@@ -31,6 +31,7 @@
     "companion": "node --experimental-strip-types companion/src/index.ts",
     "dev:server": "node --experimental-strip-types server/index.ts",
     "dev:desktop": "node scripts/prepare-cloudflared.mjs --current && electron .",
+    "gateway:telegram": "node server/gateway/telegram.ts",
     "build": "tsc -b && tsc -p tsconfig.server.json && vite build",
     "typecheck": "tsc -b && tsc -p tsconfig.server.json",
     "test": "node scripts/test-floor.mjs && pnpm broker:test && pnpm test:updater && pnpm test:desktop-viewer && pnpm test:package-link && pnpm test:save-file && pnpm test:server-boot-probe && pnpm test:packaged-server",
