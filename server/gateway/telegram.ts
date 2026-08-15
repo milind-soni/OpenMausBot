@@ -41,6 +41,20 @@ export function chunkText(text: string, max = TELEGRAM_MAX): string[] {
   return chunks;
 }
 
+/** Exponential backoff with a ceiling: quick retries for a blip, patient
+ * ones for an outage, never longer than a minute so recovery stays fast. */
+export function backoffMs(failures: number, base = 2000, ceiling = 60_000): number {
+  return Math.min(ceiling, base * 2 ** Math.min(failures - 1, 10));
+}
+
+/** `fetch` rejects with a bare "fetch failed" and hides the real reason in
+ * `cause` — a gateway that only logs the message is undebuggable. */
+export function describeError(e: unknown): string {
+  const err = e as { message?: string; cause?: { code?: string; message?: string } };
+  const cause = err?.cause?.code ?? err?.cause?.message;
+  return cause ? `${err.message} (${cause})` : String(err?.message ?? e);
+}
+
 export interface AskEvent {
   requestId?: string;
   requestType: "permission" | "question";
@@ -99,7 +113,12 @@ function loadState(): GatewayState {
 function saveState(s: GatewayState) {
   try {
     writeFileSync(STATE_PATH, JSON.stringify(s, null, 2));
-  } catch {}
+  } catch (e) {
+    // a silent failure here is a security hole, not an inconvenience: the
+    // owner binding would not survive a restart, and the next chat to send
+    // /start could claim a gateway that approves shell commands
+    console.error(`telegram gateway: CANNOT PERSIST STATE to ${STATE_PATH} — the owner binding will not survive a restart: ${describeError(e)}`);
+  }
 }
 
 // ── harness API ────────────────────────────────────────────────────────
@@ -169,21 +188,50 @@ async function main() {
 
   const owner = () => state.ownerChatId;
 
+  // threadId → bot lookups happen once per runtime event, and deltas
+  // arrive per token — so the roster is cached and only re-fetched when a
+  // thread is unknown (a bot created since the last refresh).
+  let botCache: Bot[] = [];
+  const refreshBots = async () => {
+    botCache = await listBots();
+    return botCache;
+  };
+  const botForThread = async (threadId: string): Promise<Bot | undefined> => {
+    const hit = botCache.find((b) => b.threadId === threadId);
+    if (hit) return hit;
+    return (await refreshBots()).find((b) => b.threadId === threadId);
+  };
+
+  /** The bot the owner is talking to. A stored id that no longer resolves
+   * (deleted bot) is REPAIRED here — leaving it dangling would make every
+   * `isActive` check false and silently drop the whole reply stream. */
   const activeBot = async (): Promise<Bot | null> => {
-    const bots = await listBots();
-    return bots.find((b) => b.id === state.activeBotId) ?? bots[0] ?? null;
+    const bots = await refreshBots();
+    const chosen = bots.find((b) => b.id === state.activeBotId) ?? bots[0] ?? null;
+    if (chosen && state.activeBotId !== chosen.id) {
+      state.activeBotId = chosen.id;
+      saveState(state);
+    }
+    return chosen;
   };
 
   const botKeyboard = (bots: Bot[]) =>
     bots.map((b) => [{ text: `${b.busy ? "⏳ " : ""}${b.name}`, callback_data: `bot:${b.id}` }]);
 
-  const flushStream = (chatId: number) => {
+  /** Settle the streaming bubble: the bubble holds the FIRST chunk (it is
+   * the message that has been growing), any remainder goes out as further
+   * messages, in order. Awaited by every caller so bubbles can never
+   * overtake each other. */
+  const flushStream = async (chatId: number) => {
     if (!stream) return;
     const s = stream;
     if (s.timer) clearTimeout(s.timer);
     s.timer = undefined;
     s.lastEdit = Date.now();
-    void tg.edit(chatId, s.messageId, chunkText(s.text).at(-1)!);
+    const [head, ...rest] = chunkText(s.text);
+    await tg.edit(chatId, s.messageId, head ?? "…");
+    for (const part of rest) await tg.send(chatId, part);
+    stream = null;
   };
 
   const onDelta = async (chatId: number, delta: string) => {
@@ -194,27 +242,35 @@ async function main() {
     }
     stream.text += delta;
     // Telegram edits are rate-limited — batch deltas on a timer. When the
-    // text outgrows one message, finalize it and start a fresh bubble.
+    // text outgrows one message, settle the full chunks and keep only the
+    // tail growing: re-joining the remainder would rebuild a body over the
+    // 4096 limit, which Telegram rejects and every later edit repeats.
     if (stream.text.length > TELEGRAM_MAX) {
-      const parts = chunkText(stream.text);
-      await tg.edit(chatId, stream.messageId, parts[0]);
-      const sent = await tg.send(chatId, parts.slice(1).join("") || "…");
-      stream = { messageId: sent.message_id, text: parts.slice(1).join(""), lastEdit: Date.now() };
+      const [head, ...rest] = chunkText(stream.text);
+      const tail = rest.pop() ?? "";
+      if (stream.timer) clearTimeout(stream.timer);
+      await tg.edit(chatId, stream.messageId, head);
+      for (const part of rest) await tg.send(chatId, part);
+      const sent = await tg.send(chatId, tail || "…");
+      stream = { messageId: sent.message_id, text: tail, lastEdit: Date.now() };
       return;
     }
     if (!stream.timer) {
       const due = Math.max(0, EDIT_THROTTLE_MS - (Date.now() - stream.lastEdit));
-      stream.timer = setTimeout(() => flushStream(chatId), due);
+      stream.timer = setTimeout(() => void flushStream(chatId), due);
       stream.timer.unref?.();
     }
   };
 
   // ── SSE: fold runtime events into the chat ───────────────────────────
   const consumeEvents = async () => {
+    let failures = 0;
     for (;;) {
       try {
         const res = await fetch(`${SERVER}/api/events`);
         if (!res.body) throw new Error("no body");
+        console.log(`telegram gateway: event stream connected${failures ? ` (after ${failures} failed attempt(s))` : ""}`);
+        failures = 0;
         const reader = res.body.getReader();
         const decoder = new TextDecoder();
         let buf = "";
@@ -238,14 +294,20 @@ async function main() {
             } catch {
               continue;
             }
-            await handleBroadcast(payload).catch((e) => console.error("gateway handle:", e));
+            await handleBroadcast(payload).catch((e) => console.error("gateway handle:", describeError(e)));
           }
         }
+        // the stream ended without throwing — the harness restarted or
+        // dropped us; that is a failed attempt too, so the backoff grows
+        failures += 1;
       } catch (e) {
-        console.error("gateway SSE:", (e as Error).message);
+        failures += 1;
+        if (failures <= 3 || failures % 10 === 0) {
+          console.error(`gateway SSE (attempt ${failures}): ${describeError(e)}`);
+        }
       }
       stream = null;
-      await new Promise((r) => setTimeout(r, 2000)); // reconnect backoff
+      await new Promise((r) => setTimeout(r, backoffMs(failures)));
     }
   };
 
@@ -253,10 +315,9 @@ async function main() {
     const chatId = owner();
     if (!chatId || payload.kind !== "runtime") return;
     const event = payload.event ?? {};
-    const bots = await listBots();
-    const eventBot = bots.find((b) => b.threadId === event.threadId);
+    const eventBot = await botForThread(event.threadId);
     if (!eventBot) return;
-    const isActive = eventBot.id === (state.activeBotId ?? bots[0]?.id);
+    const isActive = eventBot.id === (state.activeBotId ?? botCache[0]?.id);
 
     switch (event.type) {
       case "content.delta":
@@ -264,14 +325,13 @@ async function main() {
         break;
       case "item.completed":
         if (isActive && event.itemType === "assistant_text" && event.text) {
+          // the settled text supersedes whatever the deltas built
           if (stream) {
             stream.text = event.text;
-            flushStream(chatId);
-            for (const part of chunkText(event.text).slice(1)) await tg.send(chatId, part);
+            await flushStream(chatId);
           } else {
             for (const part of chunkText(event.text)) await tg.send(chatId, part);
           }
-          stream = null;
         }
         break;
       case "request.opened": {
@@ -285,6 +345,9 @@ async function main() {
           choices: event.choices,
         };
         const sent = await tg.send(chatId, askHeader(eventBot.name, ask), keyboardFor(ask));
+        // an unanswered approval is the one thing a user MUST see — say so
+        // in the log, so "did it even go out?" is never a guess
+        console.log(`telegram gateway: sent ${ask.requestType} card for ${eventBot.name} (${ask.tool}) → message ${sent.message_id}`);
         if (ask.requestId) asks.set(ask.requestId, { messageId: sent.message_id, ask, botId: eventBot.id });
         break;
       }
@@ -299,8 +362,7 @@ async function main() {
       }
       case "turn.completed":
         if (isActive) {
-          flushStream(chatId);
-          stream = null;
+          await flushStream(chatId);
           if (event.ok === false) await tg.send(chatId, `⚠️ ${eventBot.name}: turn failed (${event.stopReason ?? "unknown"})`);
         } else if (event.ok !== false) {
           await tg.send(chatId, `📬 ${eventBot.name} finished — /bots to switch over`);
@@ -313,18 +375,33 @@ async function main() {
   };
 
   // ── long-poll telegram updates ───────────────────────────────────────
+  // A long poll that outlives its socket is normal (laptop sleeps, wifi
+  // drops, Telegram closes an idle connection). What is NOT acceptable is
+  // hammering the API every 3s forever and logging an unreadable "fetch
+  // failed" each time: back off, name the real cause, and say when the
+  // connection came back so a quiet log means a healthy gateway.
   const consumeUpdates = async () => {
     let offset = 0;
+    let failures = 0;
     for (;;) {
       try {
         const updates: any[] = await tg.updates(offset);
+        if (failures) {
+          console.log(`telegram gateway: polling recovered after ${failures} failed attempt(s)`);
+          failures = 0;
+        }
         for (const u of updates) {
           offset = Math.max(offset, u.update_id + 1);
-          await handleUpdate(u).catch((e) => console.error("gateway update:", e));
+          await handleUpdate(u).catch((e) => console.error("gateway update:", describeError(e)));
         }
       } catch (e) {
-        console.error("gateway poll:", (e as Error).message);
-        await new Promise((r) => setTimeout(r, 3000));
+        failures += 1;
+        // log the first few, then every tenth — an overnight outage must
+        // not bury the one line that matters when you come back
+        if (failures <= 3 || failures % 10 === 0) {
+          console.error(`gateway poll (attempt ${failures}): ${describeError(e)}`);
+        }
+        await new Promise((r) => setTimeout(r, backoffMs(failures)));
       }
     }
   };
@@ -356,7 +433,7 @@ async function main() {
         state.activeBotId = rest[0];
         saveState(state);
         stream = null;
-        const bot = (await listBots()).find((b) => b.id === rest[0]);
+        const bot = (await refreshBots()).find((b) => b.id === rest[0]);
         await tg.answerCallback(cb.id, bot ? `Now talking to ${bot.name}` : "Bot is gone");
         if (bot) await tg.send(chatId, `🤖 Now talking to ${bot.name} (${bot.modelSelection.model}). Just type.`);
       } else if (kind === "req") {
@@ -376,7 +453,16 @@ async function main() {
           action === "choice"
             ? { requestId, behavior: "answer", message: pending.ask.choices?.[Number(choiceIx)] ?? "" }
             : { requestId, behavior: action };
-        await api(`/api/bots/${pending.botId}/respond`, { method: "POST", body: JSON.stringify(body) });
+        // a failed answer must NOT look like a delivered one — the bot is
+        // still waiting, so say so and leave the keyboard usable for a retry
+        try {
+          await api(`/api/bots/${pending.botId}/respond`, { method: "POST", body: JSON.stringify(body) });
+        } catch (e) {
+          console.error(`gateway respond: ${describeError(e)}`);
+          await tg.answerCallback(cb.id, "Could not deliver — try again");
+          await tg.send(chatId, `⚠️ Your answer did not reach ${pending.ask.tool}: ${describeError(e)}`);
+          return;
+        }
         await tg.answerCallback(cb.id, action === "deny" ? "Denied" : "Sent");
       }
       return;
@@ -386,7 +472,7 @@ async function main() {
     if (!text) return;
 
     if (text.startsWith("/start") || text.startsWith("/bots")) {
-      const bots = await listBots();
+      const bots = await refreshBots();
       if (!bots.length) return void (await tg.send(chatId, "No bots yet — create one in the app first."));
       await tg.send(chatId, "Your bots — pick who to talk to:", botKeyboard(bots));
       return;
@@ -404,11 +490,16 @@ async function main() {
       const pending = asks.get(promptingAsk);
       promptingAsk = null;
       if (pending) {
-        await api(`/api/bots/${pending.botId}/respond`, {
-          method: "POST",
-          body: JSON.stringify({ requestId: pending.ask.requestId, behavior: "answer", message: text }),
-        });
-        await tg.send(chatId, "Answer sent.");
+        try {
+          await api(`/api/bots/${pending.botId}/respond`, {
+            method: "POST",
+            body: JSON.stringify({ requestId: pending.ask.requestId, behavior: "answer", message: text }),
+          });
+          await tg.send(chatId, "Answer sent.");
+        } catch (e) {
+          console.error(`gateway respond: ${describeError(e)}`);
+          await tg.send(chatId, `⚠️ Your answer did not get through: ${describeError(e)}`);
+        }
         return;
       }
     }

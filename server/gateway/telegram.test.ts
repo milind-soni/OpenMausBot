@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { askHeader, chunkText, keyboardFor, TELEGRAM_MAX } from "./telegram.ts";
+import { askHeader, backoffMs, chunkText, describeError, keyboardFor, TELEGRAM_MAX } from "./telegram.ts";
 
 describe("chunkText", () => {
   it("returns short text as a single chunk", () => {
@@ -55,6 +55,29 @@ describe("keyboardFor", () => {
   it("offers a free-text prompt when a question has no choices", () => {
     const kb = keyboardFor({ requestId: "r3", requestType: "question", tool: "ask_user", summary: "Anything?" });
     expect(kb[0][0].callback_data).toBe("req:r3:prompt");
+  });
+});
+
+describe("describeError", () => {
+  it("surfaces the cause fetch hides behind 'fetch failed'", () => {
+    const e = Object.assign(new Error("fetch failed"), { cause: { code: "ECONNRESET" } });
+    expect(describeError(e)).toBe("fetch failed (ECONNRESET)");
+  });
+
+  it("falls back to the message when there is no cause", () => {
+    expect(describeError(new Error("no body"))).toBe("no body");
+  });
+});
+
+describe("backoffMs", () => {
+  it("grows exponentially from the base", () => {
+    expect(backoffMs(1)).toBe(2000);
+    expect(backoffMs(2)).toBe(4000);
+    expect(backoffMs(3)).toBe(8000);
+  });
+
+  it("never exceeds the ceiling, however long the outage", () => {
+    expect(backoffMs(50)).toBe(60_000);
   });
 });
 
