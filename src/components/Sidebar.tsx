@@ -6,7 +6,9 @@ import {
   BellDot,
   Bot as BotIcon,
   Check,
+  CheckCircle2,
   ClipboardCopy,
+  CloudOff,
   Copy,
   EyeOff,
   Eraser,
@@ -47,63 +49,102 @@ function profileInitials(profile?: { name?: string; email?: string }): string {
   return email ? email[0]!.toUpperCase() : "?";
 }
 
-/** Manual update check, next to the settings gear. Packaged app only (no
- * bridge in dev/browser). One button, state-dependent: check → download →
- * restart, with a brief "up to date" tick when a check finds nothing so a
- * click is never silent. The bottom-left popup handles the loud cases. */
-function UpdateButton() {
-  const s = useUpdaterState();
-  const [checkedAt, setCheckedAt] = useState(0);
-  const updater = window.gbs?.updater;
-  // a check that found nothing lands back on idle — acknowledge it for 3s
-  const upToDate = Boolean(checkedAt) && (!s || s.status === "idle") && Date.now() - checkedAt < 3000;
-  useEffect(() => {
-    if (!upToDate) return;
-    const timer = setTimeout(() => setCheckedAt(0), 3000);
-    return () => clearTimeout(timer);
-  }, [upToDate]);
-  if (!updater) return null;
+export type SyncStatus = "signed_out" | "syncing" | "synced" | "offline_error";
 
-  const status = s?.status ?? "idle";
-  const working = status === "checking" || status === "downloading";
-  const label =
-    status === "available"
-      ? `Version ${s?.version ?? ""} available — download`
-      : status === "downloading"
-        ? `Downloading… ${Math.round(s?.percent ?? 0)}%`
-        : status === "downloaded"
-          ? `Version ${s?.version ?? ""} ready — restart to update`
-          : status === "checking"
-            ? "Checking for updates…"
-            : upToDate
-              ? "You're up to date"
-              : "Check for updates";
+/** Compact accessible sidebar-footer control displaying sync status
+ * (signed out/local-only, syncing, synced, offline/error) with click-through
+ * to Sync settings, consistent in desktop and narrow sidebars. */
+function SidebarSyncControl({ collapsed = false }: { collapsed?: boolean }) {
+  const { state, dispatch } = useStore();
+  const s = useUpdaterState();
+  const updater = window.gbs?.updater;
+
+  // Active updater state takes priority if an app update is downloading/available
+  const updateWorking = s?.status === "checking" || s?.status === "downloading";
+  const updateAvailable = s?.status === "available" || s?.status === "downloaded";
+
+  if (updater && (updateWorking || updateAvailable)) {
+    const updateLabel =
+      s?.status === "available"
+        ? `Version ${s?.version ?? ""} available — download`
+        : s?.status === "downloading"
+          ? `Downloading… ${Math.round(s?.percent ?? 0)}%`
+          : `Version ${s?.version ?? ""} ready — restart to update`;
+
+    return (
+      <button
+        onClick={() => {
+          if (s?.status === "downloaded") return void updater.install();
+          if (s?.status === "available") return void updater.download();
+        }}
+        disabled={updateWorking}
+        title={updateLabel}
+        aria-label={updateLabel}
+        className="relative rounded-md p-2 text-accent hover:bg-raised disabled:opacity-60"
+      >
+        {updateWorking ? (
+          <Loader2 size={18} className="animate-spin" />
+        ) : (
+          <ArrowDownToLine size={18} />
+        )}
+        {s?.status === "downloaded" && (
+          <span className="absolute right-1.5 top-1.5 size-2 rounded-full bg-accent" />
+        )}
+      </button>
+    );
+  }
+
+  // Derive sync status state from state contract or connection fallback
+  const status: SyncStatus =
+    (state as { syncStatus?: SyncStatus }).syncStatus ??
+    (!state.connected
+      ? "offline_error"
+      : state.config?.profile?.email
+        ? "synced"
+        : "signed_out");
+
+  const statusConfig = {
+    signed_out: {
+      label: "Signed out / Local only",
+      tooltip: "Local only — click to open Sync settings",
+      icon: CloudOff,
+      color: "text-ink-secondary hover:text-ink",
+    },
+    syncing: {
+      label: "Syncing data…",
+      tooltip: "Syncing data… — click to open Sync settings",
+      icon: RefreshCw,
+      color: "text-accent animate-spin",
+    },
+    synced: {
+      label: "Synced — data up to date",
+      tooltip: "Synced — data up to date (click for Sync settings)",
+      icon: CheckCircle2,
+      color: "text-success",
+    },
+    offline_error: {
+      label: "Sync offline — check connection",
+      tooltip: "Sync offline — click to open Sync settings",
+      icon: AlertTriangle,
+      color: "text-warning",
+    },
+  }[status];
+
+  const Icon = statusConfig.icon;
 
   return (
     <button
-      onClick={() => {
-        if (status === "downloaded") return void updater.install();
-        if (status === "available") return void updater.download();
-        setCheckedAt(Date.now());
-        void updater.check();
-      }}
-      disabled={working}
-      title={label}
-      aria-label={label}
-      className="relative rounded-md p-2 text-accent hover:bg-raised disabled:opacity-60"
+      onClick={() => dispatch({ type: "toggleAppSettings", open: true, tab: "sync" })}
+      aria-label={statusConfig.label}
+      title={statusConfig.tooltip}
+      className={cn(
+        "relative flex items-center justify-center hover:bg-raised transition-colors",
+        collapsed ? "rounded-xl p-2.5" : "rounded-md p-2",
+        statusConfig.color,
+      )}
     >
-      {working ? (
-        <Loader2 size={18} className="animate-spin" />
-      ) : upToDate ? (
-        <Check size={18} />
-      ) : status === "available" ? (
-        <ArrowDownToLine size={18} />
-      ) : (
-        <RefreshCw size={18} />
-      )}
-      {status === "downloaded" && (
-        <span className="absolute right-1.5 top-1.5 size-2 rounded-full bg-accent" />
-      )}
+      <Icon size={18} aria-hidden="true" />
+      <span className="sr-only">{statusConfig.label}</span>
     </button>
   );
 }
@@ -843,17 +884,20 @@ export function Sidebar({ collapsed = false }: { collapsed?: boolean } = {}) {
         </button>
 
         {collapsed ? (
-          <button
-            onClick={() => dispatch({ type: "toggleAppSettings" })}
-            aria-label="App settings"
-            title="App settings"
-            className={cn(
-              "flex items-center justify-center rounded-xl p-2.5 text-ink-secondary hover:bg-raised hover:text-ink",
-              state.appSettingsOpen && "bg-raised text-accent",
-            )}
-          >
-            <Settings size={20} aria-hidden="true" />
-          </button>
+          <div className="flex flex-col items-center gap-1">
+            <SidebarSyncControl collapsed={true} />
+            <button
+              onClick={() => dispatch({ type: "toggleAppSettings" })}
+              aria-label="App settings"
+              title="App settings"
+              className={cn(
+                "flex items-center justify-center rounded-xl p-2.5 text-ink-secondary hover:bg-raised hover:text-ink",
+                state.appSettingsOpen && "bg-raised text-accent",
+              )}
+            >
+              <Settings size={20} aria-hidden="true" />
+            </button>
+          </div>
         ) : (
           <div className="flex items-center gap-1">
             <button
@@ -869,7 +913,7 @@ export function Sidebar({ collapsed = false }: { collapsed?: boolean } = {}) {
                 {state.config?.profile?.name?.trim() || state.config?.profile?.email?.trim() || "You"}
               </span>
             </button>
-            <UpdateButton />
+            <SidebarSyncControl />
             <button
               onClick={() => dispatch({ type: "toggleAppSettings" })}
               aria-label="App settings"
