@@ -183,7 +183,15 @@ function StackedMauses({ members }: { members: Bot[] }) {
   );
 }
 
-function GroupListItem({ group, onMenu }: { group: Group; onMenu: (menu: { groupId: string; x: number; y: number }) => void }) {
+function GroupListItem({
+  group,
+  onMenu,
+  collapsed,
+}: {
+  group: Group;
+  onMenu: (menu: { groupId: string; x: number; y: number }) => void;
+  collapsed?: boolean;
+}) {
   const { state, dispatch } = useStore();
   const selected = state.selectedId === group.id;
   const members = group.memberIds
@@ -198,22 +206,27 @@ function GroupListItem({ group, onMenu }: { group: Group; onMenu: (menu: { group
         e.preventDefault();
         onMenu({ groupId: group.id, x: e.clientX, y: e.clientY });
       }}
+      aria-label={collapsed ? group.name : undefined}
+      title={collapsed ? group.name : undefined}
       className={cn(
-        "flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-left",
+        "flex items-center gap-3 rounded-xl text-left",
+        collapsed ? "justify-center p-2.5 w-auto" : "w-full px-3 py-2.5",
         selected ? "bg-raised" : "hover:bg-raised/50",
       )}
     >
       <StackedMauses members={members} />
-      <div className="min-w-0 flex-1">
-        <div className="flex items-baseline justify-between gap-2">
-          <span className="truncate text-[15px] font-semibold text-ink">{group.name}</span>
-          {selected && last && <span className="shrink-0 text-xs text-ink-secondary">{formatTime(last.at)}</span>}
+      {!collapsed && (
+        <div className="min-w-0 flex-1">
+          <div className="flex items-baseline justify-between gap-2">
+            <span className="truncate text-[15px] font-semibold text-ink">{group.name}</span>
+            {selected && last && <span className="shrink-0 text-xs text-ink-secondary">{formatTime(last.at)}</span>}
+          </div>
+          <div className="flex items-center justify-between gap-2">
+            <span className="truncate text-[13px] text-ink-secondary">{groupPreview(group, state.bots)}</span>
+            {group.unread && <span className="size-2 shrink-0 rounded-full bg-accent" />}
+          </div>
         </div>
-        <div className="flex items-center justify-between gap-2">
-          <span className="truncate text-[13px] text-ink-secondary">{groupPreview(group, state.bots)}</span>
-          {group.unread && <span className="size-2 shrink-0 rounded-full bg-accent" />}
-        </div>
-      </div>
+      )}
     </button>
   );
 }
@@ -482,7 +495,15 @@ function BotContextMenu({
   );
 }
 
-function BotListItem({ bot, onMenu }: { bot: Bot; onMenu: (menu: MenuState) => void }) {
+function BotListItem({
+  bot,
+  onMenu,
+  collapsed,
+}: {
+  bot: Bot;
+  onMenu: (menu: MenuState) => void;
+  collapsed?: boolean;
+}) {
   const { state, dispatch } = useStore();
   const selected = state.selectedId === bot.id;
   const mascotMotion = selected && state.mascotMotion?.botId === bot.id ? state.mascotMotion : null;
@@ -497,8 +518,11 @@ function BotListItem({ bot, onMenu }: { bot: Bot; onMenu: (menu: MenuState) => v
         e.preventDefault();
         onMenu({ botId: bot.id, x: e.clientX, y: e.clientY });
       }}
+      aria-label={collapsed ? bot.name : undefined}
+      title={collapsed ? bot.name : undefined}
       className={cn(
-        "flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-left",
+        "flex items-center gap-3 rounded-xl text-left",
+        collapsed ? "justify-center p-2.5 w-auto" : "w-full px-3 py-2.5",
         selected ? "bg-raised" : "hover:bg-raised/50",
       )}
     >
@@ -509,27 +533,29 @@ function BotListItem({ bot, onMenu }: { bot: Bot; onMenu: (menu: MenuState) => v
         motion={mascotMotion?.kind ?? "none"}
         motionKey={mascotMotion?.nonce ?? 0}
       />
-      <div className="min-w-0 flex-1">
-        <div className="flex items-baseline justify-between gap-2">
-          <span className="flex min-w-0 items-center gap-1.5 truncate text-[15px] font-semibold text-ink">
-            {bot.pinned && <Pin size={12} className="shrink-0 text-ink-secondary" />}
-            <span className="truncate">{bot.name}</span>
-          </span>
-          {selected && last && (
-            <span className="shrink-0 text-xs text-ink-secondary">
-              {formatTime(last.at)}
+      {!collapsed && (
+        <div className="min-w-0 flex-1">
+          <div className="flex items-baseline justify-between gap-2">
+            <span className="flex min-w-0 items-center gap-1.5 truncate text-[15px] font-semibold text-ink">
+              {bot.pinned && <Pin size={12} className="shrink-0 text-ink-secondary" />}
+              <span className="truncate">{bot.name}</span>
             </span>
-          )}
+            {selected && last && (
+              <span className="shrink-0 text-xs text-ink-secondary">
+                {formatTime(last.at)}
+              </span>
+            )}
+          </div>
+          <div className="flex items-center justify-between gap-2">
+            <span className="truncate text-[13px] text-ink-secondary">
+              {preview(bot)}
+            </span>
+            {bot.unread && (
+              <span className="size-2 shrink-0 rounded-full bg-accent" />
+            )}
+          </div>
         </div>
-        <div className="flex items-center justify-between gap-2">
-          <span className="truncate text-[13px] text-ink-secondary">
-            {preview(bot)}
-          </span>
-          {bot.unread && (
-            <span className="size-2 shrink-0 rounded-full bg-accent" />
-          )}
-        </div>
-      </div>
+      )}
     </button>
   );
 }
@@ -617,7 +643,7 @@ function ClearChatDialog({
   );
 }
 
-export function Sidebar() {
+export function Sidebar({ collapsed = false }: { collapsed?: boolean } = {}) {
   const { state, dispatch } = useStore();
   const [menu, setMenu] = useState<MenuState | null>(null);
   const [roomMenu, setRoomMenu] = useState<{ groupId: string; x: number; y: number } | null>(null);
@@ -656,20 +682,22 @@ export function Sidebar() {
   };
 
   return (
-    <aside className="flex h-full w-[320px] shrink-0 flex-col border-r border-hairline/40 bg-panel">
+    <aside className={cn("flex h-full shrink-0 flex-col border-r border-hairline/40 bg-panel", collapsed ? "w-[68px] items-center" : "w-[320px]")}>
       {/* Titlebar: real traffic lights in Electron, faux ones in the browser */}
       <div
-        className="flex items-center justify-between px-4 pt-3.5 pb-1"
+        className={cn("flex items-center pt-3.5 pb-1 px-4", collapsed ? "justify-center w-full" : "justify-between")}
         style={{ WebkitAppRegion: "drag" } as React.CSSProperties}
       >
-        {isElectron ? (
-          <div className="w-14" />
-        ) : (
-          <div className="flex items-center gap-2">
-            <span className="size-3 rounded-full bg-[#ff5f57]" />
-            <span className="size-3 rounded-full bg-[#febc2e]" />
-            <span className="size-3 rounded-full bg-[#28c840]" />
-          </div>
+        {!collapsed && (
+          isElectron ? (
+            <div className="w-14" />
+          ) : (
+            <div className="flex items-center gap-2">
+              <span className="size-3 rounded-full bg-[#ff5f57]" />
+              <span className="size-3 rounded-full bg-[#febc2e]" />
+              <span className="size-3 rounded-full bg-[#28c840]" />
+            </div>
+          )
         )}
         <div className="relative" style={{ WebkitAppRegion: "no-drag" } as React.CSSProperties}>
           <button
@@ -715,119 +743,148 @@ export function Sidebar() {
       </div>
 
       {/* Search */}
-      <div className="px-3 pt-2 pb-3">
-        <div className="flex items-center gap-2 rounded-lg bg-raised/70 px-3 py-2">
-          <Search size={16} className="text-ink-secondary" aria-hidden="true" />
-          <input
-            value={query}
-            onChange={(e) => setQuery(e.target.value)}
-            onKeyDown={(e) => e.key === "Escape" && setQuery("")}
-            placeholder="Search"
-            aria-label="Search bots"
-            className="w-full bg-transparent text-[14px] text-ink placeholder:text-ink-secondary focus:outline-none"
-          />
+      {!collapsed && (
+        <div className="px-3 pt-2 pb-3 w-full">
+          <div className="flex items-center gap-2 rounded-lg bg-raised/70 px-3 py-2">
+            <Search size={16} className="text-ink-secondary" aria-hidden="true" />
+            <input
+              value={query}
+              onChange={(e) => setQuery(e.target.value)}
+              onKeyDown={(e) => e.key === "Escape" && setQuery("")}
+              placeholder="Search"
+              aria-label="Search bots"
+              className="w-full bg-transparent text-[14px] text-ink placeholder:text-ink-secondary focus:outline-none"
+            />
+          </div>
         </div>
-      </div>
+      )}
 
       {/* Bot list */}
-      <div className="flex-1 overflow-y-auto px-2">
-        <div className="flex flex-col gap-0.5">
-          {visibleBots.length === 0 && visibleGroups.length === 0 && q && (
+      <div className="flex-1 overflow-y-auto px-2 w-full">
+        <div className={cn("flex flex-col gap-0.5", collapsed && "items-center")}>
+          {visibleBots.length === 0 && visibleGroups.length === 0 && q && !collapsed && (
             <div className="px-3 py-6 text-center text-[13px] text-ink-secondary">Nothing matches “{query}”</div>
           )}
           {visibleGroups.map((g) => (
-            <GroupListItem key={g.id} group={g} onMenu={setRoomMenu} />
+            <GroupListItem key={g.id} group={g} onMenu={setRoomMenu} collapsed={collapsed} />
           ))}
           {visibleBots.map((b) => (
-            <BotListItem key={b.id} bot={b} onMenu={setMenu} />
+            <BotListItem key={b.id} bot={b} onMenu={setMenu} collapsed={collapsed} />
           ))}
         </div>
       </div>
 
       {/* Footer */}
-      <div className="px-3 pb-3 pt-2">
+      <div className={cn("px-3 pb-3 pt-2 flex flex-col gap-1", collapsed ? "w-full items-center px-1" : "w-full")}>
         <button
           onClick={() => dispatch({ type: "toggleTaskBoard", open: true })}
           aria-label={`Task Board, ${totalTaskCount} tasks`}
+          title={collapsed ? `Task Board (${totalTaskCount})` : undefined}
           className={cn(
-            "flex w-full items-center gap-3 rounded-xl px-3 py-2 text-left",
+            "flex items-center gap-3 rounded-xl p-2 text-left",
+            collapsed ? "justify-center p-2.5" : "w-full px-3 py-2",
             state.taskBoardOpen ? "bg-raised" : "hover:bg-raised/50",
           )}
         >
           <ListTodo size={20} className={state.taskBoardOpen ? "text-accent" : "text-ink-secondary"} aria-hidden="true" />
-          <span className="min-w-0 flex-1 text-[14px] text-ink">Task Board</span>
-          {totalTaskCount > 0 && (
-            <span
-              className="flex items-center gap-2"
-              title={`${taskCounts.todo} todo · ${taskCounts.doing} doing · ${taskCounts.review} review · ${taskCounts.done} done`}
-            >
-              {([
-                ["todo", "bg-ink-secondary"],
-                ["doing", "bg-accent"],
-                ["review", "bg-warning"],
-                ["done", "bg-success"],
-              ] as const).map(([status, dotColor]) =>
-                taskCounts[status] > 0 ? (
-                  <span key={status} className="flex items-center gap-1">
-                    <span className={cn("size-1.5 rounded-full", dotColor)} />
-                    <span className="text-[10px] tabular-nums text-ink-secondary">{taskCounts[status]}</span>
-                  </span>
-                ) : null,
+          {!collapsed && (
+            <>
+              <span className="min-w-0 flex-1 text-[14px] text-ink">Task Board</span>
+              {totalTaskCount > 0 && (
+                <span
+                  className="flex items-center gap-2"
+                  title={`${taskCounts.todo} todo · ${taskCounts.doing} doing · ${taskCounts.review} review · ${taskCounts.done} done`}
+                >
+                  {([
+                    ["todo", "bg-ink-secondary"],
+                    ["doing", "bg-accent"],
+                    ["review", "bg-warning"],
+                    ["done", "bg-success"],
+                  ] as const).map(([status, dotColor]) =>
+                    taskCounts[status] > 0 ? (
+                      <span key={status} className="flex items-center gap-1">
+                        <span className={cn("size-1.5 rounded-full", dotColor)} />
+                        <span className="text-[10px] tabular-nums text-ink-secondary">{taskCounts[status]}</span>
+                      </span>
+                    ) : null,
+                  )}
+                </span>
               )}
-            </span>
+            </>
           )}
         </button>
+
         <button
           onClick={() => dispatch({ type: "toggleProjects", open: true })}
           aria-label="Projects"
+          title={collapsed ? "Projects" : undefined}
           className={cn(
-            "flex w-full items-center gap-3 rounded-xl px-3 py-2 text-left",
+            "flex items-center gap-3 rounded-xl p-2 text-left",
+            collapsed ? "justify-center p-2.5" : "w-full px-3 py-2",
             state.projectsOpen ? "bg-raised" : "hover:bg-raised/50",
           )}
         >
           <FolderKanban size={20} className={state.projectsOpen ? "text-accent" : "text-ink-secondary"} aria-hidden="true" />
-          <span className="text-[14px] text-ink">Projects</span>
+          {!collapsed && <span className="text-[14px] text-ink">Projects</span>}
         </button>
+
         <button
           onClick={() => dispatch({ type: "toggleApps", open: true })}
           aria-label="Apps"
+          title={collapsed ? "Apps" : undefined}
           className={cn(
-            "flex w-full items-center gap-3 rounded-xl px-3 py-2 text-left",
+            "flex items-center gap-3 rounded-xl p-2 text-left",
+            collapsed ? "justify-center p-2.5" : "w-full px-3 py-2",
             state.appsOpen ? "bg-raised" : "hover:bg-raised/50",
           )}
         >
           <LayoutGrid size={20} className={state.appsOpen ? "text-accent" : "text-ink-secondary"} aria-hidden="true" />
-          <span className="text-[14px] text-ink">Apps</span>
+          {!collapsed && <span className="text-[14px] text-ink">Apps</span>}
         </button>
-        <div className="flex items-center gap-1">
-          <button
-            onClick={() => dispatch({ type: "toggleAppSettings" })}
-            aria-label={`User profile: ${state.config?.profile?.name?.trim() || state.config?.profile?.email?.trim() || "You"}`}
-            className={cn(
-              "flex min-w-0 flex-1 items-center gap-3 rounded-xl px-3 py-2 text-left",
-              state.appSettingsOpen ? "bg-raised" : "hover:bg-raised/50",
-            )}
-          >
-            <InitialsAvatar initials={profileInitials(state.config?.profile)} size={28} />
-            <span className="truncate text-[14px] text-ink">
-              {state.config?.profile?.name?.trim() || state.config?.profile?.email?.trim() || "You"}
-            </span>
-          </button>
-          <UpdateButton />
+
+        {collapsed ? (
           <button
             onClick={() => dispatch({ type: "toggleAppSettings" })}
             aria-label="App settings"
-            className={cn(
-              "rounded-md p-2",
-              state.appSettingsOpen
-                ? "bg-raised text-accent"
-                : "text-ink-secondary hover:bg-raised hover:text-ink",
-            )}
             title="App settings"
+            className={cn(
+              "flex items-center justify-center rounded-xl p-2.5 text-ink-secondary hover:bg-raised hover:text-ink",
+              state.appSettingsOpen && "bg-raised text-accent",
+            )}
           >
-            <Settings size={18} aria-hidden="true" />
+            <Settings size={20} aria-hidden="true" />
           </button>
-        </div>
+        ) : (
+          <div className="flex items-center gap-1">
+            <button
+              onClick={() => dispatch({ type: "toggleAppSettings" })}
+              aria-label={`User profile: ${state.config?.profile?.name?.trim() || state.config?.profile?.email?.trim() || "You"}`}
+              className={cn(
+                "flex min-w-0 flex-1 items-center gap-3 rounded-xl px-3 py-2 text-left",
+                state.appSettingsOpen ? "bg-raised" : "hover:bg-raised/50",
+              )}
+            >
+              <InitialsAvatar initials={profileInitials(state.config?.profile)} size={28} />
+              <span className="truncate text-[14px] text-ink">
+                {state.config?.profile?.name?.trim() || state.config?.profile?.email?.trim() || "You"}
+              </span>
+            </button>
+            <UpdateButton />
+            <button
+              onClick={() => dispatch({ type: "toggleAppSettings" })}
+              aria-label="App settings"
+              className={cn(
+                "rounded-md p-2",
+                state.appSettingsOpen
+                  ? "bg-raised text-accent"
+                  : "text-ink-secondary hover:bg-raised hover:text-ink",
+              )}
+              title="App settings"
+            >
+              <Settings size={18} aria-hidden="true" />
+            </button>
+          </div>
+        )}
       </div>
 
       {menu && <BotContextMenu menu={menu} onClose={() => setMenu(null)} onClear={setClearTarget} />}
