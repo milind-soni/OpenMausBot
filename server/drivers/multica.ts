@@ -49,22 +49,34 @@ function decodeConfig(raw: unknown): MulticaAgentConfig {
   return {
     profile: typeof o.profile === "string" ? o.profile : undefined,
     workspaceId: typeof o.workspaceId === "string" ? o.workspaceId : undefined,
-    pollMs: typeof o.pollMs === "number" ? o.pollMs : 3000,
+    // Clamped: a config with 0 or a negative value would spin the poll loop
+    // with no pause, two HTTP requests per iteration, against someone else's
+    // server.
+    pollMs:
+      typeof o.pollMs === "number" && Number.isFinite(o.pollMs) ? Math.max(500, o.pollMs) : 3000,
   };
 }
 
 // ── pure mapping helpers (unit-tested) ──────────────────────────────────
 
-/** First non-empty line becomes the ticket title (Multica titles are
- * single-line); the rest is the brief. */
+/** Multica titles are single-line, so a turn is split: first line as the
+ * title, the rest as the brief. */
+const TITLE_MAX = 200;
+
 export function issueTitleFromText(text: string): string {
   const line = text.trim().split("\n")[0]?.trim() ?? "";
-  return line.slice(0, 200) || "OpenMausBot task";
+  return line.slice(0, TITLE_MAX) || "OpenMausBot task";
 }
 
 export function issueDescriptionFromText(text: string): string | undefined {
-  const rest = text.trim().split("\n").slice(1).join("\n").trim();
-  return rest || undefined;
+  const trimmed = text.trim();
+  const [first = "", ...rest] = trimmed.split("\n");
+  // A one-line prompt longer than the cap would otherwise lose everything
+  // past character 200: the title truncates it and the brief, being "the
+  // lines after the first", is empty. When the title had to be cut, the
+  // whole text becomes the brief so the agent still receives the request.
+  if (first.trim().length > TITLE_MAX) return trimmed;
+  return rest.join("\n").trim() || undefined;
 }
 
 /** The ticket a follow-up turn belongs to, or undefined to open a new one.

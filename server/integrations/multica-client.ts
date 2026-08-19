@@ -131,6 +131,10 @@ interface CommentBody {
 
 type RequestBody = CreateIssueBody | UpdateIssueBody | CommentBody;
 
+/** Per-request ceiling. Generous: a factory run can be slow to report, but
+ * the HTTP call answering it should not take half a minute. */
+const REQUEST_TIMEOUT_MS = 30_000;
+
 export class MulticaError extends Error {
   readonly status: number;
   readonly body: string;
@@ -166,6 +170,10 @@ export class MulticaClient {
         method,
         headers,
         body: body !== undefined ? JSON.stringify(body) : undefined,
+        // Bounded on purpose. The driver's poll loop only reaches its own
+        // 30-minute guard, and only observes an interrupt, between requests
+        // — a socket that never answers would strand the turn forever.
+        signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
       });
     } catch (cause) {
       // Never a naked "fetch failed": node hides the reason in `cause`, and

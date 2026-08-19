@@ -33,6 +33,20 @@ describe("issueTitleFromText / issueDescriptionFromText", () => {
   it("falls back to a default title for empty input", () => {
     expect(issueTitleFromText("   ")).toBe("OpenMausBot task");
   });
+
+  it("keeps the whole request when one long line has to be truncated", () => {
+    // Regression: the title caps at 200 and the brief is "the lines after the
+    // first", so a single long line used to lose everything past character
+    // 200 — the agent received a cut-off sentence and nothing else.
+    const long = `Baue die Startseite um: ${"x".repeat(250)} und dann noch der Rest`;
+    expect(issueTitleFromText(long)).toHaveLength(200);
+    expect(issueDescriptionFromText(long)).toBe(long);
+    expect(issueDescriptionFromText(long)).toContain("und dann noch der Rest");
+  });
+
+  it("still puts only the tail in the brief when the title fits", () => {
+    expect(issueDescriptionFromText("Kurzer Titel\nDetails hier")).toBe("Details hier");
+  });
 });
 
 describe("issueIdFromCursor", () => {
