@@ -35,6 +35,7 @@ import { SecretRequestCard } from "./SecretRequestCard";
 import { hasRoutineExecutionTask, RoutineRunCard } from "./RoutineRunCard";
 import { GoalRunCard } from "./GoalRunCard";
 import { AttachedFileChips, AttachedImageGallery } from "./AttachmentPreview";
+import { OptionCard } from "./OptionCard";
 import { GroupCallButton, GroupCallOverlay } from "./GroupCallView";
 
 import { ApprovalCard } from "./ApprovalCard";
@@ -240,6 +241,13 @@ const Transcript = memo(function Transcript({
           ) : m.kind === "options" && m.card?.requestId && m.card.tool ? (
             <div className="flex justify-start">
               <ApprovalCard bot={memberOf(m.from?.botId)} message={m} />
+            </div>
+          ) : m.kind === "options" && m.card && m.from?.botId ? (
+            // a QUESTION from a member. Without this branch the card fell
+            // through to null: invisible on screen, and the asking bot sat
+            // there until its 15-minute timeout answered for you
+            <div className="flex justify-start">
+              <OptionCard botId={m.from.botId} threadId={group.threadId} groupId={group.id} message={m} />
             </div>
           ) : m.kind === "goal.run" ? (
             <div className="flex justify-start">

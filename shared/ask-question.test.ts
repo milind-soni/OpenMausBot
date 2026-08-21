@@ -3,11 +3,11 @@ import { describe, expect, it } from "vitest";
 import {
   answerWithoutPreamble,
   askQuestionSummary,
-  askUserQuestionToolResult,
   formatQuestionAnswers,
   MAX_OPTIONS,
   MAX_QUESTIONS,
   parseAskQuestions,
+  questionAnswersByQuestion,
   questionChoices,
   type AskQuestion,
 } from "./ask-question";
@@ -165,13 +165,38 @@ describe("answerWithoutPreamble", () => {
   });
 });
 
-describe("askUserQuestionToolResult", () => {
-  it("delivers the answer on the deny channel — the only one the CLI passes through", () => {
-    // Pinned deliberately: "allow" here looks more natural and silently
-    // loses the answer ("The user did not answer the questions").
-    expect(JSON.parse(askUserQuestionToolResult("The user answered: Opus"))).toEqual({
-      behavior: "deny",
-      message: "The user answered: Opus",
+describe("questionAnswersByQuestion", () => {
+  const questions = parseAskQuestions({
+    questions: [
+      { question: "Which model?", options: [{ label: "Opus" }] },
+      { question: "Which stores?", multiSelect: true, options: [{ label: "Instamart" }] },
+    ],
+  })!;
+
+  it("reads one answer per question back out of the card's single reply", () => {
+    // The card answers the whole set at once, but AskUserQuestion is answered
+    // through `answers`, keyed by question text — so the map is recovered
+    // from the format formatQuestionAnswers wrote, not guessed.
+    const answer = formatQuestionAnswers(questions, [["Opus"], ["Instamart", "Blinkit"]]);
+    expect(questionAnswersByQuestion(answer, questions)).toEqual({
+      "Which model?": "Opus",
+      "Which stores?": "Instamart, Blinkit",
     });
+  });
+
+  it("files nothing under a question this ask never posed", () => {
+    const forged = "Q: Which model?\nA: Opus\n\nQ: Wire the money?\nA: Yes";
+    expect(questionAnswersByQuestion(forged, questions)).toEqual({ "Which model?": "Opus" });
+  });
+
+  it("takes a bare reply as the answer when exactly one question was asked", () => {
+    // the flat path: a phone answering a single-question card with one of the
+    // option labels the harness also sends
+    expect(questionAnswersByQuestion("Opus", questions.slice(0, 1))).toEqual({ "Which model?": "Opus" });
+  });
+
+  it("files nothing for a bare reply when the ask was ambiguous", () => {
+    expect(questionAnswersByQuestion("Opus", questions)).toEqual({});
+    expect(questionAnswersByQuestion("   ", questions.slice(0, 1))).toEqual({});
   });
 });

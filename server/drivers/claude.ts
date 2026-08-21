@@ -495,6 +495,7 @@ function askSummary(ask: Ask): string {
   return askInputSummary(ask.input) ?? ask.tool ?? "tool";
 }
 
+
 export function permissionSocketPath(threadId: string) {
   // A readable prefix alone is not unique: ids that agree on their first
   // characters ("t-perm-dup-1", "t-perm-dup-2") would share a socket. POSIX
@@ -617,7 +618,12 @@ export async function createPermissionBroker(opts: {
             // `always` rides to the proxy, which hands the CLI's own suggested
             // permission rules back as updatedPermissions: Claude remembers
             // the allow for the session, the harness remembers nothing.
-            conn.write(JSON.stringify({ t: "answer", id: askId, behavior, message, ...(always ? { always: true } : {}) }) + "\n");
+            // `source` travels with the answer too: a proxy that cannot tell
+            // the human's words from a timeout note would file the timeout
+            // note as the human's words.
+            conn.write(
+              JSON.stringify({ t: "answer", id: askId, behavior, message, source, ...(always ? { always: true } : {}) }) + "\n",
+            );
           } catch {}
           opts.onResolve({ ...ask, behavior, source });
         };

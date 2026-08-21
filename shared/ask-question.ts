@@ -159,14 +159,36 @@ export function answerWithoutPreamble(answer: string): string {
 }
 
 /**
- * The permission-tool result that delivers a person's answer to Claude.
+ * The answer text, read back as one value per question.
  *
- * It has to be a DENY. "allow" makes the CLI run AskUserQuestion for real,
- * against an interface that does not exist here, and it reports back "The
- * user did not answer the questions" — the answer is dropped. The deny
- * branch is the only one whose message the CLI hands to the model as the
- * tool result, verbatim, which is why the text says who is speaking.
+ * `AskUserQuestion` is answered through its own `answers` field, keyed by the
+ * question's text — but the card sends ONE answer for the whole set, because
+ * a person answers the whole card at once. `formatQuestionAnswers` writes
+ * each question's text beside its answer for exactly this reason, so the map
+ * is recovered rather than guessed.
+ *
+ * A message that carries no blocks at all is the flat path: an older client,
+ * or a phone answering a single-question card with one of the option labels
+ * the harness also sends. With exactly one question there is no ambiguity
+ * about what it answers, so the whole message is that question's answer.
+ * With more than one there is, and nothing is filed.
  */
-export function askUserQuestionToolResult(answer: string): string {
-  return JSON.stringify({ behavior: "deny", message: answer });
+export function questionAnswersByQuestion(
+  message: string,
+  questions: readonly AskQuestion[],
+): Record<string, string> {
+  const answers: Record<string, string> = {};
+  const known = new Map(questions.map((entry) => [entry.question, entry.question]));
+  for (const block of message.split("\n\n")) {
+    const match = /^Q: ([\s\S]+?)\nA: ([\s\S]+)$/.exec(block.trim());
+    if (!match) continue;
+    // Only a question this ask actually posed. An unrecognized block is
+    // dropped rather than filed under a key the tool never asked about.
+    const question = known.get(match[1]!.trim());
+    if (question) answers[question] = match[2]!.trim();
+  }
+  if (Object.keys(answers).length) return answers;
+  const only = questions.length === 1 ? questions[0] : undefined;
+  const flat = message.trim();
+  return only && flat ? { [only.question]: flat } : {};
 }

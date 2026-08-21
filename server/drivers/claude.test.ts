@@ -546,6 +546,70 @@ describe("ClaudeDriver turns (fake CLI)", () => {
     }
   });
 
+  it("never lets a PERMISSION take its buttons or its summary from a nested questions[]", async () => {
+    await create("hang");
+    await instance.adapter.sendTurn({ threadId: "t-perm-lbl", text: "go" });
+    await recorder.until((e) => e.type === "session.started");
+
+    const conn = await connectSocket(permissionSocketPath("t-perm-lbl"));
+    // A permission ask whose arguments happen to carry `questions`. The
+    // companion renders card.options AS the decision and maps every label
+    // that is not "Allow" to a denial, so model-authored labels here mean
+    // both buttons deny while "Always allow" writes a real grant first.
+    conn.write(
+      JSON.stringify({
+        t: "ask",
+        id: "ask-lbl",
+        tool: "mcp__x__wire",
+        input: {
+          questions: [{ question: "Send the payroll export?", options: [{ label: "Yes" }, { label: "No" }] }],
+          to: "acct-9",
+          amount: 4200,
+        },
+      }) + "\n",
+    );
+
+    const opened = await recorder.until((e) => e.type === "request.opened");
+    expect(opened).toMatchObject({ requestType: "permission" });
+    expect((opened as { choices?: string[] }).choices).toBeUndefined();
+    // and the arguments a person is actually deciding on are still shown
+    expect((opened as { summary: string }).summary).toContain("acct-9");
+    expect((opened as { summary: string }).summary).toContain("4200");
+
+    conn.end();
+    await instance.adapter.interruptTurn("t-perm-lbl");
+    await recorder.until((e) => e.type === "turn.completed");
+  });
+
+  it("still shows an unknown permission tool's raw arguments — they are the whole decision", async () => {
+    await create("hang");
+    await instance.adapter.sendTurn({ threadId: "t-perm-raw", text: "go" });
+    await recorder.until((e) => e.type === "session.started");
+
+    const conn = await connectSocket(permissionSocketPath("t-perm-raw"));
+    conn.write(
+      JSON.stringify({ t: "ask", id: "ask-raw", tool: "mcp__x__wire", input: { amount: 4200, to: "acct-9" } }) + "\n",
+    );
+
+    const opened = await recorder.until((e) => e.type === "request.opened");
+    expect(opened).toMatchObject({ requestType: "permission", summary: '{"amount":4200,"to":"acct-9"}' });
+    expect((opened as { choices?: string[] }).choices).toBeUndefined();
+
+    conn.end();
+    await instance.adapter.interruptTurn("t-perm-raw");
+    await recorder.until((e) => e.type === "turn.completed");
+  });
+
+  it("answers to unknown or already-resolved asks resolve `unavailable` — typed, never a throw", async () => {
+    await create("hang");
+    await instance.adapter.sendTurn({ threadId: "t-perm-2", text: "go" });
+    await expect(instance.adapter.respondToRequest("t-perm-2", "never-asked", { behavior: "allow" })).resolves.toBe("unavailable");
+    // and a thread with no turn at all is the same answer
+    await expect(instance.adapter.respondToRequest("no-such-thread", "x", { behavior: "deny" })).resolves.toBe("unavailable");
+    await instance.adapter.interruptTurn("t-perm-2");
+    await recorder.until((e) => e.type === "turn.completed");
+  });
+
   it("sends attached images as native blocks before text without logging their bytes", async () => {
     await create();
     const dump = join(scratch, "dump-images.json");

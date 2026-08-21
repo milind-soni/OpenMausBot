@@ -25,10 +25,13 @@ export function OptionCard({
   botId,
   threadId,
   message,
+  /** set when the card is in a room: the answer belongs to the room's thread */
+  groupId,
 }: {
   botId: string;
   threadId?: string;
   message: Message;
+  groupId?: string;
 }) {
   const { state, dispatch } = useStore();
   const [custom, setCustom] = useState("");
@@ -45,7 +48,7 @@ export function OptionCard({
 
   const answer = (text: string) => {
     if (!text.trim()) return;
-    dispatch({ type: "answerCard", botId, threadId, messageId: message.id, answer: text.trim() });
+    dispatch({ type: "answerCard", botId, threadId, messageId: message.id, answer: text.trim(), groupId });
   };
 
   return (
@@ -59,7 +62,7 @@ export function OptionCard({
         </div>
         <button
           onClick={() =>
-            dispatch({ type: "dismissCard", botId, threadId, messageId: message.id })
+            dispatch({ type: "dismissCard", botId, threadId, messageId: message.id, groupId })
           }
           className="rounded-md p-1 text-ink-secondary hover:bg-control hover:text-ink"
         >
