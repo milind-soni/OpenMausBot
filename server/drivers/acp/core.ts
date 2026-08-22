@@ -16,7 +16,16 @@
 import { homedir } from "node:os";
 
 import { PROVIDER_CREDENTIAL_ENV, WORKSPACE_CREDENTIAL_ENV } from "../../config.ts";
+import { decodeInjectId } from "../local-inject.ts";
 import { describeSpawnFailure, execCli, killCliTree, spawnCli } from "../../procs.ts";
+
+/**
+ * A `host::model` pick talks to a loopback server with its own key.
+ * Subscription ACP login (grok.com cached_token) must not fail that turn.
+ */
+export function skipSubscriptionAuthForLocalInject(model: string | undefined): boolean {
+  return Boolean(decodeInjectId(model));
+}
 
 import type {
   DriverCreateInput,
@@ -146,6 +155,10 @@ function decodeAcpConfig(defaultCli: string) {
   };
 }
 
+/**
+ * ACP JSON-RPC-over-stdio driver. Harness differences (argv, auth, catalog)
+ * live in `support`; this is the shared handshake and turn runtime.
+ */
 export function createAcpDriver(support: AcpSupport): ProviderDriver<AcpConfig> {
   const DRIVER_KIND = support.driverKind;
   const SOURCE = support.nativeSource;
@@ -530,15 +543,17 @@ export function createAcpDriver(support: AcpSupport): ProviderDriver<AcpConfig> 
             );
             const methods: Array<{ id?: string }> = Array.isArray(init?.authMethods) ? init.authMethods : [];
             const methodId = support.pickAuthMethod(methods);
-            if (methodId) {
-              try {
-                await request("authenticate", { methodId }, INIT_TIMEOUT);
-              } catch {
-                if (support.authFailure === "fail") throw new Error(support.loginNote);
-                // else: proceed on an ambient login
+            if (!skipSubscriptionAuthForLocalInject(turn.model)) {
+              if (methodId) {
+                try {
+                  await request("authenticate", { methodId }, INIT_TIMEOUT);
+                } catch {
+                  if (support.authFailure === "fail") throw new Error(support.loginNote);
+                  // else: proceed on an ambient login
+                }
+              } else if (support.authFailure === "fail") {
+                throw new Error(support.loginNote);
               }
-            } else if (support.authFailure === "fail") {
-              throw new Error(support.loginNote);
             }
 
             const cursor = typeof turn.resumeCursor === "string" ? turn.resumeCursor : null;

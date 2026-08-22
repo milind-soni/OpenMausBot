@@ -15,7 +15,7 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { ensureDirs } from "../../config.ts";
 import type { ProviderInstance } from "../../contracts.ts";
 import { recordEvents, type EventRecorder } from "../../testing/events.ts";
-import { createAcpDriver, type AcpSupport } from "./core.ts";
+import { createAcpDriver, skipSubscriptionAuthForLocalInject, type AcpSupport } from "./core.ts";
 import { GrokAgentDriver } from "./grok.ts";
 import { GeminiAgentDriver } from "./gemini.ts";
 import { KimiAgentDriver } from "./kimi.ts";
@@ -71,6 +71,15 @@ const ClassifiedErrorDriver = createAcpDriver({
     error && typeof error === "object" && (error as { code?: unknown }).code === -32000
       ? "invalid_credentials"
       : undefined,
+});
+
+describe("skipSubscriptionAuthForLocalInject", () => {
+  it("is true only for a host:: inject id", () => {
+    expect(skipSubscriptionAuthForLocalInject("omlx::MiniMax-M3-4bit")).toBe(true);
+    expect(skipSubscriptionAuthForLocalInject("unsloth::orcarouter/Qwen3.8-27B-Uncensored-GGUF")).toBe(true);
+    expect(skipSubscriptionAuthForLocalInject("grok-4.6")).toBe(false);
+    expect(skipSubscriptionAuthForLocalInject(undefined)).toBe(false);
+  });
 });
 
 describe("ACP decodeConfig", () => {
@@ -454,6 +463,27 @@ describe("ACP turns (fake CLI)", () => {
     expect(done).toMatchObject({ ok: false, stopReason: "auth_required" });
     const err = recorder.events.find((e) => e.type === "runtime.error")!;
     expect(err.message).toMatch(/not signed in/);
+  });
+
+  it("grok local inject does not require grok.com login", async () => {
+    process.env.FAKE_ACP_MODE = "no-auth";
+    mkdirSync(join(scratch, ".grok"), { recursive: true });
+    instance = await GrokAgentDriver.create({
+      instanceId: "acp-test",
+      displayName: "ACP Test",
+      environment: { HOME: scratch, GROK_HOME: join(scratch, ".grok") },
+      enabled: true,
+      config: { cli: FAKE_CLI, fullAuto: false },
+    });
+    recorder = recordEvents(instance.adapter);
+    await instance.adapter.sendTurn({
+      threadId: "t-local-auth",
+      text: "go",
+      model: "omlx::MiniMax-M3-4bit",
+    });
+    const done = await recorder.until((e) => e.type === "turn.completed");
+    expect(done).toMatchObject({ ok: true });
+    expect(recorder.events.some((e) => e.type === "runtime.error")).toBe(false);
   });
 
   it("gemini proceeds through a missing auth method (lenient login)", async () => {
