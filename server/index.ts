@@ -27,6 +27,7 @@ import * as box from "./box.ts";
 import { cloudBackendChangeError, vpsAliasChangeError } from "./cloud-backend.ts";
 import * as composio from "./composio.ts";
 import { chiefOfStaffSystemPrompt } from "./chief-of-staff.ts";
+import { openMausStatusSystemPrompt } from "./openmaus-status-capsule.ts";
 import {
   containerComputerAction,
   containerComputerExists,
@@ -195,6 +196,7 @@ function connectedAppsIntegration(botId: string, threadId: string) {
 const computerControl = new ComputerControl((botId, snapshot) => {
   broadcast({ kind: "computer-control", botId, held: snapshot.held, helpReason: snapshot.helpReason });
 });
+const controlLeaseIdSchema = z.string().min(16).max(120).regex(/^[A-Za-z0-9_-]+$/);
 
 /** The loopback endpoint a bot's computer proxy polls before acting. */
 function controlIntegration(botId: string) {
@@ -1604,7 +1606,12 @@ async function startTurn(
           )
         : [];
       const coordinationPrompt = bot.chiefOfStaff
-        ? chiefOfStaffSystemPrompt(bot.id, store.bots, Boolean(integrations.agents))
+        ? chiefOfStaffSystemPrompt(
+            bot.id,
+            store.bots,
+            Boolean(integrations.agents),
+            openMausStatusSystemPrompt(),
+          )
         : integrations.agents
           ? "You can work with the user's other bots through the agents tools — list_bots shows who's available, ask_bot sends one of them a message and returns their reply."
           : "";
@@ -4248,6 +4255,26 @@ const server = createServer(async (req, res) => {
         }
         const body = await readBody(req);
         const action = String(body.action ?? "");
+        const leaseResult =
+          body.controlLeaseId === undefined
+            ? null
+            : controlLeaseIdSchema.safeParse(body.controlLeaseId);
+        if (leaseResult && !leaseResult.success) {
+          return json(res, 400, { error: "controlLeaseId is invalid" });
+        }
+        const controlLeaseId = leaseResult?.data;
+        if (action === "take" && controlLeaseId) {
+          const result = computerControl.acquireLease(bot.id, controlLeaseId);
+          return json(res, 200, {
+            ...result.snapshot,
+            owned: result.owned,
+            acquired: result.acquired,
+          });
+        }
+        if (action === "release" && controlLeaseId) {
+          const result = computerControl.releaseLease(bot.id, controlLeaseId);
+          return json(res, 200, { ...result.snapshot, released: result.released });
+        }
         if (action === "take") return json(res, 200, computerControl.take(bot.id));
         if (action === "release") return json(res, 200, computerControl.release(bot.id));
         if (action === "dismiss-help") return json(res, 200, computerControl.dismissHelp(bot.id));

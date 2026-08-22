@@ -14,7 +14,7 @@ type PaletteEntry =
   | { kind: "room"; group: Group }
   | { kind: "message"; hit: SearchHit };
 
-export function CommandPalette() {
+export function CommandPalette({ onOpenChange }: { onOpenChange?: (open: boolean) => void }) {
   const { state, dispatch } = useStore();
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState("");
@@ -43,6 +43,10 @@ export function CommandPalette() {
     setMessageHits([]);
     setCursor(0);
   }, [open]);
+
+  useEffect(() => {
+    onOpenChange?.(open);
+  }, [onOpenChange, open]);
 
   const q = query.trim().toLowerCase();
 

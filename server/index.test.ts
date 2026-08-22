@@ -1937,6 +1937,46 @@ describe("computer control API (who is driving)", () => {
     }
   });
 
+  it("atomically owns and conditionally releases a workspace lease without returning its id", async () => {
+    const owner = "lease_5b6bbbd2-b88b-4c50-a748-ec87f332662f";
+    const other = "lease_ed602995-306f-480a-8817-e8d8c8fe7d90";
+    const took = await api("POST", `/api/bots/${botId}/computer/control`, {
+      action: "take",
+      controlLeaseId: owner,
+    });
+    expect(took.body).toMatchObject({ held: true, owned: true, acquired: true });
+    expect(JSON.stringify(took.body)).not.toContain(owner);
+
+    const blocked = await api("POST", `/api/bots/${botId}/computer/control`, {
+      action: "take",
+      controlLeaseId: other,
+    });
+    expect(blocked.body).toMatchObject({ held: true, owned: false, acquired: false });
+
+    const wrongRelease = await api("POST", `/api/bots/${botId}/computer/control`, {
+      action: "release",
+      controlLeaseId: other,
+    });
+    expect(wrongRelease.body).toMatchObject({ held: true, released: false });
+
+    const released = await api("POST", `/api/bots/${botId}/computer/control`, {
+      action: "release",
+      controlLeaseId: owner,
+    });
+    expect(released.body).toMatchObject({ held: false, released: true });
+    expect(JSON.stringify(released.body)).not.toContain(owner);
+  });
+
+  it("rejects malformed workspace leases without echoing them", async () => {
+    const invalid = "bad lease value";
+    const res = await api("POST", `/api/bots/${botId}/computer/control`, {
+      action: "take",
+      controlLeaseId: invalid,
+    });
+    expect(res.status).toBe(400);
+    expect(JSON.stringify(res.body)).not.toContain(invalid);
+  });
+
   it("refuses an unknown action and an unknown bot", async () => {
     const bad = await api("POST", `/api/bots/${botId}/computer/control`, { action: "hijack" });
     expect(bad.status).toBe(400);

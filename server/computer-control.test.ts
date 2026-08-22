@@ -35,6 +35,51 @@ describe("computer control", () => {
     expect(control.take("b1").heldSinceMs).toBe(1000);
   });
 
+  it("atomically acquires a workspace lease without exposing its id", () => {
+    const { control, changes } = tracked();
+    const leaseId = "5b6bbbd2-b88b-4c50-a748-ec87f332662f";
+    const acquired = control.acquireLease("b1", leaseId);
+    expect(acquired).toMatchObject({ owned: true, acquired: true, snapshot: { held: true } });
+    expect(acquired.snapshot).not.toHaveProperty("controlLeaseId");
+    expect(JSON.stringify(changes)).not.toContain(leaseId);
+
+    const sameLease = control.acquireLease("b1", leaseId);
+    expect(sameLease).toMatchObject({ owned: true, acquired: false });
+    expect(changes).toHaveLength(1);
+  });
+
+  it("does not acquire or release a hold owned by another surface", () => {
+    const { control, changes } = tracked();
+    control.take("b1");
+    const leaseId = "57c7f3ef-e41d-4adf-bbda-0bd25bb03893";
+
+    expect(control.acquireLease("b1", leaseId)).toMatchObject({
+      owned: false,
+      acquired: false,
+      snapshot: { held: true },
+    });
+    expect(control.releaseLease("b1", leaseId)).toMatchObject({
+      released: false,
+      snapshot: { held: true },
+    });
+    expect(changes.map((change) => change.snapshot.held)).toEqual([true]);
+  });
+
+  it("conditionally releases only the matching workspace lease", () => {
+    const { control, changes } = tracked();
+    const owner = "33e62f3a-89d9-4117-b48a-15f7deae3252";
+    const other = "ed602995-306f-480a-8817-e8d8c8fe7d90";
+    control.acquireLease("b1", owner);
+
+    expect(control.releaseLease("b1", other).released).toBe(false);
+    expect(control.snapshot("b1").held).toBe(true);
+    expect(control.releaseLease("b1", owner)).toMatchObject({
+      released: true,
+      snapshot: { held: false },
+    });
+    expect(changes.map((change) => change.snapshot.held)).toEqual([true, false]);
+  });
+
   it("requestHelp surfaces the plea but never grants control", () => {
     const { control } = tracked();
     const snapshot = control.requestHelp("b1", "  please log in for me  ");

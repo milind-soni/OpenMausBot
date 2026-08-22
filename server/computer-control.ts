@@ -25,6 +25,20 @@ export interface ControlSnapshot {
   heldSinceMs: number | null;
 }
 
+export interface ControlLeaseResult {
+  snapshot: ControlSnapshot;
+  /** True only when this lease currently owns the hold. */
+  owned: boolean;
+  /** True only when this call changed an unheld record into a held one. */
+  acquired: boolean;
+}
+
+export interface ControlLeaseReleaseResult {
+  snapshot: ControlSnapshot;
+  /** True only when this call removed a hold owned by the supplied lease. */
+  released: boolean;
+}
+
 const NO_CONTROL: ControlSnapshot = { held: false, helpReason: null, heldSinceMs: null };
 /** Keep a shouted help reason card-sized; the transcript has the rest. */
 const MAX_REASON_CHARS = 280;
@@ -33,6 +47,8 @@ interface Entry {
   heldSinceMs: number | null;
   helpReason: string | null;
   helpRequestId: string | null;
+  /** Opaque workspace lease. It is deliberately absent from every snapshot. */
+  controlLeaseId: string | null;
 }
 
 export class ComputerControl {
@@ -68,8 +84,29 @@ export class ComputerControl {
       heldSinceMs: this.now(),
       helpReason: entry?.helpReason ?? null,
       helpRequestId: entry?.helpRequestId ?? null,
+      controlLeaseId: null,
     });
     return this.changed(botId);
+  }
+
+  /** Atomically take or re-check a workspace-owned hold. The opaque lease is
+   * never returned in a snapshot, broadcast, or API response. */
+  acquireLease(botId: string, controlLeaseId: string): ControlLeaseResult {
+    const entry = this.entries.get(botId);
+    if (entry?.heldSinceMs != null) {
+      return {
+        snapshot: this.snapshot(botId),
+        owned: entry.controlLeaseId === controlLeaseId,
+        acquired: false,
+      };
+    }
+    this.entries.set(botId, {
+      heldSinceMs: this.now(),
+      helpReason: entry?.helpReason ?? null,
+      helpRequestId: entry?.helpRequestId ?? null,
+      controlLeaseId,
+    });
+    return { snapshot: this.changed(botId), owned: true, acquired: true };
   }
 
   /** The person hands the wheel back. Also settles any open help request —
@@ -78,6 +115,17 @@ export class ComputerControl {
     if (!this.entries.has(botId)) return NO_CONTROL;
     this.entries.delete(botId);
     return this.changed(botId);
+  }
+
+  /** Release only the hold created by this workspace lease. A newer or legacy
+   * holder is observed but never disturbed. */
+  releaseLease(botId: string, controlLeaseId: string): ControlLeaseReleaseResult {
+    const entry = this.entries.get(botId);
+    if (!entry || entry.heldSinceMs === null || entry.controlLeaseId !== controlLeaseId) {
+      return { snapshot: this.snapshot(botId), released: false };
+    }
+    this.entries.delete(botId);
+    return { snapshot: this.changed(botId), released: true };
   }
 
   /** The bot asks the person to take over. Never grants anything by
@@ -92,7 +140,12 @@ export class ComputerControl {
    * this id to expire only its own unanswered plea when its wait ends. */
   requestHelpLease(botId: string, reason: unknown): { snapshot: ControlSnapshot; requestId: string } {
     const text = typeof reason === "string" ? reason.trim().slice(0, MAX_REASON_CHARS) : "";
-    const entry = this.entries.get(botId) ?? { heldSinceMs: null, helpReason: null, helpRequestId: null };
+    const entry = this.entries.get(botId) ?? {
+      heldSinceMs: null,
+      helpReason: null,
+      helpRequestId: null,
+      controlLeaseId: null,
+    };
     if (entry.helpReason === null) {
       entry.helpReason = text || "the bot asked you to take over";
       entry.helpRequestId = `${botId}-${++this.requestSequence}`;

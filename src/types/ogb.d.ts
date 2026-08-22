@@ -38,6 +38,21 @@ declare global {
     };
   };
 
+  interface DesktopWorkspaceBounds {
+    x: number;
+    y: number;
+    width: number;
+    height: number;
+  }
+
+  interface DesktopWorkspaceState {
+    contextId: string;
+    open: boolean;
+    status: "opening" | "ready" | "error" | "closed";
+    interactive: boolean;
+    code?: "load-failed" | "renderer-gone";
+  }
+
   interface Window {
     ogb?: {
       platform: NodeJS.Platform;
@@ -87,6 +102,24 @@ declare global {
       desktopViewer?: {
         open(url: string, title: string, contextId: string): Promise<boolean>;
         onState(cb: (state: { open: boolean; contextId: string | null }) => void): () => void;
+      };
+      /** Two Local VM viewers embedded in one app window. URLs are accepted
+       * only by main-process validation and never return over this bridge. */
+      desktopWorkspace?: {
+        open(input: {
+          contextId: string;
+          url: string;
+          title: string;
+          bounds: DesktopWorkspaceBounds;
+        }): Promise<DesktopWorkspaceState>;
+        layout(items: Array<{
+          contextId: string;
+          bounds: DesktopWorkspaceBounds;
+          visible: boolean;
+        }>): Promise<boolean>;
+        setInteractive(contextId: string | null): Promise<boolean>;
+        close(contextId?: string): Promise<boolean>;
+        onState(cb: (state: DesktopWorkspaceState) => void): () => void;
       };
       /** Native folder picker; resolves null when the user cancels. */
       pickFolder?(current?: string): Promise<string | null>;

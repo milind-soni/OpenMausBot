@@ -27,6 +27,7 @@ export function chiefOfStaffSystemPrompt(
   chiefId: string,
   bots: ChiefTeamMember[],
   canDelegate: boolean,
+  trustedOpenMausStatus = "",
 ): string {
   const team = bots.filter((bot) => bot.id !== chiefId && !bot.hidden);
   const listed = team.slice(0, ROSTER_MAX_BOTS);
@@ -58,5 +59,6 @@ export function chiefOfStaffSystemPrompt(
     delegation,
     "Current workspace team:",
     roster,
-  ].join("\n");
+    trustedOpenMausStatus,
+  ].filter(Boolean).join("\n");
 }

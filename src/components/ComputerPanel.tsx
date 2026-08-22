@@ -8,6 +8,7 @@ import { useEffect, useRef, useState } from "react";
 import {
   CalendarDays,
   CalendarClock,
+  Columns2,
   Hand,
   Loader2,
   Monitor,
@@ -104,7 +105,13 @@ function nextRunLabel(at: number | null) {
   return `${sameDay ? "Today" : date.toLocaleDateString([], { month: "short", day: "numeric" })}, ${date.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })}`;
 }
 
-export function ComputerPanel({ bot }: { bot: Bot }) {
+export function ComputerPanel({
+  bot,
+  onOpenVmWorkspace,
+}: {
+  bot: Bot;
+  onOpenVmWorkspace?: (botId: string) => void;
+}) {
   const { state, dispatch } = useStore();
   const { capabilities, ready: capabilitiesReady } = useDesktopCapabilities();
   const localAvailable = capabilities.localComputer.available;
@@ -807,6 +814,22 @@ export function ComputerPanel({ bot }: { bot: Bot }) {
             </button>
           </div>
         )}
+
+        {phase === "vm" &&
+          vmStatus?.mode === "per-bot" &&
+          window.ogb?.desktopWorkspace &&
+          onOpenVmWorkspace && (
+            <button
+              type="button"
+              onClick={() => onOpenVmWorkspace(bot.id)}
+              disabled={pending !== null}
+              className="mt-3 flex w-full items-center justify-center gap-2 rounded-lg border border-accent/30 bg-accent/10 py-2 text-[13px] font-medium text-ink hover:bg-accent/15 disabled:opacity-50"
+              title="Watch two Local VM desktops together without pausing either bot"
+            >
+              <Columns2 size={14} />
+              Open two desktops
+            </button>
+          )}
 
         {/* Who is driving — take the wheel / hand it back */}
         {(phase === "ready" || phase === "vm") && control.helpReason && !control.held && (
