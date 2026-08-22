@@ -9,6 +9,7 @@ import { finishSpeech, startSpeech, stopSpeech } from "./speech.mjs";
 import { openBlankTerminal } from "./terminal-launch.mjs";
 import { startUpdater, registerUpdaterIpc } from "./updater.mjs";
 import { migrateWorkspaceCredentials, workspaceCredentialEnv } from "./workspace-credentials.mjs";
+import { activateExistingWindow } from "./single-instance.mjs";
 import capabilitiesModule from "./capabilities.cjs";
 
 const { desktopCapabilities, nativeDesktopActions } = capabilitiesModule;
@@ -34,6 +35,17 @@ let desktopViewerContextId = null;
 // GNOME groups the window with its installed desktop entry only when both
 // identities match. This must run before Electron becomes ready.
 if (process.platform === "linux") app.setDesktopName("com.openmausbot.app.desktop");
+
+// One instance per user: without this lock a second launch forks a second
+// harness server on a fallback port and splits data dirs in two. The loser
+// exits before any child or window exists; the winner surfaces itself.
+if (!app.requestSingleInstanceLock()) {
+  console.log("[desktop] OpenMausBot is already running — focusing that window");
+  process.exit(0);
+}
+app.on("second-instance", () => {
+  activateExistingWindow(BrowserWindow.getAllWindows());
+});
 
 // Packaged: the harness server ships in Resources (compiled JS, zero deps)
 // and runs on Electron's own Node via utilityProcess. It serves the built
