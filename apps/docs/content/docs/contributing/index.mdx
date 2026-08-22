@@ -1,0 +1,29 @@
+---
+title: Contributing
+description: Work with the project architecture and keep changes reviewable.
+icon: GitPullRequest
+---
+
+OpenMausBot welcomes focused fixes and features. Read the repository's [CONTRIBUTING.md](https://github.com/milind-soni/OpenMausBot/blob/main/CONTRIBUTING.md) before opening a pull request.
+
+## Before building
+
+- Search open and recently merged issues and pull requests.
+- Link overlapping work and coordinate with the current contributor.
+- Extend the existing harness, renderer, companion, and provider boundaries instead of adding a parallel system.
+- Open an issue before a large cross-platform change.
+
+## Local checks
+
+```bash
+pnpm typecheck
+pnpm test
+pnpm build
+pnpm check:electron
+```
+
+Run the platform-specific package or native tests when your change touches macOS, Windows, Ubuntu, Cloudflare, or iOS.
+
+## Keep PRs narrow
+
+One concern per pull request is easier to review, test, revert, and release. Large prototypes are useful integration branches, but upstream submissions should be split into independently green slices.

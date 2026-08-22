@@ -8,7 +8,12 @@
 // status SUCCESS. Deterministic, no network.
 //
 // Keep this file dependency-free — it runs as a bare `node` subprocess.
+import { writeFileSync } from "node:fs";
+
 const argv = process.argv.slice(2);
+if (process.env.FAKE_AGY_DUMP) {
+  writeFileSync(process.env.FAKE_AGY_DUMP, JSON.stringify({ argv, env: process.env }, null, 2));
+}
 if (argv.includes("--version")) {
   console.log("1.1.12");
   process.exit(0);

@@ -32,6 +32,9 @@ interface SpeakOptions {
   messageId?: string;
 }
 
+type TtsPrepareBody = { ready?: boolean; utterances?: string[]; error?: string };
+type TtsErrorBody = { error?: string };
+
 const IDLE: SpeechSnapshot = { status: "idle" };
 
 export class Speaker {
@@ -162,9 +165,11 @@ export class Speaker {
       body: JSON.stringify({ text, voiceId }),
       signal,
     });
-    const body = (await res.json().catch(() => ({}))) as { ready?: boolean; utterances?: string[]; error?: string };
+    const body: TtsPrepareBody = await res.json().catch(() => ({}));
     if (!res.ok) throw new Error(body.error ?? `the voice service returned ${res.status}`);
-    if (!body.ready) throw new Error("Add an ElevenLabs key and pick a voice in App Settings to turn on voice.");
+    if (!body.ready) {
+      throw new Error("Add the shared ElevenLabs key in an agent profile on this computer, then pick a voice for the agent.");
+    }
     return body.utterances ?? [];
   }
 
@@ -176,7 +181,7 @@ export class Speaker {
       signal,
     });
     if (!res.ok) {
-      const body = await res.json().catch(() => ({}) as { error?: string });
+      const body: TtsErrorBody = await res.json().catch(() => ({}));
       throw new Error(body.error ?? `the voice service returned ${res.status}`);
     }
     return res.blob();

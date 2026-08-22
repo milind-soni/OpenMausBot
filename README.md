@@ -21,14 +21,22 @@ Talk to them like contacts. Watch them work. Approve what matters.
 <br>
 
 <a href="https://github.com/milind-soni/openmausbot-releases/releases/latest/download/OpenMausBot.dmg">
-  <img src="https://img.shields.io/github/v/release/milind-soni/openmausbot-releases?style=for-the-badge&label=%E2%AC%87%EF%B8%8F%20%20Download%20for%20macOS&labelColor=070707&color=1084fe&cacheSeconds=300" alt="Download the latest OpenMausBot for macOS (.dmg)" height="40">
+  <img src="https://img.shields.io/github/v/release/milind-soni/openmausbot-releases?style=for-the-badge&label=%E2%AC%87%EF%B8%8F%20%20Download%20for%20Mac%20%28Apple%20silicon%29&labelColor=070707&color=1084fe&cacheSeconds=300" alt="Download the latest OpenMausBot for Mac with Apple silicon (.dmg)" height="40">
+</a>
+&nbsp;
+<a href="https://github.com/milind-soni/openmausbot-releases/releases/latest/download/OpenMausBot-intel.dmg">
+  <img src="https://img.shields.io/github/v/release/milind-soni/openmausbot-releases?style=for-the-badge&label=%E2%AC%87%EF%B8%8F%20%20Download%20for%20Mac%20%28Intel%29&labelColor=070707&color=2a9d8f&cacheSeconds=300" alt="Download the latest OpenMausBot for Intel Macs (.dmg)" height="40">
 </a>
 &nbsp;
 <a href="https://github.com/milind-soni/openmausbot-releases/releases/latest/download/OpenMausBot-setup.exe">
   <img src="https://img.shields.io/github/v/release/milind-soni/openmausbot-releases?style=for-the-badge&label=%E2%AC%87%EF%B8%8F%20%20Download%20for%20Windows&labelColor=070707&color=4cc2ff&cacheSeconds=300" alt="Download the latest OpenMausBot for Windows (.exe)" height="40">
 </a>
+&nbsp;
+<a href="https://github.com/milind-soni/openmausbot-releases/releases/latest/download/OpenMausBot-amd64.deb">
+  <img src="https://img.shields.io/github/v/release/milind-soni/openmausbot-releases?style=for-the-badge&label=%E2%AC%87%EF%B8%8F%20%20Download%20for%20Ubuntu&labelColor=070707&color=e95420&cacheSeconds=300" alt="Download the latest OpenMausBot for Ubuntu (.deb)" height="40">
+</a>
 
-<sub>macOS: Apple silicon · signed & notarized · one-click .dmg &nbsp;·&nbsp; Windows: 64-bit · one-click installer, no admin rights &nbsp;·&nbsp; both always the latest · [all releases](https://github.com/milind-soni/openmausbot-releases/releases)</sub>
+<sub>macOS: Apple silicon & Intel · signed & notarized .dmg &nbsp;·&nbsp; Windows: x64 installer &nbsp;·&nbsp; Ubuntu 24.04 x64: .deb or AppImage beta &nbsp;·&nbsp; [all releases](https://github.com/milind-soni/openmausbot-releases/releases)</sub>
 
 <br>
 <br>
@@ -51,8 +59,8 @@ already have:
   custom CLI binary (a versioned build or wrapper) in **Settings → Engines**.
 - **Local first.** One small harness server on `127.0.0.1` owns every agent process. Transcripts, keys, and
   events live in `~/.openmausbot`, not a cloud.
-- **Agents with hands.** Each bot can get a real computer — a cloud Linux desktop it drives while you watch
-  live, or your own Mac — plus 500+ apps through Composio.
+- **Agents with hands.** Each bot can use a cloud Linux desktop, an isolated Local VM, or your own computer,
+  plus 500+ apps through Composio. Host control is available on macOS and as an explicit Ubuntu GNOME beta.
 
 ## Features
 
@@ -173,20 +181,20 @@ flowchart LR
 | API | `server/index.ts` | Bots, turns, approvals, model catalog, computer lifecycle, connectors, config — HTTP + SSE. |
 | Voice | `server/tts/` | ElevenLabs, bring your own key. Runs on the harness so the key never reaches the UI; markdown is rewritten into something worth hearing before it is spoken. |
 | App | `src/` | The chat shell. Server-backed store, one reducer, zero client-side transports. |
-| Desktop | `electron/` | macOS, Windows, and Ubuntu shells with an embedded harness and explicit platform capabilities; Apple speech, local screen capture, and the current CUA bridge remain macOS-only. |
+| Desktop | `electron/` | macOS, Windows, and Ubuntu shells with an embedded harness and platform capabilities; Apple speech stays macOS-only, while a release-pinned bundled CUA runtime enables guarded Ubuntu GNOME local control. |
 
 ## Quick start
 
-**Released builds:** the harness server is embedded, so macOS and Windows need no separate server setup.
+**Released builds:** the harness server is embedded, so no separate server setup is required.
 
 | | Download | Install |
 |---|---|---|
 | **macOS** (Apple silicon) | [OpenMausBot.dmg](https://github.com/milind-soni/openmausbot-releases/releases/latest/download/OpenMausBot.dmg) | Drag it to Applications, open it. Signed & notarized. |
+| **macOS** (Intel) | [OpenMausBot-intel.dmg](https://github.com/milind-soni/openmausbot-releases/releases/latest/download/OpenMausBot-intel.dmg) | Same app, built for Intel Macs. Signed & notarized. |
 | **Windows** (x64) | [OpenMausBot-setup.exe](https://github.com/milind-soni/openmausbot-releases/releases/latest/download/OpenMausBot-setup.exe) | Run it — one-click, per-user, no admin rights. The installer isn't code-signed yet, so SmartScreen shows "unknown publisher": **More info → Run anyway**. |
+| **Ubuntu 24.04** (x64) | [OpenMausBot-amd64.deb](https://github.com/milind-soni/openmausbot-releases/releases/latest/download/OpenMausBot-amd64.deb) · [OpenMausBot.AppImage](https://github.com/milind-soni/openmausbot-releases/releases/latest/download/OpenMausBot.AppImage) | Install the `.deb` with APT (recommended), or make the AppImage executable and run it. Beta; GNOME is the supported desktop. |
 
-**Ubuntu Desktop beta:** build the `.deb` or AppImage from source using the commands below. Release downloads
-will be linked here once Linux publishing is enabled. See [the Ubuntu Desktop guide](docs/linux-desktop.md) for
-installation, capabilities, and troubleshooting.
+See the [Ubuntu Desktop guide](docs/linux-desktop.md) for installation, capabilities, and troubleshooting.
 
 **From source:**
 
@@ -208,7 +216,7 @@ Package the desktop application:
 ```sh
 pnpm package:mac      # macOS: DMG + ZIP; requires Swift/Xcode tools
 pnpm package:win      # Windows: installer + ZIP
-pnpm package:linux    # Ubuntu x64: .deb + AppImage; no Swift required
+pnpm package:linux    # Ubuntu x64: .deb + AppImage + verified CUA runtime
 ```
 
 ### Desktop capability status
@@ -217,12 +225,24 @@ pnpm package:linux    # Ubuntu x64: .deb + AppImage; no Swift required
 |---|---|---|---|
 | Packaged app, embedded harness, local agent CLIs | Supported | Beta | Beta |
 | Composio and Box/cloud computers | Supported | Beta | Beta |
-| Local screen preview and computer control | Supported | Planned | Planned after compositor validation |
+| Explicit preview-only local screen capture | Supported | Beta | Beta |
+| Bot control of this computer | Supported | Beta: opt-in, bundled Cua 0.19.3 | Beta: GNOME only, opt-in, bundled Cua 0.19.3; separately installed WinRects v8 helper |
 | Native on-device dictation | Supported | Planned | Planned |
 
-Unavailable native features fail closed on Ubuntu without blocking chat or cloud features. Linux local computer
-control, Wayland capture/automation, dictation, and ARM64 are tracked in
-[#29](https://github.com/milind-soni/OpenMausBot/issues/29) and are not claimed by the baseline package.
+The Linux preview is user-initiated and never enables local bot control or Auto routing. Packaged Linux builds ship
+the exact Cua Driver 0.19.3 runtime outside ASAR; control still requires explicit app opt-in and an explicit per-bot
+**This computer** selection, and every local action asks for approval. GNOME/Wayland additionally requires the
+versioned WinRects v8 helper and a
+passing prompt-free AT-SPI/capture/portal health report. Other Wayland compositors fail closed without blocking
+chat or cloud features. See the [Ubuntu Desktop guide](docs/linux-desktop.md) and
+tracking issues [#29](https://github.com/milind-soni/OpenMausBot/issues/29) and
+[#79](https://github.com/milind-soni/OpenMausBot/issues/79) / [#109](https://github.com/milind-soni/OpenMausBot/issues/109) / [#113](https://github.com/milind-soni/OpenMausBot/issues/113).
+
+The Linux packager downloads only the tag-pinned upstream archive during the build, verifies its size, SHA-256,
+complete member allowlist, and inner executable hashes, then packages only the CLI and cursor-theme sidecar. The
+installed app never downloads or self-updates native automation code. Cua's MIT notice, Inter's SIL OFL, a generated
+third-party license report, and a CycloneDX inventory ship with the runtime. See
+[`third_party/cua-driver/`](third_party/cua-driver/) for the reviewed provenance record.
 
 These credentials are optional — local chat works without them. Paste a key once in **App Settings** (gear
 in the sidebar footer) when you want to enable its integration:
@@ -262,7 +282,7 @@ dedicated receiver through a hosted relay or a tool such as Tailscale Funnel.
 ## Status
 
 Early but real — the loop works end to end: message → agent → streamed reply → tools → approvals →
-computer use. macOS and Windows have released builds; Ubuntu 24.04 x64 packages are in beta with the
+computer use. macOS, Windows, and Ubuntu 24.04 x64 have released builds; Ubuntu remains a beta with the
 capability limits above. Rough edges to expect: hosted/mobile connectivity is still being built, and webhook
 triggers currently use the local receiver rather than an always-on hosted relay.
 Voice needs an ElevenLabs key, and calls are macOS-only for now (they ride the same on-device dictation as
@@ -273,7 +293,11 @@ small; adding a provider is one file in [`server/drivers/`](server/drivers/) plu
 
 ## License
 
-[MIT](LICENSE) © 2026 Milind Soni and contributors.
+[Apache License 2.0](LICENSE) © 2026 Milind Soni and OpenMausBot contributors.
+
+Packaged Cua Driver components retain their upstream MIT, SIL OFL 1.1, MPL-2.0, and other dependency terms;
+the corresponding notices, license texts, source locations, and SBOM are in
+[`third_party/cua-driver/`](third_party/cua-driver/) and ship beside the native runtime.
 
 OpenMausBot is an independent, open-source project inspired by Grok Bot. It is
 not affiliated with, endorsed by, or associated with xAI; "Grok" is a trademark

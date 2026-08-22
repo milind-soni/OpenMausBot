@@ -14,7 +14,13 @@ import {
   type PointerEvent as ReactPointerEvent,
 } from "react";
 import { MAUS_COLORS, type MausColor, type MausMotion, type MausState } from "@/lib/mascot";
-import { CursorAvatar, SHAPE, type CursorAvatarHandle, type CursorShape } from "./CursorAvatar";
+import {
+  CursorAvatar,
+  DEFAULT_SILHOUETTE,
+  type CursorAvatarHandle,
+  type CursorSilhouette,
+} from "./CursorAvatar";
+import { botAvatarProfile, type BotAvatarCrop } from "../../shared/bot-avatar";
 
 /**
  * The pack's baked-in silhouette was exported with the body fill hardcoded
@@ -22,9 +28,9 @@ import { CursorAvatar, SHAPE, type CursorAvatarHandle, type CursorShape } from "
  * substitutes, which painted every bot the same. Restore the slot so the
  * per-bot gradient actually lands on the body.
  */
-const GRADIENT_SHAPE: CursorShape = {
-  ...SHAPE,
-  body: SHAPE.body.replace(/fill="#000000"/g, 'fill="{{GRADIENT}}"'),
+const GRADIENT_SILHOUETTE: CursorSilhouette = {
+  ...DEFAULT_SILHOUETTE,
+  body: DEFAULT_SILHOUETTE.body.replace(/fill="#000000"/g, 'fill="{{GRADIENT}}"'),
 };
 
 /**
@@ -48,9 +54,12 @@ const POINTER_GAZE = { forward: 1, authored: 0.25 };
  * What a one-shot motion does while it plays: CursorAvatar animates the body
  * per state, so borrowing the state for a beat moves body and face together.
  */
-const MOTION_FACE: Partial<
-  Record<Exclude<MausMotion, "none">, { state?: MausState; blink?: boolean; spin?: number }>
-> = {
+interface MotionFaces
+  extends Partial<
+    Record<Exclude<MausMotion, "none">, { state?: MausState; blink?: boolean; spin?: number }>
+  > {}
+
+const MOTION_FACE: MotionFaces = {
   arrive: { state: "spawning", spin: 900 },
   switch: { state: "waking", spin: 620 },
   customize: { state: "proud", blink: true },
@@ -193,7 +202,7 @@ function MausAvatarComponent(
         state={motionState ?? state}
         expression={expression}
         size={size}
-        shape={GRADIENT_SHAPE}
+        silhouette={GRADIENT_SILHOUETTE}
         gradient={gradientFor(color)}
         title={label ?? null}
         lookAround={forward ? 0 : 1}
@@ -210,6 +219,57 @@ function MausAvatarComponent(
 }
 
 export const MausAvatar = memo(forwardRef(MausAvatarComponent));
+
+export type BotAvatarProps = Omit<MausAvatarProps, "color"> & {
+  bot: {
+    name?: string;
+    color: MausColor;
+    avatarUrl?: string | null;
+    avatarCrop?: BotAvatarCrop;
+  };
+};
+
+/**
+ * The one renderer for a bot's chosen profile image. Malformed persisted
+ * values and images that fail to load both fall back to the animated mascot,
+ * so an old/corrupt profile can never leave a broken-image icon in the app.
+ */
+export function BotAvatar({ bot, size = 44, label, ...mascotProps }: BotAvatarProps) {
+  const profile = botAvatarProfile(bot);
+  const [imageFailed, setImageFailed] = useState(false);
+
+  useEffect(() => setImageFailed(false), [profile.avatarUrl]);
+
+  if (profile.avatarCrop === "mascot" || !profile.avatarUrl || imageFailed) {
+    return (
+      <MausAvatar
+        {...mascotProps}
+        color={bot.color}
+        size={size}
+        label={label ?? bot.name}
+      />
+    );
+  }
+
+  const radius =
+    profile.avatarCrop === "circle"
+      ? "50%"
+      : profile.avatarCrop === "rounded"
+        ? "22%"
+        : "0";
+  return (
+    <img
+      src={profile.avatarUrl}
+      alt={label ?? (bot.name ? `${bot.name} avatar` : "Bot avatar")}
+      width={size}
+      height={size}
+      draggable={false}
+      onError={() => setImageFailed(true)}
+      className="block shrink-0 bg-raised object-cover"
+      style={{ width: size, height: size, borderRadius: radius }}
+    />
+  );
+}
 
 export function InitialsAvatar({
   initials,

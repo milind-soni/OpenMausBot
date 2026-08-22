@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { LocalVmLease } from "./local-vm-lease.ts";
+import { LocalVmLease, LocalVmLeasePool } from "./local-vm-lease.ts";
 
 describe("LocalVmLease", () => {
   it("serializes different threads while letting the owner renew", () => {
@@ -56,5 +56,25 @@ describe("LocalVmLease", () => {
     expect(lease.current(busy, 1_001)).not.toBeNull();
     lease.release("thread-a");
     expect(lease.current(busy, 1_002)).toBeNull();
+  });
+});
+
+describe("LocalVmLeasePool", () => {
+  it("allows distinct bot targets concurrently while serializing each target", () => {
+    const pool = new LocalVmLeasePool(100);
+    const busy = () => true;
+
+    expect(pool.forTarget("bot:a").claim("thread-a", "bot-a", busy, 1_000)).toBe(true);
+    expect(pool.forTarget("bot:b").claim("thread-b", "bot-b", busy, 1_000)).toBe(true);
+    expect(pool.forTarget("bot:a").claim("thread-c", "bot-c", busy, 1_001)).toBe(false);
+    expect(pool.forTarget("bot:b").current(busy, 1_002)).toMatchObject({ botId: "bot-b" });
+  });
+
+  it("keeps shared mode serialized because every bot resolves to the same target", () => {
+    const pool = new LocalVmLeasePool(100);
+    const busy = () => true;
+
+    expect(pool.forTarget("shared").claim("thread-a", "bot-a", busy, 1_000)).toBe(true);
+    expect(pool.forTarget("shared").claim("thread-b", "bot-b", busy, 1_001)).toBe(false);
   });
 });

@@ -52,17 +52,47 @@ if (argv[0] === "auth" && argv[1] === "status") {
   );
 }
 
-let stdin = "";
-process.stdin.on("data", (c) => (stdin += c));
-process.stdin.on("end", () => {
-  let prompt: unknown = null;
-  try {
-    prompt = JSON.parse(stdin.split("\n").find((l) => l.trim()) ?? "null");
-  } catch {
-    /* leave null — the test will see it */
-  }
-
+// One-shot helper mode used by generateText. It does not use stdin or emit
+// the stream-json turn protocol.
+if (argAfter("--output-format") === "text") {
   if (process.env.FAKE_CLAUDE_DUMP) {
+    writeFileSync(
+      process.env.FAKE_CLAUDE_DUMP,
+      JSON.stringify({ pid: process.pid, argv, env: process.env, prompt: argAfter("-p"), mcpConfig: null }, null, 2),
+    );
+  }
+  process.stdout.write("fake generated text\n");
+  process.exit(0);
+}
+
+// Line-driven, like the real CLI under --input-format stream-json: each user
+// message starts a turn; a message that arrives WHILE a turn is playing is
+// folded into it (the real CLI delivers it before the next model call — the
+// harness calls that a steer); the process stays alive with stdin open and
+// exits only when stdin ends. `slow` leaves a gap between the tool result
+// and the reply so a test can steer into it.
+type JsonValue = string | number | boolean | null | JsonValue[] | { [key: string]: JsonValue };
+const sessionId = argAfter("--resume") ?? argAfter("--session-id") ?? "fake-session";
+const model = argAfter("--model") ?? "claude-fake";
+let dumped = false;
+let turnRunning = false;
+let steered: string[] = [];
+let stdinEnded = false;
+
+const promptText = (prompt: JsonValue): string => {
+  const m = prompt && typeof prompt === "object" && !Array.isArray(prompt) ? (prompt as { message?: { content?: unknown } }).message : undefined;
+  return typeof m?.content === "string" ? m.content : "";
+};
+
+const finishIfDone = () => {
+  if (stdinEnded && !turnRunning) process.exit(0);
+};
+
+const playTurn = (prompt: JsonValue) => {
+  turnRunning = true;
+  steered = [];
+  if (!dumped && process.env.FAKE_CLAUDE_DUMP) {
+    dumped = true;
     const configPath = argAfter("--mcp-config");
     let mcpConfig: unknown = null;
     if (configPath) {
@@ -72,17 +102,15 @@ process.stdin.on("end", () => {
         /* leave null — the test will see it */
       }
     }
-    writeFileSync(process.env.FAKE_CLAUDE_DUMP, JSON.stringify({ argv, env: process.env, prompt, mcpConfig }, null, 2));
+    writeFileSync(process.env.FAKE_CLAUDE_DUMP, JSON.stringify({ pid: process.pid, argv, env: process.env, prompt, mcpConfig }, null, 2));
   }
-
-  const sessionId = argAfter("--resume") ?? argAfter("--session-id") ?? "fake-session";
-  const model = argAfter("--model") ?? "claude-fake";
 
   if (mode === "exit-early") {
     process.stderr.write("fake-claude: simulated crash before result\n");
     process.exit(3);
   }
 
+  // the real CLI re-announces init on every turn of a live process
   out({ type: "system", subtype: "init", session_id: sessionId, model });
 
   if (mode === "hang") {
@@ -120,6 +148,45 @@ process.stdin.on("end", () => {
     },
   });
   out({ type: "user", message: { content: [{ type: "tool_result", tool_use_id: "tu-1", is_error: false }] } });
-  out({ type: "result", is_error: false, stop_reason: "end_turn", total_cost_usd: 0.01 });
-  process.exit(0);
+
+  const finish = () => {
+    out({ type: "result", is_error: false, stop_reason: "end_turn", total_cost_usd: 0.01, usage: { input_tokens: 10, cache_read_input_tokens: 2, output_tokens: 5 } });
+    turnRunning = false;
+    finishIfDone();
+  };
+  if (mode === "slow") {
+    // a gap a test can steer into; the closing reply carries anything that
+    // was folded in, the way the real CLI includes a mid-turn message in
+    // the same turn's next model call
+    setTimeout(() => {
+      const tail = steered.length ? ` + steered: ${steered.join(" | ")}` : "";
+      out({ type: "assistant", message: { content: [{ type: "text", text: `reply to: ${promptText(prompt)}${tail}` }] } });
+      finish();
+    }, 800);
+  } else {
+    finish();
+  }
+};
+
+let buf = "";
+process.stdin.on("data", (c) => {
+  buf += c;
+  let nl;
+  while ((nl = buf.indexOf("\n")) !== -1) {
+    const line = buf.slice(0, nl);
+    buf = buf.slice(nl + 1);
+    if (!line.trim()) continue;
+    let prompt: JsonValue = null;
+    try {
+      prompt = JSON.parse(line);
+    } catch {
+      continue;
+    }
+    if (turnRunning) steered.push(promptText(prompt));
+    else playTurn(prompt);
+  }
+});
+process.stdin.on("end", () => {
+  stdinEnded = true;
+  finishIfDone();
 });

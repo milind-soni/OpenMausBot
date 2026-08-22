@@ -8,12 +8,16 @@ import { Check, ShieldCheck, X } from "lucide-react";
 import { type Bot, type Message } from "@/state/store";
 import { cn } from "@/lib/cn";
 
+interface ToolLabels {
+  [tool: string]: string;
+}
+
 /** The tool's own name is noise to a human: mcp__ogb__computer_batch is
  * "computer batch", Bash is "run a command". */
 function toolLabel(tool?: string): string {
   if (!tool) return "an action";
   const bare = tool.replace(/^mcp__[^_]+__/, "").replace(/_/g, " ");
-  const nice: Record<string, string> = {
+  const nice: ToolLabels = {
     Bash: "run a command",
     Read: "read a file",
     Write: "write a file",

@@ -2,17 +2,27 @@
 // strikethrough, autolinks) with a chromed code block — language label, copy
 // button, lazy Shiki highlighting. Model output never reaches the DOM as raw
 // HTML: no rehype-raw, so HTML in the text renders as text; Shiki's output is
-// generator-escaped. While a message is still streaming, code blocks render
-// as plain <pre> and nothing is cached — partial fences would poison it.
+// generator-escaped. While a message is still streaming, a code block renders
+// as plain <pre> until its content has held still for STREAM_SETTLE_MS (the
+// fence is very likely complete), then highlights and caches — so the settled
+// bubble, a fresh component instance, mounts straight from cache instead of
+// popping from plain to highlighted.
 import { memo, useEffect, useState, type ReactNode } from "react";
 import Markdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { Check, Copy } from "lucide-react";
 
 // tiny highlight cache so revisiting a thread doesn't re-tokenize settled
-// blocks; keys are content-hashed, capped, never written while streaming
+// blocks; keys are content-hashed and capped. Streamed partials may land here
+// under their own hash — harmless (never collides with the final content's
+// key, and the cap evicts it), and the final content's entry is exactly what
+// makes the settled bubble render highlighted on mount.
 const highlightCache = new Map<string, string>();
 const CACHE_MAX = 200;
+// how long a streaming block's content must be unchanged before we spend a
+// tokenize on it — long enough to skip per-token churn mid-fence, short
+// enough that the highlight lands before the stream settles
+const STREAM_SETTLE_MS = 250;
 const hash = (s: string) => {
   let h = 0x811c9dc5;
   for (let i = 0; i < s.length; i++) {
@@ -27,32 +37,45 @@ function CodeBlock({ code, lang, streaming }: { code: string; lang: string; stre
   const [copied, setCopied] = useState(false);
 
   useEffect(() => {
-    if (streaming) return;
     const key = `${lang}:${hash(code)}`;
     const cached = highlightCache.get(key);
     if (cached) return setHtml(cached);
     let alive = true;
-    import("shiki")
-      .then((shiki) =>
-        shiki.codeToHtml(code, {
-          lang: lang || "text",
-          theme: "github-dark-default",
-        }),
-      )
-      .then((out) => {
-        if (!alive) return;
-        if (highlightCache.size >= CACHE_MAX) {
-          const first = highlightCache.keys().next().value;
-          if (first) highlightCache.delete(first);
-        }
-        highlightCache.set(key, out);
-        setHtml(out);
-      })
-      .catch(() => {
-        /* unknown language or shiki failed — the plain <pre> stays */
-      });
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const highlight = () => {
+      import("shiki")
+        .then((shiki) =>
+          shiki.codeToHtml(code, {
+            lang: lang || "text",
+            theme: "github-dark-default",
+          }),
+        )
+        .then((out) => {
+          if (!alive) return;
+          if (highlightCache.size >= CACHE_MAX) {
+            const first = highlightCache.keys().next().value;
+            if (first) highlightCache.delete(first);
+          }
+          highlightCache.set(key, out);
+          setHtml(out);
+        })
+        .catch(() => {
+          /* unknown language or shiki failed — the plain <pre> stays */
+        });
+    };
+    if (streaming) {
+      // any earlier highlight is of a shorter snapshot — drop it so the
+      // growing plain <pre> shows the real content, then wait for the block
+      // to hold still. The effect re-runs (and this cleanup clears the timer)
+      // on every content change, which is the debounce.
+      setHtml(null);
+      timer = setTimeout(highlight, STREAM_SETTLE_MS);
+    } else {
+      highlight();
+    }
     return () => {
       alive = false;
+      if (timer !== undefined) clearTimeout(timer);
     };
   }, [code, lang, streaming]);
 
@@ -83,6 +106,48 @@ function CodeBlock({ code, lang, streaming }: { code: string; lang: string; stre
         <pre className="overflow-x-auto p-3 text-[13px] leading-relaxed text-ink">{code}</pre>
       )}
     </div>
+  );
+}
+
+// Spoiler spans: GFM parses ~~text~~ to <del>; in bot messages that content
+// is usually a spoiler (answers, plot points, surprises), not a deletion —
+// hide it behind a tap-to-reveal chip instead of striking it through.
+// Display only: the stored markdown, exports, and the model's own context
+// all keep the raw ~~text~~.
+function Spoiler({ children }: { children?: ReactNode }) {
+  const [revealed, setRevealed] = useState(false);
+  if (!revealed) {
+    return (
+      <span className="relative mx-px inline-block rounded px-1 py-px">
+        <span
+          aria-hidden="true"
+          className="pointer-events-none select-none bg-raised text-transparent [&_*]:!text-transparent [&_a]:!no-underline"
+        >
+          {children}
+        </span>
+        <button
+          type="button"
+          aria-label="Reveal spoiler"
+          title="Reveal spoiler"
+          onClick={() => setRevealed(true)}
+          className="absolute inset-0 rounded bg-raised/90"
+        />
+      </span>
+    );
+  }
+  return (
+    <span className="mx-px inline rounded px-1 py-px text-[13px] leading-relaxed text-ink underline decoration-dotted decoration-hairline underline-offset-2">
+      {children}
+      <button
+        type="button"
+        aria-label="Hide spoiler"
+        title="Hide spoiler"
+        onClick={() => setRevealed(false)}
+        className="ml-1 rounded px-0.5 text-[11px] text-ink-secondary hover:text-ink"
+      >
+        Hide
+      </button>
+    </span>
   );
 }
 
@@ -174,6 +239,9 @@ function ChatMarkdownComponent({ text, streaming = false }: { text: string; stre
             return (
               <blockquote className="border-l-2 border-hairline pl-3 text-ink-secondary">{children}</blockquote>
             );
+          },
+          del({ children }: { children?: ReactNode }) {
+            return <Spoiler>{children}</Spoiler>;
           },
           hr() {
             return <hr className="border-hairline/40" />;

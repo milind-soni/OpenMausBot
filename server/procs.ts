@@ -29,23 +29,37 @@ export function spawnCli(
   opts: SpawnOptions,
 ): ChildProcessByStdio<Writable, Readable, Readable> {
   const resolved = resolveCli(cli, args);
-  return spawn(resolved.command, resolved.args, {
+  const child = spawn(resolved.command, resolved.args, {
     ...opts,
     // posix: own process group so kill(-pid) reaps child MCP servers;
     // win32: taskkill /T does the reaping instead (see killCliTree)
     ...(process.platform === "win32" ? { windowsHide: true } : { detached: true }),
   }) as ChildProcessByStdio<Writable, Readable, Readable>; // callers always pipe all three
+
+  // A write to a dying child's stdin fails differently per platform, and one
+  // of the ways is fatal. On POSIX the kill is synchronous, the stream is
+  // already destroyed by the time anything writes, and the write throws into
+  // the caller's try/catch. On Windows killCliTree goes through taskkill — a
+  // subprocess — so there is a window where the child is dead but its pipe is
+  // not, and a write during it errors *asynchronously* on the stream. No
+  // driver listens for that, an unlistened stream error is an uncaught
+  // exception, and the whole harness exits over one dead CLI. The error
+  // carries no information the drivers don't already get from `close`, which
+  // is where every one of them settles the turn — so it is swallowed, not
+  // logged.
+  child.stdin?.on("error", () => {});
+  return child;
 }
 
 export function execCli(
   cli: string,
   args: string[],
   opts: ExecFileOptions,
-  cb: (err: Error | null, stdout: string) => void,
+  cb: (err: Error | null, stdout: string, stderr?: string) => void,
 ): void {
   const resolved = resolveCli(cli, args);
-  execFile(resolved.command, resolved.args, { ...opts, windowsHide: true }, (err, stdout) =>
-    cb(err, typeof stdout === "string" ? stdout : String(stdout)),
+  execFile(resolved.command, resolved.args, { ...opts, windowsHide: true, encoding: "utf8" }, (err, stdout, stderr) =>
+    cb(err, stdout, stderr),
   );
 }
 
@@ -56,10 +70,9 @@ export function execCli(
  * each, and both are setup problems the user can fix, so say which. The
  * `setup` flag lets the UI offer "Install" instead of a "Retry" that is
  * guaranteed to fail the same way. */
-export function describeSpawnFailure(
-  err: NodeJS.ErrnoException,
-  cli: string,
-): { message: string; setup: boolean } {
+type SpawnFailure = { message: string; setup: boolean };
+
+export function describeSpawnFailure(err: NodeJS.ErrnoException, cli: string): SpawnFailure {
   if (err.code === "ENOENT")
     return { message: `\`${cli}\` isn't installed, or isn't on this app's PATH`, setup: true };
   if (err.code === "EACCES" || err.code === "EPERM")

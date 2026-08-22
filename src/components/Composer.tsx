@@ -8,12 +8,14 @@ import { MausAvatar } from "./Avatar";
 import { ComposerAttachments } from "./ComposerAttachments";
 import {
   composeMessage,
+  imageAttachmentFromFile,
+  isImageFile,
   isLongPaste,
   pasteAttachment,
   type Attachment,
 } from "@/lib/composer-attachments";
 import { normalizeState } from "@/lib/mascot";
-import { groupComposerHint } from "@/lib/group-routing";
+import { groupComposerHint, roomRespondersForComposer } from "@/lib/group-routing";
 import { PendingApprovalActions, PendingApprovalPanel, pendingApprovals } from "./PendingApproval";
 import { useDesktopCapabilities } from "./DesktopCapabilities";
 
@@ -48,6 +50,10 @@ export function Composer({
   // offers members plus @everyone; explicit mentions override the room's
   // configured default responder.
   const busy = group ? Boolean(group.busyBotId) : Boolean(bot?.busy);
+  // an engine with a live session takes a message INTO the running turn;
+  // for those the composer never locks — the server steers instead of 409
+  const canSteer =
+    !group && Boolean(bot) && state.instances.find((i) => i.instanceId === bot!.modelSelection.instanceId)?.capabilities?.queueing === true;
   // a pending approval blocks the prompt until it is answered
   const threadId = group?.threadId ?? bot?.threadId ?? "";
   // the VISIBLE branch only — an approval left on a branch you edited away
@@ -82,6 +88,21 @@ export function Composer({
   const inputRef = useRef<HTMLTextAreaElement>(null);
   // what was typed before the mic went on — partials append after it
   const baseText = useRef("");
+
+  // image paste is offered only when every bot that will actually answer
+  // can open one. sendGroup routes to mentions, else the room default —
+  // `members.some` would let a mixed room send <attached-image> to Grok.
+  const botSupportsImages = (candidate?: Bot) =>
+    Boolean(
+      candidate &&
+        state.instances.find((i) => i.instanceId === candidate.modelSelection.instanceId)?.capabilities?.images,
+    );
+  const imageTargetsSupport = (message: string) => {
+    if (!group) return botSupportsImages(bot);
+    const responders = roomRespondersForComposer(message, members ?? [], group);
+    return responders.length > 0 && responders.every(botSupportsImages);
+  };
+  const engineSupportsImages = imageTargetsSupport(text);
 
   // ── @mention picker (tag another bot; the agent reaches it via ask_bot) ──
   const mention = mentionQueryAt(text, caret);
@@ -128,15 +149,21 @@ export function Composer({
     });
   };
 
-  // One message may be queued while the bot works; it auto-sends the moment
-  // the turn settles. Enter during a turn queues instead of silently dying.
+  // Rooms hold one message client-side while a member speaks; it auto-sends
+  // the moment the room settles. 1:1 sends go straight to the server even
+  // mid-turn — the harness queues them (steer-queue), so the message shows
+  // in the transcript immediately with a queued affordance.
   const [queued, setQueued] = useState<string | null>(null);
   // a chip on its own is a message: the send control has to appear for it
   const hasContent = Boolean(text.trim()) || attachments.length > 0;
   const send = () => {
+    if (attachments.some((attachment) => attachment.kind === "image") && !imageTargetsSupport(text)) {
+      dispatch({ type: "error", message: "The selected responder does not support image attachments." });
+      return;
+    }
     const t = composeMessage(text, attachments);
     if (!t) return;
-    if (busy) {
+    if (busy && group) {
       setQueued(t);
       setText("");
       setAttachments([]);
@@ -147,19 +174,23 @@ export function Composer({
       track("message_sent", { room: true });
     } else if (bot) {
       dispatch({ type: "send", botId: bot.id, text: t });
-      track("message_sent", { driver: bot.modelSelection?.instanceId });
+      track("message_sent", { driver: bot.modelSelection?.instanceId, queued: busy });
     }
     setText("");
     setAttachments([]);
   };
   useEffect(() => {
-    if (!busy && queued) {
-      if (group) dispatch({ type: "sendGroup", groupId: group.id, text: queued });
-      else if (bot) dispatch({ type: "send", botId: bot.id, text: queued });
-      track("message_sent", { queued: true });
+    if (!busy && queued && group) {
+      if (queued.includes("<attached-image ") && !imageTargetsSupport(queued)) {
+        dispatch({ type: "error", message: "The selected responder does not support image attachments." });
+        setQueued(null);
+        return;
+      }
+      dispatch({ type: "sendGroup", groupId: group.id, text: queued });
+      track("message_sent", { room: true, queued: true });
       setQueued(null);
     }
-  }, [busy, queued, bot, group, dispatch]);
+  }, [busy, queued, group, members, state.instances, dispatch]);
 
   // native dictation: partials stream into the input while the Swift
   // helper runs; the final transcript stays in the box, ready to edit/send
@@ -282,6 +313,7 @@ export function Composer({
           items={attachments}
           onAdd={addAttachments}
           onRemove={removeAttachment}
+          allowImages={engineSupportsImages}
         />
         <div className="flex items-end gap-2 rounded-3xl border border-hairline/40 bg-raised/60 py-2 pl-3 pr-2">
         <textarea
@@ -294,6 +326,27 @@ export function Composer({
             setDismissedAt(null);
           }}
           onPaste={(e) => {
+            // an image from the clipboard becomes an uploaded attachment —
+            // but only for engines that can open one; a grok bot politely
+            // refuses instead of receiving a path it cannot read
+            const imageFiles = Array.from(e.clipboardData.files).filter(isImageFile);
+            if (imageFiles.length && engineSupportsImages) {
+              e.preventDefault();
+              void (async () => {
+                for (const file of imageFiles) {
+                  try {
+                    const attachment = await imageAttachmentFromFile(file);
+                    if (attachment) setAttachments((prev) => [...prev, attachment]);
+                  } catch (err) {
+                    dispatch({
+                      type: "error",
+                      message: err instanceof Error ? err.message : "image upload failed",
+                    });
+                  }
+                }
+              })();
+              return;
+            }
             // a wall of text becomes a chip instead of burying the input
             const pasted = e.clipboardData.getData("text/plain");
             if (!isLongPaste(pasted)) return;
@@ -348,8 +401,12 @@ export function Composer({
               ? "Answer the approval above to continue"
               : recording
               ? "Listening…"
+              : busy && canSteer
+                ? `${busyName} is working — Enter sends this into the running turn`
               : busy
-                ? `${busyName} is working — Enter queues your message`
+                ? group
+                  ? `${busyName} is working — Enter queues your message`
+                  : `${busyName} is working — sends when this turn finishes`
                 : group
                   ? `Message ${group.name} — ${groupComposerHint(group, members ?? [])}`
                   : `Message ${bot?.name ?? ""}`
@@ -388,14 +445,14 @@ export function Composer({
         {hasContent && (
           <button
             onClick={send}
-            aria-label={busy ? "Queue message" : "Send message"}
-            title={busy ? "Queue — sends when the bot finishes" : "Send"}
+            aria-label={busy && canSteer ? "Send into the running turn" : busy ? "Queue message" : "Send message"}
+            title={busy && canSteer ? "Send into the running turn" : busy ? "Sends when the current turn finishes" : "Send"}
             className={cn(
               "flex size-8 shrink-0 items-center justify-center rounded-full text-white",
-              busy ? "bg-raised text-ink-secondary hover:bg-raised-hover" : "bg-accent hover:brightness-110",
+              busy && !canSteer ? "bg-raised text-ink-secondary hover:bg-raised-hover" : "bg-accent hover:brightness-110",
             )}
           >
-            {busy ? <Clock size={15} /> : <ArrowUp size={17} />}
+            {busy && !canSteer ? <Clock size={15} /> : <ArrowUp size={17} />}
           </button>
         )}
         </div>

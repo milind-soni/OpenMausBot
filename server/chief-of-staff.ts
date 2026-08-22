@@ -7,6 +7,19 @@ export interface ChiefTeamMember {
   hidden?: boolean;
 }
 
+// The roster is interpolated into a TRUSTED bot's system prompt on every
+// turn, and its inputs (name/title/description) are user-editable and — via
+// team import — third-party-authored. Caps bound both the token spend and
+// how much room an imported persona gets to talk to the Chief with system
+// authority. agents-proxy applies the same discipline (120-char list_bots
+// descriptions); these are the roster's own limits.
+const ROSTER_MAX_BOTS = 40;
+const ROSTER_NAME_MAX = 80;
+const ROSTER_ROLE_MAX = 120;
+const ROSTER_ABOUT_MAX = 200;
+
+const clip = (value: string, max: number) => (value.length > max ? `${value.slice(0, max - 1)}…` : value);
+
 /** Dynamic system context for the one workspace-wide Chief of Staff.
  * It names the current team on every turn, while list_bots remains the
  * authoritative tool for IDs and live availability at delegation time. */
@@ -16,15 +29,18 @@ export function chiefOfStaffSystemPrompt(
   canDelegate: boolean,
 ): string {
   const team = bots.filter((bot) => bot.id !== chiefId && !bot.hidden);
+  const listed = team.slice(0, ROSTER_MAX_BOTS);
+  const overflow = team.length - listed.length;
   const roster = team.length
-    ? team
+    ? listed
         .map((bot) => {
-          const role = bot.title?.trim() || "General assistant";
+          const name = clip(bot.name, ROSTER_NAME_MAX);
+          const role = clip(bot.title?.trim() || "General assistant", ROSTER_ROLE_MAX);
           const about = bot.description?.trim();
           const availability = bot.busy ? "working right now" : "available";
-          return `- ${bot.name} — ${role}${about ? `: ${about}` : ""} (${availability})`;
+          return `- ${name} — ${role}${about ? `: ${clip(about, ROSTER_ABOUT_MAX)}` : ""} (${availability})`;
         })
-        .join("\n")
+        .join("\n") + (overflow > 0 ? `\n- …and ${overflow} more (use list_bots for the full roster).` : "")
     : "- No other visible bots are available yet.";
 
   const delegation = canDelegate

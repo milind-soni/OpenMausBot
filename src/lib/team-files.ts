@@ -28,14 +28,11 @@ function downloadManifest(manifest: ExportedTeam): { name: string; members: numb
   return { name: manifest.team.name, members: manifest.team.members.length };
 }
 
-/** Export an ad-hoc selection of bots without creating a room first. */
-export async function downloadSelectedTeam(
-  name: string,
-  memberIds: string[],
-): Promise<{ name: string; members: number }> {
+/** Export every active sidebar bot in one click. The server excludes hidden bots. */
+export async function downloadAllBots(): Promise<{ name: string; members: number }> {
   const manifest = (await api("/api/teams/export", {
     method: "POST",
-    body: JSON.stringify({ name, memberIds }),
+    body: "{}",
   })) as ExportedTeam;
   return downloadManifest(manifest);
 }

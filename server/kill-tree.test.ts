@@ -5,7 +5,7 @@
 import { spawn } from "node:child_process";
 import { describe, expect, it } from "vitest";
 
-import { killCliTree } from "./procs.ts";
+import { killCliTree, spawnCli } from "./procs.ts";
 
 const IDLE = "setInterval(() => {}, 1000)";
 
@@ -19,6 +19,19 @@ function alive(pid: number): boolean {
 }
 
 describe("killCliTree", () => {
+  it("owns stdin pipe errors before a CLI can be force-stopped", async () => {
+    const child = spawnCli(process.execPath, ["-e", IDLE], { stdio: ["pipe", "pipe", "pipe"] });
+    try {
+      expect(child.stdin.listenerCount("error")).toBeGreaterThan(0);
+    } finally {
+      killCliTree(child);
+      await Promise.race([
+        new Promise<void>((resolve) => child.once("close", () => resolve())),
+        new Promise<void>((resolve) => setTimeout(resolve, 5_000)),
+      ]);
+    }
+  });
+
   it("reaps a grandchild, not just the process it was handed", async () => {
     // a stand-in CLI: spawns one helper, reports its pid, then idles
     const parent = spawn(

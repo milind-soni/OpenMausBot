@@ -1,0 +1,37 @@
+---
+title: Connected apps
+description: Give bots secure, user-authorized tools for Gmail, GitHub, Slack, Notion, and hundreds more.
+icon: PlugZap
+---
+
+Open **Connected apps** from the sidebar, choose a service, and complete its authorization in your normal browser. OpenMausBot turns the resulting connection into tools that supported agent engines can use.
+
+<ProductScreenshot name="docs-connected-apps" alt="The clean OpenMausBot connected-app marketplace" caption="Search the marketplace or review every account from the Connected tab." />
+
+## Official packaged app
+
+The signed desktop app registers its own installation with OpenMausBot's managed connected-apps service. You do **not** need to find or paste a Composio key.
+
+1. Open **Connected apps**.
+2. Search for Gmail, GitHub, Slack, Notion, or another toolkit.
+3. Select **Connect**.
+4. Finish OAuth in the browser window that opens.
+5. Return to the app and ask a bot to use the service.
+
+The installation identity is stored using Electron's operating-system-backed secure storage. Provider OAuth tokens remain with Composio and are not written into bot prompts or the renderer.
+
+## Self-hosted or source builds
+
+The managed service is a convenience for official packaged builds. A source build can use your own Composio project and `COMPOSIO_API_KEY`; see [Self-hosted Composio](./self-hosted-composio.mdx).
+
+## Multiple accounts
+
+Connect more than one account for the same toolkit and give each a clear alias such as `work`, `personal`, or `client-acme`. When several accounts could perform an action, OpenMausBot requires explicit selection instead of silently replacing the first connection.
+
+## Disconnecting
+
+Disconnecting an account revokes the upstream grant. It does not only hide the account in the local UI. Other accounts for the same toolkit remain connected.
+
+<Callout type="info" title="No Connect key">
+  Current official builds provision connected apps automatically. A Composio project key is only needed when you deliberately run the integration yourself.
+</Callout>

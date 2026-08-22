@@ -13,13 +13,15 @@ import {
   useState,
   type ReactNode,
 } from "react";
-import type { EffortLevel } from "../../server/contracts.ts";
+import type { CloudBackend, EffortLevel } from "../../server/contracts.ts";
 import type { MausColor, MausMotion } from "@/lib/mascot";
+import type { BotAvatarCrop } from "../../shared/bot-avatar";
 import type { Routine, RoutineInput, RoutineRun } from "@/lib/routines";
 import type { WebhookAttempt, WebhookIngressStatus, WebhookTrigger } from "@/lib/webhooks";
 import { currentCall } from "@/lib/call";
-import { showNotification } from "@/lib/notify";
+import { showNotification, type NotificationTarget } from "@/lib/notify";
 import { speaker } from "@/lib/tts";
+import { createBotPatchQueue, type BotUpdatePatch } from "./bot-patch-queue";
 
 export type { MausColor } from "@/lib/mascot";
 
@@ -37,18 +39,33 @@ export interface OptionCardData {
   held?: string;
   /** the narrow grant "always allow" remembers, e.g. "Bash:git" */
   allowKey?: string;
+  approvalScope?: "local-computer";
+}
+
+export interface ConnectorCardData {
+  slug: string;
+  label: string;
+  description: string;
+  status: "required" | "authorizing" | "connected" | "failed";
+  resumeKey: string;
+  error?: string;
+  dismissed?: boolean;
+  resumed?: boolean;
 }
 
 export interface Message {
   id: string;
   role: "bot" | "user";
-  kind: "text" | "options" | "activity" | "screen";
+  kind: "text" | "options" | "activity" | "screen" | "connector";
   text?: string;
   card?: OptionCardData;
+  connector?: ConnectorCardData;
   /** activity messages: tool name + outcome. `spoken` is the server's
    * narration of the same chip ("reading a file"), used by call mode. */
   /** `setup` marks an error fixed by installing something, not by retrying. */
   tool?: { name: string; ok?: boolean; spoken?: string; setup?: boolean };
+  /** user messages sent into a running turn — the model saw it mid-turn */
+  steered?: boolean;
   /** screen messages: a frame of the bot's computer (base64) */
   png?: string;
   mime?: string;
@@ -62,6 +79,10 @@ export interface Message {
   reactions?: Array<{ emoji: string; by: string }>;
   /** comm chips: "Messaged @X" linking to the bot⇄bot channel. */
   comm?: { groupId: string; withBotId: string; withName: string; withColor: MausColor };
+  /** sent while the bot was mid-turn; auto-sends when the turn settles.
+   * Rendered only while the bot is busy, so a flag stranded by a server
+   * restart never shows a promise nothing will keep. */
+  queued?: boolean;
 }
 
 export type GroupDefaultResponder =
@@ -82,6 +103,14 @@ export interface Group {
   /** auto-created bot⇄bot channel (ask_bot exchanges mirror here) */
   dm?: boolean;
   busyBotId?: string | null;
+  /** the room's shared desk — where member turns run their shell tools,
+   * overriding each member's own folder; absent = each member's own */
+  cwd?: string;
+  /** folder the room's turns actually run in, pinned on the first turn;
+   * null = each member's own default; absent = not pinned yet */
+  pinnedCwd?: string | null;
+  /** the one message pinned to the top of this room's transcript */
+  pinnedMessageId?: string;
   messages: Message[];
 }
 
@@ -97,6 +126,20 @@ export interface Task {
   threadId: string;
   title: string;
   createdAt: number;
+  /** what this task has spent, banked once per settled turn */
+  usage?: TaskUsage;
+  /** folder this task's turns run in, pinned on its first turn; null =
+   * legacy home-folder session; absent = not pinned yet */
+  cwd?: string | null;
+}
+
+export interface TaskUsage {
+  input: number;
+  output: number;
+  /** null until any turn reported a cost — most engines never do; records
+   * from builds before cost existed lack the field entirely */
+  costUsd: number | null;
+  turns: number;
 }
 
 export interface Bot {
@@ -110,11 +153,21 @@ export interface Bot {
   notifications: boolean;
   color: MausColor;
   mascotExpression?: string | null;
+  /** App-owned image attachment used for this bot's profile. */
+  avatarUrl?: string | null;
+  /** Mascot, or the crop applied to avatarUrl. */
+  avatarCrop?: BotAvatarCrop;
   unread: boolean;
   busy?: boolean;
+  /** what the bot is doing, as the harness sees it; busy is derived from it */
+  activity?: "working" | "waiting-on-you" | "idle" | "no-signal" | "dead";
   modelSelection: ModelSelection;
   /** Where this bot's computer runs; unset = auto (cloud box if one exists, else local). */
   computer?: "cloud" | "vm" | "local" | "off";
+  /** Which cloud computer backs `computer: "cloud"`; absent means Box. */
+  cloudBackend?: CloudBackend;
+  /** where new tasks run their shell tools; absent = the private bot workspace */
+  cwd?: string;
   /** auto mode: the bot approves its own tool permissions */
   autoApprove?: boolean;
   /** tools this bot may always use without asking */
@@ -125,11 +178,18 @@ export interface Bot {
   voice?: string;
   pinned?: boolean;
   hidden?: boolean;
+  /** Sidebar section this bot renders under; absent = unsectioned. */
+  section?: string;
+  /** the one message pinned to the top of this bot's active thread */
+  pinnedMessageId?: string;
   /** The workspace's one primary coordinator. */
   chiefOfStaff?: boolean;
   /** When this bot wants to talk to another bot (ask_bot/delegate_bot),
    * pause and ask the user first. Off by default. */
   approvePeerComms?: boolean;
+  /** Whether this bot may use the workspace's connected apps. Unset means
+   * allowed for existing bots; imported bots start with this disabled. */
+  composio?: boolean;
   messages: Message[];
   /** leaf of the visible conversation branch (see visibleMessages) */
   activeLeafId?: string | null;
@@ -165,15 +225,40 @@ export function messageVersions(bot: Bot, message: Message): Message[] {
 /** GET /api/config — configured flags only; secrets are never echoed. */
 export interface ConfigStatus {
   xai?: { configured: boolean };
-  composio: { configured: boolean };
+  composio: { configured: boolean; mode?: "managed" | "self-hosted" | "unavailable" };
   box: { configured: boolean };
   opencode?: { configured: boolean };
+  vps: { configured: boolean; sshAlias: string };
+  rooms: { turnTimeoutMinutes: number };
+  localVm: { mode: "shared" | "per-bot"; maxInstances: number };
   /** Voice (ElevenLabs). `configured` = a key is saved; `ready` = a key AND
    * a voice, which is what it takes to actually speak. The key itself is
    * never echoed back. */
   tts?: { configured: boolean; ready: boolean; voice: string };
+  /** Shared write-only credential for on-demand GPT Image avatars. */
+  imageGen?: { configured: boolean };
   /** who's using the app — collected in onboarding, shown in the sidebar */
   profile?: { name: string; email: string };
+}
+
+export type ConfigStatusFrame = Pick<
+  ConfigStatus,
+  "xai" | "composio" | "box" | "vps" | "rooms" | "localVm" | "opencode" | "tts" | "imageGen" | "profile"
+>;
+
+export function configStatusFromFrame(frame: ConfigStatusFrame): ConfigStatus {
+  return {
+    xai: frame.xai,
+    composio: frame.composio,
+    box: frame.box,
+    vps: frame.vps,
+    rooms: frame.rooms,
+    localVm: frame.localVm,
+    opencode: frame.opencode,
+    tts: frame.tts,
+    imageGen: frame.imageGen,
+    profile: frame.profile,
+  };
 }
 
 /** How an engine gets installed — declared by its driver, mirrors
@@ -196,9 +281,22 @@ export interface InstanceInfo {
     reason?: string;
     authenticated?: boolean;
     version?: string | null;
+    /** a reported cost on a subscription is notional; the UI says so */
+    billing?: "metered" | "subscription";
   };
-  models: { default: string; options: Array<{ id: string; label: string; custom?: boolean }> };
-  capabilities?: { computerMcp?: boolean; agentsMcp?: boolean; effortLevels?: readonly EffortLevel[] };
+  models: { default: string; options: Array<{ id: string; label: string; custom?: boolean; loaded?: boolean }> };
+  capabilities?: {
+    computerMcp?: boolean;
+    agentsMcp?: boolean;
+    composioMcp?: boolean;
+    images?: boolean;
+    effortLevels?: readonly EffortLevel[];
+    /** the engine keeps a live session and takes a message mid-turn */
+    queueing?: boolean;
+    localComputerMcp?: boolean;
+  };
+  /** `custom` agents sit below the rail divider — no subscription catalog. */
+  access?: "subscription" | "custom";
   install?: EngineInstall;
   /** Configured CLI path override — set ONLY when the user overrode it;
    * absent means the driver default is in effect. */
@@ -209,9 +307,15 @@ export interface InstanceInfo {
   cliCandidates?: string[];
 }
 
-export type AppSettingsSection = "general" | "connections" | "engines" | "voice" | "computer";
+export type AppSettingsSection =
+  | "general"
+  | "connections"
+  | "engines"
+  | "companion"
+  | "computer"
+  | "usage";
 
-interface AppState {
+export interface AppState {
   bots: Bot[];
   groups: Group[];
   instances: InstanceInfo[];
@@ -227,12 +331,21 @@ interface AppState {
   settingsOpen: boolean;
   pluginsOpen: boolean;
   computerOpen: boolean;
+  /** the per-thread event inspector (runtime stream + native protocol tee) */
+  inspectorOpen: boolean;
   appSettingsOpen: boolean;
   appSettingsSection: AppSettingsSection;
   /** latest live frame of a bot's computer, per botId */
   screens: Record<string, { png: string; mime: string }>;
   /** bots whose cloud computer is being provisioned */
   provisioning: Record<string, boolean>;
+  /** who is driving each bot's computer: held = the person has the wheel
+   * (the bot's hands are refused server-side); helpReason = the bot's open
+   * plea for the person to take over */
+  computerControl: Record<string, { held: boolean; helpReason: string | null }>;
+  /** a search hit to scroll to once its thread is on screen; nonce lets the
+   * same message be focused twice in a row */
+  focusMessage: { threadId: string; messageId: string; nonce: number; consumed: boolean } | null;
   connected: boolean;
   error: string | null;
   mascotMotion: {
@@ -242,8 +355,15 @@ interface AppState {
   } | null;
 }
 
-type Action =
-  | { type: "hydrate"; bots: Bot[]; groups: Group[] }
+export type BotAnnouncement = Omit<Bot, "messages"> & { messages?: Message[] };
+
+export type Action =
+  | {
+      type: "hydrate";
+      bots: Bot[];
+      groups: Group[];
+      computerControl: Record<string, { held: boolean; helpReason: string | null }>;
+    }
   | { type: "showRoutines" }
   | { type: "routinesHydrated"; routines: Routine[]; runs: RoutineRun[] }
   | { type: "routinePatched"; routine: Routine }
@@ -266,7 +386,7 @@ type Action =
   | {
       type: "patchGroup";
       groupId: string;
-      patch: Partial<Pick<Group, "name" | "bulletin" | "memberIds" | "defaultResponder">>;
+      patch: Partial<Pick<Group, "name" | "bulletin" | "memberIds" | "defaultResponder" | "pinnedMessageId">>;
     }
   | { type: "deleteGroup"; groupId: string }
   | { type: "toggleReaction"; threadId: string; messageId: string; emoji: string }
@@ -301,11 +421,12 @@ type Action =
   | { type: "deleteBot"; botId: string }
   | { type: "duplicateBot"; botId: string }
   | { type: "markUnread"; botId: string }
-  | { type: "botPatched"; bot: Partial<Bot> & { id: string } }
+  | { type: "botPatched"; bot: BotAnnouncement }
   | { type: "messageAdded"; threadId: string; message: Message }
   | { type: "messagePatched"; threadId: string; message: Message }
   | { type: "screenFrame"; botId: string; png: string; mime: string }
   | { type: "provisioning"; botId: string; on: boolean }
+  | { type: "computerControl"; botId: string; held: boolean; helpReason: string | null }
   | { type: "setModel"; botId: string; selection: ModelSelection }
   | { type: "interrupt"; botId: string }
   | { type: "connected"; value: boolean }
@@ -313,31 +434,38 @@ type Action =
   | { type: "toggleSettings"; open?: boolean }
   | { type: "togglePlugins"; open?: boolean }
   | { type: "toggleComputer"; open?: boolean }
+  | { type: "toggleInspector"; open?: boolean }
+  | { type: "focusMessage"; threadId: string; messageId: string }
+  | { type: "focusMessageConsumed"; nonce: number }
   | { type: "toggleAppSettings"; open?: boolean; section?: AppSettingsSection }
   | {
       type: "updateBot";
       botId: string;
-      patch: Partial<
-        Pick<
-          Bot,
-          | "name"
-          | "title"
-          | "description"
-          | "notifications"
-          | "computer"
-          | "color"
-          | "mascotExpression"
-          | "autoApprove"
-          | "speakReplies"
-          | "voice"
-          | "pinned"
-          | "hidden"
-          | "chiefOfStaff"
-          | "approvePeerComms"
-          | "modelSelection"
-        >
-      >;
+      patch: BotUpdatePatch;
     };
+
+export function openNotificationTarget(
+  dispatch: (action: Action) => void,
+  target: NotificationTarget,
+  state: Pick<AppState, "bots" | "groups">,
+) {
+  // A room's approval/question notification carries the asker bot with the
+  // GROUP's thread id; asking the bot to switch to that thread would 404.
+  // Open the room itself. A thread that is neither a room nor one of the
+  // bot's own lands on a plain bot select instead of an error banner.
+  const group = state.groups.find((candidate) => candidate.threadId === target.threadId);
+  if (group) {
+    dispatch({ type: "select", id: group.id });
+    return;
+  }
+  dispatch({ type: "select", id: target.botId });
+  const bot = state.bots.find((candidate) => candidate.id === target.botId);
+  if (!bot) return;
+  const known =
+    bot.threadId === target.threadId ||
+    (bot.tasks ?? []).some((task) => task.threadId === target.threadId);
+  if (known) dispatch({ type: "switchTask", botId: target.botId, threadId: target.threadId });
+}
 
 function updateBot(state: AppState, botId: string, fn: (b: Bot) => Bot): AppState {
   return { ...state, bots: state.bots.map((b) => (b.id === botId ? fn(b) : b)) };
@@ -367,13 +495,19 @@ function patchCard(state: AppState, botId: string, messageId: string, patch: Par
   }));
 }
 
-function reducer(state: AppState, action: Action): AppState {
+export function reducer(state: AppState, action: Action): AppState {
   switch (action.type) {
     case "hydrate": {
       const known = (id: string) => action.bots.some((b) => b.id === id) || action.groups.some((g) => g.id === id);
       const selectedId =
         state.selectedId && known(state.selectedId) ? state.selectedId : (action.bots[0]?.id ?? "");
-      return { ...state, bots: action.bots, groups: action.groups, selectedId };
+      return {
+        ...state,
+        bots: action.bots,
+        groups: action.groups,
+        computerControl: action.computerControl,
+        selectedId,
+      };
     }
     case "showRoutines":
       return {
@@ -381,6 +515,7 @@ function reducer(state: AppState, action: Action): AppState {
         activeView: "routines",
         settingsOpen: false,
         computerOpen: false,
+        inspectorOpen: false,
         appSettingsOpen: false,
         pluginsOpen: false,
       };
@@ -472,7 +607,9 @@ function reducer(state: AppState, action: Action): AppState {
     case "botAdded":
       return withMascotMotion({
         ...state,
-        bots: [action.bot, ...state.bots],
+        // An HTTP create/import response and its SSE broadcast can race. Fold
+        // both paths without ever showing the same bot twice.
+        bots: [action.bot, ...state.bots.filter((bot) => bot.id !== action.bot.id)],
         activeView: "chat",
         selectedId: action.bot.id,
       }, action.bot.id, "arrive");
@@ -486,12 +623,15 @@ function reducer(state: AppState, action: Action): AppState {
       return updateBot(withMascotMotion(state, action.botId, "surprise"), action.botId, (b) => ({ ...b, unread: true }));
     case "botPatched": {
       const before = state.bots.find((b) => b.id === action.bot.id);
-      // A bot event can announce a bot created by another app window (team
-      // import). Patch events for unknown partial records remain ignored.
+      // Bot frames are complete except for their transcript. An unknown one
+      // was created by another client (the phone, another app window, or a
+      // team import), so add it now; the following message frames will fill
+      // its greeting without waiting for a full-page hydration.
       if (!before) {
-        return Array.isArray(action.bot.messages)
-          ? { ...state, bots: [action.bot as Bot, ...state.bots] }
-          : state;
+        return {
+          ...state,
+          bots: [{ ...action.bot, messages: action.bot.messages ?? [] }, ...state.bots],
+        };
       }
       const kind =
         action.bot.unread && !before?.unread
@@ -612,6 +752,14 @@ function reducer(state: AppState, action: Action): AppState {
         ...(action.on ? withMascotMotion(state, action.botId, "launch") : state),
         provisioning: { ...state.provisioning, [action.botId]: action.on },
       };
+    case "computerControl":
+      return {
+        ...state,
+        computerControl: {
+          ...state.computerControl,
+          [action.botId]: { held: action.held, helpReason: action.helpReason },
+        },
+      };
     case "setModel":
       return updateBot(state, action.botId, (b) => ({ ...b, modelSelection: action.selection }));
     case "connected":
@@ -630,17 +778,42 @@ function reducer(state: AppState, action: Action): AppState {
         ...state,
         settingsOpen: open,
         computerOpen: open ? false : state.computerOpen,
+        inspectorOpen: open ? false : state.inspectorOpen,
         appSettingsOpen: open ? false : state.appSettingsOpen,
       };
     }
     case "togglePlugins":
       return { ...state, pluginsOpen: action.open ?? !state.pluginsOpen };
+    case "focusMessage":
+      return {
+        ...state,
+        focusMessage: {
+          threadId: action.threadId,
+          messageId: action.messageId,
+          nonce: (state.focusMessage?.nonce ?? 0) + 1,
+          consumed: false,
+        },
+      };
+    case "focusMessageConsumed":
+      if (!state.focusMessage || state.focusMessage.nonce !== action.nonce) return state;
+      return { ...state, focusMessage: { ...state.focusMessage, consumed: true } };
     case "toggleComputer": {
       const open = action.open ?? !state.computerOpen;
       return {
         ...state,
         computerOpen: open,
         settingsOpen: open ? false : state.settingsOpen,
+        inspectorOpen: open ? false : state.inspectorOpen,
+        appSettingsOpen: open ? false : state.appSettingsOpen,
+      };
+    }
+    case "toggleInspector": {
+      const open = action.open ?? !state.inspectorOpen;
+      return {
+        ...state,
+        inspectorOpen: open,
+        settingsOpen: open ? false : state.settingsOpen,
+        computerOpen: open ? false : state.computerOpen,
         appSettingsOpen: open ? false : state.appSettingsOpen,
       };
     }
@@ -652,6 +825,7 @@ function reducer(state: AppState, action: Action): AppState {
         appSettingsSection: action.section ?? state.appSettingsSection,
         settingsOpen: open ? false : state.settingsOpen,
         computerOpen: open ? false : state.computerOpen,
+        inspectorOpen: open ? false : state.inspectorOpen,
         pluginsOpen: open ? false : state.pluginsOpen,
       };
     }
@@ -670,7 +844,8 @@ function reducer(state: AppState, action: Action): AppState {
             ),
           }
         : animated;
-      return updateBot(next, action.botId, (b) => ({ ...b, ...action.patch }));
+      const { acknowledgeLocalAuto: _ack, ...botPatch } = action.patch;
+      return updateBot(next, action.botId, (b) => ({ ...b, ...botPatch }));
     }
     case "threadActive": {
       const bot = state.bots.find((b) => b.threadId === action.threadId);
@@ -747,7 +922,7 @@ function reducer(state: AppState, action: Action): AppState {
 /** Newest screen frames whose pixels stay in memory per thread. */
 const MAX_KEPT_SCREEN_FRAMES = 8;
 
-const initialState: AppState = {
+export const initialState: AppState = {
   bots: [],
   groups: [],
   instances: [],
@@ -762,10 +937,13 @@ const initialState: AppState = {
   settingsOpen: false,
   pluginsOpen: false,
   computerOpen: false,
+  inspectorOpen: false,
   appSettingsOpen: false,
   appSettingsSection: "general",
   screens: {},
   provisioning: {},
+  computerControl: {},
+  focusMessage: null,
   connected: false,
   error: null,
   mascotMotion: null,
@@ -802,6 +980,8 @@ export function useStreaming() {
 const StoreContext = createContext<{
   state: AppState;
   dispatch: React.Dispatch<Action>;
+  /** Commit any debounced profile edits before an operation reads the bot. */
+  flushBotPatches: (botId: string) => Promise<void>;
   /** Re-fetch engine availability — after an install, without a restart. */
   refreshInstances: () => Promise<void>;
 } | null>(null);
@@ -852,8 +1032,38 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     });
   };
 
-  // debounced PATCH per bot for text-field edits (name/title/description)
-  const patchTimers = useRef(new Map<string, { timer: ReturnType<typeof setTimeout>; patch: Record<string, unknown> }>());
+  const botPatchQueue = useMemo(
+    () =>
+      createBotPatchQueue({
+        send: async (botId, patch, signal) => {
+          const result: { bot: BotAnnouncement } = await api(`/api/bots/${botId}`, {
+            method: "PATCH",
+            body: JSON.stringify(patch),
+            signal,
+          });
+          return result.bot;
+        },
+        reconcile: async (botId, signal) => {
+          const result: { bots: BotAnnouncement[] } = await api("/api/bots", { signal });
+          return result.bots.find((candidate) => candidate.id === botId) ?? null;
+        },
+        onAuthoritative: (bot, optimisticOverlay) => {
+          rawDispatch({ type: "botPatched", bot: { ...bot, ...optimisticOverlay } });
+        },
+        onError: (error) => {
+          rawDispatch({ type: "error", message: error.message });
+          setTimeout(() => rawDispatch({ type: "error", message: null }), 6000);
+        },
+      }),
+    [],
+  );
+
+  useEffect(() => {
+    // StrictMode's dev probe runs this cleanup once against the same memoized
+    // queue; revive undoes it so profile saves survive development mounts.
+    botPatchQueue.revive();
+    return () => botPatchQueue.dispose();
+  }, [botPatchQueue]);
 
   const dispatch = useMemo(() => {
     const showError = (e: unknown) => {
@@ -870,6 +1080,11 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     };
 
     const wrapped: React.Dispatch<Action> = (action) => {
+      const botBeforeUpdate =
+        action.type === "updateBot"
+          ? stateRef.current.bots.find((candidate) => candidate.id === action.botId)
+          : undefined;
+      if (action.type === "deleteBot") botPatchQueue.cancel(action.botId);
       rawDispatch(action);
       switch (action.type) {
         case "createRoutine":
@@ -984,18 +1199,24 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         case "duplicateBot": {
           const source = stateRef.current.bots.find((b) => b.id === action.botId);
           if (!source) break;
+          const duplicateProfile = {
+            name: `${source.name} copy`,
+            title: source.title,
+            description: source.description,
+            notifications: source.notifications,
+            modelSelection: source.modelSelection,
+            computer: source.computer,
+            cloudBackend: source.cloudBackend,
+            avatarUrl: source.avatarUrl,
+            avatarCrop: source.avatarCrop,
+          };
           api("/api/bots", { method: "POST" })
             .then(({ bot }) =>
               api(`/api/bots/${bot.id}`, {
                 method: "PATCH",
-                body: JSON.stringify({
-                  name: `${source.name} copy`,
-                  title: source.title,
-                  description: source.description,
-                  notifications: source.notifications,
-                  modelSelection: source.modelSelection,
-                  ...(source.computer ? { computer: source.computer } : {}),
-                }),
+                // JSON.stringify omits undefined optional fields while preserving
+                // an explicit null avatar clear, so duplication mirrors the source.
+                body: JSON.stringify(duplicateProfile),
               }).then(({ bot: patched }) =>
                 rawDispatch({ type: "botAdded", bot: { ...bot, ...patched, messages: bot.messages } }),
               ),
@@ -1089,17 +1310,9 @@ export function StoreProvider({ children }: { children: ReactNode }) {
           api(`/api/groups/${action.groupId}/interrupt`, { method: "POST" }).catch(showError);
           break;
         case "updateBot": {
-          const timers = patchTimers.current;
-          const pending = timers.get(action.botId);
-          const patch = { ...pending?.patch, ...action.patch };
-          if (pending) clearTimeout(pending.timer);
-          timers.set(action.botId, {
-            patch,
-            timer: setTimeout(() => {
-              timers.delete(action.botId);
-              api(`/api/bots/${action.botId}`, { method: "PATCH", body: JSON.stringify(patch) }).catch(showError);
-            }, 400),
-          });
+          if (botBeforeUpdate) {
+            botPatchQueue.enqueue(action.botId, action.patch, botBeforeUpdate);
+          }
           break;
         }
         default:
@@ -1107,7 +1320,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       }
     };
     return wrapped;
-  }, []);
+  }, [botPatchQueue]);
 
   // ── initial load + SSE fold ──────────────────────────────────────────
   useEffect(() => {
@@ -1115,7 +1328,13 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     const loadAll = () =>
       Promise.all([
         api("/api/bots")
-          .then(({ bots, groups }) => alive && rawDispatch({ type: "hydrate", bots, groups: groups ?? [] }))
+          .then(({ bots, groups, computerControl }) =>
+            alive && rawDispatch({
+              type: "hydrate",
+              bots,
+              groups: groups ?? [],
+              computerControl: computerControl ?? {},
+            }))
           .catch(() => {}),
         api("/api/instances")
           .then(({ instances }) => alive && rawDispatch({ type: "instances", instances }))
@@ -1205,7 +1424,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
           clearStream(frame.threadId);
           break;
         case "bot": {
-          const bot = frame.bot as Partial<Bot> & { id: string };
+          const bot = frame.bot as BotAnnouncement;
           // reading the selected chat clears its badge immediately
           if (bot.unread && bot.id === stateRef.current.selectedId) {
             bot.unread = false;
@@ -1215,7 +1434,10 @@ export function StoreProvider({ children }: { children: ReactNode }) {
               body: JSON.stringify({ unread: false }),
             }).catch(() => {});
           }
-          rawDispatch({ type: "botPatched", bot });
+          rawDispatch({
+            type: "botPatched",
+            bot: { ...bot, ...botPatchQueue.overlayFor(bot.id) },
+          });
           break;
         }
         case "group": {
@@ -1240,7 +1462,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
           // unread:false back. Opening a bot from its own notification and
           // watching the badge return on the next hydration is exactly the
           // bug that makes notifications feel broken.
-          showNotification(frame.notification, (botId) => dispatch({ type: "select", id: botId }));
+          showNotification(frame.notification, (target) => openNotificationTarget(dispatch, target, stateRef.current));
           break;
         case "group.deleted":
           rawDispatch({ type: "groupDeleted", groupId: frame.groupId });
@@ -1293,7 +1515,16 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         case "computer":
           rawDispatch({ type: "provisioning", botId: frame.botId, on: frame.state === "provisioning" });
           break;
+        case "computer-control":
+          rawDispatch({
+            type: "computerControl",
+            botId: frame.botId,
+            held: frame.held === true,
+            helpReason: typeof frame.helpReason === "string" ? frame.helpReason : null,
+          });
+          break;
         case "bot.deleted":
+          botPatchQueue.cancel(frame.botId);
           rawDispatch({ type: "deleteBot", botId: frame.botId });
           break;
         // a key changed and the fleet hot-reloaded — refresh the picker so
@@ -1301,13 +1532,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         case "config":
           rawDispatch({
             type: "configStatus",
-            config: {
-              xai: frame.xai,
-              composio: frame.composio,
-              box: frame.box,
-              tts: frame.tts,
-              profile: frame.profile,
-            },
+            config: configStatusFromFrame(frame),
           });
           api("/api/instances")
             .then(({ instances }) => rawDispatch({ type: "instances", instances }))
@@ -1367,7 +1592,14 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     return () => window.removeEventListener("focus", onFocus);
   }, [refreshInstances]);
 
-  const value = useMemo(() => ({ state, dispatch, refreshInstances }), [state, dispatch, refreshInstances]);
+  const flushBotPatches = useCallback(
+    (botId: string) => botPatchQueue.flush(botId),
+    [botPatchQueue],
+  );
+  const value = useMemo(
+    () => ({ state, dispatch, flushBotPatches, refreshInstances }),
+    [state, dispatch, flushBotPatches, refreshInstances],
+  );
   return (
     <StoreContext.Provider value={value}>
       <StreamContext.Provider value={stream}>{children}</StreamContext.Provider>

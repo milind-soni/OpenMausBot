@@ -99,6 +99,7 @@ export interface RoutineManagerOptions {
     onDispatchError: (message: string) => void,
   ) => Promise<void>;
   interruptTurn?: (botId: string, threadId: string, runOn: RoutineRunOn) => Promise<void>;
+  onRunFailed?: (run: RoutineRun) => void;
 }
 
 const ALL_DAYS = [0, 1, 2, 3, 4, 5, 6];
@@ -185,16 +186,19 @@ export class RoutineManager {
       this.runs = [];
     }
     // A local process cannot still own these turns after a full restart.
-    let recovered = false;
+    const recovered: RoutineRun[] = [];
     for (const run of this.runs) {
       if (run.status === "running" || run.status === "waiting") {
         run.status = "failed";
         run.error = "OpenMausBot restarted while this routine was running";
         run.finishedAt = this.now();
-        recovered = true;
+        recovered.push({ ...run });
       }
     }
-    if (recovered) this.save();
+    if (recovered.length > 0) {
+      this.save();
+      for (const run of recovered) this.options.onRunFailed?.(run);
+    }
   }
 
   listRoutines(): Routine[] {
@@ -444,22 +448,14 @@ export class RoutineManager {
         const state = this.options.botState(run.botId);
         if (state === "busy") continue;
         if (state === "missing") {
-          run.status = "failed";
-          run.error = "The assigned bot no longer exists";
-          run.finishedAt = this.now();
-          this.save();
-          this.emitRun(run);
+          this.failRun(run, "The assigned bot no longer exists");
           continue;
         }
         // A webhook is an incoming message, so make its task the bot's live
         // chat immediately. Scheduled work remains detached and unobtrusive.
         const task = this.options.createTask(run.botId, run.routineName, run.triggerSource === "webhook");
         if (!task) {
-          run.status = "failed";
-          run.error = "Could not create a task for this run";
-          run.finishedAt = this.now();
-          this.save();
-          this.emitRun(run);
+          this.failRun(run, "Could not create a task for this run");
           continue;
         }
         run.threadId = task.threadId;
@@ -491,9 +487,9 @@ export class RoutineManager {
     }
   }
 
-  handleRuntimeEvent(event: RuntimeEvent) {
+  handleRuntimeEvent(event: RuntimeEvent): RoutineRun | null {
     const run = this.runs.find((r) => r.threadId === event.threadId && ["running", "waiting"].includes(r.status));
-    if (!run) return;
+    if (!run) return null;
     if (event.type === "request.opened") {
       run.status = "waiting";
     } else if (event.type === "request.resolved") {
@@ -503,28 +499,39 @@ export class RoutineManager {
     } else if (event.type === "runtime.error") {
       run.error = event.message.slice(0, 500);
     } else if (event.type === "turn.completed") {
-      run.status = event.ok ? "completed" : "failed";
-      run.finishedAt = this.now();
-      run.error = event.ok ? undefined : (event.stopReason ?? run.error ?? "The bot did not complete this run");
       run.cost = event.cost;
       run.denials = event.denials;
+      if (!event.ok) {
+        this.failRun(run, event.stopReason ?? run.error ?? "The bot did not complete this run");
+        queueMicrotask(() => void this.tick());
+        return { ...run };
+      }
+      run.status = "completed";
+      run.finishedAt = this.now();
+      run.error = undefined;
     } else {
-      return;
+      return null;
     }
     this.save();
     this.emitRun(run);
     if (event.type === "turn.completed") queueMicrotask(() => void this.tick());
+    return { ...run };
   }
 
   failThread(threadId: string, message: string) {
     const run = this.runs.find((r) => r.threadId === threadId && ["running", "waiting"].includes(r.status));
     if (!run) return;
+    this.failRun(run, message);
+    queueMicrotask(() => void this.tick());
+  }
+
+  private failRun(run: RoutineRun, message: string) {
     run.status = "failed";
     run.error = message.slice(0, 500);
     run.finishedAt = this.now();
     this.save();
     this.emitRun(run);
-    queueMicrotask(() => void this.tick());
+    this.options.onRunFailed?.({ ...run });
   }
 
   private initialOccurrence(schedule: RoutineSchedule, now: number): number | null {

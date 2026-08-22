@@ -183,6 +183,7 @@ export function ensureGrokInjectSlug(
 const support: AcpSupport = {
   driverKind: "grokAgent",
   displayName: "Grok",
+  images: false,
   models: STATIC_GROK_MODELS,
   resolveModels: (env) => mergeLocalInject(readGrokModelCatalog(env), env),
   // Grok's accepted levels vary by model and the CLI validates lazily — a
@@ -205,19 +206,40 @@ const support: AcpSupport = {
     signInCommand: "grok login",
   },
 
-  // --permission-mode must always be explicit: ~/.grok/config.toml may set
-  // permission_mode = "always-approve", which would silently make every
-  // session yolo and never fire session/request_permission.
+  // Write the [model.slug] block with the instance HOME/GROK_HOME, then pass
+  // the slug on argv. spawnArgs must not call ensureGrokInjectSlug itself —
+  // that helper defaults to process.env and would miss the instance override.
+  resolveTurnModel: (model, env) => (model ? ensureGrokInjectSlug(model, env) : model),
+
+  // --permission-mode is a global grok flag. -m and --reasoning-effort are
+  // agent flags: Grok 1.0.6 only applies them when they sit AFTER `agent`
+  // and BEFORE `stdio` (`grok agent -m slug stdio`). Putting -m first is
+  // accepted as a TUI option and then ignored, so ACP session/new keeps
+  // [models].default (grok-4.6) and oMLX never sees a request.
   spawnArgs: (config, turn) => [
     "--permission-mode",
     config.fullAuto ? "bypassPermissions" : "default",
-    ...(turn.model ? ["-m", ensureGrokInjectSlug(turn.model)] : []),
+    "agent",
+    ...(turn.model ? ["-m", turn.model] : []),
     // long form on purpose: `--effort` is documented as an alias, and an
     // alias is the part a CLI is free to rename
     ...(turn.effort ? ["--reasoning-effort", turn.effort] : []),
-    "agent",
     "stdio",
   ],
+
+  // -m on argv is necessary but not sufficient: session/new still starts on
+  // [models].default. Pin the slug over the wire, same as Hermes/Droid.
+  async configureSession({ request, sessionId, turn }) {
+    if (!turn.model) return;
+    try {
+      await request("session/set_model", { sessionId, modelId: turn.model });
+    } catch (e) {
+      throw new Error(
+        `Grok rejected model "${turn.model}" via session/set_model: ${(e as Error).message}. ` +
+          `Check that grok is current (1.0.6+ supports it) and that this slug exists in ~/.grok/config.toml.`,
+      );
+    }
+  },
 
   // The CLI owns its own grok.com login; a leaked API key silently flips
   // billing from the subscription to pay-as-you-go.

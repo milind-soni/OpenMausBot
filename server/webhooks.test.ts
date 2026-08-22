@@ -58,6 +58,22 @@ afterEach(() => {
 });
 
 describe("WebhookManager", () => {
+  it("rejects malformed management input before it reaches stored state", () => {
+    const h = harness();
+    expect(() => h.manager.create({ name: 42, prompt: "Review it", botId: "maus-1" })).toThrow("name");
+    const created = create(h.manager);
+    expect(() => h.manager.update(created.webhook.id, { enabled: "yes" })).toThrow("enabled");
+    expect(h.manager.list()).toHaveLength(1);
+  });
+
+  it("does not trust malformed webhook records loaded from disk", () => {
+    const h = harness();
+    writeFileSync(h.file, JSON.stringify({ version: 1, webhooks: [{ id: "unsafe" }], deliveries: [] }));
+    const reloaded = new WebhookManager(h.options);
+    expect(reloaded.list()).toEqual([]);
+    expect(reloaded.listAttempts()).toEqual([]);
+  });
+
   it("stores only a secret digest and exposes the secret once", () => {
     const h = harness();
     const created = create(h.manager);

@@ -18,6 +18,12 @@ const socketPath = process.argv[2] ?? "";
 
 const waiting = new Map<string, (msg: any) => void>();
 const conn = connect(socketPath);
+
+interface AllowPermissionResult {
+  behavior: "allow";
+  updatedInput: object;
+  updatedPermissions?: object[];
+}
 const dead = () => {
   for (const resolve of waiting.values()) {
     resolve({ behavior: "deny", message: "OpenMausBot: permission broker unavailable — skip this action" });
@@ -120,17 +126,16 @@ async function handle(msg: any) {
         dead();
       }
     });
-    const text = isQuestion
-      ? answer.message || "No answer was given — use your best judgment."
-      : JSON.stringify(
-          answer.behavior === "allow"
-            ? {
-                behavior: "allow",
-                updatedInput: args.input ?? {},
-                ...(answer.always && suggestions ? { updatedPermissions: suggestions } : {}),
-              }
-            : { behavior: "deny", message: answer.message || "Denied from OpenMausBot" },
-        );
+    let text = answer.message || "No answer was given — use your best judgment.";
+    if (!isQuestion) {
+      if (answer.behavior === "allow") {
+        const result: AllowPermissionResult = { behavior: "allow", updatedInput: args.input ?? {} };
+        if (answer.always && suggestions) result.updatedPermissions = suggestions;
+        text = JSON.stringify(result);
+      } else {
+        text = JSON.stringify({ behavior: "deny", message: answer.message || "Denied from OpenMausBot" });
+      }
+    }
     return send({ jsonrpc: "2.0", id: msg.id, result: { content: [{ type: "text", text }] } });
   }
   if (String(msg.method ?? "").startsWith("notifications/")) return;

@@ -17,7 +17,8 @@
 /** A fenced block becomes a mention of itself, with its language if known. */
 function describeCodeBlock(fence: string): string {
   const lang = fence.trim().split(/\s+/)[0]?.replace(/[^a-z0-9+#]/gi, "") ?? "";
-  const spoken: Record<string, string> = {
+  type SpokenLanguages = Record<string, string>;
+  const spoken: SpokenLanguages = {
     ts: "TypeScript",
     tsx: "TypeScript",
     js: "JavaScript",

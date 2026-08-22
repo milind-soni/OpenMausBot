@@ -1,0 +1,26 @@
+OpenMausMobile is the private iPhone companion for OpenMausBot on your computer.
+
+Keep your AI team moving when you step away from your desk:
+
+• Answer approvals and questions
+• Follow replies as they stream
+• Send messages to bots and rooms
+• Switch and manage task contexts
+• Search the complete local transcript history
+• Edit messages and move between conversation versions
+• Share transcripts as Markdown or JSON
+• Watch a bot’s computer when you need context
+
+YOUR COMPUTER STAYS IN CHARGE
+
+OpenMausMobile connects directly to the companion service on your own computer. Your bot transcripts remain in OpenMausBot’s local storage; this app does not upload a cloud copy to the developer.
+
+PAIR ONCE, REVOKE ANY TIME
+
+Pair with a short-lived code from OpenMausBot’s Companion panel. The computer stores only a hash of the phone credential and lets you revoke the device at any time.
+
+USE IT AT HOME OR AWAY
+
+Bonjour finds your computer on a trusted local network. For private remote access, install Tailscale on both devices and connect with the computer’s MagicDNS name.
+
+Requires OpenMausBot running on a Mac, Windows, or Linux computer. Tailscale is optional and is not affiliated with OpenMausBot.

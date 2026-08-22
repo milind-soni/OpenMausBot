@@ -1,0 +1,31 @@
+{
+  "$schema": "../../node_modules/wrangler/config-schema.json",
+  "name": "openmausbot-composio",
+  "main": "src/index.ts",
+  "compatibility_date": "2026-08-18",
+  "compatibility_flags": ["nodejs_compat"],
+  "workers_dev": true,
+  "vars": {
+    "COMPOSIO_API_BASE": "https://backend.composio.dev/api/v3.1",
+    "COMPOSIO_TOOLKIT_BASE": "https://backend.composio.dev/api/v3",
+    "REGISTRATION_MODE": "open"
+  },
+  "secrets": { "required": ["COMPOSIO_API_KEY"] },
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "openmausbot-composio",
+      "database_id": "435bcde1-c017-416f-b041-7ffc508e9d88",
+      "migrations_dir": "migrations"
+    }
+  ],
+  "ratelimits": [
+    { "name": "REGISTRATION_LIMITER", "namespace_id": "8261701", "simple": { "limit": 30, "period": 60 } },
+    { "name": "SESSION_LIMITER", "namespace_id": "8261702", "simple": { "limit": 120, "period": 60 } }
+  ],
+  "observability": {
+    "enabled": true,
+    "logs": { "enabled": true, "head_sampling_rate": 1 },
+    "traces": { "enabled": true, "head_sampling_rate": 0.05 }
+  }
+}

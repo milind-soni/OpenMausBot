@@ -21,6 +21,8 @@ import { GeminiAgentDriver } from "./gemini.ts";
 import { KimiAgentDriver } from "./kimi.ts";
 import { DroidAgentDriver } from "./droid.ts";
 import { __catalogTestHooks, discoverCatalog, OpenCodeAgentDriver, parseModels, permissionEnv } from "./opencode.ts";
+import { CursorAgentDriver } from "./cursor.ts";
+import { removeTempDir } from "../../testing/cleanup.ts";
 
 const FAKE_CLI = join(dirname(fileURLToPath(import.meta.url)), "..", "..", "testing", "fake-acp-cli.ts");
 
@@ -141,9 +143,49 @@ describe("ACP decodeConfig", () => {
     });
     expect(OpenCodeAgentDriver.install?.signInCommand).toBe("opencode auth login");
   });
+  it("cursor defaults to its unambiguous binary and declares cross-platform setup", () => {
+    expect(CursorAgentDriver.decodeConfig(undefined)).toEqual({
+      cli: "cursor-agent",
+      fullAuto: false,
+      workspace: undefined,
+    });
+    expect(CursorAgentDriver.install?.command).toMatchObject({
+      darwin: expect.stringContaining("cursor.com/install"),
+      linux: expect.stringContaining("cursor.com/install"),
+      win32: expect.stringContaining("cursor.com/install"),
+    });
+    expect(CursorAgentDriver.install?.signInCommand).toBe("cursor-agent login");
+  });
   it("fullAuto only when explicitly true", () => {
     expect(GrokAgentDriver.decodeConfig({ fullAuto: "yes" }).fullAuto).toBe(false);
     expect(GrokAgentDriver.decodeConfig({ fullAuto: true }).fullAuto).toBe(true);
+  });
+
+  it("does not advertise or accept local CUA in full-auto mode", async () => {
+    const fullAuto = await GrokAgentDriver.create({
+      instanceId: "grok-full-auto",
+      displayName: "Grok Full Auto",
+      environment: {},
+      enabled: true,
+      config: { cli: FAKE_CLI, fullAuto: true },
+    });
+    expect(fullAuto.adapter.capabilities.localComputerMcp).toBe(false);
+    await expect(
+      fullAuto.adapter.sendTurn({
+        threadId: "t-full-auto-local",
+        text: "click",
+        integrations: {
+          localComputer: {
+            command: "/cua-driver",
+            args: ["mcp"],
+            env: {},
+            platform: "linux",
+            scope: "local-computer",
+          },
+        },
+      }),
+    ).rejects.toThrow(/interactive provider approvals/);
+    await fullAuto.dispose();
   });
 });
 
@@ -177,6 +219,10 @@ describe("ACP turns (fake CLI)", () => {
     delete process.env.OPENCODE_API_KEY;
     delete process.env.OPENAI_API_KEY;
     delete process.env.ANTHROPIC_API_KEY;
+    delete process.env.CURSOR_API_KEY;
+    delete process.env.CURSOR_AUTH_TOKEN;
+    delete process.env.BOX_TOKEN;
+    delete process.env.OMB_TTS_KEY;
     delete process.env.FAKE_ACP_MODELS;
     delete process.env.FAKE_ACP_MODEL_STICKS;
     delete process.env.FAKE_ACP_USAGE_ROOT;
@@ -185,7 +231,7 @@ describe("ACP turns (fake CLI)", () => {
     delete process.env.OPENCODE_CONFIG_DIR;
     recorder?.stop();
     await instance?.dispose();
-    rmSync(scratch, { recursive: true, force: true });
+    await removeTempDir(scratch);
   });
 
   it("normalizes a full turn into the canonical event sequence", async () => {
@@ -230,6 +276,12 @@ describe("ACP turns (fake CLI)", () => {
     process.env.FAKE_ACP_DUMP = dump;
     process.env.XAI_API_KEY = "xai-should-not-leak";
     process.env.OPENCODE_API_KEY = "opencode-should-not-leak";
+    process.env.CURSOR_API_KEY = "cursor-should-not-leak";
+    process.env.CURSOR_AUTH_TOKEN = "cursor-token-should-not-leak";
+    // workspace credentials with no CLI consumer at all — held by the
+    // harness (env-injected at boot by the desktop shell), used in-process
+    process.env.BOX_TOKEN = "box-should-not-leak";
+    process.env.OMB_TTS_KEY = "tts-should-not-leak";
 
     await instance.adapter.sendTurn({ threadId: "t-hygiene", text: "go" });
     await recorder.until((e) => e.type === "turn.completed");
@@ -240,14 +292,37 @@ describe("ACP turns (fake CLI)", () => {
     expect(seen.argv).toContain("--permission-mode");
     expect(seen.env.XAI_API_KEY).toBeUndefined();
     expect(seen.env.OPENCODE_API_KEY).toBeUndefined();
+    expect(seen.env.CURSOR_API_KEY).toBeUndefined();
+    expect(seen.env.CURSOR_AUTH_TOKEN).toBeUndefined();
+    expect(seen.env.BOX_TOKEN).toBeUndefined();
+    expect(seen.env.OMB_TTS_KEY).toBeUndefined();
   });
 
-  // this driver has no Composio mount, so it must not claim the
-  // capability: claiming it is what would tell an ACP bot to call
-  // composio tools it was never given
-  it("does not claim the Composio capability it cannot honour", async () => {
+  // ACP session/new accepts stdio MCP entries, so connected apps use the
+  // same harness-owned bridge as Claude and Codex.
+  it("mounts connected apps as a stdio MCP server", async () => {
     await create();
-    expect(instance.adapter.capabilities.composioMcp).not.toBe(true);
+    const dump = join(scratch, "composio.json");
+    process.env.FAKE_ACP_DUMP = dump;
+    expect(instance.adapter.capabilities.composioMcp).toBe(true);
+    await instance.adapter.sendTurn({
+      threadId: "t-composio",
+      text: "go",
+      integrations: {
+        composio: {
+          command: process.execPath,
+          args: ["/tmp/connector-proxy.js"],
+          env: { OMB_CONNECTOR_UPSTREAM_URL: "http://127.0.0.1:8799/api/internal/connectors/mcp" },
+        },
+      },
+    });
+    await recorder.until((event) => event.type === "turn.completed");
+    expect(JSON.parse(readFileSync(`${dump}.mcp.json`, "utf8"))).toContainEqual({
+      name: "composio",
+      command: process.execPath,
+      args: ["/tmp/connector-proxy.js"],
+      env: [{ name: "OMB_CONNECTOR_UPSTREAM_URL", value: "http://127.0.0.1:8799/api/internal/connectors/mcp" }],
+    });
   });
 
   it("droid takes model and autonomy over the wire, never through argv", async () => {
@@ -329,15 +404,64 @@ describe("ACP turns (fake CLI)", () => {
     expect(recorder.events.some((e) => e.type === "session.started")).toBe(true);
   });
 
+  it("mounts local CUA only on an approval-capable ACP instance", async () => {
+    await create();
+    const dump = join(scratch, "local-dump.json");
+    process.env.FAKE_ACP_DUMP = dump;
+    await instance.adapter.sendTurn({
+      threadId: "t-local",
+      text: "inspect",
+      integrations: {
+        localComputer: {
+          command: "/opt/cua driver/cua-driver",
+          args: ["mcp", "--embedded", "--socket", "/run/user/1000/driver.sock"],
+          env: { CUA_DRIVER_EMBEDDED: "1" },
+          platform: "linux",
+          generation: "generation-1",
+          scope: "local-computer",
+        },
+      },
+    });
+    await recorder.until((event) => event.type === "turn.completed");
+    const seen = JSON.parse(readFileSync(dump, "utf8"));
+    expect(seen.mcpServers).toContainEqual({
+      name: "computer",
+      command: "/opt/cua driver/cua-driver",
+      args: ["mcp", "--embedded", "--socket", "/run/user/1000/driver.sock"],
+      env: [{ name: "CUA_DRIVER_EMBEDDED", value: "1" }],
+    });
+    expect(instance.adapter.capabilities.localComputerMcp).toBe(true);
+  });
+
   it("surfaces a permission ask as request.opened and completes once allowed", async () => {
     await create(GrokAgentDriver, "permission");
-    await instance.adapter.sendTurn({ threadId: "t-perm", text: "go" });
+    await instance.adapter.sendTurn({
+      threadId: "t-perm",
+      text: "go",
+      integrations: {
+        localComputer: {
+          command: "/cua-driver",
+          args: ["mcp"],
+          env: {},
+          platform: "linux",
+          scope: "local-computer",
+        },
+      },
+    });
     const opened = await recorder.until((e) => e.type === "request.opened");
-    expect(opened).toMatchObject({ requestType: "permission", tool: "shell" });
+    expect(opened).toMatchObject({
+      requestType: "permission",
+      tool: "shell",
+      approvalScope: "local-computer",
+    });
 
     await instance.adapter.respondToRequest("t-perm", (opened as any).requestId, { behavior: "allow" });
     const resolved = await recorder.until((e) => e.type === "request.resolved");
-    expect(resolved).toMatchObject({ behavior: "allow", source: "user" });
+    expect(resolved).toMatchObject({
+      behavior: "allow",
+      source: "user",
+      approvalScope: "local-computer",
+    });
     const done = await recorder.until((e) => e.type === "turn.completed");
     expect(done).toMatchObject({ ok: true });
   });
@@ -455,6 +579,39 @@ describe("ACP turns (fake CLI)", () => {
     expect(started).toMatchObject({ sessionId: "resumed-thread-1", model: "m-two" });
     const done = await recorder.until((e) => e.type === "turn.completed");
     expect(done).toMatchObject({ ok: true });
+  });
+
+  it("applyTurnEnv sees the picker model after resolveTurnModel", async () => {
+    const dump = join(scratch, "turn-env.json");
+    process.env.FAKE_ACP_DUMP = dump;
+    const TurnEnvDriver = createAcpDriver({
+      ...SELECT_MODEL_SUPPORT,
+      driverKind: "turnEnvTest",
+      selectModel: undefined,
+      resolveTurnModel: (model) => (model ? `resolved/${model}` : model),
+      applyTurnEnv: (env, { model, requestedModel }) => {
+        env.TEST_TURN_MODEL = `${model ?? ""}|${requestedModel ?? ""}`;
+      },
+    });
+    instance = await TurnEnvDriver.create({
+      instanceId: "turn-env-test",
+      displayName: undefined,
+      environment: {},
+      enabled: true,
+      config: { cli: FAKE_CLI, fullAuto: false },
+    });
+    recorder = recordEvents(instance.adapter);
+
+    await instance.adapter.sendTurn({
+      threadId: "t-turn-env",
+      text: "go",
+      model: "ollama::ornith:35b-bf16",
+    });
+    await recorder.until((e) => e.type === "turn.completed");
+
+    expect(JSON.parse(readFileSync(dump, "utf8")).env.TEST_TURN_MODEL).toBe(
+      "resolved/ollama::ornith:35b-bf16|ollama::ornith:35b-bf16",
+    );
   });
 
   it("transformEnv sees the instance config", async () => {
@@ -626,6 +783,25 @@ describe("ACP turns (fake CLI)", () => {
     expect(env.OPENAI_API_KEY).toBeUndefined();
     expect(env.ANTHROPIC_API_KEY).toBeUndefined();
   });
+
+  it("puts Grok -m after agent so ACP stdio binds the local slug", async () => {
+    const dump = join(scratch, "grok-argv-order.json");
+    await create(GrokAgentDriver);
+    process.env.FAKE_ACP_DUMP = dump;
+    await instance.adapter.sendTurn({ threadId: "t-argv", text: "hi", model: "grok-4.5", effort: "high" });
+    await recorder.until((e) => e.type === "turn.completed");
+
+    const argv = JSON.parse(readFileSync(dump, "utf8")).argv as string[];
+    const agent = argv.indexOf("agent");
+    const modelFlag = argv.indexOf("-m");
+    const stdio = argv.indexOf("stdio");
+    expect(agent).toBeGreaterThan(-1);
+    expect(modelFlag).toBeGreaterThan(agent);
+    expect(stdio).toBeGreaterThan(modelFlag);
+    expect(argv[modelFlag + 1]).toBe("grok-4.5");
+    expect(argv.indexOf("--reasoning-effort")).toBeGreaterThan(agent);
+    expect(argv.indexOf("--permission-mode")).toBeLessThan(agent);
+  });
 });
 
 describe("ACP snapshot", () => {
@@ -663,7 +839,7 @@ describe("ACP snapshot", () => {
       expect((await instance.snapshot()).authenticated).toBe(true);
     } finally {
       await instance.dispose();
-      rmSync(scratch, { recursive: true, force: true });
+      await removeTempDir(scratch);
     }
   });
 
@@ -726,7 +902,7 @@ describe("ACP snapshot", () => {
       expect((await neither.snapshot()).authenticated).toBe(false);
     } finally {
       for (const i of instances) await i.dispose();
-      rmSync(scratch, { recursive: true, force: true });
+      await removeTempDir(scratch);
     }
   });
 
@@ -762,7 +938,7 @@ describe("ACP snapshot", () => {
       expect(instance.models.default).toBe("custom:LMStudio-Qwen-0");
     } finally {
       await instance.dispose();
-      rmSync(scratch, { recursive: true, force: true });
+      await removeTempDir(scratch);
     }
   });
 
@@ -783,7 +959,7 @@ describe("ACP snapshot", () => {
       expect(instance.models.options.every((o) => !o.id.startsWith("custom:"))).toBe(true);
     } finally {
       await instance.dispose();
-      rmSync(scratch, { recursive: true, force: true });
+      await removeTempDir(scratch);
     }
   });
 
@@ -804,7 +980,7 @@ describe("ACP snapshot", () => {
       expect((await instance.snapshot()).authenticated).toBe(true);
     } finally {
       await instance.dispose();
-      rmSync(scratch, { recursive: true, force: true });
+      await removeTempDir(scratch);
     }
   });
 

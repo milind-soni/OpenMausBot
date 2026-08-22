@@ -1,0 +1,43 @@
+---
+title: Agent engines
+description: Use the agent subscriptions and CLIs you already have.
+icon: BrainCircuit
+---
+
+OpenMausBot does not proxy every message through its own model account. It starts supported agent CLIs on your computer and normalizes their output through the local harness.
+
+<ProductScreenshot name="docs-engine-detection" alt="OpenMausBot checking which agent engines are installed" caption="The official app checks installation and sign-in state without asking users to find executable paths first." />
+
+## Built-in engines
+
+| Engine | Authentication shape | Notes |
+|---|---|---|
+| Claude | Claude CLI login | Strong support for tools, approvals, sessions, and local computer use |
+| Codex | Codex CLI login | Model discovery, approvals, steering, and computer tools |
+| Grok | Grok CLI login | ACP-based local model catalog and session support |
+| Cursor | Cursor Agent CLI login or API key | ACP driver with live model discovery |
+| Kimi | Kimi CLI login | ACP integration |
+| Droid | Factory Droid CLI login | ACP integration |
+| Antigravity | Google Antigravity CLI login | Default Google consumer engine |
+| OpenCode | No login for free Zen models; login or an optional API key adds providers | ACP integration with live provider model discovery |
+| Qwen | Qwen CLI login | ACP integration |
+| Hermes | Hermes CLI login | ACP integration |
+| Pi | Pi CLI login | Native driver |
+
+Additional driver instances can be declared in local configuration. Unavailable engines remain visible with a reason instead of crashing the provider fleet.
+
+## Detection
+
+OpenMausBot checks common installation directories and the login shell in the background. Restart the app after installing or authenticating a CLI.
+
+If detection fails, use **Settings → Engines** to set an explicit executable path. This is supported for every engine and is the most reliable solution for version managers, wrappers, custom builds, and Windows installations outside the normal path.
+
+## Model selection
+
+The model picker groups models by provider and marks defaults. Supported engines can refresh their model catalog from the installed CLI. Changing the model affects future turns; it does not rewrite earlier transcript history.
+
+<ProductScreenshot name="docs-model-picker" alt="The OpenMausBot model picker with several cloud and local engines" caption="Every bot can use a different engine and model." />
+
+<Callout type="info" title="Subscriptions stay with the provider">
+  Your existing CLI login or provider API key determines access and billing. OpenMausBot does not turn one subscription into access to another provider.
+</Callout>

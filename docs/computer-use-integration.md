@@ -1,16 +1,18 @@
 # Computer use & browser use in OpenMausBot
 
 Decision doc, 2026-08-12. How bots in OpenMausBot get local computer use and
-browser use, out of the box, with no separate installs. Based on a survey of
-OSS chat-app MCP hosts, macOS control servers, browser-automation stacks, and
-the local `cua` / `axstream` code on this machine.
+browser use. macOS and packaged Ubuntu x64 builds use an out-of-the-box,
+release-pinned provider; source/dev Ubuntu may use a separately installed provider. Based
+on a survey of OSS chat-app MCP hosts, macOS control servers,
+browser-automation stacks, and the local `cua` / `axstream` code on this
+machine.
 
 ## TL;DR architecture
 
-```
+```text
 Electron main process
-├── EmbeddedCuaDriverHost  ──spawns──▶  cua-driver (bundled Rust binary, Resources/)
-│     one TCC prompt, named OpenMausBot          │ unix socket (private)
+├── CUA host  ──spawns──▶  cua-driver (bundled on macOS and packaged Ubuntu x64)
+│     platform permission boundary               │ unix socket (private)
 ├── WebContentsView pool (embedded browser, persist: partitions per bot)
 │     driven via webContents.debugger (CDP) — zero-install browser use
 └── server/ harness (drivers spawn agent CLIs with --mcp-config)
@@ -21,8 +23,11 @@ Electron main process
 - **Plugins = MCP servers over stdio.** The Plugins panel toggles which MCP
   servers get injected into each bot's `--mcp-config`. Same pattern as Claude
   Desktop / Cherry Studio / LibreChat.
-- **Computer use = bundled `cua-driver`** (Rust, single static Mach-O,
-  23MB arm64 / 48MB universal — from `mywork/cua/libs/cua-driver/rust`).
+- **Local desktop use = `cua-driver`**. macOS packages the Rust Mach-O in app
+  Resources; Ubuntu x64 packages the certified 0.19.3 ELF plus its cursor-theme
+  sidecar outside ASAR. Both remain paired with the application release. This
+  applies to the Ubuntu 24.04 GNOME/Xorg beta and guarded GNOME/Wayland beta;
+  remote/cloud boxes and the isolated Local VM remain separate providers.
   NOT Swift — the Swift file everyone remembers
   (`examples/embedded-host-macos/ExampleAgentHarness.swift`) is a 165-line
   reference host showing the embedding pattern, not the driver.
@@ -31,18 +36,29 @@ Electron main process
   `webContents.debugger` CDP transport. No Chrome dependency, no 281MB
   Playwright download, and the user watches the bot browse inside the chat.
 
-## Computer use: CUA only — bundle cua-driver, spawn from Electron main
+## Local desktop use: CUA only — Electron owns the driver lifecycle
 
-**Decision (Milind, 2026-08-12): CUA is the ONLY computer-use provider.
+**Decision (Milind, 2026-08-12): CUA is the ONLY local desktop-control provider.
 No cliclick, no robotjs/nut.js, no Python computer-server, no fallbacks.**
-Everything that touches the user's screen/mouse/keyboard goes through the
-bundled `cua-driver` binary. Alternatives evaluated and rejected:
+All local desktop-control and input actions go through the validated
+`cua-driver` binary. Linux screen preview uses the supported Xorg or
+user-initiated XDG portal capture path and is not a control provider. This rule
+does not replace remote/cloud boxes or the isolated Local VM provider. Local
+alternatives evaluated and rejected:
+
+The Ubuntu GNOME beta uses the same official CUA provider with the Phase 5
+supply-chain contract tracked in [#113](https://github.com/milind-soni/OpenMausBot/issues/113): pinned archive
+and inner hashes, exact archive allowlist, outside-ASAR resources, full notices/SBOM, no runtime download/update,
+and fail-closed packaged discovery. Electron still owns a private embedded daemon/socket, and the harness only
+receives the validated MCP proxy contract. Xorg is tracked in [#79](https://github.com/milind-soni/OpenMausBot/issues/79);
+GNOME/Wayland additionally requires WinRects v8 plus the exact Cua health-report contract tracked in
+[#109](https://github.com/milind-soni/OpenMausBot/issues/109).
 
 | Option | Verdict |
 | --- | --- |
 | cua `computer-server` (Python/FastAPI) | ✗ 200MB+ frozen Python, second TCC prompt under wrong identity |
 | axstream / cliclick / robotjs-class | ✗ rejected — CUA-only policy |
-| **cua-driver binary, embedded mode** | ✓ THE provider: zero deps, 20+ tools, its own stdio MCP proxy + socket daemon + TS SDK (`@trycua/cua-driver`), agent-cursor overlay, permission tooling |
+| **cua-driver binary, embedded mode** | ✓ THE provider: one contract, 20+ tools, its own stdio MCP proxy + socket daemon + TS SDK (`@trycua/cua-driver`), agent-cursor overlay, permission tooling |
 
 ### The rules (from `cua/libs/cua-driver/rust/Skills/cua-driver/EMBEDDING.md` — read it end to end)
 
@@ -64,7 +80,7 @@ bundled `cua-driver` binary. Alternatives evaluated and rejected:
    grant change, destroy clients → `restart()` → reconnect (macOS caches TCC
    per process).
 
-### Packaging
+### macOS packaging target
 
 - Ship the binary at `OpenMausBot.app/Contents/Resources/cua-driver`,
   **outside the ASAR**, executable bit preserved (electron-builder

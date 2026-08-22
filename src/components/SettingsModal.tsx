@@ -3,22 +3,27 @@
 // is the stuff shared by every bot: who you are, your keys, and the
 // machine your bots can borrow.
 import { useEffect, useRef, useState } from "react";
-import { KeyRound, Monitor, Terminal, User, Volume2, X } from "lucide-react";
+import { Coins, KeyRound, Monitor, Smartphone, Terminal, User, X } from "lucide-react";
 import { useStore, type AppSettingsSection } from "@/state/store";
-import { ApiKeyRow } from "./ApiKeys";
+import { analyticsEnabled, setAnalyticsEnabled } from "@/lib/analytics";
+import { ApiKeyRow, VpsConnection } from "./ApiKeys";
 import { useUpdaterState } from "@/lib/updater";
 import { EnginesSettings } from "./EnginesSettings";
 import { LocalComputerSection } from "./LocalComputerSection";
+import { CompanionSection } from "./CompanionSection";
 import { Card } from "./SettingsPrimitives";
-import { VoiceSettings } from "./VoiceSettings";
+import { UsageSection } from "./UsageSection";
+import { SkinPicker } from "./SkinPicker";
+import { RoomTurnTimeoutSettings } from "./RoomTurnTimeoutSettings";
 import { cn } from "@/lib/cn";
 
 const SECTIONS: Array<{ id: AppSettingsSection; label: string; icon: typeof User }> = [
   { id: "general", label: "General", icon: User },
   { id: "connections", label: "Connections", icon: KeyRound },
   { id: "engines", label: "Engines", icon: Terminal },
+  { id: "companion", label: "Companion", icon: Smartphone },
   { id: "computer", label: "Local VM", icon: Monitor },
-  { id: "voice", label: "Voice", icon: Volume2 },
+  { id: "usage", label: "Usage", icon: Coins },
 ];
 
 /** Name + email, persisted to /api/config {profile} on blur. */
@@ -95,6 +100,39 @@ function UpdatesRow() {
     </Card>
   );
 }
+
+/** Usage analytics, on by default and switchable here. Naming what is sent
+ * matters more than the switch: people who cannot see the scope assume the
+ * worst, and the worst — conversation text — is exactly what this never
+ * sends (autocapture is off; see lib/analytics.ts). */
+function AnalyticsRow() {
+  const [on, setOn] = useState(analyticsEnabled);
+  return (
+    <Card
+      title="Usage analytics"
+      subtitle="Anonymous product events — app opened, which features get used. Never conversations, prompts, file contents, or bot output. Your email is only attached if you shared it during setup."
+    >
+      <button
+        role="switch"
+        aria-checked={on}
+        aria-label="Send usage analytics"
+        onClick={() => {
+          const next = !on;
+          setAnalyticsEnabled(next);
+          setOn(next);
+        }}
+        className={cnSwitch(on)}
+      >
+        <span className={cnKnob(on)} />
+      </button>
+    </Card>
+  );
+}
+
+const cnSwitch = (on: boolean) =>
+  `relative h-6 w-11 shrink-0 rounded-full transition-colors ${on ? "bg-accent" : "bg-raised"}`;
+const cnKnob = (on: boolean) =>
+  `absolute top-[3px] h-[18px] w-[18px] rounded-full bg-white transition-all ${on ? "left-[21px]" : "left-[3px]"}`;
 
 export function SettingsModal() {
   const { state, dispatch } = useStore();
@@ -198,19 +236,37 @@ export function SettingsModal() {
                 <Card title="Profile" subtitle="Shown in the sidebar. Saved as you go.">
                   <ProfileFields />
                 </Card>
+                <Card title="Skin" subtitle="Applies instantly and is remembered on this machine.">
+                  <SkinPicker />
+                </Card>
+                <Card title="Room turns" subtitle="Set one maximum duration for every bot turn in a room.">
+                  <RoomTurnTimeoutSettings />
+                </Card>
                 <UpdatesRow />
+                <AnalyticsRow />
               </>
             )}
 
             {section === "connections" && (
               <Card
-                title="Keys"
-                subtitle="Shared by all bots. Saving a key reloads providers instantly; keys are stored locally and never shown again."
+                title="Connections"
+                subtitle="Connected apps work automatically in the installed app. Other optional service keys stay on this computer."
               >
                 <div className="flex flex-col gap-4">
-                  <ApiKeyRow section="composio" />
+                  {state.config?.composio.mode === "managed" ? (
+                    <div className="rounded-lg border border-success/25 bg-success/10 px-3 py-2 text-[13px] text-success">
+                      Connected apps service is ready
+                    </div>
+                  ) : null}
                   <ApiKeyRow section="box" />
+                  <VpsConnection />
                   <ApiKeyRow section="opencode" />
+                  <details className="rounded-lg border border-hairline/40 bg-inset px-3 py-2">
+                    <summary className="cursor-pointer text-[13px] text-ink-secondary">Self-host connected apps</summary>
+                    <div className="mt-3">
+                      <ApiKeyRow section="composio" />
+                    </div>
+                  </details>
                 </div>
               </Card>
             )}
@@ -221,9 +277,11 @@ export function SettingsModal() {
               </Card>
             )}
 
-            {section === "voice" && <VoiceSettings />}
+            {section === "companion" && <CompanionSection />}
 
             {section === "computer" && <LocalComputerSection />}
+
+            {section === "usage" && <UsageSection />}
           </div>
         </div>
       </div>

@@ -39,6 +39,12 @@ describe("CUA connection persistence", () => {
       expect(
         fs.existsSync(path.join(userData, "cua-connection.json.123.test.tmp")),
       ).toBe(false);
+      // Keep replacement/rollback coverage on Windows, where Node accepts
+      // chmod but NTFS does not expose the requested POSIX mode bits.
+      if (process.platform !== "win32") {
+        expect(fs.statSync(path.join(userData, "cua-connection.json")).mode & 0o777).toBe(0o600);
+        expect(fs.statSync(userData).mode & 0o777).toBe(0o700);
+      }
     } finally {
       rmSync(userData, { recursive: true, force: true });
     }

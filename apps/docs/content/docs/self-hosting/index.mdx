@@ -1,0 +1,35 @@
+---
+title: Self-hosting OpenMausBot
+description: Run the harness and desktop app on infrastructure you control.
+icon: Server
+---
+
+OpenMausBot is local-first by default: the harness listens on loopback, agent CLIs run on your machine, and application state lives under `~/.openmausbot`.
+
+## Typical self-hosted setup
+
+1. Run OpenMausBot on your personal macOS, Windows, or Ubuntu computer.
+2. Install and authenticate the agent CLIs you want to use.
+3. Add optional third-party keys only for the services you need.
+4. Keep the harness on loopback.
+5. Use the paired companion sidecar or Tailscale when another device needs access.
+
+## What is still third party
+
+Self-hosting OpenMausBot does not self-host every optional provider:
+
+- Agent providers authenticate and bill through their own CLI or API.
+- Composio owns connected-app OAuth grants unless you replace that integration.
+- Box owns managed cloud computers.
+- ElevenLabs synthesizes speech when voice is enabled.
+
+These services are optional. Local chat through a locally installed agent CLI does not require them.
+
+## Run headless during development
+
+```bash
+pnpm install --frozen-lockfile
+pnpm dev:server
+```
+
+The main harness listens on `127.0.0.1:8799` by default. Keep it private; it owns agent processes, approvals, computers, and workspace configuration.

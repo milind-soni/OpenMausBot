@@ -1,0 +1,5 @@
+{
+  "title": "Troubleshooting",
+  "icon": "Wrench",
+  "pages": ["index", "startup-and-ports", "updates", "connected-apps"]
+}

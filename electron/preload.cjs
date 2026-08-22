@@ -6,8 +6,40 @@ contextBridge.exposeInMainWorld("ogb", {
   /** Host platform ("darwin" | "win32" | "linux") — for platform-aware UI. */
   platform: process.platform,
   getCapabilities: () => ipcRenderer.invoke("desktop:capabilities"),
+  onCapabilitiesChanged: (cb) => {
+    const handler = (_event, capabilities) => cb(capabilities);
+    ipcRenderer.on("desktop:capabilities-changed", handler);
+    return () => ipcRenderer.removeListener("desktop:capabilities-changed", handler);
+  },
+  /** The companion sidecar: the one part of this app that listens off the
+   * machine, so it runs as its own process and is off until switched on.
+   * Every call answers with the whole state, so the panel never has to
+   * stitch two round-trips together. */
+  companion: {
+    state: () => ipcRenderer.invoke("companion:state"),
+    start: () => ipcRenderer.invoke("companion:start"),
+    stop: () => ipcRenderer.invoke("companion:stop"),
+    pairing: (open) => ipcRenderer.invoke("companion:pairing", open),
+    cloudDesktop: (deviceId, allowed) => ipcRenderer.invoke("companion:cloud-desktop", deviceId, allowed),
+    revoke: (deviceId) => ipcRenderer.invoke("companion:revoke", deviceId),
+  },
+  localControl: {
+    status: () => ipcRenderer.invoke("cua:linux-status"),
+    enable: () => ipcRenderer.invoke("cua:linux-enable"),
+    disable: () => ipcRenderer.invoke("cua:linux-disable"),
+    retry: () => ipcRenderer.invoke("cua:linux-retry"),
+  },
+  /** Arms exactly one display-media request from the current renderer frame. */
+  beginScreenPreviewIntent: () => ipcRenderer.sendSync("screen:preview-intent"),
   /** One frame of this computer's screen as a data: URL when supported. */
   screenFrame: () => ipcRenderer.invoke("screen:frame"),
+  /** Physical USB Android devices. Network ADB is deliberately excluded. */
+  androidDevice: {
+    status: () => ipcRenderer.invoke("android-device:status"),
+    frame: (serial) => ipcRenderer.invoke("android-device:frame", serial),
+    input: (serial, payload) =>
+      ipcRenderer.invoke("android-device:input", serial, payload).then(() => undefined),
+  },
   speechStart: (options) => ipcRenderer.invoke("speech:start", options),
   speechStop: () => ipcRenderer.invoke("speech:stop"),
   speechFinish: () => ipcRenderer.invoke("speech:finish"),
@@ -45,6 +77,17 @@ contextBridge.exposeInMainWorld("ogb", {
   /** Open a web link in the default browser. Unlike renderer window.open,
    * this remains reliable after an asynchronous API request. */
   openExternal: (url) => ipcRenderer.invoke("desktop:open-external", url),
+  /** Live VNC/noVNC in a sandboxed modal owned by the app window. */
+  desktopViewer: {
+    open: (url, title, contextId) => ipcRenderer.invoke("desktop-viewer:open", url, title, contextId),
+    onState: (cb) => {
+      const handler = (_event, state) => cb(state);
+      ipcRenderer.on("desktop-viewer:state", handler);
+      return () => ipcRenderer.removeListener("desktop-viewer:state", handler);
+    },
+  },
+  /** Native folder picker for a bot's working folder; null when cancelled. */
+  pickFolder: (current) => ipcRenderer.invoke("desktop:pick-folder", current),
   /** Store a provider credential with OS-backed encryption. */
   setCredential: (name, value) => ipcRenderer.invoke("credential:set", name, value),
 

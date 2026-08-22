@@ -101,3 +101,68 @@ describe("redactSecrets", () => {
     expect(() => redactSecrets(deep)).not.toThrow();
   });
 });
+
+import { redactSecretsInText } from "./redact.ts";
+
+// Content-shaped secrets: what a bot's own reply, a tool title, or a
+// permission card can carry. High precision on purpose — a false positive
+// here rewrites real code in the transcript.
+describe("redactSecretsInText", () => {
+  it("masks known key prefixes wherever they appear", () => {
+    // fixtures are assembled at runtime so no token-shaped literal sits in
+    // the source — GitHub's push protection (rightly) flags those
+    const alpha = "abcdefghijklmnopqrstuvwxyz0123456789";
+    const cases: Array<[string, RegExp]> = [
+      [`set ANTHROPIC_API_KEY=sk-ant-api03-${alpha}`, /sk-ant/],
+      [`OpenAI: sk-proj-${alpha}ABCD`, /sk-proj/],
+      [`gh token ${"gh" + "p_"}${alpha}`, /ghp_/],
+      [`fine-grained ${"github_" + "pat_"}11ABCDEFG0${alpha}`, /github_pat_/],
+      [`slack ${"xox" + "b-"}${"123456789012"}-${"1234567890123"}-${alpha.slice(0, 24)}`, /xoxb-/],
+      [`aws ${"AKIA" + "IOSFODNN7EXAMPLE"} and more`, /IOSFODNN7EXAMPLE/],
+      [`google ${"AIza" + "SyA-"}${alpha.slice(0, 32)}`, /AIza/],
+      [`npm ${"npm" + "_"}${alpha}`, /npm_[a-z]/],
+    ];
+    for (const [input, leak] of cases) {
+      const out = redactSecretsInText(input);
+      expect(out, input).not.toMatch(leak);
+      expect(out).toMatch(/«redacted \d+ chars»/);
+    }
+  });
+
+  it("masks JWTs, PEM private key blocks, and bearer tokens", () => {
+    const jwt = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiIxMjM0NTY3ODkwIn0.SflKxwRJSMeKKF2QT4fwpMeJf36POk6yJV_adQssw5c";
+    expect(redactSecretsInText(`token ${jwt} ok`)).toBe(`token «redacted ${jwt.length} chars» ok`);
+    const pem = "-----BEGIN OPENSSH PRIVATE KEY-----\nb3BlbnNzaC1rZXktdjEAAAAABG5vbmUAAAAEbm9uZQAAAAAAAAABAAAAMwAAAAtzc2gtZW\n-----END OPENSSH PRIVATE KEY-----";
+    const out = redactSecretsInText(`here:\n${pem}\ndone`);
+    expect(out).not.toContain("b3BlbnNzaC1r");
+    expect(out).toMatch(/BEGIN OPENSSH PRIVATE KEY[\s\S]*«redacted \d+ chars»[\s\S]*END OPENSSH PRIVATE KEY/);
+    expect(redactSecretsInText('curl -H "Authorization: Bearer abc.def-ghi_jkl123456789"')).toBe('curl -H "Authorization: Bearer «redacted 24 chars»"');
+  });
+
+  it("masks the value of a secret-shaped key=value or key: value, keeping the key", () => {
+    expect(redactSecretsInText("export DATABASE_PASSWORD=hunter2hunter2")).toBe("export DATABASE_PASSWORD=«redacted 14 chars»");
+    expect(redactSecretsInText('{"api_key": "abcd1234efgh5678"}')).toBe('{"api_key": "«redacted 16 chars»"}');
+    expect(redactSecretsInText("client_secret: 'zzzz-yyyy-xxxx-1'")).toBe("client_secret: '«redacted 16 chars»'");
+    expect(redactSecretsInText("--token=abc123def456")).toBe("--token=«redacted 12 chars»");
+  });
+
+  it("leaves ordinary text, code, hashes and URLs alone", () => {
+    for (const s of [
+      "the keyboard shortcut is cmd-k",
+      "git commit 3f2a9c1e7b4d5a6f8e9c0b1a2d3e4f5a6b7c8d9e",
+      "https://example.com/path?page=2&sort=asc",
+      "const token = await getToken(); // fetches later",
+      "password: (leave blank to keep the current one)",
+      "Bearer tokens are sent in the Authorization header",
+      "sk-8", // too short to be a key
+    ]) {
+      expect(redactSecretsInText(s), s).toBe(s);
+    }
+  });
+
+  it("is applied to string values inside redactSecrets too", () => {
+    const out = redactSecrets({ command: "curl -H 'Authorization: Bearer abcdefghijklmnop'", note: "fine" }) as Record<string, string>;
+    expect(out.command).toContain("«redacted");
+    expect(out.note).toBe("fine");
+  });
+});

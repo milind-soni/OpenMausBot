@@ -1,7 +1,7 @@
 {
   "name": "openmausbot",
   "private": true,
-  "version": "0.1.23",
+  "version": "0.1.27",
   "description": "A local-first chat app for running a team of AI agents.",
   "homepage": "https://github.com/milind-soni/OpenMausBot",
   "repository": {
@@ -12,7 +12,7 @@
     "name": "Milind Soni",
     "email": "46266943+milind-soni@users.noreply.github.com"
   },
-  "license": "MIT",
+  "license": "Apache-2.0",
   "desktopName": "com.openmausbot.app.desktop",
   "type": "module",
   "main": "electron/main.mjs",
@@ -21,43 +21,65 @@
   },
   "packageManager": "pnpm@10.33.0",
   "scripts": {
+    "clean": "node scripts/clean.mjs",
+    "lint": "oxlint .",
+    "check:contrast": "node scripts/check-contrast.mjs",
     "dev": "vite",
+    "docs:dev": "pnpm --filter @openmausbot/docs dev",
+    "docs:build": "pnpm --filter @openmausbot/docs build",
+    "docs:preview": "pnpm --filter @openmausbot/docs preview",
+    "companion": "node --experimental-strip-types companion/src/index.ts",
     "dev:server": "node --experimental-strip-types server/index.ts",
     "dev:desktop": "electron .",
     "build": "tsc -b && tsc -p tsconfig.server.json && vite build",
     "typecheck": "tsc -b && tsc -p tsconfig.server.json",
-    "test": "vitest run && pnpm test:updater",
+    "test": "node scripts/test-floor.mjs && pnpm broker:test && pnpm test:updater && pnpm test:desktop-viewer && pnpm test:packaged-server",
     "test:updater": "node --test electron/updater-coordinator.node-test.mjs",
+    "test:desktop-viewer": "node --test electron/desktop-viewer.node-test.mjs",
     "bench:observation": "node --experimental-strip-types scripts/bench-observation.ts",
     "test:watch": "vitest",
     "test:cua": "pnpm build:cua && node scripts/smoke-cua.mjs",
     "test:cua-container": "node scripts/smoke-cua-container.mjs",
-    "check:electron": "node --check electron/main.mjs && node --check electron/terminal-launch.mjs && node --check electron/preload.cjs && node --check electron/capabilities.cjs && node --check electron/cua-connection.cjs && node --check electron/cua.mjs && node --check electron/speech.mjs",
+    "check:electron": "node scripts/check-electron.mjs",
     "preview": "vite preview",
-    "build:server": "tsc -p tsconfig.server.build.json",
+    "build:server": "tsc -p tsconfig.server.build.json && node scripts/bundle-server.mjs",
+    "build:companion": "tsc -p tsconfig.companion.build.json",
     "build:speech": "node electron/build-speech-helper.mjs",
     "build:cua": "node scripts/prepare-cua.mjs",
+    "build:android-tools": "node scripts/prepare-android-tools.mjs",
+    "build:cua:linux": "node scripts/prepare-cua-linux.mjs",
+    "build:cua:linux:offline": "node scripts/prepare-cua-linux.mjs --offline",
     "build:updater": "node scripts/bundle-updater.mjs",
-    "package:prepare": "pnpm build && pnpm build:server && pnpm build:updater",
+    "package:prepare": "pnpm build && pnpm build:server && pnpm build:companion && pnpm build:updater && pnpm build:android-tools",
     "package:mac": "pnpm package:prepare && pnpm build:speech && pnpm build:cua && electron-builder --mac --publish never",
     "package:win": "pnpm package:prepare && electron-builder --win --publish never",
-    "package:linux": "pnpm package:prepare && electron-builder --linux --x64 --publish never",
-    "package:linux:dir": "pnpm package:prepare && electron-builder --linux dir --x64 --publish never",
-    "package": "pnpm package:mac"
+    "package:linux": "pnpm package:prepare && pnpm build:cua:linux && electron-builder --linux --x64 --publish never",
+    "package:linux:offline": "pnpm package:prepare && pnpm build:cua:linux:offline && electron-builder --linux --x64 --publish never",
+    "smoke:linux-package": "node scripts/run-linux-package-smoke.mjs",
+    "package:linux:dir": "pnpm package:prepare && pnpm build:cua:linux && electron-builder --linux dir --x64 --publish never",
+    "package": "pnpm package:mac",
+    "test:packaged-server": "pnpm build:server && node scripts/smoke-packaged-server.mjs",
+    "broker:types": "wrangler types --config cloudflare/composio-broker/wrangler.jsonc cloudflare/composio-broker/worker-configuration.d.ts",
+    "broker:check": "pnpm broker:types && tsc -p cloudflare/composio-broker/tsconfig.json",
+    "broker:test": "vitest run --config cloudflare/composio-broker/vitest.config.ts",
+    "broker:deploy": "wrangler deploy --config cloudflare/composio-broker/wrangler.jsonc"
   },
   "dependencies": {
     "@trycua/cua-driver": "0.20.0",
     "clsx": "^2.1.1",
     "lucide-react": "^0.539.0",
     "posthog-js": "^1.415.6",
+    "qrcode.react": "^4.2.0",
     "react": "^19.1.0",
     "react-dom": "^19.1.0",
     "react-markdown": "^10.1.0",
     "remark-gfm": "^4.0.1",
     "shiki": "^4.4.3",
-    "tailwind-merge": "^3.3.1"
+    "tailwind-merge": "^3.3.1",
+    "zod": "4.4.3"
   },
   "devDependencies": {
+    "@oxlint/plugins": "1.78.0",
     "@tailwindcss/vite": "^4.1.11",
     "@types/node": "^26.2.0",
     "@types/react": "^19.1.9",
@@ -67,9 +89,19 @@
     "electron-builder": "^26.15.3",
     "electron-updater": "^6.8.9",
     "esbuild": "^0.28.2",
+    "oxlint": "1.78.0",
     "tailwindcss": "^4.1.11",
     "typescript": "^5.8.3",
     "vite": "^7.1.0",
-    "vitest": "^4.1.10"
+    "vitest": "^4.1.10",
+    "wrangler": "4.123.0"
+  },
+  "pnpm": {
+    "supportedArchitectures": {
+      "cpu": [
+        "arm64",
+        "x64"
+      ]
+    }
   }
 }

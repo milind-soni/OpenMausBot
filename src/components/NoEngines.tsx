@@ -7,7 +7,10 @@
 import { Loader2, RefreshCw } from "lucide-react";
 import { useState } from "react";
 import { useStore } from "@/state/store";
+import { EngineGroupLabel } from "@/components/EngineGroupLabel";
 import { EngineSetup, installCommandFor } from "@/components/EngineSetup";
+import { ProviderMark } from "@/components/ProviderIcons";
+import { splitEngineRail } from "@/lib/engine-rail";
 
 export function NoEngines() {
   const { state, refreshInstances } = useStore();
@@ -47,12 +50,30 @@ export function NoEngines() {
         </p>
 
         <div className="mt-6 flex flex-col gap-2.5">
-          {engines.map((instance) => (
-            <div key={instance.instanceId} className="rounded-xl border border-hairline/40 bg-card p-3.5">
-              <div className="text-[14px] font-medium text-ink">{instance.displayName}</div>
-              <EngineSetup instance={instance} className="mt-0.5" />
-            </div>
-          ))}
+          {(() => {
+            const { subscription, custom } = splitEngineRail(engines);
+            const card = (instance: (typeof engines)[number]) => (
+              <div key={instance.instanceId} className="rounded-xl border border-hairline/40 bg-card p-3.5">
+                <div className="flex items-center gap-2 text-[14px] font-medium text-ink">
+                  <ProviderMark driverKind={instance.driverKind} size={16} />
+                  {instance.displayName}
+                </div>
+                <EngineSetup
+                  instance={instance}
+                  intent={instance.access === "custom" ? "inject" : "cloud"}
+                  className="mt-0.5"
+                />
+              </div>
+            );
+            return (
+              <>
+                {subscription.length > 0 && <EngineGroupLabel className="px-1">Cloud</EngineGroupLabel>}
+                {subscription.map(card)}
+                {custom.length > 0 && <EngineGroupLabel className="px-1 pt-1">Local</EngineGroupLabel>}
+                {custom.map(card)}
+              </>
+            );
+          })()}
         </div>
 
         <button

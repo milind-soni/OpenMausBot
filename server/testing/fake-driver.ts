@@ -68,7 +68,7 @@ export function makeFakeDriver(opts: FakeDriverOptions = {}): FakeDriverHandle {
             capabilities: { sessionModelSwitch: "unsupported", effortLevels: opts.effortLevels },
             sendTurn: async () => ({ turnId: "fake-turn" }),
             interruptTurn: async () => {},
-            respondToRequest: async () => {},
+            respondToRequest: async () => "unavailable" as const, // this engine has no asks to answer
             hasSession: () => false,
             stopAll: async () => {},
             onEvent: (listener) => {

@@ -73,6 +73,20 @@ describe("EventBus", () => {
     expect(logged[0].type).toBe("turn.started");
   });
 
+  it("redacts credential-shaped content before writing the NDJSON log", () => {
+    const key = `sk-ant-api03-${"abcdefghijklmnopqrstuvwxyz0123456789"}`;
+    const bus = new EventBus();
+    bus.publish(testEvent({
+      threadId: "redacted-log",
+      type: "runtime.error",
+      message: `provider returned ${key}`,
+    }));
+
+    const logged = readFileSync(join(EVENTS_DIR, "redacted-log.ndjson"), "utf8");
+    expect(logged).not.toContain(key);
+    expect(logged).toContain("«redacted");
+  });
+
   it("still delivers when the NDJSON log cannot be written", () => {
     rmSync(EVENTS_DIR, { recursive: true, force: true });
     const bus = new EventBus();

@@ -46,6 +46,16 @@ describe("ProviderRegistry", () => {
     expect(described.bare.cli).toBeUndefined();
     expect(described.overridden.cli).toBe("/opt/fake/custom-bin");
     expect(described.untouched.cliDefault).toBe("fakebin");
+    expect(described.untouched.access).toBe("subscription");
+  });
+
+  it("publishes custom-only access from driver metadata", async () => {
+    const fake = makeFakeDriver();
+    Object.assign(fake.driver.metadata, { access: "custom" });
+    const registry = new ProviderRegistry([fake.driver]);
+    await registry.load({ local: { driver: "fake" } });
+    const [described] = await registry.describe();
+    expect(described.access).toBe("custom");
   });
 
   it("keeps an unknown driver as an unavailable shadow instead of failing", async () => {

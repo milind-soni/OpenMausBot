@@ -11,6 +11,10 @@ import { memo } from "react";
 import { useStore, type Bot, type Message } from "@/state/store";
 import { cn } from "@/lib/cn";
 
+interface ApprovalLabels {
+  [tool: string]: string;
+}
+
 export interface Pending {
   message: Message;
   requestId: string;
@@ -36,7 +40,7 @@ export function pendingApprovals(messages: Message[]): Pending[] {
 }
 
 function label(tool: string): string {
-  const nice: Record<string, string> = {
+  const nice: ApprovalLabels = {
     Bash: "Command approval requested",
     shell: "Command approval requested",
     Read: "File-read approval requested",

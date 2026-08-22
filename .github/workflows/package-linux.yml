@@ -1,0 +1,104 @@
+# Ubuntu packages, built and exercised on the exact distribution we support.
+#
+# This workflow deliberately produces an artifact instead of publishing to the
+# separate public releases repository. That keeps cross-repository credentials
+# out of the source repository while still making every release candidate
+# reproducible from an exact ref. Attach the resulting files to the matching
+# openmausbot-releases release after the smoke test passes.
+name: Package Ubuntu
+
+on:
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: "Commit/tag/branch to build (defaults to the branch this is run from)"
+        required: false
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  package:
+    name: DEB + AppImage (Ubuntu 24.04 x64)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ inputs.ref || github.ref }}
+          persist-credentials: false
+      - uses: pnpm/action-setup@ff378ebe6b225b0680b81c1ad4498ae0d1d3a5e3 # v6.0.10
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 24
+          cache: pnpm
+      - name: Install package validation and native smoke tools
+        run: >-
+          sudo apt-get update && sudo apt-get install -y
+          at-spi2-core dbus-x11 desktop-file-utils libxi6 libxkbcommon0 squashfs-tools xvfb
+      - run: pnpm install --frozen-lockfile
+      - name: Clean generated output
+        run: pnpm clean
+      - name: Stage the pinned CUA runtime
+        run: pnpm build:cua:linux
+      - name: Package from the verified offline CUA stage
+        run: pnpm package:linux:offline
+      - name: Verify package contents and metadata
+        run: node scripts/verify-linux-package.mjs
+      - name: Configure Chromium sandbox for the unpacked app
+        run: |
+          sudo chown root:root release/linux-unpacked/chrome-sandbox
+          sudo chmod 4755 release/linux-unpacked/chrome-sandbox
+          test "$(stat -c '%U:%G %a' release/linux-unpacked/chrome-sandbox)" = "root:root 4755"
+      - name: Launch packaged app and verify lifecycle
+        env:
+          OMB_KEEP_SMOKE_DIR: "1"
+        run: pnpm smoke:linux-package
+      - name: Prepare release assets
+        id: release
+        shell: bash
+        run: |
+          set -euo pipefail
+          version="$(node -p "require('./package.json').version")"
+          appimage="release/OpenMausBot-${version}-x86_64.AppImage"
+          deb="release/OpenMausBot-${version}-amd64.deb"
+          test -f "$appimage"
+          test -f "$deb"
+          cp "$appimage" release/OpenMausBot.AppImage
+          cp "$deb" release/OpenMausBot-amd64.deb
+          chmod 0755 release/OpenMausBot.AppImage
+          (
+            cd release
+            sha256sum \
+              "$(basename "$appimage")" \
+              "$(basename "$deb")" \
+              OpenMausBot.AppImage \
+              OpenMausBot-amd64.deb > SHA256SUMS-ubuntu-x64.txt
+          )
+          echo "artifact-name=openmausbot-ubuntu-${version}-x64" >> "$GITHUB_OUTPUT"
+          echo "version: $version"
+          echo "commit:  $(git rev-parse HEAD)"
+          cat release/SHA256SUMS-ubuntu-x64.txt
+      - name: Upload smoke diagnostics on failure
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        if: failure()
+        with:
+          name: openmausbot-ubuntu-smoke-diagnostics
+          path: |
+            ${{ runner.temp }}/omb-linux-smoke-*
+            ${{ runner.temp }}/omb-linux-smoke-runtime-*
+          if-no-files-found: warn
+          include-hidden-files: true
+          retention-days: 7
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: ${{ steps.release.outputs.artifact-name }}
+          path: |
+            release/OpenMausBot-*-amd64.deb
+            release/OpenMausBot-*-x86_64.AppImage
+            release/OpenMausBot-amd64.deb
+            release/OpenMausBot.AppImage
+            release/SHA256SUMS-ubuntu-x64.txt
+          if-no-files-found: error
+          retention-days: 14

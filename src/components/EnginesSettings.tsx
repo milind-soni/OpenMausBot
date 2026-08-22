@@ -8,6 +8,9 @@ import { useEffect, useRef, useState } from "react";
 import { Check, ChevronDown, Loader2, TriangleAlert } from "lucide-react";
 
 import { api, useStore, type InstanceInfo } from "@/state/store";
+import { EngineGroupLabel } from "./EngineGroupLabel";
+import { ProviderMark } from "./ProviderIcons";
+import { splitEngineRail } from "@/lib/engine-rail";
 import { cn } from "@/lib/cn";
 
 interface ProbeResult {
@@ -232,6 +235,7 @@ function EngineRow({ instance }: { instance: InstanceInfo }) {
     <div>
       <div className="flex items-center gap-2 text-[13px]">
         <span className={cn("size-1.5 shrink-0 rounded-full", instance.cli ? "bg-accent" : "bg-raised-hover")} />
+        <ProviderMark driverKind={instance.driverKind} size={14} />
         <span className="shrink-0 text-ink">{instance.displayName}</span>
         {instance.cli ? (
           <span className="truncate font-mono text-[11.5px] text-accent" title={instance.cli}>
@@ -288,9 +292,21 @@ export function EnginesSettings() {
       {rows.length === 0 && (
         <div className="text-[13px] text-ink-secondary">No CLI engines detected yet.</div>
       )}
-      {rows.map((i) => (
-        <EngineRow key={i.instanceId} instance={i} />
-      ))}
+      {(() => {
+        const { subscription, custom } = splitEngineRail(rows);
+        return (
+          <>
+            {subscription.length > 0 && <EngineGroupLabel>Cloud</EngineGroupLabel>}
+            {subscription.map((i) => (
+              <EngineRow key={i.instanceId} instance={i} />
+            ))}
+            {custom.length > 0 && <EngineGroupLabel className="pt-1">Local</EngineGroupLabel>}
+            {custom.map((i) => (
+              <EngineRow key={i.instanceId} instance={i} />
+            ))}
+          </>
+        );
+      })()}
       <div className="text-[12px] leading-relaxed text-ink-secondary">
         Set CLI points an engine at a specific binary — a versioned build, a wrapper script, or an
         absolute path. Saving reloads providers and interrupts any running turns.

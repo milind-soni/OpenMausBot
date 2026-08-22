@@ -18,6 +18,10 @@ directories:
   buildResources: build
   output: release
 
+# electron-builder makes copied directories group-writable by default. The
+# Linux CUA trust boundary requires root-owned package ancestors to be 0755.
+afterPack: ./scripts/after-pack.mjs
+
 # The app is three self-contained pieces, none needing node_modules at
 # runtime: the Electron main/preload (plain .mjs/.cjs), the built UI
 # (Vite → ui/), and the compiled harness server (tsc → server/), both
@@ -36,17 +40,34 @@ files:
 asar: true
 
 extraResources:
+  # Ship the app's own license terms in every desktop distribution.
+  - from: LICENSE
+    to: licenses/OpenMausBot-LICENSE.txt
+  - from: NOTICE
+    to: licenses/OpenMausBot-NOTICE.txt
   - from: dist
     to: ui
   - from: dist-server
     to: server
+  # the companion sidecar — a separate process because it is the only part
+  # of the app that listens off this machine, and it stays off until asked
+  - from: dist-companion
+    to: companion
+  - from: skills
+    to: skills
+  - from: dist-native/android-platform-tools
+    to: android-platform-tools
 
 mac:
+  # Two single-arch artifacts rather than one universal binary: the app is
+  # ~177 MB per arch, and universal would make every user download both halves.
+  # electron-updater picks by filename (arm64-marked files on Apple silicon,
+  # unmarked ones on Intel), so latest-mac.yml must list all four files.
   target:
     - target: dmg
-      arch: arm64
+      arch: [arm64, x64]
     - target: zip
-      arch: arm64
+      arch: [arm64, x64]
   icon: build/icon.icns
   category: public.app-category.productivity
   hardenedRuntime: true
@@ -59,9 +80,10 @@ mac:
       to: OpenMausBot Speech.app
     # CUA must live outside ASAR. prepare-cua stages the signed executable and
     # a self-contained JS/native SDK bundle selected for macOS arm64.
-    - from: dist-native/cua-driver
+    # ${arch} resolves per built arch — each bundle carries its own natives
+    - from: dist-native/${arch}/cua-driver
       to: cua-driver
-    - from: dist-native/cua-sdk
+    - from: dist-native/${arch}/cua-sdk
       to: cua-sdk
   extendInfo:
     NSMicrophoneUsageDescription: OpenMausBot uses the microphone for voice dictation into the composer.
@@ -74,7 +96,10 @@ mac:
 
 dmg:
   sign: true
-  artifactName: OpenMausBot-${version}.dmg
+  # ${arch} is load-bearing: without it the x64 dmg silently overwrites
+  # the arm64 one when both arches build (this section overrides both the
+  # top-level and mac-level artifactName, so it must carry the arch itself)
+  artifactName: OpenMausBot-${version}-${arch}.dmg
 
 win:
   target:
@@ -118,6 +143,11 @@ linux:
   maintainer: Milind Soni <46266943+milind-soni@users.noreply.github.com>
   vendor: OpenMausBot
   syncDesktopName: true
+  # The reviewed x64 CLI runtime is staged before packaging and remains
+  # outside ASAR so executable modes and adjacent sidecars are preserved.
+  extraResources:
+    - from: dist-native/cua-linux-x64
+      to: cua-linux-x64
   desktop:
     entry:
       Name: OpenMausBot

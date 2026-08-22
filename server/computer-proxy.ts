@@ -35,6 +35,7 @@ import {
   type BrowserTarget,
   type CropRegion,
 } from "./computer-observation.ts";
+import { CONTROL_REFUSAL, createControlClient } from "./control-client.ts";
 import {
   ensureRemoteCuaCommand,
   REMOTE_CUA_EXECUTABLE,
@@ -47,6 +48,18 @@ import {
 const BOX_API = process.env.OGB_BOX_API ?? "https://ascii.dev/api/box/v1";
 const boxId = process.env.OGB_BOX_ID ?? "";
 const token = process.env.OGB_BOX_TOKEN ?? "";
+
+// Who-is-driving: while the person holds control in the app, every tool
+// below is refused (not queued — a queued click lands after they've moved
+// on). Even screenshot: the person may be typing a credential, and the
+// safest screen for the model to see is the one AFTER the hand-back.
+/** Poll cadence while waiting for a hand-back, and the patience ceiling.
+ * Env-tunable so the contract test doesn't spend wall-clock on it. */
+const CONTROL_POLL_MS = Math.max(Number(process.env.OMB_CONTROL_POLL_MS) || 1_500, 25);
+const CONTROL_WAIT_MS = Math.max(Number(process.env.OMB_CONTROL_WAIT_MS) || 600_000, 100);
+// The cache must never outlive the poll cadence, or a hand-back would be
+// seen a stale cache-window late.
+const control = createControlClient({ cacheMs: Math.min(750, CONTROL_POLL_MS) });
 
 /** The coordinate space the model sees: frames are downscaled to this
  * width, and clicks are scaled back up to the real display box-side. */
@@ -400,7 +413,7 @@ const send = (obj: unknown): void => {
   process.stdout.write(JSON.stringify(obj) + "\n");
 };
 const text = (id: unknown, t: string, isError = false): void =>
-  send({ jsonrpc: "2.0", id, result: { content: [{ type: "text", text: t }], ...(isError ? { isError: true } : {}) } });
+  send({ jsonrpc: "2.0", id, result: { content: [{ type: "text", text: t }], isError: isError || undefined } });
 
 /** An action result: the text plus the frame the action produced. When
  * the pixels are byte-identical to the frame the model just saw, the
@@ -517,6 +530,20 @@ const TOOLS = [
     name: "computer_status",
     description: "Report whether the cloud computer is using Cua Driver or the degraded X11 fallback.",
     inputSchema: { type: "object", properties: {} },
+  },
+  {
+    name: "computer_request_help",
+    description:
+      "Ask the person to take over this computer (a login, a CAPTCHA, anything you should not do alone) and wait until they hand control back. Also call it with no reason when an action was refused because a person is already driving. You cannot take control yourself — this only asks.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        reason: {
+          type: "string",
+          description: "one short sentence the person will read — what you need their hands for",
+        },
+      },
+    },
   },
   {
     name: "click",
@@ -771,7 +798,47 @@ async function semanticActAndObserve(
   return observed(id, note, await frameFrom(out));
 }
 
+/** The only tools a bot may use while the person is driving: asking to be
+ * told when they finish, and the two that read nothing from the screen. */
+const OPEN_WHILE_DRIVEN = new Set(["computer_request_help", "computer_status", "observation_metrics"]);
+
 async function call(id: unknown, name: string, args: any) {
+  if (!OPEN_WHILE_DRIVEN.has(name) && (await control.state(true)).held) {
+    return text(id, CONTROL_REFUSAL, true);
+  }
+  if (name === "computer_request_help") {
+    if (!control.configured) {
+      return text(id, "nobody can be paged for this computer right now — carry on carefully", true);
+    }
+    const initial = await control.state(true);
+    // If the person is already driving, don't clobber whatever plea they
+    // are reading — just wait for the hand-back.
+    const requestId = initial.held ? null : await control.requestHelp(String(args?.reason ?? ""));
+    if (!initial.held && requestId === null) {
+      return text(id, "The person could not be paged for this computer right now. Carry on carefully or tell them in chat.", true);
+    }
+    let sawHold = initial.held;
+    const deadline = Date.now() + CONTROL_WAIT_MS;
+    while (Date.now() < deadline) {
+      await new Promise((resolve) => setTimeout(resolve, CONTROL_POLL_MS));
+      const state = await control.state(true);
+      if (state.held) sawHold = true;
+      if (!state.held && !state.helpOpen) {
+        return text(
+          id,
+          sawHold
+            ? "The person has finished driving and handed control back. The screen may have changed while they drove — take a fresh screenshot before your next action."
+            : "The person saw your request and dismissed it without taking control. Carry on yourself.",
+        );
+      }
+    }
+    if (requestId) await control.expireHelp(requestId);
+    return text(
+      id,
+      "Nobody took control within the wait window. Carry on carefully, or ask again if you are truly stuck.",
+      true,
+    );
+  }
   if (name === "screenshot") {
     let crop: CropRegion | null = null;
     if (args.region !== undefined) {

@@ -1,0 +1,99 @@
+{
+  "bots": [
+    {
+      "id": "4f254cf4-98c5-45ca-907e-967e2bbcb8ac",
+      "threadId": "1f3a20e3-94f2-432b-8af5-db9664ed74a2",
+      "name": "Pesto",
+      "title": "",
+      "description": "",
+      "notifications": true,
+      "color": "green",
+      "unread": true,
+      "modelSelection": {
+        "instanceId": "",
+        "model": ""
+      },
+      "createdAt": 1786742441013,
+      "tasks": [
+        {
+          "threadId": "1f3a20e3-94f2-432b-8af5-db9664ed74a2",
+          "title": "New task",
+          "createdAt": 1786742441013
+        }
+      ],
+      "messages": [
+        {
+          "id": "0c537eab-3088-4bd3-ab26-2a25ff83b91d",
+          "at": 1786742441015,
+          "parentId": null,
+          "role": "bot",
+          "kind": "text",
+          "text": "Hey — I'm Pesto. Nice to meet you."
+        },
+        {
+          "id": "a5f66904-863b-4e5f-bb22-0139b49e6103",
+          "at": 1786742441016,
+          "parentId": "0c537eab-3088-4bd3-ab26-2a25ff83b91d",
+          "role": "bot",
+          "kind": "options",
+          "card": {
+            "title": "What do you mostly want help with?",
+            "subtitle": "Pick whatever's closest; we can always expand from there.",
+            "options": [
+              "Work & projects",
+              "Writing & research",
+              "Life admin",
+              "A bit of everything"
+            ]
+          }
+        }
+      ],
+      "activeLeafId": "a5f66904-863b-4e5f-bb22-0139b49e6103",
+      "hasMore": false
+    }
+  ],
+  "groups": [
+    {
+      "id": "e87fe538-e4a9-4ed5-b46e-d4bc7a580bab",
+      "threadId": "58c85a55-425d-4180-944f-d03f38f9bbbf",
+      "name": "Fixtures",
+      "memberIds": [
+        "4f254cf4-98c5-45ca-907e-967e2bbcb8ac"
+      ],
+      "defaultResponder": {
+        "kind": "mentions"
+      },
+      "bulletin": "",
+      "unread": false,
+      "createdAt": 1786742441201,
+      "busyBotId": null,
+      "messages": [
+        {
+          "id": "5d92912c-d2f7-40cf-878b-341464cce922",
+          "at": 1786742441221,
+          "parentId": "459edaa5-f290-4770-aeb1-e0908b2b8b4a",
+          "role": "user",
+          "kind": "text",
+          "text": "fixture message 3"
+        },
+        {
+          "id": "10726f98-3a08-44da-8240-e8d84b1f0459",
+          "at": 1786742441223,
+          "parentId": "5d92912c-d2f7-40cf-878b-341464cce922",
+          "role": "user",
+          "kind": "text",
+          "text": "fixture message 4"
+        },
+        {
+          "id": "f2525bc3-4594-4394-8b2b-8df19d6cb72d",
+          "at": 1786742441225,
+          "parentId": "10726f98-3a08-44da-8240-e8d84b1f0459",
+          "role": "user",
+          "kind": "text",
+          "text": "fixture message 5"
+        }
+      ],
+      "hasMore": true
+    }
+  ]
+}

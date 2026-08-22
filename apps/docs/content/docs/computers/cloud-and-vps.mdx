@@ -1,0 +1,26 @@
+---
+title: Cloud computer and your own VPS
+description: Choose a managed Box desktop or a hardened container on a Linux server you own.
+icon: Cloud
+---
+
+## Box cloud computer
+
+Add a Box API key in App Settings to provision an isolated hosted Linux desktop. The computer can sleep and wake, and supported sessions provide a live viewer for temporary human control.
+
+Box is a third-party paid service after its trial. OpenMausBot stores the configured credential locally and does not expose it to the renderer.
+
+## Bring your own VPS
+
+OpenMausBot can control Docker on an x86_64 Linux server through an SSH config alias. The agent process stays on your local machine; only Docker commands and the managed desktop container run on the VPS.
+
+Your SSH alias should include connection multiplexing, keepalives, and a connect timeout. Connect manually once to approve the host key, then verify:
+
+```bash
+ssh my-vps true
+docker -H ssh://my-vps info
+```
+
+The SSH user needs Docker access, which is root-equivalent on that server. Use a dedicated VPS and firewall inbound traffic to SSH only.
+
+The managed container publishes no ports, has no host mounts, and is checked before every attach. Its filesystem should be treated as disposable; move important results out before deleting or upgrading the container.

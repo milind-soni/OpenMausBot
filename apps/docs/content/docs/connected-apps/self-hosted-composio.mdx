@@ -1,0 +1,31 @@
+---
+title: Composio for self-hosters
+description: Configure project-key access, scoped permissions, and headless development.
+icon: KeyRound
+---
+
+The simplest open-source setup is for each installation owner to create a Composio project and paste that project's key into OpenMausBot. This avoids operating a shared credential broker and keeps usage attached to the user's own Composio account.
+
+## Least-privilege scoped key
+
+If you use a scoped Composio project key, grant:
+
+- Sessions: read and write
+- Toolkits: read
+- Connected accounts: read and write
+
+Connected-account write access is required for upstream revocation during disconnect.
+
+## Source and headless runs
+
+Set the key on the harness process:
+
+```bash
+COMPOSIO_API_KEY=ak_your_project_key pnpm dev:server
+```
+
+OpenMausBot creates a stable random Composio user identifier and reuses the returned Session. It does not store raw Gmail, Slack, GitHub, or other provider tokens.
+
+## Managed broker
+
+The repository also contains a Cloudflare Worker broker for managed deployments. It returns the same account-aware inventory shape while keeping broker credentials out of the renderer. Use it only when you intentionally operate a hosted connection service; it is not required for ordinary self-hosting.

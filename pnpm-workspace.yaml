@@ -1,5 +1,9 @@
 # pnpm 11 reads allowBuilds, pnpm 10 reads onlyBuiltDependencies — keep both
 # so either version runs the postinstalls this project actually needs.
+# A packages list is required for `pnpm list` (electron-builder's collector).
+packages:
+  - "."
+  - "apps/docs"
 allowBuilds:
   electron: true # postinstall downloads the Electron dist
   esbuild: true # postinstall validates the platform binary

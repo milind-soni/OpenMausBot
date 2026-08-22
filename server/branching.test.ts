@@ -9,11 +9,13 @@
 //
 // Same POSIX gating as comms.test.ts (the fake CLI is a shebang script).
 import { spawn, type ChildProcess } from "node:child_process";
-import { chmodSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { removeTempDir, waitForExit } from "./testing/cleanup.ts";
+
 
 const SERVER_DIR = dirname(fileURLToPath(import.meta.url));
 const FAKE_CLI = join(SERVER_DIR, "testing", "fake-acp-cli.ts");
@@ -27,6 +29,8 @@ interface Msg {
   kind: string;
   text?: string;
   parentId?: string | null;
+  /** steer-queue: waiting to auto-send when the live turn settles */
+  queued?: boolean;
 }
 
 /** Client-side view of the active branch: walk parentId links from the leaf. */
@@ -75,6 +79,9 @@ posixOnly("conversation branching e2e (fake ACP fleet)", () => {
       JSON.stringify({
         instances: {
           happy: { driver: "grokAgent", config: { cli: FAKE_CLI, fullAuto: true } },
+          // a second engine for the mid-thread model switch: same fake, its
+          // own instance, so it starts with no session cursor for the thread
+          second: { driver: "grokAgent", config: { cli: FAKE_CLI, fullAuto: true } },
           hang: {
             driver: "grokAgent",
             environment: { FAKE_ACP_MODE: "hang" },
@@ -84,14 +91,15 @@ posixOnly("conversation branching e2e (fake ACP fleet)", () => {
       }),
     );
 
+    const env: NodeJS.ProcessEnv = {
+      HOME: home,
+      USERPROFILE: home,
+      OMB_PORT: String(PORT),
+    };
+    if (process.env.PATH) env.PATH = process.env.PATH;
     child = spawn(process.execPath, [join(SERVER_DIR, "index.ts")], {
       cwd: join(SERVER_DIR, ".."),
-      env: {
-        ...(process.env.PATH ? { PATH: process.env.PATH } : {}),
-        HOME: home,
-        USERPROFILE: home,
-        OMB_PORT: String(PORT),
-      },
+      env,
       stdio: ["ignore", "pipe", "pipe"],
     });
     child.stderr!.on("data", (c) => (stderr += c));
@@ -111,13 +119,8 @@ posixOnly("conversation branching e2e (fake ACP fleet)", () => {
   }, 30_000);
 
   afterAll(async () => {
-    child?.kill("SIGTERM");
-    await new Promise<void>((resolve) => {
-      if (!child || child.exitCode !== null) return resolve();
-      child.on("close", () => resolve());
-      setTimeout(() => (child.kill("SIGKILL"), resolve()), 5_000).unref?.();
-    });
-    rmSync(home, { recursive: true, force: true });
+    await waitForExit(child, { signal: "SIGTERM" });
+    await removeTempDir(home);
   });
 
   it(
@@ -184,9 +187,18 @@ posixOnly("conversation branching e2e (fake ACP fleet)", () => {
       expect((await api("POST", `/api/bots/${created.id}/messages`, { text: "first try" })).status).toBe(202);
       await waitFor(async () => (await getBot(created.id)).busy === true, "the hung turn to start");
 
-      // a second send while busy is refused — never a parallel turn
+      const backendBefore = (await getBot(created.id)).cloudBackend;
+      const backendChange = await api("PATCH", `/api/bots/${created.id}`, { cloudBackend: "vps" });
+      expect(backendChange.status).toBe(409);
+      expect(backendChange.body.error).toContain("stop the active turn");
+      expect((await getBot(created.id)).cloudBackend).toBe(backendBefore);
+
+      // a second send while busy queues (steer-queue) — never a parallel
+      // turn: the words land in the transcript, the live turn keeps running
       const parallel = await api("POST", `/api/bots/${created.id}/messages`, { text: "sneaky second" });
-      expect(parallel.status).toBe(409);
+      expect(parallel.status).toBe(202);
+      expect(parallel.body.queued).toBe(true);
+      expect((await getBot(created.id)).busy).toBe(true);
 
       // switching versions under a live turn is refused too
       const bot0 = await getBot(created.id);
@@ -200,9 +212,16 @@ posixOnly("conversation branching e2e (fake ACP fleet)", () => {
       expect(midTurn.status).toBe(409);
       expect((await getBot(created.id)).messages.filter((m: Msg) => m.text === "second try")).toHaveLength(0);
 
-      // stop the turn, then the same edit forks the conversation
+      // stop the turn; the queued "sneaky second" auto-runs on settle
+      // (stop-then-steer), so that drained turn must be stopped too before
+      // the thread is truly quiet enough to edit
       expect((await api("POST", `/api/bots/${created.id}/interrupt`)).status).toBe(200);
-      await waitFor(async () => (await getBot(created.id)).busy === false, "the turn to settle", 20_000);
+      await waitFor(async () => {
+        const b = await getBot(created.id);
+        return b.busy === true && b.messages.some((m: Msg) => m.text === "sneaky second" && !m.queued);
+      }, "the queued message to drain into its own turn", 20_000);
+      expect((await api("POST", `/api/bots/${created.id}/interrupt`)).status).toBe(200);
+      await waitFor(async () => (await getBot(created.id)).busy === false, "the drained turn to settle", 20_000);
       expect((await api("POST", `/api/bots/${created.id}/messages/${first.id}/edit`, { text: "second try" })).status).toBe(202);
 
       await waitFor(async () => {
@@ -222,5 +241,64 @@ posixOnly("conversation branching e2e (fake ACP fleet)", () => {
       expect(bot.messages.filter((m: Msg) => m.text === "second try")).toHaveLength(1);
     },
     45_000,
+  );
+
+  it(
+    "replays the thread to a fresh engine after a mid-thread model switch",
+    async () => {
+      const created = (await api("POST", "/api/bots")).body.bot;
+      await api("PATCH", `/api/bots/${created.id}`, {
+        modelSelection: { instanceId: "happy", model: "fake-model" },
+      });
+
+      // turn 1 on the first engine, carrying a token only the transcript knows
+      expect((await api("POST", `/api/bots/${created.id}/messages`, { text: "my dog is named Biscuit" })).status).toBe(202);
+      await waitFor(async () => {
+        const b = await getBot(created.id);
+        return !b.busy && b.messages.some((m: Msg) => m.role === "bot" && m.kind === "text");
+      }, "the first reply");
+
+      // switch the bot to a second engine that has never seen this thread
+      await api("PATCH", `/api/bots/${created.id}`, {
+        modelSelection: { instanceId: "second", model: "fake-model" },
+      });
+      expect((await api("POST", `/api/bots/${created.id}/messages`, { text: "what is my dog called?" })).status).toBe(202);
+      await waitFor(async () => {
+        const b = await getBot(created.id);
+        return !b.busy && b.messages.filter((m: Msg) => m.role === "bot" && m.kind === "text").length >= 2;
+      }, "the reply from the second engine");
+
+      // …and back to the first engine, whose own session is now stale: it
+      // has a cursor here, but the second engine took a turn since
+      await api("PATCH", `/api/bots/${created.id}`, {
+        modelSelection: { instanceId: "happy", model: "fake-model" },
+      });
+      expect((await api("POST", `/api/bots/${created.id}/messages`, { text: "and again?" })).status).toBe(202);
+      await waitFor(async () => {
+        const b = await getBot(created.id);
+        return !b.busy && b.messages.filter((m: Msg) => m.role === "bot" && m.kind === "text").length >= 3;
+      }, "the reply after switching back");
+
+      // the fake's reply is fixed, so the proof lives in the native protocol
+      // tee: the prompt each engine received must carry the history it lacks
+      const bot = await getBot(created.id);
+      const log = readFileSync(join(home, ".openmausbot", "native", `${bot.threadId}.ndjson`), "utf8");
+      const prompts = log
+        .split("\n")
+        .filter(Boolean)
+        .map((line) => JSON.parse(line))
+        .filter((e) => e.dir === "out" && e.msg?.method === "session/prompt")
+        .map((e) => JSON.stringify(e.msg.params));
+      expect(prompts).toHaveLength(3);
+      // first engine, first turn: no replay wrapper
+      expect(prompts[0]).not.toContain("joining this conversation");
+      // second engine: joined mid-thread with the earlier exchange inline
+      expect(prompts[1]).toMatch(/joining this conversation[\s\S]*User: my dog is named Biscuit[\s\S]*what is my dog called\?/);
+      expect(prompts[1]).not.toContain("rewound");
+      // first engine again: its old cursor must not be trusted — it replays
+      // everything including the turn the second engine took
+      expect(prompts[2]).toMatch(/joining this conversation[\s\S]*User: what is my dog called\?[\s\S]*and again\?/);
+    },
+    40_000,
   );
 });

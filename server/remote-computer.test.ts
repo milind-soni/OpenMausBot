@@ -18,7 +18,7 @@ describe("remote Cua computer setup", () => {
     expect(command).toContain("cua_driver-0.20.0-py3-none-manylinux_2_31_aarch64.whl");
     expect(command).toContain("f60c35696a37f37ac954935e478ae4754f220856d022036625c9400d72185961");
     expect(command).toContain("48833bc5e4c60e701fc9eefb57dbac36ec77ef3990f816fbbe85b4e954af2c77");
-    expect(command).toContain(`test \"$(${REMOTE_CUA_EXECUTABLE} --version)\" = \"cua-driver 0.20.0\"`);
+    expect(command).toContain(`test "$(${REMOTE_CUA_EXECUTABLE} --version)" = "cua-driver 0.20.0"`);
     expect(command).toContain("sha256sum -c -");
     expect(command).toContain("CUA_DRIVER_RS_TELEMETRY_ENABLED=0");
     expect(command).not.toContain("uv pip install");

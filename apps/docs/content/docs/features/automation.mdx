@@ -1,0 +1,29 @@
+---
+title: Routines and webhooks
+description: Start fresh agent tasks on a schedule or from an external event.
+icon: CalendarClock
+---
+
+## Routines
+
+A routine runs once or on selected weekdays. Each run starts a fresh task using the selected bot's model, permissions, tools, and computer configuration.
+
+<ProductScreenshot name="docs-automations" alt="An empty OpenMausBot automations calendar ready for its first schedule" caption="Review work across a day, three-day, or week view and filter by bot." />
+
+Run receipts distinguish queued, active, waiting, completed, missed, failed, and cancelled work. OpenMausBot must be running when a local routine becomes due.
+
+## Webhook triggers
+
+Webhooks start the same queued task executor from an external HTTP request. They are independent from schedules and use a dedicated receiver on `127.0.0.1:8800` by default.
+
+The receiver exposes only health and secret hook routes. It does not expose the broader OpenMausBot API.
+
+Bearer authentication is preferred because it keeps the secret out of URLs and most access logs. A capability URL is available for senders that cannot set headers.
+
+## Reaching a local webhook
+
+To accept events from the public internet, proxy only the webhook receiver through a narrowly configured relay or tunnel. Do not expose the main harness port.
+
+<Callout type="warn" title="OpenMausBot must remain running">
+  Local routines and webhook deliveries are not hosted jobs. Closing the desktop app stops the local executor and receiver.
+</Callout>

@@ -18,10 +18,13 @@
 //    for this engine, and it is the main thing this driver does beyond speaking
 //    ACP.
 
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
+import { join } from "node:path";
 
 import type { ModelCatalog } from "../../contracts.ts";
 import { execCli } from "../../procs.ts";
+import { decodeInjectId, hostApiKey, localHost, mergeLocalInject } from "../local-inject.ts";
 
 import { createAcpDriver, type AcpConfig, type AcpSupport } from "./core.ts";
 
@@ -223,6 +226,63 @@ export function parseModels(stdout: string): Array<{ id: string; label: string }
   return models;
 }
 
+function opencodeConfigDir(env: Env): string {
+  const home = env.HOME || env.USERPROFILE || homedir();
+  return join(env.XDG_CONFIG_HOME || join(home, ".config"), "opencode");
+}
+
+/** Upsert an OpenAI-compatible local provider and return OpenCode's native
+ * provider/model id. Existing provider settings and models are preserved. */
+export function ensureOpenCodeInjectModel(modelId: string, env: Env = process.env): string {
+  const inject = decodeInjectId(modelId);
+  if (!inject) return modelId;
+  const host = localHost(inject.host);
+  if (!host) return modelId;
+
+  const native = `${inject.host}/${inject.model}`;
+  const dir = opencodeConfigDir(env);
+  mkdirSync(dir, { recursive: true });
+  const path = join(dir, "opencode.json");
+  let config: Record<string, unknown> = { $schema: "https://opencode.ai/config.json" };
+  if (existsSync(path)) {
+    try {
+      config = JSON.parse(readFileSync(path, "utf8")) as Record<string, unknown>;
+    } catch {
+      // Malformed user config: inject into a fresh object rather than fail the turn.
+    }
+  }
+  const providers =
+    config.provider && typeof config.provider === "object" && !Array.isArray(config.provider)
+      ? { ...(config.provider as Record<string, unknown>) }
+      : {};
+  const previous = providers[inject.host];
+  const existing =
+    previous && typeof previous === "object" && !Array.isArray(previous)
+      ? { ...(previous as Record<string, unknown>) }
+      : { npm: "@ai-sdk/openai-compatible", name: host.label, options: {}, models: {} };
+  const options =
+    existing.options && typeof existing.options === "object" && !Array.isArray(existing.options)
+      ? { ...(existing.options as Record<string, unknown>) }
+      : {};
+  options.baseURL = host.baseUrl;
+  if (!options.apiKey) options.apiKey = hostApiKey(host, env);
+  const models =
+    existing.models && typeof existing.models === "object" && !Array.isArray(existing.models)
+      ? { ...(existing.models as Record<string, unknown>) }
+      : {};
+  if (!models[inject.model]) models[inject.model] = { name: `${inject.model} (${host.label})` };
+  providers[inject.host] = {
+    ...existing,
+    npm: existing.npm || "@ai-sdk/openai-compatible",
+    name: existing.name || host.label,
+    options,
+    models,
+  };
+  config.provider = providers;
+  writeFileSync(path, `${JSON.stringify(config, null, 2)}\n`);
+  return native;
+}
+
 // Mirrors the claude driver's default --permission-mode acceptEdits: reads and
 // edits go through, anything that leaves the sandbox asks. `*: ask` is the
 // conservative half — it also catches tools claude has no equivalent for.
@@ -393,10 +453,12 @@ const support: AcpSupport = {
   // compiled in; discoverCatalog bounds its own latency, as the contract asks.
   // It runs where a turn would run, not where the server was launched — see
   // probeCwd.
-  catalog: (config, env) => discoverCatalog(config.cli, env, probeCwd(config)),
+  catalog: async (config, env) =>
+    mergeLocalInject(await discoverCatalog(config.cli, env, probeCwd(config)), env),
   // `opencode acp` accepts no -m, so the model has to be set through the
   // session's config option before the prompt goes out.
   selectModel: { configId: "model" },
+  resolveTurnModel: (model, env) => (model ? ensureOpenCodeInjectModel(model, env) : model),
 
   spawnArgs: () => ["acp"],
 
@@ -469,7 +531,10 @@ const support: AcpSupport = {
   // OpenCode Zen models, and they answer. So readiness is "is there anything
   // left to run", not "is there a credential file".
   isAuthenticated: async (env, config) =>
-    ((await discoverCatalog(config.cli, env, probeCwd(config)).catch(() => null))?.options.length ?? 0) > 0,
+    ((await mergeLocalInject(
+      await discoverCatalog(config.cli, env, probeCwd(config)),
+      env,
+    ).catch(() => null))?.options.length ?? 0) > 0,
 
   loginNote: "OpenCode has no usable model — run `opencode auth login` to connect a provider",
 

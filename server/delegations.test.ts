@@ -24,21 +24,23 @@ interface BusPair {
   commsBus: CommsBus;
   approvalBus: { store: Store; broadcast: (payload: unknown) => void };
   broadcasts: unknown[];
-  groupBroadcasts: string[];
 }
 
 function setupBuses(store: Store): BusPair {
   const broadcasts: unknown[] = [];
-  const groupBroadcasts: string[] = [];
   const broadcast = (payload: unknown) => {
     broadcasts.push(payload);
   };
-  const broadcastGroup = (id: string) => {
-    groupBroadcasts.push(id);
-  };
-  const commsBus: CommsBus = { store, broadcast, broadcastGroup };
+  // the store emits what it writes; the server turns those into frames.
+  // Mirror that here so assertions see what a client would.
+  store.onChange((change) => {
+    if (change.type === "message" || change.type === "message.patch") {
+      broadcasts.push({ kind: change.type, threadId: change.threadId, message: change.message });
+    }
+  });
+  const commsBus: CommsBus = { store, broadcast };
   const approvalBus = { store, broadcast };
-  return { commsBus, approvalBus, broadcasts, groupBroadcasts };
+  return { commsBus, approvalBus, broadcasts };
 }
 
 /** Poll until `predicate` returns a truthy value or `timeout` elapses.
@@ -240,7 +242,7 @@ describe("drainDelegations", () => {
       },
     );
 
-    await waitFor(() => runTargetCalls.length === 1);
+    await waitFor(() => runTargetCalls.length === 1 && _pendingCount(routineTask.threadId) === 0);
     expect(_pendingCount(routineTask.threadId)).toBe(0);
     expect(runTargetCalls[0]?.sourceThreadId).toBe(routineTask.threadId);
     expect(
@@ -397,5 +399,118 @@ describe("drainDelegations", () => {
       runTargetCalls.push({ toBotId, message, commsDepth });
     });
     expect(runTargetCalls).toEqual([]);
+  });
+});
+
+import { existsSync, readFileSync } from "node:fs";
+import { join } from "node:path";
+import { _loadPending, _resetPending, discardDelegations, pendingThreads } from "./delegations.ts";
+
+describe("delegations survive a restart", () => {
+  let store: Store;
+  let from: BotRecord;
+  let target: BotRecord;
+  let buses: BusPair;
+  const file = () => join(DATA_DIR, "delegations.json");
+
+  beforeEach(() => {
+    rmSync(DATA_DIR, { recursive: true, force: true });
+    _resetPending();
+    store = new Store(selection);
+    from = store.createBot();
+    target = store.createBot();
+    store.patchBot(target.id, { name: "Helper" });
+    buses = setupBuses(store);
+  });
+  afterEach(() => _resetPending());
+
+  it("writes the queue to disk on queue, and clears it on drain and discard", async () => {
+    expect(queueDelegation(buses.commsBus, from, { toBotId: target.id, message: "do this", depth: 0 }, 1)).toBe("ok");
+    expect(existsSync(file())).toBe(true);
+    const onDisk = JSON.parse(readFileSync(file(), "utf8")) as Record<string, unknown[]>;
+    expect(onDisk[from.threadId]).toHaveLength(1);
+    expect(onDisk[from.threadId][0]).toMatchObject({ toBotId: target.id, message: "do this" });
+
+    discardDelegations(buses.commsBus, from.threadId);
+    expect(JSON.parse(readFileSync(file(), "utf8"))[from.threadId]).toBeUndefined();
+
+    queueDelegation(buses.commsBus, from, { toBotId: target.id, message: "again", depth: 0 }, 1);
+    const ran: string[] = [];
+    drainDelegations(buses.commsBus, buses.approvalBus, from.threadId, async (_to, message) => {
+      ran.push(message);
+    });
+    await waitFor(() => ran.length === 1 && pendingThreads().length === 0);
+    expect(JSON.parse(readFileSync(file(), "utf8"))[from.threadId]).toBeUndefined();
+  });
+
+  it("keeps a handoff durable until its approval and dispatch path settles", async () => {
+    queueDelegation(buses.commsBus, from, { toBotId: target.id, message: "wait for dispatch", depth: 0 }, 1);
+    let release!: () => void;
+    const dispatchSettled = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    let started = false;
+    drainDelegations(buses.commsBus, buses.approvalBus, from.threadId, async () => {
+      started = true;
+      await dispatchSettled;
+    });
+
+    await waitFor(() => started);
+    expect(pendingThreads()).toEqual([from.threadId]);
+    expect(JSON.parse(readFileSync(file(), "utf8"))[from.threadId]).toHaveLength(1);
+
+    release();
+    await waitFor(() => pendingThreads().length === 0);
+    expect(JSON.parse(readFileSync(file(), "utf8"))[from.threadId]).toBeUndefined();
+  });
+
+  it("drains work queued by a later settled turn while an earlier handoff is waiting", async () => {
+    queueDelegation(buses.commsBus, from, { toBotId: target.id, message: "first", depth: 0 }, 1);
+    let release!: () => void;
+    const firstSettled = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const ran: string[] = [];
+    const runTarget = async (_to: string, message: string) => {
+      ran.push(message);
+      if (message.includes("first")) await firstSettled;
+    };
+    drainDelegations(buses.commsBus, buses.approvalBus, from.threadId, runTarget);
+    await waitFor(() => ran.length === 1);
+
+    queueDelegation(buses.commsBus, from, { toBotId: target.id, message: "second", depth: 0 }, 1);
+    drainDelegations(buses.commsBus, buses.approvalBus, from.threadId, runTarget);
+    expect(ran).toHaveLength(1);
+
+    release();
+    await waitFor(() => ran.length === 2 && pendingThreads().length === 0);
+    expect(ran[1]).toContain("second");
+  });
+
+  it("a fresh process loads what the last one queued, and can drain it", async () => {
+    queueDelegation(buses.commsBus, from, { toBotId: target.id, message: "left over", depth: 0 }, 1);
+    // "restart": forget memory, reload from disk
+    _resetPending();
+    expect(pendingThreads()).toEqual([]);
+    _loadPending();
+    expect(pendingThreads()).toEqual([from.threadId]);
+    const ran: string[] = [];
+    drainDelegations(buses.commsBus, buses.approvalBus, from.threadId, async (_to, message) => {
+      ran.push(message);
+    });
+    await waitFor(() => ran.length === 1 && pendingThreads().length === 0);
+    expect(ran[0]).toContain("left over");
+    expect(pendingThreads()).toEqual([]);
+  });
+
+  it("tolerates a missing or corrupt file", () => {
+    _resetPending();
+    _loadPending(); // no file
+    expect(pendingThreads()).toEqual([]);
+    const { mkdirSync, writeFileSync } = require("node:fs") as typeof import("node:fs");
+    mkdirSync(DATA_DIR, { recursive: true });
+    writeFileSync(file(), "{not json");
+    _loadPending();
+    expect(pendingThreads()).toEqual([]);
   });
 });

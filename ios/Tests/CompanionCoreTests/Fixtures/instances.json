@@ -1,0 +1,21 @@
+{
+  "instances": [
+    {
+      "instanceId": "ghost",
+      "driverKind": "not-a-real-driver",
+      "displayName": "Ghost",
+      "snapshot": {
+        "state": "unavailable",
+        "reason": "unknown driver \"not-a-real-driver\" — kept as configured, unavailable here"
+      },
+      "models": {
+        "default": "",
+        "options": []
+      },
+      "capabilities": {
+        "computerMcp": false,
+        "agentsMcp": false
+      }
+    }
+  ]
+}

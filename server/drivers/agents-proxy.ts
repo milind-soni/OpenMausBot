@@ -72,7 +72,7 @@ const textResult = (id: unknown, text: string, isError = false) =>
 async function api(path: string, init?: RequestInit): Promise<Json> {
   const res = await fetch(HARNESS + path, {
     ...init,
-    headers: { "content-type": "application/json", authorization: `Bearer ${TOKEN}`, ...(init?.headers ?? {}) },
+    headers: { "content-type": "application/json", authorization: `Bearer ${TOKEN}`, ...init?.headers },
   });
   const body = (await res.json().catch(() => ({}))) as Json;
   if (!res.ok) throw new Error(String(body.error ?? `HTTP ${res.status}`));

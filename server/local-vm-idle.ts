@@ -1,4 +1,4 @@
-/** Renewable idle deadline for the shared Local VM.
+/** Renewable idle deadline for one Local VM.
  *
  * Activity resets the full window. The caller decides how to suspend or
  * recycle the disposable VM, and an active turn or lifecycle operation defers

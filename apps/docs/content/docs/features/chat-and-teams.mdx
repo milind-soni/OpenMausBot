@@ -1,0 +1,27 @@
+---
+title: Chat, tasks, rooms, and teams
+description: Organize agents like contacts and let them collaborate without losing control of each task.
+icon: MessagesSquare
+---
+
+## Bots and tasks
+
+A bot is a durable agent identity. A task is one conversation with that bot and has its own transcript, provider session, approvals, costs, and state.
+
+Use separate tasks when you want fresh context without duplicating the bot. Messages sent while a bot is busy are queued, and supported providers can be steered while they work.
+
+## Rooms
+
+Rooms bring several bots into one conversation. Each participant keeps its own agent process and provider state. Room timeouts prevent a participant from blocking the whole group indefinitely.
+
+## Delegation
+
+Bots can hand work to other bots. Delegated runs carry explicit status back into the parent conversation, including completion, failure, and cancellation.
+
+## Rewind and branches
+
+Editing an earlier message creates a new conversation path. OpenMausBot avoids resuming stale provider sessions after a rewind, so the next turn follows the visible branch rather than hidden abandoned state.
+
+## Memory and working folders
+
+Bot memory is visible and editable. A bot may also have a dedicated working folder; rooms can use a shared working folder. Cloud workspaces use a stable default so generated files remain discoverable across tasks.

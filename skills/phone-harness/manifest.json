@@ -1,0 +1,17 @@
+{
+  "id": "phone-harness",
+  "name": "Phone Harness",
+  "version": "0.1.0",
+  "description": "Control a physical Android phone connected over authorized USB debugging.",
+  "defaultEnabled": true,
+  "triggerTerms": [
+    "android",
+    "usb phone",
+    "usb debugging",
+    "adb",
+    "my phone",
+    "mobile app",
+    "on the phone"
+  ],
+  "requiredCapabilities": ["phoneMcp"]
+}

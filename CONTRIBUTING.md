@@ -41,6 +41,22 @@ pnpm package:linux # Ubuntu x64 .deb + AppImage; no Swift required
 
 For Ubuntu installation and real desktop checks, see [`docs/linux-desktop.md`](docs/linux-desktop.md).
 
+## Ubuntu release checklist
+
+Ubuntu release packages must come from the manual **Package Ubuntu** workflow on an exact release commit or tag,
+not from a developer workstation. The Ubuntu 24.04 runner builds and verifies both formats, launches the unpacked
+app and AppImage, exercises the bundled Cua lifecycle, and produces one release artifact containing:
+
+- the versioned `.deb` and AppImage;
+- stable `OpenMausBot-amd64.deb` and `OpenMausBot.AppImage` copies used by the latest-download links;
+- `SHA256SUMS-ubuntu-x64.txt` covering both versioned and stable names.
+
+Before publishing, confirm that `package.json` has the release version and dispatch the workflow against the same
+commit used for the other platforms. Attach all five Ubuntu files to the matching release in the separate
+[`openmausbot-releases`](https://github.com/milind-soni/openmausbot-releases) repository. Then verify the checksum
+file and install the `.deb` plus launch the AppImage in a clean Ubuntu 24.04 x86_64 GNOME environment. Never combine
+packages built from different commits under one version.
+
 ## Repo map
 
 | Path | What lives there |
@@ -101,8 +117,19 @@ The SPI in [`server/contracts.ts`](server/contracts.ts) is deliberately small. A
 - Renderer code must consume the desktop capability contract rather than infer support from Electron,
   the user agent, or the presence of a preload bridge. Screen preview, dictation, and local control are
   independent capabilities.
-- Test Ubuntu platform claims on a real GNOME session. Xvfb proves packaging and lifecycle, not Wayland
-  portal behavior or local computer control.
+- Test Ubuntu platform claims on a real GNOME session. Xvfb proves packaging and fake-driver orchestration, not
+  Wayland portal behavior or real CUA inspection/input delivery.
+- Linux local control must remain explicit: global opt-in plus per-bot **This computer**. Linux Auto, provider
+  full-auto/bypass modes, remembered grants, and cloud approvals must never authorize the user's desktop.
+- Keep CUA discovery shell-free and pin accepted archive, inner-file, manifest, and driver contracts. Packaged Linux
+  builds must prefer their reviewed outside-ASAR runtime and fail closed instead of executing ambient PATH code;
+  source/dev builds may use the validated explicit/user-local paths. Never add a runtime downloader/self-updater or
+  silently install GNOME extensions. GNOME/Wayland readiness must require its exact compositor/helper/portal health
+  contract; never infer it from `WAYLAND_DISPLAY` or XWayland.
+- Native release changes must update the checked-in Cua license report/SBOM, preserve MIT/OFL/MPL notices, pass the
+  malicious-archive tests, and prove identical hashes in `linux-unpacked`, `.deb`, and AppImage artifacts. AppImage
+  must additionally prove post-copy hashing in its private `0700` execution stage; never weaken the general path
+  validator to accept a root-owned group-writable SquashFS path when its toolchain emits `0775` rather than `0755`.
 - **Never build command strings for a shell.** No `shell: true`, no spawning through `cmd.exe` with
   quoted strings — model names, personas, and MCP config JSON travel through argv, and cmd.exe
   metacharacter expansion is a real injection class. On Windows, resolve `.cmd` shims to their JS
@@ -126,4 +153,5 @@ responses or events, no baking them into argv where another local process could 
 - [ ] macOS-only code is platform-gated; nothing breaks the packaged app
 - [ ] UI changes include before/after screenshots
 
-By contributing you agree your contributions are licensed under the [MIT License](LICENSE).
+By contributing you agree your contributions are licensed under the
+[Apache License, Version 2.0](LICENSE).

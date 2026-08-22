@@ -1,0 +1,13 @@
+interface:
+  display_name: "Phone Harness"
+  short_description: "Control a USB-connected Android phone"
+  default_prompt: "Use $phone-harness to open an app and complete a task on my connected Android phone."
+
+dependencies:
+  tools:
+    - type: "mcp"
+      value: "phone"
+      description: "OpenMausBot's bundled physical Android phone tools"
+
+policy:
+  allow_implicit_invocation: true

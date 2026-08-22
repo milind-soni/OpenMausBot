@@ -1,0 +1,48 @@
+---
+title: Create your first bot
+description: Choose an engine, folder, and working style for a useful first agent.
+icon: Bot
+---
+
+## Before you start
+
+Install and sign in to at least one supported agent CLI. OpenMausBot detects installed engines during onboarding and again from **App settings → Agent engines**.
+
+<ProductScreenshot name="docs-engine-detection" alt="OpenMausBot detecting installed agent engines during onboarding" caption="Detection is automatic. Engines that need installation or sign-in include the exact next step." />
+
+## Create the bot
+
+1. Select **New or share** in the sidebar.
+2. Choose **New bot**.
+3. Give the bot a clear name and purpose.
+4. Select its agent engine and model.
+5. Choose a working folder if it should edit files or work in a repository.
+
+The working folder matters: it becomes the bot's starting context and limits accidental edits elsewhere. Use a dedicated project folder for coding, research, or content work.
+
+## Give it a useful first task
+
+Start with a concrete outcome and the constraints that matter:
+
+```text
+Review this project, run the tests, and explain the three highest-impact issues.
+Do not change files yet. Link each finding to the relevant file.
+```
+
+Once you trust the diagnosis, ask the bot to implement the change. This keeps review and mutation as separate, easy-to-check steps.
+
+## Tune the bot
+
+Open **Bot settings** to change its name, avatar, instructions, engine, model, working folder, and computer setup. Different bots can use different engines and folders at the same time.
+
+<Callout type="warn" title="Authentication belongs to the CLI">
+  OpenMausBot launches agent tools you installed. If an engine returns a 401 or asks you to sign in, finish that engine's own CLI login, then refresh detection in App settings.
+</Callout>
+
+## Next steps
+
+<Cards>
+  <Card title="Add connected apps" href="/docs/connected-apps" description="Let the bot work with services you authorize." />
+  <Card title="Add a computer" href="/docs/computers" description="Give it a desktop for visual workflows." />
+  <Card title="Schedule the task" href="/docs/features/automation" description="Turn a successful prompt into recurring work." />
+</Cards>

@@ -1,0 +1,31 @@
+---
+title: Engine troubleshooting
+description: Fix missing CLIs, failed authentication, model errors, and path differences.
+icon: Wrench
+---
+
+## “CLI not found”
+
+1. Open a terminal and run the CLI directly.
+2. Confirm the command is an executable, not only a shell alias or function.
+3. Restart OpenMausBot after installation.
+4. Set the exact executable in **Settings → Engines** if automatic detection still fails.
+
+Desktop applications often inherit a different environment than a terminal. This is common on Windows shortcuts, macOS Finder launches, and Linux application menus.
+
+## Authentication failures
+
+Run the provider's own status or login command in a terminal. OpenMausBot uses the CLI's authenticated session; installing the binary alone is not enough.
+
+A `401 Unauthorized` response from `api.openai.com` means the launched Codex process did not receive valid authentication. Confirm `codex login status`, sign in again if needed, then restart OpenMausBot. Do not paste a ChatGPT password into OpenMausBot.
+
+## A selected model fails
+
+- Refresh the model picker after updating the CLI.
+- Choose a model actually available to that provider account.
+- Confirm a custom wrapper forwards the model argument and preserves the provider's expected environment.
+- Try the provider CLI directly with the same model to separate an account problem from an OpenMausBot integration problem.
+
+## Windows notes
+
+Use a real `.exe`, `.cmd`, or resolvable command path in the engine override. If a CLI was installed in WSL, the Windows desktop app cannot treat that Linux binary as a native Windows executable without an explicit bridge or wrapper.

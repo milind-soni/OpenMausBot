@@ -1,0 +1,21 @@
+{
+  "messages": [
+    {
+      "id": "10726f98-3a08-44da-8240-e8d84b1f0459",
+      "at": 1786742441223,
+      "parentId": "5d92912c-d2f7-40cf-878b-341464cce922",
+      "role": "user",
+      "kind": "text",
+      "text": "fixture message 4"
+    },
+    {
+      "id": "f2525bc3-4594-4394-8b2b-8df19d6cb72d",
+      "at": 1786742441225,
+      "parentId": "10726f98-3a08-44da-8240-e8d84b1f0459",
+      "role": "user",
+      "kind": "text",
+      "text": "fixture message 5"
+    }
+  ],
+  "hasMore": true
+}

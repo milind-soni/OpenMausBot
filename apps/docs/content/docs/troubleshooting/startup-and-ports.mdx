@@ -1,0 +1,24 @@
+---
+title: App startup and ports
+description: Diagnose launch failures and local server conflicts.
+icon: Power
+---
+
+The Electron app starts a local harness and serves the interface from the same machine. The normal port is `8799`. If another process already owns it, packaged builds may select a fallback port automatically.
+
+## App opens but never becomes ready
+
+1. Quit every OpenMausBot window.
+2. Confirm no old OpenMausBot process remains.
+3. Start the app once and wait for the local harness.
+4. If it still fails, inspect the desktop log.
+
+On macOS, packaged logs are under `~/Library/Logs/OpenMausBot`. On Windows they are under the OpenMausBot log directory in `%APPDATA%`.
+
+## Development port overrides
+
+Use `OMB_PORT` for a source-run harness. A packaged desktop build owns its server lifecycle and may choose a fallback if the preferred port is unavailable.
+
+## Isolate a test profile
+
+Developers can set `OMB_DATA_DIR` to run against a clean OpenMausBot data directory. This is useful for reproduction and screenshots without touching a real workspace.

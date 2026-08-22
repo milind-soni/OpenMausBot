@@ -18,7 +18,7 @@ import {
   X,
 } from "lucide-react";
 
-import { MausAvatar } from "@/components/Avatar";
+import { BotAvatar } from "@/components/Avatar";
 import { WebhooksPanel } from "@/components/WebhooksPanel";
 import { cn } from "@/lib/cn";
 import { MAUS_COLORS, type MausState } from "@/lib/mascot";
@@ -201,8 +201,8 @@ function RoutineCard({ item, bot, compact, onOpen }: { item: CalendarItem; bot: 
       }}
     >
       <div className={cn("flex min-w-0 items-center", compact ? "gap-1.5" : "gap-2")}>
-        <MausAvatar
-          color={bot.color}
+        <BotAvatar
+          bot={bot}
           state={status ? statusState(status) : "idle"}
           size={compact ? 32 : 38}
           animated={animated}
@@ -367,14 +367,14 @@ export function RoutineEditor({
       <div className="max-h-[90vh] w-full max-w-[620px] overflow-y-auto rounded-2xl border border-hairline/60 bg-panel shadow-2xl">
         <div className="sticky top-0 z-10 flex items-center justify-between border-b border-hairline/40 bg-panel/95 px-5 py-4 backdrop-blur">
           <div>
-            <div className="text-[17px] font-semibold text-ink">{routine ? "Edit schedule" : "New schedule"}</div>
-            <div className="mt-0.5 text-[12px] text-ink-secondary">Give a MAUS scheduled work with a calendar you can trust.</div>
+            <div className="text-[17px] font-semibold text-ink">{routine ? "Edit routine" : "New routine"}</div>
+            <div className="mt-0.5 text-[12px] text-ink-secondary">Each run starts a fresh task for this agent. No cron syntax required.</div>
           </div>
           <button onClick={onClose} className="rounded-lg p-2 text-ink-secondary hover:bg-raised hover:text-ink"><X size={18} /></button>
         </div>
         <div className="space-y-5 p-5">
           <label className="block">
-            <span className="mb-1.5 block text-[12px] font-medium text-ink-secondary">Schedule name</span>
+            <span className="mb-1.5 block text-[12px] font-medium text-ink-secondary">Routine name</span>
             <input autoFocus value={name} onChange={(event) => setName(event.target.value)} placeholder="Morning research brief" className="w-full rounded-xl border border-hairline/60 bg-inset px-3.5 py-2.5 text-[14px] text-ink outline-none placeholder:text-ink-secondary/60 focus:border-accent/70" />
           </label>
           <div>
@@ -417,7 +417,7 @@ export function RoutineEditor({
             <div className={cn("grid gap-2", lockedBotId ? "grid-cols-1" : "grid-cols-2 sm:grid-cols-3")}>
               {bots.map((bot) => (
                 <button key={bot.id} type="button" disabled={Boolean(lockedBotId)} onClick={() => setBotId(bot.id)} className={cn("flex min-w-0 items-center gap-2 rounded-xl border px-3 py-2 text-left", botId === bot.id ? "border-accent/70 bg-accent/10" : "border-hairline/50 bg-inset hover:bg-raised/60")}>
-                  <MausAvatar color={bot.color} state={botId === bot.id ? "happy" : "idle"} size={38} animated={false} />
+                  <BotAvatar bot={bot} state={botId === bot.id ? "happy" : "idle"} size={38} animated={false} />
                   <span className="min-w-0 flex-1 truncate text-[13px] font-medium text-ink">{bot.name}</span>
                   {lockedBotId && <span className="text-[11px] text-ink-secondary">Assigned from Computer</span>}
                 </button>
@@ -459,7 +459,7 @@ export function RoutineEditor({
         <div className="sticky bottom-0 flex justify-end gap-2 border-t border-hairline/40 bg-panel/95 px-5 py-4 backdrop-blur">
           <button onClick={onClose} className="rounded-xl px-4 py-2 text-[13px] text-ink-secondary hover:bg-raised hover:text-ink">Cancel</button>
           <button onClick={save} disabled={saving || !name.trim() || !prompt.trim() || !botId} className="flex items-center gap-2 rounded-xl bg-accent px-4 py-2 text-[13px] font-medium text-white hover:brightness-110 disabled:opacity-40">
-            {saving && <Loader2 size={14} className="animate-spin" />}{routine ? "Save changes" : "Create schedule"}
+            {saving && <Loader2 size={14} className="animate-spin" />}{routine ? "Save changes" : "Create routine"}
           </button>
         </div>
       </div>
@@ -497,7 +497,7 @@ function RoutineDetails({ item, bot, onClose, onEdit }: { item: CalendarItem; bo
         <div className="relative overflow-hidden border-b border-hairline/40 px-5 py-5" style={{ background: `linear-gradient(135deg, color-mix(in srgb, ${MAUS_COLORS[bot.color]} 28%, #111), #111)` }}>
           <button onClick={onClose} className="absolute right-3 top-3 rounded-lg p-2 text-white/60 hover:bg-white/10 hover:text-white"><X size={18} /></button>
           <div className="flex items-center gap-4 pr-10">
-            <MausAvatar color={bot.color} state={run ? statusState(run.status) : "idle"} size={72} animated={run?.status === "running" || run?.status === "waiting"} label={bot.name} />
+            <BotAvatar bot={bot} state={run ? statusState(run.status) : "idle"} size={72} animated={run?.status === "running" || run?.status === "waiting"} label={bot.name} />
             <div className="min-w-0">
               <div className="truncate text-[20px] font-semibold text-white">{title}</div>
               <div className="mt-1 flex items-center gap-2 text-[13px] text-white/65"><span>{bot.name}</span><span>·</span><span>{niceDate(item.at)}, {niceTime(item.at)}</span></div>
@@ -559,7 +559,7 @@ function PausedRoutines({ routines, bots, onClose, onEdit }: { routines: Routine
             const bot = bots.find((candidate) => candidate.id === routine.botId);
             return (
               <div key={routine.id} className="flex items-center gap-3 rounded-xl border border-hairline/40 bg-inset p-3">
-                {bot ? <MausAvatar color={bot.color} state="sleeping" size={44} animated={false} label={bot.name} /> : <div className="flex size-11 items-center justify-center rounded-xl bg-raised text-ink-secondary"><CalendarClock size={20} /></div>}
+                {bot ? <BotAvatar bot={bot} state="sleeping" size={44} animated={false} label={bot.name} /> : <div className="flex size-11 items-center justify-center rounded-xl bg-raised text-ink-secondary"><CalendarClock size={20} /></div>}
                 <div className="min-w-0 flex-1"><div className="truncate text-[14px] font-semibold text-ink">{routine.name}</div><div className="mt-0.5 truncate text-[11.5px] text-ink-secondary">{bot?.name ?? "Deleted MAUS"} · {scheduleLabel(routine)}</div></div>
                 {bot && <button onClick={() => dispatch({ type: "updateRoutine", routineId: routine.id, patch: { enabled: true } })} className="flex items-center gap-1.5 rounded-lg bg-accent px-3 py-1.5 text-[12px] font-medium text-white hover:brightness-110"><Play size={12} />Resume</button>}
                 <button onClick={() => onEdit(routine)} className="rounded-lg px-2 py-1.5 text-[12px] text-ink-secondary hover:bg-raised hover:text-ink">Edit</button>
@@ -626,19 +626,26 @@ export function RoutinesPage() {
       >
         <div className="flex flex-wrap items-start justify-between gap-3">
           <div>
-            <div className="flex items-center gap-2.5">{section === "calendar" ? <CalendarDays size={21} className="text-accent" /> : <Webhook size={21} className="text-accent" />}<h1 className="text-[20px] font-semibold tracking-tight text-ink">Automations</h1></div>
-            <p className="mt-1 text-[12.5px] text-ink-secondary">{section === "calendar" ? "Run MAUS tasks on a schedule." : "Run MAUS tasks when an event arrives."}</p>
+            <div className="flex items-center gap-2.5">{section === "calendar" ? <CalendarDays size={21} className="text-accent" /> : <Webhook size={21} className="text-accent" />}<h1 className="text-[20px] font-semibold tracking-tight text-ink">Tasks &amp; routines</h1></div>
+            <p className="mt-1 text-[12.5px] text-ink-secondary">{section === "calendar" ? "Routines start fresh agent tasks on a schedule." : "Webhooks start fresh agent tasks when an event arrives."}</p>
           </div>
           <div className="flex items-center gap-2">
             {running > 0 && <span className="flex items-center gap-1.5 rounded-full border border-accent/25 bg-accent/10 px-2.5 py-1.5 text-[11px] text-accent"><Loader2 size={12} className="animate-spin" />{running} active</span>}
             {unseenFailures > 0 && <span className="flex items-center gap-1.5 rounded-full border border-danger/25 bg-danger/10 px-2.5 py-1.5 text-[11px] text-danger"><CircleAlert size={12} />{unseenFailures} need attention</span>}
             {paused.length > 0 && <button onClick={() => setPausedOpen(true)} className="flex items-center gap-1.5 rounded-full border border-hairline/50 bg-panel px-2.5 py-1.5 text-[11px] text-ink-secondary hover:bg-raised hover:text-ink"><Pause size={12} />{paused.length} paused</button>}
-            {section === "calendar" && <button onClick={() => setEditor("new")} disabled={visibleBots.length === 0} className="flex items-center gap-2 rounded-xl bg-accent px-3.5 py-2 text-[13px] font-medium text-white shadow-lg shadow-accent/10 hover:brightness-110 disabled:opacity-40"><Plus size={15} />New schedule</button>}
+            {section === "calendar" && <button onClick={() => setEditor("new")} disabled={visibleBots.length === 0} className="flex items-center gap-2 rounded-xl bg-accent px-3.5 py-2 text-[13px] font-medium text-white shadow-lg shadow-accent/10 hover:brightness-110 disabled:opacity-40"><Plus size={15} />New routine</button>}
           </div>
         </div>
         <div className="mt-4 flex items-center gap-1 rounded-xl bg-panel p-1 sm:w-fit">
-          <button onClick={() => setSection("calendar")} className={cn("flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-[12px] font-medium", section === "calendar" ? "bg-raised text-ink shadow" : "text-ink-secondary hover:text-ink")}><CalendarDays size={13} />Schedules</button>
+          <button onClick={() => setSection("calendar")} className={cn("flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-[12px] font-medium", section === "calendar" ? "bg-raised text-ink shadow" : "text-ink-secondary hover:text-ink")}><CalendarDays size={13} />Routines</button>
           <button onClick={() => setSection("webhooks")} className={cn("flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-[12px] font-medium", section === "webhooks" ? "bg-raised text-ink shadow" : "text-ink-secondary hover:text-ink")}><Webhook size={13} />Webhooks{state.webhooks.length > 0 && <span className="rounded-full bg-accent/15 px-1.5 text-[10px] text-accent">{state.webhooks.length}</span>}</button>
+        </div>
+        <div className="mt-3 rounded-xl border border-hairline/45 bg-panel/70 px-3.5 py-2.5 text-[11.5px] leading-relaxed text-ink-secondary">
+          {section === "calendar" ? (
+            <><strong className="font-medium text-ink">Task</strong> = one conversation and result. <strong className="font-medium text-ink">Routine</strong> = a reusable schedule that creates a fresh task each run, using that agent's model, tools, permissions, computer, and connected apps.</>
+          ) : (
+            <><strong className="font-medium text-ink">Webhook</strong> = an event endpoint that creates a fresh task. Connected services can call it when something happens; the receiving agent keeps its existing tools and permissions.</>
+          )}
         </div>
         {section === "calendar" && <div className="mt-3 flex flex-wrap items-center gap-2">
           <div className="flex items-center rounded-xl border border-hairline/50 bg-panel p-0.5">
@@ -665,12 +672,12 @@ export function RoutinesPage() {
         <div className="flex min-h-0 flex-1 items-center justify-center p-8">
           <div className="max-w-[430px] text-center">
             <div className="relative mx-auto mb-5 flex h-28 w-44 items-end justify-center">
-              {visibleBots.slice(0, 3).map((bot, index) => <div key={bot.id} className="-ml-3 first:ml-0" style={{ transform: `translateY(${Math.abs(index - 1) * 9}px) rotate(${(index - 1) * 5}deg)` }}><MausAvatar color={bot.color} state={index === 1 ? "excited" : "idle"} size={84} /></div>)}
+              {visibleBots.slice(0, 3).map((bot, index) => <div key={bot.id} className="-ml-3 first:ml-0" style={{ transform: `translateY(${Math.abs(index - 1) * 9}px) rotate(${(index - 1) * 5}deg)` }}><BotAvatar bot={bot} state={index === 1 ? "excited" : "idle"} size={84} /></div>)}
               {visibleBots.length === 0 && <CalendarClock size={58} className="text-ink-secondary/40" />}
             </div>
             <h2 className="text-[18px] font-semibold text-ink">Put your MAUS team on a rhythm</h2>
             <p className="mt-2 text-[13px] leading-relaxed text-ink-secondary">Plan research briefs, daily check-ins, recurring reviews, or one-time work. Every run becomes a separate task with its own result.</p>
-            <button onClick={() => setEditor("new")} disabled={visibleBots.length === 0} className="mt-5 inline-flex items-center gap-2 rounded-xl bg-accent px-4 py-2.5 text-[13px] font-medium text-white hover:brightness-110 disabled:opacity-40"><Plus size={15} />Create your first schedule</button>
+            <button onClick={() => setEditor("new")} disabled={visibleBots.length === 0} className="mt-5 inline-flex items-center gap-2 rounded-xl bg-accent px-4 py-2.5 text-[13px] font-medium text-white hover:brightness-110 disabled:opacity-40"><Plus size={15} />Create your first routine</button>
             {visibleBots.length === 0 && <p className="mt-3 text-[12px] text-warning">Create a bot first, then come back to schedule it.</p>}
           </div>
         </div>

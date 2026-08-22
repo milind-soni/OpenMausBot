@@ -50,4 +50,19 @@ describe("desktop notifications", () => {
     expect(notices).toHaveLength(1);
     expect(notices[0]).toMatchObject({ title: frame.title, options: { body: frame.body, tag: frame.threadId } });
   });
+
+  it("opens the exact detached task carried by the notification", () => {
+    const { notices } = installNotification("granted");
+    const onOpen = vi.fn();
+
+    showNotification({ ...frame, threadId: "detached-routine-thread" }, onOpen);
+    notices[0]!.onclick?.();
+
+    expect(window.focus).toHaveBeenCalledOnce();
+    expect(onOpen).toHaveBeenCalledOnce();
+    expect(onOpen).toHaveBeenCalledWith({
+      botId: frame.botId,
+      threadId: "detached-routine-thread",
+    });
+  });
 });

@@ -1,0 +1,37 @@
+{
+  "name": "@openmausbot/docs",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "assets:sync": "node scripts/sync-assets.mjs",
+    "prebuild": "pnpm assets:sync",
+    "predev": "pnpm assets:sync",
+    "build": "next build",
+    "dev": "next dev",
+    "start": "next start",
+    "types:check": "next typegen && tsc --noEmit",
+    "lint": "oxlint .",
+    "preview": "next start"
+  },
+  "dependencies": {
+    "cnfast": "^0.1.0",
+    "fumadocs-core": "16.14.5",
+    "fumadocs-mdx": "15.3.0",
+    "fumadocs-ui": "npm:@fumadocs/base-ui@16.14.5",
+    "lucide-react": "^1.31.0",
+    "next": "16.3.2",
+    "react": "^19.2.8",
+    "react-dom": "^19.2.8"
+  },
+  "devDependencies": {
+    "@tailwindcss/postcss": "^4.3.3",
+    "@types/mdx": "^2.0.14",
+    "@types/node": "^26.2.0",
+    "@types/react": "^19.2.18",
+    "@types/react-dom": "^19.2.4",
+    "oxlint": "^1.78.0",
+    "postcss": "^8.5.26",
+    "tailwindcss": "^4.3.3",
+    "typescript": "^6.0.3"
+  }
+}

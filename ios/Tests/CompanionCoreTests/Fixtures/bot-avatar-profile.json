@@ -1,0 +1,9 @@
+{
+  "bots": [{
+    "id":"avatar-bot","threadId":"avatar-thread","name":"Scout","title":"Researcher","description":"Finds evidence.",
+    "notifications":true,"color":"blue","avatarUrl":"/api/attachments/123e4567-e89b-12d3-a456-426614174000.webp","avatarCrop":"rounded",
+    "unread":false,"modelSelection":{"instanceId":"local","model":"default"},"createdAt":1786742441013,
+    "speakReplies":true,"voice":"voice-1"
+  }],
+  "groups": []
+}

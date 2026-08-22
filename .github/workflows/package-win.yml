@@ -26,11 +26,11 @@ jobs:
     runs-on: windows-latest
     timeout-minutes: 30
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: ${{ inputs.ref || github.ref }}
-      - uses: pnpm/action-setup@v4
-      - uses: actions/setup-node@v4
+      - uses: pnpm/action-setup@ff378ebe6b225b0680b81c1ad4498ae0d1d3a5e3 # v6.0.10
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version: 24
           cache: pnpm
@@ -76,7 +76,33 @@ jobs:
           echo "--- app-update.yml ---"; cat "$res/app-update.yml" 2>/dev/null || true
           exit $fail
 
-      - uses: actions/upload-artifact@v4
+      # index.js EXISTING is not the same as index.js RUNNING. 0.1.24 shipped a
+      # server that died instantly on ERR_MODULE_NOT_FOUND because tsc left a
+      # bare `zod` import in a tree that carries no node_modules — and the
+      # existence check above passed it. Start the real packaged copy here,
+      # where node_modules genuinely is not present.
+      - name: start the packaged server
+        shell: bash
+        run: |
+          res=release/win-unpacked/resources
+          HOME="$RUNNER_TEMP/omb-smoke" USERPROFILE="$RUNNER_TEMP/omb-smoke" \
+            OMB_PORT=21987 node "$res/server/index.js" > "$RUNNER_TEMP/server.log" 2>&1 &
+          pid=$!
+          for _ in $(seq 1 90); do
+            if curl -fsS --max-time 2 http://127.0.0.1:21987/api/health >/dev/null 2>&1; then
+              echo "packaged server answered /api/health ✓"
+              kill $pid 2>/dev/null || true
+              exit 0
+            fi
+            kill -0 $pid 2>/dev/null || break
+            sleep 1
+          done
+          echo "::error::the packaged server never served /api/health"
+          cat "$RUNNER_TEMP/server.log" || true
+          kill $pid 2>/dev/null || true
+          exit 1
+
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: windows-installer
           path: |

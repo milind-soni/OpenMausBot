@@ -5,7 +5,7 @@
 //
 // The fake is a shebang script — the same constraint codex.cmd itself
 // hits on Windows. resolveCliSpawn covers both, so these run everywhere.
-import { chmodSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { chmodSync, mkdtempSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -14,6 +14,7 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import type { ProviderInstance } from "../contracts.ts";
 import { recordEvents, type EventRecorder } from "../testing/events.ts";
 import { CodexDriver } from "./codex.ts";
+import { removeTempDir } from "../testing/cleanup.ts";
 
 const FAKE_CLI = join(dirname(fileURLToPath(import.meta.url)), "..", "testing", "fake-codex-app-server.ts");
 
@@ -55,9 +56,11 @@ describe("CodexDriver turns (fake app-server)", () => {
     delete process.env.FAKE_CODEX_MODE;
     delete process.env.FAKE_CODEX_DUMP;
     delete process.env.OPENAI_API_KEY;
+    delete process.env.BOX_TOKEN;
+    delete process.env.OMB_TTS_KEY;
     recorder?.stop();
     await instance?.dispose();
-    rmSync(scratch, { recursive: true, force: true });
+    await removeTempDir(scratch);
   });
 
   it("runs the handshake and normalizes a full turn", async () => {
@@ -65,6 +68,10 @@ describe("CodexDriver turns (fake app-server)", () => {
     const dump = join(scratch, "dump.json");
     process.env.FAKE_CODEX_DUMP = dump;
     process.env.OPENAI_API_KEY = "sk-should-not-leak";
+    // workspace credentials the harness may hold (env-injected at boot by
+    // the desktop shell) must never ride into the CLI child
+    process.env.BOX_TOKEN = "box-should-not-leak";
+    process.env.OMB_TTS_KEY = "tts-should-not-leak";
 
     const { turnId } = await instance.adapter.sendTurn({
       threadId: "t-happy",
@@ -79,7 +86,9 @@ describe("CodexDriver turns (fake app-server)", () => {
       "turn.started",
       "session.started",
       "item.started", // commandExecution ls -la
+      "item.started", // webSearch OpenMausBot
       "item.completed", // commandExecution done
+      "item.completed", // webSearch done
       "content.delta",
       "item.completed", // assistant_text
       "thread.token-usage.updated",
@@ -94,10 +103,18 @@ describe("CodexDriver turns (fake app-server)", () => {
       input: 7,
       output: 3,
     });
-    expect(recorder.events.at(-1)).toMatchObject({ type: "turn.completed", ok: true });
+    expect(recorder.events.filter((event) => event.itemId === "w1")).toMatchObject([
+      { type: "item.started", itemType: "tool", title: "web_search" },
+      { type: "item.completed", itemType: "tool", ok: true },
+    ]);
+    // codex reports the THREAD total; the driver turns it into this turn's
+    // figure so the harness never sums a running total
+    expect(recorder.events.at(-1)).toMatchObject({ type: "turn.completed", ok: true, usage: { input: 7, output: 3 } });
 
     const seen = JSON.parse(readFileSync(dump, "utf8"));
     expect(seen.env.OPENAI_API_KEY).toBeUndefined();
+    expect(seen.env.BOX_TOKEN).toBeUndefined();
+    expect(seen.env.OMB_TTS_KEY).toBeUndefined();
     const methods = seen.calls.map((c: { method: string }) => c.method);
     expect(methods).toEqual(["initialize", "initialized", "thread/start", "turn/start"]);
     // persona rides in front of the prompt text — codex has no system slot
@@ -105,6 +122,27 @@ describe("CodexDriver turns (fake app-server)", () => {
     expect(turnStart.params.input[0].text).toBe("You are Testy.\n\nlist files");
     const threadStart = seen.calls.find((c: { method: string }) => c.method === "thread/start");
     expect(threadStart.params).toMatchObject({ model: "gpt-5.6-sol", modelProvider: "openai" });
+  });
+
+  it("keeps the full command when a Windows interpreter prefix is long", async () => {
+    await create({ mode: "windows-command" });
+    await instance.adapter.sendTurn({ threadId: "t-windows-command", text: "read notes" });
+
+    const command = [
+      "\"C:\\WINDOWS\\System32\\WindowsPowerShell\\v1.0\\powershell.exe\"",
+      "-Command",
+      `\"Get-Content -Raw -LiteralPath 'C:\\Users\\Ada\\workspaces\\${"very-long-folder\\".repeat(8)}NOTES.md'\"`,
+    ].join(" ");
+    expect(command.length).toBeGreaterThan(200);
+    const opened = await recorder.until((event) => event.type === "request.opened");
+    expect(recorder.events.find((event) => event.type === "item.started")).toMatchObject({
+      type: "item.started",
+      title: command,
+    });
+    expect(opened).toMatchObject({ requestType: "permission", summary: command });
+
+    await instance.adapter.respondToRequest("t-windows-command", opened.requestId!, { behavior: "allow" });
+    await recorder.until((event) => event.type === "turn.completed");
   });
 
   it("uses the instance environment for the Codex process", async () => {
@@ -117,6 +155,118 @@ describe("CodexDriver turns (fake app-server)", () => {
     await recorder.until((event) => event.type === "turn.completed");
 
     expect(JSON.parse(readFileSync(dump, "utf8")).env.CODEX_HOME).toBe(codexHome);
+  });
+
+  it("mounts connected apps without placing credential values in argv", async () => {
+    await create();
+    const dump = join(scratch, "composio.json");
+    process.env.FAKE_CODEX_DUMP = dump;
+    expect(instance.adapter.capabilities.composioMcp).toBe(true);
+
+    await instance.adapter.sendTurn({
+      threadId: "t-composio",
+      text: "check mail",
+      integrations: {
+        composio: {
+          command: process.execPath,
+          args: ["/tmp/connector-proxy.js"],
+          env: {
+            OMB_CONNECTOR_UPSTREAM_URL: "http://127.0.0.1:8799/api/internal/connectors/mcp",
+            OMB_COMMS_TOKEN: "per-boot-token",
+          },
+        },
+      },
+    });
+    await recorder.until((event) => event.type === "turn.completed");
+    const seen = JSON.parse(readFileSync(dump, "utf8"));
+    expect(seen.argv.join(" ")).toContain("mcp_servers.openmausbot_connectors.command");
+    expect(seen.argv.join(" ")).toContain("OMB_COMMS_TOKEN");
+    expect(seen.argv.join(" ")).not.toContain("per-boot-token");
+    expect(seen.env.OMB_COMMS_TOKEN).toBe("per-boot-token");
+  });
+
+  it("mounts peer-agent comms without placing the comms token in argv", async () => {
+    await create();
+    const dump = join(scratch, "agents.json");
+    process.env.FAKE_CODEX_DUMP = dump;
+
+    await instance.adapter.sendTurn({
+      threadId: "t-agents",
+      text: "ask the researcher",
+      integrations: {
+        agents: {
+          command: process.execPath,
+          args: ["/tmp/agents-proxy.js"],
+          env: {
+            ELECTRON_RUN_AS_NODE: "1",
+            OMB_HARNESS_URL: "http://127.0.0.1:8799",
+            OMB_BOT_ID: "captain",
+            OMB_THREAD_ID: "t-agents",
+            OMB_COMMS_TOKEN: "peer-comms-secret",
+            OMB_TURN_DEPTH: "0",
+          },
+        },
+      },
+    });
+    await recorder.until((event) => event.type === "turn.completed");
+
+    const seen = JSON.parse(readFileSync(dump, "utf8"));
+    expect(seen.argv.join(" ")).toContain("mcp_servers.agents.command");
+    expect(seen.argv.join(" ")).toContain("/tmp/agents-proxy.js");
+    expect(seen.argv.join(" ")).toContain("OMB_COMMS_TOKEN");
+    expect(seen.argv.join(" ")).not.toContain("peer-comms-secret");
+    expect(seen.env.OMB_COMMS_TOKEN).toBe("peer-comms-secret");
+    expect(instance.adapter.capabilities.agentsMcp).toBe(true);
+  });
+
+  it("mounts the Local VM computer MCP server without placing credentials in argv", async () => {
+    await create();
+    const dump = join(scratch, "local-computer.json");
+    process.env.FAKE_CODEX_DUMP = dump;
+    expect(instance.adapter.capabilities.computerMcp).toBe(true);
+
+    await instance.adapter.sendTurn({
+      threadId: "t-local-computer",
+      text: "open the browser",
+      integrations: {
+        localComputer: {
+          command: process.execPath,
+          args: ["/tmp/container-mcp.js", "podman", "openmausbot-computer", "/run/cua.sock"],
+          env: { ELECTRON_RUN_AS_NODE: "1", OMB_VM_TOKEN: "vm-secret" },
+        },
+      },
+    });
+    await recorder.until((event) => event.type === "turn.completed");
+
+    const seen = JSON.parse(readFileSync(dump, "utf8"));
+    expect(seen.argv.join(" ")).toContain("mcp_servers.computer.command");
+    expect(seen.argv.join(" ")).toContain("/tmp/container-mcp.js");
+    expect(seen.argv.join(" ")).toContain("OMB_VM_TOKEN");
+    expect(seen.argv.join(" ")).not.toContain("vm-secret");
+    expect(seen.env.OMB_VM_TOKEN).toBe("vm-secret");
+  });
+
+  it("mounts the remote computer proxy without placing its token in argv", async () => {
+    await create();
+    const dump = join(scratch, "remote-computer.json");
+    process.env.FAKE_CODEX_DUMP = dump;
+
+    await instance.adapter.sendTurn({
+      threadId: "t-remote-computer",
+      text: "take a screenshot",
+      integrations: {
+        computer: { boxId: "box-123", token: "remote-secret" },
+      },
+    });
+    await recorder.until((event) => event.type === "turn.completed");
+
+    const seen = JSON.parse(readFileSync(dump, "utf8"));
+    expect(seen.argv.join(" ")).toContain("mcp_servers.computer.command");
+    expect(seen.argv.join(" ")).toContain("computer-proxy");
+    expect(seen.argv.join(" ")).toContain("OGB_BOX_TOKEN");
+    expect(seen.argv.join(" ")).not.toContain("remote-secret");
+    expect(seen.env.OGB_BOX_ID).toBe("box-123");
+    expect(seen.env.OGB_BOX_TOKEN).toBe("remote-secret");
   });
 
   it("sends the local provider when the picker id is custom-encoded", async () => {
@@ -199,6 +349,37 @@ describe("CodexDriver turns (fake app-server)", () => {
     expect(JSON.parse(readFileSync(dump, "utf8")).decision).toEqual({ decision: "approved" });
   });
 
+  it("stamps approvalScope on cards only when the turn controls this Mac", async () => {
+    await create({ mode: "approval" });
+
+    // host-mounted: every card carries the scope that keeps the harness's
+    // local-computer-block backstop in force for remembered always-allows
+    await instance.adapter.sendTurn({
+      threadId: "t-host-scope",
+      text: "clean up",
+      integrations: {
+        localComputer: { command: "/cua-driver", args: ["mcp"], env: {}, platform: "darwin", scope: "local-computer" },
+      },
+    });
+    const host = await recorder.until((e) => e.type === "request.opened");
+    expect(host).toMatchObject({ approvalScope: "local-computer" });
+    await instance.adapter.respondToRequest("t-host-scope", host.requestId!, { behavior: "allow" });
+    await recorder.until((e) => e.type === "turn.completed");
+
+    // a Local VM mount is not the host: no scope stamped
+    await instance.adapter.sendTurn({
+      threadId: "t-vm-scope",
+      text: "clean up",
+      integrations: {
+        localComputer: { command: process.execPath, args: ["/tmp/container-mcp.js"], env: {} },
+      },
+    });
+    const vm = await recorder.until((e) => e.type === "request.opened" && e.threadId === "t-vm-scope");
+    expect((vm as { approvalScope?: string }).approvalScope).toBeUndefined();
+    await instance.adapter.respondToRequest("t-vm-scope", vm.requestId!, { behavior: "allow" });
+    await recorder.until((e) => e.type === "turn.completed" && e.threadId === "t-vm-scope");
+  });
+
   it("auto-approves commands in fullAuto without opening a request", async () => {
     await create({ mode: "approval", fullAuto: true });
     const dump = join(scratch, "dump.json");
@@ -249,6 +430,14 @@ describe("CodexDriver turns (fake app-server)", () => {
     await expect(instance.snapshot()).resolves.toMatchObject({
       state: "available",
       authenticated: false,
+    });
+  });
+
+  it("also accepts login status from older Codex versions that used stdout", async () => {
+    await create({ mode: "logged-in-stdout" });
+    await expect(instance.snapshot()).resolves.toMatchObject({
+      state: "available",
+      authenticated: true,
     });
   });
 

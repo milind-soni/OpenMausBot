@@ -1,0 +1,357 @@
+# One-button releases: builds macOS (arm64 + x64, signed, notarized, stapled),
+# Windows, and Ubuntu from ONE commit, assembles a complete draft on
+# openmausbot-releases with verified feeds, and publishes after a human
+# approves the draft.
+#
+# Every gate below exists because its absence shipped (or nearly shipped) a
+# broken build from a laptop:
+#   - clean output dirs        -> 0.1.15 "app is damaged" (stale dist/ broke the seal)
+#   - codesign gate BEFORE     -> notarization ACCEPTS invalid signatures
+#   - packaged-server smoke    -> 0.1.24 died on launch (unbundled zod import)
+#   - proxy-path probe         -> the 0.1.24 fix broke every helper while
+#                                 /api/health stayed green
+#   - staple, THEN hash        -> stapling rewrites bytes; stale feeds make
+#                                 electron-updater reject every update
+#   - blockmap regeneration    -> stale differential maps waste every updater's
+#                                 bandwidth silently
+#   - assemble-then-publish    -> 0.1.24 sat as an invisible draft; a mac-only
+#                                 publish 404s the README's other buttons
+#
+# One-time setup (repo secrets) is documented in docs/releasing.md.
+name: Release
+
+on:
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: "Commit/tag/branch to release (defaults to the branch this runs from)"
+        required: false
+        type: string
+      publish:
+        description: "Publish immediately after assembly (otherwise leave a draft for review)"
+        required: false
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+jobs:
+  prepare:
+    name: Pin the release commit
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    outputs:
+      sha: ${{ steps.pin.outputs.sha }}
+      version: ${{ steps.pin.outputs.version }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ inputs.ref || github.ref }}
+          persist-credentials: false
+      - id: pin
+        run: |
+          echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+          echo "version=$(node -p "require('./package.json').version")" >> "$GITHUB_OUTPUT"
+      - name: Refuse to overwrite a published release
+        env:
+          GH_TOKEN: ${{ secrets.RELEASES_PAT }}
+        run: |
+          v="v$(node -p "require('./package.json').version")"
+          if gh release view "$v" --repo milind-soni/openmausbot-releases --json isDraft --jq .isDraft 2>/dev/null | grep -q false; then
+            echo "::error::$v is already published on openmausbot-releases — bump the version first"
+            exit 1
+          fi
+
+  mac:
+    name: macOS arm64 + x64 (sign, notarize, staple)
+    needs: prepare
+    runs-on: macos-14
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ needs.prepare.outputs.sha }}
+          persist-credentials: false
+      - uses: pnpm/action-setup@ff378ebe6b225b0680b81c1ad4498ae0d1d3a5e3 # v6.0.10
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 24
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: Clean generated output
+        run: rm -rf dist dist-server dist-native release
+
+      - name: Import the Developer ID certificate into a throwaway keychain
+        env:
+          MAC_CERT_P12_BASE64: ${{ secrets.MAC_CERT_P12_BASE64 }}
+          MAC_CERT_PASSWORD: ${{ secrets.MAC_CERT_PASSWORD }}
+        run: |
+          KEYCHAIN="$RUNNER_TEMP/release.keychain-db"
+          KEYCHAIN_PASSWORD="$(uuidgen)"
+          echo "$MAC_CERT_P12_BASE64" | base64 --decode > "$RUNNER_TEMP/cert.p12"
+          security create-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN"
+          security set-keychain-settings -lut 21600 "$KEYCHAIN"
+          security unlock-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN"
+          security import "$RUNNER_TEMP/cert.p12" -P "$MAC_CERT_PASSWORD" -A \
+            -t cert -f pkcs12 -k "$KEYCHAIN"
+          security set-key-partition-list -S apple-tool:,apple: -k "$KEYCHAIN_PASSWORD" "$KEYCHAIN"
+          security list-keychains -d user -s "$KEYCHAIN" login.keychain
+          rm "$RUNNER_TEMP/cert.p12"
+
+      - name: Package both architectures
+        run: pnpm package:mac
+
+      - name: "Gate: the signature must verify BEFORE notarization"
+        run: |
+          for app in release/mac-arm64/OpenMausBot.app release/mac/OpenMausBot.app; do
+            codesign --verify --deep --strict "$app"
+            echo "ok: $app"
+          done
+
+      - name: "Gate: both packaged servers start and every helper path resolves"
+        run: |
+          for app in release/mac-arm64/OpenMausBot.app release/mac/OpenMausBot.app; do
+            res="$app/Contents/Resources"
+            # the server tree is plain JS — runnable on the runner's node
+            # regardless of the app binary's arch
+            OMB_SMOKE_DIST="$res/server" node scripts/smoke-packaged-server.mjs \
+              || { echo "::error::packaged server in $app failed to start"; exit 1; }
+            node --input-type=module - "$res/server" <<'EOF'
+          import { existsSync } from "node:fs";
+          import { pathToFileURL } from "node:url";
+          const server = process.argv[2];
+          const { SPAWNED_PROXIES } = await import(pathToFileURL(`${server}/proxy-paths.js`));
+          const missing = Object.entries(SPAWNED_PROXIES).filter(([, p]) => !existsSync(p));
+          if (missing.length) {
+            console.error("unresolved proxies:", missing);
+            process.exit(1);
+          }
+          console.log(`ok: ${Object.keys(SPAWNED_PROXIES).length} proxies resolve in ${server}`);
+          EOF
+            for bin in "$res/cua-driver" "$res/OpenMausBot Speech.app/Contents/MacOS/speech-helper"; do
+              lipo -archs "$bin" | grep -q "x86_64" || { echo "::error::$bin lacks x86_64"; exit 1; }
+              lipo -archs "$bin" | grep -q "arm64" || { echo "::error::$bin lacks arm64"; exit 1; }
+            done
+          done
+
+      - name: Notarize all four artifacts
+        env:
+          APPLE_API_KEY_P8_BASE64: ${{ secrets.APPLE_API_KEY_P8_BASE64 }}
+          APPLE_API_KEY_ID: ${{ secrets.APPLE_API_KEY_ID }}
+          APPLE_API_ISSUER_ID: ${{ secrets.APPLE_API_ISSUER_ID }}
+        run: |
+          echo "$APPLE_API_KEY_P8_BASE64" | base64 --decode > "$RUNNER_TEMP/notary.p8"
+          for f in release/*.dmg release/*.zip; do
+            out=$(xcrun notarytool submit "$f" \
+              --key "$RUNNER_TEMP/notary.p8" \
+              --key-id "$APPLE_API_KEY_ID" \
+              --issuer "$APPLE_API_ISSUER_ID" \
+              --wait 2>&1)
+            echo "$out" | tail -2
+            echo "$out" | grep -q "status: Accepted" || { echo "::error::notarization not Accepted for $f"; exit 1; }
+          done
+          rm "$RUNNER_TEMP/notary.p8"
+
+      - name: Staple, re-zip, regenerate blockmaps and the feed
+        run: |
+          xcrun stapler staple release/OpenMausBot-*-arm64.dmg
+          xcrun stapler staple release/OpenMausBot-*-x64.dmg
+          xcrun stapler staple release/mac-arm64/OpenMausBot.app
+          xcrun stapler staple release/mac/OpenMausBot.app
+          v=$(node -p "require('./package.json').version")
+          rm -f "release/OpenMausBot-$v-arm64.zip" "release/OpenMausBot-$v-x64.zip"
+          ditto -c -k --sequesterRsrc --keepParent release/mac-arm64/OpenMausBot.app "release/OpenMausBot-$v-arm64.zip"
+          ditto -c -k --sequesterRsrc --keepParent release/mac/OpenMausBot.app "release/OpenMausBot-$v-x64.zip"
+          node scripts/regenerate-blockmaps.mjs \
+            "release/OpenMausBot-$v-arm64.zip" "release/OpenMausBot-$v-x64.zip" \
+            "release/OpenMausBot-$v-arm64.dmg" "release/OpenMausBot-$v-x64.dmg"
+          # refreshes every hash from the post-staple bytes and refuses to
+          # finish unless the feed matches the files on disk
+          node scripts/regenerate-mac-feed.mjs
+
+      - name: Stable-named copies for the README's /latest/download links
+        run: |
+          v=$(node -p "require('./package.json').version")
+          cp "release/OpenMausBot-$v-arm64.dmg" release/OpenMausBot.dmg
+          cp "release/OpenMausBot-$v-x64.dmg" release/OpenMausBot-intel.dmg
+
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: mac-release
+          path: |
+            release/*.dmg
+            release/*.zip
+            release/*.blockmap
+            release/latest-mac.yml
+          if-no-files-found: error
+          retention-days: 7
+
+  windows:
+    name: Windows x64
+    needs: prepare
+    runs-on: windows-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ needs.prepare.outputs.sha }}
+          persist-credentials: false
+      - uses: pnpm/action-setup@ff378ebe6b225b0680b81c1ad4498ae0d1d3a5e3 # v6.0.10
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 24
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: Clean generated output
+        shell: bash
+        run: rm -rf dist dist-server release
+      - run: pnpm package:win
+      - name: Verify the packaged tree and start the packaged server
+        shell: bash
+        run: |
+          res=release/win-unpacked/resources
+          [ -f "$res/server/index.js" ] || { echo "::error::missing server/index.js"; exit 1; }
+          [ -f "$res/ui/index.html" ] || { echo "::error::missing ui/index.html"; exit 1; }
+          [ -f "$res/app-update.yml" ] || { echo "::error::missing app-update.yml"; exit 1; }
+          grep -q "openmausbot-releases" "$res/app-update.yml" || { echo "::error::wrong update repo"; exit 1; }
+          if grep -q "publisherName" "$res/app-update.yml"; then
+            echo "::error::publisherName on an unsigned build breaks every update"; exit 1
+          fi
+          HOME="$RUNNER_TEMP/smoke" USERPROFILE="$RUNNER_TEMP/smoke" OMB_PORT=21987 \
+            node "$res/server/index.js" > "$RUNNER_TEMP/server.log" 2>&1 &
+          pid=$!
+          for _ in $(seq 1 90); do
+            curl -fsS --max-time 2 http://127.0.0.1:21987/api/health >/dev/null 2>&1 && { kill $pid; exit 0; }
+            kill -0 $pid 2>/dev/null || break
+            sleep 1
+          done
+          echo "::error::the packaged server never served /api/health"
+          cat "$RUNNER_TEMP/server.log" || true
+          exit 1
+      - name: Stable-named copy
+        shell: bash
+        run: |
+          v=$(node -p "require('./package.json').version")
+          cp "release/OpenMausBot-$v-setup.exe" release/OpenMausBot-setup.exe
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: windows-release
+          path: |
+            release/*.exe
+            release/*.exe.blockmap
+            release/latest.yml
+          if-no-files-found: error
+          retention-days: 7
+
+  linux:
+    name: Ubuntu 24.04 x64
+    needs: prepare
+    runs-on: ubuntu-24.04
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ needs.prepare.outputs.sha }}
+          persist-credentials: false
+      - uses: pnpm/action-setup@ff378ebe6b225b0680b81c1ad4498ae0d1d3a5e3 # v6.0.10
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 24
+          cache: pnpm
+      - name: Install package validation and native smoke tools
+        run: >-
+          sudo apt-get update && sudo apt-get install -y
+          at-spi2-core dbus-x11 desktop-file-utils libxi6 libxkbcommon0 squashfs-tools xvfb
+      - run: pnpm install --frozen-lockfile
+      - name: Clean generated output
+        run: pnpm clean
+      - name: Stage the pinned CUA runtime
+        run: pnpm build:cua:linux
+      - run: pnpm package:linux
+      - name: Configure Chromium sandbox for the unpacked app
+        run: |
+          sudo chown root:root release/linux-unpacked/chrome-sandbox
+          sudo chmod 4755 release/linux-unpacked/chrome-sandbox
+          test "$(stat -c '%U:%G %a' release/linux-unpacked/chrome-sandbox)" = "root:root 4755"
+      - name: Smoke the packages
+        env:
+          OMB_KEEP_SMOKE_DIR: "1"
+        run: pnpm smoke:linux-package
+      - name: Stable-named copies and checksums
+        run: |
+          v=$(node -p "require('./package.json').version")
+          cp "release/OpenMausBot-$v-amd64.deb" release/OpenMausBot-amd64.deb
+          cp "release/OpenMausBot-$v-x86_64.AppImage" release/OpenMausBot.AppImage
+          (cd release && sha256sum OpenMausBot-$v-amd64.deb OpenMausBot-$v-x86_64.AppImage > SHA256SUMS-ubuntu-x64.txt)
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: linux-release
+          path: |
+            release/*.deb
+            release/*.AppImage
+            release/SHA256SUMS-ubuntu-x64.txt
+            release/latest-linux.yml
+          if-no-files-found: error
+          retention-days: 7
+
+  assemble:
+    name: Assemble the draft and verify every feed
+    needs: [prepare, mac, windows, linux]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          path: assets
+          merge-multiple: true
+      - name: Verify every feed hash against the actual bytes
+        run: |
+          cd assets
+          node --input-type=module - <<'EOF'
+          import { createHash } from "node:crypto";
+          import { readFileSync, readdirSync, statSync, existsSync } from "node:fs";
+          const sha512 = (f) => createHash("sha512").update(readFileSync(f)).digest("base64");
+          let bad = 0;
+          for (const feed of ["latest-mac.yml", "latest.yml", "latest-linux.yml"]) {
+            if (!existsSync(feed)) continue;
+            const text = readFileSync(feed, "utf8");
+            for (const [, url, hash, size] of text.matchAll(/url:\s+(\S+)[\s\S]*?sha512:\s+(\S+)\n\s+size:\s+(\d+)/g)) {
+              if (!existsSync(url)) { console.error(`MISSING ${url} (listed in ${feed})`); bad++; continue; }
+              const okHash = sha512(url) === hash;
+              const okSize = statSync(url).size === Number(size);
+              if (!okHash || !okSize) { console.error(`MISMATCH ${url} in ${feed}`); bad++; }
+              else console.log(`ok ${url}`);
+            }
+          }
+          if (bad) process.exit(1);
+          console.log(`\nall feeds verified; ${readdirSync(".").length} assets staged`);
+          EOF
+      - name: Create or update the draft with the complete asset set
+        env:
+          GH_TOKEN: ${{ secrets.RELEASES_PAT }}
+          VERSION: ${{ needs.prepare.outputs.version }}
+          SHA: ${{ needs.prepare.outputs.sha }}
+        run: |
+          cd assets
+          tag="v$VERSION"
+          if ! gh release view "$tag" --repo milind-soni/openmausbot-releases > /dev/null 2>&1; then
+            gh release create "$tag" --repo milind-soni/openmausbot-releases \
+              --draft --title "OpenMausBot $VERSION" \
+              --notes "Draft assembled by the release workflow from milind-soni/OpenMausBot@$SHA. Edit these notes, then publish."
+          fi
+          for f in *; do
+            gh release upload "$tag" "$f" --repo milind-soni/openmausbot-releases --clobber
+          done
+          echo "asset count: $(gh release view "$tag" --repo milind-soni/openmausbot-releases --json assets --jq '.assets | length')"
+
+      - name: Publish (only when asked to)
+        if: ${{ inputs.publish }}
+        env:
+          GH_TOKEN: ${{ secrets.RELEASES_PAT }}
+          VERSION: ${{ needs.prepare.outputs.version }}
+        run: |
+          gh release edit "v$VERSION" --repo milind-soni/openmausbot-releases --draft=false --latest
+          # a draft that LOOKS published is the 0.1.24 failure mode — verify
+          gh release view "v$VERSION" --repo milind-soni/openmausbot-releases --json isDraft --jq .isDraft | grep -q false
+          echo "v$VERSION is live"

@@ -1,0 +1,52 @@
+---
+title: Feature overview
+description: A map of the capabilities currently available in OpenMausBot.
+icon: Sparkles
+---
+
+OpenMausBot turns agent CLIs into a messaging-style workspace. The harness normalizes each provider into one event stream, so the interface can treat different agents consistently while preserving their native strengths.
+
+## Agents and conversations
+
+- A separate bot for each role, model, personality, and working folder
+- Streaming responses with live tool activity
+- Multiple tasks per bot, with searchable, persistent transcript history
+- Edit, branch, rewind, pin, react, export, and share conversation content
+- Rooms for multi-agent collaboration and explicit bot-to-bot delegation
+- Queueing and steering while an agent is already working
+- Per-task token and cost visibility
+- Readable, editable bot memory
+
+## Computers and tools
+
+- Local computer control with explicit opt-in and approval boundaries
+- Isolated Local VM desktops through Docker or Podman
+- Hosted Box cloud computers
+- A self-hosted Linux VPS backend over Docker's SSH transport
+- Live previews and in-app desktop takeover where the backend supports it
+- USB Android control through the Phone Harness skill
+- Connected apps through Composio, including multiple labeled accounts per toolkit
+
+## Automation
+
+- One-time and weekday routines
+- Webhook-triggered tasks with dedicated secret endpoints
+- Fresh task context and durable run receipts for each automated run
+- Notifications for work that needs attention
+
+## Voice and access
+
+- Spoken replies and per-bot ElevenLabs voices
+- Native macOS dictation and half-duplex call mode
+- Paired iOS companion with chat, approvals, search, transcript controls, and opt-in computer viewing
+
+## Desktop experience
+
+- macOS, Windows, and Ubuntu packages
+- Theme switching and accessible contrast
+- Sidebar sections, compact headers, pinned messages, spoilers, and image attachments
+- Automatic updates on macOS and Windows
+
+<Callout type="info" title="Platform differences are intentional">
+  macOS has the broadest native integration. Ubuntu local control is a guarded beta, Windows installers are not yet signed, and the iOS companion keeps sensitive workspace configuration on the computer.
+</Callout>

@@ -7,7 +7,7 @@
 // cannot exec, and the broker is a unix socket. Both now go through
 // resolveCliSpawn / permissionSocketPath, so they run everywhere.
 import { chmodSync, existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
-import { connect } from "node:net";
+import { connect, type Socket } from "node:net";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -17,8 +17,54 @@ import { ensureDirs } from "../config.ts";
 import type { ProviderInstance } from "../contracts.ts";
 import { recordEvents, type EventRecorder } from "../testing/events.ts";
 import { ClaudeDriver, permissionSocketPath } from "./claude.ts";
+import { removeTempDir } from "../testing/cleanup.ts";
 
 const FAKE_CLI = join(dirname(fileURLToPath(import.meta.url)), "..", "testing", "fake-claude-cli.ts");
+
+/** Connect to a broker socket and resolve once the connection is live. */
+function connectSocket(path: string): Promise<Socket> {
+  return new Promise((resolve, reject) => {
+    let retriesLeft = 20;
+    const tryConnect = () => {
+      const conn = connect(path);
+      const onConnect = () => {
+        conn.removeListener("error", onError);
+        resolve(conn);
+      };
+      const onError = (error: NodeJS.ErrnoException) => {
+        conn.removeListener("connect", onConnect);
+        conn.destroy();
+        // A Windows named pipe can briefly disappear while the server creates
+        // its next pipe instance for another simultaneous client.
+        if (process.platform === "win32" && error.code === "ENOENT" && retriesLeft-- > 0) {
+          setTimeout(tryConnect, 25);
+          return;
+        }
+        reject(error);
+      };
+      conn.once("connect", onConnect);
+      conn.once("error", onError);
+    };
+    tryConnect();
+  });
+}
+
+/** Returns a function that resolves, in order, with each `\n`-delimited JSON
+ * message the broker writes back on `conn` — one call per expected answer. */
+function answerQueue(conn: ReturnType<typeof connect>) {
+  const waiters: Array<(msg: any) => void> = [];
+  let buf = "";
+  conn.on("data", (chunk) => {
+    buf += chunk;
+    let nl;
+    while ((nl = buf.indexOf("\n")) !== -1) {
+      const line = buf.slice(0, nl);
+      buf = buf.slice(nl + 1);
+      waiters.shift()?.(JSON.parse(line));
+    }
+  });
+  return () => new Promise<any>((resolve) => waiters.push(resolve));
+}
 
 describe("ClaudeDriver.decodeConfig", () => {
   it("defaults to the claude binary with acceptEdits", () => {
@@ -37,7 +83,42 @@ describe("ClaudeDriver.decodeConfig", () => {
   });
 
   it.skipIf(process.platform !== "win32")("names permission pipes per harness process", () => {
-    expect(permissionSocketPath("thread-abc")).toBe(`\\\\.\\pipe\\openmausbot-perm-${process.pid}-thread-a`);
+    expect(permissionSocketPath("thread-abc")).toMatch(
+      new RegExp(`^\\\\\\\\\\.\\\\pipe\\\\openmausbot-perm-${process.pid}-thre[0-9a-f]{4}$`),
+    );
+  });
+
+  it("keeps threads whose ids share a prefix on distinct sockets", () => {
+    // the truncated prefix agrees; only the digest separates them — without
+    // it, Windows pipes for these two threads would collide and race
+    expect(permissionSocketPath("t-perm-dup-1")).not.toBe(permissionSocketPath("t-perm-dup-2"));
+  });
+
+  it("does not advertise or accept local CUA in bypassPermissions mode", async () => {
+    const bypass = await ClaudeDriver.create({
+      instanceId: "claude-bypass",
+      displayName: "Claude Bypass",
+      environment: {},
+      enabled: true,
+      config: { cli: FAKE_CLI, permissionMode: "bypassPermissions" },
+    });
+    expect(bypass.adapter.capabilities.localComputerMcp).toBe(false);
+    await expect(
+      bypass.adapter.sendTurn({
+        threadId: "t-bypass-local",
+        text: "click",
+        integrations: {
+          localComputer: {
+            command: "/cua-driver",
+            args: ["mcp"],
+            env: {},
+            platform: "linux",
+            scope: "local-computer",
+          },
+        },
+      }),
+    ).rejects.toThrow(/interactive approval broker/);
+    await bypass.dispose();
   });
 });
 
@@ -68,9 +149,16 @@ describe("ClaudeDriver turns (fake CLI)", () => {
     delete process.env.FAKE_CLAUDE_MODE;
     delete process.env.FAKE_CLAUDE_DUMP;
     delete process.env.ANTHROPIC_API_KEY;
+    delete process.env.XAI_API_KEY;
+    delete process.env.COMPOSIO_API_KEY;
+    delete process.env.BOX_TOKEN;
+    delete process.env.OPENCODE_API_KEY;
+    delete process.env.OMB_TTS_KEY;
+    delete process.env.OMB_CLAUDE_SESSION_IDLE_MS;
+    delete process.env.OMB_CLAUDE_SESSION_IDLE_MIN_MS;
     recorder?.stop();
     await instance?.dispose();
-    rmSync(scratch, { recursive: true, force: true });
+    await removeTempDir(scratch);
   });
 
   it("normalizes a full turn into the canonical event sequence", async () => {
@@ -94,7 +182,9 @@ describe("ClaudeDriver turns (fake CLI)", () => {
     const usage = recorder.events.find((e) => e.type === "thread.token-usage.updated")!;
     expect(usage).toMatchObject({ input: 12, output: 5 }); // input + cache_read
     const done = recorder.events.at(-1)!;
-    expect(done).toMatchObject({ type: "turn.completed", ok: true, cost: 0.01 });
+    // usage on the settle is the turn total from the result message, so
+    // the harness has one figure to bank per turn
+    expect(done).toMatchObject({ type: "turn.completed", ok: true, cost: 0.01, usage: { input: 12, output: 5 } });
     expect(instance.adapter.hasSession("t-happy")).toBe(false);
   });
 
@@ -122,6 +212,11 @@ describe("ClaudeDriver turns (fake CLI)", () => {
     const dump = join(scratch, "dump.json");
     process.env.FAKE_CLAUDE_DUMP = dump;
     process.env.ANTHROPIC_API_KEY = "sk-should-not-leak";
+    // workspace credentials the harness may hold (env-injected at boot by
+    // the desktop shell) must never ride into the CLI child
+    process.env.XAI_API_KEY = "xai-should-not-leak";
+    process.env.BOX_TOKEN = "box-should-not-leak";
+    process.env.OMB_TTS_KEY = "tts-should-not-leak";
 
     await instance.adapter.sendTurn({ threadId: "t-hygiene", text: "the secret prompt", system: "You are Testy." });
     await recorder.until((e) => e.type === "turn.completed");
@@ -134,6 +229,9 @@ describe("ClaudeDriver turns (fake CLI)", () => {
     expect(seen.env.ANTHROPIC_API_KEY).toBeUndefined();
     expect(seen.env.CLAUDECODE).toBeUndefined();
     expect(seen.env.CLAUDE_CODE_ENTRYPOINT).toBeUndefined();
+    expect(seen.env.XAI_API_KEY).toBeUndefined();
+    expect(seen.env.BOX_TOKEN).toBeUndefined();
+    expect(seen.env.OMB_TTS_KEY).toBeUndefined();
   });
 
   it("uses instance credentials when launching an injected local model", async () => {
@@ -152,6 +250,36 @@ describe("ClaudeDriver turns (fake CLI)", () => {
     expect(seen.argv[seen.argv.indexOf("--model") + 1]).toBe("local-model");
     expect(seen.env.ANTHROPIC_BASE_URL).toBe("http://127.0.0.1:8888");
     expect(seen.env.ANTHROPIC_AUTH_TOKEN).toBe("unsloth-secret");
+  });
+
+  it("injects a leftover API id when a local host is serving that model", async () => {
+    const previousFetch = globalThis.fetch;
+    globalThis.fetch = (async (url: string | URL) => {
+      if (String(url).includes(":8888")) {
+        return new Response(JSON.stringify({ data: [{ id: "orcarouter/Qwen3.8-27B-Uncensored-GGUF" }] }), { status: 200 });
+      }
+      return new Response("nope", { status: 500 });
+    }) as typeof fetch;
+    try {
+      await create(undefined, { UNSLOTH_STUDIO_AUTH_TOKEN: "unsloth-secret" });
+      const dump = join(scratch, "dump-leftover.json");
+      process.env.FAKE_CLAUDE_DUMP = dump;
+
+      await instance.adapter.sendTurn({
+        threadId: "t-leftover-local",
+        text: "hi",
+        model: "orcarouter/Qwen3.8-27B-Uncensored-GGUF",
+      });
+      await recorder.until((e) => e.type === "turn.completed");
+
+      const seen = JSON.parse(readFileSync(dump, "utf8"));
+      expect(seen.argv[seen.argv.indexOf("--model") + 1]).toBe("orcarouter/Qwen3.8-27B-Uncensored-GGUF");
+      expect(seen.env.ANTHROPIC_BASE_URL).toBe("http://127.0.0.1:8888");
+      expect(seen.env.ANTHROPIC_AUTH_TOKEN).toBe("unsloth-secret");
+      expect(seen.env.ANTHROPIC_API_KEY).toBe("unsloth-secret");
+    } finally {
+      globalThis.fetch = previousFetch;
+    }
   });
 
   it("mounts the agents comms proxy as an MCP server and pre-allows its tools", async () => {
@@ -216,8 +344,9 @@ describe("ClaudeDriver turns (fake CLI)", () => {
       text: "hi",
       integrations: {
         composio: {
-          url: "https://app.composio.dev/tool_router/v3/trs_test/mcp",
-          headers: { "x-api-key": "ak_test" },
+          command: process.execPath,
+          args: ["/tmp/connector-proxy.js"],
+          env: { OMB_CONNECTOR_UPSTREAM_URL: "https://example.test/mcp" },
         },
       },
     });
@@ -225,9 +354,9 @@ describe("ClaudeDriver turns (fake CLI)", () => {
 
     const seen = JSON.parse(readFileSync(dump, "utf8"));
     expect(seen.mcpConfig.mcpServers.composio).toMatchObject({
-      type: "http",
-      url: "https://app.composio.dev/tool_router/v3/trs_test/mcp",
-      headers: { "x-api-key": "ak_test" },
+      command: process.execPath,
+      args: ["/tmp/connector-proxy.js"],
+      env: { OMB_CONNECTOR_UPSTREAM_URL: "https://example.test/mcp" },
     });
     // the user's Composio key must not be readable via `ps`
     expect(JSON.stringify(seen.argv)).not.toContain("ak_test");
@@ -250,8 +379,9 @@ describe("ClaudeDriver turns (fake CLI)", () => {
       text: "hi",
       integrations: {
         composio: {
-          url: "https://app.composio.dev/tool_router/v3/trs_test/mcp",
-          headers: { "x-api-key": "ak_test" },
+          command: process.execPath,
+          args: ["/tmp/connector-proxy.js"],
+          env: { OMB_CONNECTOR_UPSTREAM_URL: "https://example.test/mcp" },
         },
       },
     });
@@ -264,6 +394,37 @@ describe("ClaudeDriver turns (fake CLI)", () => {
     expect(configPath).toMatch(/omb-mcp-/);
     expect(existsSync(configPath)).toBe(false);
     expect(existsSync(dirname(configPath))).toBe(false);
+  });
+
+  it("mounts local CUA without pre-allowing its computer namespace", async () => {
+    await create();
+    const dump = join(scratch, "local-dump.json");
+    process.env.FAKE_CLAUDE_DUMP = dump;
+    await instance.adapter.sendTurn({
+      threadId: "t-local",
+      text: "inspect the desktop",
+      integrations: {
+        localComputer: {
+          command: "/opt/cua driver/cua-driver",
+          args: ["mcp", "--embedded", "--socket", "/run/user/1000/driver.sock"],
+          env: { CUA_DRIVER_EMBEDDED: "1" },
+          platform: "linux",
+          generation: "generation-1",
+          scope: "local-computer",
+        },
+      },
+    });
+    await recorder.until((event) => event.type === "turn.completed");
+
+    const seen = JSON.parse(readFileSync(dump, "utf8"));
+    expect(seen.mcpConfig.mcpServers.computer).toEqual({
+      command: "/opt/cua driver/cua-driver",
+      args: ["mcp", "--embedded", "--socket", "/run/user/1000/driver.sock"],
+      env: { CUA_DRIVER_EMBEDDED: "1" },
+    });
+    const allowed = seen.argv[seen.argv.indexOf("--allowedTools") + 1];
+    expect(allowed).not.toContain("mcp__computer");
+    expect(instance.adapter.capabilities.localComputerMcp).toBe(true);
   });
 
   it("resumes with --resume when a cursor exists and reports that session id", async () => {
@@ -297,6 +458,94 @@ describe("ClaudeDriver turns (fake CLI)", () => {
     await instance.adapter.interruptTurn("t-int");
     const done = await recorder.until((e) => e.type === "turn.completed");
     expect(done).toMatchObject({ ok: false, stopReason: "exit_before_result" });
+  });
+
+  it("a message sent mid-turn is steered into the running turn", async () => {
+    await create("slow");
+    const { turnId } = await instance.adapter.sendTurn({ threadId: "t-steer", text: "first" });
+    await recorder.until((e) => e.type === "item.completed" && e.itemType === "tool");
+    expect(instance.adapter.capabilities.queueing).toBe(true);
+    await expect(instance.adapter.steer!("t-steer", "and also this")).resolves.toBe(true);
+    await recorder.until((e) => e.type === "turn.completed");
+    expect(recorder.events.filter((e) => e.type === "turn.completed")).toHaveLength(1);
+    const reply = recorder.events.find(
+      (e) => e.type === "item.completed" && e.itemType === "assistant_text" && (e as { text: string }).text.startsWith("reply to:"),
+    ) as { text: string };
+    expect(reply.text).toContain("steered: and also this");
+    expect(recorder.events.every((e) => e.turnId === turnId)).toBe(true);
+    await expect(instance.adapter.steer!("t-steer", "late")).resolves.toBe(false);
+  });
+
+  it("reuses the live process for the next compatible turn", async () => {
+    await create();
+    const dump = join(scratch, "dump.json");
+    process.env.FAKE_CLAUDE_DUMP = dump;
+    await instance.adapter.sendTurn({ threadId: "t-live", text: "one" });
+    await recorder.until((e) => e.type === "turn.completed");
+    const dumpBefore = readFileSync(dump, "utf8");
+    const announced = (recorder.events.find((e) => e.type === "session.started") as { sessionId: string }).sessionId;
+    const second = await instance.adapter.sendTurn({ threadId: "t-live", text: "two", resumeCursor: announced });
+    await recorder.until((e) => e.type === "turn.completed" && e.turnId === second.turnId);
+    expect(readFileSync(dump, "utf8")).toBe(dumpBefore);
+    expect(recorder.events.filter((e) => e.type === "turn.started")).toHaveLength(2);
+    expect(recorder.events.filter((e) => e.type === "turn.completed")).toHaveLength(2);
+  });
+
+  it("denies late broker asks between retained turns without opening a zombie card", async () => {
+    await create();
+    await instance.adapter.sendTurn({ threadId: "t-retained-late", text: "one" });
+    await recorder.until((e) => e.type === "turn.completed");
+
+    const conn = await connectSocket(permissionSocketPath("t-retained-late"));
+    const nextAnswer = answerQueue(conn);
+    const opensBefore = recorder.events.filter((e) => e.type === "request.opened").length;
+    const answer = nextAnswer();
+    conn.write(JSON.stringify({ t: "ask", id: "ask-between", tool: "Bash", input: { command: "echo late" } }) + "\n");
+
+    await expect(answer).resolves.toMatchObject({
+      id: "ask-between",
+      behavior: "deny",
+      message: "OpenMausBot: the turn ended",
+    });
+    expect(recorder.events.filter((e) => e.type === "request.opened")).toHaveLength(opensBefore);
+    await expect(
+      instance.adapter.respondToRequest("t-retained-late", "ask-between", { behavior: "allow" }),
+    ).resolves.toBe("unavailable");
+    conn.end();
+  });
+
+  it("replaces and resumes a live process when its spawn contract changes", async () => {
+    await create();
+    const dumpPath = join(scratch, "dump.json");
+    process.env.FAKE_CLAUDE_DUMP = dumpPath;
+    await instance.adapter.sendTurn({ threadId: "t-switch", text: "one" });
+    await recorder.until((e) => e.type === "turn.completed");
+    rmSync(dumpPath);
+    const announced = (recorder.events.find((e) => e.type === "session.started") as { sessionId: string }).sessionId;
+    const second = await instance.adapter.sendTurn({
+      threadId: "t-switch",
+      text: "two",
+      model: "claude-other",
+      resumeCursor: announced,
+    });
+    await recorder.until((e) => e.type === "turn.completed" && e.turnId === second.turnId);
+    const dump = JSON.parse(readFileSync(dumpPath, "utf8"));
+    expect(dump.argv).toContain("--resume");
+    expect(dump.argv).toContain("claude-other");
+  });
+
+  it("closes an idle session after the configured window", async () => {
+    process.env.OMB_CLAUDE_SESSION_IDLE_MIN_MS = "10";
+    process.env.OMB_CLAUDE_SESSION_IDLE_MS = "50";
+    await create();
+    await instance.adapter.sendTurn({ threadId: "t-idle", text: "one" });
+    await recorder.until((e) => e.type === "turn.completed");
+    process.env.FAKE_CLAUDE_DUMP = join(scratch, "idle-dump.json");
+    await new Promise((resolve) => setTimeout(resolve, 150));
+    const announced = (recorder.events.find((e) => e.type === "session.started") as { sessionId: string }).sessionId;
+    const second = await instance.adapter.sendTurn({ threadId: "t-idle", text: "two", resumeCursor: announced });
+    await recorder.until((e) => e.type === "turn.completed" && e.turnId === second.turnId);
+    expect(JSON.parse(readFileSync(join(scratch, "idle-dump.json"), "utf8")).argv).toContain("--resume");
   });
 
   it("an exit before result becomes runtime.error + failed turn", async () => {
@@ -335,7 +584,19 @@ describe("ClaudeDriver turns (fake CLI)", () => {
 
   it("brokers a permission ask into request.opened and answers over the socket", async () => {
     await create("hang");
-    await instance.adapter.sendTurn({ threadId: "t-perm-abc", text: "go" });
+    await instance.adapter.sendTurn({
+      threadId: "t-perm-abc",
+      text: "go",
+      integrations: {
+        localComputer: {
+          command: "/cua-driver",
+          args: ["mcp"],
+          env: {},
+          platform: "linux",
+          scope: "local-computer",
+        },
+      },
+    });
     await recorder.until((e) => e.type === "session.started");
 
     // connect as the MCP proxy would and raise an ask — unix socket on
@@ -361,26 +622,260 @@ describe("ClaudeDriver turns (fake CLI)", () => {
       tool: "Bash",
       summary: "rm -rf scratch",
       requestId: "ask-1",
+      approvalScope: "local-computer",
     });
 
-    await instance.adapter.respondToRequest("t-perm-abc", "ask-1", { behavior: "allow" });
+    // the outcome names exactly what was granted: this action, once
+    await expect(instance.adapter.respondToRequest("t-perm-abc", "ask-1", { behavior: "allow" })).resolves.toBe("allowed-once");
     expect(await answered).toMatchObject({ behavior: "allow" });
     const resolved = await recorder.until((e) => e.type === "request.resolved");
-    expect(resolved).toMatchObject({ behavior: "allow", source: "user" });
+    expect(resolved).toMatchObject({
+      behavior: "allow",
+      source: "user",
+      approvalScope: "local-computer",
+    });
 
     conn.end();
     await instance.adapter.interruptTurn("t-perm-abc");
     await recorder.until((e) => e.type === "turn.completed");
   });
 
-  it("rejects answers to unknown or already-resolved asks", async () => {
+  it("answers to unknown or already-resolved asks resolve `unavailable` — typed, never a throw", async () => {
     await create("hang");
     await instance.adapter.sendTurn({ threadId: "t-perm-2", text: "go" });
-    await expect(
-      instance.adapter.respondToRequest("t-perm-2", "never-asked", { behavior: "allow" }),
-    ).rejects.toThrow(/pending request/);
+    await expect(instance.adapter.respondToRequest("t-perm-2", "never-asked", { behavior: "allow" })).resolves.toBe("unavailable");
+    // and a thread with no turn at all is the same answer
+    await expect(instance.adapter.respondToRequest("no-such-thread", "x", { behavior: "deny" })).resolves.toBe("unavailable");
     await instance.adapter.interruptTurn("t-perm-2");
     await recorder.until((e) => e.type === "turn.completed");
+  });
+
+  it("resolves a pending ask as a system denial when the turn is interrupted", async () => {
+    await create("hang");
+    await instance.adapter.sendTurn({ threadId: "t-perm-stop", text: "go" });
+    await recorder.until((e) => e.type === "session.started");
+
+    const conn = connect(permissionSocketPath("t-perm-stop"));
+    await new Promise<void>((resolve, reject) => {
+      conn.on("connect", resolve);
+      conn.on("error", reject);
+    });
+    conn.write(JSON.stringify({ t: "ask", id: "ask-stop", tool: "Bash", input: { command: "sleep 60" } }) + "\n");
+    await recorder.until((e) => e.type === "request.opened" && e.requestId === "ask-stop");
+
+    await instance.adapter.interruptTurn("t-perm-stop");
+    const resolved = await recorder.until((e) => e.type === "request.resolved" && e.requestId === "ask-stop");
+    expect(resolved).toMatchObject({ behavior: "deny", source: "system" });
+    await recorder.until((e) => e.type === "turn.completed");
+    conn.end();
+  });
+
+  it("denies a colliding ask id on the same connection without orphaning the original", async () => {
+    await create("hang");
+    await instance.adapter.sendTurn({ threadId: "t-perm-dup-1", text: "go" });
+    await recorder.until((e) => e.type === "session.started");
+
+    const conn = await connectSocket(permissionSocketPath("t-perm-dup-1"));
+    const nextAnswer = answerQueue(conn);
+
+    // two asks with the same id on one connection, second sent before the
+    // first is resolved
+    conn.write(JSON.stringify({ t: "ask", id: "dup-1", tool: "Bash", input: { command: "echo one" } }) + "\n");
+    await recorder.until((e) => e.type === "request.opened" && e.requestId === "dup-1");
+    conn.write(JSON.stringify({ t: "ask", id: "dup-1", tool: "Bash", input: { command: "echo two" } }) + "\n");
+
+    // the collision is denied immediately, on the wire, with the duplicate's
+    // own id and the fixed denial message — and without a second
+    // request.opened ever firing for it
+    expect(await nextAnswer()).toMatchObject({
+      id: "dup-1",
+      behavior: "deny",
+      message: "OpenMausBot: duplicate ask id — skipping this request.",
+    });
+    expect(recorder.events.filter((e) => e.type === "request.opened" && e.requestId === "dup-1")).toHaveLength(1);
+
+    // the original ask is untouched and still resolves normally
+    await expect(instance.adapter.respondToRequest("t-perm-dup-1", "dup-1", { behavior: "allow" })).resolves.toBe(
+      "allowed-once",
+    );
+    expect(await nextAnswer()).toMatchObject({ behavior: "allow" });
+
+    conn.end();
+    await instance.adapter.interruptTurn("t-perm-dup-1");
+    await recorder.until((e) => e.type === "turn.completed");
+  });
+
+  it("denies a colliding ask id from a second connection on the same broker", async () => {
+    await create("hang");
+    await instance.adapter.sendTurn({ threadId: "t-perm-dup-2", text: "go" });
+    await recorder.until((e) => e.type === "session.started");
+
+    const conn1 = await connectSocket(permissionSocketPath("t-perm-dup-2"));
+    conn1.write(JSON.stringify({ t: "ask", id: "dup-2", tool: "Bash", input: { command: "echo one" } }) + "\n");
+    await recorder.until((e) => e.type === "request.opened" && e.requestId === "dup-2");
+
+    // `pending` is shared across every connection on the broker, so a
+    // second connection reusing the same id must collide too
+    const conn2 = await connectSocket(permissionSocketPath("t-perm-dup-2"));
+    const conn2Answer = answerQueue(conn2)();
+    conn2.write(JSON.stringify({ t: "ask", id: "dup-2", tool: "Bash", input: { command: "echo two" } }) + "\n");
+    expect(await conn2Answer).toMatchObject({
+      id: "dup-2",
+      behavior: "deny",
+      message: "OpenMausBot: duplicate ask id — skipping this request.",
+    });
+    expect(recorder.events.filter((e) => e.type === "request.opened" && e.requestId === "dup-2")).toHaveLength(1);
+
+    // the original, opened on conn1, still resolves normally
+    await expect(instance.adapter.respondToRequest("t-perm-dup-2", "dup-2", { behavior: "allow" })).resolves.toBe(
+      "allowed-once",
+    );
+
+    conn1.end();
+    conn2.end();
+    await instance.adapter.interruptTurn("t-perm-dup-2");
+    await recorder.until((e) => e.type === "turn.completed");
+  });
+
+  it("accepts an ask id reused after the original already resolved — not a collision", async () => {
+    await create("hang");
+    await instance.adapter.sendTurn({ threadId: "t-perm-dup-3", text: "go" });
+    await recorder.until((e) => e.type === "session.started");
+
+    const conn = await connectSocket(permissionSocketPath("t-perm-dup-3"));
+
+    conn.write(JSON.stringify({ t: "ask", id: "dup-3", tool: "Bash", input: { command: "echo one" } }) + "\n");
+    await recorder.until((e) => e.type === "request.opened" && e.requestId === "dup-3" && e.summary === "echo one");
+    await expect(instance.adapter.respondToRequest("t-perm-dup-3", "dup-3", { behavior: "allow" })).resolves.toBe(
+      "allowed-once",
+    );
+
+    // the id is free again once its ask resolved — reusing it is not a
+    // collision and should open normally (distinct summary proves this is a
+    // fresh request.opened, not the first one already seen by the recorder)
+    conn.write(JSON.stringify({ t: "ask", id: "dup-3", tool: "Bash", input: { command: "echo two" } }) + "\n");
+    await recorder.until((e) => e.type === "request.opened" && e.requestId === "dup-3" && e.summary === "echo two");
+    await expect(instance.adapter.respondToRequest("t-perm-dup-3", "dup-3", { behavior: "allow" })).resolves.toBe(
+      "allowed-once",
+    );
+
+    conn.end();
+    await instance.adapter.interruptTurn("t-perm-dup-3");
+    await recorder.until((e) => e.type === "turn.completed");
+  });
+
+  it("denies a colliding ask id for question-kind asks too, without disturbing the original", async () => {
+    await create("hang");
+    await instance.adapter.sendTurn({ threadId: "t-perm-dup-4", text: "go" });
+    await recorder.until((e) => e.type === "session.started");
+
+    const conn = await connectSocket(permissionSocketPath("t-perm-dup-4"));
+    const nextAnswer = answerQueue(conn);
+
+    conn.write(JSON.stringify({ t: "ask", id: "dup-4", kind: "question", tool: "ask_user", input: { question: "one?" } }) + "\n");
+    await recorder.until((e) => e.type === "request.opened" && e.requestId === "dup-4");
+    conn.write(JSON.stringify({ t: "ask", id: "dup-4", kind: "question", tool: "ask_user", input: { question: "two?" } }) + "\n");
+
+    // same collision guard applies regardless of ask kind
+    expect(await nextAnswer()).toMatchObject({
+      id: "dup-4",
+      behavior: "deny",
+      message: "OpenMausBot: duplicate ask id — skipping this request.",
+    });
+    expect(recorder.events.filter((e) => e.type === "request.opened" && e.requestId === "dup-4")).toHaveLength(1);
+
+    // the original question is untouched and still resolves normally
+    await expect(
+      instance.adapter.respondToRequest("t-perm-dup-4", "dup-4", { behavior: "answer", message: "yes" }),
+    ).resolves.toBe("answered");
+    expect(await nextAnswer()).toMatchObject({ behavior: "answer" });
+
+    conn.end();
+    await instance.adapter.interruptTurn("t-perm-dup-4");
+    await recorder.until((e) => e.type === "turn.completed");
+  });
+
+  it("drops a late ask on an already-closed broker instead of a dead card (#211)", async () => {
+    await create("hang");
+    await instance.adapter.sendTurn({ threadId: "t-perm-late", text: "go" });
+    await recorder.until((e) => e.type === "session.started");
+
+    // Same connection stays open across the turn ending — the exact
+    // condition that let a still-alive child raise an unanswerable card.
+    const conn = connect(permissionSocketPath("t-perm-late"));
+    await new Promise<void>((resolve, reject) => {
+      conn.on("connect", resolve);
+      conn.on("error", reject);
+    });
+
+    await instance.adapter.interruptTurn("t-perm-late");
+    await recorder.until((e) => e.type === "turn.completed");
+
+    const opensBefore = recorder.events.filter((e) => e.type === "request.opened").length;
+    const reply = new Promise<{ id: string; behavior: string; message?: string }>((resolve) => {
+      let buf = "";
+      conn.on("data", (c) => {
+        buf += c;
+        const nl = buf.indexOf("\n");
+        if (nl !== -1) resolve(JSON.parse(buf.slice(0, nl)));
+      });
+    });
+    conn.write(JSON.stringify({ t: "ask", id: "ask-late", tool: "Bash", input: { command: "rm -rf /" } }) + "\n");
+
+    // A dead card is a request.opened with no way to ever answer it — assert
+    // the late ask never becomes one, and the connection still gets a
+    // definite reply rather than hanging forever.
+    expect(await reply).toMatchObject({
+      id: "ask-late",
+      behavior: "deny",
+      message: "OpenMausBot: the turn ended",
+    });
+    expect(recorder.events.filter((e) => e.type === "request.opened")).toHaveLength(opensBefore);
+    await expect(instance.adapter.respondToRequest("t-perm-late", "ask-late", { behavior: "allow" })).resolves.toBe(
+      "unavailable",
+    );
+
+    conn.end();
+  });
+
+  it("drops a late question on an already-closed broker with an answer, not a deny (#211)", async () => {
+    // systemEndedReply(kind) branches on "question" vs "permission" — cover
+    // the question arm too, since the deny arm above doesn't exercise it.
+    await create("hang");
+    await instance.adapter.sendTurn({ threadId: "t-question-late", text: "go" });
+    await recorder.until((e) => e.type === "session.started");
+
+    const conn = connect(permissionSocketPath("t-question-late"));
+    await new Promise<void>((resolve, reject) => {
+      conn.on("connect", resolve);
+      conn.on("error", reject);
+    });
+
+    await instance.adapter.interruptTurn("t-question-late");
+    await recorder.until((e) => e.type === "turn.completed");
+
+    const opensBefore = recorder.events.filter((e) => e.type === "request.opened").length;
+    const reply = new Promise<{ id: string; behavior: string; message?: string }>((resolve) => {
+      let buf = "";
+      conn.on("data", (c) => {
+        buf += c;
+        const nl = buf.indexOf("\n");
+        if (nl !== -1) resolve(JSON.parse(buf.slice(0, nl)));
+      });
+    });
+    conn.write(JSON.stringify({ t: "ask", kind: "question", id: "q-late", tool: "ask_user", input: { question: "still there?" } }) + "\n");
+
+    expect(await reply).toMatchObject({
+      id: "q-late",
+      behavior: "answer",
+      message: "OpenMausBot: the turn is ending — wrap up.",
+    });
+    expect(recorder.events.filter((e) => e.type === "request.opened")).toHaveLength(opensBefore);
+    await expect(
+      instance.adapter.respondToRequest("t-question-late", "q-late", { behavior: "answer", message: "yes" }),
+    ).resolves.toBe("unavailable");
+
+    conn.end();
   });
 
   it("passes effort to the CLI, and omits the flag when unset", async () => {
@@ -407,6 +902,19 @@ describe("ClaudeDriver turns (fake CLI)", () => {
 
     const seen = JSON.parse(readFileSync(dump, "utf8"));
     expect(seen.argv).not.toContain("--effort");
+  });
+
+  it("strips workspace credentials from generateText helper children", async () => {
+    await create();
+    const dump = join(scratch, "generate-text-env.json");
+    process.env.FAKE_CLAUDE_DUMP = dump;
+    const names = ["XAI_API_KEY", "COMPOSIO_API_KEY", "BOX_TOKEN", "OPENCODE_API_KEY", "OMB_TTS_KEY"] as const;
+    for (const name of names) process.env[name] = `${name}-must-not-leak`;
+
+    await instance.generateText?.("summarize safely");
+
+    const seen = JSON.parse(readFileSync(dump, "utf8"));
+    for (const name of names) expect(seen.env[name]).toBeUndefined();
   });
 
   it("declares the effort levels the CLI accepts", async () => {

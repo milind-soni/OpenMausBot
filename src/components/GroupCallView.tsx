@@ -32,6 +32,8 @@ export function GroupCallButton({ group, members }: { group: Group; members: Bot
       targetId={group.id}
       targetName={group.name}
       voices={members.map((member) => member.voice)}
+      setupBotId={members.find((member) => !member.voice)?.id ?? members[0]?.id}
+      requireExplicitVoices
       onStart={() => track("group_call_started", { memberCount: members.length })}
     />
   );

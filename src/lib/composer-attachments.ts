@@ -17,7 +17,16 @@ export type FileAttachment = {
   size: number;
 };
 
-export type Attachment = PasteAttachment | FileAttachment;
+export type ImageAttachment = {
+  kind: "image";
+  id: string;
+  path: string;
+  name: string;
+  size: number;
+  mime: string;
+};
+
+export type Attachment = PasteAttachment | FileAttachment | ImageAttachment;
 
 export function isAttachment(value: unknown): value is Attachment {
   if (!value || typeof value !== "object") return false;
@@ -36,6 +45,15 @@ export function isAttachment(value: unknown): value is Attachment {
       typeof attachment.path === "string" &&
       attachment.path.length > 0 &&
       typeof attachment.name === "string"
+    );
+  }
+  if (attachment.kind === "image") {
+    return (
+      typeof attachment.path === "string" &&
+      attachment.path.length > 0 &&
+      typeof attachment.name === "string" &&
+      typeof attachment.mime === "string" &&
+      attachment.mime.startsWith("image/")
     );
   }
   return false;
@@ -64,6 +82,37 @@ function newId(): string {
 
 export function fileAttachment(name: string, path: string, size: number): FileAttachment {
   return { kind: "file", id: newId(), path, name, size };
+}
+
+/** Matches the server's IMAGE_MAX_BYTES — checked client-side so an
+ * oversized paste is refused before the upload starts, not mid-stream. */
+export const IMAGE_MAX_BYTES = 10 * 1024 * 1024;
+
+export function isImageFile(file: { type: string; size: number }): boolean {
+  return (
+    file.type.startsWith("image/") &&
+    ["image/png", "image/jpeg", "image/gif", "image/webp"].includes(file.type.split(";")[0]!.trim().toLowerCase())
+  );
+}
+
+/** Persist a pasted image server-side and return the attachment chip data.
+ * The server writes ~/.openmausbot/attachments/<uuid>.<ext> and answers
+ * with the path; the prompt references that path so every CLI can open it. */
+export async function imageAttachmentFromFile(file: File): Promise<ImageAttachment | null> {
+  if (!isImageFile(file)) return null;
+  if (file.size > IMAGE_MAX_BYTES) throw Object.assign(new Error(`${file.name} exceeds 10 MB`), { status: 413 });
+  const bytes = new Uint8Array(await file.arrayBuffer());
+  const response = await fetch("/api/attachments", {
+    method: "POST",
+    headers: { "content-type": file.type },
+    body: bytes,
+  });
+  if (!response.ok) {
+    const detail = (await response.json().catch(() => ({ error: response.statusText }))) as { error?: string };
+    throw Object.assign(new Error(detail.error ?? "upload failed"), { status: response.status });
+  }
+  const saved = (await response.json()) as { path: string; mime: string; bytes: number };
+  return { kind: "image", id: newId(), path: saved.path, name: file.name || "pasted image", size: saved.bytes, mime: saved.mime };
 }
 
 export function pasteAttachment(text: string): PasteAttachment {
@@ -145,6 +194,8 @@ export function composeMessage(text: string, attachments: Attachment[]): string 
   attachments.forEach((a, i) => {
     if (a.kind === "paste") {
       parts.push(`<pasted-text index="${i + 1}">\n${a.text}\n</pasted-text>`);
+    } else if (a.kind === "image") {
+      parts.push(`<attached-image path="${escapeAttribute(a.path)}" />`);
     } else {
       parts.push(`<attached-file path="${escapeAttribute(a.path)}" />`);
     }
@@ -163,4 +214,27 @@ export function escapeAttribute(value: string): string {
     .replaceAll("\t", "&#9;")
     .replaceAll("\r", "&#13;")
     .replaceAll("\n", "&#10;");
+}
+
+/** Split a stored user message into its display text and the images it
+ * attached, for transcript rendering. The tag never shows in the bubble. */
+export function splitAttachedImages(text: string): { display: string; images: string[] } {
+  const images: string[] = [];
+  const display = text.replace(/<attached-image\s+path="([^"]*)"\s*\/?>(?:\s*\n)?/g, (_match, raw: string) => {
+    const path = raw
+      .replaceAll("&quot;", '"')
+      .replaceAll("&lt;", "<")
+      .replaceAll("&gt;", ">")
+      .replaceAll("&amp;", "&");
+    if (path) images.push(path);
+    return "";
+  });
+  return { display: display.trim(), images };
+}
+
+/** The bare filename a saved attachment path ends in — what the serving
+ * route expects. Works for POSIX and Windows separators. */
+export function attachmentBasename(path: string): string {
+  const parts = path.split(/[\\/]/);
+  return parts[parts.length - 1] ?? "";
 }

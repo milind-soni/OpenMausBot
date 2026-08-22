@@ -11,7 +11,13 @@
 // time, never at queue time, because the user might have just turned
 // approvePeerComms on between queueing and draining.
 
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
+
+import { writeFileAtomic } from "./atomic.ts";
 import { getOrCreateChannel, mirrorExchange, type CommsBus } from "./comms-visibility.ts";
+import { DATA_DIR } from "./config.ts";
+import { newId } from "./contracts.ts";
 import { requestPeerApproval, type ApprovalBus } from "./peer-approval.ts";
 import type { BotRecord, GroupRecord } from "./store.ts";
 
@@ -26,12 +32,64 @@ export interface DelegationItem {
   depth: number;
 }
 
+interface PendingDelegationItem extends DelegationItem {
+  /** Stable acknowledgement key for crash-safe removal from the queue. */
+  id: string;
+}
+
 export type QueueResult = "ok" | "no_target" | "self" | "too_deep" | "too_many";
 
-/** Per source-thread queue. Persisted nowhere — a server restart drops
- * delegations the same way provider permissions drop, which is honest:
- * nobody can answer for an unattended bot. */
-const pendingDelegations = new Map<string, DelegationItem[]>();
+/** Per source-thread queue. Persisted to delegations.json on every change
+ * and reloaded at boot: a handoff queued right before a restart runs after
+ * it. (Provider PERMISSIONS still die with the process — nobody can answer
+ * for an unattended bot — but queued work is not a permission; the target
+ * and approvePeerComms are re-checked at drain time as always.) */
+const pendingDelegations = new Map<string, PendingDelegationItem[]>();
+const drainingThreads = new Set<string>();
+const DELEGATIONS_FILE = join(DATA_DIR, "delegations.json");
+
+function savePending(): void {
+  try {
+    writeFileAtomic(DELEGATIONS_FILE, JSON.stringify(Object.fromEntries(pendingDelegations), null, 2), { mode: 0o600 });
+  } catch (error) {
+    console.error("delegations: could not persist queue", error);
+  }
+}
+
+/** Load what a previous process left queued. Missing or corrupt → empty. */
+export function _loadPending(): void {
+  pendingDelegations.clear();
+  try {
+    const raw = JSON.parse(readFileSync(DELEGATIONS_FILE, "utf8")) as Record<string, unknown>;
+    for (const [threadId, list] of Object.entries(raw)) {
+      if (!Array.isArray(list)) continue;
+      const items = list.flatMap((value): PendingDelegationItem[] => {
+        if (!value || typeof value !== "object") return [];
+        const item = value as Partial<PendingDelegationItem>;
+        if (
+          typeof item.toBotId !== "string" ||
+          typeof item.message !== "string" ||
+          !Number.isFinite(item.depth)
+        ) return [];
+        return [{
+          id: typeof item.id === "string" && item.id ? item.id : newId(),
+          toBotId: item.toBotId,
+          message: item.message,
+          ...(typeof item.reason === "string" ? { reason: item.reason } : {}),
+          depth: Math.max(0, Math.trunc(item.depth!)),
+        }];
+      });
+      if (items.length) pendingDelegations.set(threadId, items);
+    }
+  } catch {
+    /* fresh install, or unreadable — start empty */
+  }
+}
+
+/** Source threads with something queued — what a boot drain iterates. */
+export function pendingThreads(): string[] {
+  return [...pendingDelegations.keys()];
+}
 
 /** How many handoffs one turn may queue. Small on purpose: this is the only
  * thing standing between a confused bot and a fan-out of real turns. */
@@ -55,15 +113,15 @@ export function queueDelegation(
   // making the caller wait. Without a cap, one turn can queue unboundedly
   // and fan out into as many real turns on the next settle.
   if (list.length >= MAX_QUEUED_PER_THREAD) return "too_many";
-  list.push(item);
+  list.push({ ...item, id: newId() });
   pendingDelegations.set(sourceThreadId, list);
+  savePending();
   const label = `Delegated to @${target.name}${item.reason ? `: ${item.reason}` : ""}`;
-  const note = bus.store.appendMessage(sourceThreadId, {
+  bus.store.appendMessage(sourceThreadId, {
     role: "bot",
     kind: "activity",
     tool: { name: label },
   });
-  bus.broadcast({ kind: "message", threadId: sourceThreadId, message: note });
   return "ok";
 }
 
@@ -85,26 +143,55 @@ export function drainDelegations(
     channel?: GroupRecord,
   ) => void | Promise<void>,
 ): void {
+  if (drainingThreads.has(threadId)) return;
   const list = pendingDelegations.get(threadId);
   if (!list?.length) return;
-  pendingDelegations.delete(threadId);
   const from = bus.store.botByThread(threadId);
-  if (!from) return;
-  for (const item of list) {
-    void processOne(bus, approvalBus, from, threadId, item, runTarget).catch((error) => {
-      const why = error instanceof Error ? error.message : String(error);
-      try {
-        const note = bus.store.appendMessage(threadId, {
-          role: "bot",
-          kind: "activity",
-          tool: { name: `error: delegation failed — ${why.slice(0, 120)}`, ok: false },
-        });
-        bus.broadcast({ kind: "message", threadId, message: note });
-      } catch (reportError) {
-        console.error("delegation failed and could not be reported", reportError);
-      }
-    });
+  if (!from) {
+    pendingDelegations.delete(threadId);
+    savePending();
+    return;
   }
+  const snapshot = [...list];
+  drainingThreads.add(threadId);
+  void (async () => {
+    for (const item of snapshot) {
+      try {
+        await processOne(bus, approvalBus, from, threadId, item, runTarget);
+      } catch (error) {
+        const why = error instanceof Error ? error.message : String(error);
+        try {
+          bus.store.appendMessage(threadId, {
+            role: "bot",
+            kind: "activity",
+            tool: { name: `error: delegation failed — ${why.slice(0, 120)}`, ok: false },
+          });
+        } catch (reportError) {
+          console.error("delegation failed and could not be reported", reportError);
+        }
+      } finally {
+        acknowledgeDelegation(threadId, item.id);
+      }
+    }
+  })().finally(() => {
+    drainingThreads.delete(threadId);
+    // A later turn may have queued and settled while this thread was
+    // waiting for approval. Its items were not in our snapshot, so start a
+    // fresh drain instead of leaving them parked until another restart.
+    if (pendingDelegations.get(threadId)?.length) {
+      drainDelegations(bus, approvalBus, threadId, runTarget);
+    }
+  });
+}
+
+/** Remove one terminal handoff only after approval/dispatch has settled. */
+function acknowledgeDelegation(threadId: string, itemId: string): void {
+  const current = pendingDelegations.get(threadId);
+  if (!current) return;
+  const remaining = current.filter((item) => item.id !== itemId);
+  if (remaining.length) pendingDelegations.set(threadId, remaining);
+  else pendingDelegations.delete(threadId);
+  savePending();
 }
 
 /** Drop a thread's queued handoffs without running them, telling the user
@@ -113,14 +200,14 @@ export function discardDelegations(bus: CommsBus, threadId: string): void {
   const list = pendingDelegations.get(threadId);
   if (!list?.length) return;
   pendingDelegations.delete(threadId);
+  savePending();
   const from = bus.store.botByThread(threadId);
   if (!from) return;
-  const note = bus.store.appendMessage(threadId, {
+  bus.store.appendMessage(threadId, {
     role: "bot",
     kind: "activity",
     tool: { name: `${list.length} queued delegation${list.length > 1 ? "s" : ""} dropped — the turn did not finish`, ok: false },
   });
-  bus.broadcast({ kind: "message", threadId, message: note });
 }
 
 async function processOne(
@@ -140,21 +227,19 @@ async function processOne(
   let sender = from;
   let target = bus.store.bot(item.toBotId);
   if (!target) {
-    const note = bus.store.appendMessage(sourceThreadId, {
+    bus.store.appendMessage(sourceThreadId, {
       role: "bot",
       kind: "activity",
       tool: { name: `error: delegation to ${item.toBotId} failed — no such bot`, ok: false },
     });
-    bus.broadcast({ kind: "message", threadId: sourceThreadId, message: note });
     return;
   }
   if (target.busy) {
-    const note = bus.store.appendMessage(sourceThreadId, {
+    bus.store.appendMessage(sourceThreadId, {
       role: "bot",
       kind: "activity",
       tool: { name: `Delegation to @${target.name} canceled — @${target.name} is busy`, ok: false },
     });
-    bus.broadcast({ kind: "message", threadId: sourceThreadId, message: note });
     return;
   }
   if (sender.approvePeerComms) {
@@ -167,12 +252,11 @@ async function processOne(
       sourceThreadId,
     );
     if (verdict !== "allow") {
-      const note = bus.store.appendMessage(sourceThreadId, {
+      bus.store.appendMessage(sourceThreadId, {
         role: "bot",
         kind: "activity",
         tool: { name: `Delegation to @${target.name} denied by user`, ok: false },
       });
-      bus.broadcast({ kind: "message", threadId: sourceThreadId, message: note });
       return;
     }
     // The approval could have been sitting for up to 15 minutes. Everything
@@ -183,12 +267,11 @@ async function processOne(
     const currentSender = bus.store.bot(from.id);
     if (!current || !currentSender || !bus.store.taskByThread(currentSender.id, sourceThreadId)) return;
     if (current.busy) {
-      const note = bus.store.appendMessage(sourceThreadId, {
+      bus.store.appendMessage(sourceThreadId, {
         role: "bot",
         kind: "activity",
         tool: { name: `Delegation to @${current.name} canceled — @${current.name} is busy`, ok: false },
       });
-      bus.broadcast({ kind: "message", threadId: sourceThreadId, message: note });
       return;
     }
     sender = currentSender;
@@ -204,4 +287,10 @@ async function processOne(
 /** Test helper: how many items remain queued for a thread. */
 export function _pendingCount(threadId: string): number {
   return pendingDelegations.get(threadId)?.length ?? 0;
+}
+
+/** Test helper: forget the in-memory queue (a simulated restart). */
+export function _resetPending(): void {
+  pendingDelegations.clear();
+  drainingThreads.clear();
 }

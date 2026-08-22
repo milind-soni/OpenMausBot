@@ -1,5 +1,5 @@
 import { createContext, useContext, useEffect, useState, type ReactNode } from "react";
-import { initialDesktopCapabilities, loadDesktopCapabilities } from "@/lib/desktop";
+import { cacheDesktopCapabilities, initialDesktopCapabilities, loadDesktopCapabilities } from "@/lib/desktop";
 
 type DesktopState = {
   capabilities: DesktopCapabilities;
@@ -19,11 +19,20 @@ export function DesktopCapabilitiesProvider({ children }: { children: ReactNode 
 
   useEffect(() => {
     let alive = true;
+    let eventRevision = 0;
+    const unsubscribe = window.ogb?.onCapabilitiesChanged?.((capabilities) => {
+      eventRevision += 1;
+      if (alive) setState({ capabilities: cacheDesktopCapabilities(capabilities), ready: true });
+    });
+    const initialRevision = eventRevision;
     void loadDesktopCapabilities().then((capabilities) => {
-      if (alive) setState({ capabilities, ready: true });
+      if (alive && eventRevision === initialRevision) {
+        setState({ capabilities, ready: true });
+      }
     });
     return () => {
       alive = false;
+      unsubscribe?.();
     };
   }, []);
 

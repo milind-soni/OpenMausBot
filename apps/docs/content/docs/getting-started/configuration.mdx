@@ -1,0 +1,37 @@
+---
+title: Configuration
+description: Understand engine paths, credentials, and the local configuration boundary.
+icon: Settings
+---
+
+Most users configure OpenMausBot from the app. The packaged desktop validates credentials before saving them and stores supported secrets with the operating system's secure storage.
+
+## Engine discovery
+
+OpenMausBot checks the inherited process path, common install locations, and the login shell. If an engine is installed somewhere unusual, open **Settings → Engines** and choose its executable explicitly.
+
+Explicit paths are useful when you:
+
+- keep multiple CLI versions;
+- use a wrapper script;
+- installed an engine in a directory desktop apps cannot discover; or
+- launch OpenMausBot from a Windows shortcut or Linux application menu with a different environment from your terminal.
+
+## Optional credentials
+
+| Credential | Enables |
+|---|---|
+| Composio project key | Connected apps and OAuth sessions |
+| Box API key | Hosted Linux computers |
+| ElevenLabs API key | Spoken replies and voice mode |
+| OpenCode API key | Paid OpenCode Zen models |
+
+Local agent chat works without these credentials.
+
+## Environment configuration
+
+Source and headless runs can set supported environment variables before starting the harness. The app-level settings are preferable for normal packaged use because they validate inputs and keep secret values out of the renderer.
+
+<Callout type="warn" title="Do not put secrets in prompts">
+  A prompt becomes conversation history and may be sent to an agent provider. Use App Settings or environment configuration for credentials.
+</Callout>

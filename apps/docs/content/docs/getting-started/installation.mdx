@@ -1,0 +1,54 @@
+---
+title: Installation
+description: Install OpenMausBot on macOS, Windows, or Ubuntu.
+icon: Download
+---
+
+## Download a released build
+
+Choose the package for your computer from the [latest release](https://github.com/milind-soni/openmausbot-releases/releases/latest).
+
+| Platform | Recommended package | Notes |
+|---|---|---|
+| macOS Apple silicon | `OpenMausBot.dmg` | Signed and notarized. Drag to Applications. |
+| macOS Intel | `OpenMausBot-intel.dmg` | Signed and notarized. |
+| Windows x64 | `OpenMausBot-setup.exe` | Per-user installer; Windows signing is not yet available. |
+| Ubuntu 24.04 x64 | `OpenMausBot-amd64.deb` | Recommended Ubuntu package; the AppImage is portable. |
+
+<Callout type="warn" title="Windows SmartScreen">
+  The Windows installer is not code-signed yet. Windows may show “Unknown publisher.” Verify that you downloaded it from the official OpenMausBot releases repository before choosing **More info → Run anyway**.
+</Callout>
+
+## Install an agent CLI
+
+OpenMausBot needs at least one supported agent engine installed and signed in. Claude and Codex are the most common starting points.
+
+1. Install the CLI from its official provider.
+2. Run it once in a terminal and complete sign-in.
+3. Restart OpenMausBot.
+4. Open the model picker. Available engines appear normally; unavailable engines explain what is missing.
+
+See [Agent engines](../providers/index.mdx) for the complete list and explicit path overrides.
+
+## Build from source
+
+Requirements: Node.js 24 or newer, pnpm 10.33.0, and at least one authenticated agent CLI.
+
+```bash
+git clone https://github.com/milind-soni/OpenMausBot.git
+cd OpenMausBot
+corepack enable
+pnpm install --frozen-lockfile
+```
+
+Run the harness, web UI, and Electron shell in separate terminals:
+
+```bash
+pnpm dev:server
+pnpm dev
+pnpm dev:desktop
+```
+
+## Where data lives
+
+OpenMausBot stores its application data under `~/.openmausbot`. Electron window and browser data use the normal per-platform application data directory.

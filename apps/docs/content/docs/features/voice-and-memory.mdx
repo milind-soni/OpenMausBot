@@ -1,0 +1,25 @@
+---
+title: Voice, dictation, and memory
+description: Listen to agents, talk to them, and inspect what they remember.
+icon: AudioLines
+---
+
+## Spoken replies
+
+Add an ElevenLabs key in App Settings, choose a voice, and use the speaker control on a response. Auto-speak can read new replies as they arrive.
+
+The harness rewrites code-heavy Markdown into speech-friendly text before synthesis. Keys remain on the harness and never reach the renderer.
+
+## Call mode
+
+On macOS, call mode combines native on-device speech recognition with the configured ElevenLabs voice. It is deliberately half-duplex: the microphone pauses while the bot speaks to prevent the app from transcribing its own audio.
+
+Tool progress and approval requests can be narrated during a call so long-running work does not sound disconnected.
+
+## Dictation
+
+The composer microphone uses Apple's local speech recognition in the macOS desktop build. Linux and Windows dictation are not currently shipped.
+
+## Memory
+
+Each bot can keep plain-text memory that you can inspect, correct, or delete. Memory is not a hidden remote profile; it lives with the local OpenMausBot data.

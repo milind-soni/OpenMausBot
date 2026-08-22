@@ -1,0 +1,22 @@
+---
+title: This computer
+description: Let a supported agent control the local desktop through the bundled CUA boundary.
+icon: MousePointer2
+---
+
+Local control is off by default. The Electron main process owns the bundled CUA driver lifecycle so operating-system permissions are attributed to OpenMausBot rather than a background helper.
+
+## macOS
+
+The packaged app can request Accessibility and Screen Recording permission. After granting either permission, restart the control session when prompted so macOS applies the new grant.
+
+## Ubuntu
+
+Ubuntu 24.04 GNOME local control is beta. Packaged builds include a pinned CUA runtime. Xorg is supported with explicit opt-in; guarded Wayland support also requires its validated GNOME helper and health checks.
+
+## Safety model
+
+- Enabling local control globally does not assign it to a bot.
+- Choose **This computer** for each bot that should receive the capability.
+- Risky actions still surface through the approval flow.
+- Missing permissions, unexpected binaries, unsupported desktop sessions, and failed health checks fail closed.

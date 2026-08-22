@@ -69,7 +69,7 @@ async function api(path: string, init?: RequestInit): Promise<Json> {
   const res = await fetch(DWEB + path, {
     signal: AbortSignal.timeout(30_000),
     ...init,
-    headers: { "content-type": "application/json", ...(init?.headers ?? {}) },
+    headers: { "content-type": "application/json", ...init?.headers },
   });
   const body = (await res.json().catch(() => ({}))) as Json;
   if (!res.ok) throw new Error(String(body.error ?? `HTTP ${res.status}`));

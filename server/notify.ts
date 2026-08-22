@@ -7,10 +7,10 @@
 // bot does while it works is not.
 //
 // Delivery is a separate concern. The harness emits a frame; whoever is
-// listening decides what to do with it — a desktop notification today, an
-// APNs push to a paired phone once that exists.
+// listening decides what to do with it — desktop and paired-phone local
+// notifications today, and closed-app APNs delivery once a relay exists.
 
-export type NotifyKind = "approval" | "question" | "done" | "routine-failed";
+export type NotifyKind = "approval" | "question" | "done" | "routine-failed" | "takeover";
 
 export interface Notification {
   kind: NotifyKind;
@@ -56,9 +56,11 @@ export function buildNotification(
       ? `${bot.name} needs approval`
       : kind === "question"
         ? `${bot.name} has a question`
-        : kind === "routine-failed"
-          ? `${bot.name}'s routine failed`
-          : `${bot.name} finished`;
+        : kind === "takeover"
+          ? `${bot.name} needs your hands`
+          : kind === "routine-failed"
+            ? `${bot.name}'s routine failed`
+            : `${bot.name} finished`;
 
   // A "finished" with nothing to say is not worth a notification — the
   // badge in the sidebar already carries that much.

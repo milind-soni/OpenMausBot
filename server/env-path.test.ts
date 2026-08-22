@@ -5,10 +5,11 @@ import { execFile } from "node:child_process";
 import { chmodSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";
 import { delimiter, join } from "node:path";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { augmentedPath, resetPathCacheForTests, splitCliString } from "./env-path.ts";
+import { augmentedPath, resetPathCache, resetPathCacheForTests, splitCliString } from "./env-path.ts";
 import { resolveCli } from "./procs.ts";
+import { removeTempDir } from "./testing/cleanup.ts";
 
 const posixIt = it.skipIf(process.platform === "win32");
 
@@ -86,7 +87,34 @@ describe("augmentedPath", () => {
     mkdirSync(bin, { recursive: true });
     resetPathCacheForTests();
 
-    expect(augmentedPath().split(delimiter)).toContain(bin);
+    expect(augmentedPath().split(delimiter).filter((entry) => entry === bin)).toHaveLength(1);
+  });
+
+  posixIt("keeps the last login-shell PATH available during a rescan", async () => {
+    const shell = join(homedir(), "fake-login-shell");
+    const rcOnlyBin = join(homedir(), "rc-only", "bin");
+    writeFileSync(shell, `#!/bin/sh\nprintf '__OMB_PATH__%s' '${rcOnlyBin}'\n`);
+    chmodSync(shell, 0o755);
+
+    const previousShell = process.env.SHELL;
+    const previousVitest = process.env.VITEST;
+    try {
+      process.env.SHELL = shell;
+      delete process.env.VITEST;
+      resetPathCacheForTests();
+
+      augmentedPath();
+      await vi.waitFor(() => expect(augmentedPath().split(delimiter)).toContain(rcOnlyBin));
+
+      resetPathCache();
+      expect(augmentedPath().split(delimiter)).toContain(rcOnlyBin);
+    } finally {
+      if (previousShell === undefined) delete process.env.SHELL;
+      else process.env.SHELL = previousShell;
+      if (previousVitest === undefined) delete process.env.VITEST;
+      else process.env.VITEST = previousVitest;
+      resetPathCacheForTests();
+    }
   });
 
   it("skips known dirs that do not exist", () => {
@@ -172,10 +200,12 @@ winOnly("resolveCli (Windows)", () => {
   beforeEach(() => {
     dir = mkdtempSync(join(tmpdir(), "omb-shim-"));
   });
-  afterEach(() => {
+  afterEach(async () => {
     delete process.env.OMB_EXTRA_PATH;
     resetPathCacheForTests();
-    rmSync(dir, { recursive: true, force: true });
+    // These tests spawn the shims out of this directory; a just-exited one can
+    // still be holding it for a beat after the call returns.
+    await removeTempDir(dir);
   });
 
   it("parses an npm .cmd shim down to the .exe it wraps", () => {

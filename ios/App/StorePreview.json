@@ -1,0 +1,77 @@
+{
+  "bots": [
+    {
+      "id": "preview-scout",
+      "threadId": "preview-thread-scout",
+      "name": "Scout",
+      "title": "Researcher",
+      "description": "Finds the facts and brings back sources.",
+      "notifications": true,
+      "color": "cyan",
+      "unread": true,
+      "modelSelection": { "instanceId": "preview", "model": "preview" },
+      "createdAt": 1787000000000,
+      "activeLeafId": "scout-approval",
+      "tasks": [
+        { "threadId": "preview-thread-scout", "title": "iOS launch research", "createdAt": 1787000000000 }
+      ],
+      "messages": [
+        { "id": "scout-user", "role": "user", "kind": "text", "at": 1787028500000, "text": "Compare the final TestFlight checklist with Apple’s requirements." },
+        { "id": "scout-reply", "role": "bot", "kind": "text", "at": 1787028580000, "parentId": "scout-user", "text": "I checked signing, privacy declarations, review notes, and the real-device test pass. One action needs your approval before I continue." },
+        {
+          "id": "scout-approval",
+          "role": "bot",
+          "kind": "options",
+          "at": 1787028640000,
+          "parentId": "scout-reply",
+          "card": {
+            "title": "Approval needed",
+            "subtitle": "Upload build 1 to TestFlight for internal testing?",
+            "options": ["Allow", "Deny"],
+            "requestId": "preview-request",
+            "tool": "App Store Connect",
+            "allowKey": "testflight:upload"
+          }
+        }
+      ]
+    },
+    {
+      "id": "preview-pixel",
+      "threadId": "preview-thread-pixel",
+      "name": "Pixel",
+      "title": "Designer",
+      "description": "Shapes polished product experiences.",
+      "notifications": true,
+      "color": "purple",
+      "unread": false,
+      "modelSelection": { "instanceId": "preview", "model": "preview" },
+      "createdAt": 1786900000000,
+      "activeLeafId": "pixel-reply",
+      "tasks": [{ "threadId": "preview-thread-pixel", "title": "App Store screenshots", "createdAt": 1786900000000 }],
+      "messages": [
+        { "id": "pixel-user", "role": "user", "kind": "text", "at": 1787028100000, "text": "Prepare the App Store screenshots." },
+        { "id": "pixel-reply", "role": "bot", "kind": "text", "at": 1787028200000, "parentId": "pixel-user", "text": "The iPhone roster and approval flow are ready for the product page." }
+      ]
+    },
+    {
+      "id": "preview-forge",
+      "threadId": "preview-thread-forge",
+      "name": "Forge",
+      "title": "Engineer",
+      "description": "Builds and verifies releases.",
+      "notifications": true,
+      "color": "orange",
+      "unread": false,
+      "busy": true,
+      "modelSelection": { "instanceId": "preview", "model": "preview" },
+      "createdAt": 1786800000000,
+      "activeLeafId": "forge-reply",
+      "tasks": [{ "threadId": "preview-thread-forge", "title": "Release build", "createdAt": 1786800000000 }],
+      "messages": [
+        { "id": "forge-user", "role": "user", "kind": "text", "at": 1787027800000, "text": "Run the complete release verification." },
+        { "id": "forge-reply", "role": "bot", "kind": "text", "at": 1787027900000, "parentId": "forge-user", "text": "Building the signed archive and checking the privacy manifest…" }
+      ]
+    }
+  ],
+  "groups": []
+}

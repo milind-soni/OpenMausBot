@@ -1,0 +1,21 @@
+---
+title: Local VM
+description: Run desktop work inside an isolated Docker or Podman environment.
+icon: Box
+---
+
+The Local VM gives each bot a containerized Linux desktop on the same machine as OpenMausBot. It is useful for browser work, downloads, and repeatable automation that should not run directly on your host desktop.
+
+## Requirements
+
+- Docker Desktop, Docker Engine, or a supported Podman setup
+- Enough local memory and disk for the desktop image
+- A healthy container runtime available to the OpenMausBot process
+
+## Persistence
+
+The bot's workspace and browser profile live in a durable mounted directory. Recreating the desktop can repair stale runtime state without deleting the durable workspace.
+
+## Ownership and reuse
+
+Local VM ownership uses a renewable lease. OpenMausBot validates the resolved image and container safety contract before reuse instead of trusting only a mutable image tag.

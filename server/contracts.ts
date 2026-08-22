@@ -9,6 +9,7 @@ export type DriverKind = string;
 export type InstanceId = string;
 export type ThreadId = string;
 export type TurnId = string;
+export type CloudBackend = "box" | "vps";
 
 export type ProviderErrorCode =
   | "missing_cli"
@@ -91,6 +92,11 @@ export type RuntimeEvent = RuntimeEventBase &
         stopReason?: string | null;
         cost?: number | null;
         denials?: string[];
+        /** THIS turn's token total, as the provider reports it at the end.
+         * The one figure the harness accumulates — thread.token-usage.updated
+         * is a live indicator whose meaning differs per driver (a per-call
+         * delta, a thread total, a per-step figure) and must never be summed. */
+        usage?: { input: number; output: number };
       }
     | { type: "item.started"; itemType: "tool" | "reasoning"; title?: string }
     | { type: "item.updated"; itemType: "tool" | "reasoning"; tokens?: number | null }
@@ -103,8 +109,17 @@ export type RuntimeEvent = RuntimeEventBase &
         tool: string;
         summary: string;
         choices?: string[];
+        approvalScope?: "local-computer";
       }
-    | { type: "request.resolved"; behavior: string; source: string }
+    | {
+        type: "request.resolved";
+        behavior: "allow" | "deny" | "answer";
+        /** who decided: a person, auto mode, the ask's own timeout, the
+         * harness (turn ended / settings changed), or nobody — the answerer
+         * was already gone and the action never ran */
+        source: "user" | "auto" | "timeout" | "system" | "unavailable" | "peer";
+        approvalScope?: "local-computer";
+      }
     | { type: "thread.token-usage.updated"; input: number; output: number }
     // `setup: true` marks a failure the user fixes by installing or
     // configuring something, not by retrying — the UI offers setup instead.
@@ -112,6 +127,12 @@ export type RuntimeEvent = RuntimeEventBase &
   );
 
 export type RuntimeEventListener = (event: RuntimeEvent) => void;
+
+/** What became of an answer to an ask. `allowed-once` grants only the
+ * asked-about action — broadening ("always allow") stays a separate,
+ * explicit step. `unavailable` is the fail-closed default: no answerer,
+ * no action. */
+export type RequestOutcome = "allowed-once" | "rejected" | "answered" | "unavailable";
 
 // ── adapter contract (upstream ProviderAdapterShape, promise-flavored) ──
 // The conversation runtime every provider is flattened into. streamEvents
@@ -130,15 +151,38 @@ export interface SendTurnInput {
   system?: string;
   /** Per-bot integrations the driver may hand to the agent as tools. */
   integrations?: {
-    composio?: { url: string; headers: Record<string, string> };
-    /** Cloud computer, reached through OpenMausBot's REST-to-MCP adapter. */
-    computer?: { kind?: "box"; boxId: string; token: string };
-    /** Direct stdio connection to a Cua Driver MCP server (host or sandbox). */
-    localComputer?: { command: string; args: string[]; env: Record<string, string> };
+    /** A local stdio bridge owns the remote Composio transport. Keeping the
+     * bridge harness-controlled lets it turn connection requests into trusted
+     * chat cards consistently across provider CLIs. */
+    composio?: { command: string; args: string[]; env: Record<string, string> };
+    /** Cloud computer, reached through OpenMausBot's REST-to-MCP adapter.
+     * `control` is the harness's loopback who-is-driving endpoint: the
+     * adapter consults it so a person who takes the wheel in the panel
+     * pauses the bot's hands mid-turn instead of typing over them. */
+    computer?: {
+      kind?: "box";
+      boxId: string;
+      token: string;
+      control?: { url: string; token: string };
+    };
+    /** Direct stdio connection to a Cua Driver MCP server (host, sandbox, or
+     * VPS). `scope` is set only for the user's host desktop; isolated and
+     * remote computers intentionally omit it so host-only approval rules
+     * cannot change their semantics. */
+    localComputer?: {
+      command: string;
+      args: string[];
+      env: Record<string, string>;
+      platform?: "darwin" | "linux" | "win32";
+      generation?: string;
+      scope?: "local-computer";
+    };
     /** Peer-agent comms: an MCP proxy (list_bots / ask_bot) that routes back
      * through the harness so this bot can message other bots. The harness
      * owns turns, permissions, and recursion limits; the proxy only forwards. */
     agents?: { command: string; args: string[]; env: Record<string, string> };
+    /** Physical Android phone tools over authorized USB debugging. */
+    phone?: { command: string; args: string[]; env: Record<string, string> };
     /** dweb network daemon: an MCP proxy exposing dweb status, repo, and
      * opencode model access as tools. url is the dweb HTTP base. */
     dweb?: { url: string };
@@ -167,18 +211,43 @@ export interface ProviderAdapter {
      * connected apps). Same rule again: a key in the config says the user
      * HAS those connections, not that this driver can reach them. */
     composioMcp?: boolean;
+    /** True when the driver can mount the first-party physical-phone MCP. */
+    phoneMcp?: boolean;
+    /** True when this engine accepts images in the prompt — gates image
+     * paste in the composer. Same rule as computerMcp: never offer an
+     * attachment an engine cannot open (a bot told it has an image it
+     * cannot read burns the turn). */
+    images?: boolean;
     /** Effort levels this driver can pass to its CLI, ascending. Absent =
      * the driver cannot set effort, so the app never offers the control —
      * same rule as computerMcp: never show a knob the driver cannot turn. */
     effortLevels?: readonly EffortLevel[];
+    /** True when the driver keeps a live session across turns and can take
+     * a user message MID-TURN (delivered before the model's next call —
+     * "steer"). The composer stays open during a turn on such an engine;
+     * others keep the queue-one-and-wait behaviour. Same rule as the other
+     * flags: never show a control the driver cannot honour. */
+    queueing?: boolean;
+    /** True only when local MCP calls can reach the human approval channel.
+     * Full-auto/bypass provider instances must leave this false. */
+    localComputerMcp?: boolean;
   };
   sendTurn(input: SendTurnInput): Promise<TurnStartResult>;
   interruptTurn(threadId: ThreadId, turnId?: TurnId): Promise<void>;
+  /** Answer a pending ask. Resolves with what actually happened — never
+   * throws for an ask that is no longer there: `unavailable` means nobody
+   * could take the answer (the turn ended, the broker died, the driver
+   * has no asks), and the caller treats it as a deny. Callers branch on the
+   * outcome, not on prose. */
   respondToRequest(
     threadId: ThreadId,
     requestId: string,
     decision: { behavior: "allow" | "deny" | "answer"; message?: string },
-  ): Promise<void>;
+  ): Promise<RequestOutcome>;
+  /** Deliver a user message into the RUNNING turn on this thread. Resolves
+   * false when there is no live turn to steer (the caller then sends it as
+   * a normal turn). Only drivers with `capabilities.queueing` implement it. */
+  steer?(threadId: ThreadId, text: string): Promise<boolean>;
   hasSession(threadId: ThreadId): boolean;
   stopAll(): Promise<void>;
   onEvent(listener: RuntimeEventListener): () => void;
@@ -190,6 +259,9 @@ export interface ProviderSnapshot {
   reason?: string;
   authenticated?: boolean;
   version?: string | null;
+  /** How this instance is paid for, when the driver can tell: a reported
+   * cost on a subscription is notional and the UI labels it as such. */
+  billing?: "metered" | "subscription";
 }
 
 // ── engine install descriptor ───────────────────────────────────────────
@@ -220,7 +292,16 @@ export interface EngineInstall {
 // a rejection to an unavailable shadow snapshot.
 export interface ModelCatalog {
   default: string;
-  options: Array<{ id: string; label: string; custom?: boolean }>;
+  options: Array<{
+    id: string;
+    label: string;
+    custom?: boolean;
+    loaded?: boolean;
+    /** total context window in tokens, when the driver knows it — sizes
+     * the model-facing rebuild (server/context-rebuild.ts). Unknown falls
+     * back to a pattern table over the model id, then a conservative default. */
+    contextWindow?: number;
+  }>;
 }
 
 export interface DriverCreateInput<Config> {
@@ -258,9 +339,18 @@ export interface ProviderInstance {
   dispose(): Promise<void>;
 }
 
+/** How an engine is presented in the picker rail.
+ *  `subscription` — first-party cloud catalog; Custom is extra.
+ *  `custom` — no subscription catalog; Custom is the product. */
+export type EngineAccess = "subscription" | "custom";
+
 export interface ProviderDriver<Config = unknown> {
   readonly driverKind: DriverKind;
-  readonly metadata: { displayName: string; supportsMultipleInstances?: boolean };
+  readonly metadata: {
+    displayName: string;
+    supportsMultipleInstances?: boolean;
+    access?: EngineAccess;
+  };
   /** How to get this engine installed. Omit for engines that need no local
    * binary (API-key drivers), which is what makes it optional. */
   readonly install?: EngineInstall;

@@ -25,9 +25,9 @@ jobs:
     runs-on: ${{ matrix.os }}
     timeout-minutes: 15
     steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
-      - uses: pnpm/action-setup@fc06bc1257f339d1d5d8b3a19a8cae5388b55320 # v4.4.0
-      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: pnpm/action-setup@ff378ebe6b225b0680b81c1ad4498ae0d1d3a5e3 # v6.0.10
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version: 24
           cache: pnpm
@@ -44,18 +44,23 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 25
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      - uses: pnpm/action-setup@v4
-      - uses: actions/setup-node@v4
+      - uses: pnpm/action-setup@ff378ebe6b225b0680b81c1ad4498ae0d1d3a5e3 # v6.0.10
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version: 24
           cache: pnpm
-      - name: Install package validation tools
-        run: sudo apt-get update && sudo apt-get install -y desktop-file-utils xvfb dbus-x11
+      - name: Install package validation and native smoke tools
+        run: >-
+          sudo apt-get update && sudo apt-get install -y
+          at-spi2-core dbus-x11 desktop-file-utils libxi6 libxkbcommon0 squashfs-tools xvfb
       - run: pnpm install --frozen-lockfile
-      - run: pnpm package:linux
+      - name: Stage the pinned CUA runtime
+        run: pnpm build:cua:linux
+      - name: Package from the verified offline CUA stage
+        run: pnpm package:linux:offline
       - run: node scripts/verify-linux-package.mjs
       - name: Configure Chromium sandbox for the unpacked app
         run: |
@@ -63,8 +68,21 @@ jobs:
           sudo chmod 4755 release/linux-unpacked/chrome-sandbox
           test "$(stat -c '%U:%G %a' release/linux-unpacked/chrome-sandbox)" = "root:root 4755"
       - name: Launch packaged app and verify lifecycle
-        run: dbus-run-session -- xvfb-run -a node scripts/smoke-linux-package.mjs
-      - uses: actions/upload-artifact@v4
+        env:
+          OMB_KEEP_SMOKE_DIR: "1"
+        run: pnpm smoke:linux-package
+      - name: Upload smoke diagnostics on failure
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        if: failure()
+        with:
+          name: openmausbot-ubuntu-smoke-diagnostics
+          path: |
+            ${{ runner.temp }}/omb-linux-smoke-*
+            ${{ runner.temp }}/omb-linux-smoke-runtime-*
+          if-no-files-found: warn
+          include-hidden-files: true
+          retention-days: 7
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         if: always()
         with:
           name: openmausbot-ubuntu-x64
@@ -72,3 +90,27 @@ jobs:
             release/*.deb
             release/*.AppImage
           if-no-files-found: error
+
+  ios:
+    name: Swift tests + iOS build
+    runs-on: macos-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Swift package tests
+        run: swift test --package-path ios
+      - name: Generate the Xcode project
+        run: |
+          brew install xcodegen
+          cd ios
+          xcodegen generate
+      - name: Build the simulator app
+        run: |
+          cd ios
+          xcodebuild \
+            -project OpenMausCompanion.xcodeproj \
+            -scheme OpenMausCompanion \
+            -sdk iphonesimulator \
+            -destination 'generic/platform=iOS Simulator' \
+            CODE_SIGNING_ALLOWED=NO \
+            build

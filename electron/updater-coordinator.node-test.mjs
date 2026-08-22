@@ -132,6 +132,42 @@ test("download reports downloading before the first progress event", async () =>
   await download;
 });
 
+test("downloaded waits for native staging to finish before becoming actionable", async () => {
+  const { updater, coordinator, getState } = harness();
+  const pending = deferred();
+  updater.downloadUpdate = () => pending.promise;
+
+  const download = coordinator.download();
+  updater.emit("update-downloaded", { version: "2.0.0" });
+  assert.deepEqual(getState(), { status: "downloading" });
+
+  pending.resolve(["update.zip"]);
+  await download;
+  assert.deepEqual(getState(), { status: "downloaded", version: "2.0.0" });
+});
+
+test("an asynchronous native install error escapes the restarting spinner", () => {
+  const { updater, coordinator, getState, states } = harness();
+  const error = new Error("native staging failed");
+  updater.quitAndInstall = () => updater.emit("error", error);
+
+  coordinator.install();
+
+  assert.deepEqual(getState(), { status: "error", message: "native staging failed" });
+  assert.equal(errorStates(states).length, 1);
+});
+
+test("a synchronous install failure becomes a user-visible error", () => {
+  const { updater, coordinator, getState } = harness();
+  updater.quitAndInstall = () => {
+    throw new Error("install threw");
+  };
+
+  coordinator.install();
+
+  assert.deepEqual(getState(), { status: "error", message: "install threw" });
+});
+
 test("an active download state survives a later background check failure", async () => {
   const { updater, coordinator, getState } = harness();
   const downloadPending = deferred();

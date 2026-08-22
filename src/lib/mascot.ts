@@ -7,7 +7,7 @@ export const MAUS_STATES = CURSOR_STATES;
 
 /** CursorAvatar ships French group labels; the app shows these instead. The
  * memberships mirror its STATE_GROUPS exactly. */
-export const STATE_GROUPS: Record<string, MausState[]> = {
+export const STATE_GROUPS = {
   Lifecycle: ["sleeping", "waking", "idle", "listening", "thinking", "searching", "working"],
   Reactions: [
     "excited",
@@ -43,7 +43,7 @@ export const STATE_GROUPS: Record<string, MausState[]> = {
     "bouncing",
     "powering-down",
   ],
-};
+} satisfies Record<string, MausState[]>;
 
 export const MAUS_COLOR_NAMES = [
   "green",
@@ -60,7 +60,7 @@ export const MAUS_COLOR_NAMES = [
 
 export type MausColor = (typeof MAUS_COLOR_NAMES)[number];
 
-export const MAUS_COLORS: Record<MausColor, string> = {
+export const MAUS_COLORS = {
   green: "#009957",
   blue: "#377FE6",
   red: "#D94B52",
@@ -71,7 +71,7 @@ export const MAUS_COLORS: Record<MausColor, string> = {
   yellow: "#D8A729",
   teal: "#01A492",
   coral: "#E5634E",
-};
+} satisfies Record<MausColor, string>;
 
 export const MAUS_MOTIONS = [
   "arrive",
@@ -96,7 +96,11 @@ export type MausMotion = "none" | (typeof MAUS_MOTIONS)[number];
  * they are translated on read rather than migrated in place — a bot's stored
  * face should survive a downgrade too.
  */
-const LEGACY_STATES: Record<string, MausState> = {
+interface LegacyStates {
+  [state: string]: MausState;
+}
+
+const LEGACY_STATES: LegacyStates = {
   deadpan: "idle",
   friendly: "happy",
   focused: "working",

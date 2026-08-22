@@ -8,6 +8,7 @@ import { homedir } from "node:os";
 import { basename, join } from "node:path";
 
 import type { ModelCatalog } from "../contracts.ts";
+import { killCliTree, spawnCli } from "../procs.ts";
 import { mergeLocalInject } from "./local-inject.ts";
 
 export const STATIC_CODEX_MODELS: ModelCatalog = {
@@ -15,7 +16,11 @@ export const STATIC_CODEX_MODELS: ModelCatalog = {
   options: [
     { id: "gpt-5.6-sol", label: "GPT-5.6 Sol" },
     { id: "gpt-5.6-terra", label: "GPT-5.6 Terra" },
+    { id: "gpt-5.6-luna", label: "GPT-5.6 Luna" },
+    { id: "gpt-5.5", label: "GPT-5.5" },
     { id: "gpt-5.4", label: "GPT-5.4" },
+    { id: "gpt-5.4-mini", label: "GPT-5.4 Mini" },
+    { id: "gpt-5.3-codex-spark", label: "GPT-5.3 Codex Spark" },
   ],
 };
 
@@ -36,14 +41,134 @@ export function decodeCodexSelection(id: string | null | undefined): {
   modelProvider: string | null;
 } {
   if (!id) return { model: null, modelProvider: null };
-  if (STATIC_CODEX_MODELS.options.some((option) => option.id === id)) {
-    return { model: id, modelProvider: OFFICIAL_CODEX_PROVIDER };
-  }
   const sep = id.indexOf(SEP);
   if (sep > 0) {
     return { model: id.slice(sep + SEP.length), modelProvider: id.slice(0, sep) };
   }
-  return { model: id, modelProvider: null };
+  // Every official app-server picker row has a bare id. Custom providers are
+  // always provider-qualified above, so a newly released cloud model must not
+  // silently fall through to the user's configured local provider.
+  return { model: id, modelProvider: MODEL_ID.test(id) ? OFFICIAL_CODEX_PROVIDER : null };
+}
+
+interface CodexAppServerModel {
+  id?: unknown;
+  displayName?: unknown;
+  hidden?: unknown;
+  isDefault?: unknown;
+}
+
+/** Ask the installed Codex CLI for the ChatGPT model catalog it can actually
+ * use. This is the authoritative subscription catalog and changes more often
+ * than OpenMausBot releases, so consume every page instead of hard-coding the
+ * current set forever. */
+export function readCodexAppServerModelCatalog(
+  cli: string,
+  env: Record<string, string | undefined>,
+  timeoutMs = 8_000,
+): Promise<ModelCatalog | null> {
+  return new Promise((resolve) => {
+    const child = spawnCli(cli, ["app-server"], {
+      cwd: homedir(),
+      env,
+      stdio: ["pipe", "pipe", "pipe"],
+    });
+    let settled = false;
+    let buffer = "";
+    let nextId = 1;
+    const models: CodexAppServerModel[] = [];
+    const cursors = new Set<string>();
+    const pending = new Map<number, "initialize" | "models">();
+
+    const finish = (catalog: ModelCatalog | null) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      killCliTree(child);
+      resolve(catalog);
+    };
+    const request = (method: string, params: unknown, kind: "initialize" | "models") => {
+      const id = nextId++;
+      pending.set(id, kind);
+      try {
+        child.stdin.write(`${JSON.stringify({ jsonrpc: "2.0", id, method, params })}\n`);
+      } catch {
+        finish(null);
+      }
+    };
+    const requestModels = (cursor: string | null) => {
+      request("model/list", { cursor, limit: 100 }, "models");
+    };
+    const timer = setTimeout(() => finish(null), timeoutMs);
+    timer.unref?.();
+
+    child.stdout.setEncoding("utf8");
+    child.stdout.on("data", (chunk) => {
+      buffer += chunk;
+      let newline;
+      while ((newline = buffer.indexOf("\n")) !== -1) {
+        const line = buffer.slice(0, newline);
+        buffer = buffer.slice(newline + 1);
+        if (!line.trim()) continue;
+        let message: any;
+        try {
+          message = JSON.parse(line);
+        } catch {
+          continue;
+        }
+        const kind = pending.get(message.id);
+        if (!kind) continue;
+        pending.delete(message.id);
+        if (message.error) {
+          finish(null);
+          return;
+        }
+        if (kind === "initialize") {
+          try {
+            child.stdin.write(`${JSON.stringify({ jsonrpc: "2.0", method: "initialized", params: {} })}\n`);
+          } catch {
+            finish(null);
+            return;
+          }
+          requestModels(null);
+          continue;
+        }
+
+        const page = message.result;
+        if (Array.isArray(page?.data)) models.push(...page.data);
+        const cursor = typeof page?.nextCursor === "string" && page.nextCursor ? page.nextCursor : null;
+        if (cursor && !cursors.has(cursor)) {
+          cursors.add(cursor);
+          requestModels(cursor);
+          continue;
+        }
+
+        const options: ModelCatalog["options"] = [];
+        const seen = new Set<string>();
+        let defaultModel: string | null = null;
+        for (const row of models) {
+          if (row.hidden === true || typeof row.id !== "string" || !MODEL_ID.test(row.id) || seen.has(row.id)) continue;
+          seen.add(row.id);
+          options.push({
+            id: row.id,
+            label: typeof row.displayName === "string" && row.displayName.trim() ? row.displayName : row.id,
+          });
+          if (row.isDefault === true) defaultModel = row.id;
+        }
+        if (!options.length) {
+          finish(null);
+          return;
+        }
+        finish({
+          default: defaultModel && seen.has(defaultModel) ? defaultModel : options[0].id,
+          options,
+        });
+      }
+    });
+    child.on("error", () => finish(null));
+    child.on("close", () => finish(null));
+    request("initialize", { clientInfo: { name: "openmausbot", version: "1" } }, "initialize");
+  });
 }
 
 export function codexHome(env: Record<string, string | undefined>): string {
@@ -232,10 +357,12 @@ async function probeProviderModels(
 export async function readCodexModelCatalog(
   env: Record<string, string | undefined> = process.env,
   fetchImpl: typeof fetch = fetch,
+  cli?: string,
 ): Promise<ModelCatalog> {
+  const official = (cli ? await readCodexAppServerModelCatalog(cli, env) : null) ?? STATIC_CODEX_MODELS;
   const home = codexHome(env);
   const mainText = readText(join(home, "config.toml"));
-  if (!mainText) return STATIC_CODEX_MODELS;
+  if (!mainText) return mergeLocalInject(official, env, fetchImpl);
 
   const main = parseCodexToml(mainText);
   const known = new Map(main.providers.map((provider) => [provider.id, provider]));
@@ -250,7 +377,7 @@ export async function readCodexModelCatalog(
     // default would decode the bare slug back to the OpenAI provider.
     if (
       provider === OFFICIAL_CODEX_PROVIDER &&
-      STATIC_CODEX_MODELS.options.some((option) => option.id === model)
+      official.options.some((option) => option.id === model)
     ) return;
     extras.push({ provider, model });
   };
@@ -279,7 +406,7 @@ export async function readCodexModelCatalog(
   );
   for (const row of live.flat()) remember(row.provider, row.model);
 
-  const options = STATIC_CODEX_MODELS.options.map((option) => ({ ...option }));
+  const options = official.options.map((option) => ({ ...option }));
   const seen = new Set(options.map((option) => option.id));
   for (const extra of extras) {
     const id = encodeCodexSelection(extra.provider, extra.model);
@@ -294,7 +421,7 @@ export async function readCodexModelCatalog(
 
   const configured = main.model && main.modelProvider
     ? main.modelProvider === OFFICIAL_CODEX_PROVIDER &&
-      STATIC_CODEX_MODELS.options.some((option) => option.id === main.model)
+      official.options.some((option) => option.id === main.model)
       ? main.model
       : encodeCodexSelection(main.modelProvider, main.model)
     : main.model && seen.has(main.model)
@@ -303,7 +430,7 @@ export async function readCodexModelCatalog(
 
   return mergeLocalInject(
     {
-      default: configured && seen.has(configured) ? configured : STATIC_CODEX_MODELS.default,
+      default: configured && seen.has(configured) ? configured : official.default,
       options,
     },
     env,

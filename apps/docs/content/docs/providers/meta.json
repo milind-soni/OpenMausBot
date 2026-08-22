@@ -1,0 +1,5 @@
+{
+  "title": "Agent engines",
+  "icon": "BrainCircuit",
+  "pages": ["index", "troubleshooting"]
+}

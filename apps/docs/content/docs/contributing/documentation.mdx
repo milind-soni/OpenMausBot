@@ -1,0 +1,44 @@
+---
+title: Writing documentation
+description: Add and review Fumadocs pages in the same pull request as the feature.
+icon: FilePenLine
+---
+
+Public documentation lives in `apps/docs/content/docs`. Internal design notes and implementation plans can remain in the repository's top-level `docs` folder.
+
+## Add a page
+
+Create a `.mdx` file with a title and description:
+
+```mdx
+---
+title: Feature name
+description: One sentence that says what the reader will learn.
+---
+
+Explain the user outcome first.
+```
+
+Add the page filename to the nearest `meta.json` so it appears in navigation.
+
+## Preview locally
+
+From the repository root:
+
+```bash
+pnpm docs:dev
+```
+
+Open `http://localhost:3000`. Before submitting:
+
+```bash
+pnpm docs:build
+```
+
+## Documentation standard
+
+- Describe shipped behavior, not an open PR as though it has been released.
+- Lead with user outcomes and include exact recovery steps for known failure modes.
+- State platform and security boundaries plainly.
+- Prefer links to stable public docs over duplicating long internal design records.
+- Update the changelog only when a release is actually published.

@@ -30,12 +30,21 @@ const SENSITIVE = [
   /\bcredentials?\.json\b|\bserviceaccount\b/i,
 ];
 
+/** First matching pattern's source, so a verdict can NAME the rule that
+ * made it — the decision log's whole value is "which rule", and deriving
+ * the match a second time at the call site is how the log and the verdict
+ * drift apart. */
+function matchFirst(rules: RegExp[], text: string): string | null {
+  for (const re of rules) if (re.test(text)) return re.source;
+  return null;
+}
+
 export function looksSensitive(text: string): boolean {
-  return SENSITIVE.some((re) => re.test(text));
+  return matchFirst(SENSITIVE, text) !== null;
 }
 
 export function looksDestructive(text: string): boolean {
-  return DESTRUCTIVE.some((re) => re.test(text));
+  return matchFirst(DESTRUCTIVE, text) !== null;
 }
 
 /** The key an "Always allow" remembers.
@@ -49,15 +58,16 @@ export function looksDestructive(text: string): boolean {
  * client so the two sides can never disagree about what was granted. */
 const COMMAND_TOOLS = new Set(["bash", "shell", "execute", "run_command", "computer_exec", "terminal"]);
 
-export function approvalKey(tool: string, summary: string): string {
+export function approvalKey(tool: string, summary: string, scope?: "local-computer"): string {
   const bare = tool.replace(/^mcp__[^_]+__/, "").toLowerCase();
-  if (!COMMAND_TOOLS.has(bare)) return tool;
+  if (!COMMAND_TOOLS.has(bare)) return scope ? `${scope}:${tool}` : tool;
   // first bare word of the command, skipping env assignments and sudo
   const words = summary.trim().split(/\s+/);
   let i = 0;
   while (i < words.length && (/^[A-Z_][A-Z0-9_]*=/.test(words[i]) || words[i] === "sudo")) i += 1;
   const program = (words[i] ?? "").split("/").pop()?.replace(/[^\w.-]/g, "") ?? "";
-  return program ? `${tool}:${program}` : tool;
+  const key = program ? `${tool}:${program}` : tool;
+  return scope ? `${scope}:${key}` : key;
 }
 
 export interface AutoApprover {
@@ -65,9 +75,91 @@ export interface AutoApprover {
   alwaysAllow?: string[];
 }
 
-/** Why this request may be answered without the human, or null to ask.
- * The returned string becomes the chip in the transcript, so an
- * auto-approved action is never invisible. */
+/** Why a verdict landed the way it did. `unattended-block` exists only in
+ * contrast: a grant WOULD have fired, and the only thing that stopped it
+ * was that nobody started this turn — the most audit-worthy card of all. */
+export type AutoVerdictSource =
+  | "always-allow"
+  | "auto-mode"
+  | "unattended-block"
+  | "local-computer-block"
+  | "destructive-guard"
+  | "sensitive-guard"
+  | "no-grant";
+
+export interface AutoVerdict {
+  /** Chip text when the bot may answer itself, null when a human decides.
+   * The string becomes the chip in the transcript, so an auto-approved
+   * action is never invisible. */
+  approve: string | null;
+  source: AutoVerdictSource;
+  /** What identifies the rule that decided: the matched regex (guards) or
+   * the granted key (always-allow, and unattended-block over one). Auto
+   * mode has no narrower identity than the mode itself, so it carries none. */
+  rule?: string;
+}
+
+/** The verdict AND its provenance. The decision itself is unchanged from
+ * autoDecision below — this exists so the decision log can record which
+ * rule decided without the call site re-deriving (and eventually
+ * mis-deriving) the match. */
+export function autoVerdict(
+  bot: AutoApprover,
+  tool: string,
+  summary: string,
+  context?: {
+    /** the turn was started by an outside event, with nobody at the keyboard */
+    unattended?: boolean;
+    /** the request controls the user's active desktop */
+    scope?: "local-computer";
+  },
+): AutoVerdict {
+  // the guards outrank the grants, so an "always allow" can never widen
+  // into them
+  const destructive = matchFirst(DESTRUCTIVE, summary) ?? matchFirst(DESTRUCTIVE, tool);
+  const sensitive = destructive ? null : matchFirst(SENSITIVE, summary);
+  // The grant is computed even when a hard block will refuse it: the row
+  // worth auditing is "this WOULD have auto-approved, and only the block
+  // stood in the way", which cannot be told apart from an ordinary
+  // "nobody granted this" card without knowing both halves.
+  const key = approvalKey(tool, summary, context?.scope);
+  const grant =
+    destructive || sensitive
+      ? null
+      : bot.alwaysAllow?.includes(key)
+        ? { approve: `auto-approved ${key} (always allowed)`, source: "always-allow" as const, rule: key }
+        : bot.autoApprove
+          ? { approve: `auto-approved ${tool}`, source: "auto-mode" as const, rule: undefined }
+          : null;
+  if (context?.unattended) {
+    // Auto mode is something a person switched on for turns they are present
+    // for. A webhook turn begins with nobody watching, on a payload someone
+    // else wrote, so it does not inherit that decision — the guard above is a
+    // pattern list its own comment calls "not a security boundary", and it
+    // must not stand in for a human at 3am. A guard that would have carded
+    // anyway keeps its own name; the block is only the story when it is the
+    // thing that changed the outcome.
+    if (grant) return { approve: null, source: "unattended-block", rule: grant.rule };
+    if (destructive) return { approve: null, source: "destructive-guard", rule: destructive };
+    if (sensitive) return { approve: null, source: "sensitive-guard", rule: sensitive };
+    return { approve: null, source: "no-grant" };
+  }
+  if (context?.scope === "local-computer" && !bot.autoApprove) {
+    // Host control is not covered by a remembered always-allow grant.
+    // After the Auto-on-this-computer warning, unclassified GUI actions
+    // (click/type) may auto-approve; destructive/sensitive still card.
+    if (grant) return { approve: null, source: "local-computer-block", rule: grant.rule };
+    if (destructive) return { approve: null, source: "destructive-guard", rule: destructive };
+    if (sensitive) return { approve: null, source: "sensitive-guard", rule: sensitive };
+    return { approve: null, source: "no-grant" };
+  }
+  if (destructive) return { approve: null, source: "destructive-guard", rule: destructive };
+  if (sensitive) return { approve: null, source: "sensitive-guard", rule: sensitive };
+  if (grant) return { approve: grant.approve, source: grant.source, rule: grant.rule };
+  return { approve: null, source: "no-grant" };
+}
+
+/** Why this request may be answered without the human, or null to ask. */
 export function autoDecision(
   bot: AutoApprover,
   tool: string,
@@ -75,19 +167,9 @@ export function autoDecision(
   context?: {
     /** the turn was started by an outside event, with nobody at the keyboard */
     unattended?: boolean;
+    /** the request controls the user's active desktop */
+    scope?: "local-computer";
   },
 ): string | null {
-  // Auto mode is something a person switched on for turns they are present
-  // for. A webhook turn begins with nobody watching, on a payload someone
-  // else wrote, so it does not inherit that decision — the guard below is a
-  // pattern list its own comment calls "not a security boundary", and it
-  // must not stand in for a human at 3am.
-  if (context?.unattended) return null;
-  // the guards come first, so an "always allow" can never widen into them
-  if (looksDestructive(summary) || looksDestructive(tool)) return null;
-  if (looksSensitive(summary)) return null;
-  const key = approvalKey(tool, summary);
-  if (bot.alwaysAllow?.includes(key)) return `auto-approved ${key} (always allowed)`;
-  if (bot.autoApprove) return `auto-approved ${tool}`;
-  return null;
+  return autoVerdict(bot, tool, summary, context).approve;
 }

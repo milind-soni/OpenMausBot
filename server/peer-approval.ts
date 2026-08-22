@@ -52,12 +52,9 @@ function settleCard(pending: Pending, behavior: string, source: "user" | "system
     .messagesFor(pending.threadId)
     .find((m) => m.id === pending.messageId);
   if (!existing?.card || existing.card.answered) return;
-  const patched = pending.bus.store.patchMessage(pending.threadId, pending.messageId, {
+  pending.bus.store.patchMessage(pending.threadId, pending.messageId, {
     card: { ...existing.card, answered: behavior, dismissed: source !== "user" },
   });
-  if (patched) {
-    pending.bus.broadcast({ kind: "message.patch", threadId: pending.threadId, message: patched });
-  }
 }
 
 /** requestId → pending ask. Lives only in memory — restarting the
@@ -95,7 +92,6 @@ function pushApprovalCard(
       allowKey: peerAllowKey(action, target.id),
     },
   });
-  bus.broadcast({ kind: "message", threadId: sourceThreadId, message: note });
   return note;
 }
 
@@ -173,6 +169,19 @@ export function cancelPeerApprovalsFor(botId: string): void {
   }
 }
 
+/** Deny every peer-communication approval owned by a thread whose turn was
+ * interrupted. Patching the card alone is not enough: the in-memory promise
+ * must resolve too, or the delegation queue waits until its 15-minute timer. */
+export function cancelPeerApprovalsForThread(threadId: string): void {
+  for (const [requestId, pending] of pendingComms) {
+    if (pending.threadId !== threadId) continue;
+    pendingComms.delete(requestId);
+    clearTimeout(pending.timer);
+    settleCard(pending, "deny", "system");
+    pending.resolve("deny");
+  }
+}
+
 /** Cards left on disk by a previous run can never be answered — their
  * in-memory approval died with the process. Settle them at boot so a
  * crashed run doesn't leave a thread with a permanently blocked composer. */
@@ -189,10 +198,7 @@ export function dismissStalePeerCards(bus: ApprovalBus): number {
         const patched = bus.store.patchMessage(threadId, message.id, {
           card: { ...card, answered: "deny", dismissed: true },
         });
-        if (patched) {
-          bus.broadcast({ kind: "message.patch", threadId, message: patched });
-          dismissed += 1;
-        }
+        if (patched) dismissed += 1;
       }
     }
   }

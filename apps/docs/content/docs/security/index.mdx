@@ -1,0 +1,27 @@
+---
+title: Security model
+description: The boundaries that keep agents, credentials, computers, and paired devices scoped.
+icon: ShieldCheck
+---
+
+OpenMausBot is designed around a local owner, explicit capabilities, and narrow process boundaries. Local-first does not mean risk-free: an agent with tool or computer access can still act on the resources you grant it.
+
+## Core boundaries
+
+- The harness owns agent processes and listens on loopback.
+- The renderer receives configured-or-not credential state, not secret values.
+- Provider-specific credentials are injected only into the process that needs them.
+- Risky actions become approval cards rather than implicit permission.
+- Local computer control is a separate opt-in and per-bot selection.
+- Paired phones use a default-deny API allowlist and per-device bearer tokens.
+- Cloud and VPS backends are validated before reuse.
+
+## Your responsibility
+
+- Review approvals, especially shell commands, file writes, and actions in connected services.
+- Use dedicated environments for untrusted or destructive work.
+- Keep provider accounts and connected apps scoped to what a bot needs.
+- Revoke lost companion devices immediately.
+- Keep OpenMausBot and agent CLIs updated.
+
+Security reports should be filed through the repository's documented security channel rather than disclosed in a public issue before a fix is available.

@@ -5,6 +5,8 @@ import type { Notification } from "../../server/notify.ts";
 
 export type NotifyFrame = Notification;
 
+export type NotificationTarget = Pick<NotifyFrame, "botId" | "threadId">;
+
 /** Ask while handling the settings click. Browsers may reject permission
  * requests that are triggered later by an incoming SSE frame. */
 export function requestNotificationPermission(): Promise<NotificationPermission> | null {
@@ -15,13 +17,13 @@ export function requestNotificationPermission(): Promise<NotificationPermission>
 /** Show one, unless the app is already in front of the user — a banner over
  * the window you are looking at is noise, and the chat itself already shows
  * the card. */
-export function showNotification(frame: NotifyFrame, onOpen: (botId: string) => void) {
+export function showNotification(frame: NotifyFrame, onOpen: (target: NotificationTarget) => void) {
   if (typeof Notification === "undefined") return;
   if (document.hasFocus()) return;
 
   const open = () => {
     window.focus();
-    onOpen(frame.botId);
+    onOpen({ botId: frame.botId, threadId: frame.threadId });
   };
 
   if (Notification.permission === "granted") {

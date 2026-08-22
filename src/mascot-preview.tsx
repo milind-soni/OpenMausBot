@@ -23,7 +23,9 @@ import { EXPRESSION_COUNT } from "@/components/CursorAvatar";
 import "./styles.css";
 import "./mascot-preview.css";
 
-const SCENARIOS: Partial<Record<MausState, string>> = {
+interface ScenarioLabels extends Partial<Record<MausState, string>> {}
+
+const SCENARIOS: ScenarioLabels = {
   idle: "General / admin",
   happy: "Support / guide",
   curious: "Awaiting input",
@@ -36,7 +38,7 @@ const SCENARIOS: Partial<Record<MausState, string>> = {
   proud: "Task completed",
 };
 
-const MOTION_SCENARIOS: Record<Exclude<MausMotion, "none">, string> = {
+const MOTION_SCENARIOS = {
   arrive: "New bot created",
   switch: "Active bot changed",
   customize: "Appearance updated",
@@ -49,7 +51,7 @@ const MOTION_SCENARIOS: Record<Exclude<MausMotion, "none">, string> = {
   blink: "New reply",
   surprise: "Unread update",
   failure: "Action failed",
-};
+} satisfies Record<Exclude<MausMotion, "none">, string>;
 
 const MOTION_COLORS: MausColor[] = [
   "green", "blue", "purple", "red", "cyan", "orange",

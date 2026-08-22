@@ -9,12 +9,14 @@ import { DATA_DIR } from "./config.ts";
 import type { ModelSelection } from "./contracts.ts";
 import {
   cancelPeerApprovalsFor,
+  cancelPeerApprovalsForThread,
   dismissStalePeerCards,
   peerAllowKey,
   requestPeerApproval,
   resolvePeerComms,
   type ApprovalBus,
 } from "./peer-approval.ts";
+import { closeMessageDb } from "./message-db.ts";
 import { Store, type BotRecord } from "./store.ts";
 
 const selection = (): ModelSelection => ({ instanceId: "claude", model: "fake-model" });
@@ -39,6 +41,7 @@ describe("peer approval card lifecycle", () => {
   });
 
   afterEach(() => {
+    closeMessageDb();
     rmSync(DATA_DIR, { recursive: true, force: true });
   });
 
@@ -96,6 +99,19 @@ describe("peer approval card lifecycle", () => {
     const settled = store.messagesFor(from.threadId).find((m) => m.id === card.id);
     expect(settled?.card?.answered).toBe("deny");
     expect(settled?.card?.dismissed).toBe(true); // not the user's answer
+  });
+
+  it("denies and settles approvals owned by an interrupted thread", async () => {
+    const verdict = requestPeerApproval(bus, from, target, "ping", "ask_bot");
+    const card = pendingCard(store, from)!;
+
+    cancelPeerApprovalsForThread(from.threadId);
+
+    expect(await verdict).toBe("deny");
+    const settled = store.messagesFor(from.threadId).find((m) => m.id === card.id);
+    expect(settled?.card?.answered).toBe("deny");
+    expect(settled?.card?.dismissed).toBe(true);
+    expect(pendingCard(store, from)).toBeUndefined();
   });
 
   it("dismisses cards left by a previous run, which nothing can answer", () => {

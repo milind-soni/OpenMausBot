@@ -1,0 +1,52 @@
+---
+title: OpenMausBot documentation
+description: Build a team of AI agents that can talk, use tools, operate computers, and keep working on a schedule.
+icon: BookOpen
+---
+
+<span className="omb-kicker">Local-first agent workspace</span>
+
+OpenMausBot turns agent CLIs into a familiar desktop chat app. Each bot can have its own model, instructions, working folder, connected apps, computer, and recurring work.
+
+<div className="omb-stat-row">
+  <div className="omb-stat"><strong>Many engines</strong><span>Claude, Codex, Grok, Cursor, local models, and more</span></div>
+  <div className="omb-stat"><strong>Real tools</strong><span>Apps, files, terminals, browsers, VMs, and cloud desktops</span></div>
+  <div className="omb-stat"><strong>Your machine</strong><span>Local data and bring-your-own agent subscriptions</span></div>
+</div>
+
+<ProductScreenshot name="docs-fresh-bot" alt="A new OpenMausBot bot named Bramble asking what it should help with" caption="A clean first-run bot. Each conversation belongs to a real agent process, not a simulated contact." />
+
+<Cards>
+  <Card title="Install OpenMausBot" href="/docs/getting-started/installation" description="Download a signed build or run the app from source." />
+  <Card title="Create your first bot" href="/docs/getting-started/first-bot" description="Choose an engine, give it a working folder, and send a task." />
+  <Card title="Connect apps" href="/docs/connected-apps" description="Authorize Gmail, GitHub, Slack, Notion, and hundreds more." />
+  <Card title="Give it a computer" href="/docs/computers" description="Use your desktop, an isolated local VM, Box, or your own VPS." />
+</Cards>
+
+## How the pieces fit
+
+| Layer | What it does | Where to configure it |
+|---|---|---|
+| **Bot** | Holds the identity, conversation, memory, and defaults | Bot settings |
+| **Agent engine** | Runs the reasoning loop and tools | Model picker and App settings |
+| **Working folder** | Gives the bot project context and a safe place to work | Bot settings |
+| **Connected apps** | Authorizes services such as Gmail or GitHub | Connected apps |
+| **Computer** | Gives visual control of a desktop environment | Computer panel |
+| **Automation** | Runs a task later, on a schedule, or from a webhook | Automations |
+
+## Choose your path
+
+| I want to… | Start here |
+|---|---|
+| Understand the app in five minutes | [Quick tour](./getting-started/quick-tour.mdx) |
+| Pick Claude, Codex, Cursor, Grok, or a local model | [Agent engines](./providers/index.mdx) |
+| Organize bots, tasks, rooms, and delegations | [Bots and tasks](./features/bots-and-tasks.mdx) |
+| Control a browser or desktop | [Computers](./computers/index.mdx) |
+| Run work every morning | [Automations](./features/automation.mdx) |
+| Reach my bots from an iPhone | [iOS companion](./mobile/ios-companion.mdx) |
+| Back up or move my data | [Data and backups](./self-hosting/data-and-backups.mdx) |
+| Build from source or contribute | [Contributing](./contributing/index.mdx) |
+
+<Callout type="info" title="Docs track released behavior">
+  OpenMausBot moves quickly. The changelog records shipped releases; proposed or unfinished work stays on GitHub until it lands.
+</Callout>

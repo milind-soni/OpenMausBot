@@ -46,6 +46,8 @@ export function CallButton({ bot }: { bot: Bot }) {
       targetId={bot.id}
       targetName={bot.name}
       voices={[bot.voice]}
+      setupBotId={bot.id}
+      requireExplicitVoices={false}
       onStart={() => track("call_started", { driver: bot.modelSelection?.instanceId })}
     />
   );
@@ -55,11 +57,17 @@ export function CallTargetButton({
   targetId,
   targetName,
   voices,
+  setupBotId,
+  requireExplicitVoices,
   onStart,
 }: {
   targetId: string;
   targetName: string;
   voices: Array<string | undefined>;
+  /** Agent profile to open when voice setup is missing (rooms choose a member). */
+  setupBotId?: string;
+  /** Rooms cannot rely on one workspace fallback for multiple speakers. */
+  requireExplicitVoices: boolean;
   onStart: () => void;
 }) {
   const { state, dispatch } = useStore();
@@ -67,8 +75,9 @@ export function CallTargetButton({
   const active = useOnCall() === targetId;
   const supported = capabilities.dictation.available && Boolean(window.ogb?.speechStart);
   const configured = Boolean(state.config?.tts?.configured);
+  const everyTargetHasVoice = voices.length > 0 && voices.every((voice) => Boolean(voice));
   const voiceReady =
-    configured && Boolean(state.config?.tts?.ready || (voices.length > 0 && voices.every((voice) => Boolean(voice))));
+    configured && (requireExplicitVoices ? everyTargetHasVoice : Boolean(state.config?.tts?.ready || everyTargetHasVoice));
   const unavailable = !active && (!capabilitiesReady || !supported || !voiceReady);
   const voiceSetupRequired = capabilitiesReady && supported && !voiceReady;
   const [helpOpen, setHelpOpen] = useState(false);
@@ -82,9 +91,9 @@ export function CallTargetButton({
       : !supported
         ? "Calls currently need the macOS desktop app"
         : !configured
-          ? "Add an ElevenLabs key in App Settings to make calls"
+          ? "Add an ElevenLabs key in an agent profile to make calls"
           : !voiceReady
-            ? "Pick a voice in App Settings to make calls"
+            ? "Pick a voice in an agent profile to make calls"
             : `Call ${targetName}`;
 
   const reason = !capabilitiesReady
@@ -97,7 +106,7 @@ export function CallTargetButton({
           ? "Add an ElevenLabs API key so the bot can speak during calls."
           : !voiceReady
             ? voices.length > 1
-              ? "Choose an app voice, or give every room member their own ElevenLabs voice."
+              ? "Give every room member an ElevenLabs voice before starting a room call."
               : "Choose an ElevenLabs voice before starting a call."
             : "";
 
@@ -165,11 +174,12 @@ export function CallTargetButton({
               type="button"
               onClick={() => {
                 setHelpOpen(false);
-                dispatch({ type: "toggleAppSettings", open: true, section: "voice" });
+                if (setupBotId && setupBotId !== targetId) dispatch({ type: "select", id: setupBotId });
+                dispatch({ type: "toggleSettings", open: true });
               }}
               className="mt-2.5 rounded-lg bg-accent px-3 py-1.5 text-[12px] font-medium text-white hover:brightness-110"
             >
-              Open Voice settings
+              Open agent settings
             </button>
           )}
         </div>

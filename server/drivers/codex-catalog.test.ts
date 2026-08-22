@@ -1,6 +1,7 @@
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { afterEach, describe, expect, it } from "vitest";
 
 import { CodexDriver } from "./codex.ts";
@@ -13,6 +14,7 @@ import {
 } from "./codex-catalog.ts";
 
 const scratchDirs: string[] = [];
+const FAKE_CLI = join(dirname(fileURLToPath(import.meta.url)), "..", "testing", "fake-codex-app-server.ts");
 
 afterEach(() => {
   for (const dir of scratchDirs.splice(0)) rmSync(dir, { recursive: true, force: true });
@@ -39,6 +41,13 @@ describe("decodeCodexSelection", () => {
     });
   });
 
+  it("forces newly discovered bare ids onto the ChatGPT provider too", () => {
+    expect(decodeCodexSelection("gpt-future-codex")).toEqual({
+      model: "gpt-future-codex",
+      modelProvider: OFFICIAL_CODEX_PROVIDER,
+    });
+  });
+
   it("splits provider-encoded custom ids", () => {
     expect(decodeCodexSelection("omlx::Qwen3.6-35B-A3B-bf16:qwen3-5-6-n-r-reasoning")).toEqual({
       model: "Qwen3.6-35B-A3B-bf16:qwen3-5-6-n-r-reasoning",
@@ -48,10 +57,27 @@ describe("decodeCodexSelection", () => {
 });
 
 describe("readCodexModelCatalog", () => {
-  it("returns the static cloud trio when there is no config", async () => {
+  it("returns the static cloud fallback when there is no config or CLI probe", async () => {
     expect(await readCodexModelCatalog({ HOME: join(tmpdir(), "omb-codex-missing-home") })).toEqual(
       STATIC_CODEX_MODELS,
     );
+  });
+
+  it("uses every visible page from the installed Codex app-server catalog", async () => {
+    chmodSync(FAKE_CLI, 0o755);
+    const catalog = await readCodexModelCatalog(
+      { HOME: join(tmpdir(), "omb-codex-app-server-models"), PATH: process.env.PATH },
+      fetch,
+      FAKE_CLI,
+    );
+
+    expect(catalog).toEqual({
+      default: "gpt-fake-default",
+      options: [
+        { id: "gpt-fake-default", label: "GPT Fake Default" },
+        { id: "gpt-page-two", label: "GPT Page Two" },
+      ],
+    });
   });
 
   it("appends the configured local model and cached catalog slugs as custom", async () => {
@@ -78,7 +104,7 @@ model = "GLM-5.2-mxfp4"
     });
 
     expect(catalog.default).toBe(encodeCodexSelection("omlx", "Qwen3.6-35B-A3B-bf16:qwen3-5-6-n-r-reasoning"));
-    expect(catalog.options.slice(0, 3)).toEqual(STATIC_CODEX_MODELS.options);
+    expect(catalog.options.slice(0, STATIC_CODEX_MODELS.options.length)).toEqual(STATIC_CODEX_MODELS.options);
     expect(catalog.options.filter((option) => option.custom).map((option) => option.id)).toEqual([
       encodeCodexSelection("omlx", "Qwen3.6-35B-A3B-bf16:qwen3-5-6-n-r-reasoning"),
       encodeCodexSelection("omlx", "GLM-5.2-mxfp4"),
@@ -167,6 +193,7 @@ name = "oMLX"
 
 describe("CodexDriver catalog", () => {
   it("loads the config catalog when the instance is created", async () => {
+    chmodSync(FAKE_CLI, 0o755);
     const home = scratchHome({
       "config.toml": `
 model_provider = "omlx"
@@ -181,7 +208,7 @@ name = "oMLX"
       displayName: "Codex",
       environment: { HOME: home },
       enabled: true,
-      config: CodexDriver.defaultConfig(),
+      config: { ...CodexDriver.defaultConfig(), cli: FAKE_CLI },
     });
     try {
       expect(instance.models.options.some((option) => option.id === "omlx::MiniMax-M3-4bit" && option.custom)).toBe(true);

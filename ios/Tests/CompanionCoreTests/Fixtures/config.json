@@ -1,0 +1,21 @@
+{
+  "xai": {
+    "configured": false
+  },
+  "composio": {
+    "configured": false,
+    "apiKeyConfigured": false
+  },
+  "box": {
+    "configured": false
+  },
+  "tts": {
+    "configured": false,
+    "ready": false,
+    "voice": ""
+  },
+  "profile": {
+    "name": "Ada Lovelace",
+    "email": "ada@example.com"
+  }
+}

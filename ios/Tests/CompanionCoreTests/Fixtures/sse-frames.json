@@ -1,0 +1,111 @@
+[
+  {
+    "kind": "hello",
+    "cursor": "f5696cc9:3",
+    "resumed": false
+  },
+  {
+    "kind": "message",
+    "threadId": "58c85a55-425d-4180-944f-d03f38f9bbbf",
+    "message": {
+      "id": "9f1acf7e-b628-43dc-a53a-b1fe8761f9c6",
+      "at": 1786742441212,
+      "parentId": null,
+      "role": "user",
+      "kind": "text",
+      "text": "fixture message 0"
+    },
+    "seq": 4
+  },
+  {
+    "kind": "message",
+    "threadId": "58c85a55-425d-4180-944f-d03f38f9bbbf",
+    "message": {
+      "id": "27403904-171d-4ea2-80a5-2a571a3586bd",
+      "at": 1786742441215,
+      "parentId": "9f1acf7e-b628-43dc-a53a-b1fe8761f9c6",
+      "role": "user",
+      "kind": "text",
+      "text": "fixture message 1"
+    },
+    "seq": 5
+  },
+  {
+    "kind": "message",
+    "threadId": "58c85a55-425d-4180-944f-d03f38f9bbbf",
+    "message": {
+      "id": "459edaa5-f290-4770-aeb1-e0908b2b8b4a",
+      "at": 1786742441219,
+      "parentId": "27403904-171d-4ea2-80a5-2a571a3586bd",
+      "role": "user",
+      "kind": "text",
+      "text": "fixture message 2"
+    },
+    "seq": 6
+  },
+  {
+    "kind": "message",
+    "threadId": "58c85a55-425d-4180-944f-d03f38f9bbbf",
+    "message": {
+      "id": "5d92912c-d2f7-40cf-878b-341464cce922",
+      "at": 1786742441221,
+      "parentId": "459edaa5-f290-4770-aeb1-e0908b2b8b4a",
+      "role": "user",
+      "kind": "text",
+      "text": "fixture message 3"
+    },
+    "seq": 7
+  },
+  {
+    "kind": "message",
+    "threadId": "58c85a55-425d-4180-944f-d03f38f9bbbf",
+    "message": {
+      "id": "10726f98-3a08-44da-8240-e8d84b1f0459",
+      "at": 1786742441223,
+      "parentId": "5d92912c-d2f7-40cf-878b-341464cce922",
+      "role": "user",
+      "kind": "text",
+      "text": "fixture message 4"
+    },
+    "seq": 8
+  },
+  {
+    "kind": "message",
+    "threadId": "58c85a55-425d-4180-944f-d03f38f9bbbf",
+    "message": {
+      "id": "f2525bc3-4594-4394-8b2b-8df19d6cb72d",
+      "at": 1786742441225,
+      "parentId": "10726f98-3a08-44da-8240-e8d84b1f0459",
+      "role": "user",
+      "kind": "text",
+      "text": "fixture message 5"
+    },
+    "seq": 9
+  },
+  {
+    "kind": "bot",
+    "bot": {
+      "id": "4f254cf4-98c5-45ca-907e-967e2bbcb8ac",
+      "threadId": "1f3a20e3-94f2-432b-8af5-db9664ed74a2",
+      "name": "Pesto",
+      "title": "",
+      "description": "",
+      "notifications": true,
+      "color": "green",
+      "unread": true,
+      "modelSelection": {
+        "instanceId": "",
+        "model": ""
+      },
+      "createdAt": 1786742441013,
+      "tasks": [
+        {
+          "threadId": "1f3a20e3-94f2-432b-8af5-db9664ed74a2",
+          "title": "New task",
+          "createdAt": 1786742441013
+        }
+      ]
+    },
+    "seq": 10
+  }
+]

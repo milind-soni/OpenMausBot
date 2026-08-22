@@ -1,0 +1,19 @@
+---
+title: Data and backups
+description: Know what OpenMausBot stores locally and what to preserve.
+icon: DatabaseBackup
+---
+
+OpenMausBot keeps its application state under `~/.openmausbot`, including configuration, transcripts, message attachments, device pairing state, and the SQLite message store.
+
+## Back up
+
+Close OpenMausBot before taking a filesystem-level backup so SQLite and configuration files are captured consistently. Preserve the entire `.openmausbot` directory rather than selecting individual database files.
+
+## Do not copy secrets casually
+
+Packaged desktop builds may protect credentials using operating-system secure storage. Copying the JSON directory to another machine does not necessarily make protected credentials usable there, and it should not be treated as a portable credential export.
+
+## Disposable computer filesystems
+
+Local VM workspaces are mounted durably, but a self-hosted VPS container filesystem is intentionally disposable. Move important artifacts to a durable workspace, repository, or connected app before removing or upgrading a container.

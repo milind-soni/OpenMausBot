@@ -1,0 +1,21 @@
+---
+title: Approvals and inspector
+description: Stay in control when agents ask questions, request access, or perform risky work.
+icon: ShieldCheck
+---
+
+OpenMausBot renders structured agent events as native conversation cards. Questions, choices, permission requests, tool activity, and failures remain attached to the task that produced them.
+
+## Approval cards
+
+When an engine supports approvals, OpenMausBot surfaces the request instead of hiding it in terminal output. Read the requested action and scope before approving it. Denying an action sends control back to the agent so it can choose a safer path.
+
+<ProductScreenshot name="approval-card" alt="An OpenMausBot approval card shown inside a conversation" caption="Approvals stay in context with the request and the agent's explanation." />
+
+## Inspector
+
+Use **Inspector** when you need more detail than the conversation provides. It is useful for following tool calls, reconnect attempts, engine output, and long-running work.
+
+## When a run disconnects
+
+OpenMausBot retries transient streaming failures. If retries end in an authentication or configuration error, fix the underlying engine rather than repeatedly retrying the task. See [Agent engine troubleshooting](../providers/troubleshooting.mdx).

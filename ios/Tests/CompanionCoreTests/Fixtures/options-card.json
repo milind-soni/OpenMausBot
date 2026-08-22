@@ -1,0 +1,17 @@
+{
+  "id": "a5f66904-863b-4e5f-bb22-0139b49e6103",
+  "at": 1786742441016,
+  "parentId": "0c537eab-3088-4bd3-ab26-2a25ff83b91d",
+  "role": "bot",
+  "kind": "options",
+  "card": {
+    "title": "What do you mostly want help with?",
+    "subtitle": "Pick whatever's closest; we can always expand from there.",
+    "options": [
+      "Work & projects",
+      "Writing & research",
+      "Life admin",
+      "A bit of everything"
+    ]
+  }
+}

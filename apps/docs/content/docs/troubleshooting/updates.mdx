@@ -1,0 +1,23 @@
+---
+title: Desktop updates
+description: Recover from a stuck download or restart and understand supported update paths.
+icon: RefreshCw
+---
+
+Automatic updates are available on macOS and Windows. Ubuntu packages are updated by installing a newly downloaded package.
+
+## The download keeps spinning
+
+Leave the app open long enough for one complete attempt, then quit and reopen it. A failed differential update should fall back to the full package. If the same release remains stuck, download the current installer from the [official releases repository](https://github.com/milind-soni/openmausbot-releases/releases/latest) and install it over the existing copy.
+
+## Restart to update does nothing
+
+Quit OpenMausBot completely and launch it again. If the version did not change, install the latest release manually. Your conversations and settings live outside the application bundle and are not removed by replacing the app.
+
+## Verify the installed version
+
+Open **App settings** and check the displayed version. A commit merged to `main` is not in the desktop app until a release workflow publishes a new version.
+
+<Callout type="warn" title="Use official artifacts">
+  Do not install update files forwarded through chat or uploaded to an unrelated repository. Use the OpenMausBot releases repository and its checksums.
+</Callout>

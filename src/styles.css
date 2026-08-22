@@ -1,6 +1,26 @@
 @import "tailwindcss";
 
-/* Grok Bot dark palette (pixel-sampled from the real app) */
+/* ─────────────────────────────────────────────────────────────────────────
+   SKINS
+
+   A skin is nothing but a block of custom properties. `@theme` declares the
+   tokens (and gives them the Midnight values, so the app renders correctly
+   even before any skin is applied); every block below re-declares the same
+   tokens under a `[data-skin]` selector.
+
+   Two consequences worth knowing:
+
+   1. The selector is `[data-skin=…]`, not `:root[data-skin=…]`. That means any
+      element can open a skin context for its subtree — which is how the skin
+      picker renders a live miniature of each skin instead of a painted mockup.
+   2. These blocks sit outside `@layer`, so they win against Tailwind's theme
+      layer regardless of specificity.
+
+   Contrast is a design constraint here, not an afterthought: every text/surface
+   pair in Atelier and Foundry clears WCAG AA (4.5:1), verified by measuring the
+   rendered values rather than reading the hex. `scripts/check-skin-contrast.mjs`
+   re-runs that check.
+   ───────────────────────────────────────────────────────────────────────── */
 @theme {
   --animate-panel-in: panel-in 0.24s cubic-bezier(0.22, 1, 0.36, 1);
   --animate-pop-in: pop-in 0.2s cubic-bezier(0.22, 1, 0.36, 1);
@@ -8,6 +28,7 @@
   --animate-msg-in: msg-in 0.18s cubic-bezier(0.22, 1, 0.36, 1);
   --animate-shimmer: shimmer 2s linear infinite;
 
+  /* Defaults = Midnight. Kept here so the app is never unstyled. */
   --color-app: #070707;
   --color-panel: #111111;
   --color-raised: #2f2f2f;
@@ -19,6 +40,10 @@
   --color-ink-secondary: #fcfcfc99;
   --color-accent: #1084fe;
   --color-accent-border: #459ffe;
+  /* the ring a keyboard user follows; sits on the accent so focus reads as
+     "the app is talking to you", not as a browser default */
+  --color-focus: #459ffe;
+  --color-accent-text: #7fc0ff;
   --color-bubble-user: #5a5a5a;
   --color-success: #38d591;
   --color-danger: #ff5667;
@@ -26,9 +51,201 @@
 
   --font-sans: "Inter", -apple-system, BlinkMacSystemFont, "SF Pro Text",
     "Segoe UI", system-ui, sans-serif;
+}
 
+/* Tokens that no utility generates — declared outside `@theme` so Tailwind
+   can't tree-shake them away, and so a skin can redefine them freely. */
+:root {
+  /* ink carried by a filled accent / danger surface (see the rule at the
+     bottom of this file, which is what makes them take effect) */
+  --color-accent-ink: #ffffff;
+  --color-danger-ink: #ffffff;
+  --color-scrollbar: #3d3d3d;
+  /* second speed line of the mascot — contrasts against the app ground */
+  --color-maus-line: #fcfcfc;
+}
+
+/* ── Midnight ──────────────────────────────────────────────────────────────
+   The upstream palette, pixel-sampled from the real Grok app. Repeated here
+   (rather than relying on the `@theme` defaults) so that a `[data-skin]`
+   subtree can switch *back* to it — the picker needs that.
+
+   Two upstream contrast gaps are preserved deliberately, because this skin's
+   job is to be the original: white on the accent fill measures 3.65:1 and
+   white on the danger fill 3.32:1, both short of AA for the 13–15px labels
+   they carry. Atelier and Foundry fix this via --color-accent-ink.
+   ───────────────────────────────────────────────────────────────────────── */
+[data-skin="midnight"] {
+  --color-app: #070707;
+  --color-panel: #111111;
+  --color-raised: #2f2f2f;
+  --color-raised-hover: #3d3d3d;
+  --color-card: #262626;
+  --color-inset: #191919;
+  --color-hairline: #333333;
+  --color-ink: #fcfcfc;
+  --color-ink-secondary: #fcfcfc99;
+  --color-accent: #1084fe;
+  --color-accent-border: #459ffe;
+  --color-accent-text: #7fc0ff;
+  --color-accent-ink: #ffffff;
+  --color-bubble-user: #5a5a5a;
+  --color-success: #38d591;
+  --color-danger: #ff5667;
+  --color-danger-ink: #ffffff;
+  --color-warning: #ff9800;
+  --color-scrollbar: #3d3d3d;
+  --color-maus-line: #fcfcfc;
+
+  --font-sans: "Inter", -apple-system, BlinkMacSystemFont, "SF Pro Text",
+    "Segoe UI", system-ui, sans-serif;
+  --radius-lg: 0.5rem;
+  --radius-xl: 0.75rem;
+}
+
+/* ── Atelier ───────────────────────────────────────────────────────────────
+   Daylight on paper, and the inverse of Midnight in every axis. Its one
+   structural idea: surfaces get BRIGHTER as they rise — rail, sidebar,
+   content — so the ground closest to the work is the lightest, the opposite
+   of a dark skin where raised means lighter-grey.
+
+   Four tones were darkened from the first draft to clear AA; the original
+   value is named next to each, so the drift stays auditable.
+   ───────────────────────────────────────────────────────────────────────── */
+[data-skin="atelier"] {
+  --color-app: #f5f1eb;           /* outermost ground */
+  --color-panel: #fbf8f2;         /* sidebar */
+  --color-raised: #ffffff;        /* content — raised means lighter here */
+  --color-raised-hover: #f2e9dc;  /* warm beige doubles as the hover fill */
+  --color-card: #ffffff;
+  --color-inset: #f5f1eb;         /* inset surfaces pick the rail tone back up */
+  --color-hairline: #c8bda8;      /* #ece7dd was 1.11:1 on the rail → 1.65:1 */
+
+  --color-ink: #1a1a18;           /* 17.4:1 on white */
+  --color-ink-secondary: #6b6559; /* #8b8578 was 3.67:1 → 5.78:1 */
+
+  /* Two accent tones: the fill carries white, the text stands on white. */
+  --color-accent: #a05f25;        /* #b06a2c darkened → 5.05:1 */
+  --color-accent-border: #b06a2c; /* the original tone lives on as the border */
+  --color-accent-text: #96551f;   /* for links on a light ground — 5.81:1 */
+  --color-focus: #96551f;         /* the ring rides the accent, not Grok blue */
+  --color-accent-ink: #ffffff;
+  --color-bubble-user: #f2e9dc;   /* your own messages in the badge beige */
+
+  --color-success: #3f6b47;
+  --color-danger: #a33a32;
+  --color-danger-ink: #ffffff;
+  --color-warning: #7a5f31;       /* darkened → 4.98:1 */
+  --color-scrollbar: #c9c0ae;
+  --color-maus-line: #6b6559;
+
+  /* System faces rather than Inter: paper reads as the platform's own. */
+  --font-sans: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI",
+    Roboto, sans-serif;
   --radius-lg: 6px;
   --radius-xl: 10px;
+}
+
+/* ── Foundry ───────────────────────────────────────────────────────────────
+   Night shift. The third corner of the grid: Midnight is dark and cool,
+   Atelier light and warm — this one is dark and warm, which is the register
+   most of this app's actual use falls into.
+
+   Its one structural idea, and the thing that makes it read as metal rather
+   than as "Atelier with the lights off": the accent is the brightest thing on
+   screen, not a darker patch of it. Brass at #d99a3e glows against the ground
+   at 7.9:1 and carries near-black lettering at 7.4:1 — so filled buttons read
+   as lit, not as painted. That inversion is only possible because
+   --color-accent-ink exists; with hardcoded white text the accent would have
+   to stay dark and the skin would lose its point.
+
+   Surfaces warm up as they rise (#100e0b → #262019), the way material does as
+   it comes closer to the lamp. Corners are tighter than Atelier's — 4px and
+   8px — because sheet metal doesn't round the way paper does.
+   ───────────────────────────────────────────────────────────────────────── */
+[data-skin="foundry"] {
+  --color-app: #100e0b;           /* deepest ground, warm black */
+  --color-panel: #171410;         /* sidebar */
+  --color-raised: #262019;        /* raised means warmer, not just lighter */
+  --color-raised-hover: #322b21;
+  --color-card: #1e1a14;
+  --color-inset: #0b0a08;         /* inset sinks below the ground */
+  --color-hairline: #3d3529;      /* visible on purpose — this UI has edges */
+
+  --color-ink: #f4efe4;           /* warm off-white, never pure #fff */
+  --color-ink-secondary: #b0a696; /* 6.7:1 on raised, 5.9:1 on hover */
+
+  /* Brass. Bright fill, dark lettering — the inversion described above. */
+  --color-accent: #d99a3e;
+  --color-accent-border: #e8b25e;
+  --color-accent-text: #e0a44c;   /* 8.6:1 on the ground, for links */
+  --color-focus: #e0a44c;         /* the ring rides the accent, not Grok blue */
+  --color-accent-ink: #1c150c;    /* 7.4:1 on the brass fill */
+  --color-bubble-user: #2a2318;   /* your own messages, one step out of the card */
+
+  --color-success: #57b078;
+  --color-danger: #e0685e;        /* a lamp, not a paint chip */
+  --color-danger-ink: #1c0d0b;
+  --color-warning: #dfa441;
+  --color-scrollbar: #3d3529;
+  --color-maus-line: #b0a696;
+
+  --font-sans: "Inter", -apple-system, BlinkMacSystemFont, "SF Pro Text",
+    "Segoe UI", system-ui, sans-serif;
+  --radius-lg: 4px;
+  --radius-xl: 8px;
+}
+
+/* ── Lagoon ────────────────────────────────────────────────────────────────
+   Cool daylight — the fourth corner, and the one the grid was missing:
+   Midnight is dark and cool, Atelier light and warm, Foundry dark and warm.
+
+   Where Atelier is paper, this is glazed ceramic. The neutrals carry a green-
+   blue cast rather than a cream one (#eef2f2, not #f5f1eb), so the whole
+   surface reads cool without a single saturated pixel, and the deep teal
+   accent belongs to the ground instead of sitting on top of it. Even the ink
+   is a very dark petrol rather than a neutral black — on a tinted ground a
+   truly neutral black reads as a foreign object.
+
+   Corners are the most generous of the four (8px / 14px): glass and ceramic
+   round more than paper does, and far more than sheet metal.
+   ───────────────────────────────────────────────────────────────────────── */
+[data-skin="lagoon"] {
+  /* The tint is the point, so it is carried by the surfaces, not by a button:
+     the ground sits 13 points of green-blue above its red channel, roughly
+     three times Atelier's cream cast, which is what makes the skin read as
+     teal at a glance. Raised surfaces stay pure white as the contrast anchor —
+     tinting those too turns the whole thing to soup. */
+  --color-app: #dfeceb;
+  --color-panel: #ecf4f3;
+  --color-raised: #ffffff;
+  --color-raised-hover: #cfe4e1;
+  --color-card: #ffffff;
+  --color-inset: #d5e8e5;
+  --color-hairline: #aebfbd;      /* 1.60:1 — level with the other three */
+
+  --color-ink: #14201f;           /* dark petrol; a neutral black would read
+                                     as a foreign object on a tinted ground */
+  --color-ink-secondary: #4d5c5b; /* 7.0:1 on white, 5.8:1 on the ground */
+
+  --color-accent: #11736d;        /* deep teal, carries white at 5.68:1 */
+  --color-accent-border: #14807a;
+  --color-accent-text: #0d5f5a;   /* 7.5:1 on a card */
+  --color-focus: #0d5f5a;         /* the ring rides the accent, not Grok blue */
+  --color-accent-ink: #ffffff;
+  --color-bubble-user: #cfe4e1;
+
+  --color-success: #2f6b4f;
+  --color-danger: #a8382f;
+  --color-danger-ink: #ffffff;
+  --color-warning: #7a5a2a;
+  --color-scrollbar: #a6b8b6;
+  --color-maus-line: #4d5c5b;
+
+  --font-sans: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI",
+    Roboto, sans-serif;
+  --radius-lg: 8px;
+  --radius-xl: 14px;
 }
 
 html,
@@ -45,14 +262,44 @@ body {
   overflow: hidden;
 }
 
+/* Keep focus visible after components clear the browser outline. These
+   unlayered rules outrank Tailwind utilities without needing !important. */
+:focus-visible {
+  outline: 2px solid var(--color-focus);
+  outline-offset: 2px;
+}
+
+/* Text fields already sit in a bordered card (the composer pill especially).
+   Chromium treats a pointer click as :focus-visible on inputs, so the
+   global ring above becomes a sharp blue rectangle inside the rounded
+   chrome. Fields keep their own focus:border-*; buttons still use the
+   :focus-visible ring. */
+:is(input, textarea, select):focus,
+:is(input, textarea, select):focus-visible {
+  outline: none;
+}
+
+::selection {
+  background: color-mix(in oklab, var(--color-accent) 45%, transparent);
+  color: var(--color-ink);
+}
+
 ::-webkit-scrollbar {
   width: 8px;
+  height: 8px;
 }
 ::-webkit-scrollbar-thumb {
-  background: #3d3d3d;
+  background: var(--color-scrollbar);
   border-radius: 4px;
 }
+/* the thumb was inert — it never acknowledged the pointer */
+::-webkit-scrollbar-thumb:hover {
+  background: var(--color-raised-hover);
+}
 ::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-corner {
   background: transparent;
 }
 
@@ -78,6 +325,10 @@ body {
 @keyframes shimmer {
   from { background-position: 200% 50%; }
   to { background-position: -200% 50%; }
+}
+@keyframes reduced-loader-pulse {
+  0%, 100% { opacity: 0.45; }
+  50% { opacity: 1; }
 }
 .thinking-shimmer {
   background: linear-gradient(90deg, var(--color-ink-secondary) 40%, var(--color-ink) 50%, var(--color-ink-secondary) 60%);
@@ -169,7 +420,9 @@ body {
 }
 
 .maus-speed-line--two {
-  stroke: #fcfcfc;
+  /* the mascot's own --maus-color is set per motion; this line reads against
+     the app ground instead, so it follows the skin */
+  stroke: var(--color-maus-line);
   stroke-width: 2.5px;
 }
 
@@ -556,4 +809,50 @@ body {
   }
 
   .maus-eyes { transform: none; }
+
+  /* Stop spatial motion instead of accelerating infinite animations. Loading
+     icons keep a slow opacity pulse, so progress remains visible without
+     rotation, bounce, or flicker. */
+  *,
+  *::before,
+  *::after {
+    animation: none !important;
+    transition-duration: 0.01ms !important;
+    transition-delay: 0ms !important;
+    scroll-behavior: auto !important;
+  }
+
+  .animate-spin {
+    animation: reduced-loader-pulse 1.6s ease-in-out infinite !important;
+  }
+}
+
+/* ─────────────────────────────────────────────────────────────────────────
+   Filled accent / danger surfaces
+
+   Components hardcode `text-white` on these fills (~20 call sites). That works
+   only as long as every skin's accent is dark enough to carry white — which
+   rules out any skin whose accent is meant to glow. Rather than edit twenty
+   components, the ink is taken from a token here; `text-white` and this rule
+   have equal specificity, and this file is loaded after Tailwind's utilities.
+   Midnight sets the token to #ffffff, so its rendering is unchanged.
+   ───────────────────────────────────────────────────────────────────────── */
+.bg-accent {
+  color: var(--color-accent-ink);
+}
+.bg-danger {
+  color: var(--color-danger-ink);
+}
+
+/* Disabled buttons.
+   Upstream fades them with `disabled:opacity-40`. On a dark ground that holds:
+   the button stays darker than the page and the white label survives. On a
+   light ground it inverts — Atelier's #a05f25 at 40% over white lands on
+   #d9bfa8, where white lettering measures 1.75:1 and effectively disappears.
+   So the disabled state gets its own colours instead of transparency. */
+button:disabled.bg-accent,
+button:disabled.bg-danger {
+  background-color: var(--color-raised-hover);
+  color: var(--color-ink-secondary);
+  opacity: 1;
 }

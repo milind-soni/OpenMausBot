@@ -74,6 +74,13 @@ describe("approvalKey", () => {
     expect(approvalKey("mcp__ogb__computer_batch", "click 5,5")).toBe("mcp__ogb__computer_batch");
   });
 
+  it("names local and cloud grants in different scopes", () => {
+    expect(approvalKey("mcp__computer__click", "click", "local-computer")).toBe(
+      "local-computer:mcp__computer__click",
+    );
+    expect(approvalKey("mcp__computer__click", "click")).toBe("mcp__computer__click");
+  });
+
   it("grants one program, not the whole shell", () => {
     const bot = { alwaysAllow: [approvalKey("Bash", "git status")] };
     expect(autoDecision(bot, "Bash", "git log --oneline")).toBeTruthy();
@@ -103,6 +110,25 @@ describe("autoDecision", () => {
 
   it("never lets always-allow override the destructive guard", () => {
     expect(autoDecision({ alwaysAllow: ["Bash"] }, "Bash", "sudo rm -rf /var")).toBeNull();
+  });
+
+  it("auto-approves a local-computer request when Auto mode is on", () => {
+    expect(
+      autoDecision({ autoApprove: true }, "mcp__computer__click", "Click the Submit button", {
+        scope: "local-computer",
+      }),
+    ).toBe("auto-approved mcp__computer__click");
+  });
+
+  it("does not let always-allow cover host control without Auto mode", () => {
+    const bot = {
+      alwaysAllow: ["mcp__computer__click", "local-computer:mcp__computer__click"],
+    };
+    expect(
+      autoDecision(bot, "mcp__computer__click", "Click the Submit button", {
+        scope: "local-computer",
+      }),
+    ).toBeNull();
   });
 });
 

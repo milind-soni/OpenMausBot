@@ -1,14 +1,15 @@
-// In-app auto-updater (electron-updater), manual/button-driven — the same
-// shape t3code's desktop app uses: autoDownload off, quitAndInstall on the
-// user's "Restart to update" click. One state object is broadcast to the
-// renderer on every transition; the renderer just renders it.
+// In-app auto-updater (electron-updater). Downloads are user-driven; macOS
+// stages the downloaded ZIP immediately and the explicit restart applies it.
+// One state object is broadcast on every transition.
 //
 // Only runs in the packaged, signed+notarized app (mac auto-update requires
 // signing). In dev it's a no-op so the browser/dev shell is unaffected.
 // electron-updater is vendored (electron/vendor/electron-updater.cjs) because
 // the packaged app ships no node_modules.
 import { app, ipcMain } from "electron";
+import { appendFileSync, mkdirSync } from "node:fs";
 import { createRequire } from "node:module";
+import { join } from "node:path";
 import { createUpdaterCoordinator } from "./updater-coordinator.mjs";
 
 const require = createRequire(import.meta.url);
@@ -18,6 +19,23 @@ let win = null;
 // status: idle | checking | available | downloading | downloaded | installing | error
 let state = { status: "idle" };
 let updaterCoordinator = null;
+
+function updaterLogger() {
+  const directory = app.getPath("logs");
+  const file = join(directory, "updater.log");
+  const write = (level, values) => {
+    try {
+      mkdirSync(directory, { recursive: true, mode: 0o700 });
+      const message = values
+        .map((value) => (value instanceof Error ? value.stack ?? value.message : String(value)))
+        .join(" ");
+      appendFileSync(file, `[${new Date().toISOString()}] [${level}] ${message}\n`, { mode: 0o600 });
+    } catch {
+      // Logging must never make updating unavailable.
+    }
+  };
+  return Object.fromEntries(["debug", "info", "warn", "error"].map((level) => [level, (...values) => write(level, values)]));
+}
 
 function setState(patch) {
   state = { ...state, ...patch };
@@ -32,18 +50,7 @@ export function registerUpdaterIpc() {
   ipcMain.handle("update:get-state", () => state);
   ipcMain.handle("update:check", () => updaterCoordinator?.check(true));
   ipcMain.handle("update:download", () => updaterCoordinator?.download());
-  ipcMain.handle("update:install", () => {
-    if (!autoUpdater) return;
-    // Tearing down the window and relaunching takes a beat; announce it so the
-    // button greys out instead of looking like the click was swallowed.
-    setState({ status: "installing" });
-    // isSilent, isForceRunAfter — relaunch straight into the new version
-    try {
-      autoUpdater.quitAndInstall(true, true);
-    } catch (e) {
-      setState({ status: "error", message: String(e?.message ?? e) });
-    }
-  });
+  ipcMain.handle("update:install", () => updaterCoordinator?.install());
 }
 
 export function startUpdater(mainWindow) {
@@ -62,8 +69,11 @@ export function startUpdater(mainWindow) {
     return;
   }
   autoUpdater.autoDownload = false; // button-driven download
-  autoUpdater.autoInstallOnAppQuit = false; // button-driven install
-  autoUpdater.logger = null;
+  // Squirrel.Mac has a second, native staging pass after the ZIP download.
+  // Start it immediately so "Restart to update" never has to begin that slow
+  // pass and wait indefinitely. Windows keeps the explicit installer click.
+  autoUpdater.autoInstallOnAppQuit = process.platform === "darwin";
+  autoUpdater.logger = updaterLogger();
 
   updaterCoordinator = createUpdaterCoordinator(autoUpdater, setState);
 
