@@ -134,6 +134,44 @@ const cnSwitch = (on: boolean) =>
 const cnKnob = (on: boolean) =>
   `absolute top-[3px] h-[18px] w-[18px] rounded-full bg-white transition-all ${on ? "left-[21px]" : "left-[3px]"}`;
 
+/** Writes a redacted, paste-anywhere diagnostics file the user picks. The
+ * report holds versions, configured-or-not booleans and the server.log tail —
+ * never credential values (the desktop shell does not read secret fields). */
+function DiagnosticsRow() {
+  const { dispatch } = useStore();
+  const [exporting, setExporting] = useState(false);
+
+  const exportDiagnostics = async () => {
+    if (!window.ogb?.exportDiagnostics || exporting) return;
+    setExporting(true);
+    try {
+      const path = await window.ogb.exportDiagnostics();
+      if (path) dispatch({ type: "error", message: `Diagnostics saved to ${path}` });
+    } catch (e) {
+      dispatch({ type: "error", message: e instanceof Error ? e.message : String(e) });
+      setTimeout(() => dispatch({ type: "error", message: null }), 6000);
+    } finally {
+      setExporting(false);
+    }
+  };
+
+  return (
+    <Card
+      title="Diagnostics"
+      subtitle="Versions, configuration on/off state and the server log tail — secrets are never included. Safe to attach to a bug report."
+    >
+      <button
+        onClick={() => void exportDiagnostics()}
+        disabled={exporting}
+        aria-label="Export diagnostics to a text file"
+        className="rounded-lg border border-hairline/40 px-3 py-1.5 text-[13px] text-ink hover:bg-control disabled:opacity-40"
+      >
+        Export Diagnostics…
+      </button>
+    </Card>
+  );
+}
+
 export function SettingsModal() {
   const { state, dispatch } = useStore();
   const section = state.appSettingsSection;
@@ -243,6 +281,7 @@ export function SettingsModal() {
                   <RoomTurnTimeoutSettings />
                 </Card>
                 <UpdatesRow />
+                <DiagnosticsRow />
                 <AnalyticsRow />
               </>
             )}

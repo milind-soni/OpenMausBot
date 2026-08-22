@@ -8,6 +8,7 @@ import { createAndroidDeviceController } from "./android-device.mjs";
 import { finishSpeech, startSpeech, stopSpeech } from "./speech.mjs";
 import { openBlankTerminal } from "./terminal-launch.mjs";
 import { startUpdater, registerUpdaterIpc } from "./updater.mjs";
+import { buildDiagnosticsReport, diagnosticsFileName } from "./diagnostics.mjs";
 import { migrateWorkspaceCredentials, workspaceCredentialEnv } from "./workspace-credentials.mjs";
 import capabilitiesModule from "./capabilities.cjs";
 
@@ -207,6 +208,52 @@ function slog(line) {
   } catch {
     /* logging must never break startup */
   }
+}
+
+const LOG_TAIL_BYTES = 256 * 1024;
+
+function readLogTail(logPath) {
+  try {
+    const size = fs.statSync(logPath).size;
+    const start = Math.max(0, size - LOG_TAIL_BYTES);
+    const handle = fs.openSync(logPath, "r");
+    try {
+      const buffer = Buffer.alloc(size - start);
+      fs.readSync(handle, buffer, 0, buffer.length, start);
+      return { tail: buffer.toString("utf8"), bytes: buffer.length };
+    } finally {
+      fs.closeSync(handle);
+    }
+  } catch {
+    return null;
+  }
+}
+
+// Everything the bug-report bundle needs. The config summary comes from the
+// server's own booleans-only /api/config status (credentials are never
+// echoed), and the log goes through the redactor in diagnostics.mjs — so the
+// file is safe to paste into a public issue even if a future log line ever
+// carried a secret.
+async function gatherDiagnostics() {
+  const serverStatus = await fetch(`http://127.0.0.1:${SERVER_PORT}/api/config`)
+    .then((res) => (res.ok ? res.json() : null))
+    .catch(() => null);
+  const logPath = path.join(LOG_DIR, "server.log");
+  const log = readLogTail(logPath);
+  return buildDiagnosticsReport({
+    appInfo: {
+      version: app.getVersion(),
+      platform: process.platform,
+      arch: process.arch,
+      electron: process.versions.electron,
+      node: process.versions.node,
+      packaged: app.isPackaged,
+      uptimeSeconds: Math.round(process.uptime()),
+    },
+    configSummary: serverStatus ?? {},
+    logTail: log?.tail ?? "",
+    logPath: log ? logPath : "",
+  });
 }
 
 async function startServerOn(port) {
@@ -620,6 +667,22 @@ ipcMain.handle("desktop:pick-folder", async (event, current) => {
     ...(typeof current === "string" && current ? { defaultPath: current } : {}),
   });
   return result.canceled ? null : (result.filePaths[0] ?? null);
+});
+
+// One-click bug-report bundle. Secrets are never read; the report is
+// redacted again on the way out (diagnostics.mjs). null means the user
+// cancelled the save dialog.
+ipcMain.handle("desktop:export-diagnostics", async (event) => {
+  const owner = BrowserWindow.fromWebContents(event.sender) ?? undefined;
+  const report = await gatherDiagnostics();
+  const result = await dialog.showSaveDialog(owner, {
+    title: "Export diagnostics",
+    defaultPath: diagnosticsFileName(),
+    filters: [{ name: "Text", extensions: ["txt"] }],
+  });
+  if (result.canceled || !result.filePath) return null;
+  fs.writeFileSync(result.filePath, report, { mode: 0o600 });
+  return result.filePath;
 });
 
 ipcMain.handle("desktop:open-external", async (_event, rawUrl) => {
