@@ -144,8 +144,31 @@ process.stdin.on("data", (chunk) => {
         notify("item/started", { item: { id: "i1", type: "commandExecution", command } });
         notify("item/started", { item: { id: "w1", type: "webSearch", query: "OpenMausBot" } });
         if (mode === "approval" || mode === "windows-command") {
-          const approvalCommand = mode === "windows-command" ? command : "rm -rf scratch";
-          out({ jsonrpc: "2.0", id: 100, method: "execCommandApproval", params: { command: approvalCommand } });
+          const gatewayApproval =
+            mode === "approval" && process.env.FAKE_CODEX_APPROVAL_KIND === "gateway";
+          const approvalCommand =
+            mode === "windows-command"
+              ? command
+              : process.env.FAKE_CODEX_APPROVAL_COMMAND ?? "rm -rf scratch";
+          out({
+            jsonrpc: "2.0",
+            id: 100,
+            method: gatewayApproval ? "mcpServer/elicitation/request" : "execCommandApproval",
+            params: gatewayApproval
+              ? {
+                  serverName: process.env.FAKE_CODEX_APPROVAL_SERVER_NAME ?? "openmaus_capabilities",
+                  tool: "call_capability",
+                  arguments: {
+                    server: process.env.FAKE_CODEX_APPROVAL_FALLBACK_SERVER ?? "openmaus-host",
+                    tool: "filesystem_delete",
+                    arguments: {
+                      path: process.env.FAKE_CODEX_APPROVAL_PATH ?? "scratch",
+                      recursive: process.env.FAKE_CODEX_APPROVAL_RECURSIVE === "1",
+                    },
+                  },
+                }
+              : { command: approvalCommand },
+          });
           // turn continues from the approval response handler above
         } else {
           finishTurn();

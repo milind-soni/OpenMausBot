@@ -196,6 +196,36 @@ describe("bot patch queue", () => {
     expect(queue.overlayFor("bot-1")).toEqual({});
   });
 
+  it("does not overwrite an intervening SSE bot when patch and reconciliation fail", async () => {
+    const reconciliation = deferredBot();
+    const onError = vi.fn();
+    let rendererBot: BotAnnouncement = bot({ name: "Before edit", title: "Old title" });
+    const authoritative = vi.fn((serverBot: BotAnnouncement, overlay: BotUpdatePatch) => {
+      rendererBot = { ...serverBot, ...overlay };
+    });
+    const queue = createBotPatchQueue({
+      send: async () => {
+        throw new Error("patch failed");
+      },
+      reconcile: async () => reconciliation.promise,
+      onAuthoritative: authoritative,
+      onError,
+    });
+
+    queue.enqueue("bot-1", { name: "Rejected edit" }, rendererBot);
+    await vi.advanceTimersByTimeAsync(400);
+
+    // An SSE frame arrives while the queue's authoritative re-read is pending.
+    rendererBot = bot({ name: "Newer SSE name", title: "Newer SSE title" });
+    reconciliation.reject(new Error("reconcile failed"));
+    await vi.runAllTicks();
+    await Promise.resolve();
+
+    expect(authoritative).not.toHaveBeenCalled();
+    expect(rendererBot).toMatchObject({ name: "Newer SSE name", title: "Newer SSE title" });
+    expect(onError).toHaveBeenCalledWith(expect.objectContaining({ message: "patch failed" }));
+  });
+
   it("carries acknowledgeLocalAuto to the wire but never into a state overlay", async () => {
     // The consent flag is the server's proof the local-auto warning dialog was
     // shown (server/index.ts gate). Coalesced with other edits it must still

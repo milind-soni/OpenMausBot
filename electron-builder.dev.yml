@@ -1,0 +1,15 @@
+# Packaged acceptance must not register itself as the production application.
+# macOS LaunchServices routes later opens by bundle identity, so using the
+# release identity for a development build can redirect unrelated callers to
+# an unsigned candidate without its isolated environment. A distinct product
+# name also gives environmentless relaunches separate userData and logs paths.
+extends: ./electron-builder.yml
+appId: com.openmausbot.app.full-task-dev
+productName: OpenMausBot Full Task Dev
+artifactName: OpenMausBot-Full-Task-Dev-${version}-${arch}.${ext}
+
+directories:
+  output: release-dev
+
+mac:
+  artifactName: OpenMausBot-Full-Task-Dev-${version}-${arch}.${ext}

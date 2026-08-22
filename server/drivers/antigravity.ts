@@ -232,7 +232,7 @@ export const AntigravityDriver: ProviderDriver<AntigravityConfig> = {
         settled = true;
         clearTimeout(watchdog);
         active.delete(threadId);
-        emit({ ...base(threadId, turnId), type: "turn.completed", ok, stopReason, cost, ...(usage ? { usage } : {}) });
+        emit({ ...base(threadId, turnId), turnToken: turn.turnToken, type: "turn.completed", ok, stopReason, cost, ...(usage ? { usage } : {}) });
       };
 
       // agy's print mode is argv-only, so a prompt beyond ARG_MAX would fail the

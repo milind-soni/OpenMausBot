@@ -171,7 +171,7 @@ export const BoxAgentDriver: ProviderDriver<BoxAgentConfig> = {
                   emit({ ...base(threadId, turnId), type: "item.completed", itemType: "assistant_text", text: lastText });
                 }
                 const failed = /fail|error/i.test(kind);
-                emit({ ...base(threadId, turnId), type: "turn.completed", ok: !failed, stopReason: failed ? kind : null, cost: null });
+                emit({ ...base(threadId, turnId), turnToken: turn.turnToken, type: "turn.completed", ok: !failed, stopReason: failed ? kind : null, cost: null });
                 return;
               }
             }
@@ -201,7 +201,7 @@ export const BoxAgentDriver: ProviderDriver<BoxAgentConfig> = {
                   text: typeof result === "string" && result.trim() ? result : lastText || "(finished)",
                 });
                 active.delete(threadId);
-                emit({ ...base(threadId, turnId), type: "turn.completed", ok: true, stopReason: null, cost: null });
+                emit({ ...base(threadId, turnId), turnToken: turn.turnToken, type: "turn.completed", ok: true, stopReason: null, cost: null });
                 return;
               }
               if (/failed|error|cancelled|interrupted/i.test(state)) {
@@ -209,7 +209,7 @@ export const BoxAgentDriver: ProviderDriver<BoxAgentConfig> = {
                   emit({ ...base(threadId, turnId), type: "item.completed", itemType: "assistant_text", text: lastText });
                 }
                 active.delete(threadId);
-                emit({ ...base(threadId, turnId), type: "turn.completed", ok: false, stopReason: state, cost: null });
+                emit({ ...base(threadId, turnId), turnToken: turn.turnToken, type: "turn.completed", ok: false, stopReason: state, cost: null });
                 return;
               }
             }
@@ -219,11 +219,11 @@ export const BoxAgentDriver: ProviderDriver<BoxAgentConfig> = {
           }
           // cancelled
           active.delete(threadId);
-          emit({ ...base(threadId, turnId), type: "turn.completed", ok: false, stopReason: "interrupted", cost: null });
+          emit({ ...base(threadId, turnId), turnToken: turn.turnToken, type: "turn.completed", ok: false, stopReason: "interrupted", cost: null });
         } catch (e) {
           active.delete(threadId);
           emit({ ...base(threadId, turnId), type: "runtime.error", message: (e as Error).message });
-          emit({ ...base(threadId, turnId), type: "turn.completed", ok: false, stopReason: "error", cost: null });
+          emit({ ...base(threadId, turnId), turnToken: turn.turnToken, type: "turn.completed", ok: false, stopReason: "error", cost: null });
         }
       })();
 

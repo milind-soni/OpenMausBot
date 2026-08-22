@@ -10,7 +10,8 @@ import { peerAllowKey, type PeerAction } from "./peer-approval-key.ts";
 import { DATA_DIR } from "./config.ts";
 import * as mdb from "./message-db.ts";
 import { workspaceDir } from "./workspace.ts";
-import { newId, type CloudBackend, type ModelSelection, type ThreadId } from "./contracts.ts";
+import { newId, type AccessProfile, type CloudBackend, type ModelSelection, type ThreadId } from "./contracts.ts";
+import { isAccessProfile } from "./access-profile.ts";
 import { pickBotName } from "./names.ts";
 import { redactSecretsInText } from "./redact.ts";
 import { botAvatarProfile, type BotAvatarCrop } from "../shared/bot-avatar.ts";
@@ -269,6 +270,9 @@ export interface BotRecord {
    * working instead of stopping to ask. Questions it asks YOU still come
    * through, and a short list of destructive commands still stops it. */
   autoApprove?: boolean;
+  /** Capability selection is independent of whether approvals are answered
+   * automatically. Missing means the backwards-compatible standard profile. */
+  accessProfile?: AccessProfile;
   /** Tools this bot may always use without asking, even outside auto mode
    * (set by "Always allow" on an approval card). */
   alwaysAllow?: string[];
@@ -447,6 +451,10 @@ export class Store {
       b.activity = "idle";
       if (b.cloudBackend !== undefined && b.cloudBackend !== "box" && b.cloudBackend !== "vps") {
         delete b.cloudBackend;
+        botsMigrated = true;
+      }
+      if (b.accessProfile !== undefined && !isAccessProfile(b.accessProfile)) {
+        delete b.accessProfile;
         botsMigrated = true;
       }
       const avatar = botAvatarProfile(b);

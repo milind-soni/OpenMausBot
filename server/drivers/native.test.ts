@@ -8,6 +8,7 @@ import { join } from "node:path";
 import { beforeAll, describe, expect, it } from "vitest";
 
 import { ensureDirs, NATIVE_DIR } from "../config.ts";
+import { invalidateProtectedEnvironmentRedactor } from "../redact.ts";
 import { appendNative } from "./native.ts";
 
 beforeAll(() => ensureDirs());
@@ -46,6 +47,21 @@ describe("appendNative", () => {
     const mode = statSync(join(NATIVE_DIR, "t-mode.ndjson")).mode & 0o777;
     // Windows does not implement POSIX modes; everywhere else, owner-only
     if (process.platform !== "win32") expect(mode).toBe(0o600);
+  });
+
+  it("masks an exact protected canary even when it has no recognizable prefix", () => {
+    const canary = "native-canary-value-193746";
+    process.env.NATIVE_TEST_SECRET = canary;
+    invalidateProtectedEnvironmentRedactor();
+    try {
+      appendNative("t-known", { dir: "in", source: "codex", msg: { text: `copied ${canary}` } });
+      const log = readFileSync(join(NATIVE_DIR, "t-known.ndjson"), "utf8");
+      expect(log).not.toContain(canary);
+      expect(log).toContain("redacted");
+    } finally {
+      delete process.env.NATIVE_TEST_SECRET;
+      invalidateProtectedEnvironmentRedactor();
+    }
   });
 
   it("never throws, whatever it is handed", () => {

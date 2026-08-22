@@ -292,6 +292,7 @@ export const PiDriver: ProviderDriver<PiConfig> = {
         }
         emit({
           ...base(threadId, turnId),
+          turnToken: turn.turnToken,
           type: "turn.completed",
           ok,
           stopReason: stopReason ?? (ok ? "end_turn" : "failed"),

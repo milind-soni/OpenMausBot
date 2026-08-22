@@ -7,6 +7,7 @@ import { beforeEach, describe, expect, it } from "vitest";
 
 import { EVENTS_DIR, ensureDirs } from "../config.ts";
 import type { RuntimeEvent } from "../contracts.ts";
+import { invalidateProtectedEnvironmentRedactor } from "../redact.ts";
 import { makeFakeDriver } from "../testing/fake-driver.ts";
 import { EventBus } from "./bus.ts";
 
@@ -85,6 +86,51 @@ describe("EventBus", () => {
     const logged = readFileSync(join(EVENTS_DIR, "redacted-log.ndjson"), "utf8");
     expect(logged).not.toContain(key);
     expect(logged).toContain("«redacted");
+  });
+
+  it("redacts exact protected values before logging or transcript delivery", () => {
+    const canary = "exact-canary-value-847263";
+    process.env.BUS_TEST_API_KEY = canary;
+    invalidateProtectedEnvironmentRedactor();
+    try {
+      const bus = new EventBus();
+      const seen: RuntimeEvent[] = [];
+      bus.subscribe((event) => seen.push(event));
+      bus.publish(testEvent({
+        threadId: "known-value-redaction",
+        type: "item.completed",
+        itemType: "assistant_text",
+        text: `copied ${canary}`,
+      }));
+
+      const logged = readFileSync(join(EVENTS_DIR, "known-value-redaction.ndjson"), "utf8");
+      expect(logged).not.toContain(canary);
+      expect(JSON.stringify(seen)).not.toContain(canary);
+      expect(logged).toContain("redacted");
+    } finally {
+      delete process.env.BUS_TEST_API_KEY;
+      invalidateProtectedEnvironmentRedactor();
+    }
+  });
+
+  it("does not permanently rewrite ordinary short protected values", () => {
+    process.env.BUS_TEST_API_KEY = "ordinary";
+    invalidateProtectedEnvironmentRedactor();
+    try {
+      const bus = new EventBus();
+      const seen: RuntimeEvent[] = [];
+      bus.subscribe((event) => seen.push(event));
+      bus.publish(testEvent({
+        threadId: "short-known-value",
+        type: "item.completed",
+        itemType: "assistant_text",
+        text: "an ordinary sentence",
+      }));
+      expect(JSON.stringify(seen)).toContain("ordinary");
+    } finally {
+      delete process.env.BUS_TEST_API_KEY;
+      invalidateProtectedEnvironmentRedactor();
+    }
   });
 
   it("still delivers when the NDJSON log cannot be written", () => {

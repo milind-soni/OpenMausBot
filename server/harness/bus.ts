@@ -8,7 +8,7 @@ import { appendFileSync } from "node:fs";
 import { join } from "node:path";
 
 import { EVENTS_DIR } from "../config.ts";
-import { redactSecrets } from "../redact.ts";
+import { redactProtectedEnvironmentValues, redactSecrets } from "../redact.ts";
 import type { ProviderInstance, RuntimeEvent, RuntimeEventListener } from "../contracts.ts";
 
 export class EventBus {
@@ -31,13 +31,17 @@ export class EventBus {
   }
 
   publish(event: RuntimeEvent) {
+    // Redact before BOTH persistence and delivery. The message-store fold is
+    // a listener, so logging-only redaction would still leave a canary copied
+    // by a provider in the durable transcript and subsequent replay context.
+    const sanitized = redactProtectedEnvironmentValues(redactSecrets(event)) as RuntimeEvent;
     try {
       // the canonical log is a file people paste into bug reports; scrub
       // credential-shaped content (tool titles, request summaries, reply
       // text) the same way the native tee does
       appendFileSync(
         join(EVENTS_DIR, `${event.threadId}.ndjson`),
-        JSON.stringify(redactSecrets(event)) + "\n",
+        JSON.stringify(sanitized) + "\n",
         { mode: 0o600 },
       );
     } catch {
@@ -45,7 +49,7 @@ export class EventBus {
     }
     for (const listener of [...this.listeners]) {
       try {
-        listener(event);
+        listener(sanitized);
       } catch (e) {
         console.error("bus: listener threw", e);
       }

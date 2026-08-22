@@ -1,6 +1,6 @@
 import { track } from "@/lib/analytics";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { ArrowUp, Clock, Mic, Square, Users, X } from "lucide-react";
+import { ArrowUp, Clock, Mic, Square, Target, Users, X } from "lucide-react";
 import { useStore, visibleMessages, type Bot, type Group } from "@/state/store";
 import { cn } from "@/lib/cn";
 import { useComposerDraft } from "@/lib/drafts";
@@ -315,6 +315,26 @@ export function Composer({
           onRemove={removeAttachment}
           allowImages={engineSupportsImages}
         />
+        {bot && !approval && !busy && !hasContent && (
+          <button
+            type="button"
+            onClick={() => {
+              setText("/goal ");
+              setCaret(6);
+              requestAnimationFrame(() => {
+                inputRef.current?.focus();
+                inputRef.current?.setSelectionRange(6, 6);
+              });
+            }}
+            aria-label="Use shared goal continuity"
+            title="Type an objective, or send /goal to show the current shared goal"
+            className="mb-2 inline-flex items-center gap-1.5 rounded-full border border-hairline/40 bg-panel px-2.5 py-1 text-[11.5px] text-ink-secondary hover:bg-raised hover:text-ink"
+          >
+            <Target size={12} aria-hidden="true" />
+            <code>/goal</code>
+            <span>shared continuity</span>
+          </button>
+        )}
         <div className="flex items-end gap-2 rounded-3xl border border-hairline/40 bg-raised/60 py-2 pl-3 pr-2">
         <textarea
           ref={inputRef}
