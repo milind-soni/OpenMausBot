@@ -1,0 +1,176 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="color-scheme" content="dark" />
+    <title>Hermes Work Queue</title>
+    <style>
+      :root { font-family: Inter, ui-sans-serif, system-ui, -apple-system, sans-serif; color: #f4f1eb; background: #10100f; }
+      * { box-sizing: border-box; }
+      body { margin: 0; min-height: 100vh; background: radial-gradient(circle at top left, #242019 0, #10100f 42%); }
+      main { width: min(920px, calc(100% - 32px)); margin: 0 auto; padding: 44px 0 72px; }
+      header { display: flex; align-items: flex-start; justify-content: space-between; gap: 24px; margin-bottom: 24px; }
+      h1 { margin: 0 0 8px; font-size: clamp(28px, 5vw, 44px); letter-spacing: -0.04em; }
+      h2 { margin: 0 0 4px; font-size: 16px; }
+      p { margin: 0; color: #aaa49a; line-height: 1.5; }
+      .eyebrow { margin-bottom: 8px; color: #e7b76c; font-size: 12px; font-weight: 700; letter-spacing: .13em; text-transform: uppercase; }
+      .badge { flex: none; border: 1px solid #3b3832; border-radius: 999px; padding: 8px 12px; color: #aaa49a; background: #191816; font-size: 12px; }
+      .badge.ready { border-color: #2d644d; color: #7ed6a8; background: #14251c; }
+      .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+      .card { border: 1px solid #302e2a; border-radius: 16px; background: rgba(27, 26, 24, .92); padding: 18px; box-shadow: 0 16px 50px rgba(0,0,0,.18); }
+      .wide { grid-column: 1 / -1; }
+      .copy { margin-bottom: 16px; font-size: 13px; }
+      .fields { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+      label { display: flex; flex-direction: column; gap: 6px; color: #aaa49a; font-size: 11px; font-weight: 650; letter-spacing: .03em; }
+      label.wide { grid-column: 1 / -1; }
+      input, textarea { width: 100%; border: 1px solid #3a3731; border-radius: 9px; background: #11110f; color: #f4f1eb; padding: 10px 11px; font: inherit; font-size: 13px; outline: none; }
+      input:focus, textarea:focus { border-color: #b78747; box-shadow: 0 0 0 3px rgba(183,135,71,.13); }
+      textarea { min-height: 92px; resize: vertical; }
+      button { border: 0; border-radius: 9px; padding: 10px 14px; background: #d5964e; color: #17120c; font: inherit; font-size: 13px; font-weight: 750; cursor: pointer; }
+      button.secondary { border: 1px solid #3a3731; background: #22201c; color: #f4f1eb; }
+      button:disabled { cursor: not-allowed; opacity: .42; }
+      .actions { display: flex; align-items: center; gap: 10px; margin-top: 12px; }
+      .status-row { display: flex; gap: 10px; }
+      pre { min-height: 132px; max-height: 360px; overflow: auto; margin: 12px 0 0; border-radius: 10px; background: #0c0c0b; padding: 13px; color: #b9d8c4; font: 12px/1.5 ui-monospace, SFMono-Regular, Menlo, monospace; white-space: pre-wrap; word-break: break-word; }
+      .boundary { margin-top: 12px; color: #7f7a72; font-size: 11px; }
+      @media (max-width: 700px) { header { flex-direction: column; } .grid, .fields { grid-template-columns: 1fr; } .wide { grid-column: 1; } }
+    </style>
+  </head>
+  <body>
+    <main>
+      <header>
+        <div>
+          <div class="eyebrow">OpenMausBot ingress</div>
+          <h1>Hermes Work Queue</h1>
+          <p>One narrow surface for guarded submission and status. Hermes is the only executor.</p>
+        </div>
+        <div id="health-badge" class="badge">Checking local plane…</div>
+      </header>
+
+      <div class="grid">
+        <section class="card wide">
+          <h2>Submit guarded work</h2>
+          <p class="copy">Exact source, isolated worktree, task branch, owning issue, allowed paths, and acceptance commands are required. Invalid work remains in triage.</p>
+          <form id="work-form">
+            <div class="fields">
+              <label>Repository<input name="repository" required placeholder="owner/repository" /></label>
+              <label>Owning issue<input name="issue" required inputmode="numeric" placeholder="1302" /></label>
+              <label class="wide">Isolated worktree<input name="repoPath" required placeholder="/absolute/path/to/worktree" /></label>
+              <label>Baseline SHA<input name="baselineSha" required minlength="40" maxlength="40" placeholder="40 lowercase hex characters" /></label>
+              <label>Task branch<input name="taskBranch" required value="codex/" /></label>
+              <label>Allowed paths<textarea name="allowedPaths" required placeholder="src/&#10;tests/"></textarea></label>
+              <label>Acceptance commands<textarea name="acceptanceTests" required placeholder="pnpm typecheck&#10;pnpm test"></textarea></label>
+              <label>Token budget<input name="tokenBudget" required inputmode="numeric" value="12000" /></label>
+              <label>Runtime seconds<input name="maxRuntimeSeconds" required inputmode="numeric" value="3600" /></label>
+            </div>
+            <div class="actions"><button id="submit" type="submit" disabled>Submit one request</button></div>
+          </form>
+          <div class="boundary">No merge, deploy, release, upload, provider change, credential-value access, external message, force push, destructive cleanup, protected-branch write, or out-of-worktree write authority.</div>
+        </section>
+
+        <section class="card wide">
+          <h2>Request status</h2>
+          <p class="copy">Read one deterministic work ID from the same local plane.</p>
+          <div class="status-row">
+            <input id="request-id" aria-label="Work request ID" placeholder="work-…" />
+            <button id="check" class="secondary" type="button" disabled>Check status</button>
+          </div>
+          <pre id="result" aria-live="polite">No request selected.</pre>
+        </section>
+      </div>
+    </main>
+
+    <script type="module">
+      const forbidden = [
+        "credential-value-access", "deploy", "destructive-cleanup", "external-message",
+        "force-push", "merge", "provider-default-change", "release", "upload",
+        "write-outside-worktree", "write-protected-branch",
+      ];
+      const badge = document.querySelector("#health-badge");
+      const form = document.querySelector("#work-form");
+      const submit = document.querySelector("#submit");
+      const check = document.querySelector("#check");
+      const requestId = document.querySelector("#request-id");
+      const result = document.querySelector("#result");
+      let enabled = false;
+
+      const lines = (value) => value.split("\n").map((item) => item.trim()).filter(Boolean);
+      const show = (value) => { result.textContent = JSON.stringify(value, null, 2); };
+      const invoke = async (path, init) => {
+        const response = await fetch(path, { headers: { "content-type": "application/json" }, ...init });
+        const body = await response.json().catch(() => ({ error: `HTTP ${response.status}` }));
+        if (!response.ok) throw new Error(body.error || `HTTP ${response.status}`);
+        return body;
+      };
+      const refreshControls = () => {
+        submit.disabled = !enabled;
+        check.disabled = !enabled || !requestId.value.trim();
+      };
+
+      async function health() {
+        try {
+          const response = await invoke("/api/unattended-work/health");
+          enabled = response.adapter?.enabled === true;
+          badge.textContent = enabled ? "Ingress enabled" : "Dormant / disabled";
+          badge.classList.toggle("ready", enabled);
+        } catch {
+          enabled = false;
+          badge.textContent = "Local plane unavailable";
+          badge.classList.remove("ready");
+        }
+        refreshControls();
+      }
+
+      form.addEventListener("submit", async (event) => {
+        event.preventDefault();
+        const data = new FormData(form);
+        const field = (name) => String(data.get(name) || "").trim();
+        const repository = field("repository");
+        const issueText = field("issue");
+        const envelope = {
+          schema: "aos.work-request.v1",
+          ingress: "openmausbot",
+          idempotency_key: `work:${repository}:${issueText}`,
+          repository,
+          issue: Number(issueText),
+          card: {
+            schema: "aos.hermes-card.v1",
+            repo_path: field("repoPath"),
+            github_issue: `${repository}#${issueText}`,
+            baseline_sha: field("baselineSha").toLowerCase(),
+            acceptance_tests: lines(field("acceptanceTests")),
+            token_budget: Number(field("tokenBudget")),
+            mutation_boundary: { allowed: lines(field("allowedPaths")), forbidden },
+            blocker_state: "unblocked",
+            protected_gates: ["no-merge", "no-deploy", "no-release", "no-external-send", "no-provider-change"],
+            task_class: "implementation",
+            priority: "P1",
+            not_before: null,
+            max_runtime_seconds: Number(field("maxRuntimeSeconds")),
+            task_branch: field("taskBranch"),
+          },
+        };
+        submit.disabled = true;
+        try {
+          const response = await invoke("/api/unattended-work", { method: "POST", body: JSON.stringify(envelope) });
+          if (response.request?.id) requestId.value = response.request.id;
+          show(response);
+        } catch (error) {
+          show({ error: error instanceof Error ? error.message : String(error) });
+        }
+        refreshControls();
+      });
+
+      requestId.addEventListener("input", refreshControls);
+      check.addEventListener("click", async () => {
+        check.disabled = true;
+        try { show(await invoke(`/api/unattended-work/${encodeURIComponent(requestId.value.trim())}`)); }
+        catch (error) { show({ error: error instanceof Error ? error.message : String(error) }); }
+        refreshControls();
+      });
+
+      await health();
+    </script>
+  </body>
+</html>

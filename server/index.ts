@@ -107,10 +107,12 @@ import { WebhookManager } from "./webhooks.ts";
 import { SPAWNED_PROXIES } from "./proxy-paths.ts";
 import { loadBundledSkills, renderSkillInstructions, selectBundledSkills } from "./skill-library.ts";
 import { shouldMountLocalComputer } from "./local-routing.ts";
+import { unattendedWorkAdapterFromEnv, unattendedWorkRequestIdFromPath } from "./unattended-work-adapter.ts";
 
 const PORT = Number(process.env.OMB_PORT || process.env.OGB_PORT || 8799);
 const WEBHOOK_PORT = Number(process.env.OMB_WEBHOOK_PORT || PORT + 1);
 const STATIC_DIR = process.env.OMB_STATIC_DIR || null;
+const UNATTENDED_ADAPTER_ONLY = process.env.OMB_UNATTENDED_ADAPTER_ONLY === "1";
 const MIME: Record<string, string> = {
   ".html": "text/html",
   ".js": "text/javascript",
@@ -125,8 +127,9 @@ const MIME: Record<string, string> = {
 ensureDirs();
 const cfg = loadConfig();
 const registry = new ProviderRegistry(BUILT_IN_DRIVERS);
-await registry.load(instanceConfigs(cfg));
+await registry.load(UNATTENDED_ADAPTER_ONLY ? {} : instanceConfigs(cfg));
 const bundledSkills = loadBundledSkills();
+const unattendedWork = unattendedWorkAdapterFromEnv();
 
 const bus = new EventBus();
 bus.attach(registry.instances());
@@ -1721,7 +1724,7 @@ routines = new RoutineManager({
     notify(buildNotification("routine-failed", bot, run.threadId ?? bot.threadId, detail));
   },
 });
-routines.start();
+if (!UNATTENDED_ADAPTER_ONLY) routines.start();
 
 // Webhook definitions are independent from calendar schedules, but every
 // delivery joins the same RoutineManager queue. That keeps unattended work
@@ -1740,8 +1743,10 @@ const webhooks = new WebhookManager({
 let webhookIngress: WebhookIngress | null = null;
 let webhookIngressError: string | null = null;
 try {
-  webhookIngress = await listenWebhookIngress(webhooks, { port: WEBHOOK_PORT });
-  console.log(`openmausbot webhook receiver on ${webhookIngress.baseUrl}`);
+  if (!UNATTENDED_ADAPTER_ONLY) {
+    webhookIngress = await listenWebhookIngress(webhooks, { port: WEBHOOK_PORT });
+    console.log(`openmausbot webhook receiver on ${webhookIngress.baseUrl}`);
+  }
 } catch (error) {
   webhookIngressError = error instanceof Error ? error.message : String(error);
   console.error(`openmausbot webhook receiver unavailable: ${webhookIngressError}`);
@@ -2385,6 +2390,15 @@ const server = createServer(async (req, res) => {
     const origin = req.headers.origin;
     if (origin && !isAllowedOrigin(origin)) {
       return json(res, 403, { error: "forbidden: cross-origin request" });
+    }
+    const unattendedStatusRequestId = method === "GET" ? unattendedWorkRequestIdFromPath(path) : null;
+    if (UNATTENDED_ADAPTER_ONLY && path.startsWith("/api/")) {
+      const allowed =
+        (method === "GET" && path === "/api/health") ||
+        (method === "GET" && path === "/api/unattended-work/health") ||
+        (method === "POST" && path === "/api/unattended-work") ||
+        unattendedStatusRequestId !== null;
+      if (!allowed) return json(res, 404, { error: "route unavailable in unattended adapter mode" });
     }
     // ── internal peer-agent comms (localhost + shared token only) ──────
     // The agents-proxy (spawned inside a bot's agent process) calls these to
@@ -3871,11 +3885,33 @@ const server = createServer(async (req, res) => {
       });
     }
 
+    // The unattended-work surface is intentionally narrower than every bot
+    // route above: it only proxies health, submit, and status to one fixed
+    // 127.0.0.1 service. The adapter is disabled unless the isolated runtime
+    // explicitly opts in; it never starts a turn or touches a provider.
+    if (method === "GET" && path === "/api/unattended-work/health") {
+      return json(res, 200, await unattendedWork.health());
+    }
+    if (method === "POST" && path === "/api/unattended-work") {
+      if (!String(req.headers["content-type"] ?? "").toLowerCase().startsWith("application/json")) {
+        return json(res, 415, { error: "content-type must be application/json" });
+      }
+      return json(res, 200, await unattendedWork.submit(await readBody(req)));
+    }
+    if (method === "GET" && unattendedStatusRequestId !== null) {
+      return json(res, 200, await unattendedWork.status(unattendedStatusRequestId));
+    }
+
     // identity handshake for the packaged app's port fallback: the forked
     // child proves it is OURS by echoing its pid (a stray dev server has
     // the same API shape but a different pid)
     if (method === "GET" && path === "/api/health") {
-      return json(res, 200, { app: "openmausbot", pid: process.pid, static: Boolean(STATIC_DIR) });
+      return json(res, 200, {
+        app: "openmausbot",
+        pid: process.pid,
+        static: Boolean(STATIC_DIR),
+        mode: UNATTENDED_ADAPTER_ONLY ? "unattended-adapter" : "full",
+      });
     }
 
     // ── inspector: a thread's runtime events + native protocol tee ──

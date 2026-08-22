@@ -269,6 +269,32 @@ describe("harness HTTP API", () => {
     expect(body.static).toBe(true);
   });
 
+  it("keeps the unattended work adapter dormant unless the isolated runtime opts in", async () => {
+    const health = await api("GET", "/api/unattended-work/health");
+    expect(health).toMatchObject({
+      status: 200,
+      body: {
+        status: "disabled",
+        plane: null,
+        adapter: {
+          enabled: false,
+          executor: "hermes",
+          runs_repo_tools: false,
+          uses_full_task_profile: false,
+        },
+      },
+    });
+
+    const submit = await api("POST", "/api/unattended-work", {
+      schema: "aos.work-request.v1",
+      ingress: "openmausbot",
+    });
+    expect(submit).toMatchObject({
+      status: 403,
+      body: { error: "OpenMausBot work ingress is disabled" },
+    });
+  });
+
   it("serves packaged UI assets and preserves API 404s", async () => {
     const root = await fetch(`${BASE}/`);
     expect(root.status).toBe(200);

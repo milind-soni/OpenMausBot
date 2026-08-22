@@ -313,6 +313,7 @@ export type AppSettingsSection =
   | "engines"
   | "companion"
   | "computer"
+  | "work"
   | "usage";
 
 export interface AppState {
