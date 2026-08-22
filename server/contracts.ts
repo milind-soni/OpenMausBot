@@ -318,8 +318,20 @@ export interface ProviderInstance {
   readonly displayName: string | undefined;
   readonly enabled: boolean;
   readonly models: ModelCatalog;
-  /** Refresh a live catalog without recreating the provider instance. */
+  /** Refresh a live catalog without recreating the provider instance. For a
+   *  discovery cheap enough to have already run in create() — droid reads
+   *  ~/.factory/settings.json — so `models` is resolved for every consumer. */
   readonly refreshModels?: () => Promise<void>;
+  /** Engines whose model list is discovered on the machine rather than
+   *  compiled in (opencode: it depends on the user's own providers). Omitted →
+   *  `models` is the whole catalog.
+   *
+   *  This one asks the CLI, so it is NOT free the way refreshModels is, and it
+   *  MUST bound its own latency, the way snapshot() does with its CLI timeout:
+   *  describe() awaits every instance together, so one call that never settles
+   *  stalls the whole /api/instances response — and server startup, which
+   *  builds the default bot selection from it. */
+  catalog?(): Promise<ModelCatalog>;
   readonly adapter: ProviderAdapter;
   snapshot(): Promise<ProviderSnapshot>;
   /** Cheap one-shot text call (upstream TextGeneration) — titles, summaries. */

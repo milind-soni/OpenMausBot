@@ -78,6 +78,18 @@ describe("augmentedPath", () => {
     expect(stdout.trim()).toBe("found-me");
   });
 
+  posixIt("finds the CLI opencode's own installer drops in ~/.opencode/bin", () => {
+    // opencode.ai/install — the route the opencode driver's install descriptor
+    // recommends — puts a standalone binary here, not an npm shim in a node
+    // bin dir. Without this entry the engine reports "`opencode` CLI not found"
+    // on a machine where opencode is installed and working.
+    const bin = join(homedir(), ".opencode", "bin");
+    mkdirSync(bin, { recursive: true });
+    resetPathCacheForTests();
+
+    expect(augmentedPath().split(delimiter).filter((entry) => entry === bin)).toHaveLength(1);
+  });
+
   posixIt("keeps the last login-shell PATH available during a rescan", async () => {
     const shell = join(homedir(), "fake-login-shell");
     const rcOnlyBin = join(homedir(), "rc-only", "bin");

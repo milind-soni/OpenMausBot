@@ -22,10 +22,10 @@ import type {
   DriverCreateInput,
   EffortLevel,
   EngineInstall,
+  ModelCatalog,
   ProviderDriver,
   ProviderInstance,
   ProviderSnapshot,
-  ModelCatalog,
   RuntimeEvent,
   RuntimeEventListener,
   SendTurnInput,
@@ -62,9 +62,23 @@ export interface AcpSupport {
    * describe() runs before any session exists, so there is no _meta to read
    * — eventually both should come from initialize's _meta.modelState. */
   effortLevels?: readonly EffortLevel[];
+  /** Discover the model catalog by ASKING THE CLI, for harnesses whose list
+   *  depends on what the user has configured locally. Omitted → `models` is it.
+   *  Must bound its own latency (see ProviderInstance.catalog).
+   *
+   *  Distinct from resolveModels below, and the difference is cost, not intent.
+   *  resolveModels reads a file: instant, so create() can await it and hand
+   *  every consumer a resolved `models`. This spawns a process — ~1.1s for
+   *  `opencode models` — which is too slow to sit in create() and too variable
+   *  to leave unbounded, so it is called on demand. Pick by what discovery
+   *  costs. */
+  catalog?(config: AcpConfig, env: Record<string, string | undefined>): Promise<ModelCatalog>;
   /** Default CLI binary name if the instance config doesn't override it. */
   defaultCli: string;
-  /** Optional live model catalog. A failed lookup keeps the last usable catalog.
+  /** Optional live model catalog, cheap enough to await in create(). A failed
+   *  lookup keeps the last usable catalog. See catalog() above for the
+   *  spawn-a-process variant.
+   *
    *  `config` is the instance decode so a support can ask the same binary it
    *  will spawn (custom `cli` paths), not whatever happens to be named on PATH. */
   resolveModels?(
@@ -686,6 +700,7 @@ export function createAcpDriver(support: AcpSupport): ProviderDriver<AcpConfig> 
           return models;
         },
         refreshModels: support.resolveModels ? refreshModels : undefined,
+        ...(support.catalog ? { catalog: () => support.catalog!(config, childEnv()) } : {}),
         snapshot,
         adapter: {
           provider: DRIVER_KIND,

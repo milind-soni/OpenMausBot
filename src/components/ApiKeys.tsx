@@ -6,7 +6,7 @@ import { Check, CircleHelp, ExternalLink, Loader2, TriangleAlert } from "lucide-
 import { api, useStore, type ConfigStatus } from "@/state/store";
 import { cn } from "@/lib/cn";
 
-export type ConfigSection = "composio" | "box" | "opencodeGo";
+export type ConfigSection = "composio" | "box" | "opencode";
 
 const SECTIONS: Record<
   ConfigSection,
@@ -17,13 +17,13 @@ const SECTIONS: Record<
     flag: (c) => c.composio.configured,
   },
   box: { body: (v) => ({ box: { token: v } }), flag: (c) => c.box.configured },
-  opencodeGo: { body: (v) => ({ opencodeGo: { apiKey: v } }), flag: (c) => c.opencodeGo?.configured ?? false },
+  opencode: { body: (v) => ({ opencode: { apiKey: v } }), flag: (c) => c.opencode?.configured ?? false },
 };
 
 const ELECTRON_CREDENTIAL: Record<ConfigSection, "composioApiKey" | "boxToken" | "opencodeGoApiKey"> = {
   composio: "composioApiKey",
   box: "boxToken",
-  opencodeGo: "opencodeGoApiKey",
+  opencode: "opencodeGoApiKey",
 };
 
 const CREDENTIALS: Record<
@@ -55,12 +55,12 @@ const CREDENTIALS: Record<
     optional: true,
     warning: "Box is a paid service after its trial. Usage may incur charges.",
   },
-  opencodeGo: {
-    label: "OpenCode Go API key",
-    placeholder: "Paste your OpenCode Go API key",
-    description: "Run OpenCode Go models through the maintained OpenCode CLI and ACP.",
-    href: "https://opencode.ai/docs/go/",
-    linkLabel: "Open OpenCode Go setup guide",
+  opencode: {
+    label: "OpenCode API key",
+    placeholder: "Paste your OpenCode Zen API key",
+    description: "Adds the paid OpenCode Zen models to the picker. Your own providers come from opencode auth login and need no key here.",
+    href: "https://opencode.ai/docs/zen/",
+    linkLabel: "Open OpenCode Zen setup guide",
     optional: true,
   },
 };

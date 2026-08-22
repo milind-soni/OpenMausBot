@@ -76,7 +76,9 @@ const appConfigSchema = z.object({
   composio: z.object({ apiKey: optionalText, userId: optionalText, sessionId: optionalText }).optional(),
   box: z.object({ token: optionalText }).optional(),
   vps: vpsConfigSchema.optional(),
-  /** OpenCode Go key; persisted write-only and passed only to its child. */
+  /** OpenCode key; persisted write-only and passed only to its child. */
+  opencode: z.object({ apiKey: optionalText }).optional(),
+  /** Pre-rename spelling retained for reading existing config files. */
   opencodeGo: z.object({ apiKey: optionalText }).optional(),
   /** Voice credentials and the selected voice id. */
   tts: z.object({ key: optionalText, voice: optionalText }).optional(),
@@ -95,8 +97,14 @@ export interface AppConfig {
   xai?: { key?: string; url?: string };
   composio?: { apiKey?: string; userId?: string; sessionId?: string };
   box?: { token?: string };
+  /** OpenCode key; persisted write-only and passed only to its child. It
+   * unlocks the OpenCode Zen provider — the user's own providers authenticate
+   * through opencode's own auth.json and need nothing from us. */
+  opencode?: { apiKey?: string };
   /** A named host from the user's SSH config. Authentication stays with SSH. */
   vps?: { sshAlias?: string };
+  /** Pre-rename spelling of `opencode`, still read so a key saved by an older
+   * build is not silently dropped. Never written. */
   opencodeGo?: { apiKey?: string };
   tts?: { key?: string; voice?: string };
   imageGen?: { key?: string };
@@ -120,7 +128,12 @@ export function parseConfigPatch(value: JsonValue): ConfigPatch {
   if (!parsed.success) {
     throw Object.assign(new Error(schemaIssue(parsed.error, "Invalid configuration")), { status: 400 });
   }
-  return parsed.data;
+  const patch = parsed.data;
+  if (patch.opencodeGo) {
+    patch.opencode = { ...patch.opencodeGo, ...patch.opencode };
+    delete patch.opencodeGo;
+  }
+  return patch;
 }
 
 export function vpsSshAlias(cfg: AppConfig): string | null {
@@ -178,8 +191,8 @@ export function loadConfig(): AppConfig {
   if (process.env.COMPOSIO_API_KEY !== undefined) cfg.composio.apiKey = process.env.COMPOSIO_API_KEY;
   cfg.box = { ...cfg.box };
   if (process.env.BOX_TOKEN !== undefined) cfg.box.token = process.env.BOX_TOKEN;
-  cfg.opencodeGo = { ...cfg.opencodeGo };
-  if (process.env.OPENCODE_API_KEY !== undefined) cfg.opencodeGo.apiKey = process.env.OPENCODE_API_KEY;
+  cfg.opencode = { ...cfg.opencodeGo, ...cfg.opencode };
+  if (process.env.OPENCODE_API_KEY !== undefined) cfg.opencode.apiKey = process.env.OPENCODE_API_KEY;
   cfg.tts = { ...cfg.tts };
   if (process.env.OMB_TTS_KEY !== undefined) cfg.tts.key = process.env.OMB_TTS_KEY;
   cfg.imageGen = { ...cfg.imageGen };
@@ -199,7 +212,7 @@ export function syncCredentialEnv(patch: Partial<AppConfig>): void {
     [patch.xai?.key, "XAI_API_KEY"],
     [patch.composio?.apiKey, "COMPOSIO_API_KEY"],
     [patch.box?.token, "BOX_TOKEN"],
-    [patch.opencodeGo?.apiKey, "OPENCODE_API_KEY"],
+    [patch.opencode?.apiKey ?? patch.opencodeGo?.apiKey, "OPENCODE_API_KEY"],
     [patch.tts?.key, "OMB_TTS_KEY"],
     [patch.imageGen?.key, "OMB_OPENAI_IMAGE_KEY"],
   ];
@@ -260,7 +273,7 @@ export function saveConfig(patch: Partial<AppConfig>): void {
     /* first write */
   }
   const checkedPatch = appConfigSchema.partial().parse(patch);
-  for (const key of ["xai", "composio", "box", "opencodeGo", "tts", "imageGen", "profile", "rooms", "localVm"] as const) {
+  for (const key of ["xai", "composio", "box", "opencode", "tts", "imageGen", "profile", "rooms", "localVm"] as const) {
     const section = checkedPatch[key];
     if (!section) continue;
     const current = jsonObjectSchema.safeParse(disk[key]);
@@ -291,7 +304,7 @@ export function saveConfig(patch: Partial<AppConfig>): void {
  * PERSISTABLE: instanceConfigs() injects credential env into consuming
  * drivers' entries for the live fleet, so those injected keys are stripped
  * back out before the map is returned — otherwise saving an override would
- * copy xai/box/opencodeGo secrets into the instances section of
+ * copy xai/box/opencode secrets into the instances section of
  * config.json. */
 export function withInstanceCli(
   cfg: AppConfig,
@@ -338,14 +351,15 @@ interface InstanceCliUpdate {
  * withInstanceCli() so the inject rule and the strip rule cannot drift apart.
  * Each secret goes only to the driver that actually reads it: the API-key
  * Grok driver reads XAI_API_KEY, the Computer driver reads BOX_TOKEN, and
- * OpenCode Go reads OPENCODE_API_KEY. Every other engine brings its own
+ * OpenCode reads OPENCODE_API_KEY. Every other engine brings its own
  * login, so handing it a key it never uses would only put that key in the
  * environment of an unrelated child process. */
 function injectedEnvironment(cfg: AppConfig, driver: string): Map<string, string> {
   const environment = new Map<string, string>();
   if (driver === "grok" && cfg.xai?.key) environment.set("XAI_API_KEY", cfg.xai.key);
   if (driver === "boxAgent" && cfg.box?.token) environment.set("BOX_TOKEN", cfg.box.token);
-  if (driver === "opencodeGo" && cfg.opencodeGo?.apiKey) environment.set("OPENCODE_API_KEY", cfg.opencodeGo.apiKey);
+  const opencodeKey = cfg.opencode?.apiKey ?? cfg.opencodeGo?.apiKey;
+  if (driver === "opencodeAgent" && opencodeKey) environment.set("OPENCODE_API_KEY", opencodeKey);
   return environment;
 }
 
@@ -368,6 +382,12 @@ export function instanceConfigs(cfg: AppConfig): InstanceConfigMap {
   // CLI"), so a default `gemini` instance could only ever show unavailable.
   // The driver stays registered for enterprise licences, which keep Gemini
   // CLI — `{"instances": {"gemini": {"driver": "geminiAgent"}}}` restores it.
+  //
+  // `opencode` needs no credential from us to be useful: unlike the others it
+  // runs with no login at all (the free OpenCode Zen models), and its model
+  // list is discovered from whatever providers the user has configured. A
+  // saved OPENCODE_API_KEY is optional on top — it unlocks the paid Zen
+  // catalog, and nothing else.
   const DEFAULT_FLEET: InstanceConfigMap = {
     grok: { driver: "grokAgent" },
     kimi: { driver: "kimiAgent" },
@@ -376,7 +396,7 @@ export function instanceConfigs(cfg: AppConfig): InstanceConfigMap {
     claude: { driver: "claudeAgent" },
     codex: { driver: "codex" },
     antigravity: { driver: "antigravityAgent" },
-    opencodeGo: { driver: "opencodeGo" },
+    opencode: { driver: "opencodeAgent" },
     computer: { driver: "boxAgent" },
     qwen: { driver: "qwenAgent" },
     hermes: { driver: "hermesAgent" },
@@ -395,7 +415,21 @@ export function instanceConfigs(cfg: AppConfig): InstanceConfigMap {
     ...CUSTOM_ONLY,
   } as const;
   const configured = cfg.instances && Object.keys(cfg.instances).length ? cfg.instances : null;
-  const map: InstanceConfigMap = configured ? { ...configured } : { ...DEFAULT_FLEET };
+  const source = configured ?? DEFAULT_FLEET;
+  const map: InstanceConfigMap = Object.fromEntries(
+    Object.entries(source).map(([id, entry]) => [id, { ...entry }]),
+  );
+  // The old product fleet used the driver kind as its instance id. Normalize
+  // that exact legacy pair so bots and task cursors can migrate to one stable
+  // id without exposing duplicate OpenCode rows. Arbitrarily named custom
+  // instances keep their id and only move to the replacement driver below.
+  if (
+    Object.hasOwn(map, "opencodeGo") &&
+    (map.opencodeGo.driver === "opencodeGo" || map.opencodeGo.driver === "opencodeAgent")
+  ) {
+    if (!Object.hasOwn(map, "opencode")) map.opencode = map.opencodeGo;
+    delete map.opencodeGo;
+  }
   // Product fleets pick up newly shipped engines. A one-off test/shadow map
   // (no claude/grok/codex) is left exactly as written.
   if (
@@ -407,6 +441,10 @@ export function instanceConfigs(cfg: AppConfig): InstanceConfigMap {
     }
   }
   for (const entry of Object.values(map)) {
+    // Configured fleets from before the driver rename may still point at the
+    // removed implementation. Preserve custom instance ids while moving them
+    // onto the replacement driver.
+    if (entry.driver === "opencodeGo") entry.driver = "opencodeAgent";
     const environment = { ...entry.environment };
     for (const [key, value] of injectedEnvironment(cfg, entry.driver)) environment[key] = value;
     entry.environment = environment;

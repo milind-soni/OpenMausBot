@@ -12,7 +12,14 @@ export const WORKSPACE_CREDENTIALS = [
   { section: "box", field: "token", name: "boxToken", env: "BOX_TOKEN" },
   { section: "tts", field: "key", name: "ttsKey", env: "OMB_TTS_KEY" },
   { section: "imageGen", field: "key", name: "openaiImageApiKey", env: "OMB_OPENAI_IMAGE_KEY" },
-  { section: "opencodeGo", field: "apiKey", name: "opencodeGoApiKey", env: "OPENCODE_API_KEY" },
+  {
+    section: "opencode",
+    legacySections: ["opencodeGo"],
+    field: "apiKey",
+    // Keep the encrypted-store field name so upgrades retain the saved key.
+    name: "opencodeGoApiKey",
+    env: "OPENCODE_API_KEY",
+  },
 ];
 
 /** One boot-time sweep of config.json: move every plaintext workspace secret
@@ -36,24 +43,28 @@ export function migrateWorkspaceCredentials(config, credentials) {
   const nextCredentials = { ...credentials };
   let configChanged = false;
   let credentialsChanged = false;
-  for (const { section, field, name } of WORKSPACE_CREDENTIALS) {
-    const home = nextConfig?.[section];
-    if (!home || typeof home !== "object" || Array.isArray(home)) continue;
-    if (!Object.hasOwn(home, field)) continue;
-    const value = home[field];
-    if (typeof value !== "string") continue;
-    const secret = value.trim();
-    if (secret) {
-      if (nextCredentials[name] !== secret) {
-        nextCredentials[name] = secret;
+  for (const { section, legacySections = [], field, name } of WORKSPACE_CREDENTIALS) {
+    // Legacy aliases run first so the current spelling wins if a file happens
+    // to carry both after an interrupted upgrade.
+    for (const configSection of [...legacySections, section]) {
+      const home = nextConfig?.[configSection];
+      if (!home || typeof home !== "object" || Array.isArray(home)) continue;
+      if (!Object.hasOwn(home, field)) continue;
+      const value = home[field];
+      if (typeof value !== "string") continue;
+      const secret = value.trim();
+      if (secret) {
+        if (nextCredentials[name] !== secret) {
+          nextCredentials[name] = secret;
+          credentialsChanged = true;
+        }
+      } else if (Object.hasOwn(nextCredentials, name)) {
+        delete nextCredentials[name];
         credentialsChanged = true;
       }
-    } else if (Object.hasOwn(nextCredentials, name)) {
-      delete nextCredentials[name];
-      credentialsChanged = true;
+      delete home[field];
+      configChanged = true;
     }
-    delete home[field];
-    configChanged = true;
   }
   return { config: nextConfig, credentials: nextCredentials, configChanged, credentialsChanged };
 }

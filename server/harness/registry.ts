@@ -160,12 +160,32 @@ export class ProviderRegistry {
         } catch (e) {
           snapshot = { state: "unavailable", reason: e instanceof Error ? e.message : String(e) };
         }
+        // A discovered catalog is the truth for engines that have one; a
+        // failed discovery falls back to the compiled-in list rather than
+        // emptying the picker, same as a failed snapshot downgrades instead
+        // of throwing.
+        //
+        // Only when the snapshot says the engine is there, though. Discovery
+        // spawns the CLI, the picker re-probes /api/instances on every window
+        // focus, and a driver is free not to cache a failed probe — so an
+        // engine the user never installs would otherwise cost a doomed spawn
+        // per focus event, forever, and on Windows each one is a full
+        // PATH x PATHEXT scan. The snapshot already answered "is the binary
+        // there"; there is nothing to ask a binary that is not.
+        let models = inst.models;
+        if (inst.catalog && snapshot.state === "available") {
+          try {
+            models = await inst.catalog();
+          } catch {
+            /* discovery failed — keep the static catalog */
+          }
+        }
         return {
           instanceId: inst.instanceId,
           driverKind: inst.driverKind,
           displayName: inst.displayName ?? inst.driverKind,
           snapshot,
-          models: inst.models,
+          models,
           capabilities: {
             computerMcp: inst.adapter.capabilities.computerMcp === true,
             agentsMcp: inst.adapter.capabilities.agentsMcp === true,

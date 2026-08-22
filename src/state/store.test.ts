@@ -53,7 +53,7 @@ describe("config status frames", () => {
         vps: { configured: true, sshAlias: "homelab" },
         rooms: { turnTimeoutMinutes: 20 },
         localVm: { mode: "per-bot", maxInstances: 3 },
-        opencodeGo: { configured: true },
+        opencode: { configured: true },
         tts: { configured: true, ready: true, voice: "Ada" },
         profile: { name: "Ian", email: "ian@example.test" },
       }),
@@ -64,7 +64,7 @@ describe("config status frames", () => {
       vps: { configured: true, sshAlias: "homelab" },
       rooms: { turnTimeoutMinutes: 20 },
       localVm: { mode: "per-bot", maxInstances: 3 },
-      opencodeGo: { configured: true },
+      opencode: { configured: true },
       tts: { configured: true, ready: true, voice: "Ada" },
       profile: { name: "Ian", email: "ian@example.test" },
     });

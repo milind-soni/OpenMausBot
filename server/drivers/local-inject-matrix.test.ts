@@ -12,7 +12,7 @@ import { DroidAgentDriver, droidInjectId, ensureDroidInjectModel } from "./acp/d
 import { ensureGrokInjectSlug } from "./acp/grok.ts";
 import { HermesAgentDriver, ensureHermesInjectProvider, hermesAcpModelId } from "./acp/hermes.ts";
 import { ensureKimiInjectAlias, KimiAgentDriver } from "./acp/kimi.ts";
-import { ensureOpenCodeInjectModel } from "./acp/opencode-go.ts";
+import { ensureOpenCodeInjectModel } from "./acp/opencode.ts";
 import { ensureQwenInjectModel, QwenAgentDriver } from "./acp/qwen.ts";
 import { recordEvents } from "../testing/events.ts";
 import {

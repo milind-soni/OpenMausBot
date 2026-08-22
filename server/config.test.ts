@@ -37,7 +37,7 @@ describe("configuration boundaries", () => {
 
   it("rejects malformed stored instances and API patches", () => {
     expect(() => parseStoredConfig({ instances: { claude: { driver: 42 } } })).toThrow("instances.claude.driver");
-    expect(() => parseConfigPatch({ opencodeGo: { apiKey: 42 } })).toThrow("opencodeGo.apiKey");
+    expect(() => parseConfigPatch({ opencode: { apiKey: 42 } })).toThrow("opencode.apiKey");
     expect(() => parseConfigPatch({ profile: [] })).toThrow("profile");
   });
 
@@ -153,12 +153,12 @@ describe("Instance CLI override", () => {
     const cfg: AppConfig = {
       xai: { key: "SECRET-XAI" },
       box: { token: "SECRET-BOX" },
-      opencodeGo: { apiKey: "SECRET-OCG" },
+      opencode: { apiKey: "SECRET-OCG" },
       instances: {
         claude: { driver: "claudeAgent" },
         grokApi: { driver: "grok" },
         computer: { driver: "boxAgent" },
-        opencode: { driver: "opencodeGo" },
+        opencode: { driver: "opencodeAgent" },
       },
     };
     const set = withInstanceCli(cfg, "claude", "/opt/claude");
@@ -173,12 +173,12 @@ describe("Instance CLI override", () => {
   });
 });
 
-describe("OpenCode Go configuration", () => {
-  it("injects the key only into OpenCode Go instances", () => {
+describe("OpenCode configuration", () => {
+  it("injects the key only into OpenCode instances", () => {
     const cfg: AppConfig = {
-      opencodeGo: { apiKey: "secret-value" },
+      opencode: { apiKey: "secret-value" },
       instances: {
-        opencode: { driver: "opencodeGo" },
+        opencode: { driver: "opencodeAgent" },
         grok: { driver: "grokAgent" },
       },
     };
@@ -187,6 +187,56 @@ describe("OpenCode Go configuration", () => {
     expect(instances.opencode.environment).toEqual({ OPENCODE_API_KEY: "secret-value" });
     expect(instances.grok.environment).toEqual({});
   });
+
+  // The key used to live under `opencodeGo`. Anyone who saved one before this
+  // rename has it on disk under the old name, and silently dropping it would
+  // send them back to the sign-in screen with no idea why.
+  it("still reads a key saved under the previous name", () => {
+    const cfg: AppConfig = {
+      opencodeGo: { apiKey: "saved-before-the-rename" },
+      instances: { opencode: { driver: "opencodeAgent" } },
+    };
+
+    expect(instanceConfigs(cfg).opencode.environment).toEqual({
+      OPENCODE_API_KEY: "saved-before-the-rename",
+    });
+  });
+
+  it("prefers the current name when a config carries both", () => {
+    const cfg: AppConfig = {
+      opencode: { apiKey: "current" },
+      opencodeGo: { apiKey: "legacy" },
+      instances: { opencode: { driver: "opencodeAgent" } },
+    };
+
+    expect(instanceConfigs(cfg).opencode.environment).toEqual({ OPENCODE_API_KEY: "current" });
+  });
+
+  it("moves the previous API spelling onto the current config section", () => {
+    expect(parseConfigPatch({ opencodeGo: { apiKey: "legacy" } })).toEqual({
+      opencode: { apiKey: "legacy" },
+    });
+  });
+
+  it("moves a configured fleet from the removed driver to OpenCode", () => {
+    const cfg: AppConfig = {
+      instances: { opencodeGo: { driver: "opencodeGo" } },
+    };
+
+    expect(instanceConfigs(cfg)).toMatchObject({
+      opencode: { driver: "opencodeAgent" },
+    });
+    expect(instanceConfigs(cfg)).not.toHaveProperty("opencodeGo");
+    expect(cfg.instances?.opencodeGo.driver).toBe("opencodeGo");
+  });
+
+  it("keeps an arbitrary custom instance id when moving it to OpenCode", () => {
+    const cfg: AppConfig = {
+      instances: { research: { driver: "opencodeGo" } },
+    };
+
+    expect(instanceConfigs(cfg).research.driver).toBe("opencodeAgent");
+  });
 });
 
 describe("credential env narrowing", () => {
@@ -194,11 +244,11 @@ describe("credential env narrowing", () => {
     const cfg: AppConfig = {
       xai: { key: "SECRET-XAI" },
       box: { token: "SECRET-BOX" },
-      opencodeGo: { apiKey: "SECRET-OCG" },
+      opencode: { apiKey: "SECRET-OCG" },
       instances: {
         grokApi: { driver: "grok" },
         computer: { driver: "boxAgent" },
-        opencode: { driver: "opencodeGo" },
+        opencode: { driver: "opencodeAgent" },
         claude: { driver: "claudeAgent" },
         codex: { driver: "codex" },
       },
@@ -259,7 +309,7 @@ describe("credential env preference", () => {
       JSON.stringify({
         xai: { key: "file-xai", url: "https://api.example.test/v1" },
         box: { token: "file-box" },
-        opencodeGo: { apiKey: "file-ocg" },
+        opencode: { apiKey: "file-ocg" },
         tts: { key: "file-tts", voice: "narrator" },
         imageGen: { key: "file-image" },
       }),
@@ -272,7 +322,7 @@ describe("credential env preference", () => {
     const cfg = loadConfig();
     expect(cfg.xai).toEqual({ key: "env-xai", url: "https://api.example.test/v1" });
     expect(cfg.box).toEqual({ token: "env-box" });
-    expect(cfg.opencodeGo).toEqual({ apiKey: "env-ocg" });
+    expect(cfg.opencode).toEqual({ apiKey: "env-ocg" });
     expect(cfg.tts).toEqual({ key: "env-tts", voice: "narrator" });
     expect(cfg.imageGen).toEqual({ key: "env-image" });
   });

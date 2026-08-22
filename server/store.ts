@@ -231,6 +231,20 @@ export type StoreChange =
 /** What a task is called before its first message names it. */
 export const UNTITLED_TASK = "New task";
 
+const LEGACY_OPENCODE_INSTANCE_ID = "opencodeGo";
+const OPENCODE_INSTANCE_ID = "opencode";
+
+/** Move a per-instance continuation onto the renamed default engine. The
+ * current spelling wins if both exist after an interrupted upgrade. */
+function migrateOpenCodeCursor(cursors: Record<string, unknown> | undefined): boolean {
+  if (!cursors || !Object.hasOwn(cursors, LEGACY_OPENCODE_INSTANCE_ID)) return false;
+  if (!Object.hasOwn(cursors, OPENCODE_INSTANCE_ID)) {
+    cursors[OPENCODE_INSTANCE_ID] = cursors[LEGACY_OPENCODE_INSTANCE_ID];
+  }
+  delete cursors[LEGACY_OPENCODE_INSTANCE_ID];
+  return true;
+}
+
 /** A task's name, taken from the first thing you asked it to do. */
 export function titleFromMessage(text: string): string {
   const line = text.trim().split("\n")[0]!.trim();
@@ -445,6 +459,14 @@ export class Store {
       if (b.busy || (b.activity !== undefined && b.activity !== "idle")) botsMigrated = true;
       b.busy = false;
       b.activity = "idle";
+      if (b.modelSelection?.instanceId === LEGACY_OPENCODE_INSTANCE_ID) {
+        b.modelSelection = { ...b.modelSelection, instanceId: OPENCODE_INSTANCE_ID };
+        botsMigrated = true;
+      }
+      if (migrateOpenCodeCursor(b.resumeCursors)) botsMigrated = true;
+      for (const task of b.tasks ?? []) {
+        if (migrateOpenCodeCursor(task.resumeCursors)) botsMigrated = true;
+      }
       if (b.cloudBackend !== undefined && b.cloudBackend !== "box" && b.cloudBackend !== "vps") {
         delete b.cloudBackend;
         botsMigrated = true;

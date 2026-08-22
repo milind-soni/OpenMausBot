@@ -6,7 +6,7 @@
 //
 // The fake CLI is a shebang script Windows cannot exec directly —
 // resolveCliSpawn turns it into `node <script>`, so these run everywhere.
-import { chmodSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import { chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -20,6 +20,7 @@ import { GrokAgentDriver } from "./grok.ts";
 import { GeminiAgentDriver } from "./gemini.ts";
 import { KimiAgentDriver } from "./kimi.ts";
 import { DroidAgentDriver } from "./droid.ts";
+import { __catalogTestHooks, discoverCatalog, OpenCodeAgentDriver, parseModels, permissionEnv } from "./opencode.ts";
 import { CursorAgentDriver } from "./cursor.ts";
 import { removeTempDir } from "../../testing/cleanup.ts";
 
@@ -129,6 +130,19 @@ describe("ACP decodeConfig", () => {
     });
     expect(DroidAgentDriver.install?.signInCommand).toBe("droid");
   });
+  it("opencode defaults to the opencode binary and declares cross-platform setup", () => {
+    expect(OpenCodeAgentDriver.decodeConfig(undefined)).toEqual({
+      cli: "opencode",
+      fullAuto: false,
+      workspace: undefined,
+    });
+    expect(OpenCodeAgentDriver.install?.command).toMatchObject({
+      darwin: expect.stringContaining("opencode.ai/install"),
+      linux: expect.stringContaining("opencode.ai/install"),
+      win32: expect.stringContaining("opencode-ai"),
+    });
+    expect(OpenCodeAgentDriver.install?.signInCommand).toBe("opencode auth login");
+  });
   it("cursor defaults to its unambiguous binary and declares cross-platform setup", () => {
     expect(CursorAgentDriver.decodeConfig(undefined)).toEqual({
       cli: "cursor-agent",
@@ -203,6 +217,8 @@ describe("ACP turns (fake CLI)", () => {
     delete process.env.FAKE_ACP_DUMP;
     delete process.env.XAI_API_KEY;
     delete process.env.OPENCODE_API_KEY;
+    delete process.env.OPENAI_API_KEY;
+    delete process.env.ANTHROPIC_API_KEY;
     delete process.env.CURSOR_API_KEY;
     delete process.env.CURSOR_AUTH_TOKEN;
     delete process.env.BOX_TOKEN;
@@ -210,6 +226,9 @@ describe("ACP turns (fake CLI)", () => {
     delete process.env.FAKE_ACP_MODELS;
     delete process.env.FAKE_ACP_MODEL_STICKS;
     delete process.env.FAKE_ACP_USAGE_ROOT;
+    delete process.env.OPENCODE_PERMISSION;
+    delete process.env.OPENCODE_CONFIG;
+    delete process.env.OPENCODE_CONFIG_DIR;
     recorder?.stop();
     await instance?.dispose();
     await removeTempDir(scratch);
@@ -644,6 +663,127 @@ describe("ACP turns (fake CLI)", () => {
     expect(JSON.parse(readFileSync(without, "utf8")).argv).not.toContain("--reasoning-effort");
   });
 
+  // The name used to end "and only the permission key". It names four key paths
+  // now, so that was a lie about the driver's scope; what the test actually pins
+  // is that the caller's unrelated settings survive.
+  it("opencode forces an ask policy into the child and leaves the caller's other settings alone", async () => {
+    process.env.FAKE_ACP_MODELS = "opencode/hy3-free";
+    const dump = join(scratch, "opencode-env.json");
+    process.env.FAKE_ACP_DUMP = dump;
+    instance = await OpenCodeAgentDriver.create({
+      instanceId: "opencode-ask",
+      displayName: undefined,
+      environment: { OPENCODE_CONFIG_CONTENT: JSON.stringify({ mcp: { keepme: {} }, permission: "allow" }) },
+      enabled: true,
+      config: { cli: FAKE_CLI, fullAuto: false },
+    });
+    recorder = recordEvents(instance.adapter);
+
+    await instance.adapter.sendTurn({ threadId: "t-oc-ask", text: "go" });
+    await recorder.until((e) => e.type === "turn.completed");
+
+    const injected = JSON.parse(JSON.parse(readFileSync(dump, "utf8")).env.OPENCODE_CONFIG_CONTENT);
+    expect(injected.permission.bash).toBe("ask");
+    expect(injected.permission["*"]).toBe("ask");
+    expect(injected.permission.edit).toBe("allow");
+    // opencode's own `.env` guard survives our blanket read allowance
+    expect(injected.permission.read).toMatchObject({ "*": "allow", "*.env": "ask" });
+    // the user's other settings survive: we replace one key, not the file
+    expect(injected.mcp).toEqual({ keepme: {} });
+  });
+
+  it("opencode shuts the routes that outrank the injected policy", async () => {
+    process.env.FAKE_ACP_MODELS = "opencode/hy3-free";
+    const dump = join(scratch, "opencode-routes.json");
+    process.env.FAKE_ACP_DUMP = dump;
+    instance = await OpenCodeAgentDriver.create({
+      instanceId: "opencode-routes",
+      displayName: undefined,
+      environment: {},
+      enabled: true,
+      config: { cli: FAKE_CLI, fullAuto: false },
+    });
+    recorder = recordEvents(instance.adapter);
+    // All three are inherited from our own process env and all three sidestep
+    // the config merge: OPENCODE_PERMISSION is applied after it, and
+    // OPENCODE_CONFIG/_DIR point opencode at a file or directory we do not
+    // control. Set them AFTER create() so only the per-turn sanitiser can
+    // remove them.
+    process.env.OPENCODE_PERMISSION = JSON.stringify({ bash: "allow" });
+    process.env.OPENCODE_CONFIG = join(scratch, "hostile-opencode.json");
+    process.env.OPENCODE_CONFIG_DIR = scratch;
+
+    await instance.adapter.sendTurn({ threadId: "t-oc-routes", text: "go" });
+    await recorder.until((e) => e.type === "turn.completed");
+
+    const { env } = JSON.parse(readFileSync(dump, "utf8"));
+    expect(env.OPENCODE_PERMISSION).toBeUndefined();
+    expect(env.OPENCODE_CONFIG).toBeUndefined();
+    expect(env.OPENCODE_CONFIG_DIR).toBeUndefined();
+    // a per-agent permission block in the working directory outranks ours too;
+    // disabling project config is what removes that route
+    expect(env.OPENCODE_DISABLE_PROJECT_CONFIG).toBe("1");
+  });
+
+  it("opencode hands everything to the agent in fullAuto", async () => {
+    process.env.FAKE_ACP_MODELS = "opencode/hy3-free";
+    const dump = join(scratch, "opencode-auto.json");
+    process.env.FAKE_ACP_DUMP = dump;
+    instance = await OpenCodeAgentDriver.create({
+      instanceId: "opencode-auto",
+      displayName: undefined,
+      environment: {},
+      enabled: true,
+      config: { cli: FAKE_CLI, fullAuto: true },
+    });
+    recorder = recordEvents(instance.adapter);
+
+    await instance.adapter.sendTurn({ threadId: "t-oc-auto", text: "go" });
+    await recorder.until((e) => e.type === "turn.completed");
+
+    const { env } = JSON.parse(readFileSync(dump, "utf8"));
+    expect(JSON.parse(env.OPENCODE_CONFIG_CONTENT).permission).toBe("allow");
+    // fullAuto means the user asked for no gate at all, so the project's own
+    // config is left alone rather than suppressed
+    expect(env.OPENCODE_DISABLE_PROJECT_CONFIG).toBeUndefined();
+  });
+
+  it("opencode spawns the acp subcommand and passes no -m", async () => {
+    process.env.FAKE_ACP_MODELS = "opencode/hy3-free";
+    const dump = join(scratch, "opencode-argv.json");
+    process.env.FAKE_ACP_DUMP = dump;
+    await create(OpenCodeAgentDriver);
+
+    await instance.adapter.sendTurn({ threadId: "t-oc-argv", text: "go", model: "opencode/hy3-free" });
+    await recorder.until((e) => e.type === "turn.completed");
+
+    const { argv } = JSON.parse(readFileSync(dump, "utf8"));
+    expect(argv).toEqual(["acp"]);
+  });
+
+  it("opencode inherits its own provider key and no one else's", async () => {
+    process.env.FAKE_ACP_MODELS = "opencode/hy3-free";
+    const dump = join(scratch, "opencode-keys.json");
+    process.env.FAKE_ACP_DUMP = dump;
+    await create(OpenCodeAgentDriver);
+    // OPENCODE_API_KEY unlocks the OpenCode Zen provider: on a virgin HOME the
+    // catalog goes from 8 free models to 81 once it is set (measured, 1.18.18).
+    // It is in core.ts's PROVIDER_CREDENTIAL_ENV, so only declaring it in
+    // credentialEnv keeps it. The user's own logins live in opencode's
+    // auth.json and need nothing from us — these two must not travel.
+    process.env.OPENCODE_API_KEY = "zen-key";
+    process.env.OPENAI_API_KEY = "openai-should-not-leak";
+    process.env.ANTHROPIC_API_KEY = "anthropic-should-not-leak";
+
+    await instance.adapter.sendTurn({ threadId: "t-oc-keys", text: "go" });
+    await recorder.until((e) => e.type === "turn.completed");
+
+    const { env } = JSON.parse(readFileSync(dump, "utf8"));
+    expect(env.OPENCODE_API_KEY).toBe("zen-key");
+    expect(env.OPENAI_API_KEY).toBeUndefined();
+    expect(env.ANTHROPIC_API_KEY).toBeUndefined();
+  });
+
   it("puts Grok -m after agent so ACP stdio binds the local slug", async () => {
     const dump = join(scratch, "grok-argv-order.json");
     await create(GrokAgentDriver);
@@ -858,5 +998,405 @@ describe("ACP snapshot", () => {
     } finally {
       await instance.dispose();
     }
+  });
+
+  it("opencode is unauthenticated when its catalog is empty, authenticated when it is not", async () => {
+    __catalogTestHooks.reset();
+    process.env.FAKE_ACP_MODELS = "";
+    const empty = await OpenCodeAgentDriver.create({
+      instanceId: "opencode-empty",
+      displayName: undefined,
+      environment: {},
+      enabled: true,
+      config: { cli: FAKE_CLI, fullAuto: false },
+    });
+    try {
+      expect((await empty.snapshot()).authenticated).toBe(false);
+    } finally {
+      await empty.dispose();
+    }
+
+    __catalogTestHooks.reset();
+    process.env.FAKE_ACP_MODELS = "opencode/hy3-free";
+    const ready = await OpenCodeAgentDriver.create({
+      instanceId: "opencode-ready",
+      displayName: undefined,
+      environment: {},
+      enabled: true,
+      config: { cli: FAKE_CLI, fullAuto: false },
+    });
+    try {
+      const snap = await ready.snapshot();
+      expect(snap.state).toBe("available");
+      expect(snap.authenticated).toBe(true);
+      expect((await ready.catalog!()).options).toEqual([{ id: "opencode/hy3-free", label: "hy3-free" }]);
+    } finally {
+      __catalogTestHooks.reset();
+      delete process.env.FAKE_ACP_MODELS;
+      await ready.dispose();
+    }
+  });
+});
+
+describe("opencode permission policy", () => {
+  const perm = (existing?: string) => JSON.parse(permissionEnv(existing, false)).permission;
+
+  it("wins over a permission key the caller already set", () => {
+    expect(perm(JSON.stringify({ permission: "allow" })).bash).toBe("ask");
+  });
+
+  it("keeps the caller's other settings", () => {
+    const merged = JSON.parse(permissionEnv(JSON.stringify({ mcp: { keepme: {} } }), false));
+    expect(merged.mcp).toEqual({ keepme: {} });
+  });
+
+  it("falls back to a bare policy on any shape that is not a plain object", () => {
+    for (const junk of ["{not json", "[1,2]", '"a string"', "42", "null"]) {
+      expect(perm(junk).bash).toBe("ask");
+    }
+  });
+
+  it("hands everything over in fullAuto", () => {
+    const merged = JSON.parse(permissionEnv(undefined, true));
+    expect(merged.permission).toBe("allow");
+    // fullAuto is the user asking for no gate at all, so nothing is pinned
+    expect(merged.agent).toBeUndefined();
+    expect(merged.mode).toBeUndefined();
+    expect(merged.default_agent).toBeUndefined();
+  });
+
+  it("pins the same policy on every agent it names", () => {
+    // A per-agent block is a different key path from the top-level policy: it
+    // is appended after it and evaluation is last-match-wins, so a global
+    // config could otherwise restore `bash: allow`. Naming the key path is what
+    // makes ours collide with theirs instead of losing to it.
+    const merged = JSON.parse(permissionEnv(undefined, false));
+    for (const name of ["build", "plan", "general"]) {
+      expect(merged.agent[name].permission).toEqual(merged.permission);
+      expect(merged.agent[name].permission.bash).toBe("ask");
+    }
+    // and a config cannot point the session at an agent we did not pin
+    expect(merged.default_agent).toBe("build");
+  });
+
+  it("replaces a pinned agent's permission but keeps its other fields and other agents", () => {
+    const merged = JSON.parse(
+      permissionEnv(
+        JSON.stringify({
+          agent: {
+            build: { model: "anthropic/claude-opus-5", permission: { bash: "allow" } },
+            reviewer: { prompt: "review it" },
+          },
+        }),
+        false,
+      ),
+    );
+    expect(merged.agent.build.permission.bash).toBe("ask");
+    expect(merged.agent.build.model).toBe("anthropic/claude-opus-5");
+    expect(merged.agent.reviewer).toEqual({ prompt: "review it" });
+  });
+
+  it("pins the legacy mode key path, for build and for no other agent", () => {
+    // opencode folds `mode.<name>` into `agent.<name>` AFTER every config file
+    // has merged, with the mode entry winning, so a global
+    // `mode.build.permission` outranks the agent pin above. Naming the key path
+    // is what takes it back. `build` only: the fold hardcodes `mode: "primary"`
+    // on whatever it copies, so naming `mode.general` would promote the `task`
+    // tool's subagent to a selectable primary agent the user does not have.
+    const merged = JSON.parse(permissionEnv(undefined, false));
+    expect(merged.mode.build.permission).toEqual(merged.permission);
+    expect(merged.mode.build.permission.bash).toBe("ask");
+    expect(Object.keys(merged.mode)).toEqual(["build"]);
+  });
+
+  it("overrides a mode block the caller already set, keeping its other fields and modes", () => {
+    const merged = JSON.parse(
+      permissionEnv(
+        JSON.stringify({
+          mode: {
+            build: { model: "anthropic/claude-opus-5", permission: { bash: "allow" } },
+            scribe: { prompt: "write it up" },
+          },
+        }),
+        false,
+      ),
+    );
+    // without this the caller's mode block would ride through the spread
+    // untouched and hand back exactly what the agent pin took
+    expect(merged.mode.build.permission.bash).toBe("ask");
+    expect(merged.mode.build.model).toBe("anthropic/claude-opus-5");
+    expect(merged.mode.scribe).toEqual({ prompt: "write it up" });
+  });
+
+  it("still pins when the caller's agent or mode key is not a plain object", () => {
+    for (const junk of ['{"agent":"nope"}', '{"agent":[1,2]}', '{"agent":{"build":"nope"}}']) {
+      expect(JSON.parse(permissionEnv(junk, false)).agent.build.permission.bash).toBe("ask");
+    }
+    for (const junk of ['{"mode":"nope"}', '{"mode":[1,2]}', '{"mode":{"build":"nope"}}']) {
+      expect(JSON.parse(permissionEnv(junk, false)).mode.build.permission.bash).toBe("ask");
+    }
+  });
+});
+
+describe("opencode catalog parsing", () => {
+  it("keeps one qualified id per line and labels it with the model part", () => {
+    expect(parseModels("anthropic/claude-opus-5\nollama/qwen3-coder:latest\n")).toEqual([
+      { id: "anthropic/claude-opus-5", label: "claude-opus-5" },
+      { id: "ollama/qwen3-coder:latest", label: "qwen3-coder:latest" },
+    ]);
+  });
+
+  it("drops anything that is not a qualified id rather than guessing", () => {
+    expect(parseModels("Available models:\n\nanthropic/claude-opus-5\nnot-qualified\n  indented/thing\n")).toEqual([
+      { id: "anthropic/claude-opus-5", label: "claude-opus-5" },
+    ]);
+  });
+
+  it("returns nothing for empty output", () => {
+    expect(parseModels("")).toEqual([]);
+    expect(parseModels("\n\n")).toEqual([]);
+  });
+
+  it("keeps only the first slash as the provider boundary", () => {
+    expect(parseModels("ollama/hf.co/unsloth/Qwen3-32B-GGUF:Q4_K_M\n")).toEqual([
+      { id: "ollama/hf.co/unsloth/Qwen3-32B-GGUF:Q4_K_M", label: "hf.co/unsloth/Qwen3-32B-GGUF:Q4_K_M" },
+    ]);
+  });
+
+  it("parses a CRLF stream exactly like an LF one", () => {
+    // Measured on Linux the CLI emits LF, but nothing guarantees that on
+    // Windows, and a surviving \r drops every entry without an error.
+    expect(parseModels("anthropic/claude-opus-5\r\nollama/qwen3-coder:latest\r\n")).toEqual([
+      { id: "anthropic/claude-opus-5", label: "claude-opus-5" },
+      { id: "ollama/qwen3-coder:latest", label: "qwen3-coder:latest" },
+    ]);
+  });
+});
+
+describe("opencode catalog discovery", () => {
+  beforeEach(() => {
+    __catalogTestHooks.reset();
+    process.env.FAKE_ACP_MODELS = "opencode/hy3-free,anthropic/claude-opus-5";
+  });
+  afterEach(() => {
+    __catalogTestHooks.reset();
+    delete process.env.FAKE_ACP_MODELS;
+    delete process.env.FAKE_ACP_DEFAULT_MODEL;
+    delete process.env.FAKE_ACP_CONFIG_FAILS;
+    delete process.env.FAKE_ACP_MODELS_FAILS;
+  });
+
+  it("uses the CLI's own resolved default when it is in the catalog", async () => {
+    process.env.FAKE_ACP_DEFAULT_MODEL = "anthropic/claude-opus-5";
+    const catalog = await discoverCatalog(FAKE_CLI, process.env);
+    expect(catalog.default).toBe("anthropic/claude-opus-5");
+    expect(catalog.options).toHaveLength(2);
+  });
+
+  // A provider prefix is the CLI's to spell, never ours to build. Getting this
+  // wrong is silent at every layer we control and only fails at the last one:
+  // `session/set_config_option` answers "model not found: <id>" and core.ts
+  // turns that into a failed turn, so a whole picker can look healthy while
+  // none of its entries can run.
+  it("serves model ids exactly as the CLI spells them, adding no prefix", async () => {
+    process.env.FAKE_ACP_MODELS = "openai/gpt-5.6-sol,opencode/claude-opus-4-5";
+    const catalog = await discoverCatalog(FAKE_CLI, process.env);
+    expect(catalog.options.map((o) => o.id)).toEqual([
+      "openai/gpt-5.6-sol",
+      "opencode/claude-opus-4-5",
+    ]);
+  });
+
+  it("falls back to the first entry when debug config fails", async () => {
+    process.env.FAKE_ACP_CONFIG_FAILS = "1";
+    const catalog = await discoverCatalog(FAKE_CLI, process.env);
+    expect(catalog.default).toBe("opencode/hy3-free");
+  });
+
+  it("falls back to the first entry when the reported default is not in the catalog", async () => {
+    process.env.FAKE_ACP_DEFAULT_MODEL = "gone/removed-model";
+    const catalog = await discoverCatalog(FAKE_CLI, process.env);
+    expect(catalog.default).toBe("opencode/hy3-free");
+  });
+
+  it("reports an empty catalog rather than inventing one", async () => {
+    process.env.FAKE_ACP_MODELS = "";
+    const catalog = await discoverCatalog(FAKE_CLI, process.env);
+    expect(catalog).toEqual({ default: "", options: [] });
+  });
+
+  it("does not cache a CLI that could not run, so the next call retries", async () => {
+    let clock = 1_000;
+    __catalogTestHooks.setClock(() => clock);
+    process.env.FAKE_ACP_MODELS_FAILS = "1";
+    expect((await discoverCatalog(FAKE_CLI, process.env)).options).toEqual([]);
+
+    delete process.env.FAKE_ACP_MODELS_FAILS;
+    // Same instant, so the clock cannot be what lets this through: only an
+    // uncached failure allows the second call to reach the CLI at all.
+    expect((await discoverCatalog(FAKE_CLI, process.env)).options).toHaveLength(2);
+  });
+
+  it("serves the last good catalog when a later probe cannot run", async () => {
+    let clock = 1_000;
+    __catalogTestHooks.setClock(() => clock);
+    expect((await discoverCatalog(FAKE_CLI, process.env)).options).toHaveLength(2);
+
+    // Change what a SUCCESSFUL probe would return as well, so a fresh probe
+    // that wrongly ignored the failure would visibly diverge from the stale
+    // value instead of coincidentally matching it.
+    process.env.FAKE_ACP_MODELS = "only/one";
+    process.env.FAKE_ACP_MODELS_FAILS = "1";
+    clock += 61_000; // past the TTL, so the cache is a fallback and not a hit
+    expect((await discoverCatalog(FAKE_CLI, process.env)).options).toEqual([
+      { id: "opencode/hy3-free", label: "hy3-free" },
+      { id: "anthropic/claude-opus-5", label: "claude-opus-5" },
+    ]);
+  });
+
+  it("does not collide two homes whose paths contain the key separator", async () => {
+    let clock = 1_000;
+    __catalogTestHooks.setClock(() => clock);
+    // "a b" + "c" and "a" + "b c" join to the same string under a naive
+    // space-joined key, and Windows paths routinely contain spaces
+    const first = await discoverCatalog(FAKE_CLI, { ...process.env, HOME: "a b", XDG_CONFIG_HOME: "c" });
+    expect(first.options).toHaveLength(2);
+
+    process.env.FAKE_ACP_MODELS = "only/one";
+    const second = await discoverCatalog(FAKE_CLI, { ...process.env, HOME: "a", XDG_CONFIG_HOME: "b c" });
+    expect(second.options).toEqual([{ id: "only/one", label: "one" }]);
+  });
+
+  it("serves the cache until the TTL expires, on an injected clock", async () => {
+    let now = 1_000;
+    __catalogTestHooks.setClock(() => now);
+    const first = await discoverCatalog(FAKE_CLI, process.env);
+    expect(first.options).toHaveLength(2);
+
+    process.env.FAKE_ACP_MODELS = "only/one";
+    now += 59_000;
+    expect((await discoverCatalog(FAKE_CLI, process.env)).options).toHaveLength(2);
+
+    now += 2_000;
+    expect((await discoverCatalog(FAKE_CLI, process.env)).options).toEqual([{ id: "only/one", label: "one" }]);
+  });
+
+  it("does not serve one instance's catalog to another home", async () => {
+    let clock = 1_000;
+    __catalogTestHooks.setClock(() => clock);
+    const a = await discoverCatalog(FAKE_CLI, { ...process.env, HOME: "/tmp/home-a" });
+    expect(a.options).toHaveLength(2);
+
+    process.env.FAKE_ACP_MODELS = "only/one";
+    // same binary, same instant, different home: must not hit A's entry
+    const b = await discoverCatalog(FAKE_CLI, { ...process.env, HOME: "/tmp/home-b" });
+    expect(b.options).toEqual([{ id: "only/one", label: "one" }]);
+  });
+
+  it("probes in the working directory it is given, not the server's", async () => {
+    let clock = 1_000;
+    __catalogTestHooks.setClock(() => clock);
+    // control: an existing directory probes normally
+    expect((await discoverCatalog(FAKE_CLI, process.env, tmpdir())).options).toHaveLength(2);
+
+    // A directory that does not exist makes the spawn itself fail, which is
+    // observable only if the cwd reached execCli at all — and the distinct key
+    // means this is a fresh probe rather than the control's cache entry.
+    const gone = join(tmpdir(), "omb-opencode-no-such-dir");
+    expect((await discoverCatalog(FAKE_CLI, process.env, gone)).options).toEqual([]);
+  });
+
+  it("does not serve one instance's catalog to another config content", async () => {
+    let clock = 1_000;
+    __catalogTestHooks.setClock(() => clock);
+    // OPENCODE_CONFIG_CONTENT can declare a whole provider, so two instances
+    // differing only by a per-instance `environment` entry legitimately see
+    // different catalogs. Measured on 1.18.18: 473 -> 474 lines.
+    const a = await discoverCatalog(FAKE_CLI, { ...process.env, OPENCODE_CONFIG_CONTENT: '{"x":1}' });
+    expect(a.options).toHaveLength(2);
+
+    process.env.FAKE_ACP_MODELS = "only/one";
+    const b = await discoverCatalog(FAKE_CLI, { ...process.env, OPENCODE_CONFIG_CONTENT: '{"x":2}' });
+    expect(b.options).toEqual([{ id: "only/one", label: "one" }]);
+  });
+
+  // The cache collapses SEQUENTIAL callers: describe() awaits snapshot() —
+  // which asks isAuthenticated, which discovers — before it awaits catalog(),
+  // so the second one hits a warm entry. Concurrent callers are the gap: two
+  // in-flight /api/instances requests both miss and both spawn the CLI.
+  it("spawns one probe when two callers arrive at once", async () => {
+    let clock = 1_000;
+    __catalogTestHooks.setClock(() => clock);
+    const dir = mkdtempSync(join(tmpdir(), "omb-probe-count-"));
+    try {
+      const log = join(dir, "probes.log");
+      const env = { ...process.env, FAKE_ACP_MODELS_LOG: log };
+
+      const [a, b] = await Promise.all([
+        discoverCatalog(FAKE_CLI, env),
+        discoverCatalog(FAKE_CLI, env),
+      ]);
+
+      expect(a.options).toHaveLength(2);
+      expect(b).toEqual(a);
+      expect(readFileSync(log, "utf8").trim().split("\n")).toHaveLength(1);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  // The tests above call discoverCatalog directly, so they prove the cwd
+  // reaches execCli — not that the support computes it from the instance
+  // config. Drop `probeCwd(config)` from opencode.ts's `catalog` and every one
+  // of them still passes while the probe silently moves to the server's own
+  // directory. This one goes through instance.catalog() to close that gap.
+  it("probes a configured workspace, not wherever the server was launched", async () => {
+    let clock = 1_000;
+    __catalogTestHooks.setClock(() => clock);
+    const gone = join(tmpdir(), "omb-opencode-workspace-gone");
+
+    const instance = await OpenCodeAgentDriver.create({
+      instanceId: "opencode-workspace",
+      displayName: undefined,
+      environment: {},
+      enabled: true,
+      config: { cli: FAKE_CLI, fullAuto: false, workspace: gone },
+    });
+    try {
+      // A workspace that does not exist makes the spawn itself fail, which is
+      // observable only if config.workspace reached execCli.
+      expect((await instance.catalog!()).options).toEqual([]);
+    } finally {
+      await instance.dispose();
+    }
+
+    // control: the same driver with a workspace that exists probes normally,
+    // so the empty result above is the cwd and not a broken fake CLI
+    const ok = await OpenCodeAgentDriver.create({
+      instanceId: "opencode-workspace-ok",
+      displayName: undefined,
+      environment: {},
+      enabled: true,
+      config: { cli: FAKE_CLI, fullAuto: false, workspace: tmpdir() },
+    });
+    try {
+      expect((await ok.catalog!()).options).toHaveLength(2);
+    } finally {
+      await ok.dispose();
+    }
+  });
+
+  it("does not serve one instance's catalog to another Windows home", async () => {
+    let clock = 1_000;
+    __catalogTestHooks.setClock(() => clock);
+    // On Windows HOME and the XDG_* vars are all undefined, so keying only on
+    // them collapses every opencode instance onto one entry — a silent failure
+    // on a platform we cannot exercise from here.
+    const a = await discoverCatalog(FAKE_CLI, { ...process.env, USERPROFILE: "C:\\Users\\a" });
+    expect(a.options).toHaveLength(2);
+
+    process.env.FAKE_ACP_MODELS = "only/one";
+    const b = await discoverCatalog(FAKE_CLI, { ...process.env, USERPROFILE: "C:\\Users\\b" });
+    expect(b.options).toEqual([{ id: "only/one", label: "one" }]);
   });
 });

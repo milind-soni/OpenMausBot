@@ -133,4 +133,89 @@ describe("ProviderRegistry", () => {
     expect(registry.entries()).toHaveLength(0);
     expect(registry.get("a")).toBeNull();
   });
+
+  it("describe() prefers a discovered catalog and falls back when it rejects", async () => {
+    const base = {
+      instanceId: "dyn",
+      driverKind: "dynamic",
+      displayName: "Dynamic",
+      enabled: true,
+      models: { default: "static-a", options: [{ id: "static-a", label: "Static A" }] },
+      snapshot: async () => ({ state: "available" as const }),
+      adapter: { capabilities: {} } as any,
+      dispose: async () => {},
+    };
+
+    const ok = new ProviderRegistry([
+      {
+        driverKind: "dynamic",
+        metadata: { displayName: "Dynamic" },
+        decodeConfig: () => ({}),
+        defaultConfig: () => ({}),
+        models: base.models,
+        create: async () => ({
+          ...base,
+          catalog: async () => ({ default: "live-a", options: [{ id: "live-a", label: "Live A" }] }),
+        }),
+      } as any,
+    ]);
+    await ok.load({ dyn: { driver: "dynamic" } });
+    expect((await ok.describe())[0].models.default).toBe("live-a");
+
+    const broken = new ProviderRegistry([
+      {
+        driverKind: "dynamic",
+        metadata: { displayName: "Dynamic" },
+        decodeConfig: () => ({}),
+        defaultConfig: () => ({}),
+        models: base.models,
+        create: async () => ({
+          ...base,
+          catalog: async () => {
+            throw new Error("cli exploded");
+          },
+        }),
+      } as any,
+    ]);
+    await broken.load({ dyn: { driver: "dynamic" } });
+    expect((await broken.describe())[0].models.default).toBe("static-a");
+  });
+
+  it("describe() does not probe the catalog of an instance that is unavailable", async () => {
+    // The picker re-probes /api/instances on every window focus, and a driver
+    // is free not to cache a failed probe, so a user who never installs the
+    // CLI would otherwise pay a doomed spawn per focus event forever. The
+    // snapshot already said the binary is not there; asking it for models is
+    // asking a question we know the answer to.
+    let probes = 0;
+    const registry = new ProviderRegistry([
+      {
+        driverKind: "dynamic",
+        metadata: { displayName: "Dynamic" },
+        decodeConfig: () => ({}),
+        defaultConfig: () => ({}),
+        models: { default: "static-a", options: [{ id: "static-a", label: "Static A" }] },
+        create: async () => ({
+          instanceId: "dyn",
+          driverKind: "dynamic",
+          displayName: "Dynamic",
+          enabled: true,
+          models: { default: "static-a", options: [{ id: "static-a", label: "Static A" }] },
+          snapshot: async () => ({ state: "unavailable" as const, reason: "`dyn` CLI not found" }),
+          catalog: async () => {
+            probes += 1;
+            return { default: "live-a", options: [{ id: "live-a", label: "Live A" }] };
+          },
+          adapter: { capabilities: {} } as any,
+          dispose: async () => {},
+        }),
+      } as any,
+    ]);
+    await registry.load({ dyn: { driver: "dynamic" } });
+
+    const [described] = await registry.describe();
+    expect(probes).toBe(0);
+    // and it reports the static catalog, not an empty one
+    expect(described.models.default).toBe("static-a");
+  });
 });

@@ -7,7 +7,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import { applyDroidLocalAuthEnv, DroidAgentDriver, ensureDroidInjectModel } from "./acp/droid.ts";
 import { ensureGrokInjectSlug, GrokAgentDriver } from "./acp/grok.ts";
 import { applyKimiLocalModelEnv, ensureKimiInjectAlias, KimiAgentDriver } from "./acp/kimi.ts";
-import { ensureOpenCodeInjectModel } from "./acp/opencode-go.ts";
+import { ensureOpenCodeInjectModel } from "./acp/opencode.ts";
 import { AntigravityDriver } from "./antigravity.ts";
 
 const FAKE_ACP = join(dirname(fileURLToPath(import.meta.url)), "..", "testing", "fake-acp-cli.ts");

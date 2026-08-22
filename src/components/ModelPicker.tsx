@@ -19,6 +19,11 @@ function modelLabel(instance: InstanceInfo | undefined, model: string): string {
   return instance?.models.options.find((option) => option.id === model)?.label ?? model;
 }
 
+function providerOf(modelId: string): string {
+  const separator = modelId.indexOf("/");
+  return separator > 0 ? modelId.slice(0, separator) : "";
+}
+
 function engineStatus(instance: InstanceInfo): string {
   if (needsCli(instance)) return "Not installed";
   if (needsSignIn(instance)) return "Sign-in required";
@@ -193,6 +198,25 @@ export function ModelPicker({ bot, className }: { bot: Bot; className?: string }
     />
   );
 
+  // OpenCode can expose hundreds of provider-qualified ids. Keep the compact
+  // suggested view quiet, but make the full and filtered lists scannable by
+  // showing a header whenever the provider prefix changes.
+  const groupOfficialByProvider =
+    (showAll || Boolean(query.trim())) &&
+    new Set(shownOfficial.map((option) => providerOf(option.id)).filter(Boolean)).size > 1;
+  const renderOfficialRow = (option: ModelOption, index: number) => {
+    const provider = providerOf(option.id);
+    const previousProvider = providerOf(shownOfficial[index - 1]?.id ?? "");
+    return (
+      <div key={option.id}>
+        {groupOfficialByProvider && provider && provider !== previousProvider && (
+          <EngineGroupLabel className="px-2 pb-1 pt-2">{provider}</EngineGroupLabel>
+        )}
+        {renderRow(option)}
+      </div>
+    );
+  };
+
   return (
     <div ref={rootRef} className={cn("relative", className)}>
       <button
@@ -342,7 +366,7 @@ export function ModelPicker({ bot, className }: { bot: Bot; className?: string }
                           <EngineGroupLabel className="px-2 pb-1 pt-0.5">
                             {query ? `${filteredOfficial.length} results` : showAll ? `All models · ${official.length}` : "Suggested"}
                           </EngineGroupLabel>
-                          {shownOfficial.map(renderRow)}
+                          {shownOfficial.map(renderOfficialRow)}
                           {shownOfficial.length === 0 && (
                             <div className="px-2 py-5 text-center text-[12.5px] text-ink-secondary">
                               Nothing matches “{query.trim()}”

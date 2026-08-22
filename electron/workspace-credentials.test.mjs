@@ -13,7 +13,7 @@ describe("workspace credential migration", () => {
       box: { token: "box-secret" },
       tts: { key: "tts-secret", voice: "narrator" },
       imageGen: { key: "image-secret" },
-      opencodeGo: { apiKey: "ocg-secret" },
+      opencode: { apiKey: "ocg-secret" },
       profile: { name: "Ada" },
     };
     const result = migrateWorkspaceCredentials(config, {});
@@ -33,11 +33,20 @@ describe("workspace credential migration", () => {
       box: {},
       tts: { voice: "narrator" },
       imageGen: {},
-      opencodeGo: {},
+      opencode: {},
       profile: { name: "Ada" },
     });
     // inputs are never mutated — main.mjs decides which files to rewrite
     expect(config.xai.key).toBe("xai-secret");
+  });
+
+  it("migrates the legacy OpenCode config spelling without renaming the encrypted field", () => {
+    const result = migrateWorkspaceCredentials(
+      { opencodeGo: { apiKey: "legacy-secret" } },
+      {},
+    );
+    expect(result.config).toEqual({ opencodeGo: {} });
+    expect(result.credentials).toEqual({ opencodeGoApiKey: "legacy-secret" });
   });
 
   it("is idempotent: a second boot over migrated output changes nothing", () => {

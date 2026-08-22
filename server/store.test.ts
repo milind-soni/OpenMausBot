@@ -212,6 +212,29 @@ describe("Store", () => {
     expect(reloaded.bot(bot.id)?.resumeCursors).toEqual({ claude: "sess-abc", codex: "thread-xyz" });
   });
 
+  it("migrates the removed OpenCode instance id across bots, tasks, and cursors", () => {
+    const store = new Store(selection);
+    const bot = store.createBot();
+    const raw: BotRecord[] = JSON.parse(readFileSync(join(DATA_DIR, "bots.json"), "utf8"));
+    const legacy = raw.find((record) => record.id === bot.id)!;
+    legacy.modelSelection = { instanceId: "opencodeGo", model: "opencode-go/minimax-m3" };
+    legacy.resumeCursors = { opencodeGo: "legacy-session" };
+    legacy.tasks![0]!.resumeCursors = { opencodeGo: "legacy-task-session" };
+    writeFileSync(join(DATA_DIR, "bots.json"), JSON.stringify(raw));
+
+    const reloaded = new Store(selection);
+    const migrated = reloaded.bot(bot.id)!;
+    expect(migrated.modelSelection).toEqual({
+      instanceId: "opencode",
+      model: "opencode-go/minimax-m3",
+    });
+    expect(migrated.resumeCursors).toEqual({ opencode: "legacy-session" });
+    expect(migrated.tasks![0]!.resumeCursors).toEqual({ opencode: "legacy-task-session" });
+
+    const persisted: BotRecord[] = JSON.parse(readFileSync(join(DATA_DIR, "bots.json"), "utf8"));
+    expect(persisted.find((record) => record.id === bot.id)).toMatchObject(migrated);
+  });
+
   it("seedIfEmpty creates exactly one starter bot, once", () => {
     const store = new Store(selection);
     store.seedIfEmpty();

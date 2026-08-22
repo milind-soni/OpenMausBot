@@ -20,6 +20,24 @@ export function GrokMark({ size = 16, className }: IconProps) {
   );
 }
 
+// Source: OpenCode's brand assets (opencode-logo-dark-square.svg, the
+// dark-background variant — a match for this app's own theme). The source
+// file's <mask>/<clipPath> cover the whole artboard and mask nothing, so
+// they were dropped; its transform="translate(30, 0)" was flattened into
+// the coordinates below, hence every x is 30 higher than in the original.
+export function OpenCodeMark({ size = 16, className }: IconProps) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 300 300" className={className}>
+      <path d="M210 240H90V120H210V240Z" fill="#4B4646" />
+      {/* Two subpaths winding in opposite directions punch the inner square
+          out of the outer frame via the non-zero winding rule. Do not split
+          this into two <path> elements, reorder the subpaths, or add
+          fill-rule — any of those turns the mark into a solid block. */}
+      <path d="M210 60H90V240H210V60ZM270 300H30V0H270V300Z" fill="#F1ECEC" />
+    </svg>
+  );
+}
+
 export function ClaudeMark({ size = 16, className }: IconProps) {
   return (
     <svg width={size} height={size} viewBox="0 0 256 257" preserveAspectRatio="xMidYMid" className={cn("fill-[#d97757]", className)}>
@@ -80,15 +98,6 @@ export function AntigravityMark({ size = 16, className }: IconProps) {
   );
 }
 
-/** Official OpenCode mark. */
-export function OpenCodeMark({ size = 16, className }: IconProps) {
-  return (
-    <svg width={size} height={size} viewBox="0 0 24 24" className={cn("fill-[#F5F5F5]", className)} aria-hidden>
-      <path fillRule="evenodd" d="M16 6H8v12h8V6zm4 16H4V2h16v20z" />
-    </svg>
-  );
-}
-
 /** Official Qwen mark. */
 export function QwenMark({ size = 16, className }: IconProps) {
   const grad = "omb-qwen-mark";
@@ -129,6 +138,8 @@ export function ProviderMark({ driverKind, size, className }: IconProps & { driv
     case "grok":
     case "grokAgent":
       return <GrokMark size={size} className={className} />;
+    case "opencodeAgent":
+      return <OpenCodeMark size={size} className={className} />;
     case "claudeAgent":
       return <ClaudeMark size={size} className={className} />;
     case "codex":

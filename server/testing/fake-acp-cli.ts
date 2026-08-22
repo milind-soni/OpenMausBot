@@ -29,10 +29,16 @@
 //                        core.ts has something to catch
 //   FAKE_ACP_USAGE_ROOT  put the prompt result's usage at the root instead of
 //                        under _meta (what opencode 1.18.18 actually does)
+//   FAKE_ACP_DEFAULT_MODEL  what `debug config` reports as the resolved default
+//   FAKE_ACP_CONFIG_FAILS   make `debug config` exit non-zero
+//   FAKE_ACP_MODELS_FAILS   make `models` exit non-zero (a CLI that cannot run,
+//                           as opposed to one reporting an empty catalog)
+//   FAKE_ACP_MODELS_LOG     append one line per `models` invocation, so a test
+//                           can count probes instead of inferring them
 //
 // Keep this file dependency-free — it runs as a bare `node` subprocess.
 import { spawn } from "node:child_process";
-import { existsSync, writeFileSync } from "node:fs";
+import { appendFileSync, existsSync, writeFileSync } from "node:fs";
 
 const mode = process.env.FAKE_ACP_MODE ?? "happy";
 // opencode-shaped surface: the session carries its own model catalog and the
@@ -65,6 +71,12 @@ const dumpEnv = Object.fromEntries(
     "FAKE_ACP_RPC_DUMP",
     "TEST_POLICY",
     "OPENCODE_API_KEY",
+    // OpenCode permission/config paths asserted by the driver tests.
+    "OPENCODE_CONFIG_CONTENT",
+    "OPENCODE_DISABLE_PROJECT_CONFIG",
+    "OPENCODE_PERMISSION",
+    "OPENCODE_CONFIG",
+    "OPENCODE_CONFIG_DIR",
     "OPENAI_API_KEY",
     "OPENROUTER_API_KEY",
     "ANTHROPIC_API_KEY",
@@ -89,6 +101,20 @@ if (process.env.FAKE_ACP_DUMP) {
 }
 if (argv.includes("--version")) {
   console.log("fake-acp 1.0.0");
+  process.exit(0);
+}
+// catalog surface, for the opencode driver's discovery path
+if (argv[0] === "models" && Object.hasOwn(process.env, "FAKE_ACP_MODELS")) {
+  // one line appended per invocation, so a test can count spawns rather than
+  // infer them — FAKE_ACP_DUMP overwrites and cannot show a duplicate probe
+  if (process.env.FAKE_ACP_MODELS_LOG) appendFileSync(process.env.FAKE_ACP_MODELS_LOG, "probe\n");
+  if (process.env.FAKE_ACP_MODELS_FAILS) process.exit(1);
+  process.stdout.write((process.env.FAKE_ACP_MODELS ?? "").split(",").filter(Boolean).join("\n") + "\n");
+  process.exit(0);
+}
+if (argv[0] === "debug" && argv[1] === "config") {
+  if (process.env.FAKE_ACP_CONFIG_FAILS) process.exit(1);
+  process.stdout.write(JSON.stringify({ model: process.env.FAKE_ACP_DEFAULT_MODEL ?? null }) + "\n");
   process.exit(0);
 }
 // Cursor's driver probes `agent status` / `agent models` on the same binary
@@ -234,7 +260,7 @@ function handle(msg: any) {
         out({
           jsonrpc: "2.0",
           id: msg.id,
-          error: { code: -32000, message: "Authentication required", data: { providerId: "opencode-go" } },
+          error: { code: -32000, message: "Authentication required", data: { providerId: "opencode" } },
         });
         break;
       }
