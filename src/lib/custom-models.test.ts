@@ -21,6 +21,18 @@ describe("filterCustomModels", () => {
   it("treats blank search as no filter", () => {
     expect(filterCustomModels(rows, "  ")).toEqual(rows);
   });
+
+  it("matches fleet host, cost, and unavailable reason metadata", () => {
+    const fleet = [{
+      id: "ollama::qwen3:14b",
+      label: "Qwen 3",
+      host: "GUSTAVO",
+      costClass: "local",
+      reason: "GPU is busy",
+    }];
+    expect(filterCustomModels(fleet, "gustavo")).toEqual(fleet);
+    expect(filterCustomModels(fleet, "busy")).toEqual(fleet);
+  });
 });
 
 describe("partitionCustomModels", () => {

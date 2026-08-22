@@ -13,12 +13,24 @@
 
 /** Key names whose value is a credential. Matched case-insensitively as a
  * substring, so KEY catches ANTHROPIC_API_KEY and x-api-key. */
-const SECRET_KEY_PARTS = ["token", "secret", "password", "passwd", "apikey", "api_key", "authorization", "auth_token"];
+const SECRET_KEY_PARTS = [
+  "token",
+  "secret",
+  "password",
+  "passwd",
+  "apikey",
+  "api_key",
+  "authorization",
+  "auth_token",
+  "cookie",
+  "credential",
+  "dsn",
+];
 
 /** `key` alone is too broad — it matches `keyboard`, `keys`, `hotkey`. Only
  * treat it as a credential when it stands alone or is a suffix, which is how
  * every real one is spelled (API_KEY, consumer-key, xai_key). */
-function isSecretName(name: string): boolean {
+export function isSecretName(name: string): boolean {
   const lower = name.toLowerCase();
   if (SECRET_KEY_PARTS.some((part) => lower.includes(part))) return true;
   return /(^|[_.-])keys?$/.test(lower);
@@ -45,6 +57,9 @@ const KEY_PREFIXES: RegExp[] = [
 ];
 const BEARER = /(\bBearer\s+)([A-Za-z0-9._~+/=-]{12,})/g;
 const PEM_BLOCK = /(-----BEGIN [A-Z ]*PRIVATE KEY-----)([\s\S]*?)(-----END [A-Z ]*PRIVATE KEY-----)/g;
+const SECRET_HEADER = /(\b(?:authorization|proxy-authorization|cookie|set-cookie)\s*:\s*)([^\r\n"']{4,})/gi;
+const URL_USERINFO = /(\b[a-z][a-z0-9+.-]*:\/\/)([^\s/@:]+:[^\s/@]+)@/gi;
+const DATA_URL = /\b(data:(?:image\/[^;,\s]+|application\/octet-stream);base64,)([A-Za-z0-9+/=\r\n]{16,})/gi;
 /** key=value / key: value / key="value" where the key is secret-shaped.
  * The value must be a single token of some length; prose after a colon
  * ("password: leave blank…") has spaces and does not match. */
@@ -55,6 +70,9 @@ export function redactSecretsInText(text: string): string {
   if (!text || text.length < 8) return text;
   let out = text;
   out = out.replace(PEM_BLOCK, (_m, open: string, body: string, close: string) => `${open}\n${mask(body.trim())}\n${close}`);
+  out = out.replace(DATA_URL, (_m, prefix: string, body: string) => `${prefix}«binary omitted ${body.length} chars»`);
+  out = out.replace(SECRET_HEADER, (_m, lead: string, value: string) => `${lead}${mask(value.trim())}`);
+  out = out.replace(URL_USERINFO, (_m, scheme: string, userinfo: string) => `${scheme}${mask(userinfo)}@`);
   for (const re of KEY_PREFIXES) out = out.replace(re, (m) => mask(m));
   out = out.replace(BEARER, (_m, lead: string, tok: string) => `${lead}${mask(tok)}`);
   out = out.replace(KEY_VALUE, (_m, key: string, sep: string, quote: string, value: string) => `${key}${sep}${quote}${mask(value)}${quote}`);
@@ -96,4 +114,38 @@ export function redactSecrets(input: unknown, depth = 0): unknown {
     out[key] = redactSecrets(value, depth + 1);
   }
   return out;
+}
+
+/** Replace exact protected values that have no recognizable token prefix.
+ * This is the second redaction pass used at capability/telemetry boundaries:
+ * key-shaped redaction catches structure, while this catches an arbitrary
+ * canary or provider value copied into an otherwise innocuous text field. */
+export function redactKnownValues(input: unknown, protectedValues: Iterable<string>, depth = 0): unknown {
+  const values = [...new Set([...protectedValues].filter((value) => value.length >= 6))].sort(
+    (a, b) => b.length - a.length,
+  );
+  const visit = (value: unknown, level: number): unknown => {
+    if (typeof value === "string") {
+      let output = value;
+      for (const secret of values) output = output.split(secret).join(`«redacted ${secret.length} chars»`);
+      return output;
+    }
+    if (level > 12 || value === null || typeof value !== "object") return value;
+    if (Array.isArray(value)) return value.map((item) => visit(item, level + 1));
+    return Object.fromEntries(
+      Object.entries(value as Record<string, unknown>).map(([key, item]) => [key, visit(item, level + 1)]),
+    );
+  };
+  return visit(input, depth);
+}
+
+/** Values already present in the host process under credential-shaped names.
+ * Names and values remain in memory only; callers must never serialize this
+ * set or place it in a child process wholesale. */
+export function protectedEnvironmentValues(env: NodeJS.ProcessEnv = process.env): Set<string> {
+  return new Set(
+    Object.entries(env).flatMap(([name, value]) =>
+      isSecretName(name) && typeof value === "string" && value.length >= 6 ? [value] : [],
+    ),
+  );
 }

@@ -29,7 +29,13 @@ cpSync(process.env.OMB_SMOKE_DIST ?? join(root, "dist-server"), join(staging, "s
 const child = spawn(process.execPath, [join(staging, "server", "index.js")], {
   cwd: staging,
   env: {
-    ...(process.env.PATH ? { PATH: process.env.PATH } : {}),
+    // This gate proves the packaged server and its bundled imports boot. It
+    // must not also discover and version-probe every provider CLI installed
+    // on the machine running the gate: a busy or signed-out host CLI can then
+    // consume the whole health deadline even though the packaged server is
+    // healthy. Keep only the running Node executable discoverable unless a
+    // caller intentionally supplies a smoke-specific PATH.
+    PATH: process.env.OMB_SMOKE_PATH ?? dirname(process.execPath),
     ...(process.env.SystemRoot ? { SystemRoot: process.env.SystemRoot } : {}),
     HOME: home,
     USERPROFILE: home,

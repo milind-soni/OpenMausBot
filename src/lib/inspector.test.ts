@@ -10,11 +10,11 @@ describe("summarizeRuntime", () => {
       summary: "turn started · abcdef12",
       tone: "boundary",
     });
-    expect(summarizeRuntime({ ...base, type: "turn.completed", ok: true, stopReason: "end_turn", cost: 0.01234 })).toEqual({
+    expect(summarizeRuntime({ ...base, type: "turn.completed", turnToken: undefined, ok: true, stopReason: "end_turn", cost: 0.01234 })).toEqual({
       summary: "turn ok · end_turn · $0.0123",
       tone: "boundary",
     });
-    expect(summarizeRuntime({ ...base, type: "turn.completed", ok: false }).tone).toBe("error");
+    expect(summarizeRuntime({ ...base, type: "turn.completed", turnToken: undefined, ok: false }).tone).toBe("error");
     expect(summarizeRuntime({ ...base, type: "runtime.error", message: "boom", setup: true }).summary).toBe("setup: boom");
   });
 

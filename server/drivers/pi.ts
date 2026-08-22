@@ -292,6 +292,7 @@ export const PiDriver: ProviderDriver<PiConfig> = {
         }
         emit({
           ...base(threadId, turnId),
+          turnToken: turn.turnToken,
           type: "turn.completed",
           ok,
           stopReason: stopReason ?? (ok ? "end_turn" : "failed"),
@@ -534,6 +535,9 @@ export const PiDriver: ProviderDriver<PiConfig> = {
           computerMcp: false,
           composioMcp: false,
           images: false,
+          // pi reports tool_execution_start only after its native tool has
+          // begun, so it cannot provide the pre-execution broker contract.
+          approvalBroker: false,
         },
         sendTurn,
         interruptTurn: async (threadId) => active.get(threadId)?.stop(),

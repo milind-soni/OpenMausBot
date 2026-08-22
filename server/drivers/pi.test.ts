@@ -3,8 +3,9 @@
 // RPC turn into canonical events, ride the toolUse→end_turn auto-continue,
 // broker a permission ask, and report availability from `pi --version`.
 //
-// The fake CLI is a shebang script Windows cannot exec directly; spawnCli
-// resolves it to `node <script>`, so these run everywhere.
+// Invoke the fake through this exact test runtime. That keeps the suite
+// hermetic when PATH deliberately excludes installed agent CLIs, and also
+// avoids relying on platform-specific shebang handling.
 import { chmodSync, mkdtempSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
@@ -17,6 +18,7 @@ import { recordEvents, type EventRecorder } from "../testing/events.ts";
 import { fetchPiModels, parsePiCatalog, PiDriver } from "./pi.ts";
 
 const FAKE_CLI = join(dirname(fileURLToPath(import.meta.url)), "..", "testing", "fake-pi-cli.ts");
+const FAKE_CLI_COMMAND = `${JSON.stringify(process.execPath)} ${JSON.stringify(FAKE_CLI)}`;
 const MODELS_LINE =
   '{"type":"response","command":"get_available_models","success":true,"data":{"models":[{"provider":"ollama-cloud","id":"glm-5.2","name":"glm-5.2"},{"provider":"openai","id":"gpt-4o","name":"GPT-4o"}]}}';
 
@@ -88,7 +90,7 @@ describe("PiDriver catalog (fake CLI)", () => {
   });
 
   it("probes the live catalog and flags every option custom", async () => {
-    const catalog = await fetchPiModels(FAKE_CLI, { PATH: process.env.PATH ?? "", HOME: join(tmpdir(), "omb-pi-no-settings") });
+    const catalog = await fetchPiModels(FAKE_CLI_COMMAND, { PATH: process.env.PATH ?? "", HOME: join(tmpdir(), "omb-pi-no-settings") });
     expect(catalog.options).toEqual([
       { id: "ollama-cloud/glm-5.2", label: "glm-5.2", custom: true },
       { id: "openai/gpt-4o", label: "gpt-4o", custom: true },
@@ -98,7 +100,7 @@ describe("PiDriver catalog (fake CLI)", () => {
   });
 
   it("keeps an empty catalog when the probe reports no models", async () => {
-    const catalog = await fetchPiModels(FAKE_CLI, {
+    const catalog = await fetchPiModels(FAKE_CLI_COMMAND, {
       PATH: process.env.PATH ?? "",
       HOME: join(tmpdir(), "omb-pi-empty"),
       FAKE_PI_MODE: "no-models",
@@ -117,7 +119,7 @@ describe("PiDriver turns (fake CLI)", () => {
       displayName: "pi Test",
       environment: { ...environment, ...(mode ? { FAKE_PI_MODE: mode } : {}) },
       enabled: true,
-      config: { cli: FAKE_CLI },
+      config: { cli: FAKE_CLI_COMMAND },
     });
     recorder = recordEvents(instance.adapter);
   };
@@ -133,6 +135,7 @@ describe("PiDriver turns (fake CLI)", () => {
 
   it("normalizes a full turn into the canonical event sequence", async () => {
     await create();
+    expect(instance.adapter.capabilities.approvalBroker).toBe(false);
     const { turnId } = await instance.adapter.sendTurn({
       threadId: "t-happy",
       text: "hi",

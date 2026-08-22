@@ -117,8 +117,12 @@ export class ProviderRegistry {
     return [...this.byId.values()].flatMap((e) => (e.live ? [e.live] : []));
   }
 
-  /** instance snapshots for the model picker: id, driver, models, health */
-  async describe() {
+  /** Instance snapshots for the model picker: id, driver, models, health.
+   * Live model discovery is opt-out for existing callers, but the HTTP picker
+   * route passes refreshModels:false so opening cached UI never fans out to
+   * unrelated CLIs or local providers. */
+  async describe(options: { refreshModels?: boolean } = {}) {
+    const refreshModels = options.refreshModels !== false;
     // Multiple instances may share a driver. Scan each default binary once
     // per response instead of repeating filesystem work for every row.
     const candidatesByName = new Map<string, string[]>();
@@ -141,7 +145,7 @@ export class ProviderRegistry {
             displayName: entry.shadow.displayName ?? entry.shadow.driverKind,
             snapshot: { state: "unavailable", reason: entry.shadow.reason } satisfies ProviderSnapshot,
             models: { default: "", options: [] },
-            capabilities: { computerMcp: false, agentsMcp: false, localComputerMcp: false },
+            capabilities: { computerMcp: false, agentsMcp: false, localComputerMcp: false, approvalBroker: false },
             // an unknown driver has no driver record, hence no install path
             access: driver?.metadata.access ?? "subscription",
             install: driver?.install,
@@ -155,7 +159,7 @@ export class ProviderRegistry {
         const inst = entry.live;
         let snapshot: ProviderSnapshot;
         try {
-          await inst.refreshModels?.();
+          if (refreshModels) await inst.refreshModels?.();
           snapshot = await inst.snapshot();
         } catch (e) {
           snapshot = { state: "unavailable", reason: e instanceof Error ? e.message : String(e) };
@@ -175,6 +179,8 @@ export class ProviderRegistry {
             effortLevels: inst.adapter.capabilities.effortLevels,
             queueing: inst.adapter.capabilities.queueing === true,
             localComputerMcp: inst.adapter.capabilities.localComputerMcp === true,
+            fullTaskScoped: inst.adapter.capabilities.fullTaskScoped === true,
+            approvalBroker: inst.adapter.capabilities.approvalBroker === true,
           },
           access: driver?.metadata.access ?? "subscription",
           install: driver?.install,

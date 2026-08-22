@@ -13,7 +13,7 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 import type { ProviderInstance } from "../contracts.ts";
 import { recordEvents, type EventRecorder } from "../testing/events.ts";
-import { CodexDriver } from "./codex.ts";
+import { CodexDriver, ensureOpenMausCodexHome } from "./codex.ts";
 import { removeTempDir } from "../testing/cleanup.ts";
 
 const FAKE_CLI = join(dirname(fileURLToPath(import.meta.url)), "..", "testing", "fake-codex-app-server.ts");
@@ -58,6 +58,13 @@ describe("CodexDriver turns (fake app-server)", () => {
     delete process.env.OPENAI_API_KEY;
     delete process.env.BOX_TOKEN;
     delete process.env.OMB_TTS_KEY;
+    delete process.env.AOS_STARTUP_DIRECTIVE;
+    delete process.env.FAKE_CODEX_APPROVAL_COMMAND;
+    delete process.env.FAKE_CODEX_APPROVAL_KIND;
+    delete process.env.FAKE_CODEX_APPROVAL_SERVER_NAME;
+    delete process.env.FAKE_CODEX_APPROVAL_FALLBACK_SERVER;
+    delete process.env.OPENSSL_CONF;
+    delete process.env.JDK_JAVA_OPTIONS;
     recorder?.stop();
     await instance?.dispose();
     await removeTempDir(scratch);
@@ -124,6 +131,12 @@ describe("CodexDriver turns (fake app-server)", () => {
     expect(threadStart.params).toMatchObject({ model: "gpt-5.6-sol", modelProvider: "openai" });
   });
 
+  it("keeps local computer capability profile-aware while exposing the scoped profile", async () => {
+    await create({ fullAuto: true });
+    expect(instance.adapter.capabilities.localComputerMcp).toBe(false);
+    expect(instance.adapter.capabilities.fullTaskScoped).toBe(true);
+  });
+
   it("keeps the full command when a Windows interpreter prefix is long", async () => {
     await create({ mode: "windows-command" });
     await instance.adapter.sendTurn({ threadId: "t-windows-command", text: "read notes" });
@@ -155,6 +168,103 @@ describe("CodexDriver turns (fake app-server)", () => {
     await recorder.until((event) => event.type === "turn.completed");
 
     expect(JSON.parse(readFileSync(dump, "utf8")).env.CODEX_HOME).toBe(codexHome);
+  });
+
+  it("uses a dedicated keyring-only CODEX_HOME and explicit gateway for the full profile", async () => {
+    await create();
+    const dump = join(scratch, "full-profile.json");
+    process.env.FAKE_CODEX_DUMP = dump;
+    process.env.AOS_STARTUP_DIRECTIVE = "must-not-survive";
+
+    await instance.adapter.sendTurn({
+      threadId: "t-full-profile",
+      turnToken: "turn-token-123456789012345678901234",
+      text: "work",
+      system: "OpenMaus explicit prompt",
+      accessProfile: "full-task-scoped",
+      autoApprove: true,
+      integrations: {
+        capabilityGateway: {
+          command: process.execPath,
+          args: ["/tmp/capability-proxy.js"],
+          env: { OMB_TURN_TOKEN: "turn-token-123456789012345678901234" },
+        },
+        localComputer: {
+          command: process.execPath,
+          args: ["/tmp/computer.js"],
+          env: {},
+          scope: "local-computer",
+        },
+      },
+    });
+    await recorder.until((event) => event.type === "turn.completed");
+
+    const seen = JSON.parse(readFileSync(dump, "utf8"));
+    expect(seen.env.AOS_STARTUP_DIRECTIVE).toBeUndefined();
+    expect(seen.env.CODEX_HOME).toBe(ensureOpenMausCodexHome());
+    const config = readFileSync(join(seen.env.CODEX_HOME, "config.toml"), "utf8");
+    expect(config).toContain('cli_auth_credentials_store = "keyring"');
+    expect(config).toContain("project_doc_max_bytes = 0");
+    expect(config).toContain('default_permissions = "openmaus-gateway-only"');
+    expect(config).toContain("shell_tool = false");
+    expect(config).toContain("unified_exec = false");
+    expect(config).toContain("hooks = false");
+    expect(config).not.toContain(`[permissions.openmaus-gateway-only.filesystem]`);
+    expect(config).not.toContain('":minimal"');
+    expect(config).toContain("enabled = false");
+    const argv = seen.argv.join(" ");
+    expect(argv).toContain("mcp_servers.openmaus_capabilities.command");
+    expect(argv).toContain('mcp_servers.openmaus_capabilities.default_tools_approval_mode="auto"');
+    expect(argv).not.toContain("mcp_servers.computer");
+    const start = seen.calls.find((call: { method: string }) => call.method === "thread/start");
+    expect(start.params).toMatchObject({ permissions: "openmaus-gateway-only", approvalPolicy: "on-request" });
+    expect(start.params.sandbox).toBeUndefined();
+  });
+
+  it("strips process-control environment from full-task children and MCP mounts", async () => {
+    await create({
+      environment: {
+        NoDe_OpTiOnS: "--require=/tmp/provider-preload.js",
+        DYLD_INSERT_LIBRARIES: "/tmp/provider-preload.dylib",
+        Path: "/tmp/provider-bin",
+        OMB_GRAPH_SAFE_SETTING: "retained",
+        Node_Path: "/tmp/foreign-node-modules",
+      },
+    });
+    const dump = join(scratch, "full-profile-environment.json");
+    process.env.FAKE_CODEX_DUMP = dump;
+    process.env.OPENSSL_CONF = "/tmp/inherited-openssl.cnf";
+    process.env.JDK_JAVA_OPTIONS = "-javaagent:/tmp/foreign-agent.jar";
+
+    await instance.adapter.sendTurn({
+      threadId: "t-full-profile-environment",
+      turnToken: "turn-token-environment-123456789012345",
+      text: "work",
+      accessProfile: "full-task-scoped",
+      integrations: {
+        capabilityGateway: {
+          command: process.execPath,
+          args: ["/tmp/capability-proxy.js"],
+          env: {
+            OMB_TURN_TOKEN: "turn-token-environment-123456789012345",
+            lD_pReLoAd: "/tmp/proxy-preload.dylib",
+            PYTHONSTARTUP: "/tmp/proxy-startup.py",
+          },
+        },
+      },
+    });
+    await recorder.until((event) => event.type === "turn.completed");
+
+    const seen = JSON.parse(readFileSync(dump, "utf8"));
+    for (const name of [
+      "NoDe_OpTiOnS", "DYLD_INSERT_LIBRARIES", "Path", "HOME", "TMPDIR",
+      "OPENSSL_CONF", "JDK_JAVA_OPTIONS", "Node_Path", "OMB_GRAPH_SAFE_SETTING",
+    ]) {
+      expect(seen.env[name]).toBeUndefined();
+    }
+    expect(seen.env.PATH).not.toBe("/tmp/provider-bin");
+    expect(seen.env.OMB_TURN_TOKEN).toBe("turn-token-environment-123456789012345");
+    expect(JSON.stringify(seen.argv)).not.toMatch(/lD_pReLoAd|PYTHONSTARTUP/);
   });
 
   it("mounts connected apps without placing credential values in argv", async () => {
@@ -392,12 +502,126 @@ describe("CodexDriver turns (fake app-server)", () => {
     expect(JSON.parse(readFileSync(dump, "utf8")).decision).toEqual({ decision: "approved" });
   });
 
+  it("forces the approval broker for graph turns even when fullAuto and turn auto-approval are enabled", async () => {
+    await create({ mode: "approval", fullAuto: true });
+    const dump = join(scratch, "forced-broker.json");
+    process.env.FAKE_CODEX_DUMP = dump;
+
+    await instance.adapter.sendTurn({
+      threadId: "t-forced-broker",
+      text: "inspect the workspace",
+      autoApprove: true,
+      forceApprovalBroker: true,
+    });
+    const opened = await recorder.until((event) => event.type === "request.opened");
+    expect(opened).toMatchObject({ requestType: "permission" });
+    await instance.adapter.respondToRequest("t-forced-broker", opened.requestId!, { behavior: "deny" });
+    await recorder.until((event) => event.type === "turn.completed");
+    expect(JSON.parse(readFileSync(dump, "utf8")).decision).toEqual({ decision: "denied" });
+  });
+
+  it("auto-approves an ordinary scoped delete in full-task-scoped mode", async () => {
+    await create({ mode: "approval" });
+    const dump = join(scratch, "full-delete.json");
+    process.env.FAKE_CODEX_DUMP = dump;
+    process.env.FAKE_CODEX_APPROVAL_KIND = "gateway";
+
+    await instance.adapter.sendTurn({
+      threadId: "t-full-delete",
+      turnToken: "turn-token-123456789012345678901234",
+      text: "clean up",
+      accessProfile: "full-task-scoped",
+      autoApprove: true,
+    });
+    await recorder.until((event) => event.type === "turn.completed");
+    expect(recorder.events.some((event) => event.type === "request.opened")).toBe(false);
+    expect(JSON.parse(readFileSync(dump, "utf8")).decision).toEqual({ action: "accept" });
+  });
+
+  it("keeps auto-approval independent from the full-task-scoped capability profile", async () => {
+    await create({ mode: "approval", fullAuto: true });
+    const dump = join(scratch, "full-manual.json");
+    process.env.FAKE_CODEX_DUMP = dump;
+    process.env.FAKE_CODEX_APPROVAL_KIND = "gateway";
+
+    await instance.adapter.sendTurn({
+      threadId: "t-full-manual",
+      turnToken: "turn-token-123456789012345678901234",
+      text: "clean up",
+      accessProfile: "full-task-scoped",
+      autoApprove: false,
+    });
+    const opened = await recorder.until((event) => event.type === "request.opened");
+    expect(opened).toMatchObject({ requestType: "permission", tool: "call_capability" });
+    await instance.adapter.respondToRequest("t-full-manual", opened.requestId!, { behavior: "deny" });
+    await recorder.until((event) => event.type === "turn.completed");
+    expect(JSON.parse(readFileSync(dump, "utf8")).decision).toEqual({ action: "decline" });
+  });
+
+  it("fails closed when MCP elicitation omits the exact gateway serverName", async () => {
+    await create({ mode: "approval" });
+    const dump = join(scratch, "full-invalid-server.json");
+    process.env.FAKE_CODEX_DUMP = dump;
+    process.env.FAKE_CODEX_APPROVAL_KIND = "gateway";
+    process.env.FAKE_CODEX_APPROVAL_SERVER_NAME = "not-openmaus";
+    process.env.FAKE_CODEX_APPROVAL_FALLBACK_SERVER = "openmaus_capabilities";
+
+    await instance.adapter.sendTurn({
+      threadId: "t-full-invalid-server",
+      turnToken: "turn-token-123456789012345678901234",
+      text: "clean up",
+      accessProfile: "full-task-scoped",
+      autoApprove: true,
+    });
+    await recorder.until((event) => event.type === "turn.completed");
+    expect(recorder.events.some((event) => event.type === "request.opened")).toBe(false);
+    expect(JSON.parse(readFileSync(dump, "utf8")).decision).toEqual({ action: "decline" });
+  });
+
+  it("rejects provider-native effects and directs the model through the gateway", async () => {
+    await create({ mode: "approval" });
+    const dump = join(scratch, "full-native-reject.json");
+    process.env.FAKE_CODEX_DUMP = dump;
+
+    await instance.adapter.sendTurn({
+      threadId: "t-full-native-reject",
+      turnToken: "turn-token-123456789012345678901234",
+      text: "clean up",
+      accessProfile: "full-task-scoped",
+      autoApprove: true,
+    });
+    await recorder.until((event) => event.type === "turn.completed");
+    expect(recorder.events.some((event) => event.type === "request.opened")).toBe(false);
+    expect(recorder.events.some((event) => event.type === "runtime.error" && /openmaus_capabilities/.test(event.message))).toBe(true);
+    expect(JSON.parse(readFileSync(dump, "utf8")).decision).toEqual({ decision: "denied" });
+  });
+
+  it("centrally declines catastrophic destruction in full-task-scoped mode", async () => {
+    await create({ mode: "approval" });
+    const dump = join(scratch, "full-deny.json");
+    process.env.FAKE_CODEX_DUMP = dump;
+    process.env.FAKE_CODEX_APPROVAL_COMMAND = "bash -lc 'rm -rf /'";
+
+    await instance.adapter.sendTurn({
+      threadId: "t-full-deny",
+      turnToken: "turn-token-123456789012345678901234",
+      text: "destroy",
+      accessProfile: "full-task-scoped",
+    });
+    await recorder.until((event) => event.type === "turn.completed");
+    expect(JSON.parse(readFileSync(dump, "utf8")).decision).toEqual({ decision: "denied" });
+    expect(recorder.events.some((event) => event.type === "runtime.error" && /catastrophic-destruction/.test(event.message))).toBe(true);
+  });
+
   it("rejects a second turn while one is in flight", async () => {
     await create({ mode: "approval" }); // approval mode parks the turn open
-    await instance.adapter.sendTurn({ threadId: "t-busy", text: "one" });
+    const { turnId } = await instance.adapter.sendTurn({ threadId: "t-busy", text: "one" });
     await recorder.until((e) => e.type === "request.opened");
     await expect(instance.adapter.sendTurn({ threadId: "t-busy", text: "two" })).rejects.toThrow(/already running/);
-    await instance.adapter.interruptTurn("t-busy");
+    await expect(instance.adapter.interruptTurn("t-busy", "wrong-turn")).rejects.toThrow(/identity does not match/);
+    expect(instance.adapter.hasSession("t-busy")).toBe(true);
+    await instance.adapter.interruptTurn("t-busy", turnId);
+    expect(instance.adapter.hasSession("t-busy")).toBe(false);
     await recorder.until((e) => e.type === "turn.completed");
   });
 

@@ -10,10 +10,12 @@ import { peerAllowKey, type PeerAction } from "./peer-approval-key.ts";
 import { DATA_DIR } from "./config.ts";
 import * as mdb from "./message-db.ts";
 import { workspaceDir } from "./workspace.ts";
-import { newId, type CloudBackend, type ModelSelection, type ThreadId } from "./contracts.ts";
+import { newId, type AccessProfile, type CloudBackend, type ModelSelection, type ThreadId } from "./contracts.ts";
+import { isAccessProfile } from "./access-profile.ts";
 import { pickBotName } from "./names.ts";
 import { redactSecretsInText } from "./redact.ts";
 import { botAvatarProfile, type BotAvatarCrop } from "../shared/bot-avatar.ts";
+import { retrievalProfileSchema, type RetrievalProfile } from "../shared/retrieval-profile.ts";
 
 export type MausColor =
   | "green"
@@ -269,6 +271,9 @@ export interface BotRecord {
    * working instead of stopping to ask. Questions it asks YOU still come
    * through, and a short list of destructive commands still stops it. */
   autoApprove?: boolean;
+  /** Capability selection is independent of whether approvals are answered
+   * automatically. Missing means the backwards-compatible standard profile. */
+  accessProfile?: AccessProfile;
   /** Tools this bot may always use without asking, even outside auto mode
    * (set by "Always allow" on an approval card). */
   alwaysAllow?: string[];
@@ -303,6 +308,9 @@ export interface BotRecord {
    * start false — a shared persona must not reach the user's Gmail on
    * turn one. */
   composio?: boolean;
+  /** Optional task-bound reference context. Absent is the backwards-
+   * compatible persisted form of off; it never changes tool permissions. */
+  retrievalProfile?: RetrievalProfile;
   /** Derived from `activity` — kept so the 200+ readers across the app and
    * tests keep working unchanged. Write through setActivity(), never here. */
   busy?: boolean;
@@ -447,6 +455,14 @@ export class Store {
       b.activity = "idle";
       if (b.cloudBackend !== undefined && b.cloudBackend !== "box" && b.cloudBackend !== "vps") {
         delete b.cloudBackend;
+        botsMigrated = true;
+      }
+      if (b.accessProfile !== undefined && !isAccessProfile(b.accessProfile)) {
+        delete b.accessProfile;
+        botsMigrated = true;
+      }
+      if (b.retrievalProfile !== undefined && !retrievalProfileSchema.safeParse(b.retrievalProfile).success) {
+        delete b.retrievalProfile;
         botsMigrated = true;
       }
       const avatar = botAvatarProfile(b);
@@ -785,6 +801,7 @@ export class Store {
       ...(profile.mascotExpression ? { mascotExpression: profile.mascotExpression } : {}),
       unread: false,
       modelSelection: profile.modelSelection ?? this.defaultSelection(),
+      retrievalProfile: "off",
       resumeCursors: {},
       createdAt: Date.now(),
     };
@@ -984,7 +1001,7 @@ export class Store {
 
   /** A fresh context on the same bot: new thread, new session, same
    * persona/tools/computer. Becomes the active task. */
-  createTask(botId: string, title?: string, activate = true): TaskRecord | null {
+  createTask(botId: string, title?: string, activate = true, exactCwd?: string | null): TaskRecord | null {
     const bot = this.bot(botId);
     if (!bot) return null;
     const task: TaskRecord = {
@@ -992,6 +1009,7 @@ export class Store {
       title: title?.trim() || UNTITLED_TASK,
       createdAt: Date.now(),
       resumeCursors: {},
+      ...(exactCwd === undefined ? {} : { cwd: exactCwd }),
     };
     bot.tasks = [task, ...(bot.tasks ?? [])];
     if (activate) {

@@ -64,6 +64,8 @@ export interface InstanceConfig {
 
 export type InstanceConfigMap = Record<InstanceId, InstanceConfig>;
 
+export type { AccessProfile } from "./access-profile.ts";
+
 // ── canonical runtime events ───────────────────────────────────────────
 // Subset of upstream's 49-member ProviderRuntimeEvent union — the ~12 types
 // the recipe says to start with, sharing one base. `raw` carries the
@@ -76,6 +78,9 @@ export interface RuntimeEventBase {
   threadId: ThreadId;
   createdAt: string;
   turnId?: TurnId;
+  /** Opaque per-turn ownership lease attached to permission/capability
+   * traffic. Never persisted as a resume cursor. */
+  turnToken?: string;
   itemId?: string;
   requestId?: string;
   raw?: { source: string; payload: unknown };
@@ -88,6 +93,10 @@ export type RuntimeEvent = RuntimeEventBase &
     | { type: "turn.started" }
     | {
         type: "turn.completed";
+        /** Echoes the ownership lease supplied to this exact turn. The field
+         * is required even when no capability lease was mounted so producers
+         * cannot accidentally omit it on one completion path. */
+        turnToken: string | undefined;
         ok: boolean;
         stopReason?: string | null;
         cost?: number | null;
@@ -141,6 +150,9 @@ export type RequestOutcome = "allowed-once" | "rejected" | "answered" | "unavail
 // carrying the provider-native continuation (e.g. a claude session id).
 export interface SendTurnInput {
   threadId: ThreadId;
+  /** Opaque harness-issued capability/permission lease. It is never reused
+   * between turns and becomes invalid as soon as this turn settles. */
+  turnToken?: string;
   text: string;
   model?: string;
   effort?: EffortLevel;
@@ -149,6 +161,15 @@ export interface SendTurnInput {
   transcript?: Array<{ role: "user" | "assistant"; text: string }>;
   /** Bot persona (name/title/description) as a system prompt. */
   system?: string;
+  /** Runtime authority is selected per bot/turn, independently of the
+   * provider instance's legacy auto-approval setting. */
+  accessProfile?: import("./access-profile.ts").AccessProfile;
+  /** Independent approval preference. The access profile selects available
+   * capabilities and hard denials; this flag alone removes routine pauses. */
+  autoApprove?: boolean;
+  /** Graph turns force the provider's interactive broker even when its
+   * instance or bot is configured full-auto. */
+  forceApprovalBroker?: boolean;
   /** Per-bot integrations the driver may hand to the agent as tools. */
   integrations?: {
     /** A local stdio bridge owns the remote Composio transport. Keeping the
@@ -186,6 +207,8 @@ export interface SendTurnInput {
     /** dweb network daemon: an MCP proxy exposing dweb status, repo, and
      * opencode model access as tools. url is the dweb HTTP base. */
     dweb?: { url: string };
+    /** Stdio facade for the app-owned, persistent host capability gateway. */
+    capabilityGateway?: { command: string; args: string[]; env: Record<string, string> };
   };
   cwd?: string;
 }
@@ -231,6 +254,11 @@ export interface ProviderAdapter {
     /** True only when local MCP calls can reach the human approval channel.
      * Full-auto/bypass provider instances must leave this false. */
     localComputerMcp?: boolean;
+    /** True when explicitly selected turns can use the guarded
+     * full-task-scoped capability profile. */
+    fullTaskScoped?: boolean;
+    /** True when a per-turn forceApprovalBroker override is enforceable. */
+    approvalBroker?: boolean;
   };
   sendTurn(input: SendTurnInput): Promise<TurnStartResult>;
   interruptTurn(threadId: ThreadId, turnId?: TurnId): Promise<void>;
@@ -290,18 +318,47 @@ export interface EngineInstall {
 // `create` owns ALL per-instance state; two create calls share nothing.
 // Failures must reject, never throw synchronously — the registry downgrades
 // a rejection to an unavailable shadow snapshot.
+export type ModelCostClass = "free" | "paid" | "paid_subscription" | "paid_metered" | "local" | "unknown";
+
+export interface ModelRuntimeStatus {
+  configured: boolean;
+  reachable: boolean;
+  verified: boolean;
+  admitted: boolean;
+  busy: boolean;
+}
+
+export interface ModelOption {
+  /** The model id understood by this concrete OpenMausBot driver. */
+  id: string;
+  label: string;
+  custom?: boolean;
+  loaded?: boolean;
+  /** Fleet-wide stable id. Present only for rows projected by the guarded
+   * secret-free AOS model catalog. */
+  canonicalId?: string;
+  provider?: string;
+  host?: string;
+  costClass?: ModelCostClass;
+  manualOnly?: boolean;
+  isDefault?: boolean;
+  capabilities?: string[];
+  status?: ModelRuntimeStatus;
+  /** False means the row stays visible for inventory/truth, but cannot be
+   * selected until a fresh catalog refresh marks it admitted and idle. */
+  selectable?: boolean;
+  reason?: string;
+  lastVerified?: string;
+  verificationReceipt?: string;
+  /** total context window in tokens, when the driver knows it — sizes
+   * the model-facing rebuild (server/context-rebuild.ts). Unknown falls
+   * back to a pattern table over the model id, then a conservative default. */
+  contextWindow?: number;
+}
+
 export interface ModelCatalog {
   default: string;
-  options: Array<{
-    id: string;
-    label: string;
-    custom?: boolean;
-    loaded?: boolean;
-    /** total context window in tokens, when the driver knows it — sizes
-     * the model-facing rebuild (server/context-rebuild.ts). Unknown falls
-     * back to a pattern table over the model id, then a conservative default. */
-    contextWindow?: number;
-  }>;
+  options: ModelOption[];
 }
 
 export interface DriverCreateInput<Config> {

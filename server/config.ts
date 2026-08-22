@@ -216,6 +216,11 @@ export function syncCredentialEnv(patch: Partial<AppConfig>): void {
  * secret receives it through instanceConfigs() narrowing, and to every other
  * child these are someone else's keys riding along in `...process.env`. */
 export const WORKSPACE_CREDENTIAL_ENV = [
+  // One-use desktop authority must never reach a provider, proxy, or helper
+  // child. The server consumes and deletes it before constructing drivers;
+  // this denylist is the second boundary for explicitly supplied child envs.
+  "OMB_AGENT_GRAPH_APPROVAL_SECRET",
+  "OMB_AGENT_GRAPH_APPROVAL_BOOT_ID",
   "XAI_API_KEY",
   "BOX_TOKEN",
   "OPENCODE_API_KEY",
@@ -381,11 +386,23 @@ export function instanceConfigs(cfg: AppConfig): InstanceConfigMap {
     qwen: { driver: "qwenAgent" },
     hermes: { driver: "hermesAgent" },
     pi: { driver: "piAgent" },
+    localMac: { driver: "local", displayName: "Mac M5 models", config: { host: "ollama", fleetHost: "mac" } },
+    localWindows: {
+      driver: "local",
+      displayName: "Windows models",
+      config: { host: "custom", url: "http://127.0.0.1:18134/v1", fleetHost: "windows" },
+    },
   };
   const CUSTOM_ONLY = {
     qwen: { driver: "qwenAgent" },
     hermes: { driver: "hermesAgent" },
     pi: { driver: "piAgent" },
+    localMac: { driver: "local", displayName: "Mac M5 models", config: { host: "ollama", fleetHost: "mac" } },
+    localWindows: {
+      driver: "local",
+      displayName: "Windows models",
+      config: { host: "custom", url: "http://127.0.0.1:18134/v1", fleetHost: "windows" },
+    },
   } as const;
   // New default-fleet engines that existing product configs would otherwise
   // never see. Custom-only engines stay in CUSTOM_ONLY so a one-off test map

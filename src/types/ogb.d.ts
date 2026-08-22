@@ -1,5 +1,11 @@
 // The narrow bridge the Electron preload exposes. Absent in the browser.
 
+import type {
+  AgentGraph,
+  AgentGraphRunReceipt,
+  AgentGraphVerificationPathInput,
+} from "../../shared/agent-graphs";
+
 
 declare global {
   type DesktopCapabilities = {
@@ -95,6 +101,17 @@ declare global {
         name: "composioApiKey" | "xaiApiKey" | "boxToken" | "opencodeGoApiKey" | "ttsKey" | "openaiImageApiKey",
         value: string,
       ): Promise<ConfigStatus>;
+      agentGraphs?: {
+        preview(body: { objective: string; proposalIds: string[]; goalId: string | null }): Promise<{ graph: AgentGraph }>;
+        approve(graphId: string, graphHash: string): Promise<{ graph: AgentGraph }>;
+        cancel(graphId: string): Promise<{ graph: AgentGraph }>;
+        verify(
+          graphId: string,
+          graphHash: string,
+          receiptHash: string,
+          paths: AgentGraphVerificationPathInput[],
+        ): Promise<{ receipt: AgentGraphRunReceipt; receiptHash: string }>;
+      };
       /** In-app auto-update (packaged app only; dormant in dev). onState
        * fires immediately with the current state, then on transitions. */
       updater?: {

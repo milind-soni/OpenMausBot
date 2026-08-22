@@ -4,8 +4,9 @@
 // suite is deterministic with or without agent CLIs installed — and pins
 // the shadow-instance behavior end to end while it's at it.
 import { spawn, type ChildProcess } from "node:child_process";
+import { createHash } from "node:crypto";
 import { createServer, request, type Server } from "node:http";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -18,6 +19,7 @@ import { IMAGE_MAX_BYTES } from "./attachments.ts";
 const SERVER_DIR = dirname(fileURLToPath(import.meta.url));
 const ROOT = join(SERVER_DIR, "..");
 const FAKE_CLAUDE_CLI = join(SERVER_DIR, "testing", "fake-claude-cli.ts");
+const FAKE_ACP_CLI = join(SERVER_DIR, "testing", "fake-acp-cli.ts");
 const PORT = 18800 + Math.floor(Math.random() * 10_000);
 const BASE = `http://127.0.0.1:${PORT}`;
 const WEBHOOK_PORT = 39000 + Math.floor(Math.random() * 10_000);
@@ -30,7 +32,52 @@ let boxStubPort = 0;
 let home: string;
 let staticDir: string;
 let fakeClaudeDump: string;
+let fleetCatalogPath: string;
+let fakeRetrievalRouter: string;
 let stderr = "";
+
+const fleetCatalogFixture = (busy = false) => ({
+  schema_version: "openmausbot-models/v1",
+  catalog_version: 1,
+  generated_at: "2026-08-22T05:00:00Z",
+  source: {
+    registry_schema_version: "aos-model-registry/v1",
+    registry_version: 1,
+    registry_sha256: "a".repeat(64),
+  },
+  default_model_id: "fixture-fleet-model",
+  provider_candidates: [],
+  models: [{
+    id: "fixture-fleet-model",
+    display_name: "Fixture fleet model",
+    kind: "model",
+    provider_id: "fixture",
+    native_model_id: "fixture-fleet-model",
+    capabilities: ["chat"],
+    host: "hosted",
+    cost_class: "free",
+    manual_only: false,
+    is_default: true,
+    selectable: !busy,
+    status: {
+      configured: true,
+      reachable: true,
+      verified: true,
+      admitted: true,
+      busy,
+      reason: busy ? "Fixture host is busy" : null,
+      last_verification_receipt: "/fixture/receipt.json",
+    },
+    translations: {
+      litellm: "fixture-fleet-model",
+      hermes: "litellm-local:fixture-fleet-model",
+      opencode: "litellm-local/fixture-fleet-model",
+      telegram: "fixture-fleet-model",
+      openmausbot: "fixture-fleet-model",
+    },
+    route_members: [],
+  }],
+});
 
 const api = async (method: string, path: string, body?: unknown): Promise<{ status: number; body: any }> => {
   const res = await fetch(`${BASE}${path}`, {
@@ -39,6 +86,29 @@ const api = async (method: string, path: string, body?: unknown): Promise<{ stat
     body: body ? JSON.stringify(body) : undefined,
   });
   return { status: res.status, body: await res.json() };
+};
+
+const retrievalReceiptFor = (botId: string, threadId: string, taskId: string): any | undefined => {
+  const directory = join(home, ".openmausbot", "retrieval-receipts");
+  if (!existsSync(directory)) return undefined;
+  for (const name of readdirSync(directory)) {
+    if (!name.endsWith(".json")) continue;
+    const record = JSON.parse(readFileSync(join(directory, name), "utf8"));
+    const proof = record?.receipt?.native_session_proof;
+    if (proof?.botId === botId && proof?.threadId === threadId && proof?.taskId === taskId) return record;
+  }
+  return undefined;
+};
+
+const retrievalBlockFromClaudeDump = (): string => {
+  const dump = JSON.parse(readFileSync(fakeClaudeDump, "utf8"));
+  const index = dump.argv.indexOf("--append-system-prompt");
+  const system = index >= 0 ? dump.argv[index + 1] : "";
+  const start = system.indexOf("\n\n<untrusted-retrieval");
+  const closing = "</untrusted-retrieval>";
+  const close = system.indexOf(closing, start);
+  if (start < 0 || close < 0) return "";
+  return system.slice(start, close + closing.length);
 };
 
 const uploadAvatar = async (mime = "image/png"): Promise<string> => {
@@ -68,17 +138,66 @@ beforeAll(async () => {
   home = mkdtempSync(join(tmpdir(), "omb-api-test-"));
   staticDir = join(home, "static");
   fakeClaudeDump = join(home, "fake-claude-dump.json");
+  fleetCatalogPath = join(home, "openmausbot-models.v1.json");
+  fakeRetrievalRouter = join(home, "fake-retrieval-router.mjs");
   // a fleet of exactly one unknown driver: no CLI probes, no network
   mkdirSync(join(home, ".openmausbot"), { recursive: true });
   mkdirSync(join(staticDir, "assets"), { recursive: true });
   writeFileSync(join(staticDir, "index.html"), "<!doctype html><title>Packaged OpenMausBot</title>");
   writeFileSync(join(staticDir, "assets", "smoke.css"), "body { color: white; }");
+  writeFileSync(fleetCatalogPath, JSON.stringify(fleetCatalogFixture()));
+  writeFileSync(fakeRetrievalRouter, `#!/usr/bin/env node
+import { createHash } from "node:crypto";
+import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { dirname, join } from "node:path";
+const argv = process.argv.slice(2);
+const arg = (flag) => argv[argv.indexOf(flag) + 1];
+const cwd = arg("--cwd");
+const sourcePath = join(cwd, "retrieval-dispatch-source.md");
+mkdirSync(cwd, { recursive: true });
+writeFileSync(sourcePath, "Native dispatch receipt source sentinel");
+const source = readFileSync(sourcePath, "utf8");
+const normalized = source.replace(/\\r\\n/g, "\\n").replace(/\\r/g, "\\n").split("\\n").map((line) => line.trimEnd()).join("\\n").trim() + "\\n";
+const hash = "sha256:" + createHash("sha256").update(normalized).digest("hex");
+const botId = arg("--bot-id");
+const threadId = arg("--thread-id");
+const taskId = arg("--task-id");
+const request = {
+  schema: "retrieval.request.v1", query: arg("--query"), cwd,
+  surface: "openmausbot", session: arg("--session"), botId, threadId, taskId,
+  truth: "working_set", active_only: true, hit_limit: 5,
+};
+const sourceTruth = {
+  requested: "working_set", served: "working_set", eligible: true,
+  verification_scope: "current_source_bytes", repository_root: dirname(sourcePath),
+  source_roots: [dirname(sourcePath)],
+};
+process.stdout.write(JSON.stringify({
+  schema: "retrieval.evidence.v1", request, current_source_verified: true,
+  instruction_authority: false, content_trust: "untrusted_retrieval_evidence",
+  persistent_process_started: false, index_stale: false,
+  requires_current_source_readback: false, truth: "working_set", answerability: "answerable",
+  windows_served: false, windows_active_generation: null,
+  local_manifest_digest: "sha256:" + "a".repeat(64), fallback: "fts5-current-source",
+  hits: [{
+    canonical_path: sourcePath, content_hash: hash, current_source_verified: true,
+    instruction_authority: false, content_trust: "untrusted_retrieval_evidence",
+    line_or_heading: 1, snippet: source, source_truth: sourceTruth,
+    current_source_verification: {
+      verified: true, canonical_path: sourcePath, content_hash: hash,
+      sensitivity: "normal", source_body_recorded: false,
+    },
+  }],
+}));
+`);
+  chmodSync(fakeRetrievalRouter, 0o700);
   writeFileSync(
     join(home, ".openmausbot", "config.json"),
     JSON.stringify({
       instances: {
         ghost: { driver: "not-a-real-driver", displayName: "Ghost" },
         claude: { driver: "claudeAgent", displayName: "Fixture Claude", config: { cli: FAKE_CLAUDE_CLI } },
+        hermes: { driver: "hermesAgent", displayName: "Fixture Hermes", config: { cli: FAKE_ACP_CLI } },
       },
     }),
   );
@@ -215,21 +334,32 @@ beforeAll(async () => {
     env: {
       ...(process.env.PATH ? { PATH: process.env.PATH } : {}),
       ...(process.env.SystemRoot ? { SystemRoot: process.env.SystemRoot } : {}),
+      NODE_ENV: "test",
       HOME: home,
       USERPROFILE: home,
       OMB_PORT: String(PORT),
       OMB_WEBHOOK_PORT: String(WEBHOOK_PORT),
       OMB_BOX_API: `http://127.0.0.1:${boxStubPort}`,
       OMB_COMPOSIO_API: `http://127.0.0.1:${boxStubPort}/api/v3.1`,
+      DWEB_URL: "http://127.0.0.1:9",
       OMB_STATIC_DIR: staticDir,
+      // The integration test exercises the sanitized local telemetry journal
+      // directly. External sink processes would add CredVault/provider
+      // startup latency without improving that assertion.
+      OMB_TELEMETRY_DISABLED: "1",
+      OMB_RETRIEVAL_ROUTER: fakeRetrievalRouter,
       FAKE_CLAUDE_MODE: "hang",
       FAKE_CLAUDE_DUMP: fakeClaudeDump,
+      AOS_MODEL_CATALOG_PATH: fleetCatalogPath,
     },
     stdio: ["ignore", "pipe", "pipe"],
   });
   child.stderr!.on("data", (c) => (stderr += c));
 
-  const deadline = Date.now() + 20_000;
+  // Node's strip-only TypeScript loader must transform the full server graph
+  // in this integration harness. On a busy desktop that cold start can exceed
+  // 20 seconds even though the packaged JavaScript server starts normally.
+  const deadline = Date.now() + 60_000;
   for (;;) {
     try {
       const res = await fetch(`${BASE}/api/health`);
@@ -241,7 +371,7 @@ beforeAll(async () => {
     if (child.exitCode !== null) throw new Error(`server exited ${child.exitCode}. stderr:\n${stderr}`);
     await new Promise((r) => setTimeout(r, 150));
   }
-}, 30_000);
+}, 75_000);
 
 afterAll(async () => {
   boxStub?.close();
@@ -267,6 +397,142 @@ describe("harness HTTP API", () => {
     expect(body.app).toBe("openmausbot");
     expect(typeof body.pid).toBe("number");
     expect(body.static).toBe(true);
+  });
+
+  it("owns and traces authenticated external observer turns without full-task authority", async () => {
+    const endpoint = JSON.parse(readFileSync(join(home, ".openmausbot", "runtime", "capability-gateway.json"), "utf8"));
+    const headers = {
+      authorization: `Bearer ${endpoint.authorization}`,
+      "content-type": "application/json",
+    };
+    const opened = await fetch(`${BASE}/api/internal/capabilities/turns`, {
+      method: "POST",
+      headers,
+      body: JSON.stringify({
+        client: "hermes-manus",
+        threadId: "external-trace-test",
+        promptSummary: "sanitized external task",
+      }),
+    });
+    expect(opened.status).toBe(201);
+    const lease = await opened.json() as {
+      turnToken: string;
+      manifest: { schema: string; profile: string; toolInventory: string[] };
+    };
+    expect(lease.manifest).toMatchObject({ schema: "openmaus.capability-profile.v1", profile: "observer-router" });
+    expect(lease.manifest.toolInventory).not.toContain("openmaus-host:filesystem_stat");
+
+    const called = await fetch(`${BASE}/api/internal/capabilities/call`, {
+      method: "POST",
+      headers: { ...headers, "x-openmaus-turn-token": lease.turnToken },
+      body: JSON.stringify({ server: "openmaus-host", tool: "filesystem_stat", arguments: { path: home } }),
+    });
+    expect(called.status).toBe(200);
+    const callBody = await called.json() as { result: { isError?: boolean; content?: Array<{ text?: string }> } };
+    expect(callBody.result.isError).toBe(true);
+    expect(JSON.stringify(callBody.result.content)).toMatch(/observer denied|identity-pinned fleet bridge/);
+
+    const retrieval = await fetch(`${BASE}/api/internal/capabilities/retrieval`, {
+      method: "POST",
+      headers: { ...headers, "x-openmaus-turn-token": lease.turnToken },
+      body: JSON.stringify({ query: "do not expose a prior transcript" }),
+    });
+    expect(retrieval.status).toBe(403);
+
+    const ended = await fetch(`${BASE}/api/internal/capabilities/turns/${lease.turnToken}`, {
+      method: "DELETE",
+      headers,
+    });
+    expect(ended.status).toBe(200);
+    const journal = readFileSync(join(home, ".openmausbot", "telemetry", "turns.ndjson"), "utf8");
+    const trace = journal.trim().split("\n").map((line) => JSON.parse(line)).findLast((row) => row.threadId === "external-trace-test");
+    expect(trace).toMatchObject({
+      application: "openmausbot",
+      botId: "hermes-manus",
+      engine: "openmaus-gateway",
+      outcome: "completed",
+      tools: [{ name: "openmaus-host:filesystem_stat", ok: false }],
+    });
+  });
+
+  it("routes an internal full-task lease through the HTTP proxy without widening observer leases", async () => {
+    const endpoint = JSON.parse(readFileSync(join(home, ".openmausbot", "runtime", "capability-gateway.json"), "utf8"));
+    const headers = {
+      authorization: `Bearer ${endpoint.authorization}`,
+      "content-type": "application/json",
+    };
+    const bot = (await api("POST", "/api/bots")).body.bot;
+    try {
+      const selected = await api("PATCH", `/api/bots/${bot.id}`, {
+        modelSelection: { instanceId: "claude", model: "claude-sonnet-5" },
+        accessProfile: "full-task-scoped",
+      });
+      expect(selected.status).toBe(200);
+
+      rmSync(fakeClaudeDump, { force: true });
+      expect((await api("POST", `/api/bots/${bot.id}/messages`, { text: "inspect this workspace" })).status).toBe(202);
+      await expect.poll(() => {
+        if (!existsSync(fakeClaudeDump)) return "";
+        const dump = JSON.parse(readFileSync(fakeClaudeDump, "utf8"));
+        return dump.mcpConfig?.mcpServers?.openmaus_capabilities?.env?.OMB_TURN_TOKEN ?? "";
+      }, { timeout: 5_000 }).toMatch(/^[a-f0-9]{64}$/);
+      const dump = JSON.parse(readFileSync(fakeClaudeDump, "utf8"));
+      const turnToken = String(dump.mcpConfig.mcpServers.openmaus_capabilities.env.OMB_TURN_TOKEN);
+
+      const inventory = await fetch(`${BASE}/api/internal/capabilities`, {
+        headers: { ...headers, "x-openmaus-turn-token": turnToken },
+      });
+      expect(inventory.status).toBe(200);
+      const inventoryBody = await inventory.json() as {
+        result: { manifest: { profile: string; toolInventory: string[] } };
+      };
+      expect(inventoryBody.result.manifest.profile).toBe("full-task-scoped");
+      expect(inventoryBody.result.manifest.toolInventory).toContain("openmaus-host:filesystem_stat");
+
+      const listed = await fetch(`${BASE}/api/internal/capabilities/openmaus-host/tools`, {
+        headers: { ...headers, "x-openmaus-turn-token": turnToken },
+      });
+      expect(listed.status).toBe(200);
+      const listedBody = await listed.json() as { result: { tools: Array<{ name: string }> } };
+      expect(listedBody.result.tools.map((tool) => tool.name)).toContain("filesystem_stat");
+
+      const called = await fetch(`${BASE}/api/internal/capabilities/call`, {
+        method: "POST",
+        headers: { ...headers, "x-openmaus-turn-token": turnToken },
+        body: JSON.stringify({ server: "openmaus-host", tool: "filesystem_stat", arguments: { path: home } }),
+      });
+      expect(called.status).toBe(200);
+      expect((await called.json() as { result: { type: string } }).result).toMatchObject({ type: "directory" });
+
+      const retrieval = await fetch(`${BASE}/api/internal/capabilities/retrieval`, {
+        method: "POST",
+        headers: { ...headers, "x-openmaus-turn-token": turnToken },
+        body: JSON.stringify({
+          query: "inspect this workspace",
+          cwd: join(home, ".openmausbot", "workspaces", bot.id),
+        }),
+      });
+      expect(retrieval.status).toBe(200);
+      expect((await retrieval.json() as { result: { schema: string } }).result.schema).toBe("openmaus.retrieval-context.v1");
+
+      const ended = await fetch(`${BASE}/api/internal/capabilities/turns/${turnToken}`, {
+        method: "DELETE",
+        headers,
+      });
+      expect(ended.status).toBe(200);
+      const expired = await fetch(`${BASE}/api/internal/capabilities`, {
+        headers: { ...headers, "x-openmaus-turn-token": turnToken },
+      });
+      expect(expired.status).toBe(409);
+    } finally {
+      await api("POST", `/api/bots/${bot.id}/interrupt`);
+      await expect.poll(async () => {
+        const state = (await api("GET", "/api/bots")).body;
+        return state.bots.find((candidate: { id: string }) => candidate.id === bot.id)?.busy;
+      }, { timeout: 5_000 }).toBe(false);
+      await api("DELETE", `/api/bots/${bot.id}`);
+      rmSync(fakeClaudeDump, { force: true });
+    }
   });
 
   it("serves packaged UI assets and preserves API 404s", async () => {
@@ -373,6 +639,87 @@ describe("harness HTTP API", () => {
     }));
   });
 
+  it("projects the cached secret-free fleet catalog and fail-closes an invalid refresh", async () => {
+    const first = await api("GET", "/api/instances");
+    const hermes = first.body.instances.find((instance: { instanceId: string }) => instance.instanceId === "hermes");
+    expect(hermes.models.options).toContainEqual(expect.objectContaining({
+      id: "litellm-local:fixture-fleet-model",
+      canonicalId: "fixture-fleet-model",
+      costClass: "free",
+      host: "hosted",
+      selectable: true,
+    }));
+
+    try {
+      writeFileSync(fleetCatalogPath, "not-json");
+      const failed = await api("POST", "/api/model-catalog/refresh");
+      expect(failed.status).toBe(200);
+      expect(failed.body.catalog.source.state).toBe("invalid");
+      const failedHermes = failed.body.instances.find((instance: { instanceId: string }) => instance.instanceId === "hermes");
+      expect(failedHermes.models.options).toContainEqual(expect.objectContaining({
+        canonicalId: "fixture-fleet-model",
+        selectable: false,
+      }));
+    } finally {
+      writeFileSync(fleetCatalogPath, JSON.stringify(fleetCatalogFixture()));
+    }
+    expect((await api("POST", "/api/model-catalog/refresh")).body.catalog.source.state).toBe("ready");
+  });
+
+  it("translates a stable fleet id and starts one fresh task after a model change", async () => {
+    writeFileSync(fleetCatalogPath, JSON.stringify(fleetCatalogFixture()));
+    await api("POST", "/api/model-catalog/refresh");
+    const defaulted = (await api("POST", "/api/bots")).body.bot;
+    expect(defaulted.modelSelection).toEqual({
+      instanceId: "hermes",
+      model: "litellm-local:fixture-fleet-model",
+    });
+    const created = (await api("PATCH", `/api/bots/${defaulted.id}`, {
+      modelSelection: { instanceId: "claude", model: "claude-sonnet-5" },
+    })).body.bot;
+    const previousThread = created.threadId;
+    const previousTaskCount = created.tasks.length;
+
+    const switched = await api("POST", `/api/bots/${created.id}/model`, {
+      instanceId: "hermes",
+      model: "caller-value-is-not-trusted",
+      canonicalId: "fixture-fleet-model",
+    });
+    expect(switched.status).toBe(201);
+    expect(switched.body.changed).toBe(true);
+    expect(switched.body.bot.modelSelection).toEqual({
+      instanceId: "hermes",
+      model: "litellm-local:fixture-fleet-model",
+    });
+    expect(switched.body.bot.threadId).not.toBe(previousThread);
+    expect(switched.body.bot.tasks).toHaveLength(previousTaskCount + 1);
+    expect(switched.body.bot.messages).toEqual([]);
+
+    const same = await api("POST", `/api/bots/${created.id}/model`, {
+      instanceId: "hermes",
+      model: "still-not-authoritative",
+      canonicalId: "fixture-fleet-model",
+    });
+    expect(same.status).toBe(200);
+    expect(same.body.changed).toBe(false);
+    expect(same.body.bot.tasks).toHaveLength(previousTaskCount + 1);
+
+    try {
+      writeFileSync(fleetCatalogPath, JSON.stringify(fleetCatalogFixture(true)));
+      await api("POST", "/api/model-catalog/refresh");
+      const disabled = await api("POST", `/api/bots/${created.id}/model`, {
+        instanceId: "hermes",
+        model: "litellm-local:fixture-fleet-model",
+        canonicalId: "fixture-fleet-model",
+      });
+      expect(disabled.status).toBe(409);
+      expect(disabled.body.error).toBe("Fixture host is busy");
+    } finally {
+      writeFileSync(fleetCatalogPath, JSON.stringify(fleetCatalogFixture()));
+      await api("POST", "/api/model-catalog/refresh");
+    }
+  });
+
   it("searches transcripts and exports a conversation", async () => {
     const bot = (await api("POST", "/api/bots")).body.bot;
     // every new bot opens with a seeded greeting — a known searchable string
@@ -439,6 +786,7 @@ describe("harness HTTP API", () => {
     const created = await api("POST", "/api/bots");
     expect(created.status).toBe(201);
     const bot = created.body.bot;
+    expect(bot.retrievalProfile).toBe("off");
 
     const patched = await api("PATCH", `/api/bots/${bot.id}`, { name: "Renamed", pinned: true });
     expect(patched.status).toBe(200);
@@ -461,6 +809,12 @@ describe("harness HTTP API", () => {
     const gated = await api("PATCH", `/api/bots/${bot.id}`, { composio: false });
     expect(gated.status).toBe(200);
 
+    expect((await api("PATCH", `/api/bots/${bot.id}`, { retrievalProfile: "full-task-scoped" })).status).toBe(400);
+    const retrievalEnabled = await api("PATCH", `/api/bots/${bot.id}`, { retrievalProfile: "task-scoped" });
+    expect(retrievalEnabled.status).toBe(200);
+    expect(retrievalEnabled.body.bot.retrievalProfile).toBe("task-scoped");
+    expect((await api("PATCH", `/api/bots/${bot.id}`, { retrievalProfile: "off" })).body.bot.retrievalProfile).toBe("off");
+
     // sidebar sections: assign, round-trip, trim, clear — and the field
     // drops off the record entirely once cleared rather than lingering
     // as an empty string through exports and wire frames
@@ -478,11 +832,120 @@ describe("harness HTTP API", () => {
     expect(gated.body.bot.composio).toBe(false);
     expect((await api("PATCH", `/api/bots/${bot.id}`, { composio: true })).body.bot.composio).toBe(true);
 
+    const unsupportedFullProfile = await api("PATCH", `/api/bots/${bot.id}`, {
+      modelSelection: { instanceId: "ghost", model: "ghost-model" },
+      accessProfile: "full-task-scoped",
+    });
+    expect(unsupportedFullProfile.status).toBe(400);
+    expect(unsupportedFullProfile.body.error).toMatch(/only for Claude and Codex/i);
+
     const deleted = await api("DELETE", `/api/bots/${bot.id}`);
     expect(deleted.status).toBe(200);
     const after = await api("GET", "/api/bots");
     expect(after.body.bots.find((b: { id: string }) => b.id === bot.id)).toBeUndefined();
   });
+
+  it("records retrieval only after the native adapter accepts direct and room turns", async () => {
+    const direct = (await api("POST", "/api/bots")).body.bot;
+    const roomBot = (await api("POST", "/api/bots")).body.bot;
+    let room: { id: string; threadId: string } | undefined;
+    const directQuery = "Find the canonical source implementation relationship for this task";
+    const roomQuery = "Find the prior project decision and source relationship for this room";
+    try {
+      for (const bot of [direct, roomBot]) {
+        const selected = await api("PATCH", `/api/bots/${bot.id}`, {
+          modelSelection: { instanceId: "claude", model: "claude-sonnet-5" },
+          retrievalProfile: "task-scoped",
+          composio: false,
+        });
+        expect(selected.status).toBe(200);
+      }
+
+      rmSync(fakeClaudeDump, { force: true });
+      expect((await api("POST", `/api/bots/${direct.id}/messages`, { text: directQuery })).status).toBe(202);
+      await expect.poll(
+        () => retrievalReceiptFor(direct.id, direct.threadId, direct.threadId)?.receipt?.native_dispatch_proof?.status,
+        { timeout: 8_000 },
+      ).toBe("accepted");
+      await expect.poll(() => existsSync(fakeClaudeDump), { timeout: 8_000 }).toBe(true);
+
+      const directRecord = retrievalReceiptFor(direct.id, direct.threadId, direct.threadId);
+      const directContext = retrievalBlockFromClaudeDump();
+      expect(directContext).toContain("Native dispatch receipt source sentinel");
+      expect(directRecord.receipt).toMatchObject({
+        accepted_hits: 1,
+        native_session_proof: { botId: direct.id, threadId: direct.threadId, taskId: direct.threadId },
+        native_dispatch_proof: {
+          status: "accepted",
+          botId: direct.id,
+          threadId: direct.threadId,
+          taskId: direct.threadId,
+          instanceId: "claude",
+          driverKind: "claudeAgent",
+          model: "claude-sonnet-5",
+          failureStage: null,
+        },
+      });
+      expect(directRecord.receipt.native_dispatch_proof.turnId).toMatch(/^[a-z0-9-]+$/i);
+      expect(directRecord.receipt.native_dispatch_proof.contextBytes).toBe(Buffer.byteLength(directContext, "utf8"));
+      expect(directRecord.receipt.native_dispatch_proof.contextSha256).toBe(
+        `sha256:${createHash("sha256").update(directContext, "utf8").digest("hex")}`,
+      );
+      expect(JSON.stringify(directRecord)).not.toContain(directQuery);
+      expect(JSON.stringify(directRecord)).not.toContain("Native dispatch receipt source sentinel");
+
+      await api("POST", `/api/bots/${direct.id}/interrupt`);
+      await expect.poll(async () => {
+        const state = (await api("GET", "/api/bots")).body;
+        return state.bots.find((bot: { id: string }) => bot.id === direct.id)?.busy;
+      }, { timeout: 8_000 }).toBe(false);
+
+      const createdRoom: { id: string; threadId: string } = (await api("POST", "/api/groups", {
+        name: "Retrieval dispatch room",
+        memberIds: [roomBot.id],
+      })).body.group;
+      room = createdRoom;
+      expect((await api("PATCH", `/api/groups/${createdRoom.id}`, {
+        defaultResponder: { kind: "member", botId: roomBot.id },
+      })).status).toBe(200);
+      rmSync(fakeClaudeDump, { force: true });
+      expect((await api("POST", `/api/groups/${createdRoom.id}/messages`, { text: roomQuery })).status).toBe(202);
+      await expect.poll(
+        () => retrievalReceiptFor(roomBot.id, createdRoom.threadId, createdRoom.threadId)?.receipt?.native_dispatch_proof?.status,
+        { timeout: 8_000 },
+      ).toBe("accepted");
+      await expect.poll(() => existsSync(fakeClaudeDump), { timeout: 8_000 }).toBe(true);
+
+      const roomRecord = retrievalReceiptFor(roomBot.id, createdRoom.threadId, createdRoom.threadId);
+      const roomContext = retrievalBlockFromClaudeDump();
+      expect(roomContext).toContain("Native dispatch receipt source sentinel");
+      expect(roomRecord.receipt.native_dispatch_proof).toMatchObject({
+        status: "accepted",
+        botId: roomBot.id,
+        threadId: createdRoom.threadId,
+        taskId: createdRoom.threadId,
+        instanceId: "claude",
+        driverKind: "claudeAgent",
+        model: "claude-sonnet-5",
+        failureStage: null,
+      });
+      expect(roomRecord.receipt.native_dispatch_proof.contextBytes).toBe(Buffer.byteLength(roomContext, "utf8"));
+      expect(roomRecord.receipt.native_dispatch_proof.contextSha256).toBe(
+        `sha256:${createHash("sha256").update(roomContext, "utf8").digest("hex")}`,
+      );
+      expect(JSON.stringify(roomRecord)).not.toContain(roomQuery);
+      expect(JSON.stringify(roomRecord)).not.toContain("Native dispatch receipt source sentinel");
+    } finally {
+      if (room) {
+        await api("POST", `/api/groups/${room.id}/interrupt`);
+        await api("DELETE", `/api/groups/${room.id}`);
+      }
+      await api("POST", `/api/bots/${direct.id}/interrupt`);
+      await api("POST", `/api/bots/${roomBot.id}/interrupt`);
+      await api("DELETE", `/api/bots/${direct.id}`);
+      await api("DELETE", `/api/bots/${roomBot.id}`);
+    }
+  }, 30_000);
 
   it("saves, serves, and guards image attachments", async () => {
     // a real 1x1 PNG so the bytes round-trip intact
@@ -594,6 +1057,7 @@ describe("harness HTTP API", () => {
         { notifications: "yes" },
         { voice: null },
         { speakReplies: 1 },
+        { retrievalProfile: "task-scoped" },
       ]) {
         expect((await api("PATCH", `/api/bots/${bot.id}/profile`, invalid)).status).toBe(400);
       }
@@ -731,7 +1195,7 @@ describe("harness HTTP API", () => {
     } finally {
       stream.close();
     }
-  });
+  }, 90_000);
 
   it("imports a team as a project: one room, on a folder", async () => {
     // The manifest still describes only people. Room name and folder come
@@ -814,6 +1278,7 @@ describe("harness HTTP API", () => {
             id: trusted.id,
             threadId: trusted.threadId,
             autoApprove: true,
+            accessProfile: "full-task-scoped",
             alwaysAllow: ["Bash"],
             chiefOfStaff: true,
             approvePeerComms: false,
@@ -837,6 +1302,7 @@ describe("harness HTTP API", () => {
     expect(impostor.name).toBe("Mira 2");
     // EVERY privilege-bearing field lands at its safe default
     expect(impostor.autoApprove).toBeUndefined();
+    expect(impostor.accessProfile).toBeUndefined();
     expect(impostor.alwaysAllow).toBeUndefined();
     expect(impostor.chiefOfStaff).toBeUndefined();
     expect(impostor.approvePeerComms).toBeUndefined();
@@ -906,7 +1372,7 @@ describe("harness HTTP API", () => {
     for (const bot of [trusted, impostor, legacy.body.bots[0], secondBot]) {
       expect((await api("DELETE", `/api/bots/${bot.id}`)).status).toBe(200);
     }
-  });
+  }, 90_000);
 
   it("keeps the rest of a duplicate's fields when the source engine is offline", async () => {
     // duplicateBot POSTs a blank bot, then PATCHes the source's whole
@@ -1855,7 +2321,7 @@ describe("instance CLI override API", () => {
     expect((await api("PATCH", "/api/instances/nope", { cli: "/x" })).status).toBe(404);
     expect((await api("PATCH", "/api/instances/ghost", { cli: 42 })).status).toBe(400);
     expect((await api("PATCH", "/api/instances/ghost", { cli: "/x\ny" })).status).toBe(400);
-  });
+  }, 90_000);
 
   it("echoes a path-ish name back as the only cli candidate", async () => {
     const res = await api("GET", "/api/cli-candidates?name=/opt/definitely/not/here");
@@ -1901,7 +2367,7 @@ describe("instance CLI override API", () => {
     const overlapping = await api("PATCH", "/api/instances/ghost", { cli: "/tmp/ghost-overlap" });
     expect(overlapping.status).toBe(409);
     expect((await slowConfigWrite).status).toBe(200);
-  });
+  }, 90_000);
 });
 
 describe("computer control API (who is driving)", () => {

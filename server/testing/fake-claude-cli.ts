@@ -17,7 +17,17 @@
 //                      inherited-api-key — what `auth status` reports
 //
 // Keep this file dependency-free — it runs as a bare `node` subprocess.
-import { readFileSync, writeFileSync } from "node:fs";
+import { readFileSync, renameSync, writeFileSync } from "node:fs";
+
+type JsonValue = string | number | boolean | null | JsonValue[] | { [key: string]: JsonValue };
+
+interface FakeClaudeDump {
+  pid: number;
+  argv: string[];
+  env: NodeJS.ProcessEnv;
+  prompt: JsonValue;
+  mcpConfig: JsonValue | null;
+}
 
 const mode = process.env.FAKE_CLAUDE_MODE ?? "happy";
 
@@ -28,6 +38,12 @@ const argAfter = (flag: string): string | null => {
 };
 
 const out = (obj: unknown) => process.stdout.write(JSON.stringify(obj) + "\n");
+
+const writeDump = (path: string, value: FakeClaudeDump): void => {
+  const pending = `${path}.${process.pid}.pending`;
+  writeFileSync(pending, JSON.stringify(value, null, 2));
+  renameSync(pending, path);
+};
 
 // Snapshot probes: both answer on argv alone and exit without reading stdin.
 if (argv[0] === "--version") {
@@ -56,9 +72,9 @@ if (argv[0] === "auth" && argv[1] === "status") {
 // the stream-json turn protocol.
 if (argAfter("--output-format") === "text") {
   if (process.env.FAKE_CLAUDE_DUMP) {
-    writeFileSync(
+    writeDump(
       process.env.FAKE_CLAUDE_DUMP,
-      JSON.stringify({ pid: process.pid, argv, env: process.env, prompt: argAfter("-p"), mcpConfig: null }, null, 2),
+      { pid: process.pid, argv, env: process.env, prompt: argAfter("-p"), mcpConfig: null },
     );
   }
   process.stdout.write("fake generated text\n");
@@ -71,7 +87,6 @@ if (argAfter("--output-format") === "text") {
 // harness calls that a steer); the process stays alive with stdin open and
 // exits only when stdin ends. `slow` leaves a gap between the tool result
 // and the reply so a test can steer into it.
-type JsonValue = string | number | boolean | null | JsonValue[] | { [key: string]: JsonValue };
 const sessionId = argAfter("--resume") ?? argAfter("--session-id") ?? "fake-session";
 const model = argAfter("--model") ?? "claude-fake";
 let dumped = false;
@@ -94,7 +109,7 @@ const playTurn = (prompt: JsonValue) => {
   if (!dumped && process.env.FAKE_CLAUDE_DUMP) {
     dumped = true;
     const configPath = argAfter("--mcp-config");
-    let mcpConfig: unknown = null;
+    let mcpConfig: JsonValue | null = null;
     if (configPath) {
       try {
         mcpConfig = JSON.parse(readFileSync(configPath, "utf8"));
@@ -102,7 +117,7 @@ const playTurn = (prompt: JsonValue) => {
         /* leave null — the test will see it */
       }
     }
-    writeFileSync(process.env.FAKE_CLAUDE_DUMP, JSON.stringify({ pid: process.pid, argv, env: process.env, prompt, mcpConfig }, null, 2));
+    writeDump(process.env.FAKE_CLAUDE_DUMP, { pid: process.pid, argv, env: process.env, prompt, mcpConfig });
   }
 
   if (mode === "exit-early") {

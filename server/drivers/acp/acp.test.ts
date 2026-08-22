@@ -180,14 +180,14 @@ describe("ACP turns (fake CLI)", () => {
   let recorder: EventRecorder;
   let scratch: string;
 
-  const create = async (driver = GrokAgentDriver, mode?: string) => {
+  const create = async (driver = GrokAgentDriver, mode?: string, fullAuto = false) => {
     if (mode) process.env.FAKE_ACP_MODE = mode;
     instance = await driver.create({
       instanceId: "acp-test",
       displayName: "ACP Test",
       environment: {},
       enabled: true,
-      config: { cli: FAKE_CLI, fullAuto: false },
+      config: { cli: FAKE_CLI, fullAuto },
     });
     recorder = recordEvents(instance.adapter);
   };
@@ -445,6 +445,20 @@ describe("ACP turns (fake CLI)", () => {
     });
     const done = await recorder.until((e) => e.type === "turn.completed");
     expect(done).toMatchObject({ ok: true });
+  });
+
+  it("forces the approval broker for graph turns even when the instance is fullAuto", async () => {
+    await create(GrokAgentDriver, "permission", true);
+    await instance.adapter.sendTurn({
+      threadId: "t-forced-broker",
+      text: "inspect the workspace",
+      forceApprovalBroker: true,
+    });
+    const opened = await recorder.until((event) => event.type === "request.opened");
+    expect(opened).toMatchObject({ requestType: "permission", tool: "shell" });
+    await instance.adapter.respondToRequest("t-forced-broker", opened.requestId!, { behavior: "allow" });
+    await recorder.until((event) => event.type === "turn.completed");
+    expect(instance.adapter.capabilities.approvalBroker).toBe(true);
   });
 
   it("grok fails closed when the CLI advertises no cached_token (needs login)", async () => {

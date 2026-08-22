@@ -91,6 +91,16 @@ contextBridge.exposeInMainWorld("ogb", {
   /** Store a provider credential with OS-backed encryption. */
   setCredential: (name, value) => ipcRenderer.invoke("credential:set", name, value),
 
+  /** All graph mutations cross main-process IPC; the renderer never receives
+   * the per-boot signing capability used by the loopback server. */
+  agentGraphs: {
+    preview: (body) => ipcRenderer.invoke("agent-graphs:mutate", "preview", null, body),
+    approve: (graphId, graphHash) => ipcRenderer.invoke("agent-graphs:mutate", "approve", graphId, { graphHash }),
+    cancel: (graphId) => ipcRenderer.invoke("agent-graphs:mutate", "cancel", graphId, {}),
+    verify: (graphId, graphHash, receiptHash, paths) =>
+      ipcRenderer.invoke("agent-graphs:mutate", "verify", graphId, { graphHash, receiptHash, paths }),
+  },
+
   /** In-app auto-update. State object:
    *  { status: "idle"|"checking"|"available"|"downloading"|"downloaded"|"error",
    *    version?, percent?, message? }. onState fires immediately with the

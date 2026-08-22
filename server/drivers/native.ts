@@ -6,7 +6,7 @@ import { appendFileSync } from "node:fs";
 import { join } from "node:path";
 
 import { NATIVE_DIR } from "../config.ts";
-import { redactSecrets } from "../redact.ts";
+import { protectedEnvironmentValues, redactKnownValues, redactSecrets } from "../redact.ts";
 
 export function appendNative(threadId: string, entry: { dir: "in" | "out"; source: string; msg: unknown }) {
   try {
@@ -17,7 +17,11 @@ export function appendNative(threadId: string, entry: { dir: "in" | "out"; sourc
     // the shape stays intact.
     appendFileSync(
       join(NATIVE_DIR, `${threadId}.ndjson`),
-      JSON.stringify({ at: new Date().toISOString(), ...entry, msg: redactSecrets(entry.msg) }) + "\n",
+      JSON.stringify({
+        at: new Date().toISOString(),
+        ...entry,
+        msg: redactKnownValues(redactSecrets(entry.msg), protectedEnvironmentValues()),
+      }) + "\n",
       { mode: 0o600 },
     );
   } catch {

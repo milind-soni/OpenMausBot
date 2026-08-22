@@ -14,6 +14,7 @@ import { SettingsModal } from "@/components/SettingsModal";
 import { UpdateBanner } from "@/components/UpdateBanner";
 import { DesktopCapabilitiesProvider } from "@/components/DesktopCapabilities";
 import { RoutinesPage } from "@/components/RoutinesPage";
+import { ImprovementInbox } from "@/components/ImprovementInbox";
 import { NoEngines } from "@/components/NoEngines";
 import { CommandPalette } from "@/components/CommandPalette";
 
@@ -106,7 +107,9 @@ function Shell() {
           menuButtonRef.current?.focus();
         }}
       />
-      {state.activeView === "routines" ? (
+      {state.activeView === "improvements" ? (
+        <ImprovementInbox />
+      ) : state.activeView === "routines" ? (
         <RoutinesPage />
       ) : noEngines ? (
         <NoEngines />

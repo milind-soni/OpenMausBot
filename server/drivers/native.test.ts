@@ -48,6 +48,19 @@ describe("appendNative", () => {
     if (process.platform !== "win32") expect(mode).toBe(0o600);
   });
 
+  it("masks an exact protected canary even when it has no recognizable prefix", () => {
+    const canary = "native-canary-value-193746";
+    process.env.NATIVE_TEST_SECRET = canary;
+    try {
+      appendNative("t-known", { dir: "in", source: "codex", msg: { text: `copied ${canary}` } });
+      const log = readFileSync(join(NATIVE_DIR, "t-known.ndjson"), "utf8");
+      expect(log).not.toContain(canary);
+      expect(log).toContain("redacted");
+    } finally {
+      delete process.env.NATIVE_TEST_SECRET;
+    }
+  });
+
   it("never throws, whatever it is handed", () => {
     expect(() => appendNative("t-bad", { dir: "in", source: "acp", msg: undefined })).not.toThrow();
     const cyclic: Record<string, unknown> = {};

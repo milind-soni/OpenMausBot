@@ -13,17 +13,55 @@ import {
   useState,
   type ReactNode,
 } from "react";
-import type { CloudBackend, EffortLevel } from "../../server/contracts.ts";
+import type { AccessProfile, CloudBackend, EffortLevel } from "../../server/contracts.ts";
 import type { MausColor, MausMotion } from "@/lib/mascot";
 import type { BotAvatarCrop } from "../../shared/bot-avatar";
+import type { RetrievalProfile } from "../../shared/retrieval-profile";
 import type { Routine, RoutineInput, RoutineRun } from "@/lib/routines";
 import type { WebhookAttempt, WebhookIngressStatus, WebhookTrigger } from "@/lib/webhooks";
+import type { AgentGraph } from "../../shared/agent-graphs";
 import { currentCall } from "@/lib/call";
 import { showNotification, type NotificationTarget } from "@/lib/notify";
 import { speaker } from "@/lib/tts";
 import { createBotPatchQueue, type BotUpdatePatch } from "./bot-patch-queue";
 
 export type { MausColor } from "@/lib/mascot";
+
+export interface ImprovementProposal {
+  proposal_id: string;
+  cluster_id: string | null;
+  title: string;
+  project_id: string | null;
+  category: string | null;
+  affected_surfaces: string[];
+  target_type: string | null;
+  state: string;
+  recurrence_count: number;
+  expires_at: string | null;
+  evidence_hashes: string[];
+  content_hash: string | null;
+  review_required: true;
+  mutation_authority: "none";
+  instruction_authority: false;
+  display_only: {
+    proposed_change: string | null;
+    risk: string | null;
+    tests: string[];
+    rollback: string | null;
+    trusted_as_instructions: false;
+  };
+}
+
+export interface ImprovementFeed {
+  schema: "openmaus.observer_improvement_proposals.v2";
+  state: string;
+  generated_at?: string | null;
+  feed_hash?: string | null;
+  mutation_authority: "none";
+  instruction_authority: false;
+  agent_graphs_enabled: boolean;
+  proposals: ImprovementProposal[];
+}
 
 export interface OptionCardData {
   title: string;
@@ -170,6 +208,8 @@ export interface Bot {
   cwd?: string;
   /** auto mode: the bot approves its own tool permissions */
   autoApprove?: boolean;
+  /** Runtime capability posture; missing is the standard profile. */
+  accessProfile?: AccessProfile;
   /** tools this bot may always use without asking */
   alwaysAllow?: string[];
   /** speak this bot's replies aloud as they settle */
@@ -190,6 +230,8 @@ export interface Bot {
   /** Whether this bot may use the workspace's connected apps. Unset means
    * allowed for existing bots; imported bots start with this disabled. */
   composio?: boolean;
+  /** Task-bound, verified reference context. Independent of tool access. */
+  retrievalProfile?: RetrievalProfile;
   messages: Message[];
   /** leaf of the visible conversation branch (see visibleMessages) */
   activeLeafId?: string | null;
@@ -271,6 +313,37 @@ export interface EngineInstall {
   needsNode?: boolean;
 }
 
+export type ModelCostClass = "free" | "paid" | "paid_subscription" | "paid_metered" | "local" | "unknown";
+
+export interface ModelRuntimeStatus {
+  configured: boolean;
+  reachable: boolean;
+  verified: boolean;
+  admitted: boolean;
+  busy: boolean;
+}
+
+export interface ModelOption {
+  /** Driver-native id used for the actual turn. */
+  id: string;
+  label: string;
+  custom?: boolean;
+  loaded?: boolean;
+  canonicalId?: string;
+  provider?: string;
+  host?: string;
+  costClass?: ModelCostClass;
+  manualOnly?: boolean;
+  isDefault?: boolean;
+  capabilities?: string[];
+  status?: ModelRuntimeStatus;
+  selectable?: boolean;
+  reason?: string;
+  lastVerified?: string;
+  verificationReceipt?: string;
+  contextWindow?: number;
+}
+
 /** One row of GET /api/instances — the model picker's data. */
 export interface InstanceInfo {
   instanceId: string;
@@ -284,7 +357,7 @@ export interface InstanceInfo {
     /** a reported cost on a subscription is notional; the UI says so */
     billing?: "metered" | "subscription";
   };
-  models: { default: string; options: Array<{ id: string; label: string; custom?: boolean; loaded?: boolean }> };
+  models: { default: string; options: ModelOption[] };
   capabilities?: {
     computerMcp?: boolean;
     agentsMcp?: boolean;
@@ -294,6 +367,8 @@ export interface InstanceInfo {
     /** the engine keeps a live session and takes a message mid-turn */
     queueing?: boolean;
     localComputerMcp?: boolean;
+    fullTaskScoped?: boolean;
+    approvalBroker?: boolean;
   };
   /** `custom` agents sit below the rail divider — no subscription catalog. */
   access?: "subscription" | "custom";
@@ -322,7 +397,16 @@ export interface AppState {
   config: ConfigStatus | null;
   /** selected chat — a bot id OR a group id */
   selectedId: string;
-  activeView: "chat" | "routines";
+  activeView: "chat" | "routines" | "improvements";
+  improvements: ImprovementFeed | null;
+  agentGraphs: AgentGraph[];
+  agentGraphsEnabled: boolean;
+  agentGraphDesktopMutationsAvailable: boolean;
+  agentGraphStorageHealth: {
+    state: "healthy" | "quarantined" | "degraded";
+    quarantined: Array<{ fingerprint: string; reason: string }>;
+    sinkErrors: string[];
+  };
   routines: Routine[];
   routineRuns: RoutineRun[];
   webhooks: WebhookTrigger[];
@@ -365,6 +449,20 @@ export type Action =
       computerControl: Record<string, { held: boolean; helpReason: string | null }>;
     }
   | { type: "showRoutines" }
+  | { type: "showImprovements" }
+  | { type: "improvementsHydrated"; feed: ImprovementFeed }
+  | {
+      type: "agentGraphsHydrated";
+      graphs: AgentGraph[];
+      enabled: boolean;
+      desktopMutationsAvailable: boolean;
+      health: AppState["agentGraphStorageHealth"];
+      /** Graph revisions present when this REST request began. Entries absent
+       * from the returned authoritative membership may be removed only if no
+       * newer SSE revision arrived in the meantime. */
+      baselineRevisions: Record<string, number>;
+    }
+  | { type: "agentGraphPatched"; graph: AgentGraph }
   | { type: "routinesHydrated"; routines: Routine[]; runs: RoutineRun[] }
   | { type: "routinePatched"; routine: Routine }
   | { type: "routineDeleted"; routineId: string }
@@ -427,7 +525,15 @@ export type Action =
   | { type: "screenFrame"; botId: string; png: string; mime: string }
   | { type: "provisioning"; botId: string; on: boolean }
   | { type: "computerControl"; botId: string; held: boolean; helpReason: string | null }
-  | { type: "setModel"; botId: string; selection: ModelSelection }
+  | {
+      type: "setModel";
+      botId: string;
+      selection: ModelSelection;
+      /** Stable fleet id used by the server to resolve the driver-native id. */
+      canonicalId?: string;
+      /** A model/engine change starts a provider-session-isolated task. */
+      freshTask?: boolean;
+    }
   | { type: "interrupt"; botId: string }
   | { type: "connected"; value: boolean }
   | { type: "error"; message: string | null }
@@ -495,6 +601,26 @@ function patchCard(state: AppState, botId: string, messageId: string, patch: Par
   }));
 }
 
+function haveIdenticalSerializedGraph(left: AgentGraph, right: AgentGraph): boolean {
+  // Graphs cross both REST and SSE as JSON. Equal revisions must replay the
+  // exact same normalized server document; differing bytes fail closed.
+  return JSON.stringify(left) === JSON.stringify(right);
+}
+
+function hasValidAgentGraphRevision(graph: AgentGraph): boolean {
+  return Number.isSafeInteger(graph.revision) && graph.revision > 0;
+}
+
+/** Resolve an unordered REST/SSE graph update without consulting timestamps.
+ * Equal revisions are valid only as an idempotent replay of identical data. */
+function mergeAgentGraph(current: AgentGraph | undefined, incoming: AgentGraph): AgentGraph | undefined {
+  if (!hasValidAgentGraphRevision(incoming)) return current;
+  if (!current) return incoming;
+  if (incoming.revision > current.revision) return incoming;
+  if (incoming.revision === current.revision && haveIdenticalSerializedGraph(incoming, current)) return current;
+  return current;
+}
+
 export function reducer(state: AppState, action: Action): AppState {
   switch (action.type) {
     case "hydrate": {
@@ -519,6 +645,55 @@ export function reducer(state: AppState, action: Action): AppState {
         appSettingsOpen: false,
         pluginsOpen: false,
       };
+    case "showImprovements":
+      return {
+        ...state,
+        activeView: "improvements",
+        settingsOpen: false,
+        computerOpen: false,
+        inspectorOpen: false,
+        appSettingsOpen: false,
+        pluginsOpen: false,
+      };
+    case "improvementsHydrated":
+      return {
+        ...state,
+        improvements: action.feed,
+        agentGraphsEnabled: action.feed.agent_graphs_enabled,
+      };
+    case "agentGraphsHydrated": {
+      const merged = new Map<string, AgentGraph>();
+      for (const graph of action.graphs) {
+        const next = mergeAgentGraph(state.agentGraphs.find((current) => current.id === graph.id), graph);
+        if (next) merged.set(graph.id, next);
+      }
+      for (const current of state.agentGraphs) {
+        if (merged.has(current.id)) continue;
+        const baselineRevision = action.baselineRevisions[current.id];
+        // The server snapshot is authoritative for objects that existed when
+        // its request began. Preserve only a graph created or advanced by a
+        // concurrent SSE frame after that boundary.
+        if (baselineRevision === undefined || current.revision > baselineRevision) {
+          merged.set(current.id, current);
+        }
+      }
+      return {
+        ...state,
+        agentGraphs: [...merged.values()].sort((left, right) => right.createdAt - left.createdAt),
+        agentGraphsEnabled: action.enabled,
+        agentGraphDesktopMutationsAvailable: action.desktopMutationsAvailable,
+        agentGraphStorageHealth: action.health,
+      };
+    }
+    case "agentGraphPatched": {
+      const current = state.agentGraphs.find((graph) => graph.id === action.graph.id);
+      const next = mergeAgentGraph(current, action.graph);
+      if (!next || next === current) return state;
+      const agentGraphs = current
+        ? state.agentGraphs.map((graph) => graph.id === action.graph.id ? next : graph)
+        : [next, ...state.agentGraphs];
+      return { ...state, agentGraphs: agentGraphs.sort((left, right) => right.createdAt - left.createdAt) };
+    }
     case "routinesHydrated":
       return { ...state, routines: action.routines, routineRuns: action.runs };
     case "routinePatched": {
@@ -761,7 +936,13 @@ export function reducer(state: AppState, action: Action): AppState {
         },
       };
     case "setModel":
-      return updateBot(state, action.botId, (b) => ({ ...b, modelSelection: action.selection }));
+      // A fresh-task switch is committed only after the atomic server
+      // transition succeeds. Keeping the old selection here prevents a stale
+      // or newly-disabled catalog row from stranding the UI on a model the
+      // server rejected.
+      return action.freshTask
+        ? state
+        : updateBot(state, action.botId, (b) => ({ ...b, modelSelection: action.selection }));
     case "connected":
       return { ...state, connected: action.value };
     case "error":
@@ -929,6 +1110,11 @@ export const initialState: AppState = {
   config: null,
   selectedId: "",
   activeView: "chat",
+  improvements: null,
+  agentGraphs: [],
+  agentGraphsEnabled: false,
+  agentGraphDesktopMutationsAvailable: false,
+  agentGraphStorageHealth: { state: "healthy", quarantined: [], sinkErrors: [] },
   routines: [],
   routineRuns: [],
   webhooks: [],
@@ -984,6 +1170,8 @@ const StoreContext = createContext<{
   flushBotPatches: (botId: string) => Promise<void>;
   /** Re-fetch engine availability — after an install, without a restart. */
   refreshInstances: () => Promise<void>;
+  /** Reload the cached, secret-free fleet catalog without probing providers. */
+  refreshModelCatalog: () => Promise<void>;
 } | null>(null);
 
 export function StoreProvider({ children }: { children: ReactNode }) {
@@ -1275,10 +1463,22 @@ export function StoreProvider({ children }: { children: ReactNode }) {
           }).catch(showError);
           break;
         case "setModel":
-          api(`/api/bots/${action.botId}`, {
-            method: "PATCH",
-            body: JSON.stringify({ modelSelection: action.selection }),
-          }).catch(showError);
+          if (action.freshTask) {
+            api(`/api/bots/${action.botId}/model`, {
+              method: "POST",
+              body: JSON.stringify({
+                ...action.selection,
+                canonicalId: action.canonicalId,
+              }),
+            })
+              .then((result: any) => result?.bot && rawDispatch({ type: "taskSwitched", bot: result.bot }))
+              .catch(showError);
+          } else {
+            api(`/api/bots/${action.botId}`, {
+              method: "PATCH",
+              body: JSON.stringify({ modelSelection: action.selection }),
+            }).catch(showError);
+          }
           break;
         case "interrupt":
           api(`/api/bots/${action.botId}/interrupt`, { method: "POST" }).catch(showError);
@@ -1325,8 +1525,11 @@ export function StoreProvider({ children }: { children: ReactNode }) {
   // ── initial load + SSE fold ──────────────────────────────────────────
   useEffect(() => {
     let alive = true;
-    const loadAll = () =>
-      Promise.all([
+    const loadAll = () => {
+      const graphBaselineRevisions = Object.fromEntries(
+        stateRef.current.agentGraphs.map((graph) => [graph.id, graph.revision]),
+      );
+      return Promise.all([
         api("/api/bots")
           .then(({ bots, groups, computerControl }) =>
             alive && rawDispatch({
@@ -1348,7 +1551,21 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         api("/api/webhooks")
           .then(({ webhooks, attempts, ingress }) => alive && rawDispatch({ type: "webhooksHydrated", webhooks, attempts: attempts ?? [], ingress }))
           .catch(() => {}),
+        api("/api/improvements")
+          .then((feed) => alive && rawDispatch({ type: "improvementsHydrated", feed }))
+          .catch(() => {}),
+        api("/api/agent-graphs")
+          .then(({ graphs, enabled, desktop_mutations_available, health }) => alive && rawDispatch({
+            type: "agentGraphsHydrated",
+            graphs: graphs ?? [],
+            enabled: enabled === true,
+            desktopMutationsAvailable: desktop_mutations_available === true,
+            health: health ?? { state: "degraded", quarantined: [], sinkErrors: ["graph storage health unavailable"] },
+            baselineRevisions: graphBaselineRevisions,
+          }))
+          .catch(() => {}),
       ]);
+    };
 
     // A snapshot and the live fold have to meet at a defined boundary. Start
     // hydration only after the stream says hello, queue frames that arrive
@@ -1476,6 +1693,9 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         case "routine.run":
           rawDispatch({ type: "routineRunPatched", run: frame.run });
           break;
+        case "agent-graph.updated":
+          rawDispatch({ type: "agentGraphPatched", graph: frame.graph });
+          break;
         case "webhook":
           rawDispatch({ type: "webhookPatched", webhook: frame.webhook });
           break;
@@ -1569,10 +1789,19 @@ export function StoreProvider({ children }: { children: ReactNode }) {
   // as "Check again" so the user isn't told to restart when a refresh will do.
   const refreshInstances = useCallback(async () => {
     try {
-      const { instances } = await api("/api/instances");
+      const { instances } = await api("/api/instances?refresh=1");
       rawDispatch({ type: "instances", instances });
     } catch {
       /* offline or server down — the existing list stays */
+    }
+  }, []);
+
+  const refreshModelCatalog = useCallback(async () => {
+    try {
+      const { instances } = await api("/api/model-catalog/refresh", { method: "POST" });
+      rawDispatch({ type: "instances", instances });
+    } catch {
+      /* keep the last rendered inventory when the server is offline */
     }
   }, []);
 
@@ -1597,8 +1826,8 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     [botPatchQueue],
   );
   const value = useMemo(
-    () => ({ state, dispatch, flushBotPatches, refreshInstances }),
-    [state, dispatch, flushBotPatches, refreshInstances],
+    () => ({ state, dispatch, flushBotPatches, refreshInstances, refreshModelCatalog }),
+    [state, dispatch, flushBotPatches, refreshInstances, refreshModelCatalog],
   );
   return (
     <StoreContext.Provider value={value}>

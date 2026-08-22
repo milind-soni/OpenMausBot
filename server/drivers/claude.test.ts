@@ -16,7 +16,7 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { ensureDirs } from "../config.ts";
 import type { ProviderInstance } from "../contracts.ts";
 import { recordEvents, type EventRecorder } from "../testing/events.ts";
-import { ClaudeDriver, permissionSocketPath } from "./claude.ts";
+import { ClaudeDriver, claudeBareAuthenticationSettings, permissionSocketPath } from "./claude.ts";
 import { removeTempDir } from "../testing/cleanup.ts";
 
 const FAKE_CLI = join(dirname(fileURLToPath(import.meta.url)), "..", "testing", "fake-claude-cli.ts");
@@ -94,7 +94,7 @@ describe("ClaudeDriver.decodeConfig", () => {
     expect(permissionSocketPath("t-perm-dup-1")).not.toBe(permissionSocketPath("t-perm-dup-2"));
   });
 
-  it("does not advertise or accept local CUA in bypassPermissions mode", async () => {
+  it("keeps local CUA profile-aware while advertising the scoped gateway separately", async () => {
     const bypass = await ClaudeDriver.create({
       instanceId: "claude-bypass",
       displayName: "Claude Bypass",
@@ -103,6 +103,7 @@ describe("ClaudeDriver.decodeConfig", () => {
       config: { cli: FAKE_CLI, permissionMode: "bypassPermissions" },
     });
     expect(bypass.adapter.capabilities.localComputerMcp).toBe(false);
+    expect(bypass.adapter.capabilities.fullTaskScoped).toBe(true);
     await expect(
       bypass.adapter.sendTurn({
         threadId: "t-bypass-local",
@@ -127,14 +128,18 @@ describe("ClaudeDriver turns (fake CLI)", () => {
   let recorder: EventRecorder;
   let scratch: string;
 
-  const create = async (mode?: string, environment: Record<string, string> = {}) => {
+  const create = async (
+    mode?: string,
+    environment: Record<string, string> = {},
+    permissionMode: "acceptEdits" | "auto" | "bypassPermissions" = "acceptEdits",
+  ) => {
     if (mode) process.env.FAKE_CLAUDE_MODE = mode;
     instance = await ClaudeDriver.create({
       instanceId: "claude-test",
       displayName: "Claude Test",
       environment,
       enabled: true,
-      config: { cli: FAKE_CLI, permissionMode: "acceptEdits" },
+      config: { cli: FAKE_CLI, permissionMode },
     });
     recorder = recordEvents(instance.adapter);
   };
@@ -154,8 +159,11 @@ describe("ClaudeDriver turns (fake CLI)", () => {
     delete process.env.BOX_TOKEN;
     delete process.env.OPENCODE_API_KEY;
     delete process.env.OMB_TTS_KEY;
+    delete process.env.AOS_STARTUP_DIRECTIVE;
     delete process.env.OMB_CLAUDE_SESSION_IDLE_MS;
     delete process.env.OMB_CLAUDE_SESSION_IDLE_MIN_MS;
+    delete process.env.OPENSSL_CONF;
+    delete process.env.OMB_CLAUDE_API_KEY_ALIAS;
     recorder?.stop();
     await instance?.dispose();
     await removeTempDir(scratch);
@@ -186,6 +194,24 @@ describe("ClaudeDriver turns (fake CLI)", () => {
     // the harness has one figure to bank per turn
     expect(done).toMatchObject({ type: "turn.completed", ok: true, cost: 0.01, usage: { input: 12, output: 5 } });
     expect(instance.adapter.hasSession("t-happy")).toBe(false);
+  });
+
+  it("overrides bypassPermissions for an approval-bound graph turn", async () => {
+    await create(undefined, {}, "bypassPermissions");
+    const dump = join(scratch, "forced-broker.json");
+    process.env.FAKE_CLAUDE_DUMP = dump;
+
+    await instance.adapter.sendTurn({
+      threadId: "t-forced-broker",
+      text: "inspect the workspace",
+      autoApprove: true,
+      forceApprovalBroker: true,
+    });
+    await recorder.until((event) => event.type === "turn.completed");
+    const argv = JSON.parse(readFileSync(dump, "utf8")).argv as string[];
+    const modeIndex = argv.indexOf("--permission-mode");
+    expect(argv[modeIndex + 1]).toBe("default");
+    expect(instance.adapter.capabilities.approvalBroker).toBe(true);
   });
 
   it("streams partial-message text deltas without re-emitting the whole message", async () => {
@@ -232,6 +258,155 @@ describe("ClaudeDriver turns (fake CLI)", () => {
     expect(seen.env.XAI_API_KEY).toBeUndefined();
     expect(seen.env.BOX_TOKEN).toBeUndefined();
     expect(seen.env.OMB_TTS_KEY).toBeUndefined();
+  });
+
+  it("launches full-task-scoped turns with empty host settings and only the explicit gateway", async () => {
+    await create();
+    const dump = join(scratch, "full-profile.json");
+    process.env.FAKE_CLAUDE_DUMP = dump;
+    process.env.AOS_STARTUP_DIRECTIVE = "must-not-survive";
+
+    await instance.adapter.sendTurn({
+      threadId: "t-full-profile",
+      turnToken: "turn-token-123456789012345678901234",
+      text: "work",
+      system: "OpenMaus explicit prompt",
+      accessProfile: "full-task-scoped",
+      autoApprove: true,
+      integrations: {
+        capabilityGateway: {
+          command: process.execPath,
+          args: ["/tmp/capability-proxy.js"],
+          env: { OMB_TURN_TOKEN: "turn-token-123456789012345678901234" },
+        },
+        composio: {
+          command: process.execPath,
+          args: ["/tmp/connector-proxy.js"],
+          env: { OMB_CONNECTOR_UPSTREAM_URL: "https://example.test/mcp" },
+        },
+      },
+    });
+    await recorder.until((e) => e.type === "turn.completed");
+
+    const seen = JSON.parse(readFileSync(dump, "utf8"));
+    expect(seen.argv).not.toContain("--safe-mode");
+    expect(seen.argv).not.toContain("--bare");
+    expect(seen.argv[seen.argv.indexOf("--setting-sources") + 1]).toBe("");
+    expect(seen.argv).toContain("--strict-mcp-config");
+    const tools = seen.argv[seen.argv.indexOf("--tools") + 1];
+    expect(tools).toContain("mcp__openmaus_capabilities__call_capability");
+    expect(tools).not.toContain("Bash");
+    expect(tools).not.toContain("Read");
+    expect(seen.argv).toContain("--system-prompt");
+    expect(seen.argv).not.toContain("--append-system-prompt");
+    expect(seen.env.AOS_STARTUP_DIRECTIVE).toBeUndefined();
+    expect(Object.keys(seen.mcpConfig.mcpServers).sort()).toEqual([
+      "ogb",
+      "openmaus_capabilities",
+    ]);
+    const allowed = seen.argv[seen.argv.indexOf("--allowedTools") + 1];
+    expect(allowed).toContain("mcp__openmaus_capabilities");
+    expect(seen.argv[seen.argv.indexOf("--permission-mode") + 1]).toBe("acceptEdits");
+    expect(allowed).toContain("mcp__ogb");
+    expect(allowed).not.toContain("mcp__composio");
+    delete process.env.AOS_STARTUP_DIRECTIVE;
+  });
+
+  it("strips process-control environment from full-task children and MCP config", async () => {
+    await create(undefined, {
+      nOdE_OpTiOnS: "--require=/tmp/provider-preload.js",
+      LD_PRELOAD: "/tmp/provider-preload.dylib",
+      PATH: "/tmp/provider-bin",
+      OMB_GRAPH_SAFE_SETTING: "retained",
+      claude_config_dir: "/tmp/foreign-claude-config",
+      NODE_PATH: "/tmp/foreign-node-modules",
+    });
+    const dump = join(scratch, "full-profile-environment.json");
+    process.env.FAKE_CLAUDE_DUMP = dump;
+    process.env.OPENSSL_CONF = "/tmp/inherited-openssl.cnf";
+    process.env.OMB_CLAUDE_API_KEY_ALIAS = "logical/account-that-must-not-be-selected";
+
+    await instance.adapter.sendTurn({
+      threadId: "t-full-profile-environment",
+      turnToken: "turn-token-environment-123456789012345",
+      text: "work",
+      accessProfile: "full-task-scoped",
+      integrations: {
+        capabilityGateway: {
+          command: process.execPath,
+          args: ["/tmp/capability-proxy.js"],
+          env: {
+            OMB_TURN_TOKEN: "turn-token-environment-123456789012345",
+            DyLd_InSeRt_LiBrArIeS: "/tmp/proxy-preload.dylib",
+            Bash_Env: "/tmp/proxy-startup",
+          },
+        },
+      },
+    });
+    await recorder.until((event) => event.type === "turn.completed");
+
+    const seen = JSON.parse(readFileSync(dump, "utf8"));
+    for (const name of [
+      "nOdE_OpTiOnS", "LD_PRELOAD", "HOME", "TMPDIR", "OPENSSL_CONF",
+      "OMB_CLAUDE_API_KEY_ALIAS", "claude_config_dir", "NODE_PATH", "OMB_GRAPH_SAFE_SETTING",
+    ]) {
+      expect(seen.env[name]).toBeUndefined();
+    }
+    expect(seen.env.PATH).not.toBe("/tmp/provider-bin");
+    expect(seen.argv).not.toContain("--bare");
+    expect(seen.mcpConfig.mcpServers.openmaus_capabilities.env).toEqual({
+      OMB_TURN_TOKEN: "turn-token-environment-123456789012345",
+    });
+  });
+
+  it("uses bare mode with an app-owned CredVault helper when an API-key alias is configured", async () => {
+    await create(undefined, { OMB_CLAUDE_API_KEY_ALIAS: "openmaus/claude-api" });
+    const dump = join(scratch, "full-profile-bare.json");
+    process.env.FAKE_CLAUDE_DUMP = dump;
+
+    await instance.adapter.sendTurn({
+      threadId: "t-full-profile-bare",
+      turnToken: "turn-token-bare-1234567890123456789",
+      text: "work",
+      system: "OpenMaus explicit prompt",
+      accessProfile: "full-task-scoped",
+      autoApprove: true,
+      integrations: {
+        capabilityGateway: {
+          command: process.execPath,
+          args: ["/tmp/capability-proxy.js"],
+          env: { OMB_TURN_TOKEN: "turn-token-bare-1234567890123456789" },
+        },
+      },
+    });
+    await recorder.until((e) => e.type === "turn.completed");
+
+    const seen = JSON.parse(readFileSync(dump, "utf8"));
+    expect(seen.argv).toContain("--bare");
+    expect(seen.argv).not.toContain("--setting-sources");
+    const settings = JSON.parse(seen.argv[seen.argv.indexOf("--settings") + 1]);
+    expect(settings.apiKeyHelper).toContain("claude-api-key-helper");
+    expect(settings.apiKeyHelper).toContain("openmaus/claude-api");
+    expect(JSON.stringify(settings)).not.toMatch(/sk-ant-|api[_-]?key\s*[:=]/i);
+    expect(seen.env.ANTHROPIC_API_KEY).toBeUndefined();
+    expect(seen.env.ANTHROPIC_AUTH_TOKEN).toBeUndefined();
+    expect(seen.env.CLAUDE_CODE_OAUTH_TOKEN).toBeUndefined();
+  });
+
+  it("builds the Claude bare-mode helper without POSIX commands on Windows", () => {
+    const settings = JSON.parse(claudeBareAuthenticationSettings("openmaus/claude-api", {
+      platform: "win32",
+      executable: "C:\\Program Files\\OpenMausBot\\OpenMausBot Helper.exe",
+      helperPath: "C:\\Program Files\\OpenMausBot\\server\\claude-api-key-helper.js",
+      electron: true,
+    }));
+    expect(settings.apiKeyHelper).toBe(
+      "set ELECTRON_RUN_AS_NODE=1&& \"\"C:\\Program Files\\OpenMausBot\\OpenMausBot Helper.exe\" " +
+      "\"C:\\Program Files\\OpenMausBot\\server\\claude-api-key-helper.js\" \"openmaus/claude-api\"\"",
+    );
+    expect(settings.apiKeyHelper).not.toContain("/usr/bin/env");
+    expect(() => claudeBareAuthenticationSettings("openmaus/bad%PATH%", { platform: "win32" }))
+      .toThrow(/alias is invalid/);
   });
 
   it("uses instance credentials when launching an injected local model", async () => {
@@ -452,10 +627,13 @@ describe("ClaudeDriver turns (fake CLI)", () => {
 
   it("interrupt kills the turn and settles it as failed, not hung", async () => {
     await create("hang");
-    await instance.adapter.sendTurn({ threadId: "t-int", text: "go" });
+    const { turnId } = await instance.adapter.sendTurn({ threadId: "t-int", text: "go" });
     await recorder.until((e) => e.type === "session.started");
 
-    await instance.adapter.interruptTurn("t-int");
+    await expect(instance.adapter.interruptTurn("t-int", "wrong-turn")).rejects.toThrow(/identity does not match/);
+    expect(instance.adapter.hasSession("t-int")).toBe(true);
+    await instance.adapter.interruptTurn("t-int", turnId);
+    expect(instance.adapter.hasSession("t-int")).toBe(false);
     const done = await recorder.until((e) => e.type === "turn.completed");
     expect(done).toMatchObject({ ok: false, stopReason: "exit_before_result" });
   });
@@ -480,15 +658,24 @@ describe("ClaudeDriver turns (fake CLI)", () => {
     await create();
     const dump = join(scratch, "dump.json");
     process.env.FAKE_CLAUDE_DUMP = dump;
-    await instance.adapter.sendTurn({ threadId: "t-live", text: "one" });
+    await instance.adapter.sendTurn({ threadId: "t-live", text: "one", turnToken: "turn-token-one" });
     await recorder.until((e) => e.type === "turn.completed");
     const dumpBefore = readFileSync(dump, "utf8");
     const announced = (recorder.events.find((e) => e.type === "session.started") as { sessionId: string }).sessionId;
-    const second = await instance.adapter.sendTurn({ threadId: "t-live", text: "two", resumeCursor: announced });
+    const second = await instance.adapter.sendTurn({
+      threadId: "t-live",
+      text: "two",
+      resumeCursor: announced,
+      turnToken: "turn-token-two",
+    });
     await recorder.until((e) => e.type === "turn.completed" && e.turnId === second.turnId);
     expect(readFileSync(dump, "utf8")).toBe(dumpBefore);
     expect(recorder.events.filter((e) => e.type === "turn.started")).toHaveLength(2);
     expect(recorder.events.filter((e) => e.type === "turn.completed")).toHaveLength(2);
+    expect(recorder.events.filter((e) => e.type === "turn.completed").map((e) => e.turnToken)).toEqual([
+      "turn-token-one",
+      "turn-token-two",
+    ]);
   });
 
   it("denies late broker asks between retained turns without opening a zombie card", async () => {

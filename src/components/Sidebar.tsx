@@ -24,6 +24,7 @@ import {
   RefreshCw,
   Search,
   Settings,
+  Sparkles,
   Puzzle,
   Trash2,
   Users,
@@ -1414,6 +1415,20 @@ export function Sidebar({ open, onClose }: { open: boolean; onClose: () => void 
 
       {/* Footer */}
       <div className={cn("pb-3 pt-2", density === "icons" ? "px-2" : "px-3")}>
+        <button
+          onClick={() => dispatch({ type: "showImprovements" })}
+          aria-label={density === "icons" ? "Improvement Inbox" : undefined}
+          title={density === "icons" ? "Improvement Inbox" : undefined}
+          className={cn(
+            "flex min-h-10 w-full items-center rounded-xl py-2 text-left transition-colors",
+            density === "icons" ? "justify-center px-2" : "gap-3 px-3",
+            state.activeView === "improvements" ? "bg-raised text-ink" : "text-ink hover:bg-raised/50",
+          )}
+        >
+          <Sparkles size={20} className={state.activeView === "improvements" ? "text-accent" : "text-ink-secondary"} />
+          <span className={cn("flex-1 text-[14px]", density === "icons" && "hidden")}>Improvement Inbox</span>
+          {state.improvements?.state && state.improvements.state !== "fresh" && <span className="size-2 rounded-full bg-warning" />}
+        </button>
         <button
           onClick={() => dispatch({ type: "showRoutines" })}
           aria-label={density === "icons" ? "Tasks and routines" : undefined}

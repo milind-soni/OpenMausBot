@@ -13,6 +13,26 @@ import { decodeInjectId, hostApiKey, localHost, mergeLocalInject } from "../loca
 import { createAcpDriver, type AcpSupport } from "./core.ts";
 
 const EMPTY: ModelCatalog = { default: "", options: [] };
+// Canonical fleet routes use Hermes' provider:model dialect. Keep ordinary
+// provider slugs on the existing ACP default path; only a producer-owned
+// route alias (or a guarded local inject id below) is sent to set_model.
+const HERMES_FLEET_MODEL_ID = /^[\w][\w./+-]*:[\w][\w./:+-]*$/;
+
+export const HERMES_OPENMAUS_SCREENSHOT_COMPAT = "HERMES_OPENMAUS_SCREENSHOT_COMPAT";
+export const HERMES_OPENMAUS_SCREENSHOT_COMPAT_MODEL = "HERMES_OPENMAUS_SCREENSHOT_COMPAT_MODEL";
+
+/** Bind screenshot pseudo-call compatibility to one exact injected model. */
+export function bindHermesScreenshotCompat(
+  env: Record<string, string | undefined>,
+  modelId: string | null | undefined,
+): void {
+  delete env[HERMES_OPENMAUS_SCREENSHOT_COMPAT];
+  delete env[HERMES_OPENMAUS_SCREENSHOT_COMPAT_MODEL];
+  const inject = decodeInjectId(modelId);
+  if (!inject) return;
+  env[HERMES_OPENMAUS_SCREENSHOT_COMPAT] = "1";
+  env[HERMES_OPENMAUS_SCREENSHOT_COMPAT_MODEL] = inject.model;
+}
 
 function hermesHome(env: Record<string, string | undefined>): string {
   return env.HERMES_HOME || join(env.HOME || env.USERPROFILE || homedir(), ".hermes");
@@ -75,11 +95,12 @@ export function ensureHermesInjectProvider(
   return hermesAcpModelId(modelId) ?? modelId;
 }
 
-/** ACP session/set_model id. Hermes parse_model_input treats `custom:name:model`. */
+/** ACP session/set_model id. Local inject rows become `custom:name:model`;
+ * fleet-catalog rows are already Hermes-native aliases and pass through. */
 export function hermesAcpModelId(modelId: string | null | undefined): string | null {
   const inject = decodeInjectId(modelId);
-  if (!inject) return null;
-  return `custom:${inject.host}:${inject.model}`;
+  if (inject) return `custom:${inject.host}:${inject.model}`;
+  return modelId && HERMES_FLEET_MODEL_ID.test(modelId) ? modelId : null;
 }
 
 async function resolveModels(env: Record<string, string | undefined>): Promise<ModelCatalog> {
@@ -107,6 +128,10 @@ const support: AcpSupport = {
   models: EMPTY,
   resolveModels,
   resolveTurnModel: (model, env) => {
+    // Never inherit a broad or stale compatibility grant from the parent.
+    // Only this OpenMaus driver binds one concrete local model; Hermes still
+    // requires the exact read-only screenshot MCP tool before activation.
+    bindHermesScreenshotCompat(env, model);
     if (!model) return model;
     ensureHermesInjectProvider(model, env);
     return model;

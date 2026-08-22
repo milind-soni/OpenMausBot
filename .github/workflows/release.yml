@@ -34,6 +34,7 @@ on:
         default: false
 
 permissions:
+  actions: read
   contents: read
 
 jobs:
@@ -53,6 +54,145 @@ jobs:
         run: |
           echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
           echo "version=$(node -p "require('./package.json').version")" >> "$GITHUB_OUTPUT"
+      - name: Gate the exact commit on completed all-platform CI
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_SHA: ${{ steps.pin.outputs.sha }}
+          REPOSITORY: ${{ github.repository }}
+          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+        run: |
+          set -euo pipefail
+          node --input-type=module <<'EOF'
+          const required = new Map([
+            ["typecheck + test (macos-latest)", [
+              "Run pnpm typecheck",
+              "Run pnpm test",
+              "Run pnpm check:electron",
+            ]],
+            ["typecheck + test (ubuntu-latest)", [
+              "Run pnpm typecheck",
+              "Run pnpm test",
+              "Run pnpm check:electron",
+              "production UI build",
+            ]],
+            ["typecheck + test (windows-latest)", [
+              "Run pnpm typecheck",
+              "Run pnpm test",
+              "Run pnpm check:electron",
+            ]],
+            ["package + smoke (Ubuntu 24.04 x64)", [
+              "Package from the verified offline CUA stage",
+              "Run node scripts/verify-linux-package.mjs",
+              "Launch packaged app and verify lifecycle",
+            ]],
+          ]);
+
+          const token = process.env.GH_TOKEN;
+          const repository = process.env.REPOSITORY;
+          const sha = process.env.RELEASE_SHA;
+          const defaultBranch = process.env.DEFAULT_BRANCH;
+          const apiBase = process.env.GITHUB_API_URL ?? "https://api.github.com";
+          if (!token || !repository || !defaultBranch || !/^[0-9a-f]{40}$/.test(sha ?? "")) {
+            throw new Error("release CI gate is missing a token, repository, default branch, or exact 40-character SHA");
+          }
+
+          const { readFileSync } = await import("node:fs");
+          const ciWorkflow = readFileSync(".github/workflows/ci.yml", "utf8");
+          const packageJson = JSON.parse(readFileSync("package.json", "utf8"));
+          const requiredCiSource = [
+            "os: [macos-latest, ubuntu-latest, windows-latest]",
+            "- run: pnpm typecheck",
+            "- run: pnpm test",
+            "- run: pnpm check:electron",
+            "name: package + smoke (Ubuntu 24.04 x64)",
+            "run: pnpm package:linux:offline",
+            "run: node scripts/verify-linux-package.mjs",
+            "run: pnpm smoke:linux-package",
+          ];
+          for (const fragment of requiredCiSource) {
+            if (!ciWorkflow.includes(fragment)) {
+              throw new Error(`exact release SHA no longer contains required CI/package contract: ${fragment}`);
+            }
+          }
+          if (!(packageJson.scripts?.test ?? "").includes("pnpm test:packaged-server")) {
+            throw new Error("pnpm test no longer includes the packaged-server gate");
+          }
+          if (!(packageJson.scripts?.["test:packaged-server"] ?? "").includes("scripts/smoke-packaged-server.mjs")) {
+            throw new Error("test:packaged-server no longer starts the isolated packaged-server smoke");
+          }
+
+          const headers = {
+            accept: "application/vnd.github+json",
+            authorization: `Bearer ${token}`,
+            "x-github-api-version": "2022-11-28",
+          };
+          const getJson = async (path) => {
+            const response = await fetch(new URL(path, `${apiBase}/`), { headers });
+            if (!response.ok) {
+              throw new Error(`GitHub Actions proof unavailable for ${path}: HTTP ${response.status}`);
+            }
+            return response.json();
+          };
+
+          const runsUrl = new URL(
+            `repos/${repository}/actions/workflows/ci.yml/runs`,
+            `${apiBase}/`,
+          );
+          runsUrl.searchParams.set("head_sha", sha);
+          runsUrl.searchParams.set("status", "success");
+          runsUrl.searchParams.set("per_page", "100");
+          const runs = await getJson(`${runsUrl.pathname}${runsUrl.search}`);
+          const candidates = (runs.workflow_runs ?? [])
+            .filter((run) => (
+              run.head_sha === sha
+              && run.path === ".github/workflows/ci.yml"
+              && run.status === "completed"
+              && run.conclusion === "success"
+              // pull_request jobs checkout a synthetic merge ref, not the
+              // requested release SHA. A successful default-branch push is
+              // the exact-byte proof used by this release gate.
+              && run.event === "push"
+              && run.head_branch === defaultBranch
+            ))
+            .sort((left, right) => (
+              (right.run_attempt ?? 0) - (left.run_attempt ?? 0)
+              || right.id - left.id
+            ));
+          if (candidates.length === 0) {
+            throw new Error(
+              `no successful completed CI push run on ${defaultBranch} proves exact release SHA ${sha}`,
+            );
+          }
+
+          const run = candidates[0];
+          const jobs = await getJson(
+            `repos/${repository}/actions/runs/${run.id}/jobs?filter=latest&per_page=100`,
+          );
+          if ((jobs.total_count ?? 0) > (jobs.jobs ?? []).length) {
+            throw new Error(`CI run ${run.id} returned incomplete paginated job proof`);
+          }
+
+          for (const [jobName, requiredSteps] of required) {
+            const matches = (jobs.jobs ?? []).filter((job) => job.name === jobName);
+            if (matches.length !== 1) {
+              throw new Error(`CI run ${run.id} must contain exactly one ${jobName} job; found ${matches.length}`);
+            }
+            const job = matches[0];
+            if (job.head_sha !== sha || job.status !== "completed" || job.conclusion !== "success") {
+              throw new Error(`CI job ${jobName} is not a completed success for exact SHA ${sha}`);
+            }
+            for (const stepName of requiredSteps) {
+              const steps = (job.steps ?? []).filter((step) => step.name === stepName);
+              if (steps.length !== 1 || steps[0].status !== "completed" || steps[0].conclusion !== "success") {
+                throw new Error(`CI job ${jobName} lacks successful required step: ${stepName}`);
+              }
+            }
+          }
+
+          console.log(
+            `exact-SHA CI gate passed: ${repository}@${sha} via run ${run.id}; ${required.size} required jobs verified`,
+          );
+          EOF
       - name: Refuse to overwrite a published release
         env:
           GH_TOKEN: ${{ secrets.RELEASES_PAT }}

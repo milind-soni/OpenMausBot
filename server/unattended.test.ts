@@ -179,7 +179,11 @@ posixOnly("unattended turns keep asking", () => {
       // payload and releases the bot that ACTS on it.
       const created = await api("POST", "/api/bots");
       const teammate = created.body.bot;
-      await api("PATCH", `/api/bots/${teammate.id}`, { name: "Teammate", autoApprove: true });
+      await api("PATCH", `/api/bots/${teammate.id}`, {
+        name: "Teammate",
+        autoApprove: true,
+        modelSelection: { instanceId: "grok", model: "fake-model" },
+      });
 
       const delegator = (await api("POST", "/api/bots")).body.bot;
       await api("PATCH", `/api/bots/${delegator.id}`, {

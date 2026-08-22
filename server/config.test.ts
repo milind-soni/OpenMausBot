@@ -89,10 +89,22 @@ describe("configuration boundaries", () => {
 });
 
 describe("default fleet", () => {
-  it("ships Qwen and Hermes as custom-only engines", () => {
+  it("ships Qwen, Hermes, and direct Mac/Windows models as custom-only engines", () => {
     const map = instanceConfigs({});
     expect(map.qwen).toEqual({ driver: "qwenAgent", environment: {} });
     expect(map.hermes).toEqual({ driver: "hermesAgent", environment: {} });
+    expect(map.localMac).toEqual({
+      driver: "local",
+      displayName: "Mac M5 models",
+      config: { host: "ollama", fleetHost: "mac" },
+      environment: {},
+    });
+    expect(map.localWindows).toEqual({
+      driver: "local",
+      displayName: "Windows models",
+      config: { host: "custom", url: "http://127.0.0.1:18134/v1", fleetHost: "windows" },
+      environment: {},
+    });
   });
 
   it("ships Cursor as a default-fleet subscription engine", () => {
@@ -105,6 +117,8 @@ describe("default fleet", () => {
     expect(map.claude.driver).toBe("claudeAgent");
     expect(map.qwen?.driver).toBe("qwenAgent");
     expect(map.hermes?.driver).toBe("hermesAgent");
+    expect(map.localMac?.driver).toBe("local");
+    expect(map.localWindows?.driver).toBe("local");
     expect(map.cursor?.driver).toBe("cursorAgent");
   });
 

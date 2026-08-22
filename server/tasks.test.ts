@@ -51,6 +51,25 @@ describe("tasks", () => {
     expect(store.messagesFor(firstThread).length).toBeGreaterThan(0);
   });
 
+  it("keeps a changed model on the fresh task without carrying its provider session", async () => {
+    const { store } = await freshStore();
+    const bot = store.createBot();
+    const firstThread = bot.threadId;
+    store.setResumeCursor(bot.id, "claude", "old-provider-session");
+    store.patchBot(bot.id, {
+      modelSelection: { instanceId: "hermes", model: "litellm-local:minimax-m3-light" },
+    });
+
+    const task = store.createTask(bot.id)!;
+    expect(task.threadId).not.toBe(firstThread);
+    expect(store.bot(bot.id)?.modelSelection).toEqual({
+      instanceId: "hermes",
+      model: "litellm-local:minimax-m3-light",
+    });
+    expect(store.activeTask(bot.id)?.resumeCursors).toEqual({});
+    expect(store.taskByThread(bot.id, firstThread)?.resumeCursors.claude).toBe("old-provider-session");
+  });
+
   it("can create a detached routine task without changing the visible conversation", async () => {
     const { store } = await freshStore();
     const bot = store.createBot();

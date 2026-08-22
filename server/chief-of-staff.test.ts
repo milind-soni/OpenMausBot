@@ -58,4 +58,14 @@ describe("chiefOfStaffSystemPrompt", () => {
     expect(prompt).toContain("cannot contact teammates");
     expect(prompt).not.toContain("Use ask_bot");
   });
+
+  it("includes trusted OpenMaus status only when the Chief caller supplies it", () => {
+    const status = "TRUSTED OPENMAUSBOT STATUS\nfreshness=fresh; runtime_state=degraded";
+
+    const chiefPrompt = chiefOfStaffSystemPrompt("chief", bots, true, status);
+    const ordinaryPrompt = chiefOfStaffSystemPrompt("writer", bots, true);
+
+    expect(chiefPrompt).toContain(status);
+    expect(ordinaryPrompt).not.toContain("TRUSTED OPENMAUSBOT STATUS");
+  });
 });
