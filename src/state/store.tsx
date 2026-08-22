@@ -111,6 +111,9 @@ export interface Group {
   pinnedCwd?: string | null;
   /** the one message pinned to the top of this room's transcript */
   pinnedMessageId?: string;
+  /** New user-created rooms remain in setup until Save or Skip. */
+  setupCompletedAt?: number | null;
+  setupSkippedAt?: number | null;
   messages: Message[];
 }
 

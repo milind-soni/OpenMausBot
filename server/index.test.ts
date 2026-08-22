@@ -317,6 +317,42 @@ describe("harness HTTP API", () => {
     expect(body.bots[0].messages.length).toBeGreaterThanOrEqual(2);
   });
 
+  it("persists room setup and blocks the first message until it is finished", async () => {
+    const bot = (await api("GET", "/api/bots")).body.bots[0];
+    const created = await api("POST", "/api/groups", { name: "Setup probe", memberIds: [bot.id] });
+    expect(created.status).toBe(201);
+    const group = created.body.group;
+    try {
+      expect(group).toMatchObject({ setupCompletedAt: null, setupSkippedAt: null, messages: [] });
+      const blocked = await api("POST", `/api/groups/${group.id}/messages`, { text: "before setup" });
+      expect(blocked.status).toBe(409);
+      expect((await api("GET", "/api/bots")).body.groups.find((candidate: { id: string }) => candidate.id === group.id).messages).toHaveLength(0);
+
+      const invalid = await api("PATCH", `/api/groups/${group.id}/setup`, {
+        action: "complete",
+        cwd: null,
+        bulletin: "",
+        defaultResponder: { kind: "member", botId: "missing" },
+      });
+      expect(invalid.status).toBe(400);
+
+      const completed = await api("PATCH", `/api/groups/${group.id}/setup`, {
+        action: "complete",
+        cwd: null,
+        bulletin: "shared brief",
+        defaultResponder: { kind: "member", botId: bot.id },
+      });
+      expect(completed.status).toBe(200);
+      expect(completed.body.group).toMatchObject({ bulletin: "shared brief", setupCompletedAt: expect.any(Number) });
+      expect((await api("GET", "/api/bots")).body.groups.find((candidate: { id: string }) => candidate.id === group.id)).toMatchObject({
+        bulletin: "shared brief",
+        setupSkippedAt: null,
+      });
+    } finally {
+      await api("DELETE", `/api/groups/${group.id}`);
+    }
+  });
+
   it("keeps direct-message channels folderless at the API boundary", async () => {
     const attempted = await api("PATCH", "/api/groups/test-dm", { cwd: home });
     expect(attempted.status).toBe(400);
@@ -1247,6 +1283,8 @@ describe("harness HTTP API", () => {
       name: "Room timeout capture",
       memberIds: [botId],
     })).body.group;
+    const ready = await api("PATCH", `/api/groups/${room.id}/setup`, { action: "skip" });
+    expect(ready.status).toBe(200);
     try {
       const selected = await api("PATCH", `/api/bots/${botId}`, {
         modelSelection: { instanceId: "claude", model: "claude-sonnet-5" },
@@ -1630,7 +1668,12 @@ describe("message pages", () => {
     const created = await api("POST", "/api/groups", { name: "Paging", memberIds: [body.bots[0].id] });
     expect(created.status).toBe(201);
     const groupId = created.body.group.id;
-    const quiet = await api("PATCH", `/api/groups/${groupId}`, { defaultResponder: { kind: "mentions" } });
+    // finish room setup with a mentions-only responder so no bot answers the probes
+    const quiet = await api("PATCH", `/api/groups/${groupId}/setup`, {
+      action: "complete",
+      defaultResponder: { kind: "mentions" },
+      bulletin: "",
+    });
     expect(quiet.status).toBe(200);
 
     for (let i = 0; i < count; i++) {

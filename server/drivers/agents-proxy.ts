@@ -1,10 +1,10 @@
 // Agent-to-agent comms MCP proxy — spawned as an MCP server inside a bot's
-// agent process (via the "agents" integration). Exposes three tools that
-// let one bot talk to another, routed back through the harness so the
-// harness stays the single owner of turns, permissions, and recursion
-// limits:
+// agent process (via the "agents" integration). Exposes the workspace team
+// tools, routed back through the harness so the harness stays the single
+// owner of turns, permissions, and recursion limits:
 //
 //   list_bots()                          → the other bots in this workspace + their status
+//   create_bot(name, role, description?) → create a persistent teammate
 //   ask_bot(bot_id, msg)                 → send msg to that bot, wait, return its reply
 //   delegate_bot(bot_id, msg, reason?)   → hand the task to a peer ASYNC: returns
 //                                          immediately, the peer runs after your
@@ -32,6 +32,20 @@ const TOOLS = [
     description:
       "List the other bots (agents) in this OpenMausBot workspace you can message, with their model and whether they're busy. Call this before ask_bot to discover who's available.",
     inputSchema: { type: "object", properties: {} },
+  },
+  {
+    name: "create_bot",
+    description:
+      "Create a persistent teammate in this OpenMausBot workspace. Give the teammate a unique name and a concise role; it inherits your current engine and model and can be contacted with ask_bot or delegate_bot after creation.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        name: { type: "string", description: "Teammate name (1–80 characters)." },
+        role: { type: "string", description: "Teammate role/title (1–120 characters)." },
+        description: { type: "string", description: "Optional short description (up to 200 characters)." },
+      },
+      required: ["name", "role"],
+    },
   },
   {
     name: "ask_bot",
@@ -90,6 +104,26 @@ async function callTool(name: string, args: Json): Promise<{ text: string; isErr
       return `- ${b.name}${role}${about} [id: ${b.id}, model: ${b.model}${b.busy ? ", busy" : ""}]`;
     });
     return { text: `Other bots you can message with ask_bot:\n${lines.join("\n")}` };
+  }
+  if (name === "create_bot") {
+    const teammateName = String(args.name ?? "").trim();
+    const role = String(args.role ?? "").trim();
+    const description = String(args.description ?? "").trim();
+    if (!teammateName || !role) return { text: "create_bot needs name and role.", isError: true };
+    const r = await api("/api/internal/create-bot", {
+      method: "POST",
+      body: JSON.stringify({
+        fromBotId: BOT_ID,
+        fromThreadId: THREAD_ID,
+        name: teammateName,
+        role,
+        description,
+      }),
+    });
+    const bot = (r.bot ?? {}) as Json;
+    return {
+      text: `Created teammate ${bot.name ?? teammateName} (${bot.title ?? role}) [id: ${bot.id ?? "unknown"}, model: ${bot.model ?? "current engine"}].`,
+    };
   }
   if (name === "ask_bot") {
     const toBotId = String(args.bot_id ?? "").trim();

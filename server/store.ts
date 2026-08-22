@@ -139,6 +139,11 @@ export interface GroupRecord {
   /** the one message pinned to the top of this room's transcript. A pin id
    * that no longer resolves (edited away, deleted) simply renders nothing. */
   pinnedMessageId?: string;
+  /** New user-created rooms start with setup pending. Null timestamps are
+   * intentional: records from before room setup has existed omit both keys
+   * and remain immediately usable. */
+  setupCompletedAt?: number | null;
+  setupSkippedAt?: number | null;
 }
 
 /** One task = one conversation with its own context.
@@ -571,6 +576,7 @@ export class Store {
       createdAt: Date.now(),
       dm: dm || undefined,
       busyBotId: null,
+      ...(dm ? {} : { setupCompletedAt: null, setupSkippedAt: null }),
     };
     this.groups.unshift(group);
     this.saveGroups();
@@ -585,7 +591,7 @@ export class Store {
     );
   }
 
-  patchGroup(id: string, patch: Partial<Pick<GroupRecord, "name" | "memberIds" | "defaultResponder" | "bulletin" | "unread" | "busyBotId" | "cwd">>): GroupRecord | null {
+  patchGroup(id: string, patch: Partial<Pick<GroupRecord, "name" | "memberIds" | "defaultResponder" | "bulletin" | "unread" | "busyBotId" | "cwd" | "setupCompletedAt" | "setupSkippedAt">>): GroupRecord | null {
     const group = this.group(id);
     if (!group) return null;
     Object.assign(group, patch);

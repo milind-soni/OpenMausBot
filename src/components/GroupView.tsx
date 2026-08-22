@@ -3,7 +3,7 @@
 // does not become a wall of competing motion. Plain messages go to the room's
 // default responder; @mentions override that routing.
 import { memo, useCallback, useDeferredValue, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
-import { ArrowDown, ChevronDown, Folder, FolderOpen, Pin, PinOff, X } from "lucide-react";
+import { ArrowDown, Check, ChevronDown, Folder, FolderOpen, Loader2, Pin, PinOff, X } from "lucide-react";
 import {
   api,
   useStore,
@@ -209,17 +209,13 @@ function DefaultResponderSelect({ group, members }: { group: Group; members: Bot
         onChange={(event) => change(event.target.value)}
         className="h-8 max-w-[190px] appearance-none truncate rounded-full border border-hairline/40 bg-raised/60 py-1 pl-3 pr-7 text-[12.5px] font-medium text-ink outline-none hover:bg-raised focus:border-accent"
       >
-        <optgroup label="Room lead">
-          {members.map((member) => (
-            <option key={member.id} value={`member:${member.id}`}>
-              Lead: {member.name}
-            </option>
-          ))}
-        </optgroup>
-        <optgroup label="Room behavior">
-          <option value="everyone">Everyone responds</option>
-          <option value="mentions">Mentions only</option>
-        </optgroup>
+        {members.map((member) => (
+          <option key={member.id} value={`member:${member.id}`}>
+            Lead: {member.name}
+          </option>
+        ))}
+        <option value="everyone">Everyone responds</option>
+        <option value="mentions">Only when mentioned</option>
       </select>
       <ChevronDown
         size={13}
@@ -346,6 +342,355 @@ function RoomWorkingFolderChip({ group, onToggle }: { group: Group; onToggle: ()
   );
 }
 
+
+type RoomSetupFields = {
+  setupPending?: boolean;
+  setupRequired?: boolean;
+  setupState?: "required" | "completed" | "skipped";
+  setupCompletedAt?: number | string | null;
+  setupSkippedAt?: number | string | null;
+};
+
+type RoomResponderMode = "lead" | "everyone" | "mentions";
+
+function setupResponderMode(responder: GroupDefaultResponder): RoomResponderMode {
+  return responder.kind === "member" ? "lead" : responder.kind;
+}
+
+function roomNeedsSetup(group: Group): boolean {
+  if (group.dm || group.messages.length > 0) return false;
+  // SAFETY: setup fields are additive server metadata; the existing Group shape remains valid when absent.
+  const marker = group as Group & RoomSetupFields;
+  const hasSetupMarker =
+    Object.prototype.hasOwnProperty.call(marker, "setupCompletedAt") ||
+    Object.prototype.hasOwnProperty.call(marker, "setupSkippedAt");
+  // Legacy empty rooms omit both keys and remain immediately usable.
+  if (!hasSetupMarker) return false;
+  if (
+    marker.setupPending === false ||
+    marker.setupRequired === false ||
+    marker.setupState === "completed" ||
+    marker.setupState === "skipped" ||
+    marker.setupCompletedAt != null ||
+    marker.setupSkippedAt != null
+  ) {
+    return false;
+  }
+  return true;
+}
+
+function RoomSetup({ group, members }: { group: Group; members: Bot[] }) {
+  const { dispatch } = useStore();
+  const [folder, setFolder] = useState(group.cwd ?? "");
+  const [behavior, setBehavior] = useState<RoomResponderMode>(setupResponderMode(group.defaultResponder));
+  const [leadId, setLeadId] = useState(
+    group.defaultResponder.kind === "member" ? group.defaultResponder.botId : members[0]?.id ?? "",
+  );
+  const [instructions, setInstructions] = useState(group.bulletin);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [leadPickerOpen, setLeadPickerOpen] = useState(false);
+  const leadPickerRef = useRef<HTMLDivElement>(null);
+  const selectedLead = members.find((member) => member.id === leadId) ?? members[0];
+
+  useEffect(() => {
+    if (!leadPickerOpen) return;
+    const closeOnOutsideClick = (event: PointerEvent) => {
+      if (!leadPickerRef.current?.contains(event.target as Node)) setLeadPickerOpen(false);
+    };
+    const closeOnEscape = (event: KeyboardEvent) => {
+      if (event.key === "Escape") setLeadPickerOpen(false);
+    };
+    document.addEventListener("pointerdown", closeOnOutsideClick);
+    document.addEventListener("keydown", closeOnEscape);
+    return () => {
+      document.removeEventListener("pointerdown", closeOnOutsideClick);
+      document.removeEventListener("keydown", closeOnEscape);
+    };
+  }, [leadPickerOpen]);
+
+  const responder = (): GroupDefaultResponder => {
+    if (behavior === "everyone") return { kind: "everyone" };
+    if (behavior === "mentions") return { kind: "mentions" };
+    return members.some((member) => member.id === leadId)
+      ? { kind: "member", botId: leadId }
+      : group.defaultResponder;
+  };
+
+  const finish = async (action: "complete" | "skip") => {
+    setLeadPickerOpen(false);
+    setSaving(true);
+    setError(null);
+    try {
+      const payload =
+        action === "skip"
+          ? { action }
+          : {
+              action,
+              cwd: folder.trim() || null,
+              defaultResponder: responder(),
+              bulletin: instructions,
+            };
+      const result = await api(`/api/groups/${group.id}/setup`, {
+        method: "PATCH",
+        body: JSON.stringify(payload),
+      });
+      const now = Date.now();
+      const nextGroup = {
+        ...(result.group ?? group),
+        id: group.id,
+        setupPending: false,
+        ...(action === "skip" ? { setupSkippedAt: now } : { setupCompletedAt: now }),
+      };
+      dispatch({ type: "groupPatched", group: nextGroup });
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : String(cause));
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const pickFolder = async () => {
+    const chosen = await window.ogb?.pickFolder?.(folder || group.cwd);
+    if (chosen) setFolder(chosen);
+  };
+
+  return (
+    <section
+      data-testid="room-setup"
+      aria-labelledby="room-setup-title"
+      className="relative z-20 w-full overflow-visible rounded-3xl border border-hairline/50 bg-card shadow-xl shadow-black/10"
+    >
+      <div className="rounded-t-3xl border-b border-hairline/40 bg-panel/70 px-5 py-5 sm:px-7">
+        <div className="flex items-start gap-3">
+          <span className="flex size-9 shrink-0 items-center justify-center rounded-xl bg-accent text-sm font-bold text-white">1</span>
+          <div>
+            <h1 id="room-setup-title" className="text-xl font-semibold tracking-tight text-ink">Set up {group.name}</h1>
+            <p className="mt-1 max-w-[560px] text-[13.5px] leading-relaxed text-ink-secondary">
+              Give this room a shared workspace, response style, and a little context before the first conversation starts.
+            </p>
+          </div>
+        </div>
+      </div>
+      <form
+        className="space-y-5 px-5 py-5 sm:px-7 sm:py-6"
+        onSubmit={(event) => {
+          event.preventDefault();
+          void finish("complete");
+        }}
+      >
+        <label className="block">
+          <span className="text-[13px] font-semibold text-ink">Working folder</span>
+          <span className="mt-1 block text-[12px] text-ink-secondary">Where room members run file and shell tools.</span>
+          <div className="mt-2 flex gap-2">
+            <input
+              value={folder}
+              onChange={(event) => setFolder(event.target.value)}
+              placeholder="Each bot's own folder"
+              className="min-w-0 flex-1 rounded-xl border border-hairline/50 bg-inset px-3 py-2.5 font-mono text-[12.5px] text-ink placeholder:text-ink-secondary focus:border-accent focus:outline-none"
+            />
+            {window.ogb?.pickFolder && (
+              <button
+                type="button"
+                onClick={() => void pickFolder()}
+                disabled={saving}
+                className="flex shrink-0 items-center gap-1.5 rounded-xl border border-hairline/50 bg-raised px-3 py-2 text-[13px] font-medium text-ink hover:bg-raised-hover disabled:opacity-50"
+              >
+                <FolderOpen size={14} /> Choose
+              </button>
+            )}
+          </div>
+        </label>
+
+        <fieldset className="block">
+          <legend className="text-[13px] font-semibold text-ink">Default responder</legend>
+          <p className="mt-1 text-[12px] text-ink-secondary">Choose who answers when nobody is mentioned.</p>
+          <div role="radiogroup" aria-label="Default responder" className="mt-2 grid gap-2 sm:grid-cols-3">
+            <div ref={leadPickerRef} className="relative min-w-0">
+              <button
+                type="button"
+                role="radio"
+                aria-checked={behavior === "lead"}
+                aria-haspopup="listbox"
+                aria-expanded={behavior === "lead" && leadPickerOpen}
+                onClick={() => {
+                  setBehavior("lead");
+                  setLeadPickerOpen((open) => !open);
+                }}
+                disabled={saving}
+                className={cn(
+                  "flex min-h-[72px] w-full flex-col items-start justify-between rounded-2xl border px-3 py-3 text-left transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/40 disabled:cursor-not-allowed disabled:opacity-50",
+                  behavior === "lead"
+                    ? "border-accent bg-accent/10 text-ink ring-1 ring-accent/30"
+                    : "border-hairline/50 bg-inset text-ink-secondary hover:border-hairline hover:bg-raised",
+                )}
+              >
+                <span className="flex w-full items-center justify-between gap-2">
+                  <span className="flex items-center gap-2 text-[13px] font-semibold">
+                    <span
+                      className={cn(
+                        "flex size-4 shrink-0 items-center justify-center rounded-full border",
+                        behavior === "lead" ? "border-accent bg-accent" : "border-ink-secondary/60",
+                      )}
+                    >
+                      {behavior === "lead" && <span className="size-1.5 rounded-full bg-white" />}
+                    </span>
+                    Specific lead
+                  </span>
+                  <ChevronDown
+                    size={14}
+                    aria-hidden="true"
+                    className={cn("shrink-0 text-ink-secondary transition-transform", leadPickerOpen && "rotate-180")}
+                  />
+                </span>
+                <span className="ml-6 mt-2 truncate text-[11.5px] text-ink-secondary">
+                  {selectedLead?.name ?? "Choose a teammate"}
+                </span>
+              </button>
+              {behavior === "lead" && leadPickerOpen && (
+                <div
+                  role="listbox"
+                  aria-label="Choose a lead"
+                  className="absolute left-0 top-full z-30 mt-2 w-72 max-w-[calc(100vw-3rem)] overflow-hidden rounded-2xl border border-hairline/60 bg-panel shadow-2xl shadow-black/20"
+                >
+                  <div className="border-b border-hairline/40 px-3 py-2.5">
+                    <div className="text-[12.5px] font-semibold text-ink">Choose a lead</div>
+                    <div className="mt-0.5 text-[11.5px] text-ink-secondary">Plain messages go to this teammate.</div>
+                  </div>
+                  <div className="max-h-48 overflow-y-auto p-1.5">
+                    {members.map((member) => {
+                      const selected = member.id === leadId;
+                      return (
+                        <button
+                          key={member.id}
+                          type="button"
+                          role="option"
+                          aria-selected={selected}
+                          onClick={() => {
+                            setLeadId(member.id);
+                            setLeadPickerOpen(false);
+                          }}
+                          className={cn(
+                            "flex w-full items-center gap-2 rounded-xl px-2.5 py-2 text-left transition",
+                            selected ? "bg-accent/10" : "hover:bg-raised",
+                          )}
+                        >
+                          <MausAvatar
+                            color={member.color}
+                            state={normalizeState(member.mascotExpression) ?? "happy"}
+                            size={24}
+                            animated={false}
+                          />
+                          <span className="min-w-0 flex-1">
+                            <span className="block truncate text-[13px] font-medium text-ink">{member.name}</span>
+                            <span className="block truncate text-[11px] text-ink-secondary">{member.title}</span>
+                          </span>
+                          {selected && <Check size={15} className="shrink-0 text-accent" />}
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+              )}
+            </div>
+
+            <button
+              type="button"
+              role="radio"
+              aria-checked={behavior === "everyone"}
+              onClick={() => {
+                setBehavior("everyone");
+                setLeadPickerOpen(false);
+              }}
+              disabled={saving}
+              className={cn(
+                "flex min-h-[72px] w-full flex-col items-start justify-between rounded-2xl border px-3 py-3 text-left transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/40 disabled:cursor-not-allowed disabled:opacity-50",
+                behavior === "everyone"
+                  ? "border-accent bg-accent/10 text-ink ring-1 ring-accent/30"
+                  : "border-hairline/50 bg-inset text-ink-secondary hover:border-hairline hover:bg-raised",
+              )}
+            >
+              <span className="flex items-center gap-2 text-[13px] font-semibold">
+                <span
+                  className={cn(
+                    "flex size-4 shrink-0 items-center justify-center rounded-full border",
+                    behavior === "everyone" ? "border-accent bg-accent" : "border-ink-secondary/60",
+                  )}
+                >
+                  {behavior === "everyone" && <span className="size-1.5 rounded-full bg-white" />}
+                </span>
+                Everyone responds
+              </span>
+              <span className="ml-6 mt-2 text-[11.5px] text-ink-secondary">All room members</span>
+            </button>
+
+            <button
+              type="button"
+              role="radio"
+              aria-checked={behavior === "mentions"}
+              onClick={() => {
+                setBehavior("mentions");
+                setLeadPickerOpen(false);
+              }}
+              disabled={saving}
+              className={cn(
+                "flex min-h-[72px] w-full flex-col items-start justify-between rounded-2xl border px-3 py-3 text-left transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/40 disabled:cursor-not-allowed disabled:opacity-50",
+                behavior === "mentions"
+                  ? "border-accent bg-accent/10 text-ink ring-1 ring-accent/30"
+                  : "border-hairline/50 bg-inset text-ink-secondary hover:border-hairline hover:bg-raised",
+              )}
+            >
+              <span className="flex items-center gap-2 text-[13px] font-semibold">
+                <span
+                  className={cn(
+                    "flex size-4 shrink-0 items-center justify-center rounded-full border",
+                    behavior === "mentions" ? "border-accent bg-accent" : "border-ink-secondary/60",
+                  )}
+                >
+                  {behavior === "mentions" && <span className="size-1.5 rounded-full bg-white" />}
+                </span>
+                Only when mentioned
+              </span>
+              <span className="ml-6 mt-2 text-[11.5px] text-ink-secondary">Only @mentioned members</span>
+            </button>
+          </div>
+        </fieldset>
+
+        <label className="block">
+          <span className="text-[13px] font-semibold text-ink">Room instructions</span>
+          <span className="mt-1 block text-[12px] text-ink-secondary">A shared brief every member sees on each turn. You can edit it later.</span>
+          <textarea
+            value={instructions}
+            onChange={(event) => setInstructions(event.target.value)}
+            rows={5}
+            placeholder="Goals, tone, ownership, constraints…"
+            className="mt-2 w-full resize-y rounded-xl border border-hairline/50 bg-inset px-3 py-2.5 text-[13px] leading-relaxed text-ink placeholder:text-ink-secondary focus:border-accent focus:outline-none"
+          />
+        </label>
+
+        {error && <div role="alert" className="rounded-xl border border-danger/30 bg-danger/10 px-3 py-2 text-[12.5px] text-danger">{error}</div>}
+        <div className="flex flex-col-reverse gap-2 sm:flex-row sm:items-center sm:justify-between">
+          <button
+            type="button"
+            onClick={() => void finish("skip")}
+            disabled={saving}
+            className="rounded-xl px-3 py-2 text-left text-[13px] text-ink-secondary hover:bg-raised hover:text-ink disabled:opacity-50"
+          >
+            Skip for later
+          </button>
+          <button
+            type="submit"
+            disabled={saving}
+            className="flex items-center justify-center gap-2 rounded-xl bg-accent px-4 py-2.5 text-[13px] font-semibold text-white hover:brightness-110 disabled:opacity-50"
+          >
+            {saving && <Loader2 size={14} className="animate-spin" />}
+            Save & continue
+          </button>
+        </div>
+      </form>
+    </section>
+  );
+}
 export function GroupView({ group }: { group: Group }) {
   const { state, dispatch } = useStore();
   const stream = useStreaming();
@@ -364,6 +709,7 @@ export function GroupView({ group }: { group: Group }) {
     [group.memberIds, state.bots],
   );
   const speaker = members.find((b) => b.id === group.busyBotId);
+  const setupPending = roomNeedsSetup(group);
 
   // Windowed transcript, mirroring ChatView: only a tail of the room mounts;
   // the anchored boundary re-tails on a render-phase reset when the room (or
@@ -484,8 +830,8 @@ export function GroupView({ group }: { group: Group }) {
         <span className="text-[15px] font-semibold text-ink">{group.name}</span>
         <div className="flex items-center gap-1.5" style={noDrag}>
           <GroupCallButton group={group} members={members} />
-          {!group.dm && <RoomWorkingFolderChip group={group} onToggle={() => setFolderOpen((open) => !open)} />}
-          {!group.dm && <DefaultResponderSelect group={group} members={members} />}
+          {!setupPending && !group.dm && <RoomWorkingFolderChip group={group} onToggle={() => setFolderOpen((open) => !open)} />}
+          {!setupPending && !group.dm && <DefaultResponderSelect group={group} members={members} />}
           {members.map((b) => (
             <span
               key={b.id}
@@ -510,7 +856,7 @@ export function GroupView({ group }: { group: Group }) {
       </div>
 
       {/* Bulletin: one pinned line; click to edit */}
-      <div className="mx-auto w-full max-w-[900px] px-5">
+      {!setupPending && <div className="mx-auto w-full max-w-[900px] px-5">
         {bulletinOpen ? (
           <div className="mb-1 rounded-lg border border-hairline/40 bg-panel p-2">
             <textarea
@@ -542,10 +888,10 @@ export function GroupView({ group }: { group: Group }) {
             </span>
           </button>
         )}
-      </div>
+      </div>}
 
       {/* Working folder card — the chip in the header toggles it */}
-      {folderOpen && !group.dm && (
+      {!setupPending && folderOpen && !group.dm && (
         <div className="mx-auto w-full max-w-[900px] px-5">
           <div className="mb-1">
             <RoomWorkingFolder group={group} />
@@ -612,6 +958,11 @@ export function GroupView({ group }: { group: Group }) {
           if (resume) setBottomFollow(true);
         }}
       >
+        {setupPending ? (
+          <div className="mx-auto flex min-h-full max-w-[900px] items-center py-8">
+            <RoomSetup group={group} members={members} />
+          </div>
+        ) : (
         <div
           className="mx-auto flex max-w-[900px] flex-col gap-3 pb-4"
           role="log"
@@ -679,6 +1030,7 @@ export function GroupView({ group }: { group: Group }) {
             </>
           )}
         </div>
+        )}
       </div>
 
       {!follow && (
@@ -697,7 +1049,7 @@ export function GroupView({ group }: { group: Group }) {
         </button>
       )}
 
-      <Composer key={group.id} group={group} members={members} />
+      <Composer key={group.id} group={group} members={members} locked={setupPending} />
     </main>
   );
 }

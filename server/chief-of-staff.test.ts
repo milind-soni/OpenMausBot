@@ -49,6 +49,7 @@ describe("chiefOfStaffSystemPrompt", () => {
     expect(prompt).toContain("Patch — Engineer (working right now)");
     expect(prompt).not.toContain("Secret");
     expect(prompt).not.toContain("Atlas —");
+    expect(prompt).toContain("Use create_bot");
     expect(prompt).toContain("Use ask_bot");
   });
 

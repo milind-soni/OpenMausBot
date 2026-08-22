@@ -75,6 +75,7 @@ import {
   roomResponders,
   Store,
   type GroupDefaultResponder,
+  type GroupRecord,
   type Message,
   type TaskRecord,
 } from "./store.ts";
@@ -1585,13 +1586,10 @@ async function startTurn(
       // stop, so the user's tokens can't be burned by a bot-to-bot loop.
       // Only drivers that mount the tools get the integration (and, via the
       // integrations.agents gate below, the prompt hint) — a bot on a driver
-      // without it must not be told about tools it cannot call. Any bot can
-      // still be the TARGET of ask_bot regardless of its driver.
-      if (
-        commsDepth < MAX_COMMS_DEPTH &&
-        instance.adapter.capabilities.agentsMcp === true &&
-        store.bots.filter((b) => b.id !== bot.id && !b.hidden).length > 0
-      ) {
+      // without it must not be told about tools it cannot call. Keep the
+      // integration mounted even with an empty roster: create_bot is how the
+      // first persistent teammate gets made.
+      if (commsDepth < MAX_COMMS_DEPTH && instance.adapter.capabilities.agentsMcp === true) {
         integrations.agents = agentsIntegration(bot.id, threadId, commsDepth);
       }
       // @mentions in the user's message (the composer's tagging UI) become
@@ -1606,7 +1604,7 @@ async function startTurn(
       const coordinationPrompt = bot.chiefOfStaff
         ? chiefOfStaffSystemPrompt(bot.id, store.bots, Boolean(integrations.agents))
         : integrations.agents
-          ? "You can work with the user's other bots through the agents tools — list_bots shows who's available, ask_bot sends one of them a message and returns their reply."
+          ? "You can manage the user's bot team through the agents tools — list_bots shows who's available, create_bot adds a persistent teammate, and ask_bot sends one a message and returns its reply."
           : "";
 
       // (activeVpsThreads was already claimed above, before the provision or
@@ -1986,6 +1984,9 @@ async function runGroupMemberTurn(
 function startGroupTurn(groupId: string, text: string) {
   const group = store.group(groupId);
   if (!group) throw Object.assign(new Error("no such group"), { status: 404 });
+  if (roomSetupPending(group)) {
+    throw Object.assign(new Error("finish room setup before sending the first message"), { status: 409 });
+  }
   store.appendMessage(group.threadId, { role: "user", kind: "text", text });
 
   const members = group.memberIds
@@ -2021,6 +2022,19 @@ function startGroupTurn(groupId: string, text: string) {
     }
   });
   groupQueues.set(groupId, next.catch(() => {}));
+}
+
+function roomSetupPending(group: GroupRecord): boolean {
+  const hasMarker =
+    Object.prototype.hasOwnProperty.call(group, "setupCompletedAt") ||
+    Object.prototype.hasOwnProperty.call(group, "setupSkippedAt");
+  return (
+    !group.dm &&
+    hasMarker &&
+    group.setupCompletedAt == null &&
+    group.setupSkippedAt == null &&
+    store.messagesFor(group.threadId).length === 0
+  );
 }
 
 const CONNECTOR_SLUG = /^[a-z0-9][a-z0-9_-]{0,80}$/;
@@ -2388,7 +2402,7 @@ const server = createServer(async (req, res) => {
     }
     // ── internal peer-agent comms (localhost + shared token only) ──────
     // The agents-proxy (spawned inside a bot's agent process) calls these to
-    // discover peers and hand a message to one. Not part of the public API.
+    // manage the roster and hand work to a peer. Not part of the public API.
     if (path.startsWith("/api/internal/")) {
       if (!authorizedComms(req.headers.authorization)) {
         return json(res, 401, { error: "unauthorized" });
@@ -2408,6 +2422,31 @@ const server = createServer(async (req, res) => {
             description: b.description || undefined,
           }));
         return json(res, 200, { bots });
+      }
+      if (method === "POST" && path === "/api/internal/create-bot") {
+        const body = await readBody(req);
+        const fromBotId = String(body.fromBotId ?? "");
+        const from = store.bot(fromBotId);
+        if (!from) return json(res, 404, { error: "no such sender bot" });
+        const fromThreadId = String(body.fromThreadId ?? from.threadId);
+        if (!store.taskByThread(from.id, fromThreadId)) {
+          return json(res, 403, { error: "source thread does not belong to sender" });
+        }
+        const name = String(body.name ?? "").trim();
+        const role = String(body.role ?? "").trim();
+        const description = String(body.description ?? "").trim();
+        if (!name || !role) return json(res, 400, { error: "name and role required" });
+        if (name.length > 80) return json(res, 400, { error: "name must be 80 characters or fewer" });
+        if (role.length > 120) return json(res, 400, { error: "role must be 120 characters or fewer" });
+        if (description.length > 200) return json(res, 400, { error: "description must be 200 characters or fewer" });
+
+        // A model-created teammate starts with the creator's selected engine;
+        // the user can change it in the normal bot settings afterward.
+        const created = store.createBot(
+          { name, title: role, description, modelSelection: from.modelSelection },
+          { seedMessages: false },
+        );
+        return json(res, 201, { bot: publicBot(created) });
       }
       if (method === "POST" && path === "/api/internal/ask-bot") {
         const body = await readBody(req);
@@ -3101,6 +3140,47 @@ const server = createServer(async (req, res) => {
         for (const bot of importedBots) store.deleteBot(bot.id);
         throw error;
       }
+    }
+    m = path.match(/^\/api\/groups\/([\w-]+)\/setup$/);
+    if (m && method === "PATCH") {
+      const group = store.group(m[1]);
+      if (!group) return json(res, 404, { error: "no such room" });
+      if (group.dm) return json(res, 400, { error: "direct-message channels do not have room setup" });
+      const body = await readBody(req);
+      if (body.action !== "complete" && body.action !== "skip") {
+        return json(res, 400, { error: "action must be complete or skip" });
+      }
+      if (group.setupCompletedAt != null || group.setupSkippedAt != null) {
+        return json(res, 200, { group });
+      }
+      if (store.messagesFor(group.threadId).length > 0) {
+        return json(res, 409, { error: "room setup must be finished before the first message" });
+      }
+
+      const patch: Partial<Pick<GroupRecord, "cwd" | "defaultResponder" | "bulletin" | "setupCompletedAt" | "setupSkippedAt">> = {};
+      if (body.action === "complete") {
+        const checked = validateBotCwd(body.cwd ?? null);
+        if (!checked.ok) return json(res, 400, { error: checked.error });
+        if (typeof body.bulletin !== "string") return json(res, 400, { error: "bulletin must be a string" });
+        if (body.bulletin.length > 12_000) return json(res, 400, { error: "bulletin must be at most 12000 characters" });
+        const value = body.defaultResponder as { kind?: unknown; botId?: unknown } | null;
+        let responder: GroupDefaultResponder | null = null;
+        if (value?.kind === "everyone") responder = { kind: "everyone" };
+        else if (value?.kind === "mentions") responder = { kind: "mentions" };
+        else if (value?.kind === "member" && typeof value.botId === "string" && group.memberIds.includes(value.botId)) {
+          responder = { kind: "member", botId: value.botId };
+        }
+        if (!responder) return json(res, 400, { error: "invalid default responder" });
+        patch.cwd = checked.cwd ?? undefined;
+        patch.defaultResponder = responder;
+        patch.bulletin = body.bulletin;
+        patch.setupCompletedAt = Date.now();
+      } else {
+        patch.setupSkippedAt = Date.now();
+      }
+      const updated = store.patchGroup(m[1], patch);
+      if (!updated) return json(res, 404, { error: "no such room" });
+      return json(res, 200, { group: updated });
     }
     m = path.match(/^\/api\/groups\/([\w-]+)$/);
     if (m && method === "PATCH") {

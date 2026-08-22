@@ -16,6 +16,8 @@ const TOKEN = "test-comms-token";
 let stub: Server;
 let stubPort = 0;
 let lastAuth: string | undefined;
+let lastCreateBody: any = null;
+let createResponse: unknown = { bot: { id: "bot-new", name: "Researcher", title: "Research", model: "fake-model" } };
 let lastAskBody: any = null;
 let askResponse: unknown = { botName: "Helper", text: "hi from helper" };
 let lastDelegateBody: any = null;
@@ -51,6 +53,16 @@ beforeAll(async () => {
           bots: [{ id: "bot-helper", name: "Helper", model: "fake-model", busy: false }],
         }),
       );
+    }
+    if (req.method === "POST" && req.url === "/api/internal/create-bot") {
+      let data = "";
+      req.on("data", (c) => (data += c));
+      req.on("end", () => {
+        lastCreateBody = JSON.parse(data);
+        res.writeHead(201, { "content-type": "application/json" });
+        res.end(JSON.stringify(createResponse));
+      });
+      return;
     }
     if (req.method === "POST" && req.url === "/api/internal/ask-bot") {
       let data = "";
@@ -114,7 +126,24 @@ describe("agents-proxy MCP surface", () => {
     const init = await rpc("initialize", { protocolVersion: "2024-11-05" });
     expect(init.result.serverInfo.name).toContain("agents");
     const list = await rpc("tools/list");
-    expect(list.result.tools.map((t: { name: string }) => t.name)).toEqual(["list_bots", "ask_bot", "delegate_bot"]);
+    expect(list.result.tools.map((t: { name: string }) => t.name)).toEqual([
+      "list_bots",
+      "create_bot",
+      "ask_bot",
+      "delegate_bot",
+    ]);
+  });
+
+  it("creates a persistent teammate with the sender context", async () => {
+    const res = await callTool("create_bot", { name: "Researcher", role: "Research", description: "Finds evidence" });
+    expect(res.result.content[0].text).toContain("Created teammate Researcher");
+    expect(lastCreateBody).toMatchObject({
+      fromBotId: "bot-asker",
+      fromThreadId: "thread-asker-routine",
+      name: "Researcher",
+      role: "Research",
+      description: "Finds evidence",
+    });
   });
 
   it("list_bots renders the roster and authenticates with the shared token", async () => {
@@ -185,6 +214,11 @@ describe("agents-proxy MCP surface", () => {
 
   it("requires bot_id and message", async () => {
     const res = await callTool("ask_bot", { bot_id: "", message: "" });
+    expect(res.result.isError).toBe(true);
+  });
+
+  it("requires name and role", async () => {
+    const res = await callTool("create_bot", { name: "", role: "" });
     expect(res.result.isError).toBe(true);
   });
 });

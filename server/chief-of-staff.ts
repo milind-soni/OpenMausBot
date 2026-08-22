@@ -45,8 +45,8 @@ export function chiefOfStaffSystemPrompt(
 
   const delegation = canDelegate
     ? [
-        "Use list_bots to confirm the live roster and IDs. Use ask_bot when a teammate is better suited to part of the request.",
-        "Delegate with a clear, self-contained brief and wait for the teammate's actual reply before claiming its work is complete.",
+        "Use list_bots to confirm the live roster and IDs. Use create_bot when the user asks for a new persistent teammate.",
+        "Use ask_bot or delegate_bot once it exists. Delegate with a clear, self-contained brief and wait for the teammate's actual reply before claiming its work is complete.",
         "You may consult more than one teammate when the request genuinely benefits, then combine their results into one coherent answer.",
       ].join(" ")
     : "Your current engine cannot contact teammates. Be honest about that limitation and ask the user to choose a delegation-compatible engine before promising coordinated work.";
