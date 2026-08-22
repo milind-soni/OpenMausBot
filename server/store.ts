@@ -139,6 +139,18 @@ export interface GroupRecord {
   /** the one message pinned to the top of this room's transcript. A pin id
    * that no longer resolves (edited away, deleted) simply renders nothing. */
   pinnedMessageId?: string;
+  /** Sidebar team this room belongs to; absent = unassigned (All bots). */
+  teamId?: string;
+}
+
+export const MAX_TEAM_NAME = 60;
+
+/** A named roster the sidebar switcher can focus. Membership lives on
+ * bots and rooms (`teamId`); this record is the name + stable id. */
+export interface TeamRecord {
+  id: string;
+  name: string;
+  createdAt: number;
 }
 
 /** One task = one conversation with its own context.
@@ -226,7 +238,8 @@ export type StoreChange =
   | { type: "bot"; botId: string }
   | { type: "bot.deleted"; botId: string }
   | { type: "group"; groupId: string }
-  | { type: "group.deleted"; groupId: string };
+  | { type: "group.deleted"; groupId: string }
+  | { type: "teams"; teams: TeamRecord[]; activeTeamId: string | null };
 
 /** What a task is called before its first message names it. */
 export const UNTITLED_TASK = "New task";
@@ -285,8 +298,11 @@ export interface BotRecord {
   rewound?: boolean;
   pinned?: boolean;
   hidden?: boolean;
-  /** Optional labeled divider used to organize this bot in the sidebar. */
+  /** Optional labeled divider used to organize this bot in the sidebar.
+   * Kept in sync with the bot's team name so older clients still group. */
   section?: string;
+  /** Sidebar team this bot belongs to; absent = unassigned (All bots). */
+  teamId?: string;
   /** the one message pinned to the top of this bot's active thread; a pin
    * that no longer resolves (branch switched away, deleted) renders nothing */
   pinnedMessageId?: string;
@@ -315,6 +331,7 @@ export interface BotRecord {
 
 const BOTS_FILE = join(DATA_DIR, "bots.json");
 const GROUPS_FILE = join(DATA_DIR, "groups.json");
+const TEAMS_FILE = join(DATA_DIR, "teams.json");
 const messagesFile = (threadId: string) => join(DATA_DIR, `messages-${threadId}.json`);
 
 const COLORS: MausColor[] = [
@@ -416,6 +433,9 @@ interface ThreadState {
 export class Store {
   bots: BotRecord[] = [];
   groups: GroupRecord[] = [];
+  teams: TeamRecord[] = [];
+  /** null = the All bots workspace view. */
+  activeTeamId: string | null = null;
   private threads = new Map<string, ThreadState>();
   private defaultSelection: () => ModelSelection;
   private listeners = new Set<(change: StoreChange) => void>();
@@ -433,6 +453,7 @@ export class Store {
     } catch {
       this.groups = [];
     }
+    this.loadTeams();
     // busy never survives a restart — no turn does either. Rooms saved
     // before default responders existed adopt their first member as lead.
     let botsMigrated = false;
@@ -497,8 +518,10 @@ export class Store {
       if (JSON.stringify(normalized) !== JSON.stringify(g.defaultResponder)) groupsMigrated = true;
       g.defaultResponder = normalized;
     }
-    if (botsMigrated) this.saveBots();
-    if (groupsMigrated) this.saveGroups();
+    const sectionMigration = this.migrateSectionsToTeams();
+    if (botsMigrated || sectionMigration.bots) this.saveBots();
+    if (groupsMigrated || sectionMigration.groups) this.saveGroups();
+    if (sectionMigration.teams) this.saveTeams();
     // bots saved before tasks existed have one endless thread; adopt it as
     // their first task so nothing is lost and nothing special-cases it
     for (const b of this.bots) {
@@ -531,6 +554,205 @@ export class Store {
 
   private saveGroups() {
     writeFileAtomic(GROUPS_FILE, JSON.stringify(this.groups.map(({ busyBotId, ...g }) => g), null, 2));
+  }
+
+  private saveTeams() {
+    writeFileAtomic(
+      TEAMS_FILE,
+      JSON.stringify({ teams: this.teams, activeTeamId: this.activeTeamId }, null, 2),
+    );
+  }
+
+  private loadTeams() {
+    try {
+      const raw = JSON.parse(readFileSync(TEAMS_FILE, "utf8")) as {
+        teams?: unknown;
+        activeTeamId?: unknown;
+      };
+      if (Array.isArray(raw.teams)) {
+        const seen = new Set<string>();
+        for (const item of raw.teams) {
+          if (!item || typeof item !== "object" || Array.isArray(item)) continue;
+          const rec = item as { id?: unknown; name?: unknown; createdAt?: unknown };
+          if (typeof rec.id !== "string" || !rec.id || seen.has(rec.id)) continue;
+          if (typeof rec.name !== "string" || !rec.name.trim()) continue;
+          seen.add(rec.id);
+          this.teams.push({
+            id: rec.id,
+            name: rec.name.trim().slice(0, MAX_TEAM_NAME),
+            createdAt: typeof rec.createdAt === "number" && Number.isFinite(rec.createdAt) ? rec.createdAt : Date.now(),
+          });
+        }
+      }
+      if (typeof raw.activeTeamId === "string" && this.teams.some((team) => team.id === raw.activeTeamId)) {
+        this.activeTeamId = raw.activeTeamId;
+      } else {
+        this.activeTeamId = null;
+      }
+    } catch {
+      this.teams = [];
+      this.activeTeamId = null;
+    }
+  }
+
+  /** Promote leftover `section` labels into first-class teams so the
+   * switcher lists what the old sidebar dividers already grouped. */
+  private migrateSectionsToTeams(): { bots: boolean; groups: boolean; teams: boolean } {
+    let bots = false;
+    let groups = false;
+    let teams = false;
+    const byName = new Map(this.teams.map((team) => [team.name.toLowerCase(), team]));
+    for (const bot of this.bots) {
+      if (bot.teamId && this.team(bot.teamId)) continue;
+      const section = bot.section?.trim();
+      if (!section) {
+        if (bot.teamId) {
+          delete bot.teamId;
+          bots = true;
+        }
+        continue;
+      }
+      let team = byName.get(section.toLowerCase());
+      if (!team) {
+        team = { id: newId(), name: section, createdAt: Date.now() };
+        this.teams.push(team);
+        byName.set(section.toLowerCase(), team);
+        teams = true;
+      }
+      if (bot.teamId !== team.id) {
+        bot.teamId = team.id;
+        bots = true;
+      }
+    }
+    for (const group of this.groups) {
+      if (group.teamId && this.team(group.teamId)) continue;
+      if (group.dm) {
+        if (group.teamId) {
+          delete group.teamId;
+          groups = true;
+        }
+        continue;
+      }
+      const members = group.memberIds.map((id) => this.bot(id)).filter((bot): bot is BotRecord => Boolean(bot));
+      const sharedTeamId = members[0]?.teamId;
+      const allShare =
+        typeof sharedTeamId === "string" &&
+        Boolean(this.team(sharedTeamId)) &&
+        members.length > 0 &&
+        members.every((bot) => bot.teamId === sharedTeamId);
+      if (allShare && sharedTeamId) {
+        group.teamId = sharedTeamId;
+        groups = true;
+      } else if (group.teamId) {
+        delete group.teamId;
+        groups = true;
+      }
+    }
+    if (this.activeTeamId && !this.team(this.activeTeamId)) {
+      this.activeTeamId = null;
+      teams = true;
+    }
+    return { bots, groups, teams };
+  }
+
+  private emitTeams() {
+    this.saveTeams();
+    this.emit({ type: "teams", teams: this.teams, activeTeamId: this.activeTeamId });
+  }
+
+  team(id: string): TeamRecord | undefined {
+    return this.teams.find((team) => team.id === id);
+  }
+
+  private uniqueTeamName(requested: string): string {
+    const base = requested.trim().slice(0, MAX_TEAM_NAME) || "Team";
+    const taken = (name: string) => this.teams.some((team) => team.name.toLowerCase() === name.toLowerCase());
+    if (!taken(base)) return base;
+    for (let n = 2; n < 1000; n++) {
+      const suffix = ` ${n}`;
+      const name = `${base.slice(0, MAX_TEAM_NAME - suffix.length).trimEnd()}${suffix}`;
+      if (!taken(name)) return name;
+    }
+    return `${base.slice(0, 48)}-${newId().slice(0, 8)}`;
+  }
+
+  createTeam(name: string): TeamRecord | null {
+    const normalized = name.trim();
+    if (!normalized || normalized.length > MAX_TEAM_NAME) return null;
+    if (this.teams.some((team) => team.name.toLowerCase() === normalized.toLowerCase())) return null;
+    const team: TeamRecord = { id: newId(), name: normalized, createdAt: Date.now() };
+    this.teams.push(team);
+    this.emitTeams();
+    return team;
+  }
+
+  /** Import path: never fail on a colliding display name. */
+  createTeamNamed(name: string): TeamRecord {
+    return this.createTeam(this.uniqueTeamName(name))!;
+  }
+
+  findOrCreateTeam(name: string): TeamRecord | null {
+    const normalized = name.trim();
+    if (!normalized || normalized.length > MAX_TEAM_NAME) return null;
+    const existing = this.teams.find((team) => team.name.toLowerCase() === normalized.toLowerCase());
+    return existing ?? this.createTeam(normalized);
+  }
+
+  renameTeam(id: string, name: string): TeamRecord | null {
+    const team = this.team(id);
+    if (!team) return null;
+    const normalized = name.trim();
+    if (!normalized || normalized.length > MAX_TEAM_NAME) return null;
+    if (this.teams.some((other) => other.id !== id && other.name.toLowerCase() === normalized.toLowerCase())) {
+      return null;
+    }
+    if (team.name === normalized) return team;
+    team.name = normalized;
+    let botsChanged = false;
+    for (const bot of this.bots) {
+      if (bot.teamId !== id) continue;
+      bot.section = normalized;
+      botsChanged = true;
+    }
+    if (botsChanged) this.saveBots();
+    this.emitTeams();
+    for (const bot of this.bots) {
+      if (bot.teamId === id) this.emit({ type: "bot", botId: bot.id });
+    }
+    return team;
+  }
+
+  deleteTeam(id: string): boolean {
+    if (!this.team(id)) return false;
+    this.teams = this.teams.filter((team) => team.id !== id);
+    let botsChanged = false;
+    let groupsChanged = false;
+    for (const bot of this.bots) {
+      if (bot.teamId !== id) continue;
+      delete bot.teamId;
+      delete bot.section;
+      botsChanged = true;
+      this.emit({ type: "bot", botId: bot.id });
+    }
+    for (const group of this.groups) {
+      if (group.teamId !== id) continue;
+      delete group.teamId;
+      groupsChanged = true;
+      this.emit({ type: "group", groupId: group.id });
+    }
+    if (this.activeTeamId === id) this.activeTeamId = null;
+    if (botsChanged) this.saveBots();
+    if (groupsChanged) this.saveGroups();
+    this.emitTeams();
+    return true;
+  }
+
+  setActiveTeam(id: string | null): boolean {
+    if (id && !this.team(id)) return false;
+    if (this.activeTeamId === id) return true;
+    this.activeTeamId = id;
+    this.emitTeams();
+    return true;
   }
 
   // ── groups ────────────────────────────────────────────────────────────
@@ -585,7 +807,7 @@ export class Store {
     );
   }
 
-  patchGroup(id: string, patch: Partial<Pick<GroupRecord, "name" | "memberIds" | "defaultResponder" | "bulletin" | "unread" | "busyBotId" | "cwd">>): GroupRecord | null {
+  patchGroup(id: string, patch: Partial<Pick<GroupRecord, "name" | "memberIds" | "defaultResponder" | "bulletin" | "unread" | "busyBotId" | "cwd" | "teamId" | "pinnedMessageId">>): GroupRecord | null {
     const group = this.group(id);
     if (!group) return null;
     Object.assign(group, patch);
@@ -765,7 +987,7 @@ export class Store {
 
   createBot(
     profile: Partial<
-      Pick<BotRecord, "name" | "title" | "description" | "color" | "mascotExpression" | "modelSelection">
+      Pick<BotRecord, "name" | "title" | "description" | "color" | "mascotExpression" | "modelSelection" | "teamId">
     > = {},
     opts: {
       /** false = no greeting/onboarding seed. Imported bots must not open
@@ -787,6 +1009,9 @@ export class Store {
       modelSelection: profile.modelSelection ?? this.defaultSelection(),
       resumeCursors: {},
       createdAt: Date.now(),
+      ...(profile.teamId && this.team(profile.teamId)
+        ? { teamId: profile.teamId, section: this.team(profile.teamId)!.name }
+        : {}),
     };
     bot.tasks = [{ threadId: bot.threadId, title: UNTITLED_TASK, createdAt: bot.createdAt, resumeCursors: {} }];
     this.bots.unshift(bot);
@@ -830,6 +1055,13 @@ export class Store {
     this.saveBots();
     this.emit({ type: "bot", botId: id });
     return bot;
+  }
+
+  /** Undo a replace-import archive: bots become visible with their prior Chief flag. */
+  restoreArchivedBots(archived: Array<{ id: string; chiefOfStaff: boolean }>): void {
+    for (const item of archived) {
+      this.patchBot(item.id, { hidden: false, chiefOfStaff: item.chiefOfStaff });
+    }
   }
 
   /** The one way runtime state changes. Sets `activity` and derives `busy`

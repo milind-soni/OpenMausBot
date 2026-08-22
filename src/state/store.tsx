@@ -21,6 +21,8 @@ import type { WebhookAttempt, WebhookIngressStatus, WebhookTrigger } from "@/lib
 import { currentCall } from "@/lib/call";
 import { showNotification, type NotificationTarget } from "@/lib/notify";
 import { speaker } from "@/lib/tts";
+import { createTeamActivationQueue } from "@/lib/team-activation";
+import { firstVisibleSelection } from "@/lib/team-scope";
 import { createBotPatchQueue, type BotUpdatePatch } from "./bot-patch-queue";
 
 export type { MausColor } from "@/lib/mascot";
@@ -111,7 +113,15 @@ export interface Group {
   pinnedCwd?: string | null;
   /** the one message pinned to the top of this room's transcript */
   pinnedMessageId?: string;
+  /** Sidebar team this room belongs to; absent = unassigned. */
+  teamId?: string | null;
   messages: Message[];
+}
+
+export interface Team {
+  id: string;
+  name: string;
+  createdAt: number;
 }
 
 export interface ModelSelection {
@@ -180,6 +190,8 @@ export interface Bot {
   hidden?: boolean;
   /** Sidebar section this bot renders under; absent = unsectioned. */
   section?: string;
+  /** Sidebar team this bot belongs to; absent = unassigned. */
+  teamId?: string | null;
   /** the one message pinned to the top of this bot's active thread */
   pinnedMessageId?: string;
   /** The workspace's one primary coordinator. */
@@ -318,6 +330,9 @@ export type AppSettingsSection =
 export interface AppState {
   bots: Bot[];
   groups: Group[];
+  teams: Team[];
+  /** null = All bots. */
+  activeTeamId: string | null;
   instances: InstanceInfo[];
   config: ConfigStatus | null;
   /** selected chat — a bot id OR a group id */
@@ -362,8 +377,16 @@ export type Action =
       type: "hydrate";
       bots: Bot[];
       groups: Group[];
+      teams?: Team[];
+      activeTeamId?: string | null;
       computerControl: Record<string, { held: boolean; helpReason: string | null }>;
     }
+  | { type: "teamsHydrated"; teams: Team[]; activeTeamId: string | null }
+  | { type: "teamsListed"; teams: Team[] }
+  | { type: "createTeam"; name: string }
+  | { type: "renameTeam"; teamId: string; name: string }
+  | { type: "deleteTeam"; teamId: string }
+  | { type: "setActiveTeam"; teamId: string | null }
   | { type: "showRoutines" }
   | { type: "routinesHydrated"; routines: Routine[]; runs: RoutineRun[] }
   | { type: "routinePatched"; routine: Routine }
@@ -381,7 +404,7 @@ export type Action =
   | { type: "markRoutineRunSeen"; runId: string }
   | { type: "groupPatched"; group: Partial<Group> & { id: string } }
   | { type: "groupDeleted"; groupId: string }
-  | { type: "createGroup"; memberIds: string[]; name?: string }
+  | { type: "createGroup"; memberIds: string[]; name?: string; teamId?: string }
   | { type: "sendGroup"; groupId: string; text: string }
   | {
       type: "patchGroup";
@@ -498,17 +521,33 @@ function patchCard(state: AppState, botId: string, messageId: string, patch: Par
 export function reducer(state: AppState, action: Action): AppState {
   switch (action.type) {
     case "hydrate": {
-      const known = (id: string) => action.bots.some((b) => b.id === id) || action.groups.some((g) => g.id === id);
-      const selectedId =
-        state.selectedId && known(state.selectedId) ? state.selectedId : (action.bots[0]?.id ?? "");
+      const teams = action.teams ?? state.teams;
+      const activeTeamId = action.activeTeamId !== undefined ? action.activeTeamId : state.activeTeamId;
+      const selectedId = firstVisibleSelection(action.bots, action.groups, activeTeamId, state.selectedId);
       return {
         ...state,
         bots: action.bots,
         groups: action.groups,
+        teams,
+        activeTeamId,
         computerControl: action.computerControl,
         selectedId,
       };
     }
+    case "teamsHydrated": {
+      const selectedId = firstVisibleSelection(state.bots, state.groups, action.activeTeamId, state.selectedId);
+      return { ...state, teams: action.teams, activeTeamId: action.activeTeamId, selectedId };
+    }
+    case "teamsListed":
+      return { ...state, teams: action.teams };
+    case "setActiveTeam": {
+      const selectedId = firstVisibleSelection(state.bots, state.groups, action.teamId, state.selectedId);
+      return { ...state, activeTeamId: action.teamId, selectedId, activeView: "chat" };
+    }
+    case "createTeam":
+    case "renameTeam":
+    case "deleteTeam":
+      return state;
     case "showRoutines":
       return {
         ...state,
@@ -652,7 +691,7 @@ export function reducer(state: AppState, action: Action): AppState {
         : animated;
       const switchedThread =
         typeof action.bot.threadId === "string" && action.bot.threadId !== before.threadId;
-      return updateBot(next, action.bot.id, (b) => ({
+      const patched = updateBot(next, action.bot.id, (b) => ({
         ...b,
         ...action.bot,
         // Ordinary bot patches omit messages and must preserve the current
@@ -664,6 +703,16 @@ export function reducer(state: AppState, action: Action): AppState {
             ? action.bot.messages
             : b.messages,
       }));
+      if ((before.teamId ?? null) === (action.bot.teamId ?? null)) return patched;
+      return {
+        ...patched,
+        selectedId: firstVisibleSelection(
+          patched.bots,
+          patched.groups,
+          patched.activeTeamId,
+          patched.selectedId,
+        ),
+      };
     }
     case "messageAdded": {
       const bot = state.bots.find((b) => b.threadId === action.threadId);
@@ -845,7 +894,17 @@ export function reducer(state: AppState, action: Action): AppState {
           }
         : animated;
       const { acknowledgeLocalAuto: _ack, ...botPatch } = action.patch;
-      return updateBot(next, action.botId, (b) => ({ ...b, ...botPatch }));
+      const patched = updateBot(next, action.botId, (b) => ({ ...b, ...botPatch }));
+      if (!Object.prototype.hasOwnProperty.call(action.patch, "teamId")) return patched;
+      return {
+        ...patched,
+        selectedId: firstVisibleSelection(
+          patched.bots,
+          patched.groups,
+          patched.activeTeamId,
+          patched.selectedId,
+        ),
+      };
     }
     case "threadActive": {
       const bot = state.bots.find((b) => b.threadId === action.threadId);
@@ -925,6 +984,8 @@ const MAX_KEPT_SCREEN_FRAMES = 8;
 export const initialState: AppState = {
   bots: [],
   groups: [],
+  teams: [],
+  activeTeamId: null,
   instances: [],
   config: null,
   selectedId: "",
@@ -1065,6 +1126,29 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     return () => botPatchQueue.dispose();
   }, [botPatchQueue]);
 
+  const teamActivationQueue = useMemo(
+    () =>
+      createTeamActivationQueue<{ teams: Team[]; activeTeamId: string | null }>({
+        request: (id) =>
+          api("/api/teams/active", {
+            method: "POST",
+            body: JSON.stringify({ id }),
+          }),
+        apply: ({ teams, activeTeamId }) => rawDispatch({ type: "teamsHydrated", teams, activeTeamId }),
+        rollback: (rollbackTeamId) =>
+          rawDispatch({
+            type: "teamsHydrated",
+            teams: stateRef.current.teams,
+            activeTeamId: rollbackTeamId,
+          }),
+        onError: (error) => {
+          rawDispatch({ type: "error", message: error.message });
+          setTimeout(() => rawDispatch({ type: "error", message: null }), 6000);
+        },
+      }),
+    [],
+  );
+
   const dispatch = useMemo(() => {
     const showError = (e: unknown) => {
       rawDispatch({ type: "error", message: e instanceof Error ? e.message : String(e) });
@@ -1078,8 +1162,13 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         body: JSON.stringify(patch),
       }).catch(() => {});
     };
+    const claimActiveTeam = (teams: Team[], activeTeamId: string | null) => {
+      rawDispatch({ type: "teamsHydrated", teams, activeTeamId });
+      void teamActivationQueue.enqueue(activeTeamId, stateRef.current.activeTeamId);
+    };
 
     const wrapped: React.Dispatch<Action> = (action) => {
+      const previousActiveTeamId = stateRef.current.activeTeamId;
       const botBeforeUpdate =
         action.type === "updateBot"
           ? stateRef.current.bots.find((candidate) => candidate.id === action.botId)
@@ -1192,7 +1281,12 @@ export function StoreProvider({ children }: { children: ReactNode }) {
           break;
         }
         case "newBot":
-          api("/api/bots", { method: "POST" })
+          api("/api/bots", {
+            method: "POST",
+            body: JSON.stringify(
+              stateRef.current.activeTeamId ? { teamId: stateRef.current.activeTeamId } : {},
+            ),
+          })
             .then(({ bot }) => rawDispatch({ type: "botAdded", bot }))
             .catch(showError);
           break;
@@ -1209,6 +1303,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
             cloudBackend: source.cloudBackend,
             avatarUrl: source.avatarUrl,
             avatarCrop: source.avatarCrop,
+            ...(source.teamId ? { teamId: source.teamId } : {}),
           };
           api("/api/bots", { method: "POST" })
             .then(({ bot }) =>
@@ -1245,7 +1340,11 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         case "createGroup":
           api(`/api/groups`, {
             method: "POST",
-            body: JSON.stringify({ memberIds: action.memberIds, name: action.name }),
+            body: JSON.stringify({
+              memberIds: action.memberIds,
+              name: action.name,
+              ...(action.teamId ? { teamId: action.teamId } : {}),
+            }),
           })
             .then(({ group }) => {
               rawDispatch({ type: "groupPatched", group });
@@ -1309,6 +1408,31 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         case "interruptGroup":
           api(`/api/groups/${action.groupId}/interrupt`, { method: "POST" }).catch(showError);
           break;
+        case "createTeam":
+          api("/api/teams", { method: "POST", body: JSON.stringify({ name: action.name }) })
+            .then(({ teams, activeTeamId }: { teams: Team[]; activeTeamId: string | null }) =>
+              claimActiveTeam(teams, activeTeamId),
+            )
+            .catch(showError);
+          break;
+        case "renameTeam":
+          api(`/api/teams/${action.teamId}`, {
+            method: "PATCH",
+            body: JSON.stringify({ name: action.name }),
+          })
+            .then(({ teams }: { teams: Team[] }) => rawDispatch({ type: "teamsListed", teams }))
+            .catch(showError);
+          break;
+        case "deleteTeam":
+          api(`/api/teams/${action.teamId}`, { method: "DELETE" })
+            .then(({ teams, activeTeamId }: { teams: Team[]; activeTeamId: string | null }) =>
+              claimActiveTeam(teams, activeTeamId),
+            )
+            .catch(showError);
+          break;
+        case "setActiveTeam":
+          void teamActivationQueue.enqueue(action.teamId, previousActiveTeamId);
+          break;
         case "updateBot": {
           if (botBeforeUpdate) {
             botPatchQueue.enqueue(action.botId, action.patch, botBeforeUpdate);
@@ -1320,7 +1444,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       }
     };
     return wrapped;
-  }, [botPatchQueue]);
+  }, [botPatchQueue, teamActivationQueue]);
 
   // ── initial load + SSE fold ──────────────────────────────────────────
   useEffect(() => {
@@ -1328,11 +1452,13 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     const loadAll = () =>
       Promise.all([
         api("/api/bots")
-          .then(({ bots, groups, computerControl }) =>
+          .then(({ bots, groups, teams, activeTeamId, computerControl }) =>
             alive && rawDispatch({
               type: "hydrate",
               bots,
               groups: groups ?? [],
+              teams: teams ?? [],
+              activeTeamId: activeTeamId ?? null,
               computerControl: computerControl ?? {},
             }))
           .catch(() => {}),
@@ -1466,6 +1592,17 @@ export function StoreProvider({ children }: { children: ReactNode }) {
           break;
         case "group.deleted":
           rawDispatch({ type: "groupDeleted", groupId: frame.groupId });
+          break;
+        case "teams":
+          rawDispatch({
+            type: "teamsHydrated",
+            teams: Array.isArray(frame.teams) ? frame.teams : [],
+            activeTeamId: teamActivationQueue.isBusy()
+              ? stateRef.current.activeTeamId
+              : typeof frame.activeTeamId === "string"
+                ? frame.activeTeamId
+                : null,
+          });
           break;
         case "routine":
           rawDispatch({ type: "routinePatched", routine: frame.routine });

@@ -30,9 +30,18 @@ function downloadManifest(manifest: ExportedTeam): { name: string; members: numb
 
 /** Export every active sidebar bot in one click. The server excludes hidden bots. */
 export async function downloadAllBots(): Promise<{ name: string; members: number }> {
+  return downloadTeam();
+}
+
+/** Export one named team, or every visible bot when teamId is omitted. */
+export async function downloadTeam(opts?: {
+  teamId?: string;
+  name?: string;
+}): Promise<{ name: string; members: number }> {
+  // SAFETY: /api/teams/export returns a parsed team manifest or throws.
   const manifest = (await api("/api/teams/export", {
     method: "POST",
-    body: "{}",
+    body: JSON.stringify(opts ?? {}),
   })) as ExportedTeam;
   return downloadManifest(manifest);
 }

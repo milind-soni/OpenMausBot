@@ -20,6 +20,7 @@ export type BotUpdatePatch = Partial<
     | "pinned"
     | "hidden"
     | "section"
+    | "teamId"
     | "pinnedMessageId"
     | "chiefOfStaff"
     | "approvePeerComms"

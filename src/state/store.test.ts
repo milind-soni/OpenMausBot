@@ -105,3 +105,79 @@ describe("cross-client bot creation", () => {
     expect(greeted.bots[0]?.messages).toEqual([greeting]);
   });
 });
+
+describe("team switcher", () => {
+  const bot = (id: string, teamId?: string): Bot => ({
+    id,
+    threadId: `${id}-thread`,
+    name: id,
+    title: "",
+    description: "",
+    notifications: true,
+    color: "green",
+    unread: false,
+    modelSelection: { instanceId: "codex", model: "default" },
+    messages: [],
+    ...(teamId ? { teamId } : {}),
+  });
+
+  it("hydrate and setActiveTeam keep the current chat when it still belongs", () => {
+    const scout = bot("scout", "eng");
+    const copy = bot("copy", "mkt");
+    const hydrated = reducer(initialState, {
+      type: "hydrate",
+      bots: [scout, copy],
+      groups: [],
+      teams: [
+        { id: "eng", name: "Engineering", createdAt: 1 },
+        { id: "mkt", name: "Marketing", createdAt: 2 },
+      ],
+      activeTeamId: "eng",
+      computerControl: {},
+    });
+    expect(hydrated.selectedId).toBe("scout");
+    expect(hydrated.activeTeamId).toBe("eng");
+
+    const selected = reducer(hydrated, { type: "select", id: "scout" });
+    const switched = reducer(selected, { type: "setActiveTeam", teamId: "mkt" });
+    expect(switched.activeTeamId).toBe("mkt");
+    expect(switched.selectedId).toBe("copy");
+  });
+
+  it("moves selection when the open bot leaves the active team", () => {
+    const scout = bot("scout", "eng");
+    const tester = bot("tester", "eng");
+    const start = reducer(initialState, {
+      type: "hydrate",
+      bots: [scout, tester],
+      groups: [],
+      teams: [{ id: "eng", name: "Engineering", createdAt: 1 }],
+      activeTeamId: "eng",
+      computerControl: {},
+    });
+    const selected = reducer(start, { type: "select", id: "scout" });
+    const moved = reducer(selected, { type: "updateBot", botId: "scout", patch: { teamId: "" } });
+    expect(moved.selectedId).toBe("tester");
+  });
+
+  it("teamsListed refreshes names without rewinding the active team", () => {
+    const start = reducer(initialState, {
+      type: "hydrate",
+      bots: [bot("scout", "eng")],
+      groups: [],
+      teams: [{ id: "eng", name: "Engineering", createdAt: 1 }],
+      activeTeamId: "eng",
+      computerControl: {},
+    });
+    const listed = reducer(start, {
+      type: "teamsListed",
+      teams: [
+        { id: "eng", name: "Platform", createdAt: 1 },
+        { id: "mkt", name: "Marketing", createdAt: 2 },
+      ],
+    });
+    expect(listed.activeTeamId).toBe("eng");
+    expect(listed.selectedId).toBe("scout");
+    expect(listed.teams.map((team) => team.name)).toEqual(["Platform", "Marketing"]);
+  });
+});

@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { Loader2, Menu } from "lucide-react";
 import { StoreProvider, useStore } from "@/state/store";
+import { botInActiveTeam } from "@/lib/team-scope";
 import { Onboarding } from "@/components/Onboarding";
 import { emailGateDone, initAnalytics } from "@/lib/analytics";
 import { Sidebar } from "@/components/Sidebar";
@@ -27,7 +28,7 @@ function Shell() {
   const [drawerOpen, setDrawerOpen] = useState(false);
   const menuButtonRef = useRef<HTMLButtonElement>(null);
   const group = state.groups.find((g) => g.id === state.selectedId);
-  const bot = group ? undefined : (state.bots.find((b) => b.id === state.selectedId) ?? state.bots[0]);
+  const bot = group ? undefined : state.bots.find((b) => b.id === state.selectedId);
 
   // Nothing on this machine can run a bot. A missing cloud login does not
   // count — that CLI can still host a local model. Wait for the first
@@ -44,7 +45,7 @@ function Shell() {
     const onKey = (e: KeyboardEvent) => {
       const mod = e.metaKey || e.ctrlKey;
       if (!mod) return;
-      const bots = state.bots.filter((b) => !b.hidden);
+      const bots = state.bots.filter((b) => botInActiveTeam(b, state.activeTeamId));
       if (e.key === "n" && !e.shiftKey) {
         e.preventDefault();
         dispatch({ type: "newBot" });
@@ -65,7 +66,7 @@ function Shell() {
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [state.bots, state.selectedId, dispatch]);
+  }, [state.bots, state.selectedId, state.activeTeamId, dispatch]);
 
   // Picking a conversation closes the drawer: on a phone the chat is what you
   // asked for, and leaving the list up would hide it. Watching activeView too
@@ -118,7 +119,11 @@ function Shell() {
         <main className="flex h-full min-w-0 flex-1 flex-col items-center justify-center gap-3 bg-app text-ink-secondary">
           <Loader2 size={20} className="animate-spin" />
           <div className="text-[14px]">
-            {state.connected ? "No bots yet" : "Connecting to the bot server…"}
+            {state.connected
+              ? state.activeTeamId
+                ? "No bots in this team yet"
+                : "No bots yet"
+              : "Connecting to the bot server…"}
           </div>
           {!state.connected && (
             <div className="text-[12px]">

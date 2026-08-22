@@ -1,7 +1,8 @@
 import { track } from "@/lib/analytics";
 import { cn } from "@/lib/cn";
 import { teamImportPreview, type PendingTeamImport } from "@/lib/team-import";
-import { api, useStore, type Bot } from "@/state/store";
+import { botInActiveTeam } from "@/lib/team-scope";
+import { api, useStore, type Bot, type Team } from "@/state/store";
 import {
   ArrowLeft,
   Check,
@@ -103,7 +104,7 @@ export function TeamLibraryPanel({
   const [search, setSearch] = useState("");
   const [error, setError] = useState("");
 
-  const currentBotCount = state.bots.filter((bot) => !bot.hidden).length;
+  const currentBotCount = state.bots.filter((bot) => botInActiveTeam(bot, state.activeTeamId)).length;
 
   const loadCatalog = useCallback(async () => {
     setCatalogLoading(true);
@@ -212,12 +213,28 @@ export function TeamLibraryPanel({
     setError("");
     try {
       // SAFETY: this endpoint is owned by the app and returns imported bots.
-      const response = (await api(`/api/teams/import?mode=${importMode}`, {
+      const params = new URLSearchParams({ mode: importMode });
+      params.set("teamId", state.activeTeamId ?? "");
+      const response = (await api(`/api/teams/import?${params}`, {
         method: "POST",
         body: JSON.stringify(pending.manifest),
-      })) as { bots: Bot[]; archivedBots?: Bot[]; archived?: ArchivedTeamBot[] };
+      })) as {
+        bots: Bot[];
+        archivedBots?: Bot[];
+        archived?: ArchivedTeamBot[];
+        teams?: Team[];
+        activeTeamId?: string | null;
+      };
       for (const bot of response.archivedBots ?? []) dispatch({ type: "botPatched", bot });
       for (const bot of response.bots) dispatch({ type: "botAdded", bot });
+      if (response.teams) {
+        dispatch({
+          type: "teamsHydrated",
+          teams: response.teams,
+          activeTeamId: response.activeTeamId ?? null,
+        });
+      }
+      dispatch({ type: "setActiveTeam", teamId: response.activeTeamId ?? null });
       const first = response.bots[0];
       if (first) dispatch({ type: "select", id: first.id });
       track("team_imported", { members: response.bots.length, source, mode: importMode });

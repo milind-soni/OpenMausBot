@@ -5,6 +5,7 @@
 import { useEffect, useState } from "react";
 import { GitBranch, Wrench } from "lucide-react";
 import { api, useStore, formatTime } from "@/state/store";
+import { searchHitInActiveTeam } from "@/lib/team-scope";
 import { MausAvatar } from "./Avatar";
 import { cn } from "@/lib/cn";
 import type { SearchHit } from "@/lib/search-hit";
@@ -31,7 +32,8 @@ export function SearchResults({ query, onLanded }: { query: string; onLanded: ()
     setError(null);
     let alive = true;
     const t = setTimeout(() => {
-      api(`/api/search?q=${encodeURIComponent(q)}&limit=40`)
+      const team = state.activeTeamId ? `&teamId=${encodeURIComponent(state.activeTeamId)}` : "";
+      api(`/api/search?q=${encodeURIComponent(q)}&limit=40${team}`)
         .then((r: { hits: SearchHit[] }) => alive && (setHits(r.hits), setError(null)))
         .catch((e: unknown) => alive && setError(e instanceof Error ? e.message : String(e)));
     }, DEBOUNCE_MS);
@@ -39,9 +41,13 @@ export function SearchResults({ query, onLanded }: { query: string; onLanded: ()
       alive = false;
       clearTimeout(t);
     };
-  }, [q]);
+  }, [q, state.activeTeamId]);
 
   if (q.length < MIN_QUERY) return null;
+
+  const scopedHits = hits?.filter((hit) =>
+    searchHitInActiveTeam(hit, state.bots, state.groups, state.activeTeamId),
+  );
 
   const land = async (hit: SearchHit) => {
     try {
@@ -55,11 +61,11 @@ export function SearchResults({ query, onLanded }: { query: string; onLanded: ()
   return (
     <div className="mt-2 border-t border-hairline/40 pt-2">
       <div className="px-3 pb-1 text-[11px] font-medium uppercase tracking-wide text-ink-secondary">
-        Messages{hits ? ` · ${hits.length}${hits.length === 40 ? "+" : ""}` : ""}
+        Messages{scopedHits ? ` · ${scopedHits.length}${scopedHits.length === 40 ? "+" : ""}` : ""}
       </div>
       {error && <div className="px-3 py-2 text-[12.5px] text-danger">couldn't search: {error}</div>}
-      {hits && hits.length === 0 && !error && <div className="px-3 py-3 text-[13px] text-ink-secondary">No messages match “{q}”</div>}
-      {hits?.map((hit) => {
+      {scopedHits && scopedHits.length === 0 && !error && <div className="px-3 py-3 text-[13px] text-ink-secondary">No messages match “{q}”</div>}
+      {scopedHits?.map((hit) => {
         const bot = hit.botId ? state.bots.find((b) => b.id === hit.botId) : undefined;
         const before = hit.snippet.slice(0, hit.matchStart);
         const match = hit.snippet.slice(hit.matchStart, hit.matchStart + hit.matchLength);

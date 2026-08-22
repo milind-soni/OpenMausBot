@@ -72,6 +72,7 @@ import { ProviderRegistry } from "./harness/registry.ts";
 import { cancelPeerApprovalsFor, cancelPeerApprovalsForThread, dismissStalePeerCards, requestPeerApproval, resolvePeerComms, type ApprovalBus } from "./peer-approval.ts";
 import {
   mentionedBots,
+  MAX_TEAM_NAME,
   roomResponders,
   Store,
   type GroupDefaultResponder,
@@ -267,7 +268,12 @@ const wireTask = ({ resumeCursors, lastInstanceId, ...task }: TaskRecord) => tas
 
 const wireBot = (bot: NonNullable<ReturnType<typeof store.bot>>) => {
   const { resumeCursors, tasks, ...rest } = bot;
-  return { ...rest, avatarUrl: rest.avatarUrl ?? null, ...(tasks ? { tasks: tasks.map(wireTask) } : {}) };
+  return {
+    ...rest,
+    teamId: rest.teamId ?? null,
+    avatarUrl: rest.avatarUrl ?? null,
+    ...(tasks ? { tasks: tasks.map(wireTask) } : {}),
+  };
 };
 
 /** Profile URLs are app-owned references, not merely strings with a trusted
@@ -311,11 +317,14 @@ store.onChange((change) => {
       break;
     case "group": {
       const group = store.group(change.groupId);
-      if (group) broadcast({ kind: "group", group });
+      if (group) broadcast({ kind: "group", group: { ...group, teamId: group.teamId ?? null } });
       break;
     }
     case "group.deleted":
       broadcast({ kind: "group.deleted", groupId: change.groupId });
+      break;
+    case "teams":
+      broadcast({ kind: "teams", teams: change.teams, activeTeamId: change.activeTeamId });
       break;
   }
 });
@@ -2741,7 +2750,9 @@ const server = createServer(async (req, res) => {
       if (limit === null) return json(res, 400, { error: "messages must be a non-negative whole number" });
       return json(res, 200, {
         bots: store.bots.map((bot) => ({ ...publicBot(bot), ...messagePage(bot.threadId, limit) })),
-        groups: store.groups.map((g) => ({ ...g, ...messagePage(g.threadId, limit) })),
+        groups: store.groups.map((g) => ({ ...g, teamId: g.teamId ?? null, ...messagePage(g.threadId, limit) })),
+        teams: store.teams,
+        activeTeamId: store.activeTeamId,
         computerControl: Object.fromEntries(
           store.bots.map((bot) => {
             const snapshot = computerControl.snapshot(bot.id);
@@ -2871,7 +2882,10 @@ const server = createServer(async (req, res) => {
         if (!ids) activePaths.set(threadId, (ids = new Set(store.activePath(threadId).map((m) => m.id))));
         return ids.has(messageId);
       };
-      const hits = searchMessages(q, limit)
+      const teamId = url.searchParams.get("teamId");
+      if (teamId && !store.team(teamId)) return json(res, 404, { error: "no such team" });
+      const pool = teamId ? Math.min(Math.max(limit * 10, 200), 1000) : limit;
+      const hits = searchMessages(q, pool)
         .map((hit) => {
           const bot = store.botByThread(hit.threadId);
           const group = bot ? undefined : store.groupByThread(hit.threadId);
@@ -2884,7 +2898,25 @@ const server = createServer(async (req, res) => {
           if (group) return { ...hit, groupId: group.id, name: group.name, onActivePath: active };
           return null;
         })
-        .filter((hit): hit is NonNullable<typeof hit> => hit !== null);
+        .filter((hit): hit is NonNullable<typeof hit> => hit !== null)
+        .filter((hit) => {
+          if (!teamId) return true;
+          if ("botId" in hit) {
+            const owner = store.bot(hit.botId);
+            return Boolean(owner && !owner.hidden && owner.teamId === teamId);
+          }
+          if ("groupId" in hit) {
+            const room = store.group(hit.groupId);
+            if (!room) return false;
+            if (room.teamId) return room.teamId === teamId;
+            const members = room.memberIds
+              .map((id) => store.bot(id))
+              .filter((member): member is NonNullable<typeof member> => member != null && !member.hidden);
+            return members.length > 0 && members.every((member) => member.teamId === teamId);
+          }
+          return false;
+        })
+        .slice(0, limit);
       return json(res, 200, { hits });
     }
 
@@ -2941,19 +2973,71 @@ const server = createServer(async (req, res) => {
         typeof body.name === "string" && body.name.trim()
           ? body.name.trim()
           : `${store.bot(memberIds[0])!.name} & co.`;
+      const teamId = typeof body.teamId === "string" ? body.teamId : undefined;
+      if (teamId && !store.team(teamId)) return json(res, 400, { error: "no such team" });
       const group = store.createGroup(name, memberIds);
-      return json(res, 201, { group: { ...group, messages: [] } });
+      if (teamId) store.patchGroup(group.id, { teamId });
+      const saved = store.group(group.id) ?? group;
+      return json(res, 201, { group: { ...saved, messages: [] } });
+    }
+    if (method === "GET" && path === "/api/teams") {
+      return json(res, 200, { teams: store.teams, activeTeamId: store.activeTeamId });
+    }
+    if (method === "POST" && path === "/api/teams") {
+      const body = await readBody(req);
+      if (typeof body.name !== "string") return json(res, 400, { error: "name must be a string" });
+      const name = body.name.trim();
+      if (!name) return json(res, 400, { error: "A team needs a name" });
+      if (name.length > MAX_TEAM_NAME) {
+        return json(res, 400, { error: `name must be at most ${MAX_TEAM_NAME} characters` });
+      }
+      const team = store.createTeam(name);
+      if (!team) return json(res, 409, { error: "A team with that name already exists" });
+      if (body.activate !== false) store.setActiveTeam(team.id);
+      return json(res, 201, { team, teams: store.teams, activeTeamId: store.activeTeamId });
+    }
+    if (method === "POST" && path === "/api/teams/active") {
+      const body = await readBody(req);
+      const id = body.id === null || body.id === "" ? null : body.id;
+      if (id !== null && typeof id !== "string") return json(res, 400, { error: "id must be a team id or null" });
+      if (!store.setActiveTeam(id)) return json(res, 404, { error: "no such team" });
+      return json(res, 200, { teams: store.teams, activeTeamId: store.activeTeamId });
+    }
+    m = path.match(/^\/api\/teams\/([\w-]+)$/);
+    if (m && method === "PATCH") {
+      const body = await readBody(req);
+      if (!store.team(m[1])) return json(res, 404, { error: "no such team" });
+      if (typeof body.name !== "string") return json(res, 400, { error: "name must be a string" });
+      const name = body.name.trim();
+      if (!name) return json(res, 400, { error: "A team needs a name" });
+      if (name.length > MAX_TEAM_NAME) {
+        return json(res, 400, { error: `name must be at most ${MAX_TEAM_NAME} characters` });
+      }
+      const team = store.renameTeam(m[1], name);
+      if (!team) return json(res, 409, { error: "A team with that name already exists" });
+      return json(res, 200, { team, teams: store.teams, activeTeamId: store.activeTeamId });
+    }
+    if (m && method === "DELETE") {
+      if (!store.deleteTeam(m[1])) return json(res, 404, { error: "no such team" });
+      return json(res, 200, { ok: true, teams: store.teams, activeTeamId: store.activeTeamId });
     }
     if (method === "POST" && path === "/api/teams/export") {
       const body = await readBody(req);
       const profileName = cfg.profile?.name?.trim();
-      const name =
+      let memberIds = store.bots.filter((bot) => !bot.hidden).map((bot) => bot.id);
+      let name =
         typeof body.name === "string" && body.name.trim()
           ? body.name.trim()
           : profileName
             ? `${profileName}'s Team`
             : "My OpenMaus Team";
-      const memberIds = store.bots.filter((bot) => !bot.hidden).map((bot) => bot.id);
+      if (typeof body.teamId === "string") {
+        const team = store.team(body.teamId);
+        if (!team) return json(res, 404, { error: "no such team" });
+        memberIds = store.bots.filter((bot) => !bot.hidden && bot.teamId === team.id).map((bot) => bot.id);
+        if (typeof body.name !== "string" || !body.name.trim()) name = team.name;
+        if (memberIds.length === 0) return json(res, 400, { error: `${team.name} has no bots to export` });
+      }
       if (memberIds.length === 0) return json(res, 400, { error: "Create a bot before exporting your team" });
       try {
         return json(
@@ -3037,15 +3121,30 @@ const server = createServer(async (req, res) => {
         return json(res, 400, { error: error instanceof Error ? error.message : "Invalid team file" });
       }
 
+      // The client may still have a team switch in flight. Scope add/replace
+      // to the team it asked for, not whatever /api/teams/active last wrote.
+      const requestedScope = url.searchParams.has("teamId") ? url.searchParams.get("teamId") : undefined;
+      let scopeTeamId: string | null;
+      if (requestedScope === undefined) scopeTeamId = store.activeTeamId;
+      else if (!requestedScope) scopeTeamId = null;
+      else if (!store.team(requestedScope)) return json(res, 400, { error: "no such team" });
+      else scopeTeamId = requestedScope;
+
       // Snapshot before creating anything so replace never archives the new
       // team. Old bots are hidden only after every new bot was created; a
       // failed import therefore leaves the current workspace untouched.
+      // A named team replaces that roster only; All bots still replaces
+      // every visible bot.
+      const previousActiveTeamId = store.activeTeamId;
       const archived = importMode === "replace"
         ? store.bots
-            .filter((bot) => !bot.hidden)
+            .filter(
+              (bot) => !bot.hidden && (scopeTeamId === null || bot.teamId === scopeTeamId),
+            )
             .map((bot) => ({ id: bot.id, chiefOfStaff: Boolean(bot.chiefOfStaff) }))
         : [];
       const importedBots: ReturnType<typeof store.createBot>[] = [];
+      let createdTeamId: string | null = null;
       // Names already in use, hidden bots included: an archived bot can be
       // un-archived later, and a revived duplicate would be just as
       // ambiguous then. In replace mode this means re-importing your own
@@ -3075,7 +3174,17 @@ const server = createServer(async (req, res) => {
           const bot = store.patchBot(id, { hidden: true, chiefOfStaff: false });
           return bot ? [publicBot(bot)] : [];
         });
-        const publicBots = importedBots.map(publicBot);
+        // Add into the team you're looking at; replace (or All bots) stands
+        // up a team named after the file and switches to it.
+        const existingTeam =
+          importMode === "add" && scopeTeamId ? store.team(scopeTeamId) : undefined;
+        const hostTeam = existingTeam ?? store.createTeamNamed(manifest.team.name);
+        if (!existingTeam) createdTeamId = hostTeam.id;
+        if (hostTeam.id !== store.activeTeamId) store.setActiveTeam(hostTeam.id);
+        for (const created of importedBots) {
+          store.patchBot(created.id, { teamId: hostTeam.id, section: hostTeam.name });
+        }
+        const publicBots = importedBots.map((bot) => publicBot(store.bot(bot.id) ?? bot));
         for (const bot of archivedBots) broadcast({ kind: "bot", bot });
         for (const bot of publicBots) broadcast({ kind: "bot", bot });
 
@@ -3091,14 +3200,27 @@ const server = createServer(async (req, res) => {
             // before anyone has worked, which is the store's call, not ours.
             group = store.patchGroup(group.id, { cwd: projectCwd }) ?? group;
           }
-          broadcast({ kind: "group", group });
+          group = store.patchGroup(group.id, { teamId: hostTeam.id }) ?? group;
+          broadcast({ kind: "group", group: { ...group, teamId: group.teamId ?? null } });
         }
-        return json(res, 201, { bots: publicBots, archivedBots, archived, group });
+        return json(res, 201, {
+          bots: publicBots,
+          archivedBots,
+          archived,
+          group,
+          team: hostTeam,
+          teams: store.teams,
+          activeTeamId: store.activeTeamId,
+        });
       } catch (error) {
         // A room of deleted members must not survive either — patchGroup can
-        // throw (disk) after createGroup already saved.
+        // throw (disk) after createGroup already saved. Restore archived
+        // bots first so a failed replace does not leave the previous team hidden.
+        store.restoreArchivedBots(archived);
         if (group) store.deleteGroup(group.id);
         for (const bot of importedBots) store.deleteBot(bot.id);
+        if (createdTeamId) store.deleteTeam(createdTeamId);
+        store.setActiveTeam(store.team(previousActiveTeamId ?? "") ? previousActiveTeamId : null);
         throw error;
       }
     }
@@ -3151,6 +3273,12 @@ const server = createServer(async (req, res) => {
         else if (typeof body.pinnedMessageId === "string" && /^[\w-]+$/.test(body.pinnedMessageId)) {
           patch.pinnedMessageId = body.pinnedMessageId;
         } else return json(res, 400, { error: "pinnedMessageId must be a message id" });
+      }
+      if (body.teamId !== undefined) {
+        if (body.teamId === null || body.teamId === "") patch.teamId = undefined;
+        else if (typeof body.teamId !== "string") return json(res, 400, { error: "teamId must be a string" });
+        else if (!store.team(body.teamId)) return json(res, 400, { error: "no such team" });
+        else patch.teamId = body.teamId;
       }
       const group = store.patchGroup(m[1], patch);
       if (!group) return json(res, 404, { error: "no such room" });
@@ -3206,7 +3334,10 @@ const server = createServer(async (req, res) => {
       return json(res, 200, { message: patched });
     }
     if (method === "POST" && path === "/api/bots") {
-      const bot = store.createBot();
+      const body = await readBody(req);
+      const teamId = typeof body.teamId === "string" ? body.teamId : undefined;
+      if (teamId && !store.team(teamId)) return json(res, 400, { error: "no such team" });
+      const bot = store.createBot(teamId ? { teamId } : {});
       store.patchBot(bot.id, { modelSelection: await defaultSelection() });
       return json(res, 201, {
         bot: {
@@ -3344,7 +3475,9 @@ const server = createServer(async (req, res) => {
         else {
           const trimmed = body.section.trim();
           if (!trimmed) section = null;
-          else if (trimmed.length > 60) return json(res, 400, { error: "section must be at most 60 characters" });
+          else if (trimmed.length > MAX_TEAM_NAME) {
+            return json(res, 400, { error: `section must be at most ${MAX_TEAM_NAME} characters` });
+          }
           else section = trimmed;
         }
       }
@@ -3361,6 +3494,26 @@ const server = createServer(async (req, res) => {
         } else return json(res, 400, { error: "pinnedMessageId must be a message id" });
       }
       if (section !== undefined) patch.section = section ?? undefined;
+      if (body.teamId !== undefined) {
+        if (body.teamId === null || body.teamId === "") {
+          patch.teamId = undefined;
+          patch.section = undefined;
+        } else if (typeof body.teamId !== "string") {
+          return json(res, 400, { error: "teamId must be a string" });
+        } else {
+          const team = store.team(body.teamId);
+          if (!team) return json(res, 400, { error: "no such team" });
+          patch.teamId = team.id;
+          patch.section = team.name;
+        }
+      } else if (section !== undefined) {
+        if (section === null) patch.teamId = undefined;
+        else {
+          const team = store.findOrCreateTeam(section);
+          if (!team) return json(res, 400, { error: `section must be at most ${MAX_TEAM_NAME} characters` });
+          patch.teamId = team.id;
+        }
+      }
       // per-bot gate on the workspace's connected apps (Composio)
       if (body.composio !== undefined) {
         if (typeof body.composio !== "boolean") return json(res, 400, { error: "composio must be true or false" });
