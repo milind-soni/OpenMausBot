@@ -1,15 +1,35 @@
 // Custom picker: search the live inject list, and pin models the host
 // already has in memory so the user can pick them without scrolling.
 
-export function filterCustomModels<T extends { id: string; label: string }>(
+interface SearchableModel {
+  id: string;
+  label: string;
+  canonicalId?: string;
+  provider?: string;
+  host?: string;
+  reason?: string;
+  costClass?: string;
+  capabilities?: string[];
+}
+
+export function filterCustomModels<T extends SearchableModel>(
   options: readonly T[],
   query: string,
 ): T[] {
   const needle = query.trim().toLowerCase();
   if (!needle) return [...options];
-  return options.filter(
-    (option) => option.label.toLowerCase().includes(needle) || option.id.toLowerCase().includes(needle),
-  );
+  return options.filter((option) => {
+    return [
+      option.label,
+      option.id,
+      option.canonicalId,
+      option.provider,
+      option.host,
+      option.reason,
+      option.costClass,
+      ...(option.capabilities ?? []),
+    ].filter(Boolean).join(" ").toLowerCase().includes(needle);
+  });
 }
 
 export function partitionCustomModels<T extends { id: string; loaded?: boolean }>(

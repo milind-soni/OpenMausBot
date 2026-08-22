@@ -60,7 +60,7 @@ import { ComputerControl } from "./computer-control.ts";
 import { augmentedPath, findCliCandidates, resetPathCache } from "./env-path.ts";
 import { describeSpawnFailure, execCli } from "./procs.ts";
 import { buildNotification, type Notification } from "./notify.ts";
-import { isEffortLevel, type RequestOutcome, type RuntimeEvent } from "./contracts.ts";
+import { EFFORT_LEVELS, isEffortLevel, type ModelSelection, type RequestOutcome, type RuntimeEvent } from "./contracts.ts";
 
 import { BUILT_IN_DRIVERS } from "./drivers/builtIn.ts";
 import { getOrCreateChannel, mirrorActivity, mirrorExchange, mirrorReply, type CommsBus } from "./comms-visibility.ts";
@@ -107,9 +107,19 @@ import { WebhookManager } from "./webhooks.ts";
 import { SPAWNED_PROXIES } from "./proxy-paths.ts";
 import { loadBundledSkills, renderSkillInstructions, selectBundledSkills } from "./skill-library.ts";
 import { shouldMountLocalComputer } from "./local-routing.ts";
+import {
+  FleetModelCatalogRegistry,
+  projectFleetModels,
+} from "./fleet-model-catalog.ts";
 
 const PORT = Number(process.env.OMB_PORT || process.env.OGB_PORT || 8799);
 const WEBHOOK_PORT = Number(process.env.OMB_WEBHOOK_PORT || PORT + 1);
+const modelSwitchBodySchema = z.object({
+  instanceId: z.string().min(1),
+  model: z.string().min(1),
+  canonicalId: z.string().min(1).optional(),
+  effort: z.enum(EFFORT_LEVELS).optional(),
+}).strict();
 const STATIC_DIR = process.env.OMB_STATIC_DIR || null;
 const MIME: Record<string, string> = {
   ".html": "text/html",
@@ -126,6 +136,15 @@ ensureDirs();
 const cfg = loadConfig();
 const registry = new ProviderRegistry(BUILT_IN_DRIVERS);
 await registry.load(instanceConfigs(cfg));
+const fleetModelCatalog = new FleetModelCatalogRegistry();
+let cachedInstanceDescriptions: Awaited<ReturnType<typeof registry.describe>> | null = null;
+
+async function instanceDescriptions(refresh = false) {
+  if (refresh || !cachedInstanceDescriptions) {
+    cachedInstanceDescriptions = await registry.describe({ refreshModels: refresh });
+  }
+  return cachedInstanceDescriptions;
+}
 const bundledSkills = loadBundledSkills();
 
 const bus = new EventBus();
@@ -239,17 +258,28 @@ function askBotAndWait(targetBotId: string, message: string, depth: number, from
   });
 }
 
-// default selection for new bots: first available instance, claude preferred
+// Default selection for new bots: the validated fleet-wide shared default
+// wins when its owning instance is available. Existing tasks retain their
+// saved selection; this function is only used for new bots/tasks and reset.
 async function defaultSelection() {
-  const described = await registry.describe();
+  const described = projectFleetModels(
+    await instanceDescriptions(false),
+    fleetModelCatalog.snapshot(),
+  );
   const available = described.filter((d) => d.snapshot.state === "available");
+  const sharedDefault = available.find((instance) =>
+    instance.models.options.some((option) => option.isDefault && option.selectable !== false)
+  );
   // Deliberately NO fallback to described[0]. Handing a bot an engine whose
   // CLI isn't installed makes it look ready and then fail on send with a raw
   // spawn ENOENT — the single worst first-run experience, and the one every
   // user with no CLIs used to get. An empty selection is honest: the UI shows
   // the setup path instead of a bot that cannot answer.
-  const pick = available.find((d) => d.driverKind === "claudeAgent") ?? available[0];
-  return { instanceId: pick?.instanceId ?? "", model: pick?.models.default ?? "" };
+  const pick = sharedDefault ?? available.find((d) => d.driverKind === "claudeAgent") ?? available[0];
+  const defaultModel = pick?.models.options.find(
+    (option) => option.isDefault && option.selectable !== false,
+  )?.id ?? pick?.models.default ?? "";
+  return { instanceId: pick?.instanceId ?? "", model: defaultModel };
 }
 let bootSelection = { instanceId: "", model: "" };
 const store = new Store(() => bootSelection);
@@ -2255,6 +2285,7 @@ async function reloadProviders() {
   bus.detachAll();
   await registry.disposeAll();
   await registry.load(instanceConfigs(cfg));
+  cachedInstanceDescriptions = null;
   bus.attach(registry.instances());
   // A killed turn's terminal events can die with the old fleet (dispose is
   // async under the hood), stranding the bot busy — and its screen poller —
@@ -3712,6 +3743,74 @@ const server = createServer(async (req, res) => {
       tasks: store.tasks(bot.id).map(wireTask),
     });
 
+    // A picker model change is one server-owned transition: resolve the
+    // stable catalog id to this driver's native id, enforce cached admission,
+    // persist the selection, then move onto a provider-session-isolated task.
+    // This avoids a PATCH/POST race where the new task could start with the
+    // previous engine or model.
+    m = path.match(/^\/api\/bots\/([\w-]+)\/model$/);
+    if (m && method === "POST") {
+      const bot = store.bot(m[1]);
+      if (!bot) return json(res, 404, { error: "no such bot" });
+      if (bot.busy) {
+        return json(res, 409, { error: "this bot is working — let it finish before changing model" });
+      }
+      const parsedBody = modelSwitchBodySchema.safeParse(await readBody(req));
+      if (!parsedBody.success) {
+        return json(res, 400, { error: "instanceId, model, optional canonicalId, and optional effort must be valid" });
+      }
+      const body = parsedBody.data;
+      const { instanceId, model: requestedModel, canonicalId } = body;
+
+      if (!cachedInstanceDescriptions) {
+        return json(res, 409, { error: "engine inventory is not loaded — refresh engines first" });
+      }
+      const instances = projectFleetModels(cachedInstanceDescriptions, fleetModelCatalog.snapshot());
+      const target = instances.find((instance) => instance.instanceId === instanceId);
+      if (!target || target.snapshot.state !== "available" || !registry.get(instanceId)) {
+        return json(res, 409, {
+          error: target?.snapshot.reason ?? `provider instance "${instanceId}" is unavailable`,
+        });
+      }
+      const option = target.models.options.find((candidate) =>
+        canonicalId ? candidate.canonicalId === canonicalId : candidate.id === requestedModel
+      );
+      if (!option) {
+        return json(res, 400, { error: "that model is not in the cached catalog for this engine" });
+      }
+      if (option.selectable === false) {
+        return json(res, 409, { error: option.reason ?? "that model is not currently selectable" });
+      }
+      if (body.effort !== undefined) {
+        const allowed: readonly string[] = target.capabilities.effortLevels ?? [];
+        if (!allowed.includes(body.effort)) {
+          return json(res, 400, { error: `effort "${body.effort}" is not offered by this bot's engine` });
+        }
+      }
+      const selection: ModelSelection = {
+        instanceId,
+        model: option.id,
+      };
+      if (body.effort !== undefined) selection.effort = body.effort;
+      if (
+        bot.modelSelection.instanceId === selection.instanceId &&
+        bot.modelSelection.model === selection.model &&
+        bot.modelSelection.effort === selection.effort
+      ) {
+        return json(res, 200, { bot: botWithThread(bot), task: null, changed: false });
+      }
+      let transition: ReturnType<typeof store.switchModelAndCreateTask>;
+      try {
+        transition = store.switchModelAndCreateTask(bot.id, selection);
+      } catch {
+        return json(res, 500, { error: "couldn't create a fresh task for that model" });
+      }
+      if (!transition) return json(res, 404, { error: "no such bot" });
+      const fresh = botWithThread(transition.bot);
+      broadcast({ kind: "bot", bot: fresh });
+      return json(res, 201, { bot: fresh, task: wireTask(transition.task), changed: true });
+    }
+
     m = path.match(/^\/api\/bots\/([\w-]+)\/tasks$/);
     if (m && method === "POST") {
       const bot = store.bot(m[1]);
@@ -3912,12 +4011,35 @@ const server = createServer(async (req, res) => {
 
     // ── provider instances (model picker) ──
     if (method === "GET" && path === "/api/instances") {
-      // Rescan PATH first: this endpoint is how the app answers "what can I
-      // run?", and the interesting case is a CLI installed since launch.
-      // Windows never pushes PATH changes into a live process, so without
-      // this the answer is frozen at boot and "check again" is a no-op.
-      resetPathCache();
-      return json(res, 200, { instances: await registry.describe() });
+      // Cached by default: opening the model picker or restoring app state
+      // must not fan out to every CLI/provider. Setup screens opt into a live
+      // provider refresh with ?refresh=1; the fleet-catalog picker has its own
+      // file-only POST below.
+      const refreshModels = url.searchParams.get("refresh") === "1";
+      if (refreshModels) resetPathCache();
+      const instances = projectFleetModels(
+        await instanceDescriptions(refreshModels),
+        fleetModelCatalog.snapshot(),
+      );
+      return json(res, 200, { instances });
+    }
+
+    if (method === "GET" && path === "/api/model-catalog") {
+      return json(res, 200, { catalog: fleetModelCatalog.snapshot() });
+    }
+
+    if (method === "POST" && path === "/api/model-catalog/refresh") {
+      // Reload only the guarded projection. Admission/discovery is owned by
+      // its producer; this action does not probe a provider or model host.
+      const catalog = fleetModelCatalog.refresh();
+      if (!cachedInstanceDescriptions) {
+        return json(res, 409, {
+          error: "engine inventory is not loaded — load instances before refreshing the model catalog",
+          catalog,
+        });
+      }
+      const instances = projectFleetModels(cachedInstanceDescriptions, catalog);
+      return json(res, 200, { catalog, instances });
     }
 
     // ── CLI binary discovery for the Engines "detected" dropdown ──
@@ -3980,7 +4102,9 @@ const server = createServer(async (req, res) => {
         // from the memoized PATH, so resetting after would answer this request
         // with the pre-reset cache
         resetPathCache();
-        return json(res, 200, { instances: await registry.describe() });
+        return json(res, 200, {
+          instances: projectFleetModels(await instanceDescriptions(true), fleetModelCatalog.snapshot()),
+        });
       } finally {
         providerConfigBusy = false;
       }

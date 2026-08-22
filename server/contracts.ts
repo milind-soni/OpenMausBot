@@ -290,18 +290,47 @@ export interface EngineInstall {
 // `create` owns ALL per-instance state; two create calls share nothing.
 // Failures must reject, never throw synchronously — the registry downgrades
 // a rejection to an unavailable shadow snapshot.
+export type ModelCostClass = "free" | "paid" | "paid_subscription" | "paid_metered" | "local" | "unknown";
+
+export interface ModelRuntimeStatus {
+  configured: boolean;
+  reachable: boolean;
+  verified: boolean;
+  admitted: boolean;
+  busy: boolean;
+}
+
+export interface ModelOption {
+  /** The model id understood by this concrete OpenMausBot driver. */
+  id: string;
+  label: string;
+  custom?: boolean;
+  loaded?: boolean;
+  /** Fleet-wide stable id. Present only for rows projected by the guarded
+   * secret-free AOS model catalog. */
+  canonicalId?: string;
+  provider?: string;
+  host?: string;
+  costClass?: ModelCostClass;
+  manualOnly?: boolean;
+  isDefault?: boolean;
+  capabilities?: string[];
+  status?: ModelRuntimeStatus;
+  /** False means the row stays visible for inventory/truth, but cannot be
+   * selected until a fresh catalog refresh marks it admitted and idle. */
+  selectable?: boolean;
+  reason?: string;
+  lastVerified?: string;
+  verificationReceipt?: string;
+  /** total context window in tokens, when the driver knows it — sizes
+   * the model-facing rebuild (server/context-rebuild.ts). Unknown falls
+   * back to a pattern table over the model id, then a conservative default. */
+  contextWindow?: number;
+}
+
 export interface ModelCatalog {
   default: string;
-  options: Array<{
-    id: string;
-    label: string;
-    custom?: boolean;
-    loaded?: boolean;
-    /** total context window in tokens, when the driver knows it — sizes
-     * the model-facing rebuild (server/context-rebuild.ts). Unknown falls
-     * back to a pattern table over the model id, then a conservative default. */
-    contextWindow?: number;
-  }>;
+  options: ModelOption[];
 }
 
 export interface DriverCreateInput<Config> {

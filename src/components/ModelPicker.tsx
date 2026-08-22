@@ -2,7 +2,7 @@
 // show a short suggested list with search and an explicit all-models view;
 // engines that need setup show one focused action instead of a disabled wall.
 import { useEffect, useRef, useState } from "react";
-import { Check, ChevronDown, ChevronLeft, ChevronRight, Search } from "lucide-react";
+import { Check, ChevronDown, ChevronLeft, ChevronRight, RefreshCw, Search } from "lucide-react";
 import { useStore, type Bot, type InstanceInfo, type ModelSelection } from "@/state/store";
 import { filterCustomModels, partitionCustomModels, suggestedModels } from "@/lib/custom-models";
 import { isCustomOnly, splitEngineRail } from "@/lib/engine-rail";
@@ -11,6 +11,7 @@ import { EngineSetup, needsCli, needsSignIn } from "./EngineSetup";
 import { EngineGroupLabel } from "./EngineGroupLabel";
 import { cn } from "@/lib/cn";
 import { COMPACT_SQUARE } from "@/lib/compact-chip";
+import { modelMetadata, modelReadinessLabel, modelSelectable } from "@/lib/model-catalog";
 
 type ModelOption = InstanceInfo["models"]["options"][number];
 const COMPACT_MODEL_COUNT = 5;
@@ -29,32 +30,48 @@ function ModelRow({
   option,
   current,
   defaultId,
+  blockedReason,
   onPick,
 }: {
   option: ModelOption;
   current: boolean;
   defaultId: string;
+  blockedReason?: string;
   onPick: () => void;
 }) {
+  const selectable = modelSelectable(option) && !blockedReason;
+  const unavailableReason = blockedReason ?? option.reason;
+  const metadata = modelMetadata(option);
   return (
     <button
       type="button"
+      disabled={!selectable}
+      aria-disabled={!selectable}
+      title={!selectable ? unavailableReason ?? modelReadinessLabel(option) : undefined}
       onClick={onPick}
       className={cn(
-        "flex w-full items-center justify-between gap-2 rounded-lg px-2.5 py-2 text-left text-[13px] text-ink hover:bg-control/60",
+        "flex w-full items-start justify-between gap-2 rounded-lg px-2.5 py-2 text-left text-[13px] text-ink hover:bg-control/60 disabled:cursor-not-allowed disabled:opacity-55 disabled:hover:bg-transparent",
         current && "bg-control",
       )}
     >
-      <span className="flex min-w-0 items-center gap-2">
-        <span className="truncate">{option.label}</span>
-        {option.id === defaultId && (
-          <span className="shrink-0 rounded bg-inset px-1.5 py-px text-[10px] text-ink-secondary">Default</span>
+      <span className="min-w-0">
+        <span className="flex min-w-0 items-center gap-2">
+          <span className="truncate">{option.label}</span>
+          {(option.isDefault || option.id === defaultId) && (
+            <span className="shrink-0 rounded bg-inset px-1.5 py-px text-[10px] text-ink-secondary">Default</span>
+          )}
+          {option.loaded && (
+            <span className="shrink-0 rounded bg-accent/10 px-1.5 py-px text-[10px] text-accent">Loaded</span>
+          )}
+        </span>
+        {metadata.length > 0 && (
+          <span className="mt-0.5 block truncate text-[10.5px] text-ink-secondary">{metadata.join(" · ")}</span>
         )}
-        {option.loaded && (
-          <span className="shrink-0 rounded bg-accent/10 px-1.5 py-px text-[10px] text-accent">Loaded</span>
+        {!selectable && unavailableReason && (
+          <span className="mt-0.5 block truncate text-[10.5px] text-warning">{unavailableReason}</span>
         )}
       </span>
-      {current && <Check size={14} className="shrink-0 text-accent" />}
+      {current && <Check size={14} className="mt-0.5 shrink-0 text-accent" />}
     </button>
   );
 }
@@ -92,22 +109,19 @@ function ModelSearch({
 }
 
 export function ModelPicker({ bot, className }: { bot: Bot; className?: string }) {
-  const { state, dispatch, refreshInstances } = useStore();
+  const { state, dispatch, refreshModelCatalog } = useStore();
   const [open, setOpen] = useState(false);
   const [railId, setRailId] = useState<string | null>(null);
   const [pane, setPane] = useState<"main" | "custom">("main");
   const [query, setQuery] = useState("");
   const [showAll, setShowAll] = useState(false);
+  const [refreshing, setRefreshing] = useState(false);
   const rootRef = useRef<HTMLDivElement>(null);
 
   const selection = bot.modelSelection;
   const active = state.instances.find((instance) => instance.instanceId === selection.instanceId);
   const railInstance =
     state.instances.find((instance) => instance.instanceId === (railId ?? selection.instanceId)) ?? state.instances[0];
-
-  useEffect(() => {
-    if (open) void refreshInstances();
-  }, [open, refreshInstances]);
 
   useEffect(() => {
     if (!open) return;
@@ -151,7 +165,13 @@ export function ModelPicker({ bot, className }: { bot: Bot; className?: string }
   };
 
   const pick = (instance: InstanceInfo, model: string) => {
+    const option = instance.models.options.find((candidate) => candidate.id === model);
+    if (bot.busy || (option && !modelSelectable(option))) return;
     const sameInstance = instance.instanceId === selection.instanceId;
+    if (sameInstance && selection.model === model) {
+      setOpen(false);
+      return;
+    }
     const nextSelection: ModelSelection = {
       instanceId: instance.instanceId,
       model,
@@ -161,12 +181,15 @@ export function ModelPicker({ bot, className }: { bot: Bot; className?: string }
       type: "setModel",
       botId: bot.id,
       selection: nextSelection,
+      canonicalId: option?.canonicalId,
+      freshTask: true,
     });
     setOpen(false);
   };
 
   const official = railInstance?.models.options.filter((option) => !option.custom) ?? [];
   const custom = railInstance?.models.options.filter((option) => option.custom) ?? [];
+  const availableCustom = custom.filter(modelSelectable).length;
   const currentModel = selection.instanceId === railInstance?.instanceId ? selection.model : undefined;
   const filteredOfficial = filterCustomModels(official, query);
   const compactOfficial = railInstance
@@ -177,11 +200,14 @@ export function ModelPicker({ bot, className }: { bot: Bot; className?: string }
   const { pinned, rest } = partitionCustomModels(filteredCustom);
   const blocked = railInstance
     ? pane === "custom"
-      ? needsCli(railInstance)
+      ? custom.length === 0 && needsCli(railInstance)
       : needsCli(railInstance) || needsSignIn(railInstance)
     : false;
-  const canOpenCustom = Boolean(railInstance && !needsCli(railInstance));
+  const canOpenCustom = Boolean(railInstance && (custom.length > 0 || !needsCli(railInstance)));
   const canReturnToOfficial = official.length > 0 && !isCustomOnly(railInstance);
+  const engineUnavailableReason = railInstance?.snapshot.state === "available"
+    ? undefined
+    : railInstance?.snapshot.reason ?? "This engine is unavailable.";
 
   const renderRow = (option: ModelOption) => (
     <ModelRow
@@ -189,7 +215,8 @@ export function ModelPicker({ bot, className }: { bot: Bot; className?: string }
       option={option}
       current={selection.instanceId === railInstance?.instanceId && selection.model === option.id}
       defaultId={railInstance?.models.default ?? ""}
-      onPick={() => railInstance && pick(railInstance, option.id)}
+      blockedReason={bot.busy ? "Let this task finish before changing model." : engineUnavailableReason}
+      onPick={() => railInstance && modelSelectable(option) && pick(railInstance, option.id)}
     />
   );
 
@@ -280,18 +307,33 @@ export function ModelPicker({ bot, className }: { bot: Bot; className?: string }
                 <div className="shrink-0 px-4 pb-2 pt-3.5">
                   <div className="flex items-center justify-between gap-3">
                     <div className="truncate text-[14px] font-semibold text-ink">{railInstance.displayName}</div>
-                    <span
-                      className={cn(
-                        "shrink-0 rounded-full px-2 py-0.5 text-[10.5px] font-medium",
-                        blocked ? "bg-warning/10 text-warning" : "bg-success/10 text-success",
-                      )}
-                    >
-                      {pane === "custom" && !blocked ? "Local models" : engineStatus(railInstance)}
+                    <span className="flex shrink-0 items-center gap-1.5">
+                      <button
+                        type="button"
+                        aria-label="Refresh fleet model catalog"
+                        title="Reload the cached fleet catalog"
+                        disabled={refreshing}
+                        onClick={() => {
+                          setRefreshing(true);
+                          void refreshModelCatalog().finally(() => setRefreshing(false));
+                        }}
+                        className="rounded-full p-1 text-ink-secondary hover:bg-raised hover:text-ink disabled:opacity-50"
+                      >
+                        <RefreshCw size={12} className={cn(refreshing && "animate-spin")} />
+                      </button>
+                      <span
+                        className={cn(
+                          "rounded-full px-2 py-0.5 text-[10.5px] font-medium",
+                          engineUnavailableReason ? "bg-warning/10 text-warning" : "bg-success/10 text-success",
+                        )}
+                      >
+                        {pane === "custom" && !engineUnavailableReason ? "Fleet catalog" : engineStatus(railInstance)}
+                      </span>
                     </span>
                   </div>
                   <div className="mt-0.5 text-[11.5px] text-ink-secondary">
                     {pane === "custom"
-                      ? "Run this agent with a model already on your machine."
+                      ? "Choose an admitted hosted or local fleet model."
                       : "Choose a model for this bot."}
                   </div>
                 </div>
@@ -379,9 +421,9 @@ export function ModelPicker({ bot, className }: { bot: Bot; className?: string }
                           {rest.map(renderRow)}
                           {custom.length === 0 && (
                             <div className="mx-1 rounded-xl border border-dashed border-hairline/50 px-3 py-5 text-center">
-                              <div className="text-[12.5px] font-medium text-ink">No local models found</div>
+                              <div className="text-[12.5px] font-medium text-ink">No fleet models found</div>
                               <div className="mt-1 text-[11.5px] leading-relaxed text-ink-secondary">
-                                Start oMLX, Ollama, Unsloth, LM Studio, or EXO, then reopen this picker.
+                                Update the canonical catalog, then use Refresh above.
                               </div>
                             </div>
                           )}
@@ -400,7 +442,7 @@ export function ModelPicker({ bot, className }: { bot: Bot; className?: string }
                   <button
                     type="button"
                     aria-label={
-                      custom.length > 0 ? `Use a local model (${custom.length} available)` : "Use a local model"
+                      custom.length > 0 ? `Fleet and local models (${availableCustom} ready)` : "Fleet and local models"
                     }
                     disabled={!canOpenCustom}
                     onClick={() => {
@@ -409,11 +451,11 @@ export function ModelPicker({ bot, className }: { bot: Bot; className?: string }
                     }}
                     className="flex w-full shrink-0 items-center justify-between gap-2 border-t border-hairline/40 px-4 py-3 text-left text-[12.5px] font-medium text-ink hover:bg-control/60 disabled:cursor-not-allowed disabled:text-ink-secondary/40 disabled:hover:bg-transparent"
                   >
-                    <span>Use a local model</span>
+                    <span>Fleet &amp; local models</span>
                     <span className="flex items-center gap-2">
                       {custom.length > 0 && (
                         <span className="rounded-full bg-inset px-2 py-0.5 text-[10.5px] text-ink-secondary">
-                          {custom.length} available
+                          {availableCustom} ready
                         </span>
                       )}
                       <ChevronRight size={14} className="text-ink-secondary" />

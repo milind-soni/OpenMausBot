@@ -58,21 +58,27 @@ export class ProviderRegistry {
   }
 
   async load(configs: InstanceConfigMap) {
-    for (const [instanceId, entry] of Object.entries(configs)) {
+    const loaded = await Promise.all(Object.entries(configs).map(async ([instanceId, entry]): Promise<{
+      instanceId: InstanceId;
+      registryEntry: RegistryEntry;
+      rawCli?: string;
+    }> => {
       const driver = this.driversByKind.get(entry.driver);
       if (!driver) {
-        this.byId.set(instanceId, {
+        return {
           instanceId,
-          shadow: {
+          registryEntry: {
             instanceId,
-            driverKind: entry.driver,
-            displayName: entry.displayName,
-            cli: cliOfRaw(entry.config),
-            shadow: true,
-            reason: `unknown driver "${entry.driver}" — kept as configured, unavailable here`,
+            shadow: {
+              instanceId,
+              driverKind: entry.driver,
+              displayName: entry.displayName,
+              cli: cliOfRaw(entry.config),
+              shadow: true,
+              reason: `unknown driver "${entry.driver}" — kept as configured, unavailable here`,
+            },
           },
-        });
-        continue;
+        };
       }
       try {
         const config = entry.config === undefined ? driver.defaultConfig() : driver.decodeConfig(entry.config);
@@ -80,7 +86,6 @@ export class ProviderRegistry {
         // decodeConfig fills in the driver default ("claude", "codex", …),
         // so reading `cli` there would flag every instance as overridden.
         const rawCli = cliOfRaw(entry.config);
-        if (rawCli) this.cliByInstance.set(instanceId, rawCli);
         const live = await driver.create({
           instanceId,
           displayName: entry.displayName ?? driver.metadata.displayName,
@@ -88,20 +93,29 @@ export class ProviderRegistry {
           enabled: entry.enabled ?? true,
           config,
         });
-        this.byId.set(instanceId, { instanceId, live });
+        return { instanceId, registryEntry: { instanceId, live }, rawCli };
       } catch (e) {
-        this.byId.set(instanceId, {
+        return {
           instanceId,
-          shadow: {
+          registryEntry: {
             instanceId,
-            driverKind: entry.driver,
-            displayName: entry.displayName ?? driver.metadata.displayName,
-            cli: cliOfRaw(entry.config),
-            shadow: true,
-            reason: e instanceof Error ? e.message : String(e),
+            shadow: {
+              instanceId,
+              driverKind: entry.driver,
+              displayName: entry.displayName ?? driver.metadata.displayName,
+              cli: cliOfRaw(entry.config),
+              shadow: true,
+              reason: e instanceof Error ? e.message : String(e),
+            },
           },
-        });
+        };
       }
+    }));
+    // Promise.all preserves config order while allowing slow provider probes
+    // to overlap. Commit the completed rows only after every create settles.
+    for (const row of loaded) {
+      if (row.rawCli) this.cliByInstance.set(row.instanceId, row.rawCli);
+      this.byId.set(row.instanceId, row.registryEntry);
     }
   }
 
@@ -117,8 +131,12 @@ export class ProviderRegistry {
     return [...this.byId.values()].flatMap((e) => (e.live ? [e.live] : []));
   }
 
-  /** instance snapshots for the model picker: id, driver, models, health */
-  async describe() {
+  /** Instance snapshots for the model picker: id, driver, models, health.
+   * Live model discovery is opt-out for existing callers, but the HTTP picker
+   * route passes refreshModels:false so opening cached UI never fans out to
+   * unrelated CLIs or local providers. */
+  async describe(options: { refreshModels?: boolean } = {}) {
+    const refreshModels = options.refreshModels !== false;
     // Multiple instances may share a driver. Scan each default binary once
     // per response instead of repeating filesystem work for every row.
     const candidatesByName = new Map<string, string[]>();
@@ -155,7 +173,7 @@ export class ProviderRegistry {
         const inst = entry.live;
         let snapshot: ProviderSnapshot;
         try {
-          await inst.refreshModels?.();
+          if (refreshModels) await inst.refreshModels?.();
           snapshot = await inst.snapshot();
         } catch (e) {
           snapshot = { state: "unavailable", reason: e instanceof Error ? e.message : String(e) };

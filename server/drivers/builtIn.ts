@@ -6,6 +6,7 @@ import { BoxAgentDriver } from "./boxagent.ts";
 import { ClaudeDriver } from "./claude.ts";
 import { CodexDriver } from "./codex.ts";
 import { GrokDriver } from "./grok.ts";
+import { LocalDriver } from "./local.ts";
 import { GrokAgentDriver } from "./acp/grok.ts";
 import { GeminiAgentDriver } from "./acp/gemini.ts";
 import { KimiAgentDriver } from "./acp/kimi.ts";
@@ -31,4 +32,5 @@ export const BUILT_IN_DRIVERS: readonly AnyProviderDriver[] = [
   CodexDriver,
   AntigravityDriver,
   BoxAgentDriver,
+  LocalDriver,
 ];

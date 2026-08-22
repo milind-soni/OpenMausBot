@@ -381,11 +381,23 @@ export function instanceConfigs(cfg: AppConfig): InstanceConfigMap {
     qwen: { driver: "qwenAgent" },
     hermes: { driver: "hermesAgent" },
     pi: { driver: "piAgent" },
+    localMac: { driver: "local", displayName: "Mac M5 models", config: { host: "ollama", fleetHost: "mac" } },
+    localWindows: {
+      driver: "local",
+      displayName: "Windows models",
+      config: { host: "custom", url: "http://127.0.0.1:18134/v1", fleetHost: "windows" },
+    },
   };
   const CUSTOM_ONLY = {
     qwen: { driver: "qwenAgent" },
     hermes: { driver: "hermesAgent" },
     pi: { driver: "piAgent" },
+    localMac: { driver: "local", displayName: "Mac M5 models", config: { host: "ollama", fleetHost: "mac" } },
+    localWindows: {
+      driver: "local",
+      displayName: "Windows models",
+      config: { host: "custom", url: "http://127.0.0.1:18134/v1", fleetHost: "windows" },
+    },
   } as const;
   // New default-fleet engines that existing product configs would otherwise
   // never see. Custom-only engines stay in CUSTOM_ONLY so a one-off test map

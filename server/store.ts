@@ -1003,6 +1003,44 @@ export class Store {
     return task;
   }
 
+  /** Change the engine/model and open its session-isolated task as one
+   * persisted transition. A failed atomic write restores the exact in-memory
+   * bot so callers never observe a selection without its matching task. */
+  switchModelAndCreateTask(
+    botId: string,
+    selection: ModelSelection,
+  ): { bot: BotRecord; task: TaskRecord } | null {
+    const bot = this.bot(botId);
+    if (!bot) return null;
+    const task: TaskRecord = {
+      threadId: newId(),
+      title: UNTITLED_TASK,
+      createdAt: Date.now(),
+      resumeCursors: {},
+    };
+    const previous = {
+      modelSelection: bot.modelSelection,
+      tasks: bot.tasks,
+      threadId: bot.threadId,
+      resumeCursors: bot.resumeCursors,
+    };
+    bot.modelSelection = { ...selection };
+    bot.tasks = [task, ...(bot.tasks ?? [])];
+    bot.threadId = task.threadId;
+    bot.resumeCursors = {};
+    try {
+      this.saveBots();
+    } catch (error) {
+      bot.modelSelection = previous.modelSelection;
+      bot.tasks = previous.tasks;
+      bot.threadId = previous.threadId;
+      bot.resumeCursors = previous.resumeCursors;
+      throw error;
+    }
+    this.emit({ type: "bot", botId });
+    return { bot, task };
+  }
+
   switchTask(botId: string, threadId: string): BotRecord | null {
     const bot = this.bot(botId);
     const task = bot?.tasks?.find((t) => t.threadId === threadId);

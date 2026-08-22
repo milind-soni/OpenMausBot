@@ -96,6 +96,32 @@ describe("ProviderRegistry", () => {
     expect(f.snapshot).toMatchObject({ state: "unavailable", reason: "boom at create" });
   });
 
+  it("creates provider instances concurrently while preserving config order", async () => {
+    const first = makeFakeDriver({ kind: "first" });
+    const second = makeFakeDriver({ kind: "second" });
+    let active = 0;
+    let maxActive = 0;
+    for (const fake of [first, second]) {
+      const create = fake.driver.create.bind(fake.driver);
+      fake.driver.create = async (input) => {
+        active += 1;
+        maxActive = Math.max(maxActive, active);
+        await new Promise((resolve) => setTimeout(resolve, 20));
+        try {
+          return await create(input);
+        } finally {
+          active -= 1;
+        }
+      };
+    }
+    const registry = new ProviderRegistry([first.driver, second.driver]);
+
+    await registry.load({ a: { driver: "first" }, b: { driver: "second" } });
+
+    expect(maxActive).toBe(2);
+    expect(registry.entries().map((entry) => entry.instanceId)).toEqual(["a", "b"]);
+  });
+
   it("describe() reports a snapshot() failure as unavailable rather than throwing", async () => {
     const fake = makeFakeDriver({ failSnapshot: "provider probe exploded" });
     const registry = new ProviderRegistry([fake.driver]);

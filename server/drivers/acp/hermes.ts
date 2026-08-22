@@ -13,6 +13,10 @@ import { decodeInjectId, hostApiKey, localHost, mergeLocalInject } from "../loca
 import { createAcpDriver, type AcpSupport } from "./core.ts";
 
 const EMPTY: ModelCatalog = { default: "", options: [] };
+// Canonical fleet routes use Hermes' provider:model dialect. Keep ordinary
+// provider slugs on the existing ACP default path; only a producer-owned
+// route alias (or a guarded local inject id below) is sent to set_model.
+const HERMES_FLEET_MODEL_ID = /^(?![\s\S]*[\r\n])[\w][\w./+-]*:[\w][\w./:+-]*$/;
 
 function hermesHome(env: Record<string, string | undefined>): string {
   return env.HERMES_HOME || join(env.HOME || env.USERPROFILE || homedir(), ".hermes");
@@ -75,11 +79,12 @@ export function ensureHermesInjectProvider(
   return hermesAcpModelId(modelId) ?? modelId;
 }
 
-/** ACP session/set_model id. Hermes parse_model_input treats `custom:name:model`. */
+/** ACP session/set_model id. Local inject rows become `custom:name:model`;
+ * fleet-catalog rows are already Hermes-native aliases and pass through. */
 export function hermesAcpModelId(modelId: string | null | undefined): string | null {
   const inject = decodeInjectId(modelId);
-  if (!inject) return null;
-  return `custom:${inject.host}:${inject.model}`;
+  if (inject) return `custom:${inject.host}:${inject.model}`;
+  return modelId && HERMES_FLEET_MODEL_ID.test(modelId) ? modelId : null;
 }
 
 async function resolveModels(env: Record<string, string | undefined>): Promise<ModelCatalog> {

@@ -271,6 +271,37 @@ export interface EngineInstall {
   needsNode?: boolean;
 }
 
+export type ModelCostClass = "free" | "paid" | "paid_subscription" | "paid_metered" | "local" | "unknown";
+
+export interface ModelRuntimeStatus {
+  configured: boolean;
+  reachable: boolean;
+  verified: boolean;
+  admitted: boolean;
+  busy: boolean;
+}
+
+export interface ModelOption {
+  /** Driver-native id used for the actual turn. */
+  id: string;
+  label: string;
+  custom?: boolean;
+  loaded?: boolean;
+  canonicalId?: string;
+  provider?: string;
+  host?: string;
+  costClass?: ModelCostClass;
+  manualOnly?: boolean;
+  isDefault?: boolean;
+  capabilities?: string[];
+  status?: ModelRuntimeStatus;
+  selectable?: boolean;
+  reason?: string;
+  lastVerified?: string;
+  verificationReceipt?: string;
+  contextWindow?: number;
+}
+
 /** One row of GET /api/instances — the model picker's data. */
 export interface InstanceInfo {
   instanceId: string;
@@ -284,7 +315,7 @@ export interface InstanceInfo {
     /** a reported cost on a subscription is notional; the UI says so */
     billing?: "metered" | "subscription";
   };
-  models: { default: string; options: Array<{ id: string; label: string; custom?: boolean; loaded?: boolean }> };
+  models: { default: string; options: ModelOption[] };
   capabilities?: {
     computerMcp?: boolean;
     agentsMcp?: boolean;
@@ -427,7 +458,15 @@ export type Action =
   | { type: "screenFrame"; botId: string; png: string; mime: string }
   | { type: "provisioning"; botId: string; on: boolean }
   | { type: "computerControl"; botId: string; held: boolean; helpReason: string | null }
-  | { type: "setModel"; botId: string; selection: ModelSelection }
+  | {
+      type: "setModel";
+      botId: string;
+      selection: ModelSelection;
+      /** Stable fleet id used by the server to resolve the driver-native id. */
+      canonicalId?: string;
+      /** A model/engine change starts a provider-session-isolated task. */
+      freshTask?: boolean;
+    }
   | { type: "interrupt"; botId: string }
   | { type: "connected"; value: boolean }
   | { type: "error"; message: string | null }
@@ -761,7 +800,13 @@ export function reducer(state: AppState, action: Action): AppState {
         },
       };
     case "setModel":
-      return updateBot(state, action.botId, (b) => ({ ...b, modelSelection: action.selection }));
+      // A fresh-task switch is committed only after the atomic server
+      // transition succeeds. Keeping the old selection here prevents a stale
+      // or newly-disabled catalog row from stranding the UI on a model the
+      // server rejected.
+      return action.freshTask
+        ? state
+        : updateBot(state, action.botId, (b) => ({ ...b, modelSelection: action.selection }));
     case "connected":
       return { ...state, connected: action.value };
     case "error":
@@ -984,6 +1029,8 @@ const StoreContext = createContext<{
   flushBotPatches: (botId: string) => Promise<void>;
   /** Re-fetch engine availability — after an install, without a restart. */
   refreshInstances: () => Promise<void>;
+  /** Reload the cached, secret-free fleet catalog without probing providers. */
+  refreshModelCatalog: () => Promise<void>;
 } | null>(null);
 
 export function StoreProvider({ children }: { children: ReactNode }) {
@@ -1275,10 +1322,22 @@ export function StoreProvider({ children }: { children: ReactNode }) {
           }).catch(showError);
           break;
         case "setModel":
-          api(`/api/bots/${action.botId}`, {
-            method: "PATCH",
-            body: JSON.stringify({ modelSelection: action.selection }),
-          }).catch(showError);
+          if (action.freshTask) {
+            api(`/api/bots/${action.botId}/model`, {
+              method: "POST",
+              body: JSON.stringify({
+                ...action.selection,
+                canonicalId: action.canonicalId,
+              }),
+            })
+              .then((result: any) => result?.bot && rawDispatch({ type: "taskSwitched", bot: result.bot }))
+              .catch(showError);
+          } else {
+            api(`/api/bots/${action.botId}`, {
+              method: "PATCH",
+              body: JSON.stringify({ modelSelection: action.selection }),
+            }).catch(showError);
+          }
           break;
         case "interrupt":
           api(`/api/bots/${action.botId}/interrupt`, { method: "POST" }).catch(showError);
@@ -1569,10 +1628,19 @@ export function StoreProvider({ children }: { children: ReactNode }) {
   // as "Check again" so the user isn't told to restart when a refresh will do.
   const refreshInstances = useCallback(async () => {
     try {
-      const { instances } = await api("/api/instances");
+      const { instances } = await api("/api/instances?refresh=1");
       rawDispatch({ type: "instances", instances });
     } catch {
       /* offline or server down — the existing list stays */
+    }
+  }, []);
+
+  const refreshModelCatalog = useCallback(async () => {
+    try {
+      const { instances } = await api("/api/model-catalog/refresh", { method: "POST" });
+      rawDispatch({ type: "instances", instances });
+    } catch {
+      /* keep the last rendered inventory when the server is offline */
     }
   }, []);
 
@@ -1597,8 +1665,8 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     [botPatchQueue],
   );
   const value = useMemo(
-    () => ({ state, dispatch, flushBotPatches, refreshInstances }),
-    [state, dispatch, flushBotPatches, refreshInstances],
+    () => ({ state, dispatch, flushBotPatches, refreshInstances, refreshModelCatalog }),
+    [state, dispatch, flushBotPatches, refreshInstances, refreshModelCatalog],
   );
   return (
     <StoreContext.Provider value={value}>

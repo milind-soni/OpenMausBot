@@ -18,6 +18,7 @@ import { IMAGE_MAX_BYTES } from "./attachments.ts";
 const SERVER_DIR = dirname(fileURLToPath(import.meta.url));
 const ROOT = join(SERVER_DIR, "..");
 const FAKE_CLAUDE_CLI = join(SERVER_DIR, "testing", "fake-claude-cli.ts");
+const FAKE_ACP_CLI = join(SERVER_DIR, "testing", "fake-acp-cli.ts");
 const PORT = 18800 + Math.floor(Math.random() * 10_000);
 const BASE = `http://127.0.0.1:${PORT}`;
 const WEBHOOK_PORT = 39000 + Math.floor(Math.random() * 10_000);
@@ -30,7 +31,51 @@ let boxStubPort = 0;
 let home: string;
 let staticDir: string;
 let fakeClaudeDump: string;
+let fleetCatalogPath: string;
 let stderr = "";
+
+const fleetCatalogFixture = (busy = false) => ({
+  schema_version: "openmausbot-models/v1",
+  catalog_version: 1,
+  generated_at: "2026-08-22T05:00:00Z",
+  source: {
+    registry_schema_version: "aos-model-registry/v1",
+    registry_version: 1,
+    registry_sha256: "a".repeat(64),
+  },
+  default_model_id: "fixture-fleet-model",
+  provider_candidates: [],
+  models: [{
+    id: "fixture-fleet-model",
+    display_name: "Fixture fleet model",
+    kind: "model",
+    provider_id: "fixture",
+    native_model_id: "fixture-fleet-model",
+    capabilities: ["chat"],
+    host: "hosted",
+    cost_class: "free",
+    manual_only: false,
+    is_default: true,
+    selectable: !busy,
+    status: {
+      configured: true,
+      reachable: true,
+      verified: true,
+      admitted: true,
+      busy,
+      reason: busy ? "Fixture host is busy" : null,
+      last_verification_receipt: "/fixture/receipt.json",
+    },
+    translations: {
+      litellm: "fixture-fleet-model",
+      hermes: "litellm-local:fixture-fleet-model",
+      opencode: "litellm-local/fixture-fleet-model",
+      telegram: "fixture-fleet-model",
+      openmausbot: "fixture-fleet-model",
+    },
+    route_members: [],
+  }],
+});
 
 const api = async (method: string, path: string, body?: unknown): Promise<{ status: number; body: any }> => {
   const res = await fetch(`${BASE}${path}`, {
@@ -68,17 +113,20 @@ beforeAll(async () => {
   home = mkdtempSync(join(tmpdir(), "omb-api-test-"));
   staticDir = join(home, "static");
   fakeClaudeDump = join(home, "fake-claude-dump.json");
+  fleetCatalogPath = join(home, "openmausbot-models.v1.json");
   // a fleet of exactly one unknown driver: no CLI probes, no network
   mkdirSync(join(home, ".openmausbot"), { recursive: true });
   mkdirSync(join(staticDir, "assets"), { recursive: true });
   writeFileSync(join(staticDir, "index.html"), "<!doctype html><title>Packaged OpenMausBot</title>");
   writeFileSync(join(staticDir, "assets", "smoke.css"), "body { color: white; }");
+  writeFileSync(fleetCatalogPath, JSON.stringify(fleetCatalogFixture()));
   writeFileSync(
     join(home, ".openmausbot", "config.json"),
     JSON.stringify({
       instances: {
         ghost: { driver: "not-a-real-driver", displayName: "Ghost" },
         claude: { driver: "claudeAgent", displayName: "Fixture Claude", config: { cli: FAKE_CLAUDE_CLI } },
+        hermes: { driver: "hermesAgent", displayName: "Fixture Hermes", config: { cli: FAKE_ACP_CLI } },
       },
     }),
   );
@@ -224,6 +272,7 @@ beforeAll(async () => {
       OMB_STATIC_DIR: staticDir,
       FAKE_CLAUDE_MODE: "hang",
       FAKE_CLAUDE_DUMP: fakeClaudeDump,
+      AOS_MODEL_CATALOG_PATH: fleetCatalogPath,
     },
     stdio: ["ignore", "pipe", "pipe"],
   });
@@ -371,6 +420,85 @@ describe("harness HTTP API", () => {
       driverKind: "claudeAgent",
       displayName: "Fixture Claude",
     }));
+  });
+
+  it("projects the cached secret-free fleet catalog and fail-closes an invalid refresh", async () => {
+    const first = await api("GET", "/api/instances");
+    const hermes = first.body.instances.find((instance: { instanceId: string }) => instance.instanceId === "hermes");
+    expect(hermes.models.options).toContainEqual(expect.objectContaining({
+      id: "litellm-local:fixture-fleet-model",
+      canonicalId: "fixture-fleet-model",
+      costClass: "free",
+      host: "hosted",
+      selectable: true,
+    }));
+
+    writeFileSync(fleetCatalogPath, "not-json");
+    const failed = await api("POST", "/api/model-catalog/refresh");
+    expect(failed.status).toBe(200);
+    expect(failed.body.catalog.source.state).toBe("invalid");
+    const failedHermes = failed.body.instances.find((instance: { instanceId: string }) => instance.instanceId === "hermes");
+    expect(failedHermes.models.options).toContainEqual(expect.objectContaining({
+      canonicalId: "fixture-fleet-model",
+      selectable: false,
+    }));
+
+    writeFileSync(fleetCatalogPath, JSON.stringify(fleetCatalogFixture()));
+    expect((await api("POST", "/api/model-catalog/refresh")).body.catalog.source.state).toBe("ready");
+  });
+
+  it("translates a stable fleet id and starts one fresh task after a model change", async () => {
+    writeFileSync(fleetCatalogPath, JSON.stringify(fleetCatalogFixture()));
+    await api("POST", "/api/model-catalog/refresh");
+    const defaulted = (await api("POST", "/api/bots")).body.bot;
+    expect(defaulted.modelSelection).toEqual({
+      instanceId: "hermes",
+      model: "litellm-local:fixture-fleet-model",
+    });
+    const created = (await api("PATCH", `/api/bots/${defaulted.id}`, {
+      modelSelection: { instanceId: "claude", model: "claude-sonnet-5" },
+    })).body.bot;
+    const previousThread = created.threadId;
+    const previousTaskCount = created.tasks.length;
+
+    const switched = await api("POST", `/api/bots/${created.id}/model`, {
+      instanceId: "hermes",
+      model: "caller-value-is-not-trusted",
+      canonicalId: "fixture-fleet-model",
+    });
+    expect(switched.status).toBe(201);
+    expect(switched.body.changed).toBe(true);
+    expect(switched.body.bot.modelSelection).toEqual({
+      instanceId: "hermes",
+      model: "litellm-local:fixture-fleet-model",
+    });
+    expect(switched.body.bot.threadId).not.toBe(previousThread);
+    expect(switched.body.bot.tasks).toHaveLength(previousTaskCount + 1);
+    expect(switched.body.bot.messages).toEqual([]);
+
+    const same = await api("POST", `/api/bots/${created.id}/model`, {
+      instanceId: "hermes",
+      model: "still-not-authoritative",
+      canonicalId: "fixture-fleet-model",
+    });
+    expect(same.status).toBe(200);
+    expect(same.body.changed).toBe(false);
+    expect(same.body.bot.tasks).toHaveLength(previousTaskCount + 1);
+
+    try {
+      writeFileSync(fleetCatalogPath, JSON.stringify(fleetCatalogFixture(true)));
+      await api("POST", "/api/model-catalog/refresh");
+      const disabled = await api("POST", `/api/bots/${created.id}/model`, {
+        instanceId: "hermes",
+        model: "litellm-local:fixture-fleet-model",
+        canonicalId: "fixture-fleet-model",
+      });
+      expect(disabled.status).toBe(409);
+      expect(disabled.body.error).toBe("Fixture host is busy");
+    } finally {
+      writeFileSync(fleetCatalogPath, JSON.stringify(fleetCatalogFixture()));
+      await api("POST", "/api/model-catalog/refresh");
+    }
   });
 
   it("searches transcripts and exports a conversation", async () => {

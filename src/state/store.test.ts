@@ -10,7 +10,9 @@ import {
 } from "./store";
 
 describe("notification routing", () => {
+  // SAFETY: these intentionally-minimal fixtures exercise only the routing fields read by openNotificationTarget.
   const bots = [{ id: "bot-1", threadId: "main-thread", tasks: [{ threadId: "detached-thread" }] }] as never;
+  // SAFETY: same narrow routing fixture contract as bots above.
   const groups = [{ id: "room-1", threadId: "room-thread" }] as never;
 
   it("selects the bot and switches to the notification's exact task", () => {
@@ -103,5 +105,34 @@ describe("cross-client bot creation", () => {
     });
 
     expect(greeted.bots[0]?.messages).toEqual([greeting]);
+  });
+});
+
+describe("model switching", () => {
+  const bot = {
+    id: "model-bot",
+    threadId: "model-thread",
+    name: "Model bot",
+    title: "",
+    description: "",
+    notifications: true,
+    color: "green",
+    unread: false,
+    modelSelection: { instanceId: "hermes", model: "litellm-local:MiniMax-M3" },
+    messages: [],
+  } satisfies Bot;
+
+  it("waits for the atomic server response before showing a fresh-task model", () => {
+    const state = { ...initialState, bots: [bot] };
+    const next = reducer(state, {
+      type: "setModel",
+      botId: bot.id,
+      selection: { instanceId: "hermes", model: "litellm-local:minimax-m3-light" },
+      canonicalId: "minimax-m3-light",
+      freshTask: true,
+    });
+
+    expect(next).toBe(state);
+    expect(next.bots[0]?.modelSelection).toEqual(bot.modelSelection);
   });
 });
