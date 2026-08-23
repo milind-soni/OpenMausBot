@@ -366,6 +366,50 @@ describe("DshApiClient unary transport", () => {
 });
 
 describe("DshApiClient event streams", () => {
+  it("invalidates paired streams when the next authenticated request is rejected", async () => {
+    const fake = await host();
+    const client = new DshApiClient({
+      baseUrl: fake.baseUrl,
+      transport: "paired",
+      deviceCookie: "dsh_device=fixture-value",
+    });
+    const health: string[] = [];
+    const stopHealth = client.subscribeHealth((state) => health.push(`${state.kind}:${state.state}`));
+    const stopMux = client.subscribeMux(() => {});
+    const stopHost = client.subscribeHost(() => {});
+
+    try {
+      await Promise.all([fake.waitForStream("mux"), fake.waitForStream("host"), client.waitForStreamsOpen()]);
+      fake.onRouteRequest = ({ path }, response) => {
+        if (path !== "/remote/api/respond") return false;
+        response.writeHead(403, { "content-type": "application/json" });
+        response.end(JSON.stringify({ error: "revoked-device-upstream-secret" }));
+        return true;
+      };
+      const allClosed = Promise.all([fake.waitForNoStreams("mux"), fake.waitForNoStreams("host")]);
+
+      await expect(client.respond("revoked-rpc", { ok: true, value: { behavior: "allow" } })).rejects.toThrow(
+        "paired device is no longer authorized",
+      );
+      await allClosed;
+      expect(health).toEqual(expect.arrayContaining(["mux:reconnecting", "host:reconnecting"]));
+      expect(JSON.stringify(health)).not.toContain("revoked-device-upstream-secret");
+      const requestCount = fake.requests.length;
+      const streamAttempts = { mux: fake.streamHeaders.mux.length, host: fake.streamHeaders.host.length };
+      await expect(client.waitForStreamsOpen()).rejects.toThrow("paired device is no longer authorized");
+      await expect(client.unary("llm.models", {})).rejects.toThrow("paired device is no longer authorized");
+      await new Promise((resolve) => setTimeout(resolve, 50));
+      expect(fake.requests).toHaveLength(requestCount);
+      expect(fake.streamHeaders.mux).toHaveLength(streamAttempts.mux);
+      expect(fake.streamHeaders.host).toHaveLength(streamAttempts.host);
+    } finally {
+      stopMux();
+      stopHost();
+      stopHealth();
+      client.close();
+    }
+  });
+
   it("recycles both physical streams after an incomplete WebSocket upgrade and later recovers", async () => {
     const fake = await host();
     fake.setStreamHandshakeHung("mux", true);

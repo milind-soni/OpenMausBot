@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { X } from "lucide-react";
+import { TriangleAlert, X } from "lucide-react";
 import { useStore, type Message } from "@/state/store";
 import { cn } from "@/lib/cn";
 
@@ -63,7 +63,8 @@ export function OptionCardView({
 }: OptionCardViewProps) {
   const card = message.card;
   const answered = card?.answered !== undefined;
-  if (!card || card.dismissed) return null;
+  const unavailable = card?.answered === "unavailable";
+  if (!card || (card.dismissed && !unavailable)) return null;
 
   const answer = (payload: QuestionAnswerPayload) => {
     if (claimSubmission()) onAnswer(payload);
@@ -122,6 +123,12 @@ export function OptionCardView({
         ))}
       </div>
 
+      {unavailable && (
+        <div className="mt-3 flex items-center gap-1.5 text-[13px] text-warning">
+          <TriangleAlert size={14} /> Unavailable · no answer was sent
+        </div>
+      )}
+
       {card.multiSelect && !answered && (
         <button
           onClick={() => answer(questionAnswerPayload(selected, custom))}
@@ -179,7 +186,7 @@ export function OptionCard({
   useEffect(() => {
     if (!answered) submission.current.reset();
   }, [answered]);
-  if (!card || card.dismissed) return null;
+  if (!card || (card.dismissed && card.answered !== "unavailable")) return null;
 
   const answer = (payload: QuestionAnswerPayload) => {
     const action = {

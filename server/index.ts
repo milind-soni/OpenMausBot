@@ -2485,13 +2485,30 @@ function publicDeepSeekHarnessConnection(instanceId: string, config: DeepSeekHar
   return connection;
 }
 
-async function persistDeepSeekHarnessConfig(instanceId: string, config: DeepSeekHarnessConfig): Promise<boolean> {
+async function persistDeepSeekHarnessConfig(
+  instanceId: string,
+  config: DeepSeekHarnessConfig,
+  options: { forceReload?: boolean } = {},
+): Promise<boolean> {
   const update = withInstanceDriverConfig(cfg, instanceId, "deepseekHarness", dshJsonValueSchema.parse(config));
   if (!update.ok) throw new DeepSeekHarnessSettingsError(404, "deepseek-instance-not-found", `unknown DeepSeek Harness instance "${instanceId}"`);
-  if (!update.changed) return false;
+  if (!update.changed) {
+    // A successful re-pair can renew the same cookie value. The previous
+    // client may already have latched that credential as revoked, so the
+    // external authorization change still requires a fresh provider client.
+    if (options.forceReload) {
+      await reloadProviders();
+      await registry.get(instanceId)?.refreshModels?.();
+    }
+    return false;
+  }
   saveConfig({ instances: update.config.instances });
   Object.assign(cfg, loadConfig());
   await reloadProviders();
+  // Return from a connection write with the new instance ready for an
+  // immediate API/chat request; the renderer's later /api/instances refresh
+  // must not be what makes the catalog usable.
+  await registry.get(instanceId)?.refreshModels?.();
   return true;
 }
 
@@ -4419,7 +4436,7 @@ const server = createServer(async (req, res) => {
               transport: "paired",
               deviceCookie: accepted.deviceCookie,
             };
-            await persistDeepSeekHarnessConfig(instanceId, next);
+            await persistDeepSeekHarnessConfig(instanceId, next, { forceReload: true });
             return json(res, 200, { paired: true });
           }
 

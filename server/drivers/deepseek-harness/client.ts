@@ -106,6 +106,7 @@ export class DshApiClient {
   private readonly timeoutMs: number;
   private readonly streamOpenTimeoutMs: number;
   private closed = false;
+  private pairedAuthorizationInvalidated = false;
 
   constructor(options: DshApiClientOptions) {
     let baseUrl: URL;
@@ -129,6 +130,7 @@ export class DshApiClient {
   }
 
   async unary<T extends DshJsonValue>(method: string, payload: DshJsonValue): Promise<DshUnaryResponse<T>> {
+    if (this.pairedAuthorizationInvalidated) throw new DshTransportError("DSH paired device is no longer authorized");
     if (!isDshApiMethod(method)) throw new DshTransportError("DSH API method is invalid");
     if (this.transport === "paired" && pairedMethodIsLoopbackOnly(method)) {
       throw new DshTransportError("DSH method is not available through paired transport");
@@ -153,7 +155,12 @@ export class DshApiClient {
       throw new DshTransportError("DSH request could not reach the host");
     }
     try {
-      if (!response.ok) throw new DshTransportError(`DSH request failed with HTTP ${response.status}`);
+      if (!response.ok) {
+        if (this.pairedAuthorizationWasRejected(response.status)) this.invalidatePairedAuthorization();
+        throw new DshTransportError(this.pairedAuthorizationWasRejected(response.status)
+          ? "DSH paired device is no longer authorized"
+          : `DSH request failed with HTTP ${response.status}`);
+      }
       const parsed = dshServerResponseSchema.safeParse(await boundedJson(response));
       if (!parsed.success) throw new DshTransportError("DSH response envelope was invalid");
       if (parsed.data.rpcId !== rpcId) throw new DshTransportError("DSH response rpc id did not match request");
@@ -172,6 +179,7 @@ export class DshApiClient {
   }
 
   async respond(rpcId: string, result: DshRpcResult): Promise<DshReceipt> {
+    if (this.pairedAuthorizationInvalidated) throw new DshTransportError("DSH paired device is no longer authorized");
     const parsed = dshClientResponseSchema.safeParse({ type: "client-response", rpcId, result });
     if (!parsed.success) throw new DshTransportError("DSH response envelope was invalid");
     const body = JSON.stringify(parsed.data);
@@ -191,7 +199,12 @@ export class DshApiClient {
       throw new DshTransportError("DSH response could not reach the host");
     }
     try {
-      if (!response.ok) throw new DshTransportError(`DSH response failed with HTTP ${response.status}`);
+      if (!response.ok) {
+        if (this.pairedAuthorizationWasRejected(response.status)) this.invalidatePairedAuthorization();
+        throw new DshTransportError(this.pairedAuthorizationWasRejected(response.status)
+          ? "DSH paired device is no longer authorized"
+          : `DSH response failed with HTTP ${response.status}`);
+      }
       const receipt = dshReceiptSchema.safeParse(await boundedJson(response));
       if (!receipt.success) throw new DshTransportError("DSH response receipt was invalid");
       return receipt.data;
@@ -214,6 +227,7 @@ export class DshApiClient {
   /** Strict readiness: unary startup may proceed only while both physical downlinks are open. */
   waitForStreamsOpen(): Promise<void> {
     if (this.closed) return Promise.reject(new DshTransportError("DSH client is closed"));
+    if (this.pairedAuthorizationInvalidated) return Promise.reject(new DshTransportError("DSH paired device is no longer authorized"));
     if (this.streams.mux.connected && this.streams.host.connected) return Promise.resolve();
     return new Promise<void>((resolve, reject) => {
       const waiter: ReadinessWaiter = {
@@ -263,7 +277,7 @@ export class DshApiClient {
 
   private connect(kind: StreamKind): void {
     const state = this.streams[kind];
-    if (this.closed || !this.listeners[kind].size || state.socket || state.reconnectTimer) return;
+    if (this.closed || this.pairedAuthorizationInvalidated || !this.listeners[kind].size || state.socket || state.reconnectTimer) return;
     const socket = new WebSocket(this.webSocketEndpoint(kind), { headers: this.headers, maxPayload: MAX_JSON_BYTES });
     state.socket = socket;
     state.generation++;
@@ -304,7 +318,7 @@ export class DshApiClient {
 
   private scheduleReconnect(kind: StreamKind): void {
     const state = this.streams[kind];
-    if (this.closed || !this.listeners[kind].size || state.reconnectTimer) return;
+    if (this.closed || this.pairedAuthorizationInvalidated || !this.listeners[kind].size || state.reconnectTimer) return;
     const delay = Math.min(RECONNECT_BASE_MS * 2 ** state.attempts, RECONNECT_MAX_MS);
     state.attempts = Math.min(state.attempts + 1, 10);
     state.reconnectTimer = setTimeout(() => {
@@ -362,6 +376,34 @@ export class DshApiClient {
       waiter.reject(error);
     }
     this.readinessWaiters.clear();
+  }
+
+  private pairedAuthorizationWasRejected(status: number): boolean {
+    return this.transport === "paired" && (status === 401 || status === 403);
+  }
+
+  /** A paired credential is checked independently on HTTP and WebSocket
+   * requests. If an already-open stream outlives a revocation, the next
+   * rejected unary/response must still become the provider's stream-loss
+   * boundary. Do not reconnect with the revoked cookie; re-pairing rebuilds
+   * the instance with a new client. */
+  private invalidatePairedAuthorization(): void {
+    if (this.pairedAuthorizationInvalidated) return;
+    this.pairedAuthorizationInvalidated = true;
+    this.rejectReadiness(new DshTransportError("DSH paired device is no longer authorized"));
+    for (const kind of ["mux", "host"] as const) {
+      const state = this.streams[kind];
+      if (state.reconnectTimer) clearTimeout(state.reconnectTimer);
+      if (state.openTimer) clearTimeout(state.openTimer);
+      state.reconnectTimer = undefined;
+      state.openTimer = undefined;
+      const socket = state.socket;
+      const lostGeneration = Boolean(socket) || state.connected;
+      state.socket = undefined;
+      state.connected = false;
+      socket?.terminate();
+      if (lostGeneration) this.emitHealth(kind, "reconnecting", state.generation);
+    }
   }
 
   private endpoint(method: string): string {

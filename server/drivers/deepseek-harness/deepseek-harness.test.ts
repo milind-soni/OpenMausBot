@@ -282,6 +282,37 @@ describe("DeepSeek Harness turns", () => {
     await instance.dispose();
   });
 
+  it("accepts the Host materializing its model default when no effort was requested", async () => {
+    const fake = await host();
+    fake.onRequest = ({ body }) => {
+      const request = dshClientRequestSchema.parse(body);
+      if (request.method === "session.selectModel") {
+        const selected = z.object({ provider: z.string(), model: z.string() }).parse(request.payload);
+        return response(request.rpcId, { selected: { ...selected, reasoningEffort: "high" } });
+      }
+      return officialResponse(request, "default-effort-session");
+    };
+    const instance = await DeepSeekHarnessDriver.create({
+      instanceId: "deepseekHarness",
+      displayName: undefined,
+      environment: {},
+      enabled: true,
+      config: { baseUrl: fake.baseUrl, transport: "direct" },
+    });
+
+    await expect(instance.adapter.sendTurn({
+      threadId: "default-effort-thread",
+      text: "Use the model default",
+      model: encodeDshModelId("deepseek", "chat"),
+    })).resolves.toEqual({ turnId: expect.any(String) });
+    expect(fake.requests.map((request) => dshClientRequestSchema.parse(request.body).method)).toEqual([
+      "session.create",
+      "session.selectModel",
+      "session.prompt",
+    ]);
+    await instance.dispose();
+  });
+
   it.each([
     ["provider", { provider: "wrong-provider", model: "requested", reasoningEffort: "high" }, "wrong-provider"],
     ["model", { provider: "openrouter", model: "wrong/model", reasoningEffort: "high" }, "wrong/model"],

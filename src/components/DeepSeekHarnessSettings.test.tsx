@@ -15,6 +15,7 @@ import {
   filterDeepSeekHarnessModels,
   fromDshReasoningEfforts,
   modelDraftFromCandidate,
+  runDeepSeekHarnessInitialLoad,
   toDshReasoningEfforts,
   upsertDeepSeekHarnessModelAndRefresh,
   type DeepSeekHarnessSettingsViewProps,
@@ -425,6 +426,31 @@ describe("DeepSeek Harness settings actions", () => {
     expect(gate.claim()).toBe(false);
     gate.release();
     expect(gate.claim()).toBe(true);
+  });
+
+  it("lets the surviving Strict Mode effect settle the initial load", async () => {
+    const calls: boolean[] = [];
+    const settled: string[] = [];
+    let firstCurrent = true;
+    let releaseFirst = () => {};
+    const first = new Promise<void>((resolve) => { releaseFirst = resolve; });
+
+    const stale = runDeepSeekHarnessInitialLoad(
+      async (showPending) => { calls.push(showPending); await first; return "stale"; },
+      () => firstCurrent,
+      () => settled.push("stale"),
+    );
+    firstCurrent = false;
+    await runDeepSeekHarnessInitialLoad(
+      async (showPending) => { calls.push(showPending); return "success"; },
+      () => true,
+      () => settled.push("current"),
+    );
+    releaseFirst();
+    await stale;
+
+    expect(calls).toEqual([false, false]);
+    expect(settled).toEqual(["current"]);
   });
 
   it("pairs with the one-time link and never returns or requests a cookie", async () => {

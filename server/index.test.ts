@@ -1874,10 +1874,14 @@ describe("harness HTTP API", () => {
       expect(open.card.answered).toBeUndefined();
 
       dshPairedAuthorized = false;
-      dshStub.setStreamBlocked("mux", true);
-      dshStub.setStreamBlocked("host", true);
-      dshStub.closeStreams("mux");
-      dshStub.closeStreams("host");
+      const rejectedAnswer = await api("POST", `/api/bots/${bot.id}/respond`, {
+        requestId: open.card.requestId,
+        behavior: "allow",
+      });
+      expect(rejectedAnswer).toEqual({
+        status: 409,
+        body: { ok: false, outcome: "retryable", error: "the host did not acknowledge the answer; retry it" },
+      });
 
       const settled = await waitUntil(async () => {
         const current = (await api("GET", "/api/bots")).body.bots.find((candidate: { id: string }) => candidate.id === bot.id);
@@ -1894,7 +1898,11 @@ describe("harness HTTP API", () => {
           const parsed = dshClientRequestSchema.safeParse(entry.body);
           return parsed.success ? [parsed.data.method] : [];
         });
-      expect(methods).toContain("session.cancel");
+      // Authorization is latched off at the 403 boundary. Teardown still
+      // attempts its bounded cancel, but the revoked cookie must never be
+      // emitted on another Host request.
+      expect(methods).not.toContain("session.cancel");
+      expect(dshStub.requests.slice(requestStart).some((entry) => entry.path === "/remote/api/respond")).toBe(true);
 
       const revoked = await api("GET", "/api/instances/deepseekHarness/deepseek-harness");
       expect(revoked.body.modelManagement).toMatchObject({
@@ -1914,10 +1922,34 @@ describe("harness HTTP API", () => {
         modelManagement: { available: true, supported: true },
       });
       expect(JSON.stringify(recovered.body)).not.toMatch(/deviceCookie|dsh_pair/i);
+
+      const recoveryStart = dshStub.requests.length;
+      expect(await api("POST", `/api/bots/${bot.id}/messages`, { text: "paired revocation recovery fixture" })).toEqual({
+        status: 202,
+        body: { ok: true },
+      });
+      const recoveredPrompt = await waitUntil(async () => {
+        const prompt = dshStub.requests.slice(recoveryStart)
+          .map((entry) => dshClientRequestSchema.safeParse(entry.body).data)
+          .find((entry) => entry?.method === "session.prompt");
+        if (prompt) return prompt;
+        const current = (await api("GET", "/api/bots")).body.bots.find((candidate: { id: string }) => candidate.id === bot.id);
+        if (!current?.busy) throw new Error(`re-paired turn failed before prompt: ${JSON.stringify(current?.messages.at(-1))}`);
+        return undefined;
+      });
+      const recoveredSessionId = z.object({ sessionId: z.string() }).parse(recoveredPrompt.payload).sessionId;
+      dshStub.send("mux", {
+        type: "server-request",
+        rpcId: "active-revocation-recovered-end",
+        method: "session/event",
+        payload: { type: "session/event", sessionId: recoveredSessionId, event: { type: "turn/end", seq: 1, time: 2, data: { reason: { kind: "completed" } } } },
+      });
+      await waitUntil(async () => {
+        const current = (await api("GET", "/api/bots")).body.bots.find((candidate: { id: string }) => candidate.id === bot.id);
+        return current?.busy ? undefined : true;
+      });
     } finally {
       dshPairedAuthorized = true;
-      dshStub.setStreamBlocked("mux", false);
-      dshStub.setStreamBlocked("host", false);
       // Changing origin deliberately clears the write-only device cookie; switch
       // back immediately so this security fixture cannot leak paired state into
       // the settings API cases that follow it.

@@ -76,13 +76,13 @@ introduced in [dsh-web-ui PR #1016](https://github.com/zhu1090093659/dsh-web-ui/
 If the endpoint is absent, OpenMausBot leaves chat available and explains that
 only model management needs a plugin update.
 
-For providers that inherit DSH's installed model catalog, use a plugin build
-that also preserves those inherited entries when it adopts a custom model.
-That compatibility is tracked in
-[dsh-web-ui issue #1029](https://github.com/zhu1090093659/dsh-web-ui/issues/1029).
-With an intermediate plugin build that lacks it, add the model in DSH itself or
-temporarily use Direct mode instead of materializing the list through Paired
-mode.
+Current `dsh-web-ui` `dev` builds include the inherited-catalog correction
+confirmed in [issue #1029](https://github.com/zhu1090093659/dsh-web-ui/issues/1029):
+installed entries stay inherited through `modelOverrides`, while adding an
+unknown custom model materializes every live entry and removes the now-stale
+overrides atomically. Update the plugin if its paired catalog predates that
+resolved issue; older builds can expose the endpoint from #1016 without these
+preservation semantics.
 
 ## Models and OpenRouter
 

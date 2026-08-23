@@ -493,7 +493,11 @@ export const DeepSeekHarnessDriver: ProviderDriver<DeepSeekHarnessConfig> = {
           !selected
           || selected.provider !== selectPayload.provider
           || selected.model !== selectPayload.model
-          || selected.reasoningEffort !== selectPayload.reasoningEffort
+          // Omitting effort delegates to the model's default. The Host may
+          // materialize that effective default in its acknowledgement; only
+          // an effort OMB explicitly requested must round-trip byte-for-byte.
+          || (selectPayload.reasoningEffort !== undefined
+            && selected.reasoningEffort !== selectPayload.reasoningEffort)
         ) {
           throw new Error("DeepSeek Harness did not preserve the requested model and effort");
         }

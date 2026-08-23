@@ -49,6 +49,18 @@ export function createDeepSeekHarnessSubmissionGate() {
   };
 }
 
+/** Initial reads deliberately bypass the write gate. React Strict Mode mounts,
+ * cleans up, and mounts effects again; gating those reads lets the discarded
+ * request block the surviving effect and leaves the UI permanently loading. */
+export async function runDeepSeekHarnessInitialLoad(
+  load: (showPending: boolean) => Promise<"success" | "failure" | "stale">,
+  isCurrent: () => boolean,
+  settle: () => void,
+): Promise<void> {
+  await load(false);
+  if (isCurrent()) settle();
+}
+
 export interface DeepSeekHarnessSettingsViewProps {
   instance: InstanceInfo;
   settings: DeepSeekHarnessSettingsSnapshot | null;
@@ -961,8 +973,10 @@ export function DeepSeekHarnessSettings({ instance }: { instance: InstanceInfo }
   }, [applySettings, instance.instanceId, syncActionFeedback]);
 
   useEffect(() => {
-    void load();
+    let current = true;
+    void runDeepSeekHarnessInitialLoad(load, () => current, () => setPending(null));
     return () => {
+      current = false;
       loadGeneration.current += 1;
       modelRequestGuard.current.invalidate();
     };
