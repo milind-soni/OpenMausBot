@@ -423,9 +423,12 @@ describe("DshApiClient event streams", () => {
       const readiness = client.waitForStreamsOpen();
       await fake.waitForHungStreamHandshake("mux");
       await expect(readiness).rejects.toThrow("event streams did not open");
+      await fake.waitForNoStreams("host");
 
       fake.setStreamHandshakeHung("mux", false);
-      await Promise.all([fake.waitForStream("mux"), client.waitForStreamsOpen()]);
+      await Promise.all([fake.waitForStream("mux"), fake.waitForStream("host")]);
+      await Promise.all([fake.waitForStreamRoundTrip("mux"), fake.waitForStreamRoundTrip("host")]);
+      await client.waitForStreamsOpen();
 
       expect(fake.streamHeaders.mux).toHaveLength(1);
       expect(fake.streamHeaders.host.length).toBeGreaterThanOrEqual(2);
