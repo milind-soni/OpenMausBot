@@ -227,6 +227,21 @@ describe("Store", () => {
     expect(reloaded.bot(bot.id)?.resumeCursors).toEqual({ claude: "sess-abc", codex: "thread-xyz" });
   });
 
+  it("persists independent provider continuations for every room member", () => {
+    const store = new Store(selection);
+    const first = store.createBot({ name: "First" });
+    const second = store.createBot({ name: "Second" });
+    const group = store.createGroup("Pair", [first.id, second.id]);
+
+    store.setGroupResumeCursor(group.id, first.id, "deepseekHarness", "dsh:first");
+    store.setGroupResumeCursor(group.id, second.id, "deepseekHarness", "dsh:second");
+
+    const reloaded = new Store(selection);
+    expect(reloaded.groupResumeCursor(group.id, first.id, "deepseekHarness")).toBe("dsh:first");
+    expect(reloaded.groupResumeCursor(group.id, second.id, "deepseekHarness")).toBe("dsh:second");
+    expect(reloaded.groupResumeCursor(group.id, first.id, "other")).toBeUndefined();
+  });
+
   it("seedIfEmpty creates exactly one starter bot, once", () => {
     const store = new Store(selection);
     store.seedIfEmpty();

@@ -40,6 +40,26 @@ describe("readClaudeModelCatalog", () => {
     });
   });
 
+  it("preserves exact effort levels from configured extra models", () => {
+    const home = mkdtempSync(join(tmpdir(), "omb-claude-effort-catalog-"));
+    scratchDirs.push(home);
+    const dir = join(home, ".claude");
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(
+      join(dir, "settings.json"),
+      JSON.stringify({
+        availableModels: [{ id: "claude-exact-low", label: "Claude exact low", effortLevels: ["low"] }],
+      }),
+    );
+
+    expect(readClaudeModelCatalog({ HOME: home }).options).toContainEqual({
+      id: "claude-exact-low",
+      label: "Claude exact low",
+      custom: true,
+      effortLevels: ["low"],
+    });
+  });
+
   it("does not list settings.model as a Custom leftover", () => {
     const home = mkdtempSync(join(tmpdir(), "omb-claude-leftover-"));
     scratchDirs.push(home);

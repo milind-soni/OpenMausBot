@@ -52,19 +52,34 @@ import {
   skillRecorderEnabled,
   syncCredentialEnv,
   withInstanceCli,
+  withInstanceDriverConfig,
   vpsSshAlias,
   DATA_DIR,
   EVENTS_DIR,
   NATIVE_DIR,
 } from "./config.ts";
+import {
+  DeepSeekHarnessManagementClient,
+  DeepSeekHarnessSettingsError,
+  acceptDeepSeekHarnessPairing,
+  parseDeepSeekHarnessConnectionPatch,
+  parseDeepSeekHarnessDiscoverRequest,
+  parseDeepSeekHarnessPairRequest,
+  parseDeepSeekHarnessUpsertRequest,
+  publicDeepSeekHarnessSettingsError,
+  unavailableDeepSeekHarnessManagement,
+} from "./deepseek-harness-settings.ts";
 import { ComputerControl } from "./computer-control.ts";
 import { augmentedPath, findCliCandidates, resetPathCache } from "./env-path.ts";
 import { describeSpawnFailure, execCli } from "./procs.ts";
 import { buildNotification, type Notification } from "./notify.ts";
 import { isEffortLevel, type RequestOutcome, type RuntimeEvent } from "./contracts.ts";
 import { RETRY_MAX_ATTEMPTS } from "./drivers/retry.ts";
+import { effortLevelsForModel } from "../src/lib/model-effort.ts";
 
 import { BUILT_IN_DRIVERS } from "./drivers/builtIn.ts";
+import { DeepSeekHarnessDriver, type DeepSeekHarnessConfig } from "./drivers/deepseek-harness/index.ts";
+import { dshJsonValueSchema } from "./drivers/deepseek-harness/protocol.ts";
 import { getOrCreateChannel, mirrorActivity, mirrorExchange, mirrorReply, type CommsBus } from "./comms-visibility.ts";
 import { searchMessages } from "./message-db.ts";
 import { _loadPending, discardDelegations, drainDelegations, pendingThreads, queueDelegation, type QueueResult } from "./delegations.ts";
@@ -278,6 +293,11 @@ const wireBot = (bot: NonNullable<ReturnType<typeof store.bot>>) => {
   return { ...rest, avatarUrl: rest.avatarUrl ?? null, ...(tasks ? { tasks: tasks.map(wireTask) } : {}) };
 };
 
+const wireGroup = (group: NonNullable<ReturnType<typeof store.group>>) => {
+  const { memberResumeCursors: _memberResumeCursors, ...rest } = group;
+  return rest;
+};
+
 /** Profile URLs are app-owned references, not merely strings with a trusted
  * prefix. Resolve them before persistence so every accepted avatar can be
  * fetched immediately and a deleted/guessed attachment id cannot become a
@@ -319,7 +339,7 @@ store.onChange((change) => {
       break;
     case "group": {
       const group = store.group(change.groupId);
-      if (group) broadcast({ kind: "group", group });
+      if (group) broadcast({ kind: "group", group: wireGroup(group) });
       break;
     }
     case "group.deleted":
@@ -446,6 +466,13 @@ function broadcast(payload: Record<string, unknown>) {
 const toolMessageByItem = new Map<string, string>(); // threadId:itemId -> messageId
 const askMessageByRequest = new Map<string, string>(); // threadId:requestId -> messageId
 
+/** Provider-native continuation ids are persistence inputs, never public runtime data. */
+function wireRuntimeEvent(event: RuntimeEvent): RuntimeEvent {
+  if (event.type !== "session.started") return event;
+  const { resumeCursor: _resumeCursor, sessionId: _sessionId, ...rest } = event;
+  return { ...rest, type: "session.started", sessionId: null };
+}
+
 /** Deliver a person's answer to the engine that asked, and tell the truth
  * about what happened. `unavailable` — the turn ended, the ask timed out,
  * the engine has no asks — is fail-closed: the action was never run. The
@@ -457,6 +484,8 @@ async function answerRequest(
   requestId: string,
   behavior: "allow" | "deny" | "answer",
   message?: string,
+  selected?: string[],
+  custom?: string,
   decidedFor?: { id: string; name: string },
 ): Promise<RequestOutcome> {
   // Snapshot the card BEFORE delivering the answer: a delivered answer
@@ -475,7 +504,7 @@ async function answerRequest(
   let outcome: RequestOutcome = "unavailable";
   if (instance) {
     try {
-      outcome = await instance.adapter.respondToRequest(threadId, requestId, { behavior, message });
+      outcome = await instance.adapter.respondToRequest(threadId, requestId, { behavior, message, selected, custom });
     } catch {
       outcome = "unavailable";
     }
@@ -485,7 +514,7 @@ async function answerRequest(
   // over a request nothing answered would be the audit log lying. A
   // question's `answer` is conversation, not authorization, so it is not a
   // decision either.
-  if (outcome !== "unavailable" && behavior !== "answer") {
+  if (outcome !== "unavailable" && outcome !== "retryable" && outcome !== "already-resolved" && behavior !== "answer" && card?.tool) {
     appendDecision(DATA_DIR, {
       threadId,
       requestId,
@@ -506,7 +535,7 @@ async function answerRequest(
     const existing = messageId
       ? thread.find((m) => m.id === messageId)
       : thread.find((m) => m.card?.requestId === requestId);
-    if (existing?.card && !existing.card.answered) {
+    if (existing?.card && existing.card.answered === undefined) {
       store.patchMessage(threadId, existing.id, { card: { ...existing.card, answered: "unavailable", dismissed: true } });
     }
     if (messageId) askMessageByRequest.delete(`${threadId}:${requestId}`);
@@ -529,7 +558,7 @@ function closeOpenApprovals(threadId: string): void {
   cancelPeerApprovalsForThread(threadId);
   for (const message of store.messagesFor(threadId)) {
     const card = message.card;
-    if (!card?.requestId || card.answered || card.dismissed) continue;
+    if (!card?.requestId || card.answered !== undefined || card.dismissed) continue;
     store.patchMessage(threadId, message.id, { card: { ...card, answered: "unavailable", dismissed: true } });
     askMessageByRequest.delete(`${threadId}:${card.requestId}`);
   }
@@ -730,7 +759,7 @@ bus.subscribe((event: RuntimeEvent) => {
   if (event.type === "turn.completed") {
     releaseLocalVmThread(event.threadId);
   }
-  broadcast({ kind: "runtime", event });
+  broadcast({ kind: "runtime", event: wireRuntimeEvent(event) });
   const routineRun = routines?.handleRuntimeEvent(event) ?? null;
   const bot = store.botByThread(event.threadId);
   const group = bot ? undefined : store.groupByThread(event.threadId);
@@ -745,7 +774,9 @@ bus.subscribe((event: RuntimeEvent) => {
   switch (event.type) {
     case "session.started":
       if (bot && event.sessionId && event.providerInstanceId) {
-        store.setResumeCursor(bot.id, event.providerInstanceId, event.sessionId, event.threadId);
+        store.setResumeCursor(bot.id, event.providerInstanceId, event.resumeCursor ?? event.sessionId, event.threadId);
+      } else if (group && speaker && event.sessionId && event.providerInstanceId) {
+        store.setGroupResumeCursor(group.id, speaker.botId, event.providerInstanceId, event.resumeCursor ?? event.sessionId);
       }
       break;
     case "item.completed":
@@ -820,7 +851,8 @@ bus.subscribe((event: RuntimeEvent) => {
           try {
             if (!instance) throw new Error("provider unavailable");
             const outcome = await instance.adapter.respondToRequest(event.threadId, requestId, { behavior: "allow" });
-            if (outcome === "unavailable") throw new Error("the ask is no longer open");
+            if (outcome === "already-resolved") return;
+            if (outcome === "unavailable" || outcome === "retryable") throw new Error("the ask was not acknowledged");
             pushMessage({
               role: "bot",
               kind: "activity",
@@ -887,6 +919,7 @@ bus.subscribe((event: RuntimeEvent) => {
                 : "Your bot has a question",
           subtitle: event.summary,
           options: event.choices?.length ? event.choices : permission ? ["Allow", "Deny"] : [],
+          multiSelect: event.multiSelect,
           requestId: event.requestId,
           tool: permission ? event.tool : undefined,
           // the exact grant "always allow" would remember, decided here so
@@ -938,9 +971,13 @@ bus.subscribe((event: RuntimeEvent) => {
       const messageId = event.requestId ? askMessageByRequest.get(`${event.threadId}:${event.requestId}`) : null;
       if (messageId) {
         const existing = store.messagesFor(event.threadId).find((m) => m.id === messageId);
-        if (existing?.card && !existing.card.answered) {
+        if (existing?.card && existing.card.answered === undefined) {
           store.patchMessage(event.threadId, messageId, {
-            card: { ...existing.card, answered: event.behavior, dismissed: event.source !== "user" },
+            card: {
+              ...existing.card,
+              answered: event.source === "unavailable" ? "unavailable" : event.behavior,
+              dismissed: event.source !== "user",
+            },
           });
         }
         if (event.requestId) askMessageByRequest.delete(`${event.threadId}:${event.requestId}`);
@@ -1350,12 +1387,26 @@ async function startTurn(
   }
   const instanceId = instance.instanceId;
   const model = opts?.runOn === "cloud" ? instance.models.default : bot.modelSelection.model;
+  if (
+    instance.driverKind === "deepseekHarness"
+    && !instance.models.options.some((option) => option.id === model)
+  ) {
+    throw Object.assign(
+      new Error("the selected DeepSeek Harness model is no longer available. Refresh the catalog or choose another model"),
+      { status: 409 },
+    );
+  }
   // a cloud routine borrows the instance default model, so it borrows no
   // per-bot effort either
   const effort = opts?.runOn === "cloud" ? undefined : bot.modelSelection.effort;
   // A selection can be persisted while its engine is offline. Re-check when
   // the engine returns so an old or unsupported value never reaches a CLI.
-  if (effort && !instance.adapter.capabilities.effortLevels?.includes(effort)) {
+  const allowedEffortLevels = effortLevelsForModel(
+    instance.models.options,
+    model,
+    instance.adapter.capabilities.effortLevels,
+  );
+  if (effort && !allowedEffortLevels?.includes(effort)) {
     throw Object.assign(
       new Error(`effort "${effort}" is not offered by this bot's engine — choose another level in settings`),
       { status: 409 },
@@ -1871,6 +1922,38 @@ async function runGroupMemberTurn(
     });
     return true;
   }
+  if (
+    instance.driverKind === "deepseekHarness"
+    && !instance.models.options.some((option) => option.id === bot.modelSelection.model)
+  ) {
+    store.appendMessage(group.threadId, {
+      role: "bot",
+      kind: "activity",
+      from: { botId: bot.id, name: bot.name, color: bot.color },
+      tool: {
+        name: `error: ${bot.name}'s selected DeepSeek Harness model is no longer available. Refresh the catalog or choose another model`,
+        ok: false,
+      },
+    });
+    return true;
+  }
+  const allowedEffortLevels = effortLevelsForModel(
+    instance.models.options,
+    bot.modelSelection.model,
+    instance.adapter.capabilities.effortLevels,
+  );
+  if (bot.modelSelection.effort && !allowedEffortLevels?.includes(bot.modelSelection.effort)) {
+    store.appendMessage(group.threadId, {
+      role: "bot",
+      kind: "activity",
+      from: { botId: bot.id, name: bot.name, color: bot.color },
+      tool: {
+        name: `error: effort "${bot.modelSelection.effort}" is not offered by this bot's engine — choose another level in settings`,
+        ok: false,
+      },
+    });
+    return true;
+  }
   const integrations: NonNullable<Parameters<typeof instance.adapter.sendTurn>[0]["integrations"]> = {};
   const selectedSkills = selectBundledSkills(
     serializeRoomContext(group.threadId, userName),
@@ -1971,10 +2054,12 @@ async function runGroupMemberTurn(
     instance.adapter
       .sendTurn({
         threadId: group.threadId,
+        sessionKey: `${group.threadId}:${bot.id}`,
         text,
         system: roomSystem,
         cwd,
         integrations,
+        resumeCursor: store.groupResumeCursor(group.id, bot.id, bot.modelSelection.instanceId),
         ...memberTurnSelection(bot.modelSelection),
       })
       .catch((err) => {
@@ -2366,6 +2451,66 @@ async function reloadProviders() {
 // and reload sequence single-flight so two settings requests cannot drop one
 // another's changes or dispose a fleet while another reload is creating it.
 let providerConfigBusy = false;
+
+function deepSeekHarnessInstanceConfig(instanceId: string): DeepSeekHarnessConfig {
+  const fleet = instanceConfigs(structuredClone(cfg));
+  if (!Object.hasOwn(fleet, instanceId) || fleet[instanceId].driver !== "deepseekHarness") {
+    throw new DeepSeekHarnessSettingsError(404, "deepseek-instance-not-found", `unknown DeepSeek Harness instance "${instanceId}"`);
+  }
+  try {
+    return DeepSeekHarnessDriver.decodeConfig(fleet[instanceId].config ?? {});
+  } catch {
+    throw new DeepSeekHarnessSettingsError(400, "invalid-deepseek-config", "DeepSeek Harness instance configuration is invalid");
+  }
+}
+
+interface DeepSeekHarnessConnectionStatus {
+  instanceId: string;
+  transport: "direct" | "paired";
+  baseUrl: string;
+  paired: boolean;
+  hasDeviceCredential: boolean;
+  agentPreset?: string;
+}
+
+function publicDeepSeekHarnessConnection(instanceId: string, config: DeepSeekHarnessConfig) {
+  const connection: DeepSeekHarnessConnectionStatus = {
+    instanceId,
+    transport: config.transport,
+    baseUrl: config.baseUrl,
+    paired: config.transport === "paired" && Boolean(config.deviceCookie),
+    hasDeviceCredential: Boolean(config.deviceCookie),
+  };
+  if (config.agentPreset !== undefined) connection.agentPreset = config.agentPreset;
+  return connection;
+}
+
+async function persistDeepSeekHarnessConfig(
+  instanceId: string,
+  config: DeepSeekHarnessConfig,
+  options: { forceReload?: boolean } = {},
+): Promise<boolean> {
+  const update = withInstanceDriverConfig(cfg, instanceId, "deepseekHarness", dshJsonValueSchema.parse(config));
+  if (!update.ok) throw new DeepSeekHarnessSettingsError(404, "deepseek-instance-not-found", `unknown DeepSeek Harness instance "${instanceId}"`);
+  if (!update.changed) {
+    // A successful re-pair can renew the same cookie value. The previous
+    // client may already have latched that credential as revoked, so the
+    // external authorization change still requires a fresh provider client.
+    if (options.forceReload) {
+      await reloadProviders();
+      await registry.get(instanceId)?.refreshModels?.();
+    }
+    return false;
+  }
+  saveConfig({ instances: update.config.instances });
+  Object.assign(cfg, loadConfig());
+  await reloadProviders();
+  // Return from a connection write with the new instance ready for an
+  // immediate API/chat request; the renderer's later /api/instances refresh
+  // must not be what makes the catalog usable.
+  await registry.get(instanceId)?.refreshModels?.();
+  return true;
+}
 
 // ── HTTP plumbing ─────────────────────────────────────────────────────
 function json(res: ServerResponse, status: number, body: unknown) {
@@ -2895,7 +3040,7 @@ const server = createServer(async (req, res) => {
       if (limit === null) return json(res, 400, { error: "messages must be a non-negative whole number" });
       return json(res, 200, {
         bots: store.bots.map((bot) => ({ ...publicBot(bot), ...messagePage(bot.threadId, limit) })),
-        groups: store.groups.map((g) => ({ ...g, ...messagePage(g.threadId, limit) })),
+        groups: store.groups.map((g) => ({ ...wireGroup(g), ...messagePage(g.threadId, limit) })),
         computerControl: Object.fromEntries(
           store.bots.map((bot) => {
             const snapshot = computerControl.snapshot(bot.id);
@@ -3110,7 +3255,7 @@ const server = createServer(async (req, res) => {
         }
       }
       const group = store.createGroup(name, memberIds, false, section);
-      return json(res, 201, { group: { ...group, messages: [] } });
+      return json(res, 201, { group: { ...wireGroup(group), messages: [] } });
     }
     if (method === "POST" && path === "/api/teams/export") {
       const body = await readBody(req);
@@ -3291,9 +3436,9 @@ const server = createServer(async (req, res) => {
             // before anyone has worked, which is the store's call, not ours.
             group = store.patchGroup(group.id, { cwd: projectCwd }) ?? group;
           }
-          broadcast({ kind: "group", group });
+          broadcast({ kind: "group", group: wireGroup(group) });
         }
-        return json(res, 201, { bots: publicBots, archivedBots, archived, group });
+        return json(res, 201, { bots: publicBots, archivedBots, archived, group: group ? wireGroup(group) : undefined });
       } catch (error) {
         // A room of deleted members must not survive either — patchGroup can
         // throw (disk) after createGroup already saved.
@@ -3312,7 +3457,7 @@ const server = createServer(async (req, res) => {
         return json(res, 400, { error: "action must be complete or skip" });
       }
       if (group.setupCompletedAt != null || group.setupSkippedAt != null) {
-        return json(res, 200, { group });
+        return json(res, 200, { group: wireGroup(group) });
       }
       if (store.messagesFor(group.threadId).length > 0) {
         return json(res, 409, { error: "room setup must be finished before the first message" });
@@ -3341,7 +3486,7 @@ const server = createServer(async (req, res) => {
       }
       const updated = store.patchGroup(m[1], patch);
       if (!updated) return json(res, 404, { error: "no such room" });
-      return json(res, 200, { group: updated });
+      return json(res, 200, { group: wireGroup(updated) });
     }
     m = path.match(/^\/api\/groups\/([\w-]+)$/);
     if (m && method === "PATCH") {
@@ -3413,14 +3558,14 @@ const server = createServer(async (req, res) => {
       }
       const group = store.patchGroup(m[1], patch);
       if (!group) return json(res, 404, { error: "no such room" });
-      return json(res, 200, { group });
+      return json(res, 200, { group: wireGroup(group) });
     }
     m = path.match(/^\/api\/groups\/([\w-]+)\/read$/);
     if (m && method === "POST") {
       const group = store.patchGroup(m[1], { unread: false });
       if (!group) return json(res, 404, { error: "no such room" });
-      broadcast({ kind: "group", group });
-      return json(res, 200, { group });
+      broadcast({ kind: "group", group: wireGroup(group) });
+      return json(res, 200, { group: wireGroup(group) });
     }
     m = path.match(/^\/api\/groups\/([\w-]+)$/);
     if (m && method === "DELETE") {
@@ -3570,7 +3715,7 @@ const server = createServer(async (req, res) => {
       // safe — startTurn refuses to run a turn on an unavailable instance
       // anyway, so an unverifiable level never reaches a CLI.
       const nextSelection = (body as Record<string, unknown>).modelSelection as
-        | { instanceId?: string; effort?: string }
+        | { instanceId?: string; model?: string; effort?: string }
         | undefined;
       if (nextSelection?.effort !== undefined) {
         if (!isEffortLevel(nextSelection.effort)) {
@@ -3579,7 +3724,13 @@ const server = createServer(async (req, res) => {
         const target = registry.get(nextSelection.instanceId ?? existingBot?.modelSelection.instanceId ?? "");
         // typed as strings, not levels: this is the boundary that decides
         // whether the value *is* a level, so it must not assert that it is
-        const allowed: readonly string[] = target?.adapter.capabilities.effortLevels ?? [];
+        const allowed: readonly string[] = target
+          ? (effortLevelsForModel(
+              target.models.options,
+              nextSelection.model ?? existingBot?.modelSelection.model ?? "",
+              target.adapter.capabilities.effortLevels,
+            ) ?? [])
+          : [];
         if (target && !allowed.includes(nextSelection.effort)) {
           return json(res, 400, {
             error: `effort "${nextSelection.effort}" is not offered by this bot's engine`,
@@ -3906,7 +4057,10 @@ const server = createServer(async (req, res) => {
       if (resolvePeerComms(approvalBus, String(body.requestId), behavior)) {
         return json(res, 200, { ok: true, outcome: behavior === "allow" ? "allowed-once" : "rejected" });
       }
-      const outcome = await answerRequest(bot.threadId, bot.modelSelection.instanceId, String(body.requestId), behavior, body.message, { id: bot.id, name: bot.name });
+      const selected = z.array(z.string()).safeParse(body.selected).data;
+      const custom = z.string().safeParse(body.custom).data;
+      const outcome = await answerRequest(bot.threadId, bot.modelSelection.instanceId, String(body.requestId), behavior, body.message, selected, custom, { id: bot.id, name: bot.name });
+      if (outcome === "retryable") return json(res, 409, { ok: false, outcome, error: "the host did not acknowledge the answer; retry it" });
       return json(res, 200, { ok: true, outcome });
     }
     // Answer by THREAD, so a request raised inside a room can be answered
@@ -3937,7 +4091,10 @@ const server = createServer(async (req, res) => {
           (pending?.from ? store.bot(pending.from.botId) : undefined)
         : store.botByThread(threadId);
       if (!owner && !pending) return json(res, 404, { error: "nothing is waiting on an answer in this conversation" });
-      const outcome = await answerRequest(threadId, owner?.modelSelection.instanceId ?? "", requestId, behavior, body.message, owner ? { id: owner.id, name: owner.name } : undefined);
+      const selected = z.array(z.string()).safeParse(body.selected).data;
+      const custom = z.string().safeParse(body.custom).data;
+      const outcome = await answerRequest(threadId, owner?.modelSelection.instanceId ?? "", requestId, behavior, body.message, selected, custom, owner ? { id: owner.id, name: owner.name } : undefined);
+      if (outcome === "retryable") return json(res, 409, { ok: false, outcome, error: "the host did not acknowledge the answer; retry it" });
       return json(res, 200, { ok: true, outcome });
     }
     m = path.match(/^\/api\/bots\/([\w-]+)\/interrupt$/);
@@ -4212,6 +4369,94 @@ const server = createServer(async (req, res) => {
       // turn this endpoint into an inherited-secret reader.
       const probe = await testCliBinary(cli, driver);
       return json(res, 200, probe);
+    }
+
+    // ── DeepSeek Harness connection + bounded model management ──────
+    const deepSeekSettingsRoute = /^\/api\/instances\/([\w.-]+)\/deepseek-harness(?:\/(pair|discover|upsert))?$/.exec(path);
+    if (deepSeekSettingsRoute) {
+      const instanceId = deepSeekSettingsRoute[1];
+      const action = deepSeekSettingsRoute[2];
+      if (method === "GET" && action === undefined) {
+        const config = deepSeekHarnessInstanceConfig(instanceId);
+        const management = new DeepSeekHarnessManagementClient(config);
+        try {
+          let modelManagement;
+          try {
+            modelManagement = await management.describe();
+          } catch (error) {
+            if (!(error instanceof DeepSeekHarnessSettingsError)) throw error;
+            modelManagement = unavailableDeepSeekHarnessManagement(error);
+          }
+          return json(res, 200, {
+            connection: publicDeepSeekHarnessConnection(instanceId, config),
+            modelManagement,
+          });
+        } finally {
+          management.close();
+        }
+      }
+
+      const writesConnection = method === "PATCH" && action === undefined;
+      const runsAction = method === "POST" && action !== undefined;
+      if (writesConnection || runsAction) {
+        if (!String(req.headers["content-type"] ?? "").toLowerCase().startsWith("application/json")) {
+          return json(res, 415, { code: "invalid-request", error: "content-type must be application/json" });
+        }
+        const body = await readBody(req);
+        if (providerConfigBusy) return json(res, 409, { code: "settings-busy", error: "Another provider update is still finishing. Wait a moment and try again." });
+        providerConfigBusy = true;
+        try {
+          const current = deepSeekHarnessInstanceConfig(instanceId);
+          if (writesConnection) {
+            const patch = parseDeepSeekHarnessConnectionPatch(body);
+            const next: DeepSeekHarnessConfig = { ...current };
+            const changingOrigin = patch.baseUrl !== undefined && patch.baseUrl !== current.baseUrl;
+            const nextTransport = patch.transport ?? current.transport;
+            if (changingOrigin && nextTransport === "paired") {
+              throw new DeepSeekHarnessSettingsError(409, "pairing-required", "Pair this DeepSeek Harness origin before using paired transport");
+            }
+            if (patch.baseUrl !== undefined) next.baseUrl = patch.baseUrl;
+            if (patch.transport !== undefined) next.transport = patch.transport;
+            if (changingOrigin) delete next.deviceCookie;
+            if (patch.agentPreset === null) delete next.agentPreset;
+            else if (patch.agentPreset !== undefined) next.agentPreset = patch.agentPreset;
+            if (next.transport === "paired" && !next.deviceCookie) {
+              throw new DeepSeekHarnessSettingsError(409, "pairing-required", "Pair this DeepSeek Harness origin before using paired transport");
+            }
+            const saved = await persistDeepSeekHarnessConfig(instanceId, next);
+            return json(res, 200, { saved, connection: publicDeepSeekHarnessConnection(instanceId, next) });
+          }
+
+          if (action === "pair") {
+            const pair = parseDeepSeekHarnessPairRequest(body);
+            const accepted = await acceptDeepSeekHarnessPairing(pair.pairingLink);
+            const next: DeepSeekHarnessConfig = {
+              ...current,
+              baseUrl: accepted.baseUrl,
+              transport: "paired",
+              deviceCookie: accepted.deviceCookie,
+            };
+            await persistDeepSeekHarnessConfig(instanceId, next, { forceReload: true });
+            return json(res, 200, { paired: true });
+          }
+
+          const management = new DeepSeekHarnessManagementClient(current);
+          try {
+            if (action === "discover") {
+              return json(res, 200, await management.discover(parseDeepSeekHarnessDiscoverRequest(body)));
+            }
+            if (action === "upsert") {
+              const result = await management.upsert(parseDeepSeekHarnessUpsertRequest(body));
+              await registry.get(instanceId)?.refreshModels?.().catch(() => {});
+              return json(res, 200, result);
+            }
+          } finally {
+            management.close();
+          }
+        } finally {
+          providerConfigBusy = false;
+        }
+      }
     }
 
     // ── per-instance CLI path override (custom builds / versioned bins) ──
@@ -4587,6 +4832,10 @@ const server = createServer(async (req, res) => {
 
     return json(res, 404, { error: `no route: ${method} ${path}` });
   } catch (e) {
+    if (e instanceof DeepSeekHarnessSettingsError) {
+      const failure = publicDeepSeekHarnessSettingsError(e);
+      return json(res, failure.status, { code: failure.code, error: failure.error });
+    }
     const status = (e as any)?.status ?? 500;
     return json(res, status, { error: e instanceof Error ? e.message : String(e) });
   }

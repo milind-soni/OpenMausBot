@@ -114,6 +114,19 @@ describe("ProviderRegistry", () => {
     expect(described.capabilities.effortLevels).toEqual(["low", "high"]);
   });
 
+  it("preserves exact model effort levels in describe()", async () => {
+    const fake = makeFakeDriver();
+    fake.driver.models.options[0] = {
+      ...fake.driver.models.options[0],
+      effortLevels: ["minimal", "high"],
+    };
+    const registry = new ProviderRegistry([fake.driver]);
+    await registry.load({ a: { driver: "fake" } });
+
+    const [described] = await registry.describe();
+    expect(described.models.options[0].effortLevels).toEqual(["minimal", "high"]);
+  });
+
   it("omits effortLevels from describe() when the driver declares none", async () => {
     const fake = makeFakeDriver();
     const registry = new ProviderRegistry([fake.driver]);

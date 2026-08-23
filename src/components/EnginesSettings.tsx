@@ -9,9 +9,14 @@ import { Check, ChevronDown, Loader2, TriangleAlert } from "lucide-react";
 
 import { api, useStore, type InstanceInfo } from "@/state/store";
 import { EngineGroupLabel } from "./EngineGroupLabel";
+import { DeepSeekHarnessSettings } from "./DeepSeekHarnessSettings";
 import { ProviderMark } from "./ProviderIcons";
 import { splitEngineRail } from "@/lib/engine-rail";
 import { cn } from "@/lib/cn";
+
+export function deepSeekHarnessSettingsInstances(instances: readonly InstanceInfo[]): InstanceInfo[] {
+  return instances.filter((instance) => instance.driverKind === "deepseekHarness");
+}
 
 interface ProbeResult {
   ok: boolean;
@@ -282,16 +287,23 @@ function EngineRow({ instance }: { instance: InstanceInfo }) {
 
 export function EnginesSettings() {
   const { state } = useStore();
+  const deepSeekHarnessInstances = deepSeekHarnessSettingsInstances(state.instances);
   // every KNOWN-driver instance has cliDefault; unknown-driver shadows have
   // neither unless an override was set. Including them keeps a Reset-able row
   // (and a Set CLI… path) for engines the running build doesn't recognize.
-  const rows = state.instances.filter((i) => i.cli !== undefined || i.cliDefault !== undefined || i.snapshot.state === "unavailable");
+  const rows = state.instances.filter((i) =>
+    i.driverKind !== "deepseekHarness"
+    && (i.cli !== undefined || i.cliDefault !== undefined || i.snapshot.state === "unavailable"));
 
   return (
     <div className="flex flex-col gap-5">
-      {rows.length === 0 && (
+      {rows.length === 0 && deepSeekHarnessInstances.length === 0 && (
         <div className="text-[13px] text-ink-secondary">No CLI engines detected yet.</div>
       )}
+      {deepSeekHarnessInstances.length > 0 && <EngineGroupLabel>Harness</EngineGroupLabel>}
+      {deepSeekHarnessInstances.map((instance) => (
+        <DeepSeekHarnessSettings key={instance.instanceId} instance={instance} />
+      ))}
       {(() => {
         const { subscription, custom } = splitEngineRail(rows);
         return (

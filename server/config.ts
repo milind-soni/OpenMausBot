@@ -4,6 +4,7 @@
 import { readFileSync, mkdirSync, existsSync, renameSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
+import { isDeepStrictEqual } from "node:util";
 import { z } from "zod";
 
 import { writeFileAtomic } from "./atomic.ts";
@@ -331,14 +332,7 @@ export function withInstanceCli(
     delete rest.cli;
     entry.config = Object.keys(rest).length ? rest : undefined;
   }
-  for (const e of Object.values(map)) {
-    if (!e.environment) continue;
-    const injected = injectedEnvironment(next, e.driver);
-    for (const [k, v] of Object.entries(e.environment)) {
-      if (injected.get(k) === v) delete e.environment[k];
-    }
-    if (!Object.keys(e.environment).length) delete e.environment;
-  }
+  stripInjectedInstanceEnvironment(next, map);
   next.instances = map;
   return { ok: true, config: next };
 }
@@ -346,6 +340,47 @@ export function withInstanceCli(
 interface InstanceCliUpdate {
   ok: boolean;
   config: AppConfig;
+}
+
+export interface InstanceDriverConfigUpdate {
+  ok: boolean;
+  changed: boolean;
+  config: AppConfig;
+}
+
+/** Replace one instance's driver-private config while keeping the rest of the
+ * persisted fleet byte-for-byte equivalent. The live instance map contains
+ * credential environment injected from top-level config, so strip those
+ * values before returning a map that a caller may persist. */
+export function withInstanceDriverConfig(
+  cfg: AppConfig,
+  instanceId: string,
+  expectedDriver: string,
+  config: JsonValue | undefined,
+): InstanceDriverConfigUpdate {
+  const next: AppConfig = structuredClone(cfg);
+  const map = instanceConfigs(next);
+  if (!Object.hasOwn(map, instanceId) || map[instanceId].driver !== expectedDriver) {
+    return { ok: false, changed: false, config: cfg };
+  }
+  const entry = map[instanceId];
+  const changed = !isDeepStrictEqual(entry.config, config);
+  if (config === undefined) delete entry.config;
+  else entry.config = structuredClone(config);
+  stripInjectedInstanceEnvironment(next, map);
+  next.instances = map;
+  return { ok: true, changed, config: next };
+}
+
+function stripInjectedInstanceEnvironment(cfg: AppConfig, map: InstanceConfigMap): void {
+  for (const entry of Object.values(map)) {
+    if (!entry.environment) continue;
+    const injected = injectedEnvironment(cfg, entry.driver);
+    for (const [key, value] of Object.entries(entry.environment)) {
+      if (injected.get(key) === value) delete entry.environment[key];
+    }
+    if (!Object.keys(entry.environment).length) delete entry.environment;
+  }
 }
 
 /** The credential env instanceConfigs() injects for one driver — shared with
@@ -400,6 +435,7 @@ export function instanceConfigs(cfg: AppConfig): InstanceConfigMap {
     qwen: { driver: "qwenAgent" },
     hermes: { driver: "hermesAgent" },
     pi: { driver: "piAgent" },
+    deepseekHarness: { driver: "deepseekHarness" },
   };
   const CUSTOM_ONLY = {
     qwen: { driver: "qwenAgent" },
@@ -412,6 +448,7 @@ export function instanceConfigs(cfg: AppConfig): InstanceConfigMap {
   const PRODUCT_FLEET_ADDITIONS = {
     cursor: { driver: "cursorAgent" },
     openaiCompat: { driver: "openai-compat" },
+    deepseekHarness: { driver: "deepseekHarness" },
     ...CUSTOM_ONLY,
   } as const;
   const configured = cfg.instances && Object.keys(cfg.instances).length ? cfg.instances : null;

@@ -10,10 +10,14 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { z } from "zod";
 
 import { removeTempDir, waitForExit } from "./testing/cleanup.ts";
 import { openSse } from "./testing/sse.ts";
 import { IMAGE_MAX_BYTES } from "./attachments.ts";
+import { FakeDshHost } from "./testing/fake-dsh-host.ts";
+import { dshClientRequestSchema, dshClientResponseSchema, dshJsonValueSchema, type DshJsonValue } from "./drivers/deepseek-harness/protocol.ts";
+import { encodeDshModelId } from "./drivers/deepseek-harness/models.ts";
 
 const SERVER_DIR = dirname(fileURLToPath(import.meta.url));
 const ROOT = join(SERVER_DIR, "..");
@@ -31,6 +35,18 @@ let home: string;
 let staticDir: string;
 let fakeClaudeDump: string;
 let stderr = "";
+let dshStub: FakeDshHost;
+let dshSessionSequence = 0;
+let dshSettingsRevision = 7;
+let dshPluginAvailable = true;
+let dshManagementOffline = false;
+let dshPairedAuthorized = true;
+let dshSettingsConflict = false;
+let dshChatModelAvailable = true;
+let dshConfiguredModels: DshJsonValue[] = [
+  { id: "keep", name: "Keep", input: ["text"], custom: { preserved: true } },
+];
+const dshUsedPairTokens = new Set<string>();
 
 const api = async (method: string, path: string, body?: unknown): Promise<{ status: number; body: any }> => {
   const res = await fetch(`${BASE}${path}`, {
@@ -39,6 +55,22 @@ const api = async (method: string, path: string, body?: unknown): Promise<{ stat
     body: body ? JSON.stringify(body) : undefined,
   });
   return { status: res.status, body: await res.json() };
+};
+
+async function waitUntil<T>(read: () => T | undefined | Promise<T | undefined>, timeoutMs = 5_000): Promise<T> {
+  const deadline = Date.now() + timeoutMs;
+  for (;;) {
+    const value = await read();
+    if (value !== undefined) return value;
+    if (Date.now() >= deadline) throw new Error("timed out waiting for fixture state");
+    await new Promise((resolve) => setTimeout(resolve, 20));
+  }
+}
+
+const writeClaudeCatalog = (options: unknown[]) => {
+  const configDir = join(home, ".claude");
+  mkdirSync(configDir, { recursive: true });
+  writeFileSync(join(configDir, "settings.json"), JSON.stringify({ availableModels: options }));
 };
 
 const uploadAvatar = async (mime = "image/png"): Promise<string> => {
@@ -68,6 +100,140 @@ beforeAll(async () => {
   home = mkdtempSync(join(tmpdir(), "omb-api-test-"));
   staticDir = join(home, "static");
   fakeClaudeDump = join(home, "fake-claude-dump.json");
+  dshStub = new FakeDshHost();
+  await dshStub.start();
+  dshStub.onRouteRequest = ({ path, headers, body }, response) => {
+    const send = (status: number, value: DshJsonValue, extraHeaders: Record<string, string | string[]> = {}) => {
+      response.writeHead(status, { "content-type": "application/json", ...extraHeaders });
+      response.end(JSON.stringify(value));
+    };
+    if (path === "/api/pair/accept") {
+      const token = z.object({ token: z.string() }).safeParse(body).data?.token;
+      if (!token || token === "rejected-pair") {
+        send(404, { ok: false, code: "unknown" });
+        return true;
+      }
+      if (dshUsedPairTokens.has(token)) {
+        send(409, { ok: false, code: "used" });
+        return true;
+      }
+      dshUsedPairTokens.add(token);
+      send(200, { ok: true, deviceId: "paired-fixture" }, {
+        "set-cookie": ["dsh_pair=paired-fixture-cookie; Path=/; HttpOnly; SameSite=Lax"],
+      });
+      return true;
+    }
+    if (path.startsWith("/remote/api/") && !dshPairedAuthorized) {
+      send(403, { error: "revoked-device-upstream-secret" });
+      return true;
+    }
+    if (path.startsWith("/api/pair/model-catalog")) {
+      if (!dshPluginAvailable) {
+        send(404, { error: "missing" });
+        return true;
+      }
+      if (headers.cookie !== "dsh_pair=paired-fixture-cookie" || !dshPairedAuthorized) {
+        send(403, { error: "unpaired-upstream-secret" });
+        return true;
+      }
+      if (path.endsWith("/discover")) {
+        send(200, { models: [{ id: "deepseek/deepseek-v3", name: "DeepSeek V3", contextWindow: 64_000, maxTokens: 8_000 }] });
+        return true;
+      }
+      if (path.endsWith("/upsert")) {
+        send(200, { groups: [{ id: "openrouter", name: "OpenRouter", models: [{ id: "deepseek/deepseek-v3", name: "DeepSeek V3" }] }], failures: [] });
+        return true;
+      }
+      send(200, { capability: "paired-model-catalog", providers: [{ provider: "openrouter", displayName: "OpenRouter" }] });
+      return true;
+    }
+    return false;
+  };
+  dshStub.onRequest = ({ body }) => {
+    if (dshClientResponseSchema.safeParse(body).success) {
+      return dshJsonValueSchema.parse({ accepted: false, reason: "not-pending" });
+    }
+    const request = dshClientRequestSchema.parse(body);
+    if (request.method === "host.describe" && dshManagementOffline) {
+      return dshJsonValueSchema.parse({
+        type: "server-response",
+        rpcId: request.rpcId,
+        result: {
+          ok: false,
+          error: { code: "host-offline", message: "direct-upstream-secret", details: { credential: "must-not-leak" } },
+        },
+      });
+    }
+    let value: DshJsonValue;
+    if (request.method === "session.create") {
+      const payload = z.object({ sessionId: z.string().optional() }).parse(request.payload);
+      value = { sessionId: payload.sessionId ?? `server-dsh-${++dshSessionSequence}` };
+    }
+    else if (request.method === "session.selectModel") {
+      const selectionSchema = z.object({ provider: z.string(), model: z.string(), reasoningEffort: z.string().optional() });
+      const payload = selectionSchema.parse(request.payload);
+      const selected = selectionSchema.parse(
+        !dshChatModelAvailable && payload.provider === "deepseek" && payload.model === "chat"
+          ? { ...payload, model: "fallback" }
+          : payload,
+      );
+      value = { selected };
+    }
+    else if (request.method === "session.prompt" || request.method === "session.cancel") value = { accepted: true };
+    else if (request.method === "host.describe") value = { version: "fixture", cwd: "/fixture", attachedSessions: 0, home: "/fixture", canOpenPath: false };
+    else if (request.method === "llm.providers") value = { providers: [
+      { provider: "openrouter", displayName: "OpenRouter", settingsNs: "llm-pi-ai", settingsPath: ["providers", "openrouter"], active: true },
+      { provider: "inactive", displayName: "Inactive", settingsNs: "llm-pi-ai", settingsPath: ["providers", "inactive"], active: false },
+    ] };
+    else if (request.method === "llm.models") value = {
+      groups: [{
+        id: "deepseek",
+        name: "DeepSeek",
+        models: dshChatModelAvailable
+          ? [{ id: "chat", name: "Chat" }, { id: "fallback", name: "Fallback" }]
+          : [{ id: "fallback", name: "Fallback" }],
+      }],
+      failures: [],
+    };
+    else if (request.method === "llm.discoverModels") value = { models: [{ id: "deepseek/deepseek-v3", name: "DeepSeek V3", contextWindow: 64_000, maxTokens: 8_000 }] };
+    else if (request.method === "settings.describe") value = {
+      writable: true,
+      hasDocument: true,
+      namespaces: [{
+        ns: "llm-pi-ai",
+        schema: {},
+        value: { providers: { openrouter: { models: dshConfiguredModels } } },
+        applies: "live",
+        secrets: [{ path: ["providers", "openrouter", "apiKey"], set: true }],
+        revision: dshSettingsRevision,
+      }],
+    };
+    else if (request.method === "settings.mutate") {
+      if (dshSettingsConflict) {
+        return dshJsonValueSchema.parse({
+          type: "server-response",
+          rpcId: request.rpcId,
+          result: {
+            ok: false,
+            error: { code: "settings-conflict", message: "upstream-secret", details: { ns: "llm-pi-ai", expected: 7, actual: 8 } },
+          },
+        });
+      }
+      const payload = z.object({
+        ns: z.literal("llm-pi-ai"),
+        expectedRevision: z.number(),
+        ops: z.array(z.object({ op: z.literal("set"), path: z.array(z.string()), value: z.unknown() })),
+      }).parse(request.payload);
+      const modelOp = payload.ops.find((op) => op.path.join(".") === "providers.openrouter.models");
+      const nextModels = dshJsonValueSchema.safeParse(modelOp?.value);
+      if (nextModels.success && Array.isArray(nextModels.data)) dshConfiguredModels = nextModels.data;
+      dshSettingsRevision += 1;
+      value = { ns: "llm-pi-ai", schema: {}, value: {}, applies: "live", secrets: [], revision: dshSettingsRevision };
+    }
+    else if (request.method === "agentPreset.list") value = { presets: [], authorable: false, hasDocument: false };
+    else throw new Error(`unsupported DSH fixture method ${request.method}`);
+    return dshJsonValueSchema.parse({ type: "server-response", rpcId: request.rpcId, result: { ok: true, value } });
+  };
   // a fleet of exactly one unknown driver: no CLI probes, no network
   mkdirSync(join(home, ".openmausbot"), { recursive: true });
   mkdirSync(join(staticDir, "assets"), { recursive: true });
@@ -79,6 +245,7 @@ beforeAll(async () => {
       instances: {
         ghost: { driver: "not-a-real-driver", displayName: "Ghost" },
         claude: { driver: "claudeAgent", displayName: "Fixture Claude", config: { cli: FAKE_CLAUDE_CLI } },
+        deepseekHarness: { driver: "deepseekHarness", displayName: "Fixture DSH", config: { baseUrl: dshStub.baseUrl, transport: "direct" } },
       },
     }),
   );
@@ -249,6 +416,7 @@ afterAll(async () => {
   // retry loop; these helpers are that fix plus the cause — the retry AND
   // an exit that is actually waited for before the delete begins.
   await waitForExit(child, { signal: "SIGTERM" });
+  await dshStub.stop();
   await removeTempDir(home);
 });
 
@@ -1245,6 +1413,147 @@ describe("harness HTTP API", () => {
     expect(patched.body.error).toContain("not recognized");
   });
 
+  it("accepts the canonical minimal effort value while an engine is offline", async () => {
+    const bot = (await api("POST", "/api/bots")).body.bot;
+    const patched = await api("PATCH", `/api/bots/${bot.id}`, {
+      modelSelection: { instanceId: "ghost", model: "ghost-1", effort: "minimal" },
+    });
+
+    expect(patched.status).toBe(200);
+    expect(patched.body.bot.modelSelection.effort).toBe("minimal");
+  });
+
+  it("rejects a live bot PATCH effort absent from the selected model's exact levels", async () => {
+    const model = "claude-exact-low";
+    writeClaudeCatalog([{ id: model, label: "Claude exact low", effortLevels: ["low"] }]);
+    await api("GET", "/api/instances");
+    const bot = (await api("POST", "/api/bots")).body.bot;
+
+    try {
+      const patched = await api("PATCH", `/api/bots/${bot.id}`, {
+        modelSelection: { instanceId: "claude", model, effort: "high" },
+      });
+
+      expect(patched.status).toBe(400);
+      expect(patched.body.error).toContain('effort "high" is not offered');
+    } finally {
+      writeClaudeCatalog([]);
+      await api("GET", "/api/instances");
+      await api("DELETE", `/api/bots/${bot.id}`);
+    }
+  });
+
+  it("refuses a selected DSH model that disappeared after catalog refresh in direct and room turns", async () => {
+    dshChatModelAvailable = true;
+    await api("GET", "/api/instances");
+    const bot = (await api("POST", "/api/bots")).body.bot;
+    const selectedModel = encodeDshModelId("deepseek", "chat");
+    const patched = await api("PATCH", `/api/bots/${bot.id}`, {
+      modelSelection: { instanceId: "deepseekHarness", model: selectedModel },
+    });
+    expect(patched.status).toBe(200);
+    const room = (await api("POST", "/api/groups", {
+      name: "Vanished DSH model room",
+      memberIds: [bot.id],
+    })).body.group;
+    expect((await api("PATCH", `/api/groups/${room.id}/setup`, { action: "skip" })).status).toBe(200);
+
+    const before = (await api("GET", "/api/bots")).body.bots.find((candidate: { id: string }) => candidate.id === bot.id);
+    const beforeMessages = before.messages.length;
+    const requestStart = dshStub.requests.length;
+    let send: Awaited<ReturnType<typeof api>> | undefined;
+    try {
+      dshChatModelAvailable = false;
+      const refreshed = await api("GET", "/api/instances");
+      const dsh = refreshed.body.instances.find((candidate: { instanceId: string }) => candidate.instanceId === "deepseekHarness");
+      expect(dsh.models.options.map((option: { id: string }) => option.id)).toEqual([
+        encodeDshModelId("deepseek", "fallback"),
+      ]);
+
+      send = await api("POST", `/api/bots/${bot.id}/messages`, { text: "Do not run this on another model." });
+      expect(send.status).toBe(409);
+      expect(send.body.error).toMatch(/selected DeepSeek Harness model is no longer available/i);
+
+      const after = (await api("GET", "/api/bots")).body.bots.find((candidate: { id: string }) => candidate.id === bot.id);
+      expect(after.busy).not.toBe(true);
+      expect(after.messages).toHaveLength(beforeMessages);
+
+      expect((await api("POST", `/api/groups/${room.id}/messages`, { text: "Do not run this room turn either." })).status).toBe(202);
+      await expect.poll(async () => {
+        const state = (await api("GET", "/api/bots?messages=20")).body;
+        const messages = state.groups.find((group: { id: string }) => group.id === room.id).messages;
+        return messages.some((message: { tool?: { name?: string } }) =>
+          message.tool?.name?.includes("selected DeepSeek Harness model is no longer available"),
+        );
+      }, { timeout: 5_000 }).toBe(true);
+
+      const dispatched = dshStub.requests.slice(requestStart)
+        .flatMap((request) => {
+          const parsed = dshClientRequestSchema.safeParse(request.body);
+          return parsed.success ? [parsed.data.method] : [];
+        });
+      expect(dispatched).not.toContain("session.create");
+      expect(dispatched).not.toContain("session.selectModel");
+      expect(dispatched).not.toContain("session.prompt");
+    } finally {
+      if (send?.status === 202) {
+        const prompt = await waitUntil(() => dshStub.requests.slice(requestStart)
+          .map((request) => dshClientRequestSchema.safeParse(request.body).data)
+          .find((request) => request?.method === "session.prompt"));
+        const sessionId = z.object({ sessionId: z.string() }).parse(prompt.payload).sessionId;
+        dshStub.send("mux", {
+          type: "server-request",
+          rpcId: "catalog-disappeared-cleanup",
+          method: "session/event",
+          payload: { type: "session/event", sessionId, event: { type: "turn/end", seq: 1, time: 1, data: { reason: { kind: "cancelled" } } } },
+        });
+        await waitUntil(async () => {
+          const current = (await api("GET", "/api/bots")).body.bots.find((candidate: { id: string }) => candidate.id === bot.id);
+          return current?.busy ? undefined : true;
+        });
+      }
+      dshChatModelAvailable = true;
+      await api("GET", "/api/instances");
+      await api("DELETE", `/api/groups/${room.id}`);
+      await api("DELETE", `/api/bots/${bot.id}`);
+    }
+  });
+
+  it("does not dispatch a room turn with stale exact-model effort", async () => {
+    const model = "claude-room-exact";
+    writeClaudeCatalog([{ id: model, label: "Claude room exact" }]);
+    await api("GET", "/api/instances");
+    const bot = (await api("POST", "/api/bots")).body.bot;
+    const room = (await api("POST", "/api/groups", { name: "Exact effort room", memberIds: [bot.id] })).body.group;
+    expect((await api("PATCH", `/api/groups/${room.id}/setup`, { action: "skip" })).status).toBe(200);
+
+    try {
+      const selected = await api("PATCH", `/api/bots/${bot.id}`, {
+        modelSelection: { instanceId: "claude", model, effort: "high" },
+      });
+      expect(selected.status).toBe(200);
+
+      writeClaudeCatalog([{ id: model, label: "Claude room exact", effortLevels: ["low"] }]);
+      await api("GET", "/api/instances");
+      rmSync(fakeClaudeDump, { force: true });
+
+      expect((await api("POST", `/api/groups/${room.id}/messages`, { text: "Please respond." })).status).toBe(202);
+      await expect.poll(async () => {
+        const state = (await api("GET", "/api/bots?messages=20")).body;
+        const messages = state.groups.find((group: { id: string }) => group.id === room.id).messages;
+        return messages.some((message: { tool?: { name?: string } }) =>
+          message.tool?.name?.includes('effort "high" is not offered by this bot\'s engine'),
+        );
+      }, { timeout: 5_000 }).toBe(true);
+      expect(existsSync(fakeClaudeDump)).toBe(false);
+    } finally {
+      writeClaudeCatalog([]);
+      await api("GET", "/api/instances");
+      await api("DELETE", `/api/groups/${room.id}`);
+      await api("DELETE", `/api/bots/${bot.id}`);
+    }
+  });
+
   it("leaves a bot with no effort level untouched", async () => {
     const bot = (await api("POST", "/api/bots")).body.bot;
     expect(bot.modelSelection.effort).toBeUndefined();
@@ -1364,6 +1673,389 @@ describe("harness HTTP API", () => {
     const reread = (await api("GET", "/api/bots")).body.bots.find((candidate: { id: string }) => candidate.id === bot.id);
     expect(reread.messages.at(-1).tool).toMatchObject({ ok: false });
     expect(reread.messages.at(-1).tool.name).toContain("request is no longer open");
+  });
+
+  it("returns retryable DSH answers as HTTP 409 without transcript or audit success", async () => {
+    await api("GET", "/api/instances"); // refresh the live DSH catalog
+    const bot = (await api("POST", "/api/bots")).body.bot;
+    const model = encodeDshModelId("deepseek", "chat");
+    const patched = await api("PATCH", `/api/bots/${bot.id}`, { modelSelection: { instanceId: "deepseekHarness", model } });
+    expect(patched.status).toBe(200);
+    const requestStart = dshStub.requests.length;
+    expect((await api("POST", `/api/bots/${bot.id}/messages`, { text: "manual retry fixture" })).status).toBe(202);
+    const prompt = await waitUntil(() => dshStub.requests.slice(requestStart).map((entry) => dshClientRequestSchema.safeParse(entry.body).data).find((entry) => entry?.method === "session.prompt"));
+    // SAFETY: FakeDshHost validated this official session.prompt payload before recording it.
+    const sessionId = (prompt.payload as { sessionId: string }).sessionId;
+    dshStub.send("mux", { type: "server-request", rpcId: "server-manual-rpc", method: "approval/requested", payload: { type: "approval/requested", sessionId, approvalId: "server-manual", toolName: "shell", reason: "manual retry" } });
+    const open = await waitUntil(async () => {
+      const all = (await api("GET", "/api/bots")).body;
+      const current = all.bots.find((candidate: { id: string }) => candidate.id === bot.id);
+      return current?.messages.find((message: any) => message.card?.subtitle === "manual retry");
+    });
+    expect(open?.card.requestId).toEqual(expect.any(String));
+    const beforeState = (await api("GET", "/api/bots")).body.bots.find((candidate: { id: string }) => candidate.id === bot.id);
+    const beforeCount = beforeState.messages.length;
+    const retry = await api("POST", `/api/bots/${bot.id}/respond`, { requestId: open.card.requestId, behavior: "allow" });
+    expect(retry.status).toBe(409);
+    expect(retry.body).toMatchObject({ ok: false, outcome: "retryable" });
+    const after = (await api("GET", "/api/bots")).body.bots.find((candidate: { id: string }) => candidate.id === bot.id);
+    const stillOpen = after.messages.find((message: any) => message.id === open.id).card;
+    expect(stillOpen.answered).toBeUndefined();
+    expect(stillOpen.dismissed).not.toBe(true);
+    expect(after.messages).toHaveLength(beforeCount);
+    await new Promise((resolve) => setTimeout(resolve, 30));
+    const decisionsFile = join(home, ".openmausbot", "decisions.ndjson");
+    const rows = existsSync(decisionsFile) ? readFileSync(decisionsFile, "utf8").trim().split("\n").filter(Boolean).map((line) => JSON.parse(line)) : [];
+    expect(rows.some((row: any) => row.requestId === open.card.requestId && row.decision === "user-approved")).toBe(false);
+
+    dshStub.send("mux", { type: "server-request", rpcId: "server-manual-end", method: "session/event", payload: { type: "session/event", sessionId, event: { type: "turn/end", seq: 1, time: 1, data: { reason: { kind: "completed" } } } } });
+    await waitUntil(async () => {
+      const current = (await api("GET", "/api/bots")).body.bots.find((candidate: { id: string }) => candidate.id === bot.id);
+      return current?.busy ? undefined : true;
+    });
+    await api("DELETE", `/api/bots/${bot.id}`);
+  });
+
+  it("never claims an auto approval when DSH returns retryable or resolves authoritatively", async () => {
+    await api("GET", "/api/instances");
+    const bot = (await api("POST", "/api/bots")).body.bot;
+    const model = encodeDshModelId("deepseek", "chat");
+    const patched = await api("PATCH", `/api/bots/${bot.id}`, {
+      autoApprove: true,
+      modelSelection: { instanceId: "deepseekHarness", model },
+    });
+    expect(patched.status).toBe(200);
+
+    try {
+      const firstStart = dshStub.requests.length;
+      expect((await api("POST", `/api/bots/${bot.id}/messages`, { text: "auto retry fixture" })).status).toBe(202);
+      const firstPrompt = await waitUntil(() => dshStub.requests
+        .slice(firstStart)
+        .map((entry) => dshClientRequestSchema.safeParse(entry.body).data)
+        .find((entry) => entry?.method === "session.prompt"));
+      // SAFETY: FakeDshHost validated this official session.prompt payload before recording it.
+      const sessionId = (firstPrompt.payload as { sessionId: string }).sessionId;
+      dshStub.send("mux", {
+        type: "server-request",
+        rpcId: "server-auto-retry-rpc",
+        method: "approval/requested",
+        payload: {
+          type: "approval/requested",
+          sessionId,
+          approvalId: "server-auto-retry",
+          toolName: "Bash",
+          reason: "ls -la auto retry fixture",
+        },
+      });
+      const fallback = await waitUntil(async () => {
+        const current = (await api("GET", "/api/bots")).body.bots.find((candidate: { id: string }) => candidate.id === bot.id);
+        return current?.messages.find((message: { card?: { subtitle?: string } }) => message.card?.subtitle === "ls -la auto retry fixture");
+      });
+      expect(fallback.card).toMatchObject({ held: "Auto mode couldn't answer this one." });
+      let current = (await api("GET", "/api/bots")).body.bots.find((candidate: { id: string }) => candidate.id === bot.id);
+      expect(current.messages.some((message: { tool?: { name?: string; ok?: boolean } }) =>
+        message.tool?.ok === true && message.tool.name?.includes("auto retry fixture"))).toBe(false);
+      const decisionsFile = join(home, ".openmausbot", "decisions.ndjson");
+      let rows = existsSync(decisionsFile)
+        ? readFileSync(decisionsFile, "utf8").trim().split("\n").filter(Boolean).map((line) => JSON.parse(line))
+        : [];
+      expect(rows.some((row: { summary?: string; decision?: string }) =>
+        row.summary === "ls -la auto retry fixture" && row.decision === "auto-approved")).toBe(false);
+
+      dshStub.send("mux", {
+        type: "server-request",
+        rpcId: "server-auto-retry-resolved",
+        method: "approval/resolved",
+        payload: { type: "approval/resolved", sessionId, approvalId: "server-auto-retry", outcome: "cancelled" },
+      });
+      dshStub.send("mux", {
+        type: "server-request",
+        rpcId: "server-auto-retry-end",
+        method: "session/event",
+        payload: { type: "session/event", sessionId, event: { type: "turn/end", seq: 1, time: 1, data: { reason: { kind: "completed" } } } },
+      });
+      await waitUntil(async () => {
+        const settled = (await api("GET", "/api/bots")).body.bots.find((candidate: { id: string }) => candidate.id === bot.id);
+        return settled?.busy ? undefined : true;
+      });
+
+      dshStub.onRawRequest = (request) => request.path.endsWith("/respond");
+      const secondStart = dshStub.requests.length;
+      expect((await api("POST", `/api/bots/${bot.id}/messages`, { text: "auto authoritative fixture" })).status).toBe(202);
+      const secondPrompt = await waitUntil(() => dshStub.requests
+        .slice(secondStart)
+        .map((entry) => dshClientRequestSchema.safeParse(entry.body).data)
+        .find((entry) => entry?.method === "session.prompt"));
+      // SAFETY: FakeDshHost validated this official session.prompt payload before recording it.
+      expect((secondPrompt.payload as { sessionId: string }).sessionId).toBe(sessionId);
+      dshStub.send("mux", {
+        type: "server-request",
+        rpcId: "server-auto-authoritative-rpc",
+        method: "approval/requested",
+        payload: {
+          type: "approval/requested",
+          sessionId,
+          approvalId: "server-auto-authoritative",
+          toolName: "Bash",
+          reason: "ls -la auto authoritative fixture",
+        },
+      });
+      await waitUntil(() => dshStub.requests.slice(secondStart).find((entry) => entry.path.endsWith("/respond")));
+      dshStub.send("mux", {
+        type: "server-request",
+        rpcId: "server-auto-authoritative-resolved",
+        method: "approval/resolved",
+        payload: { type: "approval/resolved", sessionId, approvalId: "server-auto-authoritative", outcome: "cancelled" },
+      });
+      dshStub.releaseRawResponses();
+      await new Promise<void>((resolve) => setImmediate(resolve));
+      await new Promise<void>((resolve) => setImmediate(resolve));
+
+      current = (await api("GET", "/api/bots")).body.bots.find((candidate: { id: string }) => candidate.id === bot.id);
+      expect(current.messages.some((message: { card?: { subtitle?: string }; tool?: { name?: string; ok?: boolean } }) =>
+        message.card?.subtitle === "ls -la auto authoritative fixture"
+        || (message.tool?.ok === true && message.tool.name?.includes("auto authoritative fixture")))).toBe(false);
+      rows = existsSync(decisionsFile)
+        ? readFileSync(decisionsFile, "utf8").trim().split("\n").filter(Boolean).map((line) => JSON.parse(line))
+        : [];
+      expect(rows.some((row: { summary?: string }) => row.summary === "ls -la auto authoritative fixture")).toBe(false);
+
+      dshStub.send("mux", {
+        type: "server-request",
+        rpcId: "server-auto-authoritative-end",
+        method: "session/event",
+        payload: { type: "session/event", sessionId, event: { type: "turn/end", seq: 2, time: 2, data: { reason: { kind: "completed" } } } },
+      });
+      await waitUntil(async () => {
+        const settled = (await api("GET", "/api/bots")).body.bots.find((candidate: { id: string }) => candidate.id === bot.id);
+        return settled?.busy ? undefined : true;
+      });
+    } finally {
+      dshStub.onRawRequest = undefined;
+      dshStub.releaseRawResponses();
+      await api("DELETE", `/api/bots/${bot.id}`);
+    }
+  });
+
+  it("settles an active paired turn and its open card when device access is revoked, then recovers after re-pairing", async () => {
+    dshPairedAuthorized = true;
+    const paired = await api("POST", "/api/instances/deepseekHarness/deepseek-harness/pair", {
+      pairingLink: `${dshStub.baseUrl}/m/?pair=active-revocation-initial`,
+    });
+    expect(paired).toEqual({ status: 200, body: { paired: true } });
+    await api("GET", "/api/instances");
+    const bot = (await api("POST", "/api/bots")).body.bot;
+    const model = encodeDshModelId("deepseek", "chat");
+    expect((await api("PATCH", `/api/bots/${bot.id}`, {
+      modelSelection: { instanceId: "deepseekHarness", model },
+    })).status).toBe(200);
+    const requestStart = dshStub.requests.length;
+
+    try {
+      expect((await api("POST", `/api/bots/${bot.id}/messages`, { text: "paired revocation fixture" })).status).toBe(202);
+      const prompt = await waitUntil(() => dshStub.requests.slice(requestStart)
+        .map((entry) => dshClientRequestSchema.safeParse(entry.body).data)
+        .find((entry) => entry?.method === "session.prompt"));
+      const sessionId = z.object({ sessionId: z.string() }).parse(prompt.payload).sessionId;
+      dshStub.send("mux", {
+        type: "server-request",
+        rpcId: "active-revocation-approval",
+        method: "approval/requested",
+        payload: {
+          type: "approval/requested",
+          sessionId,
+          approvalId: "active-revocation-approval",
+          toolName: "shell",
+          reason: "approval before access revocation",
+        },
+      });
+      const open = await waitUntil(async () => {
+        const current = (await api("GET", "/api/bots")).body.bots.find((candidate: { id: string }) => candidate.id === bot.id);
+        return current?.messages.find((message: { card?: { subtitle?: string } }) => message.card?.subtitle === "approval before access revocation");
+      });
+      expect(open.card.answered).toBeUndefined();
+
+      dshPairedAuthorized = false;
+      const rejectedAnswer = await api("POST", `/api/bots/${bot.id}/respond`, {
+        requestId: open.card.requestId,
+        behavior: "allow",
+      });
+      expect(rejectedAnswer).toEqual({
+        status: 409,
+        body: { ok: false, outcome: "retryable", error: "the host did not acknowledge the answer; retry it" },
+      });
+
+      const settled = await waitUntil(async () => {
+        const current = (await api("GET", "/api/bots")).body.bots.find((candidate: { id: string }) => candidate.id === bot.id);
+        const card = current?.messages.find((message: { id: string }) => message.id === open.id)?.card;
+        return !current?.busy && card?.dismissed ? { current, card } : undefined;
+      });
+      expect(settled.card).toMatchObject({ answered: "unavailable", dismissed: true });
+      expect(settled.current.messages.some((message: { tool?: { name?: string } }) =>
+        message.tool?.name?.includes("DeepSeek Harness event stream was lost"))).toBe(true);
+      expect(JSON.stringify(settled.current)).not.toMatch(/revoked-device-upstream-secret|deviceCookie|dsh_pair/i);
+
+      const methods = dshStub.requests.slice(requestStart)
+        .flatMap((entry) => {
+          const parsed = dshClientRequestSchema.safeParse(entry.body);
+          return parsed.success ? [parsed.data.method] : [];
+        });
+      // Authorization is latched off at the 403 boundary. Teardown still
+      // attempts its bounded cancel, but the revoked cookie must never be
+      // emitted on another Host request.
+      expect(methods).not.toContain("session.cancel");
+      expect(dshStub.requests.slice(requestStart).some((entry) => entry.path === "/remote/api/respond")).toBe(true);
+
+      const revoked = await api("GET", "/api/instances/deepseekHarness/deepseek-harness");
+      expect(revoked.body.modelManagement).toMatchObject({
+        available: false,
+        reasonCode: "paired-device-unauthorized",
+      });
+      expect(JSON.stringify(revoked.body)).not.toMatch(/revoked-device-upstream-secret|deviceCookie|dsh_pair/i);
+
+      dshPairedAuthorized = true;
+      const repaired = await api("POST", "/api/instances/deepseekHarness/deepseek-harness/pair", {
+        pairingLink: `${dshStub.baseUrl}/m/?pair=active-revocation-recovery`,
+      });
+      expect(repaired).toEqual({ status: 200, body: { paired: true } });
+      const recovered = await api("GET", "/api/instances/deepseekHarness/deepseek-harness");
+      expect(recovered.body).toMatchObject({
+        connection: { transport: "paired", paired: true, hasDeviceCredential: true },
+        modelManagement: { available: true, supported: true },
+      });
+      expect(JSON.stringify(recovered.body)).not.toMatch(/deviceCookie|dsh_pair/i);
+
+      const recoveryStart = dshStub.requests.length;
+      expect(await api("POST", `/api/bots/${bot.id}/messages`, { text: "paired revocation recovery fixture" })).toEqual({
+        status: 202,
+        body: { ok: true },
+      });
+      const recoveredPrompt = await waitUntil(async () => {
+        const prompt = dshStub.requests.slice(recoveryStart)
+          .map((entry) => dshClientRequestSchema.safeParse(entry.body).data)
+          .find((entry) => entry?.method === "session.prompt");
+        if (prompt) return prompt;
+        const current = (await api("GET", "/api/bots")).body.bots.find((candidate: { id: string }) => candidate.id === bot.id);
+        if (!current?.busy) throw new Error(`re-paired turn failed before prompt: ${JSON.stringify(current?.messages.at(-1))}`);
+        return undefined;
+      });
+      const recoveredSessionId = z.object({ sessionId: z.string() }).parse(recoveredPrompt.payload).sessionId;
+      dshStub.send("mux", {
+        type: "server-request",
+        rpcId: "active-revocation-recovered-end",
+        method: "session/event",
+        payload: { type: "session/event", sessionId: recoveredSessionId, event: { type: "turn/end", seq: 1, time: 2, data: { reason: { kind: "completed" } } } },
+      });
+      await waitUntil(async () => {
+        const current = (await api("GET", "/api/bots")).body.bots.find((candidate: { id: string }) => candidate.id === bot.id);
+        return current?.busy ? undefined : true;
+      });
+    } finally {
+      dshPairedAuthorized = true;
+      // Changing origin deliberately clears the write-only device cookie; switch
+      // back immediately so this security fixture cannot leak paired state into
+      // the settings API cases that follow it.
+      await api("PATCH", "/api/instances/deepseekHarness/deepseek-harness", {
+        baseUrl: "http://127.0.0.1:1",
+        transport: "direct",
+      });
+      await api("PATCH", "/api/instances/deepseekHarness/deepseek-harness", {
+        baseUrl: dshStub.baseUrl,
+        transport: "direct",
+      });
+      await api("DELETE", `/api/bots/${bot.id}`);
+    }
+  });
+
+  it("persists private DSH cursors independently for a bot chat and its room membership", async () => {
+    await api("GET", "/api/instances");
+    const bot = (await api("POST", "/api/bots")).body.bot;
+    const model = encodeDshModelId("deepseek", "chat");
+    expect((await api("PATCH", `/api/bots/${bot.id}`, {
+      modelSelection: { instanceId: "deepseekHarness", model },
+    })).status).toBe(200);
+    const group = (await api("POST", "/api/groups", { name: "DSH cursor room", memberIds: [bot.id] })).body.group;
+    expect(group).not.toHaveProperty("memberResumeCursors");
+    expect((await api("PATCH", `/api/groups/${group.id}/setup`, { action: "skip" })).status).toBe(200);
+    const stream = await openSse(`${BASE}/api/events`);
+
+    try {
+      const groupStart = dshStub.requests.length;
+      expect((await api("POST", `/api/groups/${group.id}/messages`, { text: "room cursor fixture" })).status).toBe(202);
+      const groupPrompt = await waitUntil(() => dshStub.requests
+        .slice(groupStart)
+        .map((entry) => dshClientRequestSchema.safeParse(entry.body).data)
+        .find((entry) => entry?.method === "session.prompt"));
+      // SAFETY: FakeDshHost validated this official session.prompt payload before recording it.
+      const groupSessionId = (groupPrompt.payload as { sessionId: string }).sessionId;
+      const persistedGroupCursor = await waitUntil(() => {
+        const groups = JSON.parse(readFileSync(join(home, ".openmausbot", "groups.json"), "utf8"));
+        // SAFETY: this private test file is written by Store's typed GroupRecord serializer.
+        return groups.find((candidate: { id: string }) => candidate.id === group.id)
+          ?.memberResumeCursors?.[bot.id]?.deepseekHarness as string | undefined;
+      });
+      expect(persistedGroupCursor).toMatch(/^dsh1:/);
+      const repeatedSetup = await api("PATCH", `/api/groups/${group.id}/setup`, { action: "skip" });
+      expect(repeatedSetup.status).toBe(200);
+      expect(repeatedSetup.body.group).not.toHaveProperty("memberResumeCursors");
+      expect(JSON.stringify(repeatedSetup.body)).not.toContain(persistedGroupCursor);
+      const privateRuntime = await stream.until((frame) => frame.kind === "runtime" && frame.event?.type === "session.started" && frame.event?.threadId === group.threadId);
+      expect(privateRuntime.event).toMatchObject({ type: "session.started", sessionId: null });
+      expect(privateRuntime.event).not.toHaveProperty("resumeCursor");
+      expect(JSON.stringify(privateRuntime)).not.toContain(groupSessionId);
+      expect(JSON.stringify(privateRuntime)).not.toContain("dsh1:");
+      const wireState = (await api("GET", "/api/bots")).body;
+      expect(wireState.groups.find((candidate: { id: string }) => candidate.id === group.id)).not.toHaveProperty("memberResumeCursors");
+
+      dshStub.send("mux", {
+        type: "server-request",
+        rpcId: "server-room-cursor-end",
+        method: "session/event",
+        payload: { type: "session/event", sessionId: groupSessionId, event: { type: "turn/end", seq: 1, time: 1, data: { reason: { kind: "completed" } } } },
+      });
+      await waitUntil(async () => {
+        const current = (await api("GET", "/api/bots")).body.groups.find((candidate: { id: string }) => candidate.id === group.id);
+        return current?.busyBotId ? undefined : true;
+      });
+
+      const botStart = dshStub.requests.length;
+      expect((await api("POST", `/api/bots/${bot.id}/messages`, { text: "bot cursor fixture" })).status).toBe(202);
+      const botPrompt = await waitUntil(() => dshStub.requests
+        .slice(botStart)
+        .map((entry) => dshClientRequestSchema.safeParse(entry.body).data)
+        .find((entry) => entry?.method === "session.prompt"));
+      // SAFETY: FakeDshHost validated this official session.prompt payload before recording it.
+      const botSessionId = (botPrompt.payload as { sessionId: string }).sessionId;
+      const persistedBotCursor = await waitUntil(() => {
+        const bots = JSON.parse(readFileSync(join(home, ".openmausbot", "bots.json"), "utf8"));
+        // SAFETY: this private test file is written by Store's typed BotRecord serializer.
+        return bots.find((candidate: { id: string }) => candidate.id === bot.id)
+          ?.resumeCursors?.deepseekHarness as string | undefined;
+      });
+      expect(persistedBotCursor).toMatch(/^dsh1:/);
+      expect(persistedBotCursor).not.toBe(persistedGroupCursor);
+      expect((await api("GET", "/api/bots")).body.bots.find((candidate: { id: string }) => candidate.id === bot.id)).not.toHaveProperty("resumeCursors");
+      const botRuntime = await stream.until((frame) => frame.kind === "runtime" && frame.event?.type === "session.started" && frame.event?.threadId === bot.threadId);
+      expect(botRuntime.event).toMatchObject({ type: "session.started", sessionId: null });
+      expect(botRuntime.event).not.toHaveProperty("resumeCursor");
+      expect(JSON.stringify(botRuntime)).not.toContain(botSessionId);
+      expect(JSON.stringify(botRuntime)).not.toContain("dsh1:");
+
+      dshStub.send("mux", {
+        type: "server-request",
+        rpcId: "server-bot-cursor-end",
+        method: "session/event",
+        payload: { type: "session/event", sessionId: botSessionId, event: { type: "turn/end", seq: 1, time: 1, data: { reason: { kind: "completed" } } } },
+      });
+      await waitUntil(async () => {
+        const current = (await api("GET", "/api/bots")).body.bots.find((candidate: { id: string }) => candidate.id === bot.id);
+        return current?.busy ? undefined : true;
+      });
+    } finally {
+      stream.close();
+      await api("DELETE", `/api/groups/${group.id}`);
+      await api("DELETE", `/api/bots/${bot.id}`);
+    }
   });
 
   it("answers a room approval whose turn is already over instead of stranding the room", async () => {
@@ -2227,7 +2919,275 @@ describe("instance CLI override API", () => {
     await new Promise((resolve) => setTimeout(resolve, 30));
     const overlapping = await api("PATCH", "/api/instances/ghost", { cli: "/tmp/ghost-overlap" });
     expect(overlapping.status).toBe(409);
+    const overlappingDsh = await api("PATCH", "/api/instances/deepseekHarness/deepseek-harness", { agentPreset: "busy-overlap" });
+    expect(overlappingDsh.status).toBe(409);
     expect((await slowConfigWrite).status).toBe(200);
+  });
+});
+
+describe("DeepSeek Harness settings API", () => {
+  it("describes direct model management without exposing settings values or credentials", async () => {
+    const result = await api("GET", "/api/instances/deepseekHarness/deepseek-harness");
+    expect(result.status).toBe(200);
+    expect(result.body).toEqual({
+      connection: {
+        instanceId: "deepseekHarness",
+        transport: "direct",
+        baseUrl: dshStub.baseUrl,
+        paired: false,
+        hasDeviceCredential: false,
+      },
+      modelManagement: {
+        available: true,
+        supported: true,
+        providers: [{ provider: "openrouter", displayName: "OpenRouter" }],
+      },
+    });
+    expect(JSON.stringify(result.body)).not.toContain("apiKey");
+    expect(JSON.stringify(result.body)).not.toContain("deviceCookie");
+  });
+
+  it("keeps the write-only direct connection editable when the configured host is offline", async () => {
+    expect((await api("PATCH", "/api/instances/deepseekHarness/deepseek-harness", {
+      baseUrl: dshStub.baseUrl,
+      transport: "direct",
+    })).status).toBe(200);
+    dshManagementOffline = true;
+    try {
+      const result = await api("GET", "/api/instances/deepseekHarness/deepseek-harness");
+      expect(result.status).toBe(200);
+      expect(result.body.connection).toMatchObject({
+        instanceId: "deepseekHarness",
+        transport: "direct",
+        baseUrl: dshStub.baseUrl,
+        paired: false,
+      });
+      expect(result.body.modelManagement).toEqual({
+        available: false,
+        supported: true,
+        providers: [],
+        reasonCode: "host-unavailable",
+        reason: expect.stringMatching(/could not reach/i),
+      });
+      const serialized = JSON.stringify(result.body);
+      expect(serialized).not.toContain("direct-upstream-secret");
+      expect(serialized).not.toContain("must-not-leak");
+      expect(serialized).not.toContain("deviceCookie");
+      expect(serialized).not.toContain("apiKey");
+    } finally {
+      dshManagementOffline = false;
+    }
+  });
+
+  it("normalizes PATCH input, accepts JSON only, and preserves unrelated instance config", async () => {
+    const wrongType = await fetch(`${BASE}/api/instances/deepseekHarness/deepseek-harness`, {
+      method: "PATCH",
+      headers: { "content-type": "text/plain" },
+      body: JSON.stringify({ agentPreset: "coder" }),
+    });
+    expect(wrongType.status).toBe(415);
+
+    const saved = await api("PATCH", "/api/instances/deepseekHarness/deepseek-harness", {
+      baseUrl: `${dshStub.baseUrl}/`,
+      agentPreset: " coder ",
+    });
+    expect(saved.status).toBe(200);
+    expect(saved.body).toEqual({
+      saved: true,
+      connection: {
+        instanceId: "deepseekHarness",
+        transport: "direct",
+        baseUrl: dshStub.baseUrl,
+        paired: false,
+        hasDeviceCredential: false,
+        agentPreset: "coder",
+      },
+    });
+    expect(JSON.stringify(saved.body)).not.toContain("deviceCookie");
+    const disk = JSON.parse(readFileSync(join(home, ".openmausbot", "config.json"), "utf8"));
+    expect(disk.instances.ghost).toMatchObject({ driver: "not-a-real-driver", displayName: "Ghost" });
+    expect(disk.instances.deepseekHarness.config).toMatchObject({ baseUrl: dshStub.baseUrl, transport: "direct", agentPreset: "coder" });
+
+    const cleared = await api("PATCH", "/api/instances/deepseekHarness/deepseek-harness", { agentPreset: null });
+    expect(cleared.status).toBe(200);
+    expect(cleared.body.connection.agentPreset).toBeUndefined();
+    expect((await api("PATCH", "/api/instances/ghost/deepseek-harness", { transport: "direct" })).status).toBe(404);
+    expect((await api("PATCH", "/api/instances/deepseekHarness/deepseek-harness", { unknown: true })).status).toBe(400);
+  });
+
+  it("discovers and revision-safely adopts OpenRouter models through the direct Host API", async () => {
+    const before = dshStub.requests.length;
+    const discovered = await api("POST", "/api/instances/deepseekHarness/deepseek-harness/discover", { provider: "openrouter" });
+    expect(discovered).toEqual({
+      status: 200,
+      body: { models: [{ id: "deepseek/deepseek-v3", name: "DeepSeek V3", contextWindow: 64_000, maxTokens: 8_000 }] },
+    });
+    const upserted = await api("POST", "/api/instances/deepseekHarness/deepseek-harness/upsert", {
+      provider: "openrouter",
+      model: { id: "keep", name: "Keep updated", contextWindow: 32_000, reasoningEfforts: ["off", "low", "high"] },
+    });
+    expect(upserted.status).toBe(200);
+    expect(upserted.body.updated).toBe(true);
+    const requests = dshStub.requests.slice(before).map((entry) => dshClientRequestSchema.safeParse(entry.body).data).filter(Boolean);
+    const discovery = requests.find((entry) => entry!.method === "llm.discoverModels")!;
+    expect(discovery.payload).toEqual({ settingsNs: "llm-pi-ai", provider: "openrouter" });
+    const mutation = requests.find((entry) => entry!.method === "settings.mutate")!;
+    expect(mutation.payload).toEqual({
+      ns: "llm-pi-ai",
+      expectedRevision: 7,
+      ops: [{
+        op: "set",
+        path: ["providers", "openrouter", "models"],
+        value: [{
+          id: "keep",
+          name: "Keep updated",
+          input: ["text"],
+          custom: { preserved: true },
+          contextWindow: 32_000,
+          reasoningEfforts: { off: null, low: "low", high: "high" },
+        }],
+      }],
+    });
+    expect(JSON.stringify(upserted.body)).not.toContain("settings");
+  });
+
+  it("persists nothing after rejected pairing, then pairs once and keeps the cookie write-only", async () => {
+    const configPath = join(home, ".openmausbot", "config.json");
+    const before = readFileSync(configPath, "utf8");
+    const rejected = await api("POST", "/api/instances/deepseekHarness/deepseek-harness/pair", {
+      pairingLink: `${dshStub.baseUrl}/m/?pair=rejected-pair`,
+    });
+    expect(rejected.status).toBe(400);
+    expect(rejected.body).toEqual({
+      code: "pairing-rejected",
+      error: "DSH rejected this pairing link or token because it is invalid or expired. Generate a fresh pairing link and try again.",
+    });
+    expect(readFileSync(configPath, "utf8")).toBe(before);
+
+    const accepted = await api("POST", "/api/instances/deepseekHarness/deepseek-harness/pair", {
+      pairingLink: `${dshStub.baseUrl}/m/?pair=server-pair-once&workspace=ws-1`,
+    });
+    expect(accepted.status).toBe(200);
+    expect(accepted.body).toEqual({ paired: true });
+    expect(JSON.stringify(accepted.body)).not.toContain("server-pair-once");
+    expect(JSON.stringify(accepted.body)).not.toContain("paired-fixture-cookie");
+    const disk = JSON.parse(readFileSync(configPath, "utf8"));
+    expect(disk.instances.deepseekHarness.config).toMatchObject({
+      baseUrl: dshStub.baseUrl,
+      transport: "paired",
+      deviceCookie: "dsh_pair=paired-fixture-cookie",
+    });
+
+    const reused = await api("POST", "/api/instances/deepseekHarness/deepseek-harness/pair", {
+      pairingLink: `${dshStub.baseUrl}/m/?pair=server-pair-once`,
+    });
+    expect(reused.status).toBe(400);
+
+    const direct = await api("PATCH", "/api/instances/deepseekHarness/deepseek-harness", { transport: "direct" });
+    expect(direct.body.connection).toMatchObject({ transport: "direct", paired: false, hasDeviceCredential: true });
+    expect(JSON.stringify(direct.body)).not.toContain("paired-fixture-cookie");
+    const pairedAgain = await api("PATCH", "/api/instances/deepseekHarness/deepseek-harness", { transport: "paired" });
+    expect(pairedAgain.body.connection).toMatchObject({ transport: "paired", paired: true, hasDeviceCredential: true });
+    expect(JSON.stringify(pairedAgain.body)).not.toContain("paired-fixture-cookie");
+  });
+
+  it("uses the paired plugin model routes and explains the older-plugin fallback", async () => {
+    try {
+      const described = await api("GET", "/api/instances/deepseekHarness/deepseek-harness");
+      expect(described.status).toBe(200);
+      expect(described.body.connection).toMatchObject({ transport: "paired", paired: true, baseUrl: dshStub.baseUrl });
+      expect(described.body.modelManagement).toEqual({
+        available: true,
+        supported: true,
+        providers: [{ provider: "openrouter", displayName: "OpenRouter" }],
+      });
+
+      const start = dshStub.requests.length;
+      expect((await api("POST", "/api/instances/deepseekHarness/deepseek-harness/discover", { provider: "openrouter" })).status).toBe(200);
+      expect((await api("POST", "/api/instances/deepseekHarness/deepseek-harness/upsert", { provider: "openrouter", model: { id: "deepseek/deepseek-v3" } })).status).toBe(200);
+      expect(dshStub.requests.slice(start).map((request) => request.path).filter((path) => path.includes("model-catalog"))).toEqual([
+        "/api/pair/model-catalog/discover",
+        "/api/pair/model-catalog/upsert",
+      ]);
+
+      dshPluginAvailable = false;
+      const fallback = await api("GET", "/api/instances/deepseekHarness/deepseek-harness");
+      expect(fallback.status).toBe(200);
+      expect(fallback.body.modelManagement).toEqual({
+        available: false,
+        supported: false,
+        providers: [],
+        reasonCode: "paired-plugin-update-required",
+        reason: expect.stringMatching(/update.*remote-web-ui/i),
+      });
+      const unavailable = await api("POST", "/api/instances/deepseekHarness/deepseek-harness/discover", { provider: "openrouter" });
+      expect(unavailable.status).toBe(409);
+      expect(unavailable.body.code).toBe("paired-plugin-update-required");
+      expect(unavailable.body.error).toMatch(/update.*remote-web-ui/i);
+    } finally {
+      dshPluginAvailable = true;
+      const restored = await api("PATCH", "/api/instances/deepseekHarness/deepseek-harness", { transport: "direct" });
+      expect(restored.status).toBe(200);
+    }
+  });
+
+  it("keeps the write-only paired connection editable when the paired device is revoked", async () => {
+    const paired = await api("POST", "/api/instances/deepseekHarness/deepseek-harness/pair", {
+      pairingLink: `${dshStub.baseUrl}/m/?pair=revoked-recovery-pair`,
+    });
+    expect(paired.status).toBe(200);
+    dshPairedAuthorized = false;
+    try {
+      const result = await api("GET", "/api/instances/deepseekHarness/deepseek-harness");
+      expect(result.status).toBe(200);
+      expect(result.body.connection).toMatchObject({
+        instanceId: "deepseekHarness",
+        transport: "paired",
+        baseUrl: dshStub.baseUrl,
+        paired: true,
+      });
+      expect(result.body.modelManagement).toEqual({
+        available: false,
+        supported: true,
+        providers: [],
+        reasonCode: "paired-device-unauthorized",
+        reason: expect.stringMatching(/pair.*again/i),
+      });
+      const serialized = JSON.stringify(result.body);
+      expect(serialized).not.toContain("unpaired-upstream-secret");
+      expect(serialized).not.toContain("paired-fixture-cookie");
+      expect(serialized).not.toContain("deviceCookie");
+      expect(serialized).not.toContain("apiKey");
+      const action = await api("POST", "/api/instances/deepseekHarness/deepseek-harness/discover", { provider: "openrouter" });
+      expect(action).toMatchObject({ status: 403, body: { code: "paired-device-unauthorized" } });
+      expect(JSON.stringify(action.body)).not.toContain("unpaired-upstream-secret");
+    } finally {
+      dshPairedAuthorized = true;
+      expect((await api("PATCH", "/api/instances/deepseekHarness/deepseek-harness", { transport: "direct" })).status).toBe(200);
+    }
+  });
+
+  it("bounds malformed and oversized management requests", async () => {
+    expect((await api("POST", "/api/instances/deepseekHarness/deepseek-harness/discover", { provider: "bad\nprovider" })).status).toBe(400);
+    expect((await api("POST", "/api/instances/deepseekHarness/deepseek-harness/upsert", { provider: "openrouter", model: { id: "x", maxTokens: 10_000_001 } })).status).toBe(400);
+    expect((await api("POST", "/api/instances/deepseekHarness/deepseek-harness/pair", { pairingLink: `https://dsh.example.test/m/?pair=${"x".repeat(20_000)}` })).status).toBe(413);
+  });
+
+  it("returns stable safe codes for provider eligibility and revision conflicts", async () => {
+    const provider = await api("POST", "/api/instances/deepseekHarness/deepseek-harness/discover", { provider: "inactive" });
+    expect(provider).toMatchObject({ status: 404, body: { code: "provider-not-eligible" } });
+
+    dshSettingsConflict = true;
+    try {
+      const conflict = await api("POST", "/api/instances/deepseekHarness/deepseek-harness/upsert", {
+        provider: "openrouter",
+        model: { id: "conflict" },
+      });
+      expect(conflict).toMatchObject({ status: 409, body: { code: "model-update-conflict" } });
+      expect(JSON.stringify(conflict.body)).not.toContain("upstream-secret");
+    } finally {
+      dshSettingsConflict = false;
+    }
   });
 });
 

@@ -8,14 +8,14 @@
 
 <sub>An open-source version of **Grok Bot** — bring-your-own-agent, local-first, on the models you already have.</sub>
 
-Every bot in the sidebar is a real agent — Claude or Codex running locally under the hood — with its own
-personality, its own model, its own cloud computer, and its own connected apps.
+Every bot in the sidebar is a real agent - a local agent CLI or DeepSeek Harness session under the hood - with its own
+personality and model, plus computers and connected apps when its engine supports them.
 Talk to them like contacts. Watch them work. Approve what matters.
 
 ![TypeScript](https://img.shields.io/badge/TypeScript-strict-3178C6?logo=typescript&logoColor=white)
 ![React](https://img.shields.io/badge/React-19-61DAFB?logo=react&logoColor=black)
 ![Electron](https://img.shields.io/badge/Electron-macOS%20%C2%B7%20Windows%20%C2%B7%20Ubuntu-2B2E3A?logo=electron&logoColor=9FEAF9)
-![Agents](https://img.shields.io/badge/agents-Claude%20·%20Codex-d97757)
+![Agents](https://img.shields.io/badge/agents-Claude%20·%20Codex%20·%20DSH-d97757)
 ![PRs](https://img.shields.io/badge/PRs-welcome-38d591)
 
 <br>
@@ -54,9 +54,10 @@ it keeps the idea (AI as a *messaging app*: a roster of bots you chat with, each
 memory of its thread, model, computer, and apps) and rebuilds it open, local-first, and on the agents you
 already have:
 
-- **Bring your own agents.** Bots run on the `claude`, `codex`, and `grok` CLIs installed on your own machine
-  — your existing logins and subscriptions, no new accounts, no proxy in the middle. Point any engine at a
-  custom CLI binary (a versioned build or wrapper) in **Settings → Engines**.
+- **Bring your own agents.** Bots run on the `claude`, `codex`, and `grok` CLIs installed on your own machine,
+  or on a [DeepSeek Harness Host API](docs/deepseek-harness.md) you control. Keep your existing logins,
+  subscriptions, configured OpenRouter models, and agent presets. Point a CLI engine at a custom binary or
+  configure DSH Direct/Paired access in **Settings → Engines**.
 - **Local first.** One small harness server on `127.0.0.1` owns every agent process. Transcripts, keys, and
   events live in `~/.openmausbot`, not a cloud.
 - **Agents with hands.** Each bot can use a cloud Linux desktop, an isolated Local VM, or your own computer,
@@ -70,7 +71,7 @@ already have:
 
 ### 🧠 Pick a brain per bot
 
-A model picker with a provider rail — Claude and Codex models side by side, defaults marked, unavailable
+A model picker with a provider rail - CLI and DeepSeek Harness models side by side, defaults marked, unavailable
 providers dimmed with the reason. Switch a bot's model mid-conversation.
 
 <img src="docs/screenshots/model-picker.png" alt="Model picker with provider rail" width="100%">
@@ -167,22 +168,23 @@ flowchart LR
         REG[Driver registry] --> BUS[Event bus → SSE]
         BROKER[Permission broker]
     end
-    subgraph agents ["Agents on your computer"]
+    subgraph agents ["Agent runtimes"]
         CL[claude CLI]
         CX[codex CLI]
         GR[grok CLI]
+        DSH[DeepSeek Harness Host API]
     end
     UI -- "HTTP commands" --> server
     BUS -- "one SSE stream" --> UI
-    REG --> CL & CX & GR
-    CL & CX & GR -- "permission requests" --> BROKER
+    REG --> CL & CX & GR & DSH
+    CL & CX & GR & DSH -- "permission requests" --> BROKER
     server -- "Box API" --> BOX[("Cloud computer<br/>box.ascii.dev")]
     server -- "Composio Session" --> APPS[("Gmail · Slack · GitHub · …")]
 ```
 
 | Layer | Where | What it does |
 |---|---|---|
-| Drivers | `server/drivers/` | One per provider: Claude, Codex, and Grok Build over their local CLIs (stream-JSON / JSON-RPC / ACP), plus a cloud-computer agent. Unknown drivers degrade to "unavailable", never crash the fleet. |
+| Drivers | `server/drivers/` | One per provider: local CLI agents, DeepSeek Harness over its Host API, and a cloud-computer agent. Unknown drivers degrade to "unavailable", never crash the fleet. |
 | Harness | `server/harness/` | Registry (configs → live instances) and the fan-in event bus every client folds. |
 | API | `server/index.ts` | Bots, turns, approvals, model catalog, computer lifecycle, connectors, config — HTTP + SSE. |
 | Voice | `server/tts/` | ElevenLabs, bring your own key. Runs on the harness so the key never reaches the UI; markdown is rewritten into something worth hearing before it is spoken. |
@@ -213,9 +215,10 @@ pnpm dev           # app → http://127.0.0.1:5199
 pnpm dev:desktop   # Electron shell; keep the two commands above running
 ```
 
-Requirements: **macOS, Windows, or Ubuntu 24.04 x64**, **Node 24+**, **pnpm**, and at least one agent CLI — [`claude`](https://claude.com/claude-code),
-[`codex`](https://github.com/openai/codex), or [`grok`](https://x.ai/cli) — installed and logged in. They appear
-in the model picker automatically.
+Requirements: **macOS, Windows, or Ubuntu 24.04 x64**, **Node 24+**, **pnpm**, and either a reachable
+[DeepSeek Harness Host API](docs/deepseek-harness.md) or at least one installed and signed-in agent CLI:
+[`claude`](https://claude.com/claude-code), [`codex`](https://github.com/openai/codex), or [`grok`](https://x.ai/cli).
+Available engines and their live models appear in the model picker automatically.
 
 Package the desktop application:
 

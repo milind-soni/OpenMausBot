@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-import { currentCall, deferCallCleanup, endCall, startCall } from "./call";
+import { currentCall, deferCallCleanup, endCall, matchSpokenOption, startCall } from "./call";
 
 describe("call ownership", () => {
   beforeEach(() => {
@@ -36,5 +36,10 @@ describe("call ownership", () => {
     await Promise.resolve();
 
     expect(currentCall()).toBeNull();
+  });
+
+  it("matches a spoken option without requiring accents or case", () => {
+    expect(matchSpokenOption(["Café", "Thé"], "cafe")).toBe("Café");
+    expect(matchSpokenOption(["Café", "Thé"], "inconnu")).toBeUndefined();
   });
 });

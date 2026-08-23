@@ -22,6 +22,12 @@ export function currentCall(): string | null {
   return current;
 }
 
+/** Match a dictated answer to a visible option without making speech
+ * recognition reproduce the option's casing or diacritics exactly. */
+export function matchSpokenOption(options: readonly string[], spoken: string): string | undefined {
+  return options.find((option) => option.localeCompare(spoken, undefined, { sensitivity: "base" }) === 0);
+}
+
 export function startCall(targetId: string) {
   if (current === targetId) return;
   // Switching calls must silence both halves before ownership changes; the

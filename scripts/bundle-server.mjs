@@ -52,6 +52,15 @@ await build({
   format: "esm",
   outbase: server,
   outdir: join(root, "dist-server"),
+  // Some bundled CommonJS dependencies (notably ws) load Node built-ins and
+  // optional native accelerators through require(). esbuild preserves those
+  // calls behind its __require helper, but a pure ESM entry has no require in
+  // scope and crashes before the packaged server can listen. Provide Node's
+  // ESM-safe require locally; optional modules still retain their own guarded
+  // fallback behavior, while built-ins resolve in the zero-node_modules app.
+  banner: {
+    js: 'import { createRequire as __createRequire } from "node:module"; const require = __createRequire(import.meta.url);',
+  },
   // Written after tsc, replacing its output for these entry points.
   allowOverwrite: true,
   logLevel: "info",

@@ -21,7 +21,7 @@ import { useCallback, useEffect, useId, useRef, useState } from "react";
 import { Loader2, Phone, PhoneOff, X } from "lucide-react";
 
 import { useStore, visibleMessages, type Bot } from "@/state/store";
-import { currentCall, deferCallCleanup, endCall, startCall, useOnCall } from "@/lib/call";
+import { currentCall, deferCallCleanup, endCall, matchSpokenOption, startCall, useOnCall } from "@/lib/call";
 import { speaker } from "@/lib/tts";
 import { useSpeech } from "@/lib/tts/useSpeech";
 import { usePushToTalk } from "@/lib/push-to-talk";
@@ -228,7 +228,7 @@ function Call({ bot }: { bot: Bot }) {
   // the approval we last asked about aloud, so a card that stays open
   // while the user thinks is not re-read every render
   const askedApproval = useRef<string | null>(null);
-  const askedQuestion = useRef<{ requestId: string; messageId: string } | null>(null);
+  const askedQuestion = useRef<{ requestId: string; messageId: string; options: string[] } | null>(null);
   const phaseRef = useRef<Phase>(initialPhase);
   const alive = useRef(true);
   const sayGeneration = useRef(0);
@@ -337,7 +337,8 @@ function Call({ bot }: { bot: Bot }) {
       const openQuestion = askedQuestion.current;
       if (openQuestion) {
         askedQuestion.current = null;
-        dispatch({ type: "answerCard", botId: bot.id, messageId: openQuestion.messageId, answer: said });
+        const selected = matchSpokenOption(openQuestion.options, said);
+        dispatch({ type: "answerCard", botId: bot.id, messageId: openQuestion.messageId, answer: said, selected: selected ? [selected] : [], custom: selected ? undefined : said });
         move("working");
         return;
       }
@@ -401,7 +402,7 @@ function Call({ bot }: { bot: Bot }) {
       askedQuestion.current?.requestId !== question.card.requestId &&
       phase !== "speaking"
     ) {
-      askedQuestion.current = { requestId: question.card.requestId, messageId: question.id };
+      askedQuestion.current = { requestId: question.card.requestId, messageId: question.id, options: question.card.options };
       spokenIds.current.add(question.id);
       const detail = question.card.subtitle.trim();
       const choices = question.card.options.length

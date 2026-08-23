@@ -13,9 +13,16 @@ import {
   useState,
   type ReactNode,
 } from "react";
+import { z } from "zod";
 import type { CloudBackend, EffortLevel } from "../../server/contracts.ts";
+import { clearUnsupportedEffort } from "@/lib/model-effort";
 import type { MausColor, MausMotion } from "@/lib/mascot";
 import type { BotAvatarCrop } from "../../shared/bot-avatar";
+import {
+  DEEPSEEK_HARNESS_MAX_TOKEN_LIMIT,
+  DEEPSEEK_HARNESS_PUBLIC_ERROR_CODES,
+  type DeepSeekHarnessPublicErrorCode,
+} from "../../shared/deepseek-harness";
 import type { Routine, RoutineInput, RoutineRun } from "@/lib/routines";
 import type { WebhookAttempt, WebhookIngressStatus, WebhookTrigger } from "@/lib/webhooks";
 import { currentCall } from "@/lib/call";
@@ -30,6 +37,7 @@ export interface OptionCardData {
   title: string;
   subtitle: string;
   options: string[];
+  multiSelect?: boolean;
   answered?: string;
   dismissed?: boolean;
   /** Present when this card is a live provider ask (approval/question). */
@@ -296,7 +304,17 @@ export interface InstanceInfo {
     /** a reported cost on a subscription is notional; the UI says so */
     billing?: "metered" | "subscription";
   };
-  models: { default: string; options: Array<{ id: string; label: string; custom?: boolean; loaded?: boolean }> };
+  models: {
+    default: string;
+    options: Array<{
+      id: string;
+      label: string;
+      custom?: boolean;
+      loaded?: boolean;
+      contextWindow?: number;
+      effortLevels?: readonly EffortLevel[];
+    }>;
+  };
   capabilities?: {
     computerMcp?: boolean;
     agentsMcp?: boolean;
@@ -317,6 +335,67 @@ export interface InstanceInfo {
   cliDefault?: string;
   /** Absolute paths of every default binary found on PATH, PATH order. */
   cliCandidates?: string[];
+}
+
+const deepSeekHarnessTransportSchema = z.enum(["direct", "paired"]);
+const deepSeekHarnessReasoningEffortSchema = z.enum(["off", "minimal", "low", "medium", "high", "xhigh", "max"]);
+const deepSeekHarnessModelProfileSchema = z.object({
+  id: z.string(),
+  name: z.string().optional(),
+  contextWindow: z.number().int().safe().positive().max(DEEPSEEK_HARNESS_MAX_TOKEN_LIMIT).optional(),
+  maxTokens: z.number().int().safe().positive().max(DEEPSEEK_HARNESS_MAX_TOKEN_LIMIT).optional(),
+  reasoningEfforts: z.array(deepSeekHarnessReasoningEffortSchema).optional(),
+});
+const deepSeekHarnessPublicCatalogSchema = z.object({
+  groups: z.array(z.object({
+    id: z.string(),
+    name: z.string(),
+    models: z.array(z.object({
+      id: z.string(),
+      name: z.string(),
+      description: z.string().optional(),
+      reasoning: z.object({
+        efforts: z.array(z.object({ id: z.string(), name: z.string(), description: z.string().optional() })),
+        defaultEffort: z.string().optional(),
+      }).optional(),
+    })),
+  })),
+  failures: z.array(z.object({ id: z.string(), name: z.string(), message: z.string() })),
+});
+const deepSeekHarnessConnectionSchema = z.object({
+  instanceId: z.string(),
+  transport: deepSeekHarnessTransportSchema,
+  baseUrl: z.string(),
+  paired: z.boolean(),
+  hasDeviceCredential: z.boolean(),
+  agentPreset: z.string().optional(),
+});
+const deepSeekHarnessSettingsSnapshotSchema = z.object({
+  connection: deepSeekHarnessConnectionSchema,
+  modelManagement: z.object({
+    available: z.boolean(),
+    supported: z.boolean(),
+    providers: z.array(z.object({ provider: z.string(), displayName: z.string() })),
+    reasonCode: z.enum(["host-unavailable", "paired-device-unauthorized", "paired-plugin-update-required"]).optional(),
+    reason: z.string().optional(),
+  }),
+});
+
+export type DeepSeekHarnessTransport = z.infer<typeof deepSeekHarnessTransportSchema>;
+export type DeepSeekHarnessReasoningEffort = z.infer<typeof deepSeekHarnessReasoningEffortSchema>;
+export type DeepSeekHarnessModelProfile = z.infer<typeof deepSeekHarnessModelProfileSchema>;
+export type DeepSeekHarnessPublicCatalog = z.infer<typeof deepSeekHarnessPublicCatalogSchema>;
+export type DeepSeekHarnessSettingsSnapshot = z.infer<typeof deepSeekHarnessSettingsSnapshotSchema>;
+
+export interface DeepSeekHarnessConnectionPatch {
+  baseUrl?: string;
+  transport?: DeepSeekHarnessTransport;
+  agentPreset?: string | null;
+}
+
+export interface DeepSeekHarnessUpsertRequest {
+  provider: string;
+  model: DeepSeekHarnessModelProfile;
 }
 
 export type AppSettingsSection =
@@ -430,8 +509,12 @@ export type Action =
   | { type: "editMessage"; botId: string; messageId: string; text: string }
   | { type: "switchBranch"; botId: string; messageId: string }
   | { type: "threadActive"; threadId: string; activeLeafId: string }
-  | { type: "answerCard"; botId: string; messageId: string; answer: string }
+  | { type: "answerCard"; botId: string; messageId: string; answer: string; selected?: string[]; custom?: string }
+  | { type: "restoreCard"; botId: string; messageId: string; requestId: string; expectedAnswer?: string; expectedDismissed?: true }
   | { type: "dismissCard"; botId: string; messageId: string }
+  | { type: "answerGroupCard"; groupId: string; messageId: string; answer: string; selected?: string[]; custom?: string }
+  | { type: "dismissGroupCard"; groupId: string; messageId: string }
+  | { type: "restoreGroupCard"; groupId: string; messageId: string; requestId: string; expectedAnswer?: string; expectedDismissed?: true }
   // permission cards answer by THREAD, so a request raised inside a room
   // can be answered the same way as one in a 1:1 chat
   | {
@@ -440,6 +523,8 @@ export type Action =
       requestId: string;
       behavior: "allow" | "deny" | "answer";
       message?: string;
+      selected?: string[];
+      custom?: string;
       /** remember this exact grant (the server's allowKey) for the bot */
       alwaysAllow?: { botId: string; key: string };
     }
@@ -525,6 +610,24 @@ function patchCard(state: AppState, botId: string, messageId: string, patch: Par
       m.id === messageId && m.card ? { ...m, card: { ...m.card, ...patch } } : m,
     ),
   }));
+}
+
+function patchGroupCard(state: AppState, groupId: string, messageId: string, patch: Partial<OptionCardData>): AppState {
+  return {
+    ...state,
+    groups: state.groups.map((group) => group.id === groupId ? {
+      ...group,
+      messages: group.messages.map((message) => message.id === messageId && message.card
+        ? { ...message, card: { ...message.card, ...patch } }
+        : message),
+    } : group),
+  };
+}
+
+function canRestoreCard(card: OptionCardData | undefined, action: { requestId: string; expectedAnswer?: string; expectedDismissed?: true }): boolean {
+  if (!card || card.requestId !== action.requestId) return false;
+  if (action.expectedAnswer !== undefined) return card.answered === action.expectedAnswer && card.dismissed !== true;
+  return action.expectedDismissed === true && card.dismissed === true && card.answered === undefined;
 }
 
 export function reducer(state: AppState, action: Action): AppState {
@@ -652,6 +755,18 @@ export function reducer(state: AppState, action: Action): AppState {
       );
     case "dismissCard":
       return patchCard(state, action.botId, action.messageId, { dismissed: true });
+    case "restoreCard": {
+      const card = state.bots.find((bot) => bot.id === action.botId)?.messages.find((message) => message.id === action.messageId)?.card;
+      return canRestoreCard(card, action) ? patchCard(state, action.botId, action.messageId, { answered: undefined, dismissed: false }) : state;
+    }
+    case "answerGroupCard":
+      return patchGroupCard(state, action.groupId, action.messageId, { answered: action.answer });
+    case "dismissGroupCard":
+      return patchGroupCard(state, action.groupId, action.messageId, { dismissed: true });
+    case "restoreGroupCard": {
+      const card = state.groups.find((group) => group.id === action.groupId)?.messages.find((message) => message.id === action.messageId)?.card;
+      return canRestoreCard(card, action) ? patchGroupCard(state, action.groupId, action.messageId, { answered: undefined, dismissed: false }) : state;
+    }
     case "decideRequest":
       return state; // the server's request.resolved patch settles the card
     case "botAdded":
@@ -812,8 +927,15 @@ export function reducer(state: AppState, action: Action): AppState {
           [action.botId]: { held: action.held, helpReason: action.helpReason },
         },
       };
-    case "setModel":
-      return updateBot(state, action.botId, (b) => ({ ...b, modelSelection: action.selection }));
+    case "setModel": {
+      const instance = state.instances.find((candidate) => candidate.instanceId === action.selection.instanceId);
+      const selection = clearUnsupportedEffort(
+        action.selection,
+        instance?.models.options ?? [],
+        instance?.capabilities?.effortLevels,
+      );
+      return updateBot(state, action.botId, (b) => ({ ...b, modelSelection: selection }));
+    }
     case "connected":
       return { ...state, connected: action.value };
     case "error":
@@ -1039,15 +1161,110 @@ export const initialState: AppState = {
 };
 
 // ── API client ─────────────────────────────────────────────────────────
+export class ApiError extends Error {
+  readonly code?: string;
+
+  constructor(message: string, code?: string) {
+    super(message);
+    this.name = "ApiError";
+    this.code = code;
+  }
+}
+
 export async function api(path: string, init?: RequestInit): Promise<any> {
   const res = await fetch(path, {
     headers: { "content-type": "application/json" },
     ...init,
   });
   const body = await res.json().catch(() => ({}));
-  if (!res.ok) throw new Error(body.error ?? `${res.status} ${res.statusText}`);
+  if (!res.ok) {
+    const parsed = z.object({
+      error: z.string().optional(),
+      code: z.string().regex(/^[a-z0-9][a-z0-9-]{0,63}$/).optional(),
+    }).safeParse(body);
+    const details = parsed.success ? parsed.data : {};
+    throw new ApiError(details.error ?? `${res.status} ${res.statusText}`, details.code);
+  }
   return body;
 }
+
+type JsonRequest = (path: string, init?: RequestInit) => Promise<any>;
+type DeepSeekHarnessPostBody =
+  | { pairingLink: string }
+  | { provider: string }
+  | DeepSeekHarnessUpsertRequest;
+
+const deepSeekHarnessPublicErrorCodeSchema = z.enum(DEEPSEEK_HARNESS_PUBLIC_ERROR_CODES);
+
+export class DeepSeekHarnessApiError extends Error {
+  readonly code: DeepSeekHarnessPublicErrorCode;
+
+  constructor(code: DeepSeekHarnessPublicErrorCode) {
+    super(`DeepSeek Harness request failed (${code}).`);
+    this.name = "DeepSeekHarnessApiError";
+    this.code = code;
+  }
+}
+
+async function parseDeepSeekHarnessResponse<T>(
+  response: () => ReturnType<JsonRequest>,
+  schema: z.ZodType<T>,
+): Promise<T> {
+  let body: unknown;
+  try {
+    body = await response();
+  } catch (error) {
+    if (error instanceof DeepSeekHarnessApiError) throw error;
+    if (error instanceof ApiError) {
+      const code = deepSeekHarnessPublicErrorCodeSchema.safeParse(error.code);
+      throw new DeepSeekHarnessApiError(code.success ? code.data : "request-failed");
+    }
+    throw new DeepSeekHarnessApiError("request-failed");
+  }
+
+  const parsed = schema.safeParse(body);
+  if (!parsed.success) throw new DeepSeekHarnessApiError("invalid-response");
+  return parsed.data;
+}
+
+/** Typed renderer boundary for the narrow, write-only DSH settings API. */
+export function createDeepSeekHarnessActions(request: JsonRequest = api) {
+  const root = (instanceId: string) =>
+    `/api/instances/${encodeURIComponent(instanceId)}/deepseek-harness`;
+  const post = (path: string, body: DeepSeekHarnessPostBody) => request(path, {
+    method: "POST",
+    body: JSON.stringify(body),
+  });
+
+  return {
+    get: async (instanceId: string) => parseDeepSeekHarnessResponse(
+      () => request(root(instanceId)),
+      deepSeekHarnessSettingsSnapshotSchema,
+    ),
+    patch: async (instanceId: string, patch: DeepSeekHarnessConnectionPatch) => parseDeepSeekHarnessResponse(
+      () => request(root(instanceId), {
+        method: "PATCH",
+        body: JSON.stringify(patch),
+      }),
+      z.object({ saved: z.boolean(), connection: deepSeekHarnessConnectionSchema }),
+    ),
+    pair: async (instanceId: string, pairingLink: string) => parseDeepSeekHarnessResponse(
+      () => post(`${root(instanceId)}/pair`, { pairingLink }),
+      z.object({ paired: z.literal(true) }),
+    ),
+    discover: async (instanceId: string, provider: string) => parseDeepSeekHarnessResponse(
+      () => post(`${root(instanceId)}/discover`, { provider }),
+      z.object({ models: z.array(deepSeekHarnessModelProfileSchema) }),
+    ),
+    upsert: async (instanceId: string, input: DeepSeekHarnessUpsertRequest) => parseDeepSeekHarnessResponse(
+      () => post(`${root(instanceId)}/upsert`, input),
+      z.object({ updated: z.literal(true), catalog: deepSeekHarnessPublicCatalogSchema }),
+    ),
+  };
+}
+
+export type DeepSeekHarnessActions = ReturnType<typeof createDeepSeekHarnessActions>;
+export const deepSeekHarnessActions = createDeepSeekHarnessActions();
 
 /** Per-frame stream state lives in its OWN context: token frames update only
  * the components that read this hook (the chat's streaming tail), while every
@@ -1238,6 +1455,8 @@ export function StoreProvider({ children }: { children: ReactNode }) {
                 requestId: action.requestId,
                 behavior: action.behavior,
                 message: action.message,
+                selected: action.selected,
+                custom: action.custom,
               }),
             }).catch(showError);
           if (action.alwaysAllow) {
@@ -1270,9 +1489,14 @@ export function StoreProvider({ children }: { children: ReactNode }) {
               body: JSON.stringify({
                 requestId: card.requestId,
                 behavior,
-                message: behavior === "answer" ? action.answer : undefined,
+                message: behavior === "answer" ? action.custom ?? action.selected?.[0] : undefined,
+                selected: behavior === "answer" ? action.selected : undefined,
+                custom: behavior === "answer" ? action.custom : undefined,
               }),
-            }).catch(showError);
+            }).catch((error) => {
+              rawDispatch({ type: "restoreCard", botId: action.botId, messageId: action.messageId, requestId: card.requestId!, expectedAnswer: action.answer });
+              showError(error);
+            });
           } else {
             persistCard(action.botId, action.messageId, { answered: action.answer });
             api(`/api/bots/${action.botId}/messages`, {
@@ -1289,10 +1513,39 @@ export function StoreProvider({ children }: { children: ReactNode }) {
             api(`/api/bots/${action.botId}/respond`, {
               method: "POST",
               body: JSON.stringify({ requestId: card.requestId, behavior: "deny", message: "Dismissed by user." }),
-            }).catch(() => {});
+            }).catch((error) => {
+              rawDispatch({ type: "restoreCard", botId: action.botId, messageId: action.messageId, requestId: card.requestId!, expectedDismissed: true });
+              showError(error);
+            });
           } else {
             persistCard(action.botId, action.messageId, { dismissed: true });
           }
+          break;
+        }
+        case "answerGroupCard": {
+          const group = stateRef.current.groups.find((candidate) => candidate.id === action.groupId);
+          const card = group?.messages.find((message) => message.id === action.messageId)?.card;
+          if (!group || !card?.requestId) break;
+          api(`/api/threads/${group.threadId}/respond`, {
+            method: "POST",
+            body: JSON.stringify({ requestId: card.requestId, behavior: "answer", message: action.custom ?? action.selected?.[0], selected: action.selected, custom: action.custom }),
+          }).catch((error) => {
+            rawDispatch({ type: "restoreGroupCard", groupId: action.groupId, messageId: action.messageId, requestId: card.requestId!, expectedAnswer: action.answer });
+            showError(error);
+          });
+          break;
+        }
+        case "dismissGroupCard": {
+          const group = stateRef.current.groups.find((candidate) => candidate.id === action.groupId);
+          const card = group?.messages.find((message) => message.id === action.messageId)?.card;
+          if (!group || !card?.requestId) break;
+          api(`/api/threads/${group.threadId}/respond`, {
+            method: "POST",
+            body: JSON.stringify({ requestId: card.requestId, behavior: "deny", message: "Dismissed by user." }),
+          }).catch((error) => {
+            rawDispatch({ type: "restoreGroupCard", groupId: action.groupId, messageId: action.messageId, requestId: card.requestId!, expectedDismissed: true });
+            showError(error);
+          });
           break;
         }
         case "newBot":

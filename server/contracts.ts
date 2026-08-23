@@ -31,7 +31,7 @@ export class ProviderError extends Error {
 
 /** Reasoning-effort levels, ascending. A union of everything any engine
  * accepts; each driver declares the subset its CLI will take. */
-export const EFFORT_LEVELS = ["none", "low", "medium", "high", "xhigh", "max"] as const;
+export const EFFORT_LEVELS = ["none", "minimal", "low", "medium", "high", "xhigh", "max"] as const;
 export type EffortLevel = (typeof EFFORT_LEVELS)[number];
 
 /** Narrow untrusted API/config input before it becomes a model selection. */
@@ -83,7 +83,7 @@ export interface RuntimeEventBase {
 
 export type RuntimeEvent = RuntimeEventBase &
   (
-    | { type: "session.started"; sessionId: string | null; model?: string | null }
+    | { type: "session.started"; sessionId: string | null; model?: string | null; resumeCursor?: string }
     | { type: "session.exited"; reason?: string }
     | { type: "turn.started" }
     | {
@@ -117,6 +117,7 @@ export type RuntimeEvent = RuntimeEventBase &
         tool: string;
         summary: string;
         choices?: string[];
+        multiSelect?: boolean;
         approvalScope?: "local-computer";
       }
     | {
@@ -140,7 +141,10 @@ export type RuntimeEventListener = (event: RuntimeEvent) => void;
  * asked-about action — broadening ("always allow") stays a separate,
  * explicit step. `unavailable` is the fail-closed default: no answerer,
  * no action. */
-export type RequestOutcome = "allowed-once" | "rejected" | "answered" | "unavailable";
+/** `retryable` means the provider did not acknowledge delivery; retain the card and let the person retry.
+ * `already-resolved` means an authoritative provider event settled the ask
+ * before the delivery receipt; callers must not restore or re-audit it. */
+export type RequestOutcome = "allowed-once" | "rejected" | "answered" | "already-resolved" | "retryable" | "unavailable";
 
 // ── adapter contract (upstream ProviderAdapterShape, promise-flavored) ──
 // The conversation runtime every provider is flattened into. streamEvents
@@ -149,6 +153,9 @@ export type RequestOutcome = "allowed-once" | "rejected" | "answered" | "unavail
 // carrying the provider-native continuation (e.g. a claude session id).
 export interface SendTurnInput {
   threadId: ThreadId;
+  /** Optional provider-session identity when several personas share one
+   * public transcript (room members). Runtime events still use threadId. */
+  sessionKey?: string;
   text: string;
   model?: string;
   effort?: EffortLevel;
@@ -250,7 +257,7 @@ export interface ProviderAdapter {
   respondToRequest(
     threadId: ThreadId,
     requestId: string,
-    decision: { behavior: "allow" | "deny" | "answer"; message?: string },
+    decision: { behavior: "allow" | "deny" | "answer"; message?: string; selected?: string[]; custom?: string },
   ): Promise<RequestOutcome>;
   /** Deliver a user message into the RUNNING turn on this thread. Resolves
    * false when there is no live turn to steer (the caller then sends it as
@@ -309,6 +316,9 @@ export interface ModelCatalog {
      * the model-facing rebuild (server/context-rebuild.ts). Unknown falls
      * back to a pattern table over the model id, then a conservative default. */
     contextWindow?: number;
+    /** Exact reasoning levels accepted by this model. Absent falls back to
+     * the driver's declared levels for legacy catalogs. */
+    effortLevels?: readonly EffortLevel[];
   }>;
 }
 

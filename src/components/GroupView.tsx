@@ -22,7 +22,7 @@ import { Composer } from "./Composer";
 import { ConnectorCard } from "./ConnectorCard";
 import { GroupCallButton, GroupCallOverlay } from "./GroupCallView";
 import { ReactionBar, ReactionChips } from "./Reactions";
-import { ApprovalCard } from "./ApprovalCard";
+import { GroupRequestCard } from "./GroupRequestCard";
 import { ManageMembersPanel } from "./ManageMembersPanel";
 import { useDesktopCapabilities } from "./DesktopCapabilities";
 import { cn } from "@/lib/cn";
@@ -114,10 +114,8 @@ const Transcript = memo(function Transcript({
           // Allow the broker rejects
           m.kind === "connector" && m.connector && m.from?.botId ? (
             <ConnectorCard botId={m.from.botId} threadId={group.threadId} message={m} />
-          ) : m.kind === "options" && m.card?.requestId && m.card.tool ? (
-            <div className="flex justify-start">
-              <ApprovalCard bot={memberOf(m.from?.botId)} message={m} />
-            </div>
+          ) : m.kind === "options" && m.card?.requestId ? (
+            <GroupRequestCard groupId={group.id} bot={memberOf(m.from?.botId)} message={m} />
           ) : m.kind === "activity" && m.tool ? (
             <div className="flex justify-start">
               <div

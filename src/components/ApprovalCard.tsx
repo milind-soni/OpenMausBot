@@ -4,7 +4,7 @@
 // approval is a decision about one concrete action, so it shows the tool
 // and the actual command/path in monospace, and the choices carry their
 // own behavior instead of being matched by their label text.
-import { Check, ShieldCheck, X } from "lucide-react";
+import { Check, ShieldCheck, TriangleAlert, X } from "lucide-react";
 import { type Bot, type Message } from "@/state/store";
 import { cn } from "@/lib/cn";
 
@@ -72,6 +72,10 @@ export function ApprovalCard({
         {settled === "allow" ? (
           <>
             <Check size={14} className="text-success" /> Allowed
+          </>
+        ) : settled === "unavailable" ? (
+          <>
+            <TriangleAlert size={14} className="text-warning" /> Unavailable · action not run
           </>
         ) : settled ? (
           <>
