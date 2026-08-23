@@ -184,7 +184,13 @@ export interface TaskUsage {
  * the whole command line), a permission card's summary. What the user typed
  * is theirs and stays as typed. Stored, not just displayed: the transcript
  * is replayed into every rebuild, and a leaked key would otherwise be
- * permanent. */
+ * permanent.
+ *
+ * Tool RESULTS take the same pass, and for the same reason — `cat .env`
+ * output lands in the transcript as an activity chip's title and would be
+ * replayed verbatim forever — but they are not "bot-authored", so this is
+ * deliberately separate from redactBotAuthored: user text must stay as
+ * typed even when it happens to carry a key. */
 function redactBotAuthored<T extends Omit<Message, "id" | "at"> & { at?: number }>(message: T): T {
   if (message.role !== "bot") return message;
   const out = { ...message };
@@ -206,6 +212,11 @@ function redactBotAuthored<T extends Omit<Message, "id" | "at"> & { at?: number 
     };
   }
   return out;
+}
+
+function redactToolResult<T extends Omit<Message, "id" | "at"> & { at?: number }>(message: T): T {
+  if (!message.tool?.name || message.role === "user") return message;
+  return { ...message, tool: { ...message.tool, name: redactSecretsInText(message.tool.name) } };
 }
 
 /** What changed, emitted by the store itself right after each write. The
@@ -672,7 +683,7 @@ export class Store {
 
   appendMessage(threadId: string, message: Omit<Message, "id" | "at"> & { at?: number }): Message {
     const t = this.thread(threadId);
-    const full: Message = { id: newId(), at: Date.now(), parentId: t.activeLeafId, ...redactBotAuthored(message) };
+    const full: Message = { id: newId(), at: Date.now(), parentId: t.activeLeafId, ...redactBotAuthored(redactToolResult(message)) };
     t.messages.push(full);
     t.activeLeafId = full.id;
     mdb.appendMessage(threadId, full);

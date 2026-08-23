@@ -165,4 +165,46 @@ describe("redactSecretsInText", () => {
     expect(out.command).toContain("«redacted");
     expect(out.note).toBe("fine");
   });
+
+  // Tool results are what actually leak: a `cat .env` or `printenv` dumps
+  // real credentials into the transcript as plain output. The same content
+  // rules apply — but a near-miss must survive, because debugging usefulness
+  // matters and a generic "long token" rule would rewrite real code.
+  describe("tool-output shapes (value-shape rules)", () => {
+    const alpha = "abcdefghijklmnopqrstuvwxyz0123456789";
+    it("masks every high-signal secret shape in raw tool output", () => {
+      const cases: Array<[string, RegExp]> = [
+        [`OPENAI_API_KEY=${"sk" + "-"}${alpha}`, /sk-[a-z]/],
+        [`aws ${"AKIA" + "ABCDEFGHIJKLMNOP"} example`, /AKIA[A-Z0-9]{16}/],
+        [`bare openai shape ${"sk" + "-"}${alpha.slice(0, 24)} trailing`, /sk-[a-z]/],
+        [`token: ${"gh" + "o_"}${alpha.slice(0, 36)}`, /gho_/],
+        [`fine-grained ${"github_" + "pat_"}11ABCDEFG0${alpha}`, /github_pat_/],
+        [`slack user token ${"xox" + "p-"}2400-${"1234567890123"}-${alpha.slice(0, 24)}`, /xoxp-/],
+      ];
+      for (const [input, leak] of cases) {
+        const out = redactSecretsInText(input);
+        expect(out, input).not.toMatch(leak);
+        expect(out).toMatch(/«redacted \d+ chars»/);
+      }
+      // PEM keeps its header/footer markers but loses the key body
+      const pemOut = redactSecretsInText(
+        `deploy key:\n-----BEGIN RSA PRIVATE KEY-----\n${"MIIEpAIBAAKCAQEA7abcd1234"}\n-----END RSA PRIVATE KEY-----`,
+      );
+      expect(pemOut).not.toContain("MIIEpAIBAAKCAQEA7abcd1234");
+      expect(pemOut).toMatch(/BEGIN RSA PRIVATE KEY[\s\S]*«redacted \d+ chars»[\s\S]*END RSA PRIVATE KEY/);
+    });
+
+    it("leaves near-misses alone so debugging stays useful", () => {
+      for (const s of [
+        `${"sk" + "-"}short12345`, // provider-less sk- but too short to be a key
+        "AKIAIOSFODNN7EXAMPL", // 19 chars — one short of the fixed 4+16 shape
+        `${"xox" + "b-"}short9chars`, // slack prefix, under the 20-char floor
+        `${"gh" + "p_"}short7`, // github prefix, too short to be real
+        "github_pat_tooshort", // fine-grained prefix, too short
+        "commit 3f2a9c1e7b4d5a6f8e9c0b1a2d3e4f5a6b7c8d9e is just a hash",
+      ]) {
+        expect(redactSecretsInText(s), s).toBe(s);
+      }
+    });
+  });
 });

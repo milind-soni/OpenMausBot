@@ -521,6 +521,36 @@ describe("Store redacts bot-authored secrets on write", () => {
     const again = new Store(selection);
     expect(again.messagesFor(bot.threadId).find((m) => m.id === reply.id)?.text).not.toContain(key);
   });
+
+  it("masks a key in a TOOL RESULT at store time while normal prose survives untouched", () => {
+    const store = new Store(selection);
+    const bot = store.createBot();
+    const skKey = `sk-proj-abcdefghijklmnopqrstuvwxyz0123456789`;
+    const envDump = `Bash: cat .env\nDATABASE_URL=postgres://localhost/app\nOPENAI_API_KEY=${skKey}\nPORT=3000`;
+    const chip = store.appendMessage(bot.threadId, {
+      role: "bot",
+      kind: "activity",
+      tool: { name: envDump, ok: true },
+    });
+    expect(chip.tool?.name).not.toContain(skKey);
+    expect(chip.tool?.name).toContain("«redacted");
+    // prose and non-secret lines in the same output stay readable
+    expect(chip.tool?.name).toContain("cat .env");
+    expect(chip.tool?.name).toContain("DATABASE_URL=postgres://localhost/app");
+    expect(chip.tool?.name).toContain("PORT=3000");
+    // the persisted copy is redacted too, not just what append returned
+    const again = new Store(selection);
+    const stored = again.messagesFor(bot.threadId).find((m) => m.id === chip.id)?.tool?.name ?? "";
+    expect(stored).not.toContain(skKey);
+  });
+
+  it("tool-result redaction never touches user messages", () => {
+    const store = new Store(selection);
+    const bot = store.createBot();
+    const key = `sk-ant-api03-${"abcdefghijklmnopqrstuvwxyz0123456789"}`;
+    const mine = store.appendMessage(bot.threadId, { role: "user", kind: "activity", tool: { name: `paste ${key}` } });
+    expect(mine.tool?.name).toBe(`paste ${key}`);
+  });
 });
 
 describe("Store task usage", () => {
