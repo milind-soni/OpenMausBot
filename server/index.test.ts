@@ -42,6 +42,7 @@ let dshPluginAvailable = true;
 let dshManagementOffline = false;
 let dshPairedAuthorized = true;
 let dshSettingsConflict = false;
+let dshChatModelAvailable = true;
 let dshConfiguredModels: DshJsonValue[] = [
   { id: "keep", name: "Keep", input: ["text"], custom: { preserved: true } },
 ];
@@ -122,6 +123,10 @@ beforeAll(async () => {
       });
       return true;
     }
+    if (path.startsWith("/remote/api/") && !dshPairedAuthorized) {
+      send(403, { error: "revoked-device-upstream-secret" });
+      return true;
+    }
     if (path.startsWith("/api/pair/model-catalog")) {
       if (!dshPluginAvailable) {
         send(404, { error: "missing" });
@@ -167,7 +172,11 @@ beforeAll(async () => {
     else if (request.method === "session.selectModel") {
       const selectionSchema = z.object({ provider: z.string(), model: z.string(), reasoningEffort: z.string().optional() });
       const payload = selectionSchema.parse(request.payload);
-      const selected = selectionSchema.parse(payload);
+      const selected = selectionSchema.parse(
+        !dshChatModelAvailable && payload.provider === "deepseek" && payload.model === "chat"
+          ? { ...payload, model: "fallback" }
+          : payload,
+      );
       value = { selected };
     }
     else if (request.method === "session.prompt" || request.method === "session.cancel") value = { accepted: true };
@@ -176,7 +185,16 @@ beforeAll(async () => {
       { provider: "openrouter", displayName: "OpenRouter", settingsNs: "llm-pi-ai", settingsPath: ["providers", "openrouter"], active: true },
       { provider: "inactive", displayName: "Inactive", settingsNs: "llm-pi-ai", settingsPath: ["providers", "inactive"], active: false },
     ] };
-    else if (request.method === "llm.models") value = { groups: [{ id: "deepseek", name: "DeepSeek", models: [{ id: "chat", name: "Chat" }] }], failures: [] };
+    else if (request.method === "llm.models") value = {
+      groups: [{
+        id: "deepseek",
+        name: "DeepSeek",
+        models: dshChatModelAvailable
+          ? [{ id: "chat", name: "Chat" }, { id: "fallback", name: "Fallback" }]
+          : [{ id: "fallback", name: "Fallback" }],
+      }],
+      failures: [],
+    };
     else if (request.method === "llm.discoverModels") value = { models: [{ id: "deepseek/deepseek-v3", name: "DeepSeek V3", contextWindow: 64_000, maxTokens: 8_000 }] };
     else if (request.method === "settings.describe") value = {
       writable: true,
@@ -1425,6 +1443,81 @@ describe("harness HTTP API", () => {
     }
   });
 
+  it("refuses a selected DSH model that disappeared after catalog refresh in direct and room turns", async () => {
+    dshChatModelAvailable = true;
+    await api("GET", "/api/instances");
+    const bot = (await api("POST", "/api/bots")).body.bot;
+    const selectedModel = encodeDshModelId("deepseek", "chat");
+    const patched = await api("PATCH", `/api/bots/${bot.id}`, {
+      modelSelection: { instanceId: "deepseekHarness", model: selectedModel },
+    });
+    expect(patched.status).toBe(200);
+    const room = (await api("POST", "/api/groups", {
+      name: "Vanished DSH model room",
+      memberIds: [bot.id],
+    })).body.group;
+
+    const before = (await api("GET", "/api/bots")).body.bots.find((candidate: { id: string }) => candidate.id === bot.id);
+    const beforeMessages = before.messages.length;
+    const requestStart = dshStub.requests.length;
+    let send: Awaited<ReturnType<typeof api>> | undefined;
+    try {
+      dshChatModelAvailable = false;
+      const refreshed = await api("GET", "/api/instances");
+      const dsh = refreshed.body.instances.find((candidate: { instanceId: string }) => candidate.instanceId === "deepseekHarness");
+      expect(dsh.models.options.map((option: { id: string }) => option.id)).toEqual([
+        encodeDshModelId("deepseek", "fallback"),
+      ]);
+
+      send = await api("POST", `/api/bots/${bot.id}/messages`, { text: "Do not run this on another model." });
+      expect(send.status).toBe(409);
+      expect(send.body.error).toMatch(/selected DeepSeek Harness model is no longer available/i);
+
+      const after = (await api("GET", "/api/bots")).body.bots.find((candidate: { id: string }) => candidate.id === bot.id);
+      expect(after.busy).not.toBe(true);
+      expect(after.messages).toHaveLength(beforeMessages);
+
+      expect((await api("POST", `/api/groups/${room.id}/messages`, { text: "Do not run this room turn either." })).status).toBe(202);
+      await expect.poll(async () => {
+        const state = (await api("GET", "/api/bots?messages=20")).body;
+        const messages = state.groups.find((group: { id: string }) => group.id === room.id).messages;
+        return messages.some((message: { tool?: { name?: string } }) =>
+          message.tool?.name?.includes("selected DeepSeek Harness model is no longer available"),
+        );
+      }, { timeout: 5_000 }).toBe(true);
+
+      const dispatched = dshStub.requests.slice(requestStart)
+        .flatMap((request) => {
+          const parsed = dshClientRequestSchema.safeParse(request.body);
+          return parsed.success ? [parsed.data.method] : [];
+        });
+      expect(dispatched).not.toContain("session.create");
+      expect(dispatched).not.toContain("session.selectModel");
+      expect(dispatched).not.toContain("session.prompt");
+    } finally {
+      if (send?.status === 202) {
+        const prompt = await waitUntil(() => dshStub.requests.slice(requestStart)
+          .map((request) => dshClientRequestSchema.safeParse(request.body).data)
+          .find((request) => request?.method === "session.prompt"));
+        const sessionId = z.object({ sessionId: z.string() }).parse(prompt.payload).sessionId;
+        dshStub.send("mux", {
+          type: "server-request",
+          rpcId: "catalog-disappeared-cleanup",
+          method: "session/event",
+          payload: { type: "session/event", sessionId, event: { type: "turn/end", seq: 1, time: 1, data: { reason: { kind: "cancelled" } } } },
+        });
+        await waitUntil(async () => {
+          const current = (await api("GET", "/api/bots")).body.bots.find((candidate: { id: string }) => candidate.id === bot.id);
+          return current?.busy ? undefined : true;
+        });
+      }
+      dshChatModelAvailable = true;
+      await api("GET", "/api/instances");
+      await api("DELETE", `/api/groups/${room.id}`);
+      await api("DELETE", `/api/bots/${bot.id}`);
+    }
+  });
+
   it("does not dispatch a room turn with stale exact-model effort", async () => {
     const model = "claude-room-exact";
     writeClaudeCatalog([{ id: model, label: "Claude room exact" }]);
@@ -1738,6 +1831,104 @@ describe("harness HTTP API", () => {
     } finally {
       dshStub.onRawRequest = undefined;
       dshStub.releaseRawResponses();
+      await api("DELETE", `/api/bots/${bot.id}`);
+    }
+  });
+
+  it("settles an active paired turn and its open card when device access is revoked, then recovers after re-pairing", async () => {
+    dshPairedAuthorized = true;
+    const paired = await api("POST", "/api/instances/deepseekHarness/deepseek-harness/pair", {
+      pairingLink: `${dshStub.baseUrl}/m/?pair=active-revocation-initial`,
+    });
+    expect(paired).toEqual({ status: 200, body: { paired: true } });
+    await api("GET", "/api/instances");
+    const bot = (await api("POST", "/api/bots")).body.bot;
+    const model = encodeDshModelId("deepseek", "chat");
+    expect((await api("PATCH", `/api/bots/${bot.id}`, {
+      modelSelection: { instanceId: "deepseekHarness", model },
+    })).status).toBe(200);
+    const requestStart = dshStub.requests.length;
+
+    try {
+      expect((await api("POST", `/api/bots/${bot.id}/messages`, { text: "paired revocation fixture" })).status).toBe(202);
+      const prompt = await waitUntil(() => dshStub.requests.slice(requestStart)
+        .map((entry) => dshClientRequestSchema.safeParse(entry.body).data)
+        .find((entry) => entry?.method === "session.prompt"));
+      const sessionId = z.object({ sessionId: z.string() }).parse(prompt.payload).sessionId;
+      dshStub.send("mux", {
+        type: "server-request",
+        rpcId: "active-revocation-approval",
+        method: "approval/requested",
+        payload: {
+          type: "approval/requested",
+          sessionId,
+          approvalId: "active-revocation-approval",
+          toolName: "shell",
+          reason: "approval before access revocation",
+        },
+      });
+      const open = await waitUntil(async () => {
+        const current = (await api("GET", "/api/bots")).body.bots.find((candidate: { id: string }) => candidate.id === bot.id);
+        return current?.messages.find((message: { card?: { subtitle?: string } }) => message.card?.subtitle === "approval before access revocation");
+      });
+      expect(open.card.answered).toBeUndefined();
+
+      dshPairedAuthorized = false;
+      dshStub.setStreamBlocked("mux", true);
+      dshStub.setStreamBlocked("host", true);
+      dshStub.closeStreams("mux");
+      dshStub.closeStreams("host");
+
+      const settled = await waitUntil(async () => {
+        const current = (await api("GET", "/api/bots")).body.bots.find((candidate: { id: string }) => candidate.id === bot.id);
+        const card = current?.messages.find((message: { id: string }) => message.id === open.id)?.card;
+        return !current?.busy && card?.dismissed ? { current, card } : undefined;
+      });
+      expect(settled.card).toMatchObject({ answered: "unavailable", dismissed: true });
+      expect(settled.current.messages.some((message: { tool?: { name?: string } }) =>
+        message.tool?.name?.includes("DeepSeek Harness event stream was lost"))).toBe(true);
+      expect(JSON.stringify(settled.current)).not.toMatch(/revoked-device-upstream-secret|deviceCookie|dsh_pair/i);
+
+      const methods = dshStub.requests.slice(requestStart)
+        .flatMap((entry) => {
+          const parsed = dshClientRequestSchema.safeParse(entry.body);
+          return parsed.success ? [parsed.data.method] : [];
+        });
+      expect(methods).toContain("session.cancel");
+
+      const revoked = await api("GET", "/api/instances/deepseekHarness/deepseek-harness");
+      expect(revoked.body.modelManagement).toMatchObject({
+        available: false,
+        reasonCode: "paired-device-unauthorized",
+      });
+      expect(JSON.stringify(revoked.body)).not.toMatch(/revoked-device-upstream-secret|deviceCookie|dsh_pair/i);
+
+      dshPairedAuthorized = true;
+      const repaired = await api("POST", "/api/instances/deepseekHarness/deepseek-harness/pair", {
+        pairingLink: `${dshStub.baseUrl}/m/?pair=active-revocation-recovery`,
+      });
+      expect(repaired).toEqual({ status: 200, body: { paired: true } });
+      const recovered = await api("GET", "/api/instances/deepseekHarness/deepseek-harness");
+      expect(recovered.body).toMatchObject({
+        connection: { transport: "paired", paired: true, hasDeviceCredential: true },
+        modelManagement: { available: true, supported: true },
+      });
+      expect(JSON.stringify(recovered.body)).not.toMatch(/deviceCookie|dsh_pair/i);
+    } finally {
+      dshPairedAuthorized = true;
+      dshStub.setStreamBlocked("mux", false);
+      dshStub.setStreamBlocked("host", false);
+      // Changing origin deliberately clears the write-only device cookie; switch
+      // back immediately so this security fixture cannot leak paired state into
+      // the settings API cases that follow it.
+      await api("PATCH", "/api/instances/deepseekHarness/deepseek-harness", {
+        baseUrl: "http://127.0.0.1:1",
+        transport: "direct",
+      });
+      await api("PATCH", "/api/instances/deepseekHarness/deepseek-harness", {
+        baseUrl: dshStub.baseUrl,
+        transport: "direct",
+      });
       await api("DELETE", `/api/bots/${bot.id}`);
     }
   });

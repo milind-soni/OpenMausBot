@@ -43,6 +43,13 @@ const configSchema = z.object({
 }).strict();
 const jsonObjectSchema = z.record(z.string(), z.json());
 const sessionResultSchema = z.object({ sessionId: z.string().min(1).max(512) });
+const selectedModelResultSchema = z.object({
+  selected: z.object({
+    provider: z.string().min(1).max(512),
+    model: z.string().min(1).max(512),
+    reasoningEffort: z.string().min(1).max(80).optional(),
+  }),
+});
 const hostDescribeSchema = z.object({ version: z.string().max(200).optional() });
 const usageSchema = z.object({ inputTokens: z.number().int().safe().nonnegative(), outputTokens: z.number().int().safe().nonnegative() });
 const resumeCursorSchema = z.string().min(1).max(512);
@@ -480,7 +487,16 @@ export const DeepSeekHarnessDriver: ProviderDriver<DeepSeekHarnessConfig> = {
         if (turn.effort) selectPayload.reasoningEffort = turn.effort === "none" ? "off" : turn.effort;
         await client.waitForStreamsOpen();
         if (!isCurrent(turn.threadId, running, fence)) throw new Error("DeepSeek Harness turn was cancelled during startup");
-        await client.unary("session.selectModel", dshJsonValueSchema.parse(selectPayload));
+        const selectedResponse = await client.unary("session.selectModel", dshJsonValueSchema.parse(selectPayload));
+        const selected = selectedModelResultSchema.safeParse(selectedResponse.value).data?.selected;
+        if (
+          !selected
+          || selected.provider !== selectPayload.provider
+          || selected.model !== selectPayload.model
+          || selected.reasoningEffort !== selectPayload.reasoningEffort
+        ) {
+          throw new Error("DeepSeek Harness did not preserve the requested model and effort");
+        }
         if (!isCurrent(turn.threadId, running, fence)) throw new Error("DeepSeek Harness turn was cancelled during startup");
         const replayed = takeBaseline(sessionId, running.generation);
         if (cursor && cursor.sessionId !== sessionId) releaseBaseline(cursor.sessionId, running.generation, true);

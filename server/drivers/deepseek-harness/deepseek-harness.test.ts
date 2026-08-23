@@ -282,6 +282,49 @@ describe("DeepSeek Harness turns", () => {
     await instance.dispose();
   });
 
+  it.each([
+    ["provider", { provider: "wrong-provider", model: "requested", reasoningEffort: "high" }, "wrong-provider"],
+    ["model", { provider: "openrouter", model: "wrong/model", reasoningEffort: "high" }, "wrong/model"],
+    ["effort", { provider: "openrouter", model: "requested", reasoningEffort: "xhigh" }, "xhigh"],
+  ] as const)("fails closed when DSH acknowledges a different %s before prompting", async (_field, selected, leakMarker) => {
+    const fake = await host();
+    fake.onRequest = ({ body }) => {
+      const request = dshClientRequestSchema.parse(body);
+      if (request.method === "session.selectModel") {
+        return response(request.rpcId, { selected });
+      }
+      return officialResponse(request, "selection-changed-session");
+    };
+    const instance = await DeepSeekHarnessDriver.create({
+      instanceId: "deepseekHarness",
+      displayName: undefined,
+      environment: {},
+      enabled: true,
+      config: { baseUrl: fake.baseUrl, transport: "direct" },
+    });
+    const events = recordEvents(instance.adapter);
+
+    await expect(instance.adapter.sendTurn({
+      threadId: "selection-changed",
+      text: "Never send this prompt to a fallback model",
+      model: encodeDshModelId("openrouter", "requested"),
+      effort: "high",
+    })).rejects.toThrow("did not preserve the requested model and effort");
+
+    expect(fake.requests.map((request) => dshClientRequestSchema.parse(request.body).method)).toEqual([
+      "session.create",
+      "session.selectModel",
+    ]);
+    expect(events.events).toEqual(expect.arrayContaining([
+      expect.objectContaining({ type: "runtime.error", message: "DeepSeek Harness turn could not start" }),
+      expect.objectContaining({ type: "turn.completed", ok: false, stopReason: "start_failed" }),
+    ]));
+    expect(JSON.stringify(events.events)).not.toContain(leakMarker);
+
+    events.stop();
+    await instance.dispose();
+  });
+
   it("normalizes streamed events once and brokers approvals plus batched questions", async () => {
     const fake = await host();
     fake.onRequest = ({ body }) => {

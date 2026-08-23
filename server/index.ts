@@ -973,7 +973,11 @@ bus.subscribe((event: RuntimeEvent) => {
         const existing = store.messagesFor(event.threadId).find((m) => m.id === messageId);
         if (existing?.card && existing.card.answered === undefined) {
           store.patchMessage(event.threadId, messageId, {
-            card: { ...existing.card, answered: event.behavior, dismissed: event.source !== "user" },
+            card: {
+              ...existing.card,
+              answered: event.source === "unavailable" ? "unavailable" : event.behavior,
+              dismissed: event.source !== "user",
+            },
           });
         }
         if (event.requestId) askMessageByRequest.delete(`${event.threadId}:${event.requestId}`);
@@ -1383,6 +1387,15 @@ async function startTurn(
   }
   const instanceId = instance.instanceId;
   const model = opts?.runOn === "cloud" ? instance.models.default : bot.modelSelection.model;
+  if (
+    instance.driverKind === "deepseekHarness"
+    && !instance.models.options.some((option) => option.id === model)
+  ) {
+    throw Object.assign(
+      new Error("the selected DeepSeek Harness model is no longer available. Refresh the catalog or choose another model"),
+      { status: 409 },
+    );
+  }
   // a cloud routine borrows the instance default model, so it borrows no
   // per-bot effort either
   const effort = opts?.runOn === "cloud" ? undefined : bot.modelSelection.effort;
@@ -1906,6 +1919,21 @@ async function runGroupMemberTurn(
       kind: "activity",
       from: { botId: bot.id, name: bot.name, color: bot.color },
       tool: { name: `${bot.name} is busy in another conversation — skipped this round`, ok: false },
+    });
+    return true;
+  }
+  if (
+    instance.driverKind === "deepseekHarness"
+    && !instance.models.options.some((option) => option.id === bot.modelSelection.model)
+  ) {
+    store.appendMessage(group.threadId, {
+      role: "bot",
+      kind: "activity",
+      from: { botId: bot.id, name: bot.name, color: bot.color },
+      tool: {
+        name: `error: ${bot.name}'s selected DeepSeek Harness model is no longer available. Refresh the catalog or choose another model`,
+        ok: false,
+      },
     });
     return true;
   }
