@@ -463,7 +463,7 @@ describe("DshApiClient event streams", () => {
       if (hostFrames.length === 1) firstHost.resolve();
     });
 
-    await Promise.all([fake.waitForStream("mux"), fake.waitForStream("host")]);
+    await Promise.all([fake.waitForStream("mux"), fake.waitForStream("host"), client.waitForStreamsOpen()]);
     expect(health).toContain("mux:connected");
     expect(fake.streamHeaders.mux[0].cookie).toBe("dsh_device=fixture-value");
     expect(fake.streamHeaders.host[0].cookie).toBe("dsh_device=fixture-value");
@@ -482,7 +482,7 @@ describe("DshApiClient event streams", () => {
     fake.closeStreams("mux");
     await Promise.all([muxClosed, muxReconnecting.promise]);
     expect(health).toContain("mux:reconnecting");
-    await fake.waitForStream("mux");
+    await Promise.all([fake.waitForStream("mux"), client.waitForStreamsOpen()]);
     fake.send("mux", { type: "server-request", rpcId: "mux-2", method: "session/event", payload: { type: "session/event", sessionId: "s2", event: { type: "turn/start", seq: 0, time: 1, data: {} } } });
     await secondMux.promise;
 
