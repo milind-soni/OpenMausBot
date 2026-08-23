@@ -27,6 +27,8 @@ const BASELINE_MAX_BYTES = 256_000;
 const BASELINE_MAX_BYTES_PER_SESSION = 32_000;
 const BASELINE_TTL_MS = 10_000;
 const RESUME_BARRIER_TIMEOUT_MS = 8_000;
+const QUEUE_SUBMISSION_MAX_FRAMES = 256;
+const QUEUE_SUBMISSION_MAX_BYTES = 1_000_000;
 
 export interface DeepSeekHarnessConfig {
   baseUrl: string;
@@ -70,7 +72,7 @@ interface SessionRecord {
   sessionId: string;
   personaDelivered: boolean;
 }
-type TurnPhase = "starting" | "selecting" | "resuming" | "queued" | "running";
+type TurnPhase = "starting" | "selecting" | "resuming" | "queueing" | "queued" | "running";
 interface ResumeBarrier {
   pending: Set<string>;
   terminalSeen: boolean;
@@ -92,6 +94,9 @@ interface ActiveTurn {
   settleStartup: () => void;
   cancelPromise?: Promise<void>;
   resumeBarrier?: ResumeBarrier;
+  queueFrames: DshServerRequest[];
+  queueFrameBytes: number;
+  queueOverflowed: boolean;
   usage?: { input: number; output: number };
 }
 interface PendingApproval {
@@ -343,6 +348,18 @@ export const DeepSeekHarnessDriver: ProviderDriver<DeepSeekHarnessConfig> = {
       if (seenFrames.size > 4_096) seenFrames.delete(seenFrames.values().next().value!);
       return true;
     };
+    const bufferQueueFrame = (running: ActiveTurn, frame: DshServerRequest) => {
+      const bytes = Buffer.byteLength(JSON.stringify(frame));
+      if (
+        running.queueFrames.length >= QUEUE_SUBMISSION_MAX_FRAMES
+        || running.queueFrameBytes + bytes > QUEUE_SUBMISSION_MAX_BYTES
+      ) {
+        running.queueOverflowed = true;
+        return;
+      }
+      running.queueFrames.push(frame);
+      running.queueFrameBytes += bytes;
+    };
     const isCurrent = (threadId: string, running: ActiveTurn, fence?: number) => active.get(threadId) === running && !running.cancelled && !stopping && !disposed && (fence === undefined || fence === lifecycle);
     const createResumeBarrier = (): ResumeBarrier => {
       let resolve = () => {};
@@ -465,7 +482,23 @@ export const DeepSeekHarnessDriver: ProviderDriver<DeepSeekHarnessConfig> = {
       });
       const startupSettled = new Promise<void>((resolve) => { settleStartup = resolve; });
       // Reservation occurs before the first await, so a concurrent turn cannot race session creation.
-      const running: ActiveTurn = { generation: newId(), sessionKey, turnId, sessionId: "", phase: "starting", cancelled: false, completed: false, ready, releaseReady, failReady, startupSettled, settleStartup };
+      const running: ActiveTurn = {
+        generation: newId(),
+        sessionKey,
+        turnId,
+        sessionId: "",
+        phase: "starting",
+        cancelled: false,
+        completed: false,
+        ready,
+        releaseReady,
+        failReady,
+        startupSettled,
+        settleStartup,
+        queueFrames: [],
+        queueFrameBytes: 0,
+        queueOverflowed: false,
+      };
       active.set(turn.threadId, running);
       emit({ ...base(turn.threadId, turnId), type: "turn.started" });
       try {
@@ -524,27 +557,47 @@ export const DeepSeekHarnessDriver: ProviderDriver<DeepSeekHarnessConfig> = {
         }
         await client.waitForStreamsOpen();
         if (!isCurrent(turn.threadId, running, fence)) throw new Error("DeepSeek Harness turn was cancelled during startup");
-        await client.unary("session.prompt", {
+        const promptRequest = client.unary("session.prompt", {
           sessionId,
           mode: "queue",
           content: [{ type: "text", text: promptText(turn, !session.personaDelivered) }],
         });
+        // Once submission starts, new session frames belong to this turn, but
+        // they cannot be published until the Host confirms prompt acceptance.
+        running.phase = "queueing";
+        await promptRequest;
         if (!isCurrent(turn.threadId, running, fence)) throw new Error("DeepSeek Harness turn was cancelled during startup");
+        if (running.queueOverflowed) {
+          running.queueFrames = [];
+          running.queueFrameBytes = 0;
+          running.settleStartup();
+          await cancelRunning(running);
+          throw new Error("DeepSeek Harness queue submission event buffer overflowed");
+        }
         session.personaDelivered = true;
         running.phase = "queued";
-        // A stream can close while the final queue HTTP response is held.
-        // Its health event occurred while this turn was still selecting, so
-        // arm the normal terminal-loss path explicitly at the phase boundary.
-        if (!streamHealthy.mux || !streamHealthy.host) scheduleStreamFailure();
         // Persist only after the persona-bearing queue prompt was accepted. A
         // crash after create/select therefore safely re-delivers it on resume.
         emit({ ...base(turn.threadId, turnId), type: "session.started", sessionId, model: turn.model ?? null, resumeCursor: encodeCursor(session) });
         running.releaseReady();
         running.settleStartup();
+        const queuedFrames = running.queueFrames;
+        running.queueFrames = [];
+        running.queueFrameBytes = 0;
+        for (const frame of queuedFrames) {
+          if (running.completed) break;
+          handleFrame(frame);
+        }
+        // A stream can close while the final queue HTTP response is held.
+        // Its health event occurred while this turn was still selecting, so
+        // arm the normal terminal-loss path explicitly at the phase boundary.
+        if (!streamHealthy.mux || !streamHealthy.host) scheduleStreamFailure();
         return { turnId };
       } catch (error) {
         running.resumeBarrier?.release();
         running.resumeBarrier = undefined;
+        running.queueFrames = [];
+        running.queueFrameBytes = 0;
         if (cursor) releaseBaseline(cursor.sessionId, running.generation, true);
         if (running.sessionId) releaseBaseline(running.sessionId, running.generation, true);
         await resolvePendingUnavailable(turn.threadId);
@@ -662,6 +715,10 @@ export const DeepSeekHarnessDriver: ProviderDriver<DeepSeekHarnessConfig> = {
       }
       const { threadId, running } = current;
       const eventBase = base(threadId, running.turnId);
+      if (running.phase === "queueing") {
+        bufferQueueFrame(running, frame);
+        return;
+      }
       if (running.phase === "starting" || running.phase === "selecting") {
         if (method === "approval/requested" || method === "question/requested") bufferBaseline(sessionId, frame);
         else if (method === "approval/resolved" || method === "question/resolved") withdrawBaseline(sessionId, method, payload ?? {});

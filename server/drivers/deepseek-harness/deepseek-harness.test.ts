@@ -518,6 +518,40 @@ describe("DeepSeek Harness turns", () => {
     events.stop();
   });
 
+  it("replays a fast terminal frame received while the queue prompt response is held", async () => {
+    const fake = await host();
+    let holdPrompt = true;
+    fake.onRawRequest = (request) => holdPrompt && dshClientRequestSchema.safeParse(request.body).data?.method === "session.prompt";
+    fake.onRequest = ({ body }) => officialResponse(dshClientRequestSchema.parse(body), "fast-terminal-session");
+    const instance = await DeepSeekHarnessDriver.create({ instanceId: "deepseekHarness", displayName: undefined, environment: {}, enabled: true, config: { baseUrl: fake.baseUrl, transport: "direct" } });
+    const events = recordEvents(instance.adapter);
+    const model = encodeDshModelId("deepseek", "chat");
+
+    const start = instance.adapter.sendTurn({ threadId: "fast-terminal", text: "x", model });
+    await fake.waitForRawResponse();
+    const event = (rpcId: string, type: string, seq: number, data: DshJsonValue) => ({ type: "server-request", rpcId, method: "session/event", payload: { type: "session/event", sessionId: "fast-terminal-session", event: { type, seq, time: seq, data } } });
+    fake.send("mux", event("fast-start", "turn/start", 1, {}));
+    fake.send("mux", event("fast-output", "assistant/chunk.text-delta", 2, { delta: "fast output" }));
+    fake.send("mux", event("fast-end", "turn/end", 3, { reason: { kind: "completed" } }));
+    await fake.waitForStreamRoundTrip("mux");
+    expect(events.events.some((item) => item.type === "turn.completed")).toBe(false);
+
+    holdPrompt = false;
+    fake.releaseRawResponses();
+    const started = await start;
+    const completed = await events.until((item) => item.type === "turn.completed" && item.turnId === started.turnId, 500);
+    expect(completed).toMatchObject({ ok: true, stopReason: "completed" });
+    expect(events.events.filter((item) => item.type === "session.started" || item.type === "content.delta" || item.type === "turn.completed").map((item) => item.type)).toEqual([
+      "session.started",
+      "content.delta",
+      "turn.completed",
+    ]);
+    expect(events.events).toContainEqual(expect.objectContaining({ type: "content.delta", delta: "fast output" }));
+    await expect(instance.adapter.sendTurn({ threadId: "fast-terminal", text: "next", model })).resolves.toEqual({ turnId: expect.any(String) });
+    await instance.dispose();
+    events.stop();
+  });
+
   it("keeps negative and ambiguous approval/question receipts retryable with the stable rpc id", async () => {
     const fake = await host();
     let receipts = 0;
