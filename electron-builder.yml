@@ -114,15 +114,17 @@ win:
     - target: zip
       arch: x64
   icon: build/icon.ico
-  # No signing config yet (would go under win.signtoolOptions or
-  # win.azureSignOptions — eb 26 nests it, there is no top-level
-  # win.certificateFile). The installer is unsigned, so SmartScreen shows
-  # "unknown publisher" on first run (README says so). verifyUpdateCodeSignature
-  # defaults true, but electron-updater skips the check when app-update.yml
-  # carries no publisherName — so auto-update still works today. Do NOT set
-  # publisherName without actually signing, or every update is rejected as
-  # untrusted; and once signed, keep the cert subject stable (or list both old
-  # and new in publisherName) or you strand already-installed users.
+  # Signing: the build is unsigned by default (electron-builder needs signtool.exe
+  # from the Windows SDK, which this repo's CI provides). To produce a SIGNED
+  # Windows build locally, run scripts/sign-win.ps1 after `pnpm package:win`
+  # (uses build/omb-selfsigned.pfx for pipeline verification) or supply a real
+  # Authenticode cert via CSC_LINK/CSC_KEY_PASSWORD + win.certificateFile and
+  # install signtool. A self-signed cert still trips SmartScreen ("unknown
+  # publisher") — it only proves the signing pipeline works; for a clean install
+  # use a CA-issued cert (SSL.com/Sectigo/EV). publisherName stays unset on
+  # purpose: electron-updater skips signature verification when app-update.yml
+  # has no publisherName, so auto-update keeps working today. Do NOT set
+  # publisherName without a REAL cert, or every update is rejected as untrusted.
 
 nsis:
   oneClick: true

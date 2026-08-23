@@ -21,3 +21,7 @@ release
 cloudflare/composio-broker/worker-configuration.d.ts
 .claude/worktrees/
 .vercel/
+
+# local self-signed test cert (not for production)
+build/omb-selfsigned.pfx
+>>>>>>> 8f1cea4 (feat(build): add reproducible Windows code-signing step)

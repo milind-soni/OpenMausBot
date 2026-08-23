@@ -271,6 +271,25 @@ pnpm package:win   # Windows installer + zip → release/
 pnpm package:linux # Ubuntu x64 .deb + AppImage → release/
 ```
 
+#### Code-signing the Windows build
+
+`pnpm package:win` produces an **unsigned** installer (SmartScreen flags it as
+"unknown publisher"). Sign it with Authenticode after the build:
+
+```sh
+# self-signed test cert (pipeline verification only — still trips SmartScreen)
+pwsh scripts/sign-win.ps1
+
+# real CA-issued cert (clean SmartScreen install)
+CSC_LINK=path/to/cert.pfx CSC_KEY_PASSWORD=**** pwsh scripts/sign-win.ps1
+```
+
+`scripts/sign-win.ps1` signs both `release/OpenMausBot-<ver>-setup.exe` and the
+inner `OpenMausBot.exe` with an RFC-3161 timestamp (DigiCert), so the signature
+outlives the cert. A self-signed cert validates only on machines that trust its
+root; for a SmartScreen-clean install use a CA-issued Authenticode certificate
+and set `win.certificateFile` / `CSC_*` in `electron-builder.yml`.
+
 ### Routines and webhook triggers
 
 Routines can run once or on selected weekdays, using either a MAUS's configured model/computer or the

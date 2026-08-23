@@ -25,6 +25,8 @@ jobs:
     name: NSIS installer
     runs-on: windows-latest
     timeout-minutes: 30
+    env:
+      HAS_CSC: ${{ secrets.CSC_LINK != '' }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -42,6 +44,17 @@ jobs:
         shell: bash
         run: rm -rf dist dist-server release
       - run: pnpm package:win
+      # Optional Authenticode signing. Runs only when a cert is supplied via
+      # secrets.CSC_LINK (the same var electron-builder would use). Without it
+      # the build stays unsigned — the verify step below still rejects a
+      # publisherName on an unsigned build, so auto-update keeps working.
+      - name: sign the Windows build (optional)
+        if: ${{ env.HAS_CSC == 'true' }}
+        shell: bash
+        env:
+          OMB_CERT_FILE: ${{ secrets.CSC_LINK }}
+          OMB_PFX_PASSWORD: ${{ secrets.CSC_KEY_PASSWORD }}
+        run: pwsh scripts/sign-win.ps1
       - name: report what was built
         shell: bash
         run: |

@@ -54,6 +54,7 @@
     "package:prepare": "pnpm build && pnpm build:server && pnpm build:companion && pnpm build:updater && pnpm build:android-tools",
     "package:mac": "pnpm package:prepare && pnpm build:speech && pnpm build:recorder && pnpm build:cua && electron-builder --mac --publish never",
     "package:win": "pnpm package:prepare && electron-builder --win --publish never",
+    "package:win:signed": "pnpm package:win && pwsh scripts/sign-win.ps1",
     "package:linux": "pnpm package:prepare && pnpm build:cua:linux && electron-builder --linux --x64 --publish never",
     "package:linux:offline": "pnpm package:prepare && pnpm build:cua:linux:offline && electron-builder --linux --x64 --publish never",
     "smoke:linux-package": "node scripts/run-linux-package-smoke.mjs",
