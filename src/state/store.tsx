@@ -13,10 +13,16 @@ import {
   useState,
   type ReactNode,
 } from "react";
+import { z } from "zod";
 import type { CloudBackend, EffortLevel } from "../../server/contracts.ts";
 import { clearUnsupportedEffort } from "@/lib/model-effort";
 import type { MausColor, MausMotion } from "@/lib/mascot";
 import type { BotAvatarCrop } from "../../shared/bot-avatar";
+import {
+  DEEPSEEK_HARNESS_MAX_TOKEN_LIMIT,
+  DEEPSEEK_HARNESS_PUBLIC_ERROR_CODES,
+  type DeepSeekHarnessPublicErrorCode,
+} from "../../shared/deepseek-harness";
 import type { Routine, RoutineInput, RoutineRun } from "@/lib/routines";
 import type { WebhookAttempt, WebhookIngressStatus, WebhookTrigger } from "@/lib/webhooks";
 import { currentCall } from "@/lib/call";
@@ -330,6 +336,106 @@ export interface InstanceInfo {
   /** Absolute paths of every default binary found on PATH, PATH order. */
   cliCandidates?: string[];
 }
+
+export type DeepSeekHarnessTransport = "direct" | "paired";
+export type DeepSeekHarnessReasoningEffort = "off" | "minimal" | "low" | "medium" | "high" | "xhigh" | "max";
+
+export interface DeepSeekHarnessModelProfile {
+  id: string;
+  name?: string;
+  contextWindow?: number;
+  maxTokens?: number;
+  reasoningEfforts?: DeepSeekHarnessReasoningEffort[];
+}
+
+export interface DeepSeekHarnessPublicCatalog {
+  groups: Array<{
+    id: string;
+    name: string;
+    models: Array<{
+      id: string;
+      name: string;
+      description?: string;
+      reasoning?: {
+        efforts: Array<{ id: string; name: string; description?: string }>;
+        defaultEffort?: string;
+      };
+    }>;
+  }>;
+  failures: Array<{ id: string; name: string; message: string }>;
+}
+
+export interface DeepSeekHarnessSettingsSnapshot {
+  connection: {
+    instanceId: string;
+    transport: DeepSeekHarnessTransport;
+    baseUrl: string;
+    paired: boolean;
+    hasDeviceCredential: boolean;
+    agentPreset?: string;
+  };
+  modelManagement: {
+    available: boolean;
+    supported: boolean;
+    providers: Array<{ provider: string; displayName: string }>;
+    reasonCode?: "host-unavailable" | "paired-device-unauthorized" | "paired-plugin-update-required";
+    reason?: string;
+  };
+}
+
+export interface DeepSeekHarnessConnectionPatch {
+  baseUrl?: string;
+  transport?: DeepSeekHarnessTransport;
+  agentPreset?: string | null;
+}
+
+export interface DeepSeekHarnessUpsertRequest {
+  provider: string;
+  model: DeepSeekHarnessModelProfile;
+}
+
+const deepSeekHarnessReasoningEffortSchema = z.enum(["off", "minimal", "low", "medium", "high", "xhigh", "max"]);
+const deepSeekHarnessModelProfileSchema = z.object({
+  id: z.string(),
+  name: z.string().optional(),
+  contextWindow: z.number().int().safe().positive().max(DEEPSEEK_HARNESS_MAX_TOKEN_LIMIT).optional(),
+  maxTokens: z.number().int().safe().positive().max(DEEPSEEK_HARNESS_MAX_TOKEN_LIMIT).optional(),
+  reasoningEfforts: z.array(deepSeekHarnessReasoningEffortSchema).optional(),
+});
+const deepSeekHarnessPublicCatalogSchema = z.object({
+  groups: z.array(z.object({
+    id: z.string(),
+    name: z.string(),
+    models: z.array(z.object({
+      id: z.string(),
+      name: z.string(),
+      description: z.string().optional(),
+      reasoning: z.object({
+        efforts: z.array(z.object({ id: z.string(), name: z.string(), description: z.string().optional() })),
+        defaultEffort: z.string().optional(),
+      }).optional(),
+    })),
+  })),
+  failures: z.array(z.object({ id: z.string(), name: z.string(), message: z.string() })),
+});
+const deepSeekHarnessConnectionSchema = z.object({
+  instanceId: z.string(),
+  transport: z.enum(["direct", "paired"]),
+  baseUrl: z.string(),
+  paired: z.boolean(),
+  hasDeviceCredential: z.boolean(),
+  agentPreset: z.string().optional(),
+});
+const deepSeekHarnessSettingsSnapshotSchema = z.object({
+  connection: deepSeekHarnessConnectionSchema,
+  modelManagement: z.object({
+    available: z.boolean(),
+    supported: z.boolean(),
+    providers: z.array(z.object({ provider: z.string(), displayName: z.string() })),
+    reasonCode: z.enum(["host-unavailable", "paired-device-unauthorized", "paired-plugin-update-required"]).optional(),
+    reason: z.string().optional(),
+  }),
+});
 
 export type AppSettingsSection =
   | "general"
@@ -1094,15 +1200,110 @@ export const initialState: AppState = {
 };
 
 // ── API client ─────────────────────────────────────────────────────────
+export class ApiError extends Error {
+  readonly code?: string;
+
+  constructor(message: string, code?: string) {
+    super(message);
+    this.name = "ApiError";
+    this.code = code;
+  }
+}
+
 export async function api(path: string, init?: RequestInit): Promise<any> {
   const res = await fetch(path, {
     headers: { "content-type": "application/json" },
     ...init,
   });
   const body = await res.json().catch(() => ({}));
-  if (!res.ok) throw new Error(body.error ?? `${res.status} ${res.statusText}`);
+  if (!res.ok) {
+    const parsed = z.object({
+      error: z.string().optional(),
+      code: z.string().regex(/^[a-z0-9][a-z0-9-]{0,63}$/).optional(),
+    }).safeParse(body);
+    const details = parsed.success ? parsed.data : {};
+    throw new ApiError(details.error ?? `${res.status} ${res.statusText}`, details.code);
+  }
   return body;
 }
+
+type JsonRequest = (path: string, init?: RequestInit) => Promise<any>;
+type DeepSeekHarnessPostBody =
+  | { pairingLink: string }
+  | { provider: string }
+  | DeepSeekHarnessUpsertRequest;
+
+const deepSeekHarnessPublicErrorCodeSchema = z.enum(DEEPSEEK_HARNESS_PUBLIC_ERROR_CODES);
+
+export class DeepSeekHarnessApiError extends Error {
+  readonly code: DeepSeekHarnessPublicErrorCode;
+
+  constructor(code: DeepSeekHarnessPublicErrorCode) {
+    super(`DeepSeek Harness request failed (${code}).`);
+    this.name = "DeepSeekHarnessApiError";
+    this.code = code;
+  }
+}
+
+async function parseDeepSeekHarnessResponse<T>(
+  response: () => ReturnType<JsonRequest>,
+  schema: z.ZodType<T>,
+): Promise<T> {
+  let body: unknown;
+  try {
+    body = await response();
+  } catch (error) {
+    if (error instanceof DeepSeekHarnessApiError) throw error;
+    if (error instanceof ApiError) {
+      const code = deepSeekHarnessPublicErrorCodeSchema.safeParse(error.code);
+      throw new DeepSeekHarnessApiError(code.success ? code.data : "request-failed");
+    }
+    throw new DeepSeekHarnessApiError("request-failed");
+  }
+
+  const parsed = schema.safeParse(body);
+  if (!parsed.success) throw new DeepSeekHarnessApiError("invalid-response");
+  return parsed.data;
+}
+
+/** Typed renderer boundary for the narrow, write-only DSH settings API. */
+export function createDeepSeekHarnessActions(request: JsonRequest = api) {
+  const root = (instanceId: string) =>
+    `/api/instances/${encodeURIComponent(instanceId)}/deepseek-harness`;
+  const post = (path: string, body: DeepSeekHarnessPostBody) => request(path, {
+    method: "POST",
+    body: JSON.stringify(body),
+  });
+
+  return {
+    get: async (instanceId: string) => parseDeepSeekHarnessResponse(
+      () => request(root(instanceId)),
+      deepSeekHarnessSettingsSnapshotSchema,
+    ),
+    patch: async (instanceId: string, patch: DeepSeekHarnessConnectionPatch) => parseDeepSeekHarnessResponse(
+      () => request(root(instanceId), {
+        method: "PATCH",
+        body: JSON.stringify(patch),
+      }),
+      z.object({ saved: z.boolean(), connection: deepSeekHarnessConnectionSchema }),
+    ),
+    pair: async (instanceId: string, pairingLink: string) => parseDeepSeekHarnessResponse(
+      () => post(`${root(instanceId)}/pair`, { pairingLink }),
+      z.object({ paired: z.literal(true) }),
+    ),
+    discover: async (instanceId: string, provider: string) => parseDeepSeekHarnessResponse(
+      () => post(`${root(instanceId)}/discover`, { provider }),
+      z.object({ models: z.array(deepSeekHarnessModelProfileSchema) }),
+    ),
+    upsert: async (instanceId: string, input: DeepSeekHarnessUpsertRequest) => parseDeepSeekHarnessResponse(
+      () => post(`${root(instanceId)}/upsert`, input),
+      z.object({ updated: z.literal(true), catalog: deepSeekHarnessPublicCatalogSchema }),
+    ),
+  };
+}
+
+export type DeepSeekHarnessActions = ReturnType<typeof createDeepSeekHarnessActions>;
+export const deepSeekHarnessActions = createDeepSeekHarnessActions();
 
 /** Per-frame stream state lives in its OWN context: token frames update only
  * the components that read this hook (the chat's streaming tail), while every

@@ -66,6 +66,7 @@ import {
   parseDeepSeekHarnessDiscoverRequest,
   parseDeepSeekHarnessPairRequest,
   parseDeepSeekHarnessUpsertRequest,
+  publicDeepSeekHarnessSettingsError,
   unavailableDeepSeekHarnessManagement,
 } from "./deepseek-harness-settings.ts";
 import { ComputerControl } from "./computer-control.ts";
@@ -2440,6 +2441,7 @@ interface DeepSeekHarnessConnectionStatus {
   transport: "direct" | "paired";
   baseUrl: string;
   paired: boolean;
+  hasDeviceCredential: boolean;
   agentPreset?: string;
 }
 
@@ -2449,6 +2451,7 @@ function publicDeepSeekHarnessConnection(instanceId: string, config: DeepSeekHar
     transport: config.transport,
     baseUrl: config.baseUrl,
     paired: config.transport === "paired" && Boolean(config.deviceCookie),
+    hasDeviceCredential: Boolean(config.deviceCookie),
   };
   if (config.agentPreset !== undefined) connection.agentPreset = config.agentPreset;
   return connection;
@@ -4352,10 +4355,10 @@ const server = createServer(async (req, res) => {
       const runsAction = method === "POST" && action !== undefined;
       if (writesConnection || runsAction) {
         if (!String(req.headers["content-type"] ?? "").toLowerCase().startsWith("application/json")) {
-          return json(res, 415, { error: "content-type must be application/json" });
+          return json(res, 415, { code: "invalid-request", error: "content-type must be application/json" });
         }
         const body = await readBody(req);
-        if (providerConfigBusy) return json(res, 409, { error: "provider settings are already being updated" });
+        if (providerConfigBusy) return json(res, 409, { code: "settings-busy", error: "Another provider update is still finishing. Wait a moment and try again." });
         providerConfigBusy = true;
         try {
           const current = deepSeekHarnessInstanceConfig(instanceId);
@@ -4784,6 +4787,10 @@ const server = createServer(async (req, res) => {
 
     return json(res, 404, { error: `no route: ${method} ${path}` });
   } catch (e) {
+    if (e instanceof DeepSeekHarnessSettingsError) {
+      const failure = publicDeepSeekHarnessSettingsError(e);
+      return json(res, failure.status, { code: failure.code, error: failure.error });
+    }
     const status = (e as any)?.status ?? 500;
     return json(res, status, { error: e instanceof Error ? e.message : String(e) });
   }
