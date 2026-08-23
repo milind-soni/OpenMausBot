@@ -166,6 +166,35 @@ export class FakeDshHost {
     return new Promise((resolve) => this.noStreamWaiters[kind].push(resolve));
   }
 
+  /** Wait until the client has processed every frame sent before this call. */
+  waitForStreamRoundTrip(kind: StreamKind): Promise<void> {
+    const socket = [...this.sockets[kind]].at(-1);
+    if (!socket) return Promise.reject(new Error(`no ${kind} stream is connected`));
+    return new Promise((resolve, reject) => {
+      const timeout = setTimeout(() => {
+        cleanup();
+        reject(new Error(`timed out waiting for ${kind} stream round trip`));
+      }, 2_000);
+      timeout.unref?.();
+      const cleanup = () => {
+        clearTimeout(timeout);
+        socket.off("pong", done);
+        socket.off("close", closed);
+      };
+      const done = () => {
+        cleanup();
+        resolve();
+      };
+      const closed = () => {
+        cleanup();
+        reject(new Error(`${kind} stream closed before round trip`));
+      };
+      socket.once("pong", done);
+      socket.once("close", closed);
+      socket.ping();
+    });
+  }
+
   waitForHungStreamHandshake(kind: StreamKind): Promise<void> {
     if (this.hungHandshakeSockets[kind].size) return Promise.resolve();
     return new Promise((resolve) => this.hungHandshakeWaiters[kind].push(resolve));

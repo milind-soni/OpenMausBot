@@ -445,7 +445,11 @@ describe("DshApiClient event streams", () => {
     const muxFrames: unknown[] = [];
     const hostFrames: unknown[] = [];
     const health: string[] = [];
-    const stopHealth = client.subscribeHealth((state) => health.push(`${state.kind}:${state.state}`));
+    const muxReconnecting = deferred();
+    const stopHealth = client.subscribeHealth((state) => {
+      health.push(`${state.kind}:${state.state}`);
+      if (state.kind === "mux" && state.state === "reconnecting") muxReconnecting.resolve();
+    });
     const firstMux = deferred();
     const secondMux = deferred();
     const firstHost = deferred();
@@ -476,7 +480,7 @@ describe("DshApiClient event streams", () => {
 
     const muxClosed = fake.waitForNoStreams("mux");
     fake.closeStreams("mux");
-    await muxClosed;
+    await Promise.all([muxClosed, muxReconnecting.promise]);
     expect(health).toContain("mux:reconnecting");
     await fake.waitForStream("mux");
     fake.send("mux", { type: "server-request", rpcId: "mux-2", method: "session/event", payload: { type: "session/event", sessionId: "s2", event: { type: "turn/start", seq: 0, time: 1, data: {} } } });

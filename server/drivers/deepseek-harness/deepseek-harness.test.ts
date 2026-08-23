@@ -1174,13 +1174,15 @@ describe("DeepSeek Harness turns", () => {
       if (kind === "mux") socket.send(JSON.stringify({ type: "server-request", rpcId: "expired-rpc", method: "approval/requested", payload: { type: "approval/requested", sessionId: "expired-session", approvalId: "expired", toolName: "shell" } }));
     };
     fake.onRequest = ({ body }) => {
-      const request = dshClientRequestSchema.parse(body);
-      return officialResponse(request, "expired-session");
+      const request = dshClientRequestSchema.safeParse(body);
+      if (!request.success) return accepted();
+      return officialResponse(request.data, "expired-session");
     };
     const instance = await DeepSeekHarnessDriver.create({ instanceId: "deepseekHarness", displayName: undefined, environment: {}, enabled: true, config: { baseUrl: fake.baseUrl, transport: "direct" } });
     const events = recordEvents(instance.adapter);
     try {
       await Promise.all([fake.waitForStream("mux"), fake.waitForStream("host")]);
+      await fake.waitForStreamRoundTrip("mux");
       clock.mockReturnValue(initialNow + 11_000);
       await instance.adapter.sendTurn({ threadId: "expired", text: "resume", resumeCursor: "expired-session", model: encodeDshModelId("deepseek", "chat") });
       expect(events.events.some((event) => event.type === "request.opened")).toBe(false);
