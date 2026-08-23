@@ -94,6 +94,16 @@ async function loadSecureCredentials() {
 }
 
 async function saveSecureCredentials(credentials) {
+  if (secureCredentialsUnreadable) {
+    // A store that exists but failed to read must never be replaced by a
+    // partial one: the file may hold recoverable credentials this launch
+    // cannot see. Every writer (boot migrations, credential:set) goes
+    // through here, so refusing covers them all; a launch that can read
+    // the store again is the recovery path.
+    throw new Error(
+      "The saved credential store could not be read this launch. Restart OpenMausBot before saving credentials so nothing is overwritten.",
+    );
+  }
   if (!(await safeStorage.isAsyncEncryptionAvailable())) {
     throw new Error("The operating-system credential store is unavailable");
   }

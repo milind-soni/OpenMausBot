@@ -571,7 +571,7 @@ export function PluginsPanel() {
               </div>
             </div>
           )}
-          {cards !== null && visible.length === 0 && !inventoryFailure && (
+          {cards !== null && visible.length === 0 && !(tab === "connected" && inventoryFailure) && (
             <div className="flex min-h-56 flex-col items-center justify-center text-center">
               <div className="text-[14px] font-medium text-ink">
                 {tab === "connected" ? "No connected apps yet" : "No apps found"}
