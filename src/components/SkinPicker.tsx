@@ -21,7 +21,7 @@ function Miniature({ skin }: { skin: SkinId }) {
     <div
       data-skin={skin}
       aria-hidden="true"
-      className="flex h-[78px] w-full overflow-hidden rounded-lg bg-app"
+      className="flex h-[78px] w-full overflow-hidden rounded-lg bg-app ring-1 ring-hairline/60"
     >
       {/* rail */}
       <div className="flex w-[11px] shrink-0 flex-col items-center gap-[3px] bg-panel pt-[5px]">
@@ -93,8 +93,8 @@ export function SkinPicker() {
             className={cn(
               "flex flex-col gap-2 rounded-xl border p-2 text-left transition-colors",
               selected
-                ? "border-accent-border bg-raised"
-                : "border-hairline/60 hover:border-hairline hover:bg-raised/50",
+                ? "border-accent-border bg-control"
+                : "border-hairline/60 hover:border-hairline hover:bg-control/50",
             )}
           >
             <Miniature skin={skin.id} />

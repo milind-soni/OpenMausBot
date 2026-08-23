@@ -55,7 +55,7 @@ export function ReactionBar({ threadId, message }: { threadId: string; message: 
             key={emoji}
             onClick={() => dispatch({ type: "toggleReaction", threadId, messageId: message.id, emoji })}
             aria-label={`React ${emoji}`}
-            className="rounded-full px-1 py-0.5 text-[13px] leading-none hover:bg-raised"
+            className="rounded-full px-1 py-0.5 text-[13px] leading-none hover:bg-control"
           >
             {emoji}
           </button>
@@ -65,7 +65,7 @@ export function ReactionBar({ threadId, message }: { threadId: string; message: 
           aria-label="More reactions"
           aria-expanded={pickerOpen}
           title="More reactions"
-          className="flex size-[22px] items-center justify-center rounded-full text-ink-secondary hover:bg-raised hover:text-ink"
+          className="flex size-[22px] items-center justify-center rounded-full text-ink-secondary hover:bg-control hover:text-ink"
         >
           {pickerOpen ? <X size={12} /> : <Plus size={12} />}
         </button>
@@ -85,7 +85,7 @@ export function ReactionBar({ threadId, message }: { threadId: string; message: 
                   setPickerOpen(false);
                 }}
                 aria-label={`React ${emoji}`}
-                className="rounded-lg px-1 py-1 text-[15px] leading-none hover:bg-raised"
+                className="rounded-lg px-1 py-1 text-[15px] leading-none hover:bg-control"
               >
                 {emoji}
               </button>
@@ -127,7 +127,7 @@ export function ReactionChips({
             "flex items-center gap-1 rounded-full border px-1.5 py-0.5 text-[12px] leading-none",
             bys.includes("user")
               ? "border-accent/50 bg-accent/15"
-              : "border-hairline/40 bg-panel hover:bg-raised",
+              : "border-hairline/40 bg-panel hover:bg-control",
           )}
         >
           <span>{emoji}</span>

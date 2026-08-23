@@ -61,7 +61,7 @@ describe("room turn timeout input", () => {
       throw "unavailable";
     });
 
-    expect(result).toEqual({ ok: false, error: "Could not save the room turn limit." });
+    expect(result).toEqual({ ok: false, error: "Could not save the channel turn limit." });
   });
 
   it("blocks a second save while the first is pending and allows a later save", async () => {

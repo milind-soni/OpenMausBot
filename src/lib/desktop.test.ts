@@ -35,6 +35,17 @@ afterEach(() => {
 });
 
 describe("desktop capability cache", () => {
+  it("uses the active locale when dictation ends", async () => {
+    const { dictationError } = await import("./desktop");
+    const translator = { current: (source: string) => source };
+
+    translator.current = (source) => source === "Dictation is only available on macOS for now."
+      ? "听写功能目前仅支持 macOS。"
+      : source;
+
+    expect(dictationError(2, translator.current)).toBe("听写功能目前仅支持 macOS。");
+  });
+
   it("does not let an older initial query replace a newer IPC update", async () => {
     let resolveInitial!: (value: DesktopCapabilities) => void;
     const initial = new Promise<DesktopCapabilities>((resolve) => {

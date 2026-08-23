@@ -90,6 +90,9 @@ declare global {
       };
       /** Native folder picker; resolves null when the user cancels. */
       pickFolder?(current?: string): Promise<string | null>;
+      /** Writes the redacted diagnostics report to a user-chosen file;
+       * resolves the path, or null when cancelled. */
+      exportDiagnostics?(): Promise<string | null>;
       /** Save a provider credential through Electron's OS-backed store. */
       setCredential?(
         name: "composioApiKey" | "xaiApiKey" | "boxToken" | "opencodeGoApiKey" | "ttsKey" | "openaiImageApiKey",

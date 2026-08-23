@@ -251,6 +251,33 @@ describe("PiDriver turns (fake CLI)", () => {
     expect(instance.adapter.hasSession("t-tool")).toBe(false);
   });
 
+  it("emits each assistant text block before the tool that follows it", async () => {
+    await create("interleave");
+    await instance.adapter.sendTurn({ threadId: "t-interleave", text: "go", model: "ollama-cloud/glm-5.2" });
+    await recorder.until((e) => e.type === "turn.completed");
+
+    const types = recorder.events.map((e) => e.type);
+    expect(types).toEqual([
+      "turn.started",
+      "session.started",
+      "content.delta",
+      "item.completed", // before one
+      "item.started",
+      "item.completed", // tool
+      "content.delta",
+      "item.completed", // before two
+      "item.started",
+      "item.completed", // tool
+      "content.delta",
+      "item.completed", // after
+      "turn.completed",
+    ]);
+    const texts = recorder.events
+      .filter((e) => e.type === "item.completed" && (e as { itemType: string }).itemType === "assistant_text")
+      .map((e) => (e as { text: string }).text);
+    expect(texts).toEqual(["before one", "before two", "after"]);
+  });
+
   it("brokers a permission ask through request.opened → respondToRequest", async () => {
     await create("permission");
     await instance.adapter.sendTurn({ threadId: "t-perm", text: "go" });

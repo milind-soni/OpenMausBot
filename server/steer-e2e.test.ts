@@ -129,13 +129,10 @@ posixOnly("mid-turn steering e2e", () => {
     const queued = await api("POST", `/api/bots/${created.id}/messages`, { text: "second" });
     expect(queued.status).toBe(202);
     expect(queued.body.queued).toBe(true);
-    await waitFor(
-      async () => (await getBot(created.id)).messages.some((m: any) => m.text === "second" && m.queued === true),
-      "the queued message to appear",
-    );
+    expect((await getBot(created.id)).messages.some((m: any) => m.text === "second")).toBe(false);
     await api("POST", `/api/bots/${created.id}/interrupt`);
     await waitFor(
-      async () => (await getBot(created.id)).messages.some((m: any) => m.text === "second" && m.queued !== true),
+      async () => (await getBot(created.id)).messages.some((m: any) => m.text === "second"),
       "the queued message to begin its turn",
     );
     await api("POST", `/api/bots/${created.id}/interrupt`);

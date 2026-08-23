@@ -35,6 +35,10 @@
   --color-raised-hover: #3d3d3d;
   --color-card: #262626;
   --color-inset: #191919;
+  /* a control ON a card. The dark skins take their `raised` value, so this
+     is a no-op for them; the light skins need a tone of their own, because
+     there `raised` is pure white and a card is too. */
+  --color-control: #2f2f2f;
   --color-hairline: #333333;
   --color-ink: #fcfcfc;
   --color-ink-secondary: #fcfcfc99;
@@ -82,6 +86,7 @@
   --color-raised-hover: #3d3d3d;
   --color-card: #262626;
   --color-inset: #191919;
+  --color-control: #2f2f2f;       /* = raised: Midnight is unchanged */
   --color-hairline: #333333;
   --color-ink: #fcfcfc;
   --color-ink-secondary: #fcfcfc99;
@@ -119,6 +124,9 @@
   --color-raised-hover: #f2e9dc;  /* warm beige doubles as the hover fill */
   --color-card: #ffffff;
   --color-inset: #f5f1eb;         /* inset surfaces pick the rail tone back up */
+  --color-control: #ece4d6;       /* raised is white here and so is a card, so
+                                     a control needs its own tone: 1.26:1 on a
+                                     card, and raised-hover still lifts off it */
   --color-hairline: #c8bda8;      /* #ece7dd was 1.11:1 on the rail → 1.65:1 */
 
   --color-ink: #1a1a18;           /* 17.4:1 on white */
@@ -170,6 +178,7 @@
   --color-raised-hover: #322b21;
   --color-card: #1e1a14;
   --color-inset: #0b0a08;         /* inset sinks below the ground */
+  --color-control: #262019;       /* = raised: Foundry is unchanged */
   --color-hairline: #3d3529;      /* visible on purpose — this UI has edges */
 
   --color-ink: #f4efe4;           /* warm off-white, never pure #fff */
@@ -222,6 +231,12 @@
   --color-raised-hover: #cfe4e1;
   --color-card: #ffffff;
   --color-inset: #d5e8e5;
+  --color-control: #c3dcd9;       /* Lagoon's surfaces climb white → panel →
+                                     app → inset → hover in small steps, so a
+                                     control has to sit below the lot to clear
+                                     every one it can land on: 1.44:1 on a
+                                     card, 1.29:1 on the panel, 1.13:1 on an
+                                     inset row, 1.09:1 under the hover tone. */
   --color-hairline: #aebfbd;      /* 1.60:1 — level with the other three */
 
   --color-ink: #14201f;           /* dark petrol; a neutral black would read

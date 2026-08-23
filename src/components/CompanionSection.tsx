@@ -272,7 +272,7 @@ export function CompanionSection() {
               <button
                 disabled={busy}
                 onClick={() => void act((c) => c.pairing(false))}
-                className="mt-3 rounded-lg border border-hairline/40 px-3 py-1.5 text-[13px] text-ink hover:bg-raised disabled:opacity-40"
+                className="mt-3 rounded-lg border border-hairline/40 px-3 py-1.5 text-[13px] text-ink hover:bg-control disabled:opacity-40"
               >
                 {t("Cancel")}
               </button>
@@ -323,7 +323,7 @@ export function CompanionSection() {
                   disabled={busy}
                   onClick={() => void act((c) => c.revoke(device.id))}
                   aria-label={t("Remove {name}", { name: device.name })}
-                  className="shrink-0 rounded p-1 text-ink-secondary hover:bg-raised hover:text-danger disabled:opacity-40"
+                  className="shrink-0 rounded p-1 text-ink-secondary hover:bg-control hover:text-danger disabled:opacity-40"
                 >
                   <Trash2 size={14} />
                 </button>
@@ -337,6 +337,6 @@ export function CompanionSection() {
 }
 
 const cnSwitch = (on: boolean) =>
-  `relative h-6 w-11 shrink-0 rounded-full transition-colors disabled:opacity-40 ${on ? "bg-accent" : "bg-raised"}`;
+  `relative h-6 w-11 shrink-0 rounded-full transition-colors disabled:opacity-40 ${on ? "bg-accent" : "bg-control"}`;
 const cnKnob = (on: boolean) =>
   `absolute top-[3px] h-[18px] w-[18px] rounded-full bg-white transition-all ${on ? "left-[21px]" : "left-[3px]"}`;

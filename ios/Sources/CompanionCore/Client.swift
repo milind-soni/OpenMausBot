@@ -409,6 +409,19 @@ public struct CompanionClient: Sendable {
         try await send(try makeRequest("GET", "/api/config"), as: ConfigStatus.self)
     }
 
+    public func connectorCatalog() async throws -> ConnectorCatalog {
+        try await send(try makeRequest("GET", "/api/connectors/catalog"), as: ConnectorCatalog.self)
+    }
+
+    /// Complete account-aware status in one request. This is the inventory
+    /// source for the phone; a catalog page is not an account list.
+    public func allConnectorStatuses() async throws -> ConnectorStatuses {
+        try await send(
+            try makeRequest("GET", "/api/connectors/connected"),
+            as: ConnectorStatuses.self
+        )
+    }
+
     /// The pixels of one screen message.
     public func image(threadId: String, messageId: String) async throws -> Data {
         let imageRequest = try makeRequest("GET", "/api/threads/\(threadId)/messages/\(messageId)/image")
@@ -591,6 +604,37 @@ public struct CompanionClient: Sendable {
     /// the key and puts it on the card; the phone never derives its own.
     public func alwaysAllow(botId: String, key: String) async throws {
         try await send(try makeRequest("POST", "/api/bots/\(botId)/always-allow", body: ["allowKey": key]))
+    }
+
+    /// Starts one more account authorization for a toolkit. Revocation is
+    /// intentionally absent: the paired-device boundary keeps that on the Mac.
+    public func authorizeConnector(slug: String, alias: String?) async throws -> URL {
+        guard Self.validConnectorSlug(slug) else { throw APIError.badURL }
+        let trimmed = alias?.trimmingCharacters(in: .whitespacesAndNewlines)
+        let body: [String: String]?
+        if let trimmed, !trimmed.isEmpty {
+            body = ["alias": trimmed]
+        } else {
+            body = nil
+        }
+        let response = try await send(
+            try makeRequest("POST", "/api/connectors/\(slug)/authorize", body: body),
+            as: ConnectorAuthorizationResponse.self
+        )
+        guard let url = URL(string: response.url),
+              url.scheme == "https",
+              url.host != nil
+        else { throw APIError.badURL }
+        return url
+    }
+
+    /// Matches the companion's `[\w-]+` toolkit route component. JavaScript
+    /// `\w` is ASCII here; Unicode letters must not become a confusing 404.
+    private static func validConnectorSlug(_ value: String) -> Bool {
+        !value.isEmpty && value.utf8.allSatisfy {
+            (48...57).contains($0) || (65...90).contains($0) ||
+                (97...122).contains($0) || $0 == 95 || $0 == 45
+        }
     }
 
     public func toggleReaction(threadId: String, messageId: String, emoji: String) async throws -> Message {

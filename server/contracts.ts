@@ -87,6 +87,14 @@ export type RuntimeEvent = RuntimeEventBase &
     | { type: "session.exited"; reason?: string }
     | { type: "turn.started" }
     | {
+        type: "turn.retrying";
+        /** 1-based: the retry about to be launched (1 = first relaunch). */
+        attempt: number;
+        delayMs: number;
+        /** Why this failure was judged retry-worthy (classifyError's reason). */
+        reason: string;
+      }
+    | {
         type: "turn.completed";
         ok: boolean;
         stopReason?: string | null;

@@ -13,6 +13,7 @@ import type {
   SendTurnInput,
 } from "../contracts.ts";
 import { newEventId, newId } from "../contracts.ts";
+import { classifyError, computeBackoff, interruptibleDelay, RETRY_MAX_ATTEMPTS } from "./retry.ts";
 import { appendNative } from "./native.ts";
 
 const DRIVER_KIND = "grok";
@@ -131,6 +132,10 @@ export const GrokDriver: ProviderDriver<GrokConfig> = {
       if (active.has(threadId)) throw new Error("a turn is already running on this thread");
       const turnId = newId();
       const abort = new AbortController();
+      let streamedText = false;
+      // the backoff is scaled down in tests so a fake's transient failures
+      // don't stall real seconds
+      const retryScale = Number(process.env.FAKE_GROK_RETRY_SCALE ?? "1");
       active.set(threadId, { abort, turnId });
 
       const messages = [
@@ -147,35 +152,69 @@ export const GrokDriver: ProviderDriver<GrokConfig> = {
       emit({ ...base(threadId, turnId), type: "session.started", sessionId: null, model: turn.model ?? MODELS.default });
 
       (async () => {
-        try {
-          const { text, usage } = await complete(messages, turn.model || MODELS.default, {
-            stream: true,
-            signal: abort.signal,
-            onDelta: (delta) =>
-              emit({ ...base(threadId, turnId), type: "content.delta", streamKind: "assistant_text", delta }),
-          });
-          appendNative(threadId, { dir: "in", source: "xai.chat.completions", msg: { text, usage } });
-          if (text.trim()) {
-            emit({ ...base(threadId, turnId), type: "item.completed", itemType: "assistant_text", text });
+        let attempt = 0;
+        for (;;) {
+          try {
+            const { text, usage } = await complete(messages, turn.model || MODELS.default, {
+              stream: true,
+              signal: abort.signal,
+              onDelta: (delta) => {
+                streamedText = true;
+                emit({ ...base(threadId, turnId), type: "content.delta", streamKind: "assistant_text", delta });
+              },
+            });
+            appendNative(threadId, { dir: "in", source: "xai.chat.completions", msg: { text, usage } });
+            if (text.trim()) {
+              emit({ ...base(threadId, turnId), type: "item.completed", itemType: "assistant_text", text });
+            }
+            if (usage) {
+              emit({ ...base(threadId, turnId), type: "thread.token-usage.updated", ...usage });
+            }
+            active.delete(threadId);
+            emit({ ...base(threadId, turnId), type: "turn.completed", ok: true, stopReason: null, cost: null });
+            return;
+          } catch (e) {
+            const aborted = (e as Error).name === "AbortError";
+            const failure = e instanceof Error ? e : { text: String(e) };
+            const verdict = classifyError(failure);
+            if (!aborted && !streamedText && verdict.transient && attempt < RETRY_MAX_ATTEMPTS - 1) {
+              const delayMs = computeBackoff(attempt);
+              attempt++;
+              emit({
+                ...base(threadId, turnId),
+                type: "turn.retrying",
+                attempt,
+                delayMs,
+                reason: verdict.reason,
+              });
+              const wait = interruptibleDelay(delayMs * retryScale, abort.signal);
+              const outcome = await wait.promise;
+              if (outcome === "cancelled" || abort.signal.aborted) {
+                active.delete(threadId);
+                emit({
+                  ...base(threadId, turnId),
+                  type: "turn.completed",
+                  ok: false,
+                  stopReason: "interrupted",
+                  cost: null,
+                });
+                return;
+              }
+              continue;
+            }
+            active.delete(threadId);
+            if (!aborted) {
+              emit({ ...base(threadId, turnId), type: "runtime.error", message: (e as Error).message });
+            }
+            emit({
+              ...base(threadId, turnId),
+              type: "turn.completed",
+              ok: false,
+              stopReason: aborted ? "interrupted" : "error",
+              cost: null,
+            });
+            return;
           }
-          if (usage) {
-            emit({ ...base(threadId, turnId), type: "thread.token-usage.updated", ...usage });
-          }
-          active.delete(threadId);
-          emit({ ...base(threadId, turnId), type: "turn.completed", ok: true, stopReason: null, cost: null });
-        } catch (e) {
-          active.delete(threadId);
-          const aborted = (e as Error).name === "AbortError";
-          if (!aborted) {
-            emit({ ...base(threadId, turnId), type: "runtime.error", message: (e as Error).message });
-          }
-          emit({
-            ...base(threadId, turnId),
-            type: "turn.completed",
-            ok: false,
-            stopReason: aborted ? "interrupted" : "error",
-            cost: null,
-          });
         }
       })();
 

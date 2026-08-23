@@ -5,11 +5,11 @@
 // real app-server, it never exits on its own — the driver kills it.
 //
 //   FAKE_CODEX_MODE   happy (default) | approval | resume | stream | windows-command |
-//                     logged-in-stdout | logged-out | unauthorized
+//                     mcp-elicitation | logged-in-stdout | logged-out | unauthorized
 //   FAKE_CODEX_DUMP   path to write {argv, env, calls, decision} as JSON
 //
 // Keep this file dependency-free — it runs as a bare `node` subprocess.
-import { writeFileSync } from "node:fs";
+import { readFileSync, writeFileSync } from "node:fs";
 
 const mode = process.env.FAKE_CODEX_MODE ?? "happy";
 
@@ -73,7 +73,7 @@ process.stdin.on("data", (chunk) => {
     }
 
     // response to our own server->client request (approval decision)
-    if (msg.id === 100 && (msg.result !== undefined || msg.error !== undefined)) {
+    if ((msg.id === 100 || msg.id === 101) && (msg.result !== undefined || msg.error !== undefined)) {
       decision = msg.result ?? { error: msg.error };
       finishTurn();
       continue;
@@ -133,6 +133,33 @@ process.stdin.on("data", (chunk) => {
           });
           break;
         }
+        // transient-failure script for retry tests. FAKE_CODEX_TRANSIENTS is
+        // how many launches fail transiently; the launch count lives in a
+        // state FILE because child processes cannot mutate the parent's env.
+        // FAKE_CODEX_PARTIAL_FAILS makes the FIRST failing turn stream a text
+        // delta first, so the partial-output guard has something to see.
+        if (process.env.FAKE_CODEX_TRANSIENTS && process.env.FAKE_CODEX_STATE) {
+          let launched = 0;
+          try {
+            launched = Number(readFileSync(process.env.FAKE_CODEX_STATE, "utf8")) || 0;
+          } catch {}
+          const quota = Number(process.env.FAKE_CODEX_TRANSIENTS) || 0;
+          writeFileSync(process.env.FAKE_CODEX_STATE, String(launched + 1));
+          if (launched < quota) {
+            if (process.env.FAKE_CODEX_PARTIAL_FAILS) {
+              out({ jsonrpc: "2.0", id: msg.id, result: { ok: true } });
+              notify("item/agentMessage/delta", { itemId: "m1", delta: "half an answer" });
+              notify("turn/completed", { turn: { status: "failed", error: { message: "provider overloaded, try again" } } });
+              break;
+            }
+            out({
+              jsonrpc: "2.0",
+              id: msg.id,
+              error: { code: -32603, message: "provider returned 503: upstream capacity exceeded" },
+            });
+            break;
+          }
+        }
         out({ jsonrpc: "2.0", id: msg.id, result: { ok: true } });
         const command = mode === "windows-command"
           ? [
@@ -143,7 +170,20 @@ process.stdin.on("data", (chunk) => {
           : "ls -la";
         notify("item/started", { item: { id: "i1", type: "commandExecution", command } });
         notify("item/started", { item: { id: "w1", type: "webSearch", query: "OpenMausBot" } });
-        if (mode === "approval" || mode === "windows-command") {
+        if (mode === "mcp-elicitation") {
+          out({
+            jsonrpc: "2.0",
+            id: 101,
+            method: "mcpServer/elicitation/request",
+            params: {
+              serverName: "agents",
+              mode: "form",
+              _meta: { codex_approval_kind: "mcp_tool_call", tool_params: {} },
+              message: 'Allow the agents MCP server to run tool "list_bots"?',
+              requestedSchema: { type: "object", properties: {} },
+            },
+          });
+        } else if (mode === "approval" || mode === "windows-command") {
           const approvalCommand = mode === "windows-command" ? command : "rm -rf scratch";
           out({ jsonrpc: "2.0", id: 100, method: "execCommandApproval", params: { command: approvalCommand } });
           // turn continues from the approval response handler above

@@ -12,6 +12,50 @@ import type { ModelCatalog, ProviderErrorCode } from "../../contracts.ts";
 import { execCli } from "../../procs.ts";
 import { createAcpDriver, type AcpSupport } from "./core.ts";
 
+/** Translate an argv `--model` slug into the id this ACP session will accept.
+ *
+ * Cursor keeps two model namespaces and they do not match. `cursor-agent
+ * models` and the `--model` flag speak flat slugs (`auto`, `gpt-5.3-codex`).
+ * The ACP session advertises parameterised ids instead
+ * (`default[]`, `gpt-5.3-codex[reasoning=medium,fast=false]`), and
+ * `session/set_model` accepts *only* those. Sending the argv slug earns
+ * `-32602 Invalid params` for every model, not merely unknown ones — which
+ * read as "this account cannot use that model" and sent people to check their
+ * subscription over a pure id-format mismatch.
+ *
+ * Matching walks from most to least specific, and `auto` is special-cased
+ * because Cursor calls that entry `default[]` while naming it "Auto".
+ *
+ * Returns null when nothing matches, including when the agent advertised no
+ * models at all. The caller then falls back to sending the slug unchanged,
+ * which is what older CLIs that ignore the model list still expect.
+ */
+export function resolveCursorAcpModelId(
+  available: Array<{ modelId?: string; name?: string }>,
+  wanted: string,
+): string | null {
+  const want = wanted.trim().toLowerCase();
+  if (!want) return null;
+  const ids = available.filter((m) => typeof m?.modelId === "string" && m.modelId);
+  if (!ids.length) return null;
+  const base = (id: string) => id.split("[")[0].trim().toLowerCase();
+
+  const exact = ids.find((m) => m.modelId!.toLowerCase() === want);
+  if (exact) return exact.modelId!;
+
+  const byBase = ids.find((m) => base(m.modelId!) === want);
+  if (byBase) return byBase.modelId!;
+
+  const byName = ids.find((m) => (m.name ?? "").trim().toLowerCase() === want);
+  if (byName) return byName.modelId!;
+
+  if (want === "auto" || want === "default") {
+    const dflt = ids.find((m) => base(m.modelId!) === "default");
+    if (dflt) return dflt.modelId!;
+  }
+  return null;
+}
+
 export const STATIC_CURSOR_MODELS: ModelCatalog = {
   default: "auto",
   options: [
@@ -325,15 +369,21 @@ const support = (run: typeof execCli): AcpSupport => ({
   isAuthenticated: (env, config) => probeCursorAuth(config.cli || "cursor-agent", env, run),
   classifyError: classifyCursorError,
 
-  async configureSession({ request, sessionId, turn }) {
+  async configureSession({ request, sessionId, turn, sessionModels }) {
     if (!turn.model) return;
+    // Prefer the id this session actually advertised; fall back to the argv
+    // slug so a CLI that advertises nothing behaves exactly as before.
+    const modelId = resolveCursorAcpModelId(sessionModels ?? [], turn.model) ?? turn.model;
     try {
-      await request("session/set_model", { sessionId, modelId: turn.model });
+      await request("session/set_model", { sessionId, modelId });
     } catch (e) {
       const err = e as Error & { code?: unknown };
-      if (err.code === -32601) return;
+      // -32601 method missing, -32602 id not in this session's namespace. In
+      // both cases spawnArgs already pinned `--model`, so the turn runs the
+      // right model anyway; failing it here would refuse a working request.
+      if (err.code === -32601 || err.code === -32602) return;
       throw new Error(
-        `Cursor rejected model "${turn.model}" via session/set_model: ${err.message}. ` +
+        `Cursor rejected model "${turn.model}" (sent as "${modelId}") via session/set_model: ${err.message}. ` +
           `Check that \`cursor-agent\` is current and that this account can use that model.`,
       );
     }

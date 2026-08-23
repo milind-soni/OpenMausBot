@@ -14,19 +14,23 @@ import CompanionCore
 // isn't. The App target is iOS; CompanionCore is where the portable half
 // lives.
 import UIKit
+import AVFoundation
 
 struct ChatView: View {
     let chat: Chat
     @EnvironmentObject private var session: Session
     @Environment(\.dismiss) private var dismiss
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.scenePhase) private var scenePhase
     @State private var draft = ""
     @State private var showingTasks = false
     @State private var showingComputer = false
     @State private var showingPlus = false
     @State private var showingProfile = false
+    @State private var showCommandHUD = false
     @State private var shareFile: ShareFile?
     @FocusState private var composerFocused: Bool
+    @StateObject private var dictation = SpeechDictation()
     /// The opening beat: the island grows with the bot's face in it, then
     /// shrinks away as the face settles into the header. `facePhase` is 1
     /// with the face in the island, 0 with it home in the header.
@@ -138,6 +142,10 @@ struct ChatView: View {
                             // and showing both is just noise.
                             StreamingBubble(text: nil, reasoning: thinking, color: current.color)
                                 .id(Self.liveBubbleId)
+                        } else if current.busy {
+                            TypingIndicatorView(tintColor: MausPalette.color(current.color))
+                                .id(Self.liveBubbleId)
+                                .accessibilityLabel("\(current.name) is working")
                         }
                     }
                     .padding(.horizontal, 16)
@@ -249,6 +257,37 @@ struct ChatView: View {
             // initial task above will not run again, so clear that new unread
             // bit here rather than leaving a badge on an open conversation.
             if unread { Task { await session.markRead(current) } }
+        }
+        .onDisappear { dictation.stop() }
+        .onChange(of: scenePhase) { _, phase in
+            if phase != .active { dictation.stop() }
+        }
+        .onChange(of: showingComputer) { _, shown in
+            if shown { dictation.stop() }
+        }
+        .onChange(of: showingTasks) { _, shown in
+            if shown { dictation.stop() }
+        }
+        .onChange(of: showingProfile) { _, shown in
+            if shown { dictation.stop() }
+        }
+        .onChange(of: showingPlus) { _, shown in
+            if shown { dictation.stop() }
+        }
+        .onReceive(NotificationCenter.default.publisher(for: AVAudioSession.interruptionNotification)) { note in
+            let raw = note.userInfo?[AVAudioSessionInterruptionTypeKey]
+            let value = (raw as? NSNumber)?.uintValue ?? (raw as? UInt)
+            if value == AVAudioSession.InterruptionType.began.rawValue {
+                dictation.stop()
+            }
+        }
+        .onChange(of: dictation.transcript) { _, spoken in
+            // Always join against the text frozen at capture start. A newer
+            // partial then replaces the older partial instead of duplicating it.
+            draft = Dictation.draft(base: dictation.base, transcript: spoken)
+        }
+        .onChange(of: dictation.isListening) { _, listening in
+            if listening { composerFocused = false }
         }
         .sheet(isPresented: $showingTasks) {
             if case let .bot(bot) = current { TaskManagerView(bot: bot) }
@@ -508,75 +547,164 @@ struct ChatView: View {
         !draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
     }
 
-    private func submit() {
-        let text = draft.trimmingCharacters(in: .whitespacesAndNewlines)
+    private var hasPendingApproval: Bool {
+        messages.contains { $0.card?.isPending == true }
+    }
+
+    private func submit(_ explicitText: String? = nil) {
+        // This also cancels an in-flight permission prompt before it can
+        // open the microphone after the message has already been sent.
+        dictation.stop()
+        let text = (explicitText ?? draft).trimmingCharacters(in: .whitespacesAndNewlines)
         guard !text.isEmpty else { return }
         draft = ""
+        showCommandHUD = false
+        SoundEffects.playSent()
+        Haptics.impact(.medium)
         Task { await session.send(text, to: current) }
     }
 
     // MARK: - Composer
 
-    /// A round + and a glass pill with the send button inside it.
+    /// A round + and a glass pill with dictation and send inside it.
     private var composer: some View {
-        GlassGroup(spacing: 10) {
-            HStack(alignment: .bottom, spacing: 10) {
-                Button {
-                    composerFocused = false
-                    withAnimation(.snappy(duration: 0.28)) { showingPlus.toggle() }
-                } label: {
-                    Image(systemName: "plus")
-                        .font(.system(size: 20, weight: .medium))
-                        .foregroundStyle(showingPlus ? Color(uiColor: .systemBackground) : Color.primary)
-                        .rotationEffect(.degrees(showingPlus ? 45 : 0))
-                        .frame(width: 44, height: 44)
-                        .background(Circle().fill(showingPlus ? Color.primary : Color.clear))
-                        .contentShape(Circle())
+        VStack(spacing: 6) {
+            if let error = dictation.error {
+                Text(error)
+                    .font(.system(size: 13))
+                    .foregroundStyle(.orange)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.horizontal, 4)
+            }
+
+            if showCommandHUD {
+                CommandSkillHUDView(
+                    text: $draft,
+                    isVisible: $showCommandHUD,
+                    commands: current.isBot
+                        ? CommandSkillHUDView.defaultCommands
+                        : CommandSkillHUDView.defaultCommands.filter { $0.id != "computer" && $0.id != "tasks" },
+                    accentColor: MausPalette.color(current.color)
+                ) { command in
+                    switch command.id {
+                    case "computer":
+                        draft = ""
+                        showingComputer = true
+                    case "tasks":
+                        draft = ""
+                        showingTasks = true
+                    default: submit(command.command)
+                    }
                 }
-                .buttonStyle(.plain)
-                .glassCapsule()
-                .accessibilityLabel(showingPlus ? "Close" : "More")
+                .transition(.move(edge: .bottom).combined(with: .opacity))
+            } else if draft.isEmpty && !current.busy && !hasPendingApproval {
+                PredictiveActionChipsView(accentColor: MausPalette.color(current.color)) { chip in
+                    submit(chip.prompt)
+                }
+                .transition(.opacity)
+            }
 
-                HStack(alignment: .bottom, spacing: 6) {
-                    TextField("Ask \(current.name)", text: $draft, axis: .vertical)
-                        .lineLimit(1...5)
-                        .font(.system(size: 17))
-                        .padding(.leading, 16)
-                        .padding(.vertical, 11)
-                        .focused($composerFocused)
-                        .submitLabel(.send)
-                        // Return sends, Shift+Return breaks the line — the shape
-                        // every chat app has. `.ignored` hands the keypress back to
-                        // the text field, which is what inserts the newline; there is
-                        // no way to type one otherwise once Return is claimed.
-                        .onKeyPress(.return, phases: .down) { press in
-                            guard !press.modifiers.contains(.shift) else { return .ignored }
-                            submit()
-                            return .handled
-                        }
-                        // software keyboards have no Shift+Return, so their Return
-                        // key is a send — which is what `.submitLabel(.send)` promises
-                        .onSubmit(submit)
-
+            GlassGroup(spacing: 10) {
+                HStack(alignment: .bottom, spacing: 10) {
                     Button {
-                        submit()
+                        dictation.stop()
+                        composerFocused = false
+                        withAnimation(.snappy(duration: 0.28)) { showingPlus.toggle() }
                     } label: {
-                        Image(systemName: "arrow.up")
-                            .font(.system(size: 15, weight: .bold))
-                            .foregroundStyle(canSend ? Color.white : Color.secondary)
-                            .frame(width: 32, height: 32)
-                            .background(
-                                Circle().fill(canSend ? BubbleColor.mine : Color.secondary.opacity(0.18))
-                            )
+                        Image(systemName: "plus")
+                            .font(.system(size: 20, weight: .medium))
+                            .foregroundStyle(showingPlus ? Color(uiColor: .systemBackground) : Color.primary)
+                            .rotationEffect(.degrees(showingPlus ? 45 : 0))
+                            .frame(width: 44, height: 44)
+                            .background(Circle().fill(showingPlus ? Color.primary : Color.clear))
+                            .contentShape(Circle())
                     }
                     .buttonStyle(.plain)
-                    .disabled(!canSend)
-                    .padding(.trailing, 6)
-                    .padding(.bottom, 6)
-                    .animation(.easeOut(duration: 0.15), value: canSend)
+                    .glassCapsule()
+                    .accessibilityLabel(showingPlus ? "Close" : "More")
+
+                    HStack(alignment: .bottom, spacing: 6) {
+                        Button {
+                            dictation.stop()
+                            withAnimation(.spring(response: 0.3, dampingFraction: 0.75)) {
+                                showCommandHUD.toggle()
+                            }
+                            Haptics.selection()
+                        } label: {
+                            Image(systemName: "command")
+                                .font(.system(size: 13, weight: .bold))
+                                .foregroundStyle(showCommandHUD ? Color.primary : Color.secondary)
+                                .frame(width: 30, height: 32)
+                        }
+                        .buttonStyle(.plain)
+                        .accessibilityLabel("Slash commands")
+                        .padding(.leading, 6)
+                        .padding(.bottom, 6)
+
+                        TextField(
+                            dictation.isListening ? "Listening…" : "Ask \(current.name)",
+                            text: $draft,
+                            axis: .vertical
+                        )
+                            .lineLimit(1...5)
+                            .font(.system(size: 17))
+                            .padding(.vertical, 11)
+                            .focused($composerFocused)
+                            .submitLabel(.send)
+                            // Partial transcripts rebuild from a frozen base;
+                            // prevent competing edits without dimming the text.
+                            .allowsHitTesting(!dictation.isListening && !dictation.isStarting)
+                            .onChange(of: draft) { _, value in
+                                withAnimation(.easeInOut(duration: 0.15)) {
+                                    showCommandHUD = value.hasPrefix("/")
+                                }
+                            }
+                            .onKeyPress(.return, phases: .down) { press in
+                                guard !press.modifiers.contains(.shift) else { return .ignored }
+                                submit()
+                                return .handled
+                            }
+                            .onSubmit { submit() }
+
+                        Button {
+                            composerFocused = false
+                            dictation.toggle(capturing: draft)
+                        } label: {
+                            Image(systemName: dictation.isListening ? "mic.fill" : "mic")
+                                .font(.system(size: 15, weight: .semibold))
+                                .foregroundStyle(dictation.isListening ? Color.red : Color.primary)
+                                .frame(width: 32, height: 32)
+                                .background(
+                                    Circle().fill(
+                                        dictation.isListening
+                                            ? Color.red.opacity(0.2)
+                                            : Color.secondary.opacity(0.12)
+                                    )
+                                )
+                                .symbolEffect(.pulse, isActive: dictation.isListening)
+                        }
+                        .buttonStyle(.plain)
+                        .padding(.bottom, 6)
+                        .accessibilityLabel(dictation.isListening ? "Stop dictation" : "Start dictation")
+
+                        Button { submit() } label: {
+                            Image(systemName: "arrow.up")
+                                .font(.system(size: 15, weight: .bold))
+                                .foregroundStyle(canSend ? Color.white : Color.secondary)
+                                .frame(width: 32, height: 32)
+                                .background(
+                                    Circle().fill(canSend ? BubbleColor.mine : Color.secondary.opacity(0.18))
+                                )
+                        }
+                        .buttonStyle(.plain)
+                        .disabled(!canSend)
+                        .padding(.trailing, 6)
+                        .padding(.bottom, 6)
+                        .animation(.easeOut(duration: 0.15), value: canSend)
+                    }
+                    .frame(minHeight: 44)
+                    .glassCapsule(interactive: false)
                 }
-                .frame(minHeight: 44)
-                .glassCapsule(interactive: false)
             }
         }
         .padding(.horizontal, 12)
@@ -719,8 +847,81 @@ struct TextBubble: View {
     let chat: Chat
     var tailed = true
 
+    private var parsedDiff: (filename: String, diff: String)? {
+        guard message.role != .user, let source = message.text else { return nil }
+        let text = source.trimmingCharacters(in: .whitespacesAndNewlines)
+        let diff: String
+        if text.hasPrefix("```diff"), text.hasSuffix("```") {
+            diff = String(text.dropFirst("```diff".count).dropLast(3))
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+        } else if text.hasPrefix("diff --git ") {
+            diff = text
+        } else {
+            return nil
+        }
+        let firstLine = diff.split(separator: "\n", maxSplits: 1).first.map(String.init) ?? ""
+        let filename = firstLine.split(separator: " ").last.map(String.init)?
+            .replacingOccurrences(of: "b/", with: "") ?? "Git patch"
+        return (filename, diff)
+    }
+
+    private var parsedTable: (headers: [String], rows: [[String]])? {
+        guard message.role != .user, let source = message.text else { return nil }
+        let lines = source.components(separatedBy: .newlines)
+            .map { $0.trimmingCharacters(in: .whitespaces) }
+            .filter { !$0.isEmpty }
+        guard lines.count >= 3, lines.allSatisfy({ $0.hasPrefix("|") && $0.hasSuffix("|") }) else {
+            return nil
+        }
+        let headers = Self.tableCells(lines[0])
+        let separators = Self.tableCells(lines[1])
+        guard !headers.isEmpty, separators.count == headers.count,
+              separators.allSatisfy(Self.isTableSeparator) else { return nil }
+        let rows = lines.dropFirst(2).map(Self.tableCells)
+        guard rows.allSatisfy({ $0.count == headers.count }) else { return nil }
+        return (headers, rows)
+    }
+
+    private static func tableCells(_ line: String) -> [String] {
+        var body = line
+        if body.first == "|" { body.removeFirst() }
+        if body.last == "|" { body.removeLast() }
+
+        var cells: [String] = []
+        var cell = ""
+        var escaped = false
+        for character in body {
+            if escaped {
+                if character == "|" {
+                    cell.append(character)
+                } else {
+                    cell.append("\\")
+                    cell.append(character)
+                }
+                escaped = false
+            } else if character == "\\" {
+                escaped = true
+            } else if character == "|" {
+                cells.append(cell.trimmingCharacters(in: .whitespaces))
+                cell = ""
+            } else {
+                cell.append(character)
+            }
+        }
+        if escaped { cell.append("\\") }
+        cells.append(cell.trimmingCharacters(in: .whitespaces))
+        return cells
+    }
+
+    private static func isTableSeparator(_ cell: String) -> Bool {
+        let compact = cell.replacingOccurrences(of: " ", with: "")
+        let core = compact.trimmingCharacters(in: CharacterSet(charactersIn: ":"))
+        return core.count >= 3 && core.allSatisfy { $0 == "-" }
+    }
+
     var body: some View {
         let mine = message.role == .user
+        let customCard = parsedDiff != nil || parsedTable != nil
         // rooms attribute each line to the member who said it
         let speaker = message.from
         // No face beside the bubble: the bot's face is in the header, and in
@@ -737,7 +938,11 @@ struct TextBubble: View {
                 // Bots get markdown, you do not — the same split the desktop
                 // makes. Markdown you did not intend is worse than markdown
                 // you did: a message about `**` should show the asterisks.
-                if mine {
+                if let diff = parsedDiff {
+                    GitPRDiffCardView(filename: diff.filename, diffText: diff.diff)
+                } else if let table = parsedTable {
+                    SQLResultTableView(columns: table.headers, rows: table.rows)
+                } else if mine {
                     Text(message.text ?? "")
                         .font(.system(size: 17))
                         .foregroundStyle(BubbleColor.mineText)
@@ -750,14 +955,18 @@ struct TextBubble: View {
                         .fixedSize(horizontal: false, vertical: true)
                 }
             }
-            .padding(.horizontal, 15)
-            .padding(.vertical, 11)
+            .padding(.horizontal, customCard ? 0 : 15)
+            .padding(.vertical, customCard ? 0 : 11)
             .background(
-                SpeechBubble(tail: tailed ? (mine ? .trailing : .leading) : .none)
-                    .fill(mine ? BubbleColor.mine : BubbleColor.theirs)
+                Group {
+                    if !customCard {
+                        SpeechBubble(tail: tailed ? (mine ? .trailing : .leading) : .none)
+                            .fill(mine ? BubbleColor.mine : BubbleColor.theirs)
+                    }
+                }
             )
             // leave room for the tail below, so the next row does not sit on it
-            .padding(.bottom, tailed ? SpeechBubble.tailDrop() : 0)
+            .padding(.bottom, !customCard && tailed ? SpeechBubble.tailDrop() : 0)
 
             if !mine { Spacer(minLength: 44) }
         }
@@ -771,14 +980,11 @@ struct ActivityChip: View {
 
     var body: some View {
         if let tool {
-            Label {
-                Text(tool.name).lineLimit(1)
-            } icon: {
-                Image(systemName: tool.ok == false ? "exclamationmark.triangle" : "wrench.and.screwdriver")
-            }
-            .font(.system(size: 13))
-            .foregroundStyle(tool.ok == false ? Color.red : Color.secondary)
-            .padding(.leading, 4)
+            SkillExecutionReceiptView(
+                skillName: tool.name,
+                status: tool.ok.map { $0 ? "success" : "error" } ?? "running"
+            )
+            .padding(.leading, 2)
         }
     }
 }
@@ -969,17 +1175,12 @@ struct StreamingBubble: View {
         HStack(alignment: .bottom, spacing: 0) {
             VStack(alignment: .leading, spacing: 4) {
                 if let reasoning, !reasoning.isEmpty, text?.isEmpty != false {
-                    // Quieter and smaller than an answer, because it is not
-                    // one. Tail-limited: reasoning runs to thousands of words
-                    // and the part worth seeing is always the end.
-                    //
-                    // Plain text, unlike the answer: the tail cut lands
-                    // wherever it lands, and rendering markdown that starts
-                    // mid-syntax invents structure the model did not write.
-                    Text(String(reasoning.suffix(400)))
-                        .font(.system(size: 14))
-                        .foregroundStyle(Color.secondary)
-                        .fixedSize(horizontal: false, vertical: true)
+                    AgentThoughtChamberView(
+                        reasoning: String(reasoning.suffix(2_000)),
+                        botName: "Bot",
+                        mascotColor: MausPalette.color(color),
+                        isStreaming: true
+                    )
                 }
                 if let text, !text.isEmpty {
                     // Same renderer as the settled bubble, for the same

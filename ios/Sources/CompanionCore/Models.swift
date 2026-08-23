@@ -643,6 +643,48 @@ public struct NotificationTarget: Equatable, Sendable {
     }
 }
 
+// MARK: - Connected apps
+
+public struct ConnectorCard: Codable, Hashable, Identifiable, Sendable {
+    public var slug: String
+    public var label: String
+    public var blurb: String
+    public var logo: String?
+    public var domain: String?
+    public var id: String { slug }
+}
+
+public struct ConnectorAccount: Codable, Hashable, Identifiable, Sendable {
+    public var id: String
+    public var alias: String?
+    public var status: String
+
+    /// Composio lifecycle values include both `ACTIVE` and `INACTIVE`; an
+    /// exact normalized comparison avoids rendering the latter as connected.
+    public var isActive: Bool {
+        status.trimmingCharacters(in: .whitespacesAndNewlines).uppercased() == "ACTIVE"
+    }
+}
+
+public struct ConnectorStatus: Codable, Hashable, Sendable {
+    public var connected: Bool
+    public var pending: Bool?
+    public var status: String?
+    public var accounts: [ConnectorAccount]?
+}
+
+public struct ConnectorCatalog: Codable, Sendable {
+    public var configured: Bool
+    public var mode: String?
+    public var source: String?
+    public var cards: [ConnectorCard]
+}
+
+public struct ConnectorStatuses: Codable, Sendable {
+    public var configured: Bool
+    public var services: [String: ConnectorStatus]
+}
+
 /// The harness's error body. Every non-2xx response carries one.
 public struct APIErrorBody: Codable, Sendable {
     public var error: String
@@ -688,7 +730,6 @@ struct ActiveBranchResponse: Codable, Sendable {
 struct BotResponse: Codable, Sendable {
     var bot: Bot
 }
-
 struct VoiceListResponse: Codable, Sendable {
     var voices: [Voice]
     var error: String?
@@ -712,3 +753,7 @@ struct RoutinesResponse: Codable, Sendable {
 
 struct RoutineResponse: Codable, Sendable { var routine: Routine }
 struct RoutineRunResponse: Codable, Sendable { var run: RoutineRun }
+
+struct ConnectorAuthorizationResponse: Codable, Sendable {
+    var url: String
+}

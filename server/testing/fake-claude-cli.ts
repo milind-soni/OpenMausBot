@@ -109,6 +109,29 @@ const playTurn = (prompt: JsonValue) => {
     process.stderr.write("fake-claude: simulated crash before result\n");
     process.exit(3);
   }
+  // transient-failure script for retry tests. FAKE_CLAUDE_TRANSIENTS is how
+  // many launches fail transiently (503-shaped stderr, exit 5); the count of
+  // launches so far lives in a state FILE because child processes cannot
+  // mutate the parent's environment. When the quota is exhausted (or
+  // FAKE_CLAUDE_STATE is unset) the turn completes normally.
+  // FAKE_CLAUDE_PARTIAL_FAILS makes the FIRST launch emit a text delta
+  // before failing — the partial-output guard must forbid retrying it.
+  if (process.env.FAKE_CLAUDE_TRANSIENTS && process.env.FAKE_CLAUDE_STATE) {
+    let launched = 0;
+    try {
+      launched = Number(readFileSync(process.env.FAKE_CLAUDE_STATE, "utf8")) || 0;
+    } catch {}
+    const quota = Number(process.env.FAKE_CLAUDE_TRANSIENTS) || 0;
+    writeFileSync(process.env.FAKE_CLAUDE_STATE, String(launched + 1));
+    out({ type: "system", subtype: "init", session_id: sessionId, model });
+    if (launched < quota) {
+      if (process.env.FAKE_CLAUDE_PARTIAL_FAILS) {
+        out({ type: "stream_event", event: { type: "content_block_delta", delta: { type: "text_delta", text: "half an answer" } } });
+      }
+      process.stderr.write("claude: API error (503): service temporarily unavailable\n");
+      process.exit(5);
+    }
+  }
 
   // the real CLI re-announces init on every turn of a live process
   out({ type: "system", subtype: "init", session_id: sessionId, model });

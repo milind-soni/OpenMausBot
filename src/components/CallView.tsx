@@ -108,7 +108,7 @@ export function CallTargetButton({
           ? t("Add an ElevenLabs API key so the bot can speak during calls.")
           : !voiceReady
             ? voices.length > 1
-              ? t("Give every room member an ElevenLabs voice before starting a room call.")
+              ? t("Give every channel member an ElevenLabs voice before starting a channel call.")
               : t("Choose an ElevenLabs voice before starting a call.")
             : "";
 

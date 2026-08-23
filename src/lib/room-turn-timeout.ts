@@ -48,6 +48,6 @@ export async function saveRoomTurnTimeoutMinutes(
   try {
     return { ok: true, minutes: await persist(parsed.minutes) };
   } catch (cause) {
-    return { ok: false, error: cause instanceof Error ? cause.message : "Could not save the room turn limit." };
+    return { ok: false, error: cause instanceof Error ? cause.message : "Could not save the channel turn limit." };
   }
 }

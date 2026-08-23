@@ -103,7 +103,7 @@ function CredentialHelp({ section }: { section: ConfigSection }) {
         aria-expanded={open}
         aria-controls={popoverId}
         onClick={() => setOpen((current) => !current)}
-        className="flex size-6 items-center justify-center rounded-md text-ink-secondary outline-none transition-colors hover:bg-raised hover:text-ink focus-visible:ring-2 focus-visible:ring-accent/70"
+        className="flex size-6 items-center justify-center rounded-md text-ink-secondary outline-none transition-colors hover:bg-control hover:text-ink focus-visible:ring-2 focus-visible:ring-accent/70"
       >
         <CircleHelp size={14} aria-hidden="true" />
       </button>
@@ -181,7 +181,7 @@ export function ApiKeyRow({
         <span className={cn("size-1.5 rounded-full", configured ? "bg-success" : "bg-raised-hover")} />
         <span>{t(credential.label)}</span>
         {credential.optional && (
-          <span className="rounded bg-raised px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wide text-ink-secondary">
+          <span className="rounded bg-control px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wide text-ink-secondary">
             {t("Optional")}
           </span>
         )}
@@ -205,8 +205,8 @@ export function ApiKeyRow({
           className={cn(
             "flex w-[72px] shrink-0 items-center justify-center gap-1.5 rounded-lg py-2 text-[13px]",
             clearing
-              ? "bg-raised text-danger hover:bg-raised-hover"
-              : "bg-raised text-ink hover:bg-raised-hover",
+              ? "bg-control text-danger hover:bg-raised-hover"
+              : "bg-control text-ink hover:bg-raised-hover",
             "disabled:cursor-not-allowed disabled:opacity-50",
           )}
           title={clearing ? t("Remove the saved key") : t("Save")}
@@ -253,7 +253,7 @@ export function VpsConnection() {
       <div className="mb-1.5 flex items-center gap-2 text-[13px] text-ink-secondary">
         <span className={cn("size-1.5 rounded-full", configured ? "bg-success" : "bg-raised-hover")} />
         <span>{t("Self-hosted VPS")}</span>
-        <span className="rounded bg-raised px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wide text-ink-secondary">
+        <span className="rounded bg-control px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wide text-ink-secondary">
           {t("Optional")}
         </span>
         {configured && <span className="text-[11px] text-success">{t("Connected")}</span>}
@@ -287,7 +287,7 @@ export function VpsConnection() {
           disabled={saving || (!alias.trim() && !configured)}
           className={cn(
             "flex w-[72px] shrink-0 items-center justify-center gap-1.5 rounded-lg py-2 text-[13px]",
-            !alias.trim() && configured ? "bg-raised text-danger hover:bg-raised-hover" : "bg-raised text-ink hover:bg-raised-hover",
+            !alias.trim() && configured ? "bg-control text-danger hover:bg-raised-hover" : "bg-control text-ink hover:bg-raised-hover",
             "disabled:cursor-not-allowed disabled:opacity-50",
           )}
           title={!alias.trim() && configured ? t("Remove the saved alias") : t("Save")}

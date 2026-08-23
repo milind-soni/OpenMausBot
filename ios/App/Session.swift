@@ -872,6 +872,26 @@ final class Session: ObservableObject {
         }
     }
 
+    // MARK: - Connected apps
+
+    func loadConnectorCatalog() async -> ConnectorCatalog? {
+        guard let client else { return nil }
+        do { return try await client.connectorCatalog() }
+        catch { actionError = error.localizedDescription; return nil }
+    }
+
+    func loadAllConnectorStatuses() async -> ConnectorStatuses? {
+        guard let client else { return nil }
+        do { return try await client.allConnectorStatuses() }
+        catch { actionError = error.localizedDescription; return nil }
+    }
+
+    func authorizeConnector(_ slug: String, alias: String?) async -> URL? {
+        guard let client else { return nil }
+        do { return try await client.authorizeConnector(slug: slug, alias: alias) }
+        catch { actionError = error.localizedDescription; return nil }
+    }
+
     func refreshNotificationAuthorization() async {
         notificationAuthorization = await NotificationCoordinator.shared.authorizationStatus()
     }

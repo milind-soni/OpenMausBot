@@ -121,7 +121,7 @@ function WorkingFolder({ bot }: { bot: Bot }) {
           <div className="min-w-0 flex-1 truncate rounded-lg border border-hairline/40 bg-inset px-3 py-2 font-mono text-[12.5px] text-ink" title={bot.cwd}>
             {bot.cwd ? shortPath(bot.cwd, home) : <span className="text-ink-secondary">{t("Private bot workspace")}</span>}
           </div>
-          <button onClick={() => void pick()} disabled={saving} className="flex shrink-0 items-center gap-1.5 rounded-lg bg-raised px-3 py-2 text-[13px] text-ink hover:bg-raised-hover disabled:opacity-50">
+          <button onClick={() => void pick()} disabled={saving} className="flex shrink-0 items-center gap-1.5 rounded-lg bg-control px-3 py-2 text-[13px] text-ink hover:bg-raised-hover disabled:opacity-50">
             <FolderOpen size={14} /> {t("Choose…")}
           </button>
           {bot.cwd && (
@@ -145,7 +145,7 @@ function WorkingFolder({ bot }: { bot: Bot }) {
             value={draft ?? bot.cwd ?? ""}
             onChange={(e) => setDraft(e.target.value)}
           />
-          <button type="submit" disabled={saving || draft === null} className="shrink-0 rounded-lg bg-raised px-3 py-2 text-[13px] text-ink hover:bg-raised-hover disabled:opacity-50">
+          <button type="submit" disabled={saving || draft === null} className="shrink-0 rounded-lg bg-control px-3 py-2 text-[13px] text-ink hover:bg-raised-hover disabled:opacity-50">
             {t("Save")}
           </button>
         </form>
@@ -258,7 +258,7 @@ function MemoryCard({ bot }: { bot: Bot }) {
             <span className="truncate font-mono text-[12.5px] text-ink">memory/{topic.name}</span>
             <button
               onClick={() => setTopic(null)}
-              className="shrink-0 rounded-md px-2 py-1 text-[13px] text-ink-secondary hover:bg-raised hover:text-ink"
+              className="shrink-0 rounded-md px-2 py-1 text-[13px] text-ink-secondary hover:bg-control hover:text-ink"
             >
               {t("Back")}
             </button>
@@ -285,7 +285,7 @@ function MemoryCard({ bot }: { bot: Bot }) {
             <button
               onClick={() => void save()}
               disabled={saving || !dirty}
-              className="rounded-lg bg-raised px-3 py-1.5 text-[13px] text-ink hover:bg-raised-hover disabled:opacity-50"
+              className="rounded-lg bg-control px-3 py-1.5 text-[13px] text-ink hover:bg-raised-hover disabled:opacity-50"
             >
               {saving ? t("Saving…") : t("Save")}
             </button>
@@ -305,7 +305,7 @@ function MemoryCard({ bot }: { bot: Bot }) {
                   <button
                     key={entry.name}
                     onClick={() => void openTopic(entry.name)}
-                    className="flex w-full items-center justify-between gap-2 border-b border-hairline/40 px-3 py-2 text-left last:border-b-0 hover:bg-raised/60"
+                    className="flex w-full items-center justify-between gap-2 border-b border-hairline/40 px-3 py-2 text-left last:border-b-0 hover:bg-control/60"
                   >
                     <span className="truncate font-mono text-[12.5px] text-ink">{entry.name}</span>
                     <span className="shrink-0 text-[11.5px] text-ink-secondary">{formatBytes(entry.bytes)}</span>
@@ -373,7 +373,7 @@ export function SettingsPanel({ bot }: { bot: Bot }) {
           onClick={() => dispatch({ type: "toggleSettings", open: false })}
           aria-label={t("Collapse agent profile")}
           title={t("Collapse agent profile")}
-          className="flex size-10 items-center justify-center rounded-md text-ink-secondary hover:bg-raised hover:text-ink"
+          className="flex size-10 items-center justify-center rounded-md text-ink-secondary hover:bg-control hover:text-ink"
         >
           <ChevronLeft size={18} />
         </button>
@@ -382,7 +382,7 @@ export function SettingsPanel({ bot }: { bot: Bot }) {
           onClick={() => dispatch({ type: "toggleSettings", open: false })}
           aria-label={t("Close agent profile")}
           title={t("Close agent profile")}
-          className="flex size-10 items-center justify-center rounded-md text-ink-secondary hover:bg-raised hover:text-ink"
+          className="flex size-10 items-center justify-center rounded-md text-ink-secondary hover:bg-control hover:text-ink"
         >
           <X size={18} />
         </button>
@@ -431,7 +431,7 @@ export function SettingsPanel({ bot }: { bot: Bot }) {
             <div className="flex items-center gap-3">
               <span className={cn(
                 "flex size-8 shrink-0 items-center justify-center rounded-lg",
-                bot.chiefOfStaff ? "bg-accent text-white" : "bg-raised text-ink-secondary",
+                bot.chiefOfStaff ? "bg-accent text-white" : "bg-control text-ink-secondary",
               )}>
                 <Crown size={17} />
               </span>
@@ -448,7 +448,7 @@ export function SettingsPanel({ bot }: { bot: Bot }) {
                 title={!bot.chiefOfStaff && !canCoordinate ? t("This engine cannot contact other bots") : undefined}
                 className={cn(
                   "relative h-[26px] w-[44px] shrink-0 rounded-full transition-colors disabled:cursor-not-allowed disabled:opacity-40",
-                  bot.chiefOfStaff ? "bg-accent" : "bg-raised",
+                  bot.chiefOfStaff ? "bg-accent" : "bg-control",
                 )}
               >
                 <span
@@ -492,7 +492,7 @@ export function SettingsPanel({ bot }: { bot: Bot }) {
               title={!bot.approvePeerComms && !canCoordinate ? t("This engine cannot contact other bots") : undefined}
               className={cn(
                 "relative h-[26px] w-[44px] shrink-0 rounded-full transition-colors disabled:cursor-not-allowed disabled:opacity-40",
-                bot.approvePeerComms ? "bg-accent" : "bg-raised",
+                bot.approvePeerComms ? "bg-accent" : "bg-control",
               )}
             >
               <span
@@ -534,7 +534,7 @@ export function SettingsPanel({ bot }: { bot: Bot }) {
               }
               className={cn(
                 "relative h-[26px] w-[44px] shrink-0 rounded-full transition-colors disabled:cursor-not-allowed disabled:opacity-40",
-                connectedAppsEnabled ? "bg-accent" : "bg-raised",
+                connectedAppsEnabled ? "bg-accent" : "bg-control",
               )}
             >
               <span
@@ -577,8 +577,8 @@ export function SettingsPanel({ bot }: { bot: Bot }) {
                       "flex-1 py-1.5 text-[13px] capitalize",
                       i > 0 && "border-l border-hairline/40",
                       bot.modelSelection.effort === level
-                        ? "bg-raised text-ink"
-                        : "text-ink-secondary hover:bg-raised/60 hover:text-ink",
+                        ? "bg-control text-ink"
+                        : "text-ink-secondary hover:bg-control/60 hover:text-ink",
                     )}
                   >
                     {/* the others capitalize cleanly; "xhigh" would read "Xhigh" */}
@@ -615,8 +615,8 @@ export function SettingsPanel({ bot }: { bot: Bot }) {
                     i > 0 && "border-l border-hairline/40",
                     mode === "local" && !localSelectable && "cursor-not-allowed opacity-40",
                     bot.computer === mode
-                      ? "bg-raised text-ink"
-                      : "text-ink-secondary hover:bg-raised/60 hover:text-ink",
+                      ? "bg-control text-ink"
+                      : "text-ink-secondary hover:bg-control/60 hover:text-ink",
                   )}
                 >
                   {t(label)}
@@ -661,7 +661,7 @@ export function SettingsPanel({ bot }: { bot: Bot }) {
               }}
               className={cn(
                 "relative h-[26px] w-[44px] shrink-0 rounded-full transition-colors",
-                bot.autoApprove ? "bg-accent" : "bg-raised",
+                bot.autoApprove ? "bg-accent" : "bg-control",
               )}
             >
               <span
@@ -695,7 +695,7 @@ export function SettingsPanel({ bot }: { bot: Bot }) {
               }}
               className={cn(
                 "relative h-[26px] w-[44px] shrink-0 rounded-full transition-colors",
-                bot.notifications ? "bg-accent" : "bg-raised",
+                bot.notifications ? "bg-accent" : "bg-control",
               )}
             >
               <span

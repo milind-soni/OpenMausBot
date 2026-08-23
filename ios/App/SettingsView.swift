@@ -1,8 +1,8 @@
 // Paired-device settings and safe workspace feature entry points.
 //
 // Credentials, revocation, Local VM and execution policy still live only on
-// the computer. The phone can manage renderer-neutral routines without
-// widening that boundary.
+// the computer. The phone can manage renderer-neutral routines and connected-
+// account inventory/authorization without widening that boundary.
 import SwiftUI
 import CompanionCore
 
@@ -49,10 +49,15 @@ struct SettingsView: View {
                 } label: {
                     Label("Tasks & Routines", systemImage: "calendar.badge.clock")
                 }
+                NavigationLink {
+                    ConnectedAppsView()
+                } label: {
+                    Label("Connected Apps", systemImage: "link")
+                }
             } header: {
                 Text("Workspace")
             } footer: {
-                Text("Routine schedules are safe to manage here. Provider keys, webhook secrets, pairing, revocation, Local VM, and agent execution policy stay on your computer.")
+                Text("Manage routine schedules, view connected accounts, and add Work, Personal, or client aliases here. Provider keys, webhook secrets, account revocation, pairing, Local VM, and agent execution policy stay on your computer.")
             }
 
             Section {

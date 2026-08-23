@@ -42,6 +42,15 @@ describe("buildNotification", () => {
     // that conversation, not whatever the bot happens to be showing
     expect(buildNotification("done", bot, "other-thread", "done")?.threadId).toBe("other-thread");
   });
+
+  it("carries the bot's avatar when one is given", () => {
+    const avatarUrl = "/api/attachments/123e4567-e89b-12d3-a456-426614174000.webp";
+    const frame = buildNotification("done", bot, "thread-1", "pushed the branch", { avatarUrl });
+    expect(frame).toMatchObject({ botId: "bot-1", body: "pushed the branch", avatarUrl });
+
+    // no profile image → the frame stays exactly as before
+    expect(buildNotification("done", bot, "thread-1", "pushed")?.avatarUrl).toBeUndefined();
+  });
 });
 
 describe("summarize", () => {

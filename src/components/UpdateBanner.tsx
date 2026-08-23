@@ -11,7 +11,7 @@ import { cn } from "@/lib/cn";
 // flat raised grey — the "I heard you" the click needs while the main process
 // gets going.
 const primaryAction =
-  "flex flex-1 items-center justify-center gap-1.5 rounded-lg bg-accent py-1.5 text-[13px] font-medium text-white transition-colors disabled:cursor-default disabled:bg-raised disabled:text-ink-secondary";
+  "flex flex-1 items-center justify-center gap-1.5 rounded-lg bg-accent py-1.5 text-[13px] font-medium text-white transition-colors disabled:cursor-default disabled:bg-control disabled:text-ink-secondary";
 
 // electron-updater surfaces failures as a whole HTTP dump — status line,
 // every response header, stack trace. That is unreadable in a 300px popup,
@@ -86,7 +86,7 @@ export function UpdateBanner() {
         {!busy && (
           <button
             onClick={() => setDismissed(key)}
-            className="shrink-0 rounded-md p-1 text-ink-secondary hover:bg-raised hover:text-ink"
+            className="shrink-0 rounded-md p-1 text-ink-secondary hover:bg-control hover:text-ink"
             title="Dismiss"
           >
             <X size={14} />
@@ -95,7 +95,7 @@ export function UpdateBanner() {
       </div>
 
       {s.status === "downloading" && (
-        <div className="mt-2.5 h-1 overflow-hidden rounded-full bg-raised">
+        <div className="mt-2.5 h-1 overflow-hidden rounded-full bg-control">
           <div
             className={cn(
               "h-full rounded-full bg-accent transition-[width]",
@@ -112,7 +112,7 @@ export function UpdateBanner() {
         <div className="mt-2.5 flex gap-2">
           <button
             disabled
-            className="flex flex-1 items-center justify-center gap-1.5 rounded-lg bg-raised py-1.5 text-[13px] font-medium text-ink-secondary"
+            className="flex flex-1 items-center justify-center gap-1.5 rounded-lg bg-control py-1.5 text-[13px] font-medium text-ink-secondary"
           >
             <Loader2 size={13} className="animate-spin" /> Restarting…
           </button>
@@ -168,7 +168,7 @@ export function UpdateBanner() {
                 void updater.check();
               }}
               disabled={pending !== null}
-              className="flex flex-1 items-center justify-center gap-1.5 rounded-lg bg-raised py-1.5 text-[13px] text-ink hover:bg-raised-hover disabled:text-ink-secondary disabled:hover:bg-raised"
+              className="flex flex-1 items-center justify-center gap-1.5 rounded-lg bg-control py-1.5 text-[13px] text-ink hover:bg-raised-hover disabled:text-ink-secondary disabled:hover:bg-control"
             >
               {pending === "check" ? (
                 <>
@@ -182,7 +182,7 @@ export function UpdateBanner() {
           <button
             onClick={() => setDismissed(key)}
             disabled={pending !== null}
-            className="rounded-lg px-3 py-1.5 text-[13px] text-ink-secondary hover:bg-raised hover:text-ink disabled:opacity-50 disabled:hover:bg-transparent"
+            className="rounded-lg px-3 py-1.5 text-[13px] text-ink-secondary hover:bg-control hover:text-ink disabled:opacity-50 disabled:hover:bg-transparent"
           >
             Later
           </button>

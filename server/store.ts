@@ -103,6 +103,9 @@ export interface Message {
    * them; a true stranded by a restart is inert because the client only
    * shows the affordance while the bot is busy. */
   queued?: boolean;
+  /** steer-queue entry this drained user line came from. The client pending
+   * chip matches on this id, not on equal text. Absent on ordinary sends. */
+  queueId?: string;
 }
 
 export type GroupDefaultResponder =
@@ -139,6 +142,14 @@ export interface GroupRecord {
   /** the one message pinned to the top of this room's transcript. A pin id
    * that no longer resolves (edited away, deleted) simply renders nothing. */
   pinnedMessageId?: string;
+  /** sidebar section heading this room is filed under; shares the bots'
+   * namespace so one heading can hold a project's room and its people */
+  section?: string;
+  /** New user-created rooms start with setup pending. Null timestamps are
+   * intentional: records from before room setup has existed omit both keys
+   * and remain immediately usable. */
+  setupCompletedAt?: number | null;
+  setupSkippedAt?: number | null;
 }
 
 /** One task = one conversation with its own context.
@@ -559,7 +570,7 @@ export class Store {
     return this.groups.find((g) => g.threadId === threadId);
   }
 
-  createGroup(name: string, memberIds: string[], dm = false): GroupRecord {
+  createGroup(name: string, memberIds: string[], dm = false, section?: string): GroupRecord {
     const group: GroupRecord = {
       id: newId(),
       threadId: newId(),
@@ -571,6 +582,8 @@ export class Store {
       createdAt: Date.now(),
       dm: dm || undefined,
       busyBotId: null,
+      section,
+      ...(dm ? {} : { setupCompletedAt: null, setupSkippedAt: null }),
     };
     this.groups.unshift(group);
     this.saveGroups();
@@ -585,7 +598,7 @@ export class Store {
     );
   }
 
-  patchGroup(id: string, patch: Partial<Pick<GroupRecord, "name" | "memberIds" | "defaultResponder" | "bulletin" | "unread" | "busyBotId" | "cwd">>): GroupRecord | null {
+  patchGroup(id: string, patch: Partial<Pick<GroupRecord, "name" | "memberIds" | "defaultResponder" | "bulletin" | "unread" | "busyBotId" | "cwd" | "section" | "setupCompletedAt" | "setupSkippedAt">>): GroupRecord | null {
     const group = this.group(id);
     if (!group) return null;
     Object.assign(group, patch);

@@ -131,10 +131,10 @@ export function BotProfileAvatarCard({
   return (
     <div className="overflow-hidden rounded-xl border border-hairline/40 bg-card">
       <div className="flex items-center justify-between border-b border-hairline/40 px-3 py-2.5">
-        <span className="rounded-lg bg-raised px-3 py-1.5 text-[14px] font-medium text-ink">{t("Avatar")}</span>
+        <span className="rounded-lg bg-control px-3 py-1.5 text-[14px] font-medium text-ink">{t("Avatar")}</span>
         <button
           onClick={() => onPatch({ avatarCrop: "mascot", color: "green", mascotExpression: null })}
-          className="rounded-md px-2 py-1.5 text-[13px] text-ink-secondary hover:bg-raised hover:text-ink"
+          className="rounded-md px-2 py-1.5 text-[13px] text-ink-secondary hover:bg-control hover:text-ink"
         >
           {t("Reset mascot")}
         </button>
@@ -163,7 +163,7 @@ export function BotProfileAvatarCard({
             type="button"
             onClick={() => fileRef.current?.click()}
             disabled={uploading || generating}
-            className="flex flex-1 items-center justify-center gap-1.5 rounded-lg bg-raised px-3 py-2 text-[13px] text-ink hover:bg-raised-hover disabled:opacity-50"
+            className="flex flex-1 items-center justify-center gap-1.5 rounded-lg bg-control px-3 py-2 text-[13px] text-ink hover:bg-raised-hover disabled:opacity-50"
           >
             {uploading ? <Loader2 size={14} className="animate-spin" /> : <ImagePlus size={14} />}
             {t("Upload image")}
@@ -175,7 +175,7 @@ export function BotProfileAvatarCard({
               disabled={uploading || generating}
               aria-label={t("Remove custom avatar image")}
               title={t("Remove custom image")}
-              className="flex size-10 items-center justify-center rounded-lg text-ink-secondary hover:bg-raised hover:text-danger disabled:opacity-50"
+              className="flex size-10 items-center justify-center rounded-lg text-ink-secondary hover:bg-control hover:text-danger disabled:opacity-50"
             >
               <Trash2 size={14} />
             </button>
@@ -196,7 +196,7 @@ export function BotProfileAvatarCard({
               className={cn(
                 "py-1.5 text-[12.5px]",
                 index > 0 && "border-l border-hairline/40",
-                crop === candidate ? "bg-raised text-ink" : "text-ink-secondary hover:bg-raised/60 hover:text-ink",
+                crop === candidate ? "bg-control text-ink" : "text-ink-secondary hover:bg-control/60 hover:text-ink",
               )}
             >
               {t(CROP_LABEL[candidate])}
@@ -217,7 +217,7 @@ export function BotProfileAvatarCard({
                   aria-pressed={activeState === expression}
                   onClick={() => onPatch({ mascotExpression: expression })}
                   className={cn(
-                    "flex h-[58px] items-center justify-center rounded-xl bg-inset transition-colors hover:bg-raised",
+                    "flex h-[58px] items-center justify-center rounded-xl bg-inset transition-colors hover:bg-control",
                     activeState === expression && "ring-2 ring-accent-border",
                   )}
                   title={t(expression)}
@@ -276,7 +276,7 @@ export function BotProfileAvatarCard({
                   type="button"
                   onClick={() => void saveImageKey()}
                   disabled={savingKey || !imageKey.trim()}
-                  className="flex w-[72px] items-center justify-center gap-1.5 rounded-lg bg-raised text-[12.5px] text-ink hover:bg-raised-hover disabled:opacity-50"
+                  className="flex w-[72px] items-center justify-center gap-1.5 rounded-lg bg-control text-[12.5px] text-ink hover:bg-raised-hover disabled:opacity-50"
                 >
                   {savingKey ? <Loader2 size={13} className="animate-spin" /> : <><Check size={13} /> {t("Save")}</>}
                 </button>
@@ -322,7 +322,7 @@ export function BotProfileAvatarCard({
                     type="button"
                     onClick={() => void saveImageKey()}
                     disabled={savingKey || !imageKey.trim()}
-                    className="flex w-[72px] items-center justify-center gap-1.5 rounded-lg bg-raised text-[12px] text-ink hover:bg-raised-hover disabled:opacity-50"
+                    className="flex w-[72px] items-center justify-center gap-1.5 rounded-lg bg-control text-[12px] text-ink hover:bg-raised-hover disabled:opacity-50"
                   >
                     {savingKey ? <Loader2 size={13} className="animate-spin" /> : <><Check size={13} /> {t("Save")}</>}
                   </button>

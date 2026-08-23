@@ -55,6 +55,10 @@ describe("CodexDriver turns (fake app-server)", () => {
   afterEach(async () => {
     delete process.env.FAKE_CODEX_MODE;
     delete process.env.FAKE_CODEX_DUMP;
+    delete process.env.FAKE_CODEX_TRANSIENTS;
+    delete process.env.FAKE_CODEX_PARTIAL_FAILS;
+    delete process.env.FAKE_CODEX_STATE;
+    delete process.env.FAKE_CODEX_RETRY_SCALE;
     delete process.env.OPENAI_API_KEY;
     delete process.env.BOX_TOKEN;
     delete process.env.OMB_TTS_KEY;
@@ -349,6 +353,24 @@ describe("CodexDriver turns (fake app-server)", () => {
     expect(JSON.parse(readFileSync(dump, "utf8")).decision).toEqual({ decision: "approved" });
   });
 
+  it("answers Codex 0.149 MCP elicitation with the MCP result shape", async () => {
+    await create({ mode: "mcp-elicitation" });
+    const dump = join(scratch, "mcp-elicitation.json");
+    process.env.FAKE_CODEX_DUMP = dump;
+
+    await instance.adapter.sendTurn({ threadId: "t-mcp-elicitation", text: "list bots" });
+    const opened = await recorder.until((e) => e.type === "request.opened");
+    expect(opened).toMatchObject({
+      requestType: "permission",
+      tool: "list_bots",
+      summary: 'Allow the agents MCP server to run tool "list_bots"?',
+    });
+
+    await instance.adapter.respondToRequest("t-mcp-elicitation", opened.requestId!, { behavior: "allow" });
+    await recorder.until((e) => e.type === "turn.completed");
+    expect(JSON.parse(readFileSync(dump, "utf8")).decision).toEqual({ action: "accept", content: {} });
+  });
+
   it("stamps approvalScope on cards only when the turn controls this Mac", async () => {
     await create({ mode: "approval" });
 
@@ -452,6 +474,66 @@ describe("CodexDriver turns (fake app-server)", () => {
       stopReason: "auth_required",
     });
   });
+
+  it("auto-retries a transient turn/start failure, then completes with one final message", async () => {
+    process.env.FAKE_CODEX_TRANSIENTS = "2";
+    process.env.FAKE_CODEX_STATE = join(scratch, "codex-launches");
+    process.env.FAKE_CODEX_RETRY_SCALE = "0.001";
+    await create();
+    await instance.adapter.sendTurn({ threadId: "t-codex-retry", text: "hi" });
+    await recorder.until((e) => e.type === "turn.completed" && e.ok === true);
+
+    const retries = recorder.events.filter((e) => e.type === "turn.retrying");
+    expect(retries.map((e) => e.attempt)).toEqual([1, 2]);
+    expect(retries.every((e) => e.delayMs > 0 && typeof e.reason === "string")).toBe(true);
+    expect(recorder.events.filter((e) => e.type === "turn.started")).toHaveLength(1);
+    // exactly one settled reply across all three app-server launches
+    const replies = recorder.events.filter((e) => e.type === "item.completed" && e.itemType === "assistant_text");
+    expect(replies).toHaveLength(1);
+  }, 20_000);
+
+  it("stops retrying at the attempt cap and settles as failed", async () => {
+    process.env.FAKE_CODEX_TRANSIENTS = "9";
+    process.env.FAKE_CODEX_STATE = join(scratch, "codex-launches-cap");
+    process.env.FAKE_CODEX_RETRY_SCALE = "0.001";
+    await create();
+    await instance.adapter.sendTurn({ threadId: "t-codex-cap", text: "hi" });
+
+    await expect(recorder.until((e) => e.type === "turn.completed" && e.ok === false)).resolves.toBeTruthy();
+    const retries = recorder.events.filter((e) => e.type === "turn.retrying");
+    expect(retries.map((e) => e.attempt)).toEqual([1, 2]);
+  }, 20_000);
+
+  it("interrupting one thread does not cancel another thread's retry", async () => {
+    process.env.FAKE_CODEX_TRANSIENTS = "2";
+    process.env.FAKE_CODEX_STATE = join(scratch, "codex-launches-concurrent");
+    await create();
+
+    const first = instance.adapter.sendTurn({ threadId: "t-codex-stop", text: "stop me" });
+    const second = instance.adapter.sendTurn({ threadId: "t-codex-continue", text: "keep going" });
+    await recorder.until((e) => e.type === "turn.retrying" && e.threadId === "t-codex-stop");
+    await recorder.until((e) => e.type === "turn.retrying" && e.threadId === "t-codex-continue");
+    await instance.adapter.interruptTurn("t-codex-stop");
+
+    await expect(
+      recorder.until((e) => e.type === "turn.completed" && e.threadId === "t-codex-continue"),
+    ).resolves.toMatchObject({ ok: true });
+    await Promise.allSettled([first, second]);
+  }, 20_000);
+
+  it("never retries after agent text already streamed (duplicate-text hazard)", async () => {
+    process.env.FAKE_CODEX_TRANSIENTS = "1";
+    process.env.FAKE_CODEX_PARTIAL_FAILS = "1";
+    process.env.FAKE_CODEX_STATE = join(scratch, "codex-launches-partial");
+    process.env.FAKE_CODEX_RETRY_SCALE = "0.001";
+    await create();
+    await instance.adapter.sendTurn({ threadId: "t-codex-partial", text: "hi" });
+
+    await expect(recorder.until((e) => e.type === "turn.completed" && e.ok === false)).resolves.toBeTruthy();
+    expect(recorder.events.some((e) => e.type === "content.delta" && e.streamKind === "assistant_text")).toBe(true);
+    expect(recorder.events.some((e) => e.type === "turn.retrying")).toBe(false);
+  }, 20_000);
+
 
   it("uses the explicit login command from the official Codex flow", () => {
     expect(CodexDriver.install?.signInCommand).toBe("codex login");

@@ -99,6 +99,25 @@ describe("readThreadEvents", () => {
     expect(page.total).toEqual({ runtime: 3, native: 2 });
   });
 
+  it("rejects malformed retry telemetry while retaining a valid retry event", () => {
+    const eventsDir = tmp();
+    const nativeDir = tmp();
+    const retry = (eventId: string, attempt: unknown, delayMs: unknown, reason: unknown) =>
+      runtime({ eventId, createdAt: eventId, type: "turn.retrying", attempt, delayMs, reason });
+    writeFileSync(
+      join(eventsDir, "t1.ndjson"),
+      line(retry("fractional", 1.5, 1_000, "overloaded")) +
+        line(retry("negative-attempt", -1, 1_000, "overloaded")) +
+        line(retry("negative-delay", 1, -1, "overloaded")) +
+        line(retry("infinite-delay", 1, Number.POSITIVE_INFINITY, "overloaded")) +
+        line(retry("missing-reason", 1, 1_000, undefined)) +
+        line(retry("valid-retry", 1, 1_000, "overloaded")),
+    );
+
+    const page = readThreadEvents({ eventsDir, nativeDir, threadId: "t1" });
+    expect(page.entries.map((entry) => (entry.data as { eventId: string }).eventId)).toEqual(["valid-retry"]);
+  });
+
   it("keeps walking backward when a corrupt tail record would otherwise consume the limit", () => {
     const eventsDir = tmp();
     const nativeDir = tmp();

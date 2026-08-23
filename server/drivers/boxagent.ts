@@ -129,6 +129,22 @@ export const BoxAgentDriver: ProviderDriver<BoxAgentConfig> = {
         const seen = new Set<string>();
         const startedAt = Date.now();
         let lastText = "";
+        let pendingText = "";
+        /** Emit unflushed deltas as assistant_text and reset pendingText. */
+        const flushAssistantText = () => {
+          const text = pendingText;
+          pendingText = "";
+          if (!text.trim()) return;
+          emit({ ...base(threadId, turnId), type: "item.completed", itemType: "assistant_text", text });
+        };
+        /** Stream a full-text snapshot as a delta and accumulate it for flush. */
+        const ingest = (text: string) => {
+          const delta = text.startsWith(lastText) ? text.slice(lastText.length) : text;
+          lastText = text;
+          if (!delta) return;
+          pendingText += delta;
+          emit({ ...base(threadId, turnId), type: "content.delta", streamKind: "assistant_text", delta });
+        };
         try {
           for (;;) {
             if (cancelled) break;
@@ -148,12 +164,9 @@ export const BoxAgentDriver: ProviderDriver<BoxAgentConfig> = {
               // stream anyway.
               const text = ev.text ?? ev.message ?? ev.data?.text ?? ev.data?.content ?? null;
               if (/assistant|message|output|response/i.test(kind) && typeof text === "string" && text.trim()) {
-                const delta = text.startsWith(lastText) ? text.slice(lastText.length) : text;
-                lastText = text;
-                if (delta) {
-                  emit({ ...base(threadId, turnId), type: "content.delta", streamKind: "assistant_text", delta });
-                }
+                ingest(text);
               } else if (/tool|command|exec|browse/i.test(kind)) {
+                flushAssistantText();
                 emit({
                   ...base(threadId, turnId),
                   type: "item.started",
@@ -167,9 +180,7 @@ export const BoxAgentDriver: ProviderDriver<BoxAgentConfig> = {
               // events themselves instead of hanging to the 30-min ceiling
               if (!promptId && /complete|finish|done|success|fail|error/i.test(kind)) {
                 active.delete(threadId);
-                if (lastText) {
-                  emit({ ...base(threadId, turnId), type: "item.completed", itemType: "assistant_text", text: lastText });
-                }
+                flushAssistantText();
                 const failed = /fail|error/i.test(kind);
                 emit({ ...base(threadId, turnId), type: "turn.completed", ok: !failed, stopReason: failed ? kind : null, cost: null });
                 return;
@@ -184,30 +195,17 @@ export const BoxAgentDriver: ProviderDriver<BoxAgentConfig> = {
               const state = String(run?.status ?? "");
               if (/completed|succeeded|done|finished/i.test(state)) {
                 const result = run?.result ?? run?.output ?? lastText;
-                // stream only the growth past what events already sent —
-                // the settled message below carries the full text regardless
-                if (typeof result === "string" && result.trim() && result !== lastText && result.startsWith(lastText)) {
-                  emit({
-                    ...base(threadId, turnId),
-                    type: "content.delta",
-                    streamKind: "assistant_text",
-                    delta: result.slice(lastText.length),
-                  });
+                if (typeof result === "string" && result.trim() && result !== lastText) {
+                  ingest(result);
                 }
-                emit({
-                  ...base(threadId, turnId),
-                  type: "item.completed",
-                  itemType: "assistant_text",
-                  text: typeof result === "string" && result.trim() ? result : lastText || "(finished)",
-                });
+                if (!pendingText.trim() && !lastText.trim()) pendingText = "(finished)";
+                flushAssistantText();
                 active.delete(threadId);
                 emit({ ...base(threadId, turnId), type: "turn.completed", ok: true, stopReason: null, cost: null });
                 return;
               }
               if (/failed|error|cancelled|interrupted/i.test(state)) {
-                if (lastText) {
-                  emit({ ...base(threadId, turnId), type: "item.completed", itemType: "assistant_text", text: lastText });
-                }
+                flushAssistantText();
                 active.delete(threadId);
                 emit({ ...base(threadId, turnId), type: "turn.completed", ok: false, stopReason: state, cost: null });
                 return;
@@ -218,9 +216,11 @@ export const BoxAgentDriver: ProviderDriver<BoxAgentConfig> = {
             }
           }
           // cancelled
+          flushAssistantText();
           active.delete(threadId);
           emit({ ...base(threadId, turnId), type: "turn.completed", ok: false, stopReason: "interrupted", cost: null });
         } catch (e) {
+          flushAssistantText();
           active.delete(threadId);
           emit({ ...base(threadId, turnId), type: "runtime.error", message: (e as Error).message });
           emit({ ...base(threadId, turnId), type: "turn.completed", ok: false, stopReason: "error", cost: null });

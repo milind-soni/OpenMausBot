@@ -106,6 +106,7 @@ describe("default fleet", () => {
     expect(map.qwen?.driver).toBe("qwenAgent");
     expect(map.hermes?.driver).toBe("hermesAgent");
     expect(map.cursor?.driver).toBe("cursorAgent");
+    expect(map.openaiCompat?.driver).toBe("openai-compat");
   });
 
   it("does not expand a one-off shadow fleet", () => {

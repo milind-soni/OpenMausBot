@@ -93,7 +93,7 @@ export function ConnectorCard({ botId, threadId, message }: { botId: string; thr
     <div className="flex w-full justify-start">
       <div className="w-full max-w-[520px] overflow-hidden rounded-2xl border border-hairline/50 bg-card shadow-sm">
         <div className="flex items-start gap-3 p-4">
-          <div className="flex size-11 shrink-0 items-center justify-center rounded-xl bg-raised text-[16px] font-semibold text-ink">
+          <div className="flex size-11 shrink-0 items-center justify-center rounded-xl bg-control text-[16px] font-semibold text-ink">
             {connector.label.slice(0, 1).toUpperCase() || <PlugZap size={19} />}
           </div>
           <div className="min-w-0 flex-1">
@@ -120,7 +120,7 @@ export function ConnectorCard({ botId, threadId, message }: { botId: string; thr
             {error && <p className="mt-2 text-[12px] text-danger">{error}</p>}
           </div>
           {!connected && (
-            <button onClick={dismiss} aria-label="Not now" title="Not now" className="rounded-md p-1 text-ink-secondary hover:bg-raised hover:text-ink">
+            <button onClick={dismiss} aria-label="Not now" title="Not now" className="rounded-md p-1 text-ink-secondary hover:bg-control hover:text-ink">
               <X size={15} />
             </button>
           )}

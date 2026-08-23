@@ -180,6 +180,16 @@ function isRuntimeEvent(value: unknown): value is RuntimeEvent {
       return stringOrMissing(value.reason);
     case "turn.started":
       return true;
+    case "turn.retrying":
+      return (
+        typeof value.attempt === "number" &&
+        Number.isInteger(value.attempt) &&
+        value.attempt >= 1 &&
+        typeof value.delayMs === "number" &&
+        Number.isFinite(value.delayMs) &&
+        value.delayMs >= 0 &&
+        typeof value.reason === "string"
+      );
     case "turn.completed":
       return (
         typeof value.ok === "boolean" &&

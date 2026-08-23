@@ -235,7 +235,7 @@ export function LocalComputerSection() {
           <span
             className={cn(
               "flex items-center gap-1.5 rounded-full px-2.5 py-1 text-[12.5px]",
-              headerReady ? "bg-success/15 text-success" : "bg-raised text-ink-secondary",
+              headerReady ? "bg-success/15 text-success" : "bg-control text-ink-secondary",
             )}
           >
             {loading ? <Loader2 size={12} className="animate-spin" /> : headerReady ? <Check size={12} /> : <Circle size={9} />}
@@ -257,7 +257,7 @@ export function LocalComputerSection() {
               setRefreshKey((key) => key + 1);
             }}
             disabled={loading || pending !== null}
-            className="flex items-center gap-1.5 rounded-lg border border-hairline/40 px-2.5 py-1 text-[12.5px] text-ink-secondary hover:bg-raised hover:text-ink disabled:opacity-40"
+            className="flex items-center gap-1.5 rounded-lg border border-hairline/40 px-2.5 py-1 text-[12.5px] text-ink-secondary hover:bg-control hover:text-ink disabled:opacity-40"
           >
             <RefreshCw size={12} /> {t("Re-check")}
           </button>
@@ -266,7 +266,7 @@ export function LocalComputerSection() {
               href={status?.viewer_url ?? c?.view}
               target="_blank"
               rel="noreferrer"
-              className="flex items-center gap-1.5 rounded-lg border border-hairline/40 px-2.5 py-1 text-[12.5px] text-ink hover:bg-raised"
+              className="flex items-center gap-1.5 rounded-lg border border-hairline/40 px-2.5 py-1 text-[12.5px] text-ink hover:bg-control"
             >
               <ExternalLink size={12} /> {t("Watch screen")}
             </a>
@@ -289,7 +289,7 @@ export function LocalComputerSection() {
               className={cn(
                 "flex-1 px-3 py-2 text-[13px] disabled:opacity-50",
                 index > 0 && "border-l border-hairline/40",
-                status?.mode === mode ? "bg-raised text-ink" : "text-ink-secondary hover:text-ink",
+                status?.mode === mode ? "bg-control text-ink" : "text-ink-secondary hover:text-ink",
               )}
             >
               {mode === "shared" ? t("Shared") : t("Per bot")}
@@ -306,7 +306,7 @@ export function LocalComputerSection() {
             value={status?.max_instances ?? 2}
             disabled={!status || policyPending}
             onChange={(event) => void savePolicy(status?.mode ?? "shared", Number(event.target.value))}
-            className="rounded-lg border border-hairline/40 bg-raised px-2.5 py-1.5 text-[13px] text-ink disabled:opacity-50"
+            className="rounded-lg border border-hairline/40 bg-control px-2.5 py-1.5 text-[13px] text-ink disabled:opacity-50"
           >
             {[1, 2, 3, 4].map((value) => <option key={value} value={value}>{value}</option>)}
           </select>

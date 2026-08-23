@@ -220,7 +220,12 @@ On the phone, in order:
    then come back. The transcript should catch up *without* a visible reload —
    that is the resumable stream doing its job. Watch the harness log to confirm
    it replayed rather than re-hydrated.
-6. **Revoke.** Remove the device in Settings → Companion on the computer. The
+6. **Dictate.** Open a chat, tap the mic, speak, and tap it again. Partial
+   words should replace each other in the composer rather than duplicate,
+   and the result should remain editable before sending. The first attempt
+   requests Microphone and Speech Recognition access. Locking or
+   backgrounding the phone mid-sentence must release the mic.
+7. **Revoke.** Remove the device in Settings → Companion on the computer. The
    phone should land on "This phone was unpaired" rather than silently failing.
 
 ---
@@ -274,7 +279,8 @@ Not built yet, so not bugs:
 - **Nothing arrives after the app is terminated.** Live and replayed notification
   frames now become native alerts and badges, but closed-app push still needs an
   APNs relay with project-owned Apple credentials.
-- **No voice or routine management.** Tasks, SQLite transcript search/export,
+- **No call mode, spoken replies, or routine management.** Composer dictation,
+  tasks, SQLite transcript search/export,
   reactions, and edit/version switching are available from the conversation UI.
 
 (Two entries that used to sit on this list have since shipped: replies stream

@@ -69,6 +69,8 @@ export function summarizeRuntime(e: RuntimeEvent): { summary: string; tone: Insp
       return { summary: `session exited${e.reason ? ` · ${e.reason}` : ""}`, tone: "plain" };
     case "turn.started":
       return { summary: `turn started${e.turnId ? ` · ${e.turnId.slice(0, 8)}` : ""}`, tone: "boundary" };
+    case "turn.retrying":
+      return { summary: `retrying (${e.reason}) · attempt ${e.attempt} · ${Math.round(e.delayMs / 1000)}s`, tone: "plain" };
     case "turn.completed": {
       const parts = [e.ok ? "turn ok" : "turn failed"];
       if (e.stopReason) parts.push(e.stopReason);

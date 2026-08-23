@@ -82,6 +82,15 @@ describe("Store", () => {
     expect(reloaded.group(group.id)?.defaultResponder).toEqual({ kind: "member", botId: second.id });
   });
 
+  it("persists a channel's context when it is created", () => {
+    const store = new Store(selection);
+    const bot = store.createBot();
+    const channel = store.createGroup("Website launch", [bot.id], false, "Work");
+
+    expect(channel.section).toBe("Work");
+    expect(new Store(selection).group(channel.id)?.section).toBe("Work");
+  });
+
   it("migrates old rooms without routing to their first member", () => {
     const store = new Store(selection);
     const first = store.createBot();

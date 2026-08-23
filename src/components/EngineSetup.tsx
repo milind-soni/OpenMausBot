@@ -69,7 +69,7 @@ function CommandRow({ command, actionLabel }: { command: string; actionLabel: st
             onClick={() => void copy()}
             aria-label="Copy command"
             title="Copy command"
-            className="flex shrink-0 items-center gap-1 rounded-md px-1.5 py-1 text-[11.5px] font-medium text-ink-secondary hover:bg-raised hover:text-ink"
+            className="flex shrink-0 items-center gap-1 rounded-md px-1.5 py-1 text-[11.5px] font-medium text-ink-secondary hover:bg-control hover:text-ink"
           >
             {status === "copied" ? <Check size={12} className="text-success" /> : <Copy size={12} />}
             {status === "copied" ? "Copied" : "Copy"}
@@ -95,7 +95,7 @@ function CommandRow({ command, actionLabel }: { command: string; actionLabel: st
         <button
           type="button"
           onClick={() => void copy()}
-          className="mt-2 flex w-full items-center justify-center gap-2 rounded-lg bg-raised px-3 py-2 text-[12.5px] font-semibold text-ink hover:bg-raised-hover"
+          className="mt-2 flex w-full items-center justify-center gap-2 rounded-lg bg-control px-3 py-2 text-[12.5px] font-semibold text-ink hover:bg-raised-hover"
         >
           {status === "copied" ? <Check size={14} className="text-success" /> : <Copy size={14} />}
           {status === "copied" ? "Command copied" : "Copy command"}
@@ -131,7 +131,7 @@ export function EngineSetup({
   // token) and intentionally have no install descriptor.
   if (!install) {
     return (
-      <div className={cn("rounded-xl border border-hairline/40 bg-raised/30 p-3", className)}>
+      <div className={cn("rounded-xl border border-hairline/40 bg-control/30 p-3", className)}>
         <div className="text-[13px] font-semibold text-ink">{instance.displayName} isn’t ready</div>
         <p className="mt-1 text-[12px] leading-relaxed text-ink-secondary">
           {instance.snapshot.reason ?? "This engine is not available on this machine."}
@@ -141,7 +141,7 @@ export function EngineSetup({
   }
 
   return (
-    <div className={cn("rounded-xl border border-hairline/40 bg-raised/30 p-3", className)}>
+    <div className={cn("rounded-xl border border-hairline/40 bg-control/30 p-3", className)}>
       <div className="flex items-start gap-2.5">
         <span className="mt-0.5 flex size-7 shrink-0 items-center justify-center rounded-lg bg-inset text-ink-secondary">
           {signInOnly ? <LogIn size={14} /> : <Download size={14} />}

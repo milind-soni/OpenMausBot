@@ -284,12 +284,18 @@ export const PiDriver: ProviderDriver<PiConfig> = {
         child.stdin.write(JSON.stringify(obj) + "\n");
       };
 
+      /** Emit buffered assistant text as its own item, then clear it. */
+      const flushAssistantText = () => {
+        const text = assistantText;
+        assistantText = "";
+        if (!text.trim()) return;
+        emit({ ...base(threadId, turnId), type: "item.completed", itemType: "assistant_text", text });
+      };
+
       const settle = (ok: boolean, stopReason?: string | null, usage?: { input?: number; output?: number }) => {
         if (settled) return;
         settled = true;
-        if (assistantText.trim()) {
-          emit({ ...base(threadId, turnId), type: "item.completed", itemType: "assistant_text", text: assistantText });
-        }
+        flushAssistantText();
         emit({
           ...base(threadId, turnId),
           type: "turn.completed",
@@ -350,6 +356,7 @@ export const PiDriver: ProviderDriver<PiConfig> = {
             return;
           }
           case "tool_execution_start": {
+            flushAssistantText();
             emit({
               ...base(threadId, turnId),
               type: "item.started",
@@ -373,6 +380,7 @@ export const PiDriver: ProviderDriver<PiConfig> = {
             // pi floods setWidget/setStatus for TUI bookkeeping; only
             // select/confirm/input are questions that wait for an answer.
             if (evt.method === "select" || evt.method === "confirm" || evt.method === "input") {
+              flushAssistantText();
               const reqId = evt.id ?? newId();
               const isQuestion = evt.method === "input";
               emit({

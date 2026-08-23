@@ -87,7 +87,7 @@ export function RoomTurnTimeoutSettings() {
         <span className="pr-3 text-[13px] text-ink-secondary">{t("minutes")}</span>
       </div>
       <p id="room-turn-timeout-help" className="text-[12px] leading-relaxed text-ink-secondary">
-        {t("Applies to every bot turn in rooms. Direct chats use the inactivity watchdog instead.")}
+        {t("Applies to every bot turn in channels. Direct chats use the inactivity watchdog instead.")}
       </p>
       {error ? (
         <p id="room-turn-timeout-error" role="alert" className="text-[12px] text-danger">

@@ -131,6 +131,50 @@ final class DecodingTests: XCTestCase {
         XCTAssertNil(fleet.bots.last?.cloudBackend)
     }
 
+    func testDecodesMultipleConnectedAccountsAndNoAuthToolkit() throws {
+        let payload = #"""
+        {
+          "configured": true,
+          "services": {
+            "gmail": {
+              "connected": true,
+              "pending": false,
+              "status": "ACTIVE",
+              "accounts": [
+                {"id": "ca_work", "alias": "Work", "status": "ACTIVE"},
+                {"id": "ca_personal", "status": "INACTIVE"}
+              ]
+            },
+            "weather": {
+              "connected": true,
+              "pending": false,
+              "status": "ACTIVE",
+              "accounts": []
+            },
+            "slack": {
+              "connected": false,
+              "pending": true
+            }
+          }
+        }
+        """#
+        let statuses = try JSONDecoder().decode(ConnectorStatuses.self, from: Data(payload.utf8))
+        let gmail = try XCTUnwrap(statuses.services["gmail"])
+        XCTAssertEqual(gmail.accounts?.map(\.id), ["ca_work", "ca_personal"])
+        XCTAssertEqual(gmail.accounts?.first?.alias, "Work")
+        XCTAssertNil(gmail.accounts?.last?.alias)
+        XCTAssertTrue(try XCTUnwrap(gmail.accounts?.first).isActive)
+        XCTAssertFalse(try XCTUnwrap(gmail.accounts?.last).isActive)
+
+        let noAuth = try XCTUnwrap(statuses.services["weather"])
+        XCTAssertTrue(noAuth.connected)
+        XCTAssertEqual(noAuth.accounts?.isEmpty, true)
+
+        let pending = try XCTUnwrap(statuses.services["slack"])
+        XCTAssertEqual(pending.pending, true)
+        XCTAssertNil(pending.accounts)
+    }
+
     func testOneMalformedBotDoesNotHideTheRestOfTheFleet() throws {
         let json = """
         {

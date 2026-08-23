@@ -6,6 +6,7 @@
 // turn. Failure modes mirror how real ACP agents misbehave:
 //
 //   FAKE_ACP_MODE   happy (default) | empty-reply | exit-early | fail-after-text | hang | no-auth | auth-required | permission
+//                   | interleave (message → tool → message → tool → message)
 //                   | no-session-config (reject session/set_mode + set_model
 //                     with -32601, i.e. an agent predating those methods)
 //                   | ask-peer (spawn the injected "agents" MCP server from
@@ -54,6 +55,20 @@ const configOptions = () =>
         },
       ]
     : null;
+// cursor-shaped surface: the session advertises `models.availableModels` with
+// parameterised ids (`default[]`) that differ from the argv `--model` slugs
+// (`auto`). Off unless FAKE_ACP_SESSION_MODELS is set, so every existing mode
+// stays byte-identical. Format: "id|Name,id|Name" — the name is optional.
+const acpModels = (process.env.FAKE_ACP_SESSION_MODELS ?? "")
+  .split(",")
+  .filter(Boolean)
+  .map((entry) => {
+    const [modelId, name] = entry.split("|");
+    return name ? { modelId, name } : { modelId };
+  });
+const sessionModels = () =>
+  acpModels.length ? { currentModelId: acpModels[0].modelId, availableModels: acpModels } : null;
+
 const argv = process.argv.slice(2);
 const dumpEnv = Object.fromEntries(
   [
@@ -188,6 +203,17 @@ function playTurn() {
   out({ jsonrpc: "2.0", method: "session/update", params: { update: { sessionUpdate: "tool_call_update", toolCallId: "tc-1", status: "completed" } } });
 }
 
+/** Scripted text → tool → text → tool → text turn for order-contract tests. */
+function playInterleaveTurn() {
+  out({ jsonrpc: "2.0", method: "session/update", params: { update: { sessionUpdate: "agent_message_chunk", content: { text: "before one" } } } });
+  out({ jsonrpc: "2.0", method: "session/update", params: { update: { sessionUpdate: "tool_call", toolCallId: "tc-1", title: "run" } } });
+  out({ jsonrpc: "2.0", method: "session/update", params: { update: { sessionUpdate: "tool_call_update", toolCallId: "tc-1", status: "completed" } } });
+  out({ jsonrpc: "2.0", method: "session/update", params: { update: { sessionUpdate: "agent_message_chunk", content: { text: "before two" } } } });
+  out({ jsonrpc: "2.0", method: "session/update", params: { update: { sessionUpdate: "tool_call", toolCallId: "tc-2", title: "run" } } });
+  out({ jsonrpc: "2.0", method: "session/update", params: { update: { sessionUpdate: "tool_call_update", toolCallId: "tc-2", status: "completed" } } });
+  out({ jsonrpc: "2.0", method: "session/update", params: { update: { sessionUpdate: "agent_message_chunk", content: { text: "after" } } } });
+}
+
 let buf = "";
 process.stdin.on("data", (c) => {
   buf += c;
@@ -248,12 +274,18 @@ function handle(msg: any) {
         writeFileSync(`${process.env.FAKE_ACP_DUMP}.mcp.json`, JSON.stringify(servers, null, 2));
       }
       const opts = configOptions();
-      result(msg.id, opts ? { sessionId: "fake-acp-session", configOptions: opts } : { sessionId: "fake-acp-session" });
+      const mdls = sessionModels();
+      result(msg.id, {
+        sessionId: "fake-acp-session",
+        ...(opts ? { configOptions: opts } : {}),
+        ...(mdls ? { models: mdls } : {}),
+      });
       break;
     }
     case "session/load": {
       const opts = configOptions();
-      result(msg.id, opts ? { configOptions: opts } : {});
+      const mdls = sessionModels();
+      result(msg.id, { ...(opts ? { configOptions: opts } : {}), ...(mdls ? { models: mdls } : {}) });
       break;
     }
     // per-session settings (droid sets model/autonomy here, not via argv).
@@ -265,6 +297,11 @@ function handle(msg: any) {
       if (mode === "no-session-config") {
         // an older agent that predates these methods
         return out({ jsonrpc: "2.0", id: msg.id, error: { code: -32601, message: "method not found" } });
+      }
+      if (mode === "set-model-invalid-params" && msg.method === "session/set_model") {
+        // an agent whose ACP model namespace does not contain the id it was
+        // sent — Cursor's answer when handed an argv slug like `auto`.
+        return out({ jsonrpc: "2.0", id: msg.id, error: { code: -32602, message: "Invalid params" } });
       }
       const settingId = msg.method === "session/set_mode" ? "modeId" : "modelId";
       if (typeof msg.params?.sessionId !== "string" || typeof msg.params?.[settingId] !== "string") {
@@ -394,7 +431,8 @@ function handle(msg: any) {
           });
         return;
       }
-      if (mode !== "empty-reply") playTurn();
+      if (mode === "interleave") playInterleaveTurn();
+      else if (mode !== "empty-reply") playTurn();
       if (mode === "permission") {
         // ask the client to approve a tool, then complete once answered
         pendingPermissionId = 9001;

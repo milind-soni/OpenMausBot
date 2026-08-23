@@ -63,26 +63,39 @@ function fakeStore(bots: BotRecord[]): SteerStore & { messages: Message[] } {
 }
 
 describe("steer-queue module", () => {
-  it("appends a queued user message to the thread immediately", () => {
+  it("does not append a queued user message until drain", () => {
     const bot = fakeBot("bot-a", "thread-a", true);
     const store = fakeStore([bot]);
-    const message = queueSteeredMessage(store, bot, "hold that thought");
-    expect(message).toMatchObject({ role: "user", kind: "text", text: "hold that thought", queued: true });
-    expect(store.messages).toHaveLength(1);
+    const queued = queueSteeredMessage(bot, "hold that thought");
+    expect(queued).toMatchObject({ id: expect.any(String) });
+    expect(store.messages).toHaveLength(0);
     expect(_queuedCount("thread-a")).toBe(1);
-    // consume it so module state never leaks into another test
-    drainSteeredMessages(fakeStore([fakeBot("bot-a", "thread-a", false)]), () => {});
+
+    bot.busy = false;
+    const run = vi.fn();
+    drainSteeredMessages(store, run);
+    expect(store.messages).toHaveLength(1);
+    expect(store.messages[0]).toMatchObject({
+      role: "user",
+      kind: "text",
+      text: "hold that thought",
+      queueId: queued.id,
+    });
+    expect(store.messages[0]!.queued).toBeUndefined();
+    expect(run).toHaveBeenCalledTimes(1);
+    expect(_queuedCount("thread-a")).toBe(0);
   });
 
   it("holds the queue while the bot is busy and drains it once when idle", () => {
     const bot = fakeBot("bot-b", "thread-b", true);
     const store = fakeStore([bot]);
-    queueSteeredMessage(store, bot, "first note");
-    queueSteeredMessage(store, bot, "second note");
+    const first = queueSteeredMessage(bot, "first note");
+    const second = queueSteeredMessage(bot, "second note");
     const run = vi.fn();
 
     drainSteeredMessages(store, run);
     expect(run).not.toHaveBeenCalled();
+    expect(store.messages).toHaveLength(0);
     expect(_queuedCount("thread-b")).toBe(2);
 
     bot.busy = false;
@@ -93,9 +106,11 @@ describe("steer-queue module", () => {
     expect(threadId).toBe("thread-b");
     // ONE turn for the whole burst: the texts joined with newlines
     expect(prompt).toBe("first note\nsecond note");
-    // the last queued message, so the caller appends nothing new
+    // appended at drain, last message so startTurn adds nothing new
+    expect(store.messages.map((m) => m.text)).toEqual(["first note", "second note"]);
+    expect(store.messages.map((m) => m.queueId)).toEqual([first.id, second.id]);
     expect(userMessage.text).toBe("second note");
-    // the affordance is cleared the moment the queue is consumed
+    expect(run.mock.calls[0][4]).toEqual(store.messages.map((m) => m.id));
     expect(store.messages.every((m) => !m.queued)).toBe(true);
     expect(_queuedCount("thread-b")).toBe(0);
 
@@ -112,25 +127,13 @@ describe("steer-queue module", () => {
 
   it("drops the queue of a deleted bot without running it", () => {
     const bot = fakeBot("bot-d", "thread-d", true);
-    const store = fakeStore([bot]);
-    queueSteeredMessage(store, bot, "orphaned");
+    queueSteeredMessage(bot, "orphaned");
     const run = vi.fn();
     drainSteeredMessages(fakeStore([]), run);
     expect(run).not.toHaveBeenCalled();
     expect(_queuedCount("thread-d")).toBe(0);
   });
 
-  it("skips the run when the queued messages vanished from the store", () => {
-    const bot = fakeBot("bot-e", "thread-e", true);
-    const store = fakeStore([bot]);
-    queueSteeredMessage(store, bot, "gone soon");
-    store.messages.length = 0; // the thread was deleted under the queue
-    bot.busy = false;
-    const run = vi.fn();
-    drainSteeredMessages(store, run);
-    expect(run).not.toHaveBeenCalled();
-    expect(_queuedCount("thread-e")).toBe(0);
-  });
 });
 
 // ── e2e: the real server on the gated fake ACP fleet ───────────────────
@@ -258,7 +261,7 @@ describe("steer-queue e2e (fake ACP fleet)", () => {
       expect(first.body.queued).toBeUndefined();
       expect((await botById(bot.id)).busy).toBe(true);
 
-      // sends while busy land in the transcript at once, marked queued
+      // sends while busy stay off the transcript so they cannot become the leaf
       const second = await api("POST", `/api/bots/${bot.id}/messages`, { text: "steer two" });
       expect(second.status).toBe(202);
       expect(second.body).toMatchObject({ ok: true, queued: true });
@@ -267,10 +270,9 @@ describe("steer-queue e2e (fake ACP fleet)", () => {
 
       let snapshot = await botById(bot.id);
       expect(snapshot.busy).toBe(true);
-      const queuedTexts = snapshot.messages
-        .filter((m: any) => m.role === "user" && m.queued)
-        .map((m: any) => m.text);
-      expect(queuedTexts).toEqual(["steer two", "steer three"]);
+      expect(snapshot.messages.filter((m: any) => m.role === "user").map((m: any) => m.text)).toEqual([
+        "first task please",
+      ]);
       expect(echoes(snapshot)).toHaveLength(0); // nothing has answered yet
 
       // open the gate: turn 1 settles, and the queue drains into ONE turn
@@ -290,7 +292,9 @@ describe("steer-queue e2e (fake ACP fleet)", () => {
       // framing, no rewind replay wrapper
       expect(replies[1].text).not.toContain("authenticated external webhook");
       expect(replies[1].text).not.toContain("[The user rewound");
-      // consumed: the queued affordance is gone from both messages
+      // drain appends the queued lines after the first turn's reply
+      const userTexts = snapshot.messages.filter((m: any) => m.role === "user").map((m: any) => m.text);
+      expect(userTexts).toEqual(["first task please", "steer two", "steer three"]);
       expect(snapshot.messages.some((m: any) => m.queued)).toBe(false);
 
       // an idle send with an empty queue runs one normal turn — the drain

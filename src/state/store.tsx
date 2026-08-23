@@ -83,6 +83,9 @@ export interface Message {
    * Rendered only while the bot is busy, so a flag stranded by a server
    * restart never shows a promise nothing will keep. */
   queued?: boolean;
+  /** steer-queue entry this drained user line came from. Pending chips
+   * match on this id, not on equal text. Absent on ordinary sends. */
+  queueId?: string;
 }
 
 export type GroupDefaultResponder =
@@ -111,6 +114,11 @@ export interface Group {
   pinnedCwd?: string | null;
   /** the one message pinned to the top of this room's transcript */
   pinnedMessageId?: string;
+  /** sidebar section heading this room is filed under (shared with bots) */
+  section?: string;
+  /** New user-created rooms remain in setup until Save or Skip. */
+  setupCompletedAt?: number | null;
+  setupSkippedAt?: number | null;
   messages: Message[];
 }
 
@@ -353,6 +361,23 @@ export interface AppState {
     nonce: number;
     kind: Exclude<MausMotion, "none">;
   } | null;
+  /** 1:1 queue-fallback lines waiting for drain; keyed by threadId.
+   * Each entry is identified by the server queueId, not by text. */
+  pendingQueued: Record<string, Array<{ queueId: string; text: string }>>;
+  /** queueIds whose drain frame beat the POST continuation. One-shot and
+   * bounded to a short event window so other clients cannot grow it forever. */
+  consumedQueueIds: Record<string, true>;
+}
+
+const MAX_CONSUMED_QUEUE_IDS = 64;
+
+function rememberConsumedQueueId(consumed: Record<string, true>, queueId: string): Record<string, true> {
+  const next = { ...consumed, [queueId]: true as const };
+  const overflow = Object.keys(next).length - MAX_CONSUMED_QUEUE_IDS;
+  if (overflow > 0) {
+    for (const id of Object.keys(next).slice(0, overflow)) delete next[id];
+  }
+  return next;
 }
 
 export type BotAnnouncement = Omit<Bot, "messages"> & { messages?: Message[] };
@@ -381,12 +406,12 @@ export type Action =
   | { type: "markRoutineRunSeen"; runId: string }
   | { type: "groupPatched"; group: Partial<Group> & { id: string } }
   | { type: "groupDeleted"; groupId: string }
-  | { type: "createGroup"; memberIds: string[]; name?: string }
+  | { type: "createGroup"; memberIds: string[]; name?: string; section?: string }
   | { type: "sendGroup"; groupId: string; text: string }
   | {
       type: "patchGroup";
       groupId: string;
-      patch: Partial<Pick<Group, "name" | "bulletin" | "memberIds" | "defaultResponder" | "pinnedMessageId">>;
+      patch: Partial<Pick<Group, "name" | "bulletin" | "memberIds" | "defaultResponder" | "pinnedMessageId" | "section">>;
     }
   | { type: "deleteGroup"; groupId: string }
   | { type: "toggleReaction"; threadId: string; messageId: string; emoji: string }
@@ -395,6 +420,8 @@ export type Action =
   | { type: "configStatus"; config: ConfigStatus }
   | { type: "select"; id: string }
   | { type: "send"; botId: string; text: string }
+  | { type: "pendingQueued"; threadId: string; queueId: string; text: string }
+  | { type: "consumePendingQueued"; threadId: string; queueId: string }
   | { type: "editMessage"; botId: string; messageId: string; text: string }
   | { type: "switchBranch"; botId: string; messageId: string }
   | { type: "threadActive"; threadId: string; activeLeafId: string }
@@ -892,6 +919,37 @@ export function reducer(state: AppState, action: Action): AppState {
       };
     }
     // handled entirely by the async wrapper
+    case "pendingQueued": {
+      if (state.consumedQueueIds[action.queueId]) {
+        const consumedQueueIds = { ...state.consumedQueueIds };
+        delete consumedQueueIds[action.queueId];
+        return { ...state, consumedQueueIds };
+      }
+      const prev = state.pendingQueued[action.threadId] ?? [];
+      if (prev.some((entry) => entry.queueId === action.queueId)) return state;
+      return {
+        ...state,
+        pendingQueued: {
+          ...state.pendingQueued,
+          [action.threadId]: [...prev, { queueId: action.queueId, text: action.text }],
+        },
+      };
+    }
+    case "consumePendingQueued": {
+      const prev = state.pendingQueued[action.threadId] ?? [];
+      const at = prev.findIndex((entry) => entry.queueId === action.queueId);
+      if (at < 0) {
+        return {
+          ...state,
+          consumedQueueIds: rememberConsumedQueueId(state.consumedQueueIds, action.queueId),
+        };
+      }
+      const rest = prev.filter((_, i) => i !== at);
+      const pendingQueued = { ...state.pendingQueued };
+      if (rest.length) pendingQueued[action.threadId] = rest;
+      else delete pendingQueued[action.threadId];
+      return { ...state, pendingQueued };
+    }
     case "send":
     case "editMessage":
       return withMascotMotion(state, action.botId, "working");
@@ -947,6 +1005,8 @@ export const initialState: AppState = {
   connected: false,
   error: null,
   mascotMotion: null,
+  pendingQueued: {},
+  consumedQueueIds: {},
 };
 
 // ── API client ─────────────────────────────────────────────────────────
@@ -1109,10 +1169,25 @@ export function StoreProvider({ children }: { children: ReactNode }) {
           api(`/api/routine-runs/${action.runId}/seen`, { method: "POST" }).catch(showError);
           break;
         case "send":
-          api(`/api/bots/${action.botId}/messages`, {
+          void api(`/api/bots/${action.botId}/messages`, {
             method: "POST",
             body: JSON.stringify({ text: action.text }),
-          }).catch(showError);
+          })
+            .then((body) => {
+              if (
+                body?.queued &&
+                typeof body.threadId === "string" &&
+                typeof body.queueId === "string"
+              ) {
+                rawDispatch({
+                  type: "pendingQueued",
+                  threadId: body.threadId,
+                  queueId: body.queueId,
+                  text: action.text,
+                });
+              }
+            })
+            .catch(showError);
           break;
         case "editMessage":
           api(`/api/bots/${action.botId}/messages/${action.messageId}/edit`, {
@@ -1245,7 +1320,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         case "createGroup":
           api(`/api/groups`, {
             method: "POST",
-            body: JSON.stringify({ memberIds: action.memberIds, name: action.name }),
+            body: JSON.stringify({ memberIds: action.memberIds, name: action.name, section: action.section }),
           })
             .then(({ group }) => {
               rawDispatch({ type: "groupPatched", group });
@@ -1396,6 +1471,13 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       switch (frame.kind) {
         case "message": {
           rawDispatch({ type: "messageAdded", threadId: frame.threadId, message: frame.message });
+          if (frame.message?.role === "user" && typeof frame.message.queueId === "string") {
+            rawDispatch({
+              type: "consumePendingQueued",
+              threadId: frame.threadId,
+              queueId: frame.message.queueId,
+            });
+          }
           // a settled assistant bubble replaces the in-flight stream
           if (frame.message?.role === "bot" && frame.message?.kind === "text") {
             clearStream(frame.threadId);
@@ -1462,7 +1544,11 @@ export function StoreProvider({ children }: { children: ReactNode }) {
           // unread:false back. Opening a bot from its own notification and
           // watching the badge return on the next hydration is exactly the
           // bug that makes notifications feel broken.
-          showNotification(frame.notification, (target) => openNotificationTarget(dispatch, target, stateRef.current));
+          showNotification(
+            frame.notification,
+            (target) => openNotificationTarget(dispatch, target, stateRef.current),
+            stateRef.current.bots.find((bot) => bot.id === frame.notification.botId)?.avatarUrl,
+          );
           break;
         case "group.deleted":
           rawDispatch({ type: "groupDeleted", groupId: frame.groupId });

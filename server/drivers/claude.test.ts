@@ -21,6 +21,10 @@ import { removeTempDir } from "../testing/cleanup.ts";
 
 const FAKE_CLI = join(dirname(fileURLToPath(import.meta.url)), "..", "testing", "fake-claude-cli.ts");
 
+/** Thread ids for the four ask-id-collision tests. Each must truncate to a
+ * unique 8-char tag so no two tests share a broker socket/pipe name. */
+const COLLISION_THREAD_IDS = ["t-dup-1", "t-dup-2", "t-dup-3", "t-dup-4"];
+
 /** Connect to a broker socket and resolve once the connection is live. */
 function connectSocket(path: string): Promise<Socket> {
   return new Promise((resolve, reject) => {
@@ -120,6 +124,11 @@ describe("ClaudeDriver.decodeConfig", () => {
     ).rejects.toThrow(/interactive approval broker/);
     await bypass.dispose();
   });
+
+  it("gives each collision test a distinct broker pipe path", () => {
+    const paths = COLLISION_THREAD_IDS.map(permissionSocketPath);
+    expect(new Set(paths).size).toBe(COLLISION_THREAD_IDS.length);
+  });
 });
 
 describe("ClaudeDriver turns (fake CLI)", () => {
@@ -148,6 +157,10 @@ describe("ClaudeDriver turns (fake CLI)", () => {
   afterEach(async () => {
     delete process.env.FAKE_CLAUDE_MODE;
     delete process.env.FAKE_CLAUDE_DUMP;
+    delete process.env.FAKE_CLAUDE_TRANSIENTS;
+    delete process.env.FAKE_CLAUDE_PARTIAL_FAILS;
+    delete process.env.FAKE_CLAUDE_STATE;
+    delete process.env.FAKE_CLAUDE_RETRY_SCALE;
     delete process.env.ANTHROPIC_API_KEY;
     delete process.env.XAI_API_KEY;
     delete process.env.COMPOSIO_API_KEY;
@@ -558,6 +571,86 @@ describe("ClaudeDriver turns (fake CLI)", () => {
     expect(error.message).toContain("simulated crash");
   });
 
+  it("auto-retries transient exits, then completes with exactly one final message", async () => {
+    process.env.FAKE_CLAUDE_TRANSIENTS = "2";
+    process.env.FAKE_CLAUDE_STATE = join(scratch, "launches");
+    process.env.FAKE_CLAUDE_RETRY_SCALE = "0.001";
+    await create();
+    await instance.adapter.sendTurn({ threadId: "t-retry", text: "go" });
+
+    await recorder.until((e) => e.type === "turn.completed" && e.ok === true);
+    const retries = recorder.events.filter((e) => e.type === "turn.retrying");
+    expect(retries.map((e) => e.attempt)).toEqual([1, 2]);
+    expect(retries.every((e) => e.delayMs > 0 && typeof e.reason === "string")).toBe(true);
+    // exactly one settled reply across all three launches
+    const replies = recorder.events.filter((e) => e.type === "item.completed" && e.itemType === "assistant_text");
+    expect(replies).toHaveLength(1);
+  }, 20_000);
+
+  it("stops retrying at the attempt cap and settles the turn as failed", async () => {
+    process.env.FAKE_CLAUDE_TRANSIENTS = "9";
+    process.env.FAKE_CLAUDE_STATE = join(scratch, "launches-cap");
+    process.env.FAKE_CLAUDE_RETRY_SCALE = "0.001";
+    await create();
+    await instance.adapter.sendTurn({ threadId: "t-cap", text: "go" });
+
+    await recorder.until((e) => e.type === "turn.completed" && e.ok === false);
+    const retries = recorder.events.filter((e) => e.type === "turn.retrying");
+    expect(retries.map((e) => e.attempt)).toEqual([1, 2]);
+    expect(recorder.events.some((e) => e.type === "runtime.error")).toBe(true);
+  }, 20_000);
+
+  it("gives a later turn on the same thread a fresh retry budget", async () => {
+    process.env.FAKE_CLAUDE_TRANSIENTS = "9";
+    process.env.FAKE_CLAUDE_STATE = join(scratch, "launches-fresh-budget");
+    process.env.FAKE_CLAUDE_RETRY_SCALE = "0.001";
+    await create();
+
+    await instance.adapter.sendTurn({ threadId: "t-fresh-budget", text: "one" });
+    const firstDone = await recorder.until((e) => e.type === "turn.completed");
+    await instance.adapter.sendTurn({ threadId: "t-fresh-budget", text: "two" });
+    await recorder.until((e) => e.type === "turn.completed" && e.eventId !== firstDone.eventId);
+
+    expect(recorder.events.filter((e) => e.type === "turn.retrying").map((e) => e.attempt)).toEqual([1, 2, 1, 2]);
+  }, 20_000);
+
+  it("never retries a terminal (auth-shaped) exit", async () => {
+    await create("exit-early"); // exit 3 with no transient vocabulary — terminal
+    await instance.adapter.sendTurn({ threadId: "t-terminal", text: "go" });
+
+    await recorder.until((e) => e.type === "turn.completed" && e.ok === false);
+    expect(recorder.events.some((e) => e.type === "turn.retrying")).toBe(false);
+  }, 20_000);
+
+  it("never retries after assistant text already streamed (duplicate-text hazard)", async () => {
+    process.env.FAKE_CLAUDE_TRANSIENTS = "9";
+    process.env.FAKE_CLAUDE_PARTIAL_FAILS = "1";
+    process.env.FAKE_CLAUDE_STATE = join(scratch, "launches-partial");
+    process.env.FAKE_CLAUDE_RETRY_SCALE = "0.001";
+    await create();
+    await instance.adapter.sendTurn({ threadId: "t-partial", text: "go" });
+
+    await recorder.until((e) => e.type === "turn.completed" && e.ok === false);
+    expect(recorder.events.some((e) => e.type === "content.delta" && e.streamKind === "assistant_text")).toBe(true);
+    expect(recorder.events.some((e) => e.type === "turn.retrying")).toBe(false);
+  }, 20_000);
+
+  it("an interrupt during the retry backoff cancels cleanly without a zombie relaunch", async () => {
+    process.env.FAKE_CLAUDE_TRANSIENTS = "9";
+    process.env.FAKE_CLAUDE_STATE = join(scratch, "launches-cancel");
+    process.env.FAKE_CLAUDE_RETRY_SCALE = "60"; // long backoff — we cancel inside it
+    await create();
+    await instance.adapter.sendTurn({ threadId: "t-cancel-backoff", text: "go" });
+
+    await recorder.until((e) => e.type === "turn.retrying");
+    await instance.adapter.interruptTurn("t-cancel-backoff");
+    await recorder.until((e) => e.type === "turn.completed");
+    // no second launch ever happened: no further retries, no extra replies
+    expect(recorder.events.filter((e) => e.type === "turn.retrying")).toHaveLength(1);
+    expect(recorder.events.filter((e) => e.type === "item.completed" && e.itemType === "assistant_text")).toHaveLength(0);
+  }, 30_000);
+
+
   it("skips malformed protocol lines without losing the turn", async () => {
     await create("malformed");
     await instance.adapter.sendTurn({ threadId: "t-noise", text: "go" });
@@ -672,10 +765,10 @@ describe("ClaudeDriver turns (fake CLI)", () => {
 
   it("denies a colliding ask id on the same connection without orphaning the original", async () => {
     await create("hang");
-    await instance.adapter.sendTurn({ threadId: "t-perm-dup-1", text: "go" });
+    await instance.adapter.sendTurn({ threadId: COLLISION_THREAD_IDS[0], text: "go" });
     await recorder.until((e) => e.type === "session.started");
 
-    const conn = await connectSocket(permissionSocketPath("t-perm-dup-1"));
+    const conn = await connectSocket(permissionSocketPath(COLLISION_THREAD_IDS[0]));
     const nextAnswer = answerQueue(conn);
 
     // two asks with the same id on one connection, second sent before the
@@ -695,28 +788,28 @@ describe("ClaudeDriver turns (fake CLI)", () => {
     expect(recorder.events.filter((e) => e.type === "request.opened" && e.requestId === "dup-1")).toHaveLength(1);
 
     // the original ask is untouched and still resolves normally
-    await expect(instance.adapter.respondToRequest("t-perm-dup-1", "dup-1", { behavior: "allow" })).resolves.toBe(
+    await expect(instance.adapter.respondToRequest(COLLISION_THREAD_IDS[0], "dup-1", { behavior: "allow" })).resolves.toBe(
       "allowed-once",
     );
     expect(await nextAnswer()).toMatchObject({ behavior: "allow" });
 
     conn.end();
-    await instance.adapter.interruptTurn("t-perm-dup-1");
+    await instance.adapter.interruptTurn(COLLISION_THREAD_IDS[0]);
     await recorder.until((e) => e.type === "turn.completed");
   });
 
   it("denies a colliding ask id from a second connection on the same broker", async () => {
     await create("hang");
-    await instance.adapter.sendTurn({ threadId: "t-perm-dup-2", text: "go" });
+    await instance.adapter.sendTurn({ threadId: COLLISION_THREAD_IDS[1], text: "go" });
     await recorder.until((e) => e.type === "session.started");
 
-    const conn1 = await connectSocket(permissionSocketPath("t-perm-dup-2"));
+    const conn1 = await connectSocket(permissionSocketPath(COLLISION_THREAD_IDS[1]));
     conn1.write(JSON.stringify({ t: "ask", id: "dup-2", tool: "Bash", input: { command: "echo one" } }) + "\n");
     await recorder.until((e) => e.type === "request.opened" && e.requestId === "dup-2");
 
     // `pending` is shared across every connection on the broker, so a
     // second connection reusing the same id must collide too
-    const conn2 = await connectSocket(permissionSocketPath("t-perm-dup-2"));
+    const conn2 = await connectSocket(permissionSocketPath(COLLISION_THREAD_IDS[1]));
     const conn2Answer = answerQueue(conn2)();
     conn2.write(JSON.stringify({ t: "ask", id: "dup-2", tool: "Bash", input: { command: "echo two" } }) + "\n");
     expect(await conn2Answer).toMatchObject({
@@ -727,26 +820,26 @@ describe("ClaudeDriver turns (fake CLI)", () => {
     expect(recorder.events.filter((e) => e.type === "request.opened" && e.requestId === "dup-2")).toHaveLength(1);
 
     // the original, opened on conn1, still resolves normally
-    await expect(instance.adapter.respondToRequest("t-perm-dup-2", "dup-2", { behavior: "allow" })).resolves.toBe(
+    await expect(instance.adapter.respondToRequest(COLLISION_THREAD_IDS[1], "dup-2", { behavior: "allow" })).resolves.toBe(
       "allowed-once",
     );
 
     conn1.end();
     conn2.end();
-    await instance.adapter.interruptTurn("t-perm-dup-2");
+    await instance.adapter.interruptTurn(COLLISION_THREAD_IDS[1]);
     await recorder.until((e) => e.type === "turn.completed");
   });
 
   it("accepts an ask id reused after the original already resolved — not a collision", async () => {
     await create("hang");
-    await instance.adapter.sendTurn({ threadId: "t-perm-dup-3", text: "go" });
+    await instance.adapter.sendTurn({ threadId: COLLISION_THREAD_IDS[2], text: "go" });
     await recorder.until((e) => e.type === "session.started");
 
-    const conn = await connectSocket(permissionSocketPath("t-perm-dup-3"));
+    const conn = await connectSocket(permissionSocketPath(COLLISION_THREAD_IDS[2]));
 
     conn.write(JSON.stringify({ t: "ask", id: "dup-3", tool: "Bash", input: { command: "echo one" } }) + "\n");
     await recorder.until((e) => e.type === "request.opened" && e.requestId === "dup-3" && e.summary === "echo one");
-    await expect(instance.adapter.respondToRequest("t-perm-dup-3", "dup-3", { behavior: "allow" })).resolves.toBe(
+    await expect(instance.adapter.respondToRequest(COLLISION_THREAD_IDS[2], "dup-3", { behavior: "allow" })).resolves.toBe(
       "allowed-once",
     );
 
@@ -755,21 +848,21 @@ describe("ClaudeDriver turns (fake CLI)", () => {
     // fresh request.opened, not the first one already seen by the recorder)
     conn.write(JSON.stringify({ t: "ask", id: "dup-3", tool: "Bash", input: { command: "echo two" } }) + "\n");
     await recorder.until((e) => e.type === "request.opened" && e.requestId === "dup-3" && e.summary === "echo two");
-    await expect(instance.adapter.respondToRequest("t-perm-dup-3", "dup-3", { behavior: "allow" })).resolves.toBe(
+    await expect(instance.adapter.respondToRequest(COLLISION_THREAD_IDS[2], "dup-3", { behavior: "allow" })).resolves.toBe(
       "allowed-once",
     );
 
     conn.end();
-    await instance.adapter.interruptTurn("t-perm-dup-3");
+    await instance.adapter.interruptTurn(COLLISION_THREAD_IDS[2]);
     await recorder.until((e) => e.type === "turn.completed");
   });
 
   it("denies a colliding ask id for question-kind asks too, without disturbing the original", async () => {
     await create("hang");
-    await instance.adapter.sendTurn({ threadId: "t-perm-dup-4", text: "go" });
+    await instance.adapter.sendTurn({ threadId: COLLISION_THREAD_IDS[3], text: "go" });
     await recorder.until((e) => e.type === "session.started");
 
-    const conn = await connectSocket(permissionSocketPath("t-perm-dup-4"));
+    const conn = await connectSocket(permissionSocketPath(COLLISION_THREAD_IDS[3]));
     const nextAnswer = answerQueue(conn);
 
     conn.write(JSON.stringify({ t: "ask", id: "dup-4", kind: "question", tool: "ask_user", input: { question: "one?" } }) + "\n");
@@ -786,12 +879,12 @@ describe("ClaudeDriver turns (fake CLI)", () => {
 
     // the original question is untouched and still resolves normally
     await expect(
-      instance.adapter.respondToRequest("t-perm-dup-4", "dup-4", { behavior: "answer", message: "yes" }),
+      instance.adapter.respondToRequest(COLLISION_THREAD_IDS[3], "dup-4", { behavior: "answer", message: "yes" }),
     ).resolves.toBe("answered");
     expect(await nextAnswer()).toMatchObject({ behavior: "answer" });
 
     conn.end();
-    await instance.adapter.interruptTurn("t-perm-dup-4");
+    await instance.adapter.interruptTurn(COLLISION_THREAD_IDS[3]);
     await recorder.until((e) => e.type === "turn.completed");
   });
 

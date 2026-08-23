@@ -30,6 +30,7 @@ import type {
 } from "../contracts.ts";
 import { computerProxyEnv } from "../container-computer.ts";
 import { newEventId, newId } from "../contracts.ts";
+import { classifyError, computeBackoff, interruptibleDelay, RETRY_MAX_ATTEMPTS } from "./retry.ts";
 import {
   applyClaudeInject,
   decodeInjectId,
@@ -517,6 +518,9 @@ export const ClaudeDriver: ProviderDriver<ClaudeConfig> = {
       turnId,
       createdAt: new Date().toISOString(),
     });
+    // retry bookkeeping lives PER THREAD, not per sendTurn call: a relaunch
+    // is a fresh sendTurn, and the attempt cap must survive across launches
+    const retryState = new Map<string, { attempt: number; cancelled: boolean }>();
 
     const sendTurn = async (turn: SendTurnInput) => {
       const { threadId } = turn;
@@ -526,6 +530,13 @@ export const ClaudeDriver: ProviderDriver<ClaudeConfig> = {
         throw new Error("local computer control requires the interactive approval broker");
       }
       const turnId = newId();
+      const retryAbort = new AbortController();
+      const retry = retryState.get(threadId) ?? { attempt: 0, cancelled: false };
+      retry.cancelled = false;
+      retryState.set(threadId, retry);
+      // a retry relaunches the whole CLI; the backoff is scaled down in tests
+      // so a fake's transient failures don't stall real seconds
+      const retryScale = Number(process.env.FAKE_CLAUDE_RETRY_SCALE ?? "1");
       const sessionId = typeof turn.resumeCursor === "string" ? turn.resumeCursor : null;
       const newSessionId = sessionId ? null : newId();
 
@@ -734,6 +745,9 @@ export const ClaudeDriver: ProviderDriver<ClaudeConfig> = {
         }
         active.delete(threadId);
         session.turn = null;
+        // A settled turn owns no retry budget. Retained CLI sessions may run
+        // many later turns on this thread, and each must start fresh.
+        retryState.delete(threadId);
         emit({ ...base(threadId, t.turnId), type: "turn.completed", ok, stopReason, cost, ...(usage ? { usage } : {}) });
         if (session.child.exitCode === null && !session.closing) armIdle(threadId);
       };
@@ -852,10 +866,86 @@ export const ClaudeDriver: ProviderDriver<ClaudeConfig> = {
         // process that exited between turns (idle close, contract change)
         // is just a session ending
         if (session.turn && !session.turn.settled) {
+          const message = `claude exited ${code} before result${session.stderr ? `: ${session.stderr.trim().slice(-300)}` : ""}`;
+          const verdict = classifyError({ exitCode: code, stderr: message });
+          if (
+            !retry.cancelled &&
+            code !== 0 &&
+            verdict.transient &&
+            !session.turn.sawStreamDelta &&
+            retry.attempt < RETRY_MAX_ATTEMPTS - 1
+          ) {
+            // the CLI is gone but the TURN continues: keep the thread busy,
+            // emit no terminal event, and relaunch after the backoff. The
+            // `active` entry STAYS — it is what makes an interrupt during
+            // the backoff reach this turn's stop() and cancel the retry.
+            const failedBroker = session.broker;
+            session.broker = undefined;
+            failedBroker?.pause();
+            failedBroker?.close();
+            if (session.mcpConfigPath) {
+              try {
+                rmSync(dirname(session.mcpConfigPath), { recursive: true, force: true });
+              } catch {}
+              session.mcpConfigPath = null;
+            }
+            sessions.delete(threadId);
+            session.turn = null;
+            retry.attempt++;
+            const delayMs = computeBackoff(retry.attempt - 1);
+            emit({
+              ...base(threadId, turnId),
+              type: "turn.retrying",
+              attempt: retry.attempt,
+              delayMs,
+              reason: verdict.reason,
+            });
+            void (async () => {
+              const wait = interruptibleDelay(delayMs * retryScale, retryAbort.signal);
+              await wait.promise;
+              // an interrupt during the backoff landed here via stop(); the
+              // turn settles as interrupted and no zombie relaunch happens
+              if (retry.cancelled) {
+                active.delete(threadId);
+                retryState.delete(threadId);
+                emit({
+                  ...base(threadId, turnId),
+                  type: "turn.completed",
+                  ok: false,
+                  stopReason: "interrupted",
+                  cost: null,
+                });
+                return;
+              }
+              // hand the thread back before recursing — the relaunch's own
+              // guard would otherwise reject it as "already running"
+              active.delete(threadId);
+              try {
+                const cursor = session.sessionId ?? sessionId ?? undefined;
+                await sendTurn({ ...turn, resumeCursor: cursor });
+              } catch (e) {
+                retryState.delete(threadId);
+                emit({
+                  ...base(threadId, turnId),
+                  type: "runtime.error",
+                  message: e instanceof Error ? e.message : String(e),
+                });
+                emit({
+                  ...base(threadId, turnId),
+                  type: "turn.completed",
+                  ok: false,
+                  stopReason: "exit_before_result",
+                  cost: null,
+                });
+              }
+            })();
+            return;
+          }
+          retryState.delete(threadId);
           emit({
             ...base(threadId, currentTurnId()),
             type: "runtime.error",
-            message: `claude exited ${code} before result${session.stderr ? `: ${session.stderr.trim().slice(-300)}` : ""}`,
+            message,
           });
           settle(false, "exit_before_result");
         }
@@ -869,7 +959,11 @@ export const ClaudeDriver: ProviderDriver<ClaudeConfig> = {
         if (sessions.get(threadId) === session) sessions.delete(threadId);
       });
 
-      const stop = () => killCliTree(child);
+      const stop = () => {
+        retry.cancelled = true;
+        retryAbort.abort();
+        killCliTree(child);
+      };
       active.set(threadId, { stop, turnId, broker });
       emit({ ...base(threadId, turnId), type: "turn.started" });
 

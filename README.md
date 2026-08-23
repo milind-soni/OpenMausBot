@@ -133,6 +133,12 @@ Secrets are write-only: the UI only ever sees "configured" flags.
 </tr>
 </table>
 
+### #️⃣ Channels for every context
+
+Keep Work, Personal, and each project in separate channels without cloning your bots. Every channel has
+its own transcript, shared instructions, working folder, responder rules, and editable bot roster. File a
+channel and its bots under a named context, then rename it or change its members whenever the team changes.
+
 ### 🎧 Bots that talk back
 
 Press the speaker on any reply, or switch a bot to read its answers out as they land — so you can listen
@@ -140,7 +146,7 @@ to what ran overnight while you make breakfast. Hit **call** and it's a conversa
 you what it's doing while it works, and asks for approvals out loud.
 
 Bring your own ElevenLabs key — paste it once in App Settings, pick a voice, and every bot can talk.
-Give a bot its own voice and a room stops sounding like one person.
+Give a bot its own voice and a channel stops sounding like one person.
 
 **Also in the box:** streaming replies with tool-run activity chips · native macOS dictation from the
 composer mic (on-device Apple speech recognition — desktop app) · SupaMaus cursor mascots with role-aware

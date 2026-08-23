@@ -41,8 +41,8 @@ function ModelRow({
       type="button"
       onClick={onPick}
       className={cn(
-        "flex w-full items-center justify-between gap-2 rounded-lg px-2.5 py-2 text-left text-[13px] text-ink hover:bg-raised/60",
-        current && "bg-raised",
+        "flex w-full items-center justify-between gap-2 rounded-lg px-2.5 py-2 text-left text-[13px] text-ink hover:bg-control/60",
+        current && "bg-control",
       )}
     >
       <span className="flex min-w-0 items-center gap-2">
@@ -208,7 +208,7 @@ export function ModelPicker({ bot, className }: { bot: Bot; className?: string }
         aria-expanded={open}
         aria-haspopup="dialog"
         className={cn(
-          "flex items-center gap-1.5 rounded-full border border-hairline/40 bg-raised/60 py-1 pl-2 pr-2.5 text-[13px] text-ink hover:bg-raised",
+          "flex items-center gap-1.5 rounded-full border border-hairline/40 bg-control/60 py-1 pl-2 pr-2.5 text-[13px] text-ink hover:bg-raised-hover",
           // in a narrow chat header fold to a rounded square with just the
           // provider mark; the model name rides the tooltip (a bot with no
           // resolved engine keeps its label — the mark is what would hide it)
@@ -249,7 +249,7 @@ export function ModelPicker({ bot, className }: { bot: Bot; className?: string }
                     title={`${instance.displayName} · ${engineStatus(instance)}`}
                     className={cn(
                       "relative flex size-9 items-center justify-center rounded-lg",
-                      selected ? "bg-raised ring-1 ring-hairline/50" : "hover:bg-raised/60",
+                      selected ? "bg-control ring-1 ring-hairline/50" : "hover:bg-control/60",
                     )}
                   >
                     <ProviderMark driverKind={instance.driverKind} size={18} />
@@ -303,7 +303,7 @@ export function ModelPicker({ bot, className }: { bot: Bot; className?: string }
                       setPane("main");
                       resetList();
                     }}
-                    className="mx-2 mb-1 flex shrink-0 items-center gap-1.5 rounded-lg px-2 py-1.5 text-left text-[12px] text-ink-secondary hover:bg-raised/60"
+                    className="mx-2 mb-1 flex shrink-0 items-center gap-1.5 rounded-lg px-2 py-1.5 text-left text-[12px] text-ink-secondary hover:bg-control/60"
                   >
                     <ChevronLeft size={13} /> Back to {railInstance.displayName} models
                   </button>
@@ -352,7 +352,7 @@ export function ModelPicker({ bot, className }: { bot: Bot; className?: string }
                             <button
                               type="button"
                               onClick={() => setShowAll(true)}
-                              className="mt-1 flex w-full items-center justify-between rounded-lg border-t border-hairline/40 px-2.5 py-2 text-[12.5px] font-medium text-ink-secondary hover:bg-raised/60 hover:text-ink"
+                              className="mt-1 flex w-full items-center justify-between rounded-lg border-t border-hairline/40 px-2.5 py-2 text-[12.5px] font-medium text-ink-secondary hover:bg-control/60 hover:text-ink"
                             >
                               Show all {official.length} models <ChevronDown size={13} />
                             </button>
@@ -361,7 +361,7 @@ export function ModelPicker({ bot, className }: { bot: Bot; className?: string }
                             <button
                               type="button"
                               onClick={() => setShowAll(false)}
-                              className="mt-1 w-full rounded-lg px-2.5 py-2 text-[12px] text-ink-secondary hover:bg-raised/60 hover:text-ink"
+                              className="mt-1 w-full rounded-lg px-2.5 py-2 text-[12px] text-ink-secondary hover:bg-control/60 hover:text-ink"
                             >
                               Show suggested only
                             </button>
@@ -407,7 +407,7 @@ export function ModelPicker({ bot, className }: { bot: Bot; className?: string }
                       setPane("custom");
                       resetList();
                     }}
-                    className="flex w-full shrink-0 items-center justify-between gap-2 border-t border-hairline/40 px-4 py-3 text-left text-[12.5px] font-medium text-ink hover:bg-raised/60 disabled:cursor-not-allowed disabled:text-ink-secondary/40 disabled:hover:bg-transparent"
+                    className="flex w-full shrink-0 items-center justify-between gap-2 border-t border-hairline/40 px-4 py-3 text-left text-[12.5px] font-medium text-ink hover:bg-control/60 disabled:cursor-not-allowed disabled:text-ink-secondary/40 disabled:hover:bg-transparent"
                   >
                     <span>Use a local model</span>
                     <span className="flex items-center gap-2">

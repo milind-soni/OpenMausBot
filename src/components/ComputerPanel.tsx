@@ -39,6 +39,8 @@ import {
 } from "@/lib/local-computer";
 import { useI18n } from "@/lib/i18n-context";
 
+type Translate = ReturnType<typeof useI18n>["t"];
+
 async function api(path: string, init?: RequestInit): Promise<any> {
   const res = await fetch(path, { headers: { "content-type": "application/json" }, ...init });
   const body = await res.json().catch(() => ({}));
@@ -77,7 +79,7 @@ interface LocalVmStatus {
   viewer_url: string;
 }
 
-function routineScheduleLabel(routine: Routine, locale: string, t: (source: string) => string) {
+function routineScheduleLabel(routine: Routine, locale: string, t: Translate) {
   if (routine.schedule.type === "once") {
     return new Date(routine.schedule.at).toLocaleString(locale, {
       month: "short",
@@ -97,12 +99,19 @@ function routineScheduleLabel(routine: Routine, locale: string, t: (source: stri
   return `${cadence} · ${new Date(2000, 0, 1, hour, minute).toLocaleTimeString(locale, { hour: "numeric", minute: "2-digit" })}`;
 }
 
-function nextRunLabel(at: number | null, locale: string, t: (source: string) => string) {
+function nextRunLabel(at: number | null, locale: string, t: Translate) {
   if (at == null) return t("Paused");
   const date = new Date(at);
   const today = new Date();
   const sameDay = date.toDateString() === today.toDateString();
-  return `${sameDay ? t("Today") : date.toLocaleDateString(locale, { month: "short", day: "numeric" })}, ${date.toLocaleTimeString(locale, { hour: "numeric", minute: "2-digit" })}`;
+  const time = date.toLocaleTimeString(locale, { hour: "numeric", minute: "2-digit" });
+  if (sameDay) return t("{days} at {time}", { days: t("Today"), time });
+  return new Intl.DateTimeFormat(locale, {
+    month: "short",
+    day: "numeric",
+    hour: "numeric",
+    minute: "2-digit",
+  }).format(date);
 }
 
 export function ComputerPanel({ bot }: { bot: Bot }) {
@@ -647,7 +656,7 @@ export function ComputerPanel({ bot }: { bot: Bot }) {
       <div className="flex items-center justify-between px-4 py-3">
         <button
           onClick={() => dispatch({ type: "toggleSettings", open: true })}
-          className="rounded-md p-1 text-ink-secondary hover:bg-raised hover:text-ink"
+          className="rounded-md p-1 text-ink-secondary hover:bg-control hover:text-ink"
           title={t("Bot settings")}
         >
           <Settings size={18} />
@@ -659,7 +668,7 @@ export function ComputerPanel({ bot }: { bot: Bot }) {
               aria-pressed={panelView === "computer"}
               className={cn(
                 "flex items-center gap-1.5 px-2.5 py-1 text-[12.5px]",
-                panelView === "computer" ? "bg-raised text-ink" : "text-ink-secondary hover:text-ink",
+                panelView === "computer" ? "bg-control text-ink" : "text-ink-secondary hover:text-ink",
               )}
             >
               <Monitor size={13} /> {t("Computer")}
@@ -669,10 +678,10 @@ export function ComputerPanel({ bot }: { bot: Bot }) {
               aria-pressed={panelView === "android"}
               className={cn(
                 "flex items-center gap-1.5 border-l border-hairline/40 px-2.5 py-1 text-[12.5px]",
-                panelView === "android" ? "bg-raised text-ink" : "text-ink-secondary hover:text-ink",
+                panelView === "android" ? "bg-control text-ink" : "text-ink-secondary hover:text-ink",
               )}
             >
-              <Smartphone size={13} /> Android
+              <Smartphone size={13} /> {t("Android")}
             </button>
           </div>
         ) : (
@@ -680,7 +689,7 @@ export function ComputerPanel({ bot }: { bot: Bot }) {
         )}
         <button
           onClick={() => dispatch({ type: "toggleComputer", open: false })}
-          className="rounded-md p-1 text-ink-secondary hover:bg-raised hover:text-ink"
+          className="rounded-md p-1 text-ink-secondary hover:bg-control hover:text-ink"
         >
           <X size={18} />
         </button>
@@ -732,7 +741,7 @@ export function ComputerPanel({ bot }: { bot: Bot }) {
               {phase === "local" && !isLinux && localMisses >= 3 && (
                 <button
                   onClick={() => window.ogb?.permOpenSettings?.("screen")}
-                  className="mt-1 rounded-lg bg-raised px-3 py-1.5 text-[12px] text-ink hover:bg-raised-hover"
+                  className="mt-1 rounded-lg bg-control px-3 py-1.5 text-[12px] text-ink hover:bg-raised-hover"
                 >
                   {t("Open Settings")}
                 </button>
@@ -752,7 +761,7 @@ export function ComputerPanel({ bot }: { bot: Bot }) {
                 ) : (
                   <button
                     onClick={openVmSettings}
-                    className="mt-1 rounded-lg bg-raised px-3 py-1.5 text-[12px] text-ink hover:bg-raised-hover"
+                    className="mt-1 rounded-lg bg-control px-3 py-1.5 text-[12px] text-ink hover:bg-raised-hover"
                   >
                     {t("Open Local VM setup")}
                   </button>
@@ -761,7 +770,7 @@ export function ComputerPanel({ bot }: { bot: Bot }) {
               {(phase === "vps-unconfigured" || phase === "vps-stopped") && (
                 <button
                   onClick={openConnectionSettings}
-                  className="mt-1 rounded-lg bg-raised px-3 py-1.5 text-[12px] text-ink hover:bg-raised-hover"
+                  className="mt-1 rounded-lg bg-control px-3 py-1.5 text-[12px] text-ink hover:bg-raised-hover"
                 >
                   {t("Open VPS settings")}
                 </button>
@@ -770,7 +779,7 @@ export function ComputerPanel({ bot }: { bot: Bot }) {
                 <button
                   onClick={() => run("provision")}
                   disabled={pending === "provision"}
-                  className="mt-1 rounded-lg bg-raised px-3 py-1.5 text-[12px] text-ink hover:bg-raised-hover disabled:opacity-50"
+                  className="mt-1 rounded-lg bg-control px-3 py-1.5 text-[12px] text-ink hover:bg-raised-hover disabled:opacity-50"
                 >
                   {pending === "provision" && <Loader2 size={13} className="mr-1.5 inline animate-spin" />}
                   {t("Start VPS computer")}
@@ -803,7 +812,7 @@ export function ComputerPanel({ bot }: { bot: Bot }) {
             </div>
             <button
               onClick={openConnectionSettings}
-              className="rounded-lg bg-raised px-3 py-2 text-[13px] text-ink hover:bg-raised-hover"
+              className="rounded-lg bg-control px-3 py-2 text-[13px] text-ink hover:bg-raised-hover"
             >
               {t("Open VPS settings")}
             </button>
@@ -830,7 +839,7 @@ export function ComputerPanel({ bot }: { bot: Bot }) {
               <button
                 onClick={() => controlAction("dismiss-help")}
                 disabled={controlPending}
-                className="rounded-lg bg-raised px-3 py-2 text-[13px] text-ink hover:bg-raised-hover disabled:opacity-50"
+                className="rounded-lg bg-control px-3 py-2 text-[13px] text-ink hover:bg-raised-hover disabled:opacity-50"
               >
                 {t("Dismiss")}
               </button>
@@ -841,8 +850,8 @@ export function ComputerPanel({ bot }: { bot: Bot }) {
           <div className="mt-3 rounded-xl border border-accent/25 bg-accent/10 p-4">
             <div className="text-[13px] leading-relaxed text-ink">
               {t("You have the wheel — the bot's clicks and keystrokes are refused until you hand it back.")}
-              {phase === "ready" && cloudBackend === "box" && t(" Use Open desktop to drive.")}
-              {phase === "vm" && t(" Use Open desktop to drive — the preview here is watch-only.")}
+              {phase === "ready" && cloudBackend === "box" && <> {t("Use Open desktop to drive.")}</>}
+              {phase === "vm" && <> {t("Use Open desktop to drive — the preview here is watch-only.")}</>}
             </div>
             <button
               onClick={() => controlAction("release")}
@@ -858,7 +867,7 @@ export function ComputerPanel({ bot }: { bot: Bot }) {
           <button
             onClick={() => void openDesktop()}
             disabled={pending === "join"}
-            className="mt-3 flex w-full items-center justify-center gap-2 rounded-lg bg-raised py-2 text-[13px] text-ink hover:bg-raised-hover disabled:opacity-50"
+            className="mt-3 flex w-full items-center justify-center gap-2 rounded-lg bg-control py-2 text-[13px] text-ink hover:bg-raised-hover disabled:opacity-50"
             title={t("Open the Local VM's live desktop inside OpenMausBot")}
           >
             {pending === "join" ? <Loader2 size={14} className="animate-spin" /> : <Monitor size={14} />}
@@ -869,7 +878,7 @@ export function ComputerPanel({ bot }: { bot: Bot }) {
           <button
             onClick={() => void openDesktop()}
             disabled={controlPending || pending === "join" || !vmViewerUrl}
-            className="mt-3 flex w-full items-center justify-center gap-2 rounded-lg bg-raised py-2 text-[13px] text-ink hover:bg-raised-hover disabled:opacity-50"
+            className="mt-3 flex w-full items-center justify-center gap-2 rounded-lg bg-control py-2 text-[13px] text-ink hover:bg-raised-hover disabled:opacity-50"
             title={t("Pause the bot's hands and open the Local VM's live desktop")}
           >
             {pending === "join" ? <Loader2 size={14} className="animate-spin" /> : <Hand size={14} />}
@@ -896,7 +905,7 @@ export function ComputerPanel({ bot }: { bot: Bot }) {
                   cloudBackend === "box" ? void openDesktop() : controlAction("take")
                 }
                 disabled={controlPending || pending === "join"}
-                className="flex flex-1 items-center justify-center gap-2 rounded-lg bg-raised py-2 text-[13px] text-ink hover:bg-raised-hover disabled:opacity-50"
+                className="flex flex-1 items-center justify-center gap-2 rounded-lg bg-control py-2 text-[13px] text-ink hover:bg-raised-hover disabled:opacity-50"
                 title={t("Pause the bot's hands and drive this computer yourself")}
               >
                 {pending === "join" ? <Loader2 size={14} className="animate-spin" /> : <Hand size={14} />}
@@ -907,7 +916,7 @@ export function ComputerPanel({ bot }: { bot: Bot }) {
               <button
                 onClick={() => void openDesktop()}
                 disabled={pending === "join"}
-                className="flex flex-1 items-center justify-center gap-2 rounded-lg bg-raised py-2 text-[13px] text-ink hover:bg-raised-hover disabled:opacity-50"
+                className="flex flex-1 items-center justify-center gap-2 rounded-lg bg-control py-2 text-[13px] text-ink hover:bg-raised-hover disabled:opacity-50"
               >
                 {pending === "join" ? <Loader2 size={14} className="animate-spin" /> : <Monitor size={14} />}
                 {t("Open live desktop")}
@@ -917,7 +926,7 @@ export function ComputerPanel({ bot }: { bot: Bot }) {
               <button
                 onClick={() => run("sleep")}
                 disabled={pending === "sleep"}
-                className="flex flex-1 items-center justify-center gap-2 rounded-lg bg-raised px-3 py-2 text-[13px] text-ink hover:bg-raised-hover disabled:opacity-50"
+                className="flex flex-1 items-center justify-center gap-2 rounded-lg bg-control px-3 py-2 text-[13px] text-ink hover:bg-raised-hover disabled:opacity-50"
                 title={t("Put the computer to sleep")}
               >
                 {pending === "sleep" ? <Loader2 size={14} className="animate-spin" /> : <Moon size={14} />}
@@ -982,8 +991,8 @@ export function ComputerPanel({ bot }: { bot: Bot }) {
                   i > 0 && "border-l border-hairline/40",
                   disabled && "cursor-not-allowed opacity-40",
                   bot.computer === mode
-                    ? "bg-raised text-ink"
-                    : "text-ink-secondary hover:bg-raised/60 hover:text-ink",
+                    ? "bg-control text-ink"
+                    : "text-ink-secondary hover:bg-control/60 hover:text-ink",
                 )}
               >
                 {t(label)}
@@ -1009,7 +1018,7 @@ export function ComputerPanel({ bot }: { bot: Bot }) {
               {t("Scheduled tasks")}
             </div>
             {botRoutines.length > 0 && (
-              <span className="rounded-full bg-raised px-2 py-0.5 text-[10px] font-medium text-ink-secondary">
+              <span className="rounded-full bg-control px-2 py-0.5 text-[10px] font-medium text-ink-secondary">
                 {botRoutines.length}
               </span>
             )}
@@ -1040,13 +1049,13 @@ export function ComputerPanel({ bot }: { bot: Bot }) {
                 <button
                   key={routine.id}
                   onClick={() => dispatch({ type: "showRoutines" })}
-                  className="flex w-full items-center gap-2 rounded-lg bg-inset px-3 py-2 text-left hover:bg-raised/60"
+                  className="flex w-full items-center gap-2 rounded-lg bg-inset px-3 py-2 text-left hover:bg-control/60"
                 >
                   <span className={cn("size-1.5 shrink-0 rounded-full", routine.enabled ? "bg-success" : "bg-ink-secondary/40")} />
                   <span className="min-w-0 flex-1">
                     <span className="block truncate text-[12.5px] font-medium text-ink">{routine.name}</span>
                     <span className="block truncate text-[10.5px] text-ink-secondary">
-                      {routineScheduleLabel(routine, locale, t)}{routine.runOn === "cloud" ? t(" · runs on VM") : ""}
+                      {routineScheduleLabel(routine, locale, t)}{routine.runOn === "cloud" && <> · {t("runs on VM")}</>}
                     </span>
                   </span>
                   <span className="shrink-0 text-[10px] text-ink-secondary">{nextRunLabel(routine.nextRunAt, locale, t)}</span>
@@ -1064,7 +1073,7 @@ export function ComputerPanel({ bot }: { bot: Bot }) {
             </button>
             <button
               onClick={() => dispatch({ type: "showRoutines" })}
-              className="flex items-center justify-center gap-1.5 rounded-lg bg-raised px-3 py-2 text-[13px] text-ink hover:bg-raised-hover"
+              className="flex items-center justify-center gap-1.5 rounded-lg bg-control px-3 py-2 text-[13px] text-ink hover:bg-raised-hover"
               title={t("Open schedules")}
             >
               <CalendarDays size={14} />

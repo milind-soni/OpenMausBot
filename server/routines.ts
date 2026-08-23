@@ -498,6 +498,10 @@ export class RoutineManager {
       run.output = event.text.trim().slice(0, 2_000);
     } else if (event.type === "runtime.error") {
       run.error = event.message.slice(0, 500);
+    } else if (event.type === "turn.retrying") {
+      // the driver will relaunch this same run; a transient blip is not a
+      // receipt-worthy failure, so keep the run running and stay quiet
+      return null;
     } else if (event.type === "turn.completed") {
       run.cost = event.cost;
       run.denials = event.denials;

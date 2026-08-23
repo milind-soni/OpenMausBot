@@ -5,7 +5,7 @@
 // / set_model, and streams a scripted turn in response to `prompt`. Failure
 // modes mirror how the real CLI misbehaves:
 //
-//   FAKE_PI_MODE   happy (default) | tooluse | permission | no-models | exit-early
+//   FAKE_PI_MODE   happy (default) | tooluse | permission | interleave | no-models | exit-early
 //   FAKE_PI_MODELS comma-separated provider/model pairs (default "ollama-cloud/glm-5.2,openai/gpt-4o")
 //   FAKE_PI_DUMP   path to append {argv, env} JSON, so a test can assert argv shape
 //                  and env hygiene (no leaked secrets into the pi child).
@@ -91,6 +91,21 @@ const streamPermissionTurn = () => {
   // wait for the answer before finishing
 };
 
+/** Scripted text → tool → text → tool → text turn for order-contract tests. */
+const streamInterleaveTurn = () => {
+  send({ type: "agent_start" });
+  send({ type: "turn_start" });
+  send({ type: "message_update", usage: { input: 0, output: 0 }, assistantMessageEvent: { type: "text_delta", contentIndex: 0, delta: "before one" } });
+  send({ type: "tool_execution_start", toolCallId: "call_1", toolName: "bash", args: { command: "echo one" } });
+  send({ type: "tool_execution_end", toolCallId: "call_1", toolName: "bash", isError: false });
+  send({ type: "message_update", usage: { input: 0, output: 0 }, assistantMessageEvent: { type: "text_delta", contentIndex: 0, delta: "before two" } });
+  send({ type: "tool_execution_start", toolCallId: "call_2", toolName: "bash", args: { command: "echo two" } });
+  send({ type: "tool_execution_end", toolCallId: "call_2", toolName: "bash", isError: false });
+  send({ type: "message_update", usage: { input: 0, output: 0 }, assistantMessageEvent: { type: "text_delta", contentIndex: 0, delta: "after" } });
+  send({ type: "turn_end", message: { stopReason: "end_turn", usage: { input: 12, output: 3 } }, usage: { input: 12, output: 3 } });
+  send({ type: "agent_end" });
+};
+
 const finishPermissionTurn = () => {
   send({ type: "tool_execution_start", toolCallId: "call_1", toolName: "bash", args: { command: "echo hi" } });
   send({ type: "tool_execution_end", toolCallId: "call_1", toolName: "bash", isError: false });
@@ -147,6 +162,7 @@ function handle(cmd: any) {
       send({ type: "response", command: "prompt", success: true });
       if (mode === "tooluse") streamToolTurn();
       else if (mode === "permission") streamPermissionTurn();
+      else if (mode === "interleave") streamInterleaveTurn();
       else streamTurn();
       return;
     case "extension_ui_response":

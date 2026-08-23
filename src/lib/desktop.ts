@@ -33,6 +33,14 @@ export function browserDesktopCapabilities(): DesktopCapabilities {
   return browserCapabilities;
 }
 
+export function dictationError(code: number | null, t: (source: string) => string): string | null {
+  if (code === 2) return t("Dictation is only available on macOS for now.");
+  if (code === 1) {
+    return t("Dictation needs Microphone + Speech Recognition access — System Settings → Privacy & Security.");
+  }
+  return null;
+}
+
 export function initialDesktopCapabilities(): DesktopCapabilities {
   const platform = window.ogb?.platform;
   if (!platform) return browserCapabilities;

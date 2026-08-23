@@ -16,6 +16,7 @@ import {
   decodeCursorModelCatalog,
   decodeCursorModelText,
   STATIC_CURSOR_MODELS,
+  resolveCursorAcpModelId,
 } from "./cursor.ts";
 
 const FAKE_CLI = join(dirname(fileURLToPath(import.meta.url)), "..", "..", "testing", "fake-acp-cli.ts");
@@ -279,6 +280,114 @@ describe("CursorAgentDriver", () => {
     try {
       await instance.adapter.sendTurn({ threadId: "t-cursor-old", text: "hi", model: "gpt-5.3-codex" });
       const done = await recorder.until((e) => e.type === "turn.completed");
+      expect(done).toMatchObject({ type: "turn.completed", ok: true });
+    } finally {
+      recorder.stop();
+      await instance.dispose();
+      delete process.env.FAKE_ACP_MODE;
+    }
+  });
+});
+
+describe("resolveCursorAcpModelId", () => {
+  // Real payload shape from `session/new` against cursor-agent 2026.08.11.
+  const ADVERTISED = [
+    { modelId: "default[]", name: "Auto" },
+    { modelId: "grok-4.6[effort=high,fast=true]", name: "grok-4.6" },
+    { modelId: "gpt-5.3-codex[reasoning=medium,fast=false]", name: "gpt-5.3-codex" },
+  ];
+
+  it("maps the argv slug `auto` onto Cursor's `default[]` entry", () => {
+    // The bug: `auto` is what --model and `cursor-agent models` call it, and
+    // it earns -32602 over ACP because the session only knows `default[]`.
+    expect(resolveCursorAcpModelId(ADVERTISED, "auto")).toBe("default[]");
+  });
+
+  it("maps a bare slug onto its parameterised id", () => {
+    expect(resolveCursorAcpModelId(ADVERTISED, "gpt-5.3-codex")).toBe(
+      "gpt-5.3-codex[reasoning=medium,fast=false]",
+    );
+  });
+
+  it("maps a display name onto its parameterised id", () => {
+    expect(
+      resolveCursorAcpModelId(
+        [{ modelId: "gpt-5.3-codex[reasoning=medium,fast=false]", name: "Codex 5.3" }],
+        "Codex 5.3",
+      ),
+    ).toBe("gpt-5.3-codex[reasoning=medium,fast=false]");
+  });
+
+  it("passes an already-parameterised id straight through", () => {
+    expect(resolveCursorAcpModelId(ADVERTISED, "grok-4.6[effort=high,fast=true]")).toBe(
+      "grok-4.6[effort=high,fast=true]",
+    );
+  });
+
+  it("returns null when the agent advertised no models, so the caller keeps the argv slug", () => {
+    expect(resolveCursorAcpModelId([], "auto")).toBeNull();
+  });
+
+  it("returns null for a model this session does not offer", () => {
+    expect(resolveCursorAcpModelId(ADVERTISED, "no-such-model")).toBeNull();
+  });
+});
+
+describe("cursor ACP model namespace (NS: set_model wiring)", () => {
+  it("sends the session's parameterised id, not the argv slug", async () => {
+    ensureDirs();
+    chmodSync(FAKE_CLI, 0o755);
+    const scratch = mkdtempSync(join(tmpdir(), "omb-cursor-acpid-"));
+    const dump = join(scratch, "dump.json");
+    process.env.FAKE_ACP_DUMP = dump;
+    // What cursor-agent 2026.08.11 really advertises: `auto` is `default[]`.
+    process.env.FAKE_ACP_SESSION_MODELS = "default[]|Auto,gpt-5.3-codex[reasoning=medium,fast=false]|gpt-5.3-codex";
+
+    const instance = await CursorAgentDriver.create({
+      instanceId: "cursor-acpid",
+      displayName: "Cursor",
+      environment: {},
+      enabled: true,
+      config: { cli: FAKE_CLI, fullAuto: false },
+    });
+    const recorder = recordEvents(instance.adapter);
+    try {
+      await instance.adapter.sendTurn({ threadId: "t-cursor-acpid", text: "hi", model: "auto" });
+      await recorder.until((e) => e.type === "turn.completed");
+      const applied = JSON.parse(readFileSync(`${dump}.config.json`, "utf8"));
+      // Before the fix this sent modelId "auto" and Cursor answered -32602.
+      expect(applied).toEqual([
+        { method: "session/set_model", params: { sessionId: "fake-acp-session", modelId: "default[]" } },
+      ]);
+      // argv keeps the CLI slug — the two namespaces stay separate.
+      expect(JSON.parse(readFileSync(dump, "utf8")).argv).toEqual(["--model", "auto", "acp"]);
+    } finally {
+      recorder.stop();
+      await instance.dispose();
+      delete process.env.FAKE_ACP_SESSION_MODELS;
+      // the dir goes with it: a stale FAKE_ACP_DUMP makes the *next* test's
+      // fake CLI die on ENOENT, which reads as an unrelated driver failure.
+      delete process.env.FAKE_ACP_DUMP;
+      await removeTempDir(scratch);
+    }
+  });
+
+  it("completes the turn when set_model answers -32602, because argv already pinned the model", async () => {
+    ensureDirs();
+    chmodSync(FAKE_CLI, 0o755);
+    process.env.FAKE_ACP_MODE = "set-model-invalid-params";
+    const instance = await CursorAgentDriver.create({
+      instanceId: "cursor-invalid",
+      displayName: "Cursor",
+      environment: {},
+      enabled: true,
+      config: { cli: FAKE_CLI, fullAuto: false },
+    });
+    const recorder = recordEvents(instance.adapter);
+    try {
+      await instance.adapter.sendTurn({ threadId: "t-cursor-invalid", text: "hi", model: "gpt-5.3-codex" });
+      const done = await recorder.until((e) => e.type === "turn.completed");
+      // Previously this threw and failed a turn that would have run correctly.
       expect(done).toMatchObject({ type: "turn.completed", ok: true });
     } finally {
       recorder.stop();

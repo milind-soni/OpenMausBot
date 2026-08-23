@@ -2,11 +2,13 @@ import { track } from "@/lib/analytics";
 import { cn } from "@/lib/cn";
 import { useI18n } from "@/lib/i18n-context";
 import { teamImportPreview, type PendingTeamImport } from "@/lib/team-import";
-import { api, useStore, type Bot } from "@/state/store";
+import { api, useStore, type Bot, type Group } from "@/state/store";
 import {
   ArrowLeft,
   Check,
+  Compass,
   ExternalLink,
+  FolderOpen,
   Github,
   Loader2,
   Search,
@@ -50,8 +52,34 @@ export interface TeamImportResult {
 }
 
 type ImportSource = "library" | "file" | "github";
-type TeamTab = "explore" | "import";
+type TeamTab = "explore" | "import" | "scout";
 type ImportMode = "replace" | "add";
+
+/** the scout endpoint's answer, as far as this panel renders it — the
+ * manifest itself stays opaque and goes back to the server verbatim */
+interface ScoutResult {
+  profile: { name: string; summary: string; stacks: string[] };
+  suggestion: {
+    roomName: string;
+    manifest: {
+      team: { members: Array<{ key: string; name: string; title: string; description: string; appearance: { color: string } }> };
+    };
+    reasons: Record<string, string>;
+  };
+}
+
+interface DirectoryCandidate {
+  slug: string;
+  name: string;
+  category: string;
+  integrations: string[];
+  prompt: string;
+  detailUrl: string;
+  matched: string[];
+}
+
+/** appearance colors for community bots folded into a scouted team */
+const DIRECTORY_COLORS = ["cyan", "red", "purple", "green", "orange"] as const;
 
 const TEAM_GLYPHS = [
   "bg-purple-500/15 text-purple-300",
@@ -104,6 +132,21 @@ export function TeamLibraryPanel({
   const [importMode, setImportMode] = useState<ImportMode>("replace");
   const [search, setSearch] = useState("");
   const [error, setError] = useState("");
+  const [scoutFolder, setScoutFolder] = useState("");
+  const [scouting, setScouting] = useState(false);
+  const [scouted, setScouted] = useState<ScoutResult | null>(null);
+  // the folder the current `scouted` result was actually read from — the
+  // import must pin the room to THIS, not to whatever the input says now
+  const [scoutedFolder, setScoutedFolder] = useState("");
+  // null = not asked yet or still loading; [] = asked, nothing (or offline)
+  const [directory, setDirectory] = useState<DirectoryCandidate[] | null>(null);
+  const [pickedDirectory, setPickedDirectory] = useState<Set<string>>(new Set());
+  const [roomName, setRoomName] = useState("");
+  const [creating, setCreating] = useState(false);
+  // monotonically increasing scout token: a late response from an older
+  // scout (including its lazy directory call) must never overwrite state
+  // that belongs to a newer one
+  const scoutRequest = useRef(0);
 
   const currentBotCount = state.bots.filter((bot) => !bot.hidden).length;
 
@@ -236,6 +279,98 @@ export function TeamLibraryPanel({
     }
   };
 
+  const scoutTarget = scoutFolder.trim();
+
+  const runScout = async (folder: string) => {
+    const request = ++scoutRequest.current;
+    setScouting(true);
+    setError("");
+    setScouted(null);
+    setDirectory(null);
+    setPickedDirectory(new Set());
+    try {
+      // SAFETY: this endpoint is owned by the app and returns ScoutResult.
+      const result = (await api(`/api/teams/scout?cwd=${encodeURIComponent(folder)}`)) as ScoutResult;
+      if (request !== scoutRequest.current) return;
+      setScouted(result);
+      setScoutedFolder(folder);
+      setRoomName(result.suggestion.roomName);
+      track("team_scouted", { signals: result.suggestion.manifest.team.members.length - 1 });
+      // community candidates arrive lazily; an unreachable directory just
+      // leaves this section empty
+      void api(`/api/teams/scout/directory?cwd=${encodeURIComponent(folder)}`)
+        // SAFETY: this endpoint is owned by the app and returns candidates.
+        .then((extra) => {
+          if (request === scoutRequest.current) setDirectory((extra as { directory: DirectoryCandidate[] }).directory);
+        })
+        .catch(() => {
+          if (request === scoutRequest.current) setDirectory([]);
+        });
+    } catch (cause) {
+      if (request !== scoutRequest.current) return;
+      setError(cause instanceof Error ? cause.message : String(cause));
+    } finally {
+      if (request === scoutRequest.current) setScouting(false);
+    }
+  };
+
+  const pickScoutFolder = async () => {
+    const chosen = await window.ogb?.pickFolder?.(scoutTarget || undefined);
+    if (!chosen) return;
+    setScoutFolder(chosen);
+    await runScout(chosen);
+  };
+
+  const createProject = async () => {
+    if (!scouted || creating) return;
+    setCreating(true);
+    setError("");
+    try {
+      // the confirmed suggestion, plus any community bots the user ticked —
+      // folded in as ordinary manifest members so the import boundary
+      // (persona only, no grants) applies to them like to everything else
+      const extras = (directory ?? [])
+        .filter((candidate) => pickedDirectory.has(candidate.slug))
+        .map((candidate, index) => ({
+          key: `dir-${candidate.slug}`,
+          name: candidate.name,
+          title: candidate.category || "Community bot",
+          description: candidate.prompt,
+          appearance: { color: DIRECTORY_COLORS[index % DIRECTORY_COLORS.length] },
+        }));
+      const manifest = {
+        ...scouted.suggestion.manifest,
+        team: {
+          ...scouted.suggestion.manifest.team,
+          members: [...scouted.suggestion.manifest.team.members, ...extras],
+        },
+      };
+      const room = roomName.trim() || scouted.suggestion.roomName;
+      // SAFETY: this endpoint is owned by the app and returns imported bots.
+      const response = (await api(
+        `/api/teams/import?mode=project&cwd=${encodeURIComponent(scoutedFolder)}&room=${encodeURIComponent(room)}`,
+        { method: "POST", body: JSON.stringify(manifest) },
+      )) as { bots: Bot[]; group?: Group };
+      for (const bot of response.bots) dispatch({ type: "botAdded", bot });
+      if (response.group) {
+        // upsert now instead of waiting for the SSE frame, then land in the room
+        dispatch({ type: "groupPatched", group: { ...response.group, messages: [] } });
+        dispatch({ type: "select", id: response.group.id });
+      }
+      track("team_imported", { members: response.bots.length, source: "scout", mode: "project" });
+      onImported({
+        name: room,
+        members: response.bots.length,
+        importedBotIds: response.bots.map((bot) => bot.id),
+        archived: [],
+      });
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : String(cause));
+    } finally {
+      setCreating(false);
+    }
+  };
+
   const normalizedSearch = search.trim().toLowerCase();
   const visibleTeams = (catalog?.teams ?? []).filter((entry) => {
     if (!normalizedSearch) return true;
@@ -351,7 +486,7 @@ export function TeamLibraryPanel({
                     </>
                   )
                 ) : (
-                  t("No room is created—you can make one later if you want.")
+                  t("No channel is created—you can make one later if you want.")
                 )}
               </div>
               <button
@@ -401,6 +536,20 @@ export function TeamLibraryPanel({
                   )}
                 >
                   {t("Import")}
+                </button>
+                <button
+                  role="tab"
+                  aria-selected={tab === "scout"}
+                  onClick={() => {
+                    setTab("scout");
+                    setError("");
+                  }}
+                  className={cn(
+                    "rounded-lg px-4 py-2 text-[13.5px] transition-colors",
+                    tab === "scout" ? "bg-card text-ink shadow-sm" : "text-ink-secondary hover:text-ink",
+                  )}
+                >
+                  {t("From a folder")}
                 </button>
               </div>
               {tab === "explore" && (
@@ -514,7 +663,7 @@ export function TeamLibraryPanel({
                           value={githubUrl}
                           onChange={(event) => setGithubUrl(event.target.value)}
                           onKeyDown={(event) => event.key === "Enter" && void loadGithubTeam()}
-                          placeholder="github.com/owner/repo"
+                          placeholder={t("github.com/owner/repo")}
                           aria-label={t("GitHub team URL")}
                           className="min-w-0 flex-1 rounded-xl bg-raised/80 px-3 py-2.5 text-[13px] text-ink placeholder:text-ink-secondary focus:outline-none"
                         />
@@ -529,6 +678,147 @@ export function TeamLibraryPanel({
                       </div>
                     </div>
                   </div>
+                  {error && <div role="alert" className="mt-4 rounded-lg bg-danger/10 px-3 py-2 text-[12.5px] text-danger">{error}</div>}
+                </div>
+              )}
+
+              {tab === "scout" && (
+                <div>
+                  <div className="mb-3 text-[12px] font-medium text-ink-secondary">{t("Start from a project folder")}</div>
+                  <p className="max-w-2xl text-[12.5px] leading-relaxed text-ink-secondary">
+                    {t("Point the scout at a folder. It reads what's in there — README, dependencies, layout — and suggests a team for it. Nothing is created until you say so.")}
+                  </p>
+                  <div className="mt-4 flex flex-col gap-2 sm:flex-row">
+                    <input
+                      value={scoutFolder}
+                      onChange={(event) => setScoutFolder(event.target.value)}
+                      onKeyDown={(event) => event.key === "Enter" && scoutTarget && void runScout(scoutTarget)}
+                      placeholder={t("/path/to/your/project")}
+                      aria-label={t("Project folder to scout")}
+                      className="min-w-0 flex-1 rounded-xl bg-raised/80 px-3 py-2.5 text-[13px] text-ink placeholder:text-ink-secondary focus:outline-none"
+                    />
+                    {Boolean(window.ogb?.pickFolder) && (
+                      <button
+                        onClick={() => void pickScoutFolder()}
+                        disabled={scouting}
+                        className="flex items-center justify-center gap-1.5 rounded-full bg-raised px-4 py-2.5 text-[13px] text-ink hover:bg-raised-hover disabled:opacity-40"
+                      >
+                        <FolderOpen size={14} />
+                        {t("Browse")}
+                      </button>
+                    )}
+                    <button
+                      onClick={() => void runScout(scoutTarget)}
+                      disabled={!scoutTarget || scouting}
+                      className="flex items-center justify-center gap-1.5 rounded-full bg-accent px-4 py-2.5 text-[13px] font-medium text-white hover:bg-accent/90 disabled:opacity-40"
+                    >
+                      {scouting ? <Loader2 size={14} className="animate-spin" /> : <Compass size={14} />}
+                      {scouting ? t("Scouting…") : t("Scout")}
+                    </button>
+                  </div>
+
+                  {scouted && (
+                    <div className="mt-6">
+                      <div className="rounded-2xl bg-raised/25 px-5 py-4">
+                        <div className="text-[15px] font-semibold text-ink">{scouted.profile.name}</div>
+                        {scouted.profile.summary && (
+                          <p className="mt-1 text-[12.5px] leading-relaxed text-ink-secondary">{scouted.profile.summary}</p>
+                        )}
+                        {scouted.profile.stacks.length > 0 && (
+                          <div className="mt-2.5 flex flex-wrap gap-1.5">
+                            {scouted.profile.stacks.map((stack) => (
+                              <span key={stack} className="rounded-full bg-raised px-2.5 py-1 text-[11.5px] text-ink-secondary">
+                                {stack}
+                              </span>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+
+                      <div className="mt-5 text-[12px] font-medium text-ink-secondary">{t("Suggested team")}</div>
+                      <div className="mt-1 grid grid-cols-1 gap-x-10 md:grid-cols-2">
+                        {scouted.suggestion.manifest.team.members.map((member, index) => (
+                          <div key={member.key} className="flex min-h-[64px] items-center gap-3 border-b border-hairline/35 px-1 py-3">
+                            <div className={cn("flex size-9 shrink-0 items-center justify-center rounded-lg text-[13px] font-semibold", TEAM_GLYPHS[index % TEAM_GLYPHS.length])}>
+                              {member.name.slice(0, 1).toUpperCase()}
+                            </div>
+                            <div className="min-w-0">
+                              <div className="truncate text-[14px] font-medium text-ink">
+                                {member.name} <span className="font-normal text-ink-secondary">· {member.title}</span>
+                              </div>
+                              <div className="mt-0.5 truncate text-[12px] text-ink-secondary">
+                                {scouted.suggestion.reasons[member.key] ?? ""}
+                              </div>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+
+                      {directory && directory.length > 0 && (
+                        <>
+                          <div className="mt-5 text-[12px] font-medium text-ink-secondary">{t("From the community directory — tick to add")}</div>
+                          <div className="mt-1 flex flex-col">
+                            {directory.map((candidate) => (
+                              <div key={candidate.slug} className="flex items-center gap-3 border-b border-hairline/35 px-1 py-3">
+                                <label className="flex min-w-0 flex-1 cursor-pointer items-center gap-3">
+                                  <input
+                                    type="checkbox"
+                                    checked={pickedDirectory.has(candidate.slug)}
+                                    onChange={() =>
+                                      setPickedDirectory((prev) => {
+                                        const next = new Set(prev);
+                                        if (next.has(candidate.slug)) next.delete(candidate.slug);
+                                        else next.add(candidate.slug);
+                                        return next;
+                                      })
+                                    }
+                                    className="size-4 accent-accent"
+                                  />
+                                  <div className="min-w-0 flex-1">
+                                    <div className="truncate text-[13.5px] font-medium text-ink">
+                                      {candidate.name}
+                                      {candidate.category && <span className="font-normal text-ink-secondary"> · {candidate.category}</span>}
+                                    </div>
+                                    <div className="mt-0.5 truncate text-[12px] text-ink-secondary">
+                                      {t("Matches {matches}", { matches: candidate.matched.join(", ") })}
+                                    </div>
+                                  </div>
+                                </label>
+                                <button
+                                  onClick={() => void openExternal(candidate.detailUrl)}
+                                  aria-label={t("Open {name} on botdirectory.ai", { name: candidate.name })}
+                                  title={t("Read this bot's page before adding it")}
+                                  className="rounded-lg p-1.5 text-ink-secondary hover:bg-raised hover:text-ink"
+                                >
+                                  <ExternalLink size={14} />
+                                </button>
+                              </div>
+                            ))}
+                          </div>
+                        </>
+                      )}
+
+                      <div className="mt-6 flex flex-col gap-3 sm:flex-row sm:items-center">
+                        <input
+                          value={roomName}
+                          onChange={(event) => setRoomName(event.target.value)}
+                          aria-label={t("Project channel name")}
+                          className="min-w-0 flex-1 rounded-xl bg-raised/80 px-3 py-2.5 text-[13px] text-ink placeholder:text-ink-secondary focus:outline-none"
+                        />
+                        <button
+                          onClick={() => void createProject()}
+                          disabled={creating}
+                          className="flex shrink-0 items-center justify-center gap-2 rounded-full bg-accent px-5 py-2.5 text-[13.5px] font-medium text-white hover:bg-accent/90 disabled:opacity-60"
+                        >
+                          {creating && <Loader2 size={15} className="animate-spin" />}
+                          {creating ? t("Creating…") : t("Create project channel")}
+                        </button>
+                      </div>
+                      <p className="mt-2 text-[12px] text-ink-secondary">
+                        {t("Creates the team as new bots, opens a channel for them, and points the channel at this folder.")}
+                      </p>
+                    </div>
+                  )}
                   {error && <div role="alert" className="mt-4 rounded-lg bg-danger/10 px-3 py-2 text-[12.5px] text-danger">{error}</div>}
                 </div>
               )}

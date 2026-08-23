@@ -44,11 +44,13 @@ ios/
     SSE.swift                    line parser + URLSession event stream
     Client.swift                 every call the phone is allowed to make
     Store.swift                  the fold: frames → state
+    Dictation.swift              composer text + transcript join
   Tests/CompanionCoreTests/
     Fixtures/                    captured from a real server — do not hand-edit
     DecodingTests.swift          the contract with the harness
     SSETests.swift               the parser, which is where this goes wrong
     StoreTests.swift             the fold
+    DictationTests.swift         partials replace, they do not stack
   App/                           SwiftUI, and everything that needs a device
     CompanionApp.swift           entry; owns when the stream lives and dies
     Session.swift                connection, lifecycle, actions
@@ -64,6 +66,7 @@ ios/
     UpdatesSheet.swift           the pill opened: needs you / working / to review
     NewGroupSheet.swift          make a room from the phone
     ChatView.swift               transcript, tailed bubbles, approval cards, composer
+    SpeechDictation.swift        on-device speech recognition, press-to-stop
     ComputerView.swift           opt-in live view of a bot's computer
     MarkdownText.swift           the supported Markdown presentation layer
     SettingsView.swift           status, and unpair
@@ -171,18 +174,20 @@ the host computer remain unreachable through the companion.
   `.ignored` for the shifted case hands the keypress back to the text field,
   which is the only thing that can insert the newline once Return is claimed.
   Software keyboards have no Shift+Return, so there `.onSubmit` sends.
-- **No affordance without a feature behind it.** The reference design this was
-  modelled on has a composer mic; there is no dictation here, so it is not
-  drawn. Search covers the SQLite transcript store and opens the exact task,
+- **Composer dictation is the mic.** Tap to talk, tap to stop, then edit or
+  send. Recognition stays on-device when the phone supports it, and the mic
+  remains visible so another spoken sentence can be appended. Search covers
+  the SQLite transcript store and opens the exact task,
   branch, and message; the roster's "+" creates the same basic bot the desktop
   endpoint creates, then opens it.
 
-## Not in this version
+## Limits in this version
 
 The live connection is foreground-only. Notification frames produce native
 banners, sounds, time-sensitive approval alerts, and an app badge while connected;
 the resume cursor replays alerts missed during a short background pause. There is
-no APNs delivery after the app is terminated, no voice/call mode, and no hosted relay.
+no APNs delivery after the app is terminated, no call mode or spoken replies,
+and no hosted relay. Composer dictation is available.
 Task management, SQLite transcript search,
 transcript sharing, reactions, and edit/version controls use narrow companion
 routes and the computer remains the source of truth. Tailscale is supported

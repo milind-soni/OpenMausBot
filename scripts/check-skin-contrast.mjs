@@ -110,6 +110,25 @@ const PAIRS = [
   ["--color-focus", "--color-app", 3],
   ["--color-focus", "--color-panel", 3],
   ["--color-focus", "--color-card", 3],
+  // Surface against surface. Text contrast alone will not catch a skin that
+  // gives two surfaces the same value: Atelier and Lagoon both defined
+  // `raised` as the pure white they use for a card, so every chip, hover fill
+  // and answered row painted in `raised` on a card was invisible while this
+  // file stayed green. A surface is not text — it only has to be seen at all —
+  // so the bar is a just-perceptible step rather than a WCAG ratio.
+  //
+  // `control` is measured against every surface it can land on, which is the
+  // whole list: a tone chosen to clear the card and the panel drifted into
+  // `inset` instead, and the badges inside an inset row went invisible again.
+  ["--color-control", "--color-card", 1.06],
+  ["--color-control", "--color-panel", 1.06],
+  ["--color-control", "--color-app", 1.04],
+  ["--color-control", "--color-inset", 1.04],
+  ["--color-control", "--color-raised-hover", 1.04],
+  ["--color-raised-hover", "--color-card", 1.04],
+  ["--color-inset", "--color-card", 1.04],
+  ["--color-card", "--color-app", 1.04],
+  ["--color-panel", "--color-app", 1.03],
 ];
 
 const skins = parseSkins(css);
