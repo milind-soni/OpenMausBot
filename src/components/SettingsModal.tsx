@@ -3,7 +3,7 @@
 // is the stuff shared by every bot: who you are, your keys, and the
 // machine your bots can borrow.
 import { useEffect, useRef, useState } from "react";
-import { Coins, KeyRound, Monitor, Smartphone, Terminal, User, X } from "lucide-react";
+import { ClipboardList, Coins, KeyRound, Monitor, Smartphone, Terminal, User, X } from "lucide-react";
 import { useStore, type AppSettingsSection } from "@/state/store";
 import { analyticsEnabled, setAnalyticsEnabled } from "@/lib/analytics";
 import { ApiKeyRow, VpsConnection } from "./ApiKeys";
@@ -16,6 +16,7 @@ import { UsageSection } from "./UsageSection";
 import { SkinPicker } from "./SkinPicker";
 import { RoomTurnTimeoutSettings } from "./RoomTurnTimeoutSettings";
 import { cn } from "@/lib/cn";
+import { UnattendedWorkPanel } from "./UnattendedWorkPanel";
 
 const SECTIONS: Array<{ id: AppSettingsSection; label: string; icon: typeof User }> = [
   { id: "general", label: "General", icon: User },
@@ -23,6 +24,7 @@ const SECTIONS: Array<{ id: AppSettingsSection; label: string; icon: typeof User
   { id: "engines", label: "Engines", icon: Terminal },
   { id: "companion", label: "Companion", icon: Smartphone },
   { id: "computer", label: "Local VM", icon: Monitor },
+  { id: "work", label: "Work queue", icon: ClipboardList },
   { id: "usage", label: "Usage", icon: Coins },
 ];
 
@@ -329,6 +331,8 @@ export function SettingsModal() {
             {section === "companion" && <CompanionSection />}
 
             {section === "computer" && <LocalComputerSection />}
+
+            {section === "work" && <UnattendedWorkPanel />}
 
             {section === "usage" && <UsageSection />}
           </div>
