@@ -5,7 +5,7 @@
 // session/prompt, and streams session/update notifications for a scripted
 // turn. Failure modes mirror how real ACP agents misbehave:
 //
-//   FAKE_ACP_MODE   happy (default) | empty-reply | exit-early | fail-after-text | hang | no-auth | auth-required | permission
+//   FAKE_ACP_MODE   happy (default) | empty-reply | exit-early | fail-after-text | hang | no-auth | auth-required | permission | permission-closed
 //                   | no-session-config (reject session/set_mode + set_model
 //                     with -32601, i.e. an agent predating those methods)
 //                   | ask-peer (spawn the injected "agents" MCP server from
@@ -35,6 +35,7 @@ import { spawn } from "node:child_process";
 import { existsSync, writeFileSync } from "node:fs";
 
 const mode = process.env.FAKE_ACP_MODE ?? "happy";
+const permissionCommand = process.env.FAKE_ACP_PERMISSION_COMMAND ?? "echo hi";
 // opencode-shaped surface: the session carries its own model catalog and the
 // model is chosen with session/set_config_option, because `opencode acp` takes
 // no -m. Off unless FAKE_ACP_MODELS is set, so every existing mode is byte-
@@ -395,22 +396,40 @@ function handle(msg: any) {
         return;
       }
       if (mode !== "empty-reply") playTurn();
-      if (mode === "permission") {
+      if (mode === "permission" || mode === "permission-closed") {
         // ask the client to approve a tool, then complete once answered
         pendingPermissionId = 9001;
         onPermissionAnswered = complete;
-        out({
+        const permissionRequest = {
           jsonrpc: "2.0",
           id: pendingPermissionId,
           method: "session/request_permission",
           params: {
-            toolCall: { kind: "execute", rawInput: { command: "echo hi" }, title: "echo hi" },
+            toolCall: { kind: "execute", rawInput: { command: permissionCommand }, title: permissionCommand },
             options: [
               { optionId: "allow-once", kind: "allow_once" },
               { optionId: "reject", kind: "reject_once" },
             ],
           },
-        });
+        };
+        // Race the broker deliberately: the request event is emitted, then the
+        // prompt settles in the SAME stdout chunk before the server can answer.
+        // This proves the log does not call an undelivered denial successful.
+        if (mode === "permission-closed") {
+          recordMethod("session/prompt.result");
+          onPermissionAnswered = null;
+          process.stdout.write(
+            JSON.stringify(permissionRequest) + "\n" +
+              JSON.stringify({
+                jsonrpc: "2.0",
+                id: msg.id,
+                result: { stopReason: "end_turn", _meta: { inputTokens: 10, outputTokens: 5 } },
+              }) +
+              "\n",
+          );
+        } else {
+          out(permissionRequest);
+        }
         return;
       }
       complete();

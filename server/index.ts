@@ -788,15 +788,103 @@ bus.subscribe((event: RuntimeEvent) => {
       break;
     case "request.opened": {
       const permission = event.requestType === "permission";
-      // Auto mode / always-allow: answer routine tool permissions for the
-      // bot so it keeps working. A QUESTION always reaches the human — the
-      // whole point of asking is that a person decides — and anything that
-      // looks destructive stops even in auto mode.
+      // Guarded autonomy answers safe scoped permissions so work keeps
+      // moving. Questions always reach the human, broad destruction asks,
+      // and raw protected-value access is denied without showing a card.
       const asker = bot ?? (speaker ? store.bot(speaker.botId) : undefined);
       const unattended = permission && asker && event.requestId ? isUnattended(asker.id) : false;
+      const taskBoundary = bot
+        ? store.taskByThread(bot.id, event.threadId)
+        : group
+          ? { threadId: group.threadId, cwd: group.pinnedCwd }
+          : undefined;
       const verdict = permission && asker && event.requestId
-        ? autoVerdict(asker, event.tool, event.summary, { unattended, scope: event.approvalScope })
+        ? autoVerdict(asker, event.tool, event.summary, {
+            unattended,
+            scope: event.approvalScope,
+            summaryComplete: event.summaryComplete === true,
+            taskScope:
+              taskBoundary && typeof taskBoundary.cwd === "string" && typeof event.cwd === "string"
+                ? {
+                    taskThreadId: taskBoundary.threadId,
+                    requestThreadId: event.threadId,
+                    taskCwd: taskBoundary.cwd,
+                    requestCwd: event.cwd,
+                    workspaceBound: event.workspaceBound === true,
+                  }
+                : undefined,
+          })
         : null;
+      if (verdict?.behavior === "deny" && asker && event.requestId) {
+        const instance = event.providerInstanceId
+          ? registry.get(event.providerInstanceId)
+          : registry.get(asker.modelSelection.instanceId);
+        const requestId = event.requestId;
+        const { tool, summary } = event;
+        // Fail closed: a protected-value request is denied by the provider,
+        // never converted into a human card that can wave the guard through.
+        void (async () => {
+          try {
+            if (!instance) throw new Error("provider unavailable");
+            // Drain the current protocol batch before answering. A provider
+            // can emit request.opened and turn.completed back-to-back; without
+            // this revalidation point we could log success for an ask that was
+            // already closed later in the same stdout chunk.
+            await new Promise<void>((resolve) => setImmediate(resolve));
+            const outcome = await instance.adapter.respondToRequest(event.threadId, requestId, { behavior: "deny" });
+            if (outcome === "unavailable") throw new Error("the ask is no longer open");
+            pushMessage({
+              role: "bot",
+              kind: "activity",
+              tool: { name: `blocked ${tool}: protected value access`, ok: false },
+            });
+            appendDecision(DATA_DIR, {
+              threadId: event.threadId,
+              requestId,
+              botId: asker.id,
+              botName: asker.name,
+              tool,
+              summary,
+              decision: "auto-denied",
+              source: verdict.source,
+              rule: verdict.rule,
+              unattended: unattended || undefined,
+            });
+          } catch (error) {
+            // Do not fall back to an Allow/Deny card: delivery failure must
+            // not weaken a deny into a prompt that can expose the value. Try
+            // to stop the turn, but do not call that attempt an enforced deny.
+            let stopState = "provider unavailable; turn stop not requested";
+            if (instance) {
+              try {
+                await instance.adapter.interruptTurn(event.threadId);
+                stopState = "turn stop requested";
+              } catch {
+                stopState = "turn stop request failed";
+              }
+            }
+            const deliveryError = error instanceof Error ? error.message : String(error);
+            appendDecision(DATA_DIR, {
+              threadId: event.threadId,
+              requestId,
+              botId: asker.id,
+              botName: asker.name,
+              tool,
+              summary,
+              decision: "deny-delivery-failed",
+              source: verdict.source,
+              rule: `${verdict.rule ?? "sensitive-guard"}; delivery_failed: ${deliveryError}; ${stopState}`,
+              unattended: unattended || undefined,
+            });
+            pushMessage({
+              role: "bot",
+              kind: "activity",
+              tool: { name: `deny delivery failed for ${tool}; ${stopState}`, ok: false },
+            });
+          }
+        })();
+        break;
+      }
       if (verdict?.approve && asker && event.requestId) {
         const settled = verdict.approve;
         const instance = event.providerInstanceId
@@ -811,6 +899,11 @@ bus.subscribe((event: RuntimeEvent) => {
         void (async () => {
           try {
             if (!instance) throw new Error("provider unavailable");
+            // As with automatic denial, drain the current protocol batch
+            // before answering. request.opened + turn.completed may arrive in
+            // one chunk; logging approval before that completion is consumed
+            // would claim success for an ask the provider already closed.
+            await new Promise<void>((resolve) => setImmediate(resolve));
             const outcome = await instance.adapter.respondToRequest(event.threadId, requestId, { behavior: "allow" });
             if (outcome === "unavailable") throw new Error("the ask is no longer open");
             pushMessage({
@@ -831,27 +924,18 @@ bus.subscribe((event: RuntimeEvent) => {
               decision: "auto-approved",
               source: verdict.source,
               rule: verdict.rule,
+              unattended: unattended || undefined,
             });
-          } catch {
-            // couldn't answer it for them — hand it back to the human
-            // rather than leaving the bot waiting on nobody
-            const card = pushMessage({
+          } catch (error) {
+            // A provider write is not an acknowledgement after the ask has
+            // closed. Record the failed delivery explicitly; never turn that
+            // uncertainty into either an approval claim or a stale card.
+            const deliveryError = error instanceof Error ? error.message : String(error);
+            pushMessage({
               role: "bot",
-              kind: "options",
-              card: {
-                title: "Approval needed",
-                subtitle: summary,
-                options: ["Allow", "Deny"],
-                requestId,
-                tool,
-                allowKey: event.approvalScope
-                  ? undefined
-                  : approvalKey(tool, summary, event.approvalScope),
-                held: "Auto mode couldn't answer this one.",
-                approvalScope: event.approvalScope,
-              },
+              kind: "activity",
+              tool: { name: `auto-approval delivery failed for ${tool}`, ok: false },
             });
-            askMessageByRequest.set(`${event.threadId}:${requestId}`, card.id);
             appendDecision(DATA_DIR, {
               threadId: event.threadId,
               requestId,
@@ -859,9 +943,10 @@ bus.subscribe((event: RuntimeEvent) => {
               botName: asker.name,
               tool,
               summary,
-              decision: "card-shown",
-              source: "auto-fallback",
-              rule: verdict.rule,
+              decision: "allow-delivery-failed",
+              source: verdict.source,
+              rule: `${verdict.rule ?? "guarded-autonomy"}; delivery_failed: ${deliveryError}`,
+              unattended: unattended || undefined,
             });
           }
         })();
@@ -887,11 +972,20 @@ bus.subscribe((event: RuntimeEvent) => {
             permission && !event.approvalScope
               ? approvalKey(event.tool, event.summary, event.approvalScope)
               : undefined,
-          // in auto mode a card can only mean the guard stopped it — say so
+          // State the actual exceptional reason; safe scoped work never
+          // reaches this card merely because an Auto toggle is off.
           held:
-            permission && asker?.autoApprove
-              ? "This looked destructive, so auto mode stopped to ask."
-              : undefined,
+            permission && verdict?.source === "destructive-guard"
+              ? "Broad irreversible destruction requires confirmation."
+              : permission && verdict?.source === "local-computer-block"
+                ? "Local computer control needs explicit Auto mode."
+                : permission && verdict?.source === "credential-scope-guard"
+                  ? "CredVault execution must name one fixed non-output command."
+                  : permission && verdict?.source === "incomplete-summary"
+                    ? "The provider did not supply the complete executable request."
+                    : permission && verdict?.source === "unscoped-guard"
+                      ? "Automatic approval requires an exact task and workspace boundary."
+                : undefined,
           approvalScope: event.approvalScope,
         },
       });

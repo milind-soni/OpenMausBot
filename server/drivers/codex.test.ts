@@ -121,7 +121,17 @@ describe("CodexDriver turns (fake app-server)", () => {
     const turnStart = seen.calls.at(-1);
     expect(turnStart.params.input[0].text).toBe("You are Testy.\n\nlist files");
     const threadStart = seen.calls.find((c: { method: string }) => c.method === "thread/start");
-    expect(threadStart.params).toMatchObject({ model: "gpt-5.6-sol", modelProvider: "openai" });
+    expect(threadStart.params).toMatchObject({
+      model: "gpt-5.6-sol",
+      modelProvider: "openai",
+      sandbox: "workspace-write",
+      approvalPolicy: "on-request",
+    });
+    const guardedTurn = seen.calls.find((c: { method: string }) => c.method === "turn/start");
+    expect(guardedTurn.params).toMatchObject({
+      approvalPolicy: "on-request",
+      sandboxPolicy: { type: "workspaceWrite" },
+    });
   });
 
   it("keeps the full command when a Windows interpreter prefix is long", async () => {
@@ -139,7 +149,7 @@ describe("CodexDriver turns (fake app-server)", () => {
       type: "item.started",
       title: command,
     });
-    expect(opened).toMatchObject({ requestType: "permission", summary: command });
+    expect(opened).toMatchObject({ requestType: "permission", summary: command, summaryComplete: true });
 
     await instance.adapter.respondToRequest("t-windows-command", opened.requestId!, { behavior: "allow" });
     await recorder.until((event) => event.type === "turn.completed");
@@ -180,6 +190,7 @@ describe("CodexDriver turns (fake app-server)", () => {
     await recorder.until((event) => event.type === "turn.completed");
     const seen = JSON.parse(readFileSync(dump, "utf8"));
     expect(seen.argv.join(" ")).toContain("mcp_servers.openmausbot_connectors.command");
+    expect(seen.argv.join(" ")).toContain('default_tools_approval_mode="prompt"');
     expect(seen.argv.join(" ")).toContain("OMB_COMMS_TOKEN");
     expect(seen.argv.join(" ")).not.toContain("per-boot-token");
     expect(seen.env.OMB_COMMS_TOKEN).toBe("per-boot-token");
@@ -240,6 +251,7 @@ describe("CodexDriver turns (fake app-server)", () => {
 
     const seen = JSON.parse(readFileSync(dump, "utf8"));
     expect(seen.argv.join(" ")).toContain("mcp_servers.computer.command");
+    expect(seen.argv.join(" ")).toContain('default_tools_approval_mode="prompt"');
     expect(seen.argv.join(" ")).toContain("/tmp/container-mcp.js");
     expect(seen.argv.join(" ")).toContain("OMB_VM_TOKEN");
     expect(seen.argv.join(" ")).not.toContain("vm-secret");
@@ -321,6 +333,10 @@ describe("CodexDriver turns (fake app-server)", () => {
     const methods = JSON.parse(readFileSync(dump, "utf8")).calls.map((c: { method: string }) => c.method);
     expect(methods).toContain("thread/resume");
     expect(methods).not.toContain("thread/start");
+    const resumed = JSON.parse(readFileSync(dump, "utf8")).calls.find(
+      (c: { method: string }) => c.method === "thread/resume",
+    );
+    expect(resumed.params).toMatchObject({ approvalPolicy: "on-request", sandbox: "workspace-write" });
   });
 
   it("falls back to a fresh thread when resume fails", async () => {
@@ -338,7 +354,13 @@ describe("CodexDriver turns (fake app-server)", () => {
 
     await instance.adapter.sendTurn({ threadId: "t-approve", text: "clean up" });
     const opened = await recorder.until((e) => e.type === "request.opened");
-    expect(opened).toMatchObject({ requestType: "permission", tool: "shell", summary: "rm -rf scratch" });
+    expect(opened).toMatchObject({
+      requestType: "permission",
+      tool: "shell",
+      summary: "rm -rf scratch",
+      summaryComplete: true,
+      workspaceBound: true,
+    });
 
     await instance.adapter.respondToRequest("t-approve", opened.requestId!, { behavior: "allow" });
     const resolved = await recorder.until((e) => e.type === "request.resolved");
@@ -347,6 +369,45 @@ describe("CodexDriver turns (fake app-server)", () => {
     await recorder.until((e) => e.type === "turn.completed");
     // legacy method name → legacy decision vocabulary
     expect(JSON.parse(readFileSync(dump, "utf8")).decision).toEqual({ decision: "approved" });
+  });
+
+  it("marks a reason-only Codex file approval incomplete", async () => {
+    await create({
+      mode: "file-approval",
+      environment: {
+        FAKE_CODEX_FILE_APPROVAL_PARAMS: JSON.stringify({ itemId: "file-item-1", reason: "Apply the implementation" }),
+      },
+    });
+    await instance.adapter.sendTurn({ threadId: "t-file-reason", text: "edit", cwd: scratch });
+    const opened = await recorder.until((event) => event.type === "request.opened");
+    expect(opened).toMatchObject({ tool: "edit", summary: "Apply the implementation", summaryComplete: false });
+    await instance.adapter.respondToRequest("t-file-reason", opened.requestId!, { behavior: "deny" });
+    await recorder.until((event) => event.type === "turn.completed");
+  });
+
+  it("retains exact delete operation/path and writable-scope expansion", async () => {
+    const deleted = join(scratch, "obsolete.txt");
+    const outside = join(dirname(scratch), "outside-root");
+    await create({
+      mode: "file-approval",
+      environment: {
+        FAKE_CODEX_FILE_APPROVAL_PARAMS: JSON.stringify({
+          itemId: "file-item-1",
+          grantRoot: outside,
+          reason: "Cleanup",
+        }),
+        FAKE_CODEX_FILE_ITEM_CHANGES: JSON.stringify([
+          { path: deleted, kind: { type: "delete" }, diff: "" },
+        ]),
+      },
+    });
+    await instance.adapter.sendTurn({ threadId: "t-file-delete", text: "edit", cwd: scratch });
+    const opened = await recorder.until((event) => event.type === "request.opened");
+    expect(opened).toMatchObject({ tool: "delete_file", summaryComplete: true, cwd: scratch, workspaceBound: true });
+    expect((opened as { summary: string }).summary).toContain(`delete ${deleted}`);
+    expect((opened as { summary: string }).summary).toContain(`writable-root ${outside}`);
+    await instance.adapter.respondToRequest("t-file-delete", opened.requestId!, { behavior: "deny" });
+    await recorder.until((event) => event.type === "turn.completed");
   });
 
   it("stamps approvalScope on cards only when the turn controls this Mac", async () => {
@@ -380,16 +441,47 @@ describe("CodexDriver turns (fake app-server)", () => {
     await recorder.until((e) => e.type === "turn.completed" && e.threadId === "t-vm-scope");
   });
 
-  it("auto-approves commands in fullAuto without opening a request", async () => {
+  it("keeps native fullAuto behind task approvals and host-CUA scope", async () => {
     await create({ mode: "approval", fullAuto: true });
     const dump = join(scratch, "dump.json");
     process.env.FAKE_CODEX_DUMP = dump;
 
-    await instance.adapter.sendTurn({ threadId: "t-auto", text: "clean up" });
+    await instance.adapter.sendTurn({
+      threadId: "t-auto",
+      text: "clean up",
+      cwd: scratch,
+      integrations: {
+        localComputer: {
+          command: "/cua-driver",
+          args: ["mcp"],
+          env: {},
+          platform: "darwin",
+          scope: "local-computer",
+        },
+      },
+    });
+    const opened = await recorder.until((e) => e.type === "request.opened");
+    expect(opened).toMatchObject({
+      approvalScope: "local-computer",
+      cwd: scratch,
+      workspaceBound: true,
+      summaryComplete: true,
+    });
+    await instance.adapter.respondToRequest("t-auto", opened.requestId!, { behavior: "deny" });
     await recorder.until((e) => e.type === "turn.completed");
 
-    expect(recorder.events.some((e) => e.type === "request.opened")).toBe(false);
-    expect(JSON.parse(readFileSync(dump, "utf8")).decision).toEqual({ decision: "approved" });
+    const seen = JSON.parse(readFileSync(dump, "utf8"));
+    expect(seen.decision).toEqual({ decision: "denied" });
+    expect(seen.argv.join(" ")).toContain('default_tools_approval_mode="prompt"');
+    expect(seen.calls.find((c: { method: string }) => c.method === "thread/start").params).toMatchObject({
+      sandbox: "workspace-write",
+      approvalPolicy: "on-request",
+    });
+    expect(seen.calls.find((c: { method: string }) => c.method === "turn/start").params).toMatchObject({
+      cwd: scratch,
+      approvalPolicy: "on-request",
+      sandboxPolicy: { type: "workspaceWrite", writableRoots: [scratch] },
+    });
   });
 
   it("rejects a second turn while one is in flight", async () => {

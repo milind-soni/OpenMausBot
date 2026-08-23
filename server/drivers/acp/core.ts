@@ -41,6 +41,7 @@ import { augmentedPath } from "../../env-path.ts";
 const COMPUTER_PROXY_PATH = SPAWNED_PROXIES.computer;
 import { appendNative } from "../native.ts";
 import { SPAWNED_PROXIES } from "../../proxy-paths.ts";
+import { approvalSummary } from "../approval-summary.ts";
 
 export interface AcpConfig {
   cli: string;
@@ -140,7 +141,9 @@ function decodeAcpConfig(defaultCli: string) {
     const o = (raw ?? {}) as Record<string, unknown>;
     return {
       cli: typeof o.cli === "string" ? o.cli : defaultCli,
-      fullAuto: o.fullAuto === true,
+      // Migrate every persisted native-yolo flag off at decode time. create()
+      // repeats this sanitization for callers that pass config directly.
+      fullAuto: false,
       workspace: typeof o.workspace === "string" ? o.workspace : undefined,
     };
   };
@@ -167,6 +170,12 @@ export function createAcpDriver(support: AcpSupport): ProviderDriver<AcpConfig> 
 
     async create(input: DriverCreateInput<AcpConfig>): Promise<ProviderInstance> {
       const { instanceId, config } = input;
+      // `fullAuto` is a legacy persisted setting.  It must never reach an ACP
+      // harness: Grok, Cursor, and Droid each translate it into a native yolo
+      // mode that answers before OpenMausBot receives request_permission.
+      // Keep the field shape so old bot records remain loadable, but force
+      // every support callback onto the interactive ACP permission contract.
+      const guardedConfig: AcpConfig = { ...config, fullAuto: false };
       const childEnv = () => {
         const env: Record<string, string | undefined> = {
           ...process.env,
@@ -182,14 +191,14 @@ export function createAcpDriver(support: AcpSupport): ProviderDriver<AcpConfig> 
         for (const key of [...PROVIDER_CREDENTIAL_ENV, ...WORKSPACE_CREDENTIAL_ENV]) {
           if (!allowedCredentials.has(key)) delete env[key];
         }
-        support.transformEnv?.(env, config);
+        support.transformEnv?.(env, guardedConfig);
         return env;
       };
       let models = support.models;
       const refreshModels = async () => {
         if (!support.resolveModels) return;
         try {
-          const resolved = await support.resolveModels(childEnv(), config);
+          const resolved = await support.resolveModels(childEnv(), guardedConfig);
           if (resolved.options.length) models = resolved;
         } catch {
           // Keep the last usable catalog when an optional discovery source is down.
@@ -264,9 +273,6 @@ export function createAcpDriver(support: AcpSupport): ProviderDriver<AcpConfig> 
         const { threadId } = turn;
         if (active.has(threadId)) throw new Error("a turn is already running on this thread");
         const controlsHost = turn.integrations?.localComputer?.scope === "local-computer";
-        if (controlsHost && config.fullAuto) {
-          throw new Error("local computer control requires interactive provider approvals");
-        }
         const turnId = newId();
         const cwd = turn.cwd ?? config.workspace ?? homedir();
         const env = childEnv();
@@ -278,7 +284,7 @@ export function createAcpDriver(support: AcpSupport): ProviderDriver<AcpConfig> 
             : turn;
         const mcpServers = acpMcpServers(turn);
 
-        const child = spawnCli(config.cli, support.spawnArgs(config, cliTurn), {
+        const child = spawnCli(config.cli, support.spawnArgs(guardedConfig, cliTurn), {
           cwd,
           env,
           stdio: ["pipe", "pipe", "pipe"],
@@ -354,18 +360,17 @@ export function createAcpDriver(support: AcpSupport): ProviderDriver<AcpConfig> 
             });
 
           const toolCall = params.toolCall ?? {};
-          if (config.fullAuto) {
-            const allow = optionFor("allow");
-            if (!allow) missing("allow");
-            return send({
-              jsonrpc: "2.0",
-              id: msg.id,
-              result: allow ? { outcome: { outcome: "selected", optionId: allow } } : cancelled,
-            });
-          }
           const kind = String(toolCall.kind ?? "");
           const tool = kind === "execute" ? "shell" : kind === "edit" ? "edit" : kind || "tool";
-          const summary = String(toolCall.rawInput?.command ?? toolCall.title ?? tool).slice(0, 200);
+          const rawCommand = toolCall.rawInput?.command;
+          const commandReliable =
+            typeof rawCommand === "string" ||
+            (Array.isArray(rawCommand) && rawCommand.every((part: unknown) => typeof part === "string"));
+          const summaryState = approvalSummary(
+            rawCommand ?? toolCall.rawInput ?? toolCall.title,
+            tool,
+            kind !== "execute" || commandReliable,
+          );
           const requestId = newId();
           const finish = (behavior: string, source: "user" | "timeout" | "system" = "user") => {
             if (!asks.delete(requestId)) return;
@@ -399,7 +404,12 @@ export function createAcpDriver(support: AcpSupport): ProviderDriver<AcpConfig> 
             requestId,
             requestType: "permission",
             tool,
-            summary,
+            summary: summaryState.summary,
+            summaryComplete: summaryState.summaryComplete,
+            cwd,
+            // ACP harnesses do not expose a portable OS sandbox contract.
+            // The server may card the request, but must not auto-approve it.
+            workspaceBound: false,
             approvalScope: controlsHost ? "local-computer" : undefined,
           });
         };
@@ -603,7 +613,7 @@ export function createAcpDriver(support: AcpSupport): ProviderDriver<AcpConfig> 
                   request: (method, params, timeoutMs) =>
                     request(method, params, timeoutMs ?? SESSION_CONFIG_TIMEOUT),
                   sessionId,
-                  config,
+                  config: guardedConfig,
                   turn: cliTurn,
                 });
                 // initialize's currentModelId is the CLI default (grok-4.6),
@@ -674,7 +684,7 @@ export function createAcpDriver(support: AcpSupport): ProviderDriver<AcpConfig> 
           );
         });
         if (!version) return { state: "unavailable", reason: `\`${config.cli}\` CLI not found` };
-        return { state: "available", version, authenticated: await support.isAuthenticated(env, config) };
+        return { state: "available", version, authenticated: await support.isAuthenticated(env, guardedConfig) };
       };
 
       return {
@@ -696,7 +706,7 @@ export function createAcpDriver(support: AcpSupport): ProviderDriver<AcpConfig> 
             composioMcp: true,
             images: support.images !== false,
             effortLevels: support.effortLevels,
-            localComputerMcp: !config.fullAuto,
+            localComputerMcp: true,
           },
           sendTurn,
           interruptTurn: async (threadId) => active.get(threadId)?.interrupt(),

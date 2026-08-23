@@ -199,7 +199,7 @@ describe("CursorAgentDriver", () => {
     }
   });
 
-  it("spawns `agent [--force] [--model …] acp` and keeps Cursor credentials", async () => {
+  it("ignores legacy fullAuto, omits --force, and keeps Cursor credentials", async () => {
     ensureDirs();
     chmodSync(FAKE_CLI, 0o755);
     const scratch = mkdtempSync(join(tmpdir(), "omb-cursor-"));
@@ -222,7 +222,7 @@ describe("CursorAgentDriver", () => {
       await recorder.until((e) => e.type === "turn.completed");
 
       const seen = JSON.parse(readFileSync(dump, "utf8"));
-      expect(seen.argv).toEqual(["--force", "--model", "gpt-5.3-codex", "acp"]);
+      expect(seen.argv).toEqual(["--model", "gpt-5.3-codex", "acp"]);
       expect(seen.env.CURSOR_API_KEY).toBe("cursor-should-keep");
       expect(seen.env.XAI_API_KEY).toBeUndefined();
 

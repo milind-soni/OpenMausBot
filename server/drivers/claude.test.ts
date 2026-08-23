@@ -67,14 +67,14 @@ function answerQueue(conn: ReturnType<typeof connect>) {
 }
 
 describe("ClaudeDriver.decodeConfig", () => {
-  it("defaults to the claude binary with acceptEdits", () => {
-    expect(ClaudeDriver.decodeConfig({})).toEqual({ cli: "claude", permissionMode: "acceptEdits" });
-    expect(ClaudeDriver.decodeConfig(undefined)).toEqual({ cli: "claude", permissionMode: "acceptEdits" });
+  it("defaults to the claude binary with brokered default permissions", () => {
+    expect(ClaudeDriver.decodeConfig({})).toEqual({ cli: "claude", permissionMode: "default" });
+    expect(ClaudeDriver.decodeConfig(undefined)).toEqual({ cli: "claude", permissionMode: "default" });
   });
 
-  it("accepts the three known permission modes", () => {
-    for (const permissionMode of ["acceptEdits", "auto", "bypassPermissions"] as const) {
-      expect(ClaudeDriver.decodeConfig({ permissionMode }).permissionMode).toBe(permissionMode);
+  it("migrates every legacy native-autonomy mode to brokered default", () => {
+    for (const permissionMode of ["default", "acceptEdits", "auto", "bypassPermissions"] as const) {
+      expect(ClaudeDriver.decodeConfig({ permissionMode }).permissionMode).toBe("default");
     }
   });
 
@@ -94,17 +94,22 @@ describe("ClaudeDriver.decodeConfig", () => {
     expect(permissionSocketPath("t-perm-dup-1")).not.toBe(permissionSocketPath("t-perm-dup-2"));
   });
 
-  it("does not advertise or accept local CUA in bypassPermissions mode", async () => {
+  it("ignores directly supplied bypassPermissions and keeps local CUA brokered", async () => {
+    ensureDirs();
+    chmodSync(FAKE_CLI, 0o755);
+    const scratch = mkdtempSync(join(tmpdir(), "omb-claude-legacy-bypass-"));
+    const dump = join(scratch, "dump.json");
     const bypass = await ClaudeDriver.create({
       instanceId: "claude-bypass",
       displayName: "Claude Bypass",
-      environment: {},
+      environment: { FAKE_CLAUDE_DUMP: dump },
       enabled: true,
       config: { cli: FAKE_CLI, permissionMode: "bypassPermissions" },
     });
-    expect(bypass.adapter.capabilities.localComputerMcp).toBe(false);
-    await expect(
-      bypass.adapter.sendTurn({
+    const recorder = recordEvents(bypass.adapter);
+    try {
+      expect(bypass.adapter.capabilities.localComputerMcp).toBe(true);
+      await bypass.adapter.sendTurn({
         threadId: "t-bypass-local",
         text: "click",
         integrations: {
@@ -116,9 +121,21 @@ describe("ClaudeDriver.decodeConfig", () => {
             scope: "local-computer",
           },
         },
-      }),
-    ).rejects.toThrow(/interactive approval broker/);
-    await bypass.dispose();
+      });
+      await recorder.until((event) => event.type === "turn.completed");
+      const seen = JSON.parse(readFileSync(dump, "utf8"));
+      expect(seen.argv).not.toContain("--permission-mode");
+      expect(seen.argv).not.toContain("acceptEdits");
+      expect(seen.argv).not.toContain("auto");
+      expect(seen.argv).not.toContain("bypassPermissions");
+      expect(seen.mcpConfig.mcpServers).toHaveProperty("ogb");
+      expect(seen.mcpConfig.mcpServers).toHaveProperty("computer");
+      expect(seen.argv[seen.argv.indexOf("--allowedTools") + 1]).toBe("mcp__ogb__approve");
+    } finally {
+      recorder.stop();
+      await bypass.dispose();
+      await removeTempDir(scratch);
+    }
   });
 });
 
@@ -282,7 +299,7 @@ describe("ClaudeDriver turns (fake CLI)", () => {
     }
   });
 
-  it("mounts the agents comms proxy as an MCP server and pre-allows its tools", async () => {
+  it("mounts the agents comms proxy without bypassing the permission broker", async () => {
     await create();
     const dump = join(scratch, "dump.json");
     process.env.FAKE_CLAUDE_DUMP = dump;
@@ -309,10 +326,10 @@ describe("ClaudeDriver turns (fake CLI)", () => {
     // show the comms token to every other user on the machine
     expect(JSON.stringify(seen.argv)).not.toContain("tok");
     const allowed = seen.argv[seen.argv.indexOf("--allowedTools") + 1];
-    expect(allowed).toContain("mcp__agents");
+    expect(allowed).toBe("mcp__ogb__approve");
   });
 
-  it("mounts the dweb proxy from the drivers directory and pre-allows its tools", async () => {
+  it("mounts the dweb proxy without bypassing the permission broker", async () => {
     await create();
     const dump = join(scratch, "dump.json");
     process.env.FAKE_CLAUDE_DUMP = dump;
@@ -327,7 +344,7 @@ describe("ClaudeDriver turns (fake CLI)", () => {
     const seen = JSON.parse(readFileSync(dump, "utf8"));
     expect(seen.mcpConfig.mcpServers.dweb.args[0]).toMatch(/[\\/]drivers[\\/]dweb-proxy\.(?:ts|js)$/);
     expect(seen.mcpConfig.mcpServers.dweb.env.DWEB_URL).toBe("http://127.0.0.1:49737");
-    expect(seen.argv[seen.argv.indexOf("--allowedTools") + 1]).toContain("mcp__dweb");
+    expect(seen.argv[seen.argv.indexOf("--allowedTools") + 1]).toBe("mcp__ogb__approve");
   });
 
   // the harness gates both the integration and the prompt hint on
@@ -360,7 +377,7 @@ describe("ClaudeDriver turns (fake CLI)", () => {
     });
     // the user's Composio key must not be readable via `ps`
     expect(JSON.stringify(seen.argv)).not.toContain("ak_test");
-    expect(seen.argv[seen.argv.indexOf("--allowedTools") + 1]).toContain("mcp__composio");
+    expect(seen.argv[seen.argv.indexOf("--allowedTools") + 1]).toBe("mcp__ogb__approve");
   });
 
   // the config file holds live credentials, so it must not outlive the turn —
@@ -614,13 +631,17 @@ describe("ClaudeDriver turns (fake CLI)", () => {
       conn.on("connect", resolve);
       conn.on("error", reject);
     });
-    conn.write(JSON.stringify({ t: "ask", id: "ask-1", tool: "Bash", input: { command: "rm -rf scratch" } }) + "\n");
+    const command = `echo ${"x".repeat(240)} && rm scratch`;
+    expect(command.length).toBeGreaterThan(200);
+    conn.write(JSON.stringify({ t: "ask", id: "ask-1", tool: "Bash", input: { command } }) + "\n");
 
     const opened = await recorder.until((e) => e.type === "request.opened");
     expect(opened).toMatchObject({
       requestType: "permission",
       tool: "Bash",
-      summary: "rm -rf scratch",
+      summary: command,
+      summaryComplete: true,
+      workspaceBound: false,
       requestId: "ask-1",
       approvalScope: "local-computer",
     });

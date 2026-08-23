@@ -6,10 +6,12 @@
 // not the behavior the rows describe:
 //
 //   1. a rule-matched auto-approval writes a row naming the rule
-//   2. a card and the human's answer write two rows (allow and deny)
-//   3. an unattended block writes its row — the audit row that says "this
-//      would have auto-approved, and only the block stood in the way"
-//   4. GET /api/decisions pages newest-last with ?limit=
+//   2. an undeliverable automatic allow records failure, never success
+//   3. a raw protected-value request writes an automatic denial row
+//   4. an undeliverable raw-value denial records failure, never success
+//   5. a destructive card and the human's answer write two rows
+//   6. safe webhook work preserves unattended provenance without carding
+//   7. GET /api/decisions pages newest-last with ?limit=
 import { spawn, type ChildProcess } from "node:child_process";
 import { chmodSync, mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -22,6 +24,7 @@ import { removeTempDir, waitForExit } from "./testing/cleanup.ts";
 
 const SERVER_DIR = dirname(fileURLToPath(import.meta.url));
 const FAKE_CLI = join(SERVER_DIR, "testing", "fake-acp-cli.ts");
+const FAKE_CODEX = join(SERVER_DIR, "testing", "fake-codex-app-server.ts");
 const PORT = 18800 + Math.floor(Math.random() * 10_000);
 const BASE = `http://127.0.0.1:${PORT}`;
 const posixOnly = describe.skipIf(process.platform === "win32");
@@ -99,13 +102,13 @@ async function waitForRunThread(runId: string, ms = 20_000) {
 /** A bot whose fake engine asks permission to run `echo hi` (the ACP core
  * folds that to tool "shell", summary "echo hi" — so the always-allow key
  * is "shell:echo"). */
-async function makePermissionBot(patch: Record<string, unknown>) {
+async function makePermissionBot(patch: Record<string, unknown>, instanceId = "grok") {
   const created = await api("POST", "/api/bots");
   expect(created.status).toBe(201);
   const bot = created.body.bot;
   const patched = await api("PATCH", `/api/bots/${bot.id}`, {
     ...patch,
-    modelSelection: { instanceId: "grok", model: "fake-model" },
+    modelSelection: { instanceId, model: instanceId === "codex" ? "gpt-fake-default" : "fake-model" },
   });
   expect(patched.status).toBe(200);
   return patched.body.bot ?? bot;
@@ -114,6 +117,7 @@ async function makePermissionBot(patch: Record<string, unknown>) {
 posixOnly("authorization decisions are logged", () => {
   beforeAll(async () => {
     chmodSync(FAKE_CLI, 0o755);
+    chmodSync(FAKE_CODEX, 0o755);
     home = mkdtempSync(join(tmpdir(), "omb-decisions-e2e-"));
     mkdirSync(join(home, ".openmausbot"), { recursive: true });
     writeFileSync(
@@ -123,6 +127,46 @@ posixOnly("authorization decisions are logged", () => {
           grok: {
             driver: "grokAgent",
             environment: { FAKE_ACP_MODE: "permission" },
+            config: { cli: FAKE_CLI, fullAuto: false },
+          },
+          codex: {
+            driver: "codex",
+            environment: {
+              FAKE_CODEX_MODE: "approval",
+              FAKE_CODEX_APPROVAL_COMMAND: "echo hi",
+            },
+            config: { cli: FAKE_CODEX, fullAuto: true },
+          },
+          codexRace: {
+            driver: "codex",
+            environment: {
+              FAKE_CODEX_MODE: "approval-closed",
+              FAKE_CODEX_APPROVAL_COMMAND: "echo hi",
+            },
+            config: { cli: FAKE_CODEX, fullAuto: true },
+          },
+          destructive: {
+            driver: "grokAgent",
+            environment: {
+              FAKE_ACP_MODE: "permission",
+              FAKE_ACP_PERMISSION_COMMAND: ["rm", "-rf", "/"].join(" "),
+            },
+            config: { cli: FAKE_CLI, fullAuto: false },
+          },
+          sensitive: {
+            driver: "grokAgent",
+            environment: {
+              FAKE_ACP_MODE: "permission",
+              FAKE_ACP_PERMISSION_COMMAND: ["cat", [".", "env"].join("")].join(" "),
+            },
+            config: { cli: FAKE_CLI, fullAuto: false },
+          },
+          sensitiveRace: {
+            driver: "grokAgent",
+            environment: {
+              FAKE_ACP_MODE: "permission-closed",
+              FAKE_ACP_PERMISSION_COMMAND: ["cat", [".", "env"].join("")].join(" "),
+            },
             config: { cli: FAKE_CLI, fullAuto: false },
           },
         },
@@ -140,7 +184,7 @@ posixOnly("authorization decisions are logged", () => {
       stdio: ["ignore", "pipe", "pipe"],
     });
     child.stderr!.on("data", (c) => (stderr += c));
-    const deadline = Date.now() + 20_000;
+    const deadline = Date.now() + 90_000;
     for (;;) {
       try {
         if ((await fetch(`${BASE}/api/health`)).ok) break;
@@ -150,7 +194,7 @@ posixOnly("authorization decisions are logged", () => {
       if (Date.now() > deadline) throw new Error(`server never came up. stderr:\n${stderr}`);
       await new Promise((r) => setTimeout(r, 150));
     }
-  }, 40_000);
+  }, 120_000);
 
   afterAll(async () => {
     await waitForExit(child, { signal: "SIGTERM" });
@@ -160,7 +204,7 @@ posixOnly("authorization decisions are logged", () => {
   it(
     "a rule-matched auto-approval writes a row naming the rule",
     async () => {
-      const bot = await makePermissionBot({ name: "Granted", alwaysAllow: ["shell:echo"] });
+      const bot = await makePermissionBot({ name: "Granted", alwaysAllow: ["shell:echo"] }, "codex");
       expect((await api("POST", `/api/bots/${bot.id}/messages`, { text: "run it" })).status).toBe(202);
 
       const row = await waitForDecision((r) => r.decision === "auto-approved" && r.botId === bot.id);
@@ -177,9 +221,71 @@ posixOnly("authorization decisions are logged", () => {
   );
 
   it(
+    "an ask closed in the same batch is never logged as auto-approved",
+    async () => {
+      const bot = await makePermissionBot({ name: "AllowRace", alwaysAllow: ["shell:echo"] }, "codexRace");
+      expect((await api("POST", `/api/bots/${bot.id}/messages`, { text: "run it" })).status).toBe(202);
+
+      const failed = await waitForDecision(
+        (row) => row.decision === "allow-delivery-failed" && row.botId === bot.id,
+      );
+      const decisions = (await api("GET", "/api/decisions")).body.decisions as DecisionRow[];
+      expect(failed, "the failed allow delivery never reached the decision log").not.toBeNull();
+      expect(failed!.source).toBe("always-allow");
+      expect(failed!.rule).toContain("delivery_failed");
+      expect(
+        decisions.some(
+          (candidate: DecisionRow) => candidate.botId === bot.id && candidate.decision === "auto-approved",
+        ),
+      ).toBe(false);
+      expect(await waitForBotCard(bot.id, 1_000)).toBeNull();
+    },
+    60_000,
+  );
+
+  it(
+    "raw protected-value access is denied instead of carded",
+    async () => {
+      const bot = await makePermissionBot({ name: "Guarded" }, "sensitive");
+      expect((await api("POST", `/api/bots/${bot.id}/messages`, { text: "run it" })).status).toBe(202);
+
+      const row = await waitForDecision((r) => r.decision === "auto-denied" && r.botId === bot.id);
+      expect(row, "the automatic denial never reached the decision log").not.toBeNull();
+      expect(row!.source).toBe("sensitive-guard");
+      expect(row!.tool).toBe("shell");
+      expect(await waitForBotCard(bot.id, 1_000)).toBeNull();
+    },
+    60_000,
+  );
+
+  it(
+    "an undeliverable protected-value denial is logged as failure, never auto-denied",
+    async () => {
+      const bot = await makePermissionBot({ name: "GuardRace" }, "sensitiveRace");
+      expect((await api("POST", `/api/bots/${bot.id}/messages`, { text: "run it" })).status).toBe(202);
+
+      const row = await waitForDecision((r) => r.decision === "deny-delivery-failed" && r.botId === bot.id);
+      const decisions = (await api("GET", "/api/decisions")).body.decisions as DecisionRow[];
+      expect(
+        row,
+        `the denial delivery failure never reached the decision log: ${JSON.stringify(decisions.filter((r) => r.botId === bot.id))}`,
+      ).not.toBeNull();
+      expect(row!.source).toBe("sensitive-guard");
+      expect(row!.rule).toContain("delivery_failed");
+      expect(
+        decisions.some(
+          (candidate: DecisionRow) => candidate.botId === bot.id && candidate.decision === "auto-denied",
+        ),
+      ).toBe(false);
+      expect(await waitForBotCard(bot.id, 1_000)).toBeNull();
+    },
+    60_000,
+  );
+
+  it(
     "a card and the human's allow write two rows",
     async () => {
-      const bot = await makePermissionBot({ name: "Askme" });
+      const bot = await makePermissionBot({ name: "Askme" }, "destructive");
       expect((await api("POST", `/api/bots/${bot.id}/messages`, { text: "run it" })).status).toBe(202);
 
       const card = await waitForBotCard(bot.id);
@@ -188,7 +294,7 @@ posixOnly("authorization decisions are logged", () => {
 
       const shown = await waitForDecision((r) => r.decision === "card-shown" && r.requestId === requestId);
       expect(shown, "the card was shown but never logged").not.toBeNull();
-      expect(shown!.source).toBe("no-grant");
+      expect(shown!.source).toBe("destructive-guard");
       expect(shown!.botId).toBe(bot.id);
       expect(shown!.tool).toBe("shell");
 
@@ -200,7 +306,7 @@ posixOnly("authorization decisions are logged", () => {
       expect(user, "the human's answer never reached the decision log").not.toBeNull();
       expect(user!.source).toBe("user");
       expect(user!.tool).toBe("shell");
-      expect(user!.summary).toBe("echo hi");
+      expect(user!.summary).toBe(["rm", "-rf", "/"].join(" "));
       expect(user!.botName).toBe("Askme");
     },
     90_000,
@@ -209,7 +315,7 @@ posixOnly("authorization decisions are logged", () => {
   it(
     "a human deny writes its row too",
     async () => {
-      const bot = await makePermissionBot({ name: "Refused" });
+      const bot = await makePermissionBot({ name: "Refused" }, "destructive");
       expect((await api("POST", `/api/bots/${bot.id}/messages`, { text: "run it" })).status).toBe(202);
 
       const card = await waitForBotCard(bot.id);
@@ -225,12 +331,12 @@ posixOnly("authorization decisions are logged", () => {
   );
 
   it(
-    "an unattended block writes the row that says a grant was withheld",
+    "a safe webhook turn keeps its approval provenance",
     async () => {
-      // Auto mode on AND the exact key granted: an attended turn would sail
-      // straight through, so the only thing carding this one is the
-      // unattended block — which is precisely what the row must say.
-      const bot = await makePermissionBot({ name: "Nightshift", autoApprove: true, alwaysAllow: ["shell:echo"] });
+      const bot = await makePermissionBot(
+        { name: "Nightshift", autoApprove: true, alwaysAllow: ["shell:echo"] },
+        "codex",
+      );
 
       const hook = await api("POST", "/api/webhooks", {
         name: "Nightly build",
@@ -249,12 +355,12 @@ posixOnly("authorization decisions are logged", () => {
 
       const threadId = await waitForRunThread(runId);
       expect(threadId, "the webhook never started a task").toBeTruthy();
-      const card = await waitForThreadCard(threadId!);
-      expect(card, "the webhook turn auto-approved instead of asking").not.toBeNull();
+      const card = await waitForThreadCard(threadId!, 1_000);
+      expect(card, "safe webhook work was converted into an approval card").toBeNull();
 
-      const row = await waitForDecision((r) => r.threadId === threadId && r.decision === "card-shown");
-      expect(row, "the unattended block never reached the decision log").not.toBeNull();
-      expect(row!.source).toBe("unattended-block");
+      const row = await waitForDecision((r) => r.threadId === threadId && r.decision === "auto-approved");
+      expect(row, "the webhook auto-approval never reached the decision log").not.toBeNull();
+      expect(row!.source).toBe("always-allow");
       expect(row!.rule).toBe("shell:echo");
       expect(row!.unattended).toBe(true);
       expect(row!.botId).toBe(bot.id);

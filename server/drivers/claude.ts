@@ -39,6 +39,7 @@ import {
 } from "./local-inject.ts";
 import { appendNative } from "./native.ts";
 import { SPAWNED_PROXIES } from "../proxy-paths.ts";
+import { approvalSummary, type ApprovalSummary } from "./approval-summary.ts";
 
 /** Whether `claude` has been signed in.
  *
@@ -92,7 +93,9 @@ const DRIVER_KIND = "claudeAgent";
 
 export interface ClaudeConfig {
   cli: string;
-  permissionMode: "acceptEdits" | "auto" | "bypassPermissions";
+  /** `acceptEdits`, `auto`, and `bypassPermissions` are accepted only as
+   * legacy persisted inputs and migrate to `default` during decode. */
+  permissionMode: "default" | "acceptEdits" | "auto" | "bypassPermissions";
 }
 
 // model catalog ported from upstream packages/contracts/src/model.ts
@@ -184,8 +187,8 @@ const DWEB_PROXY_PATH = SPAWNED_PROXIES.dweb;
 const NODE_ENV_FLAG = { ELECTRON_RUN_AS_NODE: "1" };
 
 // ── permission broker (ported from agentcal drivers/claude.js) ─────────
-// A headless run that hits a permission acceptEdits doesn't cover should
-// neither stall silently NOR get blanket-denied — it should ask the user.
+// A headless run that reaches a permission boundary should neither stall
+// silently NOR get blanket-denied — it should ask the user.
 // The broker is a net server on a per-turn socket; the proxy (spawned by
 // the claude CLI) forwards asks over it and waits. Unanswered permission
 // asks deny after timeoutMs with a keep-moving note; unanswered questions
@@ -215,13 +218,18 @@ function systemEndedReply(kind: Ask["kind"]): { behavior: AskBehavior; message: 
 }
 
 /** One human-readable line for an ask — what the card subtitle shows. */
-function askSummary(ask: Ask): string {
+function askSummary(ask: Ask): ApprovalSummary {
   const input = ask.input ?? {};
-  if (typeof input.question === "string") return input.question.slice(0, 300);
-  if (typeof input.command === "string") return input.command.slice(0, 200);
-  if (typeof input.url === "string") return input.url.slice(0, 200);
-  const text = JSON.stringify(input);
-  return text === "{}" ? (ask.tool ?? "tool") : text.slice(0, 200);
+  if (typeof input.question === "string") return approvalSummary(input.question, ask.tool ?? "question");
+  if (input.command !== undefined) {
+    const reliable =
+      typeof input.command === "string" ||
+      (Array.isArray(input.command) && input.command.every((part: unknown) => typeof part === "string"));
+    return approvalSummary(input.command, ask.tool ?? "tool", reliable);
+  }
+  if (typeof input.url === "string") return approvalSummary(input.url, ask.tool ?? "tool");
+  if (Object.keys(input).length === 0) return approvalSummary(undefined, ask.tool ?? "tool");
+  return approvalSummary(input, ask.tool ?? "tool");
 }
 
 export function permissionSocketPath(threadId: string) {
@@ -378,12 +386,21 @@ function createPermissionBroker(opts: {
 function decodeConfig(raw: unknown): ClaudeConfig {
   const o = (raw ?? {}) as Record<string, unknown>;
   const mode = o.permissionMode;
-  if (mode !== undefined && mode !== "acceptEdits" && mode !== "auto" && mode !== "bypassPermissions") {
+  if (
+    mode !== undefined &&
+    mode !== "default" &&
+    mode !== "acceptEdits" &&
+    mode !== "auto" &&
+    mode !== "bypassPermissions"
+  ) {
     throw new Error(`claude: invalid permissionMode ${JSON.stringify(mode)}`);
   }
   return {
     cli: typeof o.cli === "string" ? o.cli : "claude",
-    permissionMode: (mode as ClaudeConfig["permissionMode"]) ?? "acceptEdits",
+    // Every legacy native-autonomy mode can consume at least one class of
+    // mutation before the permission-prompt tool is called.  Migrate them to
+    // the brokered default instead of trusting a stored yolo flag.
+    permissionMode: "default",
   };
 }
 
@@ -522,9 +539,6 @@ export const ClaudeDriver: ProviderDriver<ClaudeConfig> = {
       const { threadId } = turn;
       if (active.has(threadId)) throw new Error("a turn is already running on this thread");
       const controlsHost = turn.integrations?.localComputer?.scope === "local-computer";
-      if (controlsHost && config.permissionMode === "bypassPermissions") {
-        throw new Error("local computer control requires the interactive approval broker");
-      }
       const turnId = newId();
       const sessionId = typeof turn.resumeCursor === "string" ? turn.resumeCursor : null;
       const newSessionId = sessionId ? null : newId();
@@ -537,7 +551,10 @@ export const ClaudeDriver: ProviderDriver<ClaudeConfig> = {
         // token-level streaming: content_block_delta events between the
         // whole-message frames, so the bubble grows as the model writes
         "--include-partial-messages",
-        "--permission-mode", config.permissionMode === "auto" ? "acceptEdits" : config.permissionMode,
+        // Do not pass a permission-mode flag. The CLI's normal mode routes
+        // asks through --permission-prompt-tool; legacy acceptEdits/auto/
+        // bypassPermissions values passed directly by an older registry can
+        // therefore never become native pre-approval.
       ];
       const turnEnvironment: NodeJS.ProcessEnv = { ...process.env, ...input.environment };
       const turnModel = await resolveClaudeTurnModel(turn.model, turnEnvironment);
@@ -546,13 +563,13 @@ export const ClaudeDriver: ProviderDriver<ClaudeConfig> = {
       if (turn.effort) args.push("--effort", turn.effort);
       if (turn.system) args.push("--append-system-prompt", turn.system);
 
-      // integrations → MCP servers; pre-allow their tools (a headless
-      // acceptEdits run silently denies anything unlisted)
+      // Integrations become MCP servers, but their tools are intentionally not
+      // pre-allowed.  Each call must reach the permission broker so CUA,
+      // credential, and destructive requests share the server guard.
       const mcpServers: Record<string, unknown> = {};
       const allowed: string[] = [];
       if (turn.integrations?.composio) {
         mcpServers.composio = { ...turn.integrations.composio };
-        allowed.push("mcp__composio");
       }
       if (turn.integrations?.computer) {
         mcpServers.computer = {
@@ -560,7 +577,6 @@ export const ClaudeDriver: ProviderDriver<ClaudeConfig> = {
           args: [PROXY_PATH],
           env: { ...NODE_ENV_FLAG, ...computerProxyEnv(turn.integrations.computer) },
         };
-        allowed.push("mcp__computer");
       } else if (turn.integrations?.localComputer) {
         const local = turn.integrations.localComputer;
         mcpServers.computer = {
@@ -568,21 +584,15 @@ export const ClaudeDriver: ProviderDriver<ClaudeConfig> = {
           args: local.args,
           env: local.env,
         };
-        // The isolated Local VM preserves the established pre-allow behavior.
-        // Host tools always route through OpenMausBot's permission broker.
-        if (!controlsHost) allowed.push("mcp__computer");
       }
       // peer-agent comms (list_bots/ask_bot) — the harness builds the whole
       // spawn contract (command/args/env incl. the boot token) in
-      // agentsIntegration(); pre-allowing matters doubly here, or the CLI's
-      // own ListAgents look-alike shadows it and "@Bot" asks go nowhere
+      // agentsIntegration(). Calls still pass through the permission broker.
       if (turn.integrations?.agents) {
         mcpServers.agents = { ...turn.integrations.agents };
-        allowed.push("mcp__agents");
       }
       if (turn.integrations?.phone) {
         mcpServers.phone = { ...turn.integrations.phone };
-        allowed.push("mcp__phone");
       }
       // dweb network daemon (status / repo / opencode model access) via
       // server/drivers/dweb-proxy.ts — points at the configured dweb instance
@@ -595,19 +605,14 @@ export const ClaudeDriver: ProviderDriver<ClaudeConfig> = {
             DWEB_URL: turn.integrations.dweb.url,
           },
         };
-        allowed.push("mcp__dweb");
       }
-      // permission broker: anything acceptEdits would silently deny becomes
-      // an Allow/Deny card in chat, and the agent gets ask_user. Skipped in
-      // bypassPermissions (fullAuto) — nothing would ever ask.
+      // The permission broker itself is the sole pre-allowed MCP surface;
+      // otherwise asking permission would recursively require permission.
       let broker: ReturnType<typeof createPermissionBroker> | undefined;
-      let socketPath: string | null = null;
-      if (config.permissionMode !== "bypassPermissions") {
-        socketPath = permissionSocketPath(threadId);
-        args.push("--permission-prompt-tool", "mcp__ogb__approve");
-        mcpServers.ogb = { command: process.execPath, args: [PERM_PROXY_PATH, socketPath], env: { ...NODE_ENV_FLAG } };
-        allowed.push("mcp__ogb");
-      }
+      const socketPath = permissionSocketPath(threadId);
+      args.push("--permission-prompt-tool", "mcp__ogb__approve");
+      mcpServers.ogb = { command: process.execPath, args: [PERM_PROXY_PATH, socketPath], env: { ...NODE_ENV_FLAG } };
+      allowed.push("mcp__ogb__approve");
       // The MCP config carries credentials — a Composio consumer key in a
       // header, the box token in the computer proxy's env, the comms token in
       // the agents proxy's env. On argv every one of those is world-readable
@@ -664,13 +669,17 @@ export const ClaudeDriver: ProviderDriver<ClaudeConfig> = {
           isActive: () => Boolean(sessions.get(threadId)?.turn),
           onAsk: (ask) => {
             const eventTurnId = sessions.get(threadId)?.turn?.turnId ?? turnId;
+            const summaryState = askSummary(ask);
             emit({
               ...base(threadId, eventTurnId),
               type: "request.opened",
               requestId: ask.id,
               requestType: ask.kind,
               tool: ask.tool,
-              summary: askSummary(ask),
+              summary: summaryState.summary,
+              summaryComplete: summaryState.summaryComplete,
+              cwd,
+              workspaceBound: false,
               approvalScope: controlsHost ? "local-computer" : undefined,
               choices: Array.isArray(ask.input?.choices) ? (ask.input.choices as string[]).slice(0, 5) : undefined,
             });
@@ -928,7 +937,7 @@ export const ClaudeDriver: ProviderDriver<ClaudeConfig> = {
           images: true,
           effortLevels: ["low", "medium", "high", "xhigh", "max"],
           queueing: true,
-          localComputerMcp: config.permissionMode !== "bypassPermissions",
+          localComputerMcp: true,
         },
         sendTurn,
         steer,

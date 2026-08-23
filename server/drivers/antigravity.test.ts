@@ -4,7 +4,7 @@
 //
 // The fake CLI is a shebang script Windows cannot exec directly;
 // spawnCli resolves it to `node <script>`, so these run everywhere.
-import { chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -52,14 +52,14 @@ describe("Antigravity decodeConfig", () => {
     });
   });
 
-  it("defaults to the agy binary and fullAuto on", () => {
-    expect(AntigravityDriver.decodeConfig({})).toEqual({ cli: "agy", fullAuto: true });
-    expect(AntigravityDriver.decodeConfig(undefined)).toEqual({ cli: "agy", fullAuto: true });
+  it("defaults to the agy binary with native fullAuto off", () => {
+    expect(AntigravityDriver.decodeConfig({})).toEqual({ cli: "agy", fullAuto: false });
+    expect(AntigravityDriver.decodeConfig(undefined)).toEqual({ cli: "agy", fullAuto: false });
   });
-  it("fullAuto defaults to true, only false when explicitly set", () => {
-    expect(AntigravityDriver.decodeConfig({}).fullAuto).toBe(true);
+  it("migrates explicit legacy fullAuto off", () => {
+    expect(AntigravityDriver.decodeConfig({}).fullAuto).toBe(false);
     expect(AntigravityDriver.decodeConfig({ fullAuto: false }).fullAuto).toBe(false);
-    expect(AntigravityDriver.decodeConfig({ fullAuto: true }).fullAuto).toBe(true);
+    expect(AntigravityDriver.decodeConfig({ fullAuto: true }).fullAuto).toBe(false);
   });
   it("rejects invalid types (throws → shadow snapshot)", () => {
     expect(() => AntigravityDriver.decodeConfig({ cli: 5 })).toThrow(/invalid cli/);
@@ -92,41 +92,18 @@ describe("Antigravity turns (fake CLI)", () => {
     await instance?.dispose();
   });
 
-  it("normalizes a full print-mode turn into the canonical event sequence", async () => {
+  it("rejects turn execution before spawning when no guarded broker exists", async () => {
     await create();
-    const { turnId } = await instance.adapter.sendTurn({ threadId: "t-happy", text: "hi", model: "gemini-3.1-pro-high" });
-    await recorder.until((e) => e.type === "turn.completed");
-
-    const types = recorder.events.map((e) => e.type);
-    expect(types).toEqual([
-      "turn.started",
-      "session.started",
-      "item.started", // tool ACTIVE
-      "item.completed", // tool DONE
-      "thread.token-usage.updated", // agent_response usage
-      "content.delta", // result.response
-      "item.completed", // assistant_text
-      "thread.token-usage.updated", // result usage
-      "turn.completed",
-    ]);
-    expect(recorder.events.every((e) => e.turnId === turnId && e.provider === "antigravityAgent")).toBe(true);
-
-    const session = recorder.events.find((e) => e.type === "session.started")!;
-    expect((session as any).sessionId).toBe("conv-fake-123");
-
-    const tool = recorder.events.find((e) => e.type === "item.completed" && (e as any).itemType === "tool")!;
-    expect((tool as any).ok).toBe(true);
-
-    const usage = recorder.events.find((e) => e.type === "thread.token-usage.updated")!;
-    expect(usage).toMatchObject({ input: 105, output: 20 });
-
-    const text = recorder.events.find((e) => e.type === "item.completed" && (e as any).itemType === "assistant_text")!;
-    expect((text as any).text).toBe("done from fake agy");
-
-    const done = recorder.events.at(-1)!;
-    // result.usage is the turn total (the per-step figures precede it)
-    expect(done).toMatchObject({ type: "turn.completed", ok: true, usage: { input: 105, output: 20 } });
+    const dump = join(tmpdir(), `omb-agy-must-not-spawn-${process.pid}.json`);
+    process.env.FAKE_AGY_DUMP = dump;
+    rmSync(dump, { force: true });
+    await expect(
+      instance.adapter.sendTurn({ threadId: "t-happy", text: "hi", model: "gemini-3.1-pro-high" }),
+    ).rejects.toThrow(/no guarded permission broker/);
+    expect(recorder.events).toEqual([]);
+    expect(existsSync(dump)).toBe(false);
     expect(instance.adapter.hasSession("t-happy")).toBe(false);
+    delete process.env.FAKE_AGY_DUMP;
   });
 
   it("respondToRequest resolves `unavailable` — no interactive permission channel, so the caller denies", async () => {

@@ -108,6 +108,13 @@ export type RuntimeEvent = RuntimeEventBase &
         requestType: "permission" | "question";
         tool: string;
         summary: string;
+        /** True only when `summary` contains the complete executable request.
+         * A false/absent value is never eligible for automatic approval. */
+        summaryComplete?: boolean;
+        /** Provider-reported working directory for this exact request. */
+        cwd?: string;
+        /** The provider enforces writes inside `cwd` for this turn. */
+        workspaceBound?: boolean;
         choices?: string[];
         approvalScope?: "local-computer";
       }

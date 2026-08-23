@@ -4,12 +4,10 @@
 // turns via `--conversation <id>` (the resumeCursor is agy's conversation_id).
 // Verified against agy 1.1.12.
 //
-// Unlike claude, print mode has NO interactive permission hook: there is no
-// per-action broker here. `--mode accept-edits` allows file edits but
-// auto-denies shell (`run_command` comes back as a tool ERROR); the default
-// `request-review` auto-denies; `--dangerously-skip-permissions` (fullAuto)
-// approves everything. Real per-action approval cards are a future path via
-// native ACP (agy issue #31), which would reuse acp/core.ts like grok/gemini.
+// Unlike Claude, print mode has NO interactive permission hook.  Turn
+// execution therefore fails closed until agy's native ACP path can route each
+// tool request through the shared guarded policy.  Snapshot/model discovery
+// and the tool-less text helper remain available.
 import { describeSpawnFailure, execCli, killCliTree, spawnCli } from "../procs.ts";
 import { mkdirSync, readFileSync } from "node:fs";
 import { homedir } from "node:os";
@@ -34,6 +32,7 @@ import { newEventId, newId } from "../contracts.ts";
 import { appendNative } from "./native.ts";
 
 const DRIVER_KIND = "antigravityAgent";
+const guardedTurnBrokerAvailable = () => false;
 
 export interface AntigravityConfig {
   cli: string;
@@ -120,12 +119,9 @@ function decodeConfig(raw: unknown): AntigravityConfig {
   }
   return {
     cli: typeof o.cli === "string" ? o.cli : "agy",
-    // Default fullAuto to TRUE: agy's headless print harness invokes tools even
-    // for trivial prompts and, with no interactive approval channel, auto-denies
-    // them — producing no output, so a non-fullAuto bot's turns frequently fail.
-    // Default to fullAuto for a usable bot; per-action consent returns with the
-    // ACP v2 path. Still throws above on a non-boolean fullAuto.
-    fullAuto: o.fullAuto === undefined ? true : o.fullAuto === true,
+    // Migrate the legacy native-bypass flag off. Direct callers that bypass
+    // decode are still contained by sendTurn's fail-closed broker gate.
+    fullAuto: false,
   };
 }
 
@@ -196,6 +192,11 @@ export const AntigravityDriver: ProviderDriver<AntigravityConfig> = {
     const sendTurn = async (turn: SendTurnInput) => {
       const { threadId } = turn;
       if (active.has(threadId)) throw new Error("a turn is already running on this thread");
+      if (!guardedTurnBrokerAvailable()) {
+        throw new Error(
+          "Antigravity print mode has no guarded permission broker; turn execution is disabled until ACP permissions are available",
+        );
+      }
       const turnId = newId();
 
       // Default cwd to a per-thread workspace under DATA_DIR — deliberately
@@ -253,11 +254,12 @@ export const AntigravityDriver: ProviderDriver<AntigravityConfig> = {
         "--output-format", "stream-json",
         "--print-timeout", "10m",
         "--add-dir", cwd,
-        // fullAuto approves everything; otherwise accept-edits allows file
-        // edits but auto-denies shell (no interactive channel in print mode)
-        config.fullAuto ? "--dangerously-skip-permissions" : "--mode",
+        // Unreachable while the fail-closed guard above is installed. Keep the
+        // dormant harness in the least-privileged request-review mode so a
+        // future refactor cannot accidentally resurrect native auto-approval.
+        "--mode",
+        "request-review",
       ];
-      if (!config.fullAuto) args.push("accept-edits");
       if (turn.model) args.push("--model", injectedApiModel(turn.model) ?? turn.model);
       if (resumeCursor) args.push("--conversation", resumeCursor);
 

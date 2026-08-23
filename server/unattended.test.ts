@@ -1,15 +1,7 @@
-// Auto mode must not follow a turn that nobody started.
-//
-// The unit tests in auto-approve.test.ts pin the RULE; these pin the
-// WIRING, which is the part that silently rots. Both of these pass if the
-// unattended mark is never set, or set on the wrong key, or never read —
-// so they are written to fail in exactly those cases:
-//
-//   1. a webhook delivery to a bot with auto mode ON must still produce an
-//      approval card, not a silent auto-approval
-//   2. and so must the turn that bot hands to a teammate — the gate has to
-//      survive the peer-comms hop, or it protects the bot that read the
-//      payload and releases the one that acts on it
+// Webhook origin is provenance, not a blanket approval veto. These tests
+// pin the wiring across a direct webhook turn and both peer-comms hops:
+// safe scoped work keeps moving, while the classifier remains the single
+// place that can ask or deny.
 import { spawn, type ChildProcess } from "node:child_process";
 import { chmodSync, mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -21,6 +13,7 @@ import { removeTempDir, waitForExit } from "./testing/cleanup.ts";
 
 const SERVER_DIR = dirname(fileURLToPath(import.meta.url));
 const FAKE_CLI = join(SERVER_DIR, "testing", "fake-acp-cli.ts");
+const FAKE_CODEX = join(SERVER_DIR, "testing", "fake-codex-app-server.ts");
 const PORT = 18800 + Math.floor(Math.random() * 10_000);
 const BASE = `http://127.0.0.1:${PORT}`;
 const posixOnly = describe.skipIf(process.platform === "win32");
@@ -66,9 +59,36 @@ async function waitForRunThread(runId: string, ms = 20_000) {
   return null;
 }
 
-posixOnly("unattended turns keep asking", () => {
+async function waitForRunTerminal(runId: string, ms = 30_000) {
+  const deadline = Date.now() + ms;
+  while (Date.now() < deadline) {
+    const { body } = await api("GET", "/api/routines");
+    const run = (body.runs ?? []).find((r: { id: string }) => r.id === runId);
+    if (run && ["completed", "failed", "cancelled", "missed"].includes(run.status)) return run;
+    await new Promise((r) => setTimeout(r, 250));
+  }
+  return null;
+}
+
+async function waitForBotAutoApproval(botId: string, ms = 40_000) {
+  const deadline = Date.now() + ms;
+  while (Date.now() < deadline) {
+    const { body } = await api("GET", "/api/bots");
+    const bot = body.bots.find((b: { id: string }) => b.id === botId);
+    const approval = bot?.messages?.find(
+      (m: { kind: string; tool?: { name?: string } }) =>
+        m.kind === "activity" && m.tool?.name?.startsWith("auto-approved"),
+    );
+    if (approval) return { approval, bot };
+    await new Promise((r) => setTimeout(r, 250));
+  }
+  return null;
+}
+
+posixOnly("unattended safe work keeps moving", () => {
   beforeAll(async () => {
     chmodSync(FAKE_CLI, 0o755);
+    chmodSync(FAKE_CODEX, 0o755);
     home = mkdtempSync(join(tmpdir(), "omb-unattended-"));
     mkdirSync(join(home, ".openmausbot"), { recursive: true });
     writeFileSync(
@@ -81,6 +101,14 @@ posixOnly("unattended turns keep asking", () => {
             driver: "grokAgent",
             environment: { FAKE_ACP_MODE: "permission" },
             config: { cli: FAKE_CLI, fullAuto: false },
+          },
+          codex: {
+            driver: "codex",
+            environment: {
+              FAKE_CODEX_MODE: "approval",
+              FAKE_CODEX_APPROVAL_COMMAND: "echo hi",
+            },
+            config: { cli: FAKE_CODEX, fullAuto: true },
           },
           // hands its work to a teammate, so the gate has to cross the hop
           delegator: {
@@ -110,7 +138,7 @@ posixOnly("unattended turns keep asking", () => {
       stdio: ["ignore", "pipe", "pipe"],
     });
     child.stderr!.on("data", (c) => (stderr += c));
-    const deadline = Date.now() + 20_000;
+    const deadline = Date.now() + 90_000;
     for (;;) {
       try {
         if ((await fetch(`${BASE}/api/health`)).ok) break;
@@ -120,7 +148,7 @@ posixOnly("unattended turns keep asking", () => {
       if (Date.now() > deadline) throw new Error(`server never came up. stderr:\n${stderr}`);
       await new Promise((r) => setTimeout(r, 150));
     }
-  }, 40_000);
+  }, 120_000);
 
   afterAll(async () => {
     await waitForExit(child, { signal: "SIGTERM" });
@@ -128,7 +156,7 @@ posixOnly("unattended turns keep asking", () => {
   });
 
   it(
-    "still asks a human when a webhook starts the turn, even with auto mode on",
+    "auto-approves safe work when a webhook starts the turn",
     async () => {
       const bots = await api("GET", "/api/bots");
       const bot = bots.body.bots[0];
@@ -137,7 +165,7 @@ posixOnly("unattended turns keep asking", () => {
         (
           await api("PATCH", `/api/bots/${bot.id}`, {
             autoApprove: true,
-            modelSelection: { instanceId: "grok", model: "fake-model" },
+            modelSelection: { instanceId: "codex", model: "gpt-fake-default" },
           })
         ).status,
       ).toBe(200);
@@ -161,25 +189,26 @@ posixOnly("unattended turns keep asking", () => {
       const threadId = await waitForRunThread(runId);
       expect(threadId, "the webhook never started a task").toBeTruthy();
 
-      // the request must reach a person: a card with a live requestId
-      const card = await waitForCard(threadId!);
-      expect(card, "a webhook turn auto-approved instead of asking").not.toBeNull();
-      expect(card.card.requestId).toBeTruthy();
-      // and it must not already be answered
-      expect(card.card.answered).toBeUndefined();
+      const terminal = await waitForRunTerminal(runId);
+      expect(terminal?.status).toBe("completed");
+      const card = await waitForCard(threadId!, 1_000);
+      expect(card, "safe webhook work stopped for approval").toBeNull();
     },
     60_000,
   );
 
   it(
-    "keeps asking after the work is handed to a teammate",
+    "keeps safe work moving after it is handed to a teammate",
     async () => {
-      // A runs the webhook and delegates; B does the acting. Without the
-      // mark crossing the hop, the gate protects the bot that READ the
-      // payload and releases the bot that ACTS on it.
+      // A runs the webhook and delegates; B does the acting. Provenance
+      // crosses the hop for audit without turning safe work into a card.
       const created = await api("POST", "/api/bots");
       const teammate = created.body.bot;
-      await api("PATCH", `/api/bots/${teammate.id}`, { name: "Teammate", autoApprove: true });
+      await api("PATCH", `/api/bots/${teammate.id}`, {
+        name: "Teammate",
+        autoApprove: true,
+        modelSelection: { instanceId: "codex", model: "gpt-fake-default" },
+      });
 
       const delegator = (await api("POST", "/api/bots")).body.bot;
       await api("PATCH", `/api/bots/${delegator.id}`, {
@@ -203,30 +232,22 @@ posixOnly("unattended turns keep asking", () => {
       });
       expect(delivered.status).toBe(202);
 
-      // the teammate's turn runs on ITS own thread, unattended by inheritance
-      const deadline = Date.now() + 40_000;
-      let card: { card?: { requestId?: string; answered?: string } } | null = null;
-      while (Date.now() < deadline && !card) {
-        const { body } = await api("GET", "/api/bots");
-        const peer = body.bots.find((b: { id: string }) => b.id === teammate.id);
-        card =
-          peer?.messages?.find(
-            (m: { kind: string; card?: { requestId?: string } }) => m.kind === "options" && m.card?.requestId,
-          ) ?? null;
-        if (!card) await new Promise((r) => setTimeout(r, 300));
-      }
-      expect(card, "the delegated turn auto-approved — the gate did not cross the hop").not.toBeNull();
-      expect(card!.card!.answered).toBeUndefined();
+      const result = await waitForBotAutoApproval(teammate.id);
+      expect(result?.approval, "the delegated safe request was not auto-approved").toBeTruthy();
+      expect(
+        result?.bot.messages?.find(
+          (m: { kind: string; card?: { requestId?: string } }) => m.kind === "options" && m.card?.requestId,
+        ),
+      ).toBeUndefined();
     },
     90_000,
   );
 
   it(
-    "keeps asking when the teammate is pulled in synchronously",
+    "keeps safe work moving when a teammate is pulled in synchronously",
     async () => {
-      // ask_bot rather than delegate_bot. Same hole, different door, and
-      // this is the ordinary shape: a webhook bot asking someone a question
-      // mid-turn. The fake asks whichever peer list_bots returns first, so
+      // ask_bot rather than delegate_bot: same provenance, synchronous hop.
+      // The fake asks whichever peer list_bots returns first, so
       // everything else is hidden to make the target deterministic.
       const existing = await api("GET", "/api/bots");
       for (const b of existing.body.bots) await api("PATCH", `/api/bots/${b.id}`, { hidden: true });
@@ -235,7 +256,7 @@ posixOnly("unattended turns keep asking", () => {
       await api("PATCH", `/api/bots/${target.id}`, {
         name: "Answerer",
         autoApprove: true,
-        modelSelection: { instanceId: "grok", model: "fake-model" },
+        modelSelection: { instanceId: "codex", model: "gpt-fake-default" },
       });
 
       const asker = (await api("POST", "/api/bots")).body.bot;
@@ -260,19 +281,13 @@ posixOnly("unattended turns keep asking", () => {
       });
       expect(delivered.status).toBe(202);
 
-      const deadline = Date.now() + 40_000;
-      let card: { card?: { requestId?: string; answered?: string } } | null = null;
-      while (Date.now() < deadline && !card) {
-        const { body } = await api("GET", "/api/bots");
-        const peer = body.bots.find((b: { id: string }) => b.id === target.id);
-        card =
-          peer?.messages?.find(
-            (m: { kind: string; card?: { requestId?: string } }) => m.kind === "options" && m.card?.requestId,
-          ) ?? null;
-        if (!card) await new Promise((r) => setTimeout(r, 300));
-      }
-      expect(card, "the asked teammate auto-approved — ask_bot did not carry the gate").not.toBeNull();
-      expect(card!.card!.answered).toBeUndefined();
+      const result = await waitForBotAutoApproval(target.id);
+      expect(result?.approval, "the synchronously asked safe request was not auto-approved").toBeTruthy();
+      expect(
+        result?.bot.messages?.find(
+          (m: { kind: string; card?: { requestId?: string } }) => m.kind === "options" && m.card?.requestId,
+        ),
+      ).toBeUndefined();
     },
     90_000,
   );

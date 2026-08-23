@@ -190,12 +190,9 @@ async function applySetting(
   }
 }
 
-// Autonomy maps onto droid's session modes (session/new advertises
-// normal | spec | auto-low | auto-medium | auto-high). Always set it
-// explicitly: ~/.factory/settings.json can pin a mode, and inheriting it
-// would either make every session yolo or make fullAuto silently ask.
+// Always pin the guarded mode explicitly: ~/.factory/settings.json can pin
+// auto-high, which would consume permissions before ACP reports them.
 const MODE_DEFAULT = "normal"; // auto-approves reads only; everything else asks
-const MODE_FULL_AUTO = "auto-high";
 
 // A curated slice of `droid exec -m <bogus>`'s built-in catalog (0.196.0 lists
 // 43). Custom models from ~/.factory/settings.json are per-machine and carry a
@@ -255,8 +252,8 @@ const support: AcpSupport = {
     applyDroidLocalAuthEnv(env, requestedModel);
   },
 
-  async configureSession({ request, sessionId, config, turn }) {
-    const modeId = config.fullAuto ? MODE_FULL_AUTO : MODE_DEFAULT;
+  async configureSession({ request, sessionId, turn }) {
+    const modeId = MODE_DEFAULT;
     await applySetting(request, "session/set_mode", { sessionId, modeId }, `autonomy mode "${modeId}"`);
     // Pin the model for the same reason as the mode: with no set_model the
     // session runs whatever ~/.factory/settings.json selected, which can be a

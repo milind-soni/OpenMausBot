@@ -5,8 +5,9 @@
 //
 // Verified against the public CLI contract (cursor.com/docs/cli/acp,
 // …/reference/parameters): `cursor-agent acp` speaks JSON-RPC on stdio, advertises
-// `cursor_login`, and takes `--force` / `--model` as global flags before the
-// `acp` subcommand. `session/set_model` is attempted when the CLI supports it;
+// `cursor_login`, and takes `--model` as a global flag before the `acp`
+// subcommand. Native `--force` is deliberately never passed.
+// `session/set_model` is attempted when the CLI supports it;
 // a missing method falls back to the argv `--model` pin.
 import type { ModelCatalog, ProviderErrorCode } from "../../contracts.ts";
 import { execCli } from "../../procs.ts";
@@ -306,10 +307,10 @@ const support = (run: typeof execCli): AcpSupport => ({
   },
 
   // Global flags must precede `acp` (cursor.com/docs/cli/reference/parameters).
-  // `--force` is the documented auto-approve switch (`--yolo` is an alias);
+  // Never pass `--force`/`--yolo`: those switches consume permissions inside
+  // Cursor before the ACP request can reach OpenMausBot's guarded policy.
   // `--model` is the reliable pin — ACP session/set_model is best-effort below.
-  spawnArgs: (config, turn) => [
-    ...(config.fullAuto ? ["--force"] : []),
+  spawnArgs: (_config, turn) => [
     ...(turn.model ? ["--model", turn.model] : []),
     "acp",
   ],

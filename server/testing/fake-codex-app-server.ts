@@ -4,14 +4,32 @@
 // initialize/thread/turn handshake, then plays a scripted turn. Like the
 // real app-server, it never exits on its own — the driver kills it.
 //
-//   FAKE_CODEX_MODE   happy (default) | approval | resume | stream | windows-command |
+//   FAKE_CODEX_MODE   happy (default) | approval | approval-closed | file-approval | resume | stream | windows-command |
 //                     logged-in-stdout | logged-out | unauthorized
 //   FAKE_CODEX_DUMP   path to write {argv, env, calls, decision} as JSON
+//   FAKE_CODEX_APPROVAL_COMMAND  override the approval-mode command fixture
+//   FAKE_CODEX_FILE_APPROVAL_PARAMS JSON params for file-approval mode
+//   FAKE_CODEX_FILE_ITEM_CHANGES JSON changes from the preceding fileChange item
 //
 // Keep this file dependency-free — it runs as a bare `node` subprocess.
 import { writeFileSync } from "node:fs";
 
 const mode = process.env.FAKE_CODEX_MODE ?? "happy";
+const requestedApprovalCommand = process.env.FAKE_CODEX_APPROVAL_COMMAND;
+const requestedFileApproval = (() => {
+  try {
+    return JSON.parse(process.env.FAKE_CODEX_FILE_APPROVAL_PARAMS ?? "{}");
+  } catch {
+    return {};
+  }
+})();
+const requestedFileItemChanges = (() => {
+  try {
+    return JSON.parse(process.env.FAKE_CODEX_FILE_ITEM_CHANGES ?? "null");
+  } catch {
+    return null;
+  }
+})();
 
 if (process.argv[2] === "--version") {
   process.stdout.write("codex-cli 0.147.0\n");
@@ -143,10 +161,43 @@ process.stdin.on("data", (chunk) => {
           : "ls -la";
         notify("item/started", { item: { id: "i1", type: "commandExecution", command } });
         notify("item/started", { item: { id: "w1", type: "webSearch", query: "OpenMausBot" } });
-        if (mode === "approval" || mode === "windows-command") {
-          const approvalCommand = mode === "windows-command" ? command : "rm -rf scratch";
-          out({ jsonrpc: "2.0", id: 100, method: "execCommandApproval", params: { command: approvalCommand } });
+        if (mode === "file-approval") {
+          if (requestedFileItemChanges) {
+            notify("item/started", {
+              item: { id: requestedFileApproval.itemId ?? "file-item-1", type: "fileChange", changes: requestedFileItemChanges },
+            });
+          }
+          out({
+            jsonrpc: "2.0",
+            id: 100,
+            method: "item/fileChange/requestApproval",
+            params: requestedFileApproval,
+          });
           // turn continues from the approval response handler above
+        } else if (mode === "approval" || mode === "approval-closed" || mode === "windows-command") {
+          const approvalCommand = requestedApprovalCommand ?? (mode === "windows-command" ? command : "rm -rf scratch");
+          const approvalRequest = {
+            jsonrpc: "2.0",
+            id: 100,
+            method: "execCommandApproval",
+            params: { command: approvalCommand },
+          };
+          if (mode === "approval-closed") {
+            // One protocol batch opens the ask and immediately settles the
+            // turn. The harness must consume both before claiming delivery.
+            process.stdout.write(
+              JSON.stringify(approvalRequest) + "\n" +
+                JSON.stringify({
+                  jsonrpc: "2.0",
+                  method: "turn/completed",
+                  params: { turn: { status: "completed" } },
+                }) +
+                "\n",
+            );
+          } else {
+            out(approvalRequest);
+            // turn continues from the approval response handler above
+          }
         } else {
           finishTurn();
         }
