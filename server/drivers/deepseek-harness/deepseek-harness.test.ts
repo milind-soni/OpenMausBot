@@ -701,6 +701,54 @@ describe("DeepSeek Harness turns", () => {
   });
 
   it.each([
+    ["observed", true],
+    ["not observed", false],
+  ] as const)("does not replay a retired turn terminal when its number was %s before interrupt", async (_state, observeOldStart) => {
+    const fake = await host();
+    let promptCount = 0;
+    fake.onRawRequest = (request) => {
+      const parsed = dshClientRequestSchema.safeParse(request.body);
+      return parsed.success && parsed.data.method === "session.prompt" && ++promptCount === 2;
+    };
+    fake.onRequest = ({ body }) => officialResponse(dshClientRequestSchema.parse(body), "interrupt-handoff-session");
+    const instance = await DeepSeekHarnessDriver.create({ instanceId: "deepseekHarness", displayName: undefined, environment: {}, enabled: true, config: { baseUrl: fake.baseUrl, transport: "direct" } });
+    const events = recordEvents(instance.adapter);
+    const model = encodeDshModelId("deepseek", "chat");
+    const sessionEvent = (rpcId: string, type: string, seq: number, data: DshJsonValue) => ({
+      type: "server-request",
+      rpcId,
+      method: "session/event",
+      payload: { type: "session/event", sessionId: "interrupt-handoff-session", event: { type, seq, time: seq, data } },
+    });
+
+    const first = await instance.adapter.sendTurn({ threadId: "interrupt-handoff", text: "first", model });
+    await fake.waitForStream("mux");
+    if (observeOldStart) {
+      fake.send("mux", sessionEvent("old-start", "turn/start", 1, { turn: 1 }));
+      await fake.waitForStreamRoundTrip("mux");
+    }
+    await instance.adapter.interruptTurn("interrupt-handoff", first.turnId);
+
+    const replacementStart = instance.adapter.sendTurn({ threadId: "interrupt-handoff", text: "replacement", model });
+    await fake.waitForRawResponse();
+    fake.send("mux", sessionEvent("old-end", "turn/end", 2, { turn: 1, reason: { kind: "aborted" } }));
+    await fake.waitForStreamRoundTrip("mux");
+    fake.releaseRawResponses();
+
+    const replacement = await replacementStart;
+    expect(events.events.filter((event) => event.type === "turn.completed" && event.turnId === replacement.turnId)).toHaveLength(0);
+    fake.send("mux", sessionEvent("replacement-start", "turn/start", 3, { turn: 2 }));
+    fake.send("mux", sessionEvent("replacement-output", "assistant/chunk", 4, { turn: 2, step: 1, chunk: { type: "text-delta", index: 0, text: "replacement output" } }));
+    fake.send("mux", sessionEvent("replacement-end", "turn/end", 5, { turn: 2, reason: { kind: "completed" } }));
+
+    await events.until((event) => event.type === "turn.completed" && event.turnId === replacement.turnId, 500);
+    expect(events.events.filter((event) => event.type === "turn.completed" && event.turnId === replacement.turnId)).toHaveLength(1);
+    expect(events.events).toContainEqual(expect.objectContaining({ type: "content.delta", turnId: replacement.turnId, delta: "replacement output" }));
+    await instance.dispose();
+    events.stop();
+  });
+
+  it.each([
     ["stopAll", "session.create"],
     ["stopAll", "session.selectModel"],
     ["stopAll", "session.prompt"],

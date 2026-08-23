@@ -54,6 +54,7 @@ const selectedModelResultSchema = z.object({
 });
 const hostDescribeSchema = z.object({ version: z.string().max(200).optional() });
 const usageSchema = z.object({ inputTokens: z.number().int().safe().nonnegative(), outputTokens: z.number().int().safe().nonnegative() });
+const hostTurnSchema = z.number().int().safe().positive();
 const resumeCursorSchema = z.string().min(1).max(512);
 const persistedCursorSchema = z.object({ version: z.literal(1), sessionId: z.string().min(1).max(512), personaDelivered: z.boolean() }).strict();
 
@@ -97,6 +98,7 @@ interface ActiveTurn {
   queueFrames: DshServerRequest[];
   queueFrameBytes: number;
   queueOverflowed: boolean;
+  hostTurn?: number;
   usage?: { input: number; output: number };
 }
 interface PendingApproval {
@@ -174,6 +176,9 @@ export const DeepSeekHarnessDriver: ProviderDriver<DeepSeekHarnessConfig> = {
     let baselineByteCount = 0;
     let muxGeneration = 0;
     const active = new Map<string, ActiveTurn>();
+    // A locally retired Host turn can still have durable frames in flight.
+    // null means the interrupt happened before its official turn number was observed.
+    const retiredHostTurns = new Map<string, number | null>();
     const seenFrames = new Set<string>();
     const pendingApprovals = new Map<string, PendingApproval>();
     const pendingQuestions = new Map<string, PendingQuestionBatch>();
@@ -218,6 +223,31 @@ export const DeepSeekHarnessDriver: ProviderDriver<DeepSeekHarnessConfig> = {
     const usageFor = (value: DshJsonValue | undefined): { input: number; output: number } | undefined => {
       const parsed = usageSchema.safeParse(value);
       return parsed.success ? { input: parsed.data.inputTokens, output: parsed.data.outputTokens } : undefined;
+    };
+    const hostTurnFor = (value: DshJsonValue | undefined): number | undefined => {
+      const parsed = hostTurnSchema.safeParse(value);
+      return parsed.success ? parsed.data : undefined;
+    };
+    const isTurnScopedFrame = (method: string) => (
+      method === "turn/start"
+      || method === "turn/end"
+      || method === "assistant/chunk"
+      || method === "assistant/chunk.text-delta"
+      || method === "assistant/chunk.reasoning-delta"
+      || method === "assistant/message"
+      || method === "tool/call"
+      || method === "tool/result"
+    );
+    const retireHostTurn = (running: ActiveTurn) => {
+      if (!running.sessionId) return;
+      const previous = retiredHostTurns.get(running.sessionId);
+      if (running.hostTurn !== undefined) {
+        retiredHostTurns.set(running.sessionId, previous === null || previous === undefined
+          ? running.hostTurn
+          : Math.max(previous, running.hostTurn));
+      } else if (!retiredHostTurns.has(running.sessionId)) {
+        retiredHostTurns.set(running.sessionId, null);
+      }
     };
     const activeForSession = (sessionId: string) => {
       const sessionKey = sessionOwners.get(sessionId);
@@ -645,6 +675,7 @@ export const DeepSeekHarnessDriver: ProviderDriver<DeepSeekHarnessConfig> = {
       // slot before awaiting the best-effort Host work so a missing or late
       // turn/end cannot strand the thread or complete it twice.
       running.completed = true;
+      retireHostTurn(running);
       if (active.get(threadId) === running) active.delete(threadId);
       await Promise.allSettled([
         cancelRunning(running),
@@ -741,6 +772,22 @@ export const DeepSeekHarnessDriver: ProviderDriver<DeepSeekHarnessConfig> = {
           && method !== "question/requested"
           && method !== "question/resolved"
         ) return;
+      }
+      const hostTurn = hostTurnFor(payload?.turn);
+      if (retiredHostTurns.has(sessionId)) {
+        const retired = retiredHostTurns.get(sessionId) ?? null;
+        const establishesReplacement = hostTurn !== undefined
+          && (retired === null ? method === "turn/start" : hostTurn > retired);
+        if (establishesReplacement) {
+          retiredHostTurns.delete(sessionId);
+          running.hostTurn = hostTurn;
+        } else if (isTurnScopedFrame(method)) {
+          return;
+        }
+      }
+      if (hostTurn !== undefined) {
+        if (running.hostTurn !== undefined && running.hostTurn !== hostTurn) return;
+        running.hostTurn = hostTurn;
       }
       if (!rememberFrame(`${sessionId}\u0000${frame.rpcId}`)) return;
       switch (method) {
@@ -1099,6 +1146,7 @@ export const DeepSeekHarnessDriver: ProviderDriver<DeepSeekHarnessConfig> = {
       sessions.clear();
       sessionThreads.clear();
       sessionOwners.clear();
+      retiredHostTurns.clear();
       clearBaseline();
       recoverStream();
       stopping = false;
