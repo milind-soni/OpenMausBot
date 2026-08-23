@@ -10,10 +10,14 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { z } from "zod";
 
 import { removeTempDir, waitForExit } from "./testing/cleanup.ts";
 import { openSse } from "./testing/sse.ts";
 import { IMAGE_MAX_BYTES } from "./attachments.ts";
+import { FakeDshHost } from "./testing/fake-dsh-host.ts";
+import { dshClientRequestSchema, dshClientResponseSchema, dshJsonValueSchema, type DshJsonValue } from "./drivers/deepseek-harness/protocol.ts";
+import { encodeDshModelId } from "./drivers/deepseek-harness/models.ts";
 
 const SERVER_DIR = dirname(fileURLToPath(import.meta.url));
 const ROOT = join(SERVER_DIR, "..");
@@ -31,6 +35,8 @@ let home: string;
 let staticDir: string;
 let fakeClaudeDump: string;
 let stderr = "";
+let dshStub: FakeDshHost;
+let dshSessionSequence = 0;
 
 const api = async (method: string, path: string, body?: unknown): Promise<{ status: number; body: any }> => {
   const res = await fetch(`${BASE}${path}`, {
@@ -40,6 +46,16 @@ const api = async (method: string, path: string, body?: unknown): Promise<{ stat
   });
   return { status: res.status, body: await res.json() };
 };
+
+async function waitUntil<T>(read: () => T | undefined | Promise<T | undefined>, timeoutMs = 5_000): Promise<T> {
+  const deadline = Date.now() + timeoutMs;
+  for (;;) {
+    const value = await read();
+    if (value !== undefined) return value;
+    if (Date.now() >= deadline) throw new Error("timed out waiting for fixture state");
+    await new Promise((resolve) => setTimeout(resolve, 20));
+  }
+}
 
 const writeClaudeCatalog = (options: unknown[]) => {
   const configDir = join(home, ".claude");
@@ -74,6 +90,31 @@ beforeAll(async () => {
   home = mkdtempSync(join(tmpdir(), "omb-api-test-"));
   staticDir = join(home, "static");
   fakeClaudeDump = join(home, "fake-claude-dump.json");
+  dshStub = new FakeDshHost();
+  await dshStub.start();
+  dshStub.onRequest = ({ body }) => {
+    if (dshClientResponseSchema.safeParse(body).success) {
+      return dshJsonValueSchema.parse({ accepted: false, reason: "not-pending" });
+    }
+    const request = dshClientRequestSchema.parse(body);
+    let value: DshJsonValue;
+    if (request.method === "session.create") {
+      const payload = z.object({ sessionId: z.string().optional() }).parse(request.payload);
+      value = { sessionId: payload.sessionId ?? `server-dsh-${++dshSessionSequence}` };
+    }
+    else if (request.method === "session.selectModel") {
+      const selectionSchema = z.object({ provider: z.string(), model: z.string(), reasoningEffort: z.string().optional() });
+      const payload = selectionSchema.parse(request.payload);
+      const selected = selectionSchema.parse(payload);
+      value = { selected };
+    }
+    else if (request.method === "session.prompt" || request.method === "session.cancel") value = { accepted: true };
+    else if (request.method === "host.describe") value = { version: "fixture", cwd: "/fixture", attachedSessions: 0, home: "/fixture", canOpenPath: false };
+    else if (request.method === "llm.models") value = { groups: [{ id: "deepseek", name: "DeepSeek", models: [{ id: "chat", name: "Chat" }] }], failures: [] };
+    else if (request.method === "agentPreset.list") value = { presets: [], authorable: false, hasDocument: false };
+    else throw new Error(`unsupported DSH fixture method ${request.method}`);
+    return dshJsonValueSchema.parse({ type: "server-response", rpcId: request.rpcId, result: { ok: true, value } });
+  };
   // a fleet of exactly one unknown driver: no CLI probes, no network
   mkdirSync(join(home, ".openmausbot"), { recursive: true });
   mkdirSync(join(staticDir, "assets"), { recursive: true });
@@ -85,6 +126,7 @@ beforeAll(async () => {
       instances: {
         ghost: { driver: "not-a-real-driver", displayName: "Ghost" },
         claude: { driver: "claudeAgent", displayName: "Fixture Claude", config: { cli: FAKE_CLAUDE_CLI } },
+        deepseekHarness: { driver: "deepseekHarness", displayName: "Fixture DSH", config: { baseUrl: dshStub.baseUrl, transport: "direct" } },
       },
     }),
   );
@@ -255,6 +297,7 @@ afterAll(async () => {
   // retry loop; these helpers are that fix plus the cause — the retry AND
   // an exit that is actually waited for before the delete begins.
   await waitForExit(child, { signal: "SIGTERM" });
+  await dshStub.stop();
   await removeTempDir(home);
 });
 
@@ -1434,6 +1477,254 @@ describe("harness HTTP API", () => {
     const reread = (await api("GET", "/api/bots")).body.bots.find((candidate: { id: string }) => candidate.id === bot.id);
     expect(reread.messages.at(-1).tool).toMatchObject({ ok: false });
     expect(reread.messages.at(-1).tool.name).toContain("request is no longer open");
+  });
+
+  it("returns retryable DSH answers as HTTP 409 without transcript or audit success", async () => {
+    await api("GET", "/api/instances"); // refresh the live DSH catalog
+    const bot = (await api("POST", "/api/bots")).body.bot;
+    const model = encodeDshModelId("deepseek", "chat");
+    const patched = await api("PATCH", `/api/bots/${bot.id}`, { modelSelection: { instanceId: "deepseekHarness", model } });
+    expect(patched.status).toBe(200);
+    const requestStart = dshStub.requests.length;
+    expect((await api("POST", `/api/bots/${bot.id}/messages`, { text: "manual retry fixture" })).status).toBe(202);
+    const prompt = await waitUntil(() => dshStub.requests.slice(requestStart).map((entry) => dshClientRequestSchema.safeParse(entry.body).data).find((entry) => entry?.method === "session.prompt"));
+    // SAFETY: FakeDshHost validated this official session.prompt payload before recording it.
+    const sessionId = (prompt.payload as { sessionId: string }).sessionId;
+    dshStub.send("mux", { type: "server-request", rpcId: "server-manual-rpc", method: "approval/requested", payload: { type: "approval/requested", sessionId, approvalId: "server-manual", toolName: "shell", reason: "manual retry" } });
+    const open = await waitUntil(async () => {
+      const all = (await api("GET", "/api/bots")).body;
+      const current = all.bots.find((candidate: { id: string }) => candidate.id === bot.id);
+      return current?.messages.find((message: any) => message.card?.subtitle === "manual retry");
+    });
+    expect(open?.card.requestId).toEqual(expect.any(String));
+    const beforeState = (await api("GET", "/api/bots")).body.bots.find((candidate: { id: string }) => candidate.id === bot.id);
+    const beforeCount = beforeState.messages.length;
+    const retry = await api("POST", `/api/bots/${bot.id}/respond`, { requestId: open.card.requestId, behavior: "allow" });
+    expect(retry.status).toBe(409);
+    expect(retry.body).toMatchObject({ ok: false, outcome: "retryable" });
+    const after = (await api("GET", "/api/bots")).body.bots.find((candidate: { id: string }) => candidate.id === bot.id);
+    const stillOpen = after.messages.find((message: any) => message.id === open.id).card;
+    expect(stillOpen.answered).toBeUndefined();
+    expect(stillOpen.dismissed).not.toBe(true);
+    expect(after.messages).toHaveLength(beforeCount);
+    await new Promise((resolve) => setTimeout(resolve, 30));
+    const decisionsFile = join(home, ".openmausbot", "decisions.ndjson");
+    const rows = existsSync(decisionsFile) ? readFileSync(decisionsFile, "utf8").trim().split("\n").filter(Boolean).map((line) => JSON.parse(line)) : [];
+    expect(rows.some((row: any) => row.requestId === open.card.requestId && row.decision === "user-approved")).toBe(false);
+
+    dshStub.send("mux", { type: "server-request", rpcId: "server-manual-end", method: "session/event", payload: { type: "session/event", sessionId, event: { type: "turn/end", seq: 1, time: 1, data: { reason: { kind: "completed" } } } } });
+    await waitUntil(async () => {
+      const current = (await api("GET", "/api/bots")).body.bots.find((candidate: { id: string }) => candidate.id === bot.id);
+      return current?.busy ? undefined : true;
+    });
+    await api("DELETE", `/api/bots/${bot.id}`);
+  });
+
+  it("never claims an auto approval when DSH returns retryable or resolves authoritatively", async () => {
+    await api("GET", "/api/instances");
+    const bot = (await api("POST", "/api/bots")).body.bot;
+    const model = encodeDshModelId("deepseek", "chat");
+    const patched = await api("PATCH", `/api/bots/${bot.id}`, {
+      autoApprove: true,
+      modelSelection: { instanceId: "deepseekHarness", model },
+    });
+    expect(patched.status).toBe(200);
+
+    try {
+      const firstStart = dshStub.requests.length;
+      expect((await api("POST", `/api/bots/${bot.id}/messages`, { text: "auto retry fixture" })).status).toBe(202);
+      const firstPrompt = await waitUntil(() => dshStub.requests
+        .slice(firstStart)
+        .map((entry) => dshClientRequestSchema.safeParse(entry.body).data)
+        .find((entry) => entry?.method === "session.prompt"));
+      // SAFETY: FakeDshHost validated this official session.prompt payload before recording it.
+      const sessionId = (firstPrompt.payload as { sessionId: string }).sessionId;
+      dshStub.send("mux", {
+        type: "server-request",
+        rpcId: "server-auto-retry-rpc",
+        method: "approval/requested",
+        payload: {
+          type: "approval/requested",
+          sessionId,
+          approvalId: "server-auto-retry",
+          toolName: "Bash",
+          reason: "ls -la auto retry fixture",
+        },
+      });
+      const fallback = await waitUntil(async () => {
+        const current = (await api("GET", "/api/bots")).body.bots.find((candidate: { id: string }) => candidate.id === bot.id);
+        return current?.messages.find((message: { card?: { subtitle?: string } }) => message.card?.subtitle === "ls -la auto retry fixture");
+      });
+      expect(fallback.card).toMatchObject({ held: "Auto mode couldn't answer this one." });
+      let current = (await api("GET", "/api/bots")).body.bots.find((candidate: { id: string }) => candidate.id === bot.id);
+      expect(current.messages.some((message: { tool?: { name?: string; ok?: boolean } }) =>
+        message.tool?.ok === true && message.tool.name?.includes("auto retry fixture"))).toBe(false);
+      const decisionsFile = join(home, ".openmausbot", "decisions.ndjson");
+      let rows = existsSync(decisionsFile)
+        ? readFileSync(decisionsFile, "utf8").trim().split("\n").filter(Boolean).map((line) => JSON.parse(line))
+        : [];
+      expect(rows.some((row: { summary?: string; decision?: string }) =>
+        row.summary === "ls -la auto retry fixture" && row.decision === "auto-approved")).toBe(false);
+
+      dshStub.send("mux", {
+        type: "server-request",
+        rpcId: "server-auto-retry-resolved",
+        method: "approval/resolved",
+        payload: { type: "approval/resolved", sessionId, approvalId: "server-auto-retry", outcome: "cancelled" },
+      });
+      dshStub.send("mux", {
+        type: "server-request",
+        rpcId: "server-auto-retry-end",
+        method: "session/event",
+        payload: { type: "session/event", sessionId, event: { type: "turn/end", seq: 1, time: 1, data: { reason: { kind: "completed" } } } },
+      });
+      await waitUntil(async () => {
+        const settled = (await api("GET", "/api/bots")).body.bots.find((candidate: { id: string }) => candidate.id === bot.id);
+        return settled?.busy ? undefined : true;
+      });
+
+      dshStub.onRawRequest = (request) => request.path.endsWith("/respond");
+      const secondStart = dshStub.requests.length;
+      expect((await api("POST", `/api/bots/${bot.id}/messages`, { text: "auto authoritative fixture" })).status).toBe(202);
+      const secondPrompt = await waitUntil(() => dshStub.requests
+        .slice(secondStart)
+        .map((entry) => dshClientRequestSchema.safeParse(entry.body).data)
+        .find((entry) => entry?.method === "session.prompt"));
+      // SAFETY: FakeDshHost validated this official session.prompt payload before recording it.
+      expect((secondPrompt.payload as { sessionId: string }).sessionId).toBe(sessionId);
+      dshStub.send("mux", {
+        type: "server-request",
+        rpcId: "server-auto-authoritative-rpc",
+        method: "approval/requested",
+        payload: {
+          type: "approval/requested",
+          sessionId,
+          approvalId: "server-auto-authoritative",
+          toolName: "Bash",
+          reason: "ls -la auto authoritative fixture",
+        },
+      });
+      await waitUntil(() => dshStub.requests.slice(secondStart).find((entry) => entry.path.endsWith("/respond")));
+      dshStub.send("mux", {
+        type: "server-request",
+        rpcId: "server-auto-authoritative-resolved",
+        method: "approval/resolved",
+        payload: { type: "approval/resolved", sessionId, approvalId: "server-auto-authoritative", outcome: "cancelled" },
+      });
+      dshStub.releaseRawResponses();
+      await new Promise<void>((resolve) => setImmediate(resolve));
+      await new Promise<void>((resolve) => setImmediate(resolve));
+
+      current = (await api("GET", "/api/bots")).body.bots.find((candidate: { id: string }) => candidate.id === bot.id);
+      expect(current.messages.some((message: { card?: { subtitle?: string }; tool?: { name?: string; ok?: boolean } }) =>
+        message.card?.subtitle === "ls -la auto authoritative fixture"
+        || (message.tool?.ok === true && message.tool.name?.includes("auto authoritative fixture")))).toBe(false);
+      rows = existsSync(decisionsFile)
+        ? readFileSync(decisionsFile, "utf8").trim().split("\n").filter(Boolean).map((line) => JSON.parse(line))
+        : [];
+      expect(rows.some((row: { summary?: string }) => row.summary === "ls -la auto authoritative fixture")).toBe(false);
+
+      dshStub.send("mux", {
+        type: "server-request",
+        rpcId: "server-auto-authoritative-end",
+        method: "session/event",
+        payload: { type: "session/event", sessionId, event: { type: "turn/end", seq: 2, time: 2, data: { reason: { kind: "completed" } } } },
+      });
+      await waitUntil(async () => {
+        const settled = (await api("GET", "/api/bots")).body.bots.find((candidate: { id: string }) => candidate.id === bot.id);
+        return settled?.busy ? undefined : true;
+      });
+    } finally {
+      dshStub.onRawRequest = undefined;
+      dshStub.releaseRawResponses();
+      await api("DELETE", `/api/bots/${bot.id}`);
+    }
+  });
+
+  it("persists private DSH cursors independently for a bot chat and its room membership", async () => {
+    await api("GET", "/api/instances");
+    const bot = (await api("POST", "/api/bots")).body.bot;
+    const model = encodeDshModelId("deepseek", "chat");
+    expect((await api("PATCH", `/api/bots/${bot.id}`, {
+      modelSelection: { instanceId: "deepseekHarness", model },
+    })).status).toBe(200);
+    const group = (await api("POST", "/api/groups", { name: "DSH cursor room", memberIds: [bot.id] })).body.group;
+    expect(group).not.toHaveProperty("memberResumeCursors");
+    const stream = await openSse(`${BASE}/api/events`);
+
+    try {
+      const groupStart = dshStub.requests.length;
+      expect((await api("POST", `/api/groups/${group.id}/messages`, { text: "room cursor fixture" })).status).toBe(202);
+      const groupPrompt = await waitUntil(() => dshStub.requests
+        .slice(groupStart)
+        .map((entry) => dshClientRequestSchema.safeParse(entry.body).data)
+        .find((entry) => entry?.method === "session.prompt"));
+      // SAFETY: FakeDshHost validated this official session.prompt payload before recording it.
+      const groupSessionId = (groupPrompt.payload as { sessionId: string }).sessionId;
+      const persistedGroupCursor = await waitUntil(() => {
+        const groups = JSON.parse(readFileSync(join(home, ".openmausbot", "groups.json"), "utf8"));
+        // SAFETY: this private test file is written by Store's typed GroupRecord serializer.
+        return groups.find((candidate: { id: string }) => candidate.id === group.id)
+          ?.memberResumeCursors?.[bot.id]?.deepseekHarness as string | undefined;
+      });
+      expect(persistedGroupCursor).toMatch(/^dsh1:/);
+      const privateRuntime = await stream.until((frame) => frame.kind === "runtime" && frame.event?.type === "session.started" && frame.event?.threadId === group.threadId);
+      expect(privateRuntime.event).toMatchObject({ type: "session.started", sessionId: null });
+      expect(privateRuntime.event).not.toHaveProperty("resumeCursor");
+      expect(JSON.stringify(privateRuntime)).not.toContain(groupSessionId);
+      expect(JSON.stringify(privateRuntime)).not.toContain("dsh1:");
+      const wireState = (await api("GET", "/api/bots")).body;
+      expect(wireState.groups.find((candidate: { id: string }) => candidate.id === group.id)).not.toHaveProperty("memberResumeCursors");
+
+      dshStub.send("mux", {
+        type: "server-request",
+        rpcId: "server-room-cursor-end",
+        method: "session/event",
+        payload: { type: "session/event", sessionId: groupSessionId, event: { type: "turn/end", seq: 1, time: 1, data: { reason: { kind: "completed" } } } },
+      });
+      await waitUntil(async () => {
+        const current = (await api("GET", "/api/bots")).body.groups.find((candidate: { id: string }) => candidate.id === group.id);
+        return current?.busyBotId ? undefined : true;
+      });
+
+      const botStart = dshStub.requests.length;
+      expect((await api("POST", `/api/bots/${bot.id}/messages`, { text: "bot cursor fixture" })).status).toBe(202);
+      const botPrompt = await waitUntil(() => dshStub.requests
+        .slice(botStart)
+        .map((entry) => dshClientRequestSchema.safeParse(entry.body).data)
+        .find((entry) => entry?.method === "session.prompt"));
+      // SAFETY: FakeDshHost validated this official session.prompt payload before recording it.
+      const botSessionId = (botPrompt.payload as { sessionId: string }).sessionId;
+      const persistedBotCursor = await waitUntil(() => {
+        const bots = JSON.parse(readFileSync(join(home, ".openmausbot", "bots.json"), "utf8"));
+        // SAFETY: this private test file is written by Store's typed BotRecord serializer.
+        return bots.find((candidate: { id: string }) => candidate.id === bot.id)
+          ?.resumeCursors?.deepseekHarness as string | undefined;
+      });
+      expect(persistedBotCursor).toMatch(/^dsh1:/);
+      expect(persistedBotCursor).not.toBe(persistedGroupCursor);
+      expect((await api("GET", "/api/bots")).body.bots.find((candidate: { id: string }) => candidate.id === bot.id)).not.toHaveProperty("resumeCursors");
+      const botRuntime = await stream.until((frame) => frame.kind === "runtime" && frame.event?.type === "session.started" && frame.event?.threadId === bot.threadId);
+      expect(botRuntime.event).toMatchObject({ type: "session.started", sessionId: null });
+      expect(botRuntime.event).not.toHaveProperty("resumeCursor");
+      expect(JSON.stringify(botRuntime)).not.toContain(botSessionId);
+      expect(JSON.stringify(botRuntime)).not.toContain("dsh1:");
+
+      dshStub.send("mux", {
+        type: "server-request",
+        rpcId: "server-bot-cursor-end",
+        method: "session/event",
+        payload: { type: "session/event", sessionId: botSessionId, event: { type: "turn/end", seq: 1, time: 1, data: { reason: { kind: "completed" } } } },
+      });
+      await waitUntil(async () => {
+        const current = (await api("GET", "/api/bots")).body.bots.find((candidate: { id: string }) => candidate.id === bot.id);
+        return current?.busy ? undefined : true;
+      });
+    } finally {
+      stream.close();
+      await api("DELETE", `/api/groups/${group.id}`);
+      await api("DELETE", `/api/bots/${bot.id}`);
+    }
   });
 
   it("answers a room approval whose turn is already over instead of stranding the room", async () => {

@@ -1,8 +1,8 @@
 import { afterEach, describe, expect, it } from "vitest";
 
 import { DshApiClient, DshRpcError } from "./client.ts";
-import { dshClientRequestSchema, dshJsonValueSchema } from "./protocol.ts";
-import { FakeDshHost } from "../../testing/fake-dsh-host.ts";
+import { dshClientRequestSchema, dshClientResponseSchema, dshJsonValueSchema } from "./protocol.ts";
+import { defaultFakeResponse, FakeDshHost } from "../../testing/fake-dsh-host.ts";
 
 const hosts: FakeDshHost[] = [];
 
@@ -18,13 +18,49 @@ async function host(): Promise<FakeDshHost> {
 }
 
 describe("DshApiClient unary transport", () => {
+  it("builds exact official defaults for every fake Host RPC without undefined fields", () => {
+    const cases = [
+      ["session.create", { cwd: "/fixture" }, { sessionId: "fake-session" }],
+      ["session.selectModel", { sessionId: "s", provider: "deepseek", model: "chat" }, { selected: { provider: "deepseek", model: "chat" } }],
+      ["session.prompt", { sessionId: "s", mode: "queue", content: [{ type: "text", text: "x" }] }, { accepted: true }],
+      ["session.cancel", { sessionId: "s" }, { accepted: true }],
+      ["host.describe", {}, { version: "fake", cwd: "/fixture", attachedSessions: 0, home: "/fixture", canOpenPath: false }],
+      ["llm.models", {}, { groups: [], failures: [] }],
+      ["agentPreset.list", {}, { presets: [], authorable: false, hasDocument: false }],
+    ] as const;
+
+    for (const [method, payload, value] of cases) {
+      const request = dshClientRequestSchema.parse({ type: "client-request", rpcId: `default-${method}`, method, payload });
+      expect(defaultFakeResponse({ path: `/api/${method}`, headers: {}, body: request })).toStrictEqual({
+        type: "server-response",
+        rpcId: `default-${method}`,
+        result: { ok: true, value },
+      });
+    }
+
+    const response = dshJsonValueSchema.parse(
+      dshClientResponseSchema.parse({
+        type: "client-response",
+        rpcId: "default-respond",
+        result: { ok: false, error: { code: "cancelled", message: "cleanup", details: {} } },
+      }),
+    );
+    expect(defaultFakeResponse({ path: "/api/respond", headers: {}, body: response })).toStrictEqual({ accepted: true });
+  });
+
   it("uses the direct API path and correlates the returned rpc id", async () => {
     const fake = await host();
     const client = new DshApiClient({ baseUrl: fake.baseUrl, transport: "direct" });
 
     const result = await client.unary<{ name: string }>("host.describe", {});
 
-    expect(result.value).toEqual({});
+    expect(result.value).toEqual({
+      version: "fake",
+      cwd: "/fixture",
+      attachedSessions: 0,
+      home: "/fixture",
+      canOpenPath: false,
+    });
     expect(result.rpcId).toMatch(/^[a-z0-9-]+$/);
     expect(fake.requests).toHaveLength(1);
     expect(fake.requests[0]).toMatchObject({
@@ -32,6 +68,41 @@ describe("DshApiClient unary transport", () => {
       headers: { "content-type": "application/json" },
       body: { type: "client-request", method: "host.describe", rpcId: result.rpcId, payload: {} },
     });
+    client.close();
+  });
+
+  it.each([
+    ["session.create", { cwd: "/fixture" }],
+    ["session.selectModel", { sessionId: "s", provider: "deepseek", model: "chat" }],
+    ["session.prompt", { sessionId: "s", mode: "queue", content: [{ type: "text", text: "hello" }] }],
+    ["session.cancel", { sessionId: "s" }],
+    ["host.describe", {}],
+    ["llm.models", {}],
+    ["agentPreset.list", {}],
+  ] as const)("rejects a malformed successful %s value at the Host boundary", async (method, payload) => {
+    const fake = await host();
+    fake.onRawRequest = ({ body }, response) => {
+      const request = dshClientRequestSchema.parse(body);
+      response.writeHead(200, { "content-type": "application/json" });
+      response.end(JSON.stringify({ type: "server-response", rpcId: request.rpcId, result: { ok: true, value: {} } }));
+      return true;
+    };
+    const client = new DshApiClient({ baseUrl: fake.baseUrl, transport: "direct" });
+
+    await expect(client.unary(method, dshJsonValueSchema.parse(payload))).rejects.toThrow("DSH response value was invalid");
+    client.close();
+  });
+
+  it("makes the strict fake reject a malformed method-specific success fixture", async () => {
+    const fake = await host();
+    fake.onRequest = ({ body }) => {
+      const request = dshClientRequestSchema.parse(body);
+      return dshJsonValueSchema.parse({ type: "server-response", rpcId: request.rpcId, result: { ok: true, value: {} } });
+    };
+    const client = new DshApiClient({ baseUrl: fake.baseUrl, transport: "direct" });
+
+    await expect(client.unary("session.create", { cwd: "/fixture" })).rejects.toThrow();
+    expect(fake.invalidResponses).toContain("invalid session.create success value");
     client.close();
   });
 
@@ -94,7 +165,7 @@ describe("DshApiClient unary transport", () => {
 
     await client.unary("llm.models", {});
     await client.unary("agentPreset.list", {});
-    await client.unary("session.create", {});
+    await client.unary("session.create", { cwd: "/fixture" });
 
     expect(fake.requests.map((request) => request.path)).toEqual([
       "/remote/api/llm.models",
@@ -106,8 +177,10 @@ describe("DshApiClient unary transport", () => {
 
   it("rejects mismatched response rpc ids", async () => {
     const fake = await host();
-    fake.onRequest = () => {
-      return dshJsonValueSchema.parse({ type: "server-response", rpcId: "a-different-rpc-id", result: { ok: true, value: {} } });
+    fake.onRawRequest = (_request, response) => {
+      response.writeHead(200, { "content-type": "application/json" });
+      response.end(JSON.stringify({ type: "server-response", rpcId: "a-different-rpc-id", result: { ok: true, value: { version: "fixture", cwd: "/fixture", attachedSessions: 0, home: "/fixture", canOpenPath: false } } }));
+      return true;
     };
     const client = new DshApiClient({ baseUrl: fake.baseUrl, transport: "direct" });
 
@@ -123,7 +196,7 @@ describe("DshApiClient unary transport", () => {
       return dshJsonValueSchema.parse({
         type: "server-response",
         rpcId,
-        result: { ok: false, error: { code: "model-unavailable", message: `reflected ${deviceCookie}` } },
+        result: { ok: false, error: { code: "model-unavailable", message: `reflected ${deviceCookie}`, details: { provider: "fixture", model: "missing" } } },
       });
     };
     const client = new DshApiClient({ baseUrl: fake.baseUrl, transport: "paired", deviceCookie });
@@ -156,27 +229,156 @@ describe("DshApiClient unary transport", () => {
     client.close();
   });
 
+  it("bounds blackholed operations and lets close abort an in-flight request", async () => {
+    const fake = await host();
+    fake.onRawRequest = () => true;
+    const timed = new DshApiClient({ baseUrl: fake.baseUrl, transport: "direct", timeoutMs: 25 });
+    await expect(timed.unary("host.describe", {})).rejects.toThrow("could not reach the host");
+    timed.close();
+
+    const closing = new DshApiClient({ baseUrl: fake.baseUrl, transport: "direct", timeoutMs: 5_000 });
+    const pending = closing.unary("host.describe", {});
+    await fake.waitForRawResponse();
+    closing.close();
+    await expect(pending).rejects.toThrow("could not reach the host");
+  });
+
   it("sends client-response envelopes to the respond endpoint", async () => {
     const fake = await host();
     fake.onRequest = () => ({ accepted: true });
     const client = new DshApiClient({ baseUrl: fake.baseUrl, transport: "direct" });
 
-    await expect(client.respond("approval-1", { ok: true, value: { allow: true } })).resolves.toEqual({ accepted: true });
+    await expect(client.respond("approval-1", { ok: true, value: { sessionId: "s1", approvalId: "approval-1", outcome: "allowed-once" } })).resolves.toEqual({ accepted: true });
 
     expect(fake.requests[0]).toMatchObject({
       path: "/api/respond",
-      body: { type: "client-response", rpcId: "approval-1", result: { ok: true, value: { allow: true } } },
+      body: { type: "client-response", rpcId: "approval-1", result: { ok: true, value: { sessionId: "s1", approvalId: "approval-1", outcome: "allowed-once" } } },
     });
+    client.close();
+  });
+
+  it("maps an abort while reading a partial body to a fixed transport error", async () => {
+    const fake = await host();
+    fake.onRawRequest = (_request, response) => {
+      response.writeHead(200, { "content-type": "application/json", "transfer-encoding": "chunked" });
+      response.write('{"type":"server-response"');
+      return true;
+    };
+    const client = new DshApiClient({ baseUrl: fake.baseUrl, transport: "direct", timeoutMs: 25 });
+    await expect(client.unary("host.describe", {})).rejects.toThrow("DSH request could not reach the host");
+    client.close();
+  });
+
+  it("lets the strict fake reject obsolete session prompt payloads", async () => {
+    const fake = await host();
+    const client = new DshApiClient({ baseUrl: fake.baseUrl, transport: "direct" });
+    await expect(client.unary("session.prompt", { sessionId: "s1", mode: "queue", text: "obsolete" })).rejects.toThrow("HTTP 400");
+    expect(fake.invalidRequests).toEqual(["invalid session.prompt payload"]);
+    client.close();
+  });
+
+  it("lets the strict fake reject client methods outside the implemented Host surface", async () => {
+    const fake = await host();
+    const client = new DshApiClient({ baseUrl: fake.baseUrl, transport: "direct" });
+
+    await expect(client.unary("session.invented", {})).rejects.toThrow("HTTP 400");
+    expect(fake.invalidRequests).toEqual(["unsupported session.invented method"]);
+    client.close();
+  });
+
+  it("matches the official create, event, question, and cancellation schemas", async () => {
+    const fake = await host();
+    fake.onRequest = ({ body }) => {
+      if (dshClientResponseSchema.safeParse(body).success) return dshJsonValueSchema.parse({ accepted: true });
+      const rpcId = dshClientRequestSchema.parse(body).rpcId;
+      return dshJsonValueSchema.parse({ type: "server-response", rpcId, result: { ok: true, value: { sessionId: "s" } } });
+    };
+    const client = new DshApiClient({ baseUrl: fake.baseUrl, transport: "direct" });
+
+    await expect(client.unary("session.create", {})).resolves.toMatchObject({ value: { sessionId: "s" } });
+    expect(() => fake.send("mux", { type: "server-request", rpcId: "q", method: "question/requested", payload: {
+      type: "question/requested", sessionId: "s", questions: [{ id: "id", question: "q", header: "h", detail: "d", options: [{ label: "A", description: "desc" }], multiSelect: true, intent: { kind: "plan-review", approve: "Ship" } }],
+    } })).not.toThrow();
+    expect(() => fake.send("mux", { type: "server-request", rpcId: "bad-approval", method: "approval/requested", payload: { type: "approval/requested", sessionId: "s", approvalId: "a" } })).toThrow("invalid official");
+    expect(() => fake.send("mux", { type: "server-request", rpcId: "bad-time", method: "session/event", payload: { type: "session/event", sessionId: "s", event: { type: "turn/start", seq: 0, time: "now", data: {} } } })).toThrow("invalid official");
+    expect(() => fake.send("mux", { type: "server-request", rpcId: "bad-error", method: "stream/error", payload: { type: "stream/error", error: { code: "cancelled", message: "x" } } })).toThrow("invalid official");
+    expect(() => fake.send("mux", { type: "server-request", rpcId: "queue", method: "session/queue", payload: {
+      type: "session/queue", sessionId: "s", items: [{ id: "m", placement: "queued", message: { id: "m", role: "user", content: [{ type: "text", text: "hello" }], source: { kind: "user" } } }],
+    } })).not.toThrow();
+    expect(() => fake.send("mux", { type: "server-request", rpcId: "bad-queue", method: "session/queue", payload: {
+      type: "session/queue", sessionId: "s", items: [{ id: "m", placement: "queued", message: { id: "m", role: "user", content: [] } }],
+    } })).toThrow("invalid official");
+    expect(() => fake.send("mux", { type: "server-request", rpcId: "jobs", method: "session/jobs", payload: {
+      type: "session/jobs", sessionId: "s", jobs: [{ id: "job", kind: "shell", label: "Build", status: "running", startedAt: 1 }],
+    } })).not.toThrow();
+    expect(() => fake.send("mux", { type: "server-request", rpcId: "bad-jobs", method: "session/jobs", payload: {
+      type: "session/jobs", sessionId: "s", jobs: [{ id: "job", kind: "shell", label: "Build", status: "running" }],
+    } })).toThrow("invalid official");
+    expect(() => fake.send("host", { type: "server-request", rpcId: "workspace", method: "host/workspace-changed", payload: {
+      type: "host/workspace-changed", workspace: { workspaceId: "w", path: "/tmp/w", title: "Workspace", sessionIds: ["s"], createdAt: "now", updatedAt: "now" },
+    } })).not.toThrow();
+    expect(() => fake.send("host", { type: "server-request", rpcId: "bad-workspace", method: "host/workspace-changed", payload: {
+      type: "host/workspace-changed", workspace: { workspaceId: "w", path: "/tmp/w", title: "Workspace", sessionIds: ["s"], createdAt: "now" },
+    } })).toThrow("invalid official");
+    await expect(client.respond("cancel-rpc", { ok: false, error: { code: "cancelled", message: "cleanup", details: {} } })).resolves.toEqual({ accepted: true });
+    // SAFETY: this deliberately malformed fixture verifies the runtime schema rejects missing error details.
+    await expect(client.respond("malformed", { ok: false, error: { code: "cancelled", message: "cleanup" } } as never)).rejects.toThrow("response envelope was invalid");
+    expect(dshClientResponseSchema.parse(fake.requests.at(-1)!.body).result).toEqual({ ok: false, error: { code: "cancelled", message: "cleanup", details: {} } });
+    client.close();
+  });
+
+  it("rejects a valueless success when session.cancel requires accepted true", async () => {
+    const fake = await host();
+    fake.onRawRequest = ({ body }, response) => {
+      const request = dshClientRequestSchema.parse(body);
+      response.writeHead(200, { "content-type": "application/json" });
+      response.end(JSON.stringify({ type: "server-response", rpcId: request.rpcId, result: { ok: true } }));
+      return true;
+    };
+    const client = new DshApiClient({ baseUrl: fake.baseUrl, transport: "direct" });
+
+    await expect(client.unary("session.cancel", { sessionId: "void-session" })).rejects.toThrow("DSH response value was invalid");
     client.close();
   });
 });
 
 describe("DshApiClient event streams", () => {
+  it("recycles both physical streams after an incomplete WebSocket upgrade and later recovers", async () => {
+    const fake = await host();
+    fake.setStreamHandshakeHung("mux", true);
+    const client = new DshApiClient({ baseUrl: fake.baseUrl, transport: "direct", streamOpenTimeoutMs: 30 });
+    const health: string[] = [];
+    const stopHealth = client.subscribeHealth((state) => health.push(`${state.kind}:${state.state}:${state.generation}`));
+    const stopMux = client.subscribeMux(() => {});
+    const stopHost = client.subscribeHost(() => {});
+
+    try {
+      const readiness = client.waitForStreamsOpen();
+      await fake.waitForHungStreamHandshake("mux");
+      await expect(readiness).rejects.toThrow("event streams did not open");
+
+      fake.setStreamHandshakeHung("mux", false);
+      await Promise.all([fake.waitForStream("mux"), client.waitForStreamsOpen()]);
+
+      expect(fake.streamHeaders.mux).toHaveLength(1);
+      expect(fake.streamHeaders.host.length).toBeGreaterThanOrEqual(2);
+      expect(health.filter((entry) => entry.startsWith("mux:reconnecting"))).toHaveLength(1);
+      expect(health.filter((entry) => entry.startsWith("host:reconnecting"))).toHaveLength(1);
+    } finally {
+      stopMux();
+      stopHost();
+      stopHealth();
+      client.close();
+    }
+  });
+
   it("connects both streams, ignores malformed frames, reconnects, and tears down cleanly", async () => {
     const fake = await host();
     const client = new DshApiClient({ baseUrl: fake.baseUrl, transport: "paired", deviceCookie: "dsh_device=fixture-value" });
     const muxFrames: unknown[] = [];
     const hostFrames: unknown[] = [];
+    const health: string[] = [];
+    const stopHealth = client.subscribeHealth((state) => health.push(`${state.kind}:${state.state}`));
     const firstMux = deferred();
     const secondMux = deferred();
     const firstHost = deferred();
@@ -191,26 +393,31 @@ describe("DshApiClient event streams", () => {
     });
 
     await Promise.all([fake.waitForStream("mux"), fake.waitForStream("host")]);
+    expect(health).toContain("mux:connected");
     expect(fake.streamHeaders.mux[0].cookie).toBe("dsh_device=fixture-value");
     expect(fake.streamHeaders.host[0].cookie).toBe("dsh_device=fixture-value");
     fake.sendRaw("mux", "not JSON");
-    fake.send("mux", { type: "unexpected", rpcId: "nope" });
-    fake.send("mux", { type: "server-request", rpcId: "mux-1", method: "session/event", payload: { sessionId: "s1" } });
-    fake.send("host", { type: "server-request", rpcId: "host-1", method: "host/status", payload: { ready: true } });
+    fake.sendRaw("mux", JSON.stringify({ type: "unexpected", rpcId: "nope" }));
+    const muxOne = { type: "server-request", rpcId: "mux-1", method: "session/event", payload: { type: "session/event", sessionId: "s1", event: { type: "turn/start", seq: 0, time: 1, data: {} } } };
+    const hostOne = { type: "server-request", rpcId: "host-1", method: "host/agent-error", payload: { type: "host/agent-error", sessionId: "s1", message: "fixture" } };
+    fake.send("mux", muxOne);
+    fake.send("host", hostOne);
 
     await Promise.all([firstMux.promise, firstHost.promise]);
-    expect(muxFrames).toEqual([{ type: "server-request", rpcId: "mux-1", method: "session/event", payload: { sessionId: "s1" } }]);
-    expect(hostFrames).toEqual([{ type: "server-request", rpcId: "host-1", method: "host/status", payload: { ready: true } }]);
+    expect(muxFrames).toEqual([muxOne]);
+    expect(hostFrames).toEqual([hostOne]);
 
     const muxClosed = fake.waitForNoStreams("mux");
     fake.closeStreams("mux");
     await muxClosed;
+    expect(health).toContain("mux:reconnecting");
     await fake.waitForStream("mux");
-    fake.send("mux", { type: "server-request", rpcId: "mux-2", method: "session/event", payload: { sessionId: "s2" } });
+    fake.send("mux", { type: "server-request", rpcId: "mux-2", method: "session/event", payload: { type: "session/event", sessionId: "s2", event: { type: "turn/start", seq: 0, time: 1, data: {} } } });
     await secondMux.promise;
 
     stopMux();
     stopHost();
+    stopHealth();
     const allClosed = Promise.all([fake.waitForNoStreams("mux"), fake.waitForNoStreams("host")]);
     client.close();
     await allClosed;

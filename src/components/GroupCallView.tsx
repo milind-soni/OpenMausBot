@@ -86,7 +86,7 @@ function GroupCall({ group, members }: { group: Group; members: Bot[] }) {
   }
 
   const askedApproval = useRef<{ requestId: string; member?: Bot } | null>(null);
-  const askedQuestion = useRef<{ requestId: string; member?: Bot } | null>(null);
+  const askedQuestion = useRef<{ requestId: string; member?: Bot; options: string[] } | null>(null);
   const phaseRef = useRef<Phase>(initialPhase);
   const alive = useRef(true);
   const sayGeneration = useRef(0);
@@ -234,12 +234,15 @@ function GroupCall({ group, members }: { group: Group; members: Bot[] }) {
       if (openQuestion) {
         askedQuestion.current = null;
         allowBargeIn.current = false;
+        const selected = openQuestion.options.find((option) => option.localeCompare(said, undefined, { sensitivity: "accent" }) === 0);
         dispatch({
           type: "decideRequest",
           threadId: group.threadId,
           requestId: openQuestion.requestId,
           behavior: "answer",
           message: said,
+          selected: selected ? [selected] : [],
+          custom: selected ? undefined : said,
         });
         move("working");
         return;
@@ -307,7 +310,7 @@ function GroupCall({ group, members }: { group: Group; members: Bot[] }) {
 
     if (question?.card?.requestId && askedQuestion.current?.requestId !== question.card.requestId) {
       const member = members.find((candidate) => candidate.id === question.from?.botId);
-      askedQuestion.current = { requestId: question.card.requestId, member };
+      askedQuestion.current = { requestId: question.card.requestId, member, options: question.card.options };
       spokenIds.current.add(question.id);
       const name = member?.name ?? question.from?.name ?? "A channel member";
       const detail = question.card.subtitle.trim();

@@ -101,6 +101,11 @@ describe("configuration boundaries", () => {
 });
 
 describe("default fleet", () => {
+  it("ships DeepSeek Harness without injecting any credential environment", () => {
+    const map = instanceConfigs({});
+    expect(map.deepseekHarness).toEqual({ driver: "deepseekHarness", environment: {} });
+  });
+
   it("ships Qwen and Hermes as custom-only engines", () => {
     const map = instanceConfigs({});
     expect(map.qwen).toEqual({ driver: "qwenAgent", environment: {} });
@@ -119,6 +124,7 @@ describe("default fleet", () => {
     expect(map.hermes?.driver).toBe("hermesAgent");
     expect(map.cursor?.driver).toBe("cursorAgent");
     expect(map.openaiCompat?.driver).toBe("openai-compat");
+    expect(map.deepseekHarness?.driver).toBe("deepseekHarness");
   });
 
   it("does not expand a one-off shadow fleet", () => {

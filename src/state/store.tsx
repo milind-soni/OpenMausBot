@@ -31,6 +31,7 @@ export interface OptionCardData {
   title: string;
   subtitle: string;
   options: string[];
+  multiSelect?: boolean;
   answered?: string;
   dismissed?: boolean;
   /** Present when this card is a live provider ask (approval/question). */
@@ -441,8 +442,12 @@ export type Action =
   | { type: "editMessage"; botId: string; messageId: string; text: string }
   | { type: "switchBranch"; botId: string; messageId: string }
   | { type: "threadActive"; threadId: string; activeLeafId: string }
-  | { type: "answerCard"; botId: string; messageId: string; answer: string }
+  | { type: "answerCard"; botId: string; messageId: string; answer: string; selected?: string[]; custom?: string }
+  | { type: "restoreCard"; botId: string; messageId: string; requestId: string; expectedAnswer?: string; expectedDismissed?: true }
   | { type: "dismissCard"; botId: string; messageId: string }
+  | { type: "answerGroupCard"; groupId: string; messageId: string; answer: string; selected?: string[]; custom?: string }
+  | { type: "dismissGroupCard"; groupId: string; messageId: string }
+  | { type: "restoreGroupCard"; groupId: string; messageId: string; requestId: string; expectedAnswer?: string; expectedDismissed?: true }
   // permission cards answer by THREAD, so a request raised inside a room
   // can be answered the same way as one in a 1:1 chat
   | {
@@ -451,6 +456,8 @@ export type Action =
       requestId: string;
       behavior: "allow" | "deny" | "answer";
       message?: string;
+      selected?: string[];
+      custom?: string;
       /** remember this exact grant (the server's allowKey) for the bot */
       alwaysAllow?: { botId: string; key: string };
     }
@@ -536,6 +543,24 @@ function patchCard(state: AppState, botId: string, messageId: string, patch: Par
       m.id === messageId && m.card ? { ...m, card: { ...m.card, ...patch } } : m,
     ),
   }));
+}
+
+function patchGroupCard(state: AppState, groupId: string, messageId: string, patch: Partial<OptionCardData>): AppState {
+  return {
+    ...state,
+    groups: state.groups.map((group) => group.id === groupId ? {
+      ...group,
+      messages: group.messages.map((message) => message.id === messageId && message.card
+        ? { ...message, card: { ...message.card, ...patch } }
+        : message),
+    } : group),
+  };
+}
+
+function canRestoreCard(card: OptionCardData | undefined, action: { requestId: string; expectedAnswer?: string; expectedDismissed?: true }): boolean {
+  if (!card || card.requestId !== action.requestId) return false;
+  if (action.expectedAnswer !== undefined) return card.answered === action.expectedAnswer && card.dismissed !== true;
+  return action.expectedDismissed === true && card.dismissed === true && card.answered === undefined;
 }
 
 export function reducer(state: AppState, action: Action): AppState {
@@ -663,6 +688,18 @@ export function reducer(state: AppState, action: Action): AppState {
       );
     case "dismissCard":
       return patchCard(state, action.botId, action.messageId, { dismissed: true });
+    case "restoreCard": {
+      const card = state.bots.find((bot) => bot.id === action.botId)?.messages.find((message) => message.id === action.messageId)?.card;
+      return canRestoreCard(card, action) ? patchCard(state, action.botId, action.messageId, { answered: undefined, dismissed: false }) : state;
+    }
+    case "answerGroupCard":
+      return patchGroupCard(state, action.groupId, action.messageId, { answered: action.answer });
+    case "dismissGroupCard":
+      return patchGroupCard(state, action.groupId, action.messageId, { dismissed: true });
+    case "restoreGroupCard": {
+      const card = state.groups.find((group) => group.id === action.groupId)?.messages.find((message) => message.id === action.messageId)?.card;
+      return canRestoreCard(card, action) ? patchGroupCard(state, action.groupId, action.messageId, { answered: undefined, dismissed: false }) : state;
+    }
     case "decideRequest":
       return state; // the server's request.resolved patch settles the card
     case "botAdded":
@@ -1256,6 +1293,8 @@ export function StoreProvider({ children }: { children: ReactNode }) {
                 requestId: action.requestId,
                 behavior: action.behavior,
                 message: action.message,
+                selected: action.selected,
+                custom: action.custom,
               }),
             }).catch(showError);
           if (action.alwaysAllow) {
@@ -1288,9 +1327,14 @@ export function StoreProvider({ children }: { children: ReactNode }) {
               body: JSON.stringify({
                 requestId: card.requestId,
                 behavior,
-                message: behavior === "answer" ? action.answer : undefined,
+                message: behavior === "answer" ? action.custom ?? action.selected?.[0] : undefined,
+                selected: behavior === "answer" ? action.selected : undefined,
+                custom: behavior === "answer" ? action.custom : undefined,
               }),
-            }).catch(showError);
+            }).catch((error) => {
+              rawDispatch({ type: "restoreCard", botId: action.botId, messageId: action.messageId, requestId: card.requestId!, expectedAnswer: action.answer });
+              showError(error);
+            });
           } else {
             persistCard(action.botId, action.messageId, { answered: action.answer });
             api(`/api/bots/${action.botId}/messages`, {
@@ -1307,10 +1351,39 @@ export function StoreProvider({ children }: { children: ReactNode }) {
             api(`/api/bots/${action.botId}/respond`, {
               method: "POST",
               body: JSON.stringify({ requestId: card.requestId, behavior: "deny", message: "Dismissed by user." }),
-            }).catch(() => {});
+            }).catch((error) => {
+              rawDispatch({ type: "restoreCard", botId: action.botId, messageId: action.messageId, requestId: card.requestId!, expectedDismissed: true });
+              showError(error);
+            });
           } else {
             persistCard(action.botId, action.messageId, { dismissed: true });
           }
+          break;
+        }
+        case "answerGroupCard": {
+          const group = stateRef.current.groups.find((candidate) => candidate.id === action.groupId);
+          const card = group?.messages.find((message) => message.id === action.messageId)?.card;
+          if (!group || !card?.requestId) break;
+          api(`/api/threads/${group.threadId}/respond`, {
+            method: "POST",
+            body: JSON.stringify({ requestId: card.requestId, behavior: "answer", message: action.custom ?? action.selected?.[0], selected: action.selected, custom: action.custom }),
+          }).catch((error) => {
+            rawDispatch({ type: "restoreGroupCard", groupId: action.groupId, messageId: action.messageId, requestId: card.requestId!, expectedAnswer: action.answer });
+            showError(error);
+          });
+          break;
+        }
+        case "dismissGroupCard": {
+          const group = stateRef.current.groups.find((candidate) => candidate.id === action.groupId);
+          const card = group?.messages.find((message) => message.id === action.messageId)?.card;
+          if (!group || !card?.requestId) break;
+          api(`/api/threads/${group.threadId}/respond`, {
+            method: "POST",
+            body: JSON.stringify({ requestId: card.requestId, behavior: "deny", message: "Dismissed by user." }),
+          }).catch((error) => {
+            rawDispatch({ type: "restoreGroupCard", groupId: action.groupId, messageId: action.messageId, requestId: card.requestId!, expectedDismissed: true });
+            showError(error);
+          });
           break;
         }
         case "newBot":

@@ -279,6 +279,11 @@ const wireBot = (bot: NonNullable<ReturnType<typeof store.bot>>) => {
   return { ...rest, avatarUrl: rest.avatarUrl ?? null, ...(tasks ? { tasks: tasks.map(wireTask) } : {}) };
 };
 
+const wireGroup = (group: NonNullable<ReturnType<typeof store.group>>) => {
+  const { memberResumeCursors: _memberResumeCursors, ...rest } = group;
+  return rest;
+};
+
 /** Profile URLs are app-owned references, not merely strings with a trusted
  * prefix. Resolve them before persistence so every accepted avatar can be
  * fetched immediately and a deleted/guessed attachment id cannot become a
@@ -320,7 +325,7 @@ store.onChange((change) => {
       break;
     case "group": {
       const group = store.group(change.groupId);
-      if (group) broadcast({ kind: "group", group });
+      if (group) broadcast({ kind: "group", group: wireGroup(group) });
       break;
     }
     case "group.deleted":
@@ -447,6 +452,13 @@ function broadcast(payload: Record<string, unknown>) {
 const toolMessageByItem = new Map<string, string>(); // threadId:itemId -> messageId
 const askMessageByRequest = new Map<string, string>(); // threadId:requestId -> messageId
 
+/** Provider-native continuation ids are persistence inputs, never public runtime data. */
+function wireRuntimeEvent(event: RuntimeEvent): RuntimeEvent {
+  if (event.type !== "session.started") return event;
+  const { resumeCursor: _resumeCursor, sessionId: _sessionId, ...rest } = event;
+  return { ...rest, type: "session.started", sessionId: null };
+}
+
 /** Deliver a person's answer to the engine that asked, and tell the truth
  * about what happened. `unavailable` — the turn ended, the ask timed out,
  * the engine has no asks — is fail-closed: the action was never run. The
@@ -458,6 +470,8 @@ async function answerRequest(
   requestId: string,
   behavior: "allow" | "deny" | "answer",
   message?: string,
+  selected?: string[],
+  custom?: string,
   decidedFor?: { id: string; name: string },
 ): Promise<RequestOutcome> {
   // Snapshot the card BEFORE delivering the answer: a delivered answer
@@ -476,7 +490,7 @@ async function answerRequest(
   let outcome: RequestOutcome = "unavailable";
   if (instance) {
     try {
-      outcome = await instance.adapter.respondToRequest(threadId, requestId, { behavior, message });
+      outcome = await instance.adapter.respondToRequest(threadId, requestId, { behavior, message, selected, custom });
     } catch {
       outcome = "unavailable";
     }
@@ -486,7 +500,7 @@ async function answerRequest(
   // over a request nothing answered would be the audit log lying. A
   // question's `answer` is conversation, not authorization, so it is not a
   // decision either.
-  if (outcome !== "unavailable" && behavior !== "answer") {
+  if (outcome !== "unavailable" && outcome !== "retryable" && outcome !== "already-resolved" && behavior !== "answer" && card?.tool) {
     appendDecision(DATA_DIR, {
       threadId,
       requestId,
@@ -507,7 +521,7 @@ async function answerRequest(
     const existing = messageId
       ? thread.find((m) => m.id === messageId)
       : thread.find((m) => m.card?.requestId === requestId);
-    if (existing?.card && !existing.card.answered) {
+    if (existing?.card && existing.card.answered === undefined) {
       store.patchMessage(threadId, existing.id, { card: { ...existing.card, answered: "unavailable", dismissed: true } });
     }
     if (messageId) askMessageByRequest.delete(`${threadId}:${requestId}`);
@@ -530,7 +544,7 @@ function closeOpenApprovals(threadId: string): void {
   cancelPeerApprovalsForThread(threadId);
   for (const message of store.messagesFor(threadId)) {
     const card = message.card;
-    if (!card?.requestId || card.answered || card.dismissed) continue;
+    if (!card?.requestId || card.answered !== undefined || card.dismissed) continue;
     store.patchMessage(threadId, message.id, { card: { ...card, answered: "unavailable", dismissed: true } });
     askMessageByRequest.delete(`${threadId}:${card.requestId}`);
   }
@@ -731,7 +745,7 @@ bus.subscribe((event: RuntimeEvent) => {
   if (event.type === "turn.completed") {
     releaseLocalVmThread(event.threadId);
   }
-  broadcast({ kind: "runtime", event });
+  broadcast({ kind: "runtime", event: wireRuntimeEvent(event) });
   const routineRun = routines?.handleRuntimeEvent(event) ?? null;
   const bot = store.botByThread(event.threadId);
   const group = bot ? undefined : store.groupByThread(event.threadId);
@@ -746,7 +760,9 @@ bus.subscribe((event: RuntimeEvent) => {
   switch (event.type) {
     case "session.started":
       if (bot && event.sessionId && event.providerInstanceId) {
-        store.setResumeCursor(bot.id, event.providerInstanceId, event.sessionId, event.threadId);
+        store.setResumeCursor(bot.id, event.providerInstanceId, event.resumeCursor ?? event.sessionId, event.threadId);
+      } else if (group && speaker && event.sessionId && event.providerInstanceId) {
+        store.setGroupResumeCursor(group.id, speaker.botId, event.providerInstanceId, event.resumeCursor ?? event.sessionId);
       }
       break;
     case "item.completed":
@@ -821,7 +837,8 @@ bus.subscribe((event: RuntimeEvent) => {
           try {
             if (!instance) throw new Error("provider unavailable");
             const outcome = await instance.adapter.respondToRequest(event.threadId, requestId, { behavior: "allow" });
-            if (outcome === "unavailable") throw new Error("the ask is no longer open");
+            if (outcome === "already-resolved") return;
+            if (outcome === "unavailable" || outcome === "retryable") throw new Error("the ask was not acknowledged");
             pushMessage({
               role: "bot",
               kind: "activity",
@@ -888,6 +905,7 @@ bus.subscribe((event: RuntimeEvent) => {
                 : "Your bot has a question",
           subtitle: event.summary,
           options: event.choices?.length ? event.choices : permission ? ["Allow", "Deny"] : [],
+          multiSelect: event.multiSelect,
           requestId: event.requestId,
           tool: permission ? event.tool : undefined,
           // the exact grant "always allow" would remember, decided here so
@@ -939,7 +957,7 @@ bus.subscribe((event: RuntimeEvent) => {
       const messageId = event.requestId ? askMessageByRequest.get(`${event.threadId}:${event.requestId}`) : null;
       if (messageId) {
         const existing = store.messagesFor(event.threadId).find((m) => m.id === messageId);
-        if (existing?.card && !existing.card.answered) {
+        if (existing?.card && existing.card.answered === undefined) {
           store.patchMessage(event.threadId, messageId, {
             card: { ...existing.card, answered: event.behavior, dismissed: event.source !== "user" },
           });
@@ -1994,10 +2012,12 @@ async function runGroupMemberTurn(
     instance.adapter
       .sendTurn({
         threadId: group.threadId,
+        sessionKey: `${group.threadId}:${bot.id}`,
         text,
         system: roomSystem,
         cwd,
         integrations,
+        resumeCursor: store.groupResumeCursor(group.id, bot.id, bot.modelSelection.instanceId),
         ...memberTurnSelection(bot.modelSelection),
       })
       .catch((err) => {
@@ -2918,7 +2938,7 @@ const server = createServer(async (req, res) => {
       if (limit === null) return json(res, 400, { error: "messages must be a non-negative whole number" });
       return json(res, 200, {
         bots: store.bots.map((bot) => ({ ...publicBot(bot), ...messagePage(bot.threadId, limit) })),
-        groups: store.groups.map((g) => ({ ...g, ...messagePage(g.threadId, limit) })),
+        groups: store.groups.map((g) => ({ ...wireGroup(g), ...messagePage(g.threadId, limit) })),
         computerControl: Object.fromEntries(
           store.bots.map((bot) => {
             const snapshot = computerControl.snapshot(bot.id);
@@ -3133,7 +3153,7 @@ const server = createServer(async (req, res) => {
         }
       }
       const group = store.createGroup(name, memberIds, false, section);
-      return json(res, 201, { group: { ...group, messages: [] } });
+      return json(res, 201, { group: { ...wireGroup(group), messages: [] } });
     }
     if (method === "POST" && path === "/api/teams/export") {
       const body = await readBody(req);
@@ -3314,9 +3334,9 @@ const server = createServer(async (req, res) => {
             // before anyone has worked, which is the store's call, not ours.
             group = store.patchGroup(group.id, { cwd: projectCwd }) ?? group;
           }
-          broadcast({ kind: "group", group });
+          broadcast({ kind: "group", group: wireGroup(group) });
         }
-        return json(res, 201, { bots: publicBots, archivedBots, archived, group });
+        return json(res, 201, { bots: publicBots, archivedBots, archived, group: group ? wireGroup(group) : undefined });
       } catch (error) {
         // A room of deleted members must not survive either — patchGroup can
         // throw (disk) after createGroup already saved.
@@ -3436,14 +3456,14 @@ const server = createServer(async (req, res) => {
       }
       const group = store.patchGroup(m[1], patch);
       if (!group) return json(res, 404, { error: "no such room" });
-      return json(res, 200, { group });
+      return json(res, 200, { group: wireGroup(group) });
     }
     m = path.match(/^\/api\/groups\/([\w-]+)\/read$/);
     if (m && method === "POST") {
       const group = store.patchGroup(m[1], { unread: false });
       if (!group) return json(res, 404, { error: "no such room" });
-      broadcast({ kind: "group", group });
-      return json(res, 200, { group });
+      broadcast({ kind: "group", group: wireGroup(group) });
+      return json(res, 200, { group: wireGroup(group) });
     }
     m = path.match(/^\/api\/groups\/([\w-]+)$/);
     if (m && method === "DELETE") {
@@ -3935,7 +3955,10 @@ const server = createServer(async (req, res) => {
       if (resolvePeerComms(approvalBus, String(body.requestId), behavior)) {
         return json(res, 200, { ok: true, outcome: behavior === "allow" ? "allowed-once" : "rejected" });
       }
-      const outcome = await answerRequest(bot.threadId, bot.modelSelection.instanceId, String(body.requestId), behavior, body.message, { id: bot.id, name: bot.name });
+      const selected = z.array(z.string()).safeParse(body.selected).data;
+      const custom = z.string().safeParse(body.custom).data;
+      const outcome = await answerRequest(bot.threadId, bot.modelSelection.instanceId, String(body.requestId), behavior, body.message, selected, custom, { id: bot.id, name: bot.name });
+      if (outcome === "retryable") return json(res, 409, { ok: false, outcome, error: "the host did not acknowledge the answer; retry it" });
       return json(res, 200, { ok: true, outcome });
     }
     // Answer by THREAD, so a request raised inside a room can be answered
@@ -3966,7 +3989,10 @@ const server = createServer(async (req, res) => {
           (pending?.from ? store.bot(pending.from.botId) : undefined)
         : store.botByThread(threadId);
       if (!owner && !pending) return json(res, 404, { error: "nothing is waiting on an answer in this conversation" });
-      const outcome = await answerRequest(threadId, owner?.modelSelection.instanceId ?? "", requestId, behavior, body.message, owner ? { id: owner.id, name: owner.name } : undefined);
+      const selected = z.array(z.string()).safeParse(body.selected).data;
+      const custom = z.string().safeParse(body.custom).data;
+      const outcome = await answerRequest(threadId, owner?.modelSelection.instanceId ?? "", requestId, behavior, body.message, selected, custom, owner ? { id: owner.id, name: owner.name } : undefined);
+      if (outcome === "retryable") return json(res, 409, { ok: false, outcome, error: "the host did not acknowledge the answer; retry it" });
       return json(res, 200, { ok: true, outcome });
     }
     m = path.match(/^\/api\/bots\/([\w-]+)\/interrupt$/);
