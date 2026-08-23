@@ -161,6 +161,7 @@ export const DeepSeekHarnessDriver: ProviderDriver<DeepSeekHarnessConfig> = {
     let models: ModelCatalog = { default: "", options: [] };
     let catalogUnavailable = false;
     const sessions = new Map<string, SessionRecord>();
+    const sessionThreads = new Set<string>();
     const sessionOwners = new Map<string, string>();
     const baselineFrames = new Map<string, BaselineFrame[]>();
     const baselineClaims = new Map<string, BaselineClaim>();
@@ -419,6 +420,7 @@ export const DeepSeekHarnessDriver: ProviderDriver<DeepSeekHarnessConfig> = {
       const remembered = sessions.get(sessionKey);
       if (remembered) {
         claimSession(sessionKey, remembered.sessionId);
+        sessionThreads.add(turn.threadId);
         return remembered;
       }
       const hasResumeCursor = turn.resumeCursor !== undefined && turn.resumeCursor !== null;
@@ -433,6 +435,7 @@ export const DeepSeekHarnessDriver: ProviderDriver<DeepSeekHarnessConfig> = {
         // this adapter ever had an accepted persona-bearing queue prompt.
         const record = { sessionId, personaDelivered: parsedCursor.personaDelivered };
         sessions.set(sessionKey, record);
+        sessionThreads.add(turn.threadId);
         return record;
       }
       const payload: SessionCreatePayload = { cwd: turn.cwd ?? homedir() };
@@ -443,6 +446,7 @@ export const DeepSeekHarnessDriver: ProviderDriver<DeepSeekHarnessConfig> = {
       claimSession(sessionKey, sessionId);
       const record = { sessionId, personaDelivered: false };
       sessions.set(sessionKey, record);
+      sessionThreads.add(turn.threadId);
       return record;
     };
     const sendTurn = async (turn: SendTurnInput) => {
@@ -1025,6 +1029,7 @@ export const DeepSeekHarnessDriver: ProviderDriver<DeepSeekHarnessConfig> = {
       }));
       await resolvePendingUnavailable();
       sessions.clear();
+      sessionThreads.clear();
       sessionOwners.clear();
       clearBaseline();
       recoverStream();
@@ -1055,7 +1060,7 @@ export const DeepSeekHarnessDriver: ProviderDriver<DeepSeekHarnessConfig> = {
         steer,
         interruptTurn,
         respondToRequest,
-        hasSession: (threadId) => sessions.has(threadId),
+        hasSession: (threadId) => sessionThreads.has(threadId),
         stopAll,
         onEvent: (listener) => {
           listeners.add(listener);

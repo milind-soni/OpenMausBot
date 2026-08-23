@@ -1311,6 +1311,7 @@ describe("DeepSeek Harness turns", () => {
     const instance = await createInstance();
     const events = recordEvents(instance.adapter);
     await instance.adapter.sendTurn({ threadId: "room", sessionKey: "room:alpha", text: "first", system: "Persona Alpha", model });
+    expect(instance.adapter.hasSession("room")).toBe(true);
     const alphaCursor = events.events.find((event) => event.type === "session.started")?.resumeCursor;
     await fake.waitForStream("mux");
     fake.send("mux", { type: "server-request", rpcId: "alpha-end", method: "session/event", payload: { type: "session/event", sessionId: "room-session-1", event: { type: "turn/end", seq: 1, time: 1, data: { reason: { kind: "completed" } } } } });

@@ -604,10 +604,11 @@ export function DeepSeekHarnessSettingsView({
                 {settings.connection.baseUrl}
               </div>
             )}
-            <label className="block">
-              <span className="text-[11.5px] text-ink-secondary">Pairing link</span>
+            <div className="block">
+              <label htmlFor={`${instance.instanceId}-dsh-pairing-link`} className="text-[11.5px] text-ink-secondary">Pairing link</label>
               <div className="mt-1 flex gap-2">
                 <input
+                  id={`${instance.instanceId}-dsh-pairing-link`}
                   type="password"
                   value={pairingLink}
                   onChange={(event) => onPairingLinkChange(event.target.value)}
@@ -632,7 +633,7 @@ export function DeepSeekHarnessSettingsView({
                   {pairingLabel}
                 </button>
               </div>
-            </label>
+            </div>
             <p className="text-[10.5px] leading-relaxed text-ink-secondary">
               The one-time link is consumed by the server. OpenMausBot never sends the paired device credential to this interface.
             </p>

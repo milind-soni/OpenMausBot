@@ -113,6 +113,7 @@ function view(overrides: Partial<DeepSeekHarnessSettingsViewProps> = {}) {
 
 interface InteractiveProps {
   children?: ReactNode;
+  disabled?: boolean;
   onClick?: () => void;
   onKeyDown?: (event: { key: string; preventDefault: () => void }) => void;
   "aria-label"?: string;
@@ -276,19 +277,23 @@ describe("DeepSeek Harness settings", () => {
     const onPair = vi.fn();
     const pairingTree = DeepSeekHarnessSettingsView(props({ transport: "paired", pairingLink: "https://dsh.example.test/m/?pair=one-time", onPair }));
     const input = elements(pairingTree).find((element) => element.type === "input" && element.props["aria-label"] === "DeepSeek Harness pairing link");
+    const pairingLabel = elements(pairingTree).find((element) => element.type === "label" && elementText(element).includes("Pairing link"));
     const preventDefault = vi.fn();
     input!.props.onKeyDown!({ key: "Enter", preventDefault });
     expect(preventDefault).toHaveBeenCalledOnce();
     expect(onPair).toHaveBeenCalledOnce();
+    expect(elements(pairingLabel).some((element) => element.type === "button")).toBe(false);
   });
 
   it("blocks invalid numeric metadata with accessible field errors", () => {
-    const markup = view({ modelId: "custom/model", contextWindow: "1.5", maxTokens: "10000001" });
+    const tree = DeepSeekHarnessSettingsView(props({ modelId: "custom/model", contextWindow: "1.5", maxTokens: "10000001" }));
+    const markup = renderToStaticMarkup(tree);
+    const save = elements(tree).find((element) => element.type === "button" && elementText(element).includes("Save model"));
 
     expect(markup).toContain('aria-invalid="true"');
     expect(markup).toContain("Context window must be a whole number from 1 to 10,000,000.");
     expect(markup).toContain("Maximum output must be a whole number from 1 to 10,000,000.");
-    expect(markup).toMatch(/disabled=""[^>]*>.*Save model/s);
+    expect(save?.props.disabled).toBe(true);
   });
 
   it.each([

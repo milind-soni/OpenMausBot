@@ -23,6 +23,13 @@ describe("model effort", () => {
     expect(effortLevelsForModel([{ id: "legacy-model" }], "legacy-model", driverLevels)).toEqual(["low", "high"]);
   });
 
+  it("keeps an explicit empty level list instead of falling back", () => {
+    expect(effortLevelsForModel([{ id: "plain", effortLevels: [] }], "plain", ["low", "high"])).toEqual([]);
+    expect(
+      clearUnsupportedEffort({ model: "plain", effort: "low" }, [{ id: "plain", effortLevels: [] }], ["low"]),
+    ).toEqual({ model: "plain", effort: undefined });
+  });
+
   it("clears an effort the newly selected exact model does not accept", () => {
     expect(
       clearUnsupportedEffort(
@@ -32,5 +39,4 @@ describe("model effort", () => {
       ),
     ).toEqual({ instanceId: "dsh", model: "fast", effort: undefined });
   });
-
 });

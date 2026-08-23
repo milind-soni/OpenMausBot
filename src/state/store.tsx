@@ -337,63 +337,7 @@ export interface InstanceInfo {
   cliCandidates?: string[];
 }
 
-export type DeepSeekHarnessTransport = "direct" | "paired";
-export type DeepSeekHarnessReasoningEffort = "off" | "minimal" | "low" | "medium" | "high" | "xhigh" | "max";
-
-export interface DeepSeekHarnessModelProfile {
-  id: string;
-  name?: string;
-  contextWindow?: number;
-  maxTokens?: number;
-  reasoningEfforts?: DeepSeekHarnessReasoningEffort[];
-}
-
-export interface DeepSeekHarnessPublicCatalog {
-  groups: Array<{
-    id: string;
-    name: string;
-    models: Array<{
-      id: string;
-      name: string;
-      description?: string;
-      reasoning?: {
-        efforts: Array<{ id: string; name: string; description?: string }>;
-        defaultEffort?: string;
-      };
-    }>;
-  }>;
-  failures: Array<{ id: string; name: string; message: string }>;
-}
-
-export interface DeepSeekHarnessSettingsSnapshot {
-  connection: {
-    instanceId: string;
-    transport: DeepSeekHarnessTransport;
-    baseUrl: string;
-    paired: boolean;
-    hasDeviceCredential: boolean;
-    agentPreset?: string;
-  };
-  modelManagement: {
-    available: boolean;
-    supported: boolean;
-    providers: Array<{ provider: string; displayName: string }>;
-    reasonCode?: "host-unavailable" | "paired-device-unauthorized" | "paired-plugin-update-required";
-    reason?: string;
-  };
-}
-
-export interface DeepSeekHarnessConnectionPatch {
-  baseUrl?: string;
-  transport?: DeepSeekHarnessTransport;
-  agentPreset?: string | null;
-}
-
-export interface DeepSeekHarnessUpsertRequest {
-  provider: string;
-  model: DeepSeekHarnessModelProfile;
-}
-
+const deepSeekHarnessTransportSchema = z.enum(["direct", "paired"]);
 const deepSeekHarnessReasoningEffortSchema = z.enum(["off", "minimal", "low", "medium", "high", "xhigh", "max"]);
 const deepSeekHarnessModelProfileSchema = z.object({
   id: z.string(),
@@ -420,7 +364,7 @@ const deepSeekHarnessPublicCatalogSchema = z.object({
 });
 const deepSeekHarnessConnectionSchema = z.object({
   instanceId: z.string(),
-  transport: z.enum(["direct", "paired"]),
+  transport: deepSeekHarnessTransportSchema,
   baseUrl: z.string(),
   paired: z.boolean(),
   hasDeviceCredential: z.boolean(),
@@ -436,6 +380,23 @@ const deepSeekHarnessSettingsSnapshotSchema = z.object({
     reason: z.string().optional(),
   }),
 });
+
+export type DeepSeekHarnessTransport = z.infer<typeof deepSeekHarnessTransportSchema>;
+export type DeepSeekHarnessReasoningEffort = z.infer<typeof deepSeekHarnessReasoningEffortSchema>;
+export type DeepSeekHarnessModelProfile = z.infer<typeof deepSeekHarnessModelProfileSchema>;
+export type DeepSeekHarnessPublicCatalog = z.infer<typeof deepSeekHarnessPublicCatalogSchema>;
+export type DeepSeekHarnessSettingsSnapshot = z.infer<typeof deepSeekHarnessSettingsSnapshotSchema>;
+
+export interface DeepSeekHarnessConnectionPatch {
+  baseUrl?: string;
+  transport?: DeepSeekHarnessTransport;
+  agentPreset?: string | null;
+}
+
+export interface DeepSeekHarnessUpsertRequest {
+  provider: string;
+  model: DeepSeekHarnessModelProfile;
+}
 
 export type AppSettingsSection =
   | "general"
