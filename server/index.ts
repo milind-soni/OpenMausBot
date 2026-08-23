@@ -3457,7 +3457,7 @@ const server = createServer(async (req, res) => {
         return json(res, 400, { error: "action must be complete or skip" });
       }
       if (group.setupCompletedAt != null || group.setupSkippedAt != null) {
-        return json(res, 200, { group });
+        return json(res, 200, { group: wireGroup(group) });
       }
       if (store.messagesFor(group.threadId).length > 0) {
         return json(res, 409, { error: "room setup must be finished before the first message" });
@@ -3486,7 +3486,7 @@ const server = createServer(async (req, res) => {
       }
       const updated = store.patchGroup(m[1], patch);
       if (!updated) return json(res, 404, { error: "no such room" });
-      return json(res, 200, { group: updated });
+      return json(res, 200, { group: wireGroup(updated) });
     }
     m = path.match(/^\/api\/groups\/([\w-]+)$/);
     if (m && method === "PATCH") {

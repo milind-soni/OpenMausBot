@@ -1995,6 +1995,10 @@ describe("harness HTTP API", () => {
           ?.memberResumeCursors?.[bot.id]?.deepseekHarness as string | undefined;
       });
       expect(persistedGroupCursor).toMatch(/^dsh1:/);
+      const repeatedSetup = await api("PATCH", `/api/groups/${group.id}/setup`, { action: "skip" });
+      expect(repeatedSetup.status).toBe(200);
+      expect(repeatedSetup.body.group).not.toHaveProperty("memberResumeCursors");
+      expect(JSON.stringify(repeatedSetup.body)).not.toContain(persistedGroupCursor);
       const privateRuntime = await stream.until((frame) => frame.kind === "runtime" && frame.event?.type === "session.started" && frame.event?.threadId === group.threadId);
       expect(privateRuntime.event).toMatchObject({ type: "session.started", sessionId: null });
       expect(privateRuntime.event).not.toHaveProperty("resumeCursor");
