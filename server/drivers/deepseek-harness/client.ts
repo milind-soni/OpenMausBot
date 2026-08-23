@@ -145,6 +145,7 @@ export class DshApiClient {
         method: "POST",
         headers: { "content-type": "application/json", ...this.headers },
         body,
+        redirect: "manual",
         signal: controller.signal,
       });
     } catch {
@@ -182,6 +183,7 @@ export class DshApiClient {
         method: "POST",
         headers: { "content-type": "application/json", ...this.headers },
         body,
+        redirect: "manual",
         signal: controller.signal,
       });
     } catch {

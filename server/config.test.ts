@@ -18,6 +18,7 @@ import {
   syncCredentialEnv,
   vpsSshAlias,
   withInstanceCli,
+  withInstanceDriverConfig,
   WORKSPACE_CREDENTIAL_ENV,
   type AppConfig,
 } from "./config.ts";
@@ -189,6 +190,69 @@ describe("Instance CLI override", () => {
     const custom = { instances: { claude: { driver: "claudeAgent", environment: { MY_FLAG: "1" } } } };
     const kept = withInstanceCli(custom, "claude", "/x");
     expect(kept.config.instances!.claude.environment).toEqual({ MY_FLAG: "1" });
+  });
+});
+
+describe("Instance driver config update", () => {
+  it("updates only the requested driver config without persisting injected credentials", () => {
+    const cfg: AppConfig = {
+      xai: { key: "secret-xai" },
+      opencodeGo: { apiKey: "secret-opencode" },
+      instances: {
+        grokApi: { driver: "grok", environment: { CUSTOM_FLAG: "kept" } },
+        opencode: { driver: "opencodeGo" },
+        dsh: {
+          driver: "deepseekHarness",
+          displayName: "My DSH",
+          environment: { DSH_FLAG: "kept" },
+          config: { baseUrl: "http://127.0.0.1:3080", transport: "direct", unrelated: "kept" },
+        },
+      },
+    };
+
+    const result = withInstanceDriverConfig(cfg, "dsh", "deepseekHarness", {
+      baseUrl: "https://dsh.example.test:10443",
+      transport: "paired",
+      deviceCookie: "dsh_pair=device-1",
+      unrelated: "kept",
+    });
+
+    expect(result.ok).toBe(true);
+    expect(result.changed).toBe(true);
+    expect(result.config.instances?.dsh).toMatchObject({
+      driver: "deepseekHarness",
+      displayName: "My DSH",
+      environment: { DSH_FLAG: "kept" },
+      config: {
+        baseUrl: "https://dsh.example.test:10443",
+        transport: "paired",
+        deviceCookie: "dsh_pair=device-1",
+        unrelated: "kept",
+      },
+    });
+    expect(result.config.instances?.grokApi.environment).toEqual({ CUSTOM_FLAG: "kept" });
+    expect(result.config.instances?.opencode.environment).toBeUndefined();
+    expect(JSON.stringify(result.config.instances)).not.toContain("secret-xai");
+    expect(JSON.stringify(result.config.instances)).not.toContain("secret-opencode");
+    expect(cfg.instances?.dsh.config).toEqual({
+      baseUrl: "http://127.0.0.1:3080",
+      transport: "direct",
+      unrelated: "kept",
+    });
+  });
+
+  it("rejects an unknown instance or a mismatched driver and detects no-op updates", () => {
+    const cfg: AppConfig = {
+      instances: {
+        dsh: { driver: "deepseekHarness", config: { baseUrl: "http://127.0.0.1:3080", transport: "direct" } },
+      },
+    };
+    expect(withInstanceDriverConfig(cfg, "missing", "deepseekHarness", {}).ok).toBe(false);
+    expect(withInstanceDriverConfig(cfg, "dsh", "codex", {}).ok).toBe(false);
+    expect(withInstanceDriverConfig(cfg, "dsh", "deepseekHarness", {
+      baseUrl: "http://127.0.0.1:3080",
+      transport: "direct",
+    }).changed).toBe(false);
   });
 });
 

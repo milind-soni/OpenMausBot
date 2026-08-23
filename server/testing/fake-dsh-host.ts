@@ -37,6 +37,8 @@ export class FakeDshHost {
   readonly invalidResponses: string[] = [];
   readonly streamHeaders = { mux: new Array<IncomingMessage["headers"]>(), host: new Array<IncomingMessage["headers"]>() };
   onRequest: (request: FakeDshRequest) => DshJsonValue = defaultFakeResponse;
+  /** Optional exact HTTP-route fixture used for plugin endpoints outside the Host RPC plane. */
+  onRouteRequest: ((request: FakeDshRequest, response: ServerResponse) => boolean) | undefined;
   onRawRequest: ((request: FakeDshRequest, response: ServerResponse) => boolean) | undefined;
   onStreamOpen: ((kind: StreamKind, socket: WebSocket) => void) | undefined;
 
@@ -76,6 +78,7 @@ export class FakeDshHost {
       }
       const fakeRequest = { path: request.url ?? "", headers: request.headers, body };
       this.requests.push(fakeRequest);
+      if (this.onRouteRequest?.(fakeRequest, response)) return;
       const violation = strictRequestViolation(fakeRequest);
       if (violation) {
         this.invalidRequests.push(violation);
@@ -245,8 +248,17 @@ export function defaultFakeResponse({ body }: FakeDshRequest): DshJsonValue {
     value = { accepted: true };
   } else if (request.method === "host.describe") {
     value = { version: "fake", cwd: "/fixture", attachedSessions: 0, home: "/fixture", canOpenPath: false };
+  } else if (request.method === "llm.providers") {
+    value = { providers: [] };
   } else if (request.method === "llm.models") {
     value = { groups: [], failures: [] };
+  } else if (request.method === "llm.discoverModels") {
+    value = { models: [] };
+  } else if (request.method === "settings.describe") {
+    value = { writable: true, hasDocument: false, namespaces: [] };
+  } else if (request.method === "settings.mutate") {
+    const payload = settingsMutateSchema.parse(request.payload);
+    value = { ns: payload.ns, schema: {}, value: {}, applies: "live", secrets: [], revision: (payload.expectedRevision ?? 0) + 1 };
   } else if (request.method === "agentPreset.list") {
     value = { presets: [], authorable: false, hasDocument: false };
   } else {
@@ -276,6 +288,17 @@ const promptSchema = z.object({
   sessionId: z.string().min(1), mode: z.enum(["queue", "steer"]), content: z.array(promptContentSchema), clientTimeZone: z.string().optional(),
 }).strict();
 const cancelSchema = z.object({ sessionId: z.string().min(1) }).strict();
+const discoverModelsSchema = z.object({
+  settingsNs: z.string().min(1), provider: z.string().min(1).optional(), baseURL: z.string().min(1).optional(), api: z.string().min(1).optional(), apiKey: z.string().min(1).optional(),
+}).strict();
+const settingsMutateSchema = z.object({
+  ns: z.string().min(1),
+  ops: z.array(z.discriminatedUnion("op", [
+    z.object({ op: z.literal("set"), path: z.array(z.string()), value: z.unknown() }),
+    z.object({ op: z.literal("unset"), path: z.array(z.string()) }),
+  ])),
+  expectedRevision: z.number().optional(),
+}).strict();
 const approvalValueSchema = z.object({ sessionId: z.string().min(1), approvalId: z.string().min(1), outcome: z.enum(["allowed-once", "rejected"]) }).strict();
 const questionValueSchema = z.object({
   sessionId: z.string().min(1),
@@ -298,7 +321,9 @@ function strictRequestViolation(request: FakeDshRequest): string | null {
     : parsed.data.method === "session.selectModel" ? selectModelSchema
       : parsed.data.method === "session.prompt" ? promptSchema
         : parsed.data.method === "session.cancel" ? cancelSchema
-          : parsed.data.method === "host.describe" || parsed.data.method === "llm.models" || parsed.data.method === "agentPreset.list" ? z.object({}).strict()
+          : parsed.data.method === "llm.discoverModels" ? discoverModelsSchema
+            : parsed.data.method === "settings.mutate" ? settingsMutateSchema
+              : parsed.data.method === "host.describe" || parsed.data.method === "llm.providers" || parsed.data.method === "llm.models" || parsed.data.method === "settings.describe" || parsed.data.method === "agentPreset.list" ? z.object({}).strict()
             : null;
   if (!schema) return `unsupported ${parsed.data.method} method`;
   if (!schema.safeParse(parsed.data.payload).success) return `invalid ${parsed.data.method} payload`;

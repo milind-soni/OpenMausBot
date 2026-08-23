@@ -37,6 +37,14 @@ let fakeClaudeDump: string;
 let stderr = "";
 let dshStub: FakeDshHost;
 let dshSessionSequence = 0;
+let dshSettingsRevision = 7;
+let dshPluginAvailable = true;
+let dshManagementOffline = false;
+let dshPairedAuthorized = true;
+let dshConfiguredModels: DshJsonValue[] = [
+  { id: "keep", name: "Keep", input: ["text"], custom: { preserved: true } },
+];
+const dshUsedPairTokens = new Set<string>();
 
 const api = async (method: string, path: string, body?: unknown): Promise<{ status: number; body: any }> => {
   const res = await fetch(`${BASE}${path}`, {
@@ -92,11 +100,64 @@ beforeAll(async () => {
   fakeClaudeDump = join(home, "fake-claude-dump.json");
   dshStub = new FakeDshHost();
   await dshStub.start();
+  dshStub.onRouteRequest = ({ path, headers, body }, response) => {
+    const send = (status: number, value: DshJsonValue, extraHeaders: Record<string, string | string[]> = {}) => {
+      response.writeHead(status, { "content-type": "application/json", ...extraHeaders });
+      response.end(JSON.stringify(value));
+    };
+    if (path === "/api/pair/accept") {
+      const token = z.object({ token: z.string() }).safeParse(body).data?.token;
+      if (!token || token === "rejected-pair") {
+        send(404, { ok: false, code: "unknown" });
+        return true;
+      }
+      if (dshUsedPairTokens.has(token)) {
+        send(409, { ok: false, code: "used" });
+        return true;
+      }
+      dshUsedPairTokens.add(token);
+      send(200, { ok: true, deviceId: "paired-fixture" }, {
+        "set-cookie": ["dsh_pair=paired-fixture-cookie; Path=/; HttpOnly; SameSite=Lax"],
+      });
+      return true;
+    }
+    if (path.startsWith("/api/pair/model-catalog")) {
+      if (!dshPluginAvailable) {
+        send(404, { error: "missing" });
+        return true;
+      }
+      if (headers.cookie !== "dsh_pair=paired-fixture-cookie" || !dshPairedAuthorized) {
+        send(403, { error: "unpaired-upstream-secret" });
+        return true;
+      }
+      if (path.endsWith("/discover")) {
+        send(200, { models: [{ id: "deepseek/deepseek-v3", name: "DeepSeek V3", contextWindow: 64_000, maxTokens: 8_000 }] });
+        return true;
+      }
+      if (path.endsWith("/upsert")) {
+        send(200, { groups: [{ id: "openrouter", name: "OpenRouter", models: [{ id: "deepseek/deepseek-v3", name: "DeepSeek V3" }] }], failures: [] });
+        return true;
+      }
+      send(200, { capability: "paired-model-catalog", providers: [{ provider: "openrouter", displayName: "OpenRouter" }] });
+      return true;
+    }
+    return false;
+  };
   dshStub.onRequest = ({ body }) => {
     if (dshClientResponseSchema.safeParse(body).success) {
       return dshJsonValueSchema.parse({ accepted: false, reason: "not-pending" });
     }
     const request = dshClientRequestSchema.parse(body);
+    if (request.method === "host.describe" && dshManagementOffline) {
+      return dshJsonValueSchema.parse({
+        type: "server-response",
+        rpcId: request.rpcId,
+        result: {
+          ok: false,
+          error: { code: "host-offline", message: "direct-upstream-secret", details: { credential: "must-not-leak" } },
+        },
+      });
+    }
     let value: DshJsonValue;
     if (request.method === "session.create") {
       const payload = z.object({ sessionId: z.string().optional() }).parse(request.payload);
@@ -110,7 +171,36 @@ beforeAll(async () => {
     }
     else if (request.method === "session.prompt" || request.method === "session.cancel") value = { accepted: true };
     else if (request.method === "host.describe") value = { version: "fixture", cwd: "/fixture", attachedSessions: 0, home: "/fixture", canOpenPath: false };
+    else if (request.method === "llm.providers") value = { providers: [
+      { provider: "openrouter", displayName: "OpenRouter", settingsNs: "llm-pi-ai", settingsPath: ["providers", "openrouter"], active: true },
+      { provider: "inactive", displayName: "Inactive", settingsNs: "llm-pi-ai", settingsPath: ["providers", "inactive"], active: false },
+    ] };
     else if (request.method === "llm.models") value = { groups: [{ id: "deepseek", name: "DeepSeek", models: [{ id: "chat", name: "Chat" }] }], failures: [] };
+    else if (request.method === "llm.discoverModels") value = { models: [{ id: "deepseek/deepseek-v3", name: "DeepSeek V3", contextWindow: 64_000, maxTokens: 8_000 }] };
+    else if (request.method === "settings.describe") value = {
+      writable: true,
+      hasDocument: true,
+      namespaces: [{
+        ns: "llm-pi-ai",
+        schema: {},
+        value: { providers: { openrouter: { models: dshConfiguredModels } } },
+        applies: "live",
+        secrets: [{ path: ["providers", "openrouter", "apiKey"], set: true }],
+        revision: dshSettingsRevision,
+      }],
+    };
+    else if (request.method === "settings.mutate") {
+      const payload = z.object({
+        ns: z.literal("llm-pi-ai"),
+        expectedRevision: z.number(),
+        ops: z.array(z.object({ op: z.literal("set"), path: z.array(z.string()), value: z.unknown() })),
+      }).parse(request.payload);
+      const modelOp = payload.ops.find((op) => op.path.join(".") === "providers.openrouter.models");
+      const nextModels = dshJsonValueSchema.safeParse(modelOp?.value);
+      if (nextModels.success && Array.isArray(nextModels.data)) dshConfiguredModels = nextModels.data;
+      dshSettingsRevision += 1;
+      value = { ns: "llm-pi-ai", schema: {}, value: {}, applies: "live", secrets: [], revision: dshSettingsRevision };
+    }
     else if (request.method === "agentPreset.list") value = { presets: [], authorable: false, hasDocument: false };
     else throw new Error(`unsupported DSH fixture method ${request.method}`);
     return dshJsonValueSchema.parse({ type: "server-response", rpcId: request.rpcId, result: { ok: true, value } });
@@ -2588,7 +2678,241 @@ describe("instance CLI override API", () => {
     await new Promise((resolve) => setTimeout(resolve, 30));
     const overlapping = await api("PATCH", "/api/instances/ghost", { cli: "/tmp/ghost-overlap" });
     expect(overlapping.status).toBe(409);
+    const overlappingDsh = await api("PATCH", "/api/instances/deepseekHarness/deepseek-harness", { agentPreset: "busy-overlap" });
+    expect(overlappingDsh.status).toBe(409);
     expect((await slowConfigWrite).status).toBe(200);
+  });
+});
+
+describe("DeepSeek Harness settings API", () => {
+  it("describes direct model management without exposing settings values or credentials", async () => {
+    const result = await api("GET", "/api/instances/deepseekHarness/deepseek-harness");
+    expect(result.status).toBe(200);
+    expect(result.body).toEqual({
+      connection: {
+        instanceId: "deepseekHarness",
+        transport: "direct",
+        baseUrl: dshStub.baseUrl,
+        paired: false,
+      },
+      modelManagement: {
+        available: true,
+        supported: true,
+        providers: [{ provider: "openrouter", displayName: "OpenRouter" }],
+      },
+    });
+    expect(JSON.stringify(result.body)).not.toContain("apiKey");
+    expect(JSON.stringify(result.body)).not.toContain("deviceCookie");
+  });
+
+  it("keeps the write-only direct connection editable when the configured host is offline", async () => {
+    expect((await api("PATCH", "/api/instances/deepseekHarness/deepseek-harness", {
+      baseUrl: dshStub.baseUrl,
+      transport: "direct",
+    })).status).toBe(200);
+    dshManagementOffline = true;
+    try {
+      const result = await api("GET", "/api/instances/deepseekHarness/deepseek-harness");
+      expect(result.status).toBe(200);
+      expect(result.body.connection).toMatchObject({
+        instanceId: "deepseekHarness",
+        transport: "direct",
+        baseUrl: dshStub.baseUrl,
+        paired: false,
+      });
+      expect(result.body.modelManagement).toEqual({
+        available: false,
+        supported: true,
+        providers: [],
+        reasonCode: "host-unavailable",
+        reason: expect.stringMatching(/could not reach/i),
+      });
+      const serialized = JSON.stringify(result.body);
+      expect(serialized).not.toContain("direct-upstream-secret");
+      expect(serialized).not.toContain("must-not-leak");
+      expect(serialized).not.toContain("deviceCookie");
+      expect(serialized).not.toContain("apiKey");
+    } finally {
+      dshManagementOffline = false;
+    }
+  });
+
+  it("normalizes PATCH input, accepts JSON only, and preserves unrelated instance config", async () => {
+    const wrongType = await fetch(`${BASE}/api/instances/deepseekHarness/deepseek-harness`, {
+      method: "PATCH",
+      headers: { "content-type": "text/plain" },
+      body: JSON.stringify({ agentPreset: "coder" }),
+    });
+    expect(wrongType.status).toBe(415);
+
+    const saved = await api("PATCH", "/api/instances/deepseekHarness/deepseek-harness", {
+      baseUrl: `${dshStub.baseUrl}/`,
+      agentPreset: " coder ",
+    });
+    expect(saved.status).toBe(200);
+    expect(saved.body).toEqual({
+      saved: true,
+      connection: {
+        instanceId: "deepseekHarness",
+        transport: "direct",
+        baseUrl: dshStub.baseUrl,
+        paired: false,
+        agentPreset: "coder",
+      },
+    });
+    expect(JSON.stringify(saved.body)).not.toContain("deviceCookie");
+    const disk = JSON.parse(readFileSync(join(home, ".openmausbot", "config.json"), "utf8"));
+    expect(disk.instances.ghost).toMatchObject({ driver: "not-a-real-driver", displayName: "Ghost" });
+    expect(disk.instances.deepseekHarness.config).toMatchObject({ baseUrl: dshStub.baseUrl, transport: "direct", agentPreset: "coder" });
+
+    const cleared = await api("PATCH", "/api/instances/deepseekHarness/deepseek-harness", { agentPreset: null });
+    expect(cleared.status).toBe(200);
+    expect(cleared.body.connection.agentPreset).toBeUndefined();
+    expect((await api("PATCH", "/api/instances/ghost/deepseek-harness", { transport: "direct" })).status).toBe(404);
+    expect((await api("PATCH", "/api/instances/deepseekHarness/deepseek-harness", { unknown: true })).status).toBe(400);
+  });
+
+  it("discovers and revision-safely adopts OpenRouter models through the direct Host API", async () => {
+    const before = dshStub.requests.length;
+    const discovered = await api("POST", "/api/instances/deepseekHarness/deepseek-harness/discover", { provider: "openrouter" });
+    expect(discovered).toEqual({
+      status: 200,
+      body: { models: [{ id: "deepseek/deepseek-v3", name: "DeepSeek V3", contextWindow: 64_000, maxTokens: 8_000 }] },
+    });
+    const upserted = await api("POST", "/api/instances/deepseekHarness/deepseek-harness/upsert", {
+      provider: "openrouter",
+      model: { id: "keep", name: "Keep updated", contextWindow: 32_000, reasoningEfforts: ["off", "low", "high"] },
+    });
+    expect(upserted.status).toBe(200);
+    expect(upserted.body.updated).toBe(true);
+    const requests = dshStub.requests.slice(before).map((entry) => dshClientRequestSchema.safeParse(entry.body).data).filter(Boolean);
+    const discovery = requests.find((entry) => entry!.method === "llm.discoverModels")!;
+    expect(discovery.payload).toEqual({ settingsNs: "llm-pi-ai", provider: "openrouter" });
+    const mutation = requests.find((entry) => entry!.method === "settings.mutate")!;
+    expect(mutation.payload).toEqual({
+      ns: "llm-pi-ai",
+      expectedRevision: 7,
+      ops: [{
+        op: "set",
+        path: ["providers", "openrouter", "models"],
+        value: [{
+          id: "keep",
+          name: "Keep updated",
+          input: ["text"],
+          custom: { preserved: true },
+          contextWindow: 32_000,
+          reasoningEfforts: { off: null, low: "low", high: "high" },
+        }],
+      }],
+    });
+    expect(JSON.stringify(upserted.body)).not.toContain("settings");
+  });
+
+  it("persists nothing after rejected pairing, then pairs once and keeps the cookie write-only", async () => {
+    const configPath = join(home, ".openmausbot", "config.json");
+    const before = readFileSync(configPath, "utf8");
+    const rejected = await api("POST", "/api/instances/deepseekHarness/deepseek-harness/pair", {
+      pairingLink: `${dshStub.baseUrl}/m/?pair=rejected-pair`,
+    });
+    expect(rejected.status).toBe(400);
+    expect(readFileSync(configPath, "utf8")).toBe(before);
+
+    const accepted = await api("POST", "/api/instances/deepseekHarness/deepseek-harness/pair", {
+      pairingLink: `${dshStub.baseUrl}/m/?pair=server-pair-once&workspace=ws-1`,
+    });
+    expect(accepted.status).toBe(200);
+    expect(accepted.body).toEqual({ paired: true });
+    expect(JSON.stringify(accepted.body)).not.toContain("server-pair-once");
+    expect(JSON.stringify(accepted.body)).not.toContain("paired-fixture-cookie");
+    const disk = JSON.parse(readFileSync(configPath, "utf8"));
+    expect(disk.instances.deepseekHarness.config).toMatchObject({
+      baseUrl: dshStub.baseUrl,
+      transport: "paired",
+      deviceCookie: "dsh_pair=paired-fixture-cookie",
+    });
+
+    const reused = await api("POST", "/api/instances/deepseekHarness/deepseek-harness/pair", {
+      pairingLink: `${dshStub.baseUrl}/m/?pair=server-pair-once`,
+    });
+    expect(reused.status).toBe(400);
+  });
+
+  it("uses the paired plugin model routes and explains the older-plugin fallback", async () => {
+    try {
+      const described = await api("GET", "/api/instances/deepseekHarness/deepseek-harness");
+      expect(described.status).toBe(200);
+      expect(described.body.connection).toMatchObject({ transport: "paired", paired: true, baseUrl: dshStub.baseUrl });
+      expect(described.body.modelManagement).toEqual({
+        available: true,
+        supported: true,
+        providers: [{ provider: "openrouter", displayName: "OpenRouter" }],
+      });
+
+      const start = dshStub.requests.length;
+      expect((await api("POST", "/api/instances/deepseekHarness/deepseek-harness/discover", { provider: "openrouter" })).status).toBe(200);
+      expect((await api("POST", "/api/instances/deepseekHarness/deepseek-harness/upsert", { provider: "openrouter", model: { id: "deepseek/deepseek-v3" } })).status).toBe(200);
+      expect(dshStub.requests.slice(start).map((request) => request.path).filter((path) => path.includes("model-catalog"))).toEqual([
+        "/api/pair/model-catalog/discover",
+        "/api/pair/model-catalog/upsert",
+      ]);
+
+      dshPluginAvailable = false;
+      const fallback = await api("GET", "/api/instances/deepseekHarness/deepseek-harness");
+      expect(fallback.status).toBe(200);
+      expect(fallback.body.modelManagement).toEqual({
+        available: false,
+        supported: false,
+        providers: [],
+        reasonCode: "paired-plugin-update-required",
+        reason: expect.stringMatching(/update.*remote-web-ui/i),
+      });
+      const unavailable = await api("POST", "/api/instances/deepseekHarness/deepseek-harness/discover", { provider: "openrouter" });
+      expect(unavailable.status).toBe(409);
+      expect(unavailable.body.error).toMatch(/update.*remote-web-ui/i);
+    } finally {
+      dshPluginAvailable = true;
+      const restored = await api("PATCH", "/api/instances/deepseekHarness/deepseek-harness", { transport: "direct" });
+      expect(restored.status).toBe(200);
+    }
+  });
+
+  it("keeps the write-only paired connection editable when the paired device is revoked", async () => {
+    const paired = await api("POST", "/api/instances/deepseekHarness/deepseek-harness/pair", {
+      pairingLink: `${dshStub.baseUrl}/m/?pair=revoked-recovery-pair`,
+    });
+    expect(paired.status).toBe(200);
+    dshPairedAuthorized = false;
+    try {
+      const result = await api("GET", "/api/instances/deepseekHarness/deepseek-harness");
+      expect(result.status).toBe(200);
+      expect(result.body.connection).toMatchObject({
+        instanceId: "deepseekHarness",
+        transport: "paired",
+        baseUrl: dshStub.baseUrl,
+        paired: true,
+      });
+      expect(result.body.modelManagement).toEqual({
+        available: false,
+        supported: true,
+        providers: [],
+        reasonCode: "paired-device-unauthorized",
+        reason: expect.stringMatching(/pair.*again/i),
+      });
+      const serialized = JSON.stringify(result.body);
+      expect(serialized).not.toContain("unpaired-upstream-secret");
+      expect(serialized).not.toContain("paired-fixture-cookie");
+      expect(serialized).not.toContain("deviceCookie");
+      expect(serialized).not.toContain("apiKey");
+    } finally {
+      dshPairedAuthorized = true;
+      expect((await api("PATCH", "/api/instances/deepseekHarness/deepseek-harness", { transport: "direct" })).status).toBe(200);
+    }
+  });
+
+  it("bounds malformed and oversized management requests", async () => {
+    expect((await api("POST", "/api/instances/deepseekHarness/deepseek-harness/discover", { provider: "bad\nprovider" })).status).toBe(400);
+    expect((await api("POST", "/api/instances/deepseekHarness/deepseek-harness/upsert", { provider: "openrouter", model: { id: "x", maxTokens: 10_000_001 } })).status).toBe(400);
+    expect((await api("POST", "/api/instances/deepseekHarness/deepseek-harness/pair", { pairingLink: `https://dsh.example.test/m/?pair=${"x".repeat(20_000)}` })).status).toBe(413);
   });
 });
 

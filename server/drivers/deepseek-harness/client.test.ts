@@ -25,7 +25,11 @@ describe("DshApiClient unary transport", () => {
       ["session.prompt", { sessionId: "s", mode: "queue", content: [{ type: "text", text: "x" }] }, { accepted: true }],
       ["session.cancel", { sessionId: "s" }, { accepted: true }],
       ["host.describe", {}, { version: "fake", cwd: "/fixture", attachedSessions: 0, home: "/fixture", canOpenPath: false }],
+      ["llm.providers", {}, { providers: [] }],
       ["llm.models", {}, { groups: [], failures: [] }],
+      ["llm.discoverModels", { settingsNs: "llm-pi-ai", provider: "openrouter" }, { models: [] }],
+      ["settings.describe", {}, { writable: true, hasDocument: false, namespaces: [] }],
+      ["settings.mutate", { ns: "llm-pi-ai", ops: [], expectedRevision: 0 }, { ns: "llm-pi-ai", schema: {}, value: {}, applies: "live", secrets: [], revision: 1 }],
       ["agentPreset.list", {}, { presets: [], authorable: false, hasDocument: false }],
     ] as const;
 
@@ -121,6 +125,25 @@ describe("DshApiClient unary transport", () => {
       headers: { cookie: "dsh_device=fixture-value" },
     });
     expect(fake.requests[0].path).not.toContain("fixture-value");
+    client.close();
+  });
+
+  it("refuses unary redirects before a paired cookie can reach another origin", async () => {
+    const target = await host();
+    const source = await host();
+    source.onRawRequest = (_request, response) => {
+      response.writeHead(302, { location: `${target.baseUrl}/api/host.describe` });
+      response.end();
+      return true;
+    };
+    const client = new DshApiClient({
+      baseUrl: source.baseUrl,
+      transport: "paired",
+      deviceCookie: "dsh_device=fixture-secret-value",
+    });
+
+    await expect(client.unary("host.describe", {})).rejects.toThrow("HTTP 302");
+    expect(target.requests).toEqual([]);
     client.close();
   });
 

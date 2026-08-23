@@ -125,6 +125,30 @@ const agentPresetEntrySchema = z.object({
   description: z.string().optional(),
   broken: z.string().min(1).optional(),
 });
+const configurableProviderSchema = z.object({
+  provider: z.string().min(1),
+  displayName: z.string().min(1),
+  settingsNs: z.string(),
+  settingsPath: z.array(z.string()),
+  active: z.boolean(),
+  declared: z.boolean().optional(),
+});
+const discoveredModelSchema = z.object({
+  id: z.string().min(1),
+  name: z.string().min(1).optional(),
+  contextWindow: z.number().int().positive().optional(),
+  maxTokens: z.number().int().positive().optional(),
+});
+const settingsNamespaceSchema = z.object({
+  ns: z.string().min(1),
+  schema: z.unknown(),
+  value: z.unknown(),
+  base: z.unknown().optional(),
+  user: z.unknown().optional(),
+  applies: z.enum(["live", "restart"]),
+  secrets: z.array(z.object({ path: z.array(z.string()), set: z.boolean() })),
+  revision: z.number(),
+});
 
 const dshUnaryValueSchemas = {
   "session.create": z.object({ sessionId: sessionIdSchema, agentPreset: z.string().optional() }),
@@ -143,7 +167,11 @@ const dshUnaryValueSchemas = {
     home: z.string(),
     canOpenPath: z.boolean(),
   }),
+  "llm.providers": z.object({ providers: z.array(configurableProviderSchema) }),
   "llm.models": z.object({ groups: z.array(modelProviderGroupSchema), failures: z.array(modelCatalogFailureSchema) }),
+  "llm.discoverModels": z.object({ models: z.array(discoveredModelSchema) }),
+  "settings.describe": z.object({ writable: z.boolean(), hasDocument: z.boolean(), namespaces: z.array(settingsNamespaceSchema) }),
+  "settings.mutate": settingsNamespaceSchema,
   "agentPreset.list": z.object({ presets: z.array(agentPresetEntrySchema), authorable: z.boolean(), hasDocument: z.boolean() }),
 } as const;
 
@@ -154,7 +182,11 @@ export function dshUnaryValueSchema(method: string): z.ZodType | null {
     case "session.prompt": return dshUnaryValueSchemas["session.prompt"];
     case "session.cancel": return dshUnaryValueSchemas["session.cancel"];
     case "host.describe": return dshUnaryValueSchemas["host.describe"];
+    case "llm.providers": return dshUnaryValueSchemas["llm.providers"];
     case "llm.models": return dshUnaryValueSchemas["llm.models"];
+    case "llm.discoverModels": return dshUnaryValueSchemas["llm.discoverModels"];
+    case "settings.describe": return dshUnaryValueSchemas["settings.describe"];
+    case "settings.mutate": return dshUnaryValueSchemas["settings.mutate"];
     case "agentPreset.list": return dshUnaryValueSchemas["agentPreset.list"];
     default: return null;
   }

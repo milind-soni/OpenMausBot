@@ -52,11 +52,22 @@ import {
   skillRecorderEnabled,
   syncCredentialEnv,
   withInstanceCli,
+  withInstanceDriverConfig,
   vpsSshAlias,
   DATA_DIR,
   EVENTS_DIR,
   NATIVE_DIR,
 } from "./config.ts";
+import {
+  DeepSeekHarnessManagementClient,
+  DeepSeekHarnessSettingsError,
+  acceptDeepSeekHarnessPairing,
+  parseDeepSeekHarnessConnectionPatch,
+  parseDeepSeekHarnessDiscoverRequest,
+  parseDeepSeekHarnessPairRequest,
+  parseDeepSeekHarnessUpsertRequest,
+  unavailableDeepSeekHarnessManagement,
+} from "./deepseek-harness-settings.ts";
 import { ComputerControl } from "./computer-control.ts";
 import { augmentedPath, findCliCandidates, resetPathCache } from "./env-path.ts";
 import { describeSpawnFailure, execCli } from "./procs.ts";
@@ -66,6 +77,8 @@ import { RETRY_MAX_ATTEMPTS } from "./drivers/retry.ts";
 import { effortLevelsForModel } from "../src/lib/model-effort.ts";
 
 import { BUILT_IN_DRIVERS } from "./drivers/builtIn.ts";
+import { DeepSeekHarnessDriver, type DeepSeekHarnessConfig } from "./drivers/deepseek-harness/index.ts";
+import { dshJsonValueSchema } from "./drivers/deepseek-harness/protocol.ts";
 import { getOrCreateChannel, mirrorActivity, mirrorExchange, mirrorReply, type CommsBus } from "./comms-visibility.ts";
 import { searchMessages } from "./message-db.ts";
 import { _loadPending, discardDelegations, drainDelegations, pendingThreads, queueDelegation, type QueueResult } from "./delegations.ts";
@@ -2410,6 +2423,47 @@ async function reloadProviders() {
 // another's changes or dispose a fleet while another reload is creating it.
 let providerConfigBusy = false;
 
+function deepSeekHarnessInstanceConfig(instanceId: string): DeepSeekHarnessConfig {
+  const fleet = instanceConfigs(structuredClone(cfg));
+  if (!Object.hasOwn(fleet, instanceId) || fleet[instanceId].driver !== "deepseekHarness") {
+    throw new DeepSeekHarnessSettingsError(404, "deepseek-instance-not-found", `unknown DeepSeek Harness instance "${instanceId}"`);
+  }
+  try {
+    return DeepSeekHarnessDriver.decodeConfig(fleet[instanceId].config ?? {});
+  } catch {
+    throw new DeepSeekHarnessSettingsError(400, "invalid-deepseek-config", "DeepSeek Harness instance configuration is invalid");
+  }
+}
+
+interface DeepSeekHarnessConnectionStatus {
+  instanceId: string;
+  transport: "direct" | "paired";
+  baseUrl: string;
+  paired: boolean;
+  agentPreset?: string;
+}
+
+function publicDeepSeekHarnessConnection(instanceId: string, config: DeepSeekHarnessConfig) {
+  const connection: DeepSeekHarnessConnectionStatus = {
+    instanceId,
+    transport: config.transport,
+    baseUrl: config.baseUrl,
+    paired: config.transport === "paired" && Boolean(config.deviceCookie),
+  };
+  if (config.agentPreset !== undefined) connection.agentPreset = config.agentPreset;
+  return connection;
+}
+
+async function persistDeepSeekHarnessConfig(instanceId: string, config: DeepSeekHarnessConfig): Promise<boolean> {
+  const update = withInstanceDriverConfig(cfg, instanceId, "deepseekHarness", dshJsonValueSchema.parse(config));
+  if (!update.ok) throw new DeepSeekHarnessSettingsError(404, "deepseek-instance-not-found", `unknown DeepSeek Harness instance "${instanceId}"`);
+  if (!update.changed) return false;
+  saveConfig({ instances: update.config.instances });
+  Object.assign(cfg, loadConfig());
+  await reloadProviders();
+  return true;
+}
+
 // ── HTTP plumbing ─────────────────────────────────────────────────────
 function json(res: ServerResponse, status: number, body: unknown) {
   const data = JSON.stringify(body);
@@ -4267,6 +4321,94 @@ const server = createServer(async (req, res) => {
       // turn this endpoint into an inherited-secret reader.
       const probe = await testCliBinary(cli, driver);
       return json(res, 200, probe);
+    }
+
+    // ── DeepSeek Harness connection + bounded model management ──────
+    const deepSeekSettingsRoute = /^\/api\/instances\/([\w.-]+)\/deepseek-harness(?:\/(pair|discover|upsert))?$/.exec(path);
+    if (deepSeekSettingsRoute) {
+      const instanceId = deepSeekSettingsRoute[1];
+      const action = deepSeekSettingsRoute[2];
+      if (method === "GET" && action === undefined) {
+        const config = deepSeekHarnessInstanceConfig(instanceId);
+        const management = new DeepSeekHarnessManagementClient(config);
+        try {
+          let modelManagement;
+          try {
+            modelManagement = await management.describe();
+          } catch (error) {
+            if (!(error instanceof DeepSeekHarnessSettingsError)) throw error;
+            modelManagement = unavailableDeepSeekHarnessManagement(error);
+          }
+          return json(res, 200, {
+            connection: publicDeepSeekHarnessConnection(instanceId, config),
+            modelManagement,
+          });
+        } finally {
+          management.close();
+        }
+      }
+
+      const writesConnection = method === "PATCH" && action === undefined;
+      const runsAction = method === "POST" && action !== undefined;
+      if (writesConnection || runsAction) {
+        if (!String(req.headers["content-type"] ?? "").toLowerCase().startsWith("application/json")) {
+          return json(res, 415, { error: "content-type must be application/json" });
+        }
+        const body = await readBody(req);
+        if (providerConfigBusy) return json(res, 409, { error: "provider settings are already being updated" });
+        providerConfigBusy = true;
+        try {
+          const current = deepSeekHarnessInstanceConfig(instanceId);
+          if (writesConnection) {
+            const patch = parseDeepSeekHarnessConnectionPatch(body);
+            const next: DeepSeekHarnessConfig = { ...current };
+            const changingOrigin = patch.baseUrl !== undefined && patch.baseUrl !== current.baseUrl;
+            const nextTransport = patch.transport ?? current.transport;
+            if (changingOrigin && nextTransport === "paired") {
+              throw new DeepSeekHarnessSettingsError(409, "pairing-required", "Pair this DeepSeek Harness origin before using paired transport");
+            }
+            if (patch.baseUrl !== undefined) next.baseUrl = patch.baseUrl;
+            if (patch.transport !== undefined) next.transport = patch.transport;
+            if (changingOrigin) delete next.deviceCookie;
+            if (patch.agentPreset === null) delete next.agentPreset;
+            else if (patch.agentPreset !== undefined) next.agentPreset = patch.agentPreset;
+            if (next.transport === "paired" && !next.deviceCookie) {
+              throw new DeepSeekHarnessSettingsError(409, "pairing-required", "Pair this DeepSeek Harness origin before using paired transport");
+            }
+            const saved = await persistDeepSeekHarnessConfig(instanceId, next);
+            return json(res, 200, { saved, connection: publicDeepSeekHarnessConnection(instanceId, next) });
+          }
+
+          if (action === "pair") {
+            const pair = parseDeepSeekHarnessPairRequest(body);
+            const accepted = await acceptDeepSeekHarnessPairing(pair.pairingLink);
+            const next: DeepSeekHarnessConfig = {
+              ...current,
+              baseUrl: accepted.baseUrl,
+              transport: "paired",
+              deviceCookie: accepted.deviceCookie,
+            };
+            await persistDeepSeekHarnessConfig(instanceId, next);
+            return json(res, 200, { paired: true });
+          }
+
+          const management = new DeepSeekHarnessManagementClient(current);
+          try {
+            if (action === "discover") {
+              return json(res, 200, await management.discover(parseDeepSeekHarnessDiscoverRequest(body)));
+            }
+            if (action === "upsert") {
+              const result = await management.upsert(parseDeepSeekHarnessUpsertRequest(body));
+              await registry.get(instanceId)?.refreshModels?.().catch(() => {});
+              return json(res, 200, result);
+            }
+          } finally {
+            management.close();
+          }
+        } finally {
+          providerConfigBusy = false;
+        }
+      }
     }
 
     // ── per-instance CLI path override (custom builds / versioned bins) ──
