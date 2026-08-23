@@ -631,6 +631,41 @@ describe("DeepSeek Harness turns", () => {
     await instance.dispose();
   });
 
+  it("locally settles an interrupted queued turn when Host never emits turn/end", async () => {
+    const fake = await host();
+    fake.onRequest = ({ body }) => {
+      const request = dshClientRequestSchema.safeParse(body);
+      return request.success ? officialResponse(request.data, "interrupt-settle-session") : accepted();
+    };
+    const instance = await DeepSeekHarnessDriver.create({ instanceId: "deepseekHarness", displayName: undefined, environment: {}, enabled: true, config: { baseUrl: fake.baseUrl, transport: "direct" } });
+    const events = recordEvents(instance.adapter);
+    const model = encodeDshModelId("deepseek", "chat");
+    const first = await instance.adapter.sendTurn({ threadId: "interrupt-settle", text: "first", model });
+    await fake.waitForStream("mux");
+    fake.send("mux", { type: "server-request", rpcId: "interrupt-approval", method: "approval/requested", payload: { type: "approval/requested", sessionId: "interrupt-settle-session", approvalId: "approval", toolName: "shell" } });
+    const opened = await events.until((event) => event.type === "request.opened");
+    const requestId = opened.type === "request.opened" ? opened.requestId! : "";
+
+    await instance.adapter.interruptTurn("interrupt-settle", "different-turn");
+    expect(fake.requests.filter((request) => dshClientRequestSchema.safeParse(request.body).data?.method === "session.cancel")).toHaveLength(0);
+    await instance.adapter.interruptTurn("interrupt-settle", first.turnId);
+
+    const completed = await events.until((event) => event.type === "turn.completed" && event.turnId === first.turnId, 500);
+    expect(completed).toMatchObject({ ok: true, stopReason: "cancelled" });
+    expect(events.events).toContainEqual(expect.objectContaining({ type: "request.resolved", requestId, behavior: "deny", source: "unavailable" }));
+    await expect(instance.adapter.respondToRequest("interrupt-settle", requestId, { behavior: "allow" })).resolves.toBe("unavailable");
+    expect(events.events.filter((event) => event.type === "turn.completed" && event.turnId === first.turnId)).toHaveLength(1);
+
+    fake.send("mux", { type: "server-request", rpcId: "late-interrupt-end", method: "session/event", payload: { type: "session/event", sessionId: "interrupt-settle-session", event: { type: "turn/end", seq: 1, time: 1, data: { reason: { kind: "cancelled" } } } } });
+    await fake.waitForStreamRoundTrip("mux");
+    expect(events.events.filter((event) => event.type === "turn.completed" && event.turnId === first.turnId)).toHaveLength(1);
+    expect(fake.requests.filter((request) => dshClientRequestSchema.safeParse(request.body).data?.method === "session.cancel")).toHaveLength(1);
+
+    await expect(instance.adapter.sendTurn({ threadId: "interrupt-settle", text: "second", model })).resolves.toEqual({ turnId: expect.any(String) });
+    await instance.dispose();
+    events.stop();
+  });
+
   it.each([
     ["stopAll", "session.create"],
     ["stopAll", "session.selectModel"],
@@ -876,9 +911,10 @@ describe("DeepSeek Harness turns", () => {
     await instance.adapter.sendTurn({ threadId: "error-tool", text: "x", model: encodeDshModelId("deepseek", "chat") });
     await fake.waitForStream("mux");
     const event = (rpcId: string, type: string, data: DshJsonValue) => ({ type: "server-request", rpcId, method: "session/event", payload: { type: "session/event", sessionId: "error-tool-session", event: { type, seq: 1, time: 1, data } } });
-    fake.send("mux", event("tool", "tool/result", { message: { source: { callId: "call" }, content: [{ isError: true }] } }));
     fake.send("mux", event("usage", "assistant/message", { message: { content: [] }, usage: { inputTokens: 1.5, outputTokens: 2 } }));
+    fake.send("mux", event("tool", "tool/result", { message: { source: { callId: "call" }, content: [{ isError: true }] } }));
     await events.until((item) => item.type === "item.completed" && item.itemId === "call");
+    await fake.waitForStreamRoundTrip("mux");
     expect(events.events).toContainEqual(expect.objectContaining({ type: "item.completed", itemId: "call", ok: false }));
     expect(events.events.some((item) => item.type === "thread.token-usage.updated")).toBe(false);
     await instance.dispose();
@@ -1416,10 +1452,15 @@ describe("DeepSeek Harness turns", () => {
     const events = recordEvents(instance.adapter);
     await instance.adapter.sendTurn({ threadId: "overflow", text: "x", model: encodeDshModelId("deepseek", "chat") });
     await fake.waitForStream("mux");
-    const event = (rpcId: string, data: DshJsonValue) => ({ type: "server-request", rpcId, method: "session/event", payload: { type: "session/event", sessionId: "overflow-session", event: { type: "assistant/message", seq: 1, time: 1, data } } });
-    fake.send("mux", event("safe", { message: { content: [] }, usage: { inputTokens: Number.MAX_SAFE_INTEGER, outputTokens: 1 } }));
-    fake.send("mux", event("overflow", { message: { content: [] }, usage: { inputTokens: 1, outputTokens: 1 } }));
-    expect(events.events.filter((item) => item.type === "thread.token-usage.updated").every((item) => Number.isSafeInteger(item.input) && Number.isSafeInteger(item.output))).toBe(true);
+    const event = (rpcId: string, type: string, data: DshJsonValue) => ({ type: "server-request", rpcId, method: "session/event", payload: { type: "session/event", sessionId: "overflow-session", event: { type, seq: 1, time: 1, data } } });
+    fake.send("mux", event("safe", "assistant/message", { message: { content: [] }, usage: { inputTokens: Number.MAX_SAFE_INTEGER, outputTokens: 1 } }));
+    fake.send("mux", event("overflow", "assistant/message", { message: { content: [] }, usage: { inputTokens: 1, outputTokens: 1 } }));
+    fake.send("mux", event("overflow-sentinel", "tool/call", { callId: "overflow-sentinel", name: "sentinel", arguments: {} }));
+    await events.until((item) => item.type === "item.started" && item.itemId === "overflow-sentinel");
+    await fake.waitForStreamRoundTrip("mux");
+    const usageEvents = events.events.filter((item) => item.type === "thread.token-usage.updated");
+    expect(usageEvents).toEqual([expect.objectContaining({ input: Number.MAX_SAFE_INTEGER, output: 1 })]);
+    expect(usageEvents.every((item) => Number.isSafeInteger(item.input) && Number.isSafeInteger(item.output))).toBe(true);
     await instance.dispose();
   });
 });

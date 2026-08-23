@@ -587,8 +587,19 @@ export const DeepSeekHarnessDriver: ProviderDriver<DeepSeekHarnessConfig> = {
     };
     const interruptTurn = async (threadId: string, turnId?: string): Promise<void> => {
       const running = active.get(threadId);
-      if (!running || (turnId && running.turnId !== turnId)) return;
-      return cancelRunning(running);
+      if (!running || running.completed || (turnId && running.turnId !== turnId)) return;
+      // Interrupt is a local terminal decision. Fence and release the active
+      // slot before awaiting the best-effort Host work so a missing or late
+      // turn/end cannot strand the thread or complete it twice.
+      running.completed = true;
+      if (active.get(threadId) === running) active.delete(threadId);
+      await Promise.allSettled([
+        cancelRunning(running),
+        resolvePendingUnavailable(threadId),
+      ]);
+      const completed: RuntimeEvent = { ...base(threadId, running.turnId), type: "turn.completed", ok: true, stopReason: "cancelled", cost: null };
+      if (running.usage) completed.usage = running.usage;
+      emit(completed);
     };
     const failActiveTurnsForStream = async () => {
       streamLossTimer = undefined;
