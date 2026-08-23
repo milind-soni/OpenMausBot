@@ -200,12 +200,33 @@ See the [Ubuntu Desktop guide](docs/linux-desktop.md) for installation, capabili
 
 ```sh
 git clone https://github.com/milind-soni/OpenMausBot && cd OpenMausBot
-pnpm install
+nvm use              # if you use nvm; reads the included .nvmrc
+make install
 
+make dev             # harness + browser app → http://127.0.0.1:5199
+make desktop         # harness + browser app + Electron shell
+```
+
+The Make targets stop their companion processes when one exits or you press `Ctrl+C`. To run each process in
+its own terminal instead:
+
+```sh
+pnpm install
 pnpm dev:server    # harness server → 127.0.0.1:8799
 pnpm dev           # app → http://127.0.0.1:5199
 pnpm dev:desktop   # Electron shell; keep the two commands above running
 ```
+
+For a fork, keep local work separate from the source repository:
+
+```sh
+make pull-main      # fetch and merge upstream/main; requires a clean working tree
+make pull           # short alias for make pull-main
+git push            # push committed changes to your origin fork
+```
+
+The pull target configures `origin` as the default push remote and makes `upstream` fetch-only. Commits made
+in this checkout therefore go to your fork with normal Git commands, never to `milind-soni/OpenMausBot`.
 
 Requirements: **macOS, Windows, or Ubuntu 24.04 x64**, **Node 24+**, **pnpm**, and at least one agent CLI — [`claude`](https://claude.com/claude-code),
 [`codex`](https://github.com/openai/codex), or [`grok`](https://x.ai/cli) — installed and logged in. They appear

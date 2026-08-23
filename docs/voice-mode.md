@@ -9,7 +9,8 @@ one.
 Renderer (src/)                        Harness (server/)
 ├── lib/tts/index.ts   the speaker     ├── tts/speech-text.ts  markdown → speakable
 │     queue · prefetch · interrupt     └── tts/elevenlabs.ts   verify · voices · synthesize
-└── components/CallView.tsx
+├── components/CallView.tsx
+└── components/GroupCallView.tsx
       Apple STT endpointing            POST /api/tts/prepare → utterances
                                        POST /api/tts/speak   → mp3 bytes
 ```
@@ -45,7 +46,8 @@ fewer moving parts, and no socket to leak when a turn is interrupted.
 
 ## Call mode
 
-**Half-duplex, on purpose.** The dictation helper is `SFSpeechRecognizer` on raw
+**Half-duplex, on purpose.** One-to-one and room calls use the same dictation
+and synthesis pipeline. The dictation helper is `SFSpeechRecognizer` on raw
 `AVAudioEngine` input with no acoustic echo cancellation. A microphone left open
 through playback transcribes the bot's own voice back into the conversation and
 the two of them talk forever. So the mic is live only when the bot is not
@@ -74,6 +76,11 @@ consent must never be inferred from a sentence that merely contained the word
 turn is returned as the answer, so an agent asking for input does not strand the
 call behind an invisible card.
 
+**Room calls preserve speaker identity.** Speech is queued in transcript order,
+and each reply uses that member's configured voice. Spoken names are converted
+to the room's existing `@name` routing syntax; “everyone” becomes `@everyone`.
+If a room is configured for mentions only, unaddressed speech is not dispatched.
+
 **Latency, honestly.** Endpointing is 300–700ms and time-to-first-byte is
 ~100–250ms, against an agent turn of 5–60s. The agent dominates by 50–100x, so
 voice choice is a quality decision, not a latency one. The way to make a call
@@ -94,7 +101,6 @@ delegate real work to specialists over `ask_bot` — no new machinery required.
 ## Known gaps
 
 - **Calls are macOS-only**, because dictation is. The voice half works everywhere.
-- **Rooms don't speak yet**, though per-bot voices already exist (`bot.voice`).
 - **No spend meter.** ElevenLabs bills per character. Auto-speak is off by
   default partly for that reason, but the app should eventually show usage.
 - **No voice barge-in** — see half-duplex above.
