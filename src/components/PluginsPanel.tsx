@@ -3,7 +3,7 @@
 // Composio API key is configured, a curated set otherwise. Icons resolve
 // logo → favicon → monogram.
 import { useCallback, useEffect, useRef, useState } from "react";
-import { Check, Loader2, RefreshCw, Search, X } from "lucide-react";
+import { Check, CircleAlert, Loader2, RefreshCw, Search, X } from "lucide-react";
 import { api, useStore } from "@/state/store";
 import { cn } from "@/lib/cn";
 
@@ -64,6 +64,13 @@ export function mergeCompleteConnectorStatus(
   return mergeCurrentConnectorStatus(next, incoming, latestGenerations, requestGenerations);
 }
 
+/** A failed inventory fetch must never read as "nothing is connected":
+ * connections live on the service's side, so a transient error says retry,
+ * it does not say disconnected. */
+export function inventoryFailureMessage(detail: string): string {
+  return `Couldn't load your connected apps (${detail}). Your connections are not lost — check your connection and try again.`;
+}
+
 function ServiceIcon({ card }: { card: ToolkitCard }) {
   // 0 = official logo, 1 = favicon by domain, 2 = monogram
   const [stage, setStage] = useState(card.logo ? 0 : card.domain ? 1 : 2);
@@ -101,6 +108,7 @@ export function PluginsPanel() {
   const [busySlug, setBusySlug] = useState<string | null>(null);
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [inventoryFailure, setInventoryFailure] = useState<string | null>(null);
   const [search, setSearch] = useState("");
   const [tab, setTab] = useState<"marketplace" | "connected">("marketplace");
 
@@ -143,6 +151,7 @@ export function PluginsPanel() {
     setRefreshing(true);
     return api("/api/connectors/connected")
       .then((r) => {
+        setInventoryFailure(null);
         const services: Record<string, ConnectorStatus> = r.services ?? {};
         setStatus((current) => mergeCompleteConnectorStatus(
           current,
@@ -161,7 +170,10 @@ export function PluginsPanel() {
         }
         return services;
       })
-      .catch(() => ({}))
+      .catch((e) => {
+        setInventoryFailure(inventoryFailureMessage(e instanceof Error ? e.message : String(e)));
+        return {};
+      })
       .finally(() => setRefreshing(false));
   }, []);
 
@@ -421,6 +433,21 @@ export function PluginsPanel() {
               <div className="mb-3 text-[12px] font-medium text-ink-secondary">
                 {tab === "connected" ? "Your connections" : search ? "Search results" : "Available apps"}
               </div>
+              {tab === "connected" && inventoryFailure && (
+                <div role="alert" className="mb-3 flex flex-wrap items-center gap-x-3 gap-y-2 rounded-xl border border-warning/30 bg-warning/10 px-3.5 py-3 text-[12.5px] text-warning">
+                  <CircleAlert size={15} className="shrink-0" />
+                  <span className="min-w-0 flex-1">{inventoryFailure}</span>
+                  <button
+                    type="button"
+                    disabled={refreshing}
+                    onClick={() => void refreshConnectedStatus()}
+                    className="flex items-center gap-1.5 rounded-lg bg-warning/15 px-2.5 py-1.5 text-[11.5px] font-medium text-warning transition-colors hover:bg-warning/25 disabled:opacity-50"
+                  >
+                    {refreshing ? <Loader2 size={12} className="animate-spin" /> : null}
+                    Retry
+                  </button>
+                </div>
+              )}
               <div className="grid grid-cols-1 gap-x-10 md:grid-cols-2">
               {visible.map((card) => {
               const serviceStatus = status[card.slug];
@@ -544,7 +571,7 @@ export function PluginsPanel() {
               </div>
             </div>
           )}
-          {cards !== null && visible.length === 0 && (
+          {cards !== null && visible.length === 0 && !inventoryFailure && (
             <div className="flex min-h-56 flex-col items-center justify-center text-center">
               <div className="text-[14px] font-medium text-ink">
                 {tab === "connected" ? "No connected apps yet" : "No apps found"}

@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   disconnectAccountConfirmation,
+  inventoryFailureMessage,
   mergeCompleteConnectorStatus,
   mergeCurrentConnectorStatus,
   type ConnectorStatus,
@@ -111,5 +112,16 @@ describe("connected-app status races", () => {
     expect(disconnectAccountConfirmation("GitHub", { id: "ca_personal" })).toContain(
       "Disconnect “ca_personal” from GitHub? Only this GitHub account will be revoked.",
     );
+  });
+});
+
+describe("connected-app inventory failures", () => {
+  it("reports a failed inventory fetch as retryable, not as disconnected", () => {
+    const message = inventoryFailureMessage("Connected apps: HTTP 404");
+    expect(message).toContain("Couldn't load your connected apps");
+    expect(message).toContain("HTTP 404");
+    // the point of the message: a service-side outage must not read like
+    // "your connections are gone"
+    expect(message).toContain("not lost");
   });
 });

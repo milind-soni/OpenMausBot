@@ -64,16 +64,31 @@ app.on("second-instance", () => {
 let serverProc = null;
 let serverReady = true;
 let secureCredentials = {};
+// Set when credentials.bin exists but could not be read this launch (OS store
+// unavailable, decrypt/parse failure). Downstream boot steps check this
+// before replacing identity data: an unreadable store must not be treated as
+// "the user never connected anything".
+let secureCredentialsUnreadable = false;
 
 const CREDENTIALS_FILE = path.join(app.getPath("userData"), "credentials.bin");
 
 async function loadSecureCredentials() {
   try {
-    if (!fs.existsSync(CREDENTIALS_FILE) || !(await safeStorage.isAsyncEncryptionAvailable())) return {};
+    if (!fs.existsSync(CREDENTIALS_FILE)) {
+      secureCredentialsUnreadable = false;
+      return {};
+    }
+    if (!(await safeStorage.isAsyncEncryptionAvailable())) {
+      secureCredentialsUnreadable = true;
+      return {};
+    }
     const decrypted = await safeStorage.decryptStringAsync(fs.readFileSync(CREDENTIALS_FILE));
-    return JSON.parse(decrypted.result);
+    const parsed = JSON.parse(decrypted.result);
+    secureCredentialsUnreadable = false;
+    return parsed;
   } catch (error) {
     slog(`credential load failed: ${error?.message ?? error}`);
+    secureCredentialsUnreadable = true;
     return {};
   }
 }
@@ -159,6 +174,15 @@ function composioBrokerUrl() {
 async function ensureManagedComposioCredentials() {
   const brokerUrl = composioBrokerUrl();
   if (!brokerUrl) return;
+  if (secureCredentialsUnreadable) {
+    // The store holds this installation's broker identity, but it could not
+    // be read. Registering a fresh installation now would hand back empty
+    // connected-apps state for the user's existing authorizations, and
+    // persisting that new identity over the unreadable file could destroy
+    // recoverable data. Leave registration to a launch that can read it.
+    slog("skipping connected-apps registration: saved credentials could not be read this launch");
+    return;
+  }
   if (/^[0-9a-f]{64}$/.test(secureCredentials.composioBrokerToken ?? "")) {
     try {
       const check = await fetch(`${brokerUrl}/v1/me`, {
