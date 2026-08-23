@@ -21,3 +21,12 @@ session and does not use or store the provider API key.
 The phone and computer must be on the same trusted network. Alternatively, both may be signed into the same Tailscale network and the reviewer may enter the computer's `.ts.net` MagicDNS name.
 
 No purchase or subscription is required. The computer is the source of bot data and credentials; the developer cannot provide a universal demo account without routing reviewers into someone else's private computer.
+
+
+Agent profile, avatar upload/generation, voice preview, routines, and connected-app
+account management call only the paired computer. API/OAuth/provider keys are never
+returned to or stored by the iOS app. OAuth authorization opens the provider URL
+externally and returns to the app; each additional account requires an alias. Webhook
+creation and signing-secret rotation remain computer-only. A routine can run on the
+paired computer or an available Cloud VM; iOS reads only configured/availability
+status and never receives the VM credential.

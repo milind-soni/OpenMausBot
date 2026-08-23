@@ -31,7 +31,7 @@ upstream hardened its loopback gate.
 |---|---|
 | **Pairing** | A high-entropy QR credential plus a six-digit manual fallback, valid two minutes and single-use. Redeeming either returns a device token stored only as a SHA-256 digest. |
 | **Authorisation** | Every request needs that token. Full cloud-desktop access is a separate per-device capability, off by default. A rebinding page cannot obtain either. |
-| **The allowlist** | Default deny, per method and path (`src/routes.ts`) — the list is every request the app makes, and nothing else. General bot/room PATCH routes stay closed; read state and approval grants use narrow verbs. A route that appears in the harness later is closed to devices until someone adds it here on purpose. |
+| **The allowlist** | Default deny, per method and path (`src/routes.ts`) — the list is every request the app makes, and nothing else. General bot/room PATCH routes stay closed; profile identity, avatar, voice, routines, and account-specific connector management use narrow verbs that never return provider credentials. A route that appears in the harness later is closed to devices until someone adds it here on purpose. |
 | **Scrubbing** | `resumeCursors` — the harness's own provider session ids — never reach a device, whether or not the harness still sends them. |
 | **Discovery** | Bonjour, so a phone finds the computer by name instead of by typed address. |
 
@@ -64,8 +64,14 @@ trusted-network-only rather than described as something it is not.
   request that carries one is a browser that has found this port. Refused
   before the token is even looked at — stricter than the harness's own rule,
   which allows loopback origins.
-- **Hold credentials, settings, or Local VM control.** Those stay on the
-  machine. See `src/routes.ts` for the exact refusals and why.
+- **Return provider keys, webhook secrets, or expose Local VM control.** Those
+  stay on the machine. A paired phone does receive the user profile (including
+  email), room timeout and provider-configured booleans; connector catalog and
+  account metadata, authorization URLs, ids, aliases, and status; voice ids,
+  labels, descriptions, and generated audio; plus routine definitions, prompts,
+  schedules, and run data. These are application data forwarded on the narrow
+  allowlisted routes, not provider credentials. See `src/routes.ts` for the exact
+  allowances and refusals.
 
 ## Running it
 

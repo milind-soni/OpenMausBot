@@ -1,7 +1,10 @@
 Welcome to OpenMausMobile 1.0.
 
 • Pair securely with your OpenMausBot computer
-• Chat with bots and rooms
-• Answer approvals and questions
+• Chat with agents and rooms; answer approvals and questions
+• Give each agent a custom uploaded or generated avatar and shape
+• Edit agent identity, notifications, and per-agent voice settings
+• Create, edit, pause, resume, run, and review Tasks & Routines, including computer or available Cloud VM execution
+• Connect multiple Slack or Google accounts with clear account aliases
+• Open the exact detached task when you tap an agent notification
 • Search, manage tasks, edit versions, react, and share transcripts
-• Follow live work and reconnect without losing events

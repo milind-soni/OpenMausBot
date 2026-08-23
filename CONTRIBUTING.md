@@ -6,6 +6,11 @@ makes a PR easy to merge. Read it once before opening anything; it's short on pu
 
 ## Ground rules
 
+- **Check upstream before building.** Search open and recently merged issues and PRs before starting a
+  feature. Link any overlap in the issue/PR, extend the existing architecture instead of creating a
+  parallel implementation, and coordinate on the upstream thread when another contributor already
+  owns the same surface. A local fork is a safe place to prototype and test, not a reason to ignore
+  active collaboration.
 - **Small, focused PRs.** One concern per PR. A PR that ports a platform *and* adds a feature *and*
   refactors will be asked to split. Big changes: open an issue first and agree on the approach.
 - **Match the altitude.** This codebase is deliberately small and direct — plain Node, no frameworks
@@ -145,6 +150,7 @@ responses or events, no baking them into argv where another local process could 
 
 ## Before you open the PR
 
+- [ ] Open/recent issues and PRs were searched; overlaps are linked and coordinated
 - [ ] `pnpm typecheck` and `pnpm test` pass
 - [ ] `pnpm check:electron` passes for desktop-shell changes
 - [ ] Ubuntu packaging changes pass `pnpm package:linux` and `node scripts/verify-linux-package.mjs`

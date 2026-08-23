@@ -55,6 +55,10 @@ ios/
     Discovery.swift              NWBrowser for _openmausbot._tcp
     Keychain.swift               the device token
     MausAvatar.swift             the mascot face, in the desktop's palette
+    BotAvatarView.swift          authenticated custom image + mascot fallback
+    AgentProfileView.swift       identity, avatar generation/upload, per-agent voice
+    TasksRoutinesView.swift      schedules and run receipts, without cron syntax
+    ConnectedAppsView.swift      account aliases and account-specific disconnect
     PairingView.swift            QR handoff, discovery, address and code fallback
     PairingScanner.swift         native QR camera, permission and recovery UI
     Glass.swift                  the one material the chrome is made of (Liquid Glass on 26+)
@@ -66,7 +70,7 @@ ios/
     ChatView.swift               transcript, tailed bubbles, approval cards, composer
     ComputerView.swift           opt-in live view of a bot's computer
     MarkdownText.swift           the supported Markdown presentation layer
-    SettingsView.swift           status, and unpair
+    SettingsView.swift           status, workspace feature entry points, and unpair
 ```
 
 ## Building
@@ -123,13 +127,20 @@ here by simply not having the methods:
 | Send messages, make a bot or a room | Manage pairing or revoke devices |
 | **Answer approvals and questions** | Drive the Local VM or this computer |
 | Interrupt a bot, mark chats read | Reach `/api/internal/*` |
+| Edit the narrow safe agent profile subset | General bot PATCH / execution policy |
+| Upload/fetch app-owned avatars; request configured image generation | Read or write image-provider keys |
+| Choose/preview a valid per-agent or configured workspace voice | Read or write the shared ElevenLabs key |
+| List/create/edit/pause/run/delete routines, choose an available run location, and read receipts | Create/rotate webhooks or their secrets |
+| Fetch all connected-app statuses, add aliased accounts, disconnect one exact account | Read OAuth/provider credentials or remove all accounts implicitly |
 | Fetch screen images on demand | Load the packaged desktop UI |
 | Open an explicitly enabled cloud desktop | Provision, sleep or run shell commands on cloud computers |
 
-Marking a chat read and remembering an approval use purpose-built server
-verbs. The sidecar does not expose the general bot or room `PATCH` routes,
-because those can also change execution policy, computers, connected apps, and
-working directories.
+Marking a chat read, remembering an approval, and editing a profile use
+purpose-built server verbs. `PATCH /api/bots/:id/profile` rejects every field
+except name, title, description, notifications, avatar URL/shape, voice, and
+spoken-reply preference. The sidecar does not expose the general bot or room
+`PATCH` routes, because those can also change execution policy, computers,
+connected-app permission, and working directories.
 
 Companion settings stay on the computer on purpose: losing the phone must not
 mean losing the ability to lock it out.
@@ -161,6 +172,16 @@ the host computer remain unreachable through the companion.
 - **No optimistic state.** Actions call the harness and let the event stream
   deliver the result. A phone that draws its own version of what just happened
   is a phone that disagrees with the laptop.
+- **Native density, not a desktop sidebar copied onto a phone.** The iPhone roster
+  is already a compact, scrollable list and now uses custom agent photos at identity
+  size. Desktop's collapsible avatar-only rail has no literal iPhone equivalent;
+  this is the accepted platform-capability exception. iPad split view is not part
+  of this release.
+- **Lock-screen identity stays a mascot.** The Live Activity/widget extension is
+  not given the paired-device bearer token or an App Group copy of private avatar
+  bytes. Duplicating that credential into an extension would widen the trust
+  boundary, so lock-screen surfaces keep the deterministic color mascot while
+  authenticated in-app identity surfaces use custom images.
 - **Messaging-app shape, not settings-list shape.** Mascot faces at roster size,
   the bot's role as a chip beside its name, timestamps that say "Yesterday"
   rather than a date, and a gap-based separator in the transcript instead of a
@@ -182,9 +203,12 @@ the host computer remain unreachable through the companion.
 The live connection is foreground-only. Notification frames produce native
 banners, sounds, time-sensitive approval alerts, and an app badge while connected;
 the resume cursor replays alerts missed during a short background pause. There is
-no APNs delivery after the app is terminated, no voice/call mode, and no hosted relay.
-Task management, SQLite transcript search,
-transcript sharing, reactions, and edit/version controls use narrow companion
-routes and the computer remains the source of truth. Tailscale is supported
+no APNs delivery after the app is terminated, no live call mode, and no hosted relay.
+Per-agent ElevenLabs voice selection and preview are available, but all synthesis
+still happens on the paired computer with its shared key. Tasks, routines, connected
+app aliases, SQLite transcript search, transcript sharing, reactions, and
+edit/version controls use narrow companion routes and the computer remains the
+source of truth. Webhook creation/secret rotation, provider keys, pairing/revocation,
+Local VM, and arbitrary execution policy remain computer-only. Tailscale is supported
 through manual MagicDNS entry; it is not a dependency and OpenMausBot does not
 operate a cloud copy of local data.

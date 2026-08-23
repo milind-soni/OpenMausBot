@@ -220,7 +220,29 @@ On the phone, in order:
    then come back. The transcript should catch up *without* a visible reload —
    that is the resumable stream doing its job. Watch the harness log to confirm
    it replayed rather than re-hydrated.
-6. **Revoke.** Remove the device in Settings → Companion on the computer. The
+6. **Profile parity.** Tap an agent's name in chat. Change identity fields and
+   notifications; upload each supported raster type (including one rejected over
+   10 MB), switch all four shapes, clear the image, and generate once with and once
+   without the desktop image key configured. Relaunch and confirm the roster/header.
+7. **Voice parity.** With the shared ElevenLabs key configured on the computer,
+   first leave the workspace default voice empty: iOS must require an agent-specific
+   voice before it enables spoken replies or preview. Then select a voice, enable
+   spoken replies, and preview it. Repeat with a workspace default configured.
+   Confirm no key appears in device logs, network response JSON, defaults, or Keychain.
+8. **Tasks & Routines.** Create one-time and selected-day routines with native
+   date/time controls. Confirm the run-location picker offers This computer and only
+   enables Cloud VM when Box is configured and its agent is available; an existing
+   cloud routine must retain its location while unavailable. Edit, pause, resume, run
+   now, and delete. Confirm an expired one-time routine has no Resume action, each run
+   creates a fresh task, and receipts show queued/running/waiting/completed/failed.
+9. **Connected accounts.** Connect Slack or Google, add a second account with an
+   explicit alias, return from external OAuth, refresh, and disconnect only one
+   alias. Confirm the other remains connected and that one refresh returns every
+   connected account, including services outside the current visible catalog page.
+10. **Notification routing.** Create two detached tasks for one agent, trigger a
+    notification from the non-active task, tap it, and confirm iOS activates that
+    exact `botId + threadId`, not merely the agent's current task.
+11. **Revoke.** Remove the device in Settings → Companion on the computer. The
    phone should land on "This phone was unpaired" rather than silently failing.
 
 ---
@@ -274,8 +296,13 @@ Not built yet, so not bugs:
 - **Nothing arrives after the app is terminated.** Live and replayed notification
   frames now become native alerts and badges, but closed-app push still needs an
   APNs relay with project-owned Apple credentials.
-- **No voice or routine management.** Tasks, SQLite transcript search/export,
-  reactions, and edit/version switching are available from the conversation UI.
+- **No closed-app APNs relay or call mode.** Per-agent voice selection/preview,
+  Tasks & Routines, and multi-account connected-app management are available.
+- **Webhook management is computer-only.** Creating an internet-reachable trigger
+  or rotating its signing secret is outside the paired-phone allowlist; webhook
+  run receipts are still visible on iOS.
+- **No literal desktop avatar-only sidebar.** iPhone uses a compact custom-avatar
+  roster; iPad split view is not part of this release.
 
 (Two entries that used to sit on this list have since shipped: replies stream
 token by token as the provider emits them, and each bot has a computer panel —

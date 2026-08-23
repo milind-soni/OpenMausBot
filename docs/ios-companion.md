@@ -16,13 +16,25 @@ The first version includes:
   manual fallback, plus per-device tokens, device listing, and revocation.
 - Bot and room lists, paged transcripts, sending, interruption, and unread
   state.
+- Native agent profiles opened from the chat identity: name, role,
+  description, agent notifications, authenticated custom avatars, avatar
+  generation through the computer's configured provider, and per-agent voice.
+- Tasks & Routines with native date/time/day controls, lifecycle actions, and
+  run receipts. Each routine run creates a fresh task; no cron string reaches
+  the phone.
+- Account-aware connected apps: aliases, add-another OAuth, refresh, and
+  account-specific disconnect for multiple Slack/Google accounts.
 - Approvals and questions, including narrow “always allow” grants.
 - Resumable SSE, streamed reply text, reconnect hydration, and an opt-in live
   computer view.
+- Native notification alerts and exact `botId + threadId` routing when a user
+  taps one, including detached tasks reached after replay.
 - Markdown rendering and Keychain storage for the device token.
 
-It is foreground-only. Push notifications, background delivery, voice, App
-Store release automation, and a hosted relay are not part of this version.
+The live companion connection remains foreground-oriented. Native alerts are
+delivered from live or cursor-replayed frames, but closed-app APNs delivery and
+a hosted relay are not part of this version. Voice selection and preview are
+included; a live call mode is not.
 
 ## Runtime architecture
 
@@ -145,9 +157,20 @@ Allowed in the first release:
 - Send messages, interrupt bots, answer approvals/questions, and mark chats
   read.
 - Create a basic bot.
+- Edit only the paired-safe profile fields: identity text, agent notification
+  preference, avatar URL/shape, voice id, and spoken-reply preference.
+- Upload/fetch app-owned raster avatars (10 MB maximum) and ask the computer to
+  generate one using its already-configured shared image-provider key.
+- List voice labels, select a per-agent voice, and receive synthesized preview
+  audio from the computer's shared ElevenLabs configuration.
+- List/create/edit/pause/resume/run/delete routines and read their run receipts.
+- List connected-app account ids/aliases/status, start external OAuth with an
+  explicit alias for additional accounts, and disconnect one exact account.
 
-The write surface uses purpose-built `read` and `always-allow` endpoints. The
-general bot and room `PATCH` endpoints are not reachable through the sidecar.
+The write surface uses purpose-built `read`, `always-allow`, and
+`PATCH /api/bots/:id/profile` endpoints. The profile route rejects every field
+outside its safe allowlist. General bot and room `PATCH` endpoints are not
+reachable through the sidecar.
 An always-allow request succeeds only when its server-issued key is still on a
 pending approval for that bot, so possession of a device token is not enough
 to invent a broad execution grant.
@@ -156,8 +179,12 @@ Intentionally refused:
 
 - API keys and provider configuration.
 - Pairing, device revocation, or companion lifecycle control.
-- Local VM lifecycle, webhooks, connectors, routines, team import/export, and
-  internal peer-agent routes.
+- Local VM lifecycle, webhook creation/rotation/signing secrets, team
+  import/export, and internal peer-agent routes.
+- Bulk or implicit connected-app removal. The phone can remove only an exact
+  opaque account id already proven to belong to the requested toolkit/user.
+- Routine-run cancellation/receipt mutation and arbitrary cron/RRULE input;
+  the native feature uses the existing once/selected-days schedule contract.
 - Cloud computer provisioning, sleep, shell execution, and screenshot APIs.
   The phone receives only the fresh `join` viewer URL, never the provider key.
 - New harness routes that have not been reviewed for phone access.
@@ -221,9 +248,12 @@ xcodebuild -project OpenMausCompanion.xcodeproj \
 ```
 
 The simulator validates compilation, launch, layout, manual address parsing,
-and failure states. Bonjour, Local Network permission, Tailscale routing,
-Keychain behavior across a reboot, and approval delivery still require a real
-iPhone pass.
+profile/routine/connector screen construction, and failure states. The focused
+contract suites also pin old/new avatar decoding, notification target parsing,
+and every newly allowed sidecar method/path. Bonjour, Local Network permission,
+Tailscale routing, Keychain behavior across a reboot, avatar upload/generation,
+OAuth return, audio playback, exact-task notification taps, and approval
+delivery still require a real-iPhone pass.
 
 ## Follow-on releases
 
@@ -235,12 +265,20 @@ distribution scope:
 2. **Desktop conversation parity:** task create/switch/rename/delete, SQLite
    search with exact-message landing, transcript export/share, reactions, and
    edit/version controls. Archived or hidden chat management remains desktop-only.
-3. **Notifications:** native permission, live/replayed alerts, time-sensitive
-   approvals, badges, and background reconciliation are in the app. Closed-app
-   delivery still requires project-owned APNs credentials and a hosted relay;
-   Tailscale cannot wake a terminated iOS process.
-4. **Distribution:** signing, bundle ownership, privacy declarations,
+3. **Profiles and workspace parity:** paired-safe identity/avatar/voice,
+   Tasks & Routines, multi-account connector aliases, and exact-task
+   notification taps are in the app. The iPhone's compact custom-avatar roster
+   is the native equivalent of desktop's collapsible avatar rail; a literal
+   desktop sidebar and iPad split view are outside this release. Lock-screen
+   Live Activities retain the deterministic mascot because the widget extension
+   is deliberately not given the paired-device token or private avatar bytes.
+4. **Notifications:** native permission, live/replayed alerts, time-sensitive
+   approvals, badges, exact-task routing, and background reconciliation are in
+   the app. Closed-app delivery still requires project-owned APNs credentials
+   and a hosted relay; Tailscale cannot wake a terminated iOS process.
+5. **Distribution:** signing, bundle ownership, privacy declarations,
    TestFlight, and App Store review material. Swift tests and an unsigned
    simulator build already run in the repository CI.
-5. **Optional expansion:** voice/call mode, Local VM or host-computer
-   interaction, or a hosted relay. Each requires its own threat-model review.
+6. **Optional expansion:** live call mode, webhook administration, Local VM or
+   host-computer interaction, iPad split view, or a hosted relay. Each requires
+   its own threat-model and platform review.
