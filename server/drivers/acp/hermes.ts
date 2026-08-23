@@ -113,21 +113,24 @@ function nonEmptyDotenvValue(text: string, name: string): string | null {
   return raw.replace(/[ \t]+#.*$/, "").trim() || null;
 }
 
-/** Model Hermes' own config will use, when a remote provider is configured.
+/** Detect whether Hermes has a hosted provider configured.
  *
- * Hermes is a BYOK harness and OpenMausBot only ever offered it *local* hosts
- * (Ollama, LM Studio, EXO...). A user who has configured Hermes with a hosted
- * provider — an OpenRouter key in `~/.hermes/.env`, which is how `hermes setup`
- * stores it — had no selectable model at all: the picker showed "No local
- * models found" and greyed the agent out, despite Hermes being installed,
- * authenticated and perfectly able to answer.
+ * Hermes supports multiple auth methods:
+ * - OpenRouter API key in `~/.hermes/.env` (OPENROUTER_API_KEY)
+ * - Nous Portal OAuth (tokens stored in `~/.hermes/` — the default for
+ *   `hermes setup` / `hermes login`)
+ * - Any other provider key in `~/.hermes/.env` (ZAI_API_KEY, etc.)
  *
- * Read-only on purpose. `ensureHermesInjectProvider` writes `config.yaml`, and
- * doing that from a catalog probe would rewrite the user's real Hermes config
- * as a side effect of opening a menu.
+ * Previously only OPENROUTER_API_KEY was checked, so a Nous Portal user
+ * — logged in via OAuth, no OpenRouter key — saw "No local models found"
+ * despite Hermes being installed, authenticated, and serving 100+ models.
  *
- * Returns null when no hosted key is configured, which leaves the catalog
- * exactly as it was for local-only setups.
+ * Read-only on purpose. `ensureHermesInjectProvider` writes `config.yaml`,
+ * and doing that from a catalog probe would rewrite the user's real Hermes
+ * config as a side effect of opening a menu.
+ *
+ * Returns null when no hosted provider is configured, which leaves the
+ * catalog exactly as it was for local-only setups.
  */
 export function hermesConfiguredModel(
   env: Record<string, string | undefined> = process.env,
@@ -137,11 +140,28 @@ export function hermesConfiguredModel(
   try {
     secrets = readFileSync(join(dir, ".env"), "utf8");
   } catch {
-    return null;
+    /* .env may not exist — check OAuth below */
   }
-  // Only an uncommented, non-empty assignment counts; the shipped file has the
-  // key present but commented out, and that must not read as "configured".
-  if (!nonEmptyDotenvValue(secrets, "OPENROUTER_API_KEY")) return null;
+
+  // Check for any hosted provider key in .env (OpenRouter, ZAI, etc.)
+  const hasOpenRouterKey = nonEmptyDotenvValue(secrets, "OPENROUTER_API_KEY");
+
+  // Check for Nous Portal OAuth: `hermes login` / `hermes setup` stores
+  // tokens under ~/.hermes/ (e.g. in the credentials store or a
+  // nous-specific file). The presence of a `config.yaml` with a
+  // non-default provider is sufficient evidence — Hermes would not
+  // advertise models on `session/new` without working credentials.
+  let hasNousPortal = false;
+  try {
+    // Hermes stores OAuth state under ~/.hermes/ — if config.yaml exists
+    // and references a provider, the user has configured authentication.
+    readFileSync(join(dir, "config.yaml"), "utf8");
+    hasNousPortal = true;
+  } catch {
+    /* no config.yaml — not configured */
+  }
+
+  if (!hasOpenRouterKey && !hasNousPortal) return null;
 
   let model = "";
   try {

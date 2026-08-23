@@ -32,11 +32,22 @@ describe("hermesConfiguredModel", () => {
     });
   });
 
-  it("treats a commented-out key as not configured", () => {
-    // The shipped .env carries `# OPENROUTER_API_KEY=`; reading that as
-    // configured would offer a model that cannot authenticate.
-    const env = home("# OPENROUTER_API_KEY=\n", "model:\n  default: anthropic/claude-opus-4.6\n");
+  it("treats a commented-out key with no config.yaml as not configured", () => {
+    // The shipped .env carries `# OPENROUTER_API_KEY=`; without config.yaml
+    // there's no evidence of a working provider, so it must not read as configured.
+    const env = home("# OPENROUTER_API_KEY=\n");
     expect(hermesConfiguredModel(env)).toBeNull();
+  });
+
+  it("treats a commented-out key with config.yaml as configured (Nous Portal)", () => {
+    // A Nous Portal user has OAuth tokens, not an OpenRouter API key.
+    // config.yaml existing is sufficient evidence of a working provider.
+    const env = home("# OPENROUTER_API_KEY=\n", "model:\n  default: z-ai/glm-5.2\n");
+    expect(hermesConfiguredModel(env)).toEqual({
+      id: HERMES_CONFIG_MODEL_ID,
+      label: "z-ai/glm-5.2 (Hermes config)",
+      custom: true,
+    });
   });
 
   it.each([
@@ -44,14 +55,31 @@ describe("hermesConfiguredModel", () => {
     'OPENROUTER_API_KEY=""\n',
     "OPENROUTER_API_KEY='' # intentionally blank\n",
     "OPENROUTER_API_KEY=   # configured later\n",
-  ])("does not treat a blank key as configured: %j", (line) => {
+  ])("does not treat a blank key with no config.yaml as configured: %j", (line) => {
     expect(hermesConfiguredModel(home(line))).toBeNull();
   });
 
-  it("returns null when there is no .env at all, leaving local-only setups unchanged", () => {
+  it("returns null when there is no .env and no config.yaml, leaving local-only setups unchanged", () => {
     const root = mkdtempSync(join(tmpdir(), "omb-hermes-bare-"));
     dirs.push(root);
+    mkdirSync(join(root, ".hermes"), { recursive: true });
     expect(hermesConfiguredModel({ HERMES_HOME: join(root, ".hermes") })).toBeNull();
+  });
+
+  it("offers the configured model when only config.yaml exists (Nous Portal OAuth)", () => {
+    // A Nous Portal user logs in via OAuth — no API key in .env, but
+    // config.yaml exists with a default model. This is the most common
+    // setup for `hermes setup` / `hermes login` users.
+    const root = mkdtempSync(join(tmpdir(), "omb-hermes-nous-"));
+    dirs.push(root);
+    const h = join(root, ".hermes");
+    mkdirSync(h, { recursive: true });
+    writeFileSync(join(h, "config.yaml"), "model:\n  default: z-ai/glm-5.2\n");
+    expect(hermesConfiguredModel({ HERMES_HOME: h })).toEqual({
+      id: HERMES_CONFIG_MODEL_ID,
+      label: "z-ai/glm-5.2 (Hermes config)",
+      custom: true,
+    });
   });
 
   it("still offers the model when config.yaml is unreadable, with a generic label", () => {
