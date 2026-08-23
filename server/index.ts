@@ -983,7 +983,9 @@ bus.subscribe((event: RuntimeEvent) => {
         if (store.bot(bot.id)?.activity !== "dead") store.setActivity(bot.id, "idle");
         store.patchBot(bot.id, { unread: true });
         if (routineRun?.status !== "failed") {
-          notify(buildNotification("done", bot, event.threadId, reply));
+          // the frame carries the bot's avatar so every desktop client can
+          // show the notification under that bot's own face
+          notify(buildNotification("done", bot, event.threadId, reply, { avatarUrl: bot.avatarUrl }));
         }
         if (screenPollers.has(bot.id)) {
           // the last live frame becomes a settled inline screen message —

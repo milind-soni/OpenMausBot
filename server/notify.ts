@@ -19,6 +19,9 @@ export interface Notification {
   threadId: string;
   title: string;
   body: string;
+  /** The bot's stored profile image, when it has one; clients show it as
+   * the OS notification's icon so every banner carries its bot's face. */
+  avatarUrl?: string;
 }
 
 /** One line, short enough for a lock screen, with the newlines and code
@@ -44,6 +47,7 @@ export function buildNotification(
   bot: NotifyBot,
   threadId: string,
   detail: string,
+  extra?: { avatarUrl?: string },
 ): Notification | null {
   // The toggle means what it says: off is off, including for approvals.
   // A bot whose notifications you turned off can still block waiting for
@@ -66,5 +70,5 @@ export function buildNotification(
   // badge in the sidebar already carries that much.
   if (kind === "done" && !body) return null;
 
-  return { kind, botId: bot.id, botName: bot.name, threadId, title, body };
+  return { kind, botId: bot.id, botName: bot.name, threadId, title, body, ...extra };
 }

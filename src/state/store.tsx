@@ -1462,7 +1462,11 @@ export function StoreProvider({ children }: { children: ReactNode }) {
           // unread:false back. Opening a bot from its own notification and
           // watching the badge return on the next hydration is exactly the
           // bug that makes notifications feel broken.
-          showNotification(frame.notification, (target) => openNotificationTarget(dispatch, target, stateRef.current));
+          showNotification(
+            frame.notification,
+            (target) => openNotificationTarget(dispatch, target, stateRef.current),
+            stateRef.current.bots.find((bot) => bot.id === frame.notification.botId)?.avatarUrl,
+          );
           break;
         case "group.deleted":
           rawDispatch({ type: "groupDeleted", groupId: frame.groupId });
