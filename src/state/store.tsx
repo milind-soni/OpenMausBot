@@ -1699,7 +1699,7 @@ export function useStore() {
   return ctx;
 }
 
-export function formatTime(at: number, locale?: string) {
+export function formatTime(at: number, locale: string) {
   return new Date(at).toLocaleTimeString(locale, {
     hour: "numeric",
     minute: "2-digit",

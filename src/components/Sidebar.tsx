@@ -215,7 +215,7 @@ function GroupListItem({
   onMenu: (menu: { groupId: string; x: number; y: number }) => void;
 }) {
   const { state, dispatch } = useStore();
-  const { t } = useI18n();
+  const { locale, t } = useI18n();
   const selected = state.activeView === "chat" && state.selectedId === group.id;
   const members = group.memberIds
     .map((id) => state.bots.find((b) => b.id === id))
@@ -249,7 +249,7 @@ function GroupListItem({
       <div className={cn("min-w-0 flex-1", density === "icons" && "hidden")}>
         <div className="flex items-baseline justify-between gap-2">
           <span className="truncate text-[15px] font-semibold text-ink">{group.name}</span>
-          {selected && last && <span className="shrink-0 text-xs text-ink-secondary">{formatTime(last.at)}</span>}
+          {selected && last && <span className="shrink-0 text-xs text-ink-secondary">{formatTime(last.at, locale)}</span>}
         </div>
         <div className="flex items-center justify-between gap-2">
           <span className="truncate text-[13px] text-ink-secondary">{groupPreview(group, state.bots, t)}</span>
@@ -748,7 +748,7 @@ function BotListItem({
   archiveDisabled: boolean;
 }) {
   const { state, dispatch } = useStore();
-  const { t } = useI18n();
+  const { locale, t } = useI18n();
   const [renaming, setRenaming] = useState(false);
   const selected = state.activeView === "chat" && state.selectedId === bot.id;
   const mascotMotion = selected && state.mascotMotion?.botId === bot.id ? state.mascotMotion : null;
@@ -799,7 +799,7 @@ function BotListItem({
           </span>
           {selected && last && !renaming && (
             <span className="shrink-0 text-xs text-ink-secondary transition-opacity group-hover:opacity-0 group-focus-within:opacity-0">
-              {formatTime(last.at)}
+              {formatTime(last.at, locale)}
             </span>
           )}
         </div>
@@ -1428,11 +1428,11 @@ export function Sidebar({ open, onClose }: { open: boolean; onClose: () => void 
               />
             </div>
           )}
-          {unsectionedGroups.length > 0 && density !== "icons" && <SectionDivider name="Channels" />}
+          {unsectionedGroups.length > 0 && density !== "icons" && <SectionDivider name={t("Channels")} />}
           {unsectionedGroups.map((g) => (
             <GroupListItem key={g.id} group={g} density={density} onMenu={setRoomMenu} />
           ))}
-          {visibleBots.length > 0 && density !== "icons" && <SectionDivider name="Bots" />}
+          {visibleBots.length > 0 && density !== "icons" && <SectionDivider name={t("Bots")} />}
           {visibleBots.map((b) => (
             <BotListItem
               key={b.id}

@@ -28,7 +28,7 @@ function TaskUsage({ usage }: { usage: Task["usage"] }) {
 
 export function TaskPicker({ bot }: { bot: Bot }) {
   const { dispatch } = useStore();
-  const { t } = useI18n();
+  const { locale, t } = useI18n();
   const [open, setOpen] = useState(false);
   const [renaming, setRenaming] = useState<string | null>(null);
   const [draft, setDraft] = useState("");
@@ -144,7 +144,7 @@ export function TaskPicker({ bot }: { bot: Bot }) {
                     >
                       <div className="truncate text-[13px] text-ink">{task.title}</div>
                       <div className="text-[11px] text-ink-secondary">
-                        {formatTime(task.createdAt)}
+                        {formatTime(task.createdAt, locale)}
                         <TaskUsage usage={task.usage} />
                       </div>
                     </button>

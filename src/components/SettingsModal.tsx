@@ -162,6 +162,7 @@ function DiagnosticsRow() {
   const { t } = useI18n();
   const [exporting, setExporting] = useState(false);
   const [result, setResult] = useState<{ kind: "success" | "error"; message: string } | null>(null);
+  const supported = Boolean(window.ogb?.exportDiagnostics);
 
   const exportDiagnostics = async () => {
     if (!window.ogb?.exportDiagnostics || exporting) return;
@@ -176,6 +177,8 @@ function DiagnosticsRow() {
       setExporting(false);
     }
   };
+
+  if (!supported) return null;
 
   return (
     <Card

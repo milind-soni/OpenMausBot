@@ -9,12 +9,14 @@ import { MausAvatar } from "./Avatar";
 import { cn } from "@/lib/cn";
 import type { SearchHit } from "@/lib/search-hit";
 import { landOnSearchHit } from "@/lib/focus-message";
+import { useI18n } from "@/lib/i18n-context";
 
 export const MIN_QUERY = 2;
 const DEBOUNCE_MS = 250;
 
 export function SearchResults({ query, onLanded }: { query: string; onLanded: () => void }) {
   const { state, dispatch } = useStore();
+  const { locale } = useI18n();
   const [hits, setHits] = useState<SearchHit[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const q = query.trim();
@@ -79,7 +81,7 @@ export function SearchResults({ query, onLanded }: { query: string; onLanded: ()
               <span className="flex items-baseline gap-1.5 text-[12px] text-ink-secondary">
                 <span className="truncate font-medium text-ink">{hit.from ?? hit.name}</span>
                 {hit.task ? <span className="truncate">· {hit.task}</span> : null}
-                <span className="ml-auto shrink-0 tabular-nums">{formatTime(hit.at)}</span>
+                <span className="ml-auto shrink-0 tabular-nums">{formatTime(hit.at, locale)}</span>
               </span>
               <span className={cn("mt-0.5 line-clamp-2 text-[12.5px] leading-snug", hit.role === "user" ? "text-ink" : "text-ink-secondary")}>
                 {hit.kind === "activity" && <Wrench size={11} className="mr-1 inline text-ink-secondary" />}
