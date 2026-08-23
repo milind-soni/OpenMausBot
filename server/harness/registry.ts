@@ -165,7 +165,10 @@ export class ProviderRegistry {
           driverKind: inst.driverKind,
           displayName: inst.displayName ?? inst.driverKind,
           snapshot,
-          models: inst.models,
+          // Describe returns a wire snapshot. Copying catalog rows keeps
+          // exact-model metadata part of that boundary rather than exposing
+          // the live provider's mutable catalog object.
+          models: { ...inst.models, options: inst.models.options.map((option) => ({ ...option })) },
           capabilities: {
             computerMcp: inst.adapter.capabilities.computerMcp === true,
             agentsMcp: inst.adapter.capabilities.agentsMcp === true,

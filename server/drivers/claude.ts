@@ -20,6 +20,7 @@ import { brokerSocketPath, describeSpawnFailure, execCli, killCliTree, spawnCli 
 
 import type {
   DriverCreateInput,
+  EffortLevel,
   ModelCatalog,
   ProviderDriver,
   ProviderInstance,
@@ -29,7 +30,7 @@ import type {
   SendTurnInput,
 } from "../contracts.ts";
 import { computerProxyEnv } from "../container-computer.ts";
-import { newEventId, newId } from "../contracts.ts";
+import { isEffortLevel, newEventId, newId } from "../contracts.ts";
 import { classifyError, computeBackoff, interruptibleDelay, RETRY_MAX_ATTEMPTS } from "./retry.ts";
 import {
   applyClaudeInject,
@@ -127,17 +128,28 @@ function claudeConfigDir(env: Record<string, string | undefined>): string {
   return join(env.HOME || env.USERPROFILE || homedir(), ".claude");
 }
 
-function extrasFromUnknown(value: unknown): Array<{ id: string; label: string }> {
+function extrasFromUnknown(value: unknown): Array<{ id: string; label: string; effortLevels?: readonly EffortLevel[] }> {
   if (!Array.isArray(value)) return [];
   return value.flatMap((item) => {
     if (typeof item === "string") {
       return CLAUDE_MODEL_ID.test(item) ? [{ id: item, label: item }] : [];
     }
     if (!item || typeof item !== "object") return [];
-    const row = item as { id?: unknown; model?: unknown; slug?: unknown; name?: unknown; displayName?: unknown; label?: unknown };
+    const row = item as {
+      id?: unknown;
+      model?: unknown;
+      slug?: unknown;
+      name?: unknown;
+      displayName?: unknown;
+      label?: unknown;
+      effortLevels?: unknown;
+    };
     const id = [row.id, row.model, row.slug].find((candidate): candidate is string => typeof candidate === "string");
     if (!id || !CLAUDE_MODEL_ID.test(id)) return [];
     const label = [row.name, row.displayName, row.label].find((candidate): candidate is string => typeof candidate === "string");
+    if (Array.isArray(row.effortLevels) && row.effortLevels.every(isEffortLevel)) {
+      return [{ id, label: label || id, effortLevels: row.effortLevels }];
+    }
     return [{ id, label: label || id }];
   });
 }
@@ -169,7 +181,9 @@ export function readClaudeModelCatalog(env: Record<string, string | undefined> =
   for (const extra of extras) {
     if (seen.has(extra.id)) continue;
     seen.add(extra.id);
-    options.push({ id: extra.id, label: extra.label, custom: true });
+    const option: ModelCatalog["options"][number] = { id: extra.id, label: extra.label, custom: true };
+    if (extra.effortLevels !== undefined) option.effortLevels = extra.effortLevels;
+    options.push(option);
   }
   return { default: STATIC_CLAUDE_MODELS.default, options };
 }

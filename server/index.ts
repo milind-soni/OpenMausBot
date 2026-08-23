@@ -63,6 +63,7 @@ import { describeSpawnFailure, execCli } from "./procs.ts";
 import { buildNotification, type Notification } from "./notify.ts";
 import { isEffortLevel, type RequestOutcome, type RuntimeEvent } from "./contracts.ts";
 import { RETRY_MAX_ATTEMPTS } from "./drivers/retry.ts";
+import { effortLevelsForModel } from "../src/lib/model-effort.ts";
 
 import { BUILT_IN_DRIVERS } from "./drivers/builtIn.ts";
 import { getOrCreateChannel, mirrorActivity, mirrorExchange, mirrorReply, type CommsBus } from "./comms-visibility.ts";
@@ -1355,7 +1356,12 @@ async function startTurn(
   const effort = opts?.runOn === "cloud" ? undefined : bot.modelSelection.effort;
   // A selection can be persisted while its engine is offline. Re-check when
   // the engine returns so an old or unsupported value never reaches a CLI.
-  if (effort && !instance.adapter.capabilities.effortLevels?.includes(effort)) {
+  const allowedEffortLevels = effortLevelsForModel(
+    instance.models.options,
+    model,
+    instance.adapter.capabilities.effortLevels,
+  );
+  if (effort && !allowedEffortLevels?.includes(effort)) {
     throw Object.assign(
       new Error(`effort "${effort}" is not offered by this bot's engine — choose another level in settings`),
       { status: 409 },
@@ -1868,6 +1874,23 @@ async function runGroupMemberTurn(
       kind: "activity",
       from: { botId: bot.id, name: bot.name, color: bot.color },
       tool: { name: `${bot.name} is busy in another conversation — skipped this round`, ok: false },
+    });
+    return true;
+  }
+  const allowedEffortLevels = effortLevelsForModel(
+    instance.models.options,
+    bot.modelSelection.model,
+    instance.adapter.capabilities.effortLevels,
+  );
+  if (bot.modelSelection.effort && !allowedEffortLevels?.includes(bot.modelSelection.effort)) {
+    store.appendMessage(group.threadId, {
+      role: "bot",
+      kind: "activity",
+      from: { botId: bot.id, name: bot.name, color: bot.color },
+      tool: {
+        name: `error: effort "${bot.modelSelection.effort}" is not offered by this bot's engine — choose another level in settings`,
+        ok: false,
+      },
     });
     return true;
   }
@@ -3570,7 +3593,7 @@ const server = createServer(async (req, res) => {
       // safe — startTurn refuses to run a turn on an unavailable instance
       // anyway, so an unverifiable level never reaches a CLI.
       const nextSelection = (body as Record<string, unknown>).modelSelection as
-        | { instanceId?: string; effort?: string }
+        | { instanceId?: string; model?: string; effort?: string }
         | undefined;
       if (nextSelection?.effort !== undefined) {
         if (!isEffortLevel(nextSelection.effort)) {
@@ -3579,7 +3602,13 @@ const server = createServer(async (req, res) => {
         const target = registry.get(nextSelection.instanceId ?? existingBot?.modelSelection.instanceId ?? "");
         // typed as strings, not levels: this is the boundary that decides
         // whether the value *is* a level, so it must not assert that it is
-        const allowed: readonly string[] = target?.adapter.capabilities.effortLevels ?? [];
+        const allowed: readonly string[] = target
+          ? (effortLevelsForModel(
+              target.models.options,
+              nextSelection.model ?? existingBot?.modelSelection.model ?? "",
+              target.adapter.capabilities.effortLevels,
+            ) ?? [])
+          : [];
         if (target && !allowed.includes(nextSelection.effort)) {
           return json(res, 400, {
             error: `effort "${nextSelection.effort}" is not offered by this bot's engine`,

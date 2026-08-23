@@ -41,6 +41,12 @@ const api = async (method: string, path: string, body?: unknown): Promise<{ stat
   return { status: res.status, body: await res.json() };
 };
 
+const writeClaudeCatalog = (options: unknown[]) => {
+  const configDir = join(home, ".claude");
+  mkdirSync(configDir, { recursive: true });
+  writeFileSync(join(configDir, "settings.json"), JSON.stringify({ availableModels: options }));
+};
+
 const uploadAvatar = async (mime = "image/png"): Promise<string> => {
   const response = await fetch(`${BASE}/api/attachments`, {
     method: "POST",
@@ -1243,6 +1249,70 @@ describe("harness HTTP API", () => {
 
     expect(patched.status).toBe(400);
     expect(patched.body.error).toContain("not recognized");
+  });
+
+  it("accepts the canonical minimal effort value while an engine is offline", async () => {
+    const bot = (await api("POST", "/api/bots")).body.bot;
+    const patched = await api("PATCH", `/api/bots/${bot.id}`, {
+      modelSelection: { instanceId: "ghost", model: "ghost-1", effort: "minimal" },
+    });
+
+    expect(patched.status).toBe(200);
+    expect(patched.body.bot.modelSelection.effort).toBe("minimal");
+  });
+
+  it("rejects a live bot PATCH effort absent from the selected model's exact levels", async () => {
+    const model = "claude-exact-low";
+    writeClaudeCatalog([{ id: model, label: "Claude exact low", effortLevels: ["low"] }]);
+    await api("GET", "/api/instances");
+    const bot = (await api("POST", "/api/bots")).body.bot;
+
+    try {
+      const patched = await api("PATCH", `/api/bots/${bot.id}`, {
+        modelSelection: { instanceId: "claude", model, effort: "high" },
+      });
+
+      expect(patched.status).toBe(400);
+      expect(patched.body.error).toContain('effort "high" is not offered');
+    } finally {
+      writeClaudeCatalog([]);
+      await api("GET", "/api/instances");
+      await api("DELETE", `/api/bots/${bot.id}`);
+    }
+  });
+
+  it("does not dispatch a room turn with stale exact-model effort", async () => {
+    const model = "claude-room-exact";
+    writeClaudeCatalog([{ id: model, label: "Claude room exact" }]);
+    await api("GET", "/api/instances");
+    const bot = (await api("POST", "/api/bots")).body.bot;
+    const room = (await api("POST", "/api/groups", { name: "Exact effort room", memberIds: [bot.id] })).body.group;
+
+    try {
+      const selected = await api("PATCH", `/api/bots/${bot.id}`, {
+        modelSelection: { instanceId: "claude", model, effort: "high" },
+      });
+      expect(selected.status).toBe(200);
+
+      writeClaudeCatalog([{ id: model, label: "Claude room exact", effortLevels: ["low"] }]);
+      await api("GET", "/api/instances");
+      rmSync(fakeClaudeDump, { force: true });
+
+      expect((await api("POST", `/api/groups/${room.id}/messages`, { text: "Please respond." })).status).toBe(202);
+      await expect.poll(async () => {
+        const state = (await api("GET", "/api/bots?messages=20")).body;
+        const messages = state.groups.find((group: { id: string }) => group.id === room.id).messages;
+        return messages.some((message: { tool?: { name?: string } }) =>
+          message.tool?.name?.includes('effort "high" is not offered by this bot\'s engine'),
+        );
+      }, { timeout: 5_000 }).toBe(true);
+      expect(existsSync(fakeClaudeDump)).toBe(false);
+    } finally {
+      writeClaudeCatalog([]);
+      await api("GET", "/api/instances");
+      await api("DELETE", `/api/groups/${room.id}`);
+      await api("DELETE", `/api/bots/${bot.id}`);
+    }
   });
 
   it("leaves a bot with no effort level untouched", async () => {

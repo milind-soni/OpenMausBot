@@ -5,6 +5,7 @@ import { useEffect, useRef, useState } from "react";
 import { Check, ChevronDown, ChevronLeft, ChevronRight, Search } from "lucide-react";
 import { useStore, type Bot, type InstanceInfo, type ModelSelection } from "@/state/store";
 import { filterCustomModels, partitionCustomModels, suggestedModels } from "@/lib/custom-models";
+import { clearUnsupportedEffort } from "@/lib/model-effort";
 import { isCustomOnly, splitEngineRail } from "@/lib/engine-rail";
 import { ProviderMark } from "./ProviderIcons";
 import { EngineSetup, needsCli, needsSignIn } from "./EngineSetup";
@@ -160,7 +161,7 @@ export function ModelPicker({ bot, className }: { bot: Bot; className?: string }
     dispatch({
       type: "setModel",
       botId: bot.id,
-      selection: nextSelection,
+      selection: clearUnsupportedEffort(nextSelection, instance.models.options, instance.capabilities?.effortLevels),
     });
     setOpen(false);
   };

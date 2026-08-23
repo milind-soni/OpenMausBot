@@ -14,6 +14,7 @@ import {
   type ReactNode,
 } from "react";
 import type { CloudBackend, EffortLevel } from "../../server/contracts.ts";
+import { clearUnsupportedEffort } from "@/lib/model-effort";
 import type { MausColor, MausMotion } from "@/lib/mascot";
 import type { BotAvatarCrop } from "../../shared/bot-avatar";
 import type { Routine, RoutineInput, RoutineRun } from "@/lib/routines";
@@ -296,7 +297,17 @@ export interface InstanceInfo {
     /** a reported cost on a subscription is notional; the UI says so */
     billing?: "metered" | "subscription";
   };
-  models: { default: string; options: Array<{ id: string; label: string; custom?: boolean; loaded?: boolean }> };
+  models: {
+    default: string;
+    options: Array<{
+      id: string;
+      label: string;
+      custom?: boolean;
+      loaded?: boolean;
+      contextWindow?: number;
+      effortLevels?: readonly EffortLevel[];
+    }>;
+  };
   capabilities?: {
     computerMcp?: boolean;
     agentsMcp?: boolean;
@@ -812,8 +823,15 @@ export function reducer(state: AppState, action: Action): AppState {
           [action.botId]: { held: action.held, helpReason: action.helpReason },
         },
       };
-    case "setModel":
-      return updateBot(state, action.botId, (b) => ({ ...b, modelSelection: action.selection }));
+    case "setModel": {
+      const instance = state.instances.find((candidate) => candidate.instanceId === action.selection.instanceId);
+      const selection = clearUnsupportedEffort(
+        action.selection,
+        instance?.models.options ?? [],
+        instance?.capabilities?.effortLevels,
+      );
+      return updateBot(state, action.botId, (b) => ({ ...b, modelSelection: selection }));
+    }
     case "connected":
       return { ...state, connected: action.value };
     case "error":
