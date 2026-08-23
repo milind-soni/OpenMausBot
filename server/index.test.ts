@@ -1456,6 +1456,7 @@ describe("harness HTTP API", () => {
       name: "Vanished DSH model room",
       memberIds: [bot.id],
     })).body.group;
+    expect((await api("PATCH", `/api/groups/${room.id}/setup`, { action: "skip" })).status).toBe(200);
 
     const before = (await api("GET", "/api/bots")).body.bots.find((candidate: { id: string }) => candidate.id === bot.id);
     const beforeMessages = before.messages.length;
@@ -1524,6 +1525,7 @@ describe("harness HTTP API", () => {
     await api("GET", "/api/instances");
     const bot = (await api("POST", "/api/bots")).body.bot;
     const room = (await api("POST", "/api/groups", { name: "Exact effort room", memberIds: [bot.id] })).body.group;
+    expect((await api("PATCH", `/api/groups/${room.id}/setup`, { action: "skip" })).status).toBe(200);
 
     try {
       const selected = await api("PATCH", `/api/bots/${bot.id}`, {
@@ -1974,6 +1976,7 @@ describe("harness HTTP API", () => {
     })).status).toBe(200);
     const group = (await api("POST", "/api/groups", { name: "DSH cursor room", memberIds: [bot.id] })).body.group;
     expect(group).not.toHaveProperty("memberResumeCursors");
+    expect((await api("PATCH", `/api/groups/${group.id}/setup`, { action: "skip" })).status).toBe(200);
     const stream = await openSse(`${BASE}/api/events`);
 
     try {
