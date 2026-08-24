@@ -115,6 +115,14 @@ describe("hermesConfiguredModel", () => {
     expect(hermesConfiguredModel(env)).toBeNull();
   });
 
+  it("keeps a named custom provider even when a hosted key is also present", () => {
+    const env = home(
+      "OPENROUTER_API_KEY=stale-hosted-key\n",
+      "model:\n  default: local-model\n  provider: custom:local\n",
+    );
+    expect(hermesConfiguredModel(env)).toBeNull();
+  });
+
   it.each([
     ["scalar", "model: z-ai/glm-5.2 # selected by setup\n", "z-ai/glm-5.2"],
     ["default", "model:\n  default: z-ai/glm-5.2 # selected by setup\n", "z-ai/glm-5.2"],
