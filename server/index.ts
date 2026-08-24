@@ -75,7 +75,7 @@ import { RETRY_MAX_ATTEMPTS } from "./drivers/retry.ts";
 import { BUILT_IN_DRIVERS } from "./drivers/builtIn.ts";
 import { getOrCreateChannel, mirrorActivity, mirrorExchange, mirrorReply, type CommsBus } from "./comms-visibility.ts";
 import { searchMessages } from "./message-db.ts";
-import { _loadPending, discardDelegations, drainDelegations, pendingThreads, queueDelegation, type QueueResult } from "./delegations.ts";
+import { _loadPending, discardDelegations, drainDelegations, pendingDelegationSnapshot, pendingThreads, queueDelegation, type QueueResult } from "./delegations.ts";
 import { drainSteeredMessages, queueSteeredMessage } from "./steer-queue.ts";
 import { EventBus } from "./harness/bus.ts";
 import { ProviderRegistry } from "./harness/registry.ts";
@@ -2961,6 +2961,39 @@ const server = createServer(async (req, res) => {
         return json(res, 200, { messageIds });
       }
       return json(res, 404, { error: "unknown internal endpoint" });
+    }
+
+    // Live Team Map metadata. Prompts and replies never leave their
+    // transcripts: this projection carries only ids, status relationships,
+    // optional delegation labels, and timestamps.
+    if (method === "GET" && path === "/api/team-map") {
+      const visible = new Set(store.bots.filter((bot) => !bot.hidden).map((bot) => bot.id));
+      const collaborations = store.groups
+        .filter(
+          (group) =>
+            group.dm === true &&
+            group.memberIds.length === 2 &&
+            group.memberIds.every((botId) => visible.has(botId)),
+        )
+        .map((group) => ({
+          groupId: group.id,
+          botIds: [group.memberIds[0], group.memberIds[1]] as [string, string],
+          lastAt: store.messagesFor(group.threadId).at(-1)?.at ?? group.createdAt,
+        }))
+        .sort((a, b) => b.lastAt - a.lastAt);
+      const queued = pendingDelegationSnapshot().flatMap((item) => {
+        const source = store.botByThread(item.sourceThreadId);
+        if (!source || !visible.has(source.id) || !visible.has(item.toBotId)) return [];
+        return [{ sourceBotId: source.id, targetBotId: item.toBotId, reason: item.reason }];
+      });
+      const running = [...delegationWatch.entries()].flatMap(([threadId, watch]) => {
+        if (!visible.has(watch.toBotId)) return [];
+        const channel = watch.channelId ? store.group(watch.channelId) : undefined;
+        const sourceBotId = channel?.memberIds.find((botId) => botId !== watch.toBotId);
+        if (!sourceBotId || !visible.has(sourceBotId)) return [];
+        return [{ sourceBotId, targetBotId: watch.toBotId, threadId, groupId: channel?.id }];
+      });
+      return json(res, 200, { collaborations, queued, running });
     }
 
     // ── routines calendar ────────────────────────────────────────────────

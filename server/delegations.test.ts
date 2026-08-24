@@ -12,6 +12,7 @@ import { DATA_DIR } from "./config.ts";
 import type { ModelSelection } from "./contracts.ts";
 import {
   drainDelegations,
+  pendingDelegationSnapshot,
   queueDelegation,
   _pendingCount,
 } from "./delegations.ts";
@@ -129,6 +130,20 @@ describe("queueDelegation", () => {
         (b as { threadId?: string }).threadId === from.threadId,
     );
     expect(broadcast).toBeTruthy();
+  });
+
+  it("projects routing metadata without exposing the delegated task prompt", () => {
+    queueDelegation(commsBus, from, {
+      toBotId: target.id,
+      message: "private customer task details",
+      reason: "followup",
+      depth: 0,
+    }, 1);
+    const ownSnapshot = pendingDelegationSnapshot().filter((item) => item.sourceThreadId === from.threadId);
+    expect(ownSnapshot).toEqual([
+      { sourceThreadId: from.threadId, toBotId: target.id, reason: "followup" },
+    ]);
+    expect(JSON.stringify(ownSnapshot)).not.toContain("private customer task details");
   });
 
   it("keys detached routine delegations to their real source thread", async () => {

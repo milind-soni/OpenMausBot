@@ -91,6 +91,22 @@ export function pendingThreads(): string[] {
   return [...pendingDelegations.keys()];
 }
 
+/** Read-only metadata for the local Team Map. Task prompts stay private;
+ * the UI only needs to know who handed work to whom and the optional label. */
+export function pendingDelegationSnapshot(): Array<{
+  sourceThreadId: string;
+  toBotId: string;
+  reason?: string;
+}> {
+  return [...pendingDelegations.entries()].flatMap(([sourceThreadId, items]) =>
+    items.map((item) => ({
+      sourceThreadId,
+      toBotId: item.toBotId,
+      ...(item.reason ? { reason: item.reason } : {}),
+    })),
+  );
+}
+
 /** How many handoffs one turn may queue. Small on purpose: this is the only
  * thing standing between a confused bot and a fan-out of real turns. */
 const MAX_QUEUED_PER_THREAD = 4;

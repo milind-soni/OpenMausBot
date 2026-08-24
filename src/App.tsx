@@ -18,6 +18,7 @@ import { RoutinesPage } from "@/components/RoutinesPage";
 import { NoEngines } from "@/components/NoEngines";
 import { CommandPalette } from "@/components/CommandPalette";
 import { SkillRecorderPage } from "@/components/SkillRecorderPage";
+import { TeamMapPage } from "@/components/TeamMapPage";
 
 function Shell() {
   const { state, dispatch } = useStore();
@@ -132,7 +133,9 @@ function Shell() {
           menuButtonRef.current?.focus();
         }}
       />
-      {state.activeView === "routines" ? (
+      {state.activeView === "team-map" ? (
+        <TeamMapPage />
+      ) : state.activeView === "routines" ? (
         <RoutinesPage />
       ) : state.activeView === "skill-recorder" ? (
         <SkillRecorderPage />
