@@ -622,6 +622,12 @@ const watchdog = new TurnWatchdog({
         stopScreenPoller(currentBot.id);
         if (activeVpsThreads.get(currentBot.id) === turn.threadId) activeVpsThreads.delete(currentBot.id);
         store.setActivity(currentBot.id, "idle");
+        // The grace fallback replaces a missing turn.completed event. Release
+        // every kind of work that may have queued behind this bot, including
+        // connector and credential continuations.
+        drainQueuedSends();
+        drainConnectorResumes();
+        drainSecretResumes();
       }
     }, 6_000);
     release.unref?.();
@@ -1735,6 +1741,8 @@ async function startTurn(
       // a dispatch failure never emits turn.completed, so the settle-driven
       // drain would strand anything queued behind this turn
       drainQueuedSends();
+      drainConnectorResumes();
+      drainSecretResumes();
     }
   })();
 }
@@ -2038,6 +2046,13 @@ async function runGroupMemberTurn(
     groupSpeakers.delete(group.threadId);
     store.patchGroup(group.id, { busyBotId: null, unread: true });
     if (store.bot(bot.id)?.busy) store.setActivity(bot.id, "idle");
+  }
+  if (outcome === "dispatch_failed") {
+    // No turn.completed follows a rejected room dispatch. Anything that was
+    // queued while this bot briefly owned the room must be retried now.
+    drainQueuedSends();
+    drainConnectorResumes();
+    drainSecretResumes();
   }
 
   // chained mentions: a member's reply can summon teammates — one hop only
@@ -2505,6 +2520,8 @@ async function reloadProviders() {
   // killed turns settle here without a turn.completed event, so anything
   // queued behind them drains now — onto the freshly loaded fleet
   drainQueuedSends();
+  drainConnectorResumes();
+  drainSecretResumes();
 }
 
 // Config writes rebuild the whole provider registry. Keep the read-modify-write
