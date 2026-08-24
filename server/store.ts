@@ -66,13 +66,28 @@ export interface ConnectorCardData {
   resumed?: boolean;
 }
 
+export interface SecretRequestCardData {
+  /** Fixed allowlisted credential id; never an arbitrary config path. */
+  target: import("../shared/credential-request.ts").CredentialTargetId;
+  label: string;
+  description: string;
+  placeholder: string;
+  helpUrl: string;
+  requestKey: string;
+  provided?: boolean;
+  dismissed?: boolean;
+  resumed?: boolean;
+  error?: string;
+}
+
 export interface Message {
   id: string;
   role: "bot" | "user";
-  kind: "text" | "options" | "activity" | "screen" | "connector";
+  kind: "text" | "options" | "activity" | "screen" | "connector" | "secret";
   text?: string;
   card?: OptionCardData;
   connector?: ConnectorCardData;
+  secret?: SecretRequestCardData;
   /** activity messages: tool name + outcome. `spoken` is the same chip as
    * a phrase a voice can read ("reading a file") — computed once here so
    * call mode never has to re-derive it from the raw tool name, and absent
@@ -214,6 +229,14 @@ function redactBotAuthored<T extends Omit<Message, "id" | "at"> & { at?: number 
       label: redactSecretsInText(out.connector.label),
       description: redactSecretsInText(out.connector.description),
       error: out.connector.error ? redactSecretsInText(out.connector.error) : undefined,
+    };
+  }
+  if (out.secret) {
+    out.secret = {
+      ...out.secret,
+      label: redactSecretsInText(out.secret.label),
+      description: redactSecretsInText(out.secret.description),
+      error: out.secret.error ? redactSecretsInText(out.secret.error) : undefined,
     };
   }
   return out;

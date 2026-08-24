@@ -564,7 +564,7 @@ describe("Store redacts bot-authored secrets on write", () => {
     rmSync(DATA_DIR, { recursive: true, force: true });
   });
 
-  it("masks a key in a bot reply, a tool title and a card summary — but never in what the user typed", () => {
+  it("masks a key in bot text, tools and cards — but never in what the user typed", () => {
     const store = new Store(selection);
     const bot = store.createBot();
     const key = `sk-ant-api03-${"abcdefghijklmnopqrstuvwxyz0123456789"}`;
@@ -579,6 +579,19 @@ describe("Store redacts bot-authored secrets on write", () => {
       card: { title: "Run this?", summary: `curl -H "Authorization: Bearer ${key}"`, options: [], requestId: "r1", tool: "Bash" } as never,
     });
     expect((card.card as { summary?: string }).summary).not.toContain(key);
+    const secretCard = store.appendMessage(bot.threadId, {
+      role: "bot",
+      kind: "secret",
+      secret: {
+        target: "xaiApiKey",
+        label: "xAI API key",
+        description: `The agent accidentally included ${key}`,
+        placeholder: "xai-…",
+        helpUrl: "https://console.x.ai/",
+        requestKey: "credential-request",
+      },
+    });
+    expect(secretCard.secret?.description).not.toContain(key);
     // the user's own words are theirs
     const mine = store.appendMessage(bot.threadId, { role: "user", kind: "text", text: `use ${key} for the api` });
     expect(mine.text).toContain(key);

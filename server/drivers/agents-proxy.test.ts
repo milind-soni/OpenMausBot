@@ -21,6 +21,7 @@ let askResponse: unknown = { botName: "Helper", text: "hi from helper" };
 let lastDelegateBody: any = null;
 let delegateResponse: unknown = { queued: true, message: "Delegation queued." };
 let lastCreateBody: any = null;
+let lastCredentialBody: any = null;
 
 let child: ChildProcess;
 const pending = new Map<number, (msg: any) => void>();
@@ -83,6 +84,16 @@ beforeAll(async () => {
       });
       return;
     }
+    if (req.method === "POST" && req.url === "/api/internal/request-credential") {
+      let data = "";
+      req.on("data", (c) => (data += c));
+      req.on("end", () => {
+        lastCredentialBody = JSON.parse(data);
+        res.writeHead(200, { "content-type": "application/json" });
+        res.end(JSON.stringify({ messageId: "msg-key", label: "OpenCode API key" }));
+      });
+      return;
+    }
     res.writeHead(404, { "content-type": "application/json" });
     res.end(JSON.stringify({ error: "unknown" }));
   });
@@ -121,7 +132,7 @@ afterAll(async () => {
 });
 
 describe("agents-proxy MCP surface", () => {
-  it("answers the MCP handshake and lists all four tools", async () => {
+  it("answers the MCP handshake and lists all five tools", async () => {
     const init = await rpc("initialize", { protocolVersion: "2024-11-05" });
     expect(init.result.serverInfo.name).toContain("agents");
     const list = await rpc("tools/list");
@@ -130,6 +141,7 @@ describe("agents-proxy MCP surface", () => {
       "ask_bot",
       "delegate_bot",
       "create_bot",
+      "request_credential",
     ]);
   });
 
@@ -208,6 +220,29 @@ describe("agents-proxy MCP surface", () => {
       role: "Product designer",
       instructions: "Design and review the user experience.",
     });
+  });
+
+  it("requests an allowlisted credential without putting a secret in the request", async () => {
+    const res = await callTool("request_credential", {
+      credential_id: "opencodeGoApiKey",
+      reason: "The selected model needs it.",
+    });
+    expect(res.result.content[0].text).toContain("secure OpenCode API key card");
+    expect(res.result.content[0].text).toContain("End this turn");
+    expect(lastCredentialBody).toEqual({
+      fromBotId: "bot-asker",
+      fromThreadId: "thread-asker-routine",
+      credentialId: "opencodeGoApiKey",
+      reason: "The selected model needs it.",
+    });
+    expect(JSON.stringify(lastCredentialBody)).not.toContain("secret");
+  });
+
+  it("rejects credential ids outside the fixed allowlist locally", async () => {
+    lastCredentialBody = null;
+    const res = await callTool("request_credential", { credential_id: "arbitrary.config.path" });
+    expect(res.result.isError).toBe(true);
+    expect(lastCredentialBody).toBeNull();
   });
 
   it("rejects unknown tools with -32602", async () => {

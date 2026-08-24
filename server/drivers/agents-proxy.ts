@@ -1,5 +1,5 @@
 // Agent-to-agent comms MCP proxy — spawned as an MCP server inside a bot's
-// agent process (via the "agents" integration). Exposes four tools that
+// agent process (via the "agents" integration). Exposes five tools that
 // let one bot talk to another, routed back through the harness so the
 // harness stays the single owner of turns, permissions, and recursion
 // limits:
@@ -12,6 +12,7 @@
 //                                          the peer's reply as its own turn
 //   create_bot(name, role, instructions) → Chiefs can add a specialist to
 //                                          their own section
+//   request_credential(id, reason?)       → show a secure, allowlisted key card
 //
 // Speaks raw JSON-RPC 2.0 over stdio (no MCP SDK — house style, matches
 // computer-proxy / permission-proxy). All state comes from env, injected by
@@ -21,6 +22,8 @@
 //   OMB_COMMS_TOKEN  shared secret for the localhost-only internal endpoints
 //   OMB_TURN_DEPTH   this turn's comms depth (the harness refuses recursion)
 import readline from "node:readline";
+
+import { CREDENTIAL_TARGETS, isCredentialTargetId } from "../../shared/credential-request.ts";
 
 const HARNESS = process.env.OMB_HARNESS_URL ?? "http://127.0.0.1:8799";
 const BOT_ID = process.env.OMB_BOT_ID ?? "";
@@ -76,6 +79,26 @@ const TOOLS = [
         instructions: { type: "string", description: "What this specialist is responsible for and how it should work." },
       },
       required: ["name", "role", "instructions"],
+    },
+  },
+  {
+    name: "request_credential",
+    description:
+      "Ask the user for a supported API key through OpenMausBot's secure credential card. Use this instead of asking them to paste a secret into chat. The secret is saved by the desktop app and is never returned to you. After calling this tool, end the turn; OpenMausBot resumes the task after the user saves or declines.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        credential_id: {
+          type: "string",
+          enum: Object.keys(CREDENTIAL_TARGETS),
+          description: "The credential the current task requires.",
+        },
+        reason: {
+          type: "string",
+          description: "Optional short, non-sensitive explanation of why the task needs it.",
+        },
+      },
+      required: ["credential_id"],
     },
   },
 ];
@@ -163,6 +186,28 @@ async function callTool(name: string, args: Json): Promise<{ text: string; isErr
     createdThisTurn += 1;
     return {
       text: `Created @${r.name ?? botName} in ${r.section ?? "General"} [id: ${r.id}]. Assign work with delegate_bot.`,
+    };
+  }
+  if (name === "request_credential") {
+    const credentialId = args.credential_id;
+    if (!isCredentialTargetId(credentialId)) {
+      return { text: "request_credential needs a supported credential_id.", isError: true };
+    }
+    const reason = typeof args.reason === "string" ? args.reason.trim().slice(0, 240) : "";
+    const r = await api("/api/internal/request-credential", {
+      method: "POST",
+      body: JSON.stringify({
+        fromBotId: BOT_ID,
+        fromThreadId: THREAD_ID,
+        credentialId,
+        ...(reason ? { reason } : {}),
+      }),
+    });
+    if (r.alreadyConfigured) {
+      return { text: `${r.label ?? CREDENTIAL_TARGETS[credentialId].label} is already configured. Continue the task.` };
+    }
+    return {
+      text: `A secure ${r.label ?? CREDENTIAL_TARGETS[credentialId].label} card is now visible to the user. End this turn; OpenMausBot will resume the task after they save or decline. Never ask them to paste the key into chat.`,
     };
   }
   return { text: `Unknown tool: ${name}`, isError: true };
