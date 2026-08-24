@@ -18,6 +18,7 @@ import {
 } from "./delegations.ts";
 import { peerAllowKey, resolvePeerComms } from "./peer-approval.ts";
 import { Store, type BotRecord } from "./store.ts";
+import { WorkOrderStore } from "./work-orders.ts";
 
 const selection = (): ModelSelection => ({ instanceId: "claude", model: "fake-model" });
 
@@ -310,27 +311,35 @@ describe("drainDelegations", () => {
 
   it("keeps the handoff queued while the target is busy, then runs it when idle", async () => {
     store.patchBot(target.id, { busy: true });
-    queueDelegation(commsBus, from, { toBotId: target.id, message: "do this", depth: 0 }, 1);
+    const workOrders = new WorkOrderStore({ file: join(DATA_DIR, "busy-work-orders.json") });
+    queueDelegation(commsBus, from, { toBotId: target.id, message: "do this", depth: 0 }, 1, from.threadId, workOrders);
+    const order = workOrders.list({ limit: 1 })[0];
+    expect(order?.state).toBe("pending-source");
     drainDelegations(commsBus, approvalBus, from.threadId, (toBotId, message, commsDepth) => {
       runTargetCalls.push({ toBotId, message, commsDepth });
-    });
+    }, workOrders);
     await waitFor(() => !_isDraining(from.threadId));
     expect(runTargetCalls).toEqual([]);
     expect(_pendingCount(from.threadId)).toBe(1);
+    expect(workOrders.get(order!.id)?.state).toBe("pending-source");
     store.patchBot(target.id, { busy: false });
     drainDelegations(commsBus, approvalBus, from.threadId, (toBotId, message, commsDepth) => {
       runTargetCalls.push({ toBotId, message, commsDepth });
-    });
+    }, workOrders);
     await waitFor(() => runTargetCalls.length === 1 && _pendingCount(from.threadId) === 0);
     expect(_pendingCount(from.threadId)).toBe(0);
+    expect(workOrders.get(order!.id)?.state).toBe("completed");
   });
 
   it("asks for approval when approvePeerComms is on, then runs only on allow", async () => {
     store.patchBot(from.id, { approvePeerComms: true });
-    queueDelegation(commsBus, from, { toBotId: target.id, message: "do this", depth: 0 }, 1);
+    const workOrders = new WorkOrderStore({ file: join(DATA_DIR, "approval-work-orders.json") });
+    queueDelegation(commsBus, from, { toBotId: target.id, message: "do this", depth: 0 }, 1, from.threadId, workOrders);
+    const order = workOrders.list({ limit: 1 })[0]!;
+    expect(order.state).toBe("pending-source");
     drainDelegations(commsBus, approvalBus, from.threadId, (toBotId, message, commsDepth) => {
       runTargetCalls.push({ toBotId, message, commsDepth });
-    });
+    }, workOrders);
 
     // the source bot's thread shows the options card BEFORE runTarget fires
     const card = await waitFor(() =>
@@ -341,9 +350,10 @@ describe("drainDelegations", () => {
     expect(card.card?.allowKey).toBe(peerAllowKey("delegate_bot", target.id));
     expect(card.card?.options).toEqual(["Allow", "Deny", "Always allow"]);
     expect(runTargetCalls).toEqual([]);
+    expect(workOrders.get(order.id)?.state).toBe("awaiting-approval");
 
     resolvePeerComms(approvalBus, card.card!.requestId!, "allow");
-    await waitFor(() => runTargetCalls.length === 1);
+    await waitFor(() => workOrders.get(order.id)?.state === "completed");
     expect(runTargetCalls[0]!.toBotId).toBe(target.id);
     expect(runTargetCalls[0]!.commsDepth).toBe(1);
   });

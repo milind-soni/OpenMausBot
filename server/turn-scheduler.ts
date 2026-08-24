@@ -147,8 +147,8 @@ export class TurnScheduler {
   }
 
   /** Used when a legacy path owns a turn that was not admitted here. */
-  occupy(botId: string, id = newId(), lane: TurnLane = "user"): string {
-    if (this.active.has(botId)) return this.active.get(botId)!.id;
+  occupy(botId: string, id = newId(), lane: TurnLane = "user"): string | null {
+    if (this.active.has(botId)) return null;
     const generation = (this.generations.get(botId) ?? 0) + 1;
     this.generations.set(botId, generation);
     this.active.set(botId, { id, generation, lane });

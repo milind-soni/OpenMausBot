@@ -42,6 +42,7 @@ interface Pending {
   threadId: string;
   messageId: string;
   bus: ApprovalBus;
+  ownerKey?: string;
 }
 
 /** Mark the card answered so the UI stops treating it as pending. Mirrors
@@ -106,6 +107,7 @@ export function requestPeerApproval(
   message: string,
   action: PeerAction,
   sourceThreadId = from.threadId,
+  ownerKey?: string,
 ): Promise<"allow" | "deny"> {
   if (allowKeyAllowed(from, peerAllowKey(action, target.id))) {
     return Promise.resolve("allow");
@@ -134,8 +136,21 @@ export function requestPeerApproval(
       threadId: sourceThreadId,
       messageId: card.id,
       bus,
+      ...(ownerKey ? { ownerKey } : {}),
     });
   });
+}
+
+/** Deny one durable work-order's approval without disturbing other cards in
+ * the same source task. */
+export function cancelPeerApprovalForOwner(ownerKey: string): void {
+  for (const [requestId, pending] of pendingComms) {
+    if (pending.ownerKey !== ownerKey) continue;
+    pendingComms.delete(requestId);
+    clearTimeout(pending.timer);
+    settleCard(pending, "deny", "system");
+    pending.resolve("deny");
+  }
 }
 
 /** Called by the respond endpoints BEFORE forwarding to the provider

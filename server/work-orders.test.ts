@@ -70,4 +70,31 @@ describe("WorkOrderStore", () => {
     expect(store.list({ limit: 20 }).filter((order) => order.state === "cancelled")).toHaveLength(2);
     expect(store.get(active.id)?.state).toBe("queued");
   });
+
+  it("rejects oversized input without changing accepted request text", () => {
+    const store = new WorkOrderStore({ file: file() });
+    const accepted = "x".repeat(20_000);
+    expect(store.create({ ...input, request: accepted }).request).toBe(accepted);
+    expect(() => store.create({ ...input, request: "x".repeat(20_001) })).toThrow(/request/);
+    expect(() => store.create({ ...input, reason: "x".repeat(2_001) })).toThrow(/reason/);
+  });
+
+  it("bounds active work orders and frees capacity after cancellation", () => {
+    const store = new WorkOrderStore({ file: file(), maxActive: 1 });
+    const first = store.create(input);
+    expect(() => store.create({ ...input, request: "second" })).toThrow(/capacity/);
+    store.cancel(first.id);
+    expect(store.create({ ...input, request: "after cancellation" }).state).toBe("pending-source");
+  });
+
+  it("settles both source and target orders when a bot is deleted", () => {
+    const store = new WorkOrderStore({ file: file() });
+    const sourceOrder = store.create(input, "queued");
+    const targetOrder = store.create({ ...input, sourceBotId: "other", targetBotId: "source" }, "queued");
+    const settled = store.settleForDeletedBot("source");
+    expect(settled.cancelled.map((order) => order.id)).toEqual([sourceOrder.id]);
+    expect(settled.failed.map((order) => order.id)).toEqual([targetOrder.id]);
+    expect(store.get(sourceOrder.id)?.state).toBe("cancelled");
+    expect(store.get(targetOrder.id)?.state).toBe("failed");
+  });
 });

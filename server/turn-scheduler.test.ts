@@ -14,19 +14,21 @@ describe("TurnScheduler", () => {
     const first = deferred();
     const order: string[] = [];
     const active = scheduler.admit({ botId: "a", lane: "peer", run: async () => { order.push("active"); await first.promise; } });
-    expect(active.accepted && active.admission.queued).toBe(false);
     const normal = scheduler.admit({ botId: "a", lane: "peer", run: async () => { order.push("peer"); } });
     const background = scheduler.admit({ botId: "a", lane: "background", run: async () => { order.push("background"); } });
     const urgent = scheduler.admit({ botId: "a", lane: "urgent-peer", run: async () => { order.push("urgent"); } });
     const user = scheduler.admit({ botId: "a", lane: "user", run: async () => { order.push("user"); } });
-    if (!active.accepted || !normal.accepted) throw new Error("expected scheduler admissions");
+    if (!active.accepted || !normal.accepted || !background.accepted || !urgent.accepted || !user.accepted) {
+      throw new Error("expected scheduler admission");
+    }
+    expect(active.admission.queued).toBe(false);
     first.resolve();
     await Promise.all([
       active.completion,
       normal.completion,
-      background.accepted && background.completion,
-      urgent.accepted && urgent.completion,
-      user.accepted && user.completion,
+      background.completion,
+      urgent.completion,
+      user.completion,
     ]);
     expect(order).toEqual(["active", "user", "urgent", "peer", "background"]);
   });
@@ -40,18 +42,20 @@ describe("TurnScheduler", () => {
     const started = new Promise<void>((resolve) => { resolveStarted = resolve; });
     const aAdmission = scheduler.admit({ botId: "a", lane: "user", run: async () => { seen.push("a-start"); if (seen.length === 2) resolveStarted(); await a.promise; seen.push("a-end"); } });
     const bAdmission = scheduler.admit({ botId: "b", lane: "user", run: async () => { seen.push("b-start"); if (seen.length === 2) resolveStarted(); await b.promise; seen.push("b-end"); } });
+    if (!aAdmission.accepted || !bAdmission.accepted) throw new Error("expected concurrent admissions");
     await started;
     expect(seen).toEqual(["a-start", "b-start"]);
     a.resolve();
     b.resolve();
-    if (aAdmission.accepted && bAdmission.accepted) await Promise.all([aAdmission.completion, bAdmission.completion]);
+    await Promise.all([aAdmission.completion, bAdmission.completion]);
     expect(seen).toEqual(["a-start", "b-start", "a-end", "b-end"]);
   });
 
   it("reserves capacity for user work and supports cancellation", async () => {
     const scheduler = new TurnScheduler({ maxPendingPerBot: 3, reservedUserSlots: 1 });
     const hold = deferred();
-    scheduler.admit({ botId: "a", lane: "user", run: () => hold.promise });
+    const active = scheduler.admit({ botId: "a", lane: "user", run: () => hold.promise });
+    expect(active.accepted).toBe(true);
     const peer = scheduler.admit({ botId: "a", lane: "peer", run: () => {} });
     expect(peer.accepted).toBe(true);
     const remaining = scheduler.admit({ botId: "a", lane: "peer", run: () => {} });
@@ -81,5 +85,30 @@ describe("TurnScheduler", () => {
     expect(scheduler.hasActive("a")).toBe(true);
     second.resolve();
     if (queued.accepted) await queued.completion;
+  });
+
+  it("deduplicates a queued entry before it reaches the provider", async () => {
+    const scheduler = new TurnScheduler();
+    const hold = deferred();
+    const active = scheduler.admit({ botId: "a", lane: "user", run: () => hold.promise });
+    if (!active.accepted) throw new Error("expected active admission");
+    const queued = scheduler.admit({ botId: "a", lane: "peer", dedupeKey: "queued", run: () => {} });
+    if (!queued.accepted) throw new Error("expected queued admission");
+    expect(queued.admission.queued).toBe(true);
+    expect(scheduler.admit({ botId: "a", lane: "background", dedupeKey: "queued", run: () => {} })).toEqual({
+      accepted: false,
+      reason: "duplicate",
+    });
+    hold.resolve();
+    await Promise.all([active.completion, queued.completion]);
+  });
+
+  it("never hands a legacy caller another run's occupation token", () => {
+    const scheduler = new TurnScheduler();
+    const first = scheduler.occupy("a");
+    if (!first) throw new Error("expected first occupation");
+    expect(scheduler.occupy("a")).toBeNull();
+    expect(scheduler.release("a", "not-the-current-run")).toBe(false);
+    expect(scheduler.release("a", first)).toBe(true);
   });
 });

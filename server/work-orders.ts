@@ -36,6 +36,27 @@ export interface WorkOrder extends WorkOrderInput {
   error?: string;
 }
 
+export const WORK_ORDER_REQUEST_MAX_LENGTH = 20_000;
+export const WORK_ORDER_REASON_MAX_LENGTH = 2_000;
+
+export class WorkOrderCapacityError extends Error {
+  readonly code = "WORK_ORDER_CAPACITY";
+
+  constructor(limit: number) {
+    super(`work-order capacity reached (${limit} active orders)`);
+    this.name = "WorkOrderCapacityError";
+  }
+}
+
+export class WorkOrderInputError extends Error {
+  readonly code = "WORK_ORDER_INPUT_TOO_LARGE";
+
+  constructor(field: "request" | "reason", limit: number) {
+    super(`${field} exceeds the ${limit}-character work-order limit`);
+    this.name = "WorkOrderInputError";
+  }
+}
+
 interface DiskFile {
   version: 1;
   orders: WorkOrder[];
@@ -61,6 +82,7 @@ export class WorkOrderStore {
   private readonly file: string;
   private readonly now: () => number;
   private readonly maxTerminal: number;
+  private readonly maxActive: number;
   private readonly onTransition?: (order: WorkOrder, from: WorkOrderState, to: WorkOrderState) => void;
   private orders: WorkOrder[] = [];
 
@@ -68,11 +90,13 @@ export class WorkOrderStore {
     file?: string;
     now?: () => number;
     maxTerminal?: number;
+    maxActive?: number;
     onTransition?: (order: WorkOrder, from: WorkOrderState, to: WorkOrderState) => void;
   } = {}) {
     this.file = options.file ?? join(DATA_DIR, "work-orders.json");
     this.now = options.now ?? Date.now;
     this.maxTerminal = Math.max(1, Math.trunc(options.maxTerminal ?? 200));
+    this.maxActive = Math.max(1, Math.trunc(options.maxActive ?? 256));
     this.onTransition = options.onTransition;
     this.load();
   }
@@ -80,6 +104,15 @@ export class WorkOrderStore {
   create(input: WorkOrderInput, state: WorkOrderState = "pending-source"): WorkOrder {
     if (state !== "pending-source" && state !== "awaiting-approval" && state !== "queued") {
       throw new Error("new work orders must begin pending-source, awaiting-approval, or queued");
+    }
+    if (input.request.length > WORK_ORDER_REQUEST_MAX_LENGTH) {
+      throw new WorkOrderInputError("request", WORK_ORDER_REQUEST_MAX_LENGTH);
+    }
+    if (input.reason && input.reason.length > WORK_ORDER_REASON_MAX_LENGTH) {
+      throw new WorkOrderInputError("reason", WORK_ORDER_REASON_MAX_LENGTH);
+    }
+    if (this.orders.filter((order) => !TERMINAL.has(order.state)).length >= this.maxActive) {
+      throw new WorkOrderCapacityError(this.maxActive);
     }
     const at = this.now();
     const order: WorkOrder = {
@@ -142,6 +175,21 @@ export class WorkOrderStore {
     const order = this.orders.find((candidate) => candidate.id === id);
     if (!order || TERMINAL.has(order.state)) return null;
     return this.transition(id, "cancelled", { error: reason });
+  }
+
+  /** Settle every active order pinned to a bot that is being deleted. */
+  settleForDeletedBot(botId: string): { cancelled: WorkOrder[]; failed: WorkOrder[] } {
+    const cancelled: WorkOrder[] = [];
+    const failed: WorkOrder[] = [];
+    for (const order of [...this.orders]) {
+      if (TERMINAL.has(order.state)) continue;
+      if (order.sourceBotId === botId) {
+        cancelled.push(this.transition(order.id, "cancelled", { error: "source bot was deleted" }));
+      } else if (order.targetBotId === botId) {
+        failed.push(this.transition(order.id, "failed", { error: "target bot was deleted" }));
+      }
+    }
+    return { cancelled, failed };
   }
 
   /** Pending/approval work may be reconstructed; source and running work cannot. */

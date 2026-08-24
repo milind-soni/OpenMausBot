@@ -67,11 +67,20 @@ import { RETRY_MAX_ATTEMPTS } from "./drivers/retry.ts";
 import { BUILT_IN_DRIVERS } from "./drivers/builtIn.ts";
 import { getOrCreateChannel, mirrorActivity, mirrorExchange, mirrorReply, type CommsBus } from "./comms-visibility.ts";
 import { searchMessages } from "./message-db.ts";
-import { _loadPending, discardDelegations, drainDelegations, pendingThreads, queueDelegation, type QueueResult } from "./delegations.ts";
+import {
+  _loadPending,
+  cancelDelegationByWorkOrder,
+  discardDelegations,
+  discardDelegationsForTarget,
+  drainDelegations,
+  pendingThreads,
+  queueDelegation,
+  type QueueResult,
+} from "./delegations.ts";
 import { drainSteeredMessages, queueSteeredMessage } from "./steer-queue.ts";
 import { EventBus } from "./harness/bus.ts";
 import { ProviderRegistry } from "./harness/registry.ts";
-import { cancelPeerApprovalsFor, cancelPeerApprovalsForThread, dismissStalePeerCards, requestPeerApproval, resolvePeerComms, type ApprovalBus } from "./peer-approval.ts";
+import { cancelPeerApprovalForOwner, cancelPeerApprovalsFor, cancelPeerApprovalsForThread, dismissStalePeerCards, requestPeerApproval, resolvePeerComms, type ApprovalBus } from "./peer-approval.ts";
 import {
   mentionedBots,
   roomResponders,
@@ -113,7 +122,7 @@ import { WebhookManager } from "./webhooks.ts";
 import { SPAWNED_PROXIES } from "./proxy-paths.ts";
 import { loadBundledSkills, loadUserSkills, mergeSkills, renderSkillInstructions, selectBundledSkills } from "./skill-library.ts";
 import { shouldMountLocalComputer } from "./local-routing.ts";
-import { WorkOrderStore, type WorkOrderState } from "./work-orders.ts";
+import { WorkOrderCapacityError, WorkOrderInputError, WorkOrderStore, type WorkOrderState } from "./work-orders.ts";
 import { TurnScheduler, type TurnLane } from "./turn-scheduler.ts";
 
 const PORT = Number(process.env.OMB_PORT || process.env.OGB_PORT || 8799);
@@ -226,7 +235,7 @@ function askBotAndWait(
   rejectStartFailure = false,
 ): Promise<string> {
   const target = store.bot(targetBotId);
-  if (!target) return Promise.resolve("(no such bot)");
+  if (!target) return rejectStartFailure ? Promise.reject(new Error("no such bot")) : Promise.resolve("(no such bot)");
   const threadId = target.threadId;
   return new Promise((resolve, reject) => {
     let text = "";
@@ -250,10 +259,17 @@ function askBotAndWait(
       if (e.type === "item.completed" && e.itemType === "assistant_text") {
         text += (text ? "\n" : "") + e.text;
       } else if (e.type === "turn.completed") {
-        finish(text || "(the bot finished without a text reply)");
+        if (rejectStartFailure && !e.ok) {
+          fail(new Error("the target bot turn failed or was interrupted"));
+        } else {
+          finish(text || "(the bot finished without a text reply)");
+        }
       }
     });
-    const timer = setTimeout(() => finish(text || "(timed out waiting for the bot to reply)"), 4 * 60_000);
+    const timer = setTimeout(() => {
+      if (rejectStartFailure) fail(new Error("timed out waiting for the bot to reply"));
+      else finish(text || "(timed out waiting for the bot to reply)");
+    }, 4 * 60_000);
     startTurn(targetBotId, message, {
       commsDepth: depth + 1,
       unattended: isUnattended(fromBotId),
@@ -287,6 +303,8 @@ const workOrders = new WorkOrderStore({
 });
 const turnScheduler = new TurnScheduler({ maxPendingPerBot: 32, reservedUserSlots: 4 });
 const turnAdmissionByThread = new Map<string, { botId: string; token: string }>();
+const activeExecutionByThread = new Map<string, string>();
+const pendingSchedulerAdmissions = new Map<string, { botId: string; admissionId: string; queued: boolean }>();
 
 function laneForTurn(opts?: { commsDepth?: number; automationSource?: RoutineRunTrigger; connectorContinuation?: boolean }): TurnLane {
   if (opts?.commsDepth || opts?.connectorContinuation) return "peer";
@@ -299,6 +317,37 @@ function releaseTurnAdmission(threadId: string): void {
   if (!admission) return;
   turnAdmissionByThread.delete(threadId);
   turnScheduler.release(admission.botId, admission.token);
+}
+
+const TURN_SETTLEMENT_GRACE_MS = 6_000;
+
+function settleTurnAfterGrace(threadId: string, botId: string): void {
+  const timer = setTimeout(() => {
+    const admission = turnAdmissionByThread.get(threadId);
+    if (!admission || admission.botId !== botId) return;
+    const group = store.groupByThread(threadId);
+    const speaker = groupSpeakers.get(threadId);
+    if (group && group.busyBotId === botId && speaker?.botId === botId) {
+      groupSpeakers.delete(threadId);
+      store.patchGroup(group.id, { busyBotId: null, unread: true });
+    }
+    const bot = store.bot(botId);
+    if (bot?.busy) {
+      stopScreenPoller(bot.id);
+      if (activeVpsThreads.get(bot.id) === threadId) activeVpsThreads.delete(bot.id);
+      store.setActivity(bot.id, "idle");
+    }
+    releaseTurnAdmission(threadId);
+  }, TURN_SETTLEMENT_GRACE_MS);
+  timer.unref?.();
+}
+
+function cancelQueuedWorkOrderRuntime(workOrderId: string): void {
+  const admission = pendingSchedulerAdmissions.get(workOrderId);
+  if (!admission || !admission.queued) return;
+  if (turnScheduler.cancel(admission.botId, admission.admissionId)) {
+    pendingSchedulerAdmissions.delete(workOrderId);
+  }
 }
 
 /** A bot as a client may see it: no provider session bookkeeping.
@@ -630,21 +679,7 @@ const watchdog = new TurnWatchdog({
     // sooner. Keep ownership during that grace period so another turn cannot
     // overlap the process we are stopping. The normal turn.completed fold
     // clears it first when the adapter responds.
-    const release = setTimeout(() => {
-      const group = store.groupByThread(turn.threadId);
-      const speaker = groupSpeakers.get(turn.threadId);
-      if (group && group.busyBotId === turn.botId && speaker?.botId === turn.botId) {
-        groupSpeakers.delete(turn.threadId);
-        store.patchGroup(group.id, { busyBotId: null, unread: true });
-      }
-      const currentBot = store.bot(turn.botId);
-      if (currentBot?.busy) {
-        stopScreenPoller(currentBot.id);
-        if (activeVpsThreads.get(currentBot.id) === turn.threadId) activeVpsThreads.delete(currentBot.id);
-        store.setActivity(currentBot.id, "idle");
-      }
-    }, 6_000);
-    release.unref?.();
+    settleTurnAfterGrace(turn.threadId, turn.botId);
   },
 });
 watchdog.start();
@@ -652,7 +687,10 @@ watchdog.start();
 bus.subscribe((event: RuntimeEvent) => {
   if (event.type === "request.opened") watchdog.setWaitingOnHuman(event.threadId, true);
   else if (event.type === "request.resolved") watchdog.setWaitingOnHuman(event.threadId, false);
-  else if (event.type === "turn.completed") watchdog.settle(event.threadId);
+  else if (event.type === "turn.completed") {
+    watchdog.settle(event.threadId);
+    activeExecutionByThread.delete(event.threadId);
+  }
   else watchdog.touch(event.threadId);
 });
 
@@ -1146,12 +1184,15 @@ bus.subscribe((event: RuntimeEvent) => {
 /** How a drained delegation becomes a real turn on the target. Shared by
  * the settle-time drain and the boot-time drain of what a previous process
  * left queued. */
-const runDelegatedTurn: Parameters<typeof drainDelegations>[3] = async (toBotId, text, commsDepth, sourceThreadId, channel, workOrderId) => {
+const runDelegatedTurn: Parameters<typeof drainDelegations>[3] = async (toBotId, text, commsDepth, sourceThreadId, channel, workOrderId, targetTaskId) => {
     // startTurn REJECTS on an ordinary condition — busy target, deleted bot,
     // unavailable provider. Unhandled, that rejection is fatal to the
     // harness (Node's default), which in the packaged app kills the server
     // child. Every delegation failure has to land as a chip instead.
-    const targetThreadId = store.bot(toBotId)?.threadId;
+    const target = store.bot(toBotId);
+    const targetThreadId = targetTaskId && target?.tasks?.some((task) => task.threadId === targetTaskId)
+      ? targetTaskId
+      : target?.threadId;
     let failureReported = false;
     const reportStartFailure = (error: unknown) => {
       if (failureReported) return;
@@ -1188,6 +1229,7 @@ const runDelegatedTurn: Parameters<typeof drainDelegations>[3] = async (toBotId,
         }
         await startTurn(toBotId, text, {
           commsDepth,
+          threadId: targetTaskId,
           unattended: isUnattended(store.botByThread(sourceThreadId)?.id),
           schedulerToken,
           // startTurn schedules provider/integration setup after marking the bot
@@ -1209,7 +1251,20 @@ const runDelegatedTurn: Parameters<typeof drainDelegations>[3] = async (toBotId,
       throw new Error(reason);
     }
     schedulerToken = admission.admission.id;
-    await admission.completion;
+    if (workOrderId) {
+      pendingSchedulerAdmissions.set(workOrderId, {
+        botId: toBotId,
+        admissionId: admission.admission.id,
+        queued: admission.admission.queued,
+      });
+    }
+    try {
+      await admission.completion;
+    } finally {
+      if (workOrderId && pendingSchedulerAdmissions.get(workOrderId)?.admissionId === admission.admission.id) {
+        pendingSchedulerAdmissions.delete(workOrderId);
+      }
+    }
 };
 
 bus.subscribe((event: RuntimeEvent) => {
@@ -1492,6 +1547,11 @@ async function startTurn(
   // in the background — box provisioning can take ~90s and must never
   // hang the HTTP request
   const admissionToken = opts?.schedulerToken ?? turnScheduler.occupy(bot.id, undefined, laneForTurn(opts));
+  if (!admissionToken) {
+    throw Object.assign(new Error("the bot is already working — interrupt it first"), { status: 409 });
+  }
+  const executionId = randomUUID();
+  activeExecutionByThread.set(threadId, executionId);
   turnAdmissionByThread.set(threadId, { botId: bot.id, token: admissionToken });
   store.setActivity(bot.id, "working");
   store.patchBot(bot.id, { unread: false });
@@ -1780,6 +1840,7 @@ async function startTurn(
         startScreenPoller(bot.id, previewCapture, { screenIsTheWork: instance.driverKind === "boxAgent" });
       }
     } catch (e) {
+      if (activeExecutionByThread.get(threadId) === executionId) activeExecutionByThread.delete(threadId);
       releaseLocalVmThread(threadId);
       if (activeVpsThreads.get(bot.id) === threadId) activeVpsThreads.delete(bot.id);
       watchdog.settle(threadId);
@@ -1909,13 +1970,14 @@ function acceptDeferredConsultation(
   message: string,
   depth: number,
   sourceThreadId: string,
+  sourceExecutionId?: string,
 ) {
   const channel = getOrCreateChannel(store, from, target);
   const order = workOrders.create({
     kind: "consultation",
     sourceBotId: from.id,
     sourceTaskId: sourceThreadId,
-    sourceExecutionId: sourceThreadId,
+    ...(sourceExecutionId ? { sourceExecutionId } : {}),
     targetBotId: target.id,
     targetTaskId: target.threadId,
     request: message,
@@ -1969,10 +2031,15 @@ function schedulePeerContinuation(
   });
 }
 
-function queuePeerContinuation(order: { id: string; sourceBotId: string; sourceTaskId: string; targetBotId: string }, reply: string) {
+function queuePeerContinuation(
+  order: { id: string; sourceBotId: string; sourceTaskId: string; targetBotId: string },
+  reply: string,
+): { ok: true } | { ok: false; error: string } {
   const target = store.bot(order.targetBotId);
   const source = store.bot(order.sourceBotId);
-  if (!target || !source || !store.taskByThread(source.id, order.sourceTaskId)) return;
+  if (!target || !source || !store.taskByThread(source.id, order.sourceTaskId)) {
+    return { ok: false, error: "pinned source bot or task no longer exists" };
+  }
   const prompt = `[Deferred consultation result from @${target.name}. The earlier ask_bot receipt meant acceptance, not completion. Do not call peer tools for this continuation.]\n\n@${target.name} replied:\n${reply}`;
   if (source.busy || turnScheduler.hasActive(source.id)) {
     const current = pendingPeerContinuations.get(order.sourceTaskId);
@@ -1981,9 +2048,10 @@ function queuePeerContinuation(order: { id: string; sourceBotId: string; sourceT
       sourceTaskId: order.sourceTaskId,
       prompts: [...(current?.prompts ?? []), prompt],
     });
-    return;
+    return { ok: true };
   }
   schedulePeerContinuation(source, order.sourceTaskId, [prompt], `continuation:${order.id}`);
+  return { ok: true };
 }
 
 async function drainDeferredConsultations(): Promise<void> {
@@ -1995,7 +2063,7 @@ async function drainDeferredConsultations(): Promise<void> {
       workOrders.transition(order.id, "failed", { error: "pinned source or target task no longer exists" });
       continue;
     }
-    if (target.busy) continue;
+    if (target.busy || turnScheduler.hasActive(target.id)) continue;
     runningConsultations.add(order.id);
     const channel = order.channelId ? store.group(order.channelId) ?? undefined : undefined;
     void (async () => {
@@ -2007,28 +2075,46 @@ async function drainDeferredConsultations(): Promise<void> {
           lane: "peer",
           dedupeKey: order.id,
           run: async () => {
+            if (workOrders.get(order.id)?.state !== "queued") return;
             workOrders.transition(order.id, "running", { attempt: (order.attempt ?? 0) + 1 });
             const reply = await askBotAndWait(target.id, prefixed, order.depth, source.id, schedulerToken, true);
+            if (workOrders.get(order.id)?.state !== "running") return;
+            const delivery = queuePeerContinuation(order, reply);
+            if (!delivery.ok) {
+              workOrders.transition(order.id, "failed", { error: delivery.error });
+              if (channel) mirrorActivity(commsBus, target, channel, `Consultation failed — ${delivery.error}`, false);
+              return;
+            }
             workOrders.transition(order.id, "completed", { result: reply });
             mirrorReply(commsBus, target, reply, channel);
-            queuePeerContinuation(order, reply);
           },
         });
         if (!admission.accepted) {
           runningConsultations.delete(order.id);
-          if (admission.reason !== "duplicate") workOrders.transition(order.id, "queued");
+          if (admission.reason !== "duplicate" && workOrders.get(order.id)?.state === "queued") workOrders.transition(order.id, "queued");
           return;
         }
         schedulerToken = admission.admission.id;
-        await admission.completion;
+        pendingSchedulerAdmissions.set(order.id, {
+          botId: target.id,
+          admissionId: admission.admission.id,
+          queued: admission.admission.queued,
+        });
+        try {
+          await admission.completion;
+        } finally {
+          if (pendingSchedulerAdmissions.get(order.id)?.admissionId === admission.admission.id) {
+            pendingSchedulerAdmissions.delete(order.id);
+          }
+        }
       } catch (error) {
         const reason = error instanceof Error ? error.message : String(error);
-        try {
+        if (workOrders.get(order.id)?.state === "queued" || workOrders.get(order.id)?.state === "running") {
           workOrders.transition(order.id, "failed", { error: reason });
-        } catch (transitionError) {
-          console.error("deferred consultation transition failed", transitionError);
         }
-        if (channel) mirrorActivity(commsBus, target, channel, `Consultation failed — ${reason.slice(0, 120)}`, false);
+        if (channel && workOrders.get(order.id)?.state === "failed") {
+          mirrorActivity(commsBus, target, channel, `Consultation failed — ${reason.slice(0, 120)}`, false);
+        }
       } finally {
         runningConsultations.delete(order.id);
       }
@@ -2062,6 +2148,7 @@ function drainPeerContinuations(): void {
   if (recovered.cancelled.length || recovered.failed.length) {
     console.log(`work orders: recovered ${recovered.cancelled.length} cancelled and ${recovered.failed.length} failed record(s)`);
   }
+  void drainDeferredConsultations();
 }
 
 // Handoffs a previous process queued but never ran: the source turn is
@@ -2135,8 +2222,17 @@ async function runGroupMemberTurn(
     });
     return true;
   }
-  store.setActivity(bot.id, "working");
   const roomAdmissionToken = turnScheduler.occupy(bot.id, undefined, "user");
+  if (!roomAdmissionToken) {
+    store.appendMessage(group.threadId, {
+      role: "bot",
+      kind: "activity",
+      from: { botId: bot.id, name: bot.name, color: bot.color },
+      tool: { name: `${bot.name} is busy in another conversation — skipped this round`, ok: false },
+    });
+    return true;
+  }
+  store.setActivity(bot.id, "working");
   turnAdmissionByThread.set(group.threadId, { botId: bot.id, token: roomAdmissionToken });
 
   store.patchGroup(group.id, { busyBotId: bot.id }); // the store's change stream carries the frame
@@ -2201,6 +2297,7 @@ async function runGroupMemberTurn(
     });
     timer = scheduleRoomTurnTimeout(timeoutMinutes, () => {
       void instance.adapter.interruptTurn(group.threadId).catch(() => {});
+      watchdog.settle(group.threadId);
       store.appendMessage(group.threadId, {
         role: "bot",
         kind: "activity",
@@ -2235,7 +2332,10 @@ async function runGroupMemberTurn(
   // produces turn.completed (or the stall watchdog's grace fallback runs).
   // Do not clear busy or start the next member on that same thread early.
   if (outcome === "dispatch_failed") releaseTurnAdmission(group.threadId);
-  if (outcome === "stalled" || outcome === "timed_out") return false;
+  if (outcome === "stalled" || outcome === "timed_out") {
+    settleTurnAfterGrace(group.threadId, bot.id);
+    return false;
+  }
   // turn.completed normally performs this cleanup. Only use the fallback
   // when this invocation still owns the room; otherwise it would emit a
   // duplicate group frame or clear a newer speaker's state.
@@ -2800,9 +2900,22 @@ const server = createServer(async (req, res) => {
           currentFrom = freshFrom;
           currentTarget = freshTarget;
         }
-        if (currentTarget.busy) {
-          const accepted = acceptDeferredConsultation(currentFrom, currentTarget, message, depth, fromThreadId);
-          return json(res, 202, accepted);
+        if (currentTarget.busy || turnScheduler.hasActive(currentTarget.id)) {
+          try {
+            const accepted = acceptDeferredConsultation(
+              currentFrom,
+              currentTarget,
+              message,
+              depth,
+              fromThreadId,
+              activeExecutionByThread.get(fromThreadId),
+            );
+            return json(res, 202, accepted);
+          } catch (error) {
+            if (error instanceof WorkOrderCapacityError) return json(res, 429, { error: error.message });
+            if (error instanceof WorkOrderInputError) return json(res, 400, { error: error.message });
+            throw error;
+          }
         }
         const channel = getOrCreateChannel(store, currentFrom, currentTarget);
         mirrorExchange(commsBus, currentFrom, currentTarget, message, channel, fromThreadId);
@@ -2840,6 +2953,7 @@ const server = createServer(async (req, res) => {
           MAX_COMMS_DEPTH,
           fromThreadId,
           workOrders,
+          activeExecutionByThread.get(fromThreadId),
         );
         if (result !== "ok") {
           // the agent reads this string — a bare enum ("too_deep") tells it
@@ -2849,6 +2963,8 @@ const server = createServer(async (req, res) => {
             too_deep: "delegation chains are limited to one hop — do this one yourself",
             no_target: "no such bot",
             too_many: "too many delegations queued on this turn — finish some first",
+            capacity: "the peer work queue is full — try again after some work finishes",
+            invalid_input: "the delegation request or reason is too long",
           };
           return json(res, 200, { error: said[result] });
         }
@@ -3027,8 +3143,12 @@ const server = createServer(async (req, res) => {
     }
     workOrderMatch = path.match(/^\/api\/work-orders\/([\w-]+)\/cancel$/);
     if (workOrderMatch && method === "POST") {
-      const order = workOrders.cancel(workOrderMatch[1], String((await readBody(req)).reason ?? "cancelled by user"));
+      const workOrderId = workOrderMatch[1];
+      const order = workOrders.cancel(workOrderId, String((await readBody(req)).reason ?? "cancelled by user"));
       if (!order) return json(res, 404, { error: "no such active work order" });
+      cancelDelegationByWorkOrder(workOrderId, workOrders);
+      cancelQueuedWorkOrderRuntime(workOrderId);
+      cancelPeerApprovalForOwner(workOrderId);
       // A provider interrupt is deliberately not implicit here: cancellation
       // of queued peer work is safe; an active provider turn owns its own
       // process and follows the normal Stop/approval path.
@@ -4021,7 +4141,20 @@ const server = createServer(async (req, res) => {
       // a peer approval naming this bot can never be meaningfully answered
       // now, and its caller would otherwise wait out the 15-minute timeout
       cancelPeerApprovalsFor(bot.id);
-      discardDelegations(commsBus, bot.threadId);
+      const sourceThreads = new Set([bot.threadId, ...(bot.tasks ?? []).map((task) => task.threadId)]);
+      for (const threadId of sourceThreads) discardDelegations(commsBus, threadId, workOrders);
+      discardDelegationsForTarget(commsBus, bot.id, workOrders);
+      workOrders.settleForDeletedBot(bot.id);
+      for (const [workOrderId, admission] of pendingSchedulerAdmissions) {
+        if (admission.botId !== bot.id || !admission.queued) continue;
+        if (turnScheduler.cancel(admission.botId, admission.admissionId)) pendingSchedulerAdmissions.delete(workOrderId);
+      }
+      for (const [sourceTaskId, pending] of pendingPeerContinuations) {
+        if (pending.sourceBotId === bot.id) pendingPeerContinuations.delete(sourceTaskId);
+      }
+      for (const [threadId] of activeExecutionByThread) {
+        if (sourceThreads.has(threadId)) activeExecutionByThread.delete(threadId);
+      }
       computerControl.forget(bot.id);
       const target = perBotLocalVmTarget(bot.id);
       localVmIdles.get(target.key)?.cancel();
