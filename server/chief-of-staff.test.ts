@@ -35,21 +35,24 @@ describe("chiefOfStaffSystemPrompt roster caps", () => {
 
 describe("chiefOfStaffSystemPrompt", () => {
   const bots = [
-    { id: "chief", name: "Atlas", title: "Operations" },
-    { id: "writer", name: "Quill", title: "Writer", description: "Drafts concise copy" },
-    { id: "coder", name: "Patch", title: "Engineer", busy: true },
-    { id: "hidden", name: "Secret", hidden: true },
+    { id: "chief", name: "Atlas", title: "Operations", section: "Work" },
+    { id: "writer", name: "Quill", title: "Writer", description: "Drafts concise copy", section: "Work" },
+    { id: "coder", name: "Patch", title: "Engineer", busy: true, section: "Work" },
+    { id: "hidden", name: "Secret", hidden: true, section: "Work" },
+    { id: "personal", name: "Scout", title: "Travel planner", section: "Personal" },
   ];
 
   it("describes visible teammates, roles, and availability", () => {
     const prompt = chiefOfStaffSystemPrompt("chief", bots, true);
 
-    expect(prompt).toContain("one Chief of Staff");
+    expect(prompt).toContain("Chief of Staff for the Work section");
     expect(prompt).toContain("Quill — Writer: Drafts concise copy (available)");
     expect(prompt).toContain("Patch — Engineer (working right now)");
     expect(prompt).not.toContain("Secret");
+    expect(prompt).not.toContain("Scout");
     expect(prompt).not.toContain("Atlas —");
     expect(prompt).toContain("Use ask_bot");
+    expect(prompt).toContain("use create_bot");
   });
 
   it("does not promise delegation when the engine cannot mount agent tools", () => {

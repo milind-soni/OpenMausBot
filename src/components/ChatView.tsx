@@ -12,6 +12,7 @@ import {
   Copy,
   Crown,
   Folder,
+  ListTree,
   Loader2,
   Monitor,
   Pencil,
@@ -38,7 +39,7 @@ import { BotAvatar, MausAvatar } from "./Avatar";
 import { stateForBot } from "@/lib/mascot";
 import { showWorkingDots } from "@/lib/turn-tail";
 import { ChatMarkdown } from "./ChatMarkdown";
-import { OptionCard } from "./OptionCard";
+import { OptionCard, shouldHideOnboardingCard } from "./OptionCard";
 import { ApprovalCard } from "./ApprovalCard";
 import { Composer } from "./Composer";
 import { ConnectorCard } from "./ConnectorCard";
@@ -63,6 +64,7 @@ import {
 } from "@/lib/transcript-window";
 import { useI18n } from "@/lib/i18n-context";
 import type { TranslationValues } from "@/lib/i18n";
+import { timelineEvents } from "@/lib/taskTimeline";
 
 type Translate = (source: string, values?: TranslationValues) => string;
 
@@ -87,6 +89,53 @@ function DaySeparator({ at }: { at: number }) {
   return (
     <div className="py-3 text-center text-[13px] text-ink-secondary">
       {dayLabel(at, locale, t)} {formatTime(at, locale)}
+    </div>
+  );
+}
+
+function TaskTimeline({ messages, busy }: { messages: Message[]; busy: boolean }) {
+  const { locale, t } = useI18n();
+  const [open, setOpen] = useState(false);
+  const events = useMemo(() => timelineEvents(messages), [messages]);
+  if (events.length === 0) return null;
+  const recent = events.slice(-8);
+  return (
+    <div className="mx-auto w-full max-w-[900px] px-5 pt-1">
+      <button
+        type="button"
+        onClick={() => setOpen((value) => !value)}
+        aria-expanded={open}
+        className="flex w-full items-center justify-between rounded-lg px-2 py-1.5 text-left text-[12.5px] text-ink-secondary hover:bg-raised/50 hover:text-ink"
+      >
+        <span className="flex items-center gap-1.5">
+          <ListTree size={14} /> {t("Execution timeline")}{busy ? <> · {t("running")}</> : null}
+        </span>
+        <ChevronDown size={14} className={cn("transition-transform", open && "rotate-180")} />
+      </button>
+      {open && (
+        <ol className="ml-2 border-l border-hairline/40 pb-2 pl-3">
+          {recent.map((event) => (
+            <li key={event.id} className="relative flex items-center gap-2 py-1 text-[12px] text-ink-secondary">
+              <span
+                aria-hidden="true"
+                className={cn(
+                  "absolute -left-[17px] size-2 rounded-full",
+                  event.state === "failed"
+                    ? "bg-danger"
+                    : event.state === "complete"
+                      ? "bg-success"
+                      : event.state === "running"
+                        ? "animate-pulse bg-accent"
+                        : "bg-ink-secondary",
+                )}
+              />
+              <span className="sr-only">{t(event.state)}: </span>
+              <span className="truncate">{t(event.label)}</span>
+              <time className="ml-auto shrink-0 text-[11px] text-ink-secondary/70">{formatTime(event.at, locale)}</time>
+            </li>
+          ))}
+        </ol>
+      )}
     </div>
   );
 }
@@ -593,6 +642,7 @@ function WorkingTimer({ since }: { since: number }) {
 const MessagesList = memo(function MessagesList({
   bot,
   messages,
+  transcript,
   editingId,
   lastBotTextId,
   canRetryLast,
@@ -604,6 +654,8 @@ const MessagesList = memo(function MessagesList({
 }: {
   bot: Bot;
   messages: Message[];
+  /** Active-branch messages, including ones outside the mounted window. */
+  transcript: Message[];
   editingId: string | null;
   lastBotTextId: string | undefined;
   canRetryLast: boolean;
@@ -640,13 +692,13 @@ const MessagesList = memo(function MessagesList({
             case "connector":
               return m.connector ? <ConnectorCard botId={bot.id} threadId={bot.threadId} message={m} /> : null;
             case "options":
-              // a live permission ask gets the approval box; questions and
-              // the onboarding quiz keep the list card
-              return m.card?.requestId && m.card.tool ? (
-                <ApprovalCard bot={bot} message={m} />
-              ) : (
-                <OptionCard botId={bot.id} message={m} />
-              );
+              // a live permission ask gets the approval box; questions keep
+              // the list card. The first-run quiz drops out once they talk.
+              if (m.card?.requestId && m.card.tool) {
+                return <ApprovalCard bot={bot} message={m} />;
+              }
+              if (shouldHideOnboardingCard(m, transcript)) return null;
+              return <OptionCard botId={bot.id} message={m} />;
             case "activity":
               // a failed turn is an error, not a tool run — render it as one
               return m.tool?.name.startsWith("error:") ? (
@@ -905,7 +957,9 @@ export function ChatView({ bot }: { bot: Bot }) {
   // on Windows the frameless window's min/max/close overlay sits at the
   // top-right: the header becomes the drag strip and clears room for it
   const isWin = window.ogb?.platform === "win32";
+  // SAFETY: Electron supports this nonstandard CSS property, which React's type declarations omit.
   const drag = isWin ? ({ WebkitAppRegion: "drag" } as React.CSSProperties) : undefined;
+  // SAFETY: Electron supports this nonstandard CSS property, which React's type declarations omit.
   const noDrag = isWin ? ({ WebkitAppRegion: "no-drag" } as React.CSSProperties) : undefined;
 
   return (
@@ -1020,6 +1074,8 @@ export function ChatView({ bot }: { bot: Bot }) {
         }
       />
 
+      <TaskTimeline messages={messages} busy={bot.busy ?? false} />
+
       {/* Messages */}
       <div
         ref={scrollRef}
@@ -1067,6 +1123,7 @@ export function ChatView({ bot }: { bot: Bot }) {
           <MessagesList
             bot={bot}
             messages={windowedMessages}
+            transcript={messages}
             editingId={editingId}
             lastBotTextId={lastBotTextId}
             canRetryLast={!bot.busy && Boolean(lastUserMessage)}

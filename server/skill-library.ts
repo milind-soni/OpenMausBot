@@ -53,28 +53,66 @@ export function parseSkillManifest(value: unknown, directory: string): SkillMani
   };
 }
 
+function loadSkillDirectory(directory: string): BundledSkill | null {
+  const manifestPath = join(directory, "manifest.json");
+  const skillPath = join(directory, "SKILL.md");
+  if (!existsSync(manifestPath) || !existsSync(skillPath)) return null;
+  const manifest = parseSkillManifest(JSON.parse(readFileSync(manifestPath, "utf8")), directory);
+  const instructions = readFileSync(skillPath, "utf8").trim();
+  if (!instructions.startsWith("---")) throw new Error(`${skillPath} has no skill frontmatter`);
+  return { manifest, instructions, directory };
+}
+
 export function loadBundledSkills(root = process.env.OMB_SKILLS_DIR || join(process.cwd(), "skills")): BundledSkill[] {
   if (!existsSync(root)) return [];
   const skills: BundledSkill[] = [];
   for (const name of readdirSync(root).sort()) {
     const directory = join(root, name);
-    const manifestPath = join(directory, "manifest.json");
-    const skillPath = join(directory, "SKILL.md");
-    if (!existsSync(manifestPath) || !existsSync(skillPath)) continue;
-    const manifest = parseSkillManifest(JSON.parse(readFileSync(manifestPath, "utf8")), directory);
-    const instructions = readFileSync(skillPath, "utf8").trim();
-    if (!instructions.startsWith("---")) throw new Error(`${skillPath} has no skill frontmatter`);
-    skills.push({ manifest, instructions, directory });
+    const skill = loadSkillDirectory(directory);
+    if (skill) skills.push(skill);
   }
   return skills;
+}
+
+/** User-authored skills are hot-loaded on each turn so a just-recorded skill
+ * works without restarting the desktop app. One hand-edited broken folder is
+ * isolated instead of taking down every bot turn. */
+export function loadUserSkills(root: string): BundledSkill[] {
+  if (!existsSync(root)) return [];
+  let names: string[];
+  try {
+    names = readdirSync(root).sort();
+  } catch {
+    return [];
+  }
+  const skills: BundledSkill[] = [];
+  for (const name of names) {
+    try {
+      const skill = loadSkillDirectory(join(root, name));
+      if (skill) skills.push(skill);
+    } catch {
+      // The recorder always writes atomically validated folders, but people
+      // are free to edit them later. A malformed edit disables only itself.
+    }
+  }
+  return skills;
+}
+
+export function mergeSkills(bundled: readonly BundledSkill[], user: readonly BundledSkill[]): BundledSkill[] {
+  const byId = new Map(bundled.map((skill) => [skill.manifest.id, skill]));
+  for (const skill of user) {
+    if (!byId.has(skill.manifest.id)) byId.set(skill.manifest.id, skill);
+  }
+  return [...byId.values()];
 }
 
 export function skillInstructionsFor(
   text: string,
   capabilities: Iterable<string>,
   skills: readonly BundledSkill[],
+  options?: { includeRoot?: boolean },
 ): string {
-  return renderSkillInstructions(selectBundledSkills(text, capabilities, skills));
+  return renderSkillInstructions(selectBundledSkills(text, capabilities, skills), options);
 }
 
 export function selectBundledSkills(
@@ -91,9 +129,12 @@ export function selectBundledSkills(
   );
 }
 
-export function renderSkillInstructions(selected: readonly BundledSkill[]): string {
+export function renderSkillInstructions(
+  selected: readonly BundledSkill[],
+  { includeRoot = false }: { includeRoot?: boolean } = {},
+): string {
   if (!selected.length) return "";
-  return selected.map(({ manifest, instructions }) =>
-    `\n\n<openmaus-skill id=${JSON.stringify(manifest.id)} version=${JSON.stringify(manifest.version)}>\n${instructions}\n</openmaus-skill>`,
+  return selected.map(({ manifest, instructions, directory }) =>
+    `\n\n<openmaus-skill id=${JSON.stringify(manifest.id)} version=${JSON.stringify(manifest.version)}${includeRoot ? ` root=${JSON.stringify(directory)}` : ""}>\n${instructions}\n</openmaus-skill>`,
   ).join("");
 }

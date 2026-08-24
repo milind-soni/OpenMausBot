@@ -23,6 +23,7 @@ import {
   Plus,
   RefreshCw,
   Search,
+  Sparkles,
   Settings,
   Puzzle,
   Trash2,
@@ -35,6 +36,7 @@ import { BotAvatar, InitialsAvatar } from "./Avatar";
 import { stateForBot } from "@/lib/mascot";
 import { useUpdaterState } from "@/lib/updater";
 import { cn } from "@/lib/cn";
+import { skillRecorderEnabled } from "@/lib/feature-flags";
 import { nextRename } from "@/lib/rename";
 import { downloadAllBots } from "@/lib/team-files";
 import { useDesktopCapabilities } from "./DesktopCapabilities";
@@ -1116,7 +1118,7 @@ export function Sidebar({ open, onClose }: { open: boolean; onClose: () => void 
       );
       for (const response of archiveNew) dispatch({ type: "botPatched", bot: response.bot });
 
-      const previousChief = result.archived.find((bot) => bot.chiefOfStaff);
+      const previousChiefs = result.archived.filter((bot) => bot.chiefOfStaff);
       const restoreOthers = await Promise.all(
         result.archived
           .filter((bot) => !bot.chiefOfStaff)
@@ -1128,13 +1130,15 @@ export function Sidebar({ open, onClose }: { open: boolean; onClose: () => void 
           ),
       );
       for (const response of restoreOthers) dispatch({ type: "botPatched", bot: response.bot });
-      if (previousChief) {
-        const response = await api(`/api/bots/${previousChief.id}`, {
-          method: "PATCH",
-          body: JSON.stringify({ hidden: false, chiefOfStaff: true }),
-        });
-        dispatch({ type: "botPatched", bot: response.bot });
-      }
+      const restoredChiefs = await Promise.all(
+        previousChiefs.map((previousChief) =>
+          api(`/api/bots/${previousChief.id}`, {
+            method: "PATCH",
+            body: JSON.stringify({ hidden: false, chiefOfStaff: true }),
+          }),
+        ),
+      );
+      for (const response of restoredChiefs) dispatch({ type: "botPatched", bot: response.bot });
       const first = result.archived[0];
       if (first) dispatch({ type: "select", id: first.id });
       setTeamFeedback({ error: false, text: t("Previous team restored") });
@@ -1210,7 +1214,8 @@ export function Sidebar({ open, onClose }: { open: boolean; onClose: () => void 
         (b.title ?? "").toLowerCase().includes(q) ||
         preview(b, t).toLowerCase().includes(q),
     );
-  const chiefBot = matchingBots.find((bot) => bot.chiefOfStaff);
+  const unsectionedChief = matchingBots.find((bot) => bot.chiefOfStaff && !bot.section);
+  const sectionChiefs = matchingBots.filter((bot) => bot.chiefOfStaff && bot.section);
   const sectionedBots = matchingBots
     .filter((bot) => !bot.chiefOfStaff && bot.section)
     .sort((a, b) => Number(b.pinned ?? false) - Number(a.pinned ?? false));
@@ -1224,6 +1229,9 @@ export function Sidebar({ open, onClose }: { open: boolean; onClose: () => void 
   // whose members all moved away (or fell out of the filter) simply vanishes
   const sectionNames: string[] = [];
   for (const bot of sectionedBots) {
+    if (!sectionNames.includes(bot.section!)) sectionNames.push(bot.section!);
+  }
+  for (const bot of sectionChiefs) {
     if (!sectionNames.includes(bot.section!)) sectionNames.push(bot.section!);
   }
   for (const group of sectionedGroups) {
@@ -1414,13 +1422,13 @@ export function Sidebar({ open, onClose }: { open: boolean; onClose: () => void 
       {/* Bot list */}
       <div className="flex-1 overflow-y-auto px-2">
         <div className="flex flex-col gap-0.5">
-          {!chiefBot && visibleBots.length === 0 && sectionedBots.length === 0 && visibleGroups.length === 0 && q && q.length < MIN_QUERY && (
+          {!unsectionedChief && sectionChiefs.length === 0 && visibleBots.length === 0 && sectionedBots.length === 0 && visibleGroups.length === 0 && q && q.length < MIN_QUERY && (
             <div className="px-3 py-6 text-center text-[13px] text-ink-secondary">{t("Nothing matches “{query}”", { query })}</div>
           )}
-          {chiefBot && (
+          {unsectionedChief && (
             <div className="mb-1.5">
               <BotListItem
-                bot={chiefBot}
+                bot={unsectionedChief}
                 density={density}
                 onMenu={setMenu}
                 onArchive={(bot) => void archiveBot(bot)}
@@ -1446,6 +1454,18 @@ export function Sidebar({ open, onClose }: { open: boolean; onClose: () => void 
           {sectionNames.map((name) => (
             <Fragment key={name}>
               {density !== "icons" && <SectionDivider name={name} />}
+              {sectionChiefs
+                .filter((bot) => bot.section === name)
+                .map((bot) => (
+                  <BotListItem
+                    key={bot.id}
+                    bot={bot}
+                    density={density}
+                    onMenu={setMenu}
+                    onArchive={(candidate) => void archiveBot(candidate)}
+                    archiveDisabled
+                  />
+                ))}
               {sectionedGroups
                 .filter((g) => g.section === name)
                 .map((g) => (
@@ -1471,6 +1491,21 @@ export function Sidebar({ open, onClose }: { open: boolean; onClose: () => void 
 
       {/* Footer */}
       <div className={cn("pb-3 pt-2", density === "icons" ? "px-2" : "px-3")}>
+        {skillRecorderEnabled(state.config) && (
+          <button
+            onClick={() => dispatch({ type: "showSkillRecorder" })}
+            aria-label={density === "icons" ? t("Teach a skill") : undefined}
+            title={density === "icons" ? t("Teach a skill") : undefined}
+            className={cn(
+              "flex min-h-10 w-full items-center rounded-xl py-2 text-left transition-colors",
+              density === "icons" ? "justify-center px-2" : "gap-3 px-3",
+              state.activeView === "skill-recorder" ? "bg-raised text-ink" : "text-ink hover:bg-raised/50",
+            )}
+          >
+            <Sparkles size={20} className={state.activeView === "skill-recorder" ? "text-accent" : "text-ink-secondary"} />
+            <span className={cn("flex-1 text-[14px]", density === "icons" && "hidden")}>{t("Teach a skill")}</span>
+          </button>
+        )}
         <button
           onClick={() => dispatch({ type: "showRoutines" })}
           aria-label={density === "icons" ? t("Tasks and routines") : undefined}

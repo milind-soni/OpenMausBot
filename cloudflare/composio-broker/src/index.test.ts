@@ -136,7 +136,10 @@ describe("connected-apps broker boundaries", () => {
           });
         }
         const body = {
-          items: [{ slug: "gmail", connected_account: { id: "ca_work", status: "ACTIVE" } }],
+          items: [
+            { slug: "gmail", connected_account: { id: "ca_work", status: "ACTIVE" } },
+            { slug: "unconnected", connected_account: null },
+          ],
           next_cursor: query.has("toolkits") ? undefined : "toolkits-page-2",
         };
         return Response.json(body);

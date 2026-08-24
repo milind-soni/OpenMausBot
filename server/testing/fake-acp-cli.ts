@@ -14,6 +14,8 @@
 //                     peer, and reply with what the peer said — the comms e2e)
 //                   | delegate-peer (same as ask-peer but uses delegate_bot —
 //                     returns immediately, the peer runs after our turn)
+//                   | create-peer (a Chief creates a specialist, then delegates
+//                     work to it through the returned id)
 //                   | echo-gated (reply by echoing the full prompt, and when
 //                     FAKE_ACP_GATE_FILE is set hold the turn open until that
 //                     file exists — a deterministic busy window for the
@@ -115,6 +117,24 @@ if (argv[0] === "status" || argv[0] === "whoami") {
   process.exit(0);
 }
 if (argv[0] === "models" || argv.includes("--list-models")) {
+  if (models.length) {
+    const verbose = argv.includes("--verbose");
+    console.log(
+      models.flatMap((slug) => verbose
+        ? [
+            slug,
+            JSON.stringify({
+              id: slug.slice(slug.indexOf("/") + 1),
+              providerID: slug.slice(0, slug.indexOf("/")),
+              name: slug,
+              status: "active",
+              limit: { context: 200_000 },
+            }, null, 2),
+          ]
+        : [slug]).join("\n"),
+    );
+    process.exit(0);
+  }
   console.log(
     [
       "Available models",
@@ -380,6 +400,36 @@ function handle(msg: any) {
           })
           .catch((e) => {
             out({ jsonrpc: "2.0", method: "session/update", params: { update: { sessionUpdate: "agent_message_chunk", content: { text: `peer error: ${(e as Error).message}` } } } });
+            complete();
+          });
+        return;
+      }
+      if (mode === "create-peer" && agentsMcp) {
+        void driveMcp(agentsMcp, [
+          {
+            name: "create_bot",
+            args: () => ({
+              name: "Pixel",
+              role: "Product designer",
+              instructions: "Design and review the user experience.",
+            }),
+          },
+          {
+            name: "delegate_bot",
+            args: (created) => ({
+              bot_id: /id: ([\w-]+)/.exec(created)?.[1] ?? "",
+              message: "Review the new onboarding flow.",
+              reason: "design review",
+            }),
+          },
+        ])
+          .then((reply) => {
+            out({ jsonrpc: "2.0", method: "session/update", params: { update: { sessionUpdate: "agent_message_chunk", content: { text: `team created: ${reply}` } } } });
+            complete();
+          })
+          .catch((e) => {
+            const message = e instanceof Error ? e.message : String(e);
+            out({ jsonrpc: "2.0", method: "session/update", params: { update: { sessionUpdate: "agent_message_chunk", content: { text: `create error: ${message}` } } } });
             complete();
           });
         return;

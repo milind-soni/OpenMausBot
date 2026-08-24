@@ -630,6 +630,35 @@ describe("harness HTTP API", () => {
     expect(after.body.bots.find((b: { id: string }) => b.id === bot.id)).toBeUndefined();
   });
 
+  it("elects one Chief of Staff per section and preserves other section Chiefs", async () => {
+    const workA = (await api("POST", "/api/bots")).body.bot;
+    const workB = (await api("POST", "/api/bots")).body.bot;
+    const personal = (await api("POST", "/api/bots")).body.bot;
+    try {
+      await api("PATCH", `/api/bots/${workA.id}`, { section: "Work", chiefOfStaff: true });
+      await api("PATCH", `/api/bots/${workB.id}`, { section: "Work" });
+      await api("PATCH", `/api/bots/${personal.id}`, { section: "Personal", chiefOfStaff: true });
+
+      let bots = (await api("GET", "/api/bots")).body.bots;
+      expect(bots.find((bot: { id: string }) => bot.id === workA.id).chiefOfStaff).toBe(true);
+      expect(bots.find((bot: { id: string }) => bot.id === personal.id).chiefOfStaff).toBe(true);
+
+      await api("PATCH", `/api/bots/${workB.id}`, { chiefOfStaff: true });
+      bots = (await api("GET", "/api/bots")).body.bots;
+      expect(bots.find((bot: { id: string }) => bot.id === workA.id).chiefOfStaff).toBe(false);
+      expect(bots.find((bot: { id: string }) => bot.id === workB.id).chiefOfStaff).toBe(true);
+      expect(bots.find((bot: { id: string }) => bot.id === personal.id).chiefOfStaff).toBe(true);
+
+      // Moving a Chief keeps its role and hands off only in the destination.
+      await api("PATCH", `/api/bots/${workB.id}`, { section: "Personal" });
+      bots = (await api("GET", "/api/bots")).body.bots;
+      expect(bots.find((bot: { id: string }) => bot.id === workB.id).chiefOfStaff).toBe(true);
+      expect(bots.find((bot: { id: string }) => bot.id === personal.id).chiefOfStaff).toBe(false);
+    } finally {
+      for (const bot of [workA, workB, personal]) await api("DELETE", `/api/bots/${bot.id}`);
+    }
+  });
+
   it("explains when archived room members cannot respond", async () => {
     const archived = (await api("POST", "/api/bots")).body.bot;
     const active = (await api("POST", "/api/bots")).body.bot;
@@ -1390,6 +1419,9 @@ describe("harness HTTP API", () => {
     const send = await api("POST", `/api/bots/${bot.id}/messages`, { text: "hello?" });
     expect(send.status).toBe(409);
     expect(send.body.error).toContain("unavailable");
+    // a failed send never landed a user message, so the first-run quiz stays
+    const afterFail = (await api("GET", "/api/bots")).body.bots.find((candidate: { id: string }) => candidate.id === bot.id);
+    expect(afterFail.messages.find((m: { kind: string }) => m.kind === "options")?.card.dismissed).toBeFalsy();
   });
 
   it("refuses to fork a message when the provider is unavailable, without mutating", async () => {
@@ -1477,6 +1509,23 @@ describe("harness HTTP API", () => {
     expect(disk.rooms).toEqual({ turnTimeoutMinutes: 20 });
 
     await api("PUT", "/api/config", { rooms: { turnTimeoutMinutes: 5 } });
+  });
+
+  it("keeps Teach a skill off by default and persists an explicit opt-in", async () => {
+    const before = await api("GET", "/api/config");
+    expect(before.status).toBe(200);
+    expect(before.body.features).toEqual({ skillRecorder: false });
+
+    const saved = await api("PATCH", "/api/config", {
+      features: { skillRecorder: true },
+    });
+    expect(saved.status).toBe(200);
+    expect(saved.body.features).toEqual({ skillRecorder: true });
+
+    const disk = JSON.parse(readFileSync(join(home, ".openmausbot", "config.json"), "utf8"));
+    expect(disk.features).toEqual({ skillRecorder: true });
+
+    await api("PATCH", "/api/config", { features: { skillRecorder: false } });
   });
 
   it("keeps shared Local VM mode by default and resolves isolated targets per bot when enabled", async () => {

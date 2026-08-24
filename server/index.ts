@@ -49,6 +49,7 @@ import {
   parseConfigPatch,
   roomTurnTimeoutMinutes,
   saveConfig,
+  skillRecorderEnabled,
   syncCredentialEnv,
   withInstanceCli,
   vpsSshAlias,
@@ -74,6 +75,7 @@ import { cancelPeerApprovalsFor, cancelPeerApprovalsForThread, dismissStalePeerC
 import {
   mentionedBots,
   roomResponders,
+  sectionKey,
   Store,
   type GroupDefaultResponder,
   type GroupRecord,
@@ -109,7 +111,7 @@ import { listenWebhookIngress, webhookCredential, type WebhookIngress } from "./
 import { memberTurnSelection } from "./member-turn.ts";
 import { WebhookManager } from "./webhooks.ts";
 import { SPAWNED_PROXIES } from "./proxy-paths.ts";
-import { loadBundledSkills, renderSkillInstructions, selectBundledSkills } from "./skill-library.ts";
+import { loadBundledSkills, loadUserSkills, mergeSkills, renderSkillInstructions, selectBundledSkills } from "./skill-library.ts";
 import { shouldMountLocalComputer } from "./local-routing.ts";
 
 const PORT = Number(process.env.OMB_PORT || process.env.OGB_PORT || 8799);
@@ -131,6 +133,7 @@ const cfg = loadConfig();
 const registry = new ProviderRegistry(BUILT_IN_DRIVERS);
 await registry.load(instanceConfigs(cfg));
 const bundledSkills = loadBundledSkills();
+const availableSkills = () => mergeSkills(bundledSkills, loadUserSkills(join(DATA_DIR, "skills")));
 
 const bus = new EventBus();
 bus.attach(registry.instances());
@@ -152,6 +155,7 @@ function authorizedComms(header: string | string[] | undefined): boolean {
 // a peer invoked via ask_bot runs at depth 1 and gets NO agents tool, so
 // A→B is allowed but B→C (and A→B→A loops) never start.
 const MAX_COMMS_DEPTH = 1;
+const MAX_WORKSPACE_BOTS = 100;
 // Resolved from the server root — see server/proxy-paths.ts. This descending
 // path happened to survive bundling, but it goes through the same anchor so
 // there is exactly one way proxies are located.
@@ -1419,12 +1423,11 @@ async function startTurn(
       const selectedSkills = selectBundledSkills(
         text,
         instance.adapter.capabilities.phoneMcp === true ? ["phoneMcp"] : [],
-        bundledSkills,
+        availableSkills(),
       );
       if (selectedSkills.some((skill) => skill.manifest.requiredCapabilities.includes("phoneMcp"))) {
         integrations.phone = phoneIntegration();
       }
-      const skillInstructions = renderSkillInstructions(selectedSkills);
       // the user's connected apps, but only to a driver that can mount
       // them — a key in the config says the connections exist, not that
       // this engine can reach them — and only to a bot the user has not
@@ -1439,6 +1442,9 @@ async function startTurn(
       // MEMORY.md lives. API/box engines have no local filesystem story.
       const worksInWorkspace = instance.driverKind !== "grok" && instance.driverKind !== "boxAgent";
       const privateWorkspace = worksInWorkspace ? ensureWorkspace(bot.id) : undefined;
+      const skillInstructions = renderSkillInstructions(selectedSkills, {
+        includeRoot: worksInWorkspace && opts?.runOn !== "cloud",
+      });
       // An explicit working folder wins for new tasks; otherwise they use
       // the private bot workspace. A legacy task with an existing provider
       // session deliberately pins to null (the old home-folder behavior),
@@ -1606,10 +1612,16 @@ async function startTurn(
       // integrations.agents gate below, the prompt hint) — a bot on a driver
       // without it must not be told about tools it cannot call. Any bot can
       // still be the TARGET of ask_bot regardless of its driver.
+      const sectionPeers = store.bots.filter(
+        (candidate) =>
+          candidate.id !== bot.id &&
+          !candidate.hidden &&
+          sectionKey(candidate.section) === sectionKey(bot.section),
+      );
       if (
         commsDepth < MAX_COMMS_DEPTH &&
         instance.adapter.capabilities.agentsMcp === true &&
-        store.bots.filter((b) => b.id !== bot.id && !b.hidden).length > 0
+        (bot.chiefOfStaff || sectionPeers.length > 0)
       ) {
         integrations.agents = agentsIntegration(bot.id, threadId, commsDepth);
       }
@@ -1619,13 +1631,13 @@ async function startTurn(
       const tagged = integrations.agents
         ? mentionedBots(
             text,
-            store.bots.filter((b) => b.id !== bot.id),
+            sectionPeers,
           )
         : [];
       const coordinationPrompt = bot.chiefOfStaff
         ? chiefOfStaffSystemPrompt(bot.id, store.bots, Boolean(integrations.agents))
         : integrations.agents
-          ? "You can work with the user's other bots through the agents tools — list_bots shows who's available, ask_bot sends one of them a message and returns their reply."
+          ? "You can work with the other bots in your section through the agents tools — list_bots shows who's available, ask_bot sends one of them a message and returns their reply."
           : "";
 
       // (activeVpsThreads was already claimed above, before the provision or
@@ -1863,7 +1875,7 @@ async function runGroupMemberTurn(
   const selectedSkills = selectBundledSkills(
     serializeRoomContext(group.threadId, userName),
     instance.adapter.capabilities.phoneMcp === true ? ["phoneMcp"] : [],
-    bundledSkills,
+    availableSkills(),
   );
   if (selectedSkills.some((skill) => skill.manifest.requiredCapabilities.includes("phoneMcp"))) {
     integrations.phone = phoneIntegration();
@@ -1920,7 +1932,7 @@ async function runGroupMemberTurn(
   const cwd = groupTurnCwd(workspace, () => store.pinGroupCwd(group.id));
   const roomSystem =
     (workspace ? `${system}\n${memorySystemPrompt(bot.id).trim()}` : system) +
-    renderSkillInstructions(selectedSkills);
+    renderSkillInstructions(selectedSkills, { includeRoot: Boolean(workspace) });
 
   // run the turn and wait for it to settle, folding the reply text so a
   // chained @mention can be routed afterwards
@@ -2311,6 +2323,7 @@ function configStatus() {
       mode: localVmMode(cfg),
       maxInstances: localVmMaxInstances(cfg),
     },
+    features: { skillRecorder: skillRecorderEnabled(cfg) },
   };
 }
 
@@ -2460,10 +2473,17 @@ const server = createServer(async (req, res) => {
       }
       if (method === "GET" && path === "/api/internal/agents") {
         const self = url.searchParams.get("self");
+        const sender = self ? store.bot(self) : null;
+        if (!sender) return json(res, 403, { error: "unknown sender" });
         // title/description included so a "chief of staff"-style bot can
         // judge the team (who does what, who has no job description yet)
         const bots = store.bots
-          .filter((b) => b.id !== self && !b.hidden)
+          .filter(
+            (b) =>
+              b.id !== self &&
+              !b.hidden &&
+              sectionKey(b.section) === sectionKey(sender.section),
+          )
           .map((b) => ({
             id: b.id,
             name: b.name,
@@ -2492,6 +2512,9 @@ const server = createServer(async (req, res) => {
         // hard refusal — every peer turn has an accountable sender.
         const from = store.bot(fromBotId);
         if (!from) return json(res, 403, { error: "unknown sender" });
+        if (sectionKey(from.section) !== sectionKey(target.section)) {
+          return json(res, 403, { error: "that bot belongs to a different section" });
+        }
         const fromThreadId = String(body.fromThreadId ?? from.threadId);
         if (!store.taskByThread(from.id, fromThreadId)) {
           return json(res, 403, { error: "source thread does not belong to sender" });
@@ -2525,6 +2548,9 @@ const server = createServer(async (req, res) => {
           const freshFrom = store.bot(fromBotId);
           const freshTarget = store.bot(toBotId);
           if (!freshFrom || !freshTarget) return json(res, 404, { error: "no such bot" });
+          if (sectionKey(freshFrom.section) !== sectionKey(freshTarget.section)) {
+            return json(res, 200, { error: "that bot moved to a different section" });
+          }
           if (!store.taskByThread(freshFrom.id, fromThreadId)) {
             return json(res, 404, { error: "source task no longer exists" });
           }
@@ -2552,6 +2578,11 @@ const server = createServer(async (req, res) => {
         if (!toBotId || !message) return json(res, 400, { error: "toBotId and message required" });
         const from = store.bot(fromBotId);
         if (!from) return json(res, 404, { error: "no such bot" });
+        const target = store.bot(toBotId);
+        if (!target) return json(res, 404, { error: "no such bot" });
+        if (sectionKey(from.section) !== sectionKey(target.section)) {
+          return json(res, 403, { error: "that bot belongs to a different section" });
+        }
         const fromThreadId = String(body.fromThreadId ?? from.threadId);
         if (!store.taskByThread(from.id, fromThreadId)) {
           return json(res, 403, { error: "source thread does not belong to sender" });
@@ -2580,6 +2611,64 @@ const server = createServer(async (req, res) => {
           message: from.approvePeerComms
             ? `Queued for review — @${targetName} will only pick it up if the user approves after your turn finishes.`
             : `Delegation queued — @${targetName} will pick it up after your current turn finishes.`,
+        });
+      }
+      if (method === "POST" && path === "/api/internal/create-bot") {
+        const body = await readBody(req);
+        const fromBotId = String(body.fromBotId ?? "");
+        const chief = store.bot(fromBotId);
+        if (!chief) return json(res, 403, { error: "unknown sender" });
+        const fromThreadId = String(body.fromThreadId ?? chief.threadId);
+        if (!store.taskByThread(chief.id, fromThreadId)) {
+          return json(res, 403, { error: "source thread does not belong to sender" });
+        }
+        if (!chief.chiefOfStaff) {
+          return json(res, 403, { error: "only a section's Chief of Staff can create operator bots" });
+        }
+        if (store.bots.length >= MAX_WORKSPACE_BOTS) {
+          return json(res, 409, { error: `this workspace is limited to ${MAX_WORKSPACE_BOTS} bots` });
+        }
+        const name = String(body.name ?? "").trim();
+        const role = String(body.role ?? "").trim();
+        const instructions = String(body.instructions ?? "").trim();
+        if (!name || !role || !instructions) {
+          return json(res, 400, { error: "name, role, and instructions are required" });
+        }
+        if (name.length > 80) return json(res, 400, { error: "name must be at most 80 characters" });
+        if (role.length > 120) return json(res, 400, { error: "role must be at most 120 characters" });
+        if (instructions.length > 1_000) {
+          return json(res, 400, { error: "instructions must be at most 1000 characters" });
+        }
+        const duplicate = store.bots.find(
+          (candidate) =>
+            !candidate.hidden &&
+            sectionKey(candidate.section) === sectionKey(chief.section) &&
+            candidate.name.trim().toLowerCase() === name.toLowerCase(),
+        );
+        if (duplicate) {
+          return json(res, 409, { error: `@${duplicate.name} already exists in this section; use list_bots` });
+        }
+        const created = store.createBot(
+          {
+            name,
+            title: role,
+            description: instructions,
+            modelSelection: { ...chief.modelSelection },
+            section: chief.section,
+          },
+          { seedMessages: false },
+        );
+        const safeBot = store.patchBot(created.id, {
+          composio: false,
+          autoApprove: false,
+          approvePeerComms: false,
+        })!;
+        return json(res, 201, {
+          id: safeBot.id,
+          name: safeBot.name,
+          title: safeBot.title,
+          section: safeBot.section || "General",
+          model: safeBot.modelSelection.model,
         });
       }
       if (method === "POST" && path === "/api/internal/connectors/mcp") {
@@ -3531,6 +3620,7 @@ const server = createServer(async (req, res) => {
         } else return json(res, 400, { error: "pinnedMessageId must be a message id" });
       }
       if (section !== undefined) patch.section = section ?? undefined;
+      if (body.chiefOfStaff === false) patch.chiefOfStaff = false;
       // per-bot gate on the workspace's connected apps (Composio)
       if (body.composio !== undefined) {
         if (typeof body.composio !== "boolean") return json(res, 400, { error: "composio must be true or false" });
@@ -3599,18 +3689,19 @@ const server = createServer(async (req, res) => {
           ?.adapter.interruptTurn(existingBot.threadId)
           .catch(() => {});
       }
+      const chiefMovedSections =
+        Boolean(existingBot?.chiefOfStaff) &&
+        body.chiefOfStaff !== false &&
+        section !== undefined &&
+        sectionKey(existingBot?.section) !== sectionKey(section);
       const bot = store.patchBot(m[1], patch);
       if (!bot) return json(res, 404, { error: "no such bot" });
       const chiefChanges =
-        body.chiefOfStaff === true
+        body.chiefOfStaff === true || chiefMovedSections
           ? store.setChiefOfStaff(bot.id)
-          : body.chiefOfStaff === false && bot.chiefOfStaff
-            ? store.setChiefOfStaff(null)
-            : [];
+          : [];
       if (chiefChanges === null) return json(res, 404, { error: "no such bot" });
-      const changed = new Map([[bot.id, store.bot(bot.id)!]]);
-      for (const changedBot of chiefChanges) changed.set(changedBot.id, changedBot);
-      return json(res, 200, { bot: wireBot(bot) });
+      return json(res, 200, { bot: wireBot(store.bot(bot.id)!) });
     }
 
     if (method === "POST" && path === "/api/local-computer/interrupt") {
@@ -4260,7 +4351,8 @@ const server = createServer(async (req, res) => {
           key !== "imageGen" &&
           key !== "vps" &&
           key !== "rooms" &&
-          key !== "localVm",
+          key !== "localVm" &&
+          key !== "features",
       );
       if (reloadKeys.length > 0) await reloadProviders();
       const status = configStatus();

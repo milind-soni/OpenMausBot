@@ -64,7 +64,7 @@ const connectedAccountsPageSchema = z.object({
 const toolkitItemSchema = z.object({
   slug: z.string().optional(),
   is_no_auth: z.boolean().optional(),
-  connected_account: z.object({ id: z.string().optional(), status: z.string().optional() }).optional(),
+  connected_account: z.object({ id: z.string().optional(), status: z.string().optional() }).nullable().optional(),
 });
 type ToolkitItem = z.infer<typeof toolkitItemSchema>;
 const toolkitPageSchema = z.object({

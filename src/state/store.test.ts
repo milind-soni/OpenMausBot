@@ -56,6 +56,7 @@ describe("config status frames", () => {
         opencodeGo: { configured: true },
         tts: { configured: true, ready: true, voice: "Ada" },
         profile: { name: "Ian", email: "ian@example.test" },
+        features: { skillRecorder: true },
       }),
     ).toEqual({
       xai: { configured: true },
@@ -67,7 +68,100 @@ describe("config status frames", () => {
       opencodeGo: { configured: true },
       tts: { configured: true, ready: true, voice: "Ada" },
       profile: { name: "Ian", email: "ian@example.test" },
+      features: { skillRecorder: true },
     });
+  });
+});
+
+describe("Teach a skill feature flag", () => {
+  const config = configStatusFromFrame({
+    composio: { configured: false },
+    box: { configured: false },
+    vps: { configured: false, sshAlias: "" },
+    rooms: { turnTimeoutMinutes: 5 },
+    localVm: { mode: "shared", maxInstances: 2 },
+    features: { skillRecorder: true },
+  });
+
+  it("does not open the recorder while the experiment is disabled", () => {
+    expect(reducer(initialState, { type: "showSkillRecorder" }).activeView).toBe("chat");
+  });
+
+  it("opens after opt-in and returns to chat when disabled", () => {
+    const enabled = reducer({ ...initialState, config }, { type: "showSkillRecorder" });
+    expect(enabled.activeView).toBe("skill-recorder");
+
+    const disabled = reducer(enabled, {
+      type: "configStatus",
+      config: { ...config, features: { skillRecorder: false } },
+    });
+    expect(disabled.activeView).toBe("chat");
+  });
+});
+
+describe("onboarding quiz", () => {
+  const quizCard = {
+    title: "What do you mostly want help with?",
+    subtitle: "Pick whatever's closest; we can always expand from there.",
+    options: ["Work & projects"],
+  };
+  const bot = {
+    id: "echo",
+    threadId: "t1",
+    name: "Echo",
+    title: "",
+    description: "",
+    notifications: true,
+    color: "green",
+    unread: false,
+    modelSelection: { instanceId: "x", model: "y" },
+    messages: [
+      { id: "g", role: "bot", kind: "text", text: "Hey", at: 1 },
+      { id: "q", role: "bot", kind: "options", card: quizCard, at: 2 },
+    ],
+    activeLeafId: "q",
+  } satisfies Bot;
+
+  it("hides the quiz as soon as the person sends a message", () => {
+    const state = { ...initialState, bots: [bot], selectedId: bot.id };
+    const next = reducer(state, { type: "send", botId: bot.id, text: "Hi bro" });
+    expect(next.bots[0]?.messages.find((message) => message.id === "q")?.card?.dismissed).toBe(true);
+  });
+
+  it("hides the quiz when they pick an option", () => {
+    const state = { ...initialState, bots: [bot], selectedId: bot.id };
+    const next = reducer(state, { type: "answerCard", botId: bot.id, messageId: "q", answer: "Work & projects" });
+    expect(next.bots[0]?.messages.find((message) => message.id === "q")?.card).toMatchObject({
+      answered: "Work & projects",
+      dismissed: true,
+    });
+  });
+
+  it("leaves a live permission card in place", () => {
+    const askBot: Bot = {
+      ...bot,
+      messages: [
+        ...bot.messages,
+        {
+          id: "ask",
+          role: "bot",
+          kind: "options",
+          card: {
+            title: "Approval needed",
+            subtitle: "rm",
+            options: ["Allow", "Deny"],
+            requestId: "r1",
+            tool: "Bash",
+          },
+          at: 3,
+        },
+      ],
+      activeLeafId: "ask",
+    };
+    const state = { ...initialState, bots: [askBot], selectedId: askBot.id };
+    const next = reducer(state, { type: "send", botId: askBot.id, text: "ok" });
+    expect(next.bots[0]?.messages.find((message) => message.id === "ask")?.card?.dismissed).toBeUndefined();
+    expect(next.bots[0]?.messages.find((message) => message.id === "q")?.card?.dismissed).toBe(true);
   });
 });
 
@@ -103,6 +197,61 @@ describe("cross-client bot creation", () => {
     });
 
     expect(greeted.bots[0]?.messages).toEqual([greeting]);
+  });
+});
+
+describe("section Chiefs", () => {
+  const bot = (id: string, section: string, chiefOfStaff = false) => ({
+    id,
+    threadId: `thread-${id}`,
+    name: id,
+    title: "",
+    description: "",
+    notifications: true,
+    color: "green" as const,
+    unread: false,
+    modelSelection: { instanceId: "codex", model: "default" },
+    section,
+    chiefOfStaff,
+  });
+
+  it("hands off only within the patched bot's section", () => {
+    const workChief = bot("work-a", "Work", true);
+    const workCandidate = bot("work-b", "Work");
+    const personalChief = bot("personal", "Personal", true);
+    const state = {
+      ...initialState,
+      bots: [workChief, workCandidate, personalChief].map((candidate) => ({ ...candidate, messages: [] })),
+    };
+
+    const next = reducer(state, {
+      type: "botPatched",
+      bot: { ...workCandidate, chiefOfStaff: true },
+    });
+
+    expect(next.bots.find((candidate) => candidate.id === workChief.id)?.chiefOfStaff).toBe(false);
+    expect(next.bots.find((candidate) => candidate.id === workCandidate.id)?.chiefOfStaff).toBe(true);
+    expect(next.bots.find((candidate) => candidate.id === personalChief.id)?.chiefOfStaff).toBe(true);
+  });
+
+  it("keeps other section Chiefs during an optimistic settings update", () => {
+    const workChief = bot("work-a", "Work", true);
+    const workCandidate = bot("work-b", "Work");
+    const personalChief = bot("personal", "Personal", true);
+    const state = {
+      ...initialState,
+      bots: [workChief, workCandidate, personalChief].map((candidate) => ({ ...candidate, messages: [] })),
+    };
+
+    const next = reducer(state, {
+      type: "updateBot",
+      botId: workCandidate.id,
+      patch: { chiefOfStaff: true },
+    });
+
+    expect(next.bots.find((candidate) => candidate.id === workChief.id)?.chiefOfStaff).toBe(false);
+    expect(next.bots.find((candidate) => candidate.id === workCandidate.id)?.chiefOfStaff).toBe(true);
+    expect(next.bots.find((candidate) => candidate.id === personalChief.id)?.chiefOfStaff).toBe(true);
   });
 });
 

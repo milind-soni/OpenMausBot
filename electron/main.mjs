@@ -5,7 +5,14 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { startCua, stopCua, registerCuaIpc, setCuaStateListener } from "./cua.mjs";
 import { createAndroidDeviceController } from "./android-device.mjs";
+import { assemblyAICredential, mintAssemblyAIStreamingToken } from "./assemblyai.mjs";
 import { finishSpeech, startSpeech, stopSpeech } from "./speech.mjs";
+import {
+  recorderPermissionStatus,
+  saveSkillRecording,
+  startRecorder,
+  stopRecorder,
+} from "./skill-recorder.mjs";
 import { openBlankTerminal } from "./terminal-launch.mjs";
 import { startUpdater, registerUpdaterIpc } from "./updater.mjs";
 import { buildDiagnosticsReport, decodeLogTail, diagnosticsFileName } from "./diagnostics.mjs";
@@ -119,7 +126,7 @@ async function secureComposioConfig() {
   }
 }
 
-// The remaining workspace credentials (xai/box/voice/OpenCode Go keys) get
+// The remaining workspace credentials (xai/box/voice/OpenCode keys) get
 // the same at-rest treatment as the Composio key above. New packaged-app
 // saves go straight through credential:set below; this boot-time sweep also
 // migrates plaintext left by older versions or direct development clients.
@@ -283,7 +290,7 @@ async function startServerOn(port) {
       ...(secureCredentials.composioApiKey
         ? { COMPOSIO_API_KEY: secureCredentials.composioApiKey }
         : {}),
-      // one env var per stored workspace secret (xai/box/voice/OpenCode Go);
+      // one env var per stored workspace secret (xai/box/voice/OpenCode);
       // the server prefers these over config.json, whose plaintext fields
       // the boot migration has deleted
       ...workspaceCredentialEnv(secureCredentials),
@@ -779,6 +786,15 @@ ipcMain.handle("speech:finish", () => {
   if (nativeActions.appleSpeech) finishSpeech();
 });
 
+ipcMain.handle("skill-recorder:permissions", () => recorderPermissionStatus());
+ipcMain.handle("skill-recorder:start", (event) => {
+  const win = BrowserWindow.fromWebContents(event.sender);
+  if (!win) throw new Error("The recorder window is unavailable");
+  return startRecorder(win);
+});
+ipcMain.handle("skill-recorder:stop", () => stopRecorder());
+ipcMain.handle("skill-recorder:save", (_event, payload) => saveSkillRecording(payload));
+
 // ── companion sidecar ──────────────────────────────────────────────────
 // The renderer gets these five and nothing else: it can turn the companion
 // on and off, look at it, open or cancel a pairing window, and remove a
@@ -813,6 +829,28 @@ ipcMain.handle("desktop:capabilities", async () =>
     packaged: app.isPackaged,
     localConnection: await cuaReady,
   }),
+);
+
+ipcMain.handle("assemblyai:status", () => ({
+  configured: Boolean(assemblyAICredential(secureCredentials)),
+}));
+
+ipcMain.handle("assemblyai:set-key", async (_event, value) => {
+  if (typeof value !== "string") throw new Error("Unsupported credential");
+  if (!(await safeStorage.isAsyncEncryptionAvailable())) {
+    throw new Error("The operating-system credential store is unavailable");
+  }
+  const secret = value.trim();
+  const nextCredentials = { ...secureCredentials };
+  if (secret) nextCredentials.assemblyAiApiKey = secret;
+  else delete nextCredentials.assemblyAiApiKey;
+  await saveSecureCredentials(nextCredentials);
+  secureCredentials = nextCredentials;
+  return { configured: Boolean(secret) };
+});
+
+ipcMain.handle("assemblyai:streaming-token", () =>
+  mintAssemblyAIStreamingToken(assemblyAICredential(secureCredentials)),
 );
 
 const CREDENTIAL_PATCH = {
@@ -887,8 +925,8 @@ setCuaStateListener((connection) => {
 
 app.whenReady().then(async () => {
   if (process.platform === "darwin") app.dock.setIcon(APP_ICON);
+  secureCredentials = await loadSecureCredentials();
   if (app.isPackaged) {
-    secureCredentials = await loadSecureCredentials();
     await secureComposioConfig();
     await secureWorkspaceConfig();
     await ensureManagedComposioCredentials();
@@ -996,6 +1034,7 @@ app.on("before-quit", (e) => {
   // a live dictation session runs its own helper child that holds the mic —
   // stop it here so quitting never orphans a recording process
   if (nativeActions.appleSpeech) stopSpeech();
+  stopRecorder();
   const cleanup = Promise.race([
     stopCua().catch(() => {}),
     new Promise((resolve) => setTimeout(resolve, CUA_STOP_TIMEOUT_MS).unref()),

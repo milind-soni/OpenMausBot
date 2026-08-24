@@ -2,7 +2,7 @@
 // per-thread chips. Extracted from /api/internal/ask-bot so delegations
 // (delegate_bot) and any future peer flow reuse the same UX without a copy.
 
-import type { BotRecord, GroupRecord, Message, Store } from "./store.ts";
+import { sectionKey, type BotRecord, type GroupRecord, type Message, type Store } from "./store.ts";
 
 /** What a peer-exchange helper needs from the outside world:
  * the store (for persisted messages + groups) and the SSE broadcasters
@@ -18,10 +18,14 @@ export interface CommsBus {
  * the pair's full exchange, lives in the sidebar like any room, and the
  * user can open it to chip in. */
 export function getOrCreateChannel(store: Store, from: BotRecord, target: BotRecord): GroupRecord {
-  return (
-    store.dmGroup(from.id, target.id) ??
-    store.createGroup(`${from.name} ⇄ ${target.name}`, [from.id, target.id], true)
-  );
+  const existing = store.dmGroup(from.id, target.id);
+  if (existing) {
+    if (sectionKey(existing.section) !== sectionKey(from.section)) {
+      return store.patchGroup(existing.id, { section: from.section }) ?? existing;
+    }
+    return existing;
+  }
+  return store.createGroup(`${from.name} ⇄ ${target.name}`, [from.id, target.id], true, from.section);
 }
 
 /** Mirror `from`'s outgoing message into the channel, drop chips into

@@ -34,6 +34,10 @@ files:
   - "!electron/resources/speech-helper.swift"
   - "!electron/resources/speech-helper-Info.plist"
   - "!electron/resources/OpenMausBot Speech.app/**"
+  - "!electron/resources/recorder-helper"
+  - "!electron/resources/recorder-helper.swift"
+  - "!electron/resources/recorder-helper-Info.plist"
+  - "!electron/resources/OpenMausBot Recorder.app/**"
   - "!**/node_modules/**"
   - package.json
 
@@ -78,6 +82,8 @@ mac:
   extraResources:
     - from: electron/resources/OpenMausBot Speech.app
       to: OpenMausBot Speech.app
+    - from: electron/resources/OpenMausBot Recorder.app
+      to: OpenMausBot Recorder.app
     # CUA must live outside ASAR. prepare-cua stages the signed executable and
     # a self-contained JS/native SDK bundle selected for macOS arm64.
     # ${arch} resolves per built arch — each bundle carries its own natives

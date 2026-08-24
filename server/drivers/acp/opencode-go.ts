@@ -1,5 +1,6 @@
-// OpenCode Go subscription/API product through the maintained OpenCode CLI's
-// ACP stdio interface. The generic protocol runtime lives in core.ts.
+// The maintained OpenCode CLI through its ACP stdio interface. OpenCode is
+// the harness; Zen, Go, OpenRouter, and user-configured/local providers are
+// models discovered from that harness rather than separate OpenMaus drivers.
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
@@ -7,18 +8,27 @@ import { join } from "node:path";
 import { decodeInjectId, hostApiKey, localHost, mergeLocalInject } from "../local-inject.ts";
 import { createAcpDriver, type AcpSupport } from "./core.ts";
 import type { ModelCatalog, ProviderErrorCode } from "../../contracts.ts";
+import { execCli } from "../../procs.ts";
 
-const CATALOG_URL = "https://opencode.ai/zen/go/v1/models";
 const STATIC_MODELS: ModelCatalog = {
-  default: "opencode-go/minimax-m3",
+  default: "opencode/x-preview-f-free",
   options: [
-    { id: "opencode-go/minimax-m3", label: "Minimax M3" },
-    { id: "opencode-go/kimi-k3", label: "Kimi K3" },
-    { id: "opencode-go/glm-5.2", label: "GLM 5.2" },
+    {
+      id: "opencode/x-preview-f-free",
+      label: "Zen · Ox Alpha Free",
+      contextWindow: 1_000_000,
+    },
   ],
 };
 
 let lastSuccessfulCatalog: ModelCatalog | null = null;
+const MODEL_PROBE_TTL_MS = 30_000;
+const modelProbeCache = new Map<string, { expiresAt: number; result: Promise<boolean> }>();
+
+export type OpenCodeCatalogLoader = (
+  environment: Record<string, string | undefined>,
+  cli: string,
+) => Promise<ModelCatalog>;
 
 function labelForModel(id: string): string {
   return id
@@ -28,46 +38,143 @@ function labelForModel(id: string): string {
     .join(" ");
 }
 
-export function resetOpenCodeGoModelCache() {
-  lastSuccessfulCatalog = null;
+function providerLabel(id: string): string {
+  if (id === "opencode") return "Zen";
+  if (id === "opencode-go") return "Go";
+  if (id === "openrouter") return "OpenRouter";
+  return labelForModel(id);
 }
 
-export async function fetchOpenCodeGoModels(fetcher: typeof fetch = fetch): Promise<ModelCatalog> {
+function validModelSlug(value: string): boolean {
+  const separator = value.indexOf("/");
+  if (separator <= 0 || separator >= value.length - 1 || /\s/u.test(value)) return false;
+  return [...value].every((character) => (character.codePointAt(0) ?? 0) > 0x1f);
+}
+
+function localModelRecord(record: Record<string, unknown>): boolean {
+  const api = record.api && typeof record.api === "object" && !Array.isArray(record.api)
+    ? record.api as Record<string, unknown>
+    : {};
+  if (typeof api.url !== "string") return false;
   try {
-    const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), 8_000);
-    timeout.unref?.();
-    try {
-      const response = await fetcher(CATALOG_URL, { signal: controller.signal });
-      if (!response.ok) throw new Error(`catalog HTTP ${response.status}`);
-      const payload = await response.json() as unknown;
-      const records = Array.isArray(payload)
-        ? payload
-        : payload && typeof payload === "object" && Array.isArray((payload as { data?: unknown }).data)
-          ? (payload as { data: unknown[] }).data
-          : [];
-      const ids = records
-        .map((record) => record && typeof record === "object" ? (record as { id?: unknown }).id : undefined)
-        .filter((id): id is string => typeof id === "string" && /^[a-z0-9][a-z0-9._-]*$/i.test(id));
-      if (!ids.length) throw new Error("catalog contained no valid models");
-      const options = STATIC_MODELS.options.map((option) => ({ ...option }));
-      const seen = new Set(options.map((option) => option.id));
-      for (const id of ids) {
-        const full = `opencode-go/${id}`;
-        if (seen.has(full)) continue;
-        seen.add(full);
-        options.push({ id: full, label: labelForModel(id), custom: true });
+    const host = new URL(api.url).hostname.replace(/^\[|\]$/gu, "");
+    return host === "localhost" || host === "127.0.0.1" || host === "::1";
+  } catch {
+    return false;
+  }
+}
+
+/** Parse the authoritative inventory printed by the installed OpenCode CLI.
+ *
+ * `models --verbose` is a sequence of `provider/model` header lines followed
+ * by one JSON object. Model IDs can themselves contain `/` (OpenRouter), so
+ * only the first separator identifies the provider. Older CLIs may print just
+ * the headers; those still produce a usable catalog without metadata. */
+export function parseOpenCodeModelsOutput(stdout: string): ModelCatalog | null {
+  const options: ModelCatalog["options"] = [];
+  const seen = new Set<string>();
+  let slug: string | null = null;
+  let jsonLines: string[] = [];
+
+  const flush = () => {
+    if (!slug || seen.has(slug)) return;
+    const separator = slug.indexOf("/");
+    const provider = slug.slice(0, separator);
+    const model = slug.slice(separator + 1);
+    let record: Record<string, unknown> = {};
+    const raw = jsonLines.join("\n").trim();
+    if (raw) {
+      try {
+        const parsed = JSON.parse(raw) as unknown;
+        if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+          record = parsed as Record<string, unknown>;
+        }
+      } catch {
+        // A header-only/older CLI remains useful; fall back to the model id.
       }
-      const catalog = { default: STATIC_MODELS.default, options } satisfies ModelCatalog;
-      lastSuccessfulCatalog = catalog;
-      return catalog;
-    } finally {
-      clearTimeout(timeout);
     }
+    if (record.status === "deprecated") return;
+    const name = typeof record.name === "string" && record.name.trim()
+      ? record.name.trim()
+      : labelForModel(model);
+    const limit = record.limit && typeof record.limit === "object" && !Array.isArray(record.limit)
+      ? record.limit as Record<string, unknown>
+      : {};
+    const contextWindow = typeof limit.context === "number" && Number.isFinite(limit.context) && limit.context > 0
+      ? Math.floor(limit.context)
+      : undefined;
+    seen.add(slug);
+    options.push({
+      id: slug,
+      label: `${providerLabel(provider)} · ${name}`,
+      ...(localModelRecord(record) ? { custom: true, loaded: true } : {}),
+      ...(contextWindow ? { contextWindow } : {}),
+    });
+  };
+
+  for (const line of stdout.split(/\r?\n/u)) {
+    const trimmed = line.trim();
+    if (line === trimmed && validModelSlug(trimmed)) {
+      flush();
+      slug = trimmed;
+      jsonLines = [];
+      continue;
+    }
+    if (slug) jsonLines.push(line);
+  }
+  flush();
+
+  if (!options.length) return null;
+  const preferred = options.find((option) => option.id === STATIC_MODELS.default);
+  return { default: (preferred ?? options[0]!).id, options };
+}
+
+function runOpenCodeModels(
+  cli: string,
+  environment: Record<string, string | undefined>,
+  verbose: boolean,
+): Promise<string> {
+  return new Promise((resolve, reject) => {
+    execCli(
+      cli,
+      ["models", ...(verbose ? ["--verbose"] : [])],
+      { timeout: 20_000, maxBuffer: 8 * 1024 * 1024, env: environment },
+      (error, stdout, stderr) => {
+        if (error) {
+          reject(new Error(stderr?.trim() || error.message, { cause: error }));
+          return;
+        }
+        resolve(stdout);
+      },
+    );
+  });
+}
+
+/** Ask the same OpenCode binary that will run ACP for its effective catalog.
+ * This automatically includes Zen, Go, other connected providers, custom
+ * config, and anonymous free models with the exact IDs the session accepts. */
+export async function discoverOpenCodeModels(
+  environment: Record<string, string | undefined>,
+  cli = "opencode",
+): Promise<ModelCatalog> {
+  try {
+    const catalog = parseOpenCodeModelsOutput(await runOpenCodeModels(cli, environment, true));
+    if (!catalog) throw new Error("OpenCode returned no usable models");
+    lastSuccessfulCatalog = catalog;
+    return catalog;
   } catch {
     return lastSuccessfulCatalog ?? STATIC_MODELS;
   }
 }
+
+export function resetOpenCodeModelCache() {
+  lastSuccessfulCatalog = null;
+  modelProbeCache.clear();
+}
+
+/** Compatibility export for older tests/imports while the product migrates
+ * from the Go-only name. */
+export const resetOpenCodeGoModelCache = resetOpenCodeModelCache;
 
 const stripForeignProviderKeys = (env: Record<string, string | undefined>) => {
   for (const key of [
@@ -168,23 +275,18 @@ function storedAuthPaths(env: Record<string, string | undefined>): string[] {
   return [...new Set(roots)].map((root) => join(root, "opencode", "auth.json"));
 }
 
-/** True when an auth.json entry looks like a usable OpenCode login.
- *
- * The CLI writes `{type:"api", key}` for pasted keys and
- * `{type:"oauth", access, refresh}` for browser sign-ins — demanding `key`
- * alone rejects every OAuth login. The entry id is `"opencode"` for the
- * standard Zen sign-in and `"opencode-go"` for the Go product; both unlock
- * the Go models, so both count. */
+/** True when auth.json contains any usable provider login managed by
+ * OpenCode. The generic harness can run all of them, including `opencode`
+ * (Zen), `opencode-go`, and third-party providers such as OpenRouter. */
 function usableAuthEntry(parsed: Record<string, unknown>): boolean {
-  return ["opencode-go", "opencode"].some((id) => {
-    const auth = parsed[id];
-    if (!auth || typeof auth !== "object") return false;
+  return Object.values(parsed).some((auth) => {
+    if (!auth || typeof auth !== "object" || Array.isArray(auth)) return false;
     const entry = auth as { key?: unknown; access?: unknown; refresh?: unknown };
     return Boolean(entry.key || entry.access || entry.refresh);
   });
 }
 
-function hasStoredOpenCodeGoAuth(env: Record<string, string | undefined>) {
+function hasStoredOpenCodeAuth(env: Record<string, string | undefined>) {
   const candidates: string[] = [];
   if (env.OPENCODE_AUTH_CONTENT) candidates.push(env.OPENCODE_AUTH_CONTENT);
   for (const path of storedAuthPaths(env)) {
@@ -203,14 +305,53 @@ function hasStoredOpenCodeGoAuth(env: Record<string, string | undefined>) {
   });
 }
 
-const support = (fetcher: typeof fetch): AcpSupport => ({
+export async function canListOpenCodeModels(
+  env: Record<string, string | undefined>,
+  cli: string,
+  runModels: typeof runOpenCodeModels = runOpenCodeModels,
+): Promise<boolean> {
+  const cached = modelProbeCache.get(cli);
+  if (cached && cached.expiresAt > Date.now()) return cached.result;
+
+  const entry = {
+    expiresAt: Number.POSITIVE_INFINITY,
+    result: Promise.resolve(false),
+  };
+  entry.result = runModels(cli, env, false)
+    .then((stdout) => stdout
+      .split(/\r?\n/u)
+      .some((line) => validModelSlug(line.trim())))
+    .catch(() => false)
+    .finally(() => {
+      entry.expiresAt = Date.now() + MODEL_PROBE_TTL_MS;
+    });
+  modelProbeCache.set(cli, entry);
+  return entry.result;
+}
+
+/** Migrate the model name published during Ox Alpha's first preview. The
+ * current CLI calls the same model `x-preview-f-free`; prefer Go for an old
+ * Go bot with an explicit key, otherwise use Zen's anonymous/free route. */
+export function normalizeLegacyOpenCodeModel(
+  model: string,
+  env: Record<string, string | undefined>,
+): string {
+  if (model !== "opencode-go/ox-alpha-free") return model;
+  return env.OPENCODE_API_KEY
+    ? "opencode-go/x-preview-f-free"
+    : "opencode/x-preview-f-free";
+}
+
+const support = (loadCatalog: OpenCodeCatalogLoader): AcpSupport => ({
   driverKind: "opencodeGo",
-  displayName: "OpenCode Go",
+  // Keep the historical driver kind so existing bots and instance config do
+  // not break; only the product name/catalog expand from Go to OpenCode.
+  displayName: "OpenCode",
   models: STATIC_MODELS,
   defaultCli: "opencode",
-  nativeSource: "opencode-go.acp",
+  nativeSource: "opencode.acp",
   loginNote:
-    "OpenCode is not signed in — run `opencode auth login` and pick OpenCode, or add an OPENCODE_API_KEY in OpenMausBot settings",
+    "OpenCode has no usable models — run `opencode auth login` or connect a provider in the OpenCode app",
   install: {
     command: {
       darwin: "npm install -g opencode-ai",
@@ -224,17 +365,27 @@ const support = (fetcher: typeof fetch): AcpSupport => ({
   spawnArgs: () => ["acp"],
   credentialEnv: ["OPENCODE_API_KEY"],
   selectModel: { configId: "model" },
-  resolveTurnModel: (model, env) => (model ? ensureOpenCodeInjectModel(model, env) : model),
+  resolveTurnModel: (model, env) => model
+    ? ensureOpenCodeInjectModel(normalizeLegacyOpenCodeModel(model, env), env)
+    : model,
   transformEnv: stripForeignProviderKeys,
   pickAuthMethod: () => null,
   authFailure: "continue",
-  isAuthenticated: (env) => Boolean(env.OPENCODE_API_KEY) || hasStoredOpenCodeGoAuth(env),
-  classifyError: classifyOpenCodeGoError,
-  resolveModels: async (environment) => mergeLocalInject(await fetchOpenCodeGoModels(fetcher), environment),
+  isAuthenticated: async (env, config) => (
+    Boolean(env.OPENCODE_API_KEY)
+    || hasStoredOpenCodeAuth(env)
+    || await canListOpenCodeModels(env, config.cli)
+  ),
+  requireAuthenticationBeforeSpawn: true,
+  classifyError: classifyOpenCodeError,
+  resolveModels: async (environment, config) => mergeLocalInject(
+    await loadCatalog(environment, config.cli),
+    environment,
+  ),
   buildPromptText: (turn) => turn.system ? `${turn.system}\n\n${turn.text}` : turn.text,
 });
 
-export function classifyOpenCodeGoError(error: unknown): ProviderErrorCode | undefined {
+export function classifyOpenCodeError(error: unknown): ProviderErrorCode | undefined {
   const value = error && typeof error === "object" ? error as Record<string, unknown> : {};
   const code = value.code;
   if (code === -32000) return "invalid_credentials";
@@ -246,8 +397,12 @@ export function classifyOpenCodeGoError(error: unknown): ProviderErrorCode | und
   return undefined;
 }
 
-export function createOpenCodeGoDriver(fetcher: typeof fetch = fetch) {
-  return createAcpDriver(support(fetcher));
+export const classifyOpenCodeGoError = classifyOpenCodeError;
+
+export function createOpenCodeDriver(loadCatalog: OpenCodeCatalogLoader = discoverOpenCodeModels) {
+  return createAcpDriver(support(loadCatalog));
 }
 
-export const OpenCodeGoDriver = createOpenCodeGoDriver();
+export const createOpenCodeGoDriver = createOpenCodeDriver;
+export const OpenCodeDriver = createOpenCodeDriver();
+export const OpenCodeGoDriver = OpenCodeDriver;

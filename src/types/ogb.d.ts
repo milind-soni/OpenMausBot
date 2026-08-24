@@ -1,7 +1,63 @@
 // The narrow bridge the Electron preload exposes. Absent in the browser.
 
-
 declare global {
+type NativeSkillRecordingEvent = {
+  type: "app" | "click" | "scroll" | "key" | "typing" | "clipboard" | "download";
+  atMs: number;
+  app?: string;
+  windowTitle?: string;
+  x?: number;
+  y?: number;
+  button?: "left" | "right" | "other";
+  deltaY?: number;
+  keycode?: number;
+  meta?: boolean;
+  control?: boolean;
+  option?: boolean;
+  shift?: boolean;
+  /** Element identity for a click, from the accessibility tree. */
+  role?: string;
+  name?: string;
+  identifier?: string;
+  ancestry?: string[];
+  /** Typed keystroke count (never the characters themselves). */
+  keyCount?: number;
+  /** Clipboard action kind — never its contents. */
+  op?: "copy" | "cut" | "paste";
+  /** Downloaded file name and its origin URLs. */
+  filename?: string;
+  whereFroms?: string[];
+};
+
+type SkillRecordingPayload = {
+  name: string;
+  description: string;
+  durationMs: number;
+  transcript: string;
+  transcription?: { provider: "assemblyai"; model: string };
+  audio?: string;
+  events: Array<{
+    type: "app" | "click" | "scroll" | "shortcut" | "typing" | "clipboard" | "download";
+    atMs: number;
+    app?: string;
+    windowTitle?: string;
+    direction?: "up" | "down";
+    shortcut?: string;
+    keyCount?: number;
+    screenshot?: string;
+    /** Element identity for a click. */
+    role?: string;
+    name?: string;
+    identifier?: string;
+    ancestry?: string[];
+    /** Clipboard action kind — never its contents. */
+    op?: "copy" | "cut" | "paste";
+    /** Downloaded file name and its origin URLs. */
+    filename?: string;
+    whereFroms?: string[];
+  }>;
+};
+
   type DesktopCapabilities = {
     host: {
       platform: "darwin" | "linux" | "win32" | "other";
@@ -67,6 +123,19 @@ declare global {
         cb: (line: { partial?: boolean; text?: string; error?: string }) => void,
       ): () => void;
       onSpeechEnd(cb: (info: { code: number | null; reason?: string }) => void): () => void;
+      skillRecorder?: {
+        permissions(): Promise<{ supported: boolean; reason?: string }>;
+        start(): Promise<{ recording: boolean }>;
+        stop(): Promise<{ recording: boolean }>;
+        save(payload: SkillRecordingPayload): Promise<{ id: string; path: string; events: number }>;
+        onEvent(cb: (event: NativeSkillRecordingEvent) => void): () => void;
+        onEnd(cb: (info: { code: number | null; reason?: string }) => void): () => void;
+      };
+      transcription?: {
+        status(): Promise<{ configured: boolean }>;
+        setKey(value: string): Promise<{ configured: boolean }>;
+        streamingToken(): Promise<{ token: string; expiresInSeconds: number }>;
+      };
       /** Absolute path of a dropped File ("" when the drag carried no
        * file on disk). Absent in older builds of the shell. */
       getPathForFile?(file: File): string;

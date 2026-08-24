@@ -13,6 +13,7 @@ import {
   parseConfigPatch,
   parseStoredConfig,
   roomTurnTimeoutMinutes,
+  skillRecorderEnabled,
   stripWorkspaceCredentialEnv,
   syncCredentialEnv,
   vpsSshAlias,
@@ -77,6 +78,17 @@ describe("configuration boundaries", () => {
     });
     expect(localVmMode({ localVm: { mode: "per-bot" } })).toBe("per-bot");
     expect(localVmMaxInstances({ localVm: { maxInstances: 3 } })).toBe(3);
+  });
+
+  it("keeps experimental features off by default and accepts an explicit opt-in", () => {
+    expect(skillRecorderEnabled({})).toBe(false);
+    expect(parseConfigPatch({ features: { skillRecorder: true } })).toEqual({
+      features: { skillRecorder: true },
+    });
+    expect(skillRecorderEnabled({ features: { skillRecorder: true } })).toBe(true);
+    expect(() => parseConfigPatch({ features: { skillRecorder: "yes" } })).toThrow(
+      "features.skillRecorder",
+    );
   });
 
   it.each([0, 1.5, 5, "2", null])("rejects an invalid per-bot VM limit: %j", (maxInstances) => {

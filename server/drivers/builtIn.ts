@@ -11,11 +11,12 @@ import { GeminiAgentDriver } from "./acp/gemini.ts";
 import { KimiAgentDriver } from "./acp/kimi.ts";
 import { DroidAgentDriver } from "./acp/droid.ts";
 import { CursorAgentDriver } from "./acp/cursor.ts";
-import { OpenCodeGoDriver } from "./acp/opencode-go.ts";
+import { OpenCodeDriver } from "./acp/opencode-go.ts";
 import { QwenAgentDriver } from "./acp/qwen.ts";
 import { HermesAgentDriver } from "./acp/hermes.ts";
 import { OpenAICompatDriver } from "./openai-compat.ts";
 import { PiDriver } from "./pi.ts";
+import { MinimaxDriver } from "./minimax.ts";
 
 export const BUILT_IN_DRIVERS: readonly AnyProviderDriver[] = [
   GrokDriver,
@@ -24,7 +25,7 @@ export const BUILT_IN_DRIVERS: readonly AnyProviderDriver[] = [
   KimiAgentDriver,
   DroidAgentDriver,
   CursorAgentDriver,
-  OpenCodeGoDriver,
+  OpenCodeDriver,
   QwenAgentDriver,
   HermesAgentDriver,
   PiDriver,
@@ -33,4 +34,5 @@ export const BUILT_IN_DRIVERS: readonly AnyProviderDriver[] = [
   CodexDriver,
   AntigravityDriver,
   BoxAgentDriver,
+  MinimaxDriver,
 ];

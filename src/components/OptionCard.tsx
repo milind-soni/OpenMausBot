@@ -1,9 +1,24 @@
 import { useState } from "react";
 import { X } from "lucide-react";
-import { useStore, type Message } from "@/state/store";
+import { useStore, visibleMessages, type Message } from "@/state/store";
 import { cn } from "@/lib/cn";
 
 const LETTERS = ["A", "B", "C", "D", "E", "F"];
+
+/** First-run quiz, not a live provider ask (those carry requestId). */
+export function isOnboardingCard(message: Message): boolean {
+  return message.kind === "options" && !!message.card && !message.card.requestId;
+}
+
+/** Hide the quiz once they have talked past it — picked an option, typed in
+ * the composer, or dismissed it. Live asks are never this card. */
+export function shouldHideOnboardingCard(message: Message, transcript: Message[]): boolean {
+  if (!isOnboardingCard(message) || !message.card) return false;
+  if (message.card.dismissed || message.card.answered) return true;
+  const index = transcript.findIndex((entry) => entry.id === message.id);
+  if (index < 0) return false;
+  return transcript.slice(index + 1).some((later) => later.role === "user" && later.kind === "text");
+}
 
 export function OptionCard({
   botId,
@@ -12,10 +27,14 @@ export function OptionCard({
   botId: string;
   message: Message;
 }) {
-  const { dispatch } = useStore();
+  const { state, dispatch } = useStore();
   const [custom, setCustom] = useState("");
   const card = message.card;
-  if (!card || card.dismissed) return null;
+  const bot = state.bots.find((candidate) => candidate.id === botId);
+  const transcript = bot ? visibleMessages(bot) : [];
+  // Full thread, not the mounted window: a search-focus slice can omit the
+  // later user message that means they already talked past this quiz.
+  if (!card || shouldHideOnboardingCard(message, transcript)) return null;
 
   const answer = (text: string) => {
     if (!text.trim()) return;

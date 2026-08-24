@@ -118,6 +118,11 @@ describe("comms e2e (fake ACP fleet)", () => {
             environment: { FAKE_ACP_MODE: "delegate-peer" },
             config: { cli: FAKE_CLI, fullAuto: true },
           },
+          chiefCreator: {
+            driver: "grokAgent",
+            environment: { FAKE_ACP_MODE: "create-peer" },
+            config: { cli: FAKE_CLI, fullAuto: true },
+          },
           // a peer whose agent crashes at initialize — the delegated turn
           // ends with ok=false, so the channel must show a failed terminal
           // chip, not silence.
@@ -248,6 +253,52 @@ describe("comms e2e (fake ACP fleet)", () => {
       expect(helperBot.busy).toBeFalsy();
     },
     40_000,
+  );
+
+  it(
+    "lets a section Chief create a safe operator and delegate work to it",
+    async () => {
+      const chief = (await api("POST", "/api/bots")).body.bot;
+      await api("PATCH", `/api/bots/${chief.id}`, {
+        name: "Atlas",
+        section: "Launch",
+        chiefOfStaff: true,
+        modelSelection: { instanceId: "chiefCreator", model: "fake-model" },
+      });
+
+      const send = await api("POST", `/api/bots/${chief.id}/messages`, {
+        text: "Create the specialist team and start the design review.",
+      });
+      expect(send.status).toBe(202);
+
+      const deadline = Date.now() + 30_000;
+      let operator: any;
+      for (;;) {
+        const state = (await api("GET", "/api/bots")).body;
+        operator = state.bots.find((bot: any) => bot.name === "Pixel" && bot.section === "Launch");
+        const replied = operator?.messages.some(
+          (message: any) => message.role === "bot" && message.text?.includes("hello from fake acp"),
+        );
+        if (operator && replied && !operator.busy) break;
+        if (Date.now() > deadline) {
+          throw new Error(`Chief never created and delegated to Pixel. stderr: ${stderr.slice(-2000)}`);
+        }
+        await new Promise((resolve) => setTimeout(resolve, 250));
+      }
+
+      expect(operator).toMatchObject({
+        title: "Product designer",
+        description: "Design and review the user experience.",
+        section: "Launch",
+        composio: false,
+        autoApprove: false,
+        approvePeerComms: false,
+        modelSelection: { instanceId: "chiefCreator", model: "fake-model" },
+      });
+      expect(operator.chiefOfStaff).toBeFalsy();
+      expect(operator.messages.some((message: any) => message.text?.includes("Review the new onboarding flow."))).toBe(true);
+    },
+    45_000,
   );
 
   // ── async peer handoff (delegate_bot) ───────────────────────────────

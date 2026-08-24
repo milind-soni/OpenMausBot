@@ -362,11 +362,16 @@ export function SettingsPanel({ bot }: { bot: Bot }) {
   const canUseVps = engine?.capabilities?.computerMcp === true && engine.driverKind !== "boxAgent";
   const connectedAppsConfigured = state.config?.composio?.configured === true;
   const connectedAppsEnabled = bot.composio !== false;
-  const currentChief = state.bots.find((candidate) => candidate.chiefOfStaff);
+  const sectionName = bot.section?.trim() || t("General");
+  const currentChief = state.bots.find(
+    (candidate) =>
+      candidate.chiefOfStaff &&
+      (candidate.section?.trim() || "") === (bot.section?.trim() || ""),
+  );
 
   return (
     <>
-    <aside className="animate-panel-in flex h-full w-[400px] shrink-0 flex-col border-l border-hairline/40 bg-panel">
+    <aside className="animate-panel-in relative z-20 flex h-full w-[400px] shrink-0 flex-col border-l border-hairline/40 bg-panel">
       {/* Header */}
       <div className="flex items-center justify-between px-4 py-3">
         <button
@@ -437,7 +442,7 @@ export function SettingsPanel({ bot }: { bot: Bot }) {
               </span>
               <div className="min-w-0 flex-1">
                 <div className="text-[15px] font-medium text-ink">{t("Chief of Staff")}</div>
-                <div className="text-[11.5px] text-ink-secondary">{t("One per workspace")}</div>
+                <div className="text-[11.5px] text-ink-secondary">{t("One for {section}", { section: sectionName })}</div>
               </div>
               <button
                 role="switch"
@@ -463,12 +468,12 @@ export function SettingsPanel({ bot }: { bot: Bot }) {
               {bot.chiefOfStaff && !canCoordinate
                 ? t("This bot still holds the role, but its current engine cannot contact teammates. Choose a Claude or ACP engine to restore coordination.")
                 : bot.chiefOfStaff
-                  ? t("This is your primary contact. It can coordinate the other bots and combine their work into one answer.")
+                  ? t("This is the primary contact for {section}. It can create and coordinate specialists in this section, then combine their work into one answer.", { section: sectionName })
                 : !canCoordinate
                   ? t("Choose a Claude or ACP engine to let this bot coordinate teammates.")
                   : currentChief
-                    ? t("Make this bot your primary contact and hand the role over from {name}.", { name: currentChief.name })
-                    : t("Make this bot your primary contact for work that may involve several bots.")}
+                    ? t("Make this bot the {section} Chief and hand the role over from {name}.", { section: sectionName, name: currentChief.name })
+                    : t("Make this bot the primary contact for the {section} section.", { section: sectionName })}
             </div>
           </div>
 
@@ -546,14 +551,19 @@ export function SettingsPanel({ bot }: { bot: Bot }) {
             </button>
           </div>
 
-          <div className="flex items-center justify-between gap-4 rounded-xl bg-card p-4">
-            <div>
-              <div className="text-[15px] font-medium text-ink">{t("Model")}</div>
-              <div className="mt-0.5 text-[13px] text-ink-secondary">
-                {t("Which provider and model this bot runs on")}
-              </div>
-            </div>
-            <ModelPicker bot={bot} />
+          <div className="rounded-xl bg-card p-4">
+            <ModelPicker
+              bot={bot}
+              contained
+              label={
+                <div>
+                  <div className="text-[15px] font-medium text-ink">{t("Model")}</div>
+                  <div className="mt-0.5 text-[13px] text-ink-secondary">
+                    {t("Which provider and model this bot runs on")}
+                  </div>
+                </div>
+              }
+            />
           </div>
 
           {!!engine?.capabilities?.effortLevels?.length && (

@@ -78,6 +78,7 @@ beforeAll(async () => {
           { slug: "github", connected_account: { id: "ca_github", status: "ACTIVE" } },
           { slug: "gmail", is_no_auth: true },
           { slug: "slack" },
+          { slug: "unconnected", connected_account: null },
         ],
         next_cursor: url.searchParams.has("toolkits") ? undefined : "toolkits-page-2",
       };
