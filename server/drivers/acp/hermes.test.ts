@@ -107,6 +107,14 @@ describe("hermesConfiguredModel", () => {
     },
   );
 
+  it("keeps an explicit local provider even when a hosted key is also present", () => {
+    const env = home(
+      "OPENROUTER_API_KEY=stale-hosted-key\n",
+      "model:\n  default: llama3.2\n  provider: ollama\n",
+    );
+    expect(hermesConfiguredModel(env)).toBeNull();
+  });
+
   it.each([
     ["scalar", "model: z-ai/glm-5.2 # selected by setup\n", "z-ai/glm-5.2"],
     ["default", "model:\n  default: z-ai/glm-5.2 # selected by setup\n", "z-ai/glm-5.2"],

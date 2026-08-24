@@ -210,8 +210,12 @@ export function hermesConfiguredModel(
     /* config may not exist or may be unreadable */
   }
 
-  const configIsHosted =
-    configuredDefault !== null && !HERMES_LOCAL_CONFIG_PROVIDERS.has(configuredDefault.provider.toLowerCase());
+  const configuredProvider = configuredDefault?.provider.toLowerCase() ?? "";
+  // The model/provider selected in config.yaml is the user's explicit routing
+  // choice. A stale hosted key must not override an explicitly local setup.
+  if (configuredDefault && HERMES_LOCAL_CONFIG_PROVIDERS.has(configuredProvider)) return null;
+
+  const configIsHosted = configuredDefault !== null;
   if (!hasHostedProviderKey && !configIsHosted) return null;
 
   const model = configuredDefault?.model ?? "";
