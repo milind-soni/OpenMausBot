@@ -99,6 +99,7 @@ function SectionContextDialog({ section, label, onClose }: { section: string; la
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const onCloseRef = useRef(onClose);
   const savingRef = useRef(false);
+  const dirtyRef = useRef(false);
   const [text, setText] = useState("");
   const [savedText, setSavedText] = useState("");
   const [maxBytes, setMaxBytes] = useState(24_000);
@@ -110,6 +111,13 @@ function SectionContextDialog({ section, label, onClose }: { section: string; la
   const bytes = useMemo(() => new TextEncoder().encode(text).byteLength, [text]);
   onCloseRef.current = onClose;
   savingRef.current = saving;
+  dirtyRef.current = dirty;
+
+  const requestClose = useCallback(() => {
+    if (savingRef.current) return;
+    if (dirtyRef.current && !window.confirm("Discard unsaved changes to this shared context?")) return;
+    onCloseRef.current();
+  }, []);
 
   useEffect(() => {
     const previousFocus = document.activeElement instanceof HTMLElement ? document.activeElement : null;
@@ -117,7 +125,7 @@ function SectionContextDialog({ section, label, onClose }: { section: string; la
     const onKey = (event: KeyboardEvent) => {
       if (event.key === "Escape" && !savingRef.current) {
         event.preventDefault();
-        onCloseRef.current();
+        requestClose();
         return;
       }
       if (event.key !== "Tab") return;
@@ -146,7 +154,7 @@ function SectionContextDialog({ section, label, onClose }: { section: string; la
       window.removeEventListener("keydown", onKey);
       previousFocus?.focus();
     };
-  }, []);
+  }, [requestClose]);
 
   useEffect(() => {
     let cancelled = false;
@@ -195,7 +203,7 @@ function SectionContextDialog({ section, label, onClose }: { section: string; la
   return createPortal(
     <div
       className="fixed inset-0 z-50 flex items-center justify-center bg-black/55 p-4 backdrop-blur-[2px] sm:p-6"
-      onMouseDown={(event) => event.target === event.currentTarget && !dirty && !saving && onClose()}
+      onMouseDown={(event) => event.target === event.currentTarget && requestClose()}
     >
       <div
         ref={dialogRef}
@@ -218,7 +226,7 @@ function SectionContextDialog({ section, label, onClose }: { section: string; la
             </p>
           </div>
           <button
-            onClick={onClose}
+            onClick={requestClose}
             disabled={saving}
             aria-label="Close shared context"
             className="flex size-9 shrink-0 items-center justify-center rounded-lg text-ink-secondary hover:bg-raised hover:text-ink disabled:opacity-40"
@@ -257,7 +265,7 @@ function SectionContextDialog({ section, label, onClose }: { section: string; la
         </div>
 
         <footer className="flex items-center justify-end gap-2 border-t border-hairline/40 px-6 py-4 sm:px-8">
-          <button onClick={onClose} disabled={saving} className="rounded-lg px-3.5 py-2 text-[13px] text-ink-secondary hover:bg-raised hover:text-ink disabled:opacity-40">
+          <button onClick={requestClose} disabled={saving} className="rounded-lg px-3.5 py-2 text-[13px] text-ink-secondary hover:bg-raised hover:text-ink disabled:opacity-40">
             Cancel
           </button>
           <button
