@@ -1,7 +1,7 @@
 // Same-origin image thumbnails and an in-app lightbox. Transcript text can
 // contain arbitrary strings, so callers pass saved paths and this component
 // resolves them through attachmentImageUrl rather than loading them as URLs.
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { Download, ImageOff, Maximize2, X } from "lucide-react";
 
@@ -23,7 +23,10 @@ export function AttachmentPreviewDialog({ image, onClose }: { image: PreviewImag
   const dialogRef = useRef<HTMLDivElement>(null);
   const closeRef = useRef(onClose);
   const [failed, setFailed] = useState(false);
-  closeRef.current = onClose;
+
+  useLayoutEffect(() => {
+    closeRef.current = onClose;
+  }, [onClose]);
 
   useEffect(() => {
     const previousFocus = document.activeElement instanceof HTMLElement ? document.activeElement : null;
@@ -47,7 +50,7 @@ export function AttachmentPreviewDialog({ image, onClose }: { image: PreviewImag
       }
       const first = focusable[0];
       const last = focusable[focusable.length - 1];
-      if (event.shiftKey && document.activeElement === first) {
+      if (event.shiftKey && (document.activeElement === dialog || document.activeElement === first)) {
         event.preventDefault();
         last.focus();
       } else if (!event.shiftKey && document.activeElement === last) {
