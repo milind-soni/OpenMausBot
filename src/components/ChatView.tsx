@@ -723,7 +723,7 @@ const MessagesList = memo(function MessagesList({
                   onCancelEdit={onCancelEdit}
                   onSubmitEdit={(text) => onSubmitEdit(m.id, text)}
                   onRegenerate={onRegenerate}
-                  replyTarget={m.replyToId ? transcript.find((candidate) => candidate.id === m.replyToId) : undefined}
+                  replyTarget={m.replyToId ? bot.messages.find((candidate) => candidate.id === m.replyToId) : undefined}
                   onReply={() => onReply(m)}
                 />
               );

@@ -1410,7 +1410,10 @@ async function startTurn(
   // branch only — abandoned forks never reach the model
   const skipTranscript = new Set<string>([userMessage.id, ...(opts?.excludeMessageIds ?? [])]);
   const activeMessages = store.activePath(threadId);
-  const messagesById = new Map(activeMessages.map((message) => [message.id, message]));
+  // A flat reply may deliberately point across a fork in the same thread.
+  // Resolve its quote from full storage, while the replay itself remains
+  // strictly limited to the selected branch below.
+  const messagesById = new Map(store.messagesFor(threadId).map((message) => [message.id, message]));
   const transcript = activeMessages
     .filter((m) => m.kind === "text" && m.text && !skipTranscript.has(m.id))
     .slice(-40)
