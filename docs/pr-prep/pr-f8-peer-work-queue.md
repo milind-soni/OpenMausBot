@@ -2,7 +2,7 @@
 
 ## Title
 
-docs: define peer work queue for busy bots
+feat: queue peer work for busy bots
 
 ## Scope
 
@@ -10,7 +10,7 @@ Make valid bot-to-bot messages behave like queued human messages when the target
 
 The behavior is similar to Grok Bot's per-agent run scheduling and asynchronous agent messaging: work is queued against the agent, execution remains exclusive, and the sender receives a later result rather than holding the target turn open. The implementation remains native to OpenMausBot's existing event, transcript, approval, and provider contracts.
 
-This pull request records the implementation contract and review scope for the change. It is intentionally limited to the handoff document; runtime implementation and its regression suite should follow this contract in the focused engineering change.
+This branch implements the contract below in the runtime scheduler, durable work-order store, delegation/consultation paths, and regression suite. The existing event, transcript, approval, and provider contracts remain the integration boundaries.
 
 ## Problem
 
@@ -177,6 +177,8 @@ Tests must wait on fake-driver events, promises, state changes, or event-stream 
 - [ ] `git diff --check`
 - [ ] No generated output, lockfile churn, or unrelated feature changes
 - [ ] No regression in the existing human queue, approval flow, routine receipts, or channel visibility
+
+Focused validation for this implementation also covers the scheduler, durable work-order store, busy-target delegation, comms integration, and server-index integration suites. Repository-wide lint currently reports anti-slop findings across the server tree; the passing typecheck, build, and focused suites are the implementation-specific gates used here.
 
 ## Definition of done
 

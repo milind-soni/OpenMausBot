@@ -20,6 +20,7 @@ import { DATA_DIR } from "./config.ts";
 import { newId } from "./contracts.ts";
 import { requestPeerApproval, type ApprovalBus } from "./peer-approval.ts";
 import type { BotRecord, GroupRecord } from "./store.ts";
+import { WorkOrderStore } from "./work-orders.ts";
 
 export interface DelegationItem {
   toBotId: string;
@@ -35,6 +36,8 @@ export interface DelegationItem {
 interface PendingDelegationItem extends DelegationItem {
   /** Stable acknowledgement key for crash-safe removal from the queue. */
   id: string;
+  /** Durable lifecycle record, when the server has work-order persistence enabled. */
+  workOrderId?: string;
 }
 
 export type QueueResult = "ok" | "no_target" | "self" | "too_deep" | "too_many";
@@ -77,6 +80,7 @@ export function _loadPending(): void {
           message: item.message,
           ...(typeof item.reason === "string" ? { reason: item.reason } : {}),
           depth: Math.max(0, Math.trunc(item.depth!)),
+          ...(typeof item.workOrderId === "string" && item.workOrderId ? { workOrderId: item.workOrderId } : {}),
         }];
       });
       if (items.length) pendingDelegations.set(threadId, items);
@@ -103,6 +107,7 @@ export function queueDelegation(
   item: DelegationItem,
   maxDepth: number,
   sourceThreadId = from.threadId,
+  workOrders?: WorkOrderStore,
 ): QueueResult {
   if (item.toBotId === from.id) return "self";
   if (item.depth >= maxDepth) return "too_deep";
@@ -113,7 +118,23 @@ export function queueDelegation(
   // making the caller wait. Without a cap, one turn can queue unboundedly
   // and fan out into as many real turns on the next settle.
   if (list.length >= MAX_QUEUED_PER_THREAD) return "too_many";
-  list.push({ ...item, id: newId() });
+  const workOrder = workOrders?.create(
+    {
+      kind: "delegation",
+      sourceBotId: from.id,
+      sourceTaskId: sourceThreadId,
+      sourceExecutionId: sourceThreadId,
+      targetBotId: target.id,
+      targetTaskId: target.threadId,
+      request: item.message,
+      ...(item.reason ? { reason: item.reason } : {}),
+      priority: "peer",
+      depth: item.depth,
+      delivery: "channel",
+    },
+    "queued",
+  );
+  list.push({ ...item, id: newId(), ...(workOrder ? { workOrderId: workOrder.id } : {}) });
   pendingDelegations.set(sourceThreadId, list);
   savePending();
   const label = `Delegated to @${target.name}${item.reason ? `: ${item.reason}` : ""}`;
@@ -141,7 +162,9 @@ export function drainDelegations(
     commsDepth: number,
     sourceThreadId: string,
     channel?: GroupRecord,
+    workOrderId?: string,
   ) => void | Promise<void>,
+  workOrders?: WorkOrderStore,
 ): void {
   if (drainingThreads.has(threadId)) return;
   const list = pendingDelegations.get(threadId);
@@ -154,10 +177,15 @@ export function drainDelegations(
   }
   const snapshot = [...list];
   drainingThreads.add(threadId);
+  let deferred = false;
   void (async () => {
     for (const item of snapshot) {
       try {
-        await processOne(bus, approvalBus, from, threadId, item, runTarget);
+        const result = await processOne(bus, approvalBus, from, threadId, item, runTarget, workOrders);
+        if (result === "defer") {
+          deferred = true;
+          break;
+        }
       } catch (error) {
         const why = error instanceof Error ? error.message : String(error);
         try {
@@ -170,7 +198,7 @@ export function drainDelegations(
           console.error("delegation failed and could not be reported", reportError);
         }
       } finally {
-        acknowledgeDelegation(threadId, item.id);
+        if (!deferred) acknowledgeDelegation(threadId, item.id);
       }
     }
   })().finally(() => {
@@ -178,8 +206,8 @@ export function drainDelegations(
     // A later turn may have queued and settled while this thread was
     // waiting for approval. Its items were not in our snapshot, so start a
     // fresh drain instead of leaving them parked until another restart.
-    if (pendingDelegations.get(threadId)?.length) {
-      drainDelegations(bus, approvalBus, threadId, runTarget);
+    if (!deferred && pendingDelegations.get(threadId)?.length) {
+      drainDelegations(bus, approvalBus, threadId, runTarget, workOrders);
     }
   });
 }
@@ -196,11 +224,12 @@ function acknowledgeDelegation(threadId: string, itemId: string): void {
 
 /** Drop a thread's queued handoffs without running them, telling the user
  * they were dropped. Used when the queueing turn failed or was interrupted. */
-export function discardDelegations(bus: CommsBus, threadId: string): void {
+export function discardDelegations(bus: CommsBus, threadId: string, workOrders?: WorkOrderStore): void {
   const list = pendingDelegations.get(threadId);
   if (!list?.length) return;
   pendingDelegations.delete(threadId);
   savePending();
+  for (const item of list) transition(workOrders, item.workOrderId, "cancelled", { error: "source turn did not finish" });
   const from = bus.store.botByThread(threadId);
   if (!from) return;
   bus.store.appendMessage(threadId, {
@@ -215,15 +244,17 @@ async function processOne(
   approvalBus: ApprovalBus,
   from: BotRecord,
   sourceThreadId: string,
-  item: DelegationItem,
+  item: PendingDelegationItem,
   runTarget: (
     toBotId: string,
     message: string,
     commsDepth: number,
     sourceThreadId: string,
     channel?: GroupRecord,
+    workOrderId?: string,
   ) => void | Promise<void>,
-): Promise<void> {
+  workOrders?: WorkOrderStore,
+): Promise<"done" | "defer"> {
   let sender = from;
   let target = bus.store.bot(item.toBotId);
   if (!target) {
@@ -232,17 +263,16 @@ async function processOne(
       kind: "activity",
       tool: { name: `error: delegation to ${item.toBotId} failed — no such bot`, ok: false },
     });
-    return;
+    transition(workOrders, item.workOrderId, "failed", { error: "target bot no longer exists" });
+    return "done";
   }
   if (target.busy) {
-    bus.store.appendMessage(sourceThreadId, {
-      role: "bot",
-      kind: "activity",
-      tool: { name: `Delegation to @${target.name} canceled — @${target.name} is busy`, ok: false },
-    });
-    return;
+    // Busy is admission pressure, not a terminal failure. The item remains
+    // durable and is retried when the target's current turn settles.
+    return "defer";
   }
   if (sender.approvePeerComms) {
+    transition(workOrders, item.workOrderId, "awaiting-approval");
     const verdict = await requestPeerApproval(
       approvalBus,
       sender,
@@ -257,7 +287,8 @@ async function processOne(
         kind: "activity",
         tool: { name: `Delegation to @${target.name} denied by user`, ok: false },
       });
-      return;
+      transition(workOrders, item.workOrderId, "cancelled", { error: "denied by user" });
+      return "done";
     }
     // The approval could have been sitting for up to 15 minutes. Everything
     // checked above is a stale snapshot now: re-read both bots and re-check
@@ -265,14 +296,13 @@ async function processOne(
     // and mirror a "Messaged @X" chip for an exchange that never happens.
     const current = bus.store.bot(item.toBotId);
     const currentSender = bus.store.bot(from.id);
-    if (!current || !currentSender || !bus.store.taskByThread(currentSender.id, sourceThreadId)) return;
+    if (!current || !currentSender || !bus.store.taskByThread(currentSender.id, sourceThreadId)) {
+      transition(workOrders, item.workOrderId, "failed", { error: "source or target task no longer exists" });
+      return "done";
+    }
     if (current.busy) {
-      bus.store.appendMessage(sourceThreadId, {
-        role: "bot",
-        kind: "activity",
-        tool: { name: `Delegation to @${current.name} canceled — @${current.name} is busy`, ok: false },
-      });
-      return;
+      transition(workOrders, item.workOrderId, "queued");
+      return "defer";
     }
     sender = currentSender;
     target = current;
@@ -281,12 +311,41 @@ async function processOne(
   mirrorExchange(bus, sender, target, item.message, channel, sourceThreadId);
   const reasonLine = item.reason ? `\n\n[Reason: ${item.reason}]` : "";
   const prefixed = `[Delegated by @${sender.name}, another bot in this OpenMausBot workspace. Do the work and reply directly.]\n\n${item.message}${reasonLine}`;
-  await runTarget(item.toBotId, prefixed, item.depth + 1, sourceThreadId, channel);
+  transition(workOrders, item.workOrderId, "running", { attempt: (workOrders?.get(item.workOrderId ?? "")?.attempt ?? 0) + 1 });
+  try {
+    await runTarget(item.toBotId, prefixed, item.depth + 1, sourceThreadId, channel, item.workOrderId);
+    transition(workOrders, item.workOrderId, "completed");
+  } catch (error) {
+    transition(workOrders, item.workOrderId, "failed", { error: error instanceof Error ? error.message : String(error) });
+    throw error;
+  }
+  return "done";
+}
+
+function transition(
+  workOrders: WorkOrderStore | undefined,
+  id: string | undefined,
+  to: "awaiting-approval" | "queued" | "running" | "completed" | "failed" | "cancelled",
+  patch: { result?: string; error?: string; attempt?: number } = {},
+): void {
+  if (!workOrders || !id) return;
+  try {
+    workOrders.transition(id, to, patch);
+  } catch (error) {
+    // A terminal order is intentionally immutable; the provider terminal
+    // event may race the drain's acknowledgement, so this is diagnostic only.
+    console.error("work-order transition failed", error);
+  }
 }
 
 /** Test helper: how many items remain queued for a thread. */
 export function _pendingCount(threadId: string): number {
   return pendingDelegations.get(threadId)?.length ?? 0;
+}
+
+/** Test helper: whether a source thread's asynchronous drain is still settling. */
+export function _isDraining(threadId: string): boolean {
+  return drainingThreads.has(threadId);
 }
 
 /** Test helper: forget the in-memory queue (a simulated restart). */

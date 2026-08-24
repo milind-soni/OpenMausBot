@@ -12,6 +12,7 @@ import { DATA_DIR } from "./config.ts";
 import type { ModelSelection } from "./contracts.ts";
 import {
   drainDelegations,
+  _isDraining,
   queueDelegation,
   _pendingCount,
 } from "./delegations.ts";
@@ -307,20 +308,21 @@ describe("drainDelegations", () => {
     expect(runTargetCalls).toEqual([]);
   });
 
-  it("skips runTarget and emits a 'is busy' chip when the target is currently busy", async () => {
+  it("keeps the handoff queued while the target is busy, then runs it when idle", async () => {
     store.patchBot(target.id, { busy: true });
     queueDelegation(commsBus, from, { toBotId: target.id, message: "do this", depth: 0 }, 1);
     drainDelegations(commsBus, approvalBus, from.threadId, (toBotId, message, commsDepth) => {
       runTargetCalls.push({ toBotId, message, commsDepth });
     });
-    const chip = await waitFor(() =>
-      store
-        .messagesFor(from.threadId)
-        .find((m) => m.kind === "activity" && (m.tool?.name ?? "").includes("is busy")),
-    );
-    expect(chip.tool?.name).toBe("Delegation to @Helper canceled — @Helper is busy");
-    expect(chip.tool?.ok).toBe(false);
+    await waitFor(() => !_isDraining(from.threadId));
     expect(runTargetCalls).toEqual([]);
+    expect(_pendingCount(from.threadId)).toBe(1);
+    store.patchBot(target.id, { busy: false });
+    drainDelegations(commsBus, approvalBus, from.threadId, (toBotId, message, commsDepth) => {
+      runTargetCalls.push({ toBotId, message, commsDepth });
+    });
+    await waitFor(() => runTargetCalls.length === 1 && _pendingCount(from.threadId) === 0);
+    expect(_pendingCount(from.threadId)).toBe(0);
   });
 
   it("asks for approval when approvePeerComms is on, then runs only on allow", async () => {

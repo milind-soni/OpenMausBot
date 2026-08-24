@@ -113,6 +113,8 @@ import { WebhookManager } from "./webhooks.ts";
 import { SPAWNED_PROXIES } from "./proxy-paths.ts";
 import { loadBundledSkills, loadUserSkills, mergeSkills, renderSkillInstructions, selectBundledSkills } from "./skill-library.ts";
 import { shouldMountLocalComputer } from "./local-routing.ts";
+import { WorkOrderStore, type WorkOrderState } from "./work-orders.ts";
+import { TurnScheduler, type TurnLane } from "./turn-scheduler.ts";
 
 const PORT = Number(process.env.OMB_PORT || process.env.OGB_PORT || 8799);
 const WEBHOOK_PORT = Number(process.env.OMB_WEBHOOK_PORT || PORT + 1);
@@ -215,11 +217,18 @@ function controlIntegration(botId: string) {
 /** Run a turn on `targetBotId` and resolve with its assistant text — the
  * synchronous half of ask_bot. Subscribes to the bus, folds assistant_text
  * for that thread, resolves on turn.completed (or a 4-min ceiling). */
-function askBotAndWait(targetBotId: string, message: string, depth: number, fromBotId?: string): Promise<string> {
+function askBotAndWait(
+  targetBotId: string,
+  message: string,
+  depth: number,
+  fromBotId?: string,
+  schedulerToken?: string,
+  rejectStartFailure = false,
+): Promise<string> {
   const target = store.bot(targetBotId);
   if (!target) return Promise.resolve("(no such bot)");
   const threadId = target.threadId;
-  return new Promise((resolve) => {
+  return new Promise((resolve, reject) => {
     let text = "";
     let done = false;
     const finish = (out: string) => {
@@ -228,6 +237,13 @@ function askBotAndWait(targetBotId: string, message: string, depth: number, from
       clearTimeout(timer);
       unsub();
       resolve(out);
+    };
+    const fail = (error: unknown) => {
+      if (done) return;
+      done = true;
+      clearTimeout(timer);
+      unsub();
+      reject(error);
     };
     const unsub = bus.subscribe((e: RuntimeEvent) => {
       if (e.threadId !== threadId) return;
@@ -241,9 +257,12 @@ function askBotAndWait(targetBotId: string, message: string, depth: number, from
     startTurn(targetBotId, message, {
       commsDepth: depth + 1,
       unattended: isUnattended(fromBotId),
-    }).catch((err) =>
-      finish(`(couldn't start that bot: ${err instanceof Error ? err.message : String(err)})`),
-    );
+      schedulerToken,
+      onDispatchError: rejectStartFailure ? (message) => fail(new Error(message)) : undefined,
+    }).catch((err) => {
+      if (rejectStartFailure) fail(err);
+      else finish(`(couldn't start that bot: ${err instanceof Error ? err.message : String(err)})`);
+    });
   });
 }
 
@@ -263,6 +282,24 @@ let bootSelection = { instanceId: "", model: "" };
 const store = new Store(() => bootSelection);
 bootSelection = await defaultSelection();
 store.seedIfEmpty();
+const workOrders = new WorkOrderStore({
+  onTransition: (order, from, to) => broadcast({ kind: "work-order", order, transition: { from, to } }),
+});
+const turnScheduler = new TurnScheduler({ maxPendingPerBot: 32, reservedUserSlots: 4 });
+const turnAdmissionByThread = new Map<string, { botId: string; token: string }>();
+
+function laneForTurn(opts?: { commsDepth?: number; automationSource?: RoutineRunTrigger; connectorContinuation?: boolean }): TurnLane {
+  if (opts?.commsDepth || opts?.connectorContinuation) return "peer";
+  if (opts?.automationSource) return "background";
+  return "user";
+}
+
+function releaseTurnAdmission(threadId: string): void {
+  const admission = turnAdmissionByThread.get(threadId);
+  if (!admission) return;
+  turnAdmissionByThread.delete(threadId);
+  turnScheduler.release(admission.botId, admission.token);
+}
 
 /** A bot as a client may see it: no provider session bookkeeping.
  *
@@ -1035,6 +1072,10 @@ bus.subscribe((event: RuntimeEvent) => {
       // channel that only ever shows requests is half a record. Mirror the
       // reply on success; mirror a failed/stopped terminal chip otherwise.
       finalizeDelegationWatch(event.threadId, event.ok, reply);
+      // Release only after the delegated watch is consumed. Releasing first
+      // could pump a queued peer turn and overwrite this thread's watch
+      // before the current terminal event was mirrored.
+      releaseTurnAdmission(event.threadId);
       // group busy/unread settle in the group turn engine, which knows
       // whether more member turns are queued behind this one
       break;
@@ -1047,7 +1088,7 @@ bus.subscribe((event: RuntimeEvent) => {
 // (target threadId → channel) lets the main fold mirror the delegated
 // turn's TERMINAL state into the A⇄B channel when it completes — the
 // channel stays the full record of the handoff, not just its request.
-const delegationWatch = new Map<string, { channelId?: string; toBotId: string }>();
+const delegationWatch = new Map<string, { channelId?: string; toBotId: string; workOrderId?: string; resolve?: (ok: boolean) => void }>();
 
 /** Consume one delegated-turn watch and mirror exactly one terminal state.
  * Some harness paths settle a busy bot without a provider turn.completed
@@ -1061,6 +1102,7 @@ function finalizeDelegationWatch(
   const watched = delegationWatch.get(threadId);
   if (!watched) return false;
   delegationWatch.delete(threadId);
+  watched.resolve?.(ok);
   const target = store.bot(watched.toBotId);
   const channel = watched.channelId ? store.group(watched.channelId) : undefined;
   if (!target || !channel) return true;
@@ -1104,13 +1146,12 @@ bus.subscribe((event: RuntimeEvent) => {
 /** How a drained delegation becomes a real turn on the target. Shared by
  * the settle-time drain and the boot-time drain of what a previous process
  * left queued. */
-const runDelegatedTurn: Parameters<typeof drainDelegations>[3] = (toBotId, text, commsDepth, sourceThreadId, channel) => {
+const runDelegatedTurn: Parameters<typeof drainDelegations>[3] = async (toBotId, text, commsDepth, sourceThreadId, channel, workOrderId) => {
     // startTurn REJECTS on an ordinary condition — busy target, deleted bot,
     // unavailable provider. Unhandled, that rejection is fatal to the
     // harness (Node's default), which in the packaged app kills the server
     // child. Every delegation failure has to land as a chip instead.
     const targetThreadId = store.bot(toBotId)?.threadId;
-    if (targetThreadId) delegationWatch.set(targetThreadId, { channelId: channel?.id, toBotId });
     let failureReported = false;
     const reportStartFailure = (error: unknown) => {
       if (failureReported) return;
@@ -1133,16 +1174,42 @@ const runDelegatedTurn: Parameters<typeof drainDelegations>[3] = (toBotId, text,
         tool: { name: `error: delegation to @${bot?.name ?? toBotId} could not start — ${why.slice(0, 120)}`, ok: false },
       });
     };
-    return startTurn(toBotId, text, {
-      commsDepth,
-      unattended: isUnattended(store.botByThread(sourceThreadId)?.id),
-      // startTurn schedules provider/integration setup after marking the bot
-      // busy. Those asynchronous setup failures do not emit turn.completed,
-      // so clear the watch and report them through this callback too.
-      onDispatchError: reportStartFailure,
-    }).catch((err) => {
-      reportStartFailure(err);
+    let schedulerToken = "";
+    const admission = turnScheduler.admit({
+      botId: toBotId,
+      lane: "peer",
+      dedupeKey: workOrderId ?? `${sourceThreadId}:${toBotId}:${text}`,
+      run: async () => {
+        let terminal!: Promise<boolean>;
+        let resolveTerminal!: (ok: boolean) => void;
+        terminal = new Promise<boolean>((resolve) => { resolveTerminal = resolve; });
+        if (targetThreadId) {
+          delegationWatch.set(targetThreadId, { channelId: channel?.id, toBotId, workOrderId, resolve: resolveTerminal });
+        }
+        await startTurn(toBotId, text, {
+          commsDepth,
+          unattended: isUnattended(store.botByThread(sourceThreadId)?.id),
+          schedulerToken,
+          // startTurn schedules provider/integration setup after marking the bot
+          // busy. Those asynchronous setup failures do not emit turn.completed,
+          // so clear the watch and report them through this callback too.
+          onDispatchError: reportStartFailure,
+        }).catch((err) => {
+          reportStartFailure(err);
+        });
+        if (failureReported) throw new Error("delegated turn did not start");
+        if (targetThreadId && !(await terminal)) {
+          throw new Error("delegated turn did not complete");
+        }
+      },
     });
+    if (!admission.accepted) {
+      const reason = admission.reason === "capacity" ? "peer queue capacity reached" : `duplicate peer work (${admission.reason})`;
+      reportStartFailure(new Error(reason));
+      throw new Error(reason);
+    }
+    schedulerToken = admission.admission.id;
+    await admission.completion;
 };
 
 bus.subscribe((event: RuntimeEvent) => {
@@ -1150,8 +1217,15 @@ bus.subscribe((event: RuntimeEvent) => {
   // A turn that failed or was interrupted drops its queue rather than
   // firing it later: the user who hit Stop does not expect the delegations
   // that turn queued to run anyway, minutes later, on an unrelated turn.
-  if (!event.ok) return void discardDelegations(commsBus, event.threadId);
-  drainDelegations(commsBus, approvalBus, event.threadId, runDelegatedTurn);
+  if (!event.ok) discardDelegations(commsBus, event.threadId, workOrders);
+  // A delegation is keyed by its SOURCE thread, but admission pressure is
+  // owned by the TARGET bot. Scan the bounded source list after every
+  // terminal event so a target becoming idle wakes its waiting handoffs.
+  for (const threadId of pendingThreads()) {
+    drainDelegations(commsBus, approvalBus, threadId, runDelegatedTurn, workOrders);
+  }
+  void drainDeferredConsultations();
+  drainPeerContinuations();
 });
 
 // ── steer-queue drain: messages sent while the bot was busy ────────────
@@ -1318,12 +1392,16 @@ async function startTurn(
      * The prompt is control-plane context: it reaches the provider without
      * masquerading as another message authored by the user. */
     connectorContinuation?: boolean;
+    /** Scheduler-owned peer admission token; direct callers must omit this. */
+    schedulerToken?: string;
     onDispatchError?: (message: string) => void;
   },
 ) {
   const bot = store.bot(botId);
   if (!bot) throw Object.assign(new Error("no such bot"), { status: 404 });
-  if (bot.busy) throw Object.assign(new Error("the bot is already working — interrupt it first"), { status: 409 });
+  if (bot.busy || (turnScheduler.hasActive(bot.id) && !opts?.schedulerToken)) {
+    throw Object.assign(new Error("the bot is already working — interrupt it first"), { status: 409 });
+  }
   const threadId = opts?.threadId ?? bot.threadId;
   // a webhook turn, or one inherited from a bot already running unattended
   if (opts?.automationSource === "webhook" || opts?.unattended) markUnattended(bot.id);
@@ -1413,6 +1491,8 @@ async function startTurn(
   // busy flips immediately so the composer locks; the dispatch itself runs
   // in the background — box provisioning can take ~90s and must never
   // hang the HTTP request
+  const admissionToken = opts?.schedulerToken ?? turnScheduler.occupy(bot.id, undefined, laneForTurn(opts));
+  turnAdmissionByThread.set(threadId, { botId: bot.id, token: admissionToken });
   store.setActivity(bot.id, "working");
   store.patchBot(bot.id, { unread: false });
   turnUsage.delete(threadId);
@@ -1712,6 +1792,7 @@ async function startTurn(
       });
       store.setActivity(bot.id, "idle");
       opts?.onDispatchError?.(message);
+      releaseTurnAdmission(threadId);
       // a dispatch failure never emits turn.completed, so the settle-driven
       // drain would strand anything queued behind this turn
       drainQueuedSends();
@@ -1815,12 +1896,172 @@ const commsBus: CommsBus = { store, broadcast };
 // can call resolvePeerComms without holding a reference back to here.
 const approvalBus: ApprovalBus = { store, broadcast };
 
+// Deferred ask_bot consultations use the same durable work-order lifecycle
+// as delegate_bot, but their terminal result is delivered back to the source
+// task through a hidden continuation. The source provider is never held
+// open while a busy target works.
+const runningConsultations = new Set<string>();
+const pendingPeerContinuations = new Map<string, { sourceBotId: string; sourceTaskId: string; prompts: string[] }>();
+
+function acceptDeferredConsultation(
+  from: NonNullable<ReturnType<typeof store.bot>>,
+  target: NonNullable<ReturnType<typeof store.bot>>,
+  message: string,
+  depth: number,
+  sourceThreadId: string,
+) {
+  const channel = getOrCreateChannel(store, from, target);
+  const order = workOrders.create({
+    kind: "consultation",
+    sourceBotId: from.id,
+    sourceTaskId: sourceThreadId,
+    sourceExecutionId: sourceThreadId,
+    targetBotId: target.id,
+    targetTaskId: target.threadId,
+    request: message,
+    priority: "peer",
+    depth,
+    delivery: "continuation",
+    channelId: channel.id,
+  }, "queued");
+  mirrorExchange(commsBus, from, target, message, channel, sourceThreadId);
+  return {
+    queued: true,
+    workOrderId: order.id,
+    target: { id: target.id, name: target.name },
+    message: `Consultation accepted — @${target.name} is busy, so the result will be delivered when it finishes.`,
+  };
+}
+
+function schedulePeerContinuation(
+  source: NonNullable<ReturnType<typeof store.bot>>,
+  sourceTaskId: string,
+  prompts: string[],
+  dedupeKey: string,
+): void {
+  let schedulerToken = "";
+  const admission = turnScheduler.admit({
+    botId: source.id,
+    lane: "peer",
+    dedupeKey,
+    run: async () => {
+      await startTurn(source.id, prompts.join("\n\n"), {
+        threadId: sourceTaskId,
+        commsDepth: MAX_COMMS_DEPTH,
+        connectorContinuation: true,
+        unattended: isUnattended(source.id),
+        schedulerToken,
+      });
+    },
+  });
+  if (!admission.accepted) {
+    const current = pendingPeerContinuations.get(sourceTaskId);
+    pendingPeerContinuations.set(sourceTaskId, {
+      sourceBotId: source.id,
+      sourceTaskId,
+      prompts: [...(current?.prompts ?? []), ...prompts],
+    });
+    return;
+  }
+  schedulerToken = admission.admission.id;
+  void admission.completion.catch((error) => {
+    console.error("deferred consultation continuation failed", error);
+  });
+}
+
+function queuePeerContinuation(order: { id: string; sourceBotId: string; sourceTaskId: string; targetBotId: string }, reply: string) {
+  const target = store.bot(order.targetBotId);
+  const source = store.bot(order.sourceBotId);
+  if (!target || !source || !store.taskByThread(source.id, order.sourceTaskId)) return;
+  const prompt = `[Deferred consultation result from @${target.name}. The earlier ask_bot receipt meant acceptance, not completion. Do not call peer tools for this continuation.]\n\n@${target.name} replied:\n${reply}`;
+  if (source.busy || turnScheduler.hasActive(source.id)) {
+    const current = pendingPeerContinuations.get(order.sourceTaskId);
+    pendingPeerContinuations.set(order.sourceTaskId, {
+      sourceBotId: source.id,
+      sourceTaskId: order.sourceTaskId,
+      prompts: [...(current?.prompts ?? []), prompt],
+    });
+    return;
+  }
+  schedulePeerContinuation(source, order.sourceTaskId, [prompt], `continuation:${order.id}`);
+}
+
+async function drainDeferredConsultations(): Promise<void> {
+  for (const order of workOrders.list({ states: ["queued"], limit: 200 })) {
+    if (order.kind !== "consultation" || runningConsultations.has(order.id)) continue;
+    const source = store.bot(order.sourceBotId);
+    const target = store.bot(order.targetBotId);
+    if (!source || !target || !store.taskByThread(source.id, order.sourceTaskId) || !store.taskByThread(target.id, order.targetTaskId)) {
+      workOrders.transition(order.id, "failed", { error: "pinned source or target task no longer exists" });
+      continue;
+    }
+    if (target.busy) continue;
+    runningConsultations.add(order.id);
+    const channel = order.channelId ? store.group(order.channelId) ?? undefined : undefined;
+    void (async () => {
+      try {
+        const prefixed = `[Deferred consultation from @${source.name}. Reply directly to the requesting bot.]\n\n${order.request}`;
+        let schedulerToken = "";
+        const admission = turnScheduler.admit({
+          botId: target.id,
+          lane: "peer",
+          dedupeKey: order.id,
+          run: async () => {
+            workOrders.transition(order.id, "running", { attempt: (order.attempt ?? 0) + 1 });
+            const reply = await askBotAndWait(target.id, prefixed, order.depth, source.id, schedulerToken, true);
+            workOrders.transition(order.id, "completed", { result: reply });
+            mirrorReply(commsBus, target, reply, channel);
+            queuePeerContinuation(order, reply);
+          },
+        });
+        if (!admission.accepted) {
+          runningConsultations.delete(order.id);
+          if (admission.reason !== "duplicate") workOrders.transition(order.id, "queued");
+          return;
+        }
+        schedulerToken = admission.admission.id;
+        await admission.completion;
+      } catch (error) {
+        const reason = error instanceof Error ? error.message : String(error);
+        try {
+          workOrders.transition(order.id, "failed", { error: reason });
+        } catch (transitionError) {
+          console.error("deferred consultation transition failed", transitionError);
+        }
+        if (channel) mirrorActivity(commsBus, target, channel, `Consultation failed — ${reason.slice(0, 120)}`, false);
+      } finally {
+        runningConsultations.delete(order.id);
+      }
+    })();
+  }
+}
+
+function drainPeerContinuations(): void {
+  for (const [sourceTaskId, pending] of pendingPeerContinuations) {
+    const bot = store.bot(pending.sourceBotId);
+    if (!bot || bot.busy || turnScheduler.hasActive(bot.id)) continue;
+    pendingPeerContinuations.delete(sourceTaskId);
+    schedulePeerContinuation(bot, pending.sourceTaskId, pending.prompts, `continuation:${sourceTaskId}`);
+  }
+}
+
 // Approvals live only in memory, so any peer card still open on disk is one
 // whose resolver died with the previous process. Left alone it can never be
 // answered, and the composer stays disabled behind it — settle them at boot.
 {
   const stale = dismissStalePeerCards(approvalBus);
   if (stale) console.log(`peer approvals: dismissed ${stale} card(s) left by a previous run`);
+}
+
+// Work orders are a separate durable control-plane record. A source turn
+// cannot survive a restart, and a provider turn that was running must never
+// be replayed automatically; queued/approval-waiting orders remain for the
+// scheduler to reconcile against the current bot/task roster.
+{
+  const recovered = workOrders.recover();
+  if (recovered.cancelled.length || recovered.failed.length) {
+    console.log(`work orders: recovered ${recovered.cancelled.length} cancelled and ${recovered.failed.length} failed record(s)`);
+  }
 }
 
 // Handoffs a previous process queued but never ran: the source turn is
@@ -1831,7 +2072,7 @@ _loadPending();
 {
   const leftover = pendingThreads();
   if (leftover.length) console.log(`delegations: ${leftover.length} thread(s) with queued handoffs from a previous run — draining`);
-  for (const threadId of leftover) drainDelegations(commsBus, approvalBus, threadId, runDelegatedTurn);
+  for (const threadId of leftover) drainDelegations(commsBus, approvalBus, threadId, runDelegatedTurn, workOrders);
 }
 
 async function runGroupMemberTurn(
@@ -1862,7 +2103,7 @@ async function runGroupMemberTurn(
   // could run its 1:1 turn and a room turn concurrently — two provider
   // processes, interleaved token spend, and an interrupt that only ever
   // reached one of them.
-  if (bot.busy) {
+  if (bot.busy || turnScheduler.hasActive(bot.id)) {
     store.appendMessage(group.threadId, {
       role: "bot",
       kind: "activity",
@@ -1895,6 +2136,8 @@ async function runGroupMemberTurn(
     return true;
   }
   store.setActivity(bot.id, "working");
+  const roomAdmissionToken = turnScheduler.occupy(bot.id, undefined, "user");
+  turnAdmissionByThread.set(group.threadId, { botId: bot.id, token: roomAdmissionToken });
 
   store.patchGroup(group.id, { busyBotId: bot.id }); // the store's change stream carries the frame
   groupSpeakers.set(group.threadId, { botId: bot.id, name: bot.name, color: bot.color });
@@ -1991,6 +2234,7 @@ async function runGroupMemberTurn(
   // A timed-out provider still owns the room thread until its interrupt
   // produces turn.completed (or the stall watchdog's grace fallback runs).
   // Do not clear busy or start the next member on that same thread early.
+  if (outcome === "dispatch_failed") releaseTurnAdmission(group.threadId);
   if (outcome === "stalled" || outcome === "timed_out") return false;
   // turn.completed normally performs this cleanup. Only use the fallback
   // when this invocation still owns the room; otherwise it would emit a
@@ -2505,7 +2749,6 @@ const server = createServer(async (req, res) => {
         if (depth >= MAX_COMMS_DEPTH) return json(res, 200, { error: "message chains are limited to one hop" });
         const target = store.bot(toBotId);
         if (!target) return json(res, 404, { error: "no such bot" });
-        if (target.busy) return json(res, 200, { busy: true });
         // An unknown sender used to fall through: no mirroring AND no
         // approval, while still running the peer turn. That made an
         // unresolvable id the cheapest way past the gate, so it is now a
@@ -2554,9 +2797,12 @@ const server = createServer(async (req, res) => {
           if (!store.taskByThread(freshFrom.id, fromThreadId)) {
             return json(res, 404, { error: "source task no longer exists" });
           }
-          if (freshTarget.busy) return json(res, 200, { busy: true });
           currentFrom = freshFrom;
           currentTarget = freshTarget;
+        }
+        if (currentTarget.busy) {
+          const accepted = acceptDeferredConsultation(currentFrom, currentTarget, message, depth, fromThreadId);
+          return json(res, 202, accepted);
         }
         const channel = getOrCreateChannel(store, currentFrom, currentTarget);
         mirrorExchange(commsBus, currentFrom, currentTarget, message, channel, fromThreadId);
@@ -2593,6 +2839,7 @@ const server = createServer(async (req, res) => {
           { toBotId, message, reason, depth },
           MAX_COMMS_DEPTH,
           fromThreadId,
+          workOrders,
         );
         if (result !== "ok") {
           // the agent reads this string — a bare enum ("too_deep") tells it
@@ -2759,6 +3006,33 @@ const server = createServer(async (req, res) => {
         return json(res, 200, { messageIds });
       }
       return json(res, 404, { error: "unknown internal endpoint" });
+    }
+
+    // ── durable peer work orders ─────────────────────────────────────────
+    if (path === "/api/work-orders" && method === "GET") {
+      const sourceBotId = url.searchParams.get("sourceBotId") ?? undefined;
+      const targetBotId = url.searchParams.get("targetBotId") ?? undefined;
+      const rawStates = url.searchParams.get("states");
+      const states = rawStates
+        ? rawStates.split(",").filter((state): state is WorkOrderState =>
+            ["pending-source", "awaiting-approval", "queued", "running", "completed", "failed", "cancelled"].includes(state),
+          )
+        : undefined;
+      return json(res, 200, { workOrders: workOrders.list({ sourceBotId, targetBotId, states }) });
+    }
+    let workOrderMatch = path.match(/^\/api\/work-orders\/([\w-]+)$/);
+    if (workOrderMatch && method === "GET") {
+      const order = workOrders.get(workOrderMatch[1]);
+      return order ? json(res, 200, { workOrder: order }) : json(res, 404, { error: "no such work order" });
+    }
+    workOrderMatch = path.match(/^\/api\/work-orders\/([\w-]+)\/cancel$/);
+    if (workOrderMatch && method === "POST") {
+      const order = workOrders.cancel(workOrderMatch[1], String((await readBody(req)).reason ?? "cancelled by user"));
+      if (!order) return json(res, 404, { error: "no such active work order" });
+      // A provider interrupt is deliberately not implicit here: cancellation
+      // of queued peer work is safe; an active provider turn owns its own
+      // process and follows the normal Stop/approval path.
+      return json(res, 200, { workOrder: order });
     }
 
     // ── routines calendar ────────────────────────────────────────────────
