@@ -4,7 +4,7 @@
 //
 // The fake CLI is a shebang script Windows cannot exec directly;
 // spawnCli resolves it to `node <script>`, so these run everywhere.
-import { chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -12,8 +12,16 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 import { ensureDirs } from "../config.ts";
 import type { ProviderInstance } from "../contracts.ts";
+import { SPAWNED_PROXIES } from "../proxy-paths.ts";
 import { recordEvents, type EventRecorder } from "../testing/events.ts";
-import { AntigravityDriver, readAntigravityModelCatalog, STATIC_ANTIGRAVITY_MODELS } from "./antigravity.ts";
+import {
+  ANTIGRAVITY_COMPUTER_MCP_KEY,
+  AntigravityDriver,
+  antigravityComputerMcpServer,
+  ensureAntigravityComputerMcp,
+  readAntigravityModelCatalog,
+  STATIC_ANTIGRAVITY_MODELS,
+} from "./antigravity.ts";
 
 const FAKE_CLI = join(dirname(fileURLToPath(import.meta.url)), "..", "testing", "fake-agy-cli.ts");
 
@@ -195,6 +203,185 @@ describe("Antigravity snapshot", () => {
         else process.env[name] = previous[name];
       }
       rmSync(scratch, { recursive: true, force: true });
+    }
+  });
+});
+
+describe("Antigravity computer MCP config", () => {
+  const configPath = (home: string) => join(home, ".gemini", "config", "mcp_config.json");
+  const readConfig = (home: string) => JSON.parse(readFileSync(configPath(home), "utf8"));
+  const boxIntegrations = {
+    computer: {
+      kind: "box" as const,
+      boxId: "bx_1",
+      token: "box-tok",
+      control: { url: "http://127.0.0.1:9/control", token: "ctl-tok" },
+    },
+  };
+  const boxEntry = () => antigravityComputerMcpServer(boxIntegrations)!;
+
+  it("builds the cloud-box spec on the shared computer proxy (never path-resolved locally)", () => {
+    expect(antigravityComputerMcpServer(boxIntegrations)).toEqual({
+      command: process.execPath,
+      args: [SPAWNED_PROXIES.computer],
+      env: {
+        ELECTRON_RUN_AS_NODE: "1",
+        OGB_BOX_ID: "bx_1",
+        OGB_BOX_TOKEN: "box-tok",
+        OMB_CONTROL_URL: "http://127.0.0.1:9/control",
+        OMB_CONTROL_TOKEN: "ctl-tok",
+      },
+    });
+  });
+
+  it("passes a Local VM / VPS stdio connection through unchanged, and yields null without a computer", () => {
+    expect(
+      antigravityComputerMcpServer({
+        localComputer: { command: "/opt/cua", args: ["--mcp"], env: { CUA_SOCKET: "/tmp/cua.sock" } },
+      }),
+    ).toEqual({ command: "/opt/cua", args: ["--mcp"], env: { CUA_SOCKET: "/tmp/cua.sock" } });
+    expect(antigravityComputerMcpServer({})).toBeNull();
+    expect(antigravityComputerMcpServer(undefined)).toBeNull();
+  });
+
+  it("upserts only its own key — the user's servers and unknown top-level keys survive", () => {
+    const home = mkdtempSync(join(tmpdir(), "omb-agy-mcpcfg-"));
+    try {
+      mkdirSync(join(home, ".gemini", "config"), { recursive: true });
+      writeFileSync(
+        configPath(home),
+        JSON.stringify({
+          mcpServers: { "sqlite-helper": { command: "sqlite-mcp-server", args: ["/db"] } },
+          futureTopLevelKey: { keep: true },
+        }),
+      );
+      ensureAntigravityComputerMcp(boxEntry(), { HOME: home });
+      let config = readConfig(home);
+      expect(config.mcpServers["sqlite-helper"]).toEqual({ command: "sqlite-mcp-server", args: ["/db"] });
+      expect(config.futureTopLevelKey).toEqual({ keep: true });
+      expect(config.mcpServers[ANTIGRAVITY_COMPUTER_MCP_KEY]).toEqual(boxEntry());
+
+      // A later turn on a different computer overwrites the key in place.
+      ensureAntigravityComputerMcp(
+        { command: "/opt/cua", args: ["--mcp"], env: { CUA_SOCKET: "/tmp/cua.sock" } },
+        { HOME: home },
+      );
+      config = readConfig(home);
+      expect(config.mcpServers[ANTIGRAVITY_COMPUTER_MCP_KEY].command).toBe("/opt/cua");
+      expect(config.mcpServers["sqlite-helper"]).toEqual({ command: "sqlite-mcp-server", args: ["/db"] });
+      expect(config.futureTopLevelKey).toEqual({ keep: true });
+    } finally {
+      rmSync(home, { recursive: true, force: true });
+    }
+  });
+
+  it("starts fresh from malformed JSON instead of failing the turn", () => {
+    const home = mkdtempSync(join(tmpdir(), "omb-agy-mcpbad-"));
+    try {
+      mkdirSync(join(home, ".gemini", "config"), { recursive: true });
+      writeFileSync(configPath(home), "{{{ not json");
+      ensureAntigravityComputerMcp(boxEntry(), { HOME: home });
+      expect(readConfig(home).mcpServers[ANTIGRAVITY_COMPUTER_MCP_KEY]).toEqual(boxEntry());
+    } finally {
+      rmSync(home, { recursive: true, force: true });
+    }
+  });
+
+  it("a computer-less turn removes only its own key, and never creates the file just to remove", () => {
+    const home = mkdtempSync(join(tmpdir(), "omb-agy-mcprm-"));
+    try {
+      // No file at all: removal is a no-op, not an empty file in the user's home.
+      ensureAntigravityComputerMcp(null, { HOME: home });
+      expect(existsSync(configPath(home))).toBe(false);
+
+      mkdirSync(join(home, ".gemini", "config"), { recursive: true });
+      writeFileSync(
+        configPath(home),
+        JSON.stringify({
+          mcpServers: {
+            "sqlite-helper": { command: "sqlite-mcp-server", args: ["/db"] },
+            [ANTIGRAVITY_COMPUTER_MCP_KEY]: boxEntry(),
+          },
+        }),
+      );
+      ensureAntigravityComputerMcp(null, { HOME: home });
+      const config = readConfig(home);
+      expect(config.mcpServers[ANTIGRAVITY_COMPUTER_MCP_KEY]).toBeUndefined();
+      expect(config.mcpServers["sqlite-helper"]).toEqual({ command: "sqlite-mcp-server", args: ["/db"] });
+    } finally {
+      rmSync(home, { recursive: true, force: true });
+    }
+  });
+
+  it("advertises computerMcp only on full-auto instances, and never localComputerMcp", async () => {
+    const fullAuto = await AntigravityDriver.create({
+      instanceId: "agy-caps-full",
+      displayName: undefined,
+      environment: {},
+      enabled: true,
+      config: { cli: FAKE_CLI, fullAuto: true },
+    });
+    const acceptEdits = await AntigravityDriver.create({
+      instanceId: "agy-caps-safe",
+      displayName: undefined,
+      environment: {},
+      enabled: true,
+      config: { cli: FAKE_CLI, fullAuto: false },
+    });
+    try {
+      expect(fullAuto.adapter.capabilities.computerMcp).toBe(true);
+      // accept-edits print mode auto-denies tools that would prompt, so a
+      // mount there could never fire — the capability must not be offered.
+      expect(acceptEdits.adapter.capabilities.computerMcp).toBe(false);
+      // The host desktop needs per-action human approval; print mode has no
+      // approval channel in any mode.
+      expect(fullAuto.adapter.capabilities.localComputerMcp).toBeUndefined();
+      expect(acceptEdits.adapter.capabilities.localComputerMcp).toBeUndefined();
+    } finally {
+      await fullAuto.dispose();
+      await acceptEdits.dispose();
+    }
+  });
+
+  it("writes the mount before spawning agy and clears it on the next computer-less turn", async () => {
+    ensureDirs();
+    chmodSync(FAKE_CLI, 0o755);
+    const home = mkdtempSync(join(tmpdir(), "omb-agy-mcpturn-"));
+    mkdirSync(join(home, ".gemini", "config"), { recursive: true });
+    writeFileSync(
+      configPath(home),
+      JSON.stringify({ mcpServers: { "sqlite-helper": { command: "sqlite-mcp-server", args: ["/db"] } } }),
+    );
+    const instance = await AntigravityDriver.create({
+      instanceId: "agy-mcp-turn",
+      displayName: undefined,
+      environment: { HOME: home },
+      enabled: true,
+      config: { cli: FAKE_CLI, fullAuto: true },
+    });
+    const recorder = recordEvents(instance.adapter);
+    try {
+      await instance.adapter.sendTurn({
+        threadId: "t-mcp-on",
+        text: "click things",
+        integrations: boxIntegrations,
+      });
+      // sendTurn resolves after the child is spawned; the write happens
+      // synchronously before that spawn, so this IS the spawn-time content.
+      const mounted = readConfig(home);
+      expect(mounted.mcpServers[ANTIGRAVITY_COMPUTER_MCP_KEY]).toEqual(boxEntry());
+      expect(mounted.mcpServers["sqlite-helper"]).toEqual({ command: "sqlite-mcp-server", args: ["/db"] });
+      await recorder.until((e) => e.type === "turn.completed");
+
+      await instance.adapter.sendTurn({ threadId: "t-mcp-off", text: "no computer here" });
+      const cleared = readConfig(home);
+      expect(cleared.mcpServers[ANTIGRAVITY_COMPUTER_MCP_KEY]).toBeUndefined();
+      expect(cleared.mcpServers["sqlite-helper"]).toEqual({ command: "sqlite-mcp-server", args: ["/db"] });
+      await recorder.until((e) => e.type === "turn.completed" && e.threadId === "t-mcp-off");
+    } finally {
+      recorder.stop();
+      await instance.dispose();
+      rmSync(home, { recursive: true, force: true });
     }
   });
 });

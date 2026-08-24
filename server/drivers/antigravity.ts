@@ -10,13 +10,22 @@
 // `request-review` auto-denies; `--dangerously-skip-permissions` (fullAuto)
 // approves everything. Real per-action approval cards are a future path via
 // native ACP (agy issue #31), which would reuse acp/core.ts like grok/gemini.
+//
+// Computer use: agy has no per-turn MCP flag, so the bot's computer (cloud
+// box / Local VM / VPS) is mounted by upserting one key into the global
+// `~/.gemini/config/mcp_config.json` before each spawn — see
+// ensureAntigravityComputerMcp below. Full-auto instances only; the host
+// desktop stays off (no approval channel in print mode, ever).
 import { describeSpawnFailure, execCli, killCliTree, spawnCli } from "../procs.ts";
-import { mkdirSync, readFileSync } from "node:fs";
+import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
+import { z } from "zod";
 
 import { DATA_DIR, stripWorkspaceCredentialEnv } from "../config.ts";
+import { computerProxyEnv } from "../container-computer.ts";
 import { augmentedPath } from "../env-path.ts";
+import { SPAWNED_PROXIES } from "../proxy-paths.ts";
 import { injectedApiModel, mergeLocalInject } from "./local-inject.ts";
 
 import type { ChildProcess } from "node:child_process";
@@ -108,6 +117,89 @@ export function readAntigravityModelCatalog(env: Record<string, string | undefin
     options.push({ id: extra.id, label: extra.label, custom: true });
   }
   return { default: STATIC_ANTIGRAVITY_MODELS.default, options };
+}
+
+// ── computer MCP mount ──────────────────────────────────────────────────
+// agy has no per-session MCP flag and no project-level MCP config: verified
+// against agy 1.1.19, whose embedded docs list exactly two locations — the
+// global `~/.gemini/config/mcp_config.json` and per-plugin files — and whose
+// `agy mcp list` ignores `.gemini/{settings,mcp_config}.json` in the cwd.
+// So the bot's computer is mounted by upserting ONE key into the global file
+// right before each spawn: every other byte of the user's config is
+// preserved, and a malformed file starts from a fresh object instead of
+// failing the turn (the ensureOpenCodeInjectModel discipline).
+export const ANTIGRAVITY_COMPUTER_MCP_KEY = "openmausbot-computer";
+
+export interface AntigravityComputerMcpServer {
+  command: string;
+  args: string[];
+  env: Record<string, string>;
+}
+
+// Lenient by design: keep every unknown key the user put in the file. A
+// present-but-wrong mcpServers (e.g. an array) fails the parse and is
+// rebuilt fresh — that file was already unusable to agy itself.
+const mcpConfigFileSchema = z.looseObject({
+  mcpServers: z.looseObject({}).optional(),
+});
+
+/** The computer MCP server for this turn, or null when the turn has none.
+ * Cloud boxes go through OpenMausBot's REST-to-MCP adapter (the same spec
+ * claude.ts and codex.ts build); Local VM and VPS connections arrive as a
+ * ready-made Cua Driver stdio command and pass through unchanged. */
+export function antigravityComputerMcpServer(
+  integrations: SendTurnInput["integrations"],
+): AntigravityComputerMcpServer | null {
+  const computer = integrations?.computer;
+  if (computer) {
+    const proxyEnv = computerProxyEnv(computer);
+    return {
+      command: process.execPath,
+      args: [SPAWNED_PROXIES.computer],
+      env: {
+        ELECTRON_RUN_AS_NODE: "1",
+        OGB_BOX_ID: proxyEnv.OGB_BOX_ID ?? "",
+        OGB_BOX_TOKEN: proxyEnv.OGB_BOX_TOKEN ?? "",
+        // who-is-driving endpoint, so a person taking the wheel in the
+        // panel pauses this bot's hands mid-turn
+        OMB_CONTROL_URL: proxyEnv.OMB_CONTROL_URL ?? "",
+        OMB_CONTROL_TOKEN: proxyEnv.OMB_CONTROL_TOKEN ?? "",
+      },
+    };
+  }
+  const local = integrations?.localComputer;
+  if (local) return { command: local.command, args: local.args, env: { ...local.env } };
+  return null;
+}
+
+/** Upsert (server) or remove (null) the openmausbot-computer entry in the
+ * global mcp_config.json. Only that one key is ever written; a turn without
+ * a computer removes it so a previous turn's mount cannot leak tools — or
+ * box/control tokens — into later turns or the user's own agy sessions. */
+export function ensureAntigravityComputerMcp(
+  server: AntigravityComputerMcpServer | null,
+  env: Record<string, string | undefined> = process.env,
+): void {
+  const home = env.HOME || env.USERPROFILE || homedir();
+  const path = join(home, ".gemini", "config", "mcp_config.json");
+  let config: z.infer<typeof mcpConfigFileSchema> = {};
+  try {
+    const parsed = mcpConfigFileSchema.safeParse(JSON.parse(readFileSync(path, "utf8")));
+    if (parsed.success) config = parsed.data;
+  } catch {
+    // Missing or malformed user config — rebuild only what the mount needs.
+  }
+  const servers = { ...config.mcpServers };
+  // Nothing to remove and nothing to add: leave the user's file untouched
+  // (don't create or reformat it on every computer-less turn).
+  if (!server && !(ANTIGRAVITY_COMPUTER_MCP_KEY in servers)) return;
+  if (server) {
+    servers[ANTIGRAVITY_COMPUTER_MCP_KEY] = { command: server.command, args: server.args, env: server.env };
+  } else {
+    delete servers[ANTIGRAVITY_COMPUTER_MCP_KEY];
+  }
+  mkdirSync(dirname(path), { recursive: true });
+  writeFileSync(path, `${JSON.stringify({ ...config, mcpServers: servers }, null, 2)}\n`);
 }
 
 function decodeConfig(raw: unknown): AntigravityConfig {
@@ -245,6 +337,27 @@ export const AntigravityDriver: ProviderDriver<AntigravityConfig> = {
           message: `prompt too large for Antigravity's argv-only print mode (${Buffer.byteLength(prompt)} bytes)`,
         });
         settle(false, "prompt_too_large");
+        return { turnId };
+      }
+
+      // Mount (or unmount) the bot's computer for this turn, in the global
+      // mcp_config.json, as close to the spawn as possible — the file is
+      // machine-global, so the window in which a concurrent Antigravity turn
+      // with a DIFFERENT computer could re-write it before this child reads
+      // its config should stay as small as it can. A failed write with a
+      // computer to mount must fail the turn: the bot was promised tools it
+      // would otherwise burn the whole turn hunting for.
+      try {
+        ensureAntigravityComputerMcp(antigravityComputerMcpServer(turn.integrations), catalogEnv);
+      } catch (error) {
+        emit({
+          ...base(threadId, turnId),
+          type: "runtime.error",
+          message: `could not update Antigravity's MCP config (${join(".gemini", "config", "mcp_config.json")}): ${
+            error instanceof Error ? error.message : String(error)
+          }`,
+        });
+        settle(false, "mcp_config_error");
         return { turnId };
       }
 
@@ -428,7 +541,20 @@ export const AntigravityDriver: ProviderDriver<AntigravityConfig> = {
       snapshot,
       adapter: {
         provider: DRIVER_KIND,
-        capabilities: { sessionModelSwitch: "in-session", images: true },
+        capabilities: {
+          sessionModelSwitch: "in-session",
+          images: true,
+          // Cloud box, Local VM, and VPS computers all mount through the
+          // global mcp_config.json above. Only full-auto instances advertise
+          // it: print mode has no interactive approval channel, and outside
+          // --dangerously-skip-permissions agy auto-denies tools that would
+          // prompt (the accept-edits shell behavior in the header comment),
+          // so a non-fullAuto mount could never fire. localComputerMcp stays
+          // unset on purpose — the host desktop requires per-action human
+          // approval (see contracts.ts), which print mode cannot deliver in
+          // any mode; that returns with the native ACP path (agy issue #31).
+          computerMcp: config.fullAuto,
+        },
         sendTurn,
         interruptTurn: async (threadId) => active.get(threadId)?.stop(),
         respondToRequest: async () => "unavailable" as const, // this engine has no asks to answer
