@@ -73,6 +73,10 @@ struct NeedsYouIsland: View {
     @State private var shown: ChatUpdate?
     @State private var dismissedCardIds = Set<String>()
     @State private var answering = false
+    // The comet face is the costliest draw in the app. It earns a beat of
+    // motion when the island appears; an approval left unattended overnight
+    // must not keep a 30fps orbit running until morning.
+    @State private var attentionLive = true
 
     private var expanded: Bool { shown != nil }
 
@@ -90,9 +94,14 @@ struct NeedsYouIsland: View {
                         // The hardware island covers the first 37pt of the
                         // square; the face sits clear of it, centred.
                         Button { open(shown.chat) } label: {
-                            ChatAvatarView(chat: shown.chat, size: 120, state: MausState.forChat(shown.chat, in: session.state), comets: true)
+                            ChatAvatarView(chat: shown.chat, size: 120, state: MausState.forChat(shown.chat, in: session.state), animated: attentionLive, comets: attentionLive)
                         }
                         .buttonStyle(.plain)
+                        .task(id: shown.chat.id) {
+                            attentionLive = true
+                            try? await Task.sleep(for: .seconds(30))
+                            attentionLive = false
+                        }
                         .padding(.top, IslandGeometry.size.height + 14)
 
                         VStack(spacing: 4) {

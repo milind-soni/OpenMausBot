@@ -180,7 +180,7 @@ struct ChatView: View {
                                 Color.clear
                             }
                         }
-                        ChatAvatarView(chat: current, size: faceSize, state: MausState.forChat(current, in: session.state), comets: islandExpanded)
+                        ChatAvatarView(chat: current, size: faceSize, state: MausState.forChat(current, in: session.state), animated: MausState.forChat(current, in: session.state).showsActivity || islandExpanded, comets: islandExpanded)
                             .offset(y: faceCentre - faceSize / 2)
                             .allowsHitTesting(false)
                     }

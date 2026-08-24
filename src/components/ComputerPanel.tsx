@@ -22,6 +22,7 @@ import { useStore, type Bot } from "@/state/store";
 import type { Routine } from "@/lib/routines";
 import { ApiKeyRow } from "./ApiKeys";
 import { cn } from "@/lib/cn";
+import { usePageVisible } from "@/lib/page-visible";
 import { CloudBackendPicker } from "./CloudBackendPicker";
 import { useDesktopCapabilities } from "./DesktopCapabilities";
 import { RoutineEditor } from "./RoutinesPage";
@@ -402,12 +403,15 @@ export function ComputerPanel({ bot }: { bot: Bot }) {
     state.config?.vps?.sshAlias,
   ]);
 
-  // cloud preview: SSE frames win while the bot works; otherwise poll
+  // cloud preview: SSE frames win while the bot works; otherwise poll.
+  // Every preview poll below gates on visibility and slows way down for an
+  // idle bot — a drawer left open overnight must not keep shooting.
+  const pageVisible = usePageVisible();
   const live = state.screens[bot.id];
   const sseFlowing = Boolean(bot.busy && live);
   const inFlight = useRef(false);
   useEffect(() => {
-    if (phase !== "ready" || sseFlowing || viewerOpen) return;
+    if (phase !== "ready" || sseFlowing || viewerOpen || !pageVisible) return;
     let alive = true;
     const shoot = async () => {
       if (inFlight.current) return;
@@ -422,18 +426,18 @@ export function ComputerPanel({ bot }: { bot: Bot }) {
       }
     };
     void shoot();
-    const timer = setInterval(shoot, 4000);
+    const timer = setInterval(shoot, bot.busy ? 4000 : 30_000);
     return () => {
       alive = false;
       clearInterval(timer);
     };
-  }, [phase, sseFlowing, bot.id, viewerOpen]);
+  }, [phase, sseFlowing, bot.id, viewerOpen, pageVisible, bot.busy]);
 
   // Local VM preview comes directly from Cua Driver through the harness. It
   // does not use the password-protected noVNC viewer or cloud endpoints.
   const vmInFlight = useRef(false);
   useEffect(() => {
-    if (phase !== "vm" || viewerOpen) return;
+    if (phase !== "vm" || viewerOpen || !pageVisible) return;
     let alive = true;
     const shoot = async () => {
       if (vmInFlight.current) return;
@@ -448,12 +452,12 @@ export function ComputerPanel({ bot }: { bot: Bot }) {
       }
     };
     void shoot();
-    const timer = window.setInterval(() => void shoot(), 3000);
+    const timer = window.setInterval(() => void shoot(), bot.busy ? 3000 : 30_000);
     return () => {
       alive = false;
       window.clearInterval(timer);
     };
-  }, [phase, bot.id, viewerOpen]);
+  }, [phase, bot.id, viewerOpen, pageVisible, bot.busy]);
 
   // local preview: frames from the Electron main process. The FIRST capture
   // attempt is what makes macOS show the Screen Recording prompt (there is
@@ -461,7 +465,7 @@ export function ComputerPanel({ bot }: { bot: Bot }) {
   // the user denied — surface the Settings repair path instead of spinning.
   const [localMisses, setLocalMisses] = useState(0);
   useEffect(() => {
-    if (phase !== "local" || !window.ogb || isLinux) return;
+    if (phase !== "local" || !window.ogb || isLinux || !pageVisible) return;
     let alive = true;
     setLocalMisses(0);
     const shoot = async () => {
@@ -474,12 +478,14 @@ export function ComputerPanel({ bot }: { bot: Bot }) {
       }
     };
     void shoot();
-    const timer = setInterval(shoot, 3000);
+    // A real ScreenCaptureKit capture + PNG encode per tick: idle bots get a
+    // slow heartbeat, working ones the live cadence.
+    const timer = setInterval(shoot, bot.busy ? 3000 : 30_000);
     return () => {
       alive = false;
       clearInterval(timer);
     };
-  }, [phase, isLinux]);
+  }, [phase, isLinux, pageVisible, bot.busy]);
 
   const lastScreenMessage = [...bot.messages].reverse().find((m) => m.kind === "screen" && m.png);
   const cloudFrame =

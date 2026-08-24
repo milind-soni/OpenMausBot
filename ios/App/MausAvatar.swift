@@ -208,16 +208,22 @@ struct MausAvatar: View {
     let color: String
     var size: CGFloat = 52
     var state: MausState = .idle
-    /// Off draws the state's resting face, still. For lists of many.
-    var animated: Bool = true
+    /// Animation is OPT-IN: a mounted face costs a 30fps Canvas redraw, and a
+    /// roster of them once pegged the app (and SimRenderServer) all night.
+    /// Pass true only where motion carries meaning — a busy bot, an open
+    /// profile, the needs-you island's opening beat.
+    var animated: Bool = false
     /// Comets orbiting the body — the island's "something is happening".
     var comets: Bool = false
 
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.scenePhase) private var scenePhase
     @State private var engine = MausFaceEngine()
 
     var body: some View {
-        let live = animated && !reduceMotion
+        // Even an opted-in face stops when the app is not active: nothing is
+        // watching, and in the background the redraws only cost battery.
+        let live = animated && !reduceMotion && scenePhase == .active
         TimelineView(.animation(minimumInterval: 1.0 / 30.0, paused: !live)) { timeline in
             Canvas { context, canvasSize in
                 engine.setState(state, now: timeline.date)

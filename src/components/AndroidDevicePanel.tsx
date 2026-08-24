@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { ArrowLeft, Circle, Loader2, RotateCcw, ShieldCheck, Smartphone, Usb } from "lucide-react";
+import { usePageVisible } from "@/lib/page-visible";
 import type { AndroidDeviceInput, AndroidDeviceStatus, AndroidUsbDevice } from "@/types/ogb";
 
 type UnitPoint = { x: number; y: number };
@@ -9,9 +10,11 @@ const EMPTY_STATUS: AndroidDeviceStatus = { available: false, devices: [] };
 export function useAndroidUsbDevices() {
   const bridge = window.ogb?.androidDevice;
   const [status, setStatus] = useState<AndroidDeviceStatus>(EMPTY_STATUS);
+  const pageVisible = usePageVisible();
 
   useEffect(() => {
-    if (!bridge) return;
+    // every tick is an adb subprocess — nothing to learn while hidden
+    if (!bridge || !pageVisible) return;
     let alive = true;
     const refresh = async () => {
       try {
@@ -34,7 +37,7 @@ export function useAndroidUsbDevices() {
       alive = false;
       window.clearInterval(timer);
     };
-  }, [bridge]);
+  }, [bridge, pageVisible]);
 
   return status;
 }
@@ -45,6 +48,7 @@ function deviceLabel(device: AndroidUsbDevice) {
 
 export function AndroidDevicePanel({ status }: { status: AndroidDeviceStatus }) {
   const bridge = window.ogb?.androidDevice;
+  const pageVisible = usePageVisible();
   const authorized = status.devices.filter((device) => device.state === "device");
   const [serial, setSerial] = useState(authorized[0]?.serial ?? status.devices[0]?.serial ?? "");
   const [frame, setFrame] = useState<string | null>(null);
@@ -69,7 +73,9 @@ export function AndroidDevicePanel({ status }: { status: AndroidDeviceStatus }) 
   }, [selected, status.devices]);
 
   useEffect(() => {
-    if (!bridge || !selectedSerial || selectedState !== "device") {
+    // an adb screencap subprocess per tick — pause the mirror while hidden
+    if (!bridge || !selectedSerial || selectedState !== "device" || !pageVisible) {
+      if (!pageVisible) return;
       setFrame(null);
       return;
     }
@@ -93,7 +99,7 @@ export function AndroidDevicePanel({ status }: { status: AndroidDeviceStatus }) 
       alive = false;
       if (timer !== null) window.clearTimeout(timer);
     };
-  }, [bridge, selectedSerial, selectedState]);
+  }, [bridge, selectedSerial, selectedState, pageVisible]);
 
   useEffect(
     () => () => {

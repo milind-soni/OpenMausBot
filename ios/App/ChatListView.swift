@@ -412,7 +412,7 @@ struct ChatRow: View {
             .frame(maxHeight: .infinity)
 
             HStack(alignment: .top, spacing: 14) {
-                ChatAvatarView(chat: chat, size: 52, state: state)
+                ChatAvatarView(chat: chat, size: 52, state: state, animated: state.showsActivity)
                     .padding(.top, 12)
 
                 VStack(alignment: .leading, spacing: 4) {

@@ -1436,6 +1436,7 @@ export const CursorAvatar = React.forwardRef<CursorAvatarHandle, CursorAvatarPro
 
     useEffect(() => {
       let frame = 0
+      let wake: ReturnType<typeof setTimeout> | undefined
       engine.current.last = performance.now()
 
       const draw = (e: typeof engine.current, now: number, spinTurn: number) => {
@@ -1532,12 +1533,21 @@ export const CursorAvatar = React.forwardRef<CursorAvatarHandle, CursorAvatarPro
       }
 
       const step = (now: number) => {
-        frame = requestAnimationFrame(step)
         const e = engine.current
         const p = e.props
+        // A paused mascot must not wake at display rate: re-arming BEFORE the
+        // pause check once had N idle sidebar faces ticking at 60fps forever.
+        // While paused, poll for unpause at 4Hz — no springs, no DOM writes.
+        if (p.paused) {
+          e.last = now
+          wake = setTimeout(() => {
+            frame = requestAnimationFrame(step)
+          }, 250)
+          return
+        }
+        frame = requestAnimationFrame(step)
         const dt = Math.min((now - e.last) / 1000, 0.1)
         e.last = now
-        if (p.paused) return
 
         const f = p.spring ?? 7
         e.velocity += (-2 * f * e.velocity - f * f * (e.morph - 1)) * dt
@@ -1558,7 +1568,10 @@ export const CursorAvatar = React.forwardRef<CursorAvatarHandle, CursorAvatarPro
       }
 
       frame = requestAnimationFrame(step)
-      return () => cancelAnimationFrame(frame)
+      return () => {
+        cancelAnimationFrame(frame)
+        if (wake !== undefined) clearTimeout(wake)
+      }
     }, [])
 
     const paint = `url(#${uid}-grad)`

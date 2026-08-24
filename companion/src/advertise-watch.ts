@@ -39,8 +39,10 @@ export interface AddressWatcher {
 }
 
 /** How often the interface table is consulted. Reading it is a syscall, not
- * a packet — nothing goes on the wire unless something changed. */
-const DEFAULT_INTERVAL_MS = 5000;
+ * a packet — nothing goes on the wire unless something changed. Networks
+ * change on the minutes scale (sleep/wake, wifi hop); this is the sidecar's
+ * only recurring wakeup, so it earns a lazy cadence. */
+const DEFAULT_INTERVAL_MS = 30_000;
 
 export function createAddressWatcher(options: AddressWatchOptions): AddressWatcher {
   // The set last *acted on*, as a canonical key. `null` means "never", which

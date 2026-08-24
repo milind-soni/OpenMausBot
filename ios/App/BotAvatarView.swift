@@ -9,7 +9,8 @@ struct BotAvatarView: View {
     let bot: Bot
     let size: CGFloat
     var state: MausState = .idle
-    var animated = true
+    /// Opt-in, mirroring MausAvatar: an animated face is a 30fps canvas.
+    var animated = false
     var comets = false
 
     @EnvironmentObject private var session: Session
@@ -62,7 +63,8 @@ struct ChatAvatarView: View {
     let chat: Chat
     let size: CGFloat
     var state: MausState = .idle
-    var animated = true
+    /// Opt-in, mirroring MausAvatar: an animated face is a 30fps canvas.
+    var animated = false
     var comets = false
 
     var body: some View {

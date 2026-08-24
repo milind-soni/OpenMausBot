@@ -5,6 +5,15 @@
 import CoreGraphics
 
 enum MausState: String, CaseIterable {
+    /// States whose motion carries information — a turn in progress. Faces in
+    /// lists animate only for these; a resting bot earns a resting face.
+    var showsActivity: Bool {
+        switch self {
+        case .listening, .thinking, .searching, .working: return true
+        default: return false
+        }
+    }
+
     case sleeping = "sleeping"
     case waking = "waking"
     case idle = "idle"
