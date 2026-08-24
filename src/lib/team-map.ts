@@ -15,6 +15,8 @@ export interface TeamMapSnapshot {
 }
 
 export interface TeamMapSection<T extends TeamMapBot = TeamMapBot> {
+  /** Exact persisted section identity; empty string is the unsectioned team. */
+  key: string;
   name: string;
   chiefs: T[];
   members: T[];
@@ -29,6 +31,11 @@ export type TeamMapEdge = {
   lastAt?: number;
 };
 
+export interface TeamMapStatus {
+  label: string;
+  tone: "success" | "warning" | "danger" | "idle";
+}
+
 export const EMPTY_TEAM_MAP_SNAPSHOT: TeamMapSnapshot = {
   collaborations: [],
   queued: [],
@@ -39,11 +46,12 @@ export function buildTeamMapSections<T extends TeamMapBot>(bots: T[]): TeamMapSe
   const sections = new Map<string, T[]>();
   for (const bot of bots) {
     if (bot.hidden) continue;
-    const section = bot.section?.trim() || "General";
-    sections.set(section, [...(sections.get(section) ?? []), bot]);
+    const key = bot.section?.trim() || "";
+    sections.set(key, [...(sections.get(key) ?? []), bot]);
   }
-  return [...sections].map(([name, sectionBots]) => ({
-    name,
+  return [...sections].map(([key, sectionBots]) => ({
+    key,
+    name: key || "General",
     chiefs: sectionBots.filter((bot) => bot.chiefOfStaff),
     members: sectionBots.filter((bot) => !bot.chiefOfStaff),
   }));
@@ -90,7 +98,7 @@ export function buildTeamMapEdges(bots: TeamMapBot[], snapshot: TeamMapSnapshot)
   });
 }
 
-export function teamMapStatus(bot: TeamMapBot): { label: string; tone: "success" | "warning" | "danger" | "idle" } {
+export function teamMapStatus(bot: TeamMapBot): TeamMapStatus {
   if (bot.activity === "waiting-on-you") return { label: "Waiting for you", tone: "warning" };
   if (bot.activity === "dead" || bot.activity === "no-signal") return { label: "No signal", tone: "danger" };
   if (bot.busy || bot.activity === "working") return { label: "Working", tone: "success" };

@@ -12,8 +12,19 @@ const bots = [
 describe("team map projection", () => {
   it("groups visible bots by section and separates chiefs", () => {
     expect(buildTeamMapSections(bots)).toEqual([
-      { name: "Work", chiefs: [bots[0]], members: [bots[1]] },
-      { name: "General", chiefs: [], members: [bots[2]] },
+      { key: "Work", name: "Work", chiefs: [bots[0]], members: [bots[1]] },
+      { key: "", name: "General", chiefs: [], members: [bots[2]] },
+    ]);
+  });
+
+  it("keeps the unsectioned team distinct from a section literally named General", () => {
+    const projected = buildTeamMapSections([
+      { id: "none", name: "Unsectioned" },
+      { id: "named", name: "Named", section: " General " },
+    ]);
+    expect(projected.map(({ key, name }) => ({ key, name }))).toEqual([
+      { key: "", name: "General" },
+      { key: "General", name: "General" },
     ]);
   });
 

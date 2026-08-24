@@ -107,6 +107,14 @@ import {
   MEMORY_FILE_MAX_BYTES,
 } from "./workspace.ts";
 import {
+  readSectionContext,
+  sectionContextKey,
+  sectionContextLabel,
+  sectionContextSystemPrompt,
+  writeSectionContext,
+  SECTION_CONTEXT_MAX_BYTES,
+} from "./section-context.ts";
+import {
   installSkill,
   listSkills,
   readSkillFile,
@@ -1703,6 +1711,7 @@ async function startTurn(
             : "") +
           (coordinationPrompt ? ` ${coordinationPrompt}` : "") +
           credentialPrompt +
+          sectionContextSystemPrompt(bot.section) +
           (privateWorkspace ? memorySystemPrompt(bot.id) + skillsSystemPrompt(bot.id) : "") +
           skillInstructions +
           (opts?.automationSource === "webhook"
@@ -1973,7 +1982,9 @@ async function runGroupMemberTurn(
   // room, not of whichever member happened to speak first.
   const cwd = groupTurnCwd(workspace, () => store.pinGroupCwd(group.id));
   const roomSystem =
-    (workspace ? `${system}\n${memorySystemPrompt(bot.id).trim()}${skillsSystemPrompt(bot.id)}` : system) +
+    system +
+    sectionContextSystemPrompt(bot.section) +
+    (workspace ? `\n${memorySystemPrompt(bot.id).trim()}${skillsSystemPrompt(bot.id)}` : "") +
     renderSkillInstructions(selectedSkills, { includeRoot: Boolean(workspace) });
 
   // run the turn and wait for it to settle, folding the reply text so a
@@ -4033,6 +4044,49 @@ const server = createServer(async (req, res) => {
       const result = removeSkill(m[1]!, m[2]!);
       if ("error" in result) return json(res, 404, { error: result.error });
       return json(res, 200, { ok: true });
+    }
+
+    // ── section context: a user-owned team brief ────────────────────────
+    // Bots receive this in their system context, but no agent tool can write
+    // it. That keeps one bot from silently changing every teammate's future
+    // turns. The section query parameter is required even for General (""),
+    // so a malformed client cannot accidentally read or replace that brief.
+    if (path === "/api/section-context" && (method === "GET" || method === "PUT")) {
+      if (!url.searchParams.has("section")) return json(res, 400, { error: "section is required" });
+      const requested = url.searchParams.get("section") ?? "";
+      const section = sectionContextKey(requested);
+      if (section.length > 60) return json(res, 400, { error: "section must be at most 60 characters" });
+      const exists =
+        section === "" ||
+        store.bots.some((bot) => !bot.hidden && sectionKey(bot.section) === section) ||
+        store.groups.some((group) => sectionKey(group.section) === section);
+      if (!exists) return json(res, 404, { error: "no such section" });
+
+      if (method === "GET") {
+        const context = readSectionContext(section);
+        return json(res, 200, {
+          section,
+          label: sectionContextLabel(section),
+          text: context?.text ?? "",
+          updatedAt: context?.updatedAt ?? null,
+          maxBytes: SECTION_CONTEXT_MAX_BYTES,
+        });
+      }
+
+      const parsed = z.object({ text: z.string() }).safeParse(await readBody(req));
+      if (!parsed.success) return json(res, 400, { error: "text must be a string" });
+      if (Buffer.byteLength(parsed.data.text, "utf8") > SECTION_CONTEXT_MAX_BYTES) {
+        return json(res, 400, { error: `section context is capped at ${SECTION_CONTEXT_MAX_BYTES / 1000}KB` });
+      }
+      const context = writeSectionContext(section, parsed.data.text);
+      return json(res, 200, {
+        ok: true,
+        section,
+        label: sectionContextLabel(section),
+        text: context?.text ?? "",
+        updatedAt: context?.updatedAt ?? null,
+        maxBytes: SECTION_CONTEXT_MAX_BYTES,
+      });
     }
 
     // ── bot memory: MEMORY.md + memory/ topic files ─────────────────────

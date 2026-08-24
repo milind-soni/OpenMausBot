@@ -1,5 +1,6 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
-import { ArrowRight, Crown, Network, Radio, RefreshCw } from "lucide-react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { createPortal } from "react-dom";
+import { ArrowRight, BookOpen, Crown, Loader2, Network, Radio, RefreshCw, Save, X } from "lucide-react";
 
 import { MausAvatar } from "./Avatar";
 import { api, formatTime, useStore, type Bot } from "@/state/store";
@@ -85,11 +86,201 @@ function EdgeRow({ edge, bots }: { edge: TeamMapEdge; bots: Bot[] }) {
   );
 }
 
+interface SectionContextResponse {
+  section: string;
+  label: string;
+  text: string;
+  updatedAt: number | null;
+  maxBytes: number;
+}
+
+function SectionContextDialog({ section, label, onClose }: { section: string; label: string; onClose: () => void }) {
+  const dialogRef = useRef<HTMLDivElement>(null);
+  const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const onCloseRef = useRef(onClose);
+  const savingRef = useRef(false);
+  const [text, setText] = useState("");
+  const [savedText, setSavedText] = useState("");
+  const [maxBytes, setMaxBytes] = useState(24_000);
+  const [updatedAt, setUpdatedAt] = useState<number | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const dirty = text !== savedText;
+  const bytes = useMemo(() => new TextEncoder().encode(text).byteLength, [text]);
+  onCloseRef.current = onClose;
+  savingRef.current = saving;
+
+  useEffect(() => {
+    const previousFocus = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    dialogRef.current?.focus();
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key === "Escape" && !savingRef.current) {
+        event.preventDefault();
+        onCloseRef.current();
+        return;
+      }
+      if (event.key !== "Tab") return;
+      const dialog = dialogRef.current;
+      if (!dialog) return;
+      const focusable = [...dialog.querySelectorAll<HTMLElement>(
+        'button:not([disabled]), textarea:not([disabled]), input:not([disabled]), [href], [tabindex]:not([tabindex="-1"])',
+      )];
+      if (focusable.length === 0) {
+        event.preventDefault();
+        dialog.focus();
+        return;
+      }
+      const first = focusable[0];
+      const last = focusable[focusable.length - 1];
+      if (event.shiftKey && document.activeElement === first) {
+        event.preventDefault();
+        last.focus();
+      } else if (!event.shiftKey && document.activeElement === last) {
+        event.preventDefault();
+        first.focus();
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => {
+      window.removeEventListener("keydown", onKey);
+      previousFocus?.focus();
+    };
+  }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+    setLoading(true);
+    setError(null);
+    void api(`/api/section-context?section=${encodeURIComponent(section)}`)
+      .then((result: SectionContextResponse) => {
+        if (cancelled) return;
+        setText(result.text);
+        setSavedText(result.text);
+        setUpdatedAt(result.updatedAt);
+        setMaxBytes(result.maxBytes);
+        window.setTimeout(() => textareaRef.current?.focus(), 0);
+      })
+      .catch((cause) => {
+        if (!cancelled) setError(cause instanceof Error ? cause.message : String(cause));
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [section]);
+
+  const save = async () => {
+    if (bytes > maxBytes) return;
+    setSaving(true);
+    setError(null);
+    try {
+      const result: SectionContextResponse = await api(
+        `/api/section-context?section=${encodeURIComponent(section)}`,
+        { method: "PUT", body: JSON.stringify({ text }) },
+      );
+      setSavedText(result.text);
+      setText(result.text);
+      setUpdatedAt(result.updatedAt);
+      setMaxBytes(result.maxBytes);
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : String(cause));
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return createPortal(
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/55 p-4 backdrop-blur-[2px] sm:p-6"
+      onMouseDown={(event) => event.target === event.currentTarget && !dirty && !saving && onClose()}
+    >
+      <div
+        ref={dialogRef}
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="section-context-title"
+        tabIndex={-1}
+        className="animate-pop-in flex max-h-[min(680px,calc(100dvh-2rem))] w-full max-w-[680px] flex-col overflow-hidden rounded-[24px] border border-hairline/50 bg-panel shadow-2xl shadow-black/50 outline-none"
+      >
+        <header className="flex items-start justify-between gap-4 border-b border-hairline/40 px-6 pb-4 pt-6 sm:px-8 sm:pt-7">
+          <div>
+            <div className="flex items-center gap-2">
+              <BookOpen size={19} className="text-accent" />
+              <h2 id="section-context-title" className="text-[20px] font-semibold tracking-[-0.01em] text-ink">
+                {label} shared context
+              </h2>
+            </div>
+            <p className="mt-1.5 max-w-[520px] text-[12.5px] leading-relaxed text-ink-secondary">
+              A team brief shown to every bot in this section at the start of each turn. Only you can edit it.
+            </p>
+          </div>
+          <button
+            onClick={onClose}
+            disabled={saving}
+            aria-label="Close shared context"
+            className="flex size-9 shrink-0 items-center justify-center rounded-lg text-ink-secondary hover:bg-raised hover:text-ink disabled:opacity-40"
+          >
+            <X size={19} />
+          </button>
+        </header>
+
+        <div className="min-h-0 flex-1 overflow-y-auto px-6 py-5 sm:px-8">
+          {loading ? (
+            <div className="flex min-h-[260px] items-center justify-center text-ink-secondary">
+              <Loader2 size={20} className="animate-spin" aria-label="Loading shared context" />
+            </div>
+          ) : (
+            <>
+              <textarea
+                ref={textareaRef}
+                value={text}
+                onChange={(event) => setText(event.target.value)}
+                placeholder={"Goals\n- Ship the Windows onboarding refresh\n\nDecisions\n- Keep customer data local\n\nPreferences\n- Use concise weekly updates"}
+                aria-label={`${label} shared context`}
+                className="min-h-[280px] w-full resize-y rounded-xl border border-hairline/60 bg-inset px-4 py-3 font-mono text-[12.5px] leading-relaxed text-ink outline-none placeholder:text-ink-secondary/55 focus:border-accent/50"
+              />
+              <div className="mt-2 flex items-start justify-between gap-4 text-[11.5px] text-ink-secondary">
+                <span>
+                  Keep durable team facts here. Private notes stay in each bot's own Memory.
+                  {updatedAt ? ` Last saved ${new Date(updatedAt).toLocaleString()}.` : ""}
+                </span>
+                <span className={cn("shrink-0 tabular-nums", bytes > maxBytes && "text-danger")}>
+                  {bytes.toLocaleString()} / {maxBytes.toLocaleString()} bytes
+                </span>
+              </div>
+            </>
+          )}
+          {error && <div className="mt-3 rounded-lg border border-danger/30 bg-danger/10 px-3 py-2 text-[12px] text-danger">{error}</div>}
+        </div>
+
+        <footer className="flex items-center justify-end gap-2 border-t border-hairline/40 px-6 py-4 sm:px-8">
+          <button onClick={onClose} disabled={saving} className="rounded-lg px-3.5 py-2 text-[13px] text-ink-secondary hover:bg-raised hover:text-ink disabled:opacity-40">
+            Cancel
+          </button>
+          <button
+            onClick={() => void save()}
+            disabled={loading || saving || !dirty || bytes > maxBytes}
+            className="flex items-center gap-2 rounded-lg bg-accent px-4 py-2 text-[13px] font-medium text-white hover:brightness-110 disabled:opacity-40"
+          >
+            {saving ? <Loader2 size={14} className="animate-spin" /> : <Save size={14} />}
+            Save context
+          </button>
+        </footer>
+      </div>
+    </div>,
+    document.body,
+  );
+}
+
 export function TeamMapPage() {
   const { state } = useStore();
   const [snapshot, setSnapshot] = useState<TeamMapSnapshot>(EMPTY_TEAM_MAP_SNAPSHOT);
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [contextEditor, setContextEditor] = useState<{ section: string; label: string } | null>(null);
   const bots = useMemo(() => state.bots.filter((bot) => !bot.hidden), [state.bots]);
   const sections = useMemo(() => buildTeamMapSections(bots), [bots]);
   const edges = useMemo(() => buildTeamMapEdges(bots, snapshot), [bots, snapshot]);
@@ -161,10 +352,20 @@ export function TeamMapPage() {
 
         <div className="grid grid-cols-[repeat(auto-fit,minmax(300px,1fr))] gap-4">
           {sections.map((section) => (
-            <section key={section.name} className="rounded-2xl border border-hairline/50 bg-panel p-4">
+            <section key={section.key || "__general__"} className="rounded-2xl border border-hairline/50 bg-panel p-4">
               <div className="mb-3 flex items-center justify-between">
                 <h2 className="text-[12px] font-semibold uppercase tracking-[0.08em] text-ink-secondary">{section.name}</h2>
-                <span className="text-[11px] tabular-nums text-ink-secondary">{section.chiefs.length + section.members.length}</span>
+                <div className="flex items-center gap-2">
+                  <button
+                    onClick={() => setContextEditor({ section: section.key, label: section.name })}
+                    className="flex items-center gap-1 rounded-md px-1.5 py-1 text-[10.5px] font-medium text-ink-secondary hover:bg-raised hover:text-ink"
+                    aria-label={`Edit ${section.name} shared context`}
+                    title="Shared context"
+                  >
+                    <BookOpen size={11} /> Context
+                  </button>
+                  <span className="text-[11px] tabular-nums text-ink-secondary">{section.chiefs.length + section.members.length}</span>
+                </div>
               </div>
               <div className="space-y-2">
                 {section.chiefs.map((bot) => <BotNode key={bot.id} bot={bot} chief />)}
@@ -198,6 +399,13 @@ export function TeamMapPage() {
           </div>
         </section>
       </div>
+      {contextEditor && (
+        <SectionContextDialog
+          section={contextEditor.section}
+          label={contextEditor.label}
+          onClose={() => setContextEditor(null)}
+        />
+      )}
     </main>
   );
 }
