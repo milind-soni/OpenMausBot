@@ -8,6 +8,7 @@ import { spawn } from "node:child_process";
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
+import { parse as parseYaml } from "yaml";
 
 import type { ModelCatalog } from "../../contracts.ts";
 import { decodeInjectId, hostApiKey, INJECT_SEP, localHost, mergeLocalInject } from "../local-inject.ts";
@@ -120,6 +121,53 @@ const HERMES_HOSTED_PROVIDER_KEYS = [
   "Z_AI_API_KEY",
 ] as const;
 
+const HERMES_LOCAL_CONFIG_PROVIDERS = new Set(["custom", "lmstudio", "ollama", "vllm", "llamacpp"]);
+
+function yamlString(value: unknown): string {
+  return typeof value === "string" ? value.trim() : "";
+}
+
+/**
+ * Read the model/provider forms accepted by Hermes' `_normalize_root_model_keys`:
+ * a scalar `model`, or a mapping whose id is `default`, `model`, or `name`.
+ * Those id fields may themselves be `{ provider, model/default }` mappings.
+ * An explicit outer provider wins, except `auto`, where the nested provider is
+ * the more specific routing choice. Root-level `provider` is Hermes' legacy
+ * fallback. YAML parsing also handles quotes and trailing comments correctly.
+ */
+function hermesConfigDefault(text: string): { model: string; provider: string } | null {
+  let raw: unknown;
+  try {
+    raw = parseYaml(text);
+  } catch {
+    return null;
+  }
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return null;
+  const config = raw as Record<string, unknown>;
+  const rootProvider = yamlString(config.provider);
+  if (typeof config.model === "string") {
+    const model = config.model.trim();
+    return model ? { model, provider: rootProvider } : null;
+  }
+  if (!config.model || typeof config.model !== "object" || Array.isArray(config.model)) return null;
+
+  const modelConfig = config.model as Record<string, unknown>;
+  const outerProvider = yamlString(modelConfig.provider) || rootProvider;
+  for (const key of ["default", "model", "name"] as const) {
+    const candidate = modelConfig[key];
+    const scalar = yamlString(candidate);
+    if (scalar) return { model: scalar, provider: outerProvider };
+    if (!candidate || typeof candidate !== "object" || Array.isArray(candidate)) continue;
+    const nested = candidate as Record<string, unknown>;
+    const nestedModel = yamlString(nested.model) || yamlString(nested.default);
+    if (!nestedModel) continue;
+    const nestedProvider = yamlString(nested.provider);
+    const provider = !outerProvider || outerProvider === "auto" ? nestedProvider || outerProvider : outerProvider;
+    return { model: nestedModel, provider };
+  }
+  return null;
+}
+
 /** Detect whether Hermes has a hosted provider configured.
  *
  * Hermes supports multiple auth methods:
@@ -153,19 +201,20 @@ export function hermesConfiguredModel(
   const hasHostedProviderKey = HERMES_HOSTED_PROVIDER_KEYS.some((name) => nonEmptyDotenvValue(secrets, name));
 
   // `hermes login` / `hermes setup` records the selected default in
-  // config.yaml while the OAuth token lives in Hermes' auth store. Requiring
-  // the default matters: OpenMaus can create config.yaml itself when it adds a
-  // local inject provider, and that alone must not manufacture a remote model.
-  let model = "";
+  // config.yaml while the OAuth token lives in Hermes' auth store. An explicit
+  // local/custom provider must not trigger the hosted catalog probe.
+  let configuredDefault: { model: string; provider: string } | null = null;
   try {
-    const cfg = readFileSync(join(dir, "config.yaml"), "utf8");
-    const m = /^[ \t]*default[ \t]*:[ \t]*["']?([\w./:+-]+)["']?[ \t]*$/m.exec(cfg);
-    if (m) model = m[1];
+    configuredDefault = hermesConfigDefault(readFileSync(join(dir, "config.yaml"), "utf8"));
   } catch {
     /* config may not exist or may be unreadable */
   }
 
-  if (!hasHostedProviderKey && !model) return null;
+  const configIsHosted =
+    configuredDefault !== null && !HERMES_LOCAL_CONFIG_PROVIDERS.has(configuredDefault.provider.toLowerCase());
+  if (!hasHostedProviderKey && !configIsHosted) return null;
+
+  const model = configuredDefault?.model ?? "";
   // `custom: true` is not cosmetic. ModelPicker renders a custom-only agent's
   // *custom* pane exclusively, and that pane lists only options carrying this
   // flag; anything without it lands in the "official" bucket the pane never

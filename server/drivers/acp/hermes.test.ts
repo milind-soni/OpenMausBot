@@ -99,6 +99,34 @@ describe("hermesConfiguredModel", () => {
     expect(hermesConfiguredModel(env)).toBeNull();
   });
 
+  it.each(["custom", "ollama", "vllm", "llamacpp", "lmstudio"])(
+    "does not probe a model explicitly routed through the local %s provider",
+    (provider) => {
+      const env = home("", `model:\n  default: llama3.2 # local model\n  provider: ${provider}\n`);
+      expect(hermesConfiguredModel(env)).toBeNull();
+    },
+  );
+
+  it.each([
+    ["scalar", "model: z-ai/glm-5.2 # selected by setup\n", "z-ai/glm-5.2"],
+    ["default", "model:\n  default: z-ai/glm-5.2 # selected by setup\n", "z-ai/glm-5.2"],
+    ["model alias", "model:\n  model: z-ai/glm-5.2\n", "z-ai/glm-5.2"],
+    ["name alias", "model:\n  name: z-ai/glm-5.2\n", "z-ai/glm-5.2"],
+    [
+      "nested default",
+      "model:\n  provider: auto\n  default:\n    provider: nous\n    model: z-ai/glm-5.2\n",
+      "z-ai/glm-5.2",
+    ],
+    ["legacy root provider", "provider: nous\nmodel:\n  default: z-ai/glm-5.2\n", "z-ai/glm-5.2"],
+  ])("supports Hermes' %s configuration schema", (_schema, cfg, expectedModel) => {
+    const env = home("", cfg);
+    expect(hermesConfiguredModel(env)).toEqual({
+      id: HERMES_CONFIG_MODEL_ID,
+      label: `${expectedModel} (Hermes config)`,
+      custom: true,
+    });
+  });
+
   it("still offers the model when config.yaml is unreadable, with a generic label", () => {
     const env = home("OPENROUTER_API_KEY=sk-or-v1-test\n");
     mkdirSync(join(env.HERMES_HOME, "config.yaml"));
