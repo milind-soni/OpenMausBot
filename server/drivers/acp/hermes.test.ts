@@ -32,6 +32,18 @@ describe("hermesConfiguredModel", () => {
     });
   });
 
+  it.each(["GLM_API_KEY", "ZAI_API_KEY", "Z_AI_API_KEY"])(
+    "offers Hermes for a key-only Z.AI setup using %s",
+    (name) => {
+      const env = home(`${name}=zai-test-key\n`);
+      expect(hermesConfiguredModel(env)).toEqual({
+        id: HERMES_CONFIG_MODEL_ID,
+        label: "Hermes default (config)",
+        custom: true,
+      });
+    },
+  );
+
   it("treats a commented-out key with no config.yaml as not configured", () => {
     // The shipped .env carries `# OPENROUTER_API_KEY=`; without config.yaml
     // there's no evidence of a working provider, so it must not read as configured.
@@ -80,6 +92,11 @@ describe("hermesConfiguredModel", () => {
       label: "z-ai/glm-5.2 (Hermes config)",
       custom: true,
     });
+  });
+
+  it("does not treat an inject-only config.yaml as hosted configuration", () => {
+    const env = home("", "providers:\n  ollama:\n    base_url: http://127.0.0.1:11434/v1\n");
+    expect(hermesConfiguredModel(env)).toBeNull();
   });
 
   it("still offers the model when config.yaml is unreadable, with a generic label", () => {

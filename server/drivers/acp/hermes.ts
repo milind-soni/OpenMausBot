@@ -113,13 +113,20 @@ function nonEmptyDotenvValue(text: string, name: string): string | null {
   return raw.replace(/[ \t]+#.*$/, "").trim() || null;
 }
 
+const HERMES_HOSTED_PROVIDER_KEYS = [
+  "OPENROUTER_API_KEY",
+  "GLM_API_KEY",
+  "ZAI_API_KEY",
+  "Z_AI_API_KEY",
+] as const;
+
 /** Detect whether Hermes has a hosted provider configured.
  *
  * Hermes supports multiple auth methods:
  * - OpenRouter API key in `~/.hermes/.env` (OPENROUTER_API_KEY)
  * - Nous Portal OAuth (tokens stored in `~/.hermes/` — the default for
  *   `hermes setup` / `hermes login`)
- * - Any other provider key in `~/.hermes/.env` (ZAI_API_KEY, etc.)
+ * - Z.AI / GLM keys in `~/.hermes/.env`
  *
  * Previously only OPENROUTER_API_KEY was checked, so a Nous Portal user
  * — logged in via OAuth, no OpenRouter key — saw "No local models found"
@@ -143,34 +150,22 @@ export function hermesConfiguredModel(
     /* .env may not exist — check OAuth below */
   }
 
-  // Check for any hosted provider key in .env (OpenRouter, ZAI, etc.)
-  const hasOpenRouterKey = nonEmptyDotenvValue(secrets, "OPENROUTER_API_KEY");
+  const hasHostedProviderKey = HERMES_HOSTED_PROVIDER_KEYS.some((name) => nonEmptyDotenvValue(secrets, name));
 
-  // Check for Nous Portal OAuth: `hermes login` / `hermes setup` stores
-  // tokens under ~/.hermes/ (e.g. in the credentials store or a
-  // nous-specific file). The presence of a `config.yaml` with a
-  // non-default provider is sufficient evidence — Hermes would not
-  // advertise models on `session/new` without working credentials.
-  let hasNousPortal = false;
-  try {
-    // Hermes stores OAuth state under ~/.hermes/ — if config.yaml exists
-    // and references a provider, the user has configured authentication.
-    readFileSync(join(dir, "config.yaml"), "utf8");
-    hasNousPortal = true;
-  } catch {
-    /* no config.yaml — not configured */
-  }
-
-  if (!hasOpenRouterKey && !hasNousPortal) return null;
-
+  // `hermes login` / `hermes setup` records the selected default in
+  // config.yaml while the OAuth token lives in Hermes' auth store. Requiring
+  // the default matters: OpenMaus can create config.yaml itself when it adds a
+  // local inject provider, and that alone must not manufacture a remote model.
   let model = "";
   try {
     const cfg = readFileSync(join(dir, "config.yaml"), "utf8");
     const m = /^[ \t]*default[ \t]*:[ \t]*["']?([\w./:+-]+)["']?[ \t]*$/m.exec(cfg);
     if (m) model = m[1];
   } catch {
-    /* config unreadable — the id still works, only the label is less specific */
+    /* config may not exist or may be unreadable */
   }
+
+  if (!hasHostedProviderKey && !model) return null;
   // `custom: true` is not cosmetic. ModelPicker renders a custom-only agent's
   // *custom* pane exclusively, and that pane lists only options carrying this
   // flag; anything without it lands in the "official" bucket the pane never
