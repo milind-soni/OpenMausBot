@@ -1338,6 +1338,9 @@ export const CursorAvatar = React.forwardRef<CursorAvatarHandle, CursorAvatarPro
       stateStart: 0,
       lastState,
       lastBodyTransform: '',
+      // what the parked loop last painted; '' means "never" so a mascot that
+      // mounts paused still gets its one resting-face paint
+      pausedPaint: '',
       props: {
         state,
         expression,
@@ -1537,14 +1540,23 @@ export const CursorAvatar = React.forwardRef<CursorAvatarHandle, CursorAvatarPro
         const p = e.props
         // A paused mascot must not wake at display rate: re-arming BEFORE the
         // pause check once had N idle sidebar faces ticking at 60fps forever.
-        // While paused, poll for unpause at 4Hz — no springs, no DOM writes.
+        // While paused, poll for unpause at 4Hz — but the resting face must
+        // still be PAINTED: the SVG layers hold no expression until the first
+        // draw, so a mascot that mounts paused would otherwise stay blank.
+        // One draw per change of what the still face shows, then park.
         if (p.paused) {
           e.last = now
+          const still = `${p.state}|${p.expression ?? ''}|${paintRef.current}`
+          if (e.pausedPaint !== still) {
+            e.pausedPaint = still
+            draw(e, now, 0)
+          }
           wake = setTimeout(() => {
             frame = requestAnimationFrame(step)
           }, 250)
           return
         }
+        e.pausedPaint = ''
         frame = requestAnimationFrame(step)
         const dt = Math.min((now - e.last) / 1000, 0.1)
         e.last = now
