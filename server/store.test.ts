@@ -238,6 +238,22 @@ describe("Store", () => {
     expect(reloaded.bot(second.id)?.chiefOfStaff).toBe(false);
   });
 
+  it("patches a Chief section change and handoff in one store operation", () => {
+    const store = new Store(selection);
+    const work = store.createBot({ section: "Work" });
+    const personal = store.createBot({ section: "Personal" });
+    store.setChiefOfStaff(work.id);
+    store.setChiefOfStaff(personal.id);
+
+    store.patchBot(work.id, { section: "Personal" });
+
+    expect(store.bot(work.id)?.chiefOfStaff).toBe(true);
+    expect(store.bot(personal.id)?.chiefOfStaff).toBe(false);
+    const reloaded = new Store(selection);
+    expect(reloaded.bot(work.id)?.chiefOfStaff).toBe(true);
+    expect(reloaded.bot(personal.id)?.chiefOfStaff).toBe(false);
+  });
+
   it("patchMessage merges card patches and returns null for unknown ids", () => {
     const store = new Store(selection);
     const bot = store.createBot();

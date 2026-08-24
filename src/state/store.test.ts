@@ -253,6 +253,30 @@ describe("section Chiefs", () => {
     expect(next.bots.find((candidate) => candidate.id === workCandidate.id)?.chiefOfStaff).toBe(true);
     expect(next.bots.find((candidate) => candidate.id === personalChief.id)?.chiefOfStaff).toBe(true);
   });
+
+  it("keeps one Chief when an existing or newly announced Chief changes sections", () => {
+    const workChief = bot("work", "Work", true);
+    const personalChief = bot("personal", "Personal", true);
+    const state = {
+      ...initialState,
+      bots: [workChief, personalChief].map((candidate) => ({ ...candidate, messages: [] })),
+    };
+
+    const moved = reducer(state, {
+      type: "updateBot",
+      botId: workChief.id,
+      patch: { section: "Personal" },
+    });
+    expect(moved.bots.find((candidate) => candidate.id === workChief.id)?.chiefOfStaff).toBe(true);
+    expect(moved.bots.find((candidate) => candidate.id === personalChief.id)?.chiefOfStaff).toBe(false);
+
+    const announced = reducer(state, {
+      type: "botPatched",
+      bot: { ...bot("remote", "Personal", true), messages: [] },
+    });
+    expect(announced.bots.find((candidate) => candidate.id === "remote")?.chiefOfStaff).toBe(true);
+    expect(announced.bots.find((candidate) => candidate.id === personalChief.id)?.chiefOfStaff).toBe(false);
+  });
 });
 
 describe("pending queued chip", () => {

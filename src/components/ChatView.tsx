@@ -130,7 +130,7 @@ function TaskTimeline({ messages, busy }: { messages: Message[]; busy: boolean }
                 )}
               />
               <span className="sr-only">{t(event.state)}: </span>
-              <span className="truncate">{t(event.label)}</span>
+              <span className="truncate">{event.kind === "tool" ? event.label : t(event.label)}</span>
               <time className="ml-auto shrink-0 text-[11px] text-ink-secondary/70">{formatTime(event.at, locale)}</time>
             </li>
           ))}

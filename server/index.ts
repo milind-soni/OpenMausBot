@@ -3620,7 +3620,7 @@ const server = createServer(async (req, res) => {
         } else return json(res, 400, { error: "pinnedMessageId must be a message id" });
       }
       if (section !== undefined) patch.section = section ?? undefined;
-      if (body.chiefOfStaff === false) patch.chiefOfStaff = false;
+      if (body.chiefOfStaff !== undefined) patch.chiefOfStaff = body.chiefOfStaff;
       // per-bot gate on the workspace's connected apps (Composio)
       if (body.composio !== undefined) {
         if (typeof body.composio !== "boolean") return json(res, 400, { error: "composio must be true or false" });
@@ -3689,18 +3689,8 @@ const server = createServer(async (req, res) => {
           ?.adapter.interruptTurn(existingBot.threadId)
           .catch(() => {});
       }
-      const chiefMovedSections =
-        Boolean(existingBot?.chiefOfStaff) &&
-        body.chiefOfStaff !== false &&
-        section !== undefined &&
-        sectionKey(existingBot?.section) !== sectionKey(section);
       const bot = store.patchBot(m[1], patch);
       if (!bot) return json(res, 404, { error: "no such bot" });
-      const chiefChanges =
-        body.chiefOfStaff === true || chiefMovedSections
-          ? store.setChiefOfStaff(bot.id)
-          : [];
-      if (chiefChanges === null) return json(res, 404, { error: "no such bot" });
       return json(res, 200, { bot: wireBot(store.bot(bot.id)!) });
     }
 

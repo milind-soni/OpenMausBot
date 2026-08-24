@@ -698,9 +698,16 @@ export function reducer(state: AppState, action: Action): AppState {
       // team import), so add it now; the following message frames will fill
       // its greeting without waiting for a full-page hydration.
       if (!before) {
+        const bots = action.bot.chiefOfStaff
+          ? state.bots.map((bot) =>
+              (bot.section?.trim() || "") === (action.bot.section?.trim() || "")
+                ? { ...bot, chiefOfStaff: false }
+                : bot,
+            )
+          : state.bots;
         return {
           ...state,
-          bots: [{ ...action.bot, messages: action.bot.messages ?? [] }, ...state.bots],
+          bots: [{ ...action.bot, messages: action.bot.messages ?? [] }, ...bots],
         };
       }
       const kind =
@@ -910,7 +917,7 @@ export function reducer(state: AppState, action: Action): AppState {
         : state;
       const target = animated.bots.find((bot) => bot.id === action.botId);
       const chiefSection = (action.patch.section ?? target?.section)?.trim() || "";
-      const next = action.patch.chiefOfStaff
+      const next = (action.patch.chiefOfStaff ?? target?.chiefOfStaff)
         ? {
             ...animated,
             bots: animated.bots.map((b) =>

@@ -861,8 +861,17 @@ export class Store {
     const bot = this.bot(id);
     if (!bot) return null;
     Object.assign(bot, patch);
+    const changed = [bot];
+    if (bot.chiefOfStaff) {
+      const section = sectionKey(bot.section);
+      for (const candidate of this.bots) {
+        if (candidate.id === bot.id || !candidate.chiefOfStaff || sectionKey(candidate.section) !== section) continue;
+        candidate.chiefOfStaff = false;
+        changed.push(candidate);
+      }
+    }
     this.saveBots();
-    this.emit({ type: "bot", botId: id });
+    for (const candidate of changed) this.emit({ type: "bot", botId: candidate.id });
     return bot;
   }
 
