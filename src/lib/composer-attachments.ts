@@ -242,7 +242,7 @@ export function attachmentBasename(path: string): string {
 /** One intake path for files arriving by drop OR by the composer's attach
  * button, so a picked file and a dropped one can never behave differently.
  * The image uploader is injected: the caller owns the network, this owns
- * the sorting and the sentence the user reads when something is refused. */
+ * the ordering and the sentence the user reads when something is refused. */
 export async function intakeFiles<T extends DroppedFile & { type: string }>(
   _files: readonly T[],
   _opts: {
@@ -253,25 +253,31 @@ export async function intakeFiles<T extends DroppedFile & { type: string }>(
 ): Promise<{ attachments: Attachment[]; notice: string | null }> {
   const files = [..._files];
   const { allowImages, getPath, uploadImage } = _opts;
-  const images = allowImages ? files.filter((file) => isImageFile(file)) : [];
-  const rest = files.filter((file) => !images.includes(file));
-  const { attachments, rejectedNames } = await attachmentsFromDroppedFiles(rest, getPath);
-  const uploaded: Attachment[] = [];
+  const attachments: Attachment[] = [];
+  const rejectedNames: string[] = [];
   const imageErrors: string[] = [];
-  for (const file of images) {
-    try {
-      const attachment = await uploadImage(file);
-      if (attachment) uploaded.push(attachment);
-    } catch (err) {
-      imageErrors.push(`${file.name}: ${err instanceof Error ? err.message : "upload failed"}`);
+  // Finish each selected file in sequence so the chips retain the order in
+  // which the user chose or dropped them.
+  for (const file of files) {
+    if (allowImages && isImageFile(file)) {
+      try {
+        const attachment = await uploadImage(file);
+        if (attachment) attachments.push(attachment);
+      } catch (err) {
+        imageErrors.push(`${file.name}: ${err instanceof Error ? err.message : "upload failed"}`);
+      }
+      continue;
     }
+    const result = await attachmentsFromDroppedFiles([file], getPath);
+    attachments.push(...result.attachments);
+    rejectedNames.push(...result.rejectedNames);
   }
   const pathless = rejectedNames.length
     ? `${rejectedNames.join(", ")} — that file has no path on disk. Save it first, then attach it from Finder.`
     : null;
   const failed = imageErrors.length ? imageErrors.join("; ") : null;
   return {
-    attachments: [...attachments, ...uploaded],
+    attachments,
     notice: pathless && failed ? `${pathless} (${failed})` : (pathless ?? failed),
   };
 }

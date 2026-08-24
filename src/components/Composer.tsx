@@ -167,16 +167,20 @@ export function Composer({
   // a chip on its own is a message: the send control has to appear for it
   const fileInput = useRef<HTMLInputElement>(null);
   const [autoWarn, setAutoWarn] = useState(false);
+  const [attachmentNotice, setAttachmentNotice] = useState<string | null>(null);
   // Auto mode belongs to one bot; a room has several, each with its own.
   const autoBot = group ? undefined : bot;
   const pickFiles = async (picked: FileList | null) => {
     if (!picked?.length) return;
-    const { attachments: added } = await intakeFiles(Array.from(picked), {
+    const { attachments: added, notice } = await intakeFiles(Array.from(picked), {
       allowImages: engineSupportsImages,
       getPath: pathForFile,
       uploadImage: imageAttachmentFromFile,
     });
     if (added.length) addAttachments(added);
+    // Keep file-specific failures beside the attachments. A successful
+    // overlapping intake must not erase an earlier failure before it is read.
+    if (notice) setAttachmentNotice(notice);
   };
   const toggleAuto = () => {
     if (!autoBot) return;
@@ -354,6 +358,8 @@ export function Composer({
           onAdd={addAttachments}
           onRemove={removeAttachment}
           allowImages={engineSupportsImages}
+          notice={attachmentNotice}
+          onNotice={setAttachmentNotice}
         />
         <div className="flex items-end gap-2 rounded-3xl border border-hairline/40 bg-raised/60 py-2 pl-2 pr-2">
         <input

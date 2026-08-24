@@ -26,7 +26,10 @@ describe("intakeFiles", () => {
       getPath: onDisk,
       uploadImage: upload,
     });
-    expect(out.attachments.map((a) => a.kind).sort()).toEqual(["file", "image"]);
+    expect(out.attachments.map((a) => [a.kind, "name" in a ? a.name : ""])).toEqual([
+      ["image", "shot.png"],
+      ["file", "notes.txt"],
+    ]);
     expect(out.notice).toBeNull();
   });
 
