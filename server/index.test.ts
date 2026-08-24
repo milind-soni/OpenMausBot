@@ -523,6 +523,10 @@ describe("harness HTTP API", () => {
     expect(hit.snippet.toLowerCase()).toContain("nice to meet");
     expect(hit.snippet.slice(hit.matchStart, hit.matchStart + hit.matchLength).toLowerCase()).toBe("nice to meet");
     expect((await api("GET", "/api/search?q=")).body.hits).toEqual([]);
+    const scoped = await api("GET", `/api/search?q=nice%20to%20meet&threadId=${bot.threadId}`);
+    expect(scoped.status).toBe(200);
+    expect(scoped.body.hits.every((candidate: { threadId: string }) => candidate.threadId === bot.threadId)).toBe(true);
+    expect((await api("GET", "/api/search?q=hello&threadId=missing-thread")).status).toBe(404);
 
     const markdown = await fetch(`${BASE}/api/threads/${bot.threadId}/export`);
     expect(markdown.status).toBe(200);
@@ -567,6 +571,37 @@ describe("harness HTTP API", () => {
     await api("DELETE", `/api/bots/${bot.id}`);
     const after = await api("GET", "/api/search?q=nice%20to%20meet");
     expect(after.body.hits.find((h: { botId?: string }) => h.botId === bot.id)).toBeUndefined();
+  });
+
+  it("stores a room reply as a flat reference and rejects foreign targets", async () => {
+    const bot = (await api("POST", "/api/bots")).body.bot;
+    const foreign = (await api("POST", "/api/bots")).body.bot;
+    const room = (await api("POST", "/api/groups", { name: "Reply room", memberIds: [bot.id] })).body.group;
+    try {
+      await api("PATCH", `/api/groups/${room.id}/setup`, { action: "skip" });
+      await api("PATCH", `/api/groups/${room.id}`, { defaultResponder: { kind: "mentions" } });
+      expect((await api("POST", `/api/groups/${room.id}/messages`, { text: "First thought" })).status).toBe(202);
+      let current = (await api("GET", "/api/bots?messages=20")).body.groups.find(
+        (candidate: { id: string }) => candidate.id === room.id,
+      );
+      const original = current.messages.at(-1);
+      expect((await api("POST", `/api/groups/${room.id}/messages`, {
+        text: "Following up",
+        replyToId: original.id,
+      })).status).toBe(202);
+      current = (await api("GET", "/api/bots?messages=20")).body.groups.find(
+        (candidate: { id: string }) => candidate.id === room.id,
+      );
+      expect(current.messages.at(-1)).toMatchObject({ text: "Following up", replyToId: original.id });
+      expect((await api("POST", `/api/groups/${room.id}/messages`, {
+        text: "Wrong conversation",
+        replyToId: foreign.messages[0].id,
+      })).status).toBe(404);
+    } finally {
+      await api("DELETE", `/api/groups/${room.id}`);
+      await api("DELETE", `/api/bots/${bot.id}`);
+      await api("DELETE", `/api/bots/${foreign.id}`);
+    }
   });
 
   it("creates, patches, and deletes a bot", async () => {

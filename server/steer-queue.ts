@@ -32,17 +32,21 @@ interface QueueEntry {
    * happen on a DIFFERENT thread (a room turn) — drain matches on "this
    * queue's bot is idle now", which needs the bot, not the settling thread. */
   botId: string;
-  items: Array<{ messageId: string; text: string }>;
+  items: Array<{ messageId: string; text: string; prompt: string; replyToId?: string }>;
 }
 
 const queues = new Map<string, QueueEntry>(); // threadId → waiting sends
 
 /** Hold a mid-turn send off the transcript until drain. */
-export function queueSteeredMessage(bot: BotRecord, text: string): { id: string } {
+export function queueSteeredMessage(
+  bot: BotRecord,
+  text: string,
+  options: { prompt?: string; replyToId?: string } = {},
+): { id: string } {
   const threadId = bot.threadId;
   const id = newId();
   const entry = queues.get(threadId) ?? { botId: bot.id, items: [] };
-  entry.items.push({ messageId: id, text });
+  entry.items.push({ messageId: id, text, prompt: options.prompt ?? text, replyToId: options.replyToId });
   queues.set(threadId, entry);
   return { id };
 }
@@ -85,13 +89,14 @@ export function drainSteeredMessages(
           role: "user",
           kind: "text",
           text: item.text,
+          replyToId: item.replyToId,
           queueId: item.messageId,
         }),
       );
     }
     const last = appended.at(-1);
     if (!last) continue;
-    const prompt = entry.items.map((item) => item.text).join("\n");
+    const prompt = entry.items.map((item) => item.prompt).join("\n");
     void run(
       entry.botId,
       threadId,

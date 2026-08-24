@@ -117,6 +117,11 @@ describe("message-db", () => {
     insertMessage("t5", msg("m5", "50% done"));
     expect(searchMessages("%")).toHaveLength(1);
     expect(searchMessages("")).toEqual([]);
+
+    // Current-chat find scopes in SQL before LIMIT, so busy transcripts in
+    // other conversations cannot crowd out this thread's matches.
+    expect(searchMessages("railway", 40, "t5").map((hit) => hit.threadId)).toEqual(["t5"]);
+    expect(searchMessages("railway", 40, "missing")).toEqual([]);
   });
 
   it("search reports the match offset for highlighting, and finds activity chips by tool name", () => {

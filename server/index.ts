@@ -75,6 +75,7 @@ import { RETRY_MAX_ATTEMPTS } from "./drivers/retry.ts";
 import { BUILT_IN_DRIVERS } from "./drivers/builtIn.ts";
 import { getOrCreateChannel, mirrorActivity, mirrorExchange, mirrorReply, type CommsBus } from "./comms-visibility.ts";
 import { searchMessages } from "./message-db.ts";
+import { promptWithReply, transcriptText } from "./replies.ts";
 import { _loadPending, discardDelegations, drainDelegations, pendingDelegationSnapshot, pendingThreads, queueDelegation, type QueueResult } from "./delegations.ts";
 import { drainSteeredMessages, queueSteeredMessage } from "./steer-queue.ts";
 import { EventBus } from "./harness/bus.ts";
@@ -1351,6 +1352,8 @@ async function startTurn(
      * The prompt is control-plane context: it reaches the provider without
      * masquerading as another message authored by the user. */
     cardContinuation?: boolean;
+    /** Earlier text message this user turn is replying to. */
+    replyTo?: Message;
     onDispatchError?: (message: string) => void;
   },
 ) {
@@ -1400,17 +1403,21 @@ async function startTurn(
   if (!userMessage) {
     userMessage = opts?.cardContinuation
       ? { id: `card-${randomUUID()}`, at: Date.now(), role: "user", kind: "text", text }
-      : store.appendMessage(threadId, { role: "user", kind: "text", text });
+      : store.appendMessage(threadId, { role: "user", kind: "text", text, replyToId: opts?.replyTo?.id });
   }
 
   // transcript for API-backed drivers: settled text turns on the ACTIVE
   // branch only — abandoned forks never reach the model
   const skipTranscript = new Set<string>([userMessage.id, ...(opts?.excludeMessageIds ?? [])]);
-  const transcript = store
-    .activePath(threadId)
+  const activeMessages = store.activePath(threadId);
+  const messagesById = new Map(activeMessages.map((message) => [message.id, message]));
+  const transcript = activeMessages
     .filter((m) => m.kind === "text" && m.text && !skipTranscript.has(m.id))
     .slice(-40)
-    .map((m) => ({ role: m.role === "user" ? ("user" as const) : ("assistant" as const), text: m.text! }));
+    .map((m) => ({
+      role: m.role === "user" ? ("user" as const) : ("assistant" as const),
+      text: transcriptText(m, messagesById, cfg.profile?.name?.trim() || "User"),
+    }));
 
   // After a rewind (edit / branch switch) the provider's native session
   // still contains the abandoned branch: start a fresh session instead of
@@ -1428,7 +1435,7 @@ async function startTurn(
     !rewound &&
     engineIsFresh({ instanceId, lastInstanceId: task.lastInstanceId, resumeCursors: task.resumeCursors, transcript });
   const { turnText, resume } = buildTurnContext({
-    text,
+    text: promptWithReply(text, opts?.replyTo, cfg.profile?.name?.trim() || "User"),
     transcript,
     rewound,
     fresh,
@@ -1835,11 +1842,12 @@ const GROUP_CONTEXT_MESSAGES = 30;
 const MAX_GROUP_HOPS = 1;
 
 function serializeRoomContext(threadId: string, userName: string): string {
-  return store
-    .messagesFor(threadId)
+  const messages = store.messagesFor(threadId);
+  const messagesById = new Map(messages.map((message) => [message.id, message]));
+  return messages
     .filter((m) => m.kind === "text" && m.text)
     .slice(-GROUP_CONTEXT_MESSAGES)
-    .map((m) => `${m.role === "user" ? userName : (m.from?.name ?? "Bot")}: ${m.text}`)
+    .map((m) => `${m.role === "user" ? userName : (m.from?.name ?? "Bot")}: ${transcriptText(m, messagesById, userName)}`)
     .join("\n");
 }
 
@@ -2081,13 +2089,13 @@ async function runGroupMemberTurn(
   return true;
 }
 
-function startGroupTurn(groupId: string, text: string) {
+function startGroupTurn(groupId: string, text: string, replyTo?: Message) {
   const group = store.group(groupId);
   if (!group) throw Object.assign(new Error("no such group"), { status: 404 });
   if (roomSetupPending(group)) {
     throw Object.assign(new Error("finish room setup before sending the first message"), { status: 409 });
   }
-  store.appendMessage(group.threadId, { role: "user", kind: "text", text });
+  store.appendMessage(group.threadId, { role: "user", kind: "text", text, replyToId: replyTo?.id });
 
   const members = group.memberIds
     .map((id) => store.bot(id))
@@ -2165,6 +2173,16 @@ function roomSetupPending(group: GroupRecord): boolean {
     group.setupSkippedAt == null &&
     store.messagesFor(group.threadId).length === 0
   );
+}
+
+function resolveReplyTarget(threadId: string, value: unknown): Message | undefined {
+  if (value === undefined || value === null || value === "") return undefined;
+  if (typeof value !== "string") throw Object.assign(new Error("replyToId must be a message id"), { status: 400 });
+  const target = store.messagesFor(threadId).find((message) => message.id === value);
+  if (!target || target.kind !== "text" || !target.text?.trim()) {
+    throw Object.assign(new Error("the message being replied to is no longer available"), { status: 404 });
+  }
+  return target;
 }
 
 const CONNECTOR_SLUG = /^[a-z0-9][a-z0-9_-]{0,80}$/;
@@ -3263,6 +3281,10 @@ const server = createServer(async (req, res) => {
       const q = url.searchParams.get("q") ?? "";
       const rawLimit = url.searchParams.get("limit");
       const limit = rawLimit ? Math.min(Math.max(Number(rawLimit) || 0, 1), 100) : 40;
+      const threadId = url.searchParams.get("threadId")?.trim() || undefined;
+      if (threadId && !store.botByThread(threadId) && !store.groupByThread(threadId)) {
+        return json(res, 404, { error: "no such conversation" });
+      }
       // whether each hit sits on its thread's visible branch — a click on
       // one that does not has to switch versions first (and only then)
       const activePaths = new Map<string, Set<string>>();
@@ -3271,7 +3293,7 @@ const server = createServer(async (req, res) => {
         if (!ids) activePaths.set(threadId, (ids = new Set(store.activePath(threadId).map((m) => m.id))));
         return ids.has(messageId);
       };
-      const hits = searchMessages(q, limit)
+      const hits = searchMessages(q, limit, threadId)
         .map((hit) => {
           const bot = store.botByThread(hit.threadId);
           const group = bot ? undefined : store.groupByThread(hit.threadId);
@@ -3686,7 +3708,10 @@ const server = createServer(async (req, res) => {
       const body = await readBody(req);
       const text = String(body.text ?? "").trim();
       if (!text) return json(res, 400, { error: "text required" });
-      startGroupTurn(m[1], text);
+      const group = store.group(m[1]);
+      if (!group) return json(res, 404, { error: "no such group" });
+      const replyTo = resolveReplyTarget(group.threadId, body.replyToId);
+      startGroupTurn(group.id, text, replyTo);
       return json(res, 202, { ok: true });
     }
     m = path.match(/^\/api\/groups\/([\w-]+)\/interrupt$/);
@@ -4156,23 +4181,35 @@ const server = createServer(async (req, res) => {
       if (!text) return json(res, 400, { error: "text required" });
       const bot = store.bot(m[1]);
       if (!bot) return json(res, 404, { error: "no such bot" });
+      const replyTo = resolveReplyTarget(bot.threadId, body.replyToId);
       // Claude can accept the message inside its live turn. If the write
       // loses a race with turn settlement, or the engine cannot steer, the
       // existing server-side queue records it atomically for the next turn.
       if (bot.busy) {
         const instance = registry.get(bot.modelSelection.instanceId);
         if (instance?.adapter.capabilities.queueing && instance.adapter.steer) {
-          const steered = await instance.adapter.steer(bot.threadId, text).catch(() => false);
+          const steered = await instance.adapter
+            .steer(bot.threadId, promptWithReply(text, replyTo, cfg.profile?.name?.trim() || "User"))
+            .catch(() => false);
           if (steered) {
             clearUnattended(bot.id);
-            store.appendMessage(bot.threadId, { role: "user", kind: "text", text, steered: true });
+            store.appendMessage(bot.threadId, {
+              role: "user",
+              kind: "text",
+              text,
+              replyToId: replyTo?.id,
+              steered: true,
+            });
             return json(res, 202, { ok: true, steered: true });
           }
         }
-        const queued = queueSteeredMessage(bot, text);
+        const queued = queueSteeredMessage(bot, text, {
+          replyToId: replyTo?.id,
+          prompt: promptWithReply(text, replyTo, cfg.profile?.name?.trim() || "User"),
+        });
         return json(res, 202, { ok: true, queued: true, queueId: queued.id, threadId: bot.threadId });
       }
-      await startTurn(bot.id, text);
+      await startTurn(bot.id, text, { replyTo });
       return json(res, 202, { ok: true });
     }
 
@@ -4204,7 +4241,8 @@ const server = createServer(async (req, res) => {
       const message = store.branchMessage(bot.threadId, messageId, text);
       if (!message) return json(res, 404, { error: "no such message" });
       store.patchBot(bot.id, { rewound: true });
-      await startTurn(bot.id, text, { userMessage: message });
+      const replyTo = message.replyToId ? resolveReplyTarget(bot.threadId, message.replyToId) : undefined;
+      await startTurn(bot.id, text, { userMessage: message, replyTo });
       return json(res, 202, { ok: true });
     }
 

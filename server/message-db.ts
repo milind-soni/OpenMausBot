@@ -185,7 +185,7 @@ export interface SearchHit {
 /** Case-insensitive substring search over text messages, newest first.
  * A LIKE scan, deliberately: local transcripts are megabytes at most, a
  * scan is milliseconds, and it needs no FTS extension to exist. */
-export function searchMessages(query: string, limit = 40): SearchHit[] {
+export function searchMessages(query: string, limit = 40, threadId?: string): SearchHit[] {
   const needle = query.trim().toLowerCase();
   if (!needle) return [];
   // escape LIKE wildcards so a literal % or _ in the query stays literal
@@ -193,14 +193,16 @@ export function searchMessages(query: string, limit = 40): SearchHit[] {
   // text messages by their text; activity chips by the tool name — "which
   // bot ran that migration" is a tool-name question. The chip's name lives
   // in the row's json; a JSON1 extract keeps this one query.
-  const rows = db()
-    .prepare(
-      "SELECT thread_id, id, at, role, kind, text, json_extract(json, '$.tool.name') AS tool_name, json_extract(json, '$.from.name') AS from_name FROM messages " +
-        "WHERE (kind = 'text' AND text IS NOT NULL AND lower(text) LIKE ? ESCAPE '\\') " +
-        "   OR (kind = 'activity' AND tool_name IS NOT NULL AND lower(tool_name) LIKE ? ESCAPE '\\') " +
-        "ORDER BY at DESC LIMIT ?",
-    )
-    .all(pattern, pattern, limit) as Array<{
+  const scope = threadId ? "thread_id = ? AND " : "";
+  const statement = db().prepare(
+    "SELECT thread_id, id, at, role, kind, text, json_extract(json, '$.tool.name') AS tool_name, json_extract(json, '$.from.name') AS from_name FROM messages " +
+      `WHERE ${scope}((kind = 'text' AND text IS NOT NULL AND lower(text) LIKE ? ESCAPE '\\') ` +
+      "   OR (kind = 'activity' AND tool_name IS NOT NULL AND lower(tool_name) LIKE ? ESCAPE '\\')) " +
+      "ORDER BY at DESC LIMIT ?",
+  );
+  const rows = (threadId
+    ? statement.all(threadId, pattern, pattern, limit)
+    : statement.all(pattern, pattern, limit)) as Array<{
     thread_id: string;
     id: string;
     at: number;

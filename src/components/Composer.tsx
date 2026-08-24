@@ -1,7 +1,7 @@
 import { track } from "@/lib/analytics";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ArrowUp, Clock, Mic, Plus, Square, Users, X, Zap } from "lucide-react";
-import { useStore, visibleMessages, type Bot, type Group } from "@/state/store";
+import { useStore, visibleMessages, type Bot, type Group, type Message } from "@/state/store";
 import { cn } from "@/lib/cn";
 import { useComposerDraft } from "@/lib/drafts";
 import { MausAvatar } from "./Avatar";
@@ -20,6 +20,7 @@ import { normalizeState } from "@/lib/mascot";
 import { groupComposerHint, roomRespondersForComposer } from "@/lib/group-routing";
 import { PendingApprovalActions, PendingApprovalPanel, pendingApprovals } from "./PendingApproval";
 import { useDesktopCapabilities } from "./DesktopCapabilities";
+import { ReplyQuote } from "./ReplyQuote";
 
 /** The active @mention query at the caret: the text between an `@` that
  * starts a word and the caret. null = no mention being typed. */
@@ -40,12 +41,16 @@ export function Composer({
   group,
   members,
   onEditLast,
+  replyTo,
+  onClearReply,
   locked = false,
 }: {
   bot?: Bot;
   group?: Group;
   members?: Bot[];
   onEditLast?: () => void;
+  replyTo?: Message | null;
+  onClearReply?: () => void;
   /** New rooms keep the composer inert until their setup is saved or skipped. */
   locked?: boolean;
 }) {
@@ -158,9 +163,9 @@ export function Composer({
   // the moment the room settles. 1:1 mid-turn sends still POST (the harness
   // queue), but stay off the transcript until drain — the chip here is the
   // pending row so they cannot become the active leaf mid-turn.
-  const [queued, setQueued] = useState<string | null>(null);
+  const [queued, setQueued] = useState<{ text: string; replyToId?: string } | null>(null);
   const pendingChip = group
-    ? queued
+    ? queued?.text
     : bot
       ? state.pendingQueued?.[bot.threadId]?.map((entry) => entry.text).join("\n")
       : undefined;
@@ -205,30 +210,32 @@ export function Composer({
     const t = composeMessage(text, attachments);
     if (!t) return;
     if (busy && group) {
-      setQueued(t);
+      setQueued({ text: t, replyToId: replyTo?.id });
       setText("");
       setAttachments([]);
+      onClearReply?.();
       return;
     }
     if (group) {
-      dispatch({ type: "sendGroup", groupId: group.id, text: t });
+      dispatch({ type: "sendGroup", groupId: group.id, text: t, replyToId: replyTo?.id });
       track("message_sent", { room: true });
     } else if (bot) {
-      dispatch({ type: "send", botId: bot.id, text: t });
+      dispatch({ type: "send", botId: bot.id, text: t, replyToId: replyTo?.id });
       track("message_sent", { driver: bot.modelSelection?.instanceId, queued: busy && !canSteer });
     }
     setText("");
     setAttachments([]);
+    onClearReply?.();
   };
   useEffect(() => {
     if (busy || !queued) return;
     if (group) {
-      if (queued.includes("<attached-image ") && !imageTargetsSupport(queued)) {
+      if (queued.text.includes("<attached-image ") && !imageTargetsSupport(queued.text)) {
         dispatch({ type: "error", message: "The selected responder does not support image attachments." });
         setQueued(null);
         return;
       }
-      dispatch({ type: "sendGroup", groupId: group.id, text: queued });
+      dispatch({ type: "sendGroup", groupId: group.id, text: queued.text, replyToId: queued.replyToId });
       track("message_sent", { room: true, queued: true });
     }
     setQueued(null);
@@ -350,6 +357,15 @@ export function Composer({
                 if (group) dispatch({ type: "interruptGroup", groupId: group.id });
                 else if (bot) dispatch({ type: "interrupt", botId: bot.id });
               }}
+            />
+          </div>
+        )}
+        {replyTo && (
+          <div className="mb-2 px-1">
+            <ReplyQuote
+              message={replyTo}
+              fallbackName={bot?.name}
+              onClear={onClearReply}
             />
           </div>
         )}

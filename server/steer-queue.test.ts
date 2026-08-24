@@ -119,6 +119,20 @@ describe("steer-queue module", () => {
     expect(run).toHaveBeenCalledTimes(1);
   });
 
+  it("keeps reply metadata and the provider-facing reply prompt while queued", () => {
+    const bot = fakeBot("bot-reply", "thread-reply", true);
+    const store = fakeStore([bot]);
+    queueSteeredMessage(bot, "That part", {
+      replyToId: "original-message",
+      prompt: "Reply context\nThat part",
+    });
+    bot.busy = false;
+    const run = vi.fn();
+    drainSteeredMessages(store, run);
+    expect(store.messages[0]).toMatchObject({ text: "That part", replyToId: "original-message" });
+    expect(run.mock.calls[0][2]).toBe("Reply context\nThat part");
+  });
+
   it("fires nothing when nothing is queued", () => {
     const run = vi.fn();
     drainSteeredMessages(fakeStore([fakeBot("bot-c", "thread-c", false)]), run);

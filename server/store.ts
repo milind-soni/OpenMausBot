@@ -106,6 +106,9 @@ export interface Message {
   /** the message this one follows; null = thread root. Edited messages
    * share a parentId with the version they replace — that's a fork. */
   parentId?: string | null;
+  /** Optional flat reply reference. Unlike parentId this never changes the
+   * conversation branch; it only quotes one earlier text message inline. */
+  replyToId?: string;
   /** group threads: which member said this (sender attribution). */
   from?: { botId: string; name: string; color: string };
   /** emoji reactions; by = "user" or a member botId. */
@@ -775,6 +778,7 @@ export class Store {
       kind: "text",
       text,
       parentId: source.parentId ?? null,
+      replyToId: source.replyToId,
     };
     t.messages.push(full);
     t.activeLeafId = full.id;
