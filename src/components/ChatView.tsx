@@ -44,6 +44,7 @@ import { ApprovalCard } from "./ApprovalCard";
 import { Composer } from "./Composer";
 import { ConnectorCard } from "./ConnectorCard";
 import { SecretRequestCard } from "./SecretRequestCard";
+import { AttachedImageGallery } from "./AttachmentPreview";
 import { ModelPicker } from "./ModelPicker";
 import { RenameTitle } from "./RenameTitle";
 import { TaskPicker } from "./TaskPicker";
@@ -54,7 +55,7 @@ import { cn } from "@/lib/cn";
 import { COMPACT_BUBBLE, COMPACT_SQUARE } from "@/lib/compact-chip";
 import { useFocusMessage } from "@/lib/focus-message";
 import { webhookMessageView } from "@/lib/webhook-message";
-import { attachmentBasename, splitAttachedImages } from "@/lib/composer-attachments";
+import { splitAttachedImages } from "@/lib/composer-attachments";
 import { BOTTOM_FOLLOW_THRESHOLD, shouldResumeBottomFollow } from "@/lib/bottom-follow";
 import {
   TRANSCRIPT_WINDOW_SIZE,
@@ -421,25 +422,7 @@ function Bubble({
           ) : user ? (
             <>
               {attachedImages && attachedImages.images.length > 0 && (
-                <div className="mb-2 flex flex-wrap justify-end gap-2">
-                  {attachedImages.images.map((path) => (
-                    <a
-                      key={path}
-                      href={`/api/attachments/${encodeURIComponent(attachmentBasename(path))}`}
-                      target="_blank"
-                      rel="noreferrer"
-                      className="block max-w-[260px] overflow-hidden rounded-lg border border-hairline/40"
-                      title={path}
-                    >
-                      <img
-                        src={`/api/attachments/${encodeURIComponent(attachmentBasename(path))}`}
-                        alt="Attached image"
-                        loading="lazy"
-                        className="block max-h-[220px] w-full object-cover"
-                      />
-                    </a>
-                  ))}
-                </div>
+                <AttachedImageGallery paths={attachedImages.images} />
               )}
               <div
                 className={cn(collapsible && "max-h-40 overflow-hidden [mask-image:linear-gradient(to_bottom,black_60%,transparent)]")}

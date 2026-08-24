@@ -239,6 +239,16 @@ export function attachmentBasename(path: string): string {
   return parts[parts.length - 1] ?? "";
 }
 
+/** The renderer never loads a transcript-provided URL directly. Only names
+ * the attachment server itself can have generated become same-origin image
+ * URLs; malformed and executable-image paths render nothing, while a string
+ * that looks remote can at most resolve to a local generated filename. */
+export function attachmentImageUrl(path: string): string | null {
+  const name = attachmentBasename(path);
+  if (!/^[A-Za-z0-9-]+\.(png|jpg|gif|webp)$/.test(name)) return null;
+  return `/api/attachments/${encodeURIComponent(name)}`;
+}
+
 /** One intake path for files arriving by drop OR by the composer's attach
  * button, so a picked file and a dropped one can never behave differently.
  * The image uploader is injected: the caller owns the network, this owns

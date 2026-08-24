@@ -21,6 +21,7 @@ import { ChatMarkdown } from "./ChatMarkdown";
 import { Composer } from "./Composer";
 import { ConnectorCard } from "./ConnectorCard";
 import { SecretRequestCard } from "./SecretRequestCard";
+import { AttachedImageGallery } from "./AttachmentPreview";
 import { GroupCallButton, GroupCallOverlay } from "./GroupCallView";
 import { ReactionBar, ReactionChips } from "./Reactions";
 import { ApprovalCard } from "./ApprovalCard";
@@ -31,6 +32,7 @@ import { useFocusMessage } from "@/lib/focus-message";
 import { shortPath } from "@/lib/short-path";
 import { BOTTOM_FOLLOW_THRESHOLD, shouldResumeBottomFollow } from "@/lib/bottom-follow";
 import { showWorkingDots } from "@/lib/turn-tail";
+import { splitAttachedImages } from "@/lib/composer-attachments";
 import {
   TRANSCRIPT_WINDOW_SIZE,
   expandWindowStart,
@@ -106,6 +108,7 @@ const Transcript = memo(function Transcript({
         const prev = textMessages[i - 1];
         const newDay = !prev || new Date(prev.at).toDateString() !== new Date(m.at).toDateString();
         const user = m.role === "user";
+        const attachedImages = user && m.text ? splitAttachedImages(m.text) : null;
         const newCluster = !prev || prev.role !== m.role || prev.from?.botId !== m.from?.botId || newDay;
         const row =
           // a member can hit a permission ask mid-turn; without this the
@@ -144,7 +147,14 @@ const Transcript = memo(function Transcript({
                   )}
                   title={new Date(m.at).toLocaleString()}
                 >
-                  {user ? m.text : <ChatMarkdown text={m.text} />}
+                  {user ? (
+                    <>
+                      {attachedImages && attachedImages.images.length > 0 && (
+                        <AttachedImageGallery paths={attachedImages.images} />
+                      )}
+                      {attachedImages?.display ?? m.text}
+                    </>
+                  ) : <ChatMarkdown text={m.text} />}
                 </div>
                 {!user && <ReactionBar threadId={group.threadId} message={m} />}
                 <span className="self-end pb-1 text-[11px] tabular-nums text-ink-secondary/70 opacity-0 transition-opacity group-hover:opacity-100">

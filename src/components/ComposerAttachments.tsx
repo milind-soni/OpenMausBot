@@ -6,13 +6,14 @@ import { useEffect, useRef, useState } from "react";
 import { ClipboardPaste, File as FileIcon, Image as ImageIcon, X } from "lucide-react";
 import { cn } from "@/lib/cn";
 import {
-  attachmentBasename,
+  attachmentImageUrl,
   intakeFiles,
   formatSize,
   imageAttachmentFromFile,
   pasteSummary,
   type Attachment,
 } from "@/lib/composer-attachments";
+import { AttachmentPreviewDialog, previewImage, type PreviewImage } from "./AttachmentPreview";
 
 /** Electron 32 removed File.path — only the preload can name a file. */
 export function pathForFile(file: File): string {
@@ -35,6 +36,7 @@ export function ComposerAttachments({
   onNotice: (notice: string | null) => void;
 }) {
   const [dragging, setDragging] = useState(false);
+  const [preview, setPreview] = useState<PreviewImage | null>(null);
   // dragenter/dragleave fire once per element crossed, so the overlay
   // tracks depth rather than the last event it happened to see
   const depth = useRef(0);
@@ -133,15 +135,20 @@ export function ComposerAttachments({
                 <div className="mt-1 text-[10.5px] text-ink-secondary/70">{pasteSummary(a)}</div>
               </Chip>
             ) : a.kind === "image" ? (
-              <Chip key={a.id} label="IMAGE" title={a.path} onRemove={() => onRemove(a.id)}>
-                <div className="flex h-[76px] items-center justify-center overflow-hidden rounded-lg bg-inset">
+              <Chip key={a.id} label="IMAGE" title={a.name} onRemove={() => onRemove(a.id)}>
+                <button
+                  type="button"
+                  onClick={() => setPreview(previewImage(a.path))}
+                  className="flex h-[76px] w-full items-center justify-center overflow-hidden rounded-lg bg-inset focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/50"
+                  aria-label={`Preview ${a.name}`}
+                >
                   <img
-                    src={`/api/attachments/${encodeURIComponent(attachmentBasename(a.path))}`}
+                    src={attachmentImageUrl(a.path) ?? undefined}
                     alt={a.name}
                     loading="lazy"
                     className="max-h-[76px] max-w-full object-contain"
                   />
-                </div>
+                </button>
                 <div className="mt-1 truncate text-[10.5px] text-ink-secondary/70">{formatSize(a.size)}</div>
               </Chip>
             ) : (
@@ -158,6 +165,7 @@ export function ComposerAttachments({
           )}
         </div>
       )}
+      {preview && <AttachmentPreviewDialog image={preview} onClose={() => setPreview(null)} />}
     </>
   );
 }
