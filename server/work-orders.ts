@@ -181,12 +181,32 @@ export class WorkOrderStore {
   settleForDeletedBot(botId: string): { cancelled: WorkOrder[]; failed: WorkOrder[] } {
     const cancelled: WorkOrder[] = [];
     const failed: WorkOrder[] = [];
-    for (const order of [...this.orders]) {
+    const transitions: Array<{
+      order: WorkOrder;
+      from: WorkOrderState;
+      to: "cancelled" | "failed";
+    }> = [];
+    for (const order of this.orders) {
       if (TERMINAL.has(order.state)) continue;
-      if (order.sourceBotId === botId) {
-        cancelled.push(this.transition(order.id, "cancelled", { error: "source bot was deleted" }));
-      } else if (order.targetBotId === botId) {
-        failed.push(this.transition(order.id, "failed", { error: "target bot was deleted" }));
+      const to = order.sourceBotId === botId
+        ? "cancelled"
+        : order.targetBotId === botId
+          ? "failed"
+          : null;
+      if (!to) continue;
+      const from = order.state;
+      order.state = to;
+      order.updatedAt = this.now();
+      order.error = to === "cancelled" ? "source bot was deleted" : "target bot was deleted";
+      const settled = { ...order };
+      transitions.push({ order: settled, from, to });
+      if (to === "cancelled") cancelled.push(settled);
+      else failed.push(settled);
+    }
+    if (transitions.length) {
+      this.save();
+      for (const transition of transitions) {
+        this.onTransition?.({ ...transition.order }, transition.from, transition.to);
       }
     }
     return { cancelled, failed };

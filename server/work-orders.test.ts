@@ -4,7 +4,7 @@ import { join } from "node:path";
 
 import { describe, expect, it } from "vitest";
 
-import { WorkOrderStore, type WorkOrderInput } from "./work-orders.ts";
+import { WorkOrderStore, type WorkOrder, type WorkOrderInput } from "./work-orders.ts";
 
 const input: WorkOrderInput = {
   kind: "consultation",
@@ -88,13 +88,32 @@ describe("WorkOrderStore", () => {
   });
 
   it("settles both source and target orders when a bot is deleted", () => {
-    const store = new WorkOrderStore({ file: file() });
+    const path = file();
+    const persistedAtCallback: Array<Record<string, string>> = [];
+    let observeSettlement = false;
+    const store = new WorkOrderStore({
+      file: path,
+      onTransition: () => {
+        if (!observeSettlement) return;
+        const orders: WorkOrder[] = JSON.parse(readFileSync(path, "utf8")).orders;
+        persistedAtCallback.push(Object.fromEntries(orders.map((order) => [order.id, order.state])));
+      },
+    });
     const sourceOrder = store.create(input, "queued");
     const targetOrder = store.create({ ...input, sourceBotId: "other", targetBotId: "source" }, "queued");
+    observeSettlement = true;
     const settled = store.settleForDeletedBot("source");
     expect(settled.cancelled.map((order) => order.id)).toEqual([sourceOrder.id]);
     expect(settled.failed.map((order) => order.id)).toEqual([targetOrder.id]);
     expect(store.get(sourceOrder.id)?.state).toBe("cancelled");
     expect(store.get(targetOrder.id)?.state).toBe("failed");
+    expect(persistedAtCallback).toHaveLength(2);
+    for (const snapshot of persistedAtCallback) {
+      expect(snapshot[sourceOrder.id]).toBe("cancelled");
+      expect(snapshot[targetOrder.id]).toBe("failed");
+    }
+    const reopened = new WorkOrderStore({ file: path });
+    expect(reopened.get(sourceOrder.id)?.state).toBe("cancelled");
+    expect(reopened.get(targetOrder.id)?.state).toBe("failed");
   });
 });

@@ -4,7 +4,8 @@
 // assert what would have been dispatched to the harness. The harness itself
 // stays out of these — the integration happens in comms.test.ts (the full
 // e2e through the agents proxy + fake ACP CLI).
-import { rmSync } from "node:fs";
+import { existsSync, readFileSync, rmSync } from "node:fs";
+import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 import type { CommsBus } from "./comms-visibility.ts";
@@ -12,11 +13,16 @@ import { DATA_DIR } from "./config.ts";
 import type { ModelSelection } from "./contracts.ts";
 import {
   drainDelegations,
+  discardDelegations,
+  discardDelegationsForTarget,
+  _loadPending,
   _isDraining,
+  pendingThreads,
   queueDelegation,
   _pendingCount,
+  _resetPending,
 } from "./delegations.ts";
-import { peerAllowKey, resolvePeerComms } from "./peer-approval.ts";
+import { cancelPeerApprovalsForThread, peerAllowKey, resolvePeerComms } from "./peer-approval.ts";
 import { Store, type BotRecord } from "./store.ts";
 import { WorkOrderStore } from "./work-orders.ts";
 
@@ -67,6 +73,7 @@ describe("queueDelegation", () => {
 
   beforeEach(() => {
     rmSync(DATA_DIR, { recursive: true, force: true });
+    _resetPending();
     store = new Store(selection);
     from = store.createBot();
     target = store.createBot();
@@ -165,6 +172,7 @@ describe("drainDelegations", () => {
 
   beforeEach(() => {
     rmSync(DATA_DIR, { recursive: true, force: true });
+    _resetPending();
     store = new Store(selection);
     from = store.createBot();
     target = store.createBot();
@@ -176,12 +184,8 @@ describe("drainDelegations", () => {
   });
 
   afterEach(() => {
-    // Unresolved approval requests carry a 15-min timer that would otherwise
-    // keep vitest's event loop alive long after the suite ends. None of the
-    // tests above leave one — they all resolve via resolvePeerComms — but
-    // double-check by counting the module's pending map: tests that didn't
-    // resolve should be re-examined if this ever fires.
-    void runTargetCalls;
+    cancelPeerApprovalsForThread(from.threadId);
+    _resetPending();
   });
 
   it("runs the target's turn via runTarget and mirrors the exchange", async () => {
@@ -358,6 +362,54 @@ describe("drainDelegations", () => {
     expect(runTargetCalls[0]!.commsDepth).toBe(1);
   });
 
+  it("releases a pending approval when the source delegation is discarded", async () => {
+    store.patchBot(from.id, { approvePeerComms: true });
+    const workOrders = new WorkOrderStore({ file: join(DATA_DIR, "discarded-source-work-orders.json") });
+    queueDelegation(commsBus, from, { toBotId: target.id, message: "do this", depth: 0 }, 1, from.threadId, workOrders);
+    const order = workOrders.list({ limit: 1 })[0]!;
+    drainDelegations(commsBus, approvalBus, from.threadId, (toBotId, message, commsDepth) => {
+      runTargetCalls.push({ toBotId, message, commsDepth });
+    }, workOrders);
+
+    const card = await waitFor(() =>
+      store.messagesFor(from.threadId).find((message) => message.card?.requestId),
+    );
+    expect(workOrders.get(order.id)?.state).toBe("awaiting-approval");
+
+    discardDelegations(commsBus, from.threadId, workOrders);
+
+    await waitFor(() => !_isDraining(from.threadId));
+    const settledCard = store.messagesFor(from.threadId).find((message) => message.id === card.id);
+    expect(settledCard?.card).toMatchObject({ answered: "deny", dismissed: true });
+    expect(workOrders.get(order.id)).toMatchObject({ state: "cancelled", error: "source turn did not finish" });
+    expect(_pendingCount(from.threadId)).toBe(0);
+    expect(runTargetCalls).toEqual([]);
+  });
+
+  it("releases a pending approval when its target is deleted", async () => {
+    store.patchBot(from.id, { approvePeerComms: true });
+    const workOrders = new WorkOrderStore({ file: join(DATA_DIR, "deleted-target-work-orders.json") });
+    queueDelegation(commsBus, from, { toBotId: target.id, message: "do this", depth: 0 }, 1, from.threadId, workOrders);
+    const order = workOrders.list({ limit: 1 })[0]!;
+    drainDelegations(commsBus, approvalBus, from.threadId, (toBotId, message, commsDepth) => {
+      runTargetCalls.push({ toBotId, message, commsDepth });
+    }, workOrders);
+
+    const card = await waitFor(() =>
+      store.messagesFor(from.threadId).find((message) => message.card?.requestId),
+    );
+    expect(workOrders.get(order.id)?.state).toBe("awaiting-approval");
+
+    discardDelegationsForTarget(commsBus, target.id, workOrders);
+
+    await waitFor(() => !_isDraining(from.threadId));
+    const settledCard = store.messagesFor(from.threadId).find((message) => message.id === card.id);
+    expect(settledCard?.card).toMatchObject({ answered: "deny", dismissed: true });
+    expect(workOrders.get(order.id)).toMatchObject({ state: "failed", error: "target bot was deleted" });
+    expect(_pendingCount(from.threadId)).toBe(0);
+    expect(runTargetCalls).toEqual([]);
+  });
+
   it("emits a denial chip and skips runTarget when the user denies", async () => {
     store.patchBot(from.id, { approvePeerComms: true });
     queueDelegation(commsBus, from, { toBotId: target.id, message: "do this", depth: 0 }, 1);
@@ -413,10 +465,6 @@ describe("drainDelegations", () => {
     expect(runTargetCalls).toEqual([]);
   });
 });
-
-import { existsSync, readFileSync } from "node:fs";
-import { join } from "node:path";
-import { _loadPending, _resetPending, discardDelegations, pendingThreads } from "./delegations.ts";
 
 describe("delegations survive a restart", () => {
   let store: Store;

@@ -124,6 +124,7 @@ import { loadBundledSkills, loadUserSkills, mergeSkills, renderSkillInstructions
 import { shouldMountLocalComputer } from "./local-routing.ts";
 import { WorkOrderCapacityError, WorkOrderInputError, WorkOrderStore, type WorkOrderState } from "./work-orders.ts";
 import { TurnScheduler, type TurnLane } from "./turn-scheduler.ts";
+import { scheduleAdmissionSettlementAfterGrace } from "./turn-settlement.ts";
 
 const PORT = Number(process.env.OMB_PORT || process.env.OGB_PORT || 8799);
 const WEBHOOK_PORT = Number(process.env.OMB_WEBHOOK_PORT || PORT + 1);
@@ -322,24 +323,26 @@ function releaseTurnAdmission(threadId: string): void {
 const TURN_SETTLEMENT_GRACE_MS = 6_000;
 
 function settleTurnAfterGrace(threadId: string, botId: string): void {
-  const timer = setTimeout(() => {
-    const admission = turnAdmissionByThread.get(threadId);
-    if (!admission || admission.botId !== botId) return;
-    const group = store.groupByThread(threadId);
-    const speaker = groupSpeakers.get(threadId);
-    if (group && group.busyBotId === botId && speaker?.botId === botId) {
-      groupSpeakers.delete(threadId);
-      store.patchGroup(group.id, { busyBotId: null, unread: true });
-    }
-    const bot = store.bot(botId);
-    if (bot?.busy) {
-      stopScreenPoller(bot.id);
-      if (activeVpsThreads.get(bot.id) === threadId) activeVpsThreads.delete(bot.id);
-      store.setActivity(bot.id, "idle");
-    }
-    releaseTurnAdmission(threadId);
-  }, TURN_SETTLEMENT_GRACE_MS);
-  timer.unref?.();
+  scheduleAdmissionSettlementAfterGrace({
+    botId,
+    delayMs: TURN_SETTLEMENT_GRACE_MS,
+    current: () => turnAdmissionByThread.get(threadId),
+    settle: () => {
+      const group = store.groupByThread(threadId);
+      const speaker = groupSpeakers.get(threadId);
+      if (group && group.busyBotId === botId && speaker?.botId === botId) {
+        groupSpeakers.delete(threadId);
+        store.patchGroup(group.id, { busyBotId: null, unread: true });
+      }
+      const bot = store.bot(botId);
+      if (bot?.busy) {
+        stopScreenPoller(bot.id);
+        if (activeVpsThreads.get(bot.id) === threadId) activeVpsThreads.delete(bot.id);
+        store.setActivity(bot.id, "idle");
+      }
+      releaseTurnAdmission(threadId);
+    },
+  });
 }
 
 function cancelQueuedWorkOrderRuntime(workOrderId: string): void {

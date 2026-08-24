@@ -243,7 +243,10 @@ export function discardDelegations(bus: CommsBus, threadId: string, workOrders?:
   if (!list?.length) return;
   pendingDelegations.delete(threadId);
   savePending();
-  for (const item of list) transitionIfActive(workOrders, item.workOrderId, "cancelled", { error: "source turn did not finish" });
+  for (const item of list) {
+    cancelPeerApprovalForOwner(approvalOwner(item));
+    transitionIfActive(workOrders, item.workOrderId, "cancelled", { error: "source turn did not finish" });
+  }
   const from = bus.store.botByThread(threadId);
   if (!from) return;
   bus.store.appendMessage(threadId, {
@@ -282,6 +285,7 @@ export function discardDelegationsForTarget(bus: CommsBus, botId: string, workOr
     if (remaining.length) pendingDelegations.set(threadId, remaining);
     else pendingDelegations.delete(threadId);
     for (const item of removed) {
+      cancelPeerApprovalForOwner(approvalOwner(item));
       transitionIfActive(workOrders, item.workOrderId, "failed", { error: "target bot was deleted" });
     }
     if (bus.store.botByThread(threadId)) {
@@ -353,7 +357,7 @@ async function processOne(
       item.message,
       "delegate_bot",
       sourceThreadId,
-      item.workOrderId,
+      approvalOwner(item),
     );
     const afterApproval = workOrders?.get(item.workOrderId ?? "");
     if (afterApproval?.state === "cancelled" || afterApproval?.state === "failed") return "done";
@@ -403,6 +407,13 @@ async function processOne(
     throw error;
   }
   return "done";
+}
+
+/** Every queued item owns at most one approval. Durable work orders remain
+ * the public cancellation key; legacy/non-durable items fall back to their
+ * stable queue id so cleanup can still release a waiting drain. */
+function approvalOwner(item: PendingDelegationItem): string {
+  return item.workOrderId ?? item.id;
 }
 
 function transitionIfActive(
