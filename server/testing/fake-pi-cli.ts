@@ -170,6 +170,17 @@ function handle(cmd: any) {
       send({ type: "response", command: "set_model", success: true, data: { id: cmd.modelId, provider: cmd.provider } });
       return;
     }
+    case "set_thinking_level":
+      // record the level so a test can assert what the driver pinned
+      if (process.env.FAKE_PI_DUMP) {
+        try {
+          appendFileSync(process.env.FAKE_PI_DUMP, JSON.stringify({ thinkingLevel: cmd.level }) + "\n");
+        } catch {
+          /* never let dumping break a run */
+        }
+      }
+      send({ type: "response", command: "set_thinking_level", success: true });
+      return;
     case "prompt":
       // acknowledge acceptance; the completion comes via events
       send({ type: "response", command: "prompt", success: true });

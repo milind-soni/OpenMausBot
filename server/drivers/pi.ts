@@ -29,6 +29,7 @@ import { SPAWNED_PROXIES } from "../proxy-paths.ts";
 
 import type {
   DriverCreateInput,
+  EffortLevel,
   ModelCatalog,
   ProviderDriver,
   ProviderInstance,
@@ -37,12 +38,19 @@ import type {
   RuntimeEventListener,
   SendTurnInput,
 } from "../contracts.ts";
-import { newEventId, newId } from "../contracts.ts";
+import { EFFORT_LEVELS, newEventId, newId } from "../contracts.ts";
 import { appendNative } from "./native.ts";
 
 const DRIVER_KIND = "piAgent";
 const PI_ARGS = ["--mode", "rpc", "--no-session"];
 const NODE_ENV_FLAG = { ELECTRON_RUN_AS_NODE: "1" };
+
+/** Harness effort → pi thinking level (`set_thinking_level`). The sets match
+ * one-for-one except for the name of the lowest rung: the harness calls it
+ * "none", pi calls it "off". Exported for the test. */
+export function piThinkingLevel(effort: EffortLevel): (typeof EFFORT_LEVELS)[number] | "off" {
+  return effort === "none" ? "off" : effort;
+}
 
 /** Mirror of the Claude driver's integration → stdio MCP mount: every entry is
  * a JSON-RPC 2.0 stdio server the pi-mcp-extension consumes. Returns null when
@@ -581,6 +589,18 @@ export const PiDriver: ProviderDriver<PiConfig> = {
         }
       }
 
+      // pin reasoning effort after the model (the supported level set is
+      // model-dependent); a rejection keeps the engine default
+      if (turn.effort) {
+        try {
+          const levelPromise = awaitResponse("set_thinking_level");
+          send({ type: "set_thinking_level", level: piThinkingLevel(turn.effort) });
+          await levelPromise;
+        } catch {
+          /* keep going on the engine default */
+        }
+      }
+
       const message = turn.system ? `${turn.system}\n\n${turn.text}` : turn.text;
       try {
         send({ type: "prompt", message });
@@ -650,7 +670,14 @@ export const PiDriver: ProviderDriver<PiConfig> = {
           // extension, so it is offered exactly when the other engines offer
           // it: enabled unless the bot is in full-auto.
           localComputerMcp: !config.fullAuto,
-          images: false,
+          // Images ride the ordinary prompt as <attached-image path> refs the
+          // agent opens with its read tool — no native image blocks needed,
+          // same as every other CLI engine.
+          images: true,
+          // Reasoning effort pins pi's thinking level per turn (none → off).
+          // xhigh/max only land on models that expose them; pi rejects an
+          // unsupported level and the turn keeps the engine default.
+          effortLevels: EFFORT_LEVELS,
         },
         sendTurn,
         interruptTurn: async (threadId) => active.get(threadId)?.stop(),

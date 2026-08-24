@@ -255,6 +255,51 @@ describe("PiDriver turns (fake CLI)", () => {
     expect(instance.adapter.hasSession("t-exit")).toBe(false);
   });
 
+  it("advertises images and every harness effort level", async () => {
+    await create();
+    expect(instance.adapter.capabilities.images).toBe(true);
+    expect(instance.adapter.capabilities.effortLevels).toEqual(["none", "low", "medium", "high", "xhigh", "max"]);
+  });
+
+  it("pins reasoning effort via set_thinking_level after the model", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "omb-pi-effort-"));
+    const dump = join(dir, "dump.jsonl");
+    await create(undefined, { FAKE_PI_DUMP: dump });
+    const { turnId } = await instance.adapter.sendTurn({
+      threadId: "t-effort",
+      text: "hi",
+      model: "ollama-cloud/glm-5.2",
+      effort: "high",
+    });
+    await recorder.until((e) => e.type === "turn.completed" && e.turnId === turnId);
+    const levels = readFileSync(dump, "utf8")
+      .split("\n")
+      .filter(Boolean)
+      .map((line) => JSON.parse(line) as { thinkingLevel?: string })
+      .filter((record) => record.thinkingLevel !== undefined)
+      .map((record) => record.thinkingLevel!);
+    expect(levels).toEqual(["high"]);
+  });
+
+  it("maps the none effort to pi's off and sends nothing without effort", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "omb-pi-effort-"));
+    const dump = join(dir, "dump.jsonl");
+    await create(undefined, { FAKE_PI_DUMP: dump });
+    const none = await instance.adapter.sendTurn({ threadId: "t-none", text: "hi", effort: "none" });
+    await recorder.until((e) => e.type === "turn.completed" && e.turnId === none.turnId);
+    const plain = await instance.adapter.sendTurn({ threadId: "t-plain", text: "hi" });
+    await recorder.until((e) => e.type === "turn.completed" && e.turnId === plain.turnId);
+    const levels = readFileSync(dump, "utf8")
+      .split("\n")
+      .filter(Boolean)
+      .map((line) => JSON.parse(line) as { thinkingLevel?: string })
+      .filter((record) => record.thinkingLevel !== undefined)
+      .map((record) => record.thinkingLevel!);
+    // exactly one pin across both turns: the "none" turn's off — a plain turn
+    // must not touch the thinking level at all
+    expect(levels).toEqual(["off"]);
+  });
+
   it("scrubs provider and workspace credentials from every pi child env", async () => {
     const dir = mkdtempSync(join(tmpdir(), "omb-pi-dump-"));
     const dump = join(dir, "dump.jsonl");
