@@ -1652,7 +1652,7 @@ async function startTurn(
         : [];
       const coordinationPrompt = bot.chiefOfStaff
         ? chiefOfStaffSystemPrompt(bot.id, store.bots, Boolean(integrations.agents))
-        : integrations.agents
+        : integrations.agents && sectionPeers.length > 0
           ? "You can work with the other bots in your section through the agents tools — list_bots shows who's available, ask_bot sends one of them a message and returns their reply."
           : "";
       const credentialPrompt = integrations.agents
@@ -4649,7 +4649,7 @@ const server = createServer(async (req, res) => {
     // Inline credential cards never receive the credential value. Electron
     // saves it through the OS-backed store first; this route only verifies
     // configured state, updates card metadata, and resumes the paused turn.
-    m = path.match(/^\/api\/bots\/([\w-]+)\/secret-cards\/([\w-]+)\/(provided|dismiss)$/);
+    m = path.match(/^\/api\/bots\/([\w-]+)\/secret-cards\/([\w-]+)\/(provided|resume|dismiss)$/);
     if (m && method === "POST") {
       const body = await readBody(req);
       const threadId = String(body.threadId ?? "");
@@ -4662,6 +4662,16 @@ const server = createServer(async (req, res) => {
         }
         resumeSecretCard(m[1], threadId, message.id, "provided");
         return json(res, 200, { provided: true, resumed: true });
+      }
+      if (m[3] === "resume") {
+        if (!message.secret.provided || message.secret.dismissed) {
+          return json(res, 409, { error: "this credential request is not ready to resume" });
+        }
+        if (!credentialIsConfigured(cfg, message.secret.target)) {
+          return json(res, 409, { error: `${message.secret.label} is no longer configured` });
+        }
+        resumeSecretCard(m[1], threadId, message.id, "provided");
+        return json(res, 200, { resumed: true });
       }
       if (!message.secret.provided) resumeSecretCard(m[1], threadId, message.id, "dismissed");
       return json(res, 200, { dismissed: true, resumed: true });

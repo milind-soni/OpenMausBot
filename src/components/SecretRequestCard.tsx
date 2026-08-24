@@ -1,5 +1,5 @@
 import { useState, type FormEvent } from "react";
-import { Check, ExternalLink, KeyRound, Loader2, LockKeyhole, X } from "lucide-react";
+import { Check, ExternalLink, KeyRound, Loader2, LockKeyhole, RefreshCw, X } from "lucide-react";
 
 import { credentialConfigPatch } from "../../shared/credential-request";
 import { api, useStore, type ConfigStatus, type Message } from "@/state/store";
@@ -28,6 +28,22 @@ export function SecretRequestCard({
       method: "POST",
       body: JSON.stringify({ threadId }),
     });
+  };
+
+  const retryResume = async () => {
+    if (saving) return;
+    setSaving(true);
+    setLocalError(null);
+    try {
+      await api(`${endpoint}/resume`, {
+        method: "POST",
+        body: JSON.stringify({ threadId }),
+      });
+    } catch (error) {
+      setLocalError(error instanceof Error ? error.message : String(error));
+    } finally {
+      setSaving(false);
+    }
   };
 
   const save = async (event?: FormEvent) => {
@@ -94,7 +110,7 @@ export function SecretRequestCard({
                 <LockKeyhole size={11} /> Stored securely by OpenMausBot and never added to chat.
               </p>
             )}
-            {error && <p className="mt-2 text-[12px] text-danger">{error}</p>}
+            {error && <p role="alert" className="mt-2 text-[12px] text-danger">{error}</p>}
           </div>
           {!provided && (
             <button
@@ -141,9 +157,20 @@ export function SecretRequestCard({
           </form>
         )}
         {provided && (
-          <div className="flex items-center gap-1.5 border-t border-hairline/40 bg-panel/40 px-4 py-2.5 text-[11.5px] text-success">
-            {secret.resumed ? <Check size={12} /> : <Loader2 size={12} className="animate-spin" />}
-            {secret.resumed ? "Bot resumed without seeing the key" : "Waiting to resume safely"}
+          <div className="flex items-center justify-between border-t border-hairline/40 bg-panel/40 px-4 py-2.5 text-[11.5px] text-success">
+            <span className="flex items-center gap-1.5">
+              {secret.resumed ? <Check size={12} /> : error ? <KeyRound size={12} /> : <Loader2 size={12} className="animate-spin" />}
+              {secret.resumed ? "Bot resumed without seeing the key" : error ? "The key is safe; resuming failed" : "Waiting to resume safely"}
+            </span>
+            {!secret.resumed && error && (
+              <button
+                onClick={() => void retryResume()}
+                disabled={saving}
+                className="flex items-center gap-1.5 rounded-lg bg-accent px-3 py-1.5 text-[12px] font-medium text-white hover:opacity-90 disabled:opacity-50"
+              >
+                {saving ? <Loader2 size={12} className="animate-spin" /> : <RefreshCw size={12} />} Try again
+              </button>
+            )}
           </div>
         )}
       </div>

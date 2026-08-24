@@ -5,7 +5,17 @@ import {
   credentialConfigPatch,
   credentialIsConfigured,
   isCredentialTargetId,
+  type CredentialConfig,
+  type CredentialTargetId,
 } from "../shared/credential-request.ts";
+
+const MAPPINGS: Array<[CredentialTargetId, CredentialConfig]> = [
+  ["xaiApiKey", { xai: { key: "secret" } }],
+  ["boxToken", { box: { token: "secret" } }],
+  ["opencodeGoApiKey", { opencodeGo: { apiKey: "secret" } }],
+  ["ttsKey", { tts: { key: "secret" } }],
+  ["openaiImageApiKey", { imageGen: { key: "secret" } }],
+];
 
 describe("credential request allowlist", () => {
   it("accepts only declared own ids", () => {
@@ -16,8 +26,12 @@ describe("credential request allowlist", () => {
   });
 
   it("maps each id to a fixed config location", () => {
-    expect(credentialConfigPatch("boxToken", "secret")).toEqual({ box: { token: "secret" } });
-    expect(credentialConfigPatch("openaiImageApiKey", "secret")).toEqual({ imageGen: { key: "secret" } });
+    expect(MAPPINGS.map(([id]) => id).sort()).toEqual(Object.keys(CREDENTIAL_TARGETS).sort());
+    for (const [id, patch] of MAPPINGS) {
+      expect(credentialConfigPatch(id, "secret")).toEqual(patch);
+      expect(credentialIsConfigured(patch, id)).toBe(true);
+      expect(credentialIsConfigured({}, id)).toBe(false);
+    }
   });
 
   it("checks configured state without exposing values", () => {
