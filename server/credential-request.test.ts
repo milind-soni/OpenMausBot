@@ -4,6 +4,8 @@ import {
   CREDENTIAL_TARGETS,
   credentialConfigPatch,
   credentialIsConfigured,
+  credentialResumeOutcome,
+  isReusableCredentialRequest,
   isCredentialTargetId,
   type CredentialConfig,
   type CredentialTargetId,
@@ -38,5 +40,24 @@ describe("credential request allowlist", () => {
     expect(credentialIsConfigured({ tts: { key: "secret" } }, "ttsKey")).toBe(true);
     expect(credentialIsConfigured({ tts: { key: "" } }, "ttsKey")).toBe(false);
     expect(Object.keys(CREDENTIAL_TARGETS)).toHaveLength(5);
+  });
+
+  it("reuses open room cards only for the bot that requested them", () => {
+    const card = {
+      kind: "secret",
+      secret: { target: "xaiApiKey" },
+      from: { botId: "atlas" },
+    };
+    expect(isReusableCredentialRequest(card, "xaiApiKey", "atlas", true)).toBe(true);
+    expect(isReusableCredentialRequest(card, "xaiApiKey", "pixel", true)).toBe(false);
+    expect(isReusableCredentialRequest(card, "xaiApiKey", "pixel", false)).toBe(true);
+    expect(isReusableCredentialRequest({ ...card, secret: { ...card.secret, provided: true } }, "xaiApiKey", "atlas", true)).toBe(false);
+  });
+
+  it("preserves the original save or decline outcome when retrying", () => {
+    expect(credentialResumeOutcome({ provided: true })).toBe("provided");
+    expect(credentialResumeOutcome({ dismissed: true })).toBe("dismissed");
+    expect(credentialResumeOutcome({})).toBeNull();
+    expect(credentialResumeOutcome({ provided: true, dismissed: true })).toBeNull();
   });
 });

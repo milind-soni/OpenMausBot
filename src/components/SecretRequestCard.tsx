@@ -1,7 +1,8 @@
 import { useState, type FormEvent } from "react";
 import { Check, ExternalLink, KeyRound, Loader2, LockKeyhole, RefreshCw, X } from "lucide-react";
 
-import { credentialConfigPatch } from "../../shared/credential-request";
+import { credentialConfigPatch, credentialResumeOutcome } from "../../shared/credential-request";
+import { cn } from "@/lib/cn";
 import { api, useStore, type ConfigStatus, type Message } from "@/state/store";
 
 export function SecretRequestCard({
@@ -20,8 +21,28 @@ export function SecretRequestCard({
   const [savedLocally, setSavedLocally] = useState(false);
   const [localError, setLocalError] = useState<string | null>(null);
   const endpoint = `/api/bots/${encodeURIComponent(botId)}/secret-cards/${encodeURIComponent(message.id)}`;
+  const error = localError ?? secret.error;
+  const outcome = credentialResumeOutcome(secret);
+  const provided = outcome === "provided";
+  const declined = outcome === "dismissed";
+  const description = provided
+    ? secret.resumed
+      ? "Saved securely. Your bot is continuing the task."
+      : "Saved securely. Your bot will continue when its current turn settles."
+    : declined
+      ? "You chose not to provide this credential. OpenMausBot could not resume the bot yet."
+      : secret.description;
+  const footerLabel = declined
+    ? "Continuing without this credential failed"
+    : secret.resumed
+      ? "Bot resumed without seeing the key"
+      : error
+        ? "The key is safe; resuming failed"
+        : "Waiting to resume safely";
 
-  if (secret.dismissed) return null;
+  // A successful decline has no durable card to show. If its continuation
+  // failed, bring the card back with the same retry affordance as a saved key.
+  if (declined && (secret.resumed || !error)) return null;
 
   const notifyProvided = async () => {
     await api(`${endpoint}/provided`, {
@@ -79,9 +100,6 @@ export function SecretRequestCard({
     }).catch(() => {});
   };
 
-  const provided = secret.provided;
-  const error = localError ?? secret.error;
-
   return (
     <div className="flex w-full justify-start">
       <div className="w-full max-w-[520px] overflow-hidden rounded-2xl border border-hairline/50 bg-card shadow-sm">
@@ -99,20 +117,16 @@ export function SecretRequestCard({
               )}
             </div>
             <p className="mt-0.5 text-[12.5px] leading-relaxed text-ink-secondary">
-              {provided
-                ? secret.resumed
-                  ? "Saved securely. Your bot is continuing the task."
-                  : "Saved securely. Your bot will continue when its current turn settles."
-                : secret.description}
+              {description}
             </p>
-            {!provided && (
+            {!provided && !declined && (
               <p className="mt-1 flex items-center gap-1 text-[11.5px] text-ink-secondary/80">
                 <LockKeyhole size={11} /> Stored securely by OpenMausBot and never added to chat.
               </p>
             )}
             {error && <p role="alert" className="mt-2 text-[12px] text-danger">{error}</p>}
           </div>
-          {!provided && (
+          {!provided && !declined && (
             <button
               onClick={dismiss}
               aria-label="Not now"
@@ -123,7 +137,7 @@ export function SecretRequestCard({
             </button>
           )}
         </div>
-        {!provided && (
+        {!provided && !declined && (
           <form onSubmit={(event) => void save(event)} className="border-t border-hairline/40 bg-panel/40 px-4 py-3">
             <div className="flex gap-2">
               <input
@@ -156,11 +170,14 @@ export function SecretRequestCard({
             </a>
           </form>
         )}
-        {provided && (
-          <div className="flex items-center justify-between border-t border-hairline/40 bg-panel/40 px-4 py-2.5 text-[11.5px] text-success">
+        {(provided || declined) && (
+          <div className={cn(
+            "flex items-center justify-between border-t border-hairline/40 bg-panel/40 px-4 py-2.5 text-[11.5px]",
+            declined ? "text-danger" : "text-success",
+          )}>
             <span className="flex items-center gap-1.5">
               {secret.resumed ? <Check size={12} /> : error ? <KeyRound size={12} /> : <Loader2 size={12} className="animate-spin" />}
-              {secret.resumed ? "Bot resumed without seeing the key" : error ? "The key is safe; resuming failed" : "Waiting to resume safely"}
+              {footerLabel}
             </span>
             {!secret.resumed && error && (
               <button

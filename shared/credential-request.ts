@@ -78,3 +78,32 @@ export function credentialIsConfigured(config: CredentialConfig, id: CredentialT
       return Boolean(config.imageGen?.key);
   }
 }
+
+export function isReusableCredentialRequest(
+  message: {
+    kind?: unknown;
+    secret?: { target?: unknown; provided?: unknown; dismissed?: unknown };
+    from?: { botId?: unknown };
+  },
+  target: CredentialTargetId,
+  requestingBotId: string,
+  roomThread: boolean,
+): boolean {
+  return (
+    message.kind === "secret" &&
+    message.secret?.target === target &&
+    message.secret.provided !== true &&
+    message.secret.dismissed !== true &&
+    (!roomThread || message.from?.botId === requestingBotId)
+  );
+}
+
+export function credentialResumeOutcome(state: {
+  provided?: unknown;
+  dismissed?: unknown;
+}): "provided" | "dismissed" | null {
+  const provided = state.provided === true;
+  const dismissed = state.dismissed === true;
+  if (provided === dismissed) return null;
+  return provided ? "provided" : "dismissed";
+}

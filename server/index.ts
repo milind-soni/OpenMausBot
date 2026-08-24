@@ -11,7 +11,9 @@ import { z } from "zod";
 import { botAvatarUrlFromStoredPath } from "../shared/bot-avatar.ts";
 import {
   CREDENTIAL_TARGETS,
+  credentialResumeOutcome,
   credentialIsConfigured,
+  isReusableCredentialRequest,
   isCredentialTargetId,
   type CredentialTargetId,
 } from "../shared/credential-request.ts";
@@ -2849,12 +2851,8 @@ const server = createServer(async (req, res) => {
         if (credentialIsConfigured(cfg, credentialId)) {
           return json(res, 200, { alreadyConfigured: true, label: target.label });
         }
-        const existing = store.messagesFor(fromThreadId).find(
-          (message) =>
-            message.kind === "secret" &&
-            message.secret?.target === credentialId &&
-            !message.secret.provided &&
-            !message.secret.dismissed,
+        const existing = store.messagesFor(fromThreadId).find((message) =>
+          isReusableCredentialRequest(message, credentialId, from.id, Boolean(owner.group))
         );
         if (existing) {
           return json(res, 200, { messageId: existing.id, label: target.label });
@@ -4697,13 +4695,14 @@ const server = createServer(async (req, res) => {
         return json(res, 200, { provided: true, resumed: true });
       }
       if (m[3] === "resume") {
-        if (!message.secret.provided || message.secret.dismissed) {
+        const outcome = credentialResumeOutcome(message.secret);
+        if (!outcome) {
           return json(res, 409, { error: "this credential request is not ready to resume" });
         }
-        if (!credentialIsConfigured(cfg, message.secret.target)) {
+        if (outcome === "provided" && !credentialIsConfigured(cfg, message.secret.target)) {
           return json(res, 409, { error: `${message.secret.label} is no longer configured` });
         }
-        resumeSecretCard(m[1], threadId, message.id, "provided");
+        resumeSecretCard(m[1], threadId, message.id, outcome);
         return json(res, 200, { resumed: true });
       }
       if (!message.secret.provided) resumeSecretCard(m[1], threadId, message.id, "dismissed");
