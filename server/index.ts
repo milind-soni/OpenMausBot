@@ -1862,6 +1862,7 @@ async function runGroupMemberTurn(
   // must not run Pixel twice (once chained, once as a direct responder)
   spoken: Set<string> = new Set(),
   cardContinuation?: string,
+  onDispatchError?: (message: string) => void,
 ): Promise<boolean> {
   const group = store.group(groupId);
   const bot = store.bot(botId);
@@ -1870,12 +1871,14 @@ async function runGroupMemberTurn(
   const instance = registry.get(bot.modelSelection.instanceId);
   const userName = cfg.profile?.name?.trim() || "User";
   if (!instance) {
+    const message = `${bot.name}'s model is unavailable`;
     store.appendMessage(group.threadId, {
       role: "bot",
       kind: "activity",
       from: { botId: bot.id, name: bot.name, color: bot.color },
-      tool: { name: `error: ${bot.name}'s model is unavailable`, ok: false },
+      tool: { name: `error: ${message}`, ok: false },
     });
+    onDispatchError?.(message);
     return true;
   }
   // One turn per bot at a time, across BOTH engines. Without this a bot
@@ -1883,12 +1886,14 @@ async function runGroupMemberTurn(
   // processes, interleaved token spend, and an interrupt that only ever
   // reached one of them.
   if (bot.busy) {
+    const message = `${bot.name} is busy in another conversation — skipped this round`;
     store.appendMessage(group.threadId, {
       role: "bot",
       kind: "activity",
       from: { botId: bot.id, name: bot.name, color: bot.color },
-      tool: { name: `${bot.name} is busy in another conversation — skipped this round`, ok: false },
+      tool: { name: message, ok: false },
     });
+    onDispatchError?.(message);
     return true;
   }
   const integrations: NonNullable<Parameters<typeof instance.adapter.sendTurn>[0]["integrations"]> = {};
@@ -1909,12 +1914,14 @@ async function runGroupMemberTurn(
       if (connection) integrations.composio = connection;
     }
   } catch (error) {
+    const message = `connected apps are unavailable — ${error instanceof Error ? error.message : String(error)}`;
     store.appendMessage(group.threadId, {
       role: "bot",
       kind: "activity",
       from: { botId: bot.id, name: bot.name, color: bot.color },
-      tool: { name: `error: connected apps are unavailable — ${error instanceof Error ? error.message : String(error)}`, ok: false },
+      tool: { name: `error: ${message}`, ok: false },
     });
+    onDispatchError?.(message);
     return true;
   }
   store.setActivity(bot.id, "working");
@@ -2008,12 +2015,14 @@ async function runGroupMemberTurn(
         ...memberTurnSelection(bot.modelSelection),
       })
       .catch((err) => {
+        const message = err instanceof Error ? err.message : "turn failed";
         store.appendMessage(group.threadId, {
           role: "bot",
           kind: "activity",
           from: { botId: bot.id, name: bot.name, color: bot.color },
-          tool: { name: `error: ${err instanceof Error ? err.message.slice(0, 140) : "turn failed"}`, ok: false },
+          tool: { name: `error: ${message.slice(0, 140)}`, ok: false },
         });
+        onDispatchError?.(message);
         watchdog.settle(group.threadId);
         finish("dispatch_failed");
       });
@@ -2265,7 +2274,14 @@ function dispatchSecretResume(entry: SecretResumeEntry) {
         pendingSecretResumes.set(`${entry.threadId}:${entry.messageId}`, entry);
         return;
       }
-      await runGroupMemberTurn(current.group.id, entry.botId, 0, new Set(), prompt);
+      await runGroupMemberTurn(
+        current.group.id,
+        entry.botId,
+        0,
+        new Set(),
+        prompt,
+        (message) => markSecretResumeFailed(entry.threadId, entry.messageId, message),
+      );
     });
     groupQueues.set(
       owner.group.id,
