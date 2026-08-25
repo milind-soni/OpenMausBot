@@ -8,7 +8,8 @@
 // status SUCCESS. Deterministic, no network.
 //
 // Keep this file dependency-free — it runs as a bare `node` subprocess.
-import { writeFileSync } from "node:fs";
+import { readFileSync, writeFileSync } from "node:fs";
+import { join } from "node:path";
 
 const argv = process.argv.slice(2);
 if (process.env.FAKE_AGY_DUMP) {
@@ -17,6 +18,19 @@ if (process.env.FAKE_AGY_DUMP) {
 if (argv.includes("--version")) {
   console.log("1.1.12");
   process.exit(0);
+}
+
+const delayMs = Number(process.env.FAKE_AGY_DELAY_MS ?? 0);
+if (Number.isFinite(delayMs) && delayMs > 0) {
+  await new Promise((resolve) => setTimeout(resolve, delayMs));
+}
+if (process.env.FAKE_AGY_MCP_DUMP) {
+  const home = process.env.HOME || process.env.USERPROFILE || "";
+  let config = "null";
+  try {
+    config = readFileSync(join(home, ".gemini", "config", "mcp_config.json"), "utf8");
+  } catch {}
+  writeFileSync(process.env.FAKE_AGY_MCP_DUMP, config);
 }
 
 const out = (obj: unknown) => process.stdout.write(JSON.stringify(obj) + "\n");
