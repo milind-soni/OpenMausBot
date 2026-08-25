@@ -149,6 +149,17 @@ describe("createLineSplitter", () => {
     splitter.flush();
     expect(lines).toEqual(['{"text":"mouse 🐭"}']);
   });
+
+  it("stops buffering an oversized unterminated frame", () => {
+    const lines: string[] = [];
+    const onOverflow = vi.fn();
+    const splitter = createLineSplitter((line) => lines.push(line), { maxLineChars: 4, onOverflow });
+    splitter.push("12345");
+    splitter.push("\nignored\n");
+    splitter.flush();
+    expect(onOverflow).toHaveBeenCalledOnce();
+    expect(lines).toEqual([]);
+  });
 });
 
 describe("createGateInterceptor", () => {

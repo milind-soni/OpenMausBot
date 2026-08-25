@@ -5,22 +5,25 @@
 // the shadow-instance behavior end to end while it's at it.
 import { spawn, type ChildProcess } from "node:child_process";
 import { createServer, request, type Server } from "node:http";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { dirname, join } from "node:path";
+import { delimiter, dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
 import { removeTempDir, waitForExit } from "./testing/cleanup.ts";
 import { openSse } from "./testing/sse.ts";
 import { IMAGE_MAX_BYTES } from "./attachments.ts";
+import { validPngFixture } from "./testing/png-fixture.ts";
 
 const SERVER_DIR = dirname(fileURLToPath(import.meta.url));
 const ROOT = join(SERVER_DIR, "..");
 const FAKE_CLAUDE_CLI = join(SERVER_DIR, "testing", "fake-claude-cli.ts");
-const PORT = 18800 + Math.floor(Math.random() * 10_000);
+// Several integration files boot real harnesses in parallel. Derive these
+// ports from the worker pid instead of competing for the same random range.
+const PORT = 50_000 + (process.pid % 10_000);
 const BASE = `http://127.0.0.1:${PORT}`;
-const WEBHOOK_PORT = 39000 + Math.floor(Math.random() * 10_000);
+const WEBHOOK_PORT = 60_000 + (process.pid % 5_000);
 const WEBHOOK_BASE = `http://127.0.0.1:${WEBHOOK_PORT}`;
 
 let child: ChildProcess;
@@ -30,6 +33,7 @@ let boxStubPort = 0;
 let home: string;
 let staticDir: string;
 let fakeClaudeDump: string;
+let fakeSshBin: string;
 let stderr = "";
 
 const api = async (method: string, path: string, body?: unknown): Promise<{ status: number; body: any }> => {
@@ -68,11 +72,58 @@ beforeAll(async () => {
   home = mkdtempSync(join(tmpdir(), "omb-api-test-"));
   staticDir = join(home, "static");
   fakeClaudeDump = join(home, "fake-claude-dump.json");
+  fakeSshBin = join(home, "fake-ssh-bin");
   // a fleet of exactly one unknown driver: no CLI probes, no network
   mkdirSync(join(home, ".openmausbot"), { recursive: true });
   mkdirSync(join(staticDir, "assets"), { recursive: true });
+  mkdirSync(fakeSshBin, { recursive: true });
   writeFileSync(join(staticDir, "index.html"), "<!doctype html><title>Packaged OpenMausBot</title>");
   writeFileSync(join(staticDir, "assets", "smoke.css"), "body { color: white; }");
+  const fakeSshScript = join(home, "fake-existing-vm-ssh.mjs");
+  const fakeImage = validPngFixture().toString("base64");
+  writeFileSync(
+    fakeSshScript,
+    `import { Buffer } from "node:buffer";
+const args = process.argv.slice(2);
+const alias = args[9];
+const remote = args.slice(10).join(" ");
+if (remote === "uname -s") { process.stdout.write("Linux\\n"); process.exit(0); }
+if (remote === "cua-driver --version") { process.stdout.write("cua-driver 0.20.0\\n"); process.exit(0); }
+if (remote === "true") process.exit(0);
+if (remote !== "cua-driver mcp") process.exit(2);
+const image = Buffer.from(${JSON.stringify(fakeImage)}, "base64");
+const tools = ["get_desktop_state", "list_apps", "click", "type_text", "press_key", "scroll"];
+let pending = "";
+process.stdin.setEncoding("utf8");
+process.stdin.on("data", (chunk) => {
+  pending += chunk;
+  let newline;
+  while ((newline = pending.indexOf("\\n")) !== -1) {
+    const line = pending.slice(0, newline);
+    pending = pending.slice(newline + 1);
+    if (!line.trim()) continue;
+    const message = JSON.parse(line);
+    if (message.id === undefined) continue;
+    const result = message.method === "initialize"
+      ? { protocolVersion: "2024-11-05" }
+      : message.method === "tools/list"
+        ? { tools: tools.map((name) => ({ name })) }
+        : { content: [{ type: "image", data: image.toString("base64"), mimeType: "image/png" }] };
+    process.stdout.write(JSON.stringify({ jsonrpc: "2.0", id: message.id, result }) + "\\n");
+  }
+});
+`,
+    "utf8",
+  );
+  if (process.platform === "win32") {
+    // The server still uses shell:false. Run the fixture through the same
+    // process-exec + script-prefix mechanism used by CLI tests rather than a
+    // .cmd shim, which CreateProcess cannot resolve safely without a shell.
+  } else {
+    const fakeSsh = join(fakeSshBin, "ssh");
+    writeFileSync(fakeSsh, `#!/bin/sh\nexec "${process.execPath}" "${fakeSshScript}" "$@"\n`, "utf8");
+    chmodSync(fakeSsh, 0o755);
+  }
   writeFileSync(
     join(home, ".openmausbot", "config.json"),
     JSON.stringify({
@@ -213,7 +264,7 @@ beforeAll(async () => {
   child = spawn(process.execPath, [join(SERVER_DIR, "index.ts")], {
     cwd: ROOT,
     env: {
-      ...(process.env.PATH ? { PATH: process.env.PATH } : {}),
+      PATH: [fakeSshBin, process.env.PATH].filter(Boolean).join(delimiter),
       ...(process.env.SystemRoot ? { SystemRoot: process.env.SystemRoot } : {}),
       HOME: home,
       USERPROFILE: home,
@@ -224,6 +275,9 @@ beforeAll(async () => {
       OMB_STATIC_DIR: staticDir,
       FAKE_CLAUDE_MODE: "hang",
       FAKE_CLAUDE_DUMP: fakeClaudeDump,
+      ...(process.platform === "win32"
+        ? { OMB_TEST_SSH_COMMAND: process.execPath, OMB_TEST_SSH_PREFIX: JSON.stringify([fakeSshScript]) }
+        : {}),
     },
     stdio: ["ignore", "pipe", "pipe"],
   });
@@ -1693,7 +1747,7 @@ describe("harness HTTP API", () => {
     const first = (await api("POST", "/api/bots")).body.bot;
     const second = (await api("POST", "/api/bots")).body.bot;
     const before = await api("GET", "/api/config");
-    expect(before.body.localVm).toEqual({ mode: "shared", maxInstances: 2 });
+    expect(before.body.localVm).toEqual({ source: "managed", mode: "shared", maxInstances: 2, sshAlias: "" });
 
     const shared = await api("GET", `/api/bots/${first.id}/local-computer`);
     expect(shared.status).toBe(200);
@@ -1703,7 +1757,7 @@ describe("harness HTTP API", () => {
       localVm: { mode: "per-bot", maxInstances: 3 },
     });
     expect(saved.status).toBe(200);
-    expect(saved.body.localVm).toEqual({ mode: "per-bot", maxInstances: 3 });
+    expect(saved.body.localVm).toEqual({ source: "managed", mode: "per-bot", maxInstances: 3, sshAlias: "" });
 
     const [firstStatus, secondStatus] = await Promise.all([
       api("GET", `/api/bots/${first.id}/local-computer`),
@@ -1722,6 +1776,108 @@ describe("harness HTTP API", () => {
     const disk = JSON.parse(readFileSync(join(home, ".openmausbot", "config.json"), "utf8"));
     expect(disk.localVm).toEqual({ mode: "per-bot", maxInstances: 3 });
     await api("PATCH", "/api/config", { localVm: { mode: "shared", maxInstances: 2 } });
+  });
+
+  it("does not hide managed per-bot workspaces when switching source or deleting a bot", async () => {
+    const botId = (await api("POST", "/api/bots", {})).body.bot.id;
+    let workspacePath = "";
+    try {
+      expect((await api("PATCH", "/api/config", { localVm: { mode: "per-bot" } })).status).toBe(200);
+      workspacePath = (await api("GET", `/api/bots/${botId}/local-computer`)).body.workspace_path;
+      mkdirSync(workspacePath, { recursive: true });
+
+      const refused = await api("PATCH", "/api/config", {
+        localVm: { source: "existing", sshAlias: "fixture-existing-vm" },
+      });
+      expect(refused.status).toBe(409);
+      expect(refused.body.error).toMatch(/per-bot Local VM/i);
+
+      rmSync(workspacePath, { recursive: true, force: true });
+      const switched = await api("PATCH", "/api/config", {
+        localVm: { source: "existing", sshAlias: "fixture-existing-vm" },
+      });
+      expect(switched.status).toBe(200);
+
+      mkdirSync(workspacePath, { recursive: true });
+      const deletion = await api("DELETE", `/api/bots/${botId}`);
+      expect(deletion.status).toBe(409);
+      expect(deletion.body.error).toMatch(/Local VM/i);
+      rmSync(workspacePath, { recursive: true, force: true });
+      expect((await api("DELETE", `/api/bots/${botId}`)).status).toBe(200);
+    } finally {
+      if (workspacePath) rmSync(workspacePath, { recursive: true, force: true });
+      await api("PATCH", "/api/config", { localVm: { source: "managed", mode: "shared", maxInstances: 2, sshAlias: "" } });
+      await api("DELETE", `/api/bots/${botId}`);
+    }
+  });
+
+  it("persists the Existing VM source without exposing lifecycle or Take Control actions", async () => {
+    const created = await api("POST", "/api/bots", {});
+    const botId = created.body.bot.id;
+    await api("PATCH", `/api/bots/${botId}`, { name: "Existing VM Guard Fixture" });
+    try {
+      const saved = await api("PATCH", "/api/config", {
+        localVm: { source: "existing", sshAlias: "fixture-existing-vm" },
+      });
+      expect(saved.status).toBe(200);
+      expect(saved.body.localVm).toEqual({
+        source: "existing",
+        sshAlias: "fixture-existing-vm",
+      });
+      expect((await api("GET", "/api/config")).body.localVm).toEqual({
+        source: "existing",
+        sshAlias: "fixture-existing-vm",
+      });
+
+      const invalid = await api("PATCH", "/api/config", { localVm: { sshAlias: "vm; reboot" } });
+      expect(invalid.status).toBe(400);
+      expect(invalid.body.error).toContain("localVm.sshAlias");
+
+      const lifecycle = await api("POST", "/api/local-computer/start", {});
+      expect(lifecycle.status).toBe(409);
+      expect(lifecycle.body.error).toContain("user-managed");
+
+      const selected = await api("PATCH", `/api/bots/${botId}`, { computer: "vm" });
+      expect(selected.status).toBe(200);
+      const engine = await api("PATCH", `/api/bots/${botId}`, {
+        modelSelection: { instanceId: "claude", model: "claude-sonnet-5" },
+      });
+      expect(engine.status).toBe(200);
+      const started = await api("POST", `/api/bots/${botId}/messages`, { text: "hold the Existing VM turn" });
+      expect(started.status).toBe(202);
+      await expect.poll(async () => {
+        const state = (await api("GET", "/api/bots")).body;
+        return state.bots.find((bot: { id: string }) => bot.id === botId)?.busy;
+      }, { timeout: 5_000 }).toBe(true);
+      const sourceChange = await api("PATCH", "/api/config", { localVm: { source: "managed" } });
+      expect(sourceChange.status).toBe(409);
+      expect(sourceChange.body.error).toContain("active Existing VM turn");
+      const aliasChange = await api("PATCH", "/api/config", { localVm: { sshAlias: "another-existing-vm" } });
+      expect(aliasChange.status).toBe(409);
+      expect(aliasChange.body.error).toContain("active Existing VM turn");
+      const destination = await api("PATCH", `/api/bots/${botId}`, { computer: "cloud" });
+      expect(destination.status).toBe(409);
+      expect(destination.body.error).toContain("active Existing VM turn");
+      await api("POST", `/api/bots/${botId}/interrupt`);
+      await expect.poll(async () => {
+        const state = (await api("GET", "/api/bots")).body;
+        return state.bots.find((bot: { id: string }) => bot.id === botId)?.busy;
+      }, { timeout: 5_000 }).toBe(false);
+      const take = await api("POST", `/api/bots/${botId}/computer/control`, { action: "take" });
+      expect(take.status).toBe(409);
+      expect(take.body.error).toContain("watch-only");
+      const viewer = await api("POST", `/api/bots/${botId}/computer/join`, {});
+      expect(viewer.status).toBe(409);
+      expect(viewer.body.error).toContain("watch-only");
+      await api("PATCH", "/api/config", { localVm: { sshAlias: "" } });
+      const status = await api("GET", "/api/local-computer");
+      expect(status.body).toMatchObject({ source: "existing", ready: false, ssh: "not-configured" });
+      expect(status.body).not.toHaveProperty("mode");
+      expect(status.body).not.toHaveProperty("max_instances");
+    } finally {
+      await api("PATCH", "/api/config", { localVm: { source: "managed", sshAlias: "" } });
+      await api("DELETE", `/api/bots/${botId}`);
+    }
   });
 
   it("keeps an active turn alive when only the room timeout changes", async () => {
@@ -1770,6 +1926,44 @@ describe("harness HTTP API", () => {
       await api("DELETE", `/api/groups/${room.id}`);
       await api("DELETE", `/api/bots/${botId}`);
       await api("PUT", "/api/config", { rooms: { turnTimeoutMinutes: 5 } });
+    }
+  });
+
+  it("clears active room ownership when provider settings reload", async () => {
+    const bot = (await api("POST", "/api/bots", {})).body.bot;
+    const room = (await api("POST", "/api/groups", {
+      name: "Provider reload room",
+      memberIds: [bot.id],
+    })).body.group;
+    const ready = await api("PATCH", `/api/groups/${room.id}/setup`, { action: "skip" });
+    expect(ready.status).toBe(200);
+    try {
+      expect((await api("PATCH", `/api/bots/${bot.id}`, {
+        modelSelection: { instanceId: "claude", model: "claude-sonnet-5" },
+      })).status).toBe(200);
+      expect((await api("POST", `/api/groups/${room.id}/messages`, { text: "hold for reload" })).status).toBe(202);
+      await expect.poll(async () => {
+        const state = (await api("GET", "/api/bots")).body;
+        return {
+          botBusy: state.bots.find((candidate: { id: string }) => candidate.id === bot.id)?.busy,
+          roomBusyBotId: state.groups.find((candidate: { id: string }) => candidate.id === room.id)?.busyBotId,
+        };
+      }, { timeout: 5_000 }).toEqual({ botBusy: true, roomBusyBotId: bot.id });
+
+      const reload = await api("PATCH", "/api/instances/claude", { cli: FAKE_CLAUDE_CLI });
+      expect(reload.status).toBe(200);
+      await expect.poll(async () => {
+        const state = (await api("GET", "/api/bots")).body;
+        return {
+          botBusy: state.bots.find((candidate: { id: string }) => candidate.id === bot.id)?.busy,
+          roomBusyBotId: state.groups.find((candidate: { id: string }) => candidate.id === room.id)?.busyBotId,
+        };
+      }, { timeout: 5_000 }).toEqual({ botBusy: false, roomBusyBotId: null });
+      expect((await api("DELETE", `/api/groups/${room.id}`)).status).toBe(200);
+    } finally {
+      await api("POST", `/api/groups/${room.id}/interrupt`);
+      await api("DELETE", `/api/groups/${room.id}`);
+      await api("DELETE", `/api/bots/${bot.id}`);
     }
   });
 

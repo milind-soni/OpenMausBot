@@ -39,6 +39,24 @@ export interface BridgeLiveness {
   args: string[];
 }
 
+export const MAX_MCP_LINE_CHARS = 16 * 1024 * 1024;
+
+export type ControlGate = { url: string; token: string };
+
+export class IncompleteControlConfigError extends Error {
+  constructor(label: string) {
+    super(`incomplete ${label} control configuration`);
+    this.name = "IncompleteControlConfigError";
+  }
+}
+
+export function controlGateFromEnv(label: string): ControlGate | undefined {
+  const url = process.env.OMB_CONTROL_URL ?? "";
+  const token = process.env.OMB_CONTROL_TOKEN ?? "";
+  if (Boolean(url) !== Boolean(token)) throw new IncompleteControlConfigError(label);
+  return url && token ? { url, token } : undefined;
+}
+
 /** Run the liveness command; alive means "exited 0 within the timeout". The
  * probe is its own short-lived process, so it cannot inherit the wedged
  * connection it is diagnosing. */
@@ -69,6 +87,16 @@ export interface WatchdogHandle {
   /** Any traffic in either direction — resets the inactivity window. */
   touch: () => void;
   stop: () => void;
+}
+
+export interface LineSplitter {
+  push: (chunk: Buffer | string) => void;
+  flush: () => void;
+}
+
+export interface LineSplitterOptions {
+  maxLineChars?: number;
+  onOverflow?: () => void;
 }
 
 /** Inactivity → probe → (only then) declare dead. Traffic arriving while a
@@ -132,34 +160,53 @@ export interface BridgeOptions {
   liveness?: BridgeLiveness;
   /** Enables the who-is-driving gate: the harness's loopback control
    * endpoint plus its per-boot token. Absent → fully transparent bridge. */
-  gate?: { url: string; token: string };
+  gate?: ControlGate;
 }
 
 /** Collect a byte stream into complete newline-terminated lines. MCP's
  * stdio transport is one JSON-RPC frame per line, so line boundaries are
- * the only safe place to inspect — or inject — anything. */
-export function createLineSplitter(onLine: (line: string) => void): {
-  push: (chunk: Buffer | string) => void;
-  flush: () => void;
-} {
+ * the only safe place to inspect — or inject — anything. An unterminated
+ * frame is still bounded so a dead or hostile peer cannot grow this buffer
+ * without limit. */
+export function createLineSplitter(onLine: (line: string) => void, options: LineSplitterOptions = {}) {
+  const maxLineChars = options.maxLineChars ?? MAX_MCP_LINE_CHARS;
   let pending = "";
+  let overflowed = false;
   const decoder = new StringDecoder("utf8");
-  return {
+  const overflow = () => {
+    if (overflowed) return;
+    overflowed = true;
+    pending = "";
+    options.onOverflow?.();
+  };
+  const emit = (line: string) => {
+    if (line.length > maxLineChars) {
+      overflow();
+      return;
+    }
+    onLine(line);
+  };
+  const splitter: LineSplitter = {
     push(chunk) {
-      pending += typeof chunk === "string" ? chunk : decoder.write(chunk);
+      if (overflowed) return;
+      pending += Buffer.isBuffer(chunk) ? decoder.write(chunk) : chunk;
       let newline: number;
       while ((newline = pending.indexOf("\n")) !== -1) {
         const line = pending.slice(0, newline);
         pending = pending.slice(newline + 1);
-        onLine(line);
+        emit(line);
+        if (overflowed) return;
       }
+      if (pending.length > maxLineChars) overflow();
     },
     flush() {
+      if (overflowed) return;
       pending += decoder.end();
-      if (pending) onLine(pending);
+      if (pending) emit(pending);
       pending = "";
     },
   };
+  return splitter;
 }
 
 /** The gate itself, factored free of process wiring so a test can drive it
@@ -216,7 +263,14 @@ export function runMcpBridge(options: BridgeOptions): void {
   child.stdin.on("error", () => {});
   child.stderr.pipe(process.stderr);
 
-  let detach: () => void;
+  let detach: () => void = () => {};
+  const failFrameLimit = () => {
+    process.stderr.write(`${options.label} MCP frame exceeded its output limit; ending the bridge\n`);
+    process.exitCode = 1;
+    detach();
+    child.stdin.destroy();
+    child.kill("SIGKILL");
+  };
   if (options.gate) {
     const client = createControlClient({ url: options.gate.url, token: options.gate.token });
     const inbound = createLineSplitter(
@@ -225,6 +279,7 @@ export function runMcpBridge(options: BridgeOptions): void {
         forward: (line) => child.stdin.write(line + "\n"),
         refuse: (line) => process.stdout.write(line + "\n"),
       }),
+      { onOverflow: failFrameLimit },
     );
     const onStdin = (chunk: Buffer) => inbound.push(chunk);
     process.stdin.on("data", onStdin);
@@ -235,7 +290,7 @@ export function runMcpBridge(options: BridgeOptions): void {
     // Injected refusals must never land inside one of the child's
     // half-written frames, so the child's stdout is re-emitted at line
     // granularity as well.
-    const outbound = createLineSplitter((line) => process.stdout.write(line + "\n"));
+    const outbound = createLineSplitter((line) => process.stdout.write(line + "\n"), { onOverflow: failFrameLimit });
     child.stdout.on("data", (chunk) => outbound.push(chunk));
     child.stdout.on("end", () => outbound.flush());
     detach = () => {

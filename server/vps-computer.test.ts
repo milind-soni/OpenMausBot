@@ -30,16 +30,13 @@ import {
   reuseVps,
   type VpsCommandRunner,
 } from "./vps-computer.ts";
+import { validPngFixture } from "./testing/png-fixture.ts";
 
 const BOT_ID = "bot-1234-abcd";
 const CONFIG: AppConfig = { vps: { sshAlias: "production-vps" } };
 const IMAGE_ID = `sha256:${"a".repeat(64)}`;
 const CONTAINER_ID = "b".repeat(64);
-const screenshot = Buffer.concat([
-  Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]),
-  Buffer.alloc(600),
-  Buffer.from("IEND", "ascii"),
-]);
+const screenshot = validPngFixture();
 
 function fixture({
   image = true,

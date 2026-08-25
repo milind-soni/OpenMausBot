@@ -172,13 +172,18 @@ describe("preparing a harness response for a device", () => {
         "transfer-encoding": "chunked",
         "cache-control": "public, max-age=3600",
       });
-      res.end(JSON.stringify({ bots: [{ id: "b1" }], resumeCursors: { agent: "cursor-value" } }));
+      res.end(JSON.stringify({
+        bots: [{ id: "b1" }],
+        resumeCursors: { agent: "cursor-value" },
+        localVm: { source: "existing", configured: true, sshAlias: "personal-linux-vm" },
+      }));
     };
 
     const { status, text, headers } = await device();
     expect(status).toBe(200);
-    expect(JSON.parse(text)).toEqual({ bots: [{ id: "b1" }] });
+    expect(JSON.parse(text)).toEqual({ bots: [{ id: "b1" }], localVm: { source: "existing", configured: true } });
     expect(text).not.toContain("cursor-value");
+    expect(text).not.toContain("personal-linux-vm");
     expect(headers.get("cache-control")).toBe("private, no-store");
     expect(headers.get("cloudflare-cdn-cache-control")).toBe("no-store");
   });

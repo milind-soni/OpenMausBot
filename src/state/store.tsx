@@ -256,7 +256,9 @@ export interface ConfigStatus {
   box: { configured: boolean };
   vps: { configured: boolean; sshAlias: string };
   rooms: { turnTimeoutMinutes: number };
-  localVm: { mode: "shared" | "per-bot"; maxInstances: number };
+  localVm:
+    | { source: "managed"; mode: "shared" | "per-bot"; maxInstances: number; sshAlias: string }
+    | { source: "existing"; sshAlias: string };
   opencodeGo?: { configured: boolean };
   /** Voice (ElevenLabs). `configured` = a key is saved; `ready` = a key AND
    * a voice, which is what it takes to actually speak. The key itself is

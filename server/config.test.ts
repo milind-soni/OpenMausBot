@@ -10,6 +10,8 @@ import {
   loadConfig,
   localVmMaxInstances,
   localVmMode,
+  localVmSource,
+  localVmSshAlias,
   parseConfigPatch,
   parseStoredConfig,
   roomTurnTimeoutMinutes,
@@ -73,6 +75,8 @@ describe("configuration boundaries", () => {
   it("preserves shared Local VM behavior by default and accepts bounded per-bot mode", () => {
     expect(localVmMode({})).toBe("shared");
     expect(localVmMaxInstances({})).toBe(2);
+    expect(localVmSource({})).toBe("managed");
+    expect(localVmSshAlias({})).toBeNull();
     expect(parseConfigPatch({ localVm: { mode: "per-bot", maxInstances: 4 } })).toEqual({
       localVm: { mode: "per-bot", maxInstances: 4 },
     });
@@ -89,6 +93,16 @@ describe("configuration boundaries", () => {
     expect(() => parseConfigPatch({ features: { skillRecorder: "yes" } })).toThrow(
       "features.skillRecorder",
     );
+  });
+
+  it("accepts an Existing VM source without persisting anything except its SSH alias", () => {
+    expect(
+      parseConfigPatch({ localVm: { source: "existing", sshAlias: "linux-vm" } }),
+    ).toEqual({ localVm: { source: "existing", sshAlias: "linux-vm" } });
+    expect(localVmSource({ localVm: { source: "existing" } })).toBe("existing");
+    expect(localVmSshAlias({ localVm: { source: "existing", sshAlias: "linux-vm" } })).toBe("linux-vm");
+    expect(() => parseConfigPatch({ localVm: { sshAlias: "linux-vm; id" } })).toThrow("localVm.sshAlias");
+    expect(() => parseConfigPatch({ localVm: { sshAlias: "-linux-vm" } })).toThrow("localVm.sshAlias");
   });
 
   it.each([0, 1.5, 5, "2", null])("rejects an invalid per-bot VM limit: %j", (maxInstances) => {
