@@ -3,6 +3,7 @@ const INSTALLATION_CREDENTIAL =
 const INSTALLATION_ID =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const CLIENT_INSTANCE = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/;
+const REQUEST_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
 const stringValue = (value) => (typeof value === "string" ? value : null);
 
@@ -52,12 +53,27 @@ const boundedSecret = (value, maximum = 8_192) =>
     : null;
 
 export class ControlPlaneError extends Error {
-  constructor(code, status = 0) {
+  constructor(code, status = 0, requestId = "") {
     super(code);
     this.name = "ControlPlaneError";
     this.code = code;
     this.status = status;
+    this.requestId = REQUEST_ID.test(requestId) ? requestId : "";
   }
+}
+
+function statusErrorCode(status) {
+  if (status === 400 || status === 422) return "invalid_request";
+  if (status === 401) return "unauthorized";
+  if (status === 403) return "forbidden";
+  if (status === 404) return "not_found";
+  if (status === 405) return "method_not_allowed";
+  if (status === 409) return "conflict";
+  if (status === 413) return "request_too_large";
+  if (status === 415) return "unsupported_media_type";
+  if (status === 429) return "rate_limited";
+  if (status >= 500) return "control_plane_unavailable";
+  return "request_failed";
 }
 
 /** Production accepts HTTPS only. A loopback HTTP origin remains available
@@ -189,8 +205,9 @@ export function createControlPlaneClient({
         ? rawCode
         : null;
       throw new ControlPlaneError(
-        code ?? "request_failed",
+        code ?? statusErrorCode(response.status),
         response.status,
+        response.headers.get("x-request-id") ?? "",
       );
     }
     if (!allowEmpty && !plainObject(payload)) {

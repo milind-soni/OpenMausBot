@@ -126,9 +126,11 @@ function withAuthenticatedAccount(
 
 const FRIENDLY_MESSAGES = Object.freeze({
   invalid_email: "Enter a valid email address.",
+  invalid_request: "The secure connection request was not accepted. Check the details and try again.",
   invalid_otp: "That code is not valid. Check the email and try again.",
   otp_expired: "That code expired. Email yourself a new one.",
   unauthorized: "Your sign-in expired. Email yourself a new code to reconnect.",
+  forbidden: "The secure connection request was not allowed. Try signing in again.",
   signed_out: "Your sign-in expired. Email yourself a new code to reconnect.",
   network_unavailable: "OpenMausBot could not reach its secure connection service. Check your internet and try again.",
   rate_limited: "Too many attempts were made. Wait a little, then try again.",
@@ -139,12 +141,18 @@ const FRIENDLY_MESSAGES = Object.freeze({
   endpoint_unavailable: "The secure connection service could not finish setup. Local pairing still works; try again shortly.",
   endpoint_cleanup_pending: "The secure connection is still being removed. Try signing out again shortly.",
   control_plane_unavailable: "Secure access is not available right now. Local pairing still works.",
+  internal_error: "The secure connection service had a problem. Local pairing still works; try again.",
   invalid_response: "The secure connection service returned an unexpected response. Try again.",
+  request_failed: "The secure connection request could not be completed. Local pairing still works; try again.",
 });
 
 export function friendlyCompanionAccountError(error) {
   const code = error instanceof ControlPlaneError ? error.code : "";
-  return FRIENDLY_MESSAGES[code] ?? "Secure access could not be updated. Local pairing still works; try again.";
+  const message = FRIENDLY_MESSAGES[code] ?? FRIENDLY_MESSAGES.request_failed;
+  const reference = error instanceof ControlPlaneError && error.requestId
+    ? ` Reference: ${error.requestId}.`
+    : "";
+  return `${message}${reference}`;
 }
 
 function publicState({ available, status, email, endpoint, message }) {
@@ -467,18 +475,19 @@ export function createCompanionAccountService({
   const requestCode = (rawEmail) => serialize(async () => {
     if (!configured) throw new Error(FRIENDLY_MESSAGES.control_plane_unavailable);
     const email = normalizeAccountEmail(rawEmail);
+    let requested;
     try {
       await requireHealthyControlPlane();
-      const requested = await client.requestOTP(email);
-      phase = {
-        status: "signed-out",
-        email: requested.email,
-      };
-      return settledState();
+      requested = await client.requestOTP(email);
     } catch (error) {
       const message = failAction(error, { email, signedOut: true });
       throw new Error(message);
     }
+    phase = {
+      status: "signed-out",
+      email: requested.email,
+    };
+    return settledState();
   });
 
   const verifyCode = (rawEmail, rawCode) => serialize(async () => {

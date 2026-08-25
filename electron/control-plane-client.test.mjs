@@ -237,6 +237,40 @@ describe("control-plane desktop client", () => {
     });
   });
 
+  it("falls back from Better Auth's message-only 429 without exposing its prose", async () => {
+    const requestId = "44444444-4444-4444-8444-444444444444";
+    const client = createControlPlaneClient({
+      baseURL: "https://accounts.openmausbot.com",
+      fetchImpl: vi.fn(async () => jsonResponse(
+        { message: "Too many requests. Please try again later." },
+        { status: 429, headers: { "x-request-id": requestId } },
+      )),
+    });
+
+    await expect(client.requestOTP("ada@example.com")).rejects.toMatchObject({
+      name: "ControlPlaneError",
+      code: "rate_limited",
+      status: 429,
+      requestId,
+    });
+  });
+
+  it("uses stable status errors when a response has no public error contract", async () => {
+    const client = createControlPlaneClient({
+      baseURL: "https://accounts.openmausbot.com",
+      fetchImpl: vi.fn(async () => jsonResponse(
+        { code: "INTERNAL_DEPENDENCY_DETAIL", message: "do not expose this" },
+        { status: 400, headers: { "x-request-id": "not-a-safe-request-id" } },
+      )),
+    });
+
+    await expect(client.requestOTP("ada@example.com")).rejects.toMatchObject({
+      code: "invalid_request",
+      status: 400,
+      requestId: "",
+    });
+  });
+
   it("fails closed on redirects and network errors", async () => {
     const client = createControlPlaneClient({
       baseURL: "https://accounts.openmausbot.com",

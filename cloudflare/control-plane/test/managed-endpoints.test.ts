@@ -291,6 +291,34 @@ class FakeCloudflare {
 }
 
 describe("Cloudflare API response contracts", () => {
+  it("keeps redirects manual and rejects them without forwarding credentials", async () => {
+    const fetcher = vi.fn<CloudflareFetch>(async (_input, init) => {
+      expect(init?.redirect).toBe("manual");
+      return new Response(null, {
+        headers: { location: "https://redirect.invalid/capture-token" },
+        status: 302,
+      });
+    });
+    const api = new CloudflareAPI(readConfig(env).cloudflare, fetcher);
+
+    await expect(api.listTunnels("redirect-probe")).rejects.toMatchObject({
+      code: "cf_http_302",
+      status: 302,
+    });
+    expect(fetcher).toHaveBeenCalledOnce();
+  });
+
+  it("preserves the network error contract for genuine fetch rejection", async () => {
+    const api = new CloudflareAPI(readConfig(env).cloudflare, async () => {
+      throw new TypeError("simulated connection failure");
+    });
+
+    await expect(api.listTunnels("network-probe")).rejects.toMatchObject({
+      code: "cf_network",
+      status: null,
+    });
+  });
+
   it("accepts the documented result-only DNS delete response and validates its ID", async () => {
     const api = new CloudflareAPI(readConfig(env).cloudflare, async () => (
       Response.json({ result: { id: "dns-record-1" } })

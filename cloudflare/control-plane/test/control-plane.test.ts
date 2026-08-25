@@ -237,6 +237,29 @@ describe("Better Auth email OTP and bearer boundary", () => {
     expect(rateLimit?.attempts).toBe(3);
   });
 
+  it("canonicalizes Better Auth's message-only rate limit response", async () => {
+    const responses = [];
+    for (let index = 0; index < 6; index += 1) {
+      responses.push(await call("/api/auth/email-otp/send-verification-otp", {
+        method: "POST",
+        headers: { "cf-connecting-ip": "198.51.100.42" },
+        body: { email: `better-auth-limit-${index}@example.com`, type: "sign-in" },
+      }));
+    }
+
+    expect(responses.slice(0, 5).map((response) => response.status)).toEqual([
+      200,
+      200,
+      200,
+      200,
+      200,
+    ]);
+    const limited = responses[5];
+    expect(limited.status).toBe(429);
+    await expect(limited.json()).resolves.toEqual({ error: "rate_limited" });
+    expect(limited.headers.get("x-request-id")).toMatch(/^[0-9a-f-]{36}$/i);
+  });
+
   it("completes email OTP registration once and authenticates a bearer", async () => {
     const account = await signIn("ada@example.com");
     const me = await call("/v1/me", { token: account.token });
@@ -267,6 +290,7 @@ describe("Better Auth email OTP and bearer boundary", () => {
       body: { email: invalidEmail, otp: "00000000", name: "Invalid" },
     });
     expect(invalid.status).toBe(400);
+    await expect(invalid.json()).resolves.toEqual({ error: "invalid_otp" });
 
     const accepted = await call("/api/auth/sign-in/email-otp", {
       method: "POST",
@@ -280,6 +304,7 @@ describe("Better Auth email OTP and bearer boundary", () => {
       body: { email: invalidEmail, otp: validOTP, name: "Replay" },
     });
     expect(replayed.status).toBe(400);
+    await expect(replayed.json()).resolves.toEqual({ error: "invalid_otp" });
 
     const expiredEmail = "expired-otp@example.com";
     const expiredContext = createExecutionContext();
@@ -296,6 +321,7 @@ describe("Better Auth email OTP and bearer boundary", () => {
       body: { email: expiredEmail, otp: expiredOTP, name: "Expired" },
     });
     expect(expired.status).toBe(400);
+    await expect(expired.json()).resolves.toEqual({ error: "otp_expired" });
 
     const signedOut = await call("/api/auth/sign-out", {
       method: "POST",
