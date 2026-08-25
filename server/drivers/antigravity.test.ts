@@ -304,6 +304,41 @@ describe("Antigravity computer MCP config", () => {
     }
   });
 
+  it("preserves concurrent config edits while restoring only its own MCP entry", () => {
+    const home = mkdtempSync(join(tmpdir(), "omb-agy-mcpconcurrent-"));
+    try {
+      const restoreNewFile = ensureAntigravityComputerMcp(boxEntry(), { HOME: home });
+      const concurrentlyCreated = readConfig(home);
+      concurrentlyCreated.mcpServers["external-helper"] = { command: "external-mcp" };
+      concurrentlyCreated.futureTopLevelKey = { keep: true };
+      writeFileSync(configPath(home), JSON.stringify(concurrentlyCreated));
+
+      restoreNewFile();
+      expect(existsSync(configPath(home))).toBe(true);
+      let restored = readConfig(home);
+      expect(restored.mcpServers[ANTIGRAVITY_COMPUTER_MCP_KEY]).toBeUndefined();
+      expect(restored.mcpServers["external-helper"]).toEqual({ command: "external-mcp" });
+      expect(restored.futureTopLevelKey).toEqual({ keep: true });
+
+      const originalEntry = { command: "user-owned-mcp", args: ["--serve"] };
+      writeFileSync(
+        configPath(home),
+        JSON.stringify({ mcpServers: { [ANTIGRAVITY_COMPUTER_MCP_KEY]: originalEntry } }),
+      );
+      const restoreExistingEntry = ensureAntigravityComputerMcp(boxEntry(), { HOME: home });
+      const concurrentlyEdited = readConfig(home);
+      concurrentlyEdited.mcpServers["another-helper"] = { command: "another-mcp" };
+      writeFileSync(configPath(home), JSON.stringify(concurrentlyEdited));
+
+      restoreExistingEntry();
+      restored = readConfig(home);
+      expect(restored.mcpServers[ANTIGRAVITY_COMPUTER_MCP_KEY]).toEqual(originalEntry);
+      expect(restored.mcpServers["another-helper"]).toEqual({ command: "another-mcp" });
+    } finally {
+      rmSync(home, { recursive: true, force: true });
+    }
+  });
+
   it("a computer-less turn removes only its own key, and never creates the file just to remove", () => {
     const home = mkdtempSync(join(tmpdir(), "omb-agy-mcprm-"));
     try {
@@ -494,6 +529,57 @@ describe("Antigravity computer MCP config", () => {
       await expect.poll(() => existsSync(configPath(home))).toBe(false);
     } finally {
       firstRecorder.stop();
+      secondRecorder.stop();
+      await first.dispose();
+      await second.dispose();
+      rmSync(home, { recursive: true, force: true });
+    }
+  }, 10_000);
+
+  it("force-reaps an interrupted child that ignores SIGTERM before result", async () => {
+    ensureDirs();
+    chmodSync(FAKE_CLI, 0o755);
+    const home = mkdtempSync(join(tmpdir(), "omb-agy-mcpinterrupt-"));
+    const readyFile = join(home, "ready");
+    const first = await AntigravityDriver.create({
+      instanceId: "agy-mcp-interrupted",
+      displayName: undefined,
+      environment: {
+        HOME: home,
+        FAKE_AGY_DELAY_MS: "10000",
+        FAKE_AGY_IGNORE_SIGTERM: "1",
+        FAKE_AGY_READY_FILE: readyFile,
+      },
+      enabled: true,
+      config: { cli: FAKE_CLI, fullAuto: true },
+    });
+    const second = await AntigravityDriver.create({
+      instanceId: "agy-mcp-after-interrupt",
+      displayName: undefined,
+      environment: { HOME: home },
+      enabled: true,
+      config: { cli: FAKE_CLI, fullAuto: true },
+    });
+    const secondRecorder = recordEvents(second.adapter);
+    try {
+      await first.adapter.sendTurn({ threadId: "t-mcp-interrupted", text: "first", integrations: boxIntegrations });
+      expect(readConfig(home).mcpServers[ANTIGRAVITY_COMPUTER_MCP_KEY]).toEqual(boxEntry());
+      await expect.poll(() => existsSync(readyFile)).toBe(true);
+      await first.adapter.interruptTurn("t-mcp-interrupted");
+
+      let secondSpawned = false;
+      const secondTurn = second.adapter.sendTurn({ threadId: "t-mcp-after-interrupt", text: "second" }).then((result) => {
+        secondSpawned = true;
+        return result;
+      });
+      if (process.platform !== "win32") {
+        await new Promise((resolve) => setTimeout(resolve, 1_000));
+        expect(secondSpawned).toBe(false);
+      }
+      await secondTurn;
+      await secondRecorder.until((event) => event.type === "turn.completed");
+      await expect.poll(() => existsSync(configPath(home))).toBe(false);
+    } finally {
       secondRecorder.stop();
       await first.dispose();
       await second.dispose();

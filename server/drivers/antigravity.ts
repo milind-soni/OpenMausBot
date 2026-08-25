@@ -224,26 +224,58 @@ export function ensureAntigravityComputerMcp(
   mkdirSync(directory, { recursive: true, mode: 0o700 });
   chmodSync(directory, 0o700);
   if (existed) chmodSync(path, 0o600);
-  writeFileSync(path, `${JSON.stringify({ ...config, mcpServers: servers }, null, 2)}\n`, { mode: 0o600 });
+  const mounted = `${JSON.stringify({ ...config, mcpServers: servers }, null, 2)}\n`;
+  writeFileSync(path, mounted, { mode: 0o600 });
   chmodSync(path, 0o600);
 
-  // Restore exactly what was present before this turn. The module-wide lease
-  // means no other OpenMausBot Antigravity turn can modify the file before
-  // this runs. Keep the tightened permissions when restoring an existing file.
+  const hadOriginalEntry = ANTIGRAVITY_COMPUTER_MCP_KEY in (config.mcpServers ?? {});
+  const originalEntry = config.mcpServers?.[ANTIGRAVITY_COMPUTER_MCP_KEY];
+
+  // Restore exactly what was present before this turn when nobody else touched
+  // the file. A user's own agy process is outside our module-wide lease, so if
+  // it edited the config concurrently, preserve that edit and restore only our
+  // one key instead of replacing (or deleting) the whole file.
   let restored = false;
   return () => {
     if (restored) return;
     restored = true;
-    if (original !== null) {
+    let current: string;
+    try {
+      current = readFileSync(path, "utf8");
+    } catch (error) {
+      if (error instanceof Error && "code" in error && error.code === "ENOENT") return;
+      throw error;
+    }
+    if (current === mounted) {
+      if (original === null) {
+        unlinkSync(path);
+        return;
+      }
       writeFileSync(path, original, { mode: 0o600 });
       chmodSync(path, 0o600);
       return;
     }
+
+    // A malformed concurrent edit is not safe to rewrite. Leaving a stale
+    // OpenMausBot entry is preferable to destroying bytes we cannot interpret.
+    let currentJson: unknown;
     try {
-      unlinkSync(path);
-    } catch (error) {
-      if (!(error instanceof Error) || !("code" in error) || error.code !== "ENOENT") throw error;
+      currentJson = JSON.parse(current);
+    } catch {
+      return;
     }
+    const parsed = mcpConfigFileSchema.safeParse(currentJson);
+    if (!parsed.success) return;
+    const currentConfig = parsed.data;
+    const currentServers = { ...currentConfig.mcpServers };
+    if (hadOriginalEntry) currentServers[ANTIGRAVITY_COMPUTER_MCP_KEY] = originalEntry;
+    else delete currentServers[ANTIGRAVITY_COMPUTER_MCP_KEY];
+    writeFileSync(
+      path,
+      `${JSON.stringify({ ...currentConfig, mcpServers: currentServers }, null, 2)}\n`,
+      { mode: 0o600 },
+    );
+    chmodSync(path, 0o600);
   };
 }
 
@@ -464,7 +496,7 @@ export const AntigravityDriver: ProviderDriver<AntigravityConfig> = {
 
       let childClosed = false;
       let postSettleReaper: ReturnType<typeof setTimeout> | undefined;
-      let postSettleEscalation: ReturnType<typeof setTimeout> | undefined;
+      let terminationEscalation: ReturnType<typeof setTimeout> | undefined;
       let mcpFinalized = false;
       const finalizeMcp = () => {
         if (mcpFinalized) return;
@@ -481,16 +513,9 @@ export const AntigravityDriver: ProviderDriver<AntigravityConfig> = {
           releaseMcpLease();
         }
       };
-      armPostSettleCleanup = () => {
-        if (childClosed || postSettleReaper) return;
-        // A normal agy process exits immediately after `result`. Give it a
-        // short grace, then reap a zombie so `close` can release the lease.
-        postSettleReaper = setTimeout(() => killCliTree(child), 2_000);
-        postSettleReaper.unref?.();
-        // Keep the lease while the child is alive. If graceful termination is
-        // ignored, force the process tree down; `close` is the only path that
-        // restores the global config and releases the next queued turn.
-        postSettleEscalation = setTimeout(() => {
+      const armTerminationEscalation = () => {
+        if (childClosed || terminationEscalation) return;
+        terminationEscalation = setTimeout(() => {
           if (childClosed) return;
           if (process.platform === "win32") {
             killCliTree(child); // taskkill /T /F is already forceful
@@ -505,8 +530,20 @@ export const AntigravityDriver: ProviderDriver<AntigravityConfig> = {
               child.kill("SIGKILL");
             } catch {}
           }
-        }, 5_000);
-        postSettleEscalation.unref?.();
+        }, 3_000);
+        terminationEscalation.unref?.();
+      };
+      const stop = () => {
+        killCliTree(child); // process groups are POSIX-only
+        armTerminationEscalation();
+      };
+      armPostSettleCleanup = () => {
+        if (childClosed || postSettleReaper) return;
+        // A normal agy process exits immediately after `result`. Give it a
+        // short grace, then reap a zombie. Explicit stops use the same bounded
+        // SIGKILL escalation so an uncooperative child cannot retain the lease.
+        postSettleReaper = setTimeout(stop, 2_000);
+        postSettleReaper.unref?.();
       };
 
       // conversation_id from the init event → the resumeCursor (session.started
@@ -613,7 +650,7 @@ export const AntigravityDriver: ProviderDriver<AntigravityConfig> = {
         childClosed = true;
         children.delete(child); // close is the true process-exit signal
         clearTimeout(postSettleReaper);
-        clearTimeout(postSettleEscalation);
+        clearTimeout(terminationEscalation);
         finalizeMcp();
         if (!settled) {
           emit({
@@ -625,7 +662,6 @@ export const AntigravityDriver: ProviderDriver<AntigravityConfig> = {
         }
       });
 
-      const stop = () => killCliTree(child); // process groups are POSIX-only
       active.set(threadId, { stop, turnId });
       pending.delete(threadId);
 

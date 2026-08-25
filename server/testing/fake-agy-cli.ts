@@ -15,6 +15,9 @@ const argv = process.argv.slice(2);
 if (process.env.FAKE_AGY_IGNORE_SIGTERM === "1") {
   process.on("SIGTERM", () => {});
 }
+if (process.env.FAKE_AGY_READY_FILE) {
+  writeFileSync(process.env.FAKE_AGY_READY_FILE, "ready");
+}
 if (process.env.FAKE_AGY_DUMP) {
   writeFileSync(process.env.FAKE_AGY_DUMP, JSON.stringify({ argv, env: process.env }, null, 2));
 }
