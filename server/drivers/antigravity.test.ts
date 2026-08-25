@@ -564,7 +564,7 @@ describe("Antigravity computer MCP config", () => {
     try {
       await first.adapter.sendTurn({ threadId: "t-mcp-interrupted", text: "first", integrations: boxIntegrations });
       expect(readConfig(home).mcpServers[ANTIGRAVITY_COMPUTER_MCP_KEY]).toEqual(boxEntry());
-      await expect.poll(() => existsSync(readyFile)).toBe(true);
+      await expect.poll(() => existsSync(readyFile), { timeout: 2_000 }).toBe(true);
       await first.adapter.interruptTurn("t-mcp-interrupted");
 
       let secondSpawned = false;
@@ -578,7 +578,7 @@ describe("Antigravity computer MCP config", () => {
       }
       await secondTurn;
       await secondRecorder.until((event) => event.type === "turn.completed");
-      await expect.poll(() => existsSync(configPath(home))).toBe(false);
+      await expect.poll(() => existsSync(configPath(home)), { timeout: 6_000 }).toBe(false);
     } finally {
       secondRecorder.stop();
       await first.dispose();

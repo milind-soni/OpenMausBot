@@ -380,7 +380,12 @@ export const AntigravityDriver: ProviderDriver<AntigravityConfig> = {
       // one workspace dir. replace() already keeps a UUID unique and safe.
       const tag = threadId.replace(/[^\w-]/g, "");
       const workspace = join(DATA_DIR, "workspaces", tag);
-      mkdirSync(workspace, { recursive: true });
+      try {
+        mkdirSync(workspace, { recursive: true });
+      } catch (error) {
+        pending.delete(threadId);
+        throw error;
+      }
       const cwd = turn.cwd ?? workspace;
 
       // prompt is passed as the `--print` argv value: agy does NOT read the
