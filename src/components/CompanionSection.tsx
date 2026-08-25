@@ -123,6 +123,36 @@ export const companionAccountActionError = (
   return account?.status === "signed-out" ? account.message ?? null : null;
 };
 
+export type CompanionPairingMode =
+  | "local-only"
+  | "hosted-startable"
+  | "hosted-connecting"
+  | "hosted-ready";
+
+/** Pairing must not get ahead of a hosted connection the user has already
+ * configured. On an access point that isolates wireless clients, a QR made
+ * during that short gap contains only local routes and is guaranteed to time
+ * out even though the managed route becomes usable moments later.
+ *
+ * A ready account with Companion off is intentionally startable: starting
+ * Companion is what activates and publishes its persisted managed endpoint.
+ * `beginSetup` checks the returned state before it opens the pairing window.
+ * Signed-out, unavailable, and failed account states keep the local-first
+ * behavior promised by the account card. */
+export const companionPairingMode = (
+  account: CompanionAccountState | null,
+  companion: Pick<CompanionState, "enabled" | "endpoints"> | null,
+): CompanionPairingMode => {
+  if (companion?.endpoints?.some((endpoint) => endpoint.kind === "hosted")) {
+    return "hosted-ready";
+  }
+  if (!account?.available || account.status === "signed-out" || account.status === "error") {
+    return "local-only";
+  }
+  if (account.status === "ready" && !companion?.enabled) return "hosted-startable";
+  return "hosted-connecting";
+};
+
 export function CompanionSection() {
   const [state, setState] = useState<CompanionState | null>(null);
   const [account, setAccount] = useState<CompanionAccountState | null>(null);
@@ -195,16 +225,25 @@ export function CompanionSection() {
   // had not existed for hours. Ten seconds is cheap on loopback and well
   // inside how long anyone looks at a settings pane before believing it.
   const pairing = Boolean(state?.pairing);
+  const pairingMode = companionPairingMode(account, state);
+  // verifyCode() and retry() do not return until provisioning settles, so
+  // the last rendered account state can still be signed-out/error while the
+  // main process is already creating the endpoint. These are the two account
+  // actions that can cross that boundary.
+  const accountProvisioningHosted =
+    accountBusy && ((codeSent && code.length === 8) || account?.status === "error");
+  const pairingWaitingForHosted =
+    pairingMode === "hosted-connecting" || accountProvisioningHosted;
   useEffect(() => {
     const timer = window.setInterval(
       () => {
         setNow(Date.now());
         void load();
       },
-      pairing ? 1_000 : 10_000,
+      pairing || pairingWaitingForHosted ? 1_000 : 10_000,
     );
     return () => window.clearInterval(timer);
-  }, [pairing, load]);
+  }, [pairing, pairingWaitingForHosted, load]);
 
   if (!bridge()) {
     return (
@@ -241,7 +280,7 @@ export function CompanionSection() {
     state.addresses?.find((candidate) => candidate !== state.tailscale) ??
     state.hosts?.[0];
   const pairingLink =
-    state.pairing && address
+    state.pairing && address && !pairingWaitingForHosted
       ? companionPairingLink({
           address,
           port: state.port,
@@ -257,6 +296,14 @@ export function CompanionSection() {
     void act(async (companion) => {
       const started = state.enabled ? state : await companion.start();
       if (!started.enabled || started.error) return started;
+      // A persisted hosted account can become ready while its connector is
+      // still activating. Never mint a local-only QR during that gap.
+      if (
+        accountProvisioningHosted ||
+        companionPairingMode(account, started) === "hosted-connecting"
+      ) {
+        return started;
+      }
       return companion.pairing(true);
     });
 
@@ -468,7 +515,9 @@ export function CompanionSection() {
       <Card
         title="Connect a phone"
         subtitle={
-          state.pairing
+          pairingWaitingForHosted
+            ? "Finishing this computer's secure connection before showing a pairing code."
+            : state.pairing
             ? pairingLink
               ? "Scan with your phone's Camera, then confirm in OpenMausMobile. You can also use the code manually."
               : "Open OpenMausMobile, choose this computer, and enter the code."
@@ -477,7 +526,12 @@ export function CompanionSection() {
               : "This turns on Companion and opens a short, single-use pairing window in one step."
         }
       >
-        {state.pairing ? (
+        {pairingWaitingForHosted ? (
+          <div className="flex items-center gap-2 text-[13px] text-ink-secondary">
+            <Loader2 size={15} className="animate-spin text-accent" />
+            Waiting for the secure connection…
+          </div>
+        ) : state.pairing ? (
           <div className="flex flex-col gap-4 sm:flex-row sm:items-center">
             {pairingLink && (
               <div className="w-fit shrink-0 rounded-xl bg-white p-3" aria-label="Phone pairing QR code">
