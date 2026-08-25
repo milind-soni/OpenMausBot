@@ -464,7 +464,7 @@ export const AntigravityDriver: ProviderDriver<AntigravityConfig> = {
 
       let childClosed = false;
       let postSettleReaper: ReturnType<typeof setTimeout> | undefined;
-      let postSettleFallback: ReturnType<typeof setTimeout> | undefined;
+      let postSettleEscalation: ReturnType<typeof setTimeout> | undefined;
       let mcpFinalized = false;
       const finalizeMcp = () => {
         if (mcpFinalized) return;
@@ -487,10 +487,26 @@ export const AntigravityDriver: ProviderDriver<AntigravityConfig> = {
         // short grace, then reap a zombie so `close` can release the lease.
         postSettleReaper = setTimeout(() => killCliTree(child), 2_000);
         postSettleReaper.unref?.();
-        // Some platforms can fail to deliver `close` after a failed kill.
-        // Never leave credentials mounted or every later turn queued forever.
-        postSettleFallback = setTimeout(finalizeMcp, 5_000);
-        postSettleFallback.unref?.();
+        // Keep the lease while the child is alive. If graceful termination is
+        // ignored, force the process tree down; `close` is the only path that
+        // restores the global config and releases the next queued turn.
+        postSettleEscalation = setTimeout(() => {
+          if (childClosed) return;
+          if (process.platform === "win32") {
+            killCliTree(child); // taskkill /T /F is already forceful
+            return;
+          }
+          try {
+            const pid = child.pid;
+            if (pid) process.kill(-pid, "SIGKILL");
+            else child.kill("SIGKILL");
+          } catch {
+            try {
+              child.kill("SIGKILL");
+            } catch {}
+          }
+        }, 5_000);
+        postSettleEscalation.unref?.();
       };
 
       // conversation_id from the init event → the resumeCursor (session.started
@@ -597,7 +613,7 @@ export const AntigravityDriver: ProviderDriver<AntigravityConfig> = {
         childClosed = true;
         children.delete(child); // close is the true process-exit signal
         clearTimeout(postSettleReaper);
-        clearTimeout(postSettleFallback);
+        clearTimeout(postSettleEscalation);
         finalizeMcp();
         if (!settled) {
           emit({

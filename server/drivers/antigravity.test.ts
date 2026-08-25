@@ -454,7 +454,12 @@ describe("Antigravity computer MCP config", () => {
     const first = await AntigravityDriver.create({
       instanceId: "agy-mcp-zombie",
       displayName: undefined,
-      environment: { HOME: home, FAKE_AGY_MCP_DUMP: firstDump, FAKE_AGY_POST_RESULT_DELAY_MS: "10000" },
+      environment: {
+        HOME: home,
+        FAKE_AGY_MCP_DUMP: firstDump,
+        FAKE_AGY_POST_RESULT_DELAY_MS: "10000",
+        FAKE_AGY_IGNORE_SIGTERM: "1",
+      },
       enabled: true,
       config: { cli: FAKE_CLI, fullAuto: true },
     });
@@ -472,7 +477,15 @@ describe("Antigravity computer MCP config", () => {
       await firstRecorder.until((event) => event.type === "turn.completed");
       expect(readConfig(home).mcpServers[ANTIGRAVITY_COMPUTER_MCP_KEY]).toEqual(boxEntry());
 
-      const secondTurn = second.adapter.sendTurn({ threadId: "t-mcp-after-zombie", text: "second" });
+      let secondSpawned = false;
+      const secondTurn = second.adapter.sendTurn({ threadId: "t-mcp-after-zombie", text: "second" }).then((result) => {
+        secondSpawned = true;
+        return result;
+      });
+      if (process.platform !== "win32") {
+        await new Promise((resolve) => setTimeout(resolve, 2_500));
+        expect(secondSpawned).toBe(false);
+      }
       await secondTurn;
       await secondRecorder.until((event) => event.type === "turn.completed");
 
