@@ -150,7 +150,11 @@ export class CloudflareAPI {
 
     let response: Response;
     try {
-      response = await this.fetcher(new URL(path, API_BASE), {
+      // Calling a stored global fetch as `this.fetcher(...)` rebinds its
+      // receiver to this API instance. Workers rejects that with an illegal
+      // invocation, so detach the function before invoking it.
+      const fetcher = this.fetcher;
+      response = await fetcher(new URL(path, API_BASE), {
         body,
         headers,
         method: init.method ?? "GET",

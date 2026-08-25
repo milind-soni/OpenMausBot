@@ -291,6 +291,18 @@ class FakeCloudflare {
 }
 
 describe("Cloudflare API response contracts", () => {
+  it("does not rebind the Worker fetch receiver", async () => {
+    let receiver: unknown = "not-called";
+    const fetcher: CloudflareFetch = function (this: unknown) {
+      receiver = this;
+      return Promise.resolve(jsonResult([]));
+    };
+    const api = new CloudflareAPI(readConfig(env).cloudflare, fetcher);
+
+    await expect(api.listTunnels("receiver-probe")).resolves.toEqual([]);
+    expect(receiver).toBeUndefined();
+  });
+
   it("keeps redirects manual and rejects them without forwarding credentials", async () => {
     const fetcher = vi.fn<CloudflareFetch>(async (_input, init) => {
       expect(init?.redirect).toBe("manual");
