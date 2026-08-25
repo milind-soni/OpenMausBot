@@ -1,3 +1,5 @@
+import { z } from "zod";
+
 import { accountSession, createAuth } from "./auth";
 import { readConfig, type ControlPlaneConfig } from "./config";
 import { errorResponse, HTTPError, json, preflight, secureResponse, withBoundedRequestBody } from "./http";
@@ -21,6 +23,43 @@ import {
 const ROTATE_ROUTE = /^\/v1\/installations\/([^/]+)\/credentials\/rotate$/;
 const INSTALLATION_ROUTE = /^\/v1\/installations\/([^/]+)$/;
 
+const BETTER_AUTH_ERROR_CODES = new Map([
+  ["INVALID_EMAIL", "invalid_email"],
+  ["INVALID_OTP", "invalid_otp"],
+  ["OTP_EXPIRED", "otp_expired"],
+  ["TOO_MANY_ATTEMPTS", "rate_limited"],
+  ["USER_NOT_FOUND", "invalid_otp"],
+  ["VALIDATION_ERROR", "invalid_request"],
+]);
+const betterAuthErrorSchema = z.object({ code: z.string() }).loose();
+
+function authStatusErrorCode(status: number): string {
+  if (status === 400 || status === 422) return "invalid_request";
+  if (status === 401) return "unauthorized";
+  if (status === 403) return "forbidden";
+  if (status === 404) return "not_found";
+  if (status === 405) return "method_not_allowed";
+  if (status === 409) return "conflict";
+  if (status === 413) return "request_too_large";
+  if (status === 415) return "unsupported_media_type";
+  if (status === 429) return "rate_limited";
+  return "request_failed";
+}
+
+async function canonicalAuthResponse(response: Response): Promise<Response> {
+  if (response.status >= 500) return errorResponse(500, "internal_error");
+  if (response.status < 400 || response.status > 499) return response;
+
+  // Better Auth error bodies are dependency-owned and may contain prose or
+  // change shape between releases (its rate limiter currently returns only a
+  // `message`). Publish only OpenMausBot's stable, lowercase error contract.
+  const payload: unknown = await response.json().catch(() => null);
+  const parsed = betterAuthErrorSchema.safeParse(payload);
+  const dependencyCode = parsed.success ? parsed.data.code : "";
+  const code = BETTER_AUTH_ERROR_CODES.get(dependencyCode) ?? authStatusErrorCode(response.status);
+  return errorResponse(response.status, code);
+}
+
 async function route(
   request: Request,
   env: Env,
@@ -36,7 +75,7 @@ async function route(
     const limited = await limitedOTPResponse(request, env);
     if (limited) return limited;
     const response = await createAuth(env, ctx, config, requestId).handler(request);
-    return response.status >= 500 ? errorResponse(500, "internal_error") : response;
+    return canonicalAuthResponse(response);
   }
 
   const auth = createAuth(env, ctx, config, requestId);

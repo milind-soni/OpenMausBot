@@ -185,6 +185,36 @@ describe("Companion account service", () => {
     await expect(service.state()).resolves.toEqual({ available: true, status: "signed-out" });
   });
 
+  it("shows a specific rate-limit message instead of the generic secure-access error", async () => {
+    const requestId = "44444444-4444-4444-8444-444444444444";
+    const client = readyClient({
+      requestOTP: vi.fn(async () => {
+        throw new ControlPlaneError("rate_limited", 429, requestId);
+      }),
+    });
+    const { service } = serviceFixture({ client });
+
+    const request = service.requestCode("ada@example.com");
+    await expect(request).rejects.toThrow("Too many attempts were made");
+    await expect(request).rejects.toThrow(`Reference: ${requestId}`);
+    await expect(request).rejects.not.toThrow("Secure access could not be updated");
+  });
+
+  it("does not classify local settled-state failures as request failures", async () => {
+    const client = readyClient();
+    const service = createCompanionAccountService({
+      client,
+      readCredentials: () => {
+        throw new Error("credential store unavailable");
+      },
+    });
+
+    await expect(service.requestCode("ada@example.com")).rejects.toThrow(
+      "credential store unavailable",
+    );
+    expect(client.requestOTP).toHaveBeenCalledOnce();
+  });
+
   it("persists one stable identity and the complete provision atomically", async () => {
     const activatePersistedEndpoint = vi.fn(async () => ({ status: "ready", ready: true }));
     const { client, service, store } = serviceFixture({ activatePersistedEndpoint });
