@@ -351,6 +351,12 @@ class ExistingVmMcpClient {
       this.fail(new ExistingVmError("mcp", "CUA MCP response exceeded its output limit"));
       void this.close().catch(() => {});
     };
+    const failTransport = (error: Error) => {
+      this.buffer = "";
+      this.closed = true;
+      this.fail(error);
+      void this.close().catch(() => {});
+    };
     let newline: number;
     while ((newline = this.buffer.indexOf("\n")) !== -1) {
       const rawLine = this.buffer.slice(0, newline);
@@ -370,7 +376,7 @@ class ExistingVmMcpClient {
         if (parsed.result !== undefined) message.result = parsed.result;
         if (isJsonObject(parsed.error)) message.error = { message: parsed.error.message };
       } catch {
-        this.fail(new ExistingVmError("mcp", "CUA MCP returned invalid JSON"));
+        failTransport(new ExistingVmError("mcp", "CUA MCP returned invalid JSON"));
         return;
       }
       if (message.id === undefined) continue;

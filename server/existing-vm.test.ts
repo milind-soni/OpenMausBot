@@ -57,6 +57,9 @@ if (alias === "vm-unreachable") {
 if (alias === "vm-overflow" && remote === "cua-driver mcp") {
   process.stdout.write("x".repeat(2048));
   setInterval(() => {}, 1000);
+} else if (alias === "vm-invalid-json" && remote === "cua-driver mcp") {
+  process.stdout.write("not-json\n");
+  setInterval(() => {}, 1000);
 } else if (alias === "vm-timeout") {
   setInterval(() => {}, 1000);
 } else if (remote === "uname -s") {
@@ -112,7 +115,10 @@ describe("Existing VM transport", () => {
     options = { sshCommand: process.execPath, sshCommandPrefix: [fakeSsh] };
   });
 
-  afterAll(() => rmSync(temp, { recursive: true, force: true }));
+  afterAll(() => {
+    closeExistingVmScreenshotSessions();
+    rmSync(temp, { recursive: true, force: true });
+  });
 
   const config = (sshAlias: string): AppConfig => ({ localVm: { source: "existing", sshAlias } });
 
@@ -194,6 +200,12 @@ describe("Existing VM transport", () => {
     const status = await existingVmStatus(config("vm-overflow"), { ...options, mcpLineLimit: 64 });
     expect(status.errorCode).toBe("mcp");
     expect(status.problem).toContain("output limit");
+  });
+
+  it("closes an MCP client after invalid JSON", async () => {
+    const status = await existingVmStatus(config("vm-invalid-json"), options);
+    expect(status.errorCode).toBe("mcp");
+    expect(status.problem).toContain("invalid JSON");
   });
 
   it("deduplicates simultaneous forced readiness probes", async () => {

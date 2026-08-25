@@ -115,11 +115,10 @@ process.stdin.on("data", (chunk) => {
 `,
     "utf8",
   );
-  if (process.platform === "win32") {
-    // The server still uses shell:false. Run the fixture through the same
-    // process-exec + script-prefix mechanism used by CLI tests rather than a
-    // .cmd shim, which CreateProcess cannot resolve safely without a shell.
-  } else {
+  // On Windows the server still uses shell:false, so the fixture runs through
+  // OMB_TEST_SSH_COMMAND plus a script prefix instead of a .cmd shim, which
+  // CreateProcess cannot resolve without a shell.
+  if (process.platform !== "win32") {
     const fakeSsh = join(fakeSshBin, "ssh");
     writeFileSync(fakeSsh, `#!/bin/sh\nexec "${process.execPath}" "${fakeSshScript}" "$@"\n`, "utf8");
     chmodSync(fakeSsh, 0o755);

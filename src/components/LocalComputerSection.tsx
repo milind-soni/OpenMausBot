@@ -177,7 +177,7 @@ export function LocalComputerSection() {
       } finally {
         if (active) {
           setLoading(false);
-          timer = window.setTimeout(() => void poll(), 5000);
+          timer = window.setTimeout(() => void poll(), source === "existing" ? 30_000 : 5000);
         }
       }
     };
@@ -187,7 +187,7 @@ export function LocalComputerSection() {
       controller?.abort();
       if (timer !== undefined) window.clearTimeout(timer);
     };
-  }, [refresh, refreshKey]);
+  }, [refresh, refreshKey, source]);
 
   const post = async (action: Exclude<Action, "recreate">) => {
     const response = await fetch(`/api/local-computer/${action}`, {
