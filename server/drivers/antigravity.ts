@@ -364,6 +364,9 @@ export const AntigravityDriver: ProviderDriver<AntigravityConfig> = {
       // exiting, the bot would stay busy forever (agy's own --print-timeout 10m
       // is the only other net). Assigned just below; settle() always clears it.
       let watchdog: ReturnType<typeof setTimeout> | undefined;
+      // Assigned once the child exists. A child can emit `result` and then
+      // hang, so settling must still arrange for process and MCP cleanup.
+      let armPostSettleCleanup = () => {};
       const settle = (
         ok: boolean,
         stopReason: string | null,
@@ -374,6 +377,7 @@ export const AntigravityDriver: ProviderDriver<AntigravityConfig> = {
         settled = true;
         clearTimeout(watchdog);
         active.delete(threadId);
+        armPostSettleCleanup();
         emit({ ...base(threadId, turnId), type: "turn.completed", ok, stopReason, cost, ...(usage ? { usage } : {}) });
       };
 
@@ -457,6 +461,37 @@ export const AntigravityDriver: ProviderDriver<AntigravityConfig> = {
         return { turnId };
       }
       children.add(child);
+
+      let childClosed = false;
+      let postSettleReaper: ReturnType<typeof setTimeout> | undefined;
+      let postSettleFallback: ReturnType<typeof setTimeout> | undefined;
+      let mcpFinalized = false;
+      const finalizeMcp = () => {
+        if (mcpFinalized) return;
+        mcpFinalized = true;
+        try {
+          restoreMcp();
+        } catch (error) {
+          emit({
+            ...base(threadId, turnId),
+            type: "runtime.error",
+            message: `could not restore Antigravity's MCP config: ${error instanceof Error ? error.message : String(error)}`,
+          });
+        } finally {
+          releaseMcpLease();
+        }
+      };
+      armPostSettleCleanup = () => {
+        if (childClosed || postSettleReaper) return;
+        // A normal agy process exits immediately after `result`. Give it a
+        // short grace, then reap a zombie so `close` can release the lease.
+        postSettleReaper = setTimeout(() => killCliTree(child), 2_000);
+        postSettleReaper.unref?.();
+        // Some platforms can fail to deliver `close` after a failed kill.
+        // Never leave credentials mounted or every later turn queued forever.
+        postSettleFallback = setTimeout(finalizeMcp, 5_000);
+        postSettleFallback.unref?.();
+      };
 
       // conversation_id from the init event → the resumeCursor (session.started
       // is what the harness persists as the cursor). Also seeds tool item ids.
@@ -559,18 +594,11 @@ export const AntigravityDriver: ProviderDriver<AntigravityConfig> = {
       });
 
       child.on("close", (code) => {
+        childClosed = true;
         children.delete(child); // close is the true process-exit signal
-        try {
-          restoreMcp();
-        } catch (error) {
-          emit({
-            ...base(threadId, turnId),
-            type: "runtime.error",
-            message: `could not restore Antigravity's MCP config: ${error instanceof Error ? error.message : String(error)}`,
-          });
-        } finally {
-          releaseMcpLease();
-        }
+        clearTimeout(postSettleReaper);
+        clearTimeout(postSettleFallback);
+        finalizeMcp();
         if (!settled) {
           emit({
             ...base(threadId, turnId),

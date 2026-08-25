@@ -444,4 +444,47 @@ describe("Antigravity computer MCP config", () => {
       rmSync(home, { recursive: true, force: true });
     }
   });
+
+  it("reaps a child that hangs after result, restores the mount, and unblocks the next turn", async () => {
+    ensureDirs();
+    chmodSync(FAKE_CLI, 0o755);
+    const home = mkdtempSync(join(tmpdir(), "omb-agy-mcpreaper-"));
+    const firstDump = join(home, "first.json");
+    const secondDump = join(home, "second.json");
+    const first = await AntigravityDriver.create({
+      instanceId: "agy-mcp-zombie",
+      displayName: undefined,
+      environment: { HOME: home, FAKE_AGY_MCP_DUMP: firstDump, FAKE_AGY_POST_RESULT_DELAY_MS: "10000" },
+      enabled: true,
+      config: { cli: FAKE_CLI, fullAuto: true },
+    });
+    const second = await AntigravityDriver.create({
+      instanceId: "agy-mcp-after-zombie",
+      displayName: undefined,
+      environment: { HOME: home, FAKE_AGY_MCP_DUMP: secondDump },
+      enabled: true,
+      config: { cli: FAKE_CLI, fullAuto: true },
+    });
+    const firstRecorder = recordEvents(first.adapter);
+    const secondRecorder = recordEvents(second.adapter);
+    try {
+      await first.adapter.sendTurn({ threadId: "t-mcp-zombie", text: "first", integrations: boxIntegrations });
+      await firstRecorder.until((event) => event.type === "turn.completed");
+      expect(readConfig(home).mcpServers[ANTIGRAVITY_COMPUTER_MCP_KEY]).toEqual(boxEntry());
+
+      const secondTurn = second.adapter.sendTurn({ threadId: "t-mcp-after-zombie", text: "second" });
+      await secondTurn;
+      await secondRecorder.until((event) => event.type === "turn.completed");
+
+      expect(JSON.parse(readFileSync(firstDump, "utf8")).mcpServers[ANTIGRAVITY_COMPUTER_MCP_KEY]).toEqual(boxEntry());
+      expect(JSON.parse(readFileSync(secondDump, "utf8"))?.mcpServers?.[ANTIGRAVITY_COMPUTER_MCP_KEY]).toBeUndefined();
+      await expect.poll(() => existsSync(configPath(home))).toBe(false);
+    } finally {
+      firstRecorder.stop();
+      secondRecorder.stop();
+      await first.dispose();
+      await second.dispose();
+      rmSync(home, { recursive: true, force: true });
+    }
+  }, 10_000);
 });
