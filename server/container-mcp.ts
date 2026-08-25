@@ -3,7 +3,7 @@
 // piping, drain-safe exit, and watchdog live in mcp-bridge.ts, shared with
 // the VPS entry point.
 import { cuaExecArgs } from "./container-computer.ts";
-import { runMcpBridge } from "./mcp-bridge.ts";
+import { controlGateFromEnv, runMcpBridge } from "./mcp-bridge.ts";
 
 const [runtime, container, socket] = process.argv.slice(2);
 if (!runtime || !["docker", "podman", "container"].includes(runtime)) {
@@ -15,10 +15,15 @@ if (!container || !/^[a-zA-Z0-9_.-]+$/.test(container) || !socket?.startsWith("/
   process.exit(2);
 }
 
-// The who-is-driving pair rides in env, not argv — argv is world-readable
-// through `ps`, and the token guards a loopback endpoint.
-const controlUrl = process.env.OMB_CONTROL_URL ?? "";
-const controlToken = process.env.OMB_CONTROL_TOKEN ?? "";
+let gate: ReturnType<typeof controlGateFromEnv>;
+try {
+  // The who-is-driving pair rides in env, not argv — argv is world-readable
+  // through `ps`, and the token guards a loopback endpoint.
+  gate = controlGateFromEnv("Local VM");
+} catch (error) {
+  process.stderr.write(`${error instanceof Error ? error.message : "incomplete Local VM control configuration"}\n`);
+  process.exit(2);
+}
 
 runMcpBridge({
   command: runtime,
@@ -26,5 +31,5 @@ runMcpBridge({
   label: "Cua Driver",
   // No liveness watchdog: the runtime CLI talks to a local daemon and fails
   // fast on its own — there is no silent WAN peer to wedge on.
-  ...(controlUrl && controlToken ? { gate: { url: controlUrl, token: controlToken } } : {}),
+  gate,
 });

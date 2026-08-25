@@ -14,6 +14,17 @@ The packaged app can request Accessibility and Screen Recording permission. Afte
 
 Ubuntu 24.04 GNOME host control is temporarily disabled while the real-seat input-safety blocker in issue #345 is resolved. Packaged builds retain the pinned runtime for reproducible review, but OpenMausBot does not start it and clears legacy opt-ins. Chat, screen preview, Cloud, and Local VM remain available. Do not start the bundled driver manually as a workaround.
 
+## Existing VM
+
+Existing VM connects OpenMausBot to a Linux desktop that you already manage. It does not create, provision, isolate, delete, or manage the VM filesystem.
+
+1. Install the OpenSSH client on the computer running OpenMausBot and make sure `ssh` is available in its `PATH`.
+2. Add an SSH config alias for the VM and make sure the alias works with your normal SSH key or agent authentication.
+3. In **App Settings > Local VM**, choose **Existing VM**, enter the alias, and save it.
+4. Install the pinned CUA Driver version shown in the readiness card on the VM. OpenMausBot checks Linux, the driver version, the required CUA MCP tools, and a complete desktop image before reporting Ready.
+
+OpenMausBot uses the saved alias and your SSH configuration; it does not ask for or store an SSH password or private key. The Computer panel provides a watch-only preview for an Existing VM. Live viewer access and **Take Control** are intentionally unavailable, while the bot can use the validated CUA connection for computer actions.
+
 ## Safety model
 
 - Enabling local control globally does not assign it to a bot.

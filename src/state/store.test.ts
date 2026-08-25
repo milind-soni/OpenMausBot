@@ -52,7 +52,7 @@ describe("config status frames", () => {
         box: { configured: false },
         vps: { configured: true, sshAlias: "homelab" },
         rooms: { turnTimeoutMinutes: 20 },
-        localVm: { mode: "per-bot", maxInstances: 3 },
+        localVm: { source: "managed", mode: "per-bot", maxInstances: 3, sshAlias: "" },
         opencodeGo: { configured: true },
         tts: { configured: true, ready: true, voice: "Ada" },
         profile: { name: "Ian", email: "ian@example.test" },
@@ -64,12 +64,26 @@ describe("config status frames", () => {
       box: { configured: false },
       vps: { configured: true, sshAlias: "homelab" },
       rooms: { turnTimeoutMinutes: 20 },
-      localVm: { mode: "per-bot", maxInstances: 3 },
+      localVm: { source: "managed", mode: "per-bot", maxInstances: 3, sshAlias: "" },
       opencodeGo: { configured: true },
       tts: { configured: true, ready: true, voice: "Ada" },
       profile: { name: "Ian", email: "ian@example.test" },
       features: { skillRecorder: true },
     });
+  });
+
+  it("does not expose managed isolation fields for an Existing VM", () => {
+    const status = configStatusFromFrame({
+      xai: { configured: false },
+      composio: { configured: false, mode: "unavailable" },
+      box: { configured: false },
+      vps: { configured: false, sshAlias: "" },
+      rooms: { turnTimeoutMinutes: 5 },
+      localVm: { source: "existing", sshAlias: "linux-vm" },
+    });
+    expect(status.localVm).toEqual({ source: "existing", sshAlias: "linux-vm" });
+    expect(status.localVm).not.toHaveProperty("mode");
+    expect(status.localVm).not.toHaveProperty("maxInstances");
   });
 });
 
@@ -79,7 +93,7 @@ describe("Teach a skill feature flag", () => {
     box: { configured: false },
     vps: { configured: false, sshAlias: "" },
     rooms: { turnTimeoutMinutes: 5 },
-    localVm: { mode: "shared", maxInstances: 2 },
+    localVm: { source: "managed", mode: "shared", maxInstances: 2, sshAlias: "" },
     features: { skillRecorder: true },
   });
 
