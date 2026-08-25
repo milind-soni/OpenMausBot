@@ -154,7 +154,10 @@ export class CloudflareAPI {
         body,
         headers,
         method: init.method ?? "GET",
-        redirect: "error",
+        // Workers only implements `follow` and `manual`. Keep redirects manual
+        // so the bearer token is never forwarded to a redirect destination;
+        // the non-2xx response checks below reject the 3xx response.
+        redirect: "manual",
         signal: AbortSignal.timeout(API_TIMEOUT_MS),
       });
     } catch (error) {
