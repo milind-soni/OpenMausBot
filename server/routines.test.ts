@@ -249,7 +249,7 @@ describe("RoutineManager", () => {
     expect(h.manager.listRuns()[0]!.status).toBe("waiting");
     h.manager.handleRuntimeEvent({ ...base, type: "request.resolved", behavior: "answer", source: "user" });
     h.manager.handleRuntimeEvent({ ...base, type: "item.completed", itemType: "assistant_text", text: "Report shipped." });
-    h.manager.handleRuntimeEvent({ ...base, type: "turn.completed", ok: true, cost: 0.02 });
+    h.manager.handleRuntimeEvent({ ...base, type: "turn.completed", turnToken: undefined, ok: true, cost: 0.02 });
 
     expect(h.manager.listRuns()[0]).toMatchObject({
       status: "completed",
@@ -275,6 +275,7 @@ describe("RoutineManager", () => {
       threadId: "thread-1",
       createdAt: new Date().toISOString(),
       type: "turn.completed",
+      turnToken: undefined,
       ok: false,
       stopReason: "provider crashed",
     });
@@ -310,6 +311,7 @@ describe("RoutineManager", () => {
       threadId: "thread-1",
       createdAt: new Date().toISOString(),
       type: "turn.completed",
+      turnToken: undefined,
       ok: true,
     });
 

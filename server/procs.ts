@@ -16,8 +16,171 @@ import {
   type SpawnOptions,
 } from "node:child_process";
 import type { Readable, Writable } from "node:stream";
-import { join } from "node:path";
+import { basename, join } from "node:path";
+import { mkdirSync, readFileSync, readdirSync, renameSync, unlinkSync, writeFileSync } from "node:fs";
+import { readFile as readFileAsync, readlink } from "node:fs/promises";
 import { resolveCliSpawn, type ResolvedSpawn } from "./env-path.ts";
+
+interface OwnedProcess {
+  pid: number;
+  executable: string;
+  startIdentity: string;
+}
+
+let processRegistryDir: string | null = null;
+const ownedProcesses = new Map<number, OwnedProcess>();
+
+type ProcessIdentityProbe =
+  | { status: "found"; executable: string; startIdentity: string }
+  | { status: "not-found" | "unavailable" };
+
+function execText(file: string, args: string[], options: ExecFileOptions): Promise<string> {
+  return new Promise((resolve, reject) => {
+    execFile(file, args, { ...options, encoding: "utf8" }, (error, stdout) => {
+      if (error) reject(error);
+      else resolve(String(stdout));
+    });
+  });
+}
+
+function missingProcessError(error: unknown): boolean {
+  const value = error as NodeJS.ErrnoException & { stderr?: string };
+  return value.code === "ESRCH" || /cannot find a process|no process found|process.*not found/i.test(String(value.stderr ?? value.message));
+}
+
+export async function processIdentity(pid: number): Promise<ProcessIdentityProbe> {
+  if (!Number.isSafeInteger(pid) || pid <= 0) return { status: "unavailable" };
+  if (process.platform === "win32") {
+    try {
+      const script = [
+        `$p = Get-Process -Id ${pid} -ErrorAction Stop`,
+        "$path = $null",
+        "try { $path = $p.Path } catch {}",
+        "[pscustomobject]@{ CreationDate = $p.StartTime.ToUniversalTime().ToString('o'); ExecutablePath = $path; Name = $p.ProcessName } | ConvertTo-Json -Compress",
+      ].join("; ");
+      const value = JSON.parse((await execText("powershell.exe", ["-NoProfile", "-NonInteractive", "-Command", script], {
+        timeout: 2_000,
+        windowsHide: true,
+      })).trim()) as { CreationDate?: string; ExecutablePath?: string; Name?: string };
+      if (!value.CreationDate) return { status: "unavailable" };
+      return {
+        status: "found",
+        startIdentity: value.CreationDate,
+        executable: basename(value.ExecutablePath || value.Name || ""),
+      };
+    } catch (error) {
+      return { status: missingProcessError(error) ? "not-found" : "unavailable" };
+    }
+  }
+
+  if (process.platform === "linux") {
+    try {
+      const stat = await readFileAsync(`/proc/${pid}/stat`, "utf8");
+      const closingParen = stat.lastIndexOf(")");
+      if (closingParen < 2) return { status: "unavailable" };
+      const executableName = stat.slice(stat.indexOf("(") + 1, closingParen);
+      const fields = stat.slice(closingParen + 2).trim().split(/\s+/);
+      const startIdentity = fields[19];
+      if (!startIdentity) return { status: "unavailable" };
+      let executable = executableName;
+      try { executable = basename(await readlink(`/proc/${pid}/exe`)); } catch {}
+      return { status: "found", startIdentity, executable };
+    } catch (error) {
+      return { status: (error as NodeJS.ErrnoException).code === "ENOENT" ? "not-found" : "unavailable" };
+    }
+  }
+
+  try {
+    const value = (await execText("/bin/ps", ["-p", String(pid), "-o", "lstart=", "-o", "comm="], {
+      timeout: 1_000,
+      windowsHide: true,
+    })).trim();
+    const match = value.match(/^(.{24})\s+(.+)$/);
+    if (!match) return { status: "unavailable" };
+    return { status: "found", startIdentity: match[1]!.trim(), executable: basename(match[2]!.trim()) };
+  } catch (error) {
+    const code = (error as { code?: string | number }).code;
+    return { status: code === 1 || missingProcessError(error) ? "not-found" : "unavailable" };
+  }
+}
+
+function ownerAlive(pid: number): boolean {
+  if (!Number.isInteger(pid) || pid <= 1) return false;
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (error) {
+    // EPERM proves the process exists; only ESRCH proves that it is gone.
+    return (error as NodeJS.ErrnoException).code === "EPERM";
+  }
+}
+
+function registryFile(ownerPid = process.pid): string | null {
+  return processRegistryDir ? join(processRegistryDir, `${ownerPid}.json`) : null;
+}
+
+function writeProcessRegistry(): void {
+  const path = registryFile();
+  if (!path) return;
+  mkdirSync(processRegistryDir!, { recursive: true, mode: 0o700 });
+  const temporary = `${path}.${process.pid}.${Date.now()}.tmp`;
+  try {
+    writeFileSync(temporary, JSON.stringify({
+      schema: "openmaus.owned-process-groups.v1",
+      ownerPid: process.pid,
+      children: [...ownedProcesses.values()],
+    }, null, 2), { mode: 0o600 });
+    renameSync(temporary, path);
+  } catch {
+    try { unlinkSync(temporary); } catch {}
+  }
+}
+
+function unregisterOwnedProcess(pid: number): void {
+  if (!ownedProcesses.delete(pid)) return;
+  writeProcessRegistry();
+}
+
+/** Reap only process groups whose former owner is dead and whose PID still
+ * matches the recorded OS start identity and executable. */
+export async function configureProcessRegistry(directory: string): Promise<void> {
+  processRegistryDir = directory;
+  mkdirSync(directory, { recursive: true, mode: 0o700 });
+  for (const name of readdirSync(directory).filter((item) => /^\d+\.json$/.test(item))) {
+    const path = join(directory, name);
+    try {
+      const value = JSON.parse(readFileSync(path, "utf8")) as { schema?: string; ownerPid?: number; children?: OwnedProcess[] };
+      if (value.schema !== "openmaus.owned-process-groups.v1" || value.ownerPid === process.pid) continue;
+      if (ownerAlive(Number(value.ownerPid))) continue;
+      for (const child of Array.isArray(value.children) ? value.children : []) {
+        const observed = await processIdentity(Number(child.pid));
+        if (observed.status !== "found" || observed.startIdentity !== child.startIdentity || observed.executable !== child.executable) continue;
+        if (process.platform === "win32") {
+          execFile("taskkill", ["/PID", String(child.pid), "/T", "/F"], { windowsHide: true }, () => {});
+        } else {
+          try { process.kill(-child.pid, "SIGTERM"); } catch {}
+          setTimeout(() => {
+            void processIdentity(Number(child.pid)).then((remaining) => {
+              if (remaining.status !== "found" || remaining.startIdentity !== child.startIdentity || remaining.executable !== child.executable) return;
+              try { process.kill(-child.pid, "SIGKILL"); } catch {}
+            });
+          }, 5_000).unref();
+        }
+      }
+      unlinkSync(path);
+    } catch {
+      // Malformed or raced registry files are not authority to kill anything.
+    }
+  }
+  writeProcessRegistry();
+}
+
+export function clearProcessRegistry(): void {
+  const path = registryFile();
+  if (path) try { unlinkSync(path); } catch {}
+  ownedProcesses.clear();
+  processRegistryDir = null;
+}
 
 export function resolveCli(cli: string, args: string[] = []): ResolvedSpawn {
   return resolveCliSpawn(cli, args);
@@ -35,6 +198,33 @@ export function spawnCli(
     // win32: taskkill /T does the reaping instead (see killCliTree)
     ...(process.platform === "win32" ? { windowsHide: true } : { detached: true }),
   }) as ChildProcessByStdio<Writable, Readable, Readable>; // callers always pipe all three
+
+  if (child.pid && processRegistryDir) {
+    const pid = child.pid;
+    let registered = false;
+    const registrationDeadline = Date.now() + 10_000;
+    const register = async () => {
+      if (registered || child.exitCode !== null || child.signalCode !== null) return;
+      const observed = await processIdentity(pid);
+      if (observed.status !== "found") {
+        // A freshly spawned Windows process can be visible to Get-Process
+        // before StartTime or Path is readable, which is an unavailable
+        // probe rather than not-found. Both states are transient during this
+        // bounded registration window; retry either instead of abandoning
+        // ownership after the first partial PowerShell result.
+        if (Date.now() < registrationDeadline) {
+          setTimeout(() => void register(), 100).unref();
+        }
+        return;
+      }
+      if (child.exitCode !== null || child.signalCode !== null) return;
+      registered = true;
+      ownedProcesses.set(pid, { pid, executable: observed.executable, startIdentity: observed.startIdentity });
+      writeProcessRegistry();
+      child.once("close", () => unregisterOwnedProcess(pid));
+    };
+    void register();
+  }
 
   // A write to a dying child's stdin fails differently per platform, and one
   // of the ways is fatal. On POSIX the kill is synchronous, the stream is
@@ -83,18 +273,20 @@ export function describeSpawnFailure(err: NodeJS.ErrnoException, cli: string): S
 /** Stop a CLI and every process it spawned (MCP proxies included). */
 export function killCliTree(child: ChildProcess): void {
   const pid = child.pid;
-  if (!pid || child.exitCode !== null || child.signalCode !== null) return;
+  if (!pid) return;
 
   if (process.platform === "win32") {
     execFile("taskkill", ["/PID", String(pid), "/T", "/F"], { windowsHide: true }, (err) => {
-      if (!err) return;
-      try {
-        // taskkill is unavailable or the tree lookup failed. At least stop
-        // the process we own instead of leaving the entire turn running.
-        child.kill();
-      } catch {
-        /* already gone */
+      if (err) {
+        try {
+          // taskkill is unavailable or the tree lookup failed. At least stop
+          // the process we own instead of leaving the entire turn running.
+          child.kill();
+        } catch {
+          /* already gone */
+        }
       }
+      unregisterOwnedProcess(pid);
     });
     return;
   }
@@ -107,6 +299,7 @@ export function killCliTree(child: ChildProcess): void {
       /* already gone */
     }
   }
+  unregisterOwnedProcess(pid);
 }
 
 /** Per-turn broker channel: unix socket on POSIX, named pipe on Windows

@@ -8,6 +8,7 @@ import { z } from "zod";
 
 import { writeFileAtomic } from "./atomic.ts";
 import type { InstanceConfigMap } from "./contracts.ts";
+import { invalidateProtectedEnvironmentRedactor } from "./redact.ts";
 import { parseJson, schemaIssue, type JsonObject, type JsonValue } from "./schema.ts";
 
 const optionalText = z.string().optional();
@@ -222,11 +223,18 @@ export function syncCredentialEnv(patch: Partial<AppConfig>): void {
     [patch.tts?.key, "OMB_TTS_KEY"],
     [patch.imageGen?.key, "OMB_OPENAI_IMAGE_KEY"],
   ];
+  let changed = false;
   for (const [value, name] of secrets) {
     if (value === undefined) continue;
-    if (value) process.env[name] = value;
-    else delete process.env[name];
+    if (value) {
+      changed ||= process.env[name] !== value;
+      process.env[name] = value;
+    } else {
+      changed ||= process.env[name] !== undefined;
+      delete process.env[name];
+    }
   }
+  if (changed) invalidateProtectedEnvironmentRedactor();
   if (patch.openaiCompat?.url !== undefined) {
     if (patch.openaiCompat.url) process.env["OPENAI_COMPAT_URL"] = patch.openaiCompat.url;
     else delete process.env["OPENAI_COMPAT_URL"];

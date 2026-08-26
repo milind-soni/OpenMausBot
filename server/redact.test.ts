@@ -136,7 +136,36 @@ describe("redactSecretsInText", () => {
     const out = redactSecretsInText(`here:\n${pem}\ndone`);
     expect(out).not.toContain("b3BlbnNzaC1r");
     expect(out).toMatch(/BEGIN OPENSSH PRIVATE KEY[\s\S]*«redacted \d+ chars»[\s\S]*END OPENSSH PRIVATE KEY/);
-    expect(redactSecretsInText('curl -H "Authorization: Bearer abc.def-ghi_jkl123456789"')).toBe('curl -H "Authorization: Bearer «redacted 24 chars»"');
+    const auth = redactSecretsInText('curl -H "Authorization: Bearer abc.def-ghi_jkl123456789"');
+    expect(auth).not.toContain("abc.def-ghi_jkl123456789");
+    expect(auth).toContain("Authorization: «redacted");
+  });
+
+  it("removes cookie headers, credential-bearing URLs, and screenshot data", () => {
+    const cookie = "session=private-cookie-value; csrf=also-private";
+    const cookieOut = redactSecretsInText(`Cookie: ${cookie}`);
+    expect(cookieOut).not.toContain("private-cookie-value");
+    expect(cookieOut).toContain("redacted");
+
+    const dsnOut = redactSecretsInText("postgres://service:database-password@example.test/app");
+    expect(dsnOut).not.toContain("database-password");
+    expect(dsnOut).toContain("postgres://«redacted");
+
+    const image = "A".repeat(128);
+    const imageOut = redactSecretsInText(`data:image/png;base64,${image}`);
+    expect(imageOut).not.toContain(image);
+    expect(imageOut).toContain("binary omitted 128 chars");
+  });
+
+  it("treats cookies, DSNs, and credential-shaped object fields as secrets", () => {
+    const out = redactSecrets({
+      cookie: "session-value",
+      sentry_dsn: "https://public:private@example.test/1",
+      credential_file_content: "arbitrary-unclassified-secret",
+    }) as Record<string, string>;
+    expect(JSON.stringify(out)).not.toContain("session-value");
+    expect(JSON.stringify(out)).not.toContain("private@example");
+    expect(JSON.stringify(out)).not.toContain("arbitrary-unclassified-secret");
   });
 
   it("masks the value of a secret-shaped key=value or key: value, keeping the key", () => {

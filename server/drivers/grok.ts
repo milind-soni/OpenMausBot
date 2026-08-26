@@ -171,7 +171,7 @@ export const GrokDriver: ProviderDriver<GrokConfig> = {
               emit({ ...base(threadId, turnId), type: "thread.token-usage.updated", ...usage });
             }
             active.delete(threadId);
-            emit({ ...base(threadId, turnId), type: "turn.completed", ok: true, stopReason: null, cost: null });
+            emit({ ...base(threadId, turnId), turnToken: turn.turnToken, type: "turn.completed", ok: true, stopReason: null, cost: null });
             return;
           } catch (e) {
             const aborted = (e as Error).name === "AbortError";
@@ -193,6 +193,7 @@ export const GrokDriver: ProviderDriver<GrokConfig> = {
                 active.delete(threadId);
                 emit({
                   ...base(threadId, turnId),
+                  turnToken: turn.turnToken,
                   type: "turn.completed",
                   ok: false,
                   stopReason: "interrupted",
@@ -208,6 +209,7 @@ export const GrokDriver: ProviderDriver<GrokConfig> = {
             }
             emit({
               ...base(threadId, turnId),
+              turnToken: turn.turnToken,
               type: "turn.completed",
               ok: false,
               stopReason: aborted ? "interrupted" : "error",

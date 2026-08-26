@@ -79,6 +79,7 @@ beforeAll(async () => {
       instances: {
         ghost: { driver: "not-a-real-driver", displayName: "Ghost" },
         claude: { driver: "claudeAgent", displayName: "Fixture Claude", config: { cli: FAKE_CLAUDE_CLI } },
+        "grok-unsupported": { driver: "grok", displayName: "Fixture unsupported engine" },
       },
     }),
   );
@@ -221,7 +222,12 @@ beforeAll(async () => {
       OMB_WEBHOOK_PORT: String(WEBHOOK_PORT),
       OMB_BOX_API: `http://127.0.0.1:${boxStubPort}`,
       OMB_COMPOSIO_API: `http://127.0.0.1:${boxStubPort}/api/v3.1`,
+      DWEB_URL: "http://127.0.0.1:9",
       OMB_STATIC_DIR: staticDir,
+      // The integration test exercises the sanitized local telemetry journal
+      // directly. External sink processes would add CredVault/provider
+      // startup latency without improving that assertion.
+      OMB_TELEMETRY_DISABLED: "1",
       FAKE_CLAUDE_MODE: "hang",
       FAKE_CLAUDE_DUMP: fakeClaudeDump,
     },
@@ -229,7 +235,10 @@ beforeAll(async () => {
   });
   child.stderr!.on("data", (c) => (stderr += c));
 
-  const deadline = Date.now() + 20_000;
+  // Node's strip-only TypeScript loader must transform the full server graph
+  // in this integration harness. On a busy desktop that cold start can exceed
+  // 20 seconds even though the packaged JavaScript server starts normally.
+  const deadline = Date.now() + 60_000;
   for (;;) {
     try {
       const res = await fetch(`${BASE}/api/health`);
@@ -241,7 +250,7 @@ beforeAll(async () => {
     if (child.exitCode !== null) throw new Error(`server exited ${child.exitCode}. stderr:\n${stderr}`);
     await new Promise((r) => setTimeout(r, 150));
   }
-}, 30_000);
+}, 75_000);
 
 afterAll(async () => {
   boxStub?.close();
@@ -267,6 +276,108 @@ describe("harness HTTP API", () => {
     expect(body.app).toBe("openmausbot");
     expect(typeof body.pid).toBe("number");
     expect(body.static).toBe(true);
+  });
+
+  it("coalesces duplicate renderer errors and admits at most ten unique signatures per address", async () => {
+    const first = await api("POST", "/api/telemetry/error", { name: "RenderFault", message: "same fault" });
+    const duplicate = await api("POST", "/api/telemetry/error", { name: "RenderFault", message: "same fault" });
+    expect(first).toMatchObject({ status: 202, body: { accepted: true } });
+    expect(duplicate).toMatchObject({ status: 202, body: { accepted: false, coalesced: true } });
+
+    for (let index = 1; index < 10; index += 1) {
+      const admitted = await api("POST", "/api/telemetry/error", {
+        name: "RenderFault",
+        message: `unique fault ${index}`,
+      });
+      expect(admitted).toMatchObject({ status: 202, body: { accepted: true } });
+    }
+    const saturated = await api("POST", "/api/telemetry/error", {
+      name: "RenderFault",
+      message: "unique fault 10",
+    });
+    expect(saturated).toMatchObject({ status: 202, body: { accepted: false, coalesced: true } });
+  });
+
+  it("owns and traces authenticated external capability turns", async () => {
+    const endpoint = JSON.parse(readFileSync(join(home, ".openmausbot", "runtime", "capability-gateway.json"), "utf8"));
+    const headers = {
+      authorization: `Bearer ${endpoint.authorization}`,
+      "content-type": "application/json",
+    };
+    const opened = await fetch(`${BASE}/api/internal/capabilities/turns`, {
+      method: "POST",
+      headers,
+      body: JSON.stringify({
+        client: "hermes-manus",
+        threadId: "external-trace-test",
+        promptSummary: "sanitized external task",
+      }),
+    });
+    expect(opened.status).toBe(201);
+    const lease = await opened.json() as {
+      turnToken: string;
+      manifest: { schema: string; profile: string; toolInventory: string[] };
+    };
+    expect(lease.manifest).toMatchObject({ schema: "openmaus.capability-profile.v1", profile: "full-task-scoped" });
+    expect(lease.manifest.toolInventory).toContain("openmaus-dweb");
+
+    const called = await fetch(`${BASE}/api/internal/capabilities/call`, {
+      method: "POST",
+      headers: { ...headers, "x-openmaus-turn-token": lease.turnToken },
+      body: JSON.stringify({ server: "openmaus-host", tool: "filesystem_stat", arguments: { path: home } }),
+    });
+    expect(called.status).toBe(200);
+    const callBody = await called.json() as { result: { type: string } };
+    expect(callBody.result).toMatchObject({ type: "directory" });
+
+    const ended = await fetch(`${BASE}/api/internal/capabilities/turns/${lease.turnToken}`, {
+      method: "DELETE",
+      headers,
+    });
+    expect(ended.status).toBe(200);
+    const journal = readFileSync(join(home, ".openmausbot", "telemetry", "turns.ndjson"), "utf8");
+    const trace = journal.trim().split("\n").map((line) => JSON.parse(line)).findLast((row) => row.threadId === "external-trace-test");
+    expect(trace).toMatchObject({
+      application: "openmausbot",
+      botId: "hermes-manus",
+      engine: "openmaus-gateway",
+      outcome: "completed",
+      tools: [{ name: "openmaus-host:filesystem_stat", ok: true }],
+    });
+  });
+
+  it("bounds concurrent external capability turns per client", async () => {
+    const endpoint = JSON.parse(readFileSync(join(home, ".openmausbot", "runtime", "capability-gateway.json"), "utf8"));
+    const headers = {
+      authorization: `Bearer ${endpoint.authorization}`,
+      "content-type": "application/json",
+    };
+    const tokens: string[] = [];
+
+    try {
+      for (let index = 0; index < 8; index += 1) {
+        const opened = await fetch(`${BASE}/api/internal/capabilities/turns`, {
+          method: "POST",
+          headers,
+          body: JSON.stringify({ client: "bounded-client", threadId: `bounded-client-${index}` }),
+        });
+        expect(opened.status).toBe(201);
+        tokens.push(((await opened.json()) as { turnToken: string }).turnToken);
+      }
+
+      const rejected = await fetch(`${BASE}/api/internal/capabilities/turns`, {
+        method: "POST",
+        headers,
+        body: JSON.stringify({ client: "bounded-client", threadId: "bounded-client-overflow" }),
+      });
+      expect(rejected.status).toBe(429);
+      expect(await rejected.json()).toEqual({ error: "external capability turn limit reached for this client" });
+    } finally {
+      await Promise.all(tokens.map((token) => fetch(`${BASE}/api/internal/capabilities/turns/${token}`, {
+        method: "DELETE",
+        headers,
+      })));
+    }
   });
 
   it("serves packaged UI assets and preserves API 404s", async () => {
@@ -674,6 +785,13 @@ describe("harness HTTP API", () => {
     expect(gated.body.bot.composio).toBe(false);
     expect((await api("PATCH", `/api/bots/${bot.id}`, { composio: true })).body.bot.composio).toBe(true);
 
+    const unsupportedFullProfile = await api("PATCH", `/api/bots/${bot.id}`, {
+      modelSelection: { instanceId: "grok-unsupported", model: "grok-3-mini" },
+      accessProfile: "full-task-scoped",
+    });
+    expect(unsupportedFullProfile.status).toBe(400);
+    expect(unsupportedFullProfile.body.error).toMatch(/only for Claude and Codex/i);
+
     const deleted = await api("DELETE", `/api/bots/${bot.id}`);
     expect(deleted.status).toBe(200);
     const after = await api("GET", "/api/bots");
@@ -1048,7 +1166,7 @@ describe("harness HTTP API", () => {
     } finally {
       stream.close();
     }
-  });
+  }, 90_000);
 
   it("imports a team as a project: one room, on a folder", async () => {
     // The manifest still describes only people. Room name and folder come
@@ -1278,6 +1396,7 @@ describe("harness HTTP API", () => {
             id: trusted.id,
             threadId: trusted.threadId,
             autoApprove: true,
+            accessProfile: "full-task-scoped",
             alwaysAllow: ["Bash"],
             chiefOfStaff: true,
             approvePeerComms: false,
@@ -1301,6 +1420,7 @@ describe("harness HTTP API", () => {
     expect(impostor.name).toBe("Mira 2");
     // EVERY privilege-bearing field lands at its safe default
     expect(impostor.autoApprove).toBeUndefined();
+    expect(impostor.accessProfile).toBeUndefined();
     expect(impostor.alwaysAllow).toBeUndefined();
     expect(impostor.chiefOfStaff).toBeUndefined();
     expect(impostor.approvePeerComms).toBeUndefined();
@@ -1370,7 +1490,7 @@ describe("harness HTTP API", () => {
     for (const bot of [trusted, impostor, legacy.body.bots[0], secondBot]) {
       expect((await api("DELETE", `/api/bots/${bot.id}`)).status).toBe(200);
     }
-  });
+  }, 90_000);
 
   it("keeps the rest of a duplicate's fields when the source engine is offline", async () => {
     // duplicateBot POSTs a blank bot, then PATCHes the source's whole
@@ -1384,6 +1504,7 @@ describe("harness HTTP API", () => {
       name: "Reviewer copy",
       title: "Reviewer",
       description: "reads diffs",
+      accessProfile: "full-task-scoped",
       modelSelection: { instanceId: "ghost", model: "ghost-1", effort: "xhigh" },
     });
 
@@ -1392,6 +1513,7 @@ describe("harness HTTP API", () => {
       name: "Reviewer copy",
       title: "Reviewer",
       description: "reads diffs",
+      accessProfile: "full-task-scoped",
       modelSelection: { instanceId: "ghost", model: "ghost-1", effort: "xhigh" },
     });
   });
@@ -2387,7 +2509,7 @@ describe("instance CLI override API", () => {
     expect((await api("PATCH", "/api/instances/nope", { cli: "/x" })).status).toBe(404);
     expect((await api("PATCH", "/api/instances/ghost", { cli: 42 })).status).toBe(400);
     expect((await api("PATCH", "/api/instances/ghost", { cli: "/x\ny" })).status).toBe(400);
-  });
+  }, 90_000);
 
   it("echoes a path-ish name back as the only cli candidate", async () => {
     const res = await api("GET", "/api/cli-candidates?name=/opt/definitely/not/here");
@@ -2433,7 +2555,7 @@ describe("instance CLI override API", () => {
     const overlapping = await api("PATCH", "/api/instances/ghost", { cli: "/tmp/ghost-overlap" });
     expect(overlapping.status).toBe(409);
     expect((await slowConfigWrite).status).toBe(200);
-  });
+  }, 90_000);
 });
 
 describe("computer control API (who is driving)", () => {

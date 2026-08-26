@@ -23,6 +23,9 @@ delete process.env.HERMES_HOME;
 // wholesale, and "it is safe because of a line in another file" is not the
 // footing that delete should stand on.
 process.env.OMB_COMPANION_DIR = join(home, ".openmausbot-companion");
+// Individual telemetry tests inject fake sink children. The full server test
+// fleet must never contact a developer's real Sentry/Langfuse projects.
+process.env.OMB_TELEMETRY_DISABLED = "1";
 
 // SQLite keeps the database file open for the lifetime of its handle.
 // Windows will not remove a directory containing an open database, so close

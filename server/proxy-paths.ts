@@ -25,9 +25,9 @@ import { fileURLToPath } from "node:url";
 export const SERVER_ROOT = dirname(fileURLToPath(import.meta.url));
 
 /** .ts in dev, where node strips types; the compiled sibling once packaged. */
-export function resolveProxy(relative: string): string {
+export function resolveProxy(relative: string, packagedExtension = ".js"): string {
   const source = join(SERVER_ROOT, `${relative}.ts`);
-  return existsSync(source) ? source : join(SERVER_ROOT, `${relative}.js`);
+  return existsSync(source) ? source : join(SERVER_ROOT, `${relative}${packagedExtension}`);
 }
 
 /** Every file the server spawns as its own process. Single source of truth so
@@ -41,6 +41,12 @@ export const SPAWNED_PROXIES = {
   agents: resolveProxy("drivers/agents-proxy"),
   dweb: resolveProxy("drivers/dweb-proxy"),
   connectors: resolveProxy("connector-proxy"),
+  capabilities: resolveProxy("capability-proxy"),
+  credentialRedactor: resolveProxy("credential-redacting-proxy"),
+  claudeApiKeyHelper: resolveProxy("claude-api-key-helper"),
+  // OpenTelemetry contains legitimate dynamic CommonJS requires. A CJS sink
+  // bundle preserves them; the main server remains ESM.
+  telemetrySink: resolveProxy("telemetry-sink", ".cjs"),
   phone: resolveProxy("drivers/phone-proxy"),
   // Loaded by the external `pi` process via `-e`, not by this server — but
   // resolved through the same single source of truth so the packaged layout

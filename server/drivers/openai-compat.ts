@@ -307,6 +307,7 @@ export const OpenAICompatDriver: ProviderDriver<OpenAICompatConfig> = {
           active.delete(threadId);
           emit({
             ...base(threadId, turnId),
+            turnToken: turn.turnToken,
             type: "turn.completed",
             ok: true,
             stopReason: null,
@@ -325,6 +326,7 @@ export const OpenAICompatDriver: ProviderDriver<OpenAICompatConfig> = {
           }
           emit({
             ...base(threadId, turnId),
+            turnToken: turn.turnToken,
             type: "turn.completed",
             ok: false,
             stopReason: aborted ? "interrupted" : "error",

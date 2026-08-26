@@ -16,6 +16,7 @@ export type BotUpdatePatch = Partial<
     | "avatarUrl"
     | "avatarCrop"
     | "autoApprove"
+    | "accessProfile"
     | "speakReplies"
     | "voice"
     | "pinned"
@@ -115,13 +116,14 @@ export function createBotPatchQueue(options: BotPatchQueueOptions): BotPatchQueu
         // A rejected patch is no longer optimistic. Re-read before rolling back
         // because a lost HTTP response may still have committed and broadcast.
         entry.inFlight = {};
-        let bot: BotAnnouncement | null = entry.fallback;
+        let bot: BotAnnouncement | null = null;
         try {
           bot = await options.reconcile(entry.botId, controller.signal);
           if (bot) entry.fallback = bot;
         } catch {
-          // The captured pre-edit bot is safer than leaving rejected input in
-          // state when the reconciliation request is unavailable too.
+          // The captured pre-edit bot may be older than an SSE frame received
+          // while reconciliation was in flight. Without an authoritative
+          // re-read, leave current renderer state intact.
         }
         // Deletion may cancel this lane while the re-read is in flight. Folding
         // that result back into state would resurrect the deleted bot.

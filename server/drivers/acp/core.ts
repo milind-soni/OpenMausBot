@@ -299,7 +299,7 @@ export function createAcpDriver(support: AcpSupport): ProviderDriver<AcpConfig> 
         ) {
           emit({ ...base(threadId, turnId), type: "turn.started" });
           emit({ ...base(threadId, turnId), type: "runtime.error", message: support.loginNote, setup: true });
-          emit({ ...base(threadId, turnId), type: "turn.completed", ok: false, stopReason: "auth_required", cost: null });
+          emit({ ...base(threadId, turnId), turnToken: turn.turnToken, type: "turn.completed", ok: false, stopReason: "auth_required", cost: null });
           return { turnId };
         }
         const resolvedModel = support.resolveTurnModel?.(turn.model, env);
@@ -369,7 +369,7 @@ export function createAcpDriver(support: AcpSupport): ProviderDriver<AcpConfig> 
           rpcPending.clear();
           active.delete(threadId);
           flushAssistantText();
-          emit({ ...base(threadId, turnId), type: "turn.completed", ok, stopReason, cost: null });
+          emit({ ...base(threadId, turnId), turnToken: turn.turnToken, type: "turn.completed", ok, stopReason, cost: null });
           stop(); // the agent process does not exit on its own
         };
 

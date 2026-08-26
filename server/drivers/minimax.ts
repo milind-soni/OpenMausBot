@@ -263,6 +263,7 @@ export const MinimaxDriver: ProviderDriver<MinimaxConfig> = {
           active.delete(threadId);
           const completed: RuntimeEvent = {
             ...base(threadId, turnId),
+            turnToken: turn.turnToken,
             type: "turn.completed",
             ok: true,
             stopReason: null,
@@ -278,6 +279,7 @@ export const MinimaxDriver: ProviderDriver<MinimaxConfig> = {
           }
           emit({
             ...base(threadId, turnId),
+            turnToken: turn.turnToken,
             type: "turn.completed",
             ok: false,
             stopReason: aborted ? "interrupted" : "error",

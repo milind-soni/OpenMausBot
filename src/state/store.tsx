@@ -13,7 +13,7 @@ import {
   useState,
   type ReactNode,
 } from "react";
-import type { CloudBackend, EffortLevel } from "../../server/contracts.ts";
+import type { AccessProfile, CloudBackend, EffortLevel } from "../../server/contracts.ts";
 import type { MausColor, MausMotion } from "@/lib/mascot";
 import type { BotAvatarCrop } from "../../shared/bot-avatar";
 import type { Routine, RoutineInput, RoutineRun } from "@/lib/routines";
@@ -197,6 +197,8 @@ export interface Bot {
   cwd?: string;
   /** auto mode: the bot approves its own tool permissions */
   autoApprove?: boolean;
+  /** Runtime capability posture; missing is the standard profile. */
+  accessProfile?: AccessProfile;
   /** tools this bot may always use without asking */
   alwaysAllow?: string[];
   /** speak this bot's replies aloud as they settle */
@@ -324,6 +326,7 @@ export interface InstanceInfo {
     /** the engine keeps a live session and takes a message mid-turn */
     queueing?: boolean;
     localComputerMcp?: boolean;
+    fullTaskScoped?: boolean;
   };
   /** `custom` agents sit below the rail divider — no subscription catalog. */
   access?: "subscription" | "custom";

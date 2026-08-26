@@ -18,12 +18,24 @@
 // drivers/ nested; import.meta.url still resolves to the same location, so
 // that lookup is unaffected.
 import { build } from "esbuild";
+import { execFileSync } from "node:child_process";
+import { copyFile, rm } from "node:fs/promises";
 import { copyFileSync, mkdirSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
 
 const root = join(dirname(fileURLToPath(import.meta.url)), "..");
 const server = join(root, "server");
+let sourceSha = "unknown";
+try {
+  sourceSha = execFileSync("git", ["rev-parse", "HEAD"], {
+    cwd: root,
+    encoding: "utf8",
+    stdio: ["ignore", "pipe", "ignore"],
+  }).trim();
+} catch {
+  // Source identity remains explicit when the build is made from an archive.
+}
 
 // yaml's Node export is CommonJS and contains dynamic requires that cannot run
 // after it is inlined into our ESM-only packaged server. Its browser export is
@@ -53,6 +65,9 @@ const ENTRY_POINTS = [
   "vps-container-mcp.ts",
   "permission-proxy.ts",
   "connector-proxy.ts",
+  "capability-proxy.ts",
+  "credential-redacting-proxy.ts",
+  "claude-api-key-helper.ts",
   "drivers/agents-proxy.ts",
   "drivers/dweb-proxy.ts",
   "drivers/phone-proxy.ts",
@@ -68,9 +83,37 @@ await build({
   outdir: join(root, "dist-server"),
   // Written after tsc, replacing its output for these entry points.
   allowOverwrite: true,
+  define: { __OMB_SOURCE_SHA__: JSON.stringify(sourceSha) },
   logLevel: "info",
   plugins: [yamlEsmPlugin],
 });
+
+// The OpenTelemetry/Sentry dependency graph contains dynamic CommonJS
+// requires. Keeping this one process as CJS avoids an ESM bundle that builds
+// successfully and then fails immediately on `require("util")` at runtime.
+await build({
+  entryPoints: [join(server, "telemetry-sink.ts")],
+  bundle: true,
+  platform: "node",
+  target: "node20",
+  format: "cjs",
+  outfile: join(root, "dist-server", "telemetry-sink.cjs"),
+  define: { __OMB_SOURCE_SHA__: JSON.stringify(sourceSha) },
+  logLevel: "info",
+});
+await rm(join(root, "dist-server", "telemetry-sink.js"), { force: true });
+
+// Windows cannot apply ELECTRON_RUN_AS_NODE to the packaged Helper with
+// /usr/bin/env. The fixed launcher carries only bounded non-secret metadata;
+// CredVault still injects provider values directly into its child environment.
+await copyFile(
+  join(server, "telemetry-node-launcher.cmd"),
+  join(root, "dist-server", "telemetry-node-launcher.cmd"),
+);
+await copyFile(
+  join(server, "credential-redacting-node-launcher.cmd"),
+  join(root, "dist-server", "credential-redacting-node-launcher.cmd"),
+);
 
 // pi-mcp-extension.ts is NOT an OpenMausBot entry point: it is loaded by the
 // external `pi` process (pi's own jiti), which resolves its

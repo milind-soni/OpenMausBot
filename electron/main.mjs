@@ -66,6 +66,15 @@ const APP_ICON = path.join(__dirname, "resources/app-icon.png");
 let desktopViewerWindow = null;
 let desktopViewerOwner = null;
 let desktopViewerContextId = null;
+const SMOKE_TEST = process.env.OMB_SMOKE_TEST === "1";
+const SMOKE_CUA = SMOKE_TEST && process.env.OMB_SMOKE_CUA === "1";
+// The Wayland safety lane must enter CUA initialization so the real guard can
+// fail closed, but it must not wait for the crash/retry sequence that only a
+// ready daemon can produce.
+const SMOKE_CUA_CRASH_RETRY =
+  SMOKE_CUA && process.env.OMB_SMOKE_LINUX_CUA_BLOCKED !== "1";
+const SMOKE_BUNDLED_CUA = SMOKE_TEST && process.env.OMB_SMOKE_BUNDLED_CUA === "1";
+const SMOKE_HARD_DEATH_CUA = SMOKE_TEST && process.env.OMB_SMOKE_HARD_DEATH === "1";
 let pendingPackageInstallUrl = packageUrlFromCommandLine(process.argv);
 let mainWindow = null;
 let unreadCount = 0;
@@ -183,6 +192,31 @@ app.on("second-instance", (_event, commandLine) => {
   deliverPackageInstall(target);
 });
 
+// Development/package acceptance runs can keep every Electron-owned artifact
+// away from the installed app without changing production defaults. An
+// explicit Chromium --user-data-dir remains authoritative; Electron applies
+// that switch itself, so an environment override must not silently replace it.
+function appPathOverride(name) {
+  const configured = process.env[name]?.trim();
+  if (!configured) return null;
+  if (!path.isAbsolute(configured)) throw new Error(`${name} must be an absolute path`);
+  const resolved = path.resolve(configured);
+  if (resolved === path.parse(resolved).root) throw new Error(`${name} must not be a filesystem root`);
+  fs.mkdirSync(resolved, { recursive: true, mode: 0o700 });
+  if (!fs.statSync(resolved).isDirectory()) throw new Error(`${name} must name a directory`);
+  return resolved;
+}
+
+const USER_DATA_OVERRIDE = app.commandLine.hasSwitch("user-data-dir")
+  ? null
+  : appPathOverride("OMB_USER_DATA_DIR");
+if (USER_DATA_OVERRIDE) app.setPath("userData", USER_DATA_OVERRIDE);
+const LOG_DIR_OVERRIDE = appPathOverride("OMB_LOG_DIR");
+if (LOG_DIR_OVERRIDE) app.setPath("logs", LOG_DIR_OVERRIDE);
+
+const CREDENTIALS_FILE = path.join(app.getPath("userData"), "credentials.bin");
+const LOG_DIR = app.getPath("logs");
+
 // Packaged: the harness server ships in Resources (compiled JS, zero deps)
 // and runs on Electron's own Node via utilityProcess. It serves the built
 // UI too, so the window talks to one origin and there is no dev proxy.
@@ -194,14 +228,11 @@ let serverReady = true;
 let secureCredentials = {};
 let secureCredentialState = null;
 
-const CREDENTIALS_FILE = path.join(app.getPath("userData"), "credentials.bin");
-
 /** Set once per launch: true when the store could not be READ, which is not
  * the same as the user having saved nothing. Everything downstream — the
  * server's view of "configured", and whether we may register a fresh
  * installation — keys off this rather than off an empty object. */
 let credentialStoreUnavailable = false;
-
 async function loadSecureCredentials() {
   const result = await readSecureCredentials({
     exists: () => fs.existsSync(CREDENTIALS_FILE),
@@ -310,7 +341,6 @@ function composioBrokerUrl() {
 // Console.app-visible; %APPDATA%\OpenMausBot\logs on Windows), which is also
 // why stdio is piped, not inherited — under a Finder/Explorer launch the
 // parent's stdio leads nowhere and a failed boot is otherwise undiagnosable.
-const LOG_DIR = app.getPath("logs");
 let logStream = null;
 import {
   companionAdvertisedHostedUrl,
@@ -658,6 +688,7 @@ async function startServerOn(port) {
     OMB_RESOURCES_PATH: process.resourcesPath,
     OMB_SKILLS_DIR: path.join(process.resourcesPath, "skills"),
     OMB_PORT: String(port),
+    OMB_RELEASE: app.getVersion(),
     OMB_USER_DATA: app.getPath("userData"),
     ...(secureCredentials.composioApiKey
       ? { COMPOSIO_API_KEY: secureCredentials.composioApiKey }
@@ -984,14 +1015,14 @@ function createWindow() {
   // Packaged CI smoke hook. It validates the real renderer/preload bridge and
   // same-origin embedded server, then follows the normal window-close path.
   // No debugging port or sandbox override is needed.
-  if (process.env.OMB_SMOKE_TEST === "1") {
+  if (SMOKE_TEST) {
     win.webContents.once("did-finish-load", async () => {
       try {
         const result = await win.webContents.executeJavaScript(`
           (async () => {
             if (!window.ogb?.getCapabilities) throw new Error("desktop preload bridge is unavailable");
             let crashPromise = null;
-            if (${JSON.stringify(process.env.OMB_SMOKE_CUA === "1")}) {
+            if (${JSON.stringify(SMOKE_CUA_CRASH_RETRY)}) {
               crashPromise = new Promise((resolve, reject) => {
                 const timeout = setTimeout(() => {
                   unsubscribe?.();
@@ -1424,8 +1455,12 @@ setCuaStateListener((connection) => {
 app.whenReady().then(async () => {
   if (app.isPackaged) app.setAsDefaultProtocolClient("openmausbot");
   if (process.platform === "darwin") app.dock.setIcon(APP_ICON);
-  secureCredentials = await loadSecureCredentials();
-  if (app.isPackaged) {
+  // Package acceptance must not ask Chromium's shared Safe Storage keychain,
+  // register a connected-app identity, or migrate credentials. A development
+  // signature does not share the installed app's trust identity even when the
+  // user-data directory is isolated.
+  if (!SMOKE_TEST) secureCredentials = await loadSecureCredentials();
+  if (app.isPackaged && !SMOKE_TEST) {
     await secureComposioConfig();
     await secureWorkspaceConfig();
   }
@@ -1495,12 +1530,18 @@ app.whenReady().then(async () => {
   // connection descriptor on first render. Never blocks window creation on
   // failure — computer use degrades to "unavailable", the rest still works.
   cuaReady =
-    process.platform === "darwin" || process.platform === "linux"
+    (process.platform === "darwin" || process.platform === "linux") &&
+    (!SMOKE_TEST || SMOKE_CUA || SMOKE_BUNDLED_CUA || SMOKE_HARD_DEATH_CUA)
       ? startCua().catch((e) => {
           console.error("[cua] start failed:", e);
           return { mode: "unavailable", reason: String(e) };
         })
-      : Promise.resolve({ mode: "unavailable", reason: "unsupported-platform" });
+      : Promise.resolve({
+          mode: "unavailable",
+          reason: SMOKE_TEST
+            ? "package smoke disables CUA unless its isolated CUA lane is enabled"
+            : "unsupported-platform",
+        });
   if (app.isPackaged) serverReady = await startServerPackaged();
   // The companion the user left on comes back without anyone finding the
   // toggle again — one attempt, after the harness port is settled, with the
@@ -1514,7 +1555,7 @@ app.whenReady().then(async () => {
   // Reconcile incomplete setup and resume interrupted sign-out only after the
   // local app is usable. This background network work never gates LAN pairing
   // or the first window.
-  void hostedAccount.restore().catch(() => {});
+  if (!SMOKE_TEST) void hostedAccount.restore().catch(() => {});
   // Registration is optional network work. Start it only after the local
   // server and first window are usable, then update the server child over its
   // private parent port so Connected Apps becomes available without restart.
@@ -1524,7 +1565,7 @@ app.whenReady().then(async () => {
   if (credentialStoreUnavailable) {
     slog("skipping connected-apps registration: the credential store was unreadable this launch");
   }
-  if (app.isPackaged && composioBrokerUrl() && !credentialStoreUnavailable) {
+  if (!SMOKE_TEST && app.isPackaged && composioBrokerUrl() && !credentialStoreUnavailable) {
     void updateSecureCredentialDocument(async (credentials) => {
       await ensureManagedComposioCredentials({
         brokerUrl: composioBrokerUrl(),
@@ -1539,7 +1580,7 @@ app.whenReady().then(async () => {
   }
   // in-app auto-update (packaged only) — checks GitHub releases, downloads on
   // the user's click, installs on "Restart to update"
-  startUpdater(win);
+  if (!SMOKE_TEST) startUpdater(win);
   app.on("activate", () => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow();
   });

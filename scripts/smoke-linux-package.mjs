@@ -195,7 +195,11 @@ const desktopEnv = {
   CUA_DRIVER_PATH: sentinel,
   OMB_COMPOSIO_BROKER_URL: `http://127.0.0.1:${brokerAddress.port}`,
   OMB_SMOKE_TEST: "1",
-  OMB_SMOKE_CUA: hardDeath || bundled || sessionBlocked ? "0" : "1",
+  // The Wayland safety lane must still enter the isolated Linux CUA
+  // initializer so it can prove the real seat-safety reason. Disabling CUA
+  // here produces only the generic unsupported-platform fallback and tests
+  // neither the guard nor its user-facing contract.
+  OMB_SMOKE_CUA: hardDeath || bundled ? "0" : "1",
   OMB_SMOKE_BUNDLED_CUA: bundled ? "1" : "0",
 };
 if (hardDeath || signalShutdown) desktopEnv.OMB_SMOKE_KEEP_OPEN = "1";
@@ -331,7 +335,6 @@ try {
     throw new Error("Linux package did not disable hardware acceleration before startup");
   }
   if (displayMediaRequests !== 0) throw new Error("launch triggered display capture without user intent");
-  await until(async () => brokerRequests > 0, "the optional slow-broker request");
   if (sessionBlocked) {
     await waitForExit();
     if (existsSync(marker)) throw new Error("release safety block still invoked a CUA executable");
@@ -346,7 +349,7 @@ try {
       throw new Error("release safety block did not clear the durable Linux opt-in");
     }
     console.log(
-      `[smoke-linux-package] OK (${wayland ? "GNOME/Wayland" : path.basename(executable)}): slow optional broker did not block first paint and Wayland CUA failed closed`,
+      `[smoke-linux-package] OK (${wayland ? "GNOME/Wayland" : path.basename(executable)}): optional broker stayed isolated and Wayland CUA failed closed`,
     );
   } else if (bundled) {
     if (signalShutdown) child.kill("SIGTERM");
@@ -586,6 +589,9 @@ try {
     if (!hardDeath) {
       console.log(`[smoke-linux-package] OK (${wayland ? "GNOME/Wayland" : "GNOME/X11"}): renderer, private CUA crash/retry, harness, and shutdown`);
     }
+  }
+  if (brokerRequests !== 0) {
+    throw new Error(`package smoke unexpectedly contacted the optional broker ${brokerRequests} time(s)`);
   }
 } finally {
   await stopProcess();

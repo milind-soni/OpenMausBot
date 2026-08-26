@@ -17,6 +17,27 @@ Explicit paths are useful when you:
 - installed an engine in a directory desktop apps cannot discover; or
 - launch OpenMausBot from a Windows shortcut or Linux application menu with a different environment from your terminal.
 
+## Shared `/goal` continuity
+
+OpenMausBot can forward `/goal` commands to a host-owned goal controller so the same objective can be shared with other agent surfaces. This integration is optional and fails closed: OpenMausBot does not ship or guess a controller.
+
+Set `OMB_GOAL_CONTROL_PATH` to the controller script's absolute path before starting OpenMausBot. If the script needs a Python executable that is not available as `python3` on macOS/Linux or `python` on Windows, also set `OMB_PYTHON` to its executable path. Restart OpenMausBot after changing either value.
+
+The controller must accept these commands and return one JSON object on standard output or standard error:
+
+| OpenMausBot command | Controller invocation |
+|---|---|
+| `/goal` or `/goal status` | `show` |
+| `/goal Build the release` | `set --surface codex --lane openmaus-<bot-id> --session <thread-id> --model <model> --objective-stdin` |
+| `/goal replace Build the release` | the same `set` invocation plus `--replace` |
+| `/goal pause`, `/goal resume`, `/goal clear` | `pause`, `resume`, or `clear` |
+| `/goal done --proof /absolute/receipt.json` | `complete --proof /absolute/receipt.json` |
+| `/goal block reason --proof /absolute/receipt.json` | `block --reason reason --proof /absolute/receipt.json` |
+
+Objectives are sent through standard input, not process arguments. Completion and blocking require an existing absolute proof-file path. OpenMausBot passes a minimal environment to the controller and does not start an unattended continuation loop.
+
+If `/goal` returns `Shared goal command is not configured`, the OpenMausBot process did not inherit `OMB_GOAL_CONTROL_PATH`. Configure the variable in the shell, wrapper, or service that launches the app rather than placing the controller path in a chat prompt.
+
 ## Optional credentials
 
 | Credential | Enables |

@@ -1,0 +1,2 @@
+# Intentional synthetic authorization fixture used to verify secret redaction.
+0a452dfb0ffaaaa180da86d0c85cd93474335011:server/redact.test.ts:curl-auth-header:139

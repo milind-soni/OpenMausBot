@@ -337,6 +337,7 @@ export function SettingsPanel({ bot }: { bot: Bot }) {
         | "avatarUrl"
         | "avatarCrop"
         | "autoApprove"
+        | "accessProfile"
         | "speakReplies"
         | "voice"
         | "chiefOfStaff"
@@ -349,6 +350,8 @@ export function SettingsPanel({ bot }: { bot: Bot }) {
   const activeState = stateForBot(bot);
   const mascotMotion = state.mascotMotion?.botId === bot.id ? state.mascotMotion : null;
   const engine = state.instances.find((instance) => instance.instanceId === bot.modelSelection.instanceId);
+  const fullTaskScopedAvailable = engine?.capabilities?.fullTaskScoped === true;
+  const fullTaskScoped = bot.accessProfile === "full-task-scoped" && fullTaskScopedAvailable;
   const canCoordinate = engine?.capabilities?.agentsMcp === true;
   const canUseConnectedApps = engine?.capabilities?.composioMcp === true;
   const canUseVps = engine?.capabilities?.computerMcp === true && engine.driverKind !== "boxAgent";
@@ -669,11 +672,33 @@ export function SettingsPanel({ bot }: { bot: Bot }) {
           {/* keyed so switching bots never shows one bot's notes under another's name */}
           <MemoryCard key={bot.id} bot={bot} />
 
+          <div className="rounded-xl bg-card p-4">
+            <div className="text-[15px] font-medium text-ink">Access profile</div>
+            <div className="mt-0.5 text-[13px] text-ink-secondary">
+              {fullTaskScopedAvailable
+                ? "Full task-scoped access keeps every host and connected capability available while refusing only catastrophic destruction and credential-value disclosure."
+                : "Choose a Claude or Codex engine before enabling full task-scoped access; other engines do not mount the protected gateway."}
+            </div>
+            <select
+              value={bot.accessProfile ?? "standard"}
+              onChange={(event) => patch({ accessProfile: event.target.value as "standard" | "full-task-scoped" })}
+              aria-label="Access profile"
+              className="mt-3 w-full rounded-lg border border-hairline/40 bg-inset px-3 py-2 text-[13px] text-ink focus:border-hairline focus:outline-none"
+            >
+              <option value="standard">Standard</option>
+              <option value="full-task-scoped" disabled={!fullTaskScopedAvailable}>Full task-scoped</option>
+            </select>
+          </div>
+
           <div className="flex items-center justify-between gap-4 rounded-xl bg-card p-4">
             <div>
               <div className="text-[15px] font-medium text-ink">Auto mode</div>
               <div className="mt-0.5 text-[13px] text-ink-secondary">
-                {bot.computer === "local"
+                {fullTaskScoped && bot.autoApprove
+                  ? "Keeps going across host and connected tools; only catastrophic destruction and credential-value disclosure stop automatically."
+                  : fullTaskScoped
+                  ? "Approve each non-denied action yourself. The same capabilities remain available, and the two hard denials still apply."
+                  : bot.computer === "local"
                   ? bot.autoApprove
                     ? "Keeps going on this computer — you'll still be asked about anything destructive, and about questions it asks you."
                     : "Approve each action on this computer yourself. Turn on to let this bot keep working without stopping to ask."

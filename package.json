@@ -56,6 +56,7 @@
     "build:updater": "node scripts/bundle-updater.mjs",
     "package:prepare": "pnpm build && pnpm build:server && pnpm build:companion && pnpm build:updater && pnpm build:android-tools && pnpm build:cloudflared",
     "package:mac": "pnpm package:prepare && pnpm build:speech && pnpm build:recorder && pnpm build:cua && electron-builder --mac --publish never",
+    "package:mac:dev": "pnpm package:prepare && pnpm build:speech && pnpm build:recorder && pnpm build:cua && electron-builder --config electron-builder.dev.yml --mac dir --arm64 --publish never",
     "package:win": "pnpm package:prepare && electron-builder --win --publish never",
     "package:linux": "pnpm package:prepare && pnpm build:cua:linux && electron-builder --linux --x64 --publish never",
     "package:linux:offline": "pnpm package:prepare && pnpm build:cua:linux:offline && electron-builder --linux --x64 --publish never",
@@ -74,6 +75,10 @@
     "control-plane:dry-run": "pnpm --filter @openmausbot/control-plane dry-run"
   },
   "dependencies": {
+    "@langfuse/otel": "5.10.1",
+    "@langfuse/tracing": "5.10.1",
+    "@opentelemetry/sdk-node": "0.221.0",
+    "@sentry/node": "10.70.0",
     "@trycua/cua-driver": "0.20.0",
     "clsx": "^2.1.1",
     "lucide-react": "^0.539.0",

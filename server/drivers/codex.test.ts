@@ -5,7 +5,7 @@
 //
 // The fake is a shebang script — the same constraint codex.cmd itself
 // hits on Windows. resolveCliSpawn covers both, so these run everywhere.
-import { chmodSync, mkdtempSync, readFileSync } from "node:fs";
+import { chmodSync, mkdirSync, mkdtempSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -13,7 +13,7 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 import type { ProviderInstance } from "../contracts.ts";
 import { recordEvents, type EventRecorder } from "../testing/events.ts";
-import { CodexDriver } from "./codex.ts";
+import { CodexDriver, ensureOpenMausCodexHome } from "./codex.ts";
 import { removeTempDir } from "../testing/cleanup.ts";
 
 const FAKE_CLI = join(dirname(fileURLToPath(import.meta.url)), "..", "testing", "fake-codex-app-server.ts");
@@ -62,6 +62,13 @@ describe("CodexDriver turns (fake app-server)", () => {
     delete process.env.OPENAI_API_KEY;
     delete process.env.BOX_TOKEN;
     delete process.env.OMB_TTS_KEY;
+    delete process.env.AOS_STARTUP_DIRECTIVE;
+    delete process.env.FAKE_CODEX_APPROVAL_COMMAND;
+    delete process.env.FAKE_CODEX_APPROVAL_PATH;
+    delete process.env.FAKE_CODEX_APPROVAL_RECURSIVE;
+    delete process.env.FAKE_CODEX_APPROVAL_KIND;
+    delete process.env.FAKE_CODEX_APPROVAL_SERVER_NAME;
+    delete process.env.FAKE_CODEX_APPROVAL_FALLBACK_SERVER;
     recorder?.stop();
     await instance?.dispose();
     await removeTempDir(scratch);
@@ -128,6 +135,12 @@ describe("CodexDriver turns (fake app-server)", () => {
     expect(threadStart.params).toMatchObject({ model: "gpt-5.6-sol", modelProvider: "openai" });
   });
 
+  it("keeps local computer capability profile-aware while exposing the scoped profile", async () => {
+    await create({ fullAuto: true });
+    expect(instance.adapter.capabilities.localComputerMcp).toBe(false);
+    expect(instance.adapter.capabilities.fullTaskScoped).toBe(true);
+  });
+
   it("keeps the full command when a Windows interpreter prefix is long", async () => {
     await create({ mode: "windows-command" });
     await instance.adapter.sendTurn({ threadId: "t-windows-command", text: "read notes" });
@@ -159,6 +172,58 @@ describe("CodexDriver turns (fake app-server)", () => {
     await recorder.until((event) => event.type === "turn.completed");
 
     expect(JSON.parse(readFileSync(dump, "utf8")).env.CODEX_HOME).toBe(codexHome);
+  });
+
+  it("uses a dedicated keyring-only CODEX_HOME and explicit gateway for the full profile", async () => {
+    await create();
+    const dump = join(scratch, "full-profile.json");
+    process.env.FAKE_CODEX_DUMP = dump;
+    process.env.AOS_STARTUP_DIRECTIVE = "must-not-survive";
+
+    await instance.adapter.sendTurn({
+      threadId: "t-full-profile",
+      turnToken: "turn-token-123456789012345678901234",
+      text: "work",
+      system: "OpenMaus explicit prompt",
+      accessProfile: "full-task-scoped",
+      autoApprove: true,
+      integrations: {
+        capabilityGateway: {
+          command: process.execPath,
+          args: ["/tmp/capability-proxy.js"],
+          env: { OMB_TURN_TOKEN: "turn-token-123456789012345678901234" },
+        },
+        localComputer: {
+          command: process.execPath,
+          args: ["/tmp/computer.js"],
+          env: {},
+          scope: "local-computer",
+        },
+      },
+    });
+    await recorder.until((event) => event.type === "turn.completed");
+
+    const seen = JSON.parse(readFileSync(dump, "utf8"));
+    expect(seen.env.AOS_STARTUP_DIRECTIVE).toBeUndefined();
+    expect(seen.env.CODEX_HOME).toBe(ensureOpenMausCodexHome());
+    const config = readFileSync(join(seen.env.CODEX_HOME, "config.toml"), "utf8");
+    expect(config).toContain('cli_auth_credentials_store = "keyring"');
+    expect(config).toContain("project_doc_max_bytes = 0");
+    expect(config).toContain('default_permissions = "openmaus-gateway-only"');
+    expect(config).toContain("shell_tool = false");
+    expect(config).toContain("unified_exec = false");
+    expect(config).toContain("hooks = false");
+    expect(config).not.toContain(`[permissions.openmaus-gateway-only.filesystem]`);
+    expect(config).not.toContain('":minimal"');
+    expect(config).toContain("[agents]\nenabled = false");
+    expect(config).toContain("[permissions.openmaus-gateway-only.network]\nenabled = false");
+    const argv = seen.argv.join(" ");
+    expect(argv).toContain("mcp_servers.openmaus_capabilities.command");
+    expect(argv).toContain('mcp_servers.openmaus_capabilities.default_tools_approval_mode="auto"');
+    expect(argv).not.toContain("mcp_servers.computer");
+    const start = seen.calls.find((call: { method: string }) => call.method === "thread/start");
+    expect(start.params).toMatchObject({ permissions: "openmaus-gateway-only", approvalPolicy: "on-request" });
+    expect(start.params.sandbox).toBeUndefined();
   });
 
   it("mounts connected apps without placing credential values in argv", async () => {
@@ -412,6 +477,149 @@ describe("CodexDriver turns (fake app-server)", () => {
 
     expect(recorder.events.some((e) => e.type === "request.opened")).toBe(false);
     expect(JSON.parse(readFileSync(dump, "utf8")).decision).toEqual({ decision: "approved" });
+  });
+
+  it("auto-approves an ordinary scoped delete in full-task-scoped mode", async () => {
+    await create({ mode: "approval" });
+    const dump = join(scratch, "full-delete.json");
+    process.env.FAKE_CODEX_DUMP = dump;
+    process.env.FAKE_CODEX_APPROVAL_KIND = "gateway";
+
+    await instance.adapter.sendTurn({
+      threadId: "t-full-delete",
+      turnToken: "turn-token-123456789012345678901234",
+      text: "clean up",
+      accessProfile: "full-task-scoped",
+      autoApprove: true,
+    });
+    await recorder.until((event) => event.type === "turn.completed");
+    expect(recorder.events.some((event) => event.type === "request.opened")).toBe(false);
+    expect(JSON.parse(readFileSync(dump, "utf8")).decision).toEqual({ action: "accept" });
+  });
+
+  it("declines a recursive whole-repository delete routed through the gateway", async () => {
+    await create({ mode: "approval" });
+    mkdirSync(join(scratch, ".git"));
+    const dump = join(scratch, "full-repository-delete.json");
+    process.env.FAKE_CODEX_DUMP = dump;
+    process.env.FAKE_CODEX_APPROVAL_KIND = "gateway";
+    process.env.FAKE_CODEX_APPROVAL_PATH = scratch;
+    process.env.FAKE_CODEX_APPROVAL_RECURSIVE = "1";
+
+    await instance.adapter.sendTurn({
+      threadId: "t-full-repository-delete",
+      turnToken: "turn-token-123456789012345678901234",
+      text: "delete the repository",
+      cwd: scratch,
+      accessProfile: "full-task-scoped",
+      autoApprove: true,
+    });
+    await recorder.until((event) => event.type === "turn.completed");
+    expect(JSON.parse(readFileSync(dump, "utf8")).decision).toEqual({ action: "decline" });
+  });
+
+  it("declines a recursive home delete when a scoped turn omits cwd", async () => {
+    await create({ mode: "approval" });
+    const dump = join(scratch, "full-default-home-delete.json");
+    process.env.FAKE_CODEX_DUMP = dump;
+    process.env.FAKE_CODEX_APPROVAL_KIND = "gateway";
+    process.env.FAKE_CODEX_APPROVAL_PATH = "*";
+    process.env.FAKE_CODEX_APPROVAL_RECURSIVE = "1";
+
+    // Keep the harness cwd somewhere harmless and non-repository. Before the
+    // fix, the guard resolved `*` here even though the app-server itself was
+    // launched in homedir() and would have expanded it across the test home.
+    const harnessCwd = process.cwd();
+    try {
+      process.chdir(scratch);
+      await instance.adapter.sendTurn({
+        threadId: "t-full-default-home-delete",
+        turnToken: "turn-token-123456789012345678901234",
+        text: "delete everything here",
+        accessProfile: "full-task-scoped",
+        autoApprove: true,
+      });
+      await recorder.until((event) => event.type === "turn.completed");
+    } finally {
+      process.chdir(harnessCwd);
+    }
+
+    expect(JSON.parse(readFileSync(dump, "utf8")).decision).toEqual({ action: "decline" });
+  });
+
+  it("keeps auto-approval independent from the full-task-scoped capability profile", async () => {
+    await create({ mode: "approval", fullAuto: true });
+    const dump = join(scratch, "full-manual.json");
+    process.env.FAKE_CODEX_DUMP = dump;
+    process.env.FAKE_CODEX_APPROVAL_KIND = "gateway";
+
+    await instance.adapter.sendTurn({
+      threadId: "t-full-manual",
+      turnToken: "turn-token-123456789012345678901234",
+      text: "clean up",
+      accessProfile: "full-task-scoped",
+      autoApprove: false,
+    });
+    const opened = await recorder.until((event) => event.type === "request.opened");
+    expect(opened).toMatchObject({ requestType: "permission", tool: "call_capability" });
+    await instance.adapter.respondToRequest("t-full-manual", opened.requestId!, { behavior: "deny" });
+    await recorder.until((event) => event.type === "turn.completed");
+    expect(JSON.parse(readFileSync(dump, "utf8")).decision).toEqual({ action: "decline" });
+  });
+
+  it("fails closed when MCP elicitation omits the exact gateway serverName", async () => {
+    await create({ mode: "approval" });
+    const dump = join(scratch, "full-invalid-server.json");
+    process.env.FAKE_CODEX_DUMP = dump;
+    process.env.FAKE_CODEX_APPROVAL_KIND = "gateway";
+    process.env.FAKE_CODEX_APPROVAL_SERVER_NAME = "not-openmaus";
+    process.env.FAKE_CODEX_APPROVAL_FALLBACK_SERVER = "openmaus_capabilities";
+
+    await instance.adapter.sendTurn({
+      threadId: "t-full-invalid-server",
+      turnToken: "turn-token-123456789012345678901234",
+      text: "clean up",
+      accessProfile: "full-task-scoped",
+      autoApprove: true,
+    });
+    await recorder.until((event) => event.type === "turn.completed");
+    expect(recorder.events.some((event) => event.type === "request.opened")).toBe(false);
+    expect(JSON.parse(readFileSync(dump, "utf8")).decision).toEqual({ action: "decline" });
+  });
+
+  it("rejects provider-native effects and directs the model through the gateway", async () => {
+    await create({ mode: "approval" });
+    const dump = join(scratch, "full-native-reject.json");
+    process.env.FAKE_CODEX_DUMP = dump;
+
+    await instance.adapter.sendTurn({
+      threadId: "t-full-native-reject",
+      turnToken: "turn-token-123456789012345678901234",
+      text: "clean up",
+      accessProfile: "full-task-scoped",
+      autoApprove: true,
+    });
+    await recorder.until((event) => event.type === "turn.completed");
+    expect(recorder.events.some((event) => event.type === "request.opened")).toBe(false);
+    expect(recorder.events.some((event) => event.type === "runtime.error" && /openmaus_capabilities/.test(event.message))).toBe(true);
+    expect(JSON.parse(readFileSync(dump, "utf8")).decision).toEqual({ decision: "denied" });
+  });
+
+  it("centrally declines catastrophic destruction in full-task-scoped mode", async () => {
+    await create({ mode: "approval" });
+    const dump = join(scratch, "full-deny.json");
+    process.env.FAKE_CODEX_DUMP = dump;
+    process.env.FAKE_CODEX_APPROVAL_COMMAND = "bash -lc 'rm -rf /'";
+
+    await instance.adapter.sendTurn({
+      threadId: "t-full-deny",
+      turnToken: "turn-token-123456789012345678901234",
+      text: "destroy",
+      accessProfile: "full-task-scoped",
+    });
+    await recorder.until((event) => event.type === "turn.completed");
+    expect(JSON.parse(readFileSync(dump, "utf8")).decision).toEqual({ decision: "denied" });
+    expect(recorder.events.some((event) => event.type === "runtime.error" && /catastrophic-destruction/.test(event.message))).toBe(true);
   });
 
   it("rejects a second turn while one is in flight", async () => {
