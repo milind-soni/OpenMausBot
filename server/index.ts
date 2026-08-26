@@ -19,6 +19,7 @@ import {
 } from "../shared/credential-request.ts";
 
 import { approvalKey, autoVerdict } from "./auto-approve.ts";
+import { WakeQueue } from "./wakes.ts";
 import { appendDecision, readDecisions } from "./decision-log.ts";
 import { validateBotCwd } from "./bot-cwd.ts";
 import { attachmentExists, extensionForMime, IMAGE_MAX_BYTES, readAttachment, saveImage, type SavedAttachment } from "./attachments.ts";
@@ -2227,10 +2228,6 @@ function resolveReplyTarget(threadId: string, value: unknown): Message | undefin
 }
 
 const CONNECTOR_SLUG = /^[a-z0-9][a-z0-9_-]{0,80}$/;
-const pendingConnectorResumes = new Map<
-  string,
-  { botId: string; threadId: string; resumeKey: string; labels: string[] }
->();
 
 function connectorThread(botId: string, threadId: string) {
   const bot = store.bot(botId);
@@ -2262,41 +2259,42 @@ function markConnectorResumeFailed(threadId: string, resumeKey: string, error: s
   }
 }
 
-function dispatchConnectorResume(entry: { botId: string; threadId: string; resumeKey: string; labels: string[] }) {
-  const owner = connectorThread(entry.botId, entry.threadId);
-  if (!owner) return;
-  const names = entry.labels.join(", ");
-  const prompt = `OpenMausBot connection update: the user securely connected ${names}. Continue the task that paused for this connection. Do not ask them to connect it again.`;
-  if (owner.bot.busy) {
-    pendingConnectorResumes.set(`${entry.threadId}:${entry.resumeKey}`, entry);
-    return;
-  }
-  if (owner.group) {
-    const previous = groupQueues.get(owner.group.id) ?? Promise.resolve();
+// The one way a settled bot gets woken back up. Connector resumes were the
+// first reason and are still the only producer wired here; listeners and
+// executors join without touching the dispatch policy.
+const wakes = new WakeQueue({
+  owner(botId, threadId) {
+    const owner = connectorThread(botId, threadId);
+    if (!owner) return null;
+    // `busy` is optional on the record; absent has always meant idle
+    const busy = owner.bot.busy === true;
+    return owner.group ? { busy, groupId: owner.group.id } : { busy };
+  },
+  runGroupTurn(groupId, wake, requeue) {
+    const previous = groupQueues.get(groupId) ?? Promise.resolve();
     const next = previous.then(async () => {
-      const current = connectorThread(entry.botId, entry.threadId);
+      // the room and the bot's place in it can both change while this waits
+      const current = connectorThread(wake.botId, wake.threadId);
       if (!current?.group) return;
-      if (current.bot.busy) {
-        pendingConnectorResumes.set(`${entry.threadId}:${entry.resumeKey}`, entry);
-        return;
-      }
-      await runGroupMemberTurn(current.group.id, entry.botId, 0, new Set(), prompt);
+      if (current.bot.busy) return requeue();
+      await runGroupMemberTurn(current.group.id, wake.botId, 0, new Set(), wake.prompt);
     });
-    groupQueues.set(owner.group.id, next.catch((error) => {
-      markConnectorResumeFailed(entry.threadId, entry.resumeKey, error instanceof Error ? error.message : String(error));
-    }));
-    return;
-  }
-  void startTurn(entry.botId, prompt, {
-    threadId: entry.threadId,
-    cardContinuation: true,
-    onDispatchError: (message) => markConnectorResumeFailed(entry.threadId, entry.resumeKey, message),
-  }).catch((error) => {
-    const message = error instanceof Error ? error.message : String(error);
-    if (/already working/i.test(message)) pendingConnectorResumes.set(`${entry.threadId}:${entry.resumeKey}`, entry);
-    else markConnectorResumeFailed(entry.threadId, entry.resumeKey, message);
-  });
-}
+    groupQueues.set(
+      groupId,
+      next.catch((error) => wake.onFailure?.(error instanceof Error ? error.message : String(error))),
+    );
+  },
+  runSoloTurn(wake) {
+    const opts: Parameters<typeof startTurn>[2] = {
+      threadId: wake.threadId,
+      // control-plane context: it reaches the provider without masquerading
+      // as another message authored by the user
+      cardContinuation: true,
+    };
+    if (wake.onFailure) opts.onDispatchError = wake.onFailure;
+    return startTurn(wake.botId, wake.prompt, opts).then(() => undefined);
+  },
+});
 
 function maybeResumeConnectors(botId: string, threadId: string, resumeKey: string) {
   const cards = connectorCards(threadId, resumeKey);
@@ -2306,16 +2304,21 @@ function maybeResumeConnectors(botId: string, threadId: string, resumeKey: strin
   for (const message of cards) {
     store.patchMessage(threadId, message.id, { connector: { ...message.connector!, resumed: true, error: undefined } });
   }
-  dispatchConnectorResume({ botId, threadId, resumeKey, labels });
+  wakes.dispatch({
+    key: `${threadId}:${resumeKey}`,
+    source: "connector",
+    botId,
+    threadId,
+    prompt: `OpenMausBot connection update: the user securely connected ${labels.join(", ")}. Continue the task that paused for this connection. Do not ask them to connect it again.`,
+    onFailure: (message) => markConnectorResumeFailed(threadId, resumeKey, message),
+  });
   return true;
 }
 
+/** Kept as a named function: main calls this from five places, and the name
+ * says what those call sites mean better than `wakes.drain()` would. */
 function drainConnectorResumes() {
-  for (const [key, entry] of pendingConnectorResumes) {
-    if (store.bot(entry.botId)?.busy) continue;
-    pendingConnectorResumes.delete(key);
-    dispatchConnectorResume(entry);
-  }
+  wakes.drain();
 }
 
 type SecretResumeEntry = {

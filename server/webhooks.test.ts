@@ -124,6 +124,51 @@ describe("WebhookManager", () => {
     expect(h.manager.list()[0]).toMatchObject({ lastRunId: "run-1", deliveryCount: 1 });
   });
 
+  it("runs only the deliveries a typed listener subscribes to", () => {
+    const h = harness();
+    const { webhook, secret } = h.manager.create({
+      name: "PR watcher",
+      prompt: "Summarize the pull request.",
+      botId: "maus-1",
+      listener: { type: "github", repo: "milind-soni/OpenMausBot", events: ["pr-opened"] },
+    });
+
+    const matching = h.manager.receive(webhook.endpointId, secret, {
+      payload: {
+        action: "opened",
+        pull_request: { title: "Add a thing", user: { login: "omkar" } },
+        repository: { full_name: "milind-soni/OpenMausBot" },
+      },
+      eventName: "pull_request",
+      deliveryId: "d-1",
+    });
+    expect(matching).toMatchObject({ runId: "run-1" });
+    expect(h.queued).toHaveLength(1);
+
+    const wrongRepo = h.manager.receive(webhook.endpointId, secret, {
+      payload: { action: "opened", pull_request: { title: "Elsewhere" }, repository: { full_name: "someone/else" } },
+      eventName: "pull_request",
+      deliveryId: "d-2",
+    });
+    expect(wrongRepo).toMatchObject({ ignored: true });
+
+    const wrongKind = h.manager.receive(webhook.endpointId, secret, {
+      payload: { action: "closed", pull_request: { merged: true }, repository: { full_name: "milind-soni/OpenMausBot" } },
+      eventName: "pull_request",
+      deliveryId: "d-3",
+    });
+    expect(wrongKind).toMatchObject({ ignored: true });
+
+    const notAnEvent = h.manager.receive(webhook.endpointId, secret, {
+      payload: { hello: "world" },
+      deliveryId: "d-4",
+    });
+    expect(notAnEvent).toMatchObject({ ignored: true });
+
+    // one run, from the one delivery that actually matched
+    expect(h.queued).toHaveLength(1);
+  });
+
   it("uses an authenticated task from the payload when default instructions are empty", () => {
     const h = harness();
     const { webhook, secret } = h.manager.create({ name: "Direct tasks", prompt: "", botId: "maus-1" });

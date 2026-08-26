@@ -7,6 +7,7 @@ import { writeFileAtomic } from "./atomic.ts";
 import { DATA_DIR } from "./config.ts";
 import type { RoutineRunOn } from "./routines.ts";
 import { parseJson, schemaIssue, type JsonValue } from "./schema.ts";
+import { listenerMatches, normalizeWebhookEvent, type EventListener } from "./triggers.ts";
 
 export interface WebhookTrigger {
   id: string;
@@ -27,6 +28,10 @@ export interface WebhookTrigger {
   verificationSample?: WebhookVerificationSample;
   /** Optional event-name allowlist. Empty means every event type. */
   eventTypes?: string[];
+  /** Optional typed listener. Where eventTypes filters on a name alone, this
+   * filters on the facts inside the payload — the repo, the kind, the author,
+   * the channel — so one endpoint can serve a narrow subscription. */
+  listener?: EventListener;
 }
 
 export interface WebhookTriggerInput {
@@ -37,6 +42,7 @@ export interface WebhookTriggerInput {
   enabled?: boolean;
   verificationPending?: boolean;
   eventTypes?: string[];
+  listener?: EventListener;
 }
 
 type CleanWebhookInput = Omit<
@@ -144,6 +150,26 @@ const MAX_PENDING_RUNS = 3;
 
 const runOnSchema = z.enum(["maus", "cloud"]);
 const eventTypesSchema = z.array(z.string()).max(20).optional();
+const listenerSchema = z
+  .union([
+    z.object({
+      type: z.literal("github"),
+      repo: z.string().min(1).max(140),
+      events: z.array(z.string().max(40)).min(1).max(20),
+      userAllowlist: z.array(z.string().max(80)).max(50).optional(),
+      ciBranch: z.string().max(200).optional(),
+    }),
+    z.object({
+      type: z.literal("slack"),
+      channel: z.string().min(1).max(80),
+      match: z.union([
+        z.object({ kind: z.literal("message") }),
+        z.object({ kind: z.literal("mention") }),
+        z.object({ kind: z.literal("keyword"), keyword: z.string().min(1).max(120) }),
+      ]),
+    }),
+  ])
+  .optional();
 const triggerInputSchema = z.object({
   name: z.string(),
   prompt: z.string(),
@@ -152,6 +178,7 @@ const triggerInputSchema = z.object({
   enabled: z.boolean().optional(),
   verificationPending: z.boolean().optional(),
   eventTypes: eventTypesSchema,
+  listener: listenerSchema,
 });
 const triggerPatchSchema = triggerInputSchema.partial();
 const verificationSampleSchema = z.object({
@@ -177,6 +204,7 @@ const storedWebhookSchema = z.object({
   verifiedAt: z.number().finite().nonnegative().optional(),
   verificationSample: verificationSampleSchema.optional(),
   eventTypes: eventTypesSchema,
+  listener: listenerSchema,
   secretHash: z.string().regex(/^[a-f0-9]{64}$/),
 });
 const deliveryReceiptSchema = z.object({
@@ -255,6 +283,7 @@ function cleanInput(input: WebhookTriggerInput): CleanWebhookInput {
     verificationPending: enabled ? false : input.verificationPending === true,
   };
   if (eventTypes.length) clean.eventTypes = eventTypes;
+  if (input.listener) clean.listener = input.listener;
   return clean;
 }
 
@@ -397,10 +426,12 @@ export class WebhookManager {
       enabled: patch.enabled ?? trigger.enabled,
       verificationPending: patch.verificationPending ?? trigger.verificationPending,
       eventTypes: patch.eventTypes ?? trigger.eventTypes,
+      listener: patch.listener ?? trigger.listener,
     });
     if (this.options.botState(clean.botId) === "missing") fail(400, "That MAUS no longer exists");
     Object.assign(trigger, clean, { updatedAt: this.now() });
     if (!clean.eventTypes?.length) delete trigger.eventTypes;
+    if (!clean.listener) delete trigger.listener;
     if (patch.enabled === false) {
       this.options.cancelQueued?.(trigger.id, "The webhook was paused before this delivery started");
     }
@@ -499,6 +530,27 @@ export class WebhookManager {
       });
       this.save();
       return { deliveryId, duplicate: false, ignored: true };
+    }
+
+    // A typed listener narrows further than the name allowlist can: the repo,
+    // the kind, the author, the channel. An unrecognised payload normalizes to
+    // null and is ignored — being too loose here means waking a bot at 3am for
+    // somebody else's pull request.
+    if (trigger.listener) {
+      const normalized = normalizeWebhookEvent({ "x-github-event": event.eventName }, event.payload);
+      if (!normalized || !listenerMatches(trigger.listener, normalized)) {
+        const deliveryId = String(event.deliveryId ?? "").trim().slice(0, 200) || randomUUID();
+        this.appendAttempt(trigger, event, {
+          outcome: "ignored",
+          statusCode: 202,
+          deliveryId,
+          reason: normalized
+            ? `Listener does not match this ${normalized.source} ${normalized.kind}`
+            : "Payload does not look like a subscribed listener event",
+        });
+        this.save();
+        return { deliveryId, duplicate: false, ignored: true };
+      }
     }
 
     const now = this.now();
