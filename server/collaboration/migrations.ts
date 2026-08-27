@@ -2,7 +2,7 @@ import type { DatabaseSync } from "node:sqlite";
 
 import { OPENMAUSBOT_SOURCE_BASELINE } from "./config.ts";
 
-export const COLLABORATION_SCHEMA_VERSION = 5;
+export const COLLABORATION_SCHEMA_VERSION = 6;
 
 interface Migration {
   version: number;
@@ -489,6 +489,106 @@ const migrations: readonly Migration[] = [
         CREATE TRIGGER collaboration_control_events_no_delete
           BEFORE DELETE ON collaboration_control_events
           BEGIN SELECT RAISE(ABORT, 'control events are immutable'); END;
+      `);
+    },
+  },
+  {
+    version: 6,
+    name: "add-fenced-recovery-and-delivery-lifecycle",
+    checksum: "v6:instance-node-run-leases-containment-outbox-circuit-retention-degradation",
+    apply(database) {
+      database.exec(`
+        CREATE TABLE collaboration_instance_lease (
+          singleton INTEGER PRIMARY KEY CHECK (singleton = 1),
+          owner_id TEXT NOT NULL,
+          fencing_token INTEGER NOT NULL CHECK (fencing_token > 0),
+          acquired_at INTEGER NOT NULL,
+          heartbeat_at INTEGER NOT NULL,
+          expires_at INTEGER NOT NULL,
+          version INTEGER NOT NULL CHECK (version > 0),
+          CHECK (expires_at > heartbeat_at)
+        ) STRICT;
+
+        ALTER TABLE collaboration_work_nodes ADD COLUMN lease_owner TEXT;
+        ALTER TABLE collaboration_work_nodes ADD COLUMN lease_expires_at INTEGER;
+        ALTER TABLE collaboration_work_nodes ADD COLUMN lease_fence INTEGER;
+        ALTER TABLE collaboration_work_nodes
+          ADD COLUMN runtime_state TEXT NOT NULL DEFAULT 'dormant'
+          CHECK (runtime_state IN (
+            'dormant', 'leased', 'running', 'interrupted', 'validating',
+            'succeeded', 'failed', 'needs_configuration'
+          ));
+
+        ALTER TABLE collaboration_runs ADD COLUMN provider_id TEXT NOT NULL DEFAULT 'default';
+        ALTER TABLE collaboration_runs ADD COLUMN instance_owner TEXT;
+        ALTER TABLE collaboration_runs ADD COLUMN instance_fence INTEGER;
+        ALTER TABLE collaboration_runs ADD COLUMN node_lease_fence INTEGER;
+        ALTER TABLE collaboration_runs ADD COLUMN heartbeat_at INTEGER;
+        ALTER TABLE collaboration_runs ADD COLUMN runtime_identity_json TEXT;
+        ALTER TABLE collaboration_runs
+          ADD COLUMN containment_state TEXT NOT NULL DEFAULT 'unverified'
+          CHECK (containment_state IN ('unverified', 'verified', 'empty'));
+        ALTER TABLE collaboration_runs
+          ADD COLUMN recovery_state TEXT NOT NULL DEFAULT 'unclassified'
+          CHECK (recovery_state IN (
+            'unclassified', 'resumable', 'candidate_produced', 'interrupted',
+            'unsafe_to_retry', 'needs_configuration'
+          ));
+        ALTER TABLE collaboration_runs ADD COLUMN retention_until INTEGER;
+        ALTER TABLE collaboration_runs ADD COLUMN cleaned_at INTEGER;
+        CREATE UNIQUE INDEX collaboration_one_running_attempt
+          ON collaboration_runs(work_item_id, plan_revision, node_id)
+          WHERE status = 'running';
+
+        ALTER TABLE collaboration_outbox ADD COLUMN delivery_state TEXT NOT NULL DEFAULT 'pending'
+          CHECK (delivery_state IN ('pending', 'claimed', 'sent', 'dead_letter', 'superseded'));
+        ALTER TABLE collaboration_outbox ADD COLUMN attempt INTEGER NOT NULL DEFAULT 0 CHECK (attempt >= 0);
+        ALTER TABLE collaboration_outbox ADD COLUMN next_attempt_at INTEGER NOT NULL DEFAULT 0;
+        ALTER TABLE collaboration_outbox ADD COLUMN claim_owner TEXT;
+        ALTER TABLE collaboration_outbox ADD COLUMN claim_fence INTEGER;
+        ALTER TABLE collaboration_outbox ADD COLUMN claim_expires_at INTEGER;
+        ALTER TABLE collaboration_outbox ADD COLUMN last_error TEXT;
+        ALTER TABLE collaboration_outbox ADD COLUMN dead_lettered_at INTEGER;
+        UPDATE collaboration_outbox
+          SET delivery_state = CASE
+            WHEN sent_at IS NOT NULL THEN 'sent'
+            WHEN superseded_at IS NOT NULL THEN 'superseded'
+            ELSE 'pending'
+          END,
+          next_attempt_at = created_at;
+        CREATE INDEX collaboration_outbox_dispatchable
+          ON collaboration_outbox(delivery_state, next_attempt_at, created_at);
+
+        CREATE TABLE collaboration_provider_circuits (
+          provider_id TEXT PRIMARY KEY,
+          state TEXT NOT NULL CHECK (state IN ('closed', 'open', 'half_open')),
+          consecutive_failures INTEGER NOT NULL CHECK (consecutive_failures >= 0),
+          opened_at INTEGER,
+          retry_at INTEGER,
+          probe_owner TEXT,
+          probe_fence INTEGER,
+          last_failure_class TEXT,
+          updated_at INTEGER NOT NULL,
+          version INTEGER NOT NULL CHECK (version > 0),
+          CHECK (
+            (state = 'closed' AND opened_at IS NULL AND retry_at IS NULL AND probe_owner IS NULL AND probe_fence IS NULL) OR
+            (state = 'open' AND opened_at IS NOT NULL AND retry_at IS NOT NULL AND probe_owner IS NULL AND probe_fence IS NULL) OR
+            (state = 'half_open' AND opened_at IS NOT NULL AND retry_at IS NOT NULL AND probe_owner IS NOT NULL AND probe_fence IS NOT NULL)
+          )
+        ) STRICT;
+
+        CREATE TABLE collaboration_runtime_state (
+          singleton INTEGER PRIMARY KEY CHECK (singleton = 1),
+          mode TEXT NOT NULL CHECK (mode IN ('ready', 'degraded')),
+          reason TEXT,
+          low_disk INTEGER NOT NULL DEFAULT 0 CHECK (low_disk IN (0, 1)),
+          updated_at INTEGER NOT NULL,
+          version INTEGER NOT NULL CHECK (version > 0),
+          CHECK ((mode = 'ready' AND reason IS NULL) OR (mode = 'degraded' AND reason IS NOT NULL))
+        ) STRICT;
+        INSERT INTO collaboration_runtime_state
+          (singleton, mode, reason, low_disk, updated_at, version)
+          VALUES (1, 'ready', NULL, 0, 0, 1);
       `);
     },
   },

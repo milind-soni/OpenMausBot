@@ -1,6 +1,12 @@
 import { realpathSync } from "node:fs";
 import { isAbsolute, relative, resolve, sep } from "node:path";
 
+import {
+  type ContainmentPort,
+  type ContainmentProof,
+  verifyContainmentProof,
+} from "./containment.ts";
+
 export interface TargetCommandSpec {
   argv: readonly [string, ...string[]];
   cwd?: string;
@@ -15,6 +21,7 @@ export interface SandboxCommandAttestation {
   network: "deny" | "unknown";
   processIsolated: boolean;
   processTreeReaped: boolean;
+  containmentProof?: ContainmentProof;
 }
 
 export interface SandboxedCommandRequest {
@@ -119,6 +126,7 @@ export async function runTargetTests(input: {
   commands: Readonly<Record<string, TargetCommandSpec>>;
   runner: SandboxedCommandRunner | undefined;
   deniedPaths: readonly string[];
+  containment: ContainmentPort;
 }): Promise<{ evidence: TestEvidence[]; configurationProblems: string[] }> {
   const root = realpathSync(input.worktree);
   const results: TestEvidence[] = [];
@@ -153,6 +161,17 @@ export async function runTargetTests(input: {
       JSON.stringify(attestedDenied) !== JSON.stringify(deniedPaths)
     ) {
       configurationProblems.push(`sandbox attestation rejected for command: ${commandId}`);
+      break;
+    }
+    const proof = result.attestation.containmentProof ?? null;
+    const verified = await verifyContainmentProof(input.containment, proof);
+    if (!verified.verified || !proof) {
+      configurationProblems.push(`containment proof rejected for command: ${commandId}`);
+      break;
+    }
+    const inspected = await input.containment.inspect(proof.identity);
+    if (inspected.state !== "empty" || inspected.fingerprint !== verified.fingerprint) {
+      configurationProblems.push(`containment not empty for command: ${commandId}`);
       break;
     }
     results.push(evidence(commandId, cwd, spec, result));
