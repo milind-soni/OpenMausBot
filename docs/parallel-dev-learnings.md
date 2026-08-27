@@ -1,11 +1,12 @@
 
 
 <parallel_dev_learnings>
-<!-- Last updated: 2026-08-28 03:57 -->
-<!-- Sources harvested from 3 worktree(s): -->
-- `.parallel-dev/logs/codex%2F008-secure-headless/branch-notes.md` (branch: codex/008-secure-headless, phase: implementation)
-- `.parallel-dev/logs/codex%2F008-runtime/branch-notes.md` (branch: codex/008-runtime, phase: auto-detect)
+<!-- Last updated: 2026-08-28 05:17 -->
+<!-- Sources harvested from 4 worktree(s): -->
 - `.parallel-dev/logs/codex%2F008-ops-packaging/branch-notes.md` (branch: codex/008-ops-packaging, phase: auto-detect)
+- `.parallel-dev/logs/codex%2F008-runtime/branch-notes.md` (branch: codex/008-runtime, phase: auto-detect)
+- `.parallel-dev/logs/codex%2F008-secure-headless/branch-notes.md` (branch: codex/008-secure-headless, phase: implementation)
+- `.parallel-dev/logs/codex%2F009-nonproduction-pilot/branch-notes.md` (branch: codex/009-nonproduction-pilot, phase: auto-detect)
 
 ## Architecture Decisions
 
@@ -86,6 +87,20 @@
 - Consequence: Low disk blocks new ingress/execution immediately while alert delivery retries independently without shortening retention or deleting evidence.
   <!-- source: codex/008-secure-headless -->
 
+### Decision: Automated pilots rehearse production paths without claiming live acceptance
+- Context: Ticket 009 needs deterministic coverage before real DingTalk, host, repository, and human-signoff inputs exist.
+- Choice: Run the production headless runtime and controllers against real SQLite and a disposable Git repository while injecting only fake external ports; mark the report `automated_fake`, overall `pending`, and unsigned.
+- Rejected alternatives: A duplicate pilot-only state machine and treating fake evidence as a live pilot pass were rejected because they bypass production behavior or create a false acceptance claim.
+- Consequence: Automation can detect end-to-end regressions without external side effects, while every real-environment check remains explicitly pending for the sole Owner.
+  <!-- source: codex/009-nonproduction-pilot -->
+
+### Decision: Acceptance evidence is closed, structured, and trace-linked
+- Context: Free-form report fields could smuggle secrets or paths, and unrelated scenario IDs could be assembled into an apparently complete trace.
+- Choice: Validate enum codes, SHA-256 digests, repository-relative paths, trusted command IDs plus definition hashes, and per-scenario Work Item/event/run/audit relationships before writing JSON or derived Markdown.
+- Rejected alternatives: Regex-only secret scanning and unlinked free-text evidence were rejected because they cannot prevent opaque token leakage or false trace closure.
+- Consequence: A real report can pass only with complete applicable evidence and one Owner signature; automated reports cannot be promoted to pass by editing a status field.
+  <!-- source: codex/009-nonproduction-pilot -->
+
 ## Business Rules Discovered
 
 - [RULE] ACK: A Stream callback is acknowledged only after the authoritative sink commits or reports a durable duplicate.
@@ -116,6 +131,12 @@
 - [RULE] Operational alerts: a missing private Owner target is a delivery failure, never a reason to fall back to the project group.
   <!-- source: codex/008-ops-packaging -->
 
+- [RULE] Pilot reporting: an automated fake run cannot satisfy real DingTalk, service-manager, host-reboot, privilege-separated cgroup, real repository, or human Owner sign-off checks.
+  <!-- source: codex/009-nonproduction-pilot -->
+
+- [RULE] Candidate execution: the injected Agent may neither commit nor push; the production CandidateExecutor validates the diff and creates the managed local candidate commit.
+  <!-- source: codex/009-nonproduction-pilot -->
+
 ## Problems Encountered & Fixes
 
 ### Problem: Restore row rewrites did not block future execution
@@ -145,6 +166,13 @@
 - Fix: Wrap callbacks into promises, run cleanup in `finally`, kill and verify each unresolved bound containment, and retain the lease until expiry whenever empty cannot be proven.
 - Lesson: Bounded shutdown is a containment protocol, not only a lifecycle timeout.
   <!-- source: codex/008-secure-headless -->
+
+### Problem: A manual pilot clock invalidated the shared runtime lease
+- Symptom: Outbox draining stopped and health reported `lease_failed` after candidate execution.
+- Root cause: The rehearsal clock began near the Unix epoch while CandidateExecutor used wall-clock time, making the cached lease appear expired.
+- Fix: Anchor the manual clock to current wall time and advance it deterministically for actions and retry backoff.
+- Lesson: Injected clocks that share a persisted lease with wall-clock components must begin in the same time domain.
+  <!-- source: codex/009-nonproduction-pilot -->
 
 ## Code Patterns Established
 
@@ -178,20 +206,14 @@
 
 - Foundation focused suite: 7 files and 22 tests passed for credentials, backup/restore, containment, ledger, service, scheduler, and outbox.
 - Full pre-runtime collaboration and DingTalk suite: 29 files and 117 tests passed.
-- Review-guard regression tests prove health is degraded and delivery, scheduling, ingress, planning, execution, Owner actions, recovery, and cleanup fail before invoking side-effect ports.
-  <!-- source: codex/008-secure-headless -->
-
-- Foundation focused suite: 7 files and 22 tests passed for credentials, backup/restore, containment, ledger, service, scheduler, and outbox.
-- Full pre-runtime collaboration and DingTalk suite: 29 files and 117 tests passed.
-- Final integrated collaboration, operations, DingTalk, message DB, and packaging suite: 33 files and 137 tests passed; strict focused TypeScript and packaged no-`node_modules` health/SIGTERM smoke passed.
-- Review-guard regression tests prove health is degraded and delivery, scheduling, ingress, planning, execution, Owner actions, recovery, and cleanup fail before invoking side-effect ports.
-  <!-- source: codex/008-secure-headless -->
-
-- Foundation focused suite: 7 files and 22 tests passed for credentials, backup/restore, containment, ledger, service, scheduler, and outbox.
-- Full pre-runtime collaboration and DingTalk suite: 29 files and 117 tests passed.
 - Final integrated collaboration, operations, DingTalk, message DB, and packaging suite: 33 files and 143 tests passed; strict focused TypeScript and packaged no-`node_modules` health/SIGTERM smoke passed.
 - Review-guard regression tests prove health is degraded and delivery, scheduling, ingress, planning, execution, Owner actions, recovery, and cleanup fail before invoking side-effect ports.
   <!-- source: codex/008-secure-headless -->
+
+- Focused pilot tests cover report validation, fake ports, fault injection, CLI safety, and the production-isomorphic rehearsal.
+- The generated JSON and Markdown are mode `0600`; sensitive-content scans find no action token, credential, session webhook, group text, or absolute external path.
+- The automated report stays `pending` and unsigned while its fake-scope checks carry trace-linked evidence.
+  <!-- source: codex/009-nonproduction-pilot -->
 
 ## Integration Notes
 
@@ -208,14 +230,8 @@
 - Ticket 009 owns real DingTalk, cgroup, systemd, launchd, and host-reboot validation; Ticket 008 automated checks must not claim those real-environment results.
   <!-- source: codex/008-secure-headless -->
 
-- Collaboration schema version is 8; all consumers must expect eight applied migrations.
-- Runtime composition must use a stable verifier key and real host boot generation for Linux cgroup proofs; ephemeral verifier material is test-only.
-- Ticket 009 owns real DingTalk, cgroup, systemd, launchd, and host-reboot validation; Ticket 008 automated checks must not claim those real-environment results.
-  <!-- source: codex/008-secure-headless -->
-
-- Collaboration schema version is 8; all consumers must expect eight applied migrations.
-- Runtime composition must use a stable verifier key and real host boot generation for Linux cgroup proofs; ephemeral verifier material is test-only.
-- Ticket 009 owns real DingTalk, cgroup, systemd, launchd, and host-reboot validation; Ticket 008 automated checks must not claim those real-environment results.
-  <!-- source: codex/008-secure-headless -->
+- `pnpm pilot:collaboration:fake -- --output <directory>` writes outside the repository and intentionally remains overall `pending` until the sole Owner completes the live pilot.
+- Ticket 009 changes no collaboration schema, deployment, default-branch merge, remote-push, or multi-Owner behavior.
+  <!-- source: codex/009-nonproduction-pilot -->
 
 </parallel_dev_learnings>
