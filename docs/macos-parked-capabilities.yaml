@@ -1,0 +1,17 @@
+# Safe bootstrap state for the interactive macOS CUA daemon.
+# The worker companion replaces this file atomically with a short-lived,
+# approved task capability before OpenMausBot mounts the CUA MCP bridge.
+#
+# It grants no tools at all. A worker running this manifest is reachable and
+# provably bounded, and can do nothing until a task capability is approved —
+# which is the correct resting state between tasks.
+version: 3
+expires_after: 8760h
+idle_timeout: 20m
+
+allow:
+  tools: []
+
+resources:
+  desktop:
+    display: false

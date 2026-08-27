@@ -37,6 +37,8 @@ const PROBE_TIMEOUT_MS = 10_000;
 export interface BridgeLiveness {
   command: string;
   args: string[];
+  /** Optional child environment for a transport with a stricter boundary. */
+  env?: NodeJS.ProcessEnv;
 }
 
 /** Run the liveness command; alive means "exited 0 within the timeout". The
@@ -46,7 +48,7 @@ export function runLivenessProbe(probe: BridgeLiveness, timeoutMs = PROBE_TIMEOU
   return new Promise((resolve) => {
     const child = spawn(probe.command, probe.args, {
       shell: false,
-      env: { ...process.env, PATH: augmentedPath() },
+      env: probe.env ?? { ...process.env, PATH: augmentedPath() },
       stdio: ["ignore", "ignore", "ignore"],
     });
     const timer = setTimeout(() => {
@@ -125,6 +127,10 @@ export function createInactivityWatchdog(options: {
 export interface BridgeOptions {
   command: string;
   args: string[];
+  /** Optional child environment. The default preserves existing local/VPS
+   * behavior; a remote worker supplies an allow-listed SSH environment so no
+   * API key or loopback control token can reach the ssh child. */
+  env?: NodeJS.ProcessEnv;
   /** Names the far end in stderr messages, e.g. "Cua Driver". */
   label: string;
   /** Enables the dead-transport watchdog. Omitted for the Local VM, whose
@@ -208,7 +214,7 @@ export function createGateInterceptor(options: {
 export function runMcpBridge(options: BridgeOptions): void {
   const child = spawn(options.command, options.args, {
     shell: false,
-    env: { ...process.env, PATH: augmentedPath() },
+    env: options.env ?? { ...process.env, PATH: augmentedPath() },
     stdio: ["pipe", "pipe", "pipe"],
   });
 

@@ -1,0 +1,13 @@
+# The worker capability and policy manifests are hashed, not merely read.
+#
+# worker-companion embeds the parked manifest byte-for-byte and requires the CUA
+# daemon to report back that exact sha256 before a worker is considered bounded,
+# and docs/byo-*.md has the operator pin the base policy by digest. A CRLF
+# checkout on Windows silently changes both digests, so a Windows operator
+# following the runbook would compute a hash that never matches the one the
+# control plane expects — with nothing visibly wrong in either file.
+#
+# These must therefore arrive with LF on every platform, regardless of the
+# checking-out machine's core.autocrlf.
+docs/*-parked-capabilities.yaml text eol=lf
+docs/*-base-policy.yaml text eol=lf
