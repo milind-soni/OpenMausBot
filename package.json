@@ -32,6 +32,7 @@
     "dev:server": "node --experimental-strip-types server/index.ts",
     "collaboration:headless": "node --experimental-strip-types server/collaboration-headless.ts",
     "collaboration:health": "node --experimental-strip-types server/collaboration-headless.ts --health",
+    "smoke:dingtalk-stream": "node --experimental-strip-types scripts/smoke-dingtalk-stream.ts",
     "dev:desktop": "electron .",
     "build": "tsc -b && tsc -p tsconfig.server.json && vite build",
     "typecheck": "tsc -b && tsc -p tsconfig.server.json",
@@ -78,6 +79,7 @@
   "dependencies": {
     "@trycua/cua-driver": "0.20.0",
     "clsx": "^2.1.1",
+    "dingtalk-stream": "2.1.6-beta.1",
     "lucide-react": "^0.539.0",
     "posthog-js": "^1.415.6",
     "qrcode.react": "^4.2.0",

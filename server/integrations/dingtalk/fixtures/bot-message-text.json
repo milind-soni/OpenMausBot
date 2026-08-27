@@ -1,0 +1,14 @@
+{
+  "conversationId": "cid-group-1",
+  "msgId": "biz-message-1",
+  "senderNick": "Contributor",
+  "isAdmin": true,
+  "senderStaffId": "staff-1",
+  "senderCorpId": "corp-1",
+  "senderId": "sender-1",
+  "sessionWebhookExpiredTime": 4102444800000,
+  "createAt": 1700000000000,
+  "sessionWebhook": "https://oapi.dingtalk.com/robot/sendBySession?session=test-only",
+  "msgtype": "text",
+  "text": { "content": "修复登录失败，并补充回归测试" }
+}

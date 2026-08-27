@@ -1,0 +1,4 @@
+{
+  "transportMessageId": "transport-late-ack",
+  "requiredOrder": ["persist", "ack"]
+}
