@@ -1,0 +1,49 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>com.openmausbot.collaboration</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>/usr/local/bin/node</string>
+    <string>/opt/openmausbot/current/dist-server/collaboration-headless.js</string>
+  </array>
+  <key>WorkingDirectory</key>
+  <string>/opt/openmausbot/current</string>
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>OMB_DATA_DIR</key>
+    <string>__HOME__/Library/Application Support/OpenMausBot/Collaboration</string>
+    <key>OMB_DINGTALK_ENABLED</key>
+    <string>1</string>
+    <key>OMB_DINGTALK_CREDENTIAL_FILE</key>
+    <string>__HOME__/Library/Application Support/OpenMausBot/Collaboration/credentials/dingtalk.json</string>
+    <key>OMB_BACKUP_KEY_FILE</key>
+    <string>__HOME__/Library/Application Support/OpenMausBot/Collaboration/credentials/backup-encryption.key</string>
+    <key>OMB_EXECUTION_MODE</key>
+    <string>observe_plan_only</string>
+    <key>OMB_EXECUTION_ENABLED</key>
+    <string>0</string>
+  </dict>
+  <key>RunAtLoad</key>
+  <true/>
+  <key>KeepAlive</key>
+  <dict>
+    <key>SuccessfulExit</key>
+    <false/>
+  </dict>
+  <key>ProcessType</key>
+  <string>Background</string>
+  <key>ThrottleInterval</key>
+  <integer>5</integer>
+  <key>ExitTimeOut</key>
+  <integer>30</integer>
+  <key>StandardOutPath</key>
+  <string>__HOME__/Library/Logs/OpenMausBot/collaboration.log</string>
+  <key>StandardErrorPath</key>
+  <string>__HOME__/Library/Logs/OpenMausBot/collaboration-error.log</string>
+  <key>Umask</key>
+  <integer>63</integer>
+</dict>
+</plist>
