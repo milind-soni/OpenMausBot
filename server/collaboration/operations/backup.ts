@@ -3,8 +3,10 @@ import {
   chmodSync,
   closeSync,
   mkdirSync,
+  lstatSync,
   openSync,
   readFileSync,
+  realpathSync,
   rmSync,
   statSync,
   writeFileSync,
@@ -14,7 +16,7 @@ import { backup, DatabaseSync } from "node:sqlite";
 
 import { COLLABORATION_SCHEMA_VERSION } from "../migrations.ts";
 import { markRestoredLedgerForReview, readRestoreGuard } from "../restore-guard.ts";
-import { readEncryptionKey } from "./credentials.ts";
+import { readEncryptionKey, readSecureCredentialFile } from "./credentials.ts";
 
 const MAGIC = Buffer.from("OMBBAK01", "ascii");
 const IV_BYTES = 12;
@@ -229,12 +231,31 @@ export function rearmReviewedLedger(input: {
 }): { state: "live"; rearmedAt: number; rearmedBy: string } {
   if (input.confirmation !== "REARM_REVIEWED_LEDGER") throw new Error("restore_rearm_confirmation_required");
   const localActor = input.localActor.trim();
-  if (!localActor) throw new Error("restore_rearm_local_actor_required");
+  if (!/^[a-zA-Z0-9_.:@-]{1,128}$/u.test(localActor)) throw new Error("restore_rearm_local_actor_invalid");
   if (!/^[0-9a-f]{64}$/u.test(input.expectedBackupHash)) throw new Error("restore_rearm_backup_hash_invalid");
-  const root = resolve(input.reviewRoot);
-  const databasePath = resolve(input.reviewDatabasePath);
-  if (!isContained(root, databasePath) || basename(databasePath) !== "collaboration.sqlite") {
+  const root = realpathSync(resolve(input.reviewRoot));
+  const requestedDatabasePath = resolve(input.reviewDatabasePath);
+  const requestedDatabaseStat = lstatSync(requestedDatabasePath);
+  const databasePath = realpathSync(requestedDatabasePath);
+  const reviewDirectory = resolve(databasePath, "../..");
+  if (
+    !requestedDatabaseStat.isFile() ||
+    requestedDatabaseStat.isSymbolicLink() ||
+    !isContained(root, databasePath) ||
+    basename(databasePath) !== "collaboration.sqlite" ||
+    basename(resolve(databasePath, "..")) !== "collaboration" ||
+    resolve(reviewDirectory, "collaboration", "collaboration.sqlite") !== databasePath
+  ) {
     throw new Error("restore_rearm_requires_isolated_review_database");
+  }
+  const manifestRaw = readSecureCredentialFile(join(reviewDirectory, "RESTORE_REVIEW.json"));
+  try {
+    const manifest = JSON.parse(manifestRaw.toString("utf8")) as { state?: unknown; sourceBackupHash?: unknown };
+    if (manifest.state !== "review_required" || manifest.sourceBackupHash !== input.expectedBackupHash) {
+      throw new Error("restore_rearm_manifest_mismatch");
+    }
+  } finally {
+    manifestRaw.fill(0);
   }
   const database = new DatabaseSync(databasePath);
   const now = input.now ?? Date.now();

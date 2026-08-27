@@ -173,7 +173,7 @@ describe("encrypted collaboration ledger backup", () => {
         localActor: "local-owner",
         now: 60,
       }),
-    ).toThrow("restore_rearm_guard_mismatch");
+    ).toThrow("restore_rearm_manifest_mismatch");
     expect(
       rearmReviewedLedger({
         reviewRoot: join(root, "reviews"),
