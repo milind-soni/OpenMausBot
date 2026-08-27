@@ -32,6 +32,8 @@
     "dev:server": "node --experimental-strip-types server/index.ts",
     "collaboration:headless": "node --experimental-strip-types server/collaboration-headless.ts",
     "collaboration:health": "node --experimental-strip-types server/collaboration-headless.ts --health",
+    "test:collaboration-operations": "vitest run server/collaboration/operations/private-alert.test.ts server/collaboration/operations/disk-monitor.test.ts packaging/collaboration/service-templates.test.ts",
+    "smoke:collaboration-headless": "node scripts/smoke-collaboration-headless.mjs",
     "smoke:dingtalk-stream": "node --experimental-strip-types scripts/smoke-dingtalk-stream.ts",
     "dev:desktop": "electron .",
     "build": "tsc -b && tsc -p tsconfig.server.json && vite build",

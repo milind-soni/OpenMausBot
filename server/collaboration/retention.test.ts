@@ -131,4 +131,24 @@ describe("worktree retention", () => {
     });
     db.close();
   });
+
+  it("never removes an original worktree while a restored ledger is under review", async () => {
+    const db = database();
+    const lease = new InstanceLeaseCoordinator(db, "review-scheduler").acquire(1_000, 100_000)!;
+    db.prepare("UPDATE collaboration_runs SET retention_until = 1 WHERE id = 'RUN-1'").run();
+    db.prepare(
+      "UPDATE collaboration_restore_guard SET state = 'review_required', source_backup_hash = ?, restored_at = 1, " +
+        "version = version + 1 WHERE singleton = 1",
+    ).run("a".repeat(64));
+    const cleanup = new FakeCleanup();
+    const retention = new WorktreeRetentionManager(db, new EmptyContainment(), cleanup, {
+      successMs: 10,
+      failureOrCancellationMs: 20,
+    });
+    expect(() => retention.schedule(lease, "RUN-1", "success", 1_001)).toThrow("restore_review_required");
+    await expect(retention.cleanupExpired(lease, 1_001)).rejects.toThrow("restore_review_required");
+    expect(cleanup.removed).toEqual([]);
+    expect(db.prepare("SELECT cleaned_at FROM collaboration_runs WHERE id = 'RUN-1'").get()).toEqual({ cleaned_at: null });
+    db.close();
+  });
 });

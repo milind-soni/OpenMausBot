@@ -6,6 +6,7 @@ import { renderClarificationCard, renderPlanStatusCard, type InboundCard } from 
 import { enqueueInboundCard } from "./outbox.ts";
 import { parsePlannerProposal, PlanValidationError, type PlannerPort, type WorkNodeType } from "./planner.ts";
 import { evaluateDefinitionReadiness, type ClarificationQuestion } from "./readiness.ts";
+import { assertLedgerArmed } from "./restore-guard.ts";
 import {
   appendWorkItemSnapshot,
   readLatestWorkItemSnapshot,
@@ -110,6 +111,7 @@ export class PlanningCoordinator {
     this.database.exec("BEGIN IMMEDIATE");
     let snapshots: { previous: WorkItemSnapshot | null; current: WorkItemSnapshot };
     try {
+      assertLedgerArmed(this.database);
       snapshots = appendWorkItemSnapshot(this.database, workItemId, patch, now);
       const readiness = evaluateDefinitionReadiness(snapshots.current, this.options.policy.allowedRepositories);
       if (!readiness.ready) {
@@ -192,6 +194,7 @@ export class PlanningCoordinator {
   }
 
   observeAcceptedEvent(workItemId: string, text: string, now = Date.now()): DefinitionRevisionOutcome | null {
+    assertLedgerArmed(this.database);
     const latest = readLatestWorkItemSnapshot(this.database, workItemId);
     const normalized = text.trim();
     if (latest?.facts.includes(normalized)) return null;

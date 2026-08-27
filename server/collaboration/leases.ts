@@ -1,5 +1,7 @@
 import type { DatabaseSync } from "node:sqlite";
 
+import { assertLedgerArmed } from "./restore-guard.ts";
+
 export interface InstanceLease {
   ownerId: string;
   fence: number;
@@ -151,6 +153,7 @@ export class NodeLeaseCoordinator {
     this.database.exec("BEGIN IMMEDIATE");
     try {
       assertCurrentInstanceLease(this.database, instance, input.now);
+      assertLedgerArmed(this.database);
       const result = this.database
         .prepare(
           "UPDATE collaboration_work_nodes SET lease_owner = ?, lease_expires_at = ?, " +
@@ -203,6 +206,7 @@ export class NodeLeaseCoordinator {
   ): NodeLease {
     positiveDuration(ttlMs);
     assertCurrentInstanceLease(this.database, instance, now);
+    assertLedgerArmed(this.database);
     const result = this.database
       .prepare(
         "UPDATE collaboration_work_nodes SET lease_expires_at = ?, version = version + 1 " +
@@ -230,6 +234,7 @@ export class NodeLeaseCoordinator {
     this.database.exec("BEGIN IMMEDIATE");
     try {
       assertCurrentInstanceLease(this.database, instance, now);
+      assertLedgerArmed(this.database);
       const result = this.database
         .prepare(
           "UPDATE collaboration_work_nodes SET lease_owner = NULL, lease_expires_at = NULL, " +

@@ -8,6 +8,7 @@ import {
   evaluateOwnerPolicy,
   type WorkItemControlAction,
 } from "./policy.ts";
+import { assertLedgerArmed } from "./restore-guard.ts";
 
 const TOKEN_VERSION = 1 as const;
 const DEFAULT_TOKEN_TTL_MS = 15 * 60_000;
@@ -243,6 +244,7 @@ export class OwnerActionController {
     const expiresAt = now + ttlMs;
     this.database.exec("BEGIN IMMEDIATE");
     try {
+      assertLedgerArmed(this.database);
       const owner = this.database
         .prepare("SELECT generation FROM collaboration_owner_bindings WHERE active = 1")
         .get() as { generation: number } | undefined;
@@ -310,6 +312,7 @@ export class OwnerActionController {
     const suppliedToken = input.actionToken.trim();
     this.database.exec("BEGIN IMMEDIATE");
     try {
+      assertLedgerArmed(this.database);
       const token = suppliedToken
         ? (this.database
             .prepare(

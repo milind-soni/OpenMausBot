@@ -7,6 +7,7 @@ import {
   verifyContainmentProof,
 } from "./containment.ts";
 import { assertCurrentInstanceLease, type InstanceLease, StaleFenceError } from "./leases.ts";
+import { assertLedgerArmed } from "./restore-guard.ts";
 
 export interface RetentionPolicy {
   successMs: number;
@@ -85,6 +86,7 @@ export class WorktreeRetentionManager {
     now: number,
   ): number {
     assertCurrentInstanceLease(this.database, instance, now);
+    assertLedgerArmed(this.database);
     const retentionUntil =
       now + (outcome === "success" ? this.policy.successMs : this.policy.failureOrCancellationMs);
     const updated = this.database
@@ -102,6 +104,7 @@ export class WorktreeRetentionManager {
     now: number,
   ): Promise<Array<{ runId: string; cleaned: boolean; reason: string }>> {
     assertCurrentInstanceLease(this.database, instance, now);
+    assertLedgerArmed(this.database);
     const rows = this.database
       .prepare(
         "SELECT r.id, r.status, r.worktree_path, r.runtime_identity_json, r.containment_binding_json, " +

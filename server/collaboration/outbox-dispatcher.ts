@@ -2,6 +2,7 @@ import type { DatabaseSync } from "node:sqlite";
 
 import { assertCurrentInstanceLease, type InstanceLease, StaleFenceError } from "./leases.ts";
 import type { CollaborationOutboxEntry, OutboxDeliveryPort } from "./outbox.ts";
+import { assertLedgerArmed } from "./restore-guard.ts";
 
 interface DispatchRow {
   id: string;
@@ -75,6 +76,7 @@ export class OutboxDispatcher {
     this.database.exec("BEGIN IMMEDIATE");
     try {
       assertCurrentInstanceLease(this.database, instance, now);
+      assertLedgerArmed(this.database);
       this.database.prepare(
         "UPDATE collaboration_outbox SET delivery_state = 'superseded', superseded_at = ?, " +
           "claim_owner = NULL, claim_fence = NULL, claim_expires_at = NULL " +

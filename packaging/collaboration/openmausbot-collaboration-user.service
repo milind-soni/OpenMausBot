@@ -1,0 +1,43 @@
+[Unit]
+Description=OpenMausBot secure collaboration service (user)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=/opt/openmausbot/current
+ExecStart=/usr/bin/node /opt/openmausbot/current/dist-server/collaboration-headless.js
+Environment=OMB_DATA_DIR=%h/.local/state/openmausbot-collaboration
+Environment=OMB_DINGTALK_ENABLED=1
+Environment=OMB_DINGTALK_CREDENTIAL_FILE=%d/dingtalk.json
+Environment=OMB_OWNER_ALERT_WEBHOOK_FILE=%d/owner-alert-webhook.url
+Environment=OMB_BACKUP_KEY_FILE=%d/backup-encryption.key
+Environment=OMB_EXECUTION_MODE=observe_plan_only
+Environment=OMB_EXECUTION_ENABLED=0
+LoadCredential=dingtalk.json:%h/.config/openmausbot-collaboration/dingtalk.json
+LoadCredential=owner-alert-webhook.url:%h/.config/openmausbot-collaboration/owner-alert-webhook.url
+LoadCredential=backup-encryption.key:%h/.config/openmausbot-collaboration/backup-encryption.key
+StateDirectory=openmausbot-collaboration
+LogsDirectory=openmausbot-collaboration
+RuntimeDirectory=openmausbot-collaboration
+UMask=0077
+Restart=on-failure
+RestartSec=5s
+KillSignal=SIGTERM
+KillMode=control-group
+TimeoutStopSec=30s
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+LockPersonality=true
+RestrictSUIDSGID=true
+RestrictRealtime=true
+CapabilityBoundingSet=
+AmbientCapabilities=
+ReadWritePaths=%h/.local/state/openmausbot-collaboration %h/.local/share/openmausbot-collaboration
+
+[Install]
+WantedBy=default.target

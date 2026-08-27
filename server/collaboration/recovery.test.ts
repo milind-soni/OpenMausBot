@@ -113,7 +113,7 @@ class DeferredContainment extends FakeContainment {
     this.signalStarted = signal;
   }
 
-  override inspect(identity: ContainmentProof["identity"]) {
+  override inspect(_identity: ContainmentProof["identity"]) {
     this.inspections += 1;
     this.signalStarted?.();
     return new Promise<{ state: "empty"; fingerprint: string }>((resolve) => {
@@ -242,6 +242,23 @@ describe("run recovery", () => {
       status: "running",
       result_sha: null,
     });
+    db.close();
+  });
+
+  it("does not inspect containment or candidates for a restored review ledger", async () => {
+    const db = database();
+    const lease = new InstanceLeaseCoordinator(db, "review-scheduler").acquire(1_000, 1_000)!;
+    db.prepare(
+      "UPDATE collaboration_restore_guard SET state = 'review_required', source_backup_hash = ?, restored_at = 1, " +
+        "version = version + 1 WHERE singleton = 1",
+    ).run("b".repeat(64));
+    const containment = new FakeContainment();
+    const candidates = new FakeCandidates(true);
+    await expect(new RecoveryCoordinator(db, containment, candidates, 3).scan(lease, 1_001)).rejects.toThrow(
+      "restore_review_required",
+    );
+    expect(containment.inspections).toBe(0);
+    expect(candidates.calls).toBe(0);
     db.close();
   });
 });

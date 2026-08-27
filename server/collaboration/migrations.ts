@@ -2,7 +2,7 @@ import type { DatabaseSync } from "node:sqlite";
 
 import { OPENMAUSBOT_SOURCE_BASELINE } from "./config.ts";
 
-export const COLLABORATION_SCHEMA_VERSION = 7;
+export const COLLABORATION_SCHEMA_VERSION = 8;
 
 interface Migration {
   version: number;
@@ -605,6 +605,42 @@ const migrations: readonly Migration[] = [
         ALTER TABLE collaboration_test_evidence ADD COLUMN containment_fingerprint TEXT;
         ALTER TABLE collaboration_test_evidence ADD COLUMN containment_binding_json TEXT;
         ALTER TABLE collaboration_provider_circuits ADD COLUMN probe_expires_at INTEGER;
+      `);
+    },
+  },
+  {
+    version: 8,
+    name: "add-durable-restore-guard",
+    checksum: "v8:restore-review-guard-and-private-alert-retry",
+    apply(database) {
+      database.exec(`
+        CREATE TABLE collaboration_restore_guard (
+          singleton INTEGER PRIMARY KEY CHECK (singleton = 1),
+          state TEXT NOT NULL CHECK (state IN ('live', 'review_required')),
+          source_backup_hash TEXT,
+          restored_at INTEGER,
+          rearmed_at INTEGER,
+          rearmed_by TEXT,
+          version INTEGER NOT NULL CHECK (version > 0),
+          CHECK (
+            (state = 'live') OR
+            (state = 'review_required' AND source_backup_hash IS NOT NULL AND restored_at IS NOT NULL)
+          )
+        ) STRICT;
+        INSERT INTO collaboration_restore_guard
+          (singleton, state, source_backup_hash, restored_at, rearmed_at, rearmed_by, version)
+          VALUES (1, 'live', NULL, NULL, NULL, NULL, 1);
+
+        CREATE TABLE collaboration_private_alert_state (
+          code TEXT PRIMARY KEY,
+          digest TEXT NOT NULL,
+          occurred_at INTEGER NOT NULL,
+          delivery_state TEXT NOT NULL CHECK (delivery_state IN ('pending', 'sent', 'discarded')),
+          attempt INTEGER NOT NULL DEFAULT 0 CHECK (attempt >= 0),
+          last_attempt_at INTEGER,
+          delivered_at INTEGER,
+          CHECK ((delivery_state = 'sent' AND delivered_at IS NOT NULL) OR delivery_state <> 'sent')
+        ) STRICT;
       `);
     },
   },

@@ -9,6 +9,7 @@ import {
   StaleFenceError,
 } from "./leases.ts";
 import { ProviderCircuitBreaker } from "./provider-circuit.ts";
+import { assertLedgerArmed } from "./restore-guard.ts";
 
 export interface SchedulerClaim {
   nodeLease: NodeLease;
@@ -49,6 +50,7 @@ export class FencedScheduler {
       now: number;
     },
   ): SchedulerClaim | null {
+    assertLedgerArmed(this.database);
     this.degradation.authorizeNewWork(instance, {
       action: "scheduler.node_dispatch",
       workItemId: input.workItemId,
@@ -85,6 +87,7 @@ export class FencedScheduler {
     this.database.exec("BEGIN IMMEDIATE");
     try {
       assertCurrentInstanceLease(this.database, instance, now);
+      assertLedgerArmed(this.database);
       const updated = this.database
         .prepare(
           "UPDATE collaboration_work_nodes SET runtime_state = ?, lease_owner = NULL, lease_expires_at = NULL, " +

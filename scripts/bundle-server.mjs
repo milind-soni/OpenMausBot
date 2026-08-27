@@ -41,6 +41,7 @@ const yamlEsmPlugin = {
 // Every file run as its own process. Keep in sync with the spawn sites above.
 const ENTRY_POINTS = [
   "index.ts",
+  "collaboration-headless.ts",
   // The packaged smoke probe imports this manifest directly. Importing the
   // shared avatar contract widens TypeScript's inferred emit root to the repo,
   // so tsc may place its copy under dist-server/server/. Bundle an explicit
@@ -64,6 +65,12 @@ await build({
   platform: "node",
   target: "node20",
   format: "esm",
+  // Some bundled CommonJS dependencies (notably dingtalk-stream's ws stack)
+  // dynamically require Node built-ins. ESM has no global require, so provide
+  // a package-local bridge while still bundling all non-built-in packages.
+  banner: {
+    js: 'import { createRequire as __openmausbotCreateRequire } from "node:module"; const require = __openmausbotCreateRequire(import.meta.url);',
+  },
   outbase: server,
   outdir: join(root, "dist-server"),
   // Written after tsc, replacing its output for these entry points.
