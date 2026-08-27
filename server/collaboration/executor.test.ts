@@ -6,7 +6,7 @@ import { DatabaseSync } from "node:sqlite";
 import { afterEach, describe, expect, it } from "vitest";
 
 import { FakeDingTalkAdapter } from "../integrations/dingtalk/fake-adapter.ts";
-import type { DingTalkInboundMessage } from "../integrations/dingtalk/types.ts";
+import type { DingTalkInboundMessage, DingTalkSender } from "../integrations/dingtalk/types.ts";
 import { policy, validProposal } from "./planner.test-fixtures.ts";
 import type { AgentRunPort, AgentRunRequest, AgentRunResult } from "./provider-runner.ts";
 import type {
@@ -58,6 +58,15 @@ function inbound(): DingTalkInboundMessage {
       displayName: "Contributor",
     },
     receivedAt: 1_000,
+  };
+}
+
+function ownerSender(): DingTalkSender {
+  return {
+    senderCorpId: "corp-1",
+    senderStaffId: "owner-1",
+    senderId: "owner-sender-1",
+    displayName: "Owner",
   };
 }
 
@@ -157,6 +166,7 @@ function setup(input: {
       limits: { maxAttempts: 1, agentTimeoutMs: 2_000, maxAgentEventBytes: 16_000, interruptGraceMs: 500 },
     },
   });
+  service.bootstrapOwnerLocally({ senderCorpId: "corp-1", senderStaffId: "owner-1", now: 500 });
   const accepted = new FakeDingTalkAdapter((event) => service.ingestDingTalkMessage(event)).receive(inbound());
   if (!accepted.accepted || !accepted.workItemId) throw new Error("Expected Work Item");
   service.reviseWorkItemDefinition(
@@ -244,7 +254,9 @@ describe("trusted candidate executor", () => {
       exit_code: 0,
     });
     expect(db.prepare("SELECT count(*) AS count FROM collaboration_run_events").get()).toEqual({ count: 1 });
-    expect(db.prepare("SELECT count(*) AS count FROM collaboration_audit_events").get()).toEqual({ count: 3 });
+    expect(db.prepare("SELECT count(*) AS count FROM collaboration_audit_events WHERE run_id IS NOT NULL").get()).toEqual({
+      count: 3,
+    });
     expect(() => db.prepare("UPDATE collaboration_candidates SET state = 'invalid'").run()).toThrow(
       "candidate attempts are immutable",
     );
@@ -376,6 +388,165 @@ describe("trusted candidate executor", () => {
     if (captured && resolveRun) resolveRun(completed(captured));
     harness.service.close();
   }, 10_000);
+
+  it("atomically fences paused acquisition and interrupts an active Agent without deleting its evidence", async () => {
+    let captured: AgentRunRequest | undefined;
+    let resolveRun: ((result: AgentRunResult) => void) | undefined;
+    let signalStarted: (() => void) | undefined;
+    const started = new Promise<void>((resolve) => {
+      signalStarted = resolve;
+    });
+    const interrupted: string[] = [];
+    const agent: AgentRunPort = {
+      run(request) {
+        captured = request;
+        request.emit({ threadId: request.threadId, turnId: request.turnId, type: "progress", message: "before pause" });
+        signalStarted?.();
+        return new Promise<AgentRunResult>((resolve) => {
+          resolveRun = resolve;
+        });
+      },
+      async interrupt(runId) {
+        interrupted.push(runId);
+        if (captured && resolveRun) resolveRun(completed(captured));
+      },
+    };
+    const harness = setup({ agent });
+    const execution = harness.service.executeCurrentPlan(harness.workItemId, 1, 3_000);
+    await started;
+    if (!captured) throw new Error("Expected captured run");
+    const pause = harness.service.issueOwnerAction({
+      action: "pause",
+      workItemId: harness.workItemId,
+      expectedVersion: 1,
+      now: 3_100,
+    });
+    const paused = harness.service.performOwnerAction({
+      actionToken: pause.token,
+      sender: ownerSender(),
+      now: 3_200,
+    });
+    expect(paused).toMatchObject({ allowed: true, action: "pause", controlState: "paused" });
+    expect(paused.interruptRequestedRunIds).toEqual([captured.runId]);
+    const stopped = await execution;
+    expect(stopped).toMatchObject({
+      runId: captured.runId,
+      resultSha: null,
+      report: { state: "invalid", reasons: ["owner_interrupt"] },
+    });
+    expect(interrupted).toEqual([captured.runId]);
+
+    const database = ledger(harness.root);
+    expect(database.prepare("SELECT status, error, interrupt_requested_at FROM collaboration_runs WHERE id = ?").get(captured.runId)).toEqual({
+      status: "failed",
+      error: "owner_interrupt",
+      interrupt_requested_at: 3_200,
+    });
+    expect(database.prepare("SELECT count(*) AS count FROM collaboration_run_events WHERE run_id = ?").get(captured.runId)).toEqual({
+      count: 1,
+    });
+    expect(database.prepare("SELECT state, result_sha FROM collaboration_candidates WHERE run_id = ?").get(captured.runId)).toEqual({
+      state: "invalid",
+      result_sha: null,
+    });
+    database.close();
+
+    const resume = harness.service.issueOwnerAction({
+      action: "resume",
+      workItemId: harness.workItemId,
+      expectedVersion: 2,
+      now: 3_300,
+    });
+    expect(harness.service.performOwnerAction({
+      actionToken: resume.token,
+      sender: ownerSender(),
+      now: 3_400,
+    })).toMatchObject({ allowed: true, controlState: "active", workItemVersion: 3 });
+    harness.service.close();
+    const afterResume = ledger(harness.root);
+    expect(afterResume.prepare("SELECT execution_status, control_state FROM collaboration_work_nodes WHERE node_type = 'modify'").get()).toEqual({
+      execution_status: "not_started",
+      control_state: "active",
+    });
+    expect(afterResume.prepare("SELECT count(*) AS count FROM collaboration_run_events WHERE run_id = ?").get(captured.runId)).toEqual({
+      count: 1,
+    });
+    afterResume.close();
+  }, 10_000);
+
+  it.each(["pause", "cancel"] as const)(
+    "fences a completed Agent result when Owner %s commits during target-test finalization",
+    async (action) => {
+      const agent = new FakeAgent((request) => {
+        writeFileSync(join(request.cwd, "src", "value.txt"), "after\n");
+        return completed(request);
+      });
+      let harness: ReturnType<typeof setup>;
+      const commandRunner = new FakeSandboxedCommandRunner((request) => {
+        const issued = harness.service.issueOwnerAction({
+          action,
+          workItemId: harness.workItemId,
+          expectedVersion: 1,
+          now: 3_100,
+        });
+        expect(
+          harness.service.performOwnerAction({
+            actionToken: issued.token,
+            sender: ownerSender(),
+            now: 3_200,
+          }),
+        ).toMatchObject({ allowed: true, action });
+        return sandboxedResult(request);
+      });
+      harness = setup({ agent, commandRunner });
+
+      const outcome = await harness.service.executeCurrentPlan(harness.workItemId, 1, 3_000);
+      expect(outcome).toMatchObject({
+        resultSha: expect.stringMatching(/^[0-9a-f]{40}$/u),
+        report: { state: "invalid", reasons: ["owner_interrupt"], targetTestsPassed: false },
+      });
+      harness.service.close();
+
+      const database = ledger(harness.root);
+      expect(database.prepare("SELECT status, error, interrupt_requested_at FROM collaboration_runs").get()).toEqual({
+        status: "failed",
+        error: "owner_interrupt",
+        interrupt_requested_at: 3_200,
+      });
+      expect(database.prepare("SELECT state, result_sha FROM collaboration_candidates").get()).toEqual({
+        state: "invalid",
+        result_sha: outcome.resultSha,
+      });
+      expect(database.prepare("SELECT execution_status FROM collaboration_work_nodes WHERE node_type = 'modify'").get()).toEqual({
+        execution_status: "invalid",
+      });
+      expect(database.prepare("SELECT count(*) AS count FROM collaboration_candidates WHERE state = 'target_tests_passed'").get()).toEqual({
+        count: 0,
+      });
+      database.close();
+    },
+  );
+
+  it("does not acquire a modify node while the Owner pause is active", async () => {
+    let runs = 0;
+    const agent = new FakeAgent((request) => {
+      runs += 1;
+      return completed(request);
+    });
+    const harness = setup({ agent });
+    const pause = harness.service.issueOwnerAction({
+      action: "pause",
+      workItemId: harness.workItemId,
+      expectedVersion: 1,
+      now: 3_000,
+    });
+    harness.service.performOwnerAction({ actionToken: pause.token, sender: ownerSender(), now: 3_100 });
+    await expect(harness.service.executeCurrentPlan(harness.workItemId)).rejects.toThrow(
+      "no current executable modify node",
+    );
+    expect(runs).toBe(0);
+    harness.service.close();
+  });
 
   it("fences a candidate when a newer plan becomes current during the Agent run", async () => {
     let harness: ReturnType<typeof setup>;

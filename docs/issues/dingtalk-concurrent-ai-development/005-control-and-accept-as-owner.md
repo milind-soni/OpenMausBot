@@ -1,7 +1,7 @@
 # [005] Control and accept as Owner
 
 **Type**: AFK  
-**Status**: TODO  
+**Status**: DONE
 **Blocked by**: `docs/issues/dingtalk-concurrent-ai-development/002-create-work-item-from-message.md`, `docs/issues/dingtalk-concurrent-ai-development/004-generate-trusted-isolated-candidate.md`  
 **PRD**: `dingtalk-concurrent-ai-development-prd.md`
 
@@ -19,12 +19,24 @@ Implement the confirmed single-Owner product model across bootstrap, authorizati
 
 ## 完成信号
 
-- [ ] At most one active Owner exists under concurrent bootstrap or recovery attempts.
-- [ ] Every control transition re-resolves current identity, authorization, aggregate version, and action token.
-- [ ] Pause stops new node acquisition and interrupts active execution without deleting evidence.
-- [ ] Acceptance is impossible before a valid candidate and its required evidence exist.
-- [ ] Rejection records a reason and produces a new revision while retaining prior artifacts.
-- [ ] Non-Owner control attempts are denied and audited without changing task state.
+- [x] At most one active Owner exists under concurrent bootstrap or recovery attempts.
+- [x] Every control transition re-resolves current identity, authorization, aggregate version, and action token.
+- [x] Pause stops new node acquisition and interrupts active execution without deleting evidence.
+- [x] Acceptance is impossible before a valid candidate and its required evidence exist.
+- [x] Rejection records a reason and produces a new revision while retaining prior artifacts.
+- [x] Non-Owner control attempts are denied and audited without changing task state.
+
+## Completion evidence
+
+- Schema v5 adds append-preserving Owner binding history, a partial unique index permitting at most one active Owner, Work Item/node control state, Run interrupt requests, hashed versioned action tokens, immutable control events, and generalized control audit fields.
+- `LocalOwnerRegistry` permits exactly one local bootstrap. Recovery atomically revokes the old binding and inserts a new stable `senderCorpId + senderStaffId` binding only when the expected generation is current; it never executes a business action.
+- All six Work Item actions use one capability policy. The current DingTalk identity is resolved again for every click, and nickname, mutable sender ID, unresolved identity, old Owner generation, stale aggregate version, wrong candidate SHA, expired token, forged token, or replay cannot create a second transition. `system.admin` uses the same sole-Owner rule; no other administrator or co-signing role exists.
+- Card actions receive 256-bit opaque tokens while SQLite stores only SHA-256 hashes, token version, exact Work Item version, candidate SHA where applicable, Owner generation, and expiry. A contributor denial does not burn the Owner token; an authorized stale/invalid decision consumes it once; replay returns the stored decision without re-executing.
+- Pause and cancel atomically mark running Runs for interruption. The executor rechecks active control state inside its Run-start transaction, observes persisted interrupt requests, calls `AgentRunPort.interrupt`, and repeats the full control fence before commit, after target tests, and inside the final `BEGIN IMMEDIATE` transaction. A stop that wins any of those races can retain a result SHA and test output only as invalid `owner_interrupt` evidence; it can never become a trusted candidate. Resume makes interrupted nodes eligible for an explicit retry without deleting history.
+- Accept requires the exact candidate on the current plan, `target_tests_passed`, and a passing evidence row for every configured validate command. It closes business acceptance only; it does not merge or deploy.
+- Reject requires bounded non-empty feedback, retains the old Candidate/Run/TestEvidence, appends a new Work Item snapshot revision carrying that feedback, retires the old plan, and returns the task to collecting. Cancel records a distinct control event and does not create a rejection revision.
+- State mutation, token consumption, immutable control event, and allow/deny audit are one SQLite transaction. A forced audit-write failure proves the entire transition and interrupt request roll back fail-closed.
+- Focused verification passes 11 files / 64 tests, including deterministic pause/cancel races after Provider completion, strict TypeScript passes for every changed and new 005 file, and `git diff --check` passes. Repository-wide server typecheck remains blocked only by the pre-existing minimal-environment React type errors in `src/lib/drafts.ts`.
 
 ## User stories addressed
 
@@ -34,4 +46,3 @@ Implement the confirmed single-Owner product model across bootstrap, authorizati
 ## Background hints
 
 Represent Owner powers as policy capabilities even though only one human may hold them in this product mode.
-
