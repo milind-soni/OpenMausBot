@@ -49,7 +49,10 @@ describe("DingTalk strict normalizer", () => {
 
   it("uses Stream event identity for card dedupe and ignores embedded privilege claims", () => {
     const messageIdentity = normalizeBotMessage(fixture("bot-message-text.json")).message.sender;
-    const normalized = normalizeCardAction(fixture("card-action-owner.json", "transport-card-1", "event-card-1"));
+    const normalized = normalizeCardAction(
+      fixture("card-action-owner.json", "transport-card-1", "event-card-1"),
+      1_700_000_003_000,
+    );
     expect(normalized).toEqual({
       transportEventId: "event-card-1",
       transportMessageId: "transport-card-1",
@@ -70,7 +73,10 @@ describe("DingTalk strict normalizer", () => {
     const sameMemberPayload = JSON.parse(sameMemberEnvelope.data) as Record<string, unknown>;
     sameMemberPayload.userId = messageIdentity.senderStaffId;
     sameMemberPayload.senderId = messageIdentity.senderId;
-    const sameMember = normalizeCardAction({ ...sameMemberEnvelope, data: JSON.stringify(sameMemberPayload) });
+    const sameMember = normalizeCardAction(
+      { ...sameMemberEnvelope, data: JSON.stringify(sameMemberPayload) },
+      1_700_000_003_000,
+    );
     expect({ corp: sameMember.sender.senderCorpId, staff: sameMember.sender.senderStaffId }).toEqual({
       corp: messageIdentity.senderCorpId,
       staff: messageIdentity.senderStaffId,

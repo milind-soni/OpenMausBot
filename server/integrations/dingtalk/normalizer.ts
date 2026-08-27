@@ -121,7 +121,7 @@ function actionData(record: JsonObject): JsonObject {
   return object(raw, "dingtalk_action_data");
 }
 
-export function normalizeBotMessage(envelope: DingTalkStreamEnvelope): NormalizedDingTalkMessage {
+export function normalizeBotMessage(envelope: DingTalkStreamEnvelope, receivedAt = Date.now()): NormalizedDingTalkMessage {
   const record = parsePayload(envelope.data);
   const msgType = optionalString(record, "msgtype", 64)?.toLowerCase();
   let text: string;
@@ -146,7 +146,6 @@ export function normalizeBotMessage(envelope: DingTalkStreamEnvelope): Normalize
   const senderId =
     optionalOpaque(record, "senderId", 256) ??
     `unresolved-${createHash("sha256").update(`${senderCorpId ?? ""}\0${senderStaffId ?? ""}\0${transportMessageId}`).digest("hex").slice(0, 20)}`;
-  const receivedAt = numeric(record.createAt) ?? numeric(envelope.headers.time) ?? Date.now();
   const sessionWebhook = optionalExactText(record, "sessionWebhook", 4_096);
   const sessionWebhookExpiredTime = numeric(record.sessionWebhookExpiredTime);
 
@@ -176,7 +175,7 @@ export function normalizeBotMessage(envelope: DingTalkStreamEnvelope): Normalize
   };
 }
 
-export function normalizeCardAction(envelope: DingTalkStreamEnvelope): DingTalkCardAction {
+export function normalizeCardAction(envelope: DingTalkStreamEnvelope, receivedAt = Date.now()): DingTalkCardAction {
   const record = parsePayload(envelope.data);
   const action = actionData(record);
   const actionToken = requiredOpaque(action, "actionToken", 1_024);
@@ -198,6 +197,7 @@ export function normalizeCardAction(envelope: DingTalkStreamEnvelope): DingTalkC
     ...(optionalString(action, "reason", MAX_REASON_CHARACTERS)
       ? { reason: optionalString(action, "reason", MAX_REASON_CHARACTERS) }
       : {}),
-    receivedAt: numeric(record.createAt) ?? numeric(envelope.headers.time) ?? Date.now(),
+    // Authorization TTLs use the service receive clock, never payload/header time.
+    receivedAt,
   };
 }
