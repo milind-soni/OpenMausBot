@@ -113,7 +113,7 @@ class DeferredContainment extends FakeContainment {
     this.signalStarted = signal;
   }
 
-  override inspect(identity: ContainmentProof["identity"]) {
+  override inspect(_identity: ContainmentProof["identity"]) {
     this.inspections += 1;
     this.signalStarted?.();
     return new Promise<{ state: "empty"; fingerprint: string }>((resolve) => {

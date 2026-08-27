@@ -146,7 +146,7 @@ describe("encrypted collaboration ledger backup", () => {
       aggregateVersion: 99,
       card: {
         type: "plan_status_card",
-        headline: "must not send",
+        headline: "计划已发布",
         workItemId: "RESTORE-WI",
         planRevision: 99,
         status: "ready_for_execution",

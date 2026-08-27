@@ -1,4 +1,5 @@
 import { closeSync, constants, fstatSync, openSync, readFileSync } from "node:fs";
+import type { Stats } from "node:fs";
 import { isAbsolute, join, resolve } from "node:path";
 
 import type {
@@ -8,7 +9,7 @@ import type {
 
 const MAX_CREDENTIAL_BYTES = 16 * 1024;
 
-function validateSecureStat(stat: ReturnType<typeof fstatSync>): void {
+function validateSecureStat(stat: Stats): void {
   if (!stat.isFile()) throw new Error("credential_file_must_be_regular");
   if ((stat.mode & 0o177) !== 0) throw new Error("credential_file_permissions_must_be_0600");
   const uid = typeof process.getuid === "function" ? process.getuid() : stat.uid;
