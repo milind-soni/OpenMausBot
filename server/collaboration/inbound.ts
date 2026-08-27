@@ -8,7 +8,7 @@ import {
   renderAssociationChoiceCard,
   renderInvalidReferenceCard,
   renderPrimaryStatusCard,
-  type InboundCard,
+  type InboundAcknowledgementCard,
 } from "./message-renderer.ts";
 import {
   enqueueInboundCard,
@@ -28,7 +28,7 @@ export interface InboundMessageOutcome {
   principalResolution: PrincipalResolution;
   association: PersistedAssociationState;
   workItemId: string | null;
-  card: InboundCard;
+  card: InboundAcknowledgementCard;
   outboxId: string;
 }
 
@@ -105,6 +105,9 @@ export class InboundMessageProcessor {
         .get(sourceEventId) as ExistingEventRow | undefined;
       if (existing) {
         const outbox = outboxEntryForEvent(this.database, sourceEventId);
+        if (outbox.card.type === "clarification_card" || outbox.card.type === "plan_status_card") {
+          throw new Error(`Inbound acknowledgement ${sourceEventId} has an invalid card type`);
+        }
         this.database.exec("COMMIT");
         return {
           accepted: true,
@@ -170,7 +173,7 @@ export class InboundMessageProcessor {
     const externalEventId = randomUUID();
     let state: PersistedAssociationState;
     let selectedWorkItemId: string | null = null;
-    let card: InboundCard;
+    let card: InboundAcknowledgementCard;
     let aggregateVersion = 1;
 
     if (input.association.kind === "create") {

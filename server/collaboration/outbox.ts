@@ -7,10 +7,11 @@ export interface CollaborationOutboxEntry {
   id: string;
   source: "dingtalk";
   sourceEventId: string;
-  aggregateType: "work_item" | "association";
+  aggregateType: "work_item" | "association" | "plan";
   aggregateId: string;
   aggregateVersion: number;
   kind: InboundCard["type"];
+  supersessionKey: string | null;
   card: InboundCard;
   createdAt: number;
   sentAt: number | null;
@@ -20,13 +21,15 @@ interface OutboxRow {
   id: string;
   source: "dingtalk";
   source_event_id: string;
-  aggregate_type: "work_item" | "association";
+  aggregate_type: "work_item" | "association" | "plan";
   aggregate_id: string;
   aggregate_version: number;
   kind: InboundCard["type"];
+  supersession_key: string | null;
   payload_json: string;
   created_at: number;
   sent_at: number | null;
+  superseded_at: number | null;
 }
 
 function rowToEntry(row: OutboxRow): CollaborationOutboxEntry {
@@ -38,6 +41,7 @@ function rowToEntry(row: OutboxRow): CollaborationOutboxEntry {
     aggregateId: row.aggregate_id,
     aggregateVersion: row.aggregate_version,
     kind: row.kind,
+    supersessionKey: row.supersession_key,
     card: JSON.parse(row.payload_json) as InboundCard,
     createdAt: row.created_at,
     sentAt: row.sent_at,
@@ -48,19 +52,28 @@ export function enqueueInboundCard(
   database: DatabaseSync,
   input: {
     sourceEventId: string;
-    aggregateType: "work_item" | "association";
+    aggregateType: "work_item" | "association" | "plan";
     aggregateId: string;
     aggregateVersion: number;
     card: InboundCard;
+    supersessionKey?: string;
     now: number;
   },
 ): CollaborationOutboxEntry {
   const id = randomUUID();
+  if (input.supersessionKey) {
+    database
+      .prepare(
+        "UPDATE collaboration_outbox SET superseded_at = ? " +
+          "WHERE supersession_key = ? AND sent_at IS NULL AND superseded_at IS NULL",
+      )
+      .run(input.now, input.supersessionKey);
+  }
   database
     .prepare(
       "INSERT INTO collaboration_outbox " +
-        "(id, source, source_event_id, aggregate_type, aggregate_id, aggregate_version, kind, dedupe_key, payload_json, created_at) " +
-        "VALUES (?, 'dingtalk', ?, ?, ?, ?, ?, ?, ?, ?)",
+        "(id, source, source_event_id, aggregate_type, aggregate_id, aggregate_version, kind, dedupe_key, supersession_key, payload_json, created_at) " +
+        "VALUES (?, 'dingtalk', ?, ?, ?, ?, ?, ?, ?, ?, ?)",
     )
     .run(
       id,
@@ -70,6 +83,7 @@ export function enqueueInboundCard(
       input.aggregateVersion,
       input.card.type,
       `dingtalk:event:${input.sourceEventId}:ack`,
+      input.supersessionKey ?? null,
       JSON.stringify(input.card),
       input.now,
     );
@@ -81,6 +95,7 @@ export function enqueueInboundCard(
     aggregateId: input.aggregateId,
     aggregateVersion: input.aggregateVersion,
     kind: input.card.type,
+    supersessionKey: input.supersessionKey ?? null,
     card: input.card,
     createdAt: input.now,
     sentAt: null,
@@ -97,7 +112,10 @@ export function outboxEntryForEvent(database: DatabaseSync, sourceEventId: strin
 
 export function listPendingOutbox(database: DatabaseSync): CollaborationOutboxEntry[] {
   const rows = database
-    .prepare("SELECT * FROM collaboration_outbox WHERE sent_at IS NULL ORDER BY created_at, id")
+    .prepare(
+      "SELECT * FROM collaboration_outbox " +
+        "WHERE sent_at IS NULL AND superseded_at IS NULL ORDER BY created_at, id",
+    )
     .all() as unknown as OutboxRow[];
   return rows.map(rowToEntry);
 }
