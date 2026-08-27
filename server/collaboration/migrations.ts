@@ -2,7 +2,7 @@ import type { DatabaseSync } from "node:sqlite";
 
 import { OPENMAUSBOT_SOURCE_BASELINE } from "./config.ts";
 
-export const COLLABORATION_SCHEMA_VERSION = 3;
+export const COLLABORATION_SCHEMA_VERSION = 4;
 
 interface Migration {
   version: number;
@@ -297,6 +297,105 @@ const migrations: readonly Migration[] = [
         DROP TABLE collaboration_outbox_v2;
         CREATE INDEX collaboration_outbox_pending
           ON collaboration_outbox(sent_at, created_at);
+      `);
+    },
+  },
+  {
+    version: 4,
+    name: "add-trusted-candidate-execution",
+    checksum: "v4:runs-candidates-test-evidence-audit",
+    apply(database) {
+      database.exec(`
+        ALTER TABLE collaboration_work_nodes
+          ADD COLUMN execution_status TEXT NOT NULL DEFAULT 'not_started'
+          CHECK (execution_status IN (
+            'not_started', 'running', 'candidate_ready', 'invalid', 'needs_configuration', 'failed'
+          ));
+
+        CREATE TABLE collaboration_runs (
+          id TEXT PRIMARY KEY,
+          work_item_id TEXT NOT NULL,
+          plan_revision INTEGER NOT NULL,
+          node_id TEXT NOT NULL,
+          attempt INTEGER NOT NULL CHECK (attempt > 0),
+          agent_id TEXT NOT NULL,
+          thread_id TEXT NOT NULL,
+          turn_id TEXT NOT NULL,
+          status TEXT NOT NULL CHECK (status IN (
+            'running', 'succeeded', 'failed', 'invalid', 'needs_configuration', 'timed_out'
+          )),
+          repository_path TEXT NOT NULL,
+          worktree_path TEXT NOT NULL,
+          branch TEXT NOT NULL,
+          base_sha TEXT NOT NULL,
+          result_sha TEXT,
+          started_at INTEGER NOT NULL,
+          finished_at INTEGER,
+          error TEXT,
+          UNIQUE (work_item_id, plan_revision, node_id, attempt),
+          FOREIGN KEY (work_item_id, plan_revision, node_id)
+            REFERENCES collaboration_work_nodes(work_item_id, plan_revision, node_id)
+        ) STRICT;
+
+        CREATE TABLE collaboration_run_events (
+          run_id TEXT NOT NULL REFERENCES collaboration_runs(id),
+          sequence INTEGER NOT NULL CHECK (sequence > 0),
+          event_type TEXT NOT NULL CHECK (event_type IN ('progress', 'warning', 'result')),
+          message TEXT NOT NULL,
+          created_at INTEGER NOT NULL,
+          PRIMARY KEY (run_id, sequence)
+        ) STRICT;
+
+        CREATE TABLE collaboration_candidates (
+          id TEXT PRIMARY KEY,
+          run_id TEXT NOT NULL UNIQUE REFERENCES collaboration_runs(id),
+          state TEXT NOT NULL CHECK (state IN (
+            'target_tests_passed', 'test_failed', 'not_verified', 'invalid', 'needs_configuration'
+          )),
+          base_sha TEXT NOT NULL,
+          result_sha TEXT,
+          changed_paths_json TEXT NOT NULL,
+          violations_json TEXT NOT NULL,
+          quality_json TEXT NOT NULL,
+          created_at INTEGER NOT NULL
+        ) STRICT;
+
+        CREATE TABLE collaboration_test_evidence (
+          id TEXT PRIMARY KEY,
+          run_id TEXT NOT NULL REFERENCES collaboration_runs(id),
+          command_id TEXT NOT NULL,
+          argv_json TEXT NOT NULL,
+          cwd TEXT NOT NULL,
+          exit_code INTEGER,
+          duration_ms INTEGER NOT NULL,
+          stdout TEXT NOT NULL,
+          stderr TEXT NOT NULL,
+          state TEXT NOT NULL CHECK (state IN ('target_passed', 'failed', 'timeout', 'output_limit')),
+          created_at INTEGER NOT NULL,
+          UNIQUE (run_id, command_id)
+        ) STRICT;
+
+        CREATE TABLE collaboration_audit_events (
+          id TEXT PRIMARY KEY,
+          run_id TEXT REFERENCES collaboration_runs(id),
+          action TEXT NOT NULL,
+          outcome TEXT NOT NULL,
+          resource_json TEXT NOT NULL,
+          created_at INTEGER NOT NULL
+        ) STRICT;
+
+        CREATE TRIGGER collaboration_candidates_no_update
+          BEFORE UPDATE ON collaboration_candidates
+          BEGIN SELECT RAISE(ABORT, 'candidate attempts are immutable'); END;
+        CREATE TRIGGER collaboration_candidates_no_delete
+          BEFORE DELETE ON collaboration_candidates
+          BEGIN SELECT RAISE(ABORT, 'candidate attempts are immutable'); END;
+        CREATE TRIGGER collaboration_test_evidence_no_update
+          BEFORE UPDATE ON collaboration_test_evidence
+          BEGIN SELECT RAISE(ABORT, 'test evidence is immutable'); END;
+        CREATE TRIGGER collaboration_test_evidence_no_delete
+          BEFORE DELETE ON collaboration_test_evidence
+          BEGIN SELECT RAISE(ABORT, 'test evidence is immutable'); END;
       `);
     },
   },
