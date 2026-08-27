@@ -2,7 +2,7 @@ import type { DatabaseSync } from "node:sqlite";
 
 import { OPENMAUSBOT_SOURCE_BASELINE } from "./config.ts";
 
-export const COLLABORATION_SCHEMA_VERSION = 2;
+export const COLLABORATION_SCHEMA_VERSION = 3;
 
 interface Migration {
   version: number;
@@ -132,6 +132,169 @@ const migrations: readonly Migration[] = [
           created_at INTEGER NOT NULL,
           sent_at INTEGER
         ) STRICT;
+        CREATE INDEX collaboration_outbox_pending
+          ON collaboration_outbox(sent_at, created_at);
+      `);
+    },
+  },
+  {
+    version: 3,
+    name: "add-definition-and-planning",
+    checksum: "v3:snapshots-frontier-fenced-plans-sequential-graph-outbox",
+    apply(database) {
+      database.exec(`
+        ALTER TABLE collaboration_work_items
+          ADD COLUMN definition_status TEXT NOT NULL DEFAULT 'collecting'
+          CHECK (definition_status IN (
+            'collecting', 'waiting_clarification', 'planning', 'ready_for_execution', 'planning_failed'
+          ));
+        ALTER TABLE collaboration_work_items
+          ADD COLUMN current_plan_revision INTEGER;
+
+        CREATE TABLE collaboration_work_item_snapshots (
+          work_item_id TEXT NOT NULL REFERENCES collaboration_work_items(id),
+          revision INTEGER NOT NULL CHECK (revision > 0),
+          source_work_item_version INTEGER NOT NULL CHECK (source_work_item_version > 0),
+          goal TEXT,
+          goal_confirmed INTEGER NOT NULL CHECK (goal_confirmed IN (0, 1)),
+          repository TEXT,
+          facts_json TEXT NOT NULL,
+          assumptions_json TEXT NOT NULL,
+          acceptance_json TEXT NOT NULL,
+          blocking_ambiguities_json TEXT NOT NULL,
+          created_at INTEGER NOT NULL,
+          PRIMARY KEY (work_item_id, revision)
+        ) STRICT;
+
+        CREATE TABLE collaboration_clarification_rounds (
+          id TEXT PRIMARY KEY,
+          work_item_id TEXT NOT NULL REFERENCES collaboration_work_items(id),
+          snapshot_revision INTEGER NOT NULL,
+          questions_json TEXT NOT NULL,
+          created_at INTEGER NOT NULL,
+          UNIQUE (work_item_id, snapshot_revision),
+          FOREIGN KEY (work_item_id, snapshot_revision)
+            REFERENCES collaboration_work_item_snapshots(work_item_id, revision)
+        ) STRICT;
+
+        CREATE TABLE collaboration_plan_revisions (
+          id TEXT PRIMARY KEY,
+          work_item_id TEXT NOT NULL REFERENCES collaboration_work_items(id),
+          revision INTEGER NOT NULL CHECK (revision > 0),
+          snapshot_revision INTEGER NOT NULL,
+          status TEXT NOT NULL CHECK (status IN ('published', 'planning_failed')),
+          summary TEXT,
+          proposal_hash TEXT,
+          failure_json TEXT,
+          created_at INTEGER NOT NULL,
+          UNIQUE (work_item_id, revision),
+          FOREIGN KEY (work_item_id, snapshot_revision)
+            REFERENCES collaboration_work_item_snapshots(work_item_id, revision)
+        ) STRICT;
+
+        CREATE TABLE collaboration_planning_attempts (
+          id TEXT PRIMARY KEY,
+          work_item_id TEXT NOT NULL REFERENCES collaboration_work_items(id),
+          snapshot_revision INTEGER NOT NULL,
+          status TEXT NOT NULL CHECK (status IN ('pending', 'published', 'failed', 'stale')),
+          created_at INTEGER NOT NULL,
+          completed_at INTEGER,
+          UNIQUE (work_item_id, snapshot_revision),
+          FOREIGN KEY (work_item_id, snapshot_revision)
+            REFERENCES collaboration_work_item_snapshots(work_item_id, revision)
+        ) STRICT;
+
+        CREATE TABLE collaboration_work_nodes (
+          work_item_id TEXT NOT NULL,
+          plan_revision INTEGER NOT NULL,
+          node_id TEXT NOT NULL,
+          node_type TEXT NOT NULL CHECK (node_type IN ('analyze', 'modify', 'validate', 'report')),
+          status TEXT NOT NULL CHECK (status IN ('pending', 'ready')),
+          assigned_agent_id TEXT NOT NULL,
+          objective TEXT NOT NULL,
+          input_evidence_json TEXT NOT NULL,
+          instructions TEXT NOT NULL,
+          read_scope_json TEXT NOT NULL,
+          write_scope_json TEXT NOT NULL,
+          deny_scope_json TEXT NOT NULL,
+          commands_json TEXT NOT NULL,
+          expected_artifacts_json TEXT NOT NULL,
+          completion_definition TEXT NOT NULL,
+          risk TEXT NOT NULL CHECK (risk IN ('low', 'medium', 'high')),
+          budget_json TEXT NOT NULL,
+          active INTEGER NOT NULL DEFAULT 1 CHECK (active IN (0, 1)),
+          created_at INTEGER NOT NULL,
+          PRIMARY KEY (work_item_id, plan_revision, node_id),
+          FOREIGN KEY (work_item_id, plan_revision)
+            REFERENCES collaboration_plan_revisions(work_item_id, revision)
+        ) STRICT;
+
+        CREATE TABLE collaboration_work_edges (
+          work_item_id TEXT NOT NULL,
+          plan_revision INTEGER NOT NULL,
+          from_node_id TEXT NOT NULL,
+          to_node_id TEXT NOT NULL,
+          kind TEXT NOT NULL CHECK (kind = 'blocks'),
+          PRIMARY KEY (work_item_id, plan_revision, from_node_id, to_node_id),
+          FOREIGN KEY (work_item_id, plan_revision, from_node_id)
+            REFERENCES collaboration_work_nodes(work_item_id, plan_revision, node_id),
+          FOREIGN KEY (work_item_id, plan_revision, to_node_id)
+            REFERENCES collaboration_work_nodes(work_item_id, plan_revision, node_id)
+        ) STRICT;
+
+        CREATE TABLE collaboration_plan_node_classifications (
+          work_item_id TEXT NOT NULL,
+          new_plan_revision INTEGER NOT NULL,
+          previous_plan_revision INTEGER NOT NULL,
+          previous_node_id TEXT NOT NULL,
+          classification TEXT NOT NULL CHECK (classification IN ('valid', 'revalidate', 'obsolete')),
+          reason TEXT NOT NULL,
+          PRIMARY KEY (work_item_id, new_plan_revision, previous_plan_revision, previous_node_id),
+          FOREIGN KEY (work_item_id, new_plan_revision)
+            REFERENCES collaboration_plan_revisions(work_item_id, revision),
+          FOREIGN KEY (work_item_id, previous_plan_revision, previous_node_id)
+            REFERENCES collaboration_work_nodes(work_item_id, plan_revision, node_id)
+        ) STRICT;
+
+        CREATE TRIGGER collaboration_snapshots_no_update
+          BEFORE UPDATE ON collaboration_work_item_snapshots
+          BEGIN SELECT RAISE(ABORT, 'work item snapshots are immutable'); END;
+        CREATE TRIGGER collaboration_snapshots_no_delete
+          BEFORE DELETE ON collaboration_work_item_snapshots
+          BEGIN SELECT RAISE(ABORT, 'work item snapshots are immutable'); END;
+        CREATE TRIGGER collaboration_plan_revisions_no_update
+          BEFORE UPDATE ON collaboration_plan_revisions
+          BEGIN SELECT RAISE(ABORT, 'plan revisions are immutable'); END;
+        CREATE TRIGGER collaboration_plan_revisions_no_delete
+          BEFORE DELETE ON collaboration_plan_revisions
+          BEGIN SELECT RAISE(ABORT, 'plan revisions are immutable'); END;
+
+        ALTER TABLE collaboration_outbox RENAME TO collaboration_outbox_v2;
+        CREATE TABLE collaboration_outbox (
+          id TEXT PRIMARY KEY,
+          source TEXT NOT NULL,
+          source_event_id TEXT NOT NULL,
+          aggregate_type TEXT NOT NULL CHECK (aggregate_type IN ('work_item', 'association', 'plan')),
+          aggregate_id TEXT NOT NULL,
+          aggregate_version INTEGER NOT NULL,
+          kind TEXT NOT NULL CHECK (kind IN (
+            'primary_status_card', 'association_choice_card', 'invalid_reference_card',
+            'clarification_card', 'plan_status_card'
+          )),
+          dedupe_key TEXT NOT NULL UNIQUE,
+          supersession_key TEXT,
+          payload_json TEXT NOT NULL,
+          created_at INTEGER NOT NULL,
+          sent_at INTEGER,
+          superseded_at INTEGER
+        ) STRICT;
+        INSERT INTO collaboration_outbox
+          (id, source, source_event_id, aggregate_type, aggregate_id, aggregate_version, kind,
+          dedupe_key, payload_json, created_at, sent_at)
+        SELECT id, source, source_event_id, aggregate_type, aggregate_id, aggregate_version, kind,
+               dedupe_key, payload_json, created_at, sent_at
+        FROM collaboration_outbox_v2;
+        DROP TABLE collaboration_outbox_v2;
         CREATE INDEX collaboration_outbox_pending
           ON collaboration_outbox(sent_at, created_at);
       `);

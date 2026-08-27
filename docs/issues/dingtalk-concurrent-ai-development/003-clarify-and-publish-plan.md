@@ -1,7 +1,7 @@
 # [003] Clarify requirements and publish plan
 
 **Type**: AFK  
-**Status**: TODO  
+**Status**: DONE
 **Blocked by**: `docs/issues/dingtalk-concurrent-ai-development/002-create-work-item-from-message.md`  
 **PRD**: `dingtalk-concurrent-ai-development-prd.md`
 
@@ -19,11 +19,19 @@ Turn accepted Work Item events into an executable contract. Maintain a versioned
 
 ## 完成信号
 
-- [ ] Missing goal, repository, acceptance conditions, or blocking ambiguity prevents execution.
-- [ ] Independent clarification questions are grouped while dependent questions wait for a later round.
-- [ ] A valid task creates an ordered, acyclic graph with supported node types and configured Agent identities.
-- [ ] A changed requirement creates a new immutable revision and classifies existing nodes as valid, revalidation-needed, or obsolete.
-- [ ] Invalid plans enter an observable planning failure state instead of being silently repaired by deleting constraints.
+- [x] Missing goal, repository, acceptance conditions, or blocking ambiguity prevents execution.
+- [x] Independent clarification questions are grouped while dependent questions wait for a later round.
+- [x] A valid task creates an ordered, acyclic graph with supported node types and configured Agent identities.
+- [x] A changed requirement creates a new immutable revision and classifies existing nodes as valid, revalidation-needed, or obsolete.
+- [x] Invalid plans enter an observable planning failure state instead of being silently repaired by deleting constraints.
+
+## Completion evidence
+
+- Accepted Work Item events automatically create a durable snapshot and clarification frontier; structured answers revise that snapshot without dispatching a Provider.
+- Readiness requires a confirmed goal, allowlisted absolute repository, observable acceptance evidence and zero blocking ambiguity. Dependency-aware questions expose at most three current decisions.
+- Planner output starts as `unknown`, passes strict structural parsing, then deterministic checks for fixed node sequence, identity, dependency, acyclicity, scopes, commands and budgets.
+- Schema v3 stores immutable snapshots/revisions, planning attempts, structured node contracts, a current-plan pointer, inactive superseded nodes, classification evidence and latest-card outbox supersession.
+- Tests cover automatic event ingestion, clarification prerequisites, valid publication, malformed/cyclic/over-capability failure, immutable revision history, valid/revalidate/obsolete classification and stale-planner fencing.
 
 ## User stories addressed
 
@@ -33,4 +41,3 @@ Turn accepted Work Item events into an executable contract. Maintain a versioned
 ## Background hints
 
 Treat model output as an untrusted proposal and place all executable validation in deterministic code.
-
