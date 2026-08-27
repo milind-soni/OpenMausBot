@@ -27,6 +27,7 @@ import {
   type TestEvidence,
 } from "./quality-gate.ts";
 import { WorktreeManager, type ManagedWorktree } from "./worktree-manager.ts";
+import { assertLedgerArmed } from "./restore-guard.ts";
 
 interface NodeRow {
   node_id: string;
@@ -117,6 +118,7 @@ export class CandidateExecutor {
 
   async executeCurrentPlan(workItemId: string, attempt = 1, now = Date.now()): Promise<CandidateExecutionOutcome> {
     if (this.closed) throw new Error("Candidate executor is closed");
+    assertLedgerArmed(this.database);
     if (attempt > this.options.limits.maxAttempts) throw new Error("Execution attempt limit exceeded");
     const leaseNow = Date.now();
     const instance = this.instanceLeases.acquire(

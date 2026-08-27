@@ -16,6 +16,7 @@ import {
   outboxEntryForEvent,
   type CollaborationOutboxEntry,
 } from "./outbox.ts";
+import { assertLedgerArmed } from "./restore-guard.ts";
 
 type PersistedAssociationState = "created" | "associated" | "ambiguous" | "invalid_reference";
 
@@ -95,6 +96,7 @@ export class InboundMessageProcessor {
 
     this.database.exec("BEGIN IMMEDIATE");
     try {
+      assertLedgerArmed(this.database);
       const existing = this.database
         .prepare(
           "SELECT e.transport_message_id, e.principal_id, p.resolution, e.association_state, e.work_item_id " +

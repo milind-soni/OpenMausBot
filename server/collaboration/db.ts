@@ -3,6 +3,7 @@ import { basename, join, resolve } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 
 import { applyCollaborationMigrations, type MigrationState } from "./migrations.ts";
+import { readRestoreGuard, type RestoreGuardState } from "./restore-guard.ts";
 
 export const COLLABORATION_DATABASE_NAME = "collaboration.sqlite";
 
@@ -10,6 +11,7 @@ export interface CollaborationLedger {
   readonly filePath: string;
   readonly migrationState: MigrationState;
   databaseHealth(): DatabaseHealth;
+  restoreGuard(): RestoreGuardState;
   close(): void;
 }
 
@@ -58,6 +60,9 @@ export function openCollaborationLedger(dataDirectory: string): CollaborationLed
           journalMode: "wal",
           foreignKeys: true,
         };
+      },
+      restoreGuard() {
+        return readRestoreGuard(database);
       },
       close() {
         database.close();

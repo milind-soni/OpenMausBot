@@ -113,11 +113,16 @@ export function startCollaborationService(options: CollaborationServiceOptions):
   let closed = false;
   let serviceDegradedReason: "ledger_unwritable" | "audit_unwritable" | null = null;
 
+  const assertServiceArmed = () => {
+    if (ledger.restoreGuard().state !== "live") throw new Error("restore_review_required");
+  };
+
   return {
     health() {
       if (closed) throw new Error("Collaboration service is closed");
       const readiness = execution?.readiness();
-      const degraded = serviceDegradedReason !== null || readiness?.mode === "degraded";
+      const restoreBlocked = ledger.restoreGuard().state === "review_required";
+      const degraded = restoreBlocked || serviceDegradedReason !== null || readiness?.mode === "degraded";
       return {
         app: "openmausbot-collaboration",
         status: degraded ? "degraded" : "healthy",
@@ -129,7 +134,7 @@ export function startCollaborationService(options: CollaborationServiceOptions):
         ...(degraded
           ? {
               degradation: {
-                reason: serviceDegradedReason ?? readiness?.reason ?? "unknown",
+                reason: restoreBlocked ? "restore_review_required" : serviceDegradedReason ?? readiness?.reason ?? "unknown",
                 lowDisk: readiness?.lowDisk ?? false,
               },
             }
@@ -139,6 +144,7 @@ export function startCollaborationService(options: CollaborationServiceOptions):
     },
     ingestDingTalkMessage(message) {
       if (closed) throw new Error("Collaboration service is closed");
+      assertServiceArmed();
       try {
         const outcome = inbound.processDingTalkMessage(message);
         if (planning && outcome.workItemId) {
@@ -152,11 +158,13 @@ export function startCollaborationService(options: CollaborationServiceOptions):
     },
     reviseWorkItemDefinition(workItemId, patch, now) {
       if (closed) throw new Error("Collaboration service is closed");
+      assertServiceArmed();
       if (!planning) throw new Error("Collaboration planning is not configured");
       return planning.reviseDefinition(workItemId, patch, now);
     },
     async executeCurrentPlan(workItemId, attempt, now) {
       if (closed) throw new Error("Collaboration service is closed");
+      assertServiceArmed();
       if (!execution) throw new Error("Collaboration execution is not configured");
       return await execution.executeCurrentPlan(workItemId, attempt, now);
     },
@@ -174,6 +182,7 @@ export function startCollaborationService(options: CollaborationServiceOptions):
     },
     issueOwnerAction(input) {
       if (closed) throw new Error("Collaboration service is closed");
+      assertServiceArmed();
       try {
         return actions.issue(input);
       } catch (error) {
@@ -183,6 +192,7 @@ export function startCollaborationService(options: CollaborationServiceOptions):
     },
     performOwnerAction(input) {
       if (closed) throw new Error("Collaboration service is closed");
+      assertServiceArmed();
       try {
         return actions.perform(input);
       } catch (error) {

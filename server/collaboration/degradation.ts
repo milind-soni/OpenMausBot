@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 import type { DatabaseSync } from "node:sqlite";
 
 import { assertCurrentInstanceLease, type InstanceLease } from "./leases.ts";
+import { readRestoreGuard } from "./restore-guard.ts";
 
 export type DegradationReason = "ledger_unwritable" | "audit_unwritable" | "recovery_failed" | "lease_failed";
 
@@ -23,9 +24,10 @@ export class CollaborationDegradationController {
     const row = this.database
       .prepare("SELECT mode, reason, low_disk FROM collaboration_runtime_state WHERE singleton = 1")
       .get() as { mode: "ready" | "degraded"; reason: string | null; low_disk: number };
+    const restoreBlocked = readRestoreGuard(this.database).state === "review_required";
     return {
-      mode: this.volatileFailure ? "degraded" : row.mode,
-      reason: this.volatileFailure ?? row.reason,
+      mode: this.volatileFailure || restoreBlocked ? "degraded" : row.mode,
+      reason: this.volatileFailure ?? (restoreBlocked ? "restore_review_required" : row.reason),
       lowDisk: row.low_disk === 1,
     };
   }
