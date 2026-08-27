@@ -5,7 +5,9 @@ import { DatabaseSync } from "node:sqlite";
 import { afterEach, describe, expect, it } from "vitest";
 
 import {
+  containmentBindingHash,
   runtimeIdentityFingerprint,
+  type ContainmentBinding,
   type ContainmentPort,
   type ContainmentProof,
 } from "./containment.ts";
@@ -16,6 +18,14 @@ import { type WorktreeCleanupPort, WorktreeRetentionManager } from "./retention.
 const scratch: string[] = [];
 afterEach(() => scratch.splice(0).forEach((path) => rmSync(path, { recursive: true, force: true })));
 
+const runtimeBinding: ContainmentBinding = {
+  runId: "RUN-1",
+  canonicalWorktreePath: "/managed/worktree",
+  instanceOwner: "old-scheduler",
+  instanceFence: 1,
+  nonce: "retention-nonce-00000000000000000001",
+};
+
 const proof: ContainmentProof = {
   identity: {
     backend: "verified_service",
@@ -23,7 +33,7 @@ const proof: ContainmentProof = {
     hostGeneration: "host-generation-1",
     verifierVersion: "verifier-v1",
   },
-  receipt: "verified-receipt",
+  receipt: containmentBindingHash(runtimeBinding),
 };
 
 function database(): DatabaseSync {
@@ -37,10 +47,16 @@ function database(): DatabaseSync {
   db.prepare(
     "INSERT INTO collaboration_runs " +
       "(id, work_item_id, plan_revision, node_id, attempt, agent_id, thread_id, turn_id, status, repository_path, " +
-      "worktree_path, branch, base_sha, started_at, runtime_identity_json, containment_state) " +
+      "worktree_path, branch, base_sha, started_at, runtime_identity_json, containment_state, " +
+      "containment_binding_json, containment_fingerprint) " +
       "VALUES ('RUN-1', 'WI-1', 1, 'modify', 1, 'developer', 'thread', 'turn', 'succeeded', '/repo', " +
-      "'/managed/worktree', 'branch', ?, 1, ?, 'verified')",
-  ).run("a".repeat(40), JSON.stringify(proof));
+      "'/managed/worktree', 'branch', ?, 1, ?, 'verified', ?, ?)",
+  ).run(
+    "a".repeat(40),
+    JSON.stringify(proof),
+    JSON.stringify(runtimeBinding),
+    runtimeIdentityFingerprint(proof.identity),
+  );
   db.prepare(
     "INSERT INTO collaboration_audit_events (id, run_id, action, outcome, resource_json, created_at) " +
       "VALUES ('AUDIT-1', 'RUN-1', 'candidate.finalized', 'success', '{}', 1)",
@@ -54,8 +70,12 @@ function database(): DatabaseSync {
 }
 
 class EmptyContainment implements ContainmentPort {
-  async verifyProof(input: ContainmentProof) {
-    return { verified: true as const, fingerprint: runtimeIdentityFingerprint(input.identity) };
+  async verifyProof(input: ContainmentProof, expectedBinding: ContainmentBinding) {
+    return {
+      verified: true as const,
+      fingerprint: runtimeIdentityFingerprint(input.identity),
+      bindingHash: containmentBindingHash(expectedBinding),
+    };
   }
   async inspect(identity: ContainmentProof["identity"]) {
     return { state: "empty" as const, fingerprint: runtimeIdentityFingerprint(identity) };

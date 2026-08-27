@@ -524,7 +524,8 @@ export class OwnerActionController {
     if (interruptRequestedRunIds.length) {
       this.database
         .prepare(
-          "UPDATE collaboration_runs SET interrupt_requested_at = coalesce(interrupt_requested_at, ?) " +
+          "UPDATE collaboration_runs SET interrupt_requested_at = coalesce(interrupt_requested_at, ?), " +
+            "version = version + 1 " +
             "WHERE work_item_id = ? AND status = 'running'",
         )
         .run(now, workItem.id);
@@ -534,7 +535,7 @@ export class OwnerActionController {
       this.updateWorkItem(workItem, "control_state = 'paused', paused_at = ?", [now], now);
       this.database
         .prepare(
-          "UPDATE collaboration_work_nodes SET control_state = 'paused' " +
+          "UPDATE collaboration_work_nodes SET control_state = 'paused', version = version + 1 " +
             "WHERE work_item_id = ? AND plan_revision = ? AND active = 1 AND control_state = 'active'",
         )
         .run(workItem.id, workItem.current_plan_revision);
@@ -544,7 +545,7 @@ export class OwnerActionController {
         .prepare(
           "UPDATE collaboration_work_nodes SET control_state = 'active', " +
             "execution_status = CASE WHEN execution_status IN ('running', 'invalid', 'failed') " +
-            "THEN 'not_started' ELSE execution_status END " +
+            "THEN 'not_started' ELSE execution_status END, version = version + 1 " +
             "WHERE work_item_id = ? AND plan_revision = ? AND active = 1 AND control_state = 'paused'",
         )
         .run(workItem.id, workItem.current_plan_revision);
@@ -553,7 +554,8 @@ export class OwnerActionController {
       this.database
         .prepare(
           "UPDATE collaboration_work_nodes SET control_state = 'active', " +
-            "execution_status = CASE WHEN node_type IN ('modify', 'validate', 'report') THEN 'not_started' ELSE execution_status END " +
+            "execution_status = CASE WHEN node_type IN ('modify', 'validate', 'report') " +
+            "THEN 'not_started' ELSE execution_status END, version = version + 1 " +
             "WHERE work_item_id = ? AND plan_revision = ? AND active = 1",
         )
         .run(workItem.id, workItem.current_plan_revision);
@@ -566,7 +568,7 @@ export class OwnerActionController {
       );
       this.database
         .prepare(
-          "UPDATE collaboration_work_nodes SET control_state = 'cancelled' " +
+          "UPDATE collaboration_work_nodes SET control_state = 'cancelled', version = version + 1 " +
             "WHERE work_item_id = ? AND plan_revision = ? AND active = 1",
         )
         .run(workItem.id, workItem.current_plan_revision);
@@ -580,7 +582,7 @@ export class OwnerActionController {
       );
       this.database
         .prepare(
-          "UPDATE collaboration_work_nodes SET control_state = 'cancelled' " +
+          "UPDATE collaboration_work_nodes SET control_state = 'cancelled', version = version + 1 " +
             "WHERE work_item_id = ? AND plan_revision = ? AND active = 1",
         )
         .run(workItem.id, workItem.current_plan_revision);
@@ -596,7 +598,7 @@ export class OwnerActionController {
       );
       this.database
         .prepare(
-          "UPDATE collaboration_work_nodes SET active = 0, control_state = 'cancelled' " +
+          "UPDATE collaboration_work_nodes SET active = 0, control_state = 'cancelled', version = version + 1 " +
             "WHERE work_item_id = ? AND plan_revision = ? AND active = 1",
         )
         .run(workItem.id, workItem.current_plan_revision);

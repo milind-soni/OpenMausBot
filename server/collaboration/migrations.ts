@@ -2,7 +2,7 @@ import type { DatabaseSync } from "node:sqlite";
 
 import { OPENMAUSBOT_SOURCE_BASELINE } from "./config.ts";
 
-export const COLLABORATION_SCHEMA_VERSION = 6;
+export const COLLABORATION_SCHEMA_VERSION = 7;
 
 interface Migration {
   version: number;
@@ -589,6 +589,22 @@ const migrations: readonly Migration[] = [
         INSERT INTO collaboration_runtime_state
           (singleton, mode, reason, low_disk, updated_at, version)
           VALUES (1, 'ready', NULL, 0, 0, 1);
+      `);
+    },
+  },
+  {
+    version: 7,
+    name: "bind-containment-and-recovery-cas",
+    checksum: "v7:containment-binding-row-versions-expiring-provider-probe",
+    apply(database) {
+      database.exec(`
+        ALTER TABLE collaboration_work_nodes ADD COLUMN version INTEGER NOT NULL DEFAULT 1 CHECK (version > 0);
+        ALTER TABLE collaboration_runs ADD COLUMN version INTEGER NOT NULL DEFAULT 1 CHECK (version > 0);
+        ALTER TABLE collaboration_runs ADD COLUMN containment_fingerprint TEXT;
+        ALTER TABLE collaboration_runs ADD COLUMN containment_binding_json TEXT;
+        ALTER TABLE collaboration_test_evidence ADD COLUMN containment_fingerprint TEXT;
+        ALTER TABLE collaboration_test_evidence ADD COLUMN containment_binding_json TEXT;
+        ALTER TABLE collaboration_provider_circuits ADD COLUMN probe_expires_at INTEGER;
       `);
     },
   },

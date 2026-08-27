@@ -1,6 +1,11 @@
 import type { DatabaseSync } from "node:sqlite";
 
-import { type ContainmentPort, type ContainmentProof, verifyContainmentProof } from "./containment.ts";
+import {
+  type ContainmentBinding,
+  type ContainmentPort,
+  type ContainmentProof,
+  verifyContainmentProof,
+} from "./containment.ts";
 import { assertCurrentInstanceLease, type InstanceLease, StaleFenceError } from "./leases.ts";
 
 export interface RetentionPolicy {
@@ -25,6 +30,8 @@ interface RetainedRunRow {
   status: string;
   worktree_path: string;
   runtime_identity_json: string | null;
+  containment_binding_json: string | null;
+  containment_fingerprint: string | null;
   containment_state: string;
   retention_until: number | null;
   cleaned_at: number | null;
@@ -36,6 +43,15 @@ function proof(value: string | null): ContainmentProof | null {
   if (!value) return null;
   try {
     return JSON.parse(value) as ContainmentProof;
+  } catch {
+    return null;
+  }
+}
+
+function binding(value: string | null): ContainmentBinding | null {
+  if (!value) return null;
+  try {
+    return JSON.parse(value) as ContainmentBinding;
   } catch {
     return null;
   }
@@ -72,7 +88,10 @@ export class WorktreeRetentionManager {
     const retentionUntil =
       now + (outcome === "success" ? this.policy.successMs : this.policy.failureOrCancellationMs);
     const updated = this.database
-      .prepare("UPDATE collaboration_runs SET retention_until = ? WHERE id = ? AND cleaned_at IS NULL")
+      .prepare(
+        "UPDATE collaboration_runs SET retention_until = ?, version = version + 1 " +
+          "WHERE id = ? AND cleaned_at IS NULL",
+      )
       .run(retentionUntil, runId);
     if (updated.changes !== 1) throw new Error(`Unknown or already-cleaned run: ${runId}`);
     return retentionUntil;
@@ -85,7 +104,8 @@ export class WorktreeRetentionManager {
     assertCurrentInstanceLease(this.database, instance, now);
     const rows = this.database
       .prepare(
-        "SELECT r.id, r.status, r.worktree_path, r.runtime_identity_json, r.containment_state, " +
+        "SELECT r.id, r.status, r.worktree_path, r.runtime_identity_json, r.containment_binding_json, " +
+          "r.containment_fingerprint, r.containment_state, " +
           "r.retention_until, r.cleaned_at, n.lease_owner, n.lease_expires_at " +
           "FROM collaboration_runs r LEFT JOIN collaboration_work_nodes n " +
           "ON n.work_item_id = r.work_item_id AND n.plan_revision = r.plan_revision AND n.node_id = r.node_id " +
@@ -126,8 +146,10 @@ export class WorktreeRetentionManager {
       return { runId: row.id, cleaned: false, reason: "worktree_not_managed" };
     }
     const runtimeProof = proof(row.runtime_identity_json);
-    const verified = await verifyContainmentProof(this.containment, runtimeProof);
-    if (!verified.verified || !runtimeProof) {
+    const runtimeBinding = binding(row.containment_binding_json);
+    if (!runtimeBinding) return { runId: row.id, cleaned: false, reason: "containment_binding_missing" };
+    const verified = await verifyContainmentProof(this.containment, runtimeProof, runtimeBinding);
+    if (!verified.verified || !runtimeProof || verified.fingerprint !== row.containment_fingerprint) {
       return {
         runId: row.id,
         cleaned: false,
@@ -153,7 +175,7 @@ export class WorktreeRetentionManager {
       assertCurrentInstanceLease(this.database, instance, now);
       const updated = this.database
         .prepare(
-          "UPDATE collaboration_runs SET cleaned_at = ?, containment_state = 'empty' " +
+          "UPDATE collaboration_runs SET cleaned_at = ?, containment_state = 'empty', version = version + 1 " +
             "WHERE id = ? AND cleaned_at IS NULL AND retention_until <= ?",
         )
         .run(now, row.id, now);

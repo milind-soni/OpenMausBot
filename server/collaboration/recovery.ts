@@ -2,11 +2,12 @@ import type { DatabaseSync } from "node:sqlite";
 
 import {
   type ContainmentPort,
+  type ContainmentBinding,
   type ContainmentProof,
   runtimeIdentityFingerprint,
   verifyContainmentProof,
 } from "./containment.ts";
-import { assertCurrentInstanceLease, type InstanceLease } from "./leases.ts";
+import { assertCurrentInstanceLease, type InstanceLease, StaleFenceError } from "./leases.ts";
 
 export type RecoveryClassification =
   | "resumable"
@@ -40,18 +41,37 @@ interface RecoverableRunRow {
   worktree_path: string;
   base_sha: string;
   result_sha: string | null;
+  status: string;
+  interrupt_requested_at: number | null;
+  run_version: number;
+  instance_owner: string | null;
+  instance_fence: number | null;
+  node_lease_fence: number | null;
   runtime_identity_json: string | null;
   containment_state: string;
+  containment_fingerprint: string | null;
+  containment_binding_json: string | null;
   work_item_control_state: string;
   current_plan_revision: number | null;
   node_active: number | null;
   node_control_state: string | null;
+  node_lease_fence_current: number | null;
+  node_version: number | null;
 }
 
 function parseProof(value: string | null): ContainmentProof | null {
   if (!value) return null;
   try {
     return JSON.parse(value) as ContainmentProof;
+  } catch {
+    return null;
+  }
+}
+
+function parseBinding(value: string | null): ContainmentBinding | null {
+  if (!value) return null;
+  try {
+    return JSON.parse(value) as ContainmentBinding;
   } catch {
     return null;
   }
@@ -90,13 +110,16 @@ export class RecoveryCoordinator {
     const rows = this.database
       .prepare(
         "SELECT r.id, r.work_item_id, r.plan_revision, r.node_id, r.attempt, r.worktree_path, r.base_sha, " +
-          "r.result_sha, r.runtime_identity_json, r.containment_state, w.control_state AS work_item_control_state, " +
-          "w.current_plan_revision, n.active AS node_active, n.control_state AS node_control_state " +
+          "r.result_sha, r.status, r.interrupt_requested_at, r.version AS run_version, r.instance_owner, " +
+          "r.instance_fence, r.node_lease_fence, r.runtime_identity_json, r.containment_state, " +
+          "r.containment_fingerprint, r.containment_binding_json, " +
+          "w.control_state AS work_item_control_state, w.current_plan_revision, n.active AS node_active, " +
+          "n.control_state AS node_control_state, n.lease_fence AS node_lease_fence_current, " +
+          "n.version AS node_version " +
           "FROM collaboration_runs r JOIN collaboration_work_items w ON w.id = r.work_item_id " +
           "LEFT JOIN collaboration_work_nodes n ON n.work_item_id = r.work_item_id " +
           "AND n.plan_revision = r.plan_revision AND n.node_id = r.node_id " +
-          "WHERE r.status = 'running' OR " +
-          "(r.recovery_state = 'candidate_produced' AND n.runtime_state = 'validating') " +
+          "WHERE r.status = 'running' " +
           "ORDER BY r.started_at, r.id",
       )
       .all() as unknown as RecoverableRunRow[];
@@ -114,7 +137,18 @@ export class RecoveryCoordinator {
       return this.persist(instance, row, now, "unsafe_to_retry", "none", "work_item_or_plan_inactive");
     }
     const proof = parseProof(row.runtime_identity_json);
-    const verified = await verifyContainmentProof(this.containment, proof);
+    const binding = parseBinding(row.containment_binding_json);
+    if (
+      !binding ||
+      binding.runId !== row.id ||
+      binding.commandId !== undefined ||
+      binding.canonicalWorktreePath !== row.worktree_path ||
+      binding.instanceOwner !== row.instance_owner ||
+      binding.instanceFence !== row.instance_fence
+    ) {
+      return this.persist(instance, row, now, "needs_configuration", "none", "containment_binding_missing");
+    }
+    const verified = await verifyContainmentProof(this.containment, proof, binding);
     if (!verified.verified || !proof) {
       return this.persist(
         instance,
@@ -127,6 +161,9 @@ export class RecoveryCoordinator {
     }
     if (verified.fingerprint !== runtimeIdentityFingerprint(proof.identity)) {
       return this.persist(instance, row, now, "needs_configuration", "none", "containment_identity_mismatch");
+    }
+    if (row.containment_fingerprint !== verified.fingerprint) {
+      return this.persist(instance, row, now, "needs_configuration", "none", "containment_fingerprint_changed");
     }
     const containment = await this.containment.inspect(proof.identity);
     if (containment.state === "unknown" || containment.fingerprint !== verified.fingerprint) {
@@ -177,6 +214,56 @@ export class RecoveryCoordinator {
     this.database.exec("BEGIN IMMEDIATE");
     try {
       assertCurrentInstanceLease(this.database, instance, now);
+      const current = this.database
+        .prepare(
+          "SELECT r.status, r.interrupt_requested_at, r.version AS run_version, r.instance_owner, " +
+            "r.instance_fence, r.node_lease_fence, w.control_state AS work_item_control_state, " +
+            "w.current_plan_revision, n.active AS node_active, n.control_state AS node_control_state, " +
+            "n.lease_fence AS node_lease_fence_current, n.version AS node_version " +
+            "FROM collaboration_runs r JOIN collaboration_work_items w ON w.id = r.work_item_id " +
+            "JOIN collaboration_work_nodes n ON n.work_item_id = r.work_item_id " +
+            "AND n.plan_revision = r.plan_revision AND n.node_id = r.node_id WHERE r.id = ?",
+        )
+        .get(row.id) as
+        | Pick<
+            RecoverableRunRow,
+            | "status"
+            | "interrupt_requested_at"
+            | "run_version"
+            | "instance_owner"
+            | "instance_fence"
+            | "node_lease_fence"
+            | "work_item_control_state"
+            | "current_plan_revision"
+            | "node_active"
+            | "node_control_state"
+            | "node_lease_fence_current"
+            | "node_version"
+          >
+        | undefined;
+      if (
+        !current ||
+        current.status !== "running" ||
+        current.interrupt_requested_at !== null ||
+        current.work_item_control_state !== "active" ||
+        current.current_plan_revision !== row.plan_revision ||
+        current.node_active !== 1 ||
+        current.node_control_state !== "active" ||
+        current.run_version !== row.run_version ||
+        current.node_version !== row.node_version ||
+        current.instance_owner !== row.instance_owner ||
+        current.instance_fence !== row.instance_fence ||
+        current.node_lease_fence !== row.node_lease_fence ||
+        current.node_lease_fence_current !== row.node_lease_fence_current
+      ) {
+        this.database.exec("COMMIT");
+        return {
+          runId: row.id,
+          classification: "unsafe_to_retry",
+          nextAction: "none",
+          reason: "state_changed_during_recovery",
+        };
+      }
       const runStatus =
         classification === "candidate_produced"
           ? "succeeded"
@@ -185,13 +272,15 @@ export class RecoveryCoordinator {
             : classification === "needs_configuration"
               ? "needs_configuration"
               : null;
-      this.database
+      const runUpdated = this.database
         .prepare(
           "UPDATE collaboration_runs SET recovery_state = ?, result_sha = COALESCE(?, result_sha), " +
             "status = COALESCE(?, status), finished_at = CASE WHEN ? IS NULL THEN finished_at ELSE ? END, " +
-            "error = ? WHERE id = ? AND status = 'running'",
+            "error = ?, version = version + 1 WHERE id = ? AND status = 'running' " +
+            "AND interrupt_requested_at IS NULL AND version = ?",
         )
-        .run(classification, resultSha ?? null, runStatus, runStatus, now, reason, row.id);
+        .run(classification, resultSha ?? null, runStatus, runStatus, now, reason, row.id, row.run_version);
+      if (runUpdated.changes !== 1) throw new StaleFenceError("Recovery run CAS is stale");
       const runtimeState =
         classification === "candidate_produced"
           ? "validating"
@@ -202,21 +291,45 @@ export class RecoveryCoordinator {
               : classification === "unsafe_to_retry"
                 ? "failed"
                 : "running";
-      this.database
+      const nodeUpdated = this.database
         .prepare(
           "UPDATE collaboration_work_nodes SET runtime_state = ?, execution_status = CASE " +
             "WHEN ? = 'candidate_produced' THEN 'running' " +
             "WHEN ? = 'interrupted' THEN 'not_started' " +
             "WHEN ? = 'needs_configuration' THEN 'needs_configuration' ELSE execution_status END, " +
-            "lease_owner = NULL, lease_expires_at = NULL " +
+            "lease_owner = CASE WHEN ? = 'resumable' THEN lease_owner ELSE NULL END, " +
+            "lease_expires_at = CASE WHEN ? = 'resumable' THEN lease_expires_at ELSE NULL END, " +
+            "version = version + 1 " +
             "WHERE work_item_id = ? AND plan_revision = ? AND node_id = ? " +
-            "AND active = 1 AND control_state = 'active'",
+            "AND active = 1 AND control_state = 'active' AND version = ? " +
+            "AND lease_fence IS ?",
         )
-        .run(runtimeState, classification, classification, classification, row.work_item_id, row.plan_revision, row.node_id);
+        .run(
+          runtimeState,
+          classification,
+          classification,
+          classification,
+          classification,
+          classification,
+          row.work_item_id,
+          row.plan_revision,
+          row.node_id,
+          row.node_version,
+          row.node_lease_fence_current,
+        );
+      if (nodeUpdated.changes !== 1) throw new StaleFenceError("Recovery node CAS is stale");
       this.database.exec("COMMIT");
       return { runId: row.id, classification, nextAction, reason };
     } catch (error) {
       this.database.exec("ROLLBACK");
+      if (error instanceof StaleFenceError) {
+        return {
+          runId: row.id,
+          classification: "unsafe_to_retry",
+          nextAction: "none",
+          reason: "state_changed_during_recovery",
+        };
+      }
       throw error;
     }
   }

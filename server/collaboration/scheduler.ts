@@ -54,8 +54,6 @@ export class FencedScheduler {
       workItemId: input.workItemId,
       now: input.now,
     });
-    const provider = this.circuits.allowDispatch(instance, input.providerId, input.now);
-    if (!provider.allowed) return null;
     const nodeLease = this.nodes.claim(instance, {
       workItemId: input.workItemId,
       planRevision: input.planRevision,
@@ -64,6 +62,17 @@ export class FencedScheduler {
       ttlMs: input.nodeLeaseTtlMs,
     });
     if (!nodeLease) return null;
+    let provider: ReturnType<ProviderCircuitBreaker["allowDispatch"]>;
+    try {
+      provider = this.circuits.allowDispatch(instance, input.providerId, input.now);
+    } catch (error) {
+      this.nodes.release(instance, nodeLease, input.now);
+      throw error;
+    }
+    if (!provider.allowed) {
+      this.nodes.release(instance, nodeLease, input.now);
+      return null;
+    }
     return { nodeLease, providerId: input.providerId, halfOpenProbe: provider.probe };
   }
 
@@ -78,7 +87,8 @@ export class FencedScheduler {
       assertCurrentInstanceLease(this.database, instance, now);
       const updated = this.database
         .prepare(
-          "UPDATE collaboration_work_nodes SET runtime_state = ?, lease_owner = NULL, lease_expires_at = NULL " +
+          "UPDATE collaboration_work_nodes SET runtime_state = ?, lease_owner = NULL, lease_expires_at = NULL, " +
+            "version = version + 1 " +
             "WHERE work_item_id = ? AND plan_revision = ? AND node_id = ? " +
             "AND lease_owner = ? AND lease_fence = ? AND lease_expires_at > ?",
         )

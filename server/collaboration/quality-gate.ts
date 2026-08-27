@@ -1,8 +1,10 @@
+import { randomBytes } from "node:crypto";
 import { realpathSync } from "node:fs";
 import { isAbsolute, relative, resolve, sep } from "node:path";
 
 import {
   type ContainmentPort,
+  type ContainmentBinding,
   type ContainmentProof,
   verifyContainmentProof,
 } from "./containment.ts";
@@ -36,6 +38,8 @@ export interface SandboxedCommandRequest {
     deniedPaths: string[];
     network: "deny";
   };
+  containmentBinding: ContainmentBinding;
+  registerContainment(proof: ContainmentProof): Promise<void>;
 }
 
 export interface SandboxedCommandResult {
@@ -61,6 +65,8 @@ export interface TestEvidence {
   stdout: string;
   stderr: string;
   state: "target_passed" | "failed" | "timeout" | "output_limit";
+  containmentFingerprint: string;
+  containmentBinding: ContainmentBinding;
 }
 
 export type CandidateQualityState =
@@ -100,7 +106,14 @@ export function validateTargetCommandSpec(commandId: string, spec: TargetCommand
   if (spec.timeoutMs <= 0 || spec.maxOutputBytes <= 0) throw new Error(`Target command ${commandId} limits are invalid`);
 }
 
-function evidence(commandId: string, cwd: string, spec: TargetCommandSpec, result: SandboxedCommandResult): TestEvidence {
+function evidence(
+  commandId: string,
+  cwd: string,
+  spec: TargetCommandSpec,
+  result: SandboxedCommandResult,
+  containmentFingerprint: string,
+  containmentBinding: ContainmentBinding,
+): TestEvidence {
   return {
     commandId,
     argv: [...spec.argv],
@@ -116,6 +129,8 @@ function evidence(commandId: string, cwd: string, spec: TargetCommandSpec, resul
         : result.exitCode === 0
           ? "target_passed"
           : "failed",
+    containmentFingerprint,
+    containmentBinding,
   };
 }
 
@@ -127,6 +142,7 @@ export async function runTargetTests(input: {
   runner: SandboxedCommandRunner | undefined;
   deniedPaths: readonly string[];
   containment: ContainmentPort;
+  containmentContext: Omit<ContainmentBinding, "commandId" | "nonce">;
 }): Promise<{ evidence: TestEvidence[]; configurationProblems: string[] }> {
   const root = realpathSync(input.worktree);
   const results: TestEvidence[] = [];
@@ -142,6 +158,13 @@ export async function runTargetTests(input: {
     validateTargetCommandSpec(commandId, spec);
     const cwd = realpathSync(resolve(root, spec.cwd ?? "."));
     if (!contained(root, cwd)) throw new Error(`Target command ${commandId} cwd escaped the worktree`);
+    const containmentBinding: ContainmentBinding = {
+      ...input.containmentContext,
+      commandId,
+      canonicalWorktreePath: root,
+      nonce: randomBytes(32).toString("base64url"),
+    };
+    let registeredFingerprint: string | null = null;
     const result = await input.runner.run({
       commandId,
       argv: spec.argv,
@@ -150,6 +173,15 @@ export async function runTargetTests(input: {
       timeoutMs: spec.timeoutMs,
       maxOutputBytes: spec.maxOutputBytes,
       sandbox: { writableRoot: root, deniedPaths, network: "deny" },
+      containmentBinding,
+      registerContainment: async (proof) => {
+        const verified = await verifyContainmentProof(input.containment, proof, containmentBinding);
+        if (!verified.verified) throw new Error(`containment registration rejected for command: ${commandId}`);
+        if (registeredFingerprint !== null && registeredFingerprint !== verified.fingerprint) {
+          throw new Error(`containment registration changed for command: ${commandId}`);
+        }
+        registeredFingerprint = verified.fingerprint;
+      },
     });
     const attestedDenied = [...new Set(result.attestation.deniedPaths.map((path) => realpathSync(path)))].sort();
     if (
@@ -164,9 +196,13 @@ export async function runTargetTests(input: {
       break;
     }
     const proof = result.attestation.containmentProof ?? null;
-    const verified = await verifyContainmentProof(input.containment, proof);
+    const verified = await verifyContainmentProof(input.containment, proof, containmentBinding);
     if (!verified.verified || !proof) {
       configurationProblems.push(`containment proof rejected for command: ${commandId}`);
+      break;
+    }
+    if (registeredFingerprint !== verified.fingerprint) {
+      configurationProblems.push(`containment not registered for command: ${commandId}`);
       break;
     }
     const inspected = await input.containment.inspect(proof.identity);
@@ -174,7 +210,7 @@ export async function runTargetTests(input: {
       configurationProblems.push(`containment not empty for command: ${commandId}`);
       break;
     }
-    results.push(evidence(commandId, cwd, spec, result));
+    results.push(evidence(commandId, cwd, spec, result, verified.fingerprint, containmentBinding));
     if (results.at(-1)?.state !== "target_passed") break;
   }
   return { evidence: results, configurationProblems };

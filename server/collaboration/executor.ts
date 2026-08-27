@@ -1,10 +1,14 @@
-import { randomUUID } from "node:crypto";
+import { randomBytes, randomUUID } from "node:crypto";
 import { realpathSync } from "node:fs";
 import { dirname } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 
 import { appendExecutionAudit } from "./audit.ts";
-import { type ContainmentPort, verifyContainmentProof } from "./containment.ts";
+import {
+  type ContainmentBinding,
+  type ContainmentPort,
+  verifyContainmentProof,
+} from "./containment.ts";
 import { CollaborationDegradationController } from "./degradation.ts";
 import type { RuntimeReadiness } from "./degradation.ts";
 import {
@@ -139,7 +143,25 @@ export class CandidateExecutor {
       attempt,
       expectedBaseSha: configured.baseSha,
     });
-    this.startRun({ runId, workItemId, attempt, node, threadId, turnId, worktree, instance, now });
+    const containmentBinding: ContainmentBinding = {
+      runId,
+      canonicalWorktreePath: realpathSync(worktree.path),
+      instanceOwner: instance.ownerId,
+      instanceFence: instance.fence,
+      nonce: randomBytes(32).toString("base64url"),
+    };
+    this.startRun({
+      runId,
+      workItemId,
+      attempt,
+      node,
+      threadId,
+      turnId,
+      worktree,
+      instance,
+      containmentBinding,
+      now,
+    });
 
     const controller = new AbortController();
     let eventBytes = 0;
@@ -175,11 +197,20 @@ export class CandidateExecutor {
         denyGitMetadata: true,
         network: "deny",
       },
+      containmentBinding,
       signal: controller.signal,
       registerContainment: async (proof) => {
-        const verified = await verifyContainmentProof(this.options.containment, proof);
+        const verified = await verifyContainmentProof(this.options.containment, proof, containmentBinding);
         if (!verified.verified) throw new Error("Provider containment proof was rejected");
-        this.recordVerifiedContainment(runId, proof, instance, Date.now(), "verified");
+        this.recordVerifiedContainment(
+          runId,
+          proof,
+          verified.fingerprint,
+          containmentBinding,
+          instance,
+          Date.now(),
+          "verified",
+        );
       },
       emit: (event) => {
         if (!acceptingEvents || !eventBelongsToRun(event, { threadId, turnId })) return;
@@ -287,7 +318,11 @@ export class CandidateExecutor {
     if (result.status !== "completed") {
       return this.finalizeWithoutCandidate(runId, workItemId, node, worktree, "failed", [result.message ?? "agent_failed"], now);
     }
-    const containment = await verifyContainmentProof(this.options.containment, result.containmentProof ?? null);
+    const containment = await verifyContainmentProof(
+      this.options.containment,
+      result.containmentProof ?? null,
+      containmentBinding,
+    );
     if (!containment.verified || !result.containmentProof) {
       return this.finalizeWithoutCandidate(
         runId,
@@ -296,6 +331,17 @@ export class CandidateExecutor {
         worktree,
         "needs_configuration",
         ["reason" in containment ? containment.reason : "containment_proof_missing"],
+        now,
+      );
+    }
+    if (!this.isRegisteredContainment(runId, containment.fingerprint, containmentBinding)) {
+      return this.finalizeWithoutCandidate(
+        runId,
+        workItemId,
+        node,
+        worktree,
+        "needs_configuration",
+        ["provider_containment_not_registered"],
         now,
       );
     }
@@ -311,7 +357,15 @@ export class CandidateExecutor {
         now,
       );
     }
-    this.recordVerifiedContainment(runId, result.containmentProof, instance, Date.now(), "empty");
+    this.recordVerifiedContainment(
+      runId,
+      result.containmentProof,
+      containment.fingerprint,
+      containmentBinding,
+      instance,
+      Date.now(),
+      "empty",
+    );
 
     await this.worktrees.assertOriginalUnchanged(worktree);
     if ((await this.worktrees.currentHead(worktree)) !== worktree.baseSha) {
@@ -369,6 +423,12 @@ export class CandidateExecutor {
         commands: configured.targetCommands,
         runner: this.options.commandRunner,
         containment: this.options.containment,
+        containmentContext: {
+          runId,
+          canonicalWorktreePath: containmentBinding.canonicalWorktreePath,
+          instanceOwner: instance.ownerId,
+          instanceFence: instance.fence,
+        },
         deniedPaths: [worktree.commonGitDir, worktree.repository, this.serviceDataDirectory],
       });
       testEvidence = tests.evidence;
@@ -486,6 +546,7 @@ export class CandidateExecutor {
     turnId: string;
     worktree: ManagedWorktree;
     instance: InstanceLease;
+    containmentBinding: ContainmentBinding;
     now: number;
   }): void {
     this.database.exec("BEGIN IMMEDIATE");
@@ -497,7 +558,7 @@ export class CandidateExecutor {
       const claimed = this.database
         .prepare(
           "UPDATE collaboration_work_nodes SET lease_owner = ?, lease_expires_at = ?, " +
-            "lease_fence = COALESCE(lease_fence, 0) + 1, runtime_state = 'running' " +
+            "lease_fence = COALESCE(lease_fence, 0) + 1, runtime_state = 'running', version = version + 1 " +
             "WHERE work_item_id = ? AND plan_revision = ? AND node_id = ? AND active = 1 " +
             "AND control_state = 'active' AND (lease_expires_at IS NULL OR lease_expires_at <= ?)",
         )
@@ -520,8 +581,8 @@ export class CandidateExecutor {
         .prepare(
           "INSERT INTO collaboration_runs " +
             "(id, work_item_id, plan_revision, node_id, attempt, agent_id, thread_id, turn_id, status, repository_path, " +
-            "worktree_path, branch, base_sha, started_at, instance_owner, instance_fence, node_lease_fence, heartbeat_at) " +
-            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'running', ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            "worktree_path, branch, base_sha, started_at, instance_owner, instance_fence, node_lease_fence, heartbeat_at, " +
+            "containment_binding_json) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'running', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
         )
         .run(
           input.runId,
@@ -541,12 +602,14 @@ export class CandidateExecutor {
           input.instance.fence,
           nodeLease.lease_fence,
           input.now,
+          JSON.stringify(input.containmentBinding),
         );
       this.database
         .prepare(
           "UPDATE collaboration_work_nodes SET execution_status = CASE " +
             "WHEN node_type = 'analyze' THEN 'candidate_ready' WHEN node_type = 'modify' THEN 'running' " +
-            "ELSE execution_status END WHERE work_item_id = ? AND plan_revision = ? AND active = 1",
+            "ELSE execution_status END, version = version + 1 " +
+            "WHERE work_item_id = ? AND plan_revision = ? AND active = 1",
         )
         .run(input.workItemId, input.node.current_plan_revision);
       appendExecutionAudit(this.database, {
@@ -646,7 +709,8 @@ export class CandidateExecutor {
               : "succeeded";
       const released = this.database
         .prepare(
-          "UPDATE collaboration_work_nodes SET runtime_state = ?, lease_owner = NULL, lease_expires_at = NULL " +
+          "UPDATE collaboration_work_nodes SET runtime_state = ?, lease_owner = NULL, lease_expires_at = NULL, " +
+            "version = version + 1 " +
             "WHERE work_item_id = ? AND plan_revision = ? AND node_id = ? " +
             "AND lease_owner = ? AND lease_fence = ?",
         )
@@ -660,7 +724,10 @@ export class CandidateExecutor {
         );
       if (released.changes !== 1) throw new Error("Run node lease is stale");
       this.database
-        .prepare("UPDATE collaboration_runs SET status = ?, result_sha = ?, finished_at = ?, error = ? WHERE id = ?")
+        .prepare(
+          "UPDATE collaboration_runs SET status = ?, result_sha = ?, finished_at = ?, error = ?, " +
+            "version = version + 1 WHERE id = ?",
+        )
         .run(runStatus, resultSha, Date.now(), effectiveReport.reasons.join("; ") || null, runId);
       this.database
         .prepare(
@@ -681,8 +748,8 @@ export class CandidateExecutor {
         );
       const insertEvidence = this.database.prepare(
         "INSERT INTO collaboration_test_evidence " +
-          "(id, run_id, command_id, argv_json, cwd, exit_code, duration_ms, stdout, stderr, state, created_at) " +
-          "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+          "(id, run_id, command_id, argv_json, cwd, exit_code, duration_ms, stdout, stderr, state, created_at, " +
+          "containment_fingerprint, containment_binding_json) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
       );
       for (const item of evidence) {
         insertEvidence.run(
@@ -697,6 +764,8 @@ export class CandidateExecutor {
           item.stderr,
           item.state,
           now,
+          item.containmentFingerprint,
+          JSON.stringify(item.containmentBinding),
         );
       }
       let executionStatus =
@@ -715,7 +784,7 @@ export class CandidateExecutor {
         .prepare(
           "UPDATE collaboration_work_nodes SET execution_status = CASE " +
             "WHEN node_type IN ('modify', 'validate', 'report') THEN ? ELSE execution_status END " +
-            "WHERE work_item_id = ? AND plan_revision = ? AND active = 1",
+            ", version = version + 1 WHERE work_item_id = ? AND plan_revision = ? AND active = 1",
         )
         .run(executionStatus, workItemId, node.current_plan_revision);
       appendExecutionAudit(this.database, {
@@ -748,6 +817,8 @@ export class CandidateExecutor {
   private recordVerifiedContainment(
     runId: string,
     proof: NonNullable<AgentRunResult["containmentProof"]>,
+    fingerprint: string,
+    binding: ContainmentBinding,
     instance: Pick<InstanceLease, "ownerId" | "fence">,
     now: number,
     containmentState: "verified" | "empty",
@@ -757,15 +828,39 @@ export class CandidateExecutor {
       assertCurrentInstanceLease(this.database, instance, now);
       const result = this.database
         .prepare(
-          "UPDATE collaboration_runs SET runtime_identity_json = ?, containment_state = ?, heartbeat_at = ? " +
-            "WHERE id = ? AND status = 'running' AND instance_owner = ? AND instance_fence = ?",
+          "UPDATE collaboration_runs SET runtime_identity_json = ?, containment_state = ?, heartbeat_at = ?, " +
+            "containment_fingerprint = COALESCE(containment_fingerprint, ?), version = version + 1 " +
+            "WHERE id = ? AND status = 'running' AND instance_owner = ? AND instance_fence = ? " +
+            "AND containment_binding_json = ? " +
+            "AND (containment_fingerprint IS NULL OR containment_fingerprint = ?)",
         )
-        .run(JSON.stringify(proof), containmentState, now, runId, instance.ownerId, instance.fence);
+        .run(
+          JSON.stringify(proof),
+          containmentState,
+          now,
+          fingerprint,
+          runId,
+          instance.ownerId,
+          instance.fence,
+          JSON.stringify(binding),
+          fingerprint,
+        );
       if (result.changes !== 1) throw new Error("Run containment update is stale");
       this.database.exec("COMMIT");
     } catch (error) {
       this.database.exec("ROLLBACK");
       throw error;
     }
+  }
+
+  private isRegisteredContainment(runId: string, fingerprint: string, binding: ContainmentBinding): boolean {
+    return Boolean(
+      this.database
+        .prepare(
+          "SELECT 1 FROM collaboration_runs WHERE id = ? AND status = 'running' " +
+            "AND containment_fingerprint = ? AND containment_binding_json = ?",
+        )
+        .get(runId, fingerprint, JSON.stringify(binding)),
+    );
   }
 }

@@ -154,7 +154,7 @@ export class NodeLeaseCoordinator {
       const result = this.database
         .prepare(
           "UPDATE collaboration_work_nodes SET lease_owner = ?, lease_expires_at = ?, " +
-            "lease_fence = COALESCE(lease_fence, 0) + 1, runtime_state = 'leased' " +
+            "lease_fence = COALESCE(lease_fence, 0) + 1, runtime_state = 'leased', version = version + 1 " +
             "WHERE work_item_id = ? AND plan_revision = ? AND node_id = ? AND active = 1 " +
             "AND control_state = 'active' AND status = 'ready' " +
             "AND (lease_expires_at IS NULL OR lease_expires_at <= ?)",
@@ -205,7 +205,7 @@ export class NodeLeaseCoordinator {
     assertCurrentInstanceLease(this.database, instance, now);
     const result = this.database
       .prepare(
-        "UPDATE collaboration_work_nodes SET lease_expires_at = ? " +
+        "UPDATE collaboration_work_nodes SET lease_expires_at = ?, version = version + 1 " +
           "WHERE work_item_id = ? AND plan_revision = ? AND node_id = ? " +
           "AND lease_owner = ? AND lease_fence = ? AND lease_expires_at > ?",
       )
@@ -220,5 +220,29 @@ export class NodeLeaseCoordinator {
       );
     if (result.changes !== 1) throw new StaleFenceError("Node lease is stale");
     return { ...lease, expiresAt: now + ttlMs };
+  }
+
+  release(
+    instance: Pick<InstanceLease, "ownerId" | "fence">,
+    lease: NodeLease,
+    now: number,
+  ): void {
+    this.database.exec("BEGIN IMMEDIATE");
+    try {
+      assertCurrentInstanceLease(this.database, instance, now);
+      const result = this.database
+        .prepare(
+          "UPDATE collaboration_work_nodes SET lease_owner = NULL, lease_expires_at = NULL, " +
+            "runtime_state = 'dormant', version = version + 1 " +
+            "WHERE work_item_id = ? AND plan_revision = ? AND node_id = ? " +
+            "AND lease_owner = ? AND lease_fence = ?",
+        )
+        .run(lease.workItemId, lease.planRevision, lease.nodeId, lease.ownerId, lease.fence);
+      if (result.changes !== 1) throw new StaleFenceError("Node lease release is stale");
+      this.database.exec("COMMIT");
+    } catch (error) {
+      this.database.exec("ROLLBACK");
+      throw error;
+    }
   }
 }

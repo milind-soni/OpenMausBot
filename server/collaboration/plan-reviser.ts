@@ -376,7 +376,8 @@ export class PlanningCoordinator {
         }
         this.database
           .prepare(
-            "UPDATE collaboration_work_nodes SET active = 0 WHERE work_item_id = ? AND plan_revision = ?",
+            "UPDATE collaboration_work_nodes SET active = 0, version = version + 1 " +
+              "WHERE work_item_id = ? AND plan_revision = ?",
           )
           .run(workItemId, previousPlan.revision);
       }
