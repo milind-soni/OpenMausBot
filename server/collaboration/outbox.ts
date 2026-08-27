@@ -1,0 +1,103 @@
+import { randomUUID } from "node:crypto";
+import type { DatabaseSync } from "node:sqlite";
+
+import type { InboundCard } from "./message-renderer.ts";
+
+export interface CollaborationOutboxEntry {
+  id: string;
+  source: "dingtalk";
+  sourceEventId: string;
+  aggregateType: "work_item" | "association";
+  aggregateId: string;
+  aggregateVersion: number;
+  kind: InboundCard["type"];
+  card: InboundCard;
+  createdAt: number;
+  sentAt: number | null;
+}
+
+interface OutboxRow {
+  id: string;
+  source: "dingtalk";
+  source_event_id: string;
+  aggregate_type: "work_item" | "association";
+  aggregate_id: string;
+  aggregate_version: number;
+  kind: InboundCard["type"];
+  payload_json: string;
+  created_at: number;
+  sent_at: number | null;
+}
+
+function rowToEntry(row: OutboxRow): CollaborationOutboxEntry {
+  return {
+    id: row.id,
+    source: row.source,
+    sourceEventId: row.source_event_id,
+    aggregateType: row.aggregate_type,
+    aggregateId: row.aggregate_id,
+    aggregateVersion: row.aggregate_version,
+    kind: row.kind,
+    card: JSON.parse(row.payload_json) as InboundCard,
+    createdAt: row.created_at,
+    sentAt: row.sent_at,
+  };
+}
+
+export function enqueueInboundCard(
+  database: DatabaseSync,
+  input: {
+    sourceEventId: string;
+    aggregateType: "work_item" | "association";
+    aggregateId: string;
+    aggregateVersion: number;
+    card: InboundCard;
+    now: number;
+  },
+): CollaborationOutboxEntry {
+  const id = randomUUID();
+  database
+    .prepare(
+      "INSERT INTO collaboration_outbox " +
+        "(id, source, source_event_id, aggregate_type, aggregate_id, aggregate_version, kind, dedupe_key, payload_json, created_at) " +
+        "VALUES (?, 'dingtalk', ?, ?, ?, ?, ?, ?, ?, ?)",
+    )
+    .run(
+      id,
+      input.sourceEventId,
+      input.aggregateType,
+      input.aggregateId,
+      input.aggregateVersion,
+      input.card.type,
+      `dingtalk:event:${input.sourceEventId}:ack`,
+      JSON.stringify(input.card),
+      input.now,
+    );
+  return {
+    id,
+    source: "dingtalk",
+    sourceEventId: input.sourceEventId,
+    aggregateType: input.aggregateType,
+    aggregateId: input.aggregateId,
+    aggregateVersion: input.aggregateVersion,
+    kind: input.card.type,
+    card: input.card,
+    createdAt: input.now,
+    sentAt: null,
+  };
+}
+
+export function outboxEntryForEvent(database: DatabaseSync, sourceEventId: string): CollaborationOutboxEntry {
+  const row = database
+    .prepare("SELECT * FROM collaboration_outbox WHERE source = 'dingtalk' AND source_event_id = ?")
+    .get(sourceEventId) as OutboxRow | undefined;
+  if (!row) throw new Error(`Missing acknowledgement outbox entry for ${sourceEventId}`);
+  return rowToEntry(row);
+}
+
+export function listPendingOutbox(database: DatabaseSync): CollaborationOutboxEntry[] {
+  const rows = database
+    .prepare("SELECT * FROM collaboration_outbox WHERE sent_at IS NULL ORDER BY created_at, id")
+    .all() as unknown as OutboxRow[];
+  return rows.map(rowToEntry);
+}

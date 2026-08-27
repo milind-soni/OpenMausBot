@@ -1,7 +1,7 @@
 # [002] Create Work Item from message
 
 **Type**: AFK  
-**Status**: TODO  
+**Status**: DONE
 **Blocked by**: `docs/issues/dingtalk-concurrent-ai-development/001-establish-runnable-project-baseline.md`  
 **PRD**: `dingtalk-concurrent-ai-development-prd.md`
 
@@ -19,11 +19,18 @@ Deliver the first user-visible path through a fake DingTalk adapter: accept an e
 
 ## 完成信号
 
-- [ ] Duplicate inbound identifiers produce one durable event and one observable acknowledgement outcome.
-- [ ] Explicit references deterministically update the referenced Work Item.
-- [ ] Ambiguous association leaves work blocked until a user selects an outcome.
-- [ ] The Work Item state and outbound status update commit atomically from the user's perspective.
-- [ ] Unresolved identities cannot perform any privileged state transition.
+- [x] Duplicate inbound identifiers produce one durable event and one observable acknowledgement outcome.
+- [x] Explicit references deterministically update the referenced Work Item.
+- [x] Ambiguous association leaves work blocked until a user selects an outcome.
+- [x] The Work Item state and outbound status update commit atomically from the user's perspective.
+- [x] Unresolved identities cannot perform any privileged state transition.
+
+## Completion evidence
+
+- Migration v2 adds separate Principal aliases, conversation aliases, external business/transport IDs, Work Items, append-only contributions, association options and transactional outbox records.
+- `server/collaboration/inbound.test.ts` covers explicitly addressed creation, received-only wording, business-event deduplication across transport redelivery IDs, explicit ID and reply-chain association, ambiguity without candidate mutation, resolved/unresolved Principal behavior, fake transport ignore behavior, and full transaction rollback when outbox persistence fails.
+- Ticket 001 Ledger and Headless service regression suites remain green after the forward migration from schema version 1 to 2.
+- Focused strict TypeScript validation passes for every ticket 002 implementation and test file.
 
 ## User stories addressed
 
@@ -33,4 +40,3 @@ Deliver the first user-visible path through a fake DingTalk adapter: accept an e
 ## Background hints
 
 Model inbound transport IDs, business event IDs, identity aliases, and conversation aliases separately.
-

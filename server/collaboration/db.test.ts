@@ -25,8 +25,8 @@ describe("collaboration ledger", () => {
     const ledger = openCollaborationLedger(directory);
     expect(ledger.databaseHealth()).toEqual({
       file: COLLABORATION_DATABASE_NAME,
-      schemaVersion: 1,
-      appliedMigrations: 1,
+      schemaVersion: 2,
+      appliedMigrations: 2,
       journalMode: "wal",
       foreignKeys: true,
     });
@@ -50,17 +50,17 @@ describe("collaboration ledger", () => {
     const before = new DatabaseSync(join(directory, COLLABORATION_DATABASE_NAME));
     const initialMigration = before
       .prepare("SELECT version, name, checksum, applied_at FROM collaboration_schema_migrations")
-      .get();
+      .all();
     const initialMetadata = before.prepare("SELECT * FROM collaboration_ledger_metadata").get();
     before.close();
 
     const second = openCollaborationLedger(directory);
-    expect(second.migrationState).toEqual({ schemaVersion: 1, appliedMigrations: 1 });
+    expect(second.migrationState).toEqual({ schemaVersion: 2, appliedMigrations: 2 });
     second.close();
 
     const after = new DatabaseSync(join(directory, COLLABORATION_DATABASE_NAME));
-    expect(after.prepare("SELECT count(*) AS count FROM collaboration_schema_migrations").get()).toEqual({ count: 1 });
-    expect(after.prepare("SELECT version, name, checksum, applied_at FROM collaboration_schema_migrations").get()).toEqual(
+    expect(after.prepare("SELECT count(*) AS count FROM collaboration_schema_migrations").get()).toEqual({ count: 2 });
+    expect(after.prepare("SELECT version, name, checksum, applied_at FROM collaboration_schema_migrations").all()).toEqual(
       initialMigration,
     );
     expect(after.prepare("SELECT * FROM collaboration_ledger_metadata").get()).toEqual(initialMetadata);
