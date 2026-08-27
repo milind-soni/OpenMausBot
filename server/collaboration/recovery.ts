@@ -8,6 +8,7 @@ import {
   verifyContainmentProof,
 } from "./containment.ts";
 import { assertCurrentInstanceLease, type InstanceLease, StaleFenceError } from "./leases.ts";
+import { assertLedgerArmed } from "./restore-guard.ts";
 
 export type RecoveryClassification =
   | "resumable"
@@ -107,6 +108,7 @@ export class RecoveryCoordinator {
 
   async scan(instance: Pick<InstanceLease, "ownerId" | "fence">, now: number): Promise<RecoveryDecision[]> {
     assertCurrentInstanceLease(this.database, instance, now);
+    assertLedgerArmed(this.database);
     const rows = this.database
       .prepare(
         "SELECT r.id, r.work_item_id, r.plan_revision, r.node_id, r.attempt, r.worktree_path, r.base_sha, " +
