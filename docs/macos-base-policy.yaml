@@ -1,0 +1,44 @@
+# OpenMausBot macOS base policy for CUA Driver 0.20.0.
+#
+# This is the stable tool ceiling. The active version-3 capability manifest
+# intersects it at runtime and supplies the per-task application, file, and
+# browser-origin boundary. A tool must pass both layers.
+allow:
+  tools:
+    - start_session
+    - end_session
+    - launch_app
+    - list_windows
+    - get_window_state
+    - click
+    - double_click
+    - right_click
+    - drag
+    - scroll
+    - press_key
+    - hotkey
+    - set_value
+    - wait
+    - bring_to_front
+    - browser_prepare
+    - get_browser_state
+    - browser_navigate
+    - browser_click
+    - browser_type
+  rules:
+    - tool: type_text
+      constraints:
+        text:
+          max_length: 4096
+deny:
+  tools:
+    - shell_execute
+    - run_javascript
+    - execute_javascript
+    - page
+    - get_desktop_state
+    - get_accessibility_tree
+    - browser_download
+    - install_ffmpeg
+    - kill_app
+    - start_recording

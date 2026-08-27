@@ -32,6 +32,7 @@ import { LocalScreenPreview } from "./LocalScreenPreview";
 import { LinuxLocalControl } from "./LinuxLocalControl";
 import { MacLocalControl } from "./MacLocalControl";
 import { LocalComputerAutoWarning } from "./LocalComputerAutoWarning";
+import { WorkerPicker } from "./WorkerPicker";
 import {
   autoSelectsLocalComputer,
   instanceSupportsLocalComputer,
@@ -1060,6 +1061,7 @@ export function ComputerPanel({ bot }: { bot: Bot }) {
                 ["cloud", "Cloud"],
                 ["vm", "Local VM"],
                 ["local", "This computer"],
+                ["worker", "Worker"],
                 ["off", "Off"],
               ] as const
             ).map(([mode, label], i) => (
@@ -1067,9 +1069,12 @@ export function ComputerPanel({ bot }: { bot: Bot }) {
                 const disabled =
                   (mode === "cloud" && !cloudSupported) ||
                   (mode === "vm" && !vmSupported) ||
+                  (mode === "worker" && !vmSupported) ||
                   (mode === "local" && !localSelectable);
                 const unavailableTitle =
-                  mode === "vm" && !vmSupported
+                  mode === "worker" && !vmSupported
+                    ? "This model engine cannot use a remote worker"
+                  : mode === "vm" && !vmSupported
                     ? "This model engine cannot use the Local VM"
                     : mode === "cloud" && !cloudSupported
                       ? "This model engine cannot use cloud computer tools"
@@ -1084,7 +1089,9 @@ export function ComputerPanel({ bot }: { bot: Bot }) {
                 onClick={() => {
                   if (mode === bot.computer) return;
                   if (mode === "local" && bot.autoApprove) setLocalAutoWarning(true);
-                  else dispatch({ type: "updateBot", botId: bot.id, patch: { computer: mode } });
+                  else if (mode === "worker" && bot.autoApprove) {
+                    dispatch({ type: "updateBot", botId: bot.id, patch: { computer: mode, autoApprove: false } });
+                  } else dispatch({ type: "updateBot", botId: bot.id, patch: { computer: mode } });
                 }}
                 className={cn(
                   "flex-1 py-1.5 text-[13px]",
@@ -1101,6 +1108,12 @@ export function ComputerPanel({ bot }: { bot: Bot }) {
               })()
             ))}
           </div>
+          {bot.computer === "worker" && (
+            <WorkerPicker
+              selectedWorkerId={bot.workerId}
+              onSelect={(workerId) => dispatch({ type: "updateBot", botId: bot.id, patch: { workerId } })}
+            />
+          )}
           {(!bot.computer || bot.computer === "cloud") && (
             <>
               <CloudBackendPicker

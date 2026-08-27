@@ -10,7 +10,8 @@ import { peerAllowKey, type PeerAction } from "./peer-approval-key.ts";
 import { DATA_DIR } from "./config.ts";
 import * as mdb from "./message-db.ts";
 import { workspaceDir } from "./workspace.ts";
-import { newId, type CloudBackend, type ModelSelection, type ThreadId } from "./contracts.ts";
+import { newId, type ApprovalScope, type CloudBackend, type ModelSelection, type ThreadId } from "./contracts.ts";
+import { isValidWorkerId } from "./computer-workers.ts";
 import { pickBotName } from "./names.ts";
 import { redactSecretsInText } from "./redact.ts";
 import { botAvatarProfile, type BotAvatarCrop } from "../shared/bot-avatar.ts";
@@ -50,7 +51,7 @@ export interface OptionCardData {
   /** the narrow grant "always allow" remembers, e.g. "Bash:git" */
   allowKey?: string;
   /** Local actions never share remembered grants with cloud/tool approvals. */
-  approvalScope?: "local-computer";
+  approvalScope?: ApprovalScope;
 }
 
 export interface ConnectorCardData {
@@ -299,9 +300,14 @@ export interface BotRecord {
   modelSelection: ModelSelection;
   /** provider-native continuation per instance (e.g. claude session id) */
   resumeCursors: Record<string, unknown>;
-  /** which computer the bot acts on: its cloud box, this Mac (local CUA),
-   * or none. Unset = auto (box when it exists, else local when available). */
-  computer?: "cloud" | "vm" | "local" | "off";
+  /** which computer the bot acts on: its cloud box, this Mac (local CUA), a
+   * named remote worker (an operator-owned Windows PC or macOS guest), or
+   * none. Unset = auto (box when it exists, else local when available). */
+  computer?: "cloud" | "vm" | "local" | "worker" | "off";
+  /** Which named worker backs `computer: "worker"`. Workers are configured
+   * app-wide in `config.workers`; the bot stores only the id, never the
+   * transport identity. */
+  workerId?: string;
   /** Which cloud computer backs `computer: "cloud"`; absent means Box. */
   cloudBackend?: CloudBackend;
   /** Auto mode may prepare/start this bot's managed VPS container. Off by
@@ -521,6 +527,13 @@ export class Store {
       }
       if (b.autoStartVps !== undefined && b.autoStartVps !== true && b.autoStartVps !== false) {
         delete b.autoStartVps;
+        botsMigrated = true;
+      }
+      // A worker id that is no longer a legal id could never resolve, and
+      // leaving it set would render a bot as assigned to a machine that
+      // cannot be looked up.
+      if (b.workerId !== undefined && !isValidWorkerId(b.workerId)) {
+        delete b.workerId;
         botsMigrated = true;
       }
       const avatar = botAvatarProfile(b);
