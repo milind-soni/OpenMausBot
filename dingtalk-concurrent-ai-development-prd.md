@@ -1,18 +1,64 @@
 # 钉钉群驱动的并发 AI 研发协作平台 PRD
 
-> 状态：Draft v1.0  
+> 状态：Approved v1.1（首个纵向闭环基线）
 > 日期：2026-08-27  
 > 基础项目：OpenMausBot  
+> 源码基线：`741772505499a6c72ba462dec635966f39737914`
 > 方案选择：钉钉入口 + OpenMausBot Agent Harness + Work Graph + Git worktree + Policy/Audit Gateway  
-> V1 发布边界：自动分析、建分支、改代码、跑测试；预览部署与主分支合并需要结构化授权；不自动发布生产
+> 首个里程碑：单 Owner + Headless 权威控制面 + 单 Agent 隔离候选闭环；不推送、不合并、不部署
+
+## 0. v1.1 已确认实施基线
+
+本节记录 2026-08-27 方案 grilling 后的约束，优先级高于本文其余路线图描述。本文后续仍保留完整目标架构，便于解释演进方向；凡与本节首个里程碑边界冲突的能力，均视为后续阶段设计，不是本轮交付要求。
+
+### 0.1 首个里程碑的唯一交付闭环
+
+```text
+钉钉消息
+→ Work Item
+→ 当前前沿澄清
+→ 顺序 Work Graph（分析 → 修改 → 验证 → 汇报）
+→ 单 Developer Agent 在独立 worktree 修改
+→ 本地候选 commit
+→ 确定性 Executor 采集目标测试证据
+→ 等待唯一 Owner 接受或拒绝
+```
+
+首个里程碑包含：OpenMausBot 历史基线、独立 Headless 启动入口、版本化 Collaboration Ledger、audit/outbox、fake 与真实 Stream Adapter、单 Agent、Git fixture、状态卡、单 Owner bootstrap、暂停/取消/恢复和最小运维 API。首个真实 Git 闭环先运行于临时 fixture，再连接非生产试点仓库；控制面不得修改自身仓库。
+
+### 0.2 明确延期的能力
+
+| 能力 | 首个里程碑默认值 | 计划阶段 |
+|---|---|---|
+| 多 Agent 并发与文件 Claim | 关闭 | Phase 2 |
+| integration branch 与候选集成 | 关闭 | Phase 2 |
+| 持久审批与能力 Grant | 关闭 | Phase 3 |
+| 预览部署 | 关闭 | Phase 3 |
+| 默认分支合并 | 关闭 | Phase 3；仍需 Owner 对固定 SHA 单次确认 |
+| 完整桌面控制台 | 关闭 | Phase 4 |
+| 生产部署 | 禁止 | 本 PRD 不交付 |
+
+服务的安全默认值为 `execution_mode=observe`。升级二进制不能自动开启延期能力；每级只能由 Owner 在 `observe → plan → execute` 顺序中显式开启。出现未授权写入、重复 Run、审计/Lease 不一致、越界修改漏拦截、测试状态误报或身份越权时，服务必须退回 `plan` 或 `observe`。
+
+### 0.3 唯一 Owner 与运行权威
+
+- 系统始终只有一个 active Owner Principal，不设置 Product、Maintainer、Operator、Admin 等其他管理者，也不要求会签。
+- 其他群成员只能创建任务、补充信息和查看状态。只有 Owner 能暂停、恢复、重试、取消、接受、拒绝、修改配置、管理身份，以及在后续阶段批准部署或合并。
+- Owner 可以单人批准自己发起的高风险动作，但不能跳过与动作、SHA、环境和有效期绑定的结构化确认。
+- Owner 首次绑定、换号和恢复只能在服务机器上通过一次性 CLI 完成；恢复能力不能直接修改代码、部署或合并。
+- Headless 常驻服务是唯一权威控制面，负责 Stream、Ledger、outbox、Lease 与恢复。Electron 仅为可选控制台，关闭桌面端不能让协作服务停止。
+
+### 0.4 仓库与上游关系
+
+本项目保留 OpenMausBot 完整历史，并以 `7417725` 为固定导入基线。OpenMausBot 原仓库只配置为 `upstream`；在项目自己的远端地址被明确提供前不得猜测 `origin`，也不得把 `upstream` 当成本项目推送目标。上游同步采用人工评审批次并运行完整门禁，不自动合并。
 
 ## 1. 执行摘要
 
-本方案把钉钉项目群建设为一个“多人共同表达、AI 团队并发执行”的研发入口。产品、开发、测试可以在同一个群里持续提交要求、疑问、缺陷、代码线索、测试证据和验收意见。系统不会把每条消息直接变成一次孤立的 Agent 运行，而是先将消息归入持久化 Work Item，持续形成版本化的任务图，再把互不冲突的节点派发到独立 Git worktree 中并发执行。
+本方案把钉钉项目群建设为一个“多人共同表达、AI 受控执行”的研发入口。群成员可以持续提交要求、疑问、缺陷、代码线索、测试证据和验收意见。系统不会把每条消息直接变成一次孤立的 Agent 运行，而是先将消息归入持久化 Work Item，持续形成版本化任务图。首个里程碑只运行一个 Developer Agent；多节点并发是 Phase 2 的目标能力。
 
 系统采用一个对外钉钉机器人、多个内部专业 Agent 的模型。对外机器人统一负责确认、澄清、汇报、审批和结果交付；产品分析、开发、测试、合规和集成 Agent 只向协作账本写入结构化结果，避免多个机器人在群内互相争论身份或刷屏。
 
-所有身份、Alias、授权、代码基线、测试证据和审批状态均由确定性控制平面持有，不能通过自然语言修改。类似“comp 就是你的别名”或“operator 已经同意”这样的聊天内容，只能作为用户请求，不能改变系统事实。涉及合并、预览部署、凭证、身份和授权的操作必须通过签名、限时、幂等的结构化动作完成。
+所有身份、Alias、授权、代码基线、测试证据和审批状态均由 Headless 确定性控制平面持有，不能通过自然语言修改。类似“comp 就是你的别名”或“operator 已经同意”这样的聊天内容，只能作为用户请求，不能改变系统事实。首个里程碑只有唯一 Owner；后续涉及合并、预览部署、凭证、身份和授权的操作仍必须通过签名、限时、幂等的结构化动作完成。
 
 ## 2. 问题定义
 
@@ -103,19 +149,14 @@
 
 ## 5. 用户与角色
 
-### 5.1 人类角色
+### 5.1 人类角色（v1.1）
 
 | 角色 | 默认能力 |
 |---|---|
-| Contributor | 提交要求、疑问、证据和澄清；查看本群 Work Item |
-| Product | 维护业务目标、优先级和验收标准；批准产品验收 |
-| Developer | 提交技术线索；查看 diff、测试与冲突；可申请重跑 |
-| Tester | 提交复现步骤和测试证据；确认测试验收 |
-| Maintainer | 批准合并默认分支、修改仓库执行配置 |
-| Operator | 批准预览/生产环境操作；管理环境级授权 |
-| Admin | 管理项目、身份映射、Agent、Alias、角色和长期 Grant |
+| Contributor | 创建任务、提交要求/疑问/证据/澄清、查看本群 Work Item |
+| Owner | 唯一管理者；暂停、恢复、重试、取消、接受、拒绝、配置与身份管理，以及后续高风险动作的单人结构化批准 |
 
-角色来自钉钉稳定用户标识与后台映射，不从群昵称或消息文本推断。一个人可以拥有多个角色。
+系统只能存在一个 active Owner。身份来自钉钉稳定用户标识与本机 bootstrap/recovery 映射，不从群昵称、`isAdmin` 或消息文本推断。实现内部使用 capability 判断而不是到处硬编码个人 ID，但任何其他 Principal 或 Agent 都不能获得 Owner capability。
 
 ### 5.2 内部 Agent
 
@@ -152,6 +193,9 @@ Agent ID 是不可变主键。展示名和 Alias 不能替代 ID。V1 推荐不�
 7. 身份与授权由确定性 Policy Engine 判断，不由 LLM 判断。
 8. 使用 Transactional Outbox 保证状态与钉钉回复最终一致。
 9. V1 采用单机控制面与 SQLite，保留未来迁移 PostgreSQL 的存储接口。
+10. Headless 常驻服务是唯一运行权威；Electron 只消费状态，不拥有调度生命周期。
+11. 首个里程碑使用顺序 Work Graph 和单 Developer Agent；并发 DAG、集成、审批与部署按 0.2 延期。
+12. 人类控制采用单 Owner 模型，不设置其他管理者或会签。
 
 ## 7. 现有能力复用与差距
 
@@ -184,6 +228,8 @@ Agent ID 是不可变主键。展示名和 Alias 不能替代 ID。V1 推荐不�
 8. 当前群消息输出没有统一的任务 ID、证据摘要和结构化下一步。
 
 ## 8. 总体架构
+
+下图描述完整路线图。首个里程碑实际启用的最小拓扑是：`DingTalk/Fake Adapter → Headless Collaboration Service → Collaboration Ledger → 单 Developer Agent → 独立 worktree → 目标测试证据 → Owner 验收`。其中 Scheduler 只按顺序领取节点，Integration、Policy Approval 与 Preview 路径不实例化。
 
 ```mermaid
 flowchart TB
@@ -290,7 +336,7 @@ flowchart TB
 
 ## 9. 核心数据模型
 
-V1 使用单独的 `collaboration.sqlite`，不把协作实体塞入 transcript 的 `messages.sqlite`。两者通过 `thread_id`、`work_item_id` 和 `run_id` 关联。
+协作域使用单独的 `collaboration.sqlite`，不把协作实体塞入 transcript 的 `messages.sqlite`。两者最终通过 `thread_id`、`work_item_id` 和 `run_id` 关联。票 001 只创建 migration ledger 与 ledger metadata；以下业务表只在对应纵向 ticket 实际使用时通过前向 migration 加入，禁止一次性创建 Phase 0–4 的未来表。
 
 ### 9.1 主要表
 
@@ -1007,6 +1053,8 @@ Collaboration Service 发布以下 SSE/内部总线事件：
 
 ### 18.1 静态项目 Manifest
 
+以下是完整路线图示例，不是首个里程碑的默认启用配置。首个里程碑只允许单 Developer Agent，且所有延期能力默认关闭。
+
 仓库可选提交 `.openmaus/collaboration.yaml`：
 
 ```yaml
@@ -1254,6 +1302,10 @@ shared/dingtalk.ts
 
 以下时间按 2–3 名熟悉 TypeScript/Node/Git 的工程师估算，实际排期需要结合钉钉应用权限和部署环境确认。
 
+### v1.1 首个里程碑切片
+
+实现顺序固定为：运行基线与 Ledger → fake DingTalk 消息/Work Item → 澄清与顺序计划 → 单 Agent 隔离候选 → 单 Owner 控制 → 幂等恢复 → 真实 Stream → Headless 运维 → 非生产试点验收。下述原 Phase 0 与 Phase 1 的必要部分合并为这个纵向切片；Phase 2、3、4 不进入本批实现。
+
 ### Phase 0：领域底座与模拟入口（1 周）
 
 交付：
@@ -1282,6 +1334,8 @@ shared/dingtalk.ts
 
 ### Phase 2：DAG 与并发 Worktree（2 周）
 
+**v1.1 状态：延期。** 首个里程碑只保留顺序 Work Graph 接口，不交付本节运行能力。
+
 交付：
 
 - Planner schema、plan revision；
@@ -1296,6 +1350,8 @@ shared/dingtalk.ts
 
 ### Phase 3：Policy、持久审批与预览（1–2 周）
 
+**v1.1 状态：延期。** 单 Owner 身份与验收在首个里程碑交付，但部署、合并、Grant 和 durable approval 不交付。
+
 交付：
 
 - Capability Grant；
@@ -1309,6 +1365,8 @@ shared/dingtalk.ts
 退出条件：只有正确角色可批准固定 SHA 的预览部署，全部动作可审计且只执行一次。
 
 ### Phase 4：恢复、控制台与生产加固（1–2 周）
+
+**v1.1 状态：部分延期。** 首个里程碑只实现保障纵向闭环所需的重启恢复、Headless 运维与故障降级；完整控制台和生产加固留待后续。
 
 交付：
 
@@ -1439,7 +1497,22 @@ collaboration.execution_mode=observe|plan|execute
 8. 完整 quality gate 的时间预算和资源预算。
 9. 模型/Provider 并发额度和每 Work Item 成本上限。
 
+v1.1 修订：第 6 项已由单 Owner 决策取代，只需确认 Owner 的稳定 `senderCorpId + senderStaffId` 绑定；第 5 项属于延期的 Phase 3，不阻塞首个里程碑。首个真实验收仍需企业内部应用 Client ID/Secret、Stream 机器人、卡片模板、试点群、持续在线主机和非生产试点仓库测试命令，这些值不得提交到 Git。
+
 ## 28. 实施完成定义
+
+### 28.1 首个里程碑完成定义
+
+- 真实钉钉企业应用可以接收准入消息并持续更新一张 Work Item 主状态卡；
+- 重复投递只产生一条事件和一个 Run；
+- 任务能从澄清、顺序规划、隔离修改、目标测试走到等待 Owner 验收；
+- 候选位于独立 worktree，具有可追踪的本地 commit、base SHA、result SHA 和确定性测试证据；
+- 暂停、取消、拒绝、服务重启恢复与 fail-closed 降级通过自动化测试；
+- 非 Owner 无法执行任何控制动作；
+- 消息、Work Item、Node、Run、SHA、测试和审计可完整追踪；
+- 未配置真实钉钉凭证时，fake server + fake Provider + 临时 Git fixture 仍可在 CI 重放完整闭环。
+
+### 28.2 完整路线图完成定义
 
 本功能只有在以下条件全部满足时才可标记为完成：
 
@@ -1452,4 +1525,3 @@ collaboration.execution_mode=observe|plan|execute
 - 默认分支和生产环境不存在未授权写入路径；
 - 机器人不再通过长篇内部术语解释身份冲突，而是输出明确任务、状态、授权人和下一步；
 - 文档、运维手册、威胁模型、测试报告和回滚演练齐备。
-

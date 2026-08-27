@@ -30,6 +30,8 @@
     "docs:preview": "pnpm --filter @openmausbot/docs preview",
     "companion": "node --experimental-strip-types companion/src/index.ts",
     "dev:server": "node --experimental-strip-types server/index.ts",
+    "collaboration:headless": "node --experimental-strip-types server/collaboration-headless.ts",
+    "collaboration:health": "node --experimental-strip-types server/collaboration-headless.ts --health",
     "dev:desktop": "electron .",
     "build": "tsc -b && tsc -p tsconfig.server.json && vite build",
     "typecheck": "tsc -b && tsc -p tsconfig.server.json",
