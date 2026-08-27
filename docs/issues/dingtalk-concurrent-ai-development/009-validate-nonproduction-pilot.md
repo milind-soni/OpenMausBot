@@ -1,7 +1,7 @@
 # [009] Validate non-production pilot
 
 **Type**: HITL  
-**Status**: TODO  
+**Status**: IN PROGRESS (`automated_fake` complete; real non-production pilot pending)
 **Blocked by**: `docs/issues/dingtalk-concurrent-ai-development/007-connect-real-dingtalk-stream.md`, `docs/issues/dingtalk-concurrent-ai-development/008-operate-secure-headless-service.md`  
 **PRD**: `dingtalk-concurrent-ai-development-prd.md`
 
@@ -29,6 +29,17 @@ Configure and execute the first real, non-production pilot using an enterprise i
 
 Manual fallback: the Owner performs the flow in the configured pilot group, observes each status-card transition, inspects the candidate and evidence through the controlled view, and signs the resulting acceptance report.
 
+## Automated fake rehearsal delivered
+
+- [x] `pnpm pilot:collaboration:fake -- --output <owner-only-directory>` runs a production-isomorphic rehearsal against real SQLite and a disposable Git repository.
+- [x] The rehearsal covers duplicate ingress, outbound retry/supersession, one Owner and non-Owner denial, pause/resume/retry/reject/stale action/final accept, and a separate cancel scenario.
+- [x] Restart uses the same data directory; low disk and mandatory audit-write failure remain fail-closed.
+- [x] The candidate exists only on a managed local branch; the original default branch, index, status, and sentinel remain unchanged; no remote push is attempted.
+- [x] One validated JSON source of truth and its generated Markdown view are written atomically with mode `0600`, using hashed external identities and paths and excluding action tokens, credentials, and session webhooks.
+- [x] The report records the explicit `dingtalk-stream@2.1.6-beta.1` prerelease deviation.
+
+The automated report is intentionally `scope: automated_fake` and overall `status: pending`. It is not evidence that a real DingTalk or host pilot passed. The original completion signals above remain unchecked until the sole Owner executes and signs the real non-production pilot; no manager, co-signer, or countersignature is part of that process.
+
 ## User stories addressed
 
 - E2E-1 through E2E-10 as applicable to the confirmed first milestone.
@@ -37,4 +48,3 @@ Manual fallback: the Owner performs the flow in the configured pilot group, obse
 ## Background hints
 
 Use real credentials only through the host's secure credential mechanism; never place them in fixtures or repository files.
-
