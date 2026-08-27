@@ -1,7 +1,7 @@
 # [001] Establish runnable project baseline
 
 **Type**: AFK  
-**Status**: TODO  
+**Status**: DONE
 **Blocked by**: None — can start immediately  
 **PRD**: `dingtalk-concurrent-ai-development-prd.md`
 
@@ -18,10 +18,17 @@ Establish the confirmed implementation baseline before product behavior is added
 
 ## 完成信号
 
-- [ ] A clean environment can install dependencies, start the headless service, and observe a healthy result.
-- [ ] Starting the service twice against the same storage does not duplicate schema state.
-- [ ] The recorded source history contains baseline `7417725` and does not configure the upstream repository as the project's push destination.
-- [ ] Automated validation confirms the first-milestone configuration excludes deferred execution capabilities by default.
+- [x] A clean environment can install dependencies, start the headless service, and observe a healthy result.
+- [x] Starting the service twice against the same storage does not duplicate schema state.
+- [x] The recorded source history contains baseline `7417725` and does not configure the upstream repository as the project's push destination.
+- [x] Automated validation confirms the first-milestone configuration excludes deferred execution capabilities by default.
+
+## Completion evidence
+
+- `server/collaboration/db.test.ts` verifies private SQLite creation, WAL/foreign-key safety, schema version 1, restart idempotency, preserved metadata, and migration tamper rejection.
+- `server/collaboration/service.test.ts` verifies deterministic Headless health, the one-shot probe, and fail-closed first-milestone defaults.
+- `node --experimental-strip-types server/collaboration-headless.ts --health --data-dir <temporary-dir>` returned `status=healthy`, schema version 1, one applied migration, and `executionMode=observe`.
+- Git contains commit `741772505499a6c72ba462dec635966f39737914`; the only named source remote is `upstream`, with no `origin`, `remote.pushDefault`, or branch push remote configured.
 
 ## User stories addressed
 
@@ -31,4 +38,3 @@ Establish the confirmed implementation baseline before product behavior is added
 ## Background hints
 
 Keep the collaboration domain and database isolated from transcript storage while reusing the existing runtime through narrow adapters.
-
