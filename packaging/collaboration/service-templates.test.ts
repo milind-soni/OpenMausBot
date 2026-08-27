@@ -18,19 +18,20 @@ describe("secure collaboration service-manager templates", () => {
       expect(source).toContain("UMask=0077");
       expect(source).toContain("NoNewPrivileges=true");
       expect(source).toContain("ProtectSystem=strict");
-      expect(source).toContain("Delegate=yes");
-      expect(source).toContain("ProtectControlGroups=false");
+      expect(source).toContain("ProtectControlGroups=true");
+      expect(source).not.toContain("Delegate=yes");
+      expect(source).toContain("KillMode=control-group");
       expect(source).toContain("CapabilityBoundingSet=\n");
       expect(source).toMatch(/LoadCredential=dingtalk\.json:/);
-      expect(source).toMatch(/LoadCredential=containment-hmac\.key:/);
+      expect(source).toMatch(/LoadCredential=owner-alert-webhook\.url:/);
       expect(source).toMatch(/LoadCredential=backup-encryption\.key:/);
       expect(source).toContain("OMB_DINGTALK_CREDENTIAL_FILE=%d/dingtalk.json");
-      expect(source).toContain("OMB_CONTAINMENT_VERIFIER_KEY_FILE=%d/containment-hmac.key");
+      expect(source).toContain("OMB_OWNER_ALERT_WEBHOOK_FILE=%d/owner-alert-webhook.url");
       expect(source).toContain("OMB_BACKUP_KEY_FILE=%d/backup-encryption.key");
-      expect(source).toContain("OMB_CGROUP_ROOT=/sys/fs/cgroup/openmausbot");
-      expect(source).not.toContain("OMB_CGROUP_ROOT=/sys/fs/cgroup\n");
-      expect(source).not.toContain("ReadWritePaths=/sys/fs/cgroup\n");
-      expect(source).toContain("OMB_BOOT_GENERATION_FILE=/proc/sys/kernel/random/boot_id");
+      expect(source).toContain("OMB_EXECUTION_MODE=observe_plan_only");
+      expect(source).toContain("OMB_EXECUTION_ENABLED=0");
+      expect(source).not.toContain("OMB_CGROUP_ROOT");
+      expect(source).not.toMatch(/ReadWritePaths=.*\/sys\/fs\/cgroup/);
       expect(source).toMatch(/(?:StateDirectory|OMB_DATA_DIR)=.*openmausbot-collaboration/);
       expect(source).toMatch(/(?:LogsDirectory|StandardOutput)=.*openmausbot-collaboration/);
       expect(source).not.toContain("OMB_DINGTALK_CLIENT_SECRET");
@@ -63,6 +64,9 @@ describe("secure collaboration service-manager templates", () => {
     expect(source).toMatch(
       /<key>OMB_BACKUP_KEY_FILE<\/key>\s*<string>[^<]+\/credentials\/backup-encryption\.key<\/string>/,
     );
+    expect(source).toMatch(
+      /<key>OMB_OWNER_ALERT_WEBHOOK_FILE<\/key>\s*<string>[^<]+\/credentials\/owner-alert-webhook\.url<\/string>/,
+    );
     expect(source).not.toContain("OMB_CGROUP_ROOT");
     expect(source).not.toContain("OMB_CONTAINMENT_VERIFIER_KEY_FILE");
     expect(source).not.toContain("OMB_DINGTALK_CLIENT_SECRET");
@@ -76,6 +80,6 @@ describe("secure collaboration service-manager templates", () => {
     expect(source).toContain("Do not enable execution on macOS");
     expect(source).toContain("/proc/sys/kernel/random/boot_id");
     expect(source).toContain("/sys/fs/cgroup/openmausbot");
-    expect(source).toContain("must never receive the");
+    expect(source).toContain("never delegate `/sys/fs/cgroup`");
   });
 });

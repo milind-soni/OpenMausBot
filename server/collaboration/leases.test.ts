@@ -73,4 +73,29 @@ describe("fenced leases", () => {
     expect(nodeB.fence).toBe(2);
     db.close();
   });
+
+  it("does not claim nodes directly while a restored ledger is under review", () => {
+    const db = database();
+    seedReadyNode(db);
+    const lease = new InstanceLeaseCoordinator(db, "review-scheduler").acquire(1_000, 1_000)!;
+    db.prepare(
+      "UPDATE collaboration_restore_guard SET state = 'review_required', source_backup_hash = ?, restored_at = 1, " +
+        "version = version + 1 WHERE singleton = 1",
+    ).run("a".repeat(64));
+    const nodes = new NodeLeaseCoordinator(db);
+    expect(() =>
+      nodes.claim(lease, {
+        workItemId: "WI-1",
+        planRevision: 1,
+        nodeId: "modify",
+        now: 1_001,
+        ttlMs: 50,
+      }),
+    ).toThrow("restore_review_required");
+    expect(db.prepare("SELECT runtime_state, lease_owner FROM collaboration_work_nodes").get()).toEqual({
+      runtime_state: "dormant",
+      lease_owner: null,
+    });
+    db.close();
+  });
 });

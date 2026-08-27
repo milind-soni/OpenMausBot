@@ -1,6 +1,14 @@
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { DatabaseSync } from "node:sqlite";
 import { describe, expect, it } from "vitest";
 
+import { openCollaborationLedger } from "../db.ts";
+import { LocalOwnerRegistry } from "../owner.ts";
 import {
+  FetchPrivateOwnerAlertSink,
+  LedgerPrivateOwnerAlertPort,
   type PrivateOwnerAlertSink,
   type SafeOperationalAlert,
   ValidatingPrivateOwnerAlertPort,
@@ -62,5 +70,35 @@ describe("private Owner operational alerts", () => {
       "SHA-256",
     );
     expect(privateSink.deliveries).toEqual([]);
+  });
+
+  it("resolves the current sole Owner and posts only safe fields through a secure private relay reference", async () => {
+    const root = mkdtempSync(join(tmpdir(), "private-owner-alert-"));
+    try {
+      const ledger = openCollaborationLedger(root);
+      const owner = new LocalOwnerRegistry(ledger.filePath);
+      owner.bootstrap({ senderCorpId: "corp", senderStaffId: "owner", now: 1 });
+      owner.close();
+      const database = new DatabaseSync(ledger.filePath);
+      ledger.close();
+      const endpoint = join(root, "private-alert.url");
+      writeFileSync(endpoint, "https://alerts.example.test/private-owner", { mode: 0o600 });
+      const requests: Array<{ url: string; body: unknown }> = [];
+      const sink = new FetchPrivateOwnerAlertSink(endpoint, async (url, init) => {
+        requests.push({ url: String(url), body: JSON.parse(String(init?.body)) });
+        return new Response(null, { status: 204 });
+      });
+      await new LedgerPrivateOwnerAlertPort(database, sink).alert({ code: "disk_low", digest, occurredAt: 2 });
+      expect(requests).toEqual([
+        {
+          url: "https://alerts.example.test/private-owner",
+          body: { target: "corp:owner", code: "disk_low", digest, occurredAt: 2 },
+        },
+      ]);
+      expect(JSON.stringify(requests)).not.toContain("clientSecret");
+      database.close();
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
   });
 });

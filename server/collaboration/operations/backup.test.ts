@@ -60,6 +60,10 @@ describe("encrypted collaboration ledger backup", () => {
         "worktree_path, branch, base_sha, started_at) VALUES ('RESTORE-RUN', 'RESTORE-WI', 1, 'modify', 1, " +
         "'developer', 'thread', 'turn', 'running', '/repo', '/worktree', 'branch', ?, 1)",
     ).run("a".repeat(40));
+    setup.prepare(
+      "INSERT INTO collaboration_private_alert_state " +
+        "(code, digest, occurred_at, delivery_state, attempt) VALUES ('disk_low', ?, 1, 'pending', 1)",
+    ).run(`sha256:${"a".repeat(64)}`);
     setup.close();
 
     const keyFile = join(root, "backup.key");
@@ -81,7 +85,7 @@ describe("encrypted collaboration ledger backup", () => {
       encryptionKeyFile: keyFile,
       reviewRoot: join(root, "reviews"),
     });
-    expect(restored.gated).toMatchObject({ outbox: 1, runs: 1, nodes: 1 });
+    expect(restored.gated).toMatchObject({ outbox: 1, runs: 1, nodes: 1, privateAlerts: 1 });
     expect(restored.databasePath).not.toBe(live);
     const review = new DatabaseSync(restored.databasePath, { readOnly: true });
     expect(review.prepare("SELECT delivery_state, last_error FROM collaboration_outbox").get()).toEqual({
@@ -91,6 +95,9 @@ describe("encrypted collaboration ledger backup", () => {
     expect(review.prepare("SELECT status, recovery_state FROM collaboration_runs WHERE id = 'RESTORE-RUN'").get()).toEqual({
       status: "needs_configuration",
       recovery_state: "unsafe_to_retry",
+    });
+    expect(review.prepare("SELECT delivery_state FROM collaboration_private_alert_state").get()).toEqual({
+      delivery_state: "discarded",
     });
     review.close();
 

@@ -31,17 +31,17 @@
 - Rejected alternatives: reusing the project-group outbox or accepting free-form error text, because either can disclose secrets to a group.
 - Consequence: runtime integration must inject an independent private sink and cannot silently fall back to group delivery.
 
-### Treat disk observation as a fenced gate, not evidence cleanup
+### Treat disk observation as a fenced gate with private durable retry
 - Context: low space must stop new work without shortening retention or deleting evidence.
-- Choice: the disk monitor updates only `CollaborationDegradationController.setLowDisk()` under the active instance fence, emits one transition alert, and rejects restored review ledgers before probing or mutation.
+- Choice: the disk monitor updates only `CollaborationDegradationController.setLowDisk()` under the active instance fence, persists private alert attempts independently from group outbox, retries until acknowledged, and rejects restored review ledgers before probing or mutation.
 - Rejected alternatives: invoking retention cleanup or bypassing the durable restore guard.
 - Consequence: runtime maintenance can call `check()` deterministically while retention remains governed by its existing policy.
 
-### Scope Linux containment and keep macOS execute-disabled
-- Context: cgroup v2 requires writable control files, while granting the full hierarchy would be excessive; macOS process groups are not strong containment.
-- Choice: templates reference `/sys/fs/cgroup/openmausbot`, a real boot-id source, and stable verifier/backup keys through systemd `LoadCredential`; launchd sets observe/plan-only and execution disabled.
-- Rejected alternatives: `/sys/fs/cgroup` root access and process-group containment claims.
-- Consequence: operators must provision/delegate the scoped subtree and verify it on a real host before execute mode.
+### Keep shipped service units execute-disabled until containment is privilege-separated
+- Context: delegating writable cgroup control to the same identity that launches untrusted Agent descendants permits a child to migrate after registration; macOS process groups are also not strong containment.
+- Choice: systemd and launchd templates are observe/plan-only, deny cgroupfs writes, and use service-level control-group shutdown. Linux execute requires a separately privileged supervisor with a dedicated subtree and stable verifier material.
+- Rejected alternatives: same-UID `Delegate=yes`, `/sys/fs/cgroup` write access, and process-group containment claims.
+- Consequence: Ticket 009 must prove real host privilege separation and post-registration non-migration before a separate execute unit is enabled.
 
 
 ---
@@ -100,9 +100,9 @@
      Especially: shared entities modified, new DB columns, enum values added.
 -->
 
-- The runtime branch must inject `PrivateOwnerAlertPort` and call `CollaborationDiskMonitor.check()` with its current instance lease during deterministic maintenance.
+- Final integration constructs `CollaborationDiskMonitor` through the runtime maintenance factory and routes durable operational retries only through the current ledger Owner's private relay.
 - `scripts/smoke-collaboration-headless.mjs` assumes the final CLI retains `--health`, `--data-dir`, long-running disabled-Stream startup, and clean SIGTERM semantics.
-- The headless server bundle now includes `server/collaboration-headless.ts`; no lockfile or database schema changes are included.
+- The headless server bundle now includes `server/collaboration-headless.ts`; no lockfile changes are included.
 
 
 ---

@@ -175,12 +175,19 @@ export function restoreEncryptedLedgerForReview(input: {
         )
         .run();
       const tokens = database.prepare("DELETE FROM collaboration_action_tokens WHERE consumed_at IS NULL").run();
+      const privateAlerts = database
+        .prepare(
+          "UPDATE collaboration_private_alert_state SET delivery_state = 'discarded' " +
+            "WHERE delivery_state = 'pending'",
+        )
+        .run();
       database.exec("COMMIT");
       const gated = {
         outbox: Number(outbox.changes),
         runs: Number(runs.changes),
         nodes: Number(nodes.changes),
         actionTokens: Number(tokens.changes),
+        privateAlerts: Number(privateAlerts.changes),
       };
       const manifestPath = join(reviewDirectory, "RESTORE_REVIEW.json");
       writeFileSync(

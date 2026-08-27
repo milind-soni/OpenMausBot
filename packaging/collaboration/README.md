@@ -10,23 +10,27 @@ copies that file into systemd's protected per-service credential directory.
 
 For the user unit, install the credential with mode `0600` at
 `~/.config/openmausbot-collaboration/dingtalk.json`. The service receives only
-systemd's `%d/dingtalk.json` reference. Install independent, stable random keys
-at `containment-hmac.key` and `backup-encryption.key`, also mode `0600`.
+systemd's `%d/dingtalk.json` reference. Install the independent backup key and
+private Owner alert relay endpoint at `backup-encryption.key` and
+`owner-alert-webhook.url`, also mode `0600`.
 
 For launchd, install the credential with mode `0600` at the absolute path
 referenced by `OMB_DINGTALK_CREDENTIAL_FILE`. launchd has no equivalent of
 `LoadCredential`; the service's secure credential-file provider rejects
 symlinks, non-regular files, and files broader than `0600`.
 Install the independent backup encryption key with mode `0600` at the path
-referenced by `OMB_BACKUP_KEY_FILE`.
+referenced by `OMB_BACKUP_KEY_FILE`, and the private Owner alert relay endpoint
+at the protected path referenced by `OMB_OWNER_ALERT_WEBHOOK_FILE`.
 
-Before enabling either Linux unit, the operator must provision and delegate a
-real cgroup v2 subtree at `/sys/fs/cgroup/openmausbot` to the service identity.
-The service is deliberately scoped to that subtree and must never receive the
-whole `/sys/fs/cgroup` tree. `/proc/sys/kernel/random/boot_id` supplies the real
-boot generation. The stable containment verifier key must survive service
-restarts but remain separate from the ledger and backups. These host controls
-require real-environment verification before execute mode is enabled.
+The shipped Linux units are also observe/plan-only. They set
+`ProtectControlGroups=true` and never delegate `/sys/fs/cgroup` to the same
+identity that launches untrusted Agent descendants. Execute mode requires a
+separately privileged supervisor that owns only a dedicated subtree such as
+`/sys/fs/cgroup/openmausbot`, reads the real boot generation from
+`/proc/sys/kernel/random/boot_id`, keeps a stable verifier key outside Agent
+reach, and proves a child cannot migrate after registration. Ticket 009 must
+verify that privilege boundary on a real host before a separate execute unit
+is enabled.
 
 Before loading the launchd plist, create its Application Support and Logs
 directories with mode `0700`; its `Umask` keeps newly created state and log

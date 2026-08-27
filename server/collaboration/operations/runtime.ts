@@ -5,7 +5,12 @@ import { DatabaseSync } from "node:sqlite";
 import type { DingTalkCredentialProvider, DingTalkCredentials } from "../../integrations/dingtalk/config.ts";
 import type { DingTalkCardAction, DingTalkInboundMessage } from "../../integrations/dingtalk/types.ts";
 import type { OwnerActionOutcome } from "../actions.ts";
-import type { ContainmentPort } from "../containment.ts";
+import {
+  type ContainmentBinding,
+  type ContainmentPort,
+  type ContainmentProof,
+  verifyContainmentProof,
+} from "../containment.ts";
 import type { CandidateExecutorOptions, CandidateExecutionOutcome } from "../executor.ts";
 import type { PlanningPolicy } from "../graph.ts";
 import type { InboundMessageOutcome } from "../inbound.ts";
@@ -62,6 +67,11 @@ export interface RuntimeMaintenancePort {
   run(instance: Pick<InstanceLease, "ownerId" | "fence">, now: number): void | Promise<void>;
 }
 
+export interface RuntimeMaintenanceContext {
+  database: DatabaseSync;
+  dataDirectory: string;
+}
+
 export type RuntimeExecutionConfiguration = Omit<
   CandidateExecutorOptions,
   "agent" | "containment" | "commandRunner" | "scheduler"
@@ -88,6 +98,7 @@ export interface CollaborationHeadlessRuntimeOptions {
   outboxDelivery?: OutboxDeliveryPort;
   outbox?: Partial<OutboxDispatcherOptions>;
   maintenance?: RuntimeMaintenancePort;
+  maintenanceFactory?: (context: RuntimeMaintenanceContext) => RuntimeMaintenancePort;
   dingTalk?: {
     enabled: boolean;
     credentials: DingTalkCredentialProvider;
@@ -116,6 +127,17 @@ export interface CollaborationRuntimeHealth {
 export interface DrainOutcome {
   dispatched: DispatchOutcome | null;
   maintained: boolean;
+}
+
+interface UnresolvedRun {
+  id: string;
+  work_item_id: string;
+  plan_revision: number;
+  node_id: string;
+  worktree_path: string;
+  runtime_identity_json: string | null;
+  containment_binding_json: string | null;
+  containment_fingerprint: string | null;
 }
 
 const SYSTEM_CLOCK: RuntimeClock = { now: Date.now };
@@ -151,6 +173,35 @@ async function waitBounded(promise: Promise<unknown>, milliseconds: number): Pro
   });
 }
 
+async function resultBounded<T>(
+  promise: Promise<T>,
+  milliseconds: number,
+): Promise<{ completed: true; value: T } | { completed: false }> {
+  return await new Promise((resolve) => {
+    let settled = false;
+    const finish = (result: { completed: true; value: T } | { completed: false }) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      resolve(result);
+    };
+    const timer = setTimeout(() => finish({ completed: false }), Math.max(1, milliseconds));
+    void promise.then(
+      (value) => finish({ completed: true, value }),
+      () => finish({ completed: false }),
+    );
+  });
+}
+
+function parseJson<T>(value: string | null): T | null {
+  if (!value) return null;
+  try {
+    return JSON.parse(value) as T;
+  } catch {
+    return null;
+  }
+}
+
 export class CollaborationHeadlessRuntime {
   private readonly options: CollaborationHeadlessRuntimeOptions;
   private readonly ownerId: string;
@@ -166,6 +217,7 @@ export class CollaborationHeadlessRuntime {
   private leaseCoordinator: InstanceLeaseCoordinator | null = null;
   private lease: InstanceLease | null = null;
   private dispatcher: OutboxDispatcher | null = null;
+  private maintenance: RuntimeMaintenancePort | null = null;
   private stream: RuntimeStream | null = null;
   private dingTalkState: CollaborationRuntimeHealth["dingtalk"]["state"];
   private drainPromise: Promise<DrainOutcome> | null = null;
@@ -184,6 +236,9 @@ export class CollaborationHeadlessRuntime {
     this.dingTalkState = options.dingTalk?.enabled ? "stopped" : "disabled";
     if ((options.planner && !options.planningPolicy) || (!options.planner && options.planningPolicy)) {
       throw new Error("planner and planningPolicy must be configured together");
+    }
+    if (options.maintenance && options.maintenanceFactory) {
+      throw new Error("maintenance and maintenanceFactory are mutually exclusive");
     }
     const executionParts = [options.agent, options.containment, options.commandRunner, options.execution];
     if (executionParts.some(Boolean) && !executionParts.every(Boolean) && (options.agent || options.commandRunner || options.execution)) {
@@ -235,6 +290,9 @@ export class CollaborationHeadlessRuntime {
       this.leaseCoordinator = new InstanceLeaseCoordinator(this.database, this.ownerId);
       this.lease = this.leaseCoordinator.acquire(this.clock.now(), this.leaseTtlMs);
       if (!this.lease) throw new Error("instance_lease_unavailable");
+      this.maintenance = this.options.maintenanceFactory
+        ? this.options.maintenanceFactory({ database: this.database, dataDirectory: this.options.dataDirectory })
+        : (this.options.maintenance ?? null);
 
       if (this.options.outboxDelivery) {
         this.dispatcher = new OutboxDispatcher(this.database, this.options.outboxDelivery, {
@@ -282,7 +340,19 @@ export class CollaborationHeadlessRuntime {
       collaborationHealth = null;
     }
     const stopped = this.currentState === "stopped";
-    const reason = this.reason ?? collaborationHealth?.degradation?.reason ?? null;
+    let lowDisk = false;
+    try {
+      const row = this.database
+        ?.prepare("SELECT low_disk FROM collaboration_runtime_state WHERE singleton = 1")
+        .get() as { low_disk: number } | undefined;
+      lowDisk = row?.low_disk === 1;
+    } catch {
+      lowDisk = false;
+    }
+    const reason =
+      this.reason ??
+      collaborationHealth?.degradation?.reason ??
+      (lowDisk || collaborationHealth?.executionGated === "low_disk" ? "low_disk" : null);
     const ready =
       this.currentState === "running" &&
       !reason &&
@@ -317,12 +387,12 @@ export class CollaborationHeadlessRuntime {
   }
 
   ingestDingTalkMessage(message: DingTalkInboundMessage): InboundMessageOutcome {
-    this.assertAcceptingWork();
+    this.assertAcceptingNewWork();
     return this.service!.ingestDingTalkMessage(message);
   }
 
   performDingTalkOwnerAction(action: DingTalkCardAction): OwnerActionOutcome {
-    this.assertAcceptingWork();
+    this.assertOperational();
     return this.service!.performOwnerAction({
       actionToken: action.actionToken,
       sender: action.sender,
@@ -332,7 +402,7 @@ export class CollaborationHeadlessRuntime {
   }
 
   async executeCurrentPlan(workItemId: string, attempt?: number): Promise<CandidateExecutionOutcome> {
-    this.assertAcceptingWork();
+    this.assertAcceptingNewWork();
     if (this.platform === "darwin") throw new Error("execute_unavailable_on_macos");
     const execution = this.service!.executeCurrentPlan(workItemId, attempt, this.clock.now());
     this.activeExecutions.add(execution);
@@ -368,17 +438,25 @@ export class CollaborationHeadlessRuntime {
     const deadline = Date.now() + this.shutdownTimeoutMs;
     this.currentState = "draining";
     this.logger.write({ event: "collaboration.runtime.draining", state: this.currentState });
-    const streamStop = Promise.resolve(this.stream?.stop());
-    if (!(await waitBounded(streamStop, deadline - Date.now()))) this.reason = "shutdown_timeout";
-    this.stream = null;
-    this.dingTalkState = this.options.dingTalk?.enabled ? "stopped" : "disabled";
-    if (this.drainPromise && !(await waitBounded(this.drainPromise, deadline - Date.now()))) {
-      this.reason = "shutdown_timeout";
+    let releaseLease = false;
+    try {
+      const streamStop = Promise.resolve().then(() => this.stream?.stop());
+      if (!(await waitBounded(streamStop, deadline - Date.now()))) this.reason = "shutdown_timeout";
+      this.stream = null;
+      this.dingTalkState = this.options.dingTalk?.enabled ? "stopped" : "disabled";
+      if (this.drainPromise && !(await waitBounded(this.drainPromise, deadline - Date.now()))) {
+        this.reason = "shutdown_timeout";
+      }
+      releaseLease = await this.interruptAndSettleRuns(Math.max(1, deadline - Date.now()));
+      if (!releaseLease) this.reason = "shutdown_containment_unverified";
+    } catch {
+      this.reason = "shutdown_failed";
+      releaseLease = false;
+    } finally {
+      await this.closeResources(releaseLease);
+      this.currentState = "stopped";
+      this.logger.write({ event: "collaboration.runtime.stopped", state: this.currentState });
     }
-    await this.interruptAndSettleRuns(Math.max(1, deadline - Date.now()));
-    await this.closeResources();
-    this.currentState = "stopped";
-    this.logger.write({ event: "collaboration.runtime.stopped", state: this.currentState });
     return this.health();
   }
 
@@ -481,21 +559,30 @@ export class CollaborationHeadlessRuntime {
     const serviceReady = !this.reason && this.service!.health().ready;
     if (serviceReady && this.dispatcher) dispatched = await this.dispatcher.dispatchOne(this.lease, now);
     let maintained = false;
-    if (serviceReady && this.options.maintenance) {
-      await this.options.maintenance.run(this.lease, now);
+    if (serviceReady && this.maintenance) {
+      await this.maintenance.run(this.lease, now);
       maintained = true;
     }
     return { dispatched, maintained };
   }
 
-  private assertAcceptingWork(): void {
+  private assertOperational(): void {
     if (this.currentState !== "running" || this.reason || !this.service) {
       throw new Error("collaboration_runtime_not_accepting_work");
     }
   }
 
-  private async interruptAndSettleRuns(timeoutMs: number): Promise<void> {
-    if (!this.database || !this.lease) return;
+  private assertAcceptingNewWork(): void {
+    this.assertOperational();
+    const row = this.database
+      ?.prepare("SELECT low_disk FROM collaboration_runtime_state WHERE singleton = 1")
+      .get() as { low_disk: number } | undefined;
+    if (row?.low_disk === 1) throw new Error("collaboration_runtime_low_disk");
+  }
+
+  private async interruptAndSettleRuns(timeoutMs: number): Promise<boolean> {
+    if (!this.database || !this.lease) return true;
+    const deadline = Date.now() + timeoutMs;
     const now = this.clock.now();
     const rows = this.database
       .prepare(
@@ -509,7 +596,7 @@ export class CollaborationHeadlessRuntime {
       )
       .run(now, this.lease.ownerId, this.lease.fence);
     const interrupts = this.options.agent
-      ? Promise.allSettled(rows.map((row) => this.options.agent!.interrupt(row.id)))
+      ? Promise.allSettled(rows.map((row) => Promise.resolve().then(() => this.options.agent!.interrupt(row.id))))
       : Promise.resolve([]);
     const shutdownWork = interrupts.then(async () => {
       await Promise.allSettled([...this.activeExecutions]);
@@ -517,15 +604,12 @@ export class CollaborationHeadlessRuntime {
     if (!(await waitBounded(shutdownWork, timeoutMs))) this.reason = "shutdown_timeout";
     const unresolved = this.database
       .prepare(
-        "SELECT id, work_item_id, plan_revision, node_id FROM collaboration_runs " +
+        "SELECT id, work_item_id, plan_revision, node_id, worktree_path, runtime_identity_json, " +
+          "containment_binding_json, containment_fingerprint FROM collaboration_runs " +
           "WHERE status = 'running' AND instance_owner = ? AND instance_fence = ?",
       )
-      .all(this.lease.ownerId, this.lease.fence) as unknown as Array<{
-      id: string;
-      work_item_id: string;
-      plan_revision: number;
-      node_id: string;
-    }>;
+      .all(this.lease.ownerId, this.lease.fence) as unknown as UnresolvedRun[];
+    const containmentEmpty = await this.terminateUnresolvedContainment(unresolved, deadline);
     for (const row of unresolved) {
       this.database
         .prepare(
@@ -541,10 +625,57 @@ export class CollaborationHeadlessRuntime {
         )
         .run(row.work_item_id, row.plan_revision, row.node_id);
     }
+    return containmentEmpty;
   }
 
-  private async closeResources(): Promise<void> {
-    if (this.leaseCoordinator && this.lease) {
+  private async terminateUnresolvedContainment(rows: readonly UnresolvedRun[], deadline: number): Promise<boolean> {
+    if (rows.length === 0) return true;
+    const containment = this.options.containment;
+    if (!containment || !this.lease) return false;
+    let allEmpty = true;
+    for (const row of rows) {
+      const proof = parseJson<ContainmentProof>(row.runtime_identity_json);
+      const binding = parseJson<ContainmentBinding>(row.containment_binding_json);
+      if (
+        !proof ||
+        !binding ||
+        binding.runId !== row.id ||
+        binding.canonicalWorktreePath !== row.worktree_path ||
+        binding.instanceOwner !== this.lease.ownerId ||
+        binding.instanceFence !== this.lease.fence
+      ) {
+        allEmpty = false;
+        continue;
+      }
+      const verifiedResult = await resultBounded(
+        verifyContainmentProof(containment, proof, binding),
+        Math.max(1, deadline - Date.now()),
+      );
+      if (
+        !verifiedResult.completed ||
+        !verifiedResult.value.verified ||
+        verifiedResult.value.fingerprint !== row.containment_fingerprint
+      ) {
+        allEmpty = false;
+        continue;
+      }
+      const terminated = await resultBounded(
+        containment.terminateAndWaitEmpty(proof.identity),
+        Math.max(1, deadline - Date.now()),
+      );
+      if (
+        !terminated.completed ||
+        terminated.value.state !== "empty" ||
+        terminated.value.fingerprint !== verifiedResult.value.fingerprint
+      ) {
+        allEmpty = false;
+      }
+    }
+    return allEmpty;
+  }
+
+  private async closeResources(releaseLease = true): Promise<void> {
+    if (releaseLease && this.leaseCoordinator && this.lease) {
       try {
         this.leaseCoordinator.release(this.lease, this.clock.now());
       } catch {}
@@ -552,6 +683,7 @@ export class CollaborationHeadlessRuntime {
     this.lease = null;
     this.leaseCoordinator = null;
     this.dispatcher = null;
+    this.maintenance = null;
     try {
       this.database?.close();
     } catch {}

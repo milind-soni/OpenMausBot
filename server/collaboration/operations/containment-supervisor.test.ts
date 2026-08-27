@@ -42,13 +42,14 @@ describe("Linux cgroup v2 containment supervisor", () => {
     const root = "/sys/fs/cgroup/openmausbot";
     const scope = "openmausbot-run-0001.scope";
     io.events.set(`${root}/${scope}/cgroup.events`, "populated 1\n");
+    io.events.set(`${root}/${scope}/cgroup.procs`, "4242\n");
     const supervisor = new LinuxCgroupV2ContainmentSupervisor({
       root,
       hostGeneration: "boot-generation-1",
       verifierKey: Buffer.alloc(32, 7),
       io,
     });
-    const proof = await supervisor.issueProof(binding(), scope);
+    const proof = await supervisor.issueProof(binding(), { cgroupRelativePath: scope, expectedProcessId: 4242 });
     await expect(supervisor.verifyProof(proof, binding())).resolves.toMatchObject({
       verified: true,
       bindingHash: containmentBindingHash(binding()),
@@ -65,13 +66,17 @@ describe("Linux cgroup v2 containment supervisor", () => {
       const root = "/sys/fs/cgroup/openmausbot";
       const scope = `openmausbot-${scenario}-0001.scope`;
       io.events.set(`${root}/${scope}/cgroup.events`, "populated 1\n");
+      io.events.set(`${root}/${scope}/cgroup.procs`, "5252\n");
       const supervisor = new LinuxCgroupV2ContainmentSupervisor({
         root,
         hostGeneration: "boot-generation-1",
         verifierKey: Buffer.alloc(32, 8),
         io,
       });
-      const proof = await supervisor.issueProof(binding(`RUN-${scenario}`), scope);
+      const proof = await supervisor.issueProof(binding(`RUN-${scenario}`), {
+        cgroupRelativePath: scope,
+        expectedProcessId: 5252,
+      });
       await expect(supervisor.inspect(proof.identity)).resolves.toMatchObject({ state: "active" });
       await expect(supervisor.terminateAndWaitEmpty(proof.identity)).resolves.toMatchObject({ state: "empty" });
       expect(io.kills).toEqual([`${root}/${scope}/cgroup.kill:1`]);
@@ -97,5 +102,22 @@ describe("Linux cgroup v2 containment supervisor", () => {
       state: "unknown",
       reason: "platform_has_no_strong_containment",
     });
+  });
+
+  it("refuses to sign an unrelated or empty cgroup", async () => {
+    const io = new FakeCgroupIo();
+    const root = "/sys/fs/cgroup/openmausbot";
+    const scope = "openmausbot-unrelated-0001.scope";
+    io.events.set(`${root}/${scope}/cgroup.events`, "populated 0\n");
+    io.events.set(`${root}/${scope}/cgroup.procs`, "9999\n");
+    const supervisor = new LinuxCgroupV2ContainmentSupervisor({
+      root,
+      hostGeneration: "boot-generation-1",
+      verifierKey: Buffer.alloc(32, 9),
+      io,
+    });
+    await expect(
+      supervisor.issueProof(binding(), { cgroupRelativePath: scope, expectedProcessId: 4242 }),
+    ).rejects.toThrow("expected_process_not_in_cgroup");
   });
 });

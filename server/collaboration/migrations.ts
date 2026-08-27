@@ -611,7 +611,7 @@ const migrations: readonly Migration[] = [
   {
     version: 8,
     name: "add-durable-restore-guard",
-    checksum: "v8:restore-review-fail-closed-guard",
+    checksum: "v8:restore-review-guard-and-private-alert-retry",
     apply(database) {
       database.exec(`
         CREATE TABLE collaboration_restore_guard (
@@ -630,6 +630,17 @@ const migrations: readonly Migration[] = [
         INSERT INTO collaboration_restore_guard
           (singleton, state, source_backup_hash, restored_at, rearmed_at, rearmed_by, version)
           VALUES (1, 'live', NULL, NULL, NULL, NULL, 1);
+
+        CREATE TABLE collaboration_private_alert_state (
+          code TEXT PRIMARY KEY,
+          digest TEXT NOT NULL,
+          occurred_at INTEGER NOT NULL,
+          delivery_state TEXT NOT NULL CHECK (delivery_state IN ('pending', 'sent', 'discarded')),
+          attempt INTEGER NOT NULL DEFAULT 0 CHECK (attempt >= 0),
+          last_attempt_at INTEGER,
+          delivered_at INTEGER,
+          CHECK ((delivery_state = 'sent' AND delivered_at IS NOT NULL) OR delivery_state <> 'sent')
+        ) STRICT;
       `);
     },
   },

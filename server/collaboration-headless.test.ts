@@ -8,6 +8,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import { openCollaborationLedger } from "./collaboration/db.ts";
 import { LocalOwnerRegistry } from "./collaboration/owner.ts";
 import { parseHeadlessArguments, runCollaborationHeadless, type HeadlessIo } from "./collaboration-headless.ts";
+import type { PrivateOwnerAlertSink, SafeOperationalAlert } from "./collaboration/operations/private-alert.ts";
 import { CollaborationHeadlessRuntime, type CollaborationHeadlessRuntimeOptions } from "./collaboration/operations/runtime.ts";
 
 const scratch: string[] = [];
@@ -34,6 +35,20 @@ function io(input = ""): { io: HeadlessIo; stdout: string[]; stderr: string[] } 
       once() {},
       off() {},
     },
+  };
+}
+
+function signalIo(): { io: HeadlessIo; signal(name: NodeJS.Signals): void } {
+  const listeners = new Map<NodeJS.Signals, () => void>();
+  return {
+    io: {
+      stdin: Readable.from([]),
+      stdout: { write() {} },
+      stderr: { write() {} },
+      once: (signal, listener) => listeners.set(signal, listener),
+      off: (signal) => listeners.delete(signal),
+    },
+    signal: (name) => listeners.get(name)?.(),
   };
 }
 
@@ -113,5 +128,64 @@ describe("secure collaboration headless CLI", () => {
         {},
       ),
     ).toThrow("owner_identity_source_must_be_unique");
+  });
+
+  it("wires low-disk maintenance to the current Owner private channel without group delivery", async () => {
+    const dataDirectory = temporaryDirectory();
+    const ledger = openCollaborationLedger(join(dataDirectory, "collaboration"));
+    const owner = new LocalOwnerRegistry(ledger.filePath);
+    owner.bootstrap({ senderCorpId: "corp", senderStaffId: "owner", now: 1 });
+    owner.close();
+    ledger.close();
+
+    const lifecycle = signalIo();
+    const deliveries: Array<{ target: string; alert: Readonly<SafeOperationalAlert> }> = [];
+    let delivered: (() => void) | undefined;
+    const privateDelivery = new Promise<void>((resolve) => (delivered = resolve));
+    const privateSink: PrivateOwnerAlertSink = {
+      async sendPrivate(target, alert) {
+        deliveries.push({ target, alert });
+        delivered?.();
+      },
+    };
+    let runtime: CollaborationHeadlessRuntime | undefined;
+    const running = runCollaborationHeadless(
+      ["--data-dir", dataDirectory],
+      { OMB_DINGTALK_ENABLED: "0" },
+      {
+        io: lifecycle.io,
+        drainIntervalMs: 1,
+        diskCapacity: { capacity: () => ({ availableBytes: 1n, totalBytes: 1_000n }) },
+        privateOwnerAlertSink: privateSink,
+        createRuntime(options) {
+          runtime = new CollaborationHeadlessRuntime(options);
+          return runtime;
+        },
+      },
+    );
+    await privateDelivery;
+    expect(runtime?.health()).toMatchObject({ status: "degraded", ready: false, reason: "low_disk" });
+    expect(() =>
+      runtime?.ingestDingTalkMessage({
+        sourceEventId: "blocked-low-disk",
+        transportMessageId: "blocked-low-disk-transport",
+        conversationId: "conversation",
+        addressedToBot: true,
+        text: "must not create new work",
+        sender: { senderCorpId: "corp", senderStaffId: "member", senderId: "sender", displayName: "Member" },
+        receivedAt: 2,
+      }),
+    ).toThrow("collaboration_runtime_low_disk");
+    expect(deliveries).toEqual([
+      { target: "corp:owner", alert: expect.objectContaining({ code: "disk_low" }) },
+    ]);
+    lifecycle.signal("SIGTERM");
+    await running;
+    const database = new DatabaseSync(join(dataDirectory, "collaboration", "collaboration.sqlite"));
+    expect(database.prepare("SELECT low_disk FROM collaboration_runtime_state WHERE singleton = 1").get()).toEqual({
+      low_disk: 1,
+    });
+    expect(database.prepare("SELECT count(*) AS count FROM collaboration_work_items").get()).toEqual({ count: 0 });
+    database.close();
   });
 });

@@ -87,6 +87,7 @@ export class FencedScheduler {
     this.database.exec("BEGIN IMMEDIATE");
     try {
       assertCurrentInstanceLease(this.database, instance, now);
+      assertLedgerArmed(this.database);
       const updated = this.database
         .prepare(
           "UPDATE collaboration_work_nodes SET runtime_state = ?, lease_owner = NULL, lease_expires_at = NULL, " +

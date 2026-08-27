@@ -34,14 +34,19 @@ class FakeCapacity implements DiskCapacityPort {
 
 class FakePrivateAlerts implements PrivateOwnerAlertPort {
   readonly deliveries: SafeOperationalAlert[] = [];
+  failures = 0;
 
   async alert(input: SafeOperationalAlert): Promise<void> {
+    if (this.failures > 0) {
+      this.failures -= 1;
+      throw new Error("private_alert_temporarily_unavailable");
+    }
     this.deliveries.push(input);
   }
 }
 
 function monitor(db: DatabaseSync, capacity: FakeCapacity, alerts: FakePrivateAlerts): CollaborationDiskMonitor {
-  return new CollaborationDiskMonitor(new CollaborationDegradationController(db), alerts, capacity, {
+  return new CollaborationDiskMonitor(db, new CollaborationDegradationController(db), alerts, capacity, {
     dataDirectory: "/private-ledger",
     minimumAvailableBytes: 200n,
     minimumAvailableRatio: 0.1,
@@ -56,7 +61,7 @@ describe("collaboration disk monitor", () => {
     const capacity = new FakeCapacity();
     capacity.value = { availableBytes: 50n, totalBytes: 1_000n };
     const alerts = new FakePrivateAlerts();
-    const disk = new CollaborationDiskMonitor(degradation, alerts, capacity, {
+    const disk = new CollaborationDiskMonitor(db, degradation, alerts, capacity, {
       dataDirectory: "/private-ledger",
       minimumAvailableBytes: 200n,
       minimumAvailableRatio: 0.1,
@@ -120,6 +125,32 @@ describe("collaboration disk monitor", () => {
       low_disk: 0,
     });
     expect(alerts.deliveries).toEqual([]);
+    db.close();
+  });
+
+  it("durably retries a failed private alert and never uses the group outbox", async () => {
+    const db = database();
+    const lease = new InstanceLeaseCoordinator(db, "scheduler").acquire(1_000, 1_000)!;
+    const capacity = new FakeCapacity();
+    capacity.value = { availableBytes: 50n, totalBytes: 1_000n };
+    const alerts = new FakePrivateAlerts();
+    alerts.failures = 1;
+    const disk = monitor(db, capacity, alerts);
+
+    await expect(disk.check(lease, 1_001)).rejects.toThrow("private_alert_temporarily_unavailable");
+    expect(db.prepare("SELECT delivery_state, attempt FROM collaboration_private_alert_state").get()).toEqual({
+      delivery_state: "pending",
+      attempt: 1,
+    });
+    await expect(disk.check(lease, 1_002)).resolves.toMatchObject({ lowDisk: true });
+    expect(alerts.deliveries).toHaveLength(1);
+    expect(db.prepare("SELECT delivery_state, attempt FROM collaboration_private_alert_state").get()).toEqual({
+      delivery_state: "sent",
+      attempt: 2,
+    });
+    await disk.check(lease, 1_003);
+    expect(alerts.deliveries).toHaveLength(1);
+    expect(db.prepare("SELECT count(*) AS count FROM collaboration_outbox").get()).toEqual({ count: 0 });
     db.close();
   });
 });

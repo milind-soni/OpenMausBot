@@ -21,6 +21,11 @@ export interface CgroupV2Io {
   wait(milliseconds: number): Promise<void>;
 }
 
+export interface CgroupProcessRegistration {
+  cgroupRelativePath: string;
+  expectedProcessId: number;
+}
+
 class NodeCgroupV2Io implements CgroupV2Io {
   async realpath(path: string): Promise<string> {
     return await realpath(path);
@@ -81,14 +86,28 @@ export class LinuxCgroupV2ContainmentSupervisor implements ContainmentPort {
     this.emptyTimeoutMs = input.emptyTimeoutMs ?? 10_000;
   }
 
-  async issueProof(binding: ContainmentBinding, cgroupRelativePath: string): Promise<ContainmentProof> {
+  /** Called only by the trusted launcher after it has placed its child in the run cgroup. */
+  async issueProof(binding: ContainmentBinding, registration: CgroupProcessRegistration): Promise<ContainmentProof> {
+    if (!Number.isSafeInteger(registration.expectedProcessId) || registration.expectedProcessId < 1) {
+      throw new Error("containment_process_id_invalid");
+    }
     const identity: RuntimeIdentity = {
       backend: BACKEND,
-      opaqueId: cgroupRelativePath,
+      opaqueId: registration.cgroupRelativePath,
       hostGeneration: this.hostGeneration,
       verifierVersion: this.verifierVersion,
     };
-    await this.cgroupPath(identity);
+    const path = await this.cgroupPath(identity);
+    const processIds = (await this.io.read(join(path, "cgroup.procs")))
+      .split(/\s+/u)
+      .filter(Boolean)
+      .map(Number);
+    if (!processIds.includes(registration.expectedProcessId)) {
+      throw new Error("containment_expected_process_not_in_cgroup");
+    }
+    if (populated(await this.io.read(join(path, "cgroup.events"))) !== true) {
+      throw new Error("containment_cgroup_not_populated");
+    }
     return { identity, receipt: receipt(this.verifierKey, identity, binding) };
   }
 

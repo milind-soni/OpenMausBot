@@ -65,6 +65,12 @@ await build({
   platform: "node",
   target: "node20",
   format: "esm",
+  // Some bundled CommonJS dependencies (notably dingtalk-stream's ws stack)
+  // dynamically require Node built-ins. ESM has no global require, so provide
+  // a package-local bridge while still bundling all non-built-in packages.
+  banner: {
+    js: 'import { createRequire as __openmausbotCreateRequire } from "node:module"; const require = __openmausbotCreateRequire(import.meta.url);',
+  },
   outbase: server,
   outdir: join(root, "dist-server"),
   // Written after tsc, replacing its output for these entry points.

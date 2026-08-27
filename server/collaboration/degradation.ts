@@ -2,7 +2,7 @@ import { randomUUID } from "node:crypto";
 import type { DatabaseSync } from "node:sqlite";
 
 import { assertCurrentInstanceLease, type InstanceLease } from "./leases.ts";
-import { readRestoreGuard } from "./restore-guard.ts";
+import { assertLedgerArmed, readRestoreGuard } from "./restore-guard.ts";
 
 export type DegradationReason = "ledger_unwritable" | "audit_unwritable" | "recovery_failed" | "lease_failed";
 
@@ -30,6 +30,10 @@ export class CollaborationDegradationController {
       reason: this.volatileFailure ?? (restoreBlocked ? "restore_review_required" : row.reason),
       lowDisk: row.low_disk === 1,
     };
+  }
+
+  assertArmed(): void {
+    assertLedgerArmed(this.database);
   }
 
   setLowDisk(instance: Pick<InstanceLease, "ownerId" | "fence">, lowDisk: boolean, now: number): void {

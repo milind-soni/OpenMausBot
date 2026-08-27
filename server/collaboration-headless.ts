@@ -3,9 +3,24 @@ import { isAbsolute, join, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 
 import { openCollaborationLedger } from "./collaboration/db.ts";
+import { CollaborationDegradationController } from "./collaboration/degradation.ts";
 import type { OutboxDeliveryPort } from "./collaboration/outbox.ts";
 import { LocalOwnerRegistry } from "./collaboration/owner.ts";
-import { readSecureCredentialFile, SecureDingTalkCredentialFileProvider } from "./collaboration/operations/credentials.ts";
+import {
+  configuredCredentialPath,
+  readSecureCredentialFile,
+  SecureDingTalkCredentialFileProvider,
+} from "./collaboration/operations/credentials.ts";
+import {
+  CollaborationDiskMonitor,
+  type DiskCapacityPort,
+  NodeDiskCapacityPort,
+} from "./collaboration/operations/disk-monitor.ts";
+import {
+  FetchPrivateOwnerAlertSink,
+  LedgerPrivateOwnerAlertPort,
+  type PrivateOwnerAlertSink,
+} from "./collaboration/operations/private-alert.ts";
 import {
   CollaborationHeadlessRuntime,
   type CollaborationHeadlessRuntimeOptions,
@@ -44,6 +59,8 @@ export interface HeadlessDependencies {
   createRuntime?: (options: CollaborationHeadlessRuntimeOptions) => CollaborationHeadlessRuntime;
   drainIntervalMs?: number;
   shutdownTimeoutMs?: number;
+  diskCapacity?: DiskCapacityPort;
+  privateOwnerAlertSink?: PrivateOwnerAlertSink;
 }
 
 const PROCESS_IO: HeadlessIo = {
@@ -153,11 +170,29 @@ function createDingTalkDelivery(
   };
 }
 
+function diskMinimumBytes(environment: NodeJS.ProcessEnv): bigint {
+  const raw = environment.OMB_DISK_MIN_AVAILABLE_BYTES?.trim();
+  if (!raw) return 1024n * 1024n * 1024n;
+  if (!/^\d+$/u.test(raw)) throw new Error("OMB_DISK_MIN_AVAILABLE_BYTES must be a non-negative integer");
+  return BigInt(raw);
+}
+
+function diskMinimumRatio(environment: NodeJS.ProcessEnv): number {
+  const raw = environment.OMB_DISK_MIN_AVAILABLE_RATIO?.trim();
+  if (!raw) return 0.05;
+  const value = Number(raw);
+  if (!Number.isFinite(value) || value < 0 || value > 1) {
+    throw new Error("OMB_DISK_MIN_AVAILABLE_RATIO must be between zero and one");
+  }
+  return value;
+}
+
 function productionRuntimeOptions(
   options: HeadlessArguments,
   environment: NodeJS.ProcessEnv,
   io: HeadlessIo,
   shutdownTimeoutMs: number,
+  dependencies: HeadlessDependencies,
 ): CollaborationHeadlessRuntimeOptions {
   const sessions = new DingTalkSessionReplyRegistry();
   return {
@@ -168,6 +203,28 @@ function productionRuntimeOptions(
     ...(environment.OMB_DINGTALK_ENABLED === "1"
       ? { outboxDelivery: createDingTalkDelivery(sessions, environment) }
       : {}),
+    maintenanceFactory: ({ database, dataDirectory }) => {
+      const sink =
+        dependencies.privateOwnerAlertSink ??
+        new FetchPrivateOwnerAlertSink(
+          configuredCredentialPath(
+            "OMB_OWNER_ALERT_WEBHOOK_FILE",
+            "owner-alert-webhook.url",
+            environment,
+          ),
+        );
+      return new CollaborationDiskMonitor(
+        database,
+        new CollaborationDegradationController(database),
+        new LedgerPrivateOwnerAlertPort(database, sink),
+        dependencies.diskCapacity ?? new NodeDiskCapacityPort(),
+        {
+          dataDirectory,
+          minimumAvailableBytes: diskMinimumBytes(environment),
+          minimumAvailableRatio: diskMinimumRatio(environment),
+        },
+      );
+    },
     dingTalk: {
       enabled: environment.OMB_DINGTALK_ENABLED === "1",
       credentials: new SecureDingTalkCredentialFileProvider(environment),
@@ -289,7 +346,7 @@ export async function runCollaborationHeadless(
   }
   const shutdownTimeoutMs = dependencies.shutdownTimeoutMs ?? 10_000;
   const createRuntime = dependencies.createRuntime ?? ((runtimeOptions) => new CollaborationHeadlessRuntime(runtimeOptions));
-  const runtime = createRuntime(productionRuntimeOptions(options, environment, io, shutdownTimeoutMs));
+  const runtime = createRuntime(productionRuntimeOptions(options, environment, io, shutdownTimeoutMs, dependencies));
   const health = await runtime.start();
   io.stdout.write(`${JSON.stringify(health)}\n`);
   if (options.healthOnly) {
