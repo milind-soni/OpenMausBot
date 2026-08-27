@@ -1,13 +1,48 @@
 import { realpathSync } from "node:fs";
 import { isAbsolute, relative, resolve, sep } from "node:path";
 
-import { runArgv, type ArgvResult } from "./execution-limits.ts";
-
 export interface TargetCommandSpec {
   argv: readonly [string, ...string[]];
   cwd?: string;
   timeoutMs: number;
   maxOutputBytes: number;
+}
+
+export interface SandboxCommandAttestation {
+  sandboxEnforced: boolean;
+  writableRoot: string;
+  deniedPaths: string[];
+  network: "deny" | "unknown";
+  processIsolated: boolean;
+  processTreeReaped: boolean;
+}
+
+export interface SandboxedCommandRequest {
+  commandId: string;
+  argv: readonly [string, ...string[]];
+  cwd: string;
+  environment: NodeJS.ProcessEnv;
+  timeoutMs: number;
+  maxOutputBytes: number;
+  sandbox: {
+    writableRoot: string;
+    deniedPaths: string[];
+    network: "deny";
+  };
+}
+
+export interface SandboxedCommandResult {
+  exitCode: number | null;
+  stdout: Buffer;
+  stderr: Buffer;
+  durationMs: number;
+  timedOut: boolean;
+  outputLimitExceeded: boolean;
+  attestation: SandboxCommandAttestation;
+}
+
+export interface SandboxedCommandRunner {
+  run(request: SandboxedCommandRequest): Promise<SandboxedCommandResult>;
 }
 
 export interface TestEvidence {
@@ -58,7 +93,7 @@ export function validateTargetCommandSpec(commandId: string, spec: TargetCommand
   if (spec.timeoutMs <= 0 || spec.maxOutputBytes <= 0) throw new Error(`Target command ${commandId} limits are invalid`);
 }
 
-function evidence(commandId: string, cwd: string, spec: TargetCommandSpec, result: ArgvResult): TestEvidence {
+function evidence(commandId: string, cwd: string, spec: TargetCommandSpec, result: SandboxedCommandResult): TestEvidence {
   return {
     commandId,
     argv: [...spec.argv],
@@ -82,27 +117,48 @@ export async function runTargetTests(input: {
   environment: NodeJS.ProcessEnv;
   commandIds: readonly string[];
   commands: Readonly<Record<string, TargetCommandSpec>>;
-}): Promise<{ evidence: TestEvidence[]; missingCommandIds: string[] }> {
+  runner: SandboxedCommandRunner | undefined;
+  deniedPaths: readonly string[];
+}): Promise<{ evidence: TestEvidence[]; configurationProblems: string[] }> {
   const root = realpathSync(input.worktree);
   const results: TestEvidence[] = [];
-  const missingCommandIds: string[] = [];
+  const configurationProblems: string[] = [];
+  if (!input.runner) return { evidence: [], configurationProblems: ["sandboxed command runner unavailable"] };
+  const deniedPaths = [...new Set(input.deniedPaths.map((path) => realpathSync(path)))].sort();
   for (const commandId of input.commandIds) {
     const spec = input.commands[commandId];
     if (!spec) {
-      missingCommandIds.push(commandId);
+      configurationProblems.push(`missing command: ${commandId}`);
       continue;
     }
     validateTargetCommandSpec(commandId, spec);
     const cwd = realpathSync(resolve(root, spec.cwd ?? "."));
     if (!contained(root, cwd)) throw new Error(`Target command ${commandId} cwd escaped the worktree`);
-    const result = await runArgv(
-      { argv: spec.argv, timeoutMs: spec.timeoutMs, maxOutputBytes: spec.maxOutputBytes },
-      { cwd, env: input.environment },
-    );
+    const result = await input.runner.run({
+      commandId,
+      argv: spec.argv,
+      cwd,
+      environment: input.environment,
+      timeoutMs: spec.timeoutMs,
+      maxOutputBytes: spec.maxOutputBytes,
+      sandbox: { writableRoot: root, deniedPaths, network: "deny" },
+    });
+    const attestedDenied = [...new Set(result.attestation.deniedPaths.map((path) => realpathSync(path)))].sort();
+    if (
+      !result.attestation.sandboxEnforced ||
+      realpathSync(result.attestation.writableRoot) !== root ||
+      result.attestation.network !== "deny" ||
+      !result.attestation.processIsolated ||
+      !result.attestation.processTreeReaped ||
+      JSON.stringify(attestedDenied) !== JSON.stringify(deniedPaths)
+    ) {
+      configurationProblems.push(`sandbox attestation rejected for command: ${commandId}`);
+      break;
+    }
     results.push(evidence(commandId, cwd, spec, result));
     if (results.at(-1)?.state !== "target_passed") break;
   }
-  return { evidence: results, missingCommandIds };
+  return { evidence: results, configurationProblems };
 }
 
 export function renderCandidateStatus(input: {

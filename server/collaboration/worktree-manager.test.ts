@@ -1,5 +1,5 @@
 import { execFileSync } from "node:child_process";
-import { mkdirSync, mkdtempSync, renameSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, realpathSync, renameSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
@@ -39,6 +39,7 @@ describe("managed Git worktrees", () => {
       attempt: 1,
       expectedBaseSha: sha,
     });
+    expect(worktree.commonGitDir).toBe(realpathSync(join(repo, ".git")));
     const unusual = "src/ leading space\tand\nnewline.txt";
     writeFileSync(join(worktree.path, unusual), "content\n");
     expect(await manager.changedPaths(worktree)).toContain(unusual);

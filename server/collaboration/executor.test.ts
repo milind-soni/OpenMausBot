@@ -1,5 +1,5 @@
 import { execFileSync } from "node:child_process";
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
@@ -9,7 +9,12 @@ import { FakeDingTalkAdapter } from "../integrations/dingtalk/fake-adapter.ts";
 import type { DingTalkInboundMessage } from "../integrations/dingtalk/types.ts";
 import { policy, validProposal } from "./planner.test-fixtures.ts";
 import type { AgentRunPort, AgentRunRequest, AgentRunResult } from "./provider-runner.ts";
-import type { TargetCommandSpec } from "./quality-gate.ts";
+import type {
+  SandboxedCommandRequest,
+  SandboxedCommandResult,
+  SandboxedCommandRunner,
+  TargetCommandSpec,
+} from "./quality-gate.ts";
 import { startCollaborationService } from "./service.ts";
 
 const scratch: string[] = [];
@@ -70,6 +75,40 @@ class FakeAgent implements AgentRunPort {
   }
 }
 
+function sandboxedResult(request: SandboxedCommandRequest): SandboxedCommandResult {
+  const explicitExit = request.argv.join("\0").match(/process\.exit\((\d+)\)/u);
+  const exitCode = explicitExit ? Number(explicitExit[1]) : 0;
+  return {
+    exitCode,
+    stdout: Buffer.from(exitCode === 0 ? "sandboxed target passed\n" : ""),
+    stderr: Buffer.from(exitCode === 0 ? "" : `sandboxed target failed: ${exitCode}\n`),
+    durationMs: 5,
+    timedOut: false,
+    outputLimitExceeded: false,
+    attestation: {
+      sandboxEnforced: true,
+      writableRoot: request.sandbox.writableRoot,
+      deniedPaths: [...request.sandbox.deniedPaths],
+      network: "deny",
+      processIsolated: true,
+      processTreeReaped: true,
+    },
+  };
+}
+
+class FakeSandboxedCommandRunner implements SandboxedCommandRunner {
+  readonly requests: SandboxedCommandRequest[] = [];
+
+  constructor(
+    private readonly operation: (request: SandboxedCommandRequest) => SandboxedCommandResult = sandboxedResult,
+  ) {}
+
+  async run(request: SandboxedCommandRequest): Promise<SandboxedCommandResult> {
+    this.requests.push(request);
+    return this.operation(request);
+  }
+}
+
 function completed(request: AgentRunRequest): AgentRunResult {
   return { threadId: request.threadId, turnId: request.turnId, status: "completed", sandboxEnforced: true };
 }
@@ -88,12 +127,20 @@ function targetCommand(exitCode = 0): TargetCommandSpec {
   };
 }
 
-function setup(input: { agent: AgentRunPort; commands?: Record<string, TargetCommandSpec> }) {
+function setup(input: {
+  agent: AgentRunPort;
+  commands?: Record<string, TargetCommandSpec>;
+  commandRunner?: SandboxedCommandRunner | null;
+}) {
   const root = temp();
   const repo = repository(root);
   const baseSha = git(repo, ["rev-parse", "HEAD"]);
   writeFileSync(join(repo, "local-notes.txt"), "original untracked sentinel\n");
   const originalStatus = execFileSync("git", ["status", "--porcelain=v1", "-z", "--untracked-files=all"], { cwd: repo });
+  const commandRunner =
+    input.commandRunner === null
+      ? (undefined as unknown as SandboxedCommandRunner)
+      : (input.commandRunner ?? new FakeSandboxedCommandRunner());
   const service = startCollaborationService({
     dataDirectory: join(root, "data"),
     planning: {
@@ -102,6 +149,7 @@ function setup(input: { agent: AgentRunPort; commands?: Record<string, TargetCom
     },
     execution: {
       agent: input.agent,
+      commandRunner,
       managedWorktreeRoot: join(root, "managed-worktrees"),
       repositories: {
         [repo]: { baseSha, targetCommands: input.commands ?? { "pnpm test target": targetCommand() } },
@@ -122,7 +170,7 @@ function setup(input: { agent: AgentRunPort; commands?: Record<string, TargetCom
     },
     2_000,
   );
-  return { root, repo, baseSha, originalStatus, service, workItemId: accepted.workItemId };
+  return { root, repo, baseSha, originalStatus, service, commandRunner, workItemId: accepted.workItemId };
 }
 
 function ledger(root: string): DatabaseSync {
@@ -170,6 +218,19 @@ describe("trusted candidate executor", () => {
     expect(body).toContain(`Work-Item: ${harness.workItemId}`);
     expect(body).toContain(`Base-SHA: ${harness.baseSha}`);
     expect(git(result.worktreePath, ["rev-parse", `${result.resultSha}^`])).toBe(harness.baseSha);
+    expect(harness.commandRunner).toBeInstanceOf(FakeSandboxedCommandRunner);
+    const requests = (harness.commandRunner as FakeSandboxedCommandRunner).requests;
+    expect(requests).toHaveLength(1);
+    expect(requests[0]).toMatchObject({ commandId: "pnpm test target", cwd: result.worktreePath });
+    expect(requests[0].sandbox).toEqual({
+      writableRoot: result.worktreePath,
+      deniedPaths: [
+        realpathSync(join(harness.repo, ".git")),
+        realpathSync(harness.repo),
+        realpathSync(join(harness.root, "data", "collaboration")),
+      ].sort(),
+      network: "deny",
+    });
     harness.service.close();
 
     const db = ledger(harness.root);
@@ -267,6 +328,35 @@ describe("trusted candidate executor", () => {
     expect(missing.report).toMatchObject({ state: "needs_configuration" });
     expect(missing.report.reasons).toContain("missing command: pnpm test target");
     second.service.close();
+  });
+
+  it("requires a sandbox runner and rejects incomplete sandbox attestations", async () => {
+    const edit = new FakeAgent((request) => {
+      writeFileSync(join(request.cwd, "src", "value.txt"), "after\n");
+      return completed(request);
+    });
+    const missingRunner = setup({ agent: edit, commandRunner: null });
+    const unavailable = await missingRunner.service.executeCurrentPlan(missingRunner.workItemId);
+    expect(unavailable).toMatchObject({
+      report: { state: "needs_configuration", reasons: ["sandboxed command runner unavailable"] },
+      evidence: [],
+    });
+    missingRunner.service.close();
+
+    const rejectedRunner = new FakeSandboxedCommandRunner((request) => ({
+      ...sandboxedResult(request),
+      attestation: { ...sandboxedResult(request).attestation, network: "unknown" },
+    }));
+    const rejectedHarness = setup({ agent: edit, commandRunner: rejectedRunner });
+    const rejected = await rejectedHarness.service.executeCurrentPlan(rejectedHarness.workItemId);
+    expect(rejected).toMatchObject({
+      report: {
+        state: "needs_configuration",
+        reasons: ["sandbox attestation rejected for command: pnpm test target"],
+      },
+      evidence: [],
+    });
+    rejectedHarness.service.close();
   });
 
   it("times out, interrupts, and does not inspect or commit a still-running Agent", async () => {

@@ -69,6 +69,31 @@ describe("bounded argv execution", () => {
     expect(Date.now() - started).toBeLessThan(3_000);
   }, 10_000);
 
+  it("reaps descendants before resolving after the process-group leader exits successfully", async () => {
+    if (process.platform === "win32") return;
+    const home = cwd();
+    const env = isolatedExecutionEnvironment(process.env, home);
+    const descendant = [
+      "process.on('SIGTERM',()=>setTimeout(()=>process.exit(0),150));",
+      "if(process.send)process.send('ready');",
+      "setInterval(()=>{},1000);",
+    ].join("");
+    const leader = [
+      "const {spawn}=require('node:child_process');",
+      `const child=spawn(process.execPath,['-e',${JSON.stringify(descendant)}],{stdio:['ignore','ignore','ignore','ipc']});`,
+      "child.once('message',()=>{process.stdout.write(String(child.pid));process.exit(0);});",
+    ].join("");
+    const result = await runArgv(
+      { argv: [process.execPath, "-e", leader], timeoutMs: 2_000, maxOutputBytes: 1_000 },
+      { cwd: home, env },
+    );
+    const descendantPid = Number(result.stdout.toString("utf8"));
+    expect(result.exitCode).toBe(0);
+    expect(result.durationMs).toBeGreaterThanOrEqual(100);
+    expect(Number.isInteger(descendantPid)).toBe(true);
+    expect(() => process.kill(descendantPid, 0)).toThrow();
+  });
+
   it("rejects configured network and installation commands", () => {
     expect(() =>
       validateTargetCommandSpec("download", { argv: ["curl", "https://example.invalid"], timeoutMs: 1, maxOutputBytes: 1 }),

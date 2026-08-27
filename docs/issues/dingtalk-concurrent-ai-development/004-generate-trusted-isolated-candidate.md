@@ -33,7 +33,9 @@ Execute the sequential graph against a disposable Git repository. Lock a committ
 - Git inspection uses argv-only processes and NUL-delimited path output, including tracked deletion/rename endpoints, untracked files and ignored secret files. Deny paths, out-of-claim paths, symlinks and Git metadata mutation stop before commit.
 - Commits disable hooks/signing, use the fixed `OpenMausBot <bot@local.invalid>` identity, include Work Item/plan/node/run/base trailers, and must have exactly the locked base as their sole parent.
 - Target commands are selected by configured ID and literal argv. Network/install commands, escaping cwd, timeouts, output floods, Agent timeouts and stale plans fail closed.
-- Automated Git fixtures prove original HEAD/index/status/sentinel content remain unchanged, accurate target/full-gate wording, late-event filtering, candidate traceability and retained invalid worktrees.
+- Trusted target-test evidence is accepted only from the injected `SandboxedCommandRunner`. Its attestation must prove the managed worktree is the sole writable root, the original repository/Git common directory/service data are denied, network is denied, the process is isolated, and the complete process tree was reaped. Missing or rejected attestations produce `needs_configuration`, never `target_tests_passed`.
+- The generic argv runner is only a defense-in-depth utility, not a sandbox. On POSIX it sends TERM and then bounded KILL to its detached process group and verifies the group is gone before resolving, including when the leader exited successfully while descendants remained.
+- Automated Git fixtures prove original HEAD/index/status/sentinel content remain unchanged, accurate target/full-gate wording, late-event filtering, candidate traceability and retained invalid worktrees. Eight focused files pass 43 tests, including rejected/missing sandbox attestations and successful-leader descendant cleanup.
 
 ## User stories addressed
 

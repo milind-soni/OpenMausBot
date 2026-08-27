@@ -9,6 +9,7 @@ const FULL_SHA = /^(?:[0-9a-f]{40}|[0-9a-f]{64})$/u;
 export interface ManagedWorktree {
   repository: string;
   path: string;
+  commonGitDir: string;
   branch: string;
   baseSha: string;
   originalHead: string;
@@ -164,9 +165,14 @@ export class WorktreeManager {
     ]);
     const canonicalPath = realpathSync(path);
     if (!contained(this.root, canonicalPath)) throw new Error("Created worktree escaped its managed root");
+    const commonGitDirOutput = (await git(canonicalPath, this.environment, ["rev-parse", "--git-common-dir"]))
+      .stdout.toString("utf8")
+      .trim();
+    const commonGitDir = realpathSync(resolve(canonicalPath, commonGitDirOutput));
     return {
       repository,
       path: canonicalPath,
+      commonGitDir,
       branch,
       baseSha: originalHead,
       originalHead,

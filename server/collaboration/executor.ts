@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { realpathSync } from "node:fs";
+import { dirname } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 
 import { appendExecutionAudit } from "./audit.ts";
@@ -9,6 +10,7 @@ import {
   renderCandidateStatus,
   runTargetTests,
   type CandidateStatusReport,
+  type SandboxedCommandRunner,
   type TargetCommandSpec,
   type TestEvidence,
 } from "./quality-gate.ts";
@@ -39,6 +41,7 @@ export interface RepositoryExecutionConfig {
 
 export interface CandidateExecutorOptions {
   agent: AgentRunPort;
+  commandRunner: SandboxedCommandRunner;
   managedWorktreeRoot: string;
   repositories: Readonly<Record<string, RepositoryExecutionConfig>>;
   limits: {
@@ -73,6 +76,7 @@ function errorMessage(error: unknown): string {
 
 export class CandidateExecutor {
   private readonly database: DatabaseSync;
+  private readonly serviceDataDirectory: string;
   private readonly worktrees: WorktreeManager;
   private readonly options: CandidateExecutorOptions;
   private closed = false;
@@ -80,6 +84,7 @@ export class CandidateExecutor {
   constructor(databaseFile: string, options: CandidateExecutorOptions) {
     this.options = options;
     this.database = new DatabaseSync(databaseFile);
+    this.serviceDataDirectory = realpathSync(dirname(realpathSync(databaseFile)));
     this.database.exec("PRAGMA foreign_keys = ON");
     this.database.exec("PRAGMA busy_timeout = 5000");
     const version = this.database.prepare("PRAGMA user_version").get() as { user_version: number };
@@ -256,10 +261,12 @@ export class CandidateExecutor {
         environment: worktree.environment,
         commandIds: parseStrings(node.target_commands_json),
         commands: configured.targetCommands,
+        runner: this.options.commandRunner,
+        deniedPaths: [worktree.commonGitDir, worktree.repository, this.serviceDataDirectory],
       });
       testEvidence = tests.evidence;
-      report = tests.missingCommandIds.length
-        ? renderCandidateStatus({ modified: true, needsConfiguration: tests.missingCommandIds.map((id) => `missing command: ${id}`) })
+      report = tests.configurationProblems.length
+        ? renderCandidateStatus({ modified: true, needsConfiguration: tests.configurationProblems })
         : renderCandidateStatus({ modified: true, evidence: testEvidence });
     } catch (error) {
       report = renderCandidateStatus({ modified: true, needsConfiguration: [errorMessage(error)] });
