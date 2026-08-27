@@ -4,6 +4,11 @@ import type { DingTalkInboundMessage } from "../integrations/dingtalk/types.ts";
 import { FIRST_MILESTONE_DEFAULTS, OPENMAUSBOT_SOURCE_BASELINE } from "./config.ts";
 import { openCollaborationLedger, type CollaborationLedger, type DatabaseHealth } from "./db.ts";
 import { InboundMessageProcessor, type InboundMessageOutcome } from "./inbound.ts";
+import {
+  CandidateExecutor,
+  type CandidateExecutionOutcome,
+  type CandidateExecutorOptions,
+} from "./executor.ts";
 import type { CollaborationOutboxEntry } from "./outbox.ts";
 import {
   PlanningCoordinator,
@@ -30,6 +35,7 @@ export interface CollaborationService {
     patch: WorkItemSnapshotPatch,
     now?: number,
   ): DefinitionRevisionOutcome;
+  executeCurrentPlan(workItemId: string, attempt?: number, now?: number): Promise<CandidateExecutionOutcome>;
   pendingOutbox(): CollaborationOutboxEntry[];
   close(): void;
 }
@@ -37,6 +43,7 @@ export interface CollaborationService {
 export interface CollaborationServiceOptions {
   dataDirectory: string;
   planning?: PlanningCoordinatorOptions;
+  execution?: CandidateExecutorOptions;
 }
 
 export function startCollaborationService(options: CollaborationServiceOptions): CollaborationService {
@@ -52,6 +59,15 @@ export function startCollaborationService(options: CollaborationServiceOptions):
   try {
     planning = options.planning ? new PlanningCoordinator(ledger.filePath, options.planning) : null;
   } catch (error) {
+    inbound.close();
+    ledger.close();
+    throw error;
+  }
+  let execution: CandidateExecutor | null = null;
+  try {
+    execution = options.execution ? new CandidateExecutor(ledger.filePath, options.execution) : null;
+  } catch (error) {
+    planning?.close();
     inbound.close();
     ledger.close();
     throw error;
@@ -84,6 +100,11 @@ export function startCollaborationService(options: CollaborationServiceOptions):
       if (!planning) throw new Error("Collaboration planning is not configured");
       return planning.reviseDefinition(workItemId, patch, now);
     },
+    async executeCurrentPlan(workItemId, attempt, now) {
+      if (closed) throw new Error("Collaboration service is closed");
+      if (!execution) throw new Error("Collaboration execution is not configured");
+      return await execution.executeCurrentPlan(workItemId, attempt, now);
+    },
     pendingOutbox() {
       if (closed) throw new Error("Collaboration service is closed");
       return inbound.pendingOutbox();
@@ -91,6 +112,7 @@ export function startCollaborationService(options: CollaborationServiceOptions):
     close() {
       if (closed) return;
       closed = true;
+      execution?.close();
       planning?.close();
       inbound.close();
       ledger.close();
