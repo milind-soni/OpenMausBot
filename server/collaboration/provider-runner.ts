@@ -34,7 +34,10 @@ export interface AgentRunRequest {
     denyGitMetadata: true;
     network: "deny";
   };
+  containmentBinding: import("./containment.ts").ContainmentBinding;
   signal: AbortSignal;
+  /** Register as soon as the backend creates its independently verifiable containment. */
+  registerContainment(proof: import("./containment.ts").ContainmentProof): Promise<void>;
   emit(event: AgentRunEvent): void;
 }
 
@@ -45,6 +48,8 @@ export interface AgentRunResult {
   message?: string;
   need?: "network" | "dependency_installation";
   sandboxEnforced: boolean;
+  /** Required before candidate output can cross the runtime trust boundary. */
+  containmentProof?: import("./containment.ts").ContainmentProof;
 }
 
 export interface AgentRunPort {

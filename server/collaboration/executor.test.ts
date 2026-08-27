@@ -8,6 +8,13 @@ import { afterEach, describe, expect, it } from "vitest";
 import { FakeDingTalkAdapter } from "../integrations/dingtalk/fake-adapter.ts";
 import type { DingTalkInboundMessage, DingTalkSender } from "../integrations/dingtalk/types.ts";
 import { policy, validProposal } from "./planner.test-fixtures.ts";
+import {
+  containmentBindingHash,
+  runtimeIdentityFingerprint,
+  type ContainmentBinding,
+  type ContainmentPort,
+  type ContainmentProof,
+} from "./containment.ts";
 import type { AgentRunPort, AgentRunRequest, AgentRunResult } from "./provider-runner.ts";
 import type {
   SandboxedCommandRequest,
@@ -18,6 +25,33 @@ import type {
 import { startCollaborationService } from "./service.ts";
 
 const scratch: string[] = [];
+
+const VERIFIED_PROOF: ContainmentProof = {
+  identity: {
+    backend: "test_verified_runtime",
+    opaqueId: "opaque-runtime-identity-0001",
+    hostGeneration: "test-host-generation-1",
+    verifierVersion: "test-verifier-v1",
+  },
+  receipt: "independent-test-receipt",
+};
+
+class FakeContainment implements ContainmentPort {
+  async verifyProof(proof: ContainmentProof, expectedBinding: ContainmentBinding) {
+    const bindingHash = containmentBindingHash(expectedBinding);
+    return proof.receipt === bindingHash
+      ? { verified: true as const, fingerprint: runtimeIdentityFingerprint(proof.identity), bindingHash }
+      : { verified: false as const, reason: "unverified" };
+  }
+
+  async inspect(identity: ContainmentProof["identity"]) {
+    return { state: "empty" as const, fingerprint: runtimeIdentityFingerprint(identity) };
+  }
+
+  async terminateAndWaitEmpty(identity: ContainmentProof["identity"]) {
+    return { state: "empty" as const, fingerprint: runtimeIdentityFingerprint(identity) };
+  }
+}
 
 afterEach(() => {
   for (const directory of scratch.splice(0)) rmSync(directory, { recursive: true, force: true });
@@ -76,6 +110,7 @@ class FakeAgent implements AgentRunPort {
   constructor(private readonly operation: (request: AgentRunRequest) => Promise<AgentRunResult> | AgentRunResult) {}
 
   async run(request: AgentRunRequest): Promise<AgentRunResult> {
+    await request.registerContainment(proofForBinding(request.containmentBinding));
     return await this.operation(request);
   }
 
@@ -101,6 +136,7 @@ function sandboxedResult(request: SandboxedCommandRequest): SandboxedCommandResu
       network: "deny",
       processIsolated: true,
       processTreeReaped: true,
+      containmentProof: proofForBinding(request.containmentBinding),
     },
   };
 }
@@ -114,12 +150,23 @@ class FakeSandboxedCommandRunner implements SandboxedCommandRunner {
 
   async run(request: SandboxedCommandRequest): Promise<SandboxedCommandResult> {
     this.requests.push(request);
+    await request.registerContainment(proofForBinding(request.containmentBinding));
     return this.operation(request);
   }
 }
 
 function completed(request: AgentRunRequest): AgentRunResult {
-  return { threadId: request.threadId, turnId: request.turnId, status: "completed", sandboxEnforced: true };
+  return {
+    threadId: request.threadId,
+    turnId: request.turnId,
+    status: "completed",
+    sandboxEnforced: true,
+    containmentProof: proofForBinding(request.containmentBinding),
+  };
+}
+
+function proofForBinding(binding: ContainmentBinding): ContainmentProof {
+  return { ...VERIFIED_PROOF, receipt: containmentBindingHash(binding) };
 }
 
 function targetCommand(exitCode = 0): TargetCommandSpec {
@@ -158,6 +205,7 @@ function setup(input: {
     },
     execution: {
       agent: input.agent,
+      containment: new FakeContainment(),
       commandRunner,
       managedWorktreeRoot: join(root, "managed-worktrees"),
       repositories: {
@@ -369,6 +417,80 @@ describe("trusted candidate executor", () => {
       evidence: [],
     });
     rejectedHarness.service.close();
+  });
+
+  it("rejects process-group containment before creating a candidate or trusted evidence", async () => {
+    const agent = new FakeAgent((request) => {
+      writeFileSync(join(request.cwd, "src", "value.txt"), "after\n");
+      return {
+        ...completed(request),
+        containmentProof: {
+          identity: {
+            ...VERIFIED_PROOF.identity,
+            backend: "process_group",
+            opaqueId: "1234567890123456",
+          },
+          receipt: VERIFIED_PROOF.receipt,
+        },
+      };
+    });
+    const harness = setup({ agent });
+    const outcome = await harness.service.executeCurrentPlan(harness.workItemId);
+    expect(outcome).toMatchObject({
+      resultSha: null,
+      evidence: [],
+      report: { state: "needs_configuration", reasons: ["unsupported_process_identity"] },
+    });
+    const db = ledger(harness.root);
+    expect(db.prepare("SELECT count(*) AS count FROM collaboration_test_evidence").get()).toEqual({ count: 0 });
+    db.close();
+    harness.service.close();
+  });
+
+  it("rejects an empty Agent containment proof replayed from another run binding", async () => {
+    const agent = new FakeAgent((request) => {
+      writeFileSync(join(request.cwd, "src", "value.txt"), "after\n");
+      return {
+        ...completed(request),
+        containmentProof: proofForBinding({ ...request.containmentBinding, runId: "replayed-run" }),
+      };
+    });
+    const harness = setup({ agent });
+    const outcome = await harness.service.executeCurrentPlan(harness.workItemId);
+    expect(outcome).toMatchObject({ resultSha: null, evidence: [], report: { state: "needs_configuration" } });
+    expect(outcome.report.reasons).toContain("unverified");
+    const db = ledger(harness.root);
+    expect(db.prepare("SELECT count(*) AS count FROM collaboration_test_evidence").get()).toEqual({ count: 0 });
+    db.close();
+    harness.service.close();
+  });
+
+  it("rejects target-test containment proof replayed from another command binding", async () => {
+    const agent = new FakeAgent((request) => {
+      writeFileSync(join(request.cwd, "src", "value.txt"), "after\n");
+      return completed(request);
+    });
+    const runner = new FakeSandboxedCommandRunner((request) => {
+      const result = sandboxedResult(request);
+      return {
+        ...result,
+        attestation: {
+          ...result.attestation,
+          containmentProof: proofForBinding({ ...request.containmentBinding, commandId: "replayed-command" }),
+        },
+      };
+    });
+    const harness = setup({ agent, commandRunner: runner });
+    const outcome = await harness.service.executeCurrentPlan(harness.workItemId);
+    expect(outcome.resultSha).not.toBeNull();
+    expect(outcome).toMatchObject({
+      evidence: [],
+      report: { state: "needs_configuration", reasons: ["containment proof rejected for command: pnpm test target"] },
+    });
+    const db = ledger(harness.root);
+    expect(db.prepare("SELECT count(*) AS count FROM collaboration_test_evidence").get()).toEqual({ count: 0 });
+    db.close();
+    harness.service.close();
   });
 
   it("times out, interrupts, and does not inspect or commit a still-running Agent", async () => {

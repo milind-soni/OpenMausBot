@@ -2,6 +2,7 @@ import { execFileSync } from "node:child_process";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
+import { DatabaseSync } from "node:sqlite";
 import { afterEach, describe, expect, it } from "vitest";
 
 import { FIRST_MILESTONE_DEFAULTS, OPENMAUSBOT_SOURCE_BASELINE } from "./config.ts";
@@ -30,8 +31,8 @@ describe("headless collaboration service", () => {
       authority: "headless",
       database: {
         file: "collaboration.sqlite",
-        schemaVersion: 5,
-        appliedMigrations: 5,
+        schemaVersion: 7,
+        appliedMigrations: 7,
         journalMode: "wal",
         foreignKeys: true,
       },
@@ -66,8 +67,38 @@ describe("headless collaboration service", () => {
       status: "healthy",
       ready: true,
       authority: "headless",
-      database: { schemaVersion: 5, appliedMigrations: 5 },
+      database: { schemaVersion: 7, appliedMigrations: 7 },
       defaults: { executionMode: "observe", multiAgentConcurrency: false, previewDeployment: false },
     });
+  });
+
+  it("reports degraded health after an authoritative audit write fails", () => {
+    const directory = temporaryDirectory();
+    const service = startCollaborationService({ dataDirectory: directory });
+    service.bootstrapOwnerLocally({ senderCorpId: "corp", senderStaffId: "owner", now: 1 });
+    const created = service.ingestDingTalkMessage({
+      sourceEventId: "degraded-event",
+      transportMessageId: "degraded-transport",
+      conversationId: "degraded-conversation",
+      addressedToBot: true,
+      text: "create work",
+      sender: { senderCorpId: "corp", senderStaffId: "staff", senderId: "sender", displayName: "Contributor" },
+      receivedAt: 2,
+    });
+    const database = new DatabaseSync(join(directory, "collaboration", "collaboration.sqlite"));
+    database.exec(`
+      CREATE TRIGGER test_service_reject_audit BEFORE INSERT ON collaboration_audit_events
+      BEGIN SELECT RAISE(ABORT, 'audit unavailable'); END;
+    `);
+    expect(() =>
+      service.issueOwnerAction({ action: "pause", workItemId: created.workItemId!, expectedVersion: 1, now: 3 }),
+    ).toThrow("audit unavailable");
+    expect(service.health()).toMatchObject({
+      status: "degraded",
+      ready: false,
+      degradation: { reason: "audit_unwritable" },
+    });
+    database.close();
+    service.close();
   });
 });

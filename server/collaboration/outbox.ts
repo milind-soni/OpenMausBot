@@ -15,6 +15,28 @@ export interface CollaborationOutboxEntry {
   card: InboundCard;
   createdAt: number;
   sentAt: number | null;
+  deliveryState: "pending" | "claimed" | "sent" | "dead_letter" | "superseded";
+  attempt: number;
+  nextAttemptAt: number;
+  lastError: string | null;
+}
+
+/** Transport-neutral contract implemented by the real DingTalk adapter. */
+export interface OutboxDeliveryPort {
+  deliver(message: {
+    id: string;
+    source: string;
+    dedupeKey: string;
+    aggregateType: CollaborationOutboxEntry["aggregateType"];
+    aggregateId: string;
+    aggregateVersion: number;
+    kind: CollaborationOutboxEntry["kind"];
+    payload: InboundCard;
+  }): Promise<
+    | { outcome: "sent"; transportId?: string }
+    | { outcome: "retryable" | "unknown"; error: string }
+    | { outcome: "permanent_failure"; error: string }
+  >;
 }
 
 interface OutboxRow {
@@ -30,6 +52,11 @@ interface OutboxRow {
   created_at: number;
   sent_at: number | null;
   superseded_at: number | null;
+  delivery_state: CollaborationOutboxEntry["deliveryState"];
+  attempt: number;
+  next_attempt_at: number;
+  last_error: string | null;
+  dedupe_key: string;
 }
 
 function rowToEntry(row: OutboxRow): CollaborationOutboxEntry {
@@ -45,6 +72,10 @@ function rowToEntry(row: OutboxRow): CollaborationOutboxEntry {
     card: JSON.parse(row.payload_json) as InboundCard,
     createdAt: row.created_at,
     sentAt: row.sent_at,
+    deliveryState: row.delivery_state,
+    attempt: row.attempt,
+    nextAttemptAt: row.next_attempt_at,
+    lastError: row.last_error,
   };
 }
 
@@ -64,7 +95,7 @@ export function enqueueInboundCard(
   if (input.supersessionKey) {
     database
       .prepare(
-        "UPDATE collaboration_outbox SET superseded_at = ? " +
+        "UPDATE collaboration_outbox SET superseded_at = ?, delivery_state = 'superseded' " +
           "WHERE supersession_key = ? AND sent_at IS NULL AND superseded_at IS NULL",
       )
       .run(input.now, input.supersessionKey);
@@ -72,8 +103,9 @@ export function enqueueInboundCard(
   database
     .prepare(
       "INSERT INTO collaboration_outbox " +
-        "(id, source, source_event_id, aggregate_type, aggregate_id, aggregate_version, kind, dedupe_key, supersession_key, payload_json, created_at) " +
-        "VALUES (?, 'dingtalk', ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        "(id, source, source_event_id, aggregate_type, aggregate_id, aggregate_version, kind, dedupe_key, " +
+        "supersession_key, payload_json, created_at, next_attempt_at) " +
+        "VALUES (?, 'dingtalk', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
     )
     .run(
       id,
@@ -85,6 +117,7 @@ export function enqueueInboundCard(
       `dingtalk:event:${input.sourceEventId}:ack`,
       input.supersessionKey ?? null,
       JSON.stringify(input.card),
+      input.now,
       input.now,
     );
   return {
@@ -99,6 +132,10 @@ export function enqueueInboundCard(
     card: input.card,
     createdAt: input.now,
     sentAt: null,
+    deliveryState: "pending",
+    attempt: 0,
+    nextAttemptAt: input.now,
+    lastError: null,
   };
 }
 
@@ -114,7 +151,8 @@ export function listPendingOutbox(database: DatabaseSync): CollaborationOutboxEn
   const rows = database
     .prepare(
       "SELECT * FROM collaboration_outbox " +
-        "WHERE sent_at IS NULL AND superseded_at IS NULL ORDER BY created_at, id",
+        "WHERE delivery_state IN ('pending', 'claimed') AND sent_at IS NULL AND superseded_at IS NULL " +
+          "ORDER BY created_at, id",
     )
     .all() as unknown as OutboxRow[];
   return rows.map(rowToEntry);

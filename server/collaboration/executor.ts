@@ -1,9 +1,21 @@
-import { randomUUID } from "node:crypto";
+import { randomBytes, randomUUID } from "node:crypto";
 import { realpathSync } from "node:fs";
 import { dirname } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 
 import { appendExecutionAudit } from "./audit.ts";
+import {
+  type ContainmentBinding,
+  type ContainmentPort,
+  verifyContainmentProof,
+} from "./containment.ts";
+import { CollaborationDegradationController } from "./degradation.ts";
+import type { RuntimeReadiness } from "./degradation.ts";
+import {
+  assertCurrentInstanceLease,
+  InstanceLeaseCoordinator,
+  type InstanceLease,
+} from "./leases.ts";
 import type { AgentRunPort, AgentRunResult } from "./provider-runner.ts";
 import { eventBelongsToRun } from "./provider-runner.ts";
 import {
@@ -41,6 +53,7 @@ export interface RepositoryExecutionConfig {
 
 export interface CandidateExecutorOptions {
   agent: AgentRunPort;
+  containment: ContainmentPort;
   commandRunner: SandboxedCommandRunner;
   managedWorktreeRoot: string;
   repositories: Readonly<Record<string, RepositoryExecutionConfig>>;
@@ -50,6 +63,7 @@ export interface CandidateExecutorOptions {
     maxAgentEventBytes: number;
     interruptGraceMs: number;
   };
+  scheduler?: { ownerId: string; leaseTtlMs: number };
 }
 
 export interface CandidateExecutionOutcome {
@@ -79,6 +93,9 @@ export class CandidateExecutor {
   private readonly serviceDataDirectory: string;
   private readonly worktrees: WorktreeManager;
   private readonly options: CandidateExecutorOptions;
+  private readonly instanceLeases: InstanceLeaseCoordinator;
+  private readonly degradation: CollaborationDegradationController;
+  private ownedLease: InstanceLease | null = null;
   private closed = false;
 
   constructor(databaseFile: string, options: CandidateExecutorOptions) {
@@ -88,14 +105,30 @@ export class CandidateExecutor {
     this.database.exec("PRAGMA foreign_keys = ON");
     this.database.exec("PRAGMA busy_timeout = 5000");
     const version = this.database.prepare("PRAGMA user_version").get() as { user_version: number };
-    if (version.user_version < 5) throw new Error("Trusted candidate and Owner control schema is not installed");
+    if (version.user_version < 6) throw new Error("Fenced candidate execution schema is not installed");
     if (options.limits.maxAttempts < 1) throw new Error("Execution maxAttempts must be positive");
+    this.instanceLeases = new InstanceLeaseCoordinator(
+      this.database,
+      options.scheduler?.ownerId ?? `candidate-executor:${randomUUID()}`,
+    );
+    this.degradation = new CollaborationDegradationController(this.database);
     this.worktrees = new WorktreeManager(options.managedWorktreeRoot);
   }
 
   async executeCurrentPlan(workItemId: string, attempt = 1, now = Date.now()): Promise<CandidateExecutionOutcome> {
     if (this.closed) throw new Error("Candidate executor is closed");
     if (attempt > this.options.limits.maxAttempts) throw new Error("Execution attempt limit exceeded");
+    const leaseNow = Date.now();
+    const instance = this.instanceLeases.acquire(
+      leaseNow,
+      Math.max(
+        this.options.scheduler?.leaseTtlMs ?? 0,
+        this.options.limits.agentTimeoutMs + this.options.limits.interruptGraceMs + 60_000,
+      ),
+    );
+    if (!instance) throw new Error("Another collaboration scheduler owns the instance lease");
+    this.ownedLease = instance;
+    this.degradation.authorizeNewWork(instance, { action: "candidate.dispatch", workItemId, now: leaseNow });
     const node = this.loadModifyNode(workItemId);
     const repository = realpathSync(node.repository);
     const configured = Object.entries(this.options.repositories).find(([path]) => realpathSync(path) === repository)?.[1];
@@ -110,7 +143,25 @@ export class CandidateExecutor {
       attempt,
       expectedBaseSha: configured.baseSha,
     });
-    this.startRun({ runId, workItemId, attempt, node, threadId, turnId, worktree, now });
+    const containmentBinding: ContainmentBinding = {
+      runId,
+      canonicalWorktreePath: realpathSync(worktree.path),
+      instanceOwner: instance.ownerId,
+      instanceFence: instance.fence,
+      nonce: randomBytes(32).toString("base64url"),
+    };
+    this.startRun({
+      runId,
+      workItemId,
+      attempt,
+      node,
+      threadId,
+      turnId,
+      worktree,
+      instance,
+      containmentBinding,
+      now,
+    });
 
     const controller = new AbortController();
     let eventBytes = 0;
@@ -146,7 +197,21 @@ export class CandidateExecutor {
         denyGitMetadata: true,
         network: "deny",
       },
+      containmentBinding,
       signal: controller.signal,
+      registerContainment: async (proof) => {
+        const verified = await verifyContainmentProof(this.options.containment, proof, containmentBinding);
+        if (!verified.verified) throw new Error("Provider containment proof was rejected");
+        this.recordVerifiedContainment(
+          runId,
+          proof,
+          verified.fingerprint,
+          containmentBinding,
+          instance,
+          Date.now(),
+          "verified",
+        );
+      },
       emit: (event) => {
         if (!acceptingEvents || !eventBelongsToRun(event, { threadId, turnId })) return;
         const bytes = Buffer.byteLength(event.message, "utf8");
@@ -253,6 +318,54 @@ export class CandidateExecutor {
     if (result.status !== "completed") {
       return this.finalizeWithoutCandidate(runId, workItemId, node, worktree, "failed", [result.message ?? "agent_failed"], now);
     }
+    const containment = await verifyContainmentProof(
+      this.options.containment,
+      result.containmentProof ?? null,
+      containmentBinding,
+    );
+    if (!containment.verified || !result.containmentProof) {
+      return this.finalizeWithoutCandidate(
+        runId,
+        workItemId,
+        node,
+        worktree,
+        "needs_configuration",
+        ["reason" in containment ? containment.reason : "containment_proof_missing"],
+        now,
+      );
+    }
+    if (!this.isRegisteredContainment(runId, containment.fingerprint, containmentBinding)) {
+      return this.finalizeWithoutCandidate(
+        runId,
+        workItemId,
+        node,
+        worktree,
+        "needs_configuration",
+        ["provider_containment_not_registered"],
+        now,
+      );
+    }
+    const contained = await this.options.containment.inspect(result.containmentProof.identity);
+    if (contained.state !== "empty" || contained.fingerprint !== containment.fingerprint) {
+      return this.finalizeWithoutCandidate(
+        runId,
+        workItemId,
+        node,
+        worktree,
+        "needs_configuration",
+        [contained.state === "unknown" ? contained.reason : "provider_containment_not_empty"],
+        now,
+      );
+    }
+    this.recordVerifiedContainment(
+      runId,
+      result.containmentProof,
+      containment.fingerprint,
+      containmentBinding,
+      instance,
+      Date.now(),
+      "empty",
+    );
 
     await this.worktrees.assertOriginalUnchanged(worktree);
     if ((await this.worktrees.currentHead(worktree)) !== worktree.baseSha) {
@@ -269,6 +382,7 @@ export class CandidateExecutor {
     if (beforeCommitBlock) {
       return this.finalizeWithoutCandidate(runId, workItemId, node, worktree, "invalid", [beforeCommitBlock], now, changedPaths);
     }
+    assertCurrentInstanceLease(this.database, instance, Date.now());
     appendExecutionAudit(this.database, {
       runId,
       action: "candidate.commit_authorized",
@@ -297,6 +411,7 @@ export class CandidateExecutor {
         now,
       );
     }
+    assertCurrentInstanceLease(this.database, instance, Date.now());
 
     let testEvidence: TestEvidence[] = [];
     let report: CandidateStatusReport;
@@ -307,6 +422,13 @@ export class CandidateExecutor {
         commandIds: parseStrings(node.target_commands_json),
         commands: configured.targetCommands,
         runner: this.options.commandRunner,
+        containment: this.options.containment,
+        containmentContext: {
+          runId,
+          canonicalWorktreePath: containmentBinding.canonicalWorktreePath,
+          instanceOwner: instance.ownerId,
+          instanceFence: instance.fence,
+        },
         deniedPaths: [worktree.commonGitDir, worktree.repository, this.serviceDataDirectory],
       });
       testEvidence = tests.evidence;
@@ -330,7 +452,18 @@ export class CandidateExecutor {
   close(): void {
     if (this.closed) return;
     this.closed = true;
+    if (this.ownedLease) {
+      try {
+        this.instanceLeases.release(this.ownedLease, Date.now());
+      } catch {}
+      this.ownedLease = null;
+    }
     this.database.close();
+  }
+
+  readiness(): RuntimeReadiness {
+    if (this.closed) throw new Error("Candidate executor is closed");
+    return this.degradation.readiness();
   }
 
   private loadModifyNode(workItemId: string): NodeRow {
@@ -412,6 +545,8 @@ export class CandidateExecutor {
     threadId: string;
     turnId: string;
     worktree: ManagedWorktree;
+    instance: InstanceLease;
+    containmentBinding: ContainmentBinding;
     now: number;
   }): void {
     this.database.exec("BEGIN IMMEDIATE");
@@ -419,11 +554,35 @@ export class CandidateExecutor {
       if (!this.isCurrentExecutableNode(input.workItemId, input.node.current_plan_revision, input.node.node_id)) {
         throw new Error("Plan changed or Owner control prevents execution");
       }
+      assertCurrentInstanceLease(this.database, input.instance, Date.now());
+      const claimed = this.database
+        .prepare(
+          "UPDATE collaboration_work_nodes SET lease_owner = ?, lease_expires_at = ?, " +
+            "lease_fence = COALESCE(lease_fence, 0) + 1, runtime_state = 'running', version = version + 1 " +
+            "WHERE work_item_id = ? AND plan_revision = ? AND node_id = ? AND active = 1 " +
+            "AND control_state = 'active' AND (lease_expires_at IS NULL OR lease_expires_at <= ?)",
+        )
+        .run(
+          input.instance.ownerId,
+          input.instance.expiresAt,
+          input.workItemId,
+          input.node.current_plan_revision,
+          input.node.node_id,
+          Date.now(),
+        );
+      if (claimed.changes !== 1) throw new Error("Executable node is already leased");
+      const nodeLease = this.database
+        .prepare(
+          "SELECT lease_fence FROM collaboration_work_nodes " +
+            "WHERE work_item_id = ? AND plan_revision = ? AND node_id = ?",
+        )
+        .get(input.workItemId, input.node.current_plan_revision, input.node.node_id) as { lease_fence: number };
       this.database
         .prepare(
           "INSERT INTO collaboration_runs " +
             "(id, work_item_id, plan_revision, node_id, attempt, agent_id, thread_id, turn_id, status, repository_path, " +
-            "worktree_path, branch, base_sha, started_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'running', ?, ?, ?, ?, ?)",
+            "worktree_path, branch, base_sha, started_at, instance_owner, instance_fence, node_lease_fence, heartbeat_at, " +
+            "containment_binding_json) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'running', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
         )
         .run(
           input.runId,
@@ -439,12 +598,18 @@ export class CandidateExecutor {
           input.worktree.branch,
           input.worktree.baseSha,
           input.now,
+          input.instance.ownerId,
+          input.instance.fence,
+          nodeLease.lease_fence,
+          input.now,
+          JSON.stringify(input.containmentBinding),
         );
       this.database
         .prepare(
           "UPDATE collaboration_work_nodes SET execution_status = CASE " +
             "WHEN node_type = 'analyze' THEN 'candidate_ready' WHEN node_type = 'modify' THEN 'running' " +
-            "ELSE execution_status END WHERE work_item_id = ? AND plan_revision = ? AND active = 1",
+            "ELSE execution_status END, version = version + 1 " +
+            "WHERE work_item_id = ? AND plan_revision = ? AND active = 1",
         )
         .run(input.workItemId, input.node.current_plan_revision);
       appendExecutionAudit(this.database, {
@@ -507,6 +672,19 @@ export class CandidateExecutor {
     let finalizedReport = report;
     this.database.exec("BEGIN IMMEDIATE");
     try {
+      const runFence = this.database
+        .prepare("SELECT instance_owner, instance_fence, node_lease_fence FROM collaboration_runs WHERE id = ?")
+        .get(runId) as
+        | { instance_owner: string; instance_fence: number; node_lease_fence: number }
+        | undefined;
+      if (!runFence?.instance_owner || !runFence.instance_fence || !runFence.node_lease_fence) {
+        throw new Error("Run has no scheduler fence");
+      }
+      assertCurrentInstanceLease(
+        this.database,
+        { ownerId: runFence.instance_owner, fence: runFence.instance_fence },
+        Date.now(),
+      );
       const transactionBlock = this.executionBlockReason(runId, workItemId, node.current_plan_revision, node.node_id);
       const effectiveReport = transactionBlock
         ? renderCandidateStatus({ modified: changedPaths.length > 0, violations: [transactionBlock] })
@@ -521,8 +699,35 @@ export class CandidateExecutor {
             : effectiveReport.state === "needs_configuration"
               ? "needs_configuration"
               : "succeeded");
+      const nodeRuntimeState =
+        effectiveOwnerInterrupted
+          ? "interrupted"
+          : effectiveReport.state === "needs_configuration"
+            ? "needs_configuration"
+            : effectiveReport.state === "invalid" || effectiveReport.state === "test_failed"
+              ? "failed"
+              : "succeeded";
+      const released = this.database
+        .prepare(
+          "UPDATE collaboration_work_nodes SET runtime_state = ?, lease_owner = NULL, lease_expires_at = NULL, " +
+            "version = version + 1 " +
+            "WHERE work_item_id = ? AND plan_revision = ? AND node_id = ? " +
+            "AND lease_owner = ? AND lease_fence = ?",
+        )
+        .run(
+          nodeRuntimeState,
+          workItemId,
+          node.current_plan_revision,
+          node.node_id,
+          runFence.instance_owner,
+          runFence.node_lease_fence,
+        );
+      if (released.changes !== 1) throw new Error("Run node lease is stale");
       this.database
-        .prepare("UPDATE collaboration_runs SET status = ?, result_sha = ?, finished_at = ?, error = ? WHERE id = ?")
+        .prepare(
+          "UPDATE collaboration_runs SET status = ?, result_sha = ?, finished_at = ?, error = ?, " +
+            "version = version + 1 WHERE id = ?",
+        )
         .run(runStatus, resultSha, Date.now(), effectiveReport.reasons.join("; ") || null, runId);
       this.database
         .prepare(
@@ -543,8 +748,8 @@ export class CandidateExecutor {
         );
       const insertEvidence = this.database.prepare(
         "INSERT INTO collaboration_test_evidence " +
-          "(id, run_id, command_id, argv_json, cwd, exit_code, duration_ms, stdout, stderr, state, created_at) " +
-          "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+          "(id, run_id, command_id, argv_json, cwd, exit_code, duration_ms, stdout, stderr, state, created_at, " +
+          "containment_fingerprint, containment_binding_json) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
       );
       for (const item of evidence) {
         insertEvidence.run(
@@ -559,6 +764,8 @@ export class CandidateExecutor {
           item.stderr,
           item.state,
           now,
+          item.containmentFingerprint,
+          JSON.stringify(item.containmentBinding),
         );
       }
       let executionStatus =
@@ -577,7 +784,7 @@ export class CandidateExecutor {
         .prepare(
           "UPDATE collaboration_work_nodes SET execution_status = CASE " +
             "WHEN node_type IN ('modify', 'validate', 'report') THEN ? ELSE execution_status END " +
-            "WHERE work_item_id = ? AND plan_revision = ? AND active = 1",
+            ", version = version + 1 WHERE work_item_id = ? AND plan_revision = ? AND active = 1",
         )
         .run(executionStatus, workItemId, node.current_plan_revision);
       appendExecutionAudit(this.database, {
@@ -605,5 +812,55 @@ export class CandidateExecutor {
       report: finalizedReport,
       evidence,
     };
+  }
+
+  private recordVerifiedContainment(
+    runId: string,
+    proof: NonNullable<AgentRunResult["containmentProof"]>,
+    fingerprint: string,
+    binding: ContainmentBinding,
+    instance: Pick<InstanceLease, "ownerId" | "fence">,
+    now: number,
+    containmentState: "verified" | "empty",
+  ): void {
+    this.database.exec("BEGIN IMMEDIATE");
+    try {
+      assertCurrentInstanceLease(this.database, instance, now);
+      const result = this.database
+        .prepare(
+          "UPDATE collaboration_runs SET runtime_identity_json = ?, containment_state = ?, heartbeat_at = ?, " +
+            "containment_fingerprint = COALESCE(containment_fingerprint, ?), version = version + 1 " +
+            "WHERE id = ? AND status = 'running' AND instance_owner = ? AND instance_fence = ? " +
+            "AND containment_binding_json = ? " +
+            "AND (containment_fingerprint IS NULL OR containment_fingerprint = ?)",
+        )
+        .run(
+          JSON.stringify(proof),
+          containmentState,
+          now,
+          fingerprint,
+          runId,
+          instance.ownerId,
+          instance.fence,
+          JSON.stringify(binding),
+          fingerprint,
+        );
+      if (result.changes !== 1) throw new Error("Run containment update is stale");
+      this.database.exec("COMMIT");
+    } catch (error) {
+      this.database.exec("ROLLBACK");
+      throw error;
+    }
+  }
+
+  private isRegisteredContainment(runId: string, fingerprint: string, binding: ContainmentBinding): boolean {
+    return Boolean(
+      this.database
+        .prepare(
+          "SELECT 1 FROM collaboration_runs WHERE id = ? AND status = 'running' " +
+            "AND containment_fingerprint = ? AND containment_binding_json = ?",
+        )
+        .get(runId, fingerprint, JSON.stringify(binding)),
+    );
   }
 }

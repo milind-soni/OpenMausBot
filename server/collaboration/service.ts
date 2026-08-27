@@ -27,12 +27,14 @@ import type { WorkItemSnapshotPatch } from "./snapshot.ts";
 
 export interface CollaborationHealth {
   app: "openmausbot-collaboration";
-  status: "healthy";
-  ready: true;
+  status: "healthy" | "degraded";
+  ready: boolean;
   sourceBaseline: typeof OPENMAUSBOT_SOURCE_BASELINE;
   authority: "headless";
   database: DatabaseHealth;
   defaults: typeof FIRST_MILESTONE_DEFAULTS;
+  degradation?: { reason: string; lowDisk: boolean };
+  executionGated?: "low_disk";
 }
 
 export interface CollaborationService {
@@ -62,6 +64,12 @@ export interface CollaborationServiceOptions {
   dataDirectory: string;
   planning?: PlanningCoordinatorOptions;
   execution?: CandidateExecutorOptions;
+}
+
+function isSqliteFailure(error: unknown): boolean {
+  if (!error || typeof error !== "object") return false;
+  const code = "code" in error ? String(error.code) : "";
+  return code.startsWith("ERR_SQLITE") || code.startsWith("SQLITE_");
 }
 
 export function startCollaborationService(options: CollaborationServiceOptions): CollaborationService {
@@ -103,27 +111,44 @@ export function startCollaborationService(options: CollaborationServiceOptions):
     throw error;
   }
   let closed = false;
+  let serviceDegradedReason: "ledger_unwritable" | "audit_unwritable" | null = null;
 
   return {
     health() {
       if (closed) throw new Error("Collaboration service is closed");
+      const readiness = execution?.readiness();
+      const degraded = serviceDegradedReason !== null || readiness?.mode === "degraded";
       return {
         app: "openmausbot-collaboration",
-        status: "healthy",
-        ready: true,
+        status: degraded ? "degraded" : "healthy",
+        ready: !degraded,
         sourceBaseline: OPENMAUSBOT_SOURCE_BASELINE,
         authority: "headless",
         database: ledger.databaseHealth(),
         defaults: FIRST_MILESTONE_DEFAULTS,
+        ...(degraded
+          ? {
+              degradation: {
+                reason: serviceDegradedReason ?? readiness?.reason ?? "unknown",
+                lowDisk: readiness?.lowDisk ?? false,
+              },
+            }
+          : {}),
+        ...(readiness?.lowDisk ? { executionGated: "low_disk" as const } : {}),
       };
     },
     ingestDingTalkMessage(message) {
       if (closed) throw new Error("Collaboration service is closed");
-      const outcome = inbound.processDingTalkMessage(message);
-      if (planning && outcome.workItemId) {
-        planning.observeAcceptedEvent(outcome.workItemId, message.text, message.receivedAt);
+      try {
+        const outcome = inbound.processDingTalkMessage(message);
+        if (planning && outcome.workItemId) {
+          planning.observeAcceptedEvent(outcome.workItemId, message.text, message.receivedAt);
+        }
+        return outcome;
+      } catch (error) {
+        if (isSqliteFailure(error)) serviceDegradedReason = "ledger_unwritable";
+        throw error;
       }
-      return outcome;
     },
     reviseWorkItemDefinition(workItemId, patch, now) {
       if (closed) throw new Error("Collaboration service is closed");
@@ -149,11 +174,21 @@ export function startCollaborationService(options: CollaborationServiceOptions):
     },
     issueOwnerAction(input) {
       if (closed) throw new Error("Collaboration service is closed");
-      return actions.issue(input);
+      try {
+        return actions.issue(input);
+      } catch (error) {
+        if (isSqliteFailure(error)) serviceDegradedReason = "audit_unwritable";
+        throw error;
+      }
     },
     performOwnerAction(input) {
       if (closed) throw new Error("Collaboration service is closed");
-      return actions.perform(input);
+      try {
+        return actions.perform(input);
+      } catch (error) {
+        if (isSqliteFailure(error)) serviceDegradedReason = "audit_unwritable";
+        throw error;
+      }
     },
     pendingOutbox() {
       if (closed) throw new Error("Collaboration service is closed");
