@@ -107,6 +107,19 @@ export function drainSteeredMessages(
   }
 }
 
+/** Drop one waiting send so it never drains. Returns false when that
+ * queue id was not in the in-memory queue (already drained, or a restart
+ * lost the auto-run intent). */
+export function cancelSteeredMessage(threadId: string, messageId: string): boolean {
+  const entry = queues.get(threadId);
+  if (!entry) return false;
+  const items = entry.items.filter((item) => item.messageId !== messageId);
+  if (items.length === entry.items.length) return false;
+  if (items.length === 0) queues.delete(threadId);
+  else queues.set(threadId, { botId: entry.botId, items });
+  return true;
+}
+
 /** Test helper: how many messages remain queued for a thread. */
 export function _queuedCount(threadId: string): number {
   return queues.get(threadId)?.items.length ?? 0;

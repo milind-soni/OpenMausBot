@@ -78,7 +78,7 @@ import { getOrCreateChannel, mirrorActivity, mirrorExchange, mirrorReply, type C
 import { searchMessages } from "./message-db.ts";
 import { promptWithReply, transcriptText } from "./replies.ts";
 import { _loadPending, discardDelegations, drainDelegations, pendingDelegationSnapshot, pendingThreads, queueDelegation, type QueueResult } from "./delegations.ts";
-import { drainSteeredMessages, queueSteeredMessage } from "./steer-queue.ts";
+import { cancelSteeredMessage, drainSteeredMessages, queueSteeredMessage } from "./steer-queue.ts";
 import { EventBus } from "./harness/bus.ts";
 import { ProviderRegistry } from "./harness/registry.ts";
 import { cancelPeerApprovalsFor, cancelPeerApprovalsForThread, dismissStalePeerCards, requestPeerApproval, resolvePeerComms, type ApprovalBus } from "./peer-approval.ts";
@@ -4425,6 +4425,17 @@ const server = createServer(async (req, res) => {
       }
       await startTurn(bot.id, text, { replyTo });
       return json(res, 202, { ok: true });
+    }
+
+    m = path.match(/^\/api\/bots\/([\w-]+)\/queue\/([\w-]+)$/);
+    if (m && method === "DELETE") {
+      const bot = store.bot(m[1]);
+      if (!bot) return json(res, 404, { error: "no such bot" });
+      const queueId = m[2];
+      if (!cancelSteeredMessage(bot.threadId, queueId)) {
+        return json(res, 404, { error: "no such queued message" });
+      }
+      return json(res, 200, { ok: true });
     }
 
     // edit a user message → fork the conversation there and rerun the turn.

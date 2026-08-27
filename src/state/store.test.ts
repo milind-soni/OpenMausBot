@@ -394,4 +394,20 @@ describe("pending queued chip", () => {
     expect(late.pendingQueued).toEqual({});
     expect(late.consumedQueueIds["foreign-99"]).toBeUndefined();
   });
+
+  it("drops a cancelled pending chip without waiting for drain", () => {
+    const withBot = reducer(initialState, { type: "botPatched", bot });
+    const queued = reducer(withBot, {
+      type: "pendingQueued",
+      threadId: "t1",
+      queueId: "q-drop",
+      text: "never mind",
+    });
+    const cancelled = reducer(queued, {
+      type: "cancelQueued",
+      botId: "b1",
+      queueId: "q-drop",
+    });
+    expect(cancelled.pendingQueued).toEqual({});
+  });
 });

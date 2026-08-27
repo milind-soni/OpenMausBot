@@ -413,15 +413,24 @@ export function Composer({
             <span className="min-w-0 flex-1 truncate">
               Queued — sends when {busyName} finishes: “{pendingChip}”
             </span>
-            {group && (
-              <button
-                onClick={() => setQueued(null)}
-                aria-label="Discard queued message"
-                className="rounded p-0.5 hover:bg-raised hover:text-ink"
-              >
-                <X size={13} />
-              </button>
-            )}
+            <button
+              type="button"
+              onClick={() => {
+                if (group) {
+                  setQueued(null);
+                  return;
+                }
+                if (!bot) return;
+                for (const entry of state.pendingQueued?.[bot.threadId] ?? []) {
+                  dispatch({ type: "cancelQueued", botId: bot.id, queueId: entry.queueId });
+                }
+              }}
+              aria-label="Cancel queued message"
+              title="Cancel queued message"
+              className="ml-auto flex size-5 shrink-0 items-center justify-center rounded text-white hover:bg-white/10"
+            >
+              <X size={13} strokeWidth={2.5} />
+            </button>
           </div>
         )}
         {pickerOpen && (

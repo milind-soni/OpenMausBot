@@ -16,7 +16,7 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 
-import { drainSteeredMessages, queueSteeredMessage, _queuedCount, type SteerStore } from "./steer-queue.ts";
+import { cancelSteeredMessage, drainSteeredMessages, queueSteeredMessage, _queuedCount, type SteerStore } from "./steer-queue.ts";
 import type { BotRecord, Message } from "./store.ts";
 
 const SERVER_DIR = dirname(fileURLToPath(import.meta.url));
@@ -117,6 +117,24 @@ describe("steer-queue module", () => {
     // drain-once: a second settle finds nothing and fires nothing
     drainSteeredMessages(store, run);
     expect(run).toHaveBeenCalledTimes(1);
+  });
+
+  it("drops a cancelled message so drain does not send it", () => {
+    const bot = fakeBot("bot-cancel", "thread-cancel", true);
+    const store = fakeStore([bot]);
+    const first = queueSteeredMessage(bot, "keep me");
+    const second = queueSteeredMessage(bot, "drop me");
+    expect(cancelSteeredMessage("thread-cancel", second.id)).toBe(true);
+    expect(cancelSteeredMessage("thread-cancel", "missing")).toBe(false);
+    expect(_queuedCount("thread-cancel")).toBe(1);
+
+    bot.busy = false;
+    const run = vi.fn();
+    drainSteeredMessages(store, run);
+    expect(run).toHaveBeenCalledTimes(1);
+    expect(run.mock.calls[0][2]).toBe("keep me");
+    expect(store.messages.map((m) => m.queueId)).toEqual([first.id]);
+    expect(_queuedCount("thread-cancel")).toBe(0);
   });
 
   it("keeps reply metadata and the provider-facing reply prompt while queued", () => {

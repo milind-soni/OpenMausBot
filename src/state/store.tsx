@@ -446,6 +446,7 @@ export type Action =
   | { type: "send"; botId: string; text: string; replyToId?: string }
   | { type: "pendingQueued"; threadId: string; queueId: string; text: string }
   | { type: "consumePendingQueued"; threadId: string; queueId: string }
+  | { type: "cancelQueued"; botId: string; queueId: string }
   | { type: "editMessage"; botId: string; messageId: string; text: string }
   | { type: "switchBranch"; botId: string; messageId: string }
   | { type: "threadActive"; threadId: string; activeLeafId: string }
@@ -1028,6 +1029,17 @@ export function reducer(state: AppState, action: Action): AppState {
       else delete pendingQueued[action.threadId];
       return { ...state, pendingQueued };
     }
+    case "cancelQueued": {
+      const bot = state.bots.find((candidate) => candidate.id === action.botId);
+      if (!bot) return state;
+      const prev = state.pendingQueued[bot.threadId] ?? [];
+      const rest = prev.filter((entry) => entry.queueId !== action.queueId);
+      if (rest.length === prev.length) return state;
+      const pendingQueued = { ...state.pendingQueued };
+      if (rest.length) pendingQueued[bot.threadId] = rest;
+      else delete pendingQueued[bot.threadId];
+      return { ...state, pendingQueued };
+    }
     case "send":
       return withMascotMotion(dismissOnboardingCard(state, action.botId), action.botId, "working");
     case "editMessage":
@@ -1251,6 +1263,9 @@ export function StoreProvider({ children }: { children: ReactNode }) {
           break;
         case "markRoutineRunSeen":
           api(`/api/routine-runs/${action.runId}/seen`, { method: "POST" }).catch(showError);
+          break;
+        case "cancelQueued":
+          api(`/api/bots/${action.botId}/queue/${action.queueId}`, { method: "DELETE" }).catch(showError);
           break;
         case "send": {
           // persist through the existing card route so an older server that

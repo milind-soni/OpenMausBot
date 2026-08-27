@@ -515,6 +515,15 @@ function Bubble({
         <div className="mt-1 flex items-center gap-1 pr-1 text-[11px] text-ink-secondary/70">
           <Clock size={11} aria-hidden="true" />
           <span>Queued — sends when this turn finishes</span>
+          <button
+            type="button"
+            onClick={() => dispatch({ type: "cancelQueued", botId: bot.id, queueId: message.queueId ?? message.id })}
+            aria-label="Cancel queued message"
+            title="Cancel queued message"
+            className="ml-0.5 flex size-4 shrink-0 items-center justify-center rounded text-white hover:bg-white/10"
+          >
+            <X size={11} strokeWidth={2.5} />
+          </button>
         </div>
       )}
       <ReactionChips threadId={bot.threadId} message={message} align={user ? "right" : "left"} />
