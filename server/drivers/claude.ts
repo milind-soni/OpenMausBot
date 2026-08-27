@@ -655,6 +655,14 @@ export const ClaudeDriver: ProviderDriver<ClaudeConfig> = {
       // accepts a FILE for this flag, so the secrets go in a 0600 file that
       // is removed when the turn settles.
       let mcpConfigPath: string | null = null;
+      // The user's own servers, last so a custom name can never displace a
+      // harness integration; parseMcpServers already refused duplicates
+      // among the custom ones themselves.
+      for (const server of turn.integrations?.custom ?? []) {
+        if (server.key in mcpServers) continue;
+        mcpServers[server.key] = { command: server.command, args: server.args, env: { ...server.env } };
+        allowed.push(`mcp__${server.key}`);
+      }
       if (Object.keys(mcpServers).length) {
         mcpConfigPath = join(mkdtempSync(join(tmpdir(), "omb-mcp-")), "mcp.json");
         writeFileSync(mcpConfigPath, JSON.stringify({ mcpServers }), { mode: 0o600 });

@@ -167,6 +167,18 @@ export interface TaskUsage {
   turns: number;
 }
 
+export interface McpServer {
+  id: string;
+  name: string;
+  command: string;
+  args: string[];
+  /** What the server sends is always `key → true`: a value never reaches
+   * the renderer. Sending `true` back means "keep the stored one"; a string
+   * is only ever on the way OUT, setting a new value. */
+  env: Record<string, string | true>;
+  enabled: boolean;
+}
+
 export interface Bot {
   id: string;
   threadId: string;
@@ -199,6 +211,9 @@ export interface Bot {
   autoApprove?: boolean;
   /** tools this bot may always use without asking */
   alwaysAllow?: string[];
+  /** the user's own MCP servers. env carries KEY → true: the renderer is
+   * shown which variables are set, never what they are set to. */
+  mcpServers?: McpServer[];
   /** speak this bot's replies aloud as they settle */
   speakReplies?: boolean;
   /** this bot's own voice id (falls back to the app-wide one) */

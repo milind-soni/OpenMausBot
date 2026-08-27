@@ -21,6 +21,7 @@ import {
 import { approvalKey, autoVerdict } from "./auto-approve.ts";
 import * as checkpoints from "./checkpoints.ts";
 import { appendDecision, readDecisions } from "./decision-log.ts";
+import { enabledMcpServers, mcpKey, parseMcpServers, redactMcpServers } from "./mcp-servers.ts";
 import { validateBotCwd } from "./bot-cwd.ts";
 import { attachmentExists, extensionForMime, IMAGE_MAX_BYTES, readAttachment, saveImage, type SavedAttachment } from "./attachments.ts";
 import {
@@ -323,8 +324,13 @@ store.seedIfEmpty();
 const wireTask = ({ resumeCursors, lastInstanceId, ...task }: TaskRecord) => task;
 
 const wireBot = (bot: NonNullable<ReturnType<typeof store.bot>>) => {
-  const { resumeCursors, tasks, ...rest } = bot;
-  return { ...rest, avatarUrl: rest.avatarUrl ?? null, ...(tasks ? { tasks: tasks.map(wireTask) } : {}) };
+  const { resumeCursors, tasks, mcpServers, ...rest } = bot;
+  // The ONE projection every bot payload passes through, which is why the
+  // env values are dropped here: a second stripping site is a second place to
+  // forget one. `undefined` is omitted by JSON, so a bot with no servers is
+  // wired exactly as it was before.
+  const wiredMcp = mcpServers ? redactMcpServers(mcpServers) : undefined;
+  return { ...rest, avatarUrl: rest.avatarUrl ?? null, mcpServers: wiredMcp, ...(tasks ? { tasks: tasks.map(wireTask) } : {}) };
 };
 
 /** Profile URLs are app-owned references, not merely strings with a trusted
@@ -1540,6 +1546,15 @@ async function startTurn(
       // tools that would fail on every call or spawn an unnecessary proxy.
       const dwebUrl = process.env.DWEB_URL?.trim();
       if (dwebUrl) integrations.dweb = { url: dwebUrl };
+      const custom = enabledMcpServers(bot.mcpServers);
+      if (custom.length) {
+        integrations.custom = custom.map((server) => ({
+          key: mcpKey(server.name),
+          command: server.command,
+          args: server.args,
+          env: server.env,
+        }));
+      }
       const wants = opts?.runOn === "cloud" ? "cloud" : bot.computer; // cloud routine overrides the MAUS default
       // Cloud routines always use Box/BoxAgent. The per-bot backend applies
       // only to ordinary turns that mount a computer into the local agent.
@@ -4047,6 +4062,14 @@ const server = createServer(async (req, res) => {
       }
       for (const key of ["modelSelection", "unread", "computer", "cloudBackend", "color", "mascotExpression", "pinned", "hidden"] as const) {
         if (body[key] !== undefined) patch[key] = body[key];
+      }
+      if (body.mcpServers !== undefined) {
+        // Parsed against what is STORED, so an editor that only ever saw
+        // `env: { KEY: true }` can save without sending the value back —
+        // and so a rename keeps the id it arrived with.
+        const parsed = parseMcpServers(body.mcpServers, store.bot(m[1])?.mcpServers ?? []);
+        if (!parsed.ok) return json(res, 400, { error: parsed.error });
+        patch.mcpServers = parsed.servers;
       }
       // one pinned message per thread; null/"" clears. The id is not
       // validated against the transcript here — a pin whose message was

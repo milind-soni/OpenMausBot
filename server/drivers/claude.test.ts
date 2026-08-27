@@ -401,6 +401,32 @@ describe("ClaudeDriver turns (fake CLI)", () => {
     expect(seen.argv[seen.argv.indexOf("--allowedTools") + 1]).toContain("mcp__dweb");
   });
 
+  it("mounts the user's own MCP servers and pre-allows their tools", async () => {
+    await create();
+    const dump = join(scratch, "dump.json");
+    process.env.FAKE_CLAUDE_DUMP = dump;
+
+    await instance.adapter.sendTurn({
+      threadId: "t-custom-mcp",
+      text: "hi",
+      integrations: {
+        custom: [{ key: "filesystem", command: "npx", args: ["-y", "server-filesystem"], env: { TOKEN: "s3cret" } }],
+      },
+    });
+    await recorder.until((e) => e.type === "turn.completed");
+
+    const seen = JSON.parse(readFileSync(dump, "utf8"));
+    expect(seen.mcpConfig.mcpServers.filesystem).toMatchObject({
+      command: "npx",
+      args: ["-y", "server-filesystem"],
+      env: { TOKEN: "s3cret" },
+    });
+    // a headless acceptEdits run silently denies anything unlisted
+    expect(seen.argv[seen.argv.indexOf("--allowedTools") + 1]).toContain("mcp__filesystem");
+    // the value rides in the private config file, never on argv
+    expect(JSON.stringify(seen.argv)).not.toContain("s3cret");
+  });
+
   // the harness gates both the integration and the prompt hint on
   // capabilities.composioMcp, so the flag and the mount must agree — a bot
   // told about tools its driver never mounted burns the turn hunting

@@ -451,6 +451,43 @@ describe("harness HTTP API", () => {
     }
   });
 
+  it("keeps a custom MCP server's env values off the wire", async () => {
+    const bot = (await api("POST", "/api/bots")).body.bot;
+    try {
+      const saved = await api("PATCH", `/api/bots/${bot.id}`, {
+        mcpServers: [{ name: "Filesystem", command: "npx", args: ["-y", "srv"], env: { TOKEN: "s3cret" } }],
+      });
+      expect(saved.status).toBe(200);
+      // the value is stored, but a payload only ever carries the key name
+      expect(saved.body.bot.mcpServers[0].env).toEqual({ TOKEN: true });
+      expect(JSON.stringify(saved.body)).not.toContain("s3cret");
+      const listed = await api("GET", "/api/bots");
+      expect(JSON.stringify(listed.body)).not.toContain("s3cret");
+
+      // an editor that never saw the value can still save: `true` means
+      // "keep what is stored", and the id survives the rename
+      const id = saved.body.bot.mcpServers[0].id;
+      const renamed = await api("PATCH", `/api/bots/${bot.id}`, {
+        mcpServers: [{ id, name: "Documents", command: "npx", args: ["-y", "srv"], env: { TOKEN: true } }],
+      });
+      expect(renamed.status).toBe(200);
+      expect(renamed.body.bot.mcpServers[0].id).toBe(id);
+      expect(renamed.body.bot.mcpServers[0].name).toBe("Documents");
+
+      // two servers that fold onto one name are refused where a person reads it
+      const collision = await api("PATCH", `/api/bots/${bot.id}`, {
+        mcpServers: [
+          { name: "My Files", command: "a" },
+          { name: "my-files", command: "b" },
+        ],
+      });
+      expect(collision.status).toBe(400);
+      expect(collision.body.error).toMatch(/same name/i);
+    } finally {
+      await api("DELETE", `/api/bots/${bot.id}`);
+    }
+  });
+
   it("keeps direct-message channels folderless at the API boundary", async () => {
     const attempted = await api("PATCH", "/api/groups/test-dm", { cwd: home });
     expect(attempted.status).toBe(400);

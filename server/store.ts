@@ -274,6 +274,8 @@ export function titleFromMessage(text: string): string {
   return line.length > 48 ? `${line.slice(0, 47)}…` : line || UNTITLED_TASK;
 }
 
+import type { McpServerSpec } from "./mcp-servers.ts";
+
 export interface BotRecord {
   id: string;
   /** the ACTIVE task's thread — everything that runs a turn reads this */
@@ -312,6 +314,9 @@ export interface BotRecord {
   /** Tools this bot may always use without asking, even outside auto mode
    * (set by "Always allow" on an approval card). */
   alwaysAllow?: string[];
+  /** The user's own MCP servers, spawned for this bot's turns. Env values
+   * live here and are stripped on the way to the renderer. */
+  mcpServers?: McpServerSpec[];
   /** Speak this bot's replies aloud as they settle, without being asked.
    * Off by default: a hosted voice costs money per character, so speaking
    * is something you turn on, never something that happens to you. */
