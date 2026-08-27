@@ -35,6 +35,7 @@
     "test:collaboration-operations": "vitest run server/collaboration/operations/private-alert.test.ts server/collaboration/operations/disk-monitor.test.ts packaging/collaboration/service-templates.test.ts",
     "smoke:collaboration-headless": "node scripts/smoke-collaboration-headless.mjs",
     "smoke:dingtalk-stream": "node --experimental-strip-types scripts/smoke-dingtalk-stream.ts",
+    "pilot:collaboration:fake": "node --experimental-strip-types scripts/collaboration-pilot/run-fake.ts",
     "dev:desktop": "electron .",
     "build": "tsc -b && tsc -p tsconfig.server.json && vite build",
     "typecheck": "tsc -b && tsc -p tsconfig.server.json",
