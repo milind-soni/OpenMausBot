@@ -50,6 +50,35 @@ function requiredOpaque(record: JsonObject, key: string, maximum = 512): string 
   return value;
 }
 
+function optionalOpaque(record: JsonObject, key: string, maximum = 512): string | undefined {
+  const raw = record[key];
+  if (raw === undefined || raw === null) return undefined;
+  if (typeof raw !== "string") throw new Error(`dingtalk_${key}_invalid`);
+  const value = raw.trim();
+  if (!value) return undefined;
+  if (value.length > maximum || /\s|[\u0000-\u001f\u007f]/u.test(value)) throw new Error(`dingtalk_${key}_invalid`);
+  return value;
+}
+
+function envelopeIdentifier(value: string | undefined, key: string): string {
+  const normalized = value?.trim() ?? "";
+  if (!normalized) throw new Error(`dingtalk_${key}_missing`);
+  if (normalized.length > 256 || /\s|[\u0000-\u001f\u007f]/u.test(normalized)) {
+    throw new Error(`dingtalk_${key}_invalid`);
+  }
+  return normalized;
+}
+
+function optionalExactText(record: JsonObject, key: string, maximum: number): string | undefined {
+  const raw = record[key];
+  if (raw === undefined || raw === null) return undefined;
+  if (typeof raw !== "string") throw new Error(`dingtalk_${key}_invalid`);
+  const value = raw.trim();
+  if (!value) return undefined;
+  if (value.length > maximum || /[\u0000-\u001f\u007f]/u.test(value)) throw new Error(`dingtalk_${key}_invalid`);
+  return value;
+}
+
 function numeric(value: unknown): number | undefined {
   if (typeof value === "number" && Number.isFinite(value)) return value;
   if (typeof value === "string" && /^\d{1,16}$/u.test(value)) return Number(value);
@@ -110,16 +139,15 @@ export function normalizeBotMessage(envelope: DingTalkStreamEnvelope): Normalize
   }
 
   const sourceEventId = requiredOpaque(record, "msgId", 256);
-  const transportMessageId = envelope.headers.messageId.trim();
-  if (!transportMessageId) throw new Error("dingtalk_transport_message_id_missing");
+  const transportMessageId = envelopeIdentifier(envelope.headers.messageId, "transport_message_id");
   const conversationId = requiredOpaque(record, "conversationId", 256);
-  const senderCorpId = optionalString(record, "senderCorpId", 256);
-  const senderStaffId = optionalString(record, "senderStaffId", 256);
+  const senderCorpId = optionalOpaque(record, "senderCorpId", 256);
+  const senderStaffId = optionalOpaque(record, "senderStaffId", 256);
   const senderId =
-    optionalString(record, "senderId", 256) ??
+    optionalOpaque(record, "senderId", 256) ??
     `unresolved-${createHash("sha256").update(`${senderCorpId ?? ""}\0${senderStaffId ?? ""}\0${transportMessageId}`).digest("hex").slice(0, 20)}`;
   const receivedAt = numeric(record.createAt) ?? numeric(envelope.headers.time) ?? Date.now();
-  const sessionWebhook = optionalString(record, "sessionWebhook", 4_096);
+  const sessionWebhook = optionalExactText(record, "sessionWebhook", 4_096);
   const sessionWebhookExpiredTime = numeric(record.sessionWebhookExpiredTime);
 
   return {
@@ -129,8 +157,8 @@ export function normalizeBotMessage(envelope: DingTalkStreamEnvelope): Normalize
       conversationId,
       addressedToBot: true,
       text,
-      ...(optionalString(record, "originalMsgId", 256)
-        ? { replyToSourceEventId: optionalString(record, "originalMsgId", 256) }
+      ...(optionalOpaque(record, "originalMsgId", 256)
+        ? { replyToSourceEventId: optionalOpaque(record, "originalMsgId", 256) }
         : {}),
       sender: {
         ...(senderCorpId ? { senderCorpId } : {}),
@@ -152,18 +180,19 @@ export function normalizeCardAction(envelope: DingTalkStreamEnvelope): DingTalkC
   const record = parsePayload(envelope.data);
   const action = actionData(record);
   const actionToken = requiredOpaque(action, "actionToken", 1_024);
-  const senderCorpId = optionalString(record, "senderCorpId", 256) ?? optionalString(record, "corpId", 256);
-  const senderStaffId = optionalString(record, "senderStaffId", 256) ?? optionalString(record, "userId", 256);
-  const transportMessageId = envelope.headers.messageId.trim();
-  if (!transportMessageId) throw new Error("dingtalk_transport_message_id_missing");
+  const senderCorpId = optionalOpaque(record, "senderCorpId", 256) ?? optionalOpaque(record, "corpId", 256);
+  const senderStaffId = optionalOpaque(record, "senderStaffId", 256) ?? optionalOpaque(record, "userId", 256);
+  const transportMessageId = envelopeIdentifier(envelope.headers.messageId, "transport_message_id");
   return {
-    transportEventId: envelope.headers.eventId?.trim() || transportMessageId,
+    transportEventId: envelope.headers.eventId
+      ? envelopeIdentifier(envelope.headers.eventId, "transport_event_id")
+      : transportMessageId,
     transportMessageId,
     actionToken,
     sender: {
       ...(senderCorpId ? { senderCorpId } : {}),
       ...(senderStaffId ? { senderStaffId } : {}),
-      senderId: optionalString(record, "senderId", 256) ?? senderStaffId ?? `unresolved-${transportMessageId}`,
+      senderId: optionalOpaque(record, "senderId", 256) ?? senderStaffId ?? `unresolved-${transportMessageId}`,
       displayName: optionalString(record, "senderNick", 256) ?? "DingTalk member",
     },
     ...(optionalString(action, "reason", MAX_REASON_CHARACTERS)
