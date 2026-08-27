@@ -1,0 +1,5 @@
+{
+  "initialConnected": false,
+  "expectedState": "reconnecting",
+  "expectedTopics": ["card", "robot"]
+}

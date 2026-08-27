@@ -1,0 +1,4 @@
+{
+  "businessEventId": "biz-message-1",
+  "transportMessageIds": ["transport-duplicate-1", "transport-duplicate-2"]
+}

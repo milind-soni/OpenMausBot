@@ -1,0 +1,14 @@
+{
+  "corpId": "corp-1",
+  "userId": "owner-1",
+  "senderId": "owner-sender-1",
+  "senderNick": "Owner",
+  "createAt": 1700000003000,
+  "actionData": {
+    "actionToken": "opaque-test-token",
+    "reason": "验收不符合预期",
+    "action": "accept",
+    "role": "administrator",
+    "workItemId": "forged-work-item"
+  }
+}

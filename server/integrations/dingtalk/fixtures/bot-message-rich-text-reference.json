@@ -1,0 +1,18 @@
+{
+  "conversationId": "cid-group-1",
+  "msgId": "biz-message-2",
+  "originalMsgId": "biz-message-1",
+  "senderNick": "Tester",
+  "senderStaffId": "staff-2",
+  "senderCorpId": "corp-1",
+  "senderId": "sender-2",
+  "createAt": 1700000001000,
+  "msgtype": "richText",
+  "content": {
+    "richText": [
+      { "text": "复现于空 Token" },
+      { "atName": "机器人", "atUserId": "ignored" },
+      { "pictureDownloadCode": "ignored-media-code" }
+    ]
+  }
+}
