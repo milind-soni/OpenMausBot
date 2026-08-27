@@ -25,8 +25,8 @@ describe("collaboration ledger", () => {
     const ledger = openCollaborationLedger(directory);
     expect(ledger.databaseHealth()).toEqual({
       file: COLLABORATION_DATABASE_NAME,
-      schemaVersion: 4,
-      appliedMigrations: 4,
+      schemaVersion: 5,
+      appliedMigrations: 5,
       journalMode: "wal",
       foreignKeys: true,
     });
@@ -55,11 +55,11 @@ describe("collaboration ledger", () => {
     before.close();
 
     const second = openCollaborationLedger(directory);
-    expect(second.migrationState).toEqual({ schemaVersion: 4, appliedMigrations: 4 });
+    expect(second.migrationState).toEqual({ schemaVersion: 5, appliedMigrations: 5 });
     second.close();
 
     const after = new DatabaseSync(join(directory, COLLABORATION_DATABASE_NAME));
-    expect(after.prepare("SELECT count(*) AS count FROM collaboration_schema_migrations").get()).toEqual({ count: 4 });
+    expect(after.prepare("SELECT count(*) AS count FROM collaboration_schema_migrations").get()).toEqual({ count: 5 });
     expect(after.prepare("SELECT version, name, checksum, applied_at FROM collaboration_schema_migrations").all()).toEqual(
       initialMigration,
     );

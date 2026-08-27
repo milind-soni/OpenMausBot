@@ -2,7 +2,7 @@ import type { DatabaseSync } from "node:sqlite";
 
 import { OPENMAUSBOT_SOURCE_BASELINE } from "./config.ts";
 
-export const COLLABORATION_SCHEMA_VERSION = 4;
+export const COLLABORATION_SCHEMA_VERSION = 5;
 
 interface Migration {
   version: number;
@@ -396,6 +396,99 @@ const migrations: readonly Migration[] = [
         CREATE TRIGGER collaboration_test_evidence_no_delete
           BEFORE DELETE ON collaboration_test_evidence
           BEGIN SELECT RAISE(ABORT, 'test evidence is immutable'); END;
+      `);
+    },
+  },
+  {
+    version: 5,
+    name: "add-single-owner-control",
+    checksum: "v5:single-owner-action-tokens-control-state-acceptance",
+    apply(database) {
+      database.exec(`
+        ALTER TABLE collaboration_work_items
+          ADD COLUMN control_state TEXT NOT NULL DEFAULT 'active'
+          CHECK (control_state IN ('active', 'paused', 'cancelled', 'accepted'));
+        ALTER TABLE collaboration_work_items ADD COLUMN accepted_candidate_sha TEXT;
+        ALTER TABLE collaboration_work_items ADD COLUMN accepted_by TEXT;
+        ALTER TABLE collaboration_work_items ADD COLUMN accepted_at INTEGER;
+        ALTER TABLE collaboration_work_items ADD COLUMN cancelled_at INTEGER;
+        ALTER TABLE collaboration_work_items ADD COLUMN paused_at INTEGER;
+
+        ALTER TABLE collaboration_work_nodes
+          ADD COLUMN control_state TEXT NOT NULL DEFAULT 'active'
+          CHECK (control_state IN ('active', 'paused', 'cancelled'));
+        ALTER TABLE collaboration_runs ADD COLUMN interrupt_requested_at INTEGER;
+
+        ALTER TABLE collaboration_audit_events ADD COLUMN actor_principal_id TEXT;
+        ALTER TABLE collaboration_audit_events ADD COLUMN work_item_id TEXT;
+        ALTER TABLE collaboration_audit_events ADD COLUMN request_id TEXT;
+        ALTER TABLE collaboration_audit_events ADD COLUMN policy_rule TEXT;
+        ALTER TABLE collaboration_audit_events ADD COLUMN before_hash TEXT;
+        ALTER TABLE collaboration_audit_events ADD COLUMN after_hash TEXT;
+        ALTER TABLE collaboration_audit_events ADD COLUMN error TEXT;
+
+        CREATE TABLE collaboration_owner_bindings (
+          id TEXT PRIMARY KEY,
+          source TEXT NOT NULL CHECK (source = 'dingtalk'),
+          sender_corp_id TEXT NOT NULL,
+          sender_staff_id TEXT NOT NULL,
+          generation INTEGER NOT NULL UNIQUE CHECK (generation > 0),
+          active INTEGER NOT NULL CHECK (active IN (0, 1)),
+          created_at INTEGER NOT NULL,
+          revoked_at INTEGER,
+          CHECK ((active = 1 AND revoked_at IS NULL) OR (active = 0 AND revoked_at IS NOT NULL))
+        ) STRICT;
+        CREATE UNIQUE INDEX collaboration_single_active_owner
+          ON collaboration_owner_bindings(active) WHERE active = 1;
+        CREATE TRIGGER collaboration_owner_bindings_no_delete
+          BEFORE DELETE ON collaboration_owner_bindings
+          BEGIN SELECT RAISE(ABORT, 'owner binding history is immutable'); END;
+
+        CREATE TABLE collaboration_action_tokens (
+          id TEXT PRIMARY KEY,
+          token_version INTEGER NOT NULL CHECK (token_version = 1),
+          token_hash TEXT NOT NULL UNIQUE,
+          action TEXT NOT NULL CHECK (action IN ('pause', 'resume', 'retry', 'cancel', 'accept', 'reject')),
+          work_item_id TEXT NOT NULL REFERENCES collaboration_work_items(id),
+          aggregate_version INTEGER NOT NULL CHECK (aggregate_version > 0),
+          candidate_sha TEXT,
+          owner_generation INTEGER NOT NULL CHECK (owner_generation > 0),
+          created_at INTEGER NOT NULL,
+          expires_at INTEGER NOT NULL,
+          consumed_at INTEGER,
+          consumed_by_principal_id TEXT REFERENCES collaboration_principals(id),
+          consumed_outcome TEXT CHECK (consumed_outcome IN ('allowed', 'denied')),
+          decision_json TEXT,
+          CHECK (expires_at > created_at),
+          CHECK (
+            (action IN ('accept', 'reject') AND candidate_sha IS NOT NULL) OR
+            (action NOT IN ('accept', 'reject') AND candidate_sha IS NULL)
+          ),
+          CHECK (
+            (consumed_at IS NULL AND consumed_by_principal_id IS NULL AND consumed_outcome IS NULL AND decision_json IS NULL) OR
+            (consumed_at IS NOT NULL AND consumed_by_principal_id IS NOT NULL AND consumed_outcome IS NOT NULL AND decision_json IS NOT NULL)
+          )
+        ) STRICT;
+        CREATE INDEX collaboration_action_tokens_work_item
+          ON collaboration_action_tokens(work_item_id, created_at DESC);
+
+        CREATE TABLE collaboration_control_events (
+          id TEXT PRIMARY KEY,
+          work_item_id TEXT NOT NULL REFERENCES collaboration_work_items(id),
+          work_item_version INTEGER NOT NULL CHECK (work_item_version > 0),
+          action TEXT NOT NULL CHECK (action IN ('pause', 'resume', 'retry', 'cancel', 'accept', 'reject')),
+          principal_id TEXT NOT NULL REFERENCES collaboration_principals(id),
+          token_id TEXT NOT NULL REFERENCES collaboration_action_tokens(id),
+          candidate_sha TEXT,
+          reason TEXT,
+          created_at INTEGER NOT NULL
+        ) STRICT;
+        CREATE TRIGGER collaboration_control_events_no_update
+          BEFORE UPDATE ON collaboration_control_events
+          BEGIN SELECT RAISE(ABORT, 'control events are immutable'); END;
+        CREATE TRIGGER collaboration_control_events_no_delete
+          BEFORE DELETE ON collaboration_control_events
+          BEGIN SELECT RAISE(ABORT, 'control events are immutable'); END;
       `);
     },
   },

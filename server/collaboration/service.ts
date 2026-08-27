@@ -1,6 +1,13 @@
 import { join } from "node:path";
 
 import type { DingTalkInboundMessage } from "../integrations/dingtalk/types.ts";
+import {
+  OwnerActionController,
+  type IssueOwnerActionInput,
+  type IssuedOwnerAction,
+  type OwnerActionOutcome,
+  type PerformOwnerActionInput,
+} from "./actions.ts";
 import { FIRST_MILESTONE_DEFAULTS, OPENMAUSBOT_SOURCE_BASELINE } from "./config.ts";
 import { openCollaborationLedger, type CollaborationLedger, type DatabaseHealth } from "./db.ts";
 import { InboundMessageProcessor, type InboundMessageOutcome } from "./inbound.ts";
@@ -15,6 +22,7 @@ import {
   type DefinitionRevisionOutcome,
   type PlanningCoordinatorOptions,
 } from "./plan-reviser.ts";
+import { LocalOwnerRegistry, type OwnerBinding } from "./owner.ts";
 import type { WorkItemSnapshotPatch } from "./snapshot.ts";
 
 export interface CollaborationHealth {
@@ -36,6 +44,16 @@ export interface CollaborationService {
     now?: number,
   ): DefinitionRevisionOutcome;
   executeCurrentPlan(workItemId: string, attempt?: number, now?: number): Promise<CandidateExecutionOutcome>;
+  ownerBinding(): OwnerBinding | null;
+  bootstrapOwnerLocally(input: { senderCorpId: string; senderStaffId: string; now?: number }): OwnerBinding;
+  recoverOwnerLocally(input: {
+    expectedGeneration: number;
+    senderCorpId: string;
+    senderStaffId: string;
+    now?: number;
+  }): OwnerBinding;
+  issueOwnerAction(input: IssueOwnerActionInput): IssuedOwnerAction;
+  performOwnerAction(input: PerformOwnerActionInput): OwnerActionOutcome;
   pendingOutbox(): CollaborationOutboxEntry[];
   close(): void;
 }
@@ -67,6 +85,18 @@ export function startCollaborationService(options: CollaborationServiceOptions):
   try {
     execution = options.execution ? new CandidateExecutor(ledger.filePath, options.execution) : null;
   } catch (error) {
+    planning?.close();
+    inbound.close();
+    ledger.close();
+    throw error;
+  }
+  let owner: LocalOwnerRegistry;
+  let actions: OwnerActionController;
+  try {
+    owner = new LocalOwnerRegistry(ledger.filePath);
+    actions = new OwnerActionController(ledger.filePath);
+  } catch (error) {
+    execution?.close();
     planning?.close();
     inbound.close();
     ledger.close();
@@ -105,6 +135,26 @@ export function startCollaborationService(options: CollaborationServiceOptions):
       if (!execution) throw new Error("Collaboration execution is not configured");
       return await execution.executeCurrentPlan(workItemId, attempt, now);
     },
+    ownerBinding() {
+      if (closed) throw new Error("Collaboration service is closed");
+      return owner.active();
+    },
+    bootstrapOwnerLocally(input) {
+      if (closed) throw new Error("Collaboration service is closed");
+      return owner.bootstrap(input);
+    },
+    recoverOwnerLocally(input) {
+      if (closed) throw new Error("Collaboration service is closed");
+      return owner.recover(input);
+    },
+    issueOwnerAction(input) {
+      if (closed) throw new Error("Collaboration service is closed");
+      return actions.issue(input);
+    },
+    performOwnerAction(input) {
+      if (closed) throw new Error("Collaboration service is closed");
+      return actions.perform(input);
+    },
     pendingOutbox() {
       if (closed) throw new Error("Collaboration service is closed");
       return inbound.pendingOutbox();
@@ -112,6 +162,8 @@ export function startCollaborationService(options: CollaborationServiceOptions):
     close() {
       if (closed) return;
       closed = true;
+      actions.close();
+      owner.close();
       execution?.close();
       planning?.close();
       inbound.close();
