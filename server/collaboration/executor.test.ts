@@ -474,6 +474,59 @@ describe("trusted candidate executor", () => {
     afterResume.close();
   }, 10_000);
 
+  it.each(["pause", "cancel"] as const)(
+    "fences a completed Agent result when Owner %s commits during target-test finalization",
+    async (action) => {
+      const agent = new FakeAgent((request) => {
+        writeFileSync(join(request.cwd, "src", "value.txt"), "after\n");
+        return completed(request);
+      });
+      let harness: ReturnType<typeof setup>;
+      const commandRunner = new FakeSandboxedCommandRunner((request) => {
+        const issued = harness.service.issueOwnerAction({
+          action,
+          workItemId: harness.workItemId,
+          expectedVersion: 1,
+          now: 3_100,
+        });
+        expect(
+          harness.service.performOwnerAction({
+            actionToken: issued.token,
+            sender: ownerSender(),
+            now: 3_200,
+          }),
+        ).toMatchObject({ allowed: true, action });
+        return sandboxedResult(request);
+      });
+      harness = setup({ agent, commandRunner });
+
+      const outcome = await harness.service.executeCurrentPlan(harness.workItemId, 1, 3_000);
+      expect(outcome).toMatchObject({
+        resultSha: expect.stringMatching(/^[0-9a-f]{40}$/u),
+        report: { state: "invalid", reasons: ["owner_interrupt"], targetTestsPassed: false },
+      });
+      harness.service.close();
+
+      const database = ledger(harness.root);
+      expect(database.prepare("SELECT status, error, interrupt_requested_at FROM collaboration_runs").get()).toEqual({
+        status: "failed",
+        error: "owner_interrupt",
+        interrupt_requested_at: 3_200,
+      });
+      expect(database.prepare("SELECT state, result_sha FROM collaboration_candidates").get()).toEqual({
+        state: "invalid",
+        result_sha: outcome.resultSha,
+      });
+      expect(database.prepare("SELECT execution_status FROM collaboration_work_nodes WHERE node_type = 'modify'").get()).toEqual({
+        execution_status: "invalid",
+      });
+      expect(database.prepare("SELECT count(*) AS count FROM collaboration_candidates WHERE state = 'target_tests_passed'").get()).toEqual({
+        count: 0,
+      });
+      database.close();
+    },
+  );
+
   it("does not acquire a modify node while the Owner pause is active", async () => {
     let runs = 0;
     const agent = new FakeAgent((request) => {

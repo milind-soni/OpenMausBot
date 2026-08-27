@@ -265,8 +265,9 @@ export class CandidateExecutor {
     if (diff.violations.length) {
       return this.finalizeWithoutCandidate(runId, workItemId, node, worktree, "invalid", diff.violations, now, changedPaths);
     }
-    if (!this.isCurrentNode(workItemId, node.current_plan_revision, node.node_id)) {
-      return this.finalizeWithoutCandidate(runId, workItemId, node, worktree, "invalid", ["plan_superseded"], now, changedPaths);
+    const beforeCommitBlock = this.executionBlockReason(runId, workItemId, node.current_plan_revision, node.node_id);
+    if (beforeCommitBlock) {
+      return this.finalizeWithoutCandidate(runId, workItemId, node, worktree, "invalid", [beforeCommitBlock], now, changedPaths);
     }
     appendExecutionAudit(this.database, {
       runId,
@@ -281,6 +282,21 @@ export class CandidateExecutor {
       nodeId: node.node_id,
       runId,
     });
+
+    const afterCommitBlock = this.executionBlockReason(runId, workItemId, node.current_plan_revision, node.node_id);
+    if (afterCommitBlock) {
+      return this.finalizeCandidate(
+        runId,
+        workItemId,
+        node,
+        worktree,
+        resultSha,
+        changedPaths,
+        renderCandidateStatus({ modified: true, violations: [afterCommitBlock] }),
+        [],
+        now,
+      );
+    }
 
     let testEvidence: TestEvidence[] = [];
     let report: CandidateStatusReport;
@@ -304,8 +320,9 @@ export class CandidateExecutor {
       report = renderCandidateStatus({ modified: true, violations: ["test_modified_candidate"] });
     }
     await this.worktrees.assertOriginalUnchanged(worktree);
-    if (!this.isCurrentNode(workItemId, node.current_plan_revision, node.node_id)) {
-      report = renderCandidateStatus({ modified: true, violations: ["plan_superseded"] });
+    const afterTestsBlock = this.executionBlockReason(runId, workItemId, node.current_plan_revision, node.node_id);
+    if (afterTestsBlock) {
+      report = renderCandidateStatus({ modified: true, violations: [afterTestsBlock] });
     }
     return this.finalizeCandidate(runId, workItemId, node, worktree, resultSha, changedPaths, report, testEvidence, now);
   }
@@ -337,16 +354,41 @@ export class CandidateExecutor {
     return row;
   }
 
-  private isCurrentNode(workItemId: string, planRevision: number, nodeId: string): boolean {
-    return Boolean(
-      this.database
-        .prepare(
-          "SELECT 1 FROM collaboration_work_items w JOIN collaboration_work_nodes n " +
-            "ON n.work_item_id = w.id AND n.plan_revision = w.current_plan_revision " +
-            "WHERE w.id = ? AND w.current_plan_revision = ? AND n.node_id = ? AND n.active = 1",
-        )
-        .get(workItemId, planRevision, nodeId),
-    );
+  private executionBlockReason(
+    runId: string,
+    workItemId: string,
+    planRevision: number,
+    nodeId: string,
+  ): "owner_interrupt" | "plan_superseded" | null {
+    const row = this.database
+      .prepare(
+        "SELECT r.status AS run_status, r.interrupt_requested_at, w.control_state AS work_item_control_state, " +
+          "w.current_plan_revision, n.active AS node_active, n.control_state AS node_control_state " +
+          "FROM collaboration_runs r JOIN collaboration_work_items w ON w.id = r.work_item_id " +
+          "LEFT JOIN collaboration_work_nodes n ON n.work_item_id = w.id AND n.plan_revision = ? AND n.node_id = ? " +
+          "WHERE r.id = ? AND r.work_item_id = ? AND r.plan_revision = ? AND r.node_id = ?",
+      )
+      .get(planRevision, nodeId, runId, workItemId, planRevision, nodeId) as
+      | {
+          run_status: string;
+          interrupt_requested_at: number | null;
+          work_item_control_state: string;
+          current_plan_revision: number;
+          node_active: number | null;
+          node_control_state: string | null;
+        }
+      | undefined;
+    if (!row) return "plan_superseded";
+    if (
+      row.interrupt_requested_at !== null ||
+      row.work_item_control_state !== "active" ||
+      row.node_control_state !== "active" ||
+      row.run_status !== "running"
+    ) {
+      return "owner_interrupt";
+    }
+    if (row.current_plan_revision !== planRevision || row.node_active !== 1) return "plan_superseded";
+    return null;
   }
 
   private isCurrentExecutableNode(workItemId: string, planRevision: number, nodeId: string): boolean {
@@ -462,12 +504,26 @@ export class CandidateExecutor {
     explicitRunStatus?: "failed" | "invalid" | "needs_configuration" | "timed_out",
     ownerInterrupted = false,
   ): CandidateExecutionOutcome {
-    const runStatus = explicitRunStatus ?? (report.state === "invalid" ? "invalid" : report.state === "needs_configuration" ? "needs_configuration" : "succeeded");
+    let finalizedReport = report;
     this.database.exec("BEGIN IMMEDIATE");
     try {
+      const transactionBlock = this.executionBlockReason(runId, workItemId, node.current_plan_revision, node.node_id);
+      const effectiveReport = transactionBlock
+        ? renderCandidateStatus({ modified: changedPaths.length > 0, violations: [transactionBlock] })
+        : report;
+      finalizedReport = effectiveReport;
+      const effectiveOwnerInterrupted = ownerInterrupted || transactionBlock === "owner_interrupt";
+      const runStatus = effectiveOwnerInterrupted
+        ? "failed"
+        : explicitRunStatus ??
+          (effectiveReport.state === "invalid"
+            ? "invalid"
+            : effectiveReport.state === "needs_configuration"
+              ? "needs_configuration"
+              : "succeeded");
       this.database
         .prepare("UPDATE collaboration_runs SET status = ?, result_sha = ?, finished_at = ?, error = ? WHERE id = ?")
-        .run(runStatus, resultSha, Date.now(), report.reasons.join("; ") || null, runId);
+        .run(runStatus, resultSha, Date.now(), effectiveReport.reasons.join("; ") || null, runId);
       this.database
         .prepare(
           "INSERT INTO collaboration_candidates " +
@@ -477,12 +533,12 @@ export class CandidateExecutor {
         .run(
           randomUUID(),
           runId,
-          report.state,
+          effectiveReport.state,
           worktree.baseSha,
           resultSha,
           JSON.stringify(changedPaths),
-          JSON.stringify(report.reasons),
-          JSON.stringify(report),
+          JSON.stringify(effectiveReport.reasons),
+          JSON.stringify(effectiveReport),
           now,
         );
       const insertEvidence = this.database.prepare(
@@ -505,8 +561,13 @@ export class CandidateExecutor {
           now,
         );
       }
-      let executionStatus = report.state === "invalid" ? "invalid" : report.state === "needs_configuration" ? "needs_configuration" : "candidate_ready";
-      if (ownerInterrupted) {
+      let executionStatus =
+        effectiveReport.state === "invalid"
+          ? "invalid"
+          : effectiveReport.state === "needs_configuration"
+            ? "needs_configuration"
+            : "candidate_ready";
+      if (effectiveOwnerInterrupted) {
         const state = this.database
           .prepare("SELECT control_state FROM collaboration_work_items WHERE id = ?")
           .get(workItemId) as { control_state: string };
@@ -522,8 +583,8 @@ export class CandidateExecutor {
       appendExecutionAudit(this.database, {
         runId,
         action: "candidate.finalized",
-        outcome: report.state,
-        resource: { baseSha: worktree.baseSha, resultSha, quality: report.state, ownerInterrupted },
+        outcome: effectiveReport.state,
+        resource: { baseSha: worktree.baseSha, resultSha, quality: effectiveReport.state, ownerInterrupted: effectiveOwnerInterrupted },
         now,
       });
       this.database.exec("COMMIT");
@@ -541,7 +602,7 @@ export class CandidateExecutor {
       branch: worktree.branch,
       worktreePath: worktree.path,
       changedPaths,
-      report,
+      report: finalizedReport,
       evidence,
     };
   }
