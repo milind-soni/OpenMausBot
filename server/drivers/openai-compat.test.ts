@@ -224,4 +224,106 @@ describe("OpenAICompatDriver", () => {
     recorder.stop();
     await inst.dispose();
   });
+
+  it("decodes a default model and provider from config", () => {
+    const cfg = OpenAICompatDriver.decodeConfig({
+      model: "deepseek/deepseek-v4-flash-0731",
+      provider: "fireworks",
+    });
+    expect(cfg.model).toBe("deepseek/deepseek-v4-flash-0731");
+    expect(cfg.provider).toBe("fireworks");
+  });
+
+  it("seeds the picker with the configured default model", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => new Response(JSON.stringify({ data: [] }), { status: 200 })),
+    );
+    const inst = await OpenAICompatDriver.create({
+      instanceId: "test-default-model",
+      displayName: "Default model",
+      enabled: true,
+      config: {
+        url: "https://openrouter.ai/api/v1",
+        apiKeyEnv: "TEST_KEY",
+        model: "deepseek/deepseek-v4-flash-0731",
+      },
+      environment: { TEST_KEY: "secret" },
+    });
+    expect(inst.models.default).toBe("deepseek/deepseek-v4-flash-0731");
+    expect(inst.models.options.some((o) => o.id === "deepseek/deepseek-v4-flash-0731")).toBe(true);
+    await inst.dispose();
+  });
+
+  it("pins the OpenRouter upstream provider in the request body", async () => {
+    let sentBody: any = null;
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
+        const url = String(input);
+        if (url.endsWith("/models")) return new Response(JSON.stringify({ data: [] }), { status: 200 });
+        sentBody = JSON.parse(String(init?.body));
+        return new Response(
+          'data: {"choices":[{"delta":{"content":"hi"}}]}\n' + "data: [DONE]\n",
+          { status: 200, headers: { "content-type": "text/event-stream" } },
+        );
+      }),
+    );
+    const inst = await OpenAICompatDriver.create({
+      instanceId: "test-provider-route",
+      displayName: "Provider route",
+      enabled: true,
+      config: {
+        url: "https://openrouter.ai/api/v1",
+        apiKeyEnv: "TEST_KEY",
+        provider: "fireworks",
+      },
+      environment: { TEST_KEY: "secret" },
+    });
+    const recorder = recordEvents(inst.adapter);
+
+    await inst.adapter.sendTurn({
+      threadId: "thread-p",
+      text: "prompt",
+      model: "deepseek/deepseek-v4-flash-0731",
+    });
+    await recorder.until((e) => e.type === "turn.completed");
+
+    expect(sentBody?.model).toBe("deepseek/deepseek-v4-flash-0731");
+    expect(sentBody?.provider).toEqual({ order: ["fireworks"], allow_fallbacks: false });
+    recorder.stop();
+    await inst.dispose();
+  });
+
+  it("omits provider routing when none is configured", async () => {
+    let sentBody: any = null;
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
+        const url = String(input);
+        if (url.endsWith("/models")) return new Response(JSON.stringify({ data: [] }), { status: 200 });
+        sentBody = JSON.parse(String(init?.body));
+        return new Response(
+          'data: {"choices":[{"delta":{"content":"hi"}}]}\n' + "data: [DONE]\n",
+          { status: 200, headers: { "content-type": "text/event-stream" } },
+        );
+      }),
+    );
+    const inst = await OpenAICompatDriver.create({
+      instanceId: "test-no-provider",
+      displayName: "No provider",
+      enabled: true,
+      config: { url: "https://openrouter.ai/api/v1", apiKeyEnv: "TEST_KEY" },
+      environment: { TEST_KEY: "secret" },
+    });
+    const recorder = recordEvents(inst.adapter);
+
+    await inst.adapter.sendTurn({ threadId: "thread-np", text: "prompt", model: "vendor/model" });
+    await recorder.until((e) => e.type === "turn.completed");
+
+    expect(sentBody).not.toBeNull();
+    expect("provider" in sentBody).toBe(false);
+    recorder.stop();
+    await inst.dispose();
+  });
 });

@@ -77,7 +77,11 @@ const instanceConfigSchema = z.object({
 const instanceConfigMapSchema = z.record(z.string(), instanceConfigSchema);
 const appConfigSchema = z.object({
   xai: z.object({ key: optionalText, url: optionalText }).optional(),
-  openaiCompat: z.object({ key: optionalText, url: optionalText }).optional(),
+  /** `model` seeds the default selection; `provider` pins an OpenRouter
+   * upstream (e.g. "fireworks"). Both are non-secret and optional. */
+  openaiCompat: z
+    .object({ key: optionalText, url: optionalText, model: optionalText, provider: optionalText })
+    .optional(),
   /** Project key used for Sessions, catalog and agent tools. userId/sessionId
    * are non-secret local identifiers used to reuse one Composio Session. */
   composio: z.object({ apiKey: optionalText, userId: optionalText, sessionId: optionalText }).optional(),
@@ -103,7 +107,7 @@ const jsonObjectSchema = z.record(z.string(), z.json());
 
 export interface AppConfig {
   xai?: { key?: string; url?: string };
-  openaiCompat?: { key?: string; url?: string };
+  openaiCompat?: { key?: string; url?: string; model?: string; provider?: string };
   composio?: { apiKey?: string; userId?: string; sessionId?: string };
   box?: { token?: string };
   /** A named host from the user's SSH config. Authentication stays with SSH. */
@@ -198,6 +202,8 @@ export function loadConfig(): AppConfig {
   cfg.openaiCompat = { ...cfg.openaiCompat };
   if (process.env.OPENAI_COMPAT_API_KEY !== undefined) cfg.openaiCompat.key = process.env.OPENAI_COMPAT_API_KEY;
   if (process.env.OPENAI_COMPAT_URL !== undefined) cfg.openaiCompat.url = process.env.OPENAI_COMPAT_URL;
+  if (process.env.OPENAI_COMPAT_MODEL !== undefined) cfg.openaiCompat.model = process.env.OPENAI_COMPAT_MODEL;
+  if (process.env.OPENAI_COMPAT_PROVIDER !== undefined) cfg.openaiCompat.provider = process.env.OPENAI_COMPAT_PROVIDER;
   cfg.composio = { ...cfg.composio };
   if (process.env.COMPOSIO_API_KEY !== undefined) cfg.composio.apiKey = process.env.COMPOSIO_API_KEY;
   cfg.box = { ...cfg.box };
@@ -457,15 +463,21 @@ export function instanceConfigs(cfg: AppConfig): InstanceConfigMap {
     // intentionally not consulted by ProviderRegistry when it decodes a
     // driver's config, so carry the workspace default into the transient
     // instance map while preserving a per-instance override.
-    if (entry.driver === "openai-compat" && cfg.openaiCompat?.url) {
-      const raw = entry.config;
-      if (raw === undefined) {
-        entry.config = { url: cfg.openaiCompat.url };
-      } else if (typeof raw === "object" && raw !== null && !Array.isArray(raw)) {
-        const current = raw as Record<string, unknown>;
-        if (typeof current.url !== "string" || !current.url.trim()) {
-          entry.config = { ...current, url: cfg.openaiCompat.url };
+    if (entry.driver === "openai-compat" && cfg.openaiCompat) {
+      const defaults: Record<string, string> = {};
+      if (cfg.openaiCompat.url) defaults.url = cfg.openaiCompat.url;
+      if (cfg.openaiCompat.model) defaults.model = cfg.openaiCompat.model;
+      if (cfg.openaiCompat.provider) defaults.provider = cfg.openaiCompat.provider;
+      if (Object.keys(defaults).length) {
+        const raw = entry.config;
+        const current =
+          typeof raw === "object" && raw !== null && !Array.isArray(raw) ? (raw as Record<string, unknown>) : {};
+        const merged = { ...current };
+        // A per-instance value always wins over the workspace default.
+        for (const [k, v] of Object.entries(defaults)) {
+          if (typeof merged[k] !== "string" || !(merged[k] as string).trim()) merged[k] = v;
         }
+        entry.config = merged;
       }
     }
   }
