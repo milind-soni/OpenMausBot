@@ -84,6 +84,15 @@ describe("channel tasks", () => {
     expect(store.deleteGroupTask(channel.id, first)).toBeNull();
   });
 
+  it("normalizes a supplied task title at the store boundary", async () => {
+    const { store } = await freshStore();
+    const bot = store.createBot();
+    const channel = store.createGroup("Product", [bot.id]);
+    const longTitle = "x".repeat(100);
+
+    expect(store.createGroupTask(channel.id, `  ${longTitle}  `)?.title).toBe(longTitle.slice(0, 80));
+  });
+
   it("adopts a legacy channel thread without losing its folder or pin", async () => {
     const { store, Store } = await freshStore();
     const bot = store.createBot();

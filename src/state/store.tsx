@@ -516,10 +516,21 @@ export type Action =
       patch: BotUpdatePatch;
     };
 
+interface NotificationThreadOwner {
+  id: string;
+  threadId: string;
+  tasks?: Array<{ threadId: string }>;
+}
+
+interface NotificationRoutingState {
+  bots: NotificationThreadOwner[];
+  groups: NotificationThreadOwner[];
+}
+
 export function openNotificationTarget(
   dispatch: (action: Action) => void,
   target: NotificationTarget,
-  state: Pick<AppState, "bots" | "groups">,
+  state: NotificationRoutingState,
 ) {
   // A room's approval/question notification carries the asker bot with the
   // GROUP's thread id; asking the bot to switch to that thread would 404.
