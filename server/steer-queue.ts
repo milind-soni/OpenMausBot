@@ -41,9 +41,12 @@ const queues = new Map<string, QueueEntry>(); // threadId → waiting sends
 export function queueSteeredMessage(
   bot: BotRecord,
   text: string,
-  options: { prompt?: string; replyToId?: string } = {},
+  options: { prompt?: string; replyToId?: string; threadId?: string } = {},
 ): { id: string } {
-  const threadId = bot.threadId;
+  // An adapter steer can yield while the running turn settles. Its caller
+  // pins the task before that await; do not let a later task switch silently
+  // retarget this queued message through the mutable bot record.
+  const threadId = options.threadId ?? bot.threadId;
   const id = newId();
   const entry = queues.get(threadId) ?? { botId: bot.id, items: [] };
   entry.items.push({ messageId: id, text, prompt: options.prompt ?? text, replyToId: options.replyToId });

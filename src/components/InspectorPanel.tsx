@@ -29,6 +29,7 @@ export function InspectorPanel({ bot }: { bot: Bot }) {
   const listRef = useRef<HTMLDivElement>(null);
   const stickToBottom = useRef(true);
   const loadAbort = useRef<AbortController | null>(null);
+  const managedRefresh = useRef<() => void>(() => {});
 
   const load = useCallback(async () => {
     loadAbort.current?.abort();
@@ -100,6 +101,7 @@ export function InspectorPanel({ bot }: { bot: Bot }) {
         for (const runtime of pendingRuntime.splice(0)) appendRuntime(runtime);
       });
     };
+    managedRefresh.current = refresh;
 
     const stopLive = openLiveEvents({
       screens: false,
@@ -128,6 +130,7 @@ export function InspectorPanel({ bot }: { bot: Bot }) {
     });
     return () => {
       alive = false;
+      if (managedRefresh.current === refresh) managedRefresh.current = () => {};
       stopLive();
       if (settle) clearTimeout(settle);
     };
@@ -195,7 +198,7 @@ export function InspectorPanel({ bot }: { bot: Bot }) {
         <span className="ml-auto text-[11px] text-ink-secondary">
           {page ? (shown < total ? `last ${shown} of ${total}` : `${shown} entries`) : "loading…"}
         </span>
-        <button onClick={() => void load()} className="rounded-md p-1 text-ink-secondary hover:bg-raised hover:text-ink" title="Reload from disk">
+        <button onClick={() => managedRefresh.current()} className="rounded-md p-1 text-ink-secondary hover:bg-raised hover:text-ink" title="Reload from disk">
           <RefreshCw size={14} />
         </button>
       </div>

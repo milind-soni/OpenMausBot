@@ -5215,7 +5215,22 @@ const server = createServer(async (req, res) => {
             return json(res, 202, { ok: true, steered: true, threadId, message });
           }
         }
-        const queued = queueSteeredMessage(bot, text, {
+        // The turn can settle while steer() is awaited. If it did, its queue
+        // drain already ran; enqueueing now would strand this message until
+        // some unrelated future turn settles. Start the pinned task directly
+        // instead. If another turn claimed the bot meanwhile, queue behind it
+        // but keep the original task target.
+        const current = store.bot(bot.id);
+        if (!current) return json(res, 404, { error: "no such bot" });
+        if (!store.taskByThread(bot.id, threadId)) {
+          return json(res, 409, { error: "the target task no longer exists" });
+        }
+        if (!current.busy) {
+          const message = await startTurn(bot.id, text, { threadId, replyTo });
+          return json(res, 202, { ok: true, threadId, message });
+        }
+        const queued = queueSteeredMessage(current, text, {
+          threadId,
           replyToId: replyTo?.id,
           prompt: promptWithReply(text, replyTo, cfg.profile?.name?.trim() || "User"),
         });

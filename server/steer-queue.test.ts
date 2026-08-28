@@ -151,6 +151,35 @@ describe("steer-queue module", () => {
     expect(run.mock.calls[0][2]).toBe("Reply context\nThat part");
   });
 
+  it("keeps the caller's pinned task when the mutable bot switches during steering", () => {
+    const bot = fakeBot("bot-switch", "thread-original", true);
+    const store = fakeStore([bot]);
+
+    // This mirrors an adapter steer() yielding until the old turn settles,
+    // after which another request changes the bot's active task.
+    bot.threadId = "thread-new";
+    queueSteeredMessage(bot, "keep this with the original task", {
+      threadId: "thread-original",
+    });
+
+    expect(_queuedCount("thread-original")).toBe(1);
+    expect(_queuedCount("thread-new")).toBe(0);
+    bot.busy = false;
+    const run = vi.fn();
+    drainSteeredMessages(store, run);
+    expect(store.messages[0]).toMatchObject({
+      id: expect.stringContaining("thread-original"),
+      text: "keep this with the original task",
+    });
+    expect(run).toHaveBeenCalledWith(
+      bot.id,
+      "thread-original",
+      "keep this with the original task",
+      expect.objectContaining({ text: "keep this with the original task" }),
+      expect.any(Array),
+    );
+  });
+
   it("fires nothing when nothing is queued", () => {
     const run = vi.fn();
     drainSteeredMessages(fakeStore([fakeBot("bot-c", "thread-c", false)]), run);
