@@ -567,6 +567,111 @@ describe("harness HTTP API", () => {
     }
   });
 
+  it("deduplicates direct send retries by sendId, including after the accepted task becomes inactive", async () => {
+    const created = await api("POST", "/api/bots", {
+      modelSelection: { instanceId: "claude", model: "claude-sonnet-5" },
+      requireAvailableModel: true,
+    });
+    expect(created.status).toBe(201);
+    const bot = created.body.bot;
+    const originalThreadId = bot.threadId;
+    const sendId = "direct_retry_1234567890";
+    const request = { text: "retry this direct message once", threadId: originalThreadId, sendId };
+    try {
+      const first = await api("POST", `/api/bots/${bot.id}/messages`, request);
+      expect(first.status).toBe(202);
+      expect(first.body).toMatchObject({
+        ok: true,
+        threadId: originalThreadId,
+        message: { role: "user", kind: "text", text: request.text, sendId },
+      });
+
+      const duplicate = await api("POST", `/api/bots/${bot.id}/messages`, request);
+      expect(duplicate.status).toBe(202);
+      expect(duplicate.body).toEqual(first.body);
+
+      const conflict = await api("POST", `/api/bots/${bot.id}/messages`, {
+        ...request,
+        text: "a different message cannot reuse that identity",
+      });
+      expect(conflict.status).toBe(409);
+      expect(conflict.body.error).toMatch(/sendId already belongs/i);
+
+      const invalid = await api("POST", `/api/bots/${bot.id}/messages`, {
+        text: "invalid identity must not land",
+        threadId: originalThreadId,
+        sendId: "short",
+      });
+      expect(invalid.status).toBe(400);
+
+      const accepted = (await api("GET", "/api/bots?messages=50")).body.bots.find(
+        (candidate: { id: string }) => candidate.id === bot.id,
+      );
+      expect(accepted.messages.filter((message: { role: string; sendId?: string }) =>
+        message.role === "user" && message.sendId === sendId
+      )).toHaveLength(1);
+      expect(accepted.messages.some((message: { text?: string }) => message.text === "invalid identity must not land"))
+        .toBe(false);
+
+      await api("POST", `/api/bots/${bot.id}/interrupt`, { threadId: originalThreadId });
+      await expect.poll(async () => {
+        const state = (await api("GET", "/api/bots?messages=0")).body.bots.find(
+          (candidate: { id: string }) => candidate.id === bot.id,
+        );
+        return state?.busy;
+      }, { timeout: 5_000 }).toBe(false);
+
+      const nextTask = await api("POST", `/api/bots/${bot.id}/tasks`, { title: "Now active" });
+      expect(nextTask.status).toBe(201);
+      expect(nextTask.body.task.threadId).not.toBe(originalThreadId);
+
+      const inactiveRetry = await api("POST", `/api/bots/${bot.id}/messages`, request);
+      expect(inactiveRetry.status).toBe(202);
+      expect(inactiveRetry.body).toEqual(first.body);
+      const current = (await api("GET", "/api/bots?messages=0")).body.bots.find(
+        (candidate: { id: string }) => candidate.id === bot.id,
+      );
+      expect(current.threadId).toBe(nextTask.body.task.threadId);
+    } finally {
+      await api("POST", `/api/bots/${bot.id}/interrupt`, {}).catch(() => undefined);
+      await api("DELETE", `/api/bots/${bot.id}`);
+    }
+  });
+
+  it("deduplicates channel send retries by sendId", async () => {
+    const member = (await api("GET", "/api/bots?messages=0")).body.bots[0];
+    const room = (await api("POST", "/api/groups", {
+      name: "Idempotent channel",
+      memberIds: [member.id],
+      setup: { bulletin: "", defaultResponder: { kind: "mentions" } },
+    })).body.group;
+    const sendId = "channel_retry_123456789";
+    const request = { text: "one canonical channel message", threadId: room.threadId, sendId };
+    try {
+      const first = await api("POST", `/api/groups/${room.id}/messages`, request);
+      expect(first.status).toBe(202);
+      expect(first.body).toMatchObject({
+        ok: true,
+        threadId: room.threadId,
+        message: { role: "user", kind: "text", text: request.text, sendId },
+      });
+
+      const duplicate = await api("POST", `/api/groups/${room.id}/messages`, request);
+      expect(duplicate.status).toBe(202);
+      expect(duplicate.body).toEqual(first.body);
+
+      const snapshot = (await api("GET", "/api/bots?messages=50")).body.groups.find(
+        (candidate: { id: string }) => candidate.id === room.id,
+      );
+      expect(snapshot.messages.filter((message: { role: string; sendId?: string }) =>
+        message.role === "user" && message.sendId === sendId
+      )).toHaveLength(1);
+    } finally {
+      await api("POST", `/api/groups/${room.id}/interrupt`, {}).catch(() => undefined);
+      await api("DELETE", `/api/groups/${room.id}`);
+    }
+  });
+
   it("rejects an entire channel roster when any requested member is unknown", async () => {
     const bot = (await api("GET", "/api/bots?messages=0")).body.bots[0];
     const before = (await api("GET", "/api/bots?messages=0")).body.groups.length;
