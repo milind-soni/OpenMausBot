@@ -1,9 +1,9 @@
 // The bus is the seam every client depends on: events must arrive
 // stamped with their instanceId, cross-driver leaks must be dropped, and
 // neither logging nor a broken listener may take down the stream.
-import { existsSync, readFileSync, rmSync } from "node:fs";
+import { appendFileSync, existsSync, readFileSync, rmSync } from "node:fs";
 import { join } from "node:path";
-import { beforeEach, describe, expect, it } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { EVENTS_DIR, ensureDirs } from "../config.ts";
 import type { RuntimeEvent } from "../contracts.ts";
@@ -87,15 +87,46 @@ describe("EventBus", () => {
     expect(logged).toContain("«redacted");
   });
 
-  it("still delivers when the NDJSON log cannot be written", () => {
+  it("reports an incomplete log once while continuing live delivery", () => {
     rmSync(EVENTS_DIR, { recursive: true, force: true });
     const bus = new EventBus();
     const seen: RuntimeEvent[] = [];
     bus.subscribe((e) => seen.push(e));
 
     bus.publish(testEvent());
-    expect(seen).toHaveLength(1);
+    bus.publish(testEvent({ eventId: "ev-2", type: "turn.completed", ok: true }));
+
+    expect(seen).toHaveLength(3);
+    expect(seen[0]).toMatchObject({
+      type: "runtime.error",
+      threadId: "thread-1",
+      message: expect.stringContaining("event history is incomplete"),
+    });
+    expect(seen.slice(1).map((event) => event.eventId)).toEqual(["ev-1", "ev-2"]);
     expect(existsSync(EVENTS_DIR)).toBe(false);
+  });
+
+  it("writes the incomplete marker before the first event after logging recovers", () => {
+    let failing = true;
+    const writes: string[] = [];
+    const append: typeof appendFileSync = vi.fn((...args: Parameters<typeof appendFileSync>) => {
+      if (failing) throw new Error("disk full");
+      writes.push(String(args[1]));
+    });
+    const bus = new EventBus(append);
+    const seen: RuntimeEvent[] = [];
+    bus.subscribe((event) => seen.push(event));
+
+    bus.publish(testEvent());
+    failing = false;
+    bus.publish(testEvent({ eventId: "ev-2", type: "turn.completed", ok: true }));
+    bus.publish(testEvent({ eventId: "ev-3" }));
+
+    const recovered = writes[0].trim().split("\n").map((line) => JSON.parse(line));
+    expect(recovered.map((event) => event.type)).toEqual(["runtime.error", "turn.completed"]);
+    expect(recovered[0].message).toContain("event history is incomplete");
+    expect(writes[1].trim()).toContain('"eventId":"ev-3"');
+    expect(seen.filter((event) => event.type === "runtime.error")).toHaveLength(1);
   });
 
   it("a throwing listener does not starve the others", () => {
