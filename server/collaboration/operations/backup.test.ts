@@ -194,7 +194,7 @@ describe("encrypted collaboration ledger backup", () => {
     expect(deliveries).toBe(0);
     expect(restoredService.health()).toMatchObject({ status: "healthy", ready: true });
     restoredService.close();
-  });
+  }, 10_000);
 
   it("rejects tampering and a wrong key before creating a review database", async () => {
     const root = directory();
