@@ -1225,6 +1225,35 @@ export async function api(path: string, init?: RequestInit): Promise<any> {
   return body;
 }
 
+export interface PeripheralSnapshotLoad<Key extends string = string> {
+  key: Key;
+  load: () => Promise<void>;
+}
+
+function normalizeSnapshotFailure(cause: unknown): Error {
+  return cause instanceof Error ? cause : new Error(String(cause));
+}
+
+/** A refused SSE resume needs the chat transcript snapshot before its cursor
+ * can be acknowledged. The other panels should refresh at the same boundary,
+ * but a broken optional endpoint must not hold every chat frame hostage. */
+export async function loadSnapshotBoundary<Key extends string>(
+  loadChat: () => Promise<void>,
+  peripherals: readonly PeripheralSnapshotLoad<Key>[],
+  onPeripheralFailure: (part: PeripheralSnapshotLoad<Key>, error: Error) => void,
+): Promise<boolean> {
+  const [chat, ...settledPeripherals] = await Promise.allSettled([
+    loadChat(),
+    ...peripherals.map((part) => part.load()),
+  ]);
+  settledPeripherals.forEach((result, index) => {
+    if (result.status === "rejected") {
+      onPeripheralFailure(peripherals[index]!, normalizeSnapshotFailure(result.reason));
+    }
+  });
+  return chat.status === "fulfilled";
+}
+
 /** Per-frame stream state lives in its OWN context: token frames update only
  * the components that read this hook (the chat's streaming tail), while every
  * useStore consumer — sidebar, mascots, pickers, the settled transcript —
@@ -1660,26 +1689,122 @@ export function StoreProvider({ children }: { children: ReactNode }) {
   // ── initial load + SSE fold ──────────────────────────────────────────
   useEffect(() => {
     let alive = true;
+    type PeripheralKey = "instances" | "config" | "routines" | "webhooks";
+    type PeripheralPart = {
+      key: PeripheralKey;
+      request: () => Promise<() => void>;
+    };
+    type PeripheralRefresh = {
+      attempt: number;
+      generation: number;
+      timer: ReturnType<typeof setTimeout> | null;
+      version: number;
+    };
+    const peripheralRefresh = new Map<PeripheralKey, PeripheralRefresh>();
+    const refreshState = (key: PeripheralKey) => {
+      let current = peripheralRefresh.get(key);
+      if (!current) {
+        current = { attempt: 0, generation: 0, timer: null, version: 0 };
+        peripheralRefresh.set(key, current);
+      }
+      return current;
+    };
+    const peripheralParts: PeripheralPart[] = [
+      {
+        key: "instances",
+        request: async () => {
+          const { instances } = await api("/api/instances");
+          return () => rawDispatch({ type: "instances", instances });
+        },
+      },
+      {
+        key: "config",
+        request: async () => {
+          const config = await api("/api/config");
+          return () => rawDispatch({ type: "configStatus", config });
+        },
+      },
+      {
+        key: "routines",
+        request: async () => {
+          const { routines, runs } = await api("/api/routines");
+          return () => rawDispatch({ type: "routinesHydrated", routines, runs });
+        },
+      },
+      {
+        key: "webhooks",
+        request: async () => {
+          const { webhooks, attempts, ingress } = await api("/api/webhooks");
+          return () =>
+            rawDispatch({ type: "webhooksHydrated", webhooks, attempts: attempts ?? [], ingress });
+        },
+      },
+    ];
+    const partByKey = new Map(peripheralParts.map((part) => [part.key, part]));
+    const schedulePeripheralRetry = (part: PeripheralPart, error?: Error) => {
+      if (!alive) return;
+      const refresh = refreshState(part.key);
+      if (refresh.timer) return;
+      if (error !== undefined) {
+        console.warn(`snapshot: ${part.key} refresh failed; retrying`, error);
+      }
+      const delay = Math.min(30_000, 1_000 * 2 ** Math.min(refresh.attempt, 5));
+      refresh.attempt += 1;
+      refresh.timer = setTimeout(() => {
+        refresh.timer = null;
+        void loadPeripheral(part, true).catch((nextError) => schedulePeripheralRetry(part, nextError));
+      }, delay);
+    };
+    const loadPeripheral = async (part: PeripheralPart, protectLiveFrames: boolean): Promise<void> => {
+      const refresh = refreshState(part.key);
+      if (refresh.timer) {
+        clearTimeout(refresh.timer);
+        refresh.timer = null;
+      }
+      const generation = ++refresh.generation;
+      const version = refresh.version;
+      try {
+        const apply = await part.request();
+        if (!alive || refresh.generation !== generation) return;
+        // A background retry must never replace a live patch that arrived
+        // after its request began. Discard that stale response and try again
+        // from the newer event boundary instead.
+        if (protectLiveFrames && refresh.version !== version) {
+          schedulePeripheralRetry(part);
+          return;
+        }
+        apply();
+        refresh.attempt = 0;
+      } catch (error) {
+        // A newer refresh owns this lane now; its result will decide whether
+        // another retry is needed.
+        if (!alive || refresh.generation !== generation) return;
+        throw normalizeSnapshotFailure(error);
+      }
+    };
+    const bumpPeripheralVersion = (...keys: PeripheralKey[]) => {
+      for (const key of keys) refreshState(key).version += 1;
+    };
     const loadAll = async (): Promise<boolean> => {
-      const results = await Promise.allSettled([
-        api("/api/bots")
-          .then(({ bots, groups, computerControl }) =>
-            alive && rawDispatch({
-              type: "hydrate",
-              bots,
-              groups: groups ?? [],
-              computerControl: computerControl ?? {},
-            })),
-        api("/api/instances")
-          .then(({ instances }) => alive && rawDispatch({ type: "instances", instances })),
-        api("/api/config")
-          .then((config) => alive && rawDispatch({ type: "configStatus", config })),
-        api("/api/routines")
-          .then(({ routines, runs }) => alive && rawDispatch({ type: "routinesHydrated", routines, runs })),
-        api("/api/webhooks")
-          .then(({ webhooks, attempts, ingress }) => alive && rawDispatch({ type: "webhooksHydrated", webhooks, attempts: attempts ?? [], ingress })),
-      ]);
-      return alive && results.every((result) => result.status === "fulfilled");
+      const chat = () =>
+        api("/api/bots").then(({ bots, groups, computerControl }) => {
+          if (!alive) return;
+          rawDispatch({
+            type: "hydrate",
+            bots,
+            groups: groups ?? [],
+            computerControl: computerControl ?? {},
+          });
+        });
+      const peripherals = peripheralParts.map((part) => ({
+        key: part.key,
+        load: () => loadPeripheral(part, false),
+      }));
+      const chatReady = await loadSnapshotBoundary(chat, peripherals, (failed, error) => {
+        const part = partByKey.get(failed.key);
+        if (part) schedulePeripheralRetry(part, error);
+      });
+      return alive && chatReady;
     };
 
     // A snapshot and the live fold have to meet at a defined boundary. Start
@@ -1724,6 +1849,16 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     // server replays what we missed when it can, and re-downloading every
     // transcript on a reconnect it already covered is pure waste.
     handleFrame = (frame) => {
+      if (frame.kind === "config") bumpPeripheralVersion("config", "instances");
+      else if (frame.kind === "routine" || frame.kind === "routine.deleted" || frame.kind === "routine.run") {
+        bumpPeripheralVersion("routines");
+      } else if (
+        frame.kind === "webhook" ||
+        frame.kind === "webhook.attempt" ||
+        frame.kind === "webhook.deleted"
+      ) {
+        bumpPeripheralVersion("webhooks");
+      }
       switch (frame.kind) {
         case "message": {
           rawDispatch({ type: "messageAdded", threadId: frame.threadId, message: frame.message });
@@ -1900,6 +2035,9 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     return () => {
       alive = false;
       clearTimeout(hydrationFallback);
+      for (const refresh of peripheralRefresh.values()) {
+        if (refresh.timer) clearTimeout(refresh.timer);
+      }
       stopLive();
     };
   }, []);
