@@ -149,6 +149,44 @@ function sourceEventId(dedupeKey: string): string | undefined {
     : undefined;
 }
 
+function parseConversationAllowlist(raw: string, field: string): Set<string> {
+  let values: unknown[];
+  try {
+    const parsed = JSON.parse(raw) as unknown;
+    values = Array.isArray(parsed) ? parsed : [parsed];
+  } catch {
+    values = raw.split(",");
+  }
+  if (values.length < 1 || values.length > 32) throw new Error(`${field}_invalid`);
+  const normalized = values.map((value) => {
+    if (typeof value !== "string") throw new Error(`${field}_invalid`);
+    const id = value.trim();
+    if (!id || id.length > 256 || /[\u0000-\u001f\u007f]/u.test(id)) throw new Error(`${field}_invalid`);
+    return id;
+  });
+  const result = new Set(normalized);
+  if (result.size !== normalized.length) throw new Error(`${field}_contains_duplicates`);
+  return result;
+}
+
+export function readDingTalkAllowedConversationIds(environment: NodeJS.ProcessEnv): ReadonlySet<string> {
+  const preferred = environment.OMB_DINGTALK_ALLOWED_CONVERSATION_IDS?.trim();
+  const legacy = environment.DINGTALK_ROBOT_ALLOWED_CONVERSATION_IDS?.trim();
+  if (!preferred && !legacy) throw new Error("dingtalk_allowed_conversation_ids_required");
+  const preferredIds = preferred
+    ? parseConversationAllowlist(preferred, "OMB_DINGTALK_ALLOWED_CONVERSATION_IDS")
+    : undefined;
+  const legacyIds = legacy
+    ? parseConversationAllowlist(legacy, "DINGTALK_ROBOT_ALLOWED_CONVERSATION_IDS")
+    : undefined;
+  if (preferredIds && legacyIds) {
+    const same =
+      preferredIds.size === legacyIds.size && [...preferredIds].every((value) => legacyIds.has(value));
+    if (!same) throw new Error("dingtalk_allowed_conversation_ids_conflict");
+  }
+  return preferredIds ?? legacyIds!;
+}
+
 function createDingTalkDelivery(
   sessions: DingTalkSessionReplyRegistry,
   environment: NodeJS.ProcessEnv,
@@ -195,12 +233,16 @@ function productionRuntimeOptions(
   dependencies: HeadlessDependencies,
 ): CollaborationHeadlessRuntimeOptions {
   const sessions = new DingTalkSessionReplyRegistry();
+  const dingTalkEnabled = environment.OMB_DINGTALK_ENABLED === "1";
+  const allowedConversationIds = dingTalkEnabled
+    ? readDingTalkAllowedConversationIds(environment)
+    : undefined;
   return {
     dataDirectory: options.dataDirectory,
     shutdownTimeoutMs,
     probeOnly: options.healthOnly,
     logger: safeRuntimeLogger(io),
-    ...(environment.OMB_DINGTALK_ENABLED === "1"
+    ...(dingTalkEnabled
       ? { outboxDelivery: createDingTalkDelivery(sessions, environment) }
       : {}),
     maintenanceFactory: ({ database, dataDirectory }) => {
@@ -226,7 +268,7 @@ function productionRuntimeOptions(
       );
     },
     dingTalk: {
-      enabled: environment.OMB_DINGTALK_ENABLED === "1",
+      enabled: dingTalkEnabled,
       credentials: new SecureDingTalkCredentialFileProvider(environment),
       createStream(credentials, sinks, logger): RuntimeStream {
         const sdk = new RealDingTalkStreamSdk(credentials, () => {
@@ -238,6 +280,7 @@ function productionRuntimeOptions(
           { perform: (action) => sinks.perform(action) },
           sessions,
           { write: (event) => logger.write({ event: event.event, ...(event.code ? { code: event.code } : {}) }) },
+          { allowedConversationIds },
         );
         return {
           async start() {

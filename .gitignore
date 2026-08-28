@@ -19,6 +19,9 @@ release
 .dev.vars
 .dev.vars.*
 !cloudflare/control-plane/.dev.vars.example
+.env
+.env.*
+!.env.example
 cloudflare/composio-broker/worker-configuration.d.ts
 cloudflare/control-plane/worker-configuration.d.ts
 .claude/worktrees/

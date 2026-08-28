@@ -7,7 +7,12 @@ import { afterEach, describe, expect, it } from "vitest";
 
 import { openCollaborationLedger } from "./collaboration/db.ts";
 import { LocalOwnerRegistry } from "./collaboration/owner.ts";
-import { parseHeadlessArguments, runCollaborationHeadless, type HeadlessIo } from "./collaboration-headless.ts";
+import {
+  parseHeadlessArguments,
+  readDingTalkAllowedConversationIds,
+  runCollaborationHeadless,
+  type HeadlessIo,
+} from "./collaboration-headless.ts";
 import type { PrivateOwnerAlertSink, SafeOperationalAlert } from "./collaboration/operations/private-alert.ts";
 import { CollaborationHeadlessRuntime, type CollaborationHeadlessRuntimeOptions } from "./collaboration/operations/runtime.ts";
 
@@ -53,6 +58,20 @@ function signalIo(): { io: HeadlessIo; signal(name: NodeJS.Signals): void } {
 }
 
 describe("secure collaboration headless CLI", () => {
+  it("requires and validates an explicit DingTalk conversation allowlist", () => {
+    expect(() => readDingTalkAllowedConversationIds({})).toThrow("dingtalk_allowed_conversation_ids_required");
+    expect([...readDingTalkAllowedConversationIds({
+      DINGTALK_ROBOT_ALLOWED_CONVERSATION_IDS: '["cid-research-1"]',
+    })]).toEqual(["cid-research-1"]);
+    expect([...readDingTalkAllowedConversationIds({
+      OMB_DINGTALK_ALLOWED_CONVERSATION_IDS: "cid-research-1,cid-research-2",
+    })]).toEqual(["cid-research-1", "cid-research-2"]);
+    expect(() => readDingTalkAllowedConversationIds({
+      OMB_DINGTALK_ALLOWED_CONVERSATION_IDS: "cid-research-1",
+      DINGTALK_ROBOT_ALLOWED_CONVERSATION_IDS: "cid-other",
+    })).toThrow("dingtalk_allowed_conversation_ids_conflict");
+  });
+
   it("prints health and cleanly starts/stops with Stream disabled", async () => {
     const output = io();
     const dataDirectory = temporaryDirectory();

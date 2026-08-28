@@ -182,6 +182,35 @@ describe("DingTalk Stream adapter", () => {
     expect(failedSdk.acknowledgements).toEqual([]);
   });
 
+  it("acknowledges and discards messages outside the configured conversation allowlist", async () => {
+    const sdk = new FakeSdk();
+    const ingested: DingTalkInboundMessage[] = [];
+    const logged: Array<{ event: string; code?: string }> = [];
+    const sessions = new DingTalkSessionReplyRegistry(() => 1_700_000_000_000);
+    const adapter = new DingTalkStreamAdapter(
+      sdk,
+      {
+        ingest(message) {
+          ingested.push(message);
+          return inboundOutcome(message);
+        },
+      },
+      { perform: () => ownerOutcome() },
+      sessions,
+      { write: (event) => logged.push(event) },
+      { allowedConversationIds: new Set(["cid-research-1"]) },
+    );
+    await adapter.start();
+    await sdk.emit("robot", envelope("bot-message-text.json", "transport-outside-allowlist"));
+    expect(ingested).toEqual([]);
+    expect(sdk.acknowledgements).toEqual(["transport-outside-allowlist"]);
+    expect(sessions.active("biz-message-1")).toBeNull();
+    expect(logged).toContainEqual(expect.objectContaining({
+      event: "dingtalk.message.ignored",
+      code: "conversation_not_allowed",
+    }));
+  });
+
   it("passes only opaque token, current sender, reason, and transport event identity to Owner actions", async () => {
     const sdk = new FakeSdk();
     let captured: DingTalkCardAction | undefined;

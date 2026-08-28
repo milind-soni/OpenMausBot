@@ -11,12 +11,18 @@ import type { DingTalkStreamEnvelope } from "./types.ts";
 
 export type DingTalkStreamState = "stopped" | "connecting" | "connected" | "reconnecting" | "stopping";
 
+export interface DingTalkStreamAdapterOptions {
+  /** When configured, messages from every other conversation are acknowledged and discarded before persistence. */
+  allowedConversationIds?: ReadonlySet<string>;
+}
+
 export class DingTalkStreamAdapter {
   private readonly sdk: DingTalkStreamSdkPort;
   private readonly inbound: DingTalkInboundSink;
   private readonly ownerActions: DingTalkOwnerActionSink;
   private readonly replyChannels: DingTalkSessionReplyRegistry;
   private readonly logger: DingTalkSafeLogger;
+  private readonly options: DingTalkStreamAdapterOptions;
   private currentState: DingTalkStreamState = "stopped";
   private handlersRegistered = false;
   private connectPromise: Promise<DingTalkStreamState> | null = null;
@@ -28,12 +34,14 @@ export class DingTalkStreamAdapter {
     ownerActions: DingTalkOwnerActionSink,
     replyChannels: DingTalkSessionReplyRegistry,
     logger: DingTalkSafeLogger = new NullDingTalkSafeLogger(),
+    options: DingTalkStreamAdapterOptions = {},
   ) {
     this.sdk = sdk;
     this.inbound = inbound;
     this.ownerActions = ownerActions;
     this.replyChannels = replyChannels;
     this.logger = logger;
+    this.options = options;
   }
 
   state(): DingTalkStreamState {
@@ -79,6 +87,20 @@ export class DingTalkStreamAdapter {
   private async receiveRobot(envelope: DingTalkStreamEnvelope): Promise<void> {
     try {
       const normalized = normalizeBotMessage(envelope);
+      if (
+        this.options.allowedConversationIds &&
+        !this.options.allowedConversationIds.has(normalized.message.conversationId)
+      ) {
+        this.sdk.acknowledge(envelope.headers.messageId);
+        this.logger.write({
+          event: "dingtalk.message.ignored",
+          topic: "robot",
+          transportMessageIdHash: stableIdentifierHash(envelope.headers.messageId),
+          sourceEventIdHash: stableIdentifierHash(normalized.message.sourceEventId),
+          code: "conversation_not_allowed",
+        });
+        return;
+      }
       if (normalized.replyChannel) this.replyChannels.capture(normalized.replyChannel);
       const outcome = await this.inbound.ingest(normalized.message);
       // Success/duplicate both mean the authoritative transaction is durable.
