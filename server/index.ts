@@ -87,7 +87,18 @@ import { getOrCreateChannel, mirrorActivity, mirrorExchange, mirrorReply, type C
 import { searchMessages } from "./message-db.ts";
 import { promptWithReply, transcriptText } from "./replies.ts";
 import { _loadPending, discardDelegations, drainDelegations, pendingDelegationSnapshot, pendingThreads, queueDelegation, type QueueResult } from "./delegations.ts";
-import { cancelSteeredMessage, drainSteeredMessages, queueSteeredMessage } from "./steer-queue.ts";
+import {
+  cancelSteeredMessage,
+  drainSteeredMessages,
+  queuedSteeredMessage,
+  queueSteeredMessage,
+} from "./steer-queue.ts";
+import {
+  acceptedSendMatch,
+  parseSendId,
+  sendFingerprint,
+  SendSequencer,
+} from "./send-idempotency.ts";
 import { EventBus } from "./harness/bus.ts";
 import { ProviderRegistry } from "./harness/registry.ts";
 import { cancelPeerApprovalsFor, cancelPeerApprovalsForThread, dismissStalePeerCards, requestPeerApproval, resolvePeerComms, type ApprovalBus } from "./peer-approval.ts";
@@ -427,6 +438,7 @@ function checkedMemberIds(value: unknown): { ok: true; memberIds: string[] } | {
 }
 let bootSelection = { instanceId: "", model: "" };
 const store = new Store(() => bootSelection);
+const sendSequencer = new SendSequencer();
 bootSelection = await defaultSelection();
 store.seedIfEmpty();
 
@@ -1677,6 +1689,9 @@ async function startTurn(
     cardContinuation?: boolean;
     /** Earlier text message this user turn is replying to. */
     replyTo?: Message;
+    /** Stable identity supplied by the composer so a network retry cannot
+     * dispatch the same user action twice. */
+    sendId?: string;
     onDispatchError?: (message: string) => void;
   },
 ) {
@@ -1731,7 +1746,13 @@ async function startTurn(
   if (!userMessage) {
     userMessage = opts?.cardContinuation
       ? { id: `card-${randomUUID()}`, at: Date.now(), role: "user", kind: "text", text }
-      : store.appendMessage(threadId, { role: "user", kind: "text", text, replyToId: opts?.replyTo?.id });
+      : store.appendMessage(threadId, {
+          role: "user",
+          kind: "text",
+          text,
+          replyToId: opts?.replyTo?.id,
+          sendId: opts?.sendId,
+        });
   }
 
   // transcript for API-backed drivers: settled text turns on the ACTIVE
@@ -2620,7 +2641,7 @@ async function runGroupMemberTurn(
   return true;
 }
 
-function startGroupTurn(groupId: string, text: string, replyTo?: Message) {
+function startGroupTurn(groupId: string, text: string, replyTo?: Message, sendId?: string) {
   const group = store.group(groupId);
   if (!group) throw Object.assign(new Error("no such group"), { status: 404 });
   if (roomSetupPending(group)) {
@@ -2629,7 +2650,13 @@ function startGroupTurn(groupId: string, text: string, replyTo?: Message) {
   // Capture the active thread once. Every queued responder below is bound to
   // this task even if another client asks to switch later.
   const threadId = group.threadId;
-  const message = store.appendMessage(threadId, { role: "user", kind: "text", text, replyToId: replyTo?.id });
+  const message = store.appendMessage(threadId, {
+    role: "user",
+    kind: "text",
+    text,
+    replyToId: replyTo?.id,
+    sendId,
+  });
   if (!group.dm) store.titleGroupTaskFromFirstMessage(group.id, text, threadId);
 
   const members = group.memberIds
@@ -3759,6 +3786,9 @@ const server = createServer(async (req, res) => {
         "content-type": "text/event-stream",
         "cache-control": "no-cache",
         connection: "keep-alive",
+        // Honoured by nginx-compatible reverse proxies; harmless elsewhere.
+        // Remote clients need each frame now, not when a proxy buffer fills.
+        "x-accel-buffering": "no",
       });
 
       // Resume, if the client offered a cursor we can honour. `?since=` is
@@ -4597,12 +4627,40 @@ const server = createServer(async (req, res) => {
       if (body.threadId !== undefined && (typeof body.threadId !== "string" || !/^[\w-]+$/.test(body.threadId))) {
         return json(res, 400, { error: "threadId must be a task id" });
       }
-      if (body.threadId !== undefined && body.threadId !== group.threadId) {
+      const threadId = body.threadId ?? group.threadId;
+      const ownsThread = group.dm
+        ? group.threadId === threadId
+        : Boolean(store.groupTaskByThread(group.id, threadId));
+      if (!ownsThread) {
         return json(res, 409, { error: "the channel switched tasks before it could receive the message" });
       }
-      const replyTo = resolveReplyTarget(group.threadId, body.replyToId);
-      const message = startGroupTurn(group.id, text, replyTo);
-      return json(res, 202, { ok: true, threadId: group.threadId, message });
+      const sendId = parseSendId(body.sendId);
+      const replyTo = resolveReplyTarget(threadId, body.replyToId);
+      const receipt = await sendSequencer.run(
+        sendId ? `group:${group.id}:${threadId}:${sendId}` : undefined,
+        sendFingerprint(text, replyTo?.id),
+        async () => {
+          if (sendId) {
+            const accepted = acceptedSendMatch(store.messagesFor(threadId), sendId, text, replyTo?.id);
+            if (accepted.kind === "conflict") {
+              throw Object.assign(new Error("sendId already belongs to another message"), { status: 409 });
+            }
+            if (accepted.kind === "match") {
+              return { ok: true as const, threadId, message: accepted.message };
+            }
+          }
+          const current = store.group(group.id);
+          if (!current) throw Object.assign(new Error("no such group"), { status: 404 });
+          if (current.threadId !== threadId) {
+            throw Object.assign(new Error("the channel switched tasks before it could receive the message"), {
+              status: 409,
+            });
+          }
+          const message = startGroupTurn(current.id, text, replyTo, sendId);
+          return { ok: true as const, threadId, message };
+        },
+      );
+      return json(res, 202, receipt);
     }
     m = path.match(/^\/api\/groups\/([\w-]+)\/interrupt$/);
     if (m && method === "POST") {
@@ -5183,68 +5241,118 @@ const server = createServer(async (req, res) => {
       if (!text) return json(res, 400, { error: "text required" });
       const bot = store.bot(m[1]);
       if (!bot) return json(res, 404, { error: "no such bot" });
-      // Pin the target once. startTurn returns immediately after persisting,
-      // but an awaited steering adapter can yield before the response; never
-      // report or append against a task selected by a later request.
-      const threadId = bot.threadId;
       if (body.threadId !== undefined && (typeof body.threadId !== "string" || !/^[\w-]+$/.test(body.threadId))) {
         return json(res, 400, { error: "threadId must be a task id" });
       }
-      if (body.threadId !== undefined && body.threadId !== threadId) {
+      // A retry carries its original task. That lets us return the canonical
+      // receipt after a task switch, while a genuinely new send still has to
+      // target the task that is active now.
+      const threadId = body.threadId ?? bot.threadId;
+      if (!store.taskByThread(bot.id, threadId)) {
         return json(res, 409, { error: "the bot switched tasks before it could receive the message" });
       }
+      const sendId = parseSendId(body.sendId);
       const replyTo = resolveReplyTarget(threadId, body.replyToId);
-      // Claude can accept the message inside its live turn. If the write
-      // loses a race with turn settlement, or the engine cannot steer, the
-      // existing server-side queue records it atomically for the next turn.
-      if (bot.busy) {
-        const instance = registry.get(bot.modelSelection.instanceId);
-        let steered = false;
-        if (instance?.adapter.capabilities.queueing && instance.adapter.steer) {
-          steered = await instance.adapter
-            .steer(threadId, promptWithReply(text, replyTo, cfg.profile?.name?.trim() || "User"))
-            .catch(() => false);
-        }
-        // steer() is awaited adapter work. The turn can settle, the task can
-        // switch, or the whole bot can be deleted before its acknowledgement
-        // arrives. Re-read every ownership invariant before appending even a
-        // successful steer; otherwise that late acknowledgement writes a user
-        // message into a task the bot no longer owns. A conflict leaves the
-        // text in the client's composer/outbox to resend deliberately.
-        const current = store.bot(bot.id);
-        if (!current) return json(res, 404, { error: "no such bot" });
-        if (!store.taskByThread(bot.id, threadId)) {
-          return json(res, 409, { error: "the target task no longer exists" });
-        }
-        if (current.threadId !== threadId) {
-          return json(res, 409, { error: "the bot switched tasks before it could receive the message" });
-        }
-        if (steered) {
-          if (!current.busy) {
-            return json(res, 409, { error: "the running turn ended before the steered message could be recorded" });
+      const receipt = await sendSequencer.run(
+        sendId ? `bot:${bot.id}:${threadId}:${sendId}` : undefined,
+        sendFingerprint(text, replyTo?.id),
+        async () => {
+          if (sendId) {
+            const accepted = acceptedSendMatch(store.messagesFor(threadId), sendId, text, replyTo?.id);
+            if (accepted.kind === "conflict") {
+              throw Object.assign(new Error("sendId already belongs to another message"), { status: 409 });
+            }
+            if (accepted.kind === "match") {
+              const canonical = {
+                ok: true as const,
+                threadId,
+                message: accepted.message,
+              };
+              return accepted.message.steered
+                ? { ...canonical, steered: true as const }
+                : canonical;
+            }
+            const queued = queuedSteeredMessage(bot.id, threadId, sendId);
+            if (queued) {
+              if (queued.text !== text || queued.replyToId !== replyTo?.id) {
+                throw Object.assign(new Error("sendId already belongs to another message"), { status: 409 });
+              }
+              return { ok: true as const, queued: true as const, queueId: queued.id, threadId };
+            }
           }
-          clearUnattended(current.id);
-          const message = store.appendMessage(threadId, {
-            role: "user",
-            kind: "text",
-            text,
-            replyToId: replyTo?.id,
-            steered: true,
-          });
-          return json(res, 202, { ok: true, steered: true, threadId, message });
-        }
-        if (!current.busy) {
-          const message = await startTurn(bot.id, text, { threadId, replyTo });
-          return json(res, 202, { ok: true, threadId, message });
-        }
-        const queued = queueSteeredMessage(current.id, threadId, text, {
-          replyToId: replyTo?.id,
-          prompt: promptWithReply(text, replyTo, cfg.profile?.name?.trim() || "User"),
-        });
-        return json(res, 202, { ok: true, queued: true, queueId: queued.id, threadId });
-      }
-      const message = await startTurn(bot.id, text, { threadId, replyTo });
-      return json(res, 202, { ok: true, threadId, message });
+
+          const currentAtStart = store.bot(bot.id);
+          if (!currentAtStart) throw Object.assign(new Error("no such bot"), { status: 404 });
+          if (!store.taskByThread(currentAtStart.id, threadId)) {
+            throw Object.assign(new Error("the target task no longer exists"), { status: 409 });
+          }
+          if (currentAtStart.threadId !== threadId) {
+            throw Object.assign(new Error("the bot switched tasks before it could receive the message"), {
+              status: 409,
+            });
+          }
+
+          // Claude can accept the message inside its live turn. If the write
+          // loses a race with turn settlement, or the engine cannot steer, the
+          // existing server-side queue records it atomically for the next turn.
+          if (currentAtStart.busy) {
+            const instance = registry.get(currentAtStart.modelSelection.instanceId);
+            let steered = false;
+            if (instance?.adapter.capabilities.queueing && instance.adapter.steer) {
+              steered = await instance.adapter
+                .steer(threadId, promptWithReply(text, replyTo, cfg.profile?.name?.trim() || "User"))
+                .catch(() => false);
+            }
+            // steer() is awaited adapter work. The turn can settle, the task can
+            // switch, or the whole bot can be deleted before its acknowledgement
+            // arrives. Re-read every ownership invariant before appending even a
+            // successful steer; otherwise that late acknowledgement writes a user
+            // message into a task the bot no longer owns. A conflict leaves the
+            // text in the client's composer/outbox to resend deliberately.
+            const current = store.bot(bot.id);
+            if (!current) throw Object.assign(new Error("no such bot"), { status: 404 });
+            if (!store.taskByThread(bot.id, threadId)) {
+              throw Object.assign(new Error("the target task no longer exists"), { status: 409 });
+            }
+            if (current.threadId !== threadId) {
+              throw Object.assign(new Error("the bot switched tasks before it could receive the message"), {
+                status: 409,
+              });
+            }
+            if (steered) {
+              if (!current.busy) {
+                throw Object.assign(
+                  new Error("the running turn ended before the steered message could be recorded"),
+                  { status: 409 },
+                );
+              }
+              clearUnattended(current.id);
+              const message = store.appendMessage(threadId, {
+                role: "user",
+                kind: "text",
+                text,
+                replyToId: replyTo?.id,
+                sendId,
+                steered: true,
+              });
+              return { ok: true as const, steered: true as const, threadId, message };
+            }
+            if (!current.busy) {
+              const message = await startTurn(bot.id, text, { threadId, replyTo, sendId });
+              return { ok: true as const, threadId, message };
+            }
+            const queued = queueSteeredMessage(current.id, threadId, text, {
+              replyToId: replyTo?.id,
+              sendId,
+              prompt: promptWithReply(text, replyTo, cfg.profile?.name?.trim() || "User"),
+            });
+            return { ok: true as const, queued: true as const, queueId: queued.id, threadId };
+          }
+          const message = await startTurn(bot.id, text, { threadId, replyTo, sendId });
+          return { ok: true as const, threadId, message };
+        },
+      );
+      return json(res, 202, receipt);
     }
 
     m = path.match(/^\/api\/bots\/([\w-]+)\/queue\/([\w-]+)$/);

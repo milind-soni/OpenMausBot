@@ -48,6 +48,7 @@ import {
   resolveTranscriptWindow,
   tailWindowStart,
 } from "@/lib/transcript-window";
+import { useReplyDraft } from "@/lib/drafts";
 
 function dayLabel(at: number): string {
   const d = new Date(at);
@@ -813,11 +814,14 @@ export function GroupView({ group }: { group: Group }) {
   const [folderOpen, setFolderOpen] = useState(false);
   const [membersOpen, setMembersOpen] = useState(false);
   const [findOpen, setFindOpen] = useState(false);
-  const [replyTo, setReplyTo] = useState<Message | null>(null);
+  const { replyTo, selectReply, clearReply, consumeReply, restoreReply } = useReplyDraft(
+    group.threadId,
+    `group:${group.id}:${group.threadId}`,
+    group.messages,
+  );
   const membersTriggerRef = useRef<HTMLButtonElement>(null);
   const closeMembers = useCallback(() => setMembersOpen(false), []);
   useEffect(() => setFindOpen(false), [group.threadId]);
-  useEffect(() => setReplyTo(null), [group.threadId]);
   useEffect(() => {
     const onFind = (event: KeyboardEvent) => {
       if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "f") {
@@ -1199,7 +1203,7 @@ export function GroupView({ group }: { group: Group }) {
             messages={windowedMessages}
             transcript={group.messages}
             emergingId={popping?.id}
-            onReply={setReplyTo}
+            onReply={selectReply}
           />
           {laterCount > 0 && (
             <div className="flex justify-center">
@@ -1261,7 +1265,9 @@ export function GroupView({ group }: { group: Group }) {
         members={members}
         locked={setupPending}
         replyTo={replyTo}
-        onClearReply={() => setReplyTo(null)}
+        onClearReply={clearReply}
+        onConsumeReply={consumeReply}
+        onRestoreReply={restoreReply}
       />
       </div>
       </div>

@@ -1,12 +1,41 @@
-// Unsent composer text, kept per thread. The Composer is keyed by bot/room
-// id, so switching threads unmounts it and its local text state dies with
-// it. Drafts live in localStorage, so coming back to a bot — in this
+// Unsent composer input, kept per task. Switching tasks unmounts the Composer
+// and its local state. Drafts live in localStorage, so coming back to a task — in this
 // session or after a restart — finds what you were typing still there.
-import { useCallback, useState, type SetStateAction } from "react";
+import { useCallback, useEffect, useRef, useState, type SetStateAction } from "react";
 import { isAttachment, type Attachment } from "./composer-attachments.js";
 
 const KEY = "omb-drafts";
 const ATTACHMENTS_KEY = "omb-draft-attachments";
+const SEND_IDS_KEY = "omb-draft-send-ids";
+// A task can be unmounted and mounted again while its POST is still in
+// flight. Keep the edit generation outside React so a late failure from the
+// old component cannot overwrite a newer draft created by the new one.
+const draftRevisions = new Map<string, number>();
+// Reply targets already live in each transcript. Keep only their id in memory
+// so task navigation and a rejected send can resolve the original message
+// without duplicating message contents in storage.
+const replyDrafts = new Map<string, string>();
+type DraftRestore = { text: string; attachments: Attachment[] };
+type DraftRestoreListener = (draft: DraftRestore) => void;
+const restoreListeners = new Map<string, Set<DraftRestoreListener>>();
+export interface FailedComposerSend {
+  id: string;
+  sendId: string;
+  text: string;
+  requestText: string;
+  replyToId?: string;
+  threadId: string;
+}
+type FailedComposerSendInput = Omit<FailedComposerSend, "id">;
+export interface ComposerSendSnapshot extends FailedComposerSendInput {
+  draftId: string;
+  revision: number;
+  attachments: Attachment[];
+}
+const failedSends = new Map<string, FailedComposerSend[]>();
+const failedSendListeners = new Map<string, Set<(sends: FailedComposerSend[]) => void>>();
+const restoredSendIds = new Map<string, string>();
+let failedSendSequence = 0;
 
 type Values = Record<string, unknown>;
 type Store = Pick<Storage, "getItem" | "setItem"> | undefined;
@@ -56,6 +85,189 @@ export function setDraftAttachments(store: Store, id: string, attachments: Attac
   }
 }
 
+export function rememberReplyDraft(threadId: string, messageId: string): void {
+  replyDrafts.set(threadId, messageId);
+}
+
+export function replyDraft(threadId: string): string | undefined {
+  return replyDrafts.get(threadId);
+}
+
+export function clearReplyDraft(threadId: string): void {
+  replyDrafts.delete(threadId);
+}
+
+export function selectReplyDraft(draftId: string, threadId: string, messageId: string): void {
+  markDraftEdited(draftId);
+  rememberReplyDraft(threadId, messageId);
+}
+
+export function discardReplyDraft(draftId: string, threadId: string): void {
+  markDraftEdited(draftId);
+  clearReplyDraft(threadId);
+}
+
+/** Keeps a reply target with its task across navigation and failed sends. */
+export function useReplyDraft<T extends { id: string }>(
+  threadId: string,
+  draftId: string,
+  messages: T[],
+) {
+  const [replyTo, setReplyTo] = useState<T | null>(null);
+  const activeThreadId = useRef(threadId);
+  const previousThreadId = activeThreadId.current;
+  activeThreadId.current = threadId;
+
+  useEffect(() => {
+    const replyId = replyDraft(threadId);
+    setReplyTo((current) => {
+      if (previousThreadId === threadId && current) return current;
+      return replyId ? (messages.find((message) => message.id === replyId) ?? null) : null;
+    });
+  }, [messages, previousThreadId, threadId]);
+
+  const selectReply = useCallback((message: T) => {
+    selectReplyDraft(draftId, activeThreadId.current, message.id);
+    setReplyTo(message);
+  }, [draftId]);
+
+  const clearReply = useCallback(() => {
+    discardReplyDraft(draftId, activeThreadId.current);
+    setReplyTo(null);
+  }, [draftId]);
+
+  const consumeReply = useCallback(() => {
+    clearReplyDraft(activeThreadId.current);
+    setReplyTo(null);
+  }, []);
+
+  const restoreReply = useCallback((message: T, targetThreadId: string) => {
+    const currentId = replyDraft(targetThreadId);
+    if (currentId && currentId !== message.id) return;
+    // Persist before touching React state: this callback can belong to a task
+    // view that unmounted while its request was still in flight.
+    rememberReplyDraft(targetThreadId, message.id);
+    if (activeThreadId.current === targetThreadId) {
+      setReplyTo((current) => current ?? message);
+    }
+  }, []);
+
+  return { replyTo, selectReply, clearReply, consumeReply, restoreReply };
+}
+
+export function draftRevision(draftId: string): number {
+  return draftRevisions.get(draftId) ?? 0;
+}
+
+export function markDraftEdited(draftId: string): void {
+  restoredSendIds.delete(draftId);
+  setStoredSendId(getStore(), draftId, undefined);
+  draftRevisions.set(draftId, draftRevision(draftId) + 1);
+}
+
+export function restoredSendId(draftId: string): string | undefined {
+  const memory = restoredSendIds.get(draftId);
+  if (memory) return memory;
+  const stored = read(getStore(), SEND_IDS_KEY)[draftId];
+  if (typeof stored !== "string") return undefined;
+  restoredSendIds.set(draftId, stored);
+  return stored;
+}
+
+function setStoredSendId(store: Store, draftId: string, sendId: string | undefined): void {
+  const ids = read(store, SEND_IDS_KEY);
+  if (sendId) ids[draftId] = sendId;
+  else delete ids[draftId];
+  try {
+    store?.setItem(SEND_IDS_KEY, JSON.stringify(ids));
+  } catch {
+    /* best-effort persistence; the in-memory identity still protects this session */
+  }
+}
+
+/** Restores a rejected send into storage and whichever task view is mounted. */
+export function restoreComposerDraft(id: string, draft: DraftRestore): void {
+  const store = getStore();
+  setDraft(store, id, draft.text);
+  setDraftAttachments(store, id, draft.attachments);
+  for (const listener of restoreListeners.get(id) ?? []) listener(draft);
+}
+
+function subscribeToDraftRestores(id: string, listener: DraftRestoreListener): () => void {
+  const listeners = restoreListeners.get(id) ?? new Set<DraftRestoreListener>();
+  listeners.add(listener);
+  restoreListeners.set(id, listeners);
+  return () => {
+    listeners.delete(listener);
+    if (listeners.size === 0) restoreListeners.delete(id);
+  };
+}
+
+function publishFailedSends(id: string): void {
+  const sends = failedSends.get(id) ?? [];
+  for (const listener of failedSendListeners.get(id) ?? []) listener(sends);
+}
+
+export function failedComposerSends(id: string): FailedComposerSend[] {
+  return failedSends.get(id) ?? [];
+}
+
+export function rememberFailedComposerSend(
+  id: string,
+  input: FailedComposerSendInput,
+): FailedComposerSend {
+  const failed = { ...input, id: `${Date.now().toString(36)}-${++failedSendSequence}` };
+  failedSends.set(id, [...failedComposerSends(id), failed]);
+  publishFailedSends(id);
+  return failed;
+}
+
+/** Recovers a rejected POST without ever replacing a newer draft. */
+export function recoverFailedComposerSend(sent: ComposerSendSnapshot): "restored" | "outbox" {
+  if (draftRevision(sent.draftId) !== sent.revision) {
+    rememberFailedComposerSend(sent.draftId, {
+      sendId: sent.sendId,
+      text: sent.text,
+      requestText: sent.requestText,
+      replyToId: sent.replyToId,
+      threadId: sent.threadId,
+    });
+    return "outbox";
+  }
+  markDraftEdited(sent.draftId);
+  restoreComposerDraft(sent.draftId, {
+    text: sent.text,
+    attachments: sent.attachments,
+  });
+  // If the response vanished after server acceptance, the next Send must
+  // reuse this identity instead of starting a duplicate turn.
+  restoredSendIds.set(sent.draftId, sent.sendId);
+  setStoredSendId(getStore(), sent.draftId, sent.sendId);
+  return "restored";
+}
+
+export function forgetFailedComposerSend(id: string, failedId: string): void {
+  const remaining = failedComposerSends(id).filter((failed) => failed.id !== failedId);
+  if (remaining.length > 0) failedSends.set(id, remaining);
+  else failedSends.delete(id);
+  publishFailedSends(id);
+}
+
+export function useFailedComposerSends(id: string): FailedComposerSend[] {
+  const [sends, setSends] = useState(() => failedComposerSends(id));
+  useEffect(() => {
+    setSends(failedComposerSends(id));
+    const listeners = failedSendListeners.get(id) ?? new Set<(next: FailedComposerSend[]) => void>();
+    listeners.add(setSends);
+    failedSendListeners.set(id, listeners);
+    return () => {
+      listeners.delete(setSends);
+      if (listeners.size === 0) failedSendListeners.delete(id);
+    };
+  }, [id]);
+  return sends;
+}
+
 // Reaching for localStorage is itself a failure point: on an origin with
 // storage blocked the getter throws, and `typeof` doesn't shield it.
 function getStore(): Store {
@@ -67,9 +279,17 @@ function getStore(): Store {
 }
 
 /** useState for the composer text, persisted under `id` (a bot or room). */
-export function useDraft(id: string): [string, (next: string) => void] {
+export function useDraft(id: string, legacyId?: string): [string, (next: string) => void] {
   const store = getStore();
-  const [text, setText] = useState(() => getDraft(store, id));
+  const [text, setText] = useState(() => {
+    const current = getDraft(store, id);
+    if (current || !legacyId) return current;
+    const legacy = getDraft(store, legacyId);
+    if (!legacy) return "";
+    setDraft(store, id, legacy);
+    setDraft(store, legacyId, "");
+    return legacy;
+  });
   const set = useCallback(
     (next: string) => {
       setText(next);
@@ -77,6 +297,13 @@ export function useDraft(id: string): [string, (next: string) => void] {
     },
     [store, id],
   );
+  useEffect(() => {
+    const unsubscribe = subscribeToDraftRestores(id, (draft) => setText(draft.text));
+    // Close the render-to-effect race: a rejected request may have restored
+    // storage after this mount initialized but before its listener attached.
+    setText(getDraft(store, id));
+    return unsubscribe;
+  }, [id, store]);
   return [text, set];
 }
 
@@ -84,6 +311,7 @@ export function useDraft(id: string): [string, (next: string) => void] {
  * from text so typing does not stringify a large pasted payload per keypress. */
 export function useComposerDraft(
   id: string,
+  legacyId?: string,
 ): [
   string,
   (next: string) => void,
@@ -91,12 +319,33 @@ export function useComposerDraft(
   (next: SetStateAction<Attachment[]>) => void,
 ] {
   const store = getStore();
-  const [text, setText] = useDraft(id);
-  const [attachments, setAttachmentState] = useState(() => getDraftAttachments(store, id));
+  const [text, setText] = useDraft(id, legacyId);
+  const [attachments, setAttachmentState] = useState(() => {
+    const current = getDraftAttachments(store, id);
+    if (current.length > 0 || !legacyId) return current;
+    const legacy = getDraftAttachments(store, legacyId);
+    if (legacy.length === 0) return [];
+    setDraftAttachments(store, id, legacy);
+    setDraftAttachments(store, legacyId, []);
+    return legacy;
+  });
+  useEffect(() => {
+    const unsubscribe = subscribeToDraftRestores(id, (draft) => setAttachmentState(draft.attachments));
+    setAttachmentState(getDraftAttachments(store, id));
+    return unsubscribe;
+  }, [id, store]);
   const setAttachments = useCallback(
     (next: SetStateAction<Attachment[]>) => {
+      if (typeof next !== "function") {
+        // Persist literal restores before asking React to render. A failed
+        // request may complete after its task was switched away and this
+        // component unmounted; the draft must still be there on return.
+        setDraftAttachments(store, id, next);
+        setAttachmentState(next);
+        return;
+      }
       setAttachmentState((previous) => {
-        const value = typeof next === "function" ? next(previous) : next;
+        const value = next(previous);
         setDraftAttachments(store, id, value);
         return value;
       });

@@ -94,6 +94,8 @@ export interface Message {
   parentId?: string | null;
   /** Flat reply reference for an inline quote; unrelated to branch ancestry. */
   replyToId?: string;
+  /** Stable client identity for at-most-once chat POST retries. */
+  sendId?: string;
   /** rooms: which member said this (sender attribution). */
   from?: { botId: string; name: string; color: MausColor };
   /** emoji reactions; by = "user" or a member botId. */
@@ -495,7 +497,15 @@ export type Action =
   | { type: "groupPatched"; group: Partial<Group> & { id: string } }
   | { type: "groupDeleted"; groupId: string }
   | { type: "createGroup"; memberIds: string[]; name?: string; section?: string }
-  | { type: "sendGroup"; groupId: string; text: string; replyToId?: string }
+  | {
+      type: "sendGroup";
+      groupId: string;
+      text: string;
+      sendId?: string;
+      replyToId?: string;
+      threadId?: string;
+      onError?: () => void;
+    }
   | {
       type: "patchGroup";
       groupId: string;
@@ -511,7 +521,15 @@ export type Action =
   | { type: "instances"; instances: InstanceInfo[] }
   | { type: "configStatus"; config: ConfigStatus }
   | { type: "select"; id: string }
-  | { type: "send"; botId: string; text: string; replyToId?: string }
+  | {
+      type: "send";
+      botId: string;
+      text: string;
+      sendId?: string;
+      replyToId?: string;
+      threadId?: string;
+      onError?: () => void;
+    }
   | { type: "pendingQueued"; threadId: string; queueId: string; text: string }
   | { type: "consumePendingQueued"; threadId: string; queueId: string }
   | { type: "cancelQueued"; botId: string; queueId: string }
@@ -1418,10 +1436,12 @@ export function StoreProvider({ children }: { children: ReactNode }) {
           // persist through the existing card route so an older server that
           // does not auto-dismiss still hides the quiz on this client
           if (quizBeforeSend) persistCard(action.botId, quizBeforeSend.id, { dismissed: true });
-          const threadId = stateRef.current.bots.find((bot) => bot.id === action.botId)?.threadId;
+          const threadId =
+            action.threadId ?? stateRef.current.bots.find((bot) => bot.id === action.botId)?.threadId;
+          const sendId = action.sendId ?? crypto.randomUUID();
           void api(`/api/bots/${action.botId}/messages`, {
             method: "POST",
-            body: JSON.stringify({ text: action.text, replyToId: action.replyToId, threadId }),
+            body: JSON.stringify({ text: action.text, replyToId: action.replyToId, threadId, sendId }),
           })
             .then((body) => {
               if (body?.message && typeof body.threadId === "string") {
@@ -1440,7 +1460,10 @@ export function StoreProvider({ children }: { children: ReactNode }) {
                 });
               }
             })
-            .catch(showError);
+            .catch((error) => {
+              showError(error);
+              action.onError?.();
+            });
           break;
         }
         case "editMessage":
@@ -1587,17 +1610,22 @@ export function StoreProvider({ children }: { children: ReactNode }) {
             .catch(showError);
           break;
         case "sendGroup": {
-          const threadId = stateRef.current.groups.find((group) => group.id === action.groupId)?.threadId;
+          const threadId =
+            action.threadId ?? stateRef.current.groups.find((group) => group.id === action.groupId)?.threadId;
+          const sendId = action.sendId ?? crypto.randomUUID();
           api(`/api/groups/${action.groupId}/messages`, {
             method: "POST",
-            body: JSON.stringify({ text: action.text, replyToId: action.replyToId, threadId }),
+            body: JSON.stringify({ text: action.text, replyToId: action.replyToId, threadId, sendId }),
           })
             .then((body) => {
               if (body?.message && typeof body.threadId === "string") {
                 rawDispatch({ type: "messageAdded", threadId: body.threadId, message: body.message });
               }
             })
-            .catch(showError);
+            .catch((error) => {
+              showError(error);
+              action.onError?.();
+            });
           break;
         }
         case "patchGroup":

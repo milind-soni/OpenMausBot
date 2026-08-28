@@ -73,6 +73,7 @@ import {
   tailWindowStart,
 } from "@/lib/transcript-window";
 import { timelineEvents } from "@/lib/taskTimeline";
+import { useReplyDraft } from "@/lib/drafts";
 
 /** Long user messages collapse behind a fade so pasted walls of text don't
  * bury the conversation; bots get full markdown. */
@@ -806,9 +807,12 @@ export function ChatView({ bot }: { bot: Bot }) {
   const provisioning = state.provisioning[bot.id];
   const mascotMotion = state.mascotMotion?.botId === bot.id ? state.mascotMotion : null;
   const [findOpen, setFindOpen] = useState(false);
-  const [replyTo, setReplyTo] = useState<Message | null>(null);
+  const { replyTo, selectReply, clearReply, consumeReply, restoreReply } = useReplyDraft(
+    bot.threadId,
+    `bot:${bot.id}:${bot.threadId}`,
+    bot.messages,
+  );
   useEffect(() => setFindOpen(false), [bot.threadId]);
-  useEffect(() => setReplyTo(null), [bot.threadId]);
   useEffect(() => {
     const onFind = (event: KeyboardEvent) => {
       if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "f") {
@@ -1190,7 +1194,7 @@ export function ChatView({ bot }: { bot: Bot }) {
             onCancelEdit={cancelEdit}
             onSubmitEdit={submitEdit}
             onRegenerate={regenerate}
-            onReply={setReplyTo}
+            onReply={selectReply}
           />
           {laterCount > 0 && (
             <div className="flex justify-center">
@@ -1247,17 +1251,18 @@ export function ChatView({ bot }: { bot: Bot }) {
         </button>
       )}
 
-      {/* keyed by bot: a draft belongs to the conversation it was typed in,
-          so switching bots starts from an empty composer instead of carrying
-          the previous bot's half-written message over. ArrowUp-to-edit is
-          gated on busy like the pencil button — editing rewinds the thread,
-          which a live turn forbids (the server 409s it). */}
+      {/* Keyed by task: each conversation keeps its own draft and a failed
+          request can restore the old task without spilling into the newly
+          selected one. ArrowUp-to-edit stays gated on busy because editing
+          rewinds the thread, which a live turn forbids (the server 409s it). */}
       <div className="absolute inset-x-0 bottom-0 z-[2]">
       <Composer
-        key={bot.id}
+        key={bot.threadId}
         bot={bot}
         replyTo={replyTo}
-        onClearReply={() => setReplyTo(null)}
+        onClearReply={clearReply}
+        onConsumeReply={consumeReply}
+        onRestoreReply={restoreReply}
         onEditLast={lastUserMessage && !bot.busy ? () => setEditingId(lastUserMessage.id) : undefined}
       />
       </div>

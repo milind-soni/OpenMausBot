@@ -16,7 +16,14 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 
-import { cancelSteeredMessage, drainSteeredMessages, queueSteeredMessage, _queuedCount, type SteerStore } from "./steer-queue.ts";
+import {
+  cancelSteeredMessage,
+  drainSteeredMessages,
+  queuedSteeredMessage,
+  queueSteeredMessage,
+  _queuedCount,
+  type SteerStore,
+} from "./steer-queue.ts";
 import type { BotRecord, Message } from "./store.ts";
 
 const SERVER_DIR = dirname(fileURLToPath(import.meta.url));
@@ -84,6 +91,31 @@ describe("steer-queue module", () => {
     expect(store.messages[0]!.queued).toBeUndefined();
     expect(run).toHaveBeenCalledTimes(1);
     expect(_queuedCount("thread-a")).toBe(0);
+  });
+
+  it("keeps a stable client receipt while a send waits to drain", () => {
+    const bot = fakeBot("bot-receipt", "thread-receipt", true);
+    const store = fakeStore([bot]);
+    const queued = queueSteeredMessage(bot.id, bot.threadId, "retry safely", {
+      replyToId: "reply-1",
+      sendId: "send_1234567890123456",
+    });
+
+    expect(queuedSteeredMessage(bot.id, bot.threadId, "send_1234567890123456")).toEqual({
+      id: queued.id,
+      text: "retry safely",
+      replyToId: "reply-1",
+    });
+    expect(queuedSteeredMessage("other-bot", bot.threadId, "send_1234567890123456")).toBeNull();
+
+    bot.busy = false;
+    drainSteeredMessages(store, vi.fn());
+    expect(store.messages[0]).toMatchObject({
+      text: "retry safely",
+      sendId: "send_1234567890123456",
+      queueId: queued.id,
+    });
+    expect(queuedSteeredMessage(bot.id, bot.threadId, "send_1234567890123456")).toBeNull();
   });
 
   it("holds the queue while the bot is busy and drains it once when idle", () => {
