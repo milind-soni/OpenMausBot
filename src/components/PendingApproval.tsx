@@ -25,6 +25,12 @@ export interface Pending {
   held?: string;
 }
 
+/** The persisted payload is the authoritative marker. Tool names are
+ * provider-authored display strings and can collide with ours. */
+export function isRoutineApproval(pending: Pending): boolean {
+  return Boolean(pending.message.card?.routineRequest);
+}
+
 /** Open approvals on a thread, oldest first — answered/dismissed drop out. */
 export function pendingApprovals(messages: Message[]): Pending[] {
   return messages
@@ -39,7 +45,24 @@ export function pendingApprovals(messages: Message[]): Pending[] {
     }));
 }
 
-function label(tool: string): string {
+/** Routine cards can carry every instruction the user asked for (up to
+ * 20,000 characters). Calls should announce the concise, visible title and
+ * let the user review those details on screen instead of reading them all. */
+export function spokenApprovalPrompt(pending: Pending, requester: string): string {
+  const isRoutineRequest = isRoutineApproval(pending);
+  if (!isRoutineRequest) {
+    return `${requester} wants to ${pending.tool}. ${pending.detail}. Should I allow it?`;
+  }
+  const title = pending.message.card?.title.trim() || "Confirm this routine?";
+  return `${requester} asks: ${title}${/[.!?]$/.test(title) ? "" : "."} Review the schedule and instructions on screen. Should I confirm it?`;
+}
+
+function label(pending: Pending): string {
+  if (isRoutineApproval(pending)) {
+    return pending.message.card?.routineRequest?.operation.action === "create"
+      ? "Confirm this routine"
+      : "Confirm this routine change";
+  }
   const nice: ApprovalLabels = {
     Bash: "Command approval requested",
     shell: "Command approval requested",
@@ -48,7 +71,7 @@ function label(tool: string): string {
     Edit: "File-change approval requested",
     edit: "File-change approval requested",
   };
-  return nice[tool] ?? "Approval requested";
+  return nice[pending.tool] ?? "Approval requested";
 }
 
 export const PendingApprovalPanel = memo(function PendingApprovalPanel({
@@ -61,19 +84,33 @@ export const PendingApprovalPanel = memo(function PendingApprovalPanel({
   index: number;
 }) {
   return (
-    <div className="rounded-t-2xl border-b border-hairline/50 bg-control/40 px-4 py-3">
-      <div className="flex flex-wrap items-center gap-2">
+    <div
+      role="region"
+      aria-label={isRoutineApproval(pending) ? "Pending routine confirmation" : "Pending approval"}
+      className="rounded-t-2xl border-b border-hairline/50 bg-control/40 px-4 py-3"
+    >
+      <div className="flex flex-wrap items-center gap-2" aria-live="polite">
         <span className="text-[11px] uppercase tracking-[0.18em] text-ink-secondary">Pending approval</span>
         {count > 1 && (
           <span className="rounded-full bg-control px-1.5 py-0.5 text-[11px] tabular-nums text-ink-secondary">
             {index + 1} of {count}
           </span>
         )}
-        <span className="text-[13px] text-ink">{label(pending.tool)}</span>
-        <span className="font-mono text-[11px] text-ink-secondary">{pending.tool}</span>
+        <span className="text-[13px] text-ink">{label(pending)}</span>
+        <span className="font-mono text-[11px] text-ink-secondary">
+          {isRoutineApproval(pending)
+            ? pending.message.card?.routineRequest?.operation.action === "create"
+              ? "schedule_routine"
+              : "manage_routine"
+            : pending.tool}
+        </span>
       </div>
       {/* never truncated — long commands wrap and scroll */}
-      <pre className="mt-2 max-h-40 overflow-auto whitespace-pre-wrap break-words font-mono text-[12px] leading-relaxed text-ink">
+      <pre
+        tabIndex={0}
+        aria-label={isRoutineApproval(pending) ? "Routine details to review" : "Approval details to review"}
+        className="mt-2 max-h-40 overflow-auto whitespace-pre-wrap break-words font-mono text-[12px] leading-relaxed text-ink"
+      >
         {pending.detail}
       </pre>
       {pending.held && <div className="mt-2 text-[12px] text-warning">{pending.held}</div>}
@@ -94,6 +131,7 @@ export function PendingApprovalActions({
   onCancelTurn: () => void;
 }) {
   const { dispatch } = useStore();
+  const isRoutineRequest = isRoutineApproval(pending);
   const decide = (behavior: "allow" | "deny", always = false) =>
     dispatch({
       type: "decideRequest",
@@ -107,16 +145,18 @@ export function PendingApprovalActions({
   const base = "rounded-full px-3.5 py-1.5 text-[13.5px] transition-colors";
   return (
     <div className="flex flex-wrap items-center justify-end gap-2 px-2 py-2">
-      <button onClick={onCancelTurn} className={cn(base, "text-ink-secondary hover:bg-control hover:text-ink")}>
-        Cancel turn
-      </button>
+      {!isRoutineRequest && (
+        <button onClick={onCancelTurn} className={cn(base, "text-ink-secondary hover:bg-control hover:text-ink")}>
+          Cancel turn
+        </button>
+      )}
       <button
         onClick={() => decide("deny")}
         className={cn(base, "border border-danger/40 text-danger hover:bg-danger/10")}
       >
-        Deny
+        {isRoutineRequest ? "Cancel" : "Deny"}
       </button>
-      {bot && pending.allowKey && (
+      {!isRoutineRequest && bot && pending.allowKey && (
         <button
           onClick={() => decide("allow", true)}
           title={`Stop asking ${bot.name} about ${pending.allowKey}`}
@@ -129,7 +169,7 @@ export function PendingApprovalActions({
         onClick={() => decide("allow")}
         className={cn(base, "bg-accent font-medium text-white hover:brightness-110")}
       >
-        Allow once
+        {isRoutineRequest ? "Confirm" : "Allow once"}
       </button>
     </div>
   );

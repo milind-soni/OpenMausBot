@@ -139,8 +139,10 @@ import { readCuaConnection } from "./local-computer.ts";
 import { LocalVmIdleTimer } from "./local-vm-idle.ts";
 import { LocalVmLease, LocalVmLeasePool } from "./local-vm-lease.ts";
 import { RepeatDetector, callKey } from "./repeat-detector.ts";
+import { redactSecretsInText } from "./redact.ts";
 import * as vps from "./vps-computer.ts";
 import { RoutineManager, type RoutineRunOn, type RoutineRunTrigger } from "./routines.ts";
+import { RoutineRequestService } from "./routine-requests.ts";
 import { fetchBotDirectory, matchDirectoryBots, type MatchedDirectoryBot } from "./bot-directory.ts";
 import { scoutProject, suggestTeam } from "./project-scout.ts";
 import { fetchGithubTeam, fetchLibraryTeam, fetchTeamCatalog } from "./team-library.ts";
@@ -263,6 +265,22 @@ const computerControl = new ComputerControl((botId, snapshot) => {
   broadcast({ kind: "computer-control", botId, held: snapshot.held, helpReason: snapshot.helpReason });
 });
 const controlLeaseIdSchema = z.string().min(16).max(120).regex(/^[A-Za-z0-9_-]+$/);
+const routineRequestSourceSchema = {
+  fromBotId: z.string().min(1).max(128),
+  fromThreadId: z.string().min(1).max(128),
+};
+const routineRequestEnvelopeSchema = z.discriminatedUnion("action", [
+  z.object({ ...routineRequestSourceSchema, action: z.literal("create"), routine: z.unknown() }).strict(),
+  z.object({
+    ...routineRequestSourceSchema,
+    action: z.literal("update"),
+    routineId: z.unknown(),
+    changes: z.unknown(),
+  }).strict(),
+  ...(["pause", "resume", "run_now", "delete"] as const).map((action) =>
+    z.object({ ...routineRequestSourceSchema, action: z.literal(action), routineId: z.unknown() }).strict()
+  ),
+]);
 
 /** The loopback endpoint a bot's computer proxy polls before acting. */
 function controlIntegration(botId: string) {
@@ -509,6 +527,9 @@ store.onChange((change) => {
     case "thread":
       broadcast({ kind: "thread", threadId: change.threadId, activeLeafId: change.activeLeafId });
       break;
+    case "thread.deleted":
+      routines?.forgetRoutineRequestReceiptsForThread(change.threadId);
+      break;
     case "bot": {
       const bot = store.bot(change.botId);
       if (bot) broadcast({ kind: "bot", bot: wireBot(bot) });
@@ -719,10 +740,10 @@ async function answerRequest(
   return outcome;
 }
 
-/** Close every approval still open on a thread. Interrupting a turn kills the
- * process that raised its questions, so those cards can never be answered —
- * and a pending approval owns the composer, so one left open blocks the
- * conversation behind a question with nobody left to hear the answer. */
+/** Close every provider-owned approval still open on a thread. Interrupting a
+ * turn kills the process that raised its questions, so those cards can never
+ * be answered. Routine proposals are harness-owned and durable, so they stay
+ * actionable even after the proposing turn has stopped. */
 function closeOpenApprovals(threadId: string): void {
   // Peer approvals also hold an in-memory promise. Resolve those first; merely
   // patching their cards would leave the delegation queue waiting 15 minutes.
@@ -730,6 +751,7 @@ function closeOpenApprovals(threadId: string): void {
   for (const message of store.messagesFor(threadId)) {
     const card = message.card;
     if (!card?.requestId || card.answered || card.dismissed) continue;
+    if (card.routineRequest) continue;
     store.patchMessage(threadId, message.id, { card: { ...card, answered: "unavailable", dismissed: true } });
     askMessageByRequest.delete(`${threadId}:${card.requestId}`);
   }
@@ -2011,6 +2033,9 @@ async function startTurn(
       const credentialPrompt = integrations.agents
         ? " If a supported API key is missing, use request_credential to show the secure in-app card. Never ask the user to paste credentials into chat."
         : "";
+      const routinePrompt = integrations.agents
+        ? " If the user explicitly asks to list or review, schedule, run, or change routines, use list_routines and propose_routine or propose_routine_action. A proposal is not applied until the user confirms its in-app card, so never claim the action completed before that confirmation."
+        : "";
 
       // (activeVpsThreads was already claimed above, before the provision or
       // reuse await, so the backend guards saw this turn the whole time.)
@@ -2053,6 +2078,7 @@ async function startTurn(
             : "") +
           (coordinationPrompt ? ` ${coordinationPrompt}` : "") +
           credentialPrompt +
+          routinePrompt +
           sectionContextSystemPrompt(bot.section) +
           (privateWorkspace ? memorySystemPrompt(bot.id) + skillsSystemPrompt(bot.id) : "") +
           skillInstructions +
@@ -2134,7 +2160,137 @@ routines = new RoutineManager({
     notify(buildNotification("routine-failed", bot, run.threadId ?? bot.threadId, detail));
   },
 });
+const recoveryOwners = routines.routineRequestReceiptOwners();
+if (recoveryOwners.length > 0) {
+  // A normal launch has no crash-gap receipts, so it must not eagerly load
+  // every historical transcript. Inspect only the distinct threads named by
+  // a surviving receipt; reconciliation then removes any whose card vanished.
+  const recoveryThreads = [...new Set(recoveryOwners.map((owner) => owner.threadId))];
+  routines.reconcileRoutineRequestReceipts(
+    recoveryThreads.flatMap((threadId) =>
+      store.messagesFor(threadId).flatMap((message) => {
+        const request = message.card?.routineRequest;
+        return request && !message.card?.answered && !message.card?.dismissed
+          ? [{ requestId: request.requestId, messageId: message.id, botId: request.botId, threadId: request.threadId }]
+          : [];
+      }),
+    ),
+  );
+}
 routines.start();
+
+// Chat tools can prepare routine changes, but the harness applies them only
+// after the user confirms a durable card. Keeping this beside the scheduler
+// makes the card resolvable after an app restart without involving the model.
+async function cloudRoutineReadiness(): Promise<{ ready: boolean; reason?: string }> {
+  if (!box.boxConfigured(cfg)) {
+    return {
+      ready: false,
+      reason: "Cloud VM needs a working Box API key in App Settings before this routine can run.",
+    };
+  }
+  const instance = registry.instances().find((candidate) => candidate.driverKind === "boxAgent");
+  if (!instance) {
+    return { ready: false, reason: "The Cloud VM runner is unavailable. Restart OpenMausBot and try again." };
+  }
+  try {
+    const snapshot = await instance.snapshot();
+    return snapshot.state === "available"
+      ? { ready: true }
+      : { ready: false, reason: snapshot.reason || "The Cloud VM runner is not ready." };
+  } catch (error) {
+    return {
+      ready: false,
+      reason: `The Cloud VM runner could not be checked: ${error instanceof Error ? error.message : String(error)}`,
+    };
+  }
+}
+const routineRequests = new RoutineRequestService({
+  store,
+  routines,
+  cloudReady: cloudRoutineReadiness,
+  canPersist: routineProposalPersistence,
+});
+const ROUTINE_WEEKDAY_NAMES = ["sunday", "monday", "tuesday", "wednesday", "thursday", "friday", "saturday"] as const;
+const routineTimeZone = () => Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC";
+const agentRoutine = (routine: ReturnType<RoutineManager["listRoutines"]>[number]) => {
+  // Routines created in the calendar predate chat-card redaction and may
+  // contain a credential in their instructions. The list result is handed
+  // back to the model, so scrub the complete value before taking its preview.
+  const safeInstructions = redactSecretsInText(routine.prompt);
+  const safeName = redactSecretsInText(routine.name);
+  return {
+    id: routine.id,
+    name: safeName,
+    instructions: safeInstructions.slice(0, 2_000),
+    instructionsTruncated: safeInstructions.length > 2_000,
+    enabled: routine.enabled,
+    runOn: routine.runOn,
+    durationMinutes: routine.durationMinutes,
+    schedule: routine.schedule.type === "once"
+      ? { type: "once" as const, at: new Date(routine.schedule.at).toISOString() }
+      : {
+          type: "weekly" as const,
+          time: routine.schedule.time,
+          weekdays: routine.schedule.weekdays.map((day) => ROUTINE_WEEKDAY_NAMES[day]),
+        },
+    nextRunAt: routine.nextRunAt === null ? null : new Date(routine.nextRunAt).toISOString(),
+  };
+};
+function sendRoutineResolution(
+  res: ServerResponse,
+  result: ReturnType<RoutineRequestService["resolve"]>,
+): boolean {
+  if (!result.claimed) return false;
+  if (result.state === "invalid") {
+    json(res, result.status, { error: result.error });
+    return true;
+  }
+  if (result.state === "already_settled") {
+    json(res, 200, {
+      ok: true,
+      outcome: result.behavior === "allow" ? "allowed-once" : result.behavior === "deny" ? "rejected" : "unavailable",
+      alreadySettled: true,
+    });
+    return true;
+  }
+  if (result.state === "denied") {
+    json(res, 200, { ok: true, outcome: "rejected" });
+    return true;
+  }
+  json(res, 200, {
+    ok: true,
+    outcome: "allowed-once",
+    routineAction: result.action,
+    resultId: result.resultId,
+  });
+  return true;
+}
+function resolveAndSendRoutine(
+  res: ServerResponse,
+  args: { botId: string; botName?: string; threadId: string; requestId: string; behavior: string },
+): boolean {
+  const card = store.messagesFor(args.threadId).find(
+    (message) => message.card?.requestId === args.requestId && message.card.routineRequest,
+  )?.card;
+  const result = routineRequests.resolve(args);
+  if (
+    result.claimed &&
+    (result.state === "applied" || result.state === "denied")
+  ) {
+    appendDecision(DATA_DIR, {
+      threadId: args.threadId,
+      requestId: args.requestId,
+      botId: args.botId,
+      botName: args.botName,
+      tool: card?.tool,
+      summary: card?.subtitle,
+      decision: result.state === "applied" ? "user-approved" : "user-denied",
+      source: "user",
+    });
+  }
+  return sendRoutineResolution(res, result);
+}
 
 // Webhook definitions are independent from calendar schedules, but every
 // delivery joins the same RoutineManager queue. That keeps unattended work
@@ -2332,6 +2488,8 @@ async function runGroupMemberTurn(
     `Reply as yourself, briefly and conversationally. To bring a teammate in, mention them like @Name — they'll see the conversation and respond.`,
     integrations.agents &&
       "If a supported API key is missing, use request_credential to show the secure in-app card. Never ask the user to paste credentials into chat.",
+    integrations.agents &&
+      "If the user explicitly asks to list or review, schedule, run, or change routines, use list_routines and propose_routine or propose_routine_action. A proposal is not applied until the user confirms its in-app card, so never claim the action completed before that confirmation.",
   ]
     .filter(Boolean)
     .join("\n");
@@ -2581,6 +2739,26 @@ function connectorThread(botId: string, threadId: string) {
   const group = store.groupByThread(threadId);
   if (group?.memberIds.includes(botId)) return { bot, group };
   return null;
+}
+
+function routineProposalPersistence(botId: string, threadId: string) {
+  if (!store.bot(botId)) {
+    return { ok: false as const, status: 403, error: "unknown sender" };
+  }
+  if (!connectorThread(botId, threadId)) {
+    return { ok: false as const, status: 403, error: "source conversation does not belong to sender" };
+  }
+  // Only cards on the visible branch can be acted on from the composer.
+  // Abandoned branches must not permanently consume the proposal quota.
+  const openRequests = store.activePath(threadId).filter(
+    (message) =>
+      message.card?.routineRequest?.botId === botId &&
+      !message.card.answered &&
+      !message.card.dismissed,
+  ).length;
+  return openRequests >= 8
+    ? { ok: false as const, status: 429, error: "confirm or cancel an existing routine proposal first" }
+    : { ok: true as const };
 }
 
 function connectorMessage(botId: string, threadId: string, messageId: string) {
@@ -3091,6 +3269,63 @@ const server = createServer(async (req, res) => {
             description: b.description || undefined,
           }));
         return json(res, 200, { bots });
+      }
+      if (method === "GET" && path === "/api/internal/routines") {
+        const fromBotId = String(url.searchParams.get("fromBotId") ?? "");
+        const from = store.bot(fromBotId);
+        if (!from) return json(res, 403, { error: "unknown sender" });
+        const fromThreadId = String(url.searchParams.get("fromThreadId") ?? from.threadId);
+        if (!connectorThread(from.id, fromThreadId)) {
+          return json(res, 403, { error: "source conversation does not belong to sender" });
+        }
+        return json(res, 200, {
+          now: new Date().toISOString(),
+          timeZone: routineTimeZone(),
+          routines: routines!.listRoutines()
+            .filter((routine) => routine.botId === from.id)
+            .slice(0, 100)
+            .map(agentRoutine),
+        });
+      }
+      if (method === "POST" && path === "/api/internal/routine-requests") {
+        const parsed = routineRequestEnvelopeSchema.safeParse(await readBody(req));
+        if (!parsed.success) return json(res, 400, { error: "invalid routine proposal" });
+        const body = parsed.data;
+        const fromBotId = body.fromBotId;
+        const from = store.bot(fromBotId);
+        if (!from) return json(res, 403, { error: "unknown sender" });
+        const fromThreadId = body.fromThreadId;
+        const owner = connectorThread(from.id, fromThreadId);
+        if (!owner) return json(res, 403, { error: "source conversation does not belong to sender" });
+        const persistence = routineProposalPersistence(from.id, fromThreadId);
+        if (!persistence.ok) {
+          return json(res, persistence.status, { error: persistence.error });
+        }
+        const proposedInput = body.action === "create"
+          ? { action: body.action, routine: body.routine }
+          : body.action === "update"
+            ? { action: body.action, routineId: body.routineId, changes: body.changes }
+            : { action: body.action, routineId: body.routineId };
+        const proposed = await routineRequests.propose({
+          botId: from.id,
+          threadId: fromThreadId,
+          proposal: proposedInput,
+          from: owner.group ? { botId: from.id, name: from.name, color: from.color } : undefined,
+        });
+        const proposedCard = store.messagesFor(fromThreadId).find((message) => message.id === proposed.messageId)?.card;
+        appendDecision(DATA_DIR, {
+          threadId: fromThreadId,
+          requestId: proposed.requestId,
+          botId: from.id,
+          botName: from.name,
+          tool: proposedCard?.tool,
+          // Audit what the human was actually shown, not the shorter tool
+          // response returned to the model.
+          summary: proposedCard?.subtitle ?? proposed.summary,
+          decision: "card-shown",
+          source: "routine",
+        });
+        return json(res, 201, proposed);
       }
       if (method === "POST" && path === "/api/internal/ask-bot") {
         const body = await readBody(req);
@@ -5030,6 +5265,13 @@ const server = createServer(async (req, res) => {
       const body = await readBody(req);
       const behavior = requestBehavior(body.behavior);
       if (!behavior) return json(res, 400, { error: "behavior must be allow, deny, or answer" });
+      if (resolveAndSendRoutine(res, {
+        botId: bot.id,
+        botName: bot.name,
+        threadId: bot.threadId,
+        requestId: String(body.requestId),
+        behavior,
+      })) return;
       // peer-approval intercept: harness-native cards carry a requestId
       // that lives in peer-approval's pending map. Resolve them here so
       // the provider adapter never sees a request it didn't raise.
@@ -5049,6 +5291,24 @@ const server = createServer(async (req, res) => {
       const behavior = requestBehavior(body.behavior);
       if (!behavior) return json(res, 400, { error: "behavior must be allow, deny, or answer" });
       const requestId = String(body.requestId);
+      const routineCard = store.messagesFor(threadId).find(
+        (message) => message.card?.requestId === requestId && message.card.routineRequest,
+      );
+      if (routineCard?.card?.routineRequest) {
+        // Derive the owner from the conversation, not from the executable
+        // payload being authorized. Room cards carry their trusted sender;
+        // one-to-one tasks resolve through the store's thread ownership.
+        const routineBotId = routineCard.from?.botId ?? store.botByThread(threadId)?.id;
+        if (!routineBotId) return json(res, 400, { error: "this routine request has no valid owner" });
+        const routineOwner = store.bot(routineBotId);
+        if (resolveAndSendRoutine(res, {
+          botId: routineBotId,
+          botName: routineOwner?.name,
+          threadId,
+          requestId,
+          behavior,
+        })) return;
+      }
       // peer-approval intercept (see /api/bots/:id/respond above). A peer card
       // belongs to the bus rather than to a speaker, so resolve it before we go
       // looking for one — a room between turns has no speaker to find.

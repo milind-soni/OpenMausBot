@@ -1,4 +1,4 @@
-import { mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -110,6 +110,108 @@ describe("RoutineManager", () => {
         error: "OpenMausBot restarted while this routine was running",
       },
     ]);
+  });
+
+  it("persists confirmation receipts with the scheduler mutation and removes them after settlement", () => {
+    const h = harness();
+    const routine = h.manager.create({
+      name: "Before",
+      prompt: "Review the queue",
+      botId: "maus-1",
+      schedule: { type: "daily", time: "09:00", weekdays: [1] },
+    });
+    const request = {
+      requestId: "request-update-1",
+      messageId: "message-1",
+      botId: "maus-1",
+      threadId: "thread-1",
+      action: "update" as const,
+      fingerprintVersion: 1 as const,
+      fingerprint: "a".repeat(64),
+    };
+    h.manager.update(routine.id, { name: "After" }, request);
+
+    const reloaded = new RoutineManager(h.options);
+    expect(reloaded.routineRequestReceipt(request.requestId)).toMatchObject({
+      ...request,
+      resultId: routine.id,
+    });
+    expect(reloaded.routineRequestReceiptOwners()).toEqual([{
+      requestId: request.requestId,
+      messageId: request.messageId,
+      botId: request.botId,
+      threadId: request.threadId,
+    }]);
+    expect(() => reloaded.update(routine.id, { name: "Never applied" }, {
+      ...request,
+      fingerprint: "b".repeat(64),
+    })).toThrow(/does not match/);
+    expect(reloaded.listRoutines()[0]!.name).toBe("After");
+
+    expect(reloaded.reconcileRoutineRequestReceipts([request])).toBe(0);
+    expect(reloaded.forgetRoutineRequestReceipt(request)).toBe(true);
+    expect(new RoutineManager(h.options).routineRequestReceipt(request.requestId)).toBeNull();
+  });
+
+  it("removes unreachable recovery receipts when their conversation is deleted", () => {
+    const h = harness();
+    const routine = h.manager.create({
+      name: "Cleanup",
+      prompt: "Clean unreachable confirmations",
+      botId: "maus-1",
+      schedule: { type: "daily", time: "09:00", weekdays: [1] },
+    });
+    const request = {
+      requestId: "request-orphaned-thread",
+      messageId: "message-orphaned-thread",
+      botId: "maus-1",
+      threadId: "thread-deleted",
+      action: "pause" as const,
+      fingerprintVersion: 1 as const,
+      fingerprint: "d".repeat(64),
+    };
+    h.manager.update(routine.id, { enabled: false }, request);
+
+    expect(h.manager.forgetRoutineRequestReceiptsForThread("another-thread")).toBe(0);
+    expect(h.manager.forgetRoutineRequestReceiptsForThread("thread-deleted")).toBe(1);
+    expect(new RoutineManager(h.options).routineRequestReceipt(request.requestId)).toBeNull();
+  });
+
+  it("rolls back an uncommitted confirmation when the atomic file write fails", () => {
+    const h = harness();
+    const file = h.options.file!;
+    // A directory at the destination makes the final atomic rename fail
+    // after the temporary file has been written.
+    mkdirSync(file);
+    const request = {
+      requestId: "request-create-write-failure",
+      messageId: "message-write-failure",
+      botId: "maus-1",
+      threadId: "thread-1",
+      action: "create" as const,
+      fingerprintVersion: 1 as const,
+      fingerprint: "c".repeat(64),
+    };
+    const input = {
+      name: "Retry safely",
+      prompt: "Check the queue",
+      botId: "maus-1",
+      schedule: { type: "daily" as const, time: "09:00", weekdays: [1] },
+    };
+
+    expect(() => h.manager.create(input, request)).toThrow();
+    expect(h.manager.listRoutines()).toEqual([]);
+    expect(h.manager.routineRequestReceipt(request.requestId)).toBeNull();
+    expect(h.emitted).toEqual([]);
+
+    rmSync(file, { recursive: true, force: true });
+    rmSync(`${file}.tmp`, { force: true });
+    const routine = h.manager.create(input, request);
+    expect(h.manager.listRoutines()).toHaveLength(1);
+    expect(h.manager.routineRequestReceipt(request.requestId)).toMatchObject({
+      ...request,
+      resultId: routine.id,
+    });
   });
 
   it("queues behind a busy bot, then dispatches into a detached task", async () => {

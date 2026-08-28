@@ -16,6 +16,7 @@ import {
 import type { CloudBackend, EffortLevel } from "../../server/contracts.ts";
 import type { MausColor, MausMotion } from "@/lib/mascot";
 import type { BotAvatarCrop } from "../../shared/bot-avatar";
+import type { RoutineRequestCardData } from "../../shared/routine-request";
 import type { Routine, RoutineInput, RoutineRun } from "@/lib/routines";
 import type { WebhookAttempt, WebhookIngressStatus, WebhookTrigger } from "@/lib/webhooks";
 import { currentCall } from "@/lib/call";
@@ -41,6 +42,8 @@ export interface OptionCardData {
   /** the narrow grant "always allow" remembers, e.g. "Bash:git" */
   allowKey?: string;
   approvalScope?: "local-computer";
+  /** Persisted proposal used by the server when the user confirms it. */
+  routineRequest?: RoutineRequestCardData;
 }
 
 export interface ConnectorCardData {
@@ -487,6 +490,8 @@ export type Action =
       message?: string;
       /** remember this exact grant (the server's allowKey) for the bot */
       alwaysAllow?: { botId: string; key: string };
+      /** Local UI recovery hook for voice flows. Never sent to the server. */
+      onError?: (message: string) => void;
     }
   | { type: "newTask"; botId: string }
   | { type: "switchTask"; botId: string; threadId: string }
@@ -1372,7 +1377,10 @@ export function StoreProvider({ children }: { children: ReactNode }) {
                 behavior: action.behavior,
                 message: action.message,
               }),
-            }).catch(showError);
+            }).catch((error) => {
+              showError(error);
+              action.onError?.(error instanceof Error ? error.message : String(error));
+            });
           if (action.alwaysAllow) {
             const bot = stateRef.current.bots.find((b) => b.id === action.alwaysAllow!.botId);
             const next = [...new Set([...(bot?.alwaysAllow ?? []), action.alwaysAllow.key])];

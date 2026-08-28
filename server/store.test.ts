@@ -518,6 +518,7 @@ describe("Store change stream", () => {
     expect(events.every((e) => e.type === "bot" && e.botId === bot.id)).toBe(true);
     expect(events).toHaveLength(7);
     store.deleteBot(bot.id);
+    expect(events).toContainEqual({ type: "thread.deleted", threadId: bot.threadId });
     expect(events.at(-1)).toEqual({ type: "bot.deleted", botId: bot.id });
   });
 
@@ -534,6 +535,7 @@ describe("Store change stream", () => {
     expect(events.map((e) => e.type)).toEqual(["group", "group"]);
     expect(store.group(g.id)?.unread).toBe(true);
     store.deleteGroup(g.id);
+    expect(events).toContainEqual({ type: "thread.deleted", threadId: g.threadId });
     expect(events.at(-1)).toEqual({ type: "group.deleted", groupId: g.id });
   });
 
@@ -609,9 +611,42 @@ describe("Store redacts bot-authored secrets on write", () => {
     const card = store.appendMessage(bot.threadId, {
       role: "bot",
       kind: "options",
-      card: { title: "Run this?", summary: `curl -H "Authorization: Bearer ${key}"`, options: [], requestId: "r1", tool: "Bash" } as never,
+      card: { title: "Run this?", summary: `curl -H "Authorization: Bearer ${key}"`, held: `Blocked ${key}`, options: [], requestId: "r1", tool: "Bash" } as never,
     });
     expect((card.card as { summary?: string }).summary).not.toContain(key);
+    expect(card.card?.held).not.toContain(key);
+    const routineCard = store.appendMessage(bot.threadId, {
+      role: "bot",
+      kind: "options",
+      card: {
+        title: "Confirm routine",
+        subtitle: "Every morning",
+        options: ["Confirm", "Cancel"],
+        requestId: "routine-request",
+        tool: "schedule_routine",
+        routineRequest: {
+          version: 1,
+          requestId: "routine-request",
+          botId: bot.id,
+          threadId: bot.threadId,
+          createdAt: 1,
+          operation: {
+            action: "create",
+            routine: {
+              name: `Use ${key}`,
+              instructions: `Send a request with ${key}`,
+              schedule: { type: "daily", time: "09:00", weekdays: [1] },
+              runOn: "maus",
+              durationMinutes: 30,
+            },
+          },
+        },
+      },
+    });
+    expect(routineCard.card?.routineRequest?.operation.action).toBe("create");
+    if (routineCard.card?.routineRequest?.operation.action !== "create") throw new Error("missing routine payload");
+    expect(routineCard.card.routineRequest.operation.routine.name).not.toContain(key);
+    expect(routineCard.card.routineRequest.operation.routine.instructions).not.toContain(key);
     const secretCard = store.appendMessage(bot.threadId, {
       role: "bot",
       kind: "secret",

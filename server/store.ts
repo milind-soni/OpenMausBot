@@ -14,6 +14,7 @@ import { newId, type CloudBackend, type ModelSelection, type ThreadId } from "./
 import { pickBotName } from "./names.ts";
 import { redactSecretsInText } from "./redact.ts";
 import { botAvatarProfile, type BotAvatarCrop } from "../shared/bot-avatar.ts";
+import type { RoutineRequestCardData } from "../shared/routine-request.ts";
 
 export type MausColor =
   | "green"
@@ -51,6 +52,9 @@ export interface OptionCardData {
   allowKey?: string;
   /** Local actions never share remembered grants with cloud/tool approvals. */
   approvalScope?: "local-computer";
+  /** A durable chat-created routine proposal. The scheduler only applies it
+   * after this card is explicitly confirmed by the user. */
+  routineRequest?: RoutineRequestCardData;
 }
 
 export interface ConnectorCardData {
@@ -241,6 +245,39 @@ function redactBotAuthored<T extends Omit<Message, "id" | "at"> & { at?: number 
     card.title = redactSecretsInText(card.title);
     if (typeof card.subtitle === "string") card.subtitle = redactSecretsInText(card.subtitle);
     if (typeof card.summary === "string") card.summary = redactSecretsInText(card.summary);
+    if (typeof card.held === "string") card.held = redactSecretsInText(card.held);
+    // Routine definitions are executable bot-authored text stored behind the
+    // visible summary. Scrub the durable payload too so nesting it on a card
+    // cannot bypass the transcript's secret-redaction boundary.
+    if (card.routineRequest) {
+      const operation = card.routineRequest.operation;
+      card.routineRequest = {
+        ...card.routineRequest,
+        operation: operation.action === "create"
+          ? {
+              ...operation,
+              routine: {
+                ...operation.routine,
+                name: redactSecretsInText(operation.routine.name),
+                instructions: redactSecretsInText(operation.routine.instructions),
+              },
+            }
+          : operation.action === "update"
+            ? {
+                ...operation,
+                changes: {
+                  ...operation.changes,
+                  ...(typeof operation.changes.name === "string"
+                    ? { name: redactSecretsInText(operation.changes.name) }
+                    : {}),
+                  ...(typeof operation.changes.instructions === "string"
+                    ? { instructions: redactSecretsInText(operation.changes.instructions) }
+                    : {}),
+                },
+              }
+            : { ...operation },
+      };
+    }
     out.card = card;
   }
   if (out.connector) {
@@ -277,6 +314,7 @@ export type StoreChange =
   | { type: "message"; threadId: string; message: Message }
   | { type: "message.patch"; threadId: string; message: Message }
   | { type: "thread"; threadId: string; activeLeafId: string }
+  | { type: "thread.deleted"; threadId: string }
   | { type: "bot"; botId: string }
   | { type: "bot.deleted"; botId: string }
   | { type: "group"; groupId: string }
@@ -758,6 +796,7 @@ export class Store {
         unlinkSync(file);
       } catch {}
     }
+    this.emit({ type: "thread.deleted", threadId });
   }
 
   deleteGroup(id: string): boolean {

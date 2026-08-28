@@ -10,6 +10,7 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { z } from "zod";
 
 import { removeTempDir, waitForExit } from "./testing/cleanup.ts";
 import { openSse } from "./testing/sse.ts";
@@ -2285,6 +2286,164 @@ describe("harness HTTP API", () => {
       await api("DELETE", `/api/groups/${room.id}`);
       await api("DELETE", `/api/bots/${first.id}`);
       await api("DELETE", `/api/bots/${second.id}`);
+    }
+  });
+
+  it("keeps chat-created routines inert until their durable card is confirmed", async () => {
+    const bot = (await api("POST", "/api/bots", {})).body.bot;
+    let routineId = "";
+    let legacyRoutineId = "";
+    try {
+      const selected = await api("PATCH", `/api/bots/${bot.id}`, {
+        modelSelection: { instanceId: "claude", model: "claude-sonnet-5" },
+      });
+      expect(selected.status).toBe(200);
+
+      rmSync(fakeClaudeDump, { force: true });
+      expect((await api("POST", `/api/bots/${bot.id}/messages`, { text: "prepare a routine" })).status).toBe(202);
+      await expect.poll(() => existsSync(fakeClaudeDump), { timeout: 5_000 }).toBe(true);
+      const dump = JSON.parse(readFileSync(fakeClaudeDump, "utf8"));
+      const token = dump.mcpConfig.mcpServers.agents.env.OMB_COMMS_TOKEN;
+      expect(token).toMatch(/^[a-f0-9]{48}$/);
+      const internalHeaders = {
+        authorization: `Bearer ${token}`,
+        "content-type": "application/json",
+      };
+
+      const before = await fetch(
+        `${BASE}/api/internal/routines?fromBotId=${encodeURIComponent(bot.id)}&fromThreadId=${encodeURIComponent(bot.threadId)}`,
+        { headers: internalHeaders },
+      );
+      expect(before.status).toBe(200);
+      expect(z.object({ routines: z.array(z.unknown()) }).parse(await before.json()).routines).toEqual([]);
+
+      const unavailableCloud = await fetch(`${BASE}/api/internal/routine-requests`, {
+        method: "POST",
+        headers: internalHeaders,
+        body: JSON.stringify({
+          fromBotId: bot.id,
+          fromThreadId: bot.threadId,
+          action: "create",
+          routine: {
+            name: "Cloud brief",
+            instructions: "Summarize today's priorities in the Cloud VM.",
+            schedule: { type: "weekly", time: "09:00", weekdays: ["monday"] },
+            runOn: "cloud",
+          },
+        }),
+      });
+      expect(unavailableCloud.status).toBe(409);
+      expect(await unavailableCloud.json()).toMatchObject({
+        error: expect.stringMatching(/Box API key|Cloud VM runner/i),
+      });
+
+      const proposed = await fetch(`${BASE}/api/internal/routine-requests`, {
+        method: "POST",
+        headers: internalHeaders,
+        body: JSON.stringify({
+          fromBotId: bot.id,
+          fromThreadId: bot.threadId,
+          action: "create",
+          routine: {
+            name: "Weekday brief",
+            instructions: "Summarize the priorities for today.",
+            schedule: {
+              type: "weekly",
+              time: "09:00",
+              weekdays: ["monday", "tuesday", "wednesday", "thursday", "friday"],
+            },
+            runOn: "maus",
+            durationMinutes: 30,
+          },
+        }),
+      });
+      expect(proposed.status).toBe(201);
+      const proposal = z.object({ requestId: z.string() }).passthrough().parse(await proposed.json());
+
+      const stillInert = await api("GET", "/api/routines");
+      expect(stillInert.body.routines.filter((routine: { botId: string }) => routine.botId === bot.id)).toEqual([]);
+      const state = (await api("GET", "/api/bots")).body;
+      const card = state.bots
+        .find((candidate: { id: string }) => candidate.id === bot.id)
+        ?.messages.find((message: { card?: { requestId?: string } }) => message.card?.requestId === proposal.requestId);
+      expect(card?.card).toMatchObject({
+        tool: "schedule_routine",
+        routineRequest: { botId: bot.id, threadId: bot.threadId },
+      });
+      expect(card?.card.answered).toBeUndefined();
+
+      const confirmed = await api("POST", `/api/threads/${bot.threadId}/respond`, {
+        requestId: proposal.requestId,
+        behavior: "allow",
+      });
+      expect(confirmed).toMatchObject({ status: 200, body: { outcome: "allowed-once", routineAction: "create" } });
+      routineId = confirmed.body.resultId;
+      await expect.poll(async () => {
+        const decisions = (await api("GET", "/api/decisions")).body.decisions;
+        return decisions
+          .filter((decision: { requestId?: string }) => decision.requestId === proposal.requestId)
+          .map((decision: { decision: string; source: string }) => `${decision.decision}:${decision.source}`)
+          .sort();
+      }).toEqual(["card-shown:routine", "user-approved:user"]);
+
+      const after = await api("GET", "/api/routines");
+      expect(after.body.routines.filter((routine: { botId: string }) => routine.botId === bot.id)).toHaveLength(1);
+      const duplicate = await api("POST", `/api/threads/${bot.threadId}/respond`, {
+        requestId: proposal.requestId,
+        behavior: "allow",
+      });
+      expect(duplicate.body.alreadySettled).toBe(true);
+      expect((await api("GET", "/api/routines")).body.routines
+        .filter((routine: { botId: string }) => routine.botId === bot.id)).toHaveLength(1);
+
+      // Calendar-created routines may predate chat-card redaction. Listing
+      // them to a model must redact the whole prompt before returning its
+      // bounded preview, and tell the model when that preview is incomplete.
+      const fakeSecret = `Bearer ${"a".repeat(24)}`;
+      const fakeNameSecret = `sk-proj-${"b".repeat(24)}`;
+      const legacy = await api("POST", "/api/routines", {
+        name: `Legacy ${fakeNameSecret}`,
+        prompt: `${fakeSecret}\n${"Review the archive. ".repeat(180)}`,
+        botId: bot.id,
+        runOn: "maus",
+        enabled: false,
+        schedule: { type: "daily", time: "10:00", weekdays: [1] },
+      });
+      legacyRoutineId = legacy.body.routine.id;
+      const listed = await fetch(
+        `${BASE}/api/internal/routines?fromBotId=${encodeURIComponent(bot.id)}&fromThreadId=${encodeURIComponent(bot.threadId)}`,
+        { headers: internalHeaders },
+      );
+      expect(listed.status).toBe(200);
+      const listedBody = z.object({
+        routines: z.array(z.object({
+          id: z.string(),
+          instructions: z.string(),
+          instructionsTruncated: z.boolean(),
+        }).passthrough()),
+      }).parse(await listed.json());
+      const legacyResult = listedBody.routines.find((routine) => routine.id === legacyRoutineId)!;
+      expect(legacyResult.instructions).not.toContain(fakeSecret);
+      expect(legacyResult.name).not.toContain(fakeNameSecret);
+      expect(legacyResult.instructions).toContain("redacted");
+      expect(legacyResult.instructionsTruncated).toBe(true);
+
+      const wrongThread = await fetch(`${BASE}/api/internal/routine-requests`, {
+        method: "POST",
+        headers: internalHeaders,
+        body: JSON.stringify({
+          fromBotId: bot.id,
+          fromThreadId: "not-this-bots-thread",
+          action: "pause",
+          routineId,
+        }),
+      });
+      expect(wrongThread.status).toBe(403);
+    } finally {
+      if (legacyRoutineId) await api("DELETE", `/api/routines/${legacyRoutineId}`);
+      if (routineId) await api("DELETE", `/api/routines/${routineId}`);
+      await api("POST", `/api/bots/${bot.id}/interrupt`);
+      await api("DELETE", `/api/bots/${bot.id}`);
     }
   });
 

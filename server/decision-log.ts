@@ -36,12 +36,14 @@ export type DecisionKind =
 
 /** Who or what produced the decision. The AutoVerdictSource values carry
  * straight through from auto-approve.ts; `question` marks cards a rule may
- * never answer, `auto-fallback` a card shown after delivery failed, `user`
- * the human's answer, and auto-review sources the isolated model reviewer. */
+ * never answer, `auto-fallback` a card shown after delivery failed, `routine`
+ * a durable chat scheduling proposal, `user` the human's answer, and
+ * auto-review sources the isolated model reviewer. */
 export type DecisionSource =
   | AutoVerdictSource
   | "question"
   | "auto-fallback"
+  | "routine"
   | "user"
   | "auto-review"
   | "auto-review-shadow";
