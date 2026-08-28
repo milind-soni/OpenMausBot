@@ -622,6 +622,11 @@ const sseClients = new Set<SseClient>();
  * correctly through its own Last-Event-ID with no client code at all. */
 const STREAM_ID = randomUUID().slice(0, 8);
 const REPLAY_MAX = 500;
+const configuredSseHeartbeatMs = Number(process.env.OMB_SSE_HEARTBEAT_MS);
+const SSE_HEARTBEAT_MS =
+  Number.isFinite(configuredSseHeartbeatMs) && configuredSseHeartbeatMs > 0
+    ? configuredSseHeartbeatMs
+    : 15_000;
 let lastSeq = 0;
 const replayBuffer: Array<{ seq: number; kind: string; frame: string | null }> = [];
 
@@ -1492,7 +1497,7 @@ const runDelegatedTurn: Parameters<typeof drainDelegations>[3] = (toBotId, text,
       // busy. Those asynchronous setup failures do not emit turn.completed,
       // so clear the watch and report them through this callback too.
       onDispatchError: reportStartFailure,
-    }).catch((err) => {
+    }).then(() => undefined).catch((err) => {
       reportStartFailure(err);
     });
 };
@@ -1529,7 +1534,7 @@ function drainQueuedSends() {
     // Drain just appended the held lines; userMessage keeps startTurn
     // from duplicating the last one, and excludeIds drops every drained
     // line from the transcript-replay so they are not also in `prompt`.
-    startTurn(botId, prompt, { threadId, userMessage, excludeMessageIds: excludeIds }).catch((err) => {
+    startTurn(botId, prompt, { threadId, userMessage, excludeMessageIds: excludeIds }).then(() => undefined).catch((err) => {
       store.appendMessage(threadId, {
         role: "bot",
         kind: "activity",
@@ -2125,6 +2130,7 @@ async function startTurn(
       drainSecretResumes();
     }
   })();
+  return userMessage;
 }
 
 // ── routines: persisted definitions → detached bot tasks ───────────────
@@ -2143,7 +2149,8 @@ routines = new RoutineManager({
     return task;
   },
   startTurn: (botId, threadId, prompt, runOn, triggerSource, onDispatchError) =>
-    startTurn(botId, prompt, { threadId, runOn, automationSource: triggerSource, onDispatchError }),
+    startTurn(botId, prompt, { threadId, runOn, automationSource: triggerSource, onDispatchError })
+      .then(() => undefined),
   interruptTurn: async (botId, threadId, runOn) => {
     const bot = store.bot(botId);
     const instance = runOn === "cloud"
@@ -2622,7 +2629,7 @@ function startGroupTurn(groupId: string, text: string, replyTo?: Message) {
   // Capture the active thread once. Every queued responder below is bound to
   // this task even if another client asks to switch later.
   const threadId = group.threadId;
-  store.appendMessage(threadId, { role: "user", kind: "text", text, replyToId: replyTo?.id });
+  const message = store.appendMessage(threadId, { role: "user", kind: "text", text, replyToId: replyTo?.id });
   if (!group.dm) store.titleGroupTaskFromFirstMessage(group.id, text, threadId);
 
   const members = group.memberIds
@@ -2666,7 +2673,7 @@ function startGroupTurn(groupId: string, text: string, replyTo?: Message) {
         tool: { name: unavailableMessage, ok: false },
       });
     }
-    return;
+    return message;
   }
 
   const operation = beginGroupTurnOperation(groupId, threadId);
@@ -2701,6 +2708,7 @@ function startGroupTurn(groupId: string, text: string, replyTo?: Message) {
   });
   const tracked = next.finally(() => finishGroupTurnOperation(groupId, operation));
   groupQueues.set(groupId, tracked.catch(() => {}));
+  return message;
 }
 
 function roomSetupPending(group: GroupRecord): boolean {
@@ -3756,7 +3764,13 @@ const server = createServer(async (req, res) => {
       // Resume, if the client offered a cursor we can honour. `?since=` is
       // for clients that read the stream by hand; Last-Event-ID is what a
       // browser EventSource sends by itself.
-      const since = cursorSeq(url.searchParams.get("since") ?? req.headers["last-event-id"]);
+      // Once EventSource has received a numbered frame, its automatic
+      // reconnect carries a newer Last-Event-ID even though the original
+      // URL may still contain an older manual `since` cursor. Prefer the
+      // valid browser cursor or the stale query would replay forever.
+      const since =
+        cursorSeq(req.headers["last-event-id"]) ??
+        cursorSeq(url.searchParams.get("since") ?? undefined);
       // The buffer only reaches so far back. If the client's cursor fell off
       // the end, saying so is the only honest answer — a partial replay
       // would leave a permanent hole in its state.
@@ -3781,11 +3795,17 @@ const server = createServer(async (req, res) => {
       }
 
       sseClients.add(client);
+      // Keep this long-lived response out of socket idle-timeout handling
+      // without weakening timeouts for every other API request.
+      req.socket.setTimeout(0);
+      // A comment keeps intermediaries from idling the connection, while a
+      // data frame is visible to EventSource clients and resets their own
+      // liveness watchdog. Heartbeats carry no id and never advance replay.
       const keepalive = setInterval(() => {
         try {
-          res.write(": keepalive\n\n");
+          res.write(`: keepalive\n\ndata: ${JSON.stringify({ kind: "ping" })}\n\n`);
         } catch {}
-      }, 25_000);
+      }, SSE_HEARTBEAT_MS);
       req.on("close", () => {
         clearInterval(keepalive);
         sseClients.delete(client);
@@ -4581,8 +4601,8 @@ const server = createServer(async (req, res) => {
         return json(res, 409, { error: "the channel switched tasks before it could receive the message" });
       }
       const replyTo = resolveReplyTarget(group.threadId, body.replyToId);
-      startGroupTurn(group.id, text, replyTo);
-      return json(res, 202, { ok: true });
+      const message = startGroupTurn(group.id, text, replyTo);
+      return json(res, 202, { ok: true, threadId: group.threadId, message });
     }
     m = path.match(/^\/api\/groups\/([\w-]+)\/interrupt$/);
     if (m && method === "POST") {
@@ -5181,14 +5201,14 @@ const server = createServer(async (req, res) => {
             .catch(() => false);
           if (steered) {
             clearUnattended(bot.id);
-            store.appendMessage(bot.threadId, {
+            const message = store.appendMessage(bot.threadId, {
               role: "user",
               kind: "text",
               text,
               replyToId: replyTo?.id,
               steered: true,
             });
-            return json(res, 202, { ok: true, steered: true });
+            return json(res, 202, { ok: true, steered: true, threadId: bot.threadId, message });
           }
         }
         const queued = queueSteeredMessage(bot, text, {
@@ -5197,8 +5217,8 @@ const server = createServer(async (req, res) => {
         });
         return json(res, 202, { ok: true, queued: true, queueId: queued.id, threadId: bot.threadId });
       }
-      await startTurn(bot.id, text, { replyTo });
-      return json(res, 202, { ok: true });
+      const message = await startTurn(bot.id, text, { replyTo });
+      return json(res, 202, { ok: true, threadId: bot.threadId, message });
     }
 
     m = path.match(/^\/api\/bots\/([\w-]+)\/queue\/([\w-]+)$/);

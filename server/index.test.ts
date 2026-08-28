@@ -223,6 +223,9 @@ beforeAll(async () => {
       OMB_BOX_API: `http://127.0.0.1:${boxStubPort}`,
       OMB_COMPOSIO_API: `http://127.0.0.1:${boxStubPort}/api/v3.1`,
       OMB_STATIC_DIR: staticDir,
+      // Production uses 15s. Keep the real timer path while making the
+      // browser-visible heartbeat assertion fast and deterministic.
+      OMB_SSE_HEARTBEAT_MS: "50",
       FAKE_CLAUDE_MODE: "hang",
       FAKE_CLAUDE_DUMP: fakeClaudeDump,
     },
@@ -497,6 +500,70 @@ describe("harness HTTP API", () => {
     } finally {
       await api("POST", `/api/groups/${group.id}/interrupt`, {});
       await api("DELETE", `/api/groups/${group.id}`);
+    }
+  });
+
+  it("returns the canonical stored user message for direct and channel sends", async () => {
+    const created = await api("POST", "/api/bots", {
+      modelSelection: { instanceId: "claude", model: "claude-sonnet-5" },
+      requireAvailableModel: true,
+    });
+    expect(created.status).toBe(201);
+    const bot = created.body.bot;
+    let room: any;
+    try {
+      const direct = await api("POST", `/api/bots/${bot.id}/messages`, { text: "canonical direct" });
+      expect(direct.status).toBe(202);
+      expect(direct.body).toMatchObject({
+        ok: true,
+        threadId: bot.threadId,
+        message: {
+          id: expect.any(String),
+          at: expect.any(Number),
+          role: "user",
+          kind: "text",
+          text: "canonical direct",
+        },
+      });
+      const afterDirect = (await api("GET", "/api/bots?messages=20")).body.bots.find(
+        (candidate: { id: string }) => candidate.id === bot.id,
+      );
+      expect(afterDirect.messages.find((message: { id: string }) => message.id === direct.body.message.id))
+        .toEqual(direct.body.message);
+
+      expect((await api("POST", `/api/bots/${bot.id}/interrupt`)).status).toBe(200);
+      await expect.poll(async () => {
+        const state = (await api("GET", "/api/bots?messages=0")).body;
+        return state.bots.find((candidate: { id: string }) => candidate.id === bot.id)?.busy;
+      }, { timeout: 5_000 }).toBe(false);
+
+      room = (await api("POST", "/api/groups", {
+        name: "Canonical response room",
+        memberIds: [bot.id],
+        setup: { bulletin: "", defaultResponder: { kind: "mentions" } },
+      })).body.group;
+      const channel = await api("POST", `/api/groups/${room.id}/messages`, { text: "canonical channel" });
+      expect(channel.status).toBe(202);
+      expect(channel.body).toMatchObject({
+        ok: true,
+        threadId: room.threadId,
+        message: {
+          id: expect.any(String),
+          at: expect.any(Number),
+          role: "user",
+          kind: "text",
+          text: "canonical channel",
+        },
+      });
+      const afterChannel = (await api("GET", "/api/bots?messages=20")).body.groups.find(
+        (candidate: { id: string }) => candidate.id === room.id,
+      );
+      expect(afterChannel.messages.find((message: { id: string }) => message.id === channel.body.message.id))
+        .toEqual(channel.body.message);
+    } finally {
+      if (room) await api("DELETE", `/api/groups/${room.id}`);
+      await api("POST", `/api/bots/${bot.id}/interrupt`).catch(() => undefined);
+      await api("DELETE", `/api/bots/${bot.id}`);
     }
   });
 
@@ -3057,6 +3124,31 @@ describe("resumable event stream", () => {
     }
   });
 
+  it("sends browser-visible heartbeats without moving the replay cursor", async () => {
+    const { body } = await api("GET", "/api/bots");
+    const botId = body.bots[0].id;
+    const first = await openSse(`${BASE}/api/events`);
+    const hello = await first.until((frame) => frame.kind === "hello");
+    try {
+      expect(await first.until((frame) => frame.kind === "ping")).toEqual({ kind: "ping" });
+      await nudge(botId);
+      const next = await first.until((frame) => frame.kind === "bot" && frame.bot?.id === botId);
+      expect(next.seq).toBe(Number(hello.cursor.split(":")[1]) + 1);
+    } finally {
+      first.close();
+    }
+
+    // Heartbeats describe connection health, not application state. A
+    // reconnect from the numbered application frame remains fully resumable.
+    const cursor = `${hello.cursor.split(":")[0]}:${Number(hello.cursor.split(":")[1]) + 1}`;
+    const resumed = await openSse(`${BASE}/api/events?since=${encodeURIComponent(cursor)}`);
+    try {
+      expect((await resumed.until((frame) => frame.kind === "hello")).resumed).toBe(true);
+    } finally {
+      resumed.close();
+    }
+  });
+
   it("replays exactly what a disconnected client missed", async () => {
     const { body } = await api("GET", "/api/bots");
     const botId = body.bots[0].id;
@@ -3102,6 +3194,33 @@ describe("resumable event stream", () => {
     try {
       expect((await resumed.until((f) => f.kind === "hello")).resumed).toBe(true);
       await resumed.until((f) => f.kind === "bot");
+    } finally {
+      resumed.close();
+    }
+  });
+
+  it("prefers a newer Last-Event-ID over the EventSource URL's stale cursor", async () => {
+    const { body } = await api("GET", "/api/bots");
+    const botId = body.bots[0].id;
+
+    const first = await openSse(`${BASE}/api/events`);
+    const hello = await first.until((frame) => frame.kind === "hello");
+    await nudge(botId);
+    const seen = await first.until((frame) => frame.kind === "bot" && frame.bot?.id === botId);
+    first.close();
+    await nudge(botId);
+
+    // Native EventSource reconnects reuse their original URL, including its
+    // old query, but add Last-Event-ID for the newest numbered frame seen.
+    const resumed = await openSse(
+      `${BASE}/api/events?since=${encodeURIComponent(hello.cursor)}`,
+      { "last-event-id": `${hello.cursor.split(":")[0]}:${seen.seq}` },
+    );
+    try {
+      expect((await resumed.until((frame) => frame.kind === "hello")).resumed).toBe(true);
+      await resumed.until((frame) => frame.kind === "bot" && frame.bot?.id === botId);
+      const replayed = resumed.frames.filter((frame) => frame.kind === "bot" && frame.bot?.id === botId);
+      expect(replayed.map((frame) => frame.seq)).toEqual([seen.seq + 1]);
     } finally {
       resumed.close();
     }
