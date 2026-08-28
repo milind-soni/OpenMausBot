@@ -3452,8 +3452,8 @@ const server = createServer(async (req, res) => {
         const chief = store.bot(fromBotId);
         if (!chief) return json(res, 403, { error: "unknown sender" });
         const fromThreadId = String(body.fromThreadId ?? chief.threadId);
-        if (!store.taskByThread(chief.id, fromThreadId)) {
-          return json(res, 403, { error: "source thread does not belong to sender" });
+        if (!connectorThread(chief.id, fromThreadId)) {
+          return json(res, 403, { error: "source conversation does not belong to sender" });
         }
         if (!chief.chiefOfStaff) {
           return json(res, 403, { error: "only a section's Chief of Staff can create operator bots" });

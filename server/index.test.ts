@@ -563,6 +563,101 @@ describe("harness HTTP API", () => {
     }
   });
 
+  it("lets a Chief create operators from its direct and channel tasks but not from channels it cannot access", async () => {
+    const chief = (await api("POST", "/api/bots")).body.bot;
+    const outsider = (await api("POST", "/api/bots")).body.bot;
+    let channel: any;
+    let outsiderChannel: any;
+    const createdBotIds: string[] = [];
+    try {
+      const selected = await api("PATCH", `/api/bots/${chief.id}`, {
+        name: "Channel Chief",
+        section: "Channel creation test",
+        chiefOfStaff: true,
+        modelSelection: { instanceId: "claude", model: "claude-sonnet-5" },
+      });
+      expect(selected.status).toBe(200);
+
+      rmSync(fakeClaudeDump, { force: true });
+      expect((await api("POST", `/api/bots/${chief.id}/messages`, { text: "prepare the team" })).status).toBe(202);
+      await expect.poll(() => existsSync(fakeClaudeDump), { timeout: 5_000 }).toBe(true);
+      const dump = z.object({
+        mcpConfig: z.object({
+          mcpServers: z.object({
+            agents: z.object({ env: z.object({ OMB_COMMS_TOKEN: z.string() }) }),
+          }),
+        }),
+      }).parse(JSON.parse(readFileSync(fakeClaudeDump, "utf8")));
+      const internalHeaders = {
+        authorization: `Bearer ${dump.mcpConfig.mcpServers.agents.env.OMB_COMMS_TOKEN}`,
+        "content-type": "application/json",
+      };
+      expect((await api("POST", `/api/bots/${chief.id}/interrupt`)).status).toBe(200);
+
+      const createOperator = async (fromThreadId: string, name: string, fromBotId = chief.id) => {
+        const response = await fetch(`${BASE}/api/internal/create-bot`, {
+          method: "POST",
+          headers: internalHeaders,
+          body: JSON.stringify({
+            fromBotId,
+            fromThreadId,
+            name,
+            role: "Research operator",
+            instructions: "Research the assigned question and report concise findings.",
+          }),
+        });
+        const body = z.object({
+          id: z.string().optional(),
+          section: z.string().optional(),
+          error: z.string().optional(),
+        }).passthrough().parse(await response.json());
+        if (response.status === 201 && body.id) createdBotIds.push(body.id);
+        return { status: response.status, body };
+      };
+
+      const direct = await createOperator(chief.threadId, "Direct Task Operator");
+      expect(direct).toMatchObject({ status: 201, body: { section: "Channel creation test" } });
+
+      channel = (await api("POST", "/api/groups", {
+        name: "Chief member channel",
+        memberIds: [chief.id],
+        setup: { bulletin: "", defaultResponder: { kind: "member", botId: chief.id } },
+      })).body.group;
+      const rootThreadId = channel.threadId;
+      const channelTask = await api("POST", `/api/groups/${channel.id}/tasks`, { title: "Research task" });
+      expect(channelTask.status).toBe(201);
+      const rootTask = await createOperator(rootThreadId, "Channel Root Operator");
+      expect(rootTask.status).toBe(201);
+      const nestedTask = await createOperator(channelTask.body.task.threadId, "Channel Task Operator");
+      expect(nestedTask.status).toBe(201);
+
+      outsiderChannel = (await api("POST", "/api/groups", {
+        name: "Outsider-only channel",
+        memberIds: [outsider.id],
+        setup: { bulletin: "", defaultResponder: { kind: "member", botId: outsider.id } },
+      })).body.group;
+      const nonChief = await createOperator(outsiderChannel.threadId, "Non-Chief Operator", outsider.id);
+      expect(nonChief).toEqual({
+        status: 403,
+        body: { error: "only a section's Chief of Staff can create operator bots" },
+      });
+      const denied = await createOperator(outsiderChannel.threadId, "Forbidden Operator");
+      expect(denied).toEqual({
+        status: 403,
+        body: { error: "source conversation does not belong to sender" },
+      });
+      const state = (await api("GET", "/api/bots?messages=0")).body;
+      expect(state.bots.some((bot: { name: string }) => bot.name === "Forbidden Operator")).toBe(false);
+    } finally {
+      await api("POST", `/api/bots/${chief.id}/interrupt`);
+      if (outsiderChannel?.id) await api("DELETE", `/api/groups/${outsiderChannel.id}`);
+      if (channel?.id) await api("DELETE", `/api/groups/${channel.id}`);
+      for (const botId of createdBotIds) await api("DELETE", `/api/bots/${botId}`);
+      await api("DELETE", `/api/bots/${outsider.id}`);
+      await api("DELETE", `/api/bots/${chief.id}`);
+    }
+  });
+
   it("rejects null and array task, channel, and bot mutation bodies", async () => {
     const bot = (await api("POST", "/api/bots")).body.bot;
     const room = (await api("POST", "/api/groups", { name: "Object bodies", memberIds: [bot.id] })).body.group;
