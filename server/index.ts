@@ -18,6 +18,7 @@ import {
   type CredentialTargetId,
 } from "../shared/credential-request.ts";
 
+import { actionFromEvent, appendAction, readActions } from "./action-audit.ts";
 import { approvalKey, autoVerdict } from "./auto-approve.ts";
 import { requestReview, resolveAutoReviewMode, shouldReview } from "./auto-review.ts";
 import * as checkpoints from "./checkpoints.ts";
@@ -240,8 +241,8 @@ function agentsIntegration(botId: string, threadId: string, depth: number) {
   };
 }
 
-function phoneIntegration() {
-  const env: Record<string, string> = { ...AGENTS_NODE_FLAG };
+function phoneIntegration(botId: string) {
+  const env: Record<string, string> = { ...AGENTS_NODE_FLAG, OMB_BOT_ID: botId };
   if (process.env.OMB_ADB_PATH) env.OMB_ADB_PATH = process.env.OMB_ADB_PATH;
   if (process.env.OMB_RESOURCES_PATH) env.OMB_RESOURCES_PATH = process.env.OMB_RESOURCES_PATH;
   if (process.env.PH_ANDROID_SERIAL) env.PH_ANDROID_SERIAL = process.env.PH_ANDROID_SERIAL;
@@ -1046,6 +1047,14 @@ bus.subscribe((event: RuntimeEvent) => {
     return message;
   };
 
+  // The per-bot activity ledger. In a group the actor is the speaking
+  // member, not the room — a room does not run tools.
+  const actorId = bot?.id ?? speaker?.botId;
+  if (actorId) {
+    const action = actionFromEvent(event, actorId);
+    if (action) appendAction(DATA_DIR, action);
+  }
+
   switch (event.type) {
     case "session.started":
       if (bot && event.sessionId && event.providerInstanceId) {
@@ -1792,7 +1801,7 @@ async function startTurn(
         availableSkills(),
       );
       if (selectedSkills.some((skill) => skill.manifest.requiredCapabilities.includes("phoneMcp"))) {
-        integrations.phone = phoneIntegration();
+        integrations.phone = phoneIntegration(bot.id);
       }
       // the user's connected apps, but only to a driver that can mount
       // them — a key in the config says the connections exist, not that
@@ -1949,6 +1958,7 @@ async function startTurn(
               kind: "box",
               boxId: b.id,
               token: cfg.box!.token!,
+              botId: bot.id,
               control: controlIntegration(bot.id),
             };
             computerKind = "box";
@@ -2431,7 +2441,7 @@ async function runGroupMemberTurn(
     availableSkills(),
   );
   if (selectedSkills.some((skill) => skill.manifest.requiredCapabilities.includes("phoneMcp"))) {
-    integrations.phone = phoneIntegration();
+    integrations.phone = phoneIntegration(bot.id);
   }
   try {
     if (bot.composio !== false && composio.configured(cfg) && instance.adapter.capabilities.composioMcp === true) {
@@ -4723,6 +4733,13 @@ const server = createServer(async (req, res) => {
       const visible = wireBot(bot);
       broadcast({ kind: "bot", bot: visible });
       return json(res, 200, { bot: visible });
+    }
+    m = path.match(/^\/api\/bots\/([\w-]+)\/audit$/);
+    if (m && method === "GET") {
+      if (!store.bot(m[1])) return json(res, 404, { error: "no such bot" });
+      const limit = pageSize(url.searchParams.get("limit"));
+      if (limit === null) return json(res, 400, { error: "limit must be a non-negative integer" });
+      return json(res, 200, { actions: readActions(DATA_DIR, m[1], limit ?? DEFAULT_PAGE) });
     }
     m = path.match(/^\/api\/bots\/([\w-]+)\/always-allow$/);
     if (m && method === "POST") {

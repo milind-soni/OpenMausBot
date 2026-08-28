@@ -6,6 +6,12 @@ import { createInterface } from "node:readline";
 import { delimiter, join } from "node:path";
 import { homedir } from "node:os";
 
+import { boundToolText } from "../tool-output.ts";
+
+// Only for spilling oversized output into this bot's workspace; absent on an
+// older harness, which just means output is truncated rather than saved.
+const BOT_ID = process.env.OMB_BOT_ID ?? "";
+
 type Json = Record<string, unknown>;
 type Device = { serial: string; state: string; model: string; connection: "usb" | "network" | "emulator" };
 type UiNode = { text: string; description: string; id: string; className: string; bounds: [number, number, number, number] };
@@ -242,7 +248,12 @@ const TOOLS = [
 ] as const;
 
 type ToolResult = { content: Array<{ type: "text"; text: string } | { type: "image"; data: string; mimeType: string }>; isError?: boolean };
-const textResult = (text: string, isError = false): ToolResult => ({ content: [{ type: "text", text }], ...(isError ? { isError: true } : {}) });
+// A dumped view hierarchy is the large one here; bound every text result at
+// the single place they are built rather than per tool.
+const textResult = (text: string, isError = false): ToolResult => ({
+  content: [{ type: "text", text: boundToolText(text, BOT_ID ? { botId: BOT_ID } : undefined) }],
+  ...(isError ? { isError: true } : {}),
+});
 
 async function callTool(name: string, args: Json): Promise<ToolResult> {
   if (name === "status") {

@@ -6,6 +6,9 @@
 //            items, requests, token usage, errors. Follows live over SSE.
 //   Raw    — the provider's own protocol messages, verbatim (the native
 //            tee). Read from disk; refreshed when a turn settles.
+//   Activity — what this BOT has done, across every thread it has worked
+//            in. The other two lenses are per-thread; a bot that works in
+//            several cannot be seen whole in either.
 //
 // Nothing here is captured for the panel's sake — both logs already exist
 // under ~/.openmausbot (server/harness/bus.ts, server/drivers/native.ts).
@@ -16,7 +19,15 @@ import { cn } from "@/lib/cn";
 import { formatTime, toRows, type InspectorEntry, type InspectorPage, type InspectorRow } from "@/lib/inspector";
 import type { RuntimeEvent } from "../../server/contracts.ts";
 
-type Lens = "events" | "raw";
+type Lens = "events" | "raw" | "activity";
+
+/** The wire shape of one row from /api/bots/:id/audit. Declared here rather
+ * than imported: server/action-audit.ts pulls in a module graph the renderer
+ * build does not compile, and this is a JSON contract either way. */
+interface ActionRow {
+  ts: string;
+  name: string;
+}
 
 export function InspectorPanel({ bot }: { bot: Bot }) {
   const { dispatch } = useStore();
@@ -25,6 +36,7 @@ export function InspectorPanel({ bot }: { bot: Bot }) {
   const [page, setPage] = useState<InspectorPage | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [expanded, setExpanded] = useState<Set<string>>(() => new Set());
+  const [actions, setActions] = useState<ActionRow[] | null>(null);
   const listRef = useRef<HTMLDivElement>(null);
   const stickToBottom = useRef(true);
   const loadAbort = useRef<AbortController | null>(null);
@@ -47,6 +59,33 @@ export function InspectorPanel({ bot }: { bot: Bot }) {
       if (loadAbort.current === controller) loadAbort.current = null;
     }
   }, [threadId]);
+
+  const loadActions = useCallback(async () => {
+    try {
+      const res = await fetch(`/api/bots/${bot.id}/audit?limit=100`);
+      if (!res.ok) throw new Error(`${res.status}`);
+      // SAFETY: the harness answers this route with { actions: ActionRow[] };
+      // a body that is not that shape yields undefined and falls back to [].
+      const body = (await res.json()) as { actions?: ActionRow[] };
+      setActions(body.actions ?? []);
+    } catch {
+      // the ledger is a convenience; a failed read shows the empty state
+      // rather than taking the whole panel down
+      setActions([]);
+    }
+  }, [bot.id]);
+
+  useEffect(() => {
+    if (lens !== "activity") return;
+    void loadActions();
+  }, [lens, loadActions]);
+
+  // a tool call the user just watched should be in the list — refresh the
+  // ledger when the bot settles, not on every event
+  useEffect(() => {
+    if (lens !== "activity" || bot.busy) return;
+    void loadActions();
+  }, [lens, bot.busy, loadActions]);
 
   // history from disk on open / thread change
   useEffect(() => {
@@ -116,6 +155,16 @@ export function InspectorPanel({ bot }: { bot: Bot }) {
 
   const shown = entries.length;
   const total = lens === "raw" ? (page?.total.native ?? 0) : (page?.total.runtime ?? 0);
+  const countLabel =
+    lens === "activity"
+      ? actions === null
+        ? "loading…"
+        : `${actions.length} action${actions.length === 1 ? "" : "s"}`
+      : page
+        ? shown < total
+          ? `last ${shown} of ${total}`
+          : `${shown} entries`
+        : "loading…";
 
   return (
     <aside className="animate-panel-in flex h-full w-[460px] shrink-0 flex-col border-l border-hairline/40 bg-panel">
@@ -135,7 +184,7 @@ export function InspectorPanel({ bot }: { bot: Bot }) {
 
       <div className="flex items-center gap-2 border-b border-hairline/40 px-4 pb-3">
         <div className="flex rounded-lg bg-inset p-0.5">
-          {(["events", "raw"] as const).map((l) => (
+          {(["events", "raw", "activity"] as const).map((l) => (
             <button
               key={l}
               onClick={() => setLens(l)}
@@ -148,24 +197,37 @@ export function InspectorPanel({ bot }: { bot: Bot }) {
             </button>
           ))}
         </div>
-        <span className="ml-auto text-[11px] text-ink-secondary">
-          {page ? (shown < total ? `last ${shown} of ${total}` : `${shown} entries`) : "loading…"}
-        </span>
-        <button onClick={() => void load()} className="rounded-md p-1 text-ink-secondary hover:bg-raised hover:text-ink" title="Reload from disk">
+        <span className="ml-auto text-[11px] text-ink-secondary">{countLabel}</span>
+        <button
+          onClick={() => void (lens === "activity" ? loadActions() : load())}
+          className="rounded-md p-1 text-ink-secondary hover:bg-raised hover:text-ink"
+          title="Reload from disk"
+        >
           <RefreshCw size={14} />
         </button>
       </div>
 
       <div ref={listRef} onScroll={onScroll} className="min-h-0 flex-1 overflow-y-auto font-mono text-[11.5px]">
-        {error && <div className="px-4 py-3 text-danger">couldn't load: {error}</div>}
-        {page && rows.length === 0 && !error && (
+        {lens === "activity" ? (
+          actions !== null && actions.length === 0 ? (
+            <div className="px-4 py-6 text-ink-secondary">No recorded activity yet.</div>
+          ) : (
+            actions?.map((action) => (
+              <div key={`${action.ts}:${action.name}`} className="flex items-start gap-2 border-b border-hairline/20 px-3 py-1.5">
+                <span className="shrink-0 tabular-nums text-ink-secondary">{formatTime(action.ts)}</span>
+                <span className="min-w-0 flex-1 truncate text-ink">{action.name}</span>
+              </div>
+            ))
+          )
+        ) : null}
+        {lens !== "activity" && error && <div className="px-4 py-3 text-danger">couldn't load: {error}</div>}
+        {lens !== "activity" && page && rows.length === 0 && !error && (
           <div className="px-4 py-6 text-ink-secondary">
             {lens === "raw" ? "No native protocol messages recorded for this thread yet." : "No runtime events for this thread yet."}
           </div>
         )}
-        {rows.map((row) => (
-          <Row key={row.key} row={row} open={expanded.has(row.key)} onToggle={() => toggle(row.key)} />
-        ))}
+        {lens !== "activity" &&
+          rows.map((row) => <Row key={row.key} row={row} open={expanded.has(row.key)} onToggle={() => toggle(row.key)} />)}
       </div>
     </aside>
   );

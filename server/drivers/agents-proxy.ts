@@ -27,6 +27,7 @@
 import readline from "node:readline";
 
 import { CREDENTIAL_TARGETS, isCredentialTargetId } from "../../shared/credential-request.ts";
+import { boundToolText } from "../tool-output.ts";
 
 const HARNESS = process.env.OMB_HARNESS_URL ?? "http://127.0.0.1:8799";
 const BOT_ID = process.env.OMB_BOT_ID ?? "";
@@ -298,8 +299,11 @@ type RoutineAction = "update" | "pause" | "resume" | "run_now" | "delete";
 const send = (msg: Json) => process.stdout.write(JSON.stringify(msg) + "\n");
 const ok = (id: unknown, result: unknown) => send({ jsonrpc: "2.0", id, result });
 const rpcErr = (id: unknown, code: number, message: string) => send({ jsonrpc: "2.0", id, error: { code, message } });
+// A peer's reply is whatever that bot decided to say — an ask_bot answer can
+// be an entire report. Bound it like any other tool result before it lands in
+// the caller's context.
 const textResult = (id: unknown, text: string, isError = false) =>
-  ok(id, { content: [{ type: "text", text }], isError });
+  ok(id, { content: [{ type: "text", text: boundToolText(text, { botId: BOT_ID, label: "ask_bot" }) }], isError });
 
 async function api(path: string, init?: RequestInit): Promise<Json> {
   const res = await fetch(HARNESS + path, {

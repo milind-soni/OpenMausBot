@@ -35,6 +35,7 @@ describe("computer proxy (fake box)", () => {
   let fileReads = 0;
   let hash = "aaaa1111";
   let browserUrl = "https://example.com/";
+  let browserTitle = " Example ";
   let cropFails = false;
 
   const rpc = (msg: unknown) => proxy.stdin!.write(JSON.stringify(msg) + "\n");
@@ -61,7 +62,7 @@ describe("computer proxy (fake box)", () => {
           const size = Buffer.from(JPEG, "base64").length;
           const stdout = command.includes("127.0.0.1:9222/json/list")
             ? JSON.stringify([
-                { id: "page-1", type: "page", title: " Example ", url: browserUrl },
+                { id: "page-1", type: "page", title: browserTitle, url: browserUrl },
               ])
             : command.includes("openmausbot-cdp.mjs snapshot")
               ? JSON.stringify({
@@ -428,6 +429,49 @@ describe("computer proxy (fake box)", () => {
     expect(result.result.content[0].text).not.toMatch(/private|value|token|secret|fragment/);
   });
 
+  it("stops and asks for takeover when navigation lands on a challenge page", async () => {
+    browserUrl = "https://challenges.cloudflare.com/turnstile";
+    rpc({
+      jsonrpc: "2.0",
+      id: 140,
+      method: "tools/call",
+      params: { name: "open_url", arguments: { url: "https://shop.example.com/", observe: false } },
+    });
+    const result = await waitFor(140);
+    expect(result.result.content[0].text).toContain("anti-bot challenge");
+    expect(result.result.content[0].text).toContain("ask the user");
+    expect(result.result.isError).toBe(true);
+    browserUrl = "https://example.com/";
+  });
+
+  it("recognises a challenge that is only identifiable by its title", async () => {
+    browserUrl = "https://shop.example.com/";
+    browserTitle = "Just a moment...";
+    rpc({
+      jsonrpc: "2.0",
+      id: 141,
+      method: "tools/call",
+      params: { name: "wait_for_navigation", arguments: { url: "https://shop.example.com/" } },
+    });
+    const result = await waitFor(141);
+    expect(result.result.content[0].text).toContain("anti-bot challenge");
+    browserTitle = " Example ";
+  });
+
+  it("leaves an ordinary navigation alone", async () => {
+    browserUrl = "https://example.com/docs";
+    rpc({
+      jsonrpc: "2.0",
+      id: 142,
+      method: "tools/call",
+      params: { name: "open_url", arguments: { url: "https://example.com/docs", observe: false } },
+    });
+    const result = await waitFor(142);
+    expect(result.result.content[0].text).not.toContain("anti-bot challenge");
+    expect(result.result.isError).toBeUndefined();
+    browserUrl = "https://example.com/";
+  });
+
   it("hashes the full frame while treating distinct crops as distinct observations", async () => {
     hash = "dddd4444";
     rpc({
@@ -663,4 +707,5 @@ describe("computer proxy control gate (fake box + fake control)", () => {
     expect(result.result.isError).toBe(true);
     expect(result.result.content[0].text).toMatch(/could not be paged/i);
   });
+
 });

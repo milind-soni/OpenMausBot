@@ -36,6 +36,8 @@ import {
   type CropRegion,
 } from "./computer-observation.ts";
 import { CONTROL_REFUSAL, createControlClient } from "./control-client.ts";
+import { blockedToolNote, classifyBlockPage, createBlockHelpGate, type BlockHit } from "./bot-block.ts";
+import { boundToolText } from "./tool-output.ts";
 import {
   ensureRemoteCuaCommand,
   REMOTE_CUA_EXECUTABLE,
@@ -47,6 +49,9 @@ import {
 
 const BOX_API = process.env.OGB_BOX_API ?? "https://ascii.dev/api/box/v1";
 const boxId = process.env.OGB_BOX_ID ?? "";
+// Only for spilling oversized output into this bot's workspace. Absent on an
+// older harness, which just means the output is truncated rather than saved.
+const botId = process.env.OMB_BOT_ID ?? "";
 const token = process.env.OGB_BOX_TOKEN ?? "";
 
 // Who-is-driving: while the person holds control in the app, every tool
@@ -200,6 +205,36 @@ async function waitForNavigation(
   }
   observations.noteVerification(false);
   return { ok: false, targets };
+}
+
+// One takeover ask per blocking host per window: a blocked agent retries,
+// and the person should not get a buzz for every retry against one wall.
+const blockHelpGate = createBlockHelpGate();
+
+/** What to tell the agent, and — at most once per host per window — a plea
+ * for the person's hands through the channel that already exists for exactly
+ * this: request_help surfaces it in the computer panel and buzzes a takeover
+ * notification. */
+function blockedNoteAskingForHelp(hit: BlockHit): string {
+  const note = blockedToolNote(hit);
+  if (blockHelpGate.shouldAsk(hit.host)) {
+    // fire and forget: a control channel that is down must not turn a
+    // recognised block into a failed tool call
+    void control.requestHelp(note).catch(() => null);
+  }
+  return note;
+}
+
+/** The first target that is a challenge page we are confident about.
+ * A `low`-confidence hit is deliberately ignored here: a reCAPTCHA frame is
+ * usually embedded in a page the agent can still work with, and turning that
+ * into a hard stop would cost more turns than it saves. */
+function blockedTarget(targets: readonly BrowserTarget[]): BlockHit | undefined {
+  for (const target of targets) {
+    const hit = classifyBlockPage({ url: target.url, title: target.title });
+    if (hit?.confidence === "high") return hit;
+  }
+  return undefined;
 }
 
 const ENV = 'export DISPLAY=${DISPLAY:-:0}';
@@ -412,8 +447,18 @@ async function frameFrom(out: RunOut): Promise<Frame | null> {
 const send = (obj: unknown): void => {
   process.stdout.write(JSON.stringify(obj) + "\n");
 };
+// A browser snapshot of a busy page or the stdout of an unbounded command
+// can run to hundreds of kilobytes. Bound it here, at the one place every
+// text result leaves this proxy, so no individual tool has to remember to.
 const text = (id: unknown, t: string, isError = false): void =>
-  send({ jsonrpc: "2.0", id, result: { content: [{ type: "text", text: t }], isError: isError || undefined } });
+  send({
+    jsonrpc: "2.0",
+    id,
+    result: {
+      content: [{ type: "text", text: boundToolText(t, botId ? { botId } : undefined) }],
+      isError: isError || undefined,
+    },
+  });
 
 /** An action result: the text plus the frame the action produced. When
  * the pixels are byte-identical to the frame the model just saw, the
@@ -443,7 +488,9 @@ function observed(
     id,
     result: {
       content: [
-        { type: "text", text: note },
+        // the caption rides the same bound as every other text result — a
+        // caller that puts command output in `note` must not slip the cap
+        { type: "text", text: boundToolText(note, botId ? { botId } : undefined) },
         { type: "image", data: frame.data, mimeType: frame.mime },
       ],
     },
@@ -883,6 +930,8 @@ async function call(id: unknown, name: string, args: any) {
       const snapshot = JSON.parse(out.stdout) as SemanticBrowserSnapshot;
       if (!Array.isArray(snapshot.elements) || typeof snapshot.url !== "string") throw new Error("invalid snapshot");
       semanticBrowserUrl = snapshot.url;
+      const snapshotBlock = classifyBlockPage({ url: snapshot.url, title: snapshot.title });
+      if (snapshotBlock?.confidence === "high") return text(id, blockedNoteAskingForHelp(snapshotBlock), true);
       semanticBrowserRefs = new Set(snapshot.elements.map((element) => element.ref));
       observations.noteStructuredObservation();
       const publicUrl = safeBrowserUrl(snapshot.url) ?? "URL unavailable";
@@ -916,6 +965,8 @@ async function call(id: unknown, name: string, args: any) {
       return text(id, "wait_for_navigation needs a valid http(s) URL", true);
     }
     const result = await waitForNavigation(url);
+    const blocked = blockedTarget(result.targets);
+    if (blocked) return text(id, blockedNoteAskingForHelp(blocked), true);
     return text(
       id,
       result.ok
@@ -1011,6 +1062,10 @@ async function call(id: unknown, name: string, args: any) {
     observations.noteAction();
     const out = await runOnBox(command, 60_000);
     const verification = await waitForNavigation(normalized, 1);
+    // a challenge page is not the destination, however the navigation
+    // "verified" — say so instead of handing back a screenshot of a wall
+    const blocked = blockedTarget(verification.targets);
+    if (blocked) return text(id, blockedNoteAskingForHelp(blocked), true);
     const current = verification.targets.map((target) => target.url).join(", ") || "unavailable";
     const note = verification.ok
       ? `opened and navigation verified: ${publicUrl}`

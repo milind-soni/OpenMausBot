@@ -172,6 +172,10 @@ export interface SendTurnInput {
       boxId: string;
       token: string;
       control?: { url: string; token: string };
+      /** Whose computer this is. The adapter is a separate process and only
+       * needs it to spill oversized tool output into that bot's workspace —
+       * a driver never has to read or set it, it passes the object along. */
+      botId?: string;
     };
     /** Direct stdio connection to a Cua Driver MCP server (host, sandbox, or
      * VPS). `scope` is set only for the user's host desktop; isolated and
