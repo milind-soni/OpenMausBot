@@ -418,13 +418,52 @@ export interface AppState {
 
 const MAX_CONSUMED_QUEUE_IDS = 64;
 
-function rememberConsumedQueueId(consumed: Record<string, true>, queueId: string): Record<string, true> {
+function rememberConsumedQueueId(
+  consumed: AppState["consumedQueueIds"],
+  queueId: string,
+): AppState["consumedQueueIds"] {
   const next = { ...consumed, [queueId]: true as const };
   const overflow = Object.keys(next).length - MAX_CONSUMED_QUEUE_IDS;
   if (overflow > 0) {
     for (const id of Object.keys(next).slice(0, overflow)) delete next[id];
   }
   return next;
+}
+
+interface QueueReceiptSnapshot {
+  messages?: Message[];
+}
+
+/** A replacement snapshot can contain the canonical user line after this
+ * window missed its queue-drain frame. Remove any matching chip and retain a
+ * short tombstone so a slower POST continuation cannot add the chip back. */
+function reconcileSnapshotQueues(
+  state: AppState,
+  conversations: QueueReceiptSnapshot[],
+): AppState {
+  const landed: Array<{ queueId: string; at: number }> = [];
+  for (const conversation of conversations) {
+    for (const message of conversation.messages ?? []) {
+      if (message.queueId) landed.push({ queueId: message.queueId, at: message.at });
+    }
+  }
+  if (landed.length === 0) return state;
+
+  const landedIds = new Set(landed.map((entry) => entry.queueId));
+  const pendingQueued: AppState["pendingQueued"] = {};
+  for (const [threadId, entries] of Object.entries(state.pendingQueued)) {
+    const waiting = entries.filter((entry) => !landedIds.has(entry.queueId));
+    if (waiting.length > 0) pendingQueued[threadId] = waiting;
+  }
+
+  let consumedQueueIds = state.consumedQueueIds;
+  // Preserve the newest receipts when a large historical snapshot contains
+  // more than the bounded tombstone window.
+  landed.sort((left, right) => left.at - right.at);
+  for (const entry of landed) {
+    consumedQueueIds = rememberConsumedQueueId(consumedQueueIds, entry.queueId);
+  }
+  return { ...state, pendingQueued, consumedQueueIds };
 }
 
 export type BotAnnouncement = Omit<Bot, "messages"> & { messages?: Message[] };
@@ -604,13 +643,16 @@ export function reducer(state: AppState, action: Action): AppState {
       const known = (id: string) => action.bots.some((b) => b.id === id) || action.groups.some((g) => g.id === id);
       const selectedId =
         state.selectedId && known(state.selectedId) ? state.selectedId : (action.bots[0]?.id ?? "");
-      return {
-        ...state,
-        bots: action.bots,
-        groups: action.groups,
-        computerControl: action.computerControl,
-        selectedId,
-      };
+      return reconcileSnapshotQueues(
+        {
+          ...state,
+          bots: action.bots,
+          groups: action.groups,
+          computerControl: action.computerControl,
+          selectedId,
+        },
+        [...action.bots, ...action.groups],
+      );
     }
     case "showRoutines":
       return {
@@ -766,10 +808,11 @@ export function reducer(state: AppState, action: Action): AppState {
       // team import), so add it now; the following message frames will fill
       // its greeting without waiting for a full-page hydration.
       if (!before) {
-        return {
+        const added = {
           ...state,
           bots: [{ ...action.bot, messages: action.bot.messages ?? [] }, ...state.bots],
         };
+        return reconcileSnapshotQueues(added, [action.bot]);
       }
       const kind =
         action.bot.unread && !before?.unread
@@ -792,7 +835,7 @@ export function reducer(state: AppState, action: Action): AppState {
         : animated;
       const switchedThread =
         typeof action.bot.threadId === "string" && action.bot.threadId !== before.threadId;
-      return updateBot(next, action.bot.id, (b) => ({
+      const patched = updateBot(next, action.bot.id, (b) => ({
         ...b,
         ...action.bot,
         // Ordinary bot patches omit messages and must preserve the current
@@ -804,6 +847,9 @@ export function reducer(state: AppState, action: Action): AppState {
             ? action.bot.messages
             : b.messages,
       }));
+      return switchedThread && Array.isArray(action.bot.messages)
+        ? reconcileSnapshotQueues(patched, [action.bot])
+        : patched;
     }
     case "messageAdded": {
       const bot = state.bots.find((b) => b.threadId === action.threadId);
@@ -1111,8 +1157,14 @@ export function reducer(state: AppState, action: Action): AppState {
             : group,
         ),
       };
-    case "taskSwitched":
-      return updateBot(state, action.bot.id, (bot) => ({ ...bot, ...action.bot, messages: action.bot.messages ?? [] }));
+    case "taskSwitched": {
+      const switched = updateBot(state, action.bot.id, (bot) => ({
+        ...bot,
+        ...action.bot,
+        messages: action.bot.messages ?? [],
+      }));
+      return reconcileSnapshotQueues(switched, [action.bot]);
+    }
     case "newBot":
     case "duplicateBot":
     case "interrupt":
@@ -1608,8 +1660,8 @@ export function StoreProvider({ children }: { children: ReactNode }) {
   // ── initial load + SSE fold ──────────────────────────────────────────
   useEffect(() => {
     let alive = true;
-    const loadAll = () =>
-      Promise.all([
+    const loadAll = async (): Promise<boolean> => {
+      const results = await Promise.allSettled([
         api("/api/bots")
           .then(({ bots, groups, computerControl }) =>
             alive && rawDispatch({
@@ -1617,21 +1669,18 @@ export function StoreProvider({ children }: { children: ReactNode }) {
               bots,
               groups: groups ?? [],
               computerControl: computerControl ?? {},
-            }))
-          .catch(() => {}),
+            })),
         api("/api/instances")
-          .then(({ instances }) => alive && rawDispatch({ type: "instances", instances }))
-          .catch(() => {}),
+          .then(({ instances }) => alive && rawDispatch({ type: "instances", instances })),
         api("/api/config")
-          .then((config) => alive && rawDispatch({ type: "configStatus", config }))
-          .catch(() => {}),
+          .then((config) => alive && rawDispatch({ type: "configStatus", config })),
         api("/api/routines")
-          .then(({ routines, runs }) => alive && rawDispatch({ type: "routinesHydrated", routines, runs }))
-          .catch(() => {}),
+          .then(({ routines, runs }) => alive && rawDispatch({ type: "routinesHydrated", routines, runs })),
         api("/api/webhooks")
-          .then(({ webhooks, attempts, ingress }) => alive && rawDispatch({ type: "webhooksHydrated", webhooks, attempts: attempts ?? [], ingress }))
-          .catch(() => {}),
+          .then(({ webhooks, attempts, ingress }) => alive && rawDispatch({ type: "webhooksHydrated", webhooks, attempts: attempts ?? [], ingress })),
       ]);
+      return alive && results.every((result) => result.status === "fulfilled");
+    };
 
     // A snapshot and the live fold have to meet at a defined boundary. Start
     // hydration only after the stream says hello, queue frames that arrive
@@ -1639,30 +1688,32 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     // a late hydrate can overwrite a newer event, or an event can land between
     // an eager request and the stream opening and disappear entirely.
     let hydrated = false;
-    let hydrating = false;
+    let hydrationPromise: Promise<boolean> | null = null;
     let rehydrateRequested = false;
     const pendingFrames: any[] = [];
     let handleFrame: (frame: any) => void;
-    const hydrate = () => {
-      if (hydrating) {
+    const hydrate = (): Promise<boolean> => {
+      if (hydrationPromise) {
         // A second non-resumable hello means this snapshot may have started
         // before another connection gap. Run one more after it settles.
         rehydrateRequested = true;
-        return;
+        return hydrationPromise;
       }
-      hydrating = true;
       hydrated = false;
-      void loadAll().finally(() => {
-        if (!alive) return;
-        hydrating = false;
-        if (rehydrateRequested) {
+      hydrationPromise = (async () => {
+        let loaded = false;
+        do {
           rehydrateRequested = false;
-          hydrate();
-          return;
-        }
+          loaded = await loadAll();
+        } while (alive && rehydrateRequested);
+        if (!alive || !loaded) return false;
         hydrated = true;
         for (const frame of pendingFrames.splice(0)) handleFrame(frame);
+        return true;
+      })().finally(() => {
+        hydrationPromise = null;
       });
+      return hydrationPromise;
     };
     // If SSE is unavailable, the app should still show its saved state. A
     // later first hello hydrates again because it cannot prove there was no
@@ -1834,20 +1885,14 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     const stopLive = openLiveEvents({
       onOpen: () => rawDispatch({ type: "connected", value: true }),
       onError: () => rawDispatch({ type: "connected", value: false }),
+      onSnapshotRequired: () => {
+        clearTimeout(hydrationFallback);
+        // Frames buffered before this non-resumable stream belong to an
+        // abandoned generation. Keep the new generation behind hydrate().
+        pendingFrames.splice(0);
+        return hydrate();
+      },
       onFrame: (frame) => {
-        // `hello` is the snapshot boundary. A false `resumed` means the server
-        // could not fill the gap, so queue subsequent frames behind a hydrate.
-        if (frame.kind === "hello") {
-          clearTimeout(hydrationFallback);
-          if (!frame.resumed) {
-            // This server could not replay the gap. Anything queued behind an
-            // older snapshot belongs to the abandoned stream generation and
-            // must not be folded over the fresh snapshot we are about to load.
-            pendingFrames.splice(0);
-            hydrate();
-          }
-          return;
-        }
         if (hydrated) handleFrame(frame);
         else pendingFrames.push(frame);
       },

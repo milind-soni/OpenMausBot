@@ -37,18 +37,22 @@ interface QueueEntry {
 
 const queues = new Map<string, QueueEntry>(); // threadId → waiting sends
 
+export interface QueuedSteer {
+  id: string;
+}
+
 /** Hold a mid-turn send off the transcript until drain. */
 export function queueSteeredMessage(
-  bot: BotRecord,
+  botId: string,
+  threadId: string,
   text: string,
-  options: { prompt?: string; replyToId?: string; threadId?: string } = {},
-): { id: string } {
-  // An adapter steer can yield while the running turn settles. Its caller
-  // pins the task before that await; do not let a later task switch silently
-  // retarget this queued message through the mutable bot record.
-  const threadId = options.threadId ?? bot.threadId;
+  options: { prompt?: string; replyToId?: string } = {},
+): QueuedSteer {
   const id = newId();
-  const entry = queues.get(threadId) ?? { botId: bot.id, items: [] };
+  const entry = queues.get(threadId) ?? { botId, items: [] };
+  // A thread cannot legitimately change owners. Refuse to merge unrelated
+  // queues even if a corrupt caller reuses a thread id.
+  if (entry.botId !== botId) throw new Error("queued task belongs to another bot");
   entry.items.push({ messageId: id, text, prompt: options.prompt ?? text, replyToId: options.replyToId });
   queues.set(threadId, entry);
   return { id };
@@ -110,17 +114,20 @@ export function drainSteeredMessages(
   }
 }
 
-/** Drop one waiting send so it never drains. Returns false when that
- * queue id was not in the in-memory queue (already drained, or a restart
- * lost the auto-run intent). */
-export function cancelSteeredMessage(threadId: string, messageId: string): boolean {
-  const entry = queues.get(threadId);
-  if (!entry) return false;
-  const items = entry.items.filter((item) => item.messageId !== messageId);
-  if (items.length === entry.items.length) return false;
-  if (items.length === 0) queues.delete(threadId);
-  else queues.set(threadId, { botId: entry.botId, items });
-  return true;
+/** Drop one waiting send owned by this bot so it never drains. The queue id
+ * is stable even if the bot switches away from the task while the request is
+ * in flight. Returns false when it was already drained, belongs to another
+ * bot, or a restart lost the in-memory auto-run intent. */
+export function cancelSteeredMessage(botId: string, messageId: string): boolean {
+  for (const [threadId, entry] of queues) {
+    if (entry.botId !== botId) continue;
+    const items = entry.items.filter((item) => item.messageId !== messageId);
+    if (items.length === entry.items.length) continue;
+    if (items.length === 0) queues.delete(threadId);
+    else queues.set(threadId, { botId: entry.botId, items });
+    return true;
+  }
+  return false;
 }
 
 /** Test helper: how many messages remain queued for a thread. */

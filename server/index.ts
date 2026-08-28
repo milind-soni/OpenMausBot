@@ -5215,22 +5215,24 @@ const server = createServer(async (req, res) => {
             return json(res, 202, { ok: true, steered: true, threadId, message });
           }
         }
-        // The turn can settle while steer() is awaited. If it did, its queue
-        // drain already ran; enqueueing now would strand this message until
-        // some unrelated future turn settles. Start the pinned task directly
-        // instead. If another turn claimed the bot meanwhile, queue behind it
-        // but keep the original task target.
+        // The turn can settle while steer() is awaited. Re-read every mutable
+        // invariant before choosing the fallback: direct turns are owned by
+        // bot.threadId, so starting or queueing the old task after a switch
+        // would create a hidden turn that the ordinary interrupt route cannot
+        // stop. A conflict leaves the text in the client's composer to resend.
         const current = store.bot(bot.id);
         if (!current) return json(res, 404, { error: "no such bot" });
         if (!store.taskByThread(bot.id, threadId)) {
           return json(res, 409, { error: "the target task no longer exists" });
         }
+        if (current.threadId !== threadId) {
+          return json(res, 409, { error: "the bot switched tasks before it could receive the message" });
+        }
         if (!current.busy) {
           const message = await startTurn(bot.id, text, { threadId, replyTo });
           return json(res, 202, { ok: true, threadId, message });
         }
-        const queued = queueSteeredMessage(current, text, {
-          threadId,
+        const queued = queueSteeredMessage(current.id, threadId, text, {
           replyToId: replyTo?.id,
           prompt: promptWithReply(text, replyTo, cfg.profile?.name?.trim() || "User"),
         });
@@ -5245,7 +5247,7 @@ const server = createServer(async (req, res) => {
       const bot = store.bot(m[1]);
       if (!bot) return json(res, 404, { error: "no such bot" });
       const queueId = m[2];
-      if (!cancelSteeredMessage(bot.threadId, queueId)) {
+      if (!cancelSteeredMessage(bot.id, queueId)) {
         return json(res, 404, { error: "no such queued message" });
       }
       return json(res, 200, { ok: true });

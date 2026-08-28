@@ -31,7 +31,7 @@ export function InspectorPanel({ bot }: { bot: Bot }) {
   const loadAbort = useRef<AbortController | null>(null);
   const managedRefresh = useRef<() => void>(() => {});
 
-  const load = useCallback(async () => {
+  const load = useCallback(async (): Promise<boolean> => {
     loadAbort.current?.abort();
     const controller = new AbortController();
     loadAbort.current = controller;
@@ -41,12 +41,14 @@ export function InspectorPanel({ bot }: { bot: Bot }) {
       // SAFETY: this same-version renderer calls the harness's typed
       // inspector endpoint; malformed transport data is handled by catch.
       const next = (await res.json()) as InspectorPage;
-      if (controller.signal.aborted) return;
+      if (controller.signal.aborted) return false;
       setPage(next);
       setError(null);
+      return true;
     } catch (e) {
-      if (controller.signal.aborted) return;
+      if (controller.signal.aborted) return false;
       setError(e instanceof Error ? e.message : String(e));
+      return false;
     } finally {
       if (loadAbort.current === controller) loadAbort.current = null;
     }
@@ -89,30 +91,44 @@ export function InspectorPanel({ bot }: { bot: Bot }) {
       });
     };
 
-    const refresh = () => {
+    const flushPendingRuntime = () => {
+      for (const runtime of pendingRuntime.splice(0)) appendRuntime(runtime);
+    };
+
+    const refresh = async (flushLiveOnFailure: boolean): Promise<boolean> => {
       const generation = ++refreshGeneration;
       refreshing = true;
-      void load().finally(() => {
-        // A later refresh aborts the earlier fetch. Only its completion owns
-        // the buffered live tail, otherwise the earlier finally can flush
-        // frames immediately before the newer snapshot overwrites them.
-        if (!alive || generation !== refreshGeneration) return;
-        refreshing = false;
-        for (const runtime of pendingRuntime.splice(0)) appendRuntime(runtime);
-      });
+      const loaded = await load();
+      // A later refresh aborts the earlier fetch. Only its completion owns
+      // the buffered live tail, otherwise the earlier finally can flush
+      // frames immediately before the newer snapshot overwrites them.
+      if (!alive || generation !== refreshGeneration) return false;
+      refreshing = false;
+      // An ordinary Reload keeps the previous page when its fetch fails, so
+      // live frames buffered during that request still belong on that page.
+      // A replacement snapshot must not expose them: its caller will close
+      // and replay the stream from the last acknowledged cursor instead.
+      if (!loaded) {
+        if (flushLiveOnFailure) flushPendingRuntime();
+        return false;
+      }
+      flushPendingRuntime();
+      return true;
     };
-    managedRefresh.current = refresh;
+    const requestRefresh = () => void refresh(true);
+    const refreshFromSnapshot = (): Promise<boolean> => {
+      // A refused resume starts a new stream generation. Frames retained by
+      // an earlier failed refresh will be present in the new disk snapshot or
+      // replayed again, so do not carry them across the generation boundary.
+      pendingRuntime.splice(0);
+      return refresh(false);
+    };
+    managedRefresh.current = requestRefresh;
 
     const stopLive = openLiveEvents({
       screens: false,
+      onSnapshotRequired: refreshFromSnapshot,
       onFrame: (frame) => {
-        if (frame.kind === "hello") {
-          // A refused resume means runtime entries may have fallen outside
-          // the replay window. Buffer its new live tail while the persisted
-          // snapshot closes that gap, then dedupe by canonical event id.
-          if (frame.resumed === false) refresh();
-          return;
-        }
         if (frame.kind !== "runtime") return;
         const event = frame.event;
         if (!event || Array.isArray(event) || Object(event) !== event) return;
@@ -124,13 +140,13 @@ export function InspectorPanel({ bot }: { bot: Bot }) {
         else appendRuntime(runtime);
         if (runtime.type === "turn.completed" || runtime.type === "runtime.error") {
           if (settle) clearTimeout(settle);
-          settle = setTimeout(refresh, 400);
+          settle = setTimeout(requestRefresh, 400);
         }
       },
     });
     return () => {
       alive = false;
-      if (managedRefresh.current === refresh) managedRefresh.current = () => {};
+      if (managedRefresh.current === requestRefresh) managedRefresh.current = () => {};
       stopLive();
       if (settle) clearTimeout(settle);
     };

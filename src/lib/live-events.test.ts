@@ -108,7 +108,10 @@ describe("live events supervisor", () => {
   it("uses data pings as liveness without forwarding them", () => {
     const test = harness();
     const onFrame = vi.fn();
-    const stop = openLiveEvents({ onFrame, staleMs: 1_000 }, test.platform);
+    const stop = openLiveEvents(
+      { onFrame, onSnapshotRequired: async () => true, staleMs: 1_000 },
+      test.platform,
+    );
 
     expect(test.sources).toHaveLength(1);
     test.sources[0].open();
@@ -132,7 +135,7 @@ describe("live events supervisor", () => {
     const test = harness();
     const onFrame = vi.fn();
     const stop = openLiveEvents(
-      { onFrame, retryMinMs: 100, retryMaxMs: 100 },
+      { onFrame, onSnapshotRequired: async () => true, retryMinMs: 100, retryMaxMs: 100 },
       test.platform,
     );
     const staleHandler = test.sources[0].onmessage;
@@ -147,11 +150,18 @@ describe("live events supervisor", () => {
     stop();
   });
 
-  it("keeps the old cursor through a successful hello, then resets it after a refused resume", () => {
+  it("commits a refused-resume boundary only after its replacement snapshot succeeds", async () => {
     const test = harness();
     const frames: unknown[] = [];
+    const snapshotResolutions: Array<(loaded: boolean) => void> = [];
     const stop = openLiveEvents(
-      { onFrame: (frame) => frames.push(frame), retryMinMs: 100, retryMaxMs: 100 },
+      {
+        onFrame: (frame) => frames.push(frame),
+        onSnapshotRequired: () =>
+          new Promise<boolean>((resolve) => snapshotResolutions.push(resolve)),
+        retryMinMs: 100,
+        retryMaxMs: 100,
+      },
       test.platform,
     );
 
@@ -167,16 +177,27 @@ describe("live events supervisor", () => {
     vi.advanceTimersByTime(100);
     expect(test.sources[2].url).toBe("/api/events?since=oldrun00%3A10");
 
-    // A restart/expired replay window has no frames to replay. The consumer
-    // hydrates on this hello, and subsequent connections start at its boundary.
+    // A restart/expired replay window has no frames to replay. Application
+    // frames may arrive while the consumer rebuilds, but neither their id nor
+    // the hello boundary is safe until that replacement snapshot succeeds.
     test.sources[2].message({ kind: "hello", resumed: false, cursor: "newrun00:7" });
-    test.sources[2].error();
+    test.sources[2].message({ kind: "message", value: "behind failed snapshot" }, "newrun00:8");
+    snapshotResolutions.shift()?.(false);
+    await Promise.resolve();
     vi.advanceTimersByTime(100);
-    expect(test.sources[3].url).toBe("/api/events?since=newrun00%3A7");
+    expect(test.sources[3].url).toBe("/api/events?since=oldrun00%3A10");
+
+    test.sources[3].message({ kind: "hello", resumed: false, cursor: "newrun00:8" });
+    test.sources[3].message({ kind: "message", value: "after snapshot" }, "newrun00:9");
+    snapshotResolutions.shift()?.(true);
+    await Promise.resolve();
+    test.sources[3].error();
+    vi.advanceTimersByTime(100);
+    expect(test.sources[4].url).toBe("/api/events?since=newrun00%3A9");
     expect(frames).toEqual([
       { kind: "message" },
-      { kind: "hello", resumed: true, cursor: "oldrun00:13" },
-      { kind: "hello", resumed: false, cursor: "newrun00:7" },
+      { kind: "message", value: "behind failed snapshot" },
+      { kind: "message", value: "after snapshot" },
     ]);
     stop();
   });
@@ -196,7 +217,14 @@ describe("live events supervisor", () => {
 
     vi.setSystemTime(0);
     const stop = openLiveEvents(
-      { onFrame: vi.fn(), onError, retryMinMs: 100, retryMaxMs: 400, staleMs: 10_000 },
+      {
+        onFrame: vi.fn(),
+        onSnapshotRequired: async () => true,
+        onError,
+        retryMinMs: 100,
+        retryMaxMs: 400,
+        staleMs: 10_000,
+      },
       platform,
     );
     vi.advanceTimersByTime(1_100);
@@ -209,7 +237,13 @@ describe("live events supervisor", () => {
   it("backs off an open/error flap until the stream survives a heartbeat", () => {
     const test = harness();
     const stop = openLiveEvents(
-      { onFrame: vi.fn(), retryMinMs: 100, retryMaxMs: 400, staleMs: 10_000 },
+      {
+        onFrame: vi.fn(),
+        onSnapshotRequired: async () => true,
+        retryMinMs: 100,
+        retryMaxMs: 400,
+        staleMs: 10_000,
+      },
       test.platform,
     );
 
@@ -236,7 +270,13 @@ describe("live events supervisor", () => {
   it("does not churn a suspended hidden stream and recovers once visible", () => {
     const test = harness({ visible: false });
     const stop = openLiveEvents(
-      { onFrame: vi.fn(), staleMs: 1_000, retryMinMs: 100, retryMaxMs: 100 },
+      {
+        onFrame: vi.fn(),
+        onSnapshotRequired: async () => true,
+        staleMs: 1_000,
+        retryMinMs: 100,
+        retryMaxMs: 100,
+      },
       test.platform,
     );
 
@@ -259,7 +299,10 @@ describe("live events supervisor", () => {
 
   it("recovers immediately on online/focus/visible and removes every owner on cleanup", () => {
     const test = harness({ online: false });
-    const stop = openLiveEvents({ onFrame: vi.fn(), staleMs: 1_000 }, test.platform);
+    const stop = openLiveEvents(
+      { onFrame: vi.fn(), onSnapshotRequired: async () => true, staleMs: 1_000 },
+      test.platform,
+    );
     expect(test.sources).toHaveLength(0);
 
     test.setOnline(true);

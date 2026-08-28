@@ -46,6 +46,11 @@ export interface LiveEventsPlatform {
 
 export interface LiveEventsHandlers {
   onFrame: (frame: LiveFrame) => void;
+  /** Rebuild the consumer's complete snapshot after the server says its
+   * replay gap cannot be filled. The transport commits the new cursor only
+   * after this succeeds; false/rejection closes the stream and retries from
+   * the last known-good boundary. */
+  onSnapshotRequired: () => Promise<boolean>;
   onOpen?: () => void;
   onError?: () => void;
   screens?: boolean;
@@ -176,6 +181,13 @@ export function openLiveEvents(
   let retryAttempt = 0;
   let cursor: string | null = null;
   let lastHeardAt = platform.now();
+  let snapshotGeneration = 0;
+  let pendingSnapshot: {
+    generation: number;
+    source: LiveEventSourceLike;
+    boundaryCursor: string | null;
+    newestFrameCursor: string | null;
+  } | null = null;
 
   const clearRetry = () => {
     if (retryTimer === null) return;
@@ -187,6 +199,10 @@ export function openLiveEvents(
     const current = source;
     source = null;
     if (!current) return;
+    if (pendingSnapshot?.source === current) {
+      snapshotGeneration += 1;
+      pendingSnapshot = null;
+    }
     current.onopen = null;
     current.onerror = null;
     current.onmessage = null;
@@ -253,16 +269,55 @@ export function openLiveEvents(
       if (frame.kind === "hello") {
         // `resumed:true` is followed by replay frames. Advancing to hello's
         // newest cursor here would skip any replay frame not yet delivered if
-        // this socket died mid-replay. A failed resume has no replay, so its
-        // cursor is the new snapshot boundary and must replace the stale one.
+        // this socket died mid-replay. A failed resume has no replay, but its
+        // cursor is safe only after the consumer's replacement snapshot loads.
         if (frame.resumed === false) {
-          cursor = frame.cursor || null;
+          const generation = ++snapshotGeneration;
+          pendingSnapshot = {
+            generation,
+            source: current,
+            boundaryCursor: frame.cursor || null,
+            newestFrameCursor: null,
+          };
+          void (async () => {
+            let loaded = false;
+            try {
+              loaded = await handlers.onSnapshotRequired();
+            } catch {
+              loaded = false;
+            }
+            const pending = pendingSnapshot;
+            if (
+              stopped ||
+              source !== current ||
+              !pending ||
+              pending.generation !== generation
+            ) {
+              return;
+            }
+            if (!loaded) {
+              pendingSnapshot = null;
+              connectionLost(current);
+              return;
+            }
+            // The consumer resolved only after applying every frame it held
+            // behind the snapshot. Commit the newest delivered cursor, or the
+            // hello boundary when no application frame arrived meanwhile.
+            cursor = pending.newestFrameCursor ?? pending.boundaryCursor;
+            pendingSnapshot = null;
+          })();
         }
       } else if (event.lastEventId) {
-        cursor = event.lastEventId;
+        if (pendingSnapshot?.source === current) {
+          pendingSnapshot.newestFrameCursor = event.lastEventId;
+        } else {
+          cursor = event.lastEventId;
+        }
       }
 
-      handlers.onFrame(frame);
+      // Hello is transport control, not application state. Consumers rebuild
+      // through onSnapshotRequired and receive only numbered application data.
+      if (frame.kind !== "hello") handlers.onFrame(frame);
     };
   };
 

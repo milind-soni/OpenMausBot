@@ -485,6 +485,41 @@ describe("pending queued chip", () => {
     expect(late.consumedQueueIds).toEqual({});
   });
 
+  it("reconciles a missed drain from hydration and rejects its late POST continuation", () => {
+    const withBot = reducer(initialState, { type: "botPatched", bot });
+    const queued = reducer(withBot, {
+      type: "pendingQueued",
+      threadId: "t1",
+      queueId: "q-snapshot",
+      text: "already ran",
+    });
+    const canonical = {
+      id: "m-snapshot",
+      at: 100,
+      role: "user",
+      kind: "text",
+      text: "already ran",
+      queueId: "q-snapshot",
+    } satisfies Message;
+    const hydrated = reducer(queued, {
+      type: "hydrate",
+      bots: [{ ...bot, messages: [canonical] }],
+      groups: [],
+      computerControl: {},
+    });
+
+    expect(hydrated.pendingQueued).toEqual({});
+    expect(hydrated.consumedQueueIds["q-snapshot"]).toBe(true);
+    const late = reducer(hydrated, {
+      type: "pendingQueued",
+      threadId: "t1",
+      queueId: "q-snapshot",
+      text: "already ran",
+    });
+    expect(late.pendingQueued).toEqual({});
+    expect(late.consumedQueueIds["q-snapshot"]).toBeUndefined();
+  });
+
   it("bounds unmatched queue tombstones from other clients", () => {
     const withBot = reducer(initialState, { type: "botPatched", bot });
     let state = withBot;
