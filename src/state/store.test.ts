@@ -270,6 +270,51 @@ describe("cross-client bot creation", () => {
   });
 });
 
+describe("canonical message races", () => {
+  it("does not rewind the active branch when POST repeats a user message after the reply", () => {
+    const sent = {
+      id: "sent",
+      role: "user",
+      kind: "text",
+      text: "Ship it",
+      at: 1,
+      parentId: null,
+    } satisfies Message;
+    const reply = {
+      id: "reply",
+      role: "bot",
+      kind: "text",
+      text: "Done",
+      at: 2,
+      parentId: sent.id,
+    } satisfies Message;
+    const bot = {
+      id: "race-bot",
+      threadId: "race-thread",
+      name: "Race",
+      title: "",
+      description: "",
+      notifications: true,
+      color: "green",
+      unread: false,
+      modelSelection: { instanceId: "codex", model: "default" },
+      messages: [sent, reply],
+      activeLeafId: reply.id,
+    } satisfies Bot;
+    const state = { ...initialState, bots: [bot] };
+
+    const next = reducer(state, {
+      type: "messageAdded",
+      threadId: bot.threadId,
+      message: sent,
+    });
+
+    expect(next).toBe(state);
+    expect(next.bots[0]?.activeLeafId).toBe(reply.id);
+    expect(next.bots[0]?.messages).toEqual([sent, reply]);
+  });
+});
+
 describe("section Chiefs", () => {
   const bot = (id: string, section: string, chiefOfStaff = false) => ({
     id,

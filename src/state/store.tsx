@@ -24,6 +24,7 @@ import { showNotification, type NotificationTarget } from "@/lib/notify";
 import { speaker } from "@/lib/tts";
 import { createBotPatchQueue, type BotUpdatePatch } from "./bot-patch-queue";
 import { skillRecorderEnabled } from "@/lib/feature-flags";
+import { openLiveEvents } from "@/lib/live-events";
 
 export type { MausColor } from "@/lib/mascot";
 
@@ -818,11 +819,12 @@ export function reducer(state: AppState, action: Action): AppState {
           ),
         };
       }
+      // The POST response and the canonical SSE frame may arrive in either
+      // order. A repeated message is already folded; moving the active leaf
+      // back to it can hide a newer assistant reply that won the race.
+      if (bot.messages.some((message) => message.id === action.message.id)) return state;
       // every server-side append chains onto (and becomes) the active leaf
       const next = updateBot(state, bot.id, (b) => {
-        if (b.messages.some((m) => m.id === action.message.id)) {
-          return { ...b, activeLeafId: action.message.id };
-        }
         let messages = [...b.messages, action.message];
         // base64 screen frames are big; a long computer-use session would
         // grow memory without bound. Keep the newest few frames' pixels and
@@ -1335,11 +1337,15 @@ export function StoreProvider({ children }: { children: ReactNode }) {
           // persist through the existing card route so an older server that
           // does not auto-dismiss still hides the quiz on this client
           if (quizBeforeSend) persistCard(action.botId, quizBeforeSend.id, { dismissed: true });
+          const threadId = stateRef.current.bots.find((bot) => bot.id === action.botId)?.threadId;
           void api(`/api/bots/${action.botId}/messages`, {
             method: "POST",
-            body: JSON.stringify({ text: action.text, replyToId: action.replyToId }),
+            body: JSON.stringify({ text: action.text, replyToId: action.replyToId, threadId }),
           })
             .then((body) => {
+              if (body?.message && typeof body.threadId === "string") {
+                rawDispatch({ type: "messageAdded", threadId: body.threadId, message: body.message });
+              }
               if (
                 body?.queued &&
                 typeof body.threadId === "string" &&
@@ -1499,12 +1505,20 @@ export function StoreProvider({ children }: { children: ReactNode }) {
             })
             .catch(showError);
           break;
-        case "sendGroup":
+        case "sendGroup": {
+          const threadId = stateRef.current.groups.find((group) => group.id === action.groupId)?.threadId;
           api(`/api/groups/${action.groupId}/messages`, {
             method: "POST",
-            body: JSON.stringify({ text: action.text, replyToId: action.replyToId }),
-          }).catch(showError);
+            body: JSON.stringify({ text: action.text, replyToId: action.replyToId, threadId }),
+          })
+            .then((body) => {
+              if (body?.message && typeof body.threadId === "string") {
+                rawDispatch({ type: "messageAdded", threadId: body.threadId, message: body.message });
+              }
+            })
+            .catch(showError);
           break;
+        }
         case "patchGroup":
           api(`/api/groups/${action.groupId}`, {
             method: "PATCH",
@@ -1655,12 +1669,9 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     // gap before that connection opened.
     const hydrationFallback = setTimeout(hydrate, 1_000);
 
-    const es = new EventSource("/api/events");
     // The hydrate decision belongs to the hello frame, not to onopen: the
     // server replays what we missed when it can, and re-downloading every
     // transcript on a reconnect it already covered is pure waste.
-    es.onopen = () => rawDispatch({ type: "connected", value: true });
-    es.onerror = () => rawDispatch({ type: "connected", value: false });
     handleFrame = (frame) => {
       switch (frame.kind) {
         case "message": {
@@ -1820,27 +1831,31 @@ export function StoreProvider({ children }: { children: ReactNode }) {
           break;
       }
     };
-    es.onmessage = (raw) => {
-      let frame: any;
-      try {
-        frame = JSON.parse(raw.data);
-      } catch {
-        return;
-      }
-      // `hello` is the snapshot boundary. A false `resumed` means the server
-      // could not fill the gap, so queue subsequent frames behind a hydrate.
-      if (frame.kind === "hello") {
-        clearTimeout(hydrationFallback);
-        if (!frame.resumed) hydrate();
-        return;
-      }
-      if (hydrated) handleFrame(frame);
-      else pendingFrames.push(frame);
-    };
+    const stopLive = openLiveEvents({
+      onOpen: () => rawDispatch({ type: "connected", value: true }),
+      onError: () => rawDispatch({ type: "connected", value: false }),
+      onFrame: (frame) => {
+        // `hello` is the snapshot boundary. A false `resumed` means the server
+        // could not fill the gap, so queue subsequent frames behind a hydrate.
+        if (frame.kind === "hello") {
+          clearTimeout(hydrationFallback);
+          if (!frame.resumed) {
+            // This server could not replay the gap. Anything queued behind an
+            // older snapshot belongs to the abandoned stream generation and
+            // must not be folded over the fresh snapshot we are about to load.
+            pendingFrames.splice(0);
+            hydrate();
+          }
+          return;
+        }
+        if (hydrated) handleFrame(frame);
+        else pendingFrames.push(frame);
+      },
+    });
     return () => {
       alive = false;
       clearTimeout(hydrationFallback);
-      es.close();
+      stopLive();
     };
   }, []);
 
