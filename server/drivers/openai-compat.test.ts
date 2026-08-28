@@ -295,6 +295,117 @@ describe("OpenAICompatDriver", () => {
     await inst.dispose();
   });
 
+  it("omits provider routing on non-OpenRouter endpoints even when configured", async () => {
+    let sentBody: any = null;
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
+        const url = String(input);
+        if (url.endsWith("/models")) return new Response(JSON.stringify({ data: [] }), { status: 200 });
+        sentBody = JSON.parse(String(init?.body));
+        return new Response(
+          'data: {"choices":[{"delta":{"content":"hi"}}]}\n' + "data: [DONE]\n",
+          { status: 200, headers: { "content-type": "text/event-stream" } },
+        );
+      }),
+    );
+    const inst = await OpenAICompatDriver.create({
+      instanceId: "test-groq-no-provider",
+      displayName: "Groq strict",
+      enabled: true,
+      config: {
+        url: "https://api.groq.com/openai/v1",
+        apiKeyEnv: "TEST_KEY",
+        provider: "fireworks",
+      },
+      environment: { TEST_KEY: "secret" },
+    });
+    const recorder = recordEvents(inst.adapter);
+
+    await inst.adapter.sendTurn({ threadId: "thread-g", text: "prompt", model: "vendor/model" });
+    await recorder.until((e) => e.type === "turn.completed");
+
+    // Strict OpenAI-compatible endpoints (Groq et al.) reject unknown
+    // top-level fields — `provider` is OpenRouter-only routing.
+    expect(sentBody).not.toBeNull();
+    expect("provider" in sentBody).toBe(false);
+    recorder.stop();
+    await inst.dispose();
+  });
+
+  it("does not treat a lookalike host as OpenRouter", async () => {
+    let sentBody: any = null;
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
+        const url = String(input);
+        if (url.endsWith("/models")) return new Response(JSON.stringify({ data: [] }), { status: 200 });
+        sentBody = JSON.parse(String(init?.body));
+        return new Response(
+          'data: {"choices":[{"delta":{"content":"hi"}}]}\n' + "data: [DONE]\n",
+          { status: 200, headers: { "content-type": "text/event-stream" } },
+        );
+      }),
+    );
+    const inst = await OpenAICompatDriver.create({
+      instanceId: "test-lookalike",
+      displayName: "Lookalike host",
+      enabled: true,
+      config: {
+        // hostname is NOT openrouter.ai — substring matching on the whole
+        // URL would be fooled by a lookalike domain or a path segment
+        url: "https://notopenrouter.ai/api/v1",
+        apiKeyEnv: "TEST_KEY",
+        provider: "fireworks",
+      },
+      environment: { TEST_KEY: "secret" },
+    });
+    const recorder = recordEvents(inst.adapter);
+
+    await inst.adapter.sendTurn({ threadId: "thread-l", text: "prompt", model: "vendor/model" });
+    await recorder.until((e) => e.type === "turn.completed");
+
+    expect(sentBody).not.toBeNull();
+    expect("provider" in sentBody).toBe(false);
+    recorder.stop();
+    await inst.dispose();
+  });
+
+  it("pins the provider on an OpenRouter subdomain", async () => {
+    let sentBody: any = null;
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
+        const url = String(input);
+        if (url.endsWith("/models")) return new Response(JSON.stringify({ data: [] }), { status: 200 });
+        sentBody = JSON.parse(String(init?.body));
+        return new Response(
+          'data: {"choices":[{"delta":{"content":"hi"}}]}\n' + "data: [DONE]\n",
+          { status: 200, headers: { "content-type": "text/event-stream" } },
+        );
+      }),
+    );
+    const inst = await OpenAICompatDriver.create({
+      instanceId: "test-subdomain",
+      displayName: "OpenRouter subdomain",
+      enabled: true,
+      config: {
+        url: "https://gateway.openrouter.ai/api/v1",
+        apiKeyEnv: "TEST_KEY",
+        provider: "fireworks",
+      },
+      environment: { TEST_KEY: "secret" },
+    });
+    const recorder = recordEvents(inst.adapter);
+
+    await inst.adapter.sendTurn({ threadId: "thread-s", text: "prompt", model: "vendor/model" });
+    await recorder.until((e) => e.type === "turn.completed");
+
+    expect(sentBody?.provider).toEqual({ order: ["fireworks"], allow_fallbacks: false });
+    recorder.stop();
+    await inst.dispose();
+  });
+
   it("omits provider routing when none is configured", async () => {
     let sentBody: any = null;
     vi.stubGlobal(

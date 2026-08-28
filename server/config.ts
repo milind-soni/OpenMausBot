@@ -239,9 +239,17 @@ export function syncCredentialEnv(patch: Partial<AppConfig>): void {
     if (value) process.env[name] = value;
     else delete process.env[name];
   }
-  if (patch.openaiCompat?.url !== undefined) {
-    if (patch.openaiCompat.url) process.env["OPENAI_COMPAT_URL"] = patch.openaiCompat.url;
-    else delete process.env["OPENAI_COMPAT_URL"];
+  // loadConfig() also prefers env for url/model/provider, so a saved value
+  // must follow the same set-when-truthy / delete-when-cleared rule as keys.
+  const settings: Array<[value: string | undefined, name: string]> = [
+    [patch.openaiCompat?.url, "OPENAI_COMPAT_URL"],
+    [patch.openaiCompat?.model, "OPENAI_COMPAT_MODEL"],
+    [patch.openaiCompat?.provider, "OPENAI_COMPAT_PROVIDER"],
+  ];
+  for (const [value, name] of settings) {
+    if (value === undefined) continue;
+    if (value) process.env[name] = value;
+    else delete process.env[name];
   }
 }
 

@@ -42,9 +42,22 @@ export interface OpenAICompatConfig {
   /** Default model when a turn doesn't specify one (seeds the picker). */
   model?: string;
   /** OpenRouter upstream provider slug to pin (e.g. "fireworks"). Sent as
-   * `provider: { order: [provider], allow_fallbacks: false }`; endpoints that
-   * don't speak OpenRouter routing ignore the extra field. */
+   * `provider: { order: [provider], allow_fallbacks: false }` — but only to
+   * OpenRouter endpoints: strict OpenAI-compatible servers (Groq et al.)
+   * reject unknown top-level fields. */
   provider?: string;
+}
+
+/** True when the configured base URL points at OpenRouter (openrouter.ai or
+ * a subdomain). Parses the hostname rather than substring-matching the whole
+ * URL, so lookalike domains and path segments don't count. */
+function isOpenRouterUrl(url: string): boolean {
+  try {
+    const host = new URL(url).hostname.toLowerCase();
+    return host === "openrouter.ai" || host.endsWith(".openrouter.ai");
+  } catch {
+    return false;
+  }
 }
 
 function decodeConfig(raw: unknown): OpenAICompatConfig {
@@ -147,8 +160,11 @@ export const OpenAICompatDriver: ProviderDriver<OpenAICompatConfig> = {
           model,
           messages,
           stream: opts.stream,
-          // OpenRouter routing: pin the upstream provider when configured.
-          ...(config.provider ? { provider: { order: [config.provider], allow_fallbacks: false } } : {}),
+          // OpenRouter routing: pin the upstream provider when configured —
+          // only on OpenRouter itself; strict endpoints reject the field.
+          ...(config.provider && isOpenRouterUrl(config.url)
+            ? { provider: { order: [config.provider], allow_fallbacks: false } }
+            : {}),
         }),
         signal: opts.signal ?? AbortSignal.timeout(120_000),
       });
