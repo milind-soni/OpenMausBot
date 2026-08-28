@@ -65,14 +65,50 @@ export function InspectorPanel({ bot }: { bot: Bot }) {
   // up. Own EventSource on purpose: the store folds runtime events into
   // chat state and does not re-emit them.
   useEffect(() => {
+    let alive = true;
     let settle: ReturnType<typeof setTimeout> | null = null;
+    let refreshGeneration = 0;
+    let refreshing = false;
+    const pendingRuntime: RuntimeEvent[] = [];
+
+    const appendRuntime = (runtime: RuntimeEvent) => {
+      setPage((prev) => {
+        // A disk refresh and replay can overlap. eventId is canonical, so a
+        // replayed entry already present in the snapshot is an exact no-op.
+        if (
+          prev?.entries.some(
+            (entry) => entry.kind === "runtime" && entry.data.eventId === runtime.eventId,
+          )
+        ) {
+          return prev;
+        }
+        const entry: InspectorEntry = { kind: "runtime", at: runtime.createdAt, data: runtime };
+        if (!prev) return { entries: [entry], total: { runtime: 1, native: 0 } };
+        return { entries: [...prev.entries, entry], total: { ...prev.total, runtime: prev.total.runtime + 1 } };
+      });
+    };
+
+    const refresh = () => {
+      const generation = ++refreshGeneration;
+      refreshing = true;
+      void load().finally(() => {
+        // A later refresh aborts the earlier fetch. Only its completion owns
+        // the buffered live tail, otherwise the earlier finally can flush
+        // frames immediately before the newer snapshot overwrites them.
+        if (!alive || generation !== refreshGeneration) return;
+        refreshing = false;
+        for (const runtime of pendingRuntime.splice(0)) appendRuntime(runtime);
+      });
+    };
+
     const stopLive = openLiveEvents({
       screens: false,
       onFrame: (frame) => {
         if (frame.kind === "hello") {
           // A refused resume means runtime entries may have fallen outside
-          // the replay window; re-read the persisted log to close that gap.
-          if (frame.resumed === false) void load();
+          // the replay window. Buffer its new live tail while the persisted
+          // snapshot closes that gap, then dedupe by canonical event id.
+          if (frame.resumed === false) refresh();
           return;
         }
         if (frame.kind !== "runtime") return;
@@ -82,18 +118,16 @@ export function InspectorPanel({ bot }: { bot: Bot }) {
         // bus; this guard rejects non-object transport corruption.
         const runtime = event as RuntimeEvent;
         if (runtime.threadId !== threadId) return;
-        setPage((prev) => {
-          const entry: InspectorEntry = { kind: "runtime", at: runtime.createdAt, data: runtime };
-          if (!prev) return { entries: [entry], total: { runtime: 1, native: 0 } };
-          return { entries: [...prev.entries, entry], total: { ...prev.total, runtime: prev.total.runtime + 1 } };
-        });
+        if (refreshing) pendingRuntime.push(runtime);
+        else appendRuntime(runtime);
         if (runtime.type === "turn.completed" || runtime.type === "runtime.error") {
           if (settle) clearTimeout(settle);
-          settle = setTimeout(() => void load(), 400);
+          settle = setTimeout(refresh, 400);
         }
       },
     });
     return () => {
+      alive = false;
       stopLive();
       if (settle) clearTimeout(settle);
     };

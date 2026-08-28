@@ -5183,13 +5183,17 @@ const server = createServer(async (req, res) => {
       if (!text) return json(res, 400, { error: "text required" });
       const bot = store.bot(m[1]);
       if (!bot) return json(res, 404, { error: "no such bot" });
+      // Pin the target once. startTurn returns immediately after persisting,
+      // but an awaited steering adapter can yield before the response; never
+      // report or append against a task selected by a later request.
+      const threadId = bot.threadId;
       if (body.threadId !== undefined && (typeof body.threadId !== "string" || !/^[\w-]+$/.test(body.threadId))) {
         return json(res, 400, { error: "threadId must be a task id" });
       }
-      if (body.threadId !== undefined && body.threadId !== bot.threadId) {
+      if (body.threadId !== undefined && body.threadId !== threadId) {
         return json(res, 409, { error: "the bot switched tasks before it could receive the message" });
       }
-      const replyTo = resolveReplyTarget(bot.threadId, body.replyToId);
+      const replyTo = resolveReplyTarget(threadId, body.replyToId);
       // Claude can accept the message inside its live turn. If the write
       // loses a race with turn settlement, or the engine cannot steer, the
       // existing server-side queue records it atomically for the next turn.
@@ -5197,28 +5201,28 @@ const server = createServer(async (req, res) => {
         const instance = registry.get(bot.modelSelection.instanceId);
         if (instance?.adapter.capabilities.queueing && instance.adapter.steer) {
           const steered = await instance.adapter
-            .steer(bot.threadId, promptWithReply(text, replyTo, cfg.profile?.name?.trim() || "User"))
+            .steer(threadId, promptWithReply(text, replyTo, cfg.profile?.name?.trim() || "User"))
             .catch(() => false);
           if (steered) {
             clearUnattended(bot.id);
-            const message = store.appendMessage(bot.threadId, {
+            const message = store.appendMessage(threadId, {
               role: "user",
               kind: "text",
               text,
               replyToId: replyTo?.id,
               steered: true,
             });
-            return json(res, 202, { ok: true, steered: true, threadId: bot.threadId, message });
+            return json(res, 202, { ok: true, steered: true, threadId, message });
           }
         }
         const queued = queueSteeredMessage(bot, text, {
           replyToId: replyTo?.id,
           prompt: promptWithReply(text, replyTo, cfg.profile?.name?.trim() || "User"),
         });
-        return json(res, 202, { ok: true, queued: true, queueId: queued.id, threadId: bot.threadId });
+        return json(res, 202, { ok: true, queued: true, queueId: queued.id, threadId });
       }
-      const message = await startTurn(bot.id, text, { replyTo });
-      return json(res, 202, { ok: true, threadId: bot.threadId, message });
+      const message = await startTurn(bot.id, text, { threadId, replyTo });
+      return json(res, 202, { ok: true, threadId, message });
     }
 
     m = path.match(/^\/api\/bots\/([\w-]+)\/queue\/([\w-]+)$/);
