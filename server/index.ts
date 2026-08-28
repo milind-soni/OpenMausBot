@@ -5199,27 +5199,18 @@ const server = createServer(async (req, res) => {
       // existing server-side queue records it atomically for the next turn.
       if (bot.busy) {
         const instance = registry.get(bot.modelSelection.instanceId);
+        let steered = false;
         if (instance?.adapter.capabilities.queueing && instance.adapter.steer) {
-          const steered = await instance.adapter
+          steered = await instance.adapter
             .steer(threadId, promptWithReply(text, replyTo, cfg.profile?.name?.trim() || "User"))
             .catch(() => false);
-          if (steered) {
-            clearUnattended(bot.id);
-            const message = store.appendMessage(threadId, {
-              role: "user",
-              kind: "text",
-              text,
-              replyToId: replyTo?.id,
-              steered: true,
-            });
-            return json(res, 202, { ok: true, steered: true, threadId, message });
-          }
         }
-        // The turn can settle while steer() is awaited. Re-read every mutable
-        // invariant before choosing the fallback: direct turns are owned by
-        // bot.threadId, so starting or queueing the old task after a switch
-        // would create a hidden turn that the ordinary interrupt route cannot
-        // stop. A conflict leaves the text in the client's composer to resend.
+        // steer() is awaited adapter work. The turn can settle, the task can
+        // switch, or the whole bot can be deleted before its acknowledgement
+        // arrives. Re-read every ownership invariant before appending even a
+        // successful steer; otherwise that late acknowledgement writes a user
+        // message into a task the bot no longer owns. A conflict leaves the
+        // text in the client's composer/outbox to resend deliberately.
         const current = store.bot(bot.id);
         if (!current) return json(res, 404, { error: "no such bot" });
         if (!store.taskByThread(bot.id, threadId)) {
@@ -5227,6 +5218,20 @@ const server = createServer(async (req, res) => {
         }
         if (current.threadId !== threadId) {
           return json(res, 409, { error: "the bot switched tasks before it could receive the message" });
+        }
+        if (steered) {
+          if (!current.busy) {
+            return json(res, 409, { error: "the running turn ended before the steered message could be recorded" });
+          }
+          clearUnattended(current.id);
+          const message = store.appendMessage(threadId, {
+            role: "user",
+            kind: "text",
+            text,
+            replyToId: replyTo?.id,
+            steered: true,
+          });
+          return json(res, 202, { ok: true, steered: true, threadId, message });
         }
         if (!current.busy) {
           const message = await startTurn(bot.id, text, { threadId, replyTo });
