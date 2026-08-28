@@ -34,3 +34,53 @@ export function saveSidebarDensity(
     // The in-memory React state still makes the control useful this session.
   }
 }
+
+export const SIDEBAR_COLLAPSED_KEY = "openmausbot.sidebarCollapsedSections";
+export const SIDEBAR_SECTION_ORDER_KEY = "openmausbot.sidebarSectionOrder";
+
+function readStringList(raw: string | null): string[] {
+  if (!raw) return [];
+  return raw.split("\n").filter((value) => value.length > 0);
+}
+
+function writeStringList(key: string, values: string[], storage?: Pick<Storage, "setItem"> | null): void {
+  try {
+    const target = storage === undefined ? (globalThis.localStorage ?? null) : storage;
+    target?.setItem(key, values.join("\n"));
+  } catch {
+    /* same localStorage failure mode as density */
+  }
+}
+
+export function loadCollapsedSections(storage?: Pick<Storage, "getItem"> | null): string[] {
+  try {
+    const target = storage === undefined ? (globalThis.localStorage ?? null) : storage;
+    return readStringList(target?.getItem(SIDEBAR_COLLAPSED_KEY) ?? null);
+  } catch {
+    return [];
+  }
+}
+
+export function saveCollapsedSections(
+  names: string[],
+  storage?: Pick<Storage, "setItem"> | null,
+): void {
+  writeStringList(SIDEBAR_COLLAPSED_KEY, [...new Set(names)], storage);
+}
+
+export function toggleCollapsedSection(names: string[], id: string): string[] {
+  return names.includes(id) ? names.filter((name) => name !== id) : [...names, id];
+}
+
+export function loadSectionOrder(storage?: Pick<Storage, "getItem"> | null): string[] {
+  try {
+    const target = storage === undefined ? (globalThis.localStorage ?? null) : storage;
+    return readStringList(target?.getItem(SIDEBAR_SECTION_ORDER_KEY) ?? null);
+  } catch {
+    return [];
+  }
+}
+
+export function saveSectionOrder(names: string[], storage?: Pick<Storage, "setItem"> | null): void {
+  writeStringList(SIDEBAR_SECTION_ORDER_KEY, names, storage);
+}

@@ -20,6 +20,7 @@ import { CommandPalette } from "@/components/CommandPalette";
 import { LocalVmWorkspace } from "@/components/LocalVmWorkspace";
 import { SkillRecorderPage } from "@/components/SkillRecorderPage";
 import { TeamMapPage } from "@/components/TeamMapPage";
+import { CODEX_MICRO_SLOT_COUNT, codexMicroSlotBots } from "@/lib/codex-micro-slots";
 
 function Shell() {
   const { state, dispatch } = useStore();
@@ -46,17 +47,21 @@ function Shell() {
     !state.instances.some((i) => i.snapshot.state === "available");
 
   // App-wide shortcuts: ⌘N new bot · ⌘1–9 jump to bot · ⌘⇧[ / ⌘⇧] prev/next.
-  // Kept deliberately small; every panel already closes on Esc.
+  // ⌘1–6 match Codex Micro AG00–AG05 (Chief, then pinned, then the rest).
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       const mod = e.metaKey || e.ctrlKey;
       if (!mod) return;
       const bots = state.bots.filter((b) => !b.hidden);
+      const slots = codexMicroSlotBots(bots, CODEX_MICRO_SLOT_COUNT);
       if (e.key === "n" && !e.shiftKey) {
         e.preventDefault();
         dispatch({ type: "newBot" });
       } else if (/^[1-9]$/.test(e.key)) {
-        const target = bots[Number(e.key) - 1];
+        const digit = Number(e.key);
+        const target = digit <= CODEX_MICRO_SLOT_COUNT
+          ? slots[digit - 1]
+          : bots.filter((bot) => !slots.some((slot) => slot.id === bot.id))[digit - CODEX_MICRO_SLOT_COUNT - 1];
         if (target) {
           e.preventDefault();
           dispatch({ type: "select", id: target.id });

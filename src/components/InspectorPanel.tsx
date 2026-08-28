@@ -14,6 +14,7 @@ import { Bug, ChevronDown, ChevronRight, RefreshCw, X } from "lucide-react";
 import { useStore, type Bot } from "@/state/store";
 import { cn } from "@/lib/cn";
 import { formatTime, toRows, type InspectorEntry, type InspectorPage, type InspectorRow } from "@/lib/inspector";
+import { openLiveEvents } from "@/lib/live-events";
 import type { RuntimeEvent } from "../../server/contracts.ts";
 
 type Lens = "events" | "raw";
@@ -62,29 +63,29 @@ export function InspectorPanel({ bot }: { bot: Bot }) {
   // up. Own EventSource on purpose: the store folds runtime events into
   // chat state and does not re-emit them.
   useEffect(() => {
-    const es = new EventSource("/api/events?screens=off");
     let settle: ReturnType<typeof setTimeout> | null = null;
-    es.onmessage = (raw) => {
-      let frame: { kind?: string; event?: RuntimeEvent };
-      try {
-        frame = JSON.parse(raw.data);
-      } catch {
-        return;
-      }
-      if (frame.kind !== "runtime" || !frame.event || frame.event.threadId !== threadId) return;
-      const event = frame.event;
-      setPage((prev) => {
-        const entry: InspectorEntry = { kind: "runtime", at: event.createdAt, data: event };
-        if (!prev) return { entries: [entry], total: { runtime: 1, native: 0 } };
-        return { entries: [...prev.entries, entry], total: { ...prev.total, runtime: prev.total.runtime + 1 } };
-      });
-      if (event.type === "turn.completed" || event.type === "runtime.error") {
-        if (settle) clearTimeout(settle);
-        settle = setTimeout(() => void load(), 400);
-      }
-    };
+    const stopLive = openLiveEvents({
+      screens: false,
+      onFrame: (raw) => {
+        if (raw.kind !== "runtime") return;
+        const event = raw.event;
+        if (!event || Array.isArray(event) || Object(event) !== event) return;
+        // SAFETY: runtime frames carry the harness RuntimeEvent payload.
+        const runtime = event as RuntimeEvent;
+        if (runtime.threadId !== threadId) return;
+        setPage((prev) => {
+          const entry: InspectorEntry = { kind: "runtime", at: runtime.createdAt, data: runtime };
+          if (!prev) return { entries: [entry], total: { runtime: 1, native: 0 } };
+          return { entries: [...prev.entries, entry], total: { ...prev.total, runtime: prev.total.runtime + 1 } };
+        });
+        if (runtime.type === "turn.completed" || runtime.type === "runtime.error") {
+          if (settle) clearTimeout(settle);
+          settle = setTimeout(() => void load(), 400);
+        }
+      },
+    });
     return () => {
-      es.close();
+      stopLive();
       if (settle) clearTimeout(settle);
     };
   }, [threadId, load]);

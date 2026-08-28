@@ -14,6 +14,7 @@ import { newId, type CloudBackend, type ModelSelection, type ThreadId } from "./
 import { pickBotName } from "./names.ts";
 import { redactSecretsInText } from "./redact.ts";
 import { botAvatarProfile, type BotAvatarCrop } from "../shared/bot-avatar.ts";
+import { BOT_CHATS_SECTION } from "../shared/sidebar-layout.ts";
 import type { RoutineRequestCardData } from "../shared/routine-request.ts";
 
 export type MausColor =
@@ -626,6 +627,10 @@ export class Store {
       g.defaultResponder = normalized;
       // Bot-to-bot channels intentionally remain one canonical thread.
       if (g.dm) {
+        if (sectionKey(g.section) !== sectionKey(BOT_CHATS_SECTION)) {
+          g.section = BOT_CHATS_SECTION;
+          groupsMigrated = true;
+        }
         if (g.tasks !== undefined) {
           delete g.tasks;
           groupsMigrated = true;

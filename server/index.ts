@@ -2125,6 +2125,7 @@ async function startTurn(
       drainSecretResumes();
     }
   })();
+  return userMessage;
 }
 
 // ── routines: persisted definitions → detached bot tasks ───────────────
@@ -2622,7 +2623,7 @@ function startGroupTurn(groupId: string, text: string, replyTo?: Message) {
   // Capture the active thread once. Every queued responder below is bound to
   // this task even if another client asks to switch later.
   const threadId = group.threadId;
-  store.appendMessage(threadId, { role: "user", kind: "text", text, replyToId: replyTo?.id });
+  const message = store.appendMessage(threadId, { role: "user", kind: "text", text, replyToId: replyTo?.id });
   if (!group.dm) store.titleGroupTaskFromFirstMessage(group.id, text, threadId);
 
   const members = group.memberIds
@@ -2666,7 +2667,7 @@ function startGroupTurn(groupId: string, text: string, replyTo?: Message) {
         tool: { name: unavailableMessage, ok: false },
       });
     }
-    return;
+    return message;
   }
 
   const operation = beginGroupTurnOperation(groupId, threadId);
@@ -2701,6 +2702,7 @@ function startGroupTurn(groupId: string, text: string, replyTo?: Message) {
   });
   const tracked = next.finally(() => finishGroupTurnOperation(groupId, operation));
   groupQueues.set(groupId, tracked.catch(() => {}));
+  return message;
 }
 
 function roomSetupPending(group: GroupRecord): boolean {
@@ -3781,11 +3783,14 @@ const server = createServer(async (req, res) => {
       }
 
       sseClients.add(client);
+      req.socket.setTimeout(0);
+      // Comment keepalives hold the TCP socket; a `data:` ping is what
+      // EventSource can actually see, so a remote client notices a dead hop.
       const keepalive = setInterval(() => {
         try {
-          res.write(": keepalive\n\n");
+          res.write(`: keepalive\n\ndata: ${JSON.stringify({ kind: "ping" })}\n\n`);
         } catch {}
-      }, 25_000);
+      }, 15_000);
       req.on("close", () => {
         clearInterval(keepalive);
         sseClients.delete(client);
@@ -4581,8 +4586,8 @@ const server = createServer(async (req, res) => {
         return json(res, 409, { error: "the channel switched tasks before it could receive the message" });
       }
       const replyTo = resolveReplyTarget(group.threadId, body.replyToId);
-      startGroupTurn(group.id, text, replyTo);
-      return json(res, 202, { ok: true });
+      const message = startGroupTurn(group.id, text, replyTo);
+      return json(res, 202, { ok: true, threadId: group.threadId, message });
     }
     m = path.match(/^\/api\/groups\/([\w-]+)\/interrupt$/);
     if (m && method === "POST") {
@@ -5181,14 +5186,14 @@ const server = createServer(async (req, res) => {
             .catch(() => false);
           if (steered) {
             clearUnattended(bot.id);
-            store.appendMessage(bot.threadId, {
+            const message = store.appendMessage(bot.threadId, {
               role: "user",
               kind: "text",
               text,
               replyToId: replyTo?.id,
               steered: true,
             });
-            return json(res, 202, { ok: true, steered: true });
+            return json(res, 202, { ok: true, steered: true, threadId: bot.threadId, message });
           }
         }
         const queued = queueSteeredMessage(bot, text, {
@@ -5197,8 +5202,8 @@ const server = createServer(async (req, res) => {
         });
         return json(res, 202, { ok: true, queued: true, queueId: queued.id, threadId: bot.threadId });
       }
-      await startTurn(bot.id, text, { replyTo });
-      return json(res, 202, { ok: true });
+      const message = await startTurn(bot.id, text, { replyTo });
+      return json(res, 202, { ok: true, threadId: bot.threadId, message });
     }
 
     m = path.match(/^\/api\/bots\/([\w-]+)\/queue\/([\w-]+)$/);
@@ -6091,6 +6096,9 @@ const server = createServer(async (req, res) => {
     return json(res, status, { error: e instanceof Error ? e.message : String(e) });
   }
 });
+
+server.requestTimeout = 0;
+server.headersTimeout = 0;
 
 server.listen(PORT, "127.0.0.1", () => {
   console.log(`openmausbot server on http://127.0.0.1:${PORT}`);

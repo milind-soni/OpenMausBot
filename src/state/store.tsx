@@ -24,6 +24,7 @@ import { showNotification, type NotificationTarget } from "@/lib/notify";
 import { speaker } from "@/lib/tts";
 import { createBotPatchQueue, type BotUpdatePatch } from "./bot-patch-queue";
 import { skillRecorderEnabled } from "@/lib/feature-flags";
+import { isLivePing, openLiveEvents } from "@/lib/live-events";
 
 export type { MausColor } from "@/lib/mascot";
 
@@ -1340,6 +1341,9 @@ export function StoreProvider({ children }: { children: ReactNode }) {
             body: JSON.stringify({ text: action.text, replyToId: action.replyToId }),
           })
             .then((body) => {
+              if (body?.message && typeof body.threadId === "string") {
+                rawDispatch({ type: "messageAdded", threadId: body.threadId, message: body.message });
+              }
               if (
                 body?.queued &&
                 typeof body.threadId === "string" &&
@@ -1503,7 +1507,13 @@ export function StoreProvider({ children }: { children: ReactNode }) {
           api(`/api/groups/${action.groupId}/messages`, {
             method: "POST",
             body: JSON.stringify({ text: action.text, replyToId: action.replyToId }),
-          }).catch(showError);
+          })
+            .then((body) => {
+              if (body?.message && typeof body.threadId === "string") {
+                rawDispatch({ type: "messageAdded", threadId: body.threadId, message: body.message });
+              }
+            })
+            .catch(showError);
           break;
         case "patchGroup":
           api(`/api/groups/${action.groupId}`, {
@@ -1655,12 +1665,6 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     // gap before that connection opened.
     const hydrationFallback = setTimeout(hydrate, 1_000);
 
-    const es = new EventSource("/api/events");
-    // The hydrate decision belongs to the hello frame, not to onopen: the
-    // server replays what we missed when it can, and re-downloading every
-    // transcript on a reconnect it already covered is pure waste.
-    es.onopen = () => rawDispatch({ type: "connected", value: true });
-    es.onerror = () => rawDispatch({ type: "connected", value: false });
     handleFrame = (frame) => {
       switch (frame.kind) {
         case "message": {
@@ -1820,27 +1824,24 @@ export function StoreProvider({ children }: { children: ReactNode }) {
           break;
       }
     };
-    es.onmessage = (raw) => {
-      let frame: any;
-      try {
-        frame = JSON.parse(raw.data);
-      } catch {
-        return;
-      }
-      // `hello` is the snapshot boundary. A false `resumed` means the server
-      // could not fill the gap, so queue subsequent frames behind a hydrate.
-      if (frame.kind === "hello") {
-        clearTimeout(hydrationFallback);
-        if (!frame.resumed) hydrate();
-        return;
-      }
-      if (hydrated) handleFrame(frame);
-      else pendingFrames.push(frame);
-    };
+    const stopLive = openLiveEvents({
+      onOpen: () => rawDispatch({ type: "connected", value: true }),
+      onError: () => rawDispatch({ type: "connected", value: false }),
+      onFrame: (frame) => {
+        if (isLivePing(frame)) return;
+        if (frame.kind === "hello") {
+          clearTimeout(hydrationFallback);
+          if (!frame.resumed) hydrate();
+          return;
+        }
+        if (hydrated) handleFrame(frame);
+        else pendingFrames.push(frame);
+      },
+    });
     return () => {
       alive = false;
       clearTimeout(hydrationFallback);
-      es.close();
+      stopLive();
     };
   }, []);
 

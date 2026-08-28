@@ -1,5 +1,5 @@
 import { track } from "@/lib/analytics";
-import { Fragment, useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import {
   Archive,
@@ -8,6 +8,8 @@ import {
   Bot as BotIcon,
   CalendarDays,
   Check,
+  ChevronDown,
+  ChevronRight,
   ClipboardCopy,
   Copy,
   Crown,
@@ -45,12 +47,34 @@ import { MIN_QUERY, SearchResults } from "./SearchResults";
 import { TeamLibraryPanel, type TeamImportResult } from "./TeamLibraryPanel";
 import { RenameTitle } from "./RenameTitle";
 import { BotPickerList } from "./BotPickerList";
+import { phoneSettingsAction, SidebarPhoneButton } from "./SidebarPhoneButton";
 import {
+  loadCollapsedSections,
+  loadSectionOrder,
   loadSidebarDensity,
+  saveCollapsedSections,
+  saveSectionOrder,
   saveSidebarDensity,
+  toggleCollapsedSection,
   type SidebarDensity,
 } from "@/lib/sidebar-preferences";
-import { phoneSettingsAction, SidebarPhoneButton } from "./SidebarPhoneButton";
+import {
+  BOT_CHATS_SECTION_ID,
+  BOTS_SECTION_ID,
+  CHANNELS_SECTION_ID,
+  MORE_NAV_ID,
+  PINNED_SECTION_ID,
+  isReservedSectionId,
+  mergeSectionOrder,
+  moveSection,
+  orderedSidebarSections,
+  partitionSidebarBots,
+  partitionSidebarGroups,
+  placeSection,
+  sameSectionOrder,
+  sidebarSectionLabel,
+  type SectionDropPlace,
+} from "@/lib/sidebar-layout";
 
 /** "Milind Soni" → "MS", "milind" → "M", "you@x.dev" → "Y", unset → "?" */
 function profileInitials(profile?: { name?: string; email?: string }): string {
@@ -290,6 +314,7 @@ function RoomContextMenu({
   }, [onClose]);
 
   if (!group) return null;
+  const isBotChat = Boolean(group.dm);
   const saveRename = () => {
     const name = nextRename(group.name, draft);
     if (name) dispatch({ type: "patchGroup", groupId: group.id, patch: { name } });
@@ -327,7 +352,7 @@ function RoomContextMenu({
           <button
             type="button"
             onClick={saveRename}
-            aria-label="Save channel name"
+            aria-label={isBotChat ? "Save chat name" : "Save channel name"}
             title="Save"
             className="flex size-8 shrink-0 items-center justify-center rounded-lg text-ink-secondary hover:bg-raised hover:text-ink"
           >
@@ -336,7 +361,7 @@ function RoomContextMenu({
           <button
             type="button"
             onClick={onClose}
-            aria-label="Cancel channel rename"
+            aria-label={isBotChat ? "Cancel chat rename" : "Cancel channel rename"}
             title="Cancel"
             className="flex size-8 shrink-0 items-center justify-center rounded-lg text-ink-secondary hover:bg-raised hover:text-ink"
           >
@@ -352,19 +377,21 @@ function RoomContextMenu({
           className="flex w-full items-center gap-3 px-3.5 py-2 text-left text-[14px] text-ink hover:bg-raised/70"
         >
           <Pencil size={16} className="text-ink-secondary" />
-          Rename Channel
+          {isBotChat ? "Rename chat" : "Rename Channel"}
         </button>
       )}
-      <button
-        onClick={() => {
-          onClose();
-          onMoveToSection(group.id);
-        }}
-        className="flex w-full items-center gap-3 px-3.5 py-2 text-left text-[14px] text-ink hover:bg-raised/70"
-      >
-        <FolderPlus size={16} className="text-ink-secondary" />
-        Move to context
-      </button>
+      {!isBotChat && (
+        <button
+          onClick={() => {
+            onClose();
+            onMoveToSection(group.id);
+          }}
+          className="flex w-full items-center gap-3 px-3.5 py-2 text-left text-[14px] text-ink hover:bg-raised/70"
+        >
+          <FolderPlus size={16} className="text-ink-secondary" />
+          Move to context
+        </button>
+      )}
       <button
         onClick={() => {
           void navigator.clipboard?.writeText(group.threadId);
@@ -383,7 +410,7 @@ function RoomContextMenu({
         className="flex w-full items-center gap-3 px-3.5 py-2 text-left text-[14px] text-danger hover:bg-raised/70"
       >
         <Trash2 size={16} />
-        Delete Channel
+        {isBotChat ? "Delete chat" : "Delete Channel"}
       </button>
     </div>,
     document.body,
@@ -464,15 +491,91 @@ function NewRoomPanel({ onClose }: { onClose: () => void }) {
   );
 }
 
+const SECTION_DRAG_TYPE = "application/x-openmausbot-section";
+
 /** Labeled divider between sidebar sections. Same typographic register as
- * EngineGroupLabel so the sidebar reads as one system. */
-function SectionDivider({ name }: { name: string }) {
-  return (
-    <div className="flex items-center gap-2 px-3 pb-1 pt-3 first:pt-0" data-section={name}>
-      <span className="text-[10px] font-medium uppercase tracking-[0.08em] text-ink-secondary">
+ * EngineGroupLabel so the sidebar reads as one system. Reorderable headers
+ * are the drag handle; a click (not a drag) still toggles collapse. */
+function SectionDivider({
+  name,
+  collapsed,
+  onToggle,
+  reorderable,
+  dragging,
+  onDragStart,
+  onDragEnd,
+  onMove,
+}: {
+  name: string;
+  collapsed?: boolean;
+  onToggle?: () => void;
+  reorderable?: boolean;
+  dragging?: boolean;
+  onDragStart?: (event: React.DragEvent<HTMLDivElement>) => void;
+  onDragEnd?: () => void;
+  onMove?: (direction: -1 | 1) => void;
+}) {
+  const skippedClick = useRef(false);
+  const Chevron = collapsed ? ChevronRight : ChevronDown;
+  const label = (
+    <>
+      {onToggle && <Chevron size={12} className="shrink-0 text-ink-secondary" />}
+      <span className="truncate px-1 text-[10px] font-medium uppercase tracking-[0.08em] text-ink-secondary">
         {name}
       </span>
       <span className="h-px flex-1 bg-hairline/40" />
+    </>
+  );
+  return (
+    <div className="flex items-center gap-1 px-2 pb-1 pt-3 first:pt-0" data-section={name}>
+      {onToggle ? (
+        <div
+          role="button"
+          tabIndex={0}
+          draggable={Boolean(reorderable)}
+          aria-expanded={!collapsed}
+          aria-label={reorderable ? `${name}, drag to reorder` : name}
+          title={reorderable ? "Drag to reorder" : undefined}
+          onDragStart={(event) => {
+            skippedClick.current = true;
+            onDragStart?.(event);
+          }}
+          onDragEnd={() => {
+            onDragEnd?.();
+            window.setTimeout(() => {
+              skippedClick.current = false;
+            }, 0);
+          }}
+          onClick={() => {
+            if (skippedClick.current) {
+              skippedClick.current = false;
+              return;
+            }
+            onToggle();
+          }}
+          onKeyDown={(event) => {
+            if (event.key === "Enter" || event.key === " ") {
+              event.preventDefault();
+              onToggle();
+            } else if (event.key === "ArrowUp") {
+              event.preventDefault();
+              onMove?.(-1);
+            } else if (event.key === "ArrowDown") {
+              event.preventDefault();
+              onMove?.(1);
+            }
+          }}
+          className={cn(
+            "flex min-w-0 flex-1 select-none items-center gap-1.5 rounded-md px-1 py-0.5 text-left hover:bg-raised/50",
+            reorderable && "cursor-grab active:cursor-grabbing",
+            dragging && "opacity-40",
+          )}
+        >
+          {label}
+        </div>
+      ) : (
+        label
+      )}
     </div>
   );
 }
@@ -1035,6 +1138,18 @@ export function Sidebar({ open, onClose }: { open: boolean; onClose: () => void 
     return saved === "icons" ? "comfortable" : saved;
   });
   const [densityOpen, setDensityOpen] = useState(false);
+  const [collapsedSections, setCollapsedSections] = useState<string[]>(() => loadCollapsedSections());
+  const [sectionOrder, setSectionOrder] = useState<string[]>(() => loadSectionOrder());
+  const [draggingSectionId, setDraggingSectionId] = useState<string | null>(null);
+  const [dropTarget, setDropTarget] = useState<{ id: string; place: SectionDropPlace } | null>(null);
+  const dragRef = useRef<{
+    from: string | null;
+    over: { id: string; place: SectionDropPlace } | null;
+  }>({ from: null, over: null });
+  const orderRef = useRef<{ sectionIds: string[]; sectionOrder: string[] }>({
+    sectionIds: [],
+    sectionOrder: [],
+  });
 
   const setDensity = (next: SidebarDensity) => {
     setDensityState(next);
@@ -1227,29 +1342,79 @@ export function Sidebar({ open, onClose }: { open: boolean; onClose: () => void 
         (b.title ?? "").toLowerCase().includes(q) ||
         preview(b).toLowerCase().includes(q),
     );
-  const unsectionedChief = matchingBots.find((bot) => bot.chiefOfStaff && !bot.section);
-  const sectionChiefs = matchingBots.filter((bot) => bot.chiefOfStaff && bot.section);
-  const sectionedBots = matchingBots
-    .filter((bot) => !bot.chiefOfStaff && bot.section)
-    .sort((a, b) => Number(b.pinned ?? false) - Number(a.pinned ?? false));
-  const visibleBots = matchingBots
-    .filter((bot) => !bot.chiefOfStaff && !bot.section)
-    .sort((a, b) => Number(b.pinned ?? false) - Number(a.pinned ?? false));
+  const {
+    unsectionedChief,
+    pinnedUnderChief,
+    sectionChiefs,
+    sectionedBots,
+    unsectionedBots: visibleBots,
+  } = partitionSidebarBots(matchingBots);
   const visibleGroups = state.groups.filter((g) => !q || g.name.toLowerCase().includes(q));
-  const sectionedGroups = visibleGroups.filter((g) => g.section);
-  const unsectionedGroups = visibleGroups.filter((g) => !g.section);
-  // sections keep first-appearance order within the current list; a section
-  // whose members all moved away (or fell out of the filter) simply vanishes
-  const sectionNames: string[] = [];
+  const { botChats, sectionedRooms: sectionedGroups, unsectionedRooms: unsectionedGroups } =
+    partitionSidebarGroups(visibleGroups);
+  // Built-in buckets (Pinned, Projects, Bot Chats, Bots) share one order
+  // list with user sections so every header can be dragged.
+  const discoveredSectionNames: string[] = [];
   for (const bot of sectionedBots) {
-    if (!sectionNames.includes(bot.section!)) sectionNames.push(bot.section!);
+    if (bot.section && !isReservedSectionId(bot.section) && !discoveredSectionNames.includes(bot.section)) {
+      discoveredSectionNames.push(bot.section);
+    }
   }
   for (const bot of sectionChiefs) {
-    if (!sectionNames.includes(bot.section!)) sectionNames.push(bot.section!);
+    if (bot.section && !isReservedSectionId(bot.section) && !discoveredSectionNames.includes(bot.section)) {
+      discoveredSectionNames.push(bot.section);
+    }
   }
   for (const group of sectionedGroups) {
-    if (!sectionNames.includes(group.section!)) sectionNames.push(group.section!);
+    if (group.section && !isReservedSectionId(group.section) && !discoveredSectionNames.includes(group.section)) {
+      discoveredSectionNames.push(group.section);
+    }
   }
+  const presentSectionIds: string[] = [];
+  if (pinnedUnderChief.length > 0) presentSectionIds.push(PINNED_SECTION_ID);
+  if (unsectionedGroups.length > 0) presentSectionIds.push(CHANNELS_SECTION_ID);
+  if (botChats.length > 0) presentSectionIds.push(BOT_CHATS_SECTION_ID);
+  if (visibleBots.length > 0) presentSectionIds.push(BOTS_SECTION_ID);
+  presentSectionIds.push(...discoveredSectionNames);
+  const sectionIds = orderedSidebarSections(presentSectionIds, sectionOrder);
+  orderRef.current = { sectionIds, sectionOrder };
+  const collapseEnabled = density !== "icons" && !q;
+  const sectionCollapsed = (id: string) => collapseEnabled && collapsedSections.includes(id);
+  const toggleSection = (id: string) => {
+    const next = toggleCollapsedSection(collapsedSections, id);
+    setCollapsedSections(next);
+    saveCollapsedSections(next);
+  };
+  const commitSectionOrder = (visibleOrder: string[]) => {
+    const persist = mergeSectionOrder(orderRef.current.sectionOrder, visibleOrder);
+    if (sameSectionOrder(persist, orderRef.current.sectionOrder)) return;
+    orderRef.current = { ...orderRef.current, sectionOrder: persist };
+    setSectionOrder(persist);
+    saveSectionOrder(persist);
+  };
+  const shiftSection = (id: string, direction: -1 | 1) => {
+    commitSectionOrder(moveSection(orderRef.current.sectionIds, id, direction));
+  };
+  const finishSectionDrag = () => {
+    const { from, over } = dragRef.current;
+    dragRef.current = { from: null, over: null };
+    setDraggingSectionId(null);
+    setDropTarget(null);
+    if (!from || !over) return;
+    commitSectionOrder(placeSection(orderRef.current.sectionIds, from, over.id, over.place));
+  };
+  const updateDropTarget = (event: React.DragEvent<HTMLElement>, id: string) => {
+    if (!dragRef.current.from) return;
+    event.preventDefault();
+    event.dataTransfer.dropEffect = "move";
+    const rect = event.currentTarget.getBoundingClientRect();
+    const place: SectionDropPlace = event.clientY < rect.top + rect.height / 2 ? "before" : "after";
+    const current = dragRef.current.over;
+    if (current?.id === id && current.place === place) return;
+    const next = { id, place };
+    dragRef.current.over = next;
+    setDropTarget(next);
+  };
   const activeBotCount = state.bots.filter((bot) => !bot.hidden).length;
   const archivedBots = state.bots.filter((bot) => bot.hidden);
   const pendingTeamUndo = teamFeedback?.undo;
@@ -1433,9 +1598,16 @@ export function Sidebar({ open, onClose }: { open: boolean; onClose: () => void 
       </div>
 
       {/* Bot list */}
-      <div className="flex-1 overflow-y-auto px-2">
+      <div
+        className="flex-1 overflow-y-auto px-2"
+        onDragOver={(event) => {
+          if (!dragRef.current.from) return;
+          event.preventDefault();
+          event.dataTransfer.dropEffect = "move";
+        }}
+      >
         <div className="flex flex-col gap-0.5">
-          {!unsectionedChief && sectionChiefs.length === 0 && visibleBots.length === 0 && sectionedBots.length === 0 && visibleGroups.length === 0 && q && q.length < MIN_QUERY && (
+          {!unsectionedChief && pinnedUnderChief.length === 0 && sectionChiefs.length === 0 && visibleBots.length === 0 && sectionedBots.length === 0 && visibleGroups.length === 0 && q && q.length < MIN_QUERY && (
             <div className="px-3 py-6 text-center text-[13px] text-ink-secondary">Nothing matches “{query}”</div>
           )}
           {unsectionedChief && (
@@ -1449,114 +1621,190 @@ export function Sidebar({ open, onClose }: { open: boolean; onClose: () => void 
               />
             </div>
           )}
-          {unsectionedGroups.length > 0 && density !== "icons" && <SectionDivider name="Channels" />}
-          {unsectionedGroups.map((g) => (
-            <GroupListItem key={g.id} group={g} density={density} onMenu={setRoomMenu} />
-          ))}
-          {visibleBots.length > 0 && density !== "icons" && <SectionDivider name="Bots" />}
-          {visibleBots.map((b) => (
-            <BotListItem
-              key={b.id}
-              bot={b}
-              density={density}
-              onMenu={setMenu}
-              onArchive={(bot) => void archiveBot(bot)}
-              archiveDisabled={activeBotCount <= 1}
-            />
-          ))}
-          {sectionNames.map((name) => (
-            <Fragment key={name}>
-              {density !== "icons" && <SectionDivider name={name} />}
-              {sectionChiefs
-                .filter((bot) => bot.section === name)
-                .map((bot) => (
-                  <BotListItem
-                    key={bot.id}
-                    bot={bot}
-                    density={density}
-                    onMenu={setMenu}
-                    onArchive={(candidate) => void archiveBot(candidate)}
-                    archiveDisabled
-                  />
-                ))}
-              {sectionedGroups
-                .filter((g) => g.section === name)
-                .map((g) => (
-                  <GroupListItem key={g.id} group={g} density={density} onMenu={setRoomMenu} />
-                ))}
-              {sectionedBots
-                .filter((b) => b.section === name)
-                .map((b) => (
-                  <BotListItem
-                    key={b.id}
-                    bot={b}
-                    density={density}
-                    onMenu={setMenu}
-                    onArchive={(bot) => void archiveBot(bot)}
-                    archiveDisabled={activeBotCount <= 1}
-                  />
-                ))}
-            </Fragment>
+          {sectionIds.map((id) => (
+            <div
+              key={id}
+              onDragOver={(event) => updateDropTarget(event, id)}
+              onDrop={(event) => {
+                event.preventDefault();
+                const fromId =
+                  event.dataTransfer.getData(SECTION_DRAG_TYPE) ||
+                  event.dataTransfer.getData("text/plain") ||
+                  dragRef.current.from;
+                if (fromId && !dragRef.current.over) {
+                  const rect = event.currentTarget.getBoundingClientRect();
+                  dragRef.current.over = {
+                    id,
+                    place: event.clientY < rect.top + rect.height / 2 ? "before" : "after",
+                  };
+                }
+                if (fromId) dragRef.current.from = fromId;
+                finishSectionDrag();
+              }}
+            >
+              {dropTarget?.id === id && dropTarget.place === "before" && draggingSectionId !== id && (
+                <div className="mx-2 h-0.5 rounded-full bg-accent" />
+              )}
+              {density !== "icons" && (
+                <SectionDivider
+                  name={sidebarSectionLabel(id)}
+                  collapsed={sectionCollapsed(id)}
+                  onToggle={() => toggleSection(id)}
+                  reorderable={collapseEnabled}
+                  dragging={draggingSectionId === id}
+                  onDragStart={(event) => {
+                    event.dataTransfer.effectAllowed = "move";
+                    event.dataTransfer.setData(SECTION_DRAG_TYPE, id);
+                    event.dataTransfer.setData("text/plain", id);
+                    dragRef.current = { from: id, over: null };
+                    setDraggingSectionId(id);
+                  }}
+                  onDragEnd={() => finishSectionDrag()}
+                  onMove={(direction) => shiftSection(id, direction)}
+                />
+              )}
+              {!sectionCollapsed(id) && (
+                <>
+                  {id === PINNED_SECTION_ID &&
+                    pinnedUnderChief.map((b) => (
+                      <BotListItem
+                        key={b.id}
+                        bot={b}
+                        density={density}
+                        onMenu={setMenu}
+                        onArchive={(bot) => void archiveBot(bot)}
+                        archiveDisabled={activeBotCount <= 1}
+                      />
+                    ))}
+                  {id === CHANNELS_SECTION_ID &&
+                    unsectionedGroups.map((g) => (
+                      <GroupListItem key={g.id} group={g} density={density} onMenu={setRoomMenu} />
+                    ))}
+                  {id === BOT_CHATS_SECTION_ID &&
+                    botChats.map((g) => (
+                      <GroupListItem key={g.id} group={g} density={density} onMenu={setRoomMenu} />
+                    ))}
+                  {id === BOTS_SECTION_ID &&
+                    visibleBots.map((b) => (
+                      <BotListItem
+                        key={b.id}
+                        bot={b}
+                        density={density}
+                        onMenu={setMenu}
+                        onArchive={(bot) => void archiveBot(bot)}
+                        archiveDisabled={activeBotCount <= 1}
+                      />
+                    ))}
+                  {!isReservedSectionId(id) && (
+                    <>
+                      {sectionChiefs
+                        .filter((bot) => bot.section === id)
+                        .map((bot) => (
+                          <BotListItem
+                            key={bot.id}
+                            bot={bot}
+                            density={density}
+                            onMenu={setMenu}
+                            onArchive={(candidate) => void archiveBot(candidate)}
+                            archiveDisabled
+                          />
+                        ))}
+                      {sectionedGroups
+                        .filter((g) => g.section === id)
+                        .map((g) => (
+                          <GroupListItem key={g.id} group={g} density={density} onMenu={setRoomMenu} />
+                        ))}
+                      {sectionedBots
+                        .filter((b) => b.section === id)
+                        .map((b) => (
+                          <BotListItem
+                            key={b.id}
+                            bot={b}
+                            density={density}
+                            onMenu={setMenu}
+                            onArchive={(bot) => void archiveBot(bot)}
+                            archiveDisabled={activeBotCount <= 1}
+                          />
+                        ))}
+                    </>
+                  )}
+                </>
+              )}
+              {dropTarget?.id === id && dropTarget.place === "after" && draggingSectionId !== id && (
+                <div className="mx-2 h-0.5 rounded-full bg-accent" />
+              )}
+            </div>
           ))}
           <SearchResults query={query} onLanded={() => setQuery("")} />
         </div>
       </div>
 
-      {/* Footer */}
+      {/* Footer — tools collapse; profile name + settings gear stay. */}
       <div className={cn("pb-3 pt-2", density === "icons" ? "px-2" : "px-3")}>
-        <button
-          onClick={() => dispatch({ type: "showTeamMap" })}
-          aria-label={density === "icons" ? "Team map" : undefined}
-          title={density === "icons" ? "Team map" : undefined}
-          className={cn(
-            "flex min-h-10 w-full items-center rounded-xl py-2 text-left transition-colors",
-            density === "icons" ? "justify-center px-2" : "gap-3 px-3",
-            state.activeView === "team-map" ? "bg-raised text-ink" : "text-ink hover:bg-raised/50",
-          )}
-        >
-          <Network size={20} className={state.activeView === "team-map" ? "text-accent" : "text-ink-secondary"} />
-          <span className={cn("flex-1 text-[14px]", density === "icons" && "hidden")}>Team map</span>
-        </button>
-        {skillRecorderEnabled(state.config) && (
-          <button
-            onClick={() => dispatch({ type: "showSkillRecorder" })}
-            aria-label={density === "icons" ? "Teach a skill" : undefined}
-            title={density === "icons" ? "Teach a skill" : undefined}
-            className={cn(
-              "flex min-h-10 w-full items-center rounded-xl py-2 text-left transition-colors",
-              density === "icons" ? "justify-center px-2" : "gap-3 px-3",
-              state.activeView === "skill-recorder" ? "bg-raised text-ink" : "text-ink hover:bg-raised/50",
-            )}
-          >
-            <Sparkles size={20} className={state.activeView === "skill-recorder" ? "text-accent" : "text-ink-secondary"} />
-            <span className={cn("flex-1 text-[14px]", density === "icons" && "hidden")}>Teach a skill</span>
-          </button>
+        {density !== "icons" && (
+          <SectionDivider
+            name="More"
+            collapsed={sectionCollapsed(MORE_NAV_ID)}
+            onToggle={() => toggleSection(MORE_NAV_ID)}
+          />
         )}
-        <button
-          onClick={() => dispatch({ type: "showRoutines" })}
-          aria-label={density === "icons" ? "Tasks and routines" : undefined}
-          title={density === "icons" ? "Tasks and routines" : undefined}
-          className={cn(
-            "flex min-h-10 w-full items-center rounded-xl py-2 text-left transition-colors",
-            density === "icons" ? "justify-center px-2" : "gap-3 px-3",
-            state.activeView === "routines" ? "bg-raised text-ink" : "text-ink hover:bg-raised/50",
-          )}
-        >
-          <CalendarDays size={20} className={state.activeView === "routines" ? "text-accent" : "text-ink-secondary"} />
-          <span className={cn("flex-1 text-[14px]", density === "icons" && "hidden")}>Tasks &amp; routines</span>
-          {state.routineRuns.some((run) => ["failed", "missed"].includes(run.status) && !run.seenAt) && (
-            <span className="size-2 rounded-full bg-danger" />
-          )}
-        </button>
-        <button
-          onClick={() => dispatch({ type: "togglePlugins", open: true })}
-          className={cn("flex min-h-10 w-full items-center rounded-xl py-2 text-left hover:bg-raised/50", density === "icons" ? "justify-center px-2" : "gap-3 px-3")}
-          aria-label={density === "icons" ? "Connected apps" : undefined}
-          title={density === "icons" ? "Connected apps" : undefined}
-        >
-          <Puzzle size={20} className="text-ink-secondary" />
-          <span className={cn("text-[14px] text-ink", density === "icons" && "hidden")}>Connected apps</span>
-        </button>
+        {!sectionCollapsed(MORE_NAV_ID) && (
+          <>
+            <button
+              onClick={() => dispatch({ type: "showTeamMap" })}
+              aria-label={density === "icons" ? "Team map" : undefined}
+              title={density === "icons" ? "Team map" : undefined}
+              className={cn(
+                "flex min-h-10 w-full items-center rounded-xl py-2 text-left transition-colors",
+                density === "icons" ? "justify-center px-2" : "gap-3 px-3",
+                state.activeView === "team-map" ? "bg-raised text-ink" : "text-ink hover:bg-raised/50",
+              )}
+            >
+              <Network size={20} className={state.activeView === "team-map" ? "text-accent" : "text-ink-secondary"} />
+              <span className={cn("flex-1 text-[14px]", density === "icons" && "hidden")}>Team map</span>
+            </button>
+            {skillRecorderEnabled(state.config) && (
+              <button
+                onClick={() => dispatch({ type: "showSkillRecorder" })}
+                aria-label={density === "icons" ? "Teach a skill" : undefined}
+                title={density === "icons" ? "Teach a skill" : undefined}
+                className={cn(
+                  "flex min-h-10 w-full items-center rounded-xl py-2 text-left transition-colors",
+                  density === "icons" ? "justify-center px-2" : "gap-3 px-3",
+                  state.activeView === "skill-recorder" ? "bg-raised text-ink" : "text-ink hover:bg-raised/50",
+                )}
+              >
+                <Sparkles size={20} className={state.activeView === "skill-recorder" ? "text-accent" : "text-ink-secondary"} />
+                <span className={cn("flex-1 text-[14px]", density === "icons" && "hidden")}>Teach a skill</span>
+              </button>
+            )}
+            <button
+              onClick={() => dispatch({ type: "showRoutines" })}
+              aria-label={density === "icons" ? "Tasks and routines" : undefined}
+              title={density === "icons" ? "Tasks and routines" : undefined}
+              className={cn(
+                "flex min-h-10 w-full items-center rounded-xl py-2 text-left transition-colors",
+                density === "icons" ? "justify-center px-2" : "gap-3 px-3",
+                state.activeView === "routines" ? "bg-raised text-ink" : "text-ink hover:bg-raised/50",
+              )}
+            >
+              <CalendarDays size={20} className={state.activeView === "routines" ? "text-accent" : "text-ink-secondary"} />
+              <span className={cn("flex-1 text-[14px]", density === "icons" && "hidden")}>Tasks &amp; routines</span>
+              {state.routineRuns.some((run) => ["failed", "missed"].includes(run.status) && !run.seenAt) && (
+                <span className="size-2 rounded-full bg-danger" />
+              )}
+            </button>
+            <button
+              onClick={() => dispatch({ type: "togglePlugins", open: true })}
+              className={cn("flex min-h-10 w-full items-center rounded-xl py-2 text-left hover:bg-raised/50", density === "icons" ? "justify-center px-2" : "gap-3 px-3")}
+              aria-label={density === "icons" ? "Connected apps" : undefined}
+              title={density === "icons" ? "Connected apps" : undefined}
+            >
+              <Puzzle size={20} className="text-ink-secondary" />
+              <span className={cn("text-[14px] text-ink", density === "icons" && "hidden")}>Connected apps</span>
+            </button>
+          </>
+        )}
         {density === "icons" && (
           <SidebarPhoneButton
             density={density}
