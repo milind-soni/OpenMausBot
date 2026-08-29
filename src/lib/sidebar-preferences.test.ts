@@ -12,8 +12,8 @@ describe("sidebar density preferences", () => {
     expect(parseSidebarDensity("comfortable")).toBe("comfortable");
     expect(parseSidebarDensity("compact")).toBe("compact");
     expect(parseSidebarDensity("icons")).toBe("icons");
-    expect(parseSidebarDensity("tiny")).toBe("comfortable");
-    expect(parseSidebarDensity(null)).toBe("comfortable");
+    expect(parseSidebarDensity("tiny")).toBe("icons");
+    expect(parseSidebarDensity(null)).toBe("icons");
   });
 
   it("loads and saves without making storage availability a launch dependency", () => {
@@ -21,6 +21,6 @@ describe("sidebar density preferences", () => {
     saveSidebarDensity("icons", { setItem });
     expect(setItem).toHaveBeenCalledWith(SIDEBAR_DENSITY_KEY, "icons");
     expect(loadSidebarDensity({ getItem: () => "compact" })).toBe("compact");
-    expect(loadSidebarDensity({ getItem: () => { throw new Error("blocked"); } })).toBe("comfortable");
+    expect(loadSidebarDensity({ getItem: () => { throw new Error("blocked"); } })).toBe("icons");
   });
 });

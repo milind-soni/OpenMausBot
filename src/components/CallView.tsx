@@ -91,7 +91,7 @@ export function CallTargetButton({
       : !supported
         ? "Calls currently need the macOS desktop app"
         : !configured
-          ? "Set up a voice in an agent profile to make calls"
+          ? "Set up workspace voice in Settings to make calls"
           : !voiceReady
             ? "Pick a voice in an agent profile to make calls"
             : `Call ${targetName}`;
@@ -99,11 +99,11 @@ export function CallTargetButton({
   const reason = !capabilitiesReady
     ? "Checking whether this device can make calls."
     : !capabilities.dictation.available
-      ? "Calls require OpenMausBot for macOS because speech recognition runs on-device."
+      ? "Calls require Agent Centipede for macOS because speech recognition runs on-device."
       : !window.ogb?.speechStart
-        ? "The speech service is unavailable in this app build. Restart or update OpenMausBot."
+        ? "The speech service is unavailable in this app build. Restart or update Agent Centipede."
         : !configured
-          ? "Add an ElevenLabs API key — or switch to the built-in Mac voices — so the bot can speak during calls."
+          ? "Add an ElevenLabs API key — or switch to the built-in Mac voices — so the agent can speak during calls."
           : !voiceReady
             ? voices.length > 1
               ? "Give every channel member a voice before starting a channel call."

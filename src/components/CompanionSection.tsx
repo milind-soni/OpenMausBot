@@ -7,6 +7,7 @@ import {
   Trash2,
   Wifi,
 } from "lucide-react";
+import { useEffect, useState } from "react";
 import {
   PhoneSetupFlowView,
   companionAccountActionError,
@@ -19,6 +20,7 @@ import {
 import { companionPairingMode } from "../lib/phone-setup";
 import { ConnectionDetail } from "./ConnectionDetail";
 import { Card } from "./SettingsPrimitives";
+import type { FirebaseCredentialStatus, FirebaseImportResult } from "../types/ogb";
 
 export {
   companionAccountActionError,
@@ -45,6 +47,46 @@ export function deriveCompanionPanelStatus(
   };
 }
 
+export interface FirebaseSetupStatus {
+  label: string;
+  detail: string;
+  good: boolean;
+}
+
+export function deriveFirebaseSetupStatus(
+  status: FirebaseCredentialStatus | null,
+  restartRequired = false,
+): FirebaseSetupStatus {
+  if (!status) {
+    return {
+      label: "Checking Firebase notifications…",
+      detail: "Checking the local encrypted push configuration.",
+      good: false,
+    };
+  }
+  if (!status.serviceAccountConfigured) {
+    return {
+      label: "Firebase not connected",
+      detail: status.pushEncryptionKeyConfigured
+        ? "Encrypted push storage is ready. Import a Firebase service-account JSON to enable notifications when the app is closed."
+        : "Import a Firebase service-account JSON to enable notifications when the app is closed.",
+      good: false,
+    };
+  }
+  if (restartRequired) {
+    return {
+      label: "Firebase connected",
+      detail: "Restart required: turn Phone access off and back on to apply the new credential.",
+      good: true,
+    };
+  }
+  return {
+    label: "Firebase connected",
+    detail: `Push notifications are ready${status.projectId ? ` for ${status.projectId}` : ""}.`,
+    good: true,
+  };
+}
+
 const relative = (at: number) => {
   const seconds = Math.round((Date.now() - at) / 1000);
   if (seconds < 90) return "just now";
@@ -63,6 +105,68 @@ const endpointHost = (url: string): string => {
   }
 };
 
+function FirebaseSettings({ companionEnabled }: { companionEnabled: boolean }) {
+  const bridge = typeof window === "undefined" ? undefined : window.ogb?.firebase;
+  const [status, setStatus] = useState<FirebaseCredentialStatus | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [restartRequired, setRestartRequired] = useState(false);
+
+  useEffect(() => {
+    let alive = true;
+    bridge?.status()
+      .then((next) => alive && setStatus(next))
+      .catch(() => alive && setStatus(null));
+    return () => { alive = false; };
+  }, [bridge]);
+
+  if (!bridge) return null;
+  const view = deriveFirebaseSetupStatus(status, restartRequired && companionEnabled);
+  const importServiceAccount = async () => {
+    if (busy) return;
+    setBusy(true);
+    setError(null);
+    try {
+      const result: FirebaseImportResult = await bridge.importServiceAccount();
+      if (result.imported) {
+        setStatus(result);
+        setRestartRequired(companionEnabled);
+      }
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : String(caught));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <div className="border-t border-hairline/30 pt-4">
+      <div className="flex items-start justify-between gap-3">
+        <div className="min-w-0">
+          <div className="flex items-center gap-2 text-[13px] text-ink">
+            <Smartphone size={15} className="shrink-0 text-accent" />
+            <span>Phone notifications</span>
+          </div>
+          <div className={`mt-0.5 text-[11.5px] leading-relaxed ${view.good ? "text-success" : "text-ink-secondary"}`}>
+            {view.label}
+          </div>
+          <div className="mt-0.5 text-[11.5px] leading-relaxed text-ink-secondary">{view.detail}</div>
+        </div>
+        <button
+          type="button"
+          disabled={busy}
+          onClick={() => void importServiceAccount()}
+          className="flex shrink-0 items-center gap-1.5 rounded-lg border border-hairline/40 px-2.5 py-1.5 text-[11.5px] text-ink hover:bg-control disabled:opacity-40"
+        >
+          {busy ? <Loader2 size={12} className="animate-spin" /> : null}
+          {busy ? "Importing…" : status?.serviceAccountConfigured ? "Replace JSON" : "Import JSON"}
+        </button>
+      </div>
+      {error && <div role="alert" className="mt-2 text-[12px] text-danger">{error}</div>}
+    </div>
+  );
+}
+
 export function CompanionSection({ profileEmail = "" }: { profileEmail?: string }) {
   const c = usePhoneSetupController(profileEmail);
   const state = c.state;
@@ -70,8 +174,8 @@ export function CompanionSection({ profileEmail = "" }: { profileEmail?: string 
   if (!companionBridge()) {
     return (
       <Card
-        title="Use OpenMausBot from your phone"
-        subtitle="Open Settings in the OpenMausBot desktop app to set up a phone."
+        title="Use Agent Centipede from your phone"
+        subtitle="Open Settings in the Agent Centipede desktop app to set up a phone."
       />
     );
   }
@@ -126,7 +230,7 @@ export function CompanionSection({ profileEmail = "" }: { profileEmail?: string 
 
       <Card
         title="Paired phones"
-        subtitle={pairedCount ? "Manage the phones that can use this OpenMausBot." : "No phones are paired yet."}
+        subtitle={pairedCount ? "Manage the phones that can use this Agent Centipede workspace." : "No phones are paired yet."}
       >
         {pairedCount > 0 && (
           <ul className="flex flex-col gap-2">
@@ -256,6 +360,8 @@ export function CompanionSection({ profileEmail = "" }: { profileEmail?: string 
             )}
             {accountActionError && <div className="mt-2 text-[12px] text-danger">{accountActionError}</div>}
           </div>
+
+          <FirebaseSettings companionEnabled={state.enabled} />
 
           <div className="border-t border-hairline/30 pt-4">
             <div className="text-[13px] text-ink">Connection details</div>

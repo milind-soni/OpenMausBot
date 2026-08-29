@@ -45,7 +45,7 @@ export function NoEngines() {
       <div className="mx-auto w-full max-w-[560px] px-6 py-12">
         <h1 className="text-[20px] font-semibold text-ink">Install an AI engine to get started</h1>
         <p className="mt-1.5 text-[13.5px] leading-relaxed text-ink-secondary">
-          OpenMausBot doesn&rsquo;t ship a model of its own — your bots run on an AI CLI installed on
+          Agent Centipede doesn&rsquo;t ship a model of its own — your agents run on an AI CLI installed on
           this computer, using your existing login. Set up any one of these and your bots come alive.
         </p>
 

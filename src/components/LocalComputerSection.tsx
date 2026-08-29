@@ -226,8 +226,8 @@ export function LocalComputerSection() {
       <Card
         title="Local VM"
         subtitle={perBot
-          ? `Private Cua Linux desktops on this ${host}, with one container and durable workspace per bot. Distinct bots can work concurrently and idle desktops stop after 8 hours.`
-          : `A shared Cua Linux sandbox on this ${host} for bots to browse and work in — isolated, backed by one durable workspace, and automatically recycled after 8 hours without activity.`}
+          ? `Private Cua Linux desktops on this ${host}, with one container and durable workspace per agent. Distinct agents can work concurrently and idle desktops stop after 8 hours.`
+          : `A shared Cua Linux sandbox on this ${host} for agents to browse and work in — isolated, backed by one durable workspace, and automatically recycled after 8 hours without activity.`}
       >
         <div className="flex flex-wrap items-center gap-2">
           <span
@@ -242,9 +242,9 @@ export function LocalComputerSection() {
               : unavailable
                 ? "Status unavailable"
                 : perBot && headerReady
-                  ? "Ready for per-bot desktops"
+                  ? "Ready for per-agent desktops"
                   : perBotRuntimeUnsupported
-                    ? "Per-bot mode requires Docker or Podman"
+                    ? "Per-agent mode requires Docker or Podman"
                   : ready
                     ? "Ready"
                     : (status?.problem ?? "Not ready")}
@@ -275,7 +275,7 @@ export function LocalComputerSection() {
 
       <Card
         title="Isolation"
-        subtitle="Shared keeps the original single-desktop behavior. Per bot gives each bot its own container, workspace, viewer port, lease, and idle timer."
+        subtitle="Shared keeps the original single-desktop behavior. Per agent gives each agent its own container, workspace, viewer port, lease, and idle timer."
       >
         <div className="flex overflow-hidden rounded-lg border border-hairline/40">
           {(["shared", "per-bot"] as const).map((mode, index) => (
@@ -290,17 +290,17 @@ export function LocalComputerSection() {
                 status?.mode === mode ? "bg-control text-ink" : "text-ink-secondary hover:text-ink",
               )}
             >
-              {mode === "shared" ? "Shared" : "Per bot"}
+              {mode === "shared" ? "Shared" : "Per agent"}
             </button>
           ))}
         </div>
         <div className="mt-3 flex items-center justify-between gap-3">
           <div>
-            <div className="text-[13px] text-ink">Maximum per-bot desktops</div>
+            <div className="text-[13px] text-ink">Maximum per-agent desktops</div>
             <div className="text-[11.5px] text-ink-secondary">Limits storage and host resource use; each running desktop may use up to 4 GB and 2 CPUs.</div>
           </div>
           <select
-            aria-label="Maximum per-bot desktops"
+            aria-label="Maximum per-agent desktops"
             value={status?.max_instances ?? 2}
             disabled={!status || policyPending}
             onChange={(event) => void savePolicy(status?.mode ?? "shared", Number(event.target.value))}
@@ -312,7 +312,7 @@ export function LocalComputerSection() {
         {policyPending && <div className="mt-2 flex items-center gap-1.5 text-[12px] text-ink-secondary"><Loader2 size={12} className="animate-spin" /> Saving…</div>}
       </Card>
 
-      <Card title="Setup" subtitle="Once a container runtime is open, OpenMausBot prepares Cua and the VM for you.">
+      <Card title="Setup" subtitle="Once a container runtime is open, Agent Centipede prepares Cua and the VM for you.">
         <div className="flex flex-col gap-4">
           <Step n={1} title="Install a container runtime" done={Boolean(status?.runtime)}>
             <div className="text-[13px] leading-relaxed text-ink-secondary">
@@ -348,15 +348,15 @@ export function LocalComputerSection() {
 
           <Step
             n={4}
-            title={perBot ? "Create a private desktop from each bot's Computer panel" : needsRecreate ? "Replace the older or unsafe VM" : "Create and start the Local VM"}
+            title={perBot ? "Create a private desktop from each agent's Computer panel" : needsRecreate ? "Replace the older or unsafe VM" : "Create and start the Local VM"}
             done={!perBot && ready}
           >
             {perBot ? (
               <div className="text-[13px] leading-relaxed text-ink-secondary">
                 {perBotRuntimeUnsupported
-                  ? "Apple container requires an explicit host port, so OpenMausBot will not guess or expose one. Install or start Docker or Podman for safe per-bot dynamic loopback ports."
+                  ? "Apple container requires an explicit host port, so Agent Centipede will not guess or expose one. Install or start Docker or Podman for safe per-agent dynamic loopback ports."
                   : <>
-                      Choose <b className="text-ink">Local VM</b> for a bot, open that bot's Computer panel, then create its desktop there. OpenMausBot assigns a private workspace and an available loopback viewer port automatically.
+                      Choose <b className="text-ink">Local VM</b> for an agent, open that agent's Computer panel, then create its desktop there. Agent Centipede assigns a private workspace and an available loopback viewer port automatically.
                     </>}
               </div>
             ) : needsRecreate ? (
@@ -389,7 +389,7 @@ export function LocalComputerSection() {
         <Card>
           <div className="flex gap-2 text-[13px] text-ink-secondary">
             <AlertTriangle size={15} className="mt-0.5 shrink-0 text-warning" />
-            <span>OpenMausBot could not inspect the container runtime. Re-check, or review the app logs.</span>
+            <span>Agent Centipede could not inspect the container runtime. Re-check, or review the app logs.</span>
           </div>
         </Card>
       )}
@@ -397,8 +397,8 @@ export function LocalComputerSection() {
       <Card
         title="Safety and storage"
         subtitle={perBot
-          ? `Cua Driver operates only each VM's desktop. Every bot gets a private host folder mounted at ${status?.workspace_guest_path ?? "/home/cua/workspace"}; its files and browser profile survive VM replacement. Viewers bind only to loopback, and exact bot-derived targets prevent one bot from attaching to another bot's container. Each VM keeps the existing 4 GB, 2 CPU, 512-process and dropped-capability limits. VMs can still reach the internet.`
-          : `Cua Driver operates only the VM's desktop. Exactly one private host folder is mounted at ${status?.workspace_guest_path ?? "/home/cua/workspace"}; files and browser sign-ins there survive VM replacement, while everything elsewhere in the VM remains disposable. The password-protected viewer is available only on this machine. Docker and Podman runs are limited to 4 GB memory, 2 CPUs and 512 processes; all Linux capabilities are dropped except the two the desktop supervisor needs to switch to its unprivileged user. The VM can still reach the internet, and bots share it one at a time.`}
+          ? `Cua Driver operates only each VM's desktop. Every agent gets a private host folder mounted at ${status?.workspace_guest_path ?? "/home/cua/workspace"}; its files and browser profile survive VM replacement. Viewers bind only to loopback, and exact agent-derived targets prevent one agent from attaching to another agent's container. Each VM keeps the existing 4 GB, 2 CPU, 512-process and dropped-capability limits. VMs can still reach the internet.`
+          : `Cua Driver operates only the VM's desktop. Exactly one private host folder is mounted at ${status?.workspace_guest_path ?? "/home/cua/workspace"}; files and browser sign-ins there survive VM replacement, while everything elsewhere in the VM remains disposable. The password-protected viewer is available only on this machine. Docker and Podman runs are limited to 4 GB memory, 2 CPUs and 512 processes; all Linux capabilities are dropped except the two the desktop supervisor needs to switch to its unprivileged user. The VM can still reach the internet, and agents share it one at a time.`}
       >
         {existing && (
           <div className="flex flex-wrap gap-2">

@@ -373,7 +373,7 @@ export function TeamLibraryPanel({
         .map((candidate, index) => ({
           key: `dir-${candidate.slug}`,
           name: candidate.name,
-          title: candidate.category || "Community bot",
+          title: candidate.category || "Community agent",
           description: candidate.prompt,
           appearance: { color: DIRECTORY_COLORS[index % DIRECTORY_COLORS.length] },
         }));
@@ -456,8 +456,8 @@ export function TeamLibraryPanel({
             <p className={cn("mt-1 text-[13px] text-ink-secondary", pending && "ml-9")}>
                 {pending
                   ? pending.kind === "package"
-                    ? `${pending.members.length} bots · portable Markdown playbook`
-                    : `${pending.members.length} ready-to-load bots`
+                    ? `${pending.members.length} agents · portable Markdown playbook`
+                    : `${pending.members.length} ready-to-load agents`
                   : "Start with a complete playbook or bring your own."}
             </p>
           </div>
@@ -517,7 +517,7 @@ export function TeamLibraryPanel({
                 <Check size={15} className="mt-0.5 shrink-0 text-success" />
                 <p>
                   {pending.kind === "package"
-                    ? "Bots, Chief of Staff, rooms, and reviewed playbooks are loaded. Suggested routines arrive paused, and connected apps stay off until you approve them. Conversations, credentials, permissions, and computer access stay private."
+                    ? "Agents, optional coordinator roles, rooms, and reviewed playbooks are loaded. Suggested routines arrive paused, and connected apps stay off until you approve them. Conversations, credentials, permissions, and computer access stay private."
                     : "Only roles and appearance are loaded. Your conversations, account connections, permissions, and computer access stay private."}
                 </p>
               </div>
@@ -529,12 +529,12 @@ export function TeamLibraryPanel({
                 {currentBotCount > 0 ? (
                   importMode === "replace" ? (
                     <>
-                      Replaces your {currentBotCount} current {currentBotCount === 1 ? "bot" : "bots"}. They&apos;ll be archived with conversations intact.{" "}
+                      Replaces your {currentBotCount} current {currentBotCount === 1 ? "agent" : "agents"}. They&apos;ll be archived with conversations intact.{" "}
                       <button onClick={() => setImportMode("add")} className="font-medium text-ink hover:underline">Add alongside instead</button>
                     </>
                   ) : (
                     <>
-                      This team will be added alongside your current bots.{" "}
+                      This team will be added alongside your current agents.{" "}
                       <button onClick={() => setImportMode("replace")} className="font-medium text-ink hover:underline">Replace current team instead</button>
                     </>
                   )
@@ -647,7 +647,7 @@ export function TeamLibraryPanel({
                             <h3 className="truncate text-[14px] font-medium text-ink">{entry.name}</h3>
                             <p className="mt-0.5 truncate text-[12.5px] text-ink-secondary">{entry.outcome ?? entry.summary}</p>
                             <p className="mt-1 truncate text-[11.5px] text-ink-secondary/80">
-                              {entry.members} bots · {entry.skills.length} playbooks
+                              {entry.members} agents · {entry.skills.length} playbooks
                               {entry.requires.apps.length > 0 && ` · ${entry.requires.apps.join(", ")}`}
                               {entry.setupMinutes && ` · ~${entry.setupMinutes} min`}
                             </p>
@@ -847,7 +847,7 @@ export function TeamLibraryPanel({
                                 <button
                                   onClick={() => void openExternal(candidate.detailUrl)}
                                   aria-label={`Open ${candidate.name} on botdirectory.ai`}
-                                  title="Read this bot's page before adding it"
+                                  title="Read this agent's page before adding it"
                                   className="rounded-lg p-1.5 text-ink-secondary hover:bg-raised hover:text-ink"
                                 >
                                   <ExternalLink size={14} />
@@ -875,7 +875,7 @@ export function TeamLibraryPanel({
                         </button>
                       </div>
                       <p className="mt-2 text-[12px] text-ink-secondary">
-                        Creates the team as new bots, opens a channel for them, and points the channel at this folder.
+                        Creates the team as new agents, opens a channel for them, and points the channel at this folder.
                       </p>
                     </div>
                   )}

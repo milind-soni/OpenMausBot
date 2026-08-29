@@ -3,9 +3,9 @@
 // banked per settled turn on each task (server/store.ts addTaskUsage) and
 // summed here; nothing is fetched.
 import { useStore } from "@/state/store";
-import { MausAvatar } from "./Avatar";
+import { BotAvatar } from "./Avatar";
 import { Card } from "./SettingsPrimitives";
-import { botUsage, costCaption, formatTokens, formatUsd, hasFiniteCost, sumUsage } from "@/lib/usage";
+import { botUsage, costCaption, formatTokens, formatUsd, hasFiniteCost, sumUsage, tokenUsageLabel, tokenUsagePresentation } from "@/lib/usage";
 
 export function UsageSection() {
   const { state } = useStore();
@@ -27,9 +27,9 @@ export function UsageSection() {
   const billings = new Set(rows.map((r) => r.billing));
 
   return (
-    <Card title="Usage" subtitle="Tokens and cost per bot, added up from every settled turn. Only engines that report a price show one.">
+    <Card title="Usage" subtitle="Tokens and cost per agent, added up from settled turns. Unreported engine usage is labeled instead of counted as zero.">
       {rows.length === 0 ? (
-        <div className="text-[13px] text-ink-secondary">Nothing spent yet — figures appear after a bot's first turn.</div>
+        <div className="text-[13px] text-ink-secondary">Nothing spent yet — figures appear after an agent's first turn.</div>
       ) : (
         <div className="flex flex-col">
           <div className="grid grid-cols-[1fr_auto_auto_auto] gap-x-5 border-b border-hairline/40 pb-2 text-[11.5px] font-medium uppercase tracking-wide text-ink-secondary">
@@ -41,20 +41,20 @@ export function UsageSection() {
           {rows.map(({ bot, usage }) => (
             <div key={bot.id} className="grid grid-cols-[1fr_auto_auto_auto] items-center gap-x-5 border-b border-hairline/20 py-2 text-[13px]">
               <span className="flex min-w-0 items-center gap-2 text-ink">
-                <MausAvatar color={bot.color} state="idle" size={22} animated={false} />
+                <BotAvatar bot={bot} state="idle" size={22} animated={false} label={bot.name} />
                 <span className="truncate">{bot.name}</span>
               </span>
               <span className="text-right tabular-nums text-ink-secondary">{usage.turns}</span>
-              <span className="text-right tabular-nums text-ink" title={`${formatTokens(usage.input)} in · ${formatTokens(usage.output)} out`}>
-                {formatTokens(usage.input + usage.output)}
+              <span className="text-right tabular-nums text-ink" title={(() => { const presentation = tokenUsagePresentation(usage); return presentation.kind === "estimated" ? `Best local estimate; provider telemetry was incomplete (${presentation.estimateSource})` : `${formatTokens(usage.input)} in · ${formatTokens(usage.output)} out`; })()}>
+                {tokenUsageLabel(usage)}
               </span>
               <span className="text-right tabular-nums text-ink">{hasFiniteCost(usage.costUsd) ? formatUsd(usage.costUsd) : <span className="text-ink-secondary">—</span>}</span>
             </div>
           ))}
           <div className="grid grid-cols-[1fr_auto_auto_auto] items-center gap-x-5 pt-2.5 text-[13px] font-medium text-ink">
-            <span>All bots</span>
+            <span>All agents</span>
             <span className="text-right tabular-nums">{total.turns}</span>
-            <span className="text-right tabular-nums">{formatTokens(total.input + total.output)}</span>
+            <span className="text-right tabular-nums">{tokenUsageLabel(total)}</span>
             <span className="text-right tabular-nums">{hasFiniteCost(total.costUsd) ? formatUsd(total.costUsd) : "—"}</span>
           </div>
           {hasFiniteCost(total.costUsd) && (

@@ -113,8 +113,8 @@ export function ManageMembersPanel({
       >
         <div className="mb-1 text-[15px] font-semibold text-ink">Manage Members</div>
         <div className="mb-3 truncate text-[13px] text-ink-secondary">{group.name}</div>
-        <BotPickerList bots={bots} picked={picked} onToggle={toggle} emptyHint="Create a bot first — channels are made of bots." />
-        {!memberIds.length && <div className="mt-2 text-[12px] text-ink-secondary">A channel needs at least one bot.</div>}
+        <BotPickerList bots={bots} picked={picked} onToggle={toggle} emptyHint="Create an agent first — channels are made of agents." />
+        {!memberIds.length && <div className="mt-2 text-[12px] text-ink-secondary">A channel needs at least one agent.</div>}
         {saveError && (
           <div role="alert" className="mt-2 text-[12px] text-danger">
             {saveError}
@@ -132,7 +132,7 @@ export function ManageMembersPanel({
             disabled={!memberIds.length}
             className="flex-1 rounded-lg bg-accent py-2 text-[14px] font-medium text-white hover:brightness-110 disabled:opacity-40"
           >
-            Save{memberIds.length ? ` · ${memberIds.length} ${memberIds.length === 1 ? "bot" : "bots"}` : ""}
+            Save{memberIds.length ? ` · ${memberIds.length} ${memberIds.length === 1 ? "agent" : "agents"}` : ""}
           </button>
         </div>
       </div>

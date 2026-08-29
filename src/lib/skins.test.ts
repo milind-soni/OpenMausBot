@@ -4,8 +4,8 @@
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
-import { describe, expect, it } from "vitest";
-import { SKINS, SKIN_IDS, DEFAULT_SKIN } from "./skins";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { SKINS, SKIN_IDS, DEFAULT_SKIN, applySkin } from "./skins";
 
 const css = readFileSync(
   join(dirname(fileURLToPath(import.meta.url)), "../styles.css"),
@@ -16,15 +16,18 @@ const blocks = new Set(
   [...css.matchAll(/\[data-skin="([a-z-]+)"\]/g)].map(([, id]) => id),
 );
 
+afterEach(() => {
+  vi.unstubAllGlobals();
+});
+
 describe("skins", () => {
   it("gives every registered skin a stylesheet block", () => {
     for (const id of SKIN_IDS) expect(blocks).toContain(id);
   });
 
   it("registers every stylesheet block", () => {
-    // SAFETY: the assertion only fits toContain()'s parameter type — the
-    // assertion IS the check, and an unregistered block fails the test.
-    for (const id of blocks) expect(SKIN_IDS).toContain(id as (typeof SKIN_IDS)[number]);
+    const registered = new Set<string>(SKIN_IDS);
+    for (const id of blocks) expect(registered.has(id)).toBe(true);
   });
 
   it("defines the same tokens in every skin", () => {
@@ -45,5 +48,25 @@ describe("skins", () => {
       expect(skin.name.length).toBeGreaterThan(0);
       expect(skin.tagline.length).toBeGreaterThan(0);
     }
+  });
+
+  it("updates the native Windows title bar when the active skin changes", () => {
+    const setTitleBarColors = vi.fn();
+    const dataset: Record<string, string> = {};
+    vi.stubGlobal("document", { documentElement: { dataset } });
+    vi.stubGlobal("localStorage", { setItem: vi.fn() });
+    vi.stubGlobal("getComputedStyle", () => ({
+      getPropertyValue: (name: string) =>
+        name === "--color-app" ? " #f5f1eb " : name === "--color-ink" ? " #1a1a18 " : "",
+    }));
+    vi.stubGlobal("window", { ogb: { setTitleBarColors } });
+
+    applySkin("atelier");
+
+    expect(dataset.skin).toBe("atelier");
+    expect(setTitleBarColors).toHaveBeenCalledWith({
+      background: "#f5f1eb",
+      foreground: "#1a1a18",
+    });
   });
 });

@@ -23,6 +23,17 @@ function foldable(message: Message): boolean {
   return !tool.name.startsWith("error:");
 }
 
+/** Runtime loop heuristics are useful for diagnostics, but they are not a
+ * completed tool, a real failure, or an action the user can take. Older
+ * builds persisted them as failed activity chips; keep those rows out of
+ * the conversation and its folded step summaries. */
+export function isInternalActivityDiagnostic(message: Message): boolean {
+  return (
+    message.kind === "activity" &&
+    message.tool?.name.startsWith("Same call repeated ") === true
+  );
+}
+
 export function groupActivityRuns(messages: Message[]): TranscriptItem[] {
   const items: TranscriptItem[] = [];
   let run: Message[] = [];
@@ -33,6 +44,7 @@ export function groupActivityRuns(messages: Message[]): TranscriptItem[] {
     run = [];
   };
   for (const message of messages) {
+    if (isInternalActivityDiagnostic(message)) continue;
     if (foldable(message)) {
       const first = run[0];
       if (
@@ -53,20 +65,14 @@ export function groupActivityRuns(messages: Message[]): TranscriptItem[] {
   return items;
 }
 
-const MAX_NAMES = 3;
-
 /** The one line a folded run has to earn its place with: how much work it
- * was, which tools did it, and whether anything failed — the last being the
- * only reason you would open it. */
+ * completed and whether anything needs inspection. Raw commands belong in
+ * the expanded detail, not in a transcript-width summary. */
 export function describeRun(messages: Message[]): string {
-  const counts = new Map<string, number>();
-  for (const message of messages) {
-    const name = message.tool?.name ?? "";
-    counts.set(name, (counts.get(name) ?? 0) + 1);
-  }
-  const names = [...counts].map(([name, count]) => (count > 1 ? `${name} ×${count}` : name));
-  const shown = names.slice(0, MAX_NAMES).join(", ");
-  const rest = names.length > MAX_NAMES ? ` +${names.length - MAX_NAMES} more` : "";
   const failed = messages.filter((message) => message.tool?.ok === false).length;
-  return `${messages.length} steps · ${shown}${rest}${failed ? ` · ${failed} failed` : ""}`;
+  const completed = messages.filter((message) => message.tool?.ok === true).length;
+  const running = messages.length - completed - failed;
+  if (failed > 0) return `${messages.length} actions · ${completed} completed · ${failed} failed`;
+  if (running > 0) return `${messages.length} actions · ${completed} completed · ${running} running`;
+  return `${messages.length} actions completed`;
 }

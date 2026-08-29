@@ -27,10 +27,10 @@ export function SecretRequestCard({
   const declined = outcome === "dismissed";
   const description = provided
     ? secret.resumed
-      ? "Saved securely. Your bot is continuing the task."
-      : "Saved securely. Your bot will continue when its current turn settles."
+      ? "Saved securely. Your agent is continuing the task."
+      : "Saved securely. Your agent will continue when its current turn settles."
     : declined
-      ? "You chose not to provide this credential. OpenMausBot could not resume the bot yet."
+      ? "You chose not to provide this credential. Agent Centipede could not resume the agent yet."
       : secret.description;
   const footerLabel = declined
     ? "Continuing without this credential failed"
@@ -121,7 +121,7 @@ export function SecretRequestCard({
             </p>
             {!provided && !declined && (
               <p className="mt-1 flex items-center gap-1 text-[11.5px] text-ink-secondary/80">
-                <LockKeyhole size={11} /> Stored securely by OpenMausBot and never added to chat.
+                <LockKeyhole size={11} /> Stored securely by Agent Centipede and never added to chat.
               </p>
             )}
             {error && <p role="alert" className="mt-2 text-[12px] text-danger">{error}</p>}

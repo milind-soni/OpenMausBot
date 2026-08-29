@@ -14,6 +14,7 @@ import {
   FolderMinus,
   FolderPlus,
   Library,
+  ListTodo,
   Loader2,
   Network,
   Pencil,
@@ -51,6 +52,7 @@ import {
   type SidebarDensity,
 } from "@/lib/sidebar-preferences";
 import { phoneSettingsAction, SidebarPhoneButton } from "./SidebarPhoneButton";
+import { CentipedeBrand } from "./CentipedeBrand";
 
 /** "Milind Soni" → "MS", "milind" → "M", "you@x.dev" → "Y", unset → "?" */
 function profileInitials(profile?: { name?: string; email?: string }): string {
@@ -163,7 +165,7 @@ interface MenuState {
 
 function groupPreview(group: Group, bots: Bot[]): string {
   if (group.busyBotId) {
-    return `${bots.find((b) => b.id === group.busyBotId)?.name ?? "A bot"} is working…`;
+    return `${bots.find((b) => b.id === group.busyBotId)?.name ?? "An agent"} is working…`;
   }
   const last = group.messages.at(-1);
   if (!last) return "No messages yet";
@@ -235,10 +237,11 @@ function GroupListItem({
         onMenu({ groupId: group.id, x: rect.left + rect.width / 2, y: rect.top + rect.height / 2 });
       }}
       className={cn(
-        "relative flex w-full items-center rounded-xl text-left",
+        "centipede-agent-row relative flex w-full items-center rounded-xl text-left",
         density === "icons" ? "justify-center px-1 py-1.5" : density === "compact" ? "gap-2 px-2 py-1.5" : "gap-3 px-3 py-2.5",
         selected ? "bg-raised" : "hover:bg-raised/50",
       )}
+      data-selected={selected}
       title={density === "icons" ? group.name : undefined}
       aria-label={density === "icons" ? group.name : undefined}
     >
@@ -450,14 +453,14 @@ function NewRoomPanel({ onClose }: { onClose: () => void }) {
           bots={bots}
           picked={picked}
           onToggle={toggle}
-          emptyHint="Create a bot first — channels are made of bots."
+          emptyHint="Create an agent first — channels are made of agents."
         />
         <button
           onClick={create}
           disabled={!picked.size}
           className="mt-3 w-full rounded-lg bg-accent py-2 text-[14px] font-medium text-white hover:brightness-110 disabled:opacity-40"
         >
-          Create Channel{picked.size ? ` · ${picked.size} ${picked.size === 1 ? "bot" : "bots"}` : ""}
+          Create Channel{picked.size ? ` · ${picked.size} ${picked.size === 1 ? "agent" : "agents"}` : ""}
         </button>
       </div>
     </div>
@@ -635,9 +638,9 @@ function BotContextMenu({
   const visibleBotCount = state.bots.filter((candidate) => !candidate.hidden).length;
   const archiveBlocked = Boolean(bot.chiefOfStaff) || visibleBotCount <= 1;
   const archiveHint = bot.chiefOfStaff
-    ? "Choose another Chief of Staff first"
+    ? "Choose another coordinator first"
     : visibleBotCount <= 1
-      ? "Keep at least one active bot"
+      ? "Keep at least one active agent"
       : undefined;
   // keep the menu on-screen near the click
   const top = Math.max(8, Math.min(menu.y, window.innerHeight - 380));
@@ -683,11 +686,11 @@ function BotContextMenu({
         ),
         item(
           <Crown size={16} className={bot.chiefOfStaff ? "text-accent" : "text-ink-secondary"} />,
-          bot.chiefOfStaff ? "Remove Chief of Staff" : "Make Chief of Staff",
+          bot.chiefOfStaff ? "Remove coordinator role" : "Make coordinator",
           () => dispatch({ type: "updateBot", botId: bot.id, patch: { chiefOfStaff: !bot.chiefOfStaff } }),
           {
             disabled: !bot.chiefOfStaff && !canCoordinate,
-            hint: !bot.chiefOfStaff && !canCoordinate ? "Choose a Claude or ACP engine first" : undefined,
+            hint: !bot.chiefOfStaff && !canCoordinate ? "Choose an engine with coordination support first" : undefined,
           },
         ),
         item(<FolderPlus size={16} className="text-ink-secondary" />, "Move to section", () => {
@@ -753,7 +756,7 @@ function BotListItem({
   const visible = visibleMessages(bot);
   const last = visible.at(-1);
   const rowClass = cn(
-    "flex w-full items-center rounded-xl border text-left",
+    "centipede-agent-row flex w-full items-center rounded-xl border text-left",
     iconOnly
       ? "justify-center px-1 py-1.5"
       : density === "compact"
@@ -804,7 +807,7 @@ function BotListItem({
           <span className="flex min-w-0 items-center gap-1.5 truncate text-[13px] text-ink-secondary">
             {bot.chiefOfStaff && (
               <span className="flex shrink-0 items-center gap-1 text-[11.5px] font-medium text-accent">
-                <Crown size={11} /> Chief of Staff
+                <Crown size={11} /> Coordinator
               </span>
             )}
             {bot.chiefOfStaff && preview(bot) && <span className="shrink-0 text-ink-secondary/60">·</span>}
@@ -826,7 +829,7 @@ function BotListItem({
   // are presentational, which hides the field from assistive tech.
   if (renaming) {
     return (
-      <div className={rowClass} onContextMenu={onContextMenu}>
+      <div className={rowClass} data-selected={selected} onContextMenu={onContextMenu}>
         {body}
       </div>
     );
@@ -847,6 +850,7 @@ function BotListItem({
         }}
         onContextMenu={onContextMenu}
         className={rowClass}
+        data-selected={selected}
       >
         {body}
       </div>
@@ -860,9 +864,9 @@ function BotListItem({
         aria-label={`Archive ${bot.name}`}
         title={
           bot.chiefOfStaff
-            ? "Choose another Chief of Staff first"
+            ? "Choose another coordinator first"
             : archiveDisabled
-              ? "Keep at least one active bot"
+              ? "Keep at least one active agent"
               : `Archive ${bot.name}`
         }
         className="absolute right-1 top-1/2 flex size-10 -translate-y-1/2 items-center justify-center rounded-lg bg-card/90 text-ink-secondary opacity-0 shadow-sm transition hover:bg-raised hover:text-ink focus:opacity-100 disabled:cursor-default disabled:opacity-0 group-hover:opacity-100 group-focus-within:opacity-100 max-md:opacity-100"
@@ -931,7 +935,7 @@ function ArchivedBotsPanel({
       for (const response of responses) dispatch({ type: "botPatched", bot: response.bot });
       const first = bots[0];
       if (first) dispatch({ type: "select", id: first.id });
-      onRestored(`${bots.length} ${bots.length === 1 ? "bot" : "bots"} restored`);
+      onRestored(`${bots.length} ${bots.length === 1 ? "agent" : "agents"} restored`);
       onClose();
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : String(cause));
@@ -955,8 +959,8 @@ function ArchivedBotsPanel({
       >
         <header className="flex items-start justify-between gap-4 px-6 pb-4 pt-6 sm:px-8 sm:pt-7">
           <div>
-            <h2 id="archived-bots-title" className="text-[22px] font-semibold tracking-[-0.01em] text-ink">Archived bots</h2>
-            <p className="mt-1 text-[13px] text-ink-secondary">Conversations are kept until you choose to delete a bot.</p>
+            <h2 id="archived-bots-title" className="text-[22px] font-semibold tracking-[-0.01em] text-ink">Archived agents</h2>
+            <p className="mt-1 text-[13px] text-ink-secondary">Conversations are kept until you choose to delete an agent.</p>
           </div>
           <div className="flex items-center gap-1">
             {bots.length > 1 && (
@@ -973,7 +977,7 @@ function ArchivedBotsPanel({
               onClick={onClose}
               disabled={restoringAll || Boolean(busyId)}
               className="flex size-10 items-center justify-center rounded-lg text-ink-secondary hover:bg-raised hover:text-ink disabled:opacity-40"
-              aria-label="Close archived bots"
+              aria-label="Close archived agents"
             >
               <X size={21} />
             </button>
@@ -987,7 +991,7 @@ function ArchivedBotsPanel({
                 <BotAvatar bot={bot} state="happy" size={42} animated={false} />
                 <div className="min-w-0 flex-1">
                   <div className="truncate text-[14px] font-medium text-ink">{bot.name}</div>
-                  <div className="mt-0.5 truncate text-[12.5px] text-ink-secondary">{bot.title || "Bot"}</div>
+                  <div className="mt-0.5 truncate text-[12.5px] text-ink-secondary">{bot.title || "Agent"}</div>
                 </div>
                 <button
                   onClick={() => void restore(bot)}
@@ -1095,7 +1099,7 @@ export function Sidebar({ open, onClose }: { open: boolean; onClose: () => void 
     try {
       const exported = await downloadAllBots();
       track("team_exported", { members: exported.members, scope: "all_visible" });
-      setTeamFeedback({ error: false, text: `${exported.members} bots exported` });
+      setTeamFeedback({ error: false, text: `${exported.members} agents exported` });
     } catch (cause) {
       setTeamFeedback({
         error: true,
@@ -1257,9 +1261,9 @@ export function Sidebar({ open, onClose }: { open: boolean; onClose: () => void 
 
   return (
     <aside
-      aria-label="Bots and navigation"
+      aria-label="Agents and navigation"
       className={cn(
-        "flex h-full shrink-0 flex-col border-r border-hairline/40 bg-panel transition-[width] duration-200",
+        "centipede-sidebar flex h-full shrink-0 flex-col border-r border-hairline/40 bg-panel transition-[width] duration-200",
         density === "icons" ? "w-[80px]" : density === "compact" ? "w-[272px]" : "w-[320px]",
         // Below md only: the sidebar leaves the flow and slides in over the chat.
         // Scoped with max-md: rather than cancelled with md: on purpose — Tailwind
@@ -1365,7 +1369,7 @@ export function Sidebar({ open, onClose }: { open: boolean; onClose: () => void 
                   className="flex w-full items-center gap-3 px-3.5 py-2 text-left text-[14px] text-ink hover:bg-raised/70"
                 >
                   <BotIcon size={16} className="text-ink-secondary" />
-                  New Bot
+                  New Agent
                 </button>
                 <button
                   onClick={() => {
@@ -1386,7 +1390,7 @@ export function Sidebar({ open, onClose }: { open: boolean; onClose: () => void 
                   className="flex w-full items-center gap-3 px-3.5 py-2 text-left text-[14px] text-ink hover:bg-raised/70"
                 >
                   {exportingTeam ? <Loader2 size={16} className="animate-spin text-ink-secondary" /> : <ArrowDownToLine size={16} className="text-ink-secondary" />}
-                  {exportingTeam ? "Exporting…" : "Export all bots"}
+                  {exportingTeam ? "Exporting…" : "Export all agents"}
                 </button>
                 <button
                   onClick={() => {
@@ -1407,7 +1411,7 @@ export function Sidebar({ open, onClose }: { open: boolean; onClose: () => void 
                     className="flex w-full items-center gap-3 px-3.5 py-2 text-left text-[14px] text-ink hover:bg-raised/70"
                   >
                     <Archive size={16} className="text-ink-secondary" />
-                    <span className="flex-1">Archived bots</span>
+                    <span className="flex-1">Archived agents</span>
                     <span className="text-[11.5px] text-ink-secondary">{archivedBots.length}</span>
                   </button>
                 )}
@@ -1415,6 +1419,15 @@ export function Sidebar({ open, onClose }: { open: boolean; onClose: () => void 
             </>
           )}
         </div>
+      </div>
+
+      <div
+        className={cn(
+          "border-b border-hairline/30",
+          density === "icons" ? "flex justify-center px-2 py-2" : "px-4 pt-1 pb-3",
+        )}
+      >
+        <CentipedeBrand compact={density === "icons"} />
       </div>
 
       {/* Search */}
@@ -1426,7 +1439,7 @@ export function Sidebar({ open, onClose }: { open: boolean; onClose: () => void 
             onChange={(e) => setQuery(e.target.value)}
             onKeyDown={(e) => e.key === "Escape" && setQuery("")}
             placeholder="Search"
-            aria-label="Search bots and messages"
+            aria-label="Search agents and messages"
             className="w-full bg-transparent text-[14px] text-ink placeholder:text-ink-secondary focus:outline-none"
           />
         </div>
@@ -1453,7 +1466,7 @@ export function Sidebar({ open, onClose }: { open: boolean; onClose: () => void 
           {unsectionedGroups.map((g) => (
             <GroupListItem key={g.id} group={g} density={density} onMenu={setRoomMenu} />
           ))}
-          {visibleBots.length > 0 && density !== "icons" && <SectionDivider name="Bots" />}
+          {visibleBots.length > 0 && density !== "icons" && <SectionDivider name="Agents" />}
           {visibleBots.map((b) => (
             <BotListItem
               key={b.id}
@@ -1505,6 +1518,19 @@ export function Sidebar({ open, onClose }: { open: boolean; onClose: () => void 
       {/* Footer */}
       <div className={cn("pb-3 pt-2", density === "icons" ? "px-2" : "px-3")}>
         <button
+          onClick={() => dispatch({ type: "showWork" })}
+          aria-label={density === "icons" ? "Work" : undefined}
+          title={density === "icons" ? "Work" : undefined}
+          className={cn(
+            "flex min-h-10 w-full items-center rounded-xl py-2 text-left transition-colors",
+            density === "icons" ? "justify-center px-2" : "gap-3 px-3",
+            state.activeView === "work" ? "bg-raised text-ink" : "text-ink hover:bg-raised/50",
+          )}
+        >
+          <ListTodo size={20} className={state.activeView === "work" ? "text-accent" : "text-ink-secondary"} />
+          <span className={cn("flex-1 text-[14px]", density === "icons" && "hidden")}>Work</span>
+        </button>
+        <button
           onClick={() => dispatch({ type: "showTeamMap" })}
           aria-label={density === "icons" ? "Team map" : undefined}
           title={density === "icons" ? "Team map" : undefined}
@@ -1534,8 +1560,8 @@ export function Sidebar({ open, onClose }: { open: boolean; onClose: () => void 
         )}
         <button
           onClick={() => dispatch({ type: "showRoutines" })}
-          aria-label={density === "icons" ? "Tasks and routines" : undefined}
-          title={density === "icons" ? "Tasks and routines" : undefined}
+          aria-label={density === "icons" ? "Scheduled runs" : undefined}
+          title={density === "icons" ? "Scheduled runs" : undefined}
           className={cn(
             "flex min-h-10 w-full items-center rounded-xl py-2 text-left transition-colors",
             density === "icons" ? "justify-center px-2" : "gap-3 px-3",
@@ -1543,7 +1569,7 @@ export function Sidebar({ open, onClose }: { open: boolean; onClose: () => void 
           )}
         >
           <CalendarDays size={20} className={state.activeView === "routines" ? "text-accent" : "text-ink-secondary"} />
-          <span className={cn("flex-1 text-[14px]", density === "icons" && "hidden")}>Tasks &amp; routines</span>
+          <span className={cn("flex-1 text-[14px]", density === "icons" && "hidden")}>Scheduled runs</span>
           {state.routineRuns.some((run) => ["failed", "missed"].includes(run.status) && !run.seenAt) && (
             <span className="size-2 rounded-full bg-danger" />
           )}
@@ -1649,12 +1675,12 @@ export function Sidebar({ open, onClose }: { open: boolean; onClose: () => void 
               result.archived.length > 0
                 ? {
                     error: false,
-                    text: `${result.name} loaded · ${result.members} ${result.members === 1 ? "bot" : "bots"}`,
+                    text: `${result.name} loaded · ${result.members} ${result.members === 1 ? "agent" : "agents"}`,
                     undo: result,
                   }
                 : {
                     error: false,
-                    text: `${result.name} loaded · ${result.members} ${result.members === 1 ? "bot" : "bots"}`,
+                    text: `${result.name} loaded · ${result.members} ${result.members === 1 ? "agent" : "agents"}`,
                   },
             );
           }}

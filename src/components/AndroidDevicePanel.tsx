@@ -340,7 +340,7 @@ export function AndroidDevicePanel({ status }: { status: AndroidDeviceStatus }) 
           wireless pairing is needed.
         </div>
         <div className="mt-2 rounded-lg bg-inset px-3 py-2 text-[11px] leading-relaxed text-ink-secondary">
-          Once connected, ask any compatible Maus to open an Android app or complete a task on your phone. The
+          Once connected, ask any compatible agent to open an Android app or complete a task on your phone. The
           bundled Phone Harness skill loads automatically for phone requests.
         </div>
       </div>

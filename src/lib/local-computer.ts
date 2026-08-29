@@ -23,7 +23,7 @@ export function localComputerSelectable({
 }): boolean {
   if (!providerSupportsLocal) return false;
   if (capabilities.localComputer.available) return true;
-  return capabilities.host.platform === "darwin";
+  return capabilities.host.platform === "darwin" || capabilities.host.platform === "win32";
 }
 
 export function localComputerDisabledReason({

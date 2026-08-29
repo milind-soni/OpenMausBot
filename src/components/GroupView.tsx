@@ -24,7 +24,7 @@ import { ReplyQuote } from "./ReplyQuote";
 import { ConnectorCard } from "./ConnectorCard";
 import { SecretRequestCard } from "./SecretRequestCard";
 import { AttachedImageGallery } from "./AttachmentPreview";
-import { GroupCallButton, GroupCallOverlay } from "./GroupCallView";
+import { GroupCallOverlay } from "./GroupCallView";
 import { ReactionBar, ReactionChips } from "./Reactions";
 import { ApprovalCard } from "./ApprovalCard";
 import { ManageMembersPanel } from "./ManageMembersPanel";
@@ -200,7 +200,7 @@ const Transcript = memo(function Transcript({
                 <PinToggle group={group} message={m} />
                 <div
                   className={cn(
-                    "max-w-[70%] rounded-2xl px-4 py-2.5 text-[15px] leading-relaxed",
+                    "max-w-[70%] rounded-2xl px-4 py-2.5 text-[14px] leading-relaxed",
                     user ? "whitespace-pre-wrap bg-bubble-user text-ink" : "bg-card text-ink",
                   )}
                   title={new Date(m.at).toLocaleString()}
@@ -260,7 +260,7 @@ function StreamingBubble({ text }: { text: string }) {
   const deferred = useDeferredValue(text);
   return (
     <div className="flex w-full justify-start">
-      <div className="max-w-[70%] rounded-2xl bg-card px-4 py-2.5 text-[15px] leading-relaxed text-ink">
+      <div className="max-w-[70%] rounded-2xl bg-card px-4 py-2.5 text-[14px] leading-relaxed text-ink">
         <ChatMarkdown text={deferred} streaming />
         <span className="animate-caret ml-0.5 inline-block h-[14px] w-[2px] bg-ink align-middle" />
       </div>
@@ -277,8 +277,8 @@ function DefaultResponderSelect({ group, members }: { group: Group; members: Bot
     responder.kind === "everyone"
       ? "Plain messages go to every channel member; @mentions override this"
       : responder.kind === "mentions"
-        ? "Only explicitly @mentioned bots respond"
-        : `Plain messages go to ${lead?.name ?? "the lead bot"}; @mentions override this`;
+        ? "Only explicitly @mentioned agents respond"
+        : `Plain messages go to ${lead?.name ?? "the lead agent"}; @mentions override this`;
 
   const change = (nextValue: string) => {
     let next: GroupDefaultResponder;
@@ -355,11 +355,11 @@ function RoomWorkingFolder({ group }: { group: Group }) {
   return (
     <div className="rounded-xl bg-card p-4">
       <div className="text-[15px] font-medium text-ink">Working folder</div>
-      <div className="mt-0.5 text-[13px] text-ink-secondary">Where every bot in this channel runs its shell and file tools.</div>
+      <div className="mt-0.5 text-[13px] text-ink-secondary">Where every agent in this channel runs its shell and file tools.</div>
       {locked ? (
         <div className="mt-3">
           <div className="truncate rounded-lg border border-hairline/40 bg-inset px-3 py-2 font-mono text-[12.5px] text-ink" title={shownCwd}>
-            {shownCwd ? shortPath(shownCwd, home) : <span className="text-ink-secondary">Each bot's own folder</span>}
+            {shownCwd ? shortPath(shownCwd, home) : <span className="text-ink-secondary">Each agent's own folder</span>}
           </div>
           <div className="mt-2 text-[12px] text-ink-secondary">
             Fixed after this channel's first turn. Create a new channel and choose its folder before sending the first message to work somewhere else.
@@ -368,7 +368,7 @@ function RoomWorkingFolder({ group }: { group: Group }) {
       ) : canPick ? (
         <div className="mt-3 flex items-center gap-2">
           <div className="min-w-0 flex-1 truncate rounded-lg border border-hairline/40 bg-inset px-3 py-2 font-mono text-[12.5px] text-ink" title={group.cwd}>
-            {group.cwd ? shortPath(group.cwd, home) : <span className="text-ink-secondary">Each bot's own folder</span>}
+            {group.cwd ? shortPath(group.cwd, home) : <span className="text-ink-secondary">Each agent's own folder</span>}
           </div>
           <button onClick={() => void pick()} disabled={saving} className="flex shrink-0 items-center gap-1.5 rounded-lg bg-raised px-3 py-2 text-[13px] text-ink hover:bg-raised-hover disabled:opacity-50">
             <FolderOpen size={14} /> Choose…
@@ -390,7 +390,7 @@ function RoomWorkingFolder({ group }: { group: Group }) {
         >
           <input
             className="w-full rounded-lg border border-hairline/40 bg-inset px-3 py-2.5 font-mono text-[12.5px] text-ink placeholder:text-ink-secondary focus:outline-none focus:border-hairline"
-            placeholder="Each bot's own folder — or an absolute path"
+            placeholder="Each agent's own folder — or an absolute path"
             value={draft ?? group.cwd ?? ""}
             onChange={(e) => setDraft(e.target.value)}
           />
@@ -577,7 +577,7 @@ function RoomSetup({ group, members }: { group: Group; members: Bot[] }) {
             <input
               value={folder}
               onChange={(event) => setFolder(event.target.value)}
-              placeholder="Each bot's own folder"
+              placeholder="Each agent's own folder"
               className="min-w-0 flex-1 rounded-xl border border-hairline/50 bg-inset px-3 py-2.5 font-mono text-[12.5px] text-ink placeholder:text-ink-secondary focus:border-accent focus:outline-none"
             />
             {window.ogb?.pickFolder && (
@@ -936,10 +936,6 @@ export function GroupView({ group }: { group: Group }) {
     </span>
   ));
 
-  const isWin = window.ogb?.platform === "win32";
-  const drag = isWin ? ({ WebkitAppRegion: "drag" } as React.CSSProperties) : undefined;
-  const noDrag = isWin ? ({ WebkitAppRegion: "no-drag" } as React.CSSProperties) : undefined;
-
   return (
     <main className="relative flex h-full min-w-0 flex-1 flex-col bg-app">
       <GroupCallOverlay group={group} members={members} />
@@ -952,12 +948,10 @@ export function GroupView({ group }: { group: Group }) {
           "flex items-center justify-between px-5 py-3",
           // Room for the drawer button, which overlays this corner below md.
           "pl-11 md:pl-5",
-          isWin && "pr-[148px]",
         )}
-        style={drag}
       >
         <span className="text-[15px] font-semibold text-ink">{group.name}</span>
-        <div className="flex items-center gap-1.5" style={noDrag}>
+        <div className="flex items-center gap-1.5">
           <button
             type="button"
             onClick={() => setFindOpen((open) => !open)}
@@ -971,7 +965,6 @@ export function GroupView({ group }: { group: Group }) {
           >
             <Search size={18} />
           </button>
-          <GroupCallButton group={group} members={members} />
           {!setupPending && !group.dm && <RoomWorkingFolderChip group={group} onToggle={() => setFolderOpen((open) => !open)} />}
           {!setupPending && !group.dm && <DefaultResponderSelect group={group} members={members} />}
           {group.dm ? (
@@ -984,7 +977,7 @@ export function GroupView({ group }: { group: Group }) {
               type="button"
               onClick={() => setMembersOpen(true)}
               title="Manage members"
-              aria-label={`Manage members — ${members.length} ${members.length === 1 ? "bot" : "bots"} in this channel`}
+              aria-label={`Manage members — ${members.length} ${members.length === 1 ? "agent" : "agents"} in this channel`}
               className="flex items-center gap-1.5 rounded-full py-0.5 pl-1 pr-1.5 hover:bg-raised/60"
             >
               {memberMauses}
@@ -1014,7 +1007,7 @@ export function GroupView({ group }: { group: Group }) {
                   setBulletinOpen(false);
                 }
               }}
-              placeholder="Channel instructions — every bot in this channel follows them (who does what, tone, goals, a task checklist…)"
+              placeholder="Channel instructions — every agent in this channel follows them (who does what, tone, goals, a task checklist…)"
               rows={4}
               className="w-full resize-none bg-transparent text-[13px] leading-relaxed text-ink placeholder:text-ink-secondary focus:outline-none"
             />
@@ -1023,7 +1016,7 @@ export function GroupView({ group }: { group: Group }) {
           <button
             onClick={() => setBulletinOpen(true)}
             className="mb-1 flex w-full items-center gap-2 rounded-lg px-2 py-1.5 text-left hover:bg-raised/40"
-            title="Channel bulletin — shared instructions for every bot here"
+            title="Channel bulletin — shared instructions for every agent here"
           >
             <Pin size={12} className="shrink-0 text-ink-secondary" />
             <span className={cn("truncate text-[12.5px]", group.bulletin ? "text-ink-secondary" : "text-ink-secondary/60")}>
@@ -1047,7 +1040,7 @@ export function GroupView({ group }: { group: Group }) {
         const pinned = group.messages.find((m) => m.id === group.pinnedMessageId && m.kind === "text");
         const text = pinned ? (pinned.text ?? "").replace(/\s+/g, " ").trim() : "";
         if (!pinned || !text) return null;
-        const sender = pinned.role === "user" ? "You" : (pinned.from?.name ?? "A bot");
+        const sender = pinned.role === "user" ? "You" : (pinned.from?.name ?? "An agent");
         return (
           <div className="mx-auto w-full max-w-[900px] px-5">
             <div className="mb-2 flex items-center gap-2 rounded-lg border border-accent/25 bg-accent/[0.07] px-3 py-1.5">

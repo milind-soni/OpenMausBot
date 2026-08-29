@@ -19,14 +19,13 @@ export function requestNotificationPermission(): Promise<NotificationPermission>
  * tasks and rooms coalesces into one stack instead of stacking banners. */
 export interface NotificationBotIdentity {
   id: string;
-  avatarUrl?: string | null;
 }
 
 /** Presentation options for one bot's notifications: the stable per-bot
- * coalescing key platforms replace on (`tag`) and its avatar, when the
- * profile has one. Pure so the grouping rule stays testable on its own. */
+ * coalescing key platforms replace on (`tag`) and the canonical application
+ * mark. Bot avatars belong inside the app; OS banners carry product identity. */
 export function buildNotificationOptions(bot: NotificationBotIdentity): NotificationOptions {
-  return { tag: `openmausbot:${bot.id}`, icon: bot.avatarUrl ?? undefined };
+  return { tag: `openmausbot:${bot.id}`, icon: "./app-icon.svg" };
 }
 
 /** Show one, unless the app is already in front of the user — a banner over
@@ -35,7 +34,6 @@ export function buildNotificationOptions(bot: NotificationBotIdentity): Notifica
 export function showNotification(
   frame: NotifyFrame,
   onOpen: (target: NotificationTarget) => void,
-  avatarUrl?: string | null,
 ) {
   if (typeof Notification === "undefined") return;
   if (document.hasFocus()) return;
@@ -48,7 +46,7 @@ export function showNotification(
   if (Notification.permission === "granted") {
     const options: NotificationOptions = {
       body: frame.body,
-      ...buildNotificationOptions({ id: frame.botId, avatarUrl }),
+      ...buildNotificationOptions({ id: frame.botId }),
     };
     new Notification(frame.title, options).onclick = open;
   }

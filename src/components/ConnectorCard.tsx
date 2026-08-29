@@ -108,7 +108,7 @@ export function ConnectorCard({ botId, threadId, message }: { botId: string; thr
             <p className="mt-0.5 text-[12.5px] leading-relaxed text-ink-secondary">
               {connected
                 ? connector.resumed
-                  ? "Connected securely. Your bot is continuing the task."
+                  ? "Connected securely. Your agent is continuing the task."
                   : "Connected securely. Continue the paused task when you're ready."
                 : connector.description}
             </p>
@@ -128,7 +128,7 @@ export function ConnectorCard({ botId, threadId, message }: { botId: string; thr
         <div className="flex items-center justify-between border-t border-hairline/40 bg-panel/40 px-4 py-2.5">
           <div className="flex items-center gap-1.5 text-[11.5px] text-ink-secondary">
             {authorizing ? <Loader2 size={12} className="animate-spin" /> : <PlugZap size={12} />}
-            {authorizing ? "Waiting for sign-in…" : connected ? "Ready to use" : "Requested by your bot"}
+            {authorizing ? "Waiting for sign-in…" : connected ? "Ready to use" : "Requested by your agent"}
           </div>
           {!connected ? (
             <button

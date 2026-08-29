@@ -3,7 +3,7 @@
 // resolves them through attachmentImageUrl rather than loading them as URLs.
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
-import { Download, ImageOff, Maximize2, X } from "lucide-react";
+import { Download, ExternalLink, ImageOff, Maximize2, X } from "lucide-react";
 
 import { attachmentBasename, attachmentImageUrl } from "@/lib/composer-attachments";
 import { cn } from "@/lib/cn";
@@ -81,7 +81,7 @@ export function AttachmentPreviewDialog({ image, onClose }: { image: PreviewImag
         <header className="flex shrink-0 items-center justify-between gap-4 border-b border-white/10 bg-black/45 px-4 py-3">
           <div className="min-w-0">
             <div className="truncate text-[13px] font-medium text-white">{image.name}</div>
-            <div className="text-[10.5px] text-white/50">Saved locally by OpenMausBot</div>
+            <div className="text-[10.5px] text-white/50">Saved locally by Agent Centipede</div>
           </div>
           <div className="flex shrink-0 items-center gap-1">
             <a
@@ -107,6 +107,14 @@ export function AttachmentPreviewDialog({ image, onClose }: { image: PreviewImag
             <div className="flex flex-col items-center gap-3 text-white/60" role="status">
               <ImageOff size={34} />
               <span className="text-[13px]">This attachment is no longer available.</span>
+              <span className="flex items-center gap-2">
+                <a href={image.src} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1.5 rounded-lg border border-white/15 px-3 py-2 text-[12px] text-white hover:bg-white/10">
+                  <ExternalLink size={13} /> Open
+                </a>
+                <a href={image.src} download={image.name} className="inline-flex items-center gap-1.5 rounded-lg border border-white/15 px-3 py-2 text-[12px] text-white hover:bg-white/10">
+                  <Download size={13} /> Download
+                </a>
+              </span>
             </div>
           ) : (
             <img
@@ -125,7 +133,16 @@ export function AttachmentPreviewDialog({ image, onClose }: { image: PreviewImag
 
 function Thumbnail({ image, onPreview }: { image: PreviewImage; onPreview: () => void }) {
   const [failed, setFailed] = useState(false);
-  if (failed) return null;
+  if (failed) {
+    return (
+      <div className="flex max-w-[260px] items-center gap-2 rounded-lg border border-hairline/40 bg-inset px-3 py-2 text-[12px] text-ink-secondary">
+        <ImageOff size={14} className="shrink-0" />
+        <span className="min-w-0 flex-1 truncate">{image.name}</span>
+        <a href={image.src} target="_blank" rel="noreferrer" className="shrink-0 text-accent hover:underline">Open</a>
+        <a href={image.src} download={image.name} className="shrink-0 text-accent hover:underline">Download</a>
+      </div>
+    );
+  }
   return (
     <button
       onClick={onPreview}

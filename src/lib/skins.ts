@@ -4,7 +4,7 @@
 // that keeps the two halves from drifting apart, and it means adding a skin is
 // one CSS block plus one line in SKINS.
 
-export const SKIN_IDS = ["midnight", "atelier", "foundry", "lagoon"] as const;
+export const SKIN_IDS = ["centipede", "midnight", "atelier", "foundry", "lagoon"] as const;
 export type SkinId = (typeof SKIN_IDS)[number];
 
 export type Skin = {
@@ -15,32 +15,29 @@ export type Skin = {
 };
 
 export const SKINS: readonly Skin[] = [
+  { id: "centipede", name: "Clinical", tagline: "Sterile surfaces. Questionable organism." },
   { id: "midnight", name: "Midnight", tagline: "The original. Cool and dark." },
   { id: "atelier", name: "Atelier", tagline: "Daylight on paper, warm and quiet." },
   { id: "foundry", name: "Foundry", tagline: "Night shift. Dark, warm, lit in brass." },
   { id: "lagoon", name: "Lagoon", tagline: "Cool daylight. Porcelain and deep teal." },
 ];
 
-export const DEFAULT_SKIN: SkinId = "midnight";
+export const DEFAULT_SKIN: SkinId = "centipede";
 
-const KEY = "omb-skin";
+const KEY = "agent-centipede-skin-v1";
 
 // The input is whatever localStorage handed back — a string this app wrote
 // on an earlier run, a value edited by hand, or a leftover from a renamed
 // skin. The list is the schema.
-function isSkinId(value: unknown): value is SkinId {
-  // SAFETY: the assertion only satisfies includes()' parameter type; the
-  // check itself is what decides, and a non-member returns false.
-  return SKIN_IDS.includes(value as SkinId);
+function isSkinId(value: string | null | undefined): value is SkinId {
+  return value !== null && value !== undefined && new Set<string>(SKIN_IDS).has(value);
 }
 
 // Reaching for localStorage is itself a failure point: on an origin with
 // storage blocked the getter throws, and `typeof` alone doesn't shield it.
 function getStore(): Storage | undefined {
   try {
-    // A bare feature test, not a narrowing of parsed input: in a renderer
-    // without storage the identifier is simply not defined.
-    return typeof localStorage === "undefined" ? undefined : localStorage;
+    return globalThis.localStorage;
   } catch {
     return undefined;
   }
@@ -62,6 +59,10 @@ export function readSkin(): SkinId {
  */
 export function applySkin(id: SkinId): void {
   document.documentElement.dataset.skin = id;
+  const styles = getComputedStyle(document.documentElement);
+  const background = styles.getPropertyValue("--color-app").trim();
+  const foreground = styles.getPropertyValue("--color-ink").trim();
+  window.ogb?.setTitleBarColors?.({ background, foreground });
   try {
     getStore()?.setItem(KEY, id);
   } catch {

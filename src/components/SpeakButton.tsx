@@ -33,7 +33,7 @@ export function SpeakButton({
   const preparing = mine && speech.status === "preparing";
 
   const label = !configured
-    ? "Add an ElevenLabs key in an agent profile to read messages aloud"
+    ? "Add the workspace ElevenLabs key in Settings to read messages aloud"
     : !ready
       ? "Pick a voice in this agent's profile to read messages aloud"
     : mine

@@ -27,7 +27,8 @@ export function ReactionBar({ threadId, message }: { threadId: string; message: 
   useEffect(() => {
     if (!pickerOpen) return;
     const onDown = (e: MouseEvent) => {
-      const target = e.target as HTMLElement;
+      const target = e.target;
+      if (!(target instanceof Node)) return;
       if (!pickerRef.current?.contains(target) && !anchorRef.current?.contains(target)) {
         setPickerOpen(false);
       }
@@ -45,7 +46,7 @@ export function ReactionBar({ threadId, message }: { threadId: string; message: 
   }, [pickerOpen]);
 
   return (
-    <div className="relative">
+    <div className="relative max-md:hidden">
       <div
         ref={anchorRef}
         className="flex items-center gap-0.5 rounded-full border border-hairline/40 bg-panel px-1 py-0.5 opacity-0 shadow-sm transition-opacity group-hover:opacity-100 group-focus-within:opacity-100"

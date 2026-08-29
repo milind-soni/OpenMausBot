@@ -33,7 +33,7 @@ export function SearchResults({ query, onLanded }: { query: string; onLanded: ()
     const t = setTimeout(() => {
       api(`/api/search?q=${encodeURIComponent(q)}&limit=40`)
         .then((r: { hits: SearchHit[] }) => alive && (setHits(r.hits), setError(null)))
-        .catch((e: unknown) => alive && setError(e instanceof Error ? e.message : String(e)));
+        .catch(() => alive && setError("Search failed"));
     }, DEBOUNCE_MS);
     return () => {
       alive = false;
@@ -45,10 +45,29 @@ export function SearchResults({ query, onLanded }: { query: string; onLanded: ()
 
   const land = async (hit: SearchHit) => {
     try {
+      if (hit.category === "artifact") {
+        dispatch({ type: "showWork" });
+        onLanded();
+        return;
+      }
+      if (hit.category === "task" || hit.category === "decision") {
+        if (!hit.botId) {
+          dispatch({ type: "showWork" });
+          onLanded();
+          return;
+        }
+        dispatch({ type: "select", id: hit.botId });
+        if (hit.category === "task" && hit.threadId !== state.bots.find((bot) => bot.id === hit.botId)?.threadId) {
+          const result = await api(`/api/bots/${hit.botId}/tasks/${hit.threadId}`, { method: "POST" });
+          if (result?.bot) dispatch({ type: "taskSwitched", bot: result.bot });
+        }
+        onLanded();
+        return;
+      }
       await landOnSearchHit(hit, state, dispatch);
       onLanded();
-    } catch (e) {
-      dispatch({ type: "error", message: e instanceof Error ? e.message : String(e) });
+    } catch {
+      dispatch({ type: "error", message: "That result is no longer available." });
     }
   };
 
@@ -66,7 +85,7 @@ export function SearchResults({ query, onLanded }: { query: string; onLanded: ()
         const after = hit.snippet.slice(hit.matchStart + hit.matchLength);
         return (
           <button
-            key={`${hit.threadId}:${hit.messageId}`}
+            key={`${hit.category ?? "conversation"}:${hit.threadId}:${hit.messageId ?? hit.workId ?? hit.snippet}`}
             onClick={() => void land(hit)}
             className="flex w-full items-start gap-2.5 rounded-lg px-3 py-2 text-left hover:bg-raised/60"
           >

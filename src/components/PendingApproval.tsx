@@ -1,4 +1,4 @@
-// Pending approval, ported from the upstream pattern: an approval does
+// Needs-you input, ported from the upstream pattern: an approval does
 // not sit in the transcript waiting to be noticed — it takes over the
 // composer. The prompt is disabled, a strip above it says exactly what
 // is being asked, and the send row is replaced by the decisions.
@@ -63,13 +63,13 @@ export const PendingApprovalPanel = memo(function PendingApprovalPanel({
   return (
     <div className="rounded-t-2xl border-b border-hairline/50 bg-control/40 px-4 py-3">
       <div className="flex flex-wrap items-center gap-2">
-        <span className="text-[11px] uppercase tracking-[0.18em] text-ink-secondary">Pending approval</span>
+        <span className="text-[11px] uppercase tracking-[0.18em] text-ink-secondary">Needs you</span>
         {count > 1 && (
           <span className="rounded-full bg-control px-1.5 py-0.5 text-[11px] tabular-nums text-ink-secondary">
             {index + 1} of {count}
           </span>
         )}
-        <span className="text-[13px] text-ink">{label(pending.tool)}</span>
+        <span className="text-[13px] text-ink">{label(pending.tool)} · choose what happens next</span>
         <span className="font-mono text-[11px] text-ink-secondary">{pending.tool}</span>
       </div>
       {/* never truncated — long commands wrap and scroll */}
@@ -119,10 +119,12 @@ export function PendingApprovalActions({
       {bot && pending.allowKey && (
         <button
           onClick={() => decide("allow", true)}
-          title={`Stop asking ${bot.name} about ${pending.allowKey}`}
+          title={pending.allowKey.startsWith("action-policy:")
+            ? `Remember only this exact prepared action for ${bot.name} for 30 days`
+            : `Stop asking ${bot.name} about ${pending.allowKey}`}
           className={cn(base, "border border-hairline/50 text-ink hover:bg-control")}
         >
-          Always allow
+          {pending.allowKey.startsWith("action-policy:") ? "Remember exact · 30d" : "Always allow"}
         </button>
       )}
       <button

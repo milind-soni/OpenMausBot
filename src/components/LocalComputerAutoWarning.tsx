@@ -2,7 +2,7 @@ import { useEffect, useRef } from "react";
 import { AlertTriangle } from "lucide-react";
 
 export const LOCAL_COMPUTER_AUTO_WARNING =
-  "Auto mode will let this bot click, type, and run tools on this computer without asking first. Destructive and sensitive actions still stop. Continue only if you are watching.";
+  "Auto mode will let this agent click, type, and run tools on this computer without asking first. Destructive and sensitive actions still stop. Continue only if you are watching.";
 
 export function LocalComputerAutoWarning({
   open,

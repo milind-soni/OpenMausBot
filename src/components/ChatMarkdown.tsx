@@ -11,6 +11,7 @@ import { memo, useEffect, useState, type ReactNode } from "react";
 import Markdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { Check, Copy } from "lucide-react";
+import { CODE_HIGHLIGHT_OPTIONS } from "@/lib/code-highlight";
 
 // tiny highlight cache so revisiting a thread doesn't re-tokenize settled
 // blocks; keys are content-hashed and capped. Streamed partials may land here
@@ -72,7 +73,7 @@ function CodeBlock({ code, lang, streaming }: { code: string; lang: string; stre
         .then((shiki) =>
           shiki.codeToHtml(code, {
             lang: lang || "text",
-            theme: "github-dark-default",
+            ...CODE_HIGHLIGHT_OPTIONS,
           }),
         )
         .then((out) => {
@@ -124,7 +125,7 @@ function CodeBlock({ code, lang, streaming }: { code: string; lang: string; stre
       </div>
       {html ? (
         <div
-          className="overflow-x-auto text-[13px] leading-relaxed [&_pre]:!bg-transparent [&_pre]:m-0 [&_pre]:p-3"
+          className="chat-code-highlight overflow-x-auto text-[13px] leading-relaxed [&_pre]:!bg-transparent [&_pre]:m-0 [&_pre]:p-3"
           dangerouslySetInnerHTML={{ __html: html }}
         />
       ) : (
@@ -262,7 +263,7 @@ function ChatMarkdownComponent({ text, streaming = false }: { text: string; stre
           },
           code({ children }: { children?: ReactNode }) {
             return (
-              <code className="rounded bg-inset px-1 py-px text-[13px]">{children}</code>
+              <code className="rounded bg-inset px-1 py-px text-[12.5px]">{children}</code>
             );
           },
           a({ href, children }: { href?: string; children?: ReactNode }) {
@@ -282,7 +283,7 @@ function ChatMarkdownComponent({ text, streaming = false }: { text: string; stre
           table({ children }: { children?: ReactNode }) {
             return (
               <div className="overflow-x-auto">
-                <table className="w-full border-collapse text-[13.5px]">{children}</table>
+                <table className="w-full border-collapse text-[13px]">{children}</table>
               </div>
             );
           },
@@ -301,10 +302,10 @@ function ChatMarkdownComponent({ text, streaming = false }: { text: string; stre
             return <ol className="list-decimal space-y-1 pl-5">{children}</ol>;
           },
           h1({ children }: { children?: ReactNode }) {
-            return <div className="mt-2 text-[16px] font-semibold">{children}</div>;
+            return <div className="mt-2 text-[15px] font-semibold">{children}</div>;
           },
           h2({ children }: { children?: ReactNode }) {
-            return <div className="mt-2 text-[15.5px] font-semibold">{children}</div>;
+            return <div className="mt-2 text-[14.5px] font-semibold">{children}</div>;
           },
           h3({ children }: { children?: ReactNode }) {
             return <div className="mt-1.5 font-semibold">{children}</div>;
@@ -313,10 +314,10 @@ function ChatMarkdownComponent({ text, streaming = false }: { text: string; stre
             return <div className="mt-1.5 font-semibold">{children}</div>;
           },
           h5({ children }: { children?: ReactNode }) {
-            return <div className="mt-1.5 text-[14px] font-semibold">{children}</div>;
+            return <div className="mt-1.5 text-[13.5px] font-semibold">{children}</div>;
           },
           h6({ children }: { children?: ReactNode }) {
-            return <div className="mt-1.5 text-[13.5px] font-semibold text-ink-secondary">{children}</div>;
+            return <div className="mt-1.5 text-[12.5px] font-semibold text-ink-secondary">{children}</div>;
           },
           blockquote({ children }: { children?: ReactNode }) {
             return (

@@ -9,7 +9,7 @@ export function parseSidebarDensity(value: string | null): SidebarDensity {
     case "icons":
       return value;
     default:
-      return "comfortable";
+      return "icons";
   }
 }
 
@@ -18,7 +18,7 @@ export function loadSidebarDensity(storage?: Pick<Storage, "getItem"> | null): S
     const target = storage === undefined ? (globalThis.localStorage ?? null) : storage;
     return parseSidebarDensity(target?.getItem(SIDEBAR_DENSITY_KEY) ?? null);
   } catch {
-    return "comfortable";
+    return "icons";
   }
 }
 

@@ -25,7 +25,7 @@ function downloadPlaybook(playbook: ExportedPlaybook): { name: string; members: 
   return { name: playbook.name, members: playbook.members };
 }
 
-/** Export every active sidebar bot as one portable Chief-of-Staff Markdown. */
+/** Export every active sidebar agent as one portable team Markdown package. */
 export async function downloadAllBots(): Promise<{ name: string; members: number }> {
   const playbook = (await api("/api/teams/export", {
     method: "POST",

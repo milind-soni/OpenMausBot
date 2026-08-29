@@ -49,4 +49,30 @@ describe("suggestedModels", () => {
     const options = ["a", "b", "c"].map((id) => ({ id }));
     expect(suggestedModels(options, "b", "b", 3).map((option) => option.id)).toEqual(["b", "a", "c"]);
   });
+
+  it("keeps distinct live Cursor families discoverable instead of filling the rail with variants", () => {
+    const options = [
+      "auto",
+      "composer-2.5",
+      "composer-2.5-fast",
+      "gpt-5.3-codex",
+      "claude-sonnet-5-thinking-high",
+      "gpt-5.3-codex-low",
+      "gpt-5.3-codex-low-fast",
+      "gpt-5.3-codex-fast",
+      "gpt-5.2",
+      "cursor-grok-4.6-high-fast",
+      "claude-opus-5-thinking-high",
+      "gpt-5.6-sol-high",
+      "claude-fable-5-high",
+      "gpt-5.6-luna-high",
+    ].map((id) => ({ id }));
+
+    const visible = suggestedModels(options, "auto", undefined, 8).map((option) => option.id);
+    expect(visible).toContain("cursor-grok-4.6-high-fast");
+    expect(visible).toContain("claude-fable-5-high");
+    expect(visible).toContain("gpt-5.6-luna-high");
+    expect(visible).toContain("claude-opus-5-thinking-high");
+    expect(visible.filter((id) => id.startsWith("gpt-5.3-codex"))).toHaveLength(1);
+  });
 });

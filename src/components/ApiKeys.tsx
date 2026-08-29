@@ -49,7 +49,7 @@ const CREDENTIALS: Record<
   box: {
     label: "Box API key",
     placeholder: "Paste your Box API key",
-    description: "Give bots an isolated remote Linux computer with a desktop and terminal.",
+    description: "Give agents an isolated remote Linux computer with a desktop and terminal.",
     href: "https://docs.ascii.dev/box/api-keys",
     linkLabel: "Open Box API key guide",
     optional: true,
@@ -255,7 +255,7 @@ export function VpsConnection() {
         {configured && <span className="text-[11px] text-success">Connected</span>}
       </div>
       <div className="mb-1.5 text-[12px] leading-relaxed text-ink-secondary">
-        SSH config alias for the Linux VPS. OpenMausBot uses your normal SSH config and agent; it does not store keys or passwords.{" "}
+        SSH config alias for the Linux VPS. Agent Centipede uses your normal SSH config and agent; it does not store keys or passwords.{" "}
         See the{" "}
         <a
           href="https://github.com/milind-soni/OpenMausBot/blob/main/docs/byo-vps.md"

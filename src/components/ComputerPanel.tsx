@@ -96,8 +96,14 @@ function routineScheduleLabel(routine: Routine) {
       : days.join(",") === "1,2,3,4,5"
         ? "Weekdays"
         : days.map((day) => ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"][day]).join(", ");
-  const [hour, minute] = routine.schedule.time.split(":").map(Number);
-  return `${cadence} · ${new Date(2000, 0, 1, hour, minute).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })}`;
+  const formatTime = (value: string) => {
+    const [hour, minute] = value.split(":").map(Number);
+    return new Date(2000, 0, 1, hour, minute).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
+  };
+  if (routine.schedule.type === "interval") {
+    return `${cadence} · every ${routine.schedule.everyMinutes}m · ${formatTime(routine.schedule.from)}–${formatTime(routine.schedule.to)}`;
+  }
+  return `${cadence} · ${formatTime(routine.schedule.time)}`;
 }
 
 function nextRunLabel(at: number | null) {
@@ -113,6 +119,7 @@ export function ComputerPanel({ bot }: { bot: Bot }) {
   const { capabilities, ready: capabilitiesReady } = useDesktopCapabilities();
   const localAvailable = capabilities.localComputer.available;
   const isLinux = capabilities.host.platform === "linux";
+  const isMac = capabilities.host.platform === "darwin";
   const providerSupportsLocal = instanceSupportsLocalComputer(state.instances, bot);
   const localSelectable = localComputerSelectable({ capabilities, providerSupportsLocal });
   const [localAutoWarning, setLocalAutoWarning] = useState(false);
@@ -128,6 +135,7 @@ export function ComputerPanel({ bot }: { bot: Bot }) {
   const [vmStatus, setVmStatus] = useState<LocalVmStatus | null>(null);
   const [vpsStatus, setVpsStatus] = useState<VpsComputerStatus | null>(null);
   const [localFrame, setLocalFrame] = useState<string | null>(null);
+  const [localCaptureRetry, setLocalCaptureRetry] = useState(0);
   const [pending, setPending] = useState<
     "join" | "sleep" | "provision" | "vps-replace" | "vm-create" | "vm-recreate" | "vm-delete" | null
   >(null);
@@ -346,7 +354,7 @@ export function ComputerPanel({ bot }: { bot: Bot }) {
           setBoxState(status.container ?? null);
           setError(
             bot.autoStartVps
-              ? `${status.problem ?? "No ready VPS container"}. Auto will prepare or wake it when this bot next works.`
+              ? `${status.problem ?? "No ready VPS container"}. Auto will prepare or wake it when this agent next works.`
               : `${status.problem ?? "No ready VPS container"}. Enable Start VPS automatically below, or choose Cloud to provision it.`,
           );
           setPhase(status.container === "stopped" ? "vps-stopped" : "vps-unconfigured");
@@ -484,14 +492,14 @@ export function ComputerPanel({ bot }: { bot: Bot }) {
       }
     };
     void shoot();
-    // A real ScreenCaptureKit capture + PNG encode per tick: idle bots get a
-    // slow heartbeat, working ones the live cadence.
-    const timer = setInterval(shoot, bot.busy ? 3000 : 30_000);
+    // Retry quickly until the first frame arrives. Once seeded, idle bots use
+    // a slow heartbeat so a drawer left open does not keep capturing.
+    const timer = setInterval(shoot, localFrame ? (bot.busy ? 3000 : 30_000) : 2000);
     return () => {
       alive = false;
       clearInterval(timer);
     };
-  }, [phase, isLinux, pageVisible, bot.busy]);
+  }, [phase, isLinux, pageVisible, bot.busy, localFrame, localCaptureRetry]);
 
   const lastScreenMessage = [...bot.messages].reverse().find((m) => m.kind === "screen" && m.png);
   const cloudFrame =
@@ -580,12 +588,12 @@ export function ComputerPanel({ bot }: { bot: Bot }) {
 
       if (window.ogb?.desktopViewer) {
         const opened = await window.ogb.desktopViewer.open(viewerUrl, `${bot.name}'s live desktop`, bot.id);
-        if (!opened) throw new Error("OpenMausBot could not open the live desktop");
+        if (!opened) throw new Error("Agent Centipede could not open the live desktop");
       } else if (fallbackTab) {
         fallbackTab.location.replace(viewerUrl);
       } else if (window.ogb?.openExternal) {
         const opened = await window.ogb.openExternal(viewerUrl);
-        if (!opened) throw new Error("OpenMausBot could not open the live desktop link");
+        if (!opened) throw new Error("Agent Centipede could not open the live desktop link");
       } else if (!window.open(viewerUrl, "_blank", "noopener")) {
         throw new Error("Your browser blocked the live desktop tab");
       }
@@ -669,7 +677,7 @@ export function ComputerPanel({ bot }: { bot: Bot }) {
   };
 
   const replaceVpsComputer = async () => {
-    if (!window.confirm(`Replace ${bot.name}'s VPS computer with the version required by this OpenMausBot update? Files stored only inside the disposable container will be deleted.`)) return;
+    if (!window.confirm(`Replace ${bot.name}'s VPS computer with the version required by this Agent Centipede update? Files stored only inside the disposable container will be deleted.`)) return;
     setPending("vps-replace");
     setError(null);
     try {
@@ -702,14 +710,14 @@ export function ComputerPanel({ bot }: { bot: Bot }) {
 
   const emptyState = {
     checking: "Checking…",
-    starting: "Starting your bot's computer…",
+    starting: "Starting your agent's computer…",
     unconfigured: "No cloud computer configured",
-    "vps-unconfigured": "No managed VPS computer is configured for this bot",
-    "vps-incompatible": "This VPS computer belongs to an earlier OpenMausBot version",
+    "vps-unconfigured": "No managed VPS computer is configured for this agent",
+    "vps-incompatible": "This VPS computer belongs to an earlier Agent Centipede version",
     "vps-stopped": "The managed VPS computer is stopped",
     "local-unavailable": localDisabledReason ?? "Local computer control isn't ready.",
-    "vm-unavailable": "The Local VM isn't available for this bot",
-    off: "This bot's computer is off",
+    "vm-unavailable": "The Local VM isn't available for this agent",
+    off: "This agent's computer is off",
     error: "Couldn't reach the computer",
   } satisfies Record<Exclude<Phase, "ready" | "local" | "vm">, string>;
 
@@ -801,7 +809,7 @@ export function ComputerPanel({ bot }: { bot: Bot }) {
             />
           ) : (
             <div className="flex flex-col items-center gap-2 px-6 text-center text-ink-secondary">
-              {phase === "checking" || phase === "starting" || phase === "vm" || (phase === "local" && !isLinux) ? (
+              {phase === "checking" || phase === "starting" || phase === "vm" || (phase === "local" && !isLinux && localMisses < 3) ? (
                 <Loader2 size={18} className="animate-spin" />
               ) : phase === "off" ? (
                 <Power size={22} />
@@ -815,20 +823,29 @@ export function ComputerPanel({ bot }: { bot: Bot }) {
                     ? "Capturing the Local VM screen…"
                   : phase === "local"
                     ? isLinux
-                      ? "Ready for approved bot actions. Start the separate preview below when you want to watch the screen."
+                      ? "Ready for approved agent actions. Start the separate preview below when you want to watch the screen."
                       : localMisses >= 3
-                      ? "No frames yet — the preview needs Screen Recording permission. After granting, relaunch the app."
+                      ? isMac
+                        ? "No frames yet — the preview needs Screen Recording permission. After granting, relaunch the app."
+                        : "Screen capture did not start. Retry it now; if it still fails, restart Agent Centipede."
                       : "Capturing this computer's screen…"
                     : emptyState[phase]}
               </span>
-              {phase === "local" && !isLinux && localMisses >= 3 && (
+              {phase === "local" && !isLinux && localMisses >= 3 && (isMac ? (
                 <button
                   onClick={() => window.ogb?.permOpenSettings?.("screen")}
                   className="mt-1 rounded-lg bg-control px-3 py-1.5 text-[12px] text-ink hover:bg-raised-hover"
                 >
                   Open Settings
                 </button>
-              )}
+              ) : (
+                <button
+                  onClick={() => setLocalCaptureRetry((value) => value + 1)}
+                  className="mt-1 rounded-lg bg-control px-3 py-1.5 text-[12px] text-ink hover:bg-raised-hover"
+                >
+                  Retry capture
+                </button>
+              ))}
               {phase === "vm-unavailable" && (
                 vmStatus?.mode === "per-bot" && vmStatus.image && vmStatus.create_supported ? (
                   <button
@@ -966,7 +983,7 @@ export function ComputerPanel({ bot }: { bot: Bot }) {
             onClick={() => void openDesktop()}
             disabled={pending === "join"}
             className="mt-3 flex w-full items-center justify-center gap-2 rounded-lg bg-control py-2 text-[13px] text-ink hover:bg-raised-hover disabled:opacity-50"
-            title="Open the Local VM's live desktop inside OpenMausBot"
+            title="Open the Local VM's live desktop inside Agent Centipede"
           >
             {pending === "join" ? <Loader2 size={14} className="animate-spin" /> : <Monitor size={14} />}
             Open live desktop
@@ -977,7 +994,7 @@ export function ComputerPanel({ bot }: { bot: Bot }) {
             onClick={() => void openDesktop()}
             disabled={controlPending || pending === "join" || !vmViewerUrl}
             className="mt-3 flex w-full items-center justify-center gap-2 rounded-lg bg-control py-2 text-[13px] text-ink hover:bg-raised-hover disabled:opacity-50"
-            title="Pause the bot's hands and open the Local VM's live desktop"
+            title="Pause the agent's hands and open the Local VM's live desktop"
           >
             {pending === "join" ? <Loader2 size={14} className="animate-spin" /> : <Hand size={14} />}
             Take control
@@ -988,7 +1005,7 @@ export function ComputerPanel({ bot }: { bot: Bot }) {
             onClick={() => void runVmAction("vm-delete")}
             disabled={pending !== null || bot.busy}
             className="mt-2 flex w-full items-center justify-center gap-2 rounded-lg border border-danger/30 py-2 text-[13px] text-danger hover:bg-danger/10 disabled:opacity-50"
-            title={bot.busy ? "Stop this bot's turn before deleting its VM" : `Delete ${bot.name}'s Local VM`}
+            title={bot.busy ? "Stop this agent's turn before deleting its VM" : `Delete ${bot.name}'s Local VM`}
           >
             {pending === "vm-delete" ? <Loader2 size={14} className="animate-spin" /> : <Power size={14} />}
             Delete this bot's VM
@@ -1004,7 +1021,7 @@ export function ComputerPanel({ bot }: { bot: Bot }) {
                 }
                 disabled={controlPending || pending === "join"}
                 className="flex flex-1 items-center justify-center gap-2 rounded-lg bg-control py-2 text-[13px] text-ink hover:bg-raised-hover disabled:opacity-50"
-                title="Pause the bot's hands and drive this computer yourself"
+                title="Pause the agent's hands and drive this computer yourself"
               >
                 {pending === "join" ? <Loader2 size={14} className="animate-spin" /> : <Hand size={14} />}
                 Take control

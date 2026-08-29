@@ -88,23 +88,21 @@ describe("desktop notifications", () => {
     expect(notices[2]?.options?.tag).toBe(`openmausbot:bot-2`);
   });
 
-  it("carries the bot's avatar when its profile has one", () => {
+  it("uses the canonical Centipede mark instead of profile avatars", () => {
     const { notices } = installNotification("granted");
     const avatarUrl = "/api/attachments/123e4567-e89b-12d3-a456-426614174000.png";
 
-    showNotification(frame, vi.fn(), avatarUrl);
-    expect(notices[0]?.options?.icon).toBe(avatarUrl);
-
-    showNotification(frame, vi.fn(), null);
-    expect(notices[1]?.options?.icon).toBeUndefined();
+    showNotification(frame, vi.fn());
+    expect(notices[0]?.options?.icon).toBe("./app-icon.svg");
+    expect(notices[0]?.options?.icon).not.toBe(avatarUrl);
   });
 });
 
 describe("buildNotificationOptions", () => {
-  it("keys coalescing on botId and omits a missing avatar", () => {
+  it("keys coalescing on botId and always supplies the product mark", () => {
     expect(buildNotificationOptions({ id: "bot-9" })).toEqual({
       tag: "openmausbot:bot-9",
-      icon: undefined,
+      icon: "./app-icon.svg",
     });
   });
 });

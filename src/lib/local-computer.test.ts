@@ -34,13 +34,22 @@ describe("local computer UI eligibility", () => {
     ).toBe(true);
   });
 
-  it("keeps This computer selectable on macOS before CUA is granted", () => {
+  it("keeps This computer selectable on macOS and Windows before CUA is ready", () => {
     const capabilities = {
       host: { platform: "darwin" as const },
       localComputer: { available: false },
     } as DesktopCapabilities;
     expect(localComputerSelectable({ capabilities, providerSupportsLocal: true })).toBe(true);
     expect(localComputerSelectable({ capabilities, providerSupportsLocal: false })).toBe(false);
+    expect(
+      localComputerSelectable({
+        capabilities: {
+          host: { platform: "win32" as const },
+          localComputer: { available: false },
+        } as DesktopCapabilities,
+        providerSupportsLocal: true,
+      }),
+    ).toBe(true);
     expect(
       localComputerSelectable({
         capabilities: {

@@ -161,7 +161,7 @@ export function CommandPalette() {
             autoFocus
             value={query}
             onChange={(e) => setQuery(e.target.value)}
-            placeholder="Search bots, channels, messages…"
+            placeholder="Search agents, channels, messages…"
             className="w-full bg-transparent text-[14px] text-ink placeholder:text-ink-secondary focus:outline-none"
           />
           <kbd className="shrink-0 rounded-md border border-hairline/40 px-1.5 py-0.5 text-[11px] text-ink-secondary">
@@ -176,7 +176,7 @@ export function CommandPalette() {
           )}
           {bots.length > 0 && (
             <div className="px-3 pb-1 pt-1.5 text-[11px] font-medium uppercase tracking-[0.08em] text-ink-secondary">
-              Bots
+              Agents
             </div>
           )}
           {bots.map((bot, i) =>

@@ -1,6 +1,6 @@
 import { useEffect, useState, type ReactNode } from "react";
 import { Check, AlertTriangle, Loader2, Mic } from "lucide-react";
-import { MausAvatar } from "./Avatar";
+import { CentipedeMark } from "./CentipedeBrand";
 import { identifyEmail, setEmailGateDone, track } from "@/lib/analytics";
 import { useDesktopCapabilities } from "./DesktopCapabilities";
 import { EngineSetup } from "./EngineSetup";
@@ -178,7 +178,7 @@ export function Onboarding({ onDone }: { onDone: () => void }) {
       readyNote:
         instance.access === "custom"
           ? "Installed — ready for a local model."
-          : "Installed — ready to power bots.",
+          : "Installed — ready to power agents.",
     }));
   const readyEngines = engines.filter((e) => engineReady(e.instance));
   const setupEngines = engines.filter((e) => !engineReady(e.instance));
@@ -194,12 +194,17 @@ export function Onboarding({ onDone }: { onDone: () => void }) {
       >
         {step === 0 && (
           <div className="flex flex-col items-center">
-            <MausAvatar color="green" state="happy" size={72} />
-            <h1 className="mt-4 text-[20px] font-semibold text-ink">Welcome to OpenMausBot</h1>
+            <span className="centipede-mark-frame flex size-20 items-center justify-center rounded-2xl border border-accent/40 bg-accent/10 text-accent-text">
+              <CentipedeMark className="h-11 w-16" />
+            </span>
+            <h1 className="mt-4 text-[20px] font-semibold text-ink">Welcome to Agent Centipede</h1>
             <p className="mt-1.5 text-center text-[14px] leading-relaxed text-ink-secondary">
-              Bots that do real work on their own computer. Tell us who you are
-              and we&rsquo;ll let you know when big things ship.
+              Set up one agent or a whole team. Tell us who you are and we&rsquo;ll
+              prepare the tools and connections your agents can use.
             </p>
+            <div className="centipede-clinical-label mt-3 text-[9px] text-accent-text">
+              Human-in-the-loop · unfortunately
+            </div>
             <input
               autoFocus
               type="text"
@@ -239,7 +244,7 @@ export function Onboarding({ onDone }: { onDone: () => void }) {
           <div className="flex min-h-0 flex-col">
             <h1 className="text-[18px] font-semibold text-ink">Your engines</h1>
             <p className="mt-1 text-[13.5px] text-ink-secondary">
-              Bots run on AI tools installed on this computer — here&rsquo;s what we found.
+              Agents run on AI tools installed on this computer — here&rsquo;s what we found.
             </p>
             <div className="mt-4 flex min-h-0 flex-col gap-2.5 overflow-y-auto pr-1 [scrollbar-width:thin]">
               {!instances ? (

@@ -107,7 +107,7 @@ export function LinuxLocalControl() {
             )}
             <span aria-live="polite">
               {ready
-                ? "Ready for bots explicitly assigned to this computer. Bot actions use a private cursor, so your pointer stays under your control."
+                ? "Ready for agents explicitly assigned to this computer. Agent actions use a private cursor, so your pointer stays under your control."
                 : local.message ?? "Checking the driver and desktop session…"}
             </span>
           </div>

@@ -17,7 +17,9 @@ import { UsageSection } from "./UsageSection";
 import { SkinPicker } from "./SkinPicker";
 import { RoomTurnTimeoutSettings } from "./RoomTurnTimeoutSettings";
 import { TranscriptionSettings } from "./TranscriptionSettings";
+import { WorkspaceVoiceSettings } from "./WorkspaceVoiceSettings";
 import { cn } from "@/lib/cn";
+import type { EncryptedBackupStatus } from "@/types/ogb";
 
 const SECTIONS: Array<{
   id: AppSettingsSection;
@@ -122,7 +124,7 @@ function AnalyticsRow() {
   return (
     <Card
       title="Usage analytics"
-      subtitle="Anonymous product events — app opened, which features get used. Never conversations, prompts, file contents, or bot output. Your email is only attached if you shared it during setup."
+      subtitle="Anonymous product events — app opened, which features get used. Never conversations, prompts, file contents, or agent output. Your email is only attached if you shared it during setup."
     >
       <button
         role="switch"
@@ -240,6 +242,118 @@ function DiagnosticsRow() {
             {result.message}
           </span>
         ) : null}
+      </div>
+    </Card>
+  );
+}
+
+function BackupRow() {
+  const bridge = window.ogb?.backup;
+  const [status, setStatus] = useState<EncryptedBackupStatus | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+  const [feedback, setFeedback] = useState("");
+
+  useEffect(() => {
+    if (!bridge) return;
+    void bridge.status().then(setStatus).catch((cause: unknown) => {
+      setError(cause instanceof Error ? cause.message : "Could not inspect backups.");
+    });
+  }, [bridge]);
+
+  if (!bridge) return null;
+  const latest = status?.latest;
+  const detail = !status
+    ? "Checking the newest encrypted backup…"
+    : !status.available
+      ? "Encrypted backups run automatically in the installed desktop app."
+      : !latest
+        ? "No verified backup exists yet. Create the first one now."
+        : latest.verified && latest.createdAt
+          ? `Newest backup verified ${new Date(latest.createdAt).toLocaleString()} · ${latest.files ?? 0} core files · ${status.count} retained`
+          : `Newest backup needs attention${latest.error ? `: ${latest.error}` : "."}`;
+
+  const create = async () => {
+    if (busy) return;
+    setBusy(true);
+    setError("");
+    setFeedback("");
+    try {
+      setStatus(await bridge.create());
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : "Could not create a backup.");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const setRetention = async (keep: number) => {
+    setBusy(true);
+    setError("");
+    setFeedback("");
+    try {
+      setStatus(await bridge.setRetention(keep));
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : "Could not update backup retention.");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const exportRecoveryKey = async () => {
+    if (busy) return;
+    setBusy(true);
+    setError("");
+    setFeedback("");
+    try {
+      const saved = await bridge.exportRecoveryKey();
+      if (saved) setFeedback(`Recovery key saved to ${saved}. Keep it separate from the backups.`);
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : "Could not export the recovery key.");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <Card title="Recovery" subtitle={detail}>
+      <div className="flex min-w-0 flex-col items-end gap-2">
+        <div className="flex flex-wrap justify-end gap-2">
+          <label className="flex items-center gap-2 text-[12px] text-ink-secondary">
+            Keep
+            <select
+              aria-label="Number of encrypted backups to retain"
+              value={status?.keep ?? 14}
+              disabled={busy || !status?.available}
+              onChange={(event) => void setRetention(Number(event.target.value))}
+              className="rounded-lg border border-hairline/40 bg-inset px-2 py-1.5 text-[13px] text-ink disabled:opacity-40"
+            >
+              {[7, 14, 30, 60].map((keep) => <option key={keep} value={keep}>{keep}</option>)}
+            </select>
+          </label>
+          <button
+            onClick={() => void bridge.openFolder()}
+            className="rounded-lg border border-hairline/40 px-3 py-1.5 text-[13px] text-ink hover:bg-control"
+          >
+            Open folder
+          </button>
+          <button
+            onClick={() => void exportRecoveryKey()}
+            disabled={busy || status?.available === false}
+            className="rounded-lg border border-hairline/40 px-3 py-1.5 text-[13px] text-ink hover:bg-control disabled:opacity-40"
+          >
+            Save recovery key…
+          </button>
+          <button
+            onClick={() => void create()}
+            disabled={busy || status?.available === false}
+            className="rounded-lg border border-hairline/40 px-3 py-1.5 text-[13px] text-ink hover:bg-control disabled:opacity-40"
+          >
+            {busy ? "Working…" : "Back up now"}
+          </button>
+        </div>
+        {feedback ? <span role="status" className="max-w-72 break-all text-right text-[12px] text-success">{feedback}</span> : null}
+        {error ? <span role="alert" className="max-w-72 text-right text-[12px] text-danger">{error}</span> : null}
       </div>
     </Card>
   );
@@ -381,11 +495,12 @@ export function SettingsModal() {
                 <Card title="Skin" subtitle="Applies instantly and is remembered on this machine.">
                   <SkinPicker />
                 </Card>
-                <Card title="Channel turns" subtitle="Set one maximum duration for every bot turn in a channel.">
+                <Card title="Channel turns" subtitle="Set one maximum duration for every agent turn in a channel.">
                   <RoomTurnTimeoutSettings />
                 </Card>
                 <ExperimentalFeaturesRow />
                 <UpdatesRow />
+                <BackupRow />
                 <DiagnosticsRow />
                 <AnalyticsRow />
               </>
@@ -402,6 +517,7 @@ export function SettingsModal() {
                       Connected apps service is ready
                     </div>
                   ) : null}
+                  <WorkspaceVoiceSettings />
                   <TranscriptionSettings />
                   <ApiKeyRow section="box" />
                   <VpsConnection />

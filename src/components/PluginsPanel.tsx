@@ -483,7 +483,7 @@ export function PluginsPanel() {
         <header className="flex items-start justify-between gap-4 px-6 pb-3 pt-6 sm:px-8 sm:pt-7">
           <div>
             <h2 id="connected-apps-title" className="text-[22px] font-semibold tracking-[-0.01em] text-ink">Connected apps</h2>
-            <p className="mt-1 text-[13px] text-ink-secondary">Connect the apps your bots can use.</p>
+            <p className="mt-1 text-[13px] text-ink-secondary">Connect the apps your agents can use.</p>
           </div>
           <div className="flex items-center gap-1">
             <button
@@ -511,7 +511,7 @@ export function PluginsPanel() {
             <TriangleAlert size={14} className="mt-px shrink-0" />
             <span>
               Showing what was connected last time — this Mac's credential store could not be opened just now, so these
-              could not be re-checked. Your apps are still connected; restarting OpenMausBot usually clears this.
+              could not be re-checked. Your apps are still connected; restarting Agent Centipede usually clears this.
             </span>
           </div>
         )}

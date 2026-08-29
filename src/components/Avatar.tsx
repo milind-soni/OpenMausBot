@@ -13,7 +13,18 @@ import {
   useState,
   type PointerEvent as ReactPointerEvent,
 } from "react";
+import {
+  Activity,
+  Asterisk,
+  Blocks,
+  MonitorCog,
+  ScanText,
+  Telescope,
+  Waypoints,
+  type LucideIcon,
+} from "lucide-react";
 import { MAUS_COLORS, type MausColor, type MausMotion, type MausState } from "@/lib/mascot";
+import { agentGlyphKind, type AgentGlyphKind } from "@/lib/agent-glyph";
 import {
   CursorAvatar,
   DEFAULT_SILHOUETTE,
@@ -223,11 +234,58 @@ export const MausAvatar = memo(forwardRef(MausAvatarComponent));
 export type BotAvatarProps = Omit<MausAvatarProps, "color"> & {
   bot: {
     name?: string;
+    title?: string;
+    description?: string;
+    chiefOfStaff?: boolean;
     color: MausColor;
     avatarUrl?: string | null;
     avatarCrop?: BotAvatarCrop;
   };
 };
+
+const AGENT_GLYPH_ICONS = {
+  coordinate: Waypoints,
+  operate: Activity,
+  capture: ScanText,
+  build: Blocks,
+  research: Telescope,
+  computer: MonitorCog,
+  general: Asterisk,
+} satisfies Record<AgentGlyphKind, LucideIcon>;
+
+function AgentGlyphAvatar({
+  bot,
+  size,
+  label,
+  state,
+}: {
+  bot: BotAvatarProps["bot"];
+  size: number;
+  label?: string;
+  state?: MausState;
+}) {
+  const kind = agentGlyphKind(bot);
+  const Icon = AGENT_GLYPH_ICONS[kind];
+  const active = state === "working" || state === "thinking" || state === "loading" || state === "alerting";
+  const accessibleLabel = label ?? (bot.name ? `${bot.name} avatar` : "Agent avatar");
+
+  return (
+    <span
+      className={`agent-glyph-avatar is-${kind}${active ? " is-active" : ""}`}
+      role="img"
+      aria-label={accessibleLabel}
+      title={accessibleLabel}
+      style={{
+        width: size,
+        height: size,
+        borderRadius: Math.max(7, Math.round(size * 0.25)),
+      }}
+    >
+      <Icon size={Math.max(14, Math.round(size * 0.43))} strokeWidth={1.85} aria-hidden="true" />
+      <span className="agent-glyph-status" aria-hidden="true" />
+    </span>
+  );
+}
 
 /**
  * The one renderer for a bot's chosen profile image. Malformed persisted
@@ -240,7 +298,11 @@ export function BotAvatar({ bot, size = 44, label, ...mascotProps }: BotAvatarPr
 
   useEffect(() => setImageFailed(false), [profile.avatarUrl]);
 
-  if (profile.avatarCrop === "mascot" || !profile.avatarUrl || imageFailed) {
+  if (profile.avatarCrop === "glyph" || (!profile.avatarUrl && profile.avatarCrop !== "mascot") || imageFailed) {
+    return <AgentGlyphAvatar bot={bot} size={size} label={label} state={mascotProps.state} />;
+  }
+
+  if (profile.avatarCrop === "mascot") {
     return (
       <MausAvatar
         {...mascotProps}

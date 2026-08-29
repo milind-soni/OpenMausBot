@@ -3,7 +3,7 @@ import { Loader2, Menu } from "lucide-react";
 import { StoreProvider, useStore } from "@/state/store";
 import { Onboarding } from "@/components/Onboarding";
 import { emailGateDone, initAnalytics } from "@/lib/analytics";
-import { unreadConversationCount } from "@/lib/unread";
+import { openNotificationCount } from "@/lib/unread";
 import { Sidebar } from "@/components/Sidebar";
 import { ChatView } from "@/components/ChatView";
 import { GroupView } from "@/components/GroupView";
@@ -15,14 +15,21 @@ import { SettingsModal } from "@/components/SettingsModal";
 import { UpdateBanner } from "@/components/UpdateBanner";
 import { DesktopCapabilitiesProvider } from "@/components/DesktopCapabilities";
 import { RoutinesPage } from "@/components/RoutinesPage";
+import { WorkView } from "@/components/WorkView";
 import { NoEngines } from "@/components/NoEngines";
 import { CommandPalette } from "@/components/CommandPalette";
 import { SkillRecorderPage } from "@/components/SkillRecorderPage";
 import { TeamMapPage } from "@/components/TeamMapPage";
+import { CentipedeShellPrototype } from "@/prototypes/CentipedeShellPrototype";
+import { CentipedeSimplicityPrototype } from "@/prototypes/CentipedeSimplicityPrototype";
+import { AgentCentipedeLandingPage } from "@/prototypes/AgentCentipedeLandingPage";
+import { WorkerBatchPrototype } from "@/prototypes/WorkerBatchPrototype";
+import { MarkdownContrastPrototype } from "@/prototypes/MarkdownContrastPrototype";
+import { CentipedeDesktopShell } from "@/components/centipede/CentipedeDesktopShell";
 
 function Shell() {
   const { state, dispatch } = useStore();
-  const unreadCount = unreadConversationCount(state.bots, state.groups);
+  const unreadCount = openNotificationCount(state.bots, state.groups);
   // Mobile-only drawer state. Above md, none of these properties are emitted
   // at all — Sidebar scopes every mobile class with max-md: rather than
   // cancelling them with md:, which would still emit a translate value and
@@ -122,69 +129,92 @@ function Shell() {
       {/* fixed-position popup, bottom-left — outside the layout flow */}
       <UpdateBanner />
       <div className="relative flex min-h-0 flex-1">
-      <button
-        type="button"
-        ref={menuButtonRef}
-        aria-label="Open bot list"
-        aria-expanded={drawerOpen}
-        onClick={() => setDrawerOpen(true)}
-        className="absolute left-3 top-3 z-30 rounded-md p-1.5 text-ink-secondary hover:bg-raised hover:text-ink md:hidden"
-      >
-        <Menu size={18} />
-      </button>
-      {drawerOpen && (
-        <div
-          aria-hidden
-          onMouseDown={(e) => e.target === e.currentTarget && setDrawerOpen(false)}
-          className="absolute inset-0 z-30 bg-black/50 md:hidden"
-        />
-      )}
-      <Sidebar
-        open={drawerOpen}
-        onClose={() => {
-          setDrawerOpen(false);
-          menuButtonRef.current?.focus();
-        }}
-      />
-      {state.activeView === "team-map" ? (
-        <TeamMapPage />
-      ) : state.activeView === "routines" ? (
-        <RoutinesPage />
-      ) : state.activeView === "skill-recorder" ? (
-        <SkillRecorderPage />
-      ) : noEngines ? (
-        <NoEngines />
-      ) : group ? (
-        <GroupView key={group.id} group={group} />
-      ) : bot ? (
-        <ChatView bot={bot} />
-      ) : (
-        <main className="flex h-full min-w-0 flex-1 flex-col items-center justify-center gap-3 bg-app text-ink-secondary">
-          <Loader2 size={20} className="animate-spin" />
-          <div className="text-[14px]">
-            {state.connected ? "No bots yet" : "Connecting to the bot server…"}
-          </div>
-          {!state.connected && (
-            <div className="text-[12px]">
-              Start it with <code className="rounded bg-raised px-1.5 py-0.5">pnpm dev:server</code>
-            </div>
+        <CentipedeDesktopShell
+          sidebar={
+            <Sidebar
+              open={drawerOpen}
+              onClose={() => {
+                setDrawerOpen(false);
+                menuButtonRef.current?.focus();
+              }}
+            />
+          }
+        >
+          <button
+            type="button"
+            ref={menuButtonRef}
+            aria-label="Open bot list"
+            aria-expanded={drawerOpen}
+            onClick={() => setDrawerOpen(true)}
+            className="absolute left-3 top-3 z-30 rounded-md p-1.5 text-ink-secondary hover:bg-raised hover:text-ink md:hidden"
+          >
+            <Menu size={18} />
+          </button>
+          {drawerOpen && (
+            <div
+              aria-hidden
+              onMouseDown={(e) => e.target === e.currentTarget && setDrawerOpen(false)}
+              className="absolute inset-0 z-30 bg-black/50 md:hidden"
+            />
           )}
-        </main>
-      )}
-      {state.settingsOpen && bot && <SettingsPanel bot={bot} />}
-      {state.computerOpen && bot && <ComputerPanel bot={bot} />}
-      {state.inspectorOpen && bot && <InspectorPanel bot={bot} />}
-      {state.appSettingsOpen && <SettingsModal />}
-      {state.pluginsOpen && <PluginsPanel />}
-      {/* mounted after the modals: same z-50 tier, so DOM order keeps the
-          palette on top when one of them is open underneath */}
-      <CommandPalette />
+          {state.activeView === "team-map" ? (
+            <TeamMapPage />
+          ) : state.activeView === "work" ? (
+            <WorkView />
+          ) : state.activeView === "routines" ? (
+            <RoutinesPage />
+          ) : state.activeView === "skill-recorder" ? (
+            <SkillRecorderPage />
+          ) : noEngines ? (
+            <NoEngines />
+          ) : group ? (
+            <GroupView key={group.id} group={group} />
+          ) : bot ? (
+            <ChatView bot={bot} />
+          ) : (
+            <main className="flex h-full min-w-0 flex-1 flex-col items-center justify-center gap-3 bg-app text-ink-secondary">
+              <Loader2 size={20} className="animate-spin" />
+              <div className="text-[14px]">
+                {state.connected ? "No bots yet" : "Connecting to the bot server…"}
+              </div>
+              {!state.connected && (
+                <div className="text-[12px]">
+                  Start it with <code className="rounded bg-raised px-1.5 py-0.5">pnpm dev:server</code>
+                </div>
+              )}
+            </main>
+          )}
+          {state.settingsOpen && bot && <SettingsPanel bot={bot} />}
+          {state.computerOpen && bot && <ComputerPanel bot={bot} />}
+          {state.inspectorOpen && bot && <InspectorPanel bot={bot} />}
+          {state.appSettingsOpen && <SettingsModal />}
+          {state.pluginsOpen && <PluginsPanel />}
+          {/* mounted after the modals: same z-50 tier, so DOM order keeps the
+              palette on top when one of them is open underneath */}
+          <CommandPalette />
+        </CentipedeDesktopShell>
       </div>
     </div>
   );
 }
 
 export default function App() {
+  const prototype = new URLSearchParams(window.location.search).get("prototype");
+  if (import.meta.env.DEV && prototype === "centipede-shell") {
+    return <CentipedeShellPrototype />;
+  }
+  if (import.meta.env.DEV && prototype === "centipede-simple") {
+    return <CentipedeSimplicityPrototype />;
+  }
+  if (import.meta.env.DEV && prototype === "worker-batch") {
+    return <WorkerBatchPrototype />;
+  }
+  if (import.meta.env.DEV && prototype === "markdown-contrast") {
+    return <MarkdownContrastPrototype />;
+  }
+  if (import.meta.env.VITE_PUBLIC_SITE === "1" || (import.meta.env.DEV && prototype === "centipede-landing")) {
+    return <AgentCentipedeLandingPage />;
+  }
   const [gated, setGated] = useState(() => !emailGateDone());
   useEffect(() => {
     initAnalytics();

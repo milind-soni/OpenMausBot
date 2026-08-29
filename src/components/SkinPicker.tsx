@@ -23,13 +23,13 @@ function Miniature({ skin }: { skin: SkinId }) {
       className="flex h-[78px] w-full overflow-hidden rounded-lg bg-app ring-1 ring-hairline/60"
     >
       {/* rail */}
-      <div className="flex w-[11px] shrink-0 flex-col items-center gap-[3px] bg-panel pt-[5px]">
+      <div className={cn("flex w-[11px] shrink-0 flex-col items-center gap-[3px] bg-panel pt-[5px]", skin === "centipede" && "centipede-sidebar")}>
         <span className="size-[5px] rounded-full bg-accent" />
         <span className="size-[5px] rounded-full bg-ink-secondary/40" />
         <span className="size-[5px] rounded-full bg-ink-secondary/40" />
       </div>
       {/* sidebar — the top row is the selected conversation */}
-      <div className="flex w-[30px] shrink-0 flex-col gap-[3px] border-r border-hairline bg-panel p-[4px]">
+      <div className={cn("flex w-[30px] shrink-0 flex-col gap-[3px] border-r border-hairline bg-panel p-[4px]", skin === "centipede" && "centipede-sidebar")}>
         <span className="flex h-[9px] w-full items-center gap-[2px] rounded-sm bg-raised px-[2px]">
           <span className="size-[4px] shrink-0 rounded-full bg-accent" />
           <span className="h-[2px] flex-1 rounded-full bg-ink/50" />
@@ -76,7 +76,7 @@ export function SkinPicker() {
   return (
     // One row, so the whole set is visible without scrolling the modal —
     // 2x2 pushed the second row below the fold of its 560px frame.
-    <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+    <div className="grid grid-cols-2 gap-3 sm:grid-cols-5">
       {SKINS.map((skin) => {
         const selected = skin.id === active;
         return (

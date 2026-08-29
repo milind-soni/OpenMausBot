@@ -180,7 +180,7 @@ export function SkillRecorderPage() {
   const start = async () => {
     setError("");
     if (!bridge || !window.ogb?.beginScreenPreviewIntent || !navigator.mediaDevices?.getDisplayMedia) {
-      setError("Skill recording requires the OpenMausBot desktop app on macOS.");
+      setError("Skill recording requires the Agent Centipede desktop app on macOS.");
       return;
     }
     if (!transcriptionConfigured || !window.ogb.transcription) {
@@ -352,7 +352,7 @@ export function SkillRecorderPage() {
       <header className="flex h-[60px] shrink-0 items-center justify-between border-b border-hairline px-6">
         <div>
           <h1 className="text-[15px] font-semibold">Teach a skill</h1>
-          <p className="text-[11px] text-ink-secondary">Show it once. Let every bot repeat it.</p>
+          <p className="text-[11px] text-ink-secondary">Show it once. Let every agent repeat it.</p>
         </div>
         {recording && (
           <button type="button" onClick={() => void stop()} className="flex items-center gap-2 rounded-full bg-danger px-4 py-2 text-[12px] font-semibold text-white shadow-sm">
@@ -371,7 +371,7 @@ export function SkillRecorderPage() {
                 </div>
                 <h2 className="mt-5 text-[25px] font-semibold tracking-[-0.02em]">Record yourself doing the task</h2>
                 <p className="mt-2 max-w-xl text-[14px] leading-6 text-ink-secondary">
-                  Speak naturally while you work. OpenMausBot lines up your clicks, app changes, screenshots, and narration, then turns the reviewed demonstration into a reusable local skill.
+                  Speak naturally while you work. Agent Centipede lines up your clicks, app changes, screenshots, and narration, then turns the reviewed demonstration into a reusable local skill.
                 </p>
 
                 <div className="mt-7 grid gap-3 sm:grid-cols-3">
@@ -448,7 +448,7 @@ export function SkillRecorderPage() {
               <div className="flex flex-wrap items-end justify-between gap-4">
                 <div>
                   <div className="text-[11px] font-medium uppercase tracking-[0.12em] text-success">Recording complete</div>
-                  <h2 className="mt-1 text-[24px] font-semibold tracking-[-0.02em]">Review what the bot learned</h2>
+                  <h2 className="mt-1 text-[24px] font-semibold tracking-[-0.02em]">Review what the agent learned</h2>
                   <p className="mt-1 text-[13px] text-ink-secondary">Remove anything private or irrelevant, then name the skill.</p>
                 </div>
                 <button type="button" onClick={() => void discard()} className="flex items-center gap-2 rounded-xl px-3 py-2 text-[12px] text-ink-secondary hover:bg-raised"><Trash2 size={15} /> Discard recording</button>
@@ -484,7 +484,7 @@ export function SkillRecorderPage() {
                 <aside className="h-fit rounded-2xl border border-hairline bg-panel p-5 lg:sticky lg:top-0">
                   <label className="block text-[11px] font-medium text-ink-secondary" htmlFor="skill-name">Skill name</label>
                   <input id="skill-name" value={name} onChange={(event) => setName(event.target.value)} placeholder="e.g. File an expense report" maxLength={100} className="mt-2 w-full rounded-xl border border-hairline bg-inset px-3 py-2.5 text-[13px] outline-none placeholder:text-ink-secondary/60 focus:border-accent" />
-                  <label className="mt-4 block text-[11px] font-medium text-ink-secondary" htmlFor="skill-description">When should bots use it?</label>
+                  <label className="mt-4 block text-[11px] font-medium text-ink-secondary" htmlFor="skill-description">When should agents use it?</label>
                   <textarea id="skill-description" value={description} onChange={(event) => setDescription(event.target.value)} placeholder="Use when I ask to submit a company expense…" maxLength={300} rows={4} className="mt-2 w-full resize-none rounded-xl border border-hairline bg-inset px-3 py-2.5 text-[12px] leading-5 outline-none placeholder:text-ink-secondary/60 focus:border-accent" />
                   <div className="mt-4 space-y-2 rounded-xl bg-inset p-3 text-[11px] text-ink-secondary">
                     <div className="flex items-center justify-between"><span className="flex items-center gap-2"><FileText size={13} /> Steps</span><span>{events.length}</span></div>

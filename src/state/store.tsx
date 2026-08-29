@@ -13,9 +13,11 @@ import {
   useState,
   type ReactNode,
 } from "react";
-import type { CloudBackend, EffortLevel } from "../../server/contracts.ts";
+import type { CloudBackend, EffortLevel, LiveTokenUsage } from "../../server/contracts.ts";
+import type { ModelPricing } from "../../shared/model-pricing.ts";
 import type { MausColor, MausMotion } from "@/lib/mascot";
 import type { BotAvatarCrop } from "../../shared/bot-avatar";
+import type { BotReportingMode } from "../../shared/bot-profile";
 import type { Routine, RoutineInput, RoutineRun } from "@/lib/routines";
 import type { WebhookAttempt, WebhookIngressStatus, WebhookTrigger } from "@/lib/webhooks";
 import { currentCall } from "@/lib/call";
@@ -41,6 +43,9 @@ export interface OptionCardData {
   /** the narrow grant "always allow" remembers, e.g. "Bash:git" */
   allowKey?: string;
   approvalScope?: "local-computer";
+  /** Durable work records backing this transient conversation projection. */
+  workLockId?: string;
+  workApprovalId?: string;
 }
 
 export interface ConnectorCardData {
@@ -79,6 +84,8 @@ export interface Message {
    * narration of the same chip ("reading a file"), used by call mode. */
   /** `setup` marks an error fixed by installing something, not by retrying. */
   tool?: { name: string; ok?: boolean; spoken?: string; setup?: boolean };
+  /** One compact, durable projection of hidden temporary workers. */
+  workerBatch?: import("../../shared/worker-batch").WorkerBatchProjection;
   /** user messages sent into a running turn — the model saw it mid-turn */
   steered?: boolean;
   /** screen messages: a frame of the bot's computer (base64) */
@@ -161,10 +168,18 @@ export interface Task {
 export interface TaskUsage {
   input: number;
   output: number;
+  cachedInput?: number;
+  contextTokens?: number;
   /** null until any turn reported a cost — most engines never do; records
    * from builds before cost existed lack the field entirely */
   costUsd: number | null;
   turns: number;
+  /** Number of turns for which the engine actually supplied token counts. */
+  tokenTurns?: number;
+  /** Best-effort total for turns with no provider token telemetry. Clearly
+   * labelled as estimated by the usage presentation helpers. */
+  estimatedTokens?: number;
+  settledEventIds?: string[];
 }
 
 export interface Bot {
@@ -175,7 +190,11 @@ export interface Bot {
   name: string;
   title: string;
   description: string;
+  /** Detailed operating instructions; the short description is the agent's personality. */
+  instructions?: string;
   notifications: boolean;
+  /** Controls unsolicited operational chatter; direct replies are unaffected. */
+  reportingMode?: BotReportingMode;
   color: MausColor;
   mascotExpression?: string | null;
   /** App-owned image attachment used for this bot's profile. */
@@ -314,7 +333,7 @@ export interface InstanceInfo {
     /** a reported cost on a subscription is notional; the UI says so */
     billing?: "metered" | "subscription";
   };
-  models: { default: string; options: Array<{ id: string; label: string; custom?: boolean; loaded?: boolean }> };
+  models: { default: string; options: Array<{ id: string; label: string; custom?: boolean; loaded?: boolean; pricing?: ModelPricing }> };
   capabilities?: {
     computerMcp?: boolean;
     agentsMcp?: boolean;
@@ -352,7 +371,7 @@ export interface AppState {
   config: ConfigStatus | null;
   /** selected chat — a bot id OR a group id */
   selectedId: string;
-  activeView: "chat" | "team-map" | "routines" | "skill-recorder";
+  activeView: "chat" | "team-map" | "work" | "routines" | "skill-recorder";
   routines: Routine[];
   routineRuns: RoutineRun[];
   webhooks: WebhookTrigger[];
@@ -412,6 +431,7 @@ export type Action =
       computerControl: Record<string, { held: boolean; helpReason: string | null }>;
     }
   | { type: "showRoutines" }
+  | { type: "showWork" }
   | { type: "showTeamMap" }
   | { type: "showSkillRecorder" }
   | { type: "routinesHydrated"; routines: Routine[]; runs: RoutineRun[] }
@@ -577,6 +597,16 @@ export function reducer(state: AppState, action: Action): AppState {
       return {
         ...state,
         activeView: "routines",
+        settingsOpen: false,
+        computerOpen: false,
+        inspectorOpen: false,
+        appSettingsOpen: false,
+        pluginsOpen: false,
+      };
+    case "showWork":
+      return {
+        ...state,
+        activeView: "work",
         settingsOpen: false,
         computerOpen: false,
         inspectorOpen: false,
@@ -1108,8 +1138,10 @@ interface StreamState {
   streaming: Record<string, string>;
   /** in-flight extended thinking per threadId (ephemeral) */
   reasoning: Record<string, string>;
+  /** latest provider token telemetry per threadId */
+  liveUsage: Record<string, LiveTokenUsage>;
 }
-const EMPTY_STREAM: StreamState = { streaming: {}, reasoning: {} };
+const EMPTY_STREAM: StreamState = { streaming: {}, reasoning: {}, liveUsage: {} };
 const StreamContext = createContext<StreamState>(EMPTY_STREAM);
 
 export function useStreaming() {
@@ -1145,10 +1177,18 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     // duplicated tail instead of starting a fresh bubble.
     deltaBuffer.current.delete(threadId);
     setStream((prev) => {
-      if (!(threadId in prev.streaming) && !(threadId in prev.reasoning)) return prev;
+      if (!(threadId in prev.streaming) && !(threadId in prev.reasoning) && !(threadId in prev.liveUsage)) return prev;
       const { [threadId]: _s, ...streaming } = prev.streaming;
       const { [threadId]: _r, ...reasoning } = prev.reasoning;
-      return { streaming, reasoning };
+      const { [threadId]: _u, ...liveUsage } = prev.liveUsage;
+      return { ...prev, streaming, reasoning, liveUsage };
+    });
+  };
+  const clearLiveUsage = (threadId: string) => {
+    setStream((prev) => {
+      if (!(threadId in prev.liveUsage)) return prev;
+      const { [threadId]: _usage, ...liveUsage } = prev.liveUsage;
+      return { ...prev, liveUsage };
     });
   };
   const flushDeltas = () => {
@@ -1167,7 +1207,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         if (d.text) streaming[threadId] = (streaming[threadId] ?? "") + d.text;
         if (d.reasoning) reasoning[threadId] = (reasoning[threadId] ?? "") + d.reasoning;
       }
-      return { streaming, reasoning };
+      return { ...prev, streaming, reasoning };
     });
   };
 
@@ -1300,16 +1340,14 @@ export function StoreProvider({ children }: { children: ReactNode }) {
               }),
             }).catch(showError);
           if (action.alwaysAllow) {
-            const bot = stateRef.current.bots.find((b) => b.id === action.alwaysAllow!.botId);
-            const next = [...new Set([...(bot?.alwaysAllow ?? []), action.alwaysAllow.key])];
             // save the grant BEFORE releasing the bot: it may ask again
             // within milliseconds, and a grant that hasn't landed yet
-            // would make "always allow" ask a second time. A failed save
+            // would make the remembered action ask a second time. A failed save
             // still lets this one through — losing a preference must not
             // strand the turn — but it says so.
-            void api(`/api/bots/${action.alwaysAllow.botId}`, {
-              method: "PATCH",
-              body: JSON.stringify({ alwaysAllow: next }),
+            void api(`/api/bots/${action.alwaysAllow.botId}/always-allow`, {
+              method: "POST",
+              body: JSON.stringify({ allowKey: action.alwaysAllow.key }),
             })
               .catch(showError)
               .finally(respond);
@@ -1367,6 +1405,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
             title: source.title,
             description: source.description,
             notifications: source.notifications,
+            reportingMode: source.reportingMode,
             modelSelection: source.modelSelection,
             computer: source.computer,
             cloudBackend: source.cloudBackend,
@@ -1593,6 +1632,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
           rawDispatch({ type: "threadActive", threadId: frame.threadId, activeLeafId: frame.activeLeafId });
           // a rewind also invalidates any half-streamed text from the old branch
           clearStream(frame.threadId);
+          clearLiveUsage(frame.threadId);
           break;
         case "bot": {
           const bot = frame.bot as BotAnnouncement;
@@ -1609,6 +1649,10 @@ export function StoreProvider({ children }: { children: ReactNode }) {
             type: "botPatched",
             bot: { ...bot, ...botPatchQueue.overlayFor(bot.id) },
           });
+          // turn.completed reaches the runtime stream before the server banks
+          // usage and emits this idle bot frame. Keep the live figure until
+          // this durable replacement arrives so the header never jumps back.
+          if (!bot.busy) clearLiveUsage(bot.threadId);
           break;
         }
         case "group": {
@@ -1636,7 +1680,6 @@ export function StoreProvider({ children }: { children: ReactNode }) {
           showNotification(
             frame.notification,
             (target) => openNotificationTarget(dispatch, target, stateRef.current),
-            stateRef.current.bots.find((bot) => bot.id === frame.notification.botId)?.avatarUrl,
           );
           break;
         case "group.deleted":
@@ -1677,6 +1720,18 @@ export function StoreProvider({ children }: { children: ReactNode }) {
                 flushDeltas();
               });
             }
+          } else if (event.type === "thread.token-usage.updated") {
+            setStream((prev) => ({
+              ...prev,
+              liveUsage: {
+                ...prev.liveUsage,
+                [event.threadId]: {
+                  input: event.input,
+                  output: event.output,
+                  scope: event.scope ?? "turn",
+                },
+              },
+            }));
           } else if (event.type === "turn.completed") {
             // flush any buffered tail before clearing so no tokens are lost
             flushDeltas();
@@ -1736,6 +1791,15 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       alive = false;
       clearTimeout(hydrationFallback);
       es.close();
+      // A stream delta can be queued between the last event and teardown.
+      // Cancel it with the EventSource so a StrictMode probe or remount cannot
+      // flush stale text into the next provider instance.
+      if (deltaFlush.current !== null) {
+        cancelAnimationFrame(deltaFlush.current);
+        deltaFlush.current = null;
+      }
+      deltaBuffer.current.clear();
+      pendingFrames.length = 0;
     };
   }, []);
 

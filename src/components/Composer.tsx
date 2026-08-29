@@ -20,6 +20,7 @@ import {
 } from "@/lib/composer-attachments";
 import { normalizeState } from "@/lib/mascot";
 import { groupComposerHint, roomRespondersForComposer } from "@/lib/group-routing";
+import { queuedPromptStack } from "@/lib/queued-prompts";
 import { PendingApprovalActions, PendingApprovalPanel, pendingApprovals } from "./PendingApproval";
 import { useDesktopCapabilities } from "./DesktopCapabilities";
 import { ReplyQuote } from "./ReplyQuote";
@@ -173,8 +174,8 @@ export function Composer({
       members?.find((member) => member.id === group.busyBotId)
     : bot;
   const busyName = group
-    ? (members?.find((b) => b.id === group.busyBotId)?.name ?? "A bot")
-    : (bot?.name ?? "The bot");
+    ? (members?.find((b) => b.id === group.busyBotId)?.name ?? "An agent")
+    : (bot?.name ?? "The agent");
   // Per-thread draft: switching bots unmounts this component, so both the
   // text and its attachment chips have to outlive it (see lib/drafts).
   const [text, setText, attachments, setAttachments] = useComposerDraft(
@@ -279,11 +280,10 @@ export function Composer({
   // queue), but stay off the transcript until drain — the chip here is the
   // pending row so they cannot become the active leaf mid-turn.
   const [queued, setQueued] = useState<{ text: string; replyToId?: string } | null>(null);
-  const pendingChip = group
-    ? queued?.text
-    : bot
-      ? state.pendingQueued?.[bot.threadId]?.map((entry) => entry.text).join("\n")
-      : undefined;
+  const pendingPrompts = queuedPromptStack(
+    group && queued ? { text: queued.text } : undefined,
+    bot ? state.pendingQueued?.[bot.threadId] ?? [] : [],
+  );
   // a chip on its own is a message: the send control has to appear for it
   const fileInput = useRef<HTMLInputElement>(null);
   const [autoWarn, setAutoWarn] = useState(false);
@@ -407,27 +407,35 @@ export function Composer({
         </div>
       )}
       <div className="relative mx-auto max-w-[900px]">
-        {pendingChip && (
-          <div className="mb-2 flex items-center gap-2 rounded-lg border border-hairline/40 bg-panel px-3 py-2 text-[12.5px] text-ink-secondary">
-            <Clock size={13} className="shrink-0" />
-            <span className="min-w-0 flex-1 truncate">
-              Queued — sends when {busyName} finishes: “{pendingChip}”
-            </span>
-            {group && (
-              <button
-                onClick={() => setQueued(null)}
-                aria-label="Discard queued message"
-                className="rounded p-0.5 hover:bg-raised hover:text-ink"
+        {pendingPrompts.length > 0 && (
+          <div className="mb-2 flex flex-col gap-1.5" aria-label="Queued prompts">
+            {pendingPrompts.map((prompt, index) => (
+              <div
+                key={prompt.id}
+                className="flex items-start gap-2 rounded-lg border border-hairline/40 bg-panel px-3 py-2 text-[12.5px] text-ink-secondary"
               >
-                <X size={13} />
-              </button>
-            )}
+                <Clock size={13} className="mt-0.5 shrink-0" />
+                <span className="min-w-0 flex-1 whitespace-pre-wrap break-words">
+                  <span className="font-medium text-ink-secondary">Queued {pendingPrompts.length > 1 ? `${index + 1}/${pendingPrompts.length}` : ""}</span>
+                  {` — sends when ${busyName} finishes: “${prompt.text}”`}
+                </span>
+                {prompt.discardable && (
+                  <button
+                    onClick={() => setQueued(null)}
+                    aria-label="Discard queued message"
+                    className="rounded p-0.5 hover:bg-raised hover:text-ink"
+                  >
+                    <X size={13} />
+                  </button>
+                )}
+              </div>
+            ))}
           </div>
         )}
         {pickerOpen && (
           <div
             role="listbox"
-            aria-label="Tag a bot"
+            aria-label="Tag an agent"
             className="absolute bottom-full left-2 z-20 mb-2 w-72 overflow-hidden rounded-xl border border-hairline/40 bg-raised shadow-lg"
           >
             {candidates.map((peer, i) => (

@@ -13,7 +13,7 @@ import { cn } from "@/lib/cn";
 import { COMPACT_SQUARE } from "@/lib/compact-chip";
 
 type ModelOption = InstanceInfo["models"]["options"][number];
-const COMPACT_MODEL_COUNT = 5;
+const COMPACT_MODEL_COUNT = 8;
 
 function modelLabel(instance: InstanceInfo | undefined, model: string): string {
   return instance?.models.options.find((option) => option.id === model)?.label ?? model;
@@ -219,7 +219,7 @@ export function ModelPicker({
       aria-expanded={open}
       aria-haspopup="dialog"
       className={cn(
-        "flex items-center gap-1.5 rounded-full border border-hairline/40 bg-control/60 py-1 pl-2 pr-2.5 text-[13px] text-ink hover:bg-raised-hover",
+        "centipede-control-chip is-model flex items-center gap-1.5 rounded-full border border-hairline/40 bg-control/60 py-1 pl-2 pr-2.5 text-[13px] text-ink hover:bg-raised-hover",
         // in a narrow chat header fold to a rounded square with just the
         // provider mark; the model name rides the tooltip (a bot with no
         // resolved engine keeps its label — the mark is what would hide it)
@@ -227,8 +227,12 @@ export function ModelPicker({
       )}
       title={active ? `${active.displayName} · ${modelLabel(active, selection.model)}` : selection.model}
     >
-      {active && <ProviderMark driverKind={active.driverKind} size={14} />}
-      <span className={cn("max-w-[160px] truncate", !contained && active && "@max-4xl/chathead:hidden")}>
+      {active && (
+        <span className="centipede-chip-glyph" aria-hidden="true">
+          <ProviderMark driverKind={active.driverKind} size={13} />
+        </span>
+      )}
+      <span className={cn("max-w-[160px] truncate", !contained && active && "@max-5xl/chathead:hidden")}>
         {modelLabel(active, selection.model)}
       </span>
       <ChevronDown
@@ -236,7 +240,7 @@ export function ModelPicker({
         className={cn(
           "text-ink-secondary transition-transform",
           open && "rotate-180",
-          !contained && active && "@max-4xl/chathead:hidden",
+          !contained && active && "@max-5xl/chathead:hidden",
         )}
       />
     </button>
@@ -259,10 +263,10 @@ export function ModelPicker({
           role="dialog"
           aria-label="Choose model"
           className={cn(
-            "flex overflow-hidden rounded-2xl border border-hairline/50 bg-card",
+            "centipede-model-picker-menu flex overflow-hidden rounded-2xl border border-hairline/50 bg-card",
             contained
               ? "relative mt-3 w-full max-h-[min(420px,50dvh)]"
-              : "absolute right-0 top-full z-30 mt-2 w-[380px] max-h-[min(480px,calc(100dvh-7rem))] shadow-2xl shadow-black/50",
+              : "absolute right-0 top-full z-[60] mt-2 w-[380px] max-h-[min(480px,calc(100dvh-7rem))] shadow-2xl shadow-black/50",
           )}
         >
           <div className="flex w-14 shrink-0 flex-col gap-1 overflow-y-auto border-r border-hairline/40 bg-panel p-2">
@@ -324,7 +328,7 @@ export function ModelPicker({
                   <div className="mt-0.5 text-[11.5px] text-ink-secondary">
                     {pane === "custom"
                       ? "Run this agent with a model already on your machine."
-                      : "Choose a model for this bot."}
+                      : "Choose a model for this agent."}
                   </div>
                 </div>
 

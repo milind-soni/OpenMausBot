@@ -41,7 +41,7 @@ function BotNode({ bot, chief = false }: { bot: Bot; chief?: boolean }) {
       <span className="min-w-0 flex-1">
         <span className="flex items-center gap-1.5">
           <span className="truncate text-[13.5px] font-semibold text-ink">{bot.name}</span>
-          {chief && <Crown size={12} className="shrink-0 text-warning" aria-label="Chief of Staff" />}
+          {chief && <Crown size={12} className="shrink-0 text-warning" aria-label="Coordinator" />}
         </span>
         <span className="block truncate text-[11.5px] text-ink-secondary">{bot.title || bot.modelSelection.model}</span>
       </span>
@@ -345,7 +345,7 @@ export function TeamMapPage() {
       <div className="min-h-0 flex-1 overflow-y-auto px-7 py-6">
         <div className="mb-5 grid max-w-[620px] grid-cols-3 gap-2">
           {[
-            [bots.length, "Bots"],
+            [bots.length, "Agents"],
             [working, "Working"],
             [waiting, "Waiting on you"],
           ].map(([value, label]) => (
@@ -401,7 +401,7 @@ export function TeamMapPage() {
             ))}
             {edges.length === 0 && (
               <div className="rounded-xl border border-dashed border-hairline bg-panel px-4 py-6 text-center text-[12.5px] text-ink-secondary">
-                No bot-to-bot handoffs yet. Ask a Chief of Staff to delegate a task and it will appear here live.
+                No agent-to-agent handoffs yet. A coordinator can delegate a task, or agents can work independently; handoffs will appear here live.
               </div>
             )}
           </div>

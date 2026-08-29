@@ -143,6 +143,10 @@ type SkillRecordingPayload = {
         setKey(value: string): Promise<{ configured: boolean }>;
         streamingToken(): Promise<{ token: string; expiresInSeconds: number }>;
       };
+      firebase?: {
+        status(): Promise<FirebaseCredentialStatus>;
+        importServiceAccount(): Promise<FirebaseImportResult>;
+      };
       /** Absolute path of a dropped File ("" when the drag carried no
        * file on disk). Absent in older builds of the shell. */
       getPathForFile?(file: File): string;
@@ -163,6 +167,8 @@ type SkillRecordingPayload = {
       onPackageInstall?(cb: (url: string) => void): () => void;
       /** Updates the native Dock/taskbar unread indicator. */
       setUnreadCount?(count: number): void;
+      /** Updates Windows' native caption background and symbol colors. */
+      setTitleBarColors?(colors: { background: string; foreground: string }): void;
       /** Opens a live desktop as a sandboxed window owned by OpenMausBot. */
       desktopViewer?: {
         open(url: string, title: string, contextId: string): Promise<boolean>;
@@ -177,6 +183,13 @@ type SkillRecordingPayload = {
       /** Writes the redacted diagnostics report to a user-chosen file;
        * resolves the path, or null when cancelled. */
       exportDiagnostics?(): Promise<string | null>;
+      backup?: {
+        status(): Promise<EncryptedBackupStatus>;
+        create(): Promise<EncryptedBackupStatus>;
+        exportRecoveryKey(): Promise<string | null>;
+        setRetention(keep: number): Promise<EncryptedBackupStatus>;
+        openFolder(): Promise<boolean>;
+      };
       /** Asks where to save a bot-created file (inside ~/.openmausbot), copies
        * it there and reveals it. Resolves the chosen path, or null if the
        * user cancelled the dialog. */
@@ -232,6 +245,31 @@ export interface CompanionAccountState {
   email?: string;
   endpoint?: string;
   message?: string;
+}
+
+export interface FirebaseCredentialStatus {
+  pushEncryptionKeyConfigured: boolean;
+  serviceAccountConfigured: boolean;
+  projectId?: string;
+}
+
+export interface FirebaseImportResult extends FirebaseCredentialStatus {
+  imported: boolean;
+  configured?: boolean;
+}
+
+export interface EncryptedBackupStatus {
+  available: boolean;
+  directory: string;
+  keep: number;
+  count: number;
+  latest: null | {
+    file: string;
+    createdAt: number | null;
+    files: number | null;
+    verified: boolean;
+    error?: string;
+  };
 }
 
 export type AndroidUsbDevice = {

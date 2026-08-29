@@ -1,0 +1,706 @@
+.centipede-desktop-shell {
+  --centipede-paper: var(--color-app);
+  --centipede-surface: var(--color-panel);
+  --centipede-card: var(--color-card);
+  --centipede-ink: var(--color-ink);
+  --centipede-muted: var(--color-ink-secondary);
+  --centipede-line: color-mix(in srgb, var(--color-hairline) 72%, transparent);
+  --centipede-lime: var(--color-accent);
+  position: relative;
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) minmax(268px, 324px);
+  min-height: 0;
+  flex: 1;
+  overflow: hidden;
+  background:
+    radial-gradient(circle at 50% -20%, color-mix(in srgb, var(--centipede-lime) 7%, transparent), transparent 38%),
+    var(--centipede-paper);
+  color: var(--centipede-ink);
+  animation: centipede-shell-in .32s cubic-bezier(.22, 1, .36, 1) both;
+}
+
+.centipede-desktop-shell.is-windows {
+  grid-template-rows: 40px minmax(0, 1fr);
+}
+
+.centipede-desktop-shell.is-windows > .centipede-sidebar {
+  grid-column: 1;
+  grid-row: 1 / -1;
+}
+
+.centipede-desktop-shell.is-windows > .centipede-desktop-main {
+  grid-column: 2;
+  grid-row: 2;
+}
+
+.centipede-desktop-shell.is-windows > .centipede-now-rail { top: 40px; }
+.centipede-desktop-shell.is-windows > .centipede-task-backdrop { top: 40px; }
+
+.centipede-window-titlebar {
+  -webkit-app-region: drag;
+  grid-column: 2 / -1;
+  grid-row: 1;
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 8px;
+  padding: 0 148px 0 20px;
+  border-bottom: 1px solid var(--centipede-line);
+  background: var(--centipede-paper);
+  color: var(--centipede-muted);
+  font: 700 9px/1 ui-monospace, SFMono-Regular, Menlo, monospace;
+  letter-spacing: .14em;
+  user-select: none;
+}
+
+.centipede-window-titlebar-mark {
+  width: 7px;
+  height: 7px;
+  flex: 0 0 auto;
+  border-radius: 50%;
+  background: var(--centipede-lime);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--centipede-lime) 14%, transparent);
+  animation: centipede-live-breathe 3.8s ease-in-out infinite;
+}
+
+.centipede-window-titlebar-rule {
+  overflow: hidden;
+  padding-left: 8px;
+  border-left: 1px solid var(--centipede-line);
+  color: color-mix(in srgb, var(--centipede-muted) 72%, transparent);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.centipede-desktop-main {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.centipede-task-home-rail {
+  grid-column: 3;
+  grid-row: 2;
+  display: flex;
+  min-width: 0;
+  min-height: 0;
+  flex-direction: column;
+  gap: 14px;
+  overflow-y: auto;
+  padding: 22px 16px 18px;
+  border-left: 1px solid var(--centipede-line);
+  background: color-mix(in srgb, var(--centipede-surface) 68%, transparent);
+}
+
+.centipede-rail-heading { display: flex; align-items: flex-start; justify-content: space-between; gap: 10px; }
+.centipede-rail-heading h2 { margin: 5px 0 0; font-size: 17px; letter-spacing: -.025em; }
+.centipede-rail-alert { display: grid; width: 29px; height: 29px; place-items: center; border: 1px solid color-mix(in srgb, var(--color-warning) 45%, transparent); border-radius: 9px; background: color-mix(in srgb, var(--color-warning) 12%, transparent); color: var(--color-warning); }
+.centipede-task-list { padding: 12px; border: 1px solid var(--centipede-line); border-radius: 15px; background: color-mix(in srgb, var(--centipede-card) 72%, transparent); }
+.centipede-rail-empty { margin: 0; padding: 14px 12px; border: 1px dashed var(--centipede-line); border-radius: 12px; color: var(--centipede-muted); font-size: 12px; line-height: 1.5; }
+.centipede-rail-links { display: flex; flex-direction: column; gap: 6px; }
+.centipede-rail-links button { display: flex; min-width: 0; align-items: flex-start; gap: 9px; padding: 10px; border: 1px solid transparent; border-radius: 12px; background: transparent; color: var(--centipede-muted); text-align: left; cursor: pointer; }
+.centipede-rail-links button:hover, .centipede-rail-links button:focus-visible, .centipede-rail-links button.is-active { border-color: var(--centipede-line); background: color-mix(in srgb, var(--centipede-card) 72%, transparent); color: var(--centipede-ink); outline: none; }
+.centipede-rail-links button > span { display: flex; min-width: 0; flex: 1; flex-direction: column; gap: 3px; }
+.centipede-rail-links strong { font-size: 12px; }
+.centipede-rail-links small { overflow: hidden; color: var(--centipede-muted); font-size: 10px; text-overflow: ellipsis; white-space: nowrap; }
+.centipede-rail-failure { display: flex; align-items: flex-start; gap: 8px; padding: 10px; border: 1px solid color-mix(in srgb, var(--color-danger) 35%, transparent); border-radius: 11px; background: color-mix(in srgb, var(--color-danger) 8%, transparent); color: var(--color-danger); font-size: 11px; line-height: 1.4; }
+.centipede-rail-actions { display: flex; margin-top: auto; flex-direction: column; gap: 3px; }
+.centipede-rail-actions button { display: flex; align-items: center; gap: 8px; padding: 8px 9px; border: 0; border-radius: 9px; background: transparent; color: var(--centipede-muted); font-size: 11px; text-align: left; cursor: pointer; }
+.centipede-rail-actions button:hover, .centipede-rail-actions button:focus-visible { background: color-mix(in srgb, var(--centipede-card) 75%, transparent); color: var(--centipede-ink); outline: none; }
+.centipede-rail-actions button:disabled { cursor: not-allowed; opacity: .45; }
+
+.centipede-task-strip {
+  display: flex;
+  min-height: 42px;
+  align-items: center;
+  justify-content: center;
+  border-bottom: 1px solid var(--centipede-line);
+  background: color-mix(in srgb, var(--centipede-surface) 72%, transparent);
+}
+
+.centipede-task-strip button {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  min-height: 28px;
+  padding: 4px 10px;
+  border: 1px solid var(--centipede-line);
+  border-radius: 999px;
+  background: var(--centipede-card);
+  color: var(--centipede-muted);
+  font-size: 11px;
+  font-weight: 700;
+  cursor: pointer;
+  transition: transform .16s ease, border-color .16s ease, color .16s ease;
+}
+
+.centipede-task-strip button:hover { transform: translateY(-1px); color: var(--centipede-ink); }
+.centipede-task-strip button.is-waiting { border-color: color-mix(in srgb, var(--color-warning) 45%, var(--centipede-line)); color: var(--centipede-ink); }
+.centipede-task-strip-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--centipede-lime); animation: centipede-live-breathe 3.2s ease-in-out infinite; }
+.centipede-task-strip button.is-waiting .centipede-task-strip-dot { background: var(--color-warning); }
+
+.centipede-task-backdrop {
+  position: absolute;
+  z-index: 39;
+  inset: 0;
+  border: 0;
+  background: color-mix(in srgb, #0b0e0d 24%, transparent);
+  backdrop-filter: blur(1px);
+}
+
+.centipede-desktop-content {
+  display: flex;
+  min-width: 0;
+  min-height: 0;
+  flex: 1;
+}
+
+.centipede-desktop-content > main {
+  background-color: var(--centipede-paper);
+  background-image:
+    linear-gradient(color-mix(in srgb, var(--centipede-ink) 2.2%, transparent) 1px, transparent 1px),
+    linear-gradient(90deg, color-mix(in srgb, var(--centipede-ink) 2.2%, transparent) 1px, transparent 1px);
+  background-size: 28px 28px;
+}
+
+.centipede-desktop-content > * {
+  animation: centipede-content-in .24s cubic-bezier(.22, 1, .36, 1) both;
+}
+
+/* Conversation controls read as one centered clinical instrument rail. The
+   agent identity and utility tools occupy equal outside tracks so long task
+   names cannot shove the work state off-axis. */
+.centipede-chat-header {
+  position: relative;
+  z-index: 40;
+  isolation: isolate;
+  border-bottom: 1px solid color-mix(in srgb, var(--centipede-line) 64%, transparent);
+  background: color-mix(in srgb, var(--centipede-paper) 86%, transparent);
+  backdrop-filter: blur(14px);
+}
+
+.centipede-chat-identity,
+.centipede-chat-utilities { min-width: 0; }
+
+.centipede-chat-instruments {
+  max-width: min(760px, 62vw);
+  /* Keep the end controls from visually touching the instrument housing.
+     Vertical density stays compact; only the left/right breathing room grows. */
+  padding-inline: 10px;
+  border-color: color-mix(in srgb, var(--centipede-line) 82%, transparent);
+  background:
+    linear-gradient(180deg, color-mix(in srgb, var(--centipede-card) 84%, transparent), color-mix(in srgb, var(--centipede-surface) 72%, transparent));
+  box-shadow:
+    inset 0 1px color-mix(in srgb, white 7%, transparent),
+    0 5px 18px rgb(0 0 0 / .035);
+}
+
+/* Keep the model menu a solid surface inside the translucent chat header.
+   The header backdrop is intentionally glassy, but its menu must not let
+   transcript text show through while it is open. */
+.centipede-model-picker-menu {
+  isolation: isolate;
+  background-color: var(--centipede-card);
+  backdrop-filter: none;
+}
+
+.centipede-control-chip {
+  min-height: 30px;
+  border-color: transparent;
+  background: transparent;
+  color: var(--centipede-muted);
+  font-family: InterVariable, Inter, ui-sans-serif, system-ui, sans-serif;
+  font-weight: 560;
+  letter-spacing: -.01em;
+  transition:
+    color .16s ease,
+    background-color .16s ease,
+    border-color .16s ease,
+    box-shadow .18s ease,
+    transform .16s cubic-bezier(.22, 1, .36, 1);
+}
+
+.centipede-control-chip:hover,
+.centipede-control-chip:focus-visible {
+  border-color: color-mix(in srgb, var(--centipede-line) 88%, transparent);
+  background: color-mix(in srgb, var(--centipede-card) 88%, transparent);
+  color: var(--centipede-ink);
+  box-shadow: 0 4px 12px rgb(0 0 0 / .05);
+  outline: none;
+  transform: translateY(-1px);
+}
+
+.centipede-control-chip.is-stop {
+  color: color-mix(in srgb, var(--color-danger) 84%, var(--centipede-ink));
+}
+
+.centipede-chip-glyph {
+  display: grid;
+  width: 22px;
+  height: 22px;
+  flex: 0 0 auto;
+  place-items: center;
+  border: 1px solid color-mix(in srgb, var(--centipede-line) 72%, transparent);
+  border-radius: 7px;
+  background: color-mix(in srgb, var(--centipede-card) 76%, transparent);
+  color: color-mix(in srgb, var(--centipede-muted) 88%, var(--centipede-ink));
+  box-shadow: inset 0 1px color-mix(in srgb, white 7%, transparent);
+}
+
+.centipede-chip-glyph.is-stop {
+  border-color: color-mix(in srgb, var(--color-danger) 24%, transparent);
+  background: color-mix(in srgb, var(--color-danger) 10%, transparent);
+  color: var(--color-danger);
+}
+
+.centipede-control-chip.is-model .centipede-chip-glyph {
+  border-color: color-mix(in srgb, var(--centipede-lime) 25%, var(--centipede-line));
+  background: color-mix(in srgb, var(--centipede-lime) 8%, transparent);
+}
+
+.centipede-count-badge {
+  display: inline-grid;
+  min-width: 20px;
+  height: 20px;
+  place-items: center;
+  padding: 0 5px;
+  border: 1px solid color-mix(in srgb, var(--centipede-line) 72%, transparent);
+  border-radius: 7px;
+  background: color-mix(in srgb, var(--centipede-surface) 76%, transparent);
+  color: var(--centipede-muted);
+  font-size: 10px;
+  font-weight: 700;
+}
+
+.centipede-chat-utilities {
+  padding: 3px;
+  border: 1px solid color-mix(in srgb, var(--centipede-line) 58%, transparent);
+  border-radius: 11px;
+  background: color-mix(in srgb, var(--centipede-card) 40%, transparent);
+}
+
+.centipede-chat-utilities .centipede-icon-control,
+.centipede-chat-utilities > div > button {
+  display: grid;
+  width: 30px;
+  height: 30px;
+  place-items: center;
+  padding: 0;
+  border: 1px solid transparent;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--centipede-muted);
+  transition: color .16s ease, background-color .16s ease, border-color .16s ease, transform .16s cubic-bezier(.22, 1, .36, 1);
+}
+
+.centipede-chat-utilities .centipede-icon-control:hover,
+.centipede-chat-utilities .centipede-icon-control:focus-visible,
+.centipede-chat-utilities > div > button:hover,
+.centipede-chat-utilities > div > button:focus-visible {
+  border-color: color-mix(in srgb, var(--centipede-line) 72%, transparent);
+  background: color-mix(in srgb, var(--centipede-card) 82%, transparent);
+  color: var(--centipede-ink);
+  outline: none;
+  transform: translateY(-1px);
+}
+
+.centipede-chat-utilities .is-active {
+  border-color: color-mix(in srgb, var(--centipede-lime) 24%, transparent);
+  background: color-mix(in srgb, var(--centipede-lime) 10%, transparent);
+  color: var(--centipede-lime);
+}
+
+.centipede-command-bar {
+  display: flex;
+  min-height: 46px;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  padding: 0 18px;
+  border-bottom: 1px solid var(--centipede-line);
+  background: color-mix(in srgb, var(--centipede-surface) 70%, transparent);
+}
+
+.centipede-command-nav { display: flex; min-width: 0; align-items: center; gap: 3px; }
+.centipede-command-link { display: inline-flex; align-items: center; gap: 6px; min-height: 32px; padding: 5px 10px; border: 0; border-radius: 8px; background: transparent; color: var(--centipede-muted); font-size: 11px; font-weight: 700; cursor: pointer; transition: color .16s ease, background-color .16s ease, box-shadow .2s ease, transform .16s cubic-bezier(.22, 1, .36, 1); }
+.centipede-command-link:hover, .centipede-command-link:focus-visible { background: color-mix(in srgb, var(--centipede-card) 75%, transparent); color: var(--centipede-ink); outline: none; transform: translateY(-1px); }
+.centipede-command-link.is-active { background: color-mix(in srgb, var(--centipede-lime) 13%, transparent); color: var(--centipede-ink); box-shadow: inset 0 -2px color-mix(in srgb, var(--centipede-lime) 72%, transparent); }
+.centipede-command-link:disabled { cursor: not-allowed; opacity: .45; }
+.centipede-command-badge { min-width: 15px; padding: 2px 4px; border-radius: 99px; background: color-mix(in srgb, var(--color-warning) 20%, transparent); color: var(--color-warning); font-size: 9px; text-align: center; }
+.centipede-command-pulse { display: flex; align-items: center; gap: 6px; color: var(--centipede-muted); font-size: 11px; white-space: nowrap; }
+.centipede-command-pulse-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--color-danger); }
+.centipede-command-pulse-dot.is-live { background: var(--color-success); box-shadow: 0 0 0 3px color-mix(in srgb, var(--color-success) 16%, transparent); animation: centipede-live-breathe 3.2s ease-in-out infinite; }
+.centipede-command-pulse-dot.is-muted { opacity: .5; }
+.centipede-command-pulse-count { margin-left: 4px; padding-left: 8px; border-left: 1px solid var(--centipede-line); }
+
+.centipede-now-rail {
+  position: absolute;
+  z-index: 40;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  width: min(360px, calc(100% - 80px));
+  display: flex;
+  min-width: 0;
+  min-height: 0;
+  flex-direction: column;
+  gap: 16px;
+  overflow-y: auto;
+  padding: 26px 16px 18px;
+  background: color-mix(in srgb, var(--centipede-surface) 88%, transparent);
+  border-left: 1px solid var(--centipede-line);
+  box-shadow: -24px 0 60px color-mix(in srgb, #0b0e0d 16%, transparent);
+  animation: centipede-drawer-in .24s cubic-bezier(.22, 1, .36, 1) both;
+}
+
+.centipede-now-head-actions { display: flex; align-items: center; gap: 10px; }
+.centipede-now-head-actions button { display: grid; width: 30px; height: 30px; place-items: center; border: 0; border-radius: 9px; background: transparent; color: var(--centipede-muted); cursor: pointer; }
+.centipede-now-head-actions button:hover { background: var(--centipede-card); color: var(--centipede-ink); }
+
+@keyframes centipede-drawer-in { from { opacity: 0; transform: translateX(24px); } to { opacity: 1; transform: translateX(0); } }
+
+.centipede-now-rail > * {
+  animation: centipede-rail-in .32s cubic-bezier(.22, 1, .36, 1) both;
+}
+.centipede-now-rail > :nth-child(2) { animation-delay: 35ms; }
+.centipede-now-rail > :nth-child(3) { animation-delay: 70ms; }
+.centipede-now-rail > :nth-child(4) { animation-delay: 105ms; }
+.centipede-now-rail > :nth-child(5) { animation-delay: 140ms; }
+.centipede-now-rail > :nth-child(n + 6) { animation-delay: 175ms; }
+
+.centipede-now-head,
+.centipede-section-heading,
+.centipede-health-title {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.centipede-now-head h2 {
+  margin: 5px 0 0;
+  font-size: 20px;
+  line-height: 1.1;
+  letter-spacing: -0.025em;
+}
+
+.centipede-eyebrow {
+  margin: 0;
+  color: var(--centipede-muted);
+  font: 700 9px/1.3 ui-monospace, SFMono-Regular, Menlo, monospace;
+  letter-spacing: .16em;
+}
+
+.centipede-live-dot {
+  width: 9px;
+  height: 9px;
+  flex: 0 0 auto;
+  border-radius: 50%;
+  background: var(--color-danger);
+}
+
+.centipede-live-dot.is-live {
+  background: var(--color-success);
+  box-shadow: 0 0 0 4px color-mix(in srgb, var(--color-success) 18%, transparent);
+  animation: centipede-live-breathe 3.2s ease-in-out infinite;
+}
+
+.centipede-live-dot.is-muted { opacity: .5; }
+
+.centipede-now-stats {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+}
+
+.centipede-now-stats > div {
+  position: relative;
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 2px;
+  padding: 12px 10px 9px;
+  border: 1px solid var(--centipede-line);
+  border-radius: 12px;
+  background: color-mix(in srgb, var(--centipede-card) 70%, transparent);
+}
+
+.centipede-now-stats strong { font-size: 23px; line-height: 1; letter-spacing: -.05em; }
+.centipede-now-stats span { color: var(--centipede-muted); font-size: 11px; }
+.centipede-stat-sparkline { width: 100%; height: 19px; margin-top: 7px; overflow: visible; }
+.centipede-stat-sparkline path { fill: none; stroke: color-mix(in srgb, var(--centipede-lime) 74%, var(--centipede-muted)); stroke-width: 1.6; stroke-linecap: round; stroke-linejoin: round; vector-effect: non-scaling-stroke; }
+.centipede-stat-sparkline.is-waiting path { stroke: color-mix(in srgb, var(--color-warning) 65%, var(--centipede-muted)); }
+
+.centipede-now-section { display: flex; flex-direction: column; gap: 9px; }
+.centipede-section-heading h3 { margin: 0; font-size: 13px; font-weight: 700; }
+.centipede-section-heading > svg { color: var(--centipede-muted); }
+.centipede-count-badge { min-width: 18px; padding: 3px 6px; border-radius: 99px; background: color-mix(in srgb, var(--color-warning) 19%, transparent); color: var(--color-warning); font-size: 10px; font-weight: 700; text-align: center; }
+
+.centipede-now-list { display: flex; flex-direction: column; gap: 4px; }
+.centipede-now-item { display: flex; width: 100%; min-width: 0; align-items: center; gap: 9px; padding: 9px 8px; border: 1px solid transparent; border-radius: 11px; background: transparent; color: var(--centipede-ink); text-align: left; cursor: pointer; transition: background-color .15s ease, border-color .15s ease, transform .15s ease; }
+.centipede-now-item:hover, .centipede-now-item:focus-visible { border-color: var(--centipede-line); background: color-mix(in srgb, var(--centipede-card) 70%, transparent); outline: none; transform: translateX(2px); }
+.centipede-now-item:active { transform: translateY(1px); }
+.centipede-now-item > svg { flex: 0 0 auto; color: var(--centipede-muted); }
+.centipede-now-item.is-attention { background: color-mix(in srgb, var(--color-warning) 8%, transparent); }
+.centipede-item-icon { display: grid; width: 26px; height: 26px; flex: 0 0 auto; place-items: center; border-radius: 8px; background: color-mix(in srgb, var(--color-warning) 17%, transparent); color: var(--color-warning); }
+.centipede-item-copy { display: flex; min-width: 0; flex: 1; flex-direction: column; gap: 3px; }
+.centipede-item-copy strong, .centipede-item-copy small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.centipede-item-copy strong { font-size: 12px; font-weight: 700; }
+.centipede-item-copy small { color: var(--centipede-muted); font-size: 11px; }
+.centipede-item-pulse { width: 7px; height: 7px; flex: 0 0 auto; border-radius: 50%; background: var(--color-accent); box-shadow: 0 0 0 4px color-mix(in srgb, var(--color-accent) 16%, transparent); animation: centipede-live-breathe 2.6s ease-in-out infinite; }
+.centipede-status-word { color: var(--centipede-muted); font-size: 9px; white-space: nowrap; }
+
+.centipede-empty-state { display: flex; align-items: center; gap: 8px; padding: 11px 10px; border: 1px dashed var(--centipede-line); border-radius: 11px; color: var(--centipede-muted); font-size: 11px; }
+.centipede-empty-state svg { flex: 0 0 auto; color: var(--color-success); }
+
+.centipede-mission-surface { display: flex; flex-direction: column; gap: 11px; padding: 13px 12px 12px; border: 1px solid var(--centipede-line); border-radius: 13px; background: color-mix(in srgb, var(--centipede-card) 82%, transparent); box-shadow: 0 12px 30px rgb(0 0 0 / .035); }
+.centipede-mission-heading { display: flex; align-items: flex-start; justify-content: space-between; gap: 8px; }
+.centipede-mission-heading h3 { margin: 5px 0 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 13px; }
+.centipede-mission-count { color: var(--centipede-muted); font-size: 10px; white-space: nowrap; }
+.centipede-mission-stages { position: relative; display: flex; flex-direction: column; gap: 2px; margin: 0; padding: 0; list-style: none; }
+.centipede-mission-stages::before { position: absolute; top: 16px; bottom: 16px; left: 9px; width: 1px; background: var(--centipede-line); content: ""; }
+.centipede-mission-stages li { position: relative; display: flex; min-width: 0; align-items: center; gap: 8px; padding: 6px 0; animation: centipede-stage-in .24s cubic-bezier(.22, 1, .36, 1) both; }
+.centipede-mission-stages li:nth-child(2) { animation-delay: 35ms; }
+.centipede-mission-stages li:nth-child(3) { animation-delay: 70ms; }
+.centipede-mission-stages li:nth-child(4) { animation-delay: 105ms; }
+.centipede-stage-marker { z-index: 1; display: grid; width: 19px; height: 19px; flex: 0 0 auto; place-items: center; border: 1px solid var(--centipede-line); border-radius: 50%; background: var(--centipede-card); color: var(--centipede-muted); font-size: 11px; font-weight: 700; }
+.centipede-mission-stages li.is-done .centipede-stage-marker { border-color: color-mix(in srgb, var(--color-success) 50%, transparent); background: color-mix(in srgb, var(--color-success) 16%, transparent); color: var(--color-success); }
+.centipede-mission-stages li.is-active .centipede-stage-marker { border-color: color-mix(in srgb, var(--color-accent) 55%, transparent); background: color-mix(in srgb, var(--color-accent) 14%, transparent); color: var(--color-accent); }
+.centipede-mission-stages li.is-active .centipede-stage-marker { animation: centipede-active-ring 2.2s ease-in-out infinite; }
+.centipede-mission-stages li.is-waiting .centipede-stage-marker { border-color: color-mix(in srgb, var(--color-warning) 55%, transparent); background: color-mix(in srgb, var(--color-warning) 14%, transparent); color: var(--color-warning); }
+.centipede-stage-copy { display: flex; min-width: 0; flex: 1; flex-direction: column; gap: 2px; }
+.centipede-stage-copy strong, .centipede-stage-copy small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.centipede-stage-copy strong { font-size: 11px; }
+.centipede-stage-copy small { color: var(--centipede-muted); font-size: 10px; }
+.centipede-stage-status { color: var(--centipede-muted); font-size: 9px; white-space: nowrap; }
+.centipede-mission-stages li.is-waiting .centipede-stage-status { color: var(--color-warning); font-weight: 700; }
+.centipede-approval-link { display: flex; align-items: center; gap: 7px; padding: 8px 9px; border: 1px solid color-mix(in srgb, var(--color-warning) 35%, transparent); border-radius: 9px; background: color-mix(in srgb, var(--color-warning) 10%, transparent); color: var(--color-warning); font-size: 10px; font-weight: 700; cursor: pointer; }
+.centipede-approval-link svg:last-child { margin-left: auto; }
+.centipede-approval-link:hover, .centipede-approval-link:focus-visible { background: color-mix(in srgb, var(--color-warning) 17%, transparent); outline: none; }
+.centipede-mission-note { margin: 0; color: var(--centipede-muted); font-size: 9px; }
+
+.centipede-health-card { margin-top: auto; padding: 12px; border: 1px solid var(--centipede-line); border-radius: 13px; background: color-mix(in srgb, var(--centipede-card) 76%, transparent); }
+.centipede-health-icon { display: grid; width: 25px; height: 25px; place-items: center; border-radius: 8px; }
+.centipede-health-icon.is-good { background: color-mix(in srgb, var(--color-success) 16%, transparent); color: var(--color-success); }
+.centipede-health-icon.is-warn { background: color-mix(in srgb, var(--color-warning) 16%, transparent); color: var(--color-warning); }
+.centipede-health-card strong { font-size: 12px; }
+.centipede-health-card p { margin: 8px 0 0; color: var(--centipede-muted); font-size: 11px; line-height: 1.45; }
+.centipede-health-card .centipede-health-error { color: var(--color-danger); }
+.centipede-health-meter { display: grid; grid-template-columns: repeat(5, 1fr); gap: 4px; margin-top: 10px; }
+.centipede-health-meter span { height: 3px; border-radius: 99px; background: color-mix(in srgb, var(--centipede-muted) 17%, transparent); }
+.centipede-health-meter span.is-ready { background: var(--color-success); box-shadow: 0 0 8px color-mix(in srgb, var(--color-success) 25%, transparent); }
+
+.centipede-now-actions { display: flex; flex-direction: column; gap: 3px; }
+.centipede-now-actions button { display: flex; align-items: center; gap: 8px; padding: 8px 9px; border: 0; border-radius: 9px; background: transparent; color: var(--centipede-muted); font-size: 11px; text-align: left; cursor: pointer; }
+.centipede-now-actions button svg:last-child { margin-left: auto; }
+.centipede-now-actions button:hover, .centipede-now-actions button:focus-visible { background: color-mix(in srgb, var(--centipede-card) 75%, transparent); color: var(--centipede-ink); outline: none; }
+.centipede-now-actions button:disabled { cursor: not-allowed; opacity: .45; }
+
+.centipede-agent-row {
+  transition: background-color .16s ease, border-color .16s ease, box-shadow .2s ease, transform .18s cubic-bezier(.22, 1, .36, 1);
+}
+
+.centipede-agent-row:hover,
+.centipede-agent-row:focus-visible {
+  transform: translateX(2px);
+}
+
+.centipede-agent-row[data-selected="true"] {
+  box-shadow: inset 3px 0 color-mix(in srgb, var(--color-accent) 82%, transparent), 0 6px 18px rgb(0 0 0 / .08);
+}
+
+.agent-glyph-avatar {
+  transition: transform .2s cubic-bezier(.22, 1, .36, 1), border-color .2s ease, box-shadow .2s ease;
+}
+
+.centipede-agent-row:hover .agent-glyph-avatar,
+.centipede-agent-row:focus-visible .agent-glyph-avatar {
+  border-color: color-mix(in srgb, var(--centipede-lime) 32%, var(--centipede-line));
+  box-shadow: inset 0 1px color-mix(in srgb, white 8%, transparent), 0 5px 15px rgb(0 0 0 / .16);
+  transform: scale(1.035) rotate(-1deg);
+}
+
+.centipede-task-timeline-toggle {
+  border: 1px solid transparent;
+  transition: border-color .16s ease, background-color .16s ease, color .16s ease;
+}
+
+.centipede-task-timeline-toggle[aria-expanded="true"] {
+  border-color: var(--centipede-line);
+  border-radius: 10px 10px 0 0;
+  background: color-mix(in srgb, var(--centipede-card) 84%, transparent);
+  color: var(--centipede-ink);
+}
+
+.centipede-task-timeline-meta { display: flex; align-items: center; gap: 8px; font: 700 9px/1 ui-monospace, SFMono-Regular, Menlo, monospace; letter-spacing: .04em; }
+.centipede-task-timeline-list { margin-top: 0; margin-left: 0; padding: 8px 12px 9px 28px; border: 1px solid var(--centipede-line); border-top: 0; border-radius: 0 0 10px 10px; background: color-mix(in srgb, var(--centipede-card) 78%, transparent); }
+.centipede-task-timeline-list li { min-height: 24px; }
+.centipede-task-timeline-list li[data-state="running"] { color: var(--centipede-ink); }
+
+/* Calendar events are clinical instrument cards, not saturated app tiles.
+   Agent color is retained as one narrow specimen marker; state and hierarchy
+   come from the shared Centipede surface, ink, and status tokens. */
+.centipede-calendar-grid {
+  border-color: var(--centipede-line);
+  background:
+    linear-gradient(color-mix(in srgb, var(--centipede-ink) 2.1%, transparent) 1px, transparent 1px),
+    var(--centipede-paper);
+  background-size: 100% 68px, auto;
+}
+
+.centipede-calendar-header {
+  border-color: var(--centipede-line);
+  background: color-mix(in srgb, var(--centipede-paper) 94%, transparent);
+}
+
+.centipede-calendar-body {
+  color: var(--centipede-ink);
+}
+
+.centipede-calendar-tile {
+  isolation: isolate;
+  border: 1px solid var(--centipede-line);
+  border-radius: 9px;
+  background:
+    linear-gradient(135deg, color-mix(in srgb, var(--centipede-ink) 2.6%, transparent), transparent 58%),
+    color-mix(in srgb, var(--centipede-card) 94%, var(--centipede-paper));
+  box-shadow: inset 0 1px color-mix(in srgb, white 38%, transparent), 0 5px 14px rgb(16 19 18 / .07);
+  color: var(--centipede-ink);
+  transition: border-color .16s ease, box-shadow .2s ease, transform .16s cubic-bezier(.22, 1, .36, 1);
+}
+
+.centipede-calendar-tile:hover,
+.centipede-calendar-tile:focus-visible {
+  z-index: 20;
+  border-color: color-mix(in srgb, var(--centipede-lime) 34%, var(--centipede-line));
+  box-shadow: inset 0 1px color-mix(in srgb, white 46%, transparent), 0 9px 22px rgb(16 19 18 / .11);
+  outline: none;
+  transform: translateY(-2px);
+}
+
+.centipede-calendar-tile[data-status="running"] {
+  border-color: color-mix(in srgb, var(--color-success) 35%, var(--centipede-line));
+}
+
+.centipede-calendar-tile[data-status="waiting"] {
+  border-color: color-mix(in srgb, var(--color-warning) 42%, var(--centipede-line));
+  background:
+    linear-gradient(135deg, color-mix(in srgb, var(--color-warning) 7%, transparent), transparent 58%),
+    color-mix(in srgb, var(--centipede-card) 94%, var(--centipede-paper));
+}
+
+.centipede-calendar-tile:is([data-status="blocked"], [data-status="failed"], [data-status="missed"]) {
+  border-color: color-mix(in srgb, var(--color-danger) 46%, var(--centipede-line));
+}
+
+.centipede-calendar-tile-accent {
+  position: absolute;
+  z-index: -1;
+  inset: 7px auto 7px 0;
+  width: 3px;
+  border-radius: 0 2px 2px 0;
+  opacity: .82;
+}
+
+.centipede-calendar-tile-title { color: var(--centipede-ink); }
+.centipede-calendar-tile-meta { color: var(--centipede-muted); }
+.centipede-calendar-tile-alert { box-shadow: 0 0 0 3px color-mix(in srgb, var(--color-danger) 12%, transparent); }
+
+.centipede-calendar-tile[data-compact="true"] .agent-glyph-avatar { transform: scale(.92); }
+
+@media (prefers-reduced-motion: reduce) {
+  .centipede-calendar-tile { transition: none; }
+  .centipede-calendar-tile:hover,
+  .centipede-calendar-tile:focus-visible { transform: none; }
+}
+
+@keyframes centipede-shell-in {
+  from { opacity: 0; transform: scale(.995); }
+  to { opacity: 1; transform: scale(1); }
+}
+
+@keyframes centipede-content-in {
+  from { opacity: 0; transform: translateY(4px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes centipede-rail-in {
+  from { opacity: 0; transform: translateX(7px); }
+  to { opacity: 1; transform: translateX(0); }
+}
+
+@keyframes centipede-stage-in {
+  from { opacity: 0; transform: translateY(3px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes centipede-live-breathe {
+  0%, 100% { opacity: .88; transform: scale(.92); }
+  50% { opacity: 1; transform: scale(1.08); }
+}
+
+@keyframes centipede-active-ring {
+  0%, 100% { box-shadow: 0 0 0 0 color-mix(in srgb, var(--color-accent) 0%, transparent); }
+  50% { box-shadow: 0 0 0 4px color-mix(in srgb, var(--color-accent) 16%, transparent); }
+}
+
+@media (max-width: 1199px) {
+  .centipede-desktop-shell { grid-template-columns: auto minmax(0, 1fr) 280px; }
+  .centipede-desktop-main { border-right: 0; }
+}
+
+@media (max-width: 767px) {
+  .centipede-command-bar { display: none; }
+}
+
+@media (max-width: 767px) {
+  .centipede-desktop-shell { display: block; overflow: hidden; }
+  .centipede-desktop-main { min-height: 0; height: 100%; }
+  .centipede-task-home-rail { display: none; }
+  .centipede-chat-header {
+    grid-template-columns: minmax(0, 1fr) auto;
+    gap: 4px 8px;
+    padding-right: 12px;
+  }
+  .centipede-chat-instruments {
+    grid-column: 1 / -1;
+    grid-row: 2;
+    width: 100%;
+    max-width: 100%;
+    justify-self: stretch;
+  }
+  .centipede-chat-utilities {
+    grid-column: 2;
+    grid-row: 1;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .centipede-desktop-shell,
+  .centipede-desktop-content > *,
+  .centipede-window-titlebar-mark,
+  .centipede-command-pulse-dot.is-live,
+  .centipede-live-dot.is-live,
+  .centipede-now-rail > *,
+  .centipede-item-pulse,
+  .centipede-mission-stages li,
+  .centipede-mission-stages li.is-active .centipede-stage-marker {
+    animation: none;
+  }
+  .centipede-now-item,
+  .centipede-agent-row,
+  .agent-glyph-avatar,
+  .centipede-command-link,
+  .centipede-task-timeline-toggle { transition: none; }
+  .centipede-now-item:hover,
+  .centipede-now-item:focus-visible,
+  .centipede-agent-row:hover,
+  .centipede-agent-row:focus-visible,
+  .centipede-agent-row:hover .agent-glyph-avatar,
+  .centipede-agent-row:focus-visible .agent-glyph-avatar,
+  .centipede-command-link:hover,
+  .centipede-command-link:focus-visible { transform: none; }
+}

@@ -53,7 +53,7 @@
   --color-danger: #ff5667;
   --color-warning: #ff9800;
 
-  --font-sans: "Inter", -apple-system, BlinkMacSystemFont, "SF Pro Text",
+  --font-sans: "Inter Variable", "Inter", -apple-system, BlinkMacSystemFont, "SF Pro Text",
     "Segoe UI", system-ui, sans-serif;
 }
 
@@ -92,6 +92,7 @@
   --color-ink-secondary: #fcfcfc99;
   --color-accent: #1084fe;
   --color-accent-border: #459ffe;
+  --color-focus: #459ffe;
   --color-accent-text: #7fc0ff;
   --color-accent-ink: #ffffff;
   --color-bubble-user: #5a5a5a;
@@ -102,7 +103,7 @@
   --color-scrollbar: #3d3d3d;
   --color-maus-line: #fcfcfc;
 
-  --font-sans: "Inter", -apple-system, BlinkMacSystemFont, "SF Pro Text",
+  --font-sans: "Inter Variable", "Inter", -apple-system, BlinkMacSystemFont, "SF Pro Text",
     "Segoe UI", system-ui, sans-serif;
   --radius-lg: 0.5rem;
   --radius-xl: 0.75rem;
@@ -147,9 +148,8 @@
   --color-scrollbar: #c9c0ae;
   --color-maus-line: #6b6559;
 
-  /* System faces rather than Inter: paper reads as the platform's own. */
-  --font-sans: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI",
-    Roboto, sans-serif;
+  --font-sans: "Inter Variable", "Inter", -apple-system, BlinkMacSystemFont,
+    "Segoe UI", system-ui, sans-serif;
   --radius-lg: 6px;
   --radius-xl: 10px;
 }
@@ -199,7 +199,7 @@
   --color-scrollbar: #3d3529;
   --color-maus-line: #b0a696;
 
-  --font-sans: "Inter", -apple-system, BlinkMacSystemFont, "SF Pro Text",
+  --font-sans: "Inter Variable", "Inter", -apple-system, BlinkMacSystemFont, "SF Pro Text",
     "Segoe UI", system-ui, sans-serif;
   --radius-lg: 4px;
   --radius-xl: 8px;
@@ -257,10 +257,186 @@
   --color-scrollbar: #a6b8b6;
   --color-maus-line: #4d5c5b;
 
-  --font-sans: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI",
-    Roboto, sans-serif;
+  --font-sans: "Inter Variable", "Inter", -apple-system, BlinkMacSystemFont,
+    "Segoe UI", system-ui, sans-serif;
   --radius-lg: 8px;
   --radius-xl: 14px;
+}
+
+/* ── Agent Centipede / Clinical ───────────────────────────────────────────
+   The working surface stays warm-white and almost aseptic. Acid chartreuse
+   is reserved for agency: selected, live, ready, and executable. A dark rail
+   is applied locally by .centipede-sidebar so the rest of the UI can retain
+   readable light-surface tokens without component-level colour hacks.
+   ───────────────────────────────────────────────────────────────────────── */
+[data-skin="centipede"] {
+  --color-app: #f2f3ee;
+  --color-panel: #fafaf6;
+  --color-raised: #ffffff;
+  --color-raised-hover: #e8eae2;
+  --color-card: #ffffff;
+  --color-inset: #e9ebe4;
+  --color-control: #dfe2d9;
+  --color-hairline: #afb4a8;
+
+  --color-ink: #101312;
+  --color-ink-secondary: #555c55;
+
+  --color-accent: #6f9600;
+  --color-accent-border: #5f8100;
+  --color-accent-text: #426100;
+  --color-focus: #426100;
+  --color-accent-ink: #0a0d0b;
+  --color-bubble-user: #dff5a5;
+
+  --color-success: #287a54;
+  --color-danger: #a8363d;
+  --color-danger-ink: #ffffff;
+  --color-warning: #725a1f;
+  --color-scrollbar: #9ea49a;
+  --color-maus-line: #555c55;
+
+  --font-sans: "Inter Variable", "Inter", -apple-system, BlinkMacSystemFont, "SF Pro Text",
+    "Segoe UI", system-ui, sans-serif;
+  --radius-lg: 6px;
+  --radius-xl: 10px;
+}
+
+/* Surgical-black command rail, isolated from the clinical workspace. */
+[data-skin="centipede"] .centipede-sidebar {
+  --color-app: #0b0e0d;
+  --color-panel: #0b0e0d;
+  --color-raised: #1b201d;
+  --color-raised-hover: #252b27;
+  --color-card: #151916;
+  --color-inset: #070908;
+  --color-control: #252b27;
+  --color-hairline: #3b433c;
+  --color-ink: #f6f7f2;
+  --color-ink-secondary: #aeb6ad;
+  --color-accent: #b8f20a;
+  --color-accent-border: #cdfc4a;
+  --color-accent-text: #c9fb3a;
+  --color-focus: #c9fb3a;
+  --color-accent-ink: #0a0d0b;
+  --color-bubble-user: #252b27;
+  --color-success: #72d5a3;
+  --color-danger: #ff7379;
+  --color-danger-ink: #160304;
+  --color-warning: #e5c060;
+  --color-scrollbar: #3b433c;
+  --color-maus-line: #aeb6ad;
+}
+
+[data-skin="centipede"] .centipede-mark-frame {
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--color-accent) 12%, transparent);
+}
+
+/* Role-aware clinical glyphs. Agents differ by their operational
+   symbol, while one neutral material + one status color keeps the rail from
+   turning into a row of unrelated purple/teal app icons. */
+.agent-glyph-avatar {
+  position: relative;
+  display: inline-grid;
+  flex: 0 0 auto;
+  place-items: center;
+  overflow: hidden;
+  border: 1px solid color-mix(in srgb, var(--color-hairline) 78%, transparent);
+  background:
+    linear-gradient(color-mix(in srgb, var(--color-ink) 4%, transparent) 1px, transparent 1px),
+    linear-gradient(90deg, color-mix(in srgb, var(--color-ink) 4%, transparent) 1px, transparent 1px),
+    linear-gradient(145deg, color-mix(in srgb, var(--color-card) 96%, white 4%), var(--color-panel));
+  background-size: 9px 9px, 9px 9px, auto;
+  box-shadow:
+    inset 0 1px color-mix(in srgb, white 7%, transparent),
+    0 3px 12px rgb(0 0 0 / .12);
+  color: var(--color-ink);
+  isolation: isolate;
+}
+
+.agent-glyph-avatar::before {
+  position: absolute;
+  inset: 11%;
+  border: 1px solid color-mix(in srgb, var(--color-hairline) 46%, transparent);
+  border-radius: 19%;
+  content: "";
+  opacity: .72;
+}
+
+.agent-glyph-avatar::after {
+  position: absolute;
+  top: 10%;
+  left: 13%;
+  width: 24%;
+  height: 2px;
+  border-radius: 99px;
+  background: var(--color-accent);
+  box-shadow: 0 0 7px color-mix(in srgb, var(--color-accent) 26%, transparent);
+  content: "";
+}
+
+.agent-glyph-avatar > svg {
+  position: relative;
+  z-index: 1;
+  color: color-mix(in srgb, var(--color-ink) 90%, var(--color-accent) 10%);
+  filter: none;
+}
+
+.agent-glyph-avatar.is-coordinate > svg {
+  color: color-mix(in srgb, var(--color-ink) 78%, var(--color-accent) 22%);
+}
+
+.agent-glyph-status {
+  position: absolute;
+  z-index: 2;
+  right: 7%;
+  bottom: 7%;
+  width: 16%;
+  height: 16%;
+  min-width: 5px;
+  min-height: 5px;
+  border: 1.5px solid var(--color-card);
+  border-radius: 50%;
+  background: var(--color-accent);
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--color-accent) 22%, transparent);
+}
+
+.agent-glyph-avatar.is-active .agent-glyph-status {
+  animation: agent-glyph-pulse 1.5s ease-in-out infinite;
+}
+
+@keyframes agent-glyph-pulse {
+  50% { transform: scale(.72); opacity: .62; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .agent-glyph-avatar.is-active .agent-glyph-status { animation: none; }
+}
+
+[data-skin="centipede"] .centipede-clinical-label {
+  font-family: ui-monospace, "SFMono-Regular", Consolas, monospace;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+}
+
+/* Shiki supplies paired token variables. Code blocks deliberately keep the
+   skin's own inset surface, so the skin—not Shiki's background—selects the
+   matching foreground palette. Include the pre/code/line wrappers: plain-text
+   fences inherit their variable from the Shiki root rather than every span. */
+[data-skin="centipede"] .chat-code-highlight .shiki,
+[data-skin="centipede"] .chat-code-highlight .shiki span,
+[data-skin="atelier"] .chat-code-highlight .shiki,
+[data-skin="atelier"] .chat-code-highlight .shiki span,
+[data-skin="lagoon"] .chat-code-highlight .shiki,
+[data-skin="lagoon"] .chat-code-highlight .shiki span {
+  color: var(--shiki-light) !important;
+}
+
+[data-skin="midnight"] .chat-code-highlight .shiki,
+[data-skin="midnight"] .chat-code-highlight .shiki span,
+[data-skin="foundry"] .chat-code-highlight .shiki,
+[data-skin="foundry"] .chat-code-highlight .shiki span {
+  color: var(--shiki-dark) !important;
 }
 
 html,

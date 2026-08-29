@@ -40,6 +40,15 @@ export function ApprovalCard({
   if (!card) return null;
   const settled = card.answered;
 
+  if (settled) {
+    return (
+      <div className="flex w-full max-w-[840px] items-center gap-2 rounded-xl border border-hairline/30 bg-card/60 px-3 py-2 text-[12px] text-ink-secondary">
+        {settled === "allow" ? <Check size={13} className="text-success" /> : <X size={13} />}
+        <span>{bot ? bot.name + " · " : ""}{settled === "allow" ? "Allowed" : "Denied"}</span>
+      </div>
+    );
+  }
+
   return (
     <div
       className={cn(
@@ -69,19 +78,7 @@ export function ApprovalCard({
       {/* The decision lives in the composer (one place to answer, and it
           can't be scrolled past); here we only record what happened. */}
       <div className="mt-3 flex items-center gap-1.5 text-[13px] text-ink-secondary">
-        {settled === "allow" ? (
-          <>
-            <Check size={14} className="text-success" /> Allowed
-          </>
-        ) : settled ? (
-          <>
-            <X size={14} /> Denied
-          </>
-        ) : (
-          <>
-            <ShieldCheck size={14} className="text-accent" /> Waiting for your answer below
-          </>
-        )}
+        <><ShieldCheck size={14} className="text-accent" /> Needs your answer below</>
       </div>
     </div>
   );

@@ -10,6 +10,7 @@ import {
 import {
   companionAccountActionError,
   companionPairingMode,
+  deriveFirebaseSetupStatus,
   deriveCompanionPanelStatus,
   loadCompanionBridgeState,
   shouldHydrateCompanionEmail,
@@ -36,6 +37,33 @@ describe("companion account action errors", () => {
       "Enter a valid email",
     );
     expect(companionAccountActionError(account("error", "Secure connection needs attention"), null)).toBeNull();
+  });
+});
+
+describe("Firebase notification setup", () => {
+  it("asks for a service account while encrypted push storage is ready", () => {
+    expect(deriveFirebaseSetupStatus({
+      pushEncryptionKeyConfigured: true,
+      serviceAccountConfigured: false,
+    })).toEqual({
+      label: "Firebase not connected",
+      detail: "Encrypted push storage is ready. Import a Firebase service-account JSON to enable notifications when the app is closed.",
+      good: false,
+    });
+  });
+
+  it("reports the project without exposing credential material and flags a live companion restart", () => {
+    const view = deriveFirebaseSetupStatus({
+      pushEncryptionKeyConfigured: true,
+      serviceAccountConfigured: true,
+      projectId: "openmaus-chief",
+    }, true);
+    expect(view).toEqual({
+      label: "Firebase connected",
+      detail: "Restart required: turn Phone access off and back on to apply the new credential.",
+      good: true,
+    });
+    expect(JSON.stringify(view)).not.toContain("PRIVATE KEY");
   });
 });
 

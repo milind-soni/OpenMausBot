@@ -36,6 +36,18 @@ describe("groupActivityRuns", () => {
     expect(items[1].kind === "message" && items[1].message.tool?.name).toBe("Bash");
   });
 
+  it("hides internal repeated-call diagnostics from both runs and standalone rows", () => {
+    const loopWarning = tool("Same call repeated 5× — Read File: notes.md — it may be stuck", false);
+    const items = groupActivityRuns([tool("Grep"), loopWarning, tool("Read File"), text("Finished")]);
+
+    expect(items).toHaveLength(2);
+    expect(items.map((item) => item.kind)).toEqual(["run", "message"]);
+    expect(items[0].kind === "run" && items[0].messages).toHaveLength(2);
+    expect(
+      items.some((item) => item.kind === "message" && item.message.id === loopWarning.id),
+    ).toBe(false);
+  });
+
   it("never folds a failed turn, which renders as an error not a tool run", () => {
     const items = groupActivityRuns([tool("Edit"), tool("error: the CLI exited")]);
     expect(items.map((i) => i.kind)).toEqual(["message", "message"]);
@@ -80,21 +92,27 @@ describe("groupActivityRuns", () => {
 });
 
 describe("describeRun", () => {
-  it("counts repeats and names the tools in order of first use", () => {
-    expect(describeRun([tool("Edit"), tool("Bash"), tool("Edit"), tool("Edit")])).toBe("4 steps · Edit ×3, Bash");
-  });
-
-  it("names a single repeat without a multiplier", () => {
-    expect(describeRun([tool("Edit"), tool("Bash")])).toBe("2 steps · Edit, Bash");
-  });
-
-  it("trims a long tail of tool names rather than running off the row", () => {
-    expect(describeRun([tool("Edit"), tool("Bash"), tool("Write"), tool("Grep"), tool("Read")])).toBe(
-      "5 steps · Edit, Bash, Write +2 more",
+  it("summarizes a long failed run without leaking command text into a giant pill", () => {
+    const messages = Array.from({ length: 28 }, (_, index) =>
+      tool(
+        `C:\\runtime\\pwsh.exe -Command "rg -n pendingPrompts queuedMessages ${index}"`,
+        index >= 4,
+      ),
     );
+
+    expect(describeRun(messages)).toBe("28 actions · 24 completed · 4 failed");
+    expect(describeRun(messages)).not.toContain("pwsh.exe");
+  });
+
+  it("summarizes a completed run without exposing its commands", () => {
+    expect(describeRun([tool("Edit"), tool("Bash"), tool("Edit"), tool("Edit")])).toBe("4 actions completed");
+  });
+
+  it("summarizes active work by outcome", () => {
+    expect(describeRun([tool("Edit"), running("Bash")])).toBe("2 actions · 1 completed · 1 running");
   });
 
   it("says how many steps failed, because that is the reason to open it", () => {
-    expect(describeRun([tool("Edit"), tool("Bash", false)])).toBe("2 steps · Edit, Bash · 1 failed");
+    expect(describeRun([tool("Edit"), tool("Bash", false)])).toBe("2 actions · 1 completed · 1 failed");
   });
 });
