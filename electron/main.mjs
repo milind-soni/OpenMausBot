@@ -45,6 +45,7 @@ import {
   resolveCompanionControlPlaneURL,
 } from "./companion-account-service.mjs";
 import capabilitiesModule from "./capabilities.cjs";
+import { CENTIPEDE_V3_IDENTITY } from "./centipede-v3-identity.mjs";
 
 const { desktopCapabilities, nativeDesktopActions } = capabilitiesModule;
 const nativeActions = nativeDesktopActions(process.platform);
@@ -57,11 +58,17 @@ const { desktopViewerUrl, sameDesktopViewerOrigin } = require("./desktop-viewer.
 const { normalizeUnreadCount, parseWindowState, resolveWindowState } = require("./window-state.cjs");
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
+app.setName(CENTIPEDE_V3_IDENTITY.productName);
+if (process.platform === "win32") app.setAppUserModelId(CENTIPEDE_V3_IDENTITY.appId);
+app.setPath("userData", path.join(app.getPath("appData"), CENTIPEDE_V3_IDENTITY.dataDirectory));
+app.setPath("cache", path.join(app.getPath("userData"), "cache"));
+app.setPath("logs", path.join(app.getPath("userData"), "logs"));
+const V3_DATA_DIR = path.join(app.getPath("userData"), "data");
 // 127.0.0.1 explicitly — vite binds IPv4; a bare "localhost" here can
 // resolve to ::1 and paint a black window
 const DEV_URL = process.env.ELECTRON_START_URL ?? "http://127.0.0.1:5199";
 const DEFAULT_COMPOSIO_BROKER_URL = "https://openmausbot-composio.milindsoni201.workers.dev";
-let SERVER_PORT = 8799;
+let SERVER_PORT = CENTIPEDE_V3_IDENTITY.serverPort;
 const APP_ICON = path.join(__dirname, "resources/app-icon.png");
 let desktopViewerWindow = null;
 let desktopViewerOwner = null;
@@ -143,7 +150,7 @@ function applyUnreadBadge(win = mainWindow) {
 // intercepting input. This app is not graphics-heavy, so reliability wins.
 if (process.platform === "linux") {
   app.disableHardwareAcceleration();
-  app.setDesktopName("com.openmausbot.app.desktop");
+  app.setDesktopName("com.openmausbot.centipede.v3.desktop");
 }
 
 // One instance per user: without this lock a second launch forks a second
@@ -237,7 +244,7 @@ async function saveSecureCredentials(credentials) {
 }
 
 async function secureComposioConfig() {
-  const dataDir = process.env.OMB_DATA_DIR || path.join(app.getPath("home"), ".openmausbot");
+  const dataDir = process.env.OMB_DATA_DIR || V3_DATA_DIR;
   const configPath = path.join(dataDir, "config.json");
   try {
     const config = JSON.parse(fs.readFileSync(configPath, "utf8"));
@@ -279,7 +286,7 @@ async function secureComposioConfig() {
 // migrates plaintext left by older versions or direct development clients.
 // See workspace-credentials.mjs for the exact rules.
 async function secureWorkspaceConfig() {
-  const dataDir = process.env.OMB_DATA_DIR || path.join(app.getPath("home"), ".openmausbot");
+  const dataDir = process.env.OMB_DATA_DIR || V3_DATA_DIR;
   const configPath = path.join(dataDir, "config.json");
   try {
     const config = JSON.parse(fs.readFileSync(configPath, "utf8"));
@@ -651,9 +658,11 @@ async function gatherDiagnostics() {
 }
 
 async function startServerOn(port) {
-  const entry = path.join(process.resourcesPath, "server", "index.js");
+  const entry = path.join(process.resourcesPath, "server", "v3-index.js");
   const childEnv = managedComposioChildEnvironment(composioBrokerUrl(), secureCredentials, {
     ...process.env,
+    OMB_PRODUCT_ID: "centipede-v3",
+    OMB_DATA_DIR: process.env.OMB_DATA_DIR || V3_DATA_DIR,
     OMB_STATIC_DIR: path.join(process.resourcesPath, "ui"),
     OMB_RESOURCES_PATH: process.resourcesPath,
     OMB_SKILLS_DIR: path.join(process.resourcesPath, "skills"),
@@ -692,7 +701,7 @@ async function startServerOn(port) {
       const res = await fetch(`http://127.0.0.1:${port}/api/health`);
       if (res.ok) {
         const body = await res.json().catch(() => null);
-        if (body?.app === "openmausbot" && body.pid === proc.pid && body.static) return proc;
+        if (body?.app === CENTIPEDE_V3_IDENTITY.productName && body.pid === proc.pid && body.static) return proc;
         break; // someone else owns this port — try the next one
       }
     } catch {
@@ -710,7 +719,7 @@ async function startServerPackaged() {
   // two passes: a quit-and-reopen relaunch can race the dying instance's
   // server during teardown — one settle-and-retry covers it
   for (let attempt = 0; attempt < 2; attempt++) {
-    for (const port of [8799, 18799, 28799]) {
+    for (const port of [CENTIPEDE_V3_IDENTITY.serverPort, 28899, 38899]) {
       const proc = await startServerOn(port);
       if (proc) {
         serverProc = proc;
@@ -1422,7 +1431,7 @@ setCuaStateListener((connection) => {
 });
 
 app.whenReady().then(async () => {
-  if (app.isPackaged) app.setAsDefaultProtocolClient("openmausbot");
+  if (app.isPackaged) app.setAsDefaultProtocolClient(CENTIPEDE_V3_IDENTITY.protocol);
   if (process.platform === "darwin") app.dock.setIcon(APP_ICON);
   secureCredentials = await loadSecureCredentials();
   if (app.isPackaged) {

@@ -1,0 +1,49 @@
+extends: electron-builder.yml
+
+appId: com.openmausbot.centipede.v3
+productName: Centipede V3
+artifactName: Centipede-V3-${version}-${arch}.${ext}
+
+protocols:
+  - name: Centipede V3 outcome package
+    schemes: [centipede-v3]
+
+publish:
+  - provider: github
+    owner: milind-soni
+    repo: openmausbot-releases
+    channel: centipede-v3
+
+win:
+  executableName: centipede-v3
+  target:
+    - target: nsis
+      arch: x64
+    - target: zip
+      arch: x64
+
+nsis:
+  shortcutName: Centipede V3
+  artifactName: Centipede-V3-${version}-setup.${ext}
+
+linux:
+  executableName: centipede-v3
+
+directories:
+  output: release-v3
+
+afterPack: ./scripts/after-pack-v3.mjs
+
+extraResources:
+  - from: LICENSE
+    to: licenses/Centipede-V3-LICENSE.txt
+  - from: NOTICE
+    to: licenses/Centipede-V3-NOTICE.txt
+  - from: dist
+    to: ui
+  - from: dist-server
+    to: server
+  - from: dist-companion
+    to: companion
+  - from: skills
+    to: skills
