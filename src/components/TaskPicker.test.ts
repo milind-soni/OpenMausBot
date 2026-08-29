@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import {
   TASK_PICKER_DISMISS_MS,
   TASK_RENAME_HINT,
+  filterTasks,
   taskPickerPointerIntent,
 } from "./TaskPicker";
 
@@ -33,5 +34,34 @@ describe("task picker copy", () => {
     expect(TASK_RENAME_HINT).toContain("double-click");
     expect(TASK_RENAME_HINT).toContain("right-click");
     expect(TASK_PICKER_DISMISS_MS).toBeGreaterThanOrEqual(500);
+  });
+});
+
+describe("filterTasks", () => {
+  const tasks = [
+    { title: "Clean up" },
+    { title: "OpenMausBot Update" },
+    { title: "Investment report" },
+    { title: "Report drafts" },
+  ];
+
+  it("returns the original order when the query is empty", () => {
+    expect(filterTasks(tasks, "").map((task) => task.title)).toEqual(tasks.map((task) => task.title));
+    expect(filterTasks(tasks, "   ").map((task) => task.title)).toEqual(tasks.map((task) => task.title));
+  });
+
+  it("matches titles case-insensitively", () => {
+    expect(filterTasks(tasks, "openmaus").map((task) => task.title)).toEqual(["OpenMausBot Update"]);
+  });
+
+  it("ranks prefix hits ahead of substring hits, keeping input order in each tier", () => {
+    expect(filterTasks(tasks, "report").map((task) => task.title)).toEqual([
+      "Report drafts",
+      "Investment report",
+    ]);
+  });
+
+  it("returns nothing when nothing matches", () => {
+    expect(filterTasks(tasks, "zzzz")).toEqual([]);
   });
 });

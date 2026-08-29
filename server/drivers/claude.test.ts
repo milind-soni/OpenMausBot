@@ -1076,7 +1076,8 @@ describe("ClaudeDriver turns (fake CLI)", () => {
   });
 
   it("strips workspace credentials from generateText helper children", async () => {
-    await create();
+    const instanceConfigDir = join(scratch, "instance-claude-config");
+    await create(undefined, { CLAUDE_CONFIG_DIR: instanceConfigDir });
     const dump = join(scratch, "generate-text-env.json");
     process.env.FAKE_CLAUDE_DUMP = dump;
     const names = ["XAI_API_KEY", "COMPOSIO_API_KEY", "BOX_TOKEN", "OPENCODE_API_KEY", "OMB_TTS_KEY"] as const;
@@ -1085,7 +1086,22 @@ describe("ClaudeDriver turns (fake CLI)", () => {
     await instance.generateText?.("summarize safely");
 
     const seen = JSON.parse(readFileSync(dump, "utf8"));
+    expect(seen.prompt).toBe("summarize safely");
+    expect(seen.argv).not.toContain("summarize safely");
+    expect(seen.env.CLAUDE_CONFIG_DIR).toBe(instanceConfigDir);
     for (const name of names) expect(seen.env[name]).toBeUndefined();
+  });
+
+  it("declares safe same-provider permission review", async () => {
+    await create();
+    await expect(instance.reviewPermission?.("review this request")).resolves.toBe("fake generated text");
+  });
+
+  it("stops permission review when its caller gives up", async () => {
+    await create();
+    const controller = new AbortController();
+    controller.abort();
+    await expect(instance.reviewPermission?.("review this request", controller.signal)).rejects.toThrow(/aborted/);
   });
 
   it("declares the effort levels the CLI accepts", async () => {

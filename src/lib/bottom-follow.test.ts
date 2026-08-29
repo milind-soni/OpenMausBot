@@ -36,6 +36,17 @@ describe("shouldResumeBottomFollow", () => {
     ).toBe(false);
   });
 
+  it("does not re-pin in the old 48px magnet zone", () => {
+    expect(
+      shouldResumeBottomFollow({
+        following: false,
+        previousScrollTop: 952,
+        scrollTop: 960,
+        distanceFromBottom: 40,
+      }),
+    ).toBe(false);
+  });
+
   it("does nothing when bottom-follow is already active", () => {
     expect(
       shouldResumeBottomFollow({

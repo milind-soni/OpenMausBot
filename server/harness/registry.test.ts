@@ -123,6 +123,16 @@ describe("ProviderRegistry", () => {
     expect(described.capabilities.effortLevels).toBeUndefined();
   });
 
+  it("reports whether an instance supports isolated approval review", async () => {
+    const fake = makeFakeDriver();
+    const registry = new ProviderRegistry([fake.driver]);
+    await registry.load({ a: { driver: "fake" } });
+
+    expect((await registry.describe())[0].capabilities.approvalReview).toBe(false);
+    Object.assign(registry.get("a")!, { reviewPermission: async () => "ok" });
+    expect((await registry.describe())[0].capabilities.approvalReview).toBe(true);
+  });
+
   it("disposeAll disposes every live instance and empties the registry", async () => {
     const fake = makeFakeDriver();
     const registry = new ProviderRegistry([fake.driver]);

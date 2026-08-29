@@ -212,6 +212,15 @@ flowchart LR
 | App | `src/` | The chat shell. Server-backed store, one reducer, zero client-side transports. |
 | Desktop | `electron/` | macOS, Windows, and Ubuntu shells with an embedded harness and platform capabilities; Apple speech stays macOS-only, Ubuntu Xorg has opt-in local control, and Wayland remains fail-closed. |
 
+### Orchestrate OpenMausBot over MCP
+
+OpenMausBot ships a stdio MCP server for external clients such as Claude Desktop and Cursor. It exposes a
+deliberately bounded team control plane: inspect bots and channels, read/search compact transcript pages,
+create and configure bots/channels/tasks, send work, wait for completion, switch models, and interrupt turns.
+It does **not** expose approval grants, deletion, arbitrary settings, credentials, or computer lifecycle.
+
+See [MCP server setup and tool reference](docs/mcp-server.md).
+
 ## Quick start
 
 **Released builds ([v0.1.37](https://github.com/milind-soni/openmausbot-releases/releases/tag/v0.1.37)):** the harness server is embedded, so no separate server setup is required.

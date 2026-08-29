@@ -100,6 +100,68 @@ try {
   proxyReport = { error: String((error && error.message) || error) };
 }
 
+// The public MCP process is a second packaged entry point. Send a request and
+// close stdin immediately: this proves both that the bundle has no external
+// dependencies and that shutdown lets the final JSON-RPC frame drain.
+let mcpReport = null;
+if (listening) {
+  const mcp = spawn(process.execPath, [join(staging, "server", "mcp-server.js")], {
+    cwd: staging,
+    env: {
+      ...(process.env.PATH ? { PATH: process.env.PATH } : {}),
+      ...(process.env.SystemRoot ? { SystemRoot: process.env.SystemRoot } : {}),
+      HOME: home,
+      USERPROFILE: home,
+      OMB_PORT: String(port),
+    },
+    stdio: ["pipe", "pipe", "pipe"],
+  });
+  let stdout = "";
+  let stderr = "";
+  mcp.stdout.on("data", (chunk) => (stdout += chunk));
+  mcp.stderr.on("data", (chunk) => (stderr += chunk));
+  const initialize = JSON.stringify({
+    jsonrpc: "2.0",
+    id: 1,
+    method: "initialize",
+    params: { protocolVersion: "2025-11-25", capabilities: {}, clientInfo: { name: "package-smoke", version: "1" } },
+  });
+  const health = JSON.stringify({
+    jsonrpc: "2.0",
+    id: 2,
+    method: "tools/call",
+    params: { name: "get_system_health", arguments: {} },
+  });
+  mcp.stdin.write(`${initialize}\n${health}\n`);
+  const healthDeadline = Date.now() + 8_000;
+  while (Date.now() < healthDeadline && !stdout.split("\n").some((line) => line.includes('"id":2'))) {
+    if (mcp.exitCode !== null) break;
+    await new Promise((resolve) => setTimeout(resolve, 25));
+  }
+  // The ping is deliberately followed by EOF without waiting. If the stdio
+  // close path exits before buffered frames drain, id 3 will be missing.
+  mcp.stdin.end(`${JSON.stringify({ jsonrpc: "2.0", id: 3, method: "ping" })}\n`);
+  const closed = new Promise((resolve) => mcp.once("close", (code, signal) => resolve({ code, signal })));
+  let timeout;
+  const exit = await Promise.race([
+    closed,
+    new Promise((resolve) => {
+      timeout = setTimeout(() => resolve({ timeout: true }), 10_000);
+    }),
+  ]);
+  clearTimeout(timeout);
+  if (exit.timeout) {
+    mcp.kill("SIGKILL");
+    await closed;
+  }
+  try {
+    const responses = stdout.trim().split("\n").filter(Boolean).map((line) => JSON.parse(line));
+    mcpReport = { exit, responses, stderr };
+  } catch (error) {
+    mcpReport = { exit, stdout, stderr, error: String(error) };
+  }
+}
+
 cleanup();
 
 if (!listening) {
@@ -117,6 +179,21 @@ if (!proxyReport || proxyReport.error || proxyReport.missing.length > 0) {
   process.exit(1);
 }
 
+if (
+  !mcpReport ||
+  mcpReport.error ||
+  mcpReport.exit?.timeout ||
+  mcpReport.exit?.code !== 0 ||
+  mcpReport.responses?.find((response) => response.id === 1)?.result?.serverInfo?.name !== "openmausbot-mcp" ||
+  mcpReport.responses?.find((response) => response.id === 2)?.result?.structuredContent?.status !== "connected" ||
+  JSON.stringify(mcpReport.responses?.find((response) => response.id === 3)?.result) !== "{}"
+) {
+  console.error("the packaged MCP stdio server failed its initialize-health-and-drain smoke test:");
+  console.error(JSON.stringify(mcpReport, null, 2));
+  process.exit(1);
+}
+
 const count = Object.keys(proxyReport.resolved).length;
 console.log(`packaged server started with no node_modules in reach (port ${port}) ✓`);
 console.log(`all ${count} spawned proxy paths resolve inside the packaged server dir ✓`);
+console.log("packaged MCP stdio server reached the API and flushed its final frames ✓");

@@ -136,6 +136,28 @@ describe("Store", () => {
     expect(new Store(selection).group(channel.id)?.section).toBe("Work");
   });
 
+  it("persists a channel's completed setup in the same create write", () => {
+    const store = new Store(selection);
+    const bot = store.createBot();
+    const channel = store.createGroup("Launch", [bot.id], false, "Work", {
+      bulletin: "Ship carefully.",
+      defaultResponder: { kind: "mentions" },
+      completed: true,
+    });
+
+    expect(channel).toMatchObject({
+      bulletin: "Ship carefully.",
+      defaultResponder: { kind: "mentions" },
+      setupSkippedAt: null,
+    });
+    expect(channel.setupCompletedAt).toEqual(expect.any(Number));
+    expect(new Store(selection).group(channel.id)).toMatchObject({
+      bulletin: "Ship carefully.",
+      defaultResponder: { kind: "mentions" },
+      setupCompletedAt: channel.setupCompletedAt,
+    });
+  });
+
   it("migrates old rooms without routing to their first member", () => {
     const store = new Store(selection);
     const first = store.createBot();
@@ -496,6 +518,7 @@ describe("Store change stream", () => {
     expect(events.every((e) => e.type === "bot" && e.botId === bot.id)).toBe(true);
     expect(events).toHaveLength(7);
     store.deleteBot(bot.id);
+    expect(events).toContainEqual({ type: "thread.deleted", threadId: bot.threadId });
     expect(events.at(-1)).toEqual({ type: "bot.deleted", botId: bot.id });
   });
 
@@ -512,7 +535,25 @@ describe("Store change stream", () => {
     expect(events.map((e) => e.type)).toEqual(["group", "group"]);
     expect(store.group(g.id)?.unread).toBe(true);
     store.deleteGroup(g.id);
+    expect(events).toContainEqual({ type: "thread.deleted", threadId: g.threadId });
     expect(events.at(-1)).toEqual({ type: "group.deleted", groupId: g.id });
+  });
+
+  it("delivers each change to the listener snapshot captured before emission", () => {
+    const store = new Store(selection);
+    const bot = store.createBot();
+    const seen: string[] = [];
+    let removeSecond = () => {};
+    store.onChange(() => {
+      seen.push("first");
+      removeSecond();
+      store.onChange(() => seen.push("late"));
+    });
+    removeSecond = store.onChange(() => seen.push("second"));
+
+    store.patchBot(bot.id, { name: "Snapshot" });
+
+    expect(seen).toEqual(["first", "second"]);
   });
 
   it("unsubscribe stops delivery", () => {
@@ -587,9 +628,42 @@ describe("Store redacts bot-authored secrets on write", () => {
     const card = store.appendMessage(bot.threadId, {
       role: "bot",
       kind: "options",
-      card: { title: "Run this?", summary: `curl -H "Authorization: Bearer ${key}"`, options: [], requestId: "r1", tool: "Bash" } as never,
+      card: { title: "Run this?", summary: `curl -H "Authorization: Bearer ${key}"`, held: `Blocked ${key}`, options: [], requestId: "r1", tool: "Bash" } as never,
     });
     expect((card.card as { summary?: string }).summary).not.toContain(key);
+    expect(card.card?.held).not.toContain(key);
+    const routineCard = store.appendMessage(bot.threadId, {
+      role: "bot",
+      kind: "options",
+      card: {
+        title: "Confirm routine",
+        subtitle: "Every morning",
+        options: ["Confirm", "Cancel"],
+        requestId: "routine-request",
+        tool: "schedule_routine",
+        routineRequest: {
+          version: 1,
+          requestId: "routine-request",
+          botId: bot.id,
+          threadId: bot.threadId,
+          createdAt: 1,
+          operation: {
+            action: "create",
+            routine: {
+              name: `Use ${key}`,
+              instructions: `Send a request with ${key}`,
+              schedule: { type: "daily", time: "09:00", weekdays: [1] },
+              runOn: "maus",
+              durationMinutes: 30,
+            },
+          },
+        },
+      },
+    });
+    expect(routineCard.card?.routineRequest?.operation.action).toBe("create");
+    if (routineCard.card?.routineRequest?.operation.action !== "create") throw new Error("missing routine payload");
+    expect(routineCard.card.routineRequest.operation.routine.name).not.toContain(key);
+    expect(routineCard.card.routineRequest.operation.routine.instructions).not.toContain(key);
     const secretCard = store.appendMessage(bot.threadId, {
       role: "bot",
       kind: "secret",

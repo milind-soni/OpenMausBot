@@ -16,6 +16,7 @@ import {
 import type { CloudBackend, EffortLevel } from "../../server/contracts.ts";
 import type { MausColor, MausMotion } from "@/lib/mascot";
 import type { BotAvatarCrop } from "../../shared/bot-avatar";
+import type { RoutineRequestCardData } from "../../shared/routine-request";
 import type { Routine, RoutineInput, RoutineRun } from "@/lib/routines";
 import type { WebhookAttempt, WebhookIngressStatus, WebhookTrigger } from "@/lib/webhooks";
 import { currentCall } from "@/lib/call";
@@ -23,6 +24,7 @@ import { showNotification, type NotificationTarget } from "@/lib/notify";
 import { speaker } from "@/lib/tts";
 import { createBotPatchQueue, type BotUpdatePatch } from "./bot-patch-queue";
 import { skillRecorderEnabled } from "@/lib/feature-flags";
+import { openLiveEvents } from "@/lib/live-events";
 
 export type { MausColor } from "@/lib/mascot";
 
@@ -41,6 +43,8 @@ export interface OptionCardData {
   /** the narrow grant "always allow" remembers, e.g. "Bash:git" */
   allowKey?: string;
   approvalScope?: "local-computer";
+  /** Persisted proposal used by the server when the user confirms it. */
+  routineRequest?: RoutineRequestCardData;
 }
 
 export interface ConnectorCardData {
@@ -90,6 +94,8 @@ export interface Message {
   parentId?: string | null;
   /** Flat reply reference for an inline quote; unrelated to branch ancestry. */
   replyToId?: string;
+  /** Stable client identity for at-most-once chat POST retries. */
+  sendId?: string;
   /** rooms: which member said this (sender attribution). */
   from?: { botId: string; name: string; color: MausColor };
   /** emoji reactions; by = "user" or a member botId. */
@@ -213,6 +219,8 @@ export interface Bot {
   cwd?: string;
   /** auto mode: the bot approves its own tool permissions */
   autoApprove?: boolean;
+  /** optional model review for otherwise undecided, attended approvals */
+  autoReview?: "off" | "shadow" | "enforce";
   /** tools this bot may always use without asking */
   alwaysAllow?: string[];
   /** speak this bot's replies aloud as they settle */
@@ -340,6 +348,9 @@ export interface InstanceInfo {
     /** the engine keeps a live session and takes a message mid-turn */
     queueing?: boolean;
     localComputerMcp?: boolean;
+    /** This engine can answer a bounded review prompt without changing the
+     * bot's active conversation. */
+    approvalReview?: boolean;
   };
   /** `custom` agents sit below the rail divider — no subscription catalog. */
   access?: "subscription" | "custom";
@@ -409,13 +420,52 @@ export interface AppState {
 
 const MAX_CONSUMED_QUEUE_IDS = 64;
 
-function rememberConsumedQueueId(consumed: Record<string, true>, queueId: string): Record<string, true> {
+function rememberConsumedQueueId(
+  consumed: AppState["consumedQueueIds"],
+  queueId: string,
+): AppState["consumedQueueIds"] {
   const next = { ...consumed, [queueId]: true as const };
   const overflow = Object.keys(next).length - MAX_CONSUMED_QUEUE_IDS;
   if (overflow > 0) {
     for (const id of Object.keys(next).slice(0, overflow)) delete next[id];
   }
   return next;
+}
+
+interface QueueReceiptSnapshot {
+  messages?: Message[];
+}
+
+/** A replacement snapshot can contain the canonical user line after this
+ * window missed its queue-drain frame. Remove any matching chip and retain a
+ * short tombstone so a slower POST continuation cannot add the chip back. */
+function reconcileSnapshotQueues(
+  state: AppState,
+  conversations: QueueReceiptSnapshot[],
+): AppState {
+  const landed: Array<{ queueId: string; at: number }> = [];
+  for (const conversation of conversations) {
+    for (const message of conversation.messages ?? []) {
+      if (message.queueId) landed.push({ queueId: message.queueId, at: message.at });
+    }
+  }
+  if (landed.length === 0) return state;
+
+  const landedIds = new Set(landed.map((entry) => entry.queueId));
+  const pendingQueued: AppState["pendingQueued"] = {};
+  for (const [threadId, entries] of Object.entries(state.pendingQueued)) {
+    const waiting = entries.filter((entry) => !landedIds.has(entry.queueId));
+    if (waiting.length > 0) pendingQueued[threadId] = waiting;
+  }
+
+  let consumedQueueIds = state.consumedQueueIds;
+  // Preserve the newest receipts when a large historical snapshot contains
+  // more than the bounded tombstone window.
+  landed.sort((left, right) => left.at - right.at);
+  for (const entry of landed) {
+    consumedQueueIds = rememberConsumedQueueId(consumedQueueIds, entry.queueId);
+  }
+  return { ...state, pendingQueued, consumedQueueIds };
 }
 
 export type BotAnnouncement = Omit<Bot, "messages"> & { messages?: Message[] };
@@ -447,7 +497,15 @@ export type Action =
   | { type: "groupPatched"; group: Partial<Group> & { id: string } }
   | { type: "groupDeleted"; groupId: string }
   | { type: "createGroup"; memberIds: string[]; name?: string; section?: string }
-  | { type: "sendGroup"; groupId: string; text: string; replyToId?: string }
+  | {
+      type: "sendGroup";
+      groupId: string;
+      text: string;
+      sendId?: string;
+      replyToId?: string;
+      threadId?: string;
+      onError?: () => void;
+    }
   | {
       type: "patchGroup";
       groupId: string;
@@ -463,7 +521,15 @@ export type Action =
   | { type: "instances"; instances: InstanceInfo[] }
   | { type: "configStatus"; config: ConfigStatus }
   | { type: "select"; id: string }
-  | { type: "send"; botId: string; text: string; replyToId?: string }
+  | {
+      type: "send";
+      botId: string;
+      text: string;
+      sendId?: string;
+      replyToId?: string;
+      threadId?: string;
+      onError?: () => void;
+    }
   | { type: "pendingQueued"; threadId: string; queueId: string; text: string }
   | { type: "consumePendingQueued"; threadId: string; queueId: string }
   | { type: "cancelQueued"; botId: string; queueId: string }
@@ -482,6 +548,8 @@ export type Action =
       message?: string;
       /** remember this exact grant (the server's allowKey) for the bot */
       alwaysAllow?: { botId: string; key: string };
+      /** Local UI recovery hook for voice flows. Never sent to the server. */
+      onError?: (message: string) => void;
     }
   | { type: "newTask"; botId: string }
   | { type: "switchTask"; botId: string; threadId: string }
@@ -604,13 +672,16 @@ export function reducer(state: AppState, action: Action): AppState {
       const known = (id: string) => action.bots.some((b) => b.id === id) || action.groups.some((g) => g.id === id);
       const selectedId =
         state.selectedId && known(state.selectedId) ? state.selectedId : (action.bots[0]?.id ?? "");
-      return {
-        ...state,
-        bots: action.bots,
-        groups: action.groups,
-        computerControl: action.computerControl,
-        selectedId,
-      };
+      return reconcileSnapshotQueues(
+        {
+          ...state,
+          bots: action.bots,
+          groups: action.groups,
+          computerControl: action.computerControl,
+          selectedId,
+        },
+        [...action.bots, ...action.groups],
+      );
     }
     case "showRoutines":
       return {
@@ -766,10 +837,11 @@ export function reducer(state: AppState, action: Action): AppState {
       // team import), so add it now; the following message frames will fill
       // its greeting without waiting for a full-page hydration.
       if (!before) {
-        return {
+        const added = {
           ...state,
           bots: [{ ...action.bot, messages: action.bot.messages ?? [] }, ...state.bots],
         };
+        return reconcileSnapshotQueues(added, [action.bot]);
       }
       const kind =
         action.bot.unread && !before?.unread
@@ -792,7 +864,7 @@ export function reducer(state: AppState, action: Action): AppState {
         : animated;
       const switchedThread =
         typeof action.bot.threadId === "string" && action.bot.threadId !== before.threadId;
-      return updateBot(next, action.bot.id, (b) => ({
+      const patched = updateBot(next, action.bot.id, (b) => ({
         ...b,
         ...action.bot,
         // Ordinary bot patches omit messages and must preserve the current
@@ -804,6 +876,9 @@ export function reducer(state: AppState, action: Action): AppState {
             ? action.bot.messages
             : b.messages,
       }));
+      return switchedThread && Array.isArray(action.bot.messages)
+        ? reconcileSnapshotQueues(patched, [action.bot])
+        : patched;
     }
     case "messageAdded": {
       const bot = state.bots.find((b) => b.threadId === action.threadId);
@@ -819,11 +894,12 @@ export function reducer(state: AppState, action: Action): AppState {
           ),
         };
       }
+      // The POST response and the canonical SSE frame may arrive in either
+      // order. A repeated message is already folded; moving the active leaf
+      // back to it can hide a newer assistant reply that won the race.
+      if (bot.messages.some((message) => message.id === action.message.id)) return state;
       // every server-side append chains onto (and becomes) the active leaf
       const next = updateBot(state, bot.id, (b) => {
-        if (b.messages.some((m) => m.id === action.message.id)) {
-          return { ...b, activeLeafId: action.message.id };
-        }
         let messages = [...b.messages, action.message];
         // base64 screen frames are big; a long computer-use session would
         // grow memory without bound. Keep the newest few frames' pixels and
@@ -1110,8 +1186,14 @@ export function reducer(state: AppState, action: Action): AppState {
             : group,
         ),
       };
-    case "taskSwitched":
-      return updateBot(state, action.bot.id, (bot) => ({ ...bot, ...action.bot, messages: action.bot.messages ?? [] }));
+    case "taskSwitched": {
+      const switched = updateBot(state, action.bot.id, (bot) => ({
+        ...bot,
+        ...action.bot,
+        messages: action.bot.messages ?? [],
+      }));
+      return reconcileSnapshotQueues(switched, [action.bot]);
+    }
     case "newBot":
     case "duplicateBot":
     case "interrupt":
@@ -1170,6 +1252,35 @@ export async function api(path: string, init?: RequestInit): Promise<any> {
   const body = await res.json().catch(() => ({}));
   if (!res.ok) throw new Error(body.error ?? `${res.status} ${res.statusText}`);
   return body;
+}
+
+export interface PeripheralSnapshotLoad<Key extends string = string> {
+  key: Key;
+  load: () => Promise<void>;
+}
+
+function normalizeSnapshotFailure(cause: unknown): Error {
+  return cause instanceof Error ? cause : new Error(String(cause));
+}
+
+/** A refused SSE resume needs the chat transcript snapshot before its cursor
+ * can be acknowledged. The other panels should refresh at the same boundary,
+ * but a broken optional endpoint must not hold every chat frame hostage. */
+export async function loadSnapshotBoundary<Key extends string>(
+  loadChat: () => Promise<void>,
+  peripherals: readonly PeripheralSnapshotLoad<Key>[],
+  onPeripheralFailure: (part: PeripheralSnapshotLoad<Key>, error: Error) => void,
+): Promise<boolean> {
+  const [chat, ...settledPeripherals] = await Promise.allSettled([
+    loadChat(),
+    ...peripherals.map((part) => part.load()),
+  ]);
+  settledPeripherals.forEach((result, index) => {
+    if (result.status === "rejected") {
+      onPeripheralFailure(peripherals[index]!, normalizeSnapshotFailure(result.reason));
+    }
+  });
+  return chat.status === "fulfilled";
 }
 
 /** Per-frame stream state lives in its OWN context: token frames update only
@@ -1336,11 +1447,17 @@ export function StoreProvider({ children }: { children: ReactNode }) {
           // persist through the existing card route so an older server that
           // does not auto-dismiss still hides the quiz on this client
           if (quizBeforeSend) persistCard(action.botId, quizBeforeSend.id, { dismissed: true });
+          const threadId =
+            action.threadId ?? stateRef.current.bots.find((bot) => bot.id === action.botId)?.threadId;
+          const sendId = action.sendId ?? crypto.randomUUID();
           void api(`/api/bots/${action.botId}/messages`, {
             method: "POST",
-            body: JSON.stringify({ text: action.text, replyToId: action.replyToId }),
+            body: JSON.stringify({ text: action.text, replyToId: action.replyToId, threadId, sendId }),
           })
             .then((body) => {
+              if (body?.message && typeof body.threadId === "string") {
+                rawDispatch({ type: "messageAdded", threadId: body.threadId, message: body.message });
+              }
               if (
                 body?.queued &&
                 typeof body.threadId === "string" &&
@@ -1354,7 +1471,10 @@ export function StoreProvider({ children }: { children: ReactNode }) {
                 });
               }
             })
-            .catch(showError);
+            .catch((error) => {
+              showError(error);
+              action.onError?.();
+            });
           break;
         }
         case "editMessage":
@@ -1378,7 +1498,10 @@ export function StoreProvider({ children }: { children: ReactNode }) {
                 behavior: action.behavior,
                 message: action.message,
               }),
-            }).catch(showError);
+            }).catch((error) => {
+              showError(error);
+              action.onError?.(error instanceof Error ? error.message : String(error));
+            });
           if (action.alwaysAllow) {
             const bot = stateRef.current.bots.find((b) => b.id === action.alwaysAllow!.botId);
             const next = [...new Set([...(bot?.alwaysAllow ?? []), action.alwaysAllow.key])];
@@ -1497,12 +1620,25 @@ export function StoreProvider({ children }: { children: ReactNode }) {
             })
             .catch(showError);
           break;
-        case "sendGroup":
+        case "sendGroup": {
+          const threadId =
+            action.threadId ?? stateRef.current.groups.find((group) => group.id === action.groupId)?.threadId;
+          const sendId = action.sendId ?? crypto.randomUUID();
           api(`/api/groups/${action.groupId}/messages`, {
             method: "POST",
-            body: JSON.stringify({ text: action.text, replyToId: action.replyToId }),
-          }).catch(showError);
+            body: JSON.stringify({ text: action.text, replyToId: action.replyToId, threadId, sendId }),
+          })
+            .then((body) => {
+              if (body?.message && typeof body.threadId === "string") {
+                rawDispatch({ type: "messageAdded", threadId: body.threadId, message: body.message });
+              }
+            })
+            .catch((error) => {
+              showError(error);
+              action.onError?.();
+            });
           break;
+        }
         case "patchGroup":
           api(`/api/groups/${action.groupId}`, {
             method: "PATCH",
@@ -1592,30 +1728,123 @@ export function StoreProvider({ children }: { children: ReactNode }) {
   // ── initial load + SSE fold ──────────────────────────────────────────
   useEffect(() => {
     let alive = true;
-    const loadAll = () =>
-      Promise.all([
-        api("/api/bots")
-          .then(({ bots, groups, computerControl }) =>
-            alive && rawDispatch({
-              type: "hydrate",
-              bots,
-              groups: groups ?? [],
-              computerControl: computerControl ?? {},
-            }))
-          .catch(() => {}),
-        api("/api/instances")
-          .then(({ instances }) => alive && rawDispatch({ type: "instances", instances }))
-          .catch(() => {}),
-        api("/api/config")
-          .then((config) => alive && rawDispatch({ type: "configStatus", config }))
-          .catch(() => {}),
-        api("/api/routines")
-          .then(({ routines, runs }) => alive && rawDispatch({ type: "routinesHydrated", routines, runs }))
-          .catch(() => {}),
-        api("/api/webhooks")
-          .then(({ webhooks, attempts, ingress }) => alive && rawDispatch({ type: "webhooksHydrated", webhooks, attempts: attempts ?? [], ingress }))
-          .catch(() => {}),
-      ]);
+    type PeripheralKey = "instances" | "config" | "routines" | "webhooks";
+    type PeripheralPart = {
+      key: PeripheralKey;
+      request: () => Promise<() => void>;
+    };
+    type PeripheralRefresh = {
+      attempt: number;
+      generation: number;
+      timer: ReturnType<typeof setTimeout> | null;
+      version: number;
+    };
+    const peripheralRefresh = new Map<PeripheralKey, PeripheralRefresh>();
+    const refreshState = (key: PeripheralKey) => {
+      let current = peripheralRefresh.get(key);
+      if (!current) {
+        current = { attempt: 0, generation: 0, timer: null, version: 0 };
+        peripheralRefresh.set(key, current);
+      }
+      return current;
+    };
+    const peripheralParts: PeripheralPart[] = [
+      {
+        key: "instances",
+        request: async () => {
+          const { instances } = await api("/api/instances");
+          return () => rawDispatch({ type: "instances", instances });
+        },
+      },
+      {
+        key: "config",
+        request: async () => {
+          const config = await api("/api/config");
+          return () => rawDispatch({ type: "configStatus", config });
+        },
+      },
+      {
+        key: "routines",
+        request: async () => {
+          const { routines, runs } = await api("/api/routines");
+          return () => rawDispatch({ type: "routinesHydrated", routines, runs });
+        },
+      },
+      {
+        key: "webhooks",
+        request: async () => {
+          const { webhooks, attempts, ingress } = await api("/api/webhooks");
+          return () =>
+            rawDispatch({ type: "webhooksHydrated", webhooks, attempts: attempts ?? [], ingress });
+        },
+      },
+    ];
+    const partByKey = new Map(peripheralParts.map((part) => [part.key, part]));
+    const schedulePeripheralRetry = (part: PeripheralPart, error?: Error) => {
+      if (!alive) return;
+      const refresh = refreshState(part.key);
+      if (refresh.timer) return;
+      if (error !== undefined) {
+        console.warn(`snapshot: ${part.key} refresh failed; retrying`, error);
+      }
+      const delay = Math.min(30_000, 1_000 * 2 ** Math.min(refresh.attempt, 5));
+      refresh.attempt += 1;
+      refresh.timer = setTimeout(() => {
+        refresh.timer = null;
+        void loadPeripheral(part, true).catch((nextError) => schedulePeripheralRetry(part, nextError));
+      }, delay);
+    };
+    const loadPeripheral = async (part: PeripheralPart, protectLiveFrames: boolean): Promise<void> => {
+      const refresh = refreshState(part.key);
+      if (refresh.timer) {
+        clearTimeout(refresh.timer);
+        refresh.timer = null;
+      }
+      const generation = ++refresh.generation;
+      const version = refresh.version;
+      try {
+        const apply = await part.request();
+        if (!alive || refresh.generation !== generation) return;
+        // A background retry must never replace a live patch that arrived
+        // after its request began. Discard that stale response and try again
+        // from the newer event boundary instead.
+        if (protectLiveFrames && refresh.version !== version) {
+          schedulePeripheralRetry(part);
+          return;
+        }
+        apply();
+        refresh.attempt = 0;
+      } catch (error) {
+        // A newer refresh owns this lane now; its result will decide whether
+        // another retry is needed.
+        if (!alive || refresh.generation !== generation) return;
+        throw normalizeSnapshotFailure(error);
+      }
+    };
+    const bumpPeripheralVersion = (...keys: PeripheralKey[]) => {
+      for (const key of keys) refreshState(key).version += 1;
+    };
+    const loadAll = async (): Promise<boolean> => {
+      const chat = () =>
+        api("/api/bots").then(({ bots, groups, computerControl }) => {
+          if (!alive) return;
+          rawDispatch({
+            type: "hydrate",
+            bots,
+            groups: groups ?? [],
+            computerControl: computerControl ?? {},
+          });
+        });
+      const peripherals = peripheralParts.map((part) => ({
+        key: part.key,
+        load: () => loadPeripheral(part, false),
+      }));
+      const chatReady = await loadSnapshotBoundary(chat, peripherals, (failed, error) => {
+        const part = partByKey.get(failed.key);
+        if (part) schedulePeripheralRetry(part, error);
+      });
+      return alive && chatReady;
+    };
 
     // A snapshot and the live fold have to meet at a defined boundary. Start
     // hydration only after the stream says hello, queue frames that arrive
@@ -1623,43 +1852,52 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     // a late hydrate can overwrite a newer event, or an event can land between
     // an eager request and the stream opening and disappear entirely.
     let hydrated = false;
-    let hydrating = false;
+    let hydrationPromise: Promise<boolean> | null = null;
     let rehydrateRequested = false;
     const pendingFrames: any[] = [];
     let handleFrame: (frame: any) => void;
-    const hydrate = () => {
-      if (hydrating) {
+    const hydrate = (): Promise<boolean> => {
+      if (hydrationPromise) {
         // A second non-resumable hello means this snapshot may have started
         // before another connection gap. Run one more after it settles.
         rehydrateRequested = true;
-        return;
+        return hydrationPromise;
       }
-      hydrating = true;
       hydrated = false;
-      void loadAll().finally(() => {
-        if (!alive) return;
-        hydrating = false;
-        if (rehydrateRequested) {
+      hydrationPromise = (async () => {
+        let loaded = false;
+        do {
           rehydrateRequested = false;
-          hydrate();
-          return;
-        }
+          loaded = await loadAll();
+        } while (alive && rehydrateRequested);
+        if (!alive || !loaded) return false;
         hydrated = true;
         for (const frame of pendingFrames.splice(0)) handleFrame(frame);
+        return true;
+      })().finally(() => {
+        hydrationPromise = null;
       });
+      return hydrationPromise;
     };
     // If SSE is unavailable, the app should still show its saved state. A
     // later first hello hydrates again because it cannot prove there was no
     // gap before that connection opened.
     const hydrationFallback = setTimeout(hydrate, 1_000);
 
-    const es = new EventSource("/api/events");
     // The hydrate decision belongs to the hello frame, not to onopen: the
     // server replays what we missed when it can, and re-downloading every
     // transcript on a reconnect it already covered is pure waste.
-    es.onopen = () => rawDispatch({ type: "connected", value: true });
-    es.onerror = () => rawDispatch({ type: "connected", value: false });
     handleFrame = (frame) => {
+      if (frame.kind === "config") bumpPeripheralVersion("config", "instances");
+      else if (frame.kind === "routine" || frame.kind === "routine.deleted" || frame.kind === "routine.run") {
+        bumpPeripheralVersion("routines");
+      } else if (
+        frame.kind === "webhook" ||
+        frame.kind === "webhook.attempt" ||
+        frame.kind === "webhook.deleted"
+      ) {
+        bumpPeripheralVersion("webhooks");
+      }
       switch (frame.kind) {
         case "message": {
           rawDispatch({ type: "messageAdded", threadId: frame.threadId, message: frame.message });
@@ -1812,33 +2050,39 @@ export function StoreProvider({ children }: { children: ReactNode }) {
             type: "configStatus",
             config: configStatusFromFrame(frame),
           });
-          api("/api/instances")
-            .then(({ instances }) => rawDispatch({ type: "instances", instances }))
-            .catch(() => {});
+          {
+            const instances = partByKey.get("instances");
+            if (instances) {
+              void loadPeripheral(instances, true).catch((error) =>
+                schedulePeripheralRetry(instances, error),
+              );
+            }
+          }
           break;
       }
     };
-    es.onmessage = (raw) => {
-      let frame: any;
-      try {
-        frame = JSON.parse(raw.data);
-      } catch {
-        return;
-      }
-      // `hello` is the snapshot boundary. A false `resumed` means the server
-      // could not fill the gap, so queue subsequent frames behind a hydrate.
-      if (frame.kind === "hello") {
+    const stopLive = openLiveEvents({
+      onOpen: () => rawDispatch({ type: "connected", value: true }),
+      onError: () => rawDispatch({ type: "connected", value: false }),
+      onSnapshotRequired: () => {
         clearTimeout(hydrationFallback);
-        if (!frame.resumed) hydrate();
-        return;
-      }
-      if (hydrated) handleFrame(frame);
-      else pendingFrames.push(frame);
-    };
+        // Frames buffered before this non-resumable stream belong to an
+        // abandoned generation. Keep the new generation behind hydrate().
+        pendingFrames.splice(0);
+        return hydrate();
+      },
+      onFrame: (frame) => {
+        if (hydrated) handleFrame(frame);
+        else pendingFrames.push(frame);
+      },
+    });
     return () => {
       alive = false;
       clearTimeout(hydrationFallback);
-      es.close();
+      for (const refresh of peripheralRefresh.values()) {
+        if (refresh.timer) clearTimeout(refresh.timer);
+      }
+      stopLive();
     };
   }, []);
 

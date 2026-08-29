@@ -118,6 +118,24 @@ The SPI in [`server/contracts.ts`](server/contracts.ts) is deliberately small. A
    failed spawn as a failed turn — never a hang, never a crash.
 5. Bring a contract test following the fake-CLI pattern (scripted fake process + `recordEvents`).
 
+## MCP tool schemas
+
+Tool `inputSchema`s travel through every engine's own MCP-to-provider conversion before a model
+sees them, and those converters are lossy: composition keywords get flattened, dropped, or pruned
+by size-compaction passes (codex only began preserving `oneOf` in mid-2026; others simplify
+harder). A model that never saw your schema's branches guesses shapes forever — that is exactly
+how chat routine proposals failed in the field hours after 0.1.38 shipped (#544).
+
+- **Never use `oneOf`, `anyOf`, `allOf`, `const`, or `format` in a tool `inputSchema`.** Advertise
+  one flat object; put per-variant rules in `description`s. `enum` on plain strings is fine.
+- **Coerce before you reject.** Models stringify nested objects, shorten enum values, and vary
+  case. If an input has one obvious meaning, accept it and normalize on the wire.
+- **Errors must teach.** When you refuse an input, the message states the supported shapes with a
+  literal example the model can copy. "Invalid discriminator value" burns a turn; an example
+  fixes the next call.
+- A schema test should assert the tool surface stays flat
+  (see `server/drivers/agents-proxy.test.ts` — it regexp-guards the serialized schema).
+
 ## Platform rules
 
 - The harness (`server/`) must stay portable Node. Anything macOS-only (TCC, Swift helpers,

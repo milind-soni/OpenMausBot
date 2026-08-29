@@ -5,7 +5,7 @@
 // own transcript and its own provider session — so sensitive work, a
 // long job and a quick question can sit side by side under one agent.
 import { useEffect, useRef, useState } from "react";
-import { Check, ChevronDown, Pencil, Plus, Trash2 } from "lucide-react";
+import { Check, ChevronDown, Pencil, Plus, Search, Trash2 } from "lucide-react";
 import { useStore, formatTime, type Bot, type Group, type Task } from "@/state/store";
 import { cn } from "@/lib/cn";
 import { COMPACT_BUBBLE } from "@/lib/compact-chip";
@@ -30,6 +30,22 @@ export function taskPickerPointerIntent(
   if (type === "click" && detail >= 2) return "ignore";
   if (type === "click") return "select";
   return "ignore";
+}
+
+/** Filter the task switcher. Prefix matches float first so a few letters
+ * still find the right row in a long list; within a tier the caller's
+ * order (newest first) is preserved. */
+export function filterTasks<T extends { title: string }>(tasks: readonly T[], query: string): T[] {
+  const needle = query.trim().toLowerCase();
+  if (!needle) return [...tasks];
+  const prefix: T[] = [];
+  const substring: T[] = [];
+  for (const task of tasks) {
+    const title = task.title.toLowerCase();
+    if (title.startsWith(needle)) prefix.push(task);
+    else if (title.includes(needle)) substring.push(task);
+  }
+  return [...prefix, ...substring];
 }
 
 /** Quiet per-task token tally — input+output combined, because one honest
@@ -68,6 +84,7 @@ function ConversationTaskPicker({
   const [open, setOpen] = useState(false);
   const [renaming, setRenaming] = useState<string | null>(null);
   const [draft, setDraft] = useState("");
+  const [query, setQuery] = useState("");
   const ref = useRef<HTMLDivElement>(null);
   const dismissTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const finishingRename = useRef(false);
@@ -84,6 +101,7 @@ function ConversationTaskPicker({
   const closeMenu = () => {
     clearDismiss();
     setRenaming(null);
+    setQuery("");
     setOpen(false);
   };
 
@@ -96,7 +114,7 @@ function ConversationTaskPicker({
     }, TASK_PICKER_DISMISS_MS);
   };
 
-  const startRename = (task: Task) => {
+  const startRename = (task: PickerTask) => {
     clearDismiss();
     finishingRename.current = false;
     setDraft(task.title);
@@ -114,6 +132,7 @@ function ConversationTaskPicker({
         dismissTimer.current = null;
       }
       setRenaming(null);
+      setQuery("");
       return;
     }
     const onDown = (e: MouseEvent) => {
@@ -184,6 +203,8 @@ function ConversationTaskPicker({
     u && currentLabel
       ? `Switch task · ${currentLabel} (${u.input.toLocaleString()} in · ${u.output.toLocaleString()} out)`
       : "Switch task";
+  const visible = filterTasks(tasks, query);
+  const looking = query.trim();
 
   return (
     <div className="relative" ref={ref}>
@@ -207,8 +228,43 @@ function ConversationTaskPicker({
 
       {open && (
         <div className="absolute right-0 top-full z-40 mt-1 w-[300px] overflow-hidden rounded-xl border border-hairline/50 bg-card py-1 shadow-2xl shadow-black/50">
-          <div className="max-h-[320px] overflow-y-auto">
-            {tasks.map((task) => {
+          <div className="px-2 pb-1 pt-1.5">
+            <div className="flex items-center gap-2 rounded-lg border border-hairline/40 bg-inset px-2.5 py-1.5 focus-within:border-accent/60">
+              <Search size={13} className="shrink-0 text-ink-secondary" />
+              <input
+                autoFocus
+                value={query}
+                onChange={(e) => setQuery(e.target.value)}
+                onClick={(e) => e.stopPropagation()}
+                onMouseDown={(e) => e.stopPropagation()}
+                onKeyDown={(e) => {
+                  if (e.key === "Escape") {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    if (looking) setQuery("");
+                    else closeMenu();
+                    return;
+                  }
+                  if (e.key === "Enter" && !e.nativeEvent.isComposing) {
+                    e.preventDefault();
+                    const first = visible[0];
+                    if (!first) return;
+                    if (first.threadId !== threadId) onSwitch(first.threadId);
+                    closeMenu();
+                  }
+                }}
+                placeholder="Search tasks"
+                aria-label="Search tasks"
+                className="w-full bg-transparent text-[12.5px] text-ink placeholder:text-ink-secondary focus:outline-none"
+              />
+            </div>
+          </div>
+          <div className="max-h-[320px] overflow-y-auto" role="group" aria-label={looking ? `${visible.length} matching tasks` : "Tasks"}>
+            {visible.length === 0 ? (
+              <div className="px-3 py-6 text-center text-[13px] text-ink-secondary">
+                Nothing matches “{looking}”
+              </div>
+            ) : visible.map((task) => {
               const active = task.threadId === threadId;
               return (
                 <div

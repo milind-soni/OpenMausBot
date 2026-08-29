@@ -332,6 +332,10 @@ export interface ProviderInstance {
   snapshot(): Promise<ProviderSnapshot>;
   /** Cheap one-shot text call (upstream TextGeneration) — titles, summaries. */
   generateText?(prompt: string): Promise<string>;
+  /** Isolated, tool-free permission review on this same provider. Kept
+   * separate from generateText so the UI never infers a security capability
+   * from a generic helper that may expose prompts in argv or lack approvals. */
+  reviewPermission?(prompt: string, signal?: AbortSignal): Promise<string>;
   dispose(): Promise<void>;
 }
 

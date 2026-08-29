@@ -17,7 +17,7 @@
 //                      inherited-api-key — what `auth status` reports
 //
 // Keep this file dependency-free — it runs as a bare `node` subprocess.
-import { readFileSync, writeFileSync } from "node:fs";
+import { existsSync, readFileSync, writeFileSync } from "node:fs";
 
 const mode = process.env.FAKE_CLAUDE_MODE ?? "happy";
 
@@ -52,13 +52,20 @@ if (argv[0] === "auth" && argv[1] === "status") {
   );
 }
 
-// One-shot helper mode used by generateText. It does not use stdin or emit
-// the stream-json turn protocol.
+// One-shot helper mode used by generateText/reviewPermission. The prompt is
+// deliberately read from stdin so sensitive review text never appears in
+// argv or process listings.
 if (argAfter("--output-format") === "text") {
+  const prompt = await new Promise<string>((resolve) => {
+    let input = "";
+    process.stdin.setEncoding("utf8");
+    process.stdin.on("data", (chunk) => { input += chunk; });
+    process.stdin.on("end", () => resolve(input));
+  });
   if (process.env.FAKE_CLAUDE_DUMP) {
     writeFileSync(
       process.env.FAKE_CLAUDE_DUMP,
-      JSON.stringify({ pid: process.pid, argv, env: process.env, prompt: argAfter("-p"), mcpConfig: null }, null, 2),
+      JSON.stringify({ pid: process.pid, argv, env: process.env, prompt, mcpConfig: null }, null, 2),
     );
   }
   process.stdout.write("fake generated text\n");
@@ -78,6 +85,23 @@ let dumped = false;
 let turnRunning = false;
 let steered: string[] = [];
 let stdinEnded = false;
+let steerGateArmed = false;
+
+// Ownership-race fixture: after accepting the first prompt, stop consuming
+// stdin until the test creates this file. A large second write then leaves
+// adapter.steer() genuinely pending while the first turn settles and another
+// HTTP request deletes or switches the bot.
+const armSteerGate = () => {
+  const gate = process.env.FAKE_CLAUDE_STEER_GATE;
+  if (!gate || steerGateArmed) return;
+  steerGateArmed = true;
+  process.stdin.pause();
+  const poll = setInterval(() => {
+    if (!existsSync(gate)) return;
+    clearInterval(poll);
+    process.stdin.resume();
+  }, 10);
+};
 
 const promptText = (prompt: JsonValue): string => {
   const m = prompt && typeof prompt === "object" && !Array.isArray(prompt) ? (prompt as { message?: { content?: unknown } }).message : undefined;
@@ -206,7 +230,10 @@ process.stdin.on("data", (c) => {
       continue;
     }
     if (turnRunning) steered.push(promptText(prompt));
-    else playTurn(prompt);
+    else {
+      playTurn(prompt);
+      armSteerGate();
+    }
   }
 });
 process.stdin.on("end", () => {

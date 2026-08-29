@@ -337,6 +337,7 @@ export function SettingsPanel({ bot }: { bot: Bot }) {
         | "avatarUrl"
         | "avatarCrop"
         | "autoApprove"
+        | "autoReview"
         | "speakReplies"
         | "voice"
         | "chiefOfStaff"
@@ -349,6 +350,7 @@ export function SettingsPanel({ bot }: { bot: Bot }) {
   const activeState = stateForBot(bot);
   const mascotMotion = state.mascotMotion?.botId === bot.id ? state.mascotMotion : null;
   const engine = state.instances.find((instance) => instance.instanceId === bot.modelSelection.instanceId);
+  const canAutoReview = engine?.capabilities?.approvalReview === true;
   const canCoordinate = engine?.capabilities?.agentsMcp === true;
   const canUseConnectedApps = engine?.capabilities?.composioMcp === true;
   const canUseVps = engine?.capabilities?.computerMcp === true && engine.driverKind !== "boxAgent";
@@ -702,6 +704,41 @@ export function SettingsPanel({ bot }: { bot: Bot }) {
                 )}
               />
             </button>
+          </div>
+
+          <div className="rounded-xl bg-card p-4">
+            <div className="text-[15px] font-medium text-ink">Review routine approvals</div>
+            <div className="mt-0.5 text-[13px] text-ink-secondary">
+              {canAutoReview
+                ? "The same engine reviews ordinary approval cards. Existing safety rules, unattended turns, local-computer access, and questions still wait for you."
+                : "This engine cannot run an isolated review safely, so approval cards continue to wait for you."}
+            </div>
+            <div className="mt-3 flex gap-1 rounded-lg bg-inset p-0.5">
+              {(
+                [
+                  ["off", "Off", "Every undecided approval waits for you."],
+                  ["shadow", "Watch", "Record the review without answering the card."],
+                  ["enforce", "On", "Answer only reviews that return a strict approval."],
+                ] as const
+              ).map(([value, label, hint]) => {
+                const current = bot.autoReview === "shadow" || bot.autoReview === "enforce" ? bot.autoReview : "off";
+                const disabled = value !== "off" && !canAutoReview;
+                return (
+                  <button
+                    key={value}
+                    title={disabled ? "Not supported by this engine" : hint}
+                    disabled={disabled}
+                    onClick={() => patch({ autoReview: value })}
+                    className={cn(
+                      "flex-1 rounded-md px-2.5 py-1.5 text-[13px] font-medium disabled:cursor-not-allowed disabled:opacity-40",
+                      current === value ? "bg-raised text-ink" : "text-ink-secondary hover:text-ink",
+                    )}
+                  >
+                    {label}
+                  </button>
+                );
+              })}
+            </div>
           </div>
 
           <VoiceSettings bot={bot} onPatch={patch} />

@@ -175,6 +175,7 @@ export class ProviderRegistry {
             effortLevels: inst.adapter.capabilities.effortLevels,
             queueing: inst.adapter.capabilities.queueing === true,
             localComputerMcp: inst.adapter.capabilities.localComputerMcp === true,
+            approvalReview: inst.reviewPermission !== undefined,
           },
           access: driver?.metadata.access ?? "subscription",
           install: driver?.install,

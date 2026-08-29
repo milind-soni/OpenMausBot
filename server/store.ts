@@ -14,6 +14,7 @@ import { newId, type CloudBackend, type ModelSelection, type ThreadId } from "./
 import { pickBotName } from "./names.ts";
 import { redactSecretsInText } from "./redact.ts";
 import { botAvatarProfile, type BotAvatarCrop } from "../shared/bot-avatar.ts";
+import type { RoutineRequestCardData } from "../shared/routine-request.ts";
 
 export type MausColor =
   | "green"
@@ -51,6 +52,9 @@ export interface OptionCardData {
   allowKey?: string;
   /** Local actions never share remembered grants with cloud/tool approvals. */
   approvalScope?: "local-computer";
+  /** A durable chat-created routine proposal. The scheduler only applies it
+   * after this card is explicitly confirmed by the user. */
+  routineRequest?: RoutineRequestCardData;
 }
 
 export interface ConnectorCardData {
@@ -109,6 +113,8 @@ export interface Message {
   /** Optional flat reply reference. Unlike parentId this never changes the
    * conversation branch; it only quotes one earlier text message inline. */
   replyToId?: string;
+  /** Stable client identity for at-most-once chat POST retries. */
+  sendId?: string;
   /** group threads: which member said this (sender attribution). */
   from?: { botId: string; name: string; color: string };
   /** emoji reactions; by = "user" or a member botId. */
@@ -241,6 +247,39 @@ function redactBotAuthored<T extends Omit<Message, "id" | "at"> & { at?: number 
     card.title = redactSecretsInText(card.title);
     if (typeof card.subtitle === "string") card.subtitle = redactSecretsInText(card.subtitle);
     if (typeof card.summary === "string") card.summary = redactSecretsInText(card.summary);
+    if (typeof card.held === "string") card.held = redactSecretsInText(card.held);
+    // Routine definitions are executable bot-authored text stored behind the
+    // visible summary. Scrub the durable payload too so nesting it on a card
+    // cannot bypass the transcript's secret-redaction boundary.
+    if (card.routineRequest) {
+      const operation = card.routineRequest.operation;
+      card.routineRequest = {
+        ...card.routineRequest,
+        operation: operation.action === "create"
+          ? {
+              ...operation,
+              routine: {
+                ...operation.routine,
+                name: redactSecretsInText(operation.routine.name),
+                instructions: redactSecretsInText(operation.routine.instructions),
+              },
+            }
+          : operation.action === "update"
+            ? {
+                ...operation,
+                changes: {
+                  ...operation.changes,
+                  ...(typeof operation.changes.name === "string"
+                    ? { name: redactSecretsInText(operation.changes.name) }
+                    : {}),
+                  ...(typeof operation.changes.instructions === "string"
+                    ? { instructions: redactSecretsInText(operation.changes.instructions) }
+                    : {}),
+                },
+              }
+            : { ...operation },
+      };
+    }
     out.card = card;
   }
   if (out.connector) {
@@ -277,6 +316,7 @@ export type StoreChange =
   | { type: "message"; threadId: string; message: Message }
   | { type: "message.patch"; threadId: string; message: Message }
   | { type: "thread"; threadId: string; activeLeafId: string }
+  | { type: "thread.deleted"; threadId: string }
   | { type: "bot"; botId: string }
   | { type: "bot.deleted"; botId: string }
   | { type: "group"; groupId: string }
@@ -326,6 +366,9 @@ export interface BotRecord {
    * working instead of stopping to ask. Questions it asks YOU still come
    * through, and a short list of destructive commands still stops it. */
   autoApprove?: boolean;
+  /** Optional model review of otherwise undecided, attended approval cards.
+   * Unknown persisted values are treated as off by the review boundary. */
+  autoReview?: "off" | "shadow" | "enforce";
   /** Tools this bot may always use without asking, even outside auto mode
    * (set by "Always allow" on an approval card). */
   alwaysAllow?: string[];
@@ -658,7 +701,7 @@ export class Store {
   }
 
   private emit(change: StoreChange) {
-    for (const listener of this.listeners) {
+    for (const listener of [...this.listeners]) {
       try {
         listener(change);
       } catch (error) {
@@ -677,7 +720,17 @@ export class Store {
     );
   }
 
-  createGroup(name: string, memberIds: string[], dm = false, section?: string): GroupRecord {
+  createGroup(
+    name: string,
+    memberIds: string[],
+    dm = false,
+    section?: string,
+    setup?: {
+      bulletin?: string;
+      defaultResponder?: GroupDefaultResponder;
+      completed?: boolean;
+    },
+  ): GroupRecord {
     const threadId = newId();
     const createdAt = Date.now();
     const group: GroupRecord = {
@@ -685,8 +738,10 @@ export class Store {
       threadId,
       name,
       memberIds,
-      defaultResponder: dm ? { kind: "mentions" } : { kind: "member", botId: memberIds[0] },
-      bulletin: "",
+      defaultResponder: dm
+        ? { kind: "mentions" }
+        : normalizeGroupDefaultResponder(setup?.defaultResponder, memberIds, false),
+      bulletin: setup?.bulletin ?? "",
       unread: false,
       createdAt,
       dm: dm || undefined,
@@ -695,7 +750,7 @@ export class Store {
     };
     if (!dm) {
       group.tasks = [{ threadId, title: UNTITLED_TASK, createdAt }];
-      group.setupCompletedAt = null;
+      group.setupCompletedAt = setup?.completed ? createdAt : null;
       group.setupSkippedAt = null;
     }
     this.groups.unshift(group);
@@ -738,6 +793,7 @@ export class Store {
         unlinkSync(file);
       } catch {}
     }
+    this.emit({ type: "thread.deleted", threadId });
   }
 
   deleteGroup(id: string): boolean {

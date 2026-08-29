@@ -14,6 +14,7 @@ import { Bug, ChevronDown, ChevronRight, RefreshCw, X } from "lucide-react";
 import { useStore, type Bot } from "@/state/store";
 import { cn } from "@/lib/cn";
 import { formatTime, toRows, type InspectorEntry, type InspectorPage, type InspectorRow } from "@/lib/inspector";
+import { openLiveEvents } from "@/lib/live-events";
 import type { RuntimeEvent } from "../../server/contracts.ts";
 
 type Lens = "events" | "raw";
@@ -28,21 +29,26 @@ export function InspectorPanel({ bot }: { bot: Bot }) {
   const listRef = useRef<HTMLDivElement>(null);
   const stickToBottom = useRef(true);
   const loadAbort = useRef<AbortController | null>(null);
+  const managedRefresh = useRef<() => void>(() => {});
 
-  const load = useCallback(async () => {
+  const load = useCallback(async (): Promise<boolean> => {
     loadAbort.current?.abort();
     const controller = new AbortController();
     loadAbort.current = controller;
     try {
       const res = await fetch(`/api/threads/${threadId}/events?limit=400`, { signal: controller.signal });
       if (!res.ok) throw new Error(`${res.status}`);
+      // SAFETY: this same-version renderer calls the harness's typed
+      // inspector endpoint; malformed transport data is handled by catch.
       const next = (await res.json()) as InspectorPage;
-      if (controller.signal.aborted) return;
+      if (controller.signal.aborted) return false;
       setPage(next);
       setError(null);
+      return true;
     } catch (e) {
-      if (controller.signal.aborted) return;
+      if (controller.signal.aborted) return false;
       setError(e instanceof Error ? e.message : String(e));
+      return false;
     } finally {
       if (loadAbort.current === controller) loadAbort.current = null;
     }
@@ -62,29 +68,86 @@ export function InspectorPanel({ bot }: { bot: Bot }) {
   // up. Own EventSource on purpose: the store folds runtime events into
   // chat state and does not re-emit them.
   useEffect(() => {
-    const es = new EventSource("/api/events?screens=off");
+    let alive = true;
     let settle: ReturnType<typeof setTimeout> | null = null;
-    es.onmessage = (raw) => {
-      let frame: { kind?: string; event?: RuntimeEvent };
-      try {
-        frame = JSON.parse(raw.data);
-      } catch {
-        return;
-      }
-      if (frame.kind !== "runtime" || !frame.event || frame.event.threadId !== threadId) return;
-      const event = frame.event;
+    let refreshGeneration = 0;
+    let refreshing = false;
+    const pendingRuntime: RuntimeEvent[] = [];
+
+    const appendRuntime = (runtime: RuntimeEvent) => {
       setPage((prev) => {
-        const entry: InspectorEntry = { kind: "runtime", at: event.createdAt, data: event };
+        // A disk refresh and replay can overlap. eventId is canonical, so a
+        // replayed entry already present in the snapshot is an exact no-op.
+        if (
+          prev?.entries.some(
+            (entry) => entry.kind === "runtime" && entry.data.eventId === runtime.eventId,
+          )
+        ) {
+          return prev;
+        }
+        const entry: InspectorEntry = { kind: "runtime", at: runtime.createdAt, data: runtime };
         if (!prev) return { entries: [entry], total: { runtime: 1, native: 0 } };
         return { entries: [...prev.entries, entry], total: { ...prev.total, runtime: prev.total.runtime + 1 } };
       });
-      if (event.type === "turn.completed" || event.type === "runtime.error") {
-        if (settle) clearTimeout(settle);
-        settle = setTimeout(() => void load(), 400);
-      }
     };
+
+    const flushPendingRuntime = () => {
+      for (const runtime of pendingRuntime.splice(0)) appendRuntime(runtime);
+    };
+
+    const refresh = async (flushLiveOnFailure: boolean): Promise<boolean> => {
+      const generation = ++refreshGeneration;
+      refreshing = true;
+      const loaded = await load();
+      // A later refresh aborts the earlier fetch. Only its completion owns
+      // the buffered live tail, otherwise the earlier finally can flush
+      // frames immediately before the newer snapshot overwrites them.
+      if (!alive || generation !== refreshGeneration) return false;
+      refreshing = false;
+      // An ordinary Reload keeps the previous page when its fetch fails, so
+      // live frames buffered during that request still belong on that page.
+      // A replacement snapshot must not expose them: its caller will close
+      // and replay the stream from the last acknowledged cursor instead.
+      if (!loaded) {
+        if (flushLiveOnFailure) flushPendingRuntime();
+        return false;
+      }
+      flushPendingRuntime();
+      return true;
+    };
+    const requestRefresh = () => void refresh(true);
+    const refreshFromSnapshot = (): Promise<boolean> => {
+      // A refused resume starts a new stream generation. Frames retained by
+      // an earlier failed refresh will be present in the new disk snapshot or
+      // replayed again, so do not carry them across the generation boundary.
+      pendingRuntime.splice(0);
+      return refresh(false);
+    };
+    managedRefresh.current = requestRefresh;
+
+    const stopLive = openLiveEvents({
+      screens: false,
+      onSnapshotRequired: refreshFromSnapshot,
+      onFrame: (frame) => {
+        if (frame.kind !== "runtime") return;
+        const event = frame.event;
+        if (!event || Array.isArray(event) || Object(event) !== event) return;
+        // SAFETY: runtime stream frames are produced from the typed harness
+        // bus; this guard rejects non-object transport corruption.
+        const runtime = event as RuntimeEvent;
+        if (runtime.threadId !== threadId) return;
+        if (refreshing) pendingRuntime.push(runtime);
+        else appendRuntime(runtime);
+        if (runtime.type === "turn.completed" || runtime.type === "runtime.error") {
+          if (settle) clearTimeout(settle);
+          settle = setTimeout(requestRefresh, 400);
+        }
+      },
+    });
     return () => {
-      es.close();
+      alive = false;
+      if (managedRefresh.current === requestRefresh) managedRefresh.current = () => {};
+      stopLive();
       if (settle) clearTimeout(settle);
     };
   }, [threadId, load]);
@@ -151,7 +214,7 @@ export function InspectorPanel({ bot }: { bot: Bot }) {
         <span className="ml-auto text-[11px] text-ink-secondary">
           {page ? (shown < total ? `last ${shown} of ${total}` : `${shown} entries`) : "loading…"}
         </span>
-        <button onClick={() => void load()} className="rounded-md p-1 text-ink-secondary hover:bg-raised hover:text-ink" title="Reload from disk">
+        <button onClick={() => managedRefresh.current()} className="rounded-md p-1 text-ink-secondary hover:bg-raised hover:text-ink" title="Reload from disk">
           <RefreshCw size={14} />
         </button>
       </div>
