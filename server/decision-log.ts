@@ -26,7 +26,7 @@ import { join } from "node:path";
 import type { AutoVerdictSource } from "./auto-approve.ts";
 import { redactSecrets } from "./redact.ts";
 
-export type DecisionKind = "auto-approved" | "card-shown" | "user-approved" | "user-denied";
+export type DecisionKind = "auto-approved" | "card-shown" | "user-approved" | "user-denied" | "system-denied";
 
 /** Who or what produced the decision. The AutoVerdictSource values carry
  * straight through from auto-approve.ts; `question` marks the cards a rule

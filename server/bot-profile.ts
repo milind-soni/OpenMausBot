@@ -1,7 +1,7 @@
 import { z } from "zod";
 
 import { botAvatarCropSchema, botAvatarUrlSchema } from "../shared/bot-avatar.ts";
-import { BOT_PROFILE_LIMITS } from "../shared/bot-profile.ts";
+import { BOT_PROFILE_LIMITS, BOT_REPORTING_MODES } from "../shared/bot-profile.ts";
 
 import type { BotRecord } from "./store.ts";
 
@@ -9,7 +9,9 @@ export const BOT_PROFILE_PATCH_FIELDS = [
   "name",
   "title",
   "description",
+  "instructions",
   "notifications",
+  "reportingMode",
   "avatarUrl",
   "avatarCrop",
   "voice",
@@ -30,7 +32,12 @@ const profilePatchSchema = z.object({
     .string({ error: "description must be a string" })
     .max(BOT_PROFILE_LIMITS.description, { error: "description must be at most 4000 characters" })
     .optional(),
+  instructions: z
+    .string({ error: "instructions must be a string" })
+    .max(BOT_PROFILE_LIMITS.instructions, { error: "instructions must be at most 16000 characters" })
+    .optional(),
   notifications: z.boolean({ error: "notifications must be true or false" }).optional(),
+  reportingMode: z.enum(BOT_REPORTING_MODES, { error: "reportingMode must be all, actionable, or silent" }).optional(),
   avatarUrl: z
     .union([botAvatarUrlSchema, z.literal(""), z.null()], {
       error: "avatarUrl must be a stored PNG, JPEG, GIF, or WebP attachment",
@@ -49,7 +56,7 @@ export type BotProfilePatchInput = z.input<typeof profilePatchSchema>;
 export type BotProfilePatch = Partial<
   Pick<
     BotRecord,
-    "name" | "title" | "description" | "notifications" | "avatarUrl" | "avatarCrop" | "voice" | "speakReplies"
+    "name" | "title" | "description" | "instructions" | "notifications" | "reportingMode" | "avatarUrl" | "avatarCrop" | "voice" | "speakReplies"
   >
 >;
 
@@ -75,7 +82,7 @@ export function parseBotProfilePatch(input: BotProfilePatchInput, strict = false
     }
     const issue = parsed.error.issues[0];
     if (issue?.path[0] === "avatarCrop") {
-      return { ok: false, error: "avatarCrop must be mascot, circle, rounded, or square" };
+      return { ok: false, error: "avatarCrop must be glyph, mascot, circle, rounded, or square" };
     }
     return { ok: false, error: issue?.message ?? "invalid profile patch" };
   }

@@ -104,6 +104,7 @@ describe("CodexDriver turns (fake app-server)", () => {
       model: "fake-codex-model",
     });
     expect(recorder.events.find((e) => e.type === "thread.token-usage.updated")).toMatchObject({
+      scope: "turn",
       input: 7,
       output: 3,
     });
@@ -143,7 +144,11 @@ describe("CodexDriver turns (fake app-server)", () => {
       type: "item.started",
       title: command,
     });
-    expect(opened).toMatchObject({ requestType: "permission", summary: command });
+    expect(opened).toMatchObject({
+      requestType: "permission",
+      summary: command,
+      action: { fidelity: "exact-command", command },
+    });
 
     await instance.adapter.respondToRequest("t-windows-command", opened.requestId!, { behavior: "allow" });
     await recorder.until((event) => event.type === "turn.completed");
@@ -342,7 +347,12 @@ describe("CodexDriver turns (fake app-server)", () => {
 
     await instance.adapter.sendTurn({ threadId: "t-approve", text: "clean up" });
     const opened = await recorder.until((e) => e.type === "request.opened");
-    expect(opened).toMatchObject({ requestType: "permission", tool: "shell", summary: "rm -rf scratch" });
+    expect(opened).toMatchObject({
+      requestType: "permission",
+      tool: "shell",
+      summary: "rm -rf scratch",
+      action: { fidelity: "exact-command", command: "rm -rf scratch" },
+    });
 
     await instance.adapter.respondToRequest("t-approve", opened.requestId!, { behavior: "allow" });
     const resolved = await recorder.until((e) => e.type === "request.resolved");

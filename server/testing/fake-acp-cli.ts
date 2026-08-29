@@ -35,7 +35,7 @@
 //
 // Keep this file dependency-free — it runs as a bare `node` subprocess.
 import { spawn } from "node:child_process";
-import { existsSync, writeFileSync } from "node:fs";
+import { appendFileSync, existsSync, writeFileSync } from "node:fs";
 
 const mode = process.env.FAKE_ACP_MODE ?? "happy";
 // opencode-shaped surface: the session carries its own model catalog and the
@@ -79,6 +79,7 @@ const dumpEnv = Object.fromEntries(
     "USERPROFILE",
     "SystemRoot",
     "FAKE_ACP_MODE",
+    "FAKE_ACP_AUTH_METHOD",
     "FAKE_ACP_RPC_DUMP",
     "TEST_POLICY",
     "OPENCODE_API_KEY",
@@ -101,6 +102,9 @@ const dumpEnv = Object.fromEntries(
   ].flatMap((key) => (process.env[key] === undefined ? [] : [[key, process.env[key]]] as const)),
 );
 const dumpState: Record<string, unknown> = { argv, env: dumpEnv };
+if (process.env.FAKE_ACP_SPAWN_LOG && (argv.includes("acp") || argv.includes("agent") || argv.includes("stdio"))) {
+  appendFileSync(process.env.FAKE_ACP_SPAWN_LOG, `${process.pid}\n`);
+}
 if (process.env.FAKE_ACP_DUMP) {
   writeFileSync(process.env.FAKE_ACP_DUMP, JSON.stringify({ argv, env: dumpEnv }, null, 2));
 }
@@ -268,7 +272,10 @@ function handle(msg: any) {
         process.stderr.write("fake-acp: simulated crash before result\n");
         process.exit(3);
       }
-      const authMethods = mode === "no-auth" ? [] : [{ id: "cached_token" }];
+      const advertisedAuthMethod = process.env.FAKE_ACP_AUTH_METHOD;
+      const authMethods = mode === "no-auth"
+        ? []
+        : [{ id: advertisedAuthMethod || "cached_token" }];
       result(msg.id, { protocolVersion: 1, authMethods, _meta: { modelState: { currentModelId: "fake-acp-model" } } });
       break;
     }

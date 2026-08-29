@@ -168,7 +168,7 @@ export const GrokDriver: ProviderDriver<GrokConfig> = {
               emit({ ...base(threadId, turnId), type: "item.completed", itemType: "assistant_text", text });
             }
             if (usage) {
-              emit({ ...base(threadId, turnId), type: "thread.token-usage.updated", ...usage });
+              emit({ ...base(threadId, turnId), type: "thread.token-usage.updated", scope: "turn", ...usage });
             }
             active.delete(threadId);
             emit({ ...base(threadId, turnId), type: "turn.completed", ok: true, stopReason: null, cost: null });

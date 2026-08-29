@@ -184,6 +184,10 @@ export function findCliCandidates(name: string): string[] {
 export interface ResolvedSpawn {
   command: string;
   args: string[];
+  /** Environment assignments made by a parsed wrapper before it launches the
+   * real executable. Keeping them here lets us preserve wrapper semantics
+   * without crossing the no-shell boundary. */
+  env?: Record<string, string>;
 }
 
 /** Split a `cli` string into [command, ...fixedArgs] on unquoted whitespace —
@@ -246,12 +250,23 @@ function nodeExe(near: string): string | null {
   // make a stray node.cmd hide the real node.exe beside it.
   const onPath = whichWin("node.exe");
   if (onPath && extname(onPath).toLowerCase() === ".exe") return onPath;
+  // SAFETY: Node's ProcessVersions type omits Electron's runtime-added key;
+  // reading that optional string is the only operation performed here.
   return (process.versions as Record<string, string | undefined>).electron ? null : process.execPath;
+}
+
+function resolvedWithWrapperEnv(command: string, args: string[], env: Record<string, string>): ResolvedSpawn {
+  const resolved: ResolvedSpawn = { command, args };
+  if (Object.keys(env).length) resolved.env = env;
+  return resolved;
 }
 
 /** npm/pnpm .cmd shims all spell their target as "%dp0%\..." (or
  * "%~dp0\..."). Whatever of those exists on disk is what the shim runs. */
-function parseCmdShim(shim: string): ResolvedSpawn | null {
+function parseCmdShim(shim: string, seen = new Set<string>()): ResolvedSpawn | null {
+  const normalizedShim = shim.toLowerCase();
+  if (seen.has(normalizedShim)) return null;
+  seen.add(normalizedShim);
   let text: string;
   try {
     text = readFileSync(shim, "utf8");
@@ -259,16 +274,55 @@ function parseCmdShim(shim: string): ResolvedSpawn | null {
     return null;
   }
   const dir = dirname(shim);
+  const wrapperEnv: Record<string, string> = {};
+  if (/set\s+"CURSOR_INVOKED_AS=%~nx0"/i.test(text)) {
+    wrapperEnv.CURSOR_INVOKED_AS = basename(shim);
+  }
+
+  // Some Windows installers put a tiny compatibility shim earlier on PATH:
+  //   call "C:\\...\\real-cli.cmd" %*
+  // Resolve only this exact pass-through form. Arguments remain structured;
+  // the batch interpreter is never invoked.
+  const forward = /^\s*(?:call\s+)?"([^"]+\.(?:cmd|bat))"\s+%\*\s*$/im.exec(text);
+  if (forward) {
+    const target = forward[1].replace(/%([^%]+)%/g, (_match, name: string) => process.env[name] ?? `%${name}%`);
+    if (isFile(target)) {
+      const nested = parseCmdShim(target, seen);
+      if (nested) return { ...nested, env: { ...wrapperEnv, ...nested.env } };
+    }
+  }
+
+  // Cursor's native Windows wrapper delegates to a PowerShell script after
+  // setting CURSOR_INVOKED_AS. Parse that narrow, fixed launcher shape so
+  // execFile can run it safely and the CLI sees the same credential scope as
+  // when the user invokes cursor-agent.cmd in a terminal.
+  const psLine = text
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .find((line) => /powershell\.exe\b/i.test(line) && /\s-File\s+/i.test(line) && /\s%\*\s*$/i.test(line));
+  if (psLine) {
+    const expanded = psLine
+      .replace(/%~?dp0/gi, `${dir}\\`)
+      .replace(/%SCRIPT_DIR%/gi, dir)
+      .replace(/%([^%]+)%/g, (_match, name: string) => process.env[name] ?? `%${name}%`)
+      .replace(/\s+%\*\s*$/i, "");
+    const tokens = splitCliString(expanded);
+    const [command, ...fixed] = tokens;
+    if (command && /powershell\.exe$/i.test(command) && isFile(command)) {
+      return resolvedWithWrapperEnv(command, fixed, wrapperEnv);
+    }
+  }
+
   const targets = [...text.matchAll(/"%~?dp0%?\\?([^"]+)"/g)]
     .map((m) => join(dir, m[1]))
     .filter((p) => isFile(p) && basename(p).toLowerCase() !== "node.exe");
   const script = targets.find((p) => /\.[cm]?js$/i.test(p));
   if (script) {
     const node = nodeExe(dir);
-    if (node) return { command: node, args: [script] };
+    if (node) return resolvedWithWrapperEnv(node, [script], wrapperEnv);
   }
   const exe = targets.find((p) => extname(p).toLowerCase() === ".exe");
-  return exe ? { command: exe, args: [] } : null;
+  return exe ? resolvedWithWrapperEnv(exe, [], wrapperEnv) : null;
 }
 
 /** `#!/usr/bin/env node` → `node <script>`. Only node: nothing else has a
@@ -310,7 +364,7 @@ function resolveWord(cli: string, args: string[]): ResolvedSpawn {
   const ext = extname(file).toLowerCase();
   if (ext === ".cmd" || ext === ".bat") {
     const direct = parseCmdShim(file);
-    return direct ? { command: direct.command, args: [...direct.args, ...args] } : { command: file, args };
+    return direct ? { ...direct, args: [...direct.args, ...args] } : { command: file, args };
   }
   if (ext === ".exe" || ext === ".com") return { command: file, args };
   const viaNode = parseNodeShebang(file);

@@ -501,6 +501,7 @@ export const PiDriver: ProviderDriver<PiConfig> = {
                 requestType: isQuestion ? "question" : "permission",
                 tool: String(evt.title ?? "pi"),
                 summary: String(evt.title ?? "pi wants confirmation"),
+                action: { fidelity: "summary-only" },
               });
               pending.set(reqId, (decision) => {
                 if (decision.behavior === "deny") send({ type: "extension_ui_response", id: reqId, cancelled: true });

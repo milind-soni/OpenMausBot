@@ -91,4 +91,185 @@ describe("connector MCP bridge", () => {
     expect(upstreamAuthorization).toBe("Bearer upstream-secret");
     expect(JSON.stringify(reply)).not.toContain("upstream-secret");
   });
+
+  it("blocks connector writes for a read-only Capture bot before upstream", async () => {
+    let upstreamCalls = 0;
+    const upstream = await listen((_request, response) => {
+      upstreamCalls += 1;
+      response.writeHead(500);
+      response.end();
+    });
+    const lines = start({
+      OMB_CONNECTOR_UPSTREAM_URL: upstream,
+      OMB_CONNECTOR_POLICY: "read-only",
+    });
+    child!.stdin.write(`${JSON.stringify({
+      jsonrpc: "2.0",
+      id: 3,
+      method: "tools/call",
+      params: { name: "GMAIL_SEND_EMAIL", arguments: { to: "x@example.com" } },
+    })}\n`);
+
+    const reply = await nextJson(lines);
+    expect(reply.result.isError).toBe(true);
+    expect(reply.result.content[0].text).toMatch(/blocked non-read tool/i);
+    expect(upstreamCalls).toBe(0);
+  });
+
+  it("filters non-read tools from a read-only Capture bot's tool list", async () => {
+    const upstream = await listen((_request, response) => {
+      response.writeHead(200, { "content-type": "application/json" });
+      response.end(JSON.stringify({
+        jsonrpc: "2.0",
+        id: 4,
+        result: {
+          tools: [
+            { name: "GMAIL_LIST_EMAILS" },
+            { name: "GOOGLECALENDAR_GET_EVENTS" },
+            { name: "COMPOSIO_MULTI_EXECUTE_TOOL" },
+            { name: "GMAIL_SEND_EMAIL" },
+            { name: "GOOGLEDRIVE_DELETE_FILE" },
+            { name: "MYSTERY_ACTION" },
+          ],
+        },
+      }));
+    });
+    const lines = start({
+      OMB_CONNECTOR_UPSTREAM_URL: upstream,
+      OMB_CONNECTOR_POLICY: "read-only",
+    });
+    child!.stdin.write(`${JSON.stringify({ jsonrpc: "2.0", id: 4, method: "tools/list", params: {} })}\n`);
+
+    const reply = await nextJson(lines);
+    expect(reply.result.tools.map((tool: { name: string }) => tool.name)).toEqual([
+      "GMAIL_LIST_EMAILS",
+      "GOOGLECALENDAR_GET_EVENTS",
+      "COMPOSIO_MULTI_EXECUTE_TOOL",
+    ]);
+  });
+
+  it("allows the guarded Composio executor only when every nested tool is read-only", async () => {
+    let upstreamCalls = 0;
+    const upstream = await listen((_request, response) => {
+      upstreamCalls += 1;
+      response.writeHead(200, { "content-type": "application/json" });
+      response.end(JSON.stringify({ jsonrpc: "2.0", id: 5, result: { content: [] } }));
+    });
+    const lines = start({
+      OMB_CONNECTOR_UPSTREAM_URL: upstream,
+      OMB_CONNECTOR_POLICY: "read-only",
+    });
+    child!.stdin.write(`${JSON.stringify({
+      jsonrpc: "2.0",
+      id: 5,
+      method: "tools/call",
+      params: {
+        name: "COMPOSIO_MULTI_EXECUTE_TOOL",
+        arguments: {
+          tools: [
+            { tool_slug: "GMAIL_FETCH_EMAILS", arguments: {} },
+            { tool_slug: "GOOGLECALENDAR_EVENTS_LIST", arguments: {} },
+          ],
+          sync_response_to_workbench: false,
+        },
+      },
+    })}\n`);
+
+    const reply = await nextJson(lines);
+    expect(reply.id).toBe(5);
+    expect(reply.result.content).toEqual([]);
+    expect(upstreamCalls).toBe(1);
+  });
+
+  it("blocks a guarded Composio batch when any nested tool writes", async () => {
+    let upstreamCalls = 0;
+    const upstream = await listen((_request, response) => {
+      upstreamCalls += 1;
+      response.writeHead(500);
+      response.end();
+    });
+    const lines = start({
+      OMB_CONNECTOR_UPSTREAM_URL: upstream,
+      OMB_CONNECTOR_POLICY: "read-only",
+    });
+    child!.stdin.write(`${JSON.stringify({
+      jsonrpc: "2.0",
+      id: 6,
+      method: "tools/call",
+      params: {
+        name: "COMPOSIO_MULTI_EXECUTE_TOOL",
+        arguments: {
+          tools: [
+            { tool_slug: "GMAIL_FETCH_EMAILS", arguments: {} },
+            { tool_slug: "GMAIL_SEND_EMAIL", arguments: { to: "x@example.com" } },
+          ],
+          sync_response_to_workbench: false,
+        },
+      },
+    })}\n`);
+
+    const reply = await nextJson(lines);
+    expect(reply.result.isError).toBe(true);
+    expect(reply.result.content[0].text).toMatch(/blocked non-read tool/i);
+    expect(upstreamCalls).toBe(0);
+  });
+
+  it("preflights an exact Gmail draft before relaying it", async () => {
+    let policyBody: any = null;
+    let resultBody: { proposalId: string; workId: string } | null = null;
+    let upstreamCalls = 0;
+    const harness = await listen((request, response) => {
+      if (request.url === "/upstream") {
+        upstreamCalls += 1;
+        response.writeHead(200, { "content-type": "application/json" });
+        response.end(JSON.stringify({ jsonrpc: "2.0", id: 8, result: { content: [{ type: "text", text: "draft-1" }] } }));
+        return;
+      }
+      if (request.url === "/api/internal/action-policy/result") {
+        let body = "";
+        request.on("data", (chunk) => { body += chunk; });
+        request.on("end", () => {
+          resultBody = JSON.parse(body);
+          response.writeHead(200, { "content-type": "application/json" });
+          response.end(JSON.stringify({ ok: true }));
+        });
+        return;
+      }
+      let body = "";
+      request.on("data", (chunk) => { body += chunk; });
+      request.on("end", () => {
+        policyBody = JSON.parse(body);
+        response.writeHead(200, { "content-type": "application/json" });
+        response.end(JSON.stringify({ decision: "allow", proposalId: "proposal-1", workId: "work-1" }));
+      });
+    });
+    const lines = start({
+      OMB_HARNESS_URL: harness,
+      OMB_CONNECTOR_UPSTREAM_URL: `${harness}/upstream`,
+      OMB_COMMS_TOKEN: "bridge-secret",
+      OMB_BOT_ID: "bot-1",
+      OMB_THREAD_ID: "thread-1",
+    });
+    child!.stdin.write(`${JSON.stringify({
+      jsonrpc: "2.0",
+      id: 8,
+      method: "tools/call",
+      params: {
+        name: "COMPOSIO_MULTI_EXECUTE_TOOL",
+        arguments: { tools: [{ tool_slug: "GMAIL_CREATE_EMAIL_DRAFT", account: "ca_personal", arguments: { body: "Hi" } }] },
+      },
+    })}\n`);
+
+    const reply = await nextJson(lines);
+    expect(reply.result.content[0].text).toBe("draft-1");
+    expect(upstreamCalls).toBe(1);
+    expect(policyBody).toMatchObject({
+      botId: "bot-1",
+      threadId: "thread-1",
+      name: "COMPOSIO_MULTI_EXECUTE_TOOL",
+      identity: "Personal",
+      provider: "gmail",
+    });
+    expect(resultBody).toMatchObject({ proposalId: "proposal-1", workId: "work-1" });
+  });
 });

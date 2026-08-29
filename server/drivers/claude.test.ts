@@ -86,10 +86,10 @@ describe("ClaudeDriver.decodeConfig", () => {
     expect(() => ClaudeDriver.decodeConfig({ permissionMode: "yolo" })).toThrow(/permissionMode/);
   });
 
-  it.skipIf(process.platform !== "win32")("names permission pipes per harness process", () => {
-    expect(permissionSocketPath("thread-abc")).toMatch(
-      new RegExp(`^\\\\\\\\\\.\\\\pipe\\\\openmausbot-perm-${process.pid}-thre[0-9a-f]{4}$`),
-    );
+  it.skipIf(process.platform !== "win32")("names permission pipes stably across server restarts", () => {
+    const path = permissionSocketPath("thread-abc");
+    expect(path).toMatch(/openmausbot-perm-[0-9a-f]{12}-thre[0-9a-f]{4}$/);
+    expect(path).toBe(permissionSocketPath("thread-abc"));
   });
 
   it("keeps threads whose ids share a prefix on distinct sockets", () => {
@@ -707,13 +707,15 @@ describe("ClaudeDriver turns (fake CLI)", () => {
       conn.on("connect", resolve);
       conn.on("error", reject);
     });
-    conn.write(JSON.stringify({ t: "ask", id: "ask-1", tool: "Bash", input: { command: "rm -rf scratch" } }) + "\n");
+    const command = `echo ${"x".repeat(240)}; rm -rf scratch`;
+    conn.write(JSON.stringify({ t: "ask", id: "ask-1", tool: "Bash", input: { command } }) + "\n");
 
     const opened = await recorder.until((e) => e.type === "request.opened");
     expect(opened).toMatchObject({
       requestType: "permission",
       tool: "Bash",
-      summary: "rm -rf scratch",
+      summary: command,
+      action: { fidelity: "exact-command", command },
       requestId: "ask-1",
     });
     // a plain CLI tool never carries the desktop-control approval scope,

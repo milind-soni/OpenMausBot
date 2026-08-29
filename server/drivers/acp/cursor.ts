@@ -8,6 +8,8 @@
 // `cursor_login`, and takes `--force` / `--model` as global flags before the
 // `acp` subcommand. `session/set_model` is attempted when the CLI supports it;
 // a missing method falls back to the argv `--model` pin.
+import { createHash } from "node:crypto";
+
 import type { ModelCatalog, ProviderErrorCode } from "../../contracts.ts";
 import { execCli } from "../../procs.ts";
 import { createAcpDriver, type AcpSupport } from "./core.ts";
@@ -294,6 +296,40 @@ export async function probeCursorAuth(
   return false;
 }
 
+type CursorAuthProbe = (
+  cli: string,
+  env: Record<string, string | undefined>,
+) => Promise<boolean>;
+
+/** Cursor rotates its OAuth refresh token during `status`. Concurrent status
+ * processes can race that rotation and invalidate the durable CLI login. Keep
+ * one probe in flight per credential scope so simultaneous bot turns share
+ * the same answer without caching auth across later state changes. */
+export function createCursorAuthGate(probe: CursorAuthProbe): CursorAuthProbe {
+  const inFlight = new Map<string, Promise<boolean>>();
+
+  return (cli, env) => {
+    const scope = createHash("sha256")
+      .update(JSON.stringify([
+        cli,
+        env.HOME ?? "",
+        env.USERPROFILE ?? "",
+        env.CURSOR_API_KEY ?? "",
+        env.CURSOR_AUTH_TOKEN ?? "",
+      ]))
+      .digest("hex");
+    const existing = inFlight.get(scope);
+    if (existing) return existing;
+
+    const pending = probe(cli, env)
+      .finally(() => {
+        if (inFlight.get(scope) === pending) inFlight.delete(scope);
+      });
+    inFlight.set(scope, pending);
+    return pending;
+  };
+}
+
 export async function fetchCursorModels(
   cli: string,
   env: Record<string, string | undefined>,
@@ -329,7 +365,15 @@ export function classifyCursorError(error: unknown): ProviderErrorCode | undefin
   return undefined;
 }
 
-const support = (run: typeof execCli): AcpSupport => ({
+export function cursorKeepAliveMs(environment: Readonly<Record<string, string | undefined>> = process.env): number {
+  const configured = Number(environment.OMB_CURSOR_KEEP_ALIVE_MINUTES);
+  const minutes = Number.isFinite(configured) && configured > 0 ? configured : 30;
+  return Math.trunc(Math.max(5, Math.min(120, minutes)) * 60_000);
+}
+
+const support = (run: typeof execCli): AcpSupport => {
+  const authGate = createCursorAuthGate((cli, env) => probeCursorAuth(cli, env, run));
+  return {
   driverKind: "cursorAgent",
   displayName: "Cursor",
   models: STATIC_CURSOR_MODELS,
@@ -337,6 +381,11 @@ const support = (run: typeof execCli): AcpSupport => ({
   // Cursor's compatibility alias is unambiguous and ships with the same CLI.
   defaultCli: "cursor-agent",
   nativeSource: "cursor.acp",
+  // Cursor's ACP handshake costs roughly 2.5 seconds on Windows. Keep a
+  // compatible successful session warm for normal back-and-forth chat; the
+  // core discards it on cancellation, failure, model/tool/cwd changes, idle
+  // expiry, or provider exit.
+  keepAliveMs: cursorKeepAliveMs(),
   loginNote: "Cursor CLI is not signed in — run `cursor-agent login` in a terminal, or set CURSOR_API_KEY",
 
   install: {
@@ -361,12 +410,15 @@ const support = (run: typeof execCli): AcpSupport => ({
 
   resolveModels: (environment, config) => fetchCursorModels(config.cli || "cursor-agent", environment, run),
 
-  // Prefer the advertised ACP method. An already-signed-in CLI should accept
-  // cursor_login without a browser; a missing method rides the ambient login
-  // (CURSOR_API_KEY / `cursor-agent login`) instead of failing the turn.
-  pickAuthMethod: (methods) => (methods.some((m) => m.id === "cursor_login") ? "cursor_login" : null),
+  // Cursor advertises `cursor_login` even when the CLI already has a durable
+  // ambient login. Calling it for every fresh ACP process opens an interactive
+  // browser challenge, which is especially destructive for scheduled runs.
+  // Background turns must never initiate login: preflight the durable CLI
+  // state, then ride it without an ACP authenticate call.
+  pickAuthMethod: () => null,
   authFailure: "continue",
-  isAuthenticated: (env, config) => probeCursorAuth(config.cli || "cursor-agent", env, run),
+  isAuthenticated: (env, config) => authGate(config.cli || "cursor-agent", env),
+  requireAuthenticationBeforeSpawn: true,
   classifyError: classifyCursorError,
 
   async configureSession({ request, sessionId, turn, sessionModels }) {
@@ -389,8 +441,9 @@ const support = (run: typeof execCli): AcpSupport => ({
     }
   },
 
-  buildPromptText: (turn) => (turn.system ? `${turn.system}\n\n${turn.text}` : turn.text),
-});
+    buildPromptText: (turn) => (turn.system ? `${turn.system}\n\n${turn.text}` : turn.text),
+  };
+};
 
 export function createCursorAgentDriver(run: typeof execCli = execCli) {
   return createAcpDriver(support(run));

@@ -218,11 +218,11 @@ function systemEndedReply(kind: Ask["kind"]): { behavior: AskBehavior; message: 
 /** One human-readable line for an ask — what the card subtitle shows. */
 function askSummary(ask: Ask): string {
   const input = ask.input ?? {};
-  if (typeof input.question === "string") return input.question.slice(0, 300);
-  if (typeof input.command === "string") return input.command.slice(0, 200);
-  if (typeof input.url === "string") return input.url.slice(0, 200);
+  if (typeof input.question === "string") return input.question;
+  if (typeof input.command === "string") return input.command;
+  if (typeof input.url === "string") return input.url;
   const text = JSON.stringify(input);
-  return text === "{}" ? (ask.tool ?? "tool") : text.slice(0, 200);
+  return text === "{}" ? (ask.tool ?? "tool") : text;
 }
 
 export function permissionSocketPath(threadId: string) {
@@ -686,6 +686,9 @@ export const ClaudeDriver: ProviderDriver<ClaudeConfig> = {
               requestType: ask.kind,
               tool: ask.tool,
               summary: askSummary(ask),
+              action: typeof ask.input?.command === "string"
+                ? { fidelity: "exact-command", command: ask.input.command }
+                : { fidelity: "summary-only" },
               approvalScope:
                 typeof ask.tool === "string" && controlsHost && ask.tool.startsWith("mcp__computer")
                   ? "local-computer"
@@ -814,6 +817,7 @@ export const ClaudeDriver: ProviderDriver<ClaudeConfig> = {
               emit({
                 ...base(threadId, currentTurnId()),
                 type: "thread.token-usage.updated",
+                scope: "turn",
                 input: (msg.usage.input_tokens || 0) + (msg.usage.cache_read_input_tokens || 0),
                 output: msg.usage.output_tokens || 0,
               });

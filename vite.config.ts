@@ -13,6 +13,7 @@ export default defineConfig({
       "src/**/*.test.ts",
       "companion/**/*.test.ts",
       "scripts/**/*.test.mjs",
+      "benchmarks/**/*.test.ts",
     ],
     setupFiles: ["server/testing/setup.ts"],
     // the suite spawns fake provider CLIs and a real harness server;
@@ -34,7 +35,13 @@ export default defineConfig({
     // packager output lands inside the repo — its HTML files must never
     // trigger dev full-page reloads
     watch: {
-      ignored: ["**/release/**", "**/build/**", "**/dist/**", "**/electron/resources/**"],
+      ignored: [
+        "**/release/**",
+        "**/build/**",
+        "**/dist/**",
+        "**/dist-*/**",
+        "**/electron/resources/**",
+      ],
     },
     // the harness server owns every provider process; the app only ever
     // talks to /api — clients hold no transports

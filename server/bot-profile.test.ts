@@ -22,13 +22,18 @@ describe("parseBotProfilePatch (strict — the paired boundary)", () => {
 
   it("accepts the full identity surface", () => {
     const result = parseBotProfilePatch(
-      { name: "Mira", title: "Lead", description: "plans", notifications: true, voice: "vx", speakReplies: false },
+      { name: "Mira", title: "Lead", description: "sharp and warm", instructions: "Verify before declaring done.", notifications: true, reportingMode: "actionable", voice: "vx", speakReplies: false },
       true,
     );
     expect(result).toEqual({
       ok: true,
-      patch: { name: "Mira", title: "Lead", description: "plans", notifications: true, voice: "vx", speakReplies: false },
+      patch: { name: "Mira", title: "Lead", description: "sharp and warm", instructions: "Verify before declaring done.", notifications: true, reportingMode: "actionable", voice: "vx", speakReplies: false },
     });
+  });
+
+  it("rejects an unknown reporting mode", () => {
+    const result = parseBotProfilePatch({ reportingMode: "nag constantly" } as never, true);
+    expect(result.ok).toBe(false);
   });
 });
 
@@ -41,6 +46,14 @@ describe("parseBotProfilePatch (both modes)", () => {
   it("rejects a blank or oversized name", () => {
     expect(parseBotProfilePatch({ name: "   " }, true).ok).toBe(false);
     expect(parseBotProfilePatch({ name: "x".repeat(101) }, true).ok).toBe(false);
+  });
+
+  it("keeps detailed instructions separate and bounded", () => {
+    expect(parseBotProfilePatch({ instructions: "Evidence first." }, true)).toEqual({
+      ok: true,
+      patch: { instructions: "Evidence first." },
+    });
+    expect(parseBotProfilePatch({ instructions: "x".repeat(16_001) }, true).ok).toBe(false);
   });
 
   it("only stored-attachment avatar URLs pass; clears normalize to undefined", () => {
@@ -56,7 +69,7 @@ describe("parseBotProfilePatch (both modes)", () => {
   it("maps an avatarCrop issue to the readable message", () => {
     expect(parseBotProfilePatch({ avatarCrop: "hexagon" } as never, true)).toEqual({
       ok: false,
-      error: "avatarCrop must be mascot, circle, rounded, or square",
+      error: "avatarCrop must be glyph, mascot, circle, rounded, or square",
     });
   });
 });

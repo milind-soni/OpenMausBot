@@ -8,8 +8,8 @@ import {
 } from "../shared/bot-avatar.ts";
 
 describe("bot avatar profile schema", () => {
-  it("accepts the four supported display shapes", () => {
-    for (const crop of ["mascot", "circle", "rounded", "square"]) {
+  it("accepts the five supported display shapes", () => {
+    for (const crop of ["glyph", "mascot", "circle", "rounded", "square"]) {
       expect(botAvatarCropSchema.parse(crop)).toBe(crop);
     }
     expect(botAvatarCropSchema.safeParse("hexagon").success).toBe(false);
@@ -38,6 +38,6 @@ describe("bot avatar profile schema", () => {
 
   it("falls back safely for malformed persisted data", () => {
     expect(botAvatarProfile({ avatarUrl: "https://example.test/pixel.png", avatarCrop: "round" }))
-      .toEqual({ avatarCrop: "mascot" });
+      .toEqual({ avatarCrop: "glyph" });
   });
 });

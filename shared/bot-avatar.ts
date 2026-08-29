@@ -1,7 +1,7 @@
 import { z } from "zod";
 
-/** The mascot is a first-class avatar choice; the other values crop an image. */
-export const BOT_AVATAR_CROPS = ["mascot", "circle", "rounded", "square"] as const;
+/** Glyph and mascot are first-class avatar choices; the other values crop an image. */
+export const BOT_AVATAR_CROPS = ["glyph", "mascot", "circle", "rounded", "square"] as const;
 export const botAvatarCropSchema = z.enum(BOT_AVATAR_CROPS);
 export type BotAvatarCrop = z.infer<typeof botAvatarCropSchema>;
 
@@ -38,7 +38,7 @@ export interface BotAvatarProfile {
 
 export function botAvatarProfile(value: BotAvatarProfileInput): BotAvatarProfile {
   const profile: BotAvatarProfile = {
-    avatarCrop: botAvatarCropSchema.safeParse(value.avatarCrop).data ?? "mascot",
+    avatarCrop: botAvatarCropSchema.safeParse(value.avatarCrop).data ?? "glyph",
   };
   const url = botAvatarUrlSchema.safeParse(value.avatarUrl);
   if (url.success) profile.avatarUrl = url.data;

@@ -589,6 +589,7 @@ export const AntigravityDriver: ProviderDriver<AntigravityConfig> = {
               emit({
                 ...base(threadId, turnId),
                 type: "thread.token-usage.updated",
+                scope: "turn",
                 input: (payload.usage.input_tokens || 0) + (payload.usage.cache_read_tokens || 0),
                 output: payload.usage.output_tokens || 0,
               });
@@ -606,6 +607,7 @@ export const AntigravityDriver: ProviderDriver<AntigravityConfig> = {
               emit({
                 ...base(threadId, turnId),
                 type: "thread.token-usage.updated",
+                scope: "turn",
                 input: (payload.usage.input_tokens || 0) + (payload.usage.cache_read_tokens || 0),
                 output: payload.usage.output_tokens || 0,
               });

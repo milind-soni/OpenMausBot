@@ -15,6 +15,7 @@ import {
   type ExecFileOptions,
   type SpawnOptions,
 } from "node:child_process";
+import { createHash } from "node:crypto";
 import type { Readable, Writable } from "node:stream";
 import { join } from "node:path";
 import { resolveCliSpawn, type ResolvedSpawn } from "./env-path.ts";
@@ -29,12 +30,20 @@ export function spawnCli(
   opts: SpawnOptions,
 ): ChildProcessByStdio<Writable, Readable, Readable> {
   const resolved = resolveCli(cli, args);
-  const child = spawn(resolved.command, resolved.args, {
+  const spawnOptions: SpawnOptions = {
     ...opts,
     // posix: own process group so kill(-pid) reaps child MCP servers;
     // win32: taskkill /T does the reaping instead (see killCliTree)
     ...(process.platform === "win32" ? { windowsHide: true } : { detached: true }),
-  }) as ChildProcessByStdio<Writable, Readable, Readable>; // callers always pipe all three
+  };
+  if (resolved.env) spawnOptions.env = { ...(opts.env ?? process.env), ...resolved.env };
+  // SAFETY: every spawnCli caller supplies piped stdin/stdout/stderr, so the
+  // returned child has the three concrete stream types declared here.
+  const child = spawn(resolved.command, resolved.args, spawnOptions) as ChildProcessByStdio<
+    Writable,
+    Readable,
+    Readable
+  >;
 
   // A write to a dying child's stdin fails differently per platform, and one
   // of the ways is fatal. On POSIX the kill is synchronous, the stream is
@@ -58,8 +67,14 @@ export function execCli(
   cb: (err: Error | null, stdout: string, stderr?: string) => void,
 ): void {
   const resolved = resolveCli(cli, args);
-  execFile(resolved.command, resolved.args, { ...opts, windowsHide: true, encoding: "utf8" }, (err, stdout, stderr) =>
-    cb(err, stdout, stderr),
+  const execOptions: ExecFileOptions = {
+    ...opts,
+    windowsHide: true,
+    encoding: "utf8",
+  };
+  if (resolved.env) execOptions.env = { ...(opts.env ?? process.env), ...resolved.env };
+  execFile(resolved.command, resolved.args, execOptions, (err, stdout, stderr) =>
+    cb(err, String(stdout ?? ""), String(stderr ?? "")),
   );
 }
 
@@ -113,8 +128,11 @@ export function killCliTree(child: ChildProcess): void {
  * (Node can't listen on a filesystem socket path there — EACCES). */
 export function brokerSocketPath(dataDir: string, tag: string): string {
   return process.platform === "win32"
-    // Named pipes share a global namespace; DATA_DIR cannot isolate two
-    // concurrent app instances the way a POSIX socket directory does.
-    ? `\\\\.\\pipe\\openmausbot-perm-${process.pid}-${tag}`
+    // Named pipes share a global namespace. The application already enforces
+    // one instance per DATA_DIR, so use that durable identity instead of the
+    // server PID: a proxy can then reconnect to a replacement server after a
+    // packaged app restart. The short digest keeps the pipe name well below
+    // Windows' practical named-pipe length limits without exposing the path.
+    ? `\\\\.\\pipe\\openmausbot-perm-${createHash("sha256").update(dataDir).digest("hex").slice(0, 12)}-${tag}`
     : join(dataDir, `perm-${tag}.sock`);
 }

@@ -6,7 +6,7 @@
 //
 // The fake CLI is a shebang script Windows cannot exec directly —
 // resolveCliSpawn turns it into `node <script>`, so these run everywhere.
-import { chmodSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -15,7 +15,7 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { ensureDirs } from "../../config.ts";
 import type { ProviderInstance } from "../../contracts.ts";
 import { recordEvents, type EventRecorder } from "../../testing/events.ts";
-import { createAcpDriver, skipSubscriptionAuthForLocalInject, type AcpSupport } from "./core.ts";
+import { createAcpDriver, extractAcpUsage, skipSubscriptionAuthForLocalInject, type AcpSupport } from "./core.ts";
 import { GrokAgentDriver } from "./grok.ts";
 import { GeminiAgentDriver } from "./gemini.ts";
 import { KimiAgentDriver } from "./kimi.ts";
@@ -79,6 +79,21 @@ describe("skipSubscriptionAuthForLocalInject", () => {
     expect(skipSubscriptionAuthForLocalInject("unsloth::orcarouter/Qwen3.8-27B-Uncensored-GGUF")).toBe(true);
     expect(skipSubscriptionAuthForLocalInject("grok-4.6")).toBe(false);
     expect(skipSubscriptionAuthForLocalInject(undefined)).toBe(false);
+  });
+});
+
+describe("extractAcpUsage", () => {
+  it("accepts common provider usage shapes and nested metadata", () => {
+    expect(extractAcpUsage({ usage: { inputTokens: 12, outputTokens: 3 } })).toEqual({ input: 12, output: 3 });
+    expect(extractAcpUsage({ _meta: { usage: { input_tokens: 20, output_tokens: 4 } } })).toEqual({ input: 20, output: 4 });
+    expect(extractAcpUsage({ usage: { inputTokens: 12 }, _meta: { inputTokens: 30, outputTokens: 5 } })).toEqual({ input: 30, output: 5 });
+    expect(extractAcpUsage({ inputTokens: 7, outputTokens: 2 })).toEqual({ input: 7, output: 2 });
+  });
+
+  it("rejects missing or partial counts so usage stays unavailable", () => {
+    expect(extractAcpUsage({ usage: { inputTokens: 12 } })).toBeNull();
+    expect(extractAcpUsage({ usage: { inputTokens: -1, outputTokens: 3 } })).toBeNull();
+    expect(extractAcpUsage(null)).toBeNull();
   });
 });
 
@@ -209,6 +224,8 @@ describe("ACP turns (fake CLI)", () => {
 
   afterEach(async () => {
     delete process.env.FAKE_ACP_MODE;
+    delete process.env.FAKE_ACP_AUTH_METHOD;
+    delete process.env.FAKE_ACP_AUTH;
     delete process.env.FAKE_ACP_DUMP;
     delete process.env.XAI_API_KEY;
     delete process.env.OPENCODE_API_KEY;
@@ -219,6 +236,8 @@ describe("ACP turns (fake CLI)", () => {
     delete process.env.FAKE_ACP_MODELS;
     delete process.env.FAKE_ACP_MODEL_STICKS;
     delete process.env.FAKE_ACP_USAGE_ROOT;
+    delete process.env.FAKE_ACP_SPAWN_LOG;
+    delete process.env.FAKE_ACP_RPC_DUMP;
     recorder?.stop();
     await instance?.dispose();
     await removeTempDir(scratch);
@@ -241,6 +260,7 @@ describe("ACP turns (fake CLI)", () => {
       "turn.completed",
     ]);
     expect(recorder.events.every((e) => e.turnId === turnId && e.provider === "grokAgent")).toBe(true);
+    expect(recorder.events.find((e) => e.type === "session.started")).toMatchObject({ reused: false });
     const usage = recorder.events.find((e) => e.type === "thread.token-usage.updated")!;
     expect(usage).toMatchObject({ input: 10, output: 5 });
     const text = recorder.events.find((e) => e.type === "item.completed" && (e as any).itemType === "assistant_text")!;
@@ -248,6 +268,173 @@ describe("ACP turns (fake CLI)", () => {
     const done = recorder.events.at(-1)!;
     expect(done).toMatchObject({ type: "turn.completed", ok: true });
     expect(instance.adapter.hasSession("t-happy")).toBe(false);
+  });
+
+  it("keeps Cursor's ACP process warm across sequential turns on one thread", async () => {
+    const spawnLog = join(scratch, "cursor-spawns.txt");
+    process.env.FAKE_ACP_SPAWN_LOG = spawnLog;
+    await create(CursorAgentDriver);
+
+    await instance.adapter.sendTurn({ threadId: "t-cursor-warm", text: "first", model: "auto" });
+    await recorder.until((event) => event.type === "turn.completed");
+    await instance.adapter.sendTurn({
+      threadId: "t-cursor-warm",
+      text: "second",
+      model: "auto",
+      resumeCursor: "fake-acp-session",
+    });
+    await recorder.until((event) => event.type === "turn.completed" && event.turnId !== recorder.events[0]?.turnId);
+
+    expect(readFileSync(spawnLog, "utf8").trim().split(/\r?\n/)).toHaveLength(1);
+    expect(recorder.events.filter((event) => event.type === "turn.completed")).toHaveLength(2);
+    expect(recorder.events.filter((event) => event.type === "session.started").at(-1)).toMatchObject({ reused: true });
+  });
+
+  it("does not launch Cursor's browser login for an already-authenticated fresh session", async () => {
+    const rpcLog = join(scratch, "cursor-auth-rpc.json");
+    process.env.FAKE_ACP_AUTH_METHOD = "cursor_login";
+    process.env.FAKE_ACP_RPC_DUMP = rpcLog;
+    await create(CursorAgentDriver);
+
+    const started = await instance.adapter.sendTurn({
+      threadId: "t-cursor-already-signed-in",
+      text: "capture changed data",
+      model: "auto",
+    });
+    await recorder.until((event) => event.type === "turn.completed" && event.turnId === started.turnId);
+
+    expect(JSON.parse(readFileSync(rpcLog, "utf8"))).not.toContain("authenticate");
+  });
+
+  it("fails a signed-out Cursor turn before ACP can launch a browser login", async () => {
+    const spawnLog = join(scratch, "cursor-signed-out-spawns.txt");
+    process.env.FAKE_ACP_AUTH = "0";
+    process.env.FAKE_ACP_AUTH_METHOD = "cursor_login";
+    process.env.FAKE_ACP_SPAWN_LOG = spawnLog;
+    await create(CursorAgentDriver);
+
+    const started = await instance.adapter.sendTurn({
+      threadId: "t-cursor-signed-out",
+      text: "capture changed data",
+      model: "auto",
+    });
+    const done = await recorder.until((event) => event.type === "turn.completed" && event.turnId === started.turnId);
+
+    expect(done).toMatchObject({ ok: false, stopReason: "auth_required" });
+    expect(existsSync(spawnLog)).toBe(false);
+  });
+
+  it("prewarms Cursor without a model prompt, then reuses that exact process", async () => {
+    const spawnLog = join(scratch, "cursor-prewarm-spawns.txt");
+    const rpcLog = join(scratch, "cursor-prewarm-rpc.json");
+    process.env.FAKE_ACP_SPAWN_LOG = spawnLog;
+    process.env.FAKE_ACP_RPC_DUMP = rpcLog;
+    await create(CursorAgentDriver);
+    const prewarmSession = instance.adapter.prewarmSession;
+    expect(prewarmSession).toBeTypeOf("function");
+    if (!prewarmSession) throw new Error("Cursor prewarm is unavailable");
+
+    const prewarmed = await prewarmSession({ threadId: "t-cursor-prewarm", text: "", model: "auto" });
+    expect(prewarmed).toMatchObject({ sessionId: "fake-acp-session", status: "warmed" });
+    expect(recorder.events).toEqual([]);
+    expect(JSON.parse(readFileSync(rpcLog, "utf8"))).not.toContain("session/prompt");
+
+    await instance.adapter.sendTurn({
+      threadId: "t-cursor-prewarm",
+      text: "real user turn",
+      model: "auto",
+      resumeCursor: prewarmed.sessionId,
+    });
+    await recorder.until((event) => event.type === "turn.completed");
+
+    expect(readFileSync(spawnLog, "utf8").trim().split(/\r?\n/)).toHaveLength(1);
+    expect(recorder.events.find((event) => event.type === "session.started")).toMatchObject({ reused: true });
+    expect(JSON.parse(readFileSync(rpcLog, "utf8")).filter((method: string) => method === "session/prompt")).toHaveLength(1);
+  });
+
+  it("starts a fresh Cursor process when the selected model changes", async () => {
+    const spawnLog = join(scratch, "cursor-model-spawns.txt");
+    process.env.FAKE_ACP_SPAWN_LOG = spawnLog;
+    await create(CursorAgentDriver);
+
+    const first = await instance.adapter.sendTurn({ threadId: "t-cursor-model", text: "first", model: "auto" });
+    await recorder.until((event) => event.type === "turn.completed" && event.turnId === first.turnId);
+    const second = await instance.adapter.sendTurn({
+      threadId: "t-cursor-model",
+      text: "second",
+      model: "composer-2.5",
+      resumeCursor: "fake-acp-session",
+    });
+    await recorder.until((event) => event.type === "turn.completed" && event.turnId === second.turnId);
+
+    expect(readFileSync(spawnLog, "utf8").trim().split(/\r?\n/)).toHaveLength(2);
+  });
+
+  it("discards a warm Cursor process when stopAll is requested", async () => {
+    const spawnLog = join(scratch, "cursor-stop-spawns.txt");
+    process.env.FAKE_ACP_SPAWN_LOG = spawnLog;
+    await create(CursorAgentDriver);
+
+    const first = await instance.adapter.sendTurn({ threadId: "t-cursor-stop", text: "first", model: "auto" });
+    await recorder.until((event) => event.type === "turn.completed" && event.turnId === first.turnId);
+    await instance.adapter.stopAll();
+    const second = await instance.adapter.sendTurn({
+      threadId: "t-cursor-stop",
+      text: "second",
+      model: "auto",
+      resumeCursor: "fake-acp-session",
+    });
+    await recorder.until((event) => event.type === "turn.completed" && event.turnId === second.turnId);
+
+    expect(readFileSync(spawnLog, "utf8").trim().split(/\r?\n/)).toHaveLength(2);
+  });
+
+  it("never reuses a Cursor process after a failed turn", async () => {
+    const spawnLog = join(scratch, "cursor-failure-spawns.txt");
+    process.env.FAKE_ACP_SPAWN_LOG = spawnLog;
+    await create(CursorAgentDriver, "fail-after-text");
+
+    const first = await instance.adapter.sendTurn({ threadId: "t-cursor-failure", text: "first", model: "auto" });
+    const failed = await recorder.until((event) => event.type === "turn.completed" && event.turnId === first.turnId);
+    expect(failed).toMatchObject({ ok: false });
+
+    process.env.FAKE_ACP_MODE = "happy";
+    const second = await instance.adapter.sendTurn({
+      threadId: "t-cursor-failure",
+      text: "second",
+      model: "auto",
+      resumeCursor: "fake-acp-session",
+    });
+    const completed = await recorder.until((event) => event.type === "turn.completed" && event.turnId === second.turnId);
+    expect(completed).toMatchObject({ ok: true });
+    expect(readFileSync(spawnLog, "utf8").trim().split(/\r?\n/)).toHaveLength(2);
+  });
+
+  it("starts fresh when Cursor's mounted tool configuration changes", async () => {
+    const spawnLog = join(scratch, "cursor-tools-spawns.txt");
+    process.env.FAKE_ACP_SPAWN_LOG = spawnLog;
+    await create(CursorAgentDriver);
+    const integration = (token: string) => ({
+      composio: { command: process.execPath, args: ["/tmp/connector-proxy.js"], env: { TOKEN: token } },
+    });
+
+    const first = await instance.adapter.sendTurn({
+      threadId: "t-cursor-tools",
+      text: "first",
+      model: "auto",
+      integrations: integration("one"),
+    });
+    await recorder.until((event) => event.type === "turn.completed" && event.turnId === first.turnId);
+    const second = await instance.adapter.sendTurn({
+      threadId: "t-cursor-tools",
+      text: "second",
+      model: "auto",
+      resumeCursor: "fake-acp-session",
+      integrations: integration("two"),
+    });
+    await recorder.until((event) => event.type === "turn.completed" && event.turnId === second.turnId);
+
+    expect(readFileSync(spawnLog, "utf8").trim().split(/\r?\n/)).toHaveLength(2);
   });
 
   it("emits each assistant text block before the tool that follows it", async () => {
@@ -470,6 +657,8 @@ describe("ACP turns (fake CLI)", () => {
     expect(opened).toMatchObject({
       requestType: "permission",
       tool: "shell",
+      summary: "echo hi",
+      action: { fidelity: "exact-command", command: "echo hi" },
       approvalScope: "local-computer",
     });
 

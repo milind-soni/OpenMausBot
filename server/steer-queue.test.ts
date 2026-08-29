@@ -119,6 +119,20 @@ describe("steer-queue module", () => {
     expect(run).toHaveBeenCalledTimes(1);
   });
 
+  it("deterministically folds an accidental duplicate queued send", () => {
+    const bot = fakeBot("bot-dupe", "thread-dupe", true);
+    const first = queueSteeredMessage(bot, "same   request");
+    const duplicate = queueSteeredMessage(bot, "same request");
+    expect(duplicate).toEqual({ id: first.id, deduplicated: true });
+    expect(_queuedCount("thread-dupe")).toBe(1);
+    bot.busy = false;
+    const store = fakeStore([bot]);
+    const run = vi.fn();
+    drainSteeredMessages(store, run);
+    expect(run).toHaveBeenCalledTimes(1);
+    expect(run.mock.calls[0][2]).toBe("same   request");
+  });
+
   it("keeps reply metadata and the provider-facing reply prompt while queued", () => {
     const bot = fakeBot("bot-reply", "thread-reply", true);
     const store = fakeStore([bot]);

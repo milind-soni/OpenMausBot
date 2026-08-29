@@ -31,6 +31,7 @@ import { codexLocalProviderArgs } from "./local-inject.ts";
 import { augmentedPath } from "../env-path.ts";
 import { classifyError, computeBackoff, RETRY_MAX_ATTEMPTS } from "./retry.ts";
 import { appendNative } from "./native.ts";
+import { z } from "zod";
 
 export { decodeCodexSelection, readCodexModelCatalog, STATIC_CODEX_MODELS } from "./codex-catalog.ts";
 
@@ -39,6 +40,28 @@ const DRIVER_KIND = "codex";
 export interface CodexConfig {
   cli: string;
   fullAuto: boolean;
+}
+
+const codexTokenUsageSchema = z.object({
+  inputTokens: z.number().finite().nonnegative().optional(),
+  outputTokens: z.number().finite().nonnegative().optional(),
+  cachedInputTokens: z.number().finite().nonnegative().optional(),
+  cacheReadInputTokens: z.number().finite().nonnegative().optional(),
+  contextTokens: z.number().finite().nonnegative().optional(),
+  promptTokens: z.number().finite().nonnegative().optional(),
+});
+
+function codexTokenUsage(value: unknown): { input: number; output: number; cachedInput?: number; contextTokens?: number } | null {
+  const parsed = codexTokenUsageSchema.safeParse(value);
+  if (!parsed.success || parsed.data.inputTokens === undefined || parsed.data.outputTokens === undefined) return null;
+  const input = Math.trunc(parsed.data.inputTokens);
+  const output = Math.trunc(parsed.data.outputTokens);
+  const cachedInputValue = parsed.data.cachedInputTokens ?? parsed.data.cacheReadInputTokens;
+  const contextTokensValue = parsed.data.contextTokens ?? parsed.data.promptTokens;
+  const result: { input: number; output: number; cachedInput?: number; contextTokens?: number } = { input, output };
+  if (cachedInputValue !== undefined) result.cachedInput = Math.trunc(cachedInputValue);
+  if (contextTokensValue !== undefined) result.contextTokens = Math.trunc(contextTokensValue);
+  return result;
 }
 
 function decodeConfig(raw: unknown): CodexConfig {
@@ -202,7 +225,7 @@ export const CodexDriver: ProviderDriver<CodexConfig> = {
         sawStreamDelta: false,
         // codex reports token usage as a running THREAD total; the harness
         // wants this turn's figure, so the last report is banked on settle
-        usage: undefined as { input: number; output: number } | undefined,
+        usage: undefined as { input: number; output: number; cachedInput?: number; contextTokens?: number } | undefined,
       };
 
       const asks = new Map<string, (behavior: "allow" | "deny" | "answer", message?: string, source?: "user" | "timeout" | "system") => void>();
@@ -287,11 +310,12 @@ export const CodexDriver: ProviderDriver<CodexConfig> = {
           });
         }
         const requestId = newId();
+        const exactCommand = typeof params.command === "string" ? params.command : null;
         const summary =
           isMcpElicitation && typeof params.message === "string"
             ? params.message
-            : typeof params.command === "string"
-            ? params.command
+            : exactCommand
+            ? exactCommand
             : Array.isArray(params.questions)
               ? params.questions.map((q: any) => q.question ?? q.header).filter(Boolean).join(" · ")
               : typeof params.reason === "string"
@@ -335,6 +359,9 @@ export const CodexDriver: ProviderDriver<CodexConfig> = {
           requestType: isQuestion ? "question" : "permission",
           tool,
           summary,
+          action: exactCommand
+            ? { fidelity: "exact-command", command: exactCommand }
+            : { fidelity: "summary-only" },
           choices,
           approvalScope: controlsHost ? "local-computer" : undefined,
         });
@@ -402,15 +429,17 @@ export const CodexDriver: ProviderDriver<CodexConfig> = {
             // `last` is the most recent turn when the server sends it;
             // `total` is the thread so far — a fresh app-server per turn
             // makes that this turn's figure too
-            const turnUsage = p.tokenUsage?.last ?? p.tokenUsage?.total;
-            if (turnUsage) state.usage = { input: turnUsage.inputTokens ?? 0, output: turnUsage.outputTokens ?? 0 };
-            const t = p.tokenUsage?.total;
-            if (t) {
+            const turnUsage = codexTokenUsage(p.tokenUsage?.last ?? p.tokenUsage?.total);
+            if (turnUsage) state.usage = turnUsage;
+            if (turnUsage) {
               emit({
                 ...base(threadId, turnId),
                 type: "thread.token-usage.updated",
-                input: t.inputTokens ?? 0,
-                output: t.outputTokens ?? 0,
+                scope: "turn",
+                input: turnUsage.input,
+                output: turnUsage.output,
+                ...(turnUsage.cachedInput === undefined ? {} : { cachedInput: turnUsage.cachedInput }),
+                ...(turnUsage.contextTokens === undefined ? {} : { contextTokens: turnUsage.contextTokens }),
               });
             }
             break;

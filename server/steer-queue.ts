@@ -18,6 +18,7 @@
 // the feature.
 
 import { newId } from "./contracts.ts";
+import { isDeterministicNoChange } from "./turn-prefilter.ts";
 import type { BotRecord, Message } from "./store.ts";
 
 /** The slice of Store this module needs — narrow so tests can fake it. */
@@ -32,7 +33,7 @@ interface QueueEntry {
    * happen on a DIFFERENT thread (a room turn) — drain matches on "this
    * queue's bot is idle now", which needs the bot, not the settling thread. */
   botId: string;
-  items: Array<{ messageId: string; text: string; prompt: string; replyToId?: string }>;
+  items: Array<{ messageId: string; text: string; prompt: string; replyToId?: string; queuedAt: number }>;
 }
 
 const queues = new Map<string, QueueEntry>(); // threadId → waiting sends
@@ -42,11 +43,21 @@ export function queueSteeredMessage(
   bot: BotRecord,
   text: string,
   options: { prompt?: string; replyToId?: string } = {},
-): { id: string } {
+): { id: string; deduplicated?: boolean } {
   const threadId = bot.threadId;
-  const id = newId();
   const entry = queues.get(threadId) ?? { botId: bot.id, items: [] };
-  entry.items.push({ messageId: id, text, prompt: options.prompt ?? text, replyToId: options.replyToId });
+  const last = entry.items.at(-1);
+  if (last && last.replyToId === options.replyToId && isDeterministicNoChange(last.text, text)) {
+    return { id: last.messageId, deduplicated: true };
+  }
+  const id = newId();
+  entry.items.push({
+    messageId: id,
+    text,
+    prompt: options.prompt ?? text,
+    replyToId: options.replyToId,
+    queuedAt: Date.now(),
+  });
   queues.set(threadId, entry);
   return { id };
 }
@@ -66,6 +77,7 @@ export function drainSteeredMessages(
     prompt: string,
     userMessage: Message,
     excludeIds: string[],
+    queuedAt: number,
   ) => void | Promise<void>,
 ): void {
   // deleting only the entry being visited is safe under Map iteration
@@ -103,6 +115,7 @@ export function drainSteeredMessages(
       prompt,
       last,
       appended.map((message) => message.id),
+      entry.items[0]?.queuedAt ?? last.at,
     );
   }
 }

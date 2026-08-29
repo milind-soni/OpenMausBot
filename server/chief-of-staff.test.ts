@@ -53,6 +53,22 @@ describe("chiefOfStaffSystemPrompt", () => {
     expect(prompt).not.toContain("Atlas —");
     expect(prompt).toContain("Use ask_bot");
     expect(prompt).toContain("use create_bot");
+    expect(prompt).toContain("parallelize_work");
+    expect(prompt).toContain("substantial independent work");
+    expect(prompt).toContain("remain responsive");
+    expect(prompt).toContain("engine, model, and effort");
+    expect(prompt).toContain("cheaper/faster model");
+    expect(prompt).toContain("one worker only");
+    expect(prompt).toContain("shared repository or one computer destination");
+  });
+
+  it("requires a live tool probe before claiming Centipede tools are unavailable", () => {
+    const prompt = chiefOfStaffSystemPrompt("chief", bots, true);
+
+    expect(prompt).toContain("Never infer that a Centipede tool is unavailable");
+    expect(prompt).toContain("call the exact tool first");
+    expect(prompt).toContain("list_bots");
+    expect(prompt).toContain("capture_status");
   });
 
   it("does not promise delegation when the engine cannot mount agent tools", () => {

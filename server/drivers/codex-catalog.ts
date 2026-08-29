@@ -8,13 +8,14 @@ import { homedir } from "node:os";
 import { basename, join } from "node:path";
 
 import type { ModelCatalog } from "../contracts.ts";
+import { GPT_5_6_SOL_PRICING, type ModelPricing } from "../../shared/model-pricing.ts";
 import { killCliTree, spawnCli } from "../procs.ts";
 import { mergeLocalInject } from "./local-inject.ts";
 
 export const STATIC_CODEX_MODELS: ModelCatalog = {
   default: "gpt-5.6-sol",
   options: [
-    { id: "gpt-5.6-sol", label: "GPT-5.6 Sol" },
+    { id: "gpt-5.6-sol", label: "GPT-5.6 Sol", pricing: GPT_5_6_SOL_PRICING },
     { id: "gpt-5.6-terra", label: "GPT-5.6 Terra" },
     { id: "gpt-5.6-luna", label: "GPT-5.6 Luna" },
     { id: "gpt-5.5", label: "GPT-5.5" },
@@ -23,6 +24,17 @@ export const STATIC_CODEX_MODELS: ModelCatalog = {
     { id: "gpt-5.3-codex-spark", label: "GPT-5.3 Codex Spark" },
   ],
 };
+
+/** Keep the supplied rate card attached when the installed app-server
+ * refreshes the official catalog. Versioned aliases remain eligible. */
+export function pricingForCodexModel(model: string): ModelPricing | undefined {
+  return model.toLowerCase().startsWith("gpt-5.6-sol") ? GPT_5_6_SOL_PRICING : undefined;
+}
+
+function officialOption(id: string, label: string): ModelCatalog["options"][number] {
+  const pricing = pricingForCodexModel(id);
+  return pricing ? { id, label, pricing } : { id, label };
+}
 
 /** Built-in ChatGPT / OpenAI provider id. Official picker rows force this
  *  so a user's local `model_provider = "omlx"` does not swallow GPT-5.6. */
@@ -149,10 +161,7 @@ export function readCodexAppServerModelCatalog(
         for (const row of models) {
           if (row.hidden === true || typeof row.id !== "string" || !MODEL_ID.test(row.id) || seen.has(row.id)) continue;
           seen.add(row.id);
-          options.push({
-            id: row.id,
-            label: typeof row.displayName === "string" && row.displayName.trim() ? row.displayName : row.id,
-          });
+          options.push(officialOption(row.id, typeof row.displayName === "string" && row.displayName.trim() ? row.displayName : row.id));
           if (row.isDefault === true) defaultModel = row.id;
         }
         if (!options.length) {
@@ -406,7 +415,10 @@ export async function readCodexModelCatalog(
   );
   for (const row of live.flat()) remember(row.provider, row.model);
 
-  const options = official.options.map((option) => ({ ...option }));
+  const options = official.options.map((option) => {
+    const pricing = option.pricing ?? pricingForCodexModel(option.id);
+    return pricing ? { ...option, pricing } : { ...option };
+  });
   const seen = new Set(options.map((option) => option.id));
   for (const extra of extras) {
     const id = encodeCodexSelection(extra.provider, extra.model);

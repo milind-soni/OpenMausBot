@@ -2,6 +2,7 @@ import { z } from "zod";
 
 import { schemaIssue, type JsonValue } from "./schema.ts";
 import type { MausColor } from "./store.ts";
+import { BOT_REPORTING_MODES, type BotReportingMode } from "../shared/bot-profile.ts";
 
 export const TEAM_MANIFEST_FORMAT = "openmaus.team" as const;
 export const TEAM_MANIFEST_VERSION = 2 as const;
@@ -44,6 +45,8 @@ const memberSchema = z.object({
   name: requiredText(100),
   title: optionalText(200),
   description: optionalText(4_000),
+  instructions: optionalText(16_000),
+  reportingMode: z.enum(BOT_REPORTING_MODES).optional(),
   appearance: z.object({
     color: z.enum(COLORS, { error: "is not supported" }),
     mascotExpression: optionalText(80),
@@ -86,6 +89,8 @@ export interface TeamManifestMember {
   name: string;
   title: string;
   description: string;
+  instructions?: string;
+  reportingMode?: BotReportingMode;
   appearance: {
     color: MausColor;
     mascotExpression?: string;
@@ -132,6 +137,8 @@ interface ExportableBot {
   name: string;
   title: string;
   description: string;
+  instructions?: string;
+  reportingMode?: BotReportingMode;
   color: MausColor;
   mascotExpression?: string | null;
 }
@@ -165,6 +172,8 @@ export function parseTeamManifest(value: TeamManifestInput): ParsedTeamManifest 
       name: member.name,
       title: member.title ?? "",
       description: member.description ?? "",
+      ...(member.instructions ? { instructions: member.instructions } : {}),
+      ...(member.reportingMode ? { reportingMode: member.reportingMode } : {}),
       appearance,
     };
   });
@@ -199,6 +208,8 @@ export interface ImportedMemberProfile {
   name: string;
   title: string;
   description: string;
+  instructions?: string;
+  reportingMode?: BotReportingMode;
   color: MausColor;
   mascotExpression?: string;
 }
@@ -253,6 +264,8 @@ export function importedMemberProfile(
     description: member.description,
     color: member.appearance.color,
   };
+  if (member.instructions) profile.instructions = member.instructions;
+  if (member.reportingMode) profile.reportingMode = member.reportingMode;
   if (member.appearance.mascotExpression) profile.mascotExpression = member.appearance.mascotExpression;
   return profile;
 }
@@ -283,13 +296,16 @@ export function createTeamManifest(team: ExportableTeam, bots: ExportableBot[]):
     const key = memberKey(bot.name, index, usedKeys);
     const appearance: TeamManifestMember["appearance"] = { color: bot.color };
     if (bot.mascotExpression) appearance.mascotExpression = bot.mascotExpression;
-    return {
+    const member: TeamManifestMember = {
       key,
       name: bot.name,
       title: bot.title,
       description: bot.description,
       appearance,
     };
+    if (bot.instructions) member.instructions = bot.instructions;
+    if (bot.reportingMode) member.reportingMode = bot.reportingMode;
+    return member;
   });
 
   const manifest: TeamManifestV2 = {

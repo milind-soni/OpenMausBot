@@ -222,6 +222,7 @@ beforeAll(async () => {
       OMB_BOX_API: `http://127.0.0.1:${boxStubPort}`,
       OMB_COMPOSIO_API: `http://127.0.0.1:${boxStubPort}/api/v3.1`,
       OMB_STATIC_DIR: staticDir,
+      OMB_RESTART_TOKEN: "restart-test-token",
       FAKE_CLAUDE_MODE: "hang",
       FAKE_CLAUDE_DUMP: fakeClaudeDump,
     },
@@ -261,12 +262,81 @@ describe("harness HTTP API", () => {
     expect(await statusWithHeaders({ origin: `http://[::1]:${PORT}` })).toBe(200);
   });
 
+  it("accepts silent Capture Bridge receipts only from an extension origin", async () => {
+    const origin = `chrome-extension://${"a".repeat(32)}`;
+    const receipt = {
+      schemaVersion: 1,
+      captureId: "11111111-1111-4111-8111-111111111111",
+      capturedAt: "2026-08-26T13:00:00.000Z",
+      sourceId: "youtube",
+      url: "https://www.youtube.com/watch?v=private",
+      title: "A useful video",
+      items: [{ kind: "video", title: "A useful video" }],
+      cursor: {
+        capturedAt: "2026-08-26T13:00:00.000Z",
+        captureId: "11111111-1111-4111-8111-111111111111",
+      },
+    };
+    const preflight = await fetch(`${BASE}/api/browser-capture/receipt`, {
+      method: "OPTIONS",
+      headers: {
+        origin,
+        "access-control-request-method": "POST",
+        "access-control-request-headers": "content-type,x-openmausbot-capture",
+      },
+    });
+    expect(preflight.status).toBe(204);
+    expect(preflight.headers.get("access-control-allow-origin")).toBe(origin);
+
+    const accepted = await fetch(`${BASE}/api/browser-capture/receipt`, {
+      method: "POST",
+      headers: { origin, "content-type": "application/json", "x-openmausbot-capture": "1" },
+      body: JSON.stringify(receipt),
+    });
+    expect(accepted.status).toBe(204);
+    expect(existsSync(join(home, ".openmausbot", "browser-capture", `openmausbot-capture-event-youtube-${receipt.captureId}.json`))).toBe(true);
+
+    const rejected = await fetch(`${BASE}/api/browser-capture/receipt`, {
+      method: "POST",
+      headers: { origin: "https://evil.example", "content-type": "application/json", "x-openmausbot-capture": "1" },
+      body: JSON.stringify(receipt),
+    });
+    expect(rejected.status).toBe(403);
+  });
+
   it("identifies itself on /api/health", async () => {
     const { status, body } = await api("GET", "/api/health");
     expect(status).toBe(200);
     expect(body.app).toBe("openmausbot");
+    expect(body.dataRootIdentity).toMatch(/^[a-f0-9]{64}$/);
     expect(typeof body.pid).toBe("number");
     expect(body.static).toBe(true);
+  });
+
+  it("holds a private restart drain and blocks new turns until it is aborted", async () => {
+    const unauthorized = await fetch(`${BASE}/api/internal/restart/status`);
+    expect(unauthorized.status).toBe(401);
+
+    const headers = { authorization: "Bearer restart-test-token" };
+    const prepared = await fetch(`${BASE}/api/internal/restart/prepare`, { method: "POST", headers });
+    expect(prepared.status).toBe(200);
+    expect(await prepared.json()).toMatchObject({ draining: true });
+
+    const bots = await api("GET", "/api/bots");
+    const botId = bots.body.bots?.[0]?.id;
+    expect(botId).toBeTruthy();
+    const blocked = await fetch(`${BASE}/api/bots/${botId}/messages`, {
+      method: "POST",
+      headers: { ...headers, "content-type": "application/json" },
+      body: JSON.stringify({ text: "should wait" }),
+    });
+    // The exact route body is intentionally unimportant; the drain must fail
+    // closed before any provider dispatch is attempted.
+    expect([400, 404, 409]).toContain(blocked.status);
+
+    const aborted = await fetch(`${BASE}/api/internal/restart/abort`, { method: "POST", headers });
+    expect(aborted.status).toBe(200);
+    expect(await aborted.json()).toMatchObject({ draining: false });
   });
 
   it("serves packaged UI assets and preserves API 404s", async () => {
@@ -680,6 +750,20 @@ describe("harness HTTP API", () => {
     expect(after.body.bots.find((b: { id: string }) => b.id === bot.id)).toBeUndefined();
   });
 
+  it("returns a current bot projection by id", async () => {
+    const created = await api("POST", "/api/bots");
+    expect(created.status).toBe(201);
+    const bot = created.body.bot;
+    try {
+      const fetched = await api("GET", `/api/bots/${bot.id}`);
+      expect(fetched.status).toBe(200);
+      expect(fetched.body.bot).toMatchObject({ id: bot.id, threadId: bot.threadId });
+      expect(fetched.body.bot.messages).toEqual(expect.any(Array));
+    } finally {
+      await api("DELETE", `/api/bots/${bot.id}`);
+    }
+  });
+
   it("elects one Chief of Staff per section and preserves other section Chiefs", async () => {
     const workA = (await api("POST", "/api/bots")).body.bot;
     const workB = (await api("POST", "/api/bots")).body.bot;
@@ -968,7 +1052,7 @@ describe("harness HTTP API", () => {
     expect(markdownExport.status).toBe(200);
     expect(markdownExport.body).toMatchObject({ name: "Field Team", members: visibleNames.length });
     expect(markdownExport.body.markdown).toContain("## Activation");
-    expect(markdownExport.body.markdown).toContain("Give this file to your Chief of Staff");
+    expect(markdownExport.body.markdown).toContain("Give this file to the agent harness or person setting up the team");
     expect(markdownExport.body.markdown).not.toMatch(/Archived|autoApprove|alwaysAllow|modelSelection|threadId/);
     expect((await api("GET", "/api/bots")).body.groups).toHaveLength(roomsBefore);
     expect((await api("POST", "/api/teams/export", {})).body.team.name).toBe("My OpenMaus Team");

@@ -99,8 +99,19 @@ export function createBotPackageExport(input: {
       runOn: routine.runOn,
       schedule: routine.schedule.type === "once"
         ? { type: "once", at: routine.schedule.at }
-        : { type: "daily", time: routine.schedule.time, weekdays: [...routine.schedule.weekdays] },
+        : routine.schedule.type === "daily"
+          ? { type: "daily", time: routine.schedule.time, weekdays: [...routine.schedule.weekdays] }
+          : {
+              type: "interval",
+              everyMinutes: routine.schedule.everyMinutes,
+              from: routine.schedule.from,
+              to: routine.schedule.to,
+              weekdays: [...routine.schedule.weekdays],
+            },
       durationMinutes: routine.durationMinutes,
+      ...(routine.budget ? { budget: routine.budget } : {}),
+      ...(routine.capabilities ? { capabilities: routine.capabilities } : {}),
+      ...(routine.maxChangedStrategyRetries ? { maxChangedStrategyRetries: routine.maxChangedStrategyRetries } : {}),
       enabledAfterInstall: false as const,
     }];
   });
@@ -116,6 +127,7 @@ export function createBotPackageExport(input: {
       description: bot.description,
       appearance,
     };
+    if (bot.instructions) agent.instructions = bot.instructions;
     const assigned = agentPlaybooks.get(bot.id);
     if (assigned?.length) agent.playbooks = assigned;
     return agent;

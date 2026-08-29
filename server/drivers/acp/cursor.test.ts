@@ -10,6 +10,8 @@ import { removeTempDir } from "../../testing/cleanup.ts";
 import {
   classifyCursorError,
   createCursorAgentDriver,
+  createCursorAuthGate,
+  cursorKeepAliveMs,
   CursorAgentDriver,
   decodeCursorAuthStatus,
   decodeCursorAuthText,
@@ -20,6 +22,18 @@ import {
 } from "./cursor.ts";
 
 const FAKE_CLI = join(dirname(fileURLToPath(import.meta.url)), "..", "..", "testing", "fake-acp-cli.ts");
+
+describe("cursorKeepAliveMs", () => {
+  it("keeps successful sessions warm for 30 minutes by default", () => {
+    expect(cursorKeepAliveMs({})).toBe(30 * 60_000);
+  });
+
+  it("accepts a bounded operator override", () => {
+    expect(cursorKeepAliveMs({ OMB_CURSOR_KEEP_ALIVE_MINUTES: "45" })).toBe(45 * 60_000);
+    expect(cursorKeepAliveMs({ OMB_CURSOR_KEEP_ALIVE_MINUTES: "1" })).toBe(5 * 60_000);
+    expect(cursorKeepAliveMs({ OMB_CURSOR_KEEP_ALIVE_MINUTES: "999" })).toBe(120 * 60_000);
+  });
+});
 
 describe("decodeCursorAuthStatus", () => {
   it("reads isAuthenticated from live CLI JSON", () => {
@@ -41,6 +55,44 @@ describe("decodeCursorAuthText", () => {
     expect(decodeCursorAuthText("✓ Login successful! Logged in")).toBe(true);
     expect(decodeCursorAuthText("Not logged in")).toBe(false);
     expect(decodeCursorAuthText("Cursor Agent CLI")).toBeNull();
+  });
+});
+
+describe("createCursorAuthGate", () => {
+  it("coalesces concurrent auth probes without caching later auth state", async () => {
+    let calls = 0;
+    let release: ((authenticated: boolean) => void) | undefined;
+    const gate = createCursorAuthGate(() => {
+      calls += 1;
+      return new Promise<boolean>((resolve) => {
+        release = resolve;
+      });
+    });
+    const env = { HOME: "C:/Users/Shane" };
+
+    const checks = [gate("cursor-agent", env), gate("cursor-agent", env), gate("cursor-agent", env)];
+    expect(calls).toBe(1);
+    if (!release) throw new Error("auth probe did not start");
+    release(true);
+    await expect(Promise.all(checks)).resolves.toEqual([true, true, true]);
+
+    const later = gate("cursor-agent", env);
+    expect(calls).toBe(2);
+    if (!release) throw new Error("later auth probe did not start");
+    release(true);
+    await expect(later).resolves.toBe(true);
+  });
+
+  it("does not share auth state between different Cursor homes", async () => {
+    let calls = 0;
+    const gate = createCursorAuthGate(async () => {
+      calls += 1;
+      return true;
+    });
+
+    await gate("cursor-agent", { HOME: "C:/Users/One" });
+    await gate("cursor-agent", { HOME: "C:/Users/Two" });
+    expect(calls).toBe(2);
   });
 });
 

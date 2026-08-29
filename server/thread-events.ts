@@ -225,7 +225,11 @@ function isRuntimeEvent(value: unknown): value is RuntimeEvent {
           value.source === "peer")
       );
     case "thread.token-usage.updated":
-      return typeof value.input === "number" && typeof value.output === "number";
+      return (
+        (value.scope === undefined || value.scope === "turn" || value.scope === "thread")
+        && typeof value.input === "number"
+        && typeof value.output === "number"
+      );
     case "runtime.error":
       return typeof value.message === "string" && (value.setup === undefined || typeof value.setup === "boolean");
     default:

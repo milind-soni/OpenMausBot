@@ -301,6 +301,7 @@ export const OpenAICompatDriver: ProviderDriver<OpenAICompatConfig> = {
             emit({
               ...base(threadId, turnId),
               type: "thread.token-usage.updated",
+              scope: "turn",
               ...usage,
             });
           }

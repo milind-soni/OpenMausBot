@@ -255,6 +255,34 @@ winOnly("resolveCli (Windows)", () => {
     expect(resolved.args).toEqual(["--mcp-config", payload]);
   });
 
+  it("resolves a forwarding Cursor-style cmd wrapper without losing its invocation identity", () => {
+    const install = join(dir, "cursor-install");
+    mkdirSync(install, { recursive: true });
+    const inner = join(install, "cursor-agent.cmd");
+    const ps1 = join(install, "cursor-agent.ps1");
+    writeFileSync(
+      inner,
+      `@echo off\nsetlocal enabledelayedexpansion\nset "CURSOR_INVOKED_AS=%~nx0"\n%SystemRoot%\\System32\\WindowsPowerShell\\v1.0\\powershell.exe -NoProfile -ExecutionPolicy Bypass -File "%~dp0cursor-agent.ps1" %*\n`,
+    );
+    writeFileSync(ps1, "Write-Output $env:CURSOR_INVOKED_AS\n");
+    writeFileSync(join(dir, "cursor-agent.cmd"), `@echo off\ncall "${inner}" %*\n`);
+    onPath();
+
+    const resolved = resolveCli("cursor-agent", ["status", "--format", "json"]);
+    expect(resolved.command.toLowerCase()).toMatch(/powershell\.exe$/);
+    expect(resolved.args).toEqual([
+      "-NoProfile",
+      "-ExecutionPolicy",
+      "Bypass",
+      "-File",
+      ps1,
+      "status",
+      "--format",
+      "json",
+    ]);
+    expect(resolved.env).toMatchObject({ CURSOR_INVOKED_AS: "cursor-agent.cmd" });
+  });
+
   it("hands an unknown CLI back untouched so spawn reports its own ENOENT", () => {
     onPath();
     expect(resolveCli("definitely-not-installed", ["-p"])).toEqual({

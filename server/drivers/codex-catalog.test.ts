@@ -9,6 +9,7 @@ import {
   decodeCodexSelection,
   encodeCodexSelection,
   OFFICIAL_CODEX_PROVIDER,
+  pricingForCodexModel,
   readCodexModelCatalog,
   STATIC_CODEX_MODELS,
 } from "./codex-catalog.ts";
@@ -57,6 +58,15 @@ describe("decodeCodexSelection", () => {
 });
 
 describe("readCodexModelCatalog", () => {
+  it("keeps the supplied Sol rate card through static and refreshed catalogs", () => {
+    expect(STATIC_CODEX_MODELS.options.find((option) => option.id === "gpt-5.6-sol")?.pricing).toMatchObject({
+      inputUsdPerMillion: 4,
+      cachedInputUsdPerMillion: 0.4,
+      outputUsdPerMillion: 20,
+      longContext: { thresholdTokens: 272_000, inputMultiplier: 2, outputMultiplier: 1.5 },
+    });
+    expect(pricingForCodexModel("gpt-5.6-sol-2026-08-28")?.source).toContain("2026-08-28");
+  });
   it("returns the static cloud fallback when there is no config or CLI probe", async () => {
     expect(await readCodexModelCatalog({ HOME: join(tmpdir(), "omb-codex-missing-home") })).toEqual(
       STATIC_CODEX_MODELS,

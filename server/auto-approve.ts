@@ -10,6 +10,8 @@
 // backstop for the obvious catastrophes. Real containment is the
 // sandbox and the bot's own computer, not a regex.
 
+import type { ProviderAction } from "./contracts.ts";
+
 const DESTRUCTIVE = [
   /\brm\s+(-[a-z]*\s+)*-[a-z]*[rf]/i, // rm -rf, rm -fr, rm -r -f
   /\bmkfs\b|\bdiskutil\s+erase|\bdd\s+[^|]*\bof=\/dev\//i,
@@ -58,9 +60,65 @@ export function looksDestructive(text: string): boolean {
  * client so the two sides can never disagree about what was granted. */
 const COMMAND_TOOLS = new Set(["bash", "shell", "execute", "run_command", "computer_exec", "terminal"]);
 
+function isCommandTool(tool: string): boolean {
+  return COMMAND_TOOLS.has(tool.replace(/^mcp__[^_]+__/, "").toLowerCase());
+}
+
+/** A standing program grant is never reused across shell composition. Quoted
+ * punctuation is ordinary argument text; unquoted control syntax means the
+ * request is more than the one program the user granted. */
+export function hasShellControlSyntax(command: string): boolean {
+  let quote: "single" | "double" | null = null;
+  for (let index = 0; index < command.length; index += 1) {
+    const char = command[index];
+    if (quote === "single") {
+      if (char === "'") quote = null;
+      continue;
+    }
+    if (quote === "double") {
+      if (char === '"') {
+        quote = null;
+        continue;
+      }
+      if (char === "`" || (char === "$" && command[index + 1] === "(")) return true;
+      continue;
+    }
+    if (char === "'") {
+      quote = "single";
+      continue;
+    }
+    if (char === '"') {
+      quote = "double";
+      continue;
+    }
+    if (";&|<>\r\n`()^".includes(char)) return true;
+    if (char === "$" && command[index + 1] === "(") return true;
+  }
+  return quote !== null;
+}
+
+export interface ApprovalTarget {
+  readonly text: string;
+  readonly reusable: boolean;
+}
+
+/** The exact bytes policy evaluates. Display summaries remain useful context,
+ * but summary-only provider asks can never mint or consume a standing grant. */
+export function approvalTarget(summary: string, action?: ProviderAction): ApprovalTarget {
+  if (!action || action.fidelity === "summary-only") return { text: summary, reusable: false };
+  if (action.fidelity === "exact-command") return { text: action.command, reusable: true };
+  return {
+    text: JSON.stringify({
+      operation: action.operation,
+      accountId: action.accountId,
+      payload: action.payload,
+    }),
+    reusable: true,
+  };
+}
+
 export function approvalKey(tool: string, summary: string, scope?: "local-computer"): string {
-  const bare = tool.replace(/^mcp__[^_]+__/, "").toLowerCase();
-  if (!COMMAND_TOOLS.has(bare)) return scope ? `${scope}:${tool}` : tool;
+  if (!isCommandTool(tool)) return scope ? `${scope}:${tool}` : tool;
   // first bare word of the command, skipping env assignments and sudo
   const words = summary.trim().split(/\s+/);
   let i = 0;
@@ -83,6 +141,8 @@ export type AutoVerdictSource =
   | "auto-mode"
   | "unattended-block"
   | "local-computer-block"
+  | "compound-command-block"
+  | "non-reusable-action-block"
   | "destructive-guard"
   | "sensitive-guard"
   | "no-grant";
@@ -112,6 +172,8 @@ export function autoVerdict(
     unattended?: boolean;
     /** the request controls the user's active desktop */
     scope?: "local-computer";
+    /** the provider supplied every byte needed to authorize this action */
+    reusable?: boolean;
   },
 ): AutoVerdict {
   // the guards outrank the grants, so an "always allow" can never widen
@@ -123,10 +185,13 @@ export function autoVerdict(
   // stood in the way", which cannot be told apart from an ordinary
   // "nobody granted this" card without knowing both halves.
   const key = approvalKey(tool, summary, context?.scope);
+  const remembered = bot.alwaysAllow?.includes(key) ?? false;
+  const compound = isCommandTool(tool) && hasShellControlSyntax(summary);
+  const rememberedBlocked = remembered && (context?.reusable === false || compound);
   const grant =
     destructive || sensitive
       ? null
-      : bot.alwaysAllow?.includes(key)
+      : remembered && !rememberedBlocked
         ? { approve: `auto-approved ${key} (always allowed)`, source: "always-allow" as const, rule: key }
         : bot.autoApprove
           ? { approve: `auto-approved ${tool}`, source: "auto-mode" as const, rule: undefined }
@@ -156,6 +221,13 @@ export function autoVerdict(
   if (destructive) return { approve: null, source: "destructive-guard", rule: destructive };
   if (sensitive) return { approve: null, source: "sensitive-guard", rule: sensitive };
   if (grant) return { approve: grant.approve, source: grant.source, rule: grant.rule };
+  if (rememberedBlocked) {
+    return {
+      approve: null,
+      source: compound ? "compound-command-block" : "non-reusable-action-block",
+      rule: key,
+    };
+  }
   return { approve: null, source: "no-grant" };
 }
 
@@ -169,6 +241,8 @@ export function autoDecision(
     unattended?: boolean;
     /** the request controls the user's active desktop */
     scope?: "local-computer";
+    /** the provider supplied every byte needed to authorize this action */
+    reusable?: boolean;
   },
 ): string | null {
   return autoVerdict(bot, tool, summary, context).approve;

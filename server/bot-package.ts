@@ -4,6 +4,7 @@ import { parse as parseYaml, stringify as stringifyYaml } from "yaml";
 import { schemaIssue, type JsonValue } from "./schema.ts";
 import type { MausColor } from "./store.ts";
 import type { TeamManifestMember } from "./team-manifest.ts";
+import { BOT_REPORTING_MODES } from "../shared/bot-profile.ts";
 
 export const BOT_PACKAGE_FORMAT = "openmaus.package" as const;
 export const BOT_PACKAGE_VERSION = 1 as const;
@@ -67,6 +68,8 @@ const packageSchema = z.object({
       name: requiredText(100),
       title: optionalText(200),
       description: optionalText(4_000),
+      instructions: optionalText(16_000),
+      reportingMode: z.enum(BOT_REPORTING_MODES).optional(),
       appearance: z.object({
         color: z.enum(COLORS, { error: "is not supported" }),
         mascotExpression: optionalText(80),
@@ -98,8 +101,31 @@ const packageSchema = z.object({
           time: requiredText(5).regex(/^([01]\d|2[0-3]):[0-5]\d$/, { message: "must use HH:MM" }),
           weekdays: z.array(z.number().int().min(0).max(6)).min(1).max(7),
         }),
+        z.object({
+          type: z.literal("interval"),
+          everyMinutes: z.number().int().min(1).max(1_440),
+          from: requiredText(5).regex(/^([01]\d|2[0-3]):[0-5]\d$/, { message: "must use HH:MM" }),
+          to: requiredText(5).regex(/^([01]\d|2[0-3]):[0-5]\d$/, { message: "must use HH:MM" }),
+          weekdays: z.array(z.number().int().min(0).max(6)).min(1).max(7),
+        }),
       ]),
       durationMinutes: z.number().int().min(15).max(240),
+      budget: z.object({
+        maxScheduledRunsPerDay: z.number().int().positive().max(10_000).optional(),
+        maxTokensPerDay: z.number().int().positive().max(100_000_000).optional(),
+        maxCostUsdPerDay: z.number().positive().max(100_000).optional(),
+      }).optional(),
+      prefilter: z.object({
+        type: z.literal("change-marker"),
+        sourceIds: z.array(requiredText(120)).min(1).max(50),
+      }).optional(),
+      capabilities: z.object({
+        connectedApps: z.enum(["inherit", "off", "read-only", "draft-only", "execute"]).optional(),
+        computer: z.enum(["inherit", "off", "read-only", "execute"]).optional(),
+        peerBots: z.enum(["inherit", "off"]).optional(),
+        phone: z.enum(["inherit", "off"]).optional(),
+      }).optional(),
+      maxChangedStrategyRetries: z.union([z.literal(0), z.literal(1)]).optional(),
       enabledAfterInstall: z.literal(false),
     })).max(50).optional(),
     playbooks: z.array(z.object({
@@ -143,8 +169,11 @@ function markdownDocument(markdown: string): ParsedBotPackage {
   }
   const { botmrr, ...definition } = metadata as Record<string, unknown>;
   if (botmrr !== BOTMRR_MARKDOWN_VERSION) throw new Error("BotMRR Markdown version is not supported");
-  for (const heading of ["Activation", "Mission", "Outcomes", "Connections", "Team", "Chief of Staff", "Completion rule"]) {
+  for (const heading of ["Activation", "Mission", "Outcomes", "Connections", "Team", "Completion rule"]) {
     if (!markdown.includes(`## ${heading}`)) throw new Error(`This Markdown is missing its ${heading} section`);
+  }
+  if (!markdown.includes("## Coordination") && !markdown.includes("## Chief of Staff")) {
+    throw new Error("This Markdown is missing its Coordination section");
   }
   return {
     format: BOT_PACKAGE_FORMAT,
@@ -194,6 +223,18 @@ export function parseBotPackage(value: JsonValue | ParsedBotPackage): ParsedBotP
   }
   for (const routine of pkg.routines ?? []) {
     if (!agents.has(routine.agent)) throw new Error(`Routine ${routine.key} references unknown agent: ${routine.agent}`);
+    // Keep package validation aligned with RoutineManager.cleanSchedule. An
+    // invalid interval should fail before an import/migration can create or
+    // update any bots and routines.
+    if (routine.schedule.type === "interval") {
+      const minutes = (value: string): number => {
+        const [hour, minute] = value.split(":").map(Number);
+        return hour * 60 + minute;
+      };
+      if (minutes(routine.schedule.from) > minutes(routine.schedule.to)) {
+        throw new Error(`Routine ${routine.key} interval end time must be after its start time`);
+      }
+    }
   }
   return parsed.data;
 }
@@ -212,6 +253,7 @@ export function renderBotPackageMarkdown(document: ParsedBotPackage): string {
     agent.playbooks?.length ? `**Use these playbooks:** ${agent.playbooks.map((key) => `\`${key}\``).join(", ")}` : "",
     "",
     agent.description,
+    agent.instructions ? `**Detailed instructions**\n\n${agent.instructions}` : "",
   ].filter(Boolean).join("\n\n")).join("\n\n");
   const rooms = (pkg.rooms ?? []).map((room) => [
     `### ${room.name}`,
@@ -223,7 +265,11 @@ export function renderBotPackageMarkdown(document: ParsedBotPackage): string {
   const routines = (pkg.routines ?? []).map((routine) => [
     `### ${routine.name}`,
     `**Owner:** \`${routine.agent}\`  `,
-    `**Schedule:** ${routine.schedule.type === "daily" ? `${routine.schedule.time} on weekdays ${routine.schedule.weekdays.join(", ")}` : `once at ${routine.schedule.at}`}  `,
+    `**Schedule:** ${routine.schedule.type === "daily"
+      ? `${routine.schedule.time} on weekdays ${routine.schedule.weekdays.join(", ")}`
+      : routine.schedule.type === "interval"
+        ? `every ${routine.schedule.everyMinutes} minutes from ${routine.schedule.from} to ${routine.schedule.to} on weekdays ${routine.schedule.weekdays.join(", ")}`
+        : `once at ${routine.schedule.at}`}  `,
     "**Initial state:** paused — the user must enable it",
     "",
     routine.prompt,
@@ -250,19 +296,33 @@ export function renderBotPackageMarkdown(document: ParsedBotPackage): string {
   const connections = pkg.requirements.apps.length
     ? pkg.requirements.apps.map((app) => `- **${app.label}${app.optional ? " (optional)" : ""}:** ${app.reason}`).join("\n")
     : "- No connected apps are required.";
+  const coordinator = pkg.chiefOfStaff
+    ? pkg.agents.find((agent) => agent.key === pkg.chiefOfStaff) ?? null
+    : null;
+  const handoff = coordinator
+    ? "Give this file to your Chief of Staff."
+    : "Give this file to the agent harness or person setting up the team.";
+  const activation = coordinator
+    ? "You are the coordinator for this blueprint. Read the whole document before acting. Confirm the user's goal and any missing inputs, then create or delegate to the specialist roles below. Preserve their names, ownership, boundaries, shared-room rules, and playbooks."
+    : "You are activating this blueprint. Read the whole document before acting. Confirm the user's goal and any missing inputs, then create the roles below with their stated ownership, boundaries, shared-room rules, and playbooks. Do not invent a coordinator when the blueprint does not define one.";
+  const coordination = coordinator
+    ? `## Coordination\n\nThe coordinator role is \`${coordinator.key}\`. It owns delegation, synthesis, conflict resolution, and the final answer to the user.\n`
+    : "## Coordination\n\nNo coordinator is required. Agents may work independently or through the shared-room routing defined below.\n";
 
-  return `---\n${frontmatter}\n---\n\n# ${pkg.name}\n\n${pkg.tagline}\n\n> **Give this file to your Chief of Staff.** It is the complete team blueprint. Any agent system can run it; OpenMausBot can also install it directly.\n\n## Activation\n\nYou are the Chief of Staff for this blueprint. Read the whole document before acting. Confirm the user's goal and any missing inputs, then create or delegate to the specialist roles below. Preserve their names, ownership, boundaries, shared-room rules, and playbooks. If your platform cannot literally spawn agents, perform the roles one at a time and keep their outputs clearly separated.\n\nNever request pasted passwords or secret keys. Use the platform's normal connection flow. Do not send messages, publish content, spend money, delete data, or enable a schedule without the user's explicit approval. All routines start paused.\n\n## Mission\n\n${pkg.summary}\n\n## Outcomes\n\n${list(pkg.outcomes)}\n\n## Connections\n\n${connections}\n\n## Team\n\n${agents}\n\n## Chief of Staff\n\nThe Chief of Staff role is \`${pkg.chiefOfStaff ?? pkg.agents[0].key}\`. This role owns delegation, synthesis, conflict resolution, and the final answer to the user.\n${rooms ? `\n## Shared rooms\n\n${rooms}\n` : ""}${routines ? `\n## Suggested routines\n\n${routines}\n` : ""}${playbooks ? `\n## Playbooks\n\n${playbooks}\n` : ""}${examples ? `\n## Example job\n\n${examples}\n` : ""}\n## Completion rule\n\nReturn one clear result to the user, distinguish evidence from inference, cite source links when the work uses external material, and state what still needs human approval or a connected app.\n`;
+  return `---\n${frontmatter}\n---\n\n# ${pkg.name}\n\n${pkg.tagline}\n\n> **${handoff}** It is the complete team blueprint. Any agent system can run it; OpenMausBot can also install it directly.\n\n## Activation\n\n${activation} If your platform cannot literally spawn agents, perform the roles one at a time and keep their outputs clearly separated.\n\nNever request pasted passwords or secret keys. Use the platform's normal connection flow. Do not send messages, publish content, spend money, delete data, or enable a schedule without the user's explicit approval. All routines start paused.\n\n## Mission\n\n${pkg.summary}\n\n## Outcomes\n\n${list(pkg.outcomes)}\n\n## Connections\n\n${connections}\n\n## Team\n\n${agents}\n\n${coordination}\n${rooms ? `\n## Shared rooms\n\n${rooms}\n` : ""}${routines ? `\n## Suggested routines\n\n${routines}\n` : ""}${playbooks ? `\n## Playbooks\n\n${playbooks}\n` : ""}${examples ? `\n## Example job\n\n${examples}\n` : ""}\n## Completion rule\n\nReturn one clear result to the user, distinguish evidence from inference, cite source links when the work uses external material, and state what still needs human approval or a connected app.\n`;
 }
 
 export function packageAgentAsMember(agent: BotPackageAgent): TeamManifestMember {
-  return {
+  const appearance: TeamManifestMember["appearance"] = { color: agent.appearance.color };
+  if (agent.appearance.mascotExpression) appearance.mascotExpression = agent.appearance.mascotExpression;
+  const member: TeamManifestMember = {
     key: agent.key,
     name: agent.name,
     title: agent.title ?? "",
     description: agent.description ?? "",
-    appearance: {
-      color: agent.appearance.color,
-      ...(agent.appearance.mascotExpression ? { mascotExpression: agent.appearance.mascotExpression } : {}),
-    },
+    appearance,
   };
+  if (agent.instructions) member.instructions = agent.instructions;
+  if (agent.reportingMode) member.reportingMode = agent.reportingMode;
+  return member;
 }

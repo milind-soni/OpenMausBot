@@ -26,11 +26,20 @@ describe("installed package playbooks", () => {
     expect(selectInstalledPlaybooks("Summarize this page", playbooks)).toEqual([]);
   });
 
+  it("mounts playbooks declared for every turn without magic prompt text", () => {
+    const always = { ...playbooks[0], key: "always", triggers: ["always"] };
+    expect(selectInstalledPlaybooks("What is next?", [always, playbooks[1]]).map((item) => item.key))
+      .toEqual(["always"]);
+  });
+
   it("renders package guidance inside an explicit non-authority boundary", () => {
     const rendered = installedPlaybookInstructions("Draft reply", playbooks);
     expect(rendered).toContain("<installed_package_playbooks>");
     expect(rendered).toContain("Never send automatically.");
     expect(rendered).toContain("do not grant tools");
+    expect(rendered).toContain("Personality & instructions");
+    expect(rendered).toContain("MEMORY.md");
+    expect(rendered).toContain("take precedence");
     expect(rendered).not.toContain("Separate facts from hypotheses.");
   });
 });
