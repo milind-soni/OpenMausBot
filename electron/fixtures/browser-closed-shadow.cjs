@@ -1,16 +1,39 @@
 "use strict";
 
+const { once } = require("node:events");
 const { app, BrowserWindow, WebContentsView } = require("electron");
 const { createBrowserSurfaceManager } = require("../browser-surface.cjs");
 
-// Hosted Windows runners can abort Chromium's GPU subprocess during early
-// startup under its restricted sandbox. Disable only that child sandbox for
-// this integration fixture; the page renderer remains sandboxed. Linux CI
-// runs under Xvfb as root; macOS keeps the full production configuration.
-if (process.platform === "win32") {
-  app.commandLine.appendSwitch("disable-gpu-sandbox");
-} else if (process.platform === "linux") {
+// Linux CI runs under Xvfb as root. Windows receives the restricted-package
+// filesystem ACL it needs from the test wrapper and keeps every child sandbox.
+if (process.platform === "linux") {
   app.commandLine.appendSwitch("no-sandbox");
+}
+
+async function waitForLifecycleEvent(emitter, event, label, timeoutMs = 2_000) {
+  try {
+    await once(emitter, event, { signal: AbortSignal.timeout(timeoutMs) });
+  } catch (error) {
+    if (error?.name === "AbortError") throw new Error(`Timed out waiting for ${label} to emit ${event}`);
+    throw error;
+  }
+}
+
+async function closeFixture(manager, browserView, owner) {
+  const viewContents = browserView?.webContents;
+  const viewDestroyed = viewContents && !viewContents.isDestroyed()
+    ? waitForLifecycleEvent(viewContents, "destroyed", "browser WebContents")
+    : Promise.resolve();
+  manager.closeAll();
+  try {
+    await viewDestroyed;
+  } finally {
+    if (!owner.isDestroyed()) {
+      const ownerClosed = waitForLifecycleEvent(owner, "closed", "owner BrowserWindow");
+      owner.destroy();
+      await ownerClosed;
+    }
+  }
 }
 
 async function run() {
@@ -180,8 +203,7 @@ async function run() {
     if (!relabelRefused) throw new Error("relabelled ref was not invalidated");
     process.stdout.write("relabelled-ref-refused\n");
   } finally {
-    manager.closeAll();
-    owner.destroy();
+    await closeFixture(manager, browserView, owner);
   }
 }
 
