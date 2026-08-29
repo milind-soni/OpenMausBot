@@ -87,7 +87,7 @@ function yamlStringNeedsQuotes(str: string): boolean {
     return true;
 
   // Non-string types recognized by YAML
-  if (!isNaN(Number(str)) || ['y', 'n', 'yes', 'no', 'true', 'false', 'on', 'off', 'null'].includes(str.toLowerCase()))
+  if (!isNaN(Number(str)) || ['y', 'n', 'yes', 'no', 'true', 'false', 'on', 'off', 'null', '~'].includes(str.toLowerCase()))
     return true;
 
   return false;

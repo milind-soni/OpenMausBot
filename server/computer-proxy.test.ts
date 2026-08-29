@@ -36,6 +36,7 @@ describe("computer proxy (fake box)", () => {
   let hash = "aaaa1111";
   let browserUrl = "https://example.com/";
   let cropFails = false;
+  let waitResult: "yes" | "no" | "error" = "yes";
 
   const rpc = (msg: unknown) => proxy.stdin!.write(JSON.stringify(msg) + "\n");
   const results = new Map<number, any>();
@@ -59,7 +60,16 @@ describe("computer proxy (fake box)", () => {
           commands.push(command);
           // a real box echoes what the capture block printed
           const size = Buffer.from(JPEG, "base64").length;
-          const stdout = command.includes("127.0.0.1:9222/json/list")
+          const isWait = command.includes("WAIT_RESULT");
+          const stdout = isWait
+            ? waitResult === "error"
+              ? ""
+              : `WAIT_RESULT ${waitResult} ELAPSED ${waitResult === "yes" ? 3 : 5}\n${
+                  /GEOM/.test(command)
+                    ? `GEOM 1920 1080\nHASH ${hash}\nSIZE ${size}\nB64 ${JPEG}\n`
+                    : ""
+                }`
+            : command.includes("127.0.0.1:9222/json/list")
             ? JSON.stringify([
                 { id: "page-1", type: "page", title: " Example ", url: browserUrl },
               ])
@@ -80,7 +90,11 @@ describe("computer proxy (fake box)", () => {
                 ? `GEOM 1920 1080\nHASH ${hash}\nSIZE ${size}\nB64 ${JPEG}\nACT ok\n`
                 : "ACT ok\n";
           res.writeHead(200, { "content-type": "application/json" });
-          res.end(JSON.stringify({ exitCode: 0, stdout, stderr: "" }));
+          res.end(JSON.stringify({
+            exitCode: isWait && waitResult === "error" ? 7 : 0,
+            stdout,
+            stderr: isWait && waitResult === "error" ? "remote command endpoint failed" : "",
+          }));
         });
         return;
       }
@@ -149,6 +163,109 @@ describe("computer proxy (fake box)", () => {
     expect(click.description).toMatch(/return the resulting screen/i);
     const screenshot = res.result.tools.find((t: any) => t.name === "screenshot");
     expect(screenshot.inputSchema.properties.region).toBeTruthy();
+  });
+
+  it("wait_for keeps polling on the box in one bounded command", async () => {
+    rpc({ jsonrpc: "2.0", id: 70, method: "tools/list" });
+    const list = await waitFor(70);
+    const tool = list.result.tools.find((candidate: any) => candidate.name === "wait_for");
+    expect(tool.inputSchema.properties.condition.enum).toEqual([
+      "http_ready",
+      "tcp_ready",
+      "output_matches",
+      "file_exists",
+    ]);
+    expect(JSON.stringify(tool.inputSchema)).not.toMatch(/"(oneOf|anyOf|allOf|const|format)":/);
+
+    const before = commands.length;
+    waitResult = "yes";
+    hash = "wait1111";
+    rpc({
+      jsonrpc: "2.0",
+      id: 71,
+      method: "tools/call",
+      params: {
+        name: "wait_for",
+        arguments: { condition: "output_matches", command: "tail -1 /tmp/build.log", pattern: "done|failed", timeout_seconds: 90 },
+      },
+    });
+    const result = await waitFor(71);
+    expect(commands.length - before).toBe(1);
+    const command = commands.at(-1)!;
+    if (process.platform !== "win32") expect(spawnSync("/bin/bash", ["-n", "-c", command]).status).toBe(0);
+    expect(command).toContain("END=$((SECONDS+90))");
+    expect(command).toContain("timeout --kill-after=1s 1s bash -c");
+    expect(command).toContain("grep -Eq");
+    expect(result.result.content[0].text).toContain("condition met");
+    expect(result.result.content).toHaveLength(1);
+    expect(command).not.toContain("B64");
+    waitResult = "yes";
+    hash = "aaaa1111";
+  });
+
+  it("wait_for marks timeouts and infrastructure failures as errors without capturing the screen", async () => {
+    waitResult = "no";
+    hash = "wait2222";
+    rpc({
+      jsonrpc: "2.0",
+      id: 72,
+      method: "tools/call",
+      params: { name: "wait_for", arguments: { condition: "tcp_ready", port: 5432, timeout_seconds: 5 } },
+    });
+    const timedOut = await waitFor(72);
+    expect(timedOut.result.isError).toBe(true);
+    expect(timedOut.result.content[0].text).toContain("timed out after 5s");
+    expect(timedOut.result.content).toHaveLength(1);
+
+    waitResult = "error";
+    rpc({
+      jsonrpc: "2.0",
+      id: 73,
+      method: "tools/call",
+      params: { name: "wait_for", arguments: { condition: "file_exists", path: "/tmp/ready", observe: false } },
+    });
+    const failed = await waitFor(73);
+    expect(failed.result.isError).toBe(true);
+    expect(failed.result.content[0].text).toContain("remote command endpoint failed");
+    expect(failed.result.content[0].text).not.toContain("timed out");
+    waitResult = "yes";
+    hash = "aaaa1111";
+  });
+
+  it("wait_for cannot overrun a one-second deadline with a slow probe or sleep", async () => {
+    waitResult = "no";
+    rpc({
+      jsonrpc: "2.0",
+      id: 76,
+      method: "tools/call",
+      params: {
+        name: "wait_for",
+        arguments: { condition: "output_matches", command: "sleep 30; echo done", pattern: "done", timeout_seconds: 1, observe: false },
+      },
+    });
+    await waitFor(76);
+    const command = commands.at(-1)!;
+    if (process.platform !== "win32") {
+      const started = Date.now();
+      const executed = spawnSync("/bin/bash", ["-c", command], { encoding: "utf8", timeout: 4_000 });
+      expect(executed.status).toBe(0);
+      expect(executed.stdout).toMatch(/WAIT_RESULT no ELAPSED [12]/);
+      expect(Date.now() - started).toBeLessThan(3_000);
+    }
+    waitResult = "yes";
+  });
+
+  it("wait_for rejects incomplete input before making a box request", async () => {
+    const before = commands.length;
+    rpc({ jsonrpc: "2.0", id: 74, method: "tools/call", params: { name: "wait_for", arguments: { condition: "http_ready" } } });
+    const missing = await waitFor(74);
+    expect(missing.result.isError).toBe(true);
+    expect(missing.result.content[0].text).toContain('"url"');
+    rpc({ jsonrpc: "2.0", id: 75, method: "tools/call", params: { name: "wait_for", arguments: { condition: "every_5_minutes" } } });
+    const unknown = await waitFor(75);
+    expect(unknown.result.isError).toBe(true);
+    expect(unknown.result.content[0].text).toContain("http_ready");
+    expect(commands.length).toBe(before);
   });
 
   it("clicks and returns the frame in ONE round trip, scaled box-side", async () => {

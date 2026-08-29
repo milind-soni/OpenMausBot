@@ -361,7 +361,8 @@ export function SettingsPanel({ bot }: { bot: Bot }) {
   const canUseBrowser = engine?.capabilities?.browserMcp === true;
   const desktopBrowser = Boolean(window.ogb?.browser);
   const browserFeature = builtInBrowserEnabled(state.config);
-  const browserEnabled = bot.browser !== false;
+  const browserAllowed = bot.browser !== false;
+  const browserEnabled = browserFeature && browserAllowed;
   const sectionName = bot.section?.trim() || "General";
   const currentChief = state.bots.find(
     (candidate) =>
@@ -571,7 +572,7 @@ export function SettingsPanel({ bot }: { bot: Bot }) {
               aria-checked={browserEnabled}
               aria-label="Give this bot a built-in browser"
               disabled={!browserEnabled && (!desktopBrowser || !browserFeature || !canUseBrowser)}
-              onClick={() => patch({ browser: !browserEnabled })}
+              onClick={() => patch({ browser: !browserAllowed })}
               className={cn(
                 "relative h-[26px] w-[44px] shrink-0 rounded-full transition-colors disabled:cursor-not-allowed disabled:opacity-40",
                 browserEnabled ? "bg-accent" : "bg-control",

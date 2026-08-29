@@ -88,9 +88,9 @@ describe("configuration boundaries", () => {
       features: { skillRecorder: true },
     });
     expect(skillRecorderEnabled({ features: { skillRecorder: true } })).toBe(true);
-    // the built-in browser is on unless switched off — an independent flag
-    expect(builtInBrowserEnabled({})).toBe(true);
-    expect(builtInBrowserEnabled({ features: { skillRecorder: true } })).toBe(true);
+    // the built-in browser is an independent explicit opt-in
+    expect(builtInBrowserEnabled({})).toBe(false);
+    expect(builtInBrowserEnabled({ features: { skillRecorder: true } })).toBe(false);
     expect(parseConfigPatch({ features: { browser: false } })).toEqual({ features: { browser: false } });
     expect(builtInBrowserEnabled({ features: { browser: false } })).toBe(false);
     expect(builtInBrowserEnabled({ features: { browser: true } })).toBe(true);
@@ -99,7 +99,11 @@ describe("configuration boundaries", () => {
       browserProfiles: [{ id: "work", name: "Work" }],
     });
     expect(() => parseConfigPatch({ browserProfiles: [{ id: "../evil", name: "x" }] })).toThrow(/browserProfiles.*id/i);
+    expect(() => parseConfigPatch({ browserProfiles: [{ id: "Work", name: "Work" }] })).toThrow(/browserProfiles.*id/i);
     expect(() => parseConfigPatch({ browserProfiles: [{ id: "ok", name: "" }] })).toThrow(/browserProfiles.*name/i);
+    expect(() => parseConfigPatch({
+      browserProfiles: [{ id: "work", name: "Work" }, { id: "work", name: "Work again" }],
+    })).toThrow(/browserProfiles.*id.*duplicated/i);
     expect(() => parseConfigPatch({ features: { skillRecorder: "yes" } })).toThrow(
       "features.skillRecorder",
     );
@@ -446,11 +450,13 @@ describe("workspace credential env strip", () => {
     expect(env).toEqual({ PATH: "/usr/bin", MY_FLAG: "1" });
   });
 
-  it("covers the box token and voice key, which no engine CLI may inherit", () => {
-    // these two have no per-driver ACP allowlist entry anywhere — they are
+  it("covers in-process secrets and private app-state paths", () => {
+    // These secrets have no per-driver ACP allowlist entry anywhere — they are
     // consumed in-process (Computer driver / voice module), never by a CLI
     expect(WORKSPACE_CREDENTIAL_ENV).toContain("BOX_TOKEN");
     expect(WORKSPACE_CREDENTIAL_ENV).toContain("OMB_TTS_KEY");
     expect(WORKSPACE_CREDENTIAL_ENV).toContain("OMB_OPENAI_IMAGE_KEY");
+    expect(WORKSPACE_CREDENTIAL_ENV).toContain("OMB_BROWSER_CONNECTION");
+    expect(WORKSPACE_CREDENTIAL_ENV).toContain("OMB_USER_DATA");
   });
 });

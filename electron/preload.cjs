@@ -159,9 +159,10 @@ contextBridge.exposeInMainWorld("ogb", {
     available: () => ipcRenderer.invoke("browser:available"),
     state: (botId) => ipcRenderer.invoke("browser:state", botId),
     layout: (botId, bounds, profile, mode) => ipcRenderer.invoke("browser:layout", botId, bounds, profile, mode),
-    navigate: (botId, url) => ipcRenderer.invoke("browser:navigate", botId, url),
-    back: (botId) => ipcRenderer.invoke("browser:back", botId),
-    forward: (botId) => ipcRenderer.invoke("browser:forward", botId),
+    navigate: (botId, url, profile) => ipcRenderer.invoke("browser:navigate", botId, url, profile),
+    back: (botId, profile) => ipcRenderer.invoke("browser:back", botId, profile),
+    forward: (botId, profile) => ipcRenderer.invoke("browser:forward", botId, profile),
+    setHumanControl: (botId, held, profile) => ipcRenderer.invoke("browser:set-human-control", botId, held, profile),
     /** Wipe a named profile's logins, storage and cache after it is deleted. */
     forgetProfile: (profileId) => ipcRenderer.invoke("browser:forget-profile", profileId),
     close: (botId) => ipcRenderer.invoke("browser:close", botId),
@@ -169,6 +170,11 @@ contextBridge.exposeInMainWorld("ogb", {
       const handler = (_event, state) => cb(state);
       ipcRenderer.on("browser:state", handler);
       return () => ipcRenderer.removeListener("browser:state", handler);
+    },
+    onUserInteraction: (cb) => {
+      const handler = (_event, state) => cb(state);
+      ipcRenderer.on("browser:user-interaction", handler);
+      return () => ipcRenderer.removeListener("browser:user-interaction", handler);
     },
   },
   /** Native folder picker for a bot's working folder; null when cancelled. */

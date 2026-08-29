@@ -5,6 +5,7 @@
 // separate preview remains explicitly user-initiated. Auto never selects a
 // Linux user's desktop.
 import { useEffect, useRef, useState } from "react";
+import { z } from "zod";
 import {
   CalendarClock,
   CalendarDays,
@@ -32,6 +33,7 @@ import { RoutineEditor } from "./RoutinesPage";
 import { AndroidDevicePanel, useAndroidUsbDevices } from "./AndroidDevicePanel";
 import { BrowserPanel } from "./BrowserPanel";
 import { builtInBrowserEnabled } from "@/lib/feature-flags";
+import { transitionComputerControlLease, type ComputerControlAction } from "@/lib/computer-control";
 import { LocalScreenPreview } from "./LocalScreenPreview";
 import { LinuxLocalControl } from "./LinuxLocalControl";
 import { MacLocalControl } from "./MacLocalControl";
@@ -83,6 +85,11 @@ interface LocalVmStatus {
   problem: string | null;
   viewer_url: string;
 }
+
+const computerControlSnapshotSchema = z.object({
+  held: z.boolean().optional().default(false),
+  helpReason: z.string().nullable().optional().default(null),
+}).passthrough();
 
 function routineScheduleLabel(routine: Routine) {
   if (routine.schedule.type === "once") {
@@ -570,13 +577,14 @@ export function ComputerPanel({
   useEffect(() => {
     let alive = true;
     api(`/api/bots/${bot.id}/computer/control`)
-      .then((snap) => {
+      .then((raw) => {
         if (!alive) return;
+        const snap = computerControlSnapshotSchema.parse(raw);
         dispatch({
           type: "computerControl",
           botId: bot.id,
           held: snap.held === true,
-          helpReason: typeof snap.helpReason === "string" ? snap.helpReason : null,
+          helpReason: snap.helpReason,
         });
       })
       .catch(() => {});
@@ -585,25 +593,52 @@ export function ComputerPanel({
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [bot.id]);
-  const requestControl = async (action: "take" | "release" | "dismiss-help") => {
-    const snap = await api(`/api/bots/${bot.id}/computer/control`, {
+  const requestControl = async (action: ComputerControlAction) => {
+    const snap = computerControlSnapshotSchema.parse(await api(`/api/bots/${bot.id}/computer/control`, {
       method: "POST",
       body: JSON.stringify({ action }),
-    });
+    }));
     dispatch({
       type: "computerControl",
       botId: bot.id,
       held: snap.held === true,
-      helpReason: typeof snap.helpReason === "string" ? snap.helpReason : null,
+      helpReason: snap.helpReason,
     });
     return snap;
   };
 
-  const controlAction = (action: "take" | "release" | "dismiss-help") => {
+  const setNativeBrowserControl = async (held: boolean): Promise<boolean> => {
+    const setter = window.ogb?.browser?.setHumanControl;
+    if (!setter) return true;
+    const profile = bot.browserProfile === "guest" ? "guest" : bot.browserProfile ?? "";
+    return (await setter(bot.id, held, profile)) === true;
+  };
+
+  const transitionControl = async (action: ComputerControlAction) => {
+    // BrowserPanel performs the same two-phase transition itself. Every
+    // other computer surface must also gate Electron's direct browser host:
+    // the server hold is bot-wide, and a shell-capable agent can otherwise
+    // bypass the server proxy while the person drives Local VM/Box/VPS.
+    return transitionComputerControlLease({
+      action,
+      syncNativeBrowser: panelView !== "browser",
+      requestControl,
+      setNativeBrowserControl,
+    });
+  };
+
+  const controlAction = async (action: ComputerControlAction): Promise<boolean> => {
     setControlPending(true);
-    requestControl(action)
-      .catch((e) => setError(e.message))
-      .finally(() => setControlPending(false));
+    setError(null);
+    try {
+      await transitionControl(action);
+      return true;
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : String(cause));
+      return false;
+    } finally {
+      setControlPending(false);
+    }
   };
 
   const openDesktop = async () => {
@@ -620,7 +655,7 @@ export function ComputerPanel({
     }
     try {
       if (!control.held) {
-        await requestControl("take");
+        await transitionControl("take");
         tookControl = true;
       }
 
@@ -646,7 +681,7 @@ export function ComputerPanel({
       fallbackTab?.close();
       // Release the bot before waiting on best-effort tunnel cleanup. A sick
       // SSH process must never leave the agent paused indefinitely.
-      if (tookControl) await requestControl("release").catch(() => {});
+      if (tookControl) await transitionControl("release").catch(() => {});
       if (phase === "ready" && cloudBackend === "vps") {
         await api(`/api/bots/${bot.id}/computer/viewer-close`, { method: "POST", body: "{}" }).catch(() => {});
       }
@@ -817,7 +852,10 @@ export function ComputerPanel({
             )}
             {browserEnabled && (
             <button
-              onClick={() => setPanelView("browser")}
+              onClick={() => {
+                setError(null);
+                setPanelView("browser");
+              }}
               aria-pressed={panelView === "browser"}
               className={cn(
                 "flex items-center gap-1.5 border-l border-hairline/40 px-2.5 py-1 text-[12.5px]",
@@ -848,6 +886,11 @@ export function ComputerPanel({
             onControl={controlAction}
             onExpand={onExpandBrowser ? () => onExpandBrowser(bot.id) : undefined}
           />
+          {error && (
+            <div role="alert" className="mt-2 rounded-lg border border-danger/30 bg-danger/10 px-3 py-2 text-[12px] text-danger">
+              {error}
+            </div>
+          )}
         </div>
       ) : panelView === "android" && androidConnected ? (
         <div className="flex-1 overflow-y-auto px-4 pt-2">

@@ -64,17 +64,32 @@ const localVmConfigSchema = z.object({
  * durable Electron partition; user-controlled characters never reach it. */
 const browserProfileSchema = z.object({
   // "guest" is the throwaway session's reserved id, never a saved profile
-  id: z.string().regex(/^[A-Za-z0-9_-]{1,40}$/).refine((id) => id !== "guest", "guest is reserved"),
+  // Lowercase is part of the storage contract: durable Chromium partition
+  // directories would otherwise collide on case-insensitive filesystems.
+  id: z.string().regex(/^[a-z0-9_-]{1,40}$/).refine((id) => id !== "guest", "guest is reserved"),
   name: z.string().trim().min(1).max(40),
 }).strict();
-const browserProfilesSchema = z.array(browserProfileSchema).max(20);
+const browserProfilesSchema = z.array(browserProfileSchema).max(20).superRefine((profiles, ctx) => {
+  const seen = new Set<string>();
+  profiles.forEach((profile, index) => {
+    if (!seen.has(profile.id)) {
+      seen.add(profile.id);
+      return;
+    }
+    ctx.addIssue({
+      code: "custom",
+      path: [index, "id"],
+      message: `browser profile id ${profile.id} is duplicated`,
+    });
+  });
+});
 const featureConfigSchema = z.object({
   /** Experimental desktop workflow recorder. Hidden unless explicitly enabled. */
   skillRecorder: z.boolean().optional(),
   /** Show each tool run in the transcript. Off unless explicitly enabled. */
   showToolCalls: z.boolean().optional(),
-  /** The built-in per-bot browser (Browser tab). On unless switched off;
-   * each bot also has its own switch. */
+  /** Experimental built-in browser. Off until explicitly enabled; each bot
+   * also has its own switch. */
   browser: z.boolean().optional(),
 });
 const instanceConfigSchema = z.object({
@@ -179,10 +194,10 @@ export function showToolCallsEnabled(cfg: AppConfig): boolean {
   return cfg.features?.showToolCalls === true;
 }
 
-/** Workspace-level gate for the built-in browser: on unless switched off.
- * A bot's own switch sits under it, so either can withhold the browser. */
+/** Workspace-level gate for the experimental built-in browser. A bot's own
+ * switch sits under it, so either can withhold the browser. */
 export function builtInBrowserEnabled(cfg: AppConfig): boolean {
-  return cfg.features?.browser !== false;
+  return cfg.features?.browser === true;
 }
 
 // OMB_DATA_DIR isolates test/soak rigs from the user's real fleet.
@@ -289,6 +304,11 @@ export const WORKSPACE_CREDENTIAL_ENV = [
   "OMB_OPENAI_IMAGE_KEY",
   "COMPOSIO_API_KEY",
   "OMB_COMPOSIO_BROKER_TOKEN",
+  // Harness-private filesystem hints are not credentials themselves, but
+  // exposing them to a shell-capable agent points straight at app-owned
+  // state. The built-in browser master is delivered privately in memory.
+  "OMB_BROWSER_CONNECTION",
+  "OMB_USER_DATA",
 ] as const;
 
 /** Drop every workspace credential from a child-process env (in place). */

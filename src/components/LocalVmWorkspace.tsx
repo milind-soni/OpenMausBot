@@ -16,6 +16,7 @@ import {
 } from "react";
 import { api, useStore, type Action, type Bot } from "@/state/store";
 import { cn } from "@/lib/cn";
+import { transitionComputerControlLease } from "@/lib/computer-control";
 import {
   initialLocalVmWorkspaceSlots,
   nativeViewOverlayIntersects,
@@ -79,7 +80,21 @@ function bestEffortRelease(botId: string, controlLeaseId: string) {
     headers: { "content-type": "application/json" },
     body: JSON.stringify({ action: "release", controlLeaseId }),
     keepalive: true,
+  }).then(async (response) => {
+    if (!response.ok) return;
+    const snapshot = await response.json().catch(() => null);
+    // The server lease is the source of truth; only clear Electron after the
+    // workspace-owned release was actually accepted.
+    if (snapshot?.held === false) {
+      await window.ogb?.browser?.setHumanControl?.(botId, false).catch(() => {});
+    }
   }).catch(() => {});
+}
+
+async function setNativeBrowserControl(botId: string, held: boolean): Promise<boolean> {
+  const setter = window.ogb?.browser?.setHumanControl;
+  if (!setter) return true;
+  return (await setter(botId, held)) === true;
 }
 
 function dispatchControl(
@@ -532,14 +547,24 @@ export function LocalVmWorkspace({
   const controlPort = useMemo<LocalVmWorkspaceControlPort>(
     () => ({
       async take(botId) {
-        const snapshot = await requestComputerControl(botId, "take", controlLeaseId);
+        const snapshot = await transitionComputerControlLease({
+          action: "take",
+          syncNativeBrowser: true,
+          requestControl: (action) => requestComputerControl(botId, action, controlLeaseId),
+          setNativeBrowserControl: (held) => setNativeBrowserControl(botId, held),
+        });
         dispatchControl(dispatch, botId, snapshot);
         if (snapshot.held && snapshot.owned === true) controlledBotIdRef.current = botId;
         else if (controlledBotIdRef.current === botId) controlledBotIdRef.current = null;
         return snapshot;
       },
       async release(botId) {
-        const snapshot = await requestComputerControl(botId, "release", controlLeaseId);
+        const snapshot = await transitionComputerControlLease({
+          action: "release",
+          syncNativeBrowser: true,
+          requestControl: (action) => requestComputerControl(botId, action, controlLeaseId),
+          setNativeBrowserControl: (held) => setNativeBrowserControl(botId, held),
+        });
         dispatchControl(dispatch, botId, snapshot);
         if (controlledBotIdRef.current === botId) controlledBotIdRef.current = null;
         return snapshot;
