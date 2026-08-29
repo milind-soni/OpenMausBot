@@ -26,6 +26,7 @@ struct NewGroupSheet: View {
                     ForEach(bots) { bot in
                         Button {
                             if members.contains(bot.id) { members.remove(bot.id) } else { members.insert(bot.id) }
+                            Haptics.selection()
                         } label: {
                             HStack(spacing: 12) {
                                 BotAvatarView(bot: bot, size: 36, state: .idle, animated: false)
@@ -59,6 +60,7 @@ struct NewGroupSheet: View {
                             // it defaults) follows the first bot you picked
                             let ordered = bots.map(\.id).filter(members.contains)
                             if let room = await session.createRoom(name: name, memberIds: ordered) {
+                                Haptics.success()
                                 created(room)
                             }
                             creating = false

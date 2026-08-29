@@ -120,6 +120,7 @@ struct NeedsYouIsland: View {
                             HStack(spacing: 8) {
                                 ForEach(card.options, id: \.self) { option in
                                     Button {
+                                        Haptics.selection()
                                         answering = true
                                         Task {
                                             await session.answer(chat: shown.chat, card: card, choice: option)

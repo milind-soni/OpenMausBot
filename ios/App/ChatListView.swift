@@ -54,7 +54,10 @@ struct ChatListView: View {
                             ForEach(searchHits) { hit in
                                 Button {
                                     Task {
-                                        if let chat = await session.open(hit) { path.append(chat) }
+                                        if let chat = await session.open(hit) {
+                                            Haptics.selection()
+                                            path.append(chat)
+                                        }
                                     }
                                 } label: {
                                     SearchHitRow(hit: hit)
@@ -154,10 +157,14 @@ struct ChatListView: View {
                     return
                 }
                 searching = true
+                defer {
+                    if query == expected { searching = false }
+                }
                 try? await Task.sleep(for: .milliseconds(250))
                 guard !Task.isCancelled, query == expected else { return }
-                searchHits = await session.search(expected)
-                searching = false
+                let hits = await session.search(expected)
+                guard !Task.isCancelled, query == expected else { return }
+                searchHits = hits
             }
         }
     }
@@ -228,6 +235,7 @@ struct ChatListView: View {
                         .buttonStyle(.plain)
                     }
                     Button {
+                        Haptics.selection()
                         showingNewGroup = true
                     } label: {
                         GroupTile(room: nil)
@@ -280,10 +288,14 @@ struct ChatListView: View {
                     .frame(height: 52)
                     .glassCapsule()
                 } else {
-                    UpdatesPill(updates: session.state.updates) { showingUpdates = true }
+                    UpdatesPill(updates: session.state.updates) {
+                        Haptics.selection()
+                        showingUpdates = true
+                    }
                         .frame(height: 52)
 
                     GlassButton(systemImage: "magnifyingglass", size: 48, weight: .semibold) {
+                        Haptics.selection()
                         searchOpen = true
                         searchFocused = true
                     }
@@ -291,7 +303,10 @@ struct ChatListView: View {
 
                     GlassButton(systemImage: "square.and.pencil", size: 48, weight: .medium) {
                         Task {
-                            if let bot = await session.createBot() { path.append(Chat.bot(bot)) }
+                            if let bot = await session.createBot() {
+                                Haptics.success()
+                                path.append(Chat.bot(bot))
+                            }
                         }
                     }
                     .accessibilityLabel("New bot")

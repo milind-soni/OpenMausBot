@@ -755,6 +755,7 @@ struct MessageRow: View {
                 HStack(spacing: 6) {
                     ForEach(reactionGroups(reactions), id: \.emoji) { group in
                         Button("\(group.emoji) \(group.count)") {
+                            Haptics.selection()
                             Task { await session.react(to: message, in: chat.threadId, emoji: group.emoji) }
                         }
                         .font(.system(size: 13))
@@ -784,7 +785,10 @@ struct MessageRow: View {
         }
         .contextMenu {
             ForEach(Self.reactionChoices, id: \.self) { emoji in
-                Button(emoji) { Task { await session.react(to: message, in: chat.threadId, emoji: emoji) } }
+                Button(emoji) {
+                    Haptics.selection()
+                    Task { await session.react(to: message, in: chat.threadId, emoji: emoji) }
+                }
             }
             if message.role == .user, message.kind == .text, case let .bot(bot) = chat {
                 Divider()
@@ -1063,6 +1067,7 @@ struct CardView: View {
                     HStack(spacing: 8) {
                         ForEach(card.options, id: \.self) { option in
                             Button {
+                                Haptics.selection()
                                 answering = true
                                 Task {
                                     await session.answer(chat: chat, card: card, choice: option)
@@ -1091,6 +1096,7 @@ struct CardView: View {
                     // never a string invented here.
                     if card.allowKey != nil, let allow = allowChoice, case let .bot(bot) = chat {
                         Button("Always allow this tool") {
+                            Haptics.selection()
                             answering = true
                             Task {
                                 await session.alwaysAllow(bot: bot, card: card)

@@ -96,6 +96,7 @@ private struct UpdateRow: View {
                         HStack(spacing: 8) {
                             ForEach(card.options, id: \.self) { option in
                                 Button {
+                                    Haptics.selection()
                                     answering = true
                                     Task {
                                         await session.answer(chat: update.chat, card: card, choice: option)
