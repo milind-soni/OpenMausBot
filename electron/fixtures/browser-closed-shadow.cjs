@@ -3,7 +3,13 @@
 const { app, BrowserWindow, WebContentsView } = require("electron");
 const { createBrowserSurfaceManager } = require("../browser-surface.cjs");
 
-if (process.platform === "linux") app.commandLine.appendSwitch("no-sandbox");
+// Hosted Windows runners have no interactive GPU desktop and Chromium can
+// terminate with STATUS_BREAKPOINT before JS starts. This fixture validates
+// browser-surface privacy, not GPU or sandbox integration, so keep its native
+// Electron process on the deterministic software path on every CI host.
+app.disableHardwareAcceleration();
+app.commandLine.appendSwitch("no-sandbox");
+app.commandLine.appendSwitch("disable-gpu");
 
 async function run() {
   const owner = new BrowserWindow({ show: false, width: 900, height: 700 });

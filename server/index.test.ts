@@ -2443,20 +2443,15 @@ describe("harness HTTP API", () => {
   });
 
   it("stops a local bot's exact channel and routine work through the emergency endpoint", async () => {
-    const cuaDirectory = join(home, "Library", "Application Support", "OpenMausBot");
-    const cuaDescriptor = join(cuaDirectory, "cua-connection.json");
-    mkdirSync(cuaDirectory, { recursive: true });
-    writeFileSync(cuaDescriptor, JSON.stringify({
-      mode: "embedded",
-      mcpCommand: "/bin/true",
-      mcpArgs: ["mcp"],
-      mcpEnv: { CUA_DRIVER_EMBEDDED: "1" },
-    }));
     const bot = (await api("POST", "/api/bots", {
       modelSelection: { instanceId: "claude", model: "claude-sonnet-5" },
       requireAvailableModel: true,
     })).body.bot;
-    expect((await api("PATCH", `/api/bots/${bot.id}`, { computer: "local" })).status).toBe(200);
+    // This is an emergency-routing test, not another platform CUA contract
+    // test. Dispatch with computer access off so every CI host can run the
+    // same hanging provider, then mark the bot local immediately before the
+    // emergency action whose exact channel/routine targeting is under test.
+    expect((await api("PATCH", `/api/bots/${bot.id}`, { computer: "off" })).status).toBe(200);
     const room = (await api("POST", "/api/groups", {
       name: "Emergency stop room",
       memberIds: [bot.id],
@@ -2468,6 +2463,7 @@ describe("harness HTTP API", () => {
       rmSync(fakeClaudeDump, { force: true });
       expect((await api("POST", `/api/groups/${room.id}/messages`, { text: "work in this channel" })).status).toBe(202);
       await expect.poll(() => existsSync(fakeClaudeDump), { timeout: 5_000 }).toBe(true);
+      expect((await api("PATCH", `/api/bots/${bot.id}`, { computer: "local" })).status).toBe(200);
       expect((await api("POST", "/api/local-computer/interrupt", {})).status).toBe(200);
       await expect.poll(async () => {
         const group = (await api("GET", "/api/bots?messages=0")).body.groups.find(
@@ -2475,6 +2471,7 @@ describe("harness HTTP API", () => {
         );
         return group?.working;
       }, { timeout: 5_000 }).toBe(false);
+      expect((await api("PATCH", `/api/bots/${bot.id}`, { computer: "off" })).status).toBe(200);
 
       const routine = await api("POST", "/api/routines", {
         name: "Emergency stop routine",
@@ -2490,11 +2487,13 @@ describe("harness HTTP API", () => {
       const queued = await api("POST", `/api/routines/${routineId}/run`);
       expect(queued.status).toBe(201);
       runId = queued.body.run.id;
+      await expect.poll(() => existsSync(fakeClaudeDump), { timeout: 5_000 }).toBe(true);
       await expect.poll(async () => {
         const runs = (await api("GET", "/api/routines")).body.runs;
         return runs.find((run: { id: string }) => run.id === runId)?.status;
       }, { timeout: 5_000 }).toBe("running");
 
+      expect((await api("PATCH", `/api/bots/${bot.id}`, { computer: "local" })).status).toBe(200);
       expect((await api("POST", "/api/local-computer/interrupt", {})).status).toBe(200);
       await expect.poll(async () => {
         const runs = (await api("GET", "/api/routines")).body.runs;
@@ -2506,7 +2505,6 @@ describe("harness HTTP API", () => {
       await api("POST", `/api/groups/${room.id}/interrupt`, {}).catch(() => undefined);
       await api("DELETE", `/api/groups/${room.id}`).catch(() => undefined);
       await api("DELETE", `/api/bots/${bot.id}`).catch(() => undefined);
-      rmSync(cuaDescriptor, { force: true });
     }
   });
 

@@ -19,6 +19,7 @@ function harness() {
   let held = false;
   let epoch = 0;
   let agentEpoch = 0;
+  let clock = Date.now();
   let screenshotImpl = null;
   const pins = [];
   const manager = {
@@ -44,13 +45,15 @@ function harness() {
       return { png: "eA==", format: "jpeg" };
     },
   };
-  const host = createBrowserHost({ manager: () => manager, token: MASTER });
+  const host = createBrowserHost({ manager: () => manager, token: MASTER, now: () => clock });
   hosts.push(host);
   return {
     host,
     manager,
     calls,
     pins,
+    now: () => clock,
+    advanceTime: (milliseconds) => { clock += milliseconds; },
     setHeld: (value) => {
       if (held !== value) epoch += 1;
       held = value;
@@ -87,7 +90,7 @@ async function request(host, operation, { botId = "bot-a", profile = "work", tok
 
 describe("browser loopback host", () => {
   it("registers only master-authorized per-turn capabilities and revokes them", async () => {
-    const { host, pins } = harness();
+    const { host, pins, now, advanceTime } = harness();
     await host.start();
     const scoped = "b".repeat(64);
     expect((await manage(host, "register", {
@@ -118,9 +121,9 @@ describe("browser loopback host", () => {
       token: expiring,
       botId: "bot-a",
       profile: "work",
-      expiresAt: Date.now() + 5,
+      expiresAt: now() + 5,
     })).response.status).toBe(200);
-    await new Promise((resolve) => setTimeout(resolve, 10));
+    advanceTime(10);
     expect((await request(host, "state", { token: expiring })).response.status).toBe(401);
 
     const clearable = await register(host);

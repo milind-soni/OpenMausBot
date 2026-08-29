@@ -167,8 +167,10 @@ function sanitizeHostResult(result, operation) {
  * @param {() => (ReturnType<import("./browser-surface.cjs").createBrowserSurfaceManager> | null)} options.manager
  *   getter — the current window's surface, or null when no window is open
  * @param {string} [options.token] 64 hex chars; generated per boot when absent
+ * @param {() => number} [options.now] injectable monotonic wall clock for
+ *   deterministic capability-expiry tests
  */
-function createBrowserHost({ manager, token = randomBytes(32).toString("hex") }) {
+function createBrowserHost({ manager, token = randomBytes(32).toString("hex"), now = Date.now }) {
   const currentManager = manager?.constructor === Function ? manager : () => manager;
   if (!manager) throw new Error("The browser surface manager is required");
   if (!/^[0-9a-f]{64}$/.test(token)) throw new Error("The browser host token must be 64 hex characters");
@@ -202,7 +204,7 @@ function createBrowserHost({ manager, token = randomBytes(32).toString("hex") })
   };
 
   const pruneCapabilities = () => {
-    const current = Date.now();
+    const current = now();
     dropCapabilities((scope) => scope.expiresAt <= current);
   };
 
@@ -228,7 +230,7 @@ function createBrowserHost({ manager, token = randomBytes(32).toString("hex") })
     const botId = isString(body.botId) ? String(body.botId) : "";
     const profile = isString(body.profile) ? String(body.profile) : "";
     const requestedExpiry = Number(body.expiresAt);
-    const current = Date.now();
+    const current = now();
     if (!BOT_ID.test(botId) || !PROFILE_ID.test(profile)) {
       return json(res, 400, { error: "a valid bot and browser profile are required" });
     }
@@ -305,8 +307,8 @@ function createBrowserHost({ manager, token = randomBytes(32).toString("hex") })
       if (afterLease.held || afterLease.epoch !== beforeLease.epoch) {
         return json(res, 409, { error: "Browser control changed while the request was running — retry after the user hands it back" });
       }
-      if (afterLease.agentEpoch !== beforeLease.agentEpoch || capabilities.get(receivedToken) !== capability || capability.expiresAt <= Date.now()) {
-        if (capability.expiresAt <= Date.now()) pruneCapabilities();
+      if (afterLease.agentEpoch !== beforeLease.agentEpoch || capabilities.get(receivedToken) !== capability || capability.expiresAt <= now()) {
+        if (capability.expiresAt <= now()) pruneCapabilities();
         return json(res, 409, { error: "The browser action was cancelled because its turn ended" });
       }
       return json(res, 200, sanitizeHostResult(result ?? {}, operation));
