@@ -40,6 +40,7 @@ describe("what the app may do", () => {
     ["GET", "/api/events"],
     ["GET", "/api/instances"],
     ["GET", "/api/companion/endpoints"],
+    ["POST", "/api/companion/notification-mirror"],
     ["GET", "/api/bots"],
     ["POST", "/api/bots"],
     ["POST", "/api/bots/bot_123/messages"],
@@ -117,6 +118,14 @@ describe("what it may not", () => {
     expect(ask("GET", "/api/companion/endpoints/extra")?.status).toBe(403);
   });
 
+  it("keeps notification mirror paired, read-only, and exact-method only", () => {
+    expect(ask("POST", "/api/companion/notification-mirror", false)?.status).toBe(401);
+    expect(ask("POST", "/api/companion/notification-mirror")).toBeNull();
+    expect(ask("POST", "/api/companion/notification-mirror/heartbeat")).toBeNull();
+    expect(ask("PUT", "/api/companion/notification-mirror")?.status).toBe(403);
+    expect(ask("GET", "/api/companion/notification-mirror")?.status).toBe(403);
+  });
+
   it("describes only refused routine operations as computer-only", () => {
     for (const [method, path] of [
       ["GET", "/api/routines/routine_1"],
@@ -143,13 +152,13 @@ describe("what it may not", () => {
     expect(ask("GET", "/index.html")?.status).toBe(404);
   });
 
-  it("opens only a fresh cloud viewer, not the cloud computer control API", () => {
+  it("opens a fresh cloud viewer and permits view-only screen refreshes", () => {
     expect(allowed("POST", "/api/bots/bot_123/computer/join")).toBe(true);
+    expect(allowed("POST", "/api/bots/bot_123/computer/screenshot")).toBe(true);
     expect(allowed("GET", "/api/bots/bot_123/computer")).toBe(false);
     expect(allowed("POST", "/api/bots/bot_123/computer/provision")).toBe(false);
     expect(allowed("POST", "/api/bots/bot_123/computer/sleep")).toBe(false);
     expect(allowed("POST", "/api/bots/bot_123/computer/exec")).toBe(false);
-    expect(allowed("POST", "/api/bots/bot_123/computer/screenshot")).toBe(false);
   });
 
   // The method is part of the allowance, not decoration: reading the fleet

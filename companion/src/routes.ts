@@ -35,13 +35,13 @@ export interface RouteRequest {
 /** The one companion route that crosses into full interactive desktop
  * control. Both the allowlist and capability gate consume this classifier so
  * their security decisions cannot drift apart. */
-export const CLOUD_DESKTOP_JOIN_ROUTE = {
-  method: "POST",
-  path: /^\/api\/bots\/[\w-]+\/computer\/join$/,
-} as const;
+export const COMPUTER_VIEW_ROUTES = [
+  { method: "POST", path: /^\/api\/bots\/[\w-]+\/computer\/join$/ },
+  { method: "POST", path: /^\/api\/bots\/[\w-]+\/computer\/screenshot$/ },
+] as const;
 
-export function isCloudDesktopJoin(method: string, path: string): boolean {
-  return method === CLOUD_DESKTOP_JOIN_ROUTE.method && CLOUD_DESKTOP_JOIN_ROUTE.path.test(path);
+export function isComputerViewRoute(method: string, path: string): boolean {
+  return COMPUTER_VIEW_ROUTES.some((route) => method === route.method && route.path.test(path));
 }
 
 /** Every request the iOS app makes, and nothing else.
@@ -59,6 +59,10 @@ const ALLOWED: ReadonlyArray<{ method: string; path: RegExp }> = [
   // Sidecar-owned, authenticated endpoint metadata. The proxy terminates it
   // locally; it never becomes a newly exposed harness route.
   { method: "GET", path: /^\/api\/companion\/endpoints$/ },
+  { method: "PUT", path: /^\/api\/companion\/push-token$/ },
+  { method: "DELETE", path: /^\/api\/companion\/push-token$/ },
+  { method: "POST", path: /^\/api\/companion\/notification-mirror$/ },
+  { method: "POST", path: /^\/api\/companion\/notification-mirror\/heartbeat$/ },
 
   // the fleet, and making a bot
   { method: "GET", path: /^\/api\/bots$/ },
@@ -79,7 +83,7 @@ const ALLOWED: ReadonlyArray<{ method: string; path: RegExp }> = [
   { method: "POST", path: /^\/api\/bots\/[\w-]+\/avatar\/generate$/ },
   // Full cloud desktop access. The route is narrow and the proxy applies a
   // second, per-device capability check before it reaches the harness.
-  CLOUD_DESKTOP_JOIN_ROUTE,
+  ...COMPUTER_VIEW_ROUTES,
 
   // rooms — making one, and talking in one
   { method: "POST", path: /^\/api\/groups$/ },

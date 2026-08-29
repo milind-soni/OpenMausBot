@@ -57,7 +57,7 @@ function linuxLocalControlSupport(platform, env) {
 }
 
 function localComputerReady(platform, connection) {
-  if (platform === "darwin") {
+  if (platform === "darwin" || platform === "win32") {
     return connection?.mode === "embedded" || connection?.mode === "standalone";
   }
   if (
@@ -138,7 +138,9 @@ function desktopCapabilities({
   if (!localAvailable) {
     localComputer.reasonCode =
       localConnection?.reasonCode ??
-      (hostPlatform === "darwin" ? "cua-driver-unavailable" : "unsupported-platform");
+      (hostPlatform === "darwin" || hostPlatform === "win32"
+        ? "cua-driver-unavailable"
+        : "unsupported-platform");
   }
 
   return {
@@ -166,7 +168,7 @@ function desktopCapabilities({
 }
 
 function connectionEnabled(platform, connection) {
-  if (platform === "darwin") return localComputerReady(platform, connection);
+  if (platform === "darwin" || platform === "win32") return localComputerReady(platform, connection);
   return platform === "linux" && connection?.enabled === true;
 }
 

@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Android status-bar icons are alpha masks. Keep this transparent and monochrome. -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="24dp"
+    android:height="24dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <path
+        android:fillColor="#FFFFFFFF"
+        android:pathData="M28,46a8,8 0,1 0,0 16a8,8 0,1 0,0 -16M34,44h13a5,5 0,0 1,5 5v10a5,5 0,0 1,-5 5h-13a5,5 0,0 1,-5 -5v-10a5,5 0,0 1,5 -5M49,42h13a6,6 0,0 1,6 6v12a6,6 0,0 1,-6 6h-13a6,6 0,0 1,-6 -6v-12a6,6 0,0 1,6 -6M64,44h12a5,5 0,0 1,5 5v10a5,5 0,0 1,-5 5h-12a5,5 0,0 1,-5 -5v-10a5,5 0,0 1,5 -5M80,46a8,8 0,1 0,0 16a8,8 0,1 0,0 -16" />
+    <path
+        android:fillColor="@android:color/transparent"
+        android:strokeColor="#FFFFFFFF"
+        android:strokeLineCap="round"
+        android:strokeWidth="2.2"
+        android:pathData="M28,44L23,37M28,64L23,71M40,40L37,32M40,68L37,76M54,39L54,30M54,69L54,78M68,40L71,32M68,68L71,76M80,44L86,38M80,64L86,70" />
+</vector>

@@ -282,6 +282,37 @@ describe("DeviceRegistry", () => {
     expect(new DeviceRegistry().authenticate(phone.token)).toBeNull();
   });
 
+  it("stores a device push target encrypted and never exposes it in the public fleet", () => {
+    const pushKey = Buffer.alloc(32, 7).toString("base64");
+    const registry = new DeviceRegistry({ pushEncryptionKey: pushKey });
+    const { device } = pair(registry, "Galaxy S26 Ultra");
+    const registrationToken = `fcm_${"a".repeat(120)}`;
+
+    expect(registry.setPushToken(device.id, registrationToken)).toEqual({ ok: true });
+    expect(registry.pushTargets()).toEqual([{ deviceId: device.id, token: registrationToken }]);
+    expect(JSON.stringify(registry.list())).not.toContain(registrationToken);
+    expect(readFileSync(join(DATA_DIR, "devices.json"), "utf8")).not.toContain(registrationToken);
+
+    const reloaded = new DeviceRegistry({ pushEncryptionKey: pushKey });
+    expect(reloaded.pushTargets()).toEqual([{ deviceId: device.id, token: registrationToken }]);
+  });
+
+  it("rejects malformed push tokens and clears only the authenticated device target", () => {
+    const pushKey = Buffer.alloc(32, 9).toString("base64");
+    const registry = new DeviceRegistry({ pushEncryptionKey: pushKey });
+    const phone = pair(registry, "Galaxy S26 Ultra");
+    const tablet = pair(registry, "Tablet");
+    const phoneToken = `fcm_${"p".repeat(120)}`;
+    const tabletToken = `fcm_${"t".repeat(120)}`;
+
+    expect(registry.setPushToken(phone.device.id, "short")).toEqual({ ok: false, error: "invalid push token" });
+    expect(registry.setPushToken(phone.device.id, phoneToken)).toEqual({ ok: true });
+    expect(registry.setPushToken(tablet.device.id, tabletToken)).toEqual({ ok: true });
+    expect(registry.clearPushToken(phone.device.id)).toBe(true);
+    expect(registry.pushTargets()).toEqual([{ deviceId: tablet.device.id, token: tabletToken }]);
+    expect(registry.clearPushToken(phone.device.id)).toBe(false);
+  });
+
   it("treats a corrupt devices.json as no paired devices", () => {
     pair(new DeviceRegistry());
     writeFileSync(join(DATA_DIR, "devices.json"), "{ not json");

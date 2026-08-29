@@ -9,7 +9,15 @@
 // token is generated once, handed to the phone at pairing, and never stored
 // — devices.json keeps only its SHA-256. A stolen devices.json is not a
 // stolen fleet.
-import { createHash, randomBytes, randomInt, randomUUID, timingSafeEqual } from "node:crypto";
+import {
+  createCipheriv,
+  createDecipheriv,
+  createHash,
+  randomBytes,
+  randomInt,
+  randomUUID,
+  timingSafeEqual,
+} from "node:crypto";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 
@@ -26,10 +34,30 @@ export interface DeviceRecord {
   /** Full interactive access to a bot's cloud desktop. Deliberately off on
    * every new and migrated device until the computer owner enables it. */
   cloudDesktopAccess: boolean;
+  /** FCM registration tokens are delivery credentials. They are encrypted
+   * with an OS-protected key supplied by the desktop shell, never stored as
+   * plaintext or exposed through the control UI. */
+  push?: StoredPushTarget;
 }
 
 /** What the UI is allowed to see: a device without its secret. */
-export type PublicDevice = Omit<DeviceRecord, "tokenHash">;
+export type PublicDevice = Omit<DeviceRecord, "tokenHash" | "push">;
+
+interface StoredPushTarget {
+  version: 1;
+  iv: string;
+  ciphertext: string;
+  tag: string;
+}
+
+export interface PushTarget {
+  deviceId: string;
+  token: string;
+}
+
+export interface DeviceRegistryOptions {
+  pushEncryptionKey?: string;
+}
 
 /** A pairing window: two short-lived credentials, deliberately single-use.
  *
@@ -118,8 +146,28 @@ function normalizeDevice(record: Partial<DeviceRecord> & { id: string; tokenHash
     createdAt,
     lastSeenAt: timestamp(record.lastSeenAt, createdAt),
     cloudDesktopAccess: record.cloudDesktopAccess === true,
+    ...(isStoredPushTarget(record.push) ? { push: record.push } : {}),
   };
 }
+
+function isStoredPushTarget(value: unknown): value is StoredPushTarget {
+  if (typeof value !== "object" || value === null) return false;
+  return (
+    "version" in value && value.version === 1 &&
+    "iv" in value && typeof value.iv === "string" &&
+    "ciphertext" in value && typeof value.ciphertext === "string" &&
+    "tag" in value && typeof value.tag === "string"
+  );
+}
+
+function pushKey(value: string | undefined): Buffer | null {
+  if (!value) return null;
+  const decoded = Buffer.from(value, "base64");
+  return decoded.length === 32 ? decoded : null;
+}
+
+const validPushToken = (value: string): boolean =>
+  value.length >= 20 && value.length <= 4_096 && /^[A-Za-z0-9_:-]+$/.test(value);
 
 /** The paired fleet: who may reach the harness through the sidecar, and the
  * one short-lived window in which a new phone may join it. Backed by a file,
@@ -130,6 +178,7 @@ export class DeviceRegistry {
   private replay: PairingReplay | null = null;
   private replayExpiryTimer: ReturnType<typeof setTimeout> | null = null;
   private lastSeenWrites = new Map<string, number>();
+  private readonly pushEncryptionKey: Buffer | null;
 
   /** Load the paired fleet, normalising as it goes.
    *
@@ -139,7 +188,8 @@ export class DeviceRegistry {
    * over: what a half-written or hand-edited file used to produce was a UI
    * saying "undefined", last seen "NaN min ago". Defaults are cheaper than
    * either dropping the device or teaching every reader to doubt the type. */
-  constructor() {
+  constructor(options: DeviceRegistryOptions = {}) {
+    this.pushEncryptionKey = pushKey(options.pushEncryptionKey);
     try {
       const parsed = JSON.parse(readFileSync(DEVICES_FILE, "utf8"));
       if (Array.isArray(parsed?.devices)) {
@@ -165,7 +215,73 @@ export class DeviceRegistry {
 
   /** Every paired device, without the hash — this is what the page renders. */
   list(): PublicDevice[] {
-    return this.devices.map(({ tokenHash, ...rest }) => rest);
+    return this.devices.map(({ tokenHash, push, ...rest }) => rest);
+  }
+
+  /** Register or rotate this device's FCM address. The paired bearer has
+   * already selected the device id before this method is called. */
+  setPushToken(deviceId: string, token: string): { ok: true } | { ok: false; error: string } {
+    if (!validPushToken(token)) return { ok: false, error: "invalid push token" };
+    const key = this.pushEncryptionKey;
+    if (!key) return { ok: false, error: "push storage unavailable" };
+    const device = this.devices.find((candidate) => candidate.id === deviceId);
+    if (!device) return { ok: false, error: "device not found" };
+
+    const iv = randomBytes(12);
+    const cipher = createCipheriv("aes-256-gcm", key, iv);
+    const ciphertext = Buffer.concat([cipher.update(token, "utf8"), cipher.final()]);
+    const previous = device.push;
+    device.push = {
+      version: 1,
+      iv: iv.toString("base64"),
+      ciphertext: ciphertext.toString("base64"),
+      tag: cipher.getAuthTag().toString("base64"),
+    };
+    try {
+      this.persist();
+    } catch (error) {
+      device.push = previous;
+      throw error;
+    }
+    return { ok: true };
+  }
+
+  clearPushToken(deviceId: string): boolean {
+    const device = this.devices.find((candidate) => candidate.id === deviceId);
+    if (!device?.push) return false;
+    const previous = device.push;
+    delete device.push;
+    try {
+      this.persist();
+    } catch (error) {
+      device.push = previous;
+      throw error;
+    }
+    return true;
+  }
+
+  /** Decrypt only at the dispatch boundary. Corrupt or legacy entries fail
+   * closed so one bad target never prevents delivery to the rest. */
+  pushTargets(): PushTarget[] {
+    const key = this.pushEncryptionKey;
+    if (!key) return [];
+    const targets: PushTarget[] = [];
+    for (const device of this.devices) {
+      const stored = device.push;
+      if (!stored) continue;
+      try {
+        const decipher = createDecipheriv("aes-256-gcm", key, Buffer.from(stored.iv, "base64"));
+        decipher.setAuthTag(Buffer.from(stored.tag, "base64"));
+        const token = Buffer.concat([
+          decipher.update(Buffer.from(stored.ciphertext, "base64")),
+          decipher.final(),
+        ]).toString("utf8");
+        if (validPushToken(token)) targets.push({ deviceId: device.id, token });
+      } catch {
+        /* corrupt ciphertext is ignored; another device can still receive */
+      }
+    }
+    return targets;
   }
 
   /** How many phones are paired, against MAX_DEVICES. */

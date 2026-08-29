@@ -13,7 +13,7 @@
 import { app, utilityProcess } from "electron";
 import fs from "node:fs";
 import path from "node:path";
-import { resolveCompanionEntry } from "./companion-entry.mjs";
+import { resolveAndroidApk, resolveCompanionEntry } from "./companion-entry.mjs";
 import {
   cleanupCompanionOriginEndpoint,
   companionOriginHealth,
@@ -187,7 +187,7 @@ export function stopCompanion() {
 }
 
 /** startCompanion's body, run inside the transition queue. */
-async function start({ resourcesPath, harnessPort, hostedUrl = null, log }) {
+async function start({ resourcesPath, appPath = app.getAppPath(), harnessPort, hostedUrl = null, credentialEnvironment = {}, log }) {
   if (proc) return companionState();
   lastError = null;
   const resolved = entryPoint(resourcesPath);
@@ -223,8 +223,27 @@ async function start({ resourcesPath, harnessPort, hostedUrl = null, log }) {
   const childEnvironment = { ...process.env };
   delete childEnvironment.OMB_COMPANION_HOSTED_URL;
   delete childEnvironment.OMB_COMPANION_INTERNAL_ORIGIN;
+  // Never allow a parent-shell value to select an arbitrary file for a
+  // public download route. The resolver only returns the staged APK in a
+  // packaged app, or a known checkout release output in development.
+  delete childEnvironment.OMB_ANDROID_APK;
   if (hostedUrl) childEnvironment.OMB_COMPANION_HOSTED_URL = hostedUrl;
   childEnvironment.OMB_COMPANION_INTERNAL_ORIGIN = allocatedOrigin.socketPath;
+  const bundledAndroidApk = resolveAndroidApk({
+    isPackaged: app.isPackaged,
+    resourcesPath,
+    appPath,
+    exists: fs.existsSync,
+  });
+  if (bundledAndroidApk) childEnvironment.OMB_ANDROID_APK = bundledAndroidApk;
+  // Firebase credentials are deliberately supplied by the main process only
+  // through this child environment boundary. They never enter argv or logs.
+  if (credentialEnvironment && typeof credentialEnvironment === "object") {
+    for (const name of ["OMB_PUSH_ENCRYPTION_KEY", "OMB_FIREBASE_SERVICE_ACCOUNT_B64"]) {
+      const value = credentialEnvironment[name];
+      if (typeof value === "string" && value) childEnvironment[name] = value;
+    }
+  }
 
   let child;
   try {

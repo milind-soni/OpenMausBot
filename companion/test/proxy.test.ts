@@ -75,6 +75,7 @@ let sidecar: Server;
 let home: string;
 let stderr = "";
 const connectedDevices = createConnectedDeviceTracker();
+const pushTokens = new Map<string, string>();
 
 /** a request as a device makes it: a token, and a Host that is not loopback */
 const device = async (
@@ -177,6 +178,12 @@ beforeAll(async () => {
           : { error: "that code is not right" },
       serverName: () => "Test computer",
       connected: connectedDevices.open,
+      setPushToken: (deviceId, token) => {
+        if (token.length < 20) return { ok: false, error: "invalid push token" };
+        pushTokens.set(deviceId, token);
+        return { ok: true };
+      },
+      clearPushToken: (deviceId) => pushTokens.delete(deviceId),
     }),
   );
   // Not `listen(port, host, resolve)` alone: a bind failure emits `error` and
@@ -285,6 +292,88 @@ describe("the sidecar in front of an unmodified harness", () => {
     expect(unauthenticated.headers.get("cloudflare-cdn-cache-control")).toBe("no-store");
     expect((await device("GET", "/api/bots", { token: "omb_wrong" })).status).toBe(401);
     expect((await device("GET", "/api/bots")).status).toBe(200);
+  });
+
+  it("gates both computer viewer routes behind the device capability", async () => {
+    const restricted = createServer(
+      createProxyHandler({
+        harnessPort: 1,
+        authenticate: (token) => token === TOKEN ? { id: "restricted", cloudDesktopAccess: false } : null,
+        redeem: () => ({ error: "not pairing" }),
+        serverName: () => "Test computer",
+      }),
+    );
+    await new Promise<void>((resolve) => restricted.listen(0, "127.0.0.1", resolve));
+    const port = (restricted.address() as { port: number }).port;
+    try {
+      for (const action of ["join", "screenshot"]) {
+        const response = await fetch(`http://127.0.0.1:${port}/api/bots/chief/computer/${action}`, {
+          method: "POST",
+          headers: {
+            authorization: `Bearer ${TOKEN}`,
+            "content-type": "application/json",
+          },
+          body: "{}",
+        });
+        expect(response.status).toBe(403);
+        expect((await response.json()) as { error: string }).toEqual({
+          error: "cloud desktop access is off for this phone — enable it in OpenMausBot → Settings → Phone",
+        });
+      }
+    } finally {
+      await new Promise<void>((resolve) => restricted.close(() => resolve()));
+    }
+  });
+
+  it("lets a paired phone register, rotate, and revoke only its own push target", async () => {
+    const registrationToken = `fcm_${"a".repeat(120)}`;
+    const rotatedToken = `fcm_${"b".repeat(120)}`;
+
+    expect((await device("PUT", "/api/companion/push-token", { token: null, body: { token: registrationToken } })).status).toBe(401);
+    expect((await device("PUT", "/api/companion/push-token", { body: { token: "short" } })).status).toBe(400);
+
+    const registered = await device("PUT", "/api/companion/push-token", { body: { token: registrationToken } });
+    expect(registered.status).toBe(204);
+    expect(registered.body).toBe("");
+    expect(pushTokens.get("d1")).toBe(registrationToken);
+
+    expect((await device("PUT", "/api/companion/push-token", { body: { token: rotatedToken } })).status).toBe(204);
+    expect(pushTokens.get("d1")).toBe(rotatedToken);
+
+    expect((await device("DELETE", "/api/companion/push-token")).status).toBe(204);
+    expect(pushTokens.has("d1")).toBe(false);
+  });
+
+  it("authenticates and forwards only bounded notification mirror events", async () => {
+    const unauthorized = await device("POST", "/api/companion/notification-mirror", {
+      token: null,
+      body: { id: "m1", packageName: "com.google.android.apps.messaging", postedAt: Date.now(), title: "A", text: "B" },
+    });
+    expect(unauthorized.status).toBe(401);
+
+    const malformed = await device("POST", "/api/companion/notification-mirror", {
+      body: { id: "m1", packageName: "com.example.not-messages", postedAt: Date.now(), title: "A", text: "B" },
+    });
+    expect(malformed.status).toBe(400);
+    expect(JSON.stringify(malformed.body)).not.toContain("com.example");
+
+    const forwarded = await device("POST", "/api/companion/notification-mirror", {
+      body: {
+        id: "m1",
+        packageName: "com.google.android.apps.messaging",
+        postedAt: Date.now(),
+        title: "Alex",
+        text: "Call me",
+      },
+    });
+    // This fixture has no configured Chief, so the loopback harness reports
+    // unavailable. Reaching that response proves the sidecar allowlisted,
+    // rewrote, and forwarded the request rather than denying it itself.
+    expect(forwarded.status).toBe(503);
+    expect(JSON.stringify(forwarded.body)).not.toContain("Alex");
+
+    const heartbeat = await device("POST", "/api/companion/notification-mirror/heartbeat", { body: {} });
+    expect(heartbeat.status).toBe(503);
   });
 
   it("serves a minimal, non-cacheable companion health identity", async () => {

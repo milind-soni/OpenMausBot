@@ -19,13 +19,15 @@
 // Running this process *is* the opt-in. There is no toggle, because a toggle
 // inside a process you chose to start would be ceremony: stopping it is the
 // off switch, and it is a more honest one than a flag in a file.
-import { createServer } from "node:http";
+import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 
 import { createAddressWatcher } from "./advertise-watch.ts";
+import { serveAndroidApk } from "./apk-download.ts";
 import { createControlServer, hostCandidates } from "./control.ts";
 import { createConnectedDeviceTracker } from "./connected-devices.ts";
 import { DeviceRegistry } from "./devices.ts";
 import { companionEndpointCandidates, hostedCompanionUrl } from "./endpoints.ts";
+import { createFcmSender } from "./fcm.ts";
 import { lanAddresses, refreshTailnetName, tailnetName, tailscaleAddress } from "./listener.ts";
 import {
   advertisableAddresses,
@@ -36,6 +38,7 @@ import {
   type ServiceInfo,
 } from "./mdns.ts";
 import { createProxyHandler } from "./proxy.ts";
+import { startPushBridge } from "./push-bridge.ts";
 import { companionOriginSocket, listenCompanionOrigin } from "./origin.ts";
 
 /** A port from the environment, or the default. Anything that is not a whole
@@ -103,8 +106,27 @@ async function refreshMachineName(): Promise<void> {
   }
 }
 
-const devices = new DeviceRegistry();
+const devices = new DeviceRegistry({ pushEncryptionKey: process.env.OMB_PUSH_ENCRYPTION_KEY });
 const mdns = new MdnsResponder();
+const firebaseCredential = (() => {
+  const encoded = process.env.OMB_FIREBASE_SERVICE_ACCOUNT_B64;
+  if (!encoded) return undefined;
+  try {
+    return Buffer.from(encoded, "base64").toString("utf8");
+  } catch {
+    return undefined;
+  }
+})();
+const fcm = createFcmSender({
+  credential: firebaseCredential,
+  projectId: process.env.OMB_FIREBASE_PROJECT_ID ?? "openmaus-chief",
+});
+let stopPushBridge = () => {};
+
+const publicHandler = (request: IncomingMessage, response: ServerResponse): void => {
+  if (serveAndroidApk(request, response, process.env.OMB_ANDROID_APK)) return;
+  proxy(request, response);
+};
 
 /** Keeps the Bonjour record matching the interface table: advertise when a
  * network appears, re-advertise when DHCP moves us, withdraw when it goes —
@@ -146,9 +168,11 @@ const proxy = createProxyHandler({
     hosts: () => hostCandidates(),
     endpoints: () => companionEndpointCandidates(COMPANION_PORT, undefined, undefined, hostedUrl),
     connected: connectedDevices.open,
+    setPushToken: (deviceId, token) => devices.setPushToken(deviceId, token),
+    clearPushToken: (deviceId) => devices.clearPushToken(deviceId),
   });
-const companion = createServer(proxy);
-const managedOrigin = PRIVATE_ORIGIN ? createServer(proxy) : null;
+const companion = createServer(publicHandler);
+const managedOrigin = PRIVATE_ORIGIN ? createServer(publicHandler) : null;
 
 const control = createControlServer({
   devices,
@@ -228,6 +252,16 @@ async function main(): Promise<void> {
     await listenCompanionOrigin(managedOrigin, PRIVATE_ORIGIN);
   }
 
+  if (fcm.enabled) {
+    stopPushBridge = startPushBridge({
+      harnessPort: HARNESS_PORT,
+      targets: () => devices.pushTargets(),
+      send: (token, notification) => fcm.send(token, notification),
+      clear: (deviceId) => devices.clearPushToken(deviceId),
+      log: (message) => console.warn(`push: ${message}`),
+    });
+  }
+
   // Before advertising: the service name goes into the Bonjour record, and
   // re-advertising under a new name later would show the phone two computers.
   await refreshMachineName();
@@ -272,6 +306,7 @@ const shutdown = async (signal: string): Promise<void> => {
   // the watcher first, or a tick could re-advertise the record the next
   // line just withdrew
   watcher.stop();
+  stopPushBridge();
   await mdns.stop().catch(() => {});
   // close() waits for open connections, and an SSE stream never ends on its
   // own — drop the sockets so "stop" means stopped, now.

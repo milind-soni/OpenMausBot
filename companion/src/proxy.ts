@@ -19,7 +19,7 @@ import {
   MAX_COMPANION_ENDPOINTS,
   type CompanionEndpoint,
 } from "./endpoints.ts";
-import { denyReason, isCloudDesktopJoin } from "./routes.ts";
+import { denyReason, isComputerViewRoute } from "./routes.ts";
 import { createSseScrubber, isJson, scrub } from "./wire.ts";
 
 /** What the forwarding handler needs from the process around it. */
@@ -50,6 +50,13 @@ export interface ProxyOptions {
    * it synchronously when that device is revoked; the returned disposer is
    * called exactly once when either side closes it. */
   connected?: (deviceId: string, disconnect: () => void) => () => void;
+  /** Store or rotate the authenticated phone's FCM registration token. */
+  setPushToken?: (
+    deviceId: string,
+    token: string,
+  ) => { ok: true } | { ok: false; error: string };
+  /** Revoke only the authenticated phone's FCM registration token. */
+  clearPushToken?: (deviceId: string) => boolean;
   /** How long the harness may take to produce response *headers*. Optional,
    * and only ever set by tests — the default is the one that ships. */
   headersTimeoutMs?: number;
@@ -142,6 +149,15 @@ const sendJson = (res: ServerResponse, status: number, body: unknown): void => {
   res.end(text);
 };
 
+const sendNoContent = (res: ServerResponse): void => {
+  if (res.headersSent) {
+    res.destroy();
+    return;
+  }
+  res.writeHead(204, PRIVATE_RESPONSE_HEADERS);
+  res.end();
+};
+
 /** Reduce live endpoint metadata to the same tiny public shape returned at
  * pairing time. The hook is internal, but this still validates and caps it at
  * the network boundary so a future producer cannot accidentally publish an
@@ -197,7 +213,7 @@ const endpointSnapshot = (options: ProxyOptions): CompanionEndpointSnapshot => {
  * blocklist: `host` and `origin` must not travel (see above), `authorization`
  * is the sidecar's credential and means nothing to the harness, and hop-by-hop
  * headers are by definition not ours to relay. */
-const forwardHeaders = (req: IncomingMessage): Record<string, string> => {
+const forwardHeaders = (req: IncomingMessage, companionDeviceId?: string): Record<string, string> => {
   const out: Record<string, string> = {
     accept: String(req.headers.accept ?? "*/*"),
     // Lets a response whose URL is intentionally loopback-only (the VPS SSH
@@ -211,6 +227,12 @@ const forwardHeaders = (req: IncomingMessage): Record<string, string> => {
   // would turn every resume into a full re-hydration, silently.
   const lastEventId = req.headers["last-event-id"];
   if (lastEventId) out["last-event-id"] = String(lastEventId);
+  if (companionDeviceId) {
+    // This header is added only by the authenticated sidecar route below;
+    // the loopback server uses it to bind the capture to the paired phone.
+    out["x-openmausbot-companion"] = "1";
+    out["x-openmausbot-companion-device"] = companionDeviceId;
+  }
   return out;
 };
 
@@ -245,7 +267,7 @@ export function createProxyHandler(options: ProxyOptions) {
     // Pairing a phone grants the ordinary companion surface, not a browser
     // session with every credential that may exist inside the cloud desktop.
     // The computer owner enables this capability per device, off by default.
-    if (isCloudDesktopJoin(method, path) && !device?.cloudDesktopAccess) {
+    if (isComputerViewRoute(method, path) && !device?.cloudDesktopAccess) {
       return sendJson(res, 403, {
         error: "cloud desktop access is off for this phone — enable it in OpenMausBot → Settings → Phone",
       });
@@ -295,13 +317,57 @@ export function createProxyHandler(options: ProxyOptions) {
       return sendJson(res, 200, endpointSnapshot(options));
     }
 
+    if (method === "PUT" && path === "/api/companion/push-token") {
+      if (!device?.id) return sendJson(res, 401, { error: "paired device identity is unavailable" });
+      if (!options.setPushToken) {
+        return sendJson(res, 503, { error: "push registration is unavailable" });
+      }
+      const deviceId = device.id;
+      readJson(req).then(
+        (body) => {
+          if (typeof body.token !== "string") {
+            return sendJson(res, 400, { error: "push token must be a string" });
+          }
+          const result = options.setPushToken?.(deviceId, body.token);
+          if (!result) return sendJson(res, 503, { error: "push registration is unavailable" });
+          if (!result.ok) return sendJson(res, 400, { error: result.error });
+          return sendNoContent(res);
+        },
+        (error: Error) => sendJson(res, 400, { error: error.message }),
+      );
+      return;
+    }
+
+    if (method === "DELETE" && path === "/api/companion/push-token") {
+      if (!device?.id) return sendJson(res, 401, { error: "paired device identity is unavailable" });
+      if (!options.clearPushToken) {
+        return sendJson(res, 503, { error: "push registration is unavailable" });
+      }
+      options.clearPushToken(device.id);
+      return sendNoContent(res);
+    }
+
+    // Notification mirror is the only phone-to-desktop capture write. It is
+    // still a read-only phone capability: the sidecar rewrites it to a
+    // loopback-only internal route and supplies the authenticated device id;
+    // it never exposes a generic upstream path or reply/send operation.
+    const isNotificationMirror = method === "POST" && (
+      path === "/api/companion/notification-mirror"
+      || path === "/api/companion/notification-mirror/heartbeat"
+    );
+    const upstreamPath = isNotificationMirror
+      ? path.endsWith("/heartbeat")
+        ? "/api/internal/notification-mirror/heartbeat"
+        : "/api/internal/notification-mirror"
+      : req.url;
+
     const upstream = httpRequest(
       {
         hostname: "127.0.0.1",
         port: options.harnessPort,
-        path: req.url,
+        path: upstreamPath,
         method,
-        headers: forwardHeaders(req),
+        headers: forwardHeaders(req, isNotificationMirror ? device?.id : undefined),
       },
       (harness) => {
         clearTimeout(headersDeadline);

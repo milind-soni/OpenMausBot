@@ -4,13 +4,16 @@
 import path from "node:path";
 import { describe, expect, it } from "vitest";
 
-import { resolveCompanionEntry } from "./companion-entry.mjs";
+import { resolveAndroidApk, resolveCompanionEntry } from "./companion-entry.mjs";
 
 const RESOURCES = path.join("/tmp", "resources");
 const APP = path.join("/tmp", "app");
 const PACKAGED = path.join(RESOURCES, "companion", "index.js");
 const BUILT = path.join(APP, "dist-companion", "index.js");
 const SOURCE = path.join(APP, "companion", "src", "index.ts");
+const APK_STAGED = path.join(RESOURCES, "android", "OpenMaus-Chief.apk");
+const APK_CHECKOUT = path.join(APP, "android", "OpenMaus-Chief.apk");
+const APK_RELEASE = path.join(APP, "android", "app", "build", "outputs", "apk", "release", "app-release.apk");
 
 const resolve = (isPackaged, present) =>
   resolveCompanionEntry({
@@ -40,5 +43,24 @@ describe("companion entry resolution", () => {
 
   it("dev: a checkout with neither is a null, not a spawn error", () => {
     expect(resolve(false, [])).toBeNull();
+  });
+});
+
+describe("Android APK resolution", () => {
+  const resolveApk = (isPackaged, present) => resolveAndroidApk({
+    isPackaged,
+    resourcesPath: RESOURCES,
+    appPath: APP,
+    exists: (candidate) => present.includes(candidate),
+  });
+
+  it("packaged: serves only the staged APK", () => {
+    expect(resolveApk(true, [APK_STAGED, APK_RELEASE])).toBe(APK_STAGED);
+    expect(resolveApk(true, [APK_RELEASE])).toBeNull();
+  });
+
+  it("dev: finds the checked-out release output", () => {
+    expect(resolveApk(false, [APK_RELEASE])).toBe(APK_RELEASE);
+    expect(resolveApk(false, [APK_CHECKOUT])).toBe(APK_CHECKOUT);
   });
 });

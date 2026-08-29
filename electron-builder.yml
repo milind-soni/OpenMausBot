@@ -1,9 +1,9 @@
 appId: com.openmausbot.app
-productName: OpenMausBot
+productName: Agent Centipede
 artifactName: OpenMausBot-${version}-${arch}.${ext}
 
 protocols:
-  - name: OpenMausBot package install
+  - name: Agent Centipede package install
     schemes: [openmausbot]
 
 # In-app auto-update reads latest-mac.yml + the .zip (macOS) or latest.yml +
@@ -72,6 +72,10 @@ extraResources:
     to: skills
   - from: dist-native/android-platform-tools
     to: android-platform-tools
+  # The signed private Android companion is downloadable through the same
+  # hosted HTTPS route as pairing; it contains no workspace credentials.
+  - from: android/app/build/outputs/apk/release/app-release.apk
+    to: android/OpenMaus-Chief.apk
 
 mac:
   # Two single-arch artifacts rather than one universal binary: the app is
@@ -105,10 +109,10 @@ mac:
     - from: dist-native/cloudflared/darwin-${arch}/cloudflared
       to: cloudflared/cloudflared
   extendInfo:
-    NSMicrophoneUsageDescription: OpenMausBot uses the microphone for voice dictation into the composer.
-    NSSpeechRecognitionUsageDescription: OpenMausBot transcribes your voice on-device to type messages for you.
-    NSAccessibilityUsageDescription: OpenMausBot uses Accessibility when you let a bot control this Mac.
-    NSScreenCaptureUsageDescription: OpenMausBot uses Screen Recording so bots can see this Mac before acting.
+    NSMicrophoneUsageDescription: Agent Centipede uses the microphone for voice dictation into the composer.
+    NSSpeechRecognitionUsageDescription: Agent Centipede transcribes your voice on-device to type messages for you.
+    NSAccessibilityUsageDescription: Agent Centipede uses Accessibility when you let an agent control this Mac.
+    NSScreenCaptureUsageDescription: Agent Centipede uses Screen Recording so agents can see this Mac before acting.
   # Notarization runs manually after the build (notarytool + staple),
   # mirroring the BlueyLite ship_release.sh flow.
   notarize: false
@@ -130,6 +134,8 @@ win:
   extraResources:
     - from: dist-native/cloudflared/win32-x64/cloudflared.exe
       to: cloudflared/cloudflared.exe
+    - from: dist-native/win32-x64
+      to: cua-win32-x64
   # No signing config yet (would go under win.signtoolOptions or
   # win.azureSignOptions — eb 26 nests it, there is no top-level
   # win.certificateFile). The installer is unsigned, so SmartScreen shows
@@ -143,7 +149,7 @@ win:
 nsis:
   oneClick: true
   perMachine: false
-  shortcutName: OpenMausBot
+  shortcutName: Agent Centipede
   # Versioned, like the .dmg. The README's /latest/download/ button needs a
   # STABLE filename, so ship a second copy named OpenMausBot-setup.exe on the
   # release — the same trick as OpenMausBot.dmg beside OpenMausBot-${version}.dmg.
@@ -160,10 +166,10 @@ linux:
   icon: build/icon.svg
   category: Utility
   executableName: openmausbot
-  synopsis: Your own team of AI bots, in a chat app
-  description: A local-first chat app for running a team of AI agents.
+  synopsis: Your AI agents, with real tools and receipts
+  description: A local-first agent harness for end-to-end work across models, apps, browsers, and computers.
   maintainer: Milind Soni <46266943+milind-soni@users.noreply.github.com>
-  vendor: OpenMausBot
+  vendor: Agent Centipede
   syncDesktopName: true
   # The reviewed x64 CLI runtime is staged before packaging and remains
   # outside ASAR so executable modes and adjacent sidecars are preserved.
@@ -174,8 +180,8 @@ linux:
       to: cloudflared/cloudflared
   desktop:
     entry:
-      Name: OpenMausBot
-      Comment: Your own team of AI bots, in a chat app
+      Name: Agent Centipede
+      Comment: Your AI agents, with real tools and receipts
       Keywords: AI;Agents;Chat;Productivity;
 
 deb:

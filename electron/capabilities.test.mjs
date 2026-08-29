@@ -41,9 +41,9 @@ describe("desktop capabilities", () => {
     });
   });
 
-  it.each(["win32", "freebsd"])("fails closed on %s", (platform) => {
+  it("fails closed on unsupported desktops", () => {
     const capabilities = desktopCapabilities({
-      platform,
+      platform: "freebsd",
       env: { DISPLAY: ":0" },
       localConnection: { mode: "embedded" },
     });
@@ -56,6 +56,12 @@ describe("desktop capabilities", () => {
       support: "unsupported",
       reasonCode: "unsupported-platform",
     });
+  });
+
+  it("enables Windows local control only for a ready embedded connection", () => {
+    expect(desktopCapabilities({ platform: "win32", localConnection: { mode: "embedded" } }).localComputer)
+      .toMatchObject({ available: true, support: "supported", enabled: true, status: "ready" });
+    expect(localComputerReady("win32", { mode: "unavailable" })).toBe(false);
   });
 
   it("offers direct Xorg preview without enabling local control", () => {

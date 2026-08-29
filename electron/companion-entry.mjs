@@ -25,3 +25,19 @@ export function resolveCompanionEntry({ isPackaged, resourcesPath, appPath, exis
   if (exists(source)) return { entry: source, execArgv: ["--experimental-strip-types"] };
   return null;
 }
+
+/** Locate the signed Android companion without trusting an inherited
+ * environment variable. Packaged builds may only serve the exact staged
+ * resource; development builds additionally accept the checked-out release
+ * output so the local pairing route is useful after an Android build. */
+export function resolveAndroidApk({ isPackaged, resourcesPath, appPath, exists }) {
+  const staged = path.join(resourcesPath, "android", "OpenMaus-Chief.apk");
+  const candidates = isPackaged
+    ? [staged]
+    : [
+        staged,
+        path.join(appPath, "android", "OpenMaus-Chief.apk"),
+        path.join(appPath, "android", "app", "build", "outputs", "apk", "release", "app-release.apk"),
+      ];
+  return candidates.find(exists) ?? null;
+}
