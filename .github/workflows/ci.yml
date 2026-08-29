@@ -39,8 +39,8 @@ jobs:
           # Electron 43 currently exits with EXCEPTION_BREAKPOINT before ready
           # on the Windows Server 2025 image even after Chromium's required
           # sandbox ACL is present. Keep the complete portable suite here and
-          # exercise the real sandboxed Electron fixture in the Windows 2022
-          # job below instead of weakening its sandbox.
+          # exercise the real sandboxed Electron fixture on a Windows 11
+          # desktop runner below instead of weakening its sandbox.
           OMB_SKIP_REAL_ELECTRON_BROWSER_FIXTURE: ${{ matrix.os == 'windows-latest' && '1' || '0' }}
       - run: pnpm check:electron
       - name: production UI build
@@ -48,8 +48,11 @@ jobs:
         run: pnpm exec vite build
 
   browser-windows:
-    name: sandboxed Electron browser fixture (Windows 2022)
-    runs-on: windows-2022
+    name: sandboxed Electron browser fixture (Windows 11 arm64)
+    # Electron 43 currently aborts before `ready` on GitHub's Windows Server
+    # x64 images. This public-repository desktop runner exercises the same
+    # Windows sandbox and Electron browser surface without relaxing either.
+    runs-on: windows-11-vs2026-arm
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
