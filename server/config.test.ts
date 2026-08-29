@@ -304,6 +304,8 @@ describe("credential env preference", () => {
     "XAI_API_KEY",
     "OPENAI_COMPAT_API_KEY",
     "OPENAI_COMPAT_URL",
+    "OPENAI_COMPAT_MODEL",
+    "OPENAI_COMPAT_PROVIDER",
     "BOX_TOKEN",
     "OPENCODE_API_KEY",
     "OMB_TTS_KEY",
@@ -388,6 +390,35 @@ describe("credential env preference", () => {
     expect(process.env.COMPOSIO_API_KEY).toBe("ak_just_saved");
     expect(process.env.BOX_TOKEN).toBeUndefined();
     expect(process.env.OMB_TTS_KEY).toBeUndefined();
+  });
+
+  it("syncCredentialEnv keeps model and provider env in step with a save", () => {
+    // loadConfig() prefers OPENAI_COMPAT_MODEL/PROVIDER over the file, so a
+    // mid-session save must update them like key/url or the boot-injected
+    // values shadow the save until relaunch
+    process.env.OPENAI_COMPAT_MODEL = "boot-model";
+    process.env.OPENAI_COMPAT_PROVIDER = "boot-provider";
+    syncCredentialEnv({
+      openaiCompat: { model: "vendor/just-saved", provider: "fireworks" },
+    });
+    expect(process.env.OPENAI_COMPAT_MODEL).toBe("vendor/just-saved");
+    expect(process.env.OPENAI_COMPAT_PROVIDER).toBe("fireworks");
+  });
+
+  it("syncCredentialEnv clears model and provider env on an empty-string save", () => {
+    process.env.OPENAI_COMPAT_MODEL = "boot-model";
+    process.env.OPENAI_COMPAT_PROVIDER = "boot-provider";
+    syncCredentialEnv({ openaiCompat: { model: "", provider: "" } });
+    expect(process.env.OPENAI_COMPAT_MODEL).toBeUndefined();
+    expect(process.env.OPENAI_COMPAT_PROVIDER).toBeUndefined();
+  });
+
+  it("syncCredentialEnv leaves model and provider env untouched when absent from the patch", () => {
+    process.env.OPENAI_COMPAT_MODEL = "boot-model";
+    process.env.OPENAI_COMPAT_PROVIDER = "boot-provider";
+    syncCredentialEnv({ openaiCompat: { key: "just-saved" } });
+    expect(process.env.OPENAI_COMPAT_MODEL).toBe("boot-model");
+    expect(process.env.OPENAI_COMPAT_PROVIDER).toBe("boot-provider");
   });
 });
 
