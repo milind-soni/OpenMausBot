@@ -16,7 +16,7 @@ it.runIf(canRun)("protects closed-shadow values and revalidates real Electron re
   const args = xvfb
     ? ["-a", electron, "--no-sandbox", fixture]
     : process.platform === "win32"
-      ? ["--no-sandbox", fixture]
+      ? ["--disable-gpu-sandbox", fixture]
       : [fixture];
   const result = await new Promise((resolve, reject) => {
     const child = spawn(command, args, {

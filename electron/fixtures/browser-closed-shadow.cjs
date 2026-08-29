@@ -3,11 +3,14 @@
 const { app, BrowserWindow, WebContentsView } = require("electron");
 const { createBrowserSurfaceManager } = require("../browser-surface.cjs");
 
-// Hosted Windows runners can abort native Chromium before this fixture's JS
-// starts, while Linux CI runs under Xvfb as root. This fixture validates
-// browser privacy/ref integrity rather than OS sandbox packaging; keep the
-// already-green macOS lane sandboxed.
-if (process.platform === "win32" || process.platform === "linux") {
+// Hosted Windows runners can abort Chromium's GPU subprocess before this
+// fixture's JS starts when their cached Electron binary lacks the AppContainer
+// ACL expected by the GPU sandbox. Disable only that child sandbox: the page
+// renderer remains sandboxed. Linux CI runs under Xvfb as root; macOS keeps
+// the full production sandbox configuration.
+if (process.platform === "win32") {
+  app.commandLine.appendSwitch("disable-gpu-sandbox");
+} else if (process.platform === "linux") {
   app.commandLine.appendSwitch("no-sandbox");
 }
 
