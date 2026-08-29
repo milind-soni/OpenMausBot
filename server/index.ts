@@ -6500,7 +6500,7 @@ function isEaddrinuse(error: unknown): boolean {
   return typeof error === "object" && error !== null && (error as { code?: unknown }).code === "EADDRINUSE";
 }
 
-for (let offset = 0; offset < MAX_PORT_ATTEMPTS; offset++) {
+for (let offset = 0; offset <= MAX_PORT_ATTEMPTS; offset++) {
   const candidatePort = startPort + offset;
   const candidateWebhookPort = startWebhookPort + offset;
 
@@ -6554,7 +6554,7 @@ if (!server.listening) {
     await new Promise<void>((r) => webhookIngress!.server.close(() => r()));
     webhookIngress = null;
   }
-  throw new Error(`could not find an available port after ${MAX_PORT_ATTEMPTS} attempts starting from ${startPort}`);
+  throw new Error(`could not find an available port after ${MAX_PORT_ATTEMPTS + 1} attempts starting from ${startPort}`);
 }
 
 utilityParentPort?.postMessage({
