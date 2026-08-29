@@ -6,17 +6,11 @@ const { app, BrowserWindow, WebContentsView } = require("electron");
 const { createBrowserSurfaceManager } = require("../browser-surface.cjs");
 process.stdout.write("fixture-modules-loaded\n");
 
-// Linux CI runs under Xvfb as root. Windows receives the restricted-package
-// filesystem ACL it needs from the test wrapper and keeps every child sandbox.
+// Linux CI runs under Xvfb as root. The dedicated Windows fixture job receives
+// the restricted-package filesystem ACL it needs from the test wrapper and
+// otherwise launches Electron with its production sandbox defaults intact.
 if (process.platform === "linux") {
   app.commandLine.appendSwitch("no-sandbox");
-} else if (process.platform === "win32") {
-  // This headless fixture tests renderer/CDP isolation and intentionally
-  // refuses its only pixel-capture path. Chromium's own integration tests use
-  // this pair when no GPU process is required; renderer/utility sandboxes stay
-  // enabled and the production browser's graphics path is unchanged.
-  app.disableHardwareAcceleration();
-  app.commandLine.appendSwitch("disable-software-rasterizer");
 }
 
 async function waitForLifecycleEvent(emitter, event, label, timeoutMs = 2_000) {

@@ -13,6 +13,8 @@ const xvfb = process.platform === "linux" && !process.env.DISPLAY
   ? spawnSync("which", ["xvfb-run"], { encoding: "utf8" }).stdout.trim()
   : "";
 const canRun = process.platform !== "linux" || Boolean(process.env.DISPLAY) || Boolean(xvfb);
+const canRunRealElectronFixture = canRun
+  && !(process.platform === "win32" && process.env.OMB_SKIP_REAL_ELECTRON_BROWSER_FIXTURE === "1");
 const windowsSandboxSid = "S-1-15-2-2";
 
 function windowsSandboxRootAclCommand(executable) {
@@ -179,7 +181,7 @@ it("finds hardlinked Windows Electron files that missed the inherited sandbox AC
   ]);
 });
 
-it.runIf(canRun)("protects closed-shadow values and revalidates real Electron ref actions", async () => {
+it.runIf(canRunRealElectronFixture)("protects closed-shadow values and revalidates real Electron ref actions", async () => {
   const sandboxAclDiagnostics = prepareWindowsElectronSandbox(electron);
   const command = xvfb || electron;
   const args = xvfb
