@@ -1,7 +1,7 @@
 {
   "name": "openmausbot",
   "private": true,
-  "version": "0.2.0",
+  "version": "0.2.1",
   "description": "A local-first agent harness for end-to-end work across models, apps, browsers, and computers.",
   "homepage": "https://github.com/milind-soni/OpenMausBot",
   "repository": {
