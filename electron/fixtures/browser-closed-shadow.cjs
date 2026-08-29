@@ -4,9 +4,12 @@ const { app, BrowserWindow, WebContentsView } = require("electron");
 const { createBrowserSurfaceManager } = require("../browser-surface.cjs");
 
 // Electron's Windows LPAC sandbox requires executable ACLs that pnpm's
-// GitHub-hosted runner cache does not carry. This fixture validates browser
-// privacy/ref integrity rather than OS sandbox packaging, so run it unsandboxed.
-app.commandLine.appendSwitch("no-sandbox");
+// GitHub-hosted runner cache does not carry. Linux CI likewise runs under
+// Xvfb as root. This fixture validates browser privacy/ref integrity rather
+// than OS sandbox packaging; keep the already-green macOS lane sandboxed.
+if (process.platform === "win32" || process.platform === "linux") {
+  app.commandLine.appendSwitch("no-sandbox");
+}
 
 async function run() {
   const owner = new BrowserWindow({ show: false, width: 900, height: 700 });

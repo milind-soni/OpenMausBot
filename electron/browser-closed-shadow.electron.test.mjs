@@ -15,7 +15,9 @@ it.runIf(canRun)("protects closed-shadow values and revalidates real Electron re
   const command = xvfb || electron;
   const args = xvfb
     ? ["-a", electron, "--no-sandbox", fixture]
-    : ["--no-sandbox", fixture];
+    : process.platform === "win32"
+      ? ["--no-sandbox", fixture]
+      : [fixture];
   const result = await new Promise((resolve, reject) => {
     const child = spawn(command, args, {
       env: { ...process.env, ELECTRON_RUN_AS_NODE: undefined },
