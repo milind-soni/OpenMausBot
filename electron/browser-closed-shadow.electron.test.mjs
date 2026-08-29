@@ -14,8 +14,8 @@ const canRun = process.platform !== "linux" || Boolean(process.env.DISPLAY) || B
 it.runIf(canRun)("protects closed-shadow values and revalidates real Electron ref actions", async () => {
   const command = xvfb || electron;
   const args = xvfb
-    ? ["-a", electron, "--no-sandbox", "--disable-gpu", fixture]
-    : ["--no-sandbox", "--disable-gpu", fixture];
+    ? ["-a", electron, "--no-sandbox", fixture]
+    : ["--no-sandbox", fixture];
   const result = await new Promise((resolve, reject) => {
     const child = spawn(command, args, {
       env: { ...process.env, ELECTRON_RUN_AS_NODE: undefined },
