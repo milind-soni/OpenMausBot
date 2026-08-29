@@ -1,0 +1,28 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>OpenMausBot Capture</title>
+    <style>
+      :root { color-scheme: light dark; }
+      body { width: 280px; margin: 0; padding: 16px; font: 13px system-ui, sans-serif; background: #101216; color: #f4f6f8; }
+      h1 { font-size: 15px; margin: 0 0 8px; }
+      p { color: #aeb6c2; line-height: 1.4; margin: 8px 0 12px; }
+      button { width: 100%; border: 0; border-radius: 8px; padding: 10px; background: #4d8dff; color: white; font-weight: 650; cursor: pointer; margin-top: 8px; }
+      button.secondary { background: #313743; }
+      button:disabled { opacity: .55; cursor: wait; }
+      #status { min-height: 18px; margin-top: 10px; color: #8fe3b0; }
+      .note { font-size: 11px; }
+    </style>
+  </head>
+  <body>
+    <h1>OpenMausBot Capture</h1>
+    <p>Only tabs you approve here are checked locally every five minutes.</p>
+    <button id="approval">Approve this tab</button>
+    <button id="capture" class="secondary">Capture now</button>
+    <div id="status" role="status" aria-live="polite"></div>
+    <p class="note">Editors and form controls are removed before bounded visible text is read. Receipts stay local and rotate through a bounded one-hour buffer.</p>
+    <script src="popup.js"></script>
+  </body>
+</html>

@@ -1,0 +1,72 @@
+{
+  "format": "openmaus.legacy-profile",
+  "version": 1,
+  "profile": {
+    "id": "northstar-field-ops",
+    "ownerId": "org:northstar-cooperative",
+    "exportedAt": "2026-07-15T09:30:00.000Z",
+    "accounts": [
+      {
+        "identity": "Field Notes",
+        "provider": "papertrail",
+        "accountId": "ca_papertrail_17",
+        "source": "local",
+        "sourceId": "legacy-profile:northstar:field-notes",
+        "observedAt": "2026-07-15T09:30:00.000Z",
+        "evidenceRef": "fixture:accounts:field-notes"
+      },
+      {
+        "identity": "Operations Vault",
+        "provider": "cloudbox",
+        "accountId": "ca_cloudbox_42",
+        "source": "local",
+        "sourceId": "legacy-profile:northstar:operations-vault",
+        "observedAt": "2026-07-15T09:30:00.000Z",
+        "evidenceRef": "fixture:accounts:operations-vault"
+      }
+    ],
+    "liveLocks": [
+      {
+        "externalId": "lock:specimen-ledger",
+        "title": "Reconcile specimen ledger",
+        "description": "Compare the field ledger with the sealed archive and report discrepancies.",
+        "ownerId": "agent:cedar",
+        "ownerLabel": "Cedar",
+        "evidence": {
+          "reference": "fixture:locks:specimen-ledger",
+          "summary": "The legacy profile records this obligation as open.",
+          "observedAt": 1784107800000
+        },
+        "deadline": {
+          "key": "field-season-close",
+          "label": "Before field season close",
+          "dueAt": 1785542400000
+        },
+        "approval": {
+          "key": "publish-summary",
+          "prompt": "Approve publishing the reconciled summary after review.",
+          "requestedBy": "agent:cedar"
+        },
+        "guards": [
+          "human-approval-required",
+          "external-publish-disabled"
+        ]
+      },
+      {
+        "externalId": "lock:sensor-calibration",
+        "title": "Confirm sensor calibration",
+        "description": "Verify the calibration receipt before the next sampling window.",
+        "ownerId": "agent:marigold",
+        "ownerLabel": "Marigold",
+        "evidence": {
+          "reference": "fixture:locks:sensor-calibration",
+          "summary": "The calibration check remains open in the legacy profile.",
+          "observedAt": 1784107860000
+        },
+        "guards": [
+          "read-only-verification"
+        ]
+      }
+    ]
+  }
+}

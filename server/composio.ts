@@ -40,6 +40,8 @@ export interface ConnectorServiceState {
   pending: boolean;
   status: string;
   accounts: ConnectedAccountSummary[];
+  /** True only when the toolkit explicitly declares no-auth access. */
+  noAuth?: boolean;
 }
 
 interface AccountLinkRequest {
@@ -76,6 +78,7 @@ const connectorServiceSchema = z.object({
   connected: z.boolean(),
   pending: z.boolean().optional(),
   status: z.string().optional(),
+  no_auth: z.boolean().optional(),
   accounts: z.array(z.object({ id: z.string(), alias: z.string().optional(), status: z.string() })).optional(),
 });
 const connectorServicesResponseSchema = z.object({ services: z.record(z.string(), connectorServiceSchema).optional() });
@@ -111,6 +114,7 @@ interface IntegrationContext {
   commsToken: string;
   botId: string;
   threadId: string;
+  connectorPolicy?: "read-only" | "draft-only";
 }
 
 let managedBrokerAccess: { url: string; token: string } | null | undefined;
@@ -364,6 +368,7 @@ export async function mcpIntegration(
       OMB_COMMS_TOKEN: context.commsToken,
       OMB_BOT_ID: context.botId,
       OMB_THREAD_ID: context.threadId,
+      ...(context.connectorPolicy ? { OMB_CONNECTOR_POLICY: context.connectorPolicy } : {}),
     },
   };
 }
@@ -535,6 +540,7 @@ function allServiceStates(
       pending: accountState.pending || /^(initiated|initializing|pending)$/i.test(status),
       status,
       accounts: accountState.accounts,
+      noAuth: toolkit.is_no_auth === true,
     });
   }
   return Object.fromEntries(services);
@@ -555,6 +561,7 @@ export async function connectedServices(cfg: AppConfig): Promise<Record<string, 
         pending: state.pending ?? false,
         status: state.status ?? (state.connected ? "ACTIVE" : "not_connected"),
         accounts: state.accounts ?? [],
+        noAuth: state.no_auth === true,
       }]),
     );
   }

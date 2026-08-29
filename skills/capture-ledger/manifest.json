@@ -1,0 +1,15 @@
+{
+  "id": "capture-ledger",
+  "name": "Durable Capture",
+  "version": "1.0.0",
+  "description": "Run fail-closed source sweeps with durable cursors, action classification, and Chief-only delivery.",
+  "defaultEnabled": true,
+  "triggerTerms": [
+    "capture run",
+    "capture sweep",
+    "fast watch",
+    "full refresh",
+    "inbound watch"
+  ],
+  "requiredCapabilities": []
+}

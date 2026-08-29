@@ -1,0 +1,36 @@
+{
+  "manifest_version": 3,
+  "name": "OpenMausBot Capture Bridge",
+  "description": "Capture local, read-only freshness receipts from explicitly approved signed-in tabs.",
+  "version": "0.5.0",
+  "permissions": ["activeTab", "alarms", "tabs", "scripting", "storage"],
+  "host_permissions": [
+    "http://127.0.0.1:8799/*",
+    "https://messages.google.com/*",
+    "https://plaud.ai/*",
+    "https://*.plaud.ai/*",
+    "https://monarchmoney.com/*",
+    "https://*.monarchmoney.com/*",
+    "https://app.monarch.com/*",
+    "https://youtube.com/*",
+    "https://*.youtube.com/*",
+    "https://youtu.be/*",
+    "https://mercury.com/*",
+    "https://*.mercury.com/*",
+    "https://chatgpt.com/*",
+    "https://chat.openai.com/*",
+    "https://claude.ai/*",
+    "https://*.claude.ai/*",
+    "https://grok.com/*",
+    "https://*.grok.com/*",
+    "https://gemini.google.com/*"
+  ],
+  "background": {
+    "service_worker": "background.js",
+    "type": "module"
+  },
+  "action": {
+    "default_title": "Capture this tab",
+    "default_popup": "popup.html"
+  }
+}
