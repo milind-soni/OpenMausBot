@@ -55,7 +55,8 @@ describe("chiefOfStaffSystemPrompt", () => {
     expect(prompt).toContain("use create_bot");
     expect(prompt).toContain("parallelize_work");
     expect(prompt).toContain("substantial independent work");
-    expect(prompt).toContain("remain responsive");
+    expect(prompt).toContain("keep the chat quiet");
+    expect(prompt).toContain("Do not wait or poll for those workers in the same turn");
     expect(prompt).toContain("engine, model, and effort");
     expect(prompt).toContain("cheaper/faster model");
     expect(prompt).toContain("one worker only");
