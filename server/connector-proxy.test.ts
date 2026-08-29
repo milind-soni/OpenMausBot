@@ -27,9 +27,11 @@ function start(env: Record<string, string>) {
   return readline.createInterface({ input: child.stdout });
 }
 
-function nextJson(lines: readline.Interface) {
+function nextJson(lines: readline.Interface, timeoutMs = 1_000) {
   return new Promise<Record<string, any>>((resolve, reject) => {
+    const timer = setTimeout(() => reject(new Error("timed out waiting for JSON-RPC response")), timeoutMs);
     lines.once("line", (line) => {
+      clearTimeout(timer);
       try { resolve(JSON.parse(line)); } catch (error) { reject(error); }
     });
   });
@@ -90,6 +92,40 @@ describe("connector MCP bridge", () => {
     expect(reply).toEqual({ jsonrpc: "2.0", id: 2, result: { protocolVersion: "2025-06-18" } });
     expect(upstreamAuthorization).toBe("Bearer upstream-secret");
     expect(JSON.stringify(reply)).not.toContain("upstream-secret");
+  });
+
+  it("rejects malformed stdin JSON-RPC values without dereferencing them", async () => {
+    const lines = start({});
+    for (const value of [null, 42, []]) {
+      child!.stdin.write(`${JSON.stringify(value)}\n`);
+      const reply = await nextJson(lines);
+      expect(reply).toEqual({
+        jsonrpc: "2.0",
+        id: null,
+        error: { code: -32600, message: "Invalid Request" },
+      });
+    }
+  });
+
+  it("does not relay malformed or null upstream SSE frames as valid responses", async () => {
+    const upstream = await listen((request, response) => {
+      let body = "";
+      request.on("data", (chunk) => { body += chunk; });
+      request.on("end", () => {
+        const id = JSON.parse(body).id;
+        response.writeHead(200, { "content-type": "text/event-stream" });
+        const frame = id === 10 ? "null" : id === 11 ? JSON.stringify({ foo: "bar" }) : JSON.stringify("not-json-rpc");
+        response.end(`data: ${frame}\n\n`);
+      });
+    });
+    const lines = start({ OMB_CONNECTOR_UPSTREAM_URL: upstream });
+    for (const id of [10, 11, 12]) {
+      child!.stdin.write(`${JSON.stringify({ jsonrpc: "2.0", id, method: "initialize", params: {} })}\n`);
+      const reply = await nextJson(lines);
+      expect(reply.id).toBe(id);
+      expect(reply.result?.isError).toBe(true);
+    }
+    expect(child!.exitCode).toBeNull();
   });
 
   it("blocks connector writes for a read-only Capture bot before upstream", async () => {

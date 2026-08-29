@@ -6,11 +6,31 @@
 // URL and credentials never pass through its transcript.
 //
 // stdout is the MCP transport. Never log there.
+/* oxlint-disable anti-slop/no-unknown-parameters, anti-slop/no-unknown-returns,
+ * anti-slop/no-unsafe-dictionary-type, anti-slop/no-runtime-typeof,
+ * anti-slop/no-reflect-get, anti-slop/no-known-value-widening,
+ * anti-slop/no-conditional-empty-object-spread
+ * -- MCP stdin/upstream HTTP-SSE payloads are untrusted boundary data; the
+ * schemas and guards below narrow them before protocol or policy handling. */
 import readline from "node:readline";
 import { z } from "zod";
 import { createHash, randomUUID } from "node:crypto";
 
 type Json = Record<string, unknown>;
+
+const jsonRpcIdSchema = z.union([z.string(), z.number().finite(), z.null()]);
+const jsonRpcRequestSchema = z.object({
+  jsonrpc: z.literal("2.0"),
+  id: jsonRpcIdSchema.optional(),
+  method: z.string().min(1),
+  params: z.unknown().optional(),
+}).passthrough();
+const jsonRpcResponseSchema = z.object({
+  jsonrpc: z.literal("2.0"),
+  id: jsonRpcIdSchema,
+  result: z.unknown().optional(),
+  error: z.object({ code: z.number().int(), message: z.string(), data: z.unknown().optional() }).optional(),
+}).passthrough().refine((value) => Object.hasOwn(value, "result") !== Object.hasOwn(value, "error"));
 
 const UPSTREAM = process.env.OMB_CONNECTOR_UPSTREAM_URL ?? "";
 const HARNESS = process.env.OMB_HARNESS_URL ?? "http://127.0.0.1:8799";
@@ -54,6 +74,20 @@ function objectField(value: unknown, key: string): unknown {
   return Reflect.get(value, key);
 }
 
+function isJsonRecord(value: unknown): value is Json {
+  return Boolean(value) && typeof value === "object" && !Array.isArray(value);
+}
+
+function parseJsonRpcRequest(value: unknown): Json | null {
+  const parsed = jsonRpcRequestSchema.safeParse(value);
+  return parsed.success && isJsonRecord(parsed.data) ? parsed.data : null;
+}
+
+function parseJsonRpcResponse(value: unknown): Json | null {
+  const parsed = jsonRpcResponseSchema.safeParse(value);
+  return parsed.success && isJsonRecord(parsed.data) ? parsed.data : null;
+}
+
 function guardedToolSlugs(args: unknown): string[] | null {
   const tools = objectField(args, "tools");
   if (!Array.isArray(tools) || tools.length < 1 || tools.length > 50) return null;
@@ -93,16 +127,16 @@ function isVisibleReadOnlyTool(name: string): boolean {
 function filterRestrictedToolList(response: Json): Json {
   if (!RESTRICTED) return response;
   const result = response.result;
-  if (!result || typeof result !== "object" || Array.isArray(result)) return response;
-  const tools = (result as Json).tools;
+  if (!isJsonRecord(result)) return response;
+  const tools = result.tools;
   if (!Array.isArray(tools)) return response;
   return {
     ...response,
     result: {
-      ...(result as Json),
+      ...result,
       tools: tools.filter((tool) => {
-        if (!tool || typeof tool !== "object" || Array.isArray(tool)) return false;
-        const name = String((tool as Json).name ?? "");
+        if (!isJsonRecord(tool)) return false;
+        const name = typeof tool.name === "string" ? tool.name : "";
         return isVisibleReadOnlyTool(name) || (CONNECTOR_POLICY === "draft-only" && isDraftConnectorTool(name));
       }),
     },
@@ -153,7 +187,13 @@ async function readBounded(response: Response): Promise<string> {
 function parseUpstream(text: string, id: unknown): Json | null {
   const trimmed = text.trim();
   if (!trimmed) return null;
-  if (trimmed.startsWith("{")) return JSON.parse(trimmed) as Json;
+  if (trimmed.startsWith("{")) {
+    try {
+      return parseJsonRpcResponse(JSON.parse(trimmed));
+    } catch {
+      return null;
+    }
+  }
   const frames = trimmed
     .split(/\r?\n/)
     .filter((line) => line.startsWith("data:"))
@@ -161,7 +201,8 @@ function parseUpstream(text: string, id: unknown): Json | null {
     .filter((line) => line && line !== "[DONE]")
     .flatMap((line) => {
       try {
-        return [JSON.parse(line) as Json];
+        const frame = parseJsonRpcResponse(JSON.parse(line));
+        return frame ? [frame] : [];
       } catch {
         return [];
       }
@@ -190,12 +231,13 @@ async function relay(message: Json): Promise<Json | null> {
 
 function connectorAdds(args: unknown): string[] {
   if (!args || typeof args !== "object" || Array.isArray(args)) return [];
-  const toolkits = (args as { toolkits?: unknown }).toolkits;
+  const toolkits = objectField(args, "toolkits");
   if (!Array.isArray(toolkits)) return [];
   return [...new Set(toolkits.flatMap((item) => {
     if (typeof item === "string") return [item.toLowerCase()];
     if (!item || typeof item !== "object" || Array.isArray(item)) return [];
-    const row = item as { name?: unknown; toolkit?: unknown; action?: unknown };
+    const row = isJsonRecord(item) ? item : null;
+    if (!row) return [];
     const slug = typeof row.toolkit === "string" ? row.toolkit : row.name;
     const action = String(row.action ?? "add").toLowerCase();
     return typeof slug === "string" && ["add", "connect", "initiate"].includes(action) ? [slug.toLowerCase()] : [];
@@ -210,8 +252,8 @@ async function showConnectorCards(slugs: string[]): Promise<void> {
     signal: AbortSignal.timeout(30_000),
   });
   if (!response.ok) {
-    const body = (await response.json().catch(() => ({}))) as { error?: unknown };
-    throw new Error(String(body.error ?? `could not show connection card (HTTP ${response.status})`));
+    const body = await response.json().catch(() => ({}));
+    throw new Error(String(objectField(body, "error") ?? `could not show connection card (HTTP ${response.status})`));
   }
 }
 
@@ -286,7 +328,7 @@ async function handle(message: Json): Promise<void> {
   const method = String(message.method ?? "");
   let authorizedAction: AuthorizedConnectorAction | null = null;
   if (method === "tools/call") {
-    const params = (message.params ?? {}) as Json;
+    const params = isJsonRecord(message.params) ? message.params : {};
     const name = String(params.name ?? "");
     if (RESTRICTED && !isAllowedConnectorCall(name, params.arguments)) {
       const rule = CONNECTOR_POLICY === "read-only" ? "blocked non-read tool" : "blocked non-read/non-draft tool";
@@ -311,6 +353,7 @@ async function handle(message: Json): Promise<void> {
     }
   }
   const response = await relay(message);
+  if (!response) throw new Error("connector service returned an invalid JSON-RPC response");
   if (authorizedAction) await reportConnectorResult(authorizedAction, response);
   if (response && id !== undefined) send(method === "tools/list" ? filterRestrictedToolList(response) : response);
 }
@@ -319,15 +362,20 @@ const input = readline.createInterface({ input: process.stdin, terminal: false }
 input.on("line", (line) => {
   const trimmed = line.trim();
   if (!trimmed) return;
-  let message: Json;
+  let message: Json | null;
   try {
-    message = JSON.parse(trimmed) as Json;
+    message = parseJsonRpcRequest(JSON.parse(trimmed));
   } catch {
+    message = null;
+  }
+  if (!message) {
+    send({ jsonrpc: "2.0", id: null, error: { code: -32600, message: "Invalid Request" } });
     return;
   }
-  void handle(message).catch((error) => {
-    if (message.id !== undefined) {
-      send(textResult(message.id, error instanceof Error ? error.message : String(error), true));
+  const request = message;
+  void handle(request).catch((error) => {
+    if (request.id !== undefined) {
+      send(textResult(request.id, error instanceof Error ? error.message : String(error), true));
     }
   });
 });
