@@ -30,27 +30,25 @@ type BoxResult =
   | { found: true; connected: false }
   | { found: true; connected: true; visible: boolean; x: number; y: number; width: number; height: number };
 
-function nodeForRef(root: AriaSnapshot["root"], ref: string): AriaSnapshot["root"] | null {
+function nodesByRef(root: AriaSnapshot["root"]): Map<string, AriaSnapshot["root"]> {
+  const byRef = new Map<string, AriaSnapshot["root"]>();
   const pending = [root];
   while (pending.length) {
     const node = pending.pop()!;
-    if (node.ref === ref)
-      return node;
+    if (node.ref)
+      byRef.set(node.ref, node);
     for (const child of node.children) {
       if (typeof child !== "string")
         pending.push(child);
     }
   }
-  return null;
+  return byRef;
 }
 
 /** Facts the model reviewed before receiving a ref. Keep coordinates and
  * live values out (normal layout and typing may change those), but bind the
  * ref to the same DOM object, accessible meaning and actionability. */
-function integritySignature(tree: AriaSnapshot, ref: string, element: Element): string | null {
-  const node = nodeForRef(tree.root, ref);
-  if (!node)
-    return null;
+function integritySignature(node: AriaSnapshot["root"], element: Element): string {
   const attributes = Array.from(element.attributes)
     .map(attribute => [attribute.name, attribute.value] as const)
     .sort(([left], [right]) => left.localeCompare(right));
@@ -79,10 +77,11 @@ function integritySignature(tree: AriaSnapshot, ref: string, element: Element): 
 
 function recordIntegrity(tree: AriaSnapshot): Map<string, string> {
   const result = new Map<string, string>();
+  const nodes = nodesByRef(tree.root);
   for (const [ref, info] of tree.info) {
-    const signature = integritySignature(tree, ref, info.element);
-    if (signature)
-      result.set(ref, signature);
+    const node = nodes.get(ref);
+    if (node)
+      result.set(ref, integritySignature(node, info.element));
   }
   return result;
 }
@@ -119,7 +118,8 @@ function validateRef(ref: string): boolean {
   const currentRef = current.refs.get(element);
   if (currentRef !== ref)
     return false;
-  return integritySignature(current, currentRef, element) === reviewed;
+  const currentNode = nodesByRef(current.root).get(currentRef);
+  return currentNode ? integritySignature(currentNode, element) === reviewed : false;
 }
 
 function composedContains(ancestor: Node, candidate: Node | null): boolean {

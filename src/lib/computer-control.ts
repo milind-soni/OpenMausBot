@@ -5,6 +5,46 @@ export interface ComputerControlSnapshot {
   helpReason: string | null;
 }
 
+export type BrowserControlTransitionFailure =
+  | "native-take"
+  | "durable-take"
+  | "durable-release"
+  | "native-release";
+
+/** BrowserPanel owns a two-phase lease because direct scoped host tokens can
+ * bypass the renderer. Take is native-first; release is durable-first. A
+ * failed take stays locally held, and a failed release reasserts the hold. */
+export async function transitionBrowserControlLease(input: {
+  action: "take" | "release";
+  requestDurableControl: (action: "take" | "release") => Promise<boolean>;
+  setNativeControl: (held: boolean) => Promise<boolean>;
+}): Promise<{ ok: true } | { ok: false; failed: BrowserControlTransitionFailure }> {
+  const { action, requestDurableControl, setNativeControl } = input;
+  if (action === "take") {
+    if (!(await setNativeControl(true))) return { ok: false, failed: "native-take" };
+    if (!(await requestDurableControl("take"))) return { ok: false, failed: "durable-take" };
+    return { ok: true };
+  }
+
+  if (!(await requestDurableControl("release"))) {
+    await setNativeControl(true);
+    return { ok: false, failed: "durable-release" };
+  }
+  if (!(await setNativeControl(false))) return { ok: false, failed: "native-release" };
+  return { ok: true };
+}
+
+/** Positive-only authoritative sync. A held snapshot always tightens the
+ * Electron gate; false snapshots never release it because loopback callers
+ * can influence server state. Trusted release flows clear it explicitly. */
+export function heldComputerControlBotIds(
+  snapshots: Record<string, Pick<ComputerControlSnapshot, "held">>,
+): string[] {
+  return Object.entries(snapshots)
+    .filter(([, snapshot]) => snapshot.held)
+    .map(([botId]) => botId);
+}
+
 /** Coordinate the public server lease with Electron's private browser gate.
  * Take is local-first; release is server-first. BrowserPanel passes
  * `syncNativeBrowser: false` because it owns the same choreography itself. */

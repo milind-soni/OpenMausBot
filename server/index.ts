@@ -180,7 +180,12 @@ import { loadBundledSkills, loadUserSkills, mergeSkills, renderSkillInstructions
 import { installedPlaybookInstructions } from "./installed-playbooks.ts";
 import { createBotPackageExport } from "./package-export.ts";
 import { shouldMountLocalComputer } from "./local-routing.ts";
-import { PendingTurnCancellations, RetiredTurnRegistry, guardTurnDispatch } from "./turn-dispatch-guard.ts";
+import {
+  PendingTurnCancellations,
+  RetiredTurnRegistry,
+  guardTurnDispatch,
+  isTurnEventQuarantined,
+} from "./turn-dispatch-guard.ts";
 import { createGracefulShutdown } from "./graceful-shutdown.ts";
 
 const PORT = Number(process.env.OMB_PORT || process.env.OGB_PORT || 8799);
@@ -397,17 +402,13 @@ function retireProviderTurn(turnId: string): void {
   retiredProviderTurns.retire(turnId);
 }
 
-function isRetiredProviderEvent(event: RuntimeEvent): boolean {
-  return retiredProviderTurns.has(event.turnId);
-}
-
 function shouldIgnoreProviderEvent(event: RuntimeEvent): boolean {
   // Some adapters publish completion/error synchronously just before their
   // sendTurn promise resolves. Stop can already have cancelled that handshake,
-  // but its returned turn id is not available to retire yet. Hold every event
-  // for the cancelled owner until guardTurnDispatch receives and retires it.
-  if (pendingCancelledProviderHandshakes.has(event.threadId)) return true;
-  if (isRetiredProviderEvent(event)) return true;
+  // but its returned turn id is not available to retire yet. Quarantine the
+  // narrow pre-id window and tombstone any id it reveals; the broad gate is
+  // time-bounded so a broken promise cannot suppress a later turn forever.
+  if (isTurnEventQuarantined(pendingCancelledProviderHandshakes, retiredProviderTurns, event)) return true;
   if (event.type !== "session.exited" || event.turnId !== undefined) return false;
   return store.botByThread(event.threadId)?.busy === true || Boolean(store.groupByThread(event.threadId)?.busyBotId);
 }
@@ -437,7 +438,12 @@ function cancelDirectTurnDispatch(botId: string, expectedThreadId?: string): Dir
   const claim = directTurnDispatchClaims.get(botId);
   if (!claim || (expectedThreadId !== undefined && claim.threadId !== expectedThreadId)) return null;
   directTurnDispatchClaims.delete(botId);
-  markCancelledProviderHandshake(claim.threadId, `direct:${claim.id}`);
+  // Setup has not called the adapter yet, so there is no provider handshake
+  // (and no unknown turn id) to quarantine. Dispatching is the only phase in
+  // which a late provider event can exist.
+  if (claim.phase === "dispatching") {
+    markCancelledProviderHandshake(claim.threadId, `direct:${claim.id}`);
+  }
   // Keep setup ownership until the guarded send resolves and retires its
   // provider turn id. Some adapters can emit completion synchronously just
   // before sendTurn returns; making the bot idle here would let a replacement
@@ -2448,6 +2454,11 @@ async function startTurn(
         }, dispatchClaimId);
         if (browser) integrations.browser = browser.integration;
       }
+      // A cancelled adapter can be between accepting sendTurn and revealing
+      // its provider turn id. Never overlap a replacement with that ambiguous
+      // pre-id window: wait for the old handshake to settle or for its bounded
+      // quarantine to expire, then revalidate this exact claim before launch.
+      await pendingCancelledProviderHandshakes.waitForClear(threadId);
       if (!markDirectTurnDispatching(bot.id, dispatchClaimId, threadId)) {
         throw new DirectTurnSetupCancelled("turn stopped before dispatch");
       }
@@ -6242,7 +6253,7 @@ const server = createServer(async (req, res) => {
       const busyGroup = activeGroupTurnForBot(bot.id);
       if (busyGroup) {
         if (expectedThreadId !== undefined && busyGroup.threadId !== expectedThreadId) {
-          return json(res, 409, { error: `this bot is working in channel ${busyGroup.group.id}` });
+          return json(res, 409, { error: `this bot is working in channel ${busyGroup.group.name}` });
         }
         cancelGroupTurnOperations(busyGroup.group.id, busyGroup.threadId);
         await releaseBrowserCapabilityForThread(busyGroup.threadId);

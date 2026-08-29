@@ -1002,6 +1002,19 @@ describe("browser surface manager", () => {
     expect(manager.forgetProfile("")).toBe(0);
   });
 
+  it("refuses lossy profile aliases before they can share deletion storage", () => {
+    const { manager, views } = harness();
+    manager.layout("bot-a", BOUNDS, "work", "compact");
+    for (const alias of ["Work", "work!", "../work"]) {
+      expect(() => manager.layout("bot-b", BOUNDS, alias, "compact")).toThrow(/valid lowercase browser profile id/);
+      expect(() => manager.setCapabilityActive("bot-b", alias, true)).toThrow(/valid lowercase browser profile id/);
+      expect(() => manager.forgetProfile(alias)).toThrow(/valid lowercase browser profile id/);
+    }
+    expect(manager.size()).toBe(1);
+    expect(manager.forgetProfile("work")).toBe(1);
+    expect(views[0].calls.some(([name]) => name === "close")).toBe(true);
+  });
+
   it("tears every view down on closeAll and hides them all on hideAll", async () => {
     const { manager, owner, views, states } = harness();
     manager.layout("bot-a", BOUNDS, "", "compact");

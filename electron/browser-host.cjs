@@ -355,6 +355,13 @@ function createBrowserHost({ manager, token = randomBytes(32).toString("hex"), n
           } catch {}
           reject(error);
         };
+        const reportBoundError = (error) => {
+          // The one-shot startup handler below is removed after binding, but
+          // http.Server can still emit errors later. Keep those errors handled
+          // so a transient listener/socket failure cannot crash Electron.
+          if (url) console.error("[browser-host] server error after binding:", error);
+        };
+        server.on("error", reportBoundError);
         server.once("error", fail);
         server.listen(0, "127.0.0.1", () => {
           server.removeListener("error", fail);

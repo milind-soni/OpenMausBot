@@ -8,6 +8,7 @@ const {
   browserNavigationAllowed,
   browserNavigationUrl,
   browserPartition,
+  browserProfilePartition,
   browserUserAgent,
   formatSnapshot,
   snapshotFromAxNodes,
@@ -134,6 +135,13 @@ describe("browser snapshot", () => {
     expect(browserPartition("../../evil")).toBe("persist:openmausbot-browser-evil");
     expect(() => browserPartition("")).toThrow();
     expect(() => browserPartition("../")).toThrow();
+  });
+
+  it("maps only exact canonical profile ids to durable partitions", () => {
+    expect(browserProfilePartition("work-2")).toBe("persist:openmausbot-browser-profile-work-2");
+    for (const alias of ["Work-2", "work.2", "../work-2", "work-2!", "guest", ""]) {
+      expect(() => browserProfilePartition(alias)).toThrow(/valid lowercase browser profile id/);
+    }
   });
 
   it("decodes refs and rejects anything that is not one", () => {

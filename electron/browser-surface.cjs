@@ -451,6 +451,14 @@ function createBrowserSurfaceManager({
     if (profile === GUEST_PROFILE) return `openmausbot-browser-guest-${botId}-${++guestCounter}`;
     return profile ? browserProfilePartition(profile) : ownPartitionFor(botId);
   };
+  const profileIdOf = (profile) => {
+    const wanted = String(profile ?? "");
+    if (!wanted || wanted === GUEST_PROFILE) return wanted;
+    // Validation is intentionally delegated to the one function that owns
+    // the durable partition mapping, so every surface boundary stays exact.
+    browserProfilePartition(wanted);
+    return wanted;
+  };
   const keyOf = (botId, partition) => `${botId}\0${partition}`;
   const controlFor = (botId) => botControl.get(botId) ?? { held: false, epoch: 0, agentEpoch: 0 };
 
@@ -884,11 +892,12 @@ function createBrowserSurfaceManager({
       const ownPartition = partitionForProfile(botId, "");
       return activate(botId, entries.get(keyOf(botId, ownPartition)) ?? create(botId, ""), null);
     }
-    if (current && current.profile === profile && profile !== GUEST_PROFILE) return touch(current);
-    if (current && current.profile === GUEST_PROFILE && profile === GUEST_PROFILE) return touch(current);
-    const partition = profile === GUEST_PROFILE ? null : partitionForProfile(botId, profile);
+    const wantedProfile = profileIdOf(profile);
+    if (current && current.profile === wantedProfile && wantedProfile !== GUEST_PROFILE) return touch(current);
+    if (current && current.profile === GUEST_PROFILE && wantedProfile === GUEST_PROFILE) return touch(current);
+    const partition = wantedProfile === GUEST_PROFILE ? null : partitionForProfile(botId, wantedProfile);
     const existing = partition ? entries.get(keyOf(botId, partition)) : null;
-    return activate(botId, existing ?? create(botId, profile), current);
+    return activate(botId, existing ?? create(botId, wantedProfile), current);
   };
 
   const touch = (entry) => {
@@ -1593,6 +1602,17 @@ function createBrowserSurfaceManager({
 
   const selectAllModifiers = platform === "darwin" ? 4 : 2;
 
+  const entryForProfile = (botId, profile) => {
+    let entry = active.get(botId);
+    if (!isString(profile)) return entry;
+    const wantedProfile = profileIdOf(profile);
+    if (entry?.profile === wantedProfile) return entry;
+    if (wantedProfile === GUEST_PROFILE) {
+      return [...entries.values()].find((candidate) => candidate.botId === botId && candidate.profile === GUEST_PROFILE);
+    }
+    return entries.get(keyOf(botId, partitionForProfile(botId, wantedProfile)));
+  };
+
   const api = {
     /** Create or switch the bot's view; hidden until laid out. */
     ensure(botId, profile) {
@@ -1601,11 +1621,7 @@ function createBrowserSurfaceManager({
 
     state(botId, profile) {
       const id = botIdOf(botId);
-      let entry = active.get(id);
-      if (isString(profile) && entry?.profile !== profile) {
-        if (profile === GUEST_PROFILE) entry = [...entries.values()].find((candidate) => candidate.botId === id && candidate.profile === GUEST_PROFILE);
-        else entry = entries.get(keyOf(id, partitionForProfile(id, profile)));
-      }
+      const entry = entryForProfile(id, profile);
       return entry ? stateFor(entry) : closedState(id);
     },
 
@@ -1614,11 +1630,7 @@ function createBrowserSurfaceManager({
      * and local, while scoped bot capabilities get this inspected form. */
     async agentState(botId, profile) {
       const id = botIdOf(botId);
-      let entry = active.get(id);
-      if (isString(profile) && entry?.profile !== profile) {
-        if (profile === GUEST_PROFILE) entry = [...entries.values()].find((candidate) => candidate.botId === id && candidate.profile === GUEST_PROFILE);
-        else entry = entries.get(keyOf(id, partitionForProfile(id, profile)));
-      }
+      const entry = entryForProfile(id, profile);
       if (!entry) return closedState(id);
       return withOperation(entry, async () => {
         if (entry.documentTainted) return protectedState(entry);
@@ -2030,7 +2042,7 @@ function createBrowserSurfaceManager({
 
     setCapabilityActive(botId, profile, active) {
       const id = botIdOf(botId);
-      const wantedProfile = String(profile ?? "");
+      const wantedProfile = profileIdOf(profile);
       const key = `${id}\0${wantedProfile}`;
       if (active === true) capabilityPins.add(key);
       else capabilityPins.delete(key);
@@ -2039,12 +2051,13 @@ function createBrowserSurfaceManager({
 
     /** Drop every bot's view on a named profile — before its data is cleared. */
     forgetProfile(profileId) {
-      const wanted = String(profileId ?? "");
+      const wanted = profileIdOf(profileId);
       if (!wanted || wanted === GUEST_PROFILE) return 0;
+      const wantedPartition = browserProfilePartition(wanted);
       for (const key of capabilityPins) if (key.endsWith(`\0${wanted}`)) capabilityPins.delete(key);
       let dropped = 0;
       for (const entry of entries.values()) {
-        if (entry.profile === wanted) {
+        if (entry.partition === wantedPartition) {
           remove(entry, "profile-deleted");
           dropped += 1;
         }

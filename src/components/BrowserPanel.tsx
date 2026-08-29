@@ -8,7 +8,8 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { ArrowLeft, ExternalLink, Globe, Hand, Loader2, Maximize2, Minimize2, Plus, UserRound } from "lucide-react";
 import { usePageVisible } from "@/lib/page-visible";
 import { cn } from "@/lib/cn";
-import { useStore, type Bot, type BrowserProfile } from "@/state/store";
+import { transitionBrowserControlLease } from "@/lib/computer-control";
+import { useStore, type Bot, type BotAnnouncement, type BrowserProfile } from "@/state/store";
 
 type ControlSnapshot = { held: boolean; helpReason: string | null };
 
@@ -85,6 +86,10 @@ export function shouldRequestBrowserControl(input: {
   return input.botId === input.eventBotId && !input.held && !input.pending && !input.takeInFlight;
 }
 
+export function browserProfileChangesDisabled(bot: Pick<Bot, "busy">): boolean {
+  return bot.busy === true;
+}
+
 export function BrowserPanel({
   bot,
   control,
@@ -109,6 +114,8 @@ export function BrowserPanel({
   const pageVisible = usePageVisible();
   const hostRef = useRef<HTMLDivElement>(null);
   const nativeTakePending = useRef(false);
+  const botBusyRef = useRef(browserProfileChangesDisabled(bot));
+  botBusyRef.current = browserProfileChangesDisabled(bot);
   const [surface, setSurface] = useState<BrowserSurfaceState | null>(null);
   const [address, setAddress] = useState("");
   const [addressFocused, setAddressFocused] = useState(false);
@@ -203,7 +210,9 @@ export function BrowserPanel({
       if (action === "take") {
         if (control.held) {
           try {
-            return await bridge?.setHumanControl?.(botId, true, activeProfile) === true;
+            const applied = await bridge?.setHumanControl?.(botId, true, activeProfile) === true;
+            if (!applied) setError("The browser tab is not ready for takeover yet.");
+            return applied;
           } catch (cause) {
             setError(cause instanceof Error ? cause.message : String(cause));
             return false;
@@ -224,37 +233,24 @@ export function BrowserPanel({
         }
       };
 
-      if (action === "take") {
-        // Gate the process that owns native input before telling the server:
-        // a shell-capable agent can call its scoped host token directly and
-        // must lose that race before the person can type into the page.
-        if (!(await setLocalControl(true))) {
-          nativeTakePending.current = false;
-          return false;
-        }
-        const accepted = await onControl("take").catch(() => false);
-        if (accepted) return true;
+      const result = await transitionBrowserControlLease({
+        action,
+        requestDurableControl: (requested) => onControl(requested).catch(() => false),
+        setNativeControl: setLocalControl,
+      });
+      if (result.ok) return true;
+      if (result.failed === "durable-take") {
         // The person may already be typing into the native page. Keep the
         // agent gated even though the durable lease endpoint failed; a
         // subsequent Take control click retries the server transition.
         setError("Browser control could not be confirmed. The bot remains paused here for safety — retry Take control.");
-        nativeTakePending.current = false;
-        return false;
-      }
-
-      // Release in the opposite order. Keep Electron's direct-host gate
-      // held until the durable server lease has accepted the hand-back;
-      // otherwise a scoped token could mutate the page in the rollback gap.
-      const accepted = await onControl("release").catch(() => false);
-      if (!accepted) {
-        await setLocalControl(true);
-        return false;
-      }
-      if (!(await setLocalControl(false))) {
+      } else if (result.failed === "durable-release") {
+        setError("Control could not be handed back. The bot remains paused here for safety — retry Hand back.");
+      } else if (result.failed === "native-release") {
         setError("The server released control, but this browser remains paused locally for safety. Reopen the Browser panel to retry.");
-        return false;
       }
-      return true;
+      if (action === "take") nativeTakePending.current = false;
+      return false;
     },
     [activeProfile, botId, bridge, control.held, controlPending, onControl],
   );
@@ -302,8 +298,8 @@ export function BrowserPanel({
     await bridge.back(botId, activeProfile).catch((cause) => setError(cause instanceof Error ? cause.message : String(cause)));
   };
 
-  const chooseProfile = (value: string) => {
-    if (bot.busy) {
+  const chooseProfile = async (value: string) => {
+    if (browserProfileChangesDisabled(bot) || profileBusy) {
       setError(`Stop ${bot.name}'s turn before changing its browser profile.`);
       return;
     }
@@ -311,13 +307,27 @@ export function BrowserPanel({
       setAddingProfile(true);
       return;
     }
-    // null (not undefined) so the clear survives JSON serialisation
-    dispatch({ type: "updateBot", botId, patch: { browserProfile: value === OWN_PROFILE ? null : value } });
+    setProfileBusy(true);
+    setError(null);
+    try {
+      // Let the server serialize this against turn start. An optimistic bot
+      // patch can briefly show a new profile while the active capability is
+      // still pinned to the old hidden view.
+      const result: { bot: BotAnnouncement } = await api(`/api/bots/${botId}`, {
+        method: "PATCH",
+        body: JSON.stringify({ browserProfile: value === OWN_PROFILE ? null : value }),
+      });
+      dispatch({ type: "botPatched", bot: result.bot });
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : String(cause));
+    } finally {
+      setProfileBusy(false);
+    }
   };
 
   const addProfile = async () => {
     const name = newProfileName.trim();
-    if (!name || profileBusy || bot.busy) return;
+    if (!name || profileBusy || botBusyRef.current) return;
     setProfileBusy(true);
     setError(null);
     try {
@@ -327,7 +337,17 @@ export function BrowserPanel({
         body: JSON.stringify({ browserProfiles: [...profiles, { id, name }] }),
       });
       dispatch({ type: "configStatus", config });
-      dispatch({ type: "updateBot", botId, patch: { browserProfile: id } });
+      if (botBusyRef.current) {
+        setAddingProfile(false);
+        setNewProfileName("");
+        setError(`Created ${name}, but ${bot.name}'s turn started before it could switch profiles. Stop the turn, then select it.`);
+        return;
+      }
+      const result: { bot: BotAnnouncement } = await api(`/api/bots/${botId}`, {
+        method: "PATCH",
+        body: JSON.stringify({ browserProfile: id }),
+      });
+      dispatch({ type: "botPatched", bot: result.bot });
       setAddingProfile(false);
       setNewProfileName("");
     } catch (cause) {
@@ -347,6 +367,7 @@ export function BrowserPanel({
 
   const currentUrl = surface?.url && surface.url !== "about:blank" ? surface.url : null;
   const expanded = size === "expanded";
+  const profileChangesLocked = browserProfileChangesDisabled(bot);
 
   return (
     <div className="flex h-full min-h-0 flex-col">
@@ -479,8 +500,8 @@ export function BrowserPanel({
             <span className="shrink-0">Profile</span>
             <select
               value={activeProfile}
-              onChange={(event) => chooseProfile(event.target.value)}
-              disabled={profileBusy || bot.busy}
+              onChange={(event) => void chooseProfile(event.target.value)}
+              disabled={profileBusy || profileChangesLocked}
               aria-label="Browser profile"
               className="min-w-0 flex-1 rounded-md bg-inset px-2 py-1 text-[13px] text-ink outline-none"
             >
@@ -497,9 +518,9 @@ export function BrowserPanel({
           <button
             type="button"
             onClick={() => setAddingProfile((open) => !open)}
-            disabled={bot.busy}
+            disabled={profileChangesLocked}
             className="rounded-md p-1.5 text-ink-secondary hover:bg-control hover:text-ink disabled:cursor-not-allowed disabled:opacity-40"
-            title="Add a profile"
+            title={profileChangesLocked ? `Stop ${bot.name}'s turn before changing browser profiles` : "Add a profile"}
             aria-label="Add a profile"
           >
             <Plus size={15} />
@@ -519,13 +540,13 @@ export function BrowserPanel({
               onChange={(event) => setNewProfileName(event.target.value)}
               placeholder="Profile name, e.g. Work"
               maxLength={40}
-              disabled={bot.busy}
+              disabled={profileChangesLocked}
               className="min-w-0 flex-1 rounded-md bg-inset px-2.5 py-1.5 text-[13px] text-ink outline-none placeholder:text-ink-secondary/70"
               aria-label="New profile name"
             />
             <button
               type="submit"
-              disabled={!newProfileName.trim() || profileBusy || bot.busy}
+              disabled={!newProfileName.trim() || profileBusy || profileChangesLocked}
               className="rounded-md bg-accent px-3 py-1.5 text-[13px] font-medium text-accent-ink disabled:opacity-50"
             >
               Add
@@ -543,7 +564,9 @@ export function BrowserPanel({
           </form>
         )}
         <div className="mt-1.5 text-[11.5px] leading-relaxed text-ink-secondary">
-          A profile is its own set of logins and cookies — sign in once and it stays. Bots pointed at the same profile share it; "{bot.name}'s own" is private to this bot; Guest is thrown away when you switch off it.
+          {profileChangesLocked
+            ? `Stop ${bot.name}'s current turn before changing profiles, so it cannot keep acting in a hidden session.`
+            : `A profile is its own set of logins and cookies — sign in once and it stays. Bots pointed at the same profile share it; “${bot.name}'s own” is private to this bot; Guest is thrown away when you switch off it.`}
         </div>
       </div>
       {error && <div className="mt-2 text-[12px] text-danger">{error}</div>}

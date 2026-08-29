@@ -2618,7 +2618,9 @@ describe("harness HTTP API", () => {
       await expect.poll(() => browserCapabilityCalls.slice(callOffset).some(
         (call) => call.operation === "revoke" && call.body.token === registration?.body.token,
       ), { timeout: 5_000 }).toBe(true);
-      await new Promise((resolve) => setTimeout(resolve, 100));
+      // Registration is intentionally held by the stub. Wait beyond that
+      // entire window so a late provider dispatch cannot escape the check.
+      await new Promise((resolve) => setTimeout(resolve, browserRegisterDelayMs + 250));
       expect(existsSync(fakeClaudeDump)).toBe(false);
     } finally {
       browserRegisterDelayMs = 0;

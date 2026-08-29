@@ -217,7 +217,10 @@ export function generateAriaTree(rootElement: Element, publicOptions: AriaTreeOp
 
     if (ariaNode.role === 'link' && element.hasAttribute('href')) {
       const href = element.getAttribute('href')!;
-      ariaNode.props['url'] = sanitizeSnapshotUrl(truncateDataUrl(href), element.ownerDocument.baseURI);
+      const truncatedHref = truncateDataUrl(href);
+      ariaNode.props['url'] = publicOptions.mode === 'ai'
+        ? sanitizeSnapshotUrl(truncatedHref, element.ownerDocument.baseURI)
+        : truncatedHref;
     }
 
     if (ariaNode.role === 'textbox' && element.hasAttribute('placeholder') && element.getAttribute('placeholder') !== ariaNode.name) {

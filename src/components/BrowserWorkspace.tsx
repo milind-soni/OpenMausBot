@@ -15,10 +15,10 @@ async function api(path: string, init?: RequestInit): Promise<any> {
   return body;
 }
 
-const controlSnapshotSchema = z.object({
+const controlSnapshotSchema = z.looseObject({
   held: z.boolean().optional().default(false),
   helpReason: z.string().nullable().optional().default(null),
-}).passthrough();
+});
 
 export function BrowserWorkspace({ bot, onClose }: { bot: Bot; onClose: () => void }) {
   const { state, dispatch } = useStore();

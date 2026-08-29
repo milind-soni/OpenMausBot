@@ -219,11 +219,16 @@ function browserPartition(botId) {
 }
 
 /** A named profile is a partition several bots may share — "Work", "Client
- * A" — so one sign-in serves every bot pointed at it. */
+ * A" — so one sign-in serves every bot pointed at it. Unlike bot ids, a
+ * profile id is already a validated storage identifier and must never be
+ * lossy-normalized: two labels mapping to one partition would let one live
+ * view retain storage while the other label is deleted. */
 function browserProfilePartition(profileId) {
-  const safe = String(profileId ?? "").replace(/[^A-Za-z0-9_-]/g, "");
-  if (!safe) throw new Error("A profile id is required");
-  return `persist:openmausbot-browser-profile-${safe}`;
+  const id = String(profileId ?? "");
+  if (!/^[a-z0-9_-]{1,40}$/.test(id) || id === "guest") {
+    throw new Error("A valid lowercase browser profile id is required");
+  }
+  return `persist:openmausbot-browser-profile-${id}`;
 }
 
 const REF = /^b(\d{1,12})$/;
