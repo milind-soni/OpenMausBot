@@ -66,10 +66,12 @@ already have:
   custom CLI binary (a versioned build or wrapper) in **Settings → Engines**.
 - **Local first.** One small harness server on `127.0.0.1` owns every agent process. Transcripts, keys, and
   events live in `~/.openmausbot`, not a cloud.
-- **Agents with hands.** Each bot can use a cloud Linux desktop, an isolated Local VM, or—where the platform
-  safety boundary is currently certified—your own computer, plus 500+ apps through Composio. Host control is
-  available on macOS and Ubuntu Xorg after explicit opt-in. Ubuntu Wayland host control remains disabled while
-  issue #345 is resolved.
+- **Agents with hands.** Each bot can use a cloud Linux desktop, an isolated Local VM, a machine you own
+  through a named worker—a [Windows PC](docs/byo-windows.md) or a [macOS guest](docs/byo-macos.md)—or, where
+  the platform safety boundary is currently certified, your own computer, plus 500+ apps through Composio.
+  Workers are named and leased independently, so one bot can hold a macOS desktop while another holds a
+  Windows one. Host control is available on macOS and Ubuntu Xorg after explicit opt-in. Ubuntu Wayland host
+  control remains disabled while issue #345 is resolved.
 
 ## Features
 

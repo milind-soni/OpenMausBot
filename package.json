@@ -48,6 +48,7 @@
     "preview": "vite preview",
     "build:server": "tsc -p tsconfig.server.build.json && node scripts/bundle-server.mjs",
     "build:companion": "tsc -p tsconfig.companion.build.json",
+    "build:worker-companion": "tsc -p tsconfig.worker-companion.build.json",
     "build:speech": "node electron/build-speech-helper.mjs",
     "build:recorder": "node electron/build-recorder-helper.mjs",
     "build:cua": "node scripts/prepare-cua.mjs",

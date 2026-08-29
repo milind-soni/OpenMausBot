@@ -1,0 +1,16 @@
+{
+  "name": "openmausbot-worker-companion",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "bin": {
+    "openmausbot-worker-companion": "dist/index.js"
+  },
+  "dependencies": {
+    "@trycua/cua-driver": "0.20.0",
+    "zod": "4.4.3"
+  },
+  "engines": {
+    "node": ">=24"
+  }
+}

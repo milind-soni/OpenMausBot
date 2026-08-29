@@ -3,7 +3,11 @@ import type { JsonValue } from "../../server/schema.ts";
 
 export interface LocalVmWorkspaceBot {
   id: string;
-  computer?: "cloud" | "vm" | "local" | "off";
+  /** Includes "worker" so a bot assigned to a remote worker still fits this
+   * shape. It is never eligible for the Local VM workspace — the filters below
+   * select "vm" — but the app's Bot type is one union, and a narrower copy here
+   * makes every Bot[] fail to assign. */
+  computer?: "cloud" | "vm" | "local" | "worker" | "off";
   hidden?: boolean;
 }
 

@@ -8,8 +8,11 @@ import {
   createGateInterceptor,
   createInactivityWatchdog,
   createLineSplitter,
+  createTaskInterceptor,
   runLivenessProbe,
+  WORKER_TASK_TOOLS,
 } from "./mcp-bridge.ts";
+import type { WorkerTaskClient, WorkerTaskOp } from "./worker-task-client.ts";
 
 /** a probe whose answers the test scripts one call at a time */
 function scriptedProbe(answers: boolean[]) {
@@ -224,5 +227,148 @@ describe("createGateInterceptor", () => {
     await drain();
     expect(refused).toEqual([]);
     expect(forwarded).toHaveLength(1);
+  });
+});
+
+// The bridge's second exception to transparency. A remote worker's CUA session
+// is bounded until an approved task unlocks it, so the tools that do the
+// unlocking have to live on the same MCP server as the tools they gate.
+describe("createTaskInterceptor", () => {
+  function harness(reply = { text: "done", isError: false }) {
+    const forwarded: string[] = [];
+    const emitted: string[] = [];
+    const calls: { op: WorkerTaskOp; payload: Record<string, unknown> }[] = [];
+    const client: WorkerTaskClient = {
+      configured: true,
+      call: (op, payload) => {
+        calls.push({ op, payload });
+        return Promise.resolve(reply);
+      },
+    };
+    const interceptor = createTaskInterceptor({
+      client,
+      forward: (line) => forwarded.push(line),
+      emit: (line) => emitted.push(line),
+    });
+    return { ...interceptor, forwarded, emitted, calls };
+  }
+
+  /** inbound() runs on a serialized queue, so a test has to let it drain
+   * before asserting what was forwarded or remembered. */
+  const tick = () => new Promise((resolve) => setTimeout(resolve, 0));
+
+  const listRequest = JSON.stringify({ jsonrpc: "2.0", id: 7, method: "tools/list" });
+  const listResult = JSON.stringify({
+    jsonrpc: "2.0",
+    id: 7,
+    result: { tools: [{ name: "screenshot" }, { name: "click" }] },
+  });
+
+  it("appends the task tools to the far end's list", async () => {
+    const h = harness();
+    h.inbound(listRequest);
+    await tick();
+    h.outbound(listResult);
+    const names = JSON.parse(h.emitted[0]).result.tools.map((tool: { name: string }) => tool.name);
+    expect(names).toEqual([
+      "screenshot",
+      "click",
+      ...WORKER_TASK_TOOLS.map((tool) => tool.name),
+    ]);
+  });
+
+  it("forwards the tools/list request untouched", async () => {
+    const h = harness();
+    h.inbound(listRequest);
+    await tick();
+    expect(h.forwarded).toEqual([listRequest]);
+  });
+
+  it("does not append twice if the far end already advertises a task tool", async () => {
+    const h = harness();
+    h.inbound(listRequest);
+    await tick();
+    h.outbound(JSON.stringify({
+      jsonrpc: "2.0",
+      id: 7,
+      result: { tools: [{ name: "worker_task_run" }] },
+    }));
+    const names = JSON.parse(h.emitted[0]).result.tools.map((tool: { name: string }) => tool.name);
+    expect(names.filter((name: string) => name === "worker_task_run")).toHaveLength(1);
+  });
+
+  it("leaves a tools/list result it never saw the request for alone", () => {
+    const h = harness();
+    h.outbound(listResult);
+    expect(h.emitted).toEqual([listResult]);
+  });
+
+  it("answers a task tool call itself and never forwards it", async () => {
+    const h = harness();
+    h.inbound(JSON.stringify({
+      jsonrpc: "2.0",
+      id: 3,
+      method: "tools/call",
+      params: { name: "worker_task_run", arguments: { commandId: "build" } },
+    }));
+    await tick();
+    expect(h.forwarded).toEqual([]);
+    expect(h.calls).toEqual([{ op: "run", payload: { commandId: "build" } }]);
+    const frame = JSON.parse(h.emitted[0]);
+    expect(frame.id).toBe(3);
+    expect(frame.result.content[0].text).toBe("done");
+    expect(frame.result.isError).toBe(false);
+  });
+
+  it("passes a Cua Driver tool call straight through", async () => {
+    const h = harness();
+    const line = JSON.stringify({ jsonrpc: "2.0", id: 4, method: "tools/call", params: { name: "click" } });
+    h.inbound(line);
+    await tick();
+    expect(h.forwarded).toEqual([line]);
+    expect(h.calls).toEqual([]);
+  });
+
+  it("passes a line that is not JSON through untouched, in both directions", async () => {
+    const h = harness();
+    h.inbound("not a frame");
+    h.outbound("also not a frame");
+    await tick();
+    expect(h.forwarded).toEqual(["not a frame"]);
+    expect(h.emitted).toEqual(["also not a frame"]);
+  });
+
+  it("surfaces a refusal from the harness as an error result", async () => {
+    const h = harness({ text: "OpenMausBot could not be reached", isError: true });
+    h.inbound(JSON.stringify({
+      jsonrpc: "2.0",
+      id: 5,
+      method: "tools/call",
+      params: { name: "worker_task_propose", arguments: { manifest: {} } },
+    }));
+    await tick();
+    expect(JSON.parse(h.emitted[0]).result.isError).toBe(true);
+  });
+
+  it("answers task calls in the order they arrived", async () => {
+    const h = harness();
+    for (const id of [1, 2, 3]) {
+      h.inbound(JSON.stringify({
+        jsonrpc: "2.0",
+        id,
+        method: "tools/call",
+        params: { name: "worker_task_status" },
+      }));
+    }
+    await tick();
+    expect(h.emitted.map((line) => JSON.parse(line).id)).toEqual([1, 2, 3]);
+  });
+
+  it("every task tool describes itself, so a model can tell them apart", () => {
+    for (const tool of WORKER_TASK_TOOLS) {
+      expect(tool.name).toMatch(/^worker_task_/);
+      expect(tool.description.length).toBeGreaterThan(40);
+      expect(tool.inputSchema.type).toBe("object");
+    }
   });
 });

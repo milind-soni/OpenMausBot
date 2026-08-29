@@ -2,6 +2,7 @@ import { z } from "zod";
 
 import { parseJson } from "./schema.ts";
 import type { AutoVerdictSource } from "./auto-approve.ts";
+import type { ApprovalScope } from "./contracts.ts";
 
 export type AutoReviewMode = "off" | "shadow" | "enforce";
 
@@ -23,7 +24,7 @@ export interface ReviewContext {
   source: AutoVerdictSource | undefined;
   mode: AutoReviewMode;
   unattended: boolean;
-  approvalScope: "local-computer" | undefined;
+  approvalScope: ApprovalScope | undefined;
 }
 
 export function resolveAutoReviewMode(stored: string | undefined): AutoReviewMode {
@@ -31,8 +32,10 @@ export function resolveAutoReviewMode(stored: string | undefined): AutoReviewMod
 }
 
 /** Review is a last resort for an ordinary attended permission card.
- * Existing decisions, unattended turns, host-computer access, and questions
- * remain exclusively human/rule controlled. */
+ * Existing decisions, unattended turns, real-desktop access, and questions
+ * remain exclusively human/rule controlled. The scope check below is a bare
+ * `=== undefined`, so a remote worker's desktop is excluded on exactly the
+ * same ground the user's own screen is. */
 export function shouldReview(context: ReviewContext): boolean {
   return (
     context.mode !== "off" &&

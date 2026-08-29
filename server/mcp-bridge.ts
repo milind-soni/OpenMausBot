@@ -2,14 +2,25 @@
 // (container-mcp.ts for the Local VM, vps-container-mcp.ts for the BYO VPS).
 // It defines no tools and parses no MCP messages: bytes in, bytes out.
 //
-// The single exception to that transparency is the who-is-driving gate
-// (opt-in via `gate`). While the person holds control of this computer in
-// the app, a `tools/call` from the agent is answered with a refusal HERE,
-// on the near side, and never forwarded — Cua Driver on the far side has
-// no concept of a person holding the wheel, so the refusal cannot come
-// from anywhere else. Everything that is not a tools/call still passes
-// through untouched, and with no gate configured the bridge remains the
-// byte-for-byte pipe described above.
+// There are two exceptions to that transparency, both opt-in.
+//
+// The who-is-driving gate (`gate`). While the person holds control of this
+// computer in the app, a `tools/call` from the agent is answered with a
+// refusal HERE, on the near side, and never forwarded — Cua Driver on the far
+// side has no concept of a person holding the wheel, so the refusal cannot
+// come from anywhere else.
+//
+// The worker task tools (`task`). A remote worker's CUA session is bounded by
+// a capability that only an approved task manifest can activate, so the tools
+// that propose, run and read back a task belong on the same MCP server as the
+// CUA tools they gate — otherwise a bot would hold a computer it has no way to
+// unlock. They are appended to the far end's `tools/list` and answered here
+// against the harness's loopback control endpoint, which owns the registry,
+// the approval card and the SSH transport. The bridge itself stays thin.
+//
+// Everything that is not a tools/call still passes through untouched, and with
+// neither option configured the bridge remains the byte-for-byte pipe
+// described above.
 //
 // Two behaviors live here so neither entry point can drift:
 //   1. Exit without truncation. `process.exit()` in a close/error handler
@@ -25,6 +36,7 @@ import { StringDecoder } from "node:string_decoder";
 
 import { CONTROL_REFUSAL_PLAIN, createControlClient } from "./control-client.ts";
 import { augmentedPath } from "./env-path.ts";
+import { createWorkerTaskClient, type WorkerTaskClient, type WorkerTaskOp } from "./worker-task-client.ts";
 
 // 45s of TOTAL silence before the bridge even probes. An MCP session is
 // legitimately quiet between tool calls and a slow screenshot can take tens
@@ -37,6 +49,8 @@ const PROBE_TIMEOUT_MS = 10_000;
 export interface BridgeLiveness {
   command: string;
   args: string[];
+  /** Optional child environment for a transport with a stricter boundary. */
+  env?: NodeJS.ProcessEnv;
 }
 
 /** Run the liveness command; alive means "exited 0 within the timeout". The
@@ -46,7 +60,7 @@ export function runLivenessProbe(probe: BridgeLiveness, timeoutMs = PROBE_TIMEOU
   return new Promise((resolve) => {
     const child = spawn(probe.command, probe.args, {
       shell: false,
-      env: { ...process.env, PATH: augmentedPath() },
+      env: probe.env ?? { ...process.env, PATH: augmentedPath() },
       stdio: ["ignore", "ignore", "ignore"],
     });
     const timer = setTimeout(() => {
@@ -125,6 +139,10 @@ export function createInactivityWatchdog(options: {
 export interface BridgeOptions {
   command: string;
   args: string[];
+  /** Optional child environment. The default preserves existing local/VPS
+   * behavior; a remote worker supplies an allow-listed SSH environment so no
+   * API key or loopback control token can reach the ssh child. */
+  env?: NodeJS.ProcessEnv;
   /** Names the far end in stderr messages, e.g. "Cua Driver". */
   label: string;
   /** Enables the dead-transport watchdog. Omitted for the Local VM, whose
@@ -133,6 +151,9 @@ export interface BridgeOptions {
   /** Enables the who-is-driving gate: the harness's loopback control
    * endpoint plus its per-boot token. Absent → fully transparent bridge. */
   gate?: { url: string; token: string };
+  /** Enables the worker task tools: the harness's loopback task endpoint plus
+   * its per-boot token. Absent → the far end's tool list is untouched. */
+  task?: { url: string; token: string };
 }
 
 /** Collect a byte stream into complete newline-terminated lines. MCP's
@@ -205,10 +226,171 @@ export function createGateInterceptor(options: {
   };
 }
 
+/** The tools a bot needs to unlock and drive a remote worker. They are named
+ * for what they authorize, not for what they touch: `propose` is the call that
+ * puts a card in front of a person, and nothing else here can run until it has
+ * been answered. */
+export const WORKER_TASK_TOOLS = [
+  {
+    name: "worker_task_propose",
+    description:
+      "Propose a task manifest for this worker and ask the person to approve it. " +
+      "The manifest names every file to stage, every command that may run, and the " +
+      "browser origins the task may reach. Nothing is staged, activated or run until " +
+      "the person approves this exact document, and changing any field requires a new " +
+      "approval. Call this before any computer tool: until a task is approved the " +
+      "worker holds a capability that grants no tools at all.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        manifest: {
+          type: "object",
+          description: "The worker task manifest, version 1.",
+        },
+      },
+      required: ["manifest"],
+    },
+  },
+  {
+    name: "worker_task_status",
+    description:
+      "Report the approved task on this worker for the current conversation: its id, " +
+      "digest, the command ids it may run, and how long the approval has left.",
+    inputSchema: { type: "object", properties: {} },
+  },
+  {
+    name: "worker_task_run",
+    description:
+      "Run one command from the approved manifest by its id, on the worker, inside the " +
+      "task's staged directory. The command's program and arguments come from the " +
+      "approved document — this call selects one, it cannot describe one.",
+    inputSchema: {
+      type: "object",
+      properties: { commandId: { type: "string", description: "A command id from the approved manifest." } },
+      required: ["commandId"],
+    },
+  },
+  {
+    name: "worker_task_results",
+    description:
+      "Read back the task's declared result artefacts from the worker. Only paths the " +
+      "approved manifest lists as results are readable.",
+    inputSchema: { type: "object", properties: {} },
+  },
+];
+
+const TASK_TOOL_OPS = {
+  worker_task_propose: "propose",
+  worker_task_run: "run",
+  worker_task_status: "status",
+  worker_task_results: "results",
+} satisfies Record<string, WorkerTaskOp>;
+
+/** The tool names this bridge answers itself. */
+type TaskToolName = keyof typeof TASK_TOOL_OPS;
+
+function taskOpFor(name: string): WorkerTaskOp | null {
+  // SAFETY: the assertion is guarded by the own-property check on the very
+  // same object, so `name` is one of this literal's keys by construction.
+  return Object.hasOwn(TASK_TOOL_OPS, name) ? TASK_TOOL_OPS[name as TaskToolName] : null;
+}
+
+/** Injects the worker task tools into the far end's surface.
+ *
+ * Two halves, both on serialized queues for the reason the gate is: answering
+ * frame N+1 before frame N would reorder the agent's protocol stream.
+ *
+ *   inbound   a `tools/call` for one of ours is answered here and never
+ *             forwarded; everything else passes through, and the id of every
+ *             `tools/list` is remembered
+ *   outbound  the result of a remembered `tools/list` gets our descriptors
+ *             appended; every other frame is emitted unchanged
+ */
+export interface TaskInterceptor {
+  /** A line from the agent, heading for the far end. */
+  inbound: (line: string) => void;
+  /** A line from the far end, heading for the agent. */
+  outbound: (line: string) => void;
+}
+
+export function createTaskInterceptor(options: {
+  client: WorkerTaskClient;
+  forward: (line: string) => void;
+  emit: (line: string) => void;
+}): TaskInterceptor {
+  // Bounded so a far end that never answers a tools/list cannot grow this
+  // without limit over a long session.
+  const listIds = new Set<string>();
+  const remember = (id: string) => {
+    if (listIds.size > 64) listIds.clear();
+    listIds.add(id);
+  };
+  let queue: Promise<void> = Promise.resolve();
+
+  const inbound = (line: string) => {
+    queue = queue.then(async () => {
+      let frame: any = null;
+      try {
+        frame = JSON.parse(line);
+      } catch {
+        // not a frame we understand — never stand between the agent and its
+        // driver on anything but a recognized call
+      }
+      if (!frame) {
+        options.forward(line);
+        return;
+      }
+      if (frame.method === "tools/list" && frame.id !== undefined && frame.id !== null) {
+        remember(String(frame.id));
+        options.forward(line);
+        return;
+      }
+      const op = frame.method === "tools/call" ? taskOpFor(String(frame.params?.name ?? "")) : null;
+      if (!op) {
+        options.forward(line);
+        return;
+      }
+      const args = frame.params?.arguments;
+      const reply = await options.client.call(op, args && args instanceof Object ? { ...args } : {});
+      options.emit(
+        JSON.stringify({
+          jsonrpc: "2.0",
+          id: frame.id ?? null,
+          result: { content: [{ type: "text", text: reply.text }], isError: reply.isError },
+        }),
+      );
+    });
+  };
+
+  const outbound = (line: string) => {
+    let frame: any = null;
+    try {
+      frame = JSON.parse(line);
+    } catch {
+      options.emit(line);
+      return;
+    }
+    const id = frame?.id === undefined || frame?.id === null ? null : String(frame.id);
+    if (!id || !listIds.has(id) || !Array.isArray(frame?.result?.tools)) {
+      options.emit(line);
+      return;
+    }
+    listIds.delete(id);
+    const existing = new Set(frame.result.tools.map((tool: any) => String(tool?.name ?? "")));
+    frame.result.tools = [
+      ...frame.result.tools,
+      ...WORKER_TASK_TOOLS.filter((tool) => !existing.has(tool.name)),
+    ];
+    options.emit(JSON.stringify(frame));
+  };
+
+  return { inbound, outbound };
+}
+
 export function runMcpBridge(options: BridgeOptions): void {
   const child = spawn(options.command, options.args, {
     shell: false,
-    env: { ...process.env, PATH: augmentedPath() },
+    env: options.env ?? { ...process.env, PATH: augmentedPath() },
     stdio: ["pipe", "pipe", "pipe"],
   });
 
@@ -216,26 +398,41 @@ export function runMcpBridge(options: BridgeOptions): void {
   child.stdin.on("error", () => {});
   child.stderr.pipe(process.stderr);
 
+  const emit = (line: string) => process.stdout.write(line + "\n");
+  const toChild = (line: string) => child.stdin.write(line + "\n");
+  const tasks = options.task
+    ? createTaskInterceptor({
+        client: createWorkerTaskClient({ url: options.task.url, token: options.task.token }),
+        forward: toChild,
+        emit,
+      })
+    : null;
+
   let detach: () => void;
-  if (options.gate) {
-    const client = createControlClient({ url: options.gate.url, token: options.gate.token });
-    const inbound = createLineSplitter(
-      createGateInterceptor({
+  if (options.gate || tasks) {
+    // The gate runs first when both are configured: while a person holds the
+    // wheel, nothing executes — proposing or running a task included.
+    const deliver = tasks ? tasks.inbound : toChild;
+    let entry = deliver;
+    if (options.gate) {
+      const client = createControlClient({ url: options.gate.url, token: options.gate.token });
+      entry = createGateInterceptor({
         isHeld: async () => (await client.state(true)).held,
-        forward: (line) => child.stdin.write(line + "\n"),
-        refuse: (line) => process.stdout.write(line + "\n"),
-      }),
-    );
+        forward: deliver,
+        refuse: emit,
+      });
+    }
+    const inbound = createLineSplitter(entry);
     const onStdin = (chunk: Buffer) => inbound.push(chunk);
     process.stdin.on("data", onStdin);
     process.stdin.on("end", () => {
       inbound.flush();
       child.stdin.end();
     });
-    // Injected refusals must never land inside one of the child's
-    // half-written frames, so the child's stdout is re-emitted at line
+    // Injected refusals and tool results must never land inside one of the
+    // child's half-written frames, so the child's stdout is re-emitted at line
     // granularity as well.
-    const outbound = createLineSplitter((line) => process.stdout.write(line + "\n"));
+    const outbound = createLineSplitter(tasks ? tasks.outbound : emit);
     child.stdout.on("data", (chunk) => outbound.push(chunk));
     child.stdout.on("end", () => outbound.flush());
     detach = () => {

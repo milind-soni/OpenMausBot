@@ -65,6 +65,8 @@ import {
   syncCredentialEnv,
   withInstanceCli,
   vpsSshAlias,
+  configuredWorkers,
+  workerById,
   DATA_DIR,
   EVENTS_DIR,
   NATIVE_DIR,
@@ -149,6 +151,16 @@ import { fetchSkillFromSource } from "./skill-fetch.ts";
 import { readCuaConnection } from "./local-computer.ts";
 import { LocalVmIdleTimer } from "./local-vm-idle.ts";
 import { LocalVmLease, LocalVmLeasePool } from "./local-vm-lease.ts";
+import { publicWorker, type ResolvedWorker } from "./computer-workers.ts";
+import { RemoteWorkerLease, remoteWorkerMcp } from "./remote-worker.ts";
+import { allWorkerStatuses, workerStatus } from "./worker-status.ts";
+import { WorkerTaskRegistry } from "./worker-task-manifest.ts";
+import {
+  cancelWorkerTaskApprovalsForThread,
+  dismissStaleWorkerTaskCards,
+  resolveWorkerTaskApproval,
+} from "./worker-task-approval.ts";
+import { WorkerTaskService } from "./worker-task-service.ts";
 import { RepeatDetector, callKey } from "./repeat-detector.ts";
 import { redactSecretsInText } from "./redact.ts";
 import * as vps from "./vps-computer.ts";
@@ -297,6 +309,16 @@ const routineRequestEnvelopeSchema = z.discriminatedUnion("action", [
 function controlIntegration(botId: string) {
   return {
     url: `http://127.0.0.1:${PORT}/api/internal/computer-control?botId=${encodeURIComponent(botId)}`,
+    token: COMMS_TOKEN,
+  };
+}
+
+/** Where the worker MCP bridge sends the four task tools. Same loopback shape
+ * as computer control: the bridge is a separate per-turn process and owns no
+ * authority of its own. */
+function taskIntegration(botId: string) {
+  return {
+    url: `http://127.0.0.1:${PORT}/api/internal/worker-task?botId=${encodeURIComponent(botId)}`,
     token: COMMS_TOKEN,
   };
 }
@@ -1022,6 +1044,29 @@ function localVmIdleFor(target: LocalVmTarget): LocalVmIdleTimer {
   return idle;
 }
 
+/** One lease pool for every named worker. Records key on the SSH alias, so
+ * a macOS bot and a Windows bot never contend, while two turns aimed at one
+ * desktop still serialize. */
+const workerLease = new RemoteWorkerLease();
+const workerThreadAliases = new Map<string, string>();
+
+/** Approvals and activations for every worker, in one place. Per-worker
+ * revocation lives on the registry so a worker going offline can drop its own
+ * approvals without touching the other's — #508 acceptance item 6. */
+const workerTasks = new WorkerTaskRegistry();
+
+function releaseWorkerThread(threadId: string): void {
+  const alias = workerThreadAliases.get(threadId);
+  if (!alias) return;
+  workerLease.release(threadId);
+  workerThreadAliases.delete(threadId);
+  // A turn that ends holds no approval into the next one. The document stays
+  // registered; permission to execute it does not survive the turn.
+  const record = workerTasks.forThread(threadId);
+  if (record) workerTasks.revoke(record.manifest.taskId);
+  cancelWorkerTaskApprovalsForThread(threadId);
+}
+
 function releaseLocalVmThread(threadId: string): void {
   const target = localVmThreadTargets.get(threadId);
   if (!target) return;
@@ -1048,8 +1093,10 @@ bus.subscribe((event: RuntimeEvent) => {
     localVmLeaseFor(localVmTarget).touch(event.threadId);
     localVmIdleFor(localVmTarget).touch();
   }
+  if (workerThreadAliases.has(event.threadId)) workerLease.touch(event.threadId);
   if (event.type === "turn.completed") {
     releaseLocalVmThread(event.threadId);
+    releaseWorkerThread(event.threadId);
   }
   broadcast({ kind: "runtime", event });
   const routineRun = routines?.handleRuntimeEvent(event) ?? null;
@@ -1203,9 +1250,11 @@ bus.subscribe((event: RuntimeEvent) => {
           title:
             permission && event.approvalScope === "local-computer"
               ? "Local computer approval"
-              : permission
-                ? "Approval needed"
-                : "Your bot has a question",
+              : permission && event.approvalScope === "remote-worker-computer"
+                ? "Worker computer approval"
+                : permission
+                  ? "Approval needed"
+                  : "Your bot has a question",
           subtitle: event.summary,
           options: event.choices?.length ? event.choices : permission ? ["Allow", "Deny"] : [],
           requestId: event.requestId,
@@ -1868,7 +1917,8 @@ async function startTurn(
       const mountsCloudComputer = mountsComputerMcp || instance.driverKind === "boxAgent";
       const mountsLocalComputer = instance.adapter.capabilities.localComputerMcp === true;
       let previewCapture: (() => Promise<{ png: string; format: string }>) | null = null;
-      let computerKind: "box" | "vps" | "vm" | "local" | null = null;
+      let computerKind: "box" | "vps" | "vm" | "local" | "worker" | null = null;
+      let workerTarget: ResolvedWorker | null = null;
       let autoVpsProblem: string | null = null;
 
       // Explicit destinations are strict. In particular, Local VM must never
@@ -1912,6 +1962,35 @@ async function startTurn(
         if (!cua) throw new Error("CUA Driver is not ready for this computer — check permissions and restart OpenMausBot");
         integrations.localComputer = cua;
         computerKind = "local";
+      } else if (wants === "worker") {
+        if (!mountsComputerMcp || instance.driverKind === "boxAgent") {
+          throw new Error("this model engine cannot use a remote worker — choose Claude or an ACP engine, or select another computer destination");
+        }
+        const worker = workerById(cfg, bot.workerId ?? null);
+        if (!worker) {
+          throw new Error("this bot is not assigned to a configured worker (App Settings → Workers)");
+        }
+        // Claim before the first await, exactly as Local VM does: otherwise
+        // two turns could both pass the readiness check and then both mount
+        // the same physical desktop, interleaving real keyboard and mouse
+        // input on one screen.
+        if (!workerLease.claim(worker.sshAlias, threadId, bot.id, (id) => store.bot(id)?.busy === true)) {
+          throw new Error(`the ${worker.displayName} desktop is already being used by another turn — wait for that turn to finish`);
+        }
+        workerThreadAliases.set(threadId, worker.sshAlias);
+        const status = await workerStatus(worker);
+        if (!status.ready || !status.channelPath) {
+          throw new Error(`${status.problem ?? "this worker is not ready"} (App Settings → Workers)`);
+        }
+        integrations.localComputer = remoteWorkerMcp(
+          worker,
+          status.channelPath,
+          controlIntegration(bot.id),
+          status.capabilityDigest ?? undefined,
+          taskIntegration(bot.id),
+        );
+        workerTarget = worker;
+        computerKind = "worker";
       }
 
       // A VPS is a local-agent computer mount, never a remote agent runner.
@@ -2093,6 +2172,8 @@ async function startTurn(
               ? " You have your own self-hosted remote Linux computer through the official Cua tools. Its filesystem is disposable: everything on it is wiped whenever its container is recreated, so keep long-lived work somewhere durable — push it to a remote, or hand the results back in chat — instead of leaving it only on that computer. Inspect the desktop state before acting, prefer accessibility targets over raw coordinates, and act carefully."
               : computerKind === "local"
               ? " You can act on the user's computer through the computer tools — take a screenshot or read the desktop state first, prefer accessibility actions over raw coordinates, and act carefully."
+              : computerKind === "worker"
+              ? ` You have your own ${workerTarget?.platform === "windows" ? "Windows" : "macOS"} computer — a separate machine the user owns, reached through the official Cua tools. It is not disposable and it is not the user's own desktop: treat its files as real, do not reconfigure the machine, and stay inside the task's approved surface. Inspect the desktop state before acting, prefer accessibility targets over raw coordinates, and act carefully.`
               : "") +
           (computerKind
             ? " At a sign-in, password, MFA, CAPTCHA, or other protected-input step, stop and ask the user to complete it on the visible computer. Never type their password or ask them to paste a password or one-time code into chat."
@@ -2133,6 +2214,7 @@ async function startTurn(
       }
     } catch (e) {
       releaseLocalVmThread(threadId);
+      releaseWorkerThread(threadId);
       if (activeVpsThreads.get(bot.id) === threadId) activeVpsThreads.delete(bot.id);
       watchdog.settle(threadId);
       turnUsage.delete(threadId);
@@ -2388,6 +2470,21 @@ const approvalBus: ApprovalBus = { store, broadcast };
 {
   const stale = dismissStalePeerCards(approvalBus);
   if (stale) console.log(`peer approvals: dismissed ${stale} card(s) left by a previous run`);
+}
+
+// The four worker task tools are answered here, never in the MCP bridge: the
+// registry, the approval card and the SSH transport all live in this process.
+const workerTaskService = new WorkerTaskService({
+  bus: approvalBus,
+  registry: workerTasks,
+  workerFor: (bot) => workerById(cfg, bot.workerId ?? null),
+});
+
+// Same reasoning as the peer sweep above: a worker task card on disk belongs to
+// a resolver that died with the previous process.
+{
+  const stale = dismissStaleWorkerTaskCards(approvalBus);
+  if (stale) console.log(`worker tasks: dismissed ${stale} card(s) left by a previous run`);
 }
 
 // Handoffs a previous process queued but never ran: the source turn is
@@ -3595,6 +3692,17 @@ const server = createServer(async (req, res) => {
         return res.end(Buffer.from(upstream.bytes));
       }
       // ── computer control: proxies read the hold, bots plead for help ──
+      if (path === "/api/internal/worker-task" && method === "POST") {
+        const botId = url.searchParams.get("botId") ?? "";
+        const bot = store.bot(botId);
+        if (!bot) return json(res, 404, { error: "no such bot" });
+        const body = await readBody(req);
+        // Propose blocks on a human, so this request is deliberately long-lived;
+        // the bridge's own timeout is the ceiling, and the approval's 15-minute
+        // timer resolves it either way.
+        const outcome = await workerTaskService.handle(bot, body);
+        return json(res, outcome.status, outcome.error ? { error: outcome.error } : { text: outcome.text ?? "" });
+      }
       if (path === "/api/internal/computer-control") {
         const botId = url.searchParams.get("botId") ?? "";
         const bot = store.bot(botId);
@@ -4903,9 +5011,41 @@ const server = createServer(async (req, res) => {
       }
       if (
         body.computer !== undefined &&
-        !["cloud", "vm", "local", "off"].includes(String(body.computer))
+        !["cloud", "vm", "local", "worker", "off"].includes(String(body.computer))
       ) {
-        return json(res, 400, { error: "computer must be cloud, vm, local, or off" });
+        return json(res, 400, { error: "computer must be cloud, vm, local, worker, or off" });
+      }
+      // Tracked in its own typed local: `patch` is a Record<string, unknown>,
+      // so reading the id back out of it would lose the type the check below
+      // needs.
+      let assignedWorkerId: string | null | undefined;
+      if (body.workerId !== undefined) {
+        if (body.workerId === null || body.workerId === "") {
+          patch.workerId = undefined;
+          assignedWorkerId = null;
+        } else if (!workerById(cfg, body.workerId)) {
+          return json(res, 400, { error: "workerId must name a configured worker (App Settings → Workers)" });
+        } else {
+          assignedWorkerId = String(body.workerId);
+          patch.workerId = assignedWorkerId;
+        }
+      }
+      {
+        // Assignment and destination are checked together: either field can
+        // arrive alone, and "worker" without a resolvable id would fail only
+        // at the start of the next turn, long after the person left Settings.
+        const nextComputer = body.computer !== undefined ? body.computer : existingBot?.computer;
+        const nextWorkerId = assignedWorkerId !== undefined ? assignedWorkerId : (existingBot?.workerId ?? null);
+        if (nextComputer === "worker" && !workerById(cfg, nextWorkerId)) {
+          return json(res, 400, { error: "choose a configured worker for this bot first (App Settings → Workers)" });
+        }
+        // Every worker task is explicitly approved through the three fences,
+        // so auto mode has nothing to approve on its own and must not look
+        // like it does.
+        const nextAuto = body.autoApprove !== undefined ? body.autoApprove : existingBot?.autoApprove === true;
+        if (nextComputer === "worker" && nextAuto === true) {
+          return json(res, 400, { error: "Auto mode is unavailable while this bot uses a remote worker" });
+        }
       }
       if (body.cloudBackend !== undefined && !["box", "vps"].includes(String(body.cloudBackend))) {
         return json(res, 400, { error: "cloudBackend must be box or vps" });
@@ -5432,6 +5572,10 @@ const server = createServer(async (req, res) => {
       if (resolvePeerComms(approvalBus, String(body.requestId), behavior)) {
         return json(res, 200, { ok: true, outcome: behavior === "allow" ? "allowed-once" : "rejected" });
       }
+      // worker-task intercept: same harness-native shape as peer approval.
+      if (resolveWorkerTaskApproval(String(body.requestId), behavior)) {
+        return json(res, 200, { ok: true, outcome: behavior === "allow" ? "allowed-once" : "rejected" });
+      }
       const outcome = await answerRequest(bot.threadId, bot.modelSelection.instanceId, String(body.requestId), behavior, body.message, { id: bot.id, name: bot.name });
       return json(res, 200, { ok: true, outcome });
     }
@@ -5467,6 +5611,9 @@ const server = createServer(async (req, res) => {
       // belongs to the bus rather than to a speaker, so resolve it before we go
       // looking for one — a room between turns has no speaker to find.
       if (resolvePeerComms(approvalBus, requestId, behavior)) {
+        return json(res, 200, { ok: true, outcome: behavior === "allow" ? "allowed-once" : "rejected" });
+      }
+      if (resolveWorkerTaskApproval(requestId, behavior)) {
         return json(res, 200, { ok: true, outcome: behavior === "allow" ? "allowed-once" : "rejected" });
       }
       const group = store.groupByThread(threadId);
@@ -5819,6 +5966,32 @@ const server = createServer(async (req, res) => {
       }
     }
 
+    // ── named remote workers (Windows PCs and macOS guests) ──
+    if (method === "GET" && path === "/api/workers") {
+      const workers = configuredWorkers(cfg);
+      // Probed concurrently: an unreachable worker must not delay the
+      // healthy one, and each adapter already fails closed on its own.
+      const statuses = await allWorkerStatuses(workers, {
+        lease: workerLease,
+        isBotBusy: (botId) => store.bot(botId)?.busy === true,
+      });
+      // A worker that is no longer ready cannot be holding the capability its
+      // task was approved against, so its approvals are dropped here — and only
+      // its own. #508 item 6 is precisely that killing one worker leaves the
+      // other usable, approvals included.
+      for (const status of statuses) {
+        if (!status.ready) workerTaskService.forgetWorker(status.workerId);
+      }
+      // The SSH alias names a host in the operator's own config. Nothing
+      // downstream of the control plane needs it, so it never leaves here.
+      return json(res, 200, {
+        workers: workers.map((worker, index) => ({
+          ...publicWorker(worker),
+          status: statuses[index],
+        })),
+      });
+    }
+
     // ── app config (API keys — never echoed back, booleans only) ──
     if (method === "GET" && path === "/api/config") {
       return json(res, 200, configStatus());
@@ -5828,6 +6001,25 @@ const server = createServer(async (req, res) => {
       const patch = parseConfigPatch(body);
       if (!Object.keys(patch).length) return json(res, 400, { error: "nothing to save" });
       if (providerConfigBusy) return json(res, 409, { error: "provider settings are already being updated" });
+      if (patch.workers !== undefined) {
+        const nextAliases = new Set(configuredWorkers({ ...cfg, workers: patch.workers }).map((w) => w.sshAlias));
+        const heldAndGone = configuredWorkers(cfg).filter(
+          (worker) =>
+            !nextAliases.has(worker.sshAlias)
+            && workerLease.current(worker.sshAlias, (botId) => store.bot(botId)?.busy === true) !== null,
+        );
+        if (heldAndGone.length > 0) {
+          return json(res, 409, {
+            error: `wait for the turn using ${heldAndGone[0].displayName} to finish before changing that worker`,
+          });
+        }
+        // A worker that survived the edit unchanged keeps its lease; one that
+        // was removed or repointed must not leave a record reporting `busy`
+        // for a machine the control plane no longer addresses.
+        for (const worker of configuredWorkers(cfg)) {
+          if (!nextAliases.has(worker.sshAlias)) workerLease.releaseAlias(worker.sshAlias);
+        }
+      }
       if (patch.vps !== undefined) {
         const currentAlias = vpsSshAlias(cfg);
         const nextAlias = vpsSshAlias({ ...cfg, vps: patch.vps });
