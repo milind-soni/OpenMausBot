@@ -10,6 +10,12 @@ process.stdout.write("fixture-modules-loaded\n");
 // filesystem ACL it needs from the test wrapper and keeps every child sandbox.
 if (process.platform === "linux") {
   app.commandLine.appendSwitch("no-sandbox");
+} else if (process.platform === "win32") {
+  // Recent Windows runner updates can crash Electron's GPU child with
+  // EXCEPTION_BREAKPOINT before app ready. This fixture tests renderer/CDP
+  // isolation, not graphics acceleration; renderer and utility sandboxes stay
+  // enabled while Chromium uses its non-hardware compositing path.
+  app.disableHardwareAcceleration();
 }
 
 async function waitForLifecycleEvent(emitter, event, label, timeoutMs = 2_000) {
