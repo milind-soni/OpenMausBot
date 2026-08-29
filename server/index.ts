@@ -145,6 +145,7 @@ import { loadBundledSkills, loadUserSkills, mergeSkills, renderSkillInstructions
 import { installedPlaybookInstructions } from "./installed-playbooks.ts";
 import { createBotPackageExport } from "./package-export.ts";
 import { shouldMountLocalComputer } from "./local-routing.ts";
+import { createCentipedeV3Runtime, type CentipedeV3Runtime } from "./centipede-v3-runtime.ts";
 
 const PORT = Number(process.env.OMB_PORT || process.env.OGB_PORT || 8799);
 const WEBHOOK_PORT = Number(process.env.OMB_WEBHOOK_PORT || PORT + 1);
@@ -166,6 +167,10 @@ const registry = new ProviderRegistry(BUILT_IN_DRIVERS);
 await registry.load(instanceConfigs(cfg));
 const bundledSkills = loadBundledSkills();
 const availableSkills = () => mergeSkills(bundledSkills, loadUserSkills(join(DATA_DIR, "skills")));
+const centipedeV3: CentipedeV3Runtime | null =
+  process.env.OMB_PRODUCT_ID === "centipede-v3"
+    ? createCentipedeV3Runtime({ dataDir: DATA_DIR })
+    : null;
 
 // Electron's utility-process parent port is private to the desktop main
 // process. It lets a slow first-time managed Composio registration arrive
@@ -2718,6 +2723,22 @@ const server = createServer(async (req, res) => {
       return json(res, 403, { error: "forbidden: cross-origin request" });
     }
     // ── internal peer-agent comms (localhost + shared token only) ──────
+    if (centipedeV3 && method === "GET" && path === "/api/v3/context") {
+      return json(res, 200, centipedeV3.inspectContext());
+    }
+    if (centipedeV3 && method === "GET" && path.startsWith("/api/v3/outcomes/")) {
+      const outcomeId = decodeURIComponent(path.slice("/api/v3/outcomes/".length));
+      const projection = centipedeV3.inspectOutcome(outcomeId);
+      return projection ? json(res, 200, projection) : json(res, 404, { error: "no such outcome" });
+    }
+    if (centipedeV3 && method === "GET" && path.startsWith("/api/v3/receipts/")) {
+      const outcomeId = decodeURIComponent(path.slice("/api/v3/receipts/".length));
+      const receipt = centipedeV3.inspectOutcomeReceipt(outcomeId);
+      return receipt ? json(res, 200, receipt) : json(res, 404, { error: "no verified receipt" });
+    }
+    if (centipedeV3 && method === "POST" && path === "/api/v3/commands") {
+      return json(res, 200, await centipedeV3.dispatch(await readBody(req)));
+    }
     // The agents-proxy (spawned inside a bot's agent process) calls these to
     // discover peers and hand a message to one. Not part of the public API.
     if (path.startsWith("/api/internal/")) {
@@ -4716,7 +4737,7 @@ const server = createServer(async (req, res) => {
     // child proves it is OURS by echoing its pid (a stray dev server has
     // the same API shape but a different pid)
     if (method === "GET" && path === "/api/health") {
-      return json(res, 200, { app: "openmausbot", pid: process.pid, static: Boolean(STATIC_DIR) });
+      return json(res, 200, { app: process.env.OMB_PRODUCT_ID === "centipede-v3" ? "Centipede V3" : "openmausbot", pid: process.pid, static: Boolean(STATIC_DIR) });
     }
 
     // ── inspector: a thread's runtime events + native protocol tee ──

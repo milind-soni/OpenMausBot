@@ -1,8 +1,8 @@
 {
-  "name": "openmausbot",
+  "name": "centipede-v3",
   "private": true,
   "version": "0.1.37",
-  "description": "A local-first chat app for running a team of AI agents.",
+  "description": "Centipede V3 — a local-first outcome execution desktop.",
   "homepage": "https://github.com/milind-soni/OpenMausBot",
   "repository": {
     "type": "git",
@@ -13,7 +13,7 @@
     "email": "46266943+milind-soni@users.noreply.github.com"
   },
   "license": "Apache-2.0",
-  "desktopName": "com.openmausbot.app.desktop",
+  "desktopName": "com.openmausbot.centipede.v3.desktop",
   "type": "module",
   "main": "electron/main.mjs",
   "engines": {
@@ -29,7 +29,7 @@
     "docs:build": "pnpm --filter @openmausbot/docs build",
     "docs:preview": "pnpm --filter @openmausbot/docs preview",
     "companion": "node --experimental-strip-types companion/src/index.ts",
-    "dev:server": "node --experimental-strip-types server/index.ts",
+    "dev:server": "node --experimental-strip-types server/v3-index.ts",
     "dev:desktop": "node scripts/prepare-cloudflared.mjs --current && electron .",
     "build": "tsc -b && tsc -p tsconfig.server.json && vite build",
     "typecheck": "tsc -b && tsc -p tsconfig.server.json",
@@ -57,6 +57,7 @@
     "package:prepare": "pnpm build && pnpm build:server && pnpm build:companion && pnpm build:updater && pnpm build:android-tools && pnpm build:cloudflared",
     "package:mac": "pnpm package:prepare && pnpm build:speech && pnpm build:recorder && pnpm build:cua && electron-builder --mac --publish never",
     "package:win": "pnpm package:prepare && electron-builder --win --publish never",
+    "package:v3:win": "pnpm package:prepare && electron-builder --config electron-builder.v3.yml --win --publish never",
     "package:linux": "pnpm package:prepare && pnpm build:cua:linux && electron-builder --linux --x64 --publish never",
     "package:linux:offline": "pnpm package:prepare && pnpm build:cua:linux:offline && electron-builder --linux --x64 --publish never",
     "smoke:linux-package": "node scripts/run-linux-package-smoke.mjs",
@@ -64,6 +65,8 @@
     "package:linux:dir": "pnpm package:prepare && pnpm build:cua:linux && electron-builder --linux dir --x64 --publish never",
     "package": "pnpm package:mac",
     "test:packaged-server": "pnpm build:server && node scripts/smoke-packaged-server.mjs",
+    "test:packaged-v3-server": "pnpm build:server && node scripts/smoke-packaged-v3-server.mjs",
+    "test:v3-coexistence": "pnpm build:server && node scripts/smoke-v3-coexistence.mjs",
     "broker:types": "wrangler types --config cloudflare/composio-broker/wrangler.jsonc cloudflare/composio-broker/worker-configuration.d.ts",
     "broker:check": "pnpm broker:types && tsc -p cloudflare/composio-broker/tsconfig.json",
     "broker:test": "vitest run --config cloudflare/composio-broker/vitest.config.ts",
