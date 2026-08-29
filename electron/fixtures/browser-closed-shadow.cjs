@@ -1,8 +1,10 @@
 "use strict";
 
+process.stdout.write("fixture-entered\n");
 const { once } = require("node:events");
 const { app, BrowserWindow, WebContentsView } = require("electron");
 const { createBrowserSurfaceManager } = require("../browser-surface.cjs");
+process.stdout.write("fixture-modules-loaded\n");
 
 // Linux CI runs under Xvfb as root. Windows receives the restricted-package
 // filesystem ACL it needs from the test wrapper and keeps every child sandbox.
@@ -208,7 +210,10 @@ async function run() {
 }
 
 app.whenReady()
-  .then(run)
+  .then(() => {
+    process.stdout.write("fixture-ready\n");
+    return run();
+  })
   .then(() => app.quit())
   .catch((error) => {
     process.stderr.write(`${error?.stack ?? error}\n`);

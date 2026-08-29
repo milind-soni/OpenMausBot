@@ -4,7 +4,7 @@
 // told where its rectangle is. Anything the renderer draws is painted UNDER
 // the native view, so menus and dialogs that would overlap it hide it
 // instead. Compact in the panel; expanded when handed the main column.
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { ArrowLeft, ExternalLink, Globe, Hand, Loader2, Maximize2, Minimize2, Plus, UserRound } from "lucide-react";
 import { usePageVisible } from "@/lib/page-visible";
 import { cn } from "@/lib/cn";
@@ -115,7 +115,12 @@ export function BrowserPanel({
   const hostRef = useRef<HTMLDivElement>(null);
   const nativeTakePending = useRef(false);
   const botBusyRef = useRef(browserProfileChangesDisabled(bot));
-  botBusyRef.current = browserProfileChangesDisabled(bot);
+  // Async profile creation must only observe committed bot state. Updating the
+  // ref during render lets an interrupted concurrent render leak a busy value
+  // that React never committed and can strand the newly-created profile.
+  useLayoutEffect(() => {
+    botBusyRef.current = browserProfileChangesDisabled(bot);
+  }, [bot.busy]);
   const [surface, setSurface] = useState<BrowserSurfaceState | null>(null);
   const [address, setAddress] = useState("");
   const [addressFocused, setAddressFocused] = useState(false);
