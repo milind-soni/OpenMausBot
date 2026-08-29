@@ -3,11 +3,10 @@
 const { app, BrowserWindow, WebContentsView } = require("electron");
 const { createBrowserSurfaceManager } = require("../browser-surface.cjs");
 
-// Hosted Windows runners can abort Chromium's GPU subprocess before this
-// fixture's JS starts when their cached Electron binary lacks the AppContainer
-// ACL expected by the GPU sandbox. Disable only that child sandbox: the page
-// renderer remains sandboxed. Linux CI runs under Xvfb as root; macOS keeps
-// the full production sandbox configuration.
+// Hosted Windows runners can abort Chromium's GPU subprocess during early
+// startup under its restricted sandbox. Disable only that child sandbox for
+// this integration fixture; the page renderer remains sandboxed. Linux CI
+// runs under Xvfb as root; macOS keeps the full production configuration.
 if (process.platform === "win32") {
   app.commandLine.appendSwitch("disable-gpu-sandbox");
 } else if (process.platform === "linux") {
