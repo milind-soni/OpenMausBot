@@ -1,0 +1,3 @@
+# Outcome Orchestrator command seam
+
+Outcome Mode needs to own validation, event replay, legal transitions, exact Contract-version binding, and independent verification without making each caller understand those rules. We considered (1) an explicit interface with separate `declare`, `accept`, `start`, `answer`, `verify`, and `cancel` methods, which is discoverable but spreads transition and retry rules across a wide seam, and (2) a deep command seam with one validated `dispatch` entrypoint plus one `inspect` projection. We chose the second: the interface stays small while the implementation centralizes fail-closed replay and lifecycle behavior; the cost is that callers must construct a discriminated command, which boundary validation makes explicit.
