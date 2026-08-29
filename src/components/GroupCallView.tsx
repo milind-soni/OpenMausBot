@@ -286,7 +286,7 @@ function GroupCall({ group, members }: { group: Group; members: Bot[] }) {
 
       allowBargeIn.current = false;
       move(busyRef.current ? "working" : "sending");
-      dispatch({ type: "sendGroup", groupId: group.id, text: routed.text });
+      dispatch({ type: "sendGroup", groupId: group.id, text: routed.text, threadId: group.threadId });
       scheduleListen(false, 600);
     });
     const offEnd = bridge.onSpeechEnd(({ code, reason }) => {

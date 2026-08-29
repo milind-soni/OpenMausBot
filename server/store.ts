@@ -113,6 +113,8 @@ export interface Message {
   /** Optional flat reply reference. Unlike parentId this never changes the
    * conversation branch; it only quotes one earlier text message inline. */
   replyToId?: string;
+  /** Stable client identity for at-most-once chat POST retries. */
+  sendId?: string;
   /** group threads: which member said this (sender attribution). */
   from?: { botId: string; name: string; color: string };
   /** emoji reactions; by = "user" or a member botId. */

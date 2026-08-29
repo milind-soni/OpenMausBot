@@ -24,6 +24,7 @@ posixOnly("mid-turn steering e2e", () => {
   let child: ChildProcess;
   let home: string;
   let stderr = "";
+  let steerGate: string;
 
   const api = async (method: string, path: string, body?: unknown): Promise<{ status: number; body: any }> => {
     const res = await fetch(`${BASE}${path}`, {
@@ -47,11 +48,17 @@ posixOnly("mid-turn steering e2e", () => {
     chmodSync(FAKE_ACP, 0o755);
     home = mkdtempSync(join(tmpdir(), "omb-steer-"));
     mkdirSync(join(home, ".openmausbot"), { recursive: true });
+    steerGate = join(home, "delayed-steer.gate");
     writeFileSync(
       join(home, ".openmausbot", "config.json"),
       JSON.stringify({
         instances: {
           claude: { driver: "claudeAgent", environment: { FAKE_CLAUDE_MODE: "slow" }, config: { cli: FAKE_CLAUDE, permissionMode: "bypassPermissions" } },
+          claudeRace: {
+            driver: "claudeAgent",
+            environment: { FAKE_CLAUDE_MODE: "slow", FAKE_CLAUDE_STEER_GATE: steerGate },
+            config: { cli: FAKE_CLAUDE, permissionMode: "bypassPermissions" },
+          },
           // no live session: a message while busy uses the server-side queue
           acp: { driver: "grokAgent", environment: { FAKE_ACP_MODE: "hang" }, config: { cli: FAKE_ACP, fullAuto: true } },
         },
@@ -120,6 +127,41 @@ posixOnly("mid-turn steering e2e", () => {
     },
     40_000,
   );
+
+  it("rejects a delayed steer acknowledgement after the bot is deleted", async () => {
+    const created = (await api("POST", "/api/bots")).body.bot;
+    await api("PATCH", `/api/bots/${created.id}`, {
+      modelSelection: { instanceId: "claudeRace", model: "claude-fake" },
+    });
+
+    expect((await api("POST", `/api/bots/${created.id}/messages`, { text: "first race turn" })).status).toBe(202);
+    await waitFor(async () => (await getBot(created.id))?.busy === true, "the race turn to start");
+    await waitFor(
+      async () => (await getBot(created.id))?.messages.some((message: any) => message.kind === "activity"),
+      "the race turn tool chip",
+    );
+
+    // The fake has paused stdin after the first prompt. This exceeds a pipe's
+    // writable buffer, so the steer promise cannot acknowledge until the gate
+    // opens; meanwhile the first turn is free to settle normally.
+    const delayed = api("POST", `/api/bots/${created.id}/messages`, {
+      text: `delayed ownership check ${"x".repeat(900_000)}`,
+      threadId: created.threadId,
+    });
+    const prematurelySettled = await Promise.race([
+      delayed.then(() => true),
+      new Promise<false>((resolve) => setTimeout(() => resolve(false), 100)),
+    ]);
+    expect(prematurelySettled).toBe(false);
+
+    await waitFor(async () => (await getBot(created.id))?.busy === false, "the original race turn to settle");
+    expect((await api("DELETE", `/api/bots/${created.id}`)).status).toBe(200);
+    writeFileSync(steerGate, "open");
+
+    const rejected = await delayed;
+    expect(rejected.status).toBe(404);
+    expect(rejected.body.error).toMatch(/no such bot/i);
+  }, 40_000);
 
   it("an engine without a live session preserves the message in the server-side queue", async () => {
     const created = (await api("POST", "/api/bots")).body.bot;

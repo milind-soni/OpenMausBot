@@ -223,6 +223,9 @@ beforeAll(async () => {
       OMB_BOX_API: `http://127.0.0.1:${boxStubPort}`,
       OMB_COMPOSIO_API: `http://127.0.0.1:${boxStubPort}/api/v3.1`,
       OMB_STATIC_DIR: staticDir,
+      // Production uses 15s. Keep the real timer path while making the
+      // browser-visible heartbeat assertion fast and deterministic.
+      OMB_SSE_HEARTBEAT_MS: "50",
       FAKE_CLAUDE_MODE: "hang",
       FAKE_CLAUDE_DUMP: fakeClaudeDump,
     },
@@ -500,6 +503,175 @@ describe("harness HTTP API", () => {
     }
   });
 
+  it("returns the canonical stored user message for direct and channel sends", async () => {
+    const created = await api("POST", "/api/bots", {
+      modelSelection: { instanceId: "claude", model: "claude-sonnet-5" },
+      requireAvailableModel: true,
+    });
+    expect(created.status).toBe(201);
+    const bot = created.body.bot;
+    let room: any;
+    try {
+      const direct = await api("POST", `/api/bots/${bot.id}/messages`, { text: "canonical direct" });
+      expect(direct.status).toBe(202);
+      expect(direct.body).toMatchObject({
+        ok: true,
+        threadId: bot.threadId,
+        message: {
+          id: expect.any(String),
+          at: expect.any(Number),
+          role: "user",
+          kind: "text",
+          text: "canonical direct",
+        },
+      });
+      const afterDirect = (await api("GET", "/api/bots?messages=20")).body.bots.find(
+        (candidate: { id: string }) => candidate.id === bot.id,
+      );
+      expect(afterDirect.messages.find((message: { id: string }) => message.id === direct.body.message.id))
+        .toEqual(direct.body.message);
+
+      expect((await api("POST", `/api/bots/${bot.id}/interrupt`)).status).toBe(200);
+      await expect.poll(async () => {
+        const state = (await api("GET", "/api/bots?messages=0")).body;
+        return state.bots.find((candidate: { id: string }) => candidate.id === bot.id)?.busy;
+      }, { timeout: 5_000 }).toBe(false);
+
+      room = (await api("POST", "/api/groups", {
+        name: "Canonical response room",
+        memberIds: [bot.id],
+        setup: { bulletin: "", defaultResponder: { kind: "mentions" } },
+      })).body.group;
+      const channel = await api("POST", `/api/groups/${room.id}/messages`, { text: "canonical channel" });
+      expect(channel.status).toBe(202);
+      expect(channel.body).toMatchObject({
+        ok: true,
+        threadId: room.threadId,
+        message: {
+          id: expect.any(String),
+          at: expect.any(Number),
+          role: "user",
+          kind: "text",
+          text: "canonical channel",
+        },
+      });
+      const afterChannel = (await api("GET", "/api/bots?messages=20")).body.groups.find(
+        (candidate: { id: string }) => candidate.id === room.id,
+      );
+      expect(afterChannel.messages.find((message: { id: string }) => message.id === channel.body.message.id))
+        .toEqual(channel.body.message);
+    } finally {
+      if (room) await api("DELETE", `/api/groups/${room.id}`);
+      await api("POST", `/api/bots/${bot.id}/interrupt`).catch(() => undefined);
+      await api("DELETE", `/api/bots/${bot.id}`);
+    }
+  });
+
+  it("deduplicates direct send retries by sendId, including after the accepted task becomes inactive", async () => {
+    const created = await api("POST", "/api/bots", {
+      modelSelection: { instanceId: "claude", model: "claude-sonnet-5" },
+      requireAvailableModel: true,
+    });
+    expect(created.status).toBe(201);
+    const bot = created.body.bot;
+    const originalThreadId = bot.threadId;
+    const sendId = "direct_retry_1234567890";
+    const request = { text: "retry this direct message once", threadId: originalThreadId, sendId };
+    try {
+      const first = await api("POST", `/api/bots/${bot.id}/messages`, request);
+      expect(first.status).toBe(202);
+      expect(first.body).toMatchObject({
+        ok: true,
+        threadId: originalThreadId,
+        message: { role: "user", kind: "text", text: request.text, sendId },
+      });
+
+      const duplicate = await api("POST", `/api/bots/${bot.id}/messages`, request);
+      expect(duplicate.status).toBe(202);
+      expect(duplicate.body).toEqual(first.body);
+
+      const conflict = await api("POST", `/api/bots/${bot.id}/messages`, {
+        ...request,
+        text: "a different message cannot reuse that identity",
+      });
+      expect(conflict.status).toBe(409);
+      expect(conflict.body.error).toMatch(/sendId already belongs/i);
+
+      const invalid = await api("POST", `/api/bots/${bot.id}/messages`, {
+        text: "invalid identity must not land",
+        threadId: originalThreadId,
+        sendId: "short",
+      });
+      expect(invalid.status).toBe(400);
+
+      const accepted = (await api("GET", "/api/bots?messages=50")).body.bots.find(
+        (candidate: { id: string }) => candidate.id === bot.id,
+      );
+      expect(accepted.messages.filter((message: { role: string; sendId?: string }) =>
+        message.role === "user" && message.sendId === sendId
+      )).toHaveLength(1);
+      expect(accepted.messages.some((message: { text?: string }) => message.text === "invalid identity must not land"))
+        .toBe(false);
+
+      await api("POST", `/api/bots/${bot.id}/interrupt`, { threadId: originalThreadId });
+      await expect.poll(async () => {
+        const state = (await api("GET", "/api/bots?messages=0")).body.bots.find(
+          (candidate: { id: string }) => candidate.id === bot.id,
+        );
+        return state?.busy;
+      }, { timeout: 5_000 }).toBe(false);
+
+      const nextTask = await api("POST", `/api/bots/${bot.id}/tasks`, { title: "Now active" });
+      expect(nextTask.status).toBe(201);
+      expect(nextTask.body.task.threadId).not.toBe(originalThreadId);
+
+      const inactiveRetry = await api("POST", `/api/bots/${bot.id}/messages`, request);
+      expect(inactiveRetry.status).toBe(202);
+      expect(inactiveRetry.body).toEqual(first.body);
+      const current = (await api("GET", "/api/bots?messages=0")).body.bots.find(
+        (candidate: { id: string }) => candidate.id === bot.id,
+      );
+      expect(current.threadId).toBe(nextTask.body.task.threadId);
+    } finally {
+      await api("POST", `/api/bots/${bot.id}/interrupt`, {}).catch(() => undefined);
+      await api("DELETE", `/api/bots/${bot.id}`);
+    }
+  });
+
+  it("deduplicates channel send retries by sendId", async () => {
+    const member = (await api("GET", "/api/bots?messages=0")).body.bots[0];
+    const room = (await api("POST", "/api/groups", {
+      name: "Idempotent channel",
+      memberIds: [member.id],
+      setup: { bulletin: "", defaultResponder: { kind: "mentions" } },
+    })).body.group;
+    const sendId = "channel_retry_123456789";
+    const request = { text: "one canonical channel message", threadId: room.threadId, sendId };
+    try {
+      const first = await api("POST", `/api/groups/${room.id}/messages`, request);
+      expect(first.status).toBe(202);
+      expect(first.body).toMatchObject({
+        ok: true,
+        threadId: room.threadId,
+        message: { role: "user", kind: "text", text: request.text, sendId },
+      });
+
+      const duplicate = await api("POST", `/api/groups/${room.id}/messages`, request);
+      expect(duplicate.status).toBe(202);
+      expect(duplicate.body).toEqual(first.body);
+
+      const snapshot = (await api("GET", "/api/bots?messages=50")).body.groups.find(
+        (candidate: { id: string }) => candidate.id === room.id,
+      );
+      expect(snapshot.messages.filter((message: { role: string; sendId?: string }) =>
+        message.role === "user" && message.sendId === sendId
+      )).toHaveLength(1);
+    } finally {
+      await api("POST", `/api/groups/${room.id}/interrupt`, {}).catch(() => undefined);
+      await api("DELETE", `/api/groups/${room.id}`);
+    }
+  });
+
   it("rejects an entire channel roster when any requested member is unknown", async () => {
     const bot = (await api("GET", "/api/bots?messages=0")).body.bots[0];
     const before = (await api("GET", "/api/bots?messages=0")).body.groups.length;
@@ -560,6 +732,101 @@ describe("harness HTTP API", () => {
     } finally {
       await api("DELETE", `/api/groups/${room.id}`);
       await api("DELETE", `/api/bots/${bot.id}`);
+    }
+  });
+
+  it("lets a Chief create operators from its direct and channel tasks but not from channels it cannot access", async () => {
+    const chief = (await api("POST", "/api/bots")).body.bot;
+    const outsider = (await api("POST", "/api/bots")).body.bot;
+    let channel: any;
+    let outsiderChannel: any;
+    const createdBotIds: string[] = [];
+    try {
+      const selected = await api("PATCH", `/api/bots/${chief.id}`, {
+        name: "Channel Chief",
+        section: "Channel creation test",
+        chiefOfStaff: true,
+        modelSelection: { instanceId: "claude", model: "claude-sonnet-5" },
+      });
+      expect(selected.status).toBe(200);
+
+      rmSync(fakeClaudeDump, { force: true });
+      expect((await api("POST", `/api/bots/${chief.id}/messages`, { text: "prepare the team" })).status).toBe(202);
+      await expect.poll(() => existsSync(fakeClaudeDump), { timeout: 5_000 }).toBe(true);
+      const dump = z.object({
+        mcpConfig: z.object({
+          mcpServers: z.object({
+            agents: z.object({ env: z.object({ OMB_COMMS_TOKEN: z.string() }) }),
+          }),
+        }),
+      }).parse(JSON.parse(readFileSync(fakeClaudeDump, "utf8")));
+      const internalHeaders = {
+        authorization: `Bearer ${dump.mcpConfig.mcpServers.agents.env.OMB_COMMS_TOKEN}`,
+        "content-type": "application/json",
+      };
+      expect((await api("POST", `/api/bots/${chief.id}/interrupt`)).status).toBe(200);
+
+      const createOperator = async (fromThreadId: string, name: string, fromBotId = chief.id) => {
+        const response = await fetch(`${BASE}/api/internal/create-bot`, {
+          method: "POST",
+          headers: internalHeaders,
+          body: JSON.stringify({
+            fromBotId,
+            fromThreadId,
+            name,
+            role: "Research operator",
+            instructions: "Research the assigned question and report concise findings.",
+          }),
+        });
+        const body = z.object({
+          id: z.string().optional(),
+          section: z.string().optional(),
+          error: z.string().optional(),
+        }).passthrough().parse(await response.json());
+        if (response.status === 201 && body.id) createdBotIds.push(body.id);
+        return { status: response.status, body };
+      };
+
+      const direct = await createOperator(chief.threadId, "Direct Task Operator");
+      expect(direct).toMatchObject({ status: 201, body: { section: "Channel creation test" } });
+
+      channel = (await api("POST", "/api/groups", {
+        name: "Chief member channel",
+        memberIds: [chief.id],
+        setup: { bulletin: "", defaultResponder: { kind: "member", botId: chief.id } },
+      })).body.group;
+      const rootThreadId = channel.threadId;
+      const channelTask = await api("POST", `/api/groups/${channel.id}/tasks`, { title: "Research task" });
+      expect(channelTask.status).toBe(201);
+      const rootTask = await createOperator(rootThreadId, "Channel Root Operator");
+      expect(rootTask.status).toBe(201);
+      const nestedTask = await createOperator(channelTask.body.task.threadId, "Channel Task Operator");
+      expect(nestedTask.status).toBe(201);
+
+      outsiderChannel = (await api("POST", "/api/groups", {
+        name: "Outsider-only channel",
+        memberIds: [outsider.id],
+        setup: { bulletin: "", defaultResponder: { kind: "member", botId: outsider.id } },
+      })).body.group;
+      const nonChief = await createOperator(outsiderChannel.threadId, "Non-Chief Operator", outsider.id);
+      expect(nonChief).toEqual({
+        status: 403,
+        body: { error: "only a section's Chief of Staff can create operator bots" },
+      });
+      const denied = await createOperator(outsiderChannel.threadId, "Forbidden Operator");
+      expect(denied).toEqual({
+        status: 403,
+        body: { error: "source conversation does not belong to sender" },
+      });
+      const state = (await api("GET", "/api/bots?messages=0")).body;
+      expect(state.bots.some((bot: { name: string }) => bot.name === "Forbidden Operator")).toBe(false);
+    } finally {
+      await api("POST", `/api/bots/${chief.id}/interrupt`);
+      if (outsiderChannel?.id) await api("DELETE", `/api/groups/${outsiderChannel.id}`);
+      if (channel?.id) await api("DELETE", `/api/groups/${channel.id}`);
+      for (const botId of createdBotIds) await api("DELETE", `/api/bots/${botId}`);
+      await api("DELETE", `/api/bots/${outsider.id}`);
+      await api("DELETE", `/api/bots/${chief.id}`);
     }
   });
 
@@ -2962,6 +3229,31 @@ describe("resumable event stream", () => {
     }
   });
 
+  it("sends browser-visible heartbeats without moving the replay cursor", async () => {
+    const { body } = await api("GET", "/api/bots");
+    const botId = body.bots[0].id;
+    const first = await openSse(`${BASE}/api/events`);
+    const hello = await first.until((frame) => frame.kind === "hello");
+    try {
+      expect(await first.until((frame) => frame.kind === "ping")).toEqual({ kind: "ping" });
+      await nudge(botId);
+      const next = await first.until((frame) => frame.kind === "bot" && frame.bot?.id === botId);
+      expect(next.seq).toBe(Number(hello.cursor.split(":")[1]) + 1);
+    } finally {
+      first.close();
+    }
+
+    // Heartbeats describe connection health, not application state. A
+    // reconnect from the numbered application frame remains fully resumable.
+    const cursor = `${hello.cursor.split(":")[0]}:${Number(hello.cursor.split(":")[1]) + 1}`;
+    const resumed = await openSse(`${BASE}/api/events?since=${encodeURIComponent(cursor)}`);
+    try {
+      expect((await resumed.until((frame) => frame.kind === "hello")).resumed).toBe(true);
+    } finally {
+      resumed.close();
+    }
+  });
+
   it("replays exactly what a disconnected client missed", async () => {
     const { body } = await api("GET", "/api/bots");
     const botId = body.bots[0].id;
@@ -3007,6 +3299,33 @@ describe("resumable event stream", () => {
     try {
       expect((await resumed.until((f) => f.kind === "hello")).resumed).toBe(true);
       await resumed.until((f) => f.kind === "bot");
+    } finally {
+      resumed.close();
+    }
+  });
+
+  it("prefers a newer Last-Event-ID over the EventSource URL's stale cursor", async () => {
+    const { body } = await api("GET", "/api/bots");
+    const botId = body.bots[0].id;
+
+    const first = await openSse(`${BASE}/api/events`);
+    const hello = await first.until((frame) => frame.kind === "hello");
+    await nudge(botId);
+    const seen = await first.until((frame) => frame.kind === "bot" && frame.bot?.id === botId);
+    first.close();
+    await nudge(botId);
+
+    // Native EventSource reconnects reuse their original URL, including its
+    // old query, but add Last-Event-ID for the newest numbered frame seen.
+    const resumed = await openSse(
+      `${BASE}/api/events?since=${encodeURIComponent(hello.cursor)}`,
+      { "last-event-id": `${hello.cursor.split(":")[0]}:${seen.seq}` },
+    );
+    try {
+      expect((await resumed.until((frame) => frame.kind === "hello")).resumed).toBe(true);
+      await resumed.until((frame) => frame.kind === "bot" && frame.bot?.id === botId);
+      const replayed = resumed.frames.filter((frame) => frame.kind === "bot" && frame.bot?.id === botId);
+      expect(replayed.map((frame) => frame.seq)).toEqual([seen.seq + 1]);
     } finally {
       resumed.close();
     }

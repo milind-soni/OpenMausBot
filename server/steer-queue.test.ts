@@ -16,7 +16,14 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 
-import { cancelSteeredMessage, drainSteeredMessages, queueSteeredMessage, _queuedCount, type SteerStore } from "./steer-queue.ts";
+import {
+  cancelSteeredMessage,
+  drainSteeredMessages,
+  queuedSteeredMessage,
+  queueSteeredMessage,
+  _queuedCount,
+  type SteerStore,
+} from "./steer-queue.ts";
 import type { BotRecord, Message } from "./store.ts";
 
 const SERVER_DIR = dirname(fileURLToPath(import.meta.url));
@@ -66,7 +73,7 @@ describe("steer-queue module", () => {
   it("does not append a queued user message until drain", () => {
     const bot = fakeBot("bot-a", "thread-a", true);
     const store = fakeStore([bot]);
-    const queued = queueSteeredMessage(bot, "hold that thought");
+    const queued = queueSteeredMessage(bot.id, bot.threadId, "hold that thought");
     expect(queued).toMatchObject({ id: expect.any(String) });
     expect(store.messages).toHaveLength(0);
     expect(_queuedCount("thread-a")).toBe(1);
@@ -86,11 +93,36 @@ describe("steer-queue module", () => {
     expect(_queuedCount("thread-a")).toBe(0);
   });
 
+  it("keeps a stable client receipt while a send waits to drain", () => {
+    const bot = fakeBot("bot-receipt", "thread-receipt", true);
+    const store = fakeStore([bot]);
+    const queued = queueSteeredMessage(bot.id, bot.threadId, "retry safely", {
+      replyToId: "reply-1",
+      sendId: "send_1234567890123456",
+    });
+
+    expect(queuedSteeredMessage(bot.id, bot.threadId, "send_1234567890123456")).toEqual({
+      id: queued.id,
+      text: "retry safely",
+      replyToId: "reply-1",
+    });
+    expect(queuedSteeredMessage("other-bot", bot.threadId, "send_1234567890123456")).toBeNull();
+
+    bot.busy = false;
+    drainSteeredMessages(store, vi.fn());
+    expect(store.messages[0]).toMatchObject({
+      text: "retry safely",
+      sendId: "send_1234567890123456",
+      queueId: queued.id,
+    });
+    expect(queuedSteeredMessage(bot.id, bot.threadId, "send_1234567890123456")).toBeNull();
+  });
+
   it("holds the queue while the bot is busy and drains it once when idle", () => {
     const bot = fakeBot("bot-b", "thread-b", true);
     const store = fakeStore([bot]);
-    const first = queueSteeredMessage(bot, "first note");
-    const second = queueSteeredMessage(bot, "second note");
+    const first = queueSteeredMessage(bot.id, bot.threadId, "first note");
+    const second = queueSteeredMessage(bot.id, bot.threadId, "second note");
     const run = vi.fn();
 
     drainSteeredMessages(store, run);
@@ -122,10 +154,10 @@ describe("steer-queue module", () => {
   it("drops a cancelled message so drain does not send it", () => {
     const bot = fakeBot("bot-cancel", "thread-cancel", true);
     const store = fakeStore([bot]);
-    const first = queueSteeredMessage(bot, "keep me");
-    const second = queueSteeredMessage(bot, "drop me");
-    expect(cancelSteeredMessage("thread-cancel", second.id)).toBe(true);
-    expect(cancelSteeredMessage("thread-cancel", "missing")).toBe(false);
+    const first = queueSteeredMessage(bot.id, bot.threadId, "keep me");
+    const second = queueSteeredMessage(bot.id, bot.threadId, "drop me");
+    expect(cancelSteeredMessage(bot.id, second.id)).toBe(true);
+    expect(cancelSteeredMessage(bot.id, "missing")).toBe(false);
     expect(_queuedCount("thread-cancel")).toBe(1);
 
     bot.busy = false;
@@ -140,7 +172,7 @@ describe("steer-queue module", () => {
   it("keeps reply metadata and the provider-facing reply prompt while queued", () => {
     const bot = fakeBot("bot-reply", "thread-reply", true);
     const store = fakeStore([bot]);
-    queueSteeredMessage(bot, "That part", {
+    queueSteeredMessage(bot.id, bot.threadId, "That part", {
       replyToId: "original-message",
       prompt: "Reply context\nThat part",
     });
@@ -151,6 +183,17 @@ describe("steer-queue module", () => {
     expect(run.mock.calls[0][2]).toBe("Reply context\nThat part");
   });
 
+  it("cancels a pinned-task queue after the bot switches without crossing bot ownership", () => {
+    const bot = fakeBot("bot-switch-cancel", "thread-original-cancel", true);
+    const queued = queueSteeredMessage(bot.id, bot.threadId, "cancel on the old task");
+
+    bot.threadId = "thread-new-cancel";
+    expect(cancelSteeredMessage("some-other-bot", queued.id)).toBe(false);
+    expect(_queuedCount("thread-original-cancel")).toBe(1);
+    expect(cancelSteeredMessage(bot.id, queued.id)).toBe(true);
+    expect(_queuedCount("thread-original-cancel")).toBe(0);
+  });
+
   it("fires nothing when nothing is queued", () => {
     const run = vi.fn();
     drainSteeredMessages(fakeStore([fakeBot("bot-c", "thread-c", false)]), run);
@@ -159,7 +202,7 @@ describe("steer-queue module", () => {
 
   it("drops the queue of a deleted bot without running it", () => {
     const bot = fakeBot("bot-d", "thread-d", true);
-    queueSteeredMessage(bot, "orphaned");
+    queueSteeredMessage(bot.id, bot.threadId, "orphaned");
     const run = vi.fn();
     drainSteeredMessages(fakeStore([]), run);
     expect(run).not.toHaveBeenCalled();
