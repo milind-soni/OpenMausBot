@@ -223,6 +223,41 @@ describe("drainDelegations", () => {
     expect(fromChips[0]?.comm?.groupId).toBe(targetChips[0]?.comm?.groupId);
   });
 
+  it("dispatches independent delegations concurrently up to the fanout limit", async () => {
+    const targets = [target, store.createBot(), store.createBot(), store.createBot()];
+    for (const [index, worker] of targets.entries()) {
+      store.patchBot(worker.id, { name: `Worker ${index + 1}` });
+      expect(queueDelegation(
+        commsBus,
+        from,
+        { toBotId: worker.id, message: `work item ${index + 1}`, depth: 0 },
+        1,
+      )).toBe("ok");
+    }
+
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const started = new Set<string>();
+    let active = 0;
+    let maxActive = 0;
+    drainDelegations(commsBus, approvalBus, from.threadId, async (toBotId) => {
+      started.add(toBotId);
+      active += 1;
+      maxActive = Math.max(maxActive, active);
+      await gate;
+      active -= 1;
+    });
+
+    await waitFor(() => started.size === targets.length);
+    expect(maxActive).toBe(4);
+    expect(_pendingCount(from.threadId)).toBe(4);
+
+    release();
+    await waitFor(() => _pendingCount(from.threadId) === 0);
+  });
+
   it("includes the reason line in the prefixed message when one is given", async () => {
     queueDelegation(
       commsBus,
@@ -322,20 +357,30 @@ describe("drainDelegations", () => {
     expect(runTargetCalls).toEqual([]);
   });
 
-  it("skips runTarget and emits a 'is busy' chip when the target is currently busy", async () => {
+  it("keeps a delegation queued while its target is busy, then dispatches it once idle", async () => {
     store.patchBot(target.id, { busy: true });
     queueDelegation(commsBus, from, { toBotId: target.id, message: "do this", depth: 0 }, 1);
     drainDelegations(commsBus, approvalBus, from.threadId, (toBotId, message, commsDepth) => {
       runTargetCalls.push({ toBotId, message, commsDepth });
     });
-    const chip = await waitFor(() =>
-      store
-        .messagesFor(from.threadId)
-        .find((m) => m.kind === "activity" && (m.tool?.name ?? "").includes("is busy")),
-    );
-    expect(chip.tool?.name).toBe("Delegation to @Helper canceled — @Helper is busy");
-    expect(chip.tool?.ok).toBe(false);
+
+    await waitFor(() => _pendingCount(from.threadId) === 1);
     expect(runTargetCalls).toEqual([]);
+    expect(
+      store.messagesFor(from.threadId).some((m) => (m.tool?.name ?? "").includes("canceled")),
+    ).toBe(false);
+
+    // Let the fire-and-forget drain release its per-thread guard. In the app,
+    // the target's later turn.completed event provides this separation.
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    store.patchBot(target.id, { busy: false });
+    drainDelegations(commsBus, approvalBus, from.threadId, (toBotId, message, commsDepth) => {
+      runTargetCalls.push({ toBotId, message, commsDepth });
+    });
+
+    await waitFor(() => runTargetCalls.length === 1);
+    expect(runTargetCalls[0]?.toBotId).toBe(target.id);
+    await waitFor(() => _pendingCount(from.threadId) === 0);
   });
 
   it("asks for approval when approvePeerComms is on, then runs only on allow", async () => {

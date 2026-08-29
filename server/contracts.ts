@@ -4,12 +4,22 @@
 // de-Effect-ed: Promises instead of Effect, listener callbacks instead of
 // Stream. The shapes and names are kept so the two codebases stay mutually
 // readable.
+import type { JsonValue } from "./schema.ts";
+import type { ModelPricing } from "../shared/model-pricing.ts";
 
 export type DriverKind = string;
 export type InstanceId = string;
 export type ThreadId = string;
 export type TurnId = string;
 export type CloudBackend = "box" | "vps";
+
+/** Provider asks must state whether the harness still has the complete action.
+ * Summary-only asks can be shown to a person, but can never create standing
+ * authorization. Canonical actions carry every byte needed at execution. */
+export type ProviderAction =
+  | { fidelity: "canonical"; operation: string; accountId: string; payload: JsonValue }
+  | { fidelity: "exact-command"; command: string }
+  | { fidelity: "summary-only" };
 
 export type ProviderErrorCode =
   | "missing_cli"
@@ -49,6 +59,16 @@ export interface ModelSelection {
   effort?: EffortLevel;
 }
 
+export interface LiveTokenUsage {
+  input: number;
+  output: number;
+  cachedInput?: number;
+  contextTokens?: number;
+  /** Whether the provider's running figure covers only this turn or the
+   * whole native thread. Consumers must not guess or sum the wrong shape. */
+  scope: "turn" | "thread";
+}
+
 // ── instance configuration envelope ────────────────────────────────────
 // `driver` is any slug — NOT validated against known drivers; unknown
 // drivers round-trip and surface as unavailable shadow snapshots so a
@@ -83,7 +103,14 @@ export interface RuntimeEventBase {
 
 export type RuntimeEvent = RuntimeEventBase &
   (
-    | { type: "session.started"; sessionId: string | null; model?: string | null }
+    | {
+        type: "session.started";
+        sessionId: string | null;
+        model?: string | null;
+        /** True when an already-running provider process/session was reused.
+         * Startup latency is not applicable for that turn. */
+        reused?: boolean;
+      }
     | { type: "session.exited"; reason?: string }
     | { type: "turn.started" }
     | {
@@ -104,7 +131,7 @@ export type RuntimeEvent = RuntimeEventBase &
          * The one figure the harness accumulates — thread.token-usage.updated
          * is a live indicator whose meaning differs per driver (a per-call
          * delta, a thread total, a per-step figure) and must never be summed. */
-        usage?: { input: number; output: number };
+        usage?: { input: number; output: number; cachedInput?: number; contextTokens?: number };
       }
     | { type: "item.started"; itemType: "tool" | "reasoning"; title?: string }
     | { type: "item.updated"; itemType: "tool" | "reasoning"; tokens?: number | null }
@@ -118,6 +145,7 @@ export type RuntimeEvent = RuntimeEventBase &
         summary: string;
         choices?: string[];
         approvalScope?: "local-computer";
+        action?: ProviderAction;
       }
     | {
         type: "request.resolved";
@@ -128,7 +156,16 @@ export type RuntimeEvent = RuntimeEventBase &
         source: "user" | "auto" | "timeout" | "system" | "unavailable" | "peer";
         approvalScope?: "local-computer";
       }
-    | { type: "thread.token-usage.updated"; input: number; output: number }
+    | {
+        type: "thread.token-usage.updated";
+        input: number;
+        output: number;
+        cachedInput?: number;
+        contextTokens?: number;
+        /** Missing only on historical event records from before scope was
+         * explicit; live drivers always provide it. */
+        scope?: LiveTokenUsage["scope"];
+      }
     // `setup: true` marks a failure the user fixes by installing or
     // configuring something, not by retrying — the UI offers setup instead.
     | { type: "runtime.error"; message: string; setup?: boolean }
@@ -202,6 +239,11 @@ export interface TurnStartResult {
   turnId: TurnId;
 }
 
+export interface ProviderPrewarmResult {
+  sessionId: string;
+  status: "warmed" | "already-warm";
+}
+
 export interface ProviderAdapter {
   readonly provider: DriverKind;
   readonly capabilities: {
@@ -241,6 +283,10 @@ export interface ProviderAdapter {
     localComputerMcp?: boolean;
   };
   sendTurn(input: SendTurnInput): Promise<TurnStartResult>;
+  /** Prepare the exact provider session without sending a model prompt. The
+   * caller must pass the same model, cwd, integrations, and resume cursor the
+   * next real turn will use; otherwise normal fingerprint safety discards it. */
+  prewarmSession?(input: SendTurnInput): Promise<ProviderPrewarmResult>;
   interruptTurn(threadId: ThreadId, turnId?: TurnId): Promise<void>;
   /** Answer a pending ask. Resolves with what actually happened — never
    * throws for an ask that is no longer there: `unavailable` means nobody
@@ -305,6 +351,7 @@ export interface ModelCatalog {
     label: string;
     custom?: boolean;
     loaded?: boolean;
+    pricing?: ModelPricing;
     /** total context window in tokens, when the driver knows it — sizes
      * the model-facing rebuild (server/context-rebuild.ts). Unknown falls
      * back to a pattern table over the model id, then a conservative default. */

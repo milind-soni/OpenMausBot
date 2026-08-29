@@ -142,8 +142,8 @@ export function queueDelegation(
 }
 
 /** Drain queued delegations for a source thread (called on its
- * turn.completed). Each item is processed independently: a deny, a busy
- * target, or an error in one does not stop the rest. The actual start
+ * turn.completed). Each item is processed independently: a deny, a deferred
+ * busy target, or an error in one does not stop the rest. The actual start
  * of the target turn is delegated to `runTarget` so delegations.ts
  * stays free of harness-level concerns (commsDepth is the only thing
  * the caller needs). */
@@ -169,11 +169,13 @@ export function drainDelegations(
     return;
   }
   const snapshot = [...list];
+  const snapshotIds = new Set(snapshot.map((item) => item.id));
   drainingThreads.add(threadId);
   void (async () => {
-    for (const item of snapshot) {
+    await Promise.all(snapshot.map(async (item) => {
       try {
-        await processOne(bus, approvalBus, from, threadId, item, runTarget);
+        const outcome = await processOne(bus, approvalBus, from, threadId, item, runTarget);
+        if (outcome === "settled") acknowledgeDelegation(threadId, item.id);
       } catch (error) {
         const why = error instanceof Error ? error.message : String(error);
         try {
@@ -185,16 +187,16 @@ export function drainDelegations(
         } catch (reportError) {
           console.error("delegation failed and could not be reported", reportError);
         }
-      } finally {
         acknowledgeDelegation(threadId, item.id);
       }
-    }
+    }));
   })().finally(() => {
     drainingThreads.delete(threadId);
     // A later turn may have queued and settled while this thread was
     // waiting for approval. Its items were not in our snapshot, so start a
     // fresh drain instead of leaving them parked until another restart.
-    if (pendingDelegations.get(threadId)?.length) {
+    const current = pendingDelegations.get(threadId);
+    if (current?.some((item) => !snapshotIds.has(item.id))) {
       drainDelegations(bus, approvalBus, threadId, runTarget);
     }
   });
@@ -239,7 +241,7 @@ async function processOne(
     sourceThreadId: string,
     channel?: GroupRecord,
   ) => void | Promise<void>,
-): Promise<void> {
+): Promise<"settled" | "deferred"> {
   let sender = from;
   let target = bus.store.bot(item.toBotId);
   if (!target) {
@@ -248,15 +250,10 @@ async function processOne(
       kind: "activity",
       tool: { name: `error: delegation to ${item.toBotId} failed — no such bot`, ok: false },
     });
-    return;
+    return "settled";
   }
   if (target.busy) {
-    bus.store.appendMessage(sourceThreadId, {
-      role: "bot",
-      kind: "activity",
-      tool: { name: `Delegation to @${target.name} canceled — @${target.name} is busy`, ok: false },
-    });
-    return;
+    return "deferred";
   }
   if (sender.approvePeerComms) {
     const verdict = await requestPeerApproval(
@@ -273,7 +270,7 @@ async function processOne(
         kind: "activity",
         tool: { name: `Delegation to @${target.name} denied by user`, ok: false },
       });
-      return;
+      return "settled";
     }
     // The approval could have been sitting for up to 15 minutes. Everything
     // checked above is a stale snapshot now: re-read both bots and re-check
@@ -281,14 +278,9 @@ async function processOne(
     // and mirror a "Messaged @X" chip for an exchange that never happens.
     const current = bus.store.bot(item.toBotId);
     const currentSender = bus.store.bot(from.id);
-    if (!current || !currentSender || !bus.store.taskByThread(currentSender.id, sourceThreadId)) return;
+    if (!current || !currentSender || !bus.store.taskByThread(currentSender.id, sourceThreadId)) return "settled";
     if (current.busy) {
-      bus.store.appendMessage(sourceThreadId, {
-        role: "bot",
-        kind: "activity",
-        tool: { name: `Delegation to @${current.name} canceled — @${current.name} is busy`, ok: false },
-      });
-      return;
+      return "deferred";
     }
     sender = currentSender;
     target = current;
@@ -298,6 +290,7 @@ async function processOne(
   const reasonLine = item.reason ? `\n\n[Reason: ${item.reason}]` : "";
   const prefixed = `[Delegated by @${sender.name}, another bot in this OpenMausBot workspace. Do the work and reply directly.]\n\n${item.message}${reasonLine}`;
   await runTarget(item.toBotId, prefixed, item.depth + 1, sourceThreadId, channel);
+  return "settled";
 }
 
 /** Test helper: how many items remain queued for a thread. */

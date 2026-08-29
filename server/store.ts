@@ -14,6 +14,9 @@ import { newId, type CloudBackend, type ModelSelection, type ThreadId } from "./
 import { pickBotName } from "./names.ts";
 import { redactSecretsInText } from "./redact.ts";
 import { botAvatarProfile, type BotAvatarCrop } from "../shared/bot-avatar.ts";
+import type { BotReportingMode } from "../shared/bot-profile.ts";
+import type { WorkerBatchProjection } from "../shared/worker-batch.ts";
+import { normalizeAgentGrants, syncCoordinatorRole, type AgentCapabilityGrant } from "./agent-capabilities.ts";
 
 export type MausColor =
   | "green"
@@ -51,6 +54,9 @@ export interface OptionCardData {
   allowKey?: string;
   /** Local actions never share remembered grants with cloud/tool approvals. */
   approvalScope?: "local-computer";
+  /** Durable work records backing this transient conversation projection. */
+  workLockId?: string;
+  workApprovalId?: string;
 }
 
 export interface ConnectorCardData {
@@ -95,6 +101,8 @@ export interface Message {
   /** `setup` marks an error the user fixes by installing or configuring
    * something — the UI offers setup instead of a retry that cannot work. */
   tool?: { name: string; ok?: boolean; spoken?: string; setup?: boolean };
+  /** Compact durable projection for one hidden parallel-worker batch. */
+  workerBatch?: WorkerBatchProjection;
   /** user messages sent INTO a running turn (capabilities.queueing): the
    * model saw it mid-turn, so the transcript marks it — a reader should
    * know the reply above it may already account for this line */
@@ -202,10 +210,21 @@ export interface TaskRecord {
 export interface TaskUsage {
   input: number;
   output: number;
+  cachedInput?: number;
+  contextTokens?: number;
   /** null until any turn reports a cost — most engines never do. Records
    * written by builds before cost existed lack the field; read as null. */
   costUsd: number | null;
   turns: number;
+  /** Settled turns whose engine supplied token counts. Older records omit
+   * this; positive legacy totals imply their recorded turns were reported. */
+  tokenTurns?: number;
+  /** Persisted best-effort total for settled turns without provider counts.
+   * This is deliberately separate from input/output so consumers cannot
+   * mistake an estimate for provider telemetry. */
+  estimatedTokens?: number;
+  /** Recent terminal event ids make replay of the same turn idempotent. */
+  settledEventIds?: string[];
 }
 
 /** Everything the BOT authored is scrubbed of content-shaped secrets before
@@ -274,6 +293,18 @@ export function titleFromMessage(text: string): string {
   return line.length > 48 ? `${line.slice(0, 47)}…` : line || UNTITLED_TASK;
 }
 
+/** Durable ownership metadata for a task-scoped bot created to execute one
+ * job on another bot's behalf. Its presence lets every reader distinguish a
+ * temporary worker without relying on its mutable name or visibility. */
+export interface TemporaryWorkerMarker {
+  jobId: string;
+  ownerBotId: string;
+  ownerThreadId: ThreadId;
+  label: string;
+  createdAt: number;
+  parentStatusMessageId?: string;
+}
+
 export interface BotRecord {
   id: string;
   /** the ACTIVE task's thread — everything that runs a turn reads this */
@@ -283,7 +314,11 @@ export interface BotRecord {
   name: string;
   title: string;
   description: string;
+  /** Detailed operating instructions, kept separate from the short public-facing personality. */
+  instructions?: string;
   notifications: boolean;
+  /** User-selected policy for unsolicited progress and background updates. */
+  reportingMode?: BotReportingMode;
   color: MausColor;
   mascotExpression?: MausExpression | null;
   /** App-owned attachment served as this bot's custom profile image. */
@@ -325,6 +360,8 @@ export interface BotRecord {
   rewound?: boolean;
   pinned?: boolean;
   hidden?: boolean;
+  /** A hidden, task-scoped executor owned by another bot and job. */
+  temporaryWorker?: TemporaryWorkerMarker;
   /** Optional labeled divider used to organize this bot in the sidebar. */
   section?: string;
   /** the one message pinned to the top of this bot's active thread; a pin
@@ -333,6 +370,9 @@ export interface BotRecord {
   /** The coordinator for this bot's sidebar section. The store enforces
    * at most one Chief per section (including the unsectioned area). */
   chiefOfStaff?: boolean;
+  /** Explicit, name-independent grants. Legacy chiefOfStaff and reviewed
+   * package records are normalized into this field when loaded. */
+  agentGrants?: AgentCapabilityGrant[];
   /** Pause for human approval before this bot talks to a peer (ask_bot,
    * delegate_bot). Off by default: a chief-of-staff-style bot is most
    * useful when it can coordinate without nagging. */
@@ -527,6 +567,13 @@ export class Store {
         delete b.avatarCrop;
         botsMigrated = true;
       }
+      const normalizedGrants = normalizeAgentGrants(b);
+      const hadPersistedGrants = "agentGrants" in b;
+      if ((!hadPersistedGrants && normalizedGrants.length > 0)
+        || (hadPersistedGrants && JSON.stringify(normalizedGrants) !== JSON.stringify(b.agentGrants))) {
+        b.agentGrants = normalizedGrants;
+        botsMigrated = true;
+      }
     }
     for (const b of this.bots) {
       if (!b.chiefOfStaff) continue;
@@ -540,6 +587,7 @@ export class Store {
         continue;
       }
       b.chiefOfStaff = false;
+      b.agentGrants = syncCoordinatorRole(b, false);
       botsMigrated = true;
     }
     // Peer grants originally used mutable display names (ask_bot:@Helper).
@@ -852,7 +900,7 @@ export class Store {
 
   createBot(
     profile: Partial<
-      Pick<BotRecord, "name" | "title" | "description" | "color" | "mascotExpression" | "modelSelection" | "section">
+      Pick<BotRecord, "name" | "title" | "description" | "instructions" | "reportingMode" | "color" | "mascotExpression" | "modelSelection" | "section" | "hidden" | "temporaryWorker">
     > = {},
     opts: {
       /** false = no greeting/onboarding seed. Imported bots must not open
@@ -868,7 +916,9 @@ export class Store {
       name,
       title: profile.title ?? "",
       description: profile.description ?? "",
+      ...(profile.instructions ? { instructions: profile.instructions } : {}),
       notifications: true,
+      reportingMode: profile.reportingMode ?? "all",
       color: profile.color ?? COLORS[this.bots.length % COLORS.length],
       ...(profile.mascotExpression ? { mascotExpression: profile.mascotExpression } : {}),
       unread: false,
@@ -876,6 +926,8 @@ export class Store {
       resumeCursors: {},
       createdAt: Date.now(),
     };
+    if (profile.hidden !== undefined) bot.hidden = profile.hidden;
+    if (profile.temporaryWorker) bot.temporaryWorker = profile.temporaryWorker;
     if (section) bot.section = section;
     bot.tasks = [{ threadId: bot.threadId, title: UNTITLED_TASK, createdAt: bot.createdAt, resumeCursors: {} }];
     this.bots.unshift(bot);
@@ -883,7 +935,7 @@ export class Store {
     // Announce the owner before its onboarding transcript. SSE clients need
     // the bot/thread mapping before they can place either message.
     this.emit({ type: "bot", botId: bot.id });
-    if (opts.seedMessages !== false) {
+    if (opts.seedMessages !== false && !(bot.hidden && bot.temporaryWorker)) {
       this.appendMessage(bot.threadId, {
         role: "bot",
         kind: "text",
@@ -946,7 +998,11 @@ export class Store {
     for (const bot of this.bots) {
       if (sectionKey(bot.section) !== targetSection) continue;
       const next = bot.id === id;
-      if (Boolean(bot.chiefOfStaff) === next && !(next && bot.hidden)) continue;
+      const syncedGrants = syncCoordinatorRole(bot, next);
+      const grantsChanged = syncedGrants.length > 0 || bot.agentGrants !== undefined
+        ? JSON.stringify(syncedGrants) !== JSON.stringify(bot.agentGrants)
+        : false;
+      if (Boolean(bot.chiefOfStaff) === next && !(next && bot.hidden) && !grantsChanged) continue;
       if (next) {
         bot.chiefOfStaff = true;
         // A section's main contact must stay reachable in the sidebar.
@@ -954,6 +1010,7 @@ export class Store {
       } else {
         bot.chiefOfStaff = false;
       }
+      if (syncedGrants.length > 0 || bot.agentGrants !== undefined) bot.agentGrants = syncedGrants;
       changed.push(bot);
     }
     if (changed.length) this.saveBots();
@@ -990,21 +1047,41 @@ export class Store {
   addTaskUsage(
     botId: string,
     threadId: string,
-    turn: { input?: number; output?: number; costUsd: number | null },
+    turn: { input?: number; output?: number; cachedInput?: number; contextTokens?: number; costUsd: number | null; idempotencyKey?: string },
   ): TaskUsage | null {
     const task = this.taskByThread(botId, threadId);
     if (!task) return null;
     const prev: TaskUsage = { input: 0, output: 0, costUsd: null, turns: 0, ...task.usage };
+    if (turn.idempotencyKey && prev.settledEventIds?.includes(turn.idempotencyKey)) return task.usage ?? null;
     const cost = typeof turn.costUsd === "number" && Number.isFinite(turn.costUsd) ? turn.costUsd : null;
     const prevCost = typeof prev.costUsd === "number" ? prev.costUsd : null;
+    const reportedTokens = [turn.input, turn.output].every(
+      (value) => typeof value === "number" && Number.isFinite(value) && value >= 0,
+    );
+    const previousTokenTurns = typeof prev.tokenTurns === "number" && Number.isFinite(prev.tokenTurns)
+      ? Math.max(0, Math.min(prev.turns, Math.trunc(prev.tokenTurns)))
+      : prev.input + prev.output > 0 ? prev.turns : 0;
     // providers occasionally report NaN or a negative on a partial turn —
     // never let that poison a running tally
     const clean = (n: number | undefined) => (typeof n === "number" && Number.isFinite(n) ? Math.max(0, Math.trunc(n)) : 0);
+    const estimateForTurn = reportedTokens ? 0 : 2_000;
+    const priorEstimate = typeof prev.estimatedTokens === "number" && Number.isFinite(prev.estimatedTokens)
+      ? Math.max(0, Math.trunc(prev.estimatedTokens))
+      : 0;
     task.usage = {
       input: prev.input + clean(turn.input),
       output: prev.output + clean(turn.output),
+      ...(typeof turn.cachedInput === "number" && Number.isFinite(turn.cachedInput) && turn.cachedInput >= 0
+        ? { cachedInput: (prev.cachedInput ?? 0) + Math.trunc(turn.cachedInput) }
+        : {}),
+      ...(typeof turn.contextTokens === "number" && Number.isFinite(turn.contextTokens) && turn.contextTokens >= 0
+        ? { contextTokens: Math.trunc(turn.contextTokens) }
+        : {}),
       costUsd: cost === null ? prevCost : (prevCost ?? 0) + cost,
       turns: prev.turns + 1,
+      tokenTurns: previousTokenTurns + (reportedTokens ? 1 : 0),
+      ...(priorEstimate + estimateForTurn > 0 ? { estimatedTokens: priorEstimate + estimateForTurn } : {}),
+      ...(turn.idempotencyKey ? { settledEventIds: [...(prev.settledEventIds ?? []), turn.idempotencyKey].slice(-256) } : {}),
     };
     this.saveBots();
     this.emit({ type: "bot", botId });

@@ -9,6 +9,7 @@ import { DATA_DIR } from "./config.ts";
 import type { ModelSelection } from "./contracts.ts";
 import { peerAllowKey } from "./peer-approval-key.ts";
 import { Store, type BotRecord } from "./store.ts";
+import type { WorkerBatchProjection } from "../shared/worker-batch.ts";
 
 const selection = (): ModelSelection => ({ instanceId: "claude", model: "claude-sonnet-5" });
 
@@ -69,6 +70,62 @@ describe("Store", () => {
     expect(store.messagesFor(bot.threadId)).toHaveLength(0);
   });
 
+  it("creates a hidden temporary worker atomically without onboarding and preserves its marker", () => {
+    const store = new Store(selection);
+    const marker = {
+      jobId: "job-123",
+      ownerBotId: "chief-1",
+      ownerThreadId: "thread-chief-1",
+      label: "Research the launch",
+      createdAt: 1_788_000_000_000,
+      parentStatusMessageId: "status-1",
+    };
+    const profile = { name: "Launch researcher", hidden: true, temporaryWorker: marker };
+    let workerAtFirstEvent: unknown;
+    store.onChange((change) => {
+      if (change.type === "bot") workerAtFirstEvent ??= store.bot(change.botId);
+    });
+
+    const worker = store.createBot(profile);
+
+    expect(workerAtFirstEvent).toMatchObject({ hidden: true, temporaryWorker: marker });
+    expect(store.messagesFor(worker.threadId)).toEqual([]);
+    expect(new Store(selection).bot(worker.id)).toMatchObject({ hidden: true, temporaryWorker: marker });
+  });
+
+  it("persists and patches a compact worker batch activity without worker content", () => {
+    const store = new Store(selection);
+    const owner = store.createBot({ name: "Chief" });
+    const batch = {
+      id: "batch-1",
+      taskId: owner.threadId,
+      label: "Research lanes",
+      status: "running",
+      terminal: false,
+      jobs: [{ id: "job-1", label: "Docs", status: "running" }],
+      counts: { total: 1, queued: 0, running: 1, completed: 0, failed: 0, canceled: 0 },
+      createdAt: 10,
+      updatedAt: 11,
+    } satisfies WorkerBatchProjection;
+    const activity = store.appendMessage(owner.threadId, {
+      role: "bot",
+      kind: "activity",
+      workerBatch: batch,
+    });
+    expect(store.messagesFor(owner.threadId).find((message) => message.id === activity.id)?.workerBatch).toEqual(batch);
+
+    const completed = {
+      ...batch,
+      status: "completed",
+      terminal: true,
+      jobs: [{ ...batch.jobs[0], status: "completed" }],
+      counts: { ...batch.counts, running: 0, completed: 1 },
+      updatedAt: 12,
+    } satisfies WorkerBatchProjection;
+    store.patchMessage(owner.threadId, activity.id, { workerBatch: completed });
+    expect(new Store(selection).messagesFor(owner.threadId).find((message) => message.id === activity.id)?.workerBatch).toEqual(completed);
+  });
+
   it("addTaskUsage accumulates settled-turn totals per task and survives a restart", () => {
     const store = new Store(selection);
     const bot = store.createBot();
@@ -77,6 +134,7 @@ describe("Store", () => {
       output: 300,
       costUsd: null,
       turns: 1,
+      tokenTurns: 1,
     });
     store.addTaskUsage(bot.id, bot.threadId, { input: 800, output: 100, costUsd: null });
     store.addTaskUsage(bot.id, bot.threadId, { input: Number.NaN, output: -20, costUsd: null });
@@ -84,7 +142,7 @@ describe("Store", () => {
     expect(store.addTaskUsage(bot.id, "no-such-thread", { input: 5, output: 5, costUsd: null })).toBeNull();
 
     const reloaded = new Store(selection);
-    expect(reloaded.taskByThread(bot.id, bot.threadId)?.usage).toEqual({ input: 2000, output: 400, costUsd: null, turns: 3 });
+    expect(reloaded.taskByThread(bot.id, bot.threadId)?.usage).toEqual({ input: 2000, output: 400, costUsd: null, turns: 3, tokenTurns: 2, estimatedTokens: 2_000 });
   });
 
   it("persists the per-bot composio gate", () => {
@@ -614,14 +672,16 @@ describe("Store task usage", () => {
       output: 20,
       costUsd: 0.01,
       turns: 1,
+      tokenTurns: 1,
     });
     expect(store.addTaskUsage(bot.id, bot.threadId, { input: 50, output: 5, costUsd: 0.005 })).toEqual({
       input: 150,
       output: 25,
       costUsd: 0.015,
       turns: 2,
+      tokenTurns: 2,
     });
-    expect(store.taskByThread(bot.id, bot.threadId)?.usage).toEqual({ input: 150, output: 25, costUsd: 0.015, turns: 2 });
+    expect(store.taskByThread(bot.id, bot.threadId)?.usage).toEqual({ input: 150, output: 25, costUsd: 0.015, turns: 2, tokenTurns: 2 });
   });
 
   it("keeps cost null until some turn reports one, then sums only reported costs", () => {
@@ -635,7 +695,37 @@ describe("Store task usage", () => {
   it("counts a turn that reported no tokens at all", () => {
     const store = new Store(selection);
     const bot = store.createBot();
-    expect(store.addTaskUsage(bot.id, bot.threadId, { costUsd: null })).toEqual({ input: 0, output: 0, costUsd: null, turns: 1 });
+    expect(store.addTaskUsage(bot.id, bot.threadId, { costUsd: null })).toEqual({
+      input: 0,
+      output: 0,
+      costUsd: null,
+      turns: 1,
+      tokenTurns: 0,
+      estimatedTokens: 2_000,
+    });
+  });
+
+  it("does not double-bank a replayed terminal usage event", () => {
+    const store = new Store(selection);
+    const bot = store.createBot();
+    const first = store.addTaskUsage(bot.id, bot.threadId, { input: 100, output: 20, costUsd: 0.01, idempotencyKey: "turn-1" });
+    const replay = store.addTaskUsage(bot.id, bot.threadId, { input: 100, output: 20, costUsd: 0.01, idempotencyKey: "turn-1" });
+
+    expect(replay).toEqual(first);
+    expect(store.taskByThread(bot.id, bot.threadId)?.usage).toMatchObject({ input: 100, output: 20, costUsd: 0.01, turns: 1 });
+  });
+
+  it("tracks how many settled turns actually reported tokens", () => {
+    const store = new Store(selection);
+    const bot = store.createBot();
+    store.addTaskUsage(bot.id, bot.threadId, { input: 100, output: 20, costUsd: null });
+    expect(store.addTaskUsage(bot.id, bot.threadId, { costUsd: null })).toMatchObject({
+      input: 100,
+      output: 20,
+      turns: 2,
+      tokenTurns: 1,
+      estimatedTokens: 2_000,
+    });
   });
 
   it("ignores an unknown task", () => {
