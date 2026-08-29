@@ -17,11 +17,18 @@ import {
 } from "./skill-recorder.mjs";
 import { openBlankTerminal } from "./terminal-launch.mjs";
 import { startUpdater, registerUpdaterIpc } from "./updater.mjs";
+import { createRestartCoordinator } from "./restart-coordinator.mjs";
 import { buildDiagnosticsReport, decodeLogTail, diagnosticsFileName } from "./diagnostics.mjs";
 import { migrateWorkspaceCredentials, workspaceCredentialEnv } from "./workspace-credentials.mjs";
 import { activateExistingWindow } from "./single-instance.mjs";
 import { packageUrlFromCommandLine, packageUrlFromDeepLink } from "./package-link.mjs";
 import { defaultSaveName, withSavableFile } from "./save-file.mjs";
+import { DEFAULT_TITLE_BAR_OVERLAY, titleBarOverlayForColors } from "./title-bar-theme.mjs";
+import {
+  captureDesktopJpeg,
+  desktopJpegDataUrl,
+  startLocalScreenServer,
+} from "./local-screen-server.mjs";
 import {
   ensureManagedComposioCredentials,
   managedComposioAccess,
@@ -38,7 +45,23 @@ import {
 } from "./managed-companion-tunnel.mjs";
 import { createSecureCredentialState } from "./secure-credential-state.mjs";
 import { readSecureCredentials } from "./secure-credentials.mjs";
+import {
+  FIREBASE_PUSH_ENCRYPTION_KEY_FIELD,
+  ensureFirebasePushEncryptionKey,
+  firebaseCredentialEnv,
+  firebaseCredentialStatus,
+  importFirebaseServiceAccountFile,
+} from "./firebase-credentials.mjs";
 import { createControlPlaneClient } from "./control-plane-client.mjs";
+import {
+  BACKUP_KEY_FIELD,
+  createEncryptedBackup,
+  ensureBackupEncryptionKey,
+  inspectEncryptedBackups,
+  normalizeBackupKeep,
+  pruneEncryptedBackups,
+  writeBackupRecoveryKey,
+} from "./encrypted-backup.mjs";
 import {
   companionAccountCleanupPending,
   createCompanionAccountService,
@@ -55,12 +78,14 @@ const { createDisplayMediaGuard, invokeDisplayMediaCallback, selectCaptureSource
 const { STAGE_PREFIX: APPIMAGE_CUA_STAGE_PREFIX } = require("./cua-linux-bundle.cjs");
 const { desktopViewerUrl, sameDesktopViewerOrigin } = require("./desktop-viewer.cjs");
 const { normalizeUnreadCount, parseWindowState, resolveWindowState } = require("./window-state.cjs");
+const { unreadBadgeDataUrl } = require("./unread-badge.cjs");
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 // 127.0.0.1 explicitly — vite binds IPv4; a bare "localhost" here can
 // resolve to ::1 and paint a black window
 const DEV_URL = process.env.ELECTRON_START_URL ?? "http://127.0.0.1:5199";
 const DEFAULT_COMPOSIO_BROKER_URL = "https://openmausbot-composio.milindsoni201.workers.dev";
+const RESTART_TOKEN = randomUUID();
 let SERVER_PORT = 8799;
 const APP_ICON = path.join(__dirname, "resources/app-icon.png");
 let desktopViewerWindow = null;
@@ -70,6 +95,7 @@ let pendingPackageInstallUrl = packageUrlFromCommandLine(process.argv);
 let mainWindow = null;
 let unreadCount = 0;
 let unreadOverlayIcon = null;
+let unreadOverlayIconCount = 0;
 
 function windowStateFile() {
   return path.join(app.getPath("userData"), "window-state.json");
@@ -126,11 +152,18 @@ function applyUnreadBadge(win = mainWindow) {
   const count = normalizeUnreadCount(unreadCount);
   if (process.platform === "win32") {
     if (!win || win.isDestroyed()) return;
-    unreadOverlayIcon ??= nativeImage.createFromPath(APP_ICON).resize({ width: 16, height: 16 });
+    if (count > 0 && unreadOverlayIconCount !== count) {
+      unreadOverlayIcon = nativeImage.createFromDataURL(unreadBadgeDataUrl(count)).resize({ width: 32, height: 32 });
+      unreadOverlayIconCount = count;
+    }
     win.setOverlayIcon(
       count > 0 && !unreadOverlayIcon.isEmpty() ? unreadOverlayIcon : null,
       count > 0 ? `${count} unread conversation${count === 1 ? "" : "s"}` : "No unread conversations",
     );
+    if (count === 0) {
+      unreadOverlayIcon = null;
+      unreadOverlayIconCount = 0;
+    }
     return;
   }
   if (process.platform === "darwin" || process.platform === "linux") app.setBadgeCount(count);
@@ -145,6 +178,16 @@ if (process.platform === "linux") {
   app.disableHardwareAcceleration();
   app.setDesktopName("com.openmausbot.app.desktop");
 }
+
+// Keep the installed protocol and app id stable for upgrades while presenting
+// the commercial product name everywhere the operating system shows it.
+app.setName("Agent Centipede");
+// Keep the established Electron profile while presenting the new product
+// name. Electron otherwise derives a fresh userData directory from setName(),
+// which would make an in-place upgrade appear to forget pairing, companion,
+// window, and credential settings.
+app.setPath("userData", path.join(app.getPath("appData"), "openmausbot"));
+if (process.platform === "win32") app.setAppUserModelId("com.openmausbot.app");
 
 // One instance per user: without this lock a second launch forks a second
 // harness server on a fallback port and splits data dirs in two. The loser
@@ -191,8 +234,14 @@ app.on("second-instance", (_event, commandLine) => {
 // our API shape, not just a 200).
 let serverProc = null;
 let serverReady = true;
+let appQuitting = false;
+let serverRestartTimer = null;
+let serverRestartAttempt = 0;
+let reliabilityPowerBlocker = null;
+let localScreenServer = null;
 let secureCredentials = {};
 let secureCredentialState = null;
+let restartCoordinator = null;
 
 const CREDENTIALS_FILE = path.join(app.getPath("userData"), "credentials.bin");
 
@@ -411,10 +460,120 @@ async function desktopCompanionState() {
 function companionLaunchOptions(hostedUrl = null) {
   return {
     resourcesPath: process.resourcesPath,
+    appPath: app.getAppPath(),
     harnessPort: SERVER_PORT,
     hostedUrl,
+    credentialEnvironment: firebaseCredentialEnv(secureCredentials),
     log: slog,
   };
+}
+
+async function ensureFirebasePushKey() {
+  if (!app.isPackaged || credentialStoreUnavailable || !secureCredentialState) return;
+  const current = secureCredentialState.read();
+  const next = ensureFirebasePushEncryptionKey(current);
+  if (next[FIREBASE_PUSH_ENCRYPTION_KEY_FIELD] === current[FIREBASE_PUSH_ENCRYPTION_KEY_FIELD]) return;
+  await updateSecureCredentialDocument(() => next);
+}
+
+async function createDailyEncryptedBackup() {
+  if (!app.isPackaged || credentialStoreUnavailable || !secureCredentialState) return;
+  const current = secureCredentialState.read();
+  const next = ensureBackupEncryptionKey(current);
+  if (next[BACKUP_KEY_FIELD] !== current[BACKUP_KEY_FIELD]) {
+    await updateSecureCredentialDocument(() => next);
+  }
+  const dataDirectory = process.env.OMB_DATA_DIR || path.join(app.getPath("home"), ".openmausbot");
+  const destinationDirectory = encryptedBackupDirectory();
+  const today = new Date().toISOString().slice(0, 10);
+  const existing = fs.existsSync(destinationDirectory)
+    && fs.readdirSync(destinationDirectory).some((name) => name.startsWith(`openmausbot-${today}`));
+  if (existing) return;
+  const result = createEncryptedBackup({
+    dataDirectory,
+    destinationDirectory,
+    keyBase64: secureCredentialState.read()[BACKUP_KEY_FIELD],
+    keep: readBackupKeep(),
+  });
+  slog(`encrypted backup verified (${result.files} core files)`);
+}
+
+function encryptedBackupDirectory() {
+  return path.join(app.getPath("documents"), "OpenMausBot Backups");
+}
+
+function backupPolicyFile() {
+  return path.join(app.getPath("userData"), "backup-policy.json");
+}
+
+function readBackupKeep() {
+  try {
+    const parsed = JSON.parse(fs.readFileSync(backupPolicyFile(), "utf8"));
+    return normalizeBackupKeep(parsed?.keep);
+  } catch {
+    return normalizeBackupKeep(undefined);
+  }
+}
+
+function writeBackupKeep(value) {
+  const keep = normalizeBackupKeep(value);
+  const destination = backupPolicyFile();
+  fs.mkdirSync(path.dirname(destination), { recursive: true });
+  const temporary = `${destination}.${process.pid}.tmp`;
+  fs.writeFileSync(temporary, JSON.stringify({ keep }), { mode: 0o600 });
+  fs.renameSync(temporary, destination);
+  return keep;
+}
+
+function encryptedBackupStatus() {
+  const directory = encryptedBackupDirectory();
+  const keep = readBackupKeep();
+  if (!app.isPackaged || credentialStoreUnavailable || !secureCredentialState) {
+    return { available: false, directory, keep, count: 0, latest: null };
+  }
+  const keyBase64 = secureCredentialState.read()[BACKUP_KEY_FIELD];
+  if (typeof keyBase64 !== "string" || !keyBase64) {
+    return { available: true, directory, keep, count: 0, latest: null };
+  }
+  const inspected = inspectEncryptedBackups({ destinationDirectory: directory, keyBase64 });
+  return { available: true, directory, keep, ...inspected };
+}
+
+async function createManualEncryptedBackup() {
+  if (!app.isPackaged || credentialStoreUnavailable || !secureCredentialState) {
+    throw new Error("Encrypted backups are available in the installed app");
+  }
+  const current = secureCredentialState.read();
+  const next = ensureBackupEncryptionKey(current);
+  if (next[BACKUP_KEY_FIELD] !== current[BACKUP_KEY_FIELD]) {
+    await updateSecureCredentialDocument(() => next);
+  }
+  const result = createEncryptedBackup({
+    dataDirectory: process.env.OMB_DATA_DIR || path.join(app.getPath("home"), ".openmausbot"),
+    destinationDirectory: encryptedBackupDirectory(),
+    keyBase64: secureCredentialState.read()[BACKUP_KEY_FIELD],
+    keep: readBackupKeep(),
+  });
+  slog(`manual encrypted backup verified (${result.files} core files)`);
+  return encryptedBackupStatus();
+}
+
+async function exportEncryptedBackupRecoveryKey(owner) {
+  if (!app.isPackaged || credentialStoreUnavailable || !secureCredentialState) {
+    throw new Error("Encrypted backup recovery keys are available in the installed app");
+  }
+  const current = secureCredentialState.read();
+  const next = ensureBackupEncryptionKey(current);
+  if (next[BACKUP_KEY_FIELD] !== current[BACKUP_KEY_FIELD]) {
+    await updateSecureCredentialDocument(() => next);
+  }
+  const result = await dialog.showSaveDialog(owner, {
+    title: "Save OpenMausBot recovery key",
+    defaultPath: path.join(app.getPath("documents"), "OpenMausBot Recovery Key.key"),
+    filters: [{ name: "Recovery key", extensions: ["key"] }],
+  });
+  if (result.canceled || !result.filePath) return null;
+  return writeBackupRecoveryKey(result.filePath, secureCredentialState.read()[BACKUP_KEY_FIELD]);
 }
 
 function ensureManagedCompanionConnector() {
@@ -659,11 +818,18 @@ async function startServerOn(port) {
     OMB_SKILLS_DIR: path.join(process.resourcesPath, "skills"),
     OMB_PORT: String(port),
     OMB_USER_DATA: app.getPath("userData"),
+    ...(localScreenServer
+      ? {
+          OMB_LOCAL_SCREEN_URL: localScreenServer.url,
+          OMB_LOCAL_SCREEN_TOKEN: localScreenServer.token,
+        }
+      : {}),
     ...(secureCredentials.composioApiKey
       ? { COMPOSIO_API_KEY: secureCredentials.composioApiKey }
       : {}),
     // "we could not read your keys" must not reach the UI as "you have none"
     OMB_CREDENTIAL_STORE: credentialStoreUnavailable ? "unavailable" : "ok",
+    OMB_RESTART_TOKEN: RESTART_TOKEN,
     // one env var per stored workspace secret (xai/box/voice/OpenCode Go);
     // the server prefers these over config.json, whose plaintext fields
     // the boot migration has deleted
@@ -715,12 +881,76 @@ async function startServerPackaged() {
       if (proc) {
         serverProc = proc;
         SERVER_PORT = port;
+        watchPackagedServer(proc);
         return true;
       }
     }
     await new Promise((r) => setTimeout(r, 2500));
   }
   return false;
+}
+
+function watchPackagedServer(proc) {
+  proc.once("exit", () => {
+    if (appQuitting || serverProc !== proc) return;
+    serverProc = null;
+    serverReady = false;
+    schedulePackagedServerRestart();
+  });
+}
+
+function schedulePackagedServerRestart() {
+  if (!app.isPackaged || appQuitting || serverRestartTimer !== null) return;
+  const delay = Math.min(60_000, 1_000 * (2 ** Math.min(serverRestartAttempt, 6)));
+  serverRestartAttempt += 1;
+  slog(`server supervisor retry=${serverRestartAttempt} delayMs=${delay}`);
+  serverRestartTimer = setTimeout(async () => {
+    serverRestartTimer = null;
+    if (appQuitting) return;
+    const started = await startServerPackaged();
+    if (!started) {
+      schedulePackagedServerRestart();
+      return;
+    }
+    serverReady = true;
+    serverRestartAttempt = 0;
+    slog(`server supervisor recovered port=${SERVER_PORT}`);
+    for (const window of BrowserWindow.getAllWindows()) {
+      if (!window.isDestroyed()) void window.loadURL(`http://127.0.0.1:${SERVER_PORT}`);
+    }
+  }, delay);
+  serverRestartTimer.unref?.();
+}
+
+async function serverLifecycleRequest(pathname, method) {
+  // Unknown is never idle. The updater must not interpret a crashed or
+  // restarting child as proof that no work is in flight — that is the exact
+  // race which used to let an install erase a live turn.
+  if (!serverProc || !serverReady) {
+    throw new Error("Agent Centipede is recovering its work engine. Wait for it to reconnect, then try the update again.");
+  }
+  const response = await fetch(`http://127.0.0.1:${SERVER_PORT}${pathname}`, {
+    method,
+    headers: { authorization: `Bearer ${RESTART_TOKEN}` },
+    signal: AbortSignal.timeout(3_000),
+  });
+  const body = await response.json().catch(() => ({}));
+  if (!response.ok) throw new Error(body?.error ?? `server restart coordination failed (${response.status})`);
+  return body;
+}
+
+function ensureRestartCoordinator() {
+  restartCoordinator ??= createRestartCoordinator({
+    prepare: () => serverLifecycleRequest("/api/internal/restart/prepare", "POST"),
+    checkpoint: () => serverLifecycleRequest("/api/internal/restart/checkpoint", "POST"),
+    status: () => serverLifecycleRequest("/api/internal/restart/status", "GET"),
+    abort: () => serverLifecycleRequest("/api/internal/restart/abort", "POST"),
+    pollMs: 250,
+    // A parked approval is intentionally not force-killed by an update. The
+    // user can answer it, or retry the install once the task is finished.
+    timeoutMs: 45_000,
+  });
+  return restartCoordinator;
 }
 
 function syncManagedComposioCredentials() {
@@ -738,7 +968,7 @@ function syncManagedComposioCredentials() {
 const ERROR_PAGE =
   "data:text/html;charset=utf-8," +
   encodeURIComponent(
-    `<body style="margin:0;display:flex;align-items:center;justify-content:center;height:100vh;background:#070707;color:#fcfcfc;font:15px -apple-system,system-ui"><div style="text-align:center;max-width:360px"><div style="font-size:40px">🐭</div><h2 style="font-weight:600;margin:12px 0 6px">Couldn't start the bot server</h2><p style="color:#fcfcfc99;line-height:1.5">Something else is using its ports. Quit and reopen OpenMausBot — if it keeps happening, restart your computer.</p></div></body>`,
+    `<body style="margin:0;display:flex;align-items:center;justify-content:center;height:100vh;background:#0b0e0d;color:#f6f7f2;font:15px -apple-system,system-ui"><div style="text-align:center;max-width:360px"><div style="font-size:40px;color:#b8f20a">••••••</div><h2 style="font-weight:600;margin:12px 0 6px">The chain could not start</h2><p style="color:#aeb6ad;line-height:1.5">Something else is using its ports. Quit and reopen Agent Centipede — if it keeps happening, restart your computer.</p></div></body>`,
   );
 
 let cuaReady = Promise.resolve({ mode: "unavailable", reason: "not-started" });
@@ -788,7 +1018,7 @@ function desktopViewerErrorPage(message, retryUrl) {
 }
 
 function openDesktopViewer(owner, rawUrl, rawTitle, contextId) {
-  if (!owner || owner.isDestroyed()) throw new Error("The OpenMausBot window is unavailable");
+    if (!owner || owner.isDestroyed()) throw new Error("The Agent Centipede window is unavailable");
   const url = desktopViewerUrl(rawUrl);
   const titleCandidate = Object.prototype.toString.call(rawTitle) === "[object String]" ? rawTitle.trim() : "";
   const title = titleCandidate ? titleCandidate.slice(0, 80) : "Live desktop";
@@ -900,6 +1130,20 @@ ipcMain.on("desktop:unread-count", (event, value) => {
   applyUnreadBadge(sender);
 });
 
+ipcMain.on("desktop:title-bar-colors", (event, value) => {
+  if (process.platform !== "win32") return;
+  const sender = BrowserWindow.fromWebContents(event.sender);
+  if (!sender || sender !== mainWindow || sender.isDestroyed()) return;
+  try {
+    const overlay = titleBarOverlayForColors(value);
+    sender.setTitleBarOverlay(overlay);
+    sender.setBackgroundColor(overlay.color);
+  } catch {
+    // Renderer IPC is an untrusted boundary. Ignore malformed colors and keep
+    // the last valid native title-bar palette.
+  }
+});
+
 function createWindow() {
   const isMac = process.platform === "darwin";
   const primary = screen.getPrimaryDisplay();
@@ -910,6 +1154,7 @@ function createWindow() {
     minWidth: 900,
     minHeight: 600,
     icon: APP_ICON,
+    title: "Agent Centipede",
     backgroundColor: "#070707",
     autoHideMenuBar: process.platform !== "darwin",
     // macOS keeps inset traffic lights, Windows keeps its custom overlay,
@@ -919,11 +1164,10 @@ function createWindow() {
       : process.platform === "win32"
         ? {
             titleBarStyle: "hidden",
-            // height MUST match the ChatView/GroupView header strip (px-5 py-3
-            // around a 36px control row = 60). Windows draws the caption buttons
-            // to fill the overlay, so anything shorter leaves a dead band under
-            // them and anything taller overhangs the header.
-            titleBarOverlay: { color: "#070707", symbolColor: "#b5b5b5", height: 60 },
+            // The production shell owns a dedicated 40px title-bar row. Keeping
+            // native caption controls in that row prevents them from covering
+            // workspace navigation or the live-status rail.
+            titleBarOverlay: DEFAULT_TITLE_BAR_OVERLAY,
           }
         : {}),
     webPreferences: {
@@ -934,6 +1178,12 @@ function createWindow() {
   mainWindow = win;
   installWindowStatePersistence(win);
   applyUnreadBadge(win);
+  // Explorer or a display/taskbar restart can discard an overlay while the
+  // renderer's unread count has not changed. Reassert the last known badge
+  // whenever the window returns without asking React to manufacture a state
+  // change purely for native chrome.
+  win.on("show", () => applyUnreadBadge(win));
+  win.on("focus", () => applyUnreadBadge(win));
   if (restored.maximized) win.maximize();
   win.on("closed", () => {
     if (mainWindow === win) mainWindow = null;
@@ -1092,15 +1342,20 @@ function createWindow() {
   return win;
 }
 
-// Local-control screen preview — served from the main process so the Screen
-// Recording permission prompt attributes to the app, never the server
-ipcMain.handle("screen:frame", async () => {
-  if (process.platform !== "darwin") return null;
-  const sources = await desktopCapturer.getSources({
-    types: ["screen"],
-    thumbnailSize: { width: 1280, height: 800 },
+async function captureHostDesktopJpeg() {
+  return captureDesktopJpeg({
+    getSources: (options) => desktopCapturer.getSources(options),
+    getPrimaryDisplayId: () => screen.getPrimaryDisplay().id,
   });
-  return sources[0]?.thumbnail.toDataURL() ?? null;
+}
+
+// Local-control screen preview — served from the main process so the Screen
+// Recording permission prompt attributes to the app, never the server. On
+// Windows this is also the renderer's live preview; it must use the same
+// capture path as the companion bridge instead of returning null forever.
+ipcMain.handle("screen:frame", async () => {
+  if (process.platform !== "darwin" && process.platform !== "win32") return null;
+  return desktopJpegDataUrl(await captureHostDesktopJpeg());
 });
 
 // Onboarding permission checks. Status reads are free; the mic request
@@ -1167,6 +1422,25 @@ ipcMain.handle("desktop:export-diagnostics", async (event) => {
     }
   }
   return result.filePath;
+});
+
+ipcMain.handle("backup:status", () => encryptedBackupStatus());
+ipcMain.handle("backup:create", () => createManualEncryptedBackup());
+ipcMain.handle("backup:export-recovery-key", (event) => {
+  const owner = BrowserWindow.fromWebContents(event.sender) ?? undefined;
+  return exportEncryptedBackupRecoveryKey(owner);
+});
+ipcMain.handle("backup:set-retention", (_event, keep) => {
+  const normalizedKeep = writeBackupKeep(keep);
+  pruneEncryptedBackups(encryptedBackupDirectory(), normalizedKeep);
+  return encryptedBackupStatus();
+});
+ipcMain.handle("backup:open-folder", async () => {
+  const directory = encryptedBackupDirectory();
+  fs.mkdirSync(directory, { recursive: true });
+  const error = await shell.openPath(directory);
+  if (error) throw new Error(error);
+  return true;
 });
 
 // Bots hand users files as markdown links to paths inside the OpenMausBot
@@ -1355,6 +1629,29 @@ ipcMain.handle("assemblyai:streaming-token", () =>
   mintAssemblyAIStreamingToken(assemblyAICredential(secureCredentials)),
 );
 
+ipcMain.handle("firebase:status", () => firebaseCredentialStatus(secureCredentials));
+ipcMain.handle("firebase:import-service-account", async () => {
+  if (!app.isPackaged) throw new Error("Firebase service-account import is available in the packaged app");
+  if (credentialStoreUnavailable) throw new Error("The operating-system credential store is unavailable");
+  if (!(await safeStorage.isAsyncEncryptionAvailable())) {
+    throw new Error("The operating-system credential store is unavailable");
+  }
+  const selection = await dialog.showOpenDialog({
+    title: "Import Firebase service-account JSON",
+    properties: ["openFile"],
+    filters: [{ name: "JSON files", extensions: ["json"] }],
+  });
+  if (selection.canceled || selection.filePaths.length === 0) {
+    return { imported: false, ...firebaseCredentialStatus(secureCredentials) };
+  }
+  const result = await importFirebaseServiceAccountFile({
+    filePath: selection.filePaths[0],
+    readFile: (filePath) => fs.promises.readFile(filePath, "utf8"),
+    updateCredentials: (derive) => updateSecureCredentialDocument(derive),
+  });
+  return { imported: true, ...result, ...firebaseCredentialStatus(secureCredentials) };
+});
+
 const CREDENTIAL_PATCH = {
   composioApiKey: (value) => ({ composio: { apiKey: value } }),
   xaiApiKey: (value) => ({ xai: { key: value } }),
@@ -1423,6 +1720,14 @@ setCuaStateListener((connection) => {
 
 app.whenReady().then(async () => {
   if (app.isPackaged) app.setAsDefaultProtocolClient("openmausbot");
+  if (app.isPackaged && process.platform === "win32") {
+    // This custom unattended build is expected to be available after a reboot.
+    // Windows owns the registration, so upgrades keep the correct executable path.
+    app.setLoginItemSettings({ openAtLogin: true, path: process.execPath });
+  }
+  if (app.isPackaged && reliabilityPowerBlocker === null) {
+    reliabilityPowerBlocker = powerSaveBlocker.start("prevent-app-suspension");
+  }
   if (process.platform === "darwin") app.dock.setIcon(APP_ICON);
   secureCredentials = await loadSecureCredentials();
   if (app.isPackaged) {
@@ -1436,6 +1741,14 @@ app.whenReady().then(async () => {
     writable: !credentialStoreUnavailable,
   });
   secureCredentials = secureCredentialState.read();
+  try {
+    await ensureFirebasePushKey();
+  } catch (error) {
+    slog(`Firebase push encryption key setup failed: ${error?.message ?? error}`);
+  }
+  void createDailyEncryptedBackup().catch((error) => {
+    slog(`encrypted backup failed: ${error?.message ?? error}`);
+  });
   const hostedAccount = ensureCompanionAccountService();
   // Display capture remains user-initiated. The renderer first sends a
   // short-lived one-shot intent, then calls getDisplayMedia in the same click.
@@ -1491,17 +1804,32 @@ app.whenReady().then(async () => {
   registerCuaIpc();
   androidDevice.registerIpc(ipcMain);
   registerUpdaterIpc();
+  // The harness is a separate utility process and Electron alone may call
+  // desktopCapturer. Give it one authenticated loopback-only frame endpoint;
+  // the token exists only in this process and its child environment.
+  if (app.isPackaged && !localScreenServer) {
+    try {
+      localScreenServer = await startLocalScreenServer({
+        capture: captureHostDesktopJpeg,
+      });
+    } catch (error) {
+      slog(`local screen bridge unavailable: ${error?.message ?? error}`);
+    }
+  }
   // Start the CUA daemon before the window so the harness can pick up the
   // connection descriptor on first render. Never blocks window creation on
   // failure — computer use degrades to "unavailable", the rest still works.
   cuaReady =
-    process.platform === "darwin" || process.platform === "linux"
+    process.platform === "darwin" || process.platform === "linux" || process.platform === "win32"
       ? startCua().catch((e) => {
           console.error("[cua] start failed:", e);
           return { mode: "unavailable", reason: String(e) };
         })
       : Promise.resolve({ mode: "unavailable", reason: "unsupported-platform" });
-  if (app.isPackaged) serverReady = await startServerPackaged();
+  if (app.isPackaged) {
+    serverReady = await startServerPackaged();
+    if (!serverReady) schedulePackagedServerRestart();
+  }
   // The companion the user left on comes back without anyone finding the
   // toggle again — one attempt, after the harness port is settled, with the
   // exact options the IPC handler uses. A failure surfaces in companionState
@@ -1539,7 +1867,7 @@ app.whenReady().then(async () => {
   }
   // in-app auto-update (packaged only) — checks GitHub releases, downloads on
   // the user's click, installs on "Restart to update"
-  startUpdater(win);
+  startUpdater(win, { prepareRestart: () => ensureRestartCoordinator().waitForIdle() });
   app.on("activate", () => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow();
   });
@@ -1573,11 +1901,20 @@ process.once("SIGTERM", requestSignalQuit);
 app.on("before-quit", (e) => {
   if (cuaCleanedUp) return;
   e.preventDefault();
+  appQuitting = true;
+  if (serverRestartTimer !== null) {
+    clearTimeout(serverRestartTimer);
+    serverRestartTimer = null;
+  }
   try {
     serverProc?.kill();
   } catch {}
   // Release the sleep blocker synchronously; child shutdown is awaited below.
   syncCompanionKeepAwake(false, false);
+  if (reliabilityPowerBlocker !== null) {
+    if (powerSaveBlocker.isStarted(reliabilityPowerBlocker)) powerSaveBlocker.stop(reliabilityPowerBlocker);
+    reliabilityPowerBlocker = null;
+  }
   // a live dictation session runs its own helper child that holds the mic —
   // stop it here so quitting never orphans a recording process
   if (nativeActions.appleSpeech) stopSpeech();
@@ -1585,6 +1922,7 @@ app.on("before-quit", (e) => {
   const cleanup = Promise.race([
     Promise.all([
       stopCua().catch(() => {}),
+      localScreenServer?.close().catch(() => {}),
       // Both listeners reachable from outside the app are owned children.
       // Shut the connector down first, then the sidecar, without changing the
       // remembered toggle the next launch will restore.

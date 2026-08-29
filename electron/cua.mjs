@@ -34,6 +34,7 @@ const {
   reapStaleAppImageCuaBundles,
   stageAppImageCuaBundle,
 } = require("./cua-linux-bundle.cjs");
+const { createWindowsCuaRuntime } = require("./cua-windows-runtime.cjs");
 const { linuxLocalControlSupport } = require("./capabilities.cjs");
 
 const INSTALLED_DRIVER = "/Applications/CuaDriver.app/Contents/MacOS/cua-driver";
@@ -110,10 +111,23 @@ function persistAndNotify(next) {
   return connection;
 }
 
+function withWindowsMcpCompaction(connection) {
+  if (process.platform !== "win32" || connection?.mode !== "embedded") return connection;
+  const proxyPath = path.join(app.getAppPath(), "electron", "cua-mcp-proxy.mjs");
+  return {
+    ...connection,
+    mcpCommand: process.execPath,
+    mcpArgs: [proxyPath, connection.mcpCommand, JSON.stringify(connection.mcpArgs ?? ["mcp"])],
+    mcpEnv: { ...connection.mcpEnv, ELECTRON_RUN_AS_NODE: "1" },
+  };
+}
+
 export function resolveDriverBinary() {
   if (process.env.CUA_DRIVER_PATH) return process.env.CUA_DRIVER_PATH;
   if (app.isPackaged) {
-    const bundled = path.join(process.resourcesPath, "cua-driver");
+    const bundled = process.platform === "win32"
+      ? path.join(process.resourcesPath, "cua-win32-x64", "cua-driver.exe")
+      : path.join(process.resourcesPath, "cua-driver");
     if (fs.existsSync(bundled)) return bundled;
   }
   if (fs.existsSync(INSTALLED_DRIVER)) return INSTALLED_DRIVER;
@@ -142,12 +156,12 @@ async function loadEmbeddedSdk() {
     ]);
     return { ...embedded, ...permissions };
   }
-  process.env.OPENMAUSBOT_CUA_SDK_LIBRARY = path.join(
-    process.resourcesPath,
-    "cua-sdk",
-    "native",
-    "libcua_driver_sdk.dylib",
-  );
+  if (process.platform === "win32") {
+    const root = path.join(process.resourcesPath, "cua-win32-x64");
+    process.env.OPENMAUSBOT_CUA_SDK_LIBRARY = path.join(root, "cua_driver_sdk.dll");
+    return import(pathToFileURL(path.join(root, "cua-sdk.mjs")).href);
+  }
+  process.env.OPENMAUSBOT_CUA_SDK_LIBRARY = path.join(process.resourcesPath, "cua-sdk", "native", "libcua_driver_sdk.dylib");
   return import(pathToFileURL(path.join(process.resourcesPath, "cua-sdk", "cua-sdk.mjs")).href);
 }
 
@@ -175,30 +189,57 @@ async function attachStandalone() {
 }
 
 async function startEmbedded(binary) {
+  // Embedded hosts intentionally do not inherit arbitrary environment
+  // variables. Persist the driver's own opt-out before daemon startup.
+  spawnSync(binary, ["telemetry", "disable"], { timeout: 5000, windowsHide: true });
+  if (process.platform === "win32") {
+    const host = createWindowsCuaRuntime();
+    try {
+      const connection = await host.start(binary);
+      embeddedHost = host;
+      return connection;
+    } catch (error) {
+      await host.stop();
+      throw error;
+    }
+  }
   // Import from the staged Resources tree in production. The app intentionally
   // excludes general node_modules, so a bare package import only works in dev.
   const sdk = await loadEmbeddedSdk();
   // CUA's embedding contract requires grants before the child daemon starts;
   // these SDK calls execute in Electron main so macOS attributes them to
   // OpenMausBot rather than to a terminal or helper process.
-  const permissionStatus = sdk.requestMacOSPermissions();
-  if (!sdk.hasRequiredMacOSPermissions(permissionStatus)) {
-    const missing = [
-      !permissionStatus.accessibility && "Accessibility",
-      !permissionStatus.screenRecording && "Screen Recording",
-    ].filter(Boolean).join(" and ");
-    throw new Error(`${missing || "macOS permissions"} required; grant access in System Settings and restart OpenMausBot`);
+  if (process.platform === "darwin") {
+    const permissionStatus = sdk.requestMacOSPermissions();
+    if (!sdk.hasRequiredMacOSPermissions(permissionStatus)) {
+      const missing = [
+        !permissionStatus.accessibility && "Accessibility",
+        !permissionStatus.screenRecording && "Screen Recording",
+      ].filter(Boolean).join(" and ");
+      throw new Error(`${missing || "macOS permissions"} required; grant access in System Settings and restart Agent Centipede`);
+    }
   }
-  const host = new sdk.EmbeddedCuaDriverHost(binary, HOST_BUNDLE_ID);
+  const host = sdk.EmbeddedCuaDriverHost.withOptions(
+    sdk.EmbeddedDriverHostOptions.new({
+      ...sdk.EmbeddedDriverHostOptions.defaults(),
+      binaryPath: binary,
+      hostBundleId: HOST_BUNDLE_ID,
+      dangerouslyBypassApprovals: false,
+      environment: [],
+      inheritStderr: true,
+    }),
+  );
   try {
     const conn = await host.start();
     embeddedHost = host;
+    const mcpEnv = Object.fromEntries(conn.mcp.environment.map(({ name, value }) => [name, value]));
     return {
       mode: "embedded",
       socketPath: conn.socketPath,
-      mcpCommand: binary,
-      mcpArgs: ["mcp", "--embedded", "--socket", conn.socketPath],
-      mcpEnv: { ...CUA_ENV, CUA_DRIVER_EMBEDDED: "1", CUA_DRIVER_HOST_BUNDLE_ID: HOST_BUNDLE_ID },
+      generation: conn.generation,
+      mcpCommand: conn.mcp.command,
+      mcpArgs: [...conn.mcp.args],
+      mcpEnv: { ...CUA_ENV, ...mcpEnv },
     };
   } catch (err) {
     try {
@@ -222,14 +263,14 @@ export async function startCua() {
   }
 
   const wantEmbedded =
-    app.isPackaged || process.env.OPENMAUSBOT_CUA_EMBEDDED === "1";
+    process.platform === "win32" || app.isPackaged || process.env.OPENMAUSBOT_CUA_EMBEDDED === "1";
   let nextConnection;
 
   if (wantEmbedded) {
     try {
       nextConnection = await startEmbedded(binary);
     } catch (err) {
-      nextConnection = await attachStandalone();
+      nextConnection = process.platform === "darwin" ? await attachStandalone() : null;
       if (!nextConnection) {
         nextConnection = {
           mode: "unavailable",
@@ -254,7 +295,7 @@ export async function startCua() {
     };
   }
 
-  return persistAndNotify(nextConnection);
+  return persistAndNotify(withWindowsMcpCompaction(nextConnection));
 }
 
 export function cuaPermissionsStatus() {
@@ -264,6 +305,7 @@ export function cuaPermissionsStatus() {
     encoding: "utf8",
     timeout: 5000,
     env: { ...process.env, ...CUA_ENV },
+    windowsHide: true,
   });
   try {
     return { available: true, ...JSON.parse(out.stdout) };
@@ -326,7 +368,7 @@ export function registerCuaIpc() {
     return ensureLinuxRuntime().getStatus();
   });
   ipcMain.handle("cua:linux-retry", async () => {
-    if (process.platform === "darwin") {
+    if (process.platform === "darwin" || process.platform === "win32") {
       try {
         await stopCua();
         const connection = await startCua();
@@ -338,7 +380,7 @@ export function registerCuaIpc() {
           message: connection?.reason,
         };
       } catch (error) {
-        console.error("[cua] macOS retry failed:", error);
+        console.error(`[cua] ${process.platform === "win32" ? "Windows" : "macOS"} retry failed:`, error);
         return {
           enabled: false,
           status: "error",

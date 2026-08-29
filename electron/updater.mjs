@@ -53,7 +53,7 @@ export function registerUpdaterIpc() {
   ipcMain.handle("update:install", () => updaterCoordinator?.install());
 }
 
-export function startUpdater(mainWindow) {
+export function startUpdater(mainWindow, { prepareRestart } = {}) {
   win = mainWindow;
   // dev / unsigned builds can't auto-update — leave the banner dormant
   if (!app.isPackaged) {
@@ -75,7 +75,7 @@ export function startUpdater(mainWindow) {
   autoUpdater.autoInstallOnAppQuit = process.platform === "darwin";
   autoUpdater.logger = updaterLogger();
 
-  updaterCoordinator = createUpdaterCoordinator(autoUpdater, setState);
+  updaterCoordinator = createUpdaterCoordinator(autoUpdater, setState, { prepareRestart });
 
   // first check ~15s after launch (let the app settle), then hourly — both
   // silent on failure, hence the arrow: a bare `check` would receive the

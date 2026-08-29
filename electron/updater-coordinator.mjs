@@ -1,4 +1,4 @@
-export function createUpdaterCoordinator(updater, setState) {
+export function createUpdaterCoordinator(updater, setState, { prepareRestart } = {}) {
   let checkOperation = null;
   let downloadOperation = null;
   let installOperation = null;
@@ -119,26 +119,48 @@ export function createUpdaterCoordinator(updater, setState) {
   }
 
   function install() {
-    if (installOperation) return;
+    if (installOperation) return installOperation.promise;
     const operation = { failed: false, timer: null };
     installOperation = operation;
     setState({ status: "installing" });
-    try {
-      updater.quitAndInstall(true, true);
-    } catch (error) {
-      routeError(true, error);
-      return;
+
+    const invokeInstaller = () => {
+      try {
+        updater.quitAndInstall(true, true);
+      } catch (error) {
+        routeError(true, error);
+        return;
+      }
+      // quitAndInstall is void. If neither a quit nor an updater error arrives,
+      // recover the UI instead of spinning for the lifetime of the process.
+      if (installOperation === operation) {
+        operation.timer = setTimeout(() => {
+          if (installOperation !== operation) return;
+          installOperation = null;
+          setState({ status: "error", message: "The update could not be staged. Quit the app and try again." });
+        }, 2 * 60 * 1000);
+        operation.timer.unref?.();
+      }
+    };
+
+    // Keep the legacy synchronous path for callers without a child-process
+    // lifecycle hook. Packaged installs provide the hook and deliberately
+    // wait for the server drain before invoking quitAndInstall.
+    if (!prepareRestart) {
+      invokeInstaller();
+      operation.promise = Promise.resolve();
+      return operation.promise;
     }
-    // quitAndInstall is void. If neither a quit nor an updater error arrives,
-    // recover the UI instead of spinning for the lifetime of the process.
-    if (installOperation === operation) {
-      operation.timer = setTimeout(() => {
-        if (installOperation !== operation) return;
-        installOperation = null;
-        setState({ status: "error", message: "The update could not be staged. Quit the app and try again." });
-      }, 2 * 60 * 1000);
-      operation.timer.unref?.();
-    }
+
+    operation.promise = Promise.resolve()
+      .then(() => prepareRestart())
+      .then(() => {
+        if (!operation.failed && installOperation === operation) invokeInstaller();
+      })
+      .catch((error) => {
+        if (!operation.failed) routeError(true, error);
+      });
+    return operation.promise;
   }
 
   return { check, download, install };

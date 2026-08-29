@@ -14,7 +14,7 @@ function deferred() {
   return { promise, resolve, reject };
 }
 
-function harness() {
+function harness(options = {}) {
   const updater = new EventEmitter();
   // electron-updater has its own error listener; model that without routing it.
   updater.on("error", () => {});
@@ -23,7 +23,7 @@ function harness() {
   const coordinator = createUpdaterCoordinator(updater, (patch) => {
     state = { ...state, ...patch };
     states.push({ ...state });
-  });
+  }, options);
   return { updater, coordinator, states, getState: () => state };
 }
 
@@ -166,6 +166,39 @@ test("a synchronous install failure becomes a user-visible error", () => {
   coordinator.install();
 
   assert.deepEqual(getState(), { status: "error", message: "install threw" });
+});
+
+test("install waits for the restart lifecycle to drain before quitting", async () => {
+  const pending = deferred();
+  const { updater, coordinator, getState } = harness({ prepareRestart: () => pending.promise });
+  let installs = 0;
+  updater.quitAndInstall = () => {
+    installs += 1;
+  };
+
+  const install = coordinator.install();
+  assert.equal(getState().status, "installing");
+  assert.equal(installs, 0);
+  pending.resolve();
+  await install;
+  assert.equal(installs, 1);
+});
+
+test("install does not quit when restart checkpointing fails", async () => {
+  const { updater, coordinator, getState } = harness({
+    prepareRestart: async () => {
+      throw new Error("checkpoint failed");
+    },
+  });
+  let installs = 0;
+  updater.quitAndInstall = () => {
+    installs += 1;
+  };
+
+  await coordinator.install();
+
+  assert.equal(installs, 0);
+  assert.deepEqual(getState(), { status: "error", message: "checkpoint failed" });
 });
 
 test("an active download state survives a later background check failure", async () => {

@@ -3,7 +3,7 @@
 <plist version="1.0">
   <dict>
     <key>CFBundleDisplayName</key>
-    <string>OpenMausBot</string>
+    <string>Agent Centipede</string>
     <key>CFBundleExecutable</key>
     <string>speech-helper</string>
     <key>CFBundleIdentifier</key>
@@ -11,14 +11,14 @@
     <key>CFBundleInfoDictionaryVersion</key>
     <string>6.0</string>
     <key>CFBundleName</key>
-    <string>OpenMausBot Speech</string>
+    <string>Agent Centipede Speech</string>
     <key>CFBundlePackageType</key>
     <string>APPL</string>
     <key>LSBackgroundOnly</key>
     <true/>
     <key>NSMicrophoneUsageDescription</key>
-    <string>OpenMausBot listens while you dictate messages or talk to a bot.</string>
+    <string>Agent Centipede listens while you dictate messages or talk to an agent.</string>
     <key>NSSpeechRecognitionUsageDescription</key>
-    <string>OpenMausBot converts your speech into text during dictation and calls.</string>
+    <string>Agent Centipede converts your speech into text during dictation and calls.</string>
   </dict>
 </plist>

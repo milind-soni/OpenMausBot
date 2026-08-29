@@ -94,6 +94,10 @@ contextBridge.exposeInMainWorld("ogb", {
     setKey: (value) => ipcRenderer.invoke("assemblyai:set-key", value),
     streamingToken: () => ipcRenderer.invoke("assemblyai:streaming-token"),
   },
+  firebase: {
+    status: () => ipcRenderer.invoke("firebase:status"),
+    importServiceAccount: () => ipcRenderer.invoke("firebase:import-service-account"),
+  },
   /** Absolute path of a dropped File — Electron 32 removed File.path, and
    * only the preload can ask. "" when the drag carried no file on disk. */
   getPathForFile: (file) => {
@@ -126,6 +130,8 @@ contextBridge.exposeInMainWorld("ogb", {
   },
   /** Mirrors durable unread state into the native Dock/taskbar badge. */
   setUnreadCount: (count) => ipcRenderer.send("desktop:unread-count", count),
+  /** Keeps Windows' native caption buttons aligned with the active skin. */
+  setTitleBarColors: (colors) => ipcRenderer.send("desktop:title-bar-colors", colors),
   /** Live VNC/noVNC in a sandboxed window owned by the app window. */
   desktopViewer: {
     open: (url, title, contextId) => ipcRenderer.invoke("desktop-viewer:open", url, title, contextId),
@@ -142,6 +148,13 @@ contextBridge.exposeInMainWorld("ogb", {
   /** Writes the redacted diagnostics report to a user-chosen file; resolves
    * the path, or null when the save dialog was cancelled. */
   exportDiagnostics: () => ipcRenderer.invoke("desktop:export-diagnostics"),
+  backup: {
+    status: () => ipcRenderer.invoke("backup:status"),
+    create: () => ipcRenderer.invoke("backup:create"),
+    exportRecoveryKey: () => ipcRenderer.invoke("backup:export-recovery-key"),
+    setRetention: (keep) => ipcRenderer.invoke("backup:set-retention", keep),
+    openFolder: () => ipcRenderer.invoke("backup:open-folder"),
+  },
   /** Ask where to save a bot-created file (inside ~/.openmausbot), copy it
    * there and reveal it. Returns the chosen path, or null if the user
    * cancelled the dialog. The chat bubble shows the
