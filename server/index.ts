@@ -170,8 +170,12 @@ import { installedPlaybookInstructions } from "./installed-playbooks.ts";
 import { createBotPackageExport } from "./package-export.ts";
 import { shouldMountLocalComputer } from "./local-routing.ts";
 
-const PORT = Number(process.env.OMB_PORT || process.env.OGB_PORT || 8799);
-const WEBHOOK_PORT = Number(process.env.OMB_WEBHOOK_PORT || PORT + 1);
+const startPort = Number(process.env.OMB_PORT || process.env.OGB_PORT || 8799);
+const startWebhookPort = Number(process.env.OMB_WEBHOOK_PORT) || startPort + 1;
+let PORT = startPort;
+let WEBHOOK_PORT = startWebhookPort;
+const HOST = "127.0.0.1";
+const MAX_PORT_ATTEMPTS = 100;
 const STATIC_DIR = process.env.OMB_STATIC_DIR || null;
 const MIME: Record<string, string> = {
   ".html": "text/html",
@@ -197,6 +201,7 @@ const availableSkills = () => mergeSkills(bundledSkills, loadUserSkills(join(DAT
 // restarting the embedded server. Plain Node/dev launches have no parentPort.
 type UtilityParentPort = {
   on(event: "message", listener: (event: { data?: unknown }) => void): void;
+  postMessage(message: unknown): void;
 };
 const utilityParentPort = (process as NodeJS.Process & { parentPort?: UtilityParentPort }).parentPort;
 utilityParentPort?.on("message", (event) => {
@@ -2519,13 +2524,6 @@ const webhooks = new WebhookManager({
 
 let webhookIngress: WebhookIngress | null = null;
 let webhookIngressError: string | null = null;
-try {
-  webhookIngress = await listenWebhookIngress(webhooks, { port: WEBHOOK_PORT });
-  console.log(`openmausbot webhook receiver on ${webhookIngress.baseUrl}`);
-} catch (error) {
-  webhookIngressError = error instanceof Error ? error.message : String(error);
-  console.error(`openmausbot webhook receiver unavailable: ${webhookIngressError}`);
-}
 
 const webhookIngressStatus = () => ({
   available: Boolean(webhookIngress),
@@ -6498,9 +6496,76 @@ const server = createServer(async (req, res) => {
   }
 });
 
-server.listen(PORT, "127.0.0.1", () => {
-  console.log(`openmausbot server on http://127.0.0.1:${PORT}`);
+function isEaddrinuse(error: unknown): boolean {
+  return typeof error === "object" && error !== null && (error as { code?: unknown }).code === "EADDRINUSE";
+}
+
+for (let offset = 0; offset < MAX_PORT_ATTEMPTS; offset++) {
+  const candidatePort = startPort + offset;
+  const candidateWebhookPort = startWebhookPort + offset;
+
+  if (webhookIngress) {
+    await new Promise<void>((r) => webhookIngress!.server.close(() => r()));
+    webhookIngress = null;
+  }
+
+  try {
+    webhookIngress = await listenWebhookIngress(webhooks, { port: candidateWebhookPort, host: HOST });
+    webhookIngressError = null;
+    console.log(`openmausbot webhook receiver on ${webhookIngress.baseUrl}`);
+  } catch (error) {
+    if (isEaddrinuse(error)) {
+      continue;
+    }
+    webhookIngressError = error instanceof Error ? error.message : String(error);
+    console.error(`openmausbot webhook receiver unavailable: ${webhookIngressError}`);
+  }
+
+  try {
+    await new Promise<void>((resolve, reject) => {
+      const onError = (error: Error) => {
+        server.off("error", onError);
+        reject(error);
+      };
+      server.once("error", onError);
+      server.listen(candidatePort, HOST, () => {
+        server.off("error", onError);
+        resolve();
+      });
+    });
+    PORT = candidatePort;
+    WEBHOOK_PORT = candidateWebhookPort;
+    console.log(`openmausbot server on http://${HOST}:${PORT}`);
+    break;
+  } catch (error) {
+    if (webhookIngress) {
+      await new Promise<void>((r) => webhookIngress!.server.close(() => r()));
+      webhookIngress = null;
+    }
+    if (isEaddrinuse(error)) {
+      continue;
+    }
+    throw error;
+  }
+}
+
+if (!server.listening) {
+  if (webhookIngress) {
+    await new Promise<void>((r) => webhookIngress!.server.close(() => r()));
+    webhookIngress = null;
+  }
+  throw new Error(`could not find an available port after ${MAX_PORT_ATTEMPTS} attempts starting from ${startPort}`);
+}
+
+utilityParentPort?.postMessage({
+  type: "openmausbot:listen",
+  port: PORT,
+  webhookPort: WEBHOOK_PORT,
 });
+
+export function getResolvedPort(): number | undefined {
+  return server.listening ? PORT : undefined;
+}
 
 for (const signal of ["SIGINT", "SIGTERM"] as const) {
   process.on(signal, () => {
