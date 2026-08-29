@@ -70,14 +70,24 @@ export function targetsForPreparation({
   current = false,
   platform = process.platform,
   arch = process.arch,
+  target,
 } = {}) {
+  if (target !== undefined) {
+    if (!Object.hasOwn(CLOUDFLARED_ASSETS, target)) {
+      throw new Error(`Cloudflare Tunnel packaging is unsupported for ${target}`);
+    }
+    return [target];
+  }
   return current ? [targetForCurrentHost(platform, arch)] : targetsForHost(platform);
 }
 
 export function parsePrepareCloudflaredArgs(args = []) {
   if (args.length === 0) return { current: false };
   if (args.length === 1 && args[0] === "--current") return { current: true };
-  throw new Error("Usage: node scripts/prepare-cloudflared.mjs [--current]");
+  if (args.length === 2 && args[0] === "--target") {
+    return { current: false, target: args[1] };
+  }
+  throw new Error("Usage: node scripts/prepare-cloudflared.mjs [--current | --target <platform-arch>]");
 }
 
 export function sha256(value) {
@@ -275,9 +285,10 @@ export async function prepareCloudflared({
   platform = process.platform,
   arch = process.arch,
   current = false,
+  target,
 } = {}) {
-  for (const target of targetsForPreparation({ current, platform, arch })) {
-    await stageTarget(root, target);
+  for (const preparationTarget of targetsForPreparation({ current, platform, arch, target })) {
+    await stageTarget(root, preparationTarget);
   }
 }
 

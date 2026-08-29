@@ -1,0 +1,62 @@
+# Standalone by design: electron-builder concatenates inherited arrays, so an
+# `extends: electron-builder.yml` config could not clear the production
+# openmausbot protocol declaration.
+appId: com.openmausbot.isolated-canary
+productName: OpenMausBot Isolated Canary
+artifactName: OpenMausBot-Isolated-Canary-${version}-${arch}.${ext}
+publish: []
+
+extraMetadata:
+  version: 0.1.40-autorag-canary.1
+
+directories:
+  buildResources: build
+  output: release-isolated-canary
+
+afterPack: ./scripts/after-pack.mjs
+
+files:
+  - electron/**
+  - "!electron/**/*.test.*"
+  - "!electron/resources/speech-helper"
+  - "!electron/resources/speech-helper.swift"
+  - "!electron/resources/speech-helper-Info.plist"
+  - "!electron/resources/OpenMausBot Speech.app/**"
+  - "!electron/resources/recorder-helper"
+  - "!electron/resources/recorder-helper.swift"
+  - "!electron/resources/recorder-helper-Info.plist"
+  - "!electron/resources/OpenMausBot Recorder.app/**"
+  - "!**/node_modules/**"
+  - package.json
+
+asar: true
+
+extraResources:
+  - from: LICENSE
+    to: licenses/OpenMausBot-LICENSE.txt
+  - from: NOTICE
+    to: licenses/OpenMausBot-NOTICE.txt
+  - from: LICENSE
+    to: licenses/cloudflared-LICENSE.txt
+  - from: third_party/cloudflared/README.md
+    to: licenses/cloudflared-README.md
+  - from: dist
+    to: ui
+  - from: dist-server
+    to: server
+  - from: dist-companion
+    to: companion
+  - from: skills
+    to: skills
+  - from: dist-native/android-platform-tools
+    to: android-platform-tools
+
+win:
+  target:
+    - target: portable
+      arch: [x64]
+  executableName: OpenMausBot-Isolated-Canary
+  icon: build/icon.ico
+  extraResources:
+    - from: dist-native/cloudflared/win32-x64/cloudflared.exe
+      to: cloudflared/cloudflared.exe

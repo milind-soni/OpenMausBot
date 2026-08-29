@@ -23,6 +23,11 @@ import { activateExistingWindow } from "./single-instance.mjs";
 import { pollServerIdentity } from "./server-boot-probe.mjs";
 import { packageUrlFromCommandLine, packageUrlFromDeepLink } from "./package-link.mjs";
 import { windowChromeOptions } from "./window-chrome.mjs";
+import {
+  desktopLaunchPolicy,
+  isolatedCanaryDataPaths,
+  registerIsolatedCompanionIpc,
+} from "./isolated-canary.mjs";
 import { defaultSaveName, withSavableFile } from "./save-file.mjs";
 import {
   ensureManagedComposioCredentials,
@@ -65,6 +70,20 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 // resolve to ::1 and paint a black window
 const DEV_URL = process.env.ELECTRON_START_URL ?? "http://127.0.0.1:5199";
 const DEFAULT_COMPOSIO_BROKER_URL = "https://openmausbot-composio.milindsoni201.workers.dev";
+const launchPolicy = desktopLaunchPolicy(process.env, { appVersion: app.getVersion() });
+if (launchPolicy.isolated) {
+  // This runs before the single-instance lock. The canary therefore cannot
+  // focus, reuse, or inherit the installed app's profile, lock, or server
+  // state even when both executables run at the same time.
+  const canaryPaths = isolatedCanaryDataPaths(process.env, path, {
+    tempRoot: app.getPath("temp"),
+    appVersion: app.getVersion(),
+  });
+  fs.mkdirSync(canaryPaths.userData, { recursive: true, mode: 0o700 });
+  fs.mkdirSync(canaryPaths.serverData, { recursive: true, mode: 0o700 });
+  app.setPath("userData", canaryPaths.userData);
+  process.env.OMB_DATA_DIR = canaryPaths.serverData;
+}
 let SERVER_PORT = 8799;
 const APP_ICON = path.join(__dirname, "resources/app-icon.png");
 let desktopViewerWindow = null;
@@ -1409,37 +1428,43 @@ ipcMain.handle("skill-recorder:stop", () => stopRecorder());
 ipcMain.handle("skill-recorder:save", (_event, payload) => saveSkillRecording(payload));
 
 // ── companion sidecar ──────────────────────────────────────────────────
-// The renderer gets these five and nothing else: it can turn the companion
-// on and off, look at it, open or cancel a pairing window, and remove a
-// device. It cannot reach the sidecar's control port itself.
-ipcMain.handle("companion:state", () => desktopCompanionState());
-ipcMain.handle("companion:start", () => startDesktopCompanion());
-ipcMain.handle("companion:stop", () => stopDesktopCompanion());
-ipcMain.handle("companion:keep-awake", async (_event, enabled) => {
-  rememberCompanionKeepAwake(Boolean(enabled));
-  return desktopCompanionState();
-});
-ipcMain.handle("companion:pairing", (_event, open, expectedToken) =>
-  companionPairing(Boolean(open), expectedToken).then(decorateDesktopCompanionState),
-);
-ipcMain.handle("companion:cloud-desktop", (_event, deviceId, allowed) =>
-  companionCloudDesktopAccess(deviceId, Boolean(allowed)).then(() => desktopCompanionState()),
-);
-ipcMain.handle("companion:revoke", (_event, deviceId) =>
-  companionRevoke(deviceId).then(() => desktopCompanionState()),
-);
+if (!launchPolicy.companionIpc || !launchPolicy.companionAccountIpc) {
+  // The renderer probes these bridges when PhoneSetupFlow mounts. Isolated
+  // canaries receive complete inert states; no production account client,
+  // health probe, companion process, or settings mutation is reachable.
+  registerIsolatedCompanionIpc(ipcMain);
+} else {
+  // The renderer gets these narrow methods and cannot reach the sidecar's
+  // control port or account credentials itself.
+  ipcMain.handle("companion:state", () => desktopCompanionState());
+  ipcMain.handle("companion:start", () => startDesktopCompanion());
+  ipcMain.handle("companion:stop", () => stopDesktopCompanion());
+  ipcMain.handle("companion:keep-awake", async (_event, enabled) => {
+    rememberCompanionKeepAwake(Boolean(enabled));
+    return desktopCompanionState();
+  });
+  ipcMain.handle("companion:pairing", (_event, open, expectedToken) =>
+    companionPairing(Boolean(open), expectedToken).then(decorateDesktopCompanionState),
+  );
+  ipcMain.handle("companion:cloud-desktop", (_event, deviceId, allowed) =>
+    companionCloudDesktopAccess(deviceId, Boolean(allowed)).then(() => desktopCompanionState()),
+  );
+  ipcMain.handle("companion:revoke", (_event, deviceId) =>
+    companionRevoke(deviceId).then(() => desktopCompanionState()),
+  );
 
-// Auth and connector credentials never cross this boundary. Every handler
-// returns the same deliberately tiny, secret-free public account state.
-ipcMain.handle("companion-account:state", () => ensureCompanionAccountService().state());
-ipcMain.handle("companion-account:request-code", (_event, email) =>
-  ensureCompanionAccountService().requestCode(email),
-);
-ipcMain.handle("companion-account:verify-code", (_event, email, code) =>
-  ensureCompanionAccountService().verifyCode(email, code),
-);
-ipcMain.handle("companion-account:retry", () => ensureCompanionAccountService().retry());
-ipcMain.handle("companion-account:sign-out", () => ensureCompanionAccountService().signOut());
+  // Auth and connector credentials never cross this boundary. Every handler
+  // returns the same deliberately tiny, secret-free public account state.
+  ipcMain.handle("companion-account:state", () => ensureCompanionAccountService().state());
+  ipcMain.handle("companion-account:request-code", (_event, email) =>
+    ensureCompanionAccountService().requestCode(email),
+  );
+  ipcMain.handle("companion-account:verify-code", (_event, email, code) =>
+    ensureCompanionAccountService().verifyCode(email, code),
+  );
+  ipcMain.handle("companion-account:retry", () => ensureCompanionAccountService().retry());
+  ipcMain.handle("companion-account:sign-out", () => ensureCompanionAccountService().signOut());
+}
 
 ipcMain.handle("desktop:capabilities", async () =>
   desktopCapabilities({
@@ -1539,7 +1564,9 @@ setCuaStateListener((connection) => {
 });
 
 app.whenReady().then(async () => {
-  if (app.isPackaged) app.setAsDefaultProtocolClient("openmausbot");
+  if (app.isPackaged && launchPolicy.registerProtocol) {
+    app.setAsDefaultProtocolClient("openmausbot");
+  }
   if (process.platform === "darwin") app.dock.setIcon(APP_ICON);
   secureCredentials = await loadSecureCredentials();
   if (app.isPackaged) {
@@ -1553,7 +1580,9 @@ app.whenReady().then(async () => {
     writable: !credentialStoreUnavailable,
   });
   secureCredentials = secureCredentialState.read();
-  const hostedAccount = ensureCompanionAccountService();
+  const hostedAccount = launchPolicy.restoreHostedAccount
+    ? ensureCompanionAccountService()
+    : null;
   // Display capture remains user-initiated. The renderer first sends a
   // short-lived one-shot intent, then calls getDisplayMedia in the same click.
   // The handler binds that request to the same frame/origin, rejects audio,
@@ -1607,7 +1636,7 @@ app.whenReady().then(async () => {
   }
   registerCuaIpc();
   androidDevice.registerIpc(ipcMain);
-  registerUpdaterIpc();
+  if (launchPolicy.updater) registerUpdaterIpc();
   // Start the CUA daemon before the window so the harness can pick up the
   // connection descriptor on first render. Never blocks window creation on
   // failure — computer use degrades to "unavailable", the rest still works.
@@ -1624,14 +1653,14 @@ app.whenReady().then(async () => {
   // exact options the IPC handler uses. A failure surfaces in companionState
   // (the panel shows the error) rather than retrying; and it never delays
   // the window.
-  if (serverReady && companionEnabledAtRest()) {
+  if (launchPolicy.restoreCompanion && serverReady && companionEnabledAtRest()) {
     void startDesktopCompanion({ waitForHosted: false, remember: false });
   }
   const win = createWindow();
   // Reconcile incomplete setup and resume interrupted sign-out only after the
   // local app is usable. This background network work never gates LAN pairing
   // or the first window.
-  void hostedAccount.restore().catch(() => {});
+  if (hostedAccount) void hostedAccount.restore().catch(() => {});
   // Registration is optional network work. Start it only after the local
   // server and first window are usable, then update the server child over its
   // private parent port so Connected Apps becomes available without restart.
@@ -1641,7 +1670,12 @@ app.whenReady().then(async () => {
   if (credentialStoreUnavailable) {
     slog("skipping connected-apps registration: the credential store was unreadable this launch");
   }
-  if (app.isPackaged && composioBrokerUrl() && !credentialStoreUnavailable) {
+  if (
+    launchPolicy.registerHostedApps
+    && app.isPackaged
+    && composioBrokerUrl()
+    && !credentialStoreUnavailable
+  ) {
     void updateSecureCredentialDocument(async (credentials) => {
       await ensureManagedComposioCredentials({
         brokerUrl: composioBrokerUrl(),
@@ -1656,7 +1690,7 @@ app.whenReady().then(async () => {
   }
   // in-app auto-update (packaged only) — checks GitHub releases, downloads on
   // the user's click, installs on "Restart to update"
-  startUpdater(win);
+  if (launchPolicy.updater) startUpdater(win);
   app.on("activate", () => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow();
   });

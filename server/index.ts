@@ -115,6 +115,13 @@ import {
 import * as tts from "./tts/index.ts";
 import { narrateTool, toUtterances } from "./tts/speech-text.ts";
 import { buildTurnContext, engineIsFresh } from "./turn-context.ts";
+import {
+  appendPromptRetrievalContext,
+  promptRetrievalConfiguration,
+  retrievePromptContext,
+  type PromptRetrievalRequestKind,
+} from "./prompt-retrieval.ts";
+import { completeAcceptedProviderDispatch } from "./provider-dispatch-completion.ts";
 import { TurnWatchdog } from "./turn-watchdog.ts";
 import {
   ensureWorkspace,
@@ -796,6 +803,43 @@ const groupSpeakers = new Map<string, { botId: string; name: string; color: stri
 // Providers report cumulative-within-turn numbers; the final value is folded
 // into the task's tally when the turn settles.
 const turnUsage = new Map<string, { input: number; output: number; cachedInput?: number }>();
+
+// A direct turn is marked busy before its asynchronous retrieval/integration
+// setup begins. Stop must own that pre-provider window too: otherwise an
+// adapter with no session yet acknowledges the interrupt, then the delayed
+// setup starts a provider turn after the user pressed Stop.
+interface PendingDirectDispatch {
+  botId: string;
+  cancelled: boolean;
+}
+const pendingDirectDispatches = new Map<string, PendingDirectDispatch>();
+
+class DirectDispatchCancelled extends Error {}
+
+function beginDirectDispatch(botId: string, threadId: string): PendingDirectDispatch {
+  const pending = { botId, cancelled: false };
+  pendingDirectDispatches.set(threadId, pending);
+  return pending;
+}
+
+function cancelDirectDispatch(threadId: string): boolean {
+  const pending = pendingDirectDispatches.get(threadId);
+  if (!pending) return false;
+  pending.cancelled = true;
+  return true;
+}
+
+function assertDirectDispatch(pending: PendingDirectDispatch, threadId: string) {
+  if (pending.cancelled || pendingDirectDispatches.get(threadId) !== pending) {
+    throw new DirectDispatchCancelled("turn stopped before provider dispatch");
+  }
+}
+
+function finishDirectDispatch(pending: PendingDirectDispatch, threadId: string) {
+  if (pendingDirectDispatches.get(threadId) === pending) {
+    pendingDirectDispatches.delete(threadId);
+  }
+}
 
 // Bounded per active turn. OpenHands uses a bounded recent-event scan for
 // the same class of stuck-loop detection; retaining an unlimited set of
@@ -1807,9 +1851,39 @@ async function startTurn(
   store.setActivity(bot.id, "working");
   store.patchBot(bot.id, { unread: false });
   turnUsage.delete(threadId);
+  const pendingDispatch = beginDirectDispatch(bot.id, threadId);
 
   void (async () => {
     try {
+      // Resolve the task's pinned native cwd before retrieval. The retrieval
+      // adapter may run on another host, so it also derives a stable repository
+      // identity from this exact checkout rather than guessing from a path.
+      const worksInWorkspace = instance.driverKind !== "grok" && instance.driverKind !== "boxAgent";
+      const privateWorkspace = worksInWorkspace ? ensureWorkspace(bot.id) : undefined;
+      if (opts?.runOn === "cloud") store.pinTaskCwd(bot.id, threadId, undefined, { none: true });
+      const pinnedCwd =
+        privateWorkspace && opts?.runOn !== "cloud"
+          ? store.pinTaskCwd(bot.id, threadId, privateWorkspace)
+          : null;
+      const cwd = pinnedCwd ?? undefined;
+      const retrievalRequestKind: PromptRetrievalRequestKind =
+        opts?.automationSource || opts?.unattended
+          ? "automation"
+          : opts?.cardContinuation
+            ? "continuation"
+            : opts?.commsDepth
+              ? "delegation"
+              : "user_task";
+      const retrievalContext = await retrievePromptContext(text, threadId, {
+        cwd,
+        eventId: userMessage.id,
+        requestKind: retrievalRequestKind,
+      });
+      assertDirectDispatch(pendingDispatch, threadId);
+      const providerTurnText = appendPromptRetrievalContext(
+        turnText,
+        retrievalContext,
+      );
       const integrations: NonNullable<Parameters<typeof instance.adapter.sendTurn>[0]["integrations"]> = {};
       const selectedSkills = selectBundledSkills(
         text,
@@ -1831,8 +1905,6 @@ async function startTurn(
       // than the user's home: a bot with file tools and acceptEdits gets a
       // desk, not the whole house — and the workspace is where its
       // MEMORY.md lives. API/box engines have no local filesystem story.
-      const worksInWorkspace = instance.driverKind !== "grok" && instance.driverKind !== "boxAgent";
-      const privateWorkspace = worksInWorkspace ? ensureWorkspace(bot.id) : undefined;
       const skillInstructions = renderSkillInstructions(selectedSkills, {
         includeRoot: worksInWorkspace && opts?.runOn !== "cloud",
       });
@@ -1844,12 +1916,6 @@ async function startTurn(
       // A cloud run happens on the box, where a host folder means nothing:
       // pin the task to the default so the header chip never shows the
       // bot's folder for a task that runs elsewhere.
-      if (opts?.runOn === "cloud") store.pinTaskCwd(bot.id, threadId, undefined, { none: true });
-      const pinnedCwd =
-        privateWorkspace && opts?.runOn !== "cloud"
-          ? store.pinTaskCwd(bot.id, threadId, privateWorkspace)
-          : null;
-      const cwd = pinnedCwd ?? undefined;
       // Checkpoint explicit project folders, where a bot can overwrite the
       // user's work. Its private OpenMaus workspace is app-owned and changes
       // on nearly every ordinary chat; snapshotting it would add hidden disk
@@ -2068,11 +2134,13 @@ async function startTurn(
       // the engine cannot edit the project until the snapshot has settled.
       // snapshot() absorbs failures, so checkpointing may delay but never fail
       // a turn.
+      assertDirectDispatch(pendingDispatch, threadId);
       if (checkpointCwd) await checkpoints.snapshot(bot.id, checkpointCwd, `turn ${threadId.slice(0, 8)}`);
+      assertDirectDispatch(pendingDispatch, threadId);
       watchdog.watch(threadId, bot.id);
       await instance.adapter.sendTurn({
         threadId,
-        text: turnText,
+        text: providerTurnText,
         model,
         effort,
         // a rewound thread never resumes the abandoned branch's session
@@ -2119,6 +2187,12 @@ async function startTurn(
         integrations,
         cwd,
       });
+      await completeAcceptedProviderDispatch({
+        cancelled: pendingDispatch.cancelled,
+        interrupt: () => instance.adapter.interruptTurn(threadId),
+        assertOwned: () => assertDirectDispatch(pendingDispatch, threadId),
+        finish: () => finishDirectDispatch(pendingDispatch, threadId),
+      });
       // dispatched: the rewind is spent, and the old cursors are dead
       if (rewound) store.patchBot(bot.id, { rewound: false, resumeCursors: {} });
       // and this engine now owns the thread's most recent turn
@@ -2135,6 +2209,13 @@ async function startTurn(
       if (activeVpsThreads.get(bot.id) === threadId) activeVpsThreads.delete(bot.id);
       watchdog.settle(threadId);
       turnUsage.delete(threadId);
+      if (e instanceof DirectDispatchCancelled) {
+        if (store.bot(bot.id)?.busy) store.setActivity(bot.id, "idle");
+        drainQueuedSends();
+        drainConnectorResumes();
+        drainSecretResumes();
+        return;
+      }
       const message = e instanceof Error ? e.message : String(e);
       store.appendMessage(threadId, {
         role: "bot",
@@ -2148,6 +2229,8 @@ async function startTurn(
       drainQueuedSends();
       drainConnectorResumes();
       drainSecretResumes();
+    } finally {
+      finishDirectDispatch(pendingDispatch, threadId);
     }
   })();
   return userMessage;
@@ -2172,6 +2255,7 @@ routines = new RoutineManager({
     startTurn(botId, prompt, { threadId, runOn, automationSource: triggerSource, onDispatchError })
       .then(() => undefined),
   interruptTurn: async (botId, threadId, runOn) => {
+    cancelDirectDispatch(threadId);
     const bot = store.bot(botId);
     const instance = runOn === "cloud"
       ? registry.instances().find((candidate) => candidate.driverKind === "boxAgent") ?? null
@@ -2370,6 +2454,12 @@ function serializeRoomContext(threadId: string, userName: string): string {
     .join("\n");
 }
 
+function latestRoomUserMessage(threadId: string): Message | undefined {
+  return [...store.messagesFor(threadId)]
+    .reverse()
+    .find((message) => message.role === "user" && message.kind === "text" && message.text);
+}
+
 
 // comms bus: passed into the visibility helpers in comms-visibility.ts so
 // they can mirror messages + chips without re-deriving SSE plumbing. Same
@@ -2524,7 +2614,6 @@ async function runGroupMemberTurn(
   const text = `${serializeRoomContext(threadId, userName)}\n\n(Reply to the conversation above as ${bot.name}.)${
     cardContinuation ? `\n\n${cardContinuation}` : ""
   }`;
-
   // same workspace + memory as a 1:1 turn — the room is a different
   // conversation, not a different bot
   const worksInWorkspace = instance.driverKind !== "grok" && instance.driverKind !== "boxAgent";
@@ -2536,6 +2625,25 @@ async function runGroupMemberTurn(
   // but must not decide the pin: the room's desk is a property of the
   // room, not of whichever member happened to speak first.
   const cwd = groupTurnCwd(workspace, () => store.pinGroupCwd(group.id, threadId));
+  const nativeUserMessage = latestRoomUserMessage(threadId);
+  const retrievalContext = await retrievePromptContext(
+    nativeUserMessage?.text ?? "",
+    threadId,
+    {
+      cwd: cwd ?? undefined,
+      eventId: nativeUserMessage?.id,
+      requestKind: "room_turn",
+    },
+  );
+  if (isCancelled?.()) {
+    groupSpeakers.delete(threadId);
+    if (store.group(group.id)?.busyBotId === bot.id) {
+      store.patchGroup(group.id, { busyBotId: null, unread: true });
+    }
+    if (store.bot(bot.id)?.busy) store.setActivity(bot.id, "idle");
+    return false;
+  }
+  const providerTurnText = appendPromptRetrievalContext(text, retrievalContext);
   const roomSystem =
     system +
     sectionContextSystemPrompt(bot.section) +
@@ -2585,11 +2693,19 @@ async function runGroupMemberTurn(
     instance.adapter
       .sendTurn({
         threadId,
-        text,
+        text: providerTurnText,
         system: roomSystem,
         cwd,
         integrations,
         ...memberTurnSelection(bot.modelSelection),
+      })
+      .then(() => {
+        // Stop can land after the pre-dispatch check but before an adapter has
+        // created its native session. Re-issue it after sendTurn establishes
+        // ownership so a late provider cannot escape the room cancellation.
+        if (isCancelled?.()) {
+          void instance.adapter.interruptTurn(threadId).catch(() => {});
+        }
       })
       .catch((err) => {
         const message = err instanceof Error ? err.message : "turn failed";
@@ -4970,6 +5086,7 @@ const server = createServer(async (req, res) => {
         patch.alwaysAllow = [...new Set(body.alwaysAllow as string[])].slice(0, 200);
       }
       if (existingBot?.computer === "local" && body.computer !== undefined && body.computer !== "local") {
+        cancelDirectDispatch(existingBot.threadId);
         await registry
           .get(existingBot.modelSelection.instanceId)
           ?.adapter.interruptTurn(existingBot.threadId)
@@ -4993,6 +5110,9 @@ const server = createServer(async (req, res) => {
     if (method === "POST" && path === "/api/local-computer/interrupt") {
       if (!String(req.headers["content-type"] ?? "").toLowerCase().startsWith("application/json")) {
         return json(res, 415, { error: "content-type must be application/json" });
+      }
+      for (const bot of store.bots.filter((candidate) => candidate.computer === "local")) {
+        cancelDirectDispatch(bot.threadId);
       }
       await Promise.allSettled(
         store.bots
@@ -5024,6 +5144,7 @@ const server = createServer(async (req, res) => {
         }
       }
       // a running turn dies with its bot
+      cancelDirectDispatch(bot.threadId);
       await registry.get(bot.modelSelection.instanceId)?.adapter.interruptTurn(bot.threadId).catch(() => {});
       stopScreenPoller(bot.id);
       activeVpsThreads.delete(bot.id);
@@ -5300,8 +5421,23 @@ const server = createServer(async (req, res) => {
             const instance = registry.get(currentAtStart.modelSelection.instanceId);
             let steered = false;
             if (instance?.adapter.capabilities.queueing && instance.adapter.steer) {
+              const eventId = sendId ?? `steer-${randomUUID()}`;
+              const taskCwd = store.taskByThread(currentAtStart.id, threadId)?.cwd ?? undefined;
+              // A failed steer falls back to a normal queued/new turn. Give
+              // the attempt its own dedup scope so that ordinary fallback can
+              // still retrieve instead of inheriting a topic it never used.
+              const steerRetrievalSession = `${threadId}:steer:${eventId}`;
+              const retrievalContext = await retrievePromptContext(text, steerRetrievalSession, {
+                cwd: taskCwd,
+                eventId,
+                requestKind: "steer_attempt",
+              });
+              const providerSteerText = appendPromptRetrievalContext(
+                promptWithReply(text, replyTo, cfg.profile?.name?.trim() || "User"),
+                retrievalContext,
+              );
               steered = await instance.adapter
-                .steer(threadId, promptWithReply(text, replyTo, cfg.profile?.name?.trim() || "User"))
+                .steer(threadId, providerSteerText)
                 .catch(() => false);
             }
             // steer() is awaited adapter work. The turn can settle, the task can
@@ -5514,12 +5650,14 @@ const server = createServer(async (req, res) => {
         if (expectedThreadId !== undefined && busyGroup.threadId !== expectedThreadId) {
           return json(res, 409, { error: `this bot is working in channel ${busyGroup.id}` });
         }
+        cancelGroupTurnOperations(busyGroup.id, busyGroup.threadId);
         await instance?.adapter.interruptTurn(busyGroup.threadId).catch(() => {});
         closeOpenApprovals(busyGroup.threadId);
       }
       if (expectedThreadId !== undefined && !busyGroup && bot.threadId !== expectedThreadId) {
         return json(res, 409, { error: "the bot switched tasks before it could be interrupted" });
       }
+      cancelDirectDispatch(bot.threadId);
       await instance?.adapter.interruptTurn(bot.threadId).catch(() => {});
       closeOpenApprovals(bot.threadId);
       return json(res, 200, { ok: true });
@@ -5709,7 +5847,12 @@ const server = createServer(async (req, res) => {
     // child proves it is OURS by echoing its pid (a stray dev server has
     // the same API shape but a different pid)
     if (method === "GET" && path === "/api/health") {
-      return json(res, 200, { app: "openmausbot", pid: process.pid, static: Boolean(STATIC_DIR) });
+      return json(res, 200, {
+        app: "openmausbot",
+        pid: process.pid,
+        static: Boolean(STATIC_DIR),
+        promptRetrieval: promptRetrievalConfiguration(),
+      });
     }
 
     // ── inspector: a thread's runtime events + native protocol tee ──

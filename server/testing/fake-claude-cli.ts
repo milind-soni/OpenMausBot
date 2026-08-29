@@ -17,7 +17,7 @@
 //                      inherited-api-key — what `auth status` reports
 //
 // Keep this file dependency-free — it runs as a bare `node` subprocess.
-import { existsSync, readFileSync, writeFileSync } from "node:fs";
+import { closeSync, existsSync, readFileSync, writeFileSync } from "node:fs";
 
 const mode = process.env.FAKE_CLAUDE_MODE ?? "happy";
 
@@ -201,15 +201,26 @@ const playTurn = (prompt: JsonValue) => {
     turnRunning = false;
     finishIfDone();
   };
-  if (mode === "slow") {
+  if (mode === "slow" || mode === "reject-steer") {
     // a gap a test can steer into; the closing reply carries anything that
     // was folded in, the way the real CLI includes a mid-turn message in
     // the same turn's next model call
-    setTimeout(() => {
+    const slowMs = Math.max(100, Number(process.env.FAKE_CLAUDE_SLOW_MS) || 800);
+    const steerDeadline = Date.now() + 10_000;
+    const finishSlowTurn = () => {
+      if (
+        process.env.FAKE_CLAUDE_WAIT_FOR_STEER === "1"
+        && steered.length === 0
+        && Date.now() < steerDeadline
+      ) {
+        setTimeout(finishSlowTurn, 25);
+        return;
+      }
       const tail = steered.length ? ` + steered: ${steered.join(" | ")}` : "";
       out({ type: "assistant", message: { content: [{ type: "text", text: `reply to: ${promptText(prompt)}${tail}` }] } });
       finish();
-    }, 800);
+    };
+    setTimeout(finishSlowTurn, slowMs);
   } else {
     finish();
   }
@@ -233,6 +244,16 @@ process.stdin.on("data", (c) => {
     else {
       playTurn(prompt);
       armSteerGate();
+      // Keep the first turn alive but close its input pipe. The harness sees
+      // a real failed steer acknowledgement and must queue the message for a
+      // fresh ordinary turn rather than consuming its retrieval dedup scope.
+      if (mode === "reject-steer") {
+        process.stdin.destroy();
+        try { closeSync(0); } catch {}
+        if (process.env.FAKE_CLAUDE_STEER_CLOSED_MARKER) {
+          writeFileSync(process.env.FAKE_CLAUDE_STEER_CLOSED_MARKER, "closed");
+        }
+      }
     }
   }
 });

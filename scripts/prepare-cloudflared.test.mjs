@@ -83,9 +83,20 @@ describe("pinned cloudflared packaging", () => {
     expect(() => targetForCurrentHost("linux", "arm64")).toThrow(/unsupported/);
   });
 
-  it("accepts only the documented current-target CLI option", () => {
+  it("stages an explicit cross-package target without depending on the build host", () => {
+    expect(targetsForPreparation({ target: "win32-x64", platform: "darwin", arch: "arm64" })).toEqual([
+      "win32-x64",
+    ]);
+    expect(() => targetsForPreparation({ target: "freebsd-x64" })).toThrow(/unsupported/);
+  });
+
+  it("accepts only the documented current-target and cross-package CLI options", () => {
     expect(parsePrepareCloudflaredArgs([])).toEqual({ current: false });
     expect(parsePrepareCloudflaredArgs(["--current"])).toEqual({ current: true });
+    expect(parsePrepareCloudflaredArgs(["--target", "win32-x64"])).toEqual({
+      current: false,
+      target: "win32-x64",
+    });
     expect(() => parsePrepareCloudflaredArgs(["--all"])).toThrow(/Usage:/);
     expect(() => parsePrepareCloudflaredArgs(["--current", "--current"])).toThrow(/Usage:/);
   });
@@ -96,6 +107,9 @@ describe("pinned cloudflared packaging", () => {
     );
     expect(packageJson.scripts["build:cloudflared"]).toBe(
       "node scripts/prepare-cloudflared.mjs",
+    );
+    expect(packageJson.scripts["package:win:isolated-canary"]).toContain(
+      "node scripts/prepare-cloudflared.mjs --target win32-x64",
     );
   });
 
