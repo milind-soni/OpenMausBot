@@ -336,7 +336,6 @@ export function Composer({
   // pending row so they cannot become the active leaf mid-turn.
   const [queued, setQueued] = useState<QueuedGroupSend | null>(null);
   const queuedRef = useRef(queued);
-  queuedRef.current = queued;
   const clearQueued = useCallback(() => {
     queuedRef.current = null;
     setQueued(null);

@@ -1,7 +1,7 @@
 // Unsent composer input, kept per task. Switching tasks unmounts the Composer
 // and its local state. Drafts live in localStorage, so coming back to a task — in this
 // session or after a restart — finds what you were typing still there.
-import { useCallback, useEffect, useRef, useState, type SetStateAction } from "react";
+import { useCallback, useEffect, useState, type SetStateAction } from "react";
 import { isAttachment, type Attachment } from "./composer-attachments.js";
 
 const KEY = "omb-drafts";
@@ -107,39 +107,49 @@ export function discardReplyDraft(draftId: string, threadId: string): void {
   clearReplyDraft(threadId);
 }
 
+function resolveReplyMessage<T extends { id: string }>(threadId: string, messages: T[]): T | null {
+  const replyId = replyDraft(threadId);
+  return replyId ? (messages.find((message) => message.id === replyId) ?? null) : null;
+}
+
 /** Keeps a reply target with its task across navigation and failed sends. */
 export function useReplyDraft<T extends { id: string }>(
   threadId: string,
   draftId: string,
   messages: T[],
 ) {
-  const [replyTo, setReplyTo] = useState<T | null>(null);
-  const activeThreadId = useRef(threadId);
-  const previousThreadId = activeThreadId.current;
-  activeThreadId.current = threadId;
+  const [replyState, setReplyState] = useState<{ threadId: string; message: T | null }>(() => ({
+    threadId,
+    message: resolveReplyMessage(threadId, messages),
+  }));
+  // Resolve a switched task synchronously so the previous task's target never
+  // flashes while the effect below synchronizes the hook state.
+  const replyTo =
+    replyState.threadId === threadId
+      ? replyState.message
+      : resolveReplyMessage(threadId, messages);
 
   useEffect(() => {
-    const replyId = replyDraft(threadId);
-    setReplyTo((current) => {
-      if (previousThreadId === threadId && current) return current;
-      return replyId ? (messages.find((message) => message.id === replyId) ?? null) : null;
+    setReplyState((current) => {
+      if (current.threadId === threadId && current.message) return current;
+      return { threadId, message: resolveReplyMessage(threadId, messages) };
     });
-  }, [messages, previousThreadId, threadId]);
+  }, [messages, threadId]);
 
   const selectReply = useCallback((message: T) => {
-    selectReplyDraft(draftId, activeThreadId.current, message.id);
-    setReplyTo(message);
-  }, [draftId]);
+    selectReplyDraft(draftId, threadId, message.id);
+    setReplyState({ threadId, message });
+  }, [draftId, threadId]);
 
   const clearReply = useCallback(() => {
-    discardReplyDraft(draftId, activeThreadId.current);
-    setReplyTo(null);
-  }, [draftId]);
+    discardReplyDraft(draftId, threadId);
+    setReplyState({ threadId, message: null });
+  }, [draftId, threadId]);
 
   const consumeReply = useCallback(() => {
-    clearReplyDraft(activeThreadId.current);
-    setReplyTo(null);
-  }, []);
+    clearReplyDraft(threadId);
+    setReplyState({ threadId, message: null });
+  }, [threadId]);
 
   const restoreReply = useCallback((message: T, targetThreadId: string) => {
     const currentId = replyDraft(targetThreadId);
@@ -147,10 +157,14 @@ export function useReplyDraft<T extends { id: string }>(
     // Persist before touching React state: this callback can belong to a task
     // view that unmounted while its request was still in flight.
     rememberReplyDraft(targetThreadId, message.id);
-    if (activeThreadId.current === targetThreadId) {
-      setReplyTo((current) => current ?? message);
+    if (threadId === targetThreadId) {
+      setReplyState((current) =>
+        current.threadId === targetThreadId && current.message
+          ? current
+          : { threadId: targetThreadId, message },
+      );
     }
-  }, []);
+  }, [threadId]);
 
   return { replyTo, selectReply, clearReply, consumeReply, restoreReply };
 }

@@ -2039,9 +2039,14 @@ export function StoreProvider({ children }: { children: ReactNode }) {
             type: "configStatus",
             config: configStatusFromFrame(frame),
           });
-          api("/api/instances")
-            .then(({ instances }) => rawDispatch({ type: "instances", instances }))
-            .catch(() => {});
+          {
+            const instances = partByKey.get("instances");
+            if (instances) {
+              void loadPeripheral(instances, true).catch((error) =>
+                schedulePeripheralRetry(instances, error),
+              );
+            }
+          }
           break;
       }
     };
