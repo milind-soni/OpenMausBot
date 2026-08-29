@@ -11,11 +11,12 @@ process.stdout.write("fixture-modules-loaded\n");
 if (process.platform === "linux") {
   app.commandLine.appendSwitch("no-sandbox");
 } else if (process.platform === "win32") {
-  // Recent Windows runner updates can crash Electron's GPU child with
-  // EXCEPTION_BREAKPOINT before app ready. This fixture tests renderer/CDP
-  // isolation, not graphics acceleration; renderer and utility sandboxes stay
-  // enabled while Chromium uses its non-hardware compositing path.
+  // This headless fixture tests renderer/CDP isolation and intentionally
+  // refuses its only pixel-capture path. Chromium's own integration tests use
+  // this pair when no GPU process is required; renderer/utility sandboxes stay
+  // enabled and the production browser's graphics path is unchanged.
   app.disableHardwareAcceleration();
+  app.commandLine.appendSwitch("disable-software-rasterizer");
 }
 
 async function waitForLifecycleEvent(emitter, event, label, timeoutMs = 2_000) {
