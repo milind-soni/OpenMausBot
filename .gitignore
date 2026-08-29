@@ -14,6 +14,7 @@ electron/resources/speech-helper
 electron/resources/OpenMausBot Speech.app
 electron/resources/OpenMausBot Recorder.app
 release
+release-v3/
 .omb-scratch
 .smoke-data/
 .wrangler/
