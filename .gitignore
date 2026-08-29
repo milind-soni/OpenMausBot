@@ -18,9 +18,25 @@ release
 .wrangler/
 .dev.vars
 .dev.vars.*
+.env.site
 !cloudflare/control-plane/.dev.vars.example
 cloudflare/composio-broker/worker-configuration.d.ts
 cloudflare/control-plane/worker-configuration.d.ts
 .claude/worktrees/
 .vercel/
 .pi/
+
+# Local smoke/inspection outputs — generated artifacts, never application data.
+tmp-fcm-javap/
+work-cua-inspect/
+work-packaged-smoke/
+work-packaged-smoke-final/
+tmp-test.db
+
+# Local runtime and verification output — preserve or quarantine separately,
+# never commit application data or disposable benchmark state.
+.qa-profile-data/
+artifacts/
+benchmarks/agent-centipede/.local-runs/
+android/app/build/
+/android/*.apk
