@@ -37,6 +37,18 @@ const browserCapabilityCalls: Array<{ operation: string; authorization?: string;
 let browserRevokeFailuresRemaining = 0;
 let browserRegisterDelayMs = 0;
 
+const expectStoppedTestServerCleanly = (serverChild: ChildProcess, capturedStderr: string): void => {
+  // POSIX delivers SIGTERM to the server's graceful-shutdown handler, which
+  // exits with code 0. Windows cannot deliver that handler signal: Node maps
+  // child.kill("SIGTERM") to TerminateProcess and reports the requested stop
+  // through signalCode instead. Accept only that exact Windows teardown shape
+  // so a non-zero crash or SIGKILL escalation still fails the feature test.
+  const requestedWindowsStop = process.platform === "win32"
+    && serverChild.exitCode === null
+    && serverChild.signalCode === "SIGTERM";
+  expect(serverChild.exitCode === 0 || requestedWindowsStop, capturedStderr).toBe(true);
+};
+
 const api = async (method: string, path: string, body?: unknown): Promise<{ status: number; body: any }> => {
   const res = await fetch(`${BASE}${path}`, {
     method,
@@ -2880,7 +2892,7 @@ describe("harness HTTP API", () => {
       await waitForExit(isolatedChild, { signal: "SIGTERM" });
       await removeTempDir(isolatedHome);
     }
-    expect(isolatedChild.exitCode, isolatedStderr).toBe(0);
+    expectStoppedTestServerCleanly(isolatedChild, isolatedStderr);
   }, 30_000);
 
   it("reconciles a committed crash-stale bot reference before ACK and profile-id reuse", async () => {
@@ -2993,7 +3005,7 @@ describe("harness HTTP API", () => {
       await waitForExit(isolatedChild, { signal: "SIGTERM" });
       await removeTempDir(isolatedHome);
     }
-    expect(isolatedChild.exitCode, isolatedStderr).toBe(0);
+    expectStoppedTestServerCleanly(isolatedChild, isolatedStderr);
   }, 30_000);
 
   it("revokes live browser access even when clearing a removed profile reference cannot persist", async () => {
@@ -3107,7 +3119,7 @@ describe("harness HTTP API", () => {
       await waitForExit(isolatedChild, { signal: "SIGTERM" });
       await removeTempDir(isolatedHome);
     }
-    expect(isolatedChild.exitCode, isolatedStderr).toBe(0);
+    expectStoppedTestServerCleanly(isolatedChild, isolatedStderr);
   }, 30_000);
 
   it("rejects bot deletion with no teardown when the cleanup journal is unreadable", async () => {
@@ -3206,7 +3218,7 @@ describe("harness HTTP API", () => {
       await waitForExit(isolatedChild, { signal: "SIGTERM" });
       await removeTempDir(isolatedHome);
     }
-    expect(isolatedChild.exitCode, isolatedStderr).toBe(0);
+    expectStoppedTestServerCleanly(isolatedChild, isolatedStderr);
   }, 30_000);
 
   it("clears bot references when a named browser profile is removed", async () => {
