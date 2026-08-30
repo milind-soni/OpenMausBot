@@ -25,6 +25,7 @@ describe("browser panel address and profile helpers", () => {
     ];
     expect(profileIdFor(" Work / Microsoft ", profiles)).toBe("work-microsoft-3");
     expect(profileIdFor("🔥", profiles)).toBe("profile");
+    expect(profileIdFor("Guest", profiles)).toBe("guest-2");
   });
 
   it("coalesces native focus and input into one take-control request", () => {

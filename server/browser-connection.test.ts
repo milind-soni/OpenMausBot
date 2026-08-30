@@ -138,6 +138,25 @@ describe("browser connection descriptor", () => {
     expect(calls[1].body).toEqual({ token: capability.token });
   });
 
+  it("never reads an inherited descriptor before a packaged parent speaks", () => {
+    const home = mkdtempSync(join(tmpdir(), "omb-browser-parent-race-"));
+    const file = join(home, "browser-connection.json");
+    writeFileSync(file, JSON.stringify({
+      version: 1,
+      url: "http://127.0.0.1:3333",
+      token: "f".repeat(64),
+      pid: process.pid,
+    }));
+    const previous = process.env.OMB_DESKTOP_PARENT;
+    process.env.OMB_DESKTOP_PARENT = "1";
+    try {
+      expect(availableBrowserConnection({ file })).toBeNull();
+    } finally {
+      if (previous === undefined) delete process.env.OMB_DESKTOP_PARENT;
+      else process.env.OMB_DESKTOP_PARENT = previous;
+    }
+  });
+
   it("prefers the packaged desktop's in-memory connection and honors an explicit clear", () => {
     const home = mkdtempSync(join(tmpdir(), "omb-browser-memory-"));
     const file = join(home, "browser-connection.json");

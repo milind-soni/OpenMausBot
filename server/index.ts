@@ -22,6 +22,7 @@ import { approvalKey, autoVerdict } from "./auto-approve.ts";
 import { requestReview, resolveAutoReviewMode, shouldReview } from "./auto-review.ts";
 import {
   BrowserCleanupCoordinator,
+  finalizeBrowserCleanupMutation,
   requireBrowserCleanupAcknowledged,
   type BrowserCleanupRequest,
   type BrowserCleanupWireRequest,
@@ -69,6 +70,8 @@ import {
   showToolCallsEnabled,
   skillRecorderEnabled,
   builtInBrowserEnabled,
+  browserProfileReplacementConflict,
+  browserProfilePartitionTarget,
   syncCredentialEnv,
   withInstanceCli,
   vpsSshAlias,
@@ -482,11 +485,16 @@ async function browserIntegration(
   const connection = availableBrowserConnection();
   if (!connection) return null;
   const control = controlIntegration(botId);
-  // a profile that no longer exists falls back to the bot's own session;
-  // "guest" is a throwaway session the surface forgets on switch-away
-  const profileId = profile === "guest" || (profile && (cfg.browserProfiles ?? []).some((candidate) => candidate.id === profile)) ? profile : "";
+  // A profile that no longer exists falls back to the bot's own session.
+  // Canonical ids belong to config/bot references; Electron must receive the
+  // exact immutable partition inherited from #567 so an upgrade cannot move
+  // a bot into another account. Guest remains a throwaway partition.
+  const profileTarget = profile && profile !== "guest"
+    ? browserProfilePartitionTarget(cfg, profile)
+    : null;
+  const partitionId = profile === "guest" ? "guest" : (profileTarget?.partitionId ?? "");
   await releaseBrowserCapabilityForThread(threadId);
-  const capability = await registerBrowserCapability(connection, botId, profileId);
+  const capability = await registerBrowserCapability(connection, botId, partitionId);
   const active = { botId, ownerId, connection, capability };
   // Registration crosses a process boundary. Stop/delete/config changes can
   // land while the desktop host is minting the token; revalidate in the same
@@ -500,7 +508,7 @@ async function browserIntegration(
   return {
     connection,
     capability,
-    profile: profileId,
+    profile: partitionId,
     integration: {
       command: process.execPath,
       args: [SPAWNED_PROXIES.browser],
@@ -508,7 +516,7 @@ async function browserIntegration(
         ...AGENTS_NODE_FLAG,
         OMB_BROWSER_URL: connection.url,
         OMB_BROWSER_TOKEN: capability.token,
-        OMB_BROWSER_PROFILE: profileId,
+        OMB_BROWSER_PROFILE: partitionId,
         OMB_BOT_ID: botId,
         OMB_CONTROL_URL: control.url,
         OMB_CONTROL_TOKEN: control.token,
@@ -721,14 +729,29 @@ const store = new Store(() => bootSelection);
 const sendSequencer = new SendSequencer();
 bootSelection = await defaultSelection();
 store.seedIfEmpty();
-// A cleanup intent is written before its config/store mutation. A process
-// crash before that mutation leaves a harmless uncommitted intent; a crash
-// after it leaves work Electron must replay before the same profile id can be
-// reused. Reconcile only after both durable stores are loaded.
-browserCleanup.reconcile((request) => request.kind === "profile"
-  ? !(cfg.browserProfiles ?? []).some((profile) => profile.id === request.id)
-  : !store.bot(request.id));
-browserCleanup.startPending();
+// A committed profile cleanup means both its config deletion and bot-reference
+// cleanup were intended to be durable. Reconcile stale secondary references
+// before Electron can ACK and remove the journal: a crash between those writes
+// in an older build must not let id reuse attach a bot to somebody else's new
+// account. Prepared entries remain untouched because their deletion is
+// ambiguous and must never authorize either mutation or a wipe.
+let browserCleanupReferencesReconciled = true;
+try {
+  const committedProfileIds = new Set(browserCleanup.committedProfileIds());
+  for (const bot of store.bots) {
+    if (bot.browserProfile && committedProfileIds.has(bot.browserProfile)) {
+      store.patchBot(bot.id, { browserProfile: undefined });
+    }
+  }
+} catch (error) {
+  browserCleanupReferencesReconciled = false;
+  console.error(
+    `browser cleanup: could not reconcile committed profile references: ${error instanceof Error ? error.message : String(error)}`,
+  );
+}
+// Replay only after the secondary write above is durable. If reconciliation
+// failed, leave the committed journal in place and profile reuse blocked.
+if (browserCleanupReferencesReconciled) browserCleanup.startPending();
 
 /** A bot as a client may see it: no provider session bookkeeping.
  *
@@ -3791,6 +3814,9 @@ function configStatus() {
       showToolCalls: showToolCallsEnabled(cfg),
       browser: builtInBrowserEnabled(cfg),
     },
+    // partitionId is non-secret routing metadata. The renderer needs it to
+    // show the same durable session as an agent, but config PATCH validation
+    // keeps it read-only and rejects callers that try to choose it.
     browserProfiles: cfg.browserProfiles ?? [],
   };
 }
@@ -5783,40 +5809,41 @@ const server = createServer(async (req, res) => {
           return json(res, 409, { error: "delete this bot's Local VM from its Computer panel before deleting the bot" });
         }
       }
-      // a running turn dies with its bot
-      const directClaim = cancelDirectTurnDispatch(bot.id);
-      directTurnGenerationByBot.delete(bot.id);
-      await releaseBrowserCapabilitiesForBot(bot.id);
-      const directThreadId = directClaim?.threadId ?? bot.threadId;
-      await registry.get(bot.modelSelection.instanceId)?.adapter.interruptTurn(directThreadId).catch(() => {});
-      closeOpenApprovals(directThreadId);
-      stopScreenPoller(bot.id);
-      activeVpsThreads.delete(bot.id);
-      routines!.disableForBot(bot.id);
-      webhooks.disableForBot(bot.id);
-      lastReply.delete(bot.threadId);
-      // a peer approval naming this bot can never be meaningfully answered
-      // now, and its caller would otherwise wait out the 15-minute timeout
-      cancelPeerApprovalsFor(bot.id);
-      discardDelegations(commsBus, bot.threadId);
-      computerControl.forget(bot.id);
-      computerControlRevision.delete(bot.id);
-      const target = perBotLocalVmTarget(bot.id);
-      localVmIdles.get(target.key)?.cancel();
-      localVmIdles.delete(target.key);
-      // Journal the wipe before the durable bot deletion. If the process dies
-      // between these two writes, boot reconciliation sees the bot still
-      // exists and drops the intent; if deletion committed, Electron keeps
-      // retrying the partition wipe until it acknowledges success.
+      // Establish a durable cleanup intent before any teardown. A malformed
+      // or unreadable journal therefore rejects the delete with the bot and
+      // all of its live work untouched. The intent is aborted if a later
+      // pre-delete side effect fails, and committed only after Store deletion.
       const browserCleanupRequest = utilityParentPort ? browserCleanup.prepare("bot", bot.id) : null;
       try {
+        // a running turn dies with its bot
+        const directClaim = cancelDirectTurnDispatch(bot.id);
+        directTurnGenerationByBot.delete(bot.id);
+        await releaseBrowserCapabilitiesForBot(bot.id);
+        const directThreadId = directClaim?.threadId ?? bot.threadId;
+        await registry.get(bot.modelSelection.instanceId)?.adapter.interruptTurn(directThreadId).catch(() => {});
+        closeOpenApprovals(directThreadId);
+        stopScreenPoller(bot.id);
+        activeVpsThreads.delete(bot.id);
+        routines!.disableForBot(bot.id);
+        webhooks.disableForBot(bot.id);
+        lastReply.delete(bot.threadId);
+        // a peer approval naming this bot can never be meaningfully answered
+        // now, and its caller would otherwise wait out the 15-minute timeout
+        cancelPeerApprovalsFor(bot.id);
+        discardDelegations(commsBus, bot.threadId);
+        computerControl.forget(bot.id);
+        computerControlRevision.delete(bot.id);
+        const target = perBotLocalVmTarget(bot.id);
+        localVmIdles.get(target.key)?.cancel();
+        localVmIdles.delete(target.key);
         store.deleteBot(bot.id);
       } catch (error) {
         if (browserCleanupRequest) browserCleanup.abort(browserCleanupRequest);
         throw error;
       }
       if (browserCleanupRequest) {
-        const acknowledged = await browserCleanup.ensure(browserCleanupRequest);
+        const committedCleanup = browserCleanup.commit(browserCleanupRequest);
+        const acknowledged = await browserCleanup.ensure(committedCleanup);
         requireBrowserCleanupAcknowledged(acknowledged, `Browser data for ${bot.name}`);
       }
       for (const dir of [EVENTS_DIR, NATIVE_DIR]) {
@@ -6630,6 +6657,13 @@ const server = createServer(async (req, res) => {
             .map((profile) => profile.id)
             .filter((id) => !patch.browserProfiles!.some((profile) => profile.id === id));
       if (patch.browserProfiles !== undefined) {
+        const currentProfiles = new Map((cfg.browserProfiles ?? []).map((profile) => [profile.id, profile]));
+        const nextProfiles = patch.browserProfiles.map((profile) => {
+          const partitionId = currentProfiles.get(profile.id)?.partitionId;
+          return partitionId ? { ...profile, partitionId } : profile;
+        });
+        const routingConflict = browserProfileReplacementConflict(cfg.browserProfiles ?? [], nextProfiles);
+        if (routingConflict) return json(res, 409, { error: routingConflict });
         const currentIds = new Set((cfg.browserProfiles ?? []).map((profile) => profile.id));
         const pendingReuse = patch.browserProfiles.find(
           (profile) => !currentIds.has(profile.id) && browserCleanup.hasPendingProfile(profile.id),
@@ -6731,7 +6765,11 @@ const server = createServer(async (req, res) => {
       try {
         if (utilityParentPort) {
           for (const profileId of removedBrowserProfileIds) {
-            browserCleanupRequests.push(browserCleanup.prepare("profile", profileId));
+            const target = browserProfilePartitionTarget(cfg, profileId);
+            if (!target) throw new Error(`browser profile cleanup target “${profileId}” is unavailable`);
+            browserCleanupRequests.push(
+              browserCleanup.prepare("profile", target.profileId, target.partitionId),
+            );
           }
         }
       } catch (error) {
@@ -6769,44 +6807,34 @@ const server = createServer(async (req, res) => {
         }
       } catch (error) {
         if (configWriteCommitted) {
-          for (const request of browserCleanupRequests) void browserCleanup.ensure(request);
+          for (const request of browserCleanupRequests) {
+            const committed = browserCleanup.commit(request);
+            void browserCleanup.ensure(committed);
+          }
         } else {
           for (const request of browserCleanupRequests) browserCleanup.abort(request);
         }
         throw error;
       }
-      // From this point the profile deletion is durable. Start the wipe before
-      // touching secondary bot references so an unexpected store write error
-      // cannot leave a journal entry dormant until the next app launch.
-      for (const request of browserCleanupRequests) void browserCleanup.ensure(request);
+      let browserReferenceCleanupError: unknown = null;
       if (patch.browserProfiles !== undefined) {
         const retained = new Set(patch.browserProfiles.map((profile) => profile.id));
-        for (const bot of store.bots) {
-          if (bot.browserProfile && bot.browserProfile !== "guest" && !retained.has(bot.browserProfile)) {
-            // The profile list and every bot reference change in the same
-            // config request. Non-renderer clients therefore cannot leave a
-            // bot pointing at a deleted cookie partition.
-            store.patchBot(bot.id, { browserProfile: undefined });
+        try {
+          for (const bot of store.bots) {
+            if (bot.browserProfile && bot.browserProfile !== "guest" && !retained.has(bot.browserProfile)) {
+              // The profile list and every bot reference change in the same
+              // config request. Non-renderer clients therefore cannot leave a
+              // bot pointing at a deleted cookie partition.
+              store.patchBot(bot.id, { browserProfile: undefined });
+            }
           }
+        } catch (error) {
+          // Config is already durable. Keep the cleanup intent prepared (so
+          // it cannot wipe ambiguous state and its id remains locked), but do
+          // not let this secondary write failure skip revocation/reload below.
+          browserReferenceCleanupError = error;
         }
-        // Normal desktop deletes now wait for Electron's acknowledgement.
-        // If Electron is restarting, the durable journal keeps retrying and
-        // the id-reuse guard above prevents stale logins from resurfacing.
-        const acknowledgements = await Promise.all(
-          browserCleanupRequests.map((request) => browserCleanup.ensure(request)),
-        );
-        if (!acknowledgements.every(Boolean)) {
-          // The config mutation is already durable. Keep every connected UI in
-          // sync even though this request must truthfully return non-2xx until
-          // Electron confirms the separate storage wipe.
-          broadcast({ kind: "config", ...configStatus() });
-        }
-        requireBrowserCleanupAcknowledged(
-          acknowledgements.every(Boolean),
-          removedBrowserProfileIds.length === 1 ? "The browser profile" : "The browser profiles",
-        );
       }
-      if (disablingBuiltInBrowser) await releaseAllBrowserCapabilities();
       // Provider keys change the fleet. Profile, voice, VPS, and room timeout
       // changes do not rebuild it: no driver reads them, and they should not
       // interrupt in-flight turns.
@@ -6821,10 +6849,47 @@ const server = createServer(async (req, res) => {
           key !== "features" &&
           key !== "browserProfiles",
       );
-      if (reloadKeys.length > 0) await reloadProviders();
-      const status = configStatus();
-      broadcast({ kind: "config", ...status });
-      return json(res, 200, status);
+      // The cleanup marker becomes committed only after both pieces of durable
+      // application state agree. Commit/ACK failures are deferred until every
+      // mandatory consequence of the config write has run: no journal I/O
+      // failure may leave a two-hour bearer or stale provider fleet active.
+      const finalized = await finalizeBrowserCleanupMutation({
+        requests: browserCleanupRequests,
+        referenceError: browserReferenceCleanupError,
+        commit: (request) => browserCleanup.commit(request),
+        ensure: (request) => browserCleanup.ensure(request),
+        mandatory: async () => {
+          let mandatoryError: unknown = null;
+          if (disablingBuiltInBrowser) {
+            try {
+              await releaseAllBrowserCapabilities();
+            } catch (error) {
+              mandatoryError = error;
+            }
+          }
+          if (reloadKeys.length > 0) {
+            try {
+              await reloadProviders();
+            } catch (error) {
+              if (!mandatoryError) mandatoryError = error;
+            }
+          }
+          const status = configStatus();
+          broadcast({ kind: "config", ...status });
+          if (mandatoryError) throw mandatoryError;
+          return status;
+        },
+      });
+      // Normal desktop deletes wait for Electron's acknowledgement. If
+      // Electron is restarting, the committed journal keeps retrying and the
+      // id-reuse guard above prevents stale logins from resurfacing. Delaying
+      // this assertion until after every mandatory post-commit effect keeps
+      // the runtime aligned with the config even on a truthful 503 response.
+      requireBrowserCleanupAcknowledged(
+        finalized.acknowledgements.every(Boolean),
+        removedBrowserProfileIds.length === 1 ? "The browser profile" : "The browser profiles",
+      );
+      return json(res, 200, finalized.value);
       } finally {
         if (changingLocalVmMode) localVmModeChangeBusy = false;
         providerConfigBusy = false;

@@ -77,47 +77,118 @@ const browserProfileSchema = z.object({
 const legacyBrowserProfileSchema = z.object({
   id: z.string().regex(LEGACY_BROWSER_PROFILE_ID).refine((id) => id !== "guest", "guest is reserved"),
   name: z.string().trim().min(1).max(40),
+  /** Exact #567 Electron partition identity. This is persisted only by the
+   * migration boundary; config PATCH callers cannot choose or redirect it. */
+  partitionId: z.string().regex(LEGACY_BROWSER_PROFILE_ID).refine((id) => id !== "guest", "guest is reserved").optional(),
 }).strict();
 
 interface StoredBrowserProfileMigration {
-  profiles: Array<z.output<typeof browserProfileSchema>>;
+  profiles: BrowserProfile[];
   /** Exact legacy id to its first canonical entry. Duplicate legacy ids are
    * inherently ambiguous, so bots deterministically retain the first one. */
   aliases: ReadonlyMap<string, string>;
 }
 
+function suffixedBrowserProfileId(base: string, unavailable: ReadonlySet<string>): string {
+  for (let suffix = 2; ; suffix += 1) {
+    const ending = `-${suffix}`;
+    const candidate = `${base.slice(0, 40 - ending.length)}${ending}`;
+    if (candidate !== "guest" && !unavailable.has(candidate)) return candidate;
+  }
+}
+
 function migrateStoredBrowserProfiles(
   profiles: Array<z.output<typeof legacyBrowserProfileSchema>>,
 ): StoredBrowserProfileMigration {
-  const canonicalBases = new Set(profiles.map((profile) => profile.id.toLowerCase()));
-  const used = new Set<string>();
-  const firstIdByBase = new Map<string, string>();
-  const aliases = new Map<string, string>();
+  const requestedPartitions = profiles.map((profile) => profile.partitionId ?? profile.id);
+  const rawBases = profiles.map((profile) => profile.id.toLowerCase());
 
-  const canonical = profiles.map((profile) => {
-    const base = profile.id.toLowerCase();
-    let id = base;
-    if (id === "guest" || used.has(id)) {
-      for (let suffix = 2; ; suffix += 1) {
-        const ending = `-${suffix}`;
-        const candidate = `${base.slice(0, 40 - ending.length)}${ending}`;
-        // Keep an explicit legacy id (for example "work-2") available for
-        // its own entry instead of letting an earlier duplicate consume it.
-        if (candidate !== "guest" && !used.has(candidate) && !canonicalBases.has(candidate)) {
-          id = candidate;
-          break;
-        }
-      }
+  // Canonical logical ids must be stable even if bots.json is migrated before
+  // config.json is rewritten. Give an exact lowercase spelling first claim on
+  // its id, then the first case variant. Generated ids avoid every legacy base
+  // and partition spelling, so applying the same legacy alias map again cannot
+  // reinterpret a previously migrated bot reference.
+  const canonicalIds: Array<string | undefined> = Array(profiles.length).fill(undefined);
+  const used = new Set<string>();
+  const baseOwner = new Map<string, number>();
+  rawBases.forEach((base, index) => {
+    if (base === "guest") return;
+    const current = baseOwner.get(base);
+    if (current === undefined || (profiles[index]!.id === base && profiles[current]!.id !== base)) {
+      baseOwner.set(base, index);
     }
+  });
+  for (const [base, index] of baseOwner) {
+    canonicalIds[index] = base;
+    used.add(base);
+  }
+  const reserved = new Set([
+    "guest",
+    ...rawBases,
+    ...requestedPartitions.map((partitionId) => partitionId.toLowerCase()),
+  ]);
+  rawBases.forEach((base, index) => {
+    if (canonicalIds[index] !== undefined) return;
+    const id = suffixedBrowserProfileId(base, new Set([...reserved, ...used]));
+    canonicalIds[index] = id;
     used.add(id);
-    const firstId = firstIdByBase.get(base) ?? id;
-    firstIdByBase.set(base, firstId);
-    // Case variants and exact duplicates named the same durable partition on
-    // case-insensitive hosts. Their saved bot references are ambiguous, so
-    // every spelling resolves to the first entry deterministically. This is
-    // also idempotent if bots.json is migrated before config.json is written.
-    aliases.set(profile.id, firstId);
-    return { ...profile, id };
+  });
+
+  // Chromium partition directories collide by case on Windows and default
+  // macOS volumes. Pick one safe owner for every case-folded identity. Prefer
+  // the profile whose canonical id matches that partition; every loser gets a
+  // new partition named after its collision-safe logical id.
+  const partitionWinner = new Map<string, number>();
+  requestedPartitions.forEach((partitionId, index) => {
+    const folded = partitionId.toLowerCase();
+    const current = partitionWinner.get(folded);
+    if (current === undefined) {
+      partitionWinner.set(folded, index);
+      return;
+    }
+    const score = (candidate: number) => canonicalIds[candidate] === folded ? 1 : 0;
+    if (score(index) > score(current)) partitionWinner.set(folded, index);
+  });
+
+  let effectivePartitions = requestedPartitions.map((partitionId, index) =>
+    partitionWinner.get(partitionId.toLowerCase()) === index ? partitionId : canonicalIds[index]!,
+  );
+
+  // An earlier implementation could produce a cycle such as
+  // `foo-2 -> partition foo-2-2` and `foo-2-2 -> partition FOO-2`. The
+  // partitions are distinct today, but deleting and re-adding either id would
+  // join the other account. Move the *logical id owner* to a fresh id while
+  // retaining both exact durable partitions. Fresh ids avoid every raw id, so
+  // the old->new bot aliases below remain fixed points across repeated starts.
+  const conflictingIdOwners = new Set<number>();
+  canonicalIds.forEach((id, owner) => {
+    effectivePartitions.forEach((partitionId, partitionOwner) => {
+      if (partitionOwner !== owner && partitionId.toLowerCase() === id) conflictingIdOwners.add(owner);
+    });
+  });
+  const unavailable = new Set([...reserved, ...used]);
+  for (const owner of conflictingIdOwners) {
+    const id = suffixedBrowserProfileId(rawBases[owner]!, unavailable);
+    canonicalIds[owner] = id;
+    unavailable.add(id);
+  }
+  if (conflictingIdOwners.size > 0) {
+    effectivePartitions = requestedPartitions.map((partitionId, index) =>
+      partitionWinner.get(partitionId.toLowerCase()) === index ? partitionId : canonicalIds[index]!,
+    );
+  }
+
+  const aliases = new Map<string, string>();
+  const canonical: BrowserProfile[] = profiles.map((profile, index) => {
+    const id = canonicalIds[index]!;
+    const partitionId = effectivePartitions[index]!;
+    const migrated: BrowserProfile = { id, name: profile.name };
+    if (partitionId !== id) migrated.partitionId = partitionId;
+    // Exact duplicates are inherently ambiguous. Preserve the first mapping;
+    // later duplicate records get isolated ids but existing bot references
+    // cannot be distinguished from the first record.
+    if (!aliases.has(profile.id)) aliases.set(profile.id, id);
+    return migrated;
   });
   return { profiles: canonical, aliases };
 }
@@ -213,8 +284,81 @@ export interface AppConfig {
   browserProfiles?: BrowserProfile[];
   instances?: InstanceConfigMap;
 }
-export type BrowserProfile = z.output<typeof browserProfileSchema>;
+export type BrowserProfile = z.output<typeof browserProfileSchema> & {
+  /** Exact durable Electron partition inherited from #567. Internal and
+   * immutable; omit from PATCH/config UI payloads. Absent means `id`. */
+  partitionId?: string;
+};
 export type ConfigPatch = z.output<typeof appConfigPatchSchema>;
+
+/** Resolve a canonical profile record to its exact durable Electron
+ * partition identity. Callers must never substitute the display/API id. */
+export function browserProfilePartitionId(profile: BrowserProfile): string {
+  return profile.partitionId ?? profile.id;
+}
+
+/** Every durable partition must have one owner, and no other profile may use
+ * that partition's folded name as its logical id. Otherwise deleting and
+ * re-adding the logical id can silently attach a bot to the retained account. */
+export function browserProfileRoutingConflict(
+  profiles: readonly BrowserProfile[],
+): string | null {
+  const logicalOwner = new Map(profiles.map((profile, index) => [profile.id.toLowerCase(), index]));
+  const partitionOwner = new Map<string, number>();
+  for (const [index, profile] of profiles.entries()) {
+    const partitionId = browserProfilePartitionId(profile);
+    const foldedPartition = partitionId.toLowerCase();
+    const existingPartitionOwner = partitionOwner.get(foldedPartition);
+    if (existingPartitionOwner !== undefined && existingPartitionOwner !== index) {
+      return `browser profiles cannot share the durable session “${partitionId}”`;
+    }
+    partitionOwner.set(foldedPartition, index);
+    const otherLogicalOwner = logicalOwner.get(foldedPartition);
+    if (otherLogicalOwner !== undefined && otherLogicalOwner !== index) {
+      return `browser profile id “${profiles[otherLogicalOwner]!.id}” is already used by another durable session`;
+    }
+  }
+  return null;
+}
+
+/** A list replacement cannot recycle a removed partition in the same write.
+ * Electron erases that partition only after commit, so allowing a new profile
+ * to claim its case-folded name would race new activity against the wipe. */
+export function browserProfileReplacementConflict(
+  currentProfiles: readonly BrowserProfile[],
+  nextProfiles: readonly BrowserProfile[],
+): string | null {
+  const routingConflict = browserProfileRoutingConflict(nextProfiles);
+  if (routingConflict) return routingConflict;
+  const currentIds = new Set(currentProfiles.map((profile) => profile.id));
+  const nextIds = new Set(nextProfiles.map((profile) => profile.id));
+  const removedPartitions = new Set(
+    currentProfiles
+      .filter((profile) => !nextIds.has(profile.id))
+      .map((profile) => browserProfilePartitionId(profile).toLowerCase()),
+  );
+  const reused = nextProfiles.find((profile) =>
+    !currentIds.has(profile.id)
+    && removedPartitions.has(browserProfilePartitionId(profile).toLowerCase()));
+  return reused
+    ? `browser profile “${reused.name}” cannot reuse a session that is being erased; delete it first, then add the new profile`
+    : null;
+}
+
+export interface BrowserProfilePartitionTarget {
+  /** Canonical application identity: bot references and reuse locks use it. */
+  profileId: string;
+  /** Exact Electron storage identity: view routing and cleanup use it. */
+  partitionId: string;
+}
+
+export function browserProfilePartitionTarget(
+  config: Pick<AppConfig, "browserProfiles">,
+  profileId: string,
+): BrowserProfilePartitionTarget | null {
+  const profile = config.browserProfiles?.find((candidate) => candidate.id === profileId);
+  return profile ? { profileId: profile.id, partitionId: browserProfilePartitionId(profile) } : null;
+}
 
 export function parseStoredConfig(value: JsonValue): AppConfig {
   const parsed = storedAppConfigSchema.safeParse(value);
@@ -438,7 +582,24 @@ export function saveConfig(patch: Partial<AppConfig>): void {
   if (checkedPatch.vps !== undefined) disk.vps = normalizeVpsConfig(checkedPatch.vps);
   // the whole list is the unit of change: an add or a delete arrives as the
   // new list, never as a per-item merge
-  if (checkedPatch.browserProfiles !== undefined) disk.browserProfiles = checkedPatch.browserProfiles;
+  if (checkedPatch.browserProfiles !== undefined) {
+    // `partitionId` is read-only migration metadata. A rename/list replace
+    // from the renderer omits it, so carry it forward only for an unchanged
+    // canonical id. A genuinely new id always gets its own fresh partition.
+    const existingProfiles = new Map(
+      (storedProfiles.success ? storedProfiles.data : []).map((profile) => [profile.id, profile]),
+    );
+    const nextProfiles: BrowserProfile[] = checkedPatch.browserProfiles.map((profile) => {
+      const partitionId = existingProfiles.get(profile.id)?.partitionId;
+      return partitionId ? { ...profile, partitionId } : profile;
+    });
+    const routingConflict = browserProfileReplacementConflict(
+      storedProfiles.success ? storedProfiles.data : [],
+      nextProfiles,
+    );
+    if (routingConflict) throw Object.assign(new Error(routingConflict), { status: 409 });
+    disk.browserProfiles = nextProfiles;
+  }
   if (checkedPatch.instances) {
     const currentInstances = jsonObjectSchema.safeParse(disk.instances);
     const diskInstances: JsonObject = currentInstances.success ? currentInstances.data : {};

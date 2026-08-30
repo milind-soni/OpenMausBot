@@ -116,6 +116,10 @@ describe("browser loopback host", () => {
     expect(pins).toContainEqual(["bot-a", "work", false]);
     expect((await request(host, "state", { token: scoped })).response.status).toBe(401);
 
+    const migrated = await register(host, "bot-a", "Work");
+    expect((await request(host, "state", { token: migrated, profile: "Work" })).response.status).toBe(200);
+    expect(pins).toContainEqual(["bot-a", "Work", true]);
+
     const expiring = "d".repeat(64);
     expect((await manage(host, "register", {
       token: expiring,

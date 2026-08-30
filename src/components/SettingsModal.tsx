@@ -18,7 +18,10 @@ import { SkinPicker } from "./SkinPicker";
 import { RoomTurnTimeoutSettings } from "./RoomTurnTimeoutSettings";
 import { TranscriptionSettings } from "./TranscriptionSettings";
 import { cn } from "@/lib/cn";
-import { browserProfileDeletionBlockReason } from "@/lib/browser-profiles";
+import {
+  browserProfileDeletionBlockReason,
+  browserProfilesForPatch,
+} from "@/lib/browser-profiles";
 
 const SECTIONS: Array<{
   id: AppSettingsSection;
@@ -198,6 +201,7 @@ function ExperimentalFeaturesRow() {
   const skillRecorder = skillRecorderEnabled(state.config);
   const browser = builtInBrowserEnabled(state.config);
   const desktopBrowser = Boolean(window.ogb?.browser);
+  const browserBlockedOnWindows = window.ogb?.platform === "win32" && !desktopBrowser;
   const [saving, setSaving] = useState<"skillRecorder" | "browser" | null>(null);
   const [error, setError] = useState("");
 
@@ -249,7 +253,9 @@ function ExperimentalFeaturesRow() {
               ? browser
                 ? "Enabled for this workspace. Each bot also has its own browser switch."
                 : "Off by default. Enable it to let supported bots use a browser tab you can watch and take over."
-              : "Needs the OpenMausBot desktop app."}
+              : browserBlockedOnWindows
+                ? "Temporarily unavailable on Windows while Electron's production sandbox support is being verified."
+                : "Needs the OpenMausBot desktop app."}
           </div>
         </div>
         <button
@@ -276,11 +282,18 @@ function BrowserProfilesRow() {
   const [busy, setBusy] = useState<string | null>(null);
   const [renaming, setRenaming] = useState<{ id: string; name: string } | null>(null);
   const [error, setError] = useState("");
-  if (!builtInBrowserEnabled(state.config) || !window.ogb?.browser) return null;
+  // Windows temporarily gates the live browser surface, but upgraded users
+  // must still be able to rename or permanently erase existing sessions.
+  // The packaged server can perform that private lifecycle cleanup without
+  // exposing the browser renderer bridge.
+  if (!window.ogb || (!builtInBrowserEnabled(state.config) && profiles.length === 0)) return null;
 
   const save = async (next: typeof profiles) => {
     try {
-      const config: ConfigStatus = await api("/api/config", { method: "PATCH", body: JSON.stringify({ browserProfiles: next }) });
+      const config: ConfigStatus = await api("/api/config", {
+        method: "PATCH",
+        body: JSON.stringify({ browserProfiles: browserProfilesForPatch(next) }),
+      });
       dispatch({ type: "configStatus", config });
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : "Could not save browser profiles.");
@@ -314,14 +327,16 @@ function BrowserProfilesRow() {
       // a rejected config save must leave the user's signed-in session intact.
       const config: ConfigStatus = await api("/api/config", {
         method: "PATCH",
-        body: JSON.stringify({ browserProfiles: profiles.filter((candidate) => candidate.id !== id) }),
+        body: JSON.stringify({
+          browserProfiles: browserProfilesForPatch(profiles.filter((candidate) => candidate.id !== id)),
+        }),
       });
       dispatch({ type: "configStatus", config });
       // Packaged Electron receives the same post-commit cleanup privately
       // from the server. Keep this idempotent fallback for split-process
       // desktop development, where the server has no parent message port.
       try {
-        await window.ogb?.browser?.forgetProfile?.(id);
+        await window.ogb?.browser?.forgetProfile?.(profile.partitionId ?? profile.id);
       } catch {
         setError("The profile was removed, but its local browser data could not be erased. Restart OpenMausBot before reusing that profile name.");
       }

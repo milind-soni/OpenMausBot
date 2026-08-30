@@ -2,6 +2,7 @@
 
 process.stdout.write("fixture-entered\n");
 const { once } = require("node:events");
+const { join } = require("node:path");
 const { app, BrowserWindow, WebContentsView } = require("electron");
 const { createBrowserSurfaceManager } = require("../browser-surface.cjs");
 process.stdout.write("fixture-modules-loaded\n");
@@ -39,8 +40,39 @@ async function closeFixture(manager, browserView, owner) {
   }
 }
 
+async function verifySandboxedPreload() {
+  const probe = new BrowserWindow({
+    show: false,
+    webPreferences: {
+      contextIsolation: true,
+      nodeIntegration: false,
+      preload: join(__dirname, "..", "preload.cjs"),
+      sandbox: true,
+    },
+  });
+  try {
+    await probe.loadURL("data:text/html,<title>preload probe</title>");
+    const exposed = await probe.webContents.executeJavaScript(`({
+      ogb: typeof window.ogb,
+      platform: window.ogb?.platform,
+      browser: typeof window.ogb?.browser,
+    })`);
+    const expectedBrowser = process.platform === "win32" ? "undefined" : "object";
+    if (exposed.ogb !== "object" || exposed.platform !== process.platform || exposed.browser !== expectedBrowser) {
+      throw new Error(`sandboxed preload bridge was not exposed correctly: ${JSON.stringify(exposed)}`);
+    }
+    process.stdout.write("sandboxed-preload-bridge-loaded\n");
+  } finally {
+    if (!probe.isDestroyed()) probe.destroy();
+  }
+}
+
 async function run() {
   const owner = new BrowserWindow({ show: false, width: 900, height: 700 });
+  // Keep the fixture's owner alive while the one-shot preload probe closes;
+  // otherwise Electron may treat it as the last window and quit before the
+  // browser-surface assertions start.
+  await verifySandboxedPreload();
   let browserView = null;
   const manager = createBrowserSurfaceManager({
     owner,
@@ -139,7 +171,7 @@ async function run() {
     if (nestedProtectedValues.some(value => JSON.stringify(safeClosedSnapshot).includes(value))) {
       throw new Error("nested protected accessible-name contributor leaked after values were cleared");
     }
-    process.stdout.write("nested-name-source-redacted\n");
+    process.stdout.write("closed-shadow-nested-name-source-redacted\n");
 
     // A hostile page can transform a human-entered password into sibling
     // text/title and clear the input before a postflight DOM scan. Native
@@ -170,6 +202,46 @@ async function run() {
       throw new Error("transformed human input escaped the document taint boundary");
     }
     process.stdout.write("transformed-secret-taint\n");
+
+    // Exercise the injected Playwright snapshot on an ordinary open-DOM page.
+    // The closed-shadow document above deliberately takes the conservative AX
+    // fallback, so it cannot prove that nested accessible-name contributors
+    // are redacted by the rich snapshot implementation itself.
+    const richSnapshotHtml = `<!doctype html><html><body>
+      <label id="credential-label" for="credential">
+        API key
+        <span id="nested-name-source" role="button" tabindex="0"></span>
+      </label>
+      <input id="credential" type="password" value="">
+      <button id="ordinary-action">Ordinary action</button>
+      <script>
+        const nestedNameSource = document.getElementById("nested-name-source");
+        nestedNameSource.setAttribute("aria-label", ["sk_rich_nested_", "name_source_private"].join(""));
+        nestedNameSource.textContent = ["rich nested contributor ", "text private"].join("");
+      </script>
+    </body></html>`;
+    await browserView.webContents.loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(richSnapshotHtml)}`);
+    const richSnapshot = await manager.snapshot("fixture-bot", "");
+    if (Object.prototype.toString.call(richSnapshot.yaml) !== "[object String]" || !/\[ref=e\d+\]/.test(richSnapshot.yaml)) {
+      throw new Error("open-DOM fixture did not run the rich injected browser snapshot");
+    }
+    if (richSnapshot.elements.length !== 0 || /\[ref=b\d+\]/.test(richSnapshot.yaml)) {
+      throw new Error("open-DOM fixture unexpectedly used the conservative AX fallback");
+    }
+    if (!/button "protected field label" \[ref=e\d+\]/.test(richSnapshot.yaml)) {
+      throw new Error("rich snapshot did not retain the nested name contributor in redacted form");
+    }
+    if (!/button "Ordinary action" \[ref=e\d+\]/.test(richSnapshot.yaml)) {
+      throw new Error("rich snapshot did not expose an ordinary open-DOM action");
+    }
+    const richProtectedValues = [
+      "sk_rich_nested_name_source_private",
+      "rich nested contributor text private",
+    ];
+    if (richProtectedValues.some(value => JSON.stringify(richSnapshot).includes(value))) {
+      throw new Error("nested protected accessible-name contributor leaked through the rich snapshot");
+    }
+    process.stdout.write("rich-nested-name-source-redacted\n");
 
     const actionHtml = `<!doctype html><html><body>
       <button id="reviewed" style="position:fixed;left:40px;top:40px;width:180px;height:60px">Publish draft</button>

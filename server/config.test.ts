@@ -7,6 +7,7 @@ import {
   DATA_DIR,
   instanceConfigs,
   isValidSshAlias,
+  loadBrowserProfileIdAliases,
   loadConfig,
   localVmMaxInstances,
   localVmMode,
@@ -17,6 +18,10 @@ import {
   saveConfig,
   skillRecorderEnabled,
   builtInBrowserEnabled,
+  browserProfilePartitionId,
+  browserProfilePartitionTarget,
+  browserProfileReplacementConflict,
+  browserProfileRoutingConflict,
   stripWorkspaceCredentialEnv,
   syncCredentialEnv,
   vpsSshAlias,
@@ -63,11 +68,203 @@ describe("configuration boundaries", () => {
       rooms: { turnTimeoutMinutes: 20 },
       features: { browser: true },
       browserProfiles: [
-        { id: "work", name: "Work" },
+        { id: "work", name: "Work", partitionId: "Work" },
         { id: "work-2", name: "Second workspace" },
       ],
       instances: { claude: { driver: "claudeAgent", config: { cli: "/opt/claude" } } },
     });
+  });
+
+  it("preserves an unambiguous uppercase profile's exact durable partition", () => {
+    const config = parseStoredConfig({
+      browserProfiles: [{ id: "ClientA", name: "Client A" }],
+    });
+    expect(config.browserProfiles).toEqual([
+      { id: "clienta", name: "Client A", partitionId: "ClientA" },
+    ]);
+    expect(browserProfilePartitionId(config.browserProfiles![0]!)).toBe("ClientA");
+    expect(browserProfilePartitionTarget(config, "clienta")).toEqual({
+      profileId: "clienta",
+      partitionId: "ClientA",
+    });
+  });
+
+  it("isolates case-colliding legacy profiles instead of sharing an account", () => {
+    const config = parseStoredConfig({
+      browserProfiles: [
+        { id: "Work", name: "Uppercase" },
+        { id: "work", name: "Canonical" },
+      ],
+    });
+    expect(config.browserProfiles).toEqual([
+      { id: "work-2", name: "Uppercase" },
+      { id: "work", name: "Canonical" },
+    ]);
+    const partitions = config.browserProfiles!.map(browserProfilePartitionId);
+    expect(new Set(partitions.map((id) => id.toLowerCase())).size).toBe(partitions.length);
+  });
+
+  it("reserves explicit suffix ids while isolating a case collision", () => {
+    const config = parseStoredConfig({
+      browserProfiles: [
+        { id: "Work", name: "Uppercase" },
+        { id: "work", name: "Canonical" },
+        { id: "work-2", name: "Explicit suffix" },
+      ],
+    });
+    expect(config.browserProfiles).toEqual([
+      { id: "work-3", name: "Uppercase" },
+      { id: "work", name: "Canonical" },
+      { id: "work-2", name: "Explicit suffix" },
+    ]);
+    const partitions = config.browserProfiles!.map(browserProfilePartitionId);
+    expect(new Set(partitions.map((id) => id.toLowerCase())).size).toBe(3);
+  });
+
+  it("round-trips migrated partition aliases idempotently", () => {
+    const once = parseStoredConfig({
+      browserProfiles: [
+        { id: "ClientA", name: "Client A" },
+        { id: "Personal", name: "Personal" },
+      ],
+    });
+    expect(parseStoredConfig(JSON.parse(JSON.stringify(once)))).toEqual(once);
+  });
+
+  it("keeps explicit suffix partitions owned by their own canonical profile", () => {
+    const once = parseStoredConfig({
+      browserProfiles: [
+        { id: "Foo", name: "Case collision" },
+        { id: "FOO-2", name: "Explicit suffix" },
+        { id: "foo", name: "Canonical" },
+      ],
+    });
+    expect(once.browserProfiles).toEqual([
+      { id: "foo-3", name: "Case collision" },
+      { id: "foo-2", name: "Explicit suffix", partitionId: "FOO-2" },
+      { id: "foo", name: "Canonical" },
+    ]);
+    const profiles = once.browserProfiles!;
+    for (const [index, profile] of profiles.entries()) {
+      const partition = browserProfilePartitionId(profile).toLowerCase();
+      expect(
+        profiles.some((candidate, candidateIndex) => candidateIndex !== index && candidate.id === partition),
+      ).toBe(false);
+    }
+    expect(parseStoredConfig(JSON.parse(JSON.stringify(once)))).toEqual(once);
+  });
+
+  it("keeps legacy Guest isolated from an explicit Guest-2 profile", () => {
+    const once = parseStoredConfig({
+      browserProfiles: [
+        { id: "Guest", name: "Legacy guest account" },
+        { id: "Guest-2", name: "Explicit guest suffix" },
+      ],
+    });
+    expect(once.browserProfiles).toEqual([
+      { id: "guest-3", name: "Legacy guest account", partitionId: "Guest" },
+      { id: "guest-2", name: "Explicit guest suffix", partitionId: "Guest-2" },
+    ]);
+    expect(parseStoredConfig(JSON.parse(JSON.stringify(once)))).toEqual(once);
+  });
+
+  it("repairs a prior cross-mapped partition without moving either exact legacy account", () => {
+    const path = join(DATA_DIR, "config.json");
+    mkdirSync(DATA_DIR, { recursive: true });
+    writeFileSync(path, JSON.stringify({
+      browserProfiles: [
+        { id: "foo-2", name: "First", partitionId: "foo-2-2" },
+        { id: "foo-2-2", name: "Second", partitionId: "FOO-2" },
+        { id: "foo", name: "Canonical" },
+      ],
+    }));
+    try {
+      const once = loadConfig();
+      expect(once.browserProfiles).toEqual([
+        { id: "foo-2-3", name: "First", partitionId: "foo-2-2" },
+        { id: "foo-2-2-2", name: "Second", partitionId: "FOO-2" },
+        { id: "foo", name: "Canonical" },
+      ]);
+      const aliases = loadBrowserProfileIdAliases();
+      const first = browserProfilePartitionTarget(once, aliases.get("foo-2")!);
+      const second = browserProfilePartitionTarget(once, aliases.get("foo-2-2")!);
+      expect(first).toEqual({ profileId: "foo-2-3", partitionId: "foo-2-2" });
+      expect(second).toEqual({ profileId: "foo-2-2-2", partitionId: "FOO-2" });
+      // config.json may not have been rewritten when bots.json is. A second
+      // hydration of the same raw config must leave migrated references fixed
+      // instead of toggling them through the old cross-map again.
+      expect(aliases.get(first!.profileId) ?? first!.profileId).toBe(first!.profileId);
+      expect(aliases.get(second!.profileId) ?? second!.profileId).toBe(second!.profileId);
+      expect(parseStoredConfig(JSON.parse(JSON.stringify(once)))).toEqual(once);
+    } finally {
+      rmSync(path, { force: true });
+    }
+  });
+
+  it("keeps chained partition aliases fixed across repeated raw-config hydration", () => {
+    const path = join(DATA_DIR, "config.json");
+    mkdirSync(DATA_DIR, { recursive: true });
+    writeFileSync(path, JSON.stringify({
+      browserProfiles: [
+        { id: "foo", name: "First", partitionId: "Bar" },
+        { id: "bar", name: "Second", partitionId: "Baz" },
+      ],
+    }));
+    try {
+      const once = loadConfig();
+      expect(once.browserProfiles).toEqual([
+        { id: "foo", name: "First", partitionId: "Bar" },
+        { id: "bar-2", name: "Second", partitionId: "Baz" },
+      ]);
+      const aliases = loadBrowserProfileIdAliases();
+      const hydrate = (id: string) => aliases.get(id) ?? id;
+      expect(hydrate("foo")).toBe("foo");
+      expect(hydrate(hydrate("foo"))).toBe("foo");
+      expect(hydrate("bar")).toBe("bar-2");
+      expect(hydrate(hydrate("bar"))).toBe("bar-2");
+
+      const first = browserProfilePartitionTarget(once, hydrate("foo"));
+      const second = browserProfilePartitionTarget(once, hydrate("bar"));
+      expect(first).toEqual({ profileId: "foo", partitionId: "Bar" });
+      expect(second).toEqual({ profileId: "bar-2", partitionId: "Baz" });
+      expect(parseStoredConfig(JSON.parse(JSON.stringify(once)))).toEqual(once);
+    } finally {
+      rmSync(path, { force: true });
+    }
+  });
+
+  it("blocks a new logical id from claiming another profile's retained partition", () => {
+    const profiles = [
+      { id: "client-repaired", name: "Existing", partitionId: "Client" },
+      { id: "client", name: "New account" },
+    ];
+    expect(browserProfileRoutingConflict(profiles)).toMatch(/already used by another durable session/i);
+  });
+
+  it("blocks same-write reuse of a legacy partition that is being erased", () => {
+    expect(browserProfileReplacementConflict(
+      [{ id: "legacy-client", name: "Legacy", partitionId: "Client" }],
+      [{ id: "client", name: "New account" }],
+    )).toMatch(/delete it first, then add/i);
+  });
+
+  it("truncates 40-character collision suffixes without stealing an explicit id", () => {
+    const base = "a".repeat(40);
+    const explicitSuffix = `${"a".repeat(38)}-2`;
+    const once = parseStoredConfig({
+      browserProfiles: [
+        { id: base.toUpperCase(), name: "Case collision" },
+        { id: explicitSuffix.toUpperCase(), name: "Explicit suffix" },
+        { id: base, name: "Canonical" },
+      ],
+    });
+    expect(once.browserProfiles).toEqual([
+      { id: `${"a".repeat(38)}-3`, name: "Case collision" },
+      { id: explicitSuffix, name: "Explicit suffix", partitionId: explicitSuffix.toUpperCase() },
+      { id: base, name: "Canonical" },
+    ]);
+    expect(once.browserProfiles!.every((profile) => profile.id.length <= 40)).toBe(true);
+    expect(parseStoredConfig(JSON.parse(JSON.stringify(once)))).toEqual(once);
   });
 
   it("accepts only a simple VPS SSH config alias and exposes no credentials", () => {
@@ -126,6 +323,9 @@ describe("configuration boundaries", () => {
     });
     expect(() => parseConfigPatch({ browserProfiles: [{ id: "../evil", name: "x" }] })).toThrow(/browserProfiles.*id/i);
     expect(() => parseConfigPatch({ browserProfiles: [{ id: "Work", name: "Work" }] })).toThrow(/browserProfiles.*id/i);
+    expect(() => parseConfigPatch({
+      browserProfiles: [{ id: "work", name: "Work", partitionId: "OtherAccount" }],
+    })).toThrow(/browserProfiles/i);
     expect(() => parseConfigPatch({ browserProfiles: [{ id: "ok", name: "" }] })).toThrow(/browserProfiles.*name/i);
     expect(() => parseConfigPatch({
       browserProfiles: [{ id: "work", name: "Work" }, { id: "work", name: "Work again" }],
@@ -427,7 +627,7 @@ describe("credential env preference", () => {
       profile: { name: "Ada" },
       features: { browser: true },
       browserProfiles: [
-        { id: "client", name: "Client one" },
+        { id: "client", name: "Client one", partitionId: "Client" },
         { id: "client-2", name: "Client two" },
       ],
     });
@@ -439,11 +639,23 @@ describe("credential env preference", () => {
       profile: { name: "Ada" },
       features: { browser: true, showToolCalls: true },
       browserProfiles: [
-        { id: "client", name: "Client one" },
+        { id: "client", name: "Client one", partitionId: "Client" },
         { id: "client-2", name: "Client two" },
       ],
       futureSetting: { keep: true },
     });
+
+    // A public list replacement cannot choose an alias, but an unchanged id
+    // keeps the internal durable partition through a rename.
+    saveConfig({ browserProfiles: [
+      { id: "client", name: "Renamed client" },
+      { id: "client-2", name: "Client two" },
+    ] });
+    const renamed = JSON.parse(readFileSync(path, "utf8"));
+    expect(renamed.browserProfiles).toEqual([
+      { id: "client", name: "Renamed client", partitionId: "Client" },
+      { id: "client-2", name: "Client two" },
+    ]);
   });
 
   it("treats a blanked file field as absent when env supplies the secret", () => {

@@ -224,7 +224,7 @@ type SkillRecordingPayload = {
         setHumanControl?(botId: string, held: boolean, profile?: string): Promise<boolean>;
         /** Native page focus/input means the person has taken the wheel. */
         onUserInteraction?(cb: (event: { botId: string }) => void): () => void;
-        forgetProfile?(profileId: string): Promise<{ dropped: number }>;
+        forgetProfile?(partitionId: string): Promise<{ dropped: number }>;
         close(botId: string): Promise<boolean>;
         onState(cb: (state: BrowserSurfaceState) => void): () => void;
       };

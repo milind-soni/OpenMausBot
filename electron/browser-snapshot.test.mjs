@@ -137,10 +137,11 @@ describe("browser snapshot", () => {
     expect(() => browserPartition("../")).toThrow();
   });
 
-  it("maps only exact canonical profile ids to durable partitions", () => {
+  it("maps exact canonical and migrated profile partition ids without normalization", () => {
     expect(browserProfilePartition("work-2")).toBe("persist:openmausbot-browser-profile-work-2");
-    for (const alias of ["Work-2", "work.2", "../work-2", "work-2!", "guest", ""]) {
-      expect(() => browserProfilePartition(alias)).toThrow(/valid lowercase browser profile id/);
+    expect(browserProfilePartition("Work-2")).toBe("persist:openmausbot-browser-profile-Work-2");
+    for (const alias of ["work.2", "../work-2", "work-2!", "guest", ""]) {
+      expect(() => browserProfilePartition(alias)).toThrow(/valid browser profile partition id/);
     }
   });
 

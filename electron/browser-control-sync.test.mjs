@@ -41,8 +41,8 @@ describe("private browser lifecycle sync", () => {
     expect(decodeBrowserLifecycleMessage({
       type: "openmausbot:browser-profile-deleted",
       requestId,
-      profileId: "client_1",
-    })).toEqual({ type: "profile-deleted", requestId, profileId: "client_1" });
+      partitionId: "Client_1",
+    })).toEqual({ type: "profile-deleted", requestId, partitionId: "Client_1" });
   });
 
   it("builds an exact acknowledgement only for a valid request id", () => {
@@ -57,15 +57,19 @@ describe("private browser lifecycle sync", () => {
   it("rejects malformed lifecycle ids and ignores unrelated messages", () => {
     expect(() => decodeBrowserLifecycleMessage({ type: "openmausbot:browser-bot-deleted", botId: "../other" }))
       .toThrow(/bot-deleted/);
-    expect(() => decodeBrowserLifecycleMessage({ type: "openmausbot:browser-profile-deleted", profileId: "Work" }))
+    expect(() => decodeBrowserLifecycleMessage({ type: "openmausbot:browser-profile-deleted", partitionId: "work!" }))
       .toThrow(/profile-deleted/);
-    expect(() => decodeBrowserLifecycleMessage({ type: "openmausbot:browser-profile-deleted", profileId: "guest" }))
+    expect(() => decodeBrowserLifecycleMessage({ type: "openmausbot:browser-profile-deleted", partitionId: "guest" }))
       .toThrow(/profile-deleted/);
     expect(() => decodeBrowserLifecycleMessage({
       type: "openmausbot:browser-profile-deleted",
       requestId: "not-a-request-id",
-      profileId: "work",
+      partitionId: "Work",
     })).toThrow(/request id/);
+    expect(() => decodeBrowserLifecycleMessage({
+      type: "openmausbot:browser-profile-deleted",
+      profileId: "work",
+    })).toThrow(/profile-deleted/);
     expect(decodeBrowserLifecycleMessage({ type: "openmausbot:managed-composio" })).toBeNull();
   });
 });

@@ -40,7 +40,9 @@ const OPERATIONS = new Set([
 ]);
 const BOT_ROUTE = /^\/v1\/bots\/([A-Za-z0-9_-]{1,120})\/([a-z]+)$/;
 const BOT_ID = /^[A-Za-z0-9_-]{1,120}$/;
-const PROFILE_ID = /^[a-z0-9_-]{0,40}$/;
+// Empty = per-bot, "guest" = throwaway, mixed case = an exact read-only
+// partition identity migrated from #567. Never normalize this value.
+const PROFILE_PARTITION_ID = /^[A-Za-z0-9_-]{0,40}$/;
 const CAPABILITY_ROUTE = /^\/v1\/capabilities\/(register|revoke|clear)$/;
 
 function isLoopback(address) {
@@ -231,7 +233,7 @@ function createBrowserHost({ manager, token = randomBytes(32).toString("hex"), n
     const profile = isString(body.profile) ? String(body.profile) : "";
     const requestedExpiry = Number(body.expiresAt);
     const current = now();
-    if (!BOT_ID.test(botId) || !PROFILE_ID.test(profile)) {
+    if (!BOT_ID.test(botId) || !PROFILE_PARTITION_ID.test(profile)) {
       return json(res, 400, { error: "a valid bot and browser profile are required" });
     }
     if (!Number.isSafeInteger(requestedExpiry) || requestedExpiry <= current) {

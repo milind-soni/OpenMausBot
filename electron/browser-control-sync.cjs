@@ -1,7 +1,7 @@
 "use strict";
 
 const BOT_ID = /^[A-Za-z0-9_-]{1,120}$/;
-const PROFILE_ID = /^[a-z0-9_-]{1,40}$/;
+const PROFILE_PARTITION_ID = /^[A-Za-z0-9_-]{1,40}$/;
 const REQUEST_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
 
 function lifecycleRequestId(message) {
@@ -40,12 +40,12 @@ function decodeBrowserLifecycleMessage(message) {
     return lifecycle;
   }
   if (message.type === "openmausbot:browser-profile-deleted") {
-    const profileId = String(message.profileId ?? "");
-    if (!PROFILE_ID.test(profileId) || profileId === "guest") {
+    const partitionId = String(message.partitionId ?? "");
+    if (!PROFILE_PARTITION_ID.test(partitionId) || partitionId === "guest") {
       throw new Error("invalid browser profile-deleted message");
     }
     const requestId = lifecycleRequestId(message);
-    const lifecycle = { type: "profile-deleted", profileId };
+    const lifecycle = { type: "profile-deleted", partitionId };
     if (requestId) lifecycle.requestId = requestId;
     return lifecycle;
   }

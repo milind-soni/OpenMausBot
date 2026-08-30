@@ -1031,13 +1031,16 @@ describe("browser surface manager", () => {
     expect(manager.forgetProfile("")).toBe(0);
   });
 
-  it("refuses lossy profile aliases before they can share deletion storage", () => {
+  it("accepts exact migrated partitions but refuses lossy aliases", () => {
     const { manager, views } = harness();
     manager.layout("bot-a", BOUNDS, "work", "compact");
-    for (const alias of ["Work", "work!", "../work"]) {
-      expect(() => manager.layout("bot-b", BOUNDS, alias, "compact")).toThrow(/valid lowercase browser profile id/);
-      expect(() => manager.setCapabilityActive("bot-b", alias, true)).toThrow(/valid lowercase browser profile id/);
-      expect(() => manager.forgetProfile(alias)).toThrow(/valid lowercase browser profile id/);
+    manager.layout("bot-b", BOUNDS, "Work", "compact");
+    expect(manager.size()).toBe(2);
+    expect(manager.forgetProfile("Work")).toBe(1);
+    for (const alias of ["work!", "../work"]) {
+      expect(() => manager.layout("bot-b", BOUNDS, alias, "compact")).toThrow(/valid browser profile partition id/);
+      expect(() => manager.setCapabilityActive("bot-b", alias, true)).toThrow(/valid browser profile partition id/);
+      expect(() => manager.forgetProfile(alias)).toThrow(/valid browser profile partition id/);
     }
     expect(manager.size()).toBe(1);
     expect(manager.forgetProfile("work")).toBe(1);

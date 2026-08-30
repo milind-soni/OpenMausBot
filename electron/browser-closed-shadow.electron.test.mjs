@@ -231,9 +231,11 @@ it.runIf(canRunRealElectronFixture)("protects closed-shadow values and revalidat
     `Windows sandbox ACLs:\n${sandboxAclDiagnostics}`,
   ].join("\n");
   expect(result, diagnostics).toMatchObject({ code: 0, signal: null });
+  expect(result.stdout).toContain("sandboxed-preload-bridge-loaded");
   expect(result.stdout).toContain("closed-shadow-screenshot-refused");
-  expect(result.stdout).toContain("nested-name-source-redacted");
+  expect(result.stdout).toContain("closed-shadow-nested-name-source-redacted");
   expect(result.stdout).toContain("transformed-secret-taint");
+  expect(result.stdout).toContain("rich-nested-name-source-redacted");
   expect(result.stdout).toContain("protected-focused-keys-refused");
   expect(result.stdout).toContain("late-overlay-click-refused");
   expect(result.stdout).toContain("relabelled-ref-refused");

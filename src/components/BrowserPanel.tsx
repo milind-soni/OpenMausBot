@@ -10,13 +10,16 @@ import { usePageVisible } from "@/lib/page-visible";
 import { cn } from "@/lib/cn";
 import { transitionBrowserControlLease } from "@/lib/computer-control";
 import { useStore, type Bot, type BotAnnouncement, type BrowserProfile } from "@/state/store";
+import { browserProfilePartitionId, browserProfilesForPatch } from "@/lib/browser-profiles";
 
 type ControlSnapshot = { held: boolean; helpReason: string | null };
 
 const NATIVE_VIEW_OVERLAY_SELECTOR = '[aria-modal="true"], [role="dialog"], [role="menu"], [popover], [data-native-view-overlay]';
 const OWN_PROFILE = "";
 const GUEST_PROFILE = "guest";
-const NEW_PROFILE = "__new__";
+// Deliberately outside the server's profile-id alphabet so no legacy or API
+// profile can collide with this select-only action.
+const NEW_PROFILE = ":new-profile";
 
 async function api(path: string, init?: RequestInit): Promise<any> {
   const res = await fetch(path, { headers: { "content-type": "application/json" }, ...init });
@@ -72,7 +75,9 @@ function mutationAffectsOverlay(record: MutationRecord): boolean {
 export function profileIdFor(name: string, taken: BrowserProfile[]): string {
   const base = name.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 32) || "profile";
   let candidate = base;
-  for (let n = 2; taken.some((profile) => profile.id === candidate); n += 1) candidate = `${base}-${n}`;
+  for (let n = 2; candidate === GUEST_PROFILE || taken.some((profile) => profile.id === candidate); n += 1) {
+    candidate = `${base}-${n}`;
+  }
   return candidate;
 }
 
@@ -139,6 +144,9 @@ export function BrowserPanel({
       : bot.browserProfile && profiles.some((profile) => profile.id === bot.browserProfile)
         ? bot.browserProfile
         : OWN_PROFILE;
+  const activePartition = activeProfile === OWN_PROFILE || activeProfile === GUEST_PROFILE
+    ? activeProfile
+    : browserProfilePartitionId(profiles, activeProfile);
 
   // Layout: tell main where the tab's rectangle is, on every change that can
   // move it (resize, scroll, sidebar toggles, dialogs). Coalesced per frame.
@@ -152,7 +160,7 @@ export function BrowserPanel({
       const bounds = elementBounds(hostRef.current);
       const target = bounds && pageVisible && !overlayIntersects(bounds) ? bounds : null;
       bridge
-        .layout(botId, target, activeProfile, size)
+        .layout(botId, target, activePartition, size)
         .then((next) => {
           if (alive) setSurface(next);
         })
@@ -194,7 +202,7 @@ export function BrowserPanel({
       // but nothing may paint over the chat.
       void bridge.layout(botId, null).catch(() => {});
     };
-  }, [bridge, botId, pageVisible, activeProfile, size]);
+  }, [bridge, botId, pageVisible, activePartition, size]);
 
   useEffect(() => {
     if (!bridge) return;
@@ -215,7 +223,7 @@ export function BrowserPanel({
       if (action === "take") {
         if (control.held) {
           try {
-            const applied = await bridge?.setHumanControl?.(botId, true, activeProfile) === true;
+            const applied = await bridge?.setHumanControl?.(botId, true, activePartition) === true;
             if (!applied) setError("The browser tab is not ready for takeover yet.");
             return applied;
           } catch (cause) {
@@ -229,7 +237,7 @@ export function BrowserPanel({
       const setLocalControl = async (held: boolean): Promise<boolean> => {
         try {
           if (!bridge?.setHumanControl) throw new Error("Update OpenMausBot before using browser takeover.");
-          const applied = await bridge.setHumanControl(botId, held, activeProfile);
+          const applied = await bridge.setHumanControl(botId, held, activePartition);
           if (!applied) throw new Error("The browser tab is not ready for takeover yet.");
           return true;
         } catch (cause) {
@@ -257,7 +265,7 @@ export function BrowserPanel({
       if (action === "take") nativeTakePending.current = false;
       return false;
     },
-    [activeProfile, botId, bridge, control.held, controlPending, onControl],
+    [activePartition, botId, bridge, control.held, controlPending, onControl],
   );
 
   useEffect(() => {
@@ -288,19 +296,19 @@ export function BrowserPanel({
       setBusy(true);
       setError(null);
       bridge
-        .navigate(botId, target, activeProfile)
+        .navigate(botId, target, activePartition)
         .then(() => setAddressFocused(false))
         .catch((cause) => setError(cause instanceof Error ? cause.message : String(cause)))
         .finally(() => setBusy(false));
     },
-    [activeProfile, bridge, botId, changeControl],
+    [activePartition, bridge, botId, changeControl],
   );
 
   const back = async () => {
     if (!bridge) return;
     if (!(await changeControl("take"))) return;
     setError(null);
-    await bridge.back(botId, activeProfile).catch((cause) => setError(cause instanceof Error ? cause.message : String(cause)));
+    await bridge.back(botId, activePartition).catch((cause) => setError(cause instanceof Error ? cause.message : String(cause)));
   };
 
   const chooseProfile = async (value: string) => {
@@ -339,7 +347,7 @@ export function BrowserPanel({
       const id = profileIdFor(name, profiles);
       const config = await api("/api/config", {
         method: "PATCH",
-        body: JSON.stringify({ browserProfiles: [...profiles, { id, name }] }),
+        body: JSON.stringify({ browserProfiles: browserProfilesForPatch([...profiles, { id, name }]) }),
       });
       dispatch({ type: "configStatus", config });
       if (botBusyRef.current) {

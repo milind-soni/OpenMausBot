@@ -2,6 +2,11 @@
 // this narrow surface (window.ogb), never Node or ipcRenderer itself.
 const { contextBridge, ipcRenderer, webUtils } = require("electron");
 
+// Sandboxed preloads receive Electron's restricted `require`, which cannot
+// load sibling CommonJS files. Keep this tiny predicate inline here; main's
+// privileged process uses the shared browser-platform helper.
+const browserSurfaceSupported = process.platform === "darwin" || process.platform === "linux";
+
 let pendingPackageInstallUrl = null;
 const packageInstallListeners = new Set();
 ipcRenderer.on("package:install", (_event, url) => {
@@ -155,7 +160,7 @@ contextBridge.exposeInMainWorld("ogb", {
   /** The built-in browser: a native page view per bot that the Browser tab
    * positions over its own rectangle. Bots drive it through their tools; the
    * person drives it by clicking into the view. */
-  browser: {
+  browser: browserSurfaceSupported ? {
     available: () => ipcRenderer.invoke("browser:available"),
     state: (botId) => ipcRenderer.invoke("browser:state", botId),
     layout: (botId, bounds, profile, mode) => ipcRenderer.invoke("browser:layout", botId, bounds, profile, mode),
@@ -164,7 +169,7 @@ contextBridge.exposeInMainWorld("ogb", {
     forward: (botId, profile) => ipcRenderer.invoke("browser:forward", botId, profile),
     setHumanControl: (botId, held, profile) => ipcRenderer.invoke("browser:set-human-control", botId, held, profile),
     /** Wipe a named profile's logins, storage and cache after it is deleted. */
-    forgetProfile: (profileId) => ipcRenderer.invoke("browser:forget-profile", profileId),
+    forgetProfile: (partitionId) => ipcRenderer.invoke("browser:forget-profile", partitionId),
     close: (botId) => ipcRenderer.invoke("browser:close", botId),
     onState: (cb) => {
       const handler = (_event, state) => cb(state);
@@ -176,7 +181,7 @@ contextBridge.exposeInMainWorld("ogb", {
       ipcRenderer.on("browser:user-interaction", handler);
       return () => ipcRenderer.removeListener("browser:user-interaction", handler);
     },
-  },
+  } : undefined,
   /** Native folder picker for a bot's working folder; null when cancelled. */
   pickFolder: (current) => ipcRenderer.invoke("desktop:pick-folder", current),
   /** Writes the redacted diagnostics report to a user-chosen file; resolves

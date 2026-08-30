@@ -110,7 +110,8 @@ const desktopConnectionMessageSchema = z.object({
 // `undefined` means no desktop parent ever spoke, so a standalone/dev server
 // may use the descriptor fallback. `null` is an explicit packaged-desktop
 // "unavailable" and must not rediscover a stale on-disk master token.
-let desktopConnection: BrowserConnection | null | undefined;
+const hasDesktopParent = process.env.OMB_DESKTOP_PARENT === "1";
+let desktopConnection: BrowserConnection | null | undefined = hasDesktopParent ? null : undefined;
 
 function loopbackOrigin(value: string): string | null {
   let url: URL;
@@ -216,6 +217,11 @@ export function readBrowserConnection({
 export function availableBrowserConnection(
   options: Parameters<typeof readBrowserConnection>[0] = {},
 ): BrowserConnection | null {
+  // Keep the packaged startup race fail-closed even if module initialization
+  // or a future refactor leaves the state undefined. A utility child may use
+  // only the connection delivered over its private parent port, never a file
+  // path inherited from the shell that launched Electron.
+  if (process.env.OMB_DESKTOP_PARENT === "1" && desktopConnection === undefined) return null;
   return desktopConnection !== undefined ? desktopConnection : readBrowserConnection(options);
 }
 

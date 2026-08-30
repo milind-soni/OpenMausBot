@@ -61,6 +61,8 @@ const { createDesktopWorkspaceManager } = require("./desktop-workspace.cjs");
 const { createBrowserSurfaceManager } = require("./browser-surface.cjs");
 const { browserPartition, browserProfilePartition } = require("./browser-snapshot.cjs");
 const { createBrowserHost } = require("./browser-host.cjs");
+const { browserSurfaceSupported } = require("./browser-platform.cjs");
+const { clearBrowserPartitionSession } = require("./browser-partition-cleanup.cjs");
 const {
   postBrowserConnection,
   removeBrowserConnectionDescriptor: removeBrowserConnectionDescriptorFile,
@@ -90,6 +92,7 @@ let desktopWorkspaceOwner = null;
 // and per-boot token are sent privately to the embedded harness.
 let browserSurface = null;
 let browserHost = null;
+const browserSurfaceIsSupported = browserSurfaceSupported(process.platform);
 // Positive server assertions survive renderer reloads and surface recreation.
 // A release is deliberately local-panel-only; see browser-control-sync.cjs.
 const browserControlHolds = new Set();
@@ -702,20 +705,7 @@ function receiveBrowserControlHold(rawMessage) {
 }
 
 async function clearBrowserPartition(partition) {
-  const ses = session.fromPartition(partition);
-  // Stop live network/service-worker activity before clearing so it cannot
-  // repopulate a cookie or cache entry while the wipe is in progress.
-  try {
-    await ses.closeAllConnections();
-  } catch {}
-  await ses.clearStorageData();
-  await ses.clearCache();
-  try {
-    await ses.clearAuthCache();
-  } catch {}
-  try {
-    await ses.closeAllConnections();
-  } catch {}
+  await clearBrowserPartitionSession(session.fromPartition(partition));
 }
 
 async function applyBrowserLifecycleCleanup(lifecycle) {
@@ -725,9 +715,9 @@ async function applyBrowserLifecycleCleanup(lifecycle) {
     browserHost?.revokeCapabilitiesForBot(lifecycle.botId);
     await clearBrowserPartition(browserPartition(lifecycle.botId));
   } else {
-    browserSurface?.forgetProfile(lifecycle.profileId);
-    browserHost?.revokeCapabilitiesForProfile(lifecycle.profileId);
-    await clearBrowserPartition(browserProfilePartition(lifecycle.profileId));
+    browserSurface?.forgetProfile(lifecycle.partitionId);
+    browserHost?.revokeCapabilitiesForProfile(lifecycle.partitionId);
+    await clearBrowserPartition(browserProfilePartition(lifecycle.partitionId));
   }
   return true;
 }
@@ -792,6 +782,10 @@ async function startServerOn(port) {
   const entry = path.join(process.resourcesPath, "server", "index.js");
   const childEnv = managedComposioChildEnvironment(composioBrokerUrl(), secureCredentials, {
     ...process.env,
+    // A packaged utility child must never fall back to a descriptor inherited
+    // from the launching shell. It starts fail-closed until this exact main
+    // process sends the private in-memory connection after spawn.
+    OMB_DESKTOP_PARENT: "1",
     OMB_STATIC_DIR: path.join(process.resourcesPath, "ui"),
     OMB_RESOURCES_PATH: process.resourcesPath,
     OMB_SKILLS_DIR: path.join(process.resourcesPath, "skills"),
@@ -807,6 +801,7 @@ async function startServerOn(port) {
     // the boot migration has deleted
     ...workspaceCredentialEnv(secureCredentials),
   });
+  delete childEnv.OMB_BROWSER_CONNECTION;
   slog(`fork ${entry} port=${port}`);
   const proc = utilityProcess.fork(entry, [], {
     env: childEnv,
@@ -1148,6 +1143,10 @@ function removeBrowserConnectionDescriptor() {
 }
 
 async function ensureBrowserHost() {
+  if (!browserSurfaceIsSupported) {
+    removeBrowserConnectionDescriptor();
+    throw new Error("The sandboxed built-in browser is not yet available on this platform");
+  }
   if (browserHost?.url) return browserHost;
   const candidate = createBrowserHost({ manager: () => browserSurface });
   try {
@@ -1166,6 +1165,13 @@ async function ensureBrowserHost() {
 }
 
 async function startBrowserSurface(owner) {
+  if (!browserSurfaceIsSupported) {
+    // Never leave a development descriptor behind that could make the server
+    // advertise browser tools while the native surface is deliberately gated.
+    removeBrowserConnectionDescriptor();
+    if (serverProc) syncBrowserConnection(serverProc);
+    return;
+  }
   let surface = null;
   try {
     surface = createBrowserSurfaceManager({
@@ -1260,10 +1266,10 @@ ipcMain.handle("browser:close", (event, botId) => browserSurfaceForEvent(event).
 // and cache. The partition directory itself is left for Chromium to reuse
 // (removing it while the session object lives is the EBUSY trap every
 // Electron app with profiles has hit); nothing identifying remains in it.
-ipcMain.handle("browser:forget-profile", async (event, profileId) => {
+ipcMain.handle("browser:forget-profile", async (event, partitionId) => {
   const surface = browserSurfaceForEvent(event);
-  const id = String(profileId ?? "");
-  if (!/^[a-z0-9_-]{1,40}$/.test(id) || id === "guest") throw new Error("That browser profile id is invalid");
+  const id = String(partitionId ?? "");
+  if (!/^[A-Za-z0-9_-]{1,40}$/.test(id) || id === "guest") throw new Error("That browser partition id is invalid");
   const dropped = surface.forgetProfile(id);
   browserHost?.revokeCapabilitiesForProfile(id);
   await clearBrowserPartition(browserProfilePartition(id));
