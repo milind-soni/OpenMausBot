@@ -14,6 +14,7 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { z } from "zod";
 
 import { removeTempDir, waitForExit } from "./testing/cleanup.ts";
+import { freePortBlock } from "./testing/ports.ts";
 import { openSse } from "./testing/sse.ts";
 import { IMAGE_MAX_BYTES } from "./attachments.ts";
 
@@ -47,6 +48,39 @@ const expectStoppedTestServerCleanly = (serverChild: ChildProcess, capturedStder
     && serverChild.exitCode === null
     && serverChild.signalCode === "SIGTERM";
   expect(serverChild.exitCode === 0 || requestedWindowsStop, capturedStderr).toBe(true);
+};
+
+const waitForIsolatedServer = async (
+  serverChild: ChildProcess,
+  port: number,
+  capturedStderr: () => string,
+): Promise<void> => {
+  const deadline = Date.now() + 20_000;
+  let lastObservedHealth = "none";
+  for (;;) {
+    if (serverChild.exitCode !== null || serverChild.signalCode !== null) {
+      throw new Error(
+        `isolated server exited before becoming healthy `
+        + `(code=${String(serverChild.exitCode)}, signal=${String(serverChild.signalCode)}).\n${capturedStderr()}`,
+      );
+    }
+    try {
+      const response = await fetch(`http://127.0.0.1:${port}/api/health`);
+      if (response.status === 200) {
+        const health = await response.json() as { app?: unknown; pid?: unknown; static?: unknown };
+        lastObservedHealth = JSON.stringify(health);
+        if (health.app === "openmausbot" && health.pid === serverChild.pid && health.static === true) return;
+      }
+    } catch {
+      /* still starting */
+    }
+    if (Date.now() >= deadline) {
+      throw new Error(
+        `isolated server never became healthy (last health: ${lastObservedHealth}).\n${capturedStderr()}`,
+      );
+    }
+    await new Promise((resolve) => setTimeout(resolve, 100));
+  }
 };
 
 const api = async (method: string, path: string, body?: unknown): Promise<{ status: number; body: any }> => {
@@ -2778,8 +2812,7 @@ describe("harness HTTP API", () => {
     const isolatedHome = mkdtempSync(join(tmpdir(), "omb-browser-cleanup-api-"));
     const isolatedData = join(isolatedHome, ".openmausbot");
     const isolatedStatic = join(isolatedHome, "static");
-    const isolatedPort = 48_000 + Math.floor(Math.random() * 4_000);
-    const isolatedWebhookPort = 52_000 + Math.floor(Math.random() * 4_000);
+    const isolatedPort = await freePortBlock([0, 1]);
     const descriptorFile = join(isolatedHome, "browser-connection.json");
     mkdirSync(join(isolatedStatic, "assets"), { recursive: true });
     mkdirSync(isolatedData, { recursive: true });
@@ -2824,7 +2857,7 @@ describe("harness HTTP API", () => {
       HOME: isolatedHome,
       USERPROFILE: isolatedHome,
       OMB_PORT: String(isolatedPort),
-      OMB_WEBHOOK_PORT: String(isolatedWebhookPort),
+      OMB_WEBHOOK_PORT: String(isolatedPort + 1),
       OMB_STATIC_DIR: isolatedStatic,
       OMB_BROWSER_CONNECTION: descriptorFile,
       FAKE_CLAUDE_MODE: "hang",
@@ -2855,13 +2888,7 @@ describe("harness HTTP API", () => {
     };
 
     try {
-      await expect.poll(async () => {
-        try {
-          return (await fetch(`http://127.0.0.1:${isolatedPort}/api/health`)).status;
-        } catch {
-          return 0;
-        }
-      }, { timeout: 20_000 }).toBe(200);
+      await waitForIsolatedServer(isolatedChild, isolatedPort, () => isolatedStderr);
 
       const bot = (await isolatedApi("POST", "/api/bots", {
         modelSelection: { instanceId: "claude", model: "claude-sonnet-5" },
@@ -2899,8 +2926,7 @@ describe("harness HTTP API", () => {
     const isolatedHome = mkdtempSync(join(tmpdir(), "omb-browser-cleanup-restart-"));
     const isolatedData = join(isolatedHome, ".openmausbot");
     const isolatedStatic = join(isolatedHome, "static");
-    const isolatedPort = 48_000 + Math.floor(Math.random() * 4_000);
-    const isolatedWebhookPort = 52_000 + Math.floor(Math.random() * 4_000);
+    const isolatedPort = await freePortBlock([0, 1]);
     mkdirSync(join(isolatedStatic, "assets"), { recursive: true });
     mkdirSync(isolatedData, { recursive: true });
     writeFileSync(join(isolatedStatic, "index.html"), "<!doctype html><title>Cleanup restart test</title>");
@@ -2962,7 +2988,7 @@ describe("harness HTTP API", () => {
           HOME: isolatedHome,
           USERPROFILE: isolatedHome,
           OMB_PORT: String(isolatedPort),
-          OMB_WEBHOOK_PORT: String(isolatedWebhookPort),
+          OMB_WEBHOOK_PORT: String(isolatedPort + 1),
           OMB_STATIC_DIR: isolatedStatic,
           FAKE_CLAUDE_MODE: "hang",
           FAKE_CLAUDE_DUMP: join(isolatedHome, "fake-claude-dump.json"),
@@ -2981,13 +3007,7 @@ describe("harness HTTP API", () => {
     };
 
     try {
-      await expect.poll(async () => {
-        try {
-          return (await fetch(`http://127.0.0.1:${isolatedPort}/api/health`)).status;
-        } catch {
-          return 0;
-        }
-      }, { timeout: 20_000 }).toBe(200);
+      await waitForIsolatedServer(isolatedChild, isolatedPort, () => isolatedStderr);
       await expect.poll(() => JSON.parse(
         readFileSync(join(isolatedData, "browser-cleanups.json"), "utf8"),
       )).toEqual([]);
@@ -3012,8 +3032,7 @@ describe("harness HTTP API", () => {
     const isolatedHome = mkdtempSync(join(tmpdir(), "omb-browser-reference-write-"));
     const isolatedData = join(isolatedHome, ".openmausbot");
     const isolatedStatic = join(isolatedHome, "static");
-    const isolatedPort = 48_000 + Math.floor(Math.random() * 4_000);
-    const isolatedWebhookPort = 52_000 + Math.floor(Math.random() * 4_000);
+    const isolatedPort = await freePortBlock([0, 1]);
     const descriptorFile = join(isolatedHome, "browser-connection.json");
     const botsFile = join(isolatedData, "bots.json");
     mkdirSync(join(isolatedStatic, "assets"), { recursive: true });
@@ -3047,7 +3066,7 @@ describe("harness HTTP API", () => {
         HOME: isolatedHome,
         USERPROFILE: isolatedHome,
         OMB_PORT: String(isolatedPort),
-        OMB_WEBHOOK_PORT: String(isolatedWebhookPort),
+        OMB_WEBHOOK_PORT: String(isolatedPort + 1),
         OMB_STATIC_DIR: isolatedStatic,
         OMB_BROWSER_CONNECTION: descriptorFile,
         FAKE_CLAUDE_MODE: "hang",
@@ -3066,13 +3085,7 @@ describe("harness HTTP API", () => {
     };
 
     try {
-      await expect.poll(async () => {
-        try {
-          return (await fetch(`http://127.0.0.1:${isolatedPort}/api/health`)).status;
-        } catch {
-          return 0;
-        }
-      }, { timeout: 20_000 }).toBe(200);
+      await waitForIsolatedServer(isolatedChild, isolatedPort, () => isolatedStderr);
       const idleBot = (await isolatedApi("POST", "/api/bots", {
         modelSelection: { instanceId: "claude", model: "claude-sonnet-5" },
         requireAvailableModel: true,
@@ -3126,8 +3139,7 @@ describe("harness HTTP API", () => {
     const isolatedHome = mkdtempSync(join(tmpdir(), "omb-browser-bot-delete-journal-"));
     const isolatedData = join(isolatedHome, ".openmausbot");
     const isolatedStatic = join(isolatedHome, "static");
-    const isolatedPort = 48_000 + Math.floor(Math.random() * 4_000);
-    const isolatedWebhookPort = 52_000 + Math.floor(Math.random() * 4_000);
+    const isolatedPort = await freePortBlock([0, 1]);
     const descriptorFile = join(isolatedHome, "browser-connection.json");
     mkdirSync(join(isolatedStatic, "assets"), { recursive: true });
     mkdirSync(isolatedData, { recursive: true });
@@ -3160,7 +3172,7 @@ describe("harness HTTP API", () => {
         HOME: isolatedHome,
         USERPROFILE: isolatedHome,
         OMB_PORT: String(isolatedPort),
-        OMB_WEBHOOK_PORT: String(isolatedWebhookPort),
+        OMB_WEBHOOK_PORT: String(isolatedPort + 1),
         OMB_STATIC_DIR: isolatedStatic,
         OMB_BROWSER_CONNECTION: descriptorFile,
         FAKE_CLAUDE_MODE: "hang",
@@ -3180,13 +3192,7 @@ describe("harness HTTP API", () => {
     };
 
     try {
-      await expect.poll(async () => {
-        try {
-          return (await fetch(`http://127.0.0.1:${isolatedPort}/api/health`)).status;
-        } catch {
-          return 0;
-        }
-      }, { timeout: 20_000 }).toBe(200);
+      await waitForIsolatedServer(isolatedChild, isolatedPort, () => isolatedStderr);
       const bot = (await isolatedApi("POST", "/api/bots", {
         modelSelection: { instanceId: "claude", model: "claude-sonnet-5" },
         requireAvailableModel: true,
