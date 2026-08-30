@@ -5,6 +5,7 @@ import { describe, expect, it, vi } from "vitest";
 import {
   aspectFitBrowserBounds,
   BrowserSurfacePlaceholder,
+  browserInteractionPlan,
   browserSurfaceForProfile,
   browserSurfacePresentation,
   browserProfileChangesDisabled,
@@ -12,7 +13,6 @@ import {
   profileIdFor,
   shouldAcceptBrowserSurfaceState,
   shouldClearBrowserSurfaceFailure,
-  shouldRequestBrowserControl,
 } from "./BrowserPanel";
 import {
   heldComputerControlBotIds,
@@ -72,19 +72,25 @@ describe("browser panel address and profile helpers", () => {
     expect(profileIdFor("Guest", profiles)).toBe("guest-2");
   });
 
-  it("coalesces native focus and input into one take-control request", () => {
+  it("coalesces native focus and input and still reopens a controlled compact page", () => {
     const first = {
       botId: "bot-1",
       eventBotId: "bot-1",
+      profile: "profile-work",
+      eventProfile: "profile-work",
+      compact: false,
       held: false,
       pending: false,
       takeInFlight: false,
     };
-    expect(shouldRequestBrowserControl(first)).toBe(true);
-    expect(shouldRequestBrowserControl({ ...first, takeInFlight: true })).toBe(false);
-    expect(shouldRequestBrowserControl({ ...first, pending: true })).toBe(false);
-    expect(shouldRequestBrowserControl({ ...first, held: true })).toBe(false);
-    expect(shouldRequestBrowserControl({ ...first, eventBotId: "bot-2" })).toBe(false);
+    expect(browserInteractionPlan(first)).toBe("take");
+    expect(browserInteractionPlan({ ...first, compact: true })).toBe("expand-and-take");
+    expect(browserInteractionPlan({ ...first, compact: true, held: true })).toBe("expand");
+    expect(browserInteractionPlan({ ...first, takeInFlight: true })).toBe("ignore");
+    expect(browserInteractionPlan({ ...first, pending: true })).toBe("ignore");
+    expect(browserInteractionPlan({ ...first, held: true })).toBe("ignore");
+    expect(browserInteractionPlan({ ...first, eventBotId: "bot-2" })).toBe("ignore");
+    expect(browserInteractionPlan({ ...first, eventProfile: "profile-personal" })).toBe("ignore");
   });
 
   it("locks browser profile changes while a bot turn or local browser transition is active", () => {
@@ -113,6 +119,11 @@ describe("browser panel address and profile helpers", () => {
     )).toBe(true);
     expect(shouldAcceptBrowserSurfaceState(
       surface({ open: false, profile: null, code: "renderer-gone" }),
+      "bot-1",
+      "profile-personal",
+    )).toBe(false);
+    expect(shouldAcceptBrowserSurfaceState(
+      surface({ open: false, profile: "profile-personal", code: "renderer-gone" }),
       "bot-1",
       "profile-personal",
     )).toBe(true);

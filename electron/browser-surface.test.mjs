@@ -897,6 +897,37 @@ describe("browser surface manager", () => {
     expect(interactions).toEqual([{ botId: "bot-a", profile: "" }]);
   });
 
+  it("shields the inertial tail of a compact wheel gesture after expansion", () => {
+    const interactions = [];
+    const { manager, views } = harness({ onUserInteraction: (event) => interactions.push(event) });
+    manager.layout("bot-a", BOUNDS, "", "compact");
+
+    const first = { preventDefault: vi.fn() };
+    views[0].listeners.get("before-mouse-event")?.(first, { type: "mouseWheel", deltaY: 120 });
+    manager.layout("bot-a", { x: 0, y: 0, width: 900, height: 650 }, "", "expanded");
+    const inertia = { preventDefault: vi.fn() };
+    views[0].listeners.get("before-mouse-event")?.(inertia, { type: "mouseWheel", deltaY: 80 });
+
+    expect(first.preventDefault).toHaveBeenCalledOnce();
+    expect(inertia.preventDefault).toHaveBeenCalledOnce();
+    expect(interactions).toEqual([{ botId: "bot-a", profile: "" }]);
+  });
+
+  it("preserves the originating profile on terminal surface events", () => {
+    const { manager, views, states } = harness();
+    manager.layout("bot-a", BOUNDS, "work", "compact");
+    views[0].listeners.get("render-process-gone")?.();
+
+    expect(states.at(-1)).toMatchObject({
+      botId: "bot-a",
+      open: false,
+      profile: "work",
+      partition: "persist:openmausbot-browser-profile-work",
+      mode: "compact",
+      code: "renderer-gone",
+    });
+  });
+
   it("does not shield synthetic agent clicks in the compact surface", async () => {
     const interactions = [];
     const { manager, views } = harness({ onUserInteraction: (event) => interactions.push(event) });

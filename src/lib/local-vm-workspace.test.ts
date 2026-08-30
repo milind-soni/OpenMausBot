@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  aspectFitNativeViewBounds,
   initialLocalVmWorkspaceSlots,
   nativeViewOverlayIntersects,
   readyLocalVmViewerUrl,
@@ -28,6 +29,19 @@ const bots = [
 ];
 
 describe("Local VM native overlay shielding", () => {
+  it("checks overlays against the fitted native surface, not its letterbox", () => {
+    const fitted = aspectFitNativeViewBounds({ x: 0, y: 0, width: 1_000, height: 500 }, 1.6);
+    const hosts = [rect(fitted.x, fitted.y, fitted.width, fitted.height)];
+
+    expect(fitted).toEqual({ x: 100, y: 0, width: 800, height: 500 });
+    expect(nativeViewOverlayIntersects(hosts, [{
+      rect: rect(0, 0, 80, 500),
+      explicit: true,
+      visible: true,
+      zIndex: 40,
+    }])).toBe(false);
+  });
+
   it("hides panes only for visible intersecting overlays", () => {
     const hosts = [rect(100, 100, 400, 300)];
     expect(

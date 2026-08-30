@@ -25,6 +25,11 @@ import { transitionBrowserControlLease } from "@/lib/computer-control";
 import { useStore, type Bot, type BotAnnouncement, type BrowserProfile } from "@/state/store";
 import { browserProfilePartitionId, browserProfilesForPatch } from "@/lib/browser-profiles";
 import { useNativeViewObscured } from "@/hooks/use-native-view-obscured";
+import { aspectFitNativeViewBounds } from "@/lib/local-vm-workspace";
+import {
+  beginBrowserPanelOperation,
+  useBrowserPanelOperationPending,
+} from "@/lib/browser-panel-operation";
 
 type ControlSnapshot = { held: boolean; helpReason: string | null };
 
@@ -50,22 +55,7 @@ function elementBounds(element: HTMLElement | null): DesktopWorkspaceBounds | nu
  * Electron receives only this rectangle, leaving an even renderer-owned
  * letterbox instead of anchoring the page to the top-left. */
 export function aspectFitBrowserBounds(bounds: DesktopWorkspaceBounds): DesktopWorkspaceBounds {
-  const widthFromHeight = Math.max(1, Math.floor(bounds.height * 1.6));
-  if (widthFromHeight <= bounds.width) {
-    return {
-      x: bounds.x + Math.floor((bounds.width - widthFromHeight) / 2),
-      y: bounds.y,
-      width: widthFromHeight,
-      height: bounds.height,
-    };
-  }
-  const heightFromWidth = Math.max(1, Math.floor(bounds.width / 1.6));
-  return {
-    x: bounds.x,
-    y: bounds.y + Math.floor((bounds.height - heightFromWidth) / 2),
-    width: bounds.width,
-    height: heightFromWidth,
-  };
+  return aspectFitNativeViewBounds(bounds, 1.6);
 }
 
 /** The editable address must retain the exact page URL. A shortened host/path
@@ -107,11 +97,10 @@ export function shouldAcceptBrowserSurfaceState(
   botId: string,
   profile: string,
 ): boolean {
-  if (next.botId !== botId) return false;
-  // Terminal states intentionally omit profile/partition after the destroyed
-  // entry is removed. Ordinary updates must match the active profile exactly:
-  // an old hidden page may finish navigating after a profile switch.
-  return Boolean(next.code) || next.profile === profile;
+  // Every state, including terminal crash/eviction notices, carries the
+  // originating profile. An old hidden page may navigate or die after a
+  // switch and must never replace the selected profile's page or error state.
+  return next.botId === botId && next.profile === profile;
 }
 
 export function browserSurfacePresentation(input: {
@@ -215,14 +204,22 @@ export function profileIdFor(name: string, taken: BrowserProfile[]): string {
   return candidate;
 }
 
-export function shouldRequestBrowserControl(input: {
+export type BrowserInteractionPlan = "ignore" | "expand" | "take" | "expand-and-take";
+
+export function browserInteractionPlan(input: {
   botId: string;
   eventBotId: string;
+  profile: string;
+  eventProfile: string;
+  compact: boolean;
   held: boolean;
   pending: boolean;
   takeInFlight: boolean;
-}): boolean {
-  return input.botId === input.eventBotId && !input.held && !input.pending && !input.takeInFlight;
+}): BrowserInteractionPlan {
+  if (input.botId !== input.eventBotId || input.profile !== input.eventProfile) return "ignore";
+  if (input.held) return input.compact ? "expand" : "ignore";
+  if (input.pending || input.takeInFlight) return "ignore";
+  return input.compact ? "expand-and-take" : "take";
 }
 
 export function browserProfileChangesDisabled(
@@ -255,7 +252,8 @@ export function BrowserPanel({
   const pageVisible = usePageVisible();
   const layoutOwner = useId();
   const hostRef = useRef<HTMLDivElement>(null);
-  const nativeViewObscured = useNativeViewObscured(hostRef);
+  const nativeViewObscured = useNativeViewObscured(hostRef, size === "expanded" ? 1.6 : null);
+  const operationPending = useBrowserPanelOperationPending(bot.id);
   const nativeTakePending = useRef(false);
   const botBusyRef = useRef(browserProfileChangesDisabled(bot));
   // Async profile creation must only observe committed bot state. Updating the
@@ -313,7 +311,7 @@ export function BrowserPanel({
   // and takeover handoff so an old page cannot finish in a hidden profile (or
   // be destroyed mid-load when the old profile is Guest).
   const profileChangesLocked = browserProfileChangesDisabled(bot, {
-    browserAction: busy,
+    browserAction: busy || profileBusy || operationPending,
     controlTransition: controlPending,
   });
   const profileChangeLockMessage = bot.busy
@@ -410,68 +408,77 @@ export function BrowserPanel({
 
   const changeControl = useCallback(
     async (action: "take" | "release"): Promise<boolean> => {
-      if (action === "take") {
-        if (control.held) {
+      if (operationPending) return false;
+      const finishOperation = beginBrowserPanelOperation(botId);
+      try {
+        if (action === "take") {
+          if (control.held) {
+            try {
+              const applied = await bridge?.setHumanControl?.(botId, true, activePartition) === true;
+              if (!applied) setError("The browser tab is not ready for takeover yet.");
+              return applied;
+            } catch (cause) {
+              setError(cause instanceof Error ? cause.message : String(cause));
+              return false;
+            }
+          }
+          if (controlPending || nativeTakePending.current) return false;
+          nativeTakePending.current = true;
+        }
+        const setLocalControl = async (held: boolean): Promise<boolean> => {
           try {
-            const applied = await bridge?.setHumanControl?.(botId, true, activePartition) === true;
-            if (!applied) setError("The browser tab is not ready for takeover yet.");
-            return applied;
+            if (!bridge?.setHumanControl) throw new Error("Update OpenMausBot before using browser takeover.");
+            const applied = await bridge.setHumanControl(botId, held, activePartition);
+            if (!applied) throw new Error("The browser tab is not ready for takeover yet.");
+            return true;
           } catch (cause) {
             setError(cause instanceof Error ? cause.message : String(cause));
             return false;
           }
-        }
-        if (controlPending || nativeTakePending.current) return false;
-        nativeTakePending.current = true;
-      }
-      const setLocalControl = async (held: boolean): Promise<boolean> => {
-        try {
-          if (!bridge?.setHumanControl) throw new Error("Update OpenMausBot before using browser takeover.");
-          const applied = await bridge.setHumanControl(botId, held, activePartition);
-          if (!applied) throw new Error("The browser tab is not ready for takeover yet.");
-          return true;
-        } catch (cause) {
-          setError(cause instanceof Error ? cause.message : String(cause));
-          return false;
-        }
-      };
+        };
 
-      const result = await transitionBrowserControlLease({
-        action,
-        requestDurableControl: (requested) => onControl(requested).catch(() => false),
-        setNativeControl: setLocalControl,
-      });
-      if (result.ok) return true;
-      if (result.failed === "durable-take") {
-        // The person may already be typing into the native page. Keep the
-        // agent gated even though the durable lease endpoint failed; a
-        // subsequent Take control click retries the server transition.
-        setError("Browser control could not be confirmed. The bot remains paused here for safety — retry Take control.");
-      } else if (result.failed === "durable-release") {
-        setError("Control could not be handed back. The bot remains paused here for safety — retry Hand back.");
-      } else if (result.failed === "native-release") {
-        setError("The server released control, but this browser remains paused locally for safety. Reopen the Browser panel to retry.");
+        const result = await transitionBrowserControlLease({
+          action,
+          requestDurableControl: (requested) => onControl(requested).catch(() => false),
+          setNativeControl: setLocalControl,
+        });
+        if (result.ok) return true;
+        if (result.failed === "durable-take") {
+          // The person may already be typing into the native page. Keep the
+          // agent gated even though the durable lease endpoint failed; a
+          // subsequent Take control click retries the server transition.
+          setError("Browser control could not be confirmed. The bot remains paused here for safety — retry Take control.");
+        } else if (result.failed === "durable-release") {
+          setError("Control could not be handed back. The bot remains paused here for safety — retry Hand back.");
+        } else if (result.failed === "native-release") {
+          setError("The server released control, but this browser remains paused locally for safety. Reopen the Browser panel to retry.");
+        }
+        if (action === "take") nativeTakePending.current = false;
+        return false;
+      } finally {
+        finishOperation();
       }
-      if (action === "take") nativeTakePending.current = false;
-      return false;
     },
-    [activePartition, botId, bridge, control.held, controlPending, onControl],
+    [activePartition, botId, bridge, control.held, controlPending, onControl, operationPending],
   );
 
   useEffect(() => {
     if (!bridge?.onUserInteraction) return;
     return bridge.onUserInteraction((event) => {
-      if (!shouldRequestBrowserControl({
+      const plan = browserInteractionPlan({
         botId,
         eventBotId: event.botId,
+        profile: activePartition,
+        eventProfile: event.profile,
+        compact: size === "compact",
         held: control.held,
-        pending: controlPending,
+        pending: controlPending || operationPending,
         takeInFlight: nativeTakePending.current,
-      })) return;
-      if (size === "compact") onExpand?.();
-      void changeControl("take");
+      });
+      if (plan === "expand" || plan === "expand-and-take") onExpand?.();
+      if (plan === "take" || plan === "expand-and-take") void changeControl("take");
     });
-  }, [bridge, botId, changeControl, control.held, controlPending, onExpand, size]);
+  }, [activePartition, bridge, botId, changeControl, control.held, controlPending, onExpand, operationPending, size]);
 
   useEffect(() => {
     if (!addressFocused) setAddress(editableUrl(activeSurface?.url ?? ""));
@@ -479,9 +486,10 @@ export function BrowserPanel({
 
   const navigate = useCallback(
     async (raw: string) => {
-      if (!bridge || busy || profileBusy) return;
+      if (!bridge || busy || profileBusy || operationPending) return;
       const target = raw.trim();
       if (!target) return;
+      const finishOperation = beginBrowserPanelOperation(botId);
       setBusy(true);
       setError(null);
       try {
@@ -492,13 +500,15 @@ export function BrowserPanel({
         setError(cause instanceof Error ? cause.message : String(cause));
       } finally {
         setBusy(false);
+        finishOperation();
       }
     },
-    [activePartition, bridge, botId, busy, changeControl, profileBusy],
+    [activePartition, bridge, botId, busy, changeControl, operationPending, profileBusy],
   );
 
   const moveHistory = useCallback(async (direction: "back" | "forward") => {
-    if (!bridge || busy || profileBusy) return;
+    if (!bridge || busy || profileBusy || operationPending) return;
+    const finishOperation = beginBrowserPanelOperation(botId);
     setBusy(true);
     setError(null);
     try {
@@ -510,11 +520,13 @@ export function BrowserPanel({
       setError(cause instanceof Error ? cause.message : String(cause));
     } finally {
       setBusy(false);
+      finishOperation();
     }
-  }, [activePartition, botId, bridge, busy, changeControl, profileBusy]);
+  }, [activePartition, botId, bridge, busy, changeControl, operationPending, profileBusy]);
 
   const reload = useCallback(async () => {
-    if (!bridge?.reload || busy || profileBusy || !currentUrl) return;
+    if (!bridge?.reload || busy || profileBusy || operationPending || !currentUrl) return;
+    const finishOperation = beginBrowserPanelOperation(botId);
     setBusy(true);
     setError(null);
     try {
@@ -524,14 +536,16 @@ export function BrowserPanel({
       setError(cause instanceof Error ? cause.message : String(cause));
     } finally {
       setBusy(false);
+      finishOperation();
     }
-  }, [activePartition, botId, bridge, busy, changeControl, currentUrl, profileBusy]);
+  }, [activePartition, botId, bridge, busy, changeControl, currentUrl, operationPending, profileBusy]);
 
   const chooseProfile = async (value: string) => {
     if (profileBusy || profileChangesLocked) {
       setError(profileChangeLockMessage ?? "Wait for the current profile change to finish.");
       return;
     }
+    const finishOperation = beginBrowserPanelOperation(botId);
     setProfileBusy(true);
     setError(null);
     try {
@@ -547,12 +561,14 @@ export function BrowserPanel({
       setError(cause instanceof Error ? cause.message : String(cause));
     } finally {
       setProfileBusy(false);
+      finishOperation();
     }
   };
 
   const addProfile = async () => {
     const name = newProfileName.trim();
     if (!name || profileBusy || profileChangesLocked || botBusyRef.current) return;
+    const finishOperation = beginBrowserPanelOperation(botId);
     setProfileBusy(true);
     setError(null);
     try {
@@ -579,6 +595,7 @@ export function BrowserPanel({
       setError(cause instanceof Error ? cause.message : String(cause));
     } finally {
       setProfileBusy(false);
+      finishOperation();
     }
   };
 
@@ -624,7 +641,7 @@ export function BrowserPanel({
         <button
           type="button"
           onClick={() => void moveHistory("back")}
-          disabled={!activeSurface?.canGoBack || busy || profileBusy}
+          disabled={!activeSurface?.canGoBack || busy || profileBusy || operationPending}
           className="rounded-md p-1.5 text-ink-secondary outline-none hover:bg-control hover:text-ink focus-visible:ring-2 focus-visible:ring-accent disabled:cursor-not-allowed disabled:opacity-40"
           title="Back"
           aria-label="Back"
@@ -634,7 +651,7 @@ export function BrowserPanel({
         <button
           type="button"
           onClick={() => void moveHistory("forward")}
-          disabled={!bridge.forward || !activeSurface?.canGoForward || busy || profileBusy}
+          disabled={!bridge.forward || !activeSurface?.canGoForward || busy || profileBusy || operationPending}
           className="rounded-md p-1.5 text-ink-secondary outline-none hover:bg-control hover:text-ink focus-visible:ring-2 focus-visible:ring-accent disabled:cursor-not-allowed disabled:opacity-40"
           title="Forward"
           aria-label="Forward"
@@ -644,7 +661,7 @@ export function BrowserPanel({
         <button
           type="button"
           onClick={() => void reload()}
-          disabled={!bridge.reload || !currentUrl || busy || profileBusy}
+          disabled={!bridge.reload || !currentUrl || busy || profileBusy || operationPending}
           className="rounded-md p-1.5 text-ink-secondary outline-none hover:bg-control hover:text-ink focus-visible:ring-2 focus-visible:ring-accent disabled:cursor-not-allowed disabled:opacity-40"
           title="Reload"
           aria-label="Reload"
@@ -662,14 +679,14 @@ export function BrowserPanel({
             spellCheck={false}
             autoCapitalize="off"
             autoCorrect="off"
-            disabled={busy || profileBusy}
+            disabled={busy || profileBusy || operationPending}
             className="min-w-0 flex-1 bg-transparent text-[13px] text-ink outline-none placeholder:text-ink-secondary/70"
             aria-label="Web address"
           />
         </div>
         <button
           type="submit"
-          disabled={!address.trim() || busy || profileBusy}
+          disabled={!address.trim() || busy || profileBusy || operationPending}
           className="rounded-lg bg-control px-2.5 py-1.5 text-[12px] font-medium text-ink outline-none hover:bg-raised-hover focus-visible:ring-2 focus-visible:ring-accent disabled:cursor-not-allowed disabled:opacity-40"
         >
           Go
@@ -728,7 +745,7 @@ export function BrowserPanel({
         <button
           type="button"
           onClick={() => void changeControl(control.held ? "release" : "take")}
-          disabled={controlPending || busy || profileBusy}
+          disabled={controlPending || busy || profileBusy || operationPending}
           className={cn(
             "flex shrink-0 items-center gap-1.5 rounded-lg px-3 py-1.5 text-[13px] font-medium outline-none focus-visible:ring-2 focus-visible:ring-accent disabled:opacity-60",
             control.held ? "bg-accent text-accent-ink" : "bg-control text-ink hover:bg-raised-hover",

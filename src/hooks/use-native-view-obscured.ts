@@ -1,9 +1,16 @@
 import { useLayoutEffect, useState, type RefObject } from "react";
-import { nativeViewOverlayIntersects } from "@/lib/local-vm-workspace";
+import {
+  aspectFitNativeViewBounds,
+  nativeViewOverlayIntersects,
+} from "@/lib/local-vm-workspace";
 
 const EXPLICIT_OVERLAY_SELECTOR =
   '[aria-modal="true"], [role="dialog"], [role="menu"], [popover], [data-native-view-overlay]';
-const POSITIONED_OVERLAY_SELECTOR = `${EXPLICIT_OVERLAY_SELECTOR}, .fixed, .absolute`;
+// Responsive utility variants such as `max-md:absolute` do not match
+// `.absolute`; a class substring gives us a bounded candidate set, and the
+// computed position/z-index below decides whether it is currently raised.
+const POSITIONED_OVERLAY_SELECTOR =
+  `${EXPLICIT_OVERLAY_SELECTOR}, [class*="fixed"], [class*="absolute"]`;
 
 function isOverlayCandidate(target: EventTarget | null): target is Element {
   return target instanceof Element && Boolean(target.closest(POSITIONED_OVERLAY_SELECTOR));
@@ -14,7 +21,10 @@ function isOverlayCandidate(target: EventTarget | null): target is Element {
  * renderer-owned dialog, menu, banner, or other raised layer crosses it so
  * controls never disappear behind the page.
  */
-export function useNativeViewObscured(hostRef: RefObject<HTMLElement | null>): boolean {
+export function useNativeViewObscured(
+  hostRef: RefObject<HTMLElement | null>,
+  aspectRatio: number | null = null,
+): boolean {
   const [obscured, setObscured] = useState(false);
 
   useLayoutEffect(() => {
@@ -28,7 +38,25 @@ export function useNativeViewObscured(hostRef: RefObject<HTMLElement | null>): b
       if (!host) {
         setObscured(false);
       } else {
-        const hostRect = host.getBoundingClientRect();
+        const rawHostRect = host.getBoundingClientRect();
+        const fittedHost = aspectRatio
+          ? aspectFitNativeViewBounds({
+              x: Math.round(rawHostRect.left),
+              y: Math.round(rawHostRect.top),
+              width: Math.round(rawHostRect.width),
+              height: Math.round(rawHostRect.height),
+            }, aspectRatio)
+          : null;
+        const hostRect = fittedHost
+          ? {
+              left: fittedHost.x,
+              right: fittedHost.x + fittedHost.width,
+              top: fittedHost.y,
+              bottom: fittedHost.y + fittedHost.height,
+              width: fittedHost.width,
+              height: fittedHost.height,
+            }
+          : rawHostRect;
         const candidates = [...document.querySelectorAll<HTMLElement>(POSITIONED_OVERLAY_SELECTOR)]
           .filter(
             (candidate) =>
@@ -128,7 +156,7 @@ export function useNativeViewObscured(hostRef: RefObject<HTMLElement | null>): b
       window.removeEventListener("resize", scheduleRead);
       window.removeEventListener("scroll", scheduleRead, true);
     };
-  }, [hostRef]);
+  }, [aspectRatio, hostRef]);
 
   return obscured;
 }

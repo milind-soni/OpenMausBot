@@ -113,7 +113,7 @@ type SkillRecordingPayload = {
     partition?: string | null;
     profile?: string | null;
     mode?: "compact" | "expanded" | null;
-    code?: "renderer-gone" | "profile-changed" | "evicted";
+    code?: "renderer-gone" | "profile-deleted" | "evicted";
   }
 
   interface DesktopWorkspaceState {
@@ -225,7 +225,7 @@ type SkillRecordingPayload = {
          * server-side human-control snapshot catches up. */
         setHumanControl?(botId: string, held: boolean, profile?: string): Promise<boolean>;
         /** Native page focus/input means the person has taken the wheel. */
-        onUserInteraction?(cb: (event: { botId: string }) => void): () => void;
+        onUserInteraction?(cb: (event: { botId: string; profile: string }) => void): () => void;
         forgetProfile?(partitionId: string): Promise<{ dropped: number }>;
         close(botId: string): Promise<boolean>;
         onState(cb: (state: BrowserSurfaceState) => void): () => void;

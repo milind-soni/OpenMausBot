@@ -51,6 +51,7 @@ const MAX_PAGE_NOTICES = 20;
 const DNS_CACHE_MS = 10_000;
 const MAX_DNS_CACHE = 256;
 const AGENT_INPUT_SUPPRESS_MS = 100;
+const COMPACT_GESTURE_GUARD_MS = 400;
 const AX_TREE_DEPTH = 24;
 /** The page lays out at this size whatever the panel's rectangle is. Both
  * compact and expanded surfaces scale the same desktop viewport to fit, so
@@ -467,7 +468,7 @@ function createBrowserSurfaceManager({
   const keyOf = (botId, partition) => `${botId}\0${partition}`;
   const controlFor = (botId) => botControl.get(botId) ?? { held: false, epoch: 0, agentEpoch: 0 };
 
-  const closedState = (botId) => ({
+  const closedState = (botId, entry) => ({
     botId,
     open: false,
     url: "",
@@ -476,9 +477,9 @@ function createBrowserSurfaceManager({
     canGoBack: false,
     canGoForward: false,
     visible: false,
-    partition: null,
-    profile: null,
-    mode: null,
+    partition: entry?.partition ?? null,
+    profile: entry?.profile ?? null,
+    mode: entry?.mode ?? null,
   });
 
   const stateFor = (entry) => {
@@ -668,7 +669,10 @@ function createBrowserSurfaceManager({
       if (!entry.view.webContents.isDestroyed()) entry.view.webContents.close({ waitForBeforeUnload: false });
     } catch {}
     if (wasActive) {
-      const state = closedState(entry.botId);
+      // Preserve the removed entry's identity. A terminal event can race a
+      // profile switch; without this, the renderer can pin the old page's
+      // crash/eviction onto whichever profile is selected now.
+      const state = closedState(entry.botId, entry);
       if (code) state.code = code;
       emit(state);
     }
@@ -782,7 +786,23 @@ function createBrowserSurfaceManager({
       callback();
       pushBounded(entry.notices, "Blocked a client-certificate prompt in the built-in browser");
     });
-    contents.on("focus", () => claimHumanControl(entry, "focus"));
+    const beginCompactGestureGuard = (wasHeld) => {
+      const current = now();
+      const alreadyGuarded = current < entry.blockCompactGestureUntil;
+      entry.blockCompactGestureUntil = current + COMPACT_GESTURE_GUARD_MS;
+      if (wasHeld && !alreadyGuarded) {
+        emitUserInteraction({ botId: entry.botId, profile: entry.profile });
+      }
+    };
+    contents.on("focus", () => {
+      const wasHeld = controlFor(entry.botId).held;
+      const human = claimHumanControl(entry, "focus");
+      // A newly acquired hold emits above and may expand before Electron
+      // delivers its mouse event, so latch that gesture. An already-held view
+      // must wait for a concrete pointer event; merely restoring its focus
+      // while shrinking should not bounce the workspace open again.
+      if (human && !wasHeld && entry.mode === "compact") beginCompactGestureGuard(false);
+    });
     contents.on("before-input-event", (_event, input) => {
       const human = claimHumanControl(entry, "keyboard", input);
       // A page can transform/copy a password on input and immediately clear
@@ -798,25 +818,33 @@ function createBrowserSurfaceManager({
       // web page. Keep the matching mouse-up blocked even if the renderer has
       // already switched this entry to expanded mode in response to the
       // takeover notification.
-      if (mouse?.type === "mouseDown" && entry.blockCompactMouseUp && entry.mode !== "compact") {
-        entry.blockCompactMouseUp = false;
-      }
       if (mouse?.type === "mouseUp" && entry.blockCompactMouseUp) {
         entry.blockCompactMouseUp = false;
         event.preventDefault();
         return;
       }
       if (!["mouseDown", "contextMenu", "mouseWheel"].includes(mouse?.type)) return;
+      // Focus can reach Electron before layout IPC expands the panel. Keep the
+      // whole originating gesture watch-only even after mode changes: this
+      // catches the following context-menu event and trackpad inertia. Exact
+      // synthetic echoes remain agent input and must never be swallowed.
+      if (now() < entry.blockCompactGestureUntil) {
+        if (agentEchoMatches(entry, "mouse", mouse)) return;
+        event.preventDefault();
+        if (mouse.type === "mouseDown") entry.blockCompactMouseUp = true;
+        if (mouse.type === "mouseWheel") beginCompactGestureGuard(false);
+        return;
+      }
       const wasHeld = controlFor(entry.botId).held;
       const human = claimHumanControl(entry, "mouse", mouse);
       const compactTakeover = human && entry.mode === "compact";
       if (compactTakeover) {
         event.preventDefault();
         if (mouse.type === "mouseDown") entry.blockCompactMouseUp = true;
-        // claimHumanControl emits only for the transition into human control.
-        // A user may have shrunk an already-controlled browser, and its next
-        // compact click still needs to reopen the workspace.
-        if (wasHeld) emitUserInteraction({ botId: entry.botId, profile: entry.profile });
+        // claimHumanControl emits only for the transition into human control;
+        // an already-controlled compact page still has to reopen. The guard
+        // also suppresses the remainder of this pointer/wheel gesture.
+        beginCompactGestureGuard(wasHeld);
         return;
       }
       // A click can submit or copy an autofilled password without producing a
@@ -930,6 +958,7 @@ function createBrowserSurfaceManager({
       pressedKeys: new Map(),
       presentationScale: 1,
       blockCompactMouseUp: false,
+      blockCompactGestureUntil: 0,
       neutralizingInput: null,
       documentTainted: false,
       operationDepth: 0,
