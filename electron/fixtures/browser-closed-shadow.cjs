@@ -64,8 +64,8 @@ async function run() {
           label.append("API key ");
           const nestedLabelControl = document.createElement("span");
           nestedLabelControl.setAttribute("role", "button");
-          nestedLabelControl.setAttribute("aria-label", "sk_nested_name_source_must_stay_private");
-          nestedLabelControl.textContent = "nested contributor text must stay private";
+          nestedLabelControl.setAttribute("aria-label", ["sk_nested_name_", "source_must_stay_private"].join(""));
+          nestedLabelControl.textContent = ["nested contributor ", "text must stay private"].join("");
           label.append(nestedLabelControl);
           const input = document.createElement("input");
           input.id = "credential";
@@ -132,11 +132,11 @@ async function run() {
     if (!safeClosedSnapshot.elements.some(element => element.role === "button")) {
       throw new Error("closed-shadow interactive control was omitted from the AX fallback");
     }
-    const safeRenderedSnapshot = JSON.stringify({
-      elements: safeClosedSnapshot.elements,
-      yaml: safeClosedSnapshot.yaml,
-    });
-    if (protectedValues.some(value => safeRenderedSnapshot.includes(value))) {
+    const nestedProtectedValues = [
+      "sk_nested_name_source_must_stay_private",
+      "nested contributor text must stay private",
+    ];
+    if (nestedProtectedValues.some(value => JSON.stringify(safeClosedSnapshot).includes(value))) {
       throw new Error("nested protected accessible-name contributor leaked after values were cleared");
     }
     process.stdout.write("nested-name-source-redacted\n");
