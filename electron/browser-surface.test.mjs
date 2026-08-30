@@ -617,9 +617,12 @@ describe("browser surface manager", () => {
     await manager.click("bot-a", "b11");
     views[0].listeners.get("before-mouse-event")?.({}, { type: "mouseDown" });
     expect(interactions).toEqual([]);
+    await expect(manager.read("bot-a")).resolves.toMatchObject({ title: "Loaded" });
     await new Promise((resolve) => setTimeout(resolve, 120));
     views[0].listeners.get("before-mouse-event")?.({}, { type: "mouseDown" });
     expect(interactions).toEqual([{ botId: "bot-a", profile: "" }]);
+    manager.setHumanControl("bot-a", false, "");
+    await expect(manager.read("bot-a")).rejects.toThrow(/browser_read is unavailable/);
   });
 
   it("does not swallow a real user click at a different point during the synthetic echo window", async () => {
@@ -631,6 +634,32 @@ describe("browser surface manager", () => {
     // 100ms is not an echo and must take control immediately.
     views[0].listeners.get("before-mouse-event")?.({}, { type: "mouseDown", button: "left", x: 400, y: 300 });
     expect(interactions).toEqual([{ botId: "bot-a", profile: "" }]);
+  });
+
+  it.each(["mouseDown", "contextMenu"])("taints an autofill-copy-clear page after a human %s", async (type) => {
+    const { manager, views } = harness();
+    await manager.navigate("bot-a", "https://example.com");
+
+    // Model a hostile pointer handler copying an autofilled password into
+    // ordinary page text/title and clearing the protected source immediately.
+    // A postflight protected-field scan alone can no longer see the secret.
+    views[0].setProtectedScreenshotValue(true);
+    manager.setHumanControl("bot-a", true, "");
+    views[0].listeners.get("before-mouse-event")?.({}, {
+      type,
+      button: type === "mouseDown" ? "left" : "right",
+      x: 400,
+      y: 300,
+    });
+    views[0].setProtectedScreenshotValue(false);
+    views[0].setPageText("copied autofill-secret");
+    views[0].setTitle("cleared autofill-secret");
+    manager.setHumanControl("bot-a", false, "");
+
+    await expect(manager.read("bot-a")).rejects.toThrow(/browser_read is unavailable/);
+    const snapshot = await manager.snapshot("bot-a");
+    expect(snapshot).toMatchObject({ title: "Protected content hidden", elements: [] });
+    expect(JSON.stringify(snapshot)).not.toContain("autofill-secret");
   });
 
   it("stops a multi-step agent action after a fast take-control and hand-back", async () => {

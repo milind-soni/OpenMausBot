@@ -61,7 +61,12 @@ async function run() {
           this._closedRoot = root;
           const label = document.createElement("label");
           label.htmlFor = "credential";
-          label.textContent = "API key";
+          label.append("API key ");
+          const nestedLabelControl = document.createElement("span");
+          nestedLabelControl.setAttribute("role", "button");
+          nestedLabelControl.setAttribute("aria-label", "sk_nested_name_source_must_stay_private");
+          nestedLabelControl.textContent = "nested contributor text must stay private";
+          label.append(nestedLabelControl);
           const input = document.createElement("input");
           input.id = "credential";
           input.name = "credential";
@@ -91,7 +96,12 @@ async function run() {
       });
     </script></body></html>`;
     await browserView.webContents.loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(html)}`);
-    const protectedValues = ["sk_closed_shadow_must_not_reach_pixels", "closed shadow mnemonic must stay private"];
+    const protectedValues = [
+      "sk_closed_shadow_must_not_reach_pixels",
+      "closed shadow mnemonic must stay private",
+      "sk_nested_name_source_must_stay_private",
+      "nested contributor text must stay private",
+    ];
     let readRefused = false;
     try {
       await manager.read("fixture-bot", "");
@@ -122,6 +132,14 @@ async function run() {
     if (!safeClosedSnapshot.elements.some(element => element.role === "button")) {
       throw new Error("closed-shadow interactive control was omitted from the AX fallback");
     }
+    const safeRenderedSnapshot = JSON.stringify({
+      elements: safeClosedSnapshot.elements,
+      yaml: safeClosedSnapshot.yaml,
+    });
+    if (protectedValues.some(value => safeRenderedSnapshot.includes(value))) {
+      throw new Error("nested protected accessible-name contributor leaked after values were cleared");
+    }
+    process.stdout.write("nested-name-source-redacted\n");
 
     // A hostile page can transform a human-entered password into sibling
     // text/title and clear the input before a postflight DOM scan. Native

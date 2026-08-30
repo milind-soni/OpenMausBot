@@ -65,7 +65,11 @@ const {
   postBrowserConnection,
   removeBrowserConnectionDescriptor: removeBrowserConnectionDescriptorFile,
 } = require("./browser-connection-sync.cjs");
-const { applyBrowserControlHold, decodeBrowserLifecycleMessage } = require("./browser-control-sync.cjs");
+const {
+  applyBrowserControlHold,
+  browserLifecycleResult,
+  decodeBrowserLifecycleMessage,
+} = require("./browser-control-sync.cjs");
 const { createCuaConnectionStore: createDescriptorStore } = require("./cua-connection.cjs");
 const { normalizeUnreadCount, parseWindowState, resolveWindowState } = require("./window-state.cjs");
 
@@ -699,20 +703,22 @@ function receiveBrowserControlHold(rawMessage) {
 
 async function clearBrowserPartition(partition) {
   const ses = session.fromPartition(partition);
+  // Stop live network/service-worker activity before clearing so it cannot
+  // repopulate a cookie or cache entry while the wipe is in progress.
+  try {
+    await ses.closeAllConnections();
+  } catch {}
   await ses.clearStorageData();
   await ses.clearCache();
   try {
     await ses.clearAuthCache();
   } catch {}
   try {
-    ses.closeAllConnections();
+    await ses.closeAllConnections();
   } catch {}
 }
 
-async function applyBrowserLifecycleCleanup(rawMessage) {
-  const message = rawMessage?.data ?? rawMessage;
-  const lifecycle = decodeBrowserLifecycleMessage(message);
-  if (!lifecycle) return false;
+async function applyBrowserLifecycleCleanup(lifecycle) {
   if (lifecycle.type === "bot-deleted") {
     browserSurface?.close(lifecycle.botId);
     browserControlHolds.delete(lifecycle.botId);
@@ -723,6 +729,62 @@ async function applyBrowserLifecycleCleanup(rawMessage) {
     browserHost?.revokeCapabilitiesForProfile(lifecycle.profileId);
     await clearBrowserPartition(browserProfilePartition(lifecycle.profileId));
   }
+  return true;
+}
+
+const browserLifecycleCleanups = new Map();
+const completedBrowserLifecycleCleanups = new Set();
+const MAX_COMPLETED_BROWSER_CLEANUPS = 512;
+
+function rememberBrowserLifecycleCleanup(requestId) {
+  if (!requestId) return;
+  completedBrowserLifecycleCleanups.delete(requestId);
+  completedBrowserLifecycleCleanups.add(requestId);
+  while (completedBrowserLifecycleCleanups.size > MAX_COMPLETED_BROWSER_CLEANUPS) {
+    completedBrowserLifecycleCleanups.delete(completedBrowserLifecycleCleanups.values().next().value);
+  }
+}
+
+/** Run one private cleanup request at most once and acknowledge only after
+ * Chromium confirms its session data is gone. Duplicate retries join the
+ * same promise; a retry whose success ACK was lost receives a cached ACK. */
+function receiveBrowserLifecycleCleanup(proc, rawMessage) {
+  const message = rawMessage?.data ?? rawMessage;
+  const lifecycle = decodeBrowserLifecycleMessage(message);
+  if (!lifecycle) return false;
+  const requestId = lifecycle.requestId;
+  let cleanup = requestId ? browserLifecycleCleanups.get(requestId) : null;
+  if (!cleanup) {
+    cleanup = requestId && completedBrowserLifecycleCleanups.has(requestId)
+      ? Promise.resolve(true)
+      : applyBrowserLifecycleCleanup(lifecycle).then((result) => {
+          rememberBrowserLifecycleCleanup(requestId);
+          return result;
+        });
+    if (requestId) {
+      browserLifecycleCleanups.set(requestId, cleanup);
+      void cleanup.finally(() => {
+        if (browserLifecycleCleanups.get(requestId) === cleanup) browserLifecycleCleanups.delete(requestId);
+      }).catch(() => {});
+    }
+  }
+  void cleanup.then(
+    () => {
+      if (requestId) proc.postMessage(browserLifecycleResult(requestId, true));
+    },
+    (error) => {
+      slog(`browser lifecycle cleanup failed: ${error?.message ?? error}`);
+      if (requestId) {
+        try {
+          proc.postMessage(browserLifecycleResult(requestId, false));
+        } catch (postError) {
+          slog(`browser lifecycle result send failed: ${postError?.message ?? postError}`);
+        }
+      }
+    },
+  ).catch((error) => {
+    slog(`browser lifecycle result send failed: ${error?.message ?? error}`);
+  });
   return true;
 }
 
@@ -755,9 +817,7 @@ async function startServerOn(port) {
   proc.on("message", (message) => {
     try {
       if (receiveBrowserControlHold(message)) return;
-      void applyBrowserLifecycleCleanup(message).catch((error) => {
-        slog(`browser lifecycle cleanup failed: ${error?.message ?? error}`);
-      });
+      if (receiveBrowserLifecycleCleanup(proc, message)) return;
     } catch (error) {
       slog(`browser private sync rejected: ${error?.message ?? error}`);
     }

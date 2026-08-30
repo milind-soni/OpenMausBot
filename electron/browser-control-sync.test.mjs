@@ -2,7 +2,13 @@ import { createRequire } from "node:module";
 import { describe, expect, it, vi } from "vitest";
 
 const require = createRequire(import.meta.url);
-const { applyBrowserControlHold, decodeBrowserLifecycleMessage } = require("./browser-control-sync.cjs");
+const {
+  applyBrowserControlHold,
+  browserLifecycleResult,
+  decodeBrowserLifecycleMessage,
+} = require("./browser-control-sync.cjs");
+
+const requestId = "123e4567-e89b-42d3-a456-426614174000";
 
 describe("private browser control sync", () => {
   it("mirrors a valid server hold into Electron", () => {
@@ -27,10 +33,25 @@ describe("private browser control sync", () => {
 
 describe("private browser lifecycle sync", () => {
   it("accepts exact bot/profile deletion messages", () => {
-    expect(decodeBrowserLifecycleMessage({ type: "openmausbot:browser-bot-deleted", botId: "bot_A-1" }))
-      .toEqual({ type: "bot-deleted", botId: "bot_A-1" });
-    expect(decodeBrowserLifecycleMessage({ type: "openmausbot:browser-profile-deleted", profileId: "client_1" }))
-      .toEqual({ type: "profile-deleted", profileId: "client_1" });
+    expect(decodeBrowserLifecycleMessage({
+      type: "openmausbot:browser-bot-deleted",
+      requestId,
+      botId: "bot_A-1",
+    })).toEqual({ type: "bot-deleted", requestId, botId: "bot_A-1" });
+    expect(decodeBrowserLifecycleMessage({
+      type: "openmausbot:browser-profile-deleted",
+      requestId,
+      profileId: "client_1",
+    })).toEqual({ type: "profile-deleted", requestId, profileId: "client_1" });
+  });
+
+  it("builds an exact acknowledgement only for a valid request id", () => {
+    expect(browserLifecycleResult(requestId, true)).toEqual({
+      type: "openmausbot:browser-lifecycle-result",
+      requestId,
+      ok: true,
+    });
+    expect(() => browserLifecycleResult("../request", true)).toThrow(/result id/);
   });
 
   it("rejects malformed lifecycle ids and ignores unrelated messages", () => {
@@ -40,6 +61,11 @@ describe("private browser lifecycle sync", () => {
       .toThrow(/profile-deleted/);
     expect(() => decodeBrowserLifecycleMessage({ type: "openmausbot:browser-profile-deleted", profileId: "guest" }))
       .toThrow(/profile-deleted/);
+    expect(() => decodeBrowserLifecycleMessage({
+      type: "openmausbot:browser-profile-deleted",
+      requestId: "not-a-request-id",
+      profileId: "work",
+    })).toThrow(/request id/);
     expect(decodeBrowserLifecycleMessage({ type: "openmausbot:managed-composio" })).toBeNull();
   });
 });

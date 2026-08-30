@@ -260,6 +260,12 @@ export function generateAriaTree(rootElement: Element, publicOptions: AriaTreeOp
           if (seenContributorNodes.has(node))
             continue;
           seenContributorNodes.add(node);
+          // A descendant can expose its own accessible name (for example, an
+          // aria-label on a nested button) even after all contributor text
+          // nodes are suppressed. Treat the complete name-source subtree as
+          // protected so no descendant recomputes a secret from the live DOM.
+          if (node instanceof Element)
+            protectedNameElements.add(node);
           for (let child = node.firstChild; child; child = child.nextSibling) {
             if (child.nodeType === Node.TEXT_NODE)
               protectedNameText.add(child);

@@ -12,6 +12,8 @@ import { parseJson, schemaIssue, type JsonObject, type JsonValue } from "./schem
 
 const optionalText = z.string().optional();
 const SSH_ALIAS = /^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$/;
+const LEGACY_BROWSER_PROFILE_ID = /^[A-Za-z0-9_-]{1,40}$/;
+const BROWSER_PROFILE_ID = /^[a-z0-9_-]{1,40}$/;
 
 export const DEFAULT_ROOM_TURN_TIMEOUT_MINUTES = 5;
 export const MIN_ROOM_TURN_TIMEOUT_MINUTES = 1;
@@ -66,9 +68,64 @@ const browserProfileSchema = z.object({
   // "guest" is the throwaway session's reserved id, never a saved profile
   // Lowercase is part of the storage contract: durable Chromium partition
   // directories would otherwise collide on case-insensitive filesystems.
-  id: z.string().regex(/^[a-z0-9_-]{1,40}$/).refine((id) => id !== "guest", "guest is reserved"),
+  id: z.string().regex(BROWSER_PROFILE_ID).refine((id) => id !== "guest", "guest is reserved"),
   name: z.string().trim().min(1).max(40),
 }).strict();
+// #567 accepted mixed-case and duplicate ids. This schema exists only at the
+// persisted-data boundary so an existing config can be read and migrated;
+// API patches and save inputs continue to use browserProfileSchema above.
+const legacyBrowserProfileSchema = z.object({
+  id: z.string().regex(LEGACY_BROWSER_PROFILE_ID).refine((id) => id !== "guest", "guest is reserved"),
+  name: z.string().trim().min(1).max(40),
+}).strict();
+
+interface StoredBrowserProfileMigration {
+  profiles: Array<z.output<typeof browserProfileSchema>>;
+  /** Exact legacy id to its first canonical entry. Duplicate legacy ids are
+   * inherently ambiguous, so bots deterministically retain the first one. */
+  aliases: ReadonlyMap<string, string>;
+}
+
+function migrateStoredBrowserProfiles(
+  profiles: Array<z.output<typeof legacyBrowserProfileSchema>>,
+): StoredBrowserProfileMigration {
+  const canonicalBases = new Set(profiles.map((profile) => profile.id.toLowerCase()));
+  const used = new Set<string>();
+  const firstIdByBase = new Map<string, string>();
+  const aliases = new Map<string, string>();
+
+  const canonical = profiles.map((profile) => {
+    const base = profile.id.toLowerCase();
+    let id = base;
+    if (id === "guest" || used.has(id)) {
+      for (let suffix = 2; ; suffix += 1) {
+        const ending = `-${suffix}`;
+        const candidate = `${base.slice(0, 40 - ending.length)}${ending}`;
+        // Keep an explicit legacy id (for example "work-2") available for
+        // its own entry instead of letting an earlier duplicate consume it.
+        if (candidate !== "guest" && !used.has(candidate) && !canonicalBases.has(candidate)) {
+          id = candidate;
+          break;
+        }
+      }
+    }
+    used.add(id);
+    const firstId = firstIdByBase.get(base) ?? id;
+    firstIdByBase.set(base, firstId);
+    // Case variants and exact duplicates named the same durable partition on
+    // case-insensitive hosts. Their saved bot references are ambiguous, so
+    // every spelling resolves to the first entry deterministically. This is
+    // also idempotent if bots.json is migrated before config.json is written.
+    aliases.set(profile.id, firstId);
+    return { ...profile, id };
+  });
+  return { profiles: canonical, aliases };
+}
+
+const legacyBrowserProfilesSchema = z.array(legacyBrowserProfileSchema).max(20);
+const storedBrowserProfilesSchema = legacyBrowserProfilesSchema.transform(
+  (profiles) => migrateStoredBrowserProfiles(profiles).profiles,
+);
 const browserProfilesSchema = z.array(browserProfileSchema).max(20).superRefine((profiles, ctx) => {
   const seen = new Set<string>();
   profiles.forEach((profile, index) => {
@@ -129,6 +186,9 @@ const appConfigSchema = z.object({
   browserProfiles: browserProfilesSchema.optional(),
   instances: instanceConfigMapSchema.optional(),
 });
+const storedAppConfigSchema = appConfigSchema.extend({
+  browserProfiles: storedBrowserProfilesSchema.optional(),
+});
 const appConfigPatchSchema = appConfigSchema.omit({ instances: true });
 const jsonObjectSchema = z.record(z.string(), z.json());
 
@@ -157,9 +217,24 @@ export type BrowserProfile = z.output<typeof browserProfileSchema>;
 export type ConfigPatch = z.output<typeof appConfigPatchSchema>;
 
 export function parseStoredConfig(value: JsonValue): AppConfig {
-  const parsed = appConfigSchema.safeParse(value);
+  const parsed = storedAppConfigSchema.safeParse(value);
   if (!parsed.success) throw new Error(schemaIssue(parsed.error, "Invalid stored configuration"));
   return parsed.data;
+}
+
+/** Exact old→canonical profile ids from #567's persisted config. Store
+ * hydration uses this to migrate bot references in the same write that
+ * resets other transient bot state. Invalid/non-legacy config is inert. */
+export function loadBrowserProfileIdAliases(): ReadonlyMap<string, string> {
+  try {
+    const document = z.object({ browserProfiles: legacyBrowserProfilesSchema.optional() }).safeParse(
+      parseJson(readFileSync(join(DATA_DIR, "config.json"), "utf8")),
+    );
+    if (!document.success || !document.data.browserProfiles) return new Map();
+    return migrateStoredBrowserProfiles(document.data.browserProfiles).aliases;
+  } catch {
+    return new Map();
+  }
 }
 
 export function parseConfigPatch(value: JsonValue): ConfigPatch {
@@ -347,6 +422,11 @@ export function saveConfig(patch: Partial<AppConfig>): void {
     /* first write */
   }
   const checkedPatch = appConfigSchema.partial().parse(patch);
+  // A write is the durable migration point. Preserve every other raw key in
+  // config.json, but never write #567's mixed-case or duplicate profile ids
+  // back after we have successfully recognized the legacy list.
+  const storedProfiles = storedBrowserProfilesSchema.safeParse(disk.browserProfiles);
+  if (storedProfiles.success) disk.browserProfiles = storedProfiles.data;
   for (const key of ["xai", "openaiCompat", "composio", "box", "opencodeGo", "tts", "imageGen", "profile", "rooms", "localVm", "features"] as const) {
     const section = checkedPatch[key];
     if (!section) continue;

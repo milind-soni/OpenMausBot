@@ -777,7 +777,15 @@ function createBrowserSurfaceManager({
       if (human && input?.type !== "keyUp") entry.documentTainted = true;
     });
     contents.on("before-mouse-event", (_event, mouse) => {
-      if (["mouseDown", "contextMenu", "mouseWheel"].includes(mouse?.type)) claimHumanControl(entry, "mouse", mouse);
+      if (!["mouseDown", "contextMenu", "mouseWheel"].includes(mouse?.type)) return;
+      const human = claimHumanControl(entry, "mouse", mouse);
+      // A click can submit or copy an autofilled password without producing a
+      // keyboard event. A hostile page can then clear the protected control
+      // and echo a transformed secret into ordinary DOM/title text before the
+      // agent gets control back. Pointer activation is therefore as sensitive
+      // as typing; passive wheel scrolling still claims control but does not
+      // taint the document.
+      if (human && ["mouseDown", "contextMenu"].includes(mouse?.type)) entry.documentTainted = true;
     });
     for (const signal of ["did-navigate", "did-navigate-in-page", "did-stop-loading", "page-title-updated"]) {
       contents.on(signal, () => emitState(entry));

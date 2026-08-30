@@ -1,4 +1,4 @@
-import { mkdirSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
@@ -14,6 +14,7 @@ import {
   parseStoredConfig,
   roomTurnTimeoutMinutes,
   showToolCallsEnabled,
+  saveConfig,
   skillRecorderEnabled,
   builtInBrowserEnabled,
   stripWorkspaceCredentialEnv,
@@ -40,8 +41,33 @@ describe("configuration boundaries", () => {
 
   it("rejects malformed stored instances and API patches", () => {
     expect(() => parseStoredConfig({ instances: { claude: { driver: 42 } } })).toThrow("instances.claude.driver");
+    expect(() => parseStoredConfig({ browserProfiles: [{ id: "../evil", name: "Unsafe" }] })).toThrow(
+      "browserProfiles.0.id",
+    );
     expect(() => parseConfigPatch({ opencodeGo: { apiKey: 42 } })).toThrow("opencodeGo.apiKey");
     expect(() => parseConfigPatch({ profile: [] })).toThrow("profile");
+  });
+
+  it("canonicalizes legacy browser profile ids without dropping other stored settings", () => {
+    expect(parseStoredConfig({
+      profile: { name: "Ada", email: "ada@example.com" },
+      rooms: { turnTimeoutMinutes: 20 },
+      features: { browser: true },
+      browserProfiles: [
+        { id: "Work", name: " Work " },
+        { id: "Work", name: "Second workspace" },
+      ],
+      instances: { claude: { driver: "claudeAgent", config: { cli: "/opt/claude" } } },
+    })).toEqual({
+      profile: { name: "Ada", email: "ada@example.com" },
+      rooms: { turnTimeoutMinutes: 20 },
+      features: { browser: true },
+      browserProfiles: [
+        { id: "work", name: "Work" },
+        { id: "work-2", name: "Second workspace" },
+      ],
+      instances: { claude: { driver: "claudeAgent", config: { cli: "/opt/claude" } } },
+    });
   });
 
   it("accepts only a simple VPS SSH config alias and exposes no credentials", () => {
@@ -381,6 +407,43 @@ describe("credential env preference", () => {
     expect(cfg.xai?.key).toBe("file-xai");
     expect(cfg.tts?.key).toBe("file-tts");
     expect(cfg.imageGen?.key).toBe("file-image");
+  });
+
+  it("loads legacy browser profiles without resetting config and canonicalizes them on the next write", () => {
+    const path = join(DATA_DIR, "config.json");
+    writeFileSync(path, JSON.stringify({
+      xai: { key: "file-xai", url: "https://api.example.test/v1" },
+      profile: { name: "Ada" },
+      features: { browser: true },
+      browserProfiles: [
+        { id: "Client", name: "Client one" },
+        { id: "Client", name: "Client two" },
+      ],
+      futureSetting: { keep: true },
+    }));
+
+    expect(loadConfig()).toMatchObject({
+      xai: { key: "file-xai", url: "https://api.example.test/v1" },
+      profile: { name: "Ada" },
+      features: { browser: true },
+      browserProfiles: [
+        { id: "client", name: "Client one" },
+        { id: "client-2", name: "Client two" },
+      ],
+    });
+
+    saveConfig({ features: { showToolCalls: true } });
+    const persisted = JSON.parse(readFileSync(path, "utf8"));
+    expect(persisted).toMatchObject({
+      xai: { key: "file-xai", url: "https://api.example.test/v1" },
+      profile: { name: "Ada" },
+      features: { browser: true, showToolCalls: true },
+      browserProfiles: [
+        { id: "client", name: "Client one" },
+        { id: "client-2", name: "Client two" },
+      ],
+      futureSetting: { keep: true },
+    });
   });
 
   it("treats a blanked file field as absent when env supplies the secret", () => {

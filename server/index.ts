@@ -20,6 +20,12 @@ import {
 
 import { approvalKey, autoVerdict } from "./auto-approve.ts";
 import { requestReview, resolveAutoReviewMode, shouldReview } from "./auto-review.ts";
+import {
+  BrowserCleanupCoordinator,
+  requireBrowserCleanupAcknowledged,
+  type BrowserCleanupRequest,
+  type BrowserCleanupWireRequest,
+} from "./browser-lifecycle-cleanup.ts";
 import * as checkpoints from "./checkpoints.ts";
 import { appendDecision, readDecisions } from "./decision-log.ts";
 import { validateBotCwd } from "./bot-cwd.ts";
@@ -214,20 +220,35 @@ const availableSkills = () => mergeSkills(bundledSkills, loadUserSkills(join(DAT
 // after first paint without putting the credential in the renderer or
 // restarting the embedded server. Plain Node/dev launches have no parentPort.
 type UtilityParentPort = {
-  on(event: "message", listener: (event: { data?: unknown }) => void): void;
-  postMessage(message: unknown): void;
+  on(event: "message", listener: (event: { data?: object }) => void): void;
+  postMessage(message: object): void;
 };
+// SAFETY: Electron's utility-process runtime is the only environment that
+// supplies parentPort; plain Node intentionally leaves it absent.
 const utilityParentPort = (process as NodeJS.Process & { parentPort?: UtilityParentPort }).parentPort;
-function postDesktopPrivateMessage(message: unknown): void {
+type DesktopPrivateMessage = BrowserCleanupWireRequest | {
+  type: "openmausbot:browser-control";
+  botId: string;
+  held: true;
+};
+function postDesktopPrivateMessage(message: DesktopPrivateMessage): boolean {
+  if (!utilityParentPort) return false;
   try {
-    utilityParentPort?.postMessage(message);
+    utilityParentPort.postMessage(message);
+    return true;
   } catch (error) {
     console.error(`[desktop-sync] could not send private parent message: ${error instanceof Error ? error.message : String(error)}`);
+    return false;
   }
 }
+const browserCleanup = new BrowserCleanupCoordinator({
+  file: join(DATA_DIR, "browser-cleanups.json"),
+  send: postDesktopPrivateMessage,
+});
 utilityParentPort?.on("message", (event) => {
   const message = event?.data;
   try {
+    if (browserCleanup.receive(message)) return;
     if (!applyDesktopBrowserConnectionMessage(message)) composio.applyManagedBrokerMessage(message);
   } catch (error) {
     console.error(`[desktop-sync] rejected private parent message: ${error instanceof Error ? error.message : String(error)}`);
@@ -700,6 +721,14 @@ const store = new Store(() => bootSelection);
 const sendSequencer = new SendSequencer();
 bootSelection = await defaultSelection();
 store.seedIfEmpty();
+// A cleanup intent is written before its config/store mutation. A process
+// crash before that mutation leaves a harmless uncommitted intent; a crash
+// after it leaves work Electron must replay before the same profile id can be
+// reused. Reconcile only after both durable stores are loaded.
+browserCleanup.reconcile((request) => request.kind === "profile"
+  ? !(cfg.browserProfiles ?? []).some((profile) => profile.id === request.id)
+  : !store.bot(request.id));
+browserCleanup.startPending();
 
 /** A bot as a client may see it: no provider session bookkeeping.
  *
@@ -5775,8 +5804,21 @@ const server = createServer(async (req, res) => {
       const target = perBotLocalVmTarget(bot.id);
       localVmIdles.get(target.key)?.cancel();
       localVmIdles.delete(target.key);
-      store.deleteBot(bot.id);
-      postDesktopPrivateMessage({ type: "openmausbot:browser-bot-deleted", botId: bot.id });
+      // Journal the wipe before the durable bot deletion. If the process dies
+      // between these two writes, boot reconciliation sees the bot still
+      // exists and drops the intent; if deletion committed, Electron keeps
+      // retrying the partition wipe until it acknowledges success.
+      const browserCleanupRequest = utilityParentPort ? browserCleanup.prepare("bot", bot.id) : null;
+      try {
+        store.deleteBot(bot.id);
+      } catch (error) {
+        if (browserCleanupRequest) browserCleanup.abort(browserCleanupRequest);
+        throw error;
+      }
+      if (browserCleanupRequest) {
+        const acknowledged = await browserCleanup.ensure(browserCleanupRequest);
+        requireBrowserCleanupAcknowledged(acknowledged, `Browser data for ${bot.name}`);
+      }
       for (const dir of [EVENTS_DIR, NATIVE_DIR]) {
         try {
           unlinkSync(join(dir, `${bot.threadId}.ndjson`));
@@ -6587,6 +6629,17 @@ const server = createServer(async (req, res) => {
         : (cfg.browserProfiles ?? [])
             .map((profile) => profile.id)
             .filter((id) => !patch.browserProfiles!.some((profile) => profile.id === id));
+      if (patch.browserProfiles !== undefined) {
+        const currentIds = new Set((cfg.browserProfiles ?? []).map((profile) => profile.id));
+        const pendingReuse = patch.browserProfiles.find(
+          (profile) => !currentIds.has(profile.id) && browserCleanup.hasPendingProfile(profile.id),
+        );
+        if (pendingReuse) {
+          return json(res, 409, {
+            error: `the previous “${pendingReuse.name}” browser session is still being erased — wait before reusing it`,
+          });
+        }
+      }
       if (patch.vps !== undefined) {
         const currentAlias = vpsSshAlias(cfg);
         const nextAlias = vpsSshAlias({ ...cfg, vps: patch.vps });
@@ -6674,31 +6727,58 @@ const server = createServer(async (req, res) => {
           });
         }
       }
-      const externalSecretStorage = url.searchParams.get("secretStorage") === "external";
-      if (externalSecretStorage) {
-        // The packaged Electron caller commits supplied credentials to the
-        // OS-encrypted store before entering this route. Persist every
-        // non-secret sibling in the same request, but replace each supplied
-        // credential with an empty tombstone so an older plaintext value can
-        // never survive the merge in config.json.
-        const persisted = structuredClone(patch);
-        if (persisted.xai?.key !== undefined) persisted.xai.key = "";
-        if (persisted.composio?.apiKey !== undefined) persisted.composio.apiKey = "";
-        if (persisted.box?.token !== undefined) persisted.box.token = "";
-        if (persisted.opencodeGo?.apiKey !== undefined) persisted.opencodeGo.apiKey = "";
-        if (persisted.tts?.key !== undefined) persisted.tts.key = "";
-        if (persisted.imageGen?.key !== undefined) persisted.imageGen.key = "";
-        saveConfig(persisted);
-        syncCredentialEnv(patch);
-        Object.assign(cfg, loadConfig());
-      } else {
-        saveConfig(patch);
-        // loadConfig prefers env over the file for credentials, so the env
-        // must follow the save — otherwise the value injected at boot would
-        // shadow the new key until the next launch
-        syncCredentialEnv(patch);
-        Object.assign(cfg, loadConfig());
+      const browserCleanupRequests: BrowserCleanupRequest[] = [];
+      try {
+        if (utilityParentPort) {
+          for (const profileId of removedBrowserProfileIds) {
+            browserCleanupRequests.push(browserCleanup.prepare("profile", profileId));
+          }
+        }
+      } catch (error) {
+        for (const request of browserCleanupRequests) browserCleanup.abort(request);
+        throw error;
       }
+      let configWriteCommitted = false;
+      const externalSecretStorage = url.searchParams.get("secretStorage") === "external";
+      try {
+        if (externalSecretStorage) {
+          // The packaged Electron caller commits supplied credentials to the
+          // OS-encrypted store before entering this route. Persist every
+          // non-secret sibling in the same request, but replace each supplied
+          // credential with an empty tombstone so an older plaintext value can
+          // never survive the merge in config.json.
+          const persisted = structuredClone(patch);
+          if (persisted.xai?.key !== undefined) persisted.xai.key = "";
+          if (persisted.composio?.apiKey !== undefined) persisted.composio.apiKey = "";
+          if (persisted.box?.token !== undefined) persisted.box.token = "";
+          if (persisted.opencodeGo?.apiKey !== undefined) persisted.opencodeGo.apiKey = "";
+          if (persisted.tts?.key !== undefined) persisted.tts.key = "";
+          if (persisted.imageGen?.key !== undefined) persisted.imageGen.key = "";
+          saveConfig(persisted);
+          configWriteCommitted = true;
+          syncCredentialEnv(patch);
+          Object.assign(cfg, loadConfig());
+        } else {
+          saveConfig(patch);
+          configWriteCommitted = true;
+          // loadConfig prefers env over the file for credentials, so the env
+          // must follow the save — otherwise the value injected at boot would
+          // shadow the new key until the next launch
+          syncCredentialEnv(patch);
+          Object.assign(cfg, loadConfig());
+        }
+      } catch (error) {
+        if (configWriteCommitted) {
+          for (const request of browserCleanupRequests) void browserCleanup.ensure(request);
+        } else {
+          for (const request of browserCleanupRequests) browserCleanup.abort(request);
+        }
+        throw error;
+      }
+      // From this point the profile deletion is durable. Start the wipe before
+      // touching secondary bot references so an unexpected store write error
+      // cannot leave a journal entry dormant until the next app launch.
+      for (const request of browserCleanupRequests) void browserCleanup.ensure(request);
       if (patch.browserProfiles !== undefined) {
         const retained = new Set(patch.browserProfiles.map((profile) => profile.id));
         for (const bot of store.bots) {
@@ -6709,9 +6789,22 @@ const server = createServer(async (req, res) => {
             store.patchBot(bot.id, { browserProfile: undefined });
           }
         }
-        for (const profileId of removedBrowserProfileIds) {
-          postDesktopPrivateMessage({ type: "openmausbot:browser-profile-deleted", profileId });
+        // Normal desktop deletes now wait for Electron's acknowledgement.
+        // If Electron is restarting, the durable journal keeps retrying and
+        // the id-reuse guard above prevents stale logins from resurfacing.
+        const acknowledgements = await Promise.all(
+          browserCleanupRequests.map((request) => browserCleanup.ensure(request)),
+        );
+        if (!acknowledgements.every(Boolean)) {
+          // The config mutation is already durable. Keep every connected UI in
+          // sync even though this request must truthfully return non-2xx until
+          // Electron confirms the separate storage wipe.
+          broadcast({ kind: "config", ...configStatus() });
         }
+        requireBrowserCleanupAcknowledged(
+          acknowledgements.every(Boolean),
+          removedBrowserProfileIds.length === 1 ? "The browser profile" : "The browser profiles",
+        );
       }
       if (disablingBuiltInBrowser) await releaseAllBrowserCapabilities();
       // Provider keys change the fleet. Profile, voice, VPS, and room timeout

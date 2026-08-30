@@ -232,6 +232,7 @@ it.runIf(canRunRealElectronFixture)("protects closed-shadow values and revalidat
   ].join("\n");
   expect(result, diagnostics).toMatchObject({ code: 0, signal: null });
   expect(result.stdout).toContain("closed-shadow-screenshot-refused");
+  expect(result.stdout).toContain("nested-name-source-redacted");
   expect(result.stdout).toContain("transformed-secret-taint");
   expect(result.stdout).toContain("protected-focused-keys-refused");
   expect(result.stdout).toContain("late-overlay-click-refused");

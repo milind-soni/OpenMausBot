@@ -212,6 +212,44 @@ describe("Store", () => {
     expect(saved.find((bot) => bot.id === absent.id)).not.toHaveProperty("cloudBackend");
   });
 
+  it("migrates legacy browser profile references using the first duplicate deterministically", () => {
+    const store = new Store(selection);
+    const first = store.createBot();
+    const duplicate = store.createBot();
+    const caseVariant = store.createBot();
+    const configFile = join(DATA_DIR, "config.json");
+    const botsFile = join(DATA_DIR, "bots.json");
+    writeFileSync(configFile, JSON.stringify({
+      browserProfiles: [
+        { id: "Work", name: "Primary" },
+        { id: "Work", name: "Duplicate" },
+        { id: "work", name: "Lowercase variant" },
+      ],
+    }));
+    const bots: BotRecord[] = JSON.parse(readFileSync(botsFile, "utf8"));
+    bots.find((bot) => bot.id === first.id)!.browserProfile = "Work";
+    bots.find((bot) => bot.id === duplicate.id)!.browserProfile = "Work";
+    bots.find((bot) => bot.id === caseVariant.id)!.browserProfile = "work";
+    writeFileSync(botsFile, JSON.stringify(bots));
+
+    const reloaded = new Store(selection);
+    expect(reloaded.bot(first.id)?.browserProfile).toBe("work");
+    expect(reloaded.bot(duplicate.id)?.browserProfile).toBe("work");
+    expect(reloaded.bot(caseVariant.id)?.browserProfile).toBe("work");
+
+    const persisted: BotRecord[] = JSON.parse(readFileSync(botsFile, "utf8"));
+    expect(persisted.find((bot) => bot.id === first.id)?.browserProfile).toBe("work");
+    expect(persisted.find((bot) => bot.id === duplicate.id)?.browserProfile).toBe("work");
+    expect(persisted.find((bot) => bot.id === caseVariant.id)?.browserProfile).toBe("work");
+
+    // config.json may remain legacy until the next settings save. Repeated
+    // hydration must not reinterpret the already-canonical first id.
+    const reloadedAgain = new Store(selection);
+    expect(reloadedAgain.bot(first.id)?.browserProfile).toBe("work");
+    expect(reloadedAgain.bot(duplicate.id)?.browserProfile).toBe("work");
+    expect(reloadedAgain.bot(caseVariant.id)?.browserProfile).toBe("work");
+  });
+
   it("migrates unambiguous legacy peer grants without guessing duplicate names", () => {
     const store = new Store(selection);
     const requester = store.createBot();
