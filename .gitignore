@@ -28,3 +28,4 @@ cloudflare/control-plane/worker-configuration.d.ts
 .parallel-dev/
 .vercel/
 .pi/
+artifacts/

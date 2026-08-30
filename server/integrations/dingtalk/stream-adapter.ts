@@ -8,6 +8,7 @@ import {
 } from "./safe-log.ts";
 import { DingTalkSessionReplyRegistry } from "./reply-router.ts";
 import type { DingTalkStreamEnvelope } from "./types.ts";
+import { parseDingTalkOwnerTextAction, parseDingTalkOwnerTextCommand } from "./text-actions.ts";
 
 export type DingTalkStreamState = "stopped" | "connecting" | "connected" | "reconnecting" | "stopping";
 
@@ -102,6 +103,35 @@ export class DingTalkStreamAdapter {
         return;
       }
       if (normalized.replyChannel) this.replyChannels.capture(normalized.replyChannel);
+      const ownerAction = parseDingTalkOwnerTextAction(normalized.message);
+      if (ownerAction) {
+        const outcome = await this.ownerActions.perform(ownerAction);
+        this.sdk.acknowledge(envelope.headers.messageId);
+        this.logger.write({
+          event: "dingtalk.text_action.committed",
+          topic: "robot",
+          transportMessageIdHash: stableIdentifierHash(envelope.headers.messageId),
+          sourceEventIdHash: stableIdentifierHash(normalized.message.sourceEventId),
+          workItemId: outcome.workItemId,
+          duplicate: outcome.duplicate,
+        });
+        return;
+      }
+      const ownerCommand = parseDingTalkOwnerTextCommand(normalized.message);
+      if (ownerCommand) {
+        if (!this.ownerActions.performCommand) throw new Error("dingtalk_owner_text_commands_not_configured");
+        const outcome = await this.ownerActions.performCommand(ownerCommand);
+        this.sdk.acknowledge(envelope.headers.messageId);
+        this.logger.write({
+          event: "dingtalk.text_command.committed",
+          topic: "robot",
+          transportMessageIdHash: stableIdentifierHash(envelope.headers.messageId),
+          sourceEventIdHash: stableIdentifierHash(normalized.message.sourceEventId),
+          workItemId: outcome.workItemId,
+          duplicate: outcome.duplicate,
+        });
+        return;
+      }
       const outcome = await this.inbound.ingest(normalized.message);
       // Success/duplicate both mean the authoritative transaction is durable.
       this.sdk.acknowledge(envelope.headers.messageId);

@@ -47,7 +47,7 @@ function fixture(): AcceptanceReport {
     status: "pending",
     build: { sha: "c".repeat(40), dirty: false },
     times: { startedAt: "2026-08-28T01:00:00.000Z", finishedAt: "2026-08-28T01:01:00.000Z" },
-    ledger: { schemaVersion: 8 },
+    ledger: { schemaVersion: 9 },
     externalReferences: {
       repositoryPathHash: digest("repo-path"),
       ownerIdentityHash: ownerHash,

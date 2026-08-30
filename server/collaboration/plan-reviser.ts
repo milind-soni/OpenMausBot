@@ -30,6 +30,10 @@ export interface DefinitionRevisionOutcome {
 export interface PlanningCoordinatorOptions {
   planner: PlannerPort;
   policy: PlanningPolicy;
+  defaultDefinition?: {
+    repository: string;
+    acceptanceConditions: WorkItemSnapshot["acceptanceConditions"];
+  };
 }
 
 function equal(value: unknown, other: unknown): boolean {
@@ -199,6 +203,16 @@ export class PlanningCoordinator {
     const normalized = text.trim();
     if (latest?.facts.includes(normalized)) return null;
     const facts = [...(latest?.facts ?? []), normalized];
+    if (!latest && this.options.defaultDefinition) {
+      return this.reviseDefinition(workItemId, {
+        goal: normalized,
+        goalConfirmed: true,
+        repository: this.options.defaultDefinition.repository,
+        acceptanceConditions: this.options.defaultDefinition.acceptanceConditions,
+        blockingAmbiguities: [],
+        facts,
+      }, now);
+    }
     return this.reviseDefinition(workItemId, { facts }, now);
   }
 

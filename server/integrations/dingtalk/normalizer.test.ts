@@ -65,6 +65,7 @@ describe("DingTalk strict normalizer", () => {
       },
       reason: "验收不符合预期",
       receivedAt: 1_700_000_003_000,
+      origin: "card",
     });
     expect(normalized).not.toHaveProperty("action");
     expect(normalized).not.toHaveProperty("role");
@@ -80,6 +81,26 @@ describe("DingTalk strict normalizer", () => {
     expect({ corp: sameMember.sender.senderCorpId, staff: sameMember.sender.senderStaffId }).toEqual({
       corp: messageIdentity.senderCorpId,
       staff: messageIdentity.senderStaffId,
+    });
+  });
+
+  it("selects only the clicked token from card private data and audits button rejection", () => {
+    expect(normalizeCardAction(
+      fixture("card-action-private-data.json", "transport-card-private", "event-card-private"),
+      1_700_000_003_000,
+    )).toEqual({
+      transportEventId: "event-card-private",
+      transportMessageId: "transport-card-private",
+      actionToken: "reject-opaque-token",
+      sender: {
+        senderCorpId: "corp-1",
+        senderStaffId: "owner-1",
+        senderId: "owner-sender-1",
+        displayName: "Owner",
+      },
+      reason: "Owner rejected candidate via DingTalk interactive card",
+      receivedAt: 1_700_000_003_000,
+      origin: "card",
     });
   });
 });

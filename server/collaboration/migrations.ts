@@ -2,7 +2,7 @@ import type { DatabaseSync } from "node:sqlite";
 
 import { OPENMAUSBOT_SOURCE_BASELINE } from "./config.ts";
 
-export const COLLABORATION_SCHEMA_VERSION = 8;
+export const COLLABORATION_SCHEMA_VERSION = 9;
 
 interface Migration {
   version: number;
@@ -641,6 +641,68 @@ const migrations: readonly Migration[] = [
           delivered_at INTEGER,
           CHECK ((delivery_state = 'sent' AND delivered_at IS NOT NULL) OR delivery_state <> 'sent')
         ) STRICT;
+      `);
+    },
+  },
+  {
+    version: 9,
+    name: "add-idempotent-owner-text-commands",
+    checksum: "v9:owner-text-command-event-outcomes-command-status-outbox",
+    apply(database) {
+      database.exec(`
+        CREATE TABLE collaboration_owner_text_commands (
+          source_event_id TEXT PRIMARY KEY,
+          payload_hash TEXT NOT NULL,
+          outcome_json TEXT NOT NULL,
+          processed_at INTEGER NOT NULL
+        ) STRICT;
+        CREATE TRIGGER collaboration_owner_text_commands_no_update
+          BEFORE UPDATE ON collaboration_owner_text_commands
+          BEGIN SELECT RAISE(ABORT, 'owner text command events are immutable'); END;
+        CREATE TRIGGER collaboration_owner_text_commands_no_delete
+          BEFORE DELETE ON collaboration_owner_text_commands
+          BEGIN SELECT RAISE(ABORT, 'owner text command events are immutable'); END;
+
+        ALTER TABLE collaboration_outbox RENAME TO collaboration_outbox_v9;
+        CREATE TABLE collaboration_outbox (
+          id TEXT PRIMARY KEY,
+          source TEXT NOT NULL,
+          source_event_id TEXT NOT NULL,
+          aggregate_type TEXT NOT NULL CHECK (aggregate_type IN ('work_item', 'association', 'plan')),
+          aggregate_id TEXT NOT NULL,
+          aggregate_version INTEGER NOT NULL,
+          kind TEXT NOT NULL CHECK (kind IN (
+            'primary_status_card', 'association_choice_card', 'invalid_reference_card',
+            'clarification_card', 'plan_status_card', 'command_status_card'
+          )),
+          dedupe_key TEXT NOT NULL UNIQUE,
+          supersession_key TEXT,
+          payload_json TEXT NOT NULL,
+          created_at INTEGER NOT NULL,
+          sent_at INTEGER,
+          superseded_at INTEGER,
+          delivery_state TEXT NOT NULL DEFAULT 'pending'
+            CHECK (delivery_state IN ('pending', 'claimed', 'sent', 'dead_letter', 'superseded')),
+          attempt INTEGER NOT NULL DEFAULT 0 CHECK (attempt >= 0),
+          next_attempt_at INTEGER NOT NULL DEFAULT 0,
+          claim_owner TEXT,
+          claim_fence INTEGER,
+          claim_expires_at INTEGER,
+          last_error TEXT,
+          dead_lettered_at INTEGER
+        ) STRICT;
+        INSERT INTO collaboration_outbox
+          (id, source, source_event_id, aggregate_type, aggregate_id, aggregate_version, kind, dedupe_key,
+           supersession_key, payload_json, created_at, sent_at, superseded_at, delivery_state, attempt,
+           next_attempt_at, claim_owner, claim_fence, claim_expires_at, last_error, dead_lettered_at)
+        SELECT id, source, source_event_id, aggregate_type, aggregate_id, aggregate_version, kind, dedupe_key,
+               supersession_key, payload_json, created_at, sent_at, superseded_at, delivery_state, attempt,
+               next_attempt_at, claim_owner, claim_fence, claim_expires_at, last_error, dead_lettered_at
+        FROM collaboration_outbox_v9;
+        DROP TABLE collaboration_outbox_v9;
+        CREATE INDEX collaboration_outbox_pending ON collaboration_outbox(sent_at, created_at);
+        CREATE INDEX collaboration_outbox_dispatchable
+          ON collaboration_outbox(delivery_state, next_attempt_at, created_at);
       `);
     },
   },

@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { lstatSync, mkdirSync, readFileSync, realpathSync } from "node:fs";
+import { chmodSync, lstatSync, mkdirSync, readFileSync, realpathSync } from "node:fs";
 import { dirname, isAbsolute, relative, resolve, sep } from "node:path";
 
 import { isolatedExecutionEnvironment, runArgv, type ArgvResult } from "./execution-limits.ts";
@@ -94,8 +94,9 @@ export class WorktreeManager {
   readonly environment: NodeJS.ProcessEnv;
 
   constructor(root: string) {
-    mkdirSync(root, { recursive: true, mode: 0o700 });
+    mkdirSync(root, { recursive: true, mode: 0o711 });
     this.root = realpathSync(root);
+    chmodSync(this.root, 0o711);
     const home = resolve(this.root, ".execution-home");
     mkdirSync(home, { recursive: true, mode: 0o700 });
     this.environment = isolatedExecutionEnvironment(process.env, home);
@@ -140,7 +141,11 @@ export class WorktreeManager {
       `a${input.attempt}`,
     );
     if (!contained(this.root, path)) throw new Error("Managed worktree path escaped its root");
-    mkdirSync(dirname(path), { recursive: true, mode: 0o700 });
+    const workItemRoot = resolve(this.root, component(input.workItemId));
+    const nodeRoot = dirname(path);
+    mkdirSync(nodeRoot, { recursive: true, mode: 0o711 });
+    chmodSync(workItemRoot, 0o711);
+    chmodSync(nodeRoot, 0o711);
     const originalHead = (await git(repository, this.environment, ["rev-parse", "--verify", "HEAD^{commit}"]))
       .stdout.toString("utf8")
       .trim();

@@ -1,6 +1,12 @@
 import type { InboundMessageOutcome } from "../../collaboration/inbound.ts";
 import type { OwnerActionOutcome } from "../../collaboration/actions.ts";
-import type { DingTalkCardAction, DingTalkInboundMessage, DingTalkStreamEnvelope } from "./types.ts";
+import type {
+  DingTalkCardAction,
+  DingTalkInboundMessage,
+  DingTalkOwnerTextCommand,
+  DingTalkOwnerTextCommandOutcome,
+  DingTalkStreamEnvelope,
+} from "./types.ts";
 
 export type MaybePromise<T> = T | Promise<T>;
 
@@ -10,6 +16,7 @@ export interface DingTalkInboundSink {
 
 export interface DingTalkOwnerActionSink {
   perform(action: DingTalkCardAction): MaybePromise<OwnerActionOutcome>;
+  performCommand?(command: DingTalkOwnerTextCommand): MaybePromise<DingTalkOwnerTextCommandOutcome>;
 }
 
 export interface DingTalkStreamSdkPort {

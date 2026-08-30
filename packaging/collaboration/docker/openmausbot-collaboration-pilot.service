@@ -1,0 +1,22 @@
+[Unit]
+Description=OpenMausBot Docker collaboration pilot
+Requires=docker.service
+PartOf=docker.service
+After=docker.service network-online.target
+Wants=network-online.target
+StartLimitIntervalSec=0
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+WorkingDirectory=/Users/mac/work/github/bot/packaging/collaboration/docker
+EnvironmentFile=/etc/openmausbot-collaboration-pilot/pilot.env
+ExecStart=/usr/bin/docker compose --env-file /etc/openmausbot-collaboration-pilot/pilot.env up --detach --no-build --pull never --remove-orphans
+ExecStop=/usr/bin/docker compose --env-file /etc/openmausbot-collaboration-pilot/pilot.env down
+Restart=on-failure
+RestartSec=15
+TimeoutStartSec=1800
+TimeoutStopSec=60
+
+[Install]
+WantedBy=multi-user.target docker.service

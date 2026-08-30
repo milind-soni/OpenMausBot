@@ -107,7 +107,11 @@ export class InboundMessageProcessor {
         .get(sourceEventId) as ExistingEventRow | undefined;
       if (existing) {
         const outbox = outboxEntryForEvent(this.database, sourceEventId);
-        if (outbox.card.type === "clarification_card" || outbox.card.type === "plan_status_card") {
+        if (
+          outbox.card.type === "clarification_card" ||
+          outbox.card.type === "plan_status_card" ||
+          outbox.card.type === "command_status_card"
+        ) {
           throw new Error(`Inbound acknowledgement ${sourceEventId} has an invalid card type`);
         }
         this.database.exec("COMMIT");

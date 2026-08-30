@@ -96,6 +96,44 @@ describe("secure collaboration headless CLI", () => {
     database.close();
   });
 
+  it("wires the DingTalk card template into a STREAM-enabled runtime", async () => {
+    const output = io();
+    const dataDirectory = temporaryDirectory();
+    const credentials = join(dataDirectory, "dingtalk.json");
+    writeFileSync(credentials, JSON.stringify({ clientId: "app-key", clientSecret: "app-secret" }), { mode: 0o600 });
+    chmodSync(credentials, 0o600);
+    let receivedOptions: CollaborationHeadlessRuntimeOptions | undefined;
+    const health = await runCollaborationHeadless(
+      ["--health", "--data-dir", dataDirectory],
+      {
+        OMB_DINGTALK_ENABLED: "1",
+        OMB_DINGTALK_CREDENTIAL_FILE: credentials,
+        OMB_DINGTALK_ALLOWED_CONVERSATION_IDS: '["cid-group"]',
+        OMB_DINGTALK_PROACTIVE_OPEN_CONVERSATION_ID: "cid-group",
+        OMB_DINGTALK_CARD_TEMPLATE_ID: "template-1",
+      },
+      {
+        io: output.io,
+        createRuntime(options) {
+          receivedOptions = options;
+          return new CollaborationHeadlessRuntime({
+            ...options,
+            dingTalk: {
+              ...options.dingTalk!,
+              createStream: () => ({
+                start: async () => "connected",
+                stop() {},
+                state: () => "connected",
+              }),
+            },
+          });
+        },
+      },
+    );
+    expect(health).toMatchObject({ status: "healthy", ready: true, dingtalk: { state: "configured" } });
+    expect(receivedOptions?.dingTalk).toMatchObject({ enabled: true, cardTemplateId: "template-1" });
+  });
+
   it("never accepts Owner corp/staff identity as command-line values", () => {
     expect(() => parseHeadlessArguments(["--recover-owner", "--sender-corp-id", "secret"], {})).toThrow(
       "Unknown argument",

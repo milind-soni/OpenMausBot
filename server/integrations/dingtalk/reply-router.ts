@@ -5,6 +5,7 @@ import type {
   DingTalkSessionSendPort,
 } from "./ports.ts";
 import type { DingTalkSessionReplyChannel } from "./types.ts";
+import { isDingTalkCandidateOwnerCard } from "./cards.ts";
 
 function isRetryableStatus(status: number): boolean {
   return status === 408 || status === 429 || status >= 500;
@@ -72,12 +73,29 @@ export class DingTalkReplyRouter implements DingTalkDeliveryPort {
     payload: unknown;
     idempotencyKey: string;
   }): Promise<DingTalkDeliveryResult> {
+    if (isDingTalkCandidateOwnerCard(input.payload)) {
+      if (!input.proactiveOpenConversationId || !this.activeSender) {
+        return { kind: "permanent", code: "interactive_card_delivery_unroutable" };
+      }
+      try {
+        const response = await this.activeSender.send({
+          proactiveOpenConversationId: input.proactiveOpenConversationId,
+          payload: input.payload,
+          idempotencyKey: input.idempotencyKey,
+        });
+        if (response.ok) return { kind: "sent", channel: "proactive" };
+        return isRetryableStatus(response.status)
+          ? { kind: "retryable", code: response.code ?? "interactive_card_send_failed" }
+          : { kind: "permanent", code: response.code ?? "interactive_card_send_rejected" };
+      } catch {
+        return { kind: "retryable", code: "interactive_card_transport_error" };
+      }
+    }
     const channel = input.sourceEventId ? this.sessions.active(input.sourceEventId) : null;
     if (channel) {
       try {
         const response = await this.sessionSender.send(channel.webhookUrl, input.payload);
         if (response.ok) {
-          this.sessions.consume(channel.sourceEventId);
           return { kind: "sent", channel: "session" };
         }
         if (!input.proactiveOpenConversationId || !this.activeSender) {

@@ -42,6 +42,7 @@ const yamlEsmPlugin = {
 const ENTRY_POINTS = [
   "index.ts",
   "collaboration-headless.ts",
+  "collaboration/operations/docker-apply-patch.ts",
   // The packaged smoke probe imports this manifest directly. Importing the
   // shared avatar contract widens TypeScript's inferred emit root to the repo,
   // so tsc may place its copy under dist-server/server/. Bundle an explicit

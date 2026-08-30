@@ -7,6 +7,7 @@ import {
   type IssuedOwnerAction,
   type OwnerActionOutcome,
   type PerformOwnerActionInput,
+  type PerformDirectOwnerActionInput,
 } from "./actions.ts";
 import { FIRST_MILESTONE_DEFAULTS, OPENMAUSBOT_SOURCE_BASELINE } from "./config.ts";
 import { openCollaborationLedger, type CollaborationLedger, type DatabaseHealth } from "./db.ts";
@@ -56,6 +57,7 @@ export interface CollaborationService {
   }): OwnerBinding;
   issueOwnerAction(input: IssueOwnerActionInput): IssuedOwnerAction;
   performOwnerAction(input: PerformOwnerActionInput): OwnerActionOutcome;
+  performDirectOwnerAction(input: PerformDirectOwnerActionInput): OwnerActionOutcome;
   pendingOutbox(): CollaborationOutboxEntry[];
   close(): void;
 }
@@ -195,6 +197,16 @@ export function startCollaborationService(options: CollaborationServiceOptions):
       assertServiceArmed();
       try {
         return actions.perform(input);
+      } catch (error) {
+        if (isSqliteFailure(error)) serviceDegradedReason = "audit_unwritable";
+        throw error;
+      }
+    },
+    performDirectOwnerAction(input) {
+      if (closed) throw new Error("Collaboration service is closed");
+      assertServiceArmed();
+      try {
+        return actions.performDirect(input);
       } catch (error) {
         if (isSqliteFailure(error)) serviceDegradedReason = "audit_unwritable";
         throw error;

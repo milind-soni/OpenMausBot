@@ -236,4 +236,76 @@ describe("DingTalk Stream adapter", () => {
     });
     expect(sdk.acknowledgements).toEqual(["card-transport"]);
   });
+
+  it("routes copied text decisions to Owner actions instead of creating a new Work Item", async () => {
+    const sdk = new FakeSdk();
+    const ingested: DingTalkInboundMessage[] = [];
+    let captured: DingTalkCardAction | undefined;
+    const adapter = new DingTalkStreamAdapter(
+      sdk,
+      {
+        ingest(message) {
+          ingested.push(message);
+          return inboundOutcome(message);
+        },
+      },
+      {
+        perform(action) {
+          captured = action;
+          return ownerOutcome();
+        },
+      },
+      new DingTalkSessionReplyRegistry(() => 1_700_000_000_000),
+    );
+    await adapter.start();
+    const command = envelope("bot-message-text.json", "transport-text-action");
+    const payload = JSON.parse(command.data) as { text: { content: string } };
+    payload.text.content = "@研发助手 接受 accept_code_12345678901234567890123456789012";
+    await sdk.emit("robot", { ...command, data: JSON.stringify(payload) });
+    expect(ingested).toEqual([]);
+    expect(captured).toMatchObject({
+      transportEventId: "biz-message-1",
+      transportMessageId: "transport-text-action",
+      actionToken: "accept_code_12345678901234567890123456789012",
+      origin: "text",
+    });
+    expect(sdk.acknowledgements).toEqual(["transport-text-action"]);
+  });
+
+  it("routes deterministic WI commands without creating requirement events", async () => {
+    const sdk = new FakeSdk();
+    const ingested: DingTalkInboundMessage[] = [];
+    const commands: string[] = [];
+    const adapter = new DingTalkStreamAdapter(
+      sdk,
+      {
+        ingest(message) {
+          ingested.push(message);
+          return inboundOutcome(message);
+        },
+      },
+      {
+        perform: () => ownerOutcome(),
+        performCommand(command) {
+          commands.push(`${command.command}:${command.workItemId}`);
+          return {
+            allowed: true,
+            duplicate: false,
+            command: command.command,
+            workItemId: command.workItemId,
+            reason: "status_returned",
+          };
+        },
+      },
+      new DingTalkSessionReplyRegistry(() => 1_700_000_000_000),
+    );
+    await adapter.start();
+    const command = envelope("bot-message-text.json", "transport-owner-command");
+    const payload = JSON.parse(command.data) as { text: { content: string } };
+    payload.text.content = "@研发助手 状态 WI-A1B2C3D4E5F6";
+    await sdk.emit("robot", { ...command, data: JSON.stringify(payload) });
+    expect(ingested).toEqual([]);
+    expect(commands).toEqual(["status:WI-A1B2C3D4E5F6"]);
+    expect(sdk.acknowledgements).toEqual(["transport-owner-command"]);
+  });
 });

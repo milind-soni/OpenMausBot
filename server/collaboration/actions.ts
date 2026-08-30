@@ -44,6 +44,16 @@ export interface PerformOwnerActionInput {
   now?: number;
 }
 
+export type DirectOwnerControlAction = Exclude<WorkItemControlAction, "accept" | "reject">;
+
+export interface PerformDirectOwnerActionInput {
+  sourceEventId: string;
+  action: DirectOwnerControlAction;
+  workItemId: string;
+  sender: DingTalkSender;
+  now?: number;
+}
+
 export interface OwnerActionOutcome {
   allowed: boolean;
   duplicate: boolean;
@@ -96,12 +106,28 @@ interface SnapshotRow {
   blocking_ambiguities_json: string;
 }
 
+interface TextCommandRow {
+  payload_hash: string;
+  outcome_json: string;
+}
+
 function tokenHash(token: string): string {
   return createHash("sha256").update(token).digest("hex");
 }
 
 function stateHash(value: unknown): string {
   return createHash("sha256").update(JSON.stringify(value)).digest("hex");
+}
+
+function directCommandHash(input: PerformDirectOwnerActionInput): string {
+  return createHash("sha256").update(JSON.stringify({
+    sourceEventId: input.sourceEventId,
+    action: input.action,
+    workItemId: input.workItemId,
+    senderCorpId: input.sender.senderCorpId ?? null,
+    senderStaffId: input.sender.senderStaffId ?? null,
+    senderId: input.sender.senderId,
+  })).digest("hex");
 }
 
 function tokenTtl(ttlMs: number | undefined): number {
@@ -499,6 +525,158 @@ export class OwnerActionController {
       });
       this.database.exec("COMMIT");
       return allowed;
+    } catch (error) {
+      this.database.exec("ROLLBACK");
+      throw error;
+    }
+  }
+
+  /** Applies a WI-addressed Owner command and its transport dedupe record in one Ledger transaction. */
+  performDirect(input: PerformDirectOwnerActionInput): OwnerActionOutcome {
+    this.assertOpen();
+    const now = input.now ?? Date.now();
+    const sourceEventId = input.sourceEventId.trim();
+    const workItemId = input.workItemId.trim().toUpperCase();
+    if (!sourceEventId || sourceEventId.length > 256) throw new Error("owner_text_source_event_invalid");
+    if (!/^WI-[A-F0-9]{12}$/u.test(workItemId)) throw new Error("owner_text_work_item_invalid");
+    const normalized = { ...input, sourceEventId, workItemId, now };
+    const payloadHash = directCommandHash(normalized);
+    const requestId = randomUUID();
+    this.database.exec("BEGIN IMMEDIATE");
+    try {
+      assertLedgerArmed(this.database);
+      const previous = this.database
+        .prepare(
+          "SELECT payload_hash, outcome_json FROM collaboration_owner_text_commands WHERE source_event_id = ?",
+        )
+        .get(sourceEventId) as TextCommandRow | undefined;
+      if (previous) {
+        if (previous.payload_hash !== payloadHash) throw new Error("owner_text_command_event_conflict");
+        const decision = JSON.parse(previous.outcome_json) as OwnerActionOutcome;
+        this.database.exec("COMMIT");
+        return { ...decision, duplicate: true };
+      }
+
+      const policy = evaluateOwnerPolicy(this.database, {
+        sender: input.sender,
+        capability: capabilityForAction(input.action),
+        now,
+      });
+      let decision: OwnerActionOutcome;
+      if (policy.decision !== "allow") {
+        decision = outcome({ allowed: false, action: input.action, workItemId, reason: policy.reason });
+        appendControlAudit(this.database, {
+          actorPrincipalId: policy.principalId,
+          workItemId,
+          requestId,
+          action: `control.${input.action}`,
+          outcome: "deny",
+          policyRule: policy.ruleId,
+          resource: { sourceEventIdHash: stateHash(sourceEventId) },
+          error: decision.reason,
+          now,
+        });
+      } else {
+        let workItem: WorkItemRow | null = null;
+        try {
+          workItem = readWorkItem(this.database, workItemId);
+        } catch {
+          decision = outcome({ allowed: false, action: input.action, workItemId, reason: "unknown_work_item" });
+        }
+        if (workItem) {
+          const problem = transitionProblem(this.database, input.action, workItem, null);
+          if (problem) {
+            decision = outcome({
+              allowed: false,
+              action: input.action,
+              workItemId,
+              workItemVersion: workItem.version,
+              controlState: workItem.control_state,
+              reason: problem,
+            });
+          } else {
+            const tokenId = randomUUID();
+            const syntheticToken: ActionTokenRow = {
+              id: tokenId,
+              token_version: TOKEN_VERSION,
+              action: input.action,
+              work_item_id: workItem.id,
+              aggregate_version: workItem.version,
+              candidate_sha: null,
+              owner_generation: policy.ownerGeneration!,
+              expires_at: now + MIN_TOKEN_TTL_MS,
+              consumed_at: null,
+              decision_json: null,
+            };
+            this.database.prepare(
+              "INSERT INTO collaboration_action_tokens " +
+                "(id, token_version, token_hash, action, work_item_id, aggregate_version, candidate_sha, " +
+                "owner_generation, created_at, expires_at) VALUES (?, ?, ?, ?, ?, ?, NULL, ?, ?, ?)",
+            ).run(
+              tokenId,
+              TOKEN_VERSION,
+              tokenHash(randomBytes(32).toString("base64url")),
+              input.action,
+              workItem.id,
+              workItem.version,
+              policy.ownerGeneration,
+              now,
+              syntheticToken.expires_at,
+            );
+            const beforeHash = stateHash(workItem);
+            const applied = this.applyAction(syntheticToken, workItem, null, policy.principalId, null, now);
+            decision = outcome({
+              allowed: true,
+              action: input.action,
+              workItemId,
+              workItemVersion: applied.workItem.version,
+              controlState: applied.workItem.control_state,
+              reason: "owner_action_applied",
+              interruptRequestedRunIds: applied.interruptRequestedRunIds,
+            });
+            this.consumeToken(tokenId, policy.principalId, "allowed", decision, now);
+            this.database.prepare(
+              "INSERT INTO collaboration_control_events " +
+                "(id, work_item_id, work_item_version, action, principal_id, token_id, candidate_sha, reason, created_at) " +
+                "VALUES (?, ?, ?, ?, ?, ?, NULL, NULL, ?)",
+            ).run(randomUUID(), workItem.id, applied.workItem.version, input.action, policy.principalId, tokenId, now);
+            appendControlAudit(this.database, {
+              actorPrincipalId: policy.principalId,
+              workItemId,
+              requestId,
+              action: `control.${input.action}`,
+              outcome: "allow",
+              policyRule: policy.ruleId,
+              resource: { tokenId, sourceEventIdHash: stateHash(sourceEventId) },
+              beforeHash,
+              afterHash: stateHash(applied.workItem),
+              now,
+            });
+          }
+        }
+        if (!decision!.allowed) {
+          appendControlAudit(this.database, {
+            actorPrincipalId: policy.principalId,
+            workItemId,
+            requestId,
+            action: `control.${input.action}`,
+            outcome: "deny",
+            policyRule: "owner-action-preconditions-v1",
+            resource: {
+              sourceEventIdHash: stateHash(sourceEventId),
+              ...(workItem ? { aggregateVersion: workItem.version } : {}),
+            },
+            error: decision!.reason,
+            now,
+          });
+        }
+      }
+      this.database.prepare(
+        "INSERT INTO collaboration_owner_text_commands " +
+          "(source_event_id, payload_hash, outcome_json, processed_at) VALUES (?, ?, ?, ?)",
+      ).run(sourceEventId, payloadHash, JSON.stringify(decision!), now);
+      this.database.exec("COMMIT");
+      return decision!;
     } catch (error) {
       this.database.exec("ROLLBACK");
       throw error;

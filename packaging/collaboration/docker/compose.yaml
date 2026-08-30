@@ -1,0 +1,70 @@
+services:
+  collaboration:
+    build:
+      context: ../../..
+      dockerfile: packaging/collaboration/docker/Dockerfile
+    image: openmausbot-collaboration-pilot:local
+    pull_policy: never
+    container_name: openmausbot-collaboration-pilot
+    restart: unless-stopped
+    init: true
+    read_only: true
+    cap_drop:
+      - ALL
+    cap_add:
+      - CHOWN
+      - SETGID
+      - SETUID
+    security_opt:
+      - no-new-privileges:true
+    pids_limit: 512
+    mem_limit: 2g
+    cpus: 2
+    environment:
+      DOCKER_API_VERSION: "1.44"
+      OMB_DATA_DIR: /var/lib/openmausbot-collaboration-pilot/data
+      OMB_DINGTALK_ENABLED: "1"
+      OMB_DINGTALK_CREDENTIAL_FILE: /run/openmausbot-secrets/dingtalk.json
+      OMB_DINGTALK_ALLOWED_CONVERSATION_IDS: ${OMB_DINGTALK_ALLOWED_CONVERSATION_IDS:?required}
+      # Optional enhancement only. The default Owner decision flow uses ordinary
+      # DingTalk replies with one-time SHA/version-bound verification codes.
+      OMB_DINGTALK_PROACTIVE_OPEN_CONVERSATION_ID: ${OMB_DINGTALK_PROACTIVE_OPEN_CONVERSATION_ID:-}
+      OMB_DINGTALK_CARD_TEMPLATE_ID: ${OMB_DINGTALK_CARD_TEMPLATE_ID:-}
+      OMB_EXECUTION_ENABLED: "1"
+      OMB_EXECUTION_BACKEND: docker
+      OMB_EXECUTION_REPOSITORY: ${OMB_EXECUTION_REPOSITORY:?required}
+      OMB_EXECUTION_BASE_SHA: ${OMB_EXECUTION_BASE_SHA:?required}
+      OMB_EXECUTION_WORKTREE_ROOT: /var/lib/openmausbot-collaboration-pilot/worktrees
+      OMB_EXECUTION_EXCHANGE_ROOT: /var/lib/openmausbot-collaboration-pilot/exchange
+      OMB_EXECUTION_WRITE_SCOPES_JSON: ${OMB_EXECUTION_WRITE_SCOPES_JSON:?required}
+      OMB_EXECUTION_DENY_SCOPES_JSON: ${OMB_EXECUTION_DENY_SCOPES_JSON:-[".git",".git/**",".env",".env*","**/.env*"]}
+      OMB_EXECUTION_TARGET_COMMANDS_JSON: ${OMB_EXECUTION_TARGET_COMMANDS_JSON:?required}
+      OMB_EXECUTION_ACCEPTANCE_JSON: ${OMB_EXECUTION_ACCEPTANCE_JSON:?required}
+      OMB_DOCKER_COMMAND_IMAGE: openmausbot-collaboration-pilot:local
+      OMB_CONTAINMENT_VERIFIER_KEY_FILE: /run/openmausbot-secrets/containment-verifier.key
+      OMB_HOST_GENERATION_FILE: /proc/sys/kernel/random/boot_id
+      OMB_PROVIDER_UID: "10001"
+      OMB_PROVIDER_GID: "10001"
+      OMB_PROVIDER_HOME: /home/openmausbot-agent
+      OMB_CODEX_EXECUTABLE: /usr/local/bin/codex
+      OMB_CODEX_MODEL: ${OMB_CODEX_MODEL:-gpt-5.6-sol}
+      OMB_CODEX_REASONING_EFFORT: ${OMB_CODEX_REASONING_EFFORT:-high}
+      OMB_EXECUTION_MAX_ATTEMPTS: ${OMB_EXECUTION_MAX_ATTEMPTS:-2}
+      CODEX_HOME: /home/openmausbot-agent/.codex
+      HOME: /root
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - /var/lib/openmausbot-collaboration-pilot:/var/lib/openmausbot-collaboration-pilot
+      - ${OMB_EXECUTION_REPOSITORY:?required}:${OMB_EXECUTION_REPOSITORY:?required}
+      - /etc/openmausbot-collaboration-pilot/dingtalk.json:/run/openmausbot-secrets/dingtalk.json:ro
+      - /etc/openmausbot-collaboration-pilot/containment-verifier.key:/run/openmausbot-secrets/containment-verifier.key:ro
+      - /etc/openmausbot-collaboration-pilot/codex-auth.json:/home/openmausbot-agent/.codex/auth.json:ro
+    tmpfs:
+      - /tmp:rw,nosuid,nodev,noexec,size=256m
+      - /home/openmausbot-agent/.codex:rw,nosuid,nodev,size=64m,uid=10001,gid=10001,mode=0700
+    healthcheck:
+      test: ["CMD", "node", "/opt/openmausbot/collaboration-headless.js", "--health", "--data-dir", "/var/lib/openmausbot-collaboration-pilot/data"]
+      interval: 30s
+      timeout: 15s
+      retries: 3
+      start_period: 30s

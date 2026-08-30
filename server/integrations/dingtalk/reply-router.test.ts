@@ -34,6 +34,51 @@ describe("DingTalk reply routing", () => {
     expect(result).toEqual({ kind: "sent", channel: "session" });
     expect(sessionCalls).toHaveLength(1);
     expect(activeCalls).toEqual([]);
+    expect(sessions.active("event-1")).not.toBeNull();
+  });
+
+  it("routes a candidate decision card through proactive create-and-deliver even while session is live", async () => {
+    const sessions = new DingTalkSessionReplyRegistry(() => 1_000);
+    sessions.capture({
+      sourceEventId: "event-1",
+      webhookUrl: "https://oapi.dingtalk.com/robot/sendBySession?session=opaque",
+      expiresAt: 2_000,
+    });
+    let sessionCalls = 0;
+    const activePayloads: unknown[] = [];
+    const router = new DingTalkReplyRouter(
+      sessions,
+      { async send() { sessionCalls += 1; return { ok: true, status: 200 }; } },
+      {
+        async send(input) {
+          activePayloads.push(input.payload);
+          return { ok: true, status: 200 };
+        },
+      },
+    );
+    const payload = {
+      type: "plan_status_card",
+      headline: "候选已就绪",
+      cardTemplateId: "template-1",
+      outTrackId: "candidate-run-1",
+      workItemId: "WI-1",
+      workItemVersion: 4,
+      status: "candidate_ready",
+      summary: "目标测试已通过",
+      candidateSha: "2".repeat(40),
+      actions: [
+        { label: "接受候选", actionToken: "accept-token" },
+        { label: "拒绝候选", actionToken: "reject-token" },
+      ],
+    };
+    expect(await router.send({
+      sourceEventId: "event-1",
+      proactiveOpenConversationId: "cid-group",
+      payload,
+      idempotencyKey: "outbox-1",
+    })).toEqual({ kind: "sent", channel: "proactive" });
+    expect(sessionCalls).toBe(0);
+    expect(activePayloads).toEqual([payload]);
   });
 
   it("falls back to the explicitly configured proactive target after session expiry", async () => {

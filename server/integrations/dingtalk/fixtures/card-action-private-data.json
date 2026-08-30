@@ -1,0 +1,14 @@
+{
+  "corpId": "corp-1",
+  "userId": "owner-1",
+  "senderId": "owner-sender-1",
+  "senderNick": "Owner",
+  "createAt": 1700000003000,
+  "actionId": "action-2",
+  "cardPrivateData": {
+    "actionTokens": {
+      "action-1": "accept-opaque-token",
+      "action-2": "reject-opaque-token"
+    }
+  }
+}

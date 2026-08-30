@@ -31,6 +31,32 @@ export interface DingTalkCardAction {
   sender: DingTalkSender;
   reason?: string;
   receivedAt: number;
+  origin?: "card" | "text";
+}
+
+export type DingTalkOwnerTextCommandName =
+  | "status"
+  | "pause"
+  | "resume"
+  | "retry"
+  | "cancel"
+  | "refresh_approval";
+
+export interface DingTalkOwnerTextCommand {
+  transportEventId: string;
+  transportMessageId: string;
+  command: DingTalkOwnerTextCommandName;
+  workItemId: string;
+  sender: DingTalkSender;
+  receivedAt: number;
+}
+
+export interface DingTalkOwnerTextCommandOutcome {
+  allowed: boolean;
+  duplicate: boolean;
+  command: DingTalkOwnerTextCommandName;
+  workItemId: string;
+  reason: string;
 }
 
 export interface DingTalkStreamEnvelope {

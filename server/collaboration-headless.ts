@@ -1,16 +1,34 @@
 import { homedir } from "node:os";
+import { chmodSync, mkdirSync, readFileSync } from "node:fs";
 import { isAbsolute, join, resolve } from "node:path";
+import { DatabaseSync } from "node:sqlite";
 import { pathToFileURL } from "node:url";
 
 import { openCollaborationLedger } from "./collaboration/db.ts";
+import { OwnerActionController } from "./collaboration/actions.ts";
 import { CollaborationDegradationController } from "./collaboration/degradation.ts";
 import type { OutboxDeliveryPort } from "./collaboration/outbox.ts";
 import { LocalOwnerRegistry } from "./collaboration/owner.ts";
 import {
   configuredCredentialPath,
+  readEncryptionKey,
   readSecureCredentialFile,
   SecureDingTalkCredentialFileProvider,
 } from "./collaboration/operations/credentials.ts";
+import {
+  ConfiguredSequentialPlanner,
+  configuredPlanningPolicy,
+} from "./collaboration/operations/configured-planner.ts";
+import {
+  DockerCliContainmentSupervisor,
+  NodeDockerCommandPort,
+} from "./collaboration/operations/docker-containment.ts";
+import { DockerSandboxedCommandRunner } from "./collaboration/operations/docker-command-runner.ts";
+import {
+  CodexReadOnlyPatchProvider,
+  DockerPatchAgent,
+  DockerPatchApplier,
+} from "./collaboration/operations/docker-patch-agent.ts";
 import {
   CollaborationDiskMonitor,
   type DiskCapacityPort,
@@ -29,9 +47,19 @@ import {
   type RuntimeStream,
 } from "./collaboration/operations/runtime.ts";
 import { DingTalkReplyRouter, DingTalkSessionReplyRegistry } from "./integrations/dingtalk/reply-router.ts";
+import {
+  isDingTalkCandidateOwnerCard,
+  isDingTalkCandidateOwnerCardRequest,
+  isDingTalkCandidateTextDecisionRequest,
+  materializeDingTalkCandidateOwnerCard,
+  materializeDingTalkCandidateTextDecision,
+} from "./integrations/dingtalk/cards.ts";
+import { FetchDingTalkInteractiveCardSender } from "./integrations/dingtalk/interactive-card-sender.ts";
 import { FetchDingTalkSessionSender } from "./integrations/dingtalk/sender.ts";
 import { DingTalkStreamAdapter } from "./integrations/dingtalk/stream-adapter.ts";
 import { RealDingTalkStreamSdk } from "./integrations/dingtalk/stream-sdk.ts";
+import { validateTargetCommandSpec, type TargetCommandSpec } from "./collaboration/quality-gate.ts";
+import type { AcceptanceCondition } from "./collaboration/snapshot.ts";
 
 interface HeadlessArguments {
   dataDirectory: string;
@@ -149,6 +177,21 @@ function sourceEventId(dedupeKey: string): string | undefined {
     : undefined;
 }
 
+function latestWorkItemSourceEventId(databaseFile: string, workItemId: string): string | undefined {
+  const database = new DatabaseSync(databaseFile, { readOnly: true });
+  try {
+    const row = database
+      .prepare(
+        "SELECT source_event_id FROM collaboration_external_events " +
+          "WHERE source = 'dingtalk' AND work_item_id = ? ORDER BY received_at DESC LIMIT 1",
+      )
+      .get(workItemId) as { source_event_id: string } | undefined;
+    return row?.source_event_id;
+  } finally {
+    database.close();
+  }
+}
+
 function parseConversationAllowlist(raw: string, field: string): Set<string> {
   let values: unknown[];
   try {
@@ -190,15 +233,50 @@ export function readDingTalkAllowedConversationIds(environment: NodeJS.ProcessEn
 function createDingTalkDelivery(
   sessions: DingTalkSessionReplyRegistry,
   environment: NodeJS.ProcessEnv,
+  dataDirectory: string,
 ): OutboxDeliveryPort {
-  const router = new DingTalkReplyRouter(sessions, new FetchDingTalkSessionSender());
   const proactiveOpenConversationId = environment.OMB_DINGTALK_PROACTIVE_OPEN_CONVERSATION_ID?.trim() || undefined;
+  const credentialProvider = new SecureDingTalkCredentialFileProvider(environment);
+  const router = new DingTalkReplyRouter(
+    sessions,
+    new FetchDingTalkSessionSender(),
+    new FetchDingTalkInteractiveCardSender(credentialProvider),
+  );
+  const databaseFile = join(dataDirectory, "collaboration", "collaboration.sqlite");
   return {
     async deliver(message) {
+      const routedSourceEventId =
+        message.aggregateType === "plan"
+          ? latestWorkItemSourceEventId(databaseFile, message.aggregateId) ?? sourceEventId(message.dedupeKey)
+          : sourceEventId(message.dedupeKey);
+      let payload = message.payload;
+      if (isDingTalkCandidateOwnerCardRequest(payload) && !isDingTalkCandidateOwnerCard(payload)) {
+        const actions = new OwnerActionController(databaseFile);
+        try {
+          payload = materializeDingTalkCandidateOwnerCard(
+            payload,
+            { issueOwnerAction: (input) => actions.issue(input) },
+            Date.now(),
+          );
+        } finally {
+          actions.close();
+        }
+      } else if (isDingTalkCandidateTextDecisionRequest(payload)) {
+        const actions = new OwnerActionController(databaseFile);
+        try {
+          payload = materializeDingTalkCandidateTextDecision(
+            payload,
+            { issueOwnerAction: (input) => actions.issue(input) },
+            Date.now(),
+          );
+        } finally {
+          actions.close();
+        }
+      }
       const result = await router.send({
-        sourceEventId: sourceEventId(message.dedupeKey),
+        sourceEventId: routedSourceEventId,
         proactiveOpenConversationId,
-        payload: message.payload,
+        payload,
         idempotencyKey: message.dedupeKey,
       });
       if (result.kind === "sent") return { outcome: "sent" as const };
@@ -225,6 +303,200 @@ function diskMinimumRatio(environment: NodeJS.ProcessEnv): number {
   return value;
 }
 
+function requiredAbsolutePath(environment: NodeJS.ProcessEnv, key: string): string {
+  const value = environment[key]?.trim();
+  if (!value || !isAbsolute(value)) throw new Error(`${key}_must_be_absolute`);
+  return resolve(value);
+}
+
+function optionalPositiveInteger(environment: NodeJS.ProcessEnv, key: string): number | undefined {
+  const raw = environment[key]?.trim();
+  if (!raw) return undefined;
+  if (!/^\d+$/u.test(raw)) throw new Error(`${key}_invalid`);
+  const value = Number(raw);
+  if (!Number.isSafeInteger(value) || value < 1) throw new Error(`${key}_invalid`);
+  return value;
+}
+
+function jsonStringArray(environment: NodeJS.ProcessEnv, key: string): string[] {
+  const raw = environment[key]?.trim();
+  if (!raw) throw new Error(`${key}_required`);
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(raw) as unknown;
+  } catch {
+    throw new Error(`${key}_invalid`);
+  }
+  if (!Array.isArray(parsed) || parsed.length < 1 || parsed.length > 64) throw new Error(`${key}_invalid`);
+  const values = parsed.map((value) => typeof value === "string" ? value.trim() : "");
+  if (values.some((value) => !value || value.length > 500) || new Set(values).size !== values.length) {
+    throw new Error(`${key}_invalid`);
+  }
+  return values;
+}
+
+function targetCommands(environment: NodeJS.ProcessEnv): Record<string, TargetCommandSpec> {
+  const raw = environment.OMB_EXECUTION_TARGET_COMMANDS_JSON?.trim();
+  if (!raw) throw new Error("OMB_EXECUTION_TARGET_COMMANDS_JSON_required");
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(raw) as unknown;
+  } catch {
+    throw new Error("OMB_EXECUTION_TARGET_COMMANDS_JSON_invalid");
+  }
+  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+    throw new Error("OMB_EXECUTION_TARGET_COMMANDS_JSON_invalid");
+  }
+  const commands: Record<string, TargetCommandSpec> = {};
+  const entries = Object.entries(parsed as Record<string, unknown>);
+  if (entries.length < 1 || entries.length > 16) throw new Error("OMB_EXECUTION_TARGET_COMMANDS_JSON_invalid");
+  for (const [id, value] of entries) {
+    if (!value || typeof value !== "object" || Array.isArray(value)) throw new Error("OMB_EXECUTION_TARGET_COMMANDS_JSON_invalid");
+    const item = value as { argv?: unknown; cwd?: unknown; timeoutMs?: unknown; maxOutputBytes?: unknown };
+    if (
+      !Array.isArray(item.argv) || item.argv.length < 1 || item.argv.some((argument) => typeof argument !== "string") ||
+      !Number.isSafeInteger(item.timeoutMs) || Number(item.timeoutMs) < 1 ||
+      !Number.isSafeInteger(item.maxOutputBytes) || Number(item.maxOutputBytes) < 1 ||
+      (item.cwd !== undefined && typeof item.cwd !== "string")
+    ) {
+      throw new Error("OMB_EXECUTION_TARGET_COMMANDS_JSON_invalid");
+    }
+    const spec: TargetCommandSpec = {
+      argv: item.argv as [string, ...string[]],
+      timeoutMs: Number(item.timeoutMs),
+      maxOutputBytes: Number(item.maxOutputBytes),
+      ...(typeof item.cwd === "string" ? { cwd: item.cwd } : {}),
+    };
+    validateTargetCommandSpec(id, spec);
+    commands[id] = spec;
+  }
+  return commands;
+}
+
+function acceptanceConditions(environment: NodeJS.ProcessEnv): AcceptanceCondition[] {
+  const raw = environment.OMB_EXECUTION_ACCEPTANCE_JSON?.trim();
+  if (!raw) throw new Error("OMB_EXECUTION_ACCEPTANCE_JSON_required");
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(raw) as unknown;
+  } catch {
+    throw new Error("OMB_EXECUTION_ACCEPTANCE_JSON_invalid");
+  }
+  if (!Array.isArray(parsed) || parsed.length < 1 || parsed.length > 16) {
+    throw new Error("OMB_EXECUTION_ACCEPTANCE_JSON_invalid");
+  }
+  return parsed.map((entry) => {
+    if (!entry || typeof entry !== "object" || Array.isArray(entry)) throw new Error("OMB_EXECUTION_ACCEPTANCE_JSON_invalid");
+    const value = entry as { description?: unknown; observation?: unknown };
+    const description = typeof value.description === "string" ? value.description.trim() : "";
+    const observation = typeof value.observation === "string" ? value.observation.trim() : "";
+    if (!description || !observation || description.length > 2_000 || observation.length > 2_000) {
+      throw new Error("OMB_EXECUTION_ACCEPTANCE_JSON_invalid");
+    }
+    return { description, observation };
+  });
+}
+
+function dockerExecutionOptions(environment: NodeJS.ProcessEnv): Partial<CollaborationHeadlessRuntimeOptions> {
+  if (environment.OMB_EXECUTION_ENABLED !== "1") return {};
+  if (environment.OMB_EXECUTION_BACKEND !== "docker") throw new Error("OMB_EXECUTION_BACKEND_must_be_docker");
+  const repository = requiredAbsolutePath(environment, "OMB_EXECUTION_REPOSITORY");
+  const worktreeRoot = requiredAbsolutePath(environment, "OMB_EXECUTION_WORKTREE_ROOT");
+  const exchangeRoot = requiredAbsolutePath(environment, "OMB_EXECUTION_EXCHANGE_ROOT");
+  const baseSha = environment.OMB_EXECUTION_BASE_SHA?.trim().toLowerCase() ?? "";
+  if (!/^(?:[0-9a-f]{40}|[0-9a-f]{64})$/u.test(baseSha)) throw new Error("OMB_EXECUTION_BASE_SHA_invalid");
+  const image = environment.OMB_DOCKER_COMMAND_IMAGE?.trim();
+  if (!image || image.length > 300 || /\s/u.test(image)) throw new Error("OMB_DOCKER_COMMAND_IMAGE_invalid");
+  const keyPath = configuredCredentialPath(
+    "OMB_CONTAINMENT_VERIFIER_KEY_FILE",
+    "containment-verifier.key",
+    environment,
+  );
+  if (!keyPath) throw new Error("OMB_CONTAINMENT_VERIFIER_KEY_FILE_required");
+  const generationPath = environment.OMB_HOST_GENERATION_FILE?.trim() || "/proc/sys/kernel/random/boot_id";
+  if (!isAbsolute(generationPath)) throw new Error("OMB_HOST_GENERATION_FILE_must_be_absolute");
+  const hostGeneration = readFileSync(generationPath, "utf8").trim();
+  if (!/^[A-Za-z0-9._:-]{8,200}$/u.test(hostGeneration)) throw new Error("OMB_HOST_GENERATION_FILE_invalid");
+  const commands = targetCommands(environment);
+  const commandIds = Object.keys(commands).sort();
+  const writeScopes = jsonStringArray(environment, "OMB_EXECUTION_WRITE_SCOPES_JSON");
+  const denyScopes = environment.OMB_EXECUTION_DENY_SCOPES_JSON?.trim()
+    ? jsonStringArray(environment, "OMB_EXECUTION_DENY_SCOPES_JSON")
+    : [".git", ".git/**", ".env", ".env*", "**/.env*"];
+  const plannerOptions = { repository, writeScopes, targetCommandIds: commandIds, denyScopes };
+  const providerUid = optionalPositiveInteger(environment, "OMB_PROVIDER_UID");
+  const providerGid = optionalPositiveInteger(environment, "OMB_PROVIDER_GID");
+  if ((providerUid === undefined) !== (providerGid === undefined)) {
+    throw new Error("OMB_PROVIDER_UID_and_GID_must_be_configured_together");
+  }
+  const providerHome = environment.OMB_PROVIDER_HOME?.trim() || "/home/openmausbot-agent";
+  if (!isAbsolute(providerHome)) throw new Error("OMB_PROVIDER_HOME_must_be_absolute");
+  const maxAttempts = optionalPositiveInteger(environment, "OMB_EXECUTION_MAX_ATTEMPTS") ?? 2;
+  if (maxAttempts > 10) throw new Error("OMB_EXECUTION_MAX_ATTEMPTS_invalid");
+  const docker = new NodeDockerCommandPort({
+    ...(environment.OMB_DOCKER_EXECUTABLE?.trim() ? { executable: environment.OMB_DOCKER_EXECUTABLE.trim() } : {}),
+    ...(environment.OMB_DOCKER_CONTEXT?.trim() ? { context: environment.OMB_DOCKER_CONTEXT.trim() } : {}),
+  });
+  const containment = new DockerCliContainmentSupervisor({
+    docker,
+    hostGeneration,
+    verifierKey: readEncryptionKey(keyPath),
+  });
+  const providerRoot = join(exchangeRoot, "provider");
+  const applierRoot = join(exchangeRoot, "apply");
+  const commandRoot = join(exchangeRoot, "commands");
+  mkdirSync(exchangeRoot, { recursive: true, mode: 0o711 });
+  chmodSync(exchangeRoot, 0o711);
+  const agent = new DockerPatchAgent({
+    provider: new CodexReadOnlyPatchProvider({
+      exchangeRoot: providerRoot,
+      ...(environment.OMB_CODEX_EXECUTABLE?.trim() ? { executable: environment.OMB_CODEX_EXECUTABLE.trim() } : {}),
+      ...(environment.OMB_CODEX_MODEL?.trim() ? { model: environment.OMB_CODEX_MODEL.trim() } : {}),
+      ...(environment.OMB_CODEX_REASONING_EFFORT?.trim()
+        ? { reasoningEffort: environment.OMB_CODEX_REASONING_EFFORT.trim() }
+        : {}),
+      ...(providerUid !== undefined && providerGid !== undefined
+        ? {
+            providerUid,
+            providerGid,
+            providerHome,
+            launcher: {
+              executable: environment.OMB_PROVIDER_SET_PRIV_EXECUTABLE?.trim() || "/usr/bin/setpriv",
+              args: [
+                `--reuid=${providerUid}`,
+                `--regid=${providerGid}`,
+                "--clear-groups",
+                "--no-new-privs",
+                "--",
+              ],
+            },
+          }
+        : { providerHome }),
+    }),
+    applier: new DockerPatchApplier({ docker, containment, image, exchangeRoot: applierRoot }),
+  });
+  return {
+    planner: new ConfiguredSequentialPlanner(plannerOptions),
+    planningPolicy: configuredPlanningPolicy(plannerOptions),
+    planningDefaultDefinition: { repository, acceptanceConditions: acceptanceConditions(environment) },
+    agent,
+    containment,
+    commandRunner: new DockerSandboxedCommandRunner({ docker, containment, image, exchangeRoot: commandRoot }),
+    executionIsolation: "docker_linux",
+    autoExecuteReady: true,
+    execution: {
+      managedWorktreeRoot: worktreeRoot,
+      repositories: { [repository]: { baseSha, targetCommands: commands } },
+      limits: {
+        maxAttempts,
+        agentTimeoutMs: 15 * 60_000,
+        maxAgentEventBytes: 64 * 1024,
+        interruptGraceMs: 5_000,
+      },
+    },
+  };
+}
+
 function productionRuntimeOptions(
   options: HeadlessArguments,
   environment: NodeJS.ProcessEnv,
@@ -242,8 +514,9 @@ function productionRuntimeOptions(
     shutdownTimeoutMs,
     probeOnly: options.healthOnly,
     logger: safeRuntimeLogger(io),
+    ...dockerExecutionOptions(environment),
     ...(dingTalkEnabled
-      ? { outboxDelivery: createDingTalkDelivery(sessions, environment) }
+      ? { outboxDelivery: createDingTalkDelivery(sessions, environment, options.dataDirectory) }
       : {}),
     maintenanceFactory: ({ database, dataDirectory }) => {
       const sink =
@@ -269,6 +542,9 @@ function productionRuntimeOptions(
     },
     dingTalk: {
       enabled: dingTalkEnabled,
+      ...(environment.OMB_DINGTALK_CARD_TEMPLATE_ID?.trim()
+        ? { cardTemplateId: environment.OMB_DINGTALK_CARD_TEMPLATE_ID.trim() }
+        : {}),
       credentials: new SecureDingTalkCredentialFileProvider(environment),
       createStream(credentials, sinks, logger): RuntimeStream {
         const sdk = new RealDingTalkStreamSdk(credentials, () => {
@@ -277,7 +553,10 @@ function productionRuntimeOptions(
         const adapter = new DingTalkStreamAdapter(
           sdk,
           { ingest: (message) => sinks.ingest(message) },
-          { perform: (action) => sinks.perform(action) },
+          {
+            perform: (action) => sinks.perform(action),
+            performCommand: (command) => sinks.performCommand(command),
+          },
           sessions,
           { write: (event) => logger.write({ event: event.event, ...(event.code ? { code: event.code } : {}) }) },
           { allowedConversationIds },

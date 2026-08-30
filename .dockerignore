@@ -1,0 +1,15 @@
+.git
+.env
+.env.*
+node_modules
+dist
+dist-server
+release
+coverage
+test-results
+playwright-report
+*.log
+*.sqlite
+*.sqlite-shm
+*.sqlite-wal
+.parallel-dev

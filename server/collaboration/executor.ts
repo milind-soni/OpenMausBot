@@ -231,7 +231,13 @@ export class CandidateExecutor {
           )
           .run(runId, eventSequence, event.type, event.message, Date.now());
       },
-    });
+    }).catch((error): AgentRunResult => ({
+      threadId,
+      turnId,
+      status: "failed",
+      message: errorMessage(error),
+      sandboxEnforced: false,
+    }));
 
     const timeoutMarker = Symbol("timeout");
     const ownerInterruptMarker = Symbol("owner_interrupt");

@@ -48,8 +48,8 @@ Use a deliberately non-sensitive requirement. The report records its event IDs a
 2. Add a requirement/acceptance change and verify an immutable snapshot and plan revision.
 3. As a non-Owner, attempt every displayed control. Verify denial and no aggregate, node, run, token, or outbox state change.
 4. As Owner, exercise pause and resume. Then exercise cancel on a replaceable attempt and verify interruption evidence cannot become a trusted candidate.
-5. Exercise rejection with feedback, explicit retry, and final acceptance on the exact candidate SHA. Acceptance must not merge or deploy.
-6. Replay a consumed action and submit a stale-version action. Verify neither creates a second transition.
+5. Exercise rejection with feedback, explicit retry, and final acceptance on the exact candidate SHA. Acceptance must not merge or deploy. Use deterministic text controls for status, pause, resume, retry, cancel, and approval refresh; every command must carry the exact Work Item ID. A retry must not create a second Work Item.
+6. Replay a consumed action and submit a stale-version action. Verify neither creates a second transition. Let one approval code expire, request a refreshed approval code for the same candidate, and verify that no new Agent Run is created.
 7. Inject one temporary outbound failure. Verify bounded retry and status-card supersession without duplicate progress cards.
 8. Restart the service while work is recoverable. Verify the same Ledger reopens, recovery is fenced, and unresolved work is never silently treated as successful.
 9. Inspect the candidate only through the controlled local view. Record its managed branch, base/result SHA, relative changed paths, allowlisted command IDs and definition hashes, exit codes, and evidence hashes; never copy raw shell text into the report.

@@ -178,7 +178,14 @@ export function normalizeBotMessage(envelope: DingTalkStreamEnvelope, receivedAt
 export function normalizeCardAction(envelope: DingTalkStreamEnvelope, receivedAt = Date.now()): DingTalkCardAction {
   const record = parsePayload(envelope.data);
   const action = actionData(record);
-  const actionToken = requiredOpaque(action, "actionToken", 1_024);
+  const actionId = optionalOpaque(action, "actionId", 128) ?? optionalOpaque(record, "actionId", 128);
+  let actionToken = optionalOpaque(action, "actionToken", 1_024);
+  if (!actionToken && actionId) {
+    const privateData = actionData({ actionData: record.cardPrivateData });
+    const tokens = object(privateData.actionTokens, "dingtalk_action_tokens");
+    actionToken = requiredOpaque(tokens, actionId, 1_024);
+  }
+  if (!actionToken) throw new Error("dingtalk_actionToken_missing");
   const senderCorpId = optionalOpaque(record, "senderCorpId", 256) ?? optionalOpaque(record, "corpId", 256);
   const senderStaffId = optionalOpaque(record, "senderStaffId", 256) ?? optionalOpaque(record, "userId", 256);
   const transportMessageId = envelopeIdentifier(envelope.headers.messageId, "transport_message_id");
@@ -196,7 +203,10 @@ export function normalizeCardAction(envelope: DingTalkStreamEnvelope, receivedAt
     },
     ...(optionalString(action, "reason", MAX_REASON_CHARACTERS)
       ? { reason: optionalString(action, "reason", MAX_REASON_CHARACTERS) }
-      : {}),
+      : actionId === "action-2"
+        ? { reason: "Owner rejected candidate via DingTalk interactive card" }
+        : {}),
+    origin: "card",
     // Authorization TTLs use the service receive clock, never payload/header time.
     receivedAt,
   };

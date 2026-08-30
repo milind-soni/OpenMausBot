@@ -75,7 +75,7 @@ describe("encrypted collaboration ledger backup", () => {
       encryptionKeyFile: keyFile,
       temporaryDirectory: join(root, "tmp"),
     });
-    expect(result).toMatchObject({ outputPath: artifact, schemaVersion: 8 });
+    expect(result).toMatchObject({ outputPath: artifact, schemaVersion: 9 });
     expect(readFileSync(artifact).includes(Buffer.from("backup work"))).toBe(false);
     expect(service.health().ready).toBe(true);
     service.close();

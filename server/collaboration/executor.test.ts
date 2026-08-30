@@ -390,6 +390,23 @@ describe("trusted candidate executor", () => {
     second.service.close();
   });
 
+  it("finalizes a rejected Agent launch instead of leaving a running Run", async () => {
+    const agent: AgentRunPort = {
+      run: async () => { throw new Error("setpriv failed"); },
+      interrupt: async () => {},
+    };
+    const harness = setup({ agent });
+    const outcome = await harness.service.executeCurrentPlan(harness.workItemId);
+    expect(outcome).toMatchObject({
+      resultSha: null,
+      report: { state: "needs_configuration", reasons: ["provider_sandbox_unavailable"] },
+    });
+    harness.service.close();
+    const database = ledger(harness.root);
+    expect(database.prepare("SELECT status FROM collaboration_runs").get()).toEqual({ status: "needs_configuration" });
+    database.close();
+  });
+
   it("requires a sandbox runner and rejects incomplete sandbox attestations", async () => {
     const edit = new FakeAgent((request) => {
       writeFileSync(join(request.cwd, "src", "value.txt"), "after\n");

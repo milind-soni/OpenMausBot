@@ -475,4 +475,55 @@ describe("Owner action tokens and Work Item controls", () => {
     database.close();
     context.service.close();
   });
+
+  it("atomically deduplicates direct Owner text controls and rejects conflicting replays", () => {
+    const context = harness();
+    const first = context.service.performDirectOwnerAction({
+      sourceEventId: "text-command-1",
+      action: "pause",
+      workItemId: context.workItemId,
+      sender: ownerSender(),
+      now: 2_000,
+    });
+    expect(first).toMatchObject({ allowed: true, duplicate: false, action: "pause", controlState: "paused" });
+    expect(context.service.performDirectOwnerAction({
+      sourceEventId: "text-command-1",
+      action: "pause",
+      workItemId: context.workItemId,
+      sender: ownerSender(),
+      now: 2_100,
+    })).toMatchObject({ allowed: true, duplicate: true, action: "pause", controlState: "paused" });
+    expect(context.service.performDirectOwnerAction({
+      sourceEventId: "text-command-state-denied",
+      action: "pause",
+      workItemId: context.workItemId,
+      sender: ownerSender(),
+      now: 2_150,
+    })).toMatchObject({ allowed: false, reason: "work_item_not_active" });
+    expect(() => context.service.performDirectOwnerAction({
+      sourceEventId: "text-command-1",
+      action: "resume",
+      workItemId: context.workItemId,
+      sender: ownerSender(),
+      now: 2_200,
+    })).toThrow("owner_text_command_event_conflict");
+
+    const denied = context.service.performDirectOwnerAction({
+      sourceEventId: "text-command-non-owner",
+      action: "resume",
+      workItemId: context.workItemId,
+      sender: contributorSender(),
+      now: 2_300,
+    });
+    expect(denied).toMatchObject({ allowed: false, reason: "not_active_owner" });
+    const database = new DatabaseSync(context.databaseFile);
+    expect(database.prepare("SELECT count(*) AS count FROM collaboration_owner_text_commands").get()).toEqual({ count: 3 });
+    expect(database.prepare("SELECT count(*) AS count FROM collaboration_control_events").get()).toEqual({ count: 1 });
+    expect(database.prepare(
+      "SELECT outcome, error FROM collaboration_audit_events " +
+        "WHERE action = 'control.pause' AND outcome = 'deny' ORDER BY created_at DESC LIMIT 1",
+    ).get()).toEqual({ outcome: "deny", error: "work_item_not_active" });
+    database.close();
+    context.service.close();
+  });
 });
