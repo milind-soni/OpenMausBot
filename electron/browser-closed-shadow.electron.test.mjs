@@ -237,6 +237,12 @@ it.runIf(canRunRealElectronFixture)("protects closed-shadow values and revalidat
   expect(result.stdout).toContain("closed-shadow-nested-name-source-redacted");
   expect(result.stdout).toContain("transformed-secret-taint");
   expect(result.stdout).toContain("rich-nested-name-source-redacted");
+  expect(result.stdout).toContain("compact-known-coordinate-click");
+  expect(result.stdout).toContain("compact-known-coordinate-scroll");
+  expect(result.stdout).toContain("expanded-known-coordinate-click");
+  expect(result.stdout).toContain("expanded-known-coordinate-scroll");
+  expect(result.stdout).toContain("real-double-click-sequence");
+  expect(result.stdout).toContain("fixed-screenshot-pixel-size");
   expect(result.stdout).toContain("protected-focused-keys-refused");
   expect(result.stdout).toContain("late-overlay-click-refused");
   expect(result.stdout).toContain("relabelled-ref-refused");

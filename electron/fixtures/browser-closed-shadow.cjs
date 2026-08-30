@@ -3,7 +3,7 @@
 process.stdout.write("fixture-entered\n");
 const { once } = require("node:events");
 const { join } = require("node:path");
-const { app, BrowserWindow, WebContentsView } = require("electron");
+const { app, BrowserWindow, WebContentsView, nativeImage } = require("electron");
 const { createBrowserSurfaceManager } = require("../browser-surface.cjs");
 process.stdout.write("fixture-modules-loaded\n");
 
@@ -252,15 +252,95 @@ async function run() {
     }
     process.stdout.write("rich-nested-name-source-redacted\n");
 
-    const actionHtml = `<!doctype html><html><body>
+    const actionHtml = `<!doctype html><html><head><style>
+      html, body { margin: 0; width: 100%; height: 100%; overflow: hidden; }
+      #scroller { width: 100vw; height: 100vh; overflow: auto; }
+      #scroll-content { min-height: 2400px; }
+    </style></head><body>
+      <main id="scroller"><div id="scroll-content"></div></main>
       <button id="reviewed" style="position:fixed;left:40px;top:40px;width:180px;height:60px">Publish draft</button>
       <input id="empty-password" type="password" aria-label="Password">
       <div id="empty-secret-editor" role="textbox" contenteditable="true" aria-label="Signing key"></div>
+      <script>
+        window.actionEvents = [];
+        const reviewed = document.getElementById("reviewed");
+        for (const type of ["click", "dblclick"]) reviewed.addEventListener(type, event => {
+          window.actionEvents.push({ type, detail: event.detail, x: event.clientX, y: event.clientY });
+        });
+      </script>
     </body></html>`;
     await browserView.webContents.loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(actionHtml)}`);
     const actionSnapshot = await manager.snapshot("fixture-bot", "");
     const reviewedRef = String(actionSnapshot.yaml ?? "").match(/button[^\n]*\[ref=(e\d+)\]/)?.[1];
     if (!reviewedRef) throw new Error("real Electron fixture did not produce a rich browser ref");
+    manager.setHumanControl("fixture-bot", false, "");
+
+    // CDP DOM boxes are in the fixed 1280x800 page viewport, while Electron's
+    // native device-emulation scale expects pointer positions in the smaller
+    // WebContentsView. Exercise real compositor dispatch in both modes: this
+    // failed silently before page coordinates were converted for the current
+    // presentation scale.
+    const compactViewport = await browserView.webContents.executeJavaScript(`({ width: innerWidth, height: innerHeight })`);
+    if (compactViewport.width !== 1280 || compactViewport.height !== 800) {
+      throw new Error(`compact action viewport was not fixed: ${JSON.stringify(compactViewport)}`);
+    }
+    await manager.click("fixture-bot", reviewedRef, { profile: "" });
+    let actionEvents = await browserView.webContents.executeJavaScript(`window.actionEvents`);
+    if (JSON.stringify(actionEvents) !== JSON.stringify([{ type: "click", detail: 1, x: 130, y: 70 }])) {
+      throw new Error(`compact known-coordinate click missed its target: ${JSON.stringify(actionEvents)}`);
+    }
+    process.stdout.write("compact-known-coordinate-click\n");
+
+    await manager.scroll("fixture-bot", "down", 600, "");
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    const compactScrollTop = await browserView.webContents.executeJavaScript(`document.getElementById("scroller").scrollTop`);
+    if (compactScrollTop !== 600) throw new Error(`compact nested scroll moved ${compactScrollTop}px instead of 600px`);
+    await browserView.webContents.executeJavaScript(`document.getElementById("scroller").scrollTop = 0`);
+    process.stdout.write("compact-known-coordinate-scroll\n");
+
+    const compactShot = await manager.screenshot("fixture-bot", "");
+    const compactShotSize = nativeImage.createFromBuffer(Buffer.from(compactShot.png, "base64")).getSize();
+    if (compactShot.width !== 1024 || compactShot.height !== 640
+      || compactShotSize.width !== compactShot.width || compactShotSize.height !== compactShot.height) {
+      throw new Error(`compact screenshot pixels disagree with metadata: ${JSON.stringify({ metadata: [compactShot.width, compactShot.height], encoded: compactShotSize })}`);
+    }
+
+    manager.layout("fixture-bot", { x: 10, y: 20, width: 820, height: 600 }, "", "expanded");
+    const expandedViewport = await browserView.webContents.executeJavaScript(`({ width: innerWidth, height: innerHeight })`);
+    if (expandedViewport.width !== 1280 || expandedViewport.height !== 800) {
+      throw new Error(`expanded action viewport was not fixed: ${JSON.stringify(expandedViewport)}`);
+    }
+    const expandedSnapshot = await manager.snapshot("fixture-bot", "");
+    const expandedRef = String(expandedSnapshot.yaml ?? "").match(/button[^\n]*\[ref=(e\d+)\]/)?.[1];
+    if (!expandedRef) throw new Error("expanded Electron fixture did not produce a rich browser ref");
+    await manager.click("fixture-bot", expandedRef, { clickCount: 2, profile: "" });
+    actionEvents = await browserView.webContents.executeJavaScript(`window.actionEvents`);
+    const expectedEvents = [
+      { type: "click", detail: 1, x: 130, y: 70 },
+      { type: "click", detail: 1, x: 130, y: 70 },
+      { type: "click", detail: 2, x: 130, y: 70 },
+      { type: "dblclick", detail: 2, x: 130, y: 70 },
+    ];
+    if (JSON.stringify(actionEvents) !== JSON.stringify(expectedEvents)) {
+      throw new Error(`expanded double-click sequence was incorrect: ${JSON.stringify(actionEvents)}`);
+    }
+    process.stdout.write("expanded-known-coordinate-click\n");
+    process.stdout.write("real-double-click-sequence\n");
+
+    await manager.scroll("fixture-bot", "down", 300, "");
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    const expandedScrollTop = await browserView.webContents.executeJavaScript(`document.getElementById("scroller").scrollTop`);
+    if (expandedScrollTop !== 300) throw new Error(`expanded nested scroll moved ${expandedScrollTop}px instead of 300px`);
+    process.stdout.write("expanded-known-coordinate-scroll\n");
+
+    const expandedShot = await manager.screenshot("fixture-bot", "");
+    const expandedShotSize = nativeImage.createFromBuffer(Buffer.from(expandedShot.png, "base64")).getSize();
+    if (expandedShot.width !== 1024 || expandedShot.height !== 640
+      || expandedShotSize.width !== expandedShot.width || expandedShotSize.height !== expandedShot.height) {
+      throw new Error(`expanded screenshot pixels disagree with metadata: ${JSON.stringify({ metadata: [expandedShot.width, expandedShot.height], encoded: expandedShotSize })}`);
+    }
+    process.stdout.write("fixed-screenshot-pixel-size\n");
+
     for (const [selector, key] of [["#empty-password", "Enter"], ["#empty-secret-editor", "Backspace"]]) {
       await browserView.webContents.executeJavaScript(`document.querySelector(${JSON.stringify(selector)}).focus()`);
       manager.setHumanControl("fixture-bot", false, "");

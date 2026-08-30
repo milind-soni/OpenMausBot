@@ -163,10 +163,12 @@ contextBridge.exposeInMainWorld("ogb", {
   browser: browserSurfaceSupported ? {
     available: () => ipcRenderer.invoke("browser:available"),
     state: (botId) => ipcRenderer.invoke("browser:state", botId),
-    layout: (botId, bounds, profile, mode) => ipcRenderer.invoke("browser:layout", botId, bounds, profile, mode),
+    layout: (botId, bounds, profile, mode, layoutOwner) =>
+      ipcRenderer.invoke("browser:layout", botId, bounds, profile, mode, layoutOwner),
     navigate: (botId, url, profile) => ipcRenderer.invoke("browser:navigate", botId, url, profile),
     back: (botId, profile) => ipcRenderer.invoke("browser:back", botId, profile),
     forward: (botId, profile) => ipcRenderer.invoke("browser:forward", botId, profile),
+    reload: (botId, profile) => ipcRenderer.invoke("browser:reload", botId, profile),
     setHumanControl: (botId, held, profile) => ipcRenderer.invoke("browser:set-human-control", botId, held, profile),
     /** Wipe a named profile's logins, storage and cache after it is deleted. */
     forgetProfile: (partitionId) => ipcRenderer.invoke("browser:forget-profile", partitionId),

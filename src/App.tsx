@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { Loader2, Menu } from "lucide-react";
 import { StoreProvider, useStore } from "@/state/store";
 import { Onboarding } from "@/components/Onboarding";
@@ -126,14 +126,14 @@ function Shell() {
     dispatch({ type: "toggleComputer", open: false });
     setLocalVmWorkspaceBotId(botId);
   };
-  const openBrowserWorkspace = (botId: string) => {
+  const openBrowserWorkspace = useCallback((botId: string) => {
     dispatch({ type: "toggleComputer", open: false });
     setBrowserWorkspaceBotId(botId);
-  };
-  const closeBrowserWorkspace = () => {
+  }, [dispatch]);
+  const closeBrowserWorkspace = useCallback(() => {
     setBrowserWorkspaceBotId(null);
     dispatch({ type: "toggleComputer", open: true });
-  };
+  }, [dispatch]);
   useEffect(() => {
     if (browserWorkspaceBotId && (state.activeView !== "chat" || state.selectedId !== browserWorkspaceBotId)) {
       setBrowserWorkspaceBotId(null);
@@ -244,7 +244,12 @@ function Shell() {
       )}
       {state.settingsOpen && bot && <SettingsPanel bot={bot} />}
       {state.computerOpen && bot && (
-        <ComputerPanel bot={bot} onOpenVmWorkspace={openLocalVmWorkspace} onExpandBrowser={openBrowserWorkspace} />
+        <ComputerPanel
+          key={bot.id}
+          bot={bot}
+          onOpenVmWorkspace={openLocalVmWorkspace}
+          onExpandBrowser={openBrowserWorkspace}
+        />
       )}
       {state.inspectorOpen && bot && <InspectorPanel bot={bot} />}
       {state.appSettingsOpen && <SettingsModal />}

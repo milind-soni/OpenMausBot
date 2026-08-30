@@ -1217,12 +1217,15 @@ function browserSurfaceForEvent(event) {
 
 ipcMain.handle("browser:available", () => Boolean(browserSurface && browserHost?.url));
 ipcMain.handle("browser:state", (event, botId) => browserSurfaceForEvent(event).state(botId));
-ipcMain.handle("browser:layout", (event, botId, bounds, profile, mode) =>
+ipcMain.handle("browser:layout", (event, botId, bounds, profile, mode, layoutOwner) =>
   browserSurfaceForEvent(event).layout(
     botId,
     bounds ?? null,
     Object.prototype.toString.call(profile) === "[object String]" ? profile : undefined,
     mode === "expanded" ? "expanded" : "compact",
+    Object.prototype.toString.call(layoutOwner) === "[object String]" && layoutOwner.length <= 128
+      ? layoutOwner
+      : undefined,
   ),
 );
 const browserProfileFromRenderer = (profile) =>
@@ -1230,6 +1233,10 @@ const browserProfileFromRenderer = (profile) =>
 
 ipcMain.handle("browser:forward", async (event, botId, profile) => {
   const result = await browserSurfaceForEvent(event).forward(botId, browserProfileFromRenderer(profile), { source: "user" });
+  return { url: result.url, title: result.title };
+});
+ipcMain.handle("browser:reload", async (event, botId, profile) => {
+  const result = await browserSurfaceForEvent(event).reload(botId, browserProfileFromRenderer(profile), { source: "user" });
   return { url: result.url, title: result.title };
 });
 ipcMain.handle("browser:navigate", async (event, botId, url, profile) => {

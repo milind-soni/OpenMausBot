@@ -52,9 +52,10 @@ const DNS_CACHE_MS = 10_000;
 const MAX_DNS_CACHE = 256;
 const AGENT_INPUT_SUPPRESS_MS = 100;
 const AX_TREE_DEPTH = 24;
-/** The page lays out at this size whatever the panel's rectangle is; the
- * compact preview scales it down, the expanded view shows it 1:1. Bots see
- * one consistent desktop viewport regardless of how wide the panel is. */
+/** The page lays out at this size whatever the panel's rectangle is. Both
+ * compact and expanded surfaces scale the same desktop viewport to fit, so
+ * responsive pages, refs, screenshots and scroll positions do not change
+ * merely because the person opened the larger workspace. */
 const VIEWPORT = Object.freeze({ width: 1280, height: 800 });
 
 /** Keys a bot may press by name → CDP key event fields. `text` is what makes
@@ -459,6 +460,10 @@ function createBrowserSurfaceManager({
     browserProfilePartition(wanted);
     return wanted;
   };
+  const layoutOwnerIdOf = (ownerId) =>
+    Object.prototype.toString.call(ownerId) === "[object String]" && ownerId.length > 0 && ownerId.length <= 128
+      ? ownerId
+      : undefined;
   const keyOf = (botId, partition) => `${botId}\0${partition}`;
   const controlFor = (botId) => botControl.get(botId) ?? { held: false, epoch: 0, agentEpoch: 0 };
 
@@ -786,9 +791,34 @@ function createBrowserSurfaceManager({
       // blocked until a committed navigation replaces the document.
       if (human && input?.type !== "keyUp") entry.documentTainted = true;
     });
-    contents.on("before-mouse-event", (_event, mouse) => {
+    contents.on("before-mouse-event", (event, mouse) => {
+      // The compact surface is a watch-only preview. A person's first
+      // pointer gesture takes control and asks the renderer to expand it, but
+      // must not also activate whatever happens to be under that point on the
+      // web page. Keep the matching mouse-up blocked even if the renderer has
+      // already switched this entry to expanded mode in response to the
+      // takeover notification.
+      if (mouse?.type === "mouseDown" && entry.blockCompactMouseUp && entry.mode !== "compact") {
+        entry.blockCompactMouseUp = false;
+      }
+      if (mouse?.type === "mouseUp" && entry.blockCompactMouseUp) {
+        entry.blockCompactMouseUp = false;
+        event.preventDefault();
+        return;
+      }
       if (!["mouseDown", "contextMenu", "mouseWheel"].includes(mouse?.type)) return;
+      const wasHeld = controlFor(entry.botId).held;
       const human = claimHumanControl(entry, "mouse", mouse);
+      const compactTakeover = human && entry.mode === "compact";
+      if (compactTakeover) {
+        event.preventDefault();
+        if (mouse.type === "mouseDown") entry.blockCompactMouseUp = true;
+        // claimHumanControl emits only for the transition into human control.
+        // A user may have shrunk an already-controlled browser, and its next
+        // compact click still needs to reopen the workspace.
+        if (wasHeld) emitUserInteraction({ botId: entry.botId, profile: entry.profile });
+        return;
+      }
       // A click can submit or copy an autofilled password without producing a
       // keyboard event. A hostile page can then clear the protected control
       // and echo a transformed secret into ordinary DOM/title text before the
@@ -797,9 +827,17 @@ function createBrowserSurfaceManager({
       // taint the document.
       if (human && ["mouseDown", "contextMenu"].includes(mouse?.type)) entry.documentTainted = true;
     });
-    for (const signal of ["did-navigate-in-page", "did-stop-loading", "page-title-updated"]) {
+    for (const signal of ["did-navigate-in-page", "page-title-updated"]) {
       contents.on(signal, () => emitState(entry));
     }
+    contents.on("did-stop-loading", () => {
+      // A commit-time emulation call can briefly race Chromium's renderer
+      // replacement. Retry once the document is stable instead of leaving
+      // this page at the native panel's responsive resolution until some
+      // later React layout happens to run.
+      if (entry.mode && entry.emulationKey === null) applyMode(entry, entry.mode);
+      emitState(entry);
+    });
     contents.on("did-navigate", () => {
       // Chromium drops WebContents device emulation when a main-frame
       // navigation commits. Keeping the previous emulationKey made later
@@ -878,6 +916,7 @@ function createBrowserSurfaceManager({
       visible: false,
       bounds: null,
       mode: null,
+      layoutOwner: null,
       emulationKey: null,
       refs: null,
       refKind: "ax",
@@ -889,6 +928,8 @@ function createBrowserSurfaceManager({
       agentEchoes: [],
       pressedMouse: new Map(),
       pressedKeys: new Map(),
+      presentationScale: 1,
+      blockCompactMouseUp: false,
       neutralizingInput: null,
       documentTainted: false,
       operationDepth: 0,
@@ -934,9 +975,7 @@ function createBrowserSurfaceManager({
     return entry;
   };
 
-  const withOperation = async (entry, operation) => {
-    entry.operationDepth += 1;
-    touch(entry);
+  const runOperation = async (entry, operation) => {
     try {
       return await operation();
     } catch (error) {
@@ -946,6 +985,20 @@ function createBrowserSurfaceManager({
       entry.operationDepth = Math.max(0, entry.operationDepth - 1);
       touch(entry);
     }
+  };
+
+  /** Agent operations on one page are deliberately serialized. Without a
+   * small per-entry queue, two tool calls can interleave their privacy
+   * preflights and pointer/key sequences, making otherwise valid refs land on
+   * the wrong post-action document. Different profiles and bots still run in
+   * parallel. */
+  const withOperation = (entry, operation) => {
+    entry.operationDepth += 1;
+    touch(entry);
+    const previous = entry.operationTail ?? Promise.resolve();
+    const pending = previous.catch(() => {}).then(() => runOperation(entry, operation));
+    entry.operationTail = pending.catch(() => {});
+    return pending;
   };
 
   const activate = (botId, entry, previous) => {
@@ -1222,6 +1275,21 @@ function createBrowserSurfaceManager({
     }
   };
 
+  const presentationMouseParams = (entry, params) => {
+    if (params?.type === undefined) return params;
+    const scale = Number.isFinite(entry.presentationScale) ? entry.presentationScale : 1;
+    if (scale === 1 || (!Number.isFinite(params.x) && !Number.isFinite(params.y))) return params;
+    // Electron's WebContents device-emulation `scale` is a presentation
+    // transform outside the page's CSS viewport. DOM boxes and hit testing
+    // remain in 1280x800 page coordinates, while Input.dispatchMouseEvent is
+    // received in the scaled native view. Only the event position is scaled;
+    // wheel deltas intentionally remain CSS scroll distances.
+    const mapped = { ...params };
+    if (Number.isFinite(params.x)) mapped.x = params.x * scale;
+    if (Number.isFinite(params.y)) mapped.y = params.y * scale;
+    return mapped;
+  };
+
   const cdp = async (entry, method, params = {}, lease) => {
     const dbg = entry.view.webContents.debugger;
     await ensureProtocol(entry);
@@ -1229,6 +1297,9 @@ function createBrowserSurfaceManager({
     if (method === "Runtime.evaluate" && params.contextId === undefined) {
       const contextId = await ensureIsolatedContext(entry);
       commandParams = { ...params, contextId };
+    }
+    if (method === "Input.dispatchMouseEvent") {
+      commandParams = presentationMouseParams(entry, commandParams);
     }
     const isAgentInput = method.startsWith("Input.");
     if (isAgentInput) {
@@ -1346,16 +1417,22 @@ function createBrowserSurfaceManager({
     }
   };
 
-  /** Fit the fixed desktop viewport into the rectangle the panel gave us:
-   * scaled down for the compact preview, 1:1 when expanded. */
+  /** Fit the fixed desktop viewport into either rectangle the panel gives us.
+   * Expanded is a larger presentation of the exact same page viewport, not a
+   * responsive-layout transition. */
   const applyMode = (entry, mode) => {
     const contents = entry.view.webContents;
     entry.mode = mode;
-    if (mode === "compact" && entry.bounds) {
+    if (entry.bounds) {
       const scale = Math.min(entry.bounds.width / VIEWPORT.width, entry.bounds.height / VIEWPORT.height);
-      const boundedScale = Math.max(0.1, Math.min(1, scale));
-      const emulationKey = `compact:${boundedScale}`;
-      if (entry.emulationKey === emulationKey) return;
+      // Very large workspaces may legitimately enlarge the desktop viewport;
+      // keep a generous ceiling only to avoid pathological native values.
+      const boundedScale = Math.max(0.1, Math.min(2, scale));
+      const emulationKey = `fixed:${boundedScale}`;
+      if (entry.emulationKey === emulationKey) {
+        entry.presentationScale = boundedScale;
+        return;
+      }
       try {
         contents.enableDeviceEmulation({
           screenPosition: "desktop",
@@ -1365,14 +1442,16 @@ function createBrowserSurfaceManager({
           viewSize: { ...VIEWPORT },
           scale: boundedScale,
         });
+        entry.presentationScale = boundedScale;
         entry.emulationKey = emulationKey;
-      } catch {}
+      } catch {
+        // Keep the retry sentinel and coordinate conversion honest. A failed
+        // emulation call means Input coordinates still use the native view.
+        entry.presentationScale = 1;
+        entry.emulationKey = null;
+      }
     } else {
-      if (entry.emulationKey === "expanded") return;
-      try {
-        contents.disableDeviceEmulation();
-        entry.emulationKey = "expanded";
-      } catch {}
+      entry.presentationScale = 1;
     }
   };
 
@@ -1716,18 +1795,25 @@ function createBrowserSurfaceManager({
      * it: null). `profile` switches views; `mode` picks the scaling. A
      * profile-scoped hide is ignored after another profile has become active,
      * which makes React effect cleanup safe during profile switches. */
-    layout(botId, bounds, profile, mode) {
+    layout(botId, bounds, profile, mode, layoutOwner) {
+      const ownerId = layoutOwnerIdOf(layoutOwner);
       if (bounds === null || bounds === undefined) {
         const entry = active.get(botIdOf(botId));
         if (!entry) return closedState(botIdOf(botId));
         if (profile !== undefined && entry.profile !== profileIdOf(profile)) return stateFor(entry);
+        // Compact and expanded BrowserPanel instances can overlap briefly
+        // during React handoff. Cleanup from the old owner must never hide
+        // the newer native surface for the same bot and profile.
+        if (ownerId !== undefined && entry.layoutOwner !== ownerId) return stateFor(entry);
         if (entry.visible) {
           entry.visible = false;
           entry.view.setVisible(false);
         }
+        entry.layoutOwner = null;
         return stateFor(entry);
       }
       const entry = ensure(botId, profile);
+      entry.layoutOwner = ownerId ?? null;
       const normalized = normalizeDesktopWorkspaceBounds(bounds, owner.getContentSize());
       if (!sameBounds(entry.bounds, normalized)) {
         entry.bounds = normalized;
@@ -1735,6 +1821,12 @@ function createBrowserSurfaceManager({
       }
       applyMode(entry, mode === "expanded" ? "expanded" : "compact");
       if (!entry.visible) {
+        // A hidden sibling may have been added after this view (profile
+        // switch, workspace overlay, another bot). Re-adding raises this
+        // native child before it becomes visible, matching DOM stacking.
+        try {
+          owner.contentView.addChildView(entry.view);
+        } catch {}
         entry.visible = true;
         entry.view.setVisible(true);
       }
@@ -1786,6 +1878,16 @@ function createBrowserSurfaceManager({
       });
     },
 
+    async reload(botId, profile, { source } = {}) {
+      const entry = ensure(botId, profile);
+      return withOperation(entry, async () => {
+        const lease = beginAgentAction(entry, source);
+        assertAgentLease(entry, lease, source);
+        entry.view.webContents.reload();
+        return observe(entry);
+      });
+    },
+
     async snapshot(botId, profile) {
       const entry = ensure(botId, profile);
       return withOperation(entry, async () => {
@@ -1802,11 +1904,17 @@ function createBrowserSurfaceManager({
         const target = await centerOf(entry, ref, lease);
         const { x, y } = target;
         const which = button === "right" ? "right" : button === "middle" ? "middle" : "left";
+        const clicks = Math.min(3, Math.max(1, Math.trunc(Number(clickCount)) || 1));
         await cdp(entry, "Input.dispatchMouseEvent", { type: "mouseMoved", x, y }, lease);
         await assertRefHitTarget(entry, target, lease);
         await assertNoPopulatedProtectedFields(entry, lease);
-        await cdp(entry, "Input.dispatchMouseEvent", { type: "mousePressed", x, y, button: which, clickCount }, lease);
-        await cdp(entry, "Input.dispatchMouseEvent", { type: "mouseReleased", x, y, button: which, clickCount }, lease);
+        // Chromium derives click and dblclick DOM events from a sequence whose
+        // detail rises 1, 2, ...; sending only one down/up pair marked as 2
+        // skips the first click and behaves differently from a real pointer.
+        for (let detail = 1; detail <= clicks; detail += 1) {
+          await cdp(entry, "Input.dispatchMouseEvent", { type: "mousePressed", x, y, button: which, clickCount: detail }, lease);
+          await cdp(entry, "Input.dispatchMouseEvent", { type: "mouseReleased", x, y, button: which, clickCount: detail }, lease);
+        }
         return observe(entry);
       });
     },
@@ -1841,6 +1949,7 @@ function createBrowserSurfaceManager({
             x: from.x + (to.x - from.x) * step,
             y: from.y + (to.y - from.y) * step,
             button: "left",
+            buttons: 1,
           }, lease);
         }
         await assertRefHitTarget(entry, { ...to, ref: String(toRef) }, lease);
@@ -2032,10 +2141,25 @@ function createBrowserSurfaceManager({
         assertAgentLease(entry, lease);
         let shot = null;
         try {
+          let deviceScaleFactor = 1;
+          try {
+            const reported = Number(await evaluate(entry, "window.devicePixelRatio"));
+            if (Number.isFinite(reported) && reported >= 0.25 && reported <= 8) deviceScaleFactor = reported;
+          } catch {}
+          assertAgentLease(entry, lease);
           shot = await cdp(entry, "Page.captureScreenshot", {
             format: "jpeg",
             quality: SCREENSHOT_QUALITY,
-            clip: { x: 0, y: 0, width: VIEWPORT.width, height: VIEWPORT.height, scale: SCREENSHOT_WIDTH / VIEWPORT.width },
+            // captureScreenshot applies this scale before rasterizing at the
+            // page's device pixel ratio. Divide by DPR so the encoded JPEG —
+            // not just its metadata — is always exactly 1024x640.
+            clip: {
+              x: 0,
+              y: 0,
+              width: VIEWPORT.width,
+              height: VIEWPORT.height,
+              scale: SCREENSHOT_WIDTH / (VIEWPORT.width * deviceScaleFactor),
+            },
           });
           assertAgentLease(entry, lease);
         } catch {
