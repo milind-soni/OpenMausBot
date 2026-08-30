@@ -236,6 +236,8 @@ const appConfigSchema = z.object({
   openaiCompat: z
     .object({ key: optionalText, url: optionalText, model: optionalText, provider: optionalText })
     .optional(),
+  /** OrcaRouter gateway key. Non-secret url override is optional. */
+  orcarouter: z.object({ key: optionalText, url: optionalText }).optional(),
   /** Project key used for Sessions, catalog and agent tools. userId/sessionId
    * are non-secret local identifiers used to reuse one Composio Session. */
   composio: z.object({ apiKey: optionalText, userId: optionalText, sessionId: optionalText }).optional(),
@@ -266,6 +268,7 @@ const jsonObjectSchema = z.record(z.string(), z.json());
 export interface AppConfig {
   xai?: { key?: string; url?: string };
   openaiCompat?: { key?: string; url?: string; model?: string; provider?: string };
+  orcarouter?: { key?: string; url?: string };
   composio?: { apiKey?: string; userId?: string; sessionId?: string };
   box?: { token?: string };
   /** A named host from the user's SSH config. Authentication stays with SSH. */
@@ -459,6 +462,9 @@ export function loadConfig(): AppConfig {
   if (process.env.OPENAI_COMPAT_URL !== undefined) cfg.openaiCompat.url = process.env.OPENAI_COMPAT_URL;
   if (process.env.OPENAI_COMPAT_MODEL !== undefined) cfg.openaiCompat.model = process.env.OPENAI_COMPAT_MODEL;
   if (process.env.OPENAI_COMPAT_PROVIDER !== undefined) cfg.openaiCompat.provider = process.env.OPENAI_COMPAT_PROVIDER;
+  cfg.orcarouter = { ...cfg.orcarouter };
+  if (process.env.ORCAROUTER_API_KEY !== undefined) cfg.orcarouter.key = process.env.ORCAROUTER_API_KEY;
+  if (process.env.ORCAROUTER_BASE_URL !== undefined) cfg.orcarouter.url = process.env.ORCAROUTER_BASE_URL;
   cfg.composio = { ...cfg.composio };
   if (process.env.COMPOSIO_API_KEY !== undefined) cfg.composio.apiKey = process.env.COMPOSIO_API_KEY;
   cfg.box = { ...cfg.box };
@@ -483,6 +489,7 @@ export function syncCredentialEnv(patch: Partial<AppConfig>): void {
   const secrets: Array<[value: string | undefined, name: string]> = [
     [patch.xai?.key, "XAI_API_KEY"],
     [patch.openaiCompat?.key, "OPENAI_COMPAT_API_KEY"],
+    [patch.orcarouter?.key, "ORCAROUTER_API_KEY"],
     [patch.composio?.apiKey, "COMPOSIO_API_KEY"],
     [patch.box?.token, "BOX_TOKEN"],
     [patch.opencodeGo?.apiKey, "OPENCODE_API_KEY"],
@@ -517,6 +524,7 @@ export const WORKSPACE_CREDENTIAL_ENV = [
   "XAI_API_KEY",
   "OPENAI_COMPAT_API_KEY",
   "OPENAI_COMPAT_URL",
+  "ORCAROUTER_API_KEY",
   "BOX_TOKEN",
   "OPENCODE_API_KEY",
   "OMB_TTS_KEY",
@@ -547,6 +555,7 @@ export const PROVIDER_CREDENTIAL_ENV = [
   "KIMI_API_KEY",
   "MOONSHOT_API_KEY",
   "MINIMAX_API_KEY",
+  "ORCAROUTER_API_KEY",
   "OPENAI_API_KEY",
   "OPENCODE_API_KEY",
   "XAI_API_KEY",
@@ -679,6 +688,8 @@ function injectedEnvironment(cfg: AppConfig, driver: string): Map<string, string
     environment.set("OPENAI_COMPAT_API_KEY", cfg.openaiCompat.key);
   if (driver === "openai-compat" && cfg.openaiCompat?.url)
     environment.set("OPENAI_COMPAT_URL", cfg.openaiCompat.url);
+  if (driver === "orcarouter" && cfg.orcarouter?.key)
+    environment.set("ORCAROUTER_API_KEY", cfg.orcarouter.key);
   if (driver === "boxAgent" && cfg.box?.token) environment.set("BOX_TOKEN", cfg.box.token);
   if (driver === "opencodeGo" && cfg.opencodeGo?.apiKey) environment.set("OPENCODE_API_KEY", cfg.opencodeGo.apiKey);
   return environment;
@@ -714,6 +725,7 @@ export function instanceConfigs(cfg: AppConfig): InstanceConfigMap {
     opencodeGo: { driver: "opencodeGo" },
     computer: { driver: "boxAgent" },
     openaiCompat: { driver: "openai-compat" },
+    orcarouter: { driver: "orcarouter" },
     qwen: { driver: "qwenAgent" },
     hermes: { driver: "hermesAgent" },
     pi: { driver: "piAgent" },
@@ -729,6 +741,7 @@ export function instanceConfigs(cfg: AppConfig): InstanceConfigMap {
   const PRODUCT_FLEET_ADDITIONS = {
     cursor: { driver: "cursorAgent" },
     openaiCompat: { driver: "openai-compat" },
+    orcarouter: { driver: "orcarouter" },
     ...CUSTOM_ONLY,
   } as const;
   const configured = cfg.instances && Object.keys(cfg.instances).length ? cfg.instances : null;
