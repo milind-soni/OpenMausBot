@@ -12,7 +12,7 @@
 // Speaks raw JSON-RPC 2.0 over stdio (house style: agents-proxy/phone-proxy).
 // State comes from env, injected by the harness:
 //   OMB_BROWSER_URL    loopback host, e.g. http://127.0.0.1:52144
-//   OMB_BROWSER_TOKEN  per-boot bearer secret from browser-connection.json
+//   OMB_BROWSER_TOKEN  capability scoped to this bot + browser profile
 //   OMB_BOT_ID         which bot's tab to drive (one view per bot)
 //   OMB_BROWSER_PROFILE named shared session the bot is pointed at ("" = own)
 //   OMB_CONTROL_URL / OMB_CONTROL_TOKEN  who-is-driving endpoint: while the
@@ -22,7 +22,7 @@ import { createInterface } from "node:readline";
 import { z } from "zod";
 
 import { safeBrowserUrl } from "../computer-observation.ts";
-import { CONTROL_REFUSAL, createControlClient } from "../control-client.ts";
+import { createControlClient } from "../control-client.ts";
 
 const HOST = (process.env.OMB_BROWSER_URL ?? "").replace(/\/$/, "");
 const TOKEN = process.env.OMB_BROWSER_TOKEN ?? "";
@@ -76,7 +76,7 @@ const waitArgs = z.object({
   text: z.string().trim().min(1).optional(),
   url: z.string().trim().min(1).optional(),
   timeout_ms: z.number().int().min(250).max(30_000).optional(),
-});
+}).refine((value) => Boolean(value.text || value.url), { message: "text or url is required" });
 const readSchema = z.object({ url: z.string().default(""), title: z.string().default(""), text: z.string().default(""), truncated: z.boolean().optional() });
 const rpcMessageSchema = z.object({
   id: z.unknown().optional(),
@@ -122,10 +122,35 @@ function wallNote(kind: WallKind): string {
     : "This looks like a sign-in step. Never type the user's password or a one-time code: call browser_request_takeover so they can sign in in the Browser panel, then continue from the page you get back.";
 }
 
+const PROTECTED_FIELD_NAME = /\b(password|passwd|passcode|client[ _-]?secret|api[ _-]?key|secret[ _-]?key|private[ _-]?key|signing[ _-]?key|webhook[ _-]?secret|(?:aws[ _-]?)?secret[ _-]?access[ _-]?key|access[ _-]?token|auth[ _-]?token|refresh[ _-]?token|bearer[ _-]?token|one[ _-]?time(?:[ _-]?code)?|verification[ _-]?code|security[ _-]?(?:code|answer)|recovery[ _-]?(?:code|phrase)|seed[ _-]?phrase|mnemonic|otp|pin|card[ _-]?(?:number|security|cvv|cvc)|cvv|cvc|bank[ _-]?(?:account|routing)|routing[ _-]?(?:number|code)|account[ _-]?(?:number|no)|social[ _-]?(?:security|insurance)|ssn|tax[ _-]?id)\b/i;
+
+/** Defense in depth for mixed-version/dev setups: even if an older Electron
+ * surface includes a protected field's current value, the proxy strips it
+ * before model context or the transcript can see it. */
+function redactProtectedSnapshot(page: ObservedPage): ObservedPage {
+  const elements = page.elements.map((element) =>
+    PROTECTED_FIELD_NAME.test(element.name) && element.value !== undefined
+      ? { ...element, value: undefined }
+      : element
+  );
+  const yaml = page.yaml == null
+    ? page.yaml
+    : page.yaml
+      .split("\n")
+      .map((line) =>
+        PROTECTED_FIELD_NAME.test(line) && /\b(?:textbox|searchbox|combobox)\b/i.test(line)
+          ? line.replace(/(\[ref=[^\]]+\])(?::.*)?$/, "$1")
+          : line
+      )
+      .join("\n");
+  return { ...page, elements, yaml };
+}
+
 /** The page as the model reads it. URLs are scrubbed of query and fragment
  * before they reach a transcript (session tokens ride in both); the host
  * keeps the real one. */
 export function formatObserved(page: ObservedPage): string {
+  page = redactProtectedSnapshot(page);
   const url = safeBrowserUrl(page.url) ?? (page.url === "about:blank" ? "about:blank" : "URL unavailable");
   const wall = classifyWall(page);
   const notes = [...(page.notes ?? []), ...(wall ? [wallNote(wall)] : [])];
@@ -145,6 +170,21 @@ export function formatObserved(page: ObservedPage): string {
 
 export type HostRequest = (operation: string, body?: object) => Promise<unknown>;
 
+/** Give long-poll operations enough transport headroom beyond the duration
+ * the host itself is allowed to wait. Without this, a valid 30-second
+ * browser_wait_for was aborted by the proxy's fixed 20-second deadline. */
+export function browserHostTimeoutMs(operation: string, body: object = {}): number {
+  if (operation === "navigate") return 30_000;
+  if (operation === "wait") {
+    const requested = (body as { timeoutMs?: unknown }).timeoutMs;
+    const waitMs = typeof requested === "number" && Number.isFinite(requested)
+      ? Math.max(250, Math.min(30_000, requested))
+      : 10_000;
+    return Math.max(20_000, waitMs + 5_000);
+  }
+  return 20_000;
+}
+
 /** One round trip to the browser host. A non-2xx reply carries the host's
  * own sentence (stale ref, refused address, no previous page) — that text
  * is exactly what the model should read, so it is thrown as-is. */
@@ -154,7 +194,7 @@ export async function hostRequest(operation: string, body: object = {}, fetchImp
     method: "POST",
     headers: { authorization: `Bearer ${TOKEN}`, "content-type": "application/json" },
     body: JSON.stringify({ ...body, profile: PROFILE }),
-    signal: AbortSignal.timeout(operation === "navigate" ? 30_000 : 20_000),
+    signal: AbortSignal.timeout(browserHostTimeoutMs(operation, body)),
   });
   const parsed: unknown = await res.json().catch(() => ({}));
   if (!res.ok) {
@@ -240,7 +280,7 @@ export const TOOLS = [
   {
     name: "browser_wait_for",
     description:
-      "Wait until text appears on the page and/or the address contains something, then return the page. With neither, just waits for the page to settle. Bounded by timeout_ms (default 10000, max 30000).",
+      "Wait until text appears on the page and/or the address contains something, then return the page. Bounded by timeout_ms (default 10000, max 30000).",
     inputSchema: {
       type: "object",
       properties: {
@@ -248,6 +288,7 @@ export const TOOLS = [
         url: { type: "string", description: "A substring the address must contain." },
         timeout_ms: { type: "integer", minimum: 250, maximum: 30000 },
       },
+      anyOf: [{ required: ["text"] }, { required: ["url"] }],
     },
   },
   {
@@ -338,28 +379,22 @@ async function requestTakeover(reason: string, request: HostRequest, waitMs = TA
   return textResult("Nobody took control within the wait window. Tell the user in chat what you need, then try again when they are ready.", true);
 }
 
-const ACTS = new Set([
-  "browser_navigate",
-  "browser_click",
-  "browser_hover",
-  "browser_drag",
-  "browser_fill",
-  "browser_type",
-  "browser_press",
-  "browser_scroll",
-  "browser_select_option",
-  "browser_back",
-  "browser_forward",
-]);
+const BROWSER_CONTROL_REFUSAL =
+  "A person has taken control of this browser, so nothing was read or changed. " +
+  "Do not inspect, screenshot, or retry while they may be typing private information. " +
+  "Call browser_request_takeover to wait for them to hand control back.";
 
 async function observed(request: HostRequest, operation: string, body?: object): Promise<ToolResult> {
   return textResult(formatObserved(pageSchema.parse(await request(operation, body))));
 }
 
 export async function callTool(name: string, args: unknown, request: HostRequest = hostRequest): Promise<ToolResult> {
-  // The person driving in the panel wins: actions refuse instead of typing
-  // over their hands. Reads stay allowed — the bot may still look.
-  if (ACTS.has(name) && (await control.state()).held) return textResult(CONTROL_REFUSAL, true);
+  // The person driving in the panel wins. Reads are private too: a snapshot
+  // or screenshot taken while they enter a password would leak it straight
+  // into model context. Only the takeover wait choreography remains open.
+  if (name !== "browser_request_takeover" && (await control.state(true)).held) {
+    return textResult(BROWSER_CONTROL_REFUSAL, true);
+  }
   if (name === "browser_navigate") {
     const parsed = navigateArgs.safeParse(args);
     if (!parsed.success) return argumentError(name, parsed.error);
@@ -408,7 +443,7 @@ export async function callTool(name: string, args: unknown, request: HostRequest
     return observed(request, "select", { ref: parsed.data.ref, values });
   }
   if (name === "browser_wait_for") {
-    const parsed = waitArgs.safeParse(args ?? {});
+    const parsed = waitArgs.safeParse(args);
     if (!parsed.success) return argumentError(name, parsed.error);
     const body: { text?: string; url?: string; timeoutMs?: number } = {};
     if (parsed.data.text) body.text = parsed.data.text;

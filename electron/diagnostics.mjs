@@ -19,6 +19,10 @@ export const CREDENTIAL_ENV_NAMES = [
   "OMB_OPENAI_IMAGE_KEY",
   "COMPOSIO_API_KEY",
   "OMB_COMPOSIO_BROKER_TOKEN",
+  // Browser capability files and app-owned state paths are private even
+  // though they are not traditional API credentials.
+  "OMB_BROWSER_CONNECTION",
+  "OMB_USER_DATA",
 ];
 
 // Credential-shaped tokens (server/redact.ts parity): unmistakable formats

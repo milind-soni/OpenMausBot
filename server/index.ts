@@ -20,6 +20,13 @@ import {
 
 import { approvalKey, autoVerdict } from "./auto-approve.ts";
 import { requestReview, resolveAutoReviewMode, shouldReview } from "./auto-review.ts";
+import {
+  BrowserCleanupCoordinator,
+  finalizeBrowserCleanupMutation,
+  requireBrowserCleanupAcknowledged,
+  type BrowserCleanupRequest,
+  type BrowserCleanupWireRequest,
+} from "./browser-lifecycle-cleanup.ts";
 import * as checkpoints from "./checkpoints.ts";
 import { appendDecision, readDecisions } from "./decision-log.ts";
 import { validateBotCwd } from "./bot-cwd.ts";
@@ -63,6 +70,8 @@ import {
   showToolCallsEnabled,
   skillRecorderEnabled,
   builtInBrowserEnabled,
+  browserProfileReplacementConflict,
+  browserProfilePartitionTarget,
   syncCredentialEnv,
   withInstanceCli,
   vpsSshAlias,
@@ -153,7 +162,18 @@ import { RepeatDetector, callKey } from "./repeat-detector.ts";
 import { redactSecretsInText } from "./redact.ts";
 import * as vps from "./vps-computer.ts";
 import { RoutineManager, type RoutineRun, type RoutineRunOn, type RoutineRunTrigger } from "./routines.ts";
-import { browserScreenshot, readBrowserConnection } from "./browser-connection.ts";
+import {
+  BUILT_IN_BROWSER_SYSTEM_PROMPT,
+  applyDesktopBrowserConnectionMessage,
+  availableBrowserConnection,
+  browserScreenshot,
+  clearBrowserCapabilities,
+  registerBrowserCapability,
+  revokeBrowserCapability,
+  type BrowserCapability,
+  type BrowserConnection,
+} from "./browser-connection.ts";
+import { captureOutsideHumanControl } from "./private-screen-capture.ts";
 import { RoutineRequestService } from "./routine-requests.ts";
 import { fetchBotDirectory, matchDirectoryBots, type MatchedDirectoryBot } from "./bot-directory.ts";
 import { scoutProject, suggestTeam } from "./project-scout.ts";
@@ -169,6 +189,13 @@ import { loadBundledSkills, loadUserSkills, mergeSkills, renderSkillInstructions
 import { installedPlaybookInstructions } from "./installed-playbooks.ts";
 import { createBotPackageExport } from "./package-export.ts";
 import { shouldMountLocalComputer } from "./local-routing.ts";
+import {
+  PendingTurnCancellations,
+  RetiredTurnRegistry,
+  guardTurnDispatch,
+  isTurnEventQuarantined,
+} from "./turn-dispatch-guard.ts";
+import { createGracefulShutdown } from "./graceful-shutdown.ts";
 
 const startPort = Number(process.env.OMB_PORT || process.env.OGB_PORT || 8799);
 const startWebhookPort = Number(process.env.OMB_WEBHOOK_PORT) || startPort + 1;
@@ -200,16 +227,38 @@ const availableSkills = () => mergeSkills(bundledSkills, loadUserSkills(join(DAT
 // after first paint without putting the credential in the renderer or
 // restarting the embedded server. Plain Node/dev launches have no parentPort.
 type UtilityParentPort = {
-  on(event: "message", listener: (event: { data?: unknown }) => void): void;
-  postMessage(message: unknown): void;
+  on(event: "message", listener: (event: { data?: object }) => void): void;
+  postMessage(message: object): void;
 };
+// SAFETY: Electron's utility-process runtime is the only environment that
+// supplies parentPort; plain Node intentionally leaves it absent.
 const utilityParentPort = (process as NodeJS.Process & { parentPort?: UtilityParentPort }).parentPort;
+type DesktopPrivateMessage = BrowserCleanupWireRequest | {
+  type: "openmausbot:browser-control";
+  botId: string;
+  held: true;
+};
+function postDesktopPrivateMessage(message: DesktopPrivateMessage): boolean {
+  if (!utilityParentPort) return false;
+  try {
+    utilityParentPort.postMessage(message);
+    return true;
+  } catch (error) {
+    console.error(`[desktop-sync] could not send private parent message: ${error instanceof Error ? error.message : String(error)}`);
+    return false;
+  }
+}
+const browserCleanup = new BrowserCleanupCoordinator({
+  file: join(DATA_DIR, "browser-cleanups.json"),
+  send: postDesktopPrivateMessage,
+});
 utilityParentPort?.on("message", (event) => {
   const message = event?.data;
   try {
-    composio.applyManagedBrokerMessage(message);
+    if (browserCleanup.receive(message)) return;
+    if (!applyDesktopBrowserConnectionMessage(message)) composio.applyManagedBrokerMessage(message);
   } catch (error) {
-    console.error(`[connected-apps] rejected desktop credential sync: ${error instanceof Error ? error.message : String(error)}`);
+    console.error(`[desktop-sync] rejected private parent message: ${error instanceof Error ? error.message : String(error)}`);
   }
 });
 
@@ -258,28 +307,220 @@ function agentsIntegration(botId: string, threadId: string, depth: number) {
   };
 }
 
-/** The built-in browser, when the desktop app has one running: the proxy
- * gets the loopback host + per-boot token from the descriptor Electron
- * wrote, and the who-is-driving endpoint so a person taking the wheel in
- * the panel pauses the bot's hands. Null when there is no desktop app. */
-function browserIntegration(botId: string, profile: string | undefined) {
-  const connection = readBrowserConnection();
+/** The built-in browser, when the desktop app has one running: the harness
+ * keeps Electron's per-boot master token and gives the proxy only a scoped
+ * bot/profile capability, plus the who-is-driving endpoint so a person
+ * taking the wheel in the panel pauses the bot's hands. */
+type ActiveBrowserCapability = {
+  botId: string;
+  ownerId: string;
+  connection: BrowserConnection;
+  capability: BrowserCapability;
+};
+
+const browserCapabilitiesByThread = new Map<string, ActiveBrowserCapability>();
+const pendingBrowserCapabilityRevocations = new Map<string, {
+  active: ActiveBrowserCapability;
+  attempt: number;
+  timer: ReturnType<typeof setTimeout>;
+}>();
+const BROWSER_REVOCATION_RETRY_MS = [250, 1_000, 3_000, 10_000, 30_000] as const;
+
+async function revokeReleasedBrowserCapability(active: ActiveBrowserCapability, attempt = 0): Promise<void> {
+  const token = active.capability.token;
+  try {
+    await revokeBrowserCapability(active.connection, active.capability);
+    const pending = pendingBrowserCapabilityRevocations.get(token);
+    if (pending) clearTimeout(pending.timer);
+    pendingBrowserCapabilityRevocations.delete(token);
+  } catch (error) {
+    if (Date.now() >= active.capability.expiresAt) {
+      pendingBrowserCapabilityRevocations.delete(token);
+      return;
+    }
+    if (attempt === 0) {
+      console.error(`[browser] could not revoke turn capability; retrying until its absolute expiry: ${error instanceof Error ? error.message : String(error)}`);
+    }
+    const delay = Math.min(
+      BROWSER_REVOCATION_RETRY_MS[Math.min(attempt, BROWSER_REVOCATION_RETRY_MS.length - 1)]!,
+      Math.max(1, active.capability.expiresAt - Date.now()),
+    );
+    const timer = setTimeout(() => {
+      const pending = pendingBrowserCapabilityRevocations.get(token);
+      if (!pending || pending.timer !== timer) return;
+      void revokeReleasedBrowserCapability(active, attempt + 1);
+    }, delay);
+    timer.unref?.();
+    const previous = pendingBrowserCapabilityRevocations.get(token);
+    if (previous) clearTimeout(previous.timer);
+    pendingBrowserCapabilityRevocations.set(token, { active, attempt: attempt + 1, timer });
+  }
+}
+
+async function releaseBrowserCapabilityForThread(threadId: string, expectedOwnerId?: string): Promise<void> {
+  const active = browserCapabilitiesByThread.get(threadId);
+  if (!active || (expectedOwnerId !== undefined && active.ownerId !== expectedOwnerId)) return;
+  browserCapabilitiesByThread.delete(threadId);
+  await revokeReleasedBrowserCapability(active);
+}
+
+async function releaseBrowserCapabilitiesForBot(botId: string): Promise<void> {
+  const threads = [...browserCapabilitiesByThread]
+    .filter(([, active]) => active.botId === botId)
+    .map(([threadId]) => threadId);
+  await Promise.all(threads.map((threadId) => releaseBrowserCapabilityForThread(threadId)));
+}
+
+async function releaseAllBrowserCapabilities(): Promise<void> {
+  const active = [...browserCapabilitiesByThread.values()];
+  browserCapabilitiesByThread.clear();
+  const connections = new Map<string, BrowserConnection>();
+  for (const entry of active) {
+    connections.set(`${entry.connection.url}:${entry.connection.token}`, entry.connection);
+  }
+  for (const pending of pendingBrowserCapabilityRevocations.values()) {
+    connections.set(`${pending.active.connection.url}:${pending.active.connection.token}`, pending.active.connection);
+  }
+
+  await Promise.all([...connections.values()].map(async (connection) => {
+    try {
+      // Master clear is atomic at the host. It also invalidates a token whose
+      // earlier per-turn revoke timed out, which is essential for feature-off
+      // and graceful-shutdown boundaries.
+      await clearBrowserCapabilities(connection);
+      for (const [token, pending] of pendingBrowserCapabilityRevocations) {
+        if (
+          pending.active.connection.url === connection.url &&
+          pending.active.connection.token === connection.token
+        ) {
+          clearTimeout(pending.timer);
+          pendingBrowserCapabilityRevocations.delete(token);
+        }
+      }
+    } catch {
+      await Promise.all(active
+        .filter((entry) =>
+          entry.connection.url === connection.url && entry.connection.token === connection.token
+        )
+        .map((entry) => revokeReleasedBrowserCapability(entry)));
+    }
+  }));
+}
+
+type DirectTurnDispatchClaim = {
+  id: string;
+  threadId: string;
+  phase: "setup" | "dispatching";
+};
+class DirectTurnSetupCancelled extends Error {}
+const directTurnDispatchClaims = new Map<string, DirectTurnDispatchClaim>();
+const directTurnGenerationByBot = new Map<string, string>();
+const retiredProviderTurns = new RetiredTurnRegistry();
+const pendingCancelledProviderHandshakes = new PendingTurnCancellations();
+
+function markCancelledProviderHandshake(threadId: string, ownerId: string): void {
+  pendingCancelledProviderHandshakes.mark(threadId, ownerId);
+}
+
+function clearCancelledProviderHandshake(threadId: string, ownerId: string): void {
+  pendingCancelledProviderHandshakes.clear(threadId, ownerId);
+}
+
+function retireProviderTurn(turnId: string): void {
+  retiredProviderTurns.retire(turnId);
+}
+
+function shouldIgnoreProviderEvent(event: RuntimeEvent): boolean {
+  // Some adapters publish completion/error synchronously just before their
+  // sendTurn promise resolves. Stop can already have cancelled that handshake,
+  // but its returned turn id is not available to retire yet. Quarantine the
+  // narrow pre-id window and tombstone any id it reveals; the broad gate is
+  // time-bounded so a broken promise cannot suppress a later turn forever.
+  if (isTurnEventQuarantined(pendingCancelledProviderHandshakes, retiredProviderTurns, event)) return true;
+  if (event.type !== "session.exited" || event.turnId !== undefined) return false;
+  return store.botByThread(event.threadId)?.busy === true || Boolean(store.groupByThread(event.threadId)?.busyBotId);
+}
+
+function directTurnClaimIsCurrent(botId: string, claimId: string, threadId: string): boolean {
+  const claim = directTurnDispatchClaims.get(botId);
+  const bot = store.bot(botId);
+  return claim?.id === claimId && claim.threadId === threadId && bot?.busy === true;
+}
+
+function directTurnClaimExists(botId: string, claimId: string, threadId: string): boolean {
+  const claim = directTurnDispatchClaims.get(botId);
+  return claim?.id === claimId && claim.threadId === threadId;
+}
+
+function markDirectTurnDispatching(botId: string, claimId: string, threadId: string): boolean {
+  if (!directTurnClaimIsCurrent(botId, claimId, threadId)) return false;
+  directTurnDispatchClaims.set(botId, { id: claimId, threadId, phase: "dispatching" });
+  return true;
+}
+
+function clearDirectTurnDispatch(botId: string, claimId: string): void {
+  if (directTurnDispatchClaims.get(botId)?.id === claimId) directTurnDispatchClaims.delete(botId);
+}
+
+function cancelDirectTurnDispatch(botId: string, expectedThreadId?: string): DirectTurnDispatchClaim | null {
+  const claim = directTurnDispatchClaims.get(botId);
+  if (!claim || (expectedThreadId !== undefined && claim.threadId !== expectedThreadId)) return null;
+  directTurnDispatchClaims.delete(botId);
+  // Setup has not called the adapter yet, so there is no provider handshake
+  // (and no unknown turn id) to quarantine. Dispatching is the only phase in
+  // which a late provider event can exist.
+  if (claim.phase === "dispatching") {
+    markCancelledProviderHandshake(claim.threadId, `direct:${claim.id}`);
+  }
+  // Keep setup ownership until the guarded send resolves and retires its
+  // provider turn id. Some adapters can emit completion synchronously just
+  // before sendTurn returns; making the bot idle here would let a replacement
+  // start early enough for those old events to settle the replacement.
+  return claim;
+}
+
+async function browserIntegration(
+  botId: string,
+  profile: string | undefined,
+  threadId: string,
+  stillValid: () => boolean = () => true,
+  ownerId = randomUUID(),
+) {
+  const connection = availableBrowserConnection();
   if (!connection) return null;
   const control = controlIntegration(botId);
-  // a profile that no longer exists falls back to the bot's own session;
-  // "guest" is a throwaway session the surface forgets on switch-away
-  const profileId = profile === "guest" || (profile && (cfg.browserProfiles ?? []).some((candidate) => candidate.id === profile)) ? profile : "";
+  // A profile that no longer exists falls back to the bot's own session.
+  // Canonical ids belong to config/bot references; Electron must receive the
+  // exact immutable partition inherited from #567 so an upgrade cannot move
+  // a bot into another account. Guest remains a throwaway partition.
+  const profileTarget = profile && profile !== "guest"
+    ? browserProfilePartitionTarget(cfg, profile)
+    : null;
+  const partitionId = profile === "guest" ? "guest" : (profileTarget?.partitionId ?? "");
+  await releaseBrowserCapabilityForThread(threadId);
+  const capability = await registerBrowserCapability(connection, botId, partitionId);
+  const active = { botId, ownerId, connection, capability };
+  // Registration crosses a process boundary. Stop/delete/config changes can
+  // land while the desktop host is minting the token; revalidate in the same
+  // event-loop turn that publishes it. If ownership was lost, no agent ever
+  // receives the bearer and the just-created token is revoked immediately.
+  if (!stillValid()) {
+    await revokeReleasedBrowserCapability(active);
+    return null;
+  }
+  browserCapabilitiesByThread.set(threadId, active);
   return {
     connection,
-    profile: profileId,
+    capability,
+    profile: partitionId,
     integration: {
       command: process.execPath,
       args: [SPAWNED_PROXIES.browser],
       env: {
         ...AGENTS_NODE_FLAG,
         OMB_BROWSER_URL: connection.url,
-        OMB_BROWSER_TOKEN: connection.token,
-        OMB_BROWSER_PROFILE: profileId,
+        OMB_BROWSER_TOKEN: capability.token,
+        OMB_BROWSER_PROFILE: partitionId,
         OMB_BOT_ID: botId,
         OMB_CONTROL_URL: control.url,
         OMB_CONTROL_TOKEN: control.token,
@@ -309,7 +550,16 @@ function connectedAppsIntegration(botId: string, threadId: string) {
 // The person can take the wheel of a bot's computer from the panel; while
 // they hold it, the bot's computer proxies refuse every action. The record
 // lives here; the proxies consult it over loopback with the boot token.
+const computerControlRevision = new Map<string, number>();
 const computerControl = new ComputerControl((botId, snapshot) => {
+  computerControlRevision.set(botId, (computerControlRevision.get(botId) ?? 0) + 1);
+  // One-way, fail-closed mirror into the Electron process that owns the
+  // native browser. Never send release: a loopback caller can influence the
+  // server record, while only the trusted Browser panel may clear Electron's
+  // local gate after its server-first release succeeds.
+  if (snapshot.held && /^[A-Za-z0-9_-]{1,120}$/.test(botId)) {
+    postDesktopPrivateMessage({ type: "openmausbot:browser-control", botId, held: true });
+  }
   broadcast({ kind: "computer-control", botId, held: snapshot.held, helpReason: snapshot.helpReason });
 });
 const controlLeaseIdSchema = z.string().min(16).max(120).regex(/^[A-Za-z0-9_-]+$/);
@@ -356,6 +606,10 @@ function askBotAndWait(targetBotId: string, message: string, depth: number, from
       resolve(out);
     };
     const unsub = bus.subscribe((e: RuntimeEvent) => {
+      // A cancelled provider may flush text/completion after its replacement
+      // has started on the same thread. Retired turn ids must never satisfy a
+      // newer ask_bot waiter with the old partial reply.
+      if (shouldIgnoreProviderEvent(e)) return;
       if (e.threadId !== threadId) return;
       if (e.type === "item.completed" && e.itemType === "assistant_text") {
         text += (text ? "\n" : "") + e.text;
@@ -367,6 +621,7 @@ function askBotAndWait(targetBotId: string, message: string, depth: number, from
     startTurn(targetBotId, message, {
       commsDepth: depth + 1,
       unattended: isUnattended(fromBotId),
+      onDispatchError: (reason) => finish(`(couldn't start that bot: ${reason})`),
     }).catch((err) =>
       finish(`(couldn't start that bot: ${err instanceof Error ? err.message : String(err)})`),
     );
@@ -478,6 +733,29 @@ const store = new Store(() => bootSelection);
 const sendSequencer = new SendSequencer();
 bootSelection = await defaultSelection();
 store.seedIfEmpty();
+// A committed profile cleanup means both its config deletion and bot-reference
+// cleanup were intended to be durable. Reconcile stale secondary references
+// before Electron can ACK and remove the journal: a crash between those writes
+// in an older build must not let id reuse attach a bot to somebody else's new
+// account. Prepared entries remain untouched because their deletion is
+// ambiguous and must never authorize either mutation or a wipe.
+let browserCleanupReferencesReconciled = true;
+try {
+  const committedProfileIds = new Set(browserCleanup.committedProfileIds());
+  for (const bot of store.bots) {
+    if (bot.browserProfile && committedProfileIds.has(bot.browserProfile)) {
+      store.patchBot(bot.id, { browserProfile: undefined });
+    }
+  }
+} catch (error) {
+  browserCleanupReferencesReconciled = false;
+  console.error(
+    `browser cleanup: could not reconcile committed profile references: ${error instanceof Error ? error.message : String(error)}`,
+  );
+}
+// Replay only after the secondary write above is durable. If reconciliation
+// failed, leave the committed journal in place and profile reuse blocked.
+if (browserCleanupReferencesReconciled) browserCleanup.startPending();
 
 /** A bot as a client may see it: no provider session bookkeeping.
  *
@@ -510,7 +788,9 @@ const publicBot = (bot: NonNullable<ReturnType<typeof store.bot>>) => ({
 type GroupTurnOperation = {
   id: string;
   threadId: string;
+  botIds: Set<string>;
   cancelled: boolean;
+  providerHandshakePending: boolean;
 };
 
 // busyBotId names only the speaker that currently owns the provider process.
@@ -527,8 +807,18 @@ function publicGroupState(group: GroupRecord) {
   return { ...group, working: groupIsWorking(group) };
 }
 
-function beginGroupTurnOperation(groupId: string, threadId: string): GroupTurnOperation {
-  const operation = { id: randomUUID(), threadId, cancelled: false };
+function beginGroupTurnOperation(
+  groupId: string,
+  threadId: string,
+  botIds: Iterable<string> = [],
+): GroupTurnOperation {
+  const operation = {
+    id: randomUUID(),
+    threadId,
+    botIds: new Set(botIds),
+    cancelled: false,
+    providerHandshakePending: false,
+  };
   const operations = groupTurnOperations.get(groupId) ?? new Set<GroupTurnOperation>();
   operations.add(operation);
   groupTurnOperations.set(groupId, operations);
@@ -538,6 +828,7 @@ function beginGroupTurnOperation(groupId: string, threadId: string): GroupTurnOp
 }
 
 function finishGroupTurnOperation(groupId: string, operation: GroupTurnOperation) {
+  clearCancelledProviderHandshake(operation.threadId, `group:${operation.id}`);
   const operations = groupTurnOperations.get(groupId);
   operations?.delete(operation);
   if (operations?.size === 0) groupTurnOperations.delete(groupId);
@@ -547,8 +838,33 @@ function finishGroupTurnOperation(groupId: string, operation: GroupTurnOperation
 
 function cancelGroupTurnOperations(groupId: string, threadId: string) {
   for (const operation of groupTurnOperations.get(groupId) ?? []) {
-    if (operation.threadId === threadId) operation.cancelled = true;
+    if (operation.threadId !== threadId) continue;
+    operation.cancelled = true;
+    if (operation.providerHandshakePending) {
+      markCancelledProviderHandshake(operation.threadId, `group:${operation.id}`);
+    }
   }
+}
+
+function groupProviderHandshakeStarted(operation: GroupTurnOperation): void {
+  operation.providerHandshakePending = true;
+}
+
+function groupProviderHandshakeSettled(operation: GroupTurnOperation): void {
+  operation.providerHandshakePending = false;
+  clearCancelledProviderHandshake(operation.threadId, `group:${operation.id}`);
+}
+
+function activeGroupTurnForBot(botId: string): { group: GroupRecord; threadId: string } | null {
+  for (const group of store.groups) {
+    if (group.busyBotId === botId) return { group, threadId: group.threadId };
+    for (const operation of groupTurnOperations.get(group.id) ?? []) {
+      if (!operation.cancelled && operation.botIds.has(botId)) {
+        return { group, threadId: operation.threadId };
+      }
+    }
+  }
+  return null;
 }
 
 const groupWithThread = (group: GroupRecord) => ({
@@ -851,6 +1167,7 @@ const watchdog = new TurnWatchdog({
   stallMs: TURN_STALL_MS,
   checkMs: 60_000,
   onStall: (turn) => {
+    void releaseBrowserCapabilityForThread(turn.threadId);
     repeats.settle(turn.threadId);
     const bot = store.bot(turn.botId);
     const instance = bot ? registry.get(bot.modelSelection.instanceId) : null;
@@ -967,10 +1284,20 @@ async function reviewPermissionCard(args: {
 }
 
 bus.subscribe((event: RuntimeEvent) => {
+  if (shouldIgnoreProviderEvent(event)) return;
   if (event.type === "request.opened") watchdog.setWaitingOnHuman(event.threadId, true);
   else if (event.type === "request.resolved") watchdog.setWaitingOnHuman(event.threadId, false);
-  else if (event.type === "turn.completed") watchdog.settle(event.threadId);
-  else watchdog.touch(event.threadId);
+  else if (event.type === "turn.completed") {
+    watchdog.settle(event.threadId);
+    void releaseBrowserCapabilityForThread(event.threadId);
+  } else if (event.type === "session.exited") {
+    // A retained provider session can exit after a newer turn reused the same
+    // thread. An unscoped session event must never revoke that newer turn's
+    // capability; its turn completion or watchdog owns release instead.
+    const directBotBusy = store.botByThread(event.threadId)?.busy === true;
+    const roomBusy = Boolean(store.groupByThread(event.threadId)?.busyBotId);
+    if (!directBotBusy && !roomBusy) void releaseBrowserCapabilityForThread(event.threadId);
+  } else watchdog.touch(event.threadId);
 });
 
 // Bots currently working with nobody at the keyboard — a webhook turn, or a
@@ -1079,6 +1406,7 @@ void (async () => {
 })();
 
 bus.subscribe((event: RuntimeEvent) => {
+  if (shouldIgnoreProviderEvent(event)) return;
   const localVmTarget = localVmThreadTargets.get(event.threadId);
   if (localVmTarget) {
     localVmLeaseFor(localVmTarget).touch(event.threadId);
@@ -1129,7 +1457,7 @@ bus.subscribe((event: RuntimeEvent) => {
         // computer tools can change the screen, and each capture competes
         // with the agent for the box's command endpoint, so a bot grinding
         // through file edits must not trigger one per tool.
-        if (bot && /computer|screenshot|click|type_text|press_key|scroll|open_url|browser_/i.test(toolName)) {
+        if (bot && /computer|screenshot|click|type_text|press_key|scroll|open_url|wait_for|browser_/i.test(toolName)) {
           pokeScreenPoller(bot.id);
         }
       }
@@ -1507,6 +1835,7 @@ function finalizeDelegationWatch(
 // may be five different commands. Arguments come from ACP item titles and
 // from every permission ask's summary (the command being approved).
 bus.subscribe((event: RuntimeEvent) => {
+  if (shouldIgnoreProviderEvent(event)) return;
   if (event.type === "turn.completed" || event.type === "session.exited") return void repeats.settle(event.threadId);
   let key: string | null = null;
   if (event.type === "item.started" && event.itemType === "tool") {
@@ -1576,6 +1905,7 @@ const runDelegatedTurn: Parameters<typeof drainDelegations>[3] = (toBotId, text,
 };
 
 bus.subscribe((event: RuntimeEvent) => {
+  if (shouldIgnoreProviderEvent(event)) return;
   if (event.type !== "turn.completed") return;
   // A turn that failed or was interrupted drops its queue rather than
   // firing it later: the user who hit Stop does not expect the delegations
@@ -1605,6 +1935,7 @@ bus.subscribe((event: RuntimeEvent) => {
 // user's own words — stop-then-steer is the point, so an interrupted turn
 // drains too.
 bus.subscribe((event: RuntimeEvent) => {
+  if (shouldIgnoreProviderEvent(event)) return;
   if (event.type !== "turn.completed") return;
   drainQueuedSends();
 });
@@ -1674,11 +2005,21 @@ function startScreenPoller(
   const entry = {
     timer: null as ReturnType<typeof setInterval> | null,
     capture: (): Promise<void> => {
+      // A person can type credentials while driving any browser/computer
+      // surface. Never take a preview during that lease: live frames and the
+      // settled transcript image must retain only the last pre-takeover view.
+      if (computerControl.snapshot(botId).held) return Promise.resolve();
       if (!current && Date.now() - lastAt < SCREEN_MIN_GAP_MS) return Promise.resolve();
       current ??= (async () => {
         try {
-          const { png, format } = await capture();
-          const frame = { png, mime: format === "jpeg" ? "image/jpeg" : "image/png" };
+          const frame = await captureOutsideHumanControl(
+            () => ({
+              held: computerControl.snapshot(botId).held,
+              revision: computerControlRevision.get(botId) ?? 0,
+            }),
+            capture,
+          );
+          if (!frame) return;
           entry.last = frame;
           broadcast({ kind: "screen", botId, ...frame });
         } catch {
@@ -1875,6 +2216,9 @@ async function startTurn(
   // busy flips immediately so the composer locks; the dispatch itself runs
   // in the background — box provisioning can take ~90s and must never
   // hang the HTTP request
+  const dispatchClaimId = randomUUID();
+  directTurnGenerationByBot.set(bot.id, dispatchClaimId);
+  directTurnDispatchClaims.set(bot.id, { id: dispatchClaimId, threadId, phase: "setup" });
   store.setActivity(bot.id, "working");
   store.patchBot(bot.id, { unread: false });
   turnUsage.delete(threadId);
@@ -1882,6 +2226,7 @@ async function startTurn(
   void (async () => {
     try {
       const integrations: NonNullable<Parameters<typeof instance.adapter.sendTurn>[0]["integrations"]> = {};
+      let browser: Awaited<ReturnType<typeof browserIntegration>> = null;
       const selectedSkills = selectBundledSkills(
         text,
         instance.adapter.capabilities.phoneMcp === true ? ["phoneMcp"] : [],
@@ -1890,12 +2235,6 @@ async function startTurn(
       if (selectedSkills.some((skill) => skill.manifest.requiredCapabilities.includes("phoneMcp"))) {
         integrations.phone = phoneIntegration();
       }
-      // the built-in browser: per-bot opt-in, and only to a driver that can
-      // mount it, and only while the desktop app is running its host
-      const browser = builtInBrowserEnabled(cfg) && bot.browser !== false && instance.adapter.capabilities.browserMcp === true
-        ? browserIntegration(bot.id, bot.browserProfile)
-        : null;
-      if (browser) integrations.browser = browser.integration;
       // the user's connected apps, but only to a driver that can mount
       // them — a key in the config says the connections exist, not that
       // this engine can reach them — and only to a bot the user has not
@@ -2146,8 +2485,41 @@ async function startTurn(
       // snapshot() absorbs failures, so checkpointing may delay but never fail
       // a turn.
       if (checkpointCwd) await checkpoints.snapshot(bot.id, checkpointCwd, `turn ${threadId.slice(0, 8)}`);
+      if (!directTurnClaimIsCurrent(bot.id, dispatchClaimId, threadId)) {
+        throw new DirectTurnSetupCancelled("turn stopped before dispatch");
+      }
+      // Mint the browser bearer at the last possible moment. The desktop
+      // registration is asynchronous, so validate this exact setup claim
+      // again inside browserIntegration before the capability is published.
+      const liveBot = store.bot(bot.id);
+      if (
+        liveBot &&
+        builtInBrowserEnabled(cfg) &&
+        liveBot.browser !== false &&
+        instance.adapter.capabilities.browserMcp === true
+      ) {
+        const selectedProfile = liveBot.browserProfile;
+        browser = await browserIntegration(bot.id, selectedProfile, threadId, () => {
+          const current = store.bot(bot.id);
+          return (
+            directTurnClaimIsCurrent(bot.id, dispatchClaimId, threadId) &&
+            builtInBrowserEnabled(cfg) &&
+            current?.browser !== false &&
+            current?.browserProfile === selectedProfile
+          );
+        }, dispatchClaimId);
+        if (browser) integrations.browser = browser.integration;
+      }
+      // A cancelled adapter can be between accepting sendTurn and revealing
+      // its provider turn id. Never overlap a replacement with that ambiguous
+      // pre-id window: wait for the old handshake to settle or for its bounded
+      // quarantine to expire, then revalidate this exact claim before launch.
+      await pendingCancelledProviderHandshakes.waitForClear(threadId);
+      if (!markDirectTurnDispatching(bot.id, dispatchClaimId, threadId)) {
+        throw new DirectTurnSetupCancelled("turn stopped before dispatch");
+      }
       watchdog.watch(threadId, bot.id);
-      await instance.adapter.sendTurn({
+      const dispatch = await guardTurnDispatch(instance.adapter.sendTurn({
         threadId,
         text: turnText,
         model,
@@ -2178,9 +2550,7 @@ async function startTurn(
           (integrations.composio
             ? " The user's connected apps (Gmail, Calendar, Slack, Notion, and the rest) are reachable through the composio tools — find the right one with COMPOSIO_SEARCH_TOOLS, read its arguments with COMPOSIO_GET_TOOL_SCHEMAS, then run it with COMPOSIO_MULTI_EXECUTE_TOOL. Reach for them before telling the user you have no access to a service."
             : "") +
-          (integrations.browser
-            ? " You have your own built-in web browser through the browser tools: browser_navigate opens a page and browser_snapshot returns its accessibility tree with [ref=eN] refs; browser_click, browser_fill, browser_select_option, browser_hover and browser_press act on refs; browser_read returns the page's text; browser_wait_for waits for text or an address; browser_screenshot shows the page when the tree isn't enough. Every browser action already returns the resulting page, so don't follow it with browser_snapshot. The user watches the same page in the Browser panel and can take over at any time. At a sign-in, password, MFA, CAPTCHA, or payment step, call browser_request_takeover with what you need and continue from the page it returns; never type their password or a one-time code."
-            : "") +
+          (integrations.browser ? BUILT_IN_BROWSER_SYSTEM_PROMPT : "") +
           (coordinationPrompt ? ` ${coordinationPrompt}` : "") +
           credentialPrompt +
           routinePrompt +
@@ -2198,7 +2568,14 @@ async function startTurn(
             : ""),
         integrations,
         cwd,
+      }), () => !directTurnClaimExists(bot.id, dispatchClaimId, threadId), async () => {
+        await instance.adapter.interruptTurn(threadId).catch(() => {});
       });
+      if (dispatch.cancelled) {
+        retireProviderTurn(dispatch.value.turnId);
+        throw new DirectTurnSetupCancelled("turn stopped during provider setup");
+      }
+      clearDirectTurnDispatch(bot.id, dispatchClaimId);
       // dispatched: the rewind is spent, and the old cursors are dead
       if (rewound) store.patchBot(bot.id, { rewound: false, resumeCursors: {} });
       // and this engine now owns the thread's most recent turn
@@ -2208,17 +2585,36 @@ async function startTurn(
       // keep polling the box forever, carrying dead per-turn state. busy
       // is flipped false in the fold, so it is the honest "still running".
       if (!previewCapture && browser) {
-        const { connection, profile } = browser;
-        previewCapture = () => browserScreenshot(connection, bot.id, fetch, profile);
+        const { connection } = browser;
+        previewCapture = () => browserScreenshot(connection, browser.capability, fetch);
       }
       if (previewCapture && store.bot(bot.id)?.busy) {
         startScreenPoller(bot.id, previewCapture, { screenIsTheWork: instance.driverKind === "boxAgent" });
       }
     } catch (e) {
-      releaseLocalVmThread(threadId);
-      if (activeVpsThreads.get(bot.id) === threadId) activeVpsThreads.delete(bot.id);
-      watchdog.settle(threadId);
-      turnUsage.delete(threadId);
+      clearCancelledProviderHandshake(threadId, `direct:${dispatchClaimId}`);
+      clearDirectTurnDispatch(bot.id, dispatchClaimId);
+      await releaseBrowserCapabilityForThread(threadId, dispatchClaimId);
+      const ownsLatestGeneration = directTurnGenerationByBot.get(bot.id) === dispatchClaimId;
+      if (ownsLatestGeneration) {
+        releaseLocalVmThread(threadId);
+        if (activeVpsThreads.get(bot.id) === threadId) activeVpsThreads.delete(bot.id);
+        watchdog.settle(threadId);
+        turnUsage.delete(threadId);
+      }
+      if (e instanceof DirectTurnSetupCancelled) {
+        opts?.onDispatchError?.(e.message);
+        if (ownsLatestGeneration && store.bot(bot.id)?.busy) {
+          store.setActivity(bot.id, "idle");
+        }
+        if (ownsLatestGeneration) {
+          drainQueuedSends();
+          drainConnectorResumes();
+          drainSecretResumes();
+        }
+        return;
+      }
+      if (!ownsLatestGeneration) return;
       const message = e instanceof Error ? e.message : String(e);
       store.appendMessage(threadId, {
         role: "bot",
@@ -2342,6 +2738,7 @@ routines = new RoutineManager({
       .then(() => undefined),
   interruptTurn: async (botId, threadId, runOn) => {
     const bot = store.bot(botId);
+    cancelDirectTurnDispatch(botId, threadId);
     const instance = runOn === "cloud"
       ? registry.instances().find((candidate) => candidate.driverKind === "boxAgent") ?? null
       : bot
@@ -2593,6 +2990,8 @@ async function runGroupMemberTurn(
   cardContinuation?: string,
   onDispatchError?: (message: string) => void,
   isCancelled?: () => boolean,
+  onProviderHandshakeStarted?: () => void,
+  onProviderHandshakeSettled?: () => void,
 ): Promise<boolean> {
   if (isCancelled?.()) return false;
   const group = store.group(groupId);
@@ -2642,10 +3041,6 @@ async function runGroupMemberTurn(
   if (selectedSkills.some((skill) => skill.manifest.requiredCapabilities.includes("phoneMcp"))) {
     integrations.phone = phoneIntegration();
   }
-  if (builtInBrowserEnabled(cfg) && bot.browser !== false && instance.adapter.capabilities.browserMcp === true) {
-    const browser = browserIntegration(bot.id, bot.browserProfile);
-    if (browser) integrations.browser = browser.integration;
-  }
   try {
     if (bot.composio !== false && composio.configured(cfg) && instance.adapter.capabilities.composioMcp === true) {
       const connection = await connectedAppsIntegration(bot.id, threadId);
@@ -2683,6 +3078,44 @@ async function runGroupMemberTurn(
     return true;
   }
   store.setActivity(bot.id, "working");
+
+  // Connected-app discovery above can yield for a network round trip. A
+  // profile may be removed, or the browser feature switched off, during that
+  // window. Mint the capability only after this turn has synchronously
+  // claimed the fresh bot record so a deleted profile cannot be resurrected
+  // as a ghost session by an already-preparing room turn.
+  if (
+    builtInBrowserEnabled(cfg) &&
+    readyBot.browser !== false &&
+    instance.adapter.capabilities.browserMcp === true
+  ) {
+    const selectedProfile = readyBot.browserProfile;
+    const browser = await browserIntegration(readyBot.id, selectedProfile, threadId, () => {
+      const currentBot = store.bot(readyBot.id);
+      const currentGroup = store.group(group.id);
+      const stillOwnsThread = currentGroup?.dm
+        ? currentGroup.threadId === threadId
+        : Boolean(currentGroup && store.groupTaskByThread(currentGroup.id, threadId));
+      return (
+        !isCancelled?.() &&
+        stillOwnsThread &&
+        currentBot?.busy === true &&
+        builtInBrowserEnabled(cfg) &&
+        currentBot.browser !== false &&
+        currentBot.browserProfile === selectedProfile
+      );
+    });
+    if (browser) integrations.browser = browser.integration;
+  }
+  // Stop/delete may land while Electron is registering the capability. The
+  // callback above prevents publication; this second check also unwinds the
+  // room's setup claim so no provider turn starts after Stop returned.
+  const browserReadyBot = store.bot(readyBot.id);
+  if (isCancelled?.() || !browserReadyBot || !browserReadyBot.busy) {
+    await releaseBrowserCapabilityForThread(threadId);
+    if (browserReadyBot?.busy) store.setActivity(browserReadyBot.id, "idle");
+    return false;
+  }
 
   store.patchGroup(group.id, { busyBotId: bot.id }); // the store's change stream carries the frame
   groupSpeakers.set(threadId, { botId: bot.id, name: bot.name, color: bot.color });
@@ -2724,6 +3157,7 @@ async function runGroupMemberTurn(
   const cwd = groupTurnCwd(workspace, () => store.pinGroupCwd(group.id, threadId));
   const roomSystem =
     system +
+    (integrations.browser ? BUILT_IN_BROWSER_SYSTEM_PROMPT : "") +
     sectionContextSystemPrompt(bot.section) +
     (workspace ? `\n${memorySystemPrompt(bot.id).trim()}${skillsSystemPrompt(bot.id)}` : "") +
     renderSkillInstructions(selectedSkills, { includeRoot: Boolean(workspace) }) +
@@ -2733,11 +3167,12 @@ async function runGroupMemberTurn(
   // chained @mention can be routed afterwards
   let replyText = "";
   const timeoutMinutes = roomTurnTimeoutMinutes(cfg);
-  const outcome = await new Promise<"settled" | "dispatch_failed" | "stalled" | "timed_out">((resolve) => {
+  const outcome = await new Promise<"settled" | "dispatch_failed" | "stalled" | "timed_out" | "cancelled">((resolve) => {
     let done = false;
     let unsub = () => {};
     let unregisterStall = () => {};
     const deadline = new RoomTurnDeadline(timeoutMinutes, () => {
+      void releaseBrowserCapabilityForThread(threadId);
       void instance.adapter.interruptTurn(threadId).catch(() => {});
       store.appendMessage(threadId, {
         role: "bot",
@@ -2747,7 +3182,7 @@ async function runGroupMemberTurn(
       });
       finish("timed_out");
     });
-    const finish = (value: "settled" | "dispatch_failed" | "stalled" | "timed_out") => {
+    const finish = (value: "settled" | "dispatch_failed" | "stalled" | "timed_out" | "cancelled") => {
       if (done) return;
       done = true;
       deadline.stop();
@@ -2756,6 +3191,7 @@ async function runGroupMemberTurn(
       resolve(value);
     };
     unsub = bus.subscribe((e: RuntimeEvent) => {
+      if (shouldIgnoreProviderEvent(e)) return;
       if (e.threadId !== threadId) return;
       if (e.type === "item.completed" && e.itemType === "assistant_text") replyText += `\n${e.text}`;
       else if (e.type === "turn.completed") finish("settled");
@@ -2768,16 +3204,32 @@ async function runGroupMemberTurn(
     deadline.start();
     unregisterStall = roomStallCompletions.register(threadId, () => finish("stalled"));
     watchdog.watch(threadId, bot.id);
-    instance.adapter
-      .sendTurn({
+    onProviderHandshakeStarted?.();
+    guardTurnDispatch(instance.adapter.sendTurn({
         threadId,
         text,
         system: roomSystem,
         cwd,
         integrations,
         ...memberTurnSelection(bot.modelSelection),
+      }), () => Boolean(isCancelled?.()), async () => {
+        // Stop may have landed while the adapter was authenticating, before
+        // it had an active process for the first interrupt to reach. Now that
+        // sendTurn completed setup, revoke again and interrupt the real turn.
+        await releaseBrowserCapabilityForThread(threadId);
+        await instance.adapter.interruptTurn(threadId).catch(() => {});
+      })
+      .then((dispatch) => {
+        if (dispatch.cancelled) {
+          retireProviderTurn(dispatch.value.turnId);
+          onProviderHandshakeSettled?.();
+          finish("cancelled");
+          return;
+        }
+        onProviderHandshakeSettled?.();
       })
       .catch((err) => {
+        onProviderHandshakeSettled?.();
         const message = err instanceof Error ? err.message : "turn failed";
         store.appendMessage(threadId, {
           role: "bot",
@@ -2793,6 +3245,24 @@ async function runGroupMemberTurn(
   // A timed-out provider still owns the room thread until its interrupt
   // produces turn.completed (or the stall watchdog's grace fallback runs).
   // Do not clear busy or start the next member on that same thread early.
+  if (outcome === "cancelled") {
+    // The guarded dispatch already waited for the adapter to become
+    // addressable and issued the second interrupt. Retire its later events and
+    // settle this exact room owner explicitly so those events cannot touch a
+    // replacement turn on the same thread.
+    const currentGroup = store.group(group.id);
+    if (currentGroup?.busyBotId === bot.id) {
+      groupSpeakers.delete(threadId);
+      store.patchGroup(currentGroup.id, { busyBotId: null, unread: true });
+    }
+    const currentBot = store.bot(bot.id);
+    if (currentBot?.busy) store.setActivity(currentBot.id, "idle");
+    watchdog.settle(threadId);
+    drainQueuedSends();
+    drainConnectorResumes();
+    drainSecretResumes();
+    return false;
+  }
   if (outcome === "stalled" || outcome === "timed_out") return false;
   // turn.completed normally performs this cleanup. Only use the fallback
   // when this invocation still owns the room; otherwise it would emit a
@@ -2803,6 +3273,7 @@ async function runGroupMemberTurn(
     if (store.bot(bot.id)?.busy) store.setActivity(bot.id, "idle");
   }
   if (outcome === "dispatch_failed") {
+    await releaseBrowserCapabilityForThread(threadId);
     // No turn.completed follows a rejected room dispatch. Anything that was
     // queued while this bot briefly owned the room must be retried now.
     drainQueuedSends();
@@ -2818,7 +3289,18 @@ async function runGroupMemberTurn(
     for (const next of roomResponders(replyText, members, { kind: "mentions" })) {
       if (isCancelled?.()) return false;
       if (spoken.has(next.id)) continue;
-      if (!(await runGroupMemberTurn(groupId, threadId, next.id, hop + 1, spoken, undefined, undefined, isCancelled))) {
+      if (!(await runGroupMemberTurn(
+        groupId,
+        threadId,
+        next.id,
+        hop + 1,
+        spoken,
+        undefined,
+        undefined,
+        isCancelled,
+        onProviderHandshakeStarted,
+        onProviderHandshakeSettled,
+      ))) {
         return false;
       }
     }
@@ -2888,7 +3370,7 @@ function startGroupTurn(groupId: string, text: string, replyTo?: Message, sendId
     return message;
   }
 
-  const operation = beginGroupTurnOperation(groupId, threadId);
+  const operation = beginGroupTurnOperation(groupId, threadId, responders.map((responder) => responder.id));
   const prev = groupQueues.get(groupId) ?? Promise.resolve();
   const next = prev.then(async () => {
     if (operation.cancelled) return;
@@ -2915,6 +3397,8 @@ function startGroupTurn(groupId: string, text: string, replyTo?: Message, sendId
         undefined,
         undefined,
         () => operation.cancelled,
+        () => groupProviderHandshakeStarted(operation),
+        () => groupProviderHandshakeSettled(operation),
       ))) break;
     }
   });
@@ -3013,7 +3497,7 @@ function dispatchConnectorResume(entry: { botId: string; threadId: string; resum
   }
   if (owner.group) {
     const groupId = owner.group.id;
-    const operation = beginGroupTurnOperation(groupId, entry.threadId);
+    const operation = beginGroupTurnOperation(groupId, entry.threadId, [entry.botId]);
     const previous = groupQueues.get(groupId) ?? Promise.resolve();
     const next = previous.then(async () => {
       if (operation.cancelled) return;
@@ -3032,6 +3516,8 @@ function dispatchConnectorResume(entry: { botId: string; threadId: string; resum
         prompt,
         (message) => markConnectorResumeFailed(entry.threadId, entry.resumeKey, message),
         () => operation.cancelled,
+        () => groupProviderHandshakeStarted(operation),
+        () => groupProviderHandshakeSettled(operation),
       );
     });
     const tracked = next.finally(() => finishGroupTurnOperation(groupId, operation));
@@ -3110,7 +3596,7 @@ function dispatchSecretResume(entry: SecretResumeEntry) {
   }
   if (owner.group) {
     const groupId = owner.group.id;
-    const operation = beginGroupTurnOperation(groupId, entry.threadId);
+    const operation = beginGroupTurnOperation(groupId, entry.threadId, [entry.botId]);
     const previous = groupQueues.get(groupId) ?? Promise.resolve();
     const next = previous.then(async () => {
       if (operation.cancelled) return;
@@ -3129,6 +3615,8 @@ function dispatchSecretResume(entry: SecretResumeEntry) {
         prompt,
         (message) => markSecretResumeFailed(entry.threadId, entry.messageId, message),
         () => operation.cancelled,
+        () => groupProviderHandshakeStarted(operation),
+        () => groupProviderHandshakeSettled(operation),
       );
     });
     const tracked = next.finally(() => finishGroupTurnOperation(groupId, operation));
@@ -3184,6 +3672,7 @@ function drainSecretResumes() {
 }
 
 bus.subscribe((event: RuntimeEvent) => {
+  if (shouldIgnoreProviderEvent(event)) return;
   if (event.type === "turn.completed") {
     drainConnectorResumes();
     drainSecretResumes();
@@ -3322,6 +3811,9 @@ function configStatus() {
       showToolCalls: showToolCallsEnabled(cfg),
       browser: builtInBrowserEnabled(cfg),
     },
+    // partitionId is non-secret routing metadata. The renderer needs it to
+    // show the same durable session as an agent, but config PATCH validation
+    // keeps it read-only and rejects callers that try to choose it.
     browserProfiles: cfg.browserProfiles ?? [],
   };
 }
@@ -3329,6 +3821,7 @@ function configStatus() {
 /** Rebuild the provider fleet after a config change so new keys take
  * effect without a server restart (kills any in-flight turns). */
 async function reloadProviders() {
+  await releaseAllBrowserCapabilities();
   bus.detachAll();
   await registry.disposeAll();
   await registry.load(instanceConfigs(cfg));
@@ -4917,6 +5410,7 @@ const server = createServer(async (req, res) => {
       cancelGroupTurnOperations(group.id, group.threadId);
       const busy = group.busyBotId ? store.bot(group.busyBotId) : undefined;
       const instance = busy ? registry.get(busy.modelSelection.instanceId) : undefined;
+      await releaseBrowserCapabilityForThread(group.threadId);
       await instance?.adapter.interruptTurn(group.threadId).catch(() => {});
       closeOpenApprovals(group.threadId);
       return json(res, 200, { ok: true });
@@ -5138,16 +5632,25 @@ const server = createServer(async (req, res) => {
       // per-bot gate on the app's built-in browser
       if (body.browser !== undefined) {
         if (typeof body.browser !== "boolean") return json(res, 400, { error: "browser must be true or false" });
+        if (existingBot?.busy && body.browser !== (existingBot.browser !== false)) {
+          return json(res, 409, { error: "stop this bot's turn before changing its browser access" });
+        }
         patch.browser = body.browser;
       }
       // which named browser session this bot uses; null/"" = its own
       if (body.browserProfile !== undefined) {
-        if (body.browserProfile === null || body.browserProfile === "") patch.browserProfile = undefined;
+        const requestedProfile = body.browserProfile === null || body.browserProfile === ""
+          ? undefined
+          : body.browserProfile;
+        if (existingBot?.busy && requestedProfile !== existingBot.browserProfile) {
+          return json(res, 409, { error: "stop this bot's turn before changing its browser profile" });
+        }
+        if (requestedProfile === undefined) patch.browserProfile = undefined;
         else if (
-          typeof body.browserProfile === "string" &&
-          (body.browserProfile === "guest" || (cfg.browserProfiles ?? []).some((profile) => profile.id === body.browserProfile))
+          typeof requestedProfile === "string" &&
+          (requestedProfile === "guest" || (cfg.browserProfiles ?? []).some((profile) => profile.id === requestedProfile))
         ) {
-          patch.browserProfile = body.browserProfile;
+          patch.browserProfile = requestedProfile;
         } else return json(res, 400, { error: "browserProfile must name an existing browser profile" });
       }
       if (
@@ -5218,6 +5721,7 @@ const server = createServer(async (req, res) => {
         patch.alwaysAllow = [...new Set(body.alwaysAllow as string[])].slice(0, 200);
       }
       if (existingBot?.computer === "local" && body.computer !== undefined && body.computer !== "local") {
+        cancelDirectTurnDispatch(existingBot.id, existingBot.threadId);
         await registry
           .get(existingBot.modelSelection.instanceId)
           ?.adapter.interruptTurn(existingBot.threadId)
@@ -5245,10 +5749,29 @@ const server = createServer(async (req, res) => {
       await Promise.allSettled(
         store.bots
           .filter((bot) => bot.computer === "local")
-          .map((bot) =>
-            registry.get(bot.modelSelection.instanceId)?.adapter.interruptTurn(bot.threadId),
-          )
-          .filter((turn): turn is Promise<void> => Boolean(turn)),
+          .map(async (bot) => {
+            const routineRun = routines!.activeRunForBot(bot.id);
+            if (routineRun) {
+              cancelDirectTurnDispatch(bot.id, routineRun.threadId);
+              if (routineRun.threadId) await releaseBrowserCapabilityForThread(routineRun.threadId);
+              await routines!.cancelRun(routineRun.id);
+              return;
+            }
+            const instance = registry.get(bot.modelSelection.instanceId);
+            const groupTurn = activeGroupTurnForBot(bot.id);
+            if (groupTurn) {
+              cancelGroupTurnOperations(groupTurn.group.id, groupTurn.threadId);
+              await releaseBrowserCapabilityForThread(groupTurn.threadId);
+              await instance?.adapter.interruptTurn(groupTurn.threadId).catch(() => {});
+              closeOpenApprovals(groupTurn.threadId);
+              return;
+            }
+            const directClaim = cancelDirectTurnDispatch(bot.id);
+            const threadId = directClaim?.threadId ?? bot.threadId;
+            await releaseBrowserCapabilityForThread(threadId);
+            await instance?.adapter.interruptTurn(threadId).catch(() => {});
+            closeOpenApprovals(threadId);
+          }),
       );
       return json(res, 200, { ok: true });
     }
@@ -5256,6 +5779,18 @@ const server = createServer(async (req, res) => {
     if (m && method === "DELETE") {
       const bot = store.bot(m[1]);
       if (!bot) return json(res, 404, { error: "no such bot" });
+      const activeRoutine = routines!.activeRunForBot(bot.id);
+      if (activeRoutine) {
+        return json(res, 409, {
+          error: "stop this bot's active routine before deleting the bot",
+        });
+      }
+      const activeGroup = activeGroupTurnForBot(bot.id);
+      if (activeGroup) {
+        return json(res, 409, {
+          error: `stop this bot's work in channel ${activeGroup.group.name} before deleting the bot`,
+        });
+      }
       if (localVmMode(cfg) === "per-bot") {
         const target = perBotLocalVmTarget(bot.id);
         if (localVmActiveThreads.has(target.key) || localVmLifecycleBusy.has(target.key)) {
@@ -5271,22 +5806,43 @@ const server = createServer(async (req, res) => {
           return json(res, 409, { error: "delete this bot's Local VM from its Computer panel before deleting the bot" });
         }
       }
-      // a running turn dies with its bot
-      await registry.get(bot.modelSelection.instanceId)?.adapter.interruptTurn(bot.threadId).catch(() => {});
-      stopScreenPoller(bot.id);
-      activeVpsThreads.delete(bot.id);
-      routines!.disableForBot(bot.id);
-      webhooks.disableForBot(bot.id);
-      lastReply.delete(bot.threadId);
-      // a peer approval naming this bot can never be meaningfully answered
-      // now, and its caller would otherwise wait out the 15-minute timeout
-      cancelPeerApprovalsFor(bot.id);
-      discardDelegations(commsBus, bot.threadId);
-      computerControl.forget(bot.id);
-      const target = perBotLocalVmTarget(bot.id);
-      localVmIdles.get(target.key)?.cancel();
-      localVmIdles.delete(target.key);
-      store.deleteBot(bot.id);
+      // Establish a durable cleanup intent before any teardown. A malformed
+      // or unreadable journal therefore rejects the delete with the bot and
+      // all of its live work untouched. The intent is aborted if a later
+      // pre-delete side effect fails, and committed only after Store deletion.
+      const browserCleanupRequest = utilityParentPort ? browserCleanup.prepare("bot", bot.id) : null;
+      try {
+        // a running turn dies with its bot
+        const directClaim = cancelDirectTurnDispatch(bot.id);
+        directTurnGenerationByBot.delete(bot.id);
+        await releaseBrowserCapabilitiesForBot(bot.id);
+        const directThreadId = directClaim?.threadId ?? bot.threadId;
+        await registry.get(bot.modelSelection.instanceId)?.adapter.interruptTurn(directThreadId).catch(() => {});
+        closeOpenApprovals(directThreadId);
+        stopScreenPoller(bot.id);
+        activeVpsThreads.delete(bot.id);
+        routines!.disableForBot(bot.id);
+        webhooks.disableForBot(bot.id);
+        lastReply.delete(bot.threadId);
+        // a peer approval naming this bot can never be meaningfully answered
+        // now, and its caller would otherwise wait out the 15-minute timeout
+        cancelPeerApprovalsFor(bot.id);
+        discardDelegations(commsBus, bot.threadId);
+        computerControl.forget(bot.id);
+        computerControlRevision.delete(bot.id);
+        const target = perBotLocalVmTarget(bot.id);
+        localVmIdles.get(target.key)?.cancel();
+        localVmIdles.delete(target.key);
+        store.deleteBot(bot.id);
+      } catch (error) {
+        if (browserCleanupRequest) browserCleanup.abort(browserCleanupRequest);
+        throw error;
+      }
+      if (browserCleanupRequest) {
+        const committedCleanup = browserCleanup.commit(browserCleanupRequest);
+        const acknowledged = await browserCleanup.ensure(committedCleanup);
+        requireBrowserCleanupAcknowledged(acknowledged, `Browser data for ${bot.name}`);
+      }
       for (const dir of [EVENTS_DIR, NATIVE_DIR]) {
         try {
           unlinkSync(join(dir, `${bot.threadId}.ndjson`));
@@ -5746,30 +6302,44 @@ const server = createServer(async (req, res) => {
       if (expectedThreadId !== undefined && (typeof expectedThreadId !== "string" || !/^[\w-]+$/.test(expectedThreadId))) {
         return json(res, 400, { error: "threadId must be a task id" });
       }
+      const directClaim = directTurnDispatchClaims.get(bot.id);
       const routineRun = routines!.activeRunForBot(bot.id);
       if (routineRun) {
         if (expectedThreadId !== undefined && routineRun.threadId !== expectedThreadId) {
           return json(res, 409, { error: "this bot is running a routine in another conversation" });
         }
+        cancelDirectTurnDispatch(bot.id, routineRun.threadId ?? expectedThreadId);
+        if (routineRun.threadId) await releaseBrowserCapabilityForThread(routineRun.threadId);
         await routines!.cancelRun(routineRun.id);
         return json(res, 200, { ok: true });
       }
       const instance = registry.get(bot.modelSelection.instanceId);
       // a bot busy in a ROOM is running on the room's thread — stopping it
       // from its own chat must reach that turn, not just the 1:1 thread
-      const busyGroup = store.groups.find((g) => g.busyBotId === bot.id);
+      const busyGroup = activeGroupTurnForBot(bot.id);
       if (busyGroup) {
         if (expectedThreadId !== undefined && busyGroup.threadId !== expectedThreadId) {
-          return json(res, 409, { error: `this bot is working in channel ${busyGroup.id}` });
+          return json(res, 409, { error: `this bot is working in channel ${busyGroup.group.name}` });
         }
+        cancelGroupTurnOperations(busyGroup.group.id, busyGroup.threadId);
+        await releaseBrowserCapabilityForThread(busyGroup.threadId);
         await instance?.adapter.interruptTurn(busyGroup.threadId).catch(() => {});
         closeOpenApprovals(busyGroup.threadId);
+        return json(res, 200, { ok: true });
       }
-      if (expectedThreadId !== undefined && !busyGroup && bot.threadId !== expectedThreadId) {
+      if (
+        expectedThreadId !== undefined &&
+        !busyGroup &&
+        bot.threadId !== expectedThreadId &&
+        directClaim?.threadId !== expectedThreadId
+      ) {
         return json(res, 409, { error: "the bot switched tasks before it could be interrupted" });
       }
-      await instance?.adapter.interruptTurn(bot.threadId).catch(() => {});
-      closeOpenApprovals(bot.threadId);
+      const cancelledDirect = cancelDirectTurnDispatch(bot.id, expectedThreadId);
+      const directThreadId = cancelledDirect?.threadId ?? bot.threadId;
+      await releaseBrowserCapabilityForThread(directThreadId);
+      await instance?.adapter.interruptTurn(directThreadId).catch(() => {});
+      closeOpenApprovals(directThreadId);
       return json(res, 200, { ok: true });
     }
 
@@ -6077,11 +6647,46 @@ const server = createServer(async (req, res) => {
       const patch = parseConfigPatch(body);
       if (!Object.keys(patch).length) return json(res, 400, { error: "nothing to save" });
       if (providerConfigBusy) return json(res, 409, { error: "provider settings are already being updated" });
+      const disablingBuiltInBrowser = patch.features?.browser === false && builtInBrowserEnabled(cfg);
+      const removedBrowserProfileIds = patch.browserProfiles === undefined
+        ? []
+        : (cfg.browserProfiles ?? [])
+            .map((profile) => profile.id)
+            .filter((id) => !patch.browserProfiles!.some((profile) => profile.id === id));
+      if (patch.browserProfiles !== undefined) {
+        const currentProfiles = new Map((cfg.browserProfiles ?? []).map((profile) => [profile.id, profile]));
+        const nextProfiles = patch.browserProfiles.map((profile) => {
+          const partitionId = currentProfiles.get(profile.id)?.partitionId;
+          return partitionId ? { ...profile, partitionId } : profile;
+        });
+        const routingConflict = browserProfileReplacementConflict(cfg.browserProfiles ?? [], nextProfiles);
+        if (routingConflict) return json(res, 409, { error: routingConflict });
+        const currentIds = new Set((cfg.browserProfiles ?? []).map((profile) => profile.id));
+        const pendingReuse = patch.browserProfiles.find(
+          (profile) => !currentIds.has(profile.id) && browserCleanup.hasPendingProfile(profile.id),
+        );
+        if (pendingReuse) {
+          return json(res, 409, {
+            error: `the previous “${pendingReuse.name}” browser session is still being erased — wait before reusing it`,
+          });
+        }
+      }
       if (patch.vps !== undefined) {
         const currentAlias = vpsSshAlias(cfg);
         const nextAlias = vpsSshAlias({ ...cfg, vps: patch.vps });
         const aliasError = vpsAliasChangeError(currentAlias, nextAlias, activeVpsThreads.size > 0);
         if (aliasError) return json(res, 409, { error: aliasError });
+      }
+      if (patch.browserProfiles !== undefined) {
+        const retained = new Set(patch.browserProfiles.map((profile) => profile.id));
+        const activeReference = store.bots.find(
+          (bot) => bot.busy && bot.browserProfile && bot.browserProfile !== "guest" && !retained.has(bot.browserProfile),
+        );
+        if (activeReference) {
+          return json(res, 409, {
+            error: `stop ${activeReference.name}'s turn before removing its browser profile`,
+          });
+        }
       }
       providerConfigBusy = true;
       const changingLocalVmMode = patch.localVm?.mode !== undefined && patch.localVm.mode !== localVmMode(cfg);
@@ -6137,30 +6742,95 @@ const server = createServer(async (req, res) => {
         const check = await tts.verifyKey(newTts.key.trim());
         if (!check.ok) return json(res, 400, { error: check.message });
       }
+      if (patch.browserProfiles !== undefined) {
+        // Provider/credential validation above may await the network. A turn
+        // can start during that window and claim a profile which looked idle
+        // at the route's first check, so validate again at the mutation
+        // boundary. Keep this check and the synchronous save/reference cleanup
+        // below free of awaits.
+        const retained = new Set(patch.browserProfiles.map((profile) => profile.id));
+        const activeReference = store.bots.find(
+          (bot) => bot.busy && bot.browserProfile && bot.browserProfile !== "guest" && !retained.has(bot.browserProfile),
+        );
+        if (activeReference) {
+          return json(res, 409, {
+            error: `stop ${activeReference.name}'s turn before removing its browser profile`,
+          });
+        }
+      }
+      const browserCleanupRequests: BrowserCleanupRequest[] = [];
+      try {
+        if (utilityParentPort) {
+          for (const profileId of removedBrowserProfileIds) {
+            const target = browserProfilePartitionTarget(cfg, profileId);
+            if (!target) throw new Error(`browser profile cleanup target “${profileId}” is unavailable`);
+            browserCleanupRequests.push(
+              browserCleanup.prepare("profile", target.profileId, target.partitionId),
+            );
+          }
+        }
+      } catch (error) {
+        for (const request of browserCleanupRequests) browserCleanup.abort(request);
+        throw error;
+      }
+      let configWriteCommitted = false;
       const externalSecretStorage = url.searchParams.get("secretStorage") === "external";
-      if (externalSecretStorage) {
-        // The packaged Electron caller commits supplied credentials to the
-        // OS-encrypted store before entering this route. Persist every
-        // non-secret sibling in the same request, but replace each supplied
-        // credential with an empty tombstone so an older plaintext value can
-        // never survive the merge in config.json.
-        const persisted = structuredClone(patch);
-        if (persisted.xai?.key !== undefined) persisted.xai.key = "";
-        if (persisted.composio?.apiKey !== undefined) persisted.composio.apiKey = "";
-        if (persisted.box?.token !== undefined) persisted.box.token = "";
-        if (persisted.opencodeGo?.apiKey !== undefined) persisted.opencodeGo.apiKey = "";
-        if (persisted.tts?.key !== undefined) persisted.tts.key = "";
-        if (persisted.imageGen?.key !== undefined) persisted.imageGen.key = "";
-        saveConfig(persisted);
-        syncCredentialEnv(patch);
-        Object.assign(cfg, loadConfig());
-      } else {
-        saveConfig(patch);
-        // loadConfig prefers env over the file for credentials, so the env
-        // must follow the save — otherwise the value injected at boot would
-        // shadow the new key until the next launch
-        syncCredentialEnv(patch);
-        Object.assign(cfg, loadConfig());
+      try {
+        if (externalSecretStorage) {
+          // The packaged Electron caller commits supplied credentials to the
+          // OS-encrypted store before entering this route. Persist every
+          // non-secret sibling in the same request, but replace each supplied
+          // credential with an empty tombstone so an older plaintext value can
+          // never survive the merge in config.json.
+          const persisted = structuredClone(patch);
+          if (persisted.xai?.key !== undefined) persisted.xai.key = "";
+          if (persisted.composio?.apiKey !== undefined) persisted.composio.apiKey = "";
+          if (persisted.box?.token !== undefined) persisted.box.token = "";
+          if (persisted.opencodeGo?.apiKey !== undefined) persisted.opencodeGo.apiKey = "";
+          if (persisted.tts?.key !== undefined) persisted.tts.key = "";
+          if (persisted.imageGen?.key !== undefined) persisted.imageGen.key = "";
+          saveConfig(persisted);
+          configWriteCommitted = true;
+          syncCredentialEnv(patch);
+          Object.assign(cfg, loadConfig());
+        } else {
+          saveConfig(patch);
+          configWriteCommitted = true;
+          // loadConfig prefers env over the file for credentials, so the env
+          // must follow the save — otherwise the value injected at boot would
+          // shadow the new key until the next launch
+          syncCredentialEnv(patch);
+          Object.assign(cfg, loadConfig());
+        }
+      } catch (error) {
+        if (configWriteCommitted) {
+          for (const request of browserCleanupRequests) {
+            const committed = browserCleanup.commit(request);
+            void browserCleanup.ensure(committed);
+          }
+        } else {
+          for (const request of browserCleanupRequests) browserCleanup.abort(request);
+        }
+        throw error;
+      }
+      let browserReferenceCleanupError: unknown = null;
+      if (patch.browserProfiles !== undefined) {
+        const retained = new Set(patch.browserProfiles.map((profile) => profile.id));
+        try {
+          for (const bot of store.bots) {
+            if (bot.browserProfile && bot.browserProfile !== "guest" && !retained.has(bot.browserProfile)) {
+              // The profile list and every bot reference change in the same
+              // config request. Non-renderer clients therefore cannot leave a
+              // bot pointing at a deleted cookie partition.
+              store.patchBot(bot.id, { browserProfile: undefined });
+            }
+          }
+        } catch (error) {
+          // Config is already durable. Keep the cleanup intent prepared (so
+          // it cannot wipe ambiguous state and its id remains locked), but do
+          // not let this secondary write failure skip revocation/reload below.
+          browserReferenceCleanupError = error;
+        }
       }
       // Provider keys change the fleet. Profile, voice, VPS, and room timeout
       // changes do not rebuild it: no driver reads them, and they should not
@@ -6176,10 +6846,47 @@ const server = createServer(async (req, res) => {
           key !== "features" &&
           key !== "browserProfiles",
       );
-      if (reloadKeys.length > 0) await reloadProviders();
-      const status = configStatus();
-      broadcast({ kind: "config", ...status });
-      return json(res, 200, status);
+      // The cleanup marker becomes committed only after both pieces of durable
+      // application state agree. Commit/ACK failures are deferred until every
+      // mandatory consequence of the config write has run: no journal I/O
+      // failure may leave a two-hour bearer or stale provider fleet active.
+      const finalized = await finalizeBrowserCleanupMutation({
+        requests: browserCleanupRequests,
+        referenceError: browserReferenceCleanupError,
+        commit: (request) => browserCleanup.commit(request),
+        ensure: (request) => browserCleanup.ensure(request),
+        mandatory: async () => {
+          let mandatoryError: unknown = null;
+          if (disablingBuiltInBrowser) {
+            try {
+              await releaseAllBrowserCapabilities();
+            } catch (error) {
+              mandatoryError = error;
+            }
+          }
+          if (reloadKeys.length > 0) {
+            try {
+              await reloadProviders();
+            } catch (error) {
+              if (!mandatoryError) mandatoryError = error;
+            }
+          }
+          const status = configStatus();
+          broadcast({ kind: "config", ...status });
+          if (mandatoryError) throw mandatoryError;
+          return status;
+        },
+      });
+      // Normal desktop deletes wait for Electron's acknowledgement. If
+      // Electron is restarting, the committed journal keeps retrying and the
+      // id-reuse guard above prevents stale logins from resurfacing. Delaying
+      // this assertion until after every mandatory post-commit effect keeps
+      // the runtime aligned with the config even on a truthful 503 response.
+      requireBrowserCleanupAcknowledged(
+        finalized.acknowledgements.every(Boolean),
+        removedBrowserProfileIds.length === 1 ? "The browser profile" : "The browser profiles",
+      );
+      return json(res, 200, finalized.value);
       } finally {
         if (changingLocalVmMode) localVmModeChangeBusy = false;
         providerConfigBusy = false;
@@ -6567,13 +7274,21 @@ export function getResolvedPort(): number | undefined {
   return server.listening ? PORT : undefined;
 }
 
+const gracefulShutdown = createGracefulShutdown({
+  cleanup: [
+    () => {
+      for (const idle of localVmIdles.values()) idle.cancel();
+      vps.closeAllVpsDesktopTunnels();
+      watchdog.stop();
+      routines?.stop();
+      webhookIngress?.server.close();
+    },
+    () => releaseAllBrowserCapabilities(),
+    () => registry.disposeAll(),
+  ],
+  exit: (code) => process.exit(code),
+});
+
 for (const signal of ["SIGINT", "SIGTERM"] as const) {
-  process.on(signal, () => {
-    for (const idle of localVmIdles.values()) idle.cancel();
-    vps.closeAllVpsDesktopTunnels();
-    watchdog.stop();
-    routines?.stop();
-    webhookIngress?.server.close();
-    void registry.disposeAll().finally(() => process.exit(0));
-  });
+  process.on(signal, gracefulShutdown);
 }

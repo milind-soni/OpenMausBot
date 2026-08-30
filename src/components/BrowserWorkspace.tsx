@@ -4,6 +4,7 @@
 // Hand back) is the same lease the panel uses, so a hold survives the swap.
 import { useEffect, useState } from "react";
 import { Globe, X } from "lucide-react";
+import { z } from "zod";
 import { useStore, type Bot } from "@/state/store";
 import { BrowserPanel } from "./BrowserPanel";
 
@@ -14,6 +15,11 @@ async function api(path: string, init?: RequestInit): Promise<any> {
   return body;
 }
 
+const controlSnapshotSchema = z.looseObject({
+  held: z.boolean().optional().default(false),
+  helpReason: z.string().nullable().optional().default(null),
+});
+
 export function BrowserWorkspace({ bot, onClose }: { bot: Bot; onClose: () => void }) {
   const { state, dispatch } = useStore();
   const control = state.computerControl[bot.id] ?? { held: false, helpReason: null };
@@ -23,13 +29,14 @@ export function BrowserWorkspace({ bot, onClose }: { bot: Bot; onClose: () => vo
   useEffect(() => {
     let alive = true;
     api(`/api/bots/${bot.id}/computer/control`)
-      .then((snap) => {
+      .then((raw) => {
         if (!alive) return;
+        const snap = controlSnapshotSchema.parse(raw);
         dispatch({
           type: "computerControl",
           botId: bot.id,
           held: snap.held === true,
-          helpReason: typeof snap.helpReason === "string" ? snap.helpReason : null,
+          helpReason: snap.helpReason,
         });
       })
       .catch(() => {});
@@ -39,20 +46,29 @@ export function BrowserWorkspace({ bot, onClose }: { bot: Bot; onClose: () => vo
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [bot.id]);
 
-  const controlAction = (action: "take" | "release") => {
+  const controlAction = async (action: "take" | "release"): Promise<boolean> => {
     setControlPending(true);
     setError(null);
-    api(`/api/bots/${bot.id}/computer/control`, { method: "POST", body: JSON.stringify({ action }) })
-      .then((snap) =>
-        dispatch({
-          type: "computerControl",
-          botId: bot.id,
-          held: snap.held === true,
-          helpReason: typeof snap.helpReason === "string" ? snap.helpReason : null,
-        }),
-      )
-      .catch((cause) => setError(cause instanceof Error ? cause.message : String(cause)))
-      .finally(() => setControlPending(false));
+    try {
+      const snap = controlSnapshotSchema.parse(await api(`/api/bots/${bot.id}/computer/control`, {
+        method: "POST",
+        body: JSON.stringify({ action }),
+      }));
+      dispatch({
+        type: "computerControl",
+        botId: bot.id,
+        held: snap.held === true,
+        helpReason: snap.helpReason,
+      });
+      // A successful HTTP response is not enough: only advance Electron's
+      // native input gate when the durable lease reached the requested state.
+      return snap.held === (action === "take");
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : String(cause));
+      return false;
+    } finally {
+      setControlPending(false);
+    }
   };
 
   return (

@@ -360,8 +360,10 @@ export function SettingsPanel({ bot }: { bot: Bot }) {
   const connectedAppsEnabled = bot.composio !== false;
   const canUseBrowser = engine?.capabilities?.browserMcp === true;
   const desktopBrowser = Boolean(window.ogb?.browser);
+  const browserBlockedOnWindows = window.ogb?.platform === "win32" && !desktopBrowser;
   const browserFeature = builtInBrowserEnabled(state.config);
-  const browserEnabled = bot.browser !== false;
+  const browserAllowed = bot.browser !== false;
+  const browserEnabled = browserFeature && browserAllowed;
   const sectionName = bot.section?.trim() || "General";
   const currentChief = state.bots.find(
     (candidate) =>
@@ -556,7 +558,9 @@ export function SettingsPanel({ bot }: { bot: Bot }) {
               <div className="text-[15px] font-medium text-ink">Browser</div>
               <div className="mt-0.5 text-[13px] text-ink-secondary">
                 {!desktopBrowser
-                  ? "The built-in browser needs the OpenMausBot desktop app."
+                  ? browserBlockedOnWindows
+                    ? "The built-in browser is temporarily unavailable on Windows while Electron's production sandbox support is being verified."
+                    : "The built-in browser needs the OpenMausBot desktop app."
                   : !browserFeature
                     ? "The built-in browser is switched off under App Settings → Experimental features."
                     : !canUseBrowser
@@ -571,7 +575,7 @@ export function SettingsPanel({ bot }: { bot: Bot }) {
               aria-checked={browserEnabled}
               aria-label="Give this bot a built-in browser"
               disabled={!browserEnabled && (!desktopBrowser || !browserFeature || !canUseBrowser)}
-              onClick={() => patch({ browser: !browserEnabled })}
+              onClick={() => patch({ browser: !browserAllowed })}
               className={cn(
                 "relative h-[26px] w-[44px] shrink-0 rounded-full transition-colors disabled:cursor-not-allowed disabled:opacity-40",
                 browserEnabled ? "bg-accent" : "bg-control",

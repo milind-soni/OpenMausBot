@@ -21,6 +21,7 @@ import { LocalVmWorkspace } from "@/components/LocalVmWorkspace";
 import { BrowserWorkspace } from "@/components/BrowserWorkspace";
 import { SkillRecorderPage } from "@/components/SkillRecorderPage";
 import { TeamMapPage } from "@/components/TeamMapPage";
+import { heldComputerControlBotIds } from "@/lib/computer-control";
 
 function Shell() {
   const { state, dispatch } = useStore();
@@ -81,6 +82,18 @@ function Shell() {
   useEffect(() => {
     window.ogb?.setUnreadCount?.(unreadCount);
   }, [unreadCount]);
+
+  // Re-assert every authoritative positive hold in the process that owns the
+  // native browser. This covers initial hydration, SSE updates from another
+  // computer surface, and renderer reloads. Deliberately never mirror false:
+  // only a trusted two-phase release may open Electron's direct browser gate.
+  useEffect(() => {
+    const setter = window.ogb?.browser?.setHumanControl;
+    if (!setter) return;
+    for (const botId of heldComputerControlBotIds(state.computerControl)) {
+      void setter(botId, true).catch(() => {});
+    }
+  }, [state.computerControl]);
 
   // Warm connected-account state as soon as the local server is available.
   // The modal then opens with the correct Connect/Add account buttons and

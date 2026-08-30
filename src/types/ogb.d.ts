@@ -216,10 +216,15 @@ type SkillRecordingPayload = {
           profile?: string,
           mode?: "compact" | "expanded",
         ): Promise<BrowserSurfaceState>;
-        navigate(botId: string, url: string): Promise<{ url: string; title: string }>;
-        back(botId: string): Promise<{ url: string; title: string }>;
-        forward?(botId: string): Promise<{ url: string; title: string }>;
-        forgetProfile?(profileId: string): Promise<{ dropped: number }>;
+        navigate(botId: string, url: string, profile?: string): Promise<{ url: string; title: string }>;
+        back(botId: string, profile?: string): Promise<{ url: string; title: string }>;
+        forward?(botId: string, profile?: string): Promise<{ url: string; title: string }>;
+        /** Immediately gates native browser mutations while the durable
+         * server-side human-control snapshot catches up. */
+        setHumanControl?(botId: string, held: boolean, profile?: string): Promise<boolean>;
+        /** Native page focus/input means the person has taken the wheel. */
+        onUserInteraction?(cb: (event: { botId: string }) => void): () => void;
+        forgetProfile?(partitionId: string): Promise<{ dropped: number }>;
         close(botId: string): Promise<boolean>;
         onState(cb: (state: BrowserSurfaceState) => void): () => void;
       };

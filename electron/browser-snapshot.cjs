@@ -6,6 +6,8 @@
 // browser_snapshot there reads the same shape here.
 "use strict";
 
+const { BlockList, isIP } = require("node:net");
+
 /** Roles worth handing to a model as click/fill targets. Structural roles
  * (generic, group, paragraph) are noise; these are the interactive ones plus
  * headings, which anchor "click the link under Pricing" style instructions. */
@@ -31,7 +33,76 @@ const INTERACTIVE_ROLES = new Set([
 
 const MAX_SNAPSHOT_ELEMENTS = 250;
 const MAX_NAME_LENGTH = 180;
-const MAX_VALUE_LENGTH = 120;
+
+// A browser driven by an agent is an SSRF surface unless local destinations
+// are refused. Keep this list deliberately broader than RFC1918: link-local,
+// carrier-grade NAT, benchmark/documentation ranges, multicast and IPv6
+// local/mapped ranges must not become a door into services on the user's
+// machine or LAN (including cloud instance metadata).
+const PRIVATE_IPV4 = new BlockList();
+for (const [network, prefix] of [
+  ["0.0.0.0", 8],
+  ["10.0.0.0", 8],
+  ["100.64.0.0", 10],
+  ["127.0.0.0", 8],
+  ["169.254.0.0", 16],
+  ["172.16.0.0", 12],
+  ["192.0.0.0", 24],
+  ["192.0.2.0", 24],
+  ["192.168.0.0", 16],
+  ["198.18.0.0", 15],
+  ["198.51.100.0", 24],
+  ["203.0.113.0", 24],
+  ["224.0.0.0", 4],
+  ["240.0.0.0", 4],
+]) PRIVATE_IPV4.addSubnet(network, prefix, "ipv4");
+const PRIVATE_IPV6 = new BlockList();
+for (const [network, prefix] of [
+  ["::", 96],
+  ["::", 128],
+  ["::1", 128],
+  ["::ffff:0:0", 96],
+  ["64:ff9b::", 96],
+  ["64:ff9b:1::", 48],
+  ["100::", 64],
+  ["2001::", 23],
+  ["2001:db8::", 32],
+  ["2002::", 16],
+  ["3fff::", 20],
+  ["5f00::", 16],
+  ["fc00::", 7],
+  ["fec0::", 10],
+  ["fe80::", 10],
+  ["ff00::", 8],
+]) PRIVATE_IPV6.addSubnet(network, prefix, "ipv6");
+
+const stripIpv6Brackets = (value) => String(value ?? "").replace(/^\[|\]$/g, "");
+
+/** True only for a globally routable address. Unknown strings fail closed. */
+function browserAddressAllowed(address) {
+  const normalized = stripIpv6Brackets(address);
+  const family = isIP(normalized);
+  if (!family) return false;
+  return family === 4
+    ? !PRIVATE_IPV4.check(normalized, "ipv4")
+    : !PRIVATE_IPV6.check(normalized, "ipv6");
+}
+
+function assertPublicBrowserHost(url) {
+  const hostname = stripIpv6Brackets(url.hostname).toLowerCase().replace(/\.$/, "");
+  if (!hostname) throw new Error("That web address is invalid");
+  if (
+    hostname === "localhost"
+    || hostname.endsWith(".localhost")
+    || hostname.endsWith(".local")
+    || hostname === "metadata.google.internal"
+  ) {
+    throw new Error("Local and private-network pages cannot be opened in the built-in browser");
+  }
+  if (isIP(hostname) && !browserAddressAllowed(hostname)) {
+    throw new Error("Local and private-network pages cannot be opened in the built-in browser");
+  }
+}
 
 /** Value of a CDP AXNode property by name, or undefined. */
 function axProperty(node, name) {
@@ -55,15 +126,21 @@ function snapshotFromAxNodes(nodes, { limit = MAX_SNAPSHOT_ELEMENTS } = {}) {
     if (!INTERACTIVE_ROLES.has(role)) continue;
     const backend = Number(node?.backendDOMNodeId ?? 0);
     if (!Number.isInteger(backend) || backend <= 0) continue;
-    const name = String(node?.name?.value ?? "").replace(/\s+/g, " ").trim().slice(0, MAX_NAME_LENGTH);
     const editable = role === "textbox" || role === "searchbox" || role === "combobox" || role === "spinbutton";
-    if (!name && !editable) continue;
-    const element = { ref: `b${backend}`, role, name: name || "unnamed" };
+    const rawName = String(node?.name?.value ?? "").replace(/\s+/g, " ").trim().slice(0, MAX_NAME_LENGTH);
+    if (!rawName && !editable) continue;
+    // The bare AX tree cannot relate a heading/label contributor to the
+    // protected field that consumed it, so *any* accessible name could carry
+    // an OTP, API key, recovery phrase, etc. Preserve only the structural
+    // role. The rich isolated-world snapshot keeps ordinary labels/values
+    // after applying the full DOM classifier.
+    const name = editable ? "protected field" : role;
+    const element = { ref: `b${backend}`, role, name };
     if (axProperty(node, "disabled") === true) element.disabled = true;
-    const value = node?.value?.value;
-    if (editable && value !== undefined && value !== null && String(value).length) {
-      element.value = String(value).replace(/\s+/g, " ").trim().slice(0, MAX_VALUE_LENGTH);
-    }
+    // CDP's bare AX tree does not reliably expose an input's HTML type. A
+    // password field can therefore look exactly like an ordinary textbox.
+    // The rich injected snapshot can safely retain non-secret values; this
+    // fallback fails closed and never returns editable contents to a model.
     if (axProperty(node, "checked") !== undefined) element.checked = axProperty(node, "checked");
     elements.push(element);
     if (elements.length >= limit) break;
@@ -106,7 +183,8 @@ function browserNavigationUrl(raw) {
   if (!NAVIGABLE_PROTOCOLS.has(url.protocol)) {
     throw new Error("Only http and https pages can be opened in the browser");
   }
-  if (!url.hostname) throw new Error("That web address is invalid");
+  if (url.username || url.password) throw new Error("Credentials cannot be embedded in a browser address");
+  assertPublicBrowserHost(url);
   return url.toString();
 }
 
@@ -141,11 +219,16 @@ function browserPartition(botId) {
 }
 
 /** A named profile is a partition several bots may share — "Work", "Client
- * A" — so one sign-in serves every bot pointed at it. */
-function browserProfilePartition(profileId) {
-  const safe = String(profileId ?? "").replace(/[^A-Za-z0-9_-]/g, "");
-  if (!safe) throw new Error("A profile id is required");
-  return `persist:openmausbot-browser-profile-${safe}`;
+ * A" — so one sign-in serves every bot pointed at it. New profile ids are
+ * lowercase, but #567 already persisted mixed-case partition identities.
+ * Accept only that exact safe alphabet and never normalize it: normalization
+ * could silently route a migrated profile into another account. */
+function browserProfilePartition(partitionId) {
+  const id = String(partitionId ?? "");
+  if (!/^[A-Za-z0-9_-]{1,40}$/.test(id) || id === "guest") {
+    throw new Error("A valid browser profile partition id is required");
+  }
+  return `persist:openmausbot-browser-profile-${id}`;
 }
 
 const REF = /^b(\d{1,12})$/;
@@ -161,6 +244,7 @@ module.exports = {
   INTERACTIVE_ROLES,
   MAX_SNAPSHOT_ELEMENTS,
   backendNodeIdFromRef,
+  browserAddressAllowed,
   browserNavigationAllowed,
   browserNavigationUrl,
   browserPartition,

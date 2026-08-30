@@ -18,6 +18,10 @@ import { SkinPicker } from "./SkinPicker";
 import { RoomTurnTimeoutSettings } from "./RoomTurnTimeoutSettings";
 import { TranscriptionSettings } from "./TranscriptionSettings";
 import { cn } from "@/lib/cn";
+import {
+  browserProfileDeletionBlockReason,
+  browserProfilesForPatch,
+} from "@/lib/browser-profiles";
 
 const SECTIONS: Array<{
   id: AppSettingsSection;
@@ -197,6 +201,7 @@ function ExperimentalFeaturesRow() {
   const skillRecorder = skillRecorderEnabled(state.config);
   const browser = builtInBrowserEnabled(state.config);
   const desktopBrowser = Boolean(window.ogb?.browser);
+  const browserBlockedOnWindows = window.ogb?.platform === "win32" && !desktopBrowser;
   const [saving, setSaving] = useState<"skillRecorder" | "browser" | null>(null);
   const [error, setError] = useState("");
 
@@ -245,8 +250,12 @@ function ExperimentalFeaturesRow() {
           <div className="text-[14px] font-medium text-ink">Built-in browser</div>
           <div className="mt-0.5 text-[12px] leading-relaxed text-ink-secondary">
             {desktopBrowser
-              ? "Bots get their own browser tab in the computer panel. Turn this off to remove it for every bot; each bot also has its own switch."
-              : "Needs the OpenMausBot desktop app."}
+              ? browser
+                ? "Enabled for this workspace. Each bot also has its own browser switch."
+                : "Off by default. Enable it to let supported bots use a browser tab you can watch and take over."
+              : browserBlockedOnWindows
+                ? "Temporarily unavailable on Windows while Electron's production sandbox support is being verified."
+                : "Needs the OpenMausBot desktop app."}
           </div>
         </div>
         <button
@@ -270,17 +279,22 @@ function ExperimentalFeaturesRow() {
 function BrowserProfilesRow() {
   const { state, dispatch } = useStore();
   const profiles = state.config?.browserProfiles ?? [];
-  const bridge = window.ogb?.browser;
   const [busy, setBusy] = useState<string | null>(null);
   const [renaming, setRenaming] = useState<{ id: string; name: string } | null>(null);
   const [error, setError] = useState("");
-  if (!builtInBrowserEnabled(state.config) || !bridge) return null;
+  // Windows temporarily gates the live browser surface, but upgraded users
+  // must still be able to rename or permanently erase existing sessions.
+  // The packaged server can perform that private lifecycle cleanup without
+  // exposing the browser renderer bridge.
+  if (!window.ogb || (!builtInBrowserEnabled(state.config) && profiles.length === 0)) return null;
 
-  const save = async (next: typeof profiles, then?: () => Promise<void>) => {
+  const save = async (next: typeof profiles) => {
     try {
-      const config: ConfigStatus = await api("/api/config", { method: "PATCH", body: JSON.stringify({ browserProfiles: next }) });
+      const config: ConfigStatus = await api("/api/config", {
+        method: "PATCH",
+        body: JSON.stringify({ browserProfiles: browserProfilesForPatch(next) }),
+      });
       dispatch({ type: "configStatus", config });
-      await then?.();
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : "Could not save browser profiles.");
     } finally {
@@ -288,21 +302,49 @@ function BrowserProfilesRow() {
       setRenaming(null);
     }
   };
-  const remove = (id: string) => {
+  const remove = async (id: string) => {
     if (busy) return;
+    const profile = profiles.find((candidate) => candidate.id === id);
+    if (!profile) return;
+    const referencedBots = state.bots.filter((bot) => bot.browserProfile === id);
+    const blocked = browserProfileDeletionBlockReason(state.bots, id);
+    if (blocked) {
+      setError(blocked);
+      return;
+    }
+    const botSummary = referencedBots.length
+      ? ` ${referencedBots.length === 1 ? referencedBots[0]!.name : `${referencedBots.length} bots`} will switch to their own browser sessions.`
+      : "";
+    if (!window.confirm(`Delete “${profile.name}”?${botSummary} This permanently signs out of this profile and erases its browser data.`)) {
+      return;
+    }
     setBusy(id);
     setError("");
-    void save(
-      profiles.filter((profile) => profile.id !== id),
-      async () => {
-        // bots pointed at it fall back to their own session server-side; the
-        // surface drops its views and wipes the partition's data
-        for (const bot of state.bots) {
-          if (bot.browserProfile === id) dispatch({ type: "updateBot", botId: bot.id, patch: { browserProfile: null } });
-        }
-        await bridge.forgetProfile?.(id);
-      },
-    );
+    try {
+      // The server commits the profile list and clears every bot reference as
+      // one transaction, then privately asks Electron to erase the partition.
+      // Never wipe browser data from the renderer before that commit succeeds:
+      // a rejected config save must leave the user's signed-in session intact.
+      const config: ConfigStatus = await api("/api/config", {
+        method: "PATCH",
+        body: JSON.stringify({
+          browserProfiles: browserProfilesForPatch(profiles.filter((candidate) => candidate.id !== id)),
+        }),
+      });
+      dispatch({ type: "configStatus", config });
+      // Packaged Electron receives the same post-commit cleanup privately
+      // from the server. Keep this idempotent fallback for split-process
+      // desktop development, where the server has no parent message port.
+      try {
+        await window.ogb?.browser?.forgetProfile?.(profile.partitionId ?? profile.id);
+      } catch {
+        setError("The profile was removed, but its local browser data could not be erased. Restart OpenMausBot before reusing that profile name.");
+      }
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : "Could not delete the browser profile.");
+    } finally {
+      setBusy(null);
+    }
   };
   const rename = () => {
     if (!renaming || busy) return;
@@ -369,7 +411,7 @@ function BrowserProfilesRow() {
                 </div>
                 <button
                   type="button"
-                  onClick={() => remove(profile.id)}
+                  onClick={() => void remove(profile.id)}
                   disabled={busy !== null}
                   className="flex shrink-0 items-center gap-1 rounded-md px-2 py-1 text-[12px] text-ink-secondary hover:bg-control hover:text-danger disabled:opacity-50"
                   title="Delete this profile and forget its logins"

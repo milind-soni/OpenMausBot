@@ -4,18 +4,22 @@
 // told where its rectangle is. Anything the renderer draws is painted UNDER
 // the native view, so menus and dialogs that would overlap it hide it
 // instead. Compact in the panel; expanded when handed the main column.
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { ArrowLeft, ExternalLink, Globe, Hand, Loader2, Maximize2, Minimize2, Plus, UserRound } from "lucide-react";
 import { usePageVisible } from "@/lib/page-visible";
 import { cn } from "@/lib/cn";
-import { useStore, type Bot, type BrowserProfile } from "@/state/store";
+import { transitionBrowserControlLease } from "@/lib/computer-control";
+import { useStore, type Bot, type BotAnnouncement, type BrowserProfile } from "@/state/store";
+import { browserProfilePartitionId, browserProfilesForPatch } from "@/lib/browser-profiles";
 
 type ControlSnapshot = { held: boolean; helpReason: string | null };
 
 const NATIVE_VIEW_OVERLAY_SELECTOR = '[aria-modal="true"], [role="dialog"], [role="menu"], [popover], [data-native-view-overlay]';
 const OWN_PROFILE = "";
 const GUEST_PROFILE = "guest";
-const NEW_PROFILE = "__new__";
+// Deliberately outside the server's profile-id alphabet so no legacy or API
+// profile can collide with this select-only action.
+const NEW_PROFILE = ":new-profile";
 
 async function api(path: string, init?: RequestInit): Promise<any> {
   const res = await fetch(path, { headers: { "content-type": "application/json" }, ...init });
@@ -44,22 +48,51 @@ function overlayIntersects(host: DesktopWorkspaceBounds): boolean {
   return false;
 }
 
-function displayUrl(url: string): string {
+/** The editable address must retain the exact page URL. A shortened host/path
+ * silently dropped schemes, queries and fragments on the next submission. */
+export function editableUrl(url: string): string {
   if (!url || url === "about:blank") return "";
-  try {
-    const parsed = new URL(url);
-    return `${parsed.host}${parsed.pathname === "/" ? "" : parsed.pathname}`;
-  } catch {
-    return url;
+  return url;
+}
+
+function mutationAffectsOverlay(record: MutationRecord): boolean {
+  if (record.type === "attributes") {
+    return record.target instanceof Element && (
+      record.target.matches(NATIVE_VIEW_OVERLAY_SELECTOR) ||
+      Boolean(record.target.closest(NATIVE_VIEW_OVERLAY_SELECTOR)) ||
+      Boolean(record.target.querySelector(NATIVE_VIEW_OVERLAY_SELECTOR))
+    );
   }
+  return [...record.addedNodes, ...record.removedNodes].some((node) =>
+    node instanceof Element && (
+      node.matches(NATIVE_VIEW_OVERLAY_SELECTOR) ||
+      Boolean(node.querySelector(NATIVE_VIEW_OVERLAY_SELECTOR))
+    ),
+  );
 }
 
 /** "Work Microsoft" → "work-microsoft"; collisions get a numeric suffix. */
-function profileIdFor(name: string, taken: BrowserProfile[]): string {
+export function profileIdFor(name: string, taken: BrowserProfile[]): string {
   const base = name.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 32) || "profile";
   let candidate = base;
-  for (let n = 2; taken.some((profile) => profile.id === candidate); n += 1) candidate = `${base}-${n}`;
+  for (let n = 2; candidate === GUEST_PROFILE || taken.some((profile) => profile.id === candidate); n += 1) {
+    candidate = `${base}-${n}`;
+  }
   return candidate;
+}
+
+export function shouldRequestBrowserControl(input: {
+  botId: string;
+  eventBotId: string;
+  held: boolean;
+  pending: boolean;
+  takeInFlight: boolean;
+}): boolean {
+  return input.botId === input.eventBotId && !input.held && !input.pending && !input.takeInFlight;
+}
+
+export function browserProfileChangesDisabled(bot: Pick<Bot, "busy">): boolean {
+  return bot.busy === true;
 }
 
 export function BrowserPanel({
@@ -74,7 +107,7 @@ export function BrowserPanel({
   bot: Bot;
   control: ControlSnapshot;
   controlPending: boolean;
-  onControl: (action: "take" | "release") => void;
+  onControl: (action: "take" | "release") => Promise<boolean>;
   size?: "compact" | "expanded";
   /** Compact only: hand the tab to the main column. */
   onExpand?: () => void;
@@ -85,6 +118,14 @@ export function BrowserPanel({
   const bridge = window.ogb?.browser;
   const pageVisible = usePageVisible();
   const hostRef = useRef<HTMLDivElement>(null);
+  const nativeTakePending = useRef(false);
+  const botBusyRef = useRef(browserProfileChangesDisabled(bot));
+  // Async profile creation must only observe committed bot state. Updating the
+  // ref during render lets an interrupted concurrent render leak a busy value
+  // that React never committed and can strand the newly-created profile.
+  useLayoutEffect(() => {
+    botBusyRef.current = browserProfileChangesDisabled(bot);
+  }, [bot.busy]);
   const [surface, setSurface] = useState<BrowserSurfaceState | null>(null);
   const [address, setAddress] = useState("");
   const [addressFocused, setAddressFocused] = useState(false);
@@ -103,6 +144,9 @@ export function BrowserPanel({
       : bot.browserProfile && profiles.some((profile) => profile.id === bot.browserProfile)
         ? bot.browserProfile
         : OWN_PROFILE;
+  const activePartition = activeProfile === OWN_PROFILE || activeProfile === GUEST_PROFILE
+    ? activeProfile
+    : browserProfilePartitionId(profiles, activeProfile);
 
   // Layout: tell main where the tab's rectangle is, on every change that can
   // move it (resize, scroll, sidebar toggles, dialogs). Coalesced per frame.
@@ -116,7 +160,7 @@ export function BrowserPanel({
       const bounds = elementBounds(hostRef.current);
       const target = bounds && pageVisible && !overlayIntersects(bounds) ? bounds : null;
       bridge
-        .layout(botId, target, activeProfile, size)
+        .layout(botId, target, activePartition, size)
         .then((next) => {
           if (alive) setSurface(next);
         })
@@ -134,8 +178,17 @@ export function BrowserPanel({
     send();
     const resize = new ResizeObserver(schedule);
     if (hostRef.current) resize.observe(hostRef.current);
-    const mutation = new MutationObserver(schedule);
-    mutation.observe(document.body, { childList: true, subtree: true, attributes: true, attributeFilter: ["class", "style", "open", "aria-modal", "hidden"] });
+    // Portals may live anywhere under body, but normal app animation/style
+    // churn must not produce a layout IPC call every frame.
+    const mutation = new MutationObserver((records) => {
+      if (records.some(mutationAffectsOverlay)) schedule();
+    });
+    mutation.observe(document.body, {
+      childList: true,
+      subtree: true,
+      attributes: true,
+      attributeFilter: ["class", "style", "open", "aria-modal", "hidden"],
+    });
     window.addEventListener("resize", schedule);
     document.addEventListener("scroll", schedule, true);
     return () => {
@@ -149,7 +202,7 @@ export function BrowserPanel({
       // but nothing may paint over the chat.
       void bridge.layout(botId, null).catch(() => {});
     };
-  }, [bridge, botId, pageVisible, activeProfile, size]);
+  }, [bridge, botId, pageVisible, activePartition, size]);
 
   useEffect(() => {
     if (!bridge) return;
@@ -159,53 +212,155 @@ export function BrowserPanel({
   }, [bridge, botId]);
 
   useEffect(() => {
-    if (!addressFocused) setAddress(displayUrl(surface?.url ?? ""));
+    // Keep the synchronous guard set until React has folded the successful
+    // server snapshot. Native focus and the first mouse event commonly arrive
+    // back-to-back; neither should start a second control request.
+    if (control.held) nativeTakePending.current = false;
+  }, [control.held]);
+
+  const changeControl = useCallback(
+    async (action: "take" | "release"): Promise<boolean> => {
+      if (action === "take") {
+        if (control.held) {
+          try {
+            const applied = await bridge?.setHumanControl?.(botId, true, activePartition) === true;
+            if (!applied) setError("The browser tab is not ready for takeover yet.");
+            return applied;
+          } catch (cause) {
+            setError(cause instanceof Error ? cause.message : String(cause));
+            return false;
+          }
+        }
+        if (controlPending || nativeTakePending.current) return false;
+        nativeTakePending.current = true;
+      }
+      const setLocalControl = async (held: boolean): Promise<boolean> => {
+        try {
+          if (!bridge?.setHumanControl) throw new Error("Update OpenMausBot before using browser takeover.");
+          const applied = await bridge.setHumanControl(botId, held, activePartition);
+          if (!applied) throw new Error("The browser tab is not ready for takeover yet.");
+          return true;
+        } catch (cause) {
+          setError(cause instanceof Error ? cause.message : String(cause));
+          return false;
+        }
+      };
+
+      const result = await transitionBrowserControlLease({
+        action,
+        requestDurableControl: (requested) => onControl(requested).catch(() => false),
+        setNativeControl: setLocalControl,
+      });
+      if (result.ok) return true;
+      if (result.failed === "durable-take") {
+        // The person may already be typing into the native page. Keep the
+        // agent gated even though the durable lease endpoint failed; a
+        // subsequent Take control click retries the server transition.
+        setError("Browser control could not be confirmed. The bot remains paused here for safety — retry Take control.");
+      } else if (result.failed === "durable-release") {
+        setError("Control could not be handed back. The bot remains paused here for safety — retry Hand back.");
+      } else if (result.failed === "native-release") {
+        setError("The server released control, but this browser remains paused locally for safety. Reopen the Browser panel to retry.");
+      }
+      if (action === "take") nativeTakePending.current = false;
+      return false;
+    },
+    [activePartition, botId, bridge, control.held, controlPending, onControl],
+  );
+
+  useEffect(() => {
+    if (!bridge?.onUserInteraction) return;
+    return bridge.onUserInteraction((event) => {
+      if (!shouldRequestBrowserControl({
+        botId,
+        eventBotId: event.botId,
+        held: control.held,
+        pending: controlPending,
+        takeInFlight: nativeTakePending.current,
+      })) return;
+      if (size === "compact") onExpand?.();
+      void changeControl("take");
+    });
+  }, [bridge, botId, changeControl, control.held, controlPending, onExpand, size]);
+
+  useEffect(() => {
+    if (!addressFocused) setAddress(editableUrl(surface?.url ?? ""));
   }, [surface?.url, addressFocused]);
 
   const navigate = useCallback(
-    (raw: string) => {
+    async (raw: string) => {
       if (!bridge) return;
       const target = raw.trim();
       if (!target) return;
+      if (!(await changeControl("take"))) return;
       setBusy(true);
       setError(null);
       bridge
-        .navigate(botId, target)
+        .navigate(botId, target, activePartition)
         .then(() => setAddressFocused(false))
         .catch((cause) => setError(cause instanceof Error ? cause.message : String(cause)))
         .finally(() => setBusy(false));
     },
-    [bridge, botId],
+    [activePartition, bridge, botId, changeControl],
   );
 
-  const back = () => {
+  const back = async () => {
     if (!bridge) return;
+    if (!(await changeControl("take"))) return;
     setError(null);
-    bridge.back(botId).catch((cause) => setError(cause instanceof Error ? cause.message : String(cause)));
+    await bridge.back(botId, activePartition).catch((cause) => setError(cause instanceof Error ? cause.message : String(cause)));
   };
 
-  const chooseProfile = (value: string) => {
+  const chooseProfile = async (value: string) => {
+    if (browserProfileChangesDisabled(bot) || profileBusy) {
+      setError(`Stop ${bot.name}'s turn before changing its browser profile.`);
+      return;
+    }
     if (value === NEW_PROFILE) {
       setAddingProfile(true);
       return;
     }
-    // null (not undefined) so the clear survives JSON serialisation
-    dispatch({ type: "updateBot", botId, patch: { browserProfile: value === OWN_PROFILE ? null : value } });
+    setProfileBusy(true);
+    setError(null);
+    try {
+      // Let the server serialize this against turn start. An optimistic bot
+      // patch can briefly show a new profile while the active capability is
+      // still pinned to the old hidden view.
+      const result: { bot: BotAnnouncement } = await api(`/api/bots/${botId}`, {
+        method: "PATCH",
+        body: JSON.stringify({ browserProfile: value === OWN_PROFILE ? null : value }),
+      });
+      dispatch({ type: "botPatched", bot: result.bot });
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : String(cause));
+    } finally {
+      setProfileBusy(false);
+    }
   };
 
   const addProfile = async () => {
     const name = newProfileName.trim();
-    if (!name || profileBusy) return;
+    if (!name || profileBusy || botBusyRef.current) return;
     setProfileBusy(true);
     setError(null);
     try {
       const id = profileIdFor(name, profiles);
       const config = await api("/api/config", {
         method: "PATCH",
-        body: JSON.stringify({ browserProfiles: [...profiles, { id, name }] }),
+        body: JSON.stringify({ browserProfiles: browserProfilesForPatch([...profiles, { id, name }]) }),
       });
       dispatch({ type: "configStatus", config });
-      dispatch({ type: "updateBot", botId, patch: { browserProfile: id } });
+      if (botBusyRef.current) {
+        setAddingProfile(false);
+        setNewProfileName("");
+        setError(`Created ${name}, but ${bot.name}'s turn started before it could switch profiles. Stop the turn, then select it.`);
+        return;
+      }
+      const result: { bot: BotAnnouncement } = await api(`/api/bots/${botId}`, {
+        method: "PATCH",
+        body: JSON.stringify({ browserProfile: id }),
+      });
+      dispatch({ type: "botPatched", bot: result.bot });
       setAddingProfile(false);
       setNewProfileName("");
     } catch (cause) {
@@ -225,6 +380,7 @@ export function BrowserPanel({
 
   const currentUrl = surface?.url && surface.url !== "about:blank" ? surface.url : null;
   const expanded = size === "expanded";
+  const profileChangesLocked = browserProfileChangesDisabled(bot);
 
   return (
     <div className="flex h-full min-h-0 flex-col">
@@ -257,12 +413,12 @@ export function BrowserPanel({
         className="mb-2 flex items-center gap-1.5"
         onSubmit={(event) => {
           event.preventDefault();
-          navigate(address);
+          void navigate(address);
         }}
       >
         <button
           type="button"
-          onClick={back}
+          onClick={() => void back()}
           disabled={!surface?.canGoBack}
           className="rounded-md p-1.5 text-ink-secondary hover:bg-control hover:text-ink disabled:cursor-not-allowed disabled:opacity-40"
           title="Back"
@@ -305,6 +461,17 @@ export function BrowserPanel({
         data-native-view-host
         onClick={!expanded && onExpand ? onExpand : undefined}
         role={!expanded && onExpand ? "button" : undefined}
+        tabIndex={!expanded && onExpand ? 0 : undefined}
+        onKeyDown={
+          !expanded && onExpand
+            ? (event) => {
+                if (event.key !== "Enter" && event.key !== " ") return;
+                event.preventDefault();
+                onExpand();
+              }
+            : undefined
+        }
+        aria-label={!expanded && onExpand ? `Expand ${bot.name}'s browser` : undefined}
         title={!expanded && onExpand ? "Click to expand" : undefined}
         className={cn(
           "relative overflow-hidden rounded-xl border border-hairline/40 bg-inset",
@@ -326,7 +493,7 @@ export function BrowserPanel({
             : "Click into the page to take over any time; the bot pauses while you drive."}
         </div>
         <button
-          onClick={() => onControl(control.held ? "release" : "take")}
+          onClick={() => void changeControl(control.held ? "release" : "take")}
           disabled={controlPending}
           className={cn(
             "flex shrink-0 items-center gap-1.5 rounded-lg px-3 py-1.5 text-[13px] font-medium disabled:opacity-60",
@@ -346,8 +513,8 @@ export function BrowserPanel({
             <span className="shrink-0">Profile</span>
             <select
               value={activeProfile}
-              onChange={(event) => chooseProfile(event.target.value)}
-              disabled={profileBusy}
+              onChange={(event) => void chooseProfile(event.target.value)}
+              disabled={profileBusy || profileChangesLocked}
               aria-label="Browser profile"
               className="min-w-0 flex-1 rounded-md bg-inset px-2 py-1 text-[13px] text-ink outline-none"
             >
@@ -364,8 +531,9 @@ export function BrowserPanel({
           <button
             type="button"
             onClick={() => setAddingProfile((open) => !open)}
-            className="rounded-md p-1.5 text-ink-secondary hover:bg-control hover:text-ink"
-            title="Add a profile"
+            disabled={profileChangesLocked}
+            className="rounded-md p-1.5 text-ink-secondary hover:bg-control hover:text-ink disabled:cursor-not-allowed disabled:opacity-40"
+            title={profileChangesLocked ? `Stop ${bot.name}'s turn before changing browser profiles` : "Add a profile"}
             aria-label="Add a profile"
           >
             <Plus size={15} />
@@ -385,12 +553,13 @@ export function BrowserPanel({
               onChange={(event) => setNewProfileName(event.target.value)}
               placeholder="Profile name, e.g. Work"
               maxLength={40}
+              disabled={profileChangesLocked}
               className="min-w-0 flex-1 rounded-md bg-inset px-2.5 py-1.5 text-[13px] text-ink outline-none placeholder:text-ink-secondary/70"
               aria-label="New profile name"
             />
             <button
               type="submit"
-              disabled={!newProfileName.trim() || profileBusy}
+              disabled={!newProfileName.trim() || profileBusy || profileChangesLocked}
               className="rounded-md bg-accent px-3 py-1.5 text-[13px] font-medium text-accent-ink disabled:opacity-50"
             >
               Add
@@ -408,7 +577,9 @@ export function BrowserPanel({
           </form>
         )}
         <div className="mt-1.5 text-[11.5px] leading-relaxed text-ink-secondary">
-          A profile is its own set of logins and cookies — sign in once and it stays. Bots pointed at the same profile share it; "{bot.name}'s own" is private to this bot; Guest is thrown away when you switch off it.
+          {profileChangesLocked
+            ? `Stop ${bot.name}'s current turn before changing profiles, so it cannot keep acting in a hidden session.`
+            : `A profile is its own set of logins and cookies — sign in once and it stays. Bots pointed at the same profile share it; “${bot.name}'s own” is private to this bot; Guest is thrown away when you switch off it.`}
         </div>
       </div>
       {error && <div className="mt-2 text-[12px] text-danger">{error}</div>}

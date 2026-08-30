@@ -7,7 +7,7 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
-import { classifyWall, formatObserved } from "./browser-proxy.ts";
+import { browserHostTimeoutMs, classifyWall, formatObserved } from "./browser-proxy.ts";
 
 const PROXY = join(dirname(fileURLToPath(import.meta.url)), "browser-proxy.ts");
 const TOKEN = "b".repeat(64);
@@ -191,6 +191,9 @@ describe("browser MCP proxy", () => {
     expect(text(read)).toBe("Cart: https://shop.example/cart\n\nCart\n\n2 items · $80");
     const bad = await callTool("browser_select_option", { ref: "b2" });
     expect(bad.result.isError).toBe(true);
+    const emptyWait = await callTool("browser_wait_for", {});
+    expect(emptyWait.result.isError).toBe(true);
+    expect(text(emptyWait)).toMatch(/text or url is required/i);
   });
 
   it("reads state and screenshots without touching the page", async () => {
@@ -200,15 +203,18 @@ describe("browser MCP proxy", () => {
     expect(shot.result.content[1]).toEqual({ type: "image", data: "ZmFrZQ==", mimeType: "image/jpeg" });
   });
 
-  it("refuses to act while the person holds the wheel, but still lets the bot look", async () => {
+  it("refuses both actions and observations while the person holds the wheel", async () => {
     held = true;
-    // the control client caches its answer briefly; wait it out
-    await new Promise((resolve) => setTimeout(resolve, 900));
+    hits.length = 0;
     const refused = await callTool("browser_click", { ref: "b1" });
     expect(refused.result.isError).toBe(true);
     expect(text(refused)).toMatch(/wheel|control|driving/i);
-    const look = await callTool("browser_snapshot", {});
-    expect(look.result.isError).toBeFalsy();
+    for (const tool of ["browser_snapshot", "browser_read", "browser_screenshot", "browser_state"]) {
+      const privateResult = await callTool(tool, {});
+      expect(privateResult.result.isError).toBe(true);
+      expect(text(privateResult)).toMatch(/private information|taken control/i);
+    }
+    expect(hits).toEqual([]);
     held = false;
   });
 });
@@ -265,5 +271,54 @@ describe("formatObserved", () => {
       "Browser — T: https://a.example/p\nNo interactive elements found.",
     );
     expect(formatObserved({ url: "about:blank", title: "", elements: [] })).toContain("about:blank");
+  });
+
+  it("strips protected field values even when an older host sends them", () => {
+    const fallback = formatObserved({
+      url: "https://accounts.example/signin",
+      title: "Sign in",
+      elements: [{ ref: "b7", role: "textbox", name: "Password", value: "hunter2" }],
+    });
+    expect(fallback).toContain('b7 textbox "Password"');
+    expect(fallback).not.toContain("hunter2");
+
+    const yaml = formatObserved({
+      url: "https://accounts.example/signin",
+      title: "Sign in",
+      elements: [],
+      yaml: '- textbox "Password" [ref=e7]: hunter2\n- textbox "Email" [ref=e8]: ada@example.com',
+    });
+    expect(yaml).toContain('- textbox "Password" [ref=e7]');
+    expect(yaml).not.toContain("hunter2");
+    expect(yaml).toContain("ada@example.com");
+
+    const apiKey = formatObserved({
+      url: "https://developer.example/settings",
+      title: "Developer settings",
+      elements: [{ ref: "b9", role: "textbox", name: "API key", value: "sk_live_secret" }],
+    });
+    expect(apiKey).not.toContain("sk_live_secret");
+    const bankAccount = formatObserved({
+      url: "https://billing.example/settings",
+      title: "Billing settings",
+      elements: [],
+      yaml: '- textbox "Bank account number" [ref=e10]: 000123456789',
+    });
+    expect(bankAccount).not.toContain("000123456789");
+    for (const name of ["AWS_SECRET_ACCESS_KEY", "Private key", "Signing key", "Webhook secret", "Refresh token", "Seed phrase", "Security answer"]) {
+      const rendered = formatObserved({
+        url: "https://developer.example/settings",
+        title: "Secrets",
+        elements: [{ ref: "b11", role: "textbox", name, value: "must-not-leak" }],
+      });
+      expect(rendered).not.toContain("must-not-leak");
+    }
+  });
+
+  it("keeps the transport alive beyond the advertised browser wait", () => {
+    expect(browserHostTimeoutMs("wait", { timeoutMs: 30_000 })).toBe(35_000);
+    expect(browserHostTimeoutMs("wait", { timeoutMs: 2_000 })).toBe(20_000);
+    expect(browserHostTimeoutMs("wait")).toBe(20_000);
+    expect(browserHostTimeoutMs("navigate")).toBe(30_000);
   });
 });

@@ -308,6 +308,9 @@ export interface ConfigStatus {
 export interface BrowserProfile {
   id: string;
   name: string;
+  /** Read-only durable Electron routing inherited from legacy profiles.
+   * Config PATCH payloads must omit it. */
+  partitionId?: string;
 }
 
 export type ConfigStatusFrame = Pick<

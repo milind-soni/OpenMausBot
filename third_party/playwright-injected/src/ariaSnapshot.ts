@@ -21,6 +21,8 @@ import { normalizeWhiteSpace, truncateDataUrl } from '@isomorphic/stringUtils';
 import { distillAriaSnapshot } from './ariaSnapshotDistiller';
 import { computeBox, getElementComputedStyle, isElementVisible } from './domUtils';
 import * as roleUtils from './roleUtils';
+import { isSensitiveElement } from '../secretInput';
+import { sanitizeSnapshotUrl } from '../publicUrl';
 
 export type AriaSnapshot = {
   root: aria.AriaNode;
@@ -83,6 +85,13 @@ export function generateAriaTree(rootElement: Element, publicOptions: AriaTreeOp
   const visited = new Set<Node>();
   // For each node, the elements that contributed to its accessible name.
   const nameSourceElements = new Map<aria.AriaNode, Set<Element> | undefined>();
+  // Accessible names can themselves contain secrets (for example a one-time
+  // code rendered in an aria-labelledby node). Discover protected fields and
+  // their name contributors before walking document order, so a label that
+  // appears before its input cannot already have leaked into the snapshot.
+  const protectedFields = new Set<Element>();
+  const protectedNameElements = new Set<Element>();
+  const protectedNameText = new Set<Node>();
 
   const snapshot: AriaSnapshot = {
     root: { role: 'fragment', name: '', children: [], props: {}, box: computeBox(rootElement), receivesPointerEvents: true },
@@ -99,6 +108,8 @@ export function generateAriaTree(rootElement: Element, publicOptions: AriaTreeOp
 
     if (node.nodeType === Node.TEXT_NODE && node.nodeValue) {
       if (!parentElementVisible)
+        return;
+      if (protectedNameText.has(node))
         return;
 
       const text = node.nodeValue;
@@ -135,6 +146,11 @@ export function generateAriaTree(rootElement: Element, publicOptions: AriaTreeOp
     }
 
     const childAriaNode = visible ? toAriaNode(element, options, nameSourceElements) : null;
+    const sensitiveEditable = Boolean(childAriaNode && (protectedFields.has(element) || isSensitiveElement(element, childAriaNode.name)));
+    if (sensitiveEditable)
+      childAriaNode!.children = ['[redacted]'];
+    else if (childAriaNode && protectedNameElements.has(element))
+      childAriaNode.name = 'protected field label';
     if (childAriaNode && element.getAttribute('aria-hidden')?.toLowerCase() === 'true')
       childAriaNode.props['aria-hidden'] = 'true';
     let elementInfo: { element: Element, nameFromContentRefs: string[] } | undefined;
@@ -148,7 +164,10 @@ export function generateAriaTree(rootElement: Element, publicOptions: AriaTreeOp
       }
       ariaNode.children.push(childAriaNode);
     }
-    processElement(childAriaNode || ariaNode, element, ariaChildren, visible);
+    // Descendant text in a custom contenteditable can be the secret value.
+    // Once classified, do not traverse it back into the redacted node.
+    if (!sensitiveEditable)
+      processElement(childAriaNode || ariaNode, element, ariaChildren, visible);
 
     // Now that the subtree is processed, every descendant that contributed to this node's
     // accessible name has its ref assigned, so we can resolve those refs as the name's origins.
@@ -168,7 +187,8 @@ export function generateAriaTree(rootElement: Element, publicOptions: AriaTreeOp
     if (treatAsBlock)
       ariaNode.children.push(treatAsBlock);
 
-    ariaNode.children.push(roleUtils.getCSSContent(element, '::before') || '');
+    const protectsFieldName = protectedNameElements.has(element);
+    ariaNode.children.push(protectsFieldName ? '' : roleUtils.getCSSContent(element, '::before') || '');
     const assignedNodes = element.nodeName === 'SLOT' ? (element as HTMLSlotElement).assignedNodes() : [];
     if (assignedNodes.length) {
       for (const child of assignedNodes)
@@ -187,7 +207,7 @@ export function generateAriaTree(rootElement: Element, publicOptions: AriaTreeOp
     for (const child of ariaChildren)
       visit(ariaNode, child, parentElementVisible);
 
-    ariaNode.children.push(roleUtils.getCSSContent(element, '::after') || '');
+    ariaNode.children.push(protectsFieldName ? '' : roleUtils.getCSSContent(element, '::after') || '');
 
     if (treatAsBlock)
       ariaNode.children.push(treatAsBlock);
@@ -197,7 +217,10 @@ export function generateAriaTree(rootElement: Element, publicOptions: AriaTreeOp
 
     if (ariaNode.role === 'link' && element.hasAttribute('href')) {
       const href = element.getAttribute('href')!;
-      ariaNode.props['url'] = truncateDataUrl(href);
+      const truncatedHref = truncateDataUrl(href);
+      ariaNode.props['url'] = publicOptions.mode === 'ai'
+        ? sanitizeSnapshotUrl(truncatedHref, element.ownerDocument.baseURI)
+        : truncatedHref;
     }
 
     if (ariaNode.role === 'textbox' && element.hasAttribute('placeholder') && element.getAttribute('placeholder') !== ariaNode.name) {
@@ -208,6 +231,66 @@ export function generateAriaTree(rootElement: Element, publicOptions: AriaTreeOp
 
   roleUtils.beginAriaCaches();
   try {
+    const pending: Element[] = [rootElement];
+    const candidates: Element[] = [];
+    while (pending.length) {
+      const element = pending.pop()!;
+      const tag = element.tagName.toLowerCase();
+      const role = (element.getAttribute('role') || '').toLowerCase();
+      if (tag === 'input' || tag === 'textarea' || (element instanceof HTMLElement && element.isContentEditable) || ['textbox', 'searchbox', 'combobox'].includes(role))
+        candidates.push(element);
+      for (const child of element.children)
+        pending.push(child);
+      if (element.shadowRoot) {
+        for (const child of element.shadowRoot.children)
+          pending.push(child);
+      }
+    }
+    for (const element of candidates) {
+      const name = roleUtils.getElementAccessibleName(element, false);
+      if (!isSensitiveElement(element, name.text))
+        continue;
+      protectedFields.add(element);
+      for (const contributor of name.elements || []) {
+        protectedNameElements.add(contributor);
+        const contributorNodes: Node[] = [contributor];
+        const seenContributorNodes = new Set<Node>();
+        while (contributorNodes.length) {
+          const node = contributorNodes.pop()!;
+          if (seenContributorNodes.has(node))
+            continue;
+          seenContributorNodes.add(node);
+          // A descendant can expose its own accessible name (for example, an
+          // aria-label on a nested button) even after all contributor text
+          // nodes are suppressed. Treat the complete name-source subtree as
+          // protected so no descendant recomputes a secret from the live DOM.
+          if (node instanceof Element)
+            protectedNameElements.add(node);
+          for (let child = node.firstChild; child; child = child.nextSibling) {
+            if (child.nodeType === Node.TEXT_NODE)
+              protectedNameText.add(child);
+            else
+              contributorNodes.push(child);
+          }
+          if (node instanceof Element && node.shadowRoot) {
+            for (let child = node.shadowRoot.firstChild; child; child = child.nextSibling) {
+              if (child.nodeType === Node.TEXT_NODE)
+                protectedNameText.add(child);
+              else
+                contributorNodes.push(child);
+            }
+          }
+          if (node instanceof HTMLSlotElement) {
+            for (const assigned of node.assignedNodes({ flatten: true })) {
+              if (assigned.nodeType === Node.TEXT_NODE)
+                protectedNameText.add(assigned);
+              else
+                contributorNodes.push(assigned);
+            }
+          }
+        }
+      }
+    }
     visit(snapshot.root, rootElement, true);
   } finally {
     roleUtils.endAriaCaches();
@@ -255,6 +338,7 @@ function toAriaNode(element: Element, options: InternalOptions, nameSourceElemen
     return null;
 
   const name = roleUtils.getElementAccessibleName(element, false);
+  const isSecret = isSensitiveElement(element, name.text);
   const receivesPointerEvents = roleUtils.receivesPointerEvents(element);
 
   const box = computeBox(element);
@@ -263,7 +347,7 @@ function toAriaNode(element: Element, options: InternalOptions, nameSourceElemen
 
   const result: aria.AriaNode = {
     role,
-    name: normalizeWhiteSpace(name.text),
+    name: isSecret ? 'protected field' : normalizeWhiteSpace(name.text),
     children: [],
     props: {},
     box,
@@ -271,7 +355,7 @@ function toAriaNode(element: Element, options: InternalOptions, nameSourceElemen
     active
   };
   setAriaNodeElement(result, element);
-  nameSourceElements.set(result, name.elements);
+  nameSourceElements.set(result, isSecret ? undefined : name.elements);
   computeAriaRef(result, options);
 
   if (roleUtils.kAriaCheckedRoles.includes(role))
@@ -298,7 +382,9 @@ function toAriaNode(element: Element, options: InternalOptions, nameSourceElemen
     result.selected = roleUtils.getAriaSelected(element);
 
   if (element instanceof HTMLInputElement || element instanceof HTMLTextAreaElement) {
-    if (element.type !== 'checkbox' && element.type !== 'radio' && element.type !== 'file')
+    if (isSecret)
+      result.children = ['[redacted]'];
+    else if (element.type !== 'checkbox' && element.type !== 'radio' && element.type !== 'file')
       result.children = [element.value];
   }
 

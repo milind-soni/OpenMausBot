@@ -1,8 +1,13 @@
 import { createRequire } from "node:module";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 const require = createRequire(import.meta.url);
-const { GUEST_PROFILE, VIEWPORT, createBrowserSurfaceManager } = require("./browser-surface.cjs");
+const {
+  GUEST_PROFILE,
+  VIEWPORT,
+  createBrowserSurfaceManager,
+  domSnapshotContainsProtectedValue,
+} = require("./browser-surface.cjs");
 
 const AX_NODES = [
   { role: { value: "link" }, name: { value: "Docs" }, backendDOMNodeId: 11 },
@@ -20,13 +25,34 @@ function fakeView(partition) {
   let url = "about:blank";
   let title = "";
   let pageText = "Welcome. Docs Search";
+  let loading = false;
+  let protectedScreenshotValue = false;
+  let axNodes = structuredClone(AX_NODES);
+  let hitBackendNodeId = null;
+  let hitRelated = true;
+  let richRefsValid = true;
+  let richHit = true;
+  const injectedContexts = new Set();
+  let mainWorldSpoofed = false;
+  const fieldClassifications = new Map([
+    ["obj-12", "ordinary"],
+    ["obj-e1", "ordinary"],
+    ["active-element", "ordinary"],
+  ]);
+  const fieldClassificationQueues = new Map();
   const webContents = {
     session: {
       getUserAgent: () => "Mozilla/5.0 Chrome/1 Electron/43 OpenMausBot/1",
       setUserAgent: (ua) => calls.push(["setUserAgent", ua]),
       setPermissionCheckHandler: () => {},
       setPermissionRequestHandler: () => {},
-      on: () => {},
+      on: (name) => calls.push(["sessionOn", name]),
+      resolveHost: async () => ({ endpoints: [{ address: "93.184.216.34", family: "ipv4" }] }),
+      webRequest: {
+        onBeforeRequest: (handler) => {
+          view.beforeRequest = handler;
+        },
+      },
     },
     setWindowOpenHandler: (handler) => {
       webContents.windowOpenHandler = handler;
@@ -37,8 +63,11 @@ function fakeView(partition) {
     once: (name, handler) => {
       listeners.set(name, handler);
     },
+    removeListener: (name, handler) => {
+      if (listeners.get(name) === handler) listeners.delete(name);
+    },
     isDestroyed: () => false,
-    isLoading: () => false,
+    isLoading: () => loading,
     getURL: () => url,
     getTitle: () => title,
     navigationHistory: {
@@ -70,22 +99,46 @@ function fakeView(partition) {
       on: (name, handler) => debuggerListeners.set(name, handler),
       sendCommand: async (method, params) => {
         calls.push([method, params]);
-        if (method === "Accessibility.getFullAXTree") return { nodes: AX_NODES };
+        if (method === "Accessibility.getFullAXTree") return { nodes: axNodes };
+        if (method === "Page.getFrameTree") return { frameTree: { frame: { id: "main-frame" } } };
+        if (method === "Page.createIsolatedWorld") return { executionContextId: 42 };
         if (method === "DOM.getBoxModel") {
           if (params.backendNodeId === 99) throw new Error("No node with given id found");
           const base = params.backendNodeId === 13 ? 200 : 10;
           return { model: { border: [base, 20, base + 100, 20, base + 100, 60, base, 60] } };
         }
         if (method === "DOM.resolveNode") return { object: { objectId: `obj-${params.backendNodeId}` } };
+        if (method === "DOM.getNodeForLocation") {
+          return { backendNodeId: hitBackendNodeId ?? (Number(params.x) >= 200 ? 13 : 11) };
+        }
+        if (method === "DOMSnapshot.captureSnapshot") {
+          const strings = ["#document", "INPUT", "type", "password", "name", "api_key", "fixture-secret"];
+          const nodes = {
+            nodeName: protectedScreenshotValue ? [0, 1] : [0],
+            nodeValue: protectedScreenshotValue ? [-1, -1] : [-1],
+            parentIndex: protectedScreenshotValue ? [-1, 0] : [-1],
+            attributes: protectedScreenshotValue ? [[], [2, 3, 4, 5]] : [[]],
+          };
+          if (protectedScreenshotValue) nodes.inputValue = { index: [1], value: [6] };
+          return {
+            strings,
+            documents: [{ nodes }],
+          };
+        }
         if (method === "Runtime.callFunctionOn") return { result: { value: { chosen: ["India"] } } };
         if (method === "Runtime.evaluate") {
           const expression = String(params.expression);
+          if (expression.includes("document.activeElement")) return { result: { objectId: "active-element" } };
           if (expression === "/*injected*/") {
-            view.injected = true;
+            injectedContexts.add(params.contextId);
             return { result: { value: undefined } };
           }
-          if (expression.includes("Boolean(window.__ombBrowser)")) return { result: { value: view.injected === true } };
+          if (expression.includes("Boolean(window.__ombBrowser)")) {
+            return { result: { value: injectedContexts.has(params.contextId) || (params.contextId === undefined && mainWorldSpoofed) } };
+          }
           if (expression.includes("__ombBrowser.snapshot(")) return { result: { value: { yaml: '- heading "Docs" [ref=e1]\n- textbox "Search" [ref=e2]', refs: ["e1", "e2"], truncated: false } } };
+          if (expression.includes("validateRef")) return { result: { value: richRefsValid } };
+          if (expression.includes("hitTestRef")) return { result: { value: richHit } };
           if (expression.includes("boxForRef")) {
             if (expression.includes('"e9"')) return { result: { value: { found: false } } };
             return { result: { value: { found: true, connected: true, visible: true, x: 77, y: 33 } } };
@@ -118,12 +171,63 @@ function fakeView(partition) {
     setPageText: (text) => {
       pageText = text;
     },
+    setTitle: (value) => {
+      title = String(value ?? "");
+    },
+    setLoading: (value) => {
+      loading = value;
+    },
+    setProtectedScreenshotValue: (value) => {
+      protectedScreenshotValue = value === true;
+    },
+    setAxNodeName: (backendNodeId, name) => {
+      axNodes = axNodes.map((node) => Number(node.backendDOMNodeId) === backendNodeId
+        ? { ...node, name: { value: name } }
+        : node);
+    },
+    setHitTarget: (backendNodeId, related = false) => {
+      hitBackendNodeId = backendNodeId;
+      hitRelated = related;
+    },
+    setRichRefValid: (valid) => {
+      richRefsValid = valid === true;
+    },
+    setRichHit: (hit) => {
+      richHit = hit === true;
+    },
+    setSensitive: (objectId, value = true) => {
+      fieldClassifications.set(objectId, value ? "sensitive" : "ordinary");
+    },
+    setFieldClassification: (objectId, classification) => {
+      fieldClassifications.set(objectId, classification);
+    },
+    queueFieldClassifications: (objectId, classifications) => {
+      fieldClassificationQueues.set(objectId, [...classifications]);
+    },
+    spoofMainWorldBrowserHelper: () => {
+      mainWorldSpoofed = true;
+    },
+  };
+  const rawSendCommand = webContents.debugger.sendCommand;
+  webContents.debugger.sendCommand = async (method, params = {}) => {
+    if (method === "Runtime.callFunctionOn" && String(params.functionDeclaration).includes("__ombSensitiveField")) {
+      calls.push([method, params]);
+      const queue = fieldClassificationQueues.get(params.objectId);
+      const value = queue?.length ? queue.shift() : fieldClassifications.get(params.objectId) ?? "unknown";
+      return { result: { value } };
+    }
+    if (method === "Runtime.callFunctionOn" && String(params.functionDeclaration).includes("__ombHitRelated")) {
+      calls.push([method, params]);
+      return { result: { value: hitRelated } };
+    }
+    return rawSendCommand(method, params);
   };
   return view;
 }
 
 function harness(options = {}) {
   const views = [];
+  const sessions = new Map();
   const owner = {
     isDestroyed: () => false,
     getContentSize: () => [1200, 800],
@@ -144,6 +248,9 @@ function harness(options = {}) {
     owner,
     createView: (viewOptions) => {
       const view = fakeView(viewOptions.webPreferences.partition);
+      const shared = sessions.get(viewOptions.webPreferences.partition);
+      if (shared) view.webContents.session = shared;
+      else sessions.set(viewOptions.webPreferences.partition, view.webContents.session);
       views.push(view);
       return view;
     },
@@ -159,6 +266,40 @@ function harness(options = {}) {
 
 const cdpCalls = (view) => view.calls.filter(([name]) => /^[A-Z]/.test(name) && name.includes("."));
 const BOUNDS = { x: 20, y: 30, width: 400, height: 250 };
+
+describe("browser screenshot privacy snapshot", () => {
+  it("finds a populated protected input inside a closed shadow root", () => {
+    const strings = [
+      "#document", "DIV", "#document-fragment", "LABEL", "#text", "INPUT",
+      "closed", "for", "credential", "API key", "id", "name", "value", "sk-shadow-secret",
+    ];
+    expect(domSnapshotContainsProtectedValue({
+      strings,
+      documents: [{
+        nodes: {
+          nodeName: [0, 1, 2, 3, 4, 5],
+          nodeValue: [-1, -1, -1, -1, 9, -1],
+          parentIndex: [-1, 0, 1, 2, 3, 2],
+          attributes: [[], [], [], [7, 8], [], [10, 8, 11, 8]],
+          shadowRootType: { index: [2], value: [6] },
+          inputValue: { index: [5], value: [13] },
+        },
+      }],
+    })).toBe(true);
+    expect(domSnapshotContainsProtectedValue({
+      strings,
+      documents: [{
+        nodes: {
+          nodeName: [0, 1, 2, 5],
+          nodeValue: [-1, -1, -1, -1],
+          parentIndex: [-1, 0, 1, 2],
+          attributes: [[], [], [], [11, 12]],
+          inputValue: { index: [3], value: [13] },
+        },
+      }],
+    })).toBe(false);
+  });
+});
 
 describe("browser surface manager", () => {
   it("creates one sandboxed, partitioned view per bot only when something needs it", () => {
@@ -206,12 +347,105 @@ describe("browser surface manager", () => {
     expect(views[0].calls).toContainEqual(["loadURL", "https://example.com/"]);
     expect(page.url).toBe("https://example.com/");
     expect(page.elements.map((element) => element.ref)).toEqual(["b11", "b12", "b13"]);
-    expect(page.text).toContain('b11 link "Docs"');
+    expect(page.text).toContain('b11 link "link"');
     expect(page.text).toContain("1600px below");
     expect(views[0].calls).toContainEqual(["attach", "1.3"]);
     // attaching also enables Page events, intercepts native file pickers, and
     // makes the page believe it is focused so synthetic clicks are not dropped
     expect(cdpCalls(views[0]).slice(0, 3).map(([name]) => name)).toEqual(["Page.enable", "Page.setInterceptFileChooserDialog", "Emulation.setFocusEmulationEnabled"]);
+    const protocolReadyAt = views[0].calls.findIndex(([name]) => name === "Page.setInterceptFileChooserDialog");
+    const untrustedLoadAt = views[0].calls.findIndex(([name, url]) => name === "loadURL" && url === "https://example.com/");
+    expect(protocolReadyAt).toBeGreaterThanOrEqual(0);
+    expect(untrustedLoadAt).toBeGreaterThan(protocolReadyAt);
+  });
+
+  it("blocks DNS-private redirects without replaying public redirects or form navigations as GETs", async () => {
+    const { manager, views } = harness({
+      resolveHost: async (_entry, hostname) => ({
+        endpoints: [{ address: hostname === "private.example" ? "192.168.1.20" : "93.184.216.34" }],
+      }),
+    });
+    await expect(manager.navigate("bot-a", "https://private.example")).rejects.toThrow(/private-network/);
+    await manager.navigate("bot-a", "https://public.example");
+
+    const event = { preventDefault: vi.fn() };
+    views[0].listeners.get("will-redirect")?.(event, "https://private.example/admin");
+    // Hostname redirects/form POSTs keep their original Chromium request;
+    // the asynchronous session policy rejects the resolved private address.
+    expect(event.preventDefault).not.toHaveBeenCalled();
+    await expect(new Promise((resolve) => views[0].beforeRequest({
+      url: "https://private.example/admin",
+      method: "POST",
+      uploadData: [{ bytes: Buffer.from("secret=form-body") }],
+    }, resolve))).resolves.toEqual({ cancel: true });
+    expect(views[0].calls).not.toContainEqual(["loadURL", "https://private.example/admin"]);
+    const publicForm = { preventDefault: vi.fn() };
+    views[0].listeners.get("will-navigate")?.(publicForm, "https://public.example/login");
+    expect(publicForm.preventDefault).not.toHaveBeenCalled();
+    const literalPrivate = { preventDefault: vi.fn() };
+    views[0].listeners.get("will-redirect")?.(literalPrivate, "http://127.0.0.1:8799/api/config");
+    expect(literalPrivate.preventDefault).toHaveBeenCalledOnce();
+    const page = await manager.snapshot("bot-a");
+    expect(page.notes).toEqual(expect.arrayContaining([
+      expect.stringMatching(/^Blocked page request: .*private-network/),
+      expect.stringMatching(/^Blocked navigation: .*private-network/),
+    ]));
+  });
+
+  it("keeps native history traversal instead of canceling and appending a fresh load", async () => {
+    const { manager, views } = harness();
+    await manager.navigate("bot-a", "https://example.com/second");
+    const loadsBefore = views[0].calls.filter(([name]) => name === "loadURL").length;
+    await manager.back("bot-a", "");
+    expect(views[0].calls).toContainEqual(["goBack"]);
+    expect(views[0].calls.filter(([name]) => name === "loadURL")).toHaveLength(loadsBefore);
+  });
+
+  it("refuses POST popups instead of replaying their bodyless URL as a GET", async () => {
+    const { manager, views } = harness();
+    manager.ensure("bot-a", "");
+    expect(views[0].webContents.windowOpenHandler({
+      url: "https://example.com/checkout",
+      postBody: { data: [{ bytes: Buffer.from("card=redacted") }] },
+    })).toEqual({ action: "deny" });
+    expect(views[0].calls).not.toContainEqual(["loadURL", "https://example.com/checkout"]);
+    expect((await manager.snapshot("bot-a")).notes).toContain(
+      "Blocked a popup that tried to submit form data; open it in the current page instead",
+    );
+  });
+
+  it("blocks private HTTP and WebSocket subresources before the page can reach them", async () => {
+    const { manager, views } = harness();
+    manager.ensure("bot-a", "");
+    const request = (url) => new Promise((resolve) => views[0].beforeRequest({ url }, resolve));
+    await expect(request("http://127.0.0.1:8799/api/config")).resolves.toEqual({ cancel: true });
+    await expect(request("ws://192.168.1.4:3000/socket")).resolves.toEqual({ cancel: true });
+    await expect(request("wss://[fec0::1]/socket")).resolves.toEqual({ cancel: true });
+    await expect(request("https://example.com/app.js")).resolves.toEqual({ cancel: false });
+    await expect(request("data:text/plain,hello")).resolves.toEqual({ cancel: false });
+    const page = await manager.snapshot("bot-a");
+    expect(page.notes.filter((note) => note.startsWith("Blocked page request:"))).toHaveLength(3);
+  });
+
+  it("cancels HTTP-auth and client-certificate prompts instead of showing native UI", async () => {
+    const { manager, views } = harness();
+    manager.ensure("bot-a", "");
+    const authEvent = { preventDefault: vi.fn() };
+    const authCallback = vi.fn();
+    views[0].listeners.get("login")?.(authEvent, {}, {}, authCallback);
+    expect(authEvent.preventDefault).toHaveBeenCalledOnce();
+    expect(authCallback).toHaveBeenCalledWith();
+
+    const certEvent = { preventDefault: vi.fn() };
+    const certCallback = vi.fn();
+    views[0].listeners.get("select-client-certificate")?.(certEvent, "https://example.com", [{}], certCallback);
+    expect(certEvent.preventDefault).toHaveBeenCalledOnce();
+    expect(certCallback).toHaveBeenCalledWith();
+    const page = await manager.snapshot("bot-a");
+    expect(page.notes).toEqual(expect.arrayContaining([
+      expect.stringMatching(/HTTP authentication prompt/),
+      expect.stringMatching(/client-certificate prompt/),
+    ]));
   });
 
   it("keeps one live view per profile and switches by showing another, never rebuilding", async () => {
@@ -227,6 +461,8 @@ describe("browser surface manager", () => {
     expect(views[1].bounds).toEqual(BOUNDS);
     expect(manager.state("bot-a")).toMatchObject({ profile: "work", url: "about:blank" });
     await manager.navigate("bot-a", "https://work.example");
+    expect(manager.state("bot-a", "")).toMatchObject({ profile: "", url: "https://own.example/" });
+    expect(manager.state("bot-a", "work")).toMatchObject({ profile: "work", url: "https://work.example/" });
     // back to the bot's own session: the first view is still there with its page
     manager.layout("bot-a", BOUNDS, "", "compact");
     expect(views).toHaveLength(2);
@@ -240,9 +476,21 @@ describe("browser surface manager", () => {
     // another bot on the same named profile shares the session, not the view
     manager.layout("bot-b", BOUNDS, "work", "compact");
     expect(views[2].partition).toBe("persist:openmausbot-browser-profile-work");
+    expect(views[1].calls.filter(([name, event]) => name === "sessionOn" && event === "will-download")).toHaveLength(1);
     expect(manager.list().filter((entry) => entry.active).map((entry) => entry.botId).sort()).toEqual(["bot-a", "bot-b"]);
     expect(states.some((state) => state.botId === "bot-a" && state.profile === "work")).toBe(true);
     expect(views[1].calls.some(([name]) => name === "close")).toBe(false);
+  });
+
+  it("reuses a cold own-profile view after the active shared profile is removed", async () => {
+    const { manager, views } = harness();
+    manager.layout("bot-a", BOUNDS, "", "compact");
+    await manager.navigate("bot-a", "https://own.example");
+    manager.layout("bot-a", BOUNDS, "work", "compact");
+    expect(manager.forgetProfile("work")).toBe(1);
+    expect(manager.state("bot-a").open).toBe(false);
+    expect((await manager.snapshot("bot-a")).url).toBe("https://own.example/");
+    expect(views).toHaveLength(2);
   });
 
   it("forgets a Guest session the moment the bot switches off it", async () => {
@@ -272,6 +520,52 @@ describe("browser surface manager", () => {
     expect(manager.list().map((entry) => entry.profile).sort()).toEqual(["p1", "p2", "p3"]);
   });
 
+  it("evicts hidden idle views selected by other bots instead of locking out the next bot", () => {
+    const { manager, views } = harness({ maxViews: 3 });
+    manager.ensure("bot-a", "");
+    manager.ensure("bot-b", "");
+    manager.ensure("bot-c", "");
+    expect(manager.size()).toBe(3);
+    manager.ensure("bot-d", "");
+    expect(manager.size()).toBe(3);
+    expect(views[0].calls.some(([name]) => name === "close")).toBe(true);
+    expect(manager.list().map(({ botId }) => botId).sort()).toEqual(["bot-b", "bot-c", "bot-d"]);
+  });
+
+  it("does not evict a hidden view while a live turn capability pins it", () => {
+    const { manager, views } = harness({ maxViews: 2 });
+    manager.ensure("bot-a", "");
+    manager.setCapabilityActive("bot-a", "", true);
+    manager.ensure("bot-b", "");
+    manager.ensure("bot-c", "");
+    expect(views[0].calls.some(([name]) => name === "close")).toBe(false);
+    expect(views[1].calls.some(([name]) => name === "close")).toBe(true);
+    expect(manager.list().map(({ botId }) => botId).sort()).toEqual(["bot-a", "bot-c"]);
+  });
+
+  it("never evicts a hidden view while an operation is still using it", async () => {
+    const { manager, views } = harness({ maxViews: 1 });
+    manager.ensure("bot-a", "");
+    const original = views[0].webContents.debugger.sendCommand;
+    let resume;
+    let markStarted;
+    const started = new Promise((resolve) => { markStarted = resolve; });
+    views[0].webContents.debugger.sendCommand = async (method, params) => {
+      if (method === "Page.captureScreenshot") {
+        markStarted();
+        await new Promise((resolve) => { resume = resolve; });
+      }
+      return original(method, params);
+    };
+    const pending = manager.screenshot("bot-a", "");
+    await started;
+    expect(() => manager.ensure("bot-b", "")).toThrow(/Only 1 bot browser/);
+    resume();
+    await pending;
+    expect(() => manager.ensure("bot-b", "")).not.toThrow();
+    expect(manager.list().map(({ botId }) => botId)).toEqual(["bot-b"]);
+  });
+
   it("clicks at the centre of a known ref and refuses stale or unknown ones", async () => {
     const { manager, views } = harness();
     await manager.navigate("bot-a", "https://example.com");
@@ -287,6 +581,194 @@ describe("browser surface manager", () => {
     // a navigation invalidates every ref until the next snapshot
     views[0].listeners.get("did-navigate")?.();
     await expect(manager.click("bot-a", "b11")).rejects.toThrow(/changed since/);
+  });
+
+  it("invalidates relabelled refs and refuses a late overlay before mouse-down", async () => {
+    const { manager, views } = harness();
+    await manager.navigate("bot-a", "https://example.com");
+    views[0].setAxNodeName(11, "Delete account");
+    await expect(manager.click("bot-a", "b11")).rejects.toThrow(/stale because the page changed/);
+    expect(cdpCalls(views[0]).some(([name, params]) => name === "Input.dispatchMouseEvent" && params.type === "mousePressed")).toBe(false);
+
+    await manager.snapshot("bot-a");
+    views[0].setHitTarget(999, false);
+    await expect(manager.click("bot-a", "b11")).rejects.toThrow(/covers that ref/);
+    expect(cdpCalls(views[0]).some(([name, params]) => name === "Input.dispatchMouseEvent" && params.type === "mousePressed")).toBe(false);
+  });
+
+  it("hands native input to the user immediately and gates agent actions until hand-back", async () => {
+    const interactions = [];
+    const { manager, views } = harness({ onUserInteraction: (event) => interactions.push(event) });
+    await manager.navigate("bot-a", "https://example.com");
+    views[0].listeners.get("focus")?.();
+    expect(interactions).toEqual([{ botId: "bot-a", profile: "" }]);
+    await expect(manager.click("bot-a", "b11")).rejects.toThrow(/held by the user/);
+    // Renderer-driven address-bar navigation stays available while the user
+    // has control; an agent call remains blocked.
+    await manager.navigate("bot-a", "https://example.org", "", { source: "user" });
+    expect(manager.setHumanControl("bot-a", false, "")).toBe(true);
+    await expect(manager.click("bot-a", "b11")).resolves.toBeTruthy();
+  });
+
+  it("does not mistake a just-finished CDP input event for a human click", async () => {
+    const interactions = [];
+    const { manager, views } = harness({ onUserInteraction: (event) => interactions.push(event) });
+    await manager.navigate("bot-a", "https://example.com");
+    await manager.click("bot-a", "b11");
+    views[0].listeners.get("before-mouse-event")?.({}, { type: "mouseDown" });
+    expect(interactions).toEqual([]);
+    await expect(manager.read("bot-a")).resolves.toMatchObject({ title: "Loaded" });
+    await new Promise((resolve) => setTimeout(resolve, 120));
+    views[0].listeners.get("before-mouse-event")?.({}, { type: "mouseDown" });
+    expect(interactions).toEqual([{ botId: "bot-a", profile: "" }]);
+    manager.setHumanControl("bot-a", false, "");
+    await expect(manager.read("bot-a")).rejects.toThrow(/browser_read is unavailable/);
+  });
+
+  it("does not swallow a real user click at a different point during the synthetic echo window", async () => {
+    const interactions = [];
+    const { manager, views } = harness({ onUserInteraction: (event) => interactions.push(event) });
+    await manager.navigate("bot-a", "https://example.com");
+    await manager.click("bot-a", "b11");
+    // Agent click was at 60,40. A real native click elsewhere arriving inside
+    // 100ms is not an echo and must take control immediately.
+    views[0].listeners.get("before-mouse-event")?.({}, { type: "mouseDown", button: "left", x: 400, y: 300 });
+    expect(interactions).toEqual([{ botId: "bot-a", profile: "" }]);
+  });
+
+  it.each(["mouseDown", "contextMenu"])("taints an autofill-copy-clear page after a human %s", async (type) => {
+    const { manager, views } = harness();
+    await manager.navigate("bot-a", "https://example.com");
+
+    // Model a hostile pointer handler copying an autofilled password into
+    // ordinary page text/title and clearing the protected source immediately.
+    // A postflight protected-field scan alone can no longer see the secret.
+    views[0].setProtectedScreenshotValue(true);
+    manager.setHumanControl("bot-a", true, "");
+    views[0].listeners.get("before-mouse-event")?.({}, {
+      type,
+      button: type === "mouseDown" ? "left" : "right",
+      x: 400,
+      y: 300,
+    });
+    views[0].setProtectedScreenshotValue(false);
+    views[0].setPageText("copied autofill-secret");
+    views[0].setTitle("cleared autofill-secret");
+    manager.setHumanControl("bot-a", false, "");
+
+    await expect(manager.read("bot-a")).rejects.toThrow(/browser_read is unavailable/);
+    const snapshot = await manager.snapshot("bot-a");
+    expect(snapshot).toMatchObject({ title: "Protected content hidden", elements: [] });
+    expect(JSON.stringify(snapshot)).not.toContain("autofill-secret");
+  });
+
+  it("stops a multi-step agent action after a fast take-control and hand-back", async () => {
+    const { manager, views } = harness();
+    await manager.navigate("bot-a", "https://example.com");
+    const original = views[0].webContents.debugger.sendCommand;
+    let resume;
+    let markStarted;
+    const started = new Promise((resolve) => { markStarted = resolve; });
+    let paused = false;
+    views[0].webContents.debugger.sendCommand = async (method, params) => {
+      if (!paused && method === "Input.dispatchMouseEvent" && params?.type === "mouseMoved") {
+        paused = true;
+        markStarted();
+        await new Promise((resolve) => { resume = resolve; });
+      }
+      return original(method, params);
+    };
+    const pending = manager.click("bot-a", "b11");
+    await started;
+    manager.setHumanControl("bot-a", true);
+    manager.setHumanControl("bot-a", false);
+    resume();
+    await expect(pending).rejects.toThrow(/control changed/);
+    const laterInput = cdpCalls(views[0]).filter(([name, params]) =>
+      name === "Input.dispatchMouseEvent" && ["mousePressed", "mouseReleased"].includes(params.type));
+    expect(laterInput).toEqual([]);
+  });
+
+  it("stops a paused agent action when its turn capability is revoked", async () => {
+    const { manager, views } = harness();
+    await manager.navigate("bot-a", "https://example.com");
+    const original = views[0].webContents.debugger.sendCommand;
+    let resume;
+    let markStarted;
+    const started = new Promise((resolve) => { markStarted = resolve; });
+    let paused = false;
+    views[0].webContents.debugger.sendCommand = async (method, params) => {
+      if (!paused && method === "Input.dispatchMouseEvent" && params?.type === "mouseMoved") {
+        paused = true;
+        markStarted();
+        await new Promise((resolve) => { resume = resolve; });
+      }
+      return original(method, params);
+    };
+    const pending = manager.click("bot-a", "b11");
+    await started;
+    manager.cancelAgentActions("bot-a");
+    resume();
+    await expect(pending).rejects.toThrow(/turn ended/);
+    expect(cdpCalls(views[0]).some(([name, params]) =>
+      name === "Input.dispatchMouseEvent" && params.type === "mousePressed")).toBe(false);
+  });
+
+  it("neutralizes an in-flight mouse-down before leaving control with the user", async () => {
+    const { manager, views } = harness();
+    await manager.navigate("bot-a", "https://example.com");
+    const original = views[0].webContents.debugger.sendCommand;
+    let resume;
+    let markStarted;
+    const started = new Promise((resolve) => { markStarted = resolve; });
+    let paused = false;
+    views[0].webContents.debugger.sendCommand = async (method, params) => {
+      const result = await original(method, params);
+      if (!paused && method === "Input.dispatchMouseEvent" && params?.type === "mousePressed") {
+        paused = true;
+        markStarted();
+        await new Promise((resolve) => { resume = resolve; });
+      }
+      return result;
+    };
+    const pending = manager.click("bot-a", "b11");
+    await started;
+    manager.setHumanControl("bot-a", true);
+    resume();
+    await expect(pending).rejects.toThrow(/held by the user|control changed/);
+    const mouse = cdpCalls(views[0]).filter(([name]) => name === "Input.dispatchMouseEvent").map(([, params]) => params.type);
+    expect(mouse).toEqual(["mouseMoved", "mousePressed", "mouseReleased"]);
+  });
+
+  it("marks a revocation key release synthetic instead of claiming human control", async () => {
+    const { manager, views } = harness();
+    await manager.navigate("bot-a", "https://example.com");
+    const original = views[0].webContents.debugger.sendCommand;
+    let resume;
+    let markStarted;
+    const started = new Promise((resolve) => { markStarted = resolve; });
+    let paused = false;
+    views[0].webContents.debugger.sendCommand = async (method, params) => {
+      const result = await original(method, params);
+      if (!paused && method === "Input.dispatchKeyEvent" && params?.type === "keyDown") {
+        paused = true;
+        markStarted();
+        await new Promise((resolve) => { resume = resolve; });
+      } else if (method === "Input.dispatchKeyEvent" && params?.type === "keyUp") {
+        // Electron emits this for debugger-dispatched key events. The
+        // neutralizer's synthetic echo must consume it while held=false.
+        views[0].listeners.get("before-input-event")?.({}, { type: "keyUp", key: params.key });
+      }
+      return result;
+    };
+    const pending = manager.press("bot-a", "Enter", "");
+    await started;
+    manager.cancelAgentActions("bot-a");
+    resume();
+    await expect(pending).rejects.toThrow(/turn ended/);
+    expect(manager.controlLease("bot-a", "")).toMatchObject({ held: false });
+    expect(cdpCalls(views[0]).filter(([method, params]) =>
+      method === "Input.dispatchKeyEvent" && params.type === "keyUp")).toHaveLength(1);
   });
 
   it("hovers, drags, and chooses select options through the page", async () => {
@@ -311,7 +793,11 @@ describe("browser surface manager", () => {
     await manager.fill("bot-a", "b12", "running shoes");
     const all = cdpCalls(views[0]);
     const start = all.findIndex(([name]) => name === "DOM.focus");
-    const sequence = all.slice(start, start + 6).map(([name, params]) => [name, params.type ?? params.text ?? params.backendNodeId]);
+    const sequence = all
+      .slice(start)
+      .filter(([name]) => name === "DOM.focus" || name.startsWith("Input."))
+      .slice(0, 6)
+      .map(([name, params]) => [name, params.type ?? params.text ?? params.backendNodeId]);
     expect(sequence).toEqual([
       ["DOM.focus", 12],
       ["Input.dispatchKeyEvent", "keyDown"],
@@ -322,6 +808,50 @@ describe("browser surface manager", () => {
     ]);
     // macOS select-all is ⌘A (modifier 4), not ^A
     expect(cdpCalls(views[0]).find(([name, params]) => name === "Input.dispatchKeyEvent" && params.key === "a")[1].modifiers).toBe(4);
+  });
+
+  it("refuses to fill or type into protected credential and payment fields", async () => {
+    const { manager, views } = harness();
+    await manager.navigate("bot-a", "https://example.com");
+    views[0].setSensitive("obj-12");
+    await expect(manager.fill("bot-a", "b12", "super-secret")).rejects.toThrow(/require user control/);
+    expect(cdpCalls(views[0]).some(([name, params]) => name === "Input.insertText" && params.text === "super-secret")).toBe(false);
+
+    views[0].setSensitive("active-element");
+    await expect(manager.type("bot-a", "123456")).rejects.toThrow(/require user control/);
+    expect(cdpCalls(views[0]).some(([name, params]) => name === "Input.insertText" && params.text === "123456")).toBe(false);
+
+    // A cross-origin iframe exposes only the top iframe as activeElement.
+    // Unknown/custom focus fails closed instead of typing into a hidden card
+    // or login field inside that frame.
+    views[0].setFieldClassification("active-element", "unknown");
+    await expect(manager.type("bot-a", "cannot-leak")).rejects.toThrow(/proven ordinary editable field/);
+  });
+
+  it("cannot submit or mutate a user-entered protected form through another action", async () => {
+    const { manager, views } = harness();
+    await manager.navigate("bot-a", "https://example.com");
+    views[0].setProtectedScreenshotValue(true);
+    await expect(manager.click("bot-a", "b11")).rejects.toThrow(/protected .* field contains a value/);
+    expect(cdpCalls(views[0]).some(([name, params]) => name === "Input.dispatchMouseEvent" && params.type === "mousePressed")).toBe(false);
+
+    views[0].setProtectedScreenshotValue(false);
+    views[0].setSensitive("active-element");
+    await expect(manager.press("bot-a", "Enter")).rejects.toThrow(/require user control/);
+    await expect(manager.press("bot-a", "Backspace")).rejects.toThrow(/require user control/);
+    expect(cdpCalls(views[0]).some(([name, params]) => name === "Input.dispatchKeyEvent" && ["Enter", "Backspace"].includes(params.key))).toBe(false);
+  });
+
+  it("rechecks focus during fill so a page cannot redirect typing into a protected field", async () => {
+    const { manager, views } = harness();
+    await manager.navigate("bot-a", "https://example.com");
+    // Explicit ref is ordinary; focus initially remains ordinary, then a page
+    // key handler redirects the active target to a password/card field.
+    views[0].queueFieldClassifications("active-element", ["ordinary", "sensitive"]);
+    await expect(manager.fill("bot-a", "b12", "must-not-land")).rejects.toThrow(/require user control/);
+    expect(cdpCalls(views[0]).some(([name, params]) => name === "Input.insertText" && params.text === "must-not-land")).toBe(false);
+    expect(cdpCalls(views[0]).some(([name, params]) =>
+      name === "Input.dispatchKeyEvent" && params.key === "Backspace" && params.type === "keyDown")).toBe(false);
   });
 
   it("presses named keys, scrolls the fixed viewport, and screenshots through the protocol", async () => {
@@ -338,21 +868,96 @@ describe("browser surface manager", () => {
     expect(shot).toMatchObject({ format: "jpeg", width: 1024, height: 640, png: Buffer.from("cdp-jpeg").toString("base64") });
   });
 
+  it("refuses screenshots with populated protected fields and discards captures that overlap takeover", async () => {
+    const { manager, views } = harness();
+    await manager.navigate("bot-a", "https://example.com");
+    views[0].setProtectedScreenshotValue(true);
+    await expect(manager.screenshot("bot-a")).rejects.toThrow(/protected field contains a value/);
+    expect(cdpCalls(views[0]).some(([name]) => name === "Page.captureScreenshot")).toBe(false);
+
+    views[0].setProtectedScreenshotValue(false);
+    const original = views[0].webContents.debugger.sendCommand;
+    let resume;
+    let markStarted;
+    const started = new Promise((resolve) => { markStarted = resolve; });
+    views[0].webContents.debugger.sendCommand = async (method, params) => {
+      if (method === "Page.captureScreenshot") {
+        markStarted();
+        await new Promise((resolve) => { resume = resolve; });
+      }
+      return original(method, params);
+    };
+    const pending = manager.screenshot("bot-a");
+    await started;
+    manager.setHumanControl("bot-a", true);
+    manager.setHumanControl("bot-a", false);
+    resume();
+    await expect(pending).rejects.toThrow(/control changed/);
+  });
+
+  it("fails observations closed while protected or human-typed page text could echo a secret", async () => {
+    const { manager, views } = harness();
+    await manager.navigate("bot-a", "https://example.com");
+    views[0].setProtectedScreenshotValue(true);
+    views[0].setPageText("mirrored fixture-secret");
+    views[0].setTitle("fixture-secret");
+    await expect(manager.read("bot-a")).rejects.toThrow(/browser_read is unavailable/);
+    const protectedPage = await manager.snapshot("bot-a");
+    expect(protectedPage).toMatchObject({ url: "", title: "Protected content hidden", yaml: null, elements: [] });
+    await expect(manager.agentState("bot-a", "")).resolves.toMatchObject({ url: "", title: "Protected content hidden" });
+    expect(JSON.stringify(protectedPage)).not.toContain("fixture-secret");
+
+    views[0].setProtectedScreenshotValue(false);
+    manager.setHumanControl("bot-a", true, "");
+    views[0].listeners.get("before-input-event")?.({}, { type: "keyDown", key: "x" });
+    manager.setHumanControl("bot-a", false, "");
+    await expect(manager.read("bot-a")).rejects.toThrow(/browser_read is unavailable/);
+    expect(await manager.snapshot("bot-a")).toMatchObject({ title: "Protected content hidden", elements: [] });
+
+    // Only a committed document navigation clears the conservative taint.
+    views[0].listeners.get("did-navigate")?.();
+    views[0].setPageText("safe page");
+    views[0].setTitle("Safe");
+    await expect(manager.read("bot-a")).resolves.toMatchObject({ title: "Safe", text: "safe page" });
+  });
+
   it("waits for text or an address, reads the page, and reports dialogs it answered", async () => {
     const { manager, views } = harness();
     await manager.navigate("bot-a", "https://example.com");
     const read = await manager.read("bot-a");
     expect(read).toMatchObject({ url: "https://example.com/", text: "Welcome. Docs Search", truncated: false });
+    const textExtraction = cdpCalls(views[0]).find(([name, params]) =>
+      name === "Runtime.evaluate" && String(params.expression).includes("root.innerText"));
+    expect(textExtraction?.[1].expression).toContain("__ombSensitiveField");
+    expect(textExtraction?.[1].expression).toContain("[redacted]");
     await expect(manager.waitFor("bot-a", { text: "Docs" })).resolves.toMatchObject({ url: "https://example.com/" });
     await expect(manager.waitFor("bot-a", { text: "never there", timeoutMs: 300 })).rejects.toThrow(/timed out waiting for text "never there"/);
     await expect(manager.waitFor("bot-a", { url: "example.com" })).resolves.toBeTruthy();
     // a JS dialog is answered by the surface and surfaces in the next result
-    views[0].debuggerListeners.get("message")?.({}, "Page.javascriptDialogOpening", { type: "confirm", message: "Leave page?" });
-    expect(cdpCalls(views[0]).at(-1)).toEqual(["Page.handleJavaScriptDialog", { accept: true }]);
+    views[0].debuggerListeners.get("message")?.({}, "Page.javascriptDialogOpening", { type: "confirm", message: "fixture-secret" });
+    await vi.waitFor(() => {
+      expect(cdpCalls(views[0])).toContainEqual(["Page.handleJavaScriptDialog", { accept: false }]);
+    });
+    views[0].debuggerListeners.get("message")?.({}, "Page.fileChooserOpened", {});
+    await vi.waitFor(() => {
+      expect(cdpCalls(views[0])).toContainEqual(["Page.handleFileChooser", { action: "cancel" }]);
+    });
     const page = await manager.snapshot("bot-a");
-    expect(page.dialogs).toEqual([{ type: "confirm", message: "Leave page?" }]);
-    expect(page.text).toContain('Dialog (confirm) was answered automatically: "Leave page?"');
+    expect(page.dialogs).toEqual([
+      { type: "confirm", message: "", accepted: false },
+      { type: "filechooser", message: "the page asked for a file upload; uploads are not supported yet", accepted: false },
+    ]);
+    expect(page.text).toContain("Dialog (confirm) was dismissed automatically; its page-supplied text was hidden.");
+    expect(page.text).not.toContain("fixture-secret");
     expect((await manager.snapshot("bot-a")).dialogs).toEqual([]);
+  });
+
+  it("removes the did-stop-loading listener when the bounded settle timer wins", async () => {
+    const { manager, views } = harness({ loadWaitMs: 5 });
+    manager.ensure("bot-a", "");
+    views[0].setLoading(true);
+    await manager.snapshot("bot-a");
+    expect(views[0].listeners.has("did-stop-loading")).toBe(false);
   });
 
   it("uses Playwright's snapshot with e-refs when the page carries the script, injecting it once per document", async () => {
@@ -384,6 +989,35 @@ describe("browser surface manager", () => {
     expect(fallback.elements.map((element) => element.ref)).toEqual(["b11", "b12", "b13"]);
   });
 
+  it("revalidates rich refs and compositor hit targets in the isolated helper", async () => {
+    const { manager, views } = harness({ injectedSource: "/*injected*/" });
+    await manager.navigate("bot-a", "https://example.com");
+    views[0].setRichRefValid(false);
+    await expect(manager.click("bot-a", "e1")).rejects.toThrow(/stale because the page changed/);
+
+    views[0].setRichRefValid(true);
+    await manager.snapshot("bot-a");
+    views[0].setRichHit(false);
+    await expect(manager.click("bot-a", "e1")).rejects.toThrow(/covers that ref/);
+    expect(cdpCalls(views[0]).some(([name, params]) => name === "Input.dispatchMouseEvent" && params.type === "mousePressed")).toBe(false);
+  });
+
+  it("runs every page helper in a CDP isolated world and ignores a hostile page global", async () => {
+    const { manager, views } = harness({ injectedSource: "/*injected*/" });
+    manager.ensure("bot-a", "");
+    views[0].spoofMainWorldBrowserHelper();
+    const page = await manager.navigate("bot-a", "https://example.com");
+    expect(page.yaml).toContain("[ref=e1]");
+    const helperCalls = cdpCalls(views[0]).filter(([name]) => name === "Runtime.evaluate");
+    expect(helperCalls.length).toBeGreaterThan(0);
+    expect(helperCalls.every(([, params]) => params.contextId === 42)).toBe(true);
+    expect(helperCalls.some(([, params]) => params.expression === "/*injected*/")).toBe(true);
+    expect(cdpCalls(views[0])).toContainEqual([
+      "Page.createIsolatedWorld",
+      { frameId: "main-frame", worldName: "openmausbot-browser-snapshot", grantUniveralAccess: false },
+    ]);
+  });
+
   it("drops every bot's view on a deleted profile and leaves other sessions alone", () => {
     const { manager, views } = harness();
     manager.layout("bot-a", BOUNDS, "work", "compact");
@@ -395,6 +1029,22 @@ describe("browser surface manager", () => {
     expect(manager.state("bot-a")).toMatchObject({ open: false });
     expect(manager.forgetProfile(GUEST_PROFILE)).toBe(0);
     expect(manager.forgetProfile("")).toBe(0);
+  });
+
+  it("accepts exact migrated partitions but refuses lossy aliases", () => {
+    const { manager, views } = harness();
+    manager.layout("bot-a", BOUNDS, "work", "compact");
+    manager.layout("bot-b", BOUNDS, "Work", "compact");
+    expect(manager.size()).toBe(2);
+    expect(manager.forgetProfile("Work")).toBe(1);
+    for (const alias of ["work!", "../work"]) {
+      expect(() => manager.layout("bot-b", BOUNDS, alias, "compact")).toThrow(/valid browser profile partition id/);
+      expect(() => manager.setCapabilityActive("bot-b", alias, true)).toThrow(/valid browser profile partition id/);
+      expect(() => manager.forgetProfile(alias)).toThrow(/valid browser profile partition id/);
+    }
+    expect(manager.size()).toBe(1);
+    expect(manager.forgetProfile("work")).toBe(1);
+    expect(views[0].calls.some(([name]) => name === "close")).toBe(true);
   });
 
   it("tears every view down on closeAll and hides them all on hideAll", async () => {
