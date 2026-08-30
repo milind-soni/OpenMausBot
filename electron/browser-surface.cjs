@@ -797,16 +797,26 @@ function createBrowserSurfaceManager({
       // taint the document.
       if (human && ["mouseDown", "contextMenu"].includes(mouse?.type)) entry.documentTainted = true;
     });
-    for (const signal of ["did-navigate", "did-navigate-in-page", "did-stop-loading", "page-title-updated"]) {
+    for (const signal of ["did-navigate-in-page", "did-stop-loading", "page-title-updated"]) {
       contents.on(signal, () => emitState(entry));
     }
     contents.on("did-navigate", () => {
+      // Chromium drops WebContents device emulation when a main-frame
+      // navigation commits. Keeping the previous emulationKey made later
+      // layout calls believe the 1280x800 compact viewport was still active,
+      // so every newly-opened site fell back to the small panel's CSS size.
+      // Reapply the current presentation mode after the new document exists.
+      if (entry.mode) {
+        entry.emulationKey = null;
+        applyMode(entry, entry.mode);
+      }
       // refs name nodes of the page that just went away
       entry.documentTainted = false;
       entry.refs = null;
       entry.refIntegrity = null;
       entry.isolatedContextId = null;
       entry.isolatedContextReady = null;
+      emitState(entry);
     });
     contents.on("render-process-gone", () => remove(entry, "renderer-gone"));
     contents.debugger.on("detach", () => {
@@ -947,9 +957,21 @@ function createBrowserSurfaceManager({
       } catch {}
       // a Guest session is for one visit: switching away forgets it
       if (previous.profile === GUEST_PROFILE) remove(previous);
-      // the new view takes the old one's place on screen
-      if (previous.bounds && !entry.bounds) entry.bounds = previous.bounds;
-      if (previous.mode && !entry.mode) applyMode(entry, previous.mode);
+      // The new view takes the old one's place on screen. Keep the logical
+      // bounds and the native WebContentsView bounds in lockstep even when
+      // React hid the old profile just before selecting the new one. Without
+      // this, a freshly-created view keeps its 1280x800 hidden viewport while
+      // `entry.bounds` says it already has the compact panel rectangle; the
+      // following layout then skips setBounds and the native view covers the
+      // app from the top-left corner.
+      if (previous.bounds) {
+        entry.bounds = { ...previous.bounds };
+        entry.view.setBounds(entry.bounds);
+      }
+      // A reused profile may have last been shown in the other presentation
+      // mode. Match the surface it replaces before it becomes visible so
+      // there is no one-frame scale jump during profile switches.
+      if (previous.mode) applyMode(entry, previous.mode);
     }
     active.set(botId, entry);
     touch(entry);
@@ -1691,11 +1713,14 @@ function createBrowserSurfaceManager({
     },
 
     /** Position the bot's active view over the renderer's rectangle (or hide
-     * it: null). `profile` switches views; `mode` picks the scaling. */
+     * it: null). `profile` switches views; `mode` picks the scaling. A
+     * profile-scoped hide is ignored after another profile has become active,
+     * which makes React effect cleanup safe during profile switches. */
     layout(botId, bounds, profile, mode) {
       if (bounds === null || bounds === undefined) {
         const entry = active.get(botIdOf(botId));
         if (!entry) return closedState(botIdOf(botId));
+        if (profile !== undefined && entry.profile !== profileIdOf(profile)) return stateFor(entry);
         if (entry.visible) {
           entry.visible = false;
           entry.view.setVisible(false);

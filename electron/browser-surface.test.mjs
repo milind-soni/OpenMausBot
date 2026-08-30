@@ -376,6 +376,22 @@ describe("browser surface manager", () => {
     expect(emulationCalls.at(-1)[1].scale).toBeCloseTo(0.25, 4);
   });
 
+  it("reapplies compact emulation after a main-frame navigation commits", () => {
+    const { manager, views } = harness();
+    manager.layout("bot-a", BOUNDS, "", "compact");
+    const view = views[0];
+    expect(view.calls.filter(([name]) => name === "enableDeviceEmulation")).toHaveLength(1);
+
+    view.listeners.get("did-navigate")?.();
+
+    const emulationCalls = view.calls.filter(([name]) => name === "enableDeviceEmulation");
+    expect(emulationCalls).toHaveLength(2);
+    expect(emulationCalls.at(-1)[1]).toMatchObject({
+      viewSize: VIEWPORT,
+      screenSize: VIEWPORT,
+    });
+  });
+
   it("navigates only to web pages and answers with the page's elements plus a scroll hint", async () => {
     const { manager, views } = harness();
     await expect(manager.navigate("bot-a", "file:///etc/passwd")).rejects.toThrow(/http and https/);
@@ -516,6 +532,35 @@ describe("browser surface manager", () => {
     expect(manager.list().filter((entry) => entry.active).map((entry) => entry.botId).sort()).toEqual(["bot-a", "bot-b"]);
     expect(states.some((state) => state.botId === "bot-a" && state.profile === "work")).toBe(true);
     expect(views[1].calls.some(([name]) => name === "close")).toBe(false);
+  });
+
+  it("applies compact bounds when switching profiles after the old surface was hidden", () => {
+    const { manager, views } = harness();
+    manager.layout("bot-a", BOUNDS, "", "compact");
+    manager.layout("bot-a", null, "", "compact");
+
+    manager.layout("bot-a", BOUNDS, "work", "compact");
+
+    expect(views).toHaveLength(2);
+    expect(views[1].bounds).toEqual(BOUNDS);
+    expect(views[1].visible).toBe(true);
+    expect(views[1].calls.find(([name]) => name === "enableDeviceEmulation")?.[1]).toMatchObject({
+      viewSize: VIEWPORT,
+      screenSize: VIEWPORT,
+    });
+  });
+
+  it("ignores a stale profile-scoped hide after another profile is active", () => {
+    const { manager, views } = harness();
+    manager.layout("bot-a", BOUNDS, "", "compact");
+    manager.layout("bot-a", BOUNDS, "work", "compact");
+
+    const state = manager.layout("bot-a", null, "", "compact");
+
+    expect(state).toMatchObject({ profile: "work", visible: true });
+    expect(views[1].visible).toBe(true);
+    manager.layout("bot-a", null, "work", "compact");
+    expect(views[1].visible).toBe(false);
   });
 
   it("reuses a cold own-profile view after the active shared profile is removed", async () => {

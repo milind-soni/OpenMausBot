@@ -85,6 +85,7 @@ async function run() {
   });
   try {
     manager.ensure("fixture-bot", "");
+    manager.layout("fixture-bot", { x: 20, y: 30, width: 400, height: 250 }, "", "compact");
     const html = `<!doctype html><html><body><closed-login></closed-login><script>
       customElements.define("closed-login", class extends HTMLElement {
         constructor() {
@@ -128,6 +129,14 @@ async function run() {
       });
     </script></body></html>`;
     await browserView.webContents.loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(html)}`);
+    const viewport = await browserView.webContents.executeJavaScript(`({
+      width: window.innerWidth,
+      height: window.innerHeight,
+    })`);
+    if (viewport.width !== 1280 || viewport.height !== 800) {
+      throw new Error(`compact browser viewport changed after navigation: ${JSON.stringify(viewport)}`);
+    }
+    process.stdout.write("compact-viewport-stable-after-navigation\n");
     const protectedValues = [
       "sk_closed_shadow_must_not_reach_pixels",
       "closed shadow mnemonic must stay private",

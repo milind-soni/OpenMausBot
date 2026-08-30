@@ -109,8 +109,11 @@ export function shouldRequestBrowserControl(input: {
   return input.botId === input.eventBotId && !input.held && !input.pending && !input.takeInFlight;
 }
 
-export function browserProfileChangesDisabled(bot: Pick<Bot, "busy">): boolean {
-  return bot.busy === true;
+export function browserProfileChangesDisabled(
+  bot: Pick<Bot, "busy">,
+  pending: { browserAction?: boolean; controlTransition?: boolean } = {},
+): boolean {
+  return bot.busy === true || pending.browserAction === true || pending.controlTransition === true;
 }
 
 export function BrowserPanel({
@@ -168,6 +171,19 @@ export function BrowserPanel({
   const activePartition = activeProfile === OWN_PROFILE || activeProfile === GUEST_PROFILE
     ? activeProfile
     : browserProfilePartitionId(profiles, activeProfile);
+  // A profile switch changes the native session underneath this panel. Keep
+  // that transition serialized with address-bar navigation, history changes,
+  // and takeover handoff so an old page cannot finish in a hidden profile (or
+  // be destroyed mid-load when the old profile is Guest).
+  const profileChangesLocked = browserProfileChangesDisabled(bot, {
+    browserAction: busy,
+    controlTransition: controlPending,
+  });
+  const profileChangeLockMessage = bot.busy
+    ? `Stop ${bot.name}'s current turn before changing profiles.`
+    : profileChangesLocked
+      ? "Finish the current browser action before changing profiles."
+      : null;
 
   // Layout: tell main where the tab's rectangle is, on every change that can
   // move it (resize, scroll, sidebar toggles, dialogs). Coalesced per frame.
@@ -220,8 +236,9 @@ export function BrowserPanel({
       window.removeEventListener("resize", schedule);
       document.removeEventListener("scroll", schedule, true);
       // The tab is gone; the page stays alive (a bot mid-task keeps its tab)
-      // but nothing may paint over the chat.
-      void bridge.layout(botId, null).catch(() => {});
+      // but nothing may paint over the chat. Scope the hide to this profile:
+      // cleanup from an old selection must not hide the newly selected one.
+      void bridge.layout(botId, null, activePartition, size).catch(() => {});
     };
   }, [bridge, botId, pageVisible, activePartition, size, acceptSurface]);
 
@@ -310,31 +327,41 @@ export function BrowserPanel({
 
   const navigate = useCallback(
     async (raw: string) => {
-      if (!bridge) return;
+      if (!bridge || busy || profileBusy) return;
       const target = raw.trim();
       if (!target) return;
-      if (!(await changeControl("take"))) return;
       setBusy(true);
       setError(null);
-      bridge
-        .navigate(botId, target, activePartition)
-        .then(() => setAddressFocused(false))
-        .catch((cause) => setError(cause instanceof Error ? cause.message : String(cause)))
-        .finally(() => setBusy(false));
+      try {
+        if (!(await changeControl("take"))) return;
+        await bridge.navigate(botId, target, activePartition);
+        setAddressFocused(false);
+      } catch (cause) {
+        setError(cause instanceof Error ? cause.message : String(cause));
+      } finally {
+        setBusy(false);
+      }
     },
-    [activePartition, bridge, botId, changeControl],
+    [activePartition, bridge, botId, busy, changeControl, profileBusy],
   );
 
   const back = async () => {
-    if (!bridge) return;
-    if (!(await changeControl("take"))) return;
+    if (!bridge || busy || profileBusy) return;
+    setBusy(true);
     setError(null);
-    await bridge.back(botId, activePartition).catch((cause) => setError(cause instanceof Error ? cause.message : String(cause)));
+    try {
+      if (!(await changeControl("take"))) return;
+      await bridge.back(botId, activePartition);
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : String(cause));
+    } finally {
+      setBusy(false);
+    }
   };
 
   const chooseProfile = async (value: string) => {
-    if (browserProfileChangesDisabled(bot) || profileBusy) {
-      setError(`Stop ${bot.name}'s turn before changing its browser profile.`);
+    if (profileBusy || profileChangesLocked) {
+      setError(profileChangeLockMessage ?? "Wait for the current profile change to finish.");
       return;
     }
     if (value === NEW_PROFILE) {
@@ -361,7 +388,7 @@ export function BrowserPanel({
 
   const addProfile = async () => {
     const name = newProfileName.trim();
-    if (!name || profileBusy || botBusyRef.current) return;
+    if (!name || profileBusy || profileChangesLocked || botBusyRef.current) return;
     setProfileBusy(true);
     setError(null);
     try {
@@ -401,7 +428,6 @@ export function BrowserPanel({
 
   const currentUrl = surface?.url && surface.url !== "about:blank" ? surface.url : null;
   const expanded = size === "expanded";
-  const profileChangesLocked = browserProfileChangesDisabled(bot);
 
   return (
     <div className="flex h-full min-h-0 flex-col">
@@ -440,7 +466,7 @@ export function BrowserPanel({
         <button
           type="button"
           onClick={() => void back()}
-          disabled={!surface?.canGoBack}
+          disabled={!surface?.canGoBack || busy || profileBusy}
           className="rounded-md p-1.5 text-ink-secondary hover:bg-control hover:text-ink disabled:cursor-not-allowed disabled:opacity-40"
           title="Back"
           aria-label="Back"
@@ -458,6 +484,7 @@ export function BrowserPanel({
             spellCheck={false}
             autoCapitalize="off"
             autoCorrect="off"
+            disabled={busy || profileBusy}
             className="min-w-0 flex-1 bg-transparent text-[13px] text-ink outline-none placeholder:text-ink-secondary/70"
             aria-label="Web address"
           />
@@ -515,7 +542,7 @@ export function BrowserPanel({
         </div>
         <button
           onClick={() => void changeControl(control.held ? "release" : "take")}
-          disabled={controlPending}
+          disabled={controlPending || busy || profileBusy}
           className={cn(
             "flex shrink-0 items-center gap-1.5 rounded-lg px-3 py-1.5 text-[13px] font-medium disabled:opacity-60",
             control.held ? "bg-accent text-accent-ink" : "bg-control text-ink hover:bg-raised-hover",
@@ -552,9 +579,9 @@ export function BrowserPanel({
           <button
             type="button"
             onClick={() => setAddingProfile((open) => !open)}
-            disabled={profileChangesLocked}
+            disabled={profileBusy || profileChangesLocked}
             className="rounded-md p-1.5 text-ink-secondary hover:bg-control hover:text-ink disabled:cursor-not-allowed disabled:opacity-40"
-            title={profileChangesLocked ? `Stop ${bot.name}'s turn before changing browser profiles` : "Add a profile"}
+            title={profileChangeLockMessage ?? "Add a profile"}
             aria-label="Add a profile"
           >
             <Plus size={15} />
@@ -574,7 +601,7 @@ export function BrowserPanel({
               onChange={(event) => setNewProfileName(event.target.value)}
               placeholder="Profile name, e.g. Work"
               maxLength={40}
-              disabled={profileChangesLocked}
+              disabled={profileBusy || profileChangesLocked}
               className="min-w-0 flex-1 rounded-md bg-inset px-2.5 py-1.5 text-[13px] text-ink outline-none placeholder:text-ink-secondary/70"
               aria-label="New profile name"
             />
@@ -599,7 +626,9 @@ export function BrowserPanel({
         )}
         <div className="mt-1.5 text-[11.5px] leading-relaxed text-ink-secondary">
           {profileChangesLocked
-            ? `Stop ${bot.name}'s current turn before changing profiles, so it cannot keep acting in a hidden session.`
+            ? bot.busy
+              ? `Stop ${bot.name}'s current turn before changing profiles, so it cannot keep acting in a hidden session.`
+              : profileChangeLockMessage
             : `A profile is its own set of logins and cookies — sign in once and it stays. Bots pointed at the same profile share it; “${bot.name}'s own” is private to this bot; Guest is thrown away when you switch off it.`}
         </div>
       </div>

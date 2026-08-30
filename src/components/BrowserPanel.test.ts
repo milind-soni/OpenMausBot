@@ -43,8 +43,10 @@ describe("browser panel address and profile helpers", () => {
     expect(shouldRequestBrowserControl({ ...first, eventBotId: "bot-2" })).toBe(false);
   });
 
-  it("locks browser profile changes while a bot turn is active", () => {
+  it("locks browser profile changes while a bot turn or local browser transition is active", () => {
     expect(browserProfileChangesDisabled({ busy: true })).toBe(true);
+    expect(browserProfileChangesDisabled({ busy: false }, { browserAction: true })).toBe(true);
+    expect(browserProfileChangesDisabled({ busy: false }, { controlTransition: true })).toBe(true);
     expect(browserProfileChangesDisabled({ busy: false })).toBe(false);
     expect(browserProfileChangesDisabled({})).toBe(false);
   });
