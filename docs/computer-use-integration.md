@@ -167,16 +167,27 @@ replacement buys:
   already runs the CLI has it installed anyway.
 - **Identity model carries over.** A bot with no profile gets
   `BETTERWRIGHT_PROFILE=bot-<id>`; a named shared profile maps to its stable
-  partition id (the immutable identity rule from #567); `guest` stays `guest`.
-  Profile state lives under `~/.betterwright/browser/profiles/<name>`;
-  deleting a profile or a bot removes its directory after
-  `betterwright close --profile`.
+  partition id (the immutable identity rule from #567); `guest` stays `guest`
+  and the server wipes it at every start, keeping the old promise that Guest
+  retains no logins. Profile state lives under
+  `~/.betterwright/browser/profiles/<name>`; deleting a profile or a bot
+  removes its directory after `betterwright close --profile`, re-erasing on a
+  bounded ladder because an orphaned Chromium can rewrite the directory.
+  Pending erases are journaled in the app data dir: a restart resumes them,
+  and config refuses (409) a new profile on a partition still being erased.
 - **Sign-in and takeover move out of the app.** The bot calls
   `browser_handoff`, which returns a token-guarded live-view URL the user
   opens to watch or take control; `browser_login` fills vault credentials
-  without exposing them to the model. The in-app Browser panel and its
-  who-is-driving lease are removed. This also clears the old tier-1 limit:
-  BetterWright's browser is a real Chromium fork, so Google OAuth works.
+  without exposing them to the model. The person can also start the same
+  live view themselves: the Computer panel's "Watch live" button asks the
+  server for a `betterwright view --expose local` page on the bot's profile.
+  The in-app Browser panel and its who-is-driving lease are removed. This
+  also clears the old tier-1 limit: BetterWright's browser is a real
+  Chromium fork, so Google OAuth works.
+- **Platform matrix shifts.** BetterChromium ships for macOS arm64, Linux
+  x64 and Windows x64. Windows gains the built-in browser (the embedded
+  surface was fail-closed there pending sandbox verification); Intel macs
+  lose it, since upstream publishes no darwin-x64 artifact.
 - **Toolset.** `browser` (Playwright JS with snapshot/aria-ref semantics),
   `browser_batch`, `browser_login`, `browser_download`, `browser_handoff`,
   `browser_doctor` — self-describing over MCP, no bespoke toolset to

@@ -8,12 +8,17 @@ import { join } from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
 
 import { removeTempDir } from "./testing/cleanup.ts";
+import { DATA_DIR } from "./config.ts";
 import {
   betterwrightCliPath,
   browserIntegrationSpec,
+  browserLiveViewUrl,
+  browserPartitionBeingErased,
   browserProfileName,
+  closeBrowserLiveViews,
   createBrowserProvisioner,
   forgetBrowserProfile,
+  resumeBrowserProfileErasures,
 } from "./betterwright.ts";
 
 const temporaryHomes: string[] = [];
@@ -64,7 +69,11 @@ describe("built-in browser integration", () => {
     expect(spec).toEqual({
       command: process.execPath,
       args: [cli, "mcp"],
-      env: { ELECTRON_RUN_AS_NODE: "1", BETTERWRIGHT_PROFILE: "bot-b1" },
+      env: {
+        ELECTRON_RUN_AS_NODE: "1",
+        BETTERWRIGHT_PROFILE: "bot-b1",
+        BETTERWRIGHT_LIVE_VIEW_EXPOSE: "local",
+      },
     });
   });
 });
@@ -133,6 +142,26 @@ describe("provisioning the managed browser", () => {
   });
 });
 
+describe("browser live view", () => {
+  it("starts one view child per profile and hands out its page URL", async () => {
+    const stub = join(betterwrightHome(), "stub-view.js");
+    writeFileSync(stub, "console.log('Live view ready at http://127.0.0.1:1/?t=stub');\nsetInterval(() => {}, 1000);\n");
+    try {
+      const first = browserLiveViewUrl("p1", stub);
+      // the second request reuses the same child instead of stacking viewers
+      expect(browserLiveViewUrl("p1", stub)).toBe(first);
+      await expect(first).resolves.toBe("http://127.0.0.1:1/?t=stub");
+    } finally {
+      closeBrowserLiveViews();
+    }
+  });
+
+  it("refuses an invalid profile name and a missing CLI", async () => {
+    await expect(browserLiveViewUrl("../escape", "/unused")).resolves.toBeNull();
+    await expect(browserLiveViewUrl("p2", null)).resolves.toBeNull();
+  });
+});
+
 describe("forgetting a browser profile", () => {
   it("erases the profile directory and nothing above it", async () => {
     const home = betterwrightHome();
@@ -164,6 +193,83 @@ describe("forgetting a browser profile", () => {
       // stability check must return right after the first clean re-check.
       await forgetBrowserProfile("bot-b2", [0, 0, 60_000]);
       expect(existsSync(join(profiles, "bot-b2"))).toBe(false);
+    } finally {
+      if (previousHome === undefined) delete process.env.BETTERWRIGHT_HOME;
+      else process.env.BETTERWRIGHT_HOME = previousHome;
+    }
+  });
+
+  it("blocks partition reuse until the erase ladder settles, then clears the journal", async () => {
+    const home = betterwrightHome();
+    const profiles = join(home, "browser", "profiles");
+    mkdirSync(join(profiles, "Shop-2"), { recursive: true });
+    const previousHome = process.env.BETTERWRIGHT_HOME;
+    process.env.BETTERWRIGHT_HOME = home;
+    try {
+      const done = forgetBrowserProfile("Shop-2", [0, 300]);
+      // registration happens before the first await, and folds case — the
+      // config guard compares partition ids that never normalize case
+      expect(browserPartitionBeingErased("shop-2")).toBe(true);
+      expect(browserPartitionBeingErased("Shop-2")).toBe(true);
+      await done;
+      expect(browserPartitionBeingErased("Shop-2")).toBe(false);
+      expect(existsSync(join(DATA_DIR, "browser-erase-journal.json"))).toBe(false);
+    } finally {
+      if (previousHome === undefined) delete process.env.BETTERWRIGHT_HOME;
+      else process.env.BETTERWRIGHT_HOME = previousHome;
+    }
+  });
+
+  it("returns without the ladder when no profile state exists", async () => {
+    const home = betterwrightHome();
+    mkdirSync(join(home, "browser", "profiles"), { recursive: true });
+    const previousHome = process.env.BETTERWRIGHT_HOME;
+    process.env.BETTERWRIGHT_HOME = home;
+    try {
+      // a 60s ladder entry would blow the test timeout if it ran
+      await forgetBrowserProfile("bot-never-existed", [0, 60_000]);
+      expect(browserPartitionBeingErased("bot-never-existed")).toBe(false);
+    } finally {
+      if (previousHome === undefined) delete process.env.BETTERWRIGHT_HOME;
+      else process.env.BETTERWRIGHT_HOME = previousHome;
+    }
+  });
+
+  it("never blocks the guest throwaway on its boot wipe", async () => {
+    const home = betterwrightHome();
+    const profiles = join(home, "browser", "profiles");
+    mkdirSync(join(profiles, "guest"), { recursive: true });
+    const previousHome = process.env.BETTERWRIGHT_HOME;
+    process.env.BETTERWRIGHT_HOME = home;
+    try {
+      const done = forgetBrowserProfile("guest", [0]);
+      expect(browserPartitionBeingErased("guest")).toBe(false);
+      await done;
+      expect(existsSync(join(profiles, "guest"))).toBe(false);
+    } finally {
+      if (previousHome === undefined) delete process.env.BETTERWRIGHT_HOME;
+      else process.env.BETTERWRIGHT_HOME = previousHome;
+    }
+  });
+
+  it("resumes a journaled erase that a shutdown interrupted", async () => {
+    const home = betterwrightHome();
+    const profiles = join(home, "browser", "profiles");
+    mkdirSync(join(profiles, "bot-crashed"), { recursive: true });
+    mkdirSync(DATA_DIR, { recursive: true });
+    writeFileSync(join(DATA_DIR, "browser-erase-journal.json"), JSON.stringify({ profiles: ["bot-crashed"] }));
+    const previousHome = process.env.BETTERWRIGHT_HOME;
+    process.env.BETTERWRIGHT_HOME = home;
+    try {
+      resumeBrowserProfileErasures([0]);
+      for (let waited = 0; waited < 5_000 && existsSync(join(profiles, "bot-crashed")); waited += 100) {
+        await new Promise((tick) => setTimeout(tick, 100));
+      }
+      expect(existsSync(join(profiles, "bot-crashed"))).toBe(false);
+      for (let waited = 0; waited < 2_000 && browserPartitionBeingErased("bot-crashed"); waited += 100) {
+        await new Promise((tick) => setTimeout(tick, 100));
+      }
+      expect(browserPartitionBeingErased("bot-crashed")).toBe(false);
     } finally {
       if (previousHome === undefined) delete process.env.BETTERWRIGHT_HOME;
       else process.env.BETTERWRIGHT_HOME = previousHome;

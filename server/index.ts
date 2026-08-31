@@ -74,6 +74,7 @@ import {
   showToolCallsEnabled,
   skillRecorderEnabled,
   builtInBrowserEnabled,
+  browserProfilePartitionId,
   browserProfileReplacementConflict,
   browserProfilePartitionTarget,
   syncCredentialEnv,
@@ -178,9 +179,13 @@ import { CalendarCallManager } from "./calendar-calls.ts";
 import {
   BUILT_IN_BROWSER_SYSTEM_PROMPT,
   browserIntegrationSpec,
+  browserLiveViewUrl,
+  browserPartitionBeingErased,
   browserProfileName,
   browserProvisioner,
+  closeBrowserLiveViews,
   forgetBrowserProfile,
+  resumeBrowserProfileErasures,
 } from "./betterwright.ts";
 import { captureOutsideHumanControl } from "./private-screen-capture.ts";
 import { RoutineRequestService } from "./routine-requests.ts";
@@ -7122,6 +7127,17 @@ const server = createServer(async (req, res) => {
         });
         const routingConflict = browserProfileReplacementConflict(cfg.browserProfiles ?? [], nextProfiles);
         if (routingConflict) return json(res, 409, { error: routingConflict });
+        // Deleting a profile starts an erase that can re-run for minutes if an
+        // orphaned Chromium keeps resurrecting the data. A new profile on that
+        // partition would have its fresh logins erased by a late pass.
+        const pendingReuse = nextProfiles.find(
+          (profile) => !currentProfiles.has(profile.id) && browserPartitionBeingErased(browserProfilePartitionId(profile)),
+        );
+        if (pendingReuse) {
+          return json(res, 409, {
+            error: `the previous “${pendingReuse.name}” browser session is still being erased — wait before reusing it`,
+          });
+        }
       }
       if (patch.vps !== undefined) {
         const currentAlias = vpsSshAlias(cfg);
@@ -7520,6 +7536,23 @@ const server = createServer(async (req, res) => {
       }
       return json(res, 405, { error: "method not allowed" });
     }
+    // The person watches this bot browse, or takes the wheel, at any time:
+    // BetterWright serves a token-guarded live-view page for the bot's
+    // profile. Loopback-only, and the page dies with the server.
+    m = path.match(/^\/api\/bots\/([\w-]+)\/browser\/view$/);
+    if (m && method === "POST") {
+      const bot = store.bot(m[1]);
+      if (!bot) return json(res, 404, { error: "no such bot" });
+      if (!String(req.headers["content-type"] ?? "").toLowerCase().startsWith("application/json")) {
+        return json(res, 415, { error: "content-type must be application/json" });
+      }
+      if (!builtInBrowserEnabled(cfg) || bot.browser === false) {
+        return json(res, 409, { error: "the browser is not enabled for this bot" });
+      }
+      const url = await browserLiveViewUrl(browserProfileName(bot.id, bot.browserProfile, cfg));
+      if (!url) return json(res, 503, { error: "the browser live view could not be started" });
+      return json(res, 200, { url });
+    }
     m = path.match(/^\/api\/bots\/([\w-]+)\/computer\/viewer-close$/);
     if (m && method === "POST") {
       const bot = store.bot(m[1]);
@@ -7616,15 +7649,24 @@ server.listen(PORT, "127.0.0.1", () => {
   console.log(`openmausbot server on http://127.0.0.1:${PORT}`);
 });
 
+// Finish any profile erase a shutdown interrupted — the journal is the
+// deletion promise, and it must not evaporate with the process.
+resumeBrowserProfileErasures();
 // Warm-start the browser on machines where the feature is already on, so the
 // first browsing turn after a clean install does not pay for the download.
-if (builtInBrowserEnabled(cfg)) void browserProvisioner.ensure();
+// Guest starts from a blank slate: it is the profile that keeps no logins
+// between app runs, unlike the durable named and per-bot sessions.
+if (builtInBrowserEnabled(cfg)) {
+  void forgetBrowserProfile("guest", [0]);
+  void browserProvisioner.ensure();
+}
 
 const gracefulShutdown = createGracefulShutdown({
   cleanup: [
     () => {
       for (const idle of localVmIdles.values()) idle.cancel();
       vps.closeAllVpsDesktopTunnels();
+      closeBrowserLiveViews();
       watchdog.stop();
       routines?.stop();
       webhookIngress?.server.close();

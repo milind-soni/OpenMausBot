@@ -10,6 +10,7 @@ import {
   CalendarClock,
   CalendarDays,
   Columns2,
+  Globe,
   Hand,
   Loader2,
   Maximize2,
@@ -25,6 +26,7 @@ import { api, useStore, type Bot } from "@/state/store";
 import type { Routine } from "@/lib/routines";
 import { ApiKeyRow } from "./ApiKeys";
 import { cn } from "@/lib/cn";
+import { builtInBrowserEnabled } from "@/lib/feature-flags";
 import { usePageVisible } from "@/lib/page-visible";
 import { CloudBackendPicker } from "./CloudBackendPicker";
 import { useDesktopCapabilities } from "./DesktopCapabilities";
@@ -200,6 +202,24 @@ export function ComputerPanel({
   // bumped when a Box API key is saved inline, to re-run the spin-up flow
   const [retry, setRetry] = useState(0);
   const vmReadinessAttempts = useRef(0);
+  // The bot's browser lives in BetterWright, not in this panel; the person
+  // watches or takes over through its live-view page in a normal tab.
+  const browserEnabled = builtInBrowserEnabled(state.config) && bot.browser !== false;
+  const [browserViewPending, setBrowserViewPending] = useState(false);
+  const [browserViewError, setBrowserViewError] = useState<string | null>(null);
+  const openBrowserLiveView = async () => {
+    setBrowserViewPending(true);
+    setBrowserViewError(null);
+    try {
+      const { url } = await api(`/api/bots/${bot.id}/browser/view`, { method: "POST", body: "{}" });
+      if (window.ogb?.openExternal) void window.ogb.openExternal(url);
+      else window.open(url, "_blank", "noopener");
+    } catch (cause) {
+      setBrowserViewError(cause instanceof Error ? cause.message : "Could not open the browser live view.");
+    } finally {
+      setBrowserViewPending(false);
+    }
+  };
   const selectedInstance = state.instances.find(
     (instance) => instance.instanceId === bot.modelSelection.instanceId,
   );
@@ -865,6 +885,27 @@ export function ComputerPanel({
         </div>
       ) : (
       <div className="flex-1 overflow-y-auto px-5 pb-5">
+          {browserEnabled && (
+            <div className="mt-2">
+              <div className="flex items-center justify-between text-[13px] text-ink-secondary">
+                <span>{bot.name}'s browser</span>
+                <button
+                  onClick={() => void openBrowserLiveView()}
+                  disabled={browserViewPending}
+                  className="flex items-center gap-1.5 rounded-md bg-control px-2.5 py-1 text-[12px] text-ink hover:bg-raised-hover disabled:opacity-50"
+                  title="Open a live view of this bot's browser — watch, or click into the page to take over"
+                >
+                  {browserViewPending ? <Loader2 size={12} className="animate-spin" /> : <Globe size={12} />}
+                  Watch live
+                </button>
+              </div>
+              {browserViewError && (
+                <div className="mt-1.5 rounded-lg border border-danger/30 bg-danger/10 px-3 py-2 text-[12px] text-danger">
+                  {browserViewError}
+                </div>
+              )}
+            </div>
+          )}
           {/* Screen preview */}
           <div className="mb-1.5 mt-2 flex items-center justify-between text-[13px] text-ink-secondary">
             <span>{bot.name}'s screen</span>

@@ -298,6 +298,10 @@ beforeAll(async () => {
       // Production uses 15s. Keep the real timer path while making the
       // browser-visible heartbeat assertion fast and deterministic.
       OMB_SSE_HEARTBEAT_MS: "50",
+      // This env is built from scratch, so the suite-wide guard in
+      // testing/setup.ts does not reach the child: without this, enabling
+      // features.browser would start a real BetterChromium download.
+      OMB_BETTERWRIGHT_PROVISION: "off",
       FAKE_CLAUDE_MODE: "hang",
       FAKE_CLAUDE_DUMP: fakeClaudeDump,
     },
@@ -2868,7 +2872,12 @@ describe("harness HTTP API", () => {
       expect(browser.args[1]).toBe("mcp");
       // The bot browses in the profile's durable partition, and BetterWright
       // owns everything else about that session.
-      expect(browser.env).toEqual({ ELECTRON_RUN_AS_NODE: "1", BETTERWRIGHT_PROFILE: "work" });
+      expect(browser.env).toEqual({
+        ELECTRON_RUN_AS_NODE: "1",
+        BETTERWRIGHT_PROFILE: "work",
+        // without the live-view opt-in, browser_handoff refuses to run
+        BETTERWRIGHT_LIVE_VIEW_EXPOSE: "local",
+      });
 
       const systemIndex = dump.argv.indexOf("--append-system-prompt");
       expect(systemIndex).toBeGreaterThanOrEqual(0);
@@ -2946,6 +2955,43 @@ describe("harness HTTP API", () => {
     }
   });
 
+  it("refuses to recreate a browser profile while its old session is still being erased", async () => {
+    // The erase ladder can re-run for minutes after a delete (an orphaned
+    // Chromium can resurrect the directory); a recreated profile on the same
+    // partition would have its fresh logins erased by a late pass.
+    const profileDir = join(home, ".betterwright", "browser", "profiles", "ephem");
+    try {
+      expect((await api("PATCH", "/api/config", {
+        features: { browser: true },
+        browserProfiles: [{ id: "ephem", name: "Ephem" }],
+      })).status).toBe(200);
+      mkdirSync(profileDir, { recursive: true });
+      expect((await api("PATCH", "/api/config", { browserProfiles: [] })).status).toBe(200);
+      const reuse = await api("PATCH", "/api/config", { browserProfiles: [{ id: "ephem", name: "Ephem" }] });
+      expect(reuse.status).toBe(409);
+      expect(reuse.body.error).toMatch(/still being erased/);
+      // an unrelated name is not held hostage
+      expect((await api("PATCH", "/api/config", { browserProfiles: [{ id: "other", name: "Other" }] })).status).toBe(200);
+    } finally {
+      rmSync(profileDir, { recursive: true, force: true });
+      await api("PATCH", "/api/config", { features: { browser: false }, browserProfiles: [] }).catch(() => undefined);
+    }
+  });
+
+  it("gates the browser live view on the workspace feature", async () => {
+    const bot = (await api("POST", "/api/bots", {
+      modelSelection: { instanceId: "claude", model: "claude-sonnet-5" },
+      requireAvailableModel: true,
+    })).body.bot;
+    try {
+      const denied = await api("POST", `/api/bots/${bot.id}/browser/view`, {});
+      expect(denied.status).toBe(409);
+      expect(denied.body.error).toMatch(/not enabled/);
+    } finally {
+      await api("DELETE", `/api/bots/${bot.id}`).catch(() => undefined);
+    }
+  });
+
   it("keeps a removed browser profile deleted when clearing its bot references cannot persist", async () => {
     const isolatedHome = mkdtempSync(join(tmpdir(), "omb-browser-reference-write-"));
     const isolatedData = join(isolatedHome, ".openmausbot");
@@ -2974,6 +3020,9 @@ describe("harness HTTP API", () => {
         OMB_PORT: String(isolatedPort),
         OMB_WEBHOOK_PORT: String(isolatedPort + 1),
         OMB_STATIC_DIR: isolatedStatic,
+        // features.browser is on in this child's config — never let it
+        // provision a real BetterChromium into the throwaway home
+        OMB_BETTERWRIGHT_PROVISION: "off",
         FAKE_CLAUDE_MODE: "hang",
         FAKE_CLAUDE_DUMP: join(isolatedHome, "fake-claude-dump.json"),
       },

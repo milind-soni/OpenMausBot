@@ -3,8 +3,8 @@
 // spawns `betterwright mcp` for the turn and tells it which profile to browse
 // in. State lives in ~/.betterwright, deliberately shared with the user's own
 // CLI, so a bot and its person can hand a signed-in session back and forth.
-import { execFile } from "node:child_process";
-import { existsSync, readFileSync } from "node:fs";
+import { execFile, spawn, type ChildProcess } from "node:child_process";
+import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { rm } from "node:fs/promises";
 import { createRequire } from "node:module";
 import { homedir } from "node:os";
@@ -13,7 +13,7 @@ import { setTimeout as delay } from "node:timers/promises";
 import { promisify } from "node:util";
 
 import { z } from "zod";
-import { browserProfilePartitionTarget, type AppConfig } from "./config.ts";
+import { browserProfilePartitionTarget, DATA_DIR, type AppConfig } from "./config.ts";
 
 const execFileAsync = promisify(execFile);
 /** Both the profile names we mint and the ones config hands us. */
@@ -142,7 +142,14 @@ export function browserIntegrationSpec(profileName: string): BrowserIntegrationS
     // in the packaged app process.execPath is Electron — run the CLI as node
     command: process.execPath,
     args: [cli, "mcp"],
-    env: { ...RUN_AS_NODE, BETTERWRIGHT_PROFILE: profileName },
+    env: {
+      ...RUN_AS_NODE,
+      BETTERWRIGHT_PROFILE: profileName,
+      // browser_handoff needs this deployer opt-in or it refuses outright,
+      // and the system prompt sends bots to it for every sign-in step.
+      // Loopback-only mirrors the old desktop-local takeover surface.
+      BETTERWRIGHT_LIVE_VIEW_EXPOSE: "local",
+    },
   };
 }
 
@@ -151,6 +158,44 @@ export function browserIntegrationSpec(profileName: string): BrowserIntegrationS
  * `betterwright close`, and that Chromium rewrites the profile directory on
  * its way down. Re-erase until the state stays gone across a whole window. */
 const ERASE_RETRY_DELAYS_MS = [0, 15_000, 60_000, 5 * 60_000, 12 * 60_000];
+
+/** Partitions mid-erase, case-folded name → exact name. Config must refuse a
+ * new profile on one of these partitions: the retry ladder above would erase
+ * the new profile's logins as if they were the orphan's resurrection. The
+ * journal makes the promise survive a restart — boot resumes every entry. */
+const erasingPartitions = new Map<string, string>();
+const ERASE_JOURNAL_PATH = join(DATA_DIR, "browser-erase-journal.json");
+const eraseJournalSchema = z.object({ profiles: z.array(z.string()) });
+
+function persistEraseJournal(): void {
+  try {
+    if (erasingPartitions.size === 0) {
+      rmSync(ERASE_JOURNAL_PATH, { force: true });
+      return;
+    }
+    mkdirSync(DATA_DIR, { recursive: true });
+    writeFileSync(ERASE_JOURNAL_PATH, JSON.stringify({ profiles: [...erasingPartitions.values()] }));
+  } catch (error) {
+    console.error(`[browser] could not update the erase journal: ${error instanceof Error ? error.message : String(error)}`);
+  }
+}
+
+export function browserPartitionBeingErased(partitionId: string): boolean {
+  return erasingPartitions.has(partitionId.toLowerCase());
+}
+
+/** Boot: pick erases interrupted by a shutdown or crash back up. */
+export function resumeBrowserProfileErasures(retryDelaysMs?: readonly number[]): void {
+  let profiles: string[];
+  try {
+    const parsed = eraseJournalSchema.safeParse(JSON.parse(readFileSync(ERASE_JOURNAL_PATH, "utf8")));
+    if (!parsed.success) return;
+    profiles = parsed.data.profiles;
+  } catch {
+    return; // no journal — nothing was interrupted
+  }
+  for (const name of profiles) void forgetBrowserProfile(name, retryDelaysMs);
+}
 
 /** Erase a browser identity: stop its daemon, then remove its profile
  * directory. Called when the bot or named profile that owned it is deleted,
@@ -174,22 +219,44 @@ export async function forgetBrowserProfile(
     return;
   }
   const lock = `${target}.betterwright-lock`;
-  for (const [attempt, wait] of retryDelaysMs.entries()) {
-    // unref: a pending re-erase must never hold the server open at exit
-    if (wait > 0) await delay(wait, undefined, { ref: false });
-    // Nothing came back since the last erase: the identity is gone for good.
-    if (attempt > 0 && !existsSync(target) && !existsSync(lock)) return;
-    await closeBrowserProfileSessions(profileName, lock);
-    try {
-      await rm(target, { recursive: true, force: true });
-      // BetterWright keeps the daemon lock directory beside the profile.
-      await rm(lock, { recursive: true, force: true });
-    } catch (error) {
-      console.error(`[browser] could not erase the “${profileName}” profile: ${error instanceof Error ? error.message : String(error)}`);
-    }
+  const stateGone = () => !existsSync(target) && !existsSync(lock);
+  const settleErased = () => {
+    if (!stateGone()) return;
+    erasingPartitions.delete(profileName.toLowerCase());
+    persistEraseJournal();
+  };
+  // No profile directory and no daemon lock: nothing exists that an orphaned
+  // Chromium could resurrect, so don't hold the name for the whole ladder.
+  // (Still settle the journal — a resumed erase may already have finished.)
+  if (stateGone()) return settleErased();
+  // Guest is the shared throwaway wiped at boot; blocking its reuse is
+  // meaningless and journaling it would replay a full ladder every start.
+  if (profileName !== "guest") {
+    erasingPartitions.set(profileName.toLowerCase(), profileName);
+    persistEraseJournal();
   }
-  if (existsSync(target) || existsSync(lock)) {
-    console.error(`[browser] the “${profileName}” profile kept coming back; erase it with the betterwright CLI`);
+  try {
+    for (const [attempt, wait] of retryDelaysMs.entries()) {
+      // unref: a pending re-erase must never hold the server open at exit
+      if (wait > 0) await delay(wait, undefined, { ref: false });
+      // Nothing came back since the last erase: the identity is gone for good.
+      if (attempt > 0 && stateGone()) return;
+      await closeBrowserProfileSessions(profileName, lock);
+      try {
+        await rm(target, { recursive: true, force: true });
+        // BetterWright keeps the daemon lock directory beside the profile.
+        await rm(lock, { recursive: true, force: true });
+      } catch (error) {
+        console.error(`[browser] could not erase the “${profileName}” profile: ${error instanceof Error ? error.message : String(error)}`);
+      }
+    }
+    if (!stateGone()) {
+      // A failed erase keeps its journal entry: reuse stays blocked and the
+      // next boot retries, mirroring the old cleanup journal's promise.
+      console.error(`[browser] the “${profileName}” profile kept coming back; erase it with the betterwright CLI`);
+    }
+  } finally {
+    settleErased();
   }
 }
 
@@ -214,4 +281,63 @@ async function closeBrowserProfileSessions(profileName: string, lock: string): P
   } catch {
     // No live daemon for that profile is the ordinary case.
   }
+}
+
+/** One `betterwright view` child per profile. Its token-guarded page is how a
+ * person watches a bot browse or takes the wheel mid-page — the successor to
+ * the embedded Browser tab's live view. The page is served by the child
+ * itself (verified: the URL dies with the process), so the child stays up
+ * until the server exits or the person is done with it. */
+const liveViews = new Map<string, { url: Promise<string | null>; child: ChildProcess }>();
+
+export function browserLiveViewUrl(
+  profileName: string,
+  cliPath: string | null = betterwrightCliPath(),
+): Promise<string | null> {
+  if (!PROFILE_NAME.test(profileName)) return Promise.resolve(null);
+  const existing = liveViews.get(profileName);
+  if (existing) return existing.url;
+  if (!cliPath) return Promise.resolve(null);
+  const child = spawn(process.execPath, [cliPath, "view", "--expose", "local", "--profile", profileName], {
+    env: { ...process.env, ...RUN_AS_NODE, BETTERWRIGHT_PROFILE: profileName },
+    stdio: ["ignore", "pipe", "pipe"],
+  });
+  const url = new Promise<string | null>((settle) => {
+    // The URL prints only once the profile daemon is up; the first view may
+    // have to start it, so give it a while — but never wedge the request.
+    const deadline = setTimeout(() => {
+      settle(null);
+      child.kill();
+    }, 30_000);
+    deadline.unref();
+    let printed = "";
+    const scan = (chunk: Buffer) => {
+      printed += String(chunk);
+      const found = printed.match(/http:\/\/\S+/);
+      if (found) {
+        clearTimeout(deadline);
+        settle(found[0]);
+      }
+    };
+    child.stdout?.on("data", scan);
+    child.stderr?.on("data", scan);
+    child.on("error", () => {
+      clearTimeout(deadline);
+      settle(null);
+    });
+    child.on("exit", () => {
+      clearTimeout(deadline);
+      settle(null);
+    });
+  });
+  // a dead child serves nothing; the next request starts a fresh one
+  child.on("exit", () => liveViews.delete(profileName));
+  liveViews.set(profileName, { url, child });
+  return url;
+}
+
+/** Shutdown: live-view pages die with the server on purpose. */
+export function closeBrowserLiveViews(): void {
+  for (const { child } of liveViews.values()) child.kill();
+  liveViews.clear();
 }
