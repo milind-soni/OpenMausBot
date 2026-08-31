@@ -93,6 +93,19 @@ const api = async (method: string, path: string, body?: unknown): Promise<{ stat
   return { status: res.status, body: await res.json() };
 };
 
+const readJsonFileWhenReady = async <T = unknown>(file: string, timeout = 5_000): Promise<T> => {
+  let parsed: unknown;
+  await expect.poll(() => {
+    try {
+      parsed = JSON.parse(readFileSync(file, "utf8"));
+      return true;
+    } catch {
+      return false;
+    }
+  }, { timeout }).toBe(true);
+  return parsed as T;
+};
+
 const storedMessageCount = (threadId: string): number => {
   const db = new DatabaseSync(join(home, ".openmausbot", "messages.db"), { readOnly: true });
   try {
@@ -867,14 +880,13 @@ describe("harness HTTP API", () => {
 
       rmSync(fakeClaudeDump, { force: true });
       expect((await api("POST", `/api/bots/${chief.id}/messages`, { text: "prepare the team" })).status).toBe(202);
-      await expect.poll(() => existsSync(fakeClaudeDump), { timeout: 5_000 }).toBe(true);
       const dump = z.object({
         mcpConfig: z.object({
           mcpServers: z.object({
             agents: z.object({ env: z.object({ OMB_COMMS_TOKEN: z.string() }) }),
           }),
         }),
-      }).parse(JSON.parse(readFileSync(fakeClaudeDump, "utf8")));
+      }).parse(await readJsonFileWhenReady(fakeClaudeDump));
       const internalHeaders = {
         authorization: `Bearer ${dump.mcpConfig.mcpServers.agents.env.OMB_COMMS_TOKEN}`,
         "content-type": "application/json",
@@ -2602,7 +2614,6 @@ describe("harness HTTP API", () => {
 
       rmSync(fakeClaudeDump, { force: true });
       expect((await api("POST", `/api/groups/${room.id}/messages`, { text: "Check the website" })).status).toBe(202);
-      await expect.poll(() => existsSync(fakeClaudeDump), { timeout: 5_000 }).toBe(true);
       const dump = z.object({
         argv: z.array(z.string()),
         env: z.record(z.string(), z.string()),
@@ -2617,7 +2628,7 @@ describe("harness HTTP API", () => {
             }),
           }),
         }),
-      }).parse(JSON.parse(readFileSync(fakeClaudeDump, "utf8")));
+      }).parse(await readJsonFileWhenReady(fakeClaudeDump));
       const browserEnv = dump.mcpConfig.mcpServers.browser.env;
       expect(browserEnv).toMatchObject({ OMB_BOT_ID: bot.id, OMB_BROWSER_PROFILE: "work" });
       const registration = browserCapabilityCalls.find(
@@ -2731,8 +2742,7 @@ describe("harness HTTP API", () => {
       expect(replacementTooSoon.body.queued).toBe(true);
       expect(existsSync(fakeClaudeDump)).toBe(false);
 
-      await expect.poll(() => existsSync(fakeClaudeDump), { timeout: 5_000 }).toBe(true);
-      expect(JSON.stringify(JSON.parse(readFileSync(fakeClaudeDump, "utf8")))).toContain("replacement");
+      expect(JSON.stringify(await readJsonFileWhenReady(fakeClaudeDump))).toContain("replacement");
     } finally {
       browserRegisterDelayMs = 0;
       await api("POST", `/api/bots/${bot.id}/interrupt`, {}).catch(() => undefined);
@@ -3527,11 +3537,10 @@ describe("harness HTTP API", () => {
 
       rmSync(fakeClaudeDump, { force: true });
       expect((await api("POST", `/api/groups/${room.id}/messages`, { text: "start the lead" })).status).toBe(202);
-      await expect.poll(() => existsSync(fakeClaudeDump), { timeout: 5_000 }).toBe(true);
-      const firstDump = JSON.parse(readFileSync(fakeClaudeDump, "utf8")) as {
+      const firstDump = await readJsonFileWhenReady<{
         pid: number;
         mcpConfig: { mcpServers: { agents: { env: { OMB_COMMS_TOKEN: string } } } };
-      };
+      }>(fakeClaudeDump);
       const token = firstDump.mcpConfig.mcpServers.agents.env.OMB_COMMS_TOKEN;
       expect(token).toMatch(/^[a-f0-9]{48}$/);
 
@@ -3600,8 +3609,9 @@ describe("harness HTTP API", () => {
 
       rmSync(fakeClaudeDump, { force: true });
       expect((await api("POST", `/api/bots/${bot.id}/messages`, { text: "prepare a routine" })).status).toBe(202);
-      await expect.poll(() => existsSync(fakeClaudeDump), { timeout: 5_000 }).toBe(true);
-      const dump = JSON.parse(readFileSync(fakeClaudeDump, "utf8"));
+      const dump = await readJsonFileWhenReady<{
+        mcpConfig: { mcpServers: { agents: { env: { OMB_COMMS_TOKEN: string } } } };
+      }>(fakeClaudeDump);
       const token = dump.mcpConfig.mcpServers.agents.env.OMB_COMMS_TOKEN;
       expect(token).toMatch(/^[a-f0-9]{48}$/);
       expect((await api("POST", `/api/bots/${bot.id}/interrupt`)).status).toBe(200);
@@ -3952,8 +3962,9 @@ describe("harness HTTP API", () => {
 
       rmSync(fakeClaudeDump, { force: true });
       expect((await api("POST", `/api/bots/${bot.id}/messages`, { text: "prepare a skill" })).status).toBe(202);
-      await expect.poll(() => existsSync(fakeClaudeDump), { timeout: 5_000 }).toBe(true);
-      const dump = JSON.parse(readFileSync(fakeClaudeDump, "utf8"));
+      const dump = await readJsonFileWhenReady<{
+        mcpConfig: { mcpServers: { agents: { env: { OMB_COMMS_TOKEN: string } } } };
+      }>(fakeClaudeDump);
       const token = dump.mcpConfig.mcpServers.agents.env.OMB_COMMS_TOKEN;
       expect(token).toMatch(/^[a-f0-9]{48}$/);
       const internalHeaders = {
