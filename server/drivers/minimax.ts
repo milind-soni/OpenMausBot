@@ -115,7 +115,6 @@ export const MinimaxDriver: ProviderDriver<MinimaxConfig> = {
       missingKeyError: `no MiniMax key — set ${API_KEY_ENV} or run mmx auth login --api-key …`,
       unavailableReason: `no MiniMax API key — run mmx auth login --api-key … or set ${API_KEY_ENV}`,
       timeoutMs: 180_000,
-      timeoutStreaming: true,
       billing: "metered",
       includeUsageInCompleted: true,
       noBodyError: "MiniMax returned no response body",

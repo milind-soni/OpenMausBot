@@ -59,7 +59,6 @@ interface RuntimeOptions<Config> {
   includeUsageInCompleted?: boolean;
   noBodyError?: string;
   retryScale?: number;
-  timeoutStreaming?: boolean;
 }
 
 const usageFrom = (usage: CompletionJson["usage"]): Usage | null =>
@@ -99,7 +98,7 @@ export function createOpenAIChatRuntime<Config>(options: RuntimeOptions<Config>)
       method: "POST",
       headers: { authorization: `Bearer ${options.apiKey}`, "content-type": "application/json" },
       body: JSON.stringify(options.requestBody(model, messages, stream)),
-      signal: signal && options.timeoutStreaming ? AbortSignal.any([signal, timeout]) : signal ?? timeout,
+      signal: signal ? AbortSignal.any([signal, timeout]) : timeout,
     });
     if (!response.ok) {
       const body = await response.text().catch(() => "");

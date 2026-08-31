@@ -2,8 +2,12 @@
 // fake is a stubbed globalThis.fetch that scripts HTTP failures and SSE
 // bodies. Covers the auto-retry policy: transient (429/5xx) retried with
 // backoff, terminal (401/400) never, partial streamed output never.
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
+
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
+import { ensureDirs, NATIVE_DIR } from "../config.ts";
 import type { ProviderInstance } from "../contracts.ts";
 import { recordEvents, type EventRecorder } from "../testing/events.ts";
 import { GrokDriver } from "./grok.ts";
@@ -38,6 +42,7 @@ describe("GrokDriver turns (fake fetch)", () => {
   };
 
   beforeEach(() => {
+    ensureDirs();
     process.env.FAKE_GROK_RETRY_SCALE = "0.001";
     previousFetch = globalThis.fetch;
     calls = 0;
@@ -76,6 +81,20 @@ describe("GrokDriver turns (fake fetch)", () => {
       itemType: "assistant_text",
       text: "done from fake grok",
     });
+  });
+
+  it("records the resolved default model in native diagnostics", async () => {
+    script = [];
+    await create();
+    const threadId = "t-default-model-log";
+    await instance.adapter.sendTurn({ threadId, text: "hi" });
+    await recorder.until((event) => event.type === "turn.completed");
+
+    const entries = readFileSync(join(NATIVE_DIR, `${threadId}.ndjson`), "utf8")
+      .trim()
+      .split("\n")
+      .map((line) => JSON.parse(line) as { dir: string; msg: { model?: string } });
+    expect(entries.find((entry) => entry.dir === "out")?.msg.model).toBe("grok-4");
   });
 
   it("auto-retries transient 429/5xx responses, then completes once", async () => {
