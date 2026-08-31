@@ -8,7 +8,7 @@ function createCuaConnectionStore({
   temporaryId = randomUUID,
   processId = process.pid,
   // The same atomic, private-mode write serves every Electron-owned
-  // descriptor the harness reads (cua-connection.json, browser-connection.json).
+  // descriptor the harness reads.
   fileName = "cua-connection.json",
 }) {
   let connection = null;
