@@ -2652,6 +2652,38 @@ describe("harness HTTP API", () => {
     expect(cleared.body.language).toBe("");
   });
 
+  it("keeps an active turn alive when the UI language changes", async () => {
+    const bot = (await api("POST", "/api/bots", {
+      modelSelection: { instanceId: "claude", model: "claude-sonnet-5" },
+      requireAvailableModel: true,
+    })).body.bot;
+    try {
+      rmSync(fakeClaudeDump, { force: true });
+      expect((await api("POST", `/api/bots/${bot.id}/messages`, { text: "stay active" })).status).toBe(202);
+      await expect.poll(() => existsSync(fakeClaudeDump), { timeout: 5_000 }).toBe(true);
+
+      const saved = await api("PATCH", "/api/config", { language: "de" });
+      expect(saved.status).toBe(200);
+      expect(saved.body.language).toBe("de");
+
+      const active = (await api("GET", "/api/bots?messages=50")).body.bots.find(
+        (candidate: { id: string }) => candidate.id === bot.id,
+      );
+      expect(active?.busy).toBe(true);
+      expect(active?.messages.some((message: { tool?: { name?: string } }) =>
+        message.tool?.name?.includes("provider settings changed"),
+      )).toBe(false);
+    } finally {
+      await api("POST", `/api/bots/${bot.id}/interrupt`, {}).catch(() => undefined);
+      await expect.poll(async () => {
+        const state = (await api("GET", "/api/bots?messages=0")).body;
+        return state.bots.find((candidate: { id: string }) => candidate.id === bot.id)?.busy;
+      }, { timeout: 5_000 }).toBeFalsy();
+      await api("DELETE", `/api/bots/${bot.id}`).catch(() => undefined);
+      await api("PATCH", "/api/config", { language: "" }).catch(() => undefined);
+    }
+  });
+
   it("validates and persists the global room turn timeout", async () => {
     const before = await api("GET", "/api/config");
     expect(before.status).toBe(200);

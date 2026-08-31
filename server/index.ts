@@ -8160,12 +8160,13 @@ const server = createServer(async (req, res) => {
           browserReferenceCleanupError = error;
         }
       }
-      // Provider keys change the fleet. Profile, voice, VPS, and room timeout
-      // changes do not rebuild it: no driver reads them, and they should not
-      // interrupt in-flight turns.
+      // Provider keys change the fleet. Profile, language, voice, VPS, and
+      // room timeout changes do not rebuild it: no driver reads them, and they
+      // should not interrupt in-flight turns.
       const reloadKeys = Object.keys(patch).filter(
         (key) =>
           key !== "profile" &&
+          key !== "language" &&
           key !== "tts" &&
           key !== "imageGen" &&
           key !== "vps" &&
