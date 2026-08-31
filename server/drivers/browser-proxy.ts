@@ -356,9 +356,13 @@ async function requestTakeover(reason: string, request: HostRequest, waitMs = TA
     return textResult("Nobody can be paged for this browser right now. Tell the user in chat what you need them to do in the Browser panel.", true);
   }
   const initial = await control.state(true);
-  // if the person is already driving, don't clobber whatever plea they are reading
-  const requestId = initial.held ? null : await control.requestHelp(reason);
-  if (!initial.held && requestId === null) {
+  // Page unless a plea is already open. Skipping this whenever the person
+  // merely *held* the wheel was the silent-freeze bug: a hold they never took
+  // deliberately has no plea for them to read, so nothing appeared in the app
+  // while the bot waited out its whole window. The harness keeps an existing
+  // plea rather than replacing it, so asking while they drive is safe.
+  const requestId = initial.helpOpen ? null : await control.requestHelp(reason);
+  if (!initial.helpOpen && requestId === null) {
     return textResult("The user could not be paged right now. Tell them in chat what you need them to do in the Browser panel.", true);
   }
   let sawHold = initial.held;

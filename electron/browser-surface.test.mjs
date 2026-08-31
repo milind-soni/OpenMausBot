@@ -252,6 +252,7 @@ function fakeView(partition) {
 
 function harness(options = {}) {
   const views = [];
+  const prefs = [];
   const sessions = new Map();
   const owner = {
     isDestroyed: () => false,
@@ -272,6 +273,7 @@ function harness(options = {}) {
   const manager = createBrowserSurfaceManager({
     owner,
     createView: (viewOptions) => {
+      prefs.push(viewOptions.webPreferences);
       const view = fakeView(viewOptions.webPreferences.partition);
       const shared = sessions.get(viewOptions.webPreferences.partition);
       if (shared) view.webContents.session = shared;
@@ -286,7 +288,7 @@ function harness(options = {}) {
     now: () => Date.now() + (clock += 1),
     ...options,
   });
-  return { manager, owner, views, states };
+  return { manager, owner, views, states, prefs };
 }
 
 const cdpCalls = (view) => view.calls.filter(([name]) => /^[A-Z]/.test(name) && name.includes("."));
@@ -865,7 +867,10 @@ describe("browser surface manager", () => {
     const interactions = [];
     const { manager, views } = harness({ onUserInteraction: (event) => interactions.push(event) });
     await manager.navigate("bot-a", "https://example.com");
-    views[0].listeners.get("focus")?.();
+    // A pointer event, not focus: only a concrete gesture is a person. A
+    // wheel claims the wheel without tainting the document, so this stays a
+    // test about control gating — pointer taint has its own test below.
+    views[0].listeners.get("before-mouse-event")?.({}, { type: "mouseWheel", deltaY: 120 });
     expect(interactions).toEqual([{ botId: "bot-a", profile: "" }]);
     await expect(manager.click("bot-a", "b11")).rejects.toThrow(/held by the user/);
     // Renderer-driven address-bar navigation stays available while the user
@@ -873,6 +878,77 @@ describe("browser surface manager", () => {
     await manager.navigate("bot-a", "https://example.org", "", { source: "user" });
     expect(manager.setHumanControl("bot-a", false, "")).toBe(true);
     await expect(manager.click("bot-a", "b11")).resolves.toBeTruthy();
+  });
+
+  it("asks Chromium not to focus the bot's view when it navigates", () => {
+    // Chromium's default made every agent loadURL steal first responder,
+    // which the lease then read as the person clicking into the page.
+    const { manager, prefs } = harness();
+    manager.layout("bot-a", BOUNDS, "", "expanded");
+    expect(prefs[0]).toMatchObject({ focusOnNavigation: false });
+  });
+
+  it("never treats a bare focus event as the person taking the wheel", async () => {
+    const interactions = [];
+    const { manager, views } = harness({ onUserInteraction: (event) => interactions.push(event) });
+    await manager.navigate("bot-a", "https://example.com");
+
+    // Focus carries no source details, and Chromium raises it for a commit,
+    // a view attach, or focus moving between views in the same window. None
+    // of those is a hand on the wheel, so nothing listens for it any more.
+    expect(views[0].listeners.has("focus")).toBe(false);
+
+    expect(interactions).toEqual([]);
+    expect(manager.controlLease("bot-a", "")).toMatchObject({ held: false, epoch: 0 });
+    // The bot keeps working: this is the lockout the lease used to cause.
+    await expect(manager.click("bot-a", "b11")).resolves.toBeTruthy();
+    await expect(manager.navigate("bot-a", "https://example.com/second")).resolves.toBeTruthy();
+    expect(manager.controlLease("bot-a", "")).toMatchObject({ held: false, epoch: 0 });
+  });
+
+  it("does not blame the user for a synthetic click whose native event outlives its dispatch", async () => {
+    const interactions = [];
+    const { manager, views } = harness({ onUserInteraction: (event) => interactions.push(event) });
+    await manager.navigate("bot-a", "https://example.com");
+
+    // An echo stamped when the command was SENT expires while a slow dispatch
+    // is still in flight, so the agent's own click came back looking human.
+    // The window has to start when Electron can deliver the event.
+    const dbg = views[0].webContents.debugger;
+    const send = dbg.sendCommand;
+    let dispatched = null;
+    dbg.sendCommand = async (method, params) => {
+      const result = await send(method, params);
+      if (method === "Input.dispatchMouseEvent" && params.type === "mousePressed") {
+        dispatched = params;
+        await new Promise((resolve) => setTimeout(resolve, 150));
+      }
+      return result;
+    };
+
+    await manager.click("bot-a", "b11");
+    views[0].listeners.get("before-mouse-event")?.({}, {
+      type: "mouseDown",
+      button: dispatched.button,
+      x: dispatched.x,
+      y: dispatched.y,
+    });
+
+    expect(interactions).toEqual([]);
+    expect(manager.controlLease("bot-a", "")).toMatchObject({ held: false });
+    await expect(manager.read("bot-a")).resolves.toMatchObject({ title: "Loaded" });
+  });
+
+  it("still hands control over on a native event that lands while agent input is in flight", async () => {
+    const interactions = [];
+    const { manager, views } = harness({ onUserInteraction: (event) => interactions.push(event) });
+    await manager.navigate("bot-a", "https://example.com");
+
+    // Suppression during a dispatch is scoped to that dispatch. Once it
+    // returns, a gesture that matches no echo takes the wheel as before.
+    views[0].listeners.get("before-mouse-event")?.({}, { type: "mouseDown", button: "left", x: 700, y: 500 });
+    expect(interactions).toEqual([{ botId: "bot-a", profile: "" }]);
+    await expect(manager.click("bot-a", "b11")).rejects.toThrow(/held by the user/);
   });
 
   it.each(["mouseDown", "contextMenu", "mouseWheel"])("keeps compact human %s input watch-only while expanding", async (type) => {

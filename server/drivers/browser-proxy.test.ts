@@ -239,6 +239,22 @@ describe("browser takeover", () => {
     const missing = await callTool("browser_request_takeover", {});
     expect(missing.result.isError).toBe(true);
   }, 20_000);
+
+  it("pages the user even when the wheel is already held", async () => {
+    held = true;
+    helpOpen = false;
+    helpRequests.length = 0;
+    const pending = callTool("browser_request_takeover", { reason: "Solve the CAPTCHA" });
+    await new Promise((resolve) => setTimeout(resolve, 900));
+    // A hold the person never took deliberately puts no card on their screen,
+    // so staying quiet here left the bot waiting on a plea nobody was shown.
+    expect(helpRequests[0]).toEqual({ method: "POST", body: { reason: "Solve the CAPTCHA" } });
+    held = false;
+    helpOpen = false;
+    const res = await pending;
+    expect(res.result.isError).toBeFalsy();
+    expect(text(res)).toMatch(/handed control back/);
+  }, 20_000);
 });
 
 describe("classifyWall", () => {
