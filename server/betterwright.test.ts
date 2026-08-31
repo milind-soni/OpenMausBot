@@ -1,27 +1,32 @@
 // What these tests pin about the built-in browser: which BetterWright profile
 // a bot lands in (its own session, a shared named one, or the throwaway
-// guest), the exact process spawned for the MCP integration, and that erasing
-// a profile can only ever delete inside BetterWright's own profiles folder.
+// guest), that adapters reach the profile's one worker through the bridge and
+// forwarder, and that erasing a profile can only ever delete inside
+// BetterWright's own profiles folder.
 import { existsSync, mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
 import { createServer } from "node:http";
 import type { AddressInfo } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { Client } from "@modelcontextprotocol/sdk/client/index.js";
+import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
 import { afterAll, describe, expect, it } from "vitest";
 
 import { removeTempDir } from "./testing/cleanup.ts";
 import { DATA_DIR } from "./config.ts";
+import { SPAWNED_PROXIES } from "./proxy-paths.ts";
 import {
   betterwrightCliPath,
   browserIntegrationSpec,
   browserLiveViewUrl,
   browserPartitionBeingErased,
   browserProfileName,
-  closeBrowserLiveViews,
+  closeBrowserWorkers,
   createBrowserProvisioner,
   forgetBrowserProfile,
   proxyBrowserLiveViewPage,
   resumeBrowserProfileErasures,
+  startBrowserBridge,
 } from "./betterwright.ts";
 
 const temporaryHomes: string[] = [];
@@ -32,7 +37,51 @@ function betterwrightHome(): string {
   return home;
 }
 
+/** A stand-in `betterwright mcp`: a real stdio MCP server, hand-rolled so the
+ * stub keeps working from a temp dir where npm packages don't resolve. Its
+ * browser_handoff answers like the real one, with the URL the test plants. */
+function stubMcpCli(viewerUrl: string): string {
+  const stub = join(betterwrightHome(), "stub-mcp.js");
+  writeFileSync(
+    stub,
+    `let buf = "";
+const reply = (id, result) => process.stdout.write(JSON.stringify({ jsonrpc: "2.0", id, result }) + "\\n");
+process.stdin.on("data", (chunk) => {
+  buf += chunk;
+  let newline;
+  while ((newline = buf.indexOf("\\n")) !== -1) {
+    const line = buf.slice(0, newline);
+    buf = buf.slice(newline + 1);
+    if (!line.trim()) continue;
+    const message = JSON.parse(line);
+    if (message.method === "initialize") {
+      reply(message.id, {
+        protocolVersion: message.params.protocolVersion,
+        capabilities: { tools: {} },
+        serverInfo: { name: "stub-betterwright", version: "0.0.0" },
+      });
+    } else if (message.method === "tools/list") {
+      reply(message.id, { tools: [
+        { name: "browser", description: "stub", inputSchema: { type: "object" } },
+        { name: "browser_handoff", description: "stub", inputSchema: { type: "object" } },
+      ] });
+    } else if (message.method === "tools/call") {
+      const text = message.params.name === "browser_handoff"
+        ? "Live view started: ${viewerUrl}"
+        : JSON.stringify({ echoed: message.params.arguments ?? {} });
+      reply(message.id, { content: [{ type: "text", text }] });
+    } else if (message.id !== undefined) {
+      reply(message.id, {});
+    }
+  }
+});
+`,
+  );
+  return stub;
+}
+
 afterAll(async () => {
+  closeBrowserWorkers();
   for (const home of temporaryHomes) await removeTempDir(home);
 });
 
@@ -65,19 +114,48 @@ describe("built-in browser profiles", () => {
 });
 
 describe("built-in browser integration", () => {
-  it("spawns the betterwright MCP server for the mapped profile", () => {
-    const cli = betterwrightCliPath();
-    expect(cli).toMatch(/betterwright\.js$/);
-    const spec = browserIntegrationSpec("bot-b1");
-    expect(spec).toEqual({
-      command: process.execPath,
-      args: [cli, "mcp"],
-      env: {
-        ELECTRON_RUN_AS_NODE: "1",
-        BETTERWRIGHT_PROFILE: "bot-b1",
-        BETTERWRIGHT_LIVE_VIEW_EXPOSE: "local",
-      },
-    });
+  it("mounts the bridge forwarder, not a second profile-owning worker", async () => {
+    expect(betterwrightCliPath()).toMatch(/betterwright\.js$/);
+    // No bridge, no browser: the spec must vanish rather than point nowhere.
+    closeBrowserWorkers();
+    expect(browserIntegrationSpec("bot-b1")).toBeNull();
+    const socket = await startBrowserBridge(null, [join(betterwrightHome(), "bridge.sock")]);
+    expect(socket).toBeTruthy();
+    try {
+      expect(browserIntegrationSpec("bot-b1")).toEqual({
+        command: process.execPath,
+        args: [SPAWNED_PROXIES.browser, socket, "bot-b1"],
+        env: { ELECTRON_RUN_AS_NODE: "1" },
+      });
+    } finally {
+      closeBrowserWorkers();
+    }
+  });
+
+  it("relays an adapter's MCP session to the profile worker end to end", async () => {
+    closeBrowserWorkers();
+    const cli = stubMcpCli("http://127.0.0.1:1/?t=unused");
+    const socket = await startBrowserBridge(cli, [join(betterwrightHome(), "bridge-e2e.sock")]);
+    expect(socket).toBeTruthy();
+    const client = new Client({ name: "adapter-stand-in", version: "0" });
+    try {
+      // the exact process an adapter spawns from the integration spec
+      await client.connect(
+        new StdioClientTransport({
+          command: process.execPath,
+          args: [SPAWNED_PROXIES.browser, socket ?? "", "p-bridge"],
+        }),
+      );
+      const tools = await client.listTools();
+      expect(tools.tools.map((tool) => tool.name)).toContain("browser_handoff");
+      const result = (await client.callTool({ name: "browser", arguments: { code: "1" } })) as {
+        content: Array<{ type: string; text: string }>;
+      };
+      expect(result.content[0].text).toBe(JSON.stringify({ echoed: { code: "1" } }));
+    } finally {
+      await client.close().catch(() => {});
+      closeBrowserWorkers();
+    }
   });
 });
 
@@ -146,16 +224,15 @@ describe("provisioning the managed browser", () => {
 });
 
 describe("browser live view", () => {
-  it("starts one view child per profile and hands out its page URL", async () => {
-    const stub = join(betterwrightHome(), "stub-view.js");
-    writeFileSync(stub, "console.log('Live view ready at http://127.0.0.1:1/?t=stub');\nsetInterval(() => {}, 1000);\n");
+  it("starts the view inside the profile worker and hands out its URL", async () => {
+    const cli = stubMcpCli("http://127.0.0.1:1/?t=stub");
     try {
-      const first = browserLiveViewUrl("p1", stub);
-      // the second request reuses the same child instead of stacking viewers
-      expect(browserLiveViewUrl("p1", stub)).toBe(first);
-      await expect(first).resolves.toBe("http://127.0.0.1:1/?t=stub");
+      const first = await browserLiveViewUrl("p1", cli);
+      expect(first).toBe("http://127.0.0.1:1/?t=stub");
+      // a second ask reuses the running view instead of stacking viewers
+      await expect(browserLiveViewUrl("p1", cli)).resolves.toBe(first);
     } finally {
-      closeBrowserLiveViews();
+      closeBrowserWorkers();
     }
   });
 
@@ -165,7 +242,7 @@ describe("browser live view", () => {
   });
 
   it("re-serves the viewer page same-origin, tokenized, without its frame ban", async () => {
-    // a stand-in for what `betterwright view` serves, minus the daemon
+    // a stand-in for the viewer the worker serves from inside itself
     const viewer = createServer((req, res) => {
       if (new URL(req.url ?? "/", "http://placeholder").searchParams.get("t") !== "tok") {
         res.writeHead(404);
@@ -177,9 +254,8 @@ describe("browser live view", () => {
     });
     await new Promise<void>((ready) => viewer.listen(0, "127.0.0.1", ready));
     const viewerPort = (viewer.address() as AddressInfo).port;
-    const stub = join(betterwrightHome(), "stub-view-proxy.js");
-    writeFileSync(stub, `console.log('Live view: http://127.0.0.1:${viewerPort}/?t=tok');\nsetInterval(() => {}, 1000);\n`);
-    const front = createServer((req, res) => void proxyBrowserLiveViewPage("p-embed", req, res, stub));
+    const cli = stubMcpCli(`http://127.0.0.1:${viewerPort}/?t=tok`);
+    const front = createServer((req, res) => void proxyBrowserLiveViewPage("p-embed", req, res, cli));
     await new Promise<void>((ready) => front.listen(0, "127.0.0.1", ready));
     const frontPort = (front.address() as AddressInfo).port;
     try {
@@ -193,7 +269,7 @@ describe("browser live view", () => {
       expect(page.headers.get("x-frame-options")).toBeNull();
       expect(await page.text()).toBe("<html>viewer</html>");
     } finally {
-      closeBrowserLiveViews();
+      closeBrowserWorkers();
       viewer.close();
       front.close();
     }

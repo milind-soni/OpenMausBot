@@ -1,22 +1,32 @@
 // The built-in browser. BetterWright owns the browser process, its policy
-// guard, its credential vault and its on-disk profiles; the harness only
-// spawns `betterwright mcp` for the turn and tells it which profile to browse
-// in. State lives in ~/.betterwright, deliberately shared with the user's own
-// CLI, so a bot and its person can hand a signed-in session back and forth.
-import { execFile, spawn, type ChildProcess } from "node:child_process";
+// guard, its credential vault and its on-disk profiles. A profile has exactly
+// one owning process at a time (concurrent workers get throwaway ephemeral
+// profiles), so the server holds the one `betterwright mcp` worker per
+// profile and bridges every adapter's MCP session to it: the bot's tools and
+// the embedded live view then share a single browser instead of racing for
+// the profile. State lives in ~/.betterwright, deliberately shared with the
+// user's own CLI, so a bot and its person can hand a session back and forth.
+import { execFile } from "node:child_process";
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { rm } from "node:fs/promises";
 import { request as httpRequest, type IncomingMessage, type ServerResponse } from "node:http";
 import { createRequire } from "node:module";
-import { connect as netConnect } from "node:net";
+import { connect as netConnect, createServer as netCreateServer, type Server as NetServer, type Socket } from "node:net";
 import { homedir } from "node:os";
 import { dirname, isAbsolute, join, resolve, sep } from "node:path";
 import type { Duplex } from "node:stream";
 import { setTimeout as delay } from "node:timers/promises";
 import { promisify } from "node:util";
 
+import { Client } from "@modelcontextprotocol/sdk/client/index.js";
+import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
+import { Server as McpServer } from "@modelcontextprotocol/sdk/server/index.js";
+import { ReadBuffer, serializeMessage } from "@modelcontextprotocol/sdk/shared/stdio.js";
+import type { Transport } from "@modelcontextprotocol/sdk/shared/transport.js";
+import { CallToolRequestSchema, ListToolsRequestSchema, type JSONRPCMessage } from "@modelcontextprotocol/sdk/types.js";
 import { z } from "zod";
 import { browserProfilePartitionTarget, DATA_DIR, type AppConfig } from "./config.ts";
+import { SPAWNED_PROXIES } from "./proxy-paths.ts";
 
 const execFileAsync = promisify(execFile);
 /** Both the profile names we mint and the ones config hands us. */
@@ -137,22 +147,21 @@ export function createBrowserProvisioner(run: BetterwrightRunner = runBetterwrig
 
 export const browserProvisioner = createBrowserProvisioner();
 
-/** The MCP server a turn mounts as its `browser` integration. */
+/** The MCP server a turn mounts as its `browser` integration: a forwarder
+ * into the server's bridge, not `betterwright mcp` itself. If the adapter
+ * spawned the worker directly, that worker would own the profile and the
+ * server's live-view worker would be shunted onto an ephemeral one (or the
+ * other way round, depending on who spawned first) — the embed would then
+ * stream a browser the bot never touches. */
 export function browserIntegrationSpec(profileName: string): BrowserIntegrationSpec | null {
-  const cli = betterwrightCliPath();
-  if (!cli) return null;
+  if (!betterwrightCliPath()) return null;
+  const socket = browserBridgePath();
+  if (!socket) return null;
   return {
-    // in the packaged app process.execPath is Electron — run the CLI as node
+    // in the packaged app process.execPath is Electron — run it as node
     command: process.execPath,
-    args: [cli, "mcp"],
-    env: {
-      ...RUN_AS_NODE,
-      BETTERWRIGHT_PROFILE: profileName,
-      // browser_handoff needs this deployer opt-in or it refuses outright,
-      // and the system prompt sends bots to it for every sign-in step.
-      // Loopback-only mirrors the old desktop-local takeover surface.
-      BETTERWRIGHT_LIVE_VIEW_EXPOSE: "local",
-    },
+    args: [SPAWNED_PROXIES.browser, socket, profileName],
+    env: { ...RUN_AS_NODE },
   };
 }
 
@@ -221,6 +230,9 @@ export async function forgetBrowserProfile(
     console.error(`[browser] refused to erase a profile outside ${profilesDir}: ${profileName}`);
     return;
   }
+  // Ours is the process that owns this profile's browser — release it first
+  // so the erase below isn't fighting a live Chromium of our own making.
+  closeBrowserWorker(profileName);
   const lock = `${target}.betterwright-lock`;
   const stateGone = () => !existsSync(target) && !existsSync(lock);
   const settleErased = () => {
@@ -286,68 +298,121 @@ async function closeBrowserProfileSessions(profileName: string, lock: string): P
   }
 }
 
-/** One `betterwright view` child per profile. Its token-guarded page is how a
- * person watches a bot browse or takes the wheel mid-page — the successor to
- * the embedded Browser tab's live view. The page is served by the child
- * itself (verified: the URL dies with the process), so the child stays up
- * until the server exits or the person is done with it. */
-const liveViews = new Map<string, { url: Promise<string | null>; child: ChildProcess }>();
-/** Capability token → the view child's own URL, for the embed proxy below. */
+/** How long one browser tool call may run. Models legitimately park a call on
+ * a slow page or an explicit wait, so this is generous; progress pings from
+ * the worker reset it. */
+const BROWSER_CALL_TIMEOUT_MS = 10 * 60_000;
+
+/** The one browser worker a profile is allowed: an SDK client holding a
+ * `betterwright mcp` child. Every adapter session and the embedded live view
+ * for that profile go through this client. */
+interface BrowserWorker {
+  client: Client;
+  kill: () => void;
+}
+
+const browserWorkers = new Map<string, Promise<BrowserWorker | null>>();
+/** Live view per profile, started inside that profile's worker. */
+const liveViewsByProfile = new Map<string, { url: URL; token: string }>();
+/** Capability token → the worker's own viewer URL, for the embed proxy below. */
 const liveViewTargets = new Map<string, URL>();
 
-export function browserLiveViewUrl(
+function acquireBrowserWorker(
+  profileName: string,
+  cliPath: string | null = betterwrightCliPath(),
+): Promise<BrowserWorker | null> {
+  if (!PROFILE_NAME.test(profileName) || !cliPath) return Promise.resolve(null);
+  // Spawning mid-erase would recreate the very state the ladder is erasing.
+  if (browserPartitionBeingErased(profileName)) return Promise.resolve(null);
+  const existing = browserWorkers.get(profileName);
+  if (existing) return existing;
+  const started = (async (): Promise<BrowserWorker | null> => {
+    const transport = new StdioClientTransport({
+      command: process.execPath,
+      args: [cliPath, "mcp"],
+      env: {
+        ...(process.env as Record<string, string>),
+        ...RUN_AS_NODE,
+        BETTERWRIGHT_PROFILE: profileName,
+        // browser_handoff needs this deployer opt-in or it refuses outright,
+        // and both the embed and every sign-in step lean on it. Loopback-only
+        // mirrors the old desktop-local takeover surface.
+        BETTERWRIGHT_LIVE_VIEW_EXPOSE: "local",
+        // The embed is a persistent window onto this browser; don't let the
+        // worker's idle reaper close the bot's tabs an hour into the day.
+        BETTERWRIGHT_SESSION_TTL_SECONDS: "86400",
+      },
+    });
+    const client = new Client({ name: "openmausbot", version: "1.0.0" });
+    await client.connect(transport);
+    const forget = () => {
+      // Only clear our own registration — a replacement may already be live.
+      if (browserWorkers.get(profileName) === started) browserWorkers.delete(profileName);
+      const view = liveViewsByProfile.get(profileName);
+      if (view) {
+        liveViewsByProfile.delete(profileName);
+        liveViewTargets.delete(view.token);
+      }
+    };
+    transport.onclose = forget;
+    return {
+      client,
+      kill: () => {
+        forget();
+        void client.close().catch(() => {});
+      },
+    };
+  })();
+  browserWorkers.set(profileName, started);
+  return started.catch(() => {
+    if (browserWorkers.get(profileName) === started) browserWorkers.delete(profileName);
+    return null;
+  });
+}
+
+/** The live view for a profile, served from inside its own worker via
+ * `browser_handoff` — the only process whose canvas shows what the bot
+ * actually browses. Starting twice is fine: the worker returns the running
+ * view's URL rather than minting a second one. */
+export async function browserLiveViewUrl(
   profileName: string,
   cliPath: string | null = betterwrightCliPath(),
 ): Promise<string | null> {
-  if (!PROFILE_NAME.test(profileName)) return Promise.resolve(null);
-  const existing = liveViews.get(profileName);
-  if (existing) return existing.url;
-  if (!cliPath) return Promise.resolve(null);
-  const child = spawn(process.execPath, [cliPath, "view", "--expose", "local", "--profile", profileName], {
-    env: { ...process.env, ...RUN_AS_NODE, BETTERWRIGHT_PROFILE: profileName },
-    stdio: ["ignore", "pipe", "pipe"],
-  });
-  const url = new Promise<string | null>((settle) => {
-    // The URL prints only once the profile daemon is up; the first view may
-    // have to start it, so give it a while — but never wedge the request.
-    const deadline = setTimeout(() => {
-      settle(null);
-      child.kill();
-    }, 30_000);
-    deadline.unref();
-    let printed = "";
-    const scan = (chunk: Buffer) => {
-      printed += String(chunk);
-      const found = printed.match(/http:\/\/\S+/);
-      if (!found) return;
-      clearTimeout(deadline);
-      try {
-        const parsed = new URL(found[0]);
-        const token = parsed.searchParams.get("t");
-        if (token) {
-          liveViewTargets.set(token, parsed);
-          child.once("exit", () => liveViewTargets.delete(token));
-        }
-      } catch {
-        // an unparsable URL still gets relayed; only the embed loses out
-      }
-      settle(found[0]);
-    };
-    child.stdout?.on("data", scan);
-    child.stderr?.on("data", scan);
-    child.on("error", () => {
-      clearTimeout(deadline);
-      settle(null);
-    });
-    child.on("exit", () => {
-      clearTimeout(deadline);
-      settle(null);
-    });
-  });
-  // a dead child serves nothing; the next request starts a fresh one
-  child.on("exit", () => liveViews.delete(profileName));
-  liveViews.set(profileName, { url, child });
-  return url;
+  const cached = liveViewsByProfile.get(profileName);
+  if (cached) return cached.url.href;
+  const worker = await acquireBrowserWorker(profileName, cliPath);
+  if (!worker) return null;
+  try {
+    const result = (await worker.client.callTool(
+      {
+        name: "browser_handoff",
+        arguments: { action: "start", interactive: true, reason: "watched live from the app's Browser tab" },
+      },
+      undefined,
+      { timeout: 120_000 },
+    )) as { isError?: boolean; content?: Array<{ type: string; text?: string }> };
+    if (result.isError) return null;
+    const text = (result.content ?? []).map((item) => (item.type === "text" ? (item.text ?? "") : "")).join("\n");
+    const found = text.match(/http:\/\/\S+/);
+    if (!found) return null;
+    const parsed = new URL(found[0]);
+    const token = parsed.searchParams.get("t");
+    if (!token) return null;
+    liveViewsByProfile.set(profileName, { url: parsed, token });
+    liveViewTargets.set(token, parsed);
+    return parsed.href;
+  } catch {
+    return null;
+  }
+}
+
+/** The agent may stop the view, or the worker may have died with it; drop the
+ * cache so the next embed load starts a fresh one. */
+function invalidateBrowserLiveView(profileName: string): void {
+  const view = liveViewsByProfile.get(profileName);
+  if (!view) return;
+  liveViewsByProfile.delete(profileName);
+  liveViewTargets.delete(view.token);
 }
 
 /** Serve the live-view page through the app's own origin so the Computer
@@ -394,8 +459,15 @@ export async function proxyBrowserLiveViewPage(
     },
   );
   upstream.on("error", () => {
-    if (!res.headersSent) res.writeHead(502, { "content-type": "application/json" });
-    res.end(JSON.stringify({ error: "the browser live view is not reachable" }));
+    // The cached view is dead — the agent stopped it, or its worker exited.
+    // Drop it so the iframe's reload (the 302 above) starts a fresh one.
+    invalidateBrowserLiveView(profileName);
+    if (!res.headersSent) {
+      res.writeHead(302, { location: requested.pathname, "cache-control": "no-store" });
+      res.end();
+      return;
+    }
+    res.end();
   });
   upstream.end();
 }
@@ -431,8 +503,183 @@ export function proxyBrowserLiveViewUpgrade(req: IncomingMessage, socket: Duplex
   socket.on("error", () => upstream.destroy());
 }
 
-/** Shutdown: live-view pages die with the server on purpose. */
-export function closeBrowserLiveViews(): void {
-  for (const { child } of liveViews.values()) child.kill();
-  liveViews.clear();
+/** Shutdown, and per-profile teardown before an erase: the worker owns the
+ * Chromium, so killing it is what actually releases the profile. */
+export function closeBrowserWorker(profileName: string): void {
+  const pending = browserWorkers.get(profileName);
+  if (!pending) return;
+  browserWorkers.delete(profileName);
+  void pending.then((worker) => worker?.kill()).catch(() => {});
+}
+
+export function closeBrowserWorkers(): void {
+  for (const profileName of [...browserWorkers.keys()]) closeBrowserWorker(profileName);
+  liveViewsByProfile.clear();
+  liveViewTargets.clear();
+  bridge?.server.close();
+  bridge = null;
+}
+
+// ---------------------------------------------------------------------------
+// The browser bridge: adapters reach the per-profile worker through here.
+// ---------------------------------------------------------------------------
+
+/** MCP framing over a local socket — byte-identical to stdio framing, which
+ * is what lets browser-forwarder.ts relay it without understanding it. */
+class BridgeTransport implements Transport {
+  onclose?: () => void;
+  onerror?: (error: Error) => void;
+  onmessage?: (message: JSONRPCMessage) => void;
+  private readBuffer = new ReadBuffer();
+  private socket: Socket;
+
+  constructor(socket: Socket, initial: Buffer) {
+    this.socket = socket;
+    if (initial.length) this.readBuffer.append(initial);
+  }
+
+  async start(): Promise<void> {
+    this.socket.on("data", (chunk: Buffer) => {
+      this.readBuffer.append(chunk);
+      this.drain();
+    });
+    this.socket.on("error", (error) => this.onerror?.(error));
+    this.socket.on("close", () => this.onclose?.());
+    this.socket.resume();
+    // The initialize request may already sit in the preamble leftovers.
+    this.drain();
+  }
+
+  private drain(): void {
+    for (;;) {
+      let message: JSONRPCMessage | null;
+      try {
+        message = this.readBuffer.readMessage();
+      } catch (error) {
+        this.onerror?.(error instanceof Error ? error : new Error(String(error)));
+        return;
+      }
+      if (!message) return;
+      this.onmessage?.(message);
+    }
+  }
+
+  async send(message: JSONRPCMessage): Promise<void> {
+    await new Promise<void>((settle, reject) => {
+      this.socket.write(serializeMessage(message), (error) => (error ? reject(error) : settle()));
+    });
+  }
+
+  async close(): Promise<void> {
+    this.socket.end();
+  }
+}
+
+const preambleSchema = z.object({ t: z.literal("browser-mcp"), profile: z.string().min(1) });
+
+let bridge: { server: NetServer; path: string } | null = null;
+
+/** Where adapters dial the bridge, or null before startBrowserBridge ran —
+ * browserIntegrationSpec returns null then, exactly like a missing CLI. */
+export function browserBridgePath(): string | null {
+  return bridge?.path ?? null;
+}
+
+function bridgeSocketCandidates(): string[] {
+  if (process.platform !== "win32") return [join(DATA_DIR, "browser-mcp.sock")];
+  // Named pipes share a global namespace and are never unlinkable; the pid
+  // keeps two app instances apart and a random suffix dodges a stale name a
+  // dying predecessor still holds (same story as the permission broker).
+  const base = `\\\\.\\pipe\\openmausbot-browser-${process.pid}`;
+  return [base, `${base}-${Math.random().toString(16).slice(2, 8)}`];
+}
+
+async function serveBridgeConnection(socket: Socket, cliPath: string | null): Promise<void> {
+  socket.on("error", () => {});
+  // Read the forwarder's one-line preamble, then hold the stream until the
+  // MCP server's transport takes over — the initialize request can arrive
+  // while the worker is still spawning.
+  const preamble = await new Promise<{ profile: string; leftover: Buffer } | null>((settle) => {
+    let buffered = Buffer.alloc(0);
+    const onData = (chunk: Buffer) => {
+      buffered = Buffer.concat([buffered, chunk]);
+      const newline = buffered.indexOf(0x0a);
+      if (newline === -1) {
+        if (buffered.length > 4096) finish(null);
+        return;
+      }
+      const parsed = preambleSchema.safeParse(safeJson(buffered.subarray(0, newline).toString()));
+      finish(parsed.success ? { profile: parsed.data.profile, leftover: buffered.subarray(newline + 1) } : null);
+    };
+    const finish = (value: { profile: string; leftover: Buffer } | null) => {
+      clearTimeout(deadline);
+      socket.off("data", onData);
+      socket.pause();
+      settle(value);
+    };
+    const deadline = setTimeout(() => finish(null), 10_000);
+    deadline.unref();
+    socket.on("data", onData);
+    socket.once("close", () => finish(null));
+  });
+  if (!preamble) {
+    socket.destroy();
+    return;
+  }
+  const worker = await acquireBrowserWorker(preamble.profile, cliPath);
+  if (!worker) {
+    // No CLI, no browser, or the profile is mid-erase: fail the whole MCP
+    // connection loudly rather than serving tools that cannot work.
+    socket.destroy();
+    return;
+  }
+  const mcp = new McpServer(
+    { name: "openmausbot-browser", version: "1.0.0" },
+    { capabilities: { tools: {} } },
+  );
+  mcp.setRequestHandler(ListToolsRequestSchema, async () => await worker.client.listTools());
+  mcp.setRequestHandler(
+    CallToolRequestSchema,
+    async (request) =>
+      await worker.client.callTool(request.params, undefined, {
+        timeout: BROWSER_CALL_TIMEOUT_MS,
+        resetTimeoutOnProgress: true,
+      }),
+  );
+  await mcp.connect(new BridgeTransport(socket, preamble.leftover));
+}
+
+function safeJson(text: string): unknown {
+  try {
+    return JSON.parse(text);
+  } catch {
+    return undefined;
+  }
+}
+
+/** Bind the bridge once at boot. Losing every candidate leaves the built-in
+ * browser off for this run — reported, never thrown into boot. */
+export async function startBrowserBridge(
+  cliPath: string | null = betterwrightCliPath(),
+  candidates: string[] = bridgeSocketCandidates(),
+): Promise<string | null> {
+  if (bridge) return bridge.path;
+  mkdirSync(DATA_DIR, { recursive: true });
+  for (const path of candidates) {
+    // A previous run's socket file would EADDRINUSE forever; named pipes
+    // vanish with their owner and must not be unlinked.
+    if (process.platform !== "win32") rmSync(path, { force: true });
+    const server = netCreateServer((socket) => void serveBridgeConnection(socket, cliPath));
+    const bound = await new Promise<boolean>((settle) => {
+      server.once("error", () => settle(false));
+      server.listen(path, () => settle(true));
+    });
+    if (bound) {
+      server.unref();
+      bridge = { server, path };
+      return path;
+    }
+  }
+  console.error("[browser] the browser bridge could not bind; the built-in browser is unavailable this run");
+  return null;
 }

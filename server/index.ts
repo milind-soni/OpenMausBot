@@ -195,11 +195,12 @@ import {
   browserPartitionBeingErased,
   browserProfileName,
   browserProvisioner,
-  closeBrowserLiveViews,
+  closeBrowserWorkers,
   forgetBrowserProfile,
   proxyBrowserLiveViewPage,
   proxyBrowserLiveViewUpgrade,
   resumeBrowserProfileErasures,
+  startBrowserBridge,
 } from "./betterwright.ts";
 import { captureOutsideHumanControl } from "./private-screen-capture.ts";
 import { RoutineRequestService } from "./routine-requests.ts";
@@ -8262,6 +8263,9 @@ server.listen(PORT, "127.0.0.1", () => {
 // Finish any profile erase a shutdown interrupted — the journal is the
 // deletion promise, and it must not evaporate with the process.
 resumeBrowserProfileErasures();
+// Bind the browser bridge before the first turn can ask for a spec; adapters
+// reach the per-profile BetterWright worker only through this socket.
+void startBrowserBridge();
 // Warm-start the browser on machines where the feature is already on, so the
 // first browsing turn after a clean install does not pay for the download.
 // Guest starts from a blank slate: it is the profile that keeps no logins
@@ -8276,7 +8280,7 @@ const gracefulShutdown = createGracefulShutdown({
     () => {
       for (const idle of localVmIdles.values()) idle.cancel();
       vps.closeAllVpsDesktopTunnels();
-      closeBrowserLiveViews();
+      closeBrowserWorkers();
       watchdog.stop();
       routines?.stop();
       calendarCalls?.stop();

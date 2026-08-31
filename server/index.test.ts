@@ -2940,17 +2940,15 @@ describe("harness HTTP API", () => {
       }).parse(await readJsonFileWhenReady(fakeClaudeDump));
       const browser = dump.mcpConfig.mcpServers.browser;
       expect(browser.command).toBe(process.execPath);
-      expect(browser.args).toHaveLength(2);
-      expect(browser.args[0]).toMatch(/betterwright\.js$/);
-      expect(browser.args[1]).toBe("mcp");
+      // Not `betterwright mcp` itself: the CLI mounts a forwarder into the
+      // server's bridge, so the turn shares the profile's one worker with the
+      // embedded live view instead of evicting it onto an ephemeral profile.
+      expect(browser.args).toHaveLength(3);
+      expect(browser.args[0]).toMatch(/browser-forwarder\.(ts|js)$/);
       // The bot browses in the profile's durable partition, and BetterWright
       // owns everything else about that session.
-      expect(browser.env).toEqual({
-        ELECTRON_RUN_AS_NODE: "1",
-        BETTERWRIGHT_PROFILE: "work",
-        // without the live-view opt-in, browser_handoff refuses to run
-        BETTERWRIGHT_LIVE_VIEW_EXPOSE: "local",
-      });
+      expect(browser.args[2]).toBe("work");
+      expect(browser.env).toEqual({ ELECTRON_RUN_AS_NODE: "1" });
 
       const systemIndex = dump.argv.indexOf("--append-system-prompt");
       expect(systemIndex).toBeGreaterThanOrEqual(0);
@@ -2980,7 +2978,7 @@ describe("harness HTTP API", () => {
       const dump = z.object({
         mcpConfig: z.object({
           mcpServers: z.object({
-            browser: z.object({ env: z.object({ BETTERWRIGHT_PROFILE: z.string() }) }),
+            browser: z.object({ args: z.array(z.string()).length(3) }),
           }),
         }),
       }).parse(await readJsonFileWhenReady(fakeClaudeDump));
@@ -2989,7 +2987,7 @@ describe("harness HTTP API", () => {
         const state = (await api("GET", "/api/bots")).body;
         return state.bots.find((candidate: { id: string }) => candidate.id === bot.id)?.busy;
       }, { timeout: 5_000 }).toBeFalsy();
-      return dump.mcpConfig.mcpServers.browser.env.BETTERWRIGHT_PROFILE;
+      return dump.mcpConfig.mcpServers.browser.args[2];
     };
     try {
       expect((await api("PATCH", "/api/config", { features: { browser: true } })).status).toBe(200);

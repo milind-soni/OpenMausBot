@@ -153,9 +153,16 @@ shipped and was then replaced wholesale by
 [BetterWright](https://github.com/BetterWright/betterwright) 2.0.0. What the
 replacement buys:
 
-- **One MCP server instead of a proxy chain.** `browserIntegration()` hands
-  drivers `betterwright mcp` (spawned from `node_modules` with
-  `ELECTRON_RUN_AS_NODE=1`). The old
+- **One worker per profile, owned by the server.** BetterWright gives a
+  profile exactly one owning process; a second worker on the same profile is
+  shunted onto a throwaway ephemeral one. So the server holds the single
+  `betterwright mcp` worker per profile and `browserIntegration()` hands
+  drivers a forwarder (`server/browser-forwarder.ts <bridge-socket>
+  <profile>`) that relays the adapter's MCP stdio to the server's bridge
+  socket, where each session is proxied onto that worker. The bot's tools
+  and the embedded live view therefore share one browser — mount
+  `betterwright mcp` from the adapter directly and the embed would stream a
+  browser the bot never touches. The old
   browser-proxy → loopback host → WebContentsView pipeline, its capability
   mint/revoke lifecycle, and the vendored `playwright-injected` snapshot
   bundle are gone.
@@ -177,19 +184,21 @@ replacement buys:
   and config refuses (409) a new profile on a partition still being erased.
 - **The live view stays embedded in the app.** The Computer panel keeps a
   Browser tab: it iframes `/api/bots/:id/browser/view-embed`, a same-origin
-  proxy of the `betterwright view --expose local` page the server keeps
-  running per profile (the raw page forbids cross-origin frames and checks
-  WebSocket origins, so the server rewrites both; the viewer's `/ws`
-  upgrade rides the app origin and is routed back by token). The person
-  watches the bot's page live in the panel and clicks into it to take
-  over, exactly the old preview-plus-takeover loop; an "Open in tab"
-  button pops the same view out. For sign-in steps the bot itself calls
-  `browser_handoff` (the integration sets the deployer opt-in
-  `BETTERWRIGHT_LIVE_VIEW_EXPOSE=local`), and `browser_login` fills vault
-  credentials without exposing them to the model. The old who-is-driving
-  lease is gone: BetterWright serializes viewer and agent input itself.
-  This also clears the old tier-1 limit: BetterWright's browser is a real
-  Chromium fork, so Google OAuth works.
+  proxy of the viewer the profile's own worker serves after the server calls
+  `browser_handoff {action: "start"}` on it — the only process whose canvas
+  is the bot's actual pages (verified live: a takeover navigation through
+  the embed showed up in the bot's in-flight `page.url()`). The raw viewer
+  page forbids cross-origin frames and checks WebSocket origins, so the
+  server rewrites both; the viewer's `/ws` upgrade rides the app origin and
+  is routed back by token. The person watches the bot's page live in the
+  panel and clicks into it to take over, exactly the old
+  preview-plus-takeover loop; an "Open in tab" button pops the same view
+  out. For sign-in steps the bot itself calls `browser_handoff` (the worker
+  env sets the deployer opt-in `BETTERWRIGHT_LIVE_VIEW_EXPOSE=local`), and
+  `browser_login` fills vault credentials without exposing them to the
+  model. The old who-is-driving lease is gone: BetterWright serializes
+  viewer and agent input itself. This also clears the old tier-1 limit:
+  BetterWright's browser is a real Chromium fork, so Google OAuth works.
 - **Platform matrix shifts.** BetterChromium ships for macOS arm64, Linux
   x64 and Windows x64. Windows gains the built-in browser (the embedded
   surface was fail-closed there pending sandbox verification); Intel macs
