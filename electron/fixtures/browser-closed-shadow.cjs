@@ -387,8 +387,8 @@ async function run() {
     const lockedRootHtml = `<!doctype html><html style="overflow:hidden"><body style="margin:0;overflow:hidden">
       <div style="height:2400px">Locked page</div>
     </body></html>`;
-    manager.setHumanControl("fixture-bot", false, "");
     await browserView.webContents.loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(lockedRootHtml)}`);
+    manager.setHumanControl("fixture-bot", false, "");
     await manager.scroll("fixture-bot", "down", 300, "");
     await new Promise((resolve) => setTimeout(resolve, 50));
     const lockedScrollTop = await browserView.webContents.executeJavaScript(`document.scrollingElement.scrollTop`);
