@@ -1,0 +1,8 @@
+{
+  "noEngines.title": "安装一个 AI 引擎，开始使用",
+  "noEngines.intro": "OpenMausBot 本身不自带模型——你的机器人依托这台电脑上已安装的 AI 命令行工具运行，使用你现有的登录。任选其一完成设置，机器人即可开始工作。",
+  "engines.cloud": "云端",
+  "engines.local": "本地",
+  "common.checkAgain": "重新检测",
+  "common.checking": "检测中…"
+}

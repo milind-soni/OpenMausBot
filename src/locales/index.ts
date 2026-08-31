@@ -1,16 +1,20 @@
-// Language registry — adding a language is one file plus one line here,
-// exactly like registering a provider driver. Packs are PARTIAL: any key a
-// pack omits falls back to English, so a half-translated language is a
-// usable language, not a broken one.
-import { en } from "./en";
-import { de } from "./de";
-import { es } from "./es";
-import { fr } from "./fr";
-import { hi } from "./hi";
-import { ja } from "./ja";
-import { ptBr } from "./pt-br";
-import { zh } from "./zh";
+// Language registry — a language is one JSON file plus one line here.
+// Catalogs are plain JSON so the lingo.dev pipeline, the fallback
+// generator script, and human translators all read/write them directly.
+// Packs are PARTIAL: any key a pack omits falls back to English, so a
+// half-translated language is a usable language, not a broken one.
+import en from "./en.json";
+import de from "./de.json";
+import es from "./es.json";
+import fr from "./fr.json";
+import hi from "./hi.json";
+import ja from "./ja.json";
+// file named with canonical BCP-47 casing (the lingo.dev pipeline
+// requires it); registry keys stay lowercase for resolveLocale
+import ptBr from "./pt-BR.json";
+import zh from "./zh.json";
 
+export { en };
 export type LocaleKey = keyof typeof en;
 export type LocalePack = Partial<Record<LocaleKey, string>>;
 

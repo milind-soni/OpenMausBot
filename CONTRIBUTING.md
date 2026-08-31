@@ -138,14 +138,15 @@ how chat routine proposals failed in the field hours after 0.1.38 shipped (#544)
 
 ## Adding a language
 
-The renderer's strings live in typed catalogs under `src/locales/`. English
-(`src/locales/en.ts`) is the source of truth; a language is one file plus a
+The renderer's strings live in JSON catalogs under `src/locales/`. English
+(`src/locales/en.json`) is the source of truth (typing still flows from it); a language is one file plus a
 one-line registration, exactly like a provider driver:
 
-1. Copy `src/locales/en.ts` to `src/locales/<code>.ts` (lowercase BCP-47
-   tag: `de.ts`, `pt-br.ts`) and translate the values. Keys you leave out
-   fall back to English — partial packs are fine and expected while the
-   extraction is still spreading through the UI.
+1. Copy `src/locales/en.json` to `src/locales/<code>.json` (lowercase
+   BCP-47 tag: `de.json`, `pt-br.json`) and translate the values — or let
+   the pipeline draft it (`docs/localization-pipeline.md`). Keys you leave
+   out fall back to English — partial packs are fine and expected while
+   the extraction is still spreading through the UI.
 2. Register it in `src/locales/index.ts`.
 3. The app follows the system language (`navigator.language`, with base-tag
    fallback). There is no in-app picker yet, so verify by switching your OS

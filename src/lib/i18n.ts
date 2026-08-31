@@ -1,8 +1,7 @@
 // Minimal string catalog — deliberately not a library. The renderer follows
 // the system language; unknown tags and untranslated keys fall back to
 // English, so a partial pack can ship the day it has one string.
-import { en } from "@/locales/en";
-import { locales, type LocaleKey, type LocalePack } from "@/locales";
+import { en, locales, type LocaleKey, type LocalePack } from "@/locales";
 
 /** "de-AT" → "de-at" if registered, else "de", else "en". Pure, for tests. */
 export function resolveLocale(tag: string | undefined, available: ReadonlySet<string>): string {

@@ -1,8 +1,7 @@
 import { afterEach, describe, expect, it } from "vitest";
 
 import { resolveLocale, setLocale, t } from "./i18n";
-import { locales } from "@/locales";
-import { en } from "@/locales/en";
+import { en, locales } from "@/locales";
 
 afterEach(() => {
   setLocale("en");

@@ -1,0 +1,8 @@
+{
+  "noEngines.title": "Installez un moteur d'IA pour commencer",
+  "noEngines.intro": "OpenMausBot n'embarque pas de modèle : vos bots s'appuient sur une CLI d'IA installée sur cet ordinateur, avec votre session existante. Configurez l'une d'elles et vos bots prennent vie.",
+  "engines.cloud": "Cloud",
+  "engines.local": "Local",
+  "common.checkAgain": "Revérifier",
+  "common.checking": "Vérification…"
+}

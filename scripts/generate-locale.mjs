@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// Draft a language pack from src/locales/en.ts using the locally installed
+// Draft a language pack from src/locales/en.json using the locally installed
 // `claude` CLI (your existing login — no API key, nothing leaves your
 // machine except the prompt). The output is a DRAFT: review it like any
 // community PR before registering it.
@@ -7,7 +7,7 @@
 //   node scripts/generate-locale.mjs de "German"
 //   node scripts/generate-locale.mjs --check        # coverage report
 //
-// The en.ts catalog stays a flat map of "key": "value" string pairs on
+// The en.json catalog stays a flat map of "key": "value" string pairs on
 // purpose — this script (and translators) parse it without a TS toolchain.
 import { execFileSync } from "node:child_process";
 import { existsSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
@@ -15,24 +15,19 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const LOCALES_DIR = join(dirname(fileURLToPath(import.meta.url)), "..", "src", "locales");
-const PAIR = /"((?:[^"\\]|\\.)+)":\s*\n?\s*"((?:[^"\\]|\\.)*)"/g;
-
 function readCatalog(file) {
-  const source = readFileSync(join(LOCALES_DIR, file), "utf8");
-  const entries = {};
-  for (const match of source.matchAll(PAIR)) entries[JSON.parse(`"${match[1]}"`)] = JSON.parse(`"${match[2]}"`);
-  return entries;
+  return JSON.parse(readFileSync(join(LOCALES_DIR, file), "utf8"));
 }
 
-const en = readCatalog("en.ts");
+const en = readCatalog("en.json");
 const enKeys = Object.keys(en);
 if (!enKeys.length) {
-  console.error("could not parse any keys from en.ts — the catalog must stay flat \"key\": \"value\" pairs");
+  console.error("could not parse any keys from en.json — the catalog must stay flat \"key\": \"value\" pairs");
   process.exit(1);
 }
 
 if (process.argv[2] === "--check") {
-  for (const file of readdirSync(LOCALES_DIR).filter((f) => f.endsWith(".ts") && !["en.ts", "index.ts"].includes(f))) {
+  for (const file of readdirSync(LOCALES_DIR).filter((f) => f.endsWith(".json") && !["en.json", "index.ts"].includes(f))) {
     const pack = readCatalog(file);
     const missing = enKeys.filter((key) => !(key in pack));
     const pct = Math.round(((enKeys.length - missing.length) / enKeys.length) * 100);
@@ -47,9 +42,9 @@ if (!/^[a-z]{2,3}(-[a-z]{2,8})?$/.test(code)) {
   console.error("usage: node scripts/generate-locale.mjs <bcp47-code> [label]   (or --check)");
   process.exit(1);
 }
-const outFile = join(LOCALES_DIR, `${code}.ts`);
+const outFile = join(LOCALES_DIR, `${code}.json`);
 if (existsSync(outFile) && !process.argv.includes("--force")) {
-  console.error(`${code}.ts already exists — pass --force to overwrite the draft`);
+  console.error(`${code}.json already exists — pass --force to overwrite the draft`);
   process.exit(1);
 }
 
@@ -77,17 +72,9 @@ if (unknown.length) {
   process.exit(1);
 }
 
-const exportName = code.replace(/-(\w)/g, (_m, c) => c.toUpperCase());
-const body = enKeys
-  .filter((key) => typeof draft[key] === "string" && draft[key].trim())
-  .map((key) => `  ${JSON.stringify(key)}: ${JSON.stringify(draft[key])},`)
-  .join("\n");
-writeFileSync(
-  outFile,
-  `// ${label} — community pack, machine-drafted (review before registering).\n` +
-    `// Partial by design: keys omitted here fall back to English.\n` +
-    `// See CONTRIBUTING.md "Adding a language".\n` +
-    `import type { LocalePack } from "./index";\n\n` +
-    `export const ${exportName}: LocalePack = {\n${body}\n};\n`,
-);
-console.error(`wrote ${outFile} — review it, then register "${code}" in src/locales/index.ts`);
+const ordered = {};
+for (const key of enKeys) {
+  if (typeof draft[key] === "string" && draft[key].trim()) ordered[key] = draft[key];
+}
+writeFileSync(outFile, JSON.stringify(ordered, null, 2) + "\n");
+console.error(`wrote ${outFile} — review it, then register "${code}" in src/locales/index.ts (import + locales map)`);
