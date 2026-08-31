@@ -326,6 +326,12 @@ export function ModelPicker({
                       ? "Run this agent with a model already on your machine."
                       : "Choose a model for this bot."}
                   </div>
+                  {["deepseek", "minimax"].includes(railInstance.driverKind) && (
+                    <div className="mt-2 rounded bg-warning/10 px-2 py-1.5 text-[11px] leading-relaxed text-warning-dark border border-warning/20">
+                      <strong>Limited functionality:</strong> This native HTTP driver does not support BotFleet tools. 
+                      For full tool support, use the Pi Engine's OpenAI compat, or the DeepSeek Harness (<code>dsh</code>) instead.
+                    </div>
+                  )}
                 </div>
 
                 {pane === "custom" && canReturnToOfficial && (

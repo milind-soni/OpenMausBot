@@ -62,7 +62,7 @@ import {
   showToolCallsEnabled,
   skillRecorderEnabled,
   syncCredentialEnv,
-  withInstanceCli,
+  patchInstanceConfig,
   vpsSshAlias,
   DATA_DIR,
   EVENTS_DIR,
@@ -4815,8 +4815,8 @@ const server = createServer(async (req, res) => {
     }
 
     // ── per-instance CLI path override (custom builds / versioned bins) ──
-    // PATCH /api/instances/:id {cli: "/path/to/cli" | ""} — "" reverts to the
-    // driver default. Kills in-flight turns like any provider reload.
+    // PATCH /api/instances/:id {cli?: string, fullAuto?: boolean}
+    // Kills in-flight turns like any provider reload.
     const instancePatch = /^\/api\/instances\/([\w.-]+)$/.exec(path);
     if (method === "PATCH" && instancePatch) {
       // same non-simple-request gate as the local-VM lifecycle routes
@@ -4824,12 +4824,23 @@ const server = createServer(async (req, res) => {
         return json(res, 415, { error: "content-type must be application/json" });
       }
       const body = await readBody(req);
-      if (typeof body?.cli !== "string") return json(res, 400, { error: "cli must be a string" });
-      if (/[\n\r]/.test(body.cli)) return json(res, 400, { error: "cli must not contain newlines" });
+      const patchOptions: { cli?: string; fullAuto?: boolean } = {};
+
+      if (body?.cli !== undefined) {
+        if (typeof body.cli !== "string") return json(res, 400, { error: "cli must be a string" });
+        if (/[\n\r]/.test(body.cli)) return json(res, 400, { error: "cli must not contain newlines" });
+        patchOptions.cli = body.cli;
+      }
+
+      if (body?.fullAuto !== undefined) {
+        if (typeof body.fullAuto !== "boolean") return json(res, 400, { error: "fullAuto must be a boolean" });
+        patchOptions.fullAuto = body.fullAuto;
+      }
+
       if (providerConfigBusy) return json(res, 409, { error: "provider settings are already being updated" });
       providerConfigBusy = true;
       try {
-        const result = withInstanceCli(cfg, instancePatch[1], body.cli);
+        const result = patchInstanceConfig(cfg, instancePatch[1], patchOptions);
         if (!result.ok) return json(res, 404, { error: `unknown instance "${instancePatch[1]}"` });
         // persist the whole instances map this rebuild produced — a fresh
         // saveConfig({instances}) merge would re-derive defaults identically,

@@ -325,10 +325,10 @@ export function saveConfig(patch: Partial<AppConfig>): void {
  * back out before the map is returned — otherwise saving an override would
  * copy xai/box/opencodeGo secrets into the instances section of
  * config.json. */
-export function withInstanceCli(
+export function patchInstanceConfig(
   cfg: AppConfig,
   instanceId: string,
-  cli: string,
+  patch: { cli?: string; fullAuto?: boolean },
 ): InstanceCliUpdate {
   const next: AppConfig = structuredClone(cfg);
   const map = instanceConfigs(next);
@@ -338,17 +338,28 @@ export function withInstanceCli(
   // comes off the URL, where `__proto__` passes the route's [\w.-]+ regex)
   if (!Object.hasOwn(map, instanceId)) return { ok: false, config: cfg };
   const entry = map[instanceId];
-  const cliKey = cli.trim();
+  
   const currentConfig = jsonObjectSchema.safeParse(entry.config);
-  if (cliKey) {
-    const nextConfig: JsonObject = currentConfig.success ? { ...currentConfig.data } : {};
-    nextConfig.cli = cliKey;
-    entry.config = nextConfig;
-  } else if (currentConfig.success && Object.hasOwn(currentConfig.data, "cli")) {
-    const rest = { ...currentConfig.data };
-    delete rest.cli;
-    entry.config = Object.keys(rest).length ? rest : undefined;
+  const nextConfig: JsonObject = currentConfig.success ? { ...currentConfig.data } : {};
+
+  if (patch.cli !== undefined) {
+    const cliKey = patch.cli.trim();
+    if (cliKey) {
+      nextConfig.cli = cliKey;
+    } else {
+      delete nextConfig.cli;
+    }
   }
+
+  if (patch.fullAuto !== undefined) {
+    if (patch.fullAuto) {
+      nextConfig.fullAuto = true;
+    } else {
+      delete nextConfig.fullAuto;
+    }
+  }
+
+  entry.config = Object.keys(nextConfig).length ? nextConfig : undefined;
   for (const e of Object.values(map)) {
     if (!e.environment) continue;
     const injected = injectedEnvironment(next, e.driver);
@@ -367,7 +378,7 @@ interface InstanceCliUpdate {
 }
 
 /** The credential env instanceConfigs() injects for one driver — shared with
- * withInstanceCli() so the inject rule and the strip rule cannot drift apart.
+ * patchInstanceConfig() so the inject rule and the strip rule cannot drift apart.
  * Each secret goes only to the driver that actually reads it: the API-key
  * Grok driver reads XAI_API_KEY, the Computer driver reads BOX_TOKEN, and
  * OpenCode reads OPENCODE_API_KEY. Every other engine brings its own

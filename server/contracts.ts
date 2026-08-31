@@ -59,7 +59,7 @@ export interface InstanceConfig {
   accentColor?: string;
   environment?: Record<string, string>;
   enabled?: boolean;
-  config?: unknown;
+  config?: { fullAuto?: boolean; cli?: string; [key: string]: unknown } | unknown;
 }
 
 export type InstanceConfigMap = Record<InstanceId, InstanceConfig>;

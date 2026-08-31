@@ -256,6 +256,27 @@ function EngineRow({ instance }: { instance: InstanceInfo }) {
             {switching ? "Resetting…" : "Reset"}
           </button>
         )}
+        <label className="flex items-center gap-1.5 shrink-0 text-[12px] text-ink-secondary hover:text-ink cursor-pointer">
+          <input
+            type="checkbox"
+            className="accent-accent"
+            checked={!!instance.fullAuto}
+            disabled={switching}
+            onChange={(e) => {
+              const checked = e.target.checked;
+              setSwitching(true);
+              setError(null);
+              api(`/api/instances/${encodeURIComponent(instance.instanceId)}`, {
+                method: "PATCH",
+                body: JSON.stringify({ fullAuto: checked }),
+              })
+                .then(() => Promise.resolve(refreshInstances()).catch(() => {}))
+                .catch((e) => setError(e.message))
+                .finally(() => setSwitching(false));
+            }}
+          />
+          Bypass permissions (autonomous mode)
+        </label>
         <button
           onClick={() => setOpen((v) => !v)}
           aria-expanded={open}
@@ -267,6 +288,12 @@ function EngineRow({ instance }: { instance: InstanceInfo }) {
           Set CLI…
         </button>
       </div>
+      {["deepseek", "minimax"].includes(instance.driverKind) && (
+        <div className="mt-2 rounded bg-warning/10 px-2 py-1.5 text-[11px] leading-relaxed text-warning-dark border border-warning/20">
+          <strong>Limited functionality:</strong> This native HTTP driver does not support BotFleet tools. 
+          For full tool support, use the Pi Engine's OpenAI compat, or the DeepSeek Harness (<code>dsh</code>) instead.
+        </div>
+      )}
       {error && <div role="alert" className="mt-1 text-[12px] text-danger">{error}</div>}
       {open && (
         <CustomPicker

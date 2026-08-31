@@ -46,11 +46,16 @@ function cliOfRaw(raw: unknown): string | undefined {
   return typeof cli === "string" && cli ? cli : undefined;
 }
 
+function fullAutoOfRaw(raw: unknown): boolean {
+  return (raw as { fullAuto?: unknown } | undefined)?.fullAuto === true;
+}
+
 export class ProviderRegistry {
   private byId = new Map<InstanceId, RegistryEntry>();
   /** decoded per-instance `cli` overrides, for describe() — drivers spawn
    * from their own config; this map only reports what was configured */
   private cliByInstance = new Map<InstanceId, string>();
+  private fullAutoByInstance = new Map<InstanceId, boolean>();
   private driversByKind: Map<string, AnyProviderDriver>;
 
   constructor(drivers: readonly AnyProviderDriver[]) {
@@ -59,6 +64,9 @@ export class ProviderRegistry {
 
   async load(configs: InstanceConfigMap) {
     for (const [instanceId, entry] of Object.entries(configs)) {
+      const isFullAuto = fullAutoOfRaw(entry.config);
+      if (isFullAuto) this.fullAutoByInstance.set(instanceId, true);
+
       const driver = this.driversByKind.get(entry.driver);
       if (!driver) {
         this.byId.set(instanceId, {
@@ -150,6 +158,7 @@ export class ProviderRegistry {
             // a shadow is exactly the "your CLI is broken, pick another"
             // case where the detected-path dropdown matters most
             cliCandidates: candidatesFor(driver),
+            fullAuto: this.fullAutoByInstance.get(entry.instanceId) ?? false,
           };
         }
         const inst = entry.live;
@@ -184,6 +193,7 @@ export class ProviderRegistry {
           // the dropdown's "detected" entries. Snapshotted per describe() so a
           // newly installed CLI shows up on the next refresh.
           cliCandidates: candidatesFor(driver),
+          fullAuto: this.fullAutoByInstance.get(inst.instanceId) ?? false,
         };
       }),
     );
@@ -193,5 +203,6 @@ export class ProviderRegistry {
     await Promise.allSettled(this.instances().map((i) => i.dispose()));
     this.byId.clear();
     this.cliByInstance.clear();
+    this.fullAutoByInstance.clear();
   }
 }

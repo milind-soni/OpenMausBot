@@ -340,6 +340,8 @@ export interface InstanceInfo {
   cliDefault?: string;
   /** Absolute paths of every default binary found on PATH, PATH order. */
   cliCandidates?: string[];
+  /** YOLO full access bypass permissions */
+  fullAuto?: boolean;
 }
 
 export type AppSettingsSection =

@@ -18,7 +18,7 @@ import {
   stripWorkspaceCredentialEnv,
   syncCredentialEnv,
   vpsSshAlias,
-  withInstanceCli,
+  patchInstanceConfig,
   WORKSPACE_CREDENTIAL_ENV,
   type AppConfig,
 } from "./config.ts";
@@ -184,14 +184,14 @@ describe("default fleet", () => {
 describe("Instance CLI override", () => {
   it("sets, replaces, and clears config.cli on a default-fleet instance", () => {
     const cfg: AppConfig = {};
-    const set = withInstanceCli(cfg, "claude", "/opt/claude-2.1/bin/claude");
+    const set = patchInstanceConfig(cfg, "claude", { cli: "/opt/claude-2.1/bin/claude" });
     expect(set.ok).toBe(true);
     expect(set.config.instances!.claude.config).toEqual({ cli: "/opt/claude-2.1/bin/claude" });
 
-    const replaced = withInstanceCli(set.config, "claude", "~/bin/claude");
+    const replaced = patchInstanceConfig(set.config, "claude", { cli: "~/bin/claude" });
     expect(replaced.config.instances!.claude.config).toEqual({ cli: "~/bin/claude" });
 
-    const cleared = withInstanceCli(replaced.config, "claude", "");
+    const cleared = patchInstanceConfig(replaced.config, "claude", { cli: "" });
     expect(cleared.config.instances!.claude.config).toBeUndefined();
   });
 
@@ -199,22 +199,22 @@ describe("Instance CLI override", () => {
     const cfg: AppConfig = {
       instances: { claude: { driver: "claudeAgent", config: { cli: "/x/claude", permissionMode: "bypassPermissions" } } },
     };
-    const cleared = withInstanceCli(cfg, "claude", "");
+    const cleared = patchInstanceConfig(cfg, "claude", { cli: "" });
     expect(cleared.config.instances!.claude.config).toEqual({ permissionMode: "bypassPermissions" });
   });
 
   it("leaves the original config untouched and rejects unknown instances", () => {
     const cfg: AppConfig = { instances: { codex: { driver: "codex" } } };
-    const result = withInstanceCli(cfg, "codex", "/new/codex");
+    const result = patchInstanceConfig(cfg, "codex", { cli: "/new/codex" });
     expect(result.config.instances!.codex.config).toEqual({ cli: "/new/codex" });
     expect(cfg.instances!.codex.config).toBeUndefined();
 
-    expect(withInstanceCli(cfg, "nope", "/x").ok).toBe(false);
+    expect(patchInstanceConfig(cfg, "nope", { cli: "/x" }).ok).toBe(false);
   });
 
   it("never persists the credential env instanceConfigs injects", () => {
     // instanceConfigs() copies each credential into its consuming driver's
-    // environment for the live fleet; withInstanceCli must strip those pairs
+    // environment for the live fleet; patchInstanceConfig must strip those pairs
     // back out, or saving a CLI override would copy secrets into the
     // instances section of config.json.
     const cfg: AppConfig = {
@@ -228,14 +228,14 @@ describe("Instance CLI override", () => {
         opencode: { driver: "opencodeGo" },
       },
     };
-    const set = withInstanceCli(cfg, "claude", "/opt/claude");
+    const set = patchInstanceConfig(cfg, "claude", { cli: "/opt/claude" });
     expect(set.ok).toBe(true);
     for (const entry of Object.values(set.config.instances!)) {
       expect(entry.environment ?? {}).toEqual({});
     }
     // user-authored env survives
     const custom = { instances: { claude: { driver: "claudeAgent", environment: { MY_FLAG: "1" } } } };
-    const kept = withInstanceCli(custom, "claude", "/x");
+    const kept = patchInstanceConfig(custom, "claude", { cli: "/x" });
     expect(kept.config.instances!.claude.environment).toEqual({ MY_FLAG: "1" });
   });
 });
