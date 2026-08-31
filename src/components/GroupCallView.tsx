@@ -355,9 +355,10 @@ function GroupCall({ group, members }: { group: Group; members: Bot[] }) {
       };
       spokenIds.current.add(approval.message.id);
       const name = member?.name ?? approval.message.from?.name ?? "A channel member";
-      enqueueSpeech(isSkillApproval(approval)
-        ? `${name} wants to apply a learned-skill change. Open the channel chat to review the complete skill before applying it. You can say no to deny it.`
-        : spokenApprovalPrompt(approval, name), member, true);
+      const skillPrompt = approval.message.card?.skillRequest?.action === "update"
+        ? `${name} wants to update a learned skill. Open the channel chat to review the complete skill before replacing the current version. You can say no to deny it.`
+        : `${name} wants to enable a new learned skill. Open the channel chat to review the complete skill before enabling it. You can say no to deny it.`;
+      enqueueSpeech(isSkillApproval(approval) ? skillPrompt : spokenApprovalPrompt(approval, name), member, true);
     }
 
     if (question?.card?.requestId && askedQuestion.current?.requestId !== question.card.requestId) {

@@ -442,9 +442,10 @@ function Call({ bot }: { bot: Bot }) {
         submitted: false,
       };
       spokenIds.current.add(approval.message.id);
-      void sayThenListen(isSkillApproval(approval)
-        ? `${bot.name} wants to apply a learned-skill change. Open this chat to review the complete skill before applying it. You can say no to deny it.`
-        : spokenApprovalPrompt(approval, bot.name));
+      const skillPrompt = approval.message.card?.skillRequest?.action === "update"
+        ? `${bot.name} wants to update a learned skill. Open this chat to review the complete skill before replacing the current version. You can say no to deny it.`
+        : `${bot.name} wants to enable a new learned skill. Open this chat to review the complete skill before enabling it. You can say no to deny it.`;
+      void sayThenListen(isSkillApproval(approval) ? skillPrompt : spokenApprovalPrompt(approval, bot.name));
       return;
     }
     if (

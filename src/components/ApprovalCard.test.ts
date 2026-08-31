@@ -257,5 +257,10 @@ describe("ApprovalCard learned skills", () => {
     const markup = renderToStaticMarkup(createElement(ApprovalCard, { message }));
     expect(markup).toContain("created by an older build");
     expect(markup).toContain("cannot be safely applied");
+    expect(markup).toContain("create the skill again");
+
+    message.card!.skillRequest!.action = "update";
+    expect(renderToStaticMarkup(createElement(ApprovalCard, { message })))
+      .toContain("propose the update again");
   });
 });
