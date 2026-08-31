@@ -8249,9 +8249,17 @@ const server = createServer(async (req, res) => {
 calendarCalls.start();
 
 // The embedded live view's page dials ws://<app origin>/ws with its token;
-// route that upgrade to the right BetterWright view child. Nothing else on
+// route that upgrade to the right BetterWright view worker. Nothing else on
 // this server speaks WebSocket.
 server.on("upgrade", (req, socket, head) => {
+  // The same loopback-host + origin gate every HTTP route passes through:
+  // upgrades bypass the request handler, and the tunnel below rewrites
+  // Origin for the view worker, so this is the last place a DNS-rebound or
+  // cross-origin WebSocket can be refused.
+  if (!isLoopbackHost(req.headers.host) || !isAllowedOrigin(req.headers.origin)) {
+    socket.destroy();
+    return;
+  }
   if (req.url?.startsWith("/ws")) proxyBrowserLiveViewUpgrade(req, socket, head);
   else socket.destroy();
 });
