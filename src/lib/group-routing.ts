@@ -56,6 +56,31 @@ export function roomRespondersForComposer<T extends { id: string; name: string; 
   return [];
 }
 
+/** Goal mode always starts with one coordinator: an explicit mention, the
+ * configured lead, an in-room Chief, or the first active member. Keep this
+ * aligned with the server's selectGroupGoalCoordinator path. */
+export function goalCoordinatorForComposer<
+  T extends { id: string; name: string; hidden?: boolean; chiefOfStaff?: boolean },
+>(
+  text: string,
+  members: T[],
+  group: Pick<Group, "defaultResponder">,
+): T | null {
+  const available = members.filter((member) => !member.hidden);
+  const explicitlyMentioned = roomRespondersForComposer(
+    text,
+    available,
+    { defaultResponder: { kind: "mentions" } },
+  )[0];
+  if (explicitlyMentioned) return explicitlyMentioned;
+  const configuredResponder = group.defaultResponder;
+  if (configuredResponder?.kind === "member") {
+    const configured = available.find((member) => member.id === configuredResponder.botId);
+    if (configured) return configured;
+  }
+  return available.find((member) => member.chiefOfStaff) ?? available[0] ?? null;
+}
+
 function mentionedMembers<T extends { name: string; hidden?: boolean }>(text: string, peers: T[]): T[] {
   const candidates = peers
     .filter((p) => !p.hidden && p.name.trim())

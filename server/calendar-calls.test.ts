@@ -1,7 +1,7 @@
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { CalendarCallManager, type CalendarCallInput } from "./calendar-calls.ts";
 
@@ -62,6 +62,81 @@ describe("CalendarCallManager", () => {
       durationMinutes: 45,
       attachments: [{ path: "/safe/local/Launch brief.pdf", kind: "file" }],
     });
+  });
+
+  it("fires a due call once and persists the occurrence cursor", async () => {
+    const file = tempFile();
+    let now = 1_000;
+    const due: Array<{ id: string; scheduledFor: number }> = [];
+    const calls = new CalendarCallManager({
+      file,
+      now: () => now,
+      botExists: () => true,
+      onDue: (call, scheduledFor) => {
+        due.push({ id: call.id, scheduledFor });
+      },
+    });
+    const created = calls.create(input({ schedule: { type: "once", at: 2_000 } }));
+
+    await calls.tick();
+    expect(due).toEqual([]);
+    now = 2_000;
+    await calls.tick();
+    await calls.tick();
+
+    expect(due).toEqual([{ id: created.id, scheduledFor: 2_000 }]);
+    expect(calls.get(created.id)?.nextRunAt).toBeNull();
+    expect(manager(file, now).get(created.id)?.nextRunAt).toBeNull();
+  });
+
+  it("retries a failed kickoff while the event is current and skips stale events", async () => {
+    const error = vi.spyOn(console, "error").mockImplementation(() => {});
+    let now = 2_000;
+    let attempts = 0;
+    const calls = new CalendarCallManager({
+      file: tempFile(),
+      now: () => now,
+      botExists: () => true,
+      onDue: () => {
+        attempts += 1;
+        if (attempts === 1) throw new Error("temporary failure");
+      },
+    });
+    const current = calls.create(input({ schedule: { type: "once", at: 2_000 }, durationMinutes: 15 }));
+
+    await calls.tick();
+    expect(attempts).toBe(1);
+    expect(calls.get(current.id)?.nextRunAt).toBe(2_000);
+    await calls.tick();
+    expect(attempts).toBe(2);
+    expect(calls.get(current.id)?.nextRunAt).toBeNull();
+
+    const stale = calls.create(input({ schedule: { type: "once", at: 3_000 }, durationMinutes: 15 }));
+    now = 3_000 + 15 * 60_000;
+    await calls.tick();
+    expect(attempts).toBe(2);
+    expect(calls.get(stale.id)?.nextRunAt).toBeNull();
+    error.mockRestore();
+  });
+
+  it("links a room until the event roster changes", () => {
+    const calls = manager();
+    const created = calls.create(input());
+    expect(calls.linkRoom(created.id, "room-1").roomId).toBe("room-1");
+    expect(calls.update(created.id, { name: "Renamed" }).roomId).toBe("room-1");
+    expect(calls.update(created.id, { botIds: ["chief"] }).roomId).toBeUndefined();
+  });
+
+  it("persists the first schedule cursor when migrating old reminder files", () => {
+    const file = tempFile();
+    const created = manager(file, 100).create(input({ schedule: { type: "once", at: 2_000 } }));
+    const persisted = JSON.parse(readFileSync(file, "utf8")) as { calls: Array<{ nextRunAt?: number | null }> };
+    delete persisted.calls[0]!.nextRunAt;
+    writeFileSync(file, JSON.stringify(persisted));
+
+    expect(manager(file, 1_000).get(created.id)?.nextRunAt).toBe(2_000);
+    expect(JSON.parse(readFileSync(file, "utf8")).calls[0].nextRunAt).toBe(2_000);
+    expect(manager(file, 2_100).get(created.id)?.nextRunAt).toBe(2_000);
   });
 
   it("validates participants, schedules, duration, and attachments", () => {

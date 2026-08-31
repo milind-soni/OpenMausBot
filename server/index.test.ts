@@ -2733,6 +2733,79 @@ describe("harness HTTP API", () => {
     }
   });
 
+  it("opens one calendar room and posts the scheduled seed to everyone", async () => {
+    const modelSelection = { instanceId: "ghost", model: "ghost-1" };
+    const first = (await api("POST", "/api/bots", { name: "Calendar researcher", modelSelection })).body.bot;
+    const second = (await api("POST", "/api/bots", { name: "Calendar writer", modelSelection })).body.bot;
+    let callId = "";
+    let roomId = "";
+    try {
+      const created = await api("POST", "/api/calendar-calls", {
+        name: "Launch room",
+        description: "Review the launch plan.",
+        botIds: [first.id, second.id],
+        schedule: { type: "once", at: Date.now() - 100 },
+        durationMinutes: 30,
+        attachments: [{
+          id: "launch-brief",
+          name: "Launch brief.txt",
+          path: "/tmp/a\"&<>.txt",
+          size: 12,
+          kind: "file",
+        }],
+      });
+      expect(created.status).toBe(201);
+      callId = created.body.call.id;
+
+      await expect.poll(async () => {
+        const snapshot = await api("GET", "/api/bots?messages=50");
+        const room = snapshot.body.groups.find((candidate: { memberIds: string[] }) =>
+          candidate.memberIds.length === 2 &&
+          candidate.memberIds.includes(first.id) &&
+          candidate.memberIds.includes(second.id)
+        );
+        return room?.messages.find((message: { sendId?: string }) =>
+          message.sendId?.startsWith(`calendar_${callId}_`)
+        )?.text;
+      }, { timeout: 5_000 }).toBe(
+        '@everyone Review the launch plan.\n\n<attached-file path="/tmp/a&quot;&amp;&lt;&gt;.txt" />',
+      );
+
+      const snapshot = await api("GET", "/api/bots?messages=50");
+      const room = snapshot.body.groups.find((candidate: { memberIds: string[] }) =>
+        candidate.memberIds.length === 2 &&
+        candidate.memberIds.includes(first.id) &&
+        candidate.memberIds.includes(second.id)
+      );
+      expect(room).toMatchObject({ defaultResponder: { kind: "everyone" } });
+      roomId = room.id;
+
+      await expect.poll(async () => {
+        const refreshed = await api("GET", "/api/bots?messages=50");
+        const current = refreshed.body.groups.find((candidate: { id: string }) => candidate.id === roomId);
+        return current?.messages
+          .filter((message: { from?: { botId?: string } }) => message.from?.botId)
+          .map((message: { from: { botId: string } }) => message.from.botId)
+          .sort();
+      }, { timeout: 5_000 }).toEqual([first.id, second.id].sort());
+
+      const joined = await api("POST", `/api/calendar-calls/${callId}/room`, {});
+      expect(joined.status).toBe(200);
+      expect(joined.body.group.id).toBe(roomId);
+      expect(room.messages.filter((message: { sendId?: string }) =>
+        message.sendId?.startsWith(`calendar_${callId}_`)
+      )).toHaveLength(1);
+    } finally {
+      if (callId) await api("DELETE", `/api/calendar-calls/${callId}`).catch(() => undefined);
+      if (roomId) {
+        await api("POST", `/api/groups/${roomId}/interrupt`, {}).catch(() => undefined);
+        await api("DELETE", `/api/groups/${roomId}`).catch(() => undefined);
+      }
+      await api("DELETE", `/api/bots/${first.id}`).catch(() => undefined);
+      await api("DELETE", `/api/bots/${second.id}`).catch(() => undefined);
+    }
+  });
+
   it("refuses to delete a bot while one of its routines is active", async () => {
     const bot = (await api("POST", "/api/bots", {
       modelSelection: { instanceId: "claude", model: "claude-sonnet-5" },

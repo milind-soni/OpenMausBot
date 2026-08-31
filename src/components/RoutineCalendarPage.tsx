@@ -7,8 +7,10 @@ import {
   useState,
   type DragEvent as ReactDragEvent,
   type PointerEvent as ReactPointerEvent,
+  type CSSProperties,
 } from "react";
 import {
+  ArrowLeft,
   CalendarDays,
   CheckCircle2,
   ChevronLeft,
@@ -22,7 +24,6 @@ import {
   Loader2,
   Paperclip,
   Pause,
-  Phone,
   Play,
   Plus,
   Repeat2,
@@ -35,12 +36,11 @@ import {
 } from "lucide-react";
 
 import { BotAvatar } from "@/components/Avatar";
-import { CallTargetButton } from "@/components/CallView";
 import { pathForFile } from "@/components/ComposerAttachments";
 import { CalendarSidebar } from "@/components/routines/CalendarSidebar";
+import { useDesktopCapabilities } from "@/components/DesktopCapabilities";
 import { WebhooksPanel } from "@/components/WebhooksPanel";
 import type { CalendarCall, CalendarCallAttachment, CalendarCallInput } from "@/lib/calendar-calls";
-import { startCall } from "@/lib/call";
 import { cn } from "@/lib/cn";
 import {
   imageAttachmentFromFile,
@@ -72,7 +72,7 @@ import type {
   RoutineRunStatus,
   RoutineSchedule,
 } from "@/lib/routines";
-import { api, useStore, type Bot, type Group } from "@/state/store";
+import { api, useStore, type Bot } from "@/state/store";
 
 const HOUR_HEIGHT = 64;
 const DAY_NAMES = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
@@ -181,12 +181,6 @@ function statusState(status: RoutineRunStatus): MausState {
   if (status === "failed" || status === "missed") return "sad";
   if (status === "cancelled") return "sleeping";
   return "drowsy";
-}
-
-function sameMembers(group: Group, botIds: string[]): boolean {
-  if (group.dm || group.memberIds.length !== botIds.length) return false;
-  const wanted = new Set(botIds);
-  return group.memberIds.every((id) => wanted.has(id));
 }
 
 function AttachmentChips({
@@ -459,7 +453,9 @@ function EventEditor({
               <div className="text-[11px] leading-relaxed text-ink-secondary">
                 {kind === "routine"
                   ? "Attachments are passed to each local routine run and excluded from shared team files."
-                  : "References remain on this calendar event. Share them in chat when the call starts."}
+                  : selectedBots.length > 1
+                    ? "References will be shared in the room when the event starts."
+                    : "References stay with the event and are available when you join the room."}
               </div>
               {attachmentNotice && <div className="text-[11.5px] text-warning">{attachmentNotice}</div>}
             </div>
@@ -834,17 +830,17 @@ function CalendarGrid({
 function EventDetails({
   item,
   bots,
-  groups,
   onClose,
   onEdit,
   onCallChanged,
+  onOpenRoom,
 }: {
   item: CalendarEventItem;
   bots: Bot[];
-  groups: Group[];
   onClose: () => void;
   onEdit: () => void;
   onCallChanged: (id: string | null) => void;
+  onOpenRoom: (id: string) => void;
 }) {
   const { dispatch } = useStore();
   const [working, setWorking] = useState(false);
@@ -859,7 +855,7 @@ function EventDetails({
   const title = call?.name ?? routine?.name ?? run?.routineName ?? "Routine";
   const description = call?.description ?? routine?.prompt ?? run?.prompt ?? "";
   const attachments = call?.attachments ?? routine?.attachments ?? run?.attachments ?? [];
-  const group = call && call.botIds.length > 1 ? groups.find((candidate) => sameMembers(candidate, call.botIds)) : undefined;
+  const roomId = call?.botIds.length === 1 ? primary?.id : undefined;
 
   const invoke = async (path: string, method = "POST") => {
     setWorking(true);
@@ -875,23 +871,14 @@ function EventDetails({
     }
   };
 
-  const createRoomAndJoin = async () => {
+  const joinRoom = async () => {
     if (!call) return;
     setWorking(true);
     setError("");
     try {
-      const { group: created } = await api("/api/groups", {
-        method: "POST",
-        body: JSON.stringify({
-          name: call.name,
-          memberIds: call.botIds,
-          setup: { bulletin: call.description, defaultResponder: { kind: "mentions" } },
-        }),
-      });
+      const { group: created } = await api(`/api/calendar-calls/${call.id}/room`, { method: "POST" });
       dispatch({ type: "groupPatched", group: created });
-      dispatch({ type: "select", id: created.id });
-      setTimeout(() => startCall(created.id), 0);
-      onClose();
+      onOpenRoom(created.id);
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : String(cause));
     } finally {
@@ -934,7 +921,7 @@ function EventDetails({
             </div>
           </div>
           {description && <div className="flex items-start gap-3"><FileText size={17} className="mt-1 shrink-0 text-ink-secondary" /><div className="whitespace-pre-wrap text-[12.5px] leading-relaxed text-ink">{description}</div></div>}
-          {attachments.length > 0 && <div className="flex items-start gap-3"><Paperclip size={17} className="mt-1 shrink-0 text-ink-secondary" /><div className="min-w-0 flex-1 space-y-2"><AttachmentChips attachments={attachments} />{call && <div className="text-[11px] leading-relaxed text-ink-secondary">These references stay on the calendar event. Share them in chat when the call starts.</div>}</div></div>}
+          {attachments.length > 0 && <div className="flex items-start gap-3"><Paperclip size={17} className="mt-1 shrink-0 text-ink-secondary" /><div className="min-w-0 flex-1 space-y-2"><AttachmentChips attachments={attachments} />{call && <div className="text-[11px] leading-relaxed text-ink-secondary">{call.botIds.length > 1 ? "These references will be shared in the room when the event starts." : "These references stay with the event and are available when you join the room."}</div>}</div></div>}
           {run && <div className="rounded-xl border border-hairline/40 bg-inset p-3"><div className="flex items-center gap-2 text-[12px] font-medium capitalize text-ink">{run.status === "running" && <Loader2 size={13} className="animate-spin text-accent" />}{run.status.replace("waiting", "needs you")}</div>{run.output && <div className="mt-2 whitespace-pre-wrap text-[11.5px] leading-relaxed text-ink-secondary">{run.output}</div>}{run.error && <div className="mt-2 text-[11.5px] text-danger">{run.error}</div>}</div>}
           {run?.attention && <div className="flex items-start gap-2 rounded-xl border border-warning/30 bg-warning/10 px-3 py-2.5 text-warning"><CircleAlert size={15} className="mt-0.5 shrink-0" /><div className="min-w-0"><div className="text-[11.5px] font-semibold">Needs your attention</div><div className="mt-1 whitespace-pre-wrap text-[11.5px] leading-relaxed">{run.attention}</div></div></div>}
           {run?.status === "waiting" && !run.attention && <div className="rounded-xl border border-warning/30 bg-warning/10 px-3 py-2.5 text-[11.5px] text-warning">This bot needs your answer. Open its task to continue the run.</div>}
@@ -942,13 +929,8 @@ function EventDetails({
         </div>
 
         <div className="flex flex-wrap items-center gap-2 border-t border-hairline/40 px-4 py-3">
-          {call && call.botIds.length === 1 && primary && (
-            <div className="flex items-center gap-2 rounded-lg bg-accent/10 pl-2 pr-1 text-[12px] font-medium text-accent"><span>Join call</span><CallTargetButton targetId={primary.id} targetName={primary.name} voices={[primary.voice]} setupBotId={primary.id} requireExplicitVoices={false} onStart={() => { dispatch({ type: "select", id: primary.id }); onClose(); }} /></div>
-          )}
-          {call && call.botIds.length > 1 && group && (
-            <div className="flex items-center gap-2 rounded-lg bg-accent/10 pl-2 pr-1 text-[12px] font-medium text-accent"><span>Join call</span><CallTargetButton targetId={group.id} targetName={group.name} voices={invited.map((bot) => bot.voice)} setupBotId={invited.find((bot) => !bot.voice)?.id ?? invited[0]?.id} requireExplicitVoices onStart={() => { dispatch({ type: "select", id: group.id }); onClose(); }} /></div>
-          )}
-          {call && call.botIds.length > 1 && !group && <button onClick={createRoomAndJoin} disabled={working} className="flex items-center gap-2 rounded-lg bg-accent px-3 py-2 text-[12px] font-semibold text-white hover:brightness-110 disabled:opacity-50"><Phone size={14} />Create room &amp; join</button>}
+          {roomId && <button onClick={() => onOpenRoom(roomId)} className="flex items-center gap-1.5 rounded-lg bg-accent px-3 py-2 text-[12px] font-semibold text-white hover:brightness-110"><ExternalLink size={13} />Join room</button>}
+          {call && call.botIds.length > 1 && <button onClick={joinRoom} disabled={working} className="flex items-center gap-1.5 rounded-lg bg-accent px-3 py-2 text-[12px] font-semibold text-white hover:brightness-110 disabled:opacity-50"><ExternalLink size={13} />Join room</button>}
           {routine && <button onClick={() => void invoke(`/api/routines/${routine.id}/run`)} disabled={working} className="flex items-center gap-1.5 rounded-lg bg-accent px-3 py-2 text-[12px] font-semibold text-white hover:brightness-110 disabled:opacity-50"><Play size={13} />Run now</button>}
           {run?.threadId && primary && <button onClick={() => { dispatch({ type: "select", id: primary.id }); dispatch({ type: "switchTask", botId: primary.id, threadId: run.threadId! }); onClose(); }} className="flex items-center gap-1.5 rounded-lg px-3 py-2 text-[12px] text-ink-secondary hover:bg-raised hover:text-ink"><ExternalLink size={13} />Open task</button>}
           {run && ["queued", "running", "waiting"].includes(run.status) && <button onClick={() => void invoke(`/api/routine-runs/${run.id}/cancel`)} disabled={working} className="flex items-center gap-1.5 rounded-lg px-3 py-2 text-[12px] text-ink-secondary hover:bg-raised hover:text-ink disabled:opacity-40"><X size={13} />Cancel run</button>}
@@ -999,8 +981,10 @@ export function RoutineEditor({
   return <EventEditor seed={{ kind: "routine", at, durationMinutes: routine?.durationMinutes ?? 30, botIds: lockedBotId ? [lockedBotId] : routine ? [routine.botId] : [], routine }} bots={bots} lockedBotId={lockedBotId} defaultRunOn={defaultRunOn} onClose={onClose} onSavedCall={() => {}} />;
 }
 
-export function RoutinesPage() {
+export function RoutinesPage({ onBack, onOpenRoom }: { onBack: () => void; onOpenRoom: (id: string) => void }) {
   const { state, dispatch } = useStore();
+  const { capabilities } = useDesktopCapabilities();
+  const backButtonRef = useRef<HTMLButtonElement>(null);
   const [section, setSection] = useState<"calendar" | "webhooks">("calendar");
   const [viewDays, setViewDays] = useState<1 | 3 | 7>(7);
   const [anchor, setAnchor] = useState(() => startOfDay(Date.now()));
@@ -1024,6 +1008,7 @@ export function RoutinesPage() {
     }
   }, []);
   useEffect(() => { void loadCalls(); }, [loadCalls]);
+  useEffect(() => { backButtonRef.current?.focus({ preventScroll: true }); }, []);
 
   const items = useMemo<CalendarEventItem[]>(() => {
     const routineItems = projectedRoutineItems(state.routines, state.routineRuns, rangeStart, rangeEnd).map((item) => ({ ...item, kind: "routine" as const }));
@@ -1045,6 +1030,13 @@ export function RoutinesPage() {
   const paused = state.routines.filter((routine) => !routine.enabled && (routine.schedule.type === "daily" || routine.schedule.at > Date.now()));
   const running = state.routineRuns.filter((run) => ["queued", "running", "waiting"].includes(run.status)).length;
   const unseenFailures = state.routineRuns.filter((run) => ["failed", "missed"].includes(run.status) && !run.seenAt).length;
+  const macInset = capabilities.windowChrome === "mac-inset";
+  const windowDragStyle = macInset
+    ? ({ WebkitAppRegion: "drag" } as CSSProperties)
+    : undefined;
+  const windowNoDragStyle = macInset
+    ? ({ WebkitAppRegion: "no-drag" } as CSSProperties)
+    : undefined;
 
   const setView = (days: 1 | 3 | 7) => {
     setViewDays(days);
@@ -1108,17 +1100,31 @@ export function RoutinesPage() {
   };
 
   return (
-    <main className="flex h-full min-w-0 flex-1 flex-col bg-app">
-      <header className="shrink-0 border-b border-hairline/35 bg-app px-4 py-3 pl-11 md:pl-4">
+    <main className="flex h-full min-w-0 flex-1 flex-col bg-app animate-workspace-in">
+      <header
+        className={cn("shrink-0 border-b border-hairline/35 bg-app py-3 pr-4", macInset ? "pl-[86px]" : "pl-4")}
+        style={windowDragStyle}
+      >
         <div className="flex flex-wrap items-center gap-2">
+          <button
+            type="button"
+            ref={backButtonRef}
+            onClick={onBack}
+            aria-label="Back"
+            title="Back"
+            className="flex size-9 shrink-0 items-center justify-center rounded-lg text-ink-secondary hover:bg-raised hover:text-ink"
+            style={windowNoDragStyle}
+          >
+            <ArrowLeft size={18} />
+          </button>
           <div className="mr-3 flex items-center gap-2"><CalendarDays size={21} className="text-accent" /><h1 className="text-[18px] font-semibold tracking-tight text-ink">Calendar</h1></div>
-          <div className="flex items-center rounded-lg border border-hairline/50 bg-panel p-0.5">
+          <div className="flex items-center rounded-lg border border-hairline/50 bg-panel p-0.5" style={windowNoDragStyle}>
             <button onClick={() => setAnchor((current) => addDays(current, -viewDays))} className="rounded-md p-2 text-ink-secondary hover:bg-raised hover:text-ink" aria-label="Previous dates"><ChevronLeft size={16} /></button>
             <button onClick={goToday} className="rounded-md px-3 py-1.5 text-[12px] font-medium text-ink hover:bg-raised">Today</button>
             <button onClick={() => setAnchor((current) => addDays(current, viewDays))} className="rounded-md p-2 text-ink-secondary hover:bg-raised hover:text-ink" aria-label="Next dates"><ChevronRight size={16} /></button>
           </div>
           <div className="min-w-[220px] px-2 text-[15px] font-medium text-ink">{calendarRangeLabel(rangeStart, viewDays)}</div>
-          <div className="ml-auto flex items-center gap-2">
+          <div className="ml-auto flex items-center gap-2" style={windowNoDragStyle}>
             {running > 0 && <span className="hidden items-center gap-1.5 rounded-full bg-accent/10 px-2.5 py-1.5 text-[10.5px] text-accent sm:flex"><Loader2 size={11} className="animate-spin" />{running} active</span>}
             {unseenFailures > 0 && <span className="hidden items-center gap-1.5 rounded-full bg-danger/10 px-2.5 py-1.5 text-[10.5px] text-danger sm:flex"><CircleAlert size={11} />{unseenFailures}</span>}
             {paused.length > 0 && <button onClick={() => setPausedOpen(true)} className="hidden items-center gap-1.5 rounded-full border border-hairline/50 px-2.5 py-1.5 text-[10.5px] text-ink-secondary hover:bg-raised sm:flex"><Pause size={11} />{paused.length}</button>}
@@ -1126,7 +1132,7 @@ export function RoutinesPage() {
             <select value={viewDays} onChange={(event) => setView(Number(event.target.value) as 1 | 3 | 7)} className="rounded-lg border border-hairline/50 bg-panel px-2.5 py-2 text-[11.5px] text-ink outline-none focus:border-accent"><option value={1}>Day</option><option value={3}>3 days</option><option value={7}>Week</option></select>
           </div>
         </div>
-        <div className="mt-2 flex items-center gap-1">
+        <div className="mt-2 flex items-center gap-1" style={windowNoDragStyle}>
           <button onClick={() => setSection("calendar")} className={cn("rounded-lg px-3 py-1.5 text-[11.5px] font-medium", section === "calendar" ? "bg-accent/12 text-accent" : "text-ink-secondary hover:bg-raised hover:text-ink")}>Routines &amp; calls</button>
           <button onClick={() => setSection("webhooks")} className={cn("flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-[11.5px] font-medium", section === "webhooks" ? "bg-accent/12 text-accent" : "text-ink-secondary hover:bg-raised hover:text-ink")}><Webhook size={12} />Webhooks{state.webhooks.length > 0 && <span className="rounded-full bg-accent/15 px-1.5 text-[9px]">{state.webhooks.length}</span>}</button>
           {error && <button onClick={() => setError("")} className="ml-auto flex items-center gap-1.5 rounded-lg bg-danger/10 px-2.5 py-1.5 text-[10.5px] text-danger"><CircleAlert size={11} />{error}<X size={11} /></button>}
@@ -1143,7 +1149,7 @@ export function RoutinesPage() {
 
       {quick && <><div className="fixed inset-0 z-40 bg-black/25" onMouseDown={() => setQuick(null)} /><QuickComposer seed={quick} bots={visibleBots} onClose={() => setQuick(null)} onMore={(seed) => { setQuick(null); setEditor(seed); }} onSavedRoutine={(routine) => dispatch({ type: "routinePatched", routine })} onSavedCall={upsertCall} /></>}
       {editor && <EventEditor seed={editor} bots={visibleBots} onClose={() => setEditor(null)} onSavedCall={upsertCall} />}
-      {liveSelected && <EventDetails item={liveSelected} bots={state.bots} groups={state.groups} onClose={() => setSelected(null)} onEdit={() => { const seed: EventSeed = liveSelected.kind === "call" ? { kind: "call", at: liveSelected.at, durationMinutes: liveSelected.call.durationMinutes, botIds: liveSelected.call.botIds, call: liveSelected.call } : { kind: "routine", at: liveSelected.at, durationMinutes: liveSelected.routine?.durationMinutes ?? liveSelected.run?.durationMinutes ?? 30, botIds: [liveSelected.routine?.botId ?? liveSelected.run?.botId ?? ""].filter(Boolean), routine: liveSelected.routine ?? undefined }; setSelected(null); setEditor(seed); }} onCallChanged={(id) => { if (id) setCalls((current) => current.filter((call) => call.id !== id)); else void loadCalls(); }} />}
+      {liveSelected && <EventDetails item={liveSelected} bots={state.bots} onClose={() => setSelected(null)} onEdit={() => { const seed: EventSeed = liveSelected.kind === "call" ? { kind: "call", at: liveSelected.at, durationMinutes: liveSelected.call.durationMinutes, botIds: liveSelected.call.botIds, call: liveSelected.call } : { kind: "routine", at: liveSelected.at, durationMinutes: liveSelected.routine?.durationMinutes ?? liveSelected.run?.durationMinutes ?? 30, botIds: [liveSelected.routine?.botId ?? liveSelected.run?.botId ?? ""].filter(Boolean), routine: liveSelected.routine ?? undefined }; setSelected(null); setEditor(seed); }} onCallChanged={(id) => { if (id) setCalls((current) => current.filter((call) => call.id !== id)); else void loadCalls(); }} onOpenRoom={onOpenRoom} />}
       {pausedOpen && <PausedList routines={paused} bots={state.bots} onClose={() => setPausedOpen(false)} onEdit={(routine) => { setPausedOpen(false); const at = routine.schedule.type === "once" ? routine.schedule.at : atLocalTime(Date.now(), routine.schedule.time); setEditor({ kind: "routine", at, durationMinutes: routine.durationMinutes, botIds: [routine.botId], routine }); }} />}
     </main>
   );

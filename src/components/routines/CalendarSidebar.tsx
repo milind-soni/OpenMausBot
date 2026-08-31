@@ -32,7 +32,7 @@ export function CalendarSidebar({ bots, anchor, onSelectDate, onCreate }: Calend
   return (
     <aside
       aria-label="Calendar sidebar"
-      className="flex h-full w-[238px] shrink-0 flex-col overflow-hidden border-r border-hairline/40 bg-panel/55"
+      className="flex h-full w-[320px] shrink-0 flex-col overflow-hidden border-r border-hairline/40 bg-panel"
     >
       <div className="px-4 pb-2 pt-4">
         <button

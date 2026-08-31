@@ -8,7 +8,7 @@
 //   - Composio Sessions (connected apps → tools) over streamable HTTP
 //   - the bot's cloud computer (box.ascii.dev) via server/computer-proxy.ts
 //     — screenshot/exec/open_url, the CUA-on-the-box bridge
-import { createHash } from "node:crypto";
+import { createHash, randomBytes } from "node:crypto";
 import { mkdtempSync, readFileSync, rmSync, unlinkSync, writeFileSync } from "node:fs";
 import { createServer as createNetServer } from "node:net";
 import { homedir, tmpdir } from "node:os";
@@ -244,8 +244,28 @@ export function permissionSocketPath(threadId: string) {
   return brokerSocketPath(DATA_DIR, `${prefix}${digest}`);
 }
 
-function createPermissionBroker(opts: {
-  socketPath: string;
+/** Paths the broker may bind, tried in order. POSIX needs only the
+ * deterministic path — unlink-then-listen always wins there. Windows named
+ * pipes are never unlinkable, and a hung CLI child from an earlier server
+ * process can hold the name open for MINUTES after its turn: the next turn's
+ * listen then fails EADDRINUSE and every permission ask fail-closes into a
+ * deny nobody can explain (seen live in a user's diagnostics). Fresh
+ * suffixed fallbacks let the new broker bind immediately; the proxy child
+ * learns the real path from its argv, so nothing else needs the name. Pipe
+ * names have no sun_path length limit, so the longer tag is safe there. */
+export function brokerSocketCandidates(threadId: string): string[] {
+  const base = permissionSocketPath(threadId);
+  if (process.platform !== "win32") return [base];
+  return [
+    base,
+    `${base}-${randomBytes(3).toString("hex")}`,
+    `${base}-${randomBytes(3).toString("hex")}`,
+  ];
+}
+
+export async function createPermissionBroker(opts: {
+  /** Candidate bind paths, tried in order; the first that listens wins. */
+  socketPaths: string[];
   onAsk: (ask: Ask) => void;
   onResolve: (resolved: Ask & { behavior: AskBehavior; source: AskResolutionSource }) => void;
   isActive?: () => boolean;
@@ -264,10 +284,8 @@ function createPermissionBroker(opts: {
   // driver already forgot (`active.delete(threadId)` already ran), which can
   // never be answered — the "zombie card" in issue #211.
   let closed = false;
-  try {
-    unlinkSync(opts.socketPath);
-  } catch {}
-  const server = createNetServer((conn) => {
+  let boundPath = opts.socketPaths[0] ?? "";
+  const connectionHandler = (conn: import("node:net").Socket) => {
     conn.on("error", () => {});
     let buf = "";
     conn.on("data", (chunk) => {
@@ -315,7 +333,7 @@ function createPermissionBroker(opts: {
         if (pending.has(askId)) {
           // askId is client-controlled; JSON.stringify escapes newlines and
           // control characters so it can't corrupt the log line or terminal.
-          console.error(`permission broker on ${opts.socketPath}: duplicate ask id ${JSON.stringify(askId)} — denying`);
+          console.error(`permission broker on ${boundPath}: duplicate ask id ${JSON.stringify(askId)} — denying`);
           try {
             conn.write(JSON.stringify({ t: "answer", id: askId, behavior: "deny", message: DUPLICATE_ASK_ID_NOTE }) + "\n");
           } catch {}
@@ -342,14 +360,44 @@ function createPermissionBroker(opts: {
         opts.onAsk(ask);
       }
     });
-  });
-  // A broker that never came up used to be silent — every approval then
-  // timed out into a deny nobody could explain. Keep the turn fail-closed,
-  // but leave an actionable diagnostic.
-  server.on("error", (error) => {
-    console.error(`permission broker unavailable on ${opts.socketPath}: ${error.message}`);
-  });
-  server.listen(opts.socketPath);
+  };
+  // Bind the first candidate that will take a listener. A broker that
+  // never came up used to be silent — every approval then timed out into a
+  // deny nobody could explain. Keep the turn fail-closed on total failure,
+  // but leave an actionable diagnostic either way.
+  let server: ReturnType<typeof createNetServer> | null = null;
+  for (const [index, candidate] of opts.socketPaths.entries()) {
+    const attempt = createNetServer(connectionHandler);
+    try {
+      unlinkSync(candidate);
+    } catch {}
+    const outcome = await new Promise<"listening" | (Error & { code?: string })>((resolve) => {
+      attempt.once("listening", () => resolve("listening"));
+      // SAFETY: net 'error' events carry syscall errors; the optional
+      // `code` is only read defensively below.
+      attempt.once("error", (error) => resolve(error as Error & { code?: string }));
+      attempt.listen(candidate);
+    });
+    if (outcome === "listening") {
+      if (index > 0) {
+        console.error(`permission broker: ${opts.socketPaths[0]} is still held — bound fallback ${candidate}`);
+      }
+      boundPath = candidate;
+      server = attempt;
+      attempt.on("error", (error) => {
+        console.error(`permission broker error on ${candidate}: ${error.message}`);
+      });
+      break;
+    }
+    try {
+      attempt.close();
+    } catch {}
+    const retryable = outcome.code === "EADDRINUSE" || outcome.code === "EACCES";
+    if (!retryable || index === opts.socketPaths.length - 1) {
+      console.error(`permission broker unavailable on ${candidate}: ${outcome.message}`);
+      break;
+    }
+  }
   const drain = () => {
     for (const p of [...pending.values()]) {
       const { behavior, message } = systemEndedReply(p.ask.kind);
@@ -371,12 +419,15 @@ function createPermissionBroker(opts: {
       closed = true;
       drain();
       try {
-        server.close();
+        server?.close();
       } catch {}
       try {
-        unlinkSync(opts.socketPath);
+        unlinkSync(boundPath);
       } catch {}
     },
+    /** Where the broker actually listens — argv for the proxy child must
+     * use this, not the deterministic base, when a fallback was bound. */
+    socketPath: boundPath,
   };
 }
 
@@ -458,7 +509,7 @@ export const ClaudeDriver: ProviderDriver<ClaudeConfig> = {
     await refreshModels();
     const listeners = new Set<RuntimeEventListener>();
     // one active turn per thread; a second send while busy is a caller bug
-    const active = new Map<string, { stop: () => void; turnId: string; broker?: ReturnType<typeof createPermissionBroker> }>();
+    const active = new Map<string, { stop: () => void; turnId: string; broker?: Awaited<ReturnType<typeof createPermissionBroker>> }>();
 
     // One live CLI process per thread, kept across turns. Under
     // --input-format stream-json the CLI settles a turn with `result` while
@@ -470,7 +521,7 @@ export const ClaudeDriver: ProviderDriver<ClaudeConfig> = {
     // after SESSION_IDLE_MS of quiet, and resumed by --resume when needed.
     interface Session {
       child: ReturnType<typeof spawnCli>;
-      broker?: ReturnType<typeof createPermissionBroker>;
+      broker?: Awaited<ReturnType<typeof createPermissionBroker>>;
       mcpConfigPath: string | null;
       /** the spawn contract — a different one means a fresh process */
       argsKey: string;
@@ -644,7 +695,7 @@ export const ClaudeDriver: ProviderDriver<ClaudeConfig> = {
       // permission broker: anything acceptEdits would silently deny becomes
       // an Allow/Deny card in chat, and the agent gets ask_user. Skipped in
       // bypassPermissions (fullAuto) — nothing would ever ask.
-      let broker: ReturnType<typeof createPermissionBroker> | undefined;
+      let broker: Awaited<ReturnType<typeof createPermissionBroker>> | undefined;
       let socketPath: string | null = null;
       if (config.permissionMode !== "bypassPermissions") {
         socketPath = permissionSocketPath(threadId);
@@ -706,8 +757,8 @@ export const ClaudeDriver: ProviderDriver<ClaudeConfig> = {
         // remembers which tool each pending ask came from, so the resolved
         // event can scope approvals to real desktop-control tools only
         const askTools = new Map<string, string | undefined>();
-        broker = createPermissionBroker({
-          socketPath,
+        broker = await createPermissionBroker({
+          socketPaths: brokerSocketCandidates(threadId),
           isActive: () => Boolean(sessions.get(threadId)?.turn),
           onAsk: (ask) => {
             const eventTurnId = sessions.get(threadId)?.turn?.turnId ?? turnId;
@@ -740,6 +791,15 @@ export const ClaudeDriver: ProviderDriver<ClaudeConfig> = {
             askTools.delete(resolved.id);
           },
         });
+        // A fallback bind means the deterministic pipe is still held by an
+        // earlier process's child. The proxy learns its path from argv, so
+        // point it at the pipe we actually bound. argsKey deliberately keeps
+        // the base path: the nonce is not part of the spawn contract, and a
+        // retained session keeps its own broker object anyway.
+        if (broker.socketPath !== socketPath && mcpConfigPath) {
+          mcpServers.ogb = { command: process.execPath, args: [PERM_PROXY_PATH, broker.socketPath], env: { ...NODE_ENV_FLAG } };
+          writeFileSync(mcpConfigPath, JSON.stringify({ mcpServers }), { mode: 0o600 });
+        }
       }
       if (sessionId) args.push("--resume", sessionId);
       else args.push("--session-id", newSessionId!);

@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { Loader2, Menu } from "lucide-react";
 import { StoreProvider, useStore } from "@/state/store";
 import { Onboarding } from "@/components/Onboarding";
@@ -19,6 +19,7 @@ import { CommandPalette } from "@/components/CommandPalette";
 import { LocalVmWorkspace } from "@/components/LocalVmWorkspace";
 import { SkillRecorderPage } from "@/components/SkillRecorderPage";
 import { TeamMapPage } from "@/components/TeamMapPage";
+import { skillRecorderEnabled } from "@/lib/feature-flags";
 
 function Shell() {
   const { state, dispatch } = useStore();
@@ -34,8 +35,11 @@ function Shell() {
   const [paletteOpen, setPaletteOpen] = useState(false);
   const [localVmWorkspaceBotId, setLocalVmWorkspaceBotId] = useState<string | null>(null);
   const menuButtonRef = useRef<HTMLButtonElement>(null);
+  const previousViewRef = useRef(state.activeView);
+  const calendarOriginRef = useRef<"chat" | "team-map" | "skill-recorder">("chat");
   const group = state.groups.find((g) => g.id === state.selectedId);
   const bot = group ? undefined : (state.bots.find((b) => b.id === state.selectedId) ?? state.bots[0]);
+  const calendarFocus = state.activeView === "routines";
 
   // Nothing on this machine can run a bot. A missing cloud login does not
   // count — that CLI can still host a local model. Wait for the first
@@ -98,6 +102,13 @@ function Shell() {
   }, [state.selectedId, state.activeView, state.pluginsOpen, state.settingsOpen]);
 
   useEffect(() => {
+    if (state.activeView === "routines" && previousViewRef.current !== "routines") {
+      calendarOriginRef.current = previousViewRef.current;
+    }
+    previousViewRef.current = state.activeView;
+  }, [state.activeView]);
+
+  useEffect(() => {
     if (
       localVmWorkspaceBotId &&
       (state.activeView !== "chat" || state.selectedId !== localVmWorkspaceBotId)
@@ -115,6 +126,21 @@ function Shell() {
     dispatch({ type: "select", id: botId });
     dispatch({ type: "toggleComputer", open: true });
   };
+
+  const closeCalendar = useCallback(() => {
+    if (calendarOriginRef.current === "team-map") {
+      dispatch({ type: "showTeamMap" });
+      return;
+    }
+    if (calendarOriginRef.current === "skill-recorder" && skillRecorderEnabled(state.config)) {
+      dispatch({ type: "showSkillRecorder" });
+      return;
+    }
+    dispatch({ type: "select", id: state.selectedId });
+  }, [dispatch, state.config, state.selectedId]);
+  const openCalendarRoom = useCallback((id: string) => {
+    dispatch({ type: "select", id });
+  }, [dispatch]);
 
   const nativeViewOverlayOpen =
     drawerOpen ||
@@ -154,7 +180,7 @@ function Shell() {
       {/* fixed-position popup, bottom-left — outside the layout flow */}
       <UpdateBanner />
       <div className="relative flex min-h-0 flex-1">
-      <button
+      {!calendarFocus && <button
         type="button"
         ref={menuButtonRef}
         aria-label="Open bot list"
@@ -163,25 +189,25 @@ function Shell() {
         className="absolute left-3 top-3 z-30 rounded-md p-1.5 text-ink-secondary hover:bg-raised hover:text-ink md:hidden"
       >
         <Menu size={18} />
-      </button>
-      {drawerOpen && (
+      </button>}
+      {drawerOpen && !calendarFocus && (
         <div
           aria-hidden
           onMouseDown={(e) => e.target === e.currentTarget && setDrawerOpen(false)}
           className="absolute inset-0 z-30 bg-black/50 md:hidden"
         />
       )}
-      <Sidebar
+      {!calendarFocus && <Sidebar
         open={drawerOpen}
         onClose={() => {
           setDrawerOpen(false);
           menuButtonRef.current?.focus();
         }}
-      />
+      />}
       {state.activeView === "team-map" ? (
         <TeamMapPage />
       ) : state.activeView === "routines" ? (
-        <RoutinesPage />
+        <RoutinesPage onBack={closeCalendar} onOpenRoom={openCalendarRoom} />
       ) : state.activeView === "skill-recorder" ? (
         <SkillRecorderPage />
       ) : localVmWorkspaceBotId ? (

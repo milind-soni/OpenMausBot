@@ -38,6 +38,26 @@ describe("send idempotency", () => {
     });
   });
 
+  it("does not let one send id change channel execution mode", () => {
+    const sendId = "send_1234567890123456";
+    const message = userMessage({ channelMode: "goal" });
+    expect(acceptedSendMatch([message], sendId, "ship it", undefined, "goal")).toEqual({
+      kind: "match",
+      message,
+    });
+    expect(acceptedSendMatch([message], sendId, "ship it", undefined, "chat")).toEqual({ kind: "conflict" });
+    expect(sendFingerprint("ship it", undefined, "goal")).not.toBe(sendFingerprint("ship it", undefined, "chat"));
+  });
+
+  it("treats a legacy missing channel mode as ordinary chat", () => {
+    const sendId = "send_1234567890123456";
+    const message = userMessage();
+    expect(acceptedSendMatch([message], sendId, "ship it", undefined, "chat")).toEqual({
+      kind: "match",
+      message,
+    });
+  });
+
   it("coalesces simultaneous retries onto one operation", async () => {
     const sequencer = new SendSequencer();
     let releaseFirst = () => {};

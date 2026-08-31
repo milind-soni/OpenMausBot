@@ -13,6 +13,11 @@
 //                      way the real CLI reads it — the driver writes it to a
 //                      private temp file and deletes it when the turn settles,
 //                      so a test cannot open it after the fact.
+//   FAKE_CLAUDE_REPLIES JSON array of strings (or string arrays for multiple
+//                      assistant items) used in order across turns. This makes
+//                      bounded multi-turn orchestration deterministic.
+//   FAKE_CLAUDE_REPLY_STATE Optional counter file shared by fresh CLI
+//                      processes so scripted replies keep their order.
 //   FAKE_CLAUDE_AUTH   in (default) | out | unsupported | malformed |
 //                      inherited-api-key — what `auth status` reports
 //
@@ -20,6 +25,32 @@
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
 
 const mode = process.env.FAKE_CLAUDE_MODE ?? "happy";
+const scriptedReplies = (() => {
+  try {
+    const parsed = JSON.parse(process.env.FAKE_CLAUDE_REPLIES ?? "[]");
+    if (!Array.isArray(parsed)) return [];
+    return parsed.filter((value): value is string | string[] =>
+      typeof value === "string" || (Array.isArray(value) && value.every((part) => typeof part === "string"))
+    );
+  } catch {
+    return [];
+  }
+})();
+let scriptedReplyIndex = 0;
+const nextScriptedReply = (): string[] => {
+  const stateFile = process.env.FAKE_CLAUDE_REPLY_STATE;
+  let index = scriptedReplyIndex;
+  if (stateFile) {
+    try {
+      index = Number(readFileSync(stateFile, "utf8")) || 0;
+    } catch {}
+    writeFileSync(stateFile, String(index + 1));
+  } else {
+    scriptedReplyIndex += 1;
+  }
+  const reply = scriptedReplies[index] ?? "hello from fake claude";
+  return Array.isArray(reply) ? reply : [reply];
+};
 
 const argv = process.argv.slice(2);
 const argAfter = (flag: string): string | null => {
@@ -184,15 +215,19 @@ const playTurn = (prompt: JsonValue) => {
     });
   }
 
-  out({
-    type: "assistant",
-    message: {
-      content: [
-        { type: "text", text: "hello from fake claude" },
-        { type: "tool_use", id: "tu-1", name: "Bash" },
-      ],
-      usage: { input_tokens: 10, cache_read_input_tokens: 2, output_tokens: 5 },
-    },
+  const replyParts = nextScriptedReply();
+  replyParts.forEach((text, index) => {
+    const content: Array<
+      { type: "text"; text: string } | { type: "tool_use"; id: string; name: string }
+    > = [{ type: "text", text }];
+    if (index === replyParts.length - 1) content.push({ type: "tool_use", id: "tu-1", name: "Bash" });
+    out({
+      type: "assistant",
+      message: {
+        content,
+        usage: { input_tokens: 10, cache_read_input_tokens: 2, output_tokens: 5 },
+      },
+    });
   });
   out({ type: "user", message: { content: [{ type: "tool_result", tool_use_id: "tu-1", is_error: false }] } });
 

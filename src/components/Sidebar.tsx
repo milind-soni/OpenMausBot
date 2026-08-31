@@ -67,6 +67,7 @@ import {
   partitionSidebarGroups,
   placeSection,
   sameSectionOrder,
+  sidebarGoalRunPreview,
   sidebarLayoutInteractive,
   sidebarSectionCollapsed,
   sidebarSectionLabel,
@@ -191,9 +192,14 @@ function groupPreview(group: Group, bots: Bot[]): string {
   if (group.busyBotId) {
     return `${bots.find((b) => b.id === group.busyBotId)?.name ?? "A bot"} is working…`;
   }
+  if (group.working) return "The team is working…";
   const last = group.messages.at(-1);
   if (!last) return "No messages yet";
-  const text = last.kind === "activity" && last.tool ? last.tool.name : (last.text ?? "");
+  const text = last.kind === "activity" && last.tool
+    ? last.tool.name
+    : last.kind === "goal.run" && last.goalRun
+      ? sidebarGoalRunPreview(last.goalRun)
+      : (last.text ?? "");
   if (last.role === "user") return `You: ${text}`;
   return last.from ? `${last.from.name}: ${text}` : text;
 }
@@ -1581,6 +1587,8 @@ export function Sidebar({ open, onClose }: { open: boolean; onClose: () => void 
               <div
                 key={id}
                 data-sidebar-section-id={id}
+                onDragOver={(event) => updateSectionDropTarget(event, id)}
+                onDrop={dropSection}
                 className={cn(
                   "flex flex-col gap-0.5",
                   density !== "icons" && index > 0 && "pt-3",
@@ -1605,8 +1613,6 @@ export function Sidebar({ open, onClose }: { open: boolean; onClose: () => void 
                       setDraggingSectionId(id);
                     }}
                     onDragEnd={resetSectionDrag}
-                    onDragOver={(event) => updateSectionDropTarget(event, id)}
-                    onDrop={dropSection}
                     onMove={(direction) => moveSidebarSection(id, direction)}
                   />
                 )}
@@ -1687,8 +1693,8 @@ export function Sidebar({ open, onClose }: { open: boolean; onClose: () => void 
         )}
         <button
           onClick={() => dispatch({ type: "showRoutines" })}
-          aria-label={density === "icons" ? "Tasks and routines" : undefined}
-          title={density === "icons" ? "Tasks and routines" : undefined}
+          aria-label={density === "icons" ? "Calendar" : undefined}
+          title={density === "icons" ? "Calendar" : undefined}
           className={cn(
             "flex min-h-10 w-full items-center rounded-xl py-2 text-left transition-colors",
             density === "icons" ? "justify-center px-2" : "gap-3 px-3",
@@ -1696,7 +1702,7 @@ export function Sidebar({ open, onClose }: { open: boolean; onClose: () => void 
           )}
         >
           <CalendarDays size={20} className={state.activeView === "routines" ? "text-accent" : "text-ink-secondary"} />
-          <span className={cn("flex-1 text-[14px]", density === "icons" && "hidden")}>Tasks &amp; routines</span>
+          <span className={cn("flex-1 text-[14px]", density === "icons" && "hidden")}>Calendar</span>
           {state.routineRuns.some((run) => ["failed", "missed"].includes(run.status) && !run.seenAt) && (
             <span className="size-2 rounded-full bg-danger" />
           )}

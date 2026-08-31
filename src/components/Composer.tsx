@@ -1,6 +1,6 @@
 import { track } from "@/lib/analytics";
 import { useCallback, useEffect, useMemo, useRef, useState, type SetStateAction } from "react";
-import { ArrowUp, Check, Clock, Hand, Mic, Paperclip, ShieldCheck, Square, Users, X } from "lucide-react";
+import { ArrowUp, Check, Clock, Hand, Mic, Paperclip, ShieldCheck, Square, Target, Users, X } from "lucide-react";
 import { useStore, visibleMessages, type Bot, type Group, type Message } from "@/state/store";
 import { cn } from "@/lib/cn";
 import {
@@ -30,7 +30,7 @@ import {
   type PasteAttachment,
 } from "@/lib/composer-attachments";
 import { normalizeState } from "@/lib/mascot";
-import { groupComposerHint, roomRespondersForComposer } from "@/lib/group-routing";
+import { goalCoordinatorForComposer, groupComposerHint, roomRespondersForComposer } from "@/lib/group-routing";
 import { PendingApprovalActions, PendingApprovalPanel, pendingApprovals } from "./PendingApproval";
 import { useDesktopCapabilities } from "./DesktopCapabilities";
 import { ReplyQuote } from "./ReplyQuote";
@@ -56,6 +56,7 @@ interface ComposerDraftSnapshot extends ComposerSendSnapshot {
 interface QueuedGroupSend {
   text: string;
   replyToId?: string;
+  mode: "chat" | "goal";
   draft: ComposerDraftSnapshot;
 }
 
@@ -183,7 +184,7 @@ export function Composer({
   // Unified target: a 1:1 bot thread or a room. In a room the @ picker
   // offers members plus @everyone; explicit mentions override the room's
   // configured default responder.
-  const busy = group ? Boolean(group.busyBotId) : Boolean(bot?.busy);
+  const busy = group ? Boolean(group.working || group.busyBotId) : Boolean(bot?.busy);
   // an engine with a live session takes a message INTO the running turn;
   // for those the composer never locks — the server steers instead of 409
   const canSteer =
@@ -199,7 +200,7 @@ export function Composer({
       members?.find((member) => member.id === group.busyBotId)
     : bot;
   const busyName = group
-    ? (members?.find((b) => b.id === group.busyBotId)?.name ?? "A bot")
+    ? (members?.find((b) => b.id === group.busyBotId)?.name ?? (group.working ? "The team" : "A bot"))
     : (bot?.name ?? "The bot");
   // Per-thread draft: switching bots unmounts this component, so both the
   // text and its attachment chips have to outlive it (see lib/drafts).
@@ -211,6 +212,9 @@ export function Composer({
     !group && bot ? `bot:${bot.id}` : undefined,
   );
   const failedSends = useFailedComposerSends(draftId);
+  // Goal mode is opt-in and one-shot so the next ordinary channel message
+  // cannot accidentally start another multi-turn team run.
+  const [channelMode, setChannelMode] = useState<"chat" | "goal">("chat");
   const editText = useCallback(
     (next: string) => {
       markDraftEdited(draftId);
@@ -229,8 +233,9 @@ export function Composer({
     (sent: ComposerDraftSnapshot) => {
       // Shared recovery reaches a newly mounted view after navigation and
       // falls back to a separate retry item when a newer draft already exists.
-      if (recoverFailedComposerSend(sent) === "restored" && sent.reply) {
-        onRestoreReply?.(sent.reply, sent.threadId);
+      if (recoverFailedComposerSend(sent) === "restored") {
+        setChannelMode(sent.channelMode ?? "chat");
+        if (sent.reply) onRestoreReply?.(sent.reply, sent.threadId);
       }
     },
     [onRestoreReply],
@@ -277,12 +282,15 @@ export function Composer({
       candidate &&
         state.instances.find((i) => i.instanceId === candidate.modelSelection.instanceId)?.capabilities?.images,
     );
-  const imageTargetsSupport = (message: string) => {
+  const imageTargetsSupport = (message: string, mode: "chat" | "goal") => {
     if (!group) return botSupportsImages(bot);
+    if (mode === "goal") {
+      return botSupportsImages(goalCoordinatorForComposer(message, members ?? [], group) ?? undefined);
+    }
     const responders = roomRespondersForComposer(message, members ?? [], group);
     return responders.length > 0 && responders.every(botSupportsImages);
   };
-  const engineSupportsImages = imageTargetsSupport(text);
+  const engineSupportsImages = imageTargetsSupport(text, channelMode);
 
   // ── @mention picker (tag another bot; the agent reaches it via ask_bot) ──
   const mention = mentionQueryAt(text, caret);
@@ -385,7 +393,8 @@ export function Composer({
 
   const hasContent = Boolean(text.trim()) || attachments.length > 0;
   const retryFailedSend = (failed: FailedComposerSend) => {
-    if (failed.requestText.includes("<attached-image ") && !imageTargetsSupport(failed.requestText)) {
+    const failedMode = failed.channelMode ?? "chat";
+    if (failed.requestText.includes("<attached-image ") && !imageTargetsSupport(failed.requestText, failedMode)) {
       dispatch({ type: "error", message: "The selected responder does not support image attachments." });
       return;
     }
@@ -402,11 +411,12 @@ export function Composer({
           requestText: failed.requestText,
           replyToId: failed.replyToId,
           threadId: failed.threadId,
+          channelMode: failed.channelMode,
         });
       },
     };
     if (group) {
-      dispatch({ type: "sendGroup", groupId: group.id, ...retry });
+      dispatch({ type: "sendGroup", groupId: group.id, mode: failedMode, ...retry });
     } else if (bot) {
       dispatch({ type: "send", botId: bot.id, ...retry });
     }
@@ -416,7 +426,7 @@ export function Composer({
     // as an editable draft until that send is dispatched; replacing the slot
     // here would silently lose the first message.
     if (locked || (group && queued)) return;
-    if (attachments.some((attachment) => attachment.kind === "image") && !imageTargetsSupport(text)) {
+    if (attachments.some((attachment) => attachment.kind === "image") && !imageTargetsSupport(text, channelMode)) {
       dispatch({ type: "error", message: "The selected responder does not support image attachments." });
       return;
     }
@@ -432,14 +442,16 @@ export function Composer({
       reply: replyTo ?? null,
       replyToId: replyTo?.id,
       threadId,
+      channelMode: group ? channelMode : undefined,
     };
     if (busy && group) {
-      const pending = { text: t, replyToId: replyTo?.id, draft: sentDraft };
+      const pending = { text: t, replyToId: replyTo?.id, mode: channelMode, draft: sentDraft };
       queuedRef.current = pending;
       setQueued(pending);
       setText("");
       setAttachments([]);
       onConsumeReply?.();
+      setChannelMode("chat");
       return;
     }
     if (group) {
@@ -450,9 +462,10 @@ export function Composer({
         sendId: sentDraft.sendId,
         replyToId: replyTo?.id,
         threadId,
+        mode: channelMode,
         onError: () => restoreDraft(sentDraft),
       });
-      track("message_sent", { room: true });
+      track("message_sent", { room: true, mode: channelMode });
     } else if (bot) {
       dispatch({
         type: "send",
@@ -468,11 +481,12 @@ export function Composer({
     setText("");
     setAttachments([]);
     onConsumeReply?.();
+    if (group) setChannelMode("chat");
   };
   useEffect(() => {
     if (busy || !queued) return;
     if (group) {
-      if (queued.text.includes("<attached-image ") && !imageTargetsSupport(queued.text)) {
+      if (queued.text.includes("<attached-image ") && !imageTargetsSupport(queued.text, queued.mode)) {
         dispatch({ type: "error", message: "The selected responder does not support image attachments." });
         clearQueued();
         restoreDraft(queued.draft);
@@ -486,9 +500,10 @@ export function Composer({
         sendId: queued.draft.sendId,
         replyToId: queued.replyToId,
         threadId: queued.draft.threadId,
+        mode: queued.mode,
         onError: () => restoreDraft(queued.draft),
       });
-      track("message_sent", { room: true, queued: true });
+      track("message_sent", { room: true, queued: true, mode: queued.mode });
     }
   }, [busy, queued, group, members, state.instances, dispatch, clearQueued, restoreDraft]);
 
@@ -688,6 +703,27 @@ export function Composer({
               >
                 <Paperclip size={17} />
               </button>
+              {group && !group.dm && (
+                <button
+                  type="button"
+                  aria-pressed={channelMode === "goal"}
+                  aria-label="Finish together"
+                  title="Finish together — the team keeps working until the goal is complete"
+                  onClick={() => {
+                    markDraftEdited(draftId);
+                    setChannelMode((current) => current === "goal" ? "chat" : "goal");
+                  }}
+                  className={cn(
+                    "flex h-8 items-center gap-1.5 whitespace-nowrap rounded-full border px-3 text-[13px] transition-colors",
+                    channelMode === "goal"
+                      ? "border-accent/35 bg-accent/10 text-accent"
+                      : "border-hairline/20 bg-transparent text-ink-secondary hover:bg-raised hover:text-ink",
+                  )}
+                >
+                  <Target size={14} aria-hidden="true" />
+                  Goal
+                </button>
+              )}
               {autoBot && <PermissionModeSelector bot={autoBot} onSetAuto={setAuto} />}
             </div>
           )}
@@ -785,7 +821,9 @@ export function Composer({
                   ? `${busyName} is working — Enter queues your message`
                   : `${busyName} is working — sends when this turn finishes`
                 : group
-                  ? `Message ${group.name} — ${groupComposerHint(group, members ?? [])}`
+                  ? channelMode === "goal"
+                    ? `Describe what ${group.name} should finish together`
+                    : `Message ${group.name} — ${groupComposerHint(group, members ?? [])}`
                   : `Message ${bot?.name ?? ""}`
           }
           aria-label={`Message ${group ? group.name : (bot?.name ?? "")}`}

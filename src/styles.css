@@ -23,6 +23,7 @@
    ───────────────────────────────────────────────────────────────────────── */
 @theme {
   --animate-panel-in: panel-in 0.24s cubic-bezier(0.22, 1, 0.36, 1);
+  --animate-workspace-in: workspace-in 0.18s cubic-bezier(0.22, 1, 0.36, 1);
   --animate-pop-in: pop-in 0.2s cubic-bezier(0.22, 1, 0.36, 1);
   --animate-caret: caret-blink 1s step-end infinite;
   --animate-msg-in: msg-in 0.18s cubic-bezier(0.22, 1, 0.36, 1);
@@ -322,6 +323,10 @@ body {
 @keyframes panel-in {
   from { transform: translateX(28px); opacity: 0; }
   to { transform: translateX(0); opacity: 1; }
+}
+@keyframes workspace-in {
+  from { opacity: 0.92; }
+  to { opacity: 1; }
 }
 @keyframes pop-in {
   from { transform: scale(0.96) translateY(6px); opacity: 0; }

@@ -5,6 +5,7 @@ import { z } from "zod";
 
 import { writeFileAtomic } from "./atomic.ts";
 import { DATA_DIR } from "./config.ts";
+import { nextOccurrence } from "./routines.ts";
 
 export type CalendarCallSchedule =
   | { type: "once"; at: number }
@@ -29,6 +30,8 @@ export interface CalendarCall {
   schedule: CalendarCallSchedule;
   durationMinutes: number;
   attachments: CalendarCallAttachment[];
+  roomId?: string;
+  nextRunAt: number | null;
   createdAt: number;
   updatedAt: number;
 }
@@ -48,6 +51,7 @@ export interface CalendarCallManagerOptions {
   file?: string;
   now?: () => number;
   botExists: (botId: string) => boolean;
+  onDue?: (call: CalendarCall, scheduledFor: number) => void | Promise<void>;
 }
 
 interface CalendarCallFile {
@@ -81,6 +85,8 @@ const callSchema = z.object({
   schedule: scheduleSchema,
   durationMinutes: z.number().int().min(15).max(240),
   attachments: z.array(attachmentSchema).max(MAX_ATTACHMENTS),
+  roomId: z.string().min(1).optional(),
+  nextRunAt: z.number().finite().nonnegative().nullable().optional(),
   createdAt: z.number().finite().nonnegative(),
   updatedAt: z.number().finite().nonnegative(),
 });
@@ -93,6 +99,12 @@ function cloneSchedule(schedule: CalendarCallSchedule): CalendarCallSchedule {
   return schedule.type === "once"
     ? { type: "once", at: schedule.at }
     : { type: "daily", time: schedule.time, weekdays: [...schedule.weekdays] };
+}
+
+function sameRoster(left: readonly string[], right: readonly string[]): boolean {
+  if (left.length !== right.length) return false;
+  const wanted = new Set(left);
+  return right.every((id) => wanted.has(id));
 }
 
 function cloneCall(call: CalendarCall): CalendarCall {
@@ -133,7 +145,7 @@ function cleanAttachments(value: CalendarCallAttachment[] | undefined): Calendar
 function cleanInput(
   input: CalendarCallInput,
   botExists: CalendarCallManagerOptions["botExists"],
-): Omit<CalendarCall, "id" | "createdAt" | "updatedAt"> {
+): Omit<CalendarCall, "id" | "roomId" | "nextRunAt" | "createdAt" | "updatedAt"> {
   const name = String(input.name ?? "").trim().slice(0, 120);
   const description = String(input.description ?? "").trim().slice(0, 20_000);
   if (!name) throw new Error("Give the call a title");
@@ -163,27 +175,49 @@ export class CalendarCallManager {
   private readonly file: string;
   private readonly now: () => number;
   private readonly botExists: CalendarCallManagerOptions["botExists"];
+  private readonly onDue: CalendarCallManagerOptions["onDue"];
   private calls: CalendarCall[] = [];
+  private timer: ReturnType<typeof setInterval> | null = null;
+  private ticking = false;
 
   constructor(options: CalendarCallManagerOptions) {
     this.file = options.file ?? join(DATA_DIR, "calendar-calls.json");
     this.now = options.now ?? Date.now;
     this.botExists = options.botExists;
+    this.onDue = options.onDue;
+    let migrated = false;
     try {
       const parsed = fileSchema.safeParse(JSON.parse(readFileSync(this.file, "utf8")));
       this.calls = parsed.success
         ? parsed.data.calls.flatMap((candidate) => {
             const call = callSchema.safeParse(candidate);
-            return call.success ? [cloneCall(call.data)] : [];
+            if (!call.success) return [];
+            if (call.data.nextRunAt === undefined) migrated = true;
+            const nextRunAt = call.data.nextRunAt === undefined
+              ? this.loadedOccurrence(call.data.schedule)
+              : call.data.nextRunAt;
+            return [cloneCall({ ...call.data, nextRunAt })];
           })
         : [];
     } catch {
       this.calls = [];
     }
+    if (migrated) {
+      try {
+        this.save();
+      } catch (error) {
+        console.error("calendar calls: could not persist schedule migration", error);
+      }
+    }
   }
 
   list(): CalendarCall[] {
     return this.calls.map(cloneCall);
+  }
+
+  get(id: string): CalendarCall | null {
+    const call = this.calls.find((candidate) => candidate.id === id);
+    return call ? cloneCall(call) : null;
   }
 
   create(input: CalendarCallInput): CalendarCall {
@@ -192,10 +226,12 @@ export class CalendarCallManager {
     const call: CalendarCall = {
       id: randomUUID(),
       ...clean,
+      nextRunAt: this.initialOccurrence(clean.schedule, timestamp),
       createdAt: timestamp,
       updatedAt: timestamp,
     };
     this.commit(() => this.calls.push(call));
+    if (this.timer) queueMicrotask(() => void this.tick());
     return cloneCall(call);
   }
 
@@ -214,13 +250,26 @@ export class CalendarCallManager {
     const updated: CalendarCall = {
       id: previous.id,
       ...clean,
+      roomId: patch.botIds && !sameRoster(clean.botIds, previous.botIds) ? undefined : previous.roomId,
+      nextRunAt: this.initialOccurrence(clean.schedule, this.now()),
       createdAt: previous.createdAt,
       updatedAt: this.now(),
     };
     this.commit(() => {
       this.calls[index] = updated;
     });
+    if (this.timer) queueMicrotask(() => void this.tick());
     return cloneCall(updated);
+  }
+
+  linkRoom(id: string, roomId: string): CalendarCall {
+    const call = this.calls.find((candidate) => candidate.id === id);
+    if (!call) throw new Error("Call not found");
+    if (call.roomId === roomId) return cloneCall(call);
+    this.commit(() => {
+      call.roomId = roomId;
+    });
+    return cloneCall(call);
   }
 
   remove(id: string): boolean {
@@ -245,6 +294,56 @@ export class CalendarCallManager {
       });
     });
     return affected;
+  }
+
+  start(): void {
+    if (this.timer) return;
+    void this.tick();
+    this.timer = setInterval(() => void this.tick(), 10_000);
+    this.timer.unref?.();
+  }
+
+  stop(): void {
+    if (this.timer) clearInterval(this.timer);
+    this.timer = null;
+  }
+
+  async tick(): Promise<void> {
+    if (this.ticking) return;
+    this.ticking = true;
+    try {
+      const now = this.now();
+      for (const call of this.calls) {
+        if (call.nextRunAt == null || call.nextRunAt > now) continue;
+        const scheduledFor = call.nextRunAt;
+        if (now - scheduledFor < call.durationMinutes * 60_000) {
+          try {
+            await this.onDue?.(cloneCall(call), scheduledFor);
+          } catch (error) {
+            console.error(`calendar call ${call.id}: scheduled room kickoff failed`, error);
+            continue;
+          }
+        }
+        call.nextRunAt = call.schedule.type === "once"
+          ? null
+          : nextOccurrence(call.schedule, Math.max(now, scheduledFor));
+        this.save();
+      }
+    } finally {
+      this.ticking = false;
+    }
+  }
+
+  private initialOccurrence(schedule: CalendarCallSchedule, now: number): number | null {
+    return schedule.type === "once" ? schedule.at : nextOccurrence(schedule, now);
+  }
+
+  /** Old calendar calls were reminders only. Start recurring reminders from
+   * the next future slot and never replay an already-past one-time reminder. */
+  private loadedOccurrence(schedule: CalendarCallSchedule): number | null {
+    const now = this.now();
+    if (schedule.type === "once") return schedule.at > now ? schedule.at : null;
+    return nextOccurrence(schedule, now);
   }
 
   private commit(mutate: () => void): void {
