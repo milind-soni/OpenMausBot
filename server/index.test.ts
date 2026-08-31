@@ -2486,6 +2486,55 @@ describe("harness HTTP API", () => {
     }
   });
 
+  it("creates, edits, lists, and deletes scheduled multi-bot calls", async () => {
+    const first = (await api("POST", "/api/bots", { name: "Call host" })).body.bot;
+    const second = (await api("POST", "/api/bots", { name: "Call guest" })).body.bot;
+    let callId = "";
+    try {
+      const invalidCreate = await api("POST", "/api/calendar-calls", {
+        name: "",
+        botIds: [],
+        schedule: { type: "once", at: Date.now() + 60_000 },
+      });
+      expect(invalidCreate.status).toBe(400);
+
+      const created = await api("POST", "/api/calendar-calls", {
+        name: "Weekly bot sync",
+        description: "Review priorities.",
+        botIds: [first.id, second.id],
+        schedule: { type: "once", at: Date.now() + 60_000 },
+        durationMinutes: 30,
+        attachments: [],
+      });
+      expect(created.status).toBe(201);
+      callId = created.body.call.id;
+      expect(created.body.call).toMatchObject({
+        name: "Weekly bot sync",
+        botIds: [first.id, second.id],
+        durationMinutes: 30,
+      });
+
+      const edited = await api("PATCH", `/api/calendar-calls/${callId}`, {
+        schedule: { type: "daily", time: "11:15", weekdays: [1, 2, 3, 4, 5] },
+      });
+      expect(edited.status).toBe(200);
+      expect(edited.body.call.schedule).toEqual({ type: "daily", time: "11:15", weekdays: [1, 2, 3, 4, 5] });
+      const invalidPatch = await api("PATCH", `/api/calendar-calls/${callId}`, { durationMinutes: 5 });
+      expect(invalidPatch.status).toBe(400);
+      expect((await api("GET", "/api/calendar-calls")).body.calls).toEqual(
+        expect.arrayContaining([expect.objectContaining({ id: callId, name: "Weekly bot sync" })]),
+      );
+
+      expect((await api("DELETE", `/api/calendar-calls/${callId}`)).status).toBe(200);
+      callId = "";
+      expect((await api("PATCH", "/api/calendar-calls/missing", { name: "Nope" })).status).toBe(404);
+    } finally {
+      if (callId) await api("DELETE", `/api/calendar-calls/${callId}`).catch(() => undefined);
+      await api("DELETE", `/api/bots/${first.id}`).catch(() => undefined);
+      await api("DELETE", `/api/bots/${second.id}`).catch(() => undefined);
+    }
+  });
+
   it("refuses to delete a bot while one of its routines is active", async () => {
     const bot = (await api("POST", "/api/bots", {
       modelSelection: { instanceId: "claude", model: "claude-sonnet-5" },

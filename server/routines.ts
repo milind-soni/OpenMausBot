@@ -1,10 +1,11 @@
 import { randomUUID } from "node:crypto";
-import { mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
+import { mkdirSync, readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { z } from "zod";
 
 import { DATA_DIR } from "./config.ts";
 import type { RuntimeEvent } from "./contracts.ts";
+import { writeFileAtomic } from "./atomic.ts";
 import { redactSecretsInText } from "./redact.ts";
 import type { RoutineRequestOperation } from "../shared/routine-request.ts";
 
@@ -16,6 +17,14 @@ export type RoutineSchedule =
  * using the provider selected on the MAUS and only borrows its configured
  * computer tools, if any. */
 export type RoutineRunOn = "maus" | "cloud";
+
+export interface RoutineContextAttachment {
+  id: string;
+  kind: "file" | "image";
+  name: string;
+  path: string;
+  size: number;
+}
 
 const persistedSourceThreadId = z.string().trim().min(1).optional().catch(undefined);
 
@@ -39,6 +48,7 @@ export interface Routine {
   enabled: boolean;
   schedule: RoutineSchedule;
   durationMinutes: number;
+  attachments?: RoutineContextAttachment[];
   /** Conversation that created this routine in chat. Calendar/import-created
    * routines intentionally have no source, and older files migrate in place. */
   sourceThreadId?: string;
@@ -54,6 +64,7 @@ export interface RoutineRun {
   /** Snapshot the work so an edited/deleted definition cannot rewrite history. */
   prompt?: string;
   durationMinutes?: number;
+  attachments?: RoutineContextAttachment[];
   botId: string;
   runOn: RoutineRunOn;
   scheduledFor: number;
@@ -113,6 +124,7 @@ export interface RoutineInput {
   enabled?: boolean;
   schedule: RoutineSchedule;
   durationMinutes?: number;
+  attachments?: RoutineContextAttachment[];
 }
 
 interface RoutineFile {
@@ -154,6 +166,14 @@ export interface RoutineManagerOptions {
 const ALL_DAYS = [0, 1, 2, 3, 4, 5, 6];
 const CATCH_UP_MS = 12 * 60 * 60_000;
 const MAX_RUNS = 2_000;
+const MAX_ATTACHMENTS = 50;
+const attachmentSchema = z.object({
+  id: z.string().trim().min(1).max(200),
+  kind: z.enum(["file", "image"]),
+  name: z.string().trim().min(1).max(255),
+  path: z.string().trim().min(1).max(4_096),
+  size: z.number().finite().nonnegative(),
+});
 const ROUTINE_REQUEST_ACTIONS = new Set<RoutineRequestOperation["action"]>([
   "create",
   "update",
@@ -171,6 +191,80 @@ function cleanDays(days: unknown): number[] {
   if (!Array.isArray(days)) return ALL_DAYS;
   const out = [...new Set(days.filter((d): d is number => Number.isInteger(d) && d >= 0 && d <= 6))].sort();
   return out.length ? out : ALL_DAYS;
+}
+
+function cleanAttachments(value: unknown): RoutineContextAttachment[] {
+  if (value == null) return [];
+  if (!Array.isArray(value) || value.length > MAX_ATTACHMENTS) {
+    throw new Error(`Add no more than ${MAX_ATTACHMENTS} attachments`);
+  }
+  const ids = new Set<string>();
+  return value.map((candidate) => {
+    const parsed = attachmentSchema.safeParse(candidate);
+    if (!parsed.success || parsed.data.name.includes("\0") || parsed.data.path.includes("\0")) {
+      throw new Error("Choose a valid attachment");
+    }
+    if (ids.has(parsed.data.id)) throw new Error("Each attachment must be unique");
+    ids.add(parsed.data.id);
+    return { ...parsed.data };
+  });
+}
+
+/** A malformed legacy metadata field must not make the scheduler forget the
+ * otherwise valid routine or run that owns it. New writes still fail closed. */
+function loadAttachments(value: unknown): RoutineContextAttachment[] {
+  try {
+    return cleanAttachments(value);
+  } catch {
+    return [];
+  }
+}
+
+function cloneSchedule(schedule: RoutineSchedule): RoutineSchedule {
+  return schedule.type === "once"
+    ? { type: "once", at: schedule.at }
+    : { type: "daily", time: schedule.time, weekdays: [...schedule.weekdays] };
+}
+
+function cloneAttachments(attachments: readonly RoutineContextAttachment[] | undefined): RoutineContextAttachment[] {
+  return attachments?.map((attachment) => ({ ...attachment })) ?? [];
+}
+
+function cloneRoutine(routine: Routine): Routine {
+  return {
+    ...routine,
+    schedule: cloneSchedule(routine.schedule),
+    attachments: cloneAttachments(routine.attachments),
+  };
+}
+
+function cloneRun(run: RoutineRun): RoutineRun {
+  return {
+    ...run,
+    attachments: cloneAttachments(run.attachments),
+    denials: run.denials ? [...run.denials] : undefined,
+  };
+}
+
+/** Keep untrusted local paths inside the same quoted tag shape used by chat. */
+function escapeAttachmentPath(value: string): string {
+  return value
+    .replaceAll("&", "&amp;")
+    .replaceAll('"', "&quot;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;")
+    .replaceAll("\t", "&#9;")
+    .replaceAll("\r", "&#13;")
+    .replaceAll("\n", "&#10;");
+}
+
+function composeExecutionPrompt(prompt: string, attachments: readonly RoutineContextAttachment[] | undefined): string {
+  const parts = [prompt];
+  for (const attachment of attachments ?? []) {
+    const tag = attachment.kind === "image" ? "attached-image" : "attached-file";
+    parts.push(`<${tag} path="${escapeAttachmentPath(attachment.path)}" />`);
+  }
+  return parts.filter(Boolean).join("\n\n");
 }
 
 function cleanSchedule(schedule: RoutineSchedule): RoutineSchedule {
@@ -210,6 +304,10 @@ function sanitizeInput(input: RoutineInput): Omit<Routine, "id" | "createdAt" | 
   if (!botId) throw new Error("Choose a bot");
   const runOn = input.runOn ?? "maus";
   if (runOn !== "maus" && runOn !== "cloud") throw new Error("Choose where this routine runs");
+  const attachments = cleanAttachments(input.attachments);
+  if (runOn === "cloud" && attachments.length > 0) {
+    throw new Error("Attachments can only run on this computer until cloud file staging is available");
+  }
   return {
     name,
     prompt,
@@ -218,6 +316,7 @@ function sanitizeInput(input: RoutineInput): Omit<Routine, "id" | "createdAt" | 
     enabled: input.enabled !== false,
     schedule: cleanSchedule(input.schedule),
     durationMinutes: Math.min(240, Math.max(15, Math.round(Number(input.durationMinutes) || 30))),
+    attachments,
   };
 }
 
@@ -241,6 +340,7 @@ export class RoutineManager {
         ? disk.routines.map((routine) => ({
             ...routine,
             runOn: routine.runOn ?? "maus",
+            attachments: loadAttachments(routine.attachments),
             sourceThreadId: persistedSourceThreadId.parse(routine.sourceThreadId),
           }))
         : [];
@@ -248,6 +348,7 @@ export class RoutineManager {
         ? disk.runs.map((run) => ({
             ...run,
             runOn: run.runOn ?? "maus",
+            attachments: loadAttachments(run.attachments),
             sourceThreadId: persistedSourceThreadId.parse(run.sourceThreadId),
           }))
         : [];
@@ -277,7 +378,7 @@ export class RoutineManager {
         run.error = "OpenMausBot restarted while this routine was running";
         run.attention = undefined;
         run.finishedAt = this.now();
-        recovered.push({ ...run });
+        recovered.push(cloneRun(run));
       }
     }
     if (recovered.length > 0) {
@@ -290,21 +391,21 @@ export class RoutineManager {
   }
 
   listRoutines(): Routine[] {
-    return this.routines.map((r) => ({ ...r, schedule: { ...r.schedule } }));
+    return this.routines.map(cloneRoutine);
   }
 
   listRuns(from?: number, to?: number): RoutineRun[] {
     return this.runs
       .filter((r) => (from == null || r.scheduledFor >= from) && (to == null || r.scheduledFor <= to))
       .sort((a, b) => b.scheduledFor - a.scheduledFor)
-      .map((r) => ({ ...r }));
+      .map(cloneRun);
   }
 
   activeRunForBot(botId: string): RoutineRun | null {
     const run = this.runs.find(
       (candidate) => candidate.botId === botId && ["running", "waiting"].includes(candidate.status),
     );
-    return run ? { ...run } : null;
+    return run ? cloneRun(run) : null;
   }
 
   routineRequestReceipt(requestId: string): RoutineRequestReceipt | null {
@@ -372,7 +473,7 @@ export class RoutineManager {
       const receipt = this.matchingRoutineRequestReceipt(request);
       if (receipt) {
         const committed = this.routines.find((routine) => routine.id === receipt.resultId);
-        if (committed) return { ...committed, schedule: { ...committed.schedule } };
+        if (committed) return cloneRoutine(committed);
         throw new Error("This routine request was already applied");
       }
     }
@@ -394,7 +495,7 @@ export class RoutineManager {
       if (request) this.rememberRoutineRequest(request, routine.id, at);
     });
     this.emitRoutine(routine);
-    return { ...routine, schedule: { ...routine.schedule } };
+    return cloneRoutine(routine);
   }
 
   update(
@@ -406,7 +507,7 @@ export class RoutineManager {
       const receipt = this.matchingRoutineRequestReceipt(request);
       if (receipt) {
         const committed = this.routines.find((routine) => routine.id === receipt.resultId);
-        return committed ? { ...committed, schedule: { ...committed.schedule } } : null;
+        return committed ? cloneRoutine(committed) : null;
       }
     }
     const routine = this.routines.find((r) => r.id === id);
@@ -420,6 +521,7 @@ export class RoutineManager {
       enabled: patch.enabled ?? routine.enabled,
       schedule: patch.schedule ?? routine.schedule,
       durationMinutes: patch.durationMinutes ?? routine.durationMinutes,
+      attachments: patch.attachments ?? routine.attachments,
     });
     if (this.options.botState(clean.botId) === "missing") throw new Error("That bot no longer exists");
     const cancelledRuns: RoutineRun[] = [];
@@ -444,7 +546,7 @@ export class RoutineManager {
     });
     for (const run of cancelledRuns) this.emitRun(run);
     this.emitRoutine(routine);
-    return { ...routine, schedule: { ...routine.schedule } };
+    return cloneRoutine(routine);
   }
 
   remove(id: string, request?: RoutineRequestCommitFor<"delete">): boolean {
@@ -501,7 +603,7 @@ export class RoutineManager {
       const receipt = this.matchingRoutineRequestReceipt(request);
       if (receipt) {
         const committed = this.runs.find((run) => run.id === receipt.resultId);
-        return committed ? { ...committed } : null;
+        return committed ? cloneRun(committed) : null;
       }
     }
     const routine = this.routines.find((r) => r.id === id);
@@ -516,7 +618,7 @@ export class RoutineManager {
     });
     this.emitRun(run);
     queueMicrotask(() => void this.tick());
-    return { ...run };
+    return cloneRun(run);
   }
 
   /** Queue an event-driven job without inventing a calendar schedule. Webhook
@@ -548,6 +650,7 @@ export class RoutineManager {
       triggerSource: "webhook",
       webhookId: input.webhookId,
       deliveryId: input.deliveryId,
+      attachments: [],
       createdAt: this.now(),
     };
     this.runs.push(run);
@@ -555,7 +658,7 @@ export class RoutineManager {
     this.save();
     this.emitRun(run);
     queueMicrotask(() => void this.tick());
-    return { ...run };
+    return cloneRun(run);
   }
 
   activeWebhookRunCount(webhookId: string): number {
@@ -588,7 +691,7 @@ export class RoutineManager {
     this.emitRun(run);
     if (run.threadId) await this.options.interruptTurn?.(run.botId, run.threadId, run.runOn ?? "maus").catch(() => {});
     queueMicrotask(() => void this.tick());
-    return { ...run };
+    return cloneRun(run);
   }
 
   markSeen(id: string): RoutineRun | null {
@@ -599,7 +702,7 @@ export class RoutineManager {
       this.save();
       this.emitRun(run);
     }
-    return { ...run };
+    return cloneRun(run);
   }
 
   start() {
@@ -631,7 +734,7 @@ export class RoutineManager {
           missed.finishedAt = now;
           missed.error = "This computer was offline for more than 12 hours after the scheduled time";
           this.emitRun(missed);
-          missedRuns.push({ ...missed });
+          missedRuns.push(cloneRun(missed));
         } else {
           const run = this.newRun(routine, scheduledFor, false);
           this.emitRun(run);
@@ -676,7 +779,7 @@ export class RoutineManager {
           await this.options.startTurn(
             run.botId,
             task.threadId,
-            prompt,
+            composeExecutionPrompt(prompt, run.attachments),
             run.runOn ?? "maus",
             triggerSource,
             (message) => this.failThread(task.threadId, message),
@@ -713,7 +816,7 @@ export class RoutineManager {
       if (!event.ok) {
         this.failRun(run, event.stopReason ?? run.error ?? "The bot did not complete this run");
         queueMicrotask(() => void this.tick());
-        return { ...run };
+        return cloneRun(run);
       }
       run.status = "completed";
       run.attention = undefined;
@@ -725,7 +828,7 @@ export class RoutineManager {
     this.save();
     this.emitRun(run);
     if (event.type === "turn.completed") queueMicrotask(() => void this.tick());
-    return { ...run };
+    return cloneRun(run);
   }
 
   failThread(threadId: string, message: string) {
@@ -742,7 +845,7 @@ export class RoutineManager {
     run.finishedAt = this.now();
     this.save();
     this.emitRun(run);
-    this.options.onRunFailed?.({ ...run });
+    this.options.onRunFailed?.(cloneRun(run));
   }
 
   private initialOccurrence(schedule: RoutineSchedule, now: number): number | null {
@@ -763,6 +866,7 @@ export class RoutineManager {
       routineName: routine.name,
       prompt: routine.prompt,
       durationMinutes: routine.durationMinutes,
+      attachments: cloneAttachments(routine.attachments),
       botId: routine.botId,
       runOn: routine.runOn ?? "maus",
       scheduledFor,
@@ -778,17 +882,17 @@ export class RoutineManager {
   }
 
   private emitRoutine(routine: Routine) {
-    this.options.emit?.({ kind: "routine", routine: { ...routine, schedule: { ...routine.schedule } } });
+    this.options.emit?.({ kind: "routine", routine: cloneRoutine(routine) });
   }
 
   private emitRun(run: RoutineRun) {
-    this.options.emit?.({ kind: "routine.run", run: { ...run } });
+    this.options.emit?.({ kind: "routine.run", run: cloneRun(run) });
     this.notifyRunChanged(run);
   }
 
   private notifyRunChanged(run: RoutineRun) {
     try {
-      this.options.onRunChanged?.({ ...run });
+      this.options.onRunChanged?.(cloneRun(run));
     } catch (error) {
       // Reporting is secondary to scheduler truth. A transcript write must
       // never strand the run in memory or prevent the next tick.
@@ -833,8 +937,8 @@ export class RoutineManager {
    */
   private commitMutation(mutate: () => void): void {
     const before = {
-      routines: this.routines.map((routine) => ({ ...routine, schedule: { ...routine.schedule } })),
-      runs: this.runs.map((run) => ({ ...run, denials: run.denials ? [...run.denials] : undefined })),
+      routines: this.routines.map(cloneRoutine),
+      runs: this.runs.map(cloneRun),
       receipts: this.routineRequestReceipts.map((receipt) => ({ ...receipt })),
     };
     try {
@@ -850,13 +954,11 @@ export class RoutineManager {
 
   private save() {
     mkdirSync(dirname(this.file), { recursive: true });
-    const temp = `${this.file}.tmp`;
-    writeFileSync(temp, JSON.stringify({
+    writeFileAtomic(this.file, JSON.stringify({
       version: 1,
       routines: this.routines,
       runs: this.runs,
       routineRequestReceipts: this.routineRequestReceipts,
-    } satisfies RoutineFile, null, 2));
-    renameSync(temp, this.file);
+    } satisfies RoutineFile, null, 2), { mode: 0o600 });
   }
 }

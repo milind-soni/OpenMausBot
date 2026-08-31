@@ -4,6 +4,14 @@ export type RoutineSchedule =
 
 export type RoutineRunOn = "maus" | "cloud";
 
+export interface RoutineContextAttachment {
+  id: string;
+  kind: "file" | "image";
+  name: string;
+  path: string;
+  size: number;
+}
+
 export type RoutineRunTrigger = "schedule" | "manual" | "webhook";
 
 export type RoutineRunStatus =
@@ -24,6 +32,7 @@ export interface Routine {
   enabled: boolean;
   schedule: RoutineSchedule;
   durationMinutes: number;
+  attachments?: RoutineContextAttachment[];
   nextRunAt: number | null;
   createdAt: number;
   updatedAt: number;
@@ -35,6 +44,7 @@ export interface RoutineRun {
   routineName: string;
   prompt?: string;
   durationMinutes?: number;
+  attachments?: RoutineContextAttachment[];
   botId: string;
   runOn: RoutineRunOn;
   scheduledFor: number;
@@ -64,4 +74,5 @@ export interface RoutineInput {
   enabled?: boolean;
   schedule: RoutineSchedule;
   durationMinutes?: number;
+  attachments?: RoutineContextAttachment[];
 }

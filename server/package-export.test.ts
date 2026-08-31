@@ -54,6 +54,13 @@ describe("package export", () => {
         enabled: true,
         schedule: { type: "daily", time: "09:00", weekdays: [1] },
         durationMinutes: 30,
+        attachments: [{
+          id: "private-attachment",
+          kind: "file",
+          name: "private.txt",
+          path: "/private/calendar/context.txt",
+          size: 42,
+        }],
         nextRunAt: 123,
         createdAt: 1,
         updatedAt: 1,
@@ -70,7 +77,7 @@ describe("package export", () => {
         playbooks: [{ key: "launch" }],
       },
     });
-    expect(JSON.stringify(exported)).not.toMatch(/private-id|private-thread|private-engine|secret-model|secret-session|private\/path|autoApprove|alwaysAllow|nextRunAt/);
+    expect(JSON.stringify(exported)).not.toMatch(/private-id|private-thread|private-engine|secret-model|secret-session|private\/path|private-attachment|autoApprove|alwaysAllow|nextRunAt/);
   });
 
   it("shares one identical playbook definition across multiple bots", () => {

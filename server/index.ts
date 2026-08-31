@@ -170,6 +170,7 @@ import { RepeatDetector, callKey } from "./repeat-detector.ts";
 import { redactSecretsInText } from "./redact.ts";
 import * as vps from "./vps-computer.ts";
 import { RoutineManager, type RoutineRun, type RoutineRunOn, type RoutineRunTrigger } from "./routines.ts";
+import { CalendarCallManager } from "./calendar-calls.ts";
 import {
   BUILT_IN_BROWSER_SYSTEM_PROMPT,
   applyDesktopBrowserConnectionMessage,
@@ -1365,6 +1366,7 @@ function isUnattended(botId?: string | null): boolean {
   return true;
 }
 let routines: RoutineManager | null = null;
+let calendarCalls: CalendarCallManager | null = null;
 const localVmOwnerBusy = (botId: string) => store.bot(botId)?.busy === true;
 const localVmLeases = new LocalVmLeasePool(30 * 60_000);
 const localVmLifecycleBusy = new Set<string>();
@@ -2899,6 +2901,9 @@ routines = new RoutineManager({
     const detail = run.error ? `${run.routineName}: ${run.error}` : run.routineName;
     notify(buildNotification("routine-failed", bot, routineSourceThread(run) ?? run.threadId ?? bot.threadId, detail));
   },
+});
+calendarCalls = new CalendarCallManager({
+  botExists: (botId) => Boolean(store.bot(botId)),
 });
 const recoveryOwners = routines.routineRequestReceiptOwners();
 if (recoveryOwners.length > 0) {
@@ -5008,6 +5013,35 @@ const server = createServer(async (req, res) => {
       return run ? json(res, 200, { run }) : json(res, 404, { error: "no such active run" });
     }
 
+    // ── scheduled calls ────────────────────────────────────────────────
+    // Calls are calendar plans, not unattended jobs. The renderer opens the
+    // existing live call UI only after the user clicks Join.
+    if (path === "/api/calendar-calls" && method === "GET") {
+      return json(res, 200, { calls: calendarCalls!.list() });
+    }
+    if (path === "/api/calendar-calls" && method === "POST") {
+      try {
+        return json(res, 201, { call: calendarCalls!.create(await readBody(req)) });
+      } catch (error) {
+        throw Object.assign(error instanceof Error ? error : new Error(String(error)), { status: 400 });
+      }
+    }
+    const calendarCallMatch = path.match(/^\/api\/calendar-calls\/([\w-]+)$/);
+    if (calendarCallMatch && method === "PATCH") {
+      const exists = calendarCalls!.list().some((call) => call.id === calendarCallMatch[1]);
+      if (!exists) return json(res, 404, { error: "no such scheduled call" });
+      try {
+        return json(res, 200, { call: calendarCalls!.update(calendarCallMatch[1], await readBody(req)) });
+      } catch (error) {
+        throw Object.assign(error instanceof Error ? error : new Error(String(error)), { status: 400 });
+      }
+    }
+    if (calendarCallMatch && method === "DELETE") {
+      return calendarCalls!.remove(calendarCallMatch[1])
+        ? json(res, 200, { ok: true })
+        : json(res, 404, { error: "no such scheduled call" });
+    }
+
     // ── independent webhook triggers ────────────────────────────────────
     // Management stays on the app-only server. Actual deliveries land on a
     // second, webhook-only loopback listener so Funnel or a future hosted
@@ -6373,6 +6407,7 @@ const server = createServer(async (req, res) => {
         activeVpsThreads.delete(bot.id);
         routines!.disableForBot(bot.id);
         webhooks.disableForBot(bot.id);
+        calendarCalls!.removeBot(bot.id);
         lastReply.delete(bot.threadId);
         // a peer approval naming this bot can never be meaningfully answered
         // now, and its caller would otherwise wait out the 15-minute timeout

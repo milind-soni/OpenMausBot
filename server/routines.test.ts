@@ -1,4 +1,4 @@
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -83,6 +83,20 @@ describe("nextOccurrence", () => {
 });
 
 describe("RoutineManager", () => {
+  it("stores routine data with owner-only permissions", () => {
+    const h = harness();
+    h.manager.create({
+      name: "Private routine",
+      prompt: "Keep this private",
+      botId: "maus-private",
+      schedule: { type: "daily", time: "09:00", weekdays: [1] },
+    });
+
+    if (process.platform !== "win32") {
+      expect(statSync(h.options.file!).mode & 0o777).toBe(0o600);
+    }
+  });
+
   it("persists definitions separately from permanent run receipts", async () => {
     const h = harness();
     const routine = h.manager.create({
@@ -118,6 +132,48 @@ describe("RoutineManager", () => {
         error: "OpenMausBot restarted while this routine was running",
       },
     ]);
+  });
+
+  it("persists attachment metadata and migrates old definitions and runs to empty arrays", () => {
+    const h = harness();
+    h.setBot("busy");
+    const routine = h.manager.create({
+      name: "Review attachment",
+      prompt: "Review the supplied context",
+      botId: "maus-attachments",
+      schedule: { type: "daily", time: "09:00", weekdays: [1] },
+      attachments: [{
+        id: "file-1",
+        kind: "file",
+        name: "brief.pdf",
+        path: "/tmp/brief.pdf",
+        size: 4_096,
+      }],
+    });
+    h.manager.runNow(routine.id);
+
+    const persisted = new RoutineManager(h.options);
+    expect(persisted.listRoutines()[0]?.attachments).toEqual([{
+      id: "file-1",
+      kind: "file",
+      name: "brief.pdf",
+      path: "/tmp/brief.pdf",
+      size: 4_096,
+    }]);
+    expect(persisted.listRuns()[0]?.attachments).toEqual(persisted.listRoutines()[0]?.attachments);
+
+    const file = h.options.file!;
+    const oldFile = JSON.parse(readFileSync(file, "utf8")) as {
+      routines: Array<{ attachments?: unknown }>;
+      runs: Array<{ attachments?: unknown }>;
+    };
+    delete oldFile.routines[0]!.attachments;
+    delete oldFile.runs[0]!.attachments;
+    writeFileSync(file, JSON.stringify(oldFile));
+
+    const migrated = new RoutineManager(h.options);
+    expect(migrated.listRoutines()[0]?.attachments).toEqual([]);
+    expect(migrated.listRuns()[0]?.attachments).toEqual([]);
   });
 
   it("persists confirmation receipts with the scheduler mutation and removes them after settlement", () => {
@@ -401,6 +457,131 @@ describe("RoutineManager", () => {
       routineName: "Original brief",
       prompt: "Use the original instructions",
     });
+  });
+
+  it("snapshots attachment context and deep-clones it across public boundaries", async () => {
+    const h = harness();
+    h.setBot("busy");
+    const routine = h.manager.create({
+      name: "Original context",
+      prompt: "Use the original attachment",
+      botId: "maus-context",
+      schedule: { type: "once", at: new Date(2026, 7, 17, 8, 1).getTime() },
+      attachments: [{
+        id: "original",
+        kind: "file",
+        name: "original.txt",
+        path: "/tmp/original.txt",
+        size: 12,
+      }],
+    });
+    const emittedRoutine = h.emitted.find((payload) => payload.kind === "routine").routine;
+    emittedRoutine.attachments[0].path = "/tmp/tampered-emission.txt";
+    expect(h.manager.listRoutines()[0]?.attachments?.[0]?.path).toBe("/tmp/original.txt");
+    h.setNow(routine.nextRunAt!);
+    await h.manager.tick();
+    h.manager.update(routine.id, {
+      attachments: [{
+        id: "replacement",
+        kind: "file",
+        name: "replacement.txt",
+        path: "/tmp/replacement.txt",
+        size: 24,
+      }],
+    });
+
+    const publicRun = h.manager.listRuns()[0]!;
+    publicRun.attachments![0]!.path = "/tmp/tampered.txt";
+    expect(h.manager.listRuns()[0]?.attachments?.[0]?.path).toBe("/tmp/original.txt");
+
+    h.setBot("ready");
+    await h.manager.tick();
+    expect(h.started[0]?.prompt).toBe(
+      'Use the original attachment\n\n<attached-file path="/tmp/original.txt" />',
+    );
+    expect(h.manager.listRuns()[0]?.attachments?.[0]?.path).toBe("/tmp/original.txt");
+    expect(h.manager.listRoutines()[0]?.attachments?.[0]?.path).toBe("/tmp/replacement.txt");
+  });
+
+  it("escapes attachment paths only in the ephemeral dispatch prompt", async () => {
+    const h = harness();
+    const unusualPath = '/tmp/a"&<>\t\n\r.png';
+    const routine = h.manager.create({
+      name: "Inspect image",
+      prompt: "Inspect it",
+      botId: "maus-image",
+      schedule: { type: "once", at: new Date(2026, 7, 17, 8, 1).getTime() },
+      attachments: [{
+        id: "image-1",
+        kind: "image",
+        name: "image.png",
+        path: unusualPath,
+        size: 128,
+      }],
+    });
+    h.setNow(routine.nextRunAt!);
+    await h.manager.tick();
+
+    expect(h.started[0]?.prompt).toBe(
+      'Inspect it\n\n<attached-image path="/tmp/a&quot;&amp;&lt;&gt;&#9;&#10;&#13;.png" />',
+    );
+    expect(h.manager.listRoutines()[0]?.prompt).toBe("Inspect it");
+    expect(h.manager.listRoutines()[0]?.attachments?.[0]?.path).toBe(unusualPath);
+    expect(h.manager.listRuns()[0]?.prompt).toBe("Inspect it");
+  });
+
+  it("rejects local attachment context on cloud routines", () => {
+    const h = harness();
+    const attachment = {
+      id: "file-1",
+      kind: "file" as const,
+      name: "private.pdf",
+      path: "/tmp/private.pdf",
+      size: 42,
+    };
+    expect(() => h.manager.create({
+      name: "Cloud review",
+      prompt: "Review this",
+      botId: "maus-cloud",
+      runOn: "cloud",
+      schedule: { type: "daily", time: "09:00", weekdays: [1] },
+      attachments: [attachment],
+    })).toThrow(/only run on this computer/i);
+
+    const local = h.manager.create({
+      name: "Local review",
+      prompt: "Review this",
+      botId: "maus-local",
+      runOn: "maus",
+      schedule: { type: "daily", time: "09:00", weekdays: [1] },
+      attachments: [attachment],
+    });
+    expect(() => h.manager.update(local.id, { runOn: "cloud" })).toThrow(/cloud file staging/i);
+    expect(h.manager.listRoutines()[0]).toMatchObject({ runOn: "maus", attachments: [attachment] });
+  });
+
+  it("rejects malformed or unbounded attachment metadata", () => {
+    const h = harness();
+    const base = {
+      name: "Validate context",
+      prompt: "Review this",
+      botId: "maus-local",
+      schedule: { type: "daily" as const, time: "09:00", weekdays: [1] },
+    };
+    expect(() => h.manager.create({
+      ...base,
+      attachments: [{ id: "bad", kind: "file", name: "bad.txt", path: "/tmp/bad.txt", size: -1 }],
+    })).toThrow(/valid attachment/i);
+    expect(() => h.manager.create({
+      ...base,
+      attachments: Array.from({ length: 51 }, (_, index) => ({
+        id: `file-${index}`,
+        kind: "file" as const,
+        name: `${index}.txt`,
+        path: `/tmp/${index}.txt`,
+        size: index,
+      })),
+    })).toThrow(/no more than 50 attachments/i);
   });
 
   it("snapshots and dispatches the selected execution machine", async () => {
