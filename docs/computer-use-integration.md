@@ -1,6 +1,8 @@
 # Computer use & browser use in OpenMausBot
 
-Decision doc, 2026-08-12. How bots in OpenMausBot get local computer use and
+Decision doc, 2026-08-12; browser-use sections revised 2026-08-31 when the
+embedded WebContentsView browser was replaced by BetterWright. How bots in
+OpenMausBot get local computer use and
 browser use. macOS and packaged Ubuntu x64 builds use an out-of-the-box,
 release-pinned provider; source/dev Ubuntu may use a separately installed provider. Based
 on a survey of OSS chat-app MCP hosts, macOS control servers,
@@ -13,11 +15,10 @@ machine.
 Electron main process
 ├── CUA host  ──spawns──▶  cua-driver (bundled on macOS and packaged Ubuntu x64)
 │     platform permission boundary               │ unix socket (private)
-├── WebContentsView pool (embedded browser, persist: partitions per bot)
-│     driven via webContents.debugger (CDP) — zero-install browser use
 └── server/ harness (drivers spawn agent CLIs with --mcp-config)
       ├── computer-proxy-local.ts  ──▶ forwards MCP tool calls to driver socket
-      └── computer-proxy.ts (existing) ──▶ remote/cloud box
+      ├── computer-proxy.ts (existing) ──▶ remote/cloud box
+      └── betterwright mcp  ──▶ policy-guarded BetterChromium (browser use)
 ```
 
 - **Plugins = MCP servers over stdio.** The Plugins panel toggles which MCP
@@ -31,10 +32,12 @@ Electron main process
   NOT Swift — the Swift file everyone remembers
   (`examples/embedded-host-macos/ExampleAgentHarness.swift`) is a 165-line
   reference host showing the embedding pattern, not the driver.
-- **Browser use = the app's own Chromium first.** Electron *is* Chromium;
-  embed pages in `WebContentsView` and drive them via the built-in
-  `webContents.debugger` CDP transport. No Chrome dependency, no 281MB
-  Playwright download, and the user watches the bot browse inside the chat.
+- **Browser use = BetterWright.** The `browser` integration spawns
+  `betterwright mcp` (a dependency of this repo) inside the bot's agent
+  process. BetterWright runs its own persistent, policy-guarded browser with
+  one profile per bot (`BETTERWRIGHT_PROFILE=bot-<id>`, or a named shared
+  profile), a credential vault with trusted fill, and a live-view handoff URL
+  the bot shares when the user needs to sign in or take over.
 
 ## Local desktop use: CUA only — Electron owns the driver lifecycle
 
@@ -142,29 +145,72 @@ added to cua-driver upstream or requested as a driver tool — never bolted on
 beside it. This keeps one TCC identity, one binary to sign/notarize, and one
 behavior contract.
 
-## Browser use: three tiers
+## Browser use: BetterWright (revised 2026-08-31)
 
-1. **Default, zero setup: embedded browser.** `WebContentsView` inside the
-   chat UI, `persist:bot-<id>` session partitions (logins survive restarts,
-   per-bot isolation), normalized Chrome UA. Drive via `webContents.debugger`
-   (built-in CDP: `Input.*`, `Runtime.*`, `Page.*`,
-   `Accessibility.getFullAXTree` for playwright-mcp-style snapshot refs) +
-   `capturePage()` for vision. User can grab the mouse mid-task for logins /
-   CAPTCHAs, then hand back. Known limit: Google OAuth blocks embedded
-   webviews — route Google-account flows to tier 2/3.
-2. **Opt-in "use my real Chrome": extension bridge.** Chrome 136+ killed
-   `--remote-debugging-port` on the default profile (do NOT build the old
-   CDP-relaunch flow). The surviving path is playwright-mcp `--extension`
-   mode (or Browser MCP) + the Web Store "Playwright Extension" — drives the
-   user's logged-in tabs via `chrome.debugger`. Requires an extension install,
-   so opt-in only.
-3. **Opt-in power tier: bundled `@playwright/mcp`** launching system Chrome
-   (`--browser chrome`, its default — no download when Chrome exists),
-   persistent profile dir so logins stick. Optionally chrome-devtools-mcp for
-   perf/Lighthouse/network tasks.
+The original tier 1, an embedded `WebContentsView` pool driven over
+`webContents.debugger` with a loopback host and per-turn capability tokens,
+shipped and was then replaced wholesale by
+[BetterWright](https://github.com/BetterWright/betterwright) 2.0.0. What the
+replacement buys:
 
-Skip browser-use (Python; wants to own the agent loop; even their own desktop
-app doesn't embed it).
+- **One worker per profile, owned by the server.** BetterWright gives a
+  profile exactly one owning process; a second worker on the same profile is
+  shunted onto a throwaway ephemeral one. So the server holds the single
+  `betterwright mcp` worker per profile and `browserIntegration()` hands
+  drivers a forwarder (`server/browser-forwarder.ts <bridge-socket>
+  <profile>`) that relays the adapter's MCP stdio to the server's bridge
+  socket, where each session is proxied onto that worker. The bot's tools
+  and the embedded live view therefore share one browser — mount
+  `betterwright mcp` from the adapter directly and the embed would stream a
+  browser the bot never touches. The old
+  browser-proxy → loopback host → WebContentsView pipeline, its capability
+  mint/revoke lifecycle, and the vendored `playwright-injected` snapshot
+  bundle are gone.
+- **BetterChromium provisions on first run, not at install.** npm staging uses
+  `--ignore-scripts`, so a clean machine has the CLI but no browser. The
+  server runs `betterwright setup` (idempotent, artifact version pinned by
+  the package) the first time the feature is on — at boot, on enable, or on
+  the first mount — into the shared `~/.betterwright`, where a user who
+  already runs the CLI has it installed anyway.
+- **Identity model carries over.** A bot with no profile gets
+  `BETTERWRIGHT_PROFILE=bot-<id>`; a named shared profile maps to its stable
+  partition id (the immutable identity rule from #567); `guest` stays `guest`
+  and the server wipes it at every start, keeping the old promise that Guest
+  retains no logins. Profile state lives under
+  `~/.betterwright/browser/profiles/<name>`; deleting a profile or a bot
+  removes its directory after `betterwright close --profile`, re-erasing on a
+  bounded ladder because an orphaned Chromium can rewrite the directory.
+  Pending erases are journaled in the app data dir: a restart resumes them,
+  and config refuses (409) a new profile on a partition still being erased.
+- **The live view stays embedded in the app.** The Computer panel keeps a
+  Browser tab: it iframes `/api/bots/:id/browser/view-embed`, a same-origin
+  proxy of the viewer the profile's own worker serves after the server calls
+  `browser_handoff {action: "start"}` on it — the only process whose canvas
+  is the bot's actual pages (verified live: a takeover navigation through
+  the embed showed up in the bot's in-flight `page.url()`). The raw viewer
+  page forbids cross-origin frames and checks WebSocket origins, so the
+  server rewrites both; the viewer's `/ws` upgrade rides the app origin and
+  is routed back by token. The person watches the bot's page live in the
+  panel and clicks into it to take over, exactly the old
+  preview-plus-takeover loop; an "Open in tab" button pops the same view
+  out. For sign-in steps the bot itself calls `browser_handoff` (the worker
+  env sets the deployer opt-in `BETTERWRIGHT_LIVE_VIEW_EXPOSE=local`), and
+  `browser_login` fills vault credentials without exposing them to the
+  model. The old who-is-driving lease is gone: BetterWright serializes
+  viewer and agent input itself. This also clears the old tier-1 limit:
+  BetterWright's browser is a real Chromium fork, so Google OAuth works.
+- **Platform matrix shifts.** BetterChromium ships for macOS arm64, Linux
+  x64 and Windows x64. Windows gains the built-in browser (the embedded
+  surface was fail-closed there pending sandbox verification); Intel macs
+  lose it, since upstream publishes no darwin-x64 artifact.
+- **Toolset.** `browser` (Playwright JS with snapshot/aria-ref semantics),
+  `browser_batch`, `browser_login`, `browser_download`, `browser_handoff`,
+  `browser_doctor` — self-describing over MCP, no bespoke toolset to
+  maintain.
+
+The extension-bridge ("use my real Chrome") and `@playwright/mcp` tiers were
+never built and are no longer planned; BetterWright's provider options cover
+remote/CDP browsers if that need returns.
 
 ## Rollout order
 
@@ -174,7 +220,8 @@ app doesn't embed it).
    grant buttons, deep links).
 3. Embedded browser pane + a minimal CDP toolset (navigate / snapshot /
    click-ref / type / screenshot) exposed as the "Browser" plugin.
+   *(Shipped, then replaced by BetterWright — see the browser-use section.)*
 4. Packaging: extraResources + re-sign + notarize; wire
    `EmbeddedCuaDriverHost` for production.
-5. Later: axstream-style macro teach/replay, extension bridge, playwright-mcp
-   tier.
+5. Later: axstream-style macro teach/replay. (The extension-bridge and
+   playwright-mcp ideas are retired with the BetterWright move.)

@@ -564,6 +564,7 @@ export function SettingsPanel({ bot }: { bot: Bot }) {
         | "approvePeerComms"
         | "composio"
         | "browser"
+        | "browserProfile"
         | "modelSelection"
       >
     > & { acknowledgeLocalAuto?: boolean },
@@ -578,11 +579,18 @@ export function SettingsPanel({ bot }: { bot: Bot }) {
   const connectedAppsConfigured = state.config?.composio?.configured === true;
   const connectedAppsEnabled = bot.composio !== false;
   const canUseBrowser = engine?.capabilities?.browserMcp === true;
-  const desktopBrowser = Boolean(window.ogb?.browser);
-  const browserBlockedOnWindows = window.ogb?.platform === "win32" && !desktopBrowser;
   const browserFeature = builtInBrowserEnabled(state.config);
   const browserAllowed = bot.browser !== false;
   const browserEnabled = browserFeature && browserAllowed;
+  const browserProfiles = state.config?.browserProfiles ?? [];
+  // A deleted profile falls back to the bot's own session, exactly as the
+  // server routes it; Guest is the only id that needs no config entry.
+  const browserProfileValue =
+    bot.browserProfile === "guest"
+      ? "guest"
+      : bot.browserProfile && browserProfiles.some((profile) => profile.id === bot.browserProfile)
+        ? bot.browserProfile
+        : "";
   const sectionName = bot.section?.trim() || "General";
   const currentChief = state.bots.find(
     (candidate) =>
@@ -739,30 +747,53 @@ export function SettingsPanel({ bot }: { bot: Bot }) {
             />
           </div>
 
-          <div className="flex items-center justify-between gap-4 rounded-xl bg-card p-4">
-            <div>
-              <div className="text-[15px] font-medium text-ink">Browser</div>
-              <div className="mt-0.5 text-[13px] text-ink-secondary">
-                {!desktopBrowser
-                  ? browserBlockedOnWindows
-                    ? "The built-in browser is temporarily unavailable on Windows while Electron's production sandbox support is being verified."
-                    : "The built-in browser needs the OpenMausBot desktop app."
-                  : !browserFeature
-                    ? "The built-in browser is switched off under App Settings → Experimental."
+          <div className="rounded-xl bg-card p-4">
+            <div className="flex items-center justify-between gap-4">
+              <div>
+                <div className="text-[15px] font-medium text-ink">Browser</div>
+                <div className="mt-0.5 text-[13px] text-ink-secondary">
+                  {!browserFeature
+                    ? "The browser is switched off under App Settings → Experimental."
                     : !canUseBrowser
-                      ? "This bot's current engine cannot use the built-in browser."
+                      ? "This bot's current engine cannot use a browser."
                       : browserEnabled
-                        ? "This bot has its own browser tab in the computer panel — its own logins, watchable and takeable at any time."
-                        : "Keep the built-in browser unavailable to this bot."}
+                        ? "This bot browses the web with its own logins. Watch it live and take over any time from the Browser tab in its computer panel; it also posts a link in chat when it needs your hands."
+                        : "Keep the browser unavailable to this bot."}
+                </div>
               </div>
+              <Switch
+                checked={browserEnabled}
+                aria-label="Give this bot a browser"
+                disabled={!browserEnabled && (!browserFeature || !canUseBrowser)}
+                onClick={() => patch({ browser: !browserAllowed })}
+                className="disabled:cursor-not-allowed"
+              />
             </div>
-            <Switch
-              checked={browserEnabled}
-              aria-label="Give this bot a built-in browser"
-              disabled={!browserEnabled && (!desktopBrowser || !browserFeature || !canUseBrowser)}
-              onClick={() => patch({ browser: !browserAllowed })}
-              className="disabled:cursor-not-allowed"
-            />
+            {browserEnabled && canUseBrowser && (
+              <div className="mt-3 border-t border-hairline/30 pt-3">
+                <label className="text-[13px] text-ink-secondary" htmlFor="bot-browser-profile">
+                  Sign-in session
+                </label>
+                <select
+                  id="bot-browser-profile"
+                  value={browserProfileValue}
+                  // The server refuses a profile change mid-turn (409); mirror
+                  // that gate here instead of surfacing the rejected patch.
+                  disabled={bot.busy === true}
+                  title={bot.busy ? `Stop ${bot.name}'s current turn before changing its browser profile.` : undefined}
+                  onChange={(event) => patch({ browserProfile: event.target.value || null })}
+                  className="mt-1.5 w-full rounded-lg border border-hairline/40 bg-inset px-3 py-2 text-[13px] text-ink focus:border-hairline focus:outline-none disabled:cursor-not-allowed disabled:opacity-50"
+                >
+                  <option value="">{bot.name}'s own</option>
+                  {browserProfiles.map((profile) => (
+                    <option key={profile.id} value={profile.id}>
+                      {profile.name}
+                    </option>
+                  ))}
+                  <option value="guest">Guest (shared, cleared on restart)</option>
+                </select>
+              </div>
+            )}
           </div>
 
           <div className="rounded-xl bg-card p-4">

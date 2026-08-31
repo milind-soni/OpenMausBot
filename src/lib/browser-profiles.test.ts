@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   browserProfileDeletionBlockReason,
-  browserProfilePartitionId,
+  browserProfileIdFor,
   browserProfilesForPatch,
 } from "./browser-profiles";
 
@@ -20,20 +20,23 @@ describe("browser profile deletion", () => {
   });
 });
 
-describe("browser profile partition routing", () => {
+describe("browser profile ids", () => {
   const profiles = [
-    { id: "client", name: "Client", partitionId: "Client" },
-    { id: "personal", name: "Personal" },
+    { id: "work-microsoft", name: "Work" },
+    { id: "work-microsoft-2", name: "Work 2" },
   ];
 
-  it("resolves an immutable legacy partition without changing the public id", () => {
-    expect(browserProfilePartitionId(profiles, "client")).toBe("Client");
-    expect(browserProfilePartitionId(profiles, "personal")).toBe("personal");
-    expect(browserProfilePartitionId(profiles, "missing")).toBe("missing");
+  it("slugifies a name and steps past taken and reserved ids", () => {
+    expect(browserProfileIdFor(" Work / Microsoft ", profiles)).toBe("work-microsoft-3");
+    expect(browserProfileIdFor("🔥", profiles)).toBe("profile");
+    expect(browserProfileIdFor("Guest", profiles)).toBe("guest-2");
   });
 
   it("strips internal partition metadata from config PATCH payloads", () => {
-    expect(browserProfilesForPatch(profiles)).toEqual([
+    expect(browserProfilesForPatch([
+      { id: "client", name: "Client", partitionId: "Client" },
+      { id: "personal", name: "Personal" },
+    ])).toEqual([
       { id: "client", name: "Client" },
       { id: "personal", name: "Personal" },
     ]);

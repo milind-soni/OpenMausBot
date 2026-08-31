@@ -72,6 +72,10 @@ extraResources:
     to: skills
   - from: dist-native/android-platform-tools
     to: android-platform-tools
+  # the browser integration: betterwright + the MCP SDK it serves with,
+  # staged as a complete npm tree by scripts/prepare-betterwright.mjs
+  - from: dist-native/betterwright
+    to: betterwright
 
 mac:
   # Two single-arch artifacts rather than one universal binary: the app is

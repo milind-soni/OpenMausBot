@@ -191,9 +191,9 @@ export interface SendTurnInput {
     agents?: { command: string; args: string[]; env: Record<string, string> };
     /** Physical Android phone tools over authorized USB debugging. */
     phone?: { command: string; args: string[]; env: Record<string, string> };
-    /** The app's built-in browser: an MCP proxy (server/drivers/browser-proxy)
-     * that forwards to the Electron-owned WebContentsView the Browser tab
-     * shows. One tab per bot, in its own persistent session partition. */
+    /** The app's built-in browser: BetterWright's MCP server (see
+     * server/betterwright.ts), pointed at one durable profile — the bot's own
+     * session, a shared named one, or the throwaway guest. */
     browser?: { command: string; args: string[]; env: Record<string, string> };
     /** dweb network daemon: an MCP proxy exposing dweb status, repo, and
      * opencode model access as tools. url is the dweb HTTP base. */

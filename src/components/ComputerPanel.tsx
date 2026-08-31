@@ -10,6 +10,7 @@ import {
   CalendarClock,
   CalendarDays,
   Columns2,
+  ExternalLink,
   Globe,
   Hand,
   Loader2,
@@ -26,13 +27,12 @@ import { api, useStore, type Bot } from "@/state/store";
 import type { Routine } from "@/lib/routines";
 import { ApiKeyRow } from "./ApiKeys";
 import { cn } from "@/lib/cn";
+import { builtInBrowserEnabled } from "@/lib/feature-flags";
 import { usePageVisible } from "@/lib/page-visible";
 import { CloudBackendPicker } from "./CloudBackendPicker";
 import { useDesktopCapabilities } from "./DesktopCapabilities";
 import { RoutineEditor } from "./RoutinesPage";
 import { AndroidDevicePanel, useAndroidUsbDevices } from "./AndroidDevicePanel";
-import { BrowserPanel } from "./BrowserPanel";
-import { builtInBrowserEnabled } from "@/lib/feature-flags";
 import { transitionComputerControlLease, type ComputerControlAction } from "@/lib/computer-control";
 import { LocalScreenPreview } from "./LocalScreenPreview";
 import { LinuxLocalControl } from "./LinuxLocalControl";
@@ -144,14 +144,12 @@ function readPanelWidth(): number {
 export function ComputerPanel({
   bot,
   onOpenVmWorkspace,
-  onExpandBrowser,
 }: {
   bot: Bot;
   onOpenVmWorkspace?: (botId: string) => void;
-  onExpandBrowser?: (botId: string) => void;
 }) {
   // The panel is a fixed column by default; a drag handle on its left edge
-  // makes it wide enough to actually read a page in the Browser tab.
+  // makes it wide enough to actually read the screen preview.
   const [panelWidth, setPanelWidth] = useState(readPanelWidth);
   const resizeFrom = useRef<{ x: number; width: number } | null>(null);
   const onResizeStart = (event: React.PointerEvent<HTMLDivElement>) => {
@@ -202,11 +200,27 @@ export function ComputerPanel({
   const [panelView, setPanelView] = useState<ComputerPanelView>(() => readComputerPanelView(bot.id));
   const androidStatus = useAndroidUsbDevices();
   const androidConnected = androidStatus.devices.length > 0;
-  // the built-in browser: a per-bot switch in Settings, and only the desktop app has one
-  const browserEnabled = builtInBrowserEnabled(state.config) && bot.browser !== false && Boolean(window.ogb?.browser);
   // bumped when a Box API key is saved inline, to re-run the spin-up flow
   const [retry, setRetry] = useState(0);
   const vmReadinessAttempts = useRef(0);
+  // The bot's browser lives in BetterWright, not in this panel; the person
+  // watches or takes over through its live-view page in a normal tab.
+  const browserEnabled = builtInBrowserEnabled(state.config) && bot.browser !== false;
+  const [browserViewPending, setBrowserViewPending] = useState(false);
+  const [browserViewError, setBrowserViewError] = useState<string | null>(null);
+  const openBrowserLiveView = async () => {
+    setBrowserViewPending(true);
+    setBrowserViewError(null);
+    try {
+      const { url } = await api(`/api/bots/${bot.id}/browser/view`, { method: "POST", body: "{}" });
+      if (window.ogb?.openExternal) void window.ogb.openExternal(url);
+      else window.open(url, "_blank", "noopener");
+    } catch (cause) {
+      setBrowserViewError(cause instanceof Error ? cause.message : "Could not open the browser live view.");
+    } finally {
+      setBrowserViewPending(false);
+    }
+  };
   const selectedInstance = state.instances.find(
     (instance) => instance.instanceId === bot.modelSelection.instanceId,
   );
@@ -243,11 +257,17 @@ export function ComputerPanel({
   }, [bot.id]);
 
   useEffect(() => {
-    if ((!androidConnected && panelView === "android") || (!browserEnabled && panelView === "browser")) {
+    if (!androidConnected && panelView === "android") {
       setPanelView("computer");
       writeComputerPanelView(bot.id, "computer");
     }
-  }, [androidConnected, bot.id, browserEnabled, panelView]);
+  }, [androidConnected, bot.id, panelView]);
+  useEffect(() => {
+    if (!browserEnabled && panelView === "browser") {
+      setPanelView("computer");
+      writeComputerPanelView(bot.id, "computer");
+    }
+  }, [browserEnabled, bot.id, panelView]);
   useEffect(() => {
     vmReadinessAttempts.current = 0;
   }, [bot.id, bot.computer]);
@@ -288,8 +308,8 @@ export function ComputerPanel({
   // resolve the mode on open; box endpoints are only ever hit on the
   // cloud path, so local/off can never render a JSON error as an image
   useEffect(() => {
-    // Browser and Android own their own live surfaces. Do not provision a VM,
-    // wake a box, or churn preview state behind either tab.
+    // Android owns its own live surface. Do not provision a VM, wake a box,
+    // or churn preview state behind that tab.
     if (panelView !== "computer") return;
     let alive = true;
     setPhase("checking");
@@ -629,25 +649,9 @@ export function ComputerPanel({
     return snap;
   }, [bot.id, dispatch]);
 
-  const setNativeBrowserControl = useCallback(async (held: boolean): Promise<boolean> => {
-    const setter = window.ogb?.browser?.setHumanControl;
-    if (!setter) return true;
-    const profile = bot.browserProfile === "guest" ? "guest" : bot.browserProfile ?? "";
-    return (await setter(bot.id, held, profile)) === true;
-  }, [bot.browserProfile, bot.id]);
-
   const transitionControl = useCallback(async (action: ComputerControlAction) => {
-    // BrowserPanel performs the same two-phase transition itself. Every
-    // other computer surface must also gate Electron's direct browser host:
-    // the server hold is bot-wide, and a shell-capable agent can otherwise
-    // bypass the server proxy while the person drives Local VM/Box/VPS.
-    return transitionComputerControlLease({
-      action,
-      syncNativeBrowser: panelView !== "browser",
-      requestControl,
-      setNativeBrowserControl,
-    });
-  }, [panelView, requestControl, setNativeBrowserControl]);
+    return transitionComputerControlLease({ action, requestControl });
+  }, [requestControl]);
 
   const controlAction = useCallback(async (action: ComputerControlAction): Promise<boolean> => {
     setControlPending(true);
@@ -662,10 +666,6 @@ export function ComputerPanel({
       setControlPending(false);
     }
   }, [transitionControl]);
-
-  const expandBrowser = useCallback(() => {
-    onExpandBrowser?.(bot.id);
-  }, [bot.id, onExpandBrowser]);
 
   const openDesktop = async () => {
     setPending("join");
@@ -865,31 +865,28 @@ export function ComputerPanel({
               <Monitor size={13} /> Computer
             </button>
             {androidConnected && (
-            <button
-              onClick={() => selectPanelView("android")}
-              aria-pressed={panelView === "android"}
-              className={cn(
-                "flex items-center gap-1.5 border-l border-hairline/40 px-2.5 py-1 text-[12.5px]",
-                panelView === "android" ? "bg-control text-ink" : "text-ink-secondary hover:text-ink",
-              )}
-            >
-              <Smartphone size={13} /> Android
-            </button>
+              <button
+                onClick={() => selectPanelView("android")}
+                aria-pressed={panelView === "android"}
+                className={cn(
+                  "flex items-center gap-1.5 border-l border-hairline/40 px-2.5 py-1 text-[12.5px]",
+                  panelView === "android" ? "bg-control text-ink" : "text-ink-secondary hover:text-ink",
+                )}
+              >
+                <Smartphone size={13} /> Android
+              </button>
             )}
             {browserEnabled && (
-            <button
-              onClick={() => {
-                setError(null);
-                selectPanelView("browser");
-              }}
-              aria-pressed={panelView === "browser"}
-              className={cn(
-                "flex items-center gap-1.5 border-l border-hairline/40 px-2.5 py-1 text-[12.5px]",
-                panelView === "browser" ? "bg-control text-ink" : "text-ink-secondary hover:text-ink",
-              )}
-            >
-              <Globe size={13} /> Browser
-            </button>
+              <button
+                onClick={() => selectPanelView("browser")}
+                aria-pressed={panelView === "browser"}
+                className={cn(
+                  "flex items-center gap-1.5 border-l border-hairline/40 px-2.5 py-1 text-[12.5px]",
+                  panelView === "browser" ? "bg-control text-ink" : "text-ink-secondary hover:text-ink",
+                )}
+              >
+                <Globe size={13} /> Browser
+              </button>
             )}
           </div>
         ) : (
@@ -904,19 +901,32 @@ export function ComputerPanel({
       </div>
 
       {panelView === "browser" && browserEnabled ? (
-        <div className="flex min-h-0 flex-1 flex-col px-4 pb-4">
-          <BrowserPanel
-            bot={bot}
-            control={control}
-            controlPending={controlPending}
-            onControl={controlAction}
-            onExpand={onExpandBrowser ? expandBrowser : undefined}
-          />
-          {error && (
-            <div role="alert" className="mt-2 rounded-lg border border-danger/30 bg-danger/10 px-3 py-2 text-[12px] text-danger">
-              {error}
+        <div className="flex min-h-0 flex-1 flex-col px-4 pb-4 pt-2">
+          <div className="mb-1.5 flex items-center justify-between text-[13px] text-ink-secondary">
+            <span>{bot.name}'s browser</span>
+            <button
+              onClick={() => void openBrowserLiveView()}
+              disabled={browserViewPending}
+              className="flex items-center gap-1.5 rounded-md bg-control px-2.5 py-1 text-[12px] text-ink hover:bg-raised-hover disabled:opacity-50"
+              title="Open this live view in its own browser tab"
+            >
+              {browserViewPending ? <Loader2 size={12} className="animate-spin" /> : <ExternalLink size={12} />}
+              Open in tab
+            </button>
+          </div>
+          {browserViewError && (
+            <div className="mb-1.5 rounded-lg border border-danger/30 bg-danger/10 px-3 py-2 text-[12px] text-danger">
+              {browserViewError}
             </div>
           )}
+          <iframe
+            src={`/api/bots/${bot.id}/browser/view-embed`}
+            title={`${bot.name}'s browser live view`}
+            className="min-h-0 w-full flex-1 rounded-xl border border-hairline/40 bg-card"
+          />
+          <div className="mt-1.5 text-[12px] text-ink-secondary">
+            Live page — click into it to take over any time; hand back when you are done.
+          </div>
         </div>
       ) : panelView === "android" && androidConnected ? (
         <div className="flex-1 overflow-y-auto px-4 pt-2">

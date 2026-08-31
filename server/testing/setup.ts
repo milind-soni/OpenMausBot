@@ -17,6 +17,9 @@ process.env.USERPROFILE = home;
 delete process.env.OMB_DATA_DIR;
 // Do not let a developer's Hermes global config path leak into per-test homes.
 delete process.env.HERMES_HOME;
+// The throwaway home has no BetterChromium, and a booted harness with the
+// browser feature on would otherwise start a real ~200MB download.
+process.env.OMB_BETTERWRIGHT_PROVISION = "off";
 // The companion keeps its paired devices in its own directory, and resolves
 // it from homedir() the same way — so the redirect above already covers it.
 // Named explicitly all the same: the device tests delete this directory

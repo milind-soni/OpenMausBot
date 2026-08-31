@@ -534,9 +534,7 @@ export const WORKSPACE_CREDENTIAL_ENV = [
   "COMPOSIO_API_KEY",
   "OMB_COMPOSIO_BROKER_TOKEN",
   // Harness-private filesystem hints are not credentials themselves, but
-  // exposing them to a shell-capable agent points straight at app-owned
-  // state. The built-in browser master is delivered privately in memory.
-  "OMB_BROWSER_CONNECTION",
+  // exposing them to a shell-capable agent points straight at app-owned state.
   "OMB_USER_DATA",
 ] as const;
 

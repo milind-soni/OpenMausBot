@@ -74,27 +74,15 @@ async function readComputerControl(botId: string): Promise<LocalVmWorkspaceContr
   return parsed.data;
 }
 
+/** Unmount can outlive React state, so hand the lease back with a keepalive
+ * request rather than an awaited round trip. */
 function bestEffortRelease(botId: string, controlLeaseId: string) {
   void fetch(`/api/bots/${botId}/computer/control`, {
     method: "POST",
     headers: { "content-type": "application/json" },
     body: JSON.stringify({ action: "release", controlLeaseId }),
     keepalive: true,
-  }).then(async (response) => {
-    if (!response.ok) return;
-    const snapshot = await response.json().catch(() => null);
-    // The server lease is the source of truth; only clear Electron after the
-    // workspace-owned release was actually accepted.
-    if (snapshot?.held === false) {
-      await window.ogb?.browser?.setHumanControl?.(botId, false).catch(() => {});
-    }
   }).catch(() => {});
-}
-
-async function setNativeBrowserControl(botId: string, held: boolean): Promise<boolean> {
-  const setter = window.ogb?.browser?.setHumanControl;
-  if (!setter) return true;
-  return (await setter(botId, held)) === true;
 }
 
 function dispatchControl(
@@ -549,9 +537,7 @@ export function LocalVmWorkspace({
       async take(botId) {
         const snapshot = await transitionComputerControlLease({
           action: "take",
-          syncNativeBrowser: true,
           requestControl: (action) => requestComputerControl(botId, action, controlLeaseId),
-          setNativeBrowserControl: (held) => setNativeBrowserControl(botId, held),
         });
         dispatchControl(dispatch, botId, snapshot);
         if (snapshot.held && snapshot.owned === true) controlledBotIdRef.current = botId;
@@ -561,9 +547,7 @@ export function LocalVmWorkspace({
       async release(botId) {
         const snapshot = await transitionComputerControlLease({
           action: "release",
-          syncNativeBrowser: true,
           requestControl: (action) => requestComputerControl(botId, action, controlLeaseId),
-          setNativeBrowserControl: (held) => setNativeBrowserControl(botId, held),
         });
         dispatchControl(dispatch, botId, snapshot);
         if (controlledBotIdRef.current === botId) controlledBotIdRef.current = null;

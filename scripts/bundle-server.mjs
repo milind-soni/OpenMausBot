@@ -52,11 +52,11 @@ const ENTRY_POINTS = [
   "container-mcp.ts",
   "vps-container-mcp.ts",
   "permission-proxy.ts",
+  "browser-forwarder.ts",
   "connector-proxy.ts",
   "drivers/agents-proxy.ts",
   "drivers/dweb-proxy.ts",
   "drivers/phone-proxy.ts",
-  "drivers/browser-proxy.ts",
 ];
 
 await build({
