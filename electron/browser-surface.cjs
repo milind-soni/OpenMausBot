@@ -2064,6 +2064,11 @@ function createBrowserSurfaceManager({
         const pixels = Number.isFinite(Number(amount)) && Number(amount) > 0 ? Math.min(Number(amount), 5_000) : 600;
         const { x, y } = viewportCenter();
         await assertNoPopulatedProtectedFields(entry, lease);
+        // Chromium's Linux input path can dispatch a wheel gesture at the
+        // last known pointer target even when the wheel packet includes new
+        // coordinates. Move first so nested scroll containers are targeted
+        // consistently on every desktop platform.
+        await cdp(entry, "Input.dispatchMouseEvent", { type: "mouseMoved", x, y }, lease);
         await cdp(entry, "Input.dispatchMouseEvent", { type: "mouseWheel", x, y, deltaX: direction[0] * pixels, deltaY: direction[1] * pixels }, lease);
         return observe(entry);
       });

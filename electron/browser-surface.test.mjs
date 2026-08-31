@@ -808,13 +808,10 @@ describe("browser surface manager", () => {
     ]);
 
     await manager.scroll("bot-a", "down", 600);
-    expect(cdpCalls(views[0]).findLast(([name, params]) =>
-      name === "Input.dispatchMouseEvent" && params.type === "mouseWheel")[1]).toMatchObject({
-      x: 400,
-      y: 250,
-      deltaX: 0,
-      deltaY: 600,
-    });
+    expect(cdpCalls(views[0]).filter(([name]) => name === "Input.dispatchMouseEvent").slice(-2).map(([, params]) => params)).toEqual([
+      { type: "mouseMoved", x: 400, y: 250 },
+      { type: "mouseWheel", x: 400, y: 250, deltaX: 0, deltaY: 600 },
+    ]);
   });
 
   it("emits a real double-click sequence instead of only a detail-2 pair", async () => {
@@ -1200,6 +1197,8 @@ describe("browser surface manager", () => {
     const enter = cdpCalls(views[0]).find(([name, params]) => name === "Input.dispatchKeyEvent" && params.key === "Enter" && params.type === "keyDown");
     expect(enter?.[1]).toMatchObject({ type: "keyDown", key: "Enter", code: "Enter", windowsVirtualKeyCode: 13, text: "\r" });
     await manager.scroll("bot-a", "down");
+    expect(cdpCalls(views[0]).findLast(([name, params]) => name === "Input.dispatchMouseEvent" && params.type === "mouseMoved")?.[1])
+      .toMatchObject({ x: 640, y: 400 });
     expect(cdpCalls(views[0]).find(([name, params]) => name === "Input.dispatchMouseEvent" && params.type === "mouseWheel")[1]).toMatchObject({ x: 640, y: 400, deltaX: 0, deltaY: 600 });
     await expect(manager.scroll("bot-a", "sideways")).rejects.toThrow(/direction/);
     const shot = await manager.screenshot("bot-a");
