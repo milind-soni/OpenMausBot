@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it } from "vitest";
 
 import { resolveLocale, setLocale, t } from "./i18n";
-import { en, locales } from "@/locales";
+import { en, localeChoices, locales } from "@/locales";
 
 afterEach(() => {
   setLocale("en");
@@ -63,6 +63,15 @@ describe("t", () => {
         expect((value ?? "").trim().length).toBeGreaterThan(0);
       }
     }
+  });
+
+  it("ships exactly one JSON catalog for every picker language", () => {
+    const files = Object.keys(import.meta.glob("../locales/*.json", { eager: true }))
+      .map((path) => path.split("/").at(-1))
+      .filter((file) => file !== "source-hashes.json")
+      .sort();
+    const choices = localeChoices.map(({ code }) => `${code}.json`).sort();
+    expect(files).toEqual(choices);
   });
 
   it("overlays a partial pack and falls back to English for missing keys", () => {

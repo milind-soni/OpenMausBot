@@ -139,18 +139,28 @@ how chat routine proposals failed in the field hours after 0.1.38 shipped (#544)
 ## Adding a language
 
 The renderer's strings live in JSON catalogs under `src/locales/`. English
-(`src/locales/en.json`) is the source of truth (typing still flows from it); a language is one file plus a
-one-line registration, exactly like a provider driver:
+(`src/locales/en.json`) is the source of truth (typing still flows from it). A
+language is one file plus a one-line registration, exactly like a provider
+driver:
 
-1. Copy `src/locales/en.json` to `src/locales/<code>.json` (lowercase
-   BCP-47 tag: `de.json`, `pt-br.json`) and translate the values — or let
-   the pipeline draft it (`docs/localization-pipeline.md`). Keys you leave
-   out fall back to English — partial packs are fine and expected while
-   the extraction is still spreading through the UI.
+1. Copy `src/locales/en.json` to `src/locales/<code>.json`. Filenames use a
+   lowercase BCP-47 tag (`de.json`, `pt-br.json`). Translate the values; keys
+   you leave out fall back to English, so partial community packs are fine.
 2. Register it in `src/locales/index.ts`.
-3. The app follows the system language (`navigator.language`, with base-tag
-   fallback). There is no in-app picker yet, so verify by switching your OS
-   language.
+3. Run `pnpm i18n:check`, then select the language in **Settings → General**.
+
+An authenticated local Claude CLI can produce a first draft; it never runs in
+CI and its output still needs human review:
+
+```sh
+# Uses the locally logged-in Claude CLI
+node scripts/generate-locale.mjs it "Italian"
+```
+
+The helper runs the model without repository access, custom instructions, or
+write-capable tools. It accepts only one complete JSON object and tracks the
+English source hash for each reviewed translation. See
+[`docs/localization.md`](docs/localization.md) for the workflow and safety rules.
 
 Only a slice of the UI is extracted so far. Move strings into the catalog
 with `t("…")` as you touch components — never in big sweeps, which conflict
@@ -198,6 +208,7 @@ responses or events, no baking them into argv where another local process could 
 ## Before you open the PR
 
 - [ ] `pnpm typecheck` and `pnpm test` pass
+- [ ] Locale changes pass `pnpm i18n:check` and have been reviewed by a speaker
 - [ ] `pnpm check:electron` passes for desktop-shell changes
 - [ ] Ubuntu packaging changes pass `pnpm package:linux` and `node scripts/verify-linux-package.mjs`
 - [ ] New server behavior has a test; driver changes keep the contract tests green

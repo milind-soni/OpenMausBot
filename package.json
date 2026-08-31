@@ -24,6 +24,7 @@
     "clean": "node scripts/clean.mjs",
     "lint": "oxlint .",
     "check:contrast": "node scripts/check-skin-contrast.mjs",
+    "i18n:check": "node scripts/generate-locale.mjs --check",
     "dev": "vite",
     "docs:dev": "pnpm --filter @openmausbot/docs dev",
     "docs:build": "pnpm --filter @openmausbot/docs build",

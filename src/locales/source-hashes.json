@@ -1,0 +1,61 @@
+{
+  "version": 1,
+  "locales": {
+    "de": {
+      "noEngines.title": "af88855a5f80377de709995229ba3907df9e8fb3b940fbf7c0d9cbe6eea54afe",
+      "noEngines.intro": "b0a0cbe38b77da20f5f0436390c3a1d8896cf3d37319394ca7b35c2696d01718",
+      "engines.cloud": "b977b950c1ae31e5aeb9ef778cc20a66fc034eb81e738e0206104b677962c465",
+      "engines.local": "8c31e6e7223097e2e4847773c47a4efab6aaf79deeecc92a7759891c74976dde",
+      "common.checkAgain": "fb7099ad8e818d42eceefe0d97c824fd54ddb0eeef54c263ec72c77d39198ac9",
+      "common.checking": "ec963ffc911b840134fc738b41a8bb0493489c402a4a761efd36c16dea7d984b"
+    },
+    "es": {
+      "noEngines.title": "af88855a5f80377de709995229ba3907df9e8fb3b940fbf7c0d9cbe6eea54afe",
+      "noEngines.intro": "b0a0cbe38b77da20f5f0436390c3a1d8896cf3d37319394ca7b35c2696d01718",
+      "engines.cloud": "b977b950c1ae31e5aeb9ef778cc20a66fc034eb81e738e0206104b677962c465",
+      "engines.local": "8c31e6e7223097e2e4847773c47a4efab6aaf79deeecc92a7759891c74976dde",
+      "common.checkAgain": "fb7099ad8e818d42eceefe0d97c824fd54ddb0eeef54c263ec72c77d39198ac9",
+      "common.checking": "ec963ffc911b840134fc738b41a8bb0493489c402a4a761efd36c16dea7d984b"
+    },
+    "fr": {
+      "noEngines.title": "af88855a5f80377de709995229ba3907df9e8fb3b940fbf7c0d9cbe6eea54afe",
+      "noEngines.intro": "b0a0cbe38b77da20f5f0436390c3a1d8896cf3d37319394ca7b35c2696d01718",
+      "engines.cloud": "b977b950c1ae31e5aeb9ef778cc20a66fc034eb81e738e0206104b677962c465",
+      "engines.local": "8c31e6e7223097e2e4847773c47a4efab6aaf79deeecc92a7759891c74976dde",
+      "common.checkAgain": "fb7099ad8e818d42eceefe0d97c824fd54ddb0eeef54c263ec72c77d39198ac9",
+      "common.checking": "ec963ffc911b840134fc738b41a8bb0493489c402a4a761efd36c16dea7d984b"
+    },
+    "hi": {
+      "noEngines.title": "af88855a5f80377de709995229ba3907df9e8fb3b940fbf7c0d9cbe6eea54afe",
+      "noEngines.intro": "b0a0cbe38b77da20f5f0436390c3a1d8896cf3d37319394ca7b35c2696d01718",
+      "engines.cloud": "b977b950c1ae31e5aeb9ef778cc20a66fc034eb81e738e0206104b677962c465",
+      "engines.local": "8c31e6e7223097e2e4847773c47a4efab6aaf79deeecc92a7759891c74976dde",
+      "common.checkAgain": "fb7099ad8e818d42eceefe0d97c824fd54ddb0eeef54c263ec72c77d39198ac9",
+      "common.checking": "ec963ffc911b840134fc738b41a8bb0493489c402a4a761efd36c16dea7d984b"
+    },
+    "ja": {
+      "noEngines.title": "af88855a5f80377de709995229ba3907df9e8fb3b940fbf7c0d9cbe6eea54afe",
+      "noEngines.intro": "b0a0cbe38b77da20f5f0436390c3a1d8896cf3d37319394ca7b35c2696d01718",
+      "engines.cloud": "b977b950c1ae31e5aeb9ef778cc20a66fc034eb81e738e0206104b677962c465",
+      "engines.local": "8c31e6e7223097e2e4847773c47a4efab6aaf79deeecc92a7759891c74976dde",
+      "common.checkAgain": "fb7099ad8e818d42eceefe0d97c824fd54ddb0eeef54c263ec72c77d39198ac9",
+      "common.checking": "ec963ffc911b840134fc738b41a8bb0493489c402a4a761efd36c16dea7d984b"
+    },
+    "pt-br": {
+      "noEngines.title": "af88855a5f80377de709995229ba3907df9e8fb3b940fbf7c0d9cbe6eea54afe",
+      "noEngines.intro": "b0a0cbe38b77da20f5f0436390c3a1d8896cf3d37319394ca7b35c2696d01718",
+      "engines.cloud": "b977b950c1ae31e5aeb9ef778cc20a66fc034eb81e738e0206104b677962c465",
+      "engines.local": "8c31e6e7223097e2e4847773c47a4efab6aaf79deeecc92a7759891c74976dde",
+      "common.checkAgain": "fb7099ad8e818d42eceefe0d97c824fd54ddb0eeef54c263ec72c77d39198ac9",
+      "common.checking": "ec963ffc911b840134fc738b41a8bb0493489c402a4a761efd36c16dea7d984b"
+    },
+    "zh": {
+      "noEngines.title": "af88855a5f80377de709995229ba3907df9e8fb3b940fbf7c0d9cbe6eea54afe",
+      "noEngines.intro": "b0a0cbe38b77da20f5f0436390c3a1d8896cf3d37319394ca7b35c2696d01718",
+      "engines.cloud": "b977b950c1ae31e5aeb9ef778cc20a66fc034eb81e738e0206104b677962c465",
+      "engines.local": "8c31e6e7223097e2e4847773c47a4efab6aaf79deeecc92a7759891c74976dde",
+      "common.checkAgain": "fb7099ad8e818d42eceefe0d97c824fd54ddb0eeef54c263ec72c77d39198ac9",
+      "common.checking": "ec963ffc911b840134fc738b41a8bb0493489c402a4a761efd36c16dea7d984b"
+    }
+  }
+}
