@@ -320,7 +320,7 @@ export interface ConfigStatus {
   /** UI language override; "" (or absent) follows the system language. */
   language?: string;
   /** Opt-in flags. Absent means off. */
-  features?: { skillRecorder: boolean; showToolCalls?: boolean; browser?: boolean };
+  features?: { skillRecorder: boolean; showToolCalls?: boolean; browser?: boolean; menuBar?: boolean };
   /** Named browser sessions any bot can be pointed at. */
   browserProfiles?: BrowserProfile[];
 }

@@ -29,6 +29,8 @@ import { activateExistingWindow } from "./single-instance.mjs";
 import { pollServerIdentity } from "./server-boot-probe.mjs";
 import { packageUrlFromCommandLine, packageUrlFromDeepLink } from "./package-link.mjs";
 import { windowChromeOptions } from "./window-chrome.mjs";
+import { menuBarSurfaceUrl } from "./menu-bar-geometry.mjs";
+import { createMenuBarController } from "./menu-bar.mjs";
 import { defaultSaveName, withSavableFile } from "./save-file.mjs";
 import {
   ensureManagedComposioCredentials,
@@ -108,6 +110,7 @@ const browserConnectionStore = createDescriptorStore({
 });
 let pendingPackageInstallUrl = packageUrlFromCommandLine(process.argv);
 let mainWindow = null;
+let menuBar = null;
 let unreadCount = 0;
 let unreadOverlayIcon = null;
 
@@ -1354,6 +1357,48 @@ ipcMain.on("desktop:unread-count", (event, value) => {
   applyUnreadBadge(sender);
 });
 
+function appOriginUrl() {
+  if (app.isPackaged) {
+    return serverReady ? `http://127.0.0.1:${SERVER_PORT}` : null;
+  }
+  return DEV_URL;
+}
+
+function showMainWindow() {
+  if (!mainWindow || mainWindow.isDestroyed()) createWindow();
+  else {
+    if (mainWindow.isMinimized()) mainWindow.restore();
+    mainWindow.show();
+    mainWindow.focus();
+  }
+}
+
+function ensureMenuBar() {
+  if (menuBar) return menuBar;
+  menuBar = createMenuBarController({
+    iconPath: APP_ICON,
+    preload: path.join(__dirname, "preload.cjs"),
+    getAppUrl: () => {
+      const origin = appOriginUrl();
+      return origin ? menuBarSurfaceUrl(origin) : null;
+    },
+    showMainWindow,
+  });
+  return menuBar;
+}
+
+ipcMain.handle("menubar:set-enabled", (_event, enabled) => ({
+  enabled: ensureMenuBar().setEnabled(Boolean(enabled)),
+}));
+ipcMain.handle("menubar:hide", () => {
+  menuBar?.hide();
+  return { hidden: true };
+});
+ipcMain.handle("menubar:open-main", () => {
+  menuBar?.openMain();
+  return { opened: true };
+});
+
 function createWindow() {
   const waitsForSkinSync = process.platform === "win32";
   const primary = screen.getPrimaryDisplay();
@@ -2039,12 +2084,14 @@ app.whenReady().then(async () => {
   // the user's click, installs on "Restart to update"
   startUpdater(win);
   app.on("activate", () => {
-    if (BrowserWindow.getAllWindows().length === 0) createWindow();
+    showMainWindow();
   });
 });
 
 app.on("window-all-closed", () => {
-  if (process.platform !== "darwin") app.quit();
+  if (process.platform === "darwin") return;
+  if (menuBar?.isEnabled()) return;
+  app.quit();
 });
 
 // EMBEDDING.md lifecycle rule: defer the first quit until the embedded

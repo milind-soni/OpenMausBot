@@ -18,6 +18,7 @@ import { customMcpServers,
   saveConfig,
   skillRecorderEnabled,
   builtInBrowserEnabled,
+  menuBarEnabled,
   browserProfilePartitionId,
   browserProfilePartitionTarget,
   browserProfileReplacementConflict,
@@ -317,6 +318,9 @@ describe("configuration boundaries", () => {
     expect(parseConfigPatch({ features: { browser: false } })).toEqual({ features: { browser: false } });
     expect(builtInBrowserEnabled({ features: { browser: false } })).toBe(false);
     expect(builtInBrowserEnabled({ features: { browser: true } })).toBe(true);
+    expect(menuBarEnabled({})).toBe(false);
+    expect(parseConfigPatch({ features: { menuBar: true } })).toEqual({ features: { menuBar: true } });
+    expect(menuBarEnabled({ features: { menuBar: true } })).toBe(true);
     // named browser profiles: the list is the unit, ids are partition-safe
     expect(parseConfigPatch({ browserProfiles: [{ id: "work", name: " Work " }] })).toEqual({
       browserProfiles: [{ id: "work", name: "Work" }],

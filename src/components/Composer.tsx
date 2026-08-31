@@ -168,6 +168,7 @@ export function Composer({
   onConsumeReply,
   onRestoreReply,
   locked = false,
+  compact = false,
 }: {
   bot?: Bot;
   group?: Group;
@@ -179,6 +180,8 @@ export function Composer({
   onRestoreReply?: (message: Message, threadId: string) => void;
   /** New rooms keep the composer inert until their setup is saved or skipped. */
   locked?: boolean;
+  /** Menu-bar popover: keep the empty composer on one line. */
+  compact?: boolean;
 }) {
   const { state, dispatch } = useStore();
   const { capabilities } = useDesktopCapabilities();
@@ -315,15 +318,20 @@ export function Composer({
 
   useEffect(() => setHighlight(0), [mention?.start, mention?.query]);
 
-  // one line at rest, then grow with the draft — hard cap at six lines
+  // one line at rest, then grow with the draft — hard cap at six lines.
+  // Compact (menu bar) is a fixed 32px row matching the attach / Auto buttons.
   useEffect(() => {
     const el = inputRef.current;
     if (!el) return;
+    if (compact) {
+      el.style.height = "";
+      return;
+    }
     const line = parseFloat(getComputedStyle(el).lineHeight) || 24;
     const cap = line * 6;
     el.style.height = "auto";
     el.style.height = `${Math.min(el.scrollHeight, cap)}px`;
-  }, [text]);
+  }, [text, compact]);
 
   const pickMention = (peer: MentionChoice) => {
     if (!mention) return;
@@ -689,7 +697,12 @@ export function Composer({
             aria-hidden
             className="absolute -left-5 -right-5 top-1/2 h-[50vh] bg-app"
           />
-        <div className="relative z-[1] flex items-end gap-1 rounded-3xl bg-raised px-2 py-1.5">
+        <div
+          className={cn(
+            "relative z-[1] flex gap-1 rounded-3xl bg-raised px-2 py-1.5",
+            compact ? "items-center" : "items-end",
+          )}
+        >
           <input
             ref={fileInput}
             type="file"
@@ -818,27 +831,42 @@ export function Composer({
           disabled={Boolean(approval) || locked}
           placeholder={
             locked
-              ? "Finish room setup to start chatting"
+              ? compact
+                ? "Finish setup to chat"
+                : "Finish room setup to start chatting"
               : approval
-              ? "Answer the approval above to continue"
+              ? compact
+                ? "Answer the approval above"
+                : "Answer the approval above to continue"
               : recording
               ? "Listening…"
-              : canInject
-                ? `${busyName} is working — inject now to interrupt with the queued message`
-              : busy && canSteer
-                ? `${busyName} is working — Enter sends this into the running turn`
-              : busy
-                ? group
-                  ? `${busyName} is working — Enter queues your message`
-                  : `${busyName} is working — sends when this turn finishes`
-                : group
-                  ? channelMode === "goal"
-                    ? `Describe what ${group.name} should finish together`
-                    : `Message ${group.name} — ${groupComposerHint(group, members ?? [])}`
-                  : `Message ${bot?.name ?? ""}`
+              : compact
+                ? canInject
+                  ? `${busyName} is working — inject now`
+                  : busy
+                    ? `${busyName} is working…`
+                    : `Message ${bot?.name ?? group?.name ?? ""}`
+                : canInject
+                  ? `${busyName} is working — inject now to interrupt with the queued message`
+                : busy && canSteer
+                  ? `${busyName} is working — Enter sends this into the running turn`
+                : busy
+                  ? group
+                    ? `${busyName} is working — Enter queues your message`
+                    : `${busyName} is working — sends when this turn finishes`
+                  : group
+                    ? channelMode === "goal"
+                      ? `Describe what ${group.name} should finish together`
+                      : `Message ${group.name} — ${groupComposerHint(group, members ?? [])}`
+                    : `Message ${bot?.name ?? ""}`
           }
           aria-label={`Message ${group ? group.name : (bot?.name ?? "")}`}
-            className="max-h-[9rem] min-h-6 min-w-0 flex-1 resize-none overflow-y-auto self-center bg-transparent px-1 py-1 text-[15px] leading-6 text-ink placeholder:text-ink-secondary focus:outline-none"
+            className={cn(
+              "min-w-0 flex-1 resize-none bg-transparent px-1 text-[15px] text-ink placeholder:text-ink-secondary focus:outline-none",
+              compact
+                ? "h-8 min-h-8 overflow-hidden py-0 leading-8"
+                : "min-h-6 max-h-[9rem] self-center overflow-y-auto py-1 leading-6",
+            )}
           />
           <div className="flex items-center gap-1">
           {/* Inject is stop-then-steer made visible. The square stop would

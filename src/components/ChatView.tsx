@@ -6,6 +6,7 @@ import {
   ChevronDown,
   ChevronLeft,
   ChevronRight,
+  Maximize2,
   Bug,
   Clock,
   Copy,
@@ -833,7 +834,17 @@ function PinnedBanner({
   );
 }
 
-export function ChatView({ bot }: { bot: Bot }) {
+export function ChatView({
+  bot,
+  compact = false,
+  onBack,
+  onExpand,
+}: {
+  bot: Bot;
+  compact?: boolean;
+  onBack?: () => void;
+  onExpand?: () => void;
+}) {
   const { state, dispatch } = useStore();
   const scrollRef = useRef<HTMLDivElement>(null);
   const composerDockRef = useRef<HTMLDivElement>(null);
@@ -1067,17 +1078,30 @@ export function ChatView({ bot }: { bot: Bot }) {
         className={cn(
           // @container so the chips on the right can fold to icon bubbles
           // when the column is narrow (side panel open, small window)
-          "@container/chathead flex items-center justify-between px-5 py-3",
-          // Room for the drawer button, which overlays this corner below md.
-          "pl-11 md:pl-5",
+          "@container/chathead flex items-center justify-between py-3",
+          compact ? "gap-1 px-3" : "px-5 pl-11 md:pl-5",
         )}
       >
         <div className="flex min-w-0 items-center gap-2.5 rounded-lg px-1.5 py-1">
+          {onBack && (
+            <button
+              type="button"
+              onClick={onBack}
+              className="flex size-8 shrink-0 items-center justify-center rounded-lg text-ink-secondary hover:bg-raised hover:text-ink"
+              title="Back to bots"
+              aria-label="Back to bot list"
+            >
+              <ChevronLeft size={18} />
+            </button>
+          )}
           <button
-            onClick={() => dispatch({ type: "toggleSettings", open: true })}
+            onClick={() => {
+              if (compact) return;
+              dispatch({ type: "toggleSettings", open: true });
+            }}
             className="flex size-10 shrink-0 items-center justify-center rounded-lg hover:bg-raised/50"
-            title="Open agent profile"
-            aria-label={`Open ${bot.name}'s profile`}
+            title={compact ? bot.name : "Open agent profile"}
+            aria-label={compact ? bot.name : `Open ${bot.name}'s profile`}
           >
             <BotAvatar
               bot={bot}
@@ -1090,8 +1114,10 @@ export function ChatView({ bot }: { bot: Bot }) {
           <RenameTitle
             value={bot.name}
             onCommit={(name) => dispatch({ type: "updateBot", botId: bot.id, patch: { name } })}
-            onActivate={() => dispatch({ type: "toggleSettings", open: true })}
-            showEditButton
+            onActivate={() => {
+              if (!compact) dispatch({ type: "toggleSettings", open: true });
+            }}
+            showEditButton={!compact}
             className="truncate text-[15px] font-semibold text-ink"
             inputClassName="max-w-[220px] rounded bg-inset px-1.5 py-0.5 text-[15px] font-semibold"
           />
@@ -1103,18 +1129,20 @@ export function ChatView({ bot }: { bot: Bot }) {
           {bot.busy && <WorkingDots className="text-ink-secondary" />}
         </div>
         <div className="flex shrink-0 items-center gap-2">
-          <button
-            onClick={() => setFindOpen((open) => !open)}
-            aria-label="Find in conversation"
-            aria-pressed={findOpen}
-            className={cn(
-              "rounded-md p-1.5 hover:bg-raised",
-              findOpen ? "text-accent" : "text-ink-secondary hover:text-ink",
-            )}
-            title="Find in conversation (⌘F)"
-          >
-            <Search size={18} />
-          </button>
+          {!compact && (
+            <button
+              onClick={() => setFindOpen((open) => !open)}
+              aria-label="Find in conversation"
+              aria-pressed={findOpen}
+              className={cn(
+                "rounded-md p-1.5 hover:bg-raised",
+                findOpen ? "text-accent" : "text-ink-secondary hover:text-ink",
+              )}
+              title="Find in conversation (⌘F)"
+            >
+              <Search size={18} />
+            </button>
+          )}
           {bot.busy && (
             <button
               onClick={() => dispatch({ type: "interrupt", botId: bot.id })}
@@ -1128,33 +1156,48 @@ export function ChatView({ bot }: { bot: Bot }) {
               <span className="@max-4xl/chathead:hidden">Stop</span>
             </button>
           )}
-          <TaskPicker bot={bot} />
-          <UsageChip bot={bot} />
-          <WorkingFolderChip bot={bot} />
-          <ModelPicker bot={bot} />
-          <CallButton bot={bot} />
-          <button
-            onClick={() => dispatch({ type: "toggleComputer" })}
-            className={cn(
-              "rounded-md p-1.5 hover:bg-raised",
-              state.computerOpen ? "text-accent" : "text-ink-secondary hover:text-ink",
-            )}
-            title="Bot's computer"
-          >
-            <Monitor size={18} />
-          </button>
-          <button
-            onClick={() => dispatch({ type: "toggleInspector" })}
-            aria-label="Inspector"
-            aria-pressed={state.inspectorOpen}
-            className={cn(
-              "rounded-md p-1.5 hover:bg-raised",
-              state.inspectorOpen ? "text-accent" : "text-ink-secondary hover:text-ink",
-            )}
-            title="Inspector — runtime events and raw protocol for this thread"
-          >
-            <Bug size={18} />
-          </button>
+          {!compact && <TaskPicker bot={bot} />}
+          {!compact && <UsageChip bot={bot} />}
+          {!compact && <WorkingFolderChip bot={bot} />}
+          <ModelPicker bot={bot} fitWindow={compact} />
+          {!compact && <CallButton bot={bot} />}
+          {!compact && (
+            <button
+              onClick={() => dispatch({ type: "toggleComputer" })}
+              className={cn(
+                "rounded-md p-1.5 hover:bg-raised",
+                state.computerOpen ? "text-accent" : "text-ink-secondary hover:text-ink",
+              )}
+              title="Bot's computer"
+            >
+              <Monitor size={18} />
+            </button>
+          )}
+          {!compact && (
+            <button
+              onClick={() => dispatch({ type: "toggleInspector" })}
+              aria-label="Inspector"
+              aria-pressed={state.inspectorOpen}
+              className={cn(
+                "rounded-md p-1.5 hover:bg-raised",
+                state.inspectorOpen ? "text-accent" : "text-ink-secondary hover:text-ink",
+              )}
+              title="Inspector — runtime events and raw protocol for this thread"
+            >
+              <Bug size={18} />
+            </button>
+          )}
+          {onExpand && (
+            <button
+              type="button"
+              onClick={onExpand}
+              className="rounded-md p-1.5 text-ink-secondary hover:bg-raised hover:text-ink"
+              title="Open in full app"
+              aria-label="Open in full app"
+            >
+              <Maximize2 size={16} />
+            </button>
+          )}
         </div>
       </div>
 
@@ -1344,6 +1387,7 @@ export function ChatView({ bot }: { bot: Bot }) {
       <Composer
         key={bot.threadId}
         bot={bot}
+        compact={compact}
         replyTo={replyTo}
         onClearReply={clearReply}
         onConsumeReply={consumeReply}

@@ -195,6 +195,12 @@ type SkillRecordingPayload = {
       onPackageInstall?(cb: (url: string) => void): () => void;
       /** Updates the native Dock/taskbar unread indicator. */
       setUnreadCount?(count: number): void;
+      /** Optional menu-bar / tray popover. Absent in the browser client. */
+      menuBar?: {
+        setEnabled(enabled: boolean): Promise<{ enabled: boolean }>;
+        hide(): Promise<{ hidden: boolean }>;
+        openMain(): Promise<{ opened: boolean }>;
+      };
       /** Opens a live desktop as a sandboxed window owned by OpenMausBot. */
       desktopViewer?: {
         open(url: string, title: string, contextId: string): Promise<boolean>;

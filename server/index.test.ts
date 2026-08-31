@@ -2795,20 +2795,20 @@ describe("harness HTTP API", () => {
   it("keeps Teach a skill off by default and persists an explicit opt-in", async () => {
     const before = await api("GET", "/api/config");
     expect(before.status).toBe(200);
-    expect(before.body.features).toEqual({ browser: false, skillRecorder: false, showToolCalls: false });
+    expect(before.body.features).toEqual({ browser: false, skillRecorder: false, showToolCalls: false, menuBar: false });
 
     const saved = await api("PATCH", "/api/config", {
       features: { skillRecorder: true },
     });
     expect(saved.status).toBe(200);
-    expect(saved.body.features).toEqual({ browser: false, skillRecorder: true, showToolCalls: false });
+    expect(saved.body.features).toEqual({ browser: false, skillRecorder: true, showToolCalls: false, menuBar: false });
 
     const disk = JSON.parse(readFileSync(join(home, ".openmausbot", "config.json"), "utf8"));
     expect(disk.features).toEqual({ skillRecorder: true });
 
     const tools = await api("PATCH", "/api/config", { features: { showToolCalls: true } });
     expect(tools.status).toBe(200);
-    expect(tools.body.features).toEqual({ browser: false, skillRecorder: true, showToolCalls: true });
+    expect(tools.body.features).toEqual({ browser: false, skillRecorder: true, showToolCalls: true, menuBar: false });
 
     await api("PATCH", "/api/config", { features: { skillRecorder: false, showToolCalls: false } });
   });

@@ -6,7 +6,7 @@ import { useEffect, useRef, useState } from "react";
 import { Coins, FlaskConical, Globe, KeyRound, Monitor, Search, Smartphone, Terminal, Trash2, User, X } from "lucide-react";
 import { api, useStore, type AppSettingsSection, type ConfigStatus } from "@/state/store";
 import { analyticsEnabled, setAnalyticsEnabled } from "@/lib/analytics";
-import { builtInBrowserEnabled, showToolCallsEnabled, skillRecorderEnabled } from "@/lib/feature-flags";
+import { builtInBrowserEnabled, menuBarEnabled, showToolCallsEnabled, skillRecorderEnabled } from "@/lib/feature-flags";
 import { localeChoices } from "@/locales";
 import { ApiKeyRow, VpsConnection } from "./ApiKeys";
 import { useUpdaterState } from "@/lib/updater";
@@ -30,7 +30,7 @@ const SECTIONS: Array<{
   icon: typeof User;
   keywords: string[];
 }> = [
-  { id: "general", label: "General", icon: User, keywords: ["profile", "name", "email", "skin", "theme", "appearance", "analytics", "updates", "tools", "tool calls"] },
+  { id: "general", label: "General", icon: User, keywords: ["profile", "name", "email", "skin", "theme", "appearance", "analytics", "updates", "tools", "tool calls", "menu bar", "tray"] },
   { id: "experimental", label: "Experimental", icon: FlaskConical, keywords: ["early", "preview", "teach", "skill", "browser", "profiles"] },
   { id: "connections", label: "Connections", icon: KeyRound, keywords: ["keys", "api", "composio", "box", "xai", "vps"] },
   { id: "engines", label: "Engines", icon: Terminal, keywords: ["models", "claude", "grok", "providers", "cli"] },
@@ -185,6 +185,56 @@ function LanguageRow() {
           </option>
         ))}
       </select>
+      {error ? <p role="alert" className="mt-2 text-[12px] text-danger">{error}</p> : null}
+    </Card>
+  );
+}
+
+function MenuBarRow() {
+  const { state, dispatch } = useStore();
+  if (!window.ogb?.menuBar) return null;
+  const enabled = menuBarEnabled(state.config);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState("");
+
+  const toggle = async () => {
+    if (saving) return;
+    setSaving(true);
+    setError("");
+    try {
+      const config: ConfigStatus = await api("/api/config", {
+        method: "PATCH",
+        body: JSON.stringify({ features: { menuBar: !enabled } }),
+      });
+      dispatch({ type: "configStatus", config });
+      await window.ogb?.menuBar?.setEnabled(!enabled);
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : "Could not save the menu bar setting.");
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <Card
+      title="Menu bar"
+      subtitle="A compact OpenMausBot next to the clock. Click the icon to pick a bot and chat without opening the full window."
+    >
+      <div className="flex items-center justify-between gap-4">
+        <div className="min-w-0">
+          <div className="text-[14px] font-medium text-ink">Show in the menu bar</div>
+          <div className="mt-0.5 text-[12px] leading-relaxed text-ink-secondary">
+            Lives in the menu bar on Mac, or the system tray on Windows and Linux. Off until you turn it on.
+          </div>
+        </div>
+        <Switch
+          checked={enabled}
+          aria-label="Show OpenMausBot in the menu bar"
+          disabled={saving}
+          onClick={() => void toggle()}
+          className="disabled:cursor-wait disabled:opacity-50"
+        />
+      </div>
       {error ? <p role="alert" className="mt-2 text-[12px] text-danger">{error}</p> : null}
     </Card>
   );
@@ -652,6 +702,7 @@ export function SettingsModal() {
                   <RoomTurnTimeoutSettings />
                 </Card>
                 <LanguageRow />
+                <MenuBarRow />
           <ToolCallsRow />
                 <UpdatesRow />
                 <DiagnosticsRow />

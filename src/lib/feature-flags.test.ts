@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { builtInBrowserEnabled, showToolCallsEnabled, skillRecorderEnabled } from "./feature-flags";
+import { builtInBrowserEnabled, menuBarEnabled, showToolCallsEnabled, skillRecorderEnabled } from "./feature-flags";
 
 describe("experimental feature flags", () => {
   it("keeps Teach a skill hidden by default", () => {
@@ -28,5 +28,12 @@ describe("experimental feature flags", () => {
 
   it("shows tool-call chips only after explicit opt-in", () => {
     expect(showToolCallsEnabled({ features: { showToolCalls: true } })).toBe(true);
+  });
+
+  it("keeps the menu bar off until explicitly enabled", () => {
+    expect(menuBarEnabled(null)).toBe(false);
+    expect(menuBarEnabled({})).toBe(false);
+    expect(menuBarEnabled({ features: { menuBar: false } })).toBe(false);
+    expect(menuBarEnabled({ features: { menuBar: true } })).toBe(true);
   });
 });

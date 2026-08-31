@@ -1,5 +1,5 @@
 export interface FeatureFlagConfig {
-  features?: { skillRecorder?: boolean; showToolCalls?: boolean; browser?: boolean };
+  features?: { skillRecorder?: boolean; showToolCalls?: boolean; browser?: boolean; menuBar?: boolean };
 }
 
 /** Experimental features are available only after an explicit opt-in. */
@@ -17,4 +17,9 @@ export function builtInBrowserEnabled(config: FeatureFlagConfig | null | undefin
  * shows that work is happening. */
 export function showToolCallsEnabled(config: FeatureFlagConfig | null | undefined): boolean {
   return config?.features?.showToolCalls === true;
+}
+
+/** Desktop menu-bar / tray popover. Off until explicitly enabled. */
+export function menuBarEnabled(config: FeatureFlagConfig | null | undefined): boolean {
+  return config?.features?.menuBar === true;
 }

@@ -134,6 +134,12 @@ contextBridge.exposeInMainWorld("ogb", {
   },
   /** Mirrors durable unread state into the native Dock/taskbar badge. */
   setUnreadCount: (count) => ipcRenderer.send("desktop:unread-count", count),
+  /** Optional menu-bar / tray popover. Off until Settings enables it. */
+  menuBar: {
+    setEnabled: (enabled) => ipcRenderer.invoke("menubar:set-enabled", enabled),
+    hide: () => ipcRenderer.invoke("menubar:hide"),
+    openMain: () => ipcRenderer.invoke("menubar:open-main"),
+  },
   /** Live VNC/noVNC in a sandboxed window owned by the app window. */
   desktopViewer: {
     open: (url, title, contextId) => ipcRenderer.invoke("desktop-viewer:open", url, title, contextId),

@@ -82,6 +82,7 @@ import {
   showToolCallsEnabled,
   skillRecorderEnabled,
   builtInBrowserEnabled,
+  menuBarEnabled,
   browserProfileReplacementConflict,
   browserProfilePartitionTarget,
   syncCredentialEnv,
@@ -4917,6 +4918,7 @@ function configStatus() {
       skillRecorder: skillRecorderEnabled(cfg),
       showToolCalls: showToolCallsEnabled(cfg),
       browser: builtInBrowserEnabled(cfg),
+      menuBar: menuBarEnabled(cfg),
     },
     // partitionId is non-secret routing metadata. The renderer needs it to
     // show the same durable session as an agent, but config PATCH validation

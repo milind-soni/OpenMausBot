@@ -107,6 +107,7 @@ export function ModelPicker({
   bot,
   className,
   contained = false,
+  fitWindow = false,
   label,
 }: {
   bot: Bot;
@@ -114,6 +115,9 @@ export function ModelPicker({
   /** Expand the menu in-flow under the trigger so it cannot overflow a
    * narrow parent (the Agent profile sidebar). */
   contained?: boolean;
+  /** Pin the menu to the window edges so a 380px panel cannot clip a
+   * menu-bar popover. */
+  fitWindow?: boolean;
   label?: ReactNode;
 }) {
   const { state, dispatch, refreshInstances } = useStore();
@@ -283,7 +287,9 @@ export function ModelPicker({
             "flex overflow-hidden rounded-2xl border border-hairline/50 bg-card",
             contained
               ? "relative mt-3 w-full max-h-[min(420px,50dvh)]"
-              : "absolute right-0 top-full z-30 mt-2 w-[380px] max-h-[min(480px,calc(100dvh-7rem))] shadow-2xl shadow-black/50",
+              : fitWindow
+                ? "fixed inset-x-2 top-14 z-40 max-h-[min(420px,calc(100dvh-8rem))] shadow-2xl shadow-black/50"
+                : "absolute right-0 top-full z-30 mt-2 w-[380px] max-h-[min(480px,calc(100dvh-7rem))] shadow-2xl shadow-black/50",
           )}
         >
           <div className="flex w-14 shrink-0 flex-col gap-1 overflow-y-auto border-r border-hairline/40 bg-panel p-2">

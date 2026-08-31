@@ -21,8 +21,13 @@ import { BrowserWorkspace } from "@/components/BrowserWorkspace";
 import { SkillRecorderPage } from "@/components/SkillRecorderPage";
 import { TeamMapPage } from "@/components/TeamMapPage";
 import { heldComputerControlBotIds } from "@/lib/computer-control";
-import { skillRecorderEnabled } from "@/lib/feature-flags";
+import { menuBarEnabled, skillRecorderEnabled } from "@/lib/feature-flags";
 import { setLocale } from "@/lib/i18n";
+import { MenuBarApp } from "@/components/MenuBarApp";
+
+function isMenuBarSurface() {
+  return new URLSearchParams(window.location.search).get("surface") === "menubar";
+}
 
 function Shell() {
   const { state, dispatch } = useStore();
@@ -97,6 +102,11 @@ function Shell() {
   useEffect(() => {
     window.ogb?.setUnreadCount?.(unreadCount);
   }, [unreadCount]);
+
+  useEffect(() => {
+    if (isMenuBarSurface()) return;
+    void window.ogb?.menuBar?.setEnabled(menuBarEnabled(state.config));
+  }, [state.config?.features?.menuBar]);
 
   // Re-assert every authoritative positive hold in the process that owns the
   // native browser. This covers initial hydration, SSE updates from another
@@ -301,14 +311,15 @@ function Shell() {
 
 export default function App() {
   const [gated, setGated] = useState(() => !emailGateDone());
+  const menuBar = isMenuBarSurface();
   useEffect(() => {
     initAnalytics();
   }, []);
   return (
     <DesktopCapabilitiesProvider>
       <StoreProvider>
-        <Shell />
-        {gated && <Onboarding onDone={() => setGated(false)} />}
+        {menuBar ? <MenuBarApp /> : <Shell />}
+        {!menuBar && gated && <Onboarding onDone={() => setGated(false)} />}
       </StoreProvider>
     </DesktopCapabilitiesProvider>
   );
