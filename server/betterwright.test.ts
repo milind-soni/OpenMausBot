@@ -12,6 +12,7 @@ import {
   betterwrightCliPath,
   browserIntegrationSpec,
   browserProfileName,
+  createBrowserProvisioner,
   forgetBrowserProfile,
 } from "./betterwright.ts";
 
@@ -65,6 +66,70 @@ describe("built-in browser integration", () => {
       args: [cli, "mcp"],
       env: { ELECTRON_RUN_AS_NODE: "1", BETTERWRIGHT_PROFILE: "bot-b1" },
     });
+  });
+});
+
+describe("provisioning the managed browser", () => {
+  // The suite-wide OMB_BETTERWRIGHT_PROVISION=off guard exists for harness
+  // boots with the real runner; these tests inject fakes, so lift it.
+  const withProvisioning = async (body: () => Promise<void>) => {
+    const previous = process.env.OMB_BETTERWRIGHT_PROVISION;
+    delete process.env.OMB_BETTERWRIGHT_PROVISION;
+    try {
+      await body();
+    } finally {
+      if (previous === undefined) delete process.env.OMB_BETTERWRIGHT_PROVISION;
+      else process.env.OMB_BETTERWRIGHT_PROVISION = previous;
+    }
+  };
+
+  it("does not run setup when the browser is already usable", () =>
+    withProvisioning(async () => {
+      const calls: string[][] = [];
+      const provisioner = createBrowserProvisioner(async (args) => {
+        calls.push(args);
+        return { ok: true, stdout: "" };
+      });
+      await expect(provisioner.ensure()).resolves.toBe(true);
+      expect(calls).toEqual([["mcp", "--check"]]);
+    }));
+
+  it("runs setup once on a clean machine and shares the attempt", () =>
+    withProvisioning(async () => {
+      const calls: string[][] = [];
+      const provisioner = createBrowserProvisioner(async (args) => {
+        calls.push(args);
+        // first check fails (no browser); setup and the re-check succeed
+        return { ok: !(args[1] === "--check" && calls.length === 1), stdout: "" };
+      });
+      const [first, second] = await Promise.all([provisioner.ensure(), provisioner.ensure()]);
+      expect(first).toBe(true);
+      expect(second).toBe(true);
+      expect(calls).toEqual([["mcp", "--check"], ["setup"], ["mcp", "--check"]]);
+      // a settled success is cached — no further processes
+      await expect(provisioner.ensure()).resolves.toBe(true);
+      expect(calls.length).toBe(3);
+    }));
+
+  it("retries a failed attempt instead of caching it", () =>
+    withProvisioning(async () => {
+      let attempts = 0;
+      const provisioner = createBrowserProvisioner(async (args) => {
+        if (args[0] === "setup") attempts += 1;
+        // setup keeps failing (offline); the second attempt succeeds
+        return { ok: attempts >= 2, stdout: "" };
+      });
+      await expect(provisioner.ensure()).resolves.toBe(false);
+      await expect(provisioner.ensure()).resolves.toBe(true);
+      expect(attempts).toBe(2);
+    }));
+
+  it("stays inert while the test-suite guard is set", async () => {
+    process.env.OMB_BETTERWRIGHT_PROVISION = "off";
+    const provisioner = createBrowserProvisioner(async () => {
+      throw new Error("must not spawn");
+    });
+    await expect(provisioner.ensure()).resolves.toBe(false);
   });
 });
 

@@ -80,6 +80,60 @@ export function browserProfileName(
   return browserProfilePartitionTarget(cfg, selectedProfile)?.partitionId ?? own;
 }
 
+export interface BetterwrightRunResult {
+  ok: boolean;
+  stdout: string;
+}
+export type BetterwrightRunner = (args: string[], timeoutMs: number) => Promise<BetterwrightRunResult>;
+
+async function runBetterwright(args: string[], timeoutMs: number): Promise<BetterwrightRunResult> {
+  const cli = betterwrightCliPath();
+  if (!cli) return { ok: false, stdout: "" };
+  try {
+    const { stdout } = await execFileAsync(process.execPath, [cli, ...args], {
+      env: { ...process.env, ...RUN_AS_NODE },
+      timeout: timeoutMs,
+    });
+    return { ok: true, stdout };
+  } catch (error) {
+    return { ok: false, stdout: String((error as { stdout?: unknown }).stdout ?? "") };
+  }
+}
+
+/** BetterChromium is provisioned by `betterwright setup`, never by npm — the
+ * packaged tree is staged with --ignore-scripts, so a clean machine has the
+ * CLI but no browser and every browser tool call fails until setup runs.
+ * Setup is idempotent and downloads the exact version the betterwright
+ * package pins, so provisioning is deterministic; on a machine whose owner
+ * already uses the CLI it is a no-op. */
+export function createBrowserProvisioner(run: BetterwrightRunner = runBetterwright) {
+  let ready: Promise<boolean> | null = null;
+  const attempt = async (): Promise<boolean> => {
+    if ((await run(["mcp", "--check"], 30_000)).ok) return true;
+    console.error("[browser] BetterChromium is not installed yet — running `betterwright setup`");
+    if (!(await run(["setup"], 15 * 60_000)).ok) {
+      console.error("[browser] betterwright setup failed; browsing stays unavailable until it succeeds");
+      return false;
+    }
+    return (await run(["mcp", "--check"], 30_000)).ok;
+  };
+  return {
+    /** Resolves true once the browser is usable. Concurrent callers share one
+     * attempt; a failed attempt is retried on the next call, not cached. */
+    ensure(): Promise<boolean> {
+      // The test suite must never download a browser into a throwaway home.
+      if (process.env.OMB_BETTERWRIGHT_PROVISION === "off") return Promise.resolve(false);
+      ready ??= attempt().then((ok) => {
+        if (!ok) ready = null;
+        return ok;
+      });
+      return ready;
+    },
+  };
+}
+
+export const browserProvisioner = createBrowserProvisioner();
+
 /** The MCP server a turn mounts as its `browser` integration. */
 export function browserIntegrationSpec(profileName: string): BrowserIntegrationSpec | null {
   const cli = betterwrightCliPath();

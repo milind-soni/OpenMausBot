@@ -179,6 +179,7 @@ import {
   BUILT_IN_BROWSER_SYSTEM_PROMPT,
   browserIntegrationSpec,
   browserProfileName,
+  browserProvisioner,
   forgetBrowserProfile,
 } from "./betterwright.ts";
 import { captureOutsideHumanControl } from "./private-screen-capture.ts";
@@ -371,7 +372,11 @@ function cancelDirectTurnDispatch(botId: string, expectedThreadId?: string): Dir
  * turn — the browser, its policy guard and its logins live in BetterWright's
  * own state, and a person can drive the same profile from their CLI. */
 function browserIntegration(botId: string, profile: string | undefined) {
-  return browserIntegrationSpec(browserProfileName(botId, profile, cfg));
+  const spec = browserIntegrationSpec(browserProfileName(botId, profile, cfg));
+  // A clean install has the CLI but no browser yet. Never block the turn on
+  // the download: until it lands, the tools report exactly what is missing.
+  if (spec) void browserProvisioner.ensure();
+  return spec;
 }
 
 function phoneIntegration() {
@@ -7273,6 +7278,9 @@ const server = createServer(async (req, res) => {
           key !== "features" &&
           key !== "browserProfiles",
       );
+      // Switching the browser on is the natural moment to fetch its managed
+      // browser on a clean install; the download runs behind the response.
+      if (patch.features?.browser === true) void browserProvisioner.ensure();
       // A failed secondary write is still reported, but only after every
       // mandatory consequence of the now-durable config write has run: no
       // bookkeeping failure may leave a stale provider fleet active.
@@ -7607,6 +7615,10 @@ const server = createServer(async (req, res) => {
 server.listen(PORT, "127.0.0.1", () => {
   console.log(`openmausbot server on http://127.0.0.1:${PORT}`);
 });
+
+// Warm-start the browser on machines where the feature is already on, so the
+// first browsing turn after a clean install does not pay for the download.
+if (builtInBrowserEnabled(cfg)) void browserProvisioner.ensure();
 
 const gracefulShutdown = createGracefulShutdown({
   cleanup: [

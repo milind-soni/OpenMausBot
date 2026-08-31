@@ -28,6 +28,13 @@ if (install.status !== 0) throw new Error(`npm install of betterwright@${version
 
 const cli = join(finalDir, "node_modules", "betterwright", "dist", "bin", "betterwright.js");
 if (!existsSync(cli)) throw new Error(`staged betterwright has no CLI at ${cli}`);
-const check = spawnSync(process.execPath, [cli, "mcp", "--check"], { stdio: "inherit", env: { ...process.env, ELECTRON_RUN_AS_NODE: "1" } });
-if (check.status !== 0) throw new Error("staged betterwright failed mcp --check");
+const check = spawnSync(process.execPath, [cli, "mcp", "--check"], { encoding: "utf8", env: { ...process.env, ELECTRON_RUN_AS_NODE: "1" } });
+const report = `${check.stdout ?? ""}${check.stderr ?? ""}`;
+process.stdout.write(report);
+// A clean build machine has no BetterChromium and none is bundled: the server
+// provisions it on first run via `betterwright setup`. Only a broken staged
+// tree — the CLI unable to load itself or the MCP SDK — fails packaging.
+if (check.status !== 0 && !report.includes("Browser not installed")) {
+  throw new Error("staged betterwright failed mcp --check");
+}
 console.log(`betterwright ${version} staged at ${finalDir}`);

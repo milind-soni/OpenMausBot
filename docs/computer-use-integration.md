@@ -159,6 +159,12 @@ replacement buys:
   browser-proxy → loopback host → WebContentsView pipeline, its capability
   mint/revoke lifecycle, and the vendored `playwright-injected` snapshot
   bundle are gone.
+- **BetterChromium provisions on first run, not at install.** npm staging uses
+  `--ignore-scripts`, so a clean machine has the CLI but no browser. The
+  server runs `betterwright setup` (idempotent, artifact version pinned by
+  the package) the first time the feature is on — at boot, on enable, or on
+  the first mount — into the shared `~/.betterwright`, where a user who
+  already runs the CLI has it installed anyway.
 - **Identity model carries over.** A bot with no profile gets
   `BETTERWRIGHT_PROFILE=bot-<id>`; a named shared profile maps to its stable
   partition id (the immutable identity rule from #567); `guest` stays `guest`.
