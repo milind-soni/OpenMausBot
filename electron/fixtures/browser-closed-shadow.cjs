@@ -383,6 +383,17 @@ async function run() {
     }
     if (!relabelRefused) throw new Error("relabelled ref was not invalidated");
     process.stdout.write("relabelled-ref-refused\n");
+
+    const lockedRootHtml = `<!doctype html><html style="overflow:hidden"><body style="margin:0;overflow:hidden">
+      <div style="height:2400px">Locked page</div>
+    </body></html>`;
+    manager.setHumanControl("fixture-bot", false, "");
+    await browserView.webContents.loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(lockedRootHtml)}`);
+    await manager.scroll("fixture-bot", "down", 300, "");
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    const lockedScrollTop = await browserView.webContents.executeJavaScript(`document.scrollingElement.scrollTop`);
+    if (lockedScrollTop !== 0) throw new Error(`browser_scroll bypassed a root scroll lock by ${lockedScrollTop}px`);
+    process.stdout.write("root-scroll-lock-preserved\n");
   } finally {
     await closeFixture(manager, browserView, owner);
   }

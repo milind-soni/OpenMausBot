@@ -109,6 +109,40 @@ const SCROLL_METRICS_EXPRESSION = `(() => {
   const el = document.scrollingElement || document.documentElement;
   return { top: Math.round(el.scrollTop), height: Math.round(el.scrollHeight), view: Math.round(window.innerHeight) };
 })()`;
+const SCROLL_AT_POINT_FUNCTION = `function __ombScrollAtPoint({ x, y, deltaX, deltaY }) {
+  const root = document.scrollingElement || document.documentElement;
+  const candidates = [];
+  const seen = new Set();
+  let current = document.elementFromPoint(x, y);
+  while (current instanceof Element) {
+    if (!seen.has(current)) {
+      seen.add(current);
+      candidates.push(current);
+    }
+    const tree = current.getRootNode && current.getRootNode();
+    current = current.parentElement || (tree && tree.host instanceof Element ? tree.host : null);
+  }
+  if (root && !seen.has(root)) candidates.push(root);
+  for (const candidate of candidates) {
+    const horizontal = deltaX !== 0;
+    const currentOffset = horizontal ? candidate.scrollLeft : candidate.scrollTop;
+    const maximum = horizontal
+      ? Math.max(0, candidate.scrollWidth - candidate.clientWidth)
+      : Math.max(0, candidate.scrollHeight - candidate.clientHeight);
+    const delta = horizontal ? deltaX : deltaY;
+    const canMove = delta > 0 ? currentOffset < maximum : currentOffset > 0;
+    if (!canMove) continue;
+    const overflow = getComputedStyle(candidate)[horizontal ? "overflowX" : "overflowY"];
+    if (candidate === root) {
+      if (["hidden", "clip"].includes(overflow)) continue;
+    } else if (!["auto", "scroll", "overlay"].includes(overflow)) continue;
+    if (horizontal) candidate.scrollLeft = currentOffset + delta;
+    else candidate.scrollTop = currentOffset + delta;
+    const nextOffset = horizontal ? candidate.scrollLeft : candidate.scrollTop;
+    if (nextOffset !== currentOffset) return true;
+  }
+  return false;
+}`;
 const SENSITIVE_FIELD_SOURCE = "password|passwd|passcode|client.?secret|api.?key|secret.?key|private.?key|signing.?key|webhook.?secret|secret.?access.?key|access.?token|auth.?token|refresh.?token|bearer.?token|one.?time|otp|verification.?code|recovery.?code|seed.?phrase|mnemonic|recovery.?phrase|security.?answer|cc-.+|card.?(number|security|cvv|cvc)|cvv|cvc|bank.?(account|routing)|routing.?(number|code)|account.?(number|no)|social.?(security|insurance)|ssn|tax.?id";
 const SENSITIVE_FIELD_PATTERN = new RegExp(SENSITIVE_FIELD_SOURCE, "i");
 
@@ -2064,12 +2098,30 @@ function createBrowserSurfaceManager({
         const pixels = Number.isFinite(Number(amount)) && Number(amount) > 0 ? Math.min(Number(amount), 5_000) : 600;
         const { x, y } = viewportCenter();
         await assertNoPopulatedProtectedFields(entry, lease);
-        // Chromium's Linux input path can dispatch a wheel gesture at the
-        // last known pointer target even when the wheel packet includes new
-        // coordinates. Move first so nested scroll containers are targeted
-        // consistently on every desktop platform.
+        // Move first so hover-driven layouts settle around the same point the
+        // user sees. Standard DOM scrollers are moved in the isolated world:
+        // Chromium's Linux/X11 compositor can acknowledge a mouseWheel packet
+        // while dropping it, which made this tool silently do nothing. Keep a
+        // real wheel fallback for canvas and virtual surfaces with no native
+        // scroll container at the pointer.
         await cdp(entry, "Input.dispatchMouseEvent", { type: "mouseMoved", x, y }, lease);
-        await cdp(entry, "Input.dispatchMouseEvent", { type: "mouseWheel", x, y, deltaX: direction[0] * pixels, deltaY: direction[1] * pixels }, lease);
+        let pageScrolled = false;
+        if (platform === "linux") {
+          try {
+            pageScrolled = await evaluate(entry, `(${SCROLL_AT_POINT_FUNCTION})(${JSON.stringify({
+              x,
+              y,
+              deltaX: direction[0] * pixels,
+              deltaY: direction[1] * pixels,
+            })})`) === true;
+            assertAgentLease(entry, lease);
+          } catch {
+            assertAgentLease(entry, lease);
+          }
+        }
+        if (!pageScrolled) {
+          await cdp(entry, "Input.dispatchMouseEvent", { type: "mouseWheel", x, y, deltaX: direction[0] * pixels, deltaY: direction[1] * pixels }, lease);
+        }
         return observe(entry);
       });
     },
@@ -2174,34 +2226,40 @@ function createBrowserSurfaceManager({
         await assertScreenshotHasNoProtectedValues(entry, lease);
         assertAgentLease(entry, lease);
         let shot = null;
-        try {
-          let deviceScaleFactor = 1;
+        // Electron's CDP screenshot command can remain pending forever under
+        // Linux/X11 software compositing. Native capturePage is reliable in
+        // that environment and is normalized to the same fixed pixel size
+        // below; other platforms keep the sharper fixed-viewport CDP path.
+        if (platform !== "linux") {
           try {
-            const reported = Number(await evaluate(entry, "window.devicePixelRatio"));
-            if (Number.isFinite(reported) && reported >= 0.25 && reported <= 8) deviceScaleFactor = reported;
-          } catch {}
-          assertAgentLease(entry, lease);
-          shot = await cdp(entry, "Page.captureScreenshot", {
-            format: "jpeg",
-            quality: SCREENSHOT_QUALITY,
-            // captureScreenshot applies this scale before rasterizing at the
-            // page's device pixel ratio. Divide by DPR so the encoded JPEG —
-            // not just its metadata — is always exactly 1024x640.
-            clip: {
-              x: 0,
-              y: 0,
-              width: VIEWPORT.width,
-              height: VIEWPORT.height,
-              scale: SCREENSHOT_WIDTH / (VIEWPORT.width * deviceScaleFactor),
-            },
-          });
-          assertAgentLease(entry, lease);
-        } catch {
-          // A control transition invalidates the result even if Chromium
-          // already captured pixels. Never fall back and accidentally return
-          // a frame that overlapped the user's typing.
-          assertAgentLease(entry, lease);
-          shot = null;
+            let deviceScaleFactor = 1;
+            try {
+              const reported = Number(await evaluate(entry, "window.devicePixelRatio"));
+              if (Number.isFinite(reported) && reported >= 0.25 && reported <= 8) deviceScaleFactor = reported;
+            } catch {}
+            assertAgentLease(entry, lease);
+            shot = await cdp(entry, "Page.captureScreenshot", {
+              format: "jpeg",
+              quality: SCREENSHOT_QUALITY,
+              // captureScreenshot applies this scale before rasterizing at the
+              // page's device pixel ratio. Divide by DPR so the encoded JPEG —
+              // not just its metadata — is always exactly 1024x640.
+              clip: {
+                x: 0,
+                y: 0,
+                width: VIEWPORT.width,
+                height: VIEWPORT.height,
+                scale: SCREENSHOT_WIDTH / (VIEWPORT.width * deviceScaleFactor),
+              },
+            });
+            assertAgentLease(entry, lease);
+          } catch {
+            // A control transition invalidates the result even if Chromium
+            // already captured pixels. Never fall back and accidentally return
+            // a frame that overlapped the user's typing.
+            assertAgentLease(entry, lease);
+            shot = null;
+          }
         }
         if (shot?.data) {
           // The page can populate an API key/OTP/card field asynchronously
@@ -2213,7 +2271,15 @@ function createBrowserSurfaceManager({
           return { png: buffer.toString("base64"), format: "jpeg", width: SCREENSHOT_WIDTH, height: Math.round((VIEWPORT.height * SCREENSHOT_WIDTH) / VIEWPORT.width) };
         }
         assertAgentLease(entry, lease);
-        const image = await entry.view.webContents.capturePage();
+        const nativeBounds = entry.bounds ?? { width: VIEWPORT.width, height: VIEWPORT.height };
+        const nativeScale = Number.isFinite(entry.presentationScale) ? entry.presentationScale : 1;
+        const captureRect = {
+          x: 0,
+          y: 0,
+          width: Math.max(1, Math.min(nativeBounds.width, Math.round(VIEWPORT.width * nativeScale))),
+          height: Math.max(1, Math.min(nativeBounds.height, Math.round(VIEWPORT.height * nativeScale))),
+        };
+        const image = await entry.view.webContents.capturePage(captureRect);
         assertAgentLease(entry, lease);
         await assertScreenshotHasNoProtectedValues(entry, lease);
         const screenshotHeight = Math.round((VIEWPORT.height * SCREENSHOT_WIDTH) / VIEWPORT.width);

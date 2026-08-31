@@ -34,6 +34,7 @@ function fakeView(partition) {
   let richHit = true;
   let devicePixelRatio = 2;
   let emulationFailures = 0;
+  let domScrollAtPoint = false;
   const injectedContexts = new Set();
   let mainWorldSpoofed = false;
   const fieldClassifications = new Map([
@@ -155,6 +156,7 @@ function fakeView(partition) {
           }
           if (expression.includes("focusRef")) return { result: { value: true } };
           if (expression.includes("elementForRef")) return { result: { objectId: "obj-e1" } };
+          if (expression.includes("__ombScrollAtPoint")) return { result: { value: domScrollAtPoint } };
           if (expression.includes("scrollingElement")) return { result: { value: { top: 0, height: 2400, view: 800 } } };
           return { result: { value: pageText } };
         }
@@ -214,6 +216,9 @@ function fakeView(partition) {
     },
     failNextEmulation: () => {
       emulationFailures += 1;
+    },
+    setDomScrollAtPoint: (value) => {
+      domScrollAtPoint = value === true;
     },
     setSensitive: (objectId, value = true) => {
       fieldClassifications.set(objectId, value ? "sensitive" : "ordinary");
@@ -814,6 +819,20 @@ describe("browser surface manager", () => {
     ]);
   });
 
+  it("scrolls a standard DOM container deterministically before using the compositor fallback", async () => {
+    const { manager, views } = harness({ platform: "linux" });
+    await manager.navigate("bot-a", "https://example.com");
+    views[0].setDomScrollAtPoint(true);
+
+    await manager.scroll("bot-a", "down", 600);
+
+    const scrollEvaluation = cdpCalls(views[0]).findLast(([name, params]) =>
+      name === "Runtime.evaluate" && String(params.expression).includes("__ombScrollAtPoint"));
+    expect(scrollEvaluation?.[1].expression).toContain('{"x":640,"y":400,"deltaX":0,"deltaY":600}');
+    expect(cdpCalls(views[0]).filter(([name, params]) =>
+      name === "Input.dispatchMouseEvent" && params.type === "mouseWheel")).toHaveLength(0);
+  });
+
   it("emits a real double-click sequence instead of only a detail-2 pair", async () => {
     const { manager, views } = harness();
     await manager.navigate("bot-a", "https://example.com");
@@ -1234,6 +1253,31 @@ describe("browser surface manager", () => {
       height: 640,
       png: Buffer.from("fallback-jpeg").toString("base64"),
     });
+    expect(resize).toHaveBeenCalledWith({ width: 1024, height: 640 });
+  });
+
+  it("uses normalized native capture on Linux without issuing a hanging CDP screenshot", async () => {
+    const { manager, views } = harness({ platform: "linux" });
+    manager.layout("bot-a", { x: 10, y: 20, width: 820, height: 600 }, "", "expanded");
+    await manager.navigate("bot-a", "https://example.com");
+    const resize = vi.fn(({ width, height }) => ({
+      getSize: () => ({ width, height }),
+      toJPEG: () => Buffer.from("linux-native-jpeg"),
+    }));
+    views[0].webContents.capturePage = vi.fn(async () => ({
+      getSize: () => ({ width: 400, height: 250 }),
+      resize,
+      toJPEG: () => Buffer.from("unscaled-jpeg"),
+    }));
+
+    await expect(manager.screenshot("bot-a")).resolves.toMatchObject({
+      format: "jpeg",
+      width: 1024,
+      height: 640,
+      png: Buffer.from("linux-native-jpeg").toString("base64"),
+    });
+    expect(cdpCalls(views[0]).some(([name]) => name === "Page.captureScreenshot")).toBe(false);
+    expect(views[0].webContents.capturePage).toHaveBeenCalledWith({ x: 0, y: 0, width: 820, height: 513 });
     expect(resize).toHaveBeenCalledWith({ width: 1024, height: 640 });
   });
 

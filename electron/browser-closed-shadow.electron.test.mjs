@@ -16,6 +16,7 @@ const canRun = process.platform !== "linux" || Boolean(process.env.DISPLAY) || B
 const canRunRealElectronFixture = canRun
   && !(process.platform === "win32" && process.env.OMB_SKIP_REAL_ELECTRON_BROWSER_FIXTURE === "1");
 const windowsSandboxSid = "S-1-15-2-2";
+const fixtureTimeoutMs = 45_000;
 
 function windowsSandboxRootAclCommand(executable) {
   return {
@@ -211,13 +212,25 @@ it.runIf(canRunRealElectronFixture)("protects closed-shadow values and revalidat
       const stderr = [];
       child.stdout.on("data", (chunk) => stdout.push(chunk));
       child.stderr.on("data", (chunk) => stderr.push(chunk));
-      child.once("error", reject);
-      child.once("exit", (code, signal) => resolve({
-        code,
-        signal,
-        stdout: Buffer.concat(stdout).toString("utf8"),
-        stderr: Buffer.concat(stderr).toString("utf8"),
-      }));
+      let timedOut = false;
+      const timer = setTimeout(() => {
+        timedOut = true;
+        child.kill();
+      }, fixtureTimeoutMs);
+      child.once("error", (error) => {
+        clearTimeout(timer);
+        reject(error);
+      });
+      child.once("exit", (code, signal) => {
+        clearTimeout(timer);
+        resolve({
+          code,
+          signal,
+          timedOut,
+          stdout: Buffer.concat(stdout).toString("utf8"),
+          stderr: Buffer.concat(stderr).toString("utf8"),
+        });
+      });
     });
     if (chromiumLogFile && existsSync(chromiumLogFile)) chromiumLog = readFileSync(chromiumLogFile, "utf8");
   } finally {
@@ -225,12 +238,13 @@ it.runIf(canRunRealElectronFixture)("protects closed-shadow values and revalidat
   }
   const diagnostics = [
     `Electron exit code: ${result.code}; signal: ${result.signal ?? "none"}`,
+    `Fixture deadline exceeded: ${result.timedOut}`,
     `stdout:\n${result.stdout || "<empty>"}`,
     `stderr:\n${result.stderr || "<empty>"}`,
     `Chromium log:\n${chromiumLog || "<empty>"}`,
     `Windows sandbox ACLs:\n${sandboxAclDiagnostics}`,
   ].join("\n");
-  expect(result, diagnostics).toMatchObject({ code: 0, signal: null });
+  expect(result, diagnostics).toMatchObject({ code: 0, signal: null, timedOut: false });
   expect(result.stdout).toContain("sandboxed-preload-bridge-loaded");
   expect(result.stdout).toContain("compact-viewport-stable-after-navigation");
   expect(result.stdout).toContain("closed-shadow-screenshot-refused");
@@ -246,4 +260,5 @@ it.runIf(canRunRealElectronFixture)("protects closed-shadow values and revalidat
   expect(result.stdout).toContain("protected-focused-keys-refused");
   expect(result.stdout).toContain("late-overlay-click-refused");
   expect(result.stdout).toContain("relabelled-ref-refused");
+  expect(result.stdout).toContain("root-scroll-lock-preserved");
 }, 60_000);
