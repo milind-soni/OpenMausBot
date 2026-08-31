@@ -101,21 +101,6 @@ type SkillRecordingPayload = {
     height: number;
   }
 
-  interface BrowserSurfaceState {
-    botId: string;
-    open: boolean;
-    url: string;
-    title: string;
-    loading: boolean;
-    canGoBack: boolean;
-    canGoForward?: boolean;
-    visible: boolean;
-    partition?: string | null;
-    profile?: string | null;
-    mode?: "compact" | "expanded" | null;
-    code?: "renderer-gone" | "profile-deleted" | "evicted";
-  }
-
   interface DesktopWorkspaceState {
     contextId: string;
     open: boolean;
@@ -206,30 +191,6 @@ type SkillRecordingPayload = {
       };
       /** Two Local VM viewers embedded in one app window. URLs are accepted
        * only by main-process validation and never return over this bridge. */
-      /** The built-in browser surface; absent in a browser tab or an older shell. */
-      browser?: {
-        available(): Promise<boolean>;
-        state(botId: string): Promise<BrowserSurfaceState>;
-        layout(
-          botId: string,
-          bounds: DesktopWorkspaceBounds | null,
-          profile?: string,
-          mode?: "compact" | "expanded",
-          layoutOwner?: string,
-        ): Promise<BrowserSurfaceState>;
-        navigate(botId: string, url: string, profile?: string): Promise<{ url: string; title: string }>;
-        back(botId: string, profile?: string): Promise<{ url: string; title: string }>;
-        forward?(botId: string, profile?: string): Promise<{ url: string; title: string }>;
-        reload?(botId: string, profile?: string): Promise<{ url: string; title: string }>;
-        /** Immediately gates native browser mutations while the durable
-         * server-side human-control snapshot catches up. */
-        setHumanControl?(botId: string, held: boolean, profile?: string): Promise<boolean>;
-        /** Native page focus/input means the person has taken the wheel. */
-        onUserInteraction?(cb: (event: { botId: string; profile: string }) => void): () => void;
-        forgetProfile?(partitionId: string): Promise<{ dropped: number }>;
-        close(botId: string): Promise<boolean>;
-        onState(cb: (state: BrowserSurfaceState) => void): () => void;
-      };
       desktopWorkspace?: {
         open(input: {
           contextId: string;

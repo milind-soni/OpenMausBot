@@ -4,59 +4,34 @@ import { transitionComputerControlLease } from "../lib/computer-control";
 
 const snap = (held: boolean) => ({ held, helpReason: null });
 
-describe("computer/browser control transition ordering", () => {
-  it("gates Electron before taking the server lease", async () => {
+describe("computer control transitions", () => {
+  it("returns the snapshot when the server confirms the take", async () => {
     const calls: string[] = [];
-    await transitionComputerControlLease({
+    const result = await transitionComputerControlLease({
       action: "take",
-      syncNativeBrowser: true,
-      setNativeBrowserControl: async (held) => { calls.push(`native:${held}`); return true; },
       requestControl: async (action) => { calls.push(`server:${action}`); return snap(true); },
     });
-    expect(calls).toEqual(["native:true", "server:take"]);
+    expect(calls).toEqual(["server:take"]);
+    expect(result.held).toBe(true);
   });
 
-  it("releases the server before clearing Electron", async () => {
-    const calls: string[] = [];
-    await transitionComputerControlLease({
-      action: "release",
-      syncNativeBrowser: true,
-      setNativeBrowserControl: async (held) => { calls.push(`native:${held}`); return true; },
-      requestControl: async (action) => { calls.push(`server:${action}`); return snap(false); },
-    });
-    expect(calls).toEqual(["server:release", "native:false"]);
-  });
-
-  it("never clears the private gate when the server did not release", async () => {
-    const setNativeBrowserControl = vi.fn(async () => true);
+  it("fails loudly when the server did not release the lease", async () => {
     await expect(transitionComputerControlLease({
       action: "release",
-      syncNativeBrowser: true,
-      setNativeBrowserControl,
       requestControl: async () => snap(true),
     })).rejects.toThrow(/could not release/i);
-    expect(setNativeBrowserControl).not.toHaveBeenCalled();
   });
 
-  it("does not contact the server if the private take gate fails", async () => {
-    const requestControl = vi.fn(async () => snap(true));
+  it("fails loudly when the server did not confirm the take", async () => {
     await expect(transitionComputerControlLease({
       action: "take",
-      syncNativeBrowser: true,
-      setNativeBrowserControl: async () => false,
-      requestControl,
-    })).rejects.toThrow(/pause.*browser/i);
-    expect(requestControl).not.toHaveBeenCalled();
+      requestControl: async () => snap(false),
+    })).rejects.toThrow(/could not confirm/i);
   });
 
-  it("leaves BrowserPanel to perform its own native choreography", async () => {
-    const setNativeBrowserControl = vi.fn(async () => true);
-    await transitionComputerControlLease({
-      action: "take",
-      syncNativeBrowser: false,
-      setNativeBrowserControl,
-      requestControl: async () => snap(true),
-    });
-    expect(setNativeBrowserControl).not.toHaveBeenCalled();
+  it("passes dismiss-help straight through without a held check", async () => {
+    const requestControl = vi.fn(async () => snap(false));
+    await transitionComputerControlLease({ action: "dismiss-help", requestControl });
+    expect(requestControl).toHaveBeenCalledWith("dismiss-help");
   });
 });

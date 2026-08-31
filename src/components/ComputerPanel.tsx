@@ -10,7 +10,6 @@ import {
   CalendarClock,
   CalendarDays,
   Columns2,
-  Globe,
   Hand,
   Loader2,
   Maximize2,
@@ -31,8 +30,6 @@ import { CloudBackendPicker } from "./CloudBackendPicker";
 import { useDesktopCapabilities } from "./DesktopCapabilities";
 import { RoutineEditor } from "./RoutinesPage";
 import { AndroidDevicePanel, useAndroidUsbDevices } from "./AndroidDevicePanel";
-import { BrowserPanel } from "./BrowserPanel";
-import { builtInBrowserEnabled } from "@/lib/feature-flags";
 import { transitionComputerControlLease, type ComputerControlAction } from "@/lib/computer-control";
 import { LocalScreenPreview } from "./LocalScreenPreview";
 import { LinuxLocalControl } from "./LinuxLocalControl";
@@ -144,14 +141,12 @@ function readPanelWidth(): number {
 export function ComputerPanel({
   bot,
   onOpenVmWorkspace,
-  onExpandBrowser,
 }: {
   bot: Bot;
   onOpenVmWorkspace?: (botId: string) => void;
-  onExpandBrowser?: (botId: string) => void;
 }) {
   // The panel is a fixed column by default; a drag handle on its left edge
-  // makes it wide enough to actually read a page in the Browser tab.
+  // makes it wide enough to actually read the screen preview.
   const [panelWidth, setPanelWidth] = useState(readPanelWidth);
   const resizeFrom = useRef<{ x: number; width: number } | null>(null);
   const onResizeStart = (event: React.PointerEvent<HTMLDivElement>) => {
@@ -202,8 +197,6 @@ export function ComputerPanel({
   const [panelView, setPanelView] = useState<ComputerPanelView>(() => readComputerPanelView(bot.id));
   const androidStatus = useAndroidUsbDevices();
   const androidConnected = androidStatus.devices.length > 0;
-  // the built-in browser: a per-bot switch in Settings, and only the desktop app has one
-  const browserEnabled = builtInBrowserEnabled(state.config) && bot.browser !== false && Boolean(window.ogb?.browser);
   // bumped when a Box API key is saved inline, to re-run the spin-up flow
   const [retry, setRetry] = useState(0);
   const vmReadinessAttempts = useRef(0);
@@ -243,11 +236,11 @@ export function ComputerPanel({
   }, [bot.id]);
 
   useEffect(() => {
-    if ((!androidConnected && panelView === "android") || (!browserEnabled && panelView === "browser")) {
+    if (!androidConnected && panelView === "android") {
       setPanelView("computer");
       writeComputerPanelView(bot.id, "computer");
     }
-  }, [androidConnected, bot.id, browserEnabled, panelView]);
+  }, [androidConnected, bot.id, panelView]);
   useEffect(() => {
     vmReadinessAttempts.current = 0;
   }, [bot.id, bot.computer]);
@@ -288,8 +281,8 @@ export function ComputerPanel({
   // resolve the mode on open; box endpoints are only ever hit on the
   // cloud path, so local/off can never render a JSON error as an image
   useEffect(() => {
-    // Browser and Android own their own live surfaces. Do not provision a VM,
-    // wake a box, or churn preview state behind either tab.
+    // Android owns its own live surface. Do not provision a VM, wake a box,
+    // or churn preview state behind that tab.
     if (panelView !== "computer") return;
     let alive = true;
     setPhase("checking");
@@ -629,25 +622,9 @@ export function ComputerPanel({
     return snap;
   }, [bot.id, dispatch]);
 
-  const setNativeBrowserControl = useCallback(async (held: boolean): Promise<boolean> => {
-    const setter = window.ogb?.browser?.setHumanControl;
-    if (!setter) return true;
-    const profile = bot.browserProfile === "guest" ? "guest" : bot.browserProfile ?? "";
-    return (await setter(bot.id, held, profile)) === true;
-  }, [bot.browserProfile, bot.id]);
-
   const transitionControl = useCallback(async (action: ComputerControlAction) => {
-    // BrowserPanel performs the same two-phase transition itself. Every
-    // other computer surface must also gate Electron's direct browser host:
-    // the server hold is bot-wide, and a shell-capable agent can otherwise
-    // bypass the server proxy while the person drives Local VM/Box/VPS.
-    return transitionComputerControlLease({
-      action,
-      syncNativeBrowser: panelView !== "browser",
-      requestControl,
-      setNativeBrowserControl,
-    });
-  }, [panelView, requestControl, setNativeBrowserControl]);
+    return transitionComputerControlLease({ action, requestControl });
+  }, [requestControl]);
 
   const controlAction = useCallback(async (action: ComputerControlAction): Promise<boolean> => {
     setControlPending(true);
@@ -662,10 +639,6 @@ export function ComputerPanel({
       setControlPending(false);
     }
   }, [transitionControl]);
-
-  const expandBrowser = useCallback(() => {
-    onExpandBrowser?.(bot.id);
-  }, [bot.id, onExpandBrowser]);
 
   const openDesktop = async () => {
     setPending("join");
@@ -852,7 +825,7 @@ export function ComputerPanel({
         >
           <Settings size={18} />
         </button>
-        {androidConnected || browserEnabled ? (
+        {androidConnected ? (
           <div className="flex overflow-hidden rounded-lg border border-hairline/40">
             <button
               onClick={() => selectPanelView("computer")}
@@ -864,7 +837,6 @@ export function ComputerPanel({
             >
               <Monitor size={13} /> Computer
             </button>
-            {androidConnected && (
             <button
               onClick={() => selectPanelView("android")}
               aria-pressed={panelView === "android"}
@@ -875,22 +847,6 @@ export function ComputerPanel({
             >
               <Smartphone size={13} /> Android
             </button>
-            )}
-            {browserEnabled && (
-            <button
-              onClick={() => {
-                setError(null);
-                selectPanelView("browser");
-              }}
-              aria-pressed={panelView === "browser"}
-              className={cn(
-                "flex items-center gap-1.5 border-l border-hairline/40 px-2.5 py-1 text-[12.5px]",
-                panelView === "browser" ? "bg-control text-ink" : "text-ink-secondary hover:text-ink",
-              )}
-            >
-              <Globe size={13} /> Browser
-            </button>
-            )}
           </div>
         ) : (
           <span className="text-[15px] font-semibold text-ink">Computer</span>
@@ -903,22 +859,7 @@ export function ComputerPanel({
         </button>
       </div>
 
-      {panelView === "browser" && browserEnabled ? (
-        <div className="flex min-h-0 flex-1 flex-col px-4 pb-4">
-          <BrowserPanel
-            bot={bot}
-            control={control}
-            controlPending={controlPending}
-            onControl={controlAction}
-            onExpand={onExpandBrowser ? expandBrowser : undefined}
-          />
-          {error && (
-            <div role="alert" className="mt-2 rounded-lg border border-danger/30 bg-danger/10 px-3 py-2 text-[12px] text-danger">
-              {error}
-            </div>
-          )}
-        </div>
-      ) : panelView === "android" && androidConnected ? (
+      {panelView === "android" && androidConnected ? (
         <div className="flex-1 overflow-y-auto px-4 pt-2">
           <AndroidDevicePanel status={androidStatus} />
         </div>

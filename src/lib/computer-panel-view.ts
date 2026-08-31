@@ -1,4 +1,4 @@
-export type ComputerPanelView = "computer" | "android" | "browser";
+export type ComputerPanelView = "computer" | "android";
 
 const STORAGE_PREFIX = "omb-computer-panel-view";
 
@@ -12,7 +12,7 @@ export function readComputerPanelView(
 ): ComputerPanelView {
   try {
     const value = storage.getItem(storageKey(botId));
-    if (value === "android" || value === "browser") return value;
+    if (value === "android") return value;
   } catch {
     // Storage can be unavailable in hardened or private renderer sessions.
   }

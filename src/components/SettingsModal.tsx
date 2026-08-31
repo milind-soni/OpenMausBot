@@ -20,6 +20,7 @@ import { TranscriptionSettings } from "./TranscriptionSettings";
 import { cn } from "@/lib/cn";
 import {
   browserProfileDeletionBlockReason,
+  browserProfileIdFor,
   browserProfilesForPatch,
 } from "@/lib/browser-profiles";
 
@@ -194,8 +195,6 @@ function ExperimentalFeaturesRow() {
   const { state, dispatch } = useStore();
   const skillRecorder = skillRecorderEnabled(state.config);
   const browser = builtInBrowserEnabled(state.config);
-  const desktopBrowser = Boolean(window.ogb?.browser);
-  const browserBlockedOnWindows = window.ogb?.platform === "win32" && !desktopBrowser;
   const [saving, setSaving] = useState<"skillRecorder" | "browser" | null>(null);
   const [error, setError] = useState("");
 
@@ -238,21 +237,17 @@ function ExperimentalFeaturesRow() {
       </div>
       <div className="mt-4 flex items-center justify-between gap-4 border-t border-hairline/30 pt-4">
         <div className="min-w-0">
-          <div className="text-[14px] font-medium text-ink">Built-in browser</div>
+          <div className="text-[14px] font-medium text-ink">Browser</div>
           <div className="mt-0.5 text-[12px] leading-relaxed text-ink-secondary">
-            {desktopBrowser
-              ? browser
-                ? "Enabled for this workspace. Each bot also has its own browser switch."
-                : "Off by default. Enable it to let supported bots use a browser tab you can watch and take over."
-              : browserBlockedOnWindows
-                ? "Temporarily unavailable on Windows while Electron's production sandbox support is being verified."
-                : "Needs the OpenMausBot desktop app."}
+            {browser
+              ? "Enabled for this workspace. Each bot also has its own browser switch."
+              : "Off by default. Enable it to let supported bots browse the web in their own managed browser."}
           </div>
         </div>
         <Switch
           checked={browser}
-          aria-label="Enable the built-in browser"
-          disabled={saving !== null || (!browser && !desktopBrowser)}
+          aria-label="Enable the browser"
+          disabled={saving !== null}
           onClick={() => void toggle("browser", !browser)}
           className="disabled:cursor-wait disabled:opacity-50"
         />
@@ -262,33 +257,46 @@ function ExperimentalFeaturesRow() {
   );
 }
 
-/** Named browser sessions: rename or delete; deleting wipes that session's
- * logins, storage and cache and sends any bot on it back to its own. */
+/** Named browser sessions: create, rename or delete. Deleting drops that
+ * session's saved sign-ins and sends any bot on it back to its own. Every
+ * change is one config PATCH; the server owns the cleanup that follows. */
 function BrowserProfilesRow() {
   const { state, dispatch } = useStore();
   const profiles = state.config?.browserProfiles ?? [];
   const [busy, setBusy] = useState<string | null>(null);
   const [renaming, setRenaming] = useState<{ id: string; name: string } | null>(null);
+  const [adding, setAdding] = useState<string | null>(null);
   const [error, setError] = useState("");
-  // Windows temporarily gates the live browser surface, but upgraded users
-  // must still be able to rename or permanently erase existing sessions.
-  // The packaged server can perform that private lifecycle cleanup without
-  // exposing the browser renderer bridge.
-  if (!window.ogb || (!builtInBrowserEnabled(state.config) && profiles.length === 0)) return null;
+  // Existing sessions stay manageable after the feature is switched off, so a
+  // workspace that opted out can still clear what it signed into.
+  if (!builtInBrowserEnabled(state.config) && profiles.length === 0) return null;
 
-  const save = async (next: typeof profiles) => {
+  const save = async (next: typeof profiles): Promise<boolean> => {
     try {
       const config: ConfigStatus = await api("/api/config", {
         method: "PATCH",
         body: JSON.stringify({ browserProfiles: browserProfilesForPatch(next) }),
       });
       dispatch({ type: "configStatus", config });
+      return true;
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : "Could not save browser profiles.");
+      return false;
     } finally {
       setBusy(null);
       setRenaming(null);
     }
+  };
+  // Keep the typed name on failure: a rejected PATCH must not silently throw
+  // away what the person just wrote.
+  const add = () => {
+    const name = adding?.trim();
+    if (!name || busy) return;
+    setBusy("new");
+    setError("");
+    void save([...profiles, { id: browserProfileIdFor(name, profiles), name }]).then((saved) => {
+      if (saved) setAdding(null);
+    });
   };
   const remove = async (id: string) => {
     if (busy) return;
@@ -303,16 +311,14 @@ function BrowserProfilesRow() {
     const botSummary = referencedBots.length
       ? ` ${referencedBots.length === 1 ? referencedBots[0]!.name : `${referencedBots.length} bots`} will switch to their own browser sessions.`
       : "";
-    if (!window.confirm(`Delete “${profile.name}”?${botSummary} This permanently signs out of this profile and erases its browser data.`)) {
+    if (!window.confirm(`Delete “${profile.name}”?${botSummary} This permanently signs out of this profile.`)) {
       return;
     }
     setBusy(id);
     setError("");
     try {
-      // The server commits the profile list and clears every bot reference as
-      // one transaction, then privately asks Electron to erase the partition.
-      // Never wipe browser data from the renderer before that commit succeeds:
-      // a rejected config save must leave the user's signed-in session intact.
+      // The server commits the profile list, clears every bot reference and
+      // erases the stored session as one transaction. The renderer only asks.
       const config: ConfigStatus = await api("/api/config", {
         method: "PATCH",
         body: JSON.stringify({
@@ -320,14 +326,6 @@ function BrowserProfilesRow() {
         }),
       });
       dispatch({ type: "configStatus", config });
-      // Packaged Electron receives the same post-commit cleanup privately
-      // from the server. Keep this idempotent fallback for split-process
-      // desktop development, where the server has no parent message port.
-      try {
-        await window.ogb?.browser?.forgetProfile?.(profile.partitionId ?? profile.id);
-      } catch {
-        setError("The profile was removed, but its local browser data could not be erased. Restart OpenMausBot before reusing that profile name.");
-      }
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : "Could not delete the browser profile.");
     } finally {
@@ -347,10 +345,10 @@ function BrowserProfilesRow() {
   return (
     <Card
       title="Browser profiles"
-      subtitle="Named sign-in sessions any bot can use. Create one from a bot's Browser tab; sign in once and it stays."
+      subtitle="Named sign-in sessions any bot can use. Sign in once inside the browser and it stays."
     >
       {profiles.length === 0 ? (
-        <div className="text-[13px] text-ink-secondary">No profiles yet — pick "+ Add profile…" under a bot's browser.</div>
+        <div className="text-[13px] text-ink-secondary">No profiles yet — bots browse in their own session.</div>
       ) : (
         <div className="flex flex-col divide-y divide-hairline/30">
           {profiles.map((profile) => {
@@ -410,6 +408,43 @@ function BrowserProfilesRow() {
             );
           })}
         </div>
+      )}
+      {adding === null ? (
+        <button
+          type="button"
+          onClick={() => setAdding("")}
+          className="mt-3 rounded-lg border border-hairline/40 px-3 py-1.5 text-[13px] text-ink hover:bg-control"
+        >
+          Add profile…
+        </button>
+      ) : (
+        <form
+          className="mt-3 flex items-center gap-2"
+          onSubmit={(event) => {
+            event.preventDefault();
+            add();
+          }}
+        >
+          <input
+            autoFocus
+            value={adding}
+            onChange={(event) => setAdding(event.target.value)}
+            maxLength={40}
+            placeholder="Profile name"
+            aria-label="New profile name"
+            className="rounded-md bg-inset px-2 py-1 text-[13px] text-ink outline-none"
+          />
+          <button
+            type="submit"
+            disabled={busy !== null || !adding.trim()}
+            className="rounded-md bg-accent px-2.5 py-1 text-[12px] font-medium text-accent-ink disabled:opacity-50"
+          >
+            Create
+          </button>
+          <button type="button" onClick={() => setAdding(null)} className="text-[12px] text-ink-secondary hover:text-ink">
+            Cancel
+          </button>
+        </form>
       )}
       {error ? <p role="alert" className="mt-2 text-[12px] text-danger">{error}</p> : null}
     </Card>

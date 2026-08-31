@@ -248,7 +248,7 @@ export interface Bot {
   /** Whether this bot may use the workspace's connected apps. Unset means
    * allowed for existing bots; imported bots start with this disabled. */
   composio?: boolean;
-  /** Whether this bot gets the app's built-in browser (Browser tab). On unless switched off. */
+  /** Whether this bot may use a browser. On unless switched off. */
   browser?: boolean;
   /** Named browser profile id (config.browserProfiles); absent/null = the
    * bot's own session (null is how a clear travels over PATCH). */

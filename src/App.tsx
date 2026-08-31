@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Loader2, Menu } from "lucide-react";
 import { StoreProvider, useStore } from "@/state/store";
 import { Onboarding } from "@/components/Onboarding";
@@ -17,10 +17,8 @@ import { RoutinesPage } from "@/components/RoutinesPage";
 import { NoEngines } from "@/components/NoEngines";
 import { CommandPalette } from "@/components/CommandPalette";
 import { LocalVmWorkspace } from "@/components/LocalVmWorkspace";
-import { BrowserWorkspace } from "@/components/BrowserWorkspace";
 import { SkillRecorderPage } from "@/components/SkillRecorderPage";
 import { TeamMapPage } from "@/components/TeamMapPage";
-import { heldComputerControlBotIds } from "@/lib/computer-control";
 
 function Shell() {
   const { state, dispatch } = useStore();
@@ -35,9 +33,6 @@ function Shell() {
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [paletteOpen, setPaletteOpen] = useState(false);
   const [localVmWorkspaceBotId, setLocalVmWorkspaceBotId] = useState<string | null>(null);
-  // the Browser tab, expanded into the main column (the small preview in
-  // the panel hands off to this and back)
-  const [browserWorkspaceBotId, setBrowserWorkspaceBotId] = useState<string | null>(null);
   const menuButtonRef = useRef<HTMLButtonElement>(null);
   const group = state.groups.find((g) => g.id === state.selectedId);
   const bot = group ? undefined : (state.bots.find((b) => b.id === state.selectedId) ?? state.bots[0]);
@@ -84,18 +79,6 @@ function Shell() {
     window.ogb?.setUnreadCount?.(unreadCount);
   }, [unreadCount]);
 
-  // Re-assert every authoritative positive hold in the process that owns the
-  // native browser. This covers initial hydration, SSE updates from another
-  // computer surface, and renderer reloads. Deliberately never mirror false:
-  // only a trusted two-phase release may open Electron's direct browser gate.
-  useEffect(() => {
-    const setter = window.ogb?.browser?.setHumanControl;
-    if (!setter) return;
-    for (const botId of heldComputerControlBotIds(state.computerControl)) {
-      void setter(botId, true).catch(() => {});
-    }
-  }, [state.computerControl]);
-
   // Warm connected-account state as soon as the local server is available.
   // The modal then opens with the correct Connect/Add account buttons and
   // quietly revalidates instead of rediscovering every account from scratch.
@@ -127,20 +110,6 @@ function Shell() {
     dispatch({ type: "toggleComputer", open: false });
     setLocalVmWorkspaceBotId(botId);
   };
-  const openBrowserWorkspace = useCallback((botId: string) => {
-    dispatch({ type: "toggleComputer", open: false });
-    setBrowserWorkspaceBotId(botId);
-  }, [dispatch]);
-  const closeBrowserWorkspace = useCallback(() => {
-    setBrowserWorkspaceBotId(null);
-    dispatch({ type: "toggleComputer", open: true });
-  }, [dispatch]);
-  useEffect(() => {
-    if (browserWorkspaceBotId && (state.activeView !== "chat" || state.selectedId !== browserWorkspaceBotId)) {
-      setBrowserWorkspaceBotId(null);
-    }
-  }, [browserWorkspaceBotId, state.activeView, state.selectedId]);
-
   const openComputerFromWorkspace = (botId: string) => {
     setLocalVmWorkspaceBotId(null);
     dispatch({ type: "select", id: botId });
@@ -215,8 +184,6 @@ function Shell() {
         <RoutinesPage />
       ) : state.activeView === "skill-recorder" ? (
         <SkillRecorderPage />
-      ) : browserWorkspaceBotId && bot && bot.id === browserWorkspaceBotId ? (
-        <BrowserWorkspace bot={bot} onClose={closeBrowserWorkspace} />
       ) : localVmWorkspaceBotId ? (
         <LocalVmWorkspace
           primaryBotId={localVmWorkspaceBotId}
@@ -245,12 +212,7 @@ function Shell() {
       )}
       {state.settingsOpen && bot && <SettingsPanel bot={bot} />}
       {state.computerOpen && bot && (
-        <ComputerPanel
-          key={bot.id}
-          bot={bot}
-          onOpenVmWorkspace={openLocalVmWorkspace}
-          onExpandBrowser={openBrowserWorkspace}
-        />
+        <ComputerPanel key={bot.id} bot={bot} onOpenVmWorkspace={openLocalVmWorkspace} />
       )}
       {state.inspectorOpen && bot && <InspectorPanel bot={bot} />}
       {state.appSettingsOpen && <SettingsModal />}
