@@ -9,6 +9,7 @@ import { rm } from "node:fs/promises";
 import { createRequire } from "node:module";
 import { homedir } from "node:os";
 import { dirname, isAbsolute, join, resolve, sep } from "node:path";
+import { setTimeout as delay } from "node:timers/promises";
 import { promisify } from "node:util";
 
 import { z } from "zod";
@@ -91,24 +92,22 @@ export function browserIntegrationSpec(profileName: string): BrowserIntegrationS
   };
 }
 
+/** A still-attached MCP client — a provider session outliving its bot by up
+ * to its ~10-minute idle timeout — keeps an orphaned Chromium alive past
+ * `betterwright close`, and that Chromium rewrites the profile directory on
+ * its way down. Re-erase until the state stays gone across a whole window. */
+const ERASE_RETRY_DELAYS_MS = [0, 15_000, 60_000, 5 * 60_000, 12 * 60_000];
+
 /** Erase a browser identity: stop its daemon, then remove its profile
  * directory. Called when the bot or named profile that owned it is deleted,
  * so it must never fail the deletion it follows. */
-export async function forgetBrowserProfile(profileName: string): Promise<void> {
+export async function forgetBrowserProfile(
+  profileName: string,
+  retryDelaysMs: readonly number[] = ERASE_RETRY_DELAYS_MS,
+): Promise<void> {
   if (!PROFILE_NAME.test(profileName)) {
     console.error(`[browser] refused to forget an invalid profile name: ${profileName}`);
     return;
-  }
-  const cli = betterwrightCliPath();
-  if (cli) {
-    try {
-      await execFileAsync(process.execPath, [cli, "close", "--profile", profileName], {
-        env: { ...process.env, ...RUN_AS_NODE },
-        timeout: 10_000,
-      });
-    } catch {
-      // No live daemon for that profile is the ordinary case.
-    }
   }
   const profilesDir = resolve(
     process.env.BETTERWRIGHT_HOME ?? join(homedir(), ".betterwright"),
@@ -120,9 +119,45 @@ export async function forgetBrowserProfile(profileName: string): Promise<void> {
     console.error(`[browser] refused to erase a profile outside ${profilesDir}: ${profileName}`);
     return;
   }
+  const lock = `${target}.betterwright-lock`;
+  for (const [attempt, wait] of retryDelaysMs.entries()) {
+    // unref: a pending re-erase must never hold the server open at exit
+    if (wait > 0) await delay(wait, undefined, { ref: false });
+    // Nothing came back since the last erase: the identity is gone for good.
+    if (attempt > 0 && !existsSync(target) && !existsSync(lock)) return;
+    await closeBrowserProfileSessions(profileName, lock);
+    try {
+      await rm(target, { recursive: true, force: true });
+      // BetterWright keeps the daemon lock directory beside the profile.
+      await rm(lock, { recursive: true, force: true });
+    } catch (error) {
+      console.error(`[browser] could not erase the “${profileName}” profile: ${error instanceof Error ? error.message : String(error)}`);
+    }
+  }
+  if (existsSync(target) || existsSync(lock)) {
+    console.error(`[browser] the “${profileName}” profile kept coming back; erase it with the betterwright CLI`);
+  }
+}
+
+async function closeBrowserProfileSessions(profileName: string, lock: string): Promise<void> {
+  const cli = betterwrightCliPath();
+  if (!cli) return;
   try {
-    await rm(target, { recursive: true, force: true });
-  } catch (error) {
-    console.error(`[browser] could not erase the “${profileName}” profile: ${error instanceof Error ? error.message : String(error)}`);
+    // The profile must ride in as env: betterwright 2.0.0 misreads
+    // `close --profile <p>` as a session name and closes nothing.
+    const { stdout } = await execFileAsync(process.execPath, [cli, "close"], {
+      env: { ...process.env, ...RUN_AS_NODE, BETTERWRIGHT_PROFILE: profileName },
+      timeout: 15_000,
+    });
+    // The daemon exits shortly after its last session closes. Wait for it
+    // to release its lock so the erase below cannot race a live Chromium
+    // that would rewrite the directory mid-delete.
+    if (stdout.includes("Closed")) {
+      for (let waited = 0; waited < 5_000 && existsSync(lock); waited += 250) {
+        await delay(250, undefined, { ref: false });
+      }
+    }
+  } catch {
+    // No live daemon for that profile is the ordinary case.
   }
 }

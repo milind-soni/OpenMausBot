@@ -74,12 +74,31 @@ describe("forgetting a browser profile", () => {
     const profiles = join(home, "browser", "profiles");
     mkdirSync(join(profiles, "bot-b1"), { recursive: true });
     writeFileSync(join(profiles, "bot-b1", "Cookies"), "session");
+    mkdirSync(join(profiles, "bot-b1.betterwright-lock"), { recursive: true });
     const previousHome = process.env.BETTERWRIGHT_HOME;
     process.env.BETTERWRIGHT_HOME = home;
     try {
-      await forgetBrowserProfile("bot-b1");
+      await forgetBrowserProfile("bot-b1", [0]);
       expect(existsSync(join(profiles, "bot-b1"))).toBe(false);
+      expect(existsSync(join(profiles, "bot-b1.betterwright-lock"))).toBe(false);
       expect(existsSync(profiles)).toBe(true);
+    } finally {
+      if (previousHome === undefined) delete process.env.BETTERWRIGHT_HOME;
+      else process.env.BETTERWRIGHT_HOME = previousHome;
+    }
+  });
+
+  it("stops retrying once the erased state stays gone", async () => {
+    const home = betterwrightHome();
+    const profiles = join(home, "browser", "profiles");
+    mkdirSync(join(profiles, "bot-b2"), { recursive: true });
+    const previousHome = process.env.BETTERWRIGHT_HOME;
+    process.env.BETTERWRIGHT_HOME = home;
+    try {
+      // A later pass whose delay never elapsed would hang this test; the
+      // stability check must return right after the first clean re-check.
+      await forgetBrowserProfile("bot-b2", [0, 0, 60_000]);
+      expect(existsSync(join(profiles, "bot-b2"))).toBe(false);
     } finally {
       if (previousHome === undefined) delete process.env.BETTERWRIGHT_HOME;
       else process.env.BETTERWRIGHT_HOME = previousHome;
@@ -95,8 +114,8 @@ describe("forgetting a browser profile", () => {
     const previousHome = process.env.BETTERWRIGHT_HOME;
     process.env.BETTERWRIGHT_HOME = home;
     try {
-      await forgetBrowserProfile("../keep");
-      await forgetBrowserProfile("..");
+      await forgetBrowserProfile("../keep", [0]);
+      await forgetBrowserProfile("..", [0]);
       expect(existsSync(sibling)).toBe(true);
       expect(existsSync(profiles)).toBe(true);
     } finally {
