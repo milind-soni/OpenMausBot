@@ -1,0 +1,33 @@
+# Continuous localization: when the English catalog changes on main,
+# lingo.dev translates the delta (i18n.lock tracks what's already done)
+# and opens a PR with the updated packs. Does nothing until the
+# LINGO_API_KEY secret exists, so forks and secretless clones stay green.
+name: i18n
+on:
+  push:
+    branches: [main]
+    paths:
+      - "src/locales/en.json"
+      - "i18n.json"
+  workflow_dispatch:
+jobs:
+  translate:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: write
+    steps:
+      - name: Check for API key
+        id: key
+        env:
+          LINGO_API_KEY: ${{ secrets.LINGO_API_KEY }}
+        run: |
+          if [ -n "$LINGO_API_KEY" ]; then echo "present=true" >> "$GITHUB_OUTPUT"; else echo "present=false" >> "$GITHUB_OUTPUT"; fi
+      - uses: actions/checkout@v4
+        if: steps.key.outputs.present == 'true'
+      - uses: lingodotdev/lingo.dev@main
+        if: steps.key.outputs.present == 'true'
+        with:
+          api-key: ${{ secrets.LINGO_API_KEY }}
+          pull-request: true
+          pull-request-title: "chore(i18n): update language packs"
