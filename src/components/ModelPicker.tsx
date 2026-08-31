@@ -19,6 +19,10 @@ function modelLabel(instance: InstanceInfo | undefined, model: string): string {
   return instance?.models.options.find((option) => option.id === model)?.label ?? model;
 }
 
+function modelProvider(instance: InstanceInfo | undefined, model: string): string | undefined {
+  return instance?.models.options.find((option) => option.id === model)?.provider;
+}
+
 function engineStatus(instance: InstanceInfo): string {
   if (needsCli(instance)) return "Not installed";
   if (needsSignIn(instance)) return "Sign-in required";
@@ -47,6 +51,14 @@ function ModelRow({
     >
       <span className="flex min-w-0 items-center gap-2">
         <span className="truncate">{option.label}</span>
+        {option.provider && (
+          <span
+            className="shrink-0 rounded bg-inset px-1.5 py-px text-[10px] text-ink-secondary"
+            title={`Provider: ${option.provider}`}
+          >
+            {option.provider}
+          </span>
+        )}
         {option.id === defaultId && (
           <span className="shrink-0 rounded bg-inset px-1.5 py-px text-[10px] text-ink-secondary">Default</span>
         )}
@@ -225,11 +237,20 @@ export function ModelPicker({
         // resolved engine keeps its label — the mark is what would hide it)
         !contained && active && COMPACT_SQUARE,
       )}
-      title={active ? `${active.displayName} · ${modelLabel(active, selection.model)}` : selection.model}
+      title={
+        active
+          ? `${active.displayName} · ${modelLabel(active, selection.model)}${
+              modelProvider(active, selection.model) ? ` · ${modelProvider(active, selection.model)}` : ""
+            }`
+          : selection.model
+      }
     >
       {active && <ProviderMark driverKind={active.driverKind} size={14} />}
       <span className={cn("max-w-[160px] truncate", !contained && active && "@max-4xl/chathead:hidden")}>
         {modelLabel(active, selection.model)}
+        {active && modelProvider(active, selection.model) && (
+          <span className="text-ink-secondary"> · {modelProvider(active, selection.model)}</span>
+        )}
       </span>
       <ChevronDown
         size={14}

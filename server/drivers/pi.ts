@@ -114,7 +114,7 @@ interface PiModelsResponse {
  *  Every option is `custom` (pi is BYOK) and id is the `provider/modelId`
  *  composite the picker and `set_model` both use. Exported for the test. */
 export function parsePiCatalog(stdout: string, fallbackDefault = ""): ModelCatalog {
-  const options: Array<{ id: string; label: string; custom: true }> = [];
+  const options: Array<{ id: string; label: string; custom: true; provider: string }> = [];
   let def = fallbackDefault;
   for (const line of stdout.split("\n")) {
     if (!line.trim()) continue;
@@ -129,7 +129,7 @@ export function parsePiCatalog(stdout: string, fallbackDefault = ""): ModelCatal
     for (const m of res.data?.models ?? []) {
       if (!m?.provider || !m?.id) continue;
       const id = `${m.provider}/${m.id}`;
-      options.push({ id, label: m.name ?? m.id, custom: true });
+      options.push({ id, label: m.name ?? m.id, custom: true, provider: m.provider });
     }
     break;
   }

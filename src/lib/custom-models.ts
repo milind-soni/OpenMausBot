@@ -1,14 +1,17 @@
 // Custom picker: search the live inject list, and pin models the host
 // already has in memory so the user can pick them without scrolling.
 
-export function filterCustomModels<T extends { id: string; label: string }>(
+export function filterCustomModels<T extends { id: string; label: string; provider?: string }>(
   options: readonly T[],
   query: string,
 ): T[] {
   const needle = query.trim().toLowerCase();
   if (!needle) return [...options];
   return options.filter(
-    (option) => option.label.toLowerCase().includes(needle) || option.id.toLowerCase().includes(needle),
+    (option) =>
+      option.label.toLowerCase().includes(needle) ||
+      option.id.toLowerCase().includes(needle) ||
+      (option.provider?.toLowerCase().includes(needle) ?? false),
   );
 }
 

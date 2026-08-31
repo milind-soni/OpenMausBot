@@ -35,14 +35,26 @@ describe("parsePiCatalog", () => {
     const catalog = parsePiCatalog(MODELS_LINE + "\n");
     expect(catalog.default).toBe("ollama-cloud/glm-5.2");
     expect(catalog.options).toEqual([
-      { id: "ollama-cloud/glm-5.2", label: "glm-5.2", custom: true },
-      { id: "openai/gpt-4o", label: "GPT-4o", custom: true },
+      { id: "ollama-cloud/glm-5.2", label: "glm-5.2", custom: true, provider: "ollama-cloud" },
+      { id: "openai/gpt-4o", label: "GPT-4o", custom: true, provider: "openai" },
     ]);
   });
 
   it("uses the fallback default when the response omits one and a settings file is absent", () => {
     const catalog = parsePiCatalog(MODELS_LINE + "\n", "openai/gpt-4o");
     expect(catalog.default).toBe("openai/gpt-4o");
+  });
+
+  it("reports the provider so BYOK duplicates of one model stay distinguishable", () => {
+    const line =
+      '{"type":"response","command":"get_available_models","success":true,"data":{"models":[' +
+      '{"provider":"zai","id":"glm-5.3","name":"GLM-5.3"},' +
+      '{"provider":"nous","id":"glm-5.3","name":"GLM-5.3"}]}}\n';
+    const catalog = parsePiCatalog(line);
+    expect(catalog.options.map((o) => [o.id, o.provider])).toEqual([
+      ["zai/glm-5.3", "zai"],
+      ["nous/glm-5.3", "nous"],
+    ]);
   });
 
   it("keeps an empty catalog when the probe fails or reports no models", () => {
@@ -161,8 +173,8 @@ describe("PiDriver catalog (fake CLI)", () => {
   it("probes the live catalog and flags every option custom", async () => {
     const catalog = await fetchPiModels(FAKE_CLI, { PATH: process.env.PATH ?? "", HOME: join(tmpdir(), "omb-pi-no-settings") });
     expect(catalog.options).toEqual([
-      { id: "ollama-cloud/glm-5.2", label: "glm-5.2", custom: true },
-      { id: "openai/gpt-4o", label: "gpt-4o", custom: true },
+      { id: "ollama-cloud/glm-5.2", label: "glm-5.2", custom: true, provider: "ollama-cloud" },
+      { id: "openai/gpt-4o", label: "gpt-4o", custom: true, provider: "openai" },
     ]);
     // no ~/.pi/agent/settings.json in the throwaway home → first option wins
     expect(catalog.default).toBe("ollama-cloud/glm-5.2");

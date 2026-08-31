@@ -320,6 +320,10 @@ export interface ModelCatalog {
     label: string;
     custom?: boolean;
     loaded?: boolean;
+    /** upstream provider id (e.g. "zai", "nous") when the engine can report
+     * it — the picker shows it as a muted badge so BYOK duplicates of the
+     * same model id stay distinguishable. */
+    provider?: string;
     /** total context window in tokens, when the driver knows it — sizes
      * the model-facing rebuild (server/context-rebuild.ts). Unknown falls
      * back to a pattern table over the model id, then a conservative default. */
