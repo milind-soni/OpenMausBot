@@ -8,6 +8,7 @@ import { Sidebar } from "@/components/Sidebar";
 import { ChatView } from "@/components/ChatView";
 import { GroupView } from "@/components/GroupView";
 import { SettingsPanel } from "@/components/SettingsPanel";
+import { GroupSettingsPanel } from "@/components/GroupSettingsPanel";
 import { PluginsPanel, preloadConnectedApps } from "@/components/PluginsPanel";
 import { ComputerPanel } from "@/components/ComputerPanel";
 import { InspectorPanel } from "@/components/InspectorPanel";
@@ -211,6 +212,7 @@ function Shell() {
         </main>
       )}
       {state.settingsOpen && bot && <SettingsPanel bot={bot} />}
+      {state.settingsOpen && group && <GroupSettingsPanel group={group} />}
       {state.computerOpen && bot && (
         <ComputerPanel bot={bot} onOpenVmWorkspace={openLocalVmWorkspace} />
       )}

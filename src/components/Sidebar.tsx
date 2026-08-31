@@ -33,7 +33,7 @@ import {
 } from "lucide-react";
 import { api, useStore, formatTime, visibleMessages, type Bot, type Group } from "@/state/store";
 
-import { BotAvatar, InitialsAvatar } from "./Avatar";
+import { BotAvatar, InitialsAvatar, GroupAvatar } from "./Avatar";
 import { stateForBot } from "@/lib/mascot";
 import { useUpdaterState } from "@/lib/updater";
 import { cn } from "@/lib/cn";
@@ -242,7 +242,13 @@ function GroupListItem({
       title={density === "icons" ? group.name : undefined}
       aria-label={density === "icons" ? group.name : undefined}
     >
-      <StackedMauses members={members} density={density} />
+      {group.avatarUrl ? (
+        <div className={cn("flex shrink-0 items-center justify-center", density === "icons" ? "size-12" : density === "compact" ? "size-10" : "size-14")}>
+          <GroupAvatar group={group} size={density === "icons" ? 44 : density === "compact" ? 40 : 56} />
+        </div>
+      ) : (
+        <StackedMauses members={members} density={density} />
+      )}
       <div className={cn("min-w-0 flex-1", density === "icons" && "hidden")}>
         <div className="flex items-baseline justify-between gap-2">
           <span className="truncate text-[15px] font-semibold text-ink">{group.name}</span>

@@ -7,9 +7,9 @@
 # itself has none. If you'd rather not install it, make an iOS App target
 # in Xcode by hand, add the App/ folder, and add the local CompanionCore
 # package — the Info.plist keys below are the part that is easy to miss.
-name: OpenMausCompanion
+name: BotFleet
 options:
-  bundleIdPrefix: com.openmausbot
+  bundleIdPrefix: app.botfleet
   deploymentTarget:
     iOS: "17.0"
   createIntermediateGroups: true
@@ -19,7 +19,7 @@ packages:
     path: .
 
 targets:
-  OpenMausCompanion:
+  BotFleet:
     type: application
     platform: iOS
     sources:
@@ -28,87 +28,60 @@ targets:
     dependencies:
       - package: CompanionCore
         product: CompanionCore
-      - target: OpenMausCompanionWidgets
+      - target: BotFleetWidgets
     settings:
       base:
-        PRODUCT_BUNDLE_IDENTIFIER: com.openmausbot.app
+        PRODUCT_BUNDLE_IDENTIFIER: app.botfleet
+        DEVELOPMENT_TEAM: CC8UTF7ATG
+        CODE_SIGN_STYLE: Automatic
         MARKETING_VERSION: "1.0.0"
-        CURRENT_PROJECT_VERSION: "3"
+        CURRENT_PROJECT_VERSION: "1"
         SWIFT_VERSION: "5.9"
         TARGETED_DEVICE_FAMILY: "1"
-        # The catalog lives in App/, which is already a source path. Generated
-        # by `node scripts/make-app-icon.mjs` from the same mascot the app
-        # draws, so the icon cannot drift from the thing it depicts.
         ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
     info:
       path: App/Info.plist
       properties:
-        # What appears under the icon. Distinct from the desktop app on
-        # purpose: someone may well have both, and two identical labels on
-        # one person's devices is a small cruelty.
-        CFBundleDisplayName: OpenMausMobile
+        CFBundleDisplayName: BotFleet
         CFBundleShortVersionString: $(MARKETING_VERSION)
         CFBundleVersion: $(CURRENT_PROJECT_VERSION)
         LSApplicationCategoryType: public.app-category.productivity
         ITSAppUsesNonExemptEncryption: false
-        # The bot's Live Activity — its face and ask in the Dynamic Island
-        # and on the lock screen.
         NSSupportsLiveActivities: true
         CFBundleURLTypes:
-          - CFBundleURLName: com.openmausbot.companion.pairing
+          - CFBundleURLName: app.botfleet.companion.pairing
             CFBundleURLSchemes:
+              - botfleet
               - openmausbot
-        # REQUIRED, and easy to lose. Without a launch screen iOS runs the
-        # app in compatibility scaling: letterboxed inside black bars, with
-        # everything drawn oversized, on every modern iPhone. An empty
-        # dictionary is enough — it just has to exist.
-        #
-        # This cannot be an INFOPLIST_KEY_* build setting. Those are only
-        # read when Xcode generates the Info.plist itself, and this target
-        # supplies one, so they are silently ignored.
         UILaunchScreen: {}
         UISupportedInterfaceOrientations:
           - UIInterfaceOrientationPortrait
           - UIInterfaceOrientationLandscapeLeft
           - UIInterfaceOrientationLandscapeRight
-        # Without these two, NWBrowser returns no results at all — silently.
-        # It looks exactly like "no computers on this network", which is a
-        # confusing hour if you don't know to look here.
         NSLocalNetworkUsageDescription: >-
-          OpenMausBot finds your computer on this network so your bots can
+          BotFleet finds your computer on this network so your bots can
           reach you here.
         NSCameraUsageDescription: >-
-          OpenMausBot uses the camera only to scan a pairing QR code shown on
+          BotFleet uses the camera only to scan a pairing QR code shown on
           your computer.
         NSMicrophoneUsageDescription: >-
-          OpenMausMobile listens while you dictate a message to a bot.
+          BotFleet listens while you dictate a message to a bot.
         NSSpeechRecognitionUsageDescription: >-
-          OpenMausMobile converts your speech into text so you can send it
+          BotFleet converts your speech into text so you can send it
           to a bot. Recognition runs on this phone when it can.
         NSBonjourServices:
           - _openmausbot._tcp
-        # The companion listener is plain HTTP on a local address. ATS has
-        # to be told, and this is the narrowest way to say it: local
-        # networking only, not a blanket exception.
-        #
-        # NSAllowsLocalNetworking covers the private ranges — 10/8,
-        # 172.16/12, 192.168/16, .local — and that is the whole LAN story.
-        # It does *not* cover Tailscale: a tailnet address lives in
-        # 100.64.0.0/10, the CGNAT range, which ATS treats as ordinary
-        # public internet and blocks over plain HTTP. The address cannot be
-        # exempted (ATS exceptions are by name, not by subnet), but the
-        # MagicDNS name can be, and every tailnet name ends in ts.net — so
-        # connect by name and this one entry covers every machine you own.
         NSAppTransportSecurity:
           NSAllowsLocalNetworking: true
           NSExceptionDomains:
+            botfleet.app:
+              NSIncludesSubdomains: true
+              NSExceptionAllowsInsecureHTTPLoads: true
             ts.net:
               NSIncludesSubdomains: true
               NSExceptionAllowsInsecureHTTPLoads: true
 
-  # The Live Activity lives in a widget extension. It shares the mascot's
-  # drawing and data with the app, and the activity contract in Shared/.
-  OpenMausCompanionWidgets:
+  BotFleetWidgets:
     type: app-extension
     platform: iOS
     sources:
@@ -118,16 +91,18 @@ targets:
       - path: App/MausFaceData.swift
     settings:
       base:
-        PRODUCT_BUNDLE_IDENTIFIER: com.openmausbot.app.widgets
+        PRODUCT_BUNDLE_IDENTIFIER: app.botfleet.widgets
+        DEVELOPMENT_TEAM: CC8UTF7ATG
+        CODE_SIGN_STYLE: Automatic
         MARKETING_VERSION: "1.0.0"
-        CURRENT_PROJECT_VERSION: "3"
+        CURRENT_PROJECT_VERSION: "1"
         SWIFT_VERSION: "5.9"
         TARGETED_DEVICE_FAMILY: "1"
         SKIP_INSTALL: true
     info:
       path: Widgets/Info.plist
       properties:
-        CFBundleDisplayName: OpenMausMobile
+        CFBundleDisplayName: BotFleet
         CFBundleShortVersionString: $(MARKETING_VERSION)
         CFBundleVersion: $(CURRENT_PROJECT_VERSION)
         NSExtension:

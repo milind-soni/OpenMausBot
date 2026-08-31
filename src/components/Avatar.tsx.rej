@@ -1,0 +1,8 @@
+@@ -2,6 +2,7 @@
+ import { useMemo, useState } from "react";
+ import { Bot, useStore } from "@/state/store";
++import { Group } from "@/state/store";
+ import { cn } from "@/lib/cn";
+ import { normalizeState, type MausColor, type MausMotion, type MausState } from "@/lib/mascot";
+ import { MascotCanvas } from "./MascotCanvas";
+ 

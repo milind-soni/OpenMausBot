@@ -1,0 +1,243 @@
+2026-08-28 17:13:08 +0000 [MT] Initial pipeline context: <IDEDistributionProcessingPipelineContext: 0x7ac4b07600; archive(resolved)="<IDEArchive: 0x7ac3857e90>", distributionTask(resolved)="2", distributionDestination(resolved)="1", distributionMethod(resolved)="<IDEDistributionMethodiOSAppStoreDistribution: 0x7ac3927240>", team(resolved)="<IDEProvisioningBasicTeam: 0x7ac3d67d80; teamID='CC8UTF7ATG', teamName='(null)'>">
+	Chain (15, self inclusive):
+	<IDEDistributionProcessingPipelineContext: 0x7ac4b07600; archive = "<IDEArchive: 0x7ac3857e90>", distributionMethod="<IDEDistributionMethodiOSAppStoreDistribution: 0x7ac3927240>", team="<IDEProvisioningBasicTeam: 0x7ac3d67d80; teamID='CC8UTF7ATG', teamName='(null)'>">
+	<IDEDistributionProcessingPipelineContext: 0x7ac4b07300; archive = "<IDEArchive: 0x7ac3857e90>", distributionMethod="<IDEDistributionMethodiOSAppStoreDistribution: 0x7ac3927240>", team="<IDEProvisioningBasicTeam: 0x7ac3d67d80; teamID='CC8UTF7ATG', teamName='(null)'>">
+	<IDEDistributionContext: 0x7ac51f7200; archive = "<IDEArchive: 0x7ac3857e90>", distributionMethod="<IDEDistributionMethodiOSAppStoreDistribution: 0x7ac3927240>", team="<IDEProvisioningBasicTeam: 0x7ac3d67d80; teamID='CC8UTF7ATG', teamName='(null)'>">
+	<IDEDistributionContext: 0x7ac51f6a80; archive = "<IDEArchive: 0x7ac3857e90>", distributionMethod="<IDEDistributionMethodiOSAppStoreDistribution: 0x7ac3927240>", team="<IDEProvisioningBasicTeam: 0x7ac3d67d80; teamID='CC8UTF7ATG', teamName='(null)'>">
+	<IDEDistributionContext: 0x7ac51f5b80; archive = "<IDEArchive: 0x7ac3857e90>", distributionMethod="<IDEDistributionMethodiOSAppStoreDistribution: 0x7ac3927240>", team="<IDEProvisioningBasicTeam: 0x7ac3d67d80; teamID='CC8UTF7ATG', teamName='(null)'>">
+	<IDEDistributionContext: 0x7ac51f5900; archive = "<IDEArchive: 0x7ac3857e90>", distributionMethod="<IDEDistributionMethodiOSAppStoreDistribution: 0x7ac3927240>", team="<IDEProvisioningBasicTeam: 0x7ac3d67d80; teamID='CC8UTF7ATG', teamName='(null)'>">
+	<IDEDistributionContext: 0x7ac51f5e00; archive = "<IDEArchive: 0x7ac3857e90>", distributionMethod="<IDEDistributionMethodiOSAppStoreDistribution: 0x7ac3927240>", team="<IDEProvisioningBasicTeam: 0x7ac3d67d80; teamID='CC8UTF7ATG', teamName='(null)'>">
+	<IDEDistributionContext: 0x7ac51f6080; archive = "<IDEArchive: 0x7ac3857e90>", distributionMethod="<IDEDistributionMethodiOSAppStoreDistribution: 0x7ac3927240>", team="<IDEProvisioningBasicTeam: 0x7ac3d67d80; teamID='CC8UTF7ATG', teamName='(null)'>">
+	<IDEDistributionContext: 0x7ac51f6800; archive = "<IDEArchive: 0x7ac3857e90>", distributionMethod="<IDEDistributionMethodiOSAppStoreDistribution: 0x7ac3927240>", team="<IDEProvisioningBasicTeam: 0x7ac3d67d80; teamID='CC8UTF7ATG', teamName='(null)'>">
+	<IDEDistributionContext: 0x7ac51f5180; archive = "<IDEArchive: 0x7ac3857e90>", distributionMethod="<IDEDistributionMethodiOSAppStoreDistribution: 0x7ac3927240>", team="<IDEProvisioningBasicTeam: 0x7ac3d67d80; teamID='CC8UTF7ATG', teamName='(null)'>">
+	<IDEDistributionContext: 0x7ac51f4f00; archive = "<IDEArchive: 0x7ac3857e90>", distributionMethod="<IDEDistributionMethodiOSAppStoreDistribution: 0x7ac3927240>", team="<IDEProvisioningBasicTeam: 0x7ac3d67d80; teamID='CC8UTF7ATG', teamName='(null)'>">
+	<IDEDistributionContext: 0x7ac51f4a00; archive = "<IDEArchive: 0x7ac3857e90>", distributionMethod="<IDEDistributionMethodiOSAppStoreDistribution: 0x7ac3927240>", team="<IDEProvisioningBasicTeam: 0x7ac3d67d80; teamID='CC8UTF7ATG', teamName='(null)'>">
+	<IDEDistributionContext: 0x7ac51f4780; archive = "<IDEArchive: 0x7ac3857e90>", distributionMethod="<IDEDistributionMethodiOSAppStoreDistribution: 0x7ac3927240>", team="(null)">
+	<IDEDistributionContext: 0x7ac51f4000; archive = "<IDEArchive: 0x7ac3857e90>", distributionMethod="<IDEDistributionMethodiOSAppStoreDistribution: 0x7ac3927240>", team="(null)">
+	<IDEDistributionContext: 0x1053f6960; archive = "<IDEArchive: 0x7ac3857e90>", distributionMethod="(null)", team="(null)">
+</IDEDistributionProcessingPipelineContext: 0x7ac4b07600>
+2026-08-28 17:13:08 +0000 [MT] Processing step: IDEDistributionCreateDestRootStep
+2026-08-28 17:13:08 +0000 [MT] Processing step: IDEDistributionCopyItemStep
+2026-08-28 17:13:08 +0000 [MT] Running /usr/bin/ditto '-V' '/Users/jay/.gemini/antigravity/scratch/OpenMausBot/ios/build/BotFleet.xcarchive/Products/Applications/BotFleet.app' '/var/folders/0b/_hqdjtss47j2vcp2fhvfp4r40000gn/T/XcodeDistPipeline.~~~mZWAdV/Root/Payload/BotFleet.app'
+2026-08-28 17:13:08 +0000  >>> Copying /Users/jay/.gemini/antigravity/scratch/OpenMausBot/ios/build/BotFleet.xcarchive/Products/Applications/BotFleet.app 
+2026-08-28 17:13:08 +0000  copying file ./_CodeSignature/CodeResources ... 
+2026-08-28 17:13:08 +0000  hardlinked ./_CodeSignature/CodeResources
+2026-08-28 17:13:08 +0000  copying file ./StorePreview.json ... 
+2026-08-28 17:13:08 +0000  hardlinked ./StorePreview.json
+2026-08-28 17:13:08 +0000  copying file ./BotFleet ... 
+2026-08-28 17:13:08 +0000  hardlinked ./BotFleet
+2026-08-28 17:13:08 +0000  copying file ./Metadata.appintents/version.json ... 
+2026-08-28 17:13:08 +0000  hardlinked ./Metadata.appintents/version.json
+2026-08-28 17:13:08 +0000  copying file ./Metadata.appintents/extract.actionsdata ... 
+2026-08-28 17:13:08 +0000  hardlinked ./Metadata.appintents/extract.actionsdata
+2026-08-28 17:13:08 +0000  copying file ./PlugIns/BotFleetWidgets.appex/_CodeSignature/CodeResources ... 
+2026-08-28 17:13:08 +0000  hardlinked ./PlugIns/BotFleetWidgets.appex/_CodeSignature/CodeResources
+2026-08-28 17:13:08 +0000  copying file ./PlugIns/BotFleetWidgets.appex/BotFleetWidgets ... 
+2026-08-28 17:13:08 +0000  hardlinked ./PlugIns/BotFleetWidgets.appex/BotFleetWidgets
+2026-08-28 17:13:08 +0000  copying file ./PlugIns/BotFleetWidgets.appex/Metadata.appintents/version.json ... 
+2026-08-28 17:13:08 +0000  hardlinked ./PlugIns/BotFleetWidgets.appex/Metadata.appintents/version.json
+2026-08-28 17:13:08 +0000  copying file ./PlugIns/BotFleetWidgets.appex/Metadata.appintents/extract.actionsdata ... 
+2026-08-28 17:13:08 +0000  hardlinked ./PlugIns/BotFleetWidgets.appex/Metadata.appintents/extract.actionsdata
+2026-08-28 17:13:08 +0000  copying file ./PlugIns/BotFleetWidgets.appex/embedded.mobileprovision ... 
+2026-08-28 17:13:08 +0000  hardlinked ./PlugIns/BotFleetWidgets.appex/embedded.mobileprovision
+2026-08-28 17:13:08 +0000  copying file ./PlugIns/BotFleetWidgets.appex/Info.plist ... 
+2026-08-28 17:13:08 +0000  hardlinked ./PlugIns/BotFleetWidgets.appex/Info.plist
+2026-08-28 17:13:08 +0000  copying file ./AppIcon60x60@2x.png ... 
+2026-08-28 17:13:08 +0000  hardlinked ./AppIcon60x60@2x.png
+2026-08-28 17:13:08 +0000  copying file ./Assets.car ... 
+2026-08-28 17:13:08 +0000  hardlinked ./Assets.car
+2026-08-28 17:13:08 +0000  copying file ./AppIcon76x76@2x~ipad.png ... 
+2026-08-28 17:13:08 +0000  hardlinked ./AppIcon76x76@2x~ipad.png
+2026-08-28 17:13:08 +0000  copying file ./PrivacyInfo.xcprivacy ... 
+2026-08-28 17:13:08 +0000  hardlinked ./PrivacyInfo.xcprivacy
+2026-08-28 17:13:08 +0000  copying file ./embedded.mobileprovision ... 
+2026-08-28 17:13:08 +0000  hardlinked ./embedded.mobileprovision
+2026-08-28 17:13:08 +0000  copying file ./Info.plist ... 
+2026-08-28 17:13:08 +0000  hardlinked ./Info.plist
+2026-08-28 17:13:08 +0000  copying file ./PkgInfo ... 
+2026-08-28 17:13:08 +0000  hardlinked ./PkgInfo
+2026-08-28 17:13:08 +0000 [MT] /usr/bin/ditto exited with 0
+2026-08-28 17:13:08 +0000 [MT] Processing step: IDEDistributionEmbedProfileStep
+2026-08-28 17:13:08 +0000 [MT] Processing step: IDEDistributionInfoPlistStep
+2026-08-28 17:13:08 +0000 [MT] Skipping setting DTXcodeBuildDistribution because toolsBuildVersionName was nil.
+2026-08-28 17:13:08 +0000 [MT] Skipping setting DTXcodeBuildDistribution because toolsBuildVersionName was nil.
+2026-08-28 17:13:08 +0000 [MT] Processing step: IDEDistributionItemRemovalStep
+2026-08-28 17:13:08 +0000 [MT] Processing step: IDEDistributionAppThinningPlistStep
+2026-08-28 17:13:08 +0000 [MT] Skipping step: IDEDistributionAppThinningPlistStep because it said so
+2026-08-28 17:13:08 +0000 [MT] Processing step: IDEDistributionSymbolsStep
+2026-08-28 17:13:08 +0000 [MT] Writing /var/folders/0b/_hqdjtss47j2vcp2fhvfp4r40000gn/T/XcodeDistPipeline.~~~mZWAdV/Symbols/88CFC0BB-0152-30FF-B765-AF6312CE654A.symbols
+2026-08-28 17:13:08 +0000 [MT] Writing /var/folders/0b/_hqdjtss47j2vcp2fhvfp4r40000gn/T/XcodeDistPipeline.~~~mZWAdV/Symbols/7D169DD8-1FF4-3C73-9FC7-7E671FF1776B.symbols
+2026-08-28 17:13:08 +0000 [MT] Processing step: IDEDistributionCopyAppleProvidedContentStep
+2026-08-28 17:13:08 +0000 [MT] Processing step: IDEDistributionAppThinningStep
+2026-08-28 17:13:08 +0000 [MT] Skipping step: IDEDistributionAppThinningStep because it said so
+2026-08-28 17:13:08 +0000 [MT] Processing step: IDEDistributionArchThinningStep
+2026-08-28 17:13:08 +0000 [MT] Archs to thin for item /Users/jay/.gemini/antigravity/scratch/OpenMausBot/ios/build/BotFleet.xcarchive/Products/Applications/BotFleet.app/PlugIns/BotFleetWidgets.appex are []
+2026-08-28 17:13:08 +0000 [MT] Archs to thin for item /Users/jay/.gemini/antigravity/scratch/OpenMausBot/ios/build/BotFleet.xcarchive/Products/Applications/BotFleet.app are []
+2026-08-28 17:13:08 +0000 [MT] Processing step: IDEDistributionODRStep
+2026-08-28 17:13:08 +0000 [MT] Processing step: IDEDistributionStripXattrsStep
+2026-08-28 17:13:08 +0000 [MT] Skipping stripping extended attributes because the codesign step will strip them.
+2026-08-28 17:13:08 +0000 [MT] Skipping stripping extended attributes because the codesign step will strip them.
+2026-08-28 17:13:08 +0000 [MT] Processing step: IDEDistributionCodesignStep
+2026-08-28 17:13:08 +0000 [MT] Entitlements for <IDEDistributionItem: 0x7ac3b4e280; bundleID='app.botfleet.widgets', path='<DVTFilePath:0x7ac3831570:'/Users/jay/.gemini/antigravity/scratch/OpenMausBot/ios/build/BotFleet.xcarchive/Products/Applications/BotFleet.app/PlugIns/BotFleetWidgets.appex'>', codeSigningInfo='<_DVTCodeSigningInformation_Path: 0x7ac3b4e040; isSigned='1', isAdHocSigned='0', signingCertificate='<DVTSigningCertificate: 0x7ac354ce40; name='Apple Development: John B Wedgeworth IV (5NU3MR6C4C)', hash='0CF58A09D8D99997631E8D99A6DC2E185FC02497', serialNumber='15C2CB71A600214BBB1D6AE1866E7598', certificateKinds='(
+    "1.2.840.113635.100.6.1.12",
+    "1.2.840.113635.100.6.1.2"
+), issueDate='2026-06-30 06:47:24 +0000''>', entitlements='{
+    "application-identifier" = "CC8UTF7ATG.app.botfleet.widgets";
+    "com.apple.developer.team-identifier" = CC8UTF7ATG;
+    "get-task-allow" = 1;
+}', teamID='CC8UTF7ATG', identifier='app.botfleet.widgets', executablePath='<DVTFilePath:0x7ac3b4d6e0:'/Users/jay/.gemini/antigravity/scratch/OpenMausBot/ios/build/BotFleet.xcarchive/Products/Applications/BotFleet.app/PlugIns/BotFleetWidgets.appex/BotFleetWidgets'>', hardenedRuntime='0'>'>: {
+    "application-identifier" = "CC8UTF7ATG.app.botfleet.widgets";
+    "beta-reports-active" = 1;
+    "com.apple.developer.team-identifier" = CC8UTF7ATG;
+    "get-task-allow" = 0;
+}
+2026-08-28 17:13:08 +0000 [MT] Associated App Clip Identifiers Filter: Skipping because "com.apple.developer.associated-appclip-app-identifiers" is not present
+2026-08-28 17:13:08 +0000 [MT] Entitlements for <IDEDistributionItem: 0x7ac3b4e280; bundleID='app.botfleet.widgets', path='<DVTFilePath:0x7ac3831570:'/Users/jay/.gemini/antigravity/scratch/OpenMausBot/ios/build/BotFleet.xcarchive/Products/Applications/BotFleet.app/PlugIns/BotFleetWidgets.appex'>', codeSigningInfo='<_DVTCodeSigningInformation_Path: 0x7ac3b4e040; isSigned='1', isAdHocSigned='0', signingCertificate='<DVTSigningCertificate: 0x7ac354cc00; name='Apple Development: John B Wedgeworth IV (5NU3MR6C4C)', hash='0CF58A09D8D99997631E8D99A6DC2E185FC02497', serialNumber='15C2CB71A600214BBB1D6AE1866E7598', certificateKinds='(
+    "1.2.840.113635.100.6.1.12",
+    "1.2.840.113635.100.6.1.2"
+), issueDate='2026-06-30 06:47:24 +0000''>', entitlements='{
+    "application-identifier" = "CC8UTF7ATG.app.botfleet.widgets";
+    "com.apple.developer.team-identifier" = CC8UTF7ATG;
+    "get-task-allow" = 1;
+}', teamID='CC8UTF7ATG', identifier='app.botfleet.widgets', executablePath='<DVTFilePath:0x7ac3b4d6e0:'/Users/jay/.gemini/antigravity/scratch/OpenMausBot/ios/build/BotFleet.xcarchive/Products/Applications/BotFleet.app/PlugIns/BotFleetWidgets.appex/BotFleetWidgets'>', hardenedRuntime='0'>'> are: {
+    "application-identifier" = "CC8UTF7ATG.app.botfleet.widgets";
+    "beta-reports-active" = 1;
+    "com.apple.developer.team-identifier" = CC8UTF7ATG;
+    "get-task-allow" = 0;
+}
+2026-08-28 17:13:08 +0000 [MT] Writing entitlements for <IDEDistributionItem: 0x7ac3b4e280; bundleID='app.botfleet.widgets', path='<DVTFilePath:0x7ac3831570:'/Users/jay/.gemini/antigravity/scratch/OpenMausBot/ios/build/BotFleet.xcarchive/Products/Applications/BotFleet.app/PlugIns/BotFleetWidgets.appex'>', codeSigningInfo='<_DVTCodeSigningInformation_Path: 0x7ac3b4e040; isSigned='1', isAdHocSigned='0', signingCertificate='<DVTSigningCertificate: 0x7ac354cc00; name='Apple Development: John B Wedgeworth IV (5NU3MR6C4C)', hash='0CF58A09D8D99997631E8D99A6DC2E185FC02497', serialNumber='15C2CB71A600214BBB1D6AE1866E7598', certificateKinds='(
+    "1.2.840.113635.100.6.1.12",
+    "1.2.840.113635.100.6.1.2"
+), issueDate='2026-06-30 06:47:24 +0000''>', entitlements='{
+    "application-identifier" = "CC8UTF7ATG.app.botfleet.widgets";
+    "com.apple.developer.team-identifier" = CC8UTF7ATG;
+    "get-task-allow" = 1;
+}', teamID='CC8UTF7ATG', identifier='app.botfleet.widgets', executablePath='<DVTFilePath:0x7ac3b4d6e0:'/Users/jay/.gemini/antigravity/scratch/OpenMausBot/ios/build/BotFleet.xcarchive/Products/Applications/BotFleet.app/PlugIns/BotFleetWidgets.appex/BotFleetWidgets'>', hardenedRuntime='0'>'> to: /var/folders/0b/_hqdjtss47j2vcp2fhvfp4r40000gn/T/XcodeDistPipeline.~~~mZWAdV/entitlements~~~9TQYaV
+2026-08-28 17:13:08 +0000 [MT] invoking codesign: <NSConcreteTask: 0x7ac37922b0; launchPath='/usr/bin/codesign', arguments='(
+    "-f",
+    "-s",
+    7995E5D2351E13D9CB6E0BB3AB39B00B85D09140,
+    "--entitlements",
+    "/var/folders/0b/_hqdjtss47j2vcp2fhvfp4r40000gn/T/XcodeDistPipeline.~~~mZWAdV/entitlements~~~9TQYaV",
+    "--preserve-metadata=identifier,flags,runtime,launch-constraints,library-constraints",
+    "--generate-entitlement-der",
+    "--strip-disallowed-xattrs",
+    "-vvv",
+    "/var/folders/0b/_hqdjtss47j2vcp2fhvfp4r40000gn/T/XcodeDistPipeline.~~~mZWAdV/Root/Payload/BotFleet.app/PlugIns/BotFleetWidgets.appex"
+)'>
+2026-08-28 17:13:09 +0000 [MT] codesign output: /var/folders/0b/_hqdjtss47j2vcp2fhvfp4r40000gn/T/XcodeDistPipeline.~~~mZWAdV/Root/Payload/BotFleet.app/PlugIns/BotFleetWidgets.appex: replacing existing signature
+/var/folders/0b/_hqdjtss47j2vcp2fhvfp4r40000gn/T/XcodeDistPipeline.~~~mZWAdV/Root/Payload/BotFleet.app/PlugIns/BotFleetWidgets.appex: signed bundle with Mach-O thin (arm64) [app.botfleet.widgets]
+2026-08-28 17:13:09 +0000 [MT] Entitlements for <IDEDistributionItem: 0x7ac3b4e0a0; bundleID='app.botfleet', path='<DVTFilePath:0x7ac3b4c6c0:'/Users/jay/.gemini/antigravity/scratch/OpenMausBot/ios/build/BotFleet.xcarchive/Products/Applications/BotFleet.app'>', codeSigningInfo='<_DVTCodeSigningInformation_Path: 0x7ac4909fe0; isSigned='1', isAdHocSigned='0', signingCertificate='<DVTSigningCertificate: 0x7ac354ce40; name='Apple Development: John B Wedgeworth IV (5NU3MR6C4C)', hash='0CF58A09D8D99997631E8D99A6DC2E185FC02497', serialNumber='15C2CB71A600214BBB1D6AE1866E7598', certificateKinds='(
+    "1.2.840.113635.100.6.1.12",
+    "1.2.840.113635.100.6.1.2"
+), issueDate='2026-06-30 06:47:24 +0000''>', entitlements='{
+    "application-identifier" = "CC8UTF7ATG.app.botfleet";
+    "com.apple.developer.team-identifier" = CC8UTF7ATG;
+    "get-task-allow" = 1;
+}', teamID='CC8UTF7ATG', identifier='app.botfleet', executablePath='<DVTFilePath:0x7ac3b4d620:'/Users/jay/.gemini/antigravity/scratch/OpenMausBot/ios/build/BotFleet.xcarchive/Products/Applications/BotFleet.app/BotFleet'>', hardenedRuntime='0'>'>: {
+    "application-identifier" = "CC8UTF7ATG.app.botfleet";
+    "beta-reports-active" = 1;
+    "com.apple.developer.team-identifier" = CC8UTF7ATG;
+    "get-task-allow" = 0;
+}
+2026-08-28 17:13:09 +0000 [MT] Associated App Clip Identifiers Filter: Skipping because "com.apple.developer.associated-appclip-app-identifiers" is not present
+2026-08-28 17:13:09 +0000 [MT] Entitlements for <IDEDistributionItem: 0x7ac3b4e0a0; bundleID='app.botfleet', path='<DVTFilePath:0x7ac3b4c6c0:'/Users/jay/.gemini/antigravity/scratch/OpenMausBot/ios/build/BotFleet.xcarchive/Products/Applications/BotFleet.app'>', codeSigningInfo='<_DVTCodeSigningInformation_Path: 0x7ac4909fe0; isSigned='1', isAdHocSigned='0', signingCertificate='<DVTSigningCertificate: 0x7ac354cc00; name='Apple Development: John B Wedgeworth IV (5NU3MR6C4C)', hash='0CF58A09D8D99997631E8D99A6DC2E185FC02497', serialNumber='15C2CB71A600214BBB1D6AE1866E7598', certificateKinds='(
+    "1.2.840.113635.100.6.1.12",
+    "1.2.840.113635.100.6.1.2"
+), issueDate='2026-06-30 06:47:24 +0000''>', entitlements='{
+    "application-identifier" = "CC8UTF7ATG.app.botfleet";
+    "com.apple.developer.team-identifier" = CC8UTF7ATG;
+    "get-task-allow" = 1;
+}', teamID='CC8UTF7ATG', identifier='app.botfleet', executablePath='<DVTFilePath:0x7ac3b4d620:'/Users/jay/.gemini/antigravity/scratch/OpenMausBot/ios/build/BotFleet.xcarchive/Products/Applications/BotFleet.app/BotFleet'>', hardenedRuntime='0'>'> are: {
+    "application-identifier" = "CC8UTF7ATG.app.botfleet";
+    "beta-reports-active" = 1;
+    "com.apple.developer.team-identifier" = CC8UTF7ATG;
+    "get-task-allow" = 0;
+}
+2026-08-28 17:13:09 +0000 [MT] Writing entitlements for <IDEDistributionItem: 0x7ac3b4e0a0; bundleID='app.botfleet', path='<DVTFilePath:0x7ac3b4c6c0:'/Users/jay/.gemini/antigravity/scratch/OpenMausBot/ios/build/BotFleet.xcarchive/Products/Applications/BotFleet.app'>', codeSigningInfo='<_DVTCodeSigningInformation_Path: 0x7ac4909fe0; isSigned='1', isAdHocSigned='0', signingCertificate='<DVTSigningCertificate: 0x7ac354cc00; name='Apple Development: John B Wedgeworth IV (5NU3MR6C4C)', hash='0CF58A09D8D99997631E8D99A6DC2E185FC02497', serialNumber='15C2CB71A600214BBB1D6AE1866E7598', certificateKinds='(
+    "1.2.840.113635.100.6.1.12",
+    "1.2.840.113635.100.6.1.2"
+), issueDate='2026-06-30 06:47:24 +0000''>', entitlements='{
+    "application-identifier" = "CC8UTF7ATG.app.botfleet";
+    "com.apple.developer.team-identifier" = CC8UTF7ATG;
+    "get-task-allow" = 1;
+}', teamID='CC8UTF7ATG', identifier='app.botfleet', executablePath='<DVTFilePath:0x7ac3b4d620:'/Users/jay/.gemini/antigravity/scratch/OpenMausBot/ios/build/BotFleet.xcarchive/Products/Applications/BotFleet.app/BotFleet'>', hardenedRuntime='0'>'> to: /var/folders/0b/_hqdjtss47j2vcp2fhvfp4r40000gn/T/XcodeDistPipeline.~~~mZWAdV/entitlements~~~9gZLzq
+2026-08-28 17:13:09 +0000 [MT] invoking codesign: <NSConcreteTask: 0x7ac37923f0; launchPath='/usr/bin/codesign', arguments='(
+    "-f",
+    "-s",
+    7995E5D2351E13D9CB6E0BB3AB39B00B85D09140,
+    "--entitlements",
+    "/var/folders/0b/_hqdjtss47j2vcp2fhvfp4r40000gn/T/XcodeDistPipeline.~~~mZWAdV/entitlements~~~9gZLzq",
+    "--preserve-metadata=identifier,flags,runtime,launch-constraints,library-constraints",
+    "--generate-entitlement-der",
+    "--strip-disallowed-xattrs",
+    "-vvv",
+    "/var/folders/0b/_hqdjtss47j2vcp2fhvfp4r40000gn/T/XcodeDistPipeline.~~~mZWAdV/Root/Payload/BotFleet.app"
+)'>
+2026-08-28 17:13:09 +0000 [MT] codesign output: /var/folders/0b/_hqdjtss47j2vcp2fhvfp4r40000gn/T/XcodeDistPipeline.~~~mZWAdV/Root/Payload/BotFleet.app: replacing existing signature
+/var/folders/0b/_hqdjtss47j2vcp2fhvfp4r40000gn/T/XcodeDistPipeline.~~~mZWAdV/Root/Payload/BotFleet.app: signed app bundle with Mach-O thin (arm64) [app.botfleet]
+2026-08-28 17:13:09 +0000 [MT] Processing step: IDEDistributionZipODRItemStep
+2026-08-28 17:13:09 +0000 [MT] Skipping step: IDEDistributionZipODRItemStep because it said so
+2026-08-28 17:13:09 +0000 [MT] Skipping step: IDEDistributionZipODRItemStep because it said so
+2026-08-28 17:13:09 +0000 [MT] Processing step: IDEDistributionCreateIPAStep
+2026-08-28 17:13:09 +0000 [MT] Running /usr/bin/rsync '-8aPhhE' '/var/folders/0b/_hqdjtss47j2vcp2fhvfp4r40000gn/T/XcodeDistPipeline.~~~mZWAdV/Symbols' '--link-dest' '/var/folders/0b/_hqdjtss47j2vcp2fhvfp4r40000gn/T/XcodeDistPipeline.~~~mZWAdV' '/var/folders/0b/_hqdjtss47j2vcp2fhvfp4r40000gn/T/XcodeDistPipeline.~~~mZWAdV/Root'
+2026-08-28 17:13:09 +0000  Symbols/
+._Symbols
+            163 127%   84.85KB/s   00:00:00 (xfer#1, to-check=0/6)
+2026-08-28 17:13:09 +0000  Symbols/7D169DD8-1FF4-3C73-9FC7-7E671FF1776B.symbols
+Symbols/88CFC0BB-0152-30FF-B765-AF6312CE654A.symbols
+Symbols/._7D169DD8-1FF4-3C73-9FC7-7E671FF1776B.symbols
+            163   0%   45.70KB/s   00:00:00 (xfer#2, to-check=2/6)
+2026-08-28 17:13:09 +0000  Symbols/._88CFC0BB-0152-30FF-B765-AF6312CE654A.symbols
+            163   0%   96.77KB/s   00:00:00 (xfer#3, to-check=3/6)
+2026-08-28 17:13:09 +0000 [MT] /usr/bin/rsync exited with 0
+2026-08-28 17:13:09 +0000 [MT] Running /usr/bin/ditto '-V' '-c' '-k' '--norsrc' '/var/folders/0b/_hqdjtss47j2vcp2fhvfp4r40000gn/T/XcodeDistPipeline.~~~mZWAdV/Root' '/var/folders/0b/_hqdjtss47j2vcp2fhvfp4r40000gn/T/XcodeDistPipeline.~~~mZWAdV/Packages/BotFleet.ipa'
+2026-08-28 17:13:09 +0000  >>> Copying /var/folders/0b/_hqdjtss47j2vcp2fhvfp4r40000gn/T/XcodeDistPipeline.~~~mZWAdV/Root 
+2026-08-28 17:13:09 +0000  copying file ./Payload/BotFleet.app/_CodeSignature/CodeResources ... 
+2026-08-28 17:13:09 +0000  5509 bytes for ./Payload/BotFleet.app/_CodeSignature/CodeResources
+2026-08-28 17:13:09 +0000  copying file ./Payload/BotFleet.app/StorePreview.json ... 
+2026-08-28 17:13:09 +0000  3309 bytes for ./Payload/BotFleet.app/StorePreview.json
+copying file ./Payload/BotFleet.app/BotFleet ... 
+2026-08-28 17:13:09 +0000  2834064 bytes for ./Payload/BotFleet.app/BotFleet
+2026-08-28 17:13:09 +0000  copying file ./Payload/BotFleet.app/Metadata.appintents/version.json ... 
+2026-08-28 17:13:09 +0000  52 bytes for ./Payload/BotFleet.app/Metadata.appintents/version.json
+2026-08-28 17:13:09 +0000  copying file ./Payload/BotFleet.app/Metadata.appintents/extract.actionsdata ... 
+2026-08-28 17:13:09 +0000  3370 bytes for ./Payload/BotFleet.app/Metadata.appintents/extract.actionsdata
+2026-08-28 17:13:09 +0000  copying file ./Payload/BotFleet.app/PlugIns/BotFleetWidgets.appex/_CodeSignature/CodeResources ... 
+2026-08-28 17:13:09 +0000  2554 bytes for ./Payload/BotFleet.app/PlugIns/BotFleetWidgets.appex/_CodeSignature/CodeResources
+2026-08-28 17:13:09 +0000  copying file ./Payload/BotFleet.app/PlugIns/BotFleetWidgets.appex/BotFleetWidgets ... 
+2026-08-28 17:13:09 +0000  242640 bytes for ./Payload/BotFleet.app/PlugIns/BotFleetWidgets.appex/BotFleetWidgets
+2026-08-28 17:13:09 +0000  copying file ./Payload/BotFleet.app/PlugIns/BotFleetWidgets.appex/Metadata.appintents/version.json ... 
+2026-08-28 17:13:09 +0000  52 bytes for ./Payload/BotFleet.app/PlugIns/BotFleetWidgets.appex/Metadata.appintents/version.json
+2026-08-28 17:13:09 +0000  copying file ./Payload/BotFleet.app/PlugIns/BotFleetWidgets.appex/Metadata.appintents/extract.actionsdata ... 
+2026-08-28 17:13:09 +0000  3393 bytes for ./Payload/BotFleet.app/PlugIns/BotFleetWidgets.appex/Metadata.appintents/extract.actionsdata
+2026-08-28 17:13:09 +0000  copying file ./Payload/BotFleet.app/PlugIns/BotFleetWidgets.appex/embedded.mobileprovision ... 
+2026-08-28 17:13:09 +0000  14277 bytes for ./Payload/BotFleet.app/PlugIns/BotFleetWidgets.appex/embedded.mobileprovision
+2026-08-28 17:13:09 +0000  copying file ./Payload/BotFleet.app/PlugIns/BotFleetWidgets.appex/Info.plist ... 
+2026-08-28 17:13:09 +0000  883 bytes for ./Payload/BotFleet.app/PlugIns/BotFleetWidgets.appex/Info.plist
+copying file ./Payload/BotFleet.app/AppIcon60x60@2x.png ... 
+2026-08-28 17:13:09 +0000  10060 bytes for ./Payload/BotFleet.app/AppIcon60x60@2x.png
+2026-08-28 17:13:09 +0000  copying file ./Payload/BotFleet.app/Assets.car ... 
+2026-08-28 17:13:09 +0000  148408 bytes for ./Payload/BotFleet.app/Assets.car
+2026-08-28 17:13:09 +0000  copying file ./Payload/BotFleet.app/AppIcon76x76@2x~ipad.png ... 
+2026-08-28 17:13:09 +0000  12898 bytes for ./Payload/BotFleet.app/AppIcon76x76@2x~ipad.png
+2026-08-28 17:13:09 +0000  copying file ./Payload/BotFleet.app/PrivacyInfo.xcprivacy ... 
+2026-08-28 17:13:09 +0000  630 bytes for ./Payload/BotFleet.app/PrivacyInfo.xcprivacy
+2026-08-28 17:13:09 +0000  copying file ./Payload/BotFleet.app/embedded.mobileprovision ... 
+2026-08-28 17:13:09 +0000  14225 bytes for ./Payload/BotFleet.app/embedded.mobileprovision
+2026-08-28 17:13:09 +0000  copying file ./Payload/BotFleet.app/Info.plist ... 
+2026-08-28 17:13:09 +0000  2163 bytes for ./Payload/BotFleet.app/Info.plist
+2026-08-28 17:13:09 +0000  copying file ./Payload/BotFleet.app/PkgInfo ... 
+2026-08-28 17:13:09 +0000  8 bytes for ./Payload/BotFleet.app/PkgInfo
+2026-08-28 17:13:09 +0000  copying file ./Symbols/88CFC0BB-0152-30FF-B765-AF6312CE654A.symbols ... 
+2026-08-28 17:13:10 +0000  9075132 bytes for ./Symbols/88CFC0BB-0152-30FF-B765-AF6312CE654A.symbols
+2026-08-28 17:13:10 +0000  copying file ./Symbols/7D169DD8-1FF4-3C73-9FC7-7E671FF1776B.symbols ... 
+2026-08-28 17:13:10 +0000  361548 bytes for ./Symbols/7D169DD8-1FF4-3C73-9FC7-7E671FF1776B.symbols
+2026-08-28 17:13:10 +0000 [MT] /usr/bin/ditto exited with 0
+2026-08-28 17:13:10 +0000 [MT] Processing step: IDEDistributionAppStoreInformationStep
+2026-08-28 17:13:10 +0000 [MT] Skipping step: IDEDistributionAppStoreInformationStep because it said so
+2026-08-28 17:13:10 +0000 [MT] Processing step: IDEDistributionGenerateProcessedDistributionItems
+2026-08-28 17:13:10 +0000 [MT] IDEDistributionItem init <DVTFilePath:0x7ac300c4d0:'/var/folders/0b/_hqdjtss47j2vcp2fhvfp4r40000gn/T/XcodeDistPipeline.~~~mZWAdV/Root/Payload/BotFleet.app/PlugIns/BotFleetWidgets.appex'>
+2026-08-28 17:13:10 +0000 [MT] IDEDistributionItem init <DVTFilePath:0x7ac37a8840:'/var/folders/0b/_hqdjtss47j2vcp2fhvfp4r40000gn/T/XcodeDistPipeline.~~~mZWAdV/Root/Payload/BotFleet.app'>
+2026-08-28 17:13:10 +0000 [MT] Processing step: IDEDistributionCreateManifestStep
+2026-08-28 17:13:10 +0000 [MT] Skipping step: IDEDistributionCreateManifestStep because it said so

@@ -137,6 +137,8 @@ export interface Group {
   setupCompletedAt?: number | null;
   setupSkippedAt?: number | null;
   messages: Message[];
+  avatarUrl?: string | null;
+  avatarCrop?: BotAvatarCrop;
 }
 
 export interface ModelSelection {
@@ -355,7 +357,7 @@ export interface AppState {
   config: ConfigStatus | null;
   /** selected chat — a bot id OR a group id */
   selectedId: string;
-  activeView: "chat" | "team-map" | "routines" | "skill-recorder";
+  activeView: "chat" | "team-map" | "routines" | "skill-recorder" | "groupSettings";
   routines: Routine[];
   routineRuns: RoutineRun[];
   webhooks: WebhookTrigger[];
@@ -487,6 +489,7 @@ export type Action =
   | { type: "connected"; value: boolean }
   | { type: "error"; message: string | null }
   | { type: "toggleSettings"; open?: boolean }
+  | { type: "showGroupSettings" }
   | { type: "togglePlugins"; open?: boolean }
   | { type: "toggleComputer"; open?: boolean }
   | { type: "toggleInspector"; open?: boolean }
@@ -877,6 +880,16 @@ export function reducer(state: AppState, action: Action): AppState {
         error: action.message,
       };
     // bot settings, the computer panel, and app settings share the right slot
+    case "showGroupSettings":
+      return {
+        ...state,
+        activeView: "groupSettings",
+        settingsOpen: false,
+        computerOpen: false,
+        inspectorOpen: false,
+        appSettingsOpen: false,
+        pluginsOpen: false,
+      };
     case "toggleSettings": {
       const open = action.open ?? !state.settingsOpen;
       return {

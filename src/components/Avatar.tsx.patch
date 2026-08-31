@@ -1,0 +1,31 @@
+--- OpenMausBot/src/components/Avatar.tsx
++++ OpenMausBot/src/components/Avatar.tsx
+@@ -2,6 +2,7 @@
+ import { useMemo, useState } from "react";
+ import { Bot, useStore } from "@/state/store";
++import { Group } from "@/state/store";
+ import { cn } from "@/lib/cn";
+ import { normalizeState, type MausColor, type MausMotion, type MausState } from "@/lib/mascot";
+ import { MascotCanvas } from "./MascotCanvas";
+ 
+@@ -62,6 +63,22 @@
+   );
+ }
+ 
++export function GroupAvatar({ group, size = 44, label }: { group: Group, size?: number, label?: string }) {
++  if (!group.avatarUrl) {
++    // Fallback if no avatar
++    return (
++      <div className="flex items-center justify-center bg-control text-ink-secondary" style={{ width: size, height: size, borderRadius: "50%" }}>
++        <span className="font-semibold">{group.name.slice(0, 2).toUpperCase()}</span>
++      </div>
++    );
++  }
++  return (
++    <div className={cn("relative shrink-0", CROP_CLASSES[group.avatarCrop ?? "rounded"])} style={{ width: size, height: size }}>
++      <img src={group.avatarUrl} alt={label ?? group.name} className="size-full object-cover" />
++    </div>
++  );
++}
++
+ export function InitialsAvatar({

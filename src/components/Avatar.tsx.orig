@@ -274,27 +274,6 @@ export function BotAvatar({ bot, size = 44, label, ...mascotProps }: BotAvatarPr
   );
 }
 
-export function GroupAvatar({ group, size = 44, label }: { group: import("@/state/store").Group, size?: number, label?: string }) {
-  if (!group.avatarUrl) {
-    return (
-      <div className="flex items-center justify-center bg-control text-ink-secondary" style={{ width: size, height: size, borderRadius: "50%" }}>
-        <span className="font-semibold text-[13px]">{group.name.slice(0, 2).toUpperCase()}</span>
-      </div>
-    );
-  }
-  const radius =
-    group.avatarCrop === "circle"
-      ? "50%"
-      : group.avatarCrop === "rounded"
-        ? "22%"
-        : "0";
-  return (
-    <div className="relative shrink-0 overflow-hidden" style={{ width: size, height: size, borderRadius: radius }}>
-      <img src={group.avatarUrl} alt={label ?? group.name} className="size-full object-cover" />
-    </div>
-  );
-}
-
 export function InitialsAvatar({
   initials,
   size = 32,

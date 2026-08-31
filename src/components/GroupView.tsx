@@ -3,7 +3,7 @@
 // does not become a wall of competing motion. Plain messages go to the room's
 // default responder; @mentions override that routing.
 import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
-import { ArrowDown, Check, ChevronDown, Folder, FolderOpen, Loader2, MessageSquareReply, Pin, PinOff, Plus, Search, X } from "lucide-react";
+import { ArrowDown, Check, ChevronDown, Folder, FolderOpen, Loader2, MessageSquareReply, Pin, PinOff, Plus, Search, Settings2, X } from "lucide-react";
 import {
   api,
   useStore,
@@ -1008,8 +1008,14 @@ export function GroupView({ group }: { group: Group }) {
         )}
         style={drag}
       >
-        <span className="text-[15px] font-semibold text-ink">{group.name}</span>
-        <div className="flex items-center gap-1.5" style={noDrag}>
+        <button
+          onClick={() => dispatch({ type: "toggleSettings", open: true })}
+          className="min-w-0 truncate text-[15px] font-semibold text-ink hover:underline text-left"
+          title="Channel settings"
+        >
+          {group.name}
+        </button>
+        <div className="flex shrink-0 items-center gap-1.5" style={noDrag}>
           <button
             type="button"
             onClick={() => setFindOpen((open) => !open)}
@@ -1045,6 +1051,14 @@ export function GroupView({ group }: { group: Group }) {
               </span>
             </button>
           )}
+          <button
+            onClick={() => dispatch({ type: "toggleSettings", open: true })}
+            className="flex size-[28px] shrink-0 items-center justify-center rounded-md text-ink-secondary hover:bg-raised hover:text-ink"
+            title="Channel settings"
+            aria-label="Channel settings"
+          >
+            <Settings2 size={16} />
+          </button>
         </div>
       </div>
 

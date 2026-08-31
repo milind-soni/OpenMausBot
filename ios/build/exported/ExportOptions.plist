@@ -2,20 +2,23 @@
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
-	<!-- Upload straight to App Store Connect. Signing is automatic: the
-	     archive step resolves the Apple Distribution certificate and both
-	     App Store profiles itself (app + widget extension). -->
-	<key>method</key>
-	<string>app-store-connect</string>
 	<key>destination</key>
-	<string>upload</string>
-	<key>signingStyle</key>
-	<string>automatic</string>
-	<key>teamID</key>
-	<string>CC8UTF7ATG</string>
-	<key>uploadSymbols</key>
-	<true/>
+	<string>export</string>
+	<key>generateAppStoreInformation</key>
+	<false/>
 	<key>manageAppVersionAndBuildNumber</key>
 	<false/>
+	<key>method</key>
+	<string>app-store-connect</string>
+	<key>signingStyle</key>
+	<string>automatic</string>
+	<key>stripSwiftSymbols</key>
+	<true/>
+	<key>teamID</key>
+	<string>CC8UTF7ATG</string>
+	<key>testFlightInternalTestingOnly</key>
+	<false/>
+	<key>uploadSymbols</key>
+	<true/>
 </dict>
 </plist>

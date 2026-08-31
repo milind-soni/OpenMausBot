@@ -2,6 +2,7 @@ import { Component, memo, useCallback, useEffect, useLayoutEffect, useMemo, useR
 import {
   AlertTriangle,
   ArrowDown,
+  ArrowRight,
   Check,
   ChevronDown,
   ChevronLeft,
@@ -37,6 +38,7 @@ import {
 } from "@/state/store";
 import { EngineSetup } from "./EngineSetup";
 import { BotAvatar, MausAvatar } from "./Avatar";
+import { ProviderMark } from "./ProviderIcons";
 import { TurnPresence } from "./TurnPresence";
 import { showToolCallsEnabled } from "@/lib/feature-flags";
 import { stateForBot } from "@/lib/mascot";
@@ -305,7 +307,8 @@ function Bubble({
   replyTarget?: Message;
   onReply: () => void;
 }) {
-  const { dispatch } = useStore();
+  const { state, dispatch } = useStore();
+  const engine = state.instances.find(i => i.instanceId === bot.modelSelection.instanceId);
   const user = message.role === "user";
   const [expanded, setExpanded] = useState(false);
   const text = message.text ?? "";
@@ -330,12 +333,21 @@ function Bubble({
     if (v && !bot.busy) dispatch({ type: "switchBranch", botId: bot.id, messageId: v.id });
   };
 
+  const isBotToBot = message.role === "user" && !!message.from;
+  const isRightAligned = user && !isBotToBot;
+
   return (
-    <div className={cn("group flex w-full flex-col", user ? "animate-msg-in items-end" : "items-start")}>
-      <div className={cn("flex w-full items-center gap-1.5", user ? "justify-end" : "justify-start")}>
+    <div className={cn("group flex w-full flex-col", isRightAligned ? "animate-msg-in items-end" : "items-start")}>
+      {isBotToBot && message.from && (
+        <div className="mb-1 flex items-center gap-1.5 pl-1 text-[11px] font-medium text-ink-secondary">
+          <MausAvatar color={message.from.color} state="happy" size={16} animated={false} />
+          {message.from.name}
+        </div>
+      )}
+      <div className={cn("flex w-full items-center gap-1.5", isRightAligned ? "justify-end" : "justify-start")}>
         {/* editing rewinds the thread, so it waits for the turn to end —
             same rule as the version switcher below */}
-        {user && message.kind === "text" && !webhookView && !bot.busy && (
+        {isRightAligned && message.kind === "text" && !webhookView && !bot.busy && (
           <button
             onClick={onStartEdit}
             aria-label="Edit message"
@@ -345,9 +357,9 @@ function Bubble({
             <Pencil size={14} />
           </button>
         )}
-        {user && message.kind === "text" && <ReactionBar threadId={bot.threadId} message={message} />}
-        {user && <CopyButton text={visibleText} />}
-        {user && (
+        {isRightAligned && message.kind === "text" && <ReactionBar threadId={bot.threadId} message={message} />}
+        {isRightAligned && <CopyButton text={visibleText} />}
+        {isRightAligned && (
           <>
             <button
               type="button"
@@ -383,9 +395,11 @@ function Bubble({
             "w-fit max-w-[min(42rem,78%)] rounded-2xl text-[15px] leading-relaxed",
             user && webhookView
               ? "overflow-hidden border border-accent/25 bg-card text-ink shadow-[0_10px_30px_rgba(0,0,0,0.18)]"
-              : user
+              : isRightAligned
                 ? "bg-bubble-user px-4 py-2.5 whitespace-pre-wrap text-ink"
-                : "bg-card px-4 py-2.5 text-ink",
+                : isBotToBot
+                  ? "border border-hairline/40 bg-panel px-4 py-2.5 whitespace-pre-wrap text-ink"
+                  : "bg-card px-4 py-2.5 text-ink",
           )}
           title={new Date(message.at).toLocaleString()}
         >
@@ -450,6 +464,14 @@ function Bubble({
         {!user && (
           <>
             <div className="flex flex-col gap-0.5 self-end pb-0.5">
+              {engine && (
+                <div 
+                  className="flex items-center justify-center rounded-md p-1.5 opacity-0 transition-opacity group-hover:opacity-100 group-focus-within:opacity-100 cursor-default"
+                  title={engine.displayName}
+                >
+                  <ProviderMark driverKind={engine.driverKind} size={14} />
+                </div>
+              )}
               <CopyButton text={text} />
               {message.kind === "text" && (
                 <SpeakButton text={text} botId={bot.id} messageId={message.id} voiceId={bot.voice} />
@@ -550,23 +572,47 @@ function Bubble({
 
 /** A tool run: spinner while live, check/cross once settled. */
 function ActivityChip({ message }: { message: Message }) {
-  const { dispatch } = useStore();
+  const { state, dispatch } = useStore();
+  const [expanded, setExpanded] = useState(false);
   const tool = message.tool;
   if (!tool) return null;
   // bot⇄bot comm chip: opens the channel where the exchange lives
   const comm = message.comm;
   if (comm) {
+    const group = state.groups.find((g) => g.id === comm.groupId);
     return (
-      <div className="flex justify-start">
+      <div className="flex w-full flex-col items-start gap-2">
         <button
-          onClick={() => dispatch({ type: "select", id: comm.groupId })}
-          title={`Open the conversation with ${comm.withName}`}
+          onClick={() => setExpanded(!expanded)}
+          title={`Expand conversation with ${comm.withName}`}
           className="flex items-center gap-2 rounded-full border border-hairline/40 bg-panel px-3 py-1.5 text-[13px] text-ink-secondary hover:bg-raised hover:text-ink"
         >
-          <MausAvatar color={comm.withColor} state="happy" size={16} />
+          <MausAvatar color={comm.withColor} state="happy" size={16} animated={false} />
           <span className="max-w-[480px] truncate">{tool.name}</span>
-          <ChevronRight size={13} />
+          {expanded ? <ChevronDown size={13} /> : <ChevronRight size={13} />}
         </button>
+        {expanded && group && (
+          <div className="relative w-full max-w-[min(42rem,78%)] rounded-xl border border-hairline/40 bg-card p-4">
+            <button
+              onClick={() => dispatch({ type: "select", id: comm.groupId })}
+              className="absolute right-3 top-3 rounded-md p-1.5 text-ink-secondary hover:bg-raised hover:text-ink"
+              title="Open full conversation"
+            >
+              <ArrowRight size={14} />
+            </button>
+            <div className="flex flex-col gap-3 pr-8 max-h-[320px] overflow-y-auto">
+               {group.messages.filter((m) => m.kind === "text").map((m) => {
+                 const senderName = m.from?.name || (m.role === "user" ? "You" : "Bot");
+                 return (
+                   <div key={m.id} className="text-[14px] text-ink leading-relaxed">
+                      <div className="mb-0.5 text-[11.5px] font-semibold text-ink-secondary">{senderName}</div>
+                      <ChatMarkdown text={m.text ?? ""} />
+                   </div>
+                 );
+               })}
+            </div>
+          </div>
+        )}
       </div>
     );
   }
