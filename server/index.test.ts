@@ -4623,6 +4623,25 @@ describe("harness HTTP API", () => {
       });
       expect(deniedWithoutHash).toMatchObject({ status: 200, body: { outcome: "rejected" } });
 
+      // Denial is still safe when a crash or later cleanup has already lost
+      // the staged bytes. Settle the durable card instead of trapping the
+      // composer behind a proposal that can no longer be applied.
+      const missingStage = await stage("reviewed-skill-missing-stage");
+      writeFileSync(
+        join(home, ".openmausbot", "skill-state", bot.id, "staged.json"),
+        `${JSON.stringify({ writes: {} }, null, 2)}\n`,
+      );
+      expect(await api("POST", `/api/threads/${bot.threadId}/respond`, {
+        requestId: missingStage.requestId,
+        behavior: "deny",
+      })).toMatchObject({ status: 200, body: { outcome: "rejected" } });
+      const missingStageCard = (await api("GET", "/api/bots")).body.bots
+        .find((candidate: { id: string }) => candidate.id === bot.id)
+        ?.messages.find((message: { card?: { requestId?: string } }) =>
+          message.card?.requestId === missingStage.requestId,
+        )?.card;
+      expect(missingStageCard).toMatchObject({ answered: "deny", dismissed: true });
+
       // Deleting the only transcript that owns a pending card must also drop
       // its bot-scoped stage; otherwise the invisible proposal reserves its
       // name until the 30-day expiry.

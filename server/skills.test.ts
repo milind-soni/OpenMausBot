@@ -12,7 +12,7 @@ import {
   writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { basename, join } from "node:path";
 
 import { removeTempDir } from "./testing/cleanup.ts";
 import { DATA_DIR } from "./config.ts";
@@ -714,7 +714,7 @@ describe("staged skill writes", () => {
     expect(listStagedSkillWrites(bot)).toMatchObject([{ id: next.id }]);
   });
 
-  it("removes an updated skill and its active revision", () => {
+  it("removes an updated skill and its active revision without deleting a later same-name directory", () => {
     const created = stageSkillWrite(bot, {
       action: "create",
       files: [{ path: "SKILL.md", content: SKILL("remove-updated", "Original.") }],
@@ -729,10 +729,37 @@ describe("staged skill writes", () => {
     if ("error" in staged) throw new Error(staged.error);
     expect(applyStagedSkillWrite(bot, staged.id)).toMatchObject({ description: "Replacement." });
     const revision = realpathSync(join(workspaceDir(bot), ".agents", "skills", "remove-updated"));
+    const laterDirectory = join(workspaceDir(bot), "skills", "remove-updated");
+    mkdirSync(laterDirectory, { recursive: true });
+    writeFileSync(join(laterDirectory, "owner.txt"), "user-owned\n");
 
     expect(removeSkill(bot, "remove-updated")).toEqual({ removed: true });
     expect(existsSync(revision)).toBe(false);
-    expect(existsSync(join(workspaceDir(bot), "skills", "remove-updated"))).toBe(false);
+    expect(readFileSync(join(laterDirectory, "owner.txt"), "utf8")).toBe("user-owned\n");
+  });
+
+  it("never follows a replaced revisions directory while removing a reviewed skill", () => {
+    const created = stageSkillWrite(bot, {
+      action: "create",
+      files: [{ path: "SKILL.md", content: SKILL("remove-revision-link", "Original.") }],
+    });
+    if ("error" in created) throw new Error(created.error);
+    expect(applyStagedSkillWrite(bot, created.id)).toMatchObject({ name: "remove-revision-link" });
+
+    const root = workspaceDir(bot);
+    const activeLink = join(root, ".agents", "skills", "remove-revision-link");
+    const revision = basename(realpathSync(activeLink));
+    const revisions = join(root, "skills", ".revisions");
+    rmSync(revisions, { recursive: true, force: true });
+    const outside = join(scratch, "outside-revisions");
+    const outsideRevision = join(outside, revision);
+    mkdirSync(outsideRevision, { recursive: true });
+    writeFileSync(join(outsideRevision, "marker.txt"), "must survive\n");
+    symlinkSync(outside, revisions, process.platform === "win32" ? "junction" : "dir");
+
+    expect(removeSkill(bot, "remove-revision-link")).toEqual({ removed: true });
+    expect(readFileSync(join(outsideRevision, "marker.txt"), "utf8")).toBe("must survive\n");
+    expect(listSkills(bot)).toEqual([]);
   });
 
   it("rejects an existing or already-pending name", () => {

@@ -682,19 +682,20 @@ export function removeSkill(botId: string, name: string): { removed: true } | { 
   if (directoryEntryState(root) === "unsafe") {
     return { error: "the workspace skills path is a symlink or file; refusing to remove through it" };
   }
-  const target = entry.storageRevision
-    ? join(root, ".revisions", entry.storageRevision)
-    : join(root, name);
-  const targetState = directoryEntryState(target);
-  const original = join(root, name);
-  const originalState = entry.storageRevision ? directoryEntryState(original) : "missing";
+  const target = entry.storageRevision ? null : join(root, name);
+  const targetState = target ? directoryEntryState(target) : "missing";
   delete manifest[name];
   writeManifest(botId, manifest);
   // Remove our native links while their target still exists, so ownership
   // can be proven without ever deleting a user-replaced path.
   syncSkillLinks(botId);
-  if (targetState === "directory") rmSync(target, { recursive: true, force: true });
-  if (originalState === "directory") rmSync(original, { recursive: true, force: true });
+  if (entry.storageRevision) {
+    // Re-check both the revisions parent and the reviewed content immediately
+    // before deletion. Never follow a workspace-replaced `.revisions` link.
+    removeReviewedRevision(botId, entry.storageRevision, entry.sha256);
+  } else if (target && targetState === "directory") {
+    rmSync(target, { recursive: true, force: true });
+  }
   removeReviewedRevisionsNamed(botId, name);
   return { removed: true };
 }

@@ -4430,7 +4430,7 @@ function resolveSkillRequest(args: {
   }
   if (args.behavior !== "allow") {
     const rejected = rejectStagedSkillWrite(args.botId, request.stagedId);
-    if ("error" in rejected) {
+    if ("error" in rejected && rejected.error !== "no such staged skill") {
       return { claimed: true, status: 409, error: rejected.error };
     }
     if ("applied" in rejected) {
