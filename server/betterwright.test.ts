@@ -3,6 +3,8 @@
 // guest), the exact process spawned for the MCP integration, and that erasing
 // a profile can only ever delete inside BetterWright's own profiles folder.
 import { existsSync, mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
+import { createServer } from "node:http";
+import type { AddressInfo } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
@@ -18,6 +20,7 @@ import {
   closeBrowserLiveViews,
   createBrowserProvisioner,
   forgetBrowserProfile,
+  proxyBrowserLiveViewPage,
   resumeBrowserProfileErasures,
 } from "./betterwright.ts";
 
@@ -159,6 +162,41 @@ describe("browser live view", () => {
   it("refuses an invalid profile name and a missing CLI", async () => {
     await expect(browserLiveViewUrl("../escape", "/unused")).resolves.toBeNull();
     await expect(browserLiveViewUrl("p2", null)).resolves.toBeNull();
+  });
+
+  it("re-serves the viewer page same-origin, tokenized, without its frame ban", async () => {
+    // a stand-in for what `betterwright view` serves, minus the daemon
+    const viewer = createServer((req, res) => {
+      if (new URL(req.url ?? "/", "http://placeholder").searchParams.get("t") !== "tok") {
+        res.writeHead(404);
+        res.end();
+        return;
+      }
+      res.writeHead(200, { "content-type": "text/html", "x-frame-options": "DENY" });
+      res.end("<html>viewer</html>");
+    });
+    await new Promise<void>((ready) => viewer.listen(0, "127.0.0.1", ready));
+    const viewerPort = (viewer.address() as AddressInfo).port;
+    const stub = join(betterwrightHome(), "stub-view-proxy.js");
+    writeFileSync(stub, `console.log('Live view: http://127.0.0.1:${viewerPort}/?t=tok');\nsetInterval(() => {}, 1000);\n`);
+    const front = createServer((req, res) => void proxyBrowserLiveViewPage("p-embed", req, res, stub));
+    await new Promise<void>((ready) => front.listen(0, "127.0.0.1", ready));
+    const frontPort = (front.address() as AddressInfo).port;
+    try {
+      // the page reads its token from location.search, so the iframe is sent
+      // back around carrying it
+      const redirect = await fetch(`http://127.0.0.1:${frontPort}/embed`, { redirect: "manual" });
+      expect(redirect.status).toBe(302);
+      expect(redirect.headers.get("location")).toBe("/embed?t=tok");
+      const page = await fetch(`http://127.0.0.1:${frontPort}/embed?t=tok`);
+      expect(page.status).toBe(200);
+      expect(page.headers.get("x-frame-options")).toBeNull();
+      expect(await page.text()).toBe("<html>viewer</html>");
+    } finally {
+      closeBrowserLiveViews();
+      viewer.close();
+      front.close();
+    }
   });
 });
 

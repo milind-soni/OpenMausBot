@@ -757,7 +757,7 @@ export function SettingsPanel({ bot }: { bot: Bot }) {
                     : !canUseBrowser
                       ? "This bot's current engine cannot use a browser."
                       : browserEnabled
-                        ? "This bot browses the web in its own managed window, with its own logins. When it needs your hands it posts a live-view link in chat, and you can watch or take over any time from its Computer panel."
+                        ? "This bot browses the web with its own logins. Watch it live and take over any time from the Browser tab in its computer panel; it also posts a link in chat when it needs your hands."
                         : "Keep the browser unavailable to this bot."}
                 </div>
               </div>

@@ -175,14 +175,20 @@ replacement buys:
   bounded ladder because an orphaned Chromium can rewrite the directory.
   Pending erases are journaled in the app data dir: a restart resumes them,
   and config refuses (409) a new profile on a partition still being erased.
-- **Sign-in and takeover move out of the app.** The bot calls
-  `browser_handoff`, which returns a token-guarded live-view URL the user
-  opens to watch or take control; `browser_login` fills vault credentials
-  without exposing them to the model. The person can also start the same
-  live view themselves: the Computer panel's "Watch live" button asks the
-  server for a `betterwright view --expose local` page on the bot's profile.
-  The in-app Browser panel and its who-is-driving lease are removed. This
-  also clears the old tier-1 limit: BetterWright's browser is a real
+- **The live view stays embedded in the app.** The Computer panel keeps a
+  Browser tab: it iframes `/api/bots/:id/browser/view-embed`, a same-origin
+  proxy of the `betterwright view --expose local` page the server keeps
+  running per profile (the raw page forbids cross-origin frames and checks
+  WebSocket origins, so the server rewrites both; the viewer's `/ws`
+  upgrade rides the app origin and is routed back by token). The person
+  watches the bot's page live in the panel and clicks into it to take
+  over, exactly the old preview-plus-takeover loop; an "Open in tab"
+  button pops the same view out. For sign-in steps the bot itself calls
+  `browser_handoff` (the integration sets the deployer opt-in
+  `BETTERWRIGHT_LIVE_VIEW_EXPOSE=local`), and `browser_login` fills vault
+  credentials without exposing them to the model. The old who-is-driving
+  lease is gone: BetterWright serializes viewer and agent input itself.
+  This also clears the old tier-1 limit: BetterWright's browser is a real
   Chromium fork, so Google OAuth works.
 - **Platform matrix shifts.** BetterChromium ships for macOS arm64, Linux
   x64 and Windows x64. Windows gains the built-in browser (the embedded

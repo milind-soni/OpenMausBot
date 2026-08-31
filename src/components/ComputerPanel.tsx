@@ -10,6 +10,7 @@ import {
   CalendarClock,
   CalendarDays,
   Columns2,
+  ExternalLink,
   Globe,
   Hand,
   Loader2,
@@ -261,6 +262,12 @@ export function ComputerPanel({
       writeComputerPanelView(bot.id, "computer");
     }
   }, [androidConnected, bot.id, panelView]);
+  useEffect(() => {
+    if (!browserEnabled && panelView === "browser") {
+      setPanelView("computer");
+      writeComputerPanelView(bot.id, "computer");
+    }
+  }, [browserEnabled, bot.id, panelView]);
   useEffect(() => {
     vmReadinessAttempts.current = 0;
   }, [bot.id, bot.computer]);
@@ -845,7 +852,7 @@ export function ComputerPanel({
         >
           <Settings size={18} />
         </button>
-        {androidConnected ? (
+        {androidConnected || browserEnabled ? (
           <div className="flex overflow-hidden rounded-lg border border-hairline/40">
             <button
               onClick={() => selectPanelView("computer")}
@@ -857,16 +864,30 @@ export function ComputerPanel({
             >
               <Monitor size={13} /> Computer
             </button>
-            <button
-              onClick={() => selectPanelView("android")}
-              aria-pressed={panelView === "android"}
-              className={cn(
-                "flex items-center gap-1.5 border-l border-hairline/40 px-2.5 py-1 text-[12.5px]",
-                panelView === "android" ? "bg-control text-ink" : "text-ink-secondary hover:text-ink",
-              )}
-            >
-              <Smartphone size={13} /> Android
-            </button>
+            {androidConnected && (
+              <button
+                onClick={() => selectPanelView("android")}
+                aria-pressed={panelView === "android"}
+                className={cn(
+                  "flex items-center gap-1.5 border-l border-hairline/40 px-2.5 py-1 text-[12.5px]",
+                  panelView === "android" ? "bg-control text-ink" : "text-ink-secondary hover:text-ink",
+                )}
+              >
+                <Smartphone size={13} /> Android
+              </button>
+            )}
+            {browserEnabled && (
+              <button
+                onClick={() => selectPanelView("browser")}
+                aria-pressed={panelView === "browser"}
+                className={cn(
+                  "flex items-center gap-1.5 border-l border-hairline/40 px-2.5 py-1 text-[12.5px]",
+                  panelView === "browser" ? "bg-control text-ink" : "text-ink-secondary hover:text-ink",
+                )}
+              >
+                <Globe size={13} /> Browser
+              </button>
+            )}
           </div>
         ) : (
           <span className="text-[15px] font-semibold text-ink">Computer</span>
@@ -879,33 +900,40 @@ export function ComputerPanel({
         </button>
       </div>
 
-      {panelView === "android" && androidConnected ? (
+      {panelView === "browser" && browserEnabled ? (
+        <div className="flex min-h-0 flex-1 flex-col px-4 pb-4 pt-2">
+          <div className="mb-1.5 flex items-center justify-between text-[13px] text-ink-secondary">
+            <span>{bot.name}'s browser</span>
+            <button
+              onClick={() => void openBrowserLiveView()}
+              disabled={browserViewPending}
+              className="flex items-center gap-1.5 rounded-md bg-control px-2.5 py-1 text-[12px] text-ink hover:bg-raised-hover disabled:opacity-50"
+              title="Open this live view in its own browser tab"
+            >
+              {browserViewPending ? <Loader2 size={12} className="animate-spin" /> : <ExternalLink size={12} />}
+              Open in tab
+            </button>
+          </div>
+          {browserViewError && (
+            <div className="mb-1.5 rounded-lg border border-danger/30 bg-danger/10 px-3 py-2 text-[12px] text-danger">
+              {browserViewError}
+            </div>
+          )}
+          <iframe
+            src={`/api/bots/${bot.id}/browser/view-embed`}
+            title={`${bot.name}'s browser live view`}
+            className="min-h-0 w-full flex-1 rounded-xl border border-hairline/40 bg-card"
+          />
+          <div className="mt-1.5 text-[12px] text-ink-secondary">
+            Live page — click into it to take over any time; hand back when you are done.
+          </div>
+        </div>
+      ) : panelView === "android" && androidConnected ? (
         <div className="flex-1 overflow-y-auto px-4 pt-2">
           <AndroidDevicePanel status={androidStatus} />
         </div>
       ) : (
       <div className="flex-1 overflow-y-auto px-5 pb-5">
-          {browserEnabled && (
-            <div className="mt-2">
-              <div className="flex items-center justify-between text-[13px] text-ink-secondary">
-                <span>{bot.name}'s browser</span>
-                <button
-                  onClick={() => void openBrowserLiveView()}
-                  disabled={browserViewPending}
-                  className="flex items-center gap-1.5 rounded-md bg-control px-2.5 py-1 text-[12px] text-ink hover:bg-raised-hover disabled:opacity-50"
-                  title="Open a live view of this bot's browser — watch, or click into the page to take over"
-                >
-                  {browserViewPending ? <Loader2 size={12} className="animate-spin" /> : <Globe size={12} />}
-                  Watch live
-                </button>
-              </div>
-              {browserViewError && (
-                <div className="mt-1.5 rounded-lg border border-danger/30 bg-danger/10 px-3 py-2 text-[12px] text-danger">
-                  {browserViewError}
-                </div>
-              )}
-            </div>
-          )}
           {/* Screen preview */}
           <div className="mb-1.5 mt-2 flex items-center justify-between text-[13px] text-ink-secondary">
             <span>{bot.name}'s screen</span>

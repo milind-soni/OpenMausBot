@@ -17,8 +17,9 @@ describe("computer panel view persistence", () => {
   });
 
   it("falls back safely for stale values or blocked storage", () => {
-    // "browser" is a retired view: the built-in browser panel no longer exists.
-    expect(readComputerPanelView("sprout", { getItem: () => "browser" })).toBe("computer");
+    // "browser" survived the BetterWright migration: the tab now embeds the
+    // live view instead of the old WebContentsView, but the choice persists.
+    expect(readComputerPanelView("sprout", { getItem: () => "browser" })).toBe("browser");
     expect(readComputerPanelView("sprout", { getItem: () => "unknown" })).toBe("computer");
     expect(readComputerPanelView("sprout", { getItem: () => { throw new Error("blocked"); } })).toBe("computer");
 

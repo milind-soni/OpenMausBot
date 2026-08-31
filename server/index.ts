@@ -197,6 +197,8 @@ import {
   browserProvisioner,
   closeBrowserLiveViews,
   forgetBrowserProfile,
+  proxyBrowserLiveViewPage,
+  proxyBrowserLiveViewUpgrade,
   resumeBrowserProfileErasures,
 } from "./betterwright.ts";
 import { captureOutsideHumanControl } from "./private-screen-capture.ts";
@@ -8138,6 +8140,19 @@ const server = createServer(async (req, res) => {
       if (!url) return json(res, 503, { error: "the browser live view could not be started" });
       return json(res, 200, { url });
     }
+    // Same view, embedded: the Computer panel's Browser tab iframes this
+    // same-origin proxy of the live-view page (which forbids cross-origin
+    // frames on its raw URL).
+    m = path.match(/^\/api\/bots\/([\w-]+)\/browser\/view-embed$/);
+    if (m && method === "GET") {
+      const bot = store.bot(m[1]);
+      if (!bot) return json(res, 404, { error: "no such bot" });
+      if (!builtInBrowserEnabled(cfg) || bot.browser === false) {
+        return json(res, 409, { error: "the browser is not enabled for this bot" });
+      }
+      await proxyBrowserLiveViewPage(browserProfileName(bot.id, bot.browserProfile, cfg), req, res);
+      return;
+    }
     m = path.match(/^\/api\/bots\/([\w-]+)\/computer\/viewer-close$/);
     if (m && method === "POST") {
       const bot = store.bot(m[1]);
@@ -8231,6 +8246,14 @@ const server = createServer(async (req, res) => {
 });
 
 calendarCalls.start();
+
+// The embedded live view's page dials ws://<app origin>/ws with its token;
+// route that upgrade to the right BetterWright view child. Nothing else on
+// this server speaks WebSocket.
+server.on("upgrade", (req, socket, head) => {
+  if (req.url?.startsWith("/ws")) proxyBrowserLiveViewUpgrade(req, socket, head);
+  else socket.destroy();
+});
 
 server.listen(PORT, "127.0.0.1", () => {
   console.log(`openmausbot server on http://127.0.0.1:${PORT}`);

@@ -6,9 +6,12 @@
 import { execFile, spawn, type ChildProcess } from "node:child_process";
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { rm } from "node:fs/promises";
+import { request as httpRequest, type IncomingMessage, type ServerResponse } from "node:http";
 import { createRequire } from "node:module";
+import { connect as netConnect } from "node:net";
 import { homedir } from "node:os";
 import { dirname, isAbsolute, join, resolve, sep } from "node:path";
+import type { Duplex } from "node:stream";
 import { setTimeout as delay } from "node:timers/promises";
 import { promisify } from "node:util";
 
@@ -289,6 +292,8 @@ async function closeBrowserProfileSessions(profileName: string, lock: string): P
  * itself (verified: the URL dies with the process), so the child stays up
  * until the server exits or the person is done with it. */
 const liveViews = new Map<string, { url: Promise<string | null>; child: ChildProcess }>();
+/** Capability token → the view child's own URL, for the embed proxy below. */
+const liveViewTargets = new Map<string, URL>();
 
 export function browserLiveViewUrl(
   profileName: string,
@@ -314,10 +319,19 @@ export function browserLiveViewUrl(
     const scan = (chunk: Buffer) => {
       printed += String(chunk);
       const found = printed.match(/http:\/\/\S+/);
-      if (found) {
-        clearTimeout(deadline);
-        settle(found[0]);
+      if (!found) return;
+      clearTimeout(deadline);
+      try {
+        const parsed = new URL(found[0]);
+        const token = parsed.searchParams.get("t");
+        if (token) {
+          liveViewTargets.set(token, parsed);
+          child.once("exit", () => liveViewTargets.delete(token));
+        }
+      } catch {
+        // an unparsable URL still gets relayed; only the embed loses out
       }
+      settle(found[0]);
     };
     child.stdout?.on("data", scan);
     child.stderr?.on("data", scan);
@@ -334,6 +348,87 @@ export function browserLiveViewUrl(
   child.on("exit", () => liveViews.delete(profileName));
   liveViews.set(profileName, { url, child });
   return url;
+}
+
+/** Serve the live-view page through the app's own origin so the Computer
+ * panel can embed it: the viewer ships `X-Frame-Options: DENY`, which is
+ * right for its raw URL and wrong for our own panel. The page reads its
+ * token from location.search and dials `/ws` on whatever origin served it,
+ * so the proxy first redirects the iframe to carry the real token, then
+ * re-serves the page with the frame ban dropped. */
+export async function proxyBrowserLiveViewPage(
+  profileName: string,
+  req: IncomingMessage,
+  res: ServerResponse,
+  cliPath: string | null = betterwrightCliPath(),
+): Promise<void> {
+  const viewUrl = await browserLiveViewUrl(profileName, cliPath);
+  const target = viewUrl ? new URL(viewUrl) : null;
+  const token = target?.searchParams.get("t");
+  if (!target || !token) {
+    res.writeHead(503, { "content-type": "application/json" });
+    res.end(JSON.stringify({ error: "the browser live view could not be started" }));
+    return;
+  }
+  const requested = new URL(req.url ?? "/", "http://placeholder");
+  if (requested.searchParams.get("t") !== token) {
+    res.writeHead(302, {
+      location: `${requested.pathname}?t=${encodeURIComponent(token)}`,
+      "cache-control": "no-store",
+    });
+    res.end();
+    return;
+  }
+  const upstream = httpRequest(
+    {
+      hostname: target.hostname,
+      port: target.port,
+      path: `/?t=${encodeURIComponent(token)}`,
+      headers: { host: target.host },
+    },
+    (proxied) => {
+      const headers = { ...proxied.headers };
+      delete headers["x-frame-options"];
+      res.writeHead(proxied.statusCode ?? 502, headers);
+      proxied.pipe(res);
+    },
+  );
+  upstream.on("error", () => {
+    if (!res.headersSent) res.writeHead(502, { "content-type": "application/json" });
+    res.end(JSON.stringify({ error: "the browser live view is not reachable" }));
+  });
+  upstream.end();
+}
+
+/** Tunnel the embedded viewer's `/ws` upgrade to whichever view child owns
+ * the token. The worker drops upgrades whose Origin does not match its own
+ * host, so the handshake is rewritten rather than spliced verbatim. */
+export function proxyBrowserLiveViewUpgrade(req: IncomingMessage, socket: Duplex, head: Buffer): void {
+  const token = new URL(req.url ?? "/", "http://placeholder").searchParams.get("t") ?? "";
+  const target = liveViewTargets.get(token);
+  if (!target) {
+    socket.destroy();
+    return;
+  }
+  const upstream = netConnect(Number(target.port), target.hostname, () => {
+    const lines = [
+      `GET /ws?t=${encodeURIComponent(token)} HTTP/1.1`,
+      `host: ${target.host}`,
+      `origin: http://${target.host}`,
+      "connection: Upgrade",
+      "upgrade: websocket",
+    ];
+    for (const name of ["sec-websocket-key", "sec-websocket-version", "sec-websocket-extensions", "sec-websocket-protocol"]) {
+      const value = req.headers[name];
+      if (typeof value === "string") lines.push(`${name}: ${value}`);
+    }
+    upstream.write(`${lines.join("\r\n")}\r\n\r\n`);
+    if (head.length) upstream.write(head);
+    socket.pipe(upstream);
+    upstream.pipe(socket);
+  });
+  upstream.on("error", () => socket.destroy());
+  socket.on("error", () => upstream.destroy());
 }
 
 /** Shutdown: live-view pages die with the server on purpose. */
