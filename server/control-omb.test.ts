@@ -49,6 +49,18 @@ describe("control-omb command mapping", () => {
     });
   });
 
+  it("rejects an available engine when the endpoint is not OpenMausBot", async () => {
+    const callTool = vi.fn(async (name: string) => name === "get_system_health"
+      ? { status: "connected", app: "another-app" }
+      : { instances: [{ instanceId: "ready", snapshot: { state: "available" } }] });
+
+    const result = await runControlOmb(["doctor", "--url", "http://127.0.0.1:19999"], {
+      callTool: callTool as any,
+    }) as any;
+
+    expect(result.ok).toBe(false);
+  });
+
   it("refuses to mutate a silently discovered live app", async () => {
     await expect(runControlOmb(["new-bot", "--name", "Probe"], {
       callTool: vi.fn() as any,

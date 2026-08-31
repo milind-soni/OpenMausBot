@@ -2774,11 +2774,21 @@ describe("harness HTTP API", () => {
       expect(system).toContain('<openmaus-skill id="phone-harness"');
     } finally {
       if (room) {
-        await api("POST", `/api/groups/${room.id}/interrupt`, {}).catch(() => undefined);
-        await api("DELETE", `/api/groups/${room.id}`).catch(() => undefined);
+        expect((await api("POST", `/api/groups/${room.id}/interrupt`, {})).status).toBe(200);
+        await expect.poll(async () => {
+          const state = (await api("GET", "/api/bots?messages=0")).body;
+          const currentRoom = state.groups.find((candidate: { id: string }) => candidate.id === room.id);
+          const currentBot = state.bots.find((candidate: { id: string }) => candidate.id === bot.id);
+          return {
+            working: currentRoom?.working,
+            busyBotId: currentRoom?.busyBotId,
+            botBusy: currentBot?.busy,
+          };
+        }, { timeout: 5_000 }).toEqual({ working: false, busyBotId: null, botBusy: false });
+        expect((await api("DELETE", `/api/groups/${room.id}`)).status).toBe(200);
       }
-      await api("DELETE", `/api/bots/${bot.id}`).catch(() => undefined);
-      await api("PATCH", "/api/config", { features: { skillRecorder: false } }).catch(() => undefined);
+      expect((await api("DELETE", `/api/bots/${bot.id}`)).status).toBe(200);
+      expect((await api("PATCH", "/api/config", { features: { skillRecorder: false } })).status).toBe(200);
     }
   });
 

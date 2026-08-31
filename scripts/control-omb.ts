@@ -157,7 +157,8 @@ export async function runControlOmb(
     const health = rawHealth as { status: string; endpoint?: string; app: string; packaged: boolean };
     const instances = (models as { instances?: Array<{ instanceId?: string; snapshot?: { state?: string } }> }).instances ?? [];
     return {
-      ok: instances.some((instance) => instance.snapshot?.state === "available"),
+      ok: health.app === "openmausbot"
+        && instances.some((instance) => instance.snapshot?.state === "available"),
       health: endpoint ? { ...health, endpoint } : health,
       availableEngines: instances
         .filter((instance) => instance.snapshot?.state === "available")
