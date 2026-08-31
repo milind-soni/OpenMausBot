@@ -1,96 +1,65 @@
 ---
 name: create-verification-skill
-description: "Generate a project-local verification skill: a scripted way to launch the user's app, drive one of its features the way a user would, and capture evidence — on whichever surface this bot actually has (browser, computer, phone, or plain Bash). Use when asked to create a verification skill, a control CLI, or a feature map, or when work on an app keeps ending without proof."
+description: "Create one reviewed skill that teaches a bot how to launch, drive, and verify a specific app or project. Use only when the user explicitly asks for a verification skill."
 ---
 
 # Create a verification skill
 
-A verification skill is how you prove your own work: launch the real app,
-exercise a feature the way a user would, and capture evidence. Build it once
-and every later turn — yours or another bot's — verifies in a few tool calls
-instead of improvising. Write everything you generate for the next agent, not
-for a human: it will be read cold by a bot that has never seen the app.
+Create one compact, project-specific `SKILL.md` through OpenMausBot's normal
+skill review flow. Do not install files directly, enable a skill yourself, or
+silently add scripts to the user's project.
 
-## 1. Pick the surface from the tools you actually have
+## 1. Inspect before drafting
 
-- **Web app, or anything reachable by URL** → the built-in browser tools
-  (`browser_navigate`, `browser_snapshot`, `browser_click`, `browser_fill`,
-  `browser_wait_for`, `browser_screenshot`). Refs from snapshots are the
-  lever; screenshots are the evidence.
-- **Desktop app** → the computer tools on this bot's computer. Prefer an
-  isolated computer (cloud or Local VM) over the user's own desktop.
-- **Physical Android app** → the phone tools, when mounted.
-- **CLI, service, or library** → Bash in the workspace: build once, drive
-  each run in its own process, use curl for services.
+Use the tools already mounted on this bot to establish:
 
-If the right surface tool is not mounted, say exactly that and name the
-setting that adds it (the bot's Computer or Browser toggle). Never fake a
-surface with a weaker one.
+- the exact project or app being verified;
+- its existing launch command and reliable ready signal;
+- the safest available control surface: existing project CLI, browser,
+  computer, phone, or shell;
+- one read-only health check;
+- up to three important user workflows and the observable result that proves
+  each one worked;
+- how to stop only the process or resource started by the verification run.
 
-## 2. Interview the repo, not the user
+Prefer an existing control surface. If the project has no dependable way to
+launch or drive the relevant workflow, report that prerequisite instead of
+inventing commands, selectors, APIs, or a new control program.
 
-Answer from the codebase; ask the user only what you cannot observe: how the
-app starts locally (the repo's own dev command), how you can tell it is
-ready (log line, port answering), seed data and test accounts, whether two
-instances can run side by side. If the checkout does not start as-is, fix or
-report that first — a skill written against a broken base teaches wrong steps.
+## 2. Prove one workflow
 
-## 3. Build the lever
+Run the real launch, health check, one representative workflow, evidence
+capture, and cleanup once. Use an isolated test profile or temporary data when
+available; never drive the user's live data merely to author the skill. If the
+workflow cannot be proved with the tools currently mounted, stop and explain
+which capability is missing.
 
-When the surface is Bash-reachable, write a small control CLI into the
-project (for example `scripts/control-<app>.mjs`) instead of leaving prose
-instructions: subcommands like `doctor`, `launch`, `send`, `snapshot`,
-`screenshot`, `wait-settle`, `cleanup`. Rules for the CLI: descriptive
-errors that say what to do instead, `--dry-run` on anything destructive,
-machine-readable output, rich `--help`. When the surface is the browser,
-computer, or phone tools, those ARE the lever — the drive recipes belong in
-the feature map instead of a wrapper script.
+## 3. Draft one self-contained skill
 
-## 4. Generate the skill where it becomes real
+The proposed `SKILL.md` must contain YAML frontmatter and these sections:
 
-Write the skill to `~/.openmausbot/skills/verify-<app>/` (the user-skills
-folder; hot-loaded, no restart):
+1. **Launch** — exact command, isolated data/profile, ready signal.
+2. **Doctor** — one read-only check with an actionable failure message.
+3. **Drive** — stable names, accessibility targets, routes, refs, or commands;
+   never recorded screen coordinates.
+4. **Evidence** — action plus resulting state and any important side effect.
+5. **Cleanup** — stop only what this run started; preserve the evidence.
+6. **Feature map** — at most three proven workflows, each with the user path,
+   control recipe, success proof, and known gotcha.
+7. **Maintenance** — re-run Doctor and the affected workflow when the app
+   changes; update drifted instructions but never hide a product failure.
 
-- `manifest.json` — `id` must equal the folder name (kebab-case), plus
-  `name`, `version` "0.1.0", `description`, `defaultEnabled` true,
-  `triggerTerms` (include "/verify-<app>" and the app's name), and
-  `requiredCapabilities` naming the surface it needs (for example
-  `["browserMcp"]`) so it never triggers on a bot that cannot run it.
-- `SKILL.md` — frontmatter, then exactly these sections, each grounded in
-  what the interview found, no placeholders: **Launch** (command + ready
-  signal + teardown), **Doctor** (one read-only "is this instance worth
-  driving?" check), **Drive** (real selectors, refs, routes, or commands
-  from this app — stable handles, never coordinates), **Evidence** (what to
-  capture and where it survives; real user path, action AND resulting
-  state, side effects checked alongside what is visible), **Cleanup** (kill
-  what you started, never by process name; cleanup must not eat evidence).
-- `features/README.md` plus one file per major feature (top 3-5 to start),
-  each with exactly four H2s: `Sub-features`, `How to get to it (user
-  POV)`, `Driving it`, `Gotchas`. This map is compact shared memory — it is
-  why the second verification costs a fraction of the first.
+Keep it concise. A recording from Teach a skill may provide evidence for the
+user path, but it is input to the draft—not permission to retain secrets,
+audio, screenshots, or coordinates.
 
-## 4b. Recordings are seeds
+## 4. Stage it for review
 
-If the user has recorded a workflow with the skill recorder (or offers to
-demonstrate one), treat the recording as ground truth for that feature's
-`How to get to it (user POV)` section and its drive recipe — a
-demonstration beats your exploration. The reverse also holds: when you
-finish a feature-map entry, it upgrades any recorded skill for the same
-flow with a Doctor check, evidence standards, and cleanup it did not have.
+Call `skills_list` first. If an existing skill already covers the project,
+report that and do not overwrite it. Otherwise call `skill_manage` with
+`action="create"`, the complete `skill_md`, a short `gist`, and the exact
+source used (repository path, URL, or `conversation`).
 
-## 5. Prove it before you announce it
-
-Run the generated skill end to end once: launch, doctor, drive ONE mapped
-feature, capture evidence, clean up, then confirm the evidence still exists.
-A generated skill that was never executed is a draft, not a deliverable.
-Show the user the evidence when you report.
-
-## 6. Offer the maintenance routine
-
-Offer to keep the skill honest with a daily routine: propose it with
-propose_routine (instructions: "run /maintain-verification-skill for
-<app>"). The routine only exists after the user confirms the card — never
-claim it is scheduled before that.
-
-Prior art: this distills the verification practice from poteto's pstack,
-adapted to this app's surfaces and skill format.
+`skill_manage` only stages the proposal. Tell the user its name and that it is
+inactive until they approve the in-app review card. Never claim it was enabled
+or scheduled automatically.

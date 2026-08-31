@@ -66,41 +66,39 @@ describe("bundled skill library", () => {
   });
 });
 
-describe("bundled verification skills", () => {
+describe("bundled verification skill", () => {
   const skills = loadBundledSkills(join(process.cwd(), "skills"));
+  const instructions = skills.find((skill) => skill.manifest.id === "create-verification-skill")?.instructions ?? "";
 
-  it("ship enabled with valid manifests", () => {
+  it("ships one reviewed authoring adapter", () => {
     const ids = skills.map((skill) => skill.manifest.id);
     expect(ids).toContain("create-verification-skill");
-    expect(ids).toContain("maintain-verification-skill");
-    for (const skill of skills) {
-      expect(skill.manifest.defaultEnabled).toBe(true);
-      expect(skill.instructions.startsWith("---")).toBe(true);
-    }
+    expect(ids).not.toContain("maintain-verification-skill");
+    expect(instructions).toContain("skill_manage");
+    expect(instructions).not.toContain("~/.openmausbot");
+    expect(instructions).not.toContain("propose_routine");
   });
 
-  it("the slash form and natural phrasing both select create, and only create", () => {
+  it("requires skill authoring and an explicit creation request", () => {
     for (const text of [
       "/create-verification-skill for my notes app",
       "can you make a verification skill so you can prove changes work",
     ]) {
-      const selected = selectBundledSkills(text, [], skills).map((skill) => skill.manifest.id);
-      expect(selected).toContain("create-verification-skill");
-      expect(selected).not.toContain("maintain-verification-skill");
+      expect(selectBundledSkills(text, [], skills)).toEqual([]);
+      expect(selectBundledSkills(text, ["skillAuthoring"], skills).map((skill) => skill.manifest.id))
+        .toEqual(["create-verification-skill"]);
     }
   });
 
-  it("maintenance phrasing selects maintain without dragging in create", () => {
-    const selected = selectBundledSkills("/maintain-verification-skill for atlas", [], skills)
-      .map((skill) => skill.manifest.id);
-    expect(selected).toContain("maintain-verification-skill");
-    expect(selected).not.toContain("create-verification-skill");
-  });
-
-  it("ordinary chat selects neither", () => {
-    const selected = selectBundledSkills("please verify the numbers in this invoice", [], skills)
-      .map((skill) => skill.manifest.id);
-    expect(selected).not.toContain("create-verification-skill");
-    expect(selected).not.toContain("maintain-verification-skill");
+  it("does not mount for generic verification or maintenance phrasing", () => {
+    for (const text of [
+      "please verify the numbers in this invoice",
+      "maintain the verification skill for atlas",
+      "the verification skill is stale",
+      "make a control cli",
+      "create a feature map for my app",
+    ]) {
+      expect(selectBundledSkills(text, ["skillAuthoring"], skills)).toEqual([]);
+    }
   });
 });

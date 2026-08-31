@@ -2711,6 +2711,9 @@ describe("harness HTTP API", () => {
   it("mounts the verification skill into a real turn when its trigger appears", async () => {
     const bot = (await api("POST", "/api/bots", {})).body.bot;
     try {
+      expect((await api("PATCH", "/api/config", {
+        features: { skillRecorder: true },
+      })).status).toBe(200);
       expect((await api("PATCH", `/api/bots/${bot.id}`, {
         modelSelection: { instanceId: "claude", model: "claude-sonnet-5" },
       })).status).toBe(200);
@@ -2723,12 +2726,59 @@ describe("harness HTTP API", () => {
       const system = seen.argv[seen.argv.indexOf("--append-system-prompt") + 1] ?? "";
       // the skill's instructions ride the system prompt the agent receives
       expect(system).toContain('<openmaus-skill id="create-verification-skill"');
-      // the sibling is only MENTIONED by create's handoff text — it must not
-      // be mounted as its own skill on an untriggered turn
-      expect(system).not.toContain('<openmaus-skill id="maintain-verification-skill"');
+      expect(system).toContain("skill_manage");
     } finally {
       await api("POST", `/api/bots/${bot.id}/interrupt`);
       await api("DELETE", `/api/bots/${bot.id}`);
+      await api("PATCH", "/api/config", { features: { skillRecorder: false } });
+    }
+  });
+
+  it("mounts the verification skill only for the latest channel request", async () => {
+    const bot = (await api("POST", "/api/bots", {
+      modelSelection: { instanceId: "claude", model: "claude-sonnet-5" },
+      requireAvailableModel: true,
+    })).body.bot;
+    let room: any;
+    try {
+      expect((await api("PATCH", "/api/config", {
+        features: { skillRecorder: true },
+      })).status).toBe(200);
+      room = (await api("POST", "/api/groups", {
+        name: "Verification skill room",
+        memberIds: [bot.id],
+        setup: { bulletin: "", defaultResponder: { kind: "member", botId: bot.id } },
+      })).body.group;
+
+      rmSync(fakeClaudeDump, { force: true });
+      expect((await api("POST", `/api/groups/${room.id}/messages`, {
+        text: "/create-verification-skill for my mobile app",
+      })).status).toBe(202);
+      let seen = await readJsonFileWhenReady<{ argv: string[] }>(fakeClaudeDump);
+      let system = seen.argv[seen.argv.indexOf("--append-system-prompt") + 1] ?? "";
+      expect(system).toContain('<openmaus-skill id="create-verification-skill"');
+      expect(system).toContain('<openmaus-skill id="phone-harness"');
+      expect((await api("POST", `/api/groups/${room.id}/interrupt`, {})).status).toBe(200);
+      await expect.poll(async () => {
+        const state = (await api("GET", "/api/bots?messages=0")).body;
+        return state.bots.find((candidate: { id: string }) => candidate.id === bot.id)?.busy;
+      }, { timeout: 5_000 }).toBe(false);
+
+      rmSync(fakeClaudeDump, { force: true });
+      expect((await api("POST", `/api/groups/${room.id}/messages`, {
+        text: "now give me a short status update",
+      })).status).toBe(202);
+      seen = await readJsonFileWhenReady<{ argv: string[] }>(fakeClaudeDump);
+      system = seen.argv[seen.argv.indexOf("--append-system-prompt") + 1] ?? "";
+      expect(system).not.toContain('<openmaus-skill id="create-verification-skill"');
+      expect(system).toContain('<openmaus-skill id="phone-harness"');
+    } finally {
+      if (room) {
+        await api("POST", `/api/groups/${room.id}/interrupt`, {}).catch(() => undefined);
+        await api("DELETE", `/api/groups/${room.id}`).catch(() => undefined);
+      }
+      await api("DELETE", `/api/bots/${bot.id}`).catch(() => undefined);
+      await api("PATCH", "/api/config", { features: { skillRecorder: false } }).catch(() => undefined);
     }
   });
 

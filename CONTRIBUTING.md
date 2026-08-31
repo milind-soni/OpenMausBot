@@ -118,6 +118,26 @@ The SPI in [`server/contracts.ts`](server/contracts.ts) is deliberately small. A
    failed spawn as a failed turn — never a hang, never a crash.
 5. Bring a contract test following the fake-CLI pattern (scripted fake process + `recordEvents`).
 
+## Agent-facing control CLIs
+
+Before claiming a server or conversation change works, use the isolated flow
+in [`docs/verification/README.md`](docs/verification/README.md). For new CLIs
+intended for automation:
+
+- Reuse an existing MCP or API operation; keep the CLI to argument parsing and
+  result formatting.
+- Mutating commands require an explicit target or an isolated launcher. Never
+  silently target the user's live app.
+- Return JSON for success and failure, use non-zero exit codes for failure, and
+  provide `--help`.
+- Errors name the failed action and the next valid step.
+- Commands that delete or overwrite data provide `--dry-run`; test that it
+  leaves state unchanged.
+- Prefer task-level subcommands and add one smoke test for the main workflow.
+
+The verification feature map is intentionally incomplete. Add an entry only
+when the shared control surface can exercise it and a permanent test proves it.
+
 ## MCP tool schemas
 
 Tool `inputSchema`s travel through every engine's own MCP-to-provider conversion before a model

@@ -2,16 +2,12 @@
   "id": "create-verification-skill",
   "name": "Create Verification Skill",
   "version": "0.1.0",
-  "description": "Generate a project-local verification skill and feature map so this bot can drive the user's app like a real user and prove its own work.",
+  "description": "Stage one reviewed verification skill for a specific app or project.",
   "defaultEnabled": true,
   "triggerTerms": [
     "/create-verification-skill",
     "create a verification skill",
-    "make a verification skill",
-    "verification skill",
-    "verify your work with proof",
-    "make a control cli",
-    "feature map for"
+    "make a verification skill"
   ],
-  "requiredCapabilities": []
+  "requiredCapabilities": ["skillAuthoring"]
 }

@@ -2584,7 +2584,10 @@ async function startTurn(
       let browser: Awaited<ReturnType<typeof browserIntegration>> = null;
       const selectedSkills = selectBundledSkills(
         text,
-        instance.adapter.capabilities.phoneMcp === true ? ["phoneMcp"] : [],
+        [
+          ...(instance.adapter.capabilities.phoneMcp === true ? ["phoneMcp"] : []),
+          ...(skillAuthoring ? ["skillAuthoring"] : []),
+        ],
         availableSkills(),
       );
       if (selectedSkills.some((skill) => skill.manifest.requiredCapabilities.includes("phoneMcp"))) {
@@ -3444,10 +3447,21 @@ async function runGroupMemberTurn(
   if (hop < MAX_COMMS_DEPTH && instance.adapter.capabilities.agentsMcp === true) {
     integrations.agents = agentsIntegration(bot.id, threadId, hop, skillAuthoring);
   }
-  const selectedSkills = selectBundledSkills(
-    serializeRoomContext(threadId, userName),
-    instance.adapter.capabilities.phoneMcp === true ? ["phoneMcp"] : [],
-    availableSkills(),
+  const latestUser = [...store.activePath(threadId)].reverse().find(
+    (message) => message.role === "user" && message.kind === "text" && message.text,
+  );
+  const skills = availableSkills();
+  const selectedSkills = mergeSkills(
+    selectBundledSkills(
+      serializeRoomContext(threadId, userName),
+      instance.adapter.capabilities.phoneMcp === true ? ["phoneMcp"] : [],
+      skills,
+    ),
+    selectBundledSkills(
+      latestUser?.text ?? "",
+      skillAuthoring ? ["skillAuthoring"] : [],
+      skills,
+    ),
   );
   if (selectedSkills.some((skill) => skill.manifest.requiredCapabilities.includes("phoneMcp"))) {
     integrations.phone = phoneIntegration();
@@ -3562,7 +3576,6 @@ async function runGroupMemberTurn(
     .filter(Boolean)
     .join("\n");
 
-  const latestUser = [...store.activePath(threadId)].reverse().find((message) => message.role === "user" && message.kind === "text" && message.text);
   const learnTurn = skillAuthoring && latestUser?.text ? expandLearnTurnText(latestUser.text) : "";
   const learnBlock = learnTurn && learnTurn !== latestUser?.text ? `\n\n${learnTurn}` : "";
   const text = `${serializeRoomContext(threadId, userName)}\n\n(Reply to the conversation above as ${bot.name}.)${learnBlock}${cardContinuation ? `\n\n${cardContinuation}` : ""
