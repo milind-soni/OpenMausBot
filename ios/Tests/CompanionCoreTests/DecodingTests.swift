@@ -356,6 +356,29 @@ final class DecodingTests: XCTestCase {
         XCTAssertEqual(card.responseBehavior(for: "Deny"), "deny")
     }
 
+    func testDecodesAReviewedSkillUpdate() throws {
+        let json = """
+        {
+          "id": "skill-update", "role": "bot", "kind": "options", "at": 1786742413762,
+          "card": {
+            "title": "Update skill?", "subtitle": "Refreshes verification steps.",
+            "options": ["Update", "Deny"], "requestId": "req-update", "tool": "stage_skill",
+            "skillRequest": {
+              "version": 1, "requestId": "req-update", "botId": "bot-1", "threadId": "thread-1",
+              "stagedId": "staged-update", "action": "update", "name": "verify-app",
+              "gist": "Refreshes verification steps.", "source": "learn:maintenance",
+              "preview": "---\\nname: verify-app\\n---\\n", "sha256": "abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789", "warnings": [],
+              "createdAt": 1786742413762
+            }
+          }
+        }
+        """
+        let card = try XCTUnwrap(try JSONDecoder().decode(Message.self, from: Data(json.utf8)).card)
+        XCTAssertEqual(card.skillRequest?.action, "update")
+        XCTAssertEqual(card.responseBehavior(for: "Update"), "allow")
+        XCTAssertEqual(card.responseBehavior(for: "Deny"), "deny")
+    }
+
     func testOldSkillCardStillDecodesButCannotBeApproved() throws {
         let json = """
         {

@@ -175,6 +175,7 @@ import {
 } from "./section-context.ts";
 import {
   applyStagedSkillWrite,
+  getStagedSkillWrite,
   installSkill,
   listSkills,
   listStagedSkillWrites,
@@ -2848,7 +2849,7 @@ async function startTurn(
         ? " If the user explicitly asks to list or review, schedule, run, or change routines, use list_routines and propose_routine or propose_routine_action. A proposal is not applied until the user confirms its in-app card, so never claim the action completed before that confirmation."
         : "";
       const learnPrompt = skillAuthoring
-        ? " If the user sends /learn or asks you to save a reusable procedure from this work, use skills_list and skill_manage. Only create new skills, include the URL, folder, or conversation as source provenance, and wait for the user to review and enable the staged SKILL.md."
+        ? " If the user sends /learn or asks you to save a reusable procedure from this work, use skills_list and skill_manage. Create new skills; update an existing learned skill only when the user explicitly asks to revise that exact name. Include source provenance and wait for the review card decision."
         : "";
 
       // (activeVpsThreads was already claimed above, before the provision or
@@ -3575,7 +3576,7 @@ async function runGroupMemberTurn(
     integrations.agents &&
       "If the user explicitly asks to list or review, schedule, run, or change routines, use list_routines and propose_routine or propose_routine_action. A proposal is not applied until the user confirms its in-app card, so never claim the action completed before that confirmation.",
     skillAuthoring &&
-      "If the user sends /learn or asks you to save a reusable procedure from this work, use skills_list and skill_manage. Only create new skills, include the URL, folder, or conversation as source provenance, and wait for the user to review and enable the staged SKILL.md.",
+      "If the user sends /learn or asks you to save a reusable procedure from this work, use skills_list and skill_manage. Create new skills; update an existing learned skill only when the user explicitly asks to revise that exact name. Include source provenance and wait for the review card decision.",
     orchestration?.systemInstructions,
   ]
     .filter(Boolean)
@@ -4301,7 +4302,7 @@ function skillProposalPersistence(botId: string, threadId: string) {
 /** Listing endpoints expose lifecycle metadata, never the staged instructions
  * themselves. The exact review copy lives only on the durable approval card. */
 function stagedSkillListing(staged: ReturnType<typeof listStagedSkillWrites>[number]) {
-  const { files: _files, ...listing } = staged;
+  const { files: _files, baseSha256: _baseSha256, baseAppliedStageId: _baseAppliedStageId, ...listing } = staged;
   return listing;
 }
 
@@ -4329,14 +4330,16 @@ function rejectDeletedThreadSkillStages(cleanups: Array<{ botId: string; stagedI
   for (const cleanup of cleanups) rejectStagedSkillWrite(cleanup.botId, cleanup.stagedId);
 }
 
-function skillCardCopy(staged: { action: "create"; name: string; gist: string; warnings: string[] }): {
+function skillCardCopy(staged: { action: "create" | "update"; name: string; gist: string; warnings: string[] }): {
   title: string;
   subtitle: string;
   tool: string;
 } {
   const warnings = staged.warnings.length ? `\n\nWarnings:\n- ${staged.warnings.join("\n- ")}` : "";
   return {
-    title: `Enable skill "${staged.name}"?`,
+    title: staged.action === "create"
+      ? `Enable skill "${staged.name}"?`
+      : `Update skill "${staged.name}"?`,
     subtitle: `${staged.gist || staged.name}${warnings}`,
     tool: "stage_skill",
   };
@@ -4347,7 +4350,7 @@ function appendSkillRequestCard(args: {
   threadId: string;
   staged: {
     id: string;
-    action: "create";
+    action: "create" | "update";
     name: string;
     gist: string;
     source: string;
@@ -4381,7 +4384,7 @@ function appendSkillRequestCard(args: {
     card: {
       title: copy.title,
       subtitle: copy.subtitle,
-      options: ["Enable", "Deny"],
+      options: [args.staged.action === "create" ? "Enable" : "Update", "Deny"],
       requestId,
       tool: copy.tool,
       skillRequest: payload,
@@ -4416,14 +4419,39 @@ function resolveSkillRequest(args: {
   if (card.answered || card.dismissed) {
     // Settlement is durable before cleanup. Retry cleanup for either outcome
     // so a disk failure cannot leave a denied name permanently reserved.
-    rejectStagedSkillWrite(args.botId, request.stagedId);
+    const cleanup = rejectStagedSkillWrite(args.botId, request.stagedId);
+    if ("applied" in cleanup && cleanup.applied && card.answered !== "allow") {
+      store.patchMessage(args.threadId, message.id, {
+        card: { ...card, answered: "allow", dismissed: false, held: undefined },
+      });
+      return { claimed: true, outcome: "allowed-once", alreadySettled: true };
+    }
     return { claimed: true, outcome: card.answered === "allow" ? "allowed-once" : "rejected", alreadySettled: true };
   }
   if (args.behavior !== "allow") {
+    const rejected = rejectStagedSkillWrite(args.botId, request.stagedId);
+    if ("error" in rejected) {
+      return { claimed: true, status: 409, error: rejected.error };
+    }
+    if ("applied" in rejected) {
+      store.patchMessage(args.threadId, message.id, {
+        card: { ...card, answered: "allow", dismissed: false, held: undefined },
+      });
+      appendDecision(DATA_DIR, {
+        threadId: args.threadId,
+        requestId: args.requestId,
+        botId: args.botId,
+        botName: args.botName,
+        tool: card.tool,
+        summary: card.subtitle,
+        decision: "user-approved",
+        source: "user",
+      });
+      return { claimed: true, outcome: "allowed-once" };
+    }
     store.patchMessage(args.threadId, message.id, {
-      card: { ...card, answered: "deny", dismissed: true },
+      card: { ...card, answered: "deny", dismissed: true, held: undefined },
     });
-    rejectStagedSkillWrite(args.botId, request.stagedId);
     appendDecision(DATA_DIR, {
       threadId: args.threadId,
       requestId: args.requestId,
@@ -4454,16 +4482,66 @@ function resolveSkillRequest(args: {
   if (previewSha256 !== request.sha256) {
     return { claimed: true, status: 422, error: "the skill preview changed after review — deny and recreate it" };
   }
+  const staged = getStagedSkillWrite(args.botId, request.stagedId);
+  if (!staged) {
+    // A later proposal may have pruned this already-applied replay record.
+    // The protected manifest still binds the stage id and reviewed hash, so
+    // the old card can be settled without asking the model to recreate it.
+    const replayed = applyStagedSkillWrite(args.botId, request.stagedId, {
+      expectedSha256: request.sha256,
+    });
+    if (
+      "error" in replayed ||
+      replayed.name !== request.name ||
+      replayed.source !== request.source
+    ) {
+      return {
+        claimed: true,
+        status: 422,
+        error: "the staged skill no longer matches this approval card",
+      };
+    }
+    const patched = store.patchMessage(args.threadId, message.id, {
+      card: { ...card, answered: "allow", held: undefined },
+    });
+    if (!patched) {
+      return { claimed: true, status: 409, error: "the learned-skill approval card is no longer available" };
+    }
+    appendDecision(DATA_DIR, {
+      threadId: args.threadId,
+      requestId: args.requestId,
+      botId: args.botId,
+      botName: args.botName,
+      tool: card.tool,
+      summary: card.subtitle,
+      decision: "user-approved",
+      source: "user",
+    });
+    return { claimed: true, outcome: "allowed-once" };
+  }
+  if (
+    request.requestId !== args.requestId ||
+    request.threadId !== args.threadId ||
+    staged.action !== request.action ||
+    staged.name !== request.name ||
+    staged.source !== request.source ||
+    staged.sha256 !== request.sha256
+  ) {
+    return { claimed: true, status: 422, error: "the staged skill no longer matches this approval card" };
+  }
   const applied = applyStagedSkillWrite(args.botId, request.stagedId, {
     expectedSha256: request.sha256,
     onApplied: () => {
       const patched = store.patchMessage(args.threadId, message.id, {
-        card: { ...card, answered: "allow" },
+        card: { ...card, answered: "allow", held: undefined },
       });
       if (!patched) throw new Error("the learned-skill approval card is no longer available");
     },
   });
   if ("error" in applied) {
+    store.patchMessage(args.threadId, message.id, {
+      card: { ...card, held: applied.error },
+    });
     return { claimed: true, status: 422, error: applied.error };
   }
   appendDecision(DATA_DIR, {
@@ -5129,16 +5207,21 @@ const server = createServer(async (req, res) => {
         }
         const persistence = skillProposalPersistence(from.id, fromThreadId);
         if (!persistence.ok) return json(res, persistence.status, { error: persistence.error });
-        const action = body.action === "create" ? "create" : "";
-        if (!action) return json(res, 400, { error: 'action must be "create"' });
+        const action = body.action === "create" || body.action === "update" ? body.action : "";
+        if (!action) return json(res, 400, { error: 'action must be "create" or "update"' });
         const skillMd = typeof body.skill_md === "string" ? body.skill_md : "";
         if (!skillMd.trim()) {
           return json(res, 400, { error: 'skill_manage needs skill_md: the full SKILL.md including YAML frontmatter, for example ---\\nname: file-expense\\ndescription: Files an expense in the company portal.\\n---\\n\\n# File expense\\n' });
         }
         const source = typeof body.source === "string" ? body.source.trim() : "";
         if (!source) return json(res, 400, { error: 'source must be a URL, folder, or "conversation"' });
+        const targetName = typeof body.skill_name === "string" ? body.skill_name.trim() : "";
+        if (action === "update" && !targetName) {
+          return json(res, 400, { error: "skill_name is required when action is update" });
+        }
         const staged = stageSkillWrite(from.id, {
           action,
+          targetName: targetName || undefined,
           files: [{ path: "SKILL.md", content: skillMd }],
           gist: typeof body.gist === "string" ? body.gist : undefined,
           source: learnSource(source),

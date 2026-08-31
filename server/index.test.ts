@@ -4448,32 +4448,44 @@ describe("harness HTTP API", () => {
         "content-type": "application/json",
       };
 
-      const stage = async (name: string, extraInstructions = "") => {
+      const stage = async (
+        name: string,
+        extraInstructions = "",
+        action: "create" | "update" = "create",
+        description = `Use ${name} safely.`,
+      ) => {
         const response = await fetch(`${BASE}/api/internal/skills/stage`, {
           method: "POST",
           headers: internalHeaders,
           body: JSON.stringify({
             fromBotId: bot.id,
             fromThreadId: bot.threadId,
-            action: "create",
+            action,
+            skill_name: action === "update" ? name : undefined,
             source: "conversation",
-            gist: `Use ${name} safely.`,
-            skill_md: `---\nname: ${name}\ndescription: Use ${name} safely.\n---\n\n# ${name}\n\nDo the reviewed thing.\n${extraInstructions}`,
+            gist: description,
+            skill_md: `---\nname: ${name}\ndescription: ${description}\n---\n\n# ${name}\n\nDo the reviewed thing.\n${extraInstructions}`,
           }),
         });
         expect(response.status).toBe(201);
         const state = (await api("GET", "/api/bots")).body;
-        const card = state.bots
+        const cards = state.bots
           .find((candidate: { id: string }) => candidate.id === bot.id)
-          ?.messages.find((message: { card?: { skillRequest?: { name?: string } } }) =>
-            message.card?.skillRequest?.name === name,
-          )?.card;
-        expect(card?.options).toEqual(["Enable", "Deny"]);
+          ?.messages.filter((message: { card?: { skillRequest?: { name?: string; action?: string } } }) =>
+            message.card?.skillRequest?.name === name && message.card.skillRequest.action === action,
+          );
+        const card = cards?.[cards.length - 1]?.card;
+        expect(card?.title).toBe(action === "create" ? `Enable skill "${name}"?` : `Update skill "${name}"?`);
+        expect(card?.options).toEqual([action === "create" ? "Enable" : "Update", "Deny"]);
+        expect(card?.skillRequest?.action).toBe(action);
         expect(card?.skillRequest?.preview).toContain(`# ${name}`);
         expect(card?.skillRequest?.sha256).toMatch(/^[a-f0-9]{64}$/);
         expect(createHash("sha256").update(card.skillRequest.preview).digest("hex"))
           .toBe(card.skillRequest.sha256);
-        return card as { requestId: string; skillRequest: { preview: string; sha256: string } };
+        return card as {
+          requestId: string;
+          skillRequest: { action: "create" | "update"; preview: string; sha256: string };
+        };
       };
 
       const stagedSecret = `Bearer ${"a".repeat(24)}`;
@@ -4507,6 +4519,94 @@ describe("harness HTTP API", () => {
         reviewedSha256: first.skillRequest.sha256,
       });
       expect(approvedByBotRoute).toMatchObject({ status: 200, body: { outcome: "allowed-once" } });
+
+      const updated = await stage(
+        "reviewed-skill-one",
+        "Use only the newly reviewed workflow.\n",
+        "update",
+        "Uses the revised reviewed workflow.",
+      );
+      const beforeUpdate = await api("GET", `/api/bots/${bot.id}/skills/reviewed-skill-one`);
+      expect(beforeUpdate).toMatchObject({ status: 200, body: { text: first.skillRequest.preview } });
+      expect(beforeUpdate.body.text).not.toBe(updated.skillRequest.preview);
+
+      const stagedListing = await fetch(
+        `${BASE}/api/internal/skills?fromBotId=${encodeURIComponent(bot.id)}&fromThreadId=${encodeURIComponent(bot.threadId)}`,
+        { headers: internalHeaders },
+      );
+      expect(stagedListing.status).toBe(200);
+      const stagedInventory = await stagedListing.json() as {
+        staged: Array<{ name: string; action: string }>;
+      };
+      expect(stagedInventory.staged).toMatchObject([{ name: "reviewed-skill-one", action: "update" }]);
+      expect(JSON.stringify(stagedInventory)).not.toContain("baseSha256");
+      expect(JSON.stringify(stagedInventory)).not.toContain("baseAppliedStageId");
+
+      const approvedUpdate = await api("POST", `/api/threads/${bot.threadId}/respond`, {
+        requestId: updated.requestId,
+        behavior: "allow",
+        reviewedSha256: updated.skillRequest.sha256,
+      });
+      expect(approvedUpdate).toMatchObject({ status: 200, body: { outcome: "allowed-once" } });
+      expect(await api("GET", `/api/bots/${bot.id}/skills/reviewed-skill-one`))
+        .toMatchObject({ status: 200, body: { text: updated.skillRequest.preview } });
+
+      const deniedUpdate = await stage(
+        "reviewed-skill-one",
+        "This replacement must never land.\n",
+        "update",
+        "A denied replacement.",
+      );
+      expect(await api("POST", `/api/threads/${bot.threadId}/respond`, {
+        requestId: deniedUpdate.requestId,
+        behavior: "deny",
+      })).toMatchObject({ status: 200, body: { outcome: "rejected" } });
+      expect(await api("GET", `/api/bots/${bot.id}/skills/reviewed-skill-one`))
+        .toMatchObject({ status: 200, body: { text: updated.skillRequest.preview } });
+
+      const staleUpdate = await stage(
+        "reviewed-skill-one",
+        "This proposal will become stale.\n",
+        "update",
+        "A stale replacement.",
+      );
+      const skillPath = join(
+        home,
+        ".openmausbot",
+        "workspaces",
+        bot.id,
+        ".agents",
+        "skills",
+        "reviewed-skill-one",
+        "SKILL.md",
+      );
+      writeFileSync(skillPath, updated.skillRequest.preview.replace("newly reviewed", "changed after staging"));
+      const staleResponse = await api("POST", `/api/threads/${bot.threadId}/respond`, {
+        requestId: staleUpdate.requestId,
+        behavior: "allow",
+        reviewedSha256: staleUpdate.skillRequest.sha256,
+      });
+      expect(staleResponse.status).toBe(422);
+      expect(staleResponse.body.error).toMatch(/changed after this update was proposed/);
+      const staleCard = (await api("GET", "/api/bots")).body.bots
+        .find((candidate: { id: string }) => candidate.id === bot.id)
+        ?.messages.find((message: { card?: { requestId?: string } }) =>
+          message.card?.requestId === staleUpdate.requestId,
+        )?.card;
+      expect(staleCard?.held).toMatch(/changed after this update was proposed/);
+      writeFileSync(skillPath, updated.skillRequest.preview);
+      expect(await api("POST", `/api/threads/${bot.threadId}/respond`, {
+        requestId: staleUpdate.requestId,
+        behavior: "allow",
+        reviewedSha256: staleUpdate.skillRequest.sha256,
+      })).toMatchObject({ status: 200, body: { outcome: "allowed-once" } });
+      const recoveredCard = (await api("GET", "/api/bots")).body.bots
+        .find((candidate: { id: string }) => candidate.id === bot.id)
+        ?.messages.find((message: { card?: { requestId?: string } }) =>
+          message.card?.requestId === staleUpdate.requestId,
+        )?.card;
+      expect(recoveredCard?.answered).toBe("allow");
+      expect(recoveredCard?.held).toBeUndefined();
 
       const second = await stage("reviewed-skill-two");
       const approvedByThreadRoute = await api("POST", `/api/threads/${bot.threadId}/respond`, {

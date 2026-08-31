@@ -58,8 +58,9 @@ export function spokenApprovalPrompt(pending: Pending, requester: string): strin
   const isRoutineRequest = isRoutineApproval(pending);
   const isSkillRequest = isSkillApproval(pending);
   if (isSkillRequest) {
-    const title = pending.message.card?.title.trim() || "Enable this skill?";
-    return `${requester} asks: ${title}${/[.!?]$/.test(title) ? "" : "."} Review the skill on screen. Should I enable it?`;
+    const updating = pending.message.card?.skillRequest?.action === "update";
+    const title = pending.message.card?.title.trim() || (updating ? "Update this skill?" : "Enable this skill?");
+    return `${requester} asks: ${title}${/[.!?]$/.test(title) ? "" : "."} Review the skill on screen. Should I ${updating ? "update" : "enable"} it?`;
   }
   if (!isRoutineRequest) {
     return `${requester} wants to ${pending.tool}. ${pending.detail}. Should I allow it?`;
@@ -70,7 +71,9 @@ export function spokenApprovalPrompt(pending: Pending, requester: string): strin
 
 function label(pending: Pending): string {
   if (isSkillApproval(pending)) {
-    return "Enable this learned skill";
+    return pending.message.card?.skillRequest?.action === "update"
+      ? "Update this learned skill"
+      : "Enable this learned skill";
   }
   if (isRoutineApproval(pending)) {
     return pending.message.card?.routineRequest?.operation.action === "create"
@@ -113,7 +116,7 @@ export const PendingApprovalPanel = memo(function PendingApprovalPanel({
         <span className="text-[13px] text-ink">{label(pending)}</span>
         <span className="font-mono text-[11px] text-ink-secondary">
           {isSkillApproval(pending)
-            ? "stage_skill"
+            ? pending.message.card?.skillRequest?.action === "update" ? "update_skill" : "stage_skill"
             : isRoutineApproval(pending)
             ? pending.message.card?.routineRequest?.operation.action === "create"
               ? "schedule_routine"
@@ -198,7 +201,9 @@ export function PendingApprovalActions({
           "bg-accent font-medium text-white hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-40",
         )}
       >
-        {isSkillRequest ? "Enable" : isRoutineRequest ? "Confirm" : "Allow once"}
+        {isSkillRequest
+          ? pending.message.card?.skillRequest?.action === "update" ? "Update" : "Enable"
+          : isRoutineRequest ? "Confirm" : "Allow once"}
       </button>
     </div>
   );

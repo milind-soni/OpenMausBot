@@ -34,9 +34,11 @@ describe("expandLearnTurnText", () => {
         expect(expanded.startsWith(LEARN_PROMPT_MARKER)).toBe(true);
         expect(expanded).toContain("the REST client in ~/sdk");
         expect(expanded).toContain("skill_manage");
-        expect(expanded).toContain("does not enable");
+        expect(expanded).toContain("current version untouched");
         expect(expanded).toContain('source as the exact URL or folder');
-        expect(expanded).not.toContain('action="update"');
+        expect(expanded).toContain('action="update"');
+        expect(expanded).toContain("explicitly asked to revise");
+        expect(expanded).toContain("exact SKILL.md path listed for that skill");
     });
 
     it("treats a bare /learn as 'what we just did'", () => {

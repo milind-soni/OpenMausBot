@@ -193,7 +193,7 @@ function LearnedSkillsCard({ bot }: { bot: Bot }) {
       </div>
       <div className="mt-1 text-[12px] leading-relaxed text-ink-secondary">
         {featureEnabled
-          ? "Use /learn in chat to stage a new skill. Nothing becomes active until you review and enable it."
+          ? "Use /learn to create a skill, or /learn update <name> to revise one. Every change waits for your review."
           : "Skill authoring is off, but skills you already enabled stay under your control here."}
       </div>
       {loading ? (

@@ -1174,7 +1174,7 @@ struct CardView: View {
                         }
                     } else {
                         Label(
-                            "This proposal was created by an older build and cannot be safely enabled. Deny it and ask the bot to create it again.",
+                            "This proposal was created by an older build and cannot be safely applied. Deny it and ask the bot to create it again.",
                             systemImage: "exclamationmark.shield"
                         )
                         .font(.system(size: 12))

@@ -7,7 +7,7 @@ export function SkillRequestPreview({ request }: { request: SkillRequestCardData
   if (!reviewedSha256) {
     return (
       <div className="mt-3 rounded-lg border border-danger/30 bg-danger/5 p-3 text-[12px] leading-relaxed text-danger">
-        This proposal was created by an older build and cannot be safely enabled. Deny it, then ask the bot to
+        This proposal was created by an older build and cannot be safely applied. Deny it, then ask the bot to
         create the skill again.
       </div>
     );
@@ -15,7 +15,9 @@ export function SkillRequestPreview({ request }: { request: SkillRequestCardData
   return (
     <div className="mt-3 rounded-lg border border-hairline/40 bg-inset p-3">
       <div className="flex flex-wrap items-center justify-between gap-2 text-[11px] text-ink-secondary">
-        <span>Review the complete SKILL.md before enabling</span>
+        <span>
+          Review the complete SKILL.md before {request.action === "update" ? "replacing the current version" : "enabling"}
+        </span>
         <span className="font-mono" title={`sha256 ${reviewedSha256}`}>
           sha256 {reviewedSha256.slice(0, 8)}
         </span>

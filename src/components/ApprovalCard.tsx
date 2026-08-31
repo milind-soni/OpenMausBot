@@ -24,6 +24,7 @@ const ROUTINE_SETTLED_LABEL = {
 
 const SKILL_SETTLED_LABEL = {
   create: "Skill enabled",
+  update: "Skill updated",
 } as const;
 
 /** The tool's own name is noise to a human: mcp__ogb__computer_batch is
@@ -41,6 +42,7 @@ function toolLabel(tool?: string): string {
     schedule_routine: "schedule a routine",
     manage_routine: "change a routine",
     stage_skill: "enable a learned skill",
+    update_skill: "update a learned skill",
   };
   return nice[tool] ?? bare;
 }
@@ -65,7 +67,7 @@ export function ApprovalCard({
   const displayTool = isRoutineRequest
     ? routineAction === "create" ? "schedule_routine" : "manage_routine"
     : isSkillRequest
-      ? "stage_skill"
+      ? skillAction === "update" ? "update_skill" : "stage_skill"
     : card.tool;
 
   return (

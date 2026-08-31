@@ -356,7 +356,7 @@ function GroupCall({ group, members }: { group: Group; members: Bot[] }) {
       spokenIds.current.add(approval.message.id);
       const name = member?.name ?? approval.message.from?.name ?? "A channel member";
       enqueueSpeech(isSkillApproval(approval)
-        ? `${name} wants to enable a learned skill. Open the channel chat to review the complete skill before enabling it. You can say no to deny it.`
+        ? `${name} wants to apply a learned-skill change. Open the channel chat to review the complete skill before applying it. You can say no to deny it.`
         : spokenApprovalPrompt(approval, name), member, true);
     }
 

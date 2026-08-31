@@ -273,7 +273,7 @@ function ExperimentalFeaturesRow() {
         <div className="min-w-0">
           <div className="text-[14px] font-medium text-ink">Teach a skill</div>
           <div className="mt-0.5 text-[12px] leading-relaxed text-ink-secondary">
-            Show the workflow recorder and let supported bots stage skills with /learn.
+            Record a workflow, use /learn, or ask a supported bot to run /create-verification-skill. Every change waits for your review.
           </div>
         </div>
         <Switch

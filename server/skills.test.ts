@@ -99,6 +99,7 @@ describe("install → review → enable lifecycle", () => {
       { path: "SKILL.md", content: SKILL("code-review") },
     ]);
     expect(installed).toMatchObject({ name: "code-review", enabled: false });
+    expect(installed).toMatchObject({ editable: false });
     // disabled: invisible to the prompt
     expect(skillsSystemPrompt(bot)).toBe("");
 
@@ -328,9 +329,410 @@ describe("staged skill writes", () => {
     expect(listStagedSkillWrites(bot).map((entry) => entry.id)).toEqual([staged.id]);
 
     const applied = applyStagedSkillWrite(bot, staged.id, { expectedSha256: staged.sha256 });
-    expect(applied).toMatchObject({ name: "file-expense", enabled: true, source: "learn:expense flow" });
+    expect(applied).toMatchObject({
+      name: "file-expense",
+      enabled: true,
+      editable: true,
+      source: "learn:expense flow",
+    });
     expect(listStagedSkillWrites(bot)).toEqual([]);
     expect(skillsSystemPrompt(bot)).toContain("- file-expense:");
+  });
+
+  it("updates only the reviewed skill version and preserves the latest enablement", () => {
+    const created = stageSkillWrite(bot, {
+      action: "create",
+      files: [{ path: "SKILL.md", content: SKILL("kept-current", "Original instructions.") }],
+    });
+    if ("error" in created) throw new Error(created.error);
+    expect(applyStagedSkillWrite(bot, created.id, { expectedSha256: created.sha256 }))
+      .toMatchObject({ enabled: true });
+
+    const proposed = SKILL("kept-current", "Updated and reviewed instructions.");
+    const staged = stageSkillWrite(bot, {
+      action: "update",
+      targetName: "kept-current",
+      source: "learn:maintenance run",
+      files: [{ path: "SKILL.md", content: proposed }],
+    });
+    expect(staged).toMatchObject({ action: "update", name: "kept-current", baseSha256: created.sha256 });
+    if ("error" in staged) throw new Error(staged.error);
+    expect(readSkillFile(bot, "kept-current")).not.toBe(proposed);
+    expect(setSkillEnabled(bot, "kept-current", false)).toMatchObject({ enabled: false });
+
+    const applied = applyStagedSkillWrite(bot, staged.id, { expectedSha256: staged.sha256 });
+    expect(applied).toMatchObject({
+      name: "kept-current",
+      description: "Updated and reviewed instructions.",
+      enabled: false,
+      source: "learn:maintenance run",
+    });
+    expect(readSkillFile(bot, "kept-current")).toBe(proposed);
+    expect(listStagedSkillWrites(bot)).toEqual([]);
+  });
+
+  it("requires an exact learned target and rejects imported, renamed, or no-op updates", () => {
+    const imported = installSkill(bot, "github.com/example/review", [
+      { path: "SKILL.md", content: SKILL("imported-skill", "Imported instructions.") },
+    ]);
+    expect(imported).toMatchObject({ name: "imported-skill" });
+    expect(stageSkillWrite(bot, {
+      action: "update",
+      targetName: "imported-skill",
+      files: [{ path: "SKILL.md", content: SKILL("imported-skill", "Replacement.") }],
+    })).toMatchObject({ error: expect.stringContaining("was imported") });
+
+    const legacyLearned = installSkill(bot, "learn:legacy conversation", [
+      { path: "SKILL.md", content: SKILL("legacy-learned", "Legacy learned instructions.") },
+    ]);
+    expect(legacyLearned).toMatchObject({ editable: false });
+    expect(stageSkillWrite(bot, {
+      action: "update",
+      targetName: "legacy-learned",
+      files: [{ path: "SKILL.md", content: SKILL("legacy-learned", "Replacement.") }],
+    })).toMatchObject({ error: expect.stringContaining("predates reviewed updates") });
+
+    const created = stageSkillWrite(bot, {
+      action: "create",
+      files: [{ path: "SKILL.md", content: SKILL("exact-target", "Original.") }],
+    });
+    if ("error" in created) throw new Error(created.error);
+    expect(applyStagedSkillWrite(bot, created.id)).toMatchObject({ name: "exact-target" });
+
+    expect(stageSkillWrite(bot, {
+      action: "update",
+      files: [{ path: "SKILL.md", content: SKILL("exact-target", "Replacement.") }],
+    })).toMatchObject({ error: expect.stringContaining("skill_name is required") });
+    expect(stageSkillWrite(bot, {
+      action: "update",
+      targetName: "exact-target",
+      files: [{ path: "SKILL.md", content: SKILL("renamed-target", "Replacement.") }],
+    })).toMatchObject({ error: expect.stringContaining('must remain "exact-target"') });
+    expect(stageSkillWrite(bot, {
+      action: "update",
+      targetName: "exact-target",
+      files: [{ path: "SKILL.md", content: SKILL("exact-target", "Original.") }],
+    })).toMatchObject({ error: expect.stringContaining("already matches") });
+  });
+
+  it("denying an update leaves the current version untouched", () => {
+    const original = SKILL("denied-update", "Original.");
+    const created = stageSkillWrite(bot, {
+      action: "create",
+      files: [{ path: "SKILL.md", content: original }],
+    });
+    if ("error" in created) throw new Error(created.error);
+    expect(applyStagedSkillWrite(bot, created.id)).toMatchObject({ name: "denied-update" });
+    const staged = stageSkillWrite(bot, {
+      action: "update",
+      targetName: "denied-update",
+      files: [{ path: "SKILL.md", content: SKILL("denied-update", "Never applied.") }],
+    });
+    if ("error" in staged) throw new Error(staged.error);
+
+    expect(rejectStagedSkillWrite(bot, staged.id)).toEqual({ rejected: true });
+    expect(readSkillFile(bot, "denied-update")).toBe(original);
+  });
+
+  it("rejects an update when the same bytes were removed and recreated as another revision", () => {
+    const original = SKILL("recreated-update", "Original.");
+    const created = stageSkillWrite(bot, {
+      action: "create",
+      files: [{ path: "SKILL.md", content: original }],
+    });
+    if ("error" in created) throw new Error(created.error);
+    expect(applyStagedSkillWrite(bot, created.id)).toMatchObject({ name: "recreated-update" });
+    const stale = stageSkillWrite(bot, {
+      action: "update",
+      targetName: "recreated-update",
+      files: [{ path: "SKILL.md", content: SKILL("recreated-update", "Stale replacement.") }],
+    });
+    if ("error" in stale) throw new Error(stale.error);
+
+    expect(rejectStagedSkillWrite(bot, stale.id)).toEqual({ rejected: true });
+    expect(removeSkill(bot, "recreated-update")).toEqual({ removed: true });
+    const recreated = stageSkillWrite(bot, {
+      action: "create",
+      files: [{ path: "SKILL.md", content: original }],
+    });
+    if ("error" in recreated) throw new Error(recreated.error);
+    expect(applyStagedSkillWrite(bot, recreated.id)).toMatchObject({ name: "recreated-update" });
+
+    const stagedPath = join(DATA_DIR, "skill-state", bot, "staged.json");
+    writeFileSync(stagedPath, `${JSON.stringify({ writes: { [stale.id]: stale } }, null, 2)}\n`);
+    expect(applyStagedSkillWrite(bot, stale.id, { expectedSha256: stale.sha256 })).toMatchObject({
+      error: expect.stringContaining("changed after this update was proposed"),
+    });
+    expect(readSkillFile(bot, "recreated-update")).toBe(original);
+  });
+
+  it("switches reviewed updates by manifest pointer and keeps prior revisions untouched", () => {
+    const created = stageSkillWrite(bot, {
+      action: "create",
+      files: [{ path: "SKILL.md", content: SKILL("crash-recovery", "Original.") }],
+    });
+    if ("error" in created) throw new Error(created.error);
+    expect(applyStagedSkillWrite(bot, created.id)).toMatchObject({ name: "crash-recovery" });
+    const proposed = SKILL("crash-recovery", "Reviewed replacement.");
+    const staged = stageSkillWrite(bot, {
+      action: "update",
+      targetName: "crash-recovery",
+      files: [{ path: "SKILL.md", content: proposed }],
+    });
+    if ("error" in staged) throw new Error(staged.error);
+    const originalPath = join(workspaceDir(bot), "skills", "crash-recovery", "SKILL.md");
+    expect(readFileSync(originalPath, "utf8")).toBe(SKILL("crash-recovery", "Original."));
+    expect(applyStagedSkillWrite(bot, staged.id, { expectedSha256: staged.sha256 }))
+      .toMatchObject({ name: "crash-recovery", description: "Reviewed replacement." });
+    expect(readSkillFile(bot, "crash-recovery")).toBe(proposed);
+    expect(existsSync(originalPath)).toBe(false);
+
+    const firstRevision = realpathSync(join(workspaceDir(bot), ".agents", "skills", "crash-recovery"));
+    expect(firstRevision).toContain(`${join("skills", ".revisions")}`);
+    expect(readFileSync(join(firstRevision, "SKILL.md"), "utf8")).toBe(proposed);
+
+    const secondProposal = SKILL("crash-recovery", "Second reviewed replacement.");
+    const second = stageSkillWrite(bot, {
+      action: "update",
+      targetName: "crash-recovery",
+      files: [{ path: "SKILL.md", content: secondProposal }],
+    });
+    if ("error" in second) throw new Error(second.error);
+    expect(applyStagedSkillWrite(bot, second.id)).toMatchObject({ description: "Second reviewed replacement." });
+    const secondRevision = realpathSync(join(workspaceDir(bot), ".agents", "skills", "crash-recovery"));
+    expect(secondRevision).not.toBe(firstRevision);
+    expect(existsSync(firstRevision)).toBe(false);
+    expect(readSkillFile(bot, "crash-recovery")).toBe(secondProposal);
+    const prompt = skillsSystemPrompt(bot);
+    expect(prompt).toContain(createHash("sha256").update(second.id).digest("hex"));
+    expect(prompt).not.toContain(originalPath);
+    for (const dir of [".claude/skills", ".agents/skills", ".grok/skills"]) {
+      expect(realpathSync(join(workspaceDir(bot), dir, "crash-recovery"))).toBe(secondRevision);
+    }
+  });
+
+  it("refuses to update through a replaced skill-directory symlink", () => {
+    const original = SKILL("linked-update", "Original.");
+    const created = stageSkillWrite(bot, {
+      action: "create",
+      files: [{ path: "SKILL.md", content: original }],
+    });
+    if ("error" in created) throw new Error(created.error);
+    expect(applyStagedSkillWrite(bot, created.id)).toMatchObject({ name: "linked-update" });
+    const staged = stageSkillWrite(bot, {
+      action: "update",
+      targetName: "linked-update",
+      files: [{ path: "SKILL.md", content: SKILL("linked-update", "Replacement.") }],
+    });
+    if ("error" in staged) throw new Error(staged.error);
+
+    const directory = join(workspaceDir(bot), "skills", "linked-update");
+    const outside = join(scratch, "linked-update-outside");
+    mkdirSync(outside);
+    writeFileSync(join(outside, "SKILL.md"), original);
+    rmSync(directory, { recursive: true, force: true });
+    symlinkSync(outside, directory, process.platform === "win32" ? "junction" : "dir");
+
+    expect(applyStagedSkillWrite(bot, staged.id, { expectedSha256: staged.sha256 })).toMatchObject({
+      error: expect.stringContaining("changed after this update was proposed"),
+    });
+    expect(readFileSync(join(outside, "SKILL.md"), "utf8")).toBe(original);
+  });
+
+  it("refuses to publish through a replaced revisions directory", () => {
+    const original = SKILL("revision-boundary", "Original.");
+    const created = stageSkillWrite(bot, {
+      action: "create",
+      files: [{ path: "SKILL.md", content: original }],
+    });
+    if ("error" in created) throw new Error(created.error);
+    expect(applyStagedSkillWrite(bot, created.id)).toMatchObject({ name: "revision-boundary" });
+    const staged = stageSkillWrite(bot, {
+      action: "update",
+      targetName: "revision-boundary",
+      files: [{ path: "SKILL.md", content: SKILL("revision-boundary", "Replacement.") }],
+    });
+    if ("error" in staged) throw new Error(staged.error);
+
+    const outside = join(scratch, "outside-revisions");
+    mkdirSync(outside);
+    symlinkSync(
+      outside,
+      join(workspaceDir(bot), "skills", ".revisions"),
+      process.platform === "win32" ? "junction" : "dir",
+    );
+
+    expect(applyStagedSkillWrite(bot, staged.id)).toMatchObject({
+      error: expect.stringContaining("revisions path is not a real directory"),
+    });
+    expect(readSkillFile(bot, "revision-boundary")).toBe(original);
+    expect(existsSync(join(outside, createHash("sha256").update(staged.id).digest("hex")))).toBe(false);
+  });
+
+  it("never writes through a pre-existing revision symlink", () => {
+    const original = SKILL("revision-target", "Original.");
+    const created = stageSkillWrite(bot, {
+      action: "create",
+      files: [{ path: "SKILL.md", content: original }],
+    });
+    if ("error" in created) throw new Error(created.error);
+    expect(applyStagedSkillWrite(bot, created.id)).toMatchObject({ name: "revision-target" });
+    const staged = stageSkillWrite(bot, {
+      action: "update",
+      targetName: "revision-target",
+      files: [{ path: "SKILL.md", content: SKILL("revision-target", "Replacement.") }],
+    });
+    if ("error" in staged) throw new Error(staged.error);
+
+    const revisions = join(workspaceDir(bot), "skills", ".revisions");
+    mkdirSync(revisions);
+    const outside = join(scratch, "outside-revision-target");
+    mkdirSync(outside);
+    const marker = join(outside, "SKILL.md");
+    writeFileSync(marker, "outside stays untouched");
+    symlinkSync(
+      outside,
+      join(revisions, createHash("sha256").update(staged.id).digest("hex")),
+      process.platform === "win32" ? "junction" : "dir",
+    );
+
+    expect(applyStagedSkillWrite(bot, staged.id)).toMatchObject({
+      error: expect.stringContaining("already exists with different content"),
+    });
+    expect(readFileSync(marker, "utf8")).toBe("outside stays untouched");
+    expect(readSkillFile(bot, "revision-target")).toBe(original);
+  });
+
+  it("preserves a user-owned native link while rotating app-owned links", () => {
+    const created = stageSkillWrite(bot, {
+      action: "create",
+      files: [{ path: "SKILL.md", content: SKILL("link-owner", "Original.") }],
+    });
+    if ("error" in created) throw new Error(created.error);
+    expect(applyStagedSkillWrite(bot, created.id)).toMatchObject({ name: "link-owner" });
+
+    const userDirectory = join(scratch, "user-owned-link");
+    mkdirSync(userDirectory);
+    const claudeLink = join(workspaceDir(bot), ".claude", "skills", "link-owner");
+    rmSync(claudeLink, { force: true });
+    symlinkSync(userDirectory, claudeLink, process.platform === "win32" ? "junction" : "dir");
+
+    const staged = stageSkillWrite(bot, {
+      action: "update",
+      targetName: "link-owner",
+      files: [{ path: "SKILL.md", content: SKILL("link-owner", "Reviewed replacement.") }],
+    });
+    if ("error" in staged) throw new Error(staged.error);
+    expect(applyStagedSkillWrite(bot, staged.id)).toMatchObject({ description: "Reviewed replacement." });
+    expect(realpathSync(claudeLink)).toBe(realpathSync(userDirectory));
+    expect(realpathSync(join(workspaceDir(bot), ".agents", "skills", "link-owner")))
+      .toContain(join("skills", ".revisions"));
+  });
+
+  it("refuses a stale update without overwriting the changed skill", () => {
+    const created = stageSkillWrite(bot, {
+      action: "create",
+      files: [{ path: "SKILL.md", content: SKILL("stale-update", "Original.") }],
+    });
+    if ("error" in created) throw new Error(created.error);
+    expect(applyStagedSkillWrite(bot, created.id, { expectedSha256: created.sha256 }))
+      .toMatchObject({ enabled: true });
+    const staged = stageSkillWrite(bot, {
+      action: "update",
+      targetName: "stale-update",
+      files: [{ path: "SKILL.md", content: SKILL("stale-update", "Proposed replacement.") }],
+    });
+    if ("error" in staged) throw new Error(staged.error);
+    const changed = SKILL("stale-update", "Changed after staging.");
+    writeFileSync(join(workspaceDir(bot), "skills", "stale-update", "SKILL.md"), changed);
+
+    expect(applyStagedSkillWrite(bot, staged.id, { expectedSha256: staged.sha256 })).toMatchObject({
+      error: expect.stringContaining("changed after this update was proposed"),
+    });
+    expect(readFileSync(join(workspaceDir(bot), "skills", "stale-update", "SKILL.md"), "utf8")).toBe(changed);
+    expect(listStagedSkillWrites(bot)).toHaveLength(1);
+  });
+
+  it("replays an approved update safely when card settlement fails", () => {
+    const created = stageSkillWrite(bot, {
+      action: "create",
+      files: [{ path: "SKILL.md", content: SKILL("replay-update", "Original.") }],
+    });
+    if ("error" in created) throw new Error(created.error);
+    expect(applyStagedSkillWrite(bot, created.id, { expectedSha256: created.sha256 }))
+      .toMatchObject({ enabled: true });
+    const proposed = SKILL("replay-update", "Reviewed replacement.");
+    const staged = stageSkillWrite(bot, {
+      action: "update",
+      targetName: "replay-update",
+      files: [{ path: "SKILL.md", content: proposed }],
+    });
+    if ("error" in staged) throw new Error(staged.error);
+
+    expect(() => applyStagedSkillWrite(bot, staged.id, {
+      expectedSha256: staged.sha256,
+      onApplied: () => {
+        throw new Error("simulated card write failure");
+      },
+    })).toThrow("simulated card write failure");
+    expect(readSkillFile(bot, "replay-update")).toBe(proposed);
+
+    expect(applyStagedSkillWrite(bot, staged.id, { expectedSha256: staged.sha256 }))
+      .toMatchObject({ name: "replay-update", enabled: true });
+    expect(listStagedSkillWrites(bot)).toEqual([]);
+  });
+
+  it("does not let an already-applied replay record block the next update", () => {
+    const created = stageSkillWrite(bot, {
+      action: "create",
+      files: [{ path: "SKILL.md", content: SKILL("next-update", "Original.") }],
+    });
+    if ("error" in created) throw new Error(created.error);
+    expect(applyStagedSkillWrite(bot, created.id)).toMatchObject({ name: "next-update" });
+    const applied = stageSkillWrite(bot, {
+      action: "update",
+      targetName: "next-update",
+      files: [{ path: "SKILL.md", content: SKILL("next-update", "First replacement.") }],
+    });
+    if ("error" in applied) throw new Error(applied.error);
+
+    expect(() => applyStagedSkillWrite(bot, applied.id, {
+      onApplied: () => {
+        throw new Error("simulated card write failure");
+      },
+    })).toThrow("simulated card write failure");
+    expect(listStagedSkillWrites(bot)).toEqual([]);
+
+    const next = stageSkillWrite(bot, {
+      action: "update",
+      targetName: "next-update",
+      files: [{ path: "SKILL.md", content: SKILL("next-update", "Second replacement.") }],
+    });
+    expect(next).toMatchObject({ action: "update", name: "next-update" });
+    if ("error" in next) throw new Error(next.error);
+    expect(rejectStagedSkillWrite(bot, applied.id)).toEqual({ applied: true });
+    expect(listStagedSkillWrites(bot)).toMatchObject([{ id: next.id }]);
+  });
+
+  it("removes an updated skill and its active revision", () => {
+    const created = stageSkillWrite(bot, {
+      action: "create",
+      files: [{ path: "SKILL.md", content: SKILL("remove-updated", "Original.") }],
+    });
+    if ("error" in created) throw new Error(created.error);
+    expect(applyStagedSkillWrite(bot, created.id)).toMatchObject({ name: "remove-updated" });
+    const staged = stageSkillWrite(bot, {
+      action: "update",
+      targetName: "remove-updated",
+      files: [{ path: "SKILL.md", content: SKILL("remove-updated", "Replacement.") }],
+    });
+    if ("error" in staged) throw new Error(staged.error);
+    expect(applyStagedSkillWrite(bot, staged.id)).toMatchObject({ description: "Replacement." });
+    const revision = realpathSync(join(workspaceDir(bot), ".agents", "skills", "remove-updated"));
+
+    expect(removeSkill(bot, "remove-updated")).toEqual({ removed: true });
+    expect(existsSync(revision)).toBe(false);
+    expect(existsSync(join(workspaceDir(bot), "skills", "remove-updated"))).toBe(false);
   });
 
   it("rejects an existing or already-pending name", () => {
@@ -462,7 +864,7 @@ describe("staged skill writes", () => {
     expect(listStagedSkillWrites(bot)).toEqual([]);
   });
 
-  it("preserves a failed-settlement replay record while staging another skill", () => {
+  it("replays a failed settlement after a later proposal prunes its staged record", () => {
     const staged = stageSkillWrite(bot, {
       action: "create",
       files: [{ path: "SKILL.md", content: SKILL("replay-after-later-stage") }],
@@ -478,7 +880,7 @@ describe("staged skill writes", () => {
     ).toThrow("simulated card write failure");
 
     // A proposal card is durable and has no expiry. Simulate a long delay
-    // before another proposal is staged; the replay token must still survive.
+    // before another proposal is staged; the manifest token must still replay.
     const stagedStorePath = join(DATA_DIR, "skill-state", bot, "staged.json");
     const stagedStore = JSON.parse(readFileSync(stagedStorePath, "utf8"));
     stagedStore.writes[staged.id].createdAt = "2020-01-01T00:00:00.000Z";

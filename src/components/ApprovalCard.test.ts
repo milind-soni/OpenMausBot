@@ -5,6 +5,7 @@ import { describe, expect, it } from "vitest";
 import { ApprovalCard } from "./ApprovalCard";
 import { spokenApprovalPrompt, type Pending } from "./PendingApproval";
 import type { Message } from "@/state/store";
+import { skillRequestBehavior } from "../../shared/skill-request";
 
 const routineRequest = {
   version: 1 as const,
@@ -129,6 +130,15 @@ describe("ApprovalCard routine proposals", () => {
 });
 
 describe("ApprovalCard learned skills", () => {
+  it("maps create and update choices to approval while keeping refusals denied", () => {
+    expect(skillRequestBehavior("Enable")).toBe("allow");
+    expect(skillRequestBehavior("Update")).toBe("allow");
+    expect(skillRequestBehavior("Apply")).toBe("allow");
+    expect(skillRequestBehavior("Deny")).toBe("deny");
+    expect(skillRequestBehavior("Dismiss")).toBe("deny");
+    expect(skillRequestBehavior("unexpected")).toBe("deny");
+  });
+
   it("describes a staged skill as enablement rather than a raw tool call", () => {
     const message: Message = {
       id: "skill-card",
@@ -175,6 +185,48 @@ describe("ApprovalCard learned skills", () => {
     expect(spoken).toContain("Should I enable it?");
   });
 
+  it("labels a reviewed skill replacement as an update", () => {
+    const message: Message = {
+      id: "skill-update",
+      role: "bot",
+      kind: "options",
+      at: 1,
+      card: {
+        title: 'Update skill "verify-app"?',
+        subtitle: "Refreshes the verified workflows.",
+        options: ["Update", "Deny"],
+        requestId: "skill-update-request",
+        tool: "stage_skill",
+        skillRequest: {
+          version: 1,
+          requestId: "skill-update-request",
+          botId: "bot-1",
+          threadId: "thread-1",
+          stagedId: "staged-update",
+          action: "update",
+          name: "verify-app",
+          gist: "Refreshes the verified workflows.",
+          source: "learn:maintenance",
+          preview: "---\nname: verify-app\ndescription: Verifies the app.\n---\n",
+          sha256: "abcdef0123456789".repeat(4),
+          warnings: [],
+          createdAt: 1,
+        },
+      },
+    };
+
+    expect(renderToStaticMarkup(createElement(ApprovalCard, { message }))).toContain("update a learned skill");
+    expect(renderToStaticMarkup(createElement(ApprovalCard, { message }))).toContain("replacing the current version");
+    const spoken = spokenApprovalPrompt(
+      { message, requestId: "skill-update-request", tool: "stage_skill", detail: message.card!.subtitle },
+      "Mochi",
+    );
+    expect(spoken).toContain("Should I update it?");
+
+    message.card!.answered = "allow";
+    expect(renderToStaticMarkup(createElement(ApprovalCard, { message }))).toContain("Skill updated");
+  });
+
   it("keeps an old persisted skill card readable but deny-only", () => {
     const message: Message = {
       id: "legacy-skill-card",
@@ -204,6 +256,6 @@ describe("ApprovalCard learned skills", () => {
 
     const markup = renderToStaticMarkup(createElement(ApprovalCard, { message }));
     expect(markup).toContain("created by an older build");
-    expect(markup).toContain("cannot be safely enabled");
+    expect(markup).toContain("cannot be safely applied");
   });
 });

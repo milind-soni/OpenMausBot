@@ -19,7 +19,11 @@ import type { BotAvatarCrop } from "../../shared/bot-avatar";
 import type { RoutineRequestCardData } from "../../shared/routine-request";
 import type { RoutineRunCardData } from "../../shared/routine-run";
 import type { GroupGoalRunCardData } from "../../shared/group-goal-run";
-import { reviewedSkillSha256, type SkillRequestCardData } from "../../shared/skill-request";
+import {
+  reviewedSkillSha256,
+  skillRequestBehavior,
+  type SkillRequestCardData,
+} from "../../shared/skill-request";
 import type { Routine, RoutineInput, RoutineRun } from "@/lib/routines";
 import type { WebhookAttempt, WebhookIngressStatus, WebhookTrigger } from "@/lib/webhooks";
 import { currentCall } from "@/lib/call";
@@ -49,7 +53,7 @@ export interface OptionCardData {
   approvalScope?: "local-computer";
   /** Persisted proposal used by the server when the user confirms it. */
   routineRequest?: RoutineRequestCardData;
-  /** Staged learned skill; enabled only after the user confirms this card. */
+  /** Staged learned-skill change; applied only after the user confirms this card. */
   skillRequest?: SkillRequestCardData;
 }
 
@@ -1567,9 +1571,8 @@ export function StoreProvider({ children }: { children: ReactNode }) {
           const bot = stateRef.current.bots.find((b) => b.id === action.botId);
           const card = bot?.messages.find((m) => m.id === action.messageId)?.card;
           if (card?.requestId) {
-            const normalizedAnswer = action.answer.trim().toLowerCase();
             const behavior = card.skillRequest
-              ? ["enable", "allow"].includes(normalizedAnswer) ? "allow" : "deny"
+              ? skillRequestBehavior(action.answer)
               : action.answer === "Allow" ? "allow" : action.answer === "Deny" ? "deny" : "answer";
             api(`/api/bots/${action.botId}/respond`, {
               method: "POST",

@@ -443,7 +443,7 @@ function Call({ bot }: { bot: Bot }) {
       };
       spokenIds.current.add(approval.message.id);
       void sayThenListen(isSkillApproval(approval)
-        ? `${bot.name} wants to enable a learned skill. Open this chat to review the complete skill before enabling it. You can say no to deny it.`
+        ? `${bot.name} wants to apply a learned-skill change. Open this chat to review the complete skill before applying it. You can say no to deny it.`
         : spokenApprovalPrompt(approval, bot.name));
       return;
     }

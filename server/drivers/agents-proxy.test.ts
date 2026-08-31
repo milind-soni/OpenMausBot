@@ -44,7 +44,22 @@ let lastRoutineRequestBody: any = null;
 let lastSkillQuery = "";
 let lastSkillStageBody: any = null;
 let skillsResponse: unknown = {
-  skills: [{ name: "file-expense", description: "UNREVIEWED IMPORT INSTRUCTIONS", enabled: false }],
+  skills: [
+    {
+      name: "file-expense",
+      description: "UNREVIEWED IMPORT INSTRUCTIONS",
+      enabled: false,
+      source: "github.com/example/skills",
+      editable: false,
+    },
+    {
+      name: "learned-expense",
+      description: "PRIVATE LEARNED INSTRUCTIONS",
+      enabled: true,
+      source: "learn:conversation",
+      editable: true,
+    },
+  ],
   staged: [{ name: "pending-skill", action: "create", gist: "UNREVIEWED GIST", source: "UNREVIEWED SOURCE" }],
 };
 let skillStageResponse: unknown = { name: "file-expense", action: "create", gist: "Files an expense.", warnings: [] };
@@ -629,11 +644,15 @@ describe("agents-proxy MCP surface", () => {
     const manage = list.result.tools.find((t: { name: string }) => t.name === "skill_manage");
     expect(JSON.stringify(manage.inputSchema)).not.toMatch(/"(oneOf|anyOf|allOf|const|format)":/);
     expect(manage.inputSchema.required).toEqual(["action", "skill_md", "source"]);
+    expect(manage.inputSchema.properties.action.enum).toEqual(["create", "update"]);
 
     const listed = await callTool("skills_list", {});
     expect(listed.result.content[0].text).toContain("file-expense");
+    expect(listed.result.content[0].text).toContain("file-expense (disabled, imported)");
+    expect(listed.result.content[0].text).toContain("learned-expense (enabled, learned/editable)");
     expect(listed.result.content[0].text).toContain("pending-skill");
     expect(listed.result.content[0].text).not.toContain("UNREVIEWED");
+    expect(listed.result.content[0].text).not.toContain("PRIVATE LEARNED");
     expect(lastSkillQuery).toContain("fromBotId=bot-asker");
 
     const staged = await callTool("skill_manage", {
@@ -649,6 +668,28 @@ describe("agents-proxy MCP surface", () => {
       source: "conversation",
     });
     expect(staged.result.content[0].text).toContain("staged and inactive");
-    expect(staged.result.content[0].text).not.toContain("active until");
+    expect(staged.result.content[0].text).toContain("wait for the decision");
+
+    const updated = await callTool("skill_manage", {
+      action: "update",
+      skill_name: "file-expense",
+      skill_md: "---\nname: file-expense\ndescription: Files expenses with a receipt.\n---\n\n# File expense\n",
+      source: "conversation",
+    });
+    expect(lastSkillStageBody).toMatchObject({
+      action: "update",
+      skill_name: "file-expense",
+    });
+    expect(updated.result.content[0].text).toContain("current version remains unchanged");
+
+    lastSkillStageBody = null;
+    const missingTarget = await callTool("skill_manage", {
+      action: "update",
+      skill_md: "---\nname: file-expense\ndescription: Files expenses.\n---\n",
+      source: "conversation",
+    });
+    expect(missingTarget.result.isError).toBe(true);
+    expect(missingTarget.result.content[0].text).toContain("needs skill_name");
+    expect(lastSkillStageBody).toBeNull();
   });
 });
