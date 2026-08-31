@@ -59,7 +59,7 @@ function questionIn(messages: Message[]): Message | undefined {
 function GroupCall({ group, members }: { group: Group; members: Bot[] }) {
   const { dispatch } = useStore();
   const speech = useSpeech();
-  const initialPhase: Phase = group.busyBotId ? "working" : "listening";
+  const initialPhase: Phase = group.working || group.busyBotId ? "working" : "listening";
   const [phase, setPhase] = useState<Phase>(initialPhase);
   const [heard, setHeard] = useState("");
   const [note, setNote] = useState<string | null>(null);
@@ -72,10 +72,10 @@ function GroupCall({ group, members }: { group: Group; members: Bot[] }) {
   const approval = pendingApprovals(messages)[0];
   const question = questionIn(messages);
   const membersRef = useRef(members);
-  const busyRef = useRef(Boolean(group.busyBotId));
+  const busyRef = useRef(Boolean(group.working || group.busyBotId));
   const defaultResponderRef = useRef(group.defaultResponder);
   membersRef.current = members;
-  busyRef.current = Boolean(group.busyBotId);
+  busyRef.current = Boolean(group.working || group.busyBotId);
   defaultResponderRef.current = group.defaultResponder;
 
   const spokenIds = useRef<Set<string>>(new Set());
@@ -315,7 +315,7 @@ function GroupCall({ group, members }: { group: Group; members: Bot[] }) {
       }
       if (phaseRef.current === "listening") listen();
     });
-    if (group.busyBotId && !approval && !question) move("working");
+    if ((group.working || group.busyBotId) && !approval && !question) move("working");
     else listen();
     return () => {
       offTranscript();
@@ -336,7 +336,7 @@ function GroupCall({ group, members }: { group: Group; members: Bot[] }) {
       askedQuestion.current = null;
     }
 
-    if (resumeAfterRoutine && !approval && !question && !group.busyBotId) {
+    if (resumeAfterRoutine && !approval && !question && !group.working && !group.busyBotId) {
       scheduleListen(true);
       return;
     }
@@ -394,10 +394,10 @@ function GroupCall({ group, members }: { group: Group; members: Bot[] }) {
         enqueueSpeech(chip.tool.spoken, member);
       }
     }
-  }, [approval, enqueueSpeech, group.busyBotId, members, messages, question, scheduleListen]);
+  }, [approval, enqueueSpeech, group.busyBotId, group.working, members, messages, question, scheduleListen]);
 
   useEffect(() => {
-    const busy = Boolean(group.busyBotId);
+    const busy = Boolean(group.working || group.busyBotId);
     busyRef.current = busy;
     if (busy) {
       if (
@@ -419,7 +419,7 @@ function GroupCall({ group, members }: { group: Group; members: Bot[] }) {
     ) {
       scheduleListen();
     }
-  }, [group.busyBotId, hush, move, scheduleListen]);
+  }, [group.busyBotId, group.working, hush, move, scheduleListen]);
 
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {

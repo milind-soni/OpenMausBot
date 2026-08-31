@@ -1,3 +1,5 @@
+import type { GroupGoalRunCardData } from "../../shared/group-goal-run";
+
 export const PINNED_SECTION_ID = "builtin:pinned";
 export const CHANNELS_SECTION_ID = "builtin:channels";
 export const BOT_CHATS_SECTION_ID = "builtin:bot-chats";
@@ -8,6 +10,16 @@ const USER_SECTION_PREFIX = "section:";
 export type SidebarSectionId = string;
 export type SectionDropPlace = "before" | "after";
 export type SidebarDensityMode = "comfortable" | "compact" | "icons";
+
+const GOAL_RUN_PREVIEW_LABEL = {
+  working: "Working",
+  completed: "Completed",
+  "needs-input": "Needs your input",
+  blocked: "Blocked",
+  "limit-reached": "Turn limit reached",
+  stopped: "Stopped",
+  failed: "Failed",
+} satisfies Record<GroupGoalRunCardData["status"], string>;
 
 export type SidebarBot = {
   id: string;
@@ -42,6 +54,14 @@ export function sidebarSectionLabel(id: SidebarSectionId): string {
   if (id === BOT_CHATS_SECTION_ID) return "Bot Chats";
   if (id === BOTS_SECTION_ID) return "Bots";
   return userSectionName(id) ?? id;
+}
+
+export function sidebarGoalRunPreview(run: GroupGoalRunCardData): string {
+  const detail = run.detail?.replace(/\s+/g, " ").trim();
+  const goal = run.goal.replace(/\s+/g, " ").trim();
+  const summary = detail || goal;
+  const label = GOAL_RUN_PREVIEW_LABEL[run.status];
+  return summary ? `${label}: ${summary}` : label;
 }
 
 export function sidebarLayoutInteractive(density: SidebarDensityMode, query: string): boolean {

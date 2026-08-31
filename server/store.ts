@@ -18,6 +18,7 @@ import { botAvatarProfile, type BotAvatarCrop } from "../shared/bot-avatar.ts";
 import type { RoutineRequestCardData } from "../shared/routine-request.ts";
 import type { RoutineRunCardData } from "../shared/routine-run.ts";
 import type { SkillRequestCardData } from "../shared/skill-request.ts";
+import type { GroupGoalRunCardData } from "../shared/group-goal-run.ts";
 
 export type MausColor =
   | "green"
@@ -93,7 +94,7 @@ export interface SecretRequestCardData {
 export interface Message {
   id: string;
   role: "bot" | "user";
-  kind: "text" | "options" | "activity" | "screen" | "connector" | "secret" | "routine.run";
+  kind: "text" | "options" | "activity" | "screen" | "connector" | "secret" | "routine.run" | "goal.run";
   text?: string;
   card?: OptionCardData;
   connector?: ConnectorCardData;
@@ -101,6 +102,8 @@ export interface Message {
   /** One idempotently updated status card in the conversation that created a
    * routine. The actual provider turn remains in its isolated task. */
   routineRun?: RoutineRunCardData;
+  /** Terminal receipt for a bounded multi-bot channel goal. */
+  goalRun?: GroupGoalRunCardData;
   /** activity messages: tool name + outcome. `spoken` is the same chip as
    * a phrase a voice can read ("reading a file") — computed once here so
    * call mode never has to re-derive it from the raw tool name, and absent
@@ -124,6 +127,8 @@ export interface Message {
   replyToId?: string;
   /** Stable client identity for at-most-once chat POST retries. */
   sendId?: string;
+  /** Per-send channel behavior. Absent is legacy quick chat. */
+  channelMode?: "chat" | "goal";
   /** group threads: which member said this (sender attribution). */
   from?: { botId: string; name: string; color: string };
   /** emoji reactions; by = "user" or a member botId. */
@@ -257,6 +262,14 @@ function redactBotAuthored<T extends Omit<Message, "id" | "at"> & { at?: number 
     if (routineRun.summary) routineRun.summary = redactSecretsInText(routineRun.summary);
     if (routineRun.error) routineRun.error = redactSecretsInText(routineRun.error);
     out.routineRun = routineRun;
+  }
+  if (out.goalRun) {
+    out.goalRun = {
+      ...out.goalRun,
+      goal: redactSecretsInText(out.goalRun.goal),
+      coordinatorName: redactSecretsInText(out.goalRun.coordinatorName),
+      detail: out.goalRun.detail ? redactSecretsInText(out.goalRun.detail) : undefined,
+    };
   }
   if (out.card) {
     const card = { ...out.card } as OptionCardData & { summary?: string };

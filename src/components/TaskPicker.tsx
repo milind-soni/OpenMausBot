@@ -390,7 +390,7 @@ export function GroupTaskPicker({ group }: { group: Group }) {
     <ConversationTaskPicker
       threadId={group.threadId}
       tasks={group.tasks ?? []}
-      busy={Boolean(group.busyBotId)}
+      busy={Boolean(group.working || group.busyBotId)}
       onNew={() => dispatch({ type: "newGroupTask", groupId: group.id })}
       onSwitch={(threadId) => dispatch({ type: "switchGroupTask", groupId: group.id, threadId })}
       onRename={(threadId, title) => dispatch({ type: "renameGroupTask", groupId: group.id, threadId, title })}

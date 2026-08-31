@@ -25,6 +25,8 @@ export interface FailedComposerSend {
   requestText: string;
   replyToId?: string;
   threadId: string;
+  /** Channel delivery mode; absent for 1:1 messages and legacy retries. */
+  channelMode?: "chat" | "goal";
 }
 type FailedComposerSendInput = Omit<FailedComposerSend, "id">;
 export interface ComposerSendSnapshot extends FailedComposerSendInput {
@@ -245,6 +247,7 @@ export function recoverFailedComposerSend(sent: ComposerSendSnapshot): "restored
       requestText: sent.requestText,
       replyToId: sent.replyToId,
       threadId: sent.threadId,
+      channelMode: sent.channelMode,
     });
     return "outbox";
   }

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { roomRespondersForComposer } from "./group-routing";
+import { goalCoordinatorForComposer, roomRespondersForComposer } from "./group-routing";
 
 describe("roomRespondersForComposer", () => {
   const members = [
@@ -29,3 +29,26 @@ describe("roomRespondersForComposer", () => {
   });
 });
 
+describe("goalCoordinatorForComposer", () => {
+  const members = [
+    { id: "first", name: "First" },
+    { id: "chief", name: "Chief", chiefOfStaff: true },
+    { id: "writer", name: "Writer" },
+  ];
+
+  it("uses an explicit mention before the configured lead", () => {
+    expect(goalCoordinatorForComposer(
+      "@Writer finish this",
+      members,
+      { defaultResponder: { kind: "member", botId: "first" } },
+    )?.id).toBe("writer");
+  });
+
+  it("falls back to the in-room Chief for mentions-only goal channels", () => {
+    expect(goalCoordinatorForComposer(
+      "finish this",
+      members,
+      { defaultResponder: { kind: "mentions" } },
+    )?.id).toBe("chief");
+  });
+});

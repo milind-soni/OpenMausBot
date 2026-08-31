@@ -16,8 +16,6 @@ export function SidebarSectionHeader({
   dragging,
   onDragStart,
   onDragEnd,
-  onDragOver,
-  onDrop,
   onMove,
 }: {
   name: string;
@@ -28,8 +26,6 @@ export function SidebarSectionHeader({
   dragging: boolean;
   onDragStart?: (event: DragEvent<HTMLSpanElement>) => void;
   onDragEnd?: () => void;
-  onDragOver?: (event: DragEvent<HTMLDivElement>) => void;
-  onDrop?: (event: DragEvent<HTMLDivElement>) => void;
   onMove?: (direction: -1 | 1) => void;
 }) {
   const Chevron = collapsed ? ChevronRight : ChevronDown;
@@ -46,12 +42,7 @@ export function SidebarSectionHeader({
   };
 
   return (
-    <div
-      className="flex items-center gap-1 px-2 pb-1"
-      data-section={name}
-      onDragOver={onDragOver}
-      onDrop={onDrop}
-    >
+    <div className="flex items-center gap-1 px-2 pb-1" data-section={name}>
       {onToggle ? (
         <button
           type="button"
