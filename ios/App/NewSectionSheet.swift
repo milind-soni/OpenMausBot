@@ -22,11 +22,18 @@ struct NewSectionSheet: View {
     @State private var fingerLocation: CGPoint?
     @State private var dwellTask: Task<Void, Never>?
     @State private var scheduledCandidate: SectionSelection.Candidate?
+    @State private var selectionFeedback = 0
+    @State private var warningFeedback = 0
+    @State private var successFeedback = 0
     @FocusState private var nameFocused: Bool
 
     private static let gridSpace = "new-section-grid"
-    private static let activationMilliseconds = 300
-    private static let dwellMilliseconds = 160
+    // A brief touch separates route drawing from an ordinary fast scroll, but
+    // must not feel like a long press. The generous movement allowance lets a
+    // finger start gliding immediately, like SBB's touch timetable.
+    private static let activationMilliseconds = 140
+    private static let activationMovement: CGFloat = 80
+    private static let dwellMilliseconds = 120
 
     private enum Step {
         case bots
@@ -100,6 +107,9 @@ struct NewSectionSheet: View {
         }
         .presentationDetents([.large])
         .presentationDragIndicator(.visible)
+        .sensoryFeedback(.selection, trigger: selectionFeedback)
+        .sensoryFeedback(.warning, trigger: warningFeedback)
+        .sensoryFeedback(.success, trigger: successFeedback)
         .alert(
             "Couldn’t create section",
             isPresented: Binding(
@@ -135,7 +145,7 @@ struct NewSectionSheet: View {
             VStack(alignment: .leading, spacing: 6) {
                 Text("Swipe a section together")
                     .font(.system(size: 24, weight: .bold, design: .rounded))
-                Text("Hold a bot, then glide. Pause on each bot until it clicks.")
+                Text("Touch a bot, then glide. Pause briefly on each bot until it clicks.")
                     .font(.system(size: 15))
                     .foregroundStyle(Color.secondary)
             }
@@ -156,7 +166,7 @@ struct NewSectionSheet: View {
                     } else {
                         selection.selectAll(bots.map(\.id))
                     }
-                    Haptics.selection()
+                    selectionFeedback += 1
                 }
                 .font(.system(size: 14, weight: .semibold))
                 .disabled(bots.isEmpty || selection.isDragging)
@@ -241,10 +251,11 @@ struct NewSectionSheet: View {
             .padding(.horizontal, 16)
             .padding(.bottom, 24)
             .onPreferenceChange(SectionCellFramePreference.self) { cellFrames = $0 }
+            .highPriorityGesture(drawGesture)
         }
-        // A normal swipe scrolls. Holding a tile for the short dwell switches
-        // into drawing and freezes the scroll position; there is deliberately
-        // no surprising edge auto-scroll while a trail is active.
+        // A fast vertical swipe still scrolls. Briefly touching a tile before
+        // gliding switches into drawing and freezes the scroll position; there
+        // is deliberately no surprising edge auto-scroll while a trail is active.
         .scrollDisabled(selection.isDragging)
     }
 
@@ -256,9 +267,9 @@ struct NewSectionSheet: View {
 
         return Button {
             if selection.toggle(bot.id) {
-                Haptics.selection()
+                selectionFeedback += 1
             } else {
-                Haptics.notification(.warning)
+                warningFeedback += 1
             }
         } label: {
             VStack(spacing: 9) {
@@ -316,7 +327,6 @@ struct NewSectionSheet: View {
         .accessibilityValue(selected ? "Selected, number \(order ?? 1)" : "Not selected")
         .accessibilityHint(selected ? "Double tap to remove this bot" : "Double tap to add this bot")
         .accessibilityAddTraits(selected ? .isSelected : [])
-        .highPriorityGesture(drawGesture(startingAt: bot.id))
         .animation(reduceMotion ? nil : .snappy(duration: 0.18), value: selected)
         .animation(reduceMotion ? nil : .easeInOut(duration: 0.12), value: candidate)
     }
@@ -341,35 +351,39 @@ struct NewSectionSheet: View {
         .accessibilityHidden(true)
     }
 
-    private func drawGesture(startingAt botID: String) -> some Gesture {
+    private var drawGesture: some Gesture {
         LongPressGesture(
             minimumDuration: Double(Self.activationMilliseconds) / 1_000,
-            maximumDistance: 12
+            maximumDistance: Self.activationMovement
         )
         .sequenced(
             before: DragGesture(minimumDistance: 0, coordinateSpace: .named(Self.gridSpace))
         )
         .onChanged { phase in
             switch phase {
-            case .first(true):
-                guard !selection.isDragging else { return }
-                // The long press itself already supplied the first dwell.
-                if let candidate = selection.beginDrag(over: botID) {
-                    commit(candidate)
-                }
             case let .second(true, drag):
                 guard let drag else { return }
+                if !selection.isDragging {
+                    let firstHit = cellID(at: drag.startLocation)
+                    guard let firstHit,
+                          let candidate = selection.beginDrag(over: firstHit) else { return }
+                    // The brief activation already supplied the first dwell.
+                    commit(candidate)
+                }
                 fingerLocation = drag.location
-                let hit = SectionGridHitTesting.cellID(
-                    at: .init(x: drag.location.x, y: drag.location.y),
-                    in: hitFrames
-                )
-                schedule(selection.moveDrag(over: hit))
+                schedule(selection.moveDrag(over: cellID(at: drag.location)))
             default:
                 break
             }
         }
         .onEnded { _ in endDrawing() }
+    }
+
+    private func cellID(at point: CGPoint) -> String? {
+        SectionGridHitTesting.cellID(
+            at: .init(x: point.x, y: point.y),
+            in: hitFrames
+        )
     }
 
     private var hitFrames: [SectionGridCellFrame] {
@@ -405,9 +419,9 @@ struct NewSectionSheet: View {
     private func commit(_ candidate: SectionSelection.Candidate) {
         let result = selection.commit(candidate)
         if case .limitReached = result {
-            Haptics.notification(.warning)
+            warningFeedback += 1
         } else if result.givesFeedback {
-            Haptics.selection()
+            selectionFeedback += 1
         }
     }
 
@@ -564,7 +578,7 @@ struct NewSectionSheet: View {
                 return
             }
 
-            Haptics.success()
+            successFeedback += 1
             lastCreatedName = section
             selection.clear()
             name = ""
