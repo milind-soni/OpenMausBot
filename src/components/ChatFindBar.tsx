@@ -3,9 +3,18 @@ import { ChevronDown, ChevronUp, Search, X } from "lucide-react";
 
 import { landOnSearchHit } from "@/lib/focus-message";
 import type { SearchHit } from "@/lib/search-hit";
+import { cn } from "@/lib/cn";
 import { api, useStore } from "@/state/store";
 
-export function ChatFindBar({ threadId, onClose }: { threadId: string; onClose: () => void }) {
+export function ChatFindBar({
+  threadId,
+  onClose,
+  compact = false,
+}: {
+  threadId: string;
+  onClose: () => void;
+  compact?: boolean;
+}) {
   const { state, dispatch } = useStore();
   const inputRef = useRef<HTMLInputElement>(null);
   const requestRef = useRef(0);
@@ -69,7 +78,7 @@ export function ChatFindBar({ threadId, onClose }: { threadId: string; onClose: 
   }, [hits]);
 
   return (
-    <div className="w-full px-5 pb-2">
+    <div className={cn("w-full pb-2", compact ? "px-3" : "px-5")}>
       <div className="flex items-center gap-1.5 rounded-xl border border-hairline/50 bg-panel px-2 py-1.5 shadow-sm">
         <Search size={15} className="shrink-0 text-ink-secondary" />
         <input
@@ -79,6 +88,7 @@ export function ChatFindBar({ threadId, onClose }: { threadId: string; onClose: 
           onKeyDown={(event) => {
             if (event.key === "Escape") {
               event.preventDefault();
+              event.stopPropagation();
               onClose();
             } else if (event.key === "Enter") {
               event.preventDefault();

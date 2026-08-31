@@ -72,6 +72,7 @@ function ConversationTaskPicker({
   onSwitch,
   onRename,
   onDelete,
+  fitWindow = false,
 }: {
   threadId: string;
   tasks: PickerTask[];
@@ -80,6 +81,8 @@ function ConversationTaskPicker({
   onSwitch: (threadId: string) => void;
   onRename: (threadId: string, title: string) => void;
   onDelete: (threadId: string) => void;
+  /** Pin the menu to the window edges so a 440px menu-bar popover cannot clip it. */
+  fitWindow?: boolean;
 }) {
   const [open, setOpen] = useState(false);
   const [renaming, setRenaming] = useState<string | null>(null);
@@ -149,11 +152,14 @@ function ConversationTaskPicker({
     const onKey = (e: KeyboardEvent) => {
       if (e.key !== "Escape") return;
       if (renaming) return;
+      e.preventDefault();
+      e.stopImmediatePropagation();
       if (dismissTimer.current) {
         clearTimeout(dismissTimer.current);
         dismissTimer.current = null;
       }
       setRenaming(null);
+      setQuery("");
       setOpen(false);
     };
     window.addEventListener("mousedown", onDown);
@@ -227,7 +233,14 @@ function ConversationTaskPicker({
       </button>
 
       {open && (
-        <div className="absolute right-0 top-full z-40 mt-1 w-[300px] overflow-hidden rounded-xl border border-hairline/50 bg-card py-1 shadow-2xl shadow-black/50">
+        <div
+          className={cn(
+            "overflow-hidden rounded-xl border border-hairline/50 bg-card py-1 shadow-2xl shadow-black/50",
+            fitWindow
+              ? "fixed inset-x-2 top-14 z-40 flex max-h-[min(420px,calc(100dvh-8rem))] flex-col"
+              : "absolute right-0 top-full z-40 mt-1 w-[300px]",
+          )}
+        >
           <div className="px-2 pb-1 pt-1.5">
             <div className="flex items-center gap-2 rounded-lg border border-hairline/40 bg-inset px-2.5 py-1.5 focus-within:border-accent/60">
               <Search size={13} className="shrink-0 text-ink-secondary" />
@@ -259,7 +272,11 @@ function ConversationTaskPicker({
               />
             </div>
           </div>
-          <div className="max-h-[320px] overflow-y-auto" role="group" aria-label={looking ? `${visible.length} matching tasks` : "Tasks"}>
+          <div
+            className={cn("overflow-y-auto", fitWindow ? "min-h-0 flex-1" : "max-h-[320px]")}
+            role="group"
+            aria-label={looking ? `${visible.length} matching tasks` : "Tasks"}
+          >
             {visible.length === 0 ? (
               <div className="px-3 py-6 text-center text-[13px] text-ink-secondary">
                 Nothing matches “{looking}”
@@ -367,13 +384,14 @@ function ConversationTaskPicker({
   );
 }
 
-export function TaskPicker({ bot }: { bot: Bot }) {
+export function TaskPicker({ bot, fitWindow = false }: { bot: Bot; fitWindow?: boolean }) {
   const { dispatch } = useStore();
   return (
     <ConversationTaskPicker
       threadId={bot.threadId}
       tasks={bot.tasks ?? []}
       busy={Boolean(bot.busy)}
+      fitWindow={fitWindow}
       onNew={() => dispatch({ type: "newTask", botId: bot.id })}
       onSwitch={(threadId) => dispatch({ type: "switchTask", botId: bot.id, threadId })}
       onRename={(threadId, title) => dispatch({ type: "renameTask", botId: bot.id, threadId, title })}

@@ -14,7 +14,14 @@ type PaletteEntry =
   | { kind: "room"; group: Group }
   | { kind: "message"; hit: SearchHit };
 
-export function CommandPalette({ onOpenChange }: { onOpenChange?: (open: boolean) => void }) {
+export function CommandPalette({
+  onOpenChange,
+  onActivate,
+}: {
+  onOpenChange?: (open: boolean) => void;
+  /** After a bot, room, or message is chosen — the menu-bar surface opens chat. */
+  onActivate?: () => void;
+}) {
   const { state, dispatch } = useStore();
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState("");
@@ -99,10 +106,12 @@ export function CommandPalette({ onOpenChange }: { onOpenChange?: (open: boolean
         await landOnSearchHit(hit, state, dispatch);
       } catch (error) {
         dispatch({ type: "error", message: error instanceof Error ? error.message : String(error) });
+        return;
       }
     } else {
       dispatch({ type: "select", id: entry.kind === "bot" ? entry.bot.id : entry.group.id });
     }
+    onActivate?.();
     setOpen(false);
   };
 

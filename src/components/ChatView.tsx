@@ -1079,7 +1079,7 @@ export function ChatView({
           // @container so the chips on the right can fold to icon bubbles
           // when the column is narrow (side panel open, small window)
           "@container/chathead flex items-center justify-between py-3",
-          compact ? "gap-1 px-3" : "px-5 pl-11 md:pl-5",
+          compact ? "relative z-20 gap-1 px-3" : "px-5 pl-11 md:pl-5",
         )}
       >
         <div className="flex min-w-0 items-center gap-2.5 rounded-lg px-1.5 py-1">
@@ -1129,20 +1129,18 @@ export function ChatView({
           {bot.busy && <WorkingDots className="text-ink-secondary" />}
         </div>
         <div className="flex shrink-0 items-center gap-2">
-          {!compact && (
-            <button
-              onClick={() => setFindOpen((open) => !open)}
-              aria-label="Find in conversation"
-              aria-pressed={findOpen}
-              className={cn(
-                "rounded-md p-1.5 hover:bg-raised",
-                findOpen ? "text-accent" : "text-ink-secondary hover:text-ink",
-              )}
-              title="Find in conversation (⌘F)"
-            >
-              <Search size={18} />
-            </button>
-          )}
+          <button
+            onClick={() => setFindOpen((open) => !open)}
+            aria-label="Find in conversation"
+            aria-pressed={findOpen}
+            className={cn(
+              "rounded-md p-1.5 hover:bg-raised",
+              findOpen ? "text-accent" : "text-ink-secondary hover:text-ink",
+            )}
+            title="Find in conversation (⌘F)"
+          >
+            <Search size={18} />
+          </button>
           {bot.busy && (
             <button
               onClick={() => dispatch({ type: "interrupt", botId: bot.id })}
@@ -1156,7 +1154,7 @@ export function ChatView({
               <span className="@max-4xl/chathead:hidden">Stop</span>
             </button>
           )}
-          {!compact && <TaskPicker bot={bot} />}
+          <TaskPicker bot={bot} fitWindow={compact} />
           {!compact && <UsageChip bot={bot} />}
           {!compact && <WorkingFolderChip bot={bot} />}
           <ModelPicker bot={bot} fitWindow={compact} />
@@ -1201,7 +1199,13 @@ export function ChatView({
         </div>
       </div>
 
-      {findOpen && <ChatFindBar threadId={bot.threadId} onClose={() => setFindOpen(false)} />}
+      {findOpen && (
+        <ChatFindBar
+          threadId={bot.threadId}
+          onClose={() => setFindOpen(false)}
+          compact={compact}
+        />
+      )}
 
       {/* Error banner */}
       {state.error && (
