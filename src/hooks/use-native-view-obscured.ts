@@ -16,6 +16,26 @@ function isOverlayCandidate(target: EventTarget | null): target is Element {
   return target instanceof Element && Boolean(target.closest(POSITIONED_OVERLAY_SELECTOR));
 }
 
+export function syncNativeViewResizeTargets<T>(
+  observer: { observe(target: T): void; unobserve(target: T): void },
+  observedTargets: Set<T>,
+  nextTargets: Iterable<T>,
+): void {
+  const next = new Set(nextTargets);
+
+  for (const target of observedTargets) {
+    if (next.has(target)) continue;
+    observer.unobserve(target);
+    observedTargets.delete(target);
+  }
+
+  for (const target of next) {
+    if (observedTargets.has(target)) continue;
+    observer.observe(target);
+    observedTargets.add(target);
+  }
+}
+
 /**
  * Electron native views always paint above React. Hide a native view while a
  * renderer-owned dialog, menu, banner, or other raised layer crosses it so
@@ -31,11 +51,16 @@ export function useNativeViewObscured(
     let frame = 0;
     let activeMotion = 0;
     let motionDeadline = 0;
+    let resize: ResizeObserver | null = null;
+    const resizeTargets = new Set<Element>();
 
     const read = () => {
       frame = 0;
       const host = hostRef.current;
       if (!host) {
+        if (resize) {
+          syncNativeViewResizeTargets(resize, resizeTargets, [document.body]);
+        }
         setObscured(false);
       } else {
         const rawHostRect = host.getBoundingClientRect();
@@ -57,26 +82,34 @@ export function useNativeViewObscured(
               height: fittedHost.height,
             }
           : rawHostRect;
-        const candidates = [...document.querySelectorAll<HTMLElement>(POSITIONED_OVERLAY_SELECTOR)]
-          .filter(
-            (candidate) =>
-              candidate !== host &&
-              !candidate.contains(host) &&
-              !host.contains(candidate),
-          )
-          .map((candidate) => {
-            const style = window.getComputedStyle(candidate);
-            const zIndex = Number.parseInt(style.zIndex, 10);
-            return {
-              rect: candidate.getBoundingClientRect(),
-              explicit: candidate.matches(EXPLICIT_OVERLAY_SELECTOR),
-              visible:
-                style.display !== "none" &&
-                style.visibility !== "hidden" &&
-                Number(style.opacity) !== 0,
-              zIndex: Number.isFinite(zIndex) ? zIndex : null,
-            };
-          });
+        const candidateElements = [
+          ...document.querySelectorAll<HTMLElement>(POSITIONED_OVERLAY_SELECTOR),
+        ].filter(
+          (candidate) =>
+            candidate !== host &&
+            !candidate.contains(host) &&
+            !host.contains(candidate),
+        );
+        if (resize) {
+          syncNativeViewResizeTargets(resize, resizeTargets, [
+            document.body,
+            host,
+            ...candidateElements,
+          ]);
+        }
+        const candidates = candidateElements.map((candidate) => {
+          const style = window.getComputedStyle(candidate);
+          const zIndex = Number.parseInt(style.zIndex, 10);
+          return {
+            rect: candidate.getBoundingClientRect(),
+            explicit: candidate.matches(EXPLICIT_OVERLAY_SELECTOR),
+            visible:
+              style.display !== "none" &&
+              style.visibility !== "hidden" &&
+              Number(style.opacity) !== 0,
+            zIndex: Number.isFinite(zIndex) ? zIndex : null,
+          };
+        });
         setObscured(
           nativeViewOverlayIntersects(
             hostRect.width > 0 && hostRect.height > 0 ? [hostRect] : [],
@@ -111,7 +144,6 @@ export function useNativeViewObscured(
       scheduleRead();
     };
 
-    read();
     const mutation = new MutationObserver(scheduleRead);
     mutation.observe(document.body, {
       childList: true,
@@ -128,9 +160,8 @@ export function useNativeViewObscured(
         "popover",
       ],
     });
-    const resize = new ResizeObserver(scheduleRead);
-    resize.observe(document.body);
-    if (hostRef.current) resize.observe(hostRef.current);
+    resize = new ResizeObserver(scheduleRead);
+    read();
 
     for (const name of ["animationstart", "transitionstart"] as const) {
       document.addEventListener(name, startMotion, true);
@@ -145,7 +176,8 @@ export function useNativeViewObscured(
     return () => {
       if (frame) window.cancelAnimationFrame(frame);
       mutation.disconnect();
-      resize.disconnect();
+      resize?.disconnect();
+      resizeTargets.clear();
       for (const name of ["animationstart", "transitionstart"] as const) {
         document.removeEventListener(name, startMotion, true);
       }

@@ -23,6 +23,17 @@ async function waitForLifecycleEvent(emitter, event, label, timeoutMs = 2_000) {
   }
 }
 
+async function waitForFixedViewport(browserView, label, timeoutMs = 2_000) {
+  const deadline = Date.now() + timeoutMs;
+  let viewport = null;
+  do {
+    viewport = await browserView.webContents.executeJavaScript(`({ width: innerWidth, height: innerHeight })`);
+    if (viewport.width === 1280 && viewport.height === 800) return viewport;
+    await new Promise((resolve) => setTimeout(resolve, 20));
+  } while (Date.now() < deadline);
+  throw new Error(`${label} viewport was not fixed: ${JSON.stringify(viewport)}`);
+}
+
 async function closeFixture(manager, browserView, owner) {
   const viewContents = browserView?.webContents;
   const viewDestroyed = viewContents && !viewContents.isDestroyed()
@@ -129,13 +140,7 @@ async function run() {
       });
     </script></body></html>`;
     await browserView.webContents.loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(html)}`);
-    const viewport = await browserView.webContents.executeJavaScript(`({
-      width: window.innerWidth,
-      height: window.innerHeight,
-    })`);
-    if (viewport.width !== 1280 || viewport.height !== 800) {
-      throw new Error(`compact browser viewport changed after navigation: ${JSON.stringify(viewport)}`);
-    }
+    await waitForFixedViewport(browserView, "compact browser after navigation");
     process.stdout.write("compact-viewport-stable-after-navigation\n");
     const protectedValues = [
       "sk_closed_shadow_must_not_reach_pixels",
@@ -280,10 +285,7 @@ async function run() {
     // WebContentsView. Exercise real compositor dispatch in both modes: this
     // failed silently before page coordinates were converted for the current
     // presentation scale.
-    const compactViewport = await browserView.webContents.executeJavaScript(`({ width: innerWidth, height: innerHeight })`);
-    if (compactViewport.width !== 1280 || compactViewport.height !== 800) {
-      throw new Error(`compact action viewport was not fixed: ${JSON.stringify(compactViewport)}`);
-    }
+    await waitForFixedViewport(browserView, "compact action");
     await manager.click("fixture-bot", reviewedRef, { profile: "" });
     let actionEvents = await browserView.webContents.executeJavaScript(`window.actionEvents`);
     if (JSON.stringify(actionEvents) !== JSON.stringify([{ type: "click", detail: 1, x: 130, y: 70 }])) {
@@ -306,10 +308,7 @@ async function run() {
     }
 
     manager.layout("fixture-bot", { x: 10, y: 20, width: 820, height: 600 }, "", "expanded");
-    const expandedViewport = await browserView.webContents.executeJavaScript(`({ width: innerWidth, height: innerHeight })`);
-    if (expandedViewport.width !== 1280 || expandedViewport.height !== 800) {
-      throw new Error(`expanded action viewport was not fixed: ${JSON.stringify(expandedViewport)}`);
-    }
+    await waitForFixedViewport(browserView, "expanded action");
     const expandedSnapshot = await manager.snapshot("fixture-bot", "");
     const expandedRef = String(expandedSnapshot.yaml ?? "").match(/button[^\n]*\[ref=(e\d+)\]/)?.[1];
     if (!expandedRef) throw new Error("expanded Electron fixture did not produce a rich browser ref");

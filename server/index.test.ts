@@ -3125,6 +3125,22 @@ describe("harness HTTP API", () => {
       await expect.poll(() => browserCapabilityCalls.slice(callOffset).some(
         (call) => call.operation === "register" && call.body.botId === activeBot.id,
       ), { timeout: 5_000 }).toBe(true);
+      // Registration happens before the provider's init frame is persisted.
+      // Wait for that final startup write before sabotaging the store;
+      // otherwise slower Windows runners can reset the next HTTP request when
+      // the resume-cursor save races the deliberately-invalid bots path.
+      await expect.poll(() => {
+        try {
+          const bots = z.array(z.object({
+            id: z.string().optional(),
+            resumeCursors: z.record(z.string(), z.string()).optional(),
+          }).passthrough()).parse(JSON.parse(readFileSync(botsFile, "utf8")));
+          const cursor = bots.find((bot) => bot.id === activeBot.id)?.resumeCursors?.claude;
+          return Boolean(cursor);
+        } catch {
+          return false;
+        }
+      }, { timeout: 5_000 }).toBe(true);
 
       // The hanging provider may bank one final activity write concurrently.
       // Win the replacement atomically by retrying until the path is a

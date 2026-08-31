@@ -1211,6 +1211,33 @@ describe("browser surface manager", () => {
     });
   });
 
+  it("normalizes a narrow capturePage fallback to the fixed screenshot size", async () => {
+    const { manager, views } = harness();
+    await manager.navigate("bot-a", "https://example.com");
+    const originalSendCommand = views[0].webContents.debugger.sendCommand;
+    views[0].webContents.debugger.sendCommand = async (method, params) => {
+      if (method === "Page.captureScreenshot") throw new Error("fixture protocol capture failure");
+      return originalSendCommand(method, params);
+    };
+    const resize = vi.fn(({ width, height }) => ({
+      getSize: () => ({ width, height }),
+      toJPEG: () => Buffer.from("fallback-jpeg"),
+    }));
+    views[0].webContents.capturePage = async () => ({
+      getSize: () => ({ width: 400, height: 250 }),
+      resize,
+      toJPEG: () => Buffer.from("unscaled-jpeg"),
+    });
+
+    await expect(manager.screenshot("bot-a")).resolves.toMatchObject({
+      format: "jpeg",
+      width: 1024,
+      height: 640,
+      png: Buffer.from("fallback-jpeg").toString("base64"),
+    });
+    expect(resize).toHaveBeenCalledWith({ width: 1024, height: 640 });
+  });
+
   it("refuses screenshots with populated protected fields and discards captures that overlap takeover", async () => {
     const { manager, views } = harness();
     await manager.navigate("bot-a", "https://example.com");

@@ -2211,8 +2211,12 @@ function createBrowserSurfaceManager({
         const image = await entry.view.webContents.capturePage();
         assertAgentLease(entry, lease);
         await assertScreenshotHasNoProtectedValues(entry, lease);
-        const size = image.getSize();
-        const scaled = size.width > SCREENSHOT_WIDTH ? image.resize({ width: SCREENSHOT_WIDTH }) : image;
+        const screenshotHeight = Math.round((VIEWPORT.height * SCREENSHOT_WIDTH) / VIEWPORT.width);
+        // capturePage() reflects the native panel rectangle, which can be
+        // smaller than the model-facing screenshot contract in compact mode.
+        // Normalize both dimensions even when this means upscaling so callers
+        // never receive pixels whose size disagrees with the fixed metadata.
+        const scaled = image.resize({ width: SCREENSHOT_WIDTH, height: screenshotHeight });
         return { png: scaled.toJPEG(SCREENSHOT_QUALITY).toString("base64"), format: "jpeg", width: scaled.getSize().width, height: scaled.getSize().height };
       });
     },

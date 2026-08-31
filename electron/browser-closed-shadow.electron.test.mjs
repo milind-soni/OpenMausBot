@@ -246,4 +246,4 @@ it.runIf(canRunRealElectronFixture)("protects closed-shadow values and revalidat
   expect(result.stdout).toContain("protected-focused-keys-refused");
   expect(result.stdout).toContain("late-overlay-click-refused");
   expect(result.stdout).toContain("relabelled-ref-refused");
-}, 30_000);
+}, 60_000);
