@@ -107,13 +107,19 @@ describe("locale draft validation", () => {
   });
 
   it("builds an explicit no-tools restricted Claude invocation", () => {
-    const claude = modelInvocation();
-    expect(claude.cli).toBe("claude");
+    const claude = modelInvocation("darwin");
+    expect(claude.command).toBe("claude");
     expect(claude.args).toContain("--safe-mode");
     expect(claude.args).toContain("--restricted");
     expect(claude.args).toContain("--tools");
     expect(claude.args.at(claude.args.indexOf("--tools") + 1)).toBe("");
     expect(claude.args).toContain("--no-session-persistence");
+
+    const windows = modelInvocation("win32", "C:\\Windows\\System32\\cmd.exe");
+    expect(windows.command).toBe("C:\\Windows\\System32\\cmd.exe");
+    expect(windows.args.slice(0, 3)).toEqual(["/d", "/s", "/c"]);
+    expect(windows.args[3]).toContain('--tools ""');
+    expect(windows.args[3]).not.toContain("One");
   });
 
   it("lets structural validation report null catalogs without a hash crash", () => {

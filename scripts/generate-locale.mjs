@@ -21,8 +21,6 @@ import { tmpdir } from "node:os";
 import { basename, dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { resolveCliSpawn } from "../server/env-path.ts";
-
 const SCRIPT_PATH = fileURLToPath(import.meta.url);
 const LOCALES_DIR = join(dirname(SCRIPT_PATH), "..", "src", "locales");
 const SOURCE_FILE = "en.json";
@@ -263,18 +261,29 @@ function translationPrompt(source, label, code) {
   ].join("\n");
 }
 
-export function modelInvocation() {
+export function modelInvocation(platform = process.platform, comSpec = process.env.ComSpec ?? "cmd.exe") {
+  const args = [
+    "-p",
+    "--output-format", "text",
+    "--safe-mode",
+    "--restricted",
+    "--strict-mcp-config",
+    "--disable-slash-commands",
+    "--tools", "",
+    "--no-session-persistence",
+  ];
+  if (platform !== "win32") return { args, command: "claude" };
+
+  // Windows installs the CLI as claude.cmd, which Node cannot execute
+  // directly. The command line is entirely constant; catalog text and locale
+  // labels are delivered over stdin and can never become cmd.exe syntax.
   return {
-    cli: "claude",
+    command: comSpec,
     args: [
-      "-p",
-      "--output-format", "text",
-      "--safe-mode",
-      "--restricted",
-      "--strict-mcp-config",
-      "--disable-slash-commands",
-      "--tools", "",
-      "--no-session-persistence",
+      "/d",
+      "/s",
+      "/c",
+      'claude -p --output-format text --safe-mode --restricted --strict-mcp-config --disable-slash-commands --tools "" --no-session-persistence',
     ],
   };
 }
@@ -283,8 +292,7 @@ function runModel(prompt) {
   const workDir = mkdtempSync(join(tmpdir(), "openmausbot-locale-"));
   try {
     const invocation = modelInvocation();
-    const resolved = resolveCliSpawn(invocation.cli, invocation.args);
-    const stdout = execFileSync(resolved.command, resolved.args, {
+    const stdout = execFileSync(invocation.command, invocation.args, {
       cwd: workDir,
       encoding: "utf8",
       input: prompt,
