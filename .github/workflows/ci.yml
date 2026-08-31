@@ -32,6 +32,11 @@ jobs:
           node-version: 24
           cache: pnpm
       - run: pnpm install --frozen-lockfile
+      - name: Prepare Electron test runtime
+        # Electron 43 lazily downloads its runtime on first import. Resolve it
+        # before Vitest starts so a cold download cannot consume the fixture
+        # timeout.
+        run: node --input-type=commonjs -e "require('electron')"
       - run: pnpm typecheck
       - name: Run tests
         run: pnpm test
