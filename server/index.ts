@@ -20,13 +20,6 @@ import {
 
 import { approvalKey, autoVerdict } from "./auto-approve.ts";
 import { requestReview, resolveAutoReviewMode, shouldReview } from "./auto-review.ts";
-import {
-  BrowserCleanupCoordinator,
-  finalizeBrowserCleanupMutation,
-  requireBrowserCleanupAcknowledged,
-  type BrowserCleanupRequest,
-  type BrowserCleanupWireRequest,
-} from "./browser-lifecycle-cleanup.ts";
 import * as checkpoints from "./checkpoints.ts";
 import { appendDecision, readDecisions } from "./decision-log.ts";
 import { validateBotCwd } from "./bot-cwd.ts";
@@ -184,15 +177,10 @@ import { RoutineManager, type RoutineRun, type RoutineRunOn, type RoutineRunTrig
 import { CalendarCallManager } from "./calendar-calls.ts";
 import {
   BUILT_IN_BROWSER_SYSTEM_PROMPT,
-  applyDesktopBrowserConnectionMessage,
-  availableBrowserConnection,
-  browserScreenshot,
-  clearBrowserCapabilities,
-  registerBrowserCapability,
-  revokeBrowserCapability,
-  type BrowserCapability,
-  type BrowserConnection,
-} from "./browser-connection.ts";
+  browserIntegrationSpec,
+  browserProfileName,
+  forgetBrowserProfile,
+} from "./betterwright.ts";
 import { captureOutsideHumanControl } from "./private-screen-capture.ts";
 import { RoutineRequestService } from "./routine-requests.ts";
 import { fetchBotDirectory, matchDirectoryBots, type MatchedDirectoryBot } from "./bot-directory.ts";
@@ -244,35 +232,13 @@ const availableSkills = () => mergeSkills(bundledSkills, loadUserSkills(join(DAT
 // restarting the embedded server. Plain Node/dev launches have no parentPort.
 type UtilityParentPort = {
   on(event: "message", listener: (event: { data?: object }) => void): void;
-  postMessage(message: object): void;
 };
 // SAFETY: Electron's utility-process runtime is the only environment that
 // supplies parentPort; plain Node intentionally leaves it absent.
 const utilityParentPort = (process as NodeJS.Process & { parentPort?: UtilityParentPort }).parentPort;
-type DesktopPrivateMessage = BrowserCleanupWireRequest | {
-  type: "openmausbot:browser-control";
-  botId: string;
-  held: true;
-};
-function postDesktopPrivateMessage(message: DesktopPrivateMessage): boolean {
-  if (!utilityParentPort) return false;
-  try {
-    utilityParentPort.postMessage(message);
-    return true;
-  } catch (error) {
-    console.error(`[desktop-sync] could not send private parent message: ${error instanceof Error ? error.message : String(error)}`);
-    return false;
-  }
-}
-const browserCleanup = new BrowserCleanupCoordinator({
-  file: join(DATA_DIR, "browser-cleanups.json"),
-  send: postDesktopPrivateMessage,
-});
 utilityParentPort?.on("message", (event) => {
-  const message = event?.data;
   try {
-    if (browserCleanup.receive(message)) return;
-    if (!applyDesktopBrowserConnectionMessage(message)) composio.applyManagedBrokerMessage(message);
+    composio.applyManagedBrokerMessage(event?.data);
   } catch (error) {
     console.error(`[desktop-sync] rejected private parent message: ${error instanceof Error ? error.message : String(error)}`);
   }
@@ -326,106 +292,6 @@ function agentsIntegration(botId: string, threadId: string, depth: number, skill
       OMB_SKILL_AUTHORING_ENABLED: skillAuthoring ? "1" : "0",
     },
   };
-}
-
-/** The built-in browser, when the desktop app has one running: the harness
- * keeps Electron's per-boot master token and gives the proxy only a scoped
- * bot/profile capability, plus the who-is-driving endpoint so a person
- * taking the wheel in the panel pauses the bot's hands. */
-type ActiveBrowserCapability = {
-  botId: string;
-  ownerId: string;
-  connection: BrowserConnection;
-  capability: BrowserCapability;
-};
-
-const browserCapabilitiesByThread = new Map<string, ActiveBrowserCapability>();
-const pendingBrowserCapabilityRevocations = new Map<string, {
-  active: ActiveBrowserCapability;
-  attempt: number;
-  timer: ReturnType<typeof setTimeout>;
-}>();
-const BROWSER_REVOCATION_RETRY_MS = [250, 1_000, 3_000, 10_000, 30_000] as const;
-
-async function revokeReleasedBrowserCapability(active: ActiveBrowserCapability, attempt = 0): Promise<void> {
-  const token = active.capability.token;
-  try {
-    await revokeBrowserCapability(active.connection, active.capability);
-    const pending = pendingBrowserCapabilityRevocations.get(token);
-    if (pending) clearTimeout(pending.timer);
-    pendingBrowserCapabilityRevocations.delete(token);
-  } catch (error) {
-    if (Date.now() >= active.capability.expiresAt) {
-      pendingBrowserCapabilityRevocations.delete(token);
-      return;
-    }
-    if (attempt === 0) {
-      console.error(`[browser] could not revoke turn capability; retrying until its absolute expiry: ${error instanceof Error ? error.message : String(error)}`);
-    }
-    const delay = Math.min(
-      BROWSER_REVOCATION_RETRY_MS[Math.min(attempt, BROWSER_REVOCATION_RETRY_MS.length - 1)]!,
-      Math.max(1, active.capability.expiresAt - Date.now()),
-    );
-    const timer = setTimeout(() => {
-      const pending = pendingBrowserCapabilityRevocations.get(token);
-      if (!pending || pending.timer !== timer) return;
-      void revokeReleasedBrowserCapability(active, attempt + 1);
-    }, delay);
-    timer.unref?.();
-    const previous = pendingBrowserCapabilityRevocations.get(token);
-    if (previous) clearTimeout(previous.timer);
-    pendingBrowserCapabilityRevocations.set(token, { active, attempt: attempt + 1, timer });
-  }
-}
-
-async function releaseBrowserCapabilityForThread(threadId: string, expectedOwnerId?: string): Promise<void> {
-  const active = browserCapabilitiesByThread.get(threadId);
-  if (!active || (expectedOwnerId !== undefined && active.ownerId !== expectedOwnerId)) return;
-  browserCapabilitiesByThread.delete(threadId);
-  await revokeReleasedBrowserCapability(active);
-}
-
-async function releaseBrowserCapabilitiesForBot(botId: string): Promise<void> {
-  const threads = [...browserCapabilitiesByThread]
-    .filter(([, active]) => active.botId === botId)
-    .map(([threadId]) => threadId);
-  await Promise.all(threads.map((threadId) => releaseBrowserCapabilityForThread(threadId)));
-}
-
-async function releaseAllBrowserCapabilities(): Promise<void> {
-  const active = [...browserCapabilitiesByThread.values()];
-  browserCapabilitiesByThread.clear();
-  const connections = new Map<string, BrowserConnection>();
-  for (const entry of active) {
-    connections.set(`${entry.connection.url}:${entry.connection.token}`, entry.connection);
-  }
-  for (const pending of pendingBrowserCapabilityRevocations.values()) {
-    connections.set(`${pending.active.connection.url}:${pending.active.connection.token}`, pending.active.connection);
-  }
-
-  await Promise.all([...connections.values()].map(async (connection) => {
-    try {
-      // Master clear is atomic at the host. It also invalidates a token whose
-      // earlier per-turn revoke timed out, which is essential for feature-off
-      // and graceful-shutdown boundaries.
-      await clearBrowserCapabilities(connection);
-      for (const [token, pending] of pendingBrowserCapabilityRevocations) {
-        if (
-          pending.active.connection.url === connection.url &&
-          pending.active.connection.token === connection.token
-        ) {
-          clearTimeout(pending.timer);
-          pendingBrowserCapabilityRevocations.delete(token);
-        }
-      }
-    } catch {
-      await Promise.all(active
-        .filter((entry) =>
-          entry.connection.url === connection.url && entry.connection.token === connection.token
-        )
-        .map((entry) => revokeReleasedBrowserCapability(entry)));
-    }
-  }));
 }
 
 type DirectTurnDispatchClaim = {
@@ -500,54 +366,12 @@ function cancelDirectTurnDispatch(botId: string, expectedThreadId?: string): Dir
   return claim;
 }
 
-async function browserIntegration(
-  botId: string,
-  profile: string | undefined,
-  threadId: string,
-  stillValid: () => boolean = () => true,
-  ownerId = randomUUID(),
-) {
-  const connection = availableBrowserConnection();
-  if (!connection) return null;
-  const control = controlIntegration(botId);
-  // A profile that no longer exists falls back to the bot's own session.
-  // Canonical ids belong to config/bot references; Electron must receive the
-  // exact immutable partition inherited from #567 so an upgrade cannot move
-  // a bot into another account. Guest remains a throwaway partition.
-  const profileTarget = profile && profile !== "guest"
-    ? browserProfilePartitionTarget(cfg, profile)
-    : null;
-  const partitionId = profile === "guest" ? "guest" : (profileTarget?.partitionId ?? "");
-  await releaseBrowserCapabilityForThread(threadId);
-  const capability = await registerBrowserCapability(connection, botId, partitionId);
-  const active = { botId, ownerId, connection, capability };
-  // Registration crosses a process boundary. Stop/delete/config changes can
-  // land while the desktop host is minting the token; revalidate in the same
-  // event-loop turn that publishes it. If ownership was lost, no agent ever
-  // receives the bearer and the just-created token is revoked immediately.
-  if (!stillValid()) {
-    await revokeReleasedBrowserCapability(active);
-    return null;
-  }
-  browserCapabilitiesByThread.set(threadId, active);
-  return {
-    connection,
-    capability,
-    profile: partitionId,
-    integration: {
-      command: process.execPath,
-      args: [SPAWNED_PROXIES.browser],
-      env: {
-        ...AGENTS_NODE_FLAG,
-        OMB_BROWSER_URL: connection.url,
-        OMB_BROWSER_TOKEN: capability.token,
-        OMB_BROWSER_PROFILE: partitionId,
-        OMB_BOT_ID: botId,
-        OMB_CONTROL_URL: control.url,
-        OMB_CONTROL_TOKEN: control.token,
-      },
-    },
-  };
+/** The built-in browser: BetterWright's own MCP server, pointed at the
+ * durable profile this bot browses in. Nothing is minted or torn down per
+ * turn — the browser, its policy guard and its logins live in BetterWright's
+ * own state, and a person can drive the same profile from their CLI. */
+function browserIntegration(botId: string, profile: string | undefined) {
+  return browserIntegrationSpec(browserProfileName(botId, profile, cfg));
 }
 
 function phoneIntegration() {
@@ -574,13 +398,6 @@ function connectedAppsIntegration(botId: string, threadId: string) {
 const computerControlRevision = new Map<string, number>();
 const computerControl = new ComputerControl((botId, snapshot) => {
   computerControlRevision.set(botId, (computerControlRevision.get(botId) ?? 0) + 1);
-  // One-way, fail-closed mirror into the Electron process that owns the
-  // native browser. Never send release: a loopback caller can influence the
-  // server record, while only the trusted Browser panel may clear Electron's
-  // local gate after its server-first release succeeds.
-  if (snapshot.held && /^[A-Za-z0-9_-]{1,120}$/.test(botId)) {
-    postDesktopPrivateMessage({ type: "openmausbot:browser-control", botId, held: true });
-  }
   broadcast({ kind: "computer-control", botId, held: snapshot.held, helpReason: snapshot.helpReason });
 });
 const controlLeaseIdSchema = z.string().min(16).max(120).regex(/^[A-Za-z0-9_-]+$/);
@@ -773,29 +590,6 @@ const store = new Store(() => bootSelection);
 const sendSequencer = new SendSequencer();
 bootSelection = await defaultSelection();
 store.seedIfEmpty();
-// A committed profile cleanup means both its config deletion and bot-reference
-// cleanup were intended to be durable. Reconcile stale secondary references
-// before Electron can ACK and remove the journal: a crash between those writes
-// in an older build must not let id reuse attach a bot to somebody else's new
-// account. Prepared entries remain untouched because their deletion is
-// ambiguous and must never authorize either mutation or a wipe.
-let browserCleanupReferencesReconciled = true;
-try {
-  const committedProfileIds = new Set(browserCleanup.committedProfileIds());
-  for (const bot of store.bots) {
-    if (bot.browserProfile && committedProfileIds.has(bot.browserProfile)) {
-      store.patchBot(bot.id, { browserProfile: undefined });
-    }
-  }
-} catch (error) {
-  browserCleanupReferencesReconciled = false;
-  console.error(
-    `browser cleanup: could not reconcile committed profile references: ${error instanceof Error ? error.message : String(error)}`,
-  );
-}
-// Replay only after the secondary write above is durable. If reconciliation
-// failed, leave the committed journal in place and profile reuse blocked.
-if (browserCleanupReferencesReconciled) browserCleanup.startPending();
 
 /** A bot as a client may see it: no provider session bookkeeping.
  *
@@ -1210,7 +1004,6 @@ const watchdog = new TurnWatchdog({
   stallMs: TURN_STALL_MS,
   checkMs: 60_000,
   onStall: (turn) => {
-    void releaseBrowserCapabilityForThread(turn.threadId);
     repeats.settle(turn.threadId);
     const bot = store.bot(turn.botId);
     const instance = bot ? registry.get(bot.modelSelection.instanceId) : null;
@@ -1331,17 +1124,8 @@ bus.subscribe((event: RuntimeEvent) => {
   if (shouldIgnoreProviderEvent(event)) return;
   if (event.type === "request.opened") watchdog.setWaitingOnHuman(event.threadId, true);
   else if (event.type === "request.resolved") watchdog.setWaitingOnHuman(event.threadId, false);
-  else if (event.type === "turn.completed") {
-    watchdog.settle(event.threadId);
-    void releaseBrowserCapabilityForThread(event.threadId);
-  } else if (event.type === "session.exited") {
-    // A retained provider session can exit after a newer turn reused the same
-    // thread. An unscoped session event must never revoke that newer turn's
-    // capability; its turn completion or watchdog owns release instead.
-    const directBotBusy = store.botByThread(event.threadId)?.busy === true;
-    const roomBusy = Boolean(store.groupByThread(event.threadId)?.busyBotId);
-    if (!directBotBusy && !roomBusy) void releaseBrowserCapabilityForThread(event.threadId);
-  } else watchdog.touch(event.threadId);
+  else if (event.type === "turn.completed") watchdog.settle(event.threadId);
+  else if (event.type !== "session.exited") watchdog.touch(event.threadId);
 });
 
 // Bots currently working with nobody at the keyboard — a webhook turn, or a
@@ -2378,7 +2162,6 @@ async function startTurn(
   void (async () => {
     try {
       const integrations: NonNullable<Parameters<typeof instance.adapter.sendTurn>[0]["integrations"]> = {};
-      let browser: Awaited<ReturnType<typeof browserIntegration>> = null;
       const selectedSkills = selectBundledSkills(
         text,
         instance.adapter.capabilities.phoneMcp === true ? ["phoneMcp"] : [],
@@ -2643,9 +2426,8 @@ async function startTurn(
       if (!directTurnClaimIsCurrent(bot.id, dispatchClaimId, threadId)) {
         throw new DirectTurnSetupCancelled("turn stopped before dispatch");
       }
-      // Mint the browser bearer at the last possible moment. The desktop
-      // registration is asynchronous, so validate this exact setup claim
-      // again inside browserIntegration before the capability is published.
+      // Read the profile at the last possible moment: setup awaited above, and
+      // the bot may have been pointed at another session meanwhile.
       const liveBot = store.bot(bot.id);
       if (
         liveBot &&
@@ -2653,17 +2435,7 @@ async function startTurn(
         liveBot.browser !== false &&
         instance.adapter.capabilities.browserMcp === true
       ) {
-        const selectedProfile = liveBot.browserProfile;
-        browser = await browserIntegration(bot.id, selectedProfile, threadId, () => {
-          const current = store.bot(bot.id);
-          return (
-            directTurnClaimIsCurrent(bot.id, dispatchClaimId, threadId) &&
-            builtInBrowserEnabled(cfg) &&
-            current?.browser !== false &&
-            current?.browserProfile === selectedProfile
-          );
-        }, dispatchClaimId);
-        if (browser) integrations.browser = browser.integration;
+        integrations.browser = browserIntegration(bot.id, liveBot.browserProfile) ?? undefined;
       }
       // A cancelled adapter can be between accepting sendTurn and revealing
       // its provider turn id. Never overlap a replacement with that ambiguous
@@ -2745,17 +2517,12 @@ async function startTurn(
       // after its own turn.completed would never be torn down — it would
       // keep polling the box forever, carrying dead per-turn state. busy
       // is flipped false in the fold, so it is the honest "still running".
-      if (!previewCapture && browser) {
-        const { connection } = browser;
-        previewCapture = () => browserScreenshot(connection, browser.capability, fetch);
-      }
       if (previewCapture && store.bot(bot.id)?.busy) {
         startScreenPoller(bot.id, previewCapture, { screenIsTheWork: instance.driverKind === "boxAgent" });
       }
     } catch (e) {
       clearCancelledProviderHandshake(threadId, `direct:${dispatchClaimId}`);
       clearDirectTurnDispatch(bot.id, dispatchClaimId);
-      await releaseBrowserCapabilityForThread(threadId, dispatchClaimId);
       const ownsLatestGeneration = directTurnGenerationByBot.get(bot.id) === dispatchClaimId;
       if (ownsLatestGeneration) {
         releaseLocalVmThread(threadId);
@@ -3272,38 +3039,20 @@ async function runGroupMemberTurn(
 
   // Connected-app discovery above can yield for a network round trip. A
   // profile may be removed, or the browser feature switched off, during that
-  // window. Mint the capability only after this turn has synchronously
-  // claimed the fresh bot record so a deleted profile cannot be resurrected
-  // as a ghost session by an already-preparing room turn.
+  // window. Read the profile only after this turn has synchronously claimed
+  // the fresh bot record so a deleted profile cannot be resurrected as a
+  // ghost session by an already-preparing room turn.
   if (
     builtInBrowserEnabled(cfg) &&
     readyBot.browser !== false &&
     instance.adapter.capabilities.browserMcp === true
   ) {
-    const selectedProfile = readyBot.browserProfile;
-    const browser = await browserIntegration(readyBot.id, selectedProfile, threadId, () => {
-      const currentBot = store.bot(readyBot.id);
-      const currentGroup = store.group(group.id);
-      const stillOwnsThread = currentGroup?.dm
-        ? currentGroup.threadId === threadId
-        : Boolean(currentGroup && store.groupTaskByThread(currentGroup.id, threadId));
-      return (
-        !isCancelled?.() &&
-        stillOwnsThread &&
-        currentBot?.busy === true &&
-        builtInBrowserEnabled(cfg) &&
-        currentBot.browser !== false &&
-        currentBot.browserProfile === selectedProfile
-      );
-    });
-    if (browser) integrations.browser = browser.integration;
+    integrations.browser = browserIntegration(readyBot.id, readyBot.browserProfile) ?? undefined;
   }
-  // Stop/delete may land while Electron is registering the capability. The
-  // callback above prevents publication; this second check also unwinds the
-  // room's setup claim so no provider turn starts after Stop returned.
+  // Stop/delete may have landed during that same window. Unwind the room's
+  // setup claim so no provider turn starts after Stop returned.
   const browserReadyBot = store.bot(readyBot.id);
   if (isCancelled?.() || !browserReadyBot || !browserReadyBot.busy) {
-    await releaseBrowserCapabilityForThread(threadId);
     if (browserReadyBot?.busy) {
       store.setActivity(browserReadyBot.id, "idle");
       retryDelegationsWaitingOn(browserReadyBot.id);
@@ -3374,7 +3123,6 @@ async function runGroupMemberTurn(
     let unsub = () => {};
     let unregisterStall = () => {};
     const deadline = new RoomTurnDeadline(timeoutMinutes, () => {
-      void releaseBrowserCapabilityForThread(threadId);
       void instance.adapter.interruptTurn(threadId).catch(() => {});
       store.appendMessage(threadId, {
         role: "bot",
@@ -3417,8 +3165,7 @@ async function runGroupMemberTurn(
       }), () => Boolean(isCancelled?.()), async () => {
         // Stop may have landed while the adapter was authenticating, before
         // it had an active process for the first interrupt to reach. Now that
-        // sendTurn completed setup, revoke again and interrupt the real turn.
-        await releaseBrowserCapabilityForThread(threadId);
+        // sendTurn completed setup, interrupt the real turn.
         await instance.adapter.interruptTurn(threadId).catch(() => {});
       })
       .then((dispatch) => {
@@ -3482,7 +3229,6 @@ async function runGroupMemberTurn(
   }
   if (outcome === "dispatch_failed") {
     if (skillAuthoring) skillAuthoringClaim.claimed = false;
-    await releaseBrowserCapabilityForThread(threadId);
     // No turn.completed follows a rejected room dispatch. Anything that was
     // queued while this bot briefly owned the room must be retried now.
     drainQueuedSends();
@@ -4245,7 +3991,6 @@ function configStatus() {
 /** Rebuild the provider fleet after a config change so new keys take
  * effect without a server restart (kills any in-flight turns). */
 async function reloadProviders() {
-  await releaseAllBrowserCapabilities();
   bus.detachAll();
   await registry.disposeAll();
   await registry.load(instanceConfigs(cfg));
@@ -6078,7 +5823,6 @@ const server = createServer(async (req, res) => {
       cancelGroupTurnOperations(group.id, group.threadId);
       const busy = group.busyBotId ? store.bot(group.busyBotId) : undefined;
       const instance = busy ? registry.get(busy.modelSelection.instanceId) : undefined;
-      await releaseBrowserCapabilityForThread(group.threadId);
       await instance?.adapter.interruptTurn(group.threadId).catch(() => {});
       closeOpenApprovals(group.threadId);
       return json(res, 200, { ok: true });
@@ -6445,7 +6189,6 @@ const server = createServer(async (req, res) => {
             const routineRun = routines!.activeRunForBot(bot.id);
             if (routineRun) {
               cancelDirectTurnDispatch(bot.id, routineRun.threadId);
-              if (routineRun.threadId) await releaseBrowserCapabilityForThread(routineRun.threadId);
               await routines!.cancelRun(routineRun.id);
               return;
             }
@@ -6453,14 +6196,12 @@ const server = createServer(async (req, res) => {
             const groupTurn = activeGroupTurnForBot(bot.id);
             if (groupTurn) {
               cancelGroupTurnOperations(groupTurn.group.id, groupTurn.threadId);
-              await releaseBrowserCapabilityForThread(groupTurn.threadId);
               await instance?.adapter.interruptTurn(groupTurn.threadId).catch(() => {});
               closeOpenApprovals(groupTurn.threadId);
               return;
             }
             const directClaim = cancelDirectTurnDispatch(bot.id);
             const threadId = directClaim?.threadId ?? bot.threadId;
-            await releaseBrowserCapabilityForThread(threadId);
             await instance?.adapter.interruptTurn(threadId).catch(() => {});
             closeOpenApprovals(threadId);
           }),
@@ -6498,44 +6239,31 @@ const server = createServer(async (req, res) => {
           return json(res, 409, { error: "delete this bot's Local VM from its Computer panel before deleting the bot" });
         }
       }
-      // Establish a durable cleanup intent before any teardown. A malformed
-      // or unreadable journal therefore rejects the delete with the bot and
-      // all of its live work untouched. The intent is aborted if a later
-      // pre-delete side effect fails, and committed only after Store deletion.
-      const browserCleanupRequest = utilityParentPort ? browserCleanup.prepare("bot", bot.id) : null;
-      try {
-        // a running turn dies with its bot
-        const directClaim = cancelDirectTurnDispatch(bot.id);
-        directTurnGenerationByBot.delete(bot.id);
-        await releaseBrowserCapabilitiesForBot(bot.id);
-        const directThreadId = directClaim?.threadId ?? bot.threadId;
-        await registry.get(bot.modelSelection.instanceId)?.adapter.interruptTurn(directThreadId).catch(() => {});
-        closeOpenApprovals(directThreadId);
-        stopScreenPoller(bot.id);
-        activeVpsThreads.delete(bot.id);
-        routines!.disableForBot(bot.id);
-        webhooks.disableForBot(bot.id);
-        calendarCalls!.removeBot(bot.id);
-        lastReply.delete(bot.threadId);
-        // a peer approval naming this bot can never be meaningfully answered
-        // now, and its caller would otherwise wait out the 15-minute timeout
-        cancelPeerApprovalsFor(bot.id);
-        discardDelegations(commsBus, bot.threadId);
-        computerControl.forget(bot.id);
-        computerControlRevision.delete(bot.id);
-        const target = perBotLocalVmTarget(bot.id);
-        localVmIdles.get(target.key)?.cancel();
-        localVmIdles.delete(target.key);
-        store.deleteBot(bot.id);
-      } catch (error) {
-        if (browserCleanupRequest) browserCleanup.abort(browserCleanupRequest);
-        throw error;
-      }
-      if (browserCleanupRequest) {
-        const committedCleanup = browserCleanup.commit(browserCleanupRequest);
-        const acknowledged = await browserCleanup.ensure(committedCleanup);
-        requireBrowserCleanupAcknowledged(acknowledged, `Browser data for ${bot.name}`);
-      }
+      // a running turn dies with its bot
+      const directClaim = cancelDirectTurnDispatch(bot.id);
+      directTurnGenerationByBot.delete(bot.id);
+      const directThreadId = directClaim?.threadId ?? bot.threadId;
+      await registry.get(bot.modelSelection.instanceId)?.adapter.interruptTurn(directThreadId).catch(() => {});
+      closeOpenApprovals(directThreadId);
+      stopScreenPoller(bot.id);
+      activeVpsThreads.delete(bot.id);
+      routines!.disableForBot(bot.id);
+      webhooks.disableForBot(bot.id);
+      calendarCalls!.removeBot(bot.id);
+      lastReply.delete(bot.threadId);
+      // a peer approval naming this bot can never be meaningfully answered
+      // now, and its caller would otherwise wait out the 15-minute timeout
+      cancelPeerApprovalsFor(bot.id);
+      discardDelegations(commsBus, bot.threadId);
+      computerControl.forget(bot.id);
+      computerControlRevision.delete(bot.id);
+      const target = perBotLocalVmTarget(bot.id);
+      localVmIdles.get(target.key)?.cancel();
+      localVmIdles.delete(target.key);
+      store.deleteBot(bot.id);
+      // Only the bot's own session. A named profile it happened to point at is
+      // shared workspace state and outlives every bot that used it.
+      void forgetBrowserProfile(`bot-${bot.id}`);
       for (const dir of [EVENTS_DIR, NATIVE_DIR]) {
         try {
           unlinkSync(join(dir, `${bot.threadId}.ndjson`));
@@ -7034,7 +6762,6 @@ const server = createServer(async (req, res) => {
           return json(res, 409, { error: "this bot is running a routine in another conversation" });
         }
         cancelDirectTurnDispatch(bot.id, routineRun.threadId ?? expectedThreadId);
-        if (routineRun.threadId) await releaseBrowserCapabilityForThread(routineRun.threadId);
         await routines!.cancelRun(routineRun.id);
         return json(res, 200, { ok: true });
       }
@@ -7047,7 +6774,6 @@ const server = createServer(async (req, res) => {
           return json(res, 409, { error: `this bot is working in channel ${busyGroup.group.name}` });
         }
         cancelGroupTurnOperations(busyGroup.group.id, busyGroup.threadId);
-        await releaseBrowserCapabilityForThread(busyGroup.threadId);
         await instance?.adapter.interruptTurn(busyGroup.threadId).catch(() => {});
         closeOpenApprovals(busyGroup.threadId);
         return json(res, 200, { ok: true });
@@ -7062,7 +6788,6 @@ const server = createServer(async (req, res) => {
       }
       const cancelledDirect = cancelDirectTurnDispatch(bot.id, expectedThreadId);
       const directThreadId = cancelledDirect?.threadId ?? bot.threadId;
-      await releaseBrowserCapabilityForThread(directThreadId);
       await instance?.adapter.interruptTurn(directThreadId).catch(() => {});
       closeOpenApprovals(directThreadId);
       return json(res, 200, { ok: true });
@@ -7374,12 +7099,16 @@ const server = createServer(async (req, res) => {
       const patch = parseConfigPatch(body);
       if (!Object.keys(patch).length) return json(res, 400, { error: "nothing to save" });
       if (providerConfigBusy) return json(res, 409, { error: "provider settings are already being updated" });
-      const disablingBuiltInBrowser = patch.features?.browser === false && builtInBrowserEnabled(cfg);
-      const removedBrowserProfileIds = patch.browserProfiles === undefined
+      // The durable browser identity is the partition, not the config id, and
+      // cfg is replaced by the save below — resolve what to erase up front.
+      const removedBrowserPartitionIds = patch.browserProfiles === undefined
         ? []
         : (cfg.browserProfiles ?? [])
-            .map((profile) => profile.id)
-            .filter((id) => !patch.browserProfiles!.some((profile) => profile.id === id));
+            .filter((profile) => !patch.browserProfiles!.some((next) => next.id === profile.id))
+            .flatMap((profile) => {
+              const target = browserProfilePartitionTarget(cfg, profile.id);
+              return target ? [target.partitionId] : [];
+            });
       if (patch.browserProfiles !== undefined) {
         const currentProfiles = new Map((cfg.browserProfiles ?? []).map((profile) => [profile.id, profile]));
         const nextProfiles = patch.browserProfiles.map((profile) => {
@@ -7388,15 +7117,6 @@ const server = createServer(async (req, res) => {
         });
         const routingConflict = browserProfileReplacementConflict(cfg.browserProfiles ?? [], nextProfiles);
         if (routingConflict) return json(res, 409, { error: routingConflict });
-        const currentIds = new Set((cfg.browserProfiles ?? []).map((profile) => profile.id));
-        const pendingReuse = patch.browserProfiles.find(
-          (profile) => !currentIds.has(profile.id) && browserCleanup.hasPendingProfile(profile.id),
-        );
-        if (pendingReuse) {
-          return json(res, 409, {
-            error: `the previous “${pendingReuse.name}” browser session is still being erased — wait before reusing it`,
-          });
-        }
       }
       if (patch.vps !== undefined) {
         const currentAlias = vpsSshAlias(cfg);
@@ -7485,21 +7205,6 @@ const server = createServer(async (req, res) => {
           });
         }
       }
-      const browserCleanupRequests: BrowserCleanupRequest[] = [];
-      try {
-        if (utilityParentPort) {
-          for (const profileId of removedBrowserProfileIds) {
-            const target = browserProfilePartitionTarget(cfg, profileId);
-            if (!target) throw new Error(`browser profile cleanup target “${profileId}” is unavailable`);
-            browserCleanupRequests.push(
-              browserCleanup.prepare("profile", target.profileId, target.partitionId),
-            );
-          }
-        }
-      } catch (error) {
-        for (const request of browserCleanupRequests) browserCleanup.abort(request);
-        throw error;
-      }
       let configWriteCommitted = false;
       const externalSecretStorage = url.searchParams.get("secretStorage") === "external";
       try {
@@ -7529,16 +7234,12 @@ const server = createServer(async (req, res) => {
           syncCredentialEnv(patch);
           Object.assign(cfg, loadConfig());
         }
-      } catch (error) {
+      } finally {
+        // The profile list is gone from config: erase each removed identity's
+        // browser state even if a later step of this request fails.
         if (configWriteCommitted) {
-          for (const request of browserCleanupRequests) {
-            const committed = browserCleanup.commit(request);
-            void browserCleanup.ensure(committed);
-          }
-        } else {
-          for (const request of browserCleanupRequests) browserCleanup.abort(request);
+          for (const partitionId of removedBrowserPartitionIds) void forgetBrowserProfile(partitionId);
         }
-        throw error;
       }
       let browserReferenceCleanupError: unknown = null;
       if (patch.browserProfiles !== undefined) {
@@ -7553,9 +7254,8 @@ const server = createServer(async (req, res) => {
             }
           }
         } catch (error) {
-          // Config is already durable. Keep the cleanup intent prepared (so
-          // it cannot wipe ambiguous state and its id remains locked), but do
-          // not let this secondary write failure skip revocation/reload below.
+          // Config is already durable, so do not let this secondary write
+          // failure skip the provider reload below.
           browserReferenceCleanupError = error;
         }
       }
@@ -7573,47 +7273,21 @@ const server = createServer(async (req, res) => {
           key !== "features" &&
           key !== "browserProfiles",
       );
-      // The cleanup marker becomes committed only after both pieces of durable
-      // application state agree. Commit/ACK failures are deferred until every
-      // mandatory consequence of the config write has run: no journal I/O
-      // failure may leave a two-hour bearer or stale provider fleet active.
-      const finalized = await finalizeBrowserCleanupMutation({
-        requests: browserCleanupRequests,
-        referenceError: browserReferenceCleanupError,
-        commit: (request) => browserCleanup.commit(request),
-        ensure: (request) => browserCleanup.ensure(request),
-        mandatory: async () => {
-          let mandatoryError: unknown = null;
-          if (disablingBuiltInBrowser) {
-            try {
-              await releaseAllBrowserCapabilities();
-            } catch (error) {
-              mandatoryError = error;
-            }
-          }
-          if (reloadKeys.length > 0) {
-            try {
-              await reloadProviders();
-            } catch (error) {
-              if (!mandatoryError) mandatoryError = error;
-            }
-          }
-          const status = configStatus();
-          broadcast({ kind: "config", ...status });
-          if (mandatoryError) throw mandatoryError;
-          return status;
-        },
-      });
-      // Normal desktop deletes wait for Electron's acknowledgement. If
-      // Electron is restarting, the committed journal keeps retrying and the
-      // id-reuse guard above prevents stale logins from resurfacing. Delaying
-      // this assertion until after every mandatory post-commit effect keeps
-      // the runtime aligned with the config even on a truthful 503 response.
-      requireBrowserCleanupAcknowledged(
-        finalized.acknowledgements.every(Boolean),
-        removedBrowserProfileIds.length === 1 ? "The browser profile" : "The browser profiles",
-      );
-      return json(res, 200, finalized.value);
+      // A failed secondary write is still reported, but only after every
+      // mandatory consequence of the now-durable config write has run: no
+      // bookkeeping failure may leave a stale provider fleet active.
+      let mandatoryError = browserReferenceCleanupError;
+      if (reloadKeys.length > 0) {
+        try {
+          await reloadProviders();
+        } catch (error) {
+          if (mandatoryError === null) mandatoryError = error;
+        }
+      }
+      const status = configStatus();
+      broadcast({ kind: "config", ...status });
+      if (mandatoryError !== null) throw mandatoryError;
+      return json(res, 200, status);
       } finally {
         if (changingLocalVmMode) localVmModeChangeBusy = false;
         providerConfigBusy = false;
@@ -7943,7 +7617,6 @@ const gracefulShutdown = createGracefulShutdown({
       routines?.stop();
       webhookIngress?.server.close();
     },
-    () => releaseAllBrowserCapabilities(),
     () => registry.disposeAll(),
   ],
   exit: (code) => process.exit(code),
