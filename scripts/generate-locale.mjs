@@ -1,4 +1,3 @@
-#!/usr/bin/env node
 // Draft or refresh a JSON language pack with an authenticated local Claude
 // CLI. Models never run in CI: generated copy is reviewed and committed
 // like code, while --check stays deterministic and safe for forks.
