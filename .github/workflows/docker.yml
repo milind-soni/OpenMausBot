@@ -71,7 +71,7 @@ jobs:
         run: |
           set -euo pipefail
           docker rm -f omb >/dev/null
-          docker tag openmausbot:ci openmausbot:latest
+          docker tag openmausbot:ci ghcr.io/milind-soni/openmausbot:latest
           hash=$(docker run --rm caddy:2 caddy hash-password --plaintext 'ci-pass')
           printf 'DOMAIN=localhost\nBASIC_AUTH_USER=ci\nBASIC_AUTH_HASH=%s\nENGINES=\n' "$(printf '%s' "$hash" | sed 's/\$/$$/g')" > deploy/.env
           docker compose -f deploy/docker-compose.yml up -d --no-build
