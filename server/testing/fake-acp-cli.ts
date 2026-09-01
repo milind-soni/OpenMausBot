@@ -189,7 +189,7 @@ let pendingPermissionId: number | null = null;
 let onPermissionAnswered: (() => void) | null = null;
 
 // ask-peer mode: the "agents" MCP server entry from session/new's mcpServers
-type McpEntry = { command: string; args?: string[]; env?: Array<{ name: string; value: string }> };
+type McpEntry = { name?: string; command: string; args?: string[]; env?: Array<{ name: string; value: string }> };
 let agentsMcp: McpEntry | null = null;
 
 /** Minimal one-shot MCP stdio client: initialize, call each tool in
@@ -328,6 +328,15 @@ function handle(msg: any) {
       break;
     }
     case "session/load": {
+      // ACP starts a fresh CLI process for every turn. A resumed provider
+      // session still receives this turn's MCP mounts on session/load, so the
+      // fake must restore them just like session/new. Otherwise follow-up
+      // turns falsely look as if agents/computer/browser tools disappeared.
+      const servers: McpEntry[] = Array.isArray(msg.params?.mcpServers) ? msg.params.mcpServers : [];
+      agentsMcp = servers.find((server: McpEntry) => server?.name === "agents") ?? null;
+      if (process.env.FAKE_ACP_DUMP) {
+        writeFileSync(`${process.env.FAKE_ACP_DUMP}.mcp.json`, JSON.stringify(servers, null, 2));
+      }
       const opts = configOptions();
       const mdls = sessionModels();
       result(msg.id, { ...(opts ? { configOptions: opts } : {}), ...(mdls ? { models: mdls } : {}) });
@@ -414,9 +423,13 @@ function handle(msg: any) {
       // driving the mode's usual delegate/ask flow, which would loop or
       // re-ask for approval on a turn the user did not initiate.
       const wokeFromDelegation = promptText.includes("[A delegated task just completed]")
-        || promptText.includes("[A delegated task failed]");
+        || promptText.includes("[A delegated task failed]")
+        || promptText.includes("[Delegated tasks settled]")
+        || promptText.includes("[Delegation outcome pending after restart]");
       if (wokeFromDelegation) {
         const failed = promptText.includes("[A delegated task failed]");
+        const batched = promptText.includes("[Delegated tasks settled]")
+          || promptText.includes("[Delegation outcome pending after restart]");
         const sawResult = promptText.includes("replied to the delegated task");
         out({
           jsonrpc: "2.0",
@@ -427,9 +440,11 @@ function handle(msg: any) {
               content: {
                 text: failed
                   ? "woke after delegation failure: will tell the user"
-                  : sawResult
-                    ? "woke after delegation: saw the result"
-                    : "woke after delegation: no result",
+                  : batched
+                    ? "woke after delegation: saw batched outcomes"
+                    : sawResult
+                      ? "woke after delegation: saw the result"
+                      : "woke after delegation: no result",
               },
             },
           },

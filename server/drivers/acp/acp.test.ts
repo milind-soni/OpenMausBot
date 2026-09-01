@@ -451,6 +451,43 @@ describe("ACP turns (fake CLI)", () => {
     expect(instance.adapter.capabilities.localComputerMcp).toBe(true);
   });
 
+  it("remounts the agents MCP when a later turn resumes with session/load", async () => {
+    await create();
+    const dump = join(scratch, "resume-agents-dump.json");
+    process.env.FAKE_ACP_DUMP = dump;
+    const agents = {
+      command: process.execPath,
+      args: ["/tmp/agents-proxy.js"],
+      env: { OMB_COMMS_TOKEN: "test-token", OMB_THREAD_ID: "t-resume-agents" },
+    };
+
+    const first = await instance.adapter.sendTurn({
+      threadId: "t-resume-agents",
+      text: "first",
+      integrations: { agents },
+    });
+    await recorder.until((event) => event.type === "turn.completed" && event.turnId === first.turnId);
+
+    const second = await instance.adapter.sendTurn({
+      threadId: "t-resume-agents",
+      text: "follow-up",
+      resumeCursor: "fake-acp-session",
+      integrations: { agents },
+    });
+    await recorder.until((event) => event.type === "turn.completed" && event.turnId === second.turnId);
+
+    const mounted = JSON.parse(readFileSync(`${dump}.mcp.json`, "utf8"));
+    expect(mounted).toContainEqual({
+      name: "agents",
+      command: process.execPath,
+      args: ["/tmp/agents-proxy.js"],
+      env: [
+        { name: "OMB_COMMS_TOKEN", value: "test-token" },
+        { name: "OMB_THREAD_ID", value: "t-resume-agents" },
+      ],
+    });
+  });
+
   it("mounts user-configured custom MCP servers after the built-ins", async () => {
     await create();
     const dump = join(scratch, "custom-dump.json");

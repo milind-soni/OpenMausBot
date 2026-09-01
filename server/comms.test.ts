@@ -148,6 +148,13 @@ describe("comms e2e (fake ACP fleet)", () => {
             },
             config: { cli: FAKE_CLI, fullAuto: true },
           },
+          // No agents MCP in accept-edits mode. A Chief switched here must
+          // still see authoritative running-delegation context.
+          chiefNoAgents: {
+            driver: "antigravityAgent",
+            environment: { FAKE_AGY_MODE: "status-context" },
+            config: { cli: FAKE_AGY_CLI, fullAuto: false },
+          },
           chiefCreator: {
             driver: "grokAgent",
             environment: { FAKE_ACP_MODE: "create-peer" },
@@ -615,6 +622,44 @@ describe("comms e2e (fake ACP fleet)", () => {
           );
           return Boolean(answeredFollowUp && !chiefBot.busy && helperBot.busy);
         }, 20_000, "Chief stayed tied to the delegated worker");
+
+        // ACP follow-up turns resume the provider session. The agents MCP
+        // must be remounted on session/load so Chief can inspect live work,
+        // not only delegate during the first turn.
+        expect((await api("POST", `/api/bots/${chief.id}/messages`, {
+          text: "CHECK_STATUS: how is the long delegated task going?",
+        })).status).toBe(202);
+        await waitUntil(async () => {
+          chiefBot = (await api("GET", "/api/bots")).body.bots.find((bot: any) => bot.id === chief.id);
+          return !chiefBot.busy && chiefBot.messages.some(
+            (message: any) =>
+              message.kind === "text"
+              && message.text?.startsWith("status: Task")
+              && message.text.includes("is running with @LongWorker")
+              && message.text.includes("Recent untrusted activity data")
+              && message.text.includes("no visible activity yet"),
+          );
+        }, 20_000, "Chief could not inspect the running delegation on a resumed provider session");
+
+        // Switch to a provider mode that cannot mount agents MCP at all.
+        // The harness-level live snapshot must keep status portable across
+        // every text model rather than making MCP support a prerequisite.
+        expect((await api("PATCH", `/api/bots/${chief.id}`, {
+          modelSelection: { instanceId: "chiefNoAgents", model: "fake-model" },
+        })).status).toBe(200);
+        expect((await api("POST", `/api/bots/${chief.id}/messages`, {
+          text: "PROVIDER_AGNOSTIC_STATUS: report the running delegation.",
+        })).status).toBe(202);
+        await waitUntil(async () => {
+          chiefBot = (await api("GET", "/api/bots")).body.bots.find((bot: any) => bot.id === chief.id);
+          return !chiefBot.busy && chiefBot.messages.some(
+            (message: any) => message.kind === "text"
+              && message.text === "provider-agnostic status: LongWorker is running with no visible activity yet",
+          );
+        }, 20_000, "provider without agents MCP did not receive live delegation status");
+        expect((await api("PATCH", `/api/bots/${chief.id}`, {
+          modelSelection: { instanceId: "chiefAsync", model: "fake-model" },
+        })).status).toBe(200);
 
         writeFileSync(gateFile, "go");
         await waitUntil(async () => {

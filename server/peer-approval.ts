@@ -29,8 +29,10 @@ export interface ApprovalBus {
   broadcast: (payload: Record<string, unknown>) => void;
 }
 
+export type PeerApprovalVerdict = "allow" | "deny" | "timeout" | "cancelled" | "target_gone";
+
 interface Pending {
-  resolve: (result: "allow" | "deny") => void;
+  resolve: (result: PeerApprovalVerdict) => void;
   /** Frees the requestId if the user never answers. */
   timer: ReturnType<typeof setTimeout>;
   fromBotId: string;
@@ -96,9 +98,10 @@ function pushApprovalCard(
 }
 
 /** Ask the user (in the source task thread) whether `from` may `action` `target`.
- * Resolves with `"allow"` or `"deny"`. If `from.alwaysAllow` already
- * covers the (action, target) pair, returns `"allow"` immediately
- * without a card. */
+ * Resolves with an explicit user/system verdict. Distinguishing user deny,
+ * timeout, and cancellation is required so delegation failures wake the
+ * source while an explicit Stop remains stopped. If `from.alwaysAllow`
+ * covers the (action, target) pair, returns `"allow"` immediately. */
 export function requestPeerApproval(
   bus: ApprovalBus,
   from: BotRecord,
@@ -106,7 +109,7 @@ export function requestPeerApproval(
   message: string,
   action: PeerAction,
   sourceThreadId = from.threadId,
-): Promise<"allow" | "deny"> {
+): Promise<PeerApprovalVerdict> {
   if (allowKeyAllowed(from, peerAllowKey(action, target.id))) {
     return Promise.resolve("allow");
   }
@@ -122,7 +125,7 @@ export function requestPeerApproval(
       if (!pending) return;
       pendingComms.delete(requestId);
       settleCard(pending, "deny", "system");
-      resolve("deny");
+      resolve("timeout");
     }, APPROVAL_TIMEOUT_MS);
     timer.unref?.(); // a waiting card must never hold the process open
     pendingComms.set(requestId, {
@@ -158,18 +161,18 @@ export function resolvePeerComms(
 }
 
 /** Drop every approval waiting on a bot that no longer exists (or is being
- * deleted), denying it so the caller's turn doesn't wait out the timeout. */
+ * deleted), cancelling it so the caller's turn doesn't wait out the timeout. */
 export function cancelPeerApprovalsFor(botId: string): void {
-  for (const [requestId, pending] of [...pendingComms]) {
+  for (const [requestId, pending] of pendingComms) {
     if (pending.fromBotId !== botId && pending.toBotId !== botId) continue;
     pendingComms.delete(requestId);
     clearTimeout(pending.timer);
     settleCard(pending, "deny", "system");
-    pending.resolve("deny");
+    pending.resolve(pending.toBotId === botId && pending.fromBotId !== botId ? "target_gone" : "cancelled");
   }
 }
 
-/** Deny every peer-communication approval owned by a thread whose turn was
+/** Cancel every peer-communication approval owned by a thread whose turn was
  * interrupted. Patching the card alone is not enough: the in-memory promise
  * must resolve too, or the delegation queue waits until its 15-minute timer. */
 export function cancelPeerApprovalsForThread(threadId: string): void {
@@ -178,7 +181,7 @@ export function cancelPeerApprovalsForThread(threadId: string): void {
     pendingComms.delete(requestId);
     clearTimeout(pending.timer);
     settleCard(pending, "deny", "system");
-    pending.resolve("deny");
+    pending.resolve("cancelled");
   }
 }
 

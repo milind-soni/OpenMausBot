@@ -10,6 +10,9 @@
 //     reads OpenMausBot's temporary `openmausbot-agents` entry from agy's
 //     global MCP config, calls list_bots then ask_bot, and returns the peer's
 //     real reply. This pins the Antigravity/Gemini comms path end to end.
+//   FAKE_AGY_MODE=status-context
+//     has no agents MCP; reports whether provider-agnostic live delegation
+//     status was embedded in the turn's system prompt.
 //
 // Keep this file dependency-free — it runs as a bare `node` subprocess.
 import { spawn } from "node:child_process";
@@ -189,7 +192,13 @@ out({ event: "init", conversation_id: CONV, init: { cwd: process.cwd(), tools: [
 out({ event: "step_update", conversation_id: CONV, step_update: { conversation_id: CONV, step_index: 0, state: "ACTIVE", step_type: "tool", tool_name: toolName, tool_info: { name: toolName, parameters: {} } } });
 
 let response = "done from fake agy";
-if (mode === "ask-peer") {
+if (mode === "status-context") {
+  response = prompt.includes("[Authoritative live delegated-work status from the OpenMausBot harness]")
+      && prompt.includes("running with @LongWorker")
+      && prompt.includes("Empty recent activity means no visible progress yet")
+    ? "provider-agnostic status: LongWorker is running with no visible activity yet"
+    : "provider-agnostic status missing";
+} else if (mode === "ask-peer") {
   const agents = agentsMcpEntry();
   if (!agents) {
     response = "peer error: agents MCP not mounted";
