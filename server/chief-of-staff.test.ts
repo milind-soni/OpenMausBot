@@ -53,7 +53,7 @@ describe("chiefOfStaffSystemPrompt", () => {
     expect(prompt).not.toContain("Atlas —");
     expect(prompt).toContain("use delegate_bot");
     expect(prompt).toContain("keeps you available to the user");
-    expect(prompt).toContain("delivers the teammate's completed result back into this conversation automatically");
+    expect(prompt).toContain("delivers the teammate's outcome back into this conversation automatically — success or failure");
     expect(prompt).toContain("Do not call wait_delegation");
     expect(prompt).toContain("Use ask_bot only for a brief consultation");
     expect(prompt).toContain("Never use ask_bot for an assigned task");

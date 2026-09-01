@@ -122,7 +122,7 @@ import { BUILT_IN_DRIVERS } from "./drivers/builtIn.ts";
 import { getOrCreateChannel, mirrorActivity, mirrorExchange, mirrorReply, type CommsBus } from "./comms-visibility.ts";
 import { searchMessages } from "./message-db.ts";
 import { promptWithReply, transcriptText } from "./replies.ts";
-import { _loadPending, discardDelegations, drainDelegations, findDelegationReceipt, pendingDelegationInfo, pendingDelegationSnapshot, pendingThreads, queueDelegation, recordDelegationReceipt, releaseDelegationsWaitingOn, type QueueResult } from "./delegations.ts";
+import { _loadPending, buildDelegationFailurePrompt, buildDelegationRevivalPrompt, DelegationWakeBudget, discardDelegations, drainDelegations, findDelegationReceipt, pendingDelegationInfo, pendingDelegationSnapshot, pendingThreads, queueDelegation, recordDelegationReceipt, releaseDelegationsWaitingOn, type QueueResult } from "./delegations.ts";
 import {
   cancelSteeredMessage,
   drainSteeredMessages,
@@ -2054,11 +2054,10 @@ bus.subscribe((event: RuntimeEvent) => {
   }
 });
 
-// Delegated turns are fire-and-forget, so the drain cannot hand the
-// peer's reply back to the caller the way ask_bot does. This watch map
-// (target threadId → channel) lets the main fold mirror the delegated
-// turn's TERMINAL state into the A⇄B channel when it completes — the
-// channel stays the full record of the handoff, not just its request.
+/** A delegated turn's terminal state belongs in the A⇄B channel:
+ * the request was mirrored there when the delegation drained, and a
+ * channel that only ever shows requests is half a record. Mirror the
+ * reply on success; mirror a failed/stopped terminal chip otherwise. */
 const delegationWatch = new Map<string, {
   channelId?: string;
   toBotId: string;
@@ -2066,6 +2065,62 @@ const delegationWatch = new Map<string, {
   taskId?: string;
   sourceThreadId?: string;
 }>();
+
+// Peer wake: when a delegated reply lands, resume the source bot so it can
+// fold the result in and answer the user instead of sitting idle. Mirrors
+// the cardContinuation resume pattern used for connector/credential cards.
+const delegationWakeBudget = new DelegationWakeBudget();
+const pendingDelegationWakes = new Map<string, { botId: string; targetName: string; failureReason?: string }>();
+
+function dispatchDelegationWake(botId: string, threadId: string, targetName: string, failureReason?: string): void {
+  const prompt = failureReason
+    ? buildDelegationFailurePrompt(targetName, failureReason)
+    : buildDelegationRevivalPrompt(targetName);
+  void startTurn(botId, prompt, {
+    threadId,
+    cardContinuation: true,
+    unattended: isUnattended(botId),
+  })
+    .then(() => undefined)
+    .catch((error) => {
+      const message = error instanceof Error ? error.message : String(error);
+      // Raced with a user turn claiming the bot — retry once it settles.
+      if (/already working/i.test(message)) {
+        pendingDelegationWakes.set(threadId, { botId, targetName, failureReason });
+        return;
+      }
+      store.appendMessage(threadId, {
+        role: "bot",
+        kind: "activity",
+        tool: {
+          name: `error: could not resume after delegation — ${message.slice(0, 120)}`,
+          ok: false,
+        },
+      });
+    });
+}
+
+function wakeDelegationSource(source: BotRecord, threadId: string, targetName: string, failureReason?: string): void {
+  // Busy? Hold the wake until the source settles, then drain it — the
+  // delegated reply is already in the thread, so nothing is lost, and the
+  // source processes it the moment it is free rather than only on a later
+  // user nudge.
+  if (store.bot(source.id)?.busy) {
+    pendingDelegationWakes.set(threadId, { botId: source.id, targetName, failureReason });
+    return;
+  }
+  if (!delegationWakeBudget.tryAcquire(threadId)) return;
+  dispatchDelegationWake(source.id, threadId, targetName, failureReason);
+}
+
+function drainDelegationWakes(): void {
+  for (const [threadId, entry] of pendingDelegationWakes) {
+    if (store.bot(entry.botId)?.busy) continue;
+    pendingDelegationWakes.delete(threadId);
+    if (!delegationWakeBudget.tryAcquire(threadId)) continue;
+    dispatchDelegationWake(entry.botId, threadId, entry.targetName, entry.failureReason);
+  }
+}
 
 // Provider-native sessions only know about messages produced inside their
 // own turns. A delegated result is appended later by the harness, so mark the
@@ -2142,6 +2197,17 @@ function finalizeDelegationWatch(
       });
     }
     markTaskContextExternallyUpdated(source, watched.sourceThreadId);
+    // Peer wake: a settled delegated turn resumes the source bot so it
+    // folds the result in and answers the user, instead of sitting idle
+    // with the reply only visible in the thread (the "delegated and went
+    // silent" gap). Failures wake it too — the user must hear the task did
+    // not finish. Idle-checked and burst-capped so a busy source or a
+    // re-delegating loop cannot spin up runs.
+    if (ok && reply.trim()) {
+      wakeDelegationSource(source, watched.sourceThreadId, targetName);
+    } else if (!ok) {
+      wakeDelegationSource(source, watched.sourceThreadId, targetName, failureName || "the delegated turn did not finish");
+    }
   }
   const channel = watched.channelId ? store.group(watched.channelId) : undefined;
   if (!target || !channel) return true;
@@ -2285,6 +2351,7 @@ bus.subscribe((event: RuntimeEvent) => {
   if (shouldIgnoreProviderEvent(event)) return;
   if (event.type !== "turn.completed") return;
   drainQueuedSends();
+  drainDelegationWakes();
 });
 
 function drainQueuedSends() {
@@ -2465,7 +2532,10 @@ async function startTurn(
   // a webhook turn, or one inherited from a bot already running unattended
   if (opts?.automationSource === "webhook" || opts?.unattended) markUnattended(bot.id);
   // a person typing into this bot ends the unattended window immediately
-  else if (opts?.automationSource === undefined && !opts?.commsDepth && !opts?.cardContinuation) clearUnattended(bot.id);
+  else if (opts?.automationSource === undefined && !opts?.commsDepth && !opts?.cardContinuation) {
+    clearUnattended(bot.id);
+    delegationWakeBudget.reset(threadId);
+  }
   const task = store.taskByThread(bot.id, threadId);
   if (!task) throw Object.assign(new Error("no such task"), { status: 404 });
   const commsDepth = opts?.commsDepth ?? 0;
@@ -2992,6 +3062,7 @@ async function startTurn(
           drainQueuedSends();
           drainConnectorResumes();
           drainSecretResumes();
+          drainDelegationWakes();
         }
         return;
       }
@@ -3010,6 +3081,7 @@ async function startTurn(
       drainQueuedSends();
       drainConnectorResumes();
       drainSecretResumes();
+      drainDelegationWakes();
     }
   })();
   return userMessage;

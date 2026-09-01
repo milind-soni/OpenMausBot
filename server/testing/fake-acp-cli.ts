@@ -387,6 +387,34 @@ function handle(msg: any) {
         );
       };
       const promptText = String(msg.params?.prompt?.[0]?.text ?? "");
+      // A delegated reply woke this bot (control-plane continuation): the
+      // harness revived it to fold the result in. Synthesize instead of
+      // driving the mode's usual delegate/ask flow, which would loop or
+      // re-ask for approval on a turn the user did not initiate.
+      const wokeFromDelegation = promptText.includes("[A delegated task just completed]")
+        || promptText.includes("[A delegated task failed]");
+      if (wokeFromDelegation) {
+        const failed = promptText.includes("[A delegated task failed]");
+        const sawResult = promptText.includes("replied to the delegated task");
+        out({
+          jsonrpc: "2.0",
+          method: "session/update",
+          params: {
+            update: {
+              sessionUpdate: "agent_message_chunk",
+              content: {
+                text: failed
+                  ? "woke after delegation failure: will tell the user"
+                  : sawResult
+                    ? "woke after delegation: saw the result"
+                    : "woke after delegation: no result",
+              },
+            },
+          },
+        });
+        complete();
+        return;
+      }
       if (mode === "chief-delegate" && promptText.includes("CHIEF_RESULT_CONTEXT")) {
         const sawDelegatedResult =
           promptText.includes("@LongWorker replied to the delegated task")

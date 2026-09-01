@@ -580,3 +580,66 @@ export function _resetPending(): void {
   queuedRedrains.clear();
   receipts = [];
 }
+
+// ── peer wake (delegated reply resumes the source bot) ────────────────
+// A successful delegated reply is appended to the source thread, but that
+// alone leaves the source idle — the user has to nudge it ("what did the
+// bot say?"). The harness wakes the source with a control-plane revival
+// prompt so it can fold the result in and answer. The prompt is pure and
+// testable; the burst budget below keeps a re-delegating bot from
+// ping-ponging forever.
+
+/** The revival prompt the harness feeds a delegating bot when its peer
+ * replies. The peer's text is already in the thread; this tells the source
+ * to stop idling and answer the user with the outcome. */
+export function buildDelegationRevivalPrompt(targetName: string): string {
+  return [
+    "[A delegated task just completed]",
+    `The task you delegated to @${targetName} has finished, and their reply is now in this conversation.`,
+    "Pick the work back up: review the reply, then answer the user with the outcome — lead with the concrete result and say what happens next. Do not re-delegate the same task.",
+  ].join("\n\n");
+}
+
+/** Same wake for a failed delegated turn: the source must tell the user it
+ * did not finish and decide the next step, instead of leaving the failure
+ * as a silent chip nobody acts on. */
+export function buildDelegationFailurePrompt(targetName: string, reason: string): string {
+  return [
+    "[A delegated task failed]",
+    `The task you delegated to @${targetName} did not finish: ${reason}`,
+    "Take over: tell the user what failed in plain terms, then decide the next step — retry with a narrower task, do the work yourself, or propose an alternative. Do not re-delegate the exact same task unchanged.",
+  ].join("\n\n");
+}
+
+export const DELEGATION_WAKE_MAX_PER_WINDOW = 3;
+export const DELEGATION_WAKE_WINDOW_MS = 5 * 60 * 1000;
+
+/** Bounded auto-wake budget per source thread. A delegation completion
+ * wakes the source; if that source re-delegates and the new completion
+ * wakes it again, this cap stops an A→B→A→B ping-pong. The window is
+ * short, so a user actively driving the bot outpaces it. */
+export class DelegationWakeBudget {
+  private readonly entries = new Map<string, { count: number; windowStart: number }>();
+  private readonly now: () => number;
+
+  constructor(now: () => number = Date.now) {
+    this.now = now;
+  }
+
+  tryAcquire(threadId: string): boolean {
+    const now = this.now();
+    const entry = this.entries.get(threadId);
+    if (!entry || now - entry.windowStart >= DELEGATION_WAKE_WINDOW_MS) {
+      this.entries.set(threadId, { count: 1, windowStart: now });
+      return true;
+    }
+    if (entry.count >= DELEGATION_WAKE_MAX_PER_WINDOW) return false;
+    entry.count += 1;
+    return true;
+  }
+
+  /** A genuine user turn clears the debt — the user is driving now. */
+  reset(threadId: string): void {
+    this.entries.delete(threadId);
+  }
+}

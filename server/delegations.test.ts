@@ -11,6 +11,11 @@ import type { CommsBus } from "./comms-visibility.ts";
 import { DATA_DIR } from "./config.ts";
 import type { ModelSelection } from "./contracts.ts";
 import {
+  buildDelegationFailurePrompt,
+  buildDelegationRevivalPrompt,
+  DELEGATION_WAKE_MAX_PER_WINDOW,
+  DELEGATION_WAKE_WINDOW_MS,
+  DelegationWakeBudget,
   drainDelegations,
   findDelegationReceipt,
   MAX_BUSY_ATTEMPTS,
@@ -736,5 +741,49 @@ describe("busy retries and receipts", () => {
     discardDelegations(commsBus, from.threadId);
     expect(_pendingCount(from.threadId)).toBe(0);
     expect(findDelegationReceipt(queued.id!)).toMatchObject({ status: "dropped" });
+  });
+});
+
+describe("peer wake helpers", () => {
+  it("buildDelegationRevivalPrompt names the peer and instructs the source to answer", () => {
+    const prompt = buildDelegationRevivalPrompt("Helper");
+    expect(prompt).toContain("@Helper");
+    expect(prompt).toContain("answer the user with the outcome");
+    expect(prompt).toContain("Do not re-delegate the same task");
+  });
+
+  it("buildDelegationFailurePrompt carries the reason and forbids an unchanged retry", () => {
+    const prompt = buildDelegationFailurePrompt("Helper", "delegated turn stalled");
+    expect(prompt).toContain("@Helper");
+    expect(prompt).toContain("delegated turn stalled");
+    expect(prompt).toContain("tell the user what failed");
+    expect(prompt).toContain("Do not re-delegate the exact same task unchanged");
+  });
+
+  it("DelegationWakeBudget caps bursts per thread and expires with the window", () => {
+    let now = 1_000_000;
+    const budget = new DelegationWakeBudget(() => now);
+
+    for (let i = 0; i < DELEGATION_WAKE_MAX_PER_WINDOW; i++) {
+      expect(budget.tryAcquire("t1")).toBe(true);
+    }
+    // cap reached — no further wakes within the same window
+    expect(budget.tryAcquire("t1")).toBe(false);
+
+    // a different thread has its own budget
+    expect(budget.tryAcquire("t2")).toBe(true);
+
+    // the window rolls over and the cap resets
+    now += DELEGATION_WAKE_WINDOW_MS + 1;
+    expect(budget.tryAcquire("t1")).toBe(true);
+  });
+
+  it("DelegationWakeBudget.reset clears the debt for a thread", () => {
+    let now = 1_000_000;
+    const budget = new DelegationWakeBudget(() => now);
+    for (let i = 0; i < DELEGATION_WAKE_MAX_PER_WINDOW; i++) budget.tryAcquire("t1");
+    expect(budget.tryAcquire("t1")).toBe(false);
+    budget.reset("t1");
+    expect(budget.tryAcquire("t1")).toBe(true);
   });
 });

@@ -206,7 +206,7 @@ const TOOLS = [
   {
     name: "delegate_bot",
     description:
-      "DEFAULT FOR ASSIGNING WORK. Hand a task to another bot asynchronously: this returns immediately, your turn can end, and you remain available while the peer works. The peer starts after your current turn finishes and its result is delivered automatically to the originating conversation. Acknowledge the assignment; do not call check_delegation or wait_delegation in this same turn.",
+      "DEFAULT FOR ASSIGNING WORK. Hand a task to another bot asynchronously: this returns immediately, your turn can end, and you remain available while the peer works. The peer starts after your current turn finishes and its outcome is delivered automatically to the originating conversation — success or failure wakes you with it. Acknowledge the assignment; do not call check_delegation or wait_delegation in this same turn.",
     inputSchema: {
       type: "object",
       properties: {

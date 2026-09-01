@@ -479,7 +479,12 @@ describe("comms e2e (fake ACP fleet)", () => {
             && m.text?.includes("replied to the delegated task")
             && m.text?.includes("hello from fake acp"),
         );
-        if (askerDelegated && note && helperReplied && resultReturned && !helperBot.busy) break;
+        // The source is now revived automatically once the peer replies:
+        // it must settle again (idle) and have synthesized the result.
+        const woke = askerBot.messages.some(
+          (m: any) => m.role === "bot" && m.kind === "text" && m.text?.includes("woke after delegation"),
+        );
+        if (askerDelegated && note && helperReplied && resultReturned && woke && !helperBot.busy && !askerBot.busy) break;
         if (Date.now() > deadline) {
           throw new Error(
             `delegate handoff never settled. asker busy=${askerBot.busy} helper busy=${helperBot.busy}\n` +
@@ -544,6 +549,11 @@ describe("comms e2e (fake ACP fleet)", () => {
       expect(helperNote?.comm?.groupId).toBe(note.comm.groupId);
       expect(helperBot.busy).toBeFalsy();
       expect(askerBot.busy).toBeFalsy();
+      // the source did not need a user nudge: it was revived and folded the
+      // peer's reply back into the conversation on its own.
+      expect(
+        askerBot.messages.some((m: any) => m.role === "bot" && m.text?.includes("woke after delegation: saw the result")),
+      ).toBe(true);
     },
     45_000,
   );
@@ -615,20 +625,18 @@ describe("comms e2e (fake ACP fleet)", () => {
           );
         }, 20_000, "worker result did not return to the Chief conversation");
 
-        // The result is not only visible in storage/UI. It was appended
-        // outside the Chief provider's native session, so the next resumed
-        // turn must replay it into model context before answering.
-        expect((await api("POST", `/api/bots/${chief.id}/messages`, {
-          text: "CHIEF_RESULT_CONTEXT: what did LongWorker report?",
-        })).status).toBe(202);
+        // The Chief is revived automatically once the worker replies — no
+        // user message needed. The revived turn replays the appended result
+        // into model context and the Chief synthesizes it on its own.
         await waitUntil(async () => {
           chiefBot = (await api("GET", "/api/bots")).body.bots.find((bot: any) => bot.id === chief.id);
           return chiefBot.messages.some(
             (message: any) =>
               message.kind === "text"
-              && message.text === "chief saw delegated result: long delegated task",
+              && message.text === "woke after delegation: saw the result",
           );
-        }, 20_000, "Chief provider did not receive the delegated result on its next turn");
+        }, 20_000, "Chief did not wake with the delegated result");
+        expect(chiefBot.busy).toBeFalsy();
       } finally {
         writeFileSync(gateFile, "go");
         await waitUntil(async () => {
@@ -791,6 +799,17 @@ describe("comms e2e (fake ACP fleet)", () => {
             && m.text?.includes("ping from fake"),
         );
       }, 30_000, "provider reload left the waiting delegation stranded");
+
+      // The revived turn must NOT ask for approval again — it folds the
+      // already-approved result in and settles.
+      await waitUntil(async () => {
+        finalAsker = (await api("GET", "/api/bots")).body.bots.find((b: any) => b.id === asker.id);
+        return Boolean(
+          finalAsker.messages.some(
+            (m: any) => m.role === "bot" && m.kind === "text" && m.text?.includes("woke after delegation"),
+          ) && !finalAsker.busy,
+        );
+      }, 20_000, "revived asker did not settle without re-asking");
 
       const approvalCards = finalAsker.messages.filter((m: any) => m.kind === "options");
       expect(approvalCards.filter((m: any) => m.card?.tool === "ask_bot")).toHaveLength(1);
