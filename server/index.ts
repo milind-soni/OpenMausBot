@@ -122,7 +122,7 @@ import { BUILT_IN_DRIVERS } from "./drivers/builtIn.ts";
 import { getOrCreateChannel, mirrorActivity, mirrorExchange, mirrorReply, type CommsBus } from "./comms-visibility.ts";
 import { searchMessages } from "./message-db.ts";
 import { promptWithReply, transcriptText } from "./replies.ts";
-import { _loadPending, buildDelegationFailurePrompt, buildDelegationRevivalPrompt, DelegationWakeBudget, discardDelegations, drainDelegations, findDelegationReceipt, pendingDelegationInfo, pendingDelegationSnapshot, pendingThreads, queueDelegation, recordDelegationReceipt, releaseDelegationsWaitingOn, summarizeDelegatedActivity, type QueueResult } from "./delegations.ts";
+import { _loadPending, buildDelegationFailurePrompt, buildDelegationRevivalPrompt, DelegationWakeBudget, discardDelegations, drainDelegations, findDelegationReceipt, pendingDelegationInfo, pendingDelegationSnapshot, pendingThreads, queueDelegation, recordDelegationReceipt, releaseDelegationsWaitingOn, summarizeDelegatedActivity, type DelegationTerminalFailure, type QueueResult } from "./delegations.ts";
 import {
   cancelSteeredMessage,
   drainSteeredMessages,
@@ -2072,12 +2072,25 @@ const delegationWatch = new Map<string, {
 // fold the result in and answer the user instead of sitting idle. Mirrors
 // the cardContinuation resume pattern used for connector/credential cards.
 const delegationWakeBudget = new DelegationWakeBudget();
-const pendingDelegationWakes = new Map<string, { botId: string; targetName: string; failureReason?: string }>();
+type PendingDelegationWake = {
+  botId: string;
+  targetName: string;
+  failureReason?: string;
+  completedWithoutText?: boolean;
+};
+const pendingDelegationWakes = new Map<string, PendingDelegationWake>();
 
-function dispatchDelegationWake(botId: string, threadId: string, targetName: string, failureReason?: string): void {
+function dispatchDelegationWake(
+  botId: string,
+  threadId: string,
+  targetName: string,
+  failureReason?: string,
+  completedWithoutText = false,
+): void {
+  if (!delegationWakeBudget.tryAcquire(threadId)) return;
   const prompt = failureReason
     ? buildDelegationFailurePrompt(targetName, failureReason)
-    : buildDelegationRevivalPrompt(targetName);
+    : buildDelegationRevivalPrompt(targetName, completedWithoutText);
   void startTurn(botId, prompt, {
     threadId,
     cardContinuation: true,
@@ -2085,10 +2098,13 @@ function dispatchDelegationWake(botId: string, threadId: string, targetName: str
   })
     .then(() => undefined)
     .catch((error) => {
+      // A preflight rejection did not actually start an automatic wake, so
+      // give its reservation back before retrying behind the active turn.
+      delegationWakeBudget.release(threadId);
       const message = error instanceof Error ? error.message : String(error);
       // Raced with a user turn claiming the bot — retry once it settles.
       if (/already working/i.test(message)) {
-        pendingDelegationWakes.set(threadId, { botId, targetName, failureReason });
+        pendingDelegationWakes.set(threadId, { botId, targetName, failureReason, completedWithoutText });
         return;
       }
       store.appendMessage(threadId, {
@@ -2102,25 +2118,29 @@ function dispatchDelegationWake(botId: string, threadId: string, targetName: str
     });
 }
 
-function wakeDelegationSource(source: BotRecord, threadId: string, targetName: string, failureReason?: string): void {
+function wakeDelegationSource(
+  source: BotRecord,
+  threadId: string,
+  targetName: string,
+  failureReason?: string,
+  completedWithoutText = false,
+): void {
   // Busy? Hold the wake until the source settles, then drain it — the
   // delegated reply is already in the thread, so nothing is lost, and the
   // source processes it the moment it is free rather than only on a later
   // user nudge.
   if (store.bot(source.id)?.busy) {
-    pendingDelegationWakes.set(threadId, { botId: source.id, targetName, failureReason });
+    pendingDelegationWakes.set(threadId, { botId: source.id, targetName, failureReason, completedWithoutText });
     return;
   }
-  if (!delegationWakeBudget.tryAcquire(threadId)) return;
-  dispatchDelegationWake(source.id, threadId, targetName, failureReason);
+  dispatchDelegationWake(source.id, threadId, targetName, failureReason, completedWithoutText);
 }
 
 function drainDelegationWakes(): void {
   for (const [threadId, entry] of pendingDelegationWakes) {
     if (store.bot(entry.botId)?.busy) continue;
     pendingDelegationWakes.delete(threadId);
-    if (!delegationWakeBudget.tryAcquire(threadId)) continue;
-    dispatchDelegationWake(entry.botId, threadId, entry.targetName, entry.failureReason);
+    dispatchDelegationWake(entry.botId, threadId, entry.targetName, entry.failureReason, entry.completedWithoutText);
   }
 }
 
@@ -2147,6 +2167,16 @@ function markTaskContextExternallyUpdated(bot: BotRecord, threadId: string): voi
   const patch: Partial<BotRecord> = { unread: true };
   if (bot.threadId === threadId) patch.resumeCursors = {};
   store.patchBot(bot.id, patch);
+}
+
+/** A delegation can fail before a worker turn exists (deleted target, a
+ * section move, or exhausted busy retries). Those paths live in the durable
+ * queue rather than delegationWatch, but they must still resume the source. */
+function wakeSourceAfterUndispatchedDelegationFailure(failure: DelegationTerminalFailure): void {
+  const source = store.botByThread(failure.sourceThreadId);
+  if (!source) return;
+  markTaskContextExternallyUpdated(source, failure.sourceThreadId);
+  wakeDelegationSource(source, failure.sourceThreadId, failure.toBotName, failure.reason);
 }
 
 /** Consume one delegated-turn watch and mirror exactly one terminal state.
@@ -2205,9 +2235,9 @@ function finalizeDelegationWatch(
     // silent" gap). Failures wake it too — the user must hear the task did
     // not finish. Idle-checked and burst-capped so a busy source or a
     // re-delegating loop cannot spin up runs.
-    if (ok && reply.trim()) {
-      wakeDelegationSource(source, watched.sourceThreadId, targetName);
-    } else if (!ok) {
+    if (ok) {
+      wakeDelegationSource(source, watched.sourceThreadId, targetName, undefined, !reply.trim());
+    } else {
       wakeDelegationSource(source, watched.sourceThreadId, targetName, failureName || "the delegated turn did not finish");
     }
   }
@@ -2319,7 +2349,7 @@ function retryDelegationsWaitingOn(botId: string): void {
     delegationRetryBots.delete(botId);
     if (store.bot(botId)?.busy) return;
     for (const waitingThread of releaseDelegationsWaitingOn(botId)) {
-      drainDelegations(commsBus, approvalBus, waitingThread, runDelegatedTurn);
+      drainDelegations(commsBus, approvalBus, waitingThread, runDelegatedTurn, wakeSourceAfterUndispatchedDelegationFailure);
     }
   });
 }
@@ -2331,7 +2361,7 @@ bus.subscribe((event: RuntimeEvent) => {
   // firing it later: the user who hit Stop does not expect the delegations
   // that turn queued to run anyway, minutes later, on an unrelated turn.
   if (!event.ok) discardDelegations(commsBus, event.threadId);
-  else drainDelegations(commsBus, approvalBus, event.threadId, runDelegatedTurn);
+  else drainDelegations(commsBus, approvalBus, event.threadId, runDelegatedTurn, wakeSourceAfterUndispatchedDelegationFailure);
   // A settling bot frees itself as a delegation TARGET too: handoffs that
   // found it busy earlier were kept queued (bounded retries) on their own
   // source threads, and this is the moment they get their retry.
@@ -2545,7 +2575,6 @@ async function startTurn(
   // a task takes its name from the first thing you asked it to do
   if (text.trim() && !opts?.cardContinuation) store.titleTaskFromFirstMessage(bot.id, text, threadId);
 
-  console.error(`[omb-turn] bot=${botId} text=${JSON.stringify(text.slice(0, 70))} depth=${commsDepth} card=${Boolean(opts?.cardContinuation)}`);
   const instance = opts?.runOn === "cloud"
     ? registry.instances().find((candidate) => candidate.driverKind === "boxAgent") ?? null
     : registry.get(bot.modelSelection.instanceId);
@@ -3464,7 +3493,7 @@ _loadPending();
 {
   const leftover = pendingThreads();
   if (leftover.length) console.log(`delegations: ${leftover.length} thread(s) with queued handoffs from a previous run — draining`);
-  for (const threadId of leftover) drainDelegations(commsBus, approvalBus, threadId, runDelegatedTurn);
+  for (const threadId of leftover) drainDelegations(commsBus, approvalBus, threadId, runDelegatedTurn, wakeSourceAfterUndispatchedDelegationFailure);
 }
 
 async function runGroupMemberTurn(

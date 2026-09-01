@@ -145,7 +145,6 @@ describe("comms e2e (fake ACP fleet)", () => {
             environment: {
               FAKE_ACP_MODE: "chief-delegate",
               FAKE_ACP_TASKID_FILE: join(home, "chief-task-id"),
-              FAKE_ACP_LOG_FILE: join(home, "chief-fake.log"),
             },
             config: { cli: FAKE_CLI, fullAuto: true },
           },
@@ -931,6 +930,15 @@ describe("comms e2e (fake ACP fleet)", () => {
         }
         await new Promise((r) => setTimeout(r, 250));
       }
+
+      // A completed worker with no text is still an outcome: the source must
+      // wake and tell the user instead of silently remaining idle.
+      await waitUntil(async () => {
+        const askerBot = (await api("GET", "/api/bots")).body.bots.find((bot: any) => bot.id === asker.id);
+        return !askerBot.busy && askerBot.messages.some(
+          (message: any) => message.kind === "text" && message.text === "woke after delegation: no result",
+        );
+      }, 20_000, "source did not wake after an empty delegated completion");
     },
     45_000,
   );
@@ -1049,6 +1057,13 @@ describe("comms e2e (fake ACP fleet)", () => {
       expect(
         channel.messages.some((m: any) => m.from?.botId === asker.id && m.text?.includes("delegated task")),
       ).toBe(true);
+
+      await waitUntil(async () => {
+        const askerBot = (await api("GET", "/api/bots")).body.bots.find((bot: any) => bot.id === asker.id);
+        return !askerBot.busy && askerBot.messages.some(
+          (message: any) => message.kind === "text" && message.text === "woke after delegation failure: will tell the user",
+        );
+      }, 20_000, "source did not wake after a delegated crash");
     },
     45_000,
   );
@@ -1100,6 +1115,13 @@ describe("comms e2e (fake ACP fleet)", () => {
         }
         await new Promise((r) => setTimeout(r, 250));
       }
+
+      await waitUntil(async () => {
+        const askerBot = (await api("GET", "/api/bots")).body.bots.find((bot: any) => bot.id === asker.id);
+        return !askerBot.busy && askerBot.messages.some(
+          (message: any) => message.kind === "text" && message.text === "woke after delegation failure: will tell the user",
+        );
+      }, 20_000, "source did not wake after the delegated turn could not start");
     },
     45_000,
   );

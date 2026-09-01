@@ -320,12 +320,19 @@ describe("drainDelegations", () => {
     ).toBe(false);
   });
 
-  it("skips runTarget and emits a 'no such bot' chip when the target was deleted", async () => {
+  it("reports a deleted target as a terminal failure so the harness can wake the source", async () => {
+    const failures: Array<{ sourceThreadId: string; toBotId: string; toBotName: string; reason: string }> = [];
     queueDelegation(commsBus, from, { toBotId: target.id, message: "do this", depth: 0 }, 1);
     store.deleteBot(target.id);
-    drainDelegations(commsBus, approvalBus, from.threadId, (toBotId, message, commsDepth) => {
-      runTargetCalls.push({ toBotId, message, commsDepth });
-    });
+    drainDelegations(
+      commsBus,
+      approvalBus,
+      from.threadId,
+      (toBotId, message, commsDepth) => {
+        runTargetCalls.push({ toBotId, message, commsDepth });
+      },
+      (failure) => failures.push(failure),
+    );
     const chip = await waitFor(() =>
       store
         .messagesFor(from.threadId)
@@ -333,6 +340,12 @@ describe("drainDelegations", () => {
     );
     expect(chip.tool?.ok).toBe(false);
     expect(runTargetCalls).toEqual([]);
+    expect(failures).toEqual([{
+      sourceThreadId: from.threadId,
+      toBotId: target.id,
+      toBotName: target.id,
+      reason: "no such bot",
+    }]);
   });
 
   it("drops a queued handoff when section assignment separates the bots before dispatch", async () => {
@@ -754,6 +767,13 @@ describe("peer wake helpers", () => {
     expect(prompt).toContain("Do not re-delegate the same task");
   });
 
+  it("buildDelegationRevivalPrompt tells the source how to handle an empty completion", () => {
+    const prompt = buildDelegationRevivalPrompt("Helper", true);
+    expect(prompt).toContain("@Helper");
+    expect(prompt).toContain("returned no text reply");
+    expect(prompt).toContain("verify any expected side effect");
+  });
+
   it("buildDelegationFailurePrompt carries the reason and forbids an unchanged retry", () => {
     const prompt = buildDelegationFailurePrompt("Helper", "delegated turn stalled");
     expect(prompt).toContain("@Helper");
@@ -780,6 +800,16 @@ describe("peer wake helpers", () => {
     expect(budget.tryAcquire("t1")).toBe(true);
   });
 
+  it("DelegationWakeBudget.release returns a rejected dispatch reservation", () => {
+    const budget = new DelegationWakeBudget();
+    expect(budget.tryAcquire("t1")).toBe(true);
+    budget.release("t1");
+    for (let i = 0; i < DELEGATION_WAKE_MAX_PER_WINDOW; i++) {
+      expect(budget.tryAcquire("t1")).toBe(true);
+    }
+    expect(budget.tryAcquire("t1")).toBe(false);
+  });
+
   it("DelegationWakeBudget.reset clears the debt for a thread", () => {
     let now = 1_000_000;
     const budget = new DelegationWakeBudget(() => now);
@@ -800,13 +830,17 @@ describe("delegated turn status helpers", () => {
 
   it("summarizeDelegatedActivity keeps only post-dispatch activity, newest last, bounded", () => {
     const messages = [
-      { at: 900, kind: "text", text: "before dispatch (the user's ask)" },
-      { at: 1_100, kind: "activity", tool: { name: "Delegated to @Helper: followup" } },
-      { at: 1_200, kind: "text", text: "peer inbound message" },
-      { at: 1_300, kind: "activity", tool: { name: "tool: Bash" } },
-      { at: 1_400, kind: "text", text: "  multi  space   reply " },
-      { at: 1_500, kind: "activity" },
-      { at: 1_600, kind: "unknown-kind" },
+      { at: 900, role: "bot", kind: "text", text: "before dispatch (the user's ask)" },
+      { at: 1_000, role: "bot", kind: "activity", tool: { name: "Message from @Chief" } },
+      // The task request is not worker progress and must never make a stuck
+      // worker look active immediately after it starts.
+      { at: 1_050, role: "user", kind: "text", text: "[Delegated by @Chief] do the work" },
+      { at: 1_100, role: "bot", kind: "activity", tool: { name: "Delegated to @Helper: followup" } },
+      { at: 1_200, role: "bot", kind: "text", text: "peer inbound message" },
+      { at: 1_300, role: "bot", kind: "activity", tool: { name: "tool: Bash" } },
+      { at: 1_400, role: "bot", kind: "text", text: "  multi  space   reply " },
+      { at: 1_500, role: "bot", kind: "activity" },
+      { at: 1_600, role: "bot", kind: "unknown-kind" },
     ];
     const lines = summarizeDelegatedActivity(messages, 1_000, 5);
     expect(lines).toEqual([
@@ -820,6 +854,7 @@ describe("delegated turn status helpers", () => {
   it("summarizeDelegatedActivity bounds the list to the newest lines", () => {
     const messages = Array.from({ length: 9 }, (_, index) => ({
       at: 1_000 + index,
+      role: "bot",
       kind: "activity",
       tool: { name: `step-${index}` },
     }));

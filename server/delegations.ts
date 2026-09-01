@@ -289,6 +289,18 @@ export function queueDelegation(
  * of the target turn is delegated to `runTarget` so delegations.ts
  * stays free of harness-level concerns (commsDepth is the only thing
  * the caller needs). */
+export interface DelegationTerminalFailure {
+  sourceThreadId: string;
+  toBotId: string;
+  toBotName: string;
+  reason: string;
+}
+
+/** Called after a queued handoff reaches a terminal failure before a target
+ * turn can emit its own terminal event. The harness uses this to resume the
+ * source bot; keeping it optional preserves delegations.ts as a pure queue. */
+export type DelegationFailureReporter = (failure: DelegationTerminalFailure) => void;
+
 export function drainDelegations(
   bus: CommsBus,
   approvalBus: ApprovalBus,
@@ -301,6 +313,7 @@ export function drainDelegations(
     channel: GroupRecord | undefined,
     taskId: string,
   ) => void | Promise<void>,
+  onTerminalFailure?: DelegationFailureReporter,
 ): void {
   if (drainingThreads.has(threadId)) {
     queuedRedrains.add(threadId);
@@ -320,7 +333,7 @@ export function drainDelegations(
     for (const item of snapshot) {
       let outcome: "settled" | "requeued" = "settled";
       try {
-        outcome = await processOne(bus, approvalBus, from, threadId, item, runTarget);
+        outcome = await processOne(bus, approvalBus, from, threadId, item, runTarget, onTerminalFailure);
       } catch (error) {
         const why = error instanceof Error ? error.message : String(error);
         recordDelegationReceipt({
@@ -336,6 +349,12 @@ export function drainDelegations(
             role: "bot",
             kind: "activity",
             tool: { name: `error: delegation failed — ${why.slice(0, 120)}`, ok: false },
+          });
+          onTerminalFailure?.({
+            sourceThreadId: threadId,
+            toBotId: item.toBotId,
+            toBotName: bus.store.bot(item.toBotId)?.name ?? item.toBotId,
+            reason: why.slice(0, 120),
           });
         } catch (reportError) {
           console.error("delegation failed and could not be reported", reportError);
@@ -356,7 +375,7 @@ export function drainDelegations(
     const snapshotIds = new Set(snapshot.map((item) => item.id));
     const hasNewItems = pendingDelegations.get(threadId)?.some((item) => !snapshotIds.has(item.id)) ?? false;
     if (redrainRequested || hasNewItems) {
-      drainDelegations(bus, approvalBus, threadId, runTarget);
+      drainDelegations(bus, approvalBus, threadId, runTarget, onTerminalFailure);
     }
   });
 }
@@ -411,6 +430,7 @@ async function processOne(
     channel: GroupRecord | undefined,
     taskId: string,
   ) => void | Promise<void>,
+  onTerminalFailure?: DelegationFailureReporter,
 ): Promise<"settled" | "requeued"> {
   let sender = from;
   let target = bus.store.bot(item.toBotId);
@@ -428,9 +448,21 @@ async function processOne(
       kind: "activity",
       tool: { name: `error: delegation to ${item.toBotId} failed — no such bot`, ok: false },
     });
+    onTerminalFailure?.({
+      sourceThreadId,
+      toBotId: item.toBotId,
+      toBotName: item.toBotId,
+      reason: "no such bot",
+    });
     return "settled";
   }
   if (dropIfSectionsChanged(bus, sender, target, sourceThreadId, item)) {
+    onTerminalFailure?.({
+      sourceThreadId,
+      toBotId: target.id,
+      toBotName: target.name,
+      reason: `@${sender.name} and @${target.name} now belong to different sections`,
+    });
     return "settled";
   }
   if (target.busy) {
@@ -458,6 +490,12 @@ async function processOne(
       role: "bot",
       kind: "activity",
       tool: { name: `Delegation to @${target.name} canceled — still busy after ${MAX_BUSY_ATTEMPTS} retries`, ok: false },
+    });
+    onTerminalFailure?.({
+      sourceThreadId,
+      toBotId: target.id,
+      toBotName: target.name,
+      reason: `@${target.name} stayed busy through ${MAX_BUSY_ATTEMPTS} retries`,
     });
     return "settled";
   }
@@ -496,8 +534,40 @@ async function processOne(
     // and mirror a "Messaged @X" chip for an exchange that never happens.
     const current = bus.store.bot(item.toBotId);
     const currentSender = bus.store.bot(from.id);
-    if (!current || !currentSender || !bus.store.taskByThread(currentSender.id, sourceThreadId)) return "settled";
+    const sourceTask = currentSender && bus.store.taskByThread(currentSender.id, sourceThreadId);
+    if (!current || !currentSender || !sourceTask) {
+      if (!current) {
+        recordDelegationReceipt({
+          id: item.id,
+          sourceThreadId,
+          toBotId: item.toBotId,
+          toBotName: item.toBotId,
+          status: "error",
+          result: "the target bot was removed before approval completed",
+        });
+        if (currentSender && sourceTask) {
+          bus.store.appendMessage(sourceThreadId, {
+            role: "bot",
+            kind: "activity",
+            tool: { name: `error: delegation to ${item.toBotId} failed — target bot was removed before approval completed`, ok: false },
+          });
+          onTerminalFailure?.({
+            sourceThreadId,
+            toBotId: item.toBotId,
+            toBotName: item.toBotId,
+            reason: "the target bot was removed before approval completed",
+          });
+        }
+      }
+      return "settled";
+    }
     if (dropIfSectionsChanged(bus, currentSender, current, sourceThreadId, item)) {
+      onTerminalFailure?.({
+        sourceThreadId,
+        toBotId: current.id,
+        toBotName: current.name,
+        reason: `@${currentSender.name} and @${current.name} now belong to different sections`,
+      });
       return "settled";
     }
     if (current.busy) {
@@ -525,6 +595,12 @@ async function processOne(
         role: "bot",
         kind: "activity",
         tool: { name: `Delegation to @${current.name} canceled — still busy after ${MAX_BUSY_ATTEMPTS} retries`, ok: false },
+      });
+      onTerminalFailure?.({
+        sourceThreadId,
+        toBotId: current.id,
+        toBotName: current.name,
+        reason: `@${current.name} stayed busy through ${MAX_BUSY_ATTEMPTS} retries`,
       });
       return "settled";
     }
@@ -592,12 +668,18 @@ export function _resetPending(): void {
 /** The revival prompt the harness feeds a delegating bot when its peer
  * replies. The peer's text is already in the thread; this tells the source
  * to stop idling and answer the user with the outcome. */
-export function buildDelegationRevivalPrompt(targetName: string): string {
-  return [
-    "[A delegated task just completed]",
-    `The task you delegated to @${targetName} has finished, and their reply is now in this conversation.`,
-    "Pick the work back up: review the reply, then answer the user with the outcome — lead with the concrete result and say what happens next. Do not re-delegate the same task.",
-  ].join("\n\n");
+export function buildDelegationRevivalPrompt(targetName: string, completedWithoutText = false): string {
+  return completedWithoutText
+    ? [
+        "[A delegated task just completed]",
+        `The task you delegated to @${targetName} has finished but returned no text reply.`,
+        "Pick the work back up: tell the user it completed without a written result, verify any expected side effect if possible, and say what happens next. Do not re-delegate the same task.",
+      ].join("\n\n")
+    : [
+        "[A delegated task just completed]",
+        `The task you delegated to @${targetName} has finished, and their reply is now in this conversation.`,
+        "Pick the work back up: review the reply, then answer the user with the outcome — lead with the concrete result and say what happens next. Do not re-delegate the same task.",
+      ].join("\n\n");
 }
 
 /** Same wake for a failed delegated turn: the source must tell the user it
@@ -638,6 +720,16 @@ export class DelegationWakeBudget {
     return true;
   }
 
+  /** Give back a reservation when dispatch lost a race before it started.
+   * A failed preflight is not an automatic wake and must not consume the
+   * burst budget that protects later real completions. */
+  release(threadId: string): void {
+    const entry = this.entries.get(threadId);
+    if (!entry) return;
+    entry.count -= 1;
+    if (entry.count <= 0) this.entries.delete(threadId);
+  }
+
   /** A genuine user turn clears the debt — the user is driving now. */
   reset(threadId: string): void {
     this.entries.delete(threadId);
@@ -652,6 +744,7 @@ export class DelegationWakeBudget {
 
 export interface DelegatedActivityMessage {
   at: number;
+  role?: string;
   kind: string;
   text?: string;
   tool?: { name?: string } | null;
@@ -675,7 +768,10 @@ export function summarizeDelegatedActivity(
 ): string[] {
   const lines: string[] = [];
   for (const message of messages) {
-    if (message.at < startedAtMs) continue;
+    // runDelegatedTurn records this timestamp after the handoff chips. The
+    // same millisecond is still pre-dispatch, so only later worker output is
+    // progress; otherwise a just-started stuck worker can look active.
+    if (message.at <= startedAtMs || message.role !== "bot") continue;
     if (message.kind === "activity") {
       const name = (message.tool?.name ?? "").trim();
       if (name) lines.push(`tool: ${name}`);

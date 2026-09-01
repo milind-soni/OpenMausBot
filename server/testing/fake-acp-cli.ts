@@ -37,7 +37,7 @@
 //
 // Keep this file dependency-free — it runs as a bare `node` subprocess.
 import { spawn } from "node:child_process";
-import { appendFileSync, existsSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, readFileSync, writeFileSync } from "node:fs";
 
 const mode = process.env.FAKE_ACP_MODE ?? "happy";
 // opencode-shaped surface: the session carries its own model catalog and the
@@ -50,13 +50,6 @@ let currentModel: string | null = models[0] ?? null;
 // check_delegation call. Each turn is a fresh process, so the id is passed
 // through a file (same state-passing pattern as FAKE_ACP_GATE_FILE).
 const taskIdFile = process.env.FAKE_ACP_TASKID_FILE ?? "";
-const logFile = process.env.FAKE_ACP_LOG_FILE ?? "";
-function fakeLog(line: string): void {
-  if (!logFile) return;
-  try {
-    appendFileSync(logFile, `${new Date().toISOString()} ${line}\n`);
-  } catch {}
-}
 let chiefDelegatedTaskId = "";
 function rememberDelegatedTaskId(id: string): void {
   chiefDelegatedTaskId = id;
@@ -423,7 +416,6 @@ function handle(msg: any) {
       const wokeFromDelegation = promptText.includes("[A delegated task just completed]")
         || promptText.includes("[A delegated task failed]");
       if (wokeFromDelegation) {
-        fakeLog("branch: wokeFromDelegation");
         const failed = promptText.includes("[A delegated task failed]");
         const sawResult = promptText.includes("replied to the delegated task");
         out({
@@ -446,7 +438,6 @@ function handle(msg: any) {
         return;
       }
       if (mode === "chief-delegate" && agentsMcp && promptText.includes("CHECK_STATUS")) {
-        fakeLog(`branch: CHECK_STATUS savedTaskId=${JSON.stringify(savedDelegatedTaskId())}`);
         const savedTaskId = savedDelegatedTaskId();
         if (!savedTaskId) {
           out({ jsonrpc: "2.0", method: "session/update", params: { update: { sessionUpdate: "agent_message_chunk", content: { text: "status check skipped: no delegated task id" } } } });

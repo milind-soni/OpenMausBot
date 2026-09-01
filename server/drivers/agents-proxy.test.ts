@@ -449,6 +449,18 @@ describe("agents-proxy MCP surface", () => {
     expect(lastDelegationUrl).toContain("wait_ms=0");
     expect(lastDelegationUrl).toContain("fromBotId=bot-asker");
 
+    delegationStatusResponse = {
+      status: "running",
+      toBotName: "Helper",
+      elapsedMs: 125_000,
+      recentActivity: ["tool: Read server/index.ts", "text: Found the delegation handler"],
+    };
+    const running = await callTool("check_delegation", { task_id: "task-earlier123" });
+    expect(running.result.isError).toBeFalsy();
+    expect(running.result.content[0].text).toContain("going on 2 minutes now");
+    expect(running.result.content[0].text).toContain("tool: Read server/index.ts");
+    expect(running.result.content[0].text).toContain("Found the delegation handler");
+
     delegationStatusResponse = { status: "queued", toBotName: "Helper" };
     const waiting = await callTool("wait_delegation", { task_id: "task-earlier123", timeout_seconds: 45 });
     expect(waiting.result.content[0].text).toContain("still queued");
