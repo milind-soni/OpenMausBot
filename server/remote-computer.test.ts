@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   ensureRemoteCuaCommand,
+  isolatedRemoteCommand,
   REMOTE_CUA_EXECUTABLE,
   REMOTE_CUA_SOCKET,
   REMOTE_CUA_VERSION,
@@ -42,5 +43,32 @@ describe("remote Cua computer setup", () => {
     expect(command).toContain("openmausbot-cdp.mjs fill");
     expect(command).not.toContain("don't expand");
     expect(command).not.toContain("$HOME");
+  });
+
+  it("encodes a bot display name before composing the tmux shell", () => {
+    const botName = "$(touch /tmp/openmaus-pwned) `id` ' \\\"";
+    const command = remoteComputerBootstrapCommand(botName);
+    const encodedBanner = Buffer.from(`  ▦ ${botName}'s computer — OpenMausBot`).toString("base64");
+
+    expect(command).toContain(encodedBanner);
+    expect(command).not.toContain("touch /tmp/openmaus-pwned");
+    expect(command).not.toContain("`id`");
+    if (process.platform !== "win32") {
+      expect(spawnSync("/bin/bash", ["-n"], { input: command }).status).toBe(0);
+    }
+  });
+
+  it("builds a clean remote shell environment without interpolating the command", () => {
+    const command = isolatedRemoteCommand(`printf '%s' "$BOX_TOKEN"`);
+    expect(command).toContain('exec env -i HOME="$HOME"');
+    expect(command).toContain("/bin/bash -c");
+    if (process.platform !== "win32") {
+      const result = spawnSync("/bin/bash", ["-c", command], {
+        encoding: "utf8",
+        env: { ...process.env, BOX_TOKEN: "must-not-leak" },
+      });
+      expect(result.status).toBe(0);
+      expect(result.stdout).toBe("");
+    }
   });
 });

@@ -92,6 +92,28 @@ socket.close();`;
 
 const shellQuote = (value: string): string => `'${value.replace(/'/g, "'\\''")}'`;
 
+export const MAX_REMOTE_COMMAND_LENGTH = 4_000;
+
+/** Run a user- or model-supplied command without inheriting provider or
+ * account credentials from an older box image. Keep this shared by the bot
+ * tool and the owner's Computer-panel console so the two boundaries cannot
+ * drift apart. */
+export function isolatedRemoteCommand(command: string): string {
+  return [
+    "exec env -i",
+    'HOME="$HOME"',
+    'USER="${USER:-$(id -un)}"',
+    'LOGNAME="${LOGNAME:-${USER:-$(id -un)}}"',
+    'PATH="/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"',
+    'DISPLAY="${DISPLAY:-:0}"',
+    'XAUTHORITY="${XAUTHORITY:-$HOME/.Xauthority}"',
+    'XDG_RUNTIME_DIR="${XDG_RUNTIME_DIR:-/run/user/$(id -u)}"',
+    'DBUS_SESSION_BUS_ADDRESS="${DBUS_SESSION_BUS_ADDRESS:-}"',
+    "/bin/bash -c",
+    shellQuote(command),
+  ].join(" ");
+}
+
 /** Start the already-installed daemon after a box resume. This is cheap when
  * it is healthy and intentionally does not install anything on the hot path. */
 export function ensureRemoteCuaCommand(): string {
@@ -129,7 +151,15 @@ export function remoteComputerBootstrapCommand(botName: string): string {
     `touch /opt/ogb/cua-${REMOTE_CUA_VERSION}-ready`,
     'rm -f "$wheel"',
   ].join("\n");
-  const safeName = botName.replace(/["'\\]/g, "");
+  // The display name is untrusted. Encode the banner before composing the
+  // nested tmux shell so substitutions/backticks can never become syntax.
+  const banner = Buffer.from(`  ▦ ${botName}'s computer — OpenMausBot`).toString("base64");
+  const tmuxSessionCommand = [
+    "echo",
+    `printf %s ${shellQuote(banner)} | base64 -d`,
+    "echo",
+    "exec bash -i",
+  ].join("; ");
   return [
     "if ! command -v xdotool >/dev/null || ! command -v convert >/dev/null || ! command -v curl >/dev/null || ! command -v python3 >/dev/null; then sudo apt-get update -qq || true; sudo apt-get install -y -qq ca-certificates curl python3 gnome-screenshot xclip wmctrl xdotool imagemagick scrot >/dev/null 2>&1 || true; fi",
     "sudo mkdir -p /opt/ogb/run",
@@ -138,7 +168,7 @@ export function remoteComputerBootstrapCommand(botName: string): string {
     'pkill -f "^/opt/ogb/venv/bin/python -m computer_server( |$)" >/dev/null 2>&1 || true',
     `[ -f /opt/ogb/cua-${REMOTE_CUA_VERSION}-ready ] || [ -f /tmp/ogb-cua-installing ] || { touch /tmp/ogb-cua-installing; nohup bash -c ${shellQuote(installer)} > /tmp/ogb-cua-install.log 2>&1 & }`,
     ensureRemoteCuaCommand(),
-    `tmux has-session -t work 2>/dev/null || tmux new-session -d -s work 'echo; echo "  ▦ ${safeName}'"'"'s computer — OpenMausBot"; echo; exec bash -i'`,
+    `tmux has-session -t work 2>/dev/null || tmux new-session -d -s work ${shellQuote(tmuxSessionCommand)}`,
     "echo bootstrapped",
   ].join("\n");
 }

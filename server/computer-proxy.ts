@@ -38,6 +38,8 @@ import {
 import { CONTROL_REFUSAL, createControlClient } from "./control-client.ts";
 import {
   ensureRemoteCuaCommand,
+  isolatedRemoteCommand,
+  MAX_REMOTE_COMMAND_LENGTH,
   REMOTE_CUA_EXECUTABLE,
   REMOTE_CUA_SESSION,
   REMOTE_CUA_SOCKET,
@@ -126,19 +128,7 @@ async function runOnBox(command: string, timeoutMs = 60_000, allowWake = true): 
   // Old boxes may predate noEnv:true. Run every agent-issued command with an
   // explicit desktop-only environment so provider/account credentials cannot
   // leak through `computer_exec` or a child GUI process.
-  const isolatedCommand = [
-    "exec env -i",
-    'HOME="$HOME"',
-    'USER="${USER:-$(id -un)}"',
-    'LOGNAME="${LOGNAME:-${USER:-$(id -un)}}"',
-    'PATH="/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"',
-    'DISPLAY="${DISPLAY:-:0}"',
-    'XAUTHORITY="${XAUTHORITY:-$HOME/.Xauthority}"',
-    'XDG_RUNTIME_DIR="${XDG_RUNTIME_DIR:-/run/user/$(id -u)}"',
-    'DBUS_SESSION_BUS_ADDRESS="${DBUS_SESSION_BUS_ADDRESS:-}"',
-    "/bin/bash -c",
-    shellQuote(command),
-  ].join(" ");
+  const isolatedCommand = isolatedRemoteCommand(command);
   const res = await fetch(`${BOX_API}/boxes/${boxId}/commands`, {
     method: "POST",
     headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
@@ -633,7 +623,7 @@ const TOOLS = [
     inputSchema: {
       type: "object",
       properties: {
-        command: { type: "string" },
+        command: { type: "string", maxLength: MAX_REMOTE_COMMAND_LENGTH },
         observe: {
           type: "boolean",
           description: "default false — set true to also return a screenshot (e.g. after launching a GUI app)",
@@ -1010,7 +1000,10 @@ async function call(id: unknown, name: string, args: any) {
     return actAndObserve(id, actions, `ran ${actions.length} actions: ${summary}`, args, 180_000);
   }
   if (name === "computer_exec") {
-    const command = String(args.command ?? "").slice(0, 4000);
+    const command = String(args.command ?? "");
+    if (command.length > MAX_REMOTE_COMMAND_LENGTH) {
+      return text(id, `command is too long (maximum ${MAX_REMOTE_COMMAND_LENGTH} characters)`, true);
+    }
     observations.noteAction();
     const out = await runOnBox(command, 120_000);
     const note = `exit ${out.exitCode}\n${out.stdout.slice(-6000)}${out.stderr ? `\n[stderr]\n${out.stderr.slice(-2000)}` : ""}`;

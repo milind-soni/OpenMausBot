@@ -163,6 +163,23 @@ describe("computer proxy (fake box)", () => {
     expect(click.description).toMatch(/return the resulting screen/i);
     const screenshot = res.result.tools.find((t: any) => t.name === "screenshot");
     expect(screenshot.inputSchema.properties.region).toBeTruthy();
+    const exec = res.result.tools.find((t: any) => t.name === "computer_exec");
+    expect(exec.inputSchema.properties.command.maxLength).toBe(4000);
+  });
+
+  it("rejects an oversized shell command instead of executing a truncated prefix", async () => {
+    const before = commands.length;
+    rpc({
+      jsonrpc: "2.0",
+      id: 77,
+      method: "tools/call",
+      params: { name: "computer_exec", arguments: { command: "x".repeat(4001) } },
+    });
+
+    const result = await waitFor(77);
+    expect(result.result.isError).toBe(true);
+    expect(result.result.content[0].text).toContain("maximum 4000 characters");
+    expect(commands.length).toBe(before);
   });
 
   it("wait_for keeps polling on the box in one bounded command", async () => {

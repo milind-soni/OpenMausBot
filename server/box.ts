@@ -11,7 +11,12 @@
 //   - X11 desktop with Chrome + Ghostty; passwordless sudo; node 24.
 //   - the dedicated IP rotates across archive/resume — never persist it.
 import type { AppConfig } from "./config.ts";
-import { ensureRemoteCuaCommand, remoteComputerBootstrapCommand } from "./remote-computer.ts";
+import {
+  ensureRemoteCuaCommand,
+  isolatedRemoteCommand,
+  MAX_REMOTE_COMMAND_LENGTH,
+  remoteComputerBootstrapCommand,
+} from "./remote-computer.ts";
 
 // overridable so tests can point at a stub instead of the live provider
 const BOX_API = process.env.OMB_BOX_API || "https://ascii.dev/api/box/v1";
@@ -304,11 +309,14 @@ export async function sleepBox(cfg: AppConfig, botId: string) {
 
 /** Owner-scoped shell for the Computer panel's console. */
 export async function execOnBox(cfg: AppConfig, botId: string, command: string) {
+  if (command.length > MAX_REMOTE_COMMAND_LENGTH) {
+    throw new RangeError(`command is too long (maximum ${MAX_REMOTE_COMMAND_LENGTH} characters)`);
+  }
   const box = await findBox(cfg, botId);
   if (!box) throw new Error("no computer for this bot yet");
   const ready = await waitReady(cfg, box.id, 60_000);
   if (!ready) throw new Error("box did not wake");
-  const out = await runCommand(cfg, box.id, String(command ?? "").slice(0, 4000));
+  const out = await runCommand(cfg, box.id, isolatedRemoteCommand(command));
   return { exitCode: out.exitCode, stdout: out.stdout.slice(-4000), stderr: out.stderr.slice(-2000) };
 }
 

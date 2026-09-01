@@ -4678,6 +4678,16 @@ describe("harness HTTP API", () => {
     }
   });
 
+  it("rejects oversized Box console commands instead of executing a truncated prefix", async () => {
+    const bot = (await api("GET", "/api/bots?messages=0")).body.bots[0];
+    const response = await api("POST", `/api/bots/${bot.id}/computer/exec`, {
+      command: "x".repeat(4001),
+    });
+
+    expect(response.status).toBe(400);
+    expect(response.body.error).toContain("maximum 4000 characters");
+  });
+
   it("validates the non-secret VPS alias and keeps old bots on Box by default", async () => {
     const before = await api("GET", "/api/bots");
     const bot = before.body.bots[0];

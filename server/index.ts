@@ -94,6 +94,7 @@ import {
   customMcpServers,
 } from "./config.ts";
 import { ComputerControl } from "./computer-control.ts";
+import { MAX_REMOTE_COMMAND_LENGTH } from "./remote-computer.ts";
 import { augmentedPath, findCliCandidates, resetPathCache } from "./env-path.ts";
 import { describeSpawnFailure, execCli } from "./procs.ts";
 import { buildNotification, type Notification } from "./notify.ts";
@@ -8715,7 +8716,13 @@ const server = createServer(async (req, res) => {
           return json(res, 200, await box.sleepBox(cfg, botId));
         case "exec": {
           const body = await readBody(req);
-          return json(res, 200, await box.execOnBox(cfg, botId, String(body.command ?? "")));
+          const command = String(body.command ?? "");
+          if (command.length > MAX_REMOTE_COMMAND_LENGTH) {
+            return json(res, 400, {
+              error: `command is too long (maximum ${MAX_REMOTE_COMMAND_LENGTH} characters)`,
+            });
+          }
+          return json(res, 200, await box.execOnBox(cfg, botId, command));
         }
         case "screenshot":
           return json(res, 200, await box.screenshotBox(cfg, botId));
