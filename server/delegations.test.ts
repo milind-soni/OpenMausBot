@@ -18,12 +18,14 @@ import {
   DelegationWakeBudget,
   drainDelegations,
   findDelegationReceipt,
+  formatDelegationElapsed,
   MAX_BUSY_ATTEMPTS,
   pendingDelegationInfo,
   pendingDelegationSnapshot,
   queueDelegation,
   recordDelegationReceipt,
   releaseDelegationsWaitingOn,
+  summarizeDelegatedActivity,
   threadsWaitingOn,
   _pendingCount,
 } from "./delegations.ts";
@@ -785,5 +787,43 @@ describe("peer wake helpers", () => {
     expect(budget.tryAcquire("t1")).toBe(false);
     budget.reset("t1");
     expect(budget.tryAcquire("t1")).toBe(true);
+  });
+});
+
+describe("delegated turn status helpers", () => {
+  it("formats elapsed time compactly", () => {
+    expect(formatDelegationElapsed(5_000)).toBe("5s");
+    expect(formatDelegationElapsed(65_000)).toBe("65s");
+    expect(formatDelegationElapsed(95_000)).toBe("1m 35s");
+    expect(formatDelegationElapsed(180_000)).toBe("3m");
+  });
+
+  it("summarizeDelegatedActivity keeps only post-dispatch activity, newest last, bounded", () => {
+    const messages = [
+      { at: 900, kind: "text", text: "before dispatch (the user's ask)" },
+      { at: 1_100, kind: "activity", tool: { name: "Delegated to @Helper: followup" } },
+      { at: 1_200, kind: "text", text: "peer inbound message" },
+      { at: 1_300, kind: "activity", tool: { name: "tool: Bash" } },
+      { at: 1_400, kind: "text", text: "  multi  space   reply " },
+      { at: 1_500, kind: "activity" },
+      { at: 1_600, kind: "unknown-kind" },
+    ];
+    const lines = summarizeDelegatedActivity(messages, 1_000, 5);
+    expect(lines).toEqual([
+      "tool: Delegated to @Helper: followup",
+      "text: peer inbound message",
+      "tool: tool: Bash",
+      "text: multi space reply",
+    ]);
+  });
+
+  it("summarizeDelegatedActivity bounds the list to the newest lines", () => {
+    const messages = Array.from({ length: 9 }, (_, index) => ({
+      at: 1_000 + index,
+      kind: "activity",
+      tool: { name: `step-${index}` },
+    }));
+    const lines = summarizeDelegatedActivity(messages, 1_000, 3);
+    expect(lines).toEqual(["tool: step-6", "tool: step-7", "tool: step-8"]);
   });
 });

@@ -220,7 +220,7 @@ const TOOLS = [
   {
     name: "check_delegation",
     description:
-      "In a later turn, check what happened to a delegation without waiting: still queued, running, or finished. Do not poll this immediately after delegate_bot; completion is delivered to the conversation automatically.",
+      "In a later turn, check what happened to a delegation without waiting: still queued, running (with elapsed time and the peer's recent activity), or finished with the result. Prefer this when a delegated bot is taking long or might be stuck — empty recent activity usually means it is stuck, not working. Do not poll it right after delegate_bot; completion is delivered to the conversation automatically.",
     inputSchema: {
       type: "object",
       properties: {
@@ -515,7 +515,16 @@ async function callTool(name: string, args: Json): Promise<{ text: string; isErr
       return { text: `Task ${taskId} is still queued — ${who} hasn't picked it up yet${waitMs ? ` after ${timeout}s` : ""}. Keep working and check again later.` };
     }
     if (r.status === "running") {
-      return { text: `Task ${taskId} is running with ${who}${waitMs ? ` (still going after ${timeout}s)` : ""}. Check again shortly.` };
+      const elapsedMs = Number.isFinite(r.elapsedMs) ? Number(r.elapsedMs) : 0;
+      const minutes = Math.floor(elapsedMs / 60_000);
+      const elapsed = minutes >= 1 ? `${minutes} minute${minutes === 1 ? "" : "s"}` : `${Math.round(elapsedMs / 1000)}s`;
+      const activity = Array.isArray(r.recentActivity) ? r.recentActivity.filter((line: unknown) => typeof line === "string") : [];
+      const recent = activity.length
+        ? activity.map((line: string) => `  - ${line}`).join("\n")
+        : "  (no visible activity yet — if this stays empty, the peer may be stuck, not working; say so instead of promising progress)";
+      return {
+        text: `Task ${taskId} is running with ${who} — going on ${elapsed} now.${waitMs ? ` (still going after ${timeout}s)` : ""}\nRecent activity:\n${recent}\nJudge progress by this activity, not by waiting: real work keeps producing lines; the same silence for a long stretch usually means stuck.`,
+      };
     }
     return { text: `Task ${taskId} ended without a reply — ${String(r.status ?? "unknown")}${r.result ? `: ${String(r.result)}` : ""}.`, isError: true };
   }

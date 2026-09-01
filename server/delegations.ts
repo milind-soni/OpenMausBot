@@ -643,3 +643,48 @@ export class DelegationWakeBudget {
     this.entries.delete(threadId);
   }
 }
+
+// ── live status for a running delegated turn ──────────────────────────
+// check_delegation used to say only queued/running/finished. A chief that
+// coordinates specialists needs to see whether a long-running peer is
+// actually progressing, so the harness summarizes what the peer's thread
+// has done since the delegated turn started.
+
+export interface DelegatedActivityMessage {
+  at: number;
+  kind: string;
+  text?: string;
+  tool?: { name?: string } | null;
+}
+
+export function formatDelegationElapsed(elapsedMs: number): string {
+  const totalSeconds = Math.max(0, Math.round(elapsedMs / 1_000));
+  if (totalSeconds < 90) return `${totalSeconds}s`;
+  const minutes = Math.floor(totalSeconds / 60);
+  const seconds = totalSeconds % 60;
+  return seconds === 0 ? `${minutes}m` : `${minutes}m ${seconds}s`;
+}
+
+/** Recent, bounded activity from the peer's thread since the delegated
+ * turn started — newest last. Empty means the peer has produced nothing
+ * visible since dispatch, which reads as "maybe stuck" to the caller. */
+export function summarizeDelegatedActivity(
+  messages: readonly DelegatedActivityMessage[],
+  startedAtMs: number,
+  limit = 5,
+): string[] {
+  const lines: string[] = [];
+  for (const message of messages) {
+    if (message.at < startedAtMs) continue;
+    if (message.kind === "activity") {
+      const name = (message.tool?.name ?? "").trim();
+      if (name) lines.push(`tool: ${name}`);
+      continue;
+    }
+    if (message.kind === "text" && message.text?.trim()) {
+      const text = message.text.trim().replace(/\s+/g, " ");
+      lines.push(`text: ${text.slice(0, 140)}${text.length > 140 ? "…" : ""}`);
+    }
+  }
+  return lines.slice(-limit);
+}

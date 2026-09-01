@@ -122,7 +122,7 @@ import { BUILT_IN_DRIVERS } from "./drivers/builtIn.ts";
 import { getOrCreateChannel, mirrorActivity, mirrorExchange, mirrorReply, type CommsBus } from "./comms-visibility.ts";
 import { searchMessages } from "./message-db.ts";
 import { promptWithReply, transcriptText } from "./replies.ts";
-import { _loadPending, buildDelegationFailurePrompt, buildDelegationRevivalPrompt, DelegationWakeBudget, discardDelegations, drainDelegations, findDelegationReceipt, pendingDelegationInfo, pendingDelegationSnapshot, pendingThreads, queueDelegation, recordDelegationReceipt, releaseDelegationsWaitingOn, type QueueResult } from "./delegations.ts";
+import { _loadPending, buildDelegationFailurePrompt, buildDelegationRevivalPrompt, DelegationWakeBudget, discardDelegations, drainDelegations, findDelegationReceipt, pendingDelegationInfo, pendingDelegationSnapshot, pendingThreads, queueDelegation, recordDelegationReceipt, releaseDelegationsWaitingOn, summarizeDelegatedActivity, type QueueResult } from "./delegations.ts";
 import {
   cancelSteeredMessage,
   drainSteeredMessages,
@@ -2064,6 +2064,8 @@ const delegationWatch = new Map<string, {
   toBotName?: string;
   taskId?: string;
   sourceThreadId?: string;
+  /** when the delegated turn was dispatched — elapsed time for status checks */
+  startedAtMs?: number;
 }>();
 
 // Peer wake: when a delegated reply lands, resume the source bot so it can
@@ -2266,6 +2268,7 @@ const runDelegatedTurn: Parameters<typeof drainDelegations>[3] = (toBotId, text,
         toBotName: target?.name,
         taskId,
         sourceThreadId,
+        startedAtMs: Date.now(),
       });
     }
     let failureReported = false;
@@ -2542,6 +2545,7 @@ async function startTurn(
   // a task takes its name from the first thing you asked it to do
   if (text.trim() && !opts?.cardContinuation) store.titleTaskFromFirstMessage(bot.id, text, threadId);
 
+  console.error(`[omb-turn] bot=${botId} text=${JSON.stringify(text.slice(0, 70))} depth=${commsDepth} card=${Boolean(opts?.cardContinuation)}`);
   const instance = opts?.runOn === "cloud"
     ? registry.instances().find((candidate) => candidate.driverKind === "boxAgent") ?? null
     : registry.get(bot.modelSelection.instanceId);
@@ -5472,14 +5476,27 @@ const server = createServer(async (req, res) => {
             return json(res, 200, { status: receipt.status, toBotName: receipt.toBotName, result: receipt.result ?? "" });
           }
           const stillQueued = pendingDelegationInfo(taskId);
-          const running = [...delegationWatch.values()].find((watch) => watch.taskId === taskId);
+          const runningEntry = [...delegationWatch.entries()].find(([, watch]) => watch.taskId === taskId);
+          const running = runningEntry?.[1];
           const owner = stillQueued?.sourceThreadId ?? running?.sourceThreadId;
           if (!owner) return json(res, 404, { error: "unknown task id — delegation receipts are kept for about 48 hours" });
           if (owner !== fromThreadId) return json(res, 403, { error: "that task belongs to a different conversation" });
           if (Date.now() >= deadline) {
             const toBotId = stillQueued?.toBotId ?? running?.toBotId ?? "";
+            if (running && runningEntry) {
+              const recent = summarizeDelegatedActivity(
+                store.messagesFor(runningEntry[0]),
+                running.startedAtMs ?? Date.now(),
+              );
+              return json(res, 200, {
+                status: "running",
+                toBotName: store.bot(toBotId)?.name ?? toBotId,
+                elapsedMs: Math.max(0, Date.now() - (running.startedAtMs ?? Date.now())),
+                recentActivity: recent,
+              });
+            }
             return json(res, 200, {
-              status: running ? "running" : "queued",
+              status: "queued",
               toBotName: store.bot(toBotId)?.name ?? toBotId,
             });
           }

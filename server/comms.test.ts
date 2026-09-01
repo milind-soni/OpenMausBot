@@ -142,7 +142,11 @@ describe("comms e2e (fake ACP fleet)", () => {
           // answers ordinary follow-ups while the worker remains gated.
           chiefAsync: {
             driver: "grokAgent",
-            environment: { FAKE_ACP_MODE: "chief-delegate" },
+            environment: {
+              FAKE_ACP_MODE: "chief-delegate",
+              FAKE_ACP_TASKID_FILE: join(home, "chief-task-id"),
+              FAKE_ACP_LOG_FILE: join(home, "chief-fake.log"),
+            },
             config: { cli: FAKE_CLI, fullAuto: true },
           },
           chiefCreator: {
