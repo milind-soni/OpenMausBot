@@ -23,7 +23,7 @@ const node = (role, name, backendDOMNodeId, extra = {}) => ({
 
 describe("browser snapshot", () => {
   it("keeps only interactive elements, in document order, as stable refs", () => {
-    const elements = snapshotFromAxNodes([
+    const { elements } = snapshotFromAxNodes([
       node("RootWebArea", "Example", 1),
       node("generic", "", 2),
       node("link", "  Pricing\n  plans ", 7),
@@ -44,8 +44,9 @@ describe("browser snapshot", () => {
 
   it("drops unnamed non-editable elements and caps the list", () => {
     const nodes = Array.from({ length: 300 }, (_, i) => node("button", `b${i}`, i + 1));
-    expect(snapshotFromAxNodes(nodes)).toHaveLength(250);
-    expect(snapshotFromAxNodes([node("button", "", 3)])).toEqual([]);
+    expect(snapshotFromAxNodes(nodes)).toMatchObject({ total: 300, truncated: true });
+    expect(snapshotFromAxNodes(nodes).elements).toHaveLength(250);
+    expect(snapshotFromAxNodes([node("button", "", 3)])).toEqual({ elements: [], total: 0, truncated: false });
   });
 
   it("genericizes every editable name in the bare AX fallback", () => {
@@ -53,7 +54,7 @@ describe("browser snapshot", () => {
       node("textbox", "API key abc-123", 20, { value: { value: "abc-123" } }),
       node("searchbox", "one-time code 654321", 21),
       node("combobox", "Ordinary country picker", 22),
-    ])).toEqual([
+    ]).elements).toEqual([
       { ref: "b20", role: "textbox", name: "protected field" },
       { ref: "b21", role: "searchbox", name: "protected field" },
       { ref: "b22", role: "combobox", name: "protected field" },
@@ -65,7 +66,7 @@ describe("browser snapshot", () => {
       node("heading", "Verification code 654321", 30),
       node("link", "download?token=secret", 31),
       node("textbox", "Verification code 654321", 32),
-    ])).toEqual([
+    ]).elements).toEqual([
       { ref: "b30", role: "heading", name: "heading" },
       { ref: "b31", role: "link", name: "link" },
       { ref: "b32", role: "textbox", name: "protected field" },

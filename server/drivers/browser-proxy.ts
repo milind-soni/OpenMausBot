@@ -284,7 +284,7 @@ export const TOOLS = [
     inputSchema: {
       type: "object",
       properties: {
-        text: { type: "string", description: "Visible text to wait for." },
+        text: { type: "string", description: "Text to wait for, anywhere in the document — not only the part on screen." },
         url: { type: "string", description: "A substring the address must contain." },
         timeout_ms: { type: "integer", minimum: 250, maximum: 30000 },
       },
@@ -294,7 +294,7 @@ export const TOOLS = [
   {
     name: "browser_read",
     description:
-      "Read the page's visible text (articles, results, tables) as plain text — for understanding content, not for acting. Use browser_snapshot for things to click.",
+      "Read the page's rendered text (articles, results, tables) as plain text. Covers the whole document, not just the part on screen, so browser_scroll does not change what it returns; a long page is cut with a note saying so. For understanding content, not for acting — use browser_snapshot for things to click.",
     inputSchema: { type: "object", properties: {} },
   },
   {

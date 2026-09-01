@@ -117,9 +117,16 @@ function axProperty(node, name) {
  * can act on. Refs are `b<backendDOMNodeId>`: stable for the life of the DOM
  * node, meaningless after the page changes — which is why every action
  * hands back a fresh snapshot.
+ *
+ * Answers `{ elements, total, truncated }`. `total` counts every interactive
+ * node found, not just the ones that fit: stopping at `limit` and dropping
+ * the rest in silence left the model believing it had seen the whole page.
+ * Scanning past the limit costs one cheap filter per remaining node, and is
+ * what makes `total` exact.
  */
 function snapshotFromAxNodes(nodes, { limit = MAX_SNAPSHOT_ELEMENTS } = {}) {
   const elements = [];
+  let total = 0;
   for (const node of Array.isArray(nodes) ? nodes : []) {
     if (node?.ignored === true) continue;
     const role = String(node?.role?.value ?? "").toLowerCase();
@@ -142,10 +149,10 @@ function snapshotFromAxNodes(nodes, { limit = MAX_SNAPSHOT_ELEMENTS } = {}) {
     // The rich injected snapshot can safely retain non-secret values; this
     // fallback fails closed and never returns editable contents to a model.
     if (axProperty(node, "checked") !== undefined) element.checked = axProperty(node, "checked");
-    elements.push(element);
-    if (elements.length >= limit) break;
+    total += 1;
+    if (elements.length < limit) elements.push(element);
   }
-  return elements;
+  return { elements, total, truncated: total > elements.length };
 }
 
 /** One line per element, the shape the box helper's consumers already read. */

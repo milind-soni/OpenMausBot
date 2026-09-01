@@ -1410,6 +1410,62 @@ describe("browser surface manager", () => {
     await expect(manager.read("bot-a")).resolves.toMatchObject({ title: "Safe", text: "safe page" });
   });
 
+  it("cuts a long page at the read limit and says so in the text the model gets", async () => {
+    const { manager, views } = harness();
+    await manager.navigate("bot-a", "https://example.com");
+    views[0].setPageText("x".repeat(30_000));
+
+    const read = await manager.read("bot-a");
+    expect(read.truncated).toBe(true);
+    // The marker has to ride in `text`: the proxy renders that string and
+    // drops every other field, so a flag alone never reaches the model.
+    expect(read.text.endsWith("\n…(truncated at 24000 characters)")).toBe(true);
+    expect(read.text.slice(0, 24_000)).toBe("x".repeat(24_000));
+  });
+
+  it("says how many interactive elements the accessibility fallback left out", async () => {
+    // No injected bundle: the bare CDP accessibility tree, which caps at 250
+    // and has no way to page. Dropping the rest in silence let a bot believe
+    // it had seen every control on the page.
+    const { manager, views } = harness({ injectedSource: "" });
+    await manager.navigate("bot-a", "https://example.com");
+    const dbg = views[0].webContents.debugger;
+    const send = dbg.sendCommand;
+    dbg.sendCommand = async (method, params) => {
+      if (method === "Accessibility.getFullAXTree") {
+        return {
+          nodes: Array.from({ length: 300 }, (_, index) => ({
+            role: { value: "button" },
+            name: { value: `Button ${index}` },
+            backendDOMNodeId: index + 1,
+          })),
+        };
+      }
+      return send(method, params);
+    };
+
+    const snapshot = await manager.snapshot("bot-a");
+    expect(snapshot.elements).toHaveLength(250);
+    expect(snapshot.truncated).toBe(true);
+    expect(snapshot.notes.join("\n")).toContain("Only the first 250 interactive elements are listed; 50 more were left out");
+  });
+
+  it("does not tell the reader that scrolling pages the snapshot", async () => {
+    const { manager } = harness();
+    const page = await manager.navigate("bot-a", "https://example.com");
+    const notes = page.notes.join("\n");
+
+    // The tree is whole-document, so "scroll to see it" sent bots into
+    // scroll/read loops that re-fetched the same prefix forever.
+    expect(notes).toContain("More of the page is off-screen");
+    expect(notes).not.toContain("browser_scroll to see it");
+    expect(notes).toContain("already covers the whole document");
+    // Nor may it promise the screenshot follows the scroll: that path clips at
+    // the document origin, so it does not. Trading one false claim for another
+    // is the mistake this whole change exists to stop.
+    expect(notes).not.toMatch(/moves browser_screenshot/);
+  });
+
   it("waits for text or an address, reads the page, and reports dialogs it answered", async () => {
     const { manager, views } = harness();
     await manager.navigate("bot-a", "https://example.com");

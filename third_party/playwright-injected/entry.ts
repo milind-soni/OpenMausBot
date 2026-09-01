@@ -95,7 +95,11 @@ function snapshot(maxChars: number = DEFAULT_MAX_CHARS): SnapshotResult {
   let yaml = renderAriaSnapshotAsYaml(json);
   let truncated = false;
   if (yaml.length > maxChars) {
-    yaml = `${yaml.slice(0, maxChars)}\n…(snapshot truncated at ${maxChars} characters; browser_read shows the text)`;
+    // Do not point at browser_read here: it caps lower than this snapshot
+    // does, so it returns a shorter prefix, never the remainder. Say what
+    // this is (document order, not the viewport) so the reader does not try
+    // to scroll for the rest.
+    yaml = `${yaml.slice(0, maxChars)}\n…(snapshot truncated at ${maxChars} characters — the start of the page in document order, not the visible part. Scrolling does not reveal the rest; work from a narrower page.)`;
     truncated = true;
   }
   return { version: VERSION, yaml, refs: [...tree.info.keys()], truncated, iframes: tree.iframeRefs.length };

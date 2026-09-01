@@ -1581,7 +1581,13 @@ function createBrowserSurfaceManager({
       const parts = [];
       if (above > 8) parts.push(`${Math.round(above)}px above`);
       if (below > 8) parts.push(`${Math.round(below)}px below`);
-      return `More of the page is off-screen: ${parts.join(", ")} (browser_scroll to see it).`;
+      // Deliberately does not say "scroll to see it". The tree and browser_read
+      // both cover the whole document already, so scrolling pages neither —
+      // saying otherwise sent bots into scroll/read loops that re-fetched the
+      // same prefix forever. It does not promise anything about the screenshot
+      // either: that path clips at the document origin, so it does not follow
+      // the scroll position today. Lazy-loading is the one real effect left.
+      return `More of the page is off-screen: ${parts.join(", ")}. This snapshot already covers the whole document, and browser_read covers it too — scrolling pages neither. Use browser_scroll to let the page load more content.`;
     } catch {
       return null;
     }
@@ -1616,6 +1622,7 @@ function createBrowserSurfaceManager({
     let elements = [];
     let yaml = null;
     let truncated = false;
+    let axOverflow = 0;
     // A closed shadow tree is intentionally invisible to page JavaScript,
     // including the rich snapshot helper. Use the conservative CDP AX
     // fallback so its interactive controls are not silently omitted (and its
@@ -1638,7 +1645,12 @@ function createBrowserSurfaceManager({
     if (yaml === null) {
       await cdp(entry, "Accessibility.enable");
       const { nodes = [] } = await cdp(entry, "Accessibility.getFullAXTree", { depth: AX_TREE_DEPTH });
-      elements = snapshotFromAxNodes(nodes);
+      const fallback = snapshotFromAxNodes(nodes);
+      elements = fallback.elements;
+      if (fallback.truncated) {
+        truncated = true;
+        axOverflow = fallback.total - elements.length;
+      }
       entry.refs = new Set(elements.map((element) => element.ref));
       entry.refKind = "ax";
       entry.refIntegrity = new Map();
@@ -1656,6 +1668,9 @@ function createBrowserSurfaceManager({
     const notes = [
       ...dialogs.map((dialog) => `Dialog (${dialog.type}) was ${dialog.accepted ? "acknowledged" : "dismissed"} automatically; its page-supplied text was hidden.`),
       ...notices,
+      ...(axOverflow > 0
+        ? [`Only the first ${elements.length} interactive elements are listed; ${axOverflow} more were left out. This page needs the limited accessibility fallback, which has no way to page — work from a narrower page to reach the rest.`]
+        : []),
       ...(hint ? [hint] : []),
     ];
     let afterPrivacy;
