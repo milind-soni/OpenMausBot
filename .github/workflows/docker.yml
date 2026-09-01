@@ -84,14 +84,20 @@ jobs:
           H=https://localhost
           test "$(code $H/api/health)" = 401                                      # login wall
           test "$(code -u ci:wrong $H/api/health)" = 401
-          curl -sk -u ci:ci-pass $H/api/health | grep -q openmausbot                # Host rule satisfies the loopback gate
-          curl -sk -u ci:ci-pass $H/ | grep -qi '<html'                             # UI served through the proxy
+          # Bodies are captured before grepping: with pipefail, `curl | grep -q`
+          # can fail on SIGPIPE when grep closes the pipe early.
+          body() { curl -sk --max-time 10 "$@"; }
+          grep -q openmausbot <<<"$(body -u ci:ci-pass $H/api/health)"             # Host rule satisfies the loopback gate
+          grep -qi '<html' <<<"$(body -u ci:ci-pass $H/)"                          # UI served through the proxy
           test "$(code -u ci:ci-pass -H 'Origin: https://evil.example' $H/api/health)" = 403   # CSRF gate survives the proxy
           test "$(code -u ci:ci-pass -H 'Origin: https://localhost' $H/api/health)" = 200      # own origin is mapped
-          curl -sk -X POST $H/hooks/wh_nope | grep -q error                        # hook path reaches the receiver without login
+          grep -q error <<<"$(body -X POST $H/hooks/wh_nope)"                      # hook path reaches the receiver without login
           test "$(code http://localhost/)" = 308                                   # HTTP redirects to HTTPS
-          curl -sk -u ci:ci-pass -N --max-time 4 $H/api/events | head -c 1 | grep -q .   # SSE streams, not buffered
-          curl -sk -u ci:ci-pass $H/api/webhooks | grep -q '"baseUrl":"https://localhost"'   # OMB_WEBHOOK_PUBLIC_URL is advertised
+          # The event stream never ends, so curl's own --max-time exit (28) is expected;
+          # the proof is that bytes arrived within the window (a buffering proxy sends none).
+          sse=$( (curl -sk -u ci:ci-pass -N --max-time 4 $H/api/events || true) | head -c 64 )
+          test -n "$sse"                                                           # SSE streams, not buffered
+          grep -q '"baseUrl":"https://localhost"' <<<"$(body -u ci:ci-pass $H/api/webhooks)"   # OMB_WEBHOOK_PUBLIC_URL is advertised
           docker compose -f deploy/docker-compose.yml down -v
 
   publish:
