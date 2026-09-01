@@ -1,0 +1,28 @@
+OpenMausBot Enterprise License
+
+Copyright (c) 2026 Milind Soni. All rights reserved.
+
+This directory ("enterprise") and everything in it is NOT covered by the
+Apache License 2.0 that applies to the rest of this repository.
+
+1. Source-available. You may read, build, and evaluate this code, and you may
+   modify it for your own evaluation, so that you know exactly what runs.
+
+2. Use requires a license key. Running this code with enterprise features
+   enabled in production requires a valid, unexpired license key issued by
+   the copyright holder for your organization, under a separate agreement
+   that sets the licensed features, seats, and term.
+
+3. No redistribution. You may not redistribute, sublicense, sell, host for
+   third parties, or offer as a service this directory or any modified
+   version of it, and you may not remove or circumvent the license check.
+
+4. Everything else is open source. Delete this directory and the remainder
+   of the repository builds and runs as the open-source edition under
+   Apache 2.0, with no obligation under this license.
+
+5. No warranty. This code is provided "as is", without warranty of any kind.
+   To the extent permitted by law, the copyright holder is not liable for
+   any damages arising from its use.
+
+Questions and license keys: soni.mil2001@gmail.com

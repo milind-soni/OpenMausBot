@@ -237,6 +237,7 @@ import {
   isTurnEventQuarantined,
 } from "./turn-dispatch-guard.ts";
 import { createGracefulShutdown } from "./graceful-shutdown.ts";
+import { describeEdition, editionStatus, loadEnterpriseLayer } from "./enterprise.ts";
 
 const PORT = Number(process.env.OMB_PORT || process.env.OGB_PORT || 8799);
 const WEBHOOK_PORT = Number(process.env.OMB_WEBHOOK_PORT || PORT + 1);
@@ -8029,6 +8030,10 @@ const server = createServer(async (req, res) => {
     if (method === "GET" && path === "/api/health") {
       return json(res, 200, { app: "openmausbot", pid: process.pid, static: Boolean(STATIC_DIR) });
     }
+    // Which edition this server runs and why (see server/enterprise.ts). Read-only.
+    if (method === "GET" && path === "/api/edition") {
+      return json(res, 200, editionStatus());
+    }
 
     // ── inspector: a thread's runtime events + native protocol tee ──
     // Both logs already exist on disk; this only reads them back. Threads
@@ -8705,6 +8710,9 @@ const server = createServer(async (req, res) => {
 });
 
 calendarCalls.start();
+
+// Resolve the edition before accepting requests so /api/edition is never a guess.
+console.log(describeEdition(await loadEnterpriseLayer()));
 
 server.listen(PORT, "127.0.0.1", () => {
   console.log(`openmausbot server on http://127.0.0.1:${PORT}`);
