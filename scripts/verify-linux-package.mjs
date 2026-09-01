@@ -71,6 +71,15 @@ function requirePackageType(resources, label, expected) {
   }
 }
 
+function requireUpdaterTarget(resources, label) {
+  const updateFile = path.join(resources, "app-update.yml");
+  requireFile(updateFile);
+  const update = readFileSync(updateFile, "utf8");
+  if (!/^owner: milind-soni$/m.test(update) || !/^repo: OpenMausBot$/m.test(update)) {
+    fail(`${label} app-update.yml does not point at milind-soni/OpenMausBot`);
+  }
+}
+
 function sha256(file) {
   return createHash("sha256").update(readFileSync(file)).digest("hex");
 }
@@ -406,6 +415,7 @@ for (const forbidden of ["speech-helper", "cua-driver", "cua-sdk"]) {
 }
 const unpackedCuaHashes = verifyCuaResources(resources, "linux-unpacked");
 const unpackedCloudflaredHash = verifyCloudflaredResources(resources, "linux-unpacked");
+requireUpdaterTarget(resources, "linux-unpacked");
 
 const fields = execFileSync(
   "dpkg-deb",
@@ -430,6 +440,7 @@ try {
   const debResources = path.join(debAppRoot, "resources");
   // Routes the in-app updater to the package-manager hand-off.
   requirePackageType(debResources, "DEB", "deb");
+  requireUpdaterTarget(debResources, "DEB");
   const debHashes = verifyCuaResources(debResources, "DEB");
   const debCloudflaredHash = verifyCloudflaredResources(debResources, "DEB");
   if (debCloudflaredHash !== unpackedCloudflaredHash) {
@@ -495,6 +506,7 @@ try {
   const appImageResources = path.join(squashRoot, "resources");
   // No marker: the AppImage keeps the in-place restart-to-update path.
   requirePackageType(appImageResources, "AppImage", null);
+  requireUpdaterTarget(appImageResources, "AppImage");
   // Depending on the pinned appimagetool runtime, SquashFS directories are
   // emitted as root:root 0755 or 0775. Require one mode consistently across
   // the reviewed resource tree. The app never executes through that path:

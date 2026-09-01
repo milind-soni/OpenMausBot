@@ -1,10 +1,10 @@
 # Ubuntu packages, built and exercised on the exact distribution we support.
 #
-# This workflow deliberately produces an artifact instead of publishing to the
-# separate public releases repository. That keeps cross-repository credentials
-# out of the source repository while still making every release candidate
+# This workflow deliberately produces an artifact instead of publishing a
+# partial release. That keeps release credentials and publication authority
+# in the unified release workflow while making every release candidate
 # reproducible from an exact ref. Attach the resulting files to the matching
-# openmausbot-releases release after the smoke test passes.
+# canonical OpenMausBot release after the smoke test passes.
 name: Package Ubuntu
 
 on:

@@ -3,14 +3,43 @@
 One workflow builds everything: **Actions → Release → Run workflow**. It
 builds macOS (arm64 + x64, signed, notarized, stapled), Windows, and Ubuntu
 from a single pinned commit, verifies every artifact the way a user would
-receive it, assembles a complete draft on
-[openmausbot-releases](https://github.com/milind-soni/openmausbot-releases),
-and — if you ticked **publish** — flips it live. Leave publish unticked to
-review the draft notes first, then publish from the GitHub UI.
+receive it, and assembles the canonical draft in
+[OpenMausBot releases](https://github.com/milind-soni/OpenMausBot/releases).
+The exact same assets are also staged in the public legacy releases repo so
+installed builds from 0.1.46 and earlier can update across the repository
+migration.
+
+Tick **publish** to publish and verify the canonical release first, then make
+the identical legacy updater bridge visible. Leave it unticked to review the
+canonical draft; when you publish that draft in GitHub's UI, the **Sync
+published release** workflow
+verifies and publishes its legacy mirror automatically. Never publish only the
+legacy draft.
 
 The workflow refuses to overwrite an already-published version, so the only
 prerequisite per release is that `package.json`'s version is bumped on the
-ref you run it against.
+ref you run it against. A release is rejected if any installer, stable download
+name, updater feed, blockmap, size, or digest is absent or inconsistent.
+
+GitHub generates the release body from pull requests since the previous
+canonical tag. The docs changelog combines published canonical releases with
+the legacy archive into one complete history and caches it for five minutes.
+Configure the optional Vercel hook below to rebuild the docs immediately after
+publication; otherwise the live cache or the next normal docs deployment
+refreshes it.
+
+## Updater migration invariant
+
+`app-update.yml` is baked into every packaged desktop app. Builds through
+0.1.46 point to `milind-soni/openmausbot-releases`; newer builds point to
+`milind-soni/OpenMausBot`. For that reason:
+
+1. Every new release is published byte-for-byte to both repositories during
+   the bridge period.
+2. `openmausbot-releases` must stay public. Do not delete its final bridge
+   release, feeds, or assets.
+3. README and docs downloads point at the canonical repo, while the legacy
+   mirror exists only for installed updater clients and historical releases.
 
 ## Why the gates exist
 
@@ -22,7 +51,7 @@ stapling silently invalidating every published hash, and a finished release
 sitting invisible as a draft. Don't remove a gate without reading the comment
 above it.
 
-## One-time setup: four secrets
+## One-time setup: release secrets
 
 Set these in **OpenMausBot → Settings → Secrets and variables → Actions**.
 
@@ -54,10 +83,18 @@ base64 -i AuthKey_XXXXXXXX.p8 | pbcopy   # → APPLE_API_KEY_P8_BASE64
 ### 3. `RELEASES_PAT`
 
 A fine-grained personal access token that lets the workflow write to the
-separate releases repo: **GitHub → Settings → Developer settings →
+legacy updater mirror: **GitHub → Settings → Developer settings →
 Fine-grained tokens** → repository access: only `openmausbot-releases` →
 permissions: **Contents: Read and write**. Set a long expiry and a calendar
-reminder.
+reminder. The canonical release uses the workflow's scoped `GITHUB_TOKEN` and
+does not need a PAT.
+
+### 4. Optional `DOCS_DEPLOY_HOOK_URL`
+
+In Vercel, open the docs project and create a **Deploy Hook** for its production
+branch. Store that private URL as the `DOCS_DEPLOY_HOOK_URL` repository secret.
+Publishing a release then requests a fresh docs deployment so the generated
+changelog appears immediately. Do not put the hook URL in source control.
 
 ### Local fallback
 
@@ -65,5 +102,7 @@ The hand-cut path still works when Actions is down or a release needs
 surgery: `pnpm package:mac`, gate with `codesign --verify --deep --strict`,
 notarize with the local keychain profile (`xcrun notarytool submit …
 --keychain-profile AC_PASSWORD`), staple, re-zip, regenerate blockmaps and
-`node scripts/regenerate-mac-feed.mjs`, upload, publish, and always verify
-the published bytes against the published feed by downloading them back.
+`node scripts/regenerate-mac-feed.mjs`, upload the identical complete asset set
+to both repositories, publish and verify the canonical release before the
+legacy mirror, and always verify the published bytes against the published feed
+by downloading them back.

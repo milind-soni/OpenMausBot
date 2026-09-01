@@ -1,65 +1,15 @@
 ---
 title: Changelog
-description: Highlights from recent OpenMausBot desktop releases.
+description: The complete history of published OpenMausBot desktop releases.
 icon: Clock
 ---
 
+import { ReleaseChangelog } from '@/components/release-changelog';
+
 The changelog tracks published desktop builds. Changes merged into `main` after a release are not listed as shipped until a new build is published.
 
-## 0.1.32 — August 23, 2026
-
-- Expanded the OpenCode engine from a Go-only catalog to the installed CLI's live Zen, Go, third-party, and local provider inventory.
-- Existing OpenCode logins and anonymous free models now work without duplicate setup in OpenMausBot.
-
-[Full 0.1.32 release notes](https://github.com/milind-soni/openmausbot-releases/releases/tag/v0.1.32)
-
-## 0.1.29 — August 23, 2026
-
-- Fixed OpenCode Go's live cloud models appearing as local models and bypassing sign-in.
-- Added direct latest-build downloads for Apple silicon, Intel Mac, Windows, and Ubuntu.
-
-[Full 0.1.29 release notes](https://github.com/milind-soni/openmausbot-releases/releases/tag/v0.1.29)
-
-## 0.1.27 — August 20, 2026
-
-- Added the Cursor Agent CLI engine with ACP model discovery.
-- Added pasted screenshot attachments and labeled sidebar sections.
-- Repaired the macOS update restart path and made browser join links resilient to popup blocking.
-- Added approval audit records, credential hardening, pinned messages, more reactions, room timeouts, and temporary computer takeover.
-- Adopted Apache License 2.0.
-
-[Full 0.1.27 release notes](https://github.com/milind-soni/openmausbot-releases/releases/tag/v0.1.27)
-
-## 0.1.25 — August 20, 2026
-
-- Added a signed and notarized Intel macOS build.
-- Shipped the first Ubuntu 24.04 x64 `.deb` and AppImage beta packages.
-- Added four themes, spoiler text, safer additive team import, and several approval and model-routing fixes.
-
-[Full 0.1.25 release notes](https://github.com/milind-soni/openmausbot-releases/releases/tag/v0.1.25)
-
-## 0.1.24 — August 19, 2026
-
-- Added the native iOS companion and USB Android control.
-- Added readable bot memory, working folders, cost tracking, message search, and a raw event inspector.
-- Added Bring Your Own VPS computers and major harness reliability fixes.
-
-[Full 0.1.24 release notes](https://github.com/milind-soni/openmausbot-releases/releases/tag/v0.1.24)
-
-## 0.1.23 — August 17, 2026
-
-- Fixed the Composio OAuth completion flow.
-- Added clear updater states, a new app icon, and correct delegated-turn terminal status.
-
-[Full 0.1.23 release notes](https://github.com/milind-soni/openmausbot-releases/releases/tag/v0.1.23)
-
-## 0.1.22 — August 17, 2026
-
-- Replaced the legacy two-key connector setup with one validated Composio project key.
-- Moved connector lifecycle to Composio Sessions and added true upstream revocation.
-
-[Full 0.1.22 release notes](https://github.com/milind-soni/openmausbot-releases/releases/tag/v0.1.22)
+<ReleaseChangelog />
 
 <Callout type="info" title="Every release remains available">
-  Browse checksums, installers, and older notes in the [OpenMausBot releases repository](https://github.com/milind-soni/openmausbot-releases/releases).
+  Browse current installers and notes in [OpenMausBot releases](https://github.com/milind-soni/OpenMausBot/releases). Releases before the updater migration remain in the [legacy archive](https://github.com/milind-soni/openmausbot-releases/releases).
 </Callout>

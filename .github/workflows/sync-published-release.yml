@@ -1,0 +1,190 @@
+name: Sync published release
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Published canonical tag to mirror (for recovery)"
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  # A workflow-published release emits the same `release` event as a manual
+  # GitHub UI publish. Share the assemble lock so the recovery mirror waits
+  # instead of racing identical asset uploads.
+  group: release-mirror-${{ inputs.tag || github.event.release.tag_name }}
+  cancel-in-progress: false
+
+jobs:
+  mirror:
+    name: Preserve legacy updater compatibility
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - name: Download and verify the canonical release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ inputs.tag || github.event.release.tag_name }}
+        run: |
+          test -n "$TAG" || { echo "::error::missing release tag"; exit 1; }
+          [[ "$TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]] || {
+            echo "::error::release tag must be vX.Y.Z, got: $TAG"; exit 1; }
+          version=${TAG#v}
+          gh release view "$TAG" --repo "$GITHUB_REPOSITORY" \
+            --json isDraft,isPrerelease --jq 'select(.isDraft == false and .isPrerelease == false) | true' | grep -q true || {
+              echo "::error::$TAG is not a published stable release in $GITHUB_REPOSITORY"; exit 1; }
+          mkdir assets
+          gh release download "$TAG" --repo "$GITHUB_REPOSITORY" --dir assets
+          required=(
+            latest-linux.yml latest-mac.yml latest.yml
+            "OpenMausBot-$version-amd64.deb"
+            "OpenMausBot-$version-arm64.dmg"
+            "OpenMausBot-$version-arm64.dmg.blockmap"
+            "OpenMausBot-$version-arm64.zip"
+            "OpenMausBot-$version-arm64.zip.blockmap"
+            "OpenMausBot-$version-setup.exe"
+            "OpenMausBot-$version-setup.exe.blockmap"
+            "OpenMausBot-$version-x64.dmg"
+            "OpenMausBot-$version-x64.dmg.blockmap"
+            "OpenMausBot-$version-x64.zip"
+            "OpenMausBot-$version-x64.zip.blockmap"
+            "OpenMausBot-$version-x86_64.AppImage"
+            OpenMausBot-amd64.deb OpenMausBot-intel.dmg OpenMausBot-setup.exe
+            OpenMausBot.AppImage OpenMausBot.dmg SHA256SUMS-ubuntu-x64.txt
+          )
+          for file in "${required[@]}"; do
+            test -s "assets/$file" || { echo "::error::$TAG is missing $file"; exit 1; }
+          done
+          test "$(find assets -maxdepth 1 -type f | wc -l | tr -d ' ')" = "${#required[@]}" || {
+            echo "::error::$TAG has an unexpected release asset set"
+            find assets -maxdepth 1 -type f -print
+            exit 1
+          }
+          (
+            cd assets
+            node --input-type=module - "$version" <<'EOF'
+          import { createHash } from "node:crypto";
+          import { readFileSync, statSync } from "node:fs";
+          const version = process.argv[2];
+          const sha512 = (file) => createHash("sha512").update(readFileSync(file)).digest("base64");
+          const expected = new Map([
+            ["latest-mac.yml", [
+              `OpenMausBot-${version}-x64.zip`,
+              `OpenMausBot-${version}-arm64.zip`,
+              `OpenMausBot-${version}-x64.dmg`,
+              `OpenMausBot-${version}-arm64.dmg`,
+            ]],
+            ["latest.yml", [`OpenMausBot-${version}-setup.exe`]],
+            ["latest-linux.yml", [
+              `OpenMausBot-${version}-x86_64.AppImage`,
+              `OpenMausBot-${version}-amd64.deb`,
+            ]],
+          ]);
+          let bad = 0;
+          for (const [feed, expectedUrls] of expected) {
+            const text = readFileSync(feed, "utf8");
+            const entries = [...text.matchAll(/url:\s+(\S+)[\s\S]*?sha512:\s+(\S+)\n\s+size:\s+(\d+)/g)];
+            const urls = entries.map(([, url]) => url).sort();
+            if (JSON.stringify(urls) !== JSON.stringify([...expectedUrls].sort())) {
+              console.error(`WRONG PATHS in ${feed}: ${urls.join(", ") || "none"}`);
+              bad++;
+              continue;
+            }
+            for (const [, url, hash, size] of entries) {
+              if (sha512(url) !== hash || statSync(url).size !== Number(size)) {
+                console.error(`MISMATCH ${url} in ${feed}`);
+                bad++;
+              } else {
+                console.log(`ok ${url}`);
+              }
+            }
+          }
+          if (bad) process.exit(1);
+          console.log("ok: every updater feed matches the exact staged bytes");
+          EOF
+          )
+          gh release view "$TAG" --repo "$GITHUB_REPOSITORY" --json body --jq .body > "$RUNNER_TEMP/release-notes.md"
+          gh release view "$TAG" --repo "$GITHUB_REPOSITORY" --json name --jq .name > "$RUNNER_TEMP/release-title.txt"
+          node --input-type=module - "$TAG" <<'EOF'
+          import { createHash } from "node:crypto";
+          import { execFileSync } from "node:child_process";
+          import { readFileSync, readdirSync } from "node:fs";
+          import { join } from "node:path";
+          const tag = process.argv[2];
+          const expected = new Map(readdirSync("assets").map((name) => [
+            name,
+            `sha256:${createHash("sha256").update(readFileSync(join("assets", name))).digest("hex")}`,
+          ]));
+          const remote = JSON.parse(execFileSync("gh", ["release", "view", tag, "--repo", process.env.GITHUB_REPOSITORY, "--json", "assets"], { encoding: "utf8" })).assets;
+          if (remote.length !== expected.size) throw new Error(`canonical release has ${remote.length} assets but ${expected.size} downloaded`);
+          for (const asset of remote) {
+            if (expected.get(asset.name) !== asset.digest) throw new Error(`canonical digest mismatch for ${asset.name}`);
+          }
+          console.log(`ok: downloaded ${remote.length} canonical assets with matching digests`);
+          EOF
+
+      - name: Create or update the legacy updater mirror
+        env:
+          GH_TOKEN: ${{ secrets.RELEASES_PAT }}
+          CANONICAL_TOKEN: ${{ github.token }}
+          LEGACY_TOKEN: ${{ secrets.RELEASES_PAT }}
+          TAG: ${{ inputs.tag || github.event.release.tag_name }}
+        run: |
+          test -n "$GH_TOKEN" || { echo "::error::RELEASES_PAT is required for the updater bridge"; exit 1; }
+          title=$(cat "$RUNNER_TEMP/release-title.txt")
+          state=missing
+          if gh release view "$TAG" --repo milind-soni/openmausbot-releases > /dev/null 2>&1; then
+            state=$(gh release view "$TAG" --repo milind-soni/openmausbot-releases --json isDraft --jq .isDraft)
+          else
+            gh release create "$TAG" --repo milind-soni/openmausbot-releases \
+              --draft --title "$title" --notes-file "$RUNNER_TEMP/release-notes.md"
+            state=true
+          fi
+          if [ "$state" != false ]; then
+            for file in assets/*; do
+              gh release upload "$TAG" "$file" --repo milind-soni/openmausbot-releases --clobber
+            done
+          fi
+          # Published bytes are immutable. Draft uploads and already-published
+          # mirrors must both match before metadata or visibility changes.
+          node --input-type=module - "$TAG" <<'EOF'
+          import { execFileSync } from "node:child_process";
+          const tag = process.argv[2];
+          const assets = (repo, token) => new Map(JSON.parse(execFileSync(
+            "gh",
+            ["release", "view", tag, "--repo", repo, "--json", "assets"],
+            { encoding: "utf8", env: { ...process.env, GH_TOKEN: token } },
+          )).assets.map((asset) => [asset.name, asset.digest]));
+          const canonical = assets(process.env.GITHUB_REPOSITORY, process.env.CANONICAL_TOKEN);
+          const legacy = assets("milind-soni/openmausbot-releases", process.env.LEGACY_TOKEN);
+          if (canonical.size !== legacy.size) throw new Error(`legacy mirror has ${legacy.size} assets; canonical has ${canonical.size}`);
+          for (const [name, digest] of canonical) {
+            if (legacy.get(name) !== digest) throw new Error(`legacy mirror differs for ${name}`);
+          }
+          console.log(`ok: legacy mirror has ${legacy.size} byte-identical assets`);
+          EOF
+          # Keep recovery reruns idempotent: published bytes stay immutable,
+          # while the legacy title and notes follow the canonical release.
+          gh release edit "$TAG" --repo milind-soni/openmausbot-releases \
+            --title "$title" --notes-file "$RUNNER_TEMP/release-notes.md"
+          if [ "$state" != false ]; then
+            gh release edit "$TAG" --repo milind-soni/openmausbot-releases --draft=false --latest
+          fi
+          gh release view "$TAG" --repo milind-soni/openmausbot-releases \
+            --json isDraft --jq .isDraft | grep -q false
+
+      - name: Refresh the Vercel docs
+        env:
+          DOCS_DEPLOY_HOOK_URL: ${{ secrets.DOCS_DEPLOY_HOOK_URL }}
+        run: |
+          if [ -z "$DOCS_DEPLOY_HOOK_URL" ]; then
+            echo "::notice::DOCS_DEPLOY_HOOK_URL is not configured; the changelog will refresh on the next docs deployment"
+            exit 0
+          fi
+          curl --fail-with-body --silent --show-error --request POST "$DOCS_DEPLOY_HOOK_URL" > /dev/null
+          echo "requested a docs rebuild"

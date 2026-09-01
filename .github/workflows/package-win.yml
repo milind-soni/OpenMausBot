@@ -8,8 +8,8 @@
 # mac build — different trees under one version number. Run this from the
 # same commit as the mac build and attach the artifact to the release.
 #
-# Deliberately artifact-only: pushing straight to the separate releases
-# repo would need a cross-repo token this workflow has no business holding.
+# Deliberately artifact-only: the full release workflow is the one place
+# allowed to create a GitHub release.
 name: Package Windows
 
 on:
@@ -79,8 +79,8 @@ jobs:
           fi
           [ -f "$res/app-update.yml" ] || { echo "::error::missing $res/app-update.yml"; fail=1; }
           if [ -f "$res/app-update.yml" ]; then
-            grep -q "openmausbot-releases" "$res/app-update.yml" || {
-              echo "::error::app-update.yml does not point at openmausbot-releases"; fail=1; }
+            grep -Eq '^repo: OpenMausBot$' "$res/app-update.yml" || {
+              echo "::error::app-update.yml does not point at milind-soni/OpenMausBot"; fail=1; }
             # while the build is unsigned, a publisherName makes
             # electron-updater reject every update as untrusted
             if grep -q "publisherName" "$res/app-update.yml"; then

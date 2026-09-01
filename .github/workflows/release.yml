@@ -1,7 +1,7 @@
 # One-button releases: builds macOS (arm64 + x64, signed, notarized, stapled),
-# Windows, and Ubuntu from ONE commit, assembles a complete draft on
-# openmausbot-releases with verified feeds, and publishes after a human
-# approves the draft.
+# Windows, and Ubuntu from ONE commit, assembles a complete draft in this
+# repository with verified feeds, and mirrors it to the legacy releases repo
+# so already-installed builds can cross the updater migration safely.
 #
 # Every gate below exists because its absence shipped (or nearly shipped) a
 # broken build from a laptop:
@@ -53,13 +53,23 @@ jobs:
         run: |
           echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
           echo "version=$(node -p "require('./package.json').version")" >> "$GITHUB_OUTPUT"
-      - name: Refuse to overwrite a published release
+      - name: Refuse to overwrite a published canonical release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          v="v$(node -p "require('./package.json').version")"
+          if gh release view "$v" --repo "$GITHUB_REPOSITORY" --json isDraft --jq .isDraft 2>/dev/null | grep -q false; then
+            echo "::error::$v is already published on $GITHUB_REPOSITORY — bump the version first"
+            exit 1
+          fi
+      - name: Refuse to overwrite a published legacy mirror
         env:
           GH_TOKEN: ${{ secrets.RELEASES_PAT }}
         run: |
+          test -n "$GH_TOKEN" || { echo "::error::RELEASES_PAT is required for the updater bridge"; exit 1; }
           v="v$(node -p "require('./package.json').version")"
           if gh release view "$v" --repo milind-soni/openmausbot-releases --json isDraft --jq .isDraft 2>/dev/null | grep -q false; then
-            echo "::error::$v is already published on openmausbot-releases — bump the version first"
+            echo "::error::$v is already published on the legacy mirror — recover the canonical draft instead of rebuilding bytes"
             exit 1
           fi
 
@@ -101,6 +111,15 @@ jobs:
 
       - name: Package both architectures
         run: pnpm package:mac
+
+      - name: "Gate: both packaged apps use the canonical updater feed"
+        run: |
+          for app in release/mac-arm64/OpenMausBot.app release/mac/OpenMausBot.app; do
+            update="$app/Contents/Resources/app-update.yml"
+            test -f "$update" || { echo "::error::missing $update"; exit 1; }
+            grep -Eq '^owner: milind-soni$' "$update" || { echo "::error::wrong update owner in $update"; exit 1; }
+            grep -Eq '^repo: OpenMausBot$' "$update" || { echo "::error::wrong update repo in $update"; exit 1; }
+          done
 
       - name: "Gate: the signature must verify BEFORE notarization"
         run: |
@@ -242,7 +261,8 @@ jobs:
           "$res/cloudflared/cloudflared.exe" version | grep -Fq "cloudflared version 2026.8.2 " || {
             echo "::error::cloudflared has the wrong version"; exit 1; }
           [ -f "$res/app-update.yml" ] || { echo "::error::missing app-update.yml"; exit 1; }
-          grep -q "openmausbot-releases" "$res/app-update.yml" || { echo "::error::wrong update repo"; exit 1; }
+          grep -Eq '^owner: milind-soni$' "$res/app-update.yml" || { echo "::error::wrong update owner"; exit 1; }
+          grep -Eq '^repo: OpenMausBot$' "$res/app-update.yml" || { echo "::error::wrong update repo"; exit 1; }
           if grep -q "publisherName" "$res/app-update.yml"; then
             echo "::error::publisherName on an unsigned build breaks every update"; exit 1
           fi
@@ -299,6 +319,12 @@ jobs:
       - name: Prove overlay-free X11 input routing
         run: dbus-run-session -- xvfb-run -a pnpm smoke:cua-x11-input
       - run: pnpm package:linux
+      - name: Verify the packaged updater target
+        run: |
+          update=release/linux-unpacked/resources/app-update.yml
+          test -f "$update" || { echo "::error::missing $update"; exit 1; }
+          grep -Eq '^owner: milind-soni$' "$update" || { echo "::error::wrong update owner"; exit 1; }
+          grep -Eq '^repo: OpenMausBot$' "$update" || { echo "::error::wrong update repo"; exit 1; }
       - name: Verify package contents and metadata
         run: node scripts/verify-linux-package.mjs
       - name: Match a normal Ubuntu package parent on the ephemeral runner
@@ -351,24 +377,73 @@ jobs:
     needs: [prepare, mac, windows, linux]
     runs-on: ubuntu-24.04
     timeout-minutes: 30
+    concurrency:
+      group: release-mirror-v${{ needs.prepare.outputs.version }}
+      cancel-in-progress: false
+    permissions:
+      contents: write
     steps:
       - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
           path: assets
           merge-multiple: true
+      - name: Refuse an incomplete installer or updater set
+        env:
+          VERSION: ${{ needs.prepare.outputs.version }}
+        run: |
+          required=(
+            latest-linux.yml latest-mac.yml latest.yml
+            "OpenMausBot-$VERSION-amd64.deb"
+            "OpenMausBot-$VERSION-arm64.dmg"
+            "OpenMausBot-$VERSION-arm64.dmg.blockmap"
+            "OpenMausBot-$VERSION-arm64.zip"
+            "OpenMausBot-$VERSION-arm64.zip.blockmap"
+            "OpenMausBot-$VERSION-setup.exe"
+            "OpenMausBot-$VERSION-setup.exe.blockmap"
+            "OpenMausBot-$VERSION-x64.dmg"
+            "OpenMausBot-$VERSION-x64.dmg.blockmap"
+            "OpenMausBot-$VERSION-x64.zip"
+            "OpenMausBot-$VERSION-x64.zip.blockmap"
+            "OpenMausBot-$VERSION-x86_64.AppImage"
+            OpenMausBot-amd64.deb OpenMausBot-intel.dmg OpenMausBot-setup.exe
+            OpenMausBot.AppImage OpenMausBot.dmg SHA256SUMS-ubuntu-x64.txt
+          )
+          for file in "${required[@]}"; do
+            test -s "assets/$file" || { echo "::error::missing or empty release asset: $file"; exit 1; }
+          done
+          test "$(find assets -maxdepth 1 -type f | wc -l | tr -d ' ')" = "${#required[@]}" || {
+            echo "::error::unexpected release asset set"; find assets -maxdepth 1 -type f -print; exit 1; }
       - name: Verify every feed hash against the actual bytes
         run: |
           cd assets
           node --input-type=module - <<'EOF'
           import { createHash } from "node:crypto";
-          import { readFileSync, readdirSync, statSync, existsSync } from "node:fs";
+          import { readFileSync, readdirSync, statSync } from "node:fs";
           const sha512 = (f) => createHash("sha512").update(readFileSync(f)).digest("base64");
+          const expected = new Map([
+            ["latest-mac.yml", [
+              "OpenMausBot-${{ needs.prepare.outputs.version }}-x64.zip",
+              "OpenMausBot-${{ needs.prepare.outputs.version }}-arm64.zip",
+              "OpenMausBot-${{ needs.prepare.outputs.version }}-x64.dmg",
+              "OpenMausBot-${{ needs.prepare.outputs.version }}-arm64.dmg",
+            ]],
+            ["latest.yml", ["OpenMausBot-${{ needs.prepare.outputs.version }}-setup.exe"]],
+            ["latest-linux.yml", [
+              "OpenMausBot-${{ needs.prepare.outputs.version }}-x86_64.AppImage",
+              "OpenMausBot-${{ needs.prepare.outputs.version }}-amd64.deb",
+            ]],
+          ]);
           let bad = 0;
-          for (const feed of ["latest-mac.yml", "latest.yml", "latest-linux.yml"]) {
-            if (!existsSync(feed)) continue;
+          for (const [feed, expectedUrls] of expected) {
             const text = readFileSync(feed, "utf8");
-            for (const [, url, hash, size] of text.matchAll(/url:\s+(\S+)[\s\S]*?sha512:\s+(\S+)\n\s+size:\s+(\d+)/g)) {
-              if (!existsSync(url)) { console.error(`MISSING ${url} (listed in ${feed})`); bad++; continue; }
+            const entries = [...text.matchAll(/url:\s+(\S+)[\s\S]*?sha512:\s+(\S+)\n\s+size:\s+(\d+)/g)];
+            const urls = entries.map(([, url]) => url).sort();
+            if (JSON.stringify(urls) !== JSON.stringify([...expectedUrls].sort())) {
+              console.error(`WRONG PATHS in ${feed}: ${urls.join(", ") || "none"}`);
+              bad++;
+              continue;
+            }
+            for (const [, url, hash, size] of entries) {
               const okHash = sha512(url) === hash;
               const okSize = statSync(url).size === Number(size);
               if (!okHash || !okSize) { console.error(`MISMATCH ${url} in ${feed}`); bad++; }
@@ -378,31 +453,98 @@ jobs:
           if (bad) process.exit(1);
           console.log(`\nall feeds verified; ${readdirSync(".").length} assets staged`);
           EOF
-      - name: Create or update the draft with the complete asset set
+      - name: Create or update the canonical draft
         env:
-          GH_TOKEN: ${{ secrets.RELEASES_PAT }}
+          GH_TOKEN: ${{ github.token }}
           VERSION: ${{ needs.prepare.outputs.version }}
           SHA: ${{ needs.prepare.outputs.sha }}
         run: |
-          cd assets
+          tag="v$VERSION"
+          if ! gh release view "$tag" --repo "$GITHUB_REPOSITORY" > /dev/null 2>&1; then
+            gh release create "$tag" --repo "$GITHUB_REPOSITORY" --target "$SHA" \
+              --draft --title "OpenMausBot $VERSION" \
+              --generate-notes
+          else
+            target=$(gh release view "$tag" --repo "$GITHUB_REPOSITORY" --json targetCommitish --jq .targetCommitish)
+            target_sha=$(gh api "repos/$GITHUB_REPOSITORY/commits/$target" --jq .sha)
+            test "$target_sha" = "$SHA" || {
+              echo "::error::$tag draft targets $target_sha, not pinned release commit $SHA"
+              exit 1
+            }
+          fi
+          for file in assets/*; do
+            gh release upload "$tag" "$file" --repo "$GITHUB_REPOSITORY" --clobber
+          done
+          # A rerun preserves human edits made while reviewing the canonical
+          # draft, and mirrors that exact body into the compatibility release.
+          gh release view "$tag" --repo "$GITHUB_REPOSITORY" --json body --jq .body > "$RUNNER_TEMP/release-notes.md"
+          echo "canonical asset count: $(gh release view "$tag" --repo "$GITHUB_REPOSITORY" --json assets --jq '.assets | length')"
+
+      - name: Mirror the same draft for installed legacy clients
+        env:
+          GH_TOKEN: ${{ secrets.RELEASES_PAT }}
+          VERSION: ${{ needs.prepare.outputs.version }}
+        run: |
           tag="v$VERSION"
           if ! gh release view "$tag" --repo milind-soni/openmausbot-releases > /dev/null 2>&1; then
             gh release create "$tag" --repo milind-soni/openmausbot-releases \
-              --draft --title "OpenMausBot $VERSION" \
-              --notes "Draft assembled by the release workflow from milind-soni/OpenMausBot@$SHA. Edit these notes, then publish."
+              --draft --title "OpenMausBot $VERSION" --notes-file "$RUNNER_TEMP/release-notes.md"
           fi
-          for f in *; do
-            gh release upload "$tag" "$f" --repo milind-soni/openmausbot-releases --clobber
+          gh release edit "$tag" --repo milind-soni/openmausbot-releases \
+            --title "OpenMausBot $VERSION" --notes-file "$RUNNER_TEMP/release-notes.md"
+          for file in assets/*; do
+            gh release upload "$tag" "$file" --repo milind-soni/openmausbot-releases --clobber
           done
-          echo "asset count: $(gh release view "$tag" --repo milind-soni/openmausbot-releases --json assets --jq '.assets | length')"
+          echo "legacy asset count: $(gh release view "$tag" --repo milind-soni/openmausbot-releases --json assets --jq '.assets | length')"
+
+      - name: Prove both drafts contain the exact staged bytes
+        env:
+          CANONICAL_TOKEN: ${{ github.token }}
+          LEGACY_TOKEN: ${{ secrets.RELEASES_PAT }}
+          VERSION: ${{ needs.prepare.outputs.version }}
+        run: |
+          node --input-type=module - "$VERSION" <<'EOF'
+          import { createHash } from "node:crypto";
+          import { execFileSync } from "node:child_process";
+          import { readFileSync, readdirSync } from "node:fs";
+          import { join } from "node:path";
+          const version = process.argv[2];
+          const expected = new Map(readdirSync("assets").map((name) => [
+            name,
+            `sha256:${createHash("sha256").update(readFileSync(join("assets", name))).digest("hex")}`,
+          ]));
+          for (const [repo, token] of [
+            [process.env.GITHUB_REPOSITORY, process.env.CANONICAL_TOKEN],
+            ["milind-soni/openmausbot-releases", process.env.LEGACY_TOKEN],
+          ]) {
+            const json = execFileSync("gh", ["release", "view", `v${version}`, "--repo", repo, "--json", "assets"], {
+              encoding: "utf8",
+              env: { ...process.env, GH_TOKEN: token },
+            });
+            const assets = JSON.parse(json).assets;
+            if (assets.length !== expected.size) throw new Error(`${repo}: expected ${expected.size} assets, got ${assets.length}`);
+            for (const asset of assets) {
+              if (expected.get(asset.name) !== asset.digest) throw new Error(`${repo}: digest mismatch for ${asset.name}`);
+            }
+            console.log(`ok: ${repo} has ${assets.length} byte-identical assets`);
+          }
+          EOF
 
       - name: Publish (only when asked to)
         if: ${{ inputs.publish }}
         env:
-          GH_TOKEN: ${{ secrets.RELEASES_PAT }}
+          CANONICAL_TOKEN: ${{ github.token }}
+          LEGACY_TOKEN: ${{ secrets.RELEASES_PAT }}
           VERSION: ${{ needs.prepare.outputs.version }}
         run: |
-          gh release edit "v$VERSION" --repo milind-soni/openmausbot-releases --draft=false --latest
-          # a draft that LOOKS published is the 0.1.24 failure mode — verify
-          gh release view "v$VERSION" --repo milind-soni/openmausbot-releases --json isDraft --jq .isDraft | grep -q false
-          echo "v$VERSION is live"
+          # The bridge build points at the canonical feed. Publish and verify
+          # that destination before making the build visible to legacy clients.
+          GH_TOKEN="$CANONICAL_TOKEN" gh release edit "v$VERSION" \
+            --repo "$GITHUB_REPOSITORY" --draft=false --latest
+          GH_TOKEN="$CANONICAL_TOKEN" gh release view "v$VERSION" \
+            --repo "$GITHUB_REPOSITORY" --json isDraft --jq .isDraft | grep -q false
+          GH_TOKEN="$LEGACY_TOKEN" gh release edit "v$VERSION" \
+            --repo milind-soni/openmausbot-releases --draft=false --latest
+          GH_TOKEN="$LEGACY_TOKEN" gh release view "v$VERSION" \
+            --repo milind-soni/openmausbot-releases --json isDraft --jq .isDraft | grep -q false
+          echo "v$VERSION is live on the canonical feed and its legacy updater bridge"

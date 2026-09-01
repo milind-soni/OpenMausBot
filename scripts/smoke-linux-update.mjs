@@ -3,7 +3,7 @@
 //
 // The unit tests drive AppImageUpdater.doInstall with hand-made files. This
 // drives the whole thing: the shipped bundle, extracted from the packaged
-// AppImage, checking the real openmausbot-releases feed, downloading the real
+// AppImage, checking the real canonical release feed, downloading the real
 // asset, and installing it over a copy that carries a version in its name —
 // the exact shape that used to orphan the launcher.
 //
