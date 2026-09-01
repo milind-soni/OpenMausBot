@@ -140,11 +140,30 @@ export function createWebhookIngressHandler(manager: WebhookManager) {
   };
 }
 
+/** The base senders are told to use. Behind a proxy or tunnel the listening
+ * address is unreachable from outside, so the operator supplies the public
+ * one; a trailing slash is tolerated because every hook path adds its own. */
+export function advertisedWebhookBase(raw: string): string {
+  let parsed: URL | undefined;
+  try {
+    parsed = new URL(raw);
+  } catch {
+    parsed = undefined;
+  }
+  if (!parsed || (parsed.protocol !== "http:" && parsed.protocol !== "https:")) {
+    throw new Error(
+      `webhook public base URL must be an absolute http(s) URL such as https://bots.example.com, got "${raw}"`,
+    );
+  }
+  return raw.replace(/\/+$/, "");
+}
+
 export async function listenWebhookIngress(
   manager: WebhookManager,
-  options: { host?: string; port: number },
+  options: { host?: string; port: number; publicBaseUrl?: string },
 ): Promise<WebhookIngress> {
   const host = options.host ?? "127.0.0.1";
+  const advertised = options.publicBaseUrl === undefined ? undefined : advertisedWebhookBase(options.publicBaseUrl);
   const server = createServer(createWebhookIngressHandler(manager));
   await new Promise<void>((resolve, reject) => {
     const onError = (error: Error) => reject(error);
@@ -159,7 +178,12 @@ export async function listenWebhookIngress(
     server.close();
     throw new Error("Webhook receiver did not get a TCP address");
   }
-  return { server, host, port: address.data.port, baseUrl: `http://${host}:${address.data.port}` };
+  return {
+    server,
+    host,
+    port: address.data.port,
+    baseUrl: advertised ?? `http://${host}:${address.data.port}`,
+  };
 }
 
 export function webhookCredential(baseUrl: string, endpointId: string, secret: string) {

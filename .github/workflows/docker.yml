@@ -1,0 +1,128 @@
+name: Docker image
+
+on:
+  push:
+    branches: [main]
+    tags: ["v*"]
+    paths:
+      - Dockerfile
+      - .dockerignore
+      - deploy/**
+      - server/**
+      - src/**
+      - package.json
+      - pnpm-lock.yaml
+      - .github/workflows/docker.yml
+  pull_request:
+    paths:
+      - Dockerfile
+      - .dockerignore
+      - deploy/**
+      - .github/workflows/docker.yml
+
+permissions:
+  contents: read
+
+jobs:
+  build-and-smoke:
+    name: build image + boot smoke
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Build image
+        run: docker build -t openmausbot:ci .
+      - name: Boot the container and prove the server + UI answer
+        run: |
+          set -euo pipefail
+          docker run -d --name omb openmausbot:ci
+          for i in $(seq 1 40); do
+            if docker exec omb curl -sf http://127.0.0.1:8799/api/health | grep -q openmausbot; then break; fi
+            sleep 2
+            if [ "$i" = "40" ]; then docker logs omb; echo "server never became healthy"; exit 1; fi
+          done
+          # the renderer is served by the server itself (OMB_STATIC_DIR)
+          docker exec omb curl -sf http://127.0.0.1:8799/ | grep -qi "<html" || { docker logs omb; echo "UI not served"; exit 1; }
+          docker logs omb | tail -5
+      - name: Prove the server never binds a public interface
+        # The loopback-trust model is the auth model, so the image must keep
+        # the server unreachable from the container's own network. Probe from a
+        # sibling container on the same bridge; a positive control first proves
+        # the probe can see a socket that does bind 0.0.0.0.
+        run: |
+          set -euo pipefail
+          probe() { docker run --rm --network bridge curlimages/curl:8.14.1 -s --max-time 3 "http://$1:$2/" >/dev/null; }
+          docker run -d --name leaky --entrypoint node openmausbot:ci -e "require('http').createServer((q,s)=>s.end('leak')).listen(8799,'0.0.0.0')"
+          sleep 2
+          leaky_ip=$(docker inspect -f '{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}' leaky)
+          test -n "$leaky_ip"
+          probe "$leaky_ip" 8799 || { echo "probe cannot see a 0.0.0.0 listener; the check would be vacuous"; exit 1; }
+          docker rm -f leaky >/dev/null
+          ip=$(docker inspect -f '{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}' omb)
+          test -n "$ip"
+          if probe "$ip" 8799 || probe "$ip" 8800; then
+            echo "server answered on $ip — it must only bind 127.0.0.1"; exit 1
+          fi
+          echo "unreachable on $ip: loopback-only holds"
+      - name: Run the tenant stack (server + Caddy) and use it like a browser would
+        # deploy/docker-compose.yml is the product here: prove the login wall,
+        # the Host/Origin rules that satisfy the server's loopback gates, the
+        # unbuffered SSE stream, and the advertised webhook base — through TLS.
+        run: |
+          set -euo pipefail
+          docker rm -f omb >/dev/null
+          docker tag openmausbot:ci openmausbot:latest
+          hash=$(docker run --rm caddy:2 caddy hash-password --plaintext 'ci-pass')
+          printf 'DOMAIN=localhost\nBASIC_AUTH_USER=ci\nBASIC_AUTH_HASH=%s\nENGINES=\n' "$(printf '%s' "$hash" | sed 's/\$/$$/g')" > deploy/.env
+          docker compose -f deploy/docker-compose.yml up -d --no-build
+          for i in $(seq 1 45); do
+            curl -sk -o /dev/null --max-time 2 https://localhost/api/health && break
+            sleep 2
+            if [ "$i" = "45" ]; then docker compose -f deploy/docker-compose.yml logs; echo "caddy never answered"; exit 1; fi
+          done
+          code() { curl -sk -o /dev/null -w '%{http_code}' --max-time 5 "$@"; }
+          H=https://localhost
+          test "$(code $H/api/health)" = 401                                      # login wall
+          test "$(code -u ci:wrong $H/api/health)" = 401
+          curl -sk -u ci:ci-pass $H/api/health | grep -q openmausbot                # Host rule satisfies the loopback gate
+          curl -sk -u ci:ci-pass $H/ | grep -qi '<html'                             # UI served through the proxy
+          test "$(code -u ci:ci-pass -H 'Origin: https://evil.example' $H/api/health)" = 403   # CSRF gate survives the proxy
+          test "$(code -u ci:ci-pass -H 'Origin: https://localhost' $H/api/health)" = 200      # own origin is mapped
+          curl -sk -X POST $H/hooks/wh_nope | grep -q error                        # hook path reaches the receiver without login
+          test "$(code http://localhost/)" = 308                                   # HTTP redirects to HTTPS
+          curl -sk -u ci:ci-pass -N --max-time 4 $H/api/events | head -c 1 | grep -q .   # SSE streams, not buffered
+          curl -sk -u ci:ci-pass $H/api/webhooks | grep -q '"baseUrl":"https://localhost"'   # OMB_WEBHOOK_PUBLIC_URL is advertised
+          docker compose -f deploy/docker-compose.yml down -v
+
+  publish:
+    name: publish to GHCR
+    needs: build-and-smoke
+    if: github.event_name == 'push'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: docker/setup-buildx-action@37fe631027851001ddb9b187196cc803df7f5f0e # v4.3.0
+      - uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - id: meta
+        uses: docker/metadata-action@dc802804100637a589fabce1cb79ff13a1411302 # v6.2.0
+        with:
+          images: ghcr.io/${{ github.repository }}
+          tags: |
+            type=raw,value=latest,enable={{is_default_branch}}
+            type=sha,format=long
+            type=ref,event=tag
+      - uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a # v7.3.0
+        with:
+          context: .
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max

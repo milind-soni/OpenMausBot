@@ -1,0 +1,33 @@
+# Edge for one OpenMausBot tenant: automatic HTTPS + login in front of a server
+# that only listens on loopback. The two header rules are load-bearing —
+# see docs/self-hosting.md "Putting a proxy in front" before changing them.
+{$DOMAIN} {
+	encode zstd gzip
+
+	# Webhook ingress (/hooks/wh_...) is meant to be reachable by third parties
+	# — every hook carries its own secret — so it sits outside the login wall.
+	handle /hooks/* {
+		reverse_proxy 127.0.0.1:8800 {
+			header_up Host 127.0.0.1:8800
+		}
+	}
+
+	handle {
+		basic_auth {
+			{$BASIC_AUTH_USER} {$BASIC_AUTH_HASH}
+		}
+
+		# The server accepts browser requests only from its own origin. Map
+		# THIS site's origin onto the loopback origin it expects; any other
+		# Origin passes through unchanged and is still refused — CSRF
+		# protection survives the proxy.
+		@own header Origin https://{$DOMAIN}
+		request_header @own Origin http://127.0.0.1:8799
+
+		reverse_proxy 127.0.0.1:8799 {
+			header_up Host 127.0.0.1:8799
+			# SSE: stream events as they arrive
+			flush_interval -1
+		}
+	}
+}

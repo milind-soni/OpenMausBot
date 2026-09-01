@@ -1,0 +1,54 @@
+# One OpenMausBot tenant: the harness server plus Caddy for TLS + login.
+#
+# Caddy runs in the server's network namespace, so it reaches the server on
+# 127.0.0.1 — the server never binds a public interface. Ports are therefore
+# declared on the `omb` service (the namespace owner).
+#
+#   cp .env.example .env   # set DOMAIN, BASIC_AUTH_USER, BASIC_AUTH_HASH
+#   docker compose pull omb && docker compose up -d     # prebuilt image
+#   docker compose up -d --build                        # or build from source
+services:
+  omb:
+    build:
+      context: ..
+      args:
+        ENGINES: ${ENGINES:-}
+    # prebuilt on every main push; `docker compose up --build` builds from source instead
+    image: ghcr.io/milind-soni/openmausbot:latest
+    restart: unless-stopped
+    volumes:
+      - data:/data
+    ports:
+      - "80:80"
+      - "443:443"
+    environment:
+      OMB_PORT: "8799"
+      OMB_WEBHOOK_PORT: "8800"
+      # what the app prints as hook URLs — Caddy passes /hooks/* straight through
+      OMB_WEBHOOK_PUBLIC_URL: https://${DOMAIN}
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sf http://127.0.0.1:8799/api/health | grep -q openmausbot"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+
+  caddy:
+    image: caddy:2
+    restart: unless-stopped
+    network_mode: "service:omb"
+    depends_on:
+      omb:
+        condition: service_healthy
+    environment:
+      DOMAIN: ${DOMAIN}
+      BASIC_AUTH_USER: ${BASIC_AUTH_USER}
+      BASIC_AUTH_HASH: ${BASIC_AUTH_HASH}
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+
+volumes:
+  data:
+  caddy_data:
+  caddy_config:
