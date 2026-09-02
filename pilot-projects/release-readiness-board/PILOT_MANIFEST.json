@@ -1,0 +1,40 @@
+{
+  "version": 1,
+  "projectName": "release-readiness-board",
+  "writeScopes": [
+    "app/**",
+    "tests/**"
+  ],
+  "denyScopes": [
+    ".git",
+    ".git/**",
+    ".env",
+    ".env*",
+    "**/.env*",
+    "package.json",
+    "package-lock.json",
+    ".openai/**",
+    "PILOT_MANIFEST.json"
+  ],
+  "targetCommands": {
+    "pilot": {
+      "argv": [
+        "node",
+        "--test",
+        "tests/source-contract.test.mjs"
+      ],
+      "timeoutMs": 30000,
+      "maxOutputBytes": 65536
+    }
+  },
+  "acceptance": [
+    {
+      "description": "Requested UI behavior is implemented within the allowed source and test scopes",
+      "observation": "node --test tests/source-contract.test.mjs exits successfully"
+    },
+    {
+      "description": "The candidate adds no network, credential, database, or dependency capability",
+      "observation": "the source contract security assertion passes"
+    }
+  ]
+}
