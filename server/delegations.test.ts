@@ -30,7 +30,7 @@ import {
   _pendingCount,
 } from "./delegations.ts";
 import { peerAllowKey, resolvePeerComms } from "./peer-approval.ts";
-import { Store, type BotRecord } from "./store.ts";
+import { Store, type BotRecord, type GroupRecord } from "./store.ts";
 
 const selection = (): ModelSelection => ({ instanceId: "claude", model: "fake-model" });
 
@@ -743,6 +743,79 @@ describe("busy retries and receipts", () => {
     discardDelegations(commsBus, from.threadId);
     expect(_pendingCount(from.threadId)).toBe(0);
     expect(findDelegationReceipt(queued.id!)).toMatchObject({ status: "dropped" });
+  });
+});
+
+describe("originating group routing", () => {
+  let store: Store;
+  let from: BotRecord;
+  let target: BotRecord;
+  let group: GroupRecord;
+  let commsBus: CommsBus;
+  let approvalBus: { store: Store; broadcast: (payload: unknown) => void };
+
+  beforeEach(() => {
+    rmSync(DATA_DIR, { recursive: true, force: true });
+    _resetPending();
+    store = new Store(selection);
+    from = store.createBot();
+    target = store.createBot();
+    store.patchBot(target.id, { name: "Helper" });
+    group = store.createGroup("Planning", [from.id, target.id], false, "Agents");
+    const buses = setupBuses(store);
+    commsBus = buses.commsBus;
+    approvalBus = buses.approvalBus;
+  });
+  afterEach(() => _resetPending());
+
+  it("routes a group-thread delegation through the shared channel, not a pair DM", async () => {
+    queueDelegation(commsBus, from, { toBotId: target.id, message: "plan the sprint", depth: 0 }, 1, group.threadId);
+    const runTargetCalls: { channel: GroupRecord | undefined }[] = [];
+    drainDelegations(commsBus, approvalBus, group.threadId, (...args: unknown[]) => {
+      runTargetCalls.push({ channel: args[4] as GroupRecord | undefined });
+    });
+
+    await waitFor(() => runTargetCalls.length === 1);
+    expect(runTargetCalls[0]!.channel?.id).toBe(group.id);
+    expect(runTargetCalls[0]!.channel?.dm).toBeFalsy();
+    expect(store.dmGroup(from.id, target.id)).toBeUndefined();
+    expect(store.messagesFor(group.threadId).some((m) => m.kind === "text" && m.text?.includes("plan the sprint"))).toBe(true);
+    expect(store.messagesFor(group.threadId).some((m) => m.kind === "activity" && m.tool?.name === "Messaged @Helper")).toBe(true);
+  });
+
+  it("still uses a pair DM when the source is the bot's 1:1 thread", async () => {
+    queueDelegation(commsBus, from, { toBotId: target.id, message: "do this", depth: 0 }, 1, from.threadId);
+    const runTargetCalls: { channel: GroupRecord | undefined }[] = [];
+    drainDelegations(commsBus, approvalBus, from.threadId, (...args: unknown[]) => {
+      runTargetCalls.push({ channel: args[4] as GroupRecord | undefined });
+    });
+
+    await waitFor(() => runTargetCalls.length === 1);
+    expect(runTargetCalls[0]!.channel?.dm).toBe(true);
+    expect(runTargetCalls[0]!.channel?.memberIds).toEqual(expect.arrayContaining([from.id, target.id]));
+  });
+
+  it("does not create a pair DM when a valid shared channel exists", async () => {
+    queueDelegation(commsBus, from, { toBotId: target.id, message: "in the room", depth: 0 }, 1, group.threadId);
+    const before = store.groups.filter((g) => g.dm).length;
+    drainDelegations(commsBus, approvalBus, group.threadId, () => {});
+    await waitFor(() => _pendingCount(group.threadId) === 0);
+    const after = store.groups.filter((g) => g.dm).length;
+    expect(after).toBe(before);
+  });
+
+  it("survives persistence: a loaded delegation keeps its originating group", async () => {
+    queueDelegation(commsBus, from, { toBotId: target.id, message: "left over", depth: 0 }, 1, group.threadId);
+    _resetPending();
+    _loadPending();
+    expect(pendingThreads()).toEqual([group.threadId]);
+
+    const runTargetCalls: { channel: GroupRecord | undefined }[] = [];
+    drainDelegations(commsBus, approvalBus, group.threadId, (...args: unknown[]) => {
+      runTargetCalls.push({ channel: args[4] as GroupRecord | undefined });
+    });
+    await waitFor(() => runTargetCalls.length === 1 && _pendingCount(group.threadId) === 0);
+    expect(runTargetCalls[0]!.channel?.id).toBe(group.id);
   });
 });
 

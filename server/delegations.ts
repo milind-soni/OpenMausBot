@@ -19,7 +19,7 @@ import { getOrCreateChannel, mirrorExchange, type CommsBus } from "./comms-visib
 import { DATA_DIR } from "./config.ts";
 import { newId } from "./contracts.ts";
 import { requestPeerApproval, type ApprovalBus } from "./peer-approval.ts";
-import { sectionKey, type BotRecord, type GroupRecord } from "./store.ts";
+import { sectionKey, type BotRecord, type GroupRecord, type Store } from "./store.ts";
 
 export interface DelegationItem {
   toBotId: string;
@@ -34,12 +34,18 @@ export interface DelegationItem {
    * (= 1) for a user turn — so the peer has no agents integration, and
    * recursive delegation is structurally impossible. */
   depth: number;
+  /** When the delegation is initiated from a shared channel, mirror the
+   * exchange back into that channel instead of creating a pair DM. */
+  originatingGroupId?: string;
 }
 
 interface PendingDelegationItem extends DelegationItem {
   /** Stable acknowledgement key for crash-safe removal from the queue —
    * and the task id the delegating bot uses with check/wait_delegation. */
   id: string;
+  /** The bot that queued this handoff. Stored explicitly because a shared
+   * channel's thread is not owned by any single bot. */
+  sourceBotId: string;
   /** Busy-target retries so far. The item stays queued (not canceled) while
    * the target is busy, and is retried when any of the target's turns
    * settles — up to MAX_BUSY_ATTEMPTS. */
@@ -184,6 +190,7 @@ export function _loadPending(): void {
         ) return [];
         const loaded: PendingDelegationItem = {
           id: typeof item.id === "string" && item.id ? item.id : newId(),
+          sourceBotId: typeof item.sourceBotId === "string" && item.sourceBotId ? item.sourceBotId : newId(),
           toBotId: item.toBotId,
           message: item.message,
           ...(typeof item.reason === "string" ? { reason: item.reason } : {}),
@@ -192,6 +199,9 @@ export function _loadPending(): void {
         };
         if (item.approvalAlreadyGranted === true) loaded.approvalAlreadyGranted = true;
         if (item.waitingOnBusy === true) loaded.waitingOnBusy = true;
+        if (typeof item.originatingGroupId === "string" && item.originatingGroupId) {
+          loaded.originatingGroupId = item.originatingGroupId;
+        }
         return [loaded];
       });
       if (items.length) pendingDelegations.set(threadId, items);
@@ -270,8 +280,20 @@ export function queueDelegation(
   // making the caller wait. Without a cap, one turn can queue unboundedly
   // and fan out into as many real turns on the next settle.
   if (list.length >= MAX_QUEUED_PER_THREAD) return { result: "too_many" };
+  // If the source thread is a shared group that contains both bots, keep it
+  // as the authoritative channel instead of routing into a pair DM later.
+  const originatingGroup = item.originatingGroupId
+    ? bus.store.group(item.originatingGroupId)
+    : (sourceThreadId ? bus.store.groupByThread(sourceThreadId) : undefined);
+  const groupId =
+    originatingGroup &&
+    !originatingGroup.dm &&
+    originatingGroup.memberIds.includes(from.id) &&
+    originatingGroup.memberIds.includes(target.id)
+      ? originatingGroup.id
+      : undefined;
   const id = newId();
-  list.push({ ...item, id, attempts: 0 });
+  list.push({ ...item, id, sourceBotId: from.id, attempts: 0, ...(groupId ? { originatingGroupId: groupId } : {}) });
   pendingDelegations.set(sourceThreadId, list);
   savePending();
   const label = `Delegated to @${target.name}${item.reason ? `: ${item.reason}` : ""}`;
@@ -308,7 +330,11 @@ export function drainDelegations(
   }
   const list = pendingDelegations.get(threadId);
   if (!list?.length) return;
-  const from = bus.store.botByThread(threadId);
+  // A shared channel's thread is not owned by any single bot, so the queued
+  // item itself carries the source bot identity.
+  const from =
+    bus.store.botByThread(threadId) ??
+    bus.store.bot(list[0]!.sourceBotId);
   if (!from) {
     pendingDelegations.delete(threadId);
     savePending();
@@ -388,7 +414,7 @@ export function discardDelegations(bus: CommsBus, threadId: string): void {
       result: "the delegating turn did not finish",
     });
   }
-  const from = bus.store.botByThread(threadId);
+  const from = bus.store.botByThread(threadId) ?? bus.store.bot(list[0]!.sourceBotId);
   if (!from) return;
   bus.store.appendMessage(threadId, {
     role: "bot",
@@ -496,7 +522,7 @@ async function processOne(
     // and mirror a "Messaged @X" chip for an exchange that never happens.
     const current = bus.store.bot(item.toBotId);
     const currentSender = bus.store.bot(from.id);
-    if (!current || !currentSender || !bus.store.taskByThread(currentSender.id, sourceThreadId)) return "settled";
+    if (!current || !currentSender || !sourceThreadBelongsToBot(bus.store, currentSender.id, sourceThreadId)) return "settled";
     if (dropIfSectionsChanged(bus, currentSender, current, sourceThreadId, item)) {
       return "settled";
     }
@@ -531,12 +557,35 @@ async function processOne(
     sender = currentSender;
     target = current;
   }
-  const channel = getOrCreateChannel(bus.store, sender, target);
+  // Use the originating group as the channel when both bots are still
+  // members; otherwise the exchange falls back to the pair DM.
+  const originatingGroup =
+    (item.originatingGroupId && bus.store.group(item.originatingGroupId)) ??
+    (sourceThreadId ? bus.store.groupByThread(sourceThreadId) : undefined);
+  const channel = getOrCreateChannel(
+    bus.store,
+    sender,
+    target,
+    originatingGroup &&
+      !originatingGroup.dm &&
+      originatingGroup.memberIds.includes(sender.id) &&
+      originatingGroup.memberIds.includes(target.id)
+      ? originatingGroup
+      : undefined,
+  );
   mirrorExchange(bus, sender, target, item.message, channel, sourceThreadId);
   const reasonLine = item.reason ? `\n\n[Reason: ${item.reason}]` : "";
   const prefixed = `[Delegated by @${sender.name}, another bot in this OpenMausBot workspace. Do the work and reply directly.]\n\n${item.message}${reasonLine}`;
   await runTarget(item.toBotId, prefixed, item.depth + 1, sourceThreadId, channel, item.id);
   return "settled";
+}
+
+/** The source thread may be a bot's own task or a shared group where the
+ * bot is a member. This is the same check the API gate uses for group turns. */
+function sourceThreadBelongsToBot(store: Store, botId: string, threadId: string): boolean {
+  if (store.taskByThread(botId, threadId)) return true;
+  const group = store.groupByThread(threadId);
+  return Boolean(group && group.memberIds.includes(botId));
 }
 
 /** Section membership is an execution boundary, not just sidebar styling.

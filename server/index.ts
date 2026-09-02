@@ -6295,7 +6295,7 @@ const server = createServer(async (req, res) => {
         const fromBotId = String(url.searchParams.get("fromBotId") ?? "");
         const fromThreadId = String(url.searchParams.get("fromThreadId") ?? "");
         const from = store.bot(fromBotId);
-        if (!from || !store.taskByThread(from.id, fromThreadId)) return json(res, 403, { error: "unknown sender" });
+        if (!from || !connectorThread(from.id, fromThreadId)) return json(res, 403, { error: "unknown sender" });
         const waitMs = Math.min(Math.max(Number(url.searchParams.get("wait_ms")) || 0, 0), 240_000);
         const deadline = Date.now() + waitMs;
         // Bounded long-poll: the delegating bot parks ONE cheap HTTP request
@@ -6352,7 +6352,7 @@ const server = createServer(async (req, res) => {
           return json(res, 403, { error: "that bot belongs to a different section" });
         }
         const fromThreadId = String(body.fromThreadId ?? from.threadId);
-        if (!store.taskByThread(from.id, fromThreadId)) {
+        if (!connectorThread(from.id, fromThreadId)) {
           return json(res, 403, { error: "source thread does not belong to sender" });
         }
         const queued = queueDelegation(

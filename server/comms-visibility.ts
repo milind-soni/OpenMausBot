@@ -14,10 +14,24 @@ export interface CommsBus {
   /** SSE broadcast (kind: "group" envelope) for a single group. */
 }
 
-/** Find or create the bot⇄bot channel for the pair. The channel keeps
- * the pair's full exchange, lives in the sidebar like any room, and the
- * user can open it to chip in. */
-export function getOrCreateChannel(store: Store, from: BotRecord, target: BotRecord): GroupRecord {
+/** Find or create the channel for a peer exchange. When an originating
+ * group is supplied and both bots are members, the exchange is mirrored
+ * back into that group. Otherwise the pair's DM is used (creating it if
+ * necessary) so 1:1-bot-thread delegations keep their historical fallback. */
+export function getOrCreateChannel(
+  store: Store,
+  from: BotRecord,
+  target: BotRecord,
+  originatingGroup?: GroupRecord,
+): GroupRecord {
+  if (
+    originatingGroup &&
+    !originatingGroup.dm &&
+    originatingGroup.memberIds.includes(from.id) &&
+    originatingGroup.memberIds.includes(target.id)
+  ) {
+    return originatingGroup;
+  }
   const existing = store.dmGroup(from.id, target.id);
   if (existing) {
     if (sectionKey(existing.section) !== sectionKey(from.section)) {
