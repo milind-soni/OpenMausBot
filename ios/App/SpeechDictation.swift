@@ -41,6 +41,9 @@ final class SpeechDictation: ObservableObject {
     /// substitute the live draft.
     private(set) var base = ""
 
+    /// Joins the recognizer's restarts back into one transcript; see
+    /// `DictationAccumulator` for why the raw result is not enough.
+    private var accumulator = DictationAccumulator()
     private var recognizer: SFSpeechRecognizer?
     private var audioEngine: AVAudioEngine?
     private var recognitionRequest: SFSpeechAudioBufferRecognitionRequest?
@@ -65,6 +68,7 @@ final class SpeechDictation: ObservableObject {
         error = nil
         self.base = base.trimmingCharacters(in: .whitespacesAndNewlines)
         transcript = ""
+        accumulator = DictationAccumulator()
         isStarting = true
         generation += 1
         let gen = generation
@@ -204,7 +208,12 @@ final class SpeechDictation: ObservableObject {
         // new draft or stopping the new capture.
         guard gen == generation, !stopping, isListening else { return }
         if let result {
-            transcript = result.bestTranscription.formattedString
+            // On-device recognition starts a fresh result after a pause,
+            // dropping what came before it. The accumulator keeps it.
+            transcript = accumulator.accept(
+                text: result.bestTranscription.formattedString,
+                start: result.bestTranscription.segments.first?.timestamp
+            )
             // Composer dictation does not wait for isFinal — the last
             // partial is what you send. If the recognizer finalizes on
             // its own (rare without endAudio), just stop listening.
