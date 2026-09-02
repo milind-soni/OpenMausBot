@@ -160,7 +160,7 @@ const ADMIN_ROUTES: ReadonlyArray<{ methods: readonly string[] | null; path: Reg
   { methods: null, path: /^\/api\/auth\/pairing(\/|$)/ },
   { methods: null, path: /^\/api\/auth\/sessions(\/|$)/ },
   { methods: ["PUT", "PATCH", "DELETE"], path: /^\/api\/config$/ },
-  { methods: ["POST", "PUT", "PATCH", "DELETE"], path: /^\/api\/(instances|engines|mcp-servers|custom-engines)(\/|$)/ },
+  { methods: ["POST", "PUT", "PATCH", "DELETE"], path: /^\/api\/(instances|engines|mcp-servers|mcp\/servers|custom-engines)(\/|$)/ },
 ];
 
 export function requiredScope(method: string, path: string): Scope {

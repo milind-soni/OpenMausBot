@@ -87,6 +87,9 @@ describe("scopes", () => {
     expect(requiredScope("GET", "/api/config")).toBe("client");
     expect(requiredScope("POST", "/api/instances")).toBe("admin");
     expect(requiredScope("GET", "/api/instances")).toBe("client");
+    expect(requiredScope("POST", "/api/mcp/servers")).toBe("admin");
+    expect(requiredScope("POST", "/api/mcp/servers/github/test")).toBe("admin");
+    expect(requiredScope("GET", "/api/mcp/servers")).toBe("client");
     expect(requiredScope("POST", "/api/bots/x/messages")).toBe("client");
     expect(requiredScope("POST", "/api/auth/pair")).toBe("client");
     expect(requiredScope("POST", "/api/auth/stream-ticket")).toBe("client");
@@ -173,6 +176,13 @@ describe("resolveRequestAuth", () => {
     const denied = resolve({ host: "bots.example.com", authorization: `Bearer ${token}` }, "/api/auth/pairing", "POST");
     expect(denied.status).toBe(403);
     expect(denied.error).toContain("lacks the admin scope");
+    const mcpDenied = resolve(
+      { host: "bots.example.com", authorization: `Bearer ${token}` },
+      "/api/mcp/servers/github/test",
+      "POST",
+    );
+    expect(mcpDenied.status).toBe(403);
+    expect(mcpDenied.error).toContain("lacks the admin scope");
     expect(resolve({ host: "bots.example.com", authorization: `Bearer ${token}` }, "/api/bots").auth?.kind).toBe("session");
   });
 

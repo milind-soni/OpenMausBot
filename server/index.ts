@@ -5137,6 +5137,8 @@ async function reloadProviders() {
 // another's changes or dispose a fleet while another reload is creating it.
 let providerConfigBusy = false;
 let mcpConfigBusy = false;
+const MAX_CONCURRENT_MCP_PROBES = 2;
+let mcpProbesInFlight = 0;
 // One updater per executable: multiple Claude instances can point at the same
 // install, and running two self-updates against it would race its files.
 const claudeUpdatesInFlight = new Set<string>();
@@ -8466,7 +8468,21 @@ const server = createServer(async (req, res) => {
       if (raw === undefined) return json(res, 404, { error: "MCP server not found." });
       const parsed = parseStoredMcpServer(mcpTest[1], raw);
       if (!parsed.ok) return json(res, 400, { error: parsed.error });
-      return json(res, 200, await probeMcpServer(parsed.server));
+      if (mcpProbesInFlight >= MAX_CONCURRENT_MCP_PROBES) {
+        return json(res, 429, { error: "Two MCP connection tests are already running." });
+      }
+      const controller = new AbortController();
+      const disconnect = () => {
+        if (!res.writableEnded) controller.abort();
+      };
+      res.once("close", disconnect);
+      mcpProbesInFlight += 1;
+      try {
+        return json(res, 200, await probeMcpServer(parsed.server, undefined, controller.signal));
+      } finally {
+        res.off("close", disconnect);
+        mcpProbesInFlight -= 1;
+      }
     }
 
     if (method === "POST" && path === "/api/mcp/servers") {

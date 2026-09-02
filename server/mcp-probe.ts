@@ -28,10 +28,11 @@ function probeEnvironment(server: StoredMcpServer): NodeJS.ProcessEnv {
   return env;
 }
 
-function publicProbeError(kind: "spawn" | "timeout" | "protocol" | "closed"): string {
+function publicProbeError(kind: "spawn" | "timeout" | "protocol" | "closed" | "cancelled"): string {
   if (kind === "spawn") return "Could not start this command. Check that it is installed and executable.";
   if (kind === "timeout") return "The server did not answer in time.";
   if (kind === "closed") return "The server stopped before the MCP handshake finished.";
+  if (kind === "cancelled") return "Connection test was cancelled.";
   return "The command did not return a valid MCP tools list.";
 }
 
@@ -49,8 +50,14 @@ function redactConfiguredValues(value: string, env: Record<string, string>): str
 export function probeMcpServer(
   server: StoredMcpServer,
   timeoutMs = DEFAULT_TIMEOUT_MS,
+  signal?: AbortSignal,
 ): Promise<McpProbeResult> {
   return new Promise((resolve) => {
+    if (signal?.aborted) {
+      resolve({ ok: false, error: publicProbeError("cancelled") });
+      return;
+    }
+
     let child: ReturnType<typeof spawnCli>;
     try {
       child = spawnCli(server.command, server.args, {
@@ -66,10 +73,13 @@ export function probeMcpServer(
     let settled = false;
     let stdoutBytes = 0;
     let initialized = false;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const onAbort = () => finish({ ok: false, error: publicProbeError("cancelled") });
     const finish = (result: McpProbeResult) => {
       if (settled) return;
       settled = true;
-      clearTimeout(timer);
+      if (timer) clearTimeout(timer);
+      signal?.removeEventListener("abort", onAbort);
       killCliTree(child);
       resolve(result);
     };
@@ -117,9 +127,10 @@ export function probeMcpServer(
       finish({ ok: true, tools });
     });
 
-    const timer = setTimeout(() => {
+    timer = setTimeout(() => {
       finish({ ok: false, error: publicProbeError("timeout") });
     }, timeoutMs);
+    signal?.addEventListener("abort", onAbort, { once: true });
     child.stdout.on("data", (chunk: Buffer) => {
       stdoutBytes += chunk.byteLength;
       if (stdoutBytes > MAX_STDOUT_BYTES) {
@@ -133,6 +144,11 @@ export function probeMcpServer(
     child.stderr.resume();
     child.once("error", () => finish({ ok: false, error: publicProbeError("spawn") }));
     child.once("close", () => finish({ ok: false, error: publicProbeError("closed") }));
+
+    if (signal?.aborted) {
+      onAbort();
+      return;
+    }
 
     write({
       jsonrpc: "2.0",

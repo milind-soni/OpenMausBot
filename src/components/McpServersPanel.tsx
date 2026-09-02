@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import {
   CheckCircle2,
   CirclePower,
@@ -81,14 +81,22 @@ export function McpServersPanel() {
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [probe, setProbe] = useState<Record<string, ProbeResult>>({});
+  const loadGeneration = useRef(0);
 
   const load = useCallback(() => {
+    const generation = ++loadGeneration.current;
     setBusy("load");
     setError(null);
     return api("/api/mcp/servers")
-      .then((result) => setServers(result.servers ?? []))
-      .catch((cause) => setError(cause instanceof Error ? cause.message : String(cause)))
-      .finally(() => setBusy(null));
+      .then((result) => {
+        if (generation === loadGeneration.current) setServers(result.servers ?? []);
+      })
+      .catch((cause) => {
+        if (generation === loadGeneration.current) setError(cause instanceof Error ? cause.message : String(cause));
+      })
+      .finally(() => {
+        if (generation === loadGeneration.current) setBusy(null);
+      });
   }, []);
 
   useEffect(() => {
@@ -114,6 +122,7 @@ export function McpServersPanel() {
       return;
     }
     setBusy("save");
+    loadGeneration.current += 1;
     setError(null);
     setNotice(null);
     try {
@@ -144,6 +153,7 @@ export function McpServersPanel() {
 
   const toggle = async (server: McpServerListing) => {
     setBusy(`toggle:${server.name}`);
+    loadGeneration.current += 1;
     setError(null);
     try {
       const result = await api(`/api/mcp/servers/${server.name}`, {
@@ -161,6 +171,7 @@ export function McpServersPanel() {
 
   const test = async (server: McpServerListing) => {
     setBusy(`test:${server.name}`);
+    loadGeneration.current += 1;
     setError(null);
     setProbe((current) => {
       const next = { ...current };
@@ -183,6 +194,7 @@ export function McpServersPanel() {
   const remove = async (server: McpServerListing) => {
     if (!window.confirm(`Remove the “${server.name}” MCP server?`)) return;
     setBusy(`delete:${server.name}`);
+    loadGeneration.current += 1;
     setError(null);
     try {
       const result = await api(`/api/mcp/servers/${server.name}`, { method: "DELETE" });

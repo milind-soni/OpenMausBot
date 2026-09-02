@@ -27,6 +27,18 @@ describe("custom MCP probe", () => {
     }, 100)).resolves.toEqual({ ok: false, error: "The server did not answer in time." });
   });
 
+  it("stops a probe when its caller disconnects", async () => {
+    const controller = new AbortController();
+    const pending = probeMcpServer({
+      command: process.execPath,
+      args: ["--experimental-strip-types", fakeServer],
+      env: { FAKE_MCP_MODE: "silent" },
+      enabled: false,
+    }, 2_000, controller.signal);
+    controller.abort();
+    await expect(pending).resolves.toEqual({ ok: false, error: "Connection test was cancelled." });
+  });
+
   it("does not expose native spawn details", async () => {
     const result = await probeMcpServer({
       command: "/definitely/missing/openmaus-mcp",
