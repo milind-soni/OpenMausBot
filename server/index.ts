@@ -115,6 +115,13 @@ import {
 import { RETRY_MAX_ATTEMPTS } from "./drivers/retry.ts";
 import { decodeGeneratedImage } from "./generated-image.ts";
 import {
+  MAX_MCP_SERVERS,
+  listMcpServers,
+  parseMcpServerMutation,
+  parseStoredMcpServer,
+} from "./mcp-registry.ts";
+import { probeMcpServer } from "./mcp-probe.ts";
+import {
   GROUP_GOAL_MAX_TURNS,
   groupGoalAssignmentKey,
   groupGoalCompletionTurnId,
@@ -5073,6 +5080,19 @@ function configStatus() {
   };
 }
 
+function mcpServerResponse() {
+  return { servers: listMcpServers(cfg.mcpServers) };
+}
+
+function persistMcpServers(next: Record<string, unknown>): void {
+  saveConfig({ mcpServers: next });
+  // Do not reload the provider fleet: integrations are assembled from cfg at
+  // the next turn boundary. Updating this property directly also correctly
+  // clears the final entry; Object.assign(loadConfig()) would leave it stale
+  // when an empty section is omitted by an older config file.
+  cfg.mcpServers = next;
+}
+
 /** Rebuild the provider fleet after a config change so new keys take
  * effect without a server restart (kills any in-flight turns). */
 async function reloadProviders() {
@@ -5116,6 +5136,7 @@ async function reloadProviders() {
 // and reload sequence single-flight so two settings requests cannot drop one
 // another's changes or dispose a fleet while another reload is creating it.
 let providerConfigBusy = false;
+let mcpConfigBusy = false;
 // One updater per executable: multiple Claude instances can point at the same
 // install, and running two self-updates against it would race its files.
 const claudeUpdatesInFlight = new Set<string>();
@@ -8431,6 +8452,87 @@ const server = createServer(async (req, res) => {
         return json(res, 200, { instances: await registry.describe() });
       } finally {
         providerConfigBusy = false;
+      }
+    }
+
+    // ── custom MCP servers (stdio, local, secrets write-only) ──
+    if (method === "GET" && path === "/api/mcp/servers") {
+      return json(res, 200, mcpServerResponse());
+    }
+
+    const mcpTest = /^\/api\/mcp\/servers\/([a-z][a-z0-9_-]{0,31})\/test$/.exec(path);
+    if (method === "POST" && mcpTest) {
+      const raw = cfg.mcpServers?.[mcpTest[1]];
+      if (raw === undefined) return json(res, 404, { error: "MCP server not found." });
+      const parsed = parseStoredMcpServer(mcpTest[1], raw);
+      if (!parsed.ok) return json(res, 400, { error: parsed.error });
+      return json(res, 200, await probeMcpServer(parsed.server));
+    }
+
+    if (method === "POST" && path === "/api/mcp/servers") {
+      if (!String(req.headers["content-type"] ?? "").toLowerCase().startsWith("application/json")) {
+        return json(res, 415, { error: "content-type must be application/json" });
+      }
+      if (mcpConfigBusy) return json(res, 409, { error: "MCP servers are already being updated." });
+      mcpConfigBusy = true;
+      try {
+        const body = await readBody(req);
+        const name = typeof body?.name === "string" ? body.name : "";
+        const current = cfg.mcpServers ?? {};
+        if (Object.hasOwn(current, name)) return json(res, 409, { error: "An MCP server with that name already exists." });
+        if (Object.keys(current).length >= MAX_MCP_SERVERS) {
+          return json(res, 400, { error: `You can add at most ${MAX_MCP_SERVERS} MCP servers.` });
+        }
+        const parsed = parseMcpServerMutation(name, {
+          command: body?.command,
+          args: body?.args,
+          env: body?.env,
+          enabled: body?.enabled,
+        });
+        if (!parsed.ok) return json(res, 400, { error: parsed.error });
+        persistMcpServers({ ...current, [name]: parsed.server });
+        return json(res, 201, mcpServerResponse());
+      } finally {
+        mcpConfigBusy = false;
+      }
+    }
+
+    const mcpServerRoute = /^\/api\/mcp\/servers\/([a-z][a-z0-9_-]{0,31})$/.exec(path);
+    if (mcpServerRoute && ["PUT", "PATCH", "DELETE"].includes(method)) {
+      if (method !== "DELETE" && !String(req.headers["content-type"] ?? "").toLowerCase().startsWith("application/json")) {
+        return json(res, 415, { error: "content-type must be application/json" });
+      }
+      if (mcpConfigBusy) return json(res, 409, { error: "MCP servers are already being updated." });
+      mcpConfigBusy = true;
+      try {
+        const name = mcpServerRoute[1];
+        const current = cfg.mcpServers ?? {};
+        if (!Object.hasOwn(current, name)) return json(res, 404, { error: "MCP server not found." });
+        if (method === "DELETE") {
+          const next = { ...current };
+          delete next[name];
+          persistMcpServers(next);
+          return json(res, 200, mcpServerResponse());
+        }
+
+        const existing = parseStoredMcpServer(name, current[name]);
+        if (!existing.ok) return json(res, 400, { error: existing.error });
+        const body = await readBody(req);
+        if (method === "PATCH") {
+          if (!body || typeof body !== "object" || Array.isArray(body)
+            || Object.keys(body).length !== 1 || typeof body.enabled !== "boolean") {
+            return json(res, 400, { error: "Only an enabled boolean can be changed here." });
+          }
+          persistMcpServers({ ...current, [name]: { ...existing.server, enabled: body.enabled } });
+          return json(res, 200, mcpServerResponse());
+        }
+
+        const parsed = parseMcpServerMutation(name, body, existing.server);
+        if (!parsed.ok) return json(res, 400, { error: parsed.error });
+        persistMcpServers({ ...current, [name]: parsed.server });
+        return json(res, 200, mcpServerResponse());
+      } finally {
+        mcpConfigBusy = false;
       }
     }
 

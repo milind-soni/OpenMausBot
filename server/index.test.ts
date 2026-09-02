@@ -22,6 +22,7 @@ import { FILE_MAX_BYTES, IMAGE_MAX_BYTES } from "./attachments.ts";
 const SERVER_DIR = dirname(fileURLToPath(import.meta.url));
 const ROOT = join(SERVER_DIR, "..");
 const FAKE_CLAUDE_CLI = join(SERVER_DIR, "testing", "fake-claude-cli.ts");
+const FAKE_MCP_SERVER = join(SERVER_DIR, "testing", "fake-mcp-server.ts");
 const PORT = 18800 + Math.floor(Math.random() * 10_000);
 const BASE = `http://127.0.0.1:${PORT}`;
 const WEBHOOK_PORT = 39000 + Math.floor(Math.random() * 10_000);
@@ -2681,6 +2682,52 @@ describe("harness HTTP API", () => {
 
     const nothing = await api("PUT", "/api/config", {});
     expect(nothing.status).toBe(400);
+  });
+
+  it("manages and probes custom MCP servers without returning secret values", async () => {
+    const secret = "mcp-secret-that-must-never-render";
+    const created = await api("POST", "/api/mcp/servers", {
+      name: "fixture",
+      command: process.execPath,
+      args: ["--experimental-strip-types", FAKE_MCP_SERVER],
+      env: { FIXTURE_TOKEN: secret, REMOVE_ME: "old" },
+    });
+    expect(created.status).toBe(201);
+    expect(created.body.servers).toEqual([expect.objectContaining({
+      name: "fixture",
+      enabled: false,
+      envKeys: ["FIXTURE_TOKEN", "REMOVE_ME"],
+    })]);
+    expect(JSON.stringify(created.body)).not.toContain(secret);
+
+    const tested = await api("POST", "/api/mcp/servers/fixture/test");
+    expect(tested).toEqual({
+      status: 200,
+      body: { ok: true, tools: [{ name: "read_notes", description: "Read saved notes" }] },
+    });
+
+    const updated = await api("PUT", "/api/mcp/servers/fixture", {
+      command: process.execPath,
+      args: ["--experimental-strip-types", FAKE_MCP_SERVER],
+      env: { FIXTURE_TOKEN: true, NEXT: "fresh" },
+      enabled: false,
+    });
+    expect(updated.status).toBe(200);
+    expect(updated.body.servers[0].envKeys).toEqual(["FIXTURE_TOKEN", "NEXT"]);
+    expect(JSON.stringify(updated.body)).not.toContain(secret);
+
+    const enabled = await api("PATCH", "/api/mcp/servers/fixture", { enabled: true });
+    expect(enabled.body.servers[0].enabled).toBe(true);
+    const disk = JSON.parse(readFileSync(join(home, ".openmausbot", "config.json"), "utf8"));
+    expect(disk.mcpServers.fixture.env).toEqual({ FIXTURE_TOKEN: secret, NEXT: "fresh" });
+
+    const reserved = await api("POST", "/api/mcp/servers", { name: "computer", command: "evil" });
+    expect(reserved.status).toBe(400);
+
+    const removed = await api("DELETE", "/api/mcp/servers/fixture");
+    expect(removed).toEqual({ status: 200, body: { servers: [] } });
+    const after = await api("GET", "/api/mcp/servers");
+    expect(after).toEqual({ status: 200, body: { servers: [] } });
   });
 
   it("round-trips the UI language and clears it back to system", async () => {

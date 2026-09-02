@@ -7,6 +7,7 @@ import { Check, Loader2, RefreshCw, Search, TriangleAlert, X } from "lucide-reac
 import { api, useStore } from "@/state/store";
 import { cn } from "@/lib/cn";
 import { readCachedInventory, writeCachedInventory } from "@/lib/connected-apps-cache";
+import { McpServersPanel } from "./McpServersPanel";
 
 interface ToolkitCard {
   slug: string;
@@ -193,6 +194,7 @@ function ServiceIcon({ card }: { card: ToolkitCard }) {
 export function PluginsPanel() {
   const { dispatch } = useStore();
   const dialogRef = useRef<HTMLDivElement>(null);
+  const [surface, setSurface] = useState<"apps" | "mcp">("apps");
   const [cards, setCards] = useState<ToolkitCard[] | null>(null);
   const [source, setSource] = useState<"api" | "curated">("curated");
   const [configured, setConfigured] = useState(true);
@@ -476,27 +478,29 @@ export function PluginsPanel() {
         ref={dialogRef}
         role="dialog"
         aria-modal="true"
-        aria-labelledby="connected-apps-title"
+        aria-labelledby="plugins-title"
         tabIndex={-1}
         className="animate-pop-in flex h-[min(780px,calc(100dvh-2rem))] w-full max-w-[1040px] flex-col overflow-hidden rounded-[24px] border border-hairline/50 bg-panel shadow-2xl shadow-black/50"
       >
         <header className="flex items-start justify-between gap-4 px-6 pb-3 pt-6 sm:px-8 sm:pt-7">
           <div>
-            <h2 id="connected-apps-title" className="text-[22px] font-semibold tracking-[-0.01em] text-ink">Connected apps</h2>
-            <p className="mt-1 text-[13px] text-ink-secondary">Connect the apps your bots can use.</p>
+            <h2 id="plugins-title" className="text-[22px] font-semibold tracking-[-0.01em] text-ink">Plugins</h2>
+            <p className="mt-1 text-[13px] text-ink-secondary">Connect apps and your own MCP tools.</p>
           </div>
           <div className="flex items-center gap-1">
-            <button
-              onClick={() => void loadConnectionInventory(true)}
-              disabled={refreshing}
-              className="rounded-lg p-2 text-ink-secondary hover:bg-raised hover:text-ink disabled:opacity-50"
-              title="Refresh connection status"
-            >
-              <RefreshCw size={17} className={cn(refreshing && "animate-spin")} />
-            </button>
+            {surface === "apps" && (
+              <button
+                onClick={() => void loadConnectionInventory(true)}
+                disabled={refreshing}
+                className="rounded-lg p-2 text-ink-secondary hover:bg-raised hover:text-ink disabled:opacity-50"
+                title="Refresh connection status"
+              >
+                <RefreshCw size={17} className={cn(refreshing && "animate-spin")} />
+              </button>
+            )}
             <button
               onClick={close}
-              aria-label="Close connected apps"
+              aria-label="Close plugins"
               className="rounded-lg p-2 text-ink-secondary hover:bg-raised hover:text-ink"
             >
               <X size={21} />
@@ -504,6 +508,28 @@ export function PluginsPanel() {
           </div>
         </header>
 
+        <div className="border-b border-hairline/40 px-6 sm:px-8">
+          <div className="flex gap-6" role="tablist" aria-label="Plugin type">
+            {(["apps", "mcp"] as const).map((item) => (
+              <button
+                key={item}
+                type="button"
+                role="tab"
+                aria-selected={surface === item}
+                onClick={() => setSurface(item)}
+                className={cn(
+                  "border-b-2 px-0.5 pb-3 pt-1 text-[13.5px] font-medium transition-colors",
+                  surface === item ? "border-accent text-ink" : "border-transparent text-ink-secondary hover:text-ink",
+                )}
+              >
+                {item === "apps" ? "Connected apps" : "MCP servers"}
+              </button>
+            ))}
+          </div>
+        </div>
+
+        {surface === "apps" ? (
+          <>
         {stale && (
           // Say which of the two things is true. Silence here is what makes a
           // remembered list indistinguishable from a confirmed one.
@@ -741,6 +767,10 @@ export function PluginsPanel() {
             </div>
           )}
         </div>
+          </>
+        ) : (
+          <McpServersPanel />
+        )}
       </div>
     </div>
   );

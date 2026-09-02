@@ -8,6 +8,7 @@ import { z } from "zod";
 
 import { writeFileAtomic } from "./atomic.ts";
 import type { InstanceConfigMap } from "./contracts.ts";
+import { parseStoredMcpServer } from "./mcp-registry.ts";
 import { parseJson, schemaIssue, type JsonObject, type JsonValue } from "./schema.ts";
 
 const optionalText = z.string().optional();
@@ -592,6 +593,11 @@ export function saveConfig(patch: Partial<AppConfig>): void {
   if (checkedPatch.vps !== undefined) disk.vps = normalizeVpsConfig(checkedPatch.vps);
   // scalar, not a section: the merge loop above only walks objects
   if (checkedPatch.language !== undefined) disk.language = checkedPatch.language;
+  // Custom MCP mutations go through their own dedicated local API, but
+  // saveConfig remains the single atomic persistence boundary.
+  if (checkedPatch.mcpServers !== undefined) {
+    disk.mcpServers = jsonObjectSchema.parse(checkedPatch.mcpServers);
+  }
   // the whole list is the unit of change: an add or a delete arrives as the
   // new list, never as a per-item merge
   if (checkedPatch.browserProfiles !== undefined) {
@@ -801,30 +807,6 @@ export interface CustomMcpServer {
   env: Record<string, string>;
 }
 
-const customMcpEntrySchema = z
-  .object({
-    command: z.string().min(1),
-    args: z.array(z.string()).optional(),
-    env: z.record(z.string(), z.string()).optional(),
-    enabled: z.boolean().optional(),
-  })
-  .strict();
-
-const CUSTOM_MCP_NAME = /^[a-z][a-z0-9_-]{0,31}$/;
-/** Server keys the harness mounts itself — a custom entry must never
- * shadow or clobber one of these across any driver's namespace. */
-const RESERVED_MCP_NAMES = new Set([
-  "ogb",
-  "computer",
-  "agents",
-  "composio",
-  "browser",
-  "phone",
-  "dweb",
-  "openmausbot_connectors",
-  "openmausbot_phone",
-]);
-
 const reportedMcpSkips = new Set<string>();
 function skipMcpEntry(name: string, why: string): void {
   const key = `${name}: ${why}`;
@@ -837,28 +819,20 @@ function skipMcpEntry(name: string, why: string): void {
 export function customMcpServers(cfg: AppConfig): Record<string, CustomMcpServer> {
   const out: Record<string, CustomMcpServer> = {};
   for (const [name, raw] of Object.entries(cfg.mcpServers ?? {})) {
-    if (!CUSTOM_MCP_NAME.test(name)) {
-      skipMcpEntry(name, "server names are lowercase letters, digits, _ or - (max 32 chars), starting with a letter");
-      continue;
-    }
-    if (RESERVED_MCP_NAMES.has(name)) {
-      skipMcpEntry(name, "that name is reserved for a built-in server — pick another");
-      continue;
-    }
     if (raw && typeof raw === "object" && "url" in raw) {
       skipMcpEntry(name, 'only stdio servers ("command") are supported so far — HTTP transports are a planned follow-up');
       continue;
     }
-    const parsed = customMcpEntrySchema.safeParse(raw);
-    if (!parsed.success) {
-      skipMcpEntry(name, `invalid entry (${parsed.error.issues[0]?.message ?? "schema mismatch"}) — expected { "command": "npx", "args": [...], "env": { ... } }`);
+    const parsed = parseStoredMcpServer(name, raw);
+    if (!parsed.ok) {
+      skipMcpEntry(name, `${parsed.error} Expected { "command": "npx", "args": [...], "env": { ... } }`);
       continue;
     }
-    if (parsed.data.enabled === false) continue;
+    if (!parsed.server.enabled) continue;
     out[name] = {
-      command: parsed.data.command,
-      args: parsed.data.args ?? [],
-      env: parsed.data.env ?? {},
+      command: parsed.server.command,
+      args: parsed.server.args,
+      env: parsed.server.env,
     };
   }
   return out;
