@@ -57,13 +57,21 @@ desktop-first agent app and adopt these points as requirements:
    /api/auth/stream-ticket` mints a purpose-tagged 5-minute ticket and only
    that rides `/api/events?ticket=`. Same rule for any future WebSocket.
 4. **Browser clients use a cookie, not local storage.** `httpOnly`,
-   `SameSite=Lax`, named per **port plus an instance hash** so two servers
-   on one host never clobber each other's session.
+   `SameSite=Lax`, `Secure` whenever the request arrived over HTTPS, named
+   per **port plus an instance hash**. The name only stops two servers on
+   one host from overwriting each other's cookie; browsers still send a
+   cookie to every port on a host, so isolation between instances comes
+   from distinct hostnames, not names. Plain HTTP on a LAN carries the
+   cookie in clear and is documented as private-network-only.
 5. **Scopes from day one, small.** `client` (chats, rooms, routines,
    approvals) and `admin` (pairing, revocation, engines and MCP config,
-   settings). Every route declares its scope in one table; a route without
-   one fails typecheck. Loopback keeps its implicit `admin` in v1 so the
-   desktop app is unchanged; a config flag later requires sessions
+   settings). Admin routes are listed in one table next to the gate; the
+   rest need `client`. Loopback keeps its implicit `admin` in v1 so the
+   desktop app is unchanged, which makes one rule load-bearing: **a proxy
+   must never rewrite `Host` to loopback**, or every remote request becomes
+   the owner. The Docker stack forwards the real `Host` and relies on
+   sessions (its shared password becomes optional); the self-hosting doc
+   says so for any other proxy. A config flag later requires sessions
    everywhere for hosted tenants.
 6. **Endpoints are hints, ranked.** The server advertises loopback, LAN,
    private-network (Tailscale) and HTTPS endpoints; the user's default is
@@ -87,7 +95,13 @@ desktop-first agent app and adopt these points as requirements:
     URL, private network, managed tunnel). Launch provenance is UX only.
 11. **Brute-force protection the reference lacks.** Five failed exchanges
     per source in a minute lock pairing for that source for ten minutes,
-    and every failure is logged with a reason.
+    thirty across all sources lock everyone for one, and every failure is
+    logged with the source. The source is the first `X-Forwarded-For` hop
+    only when the connection comes from a proxy on the same machine (the
+    server binds loopback, and Caddy overwrites any forwarded header a
+    client sent); otherwise it is the socket peer. A consumed code
+    presented again by the same source within a minute gets the same
+    answer, so a lost response does not strand a device.
 
 ## Transports
 
@@ -120,7 +134,10 @@ into the renderer bundle; the served UI keeps using relative paths.
 The session layer is the seam the enterprise identity track extends: a
 session gains a `userId` when `users` arrive, and an OIDC proxy in front
 (Authentik, oauth2-proxy) can mint sessions from identity headers instead
-of pairing codes. Nothing here is thrown away by that step.
+of pairing codes. Those headers are trusted only from the configured proxy
+(the loopback peer, with client-sent copies stripped), never from a direct
+client, and that boundary gets its own test. Nothing here is thrown away
+by that step.
 
 ## Non-goals (v1)
 
