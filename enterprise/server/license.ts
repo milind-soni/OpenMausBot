@@ -20,10 +20,10 @@ export const claimsSchema = z.object({
   customer: z.string().min(1),
   /** Entitlement ids, e.g. whitelabel, sso, admin, budgets. Unknown ids are carried, not rejected. */
   features: z.array(z.string().min(1)),
-  /** ISO date the key was issued. */
-  issued: z.string().min(1),
-  /** ISO date the key stops working, or null for perpetual. */
-  expires: z.string().nullable(),
+  /** ISO date (YYYY-MM-DD) the key was issued. */
+  issued: z.iso.date("issued must be a YYYY-MM-DD date"),
+  /** ISO date (YYYY-MM-DD) the key stops working, or null for perpetual. */
+  expires: z.iso.date("expires must be a YYYY-MM-DD date").nullable(),
 });
 
 export type LicenseClaims = z.infer<typeof claimsSchema>;
@@ -67,9 +67,6 @@ export function verifyLicenseKey(
   const claims = result.data;
   if (claims.expires !== null) {
     const expires = new Date(claims.expires);
-    if (Number.isNaN(expires.getTime())) {
-      throw new Error(`OMB_LICENSE_KEY has an unreadable expiry "${claims.expires}"; ask for the key to be reissued`);
-    }
     if ((options.now ?? new Date()) >= expires) {
       throw new Error(`OMB_LICENSE_KEY expired on ${claims.expires}; renew it to keep enterprise features`);
     }

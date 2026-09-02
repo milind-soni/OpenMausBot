@@ -74,14 +74,26 @@ export async function loadEnterpriseLayer(
   }
 }
 
-export function editionStatus(): EditionStatus {
-  return current;
+/** A license that expires while the server keeps running stops granting
+ * features at that moment, not at the next restart. */
+function expired(now: number): boolean {
+  if (current.edition !== "enterprise" || !current.expiresAt) return false;
+  return now >= new Date(current.expiresAt).getTime();
+}
+
+export function editionStatus(now: number = Date.now()): EditionStatus {
+  if (!expired(now)) return current;
+  return {
+    edition: "oss",
+    features: [],
+    notice: `enterprise layer disabled: OMB_LICENSE_KEY expired on ${current.expiresAt}; renew it to keep enterprise features`,
+  };
 }
 
 /** Feature gates in core ask this and nothing else. Unknown ids are simply not
  * granted, and the open-source edition always carries an empty feature list. */
-export function entitled(feature: string): boolean {
-  return current.features.includes(feature);
+export function entitled(feature: string, now: number = Date.now()): boolean {
+  return !expired(now) && current.features.includes(feature);
 }
 
 /** One line for the startup log. */

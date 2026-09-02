@@ -52,6 +52,15 @@ describe("license keys", () => {
     expect(verifyLicenseKey(perpetual, { publicKeys: [x], now: new Date("2099-01-01") }).expires).toBeNull();
   });
 
+  it("refuses dates that are not YYYY-MM-DD on both sides", () => {
+    const { x, privateJwk } = keypair();
+    expect(() => issueLicenseKey({ ...claims, expires: "not-a-date" }, privateJwk)).toThrow(/expires must be a YYYY-MM-DD date/);
+    expect(() => issueLicenseKey({ ...claims, issued: "2026-9-2" }, privateJwk)).toThrow(/issued must be a YYYY-MM-DD date/);
+    const forged = Buffer.from(JSON.stringify({ ...claims, expires: "someday" })).toString("base64url");
+    const [prefix, , signature] = issueLicenseKey(claims, privateJwk).split(".");
+    expect(() => verifyLicenseKey(`${prefix}.${forged}.${signature}`, { publicKeys: [x] })).toThrow(/altered/);
+  });
+
   it("refuses to issue claims that would not verify", () => {
     const { privateJwk } = keypair();
     // SAFETY: deliberately wrong shape to exercise the issuer's own validation

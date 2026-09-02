@@ -52,6 +52,19 @@ describe("enterprise hook point", () => {
     expect(describeEdition(status)).toBe("openmausbot enterprise edition for Built: admin");
   });
 
+  it("stops granting features the moment the license expires, without a restart", async () => {
+    const dir = fakeLayer(`export function register() { return { customer: "Acme", features: ["sso"], expiresAt: "2027-01-01" }; }`);
+    await loadEnterpriseLayer({ dir, licenseKey: "k" });
+    const before = new Date("2026-12-31T23:59:59Z").getTime();
+    const after = new Date("2027-01-01T00:00:00Z").getTime();
+    expect(entitled("sso", before)).toBe(true);
+    expect(entitled("sso", after)).toBe(false);
+    expect(editionStatus(before).edition).toBe("enterprise");
+    const lapsed = editionStatus(after);
+    expect(lapsed.edition).toBe("oss");
+    expect(lapsed.notice).toMatch(/expired on 2027-01-01; renew it/);
+  });
+
   it("degrades to open-source with the layer's own message when the key is refused", async () => {
     const dir = fakeLayer(`export function register() { throw new Error("license expired on 2025-01-01"); }`);
     const status = await loadEnterpriseLayer({ dir, licenseKey: "stale" });

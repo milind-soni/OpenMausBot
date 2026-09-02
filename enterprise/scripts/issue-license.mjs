@@ -12,7 +12,7 @@
 //
 // The private key never enters the repo, a chat, or a container image.
 import { generateKeyPairSync } from "node:crypto";
-import { chmodSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 
@@ -45,9 +45,9 @@ if (command === "keygen") {
   const out = opts.out ?? DEFAULT_KEY_PATH;
   if (existsSync(out)) fail(`${out} already exists; move it away first (a lost key means reissuing every customer)`);
   const { publicKey, privateKey } = generateKeyPairSync("ed25519");
-  mkdirSync(dirname(out), { recursive: true });
-  writeFileSync(out, JSON.stringify(privateKey.export({ format: "jwk" }), null, 2) + "\n");
-  chmodSync(out, 0o600);
+  mkdirSync(dirname(out), { recursive: true, mode: 0o700 });
+  // created owner-only in one step: no window where a 0666 file holds the key
+  writeFileSync(out, JSON.stringify(privateKey.export({ format: "jwk" }), null, 2) + "\n", { mode: 0o600, flag: "wx" });
   console.log(`signing key written to ${out} (keep it out of the repo; back it up)`);
   console.log(`append this to LICENSE_PUBLIC_KEYS in enterprise/server/license.ts:\n  "${publicKey.export({ format: "jwk" }).x}",`);
 } else if (command === "issue") {
