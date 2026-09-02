@@ -1439,6 +1439,32 @@ final class Session: ObservableObject {
         catch { actionError = error.localizedDescription; return nil }
     }
 
+    /// A reply as utterances the computer can voice, or nil when it has no
+    /// voice set up (so the call can say so rather than fall silent).
+    func prepareSpeech(_ text: String, voiceId: String?) async throws -> PreparedSpeech {
+        guard let client else { throw APIError.transport("This computer is offline.") }
+        return try await client.prepareSpeech(text: text, voiceId: voiceId)
+    }
+
+    func speak(_ text: String, voiceId: String?) async throws -> Data {
+        guard let client else { throw APIError.transport("This computer is offline.") }
+        return try await client.speak(text: text, voiceId: voiceId)
+    }
+
+    /// Save the ElevenLabs key on the computer. Returns the server's
+    /// reason when it rejects the key, nil on success.
+    func updateVoiceKey(_ key: String) async -> String? {
+        guard let client else { return "This computer is offline." }
+        do { try await client.updateVoiceKey(key); return nil }
+        catch { return error.localizedDescription }
+    }
+
+    func updateVoiceProvider(_ provider: String) async -> String? {
+        guard let client else { return "This computer is offline." }
+        do { try await client.updateVoiceProvider(provider); return nil }
+        catch { return error.localizedDescription }
+    }
+
     func configStatus() async -> ConfigStatus? {
         guard let client else { return nil }
         return try? await client.config()

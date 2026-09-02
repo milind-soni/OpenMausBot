@@ -124,6 +124,16 @@ struct SettingsView: View {
                             SettingsIcon(symbol: "link", color: .blue)
                         }
                     }
+
+                    NavigationLink {
+                        VoiceSettingsView()
+                    } label: {
+                        Label {
+                            Text("Voice")
+                        } icon: {
+                            SettingsIcon(symbol: "phone.fill", color: .green)
+                        }
+                    }
                 }
             }
         }

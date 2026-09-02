@@ -55,6 +55,22 @@ final class SpeechDictation: ObservableObject {
     private var generation = 0
     private var startTask: Task<Void, Never>?
 
+    /// Call mode. Composer dictation runs until the person taps stop; a
+    /// call has to notice when they have finished a sentence. The same
+    /// silence endpointer as the desktop helper: the turn ends `endpointGap`
+    /// after the transcript last *changed* — the recognizer keeps
+    /// re-emitting an unchanged partial, and only a change counts. An
+    /// empty turn never ends: a call may be quiet for as long as the
+    /// person needs before they begin.
+    private var endpointGap: TimeInterval?
+    private var onTurnEnded: ((String) -> Void)?
+    private var lastTranscriptChange = Date()
+    private var endpointTimer: Timer?
+    /// `.playAndRecord` with voice-chat processing for a call (the phone's
+    /// echo cancellation, and playback stays routed); plain `.record` for
+    /// the composer.
+    private var forCall = false
+
     func toggle(capturing base: String) {
         if isListening || isStarting {
             stop()
@@ -69,6 +85,27 @@ final class SpeechDictation: ObservableObject {
         self.base = base.trimmingCharacters(in: .whitespacesAndNewlines)
         transcript = ""
         accumulator = DictationAccumulator()
+        forCall = false
+        endpointGap = nil
+        onTurnEnded = nil
+        isStarting = true
+        generation += 1
+        let gen = generation
+        startTask = Task { await actuallyStart(generation: gen) }
+    }
+
+    /// One turn of a call: listen until `gap` of silence follows speech,
+    /// then stop and hand the transcript to `onTurn`. Stopping any other
+    /// way (hang up, interruption) ends the turn without a callback.
+    func listenForTurn(endpointAfter gap: TimeInterval, onTurn: @escaping (String) -> Void) {
+        guard !isListening, !isStarting else { return }
+        error = nil
+        base = ""
+        transcript = ""
+        accumulator = DictationAccumulator()
+        forCall = true
+        endpointGap = gap
+        onTurnEnded = onTurn
         isStarting = true
         generation += 1
         let gen = generation
@@ -82,7 +119,17 @@ final class SpeechDictation: ObservableObject {
         isStarting = false
         stopping = true
         isListening = false
+        onTurnEnded = nil
         teardown()
+    }
+
+    private func endTurn() {
+        guard let onTurnEnded, isListening else { return }
+        let heard = transcript
+        // stop() clears the callback; take it first
+        self.onTurnEnded = nil
+        stop()
+        onTurnEnded(heard)
     }
 
     // MARK: - Authorization
@@ -142,10 +189,17 @@ final class SpeechDictation: ObservableObject {
         self.recognizer = recognizer
 
         let session = AVAudioSession.sharedInstance()
-        // `.record` rather than `.playAndRecord`: this is composer
-        // dictation, not a call, and holding the playback route would
-        // duck whatever else is on the phone for no reason.
-        try session.setCategory(.record, mode: .measurement)
+        if forCall {
+            try session.setCategory(
+                .playAndRecord, mode: .voiceChat,
+                options: [.defaultToSpeaker, .allowBluetooth]
+            )
+        } else {
+            // `.record` rather than `.playAndRecord`: this is composer
+            // dictation, not a call, and holding the playback route would
+            // duck whatever else is on the phone for no reason.
+            try session.setCategory(.record, mode: .measurement)
+        }
         try session.setActive(true, options: .notifyOthersOnDeactivation)
 
         let engine = AVAudioEngine()
@@ -185,6 +239,17 @@ final class SpeechDictation: ObservableObject {
 
         stopping = false
         isListening = true
+        lastTranscriptChange = Date()
+        if let gap = endpointGap {
+            let timer = Timer(timeInterval: 0.1, repeats: true) { [weak self] _ in
+                Task { @MainActor in
+                    guard let self, self.isListening, !self.transcript.isEmpty else { return }
+                    if Date().timeIntervalSince(self.lastTranscriptChange) >= gap { self.endTurn() }
+                }
+            }
+            RunLoop.main.add(timer, forMode: .common)
+            endpointTimer = timer
+        }
 
         recognitionTask = recognizer.recognitionTask(with: request) { [weak self] result, recognitionError in
             Task { @MainActor in
@@ -210,15 +275,20 @@ final class SpeechDictation: ObservableObject {
         if let result {
             // On-device recognition starts a fresh result after a pause,
             // dropping what came before it. The accumulator keeps it.
-            transcript = accumulator.accept(
+            let next = accumulator.accept(
                 text: result.bestTranscription.formattedString,
                 start: result.bestTranscription.segments.first?.timestamp
             )
+            if next != transcript {
+                transcript = next
+                lastTranscriptChange = Date()
+            }
             // Composer dictation does not wait for isFinal — the last
             // partial is what you send. If the recognizer finalizes on
-            // its own (rare without endAudio), just stop listening.
+            // its own (rare without endAudio), just stop listening; on a
+            // call that is the turn ending.
             if result.isFinal {
-                stop()
+                if onTurnEnded != nil { endTurn() } else { stop() }
                 return
             }
         }
@@ -237,6 +307,8 @@ final class SpeechDictation: ObservableObject {
     }
 
     private func teardown() {
+        endpointTimer?.invalidate()
+        endpointTimer = nil
         // Drop the tap before ending the request: a buffer that arrives
         // after endAudio() can fail the task instead of being ignored.
         if let engine = audioEngine {
