@@ -214,7 +214,7 @@ export function McpServersPanel() {
             <button
               type="button"
               onClick={() => void load()}
-              disabled={busy === "load"}
+              disabled={busy !== null}
               className="rounded-lg p-2 text-ink-secondary transition-colors hover:bg-raised hover:text-ink disabled:opacity-40"
               aria-label="Refresh MCP servers"
             >
@@ -222,13 +222,14 @@ export function McpServersPanel() {
             </button>
             <button
               type="button"
+              disabled={busy !== null}
               onClick={() => {
                 setEditing("new");
                 setDraft(EMPTY_DRAFT);
                 setError(null);
                 setNotice(null);
               }}
-              className="flex items-center gap-1.5 rounded-lg bg-accent px-3 py-2 text-[12.5px] font-medium text-white"
+              className="flex items-center gap-1.5 rounded-lg bg-accent px-3 py-2 text-[12.5px] font-medium text-white disabled:opacity-40"
             >
               <Plus size={14} /> Add server
             </button>
@@ -294,7 +295,7 @@ export function McpServersPanel() {
               <button type="button" onClick={closeEditor} className="rounded-lg px-3 py-2 text-[12.5px] text-ink-secondary hover:bg-raised">Cancel</button>
               <button
                 type="button"
-                disabled={busy === "save"}
+                disabled={busy !== null}
                 onClick={() => void save()}
                 className="flex items-center gap-1.5 rounded-lg bg-accent px-3.5 py-2 text-[12.5px] font-medium text-white disabled:opacity-50"
               >
