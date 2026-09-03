@@ -1,0 +1,14 @@
+{
+  "manifest_version": 3,
+  "name": "OpenMausBot Test Extension",
+  "version": "1.0.0",
+  "description": "Marks the page so tests can prove a content script ran.",
+  "permissions": ["storage"],
+  "content_scripts": [
+    {
+      "matches": ["http://*/*", "https://*/*"],
+      "js": ["content.js"],
+      "run_at": "document_idle"
+    }
+  ]
+}

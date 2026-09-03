@@ -1,0 +1,83 @@
+---
+title: Browser extensions
+description: Add unpacked Chrome extensions to the built-in browser, and understand which parts of them work.
+icon: Puzzle
+---
+
+The built-in browser can load Chrome extensions, from the Chrome Web Store or from an unpacked folder. Add one in **Settings → Experimental → Browser extensions**.
+
+This is not "use my real Chrome". The built-in browser is the Chromium inside OpenMausBot, and it implements only part of the Chrome extension API. Some extensions work well here, and some cannot work at all.
+
+## Add an extension
+
+1. Turn on the built-in browser in **Settings → Experimental**.
+2. Open **Settings → Experimental → Browser extensions**.
+3. Paste a Chrome Web Store link (or use **Add unpacked folder…** for a folder containing a `manifest.json`).
+4. Read the review dialog: what the extension can reach, and what will not work.
+5. Turn the switch on.
+
+OpenMausBot downloads the extension itself rather than going through Chrome. Before anything is written to disk it checks that the archive is signed by the key belonging to the extension id you asked for, and that the archive has not been altered since it was signed. An archive that fails either check is refused.
+
+Updates are manual. Paste the same link again to fetch a newer build; it arrives switched off, so a new version is reviewed before it runs.
+
+An extension arrives switched off. OpenMausBot copies the folder into its own data directory and records a hash of it, so editing the original folder afterwards cannot change what runs. If the copied files change, the extension is switched off and you are asked to remove and add it again.
+
+Changes take effect on the next page load. Turning an extension on, off, or replacing it does not touch a page a bot already has open — that page keeps running the code it was loaded with until it navigates. If an extension seems not to react after you change something, navigate the bot's browser once and try again.
+
+Only you can install an extension. No bot has a tool that can add, enable, or remove one — an extension runs inside every page a bot opens, which is more than a bot is allowed to decide.
+
+## Which computer the bot is using matters
+
+| Bot's computer | Browser there | Extensions |
+| --- | --- | --- |
+| Built-in browser | Chromium inside OpenMausBot | Yes, with the limits below |
+| Cloud box | Real Google Chrome | Yes, Web Store installs only, no limits |
+| Local VM, VPS | Firefox | No — these are Chrome extensions |
+
+On a **Cloud box** the bot drives real Chrome, so an extension you enabled in Settings is installed there by Chrome itself, from the Web Store, and every part of it works — side panels, toolbar popups, screenshots, content blocking. OpenMausBot never copies files to the box; it tells Chrome which store ids to have installed, and Chrome downloads, updates, and removes them. That means only extensions added from the Web Store reach the box; an unpacked folder cannot, because real Chrome no longer accepts unpacked extensions from a running program. Changes apply the next time the bot opens a page there.
+
+The **Local VM** and **VPS** desktops run Firefox, which has a different extension system. Chrome extensions do not apply there.
+
+The rest of this page is about the built-in browser.
+
+## Where extensions apply
+
+Extensions load per browser session, and OpenMausBot's browser profiles are sessions. One installed extension therefore applies to **every bot** and every named profile.
+
+| Profile | Extensions |
+| --- | --- |
+| A bot's own session | Yes |
+| A named profile (shared by several bots) | Yes |
+| Guest | Never |
+
+Guest browsing uses a throwaway in-memory session. Chromium refuses to load extensions there, and a throwaway profile should not inherit a durable identity anyway.
+
+Deleting a browser profile erases that profile's browser data, which includes anything an extension stored in it.
+
+## What works
+
+- **Content scripts.** The strongest case. Styling, DOM tweaks, page helpers, and internal tools built around `content_scripts` generally work.
+- **Background service workers.** They run, and content scripts can message them.
+- **`chrome.storage.local`**, `chrome.scripting`, `chrome.runtime`, `chrome.i18n`, and parts of `chrome.tabs`.
+
+## What does not
+
+- **Content blockers.** `declarativeNetRequest` is not available, so uBlock Origin Lite, AdGuard, and similar extensions cannot filter. OpenMausBot's own network policy also takes precedence over `chrome.webRequest`, so blocking through that route does not work either.
+- **Toolbar popups.** There is no extension toolbar in the browser panel, so anything whose interface is a popup button is unreachable. This affects most password managers.
+- **Side panels**, keyboard shortcuts (`commands`), `chrome.action`, `alarms`, `webNavigation`, `windows`, `cookies`, `identity`, and `chrome.storage.sync`.
+
+The review dialog lists these for the specific extension you are adding, rather than leaving you to discover them.
+
+## What is refused outright
+
+Some permissions are refused at install because they fight the browser's safety model, not merely because they would not work:
+
+`nativeMessaging`, `debugger`, `proxy`, `management`, `downloads`, `tabCapture`, `desktopCapture`.
+
+## Your bots can see what an extension does
+
+A content script changes the page, and a bot reads the page. When any extension is enabled, every page a bot reads carries a note saying so, and the bot is told to treat what it finds as page content rather than instructions. The extensions are never named to the bot.
+
+An extension that draws a fixed overlay — a banner, a floating panel, a toolbar of its own — sits on top of the page for your bots too. If that overlay covers a control a bot needs, the bot refuses the click rather than hitting the wrong element, and reports that something now covers its target. Two extensions that both pin a bar to the same edge will cover each other the same way. This is worth knowing before you enable several at once.
+
+Treat an enabled extension as part of what your bots run on. Add only what you trust.

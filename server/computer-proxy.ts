@@ -37,6 +37,8 @@ import {
 } from "./computer-observation.ts";
 import { CONTROL_REFUSAL, createControlClient } from "./control-client.ts";
 import {
+  boxExtensionPolicyCommand,
+  enabledStoreExtensionIds,
   ensureRemoteCuaCommand,
   isolatedRemoteCommand,
   MAX_REMOTE_COMMAND_LENGTH,
@@ -1089,6 +1091,10 @@ async function call(id: unknown, name: string, args: any) {
       ENV,
       GEOMETRY,
       CHROME_PROFILE_SETUP,
+      // Extensions the person enabled in Settings, as a managed policy Chrome
+      // reads on launch. Read at open time so a change made mid-session
+      // reaches the next launch rather than the next turn.
+      boxExtensionPolicyCommand(enabledStoreExtensionIds()),
       `(google-chrome ${CHROME_DEBUG_FLAGS} ${q} || chromium ${CHROME_DEBUG_FLAGS} ${q} || chromium-browser ${CHROME_DEBUG_FLAGS} ${q} || xdg-open ${q}) >/dev/null 2>&1 &`,
       'for i in 1 2 3 4 5 6 7 8 9 10 11 12; do xdotool search --onlyvisible --class "chrom" >/dev/null 2>&1 && break; sleep 0.25; done',
       ensureRemoteCuaCommand(),

@@ -243,6 +243,8 @@ type SkillRecordingPayload = {
         /** Native page focus/input means the person has taken the wheel. */
         onUserInteraction?(cb: (event: { botId: string; profile: string }) => void): () => void;
         forgetProfile?(partitionId: string): Promise<{ dropped: number }>;
+        /** Reload installed extensions into every live browser session. */
+        syncExtensions?(): Promise<{ sessions: number; errors: string[] }>;
         close(botId: string): Promise<boolean>;
         onState(cb: (state: BrowserSurfaceState) => void): () => void;
       };
@@ -263,7 +265,7 @@ type SkillRecordingPayload = {
         onState(cb: (state: DesktopWorkspaceState) => void): () => void;
       };
       /** Native folder picker; resolves null when the user cancels. */
-      pickFolder?(current?: string): Promise<string | null>;
+      pickFolder?(current?: string, title?: string): Promise<string | null>;
       /** Writes the redacted diagnostics report to a user-chosen file;
        * resolves the path, or null when cancelled. */
       exportDiagnostics?(): Promise<string | null>;

@@ -72,6 +72,7 @@ const { browserPartition, browserProfilePartition } = require("./browser-snapsho
 const { createBrowserHost } = require("./browser-host.cjs");
 const { browserSurfaceSupported } = require("./browser-platform.cjs");
 const { clearBrowserPartitionSession } = require("./browser-partition-cleanup.cjs");
+const { createBrowserExtensionCoordinator } = require("./browser-extensions.cjs");
 const {
   postBrowserConnection,
   removeBrowserConnectionDescriptor: removeBrowserConnectionDescriptorFile,
@@ -102,6 +103,24 @@ let desktopWorkspaceOwner = null;
 let browserSurface = null;
 let browserHost = null;
 const browserSurfaceIsSupported = browserSurfaceSupported(process.platform);
+/** Loads reviewed extensions into browser sessions. One per app: extensions
+ * are per-session, and every bot/profile session goes through this.
+ *
+ * Built on first use, not at module scope: app.getPath resolves properly
+ * only once Electron has settled its paths. Null on platforms where the
+ * browser surface is fail-closed, so nothing is ever loaded into a surface
+ * that does not exist. */
+let browserExtensionCoordinator = null;
+function browserExtensions() {
+  if (!browserSurfaceIsSupported) return null;
+  if (!browserExtensionCoordinator) {
+    browserExtensionCoordinator = createBrowserExtensionCoordinator({
+      dataDir: process.env.OMB_DATA_DIR || path.join(app.getPath("home"), ".openmausbot"),
+      log: (message) => slog(message),
+    });
+  }
+  return browserExtensionCoordinator;
+}
 // Positive server assertions survive renderer reloads and surface recreation.
 // A release is deliberately local-panel-only; see browser-control-sync.cjs.
 const browserControlHolds = new Set();
@@ -887,6 +906,7 @@ async function startServerOn(port) {
     try {
       if (receiveBrowserControlHold(message)) return;
       if (receiveBrowserLifecycleCleanup(proc, message)) return;
+      if (browserExtensions()?.handlePrivateMessage(message)) return;
     } catch (error) {
       slog(`browser private sync rejected: ${error?.message ?? error}`);
     }
@@ -1273,6 +1293,7 @@ async function startBrowserSurface(owner) {
       onUserInteraction: (state) => {
         if (!owner.isDestroyed() && !owner.webContents.isDestroyed()) owner.webContents.send("browser:user-interaction", state);
       },
+      extensions: browserExtensions(),
     });
     for (const botId of browserControlHolds) surface.setHumanControl(botId, true);
     browserSurface = surface;
@@ -1371,6 +1392,15 @@ ipcMain.handle("browser:forget-profile", localOnly("browser:forget-profile", asy
   browserHost?.revokeCapabilitiesForProfile(id);
   await clearBrowserPartition(browserProfilePartition(id));
   return { dropped };
+}));
+
+// Split-process development has no utility parent port, so the server's
+// private message never arrives. The renderer calls this after a mutation
+// commits; both paths are idempotent. Same dual mechanism as forgetProfile.
+ipcMain.handle("browser:sync-extensions", localOnly("browser:sync-extensions", async () => {
+  const coordinator = browserExtensions();
+  if (!coordinator) return { sessions: 0, errors: [] };
+  return coordinator.syncAll();
 }));
 
 ipcMain.on("screen:preview-intent", (event) => {
@@ -1793,10 +1823,15 @@ ipcMain.handle("engine:open-terminal", localOnly("engine:open-terminal", async (
 // renderer sandboxed and let the main process open only ordinary web links.
 // A bot's working folder: the native picker, so the path is real and the
 // user never types one. Returns null when they cancel.
-ipcMain.handle("desktop:pick-folder", localOnly("desktop:pick-folder", async (event, current) => {
+ipcMain.handle("desktop:pick-folder", localOnly("desktop:pick-folder", async (event, current, title) => {
   const win = BrowserWindow.fromWebContents(event.sender) ?? undefined;
+  // The title is renderer-supplied, so it is bounded and stripped of control
+  // characters before it reaches a native dialog.
+  const heading = typeof title === "string" && title.trim()
+    ? title.replace(/[\u0000-\u001f\u007f]/g, "").trim().slice(0, 80)
+    : "Choose a working folder";
   const result = await dialog.showOpenDialog(win, {
-    title: "Choose a working folder",
+    title: heading,
     properties: ["openDirectory", "createDirectory"],
     ...(typeof current === "string" && current ? { defaultPath: current } : {}),
   });

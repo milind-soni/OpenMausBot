@@ -2,6 +2,10 @@
 // The box command API is the transport boundary: the daemon stays loopback-only
 // inside the VM and OpenMausBot never exposes another inbound port.
 
+import { readFileSync } from "node:fs";
+import { homedir } from "node:os";
+import { join } from "node:path";
+
 export const REMOTE_CUA_VERSION = "0.20.0";
 export const REMOTE_CUA_EXECUTABLE = "/opt/ogb/cua-driver";
 export const REMOTE_CUA_SOCKET = "/opt/ogb/run/cua.sock";
@@ -116,6 +120,74 @@ export function isolatedRemoteCommand(command: string): string {
 
 /** Start the already-installed daemon after a box resume. This is cheap when
  * it is healthy and intentionally does not install anything on the hot path. */
+/** Where Chrome on the box reads managed policy. Both paths are written:
+ * the launch line tries google-chrome first and chromium second, and each
+ * reads only its own directory. */
+export const REMOTE_EXTENSION_POLICY_PATHS = [
+  "/etc/opt/chrome/policies/managed/openmausbot-extensions.json",
+  "/etc/chromium/policies/managed/openmausbot-extensions.json",
+];
+const CHROME_UPDATE_URL = "https://clients2.google.com/service/update2/crx";
+const STORE_EXTENSION_ID = /^[a-p]{32}$/;
+
+/**
+ * The Web Store extensions a person has enabled, read straight from the
+ * state file server/browser-extensions.ts writes.
+ *
+ * Deliberately not an import of that module: this file is bundled into the
+ * cloud-box proxy, which stays small and free of zod and the config loader.
+ * A hand-rolled read of one JSON file is enough here, because the box never
+ * receives our bytes — Chrome on the box installs from the store by id, so
+ * the integrity check that matters for the built-in browser has no
+ * equivalent to enforce. Local (unpacked) installs are skipped: the store
+ * is the only source real Chrome can be told to install from.
+ */
+export function enabledStoreExtensionIds(dataDir = process.env.OMB_DATA_DIR ?? join(homedir(), ".openmausbot")): string[] {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(readFileSync(join(dataDir, "browser-extensions.json"), "utf8"));
+  } catch {
+    return [];
+  }
+  if (!parsed || typeof parsed !== "object") return [];
+  const records = (parsed as { extensions?: unknown }).extensions;
+  if (!Array.isArray(records)) return [];
+  const ids: string[] = [];
+  for (const record of records) {
+    if (!record || typeof record !== "object") continue;
+    const { id, enabled } = record as { id?: unknown; enabled?: unknown };
+    if (enabled !== true || typeof id !== "string" || !STORE_EXTENSION_ID.test(id)) continue;
+    if (!ids.includes(id)) ids.push(id);
+  }
+  return ids.sort();
+}
+
+/**
+ * Tell Chrome on the box which store extensions to have installed.
+ *
+ * Real Chrome dropped the --load-extension flag in branded builds (137), so
+ * the reliable way to put an extension into it programmatically is managed
+ * policy: ExtensionInstallForcelist makes Chrome download, install, keep
+ * updated, and — when an id leaves the list — remove the extension itself.
+ * That last part is what gives enable and disable in Settings a meaning on
+ * the box. The list is therefore always written, even when empty.
+ *
+ * Runs before Chrome launches so a fresh profile sees it at startup; a
+ * Chrome already running picks it up on its next policy refresh.
+ */
+export function boxExtensionPolicyCommand(ids: string[]): string {
+  const forcelist = ids
+    .filter((id) => STORE_EXTENSION_ID.test(id))
+    .map((id) => `${id};${CHROME_UPDATE_URL}`);
+  const policy = `${JSON.stringify({ ExtensionInstallForcelist: forcelist }, null, 2)}\n`;
+  const encoded = Buffer.from(policy, "utf8").toString("base64");
+  const directories = REMOTE_EXTENSION_POLICY_PATHS.map((path) => path.slice(0, path.lastIndexOf("/")));
+  return [
+    `sudo mkdir -p ${directories.map(shellQuote).join(" ")}`,
+    ...REMOTE_EXTENSION_POLICY_PATHS.map((path) => `printf %s ${shellQuote(encoded)} | base64 -d | sudo tee ${shellQuote(path)} >/dev/null`),
+  ].join(" && ");
+}
+
 export function ensureRemoteCuaCommand(): string {
   return [
     `if [ -x ${REMOTE_CUA_EXECUTABLE} ]; then`,

@@ -181,6 +181,10 @@ const bridge = {
     setHumanControl: (botId, held, profile) => ipcRenderer.invoke("browser:set-human-control", botId, held, profile),
     /** Wipe a named profile's logins, storage and cache after it is deleted. */
     forgetProfile: (partitionId) => ipcRenderer.invoke("browser:forget-profile", partitionId),
+    /** Converge live browser sessions on the installed-extension set. The
+     * packaged server sends the same request privately; this is the path for
+     * split-process development, and both are idempotent. */
+    syncExtensions: () => ipcRenderer.invoke("browser:sync-extensions"),
     close: (botId) => ipcRenderer.invoke("browser:close", botId),
     onState: (cb) => {
       const handler = (_event, state) => cb(state);
@@ -194,7 +198,7 @@ const bridge = {
     },
   } : undefined,
   /** Native folder picker for a bot's working folder; null when cancelled. */
-  pickFolder: (current) => ipcRenderer.invoke("desktop:pick-folder", current),
+  pickFolder: (current, title) => ipcRenderer.invoke("desktop:pick-folder", current, title),
   /** Writes the redacted diagnostics report to a user-chosen file; resolves
    * the path, or null when the save dialog was cancelled. */
   exportDiagnostics: () => ipcRenderer.invoke("desktop:export-diagnostics"),

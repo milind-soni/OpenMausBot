@@ -81,6 +81,7 @@
   "dependencies": {
     "@trycua/cua-driver": "0.20.0",
     "clsx": "^2.1.1",
+    "fflate": "^0.8.3",
     "lucide-react": "^0.539.0",
     "mdast-util-from-markdown": "^2.0.3",
     "posthog-js": "^1.415.6",
