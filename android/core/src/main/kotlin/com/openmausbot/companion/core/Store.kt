@@ -25,6 +25,21 @@ data class CompanionState(
     val streaming: Map<String, String> = emptyMap(),
     val reasoning: Map<String, String> = emptyMap(),
     val screens: Map<String, ScreenFrame> = emptyMap(),
+    /**
+     * Mid-turn sends the harness is holding until the current turn settles,
+     * by thread. They are deliberately NOT in [messages]: appending one now
+     * would make it the active leaf, and the rest of the running turn would
+     * hang off a line the model never saw. So the harness keeps them and this
+     * is the phone's copy, shown as a row above the chat bar. Identified by
+     * the harness's queueId, never by text.
+     */
+    val pendingQueued: Map<String, List<QueuedSend>> = emptyMap(),
+    /**
+     * queueIds whose drain frame beat the POST's own continuation. A short,
+     * bounded tombstone list, so a slow response cannot re-add a row for a
+     * message that is already in the transcript.
+     */
+    val drainedQueueIds: List<String> = emptyList(),
 ) {
     fun transcript(threadId: String): List<Message> = messages[threadId].orEmpty()
 
@@ -123,12 +138,15 @@ data class CompanionState(
             fleet.bots.forEach { put(it.threadId, it.hasMore ?: false) }
             fleet.groups.forEach { put(it.threadId, it.hasMore ?: false) }
         }
+        // A hydrate can be the first thing this window sees after a turn
+        // settled behind its back, so rows it still holds may already have
+        // drained into these transcripts.
         return copy(
             bots = fleet.bots,
             rooms = fleet.groups,
             messages = hydratedMessages,
             hasMore = hydratedHasMore,
-        )
+        ).reconcileAllQueued()
     }
 
     fun prepend(page: ThreadPage, threadId: String): CompanionState {
@@ -147,7 +165,7 @@ data class CompanionState(
         return copy(
             messages = messages + (threadId to merged),
             hasMore = page.hasMore?.let { hasMore + (threadId to it) } ?: hasMore,
-        )
+        ).reconcileQueued(threadId)
     }
 
     fun versions(message: Message, threadId: String): List<Message> {
@@ -181,6 +199,7 @@ data class CompanionState(
             if (frame.message.role == Message.Role.BOT && frame.message.kind == Message.Kind.TEXT) {
                 result = result.clearStream(frame.threadId)
             }
+            frame.message.queueId?.let { result = result.retireQueued(it, frame.threadId) }
             result
         }
 
@@ -220,6 +239,63 @@ data class CompanionState(
         reasoning = reasoning - threadId,
     )
 
+    // MARK: - Held mid-turn sends
+
+    /**
+     * Remember a message the harness said it is holding.
+     *
+     * The drain frame can arrive before the POST that created the entry has
+     * even returned — the harness settles a turn on its own clock. When it
+     * already has, the words are in the transcript and adding a row for them
+     * would show the message twice, so the tombstone wins and is spent.
+     */
+    fun rememberQueued(send: QueuedSend, threadId: String): CompanionState {
+        if (send.queueId in drainedQueueIds) {
+            return copy(drainedQueueIds = drainedQueueIds - send.queueId)
+        }
+        val waiting = pendingQueued[threadId].orEmpty()
+        if (waiting.any { it.queueId == send.queueId }) return this
+        return copy(pendingQueued = pendingQueued + (threadId to (waiting + send)))
+    }
+
+    /**
+     * Drop a row with no tombstone — the entry is gone from the harness too,
+     * so nothing can arrive later to be matched against it.
+     */
+    fun forgetQueued(queueId: String, threadId: String): CompanionState {
+        val waiting = pendingQueued[threadId] ?: return this
+        val rest = waiting.filterNot { it.queueId == queueId }
+        return copy(
+            pendingQueued = if (rest.isEmpty()) {
+                pendingQueued - threadId
+            } else {
+                pendingQueued + (threadId to rest)
+            },
+        )
+    }
+
+    /** Drop a row because its line landed, and leave a tombstone behind. */
+    private fun retireQueued(queueId: String, threadId: String): CompanionState {
+        val tombstones = (drainedQueueIds + queueId).takeLast(MAX_DRAINED_QUEUE_IDS)
+        return forgetQueued(queueId, threadId).copy(drainedQueueIds = tombstones)
+    }
+
+    /**
+     * Reconcile rows against a transcript that arrived whole — a hydrate, a
+     * page fetch, or a bot frame carrying its own messages. A window that was
+     * backgrounded through the drain never saw the message frame, and its
+     * rows have to go.
+     */
+    private fun reconcileQueued(threadId: String): CompanionState {
+        if (!pendingQueued.containsKey(threadId)) return this
+        val landed = transcript(threadId).mapNotNull(Message::queueId).toSet()
+        if (landed.isEmpty()) return this
+        return landed.fold(this) { state, queueId -> state.retireQueued(queueId, threadId) }
+    }
+
+    private fun reconcileAllQueued(): CompanionState =
+        pendingQueued.keys.toList().fold(this) { state, threadId -> state.reconcileQueued(threadId) }
+
     fun resetCursor(cursor: String): CompanionState = copy(cursor = cursor)
 
     fun advance(seq: Int?): CompanionState {
@@ -245,7 +321,12 @@ data class CompanionState(
                 messages = previous.messages,
                 activeLeafId = bot.activeLeafId ?: previous.activeLeafId,
             )
-            return copy(bots = bots.replacing(index, merged))
+            val next = copy(bots = bots.replacing(index, merged))
+            // A turn can end without a settled reply — an engine that dies
+            // mid-sentence reports the failure as activity, not text — and
+            // the half-written answer would otherwise sit in the buffer
+            // streaming for ever.
+            return if (bot.busy != true) next.clearStream(bot.threadId) else next
         }
 
         var result = copy(
@@ -254,7 +335,10 @@ data class CompanionState(
             hasMore = hasMore + (bot.threadId to (bot.hasMore ?: false)),
         ).clearStream(previous.threadId)
         if (previous.threadId != bot.threadId) result = result.clearStream(bot.threadId)
-        return result
+        // A replacement bypasses `append`, which is what normally retires a
+        // row. Without this the held message stays above the chat bar for
+        // ever, long after its line has landed.
+        return result.reconcileQueued(bot.threadId)
     }
 
     private fun deleteBot(botId: String): CompanionState {
@@ -346,5 +430,13 @@ data class CompanionState(
 
         fun <T> List<T>.replacing(index: Int, value: T): List<T> =
             toMutableList().also { it[index] = value }
+
+        /**
+         * How many tombstones to keep. One per queued send that drained while
+         * its own POST was still in flight — a handful at the very most, but
+         * other clients queue into the same thread, so it is bounded.
+         */
+        const val MAX_DRAINED_QUEUE_IDS = 64
     }
+
 }
