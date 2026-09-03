@@ -1,16 +1,22 @@
-import { mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
-import { customMcpServers,
+import {
+  ANTIGRAVITY_NETWORK_ROUTE_ENV,
+  DEFAULT_ANTIGRAVITY_PROXY_URL,
+  customMcpServers,
   DATA_DIR,
+  antigravityNetworkRoute,
+  antigravityProxySettings,
   instanceConfigs,
   isValidSshAlias,
   loadBrowserProfileIdAliases,
   loadConfig,
   localVmMaxInstances,
   localVmMode,
+  normalizeAntigravityProxyUrl,
   parseConfigPatch,
   parseStoredConfig,
   roomTurnTimeoutMinutes,
@@ -343,6 +349,97 @@ describe("configuration boundaries", () => {
     expect(showToolCallsEnabled({ features: { showToolCalls: true } })).toBe(true);
   });
 
+  it("accepts only explicit loopback HTTP(S) proxy URLs and migrates the three network modes", () => {
+    expect(antigravityProxySettings({})).toEqual({ mode: "off", url: DEFAULT_ANTIGRAVITY_PROXY_URL });
+    expect(normalizeAntigravityProxyUrl(" HTTPS://LOCALHOST:08080/ ")).toBe("https://localhost:8080");
+    expect(parseConfigPatch({
+      features: { antigravityProxy: { enabled: true, url: "http://[::1]:10808/" } },
+    })).toEqual({
+      features: { antigravityProxy: { mode: "proxy", url: "http://[::1]:10808" } },
+    });
+    expect(parseStoredConfig({ features: { antigravityProxy: { enabled: true, url: "http://127.0.0.1:10808" } } }))
+      .toMatchObject({ features: { antigravityProxy: { mode: "proxy", url: DEFAULT_ANTIGRAVITY_PROXY_URL } } });
+    expect(parseStoredConfig({ features: { antigravityProxy: { enabled: false } } }))
+      .toMatchObject({ features: { antigravityProxy: { mode: "tun", url: DEFAULT_ANTIGRAVITY_PROXY_URL } } });
+    expect(parseStoredConfig({})).toEqual({});
+    for (const url of [
+      "http://user:password@127.0.0.1:10808", // secret-scan: allow-test-fixture
+      "http://127.0.0.1:10808/path",
+      "http://127.0.0.1:10808?token=secret", // secret-scan: allow-test-fixture
+      "http://127.0.0.1:10808#fragment",
+      "https://192.168.1.20:10808",
+      "socks5://127.0.0.1:10808",
+      "http://127.0.0.1",
+      "http://127.0.0.1:0",
+      "http://127.0.0.1:65536",
+    ]) {
+      try {
+        parseConfigPatch({ features: { antigravityProxy: { enabled: true, url } } });
+        throw new Error("expected invalid proxy URL");
+      } catch (error) {
+        expect(String(error)).toMatch(/features\.antigravityProxy\.url|Invalid configuration/);
+        expect(String(error)).not.toContain(url);
+      }
+    }
+    expect(() => parseConfigPatch({ features: { antigravityProxy: { mode: "proxy" } } })).toThrow(
+      "features.antigravityProxy.url",
+    );
+  });
+
+  it("builds one off/tun/proxy route signal without accepting user proxy values", () => {
+    expect(antigravityNetworkRoute({})).toBe("off");
+    const defaultInstances = instanceConfigs({
+      instances: {
+        agyA: { driver: "antigravityAgent" },
+        agyB: { driver: "antigravityAgent" },
+      },
+    });
+    expect(defaultInstances.agyA.environment).toEqual({ [ANTIGRAVITY_NETWORK_ROUTE_ENV]: "off" });
+    expect(defaultInstances.agyB.environment).toEqual({ [ANTIGRAVITY_NETWORK_ROUTE_ENV]: "off" });
+    const cfg: AppConfig = {
+      features: { antigravityProxy: { mode: "proxy", url: "http://localhost:08080/" } },
+      instances: {
+        agyA: { driver: "antigravityAgent", environment: { HTTP_PROXY: "http://user:secret@remote.invalid:1" } },
+        agyB: { driver: "antigravityAgent" },
+      },
+    };
+    expect(antigravityNetworkRoute(cfg)).toBe("proxy|http://localhost:8080");
+    const instances = instanceConfigs(cfg);
+    expect(instances.agyA.environment).toEqual({
+      HTTP_PROXY: "http://user:secret@remote.invalid:1",
+      [ANTIGRAVITY_NETWORK_ROUTE_ENV]: "proxy|http://localhost:8080",
+    });
+    expect(instances.agyB.environment).toEqual({
+      [ANTIGRAVITY_NETWORK_ROUTE_ENV]: "proxy|http://localhost:8080",
+    });
+    expect(instances.agyA.environment?.[ANTIGRAVITY_NETWORK_ROUTE_ENV]).not.toContain("secret");
+  });
+
+  it("persists normalized mode state through the existing config path", () => {
+    const path = join(DATA_DIR, "config.json");
+    const hadFile = existsSync(path);
+    const original = hadFile ? readFileSync(path) : undefined;
+    mkdirSync(DATA_DIR, { recursive: true });
+    try {
+      saveConfig({ features: { antigravityProxy: { enabled: true, url: "http://localhost:08080/" } } });
+      expect(JSON.parse(readFileSync(path, "utf8")).features.antigravityProxy).toEqual({
+        mode: "proxy",
+        url: "http://localhost:8080",
+      });
+      expect(antigravityProxySettings(loadConfig())).toEqual({ mode: "proxy", url: "http://localhost:8080" });
+
+      saveConfig({ features: { antigravityProxy: { mode: "tun" } } });
+      expect(JSON.parse(readFileSync(path, "utf8")).features.antigravityProxy).toEqual({
+        mode: "tun",
+        url: "http://localhost:8080",
+      });
+      expect(antigravityNetworkRoute(loadConfig())).toBe("tun");
+    } finally {
+      if (original === undefined) rmSync(path, { force: true });
+      else writeFileSync(path, original);
+    }
+  });
+
   it.each([0, 1.5, 5, "2", null])("rejects an invalid per-bot VM limit: %j", (maxInstances) => {
     expect(() => parseConfigPatch({ localVm: { maxInstances } })).toThrow("localVm.maxInstances");
   });
@@ -529,6 +626,7 @@ describe("credential env narrowing", () => {
     const instances = instanceConfigs(cfg);
     for (const [id, entry] of Object.entries(instances)) {
       if (id === "computer") expect(entry.environment).toEqual({ BOX_TOKEN: "SECRET-BOX" });
+      else if (entry.driver === "antigravityAgent") expect(entry.environment).toEqual({ [ANTIGRAVITY_NETWORK_ROUTE_ENV]: "off" });
       else expect(entry.environment).toEqual({});
     }
   });

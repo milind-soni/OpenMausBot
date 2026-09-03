@@ -18,11 +18,18 @@
 // mode, ever).
 import { describeSpawnFailure, execCli, killCliTree, spawnCli } from "../procs.ts";
 import { chmodSync, existsSync, mkdirSync, readFileSync, unlinkSync, writeFileSync } from "node:fs";
+import { createConnection } from "node:net";
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 import { z } from "zod";
 
-import { DATA_DIR, stripWorkspaceCredentialEnv } from "../config.ts";
+import {
+  ANTIGRAVITY_NETWORK_ROUTE_ENV,
+  ANTIGRAVITY_NETWORK_ROUTE_SEPARATOR,
+  DATA_DIR,
+  normalizeAntigravityNetworkRoute,
+  stripWorkspaceCredentialEnv,
+} from "../config.ts";
 import { computerProxyEnv } from "../container-computer.ts";
 import { augmentedPath } from "../env-path.ts";
 import { SPAWNED_PROXIES } from "../proxy-paths.ts";
@@ -43,6 +50,14 @@ import { newEventId, newId } from "../contracts.ts";
 import { appendNative } from "./native.ts";
 
 const DRIVER_KIND = "antigravityAgent";
+const ANTIGRAVITY_PROXY_ENV_NAMES = [
+  "HTTP_PROXY", "http_proxy", "HTTPS_PROXY", "https_proxy", "ALL_PROXY", "all_proxy", "NO_PROXY", "no_proxy",
+] as const;
+const ANTIGRAVITY_LOOPBACK_NO_PROXY = "127.0.0.1,localhost,[::1]";
+const ANTIGRAVITY_PROXY_ROUTE_PREFIX = `proxy${ANTIGRAVITY_NETWORK_ROUTE_SEPARATOR}`;
+type ProxyConnectionFactory = (options: { host: string; port: number }) => ReturnType<typeof createConnection>;
+const ANTIGRAVITY_PROXY_REACHABILITY_TIMEOUT_MS = 750;
+
 export const ANTIGRAVITY_STREAM_INPUT_MIN_VERSION = "1.1.15";
 
 export function supportsAntigravityStreamInput(version: string | null): boolean {
@@ -80,8 +95,85 @@ export const STATIC_ANTIGRAVITY_MODELS: ModelCatalog = {
   ],
 };
 
+/** Remove the HTTP/2 workaround token before applying a new network route. */
+function removeAntigravityGodebugToken(value: string | undefined): string | undefined {
+  if (value === undefined) return undefined;
+  const remaining = value.split(",").filter((token) => !token.trim().startsWith("http2client="));
+  return remaining.length > 0 ? remaining.join(",") : undefined;
+}
+
+/** Apply the normalized Off, TUN, or explicit proxy route to a child env. */
+function applyAntigravityNetworkRoute(env: NodeJS.ProcessEnv, rawRoute: unknown): string {
+  const route = normalizeAntigravityNetworkRoute(rawRoute);
+  env[ANTIGRAVITY_NETWORK_ROUTE_ENV] = route;
+  if (route === "off") return route;
+  if (route === "tun") {
+    for (const name of ANTIGRAVITY_PROXY_ENV_NAMES) delete env[name];
+    const godebug = removeAntigravityGodebugToken(env.GODEBUG);
+    if (godebug === undefined) delete env.GODEBUG;
+    else env.GODEBUG = godebug;
+    return route;
+  }
+  const proxyUrl = route.slice(ANTIGRAVITY_PROXY_ROUTE_PREFIX.length);
+  env.HTTP_PROXY = proxyUrl;
+  env.http_proxy = proxyUrl;
+  env.HTTPS_PROXY = proxyUrl;
+  env.https_proxy = proxyUrl;
+  env.ALL_PROXY = proxyUrl;
+  env.all_proxy = proxyUrl;
+  env.NO_PROXY = ANTIGRAVITY_LOOPBACK_NO_PROXY;
+  env.no_proxy = ANTIGRAVITY_LOOPBACK_NO_PROXY;
+  const godebug = removeAntigravityGodebugToken(env.GODEBUG);
+  env.GODEBUG = godebug === undefined ? "http2client=0" : `${godebug},http2client=0`;
+  return route;
+}
+
+/** Probe the selected proxy endpoint and return a user-actionable failure. */
+export function antigravityProxyUnavailableReason(
+  rawRoute: unknown,
+  connect: ProxyConnectionFactory = createConnection,
+): Promise<string | null> {
+  const route = normalizeAntigravityNetworkRoute(rawRoute);
+  if (!route.startsWith(ANTIGRAVITY_PROXY_ROUTE_PREFIX)) return Promise.resolve(null);
+  const parsed = new URL(route.slice(ANTIGRAVITY_PROXY_ROUTE_PREFIX.length));
+  const host = parsed.hostname.replace(/^\[|\]$/g, "");
+  const port = Number(parsed.port || (parsed.protocol === "https:" ? 443 : 80));
+  const reason = `Proxy unavailable: nothing is listening on ${host}:${port}. Start the proxy or choose TUN/Off.`;
+  return new Promise((resolve) => {
+    let settled = false;
+    const finish = (value: string | null) => {
+      if (settled) return;
+      settled = true;
+      resolve(value);
+    };
+    let socket: ReturnType<typeof createConnection>;
+    try {
+      socket = connect({ host, port });
+    } catch {
+      finish(reason);
+      return;
+    }
+    socket.setTimeout(ANTIGRAVITY_PROXY_REACHABILITY_TIMEOUT_MS, () => {
+      socket.destroy();
+      finish(reason);
+    });
+    socket.once("connect", () => {
+      socket.destroy();
+      finish(null);
+    });
+    socket.once("error", () => {
+      socket.destroy();
+      finish(reason);
+    });
+  });
+}
+
+/** Build the isolated Antigravity child environment and apply its route. */
 function antigravityEnvironment(overrides: NodeJS.ProcessEnv = {}): NodeJS.ProcessEnv {
   const env: NodeJS.ProcessEnv = { ...process.env, PATH: augmentedPath(), ...overrides };
+  // The launcher consumes one stable, non-secret route value. Normalize direct
+  // adapter callers too, so arbitrary proxy text can never become its signal.
+  applyAntigravityNetworkRoute(env, env[ANTIGRAVITY_NETWORK_ROUTE_ENV]);
   // The harness process may hold workspace credentials injected by the
   // desktop shell. Antigravity uses its own login, so none belong in any of
   // its turn, snapshot, or helper children.
@@ -458,6 +550,14 @@ export const AntigravityDriver: ProviderDriver<AntigravityConfig> = {
       pending.add(threadId);
       const turnId = newId();
 
+      const earlyProxyUnavailable = await antigravityProxyUnavailableReason(env[ANTIGRAVITY_NETWORK_ROUTE_ENV]);
+      if (earlyProxyUnavailable) {
+        emit({ ...base(threadId, turnId), type: "runtime.error", message: earlyProxyUnavailable });
+        emit({ ...base(threadId, turnId), type: "turn.completed", ok: false, stopReason: "proxy_unavailable", cost: null });
+        pending.delete(threadId);
+        return { turnId };
+      }
+
       const version = await versionForTurn();
       if (!supportsAntigravityStreamInput(version)) {
         pending.delete(threadId);
@@ -756,14 +856,17 @@ export const AntigravityDriver: ProviderDriver<AntigravityConfig> = {
         clearTimeout(postSettleReaper);
         clearTimeout(terminationEscalation);
         finalizeMcp();
-        if (!settled) {
+        void (async () => {
+          if (settled) return;
+          const proxyUnavailable = await antigravityProxyUnavailableReason(env[ANTIGRAVITY_NETWORK_ROUTE_ENV]);
+          if (settled) return;
           emit({
             ...base(threadId, turnId),
             type: "runtime.error",
-            message: `agy exited ${code} before result${stderr ? `: ${stderr.trim().slice(-300)}` : ""}`,
+            message: proxyUnavailable ?? `agy exited ${code} before result${stderr ? `: ${stderr.trim().slice(-300)}` : ""}`,
           });
-          settle(false, "exit_before_result");
-        }
+          settle(false, proxyUnavailable ? "proxy_unavailable" : "exit_before_result");
+        })();
       });
 
       active.set(threadId, { stop, turnId });
@@ -804,6 +907,8 @@ export const AntigravityDriver: ProviderDriver<AntigravityConfig> = {
     };
 
     const snapshot = async (): Promise<ProviderSnapshot> => {
+      const proxyUnavailable = await antigravityProxyUnavailableReason(env[ANTIGRAVITY_NETWORK_ROUTE_ENV]);
+      if (proxyUnavailable) return { state: "unavailable", reason: proxyUnavailable };
       const version = await readVersion();
       verifiedVersion = version;
       if (!version) return { state: "unavailable", reason: `\`${config.cli}\` CLI not found` };
@@ -821,6 +926,8 @@ export const AntigravityDriver: ProviderDriver<AntigravityConfig> = {
     };
 
     const generateText = async (prompt: string): Promise<string> => {
+      const proxyUnavailable = await antigravityProxyUnavailableReason(env[ANTIGRAVITY_NETWORK_ROUTE_ENV]);
+      if (proxyUnavailable) throw new Error(proxyUnavailable);
       const version = await versionForTurn();
       if (!supportsAntigravityStreamInput(version)) {
         throw new Error(

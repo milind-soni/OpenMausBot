@@ -18,6 +18,7 @@ import { removeTempDir, waitForExit } from "./testing/cleanup.ts";
 import { freePortBlock } from "./testing/ports.ts";
 import { openSse } from "./testing/sse.ts";
 import { FILE_MAX_BYTES, IMAGE_MAX_BYTES } from "./attachments.ts";
+import { DEFAULT_ANTIGRAVITY_PROXY_URL } from "./config.ts";
 
 const SERVER_DIR = dirname(fileURLToPath(import.meta.url));
 const ROOT = join(SERVER_DIR, "..");
@@ -3333,22 +3334,70 @@ describe("harness HTTP API", () => {
   it("keeps Teach a skill off by default and persists an explicit opt-in", async () => {
     const before = await api("GET", "/api/config");
     expect(before.status).toBe(200);
-    expect(before.body.features).toEqual({ browser: false, skillRecorder: false, showToolCalls: false });
+    expect(before.body.features).toEqual({
+      antigravityProxy: { mode: "off", url: DEFAULT_ANTIGRAVITY_PROXY_URL },
+      browser: false,
+      skillRecorder: false,
+      showToolCalls: false,
+    });
 
     const saved = await api("PATCH", "/api/config", {
       features: { skillRecorder: true },
     });
     expect(saved.status).toBe(200);
-    expect(saved.body.features).toEqual({ browser: false, skillRecorder: true, showToolCalls: false });
+    expect(saved.body.features).toEqual({
+      antigravityProxy: { mode: "off", url: DEFAULT_ANTIGRAVITY_PROXY_URL },
+      browser: false,
+      skillRecorder: true,
+      showToolCalls: false,
+    });
 
     const disk = JSON.parse(readFileSync(join(home, ".openmausbot", "config.json"), "utf8"));
     expect(disk.features).toEqual({ skillRecorder: true });
 
     const tools = await api("PATCH", "/api/config", { features: { showToolCalls: true } });
     expect(tools.status).toBe(200);
-    expect(tools.body.features).toEqual({ browser: false, skillRecorder: true, showToolCalls: true });
+    expect(tools.body.features).toEqual({
+      antigravityProxy: { mode: "off", url: DEFAULT_ANTIGRAVITY_PROXY_URL },
+      browser: false,
+      skillRecorder: true,
+      showToolCalls: true,
+    });
 
     await api("PATCH", "/api/config", { features: { skillRecorder: false, showToolCalls: false } });
+  });
+
+  it("validates and persists the shared Antigravity local proxy route", async () => {
+    const before = await api("GET", "/api/config");
+    expect(before.body.features.antigravityProxy).toEqual({
+      mode: "off",
+      url: DEFAULT_ANTIGRAVITY_PROXY_URL,
+    });
+
+    const unsafe = "http://user:secret@remote.example:8080/path?token=secret#fragment"; // secret-scan: allow-test-fixture
+    const rejected = await api("PATCH", "/api/config", {
+      features: { antigravityProxy: { enabled: true, url: unsafe } },
+    });
+    expect(rejected.status).toBe(400);
+    expect(String(rejected.body.error)).not.toContain(unsafe);
+
+    const enabled = await api("PATCH", "/api/config", {
+      features: { antigravityProxy: { enabled: true, url: "HTTPS://LOCALHOST:08080/" } },
+    });
+    expect(enabled.status).toBe(200);
+    expect(enabled.body.features.antigravityProxy).toEqual({ mode: "proxy", url: "https://localhost:8080" });
+    expect(JSON.stringify(enabled.body)).not.toContain("secret");
+
+    const tun = await api("PATCH", "/api/config", {
+      features: { antigravityProxy: { mode: "tun" } },
+    });
+    expect(tun.status).toBe(200);
+    expect(tun.body.features.antigravityProxy).toEqual({ mode: "tun", url: "https://localhost:8080" });
+    expect(JSON.parse(readFileSync(join(home, ".openmausbot", "config.json"), "utf8")).features.antigravityProxy)
+      .toEqual({ mode: "tun", url: "https://localhost:8080" });
+    await api("PATCH", "/api/config", {
+      features: { antigravityProxy: { mode: "off", url: DEFAULT_ANTIGRAVITY_PROXY_URL } },
+    });
   });
 
   it("refuses to delete a bot while it owns an active channel turn", async () => {

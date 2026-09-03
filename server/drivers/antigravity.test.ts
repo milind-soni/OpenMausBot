@@ -5,12 +5,13 @@
 // The fake CLI is a shebang script Windows cannot exec directly;
 // spawnCli resolves it to `node <script>`, so these run everywhere.
 import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { createServer, Socket, type Server } from "node:net";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
-import { ensureDirs } from "../config.ts";
+import { ANTIGRAVITY_NETWORK_ROUTE_ENV, ensureDirs } from "../config.ts";
 import type { ProviderInstance } from "../contracts.ts";
 import { SPAWNED_PROXIES } from "../proxy-paths.ts";
 import { removeTempDir } from "../testing/cleanup.ts";
@@ -22,6 +23,7 @@ import {
   antigravityAgentsMcpServer,
   antigravityComputerMcpServer,
   antigravityMcpServers,
+  antigravityProxyUnavailableReason,
   supportsAntigravityStreamInput,
   ensureAntigravityMcpServers,
   readAntigravityModelCatalog,
@@ -29,6 +31,17 @@ import {
 } from "./antigravity.ts";
 
 const FAKE_CLI = join(dirname(fileURLToPath(import.meta.url)), "..", "testing", "fake-agy-cli.ts");
+
+async function loopbackServer(): Promise<{ server: Server; port: number }> {
+  const server = createServer((socket) => socket.end());
+  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+  return { server, port: (server.address() as { port: number }).port };
+}
+
+async function closeServer(server: Server): Promise<void> {
+  if (!server.listening) return;
+  await new Promise<void>((resolve) => server.close(() => resolve()));
+}
 
 describe("Antigravity stream input compatibility", () => {
   it("requires the release that introduced stream-JSON stdin", () => {
@@ -281,6 +294,158 @@ describe("Antigravity snapshot", () => {
       }
       rmSync(scratch, { recursive: true, force: true });
     }
+  });
+
+  it("applies Off, TUN, and Proxy to every Antigravity child environment", async () => {
+    const scratch = mkdtempSync(join(tmpdir(), "omb-agy-route-"));
+    const { server, port } = await loopbackServer();
+    const inherited = {
+      HTTP_PROXY: "http://inherited-http",
+      http_proxy: "http://inherited-http",
+      HTTPS_PROXY: "http://inherited-https",
+      https_proxy: "http://inherited-https",
+      ALL_PROXY: "http://inherited-all",
+      all_proxy: "http://inherited-all",
+      NO_PROXY: "inherited-no-proxy",
+      no_proxy: "inherited-no-proxy",
+      GODEBUG: "custom=1,http2client=1,other=2",
+    };
+    const cases = [
+      { route: "off", expectedRoute: "off", expected: inherited },
+      {
+        route: "system",
+        expectedRoute: "tun",
+        expected: { GODEBUG: "custom=1,other=2" },
+      },
+      {
+        route: `proxy|HTTP://127.0.0.1:${port}`,
+        expectedRoute: `proxy|http://127.0.0.1:${port}`,
+        expected: {
+          HTTP_PROXY: `http://127.0.0.1:${port}`,
+          http_proxy: `http://127.0.0.1:${port}`,
+          HTTPS_PROXY: `http://127.0.0.1:${port}`,
+          https_proxy: `http://127.0.0.1:${port}`,
+          ALL_PROXY: `http://127.0.0.1:${port}`,
+          all_proxy: `http://127.0.0.1:${port}`,
+          NO_PROXY: "127.0.0.1,localhost,[::1]",
+          no_proxy: "127.0.0.1,localhost,[::1]",
+          GODEBUG: "custom=1,other=2,http2client=0",
+        },
+      },
+    ] as const;
+    try {
+      for (const [index, testCase] of cases.entries()) {
+        const dumps = [join(scratch, `${index}-a.json`), join(scratch, `${index}-b.json`)];
+        const instances = await Promise.all(dumps.map((dump, childIndex) => AntigravityDriver.create({
+          instanceId: `agy-route-${index}-${childIndex}`,
+          displayName: undefined,
+          environment: {
+            ...inherited,
+            [ANTIGRAVITY_NETWORK_ROUTE_ENV]: testCase.route,
+            FAKE_AGY_DUMP: dump,
+          },
+          enabled: true,
+          config: { cli: FAKE_CLI, fullAuto: false },
+        })));
+        const recorders = instances.map((instance) => recordEvents(instance.adapter));
+        await Promise.all(instances.map((instance, childIndex) =>
+          instance.adapter.sendTurn({ threadId: `agy-route-thread-${index}-${childIndex}`, text: "route probe" }),
+        ));
+        await Promise.all(recorders.map((recorder) => recorder.until((event) => event.type === "turn.completed")));
+        for (const dump of dumps) {
+          const invocation = JSON.parse(readFileSync(dump, "utf8")) as { env: Record<string, string | undefined> };
+          expect(invocation.env[ANTIGRAVITY_NETWORK_ROUTE_ENV]).toBe(testCase.expectedRoute);
+          for (const [name, value] of Object.entries(testCase.expected)) {
+            expect(invocation.env[name] ?? invocation.env[name.toUpperCase()]).toBe(value);
+          }
+          if (testCase.expectedRoute === "tun") {
+            for (const name of ["HTTP_PROXY", "HTTPS_PROXY", "ALL_PROXY", "NO_PROXY"]) {
+              expect(invocation.env[name] ?? invocation.env[name.toLowerCase()]).toBeUndefined();
+            }
+          }
+        }
+        await Promise.all(instances.map((instance) => instance.dispose()));
+      }
+    } finally {
+      await closeServer(server);
+      rmSync(scratch, { recursive: true, force: true });
+    }
+  });
+
+  it("checks a Proxy endpoint before probe/turn spawn and reports a drop before result", async () => {
+    const scratch = mkdtempSync(join(tmpdir(), "omb-agy-dead-proxy-"));
+    const dump = join(scratch, "spawn.json");
+    const unused = await loopbackServer();
+    const deadPort = unused.port;
+    await closeServer(unused.server);
+    const deadRoute = `proxy|http://127.0.0.1:${deadPort}`;
+    const dead = await AntigravityDriver.create({
+      instanceId: "agy-dead-proxy",
+      displayName: undefined,
+      environment: { [ANTIGRAVITY_NETWORK_ROUTE_ENV]: deadRoute, FAKE_AGY_DUMP: dump },
+      enabled: true,
+      config: { cli: "definitely-not-a-real-agy-binary", fullAuto: false },
+    });
+    const deadRecorder = recordEvents(dead.adapter);
+    try {
+      const expected = `Proxy unavailable: nothing is listening on 127.0.0.1:${deadPort}. Start the proxy or choose TUN/Off.`;
+      expect(await dead.snapshot()).toMatchObject({ state: "unavailable", reason: expected });
+      await dead.adapter.sendTurn({ threadId: "agy-dead-proxy-turn", text: "must not spawn" });
+      await deadRecorder.until((event) => event.type === "turn.completed");
+      expect(deadRecorder.events.find((event) => event.type === "runtime.error")).toMatchObject({ message: expected });
+      expect(deadRecorder.events.at(-1)).toMatchObject({ type: "turn.completed", ok: false, stopReason: "proxy_unavailable" });
+      expect(existsSync(dump)).toBe(false);
+    } finally {
+      await dead.dispose();
+      rmSync(scratch, { recursive: true, force: true });
+    }
+
+    const dropped = await loopbackServer();
+    const droppedRoute = `proxy|http://127.0.0.1:${dropped.port}`;
+    const dropScratch = mkdtempSync(join(tmpdir(), "omb-agy-mid-turn-drop-"));
+    const ready = join(dropScratch, "mid-turn-ready");
+    const dropInstance = await AntigravityDriver.create({
+      instanceId: "agy-mid-turn-drop",
+      displayName: undefined,
+      environment: {
+        [ANTIGRAVITY_NETWORK_ROUTE_ENV]: droppedRoute,
+        FAKE_AGY_DELAY_MS: "1000",
+        FAKE_AGY_READY_FILE: ready,
+      },
+      enabled: true,
+      config: { cli: FAKE_CLI, fullAuto: false },
+    });
+    const dropRecorder = recordEvents(dropInstance.adapter);
+    try {
+      await dropInstance.adapter.sendTurn({ threadId: "agy-mid-turn-drop-thread", text: "proxy drops" });
+      await expect.poll(() => existsSync(ready), { timeout: 5_000 }).toBe(true);
+      await closeServer(dropped.server);
+      await dropInstance.adapter.interruptTurn("agy-mid-turn-drop-thread");
+      await dropRecorder.until((event) => event.type === "turn.completed");
+      const expected = `Proxy unavailable: nothing is listening on 127.0.0.1:${dropped.port}. Start the proxy or choose TUN/Off.`;
+      expect(dropRecorder.events.find((event) => event.type === "runtime.error")).toMatchObject({ message: expected });
+      expect(dropRecorder.events.at(-1)).toMatchObject({ type: "turn.completed", ok: false, stopReason: "proxy_unavailable" });
+      expect(dropRecorder.events.some((event) => event.type === "runtime.error" && String((event as any).message).includes("agy exited"))).toBe(false);
+    } finally {
+      await dropInstance.dispose();
+      await closeServer(dropped.server);
+      rmSync(dropScratch, { recursive: true, force: true });
+    }
+  });
+
+  it("reports protocol default ports for explicit loopback proxy URLs", async () => {
+    const ports: number[] = [];
+    const unavailable = (route: string) => antigravityProxyUnavailableReason(route, ({ port }) => {
+      ports.push(port);
+      const socket = new Socket();
+      queueMicrotask(() => socket.emit("error", new Error("simulated unavailable proxy")));
+      return socket;
+    });
+    await expect(unavailable("proxy|http://127.0.0.1:80"))
+      .resolves.toBe("Proxy unavailable: nothing is listening on 127.0.0.1:80. Start the proxy or choose TUN/Off.");
+    await expect(unavailable("proxy|https://127.0.0.1:443"))
+      .resolves.toBe("Proxy unavailable: nothing is listening on 127.0.0.1:443. Start the proxy or choose TUN/Off.");
+    expect(ports).toEqual([80, 443]);
   });
 
   it("keeps long generateText prompts off argv too", async () => {

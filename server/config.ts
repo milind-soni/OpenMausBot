@@ -212,6 +212,90 @@ const browserProfilesSchema = z.array(browserProfileSchema).max(20).superRefine(
     });
   });
 });
+export const DEFAULT_ANTIGRAVITY_PROXY_URL = "http://127.0.0.1:10808";
+export const ANTIGRAVITY_NETWORK_ROUTE_ENV = "OPENMAUSBOT_ANTIGRAVITY_NETWORK_ROUTE";
+export const ANTIGRAVITY_NETWORK_ROUTE_SEPARATOR = "|";
+export type AntigravityNetworkMode = "off" | "tun" | "proxy";
+
+/** Normalize only an explicitly-portioned loopback HTTP(S) proxy URL. */
+export function normalizeAntigravityProxyUrl(value: unknown): string | null {
+  if (typeof value !== "string") return null;
+  const input = value.trim();
+  const match = /^(https?):\/\/(\[[0-9a-f:.]+\]|[a-z0-9.-]+):(\d{1,5})(\/?)$/i.exec(input);
+  if (!match) return null;
+  const protocol = match[1]!.toLowerCase();
+  const host = match[2]!.toLowerCase();
+  if (host !== "127.0.0.1" && host !== "localhost" && host !== "[::1]") return null;
+  const port = Number(match[3]);
+  if (!Number.isInteger(port) || port < 1 || port > 65_535) return null;
+  try {
+    const parsed = new URL(input);
+    if (parsed.username || parsed.password || parsed.search || parsed.hash) return null;
+    if (parsed.pathname !== "" && parsed.pathname !== "/") return null;
+  } catch {
+    return null;
+  }
+  return `${protocol}://${host}:${port}`;
+}
+
+/** Resolve legacy and explicit network settings to one canonical route. */
+function canonicalAntigravityProxySettings(raw: {
+  mode?: AntigravityNetworkMode;
+  enabled?: boolean;
+  url?: string;
+} | undefined): { mode: AntigravityNetworkMode; url: string } {
+  const normalizedUrl = normalizeAntigravityProxyUrl(raw?.url);
+  if (raw?.url !== undefined && normalizedUrl === null) throw new Error("Invalid Antigravity proxy URL");
+  // `enabled` is accepted only to migrate configs written by the two-state
+  // implementation. An explicit mode is the single live representation.
+  const mode = raw?.mode
+    ?? (raw?.enabled === true ? "proxy" : raw?.enabled === false ? "tun" : "off");
+  if (mode === "proxy" && normalizedUrl === null) throw new Error("Antigravity proxy URL is required in Proxy mode");
+  return { mode, url: normalizedUrl ?? DEFAULT_ANTIGRAVITY_PROXY_URL };
+}
+
+/** Normalize a partial network-mode patch without forcing an absent URL. */
+function canonicalAntigravityProxyPatch(raw: {
+  mode?: AntigravityNetworkMode;
+  enabled?: boolean;
+  url?: string;
+}): { mode: AntigravityNetworkMode; url?: string } {
+  const settings = canonicalAntigravityProxySettings(raw);
+  return settings.mode === "proxy" || raw.url !== undefined
+    ? settings
+    : { mode: settings.mode };
+}
+
+/** Return canonical Antigravity proxy settings, failing closed to Off. */
+export function antigravityProxySettings(cfg: Pick<AppConfig, "features">): {
+  mode: AntigravityNetworkMode;
+  url: string;
+} {
+  try {
+    return canonicalAntigravityProxySettings(cfg.features?.antigravityProxy);
+  } catch {
+    return { mode: "off", url: DEFAULT_ANTIGRAVITY_PROXY_URL };
+  }
+}
+
+/** One stable launcher value: `off`, `tun`, or `proxy|<safe normalized URL>`. */
+export function antigravityNetworkRoute(cfg: Pick<AppConfig, "features">): string {
+  const settings = antigravityProxySettings(cfg);
+  return settings.mode === "proxy"
+    ? `proxy${ANTIGRAVITY_NETWORK_ROUTE_SEPARATOR}${settings.url}`
+    : settings.mode;
+}
+
+/** Fail closed when a direct adapter caller supplies an unknown route value. */
+export function normalizeAntigravityNetworkRoute(value: unknown): string {
+  // `system` was the two-state route for legacy instance environments. Its
+  // behavior was the old enabled:false path, so it maps to TUN, not Off.
+  if (value === "system") return "tun";
+  if (value === "off" || value === "tun") return value;
+  if (typeof value !== "string" || !value.startsWith(`proxy${ANTIGRAVITY_NETWORK_ROUTE_SEPARATOR}`)) return "off";
+  const url = normalizeAntigravityProxyUrl(value.slice(`proxy${ANTIGRAVITY_NETWORK_ROUTE_SEPARATOR}`.length));
+  return url ? `proxy${ANTIGRAVITY_NETWORK_ROUTE_SEPARATOR}${url}` : "off";
+}
 const featureConfigSchema = z.object({
   /** Experimental desktop workflow recorder. Hidden unless explicitly enabled. */
   skillRecorder: z.boolean().optional(),
@@ -220,6 +304,19 @@ const featureConfigSchema = z.object({
   /** Experimental built-in browser. Off until explicitly enabled; each bot
    * also has its own switch. */
   browser: z.boolean().optional(),
+  /** Shared Antigravity launcher route. `enabled` is a read-compatibility migration input. */
+  antigravityProxy: z.object({
+    mode: z.enum(["off", "tun", "proxy"]).optional(),
+    enabled: z.boolean().optional(),
+    url: z.string().optional().refine(
+      (value) => value === undefined || normalizeAntigravityProxyUrl(value) !== null,
+      "must be a local HTTP(S) proxy URL with an explicit port",
+    ),
+  }).strict().superRefine((value, ctx) => {
+    if ((value.mode === "proxy" || value.enabled === true) && value.url === undefined) {
+      ctx.addIssue({ code: "custom", path: ["url"], message: "is required when proxy routing is enabled" });
+    }
+  }).optional(),
 });
 const instanceConfigSchema = z.object({
   driver: z.string().min(1),
@@ -290,7 +387,12 @@ export interface AppConfig {
    * separate container, durable workspace, viewer and lease. */
   localVm?: { mode?: "shared" | "per-bot"; maxInstances?: number };
   /** Opt-in product experiments. Every flag defaults to disabled. */
-  features?: { skillRecorder?: boolean; showToolCalls?: boolean; browser?: boolean };
+  features?: {
+    skillRecorder?: boolean;
+    showToolCalls?: boolean;
+    browser?: boolean;
+    antigravityProxy?: { mode?: AntigravityNetworkMode; enabled?: boolean; url?: string };
+  };
   /** Named browser sessions any bot can be pointed at. */
   browserProfiles?: BrowserProfile[];
   instances?: InstanceConfigMap;
@@ -371,10 +473,20 @@ export function browserProfilePartitionTarget(
   return profile ? { profileId: profile.id, partitionId: browserProfilePartitionId(profile) } : null;
 }
 
+/** Validate stored configuration and canonicalize its Antigravity route. */
 export function parseStoredConfig(value: JsonValue): AppConfig {
   const parsed = storedAppConfigSchema.safeParse(value);
   if (!parsed.success) throw new Error(schemaIssue(parsed.error, "Invalid stored configuration"));
-  return parsed.data;
+  const proxy = parsed.data.features?.antigravityProxy;
+  if (proxy === undefined) return parsed.data;
+  try {
+    return {
+      ...parsed.data,
+      features: { ...parsed.data.features, antigravityProxy: canonicalAntigravityProxySettings(proxy) },
+    };
+  } catch {
+    throw new Error("Invalid stored configuration");
+  }
 }
 
 /** Exact old→canonical profile ids from #567's persisted config. Store
@@ -392,12 +504,22 @@ export function loadBrowserProfileIdAliases(): ReadonlyMap<string, string> {
   }
 }
 
+/** Validate a config patch and canonicalize its Antigravity route. */
 export function parseConfigPatch(value: JsonValue): ConfigPatch {
   const parsed = appConfigPatchSchema.safeParse(value);
   if (!parsed.success) {
     throw Object.assign(new Error(schemaIssue(parsed.error, "Invalid configuration")), { status: 400 });
   }
-  return parsed.data;
+  const proxy = parsed.data.features?.antigravityProxy;
+  if (proxy === undefined) return parsed.data;
+  try {
+    return {
+      ...parsed.data,
+      features: { ...parsed.data.features, antigravityProxy: canonicalAntigravityProxyPatch(proxy) },
+    };
+  } catch {
+    throw Object.assign(new Error("Invalid configuration"), { status: 400 });
+  }
 }
 
 export function vpsSshAlias(cfg: AppConfig): string | null {
@@ -577,6 +699,13 @@ export function saveConfig(patch: Partial<AppConfig>): void {
     /* first write */
   }
   const checkedPatch = appConfigSchema.partial().parse(patch);
+  const proxy = checkedPatch.features?.antigravityProxy;
+  if (proxy !== undefined) {
+    checkedPatch.features = {
+      ...checkedPatch.features,
+      antigravityProxy: canonicalAntigravityProxyPatch(proxy),
+    };
+  }
   // A write is the durable migration point. Preserve every other raw key in
   // config.json, but never write #567's mixed-case or duplicate profile ids
   // back after we have successfully recognized the legacy list.
@@ -587,7 +716,21 @@ export function saveConfig(patch: Partial<AppConfig>): void {
     if (!section) continue;
     const current = jsonObjectSchema.safeParse(disk[key]);
     const merged: JsonObject = current.success ? { ...current.data } : {};
-    Object.assign(merged, section);
+    const featureSection = key === "features"
+      ? section as NonNullable<AppConfig["features"]>
+      : undefined;
+    if (featureSection?.antigravityProxy) {
+      const currentProxy = jsonObjectSchema.safeParse(merged.antigravityProxy);
+      const mergedProxy = {
+        ...(currentProxy.success ? currentProxy.data : {}),
+        ...featureSection.antigravityProxy,
+      };
+      merged.antigravityProxy = canonicalAntigravityProxySettings(mergedProxy);
+      const { antigravityProxy: _ignored, ...otherFeatures } = featureSection;
+      Object.assign(merged, otherFeatures);
+    } else {
+      Object.assign(merged, section);
+    }
     disk[key] = merged;
   }
   if (checkedPatch.vps !== undefined) disk.vps = normalizeVpsConfig(checkedPatch.vps);
@@ -699,6 +842,9 @@ function injectedEnvironment(cfg: AppConfig, driver: string): Map<string, string
     environment.set("OPENAI_COMPAT_URL", cfg.openaiCompat.url);
   if (driver === "boxAgent" && cfg.box?.token) environment.set("BOX_TOKEN", cfg.box.token);
   if (driver === "opencodeGo" && cfg.opencodeGo?.apiKey) environment.set("OPENCODE_API_KEY", cfg.opencodeGo.apiKey);
+  if (driver === "antigravityAgent") {
+    environment.set(ANTIGRAVITY_NETWORK_ROUTE_ENV, antigravityNetworkRoute(cfg));
+  }
   return environment;
 }
 

@@ -123,6 +123,9 @@ export function ModelPicker({
   const [query, setQuery] = useState("");
   const [showAll, setShowAll] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
+  const [agyProxyDraft, setAgyProxyDraft] = useState("http://127.0.0.1:10808");
+  const [agyProxySaving, setAgyProxySaving] = useState(false);
+  const [agyProxyError, setAgyProxyError] = useState<string | null>(null);
   const rootRef = useRef<HTMLDivElement>(null);
   const refreshingRef = useRef(false);
 
@@ -130,6 +133,14 @@ export function ModelPicker({
   const active = state.instances.find((instance) => instance.instanceId === selection.instanceId);
   const railInstance =
     state.instances.find((instance) => instance.instanceId === (railId ?? selection.instanceId)) ?? state.instances[0];
+  const antigravityProxy = state.config?.features?.antigravityProxy ?? {
+    mode: "off" as const,
+    url: "http://127.0.0.1:10808",
+  };
+
+  useEffect(() => {
+    if (open) setAgyProxyDraft(antigravityProxy.url);
+  }, [open, antigravityProxy.url]);
 
   const refreshModels = useCallback(() => {
     if (refreshingRef.current) return;
@@ -203,6 +214,43 @@ export function ModelPicker({
       selection: nextSelection,
     });
     setOpen(false);
+  };
+
+  /** Persist one Antigravity network-mode or proxy-URL change. */
+  const saveAgyProxy = async (patch: { mode?: "off" | "tun" | "proxy"; url?: string }) => {
+    if (agyProxySaving) return;
+    setAgyProxySaving(true);
+    setAgyProxyError(null);
+    try {
+      const config = await fetch("/api/config", {
+        method: "PATCH",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ features: { antigravityProxy: patch } }),
+      }).then(async (response) => {
+        const body = await response.json();
+        if (!response.ok) throw new Error(body.error ?? "Could not save the Antigravity network mode.");
+        return body;
+      });
+      dispatch({ type: "configStatus", config });
+    } catch (error) {
+      setAgyProxyError(error instanceof Error ? error.message : "Could not save the Antigravity network mode.");
+    } finally {
+      setAgyProxySaving(false);
+    }
+  };
+
+  /** Select Off, TUN, or Proxy and persist the route when it changes. */
+  const selectAgyProxyMode = (mode: "off" | "tun" | "proxy") => {
+    if (mode === antigravityProxy.mode) return;
+    void saveAgyProxy(mode === "proxy"
+      ? { mode, url: agyProxyDraft.trim() || antigravityProxy.url }
+      : { mode });
+  };
+
+  /** Persist a changed proxy URL after the input loses focus. */
+  const saveAgyProxyUrl = () => {
+    if (antigravityProxy.mode !== "proxy" || agyProxyDraft.trim() === antigravityProxy.url) return;
+    void saveAgyProxy({ mode: "proxy", url: agyProxyDraft });
   };
 
   const official = railInstance?.models.options.filter((option) => !option.custom) ?? [];
@@ -384,6 +432,54 @@ export function ModelPicker({
                       ? "Run this agent with a model already on your machine."
                       : "Choose a model for this bot."}
                   </div>
+                  {railInstance.driverKind === "antigravityAgent" && (
+                    <div className="mt-3 rounded-lg border border-hairline/40 bg-inset px-2.5 py-2.5">
+                      <div className="flex items-center justify-between gap-3">
+                        <div className="text-[12px] font-medium text-ink">VPN mode</div>
+                        <div role="radiogroup" aria-label="VPN mode" className="flex rounded-md bg-card p-0.5">
+                          {[
+                            { label: "Off", mode: "off" as const },
+                            { label: "TUN", mode: "tun" as const },
+                            { label: "Proxy", mode: "proxy" as const },
+                          ].map((mode) => (
+                            <button
+                              key={mode.label}
+                              type="button"
+                              role="radio"
+                              aria-checked={antigravityProxy.mode === mode.mode}
+                              disabled={agyProxySaving}
+                              onClick={() => selectAgyProxyMode(mode.mode)}
+                              className={cn(
+                                "rounded px-2 py-1 text-[10.5px] font-medium transition-colors",
+                                antigravityProxy.mode === mode.mode
+                                  ? "bg-control text-ink"
+                                  : "text-ink-secondary hover:text-ink",
+                                agyProxySaving && "cursor-wait opacity-50",
+                              )}
+                            >
+                              {mode.label}
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+                      {antigravityProxy.mode === "proxy" && (
+                        <label className="mt-2 block text-[10.5px] text-ink-secondary">
+                          Proxy URL
+                          <input
+                            type="url"
+                            value={agyProxyDraft}
+                            onChange={(event) => setAgyProxyDraft(event.target.value)}
+                            onBlur={saveAgyProxyUrl}
+                            disabled={agyProxySaving}
+                            placeholder="http://127.0.0.1:10808"
+                            aria-label="Proxy URL"
+                            className="mt-1 w-full rounded-md border border-hairline/40 bg-card px-2 py-1.5 text-[11.5px] text-ink placeholder:text-ink-secondary focus:border-accent/60 focus:outline-none disabled:opacity-50"
+                          />
+                        </label>
+                      )}
+                      {agyProxyError && <div className="mt-1.5 text-[10.5px] text-warning">{agyProxyError}</div>}
+                    </div>
+                  )}
                 </div>
 
                 {pane === "custom" && canReturnToOfficial && (
