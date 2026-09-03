@@ -6108,3 +6108,164 @@ describe("computer control API (who is driving)", () => {
     expect(res.status).toBe(401);
   });
 });
+
+describe("browser extensions API", () => {
+  /** A throwaway unpacked extension the server can install from. */
+  const makeExtension = (overrides: Record<string, string> = {}): string => {
+    const root = mkdtempSync(join(tmpdir(), "omb-route-ext-"));
+    writeFileSync(
+      join(root, "manifest.json"),
+      overrides["manifest.json"] ?? JSON.stringify({
+        manifest_version: 3,
+        name: "Route Fixture",
+        version: "1.0.0",
+        content_scripts: [{ matches: ["https://example.com/*"], js: ["content.js"] }],
+      }),
+    );
+    writeFileSync(join(root, "content.js"), overrides["content.js"] ?? "// fixture");
+    return root;
+  };
+
+  const roots: string[] = [];
+  const newExtension = (overrides?: Record<string, string>): string => {
+    const root = makeExtension(overrides);
+    roots.push(root);
+    return root;
+  };
+
+  // Every test here needs the built-in browser on, and each one cleans up
+  // after itself, so the block does not depend on its own ordering.
+  beforeAll(async () => {
+    expect((await api("PATCH", "/api/config", { features: { browser: true } })).status).toBe(200);
+  });
+
+  afterAll(async () => {
+    for (const root of roots) await removeTempDir(root);
+    await api("PATCH", "/api/config", { features: { browser: false } });
+  });
+
+  it("lists nothing before anything is installed", async () => {
+    const res = await api("GET", "/api/browser-extensions");
+    expect(res.status).toBe(200);
+    expect(res.body.extensions).toEqual([]);
+  });
+
+  it("refuses to install while the built-in browser is off", async () => {
+    await api("PATCH", "/api/config", { features: { browser: false } });
+    try {
+      const res = await api("POST", "/api/browser-extensions", { path: newExtension() });
+      expect(res.status).toBe(409);
+      expect(res.body.error).toMatch(/built-in browser/);
+    } finally {
+      await api("PATCH", "/api/config", { features: { browser: true } });
+    }
+  });
+
+  it("installs disabled, then enables only after the person asks", async () => {
+    const installed = await api("POST", "/api/browser-extensions", { path: newExtension() });
+    expect(installed.status).toBe(201);
+    expect(installed.body.extension).toMatchObject({ name: "Route Fixture", version: "1.0.0", enabled: false });
+    const id = installed.body.extension.id as string;
+
+    const listed = await api("GET", "/api/browser-extensions");
+    expect(listed.body.extensions).toHaveLength(1);
+    expect(listed.body.extensions[0].enabled).toBe(false);
+
+    const enabled = await api("PATCH", `/api/browser-extensions/${id}`, { enabled: true });
+    expect(enabled.status).toBe(200);
+    expect(enabled.body.extension.enabled).toBe(true);
+
+    expect((await api("DELETE", `/api/browser-extensions/${id}`)).status).toBe(200);
+    expect((await api("GET", "/api/browser-extensions")).body.extensions).toEqual([]);
+  });
+
+  it("serves the reviewed manifest for the review dialog", async () => {
+    const installed = await api("POST", "/api/browser-extensions", { path: newExtension() });
+    const id = installed.body.extension.id as string;
+    const manifest = await api("GET", `/api/browser-extensions/${id}/manifest`);
+    expect(manifest.status).toBe(200);
+    expect(JSON.parse(manifest.body.text)).toMatchObject({ name: "Route Fixture" });
+    await api("DELETE", `/api/browser-extensions/${id}`);
+  });
+
+  it("refuses a manifest that fights the browser's security model", async () => {
+    const root = newExtension({
+      "manifest.json": JSON.stringify({
+        manifest_version: 3,
+        name: "Nosy",
+        version: "1.0.0",
+        permissions: ["nativeMessaging"],
+      }),
+    });
+    const res = await api("POST", "/api/browser-extensions", { path: root });
+    expect(res.status).toBe(422);
+    expect(res.body.error).toMatch(/nativeMessaging/);
+  });
+
+  it("accepts a Chrome Web Store link, and refuses one that is not", async () => {
+    // The download itself needs the network, so this asserts the route
+    // reaches the store path and reports its refusal, not that it installs.
+    const bad = await api("POST", "/api/browser-extensions", { url: "https://example.com/not-a-store-page" });
+    expect(bad.status).toBe(422);
+    expect(bad.body.error).toMatch(/Chrome Web Store/);
+
+    const noId = await api("POST", "/api/browser-extensions", { url: "https://chromewebstore.google.com/detail/slug-only" });
+    expect(noId.status).toBe(422);
+    expect(noId.body.error).toMatch(/extension id/);
+  });
+
+  it("validates the request body and unknown ids", async () => {
+    expect((await api("POST", "/api/browser-extensions", {})).status).toBe(400);
+    // Neither a path nor a url is a client error, not a failed install.
+    expect((await api("POST", "/api/browser-extensions", { nonsense: 1 })).status).toBe(400);
+    expect((await api("PATCH", "/api/browser-extensions/local-000000000000", { enabled: "yes" })).status).toBe(400);
+    expect((await api("PATCH", "/api/browser-extensions/local-000000000000", { enabled: true })).status).toBe(404);
+    expect((await api("GET", "/api/browser-extensions/local-000000000000/manifest")).status).toBe(404);
+    expect((await api("DELETE", "/api/browser-extensions/local-000000000000")).status).toBe(404);
+  });
+
+  it("lets a person switch an extension off even after the feature is turned back off", async () => {
+    // Turning the feature off must never strand something already running.
+    const installed = await api("POST", "/api/browser-extensions", { path: newExtension() });
+    const id = installed.body.extension.id as string;
+    expect((await api("PATCH", `/api/browser-extensions/${id}`, { enabled: true })).status).toBe(200);
+
+    await api("PATCH", "/api/config", { features: { browser: false } });
+    try {
+      expect((await api("PATCH", `/api/browser-extensions/${id}`, { enabled: true })).status).toBe(409);
+      expect((await api("PATCH", `/api/browser-extensions/${id}`, { enabled: false })).status).toBe(200);
+    } finally {
+      await api("PATCH", "/api/config", { features: { browser: true } });
+    }
+    await api("DELETE", `/api/browser-extensions/${id}`);
+  });
+
+  it("keeps extension state out of reach of PATCH /api/config", async () => {
+    // Extension state deliberately lives in its own file, so the config
+    // endpoint has no field that could flip `enabled` past the review gate.
+    const installed = await api("POST", "/api/browser-extensions", { path: newExtension() });
+    const id = installed.body.extension.id as string;
+
+    // The patch schema does not merely ignore the field — it refuses the
+    // whole request, so there is no version of this call that lands.
+    const patched = await api("PATCH", "/api/config", {
+      browserExtensions: [{ id, enabled: true }],
+    });
+    expect(patched.status).toBe(400);
+
+    const config = await api("GET", "/api/config");
+    expect(config.body).not.toHaveProperty("browserExtensions");
+
+    const listed = await api("GET", "/api/browser-extensions");
+    expect(listed.body.extensions[0].enabled).toBe(false);
+    await api("DELETE", `/api/browser-extensions/${id}`);
+  });
+
+  it("keeps the internal namespace authenticated, extensions included", async () => {
+    // A bot can browse, but cannot decide what code runs inside the pages it
+    // browses: there is no agent-facing extension route, and the internal
+    // namespace rejects unauthenticated callers before routing at all.
+    const res = await fetch(`${BASE}/api/internal/browser-extensions`);
+    expect(res.status).toBe(401);
+  });
+});

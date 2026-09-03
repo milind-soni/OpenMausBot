@@ -36,6 +36,16 @@ Electron main process
   `webContents.debugger` CDP transport. No Chrome dependency, no 281MB
   Playwright download, and the user watches the bot browse inside the chat.
 
+- **Browser extensions are for that embedded Chromium, not your real Chrome.**
+  A person can add unpacked extensions in Settings; they load per session, so
+  one install applies to every bot and every named profile, and never to
+  Guest (Electron refuses extensions on in-memory sessions). Electron
+  implements only part of the Chrome extension API — content scripts and MV3
+  service workers run, `declarativeNetRequest` and toolbar popups do not — so
+  the install flow states per-extension what will not work rather than
+  letting people discover it. No agent tool can install or enable one. See
+  `server/browser-extensions.ts` and `electron/browser-extensions.cjs`.
+
 ## Local desktop use: CUA only — Electron owns the driver lifecycle
 
 **Decision (Milind, 2026-08-12): CUA is the ONLY local desktop-control provider.

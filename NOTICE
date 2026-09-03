@@ -4,3 +4,6 @@ Copyright 2026 Milind Soni and OpenMausBot contributors
 OpenMausBot was relicensed from the MIT License to the Apache License,
 Version 2.0, with the consent of all contributors whose copyright was
 incorporated before the transition.
+
+fflate (https://github.com/101arrowz/fflate) is bundled into the packaged
+server under the MIT License. It unpacks Chrome extension archives.

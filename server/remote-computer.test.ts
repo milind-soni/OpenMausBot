@@ -1,13 +1,19 @@
 import { spawnSync } from "node:child_process";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 
 import {
+  boxExtensionPolicyCommand,
+  enabledStoreExtensionIds,
   ensureRemoteCuaCommand,
   isolatedRemoteCommand,
   REMOTE_CUA_EXECUTABLE,
   REMOTE_CUA_SOCKET,
   REMOTE_CUA_VERSION,
   remoteComputerBootstrapCommand,
+  REMOTE_EXTENSION_POLICY_PATHS,
   semanticBrowserCommand,
 } from "./remote-computer.ts";
 
@@ -70,5 +76,82 @@ describe("remote Cua computer setup", () => {
       expect(result.status).toBe(0);
       expect(result.stdout).toBe("");
     }
+  });
+});
+
+
+describe("box browser extensions", () => {
+  const STORE_A = "a".repeat(32);
+  const STORE_B = "b".repeat(32);
+
+  const dataDirWith = (records: unknown[]): string => {
+    const dir = mkdtempSync(join(tmpdir(), "omb-box-ext-"));
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(join(dir, "browser-extensions.json"), JSON.stringify({ version: 1, extensions: records }));
+    return dir;
+  };
+
+  it("reads only enabled Web Store ids from the state file", () => {
+    const dir = dataDirWith([
+      { id: STORE_B, enabled: true },
+      { id: STORE_A, enabled: true },
+      { id: "c".repeat(32), enabled: false },
+      // a local install has no store id, so real Chrome cannot be told to fetch it
+      { id: "local-0123456789ab", enabled: true },
+      { id: "../../etc", enabled: true },
+      { id: STORE_A, enabled: true },
+    ]);
+    try {
+      expect(enabledStoreExtensionIds(dir)).toEqual([STORE_A, STORE_B]);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("treats a missing or corrupt state file as no extensions", () => {
+    expect(enabledStoreExtensionIds(join(tmpdir(), "omb-box-ext-nope"))).toEqual([]);
+    const dir = mkdtempSync(join(tmpdir(), "omb-box-ext-"));
+    writeFileSync(join(dir, "browser-extensions.json"), "{oops");
+    try {
+      expect(enabledStoreExtensionIds(dir)).toEqual([]);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("writes a managed policy that force-installs the enabled ids from the store", () => {
+    const command = boxExtensionPolicyCommand([STORE_A]);
+    const policy = JSON.parse(
+      Buffer.from(/printf %s '([A-Za-z0-9+/=]+)'/.exec(command)![1]!, "base64").toString("utf8"),
+    );
+    expect(policy).toEqual({
+      ExtensionInstallForcelist: [`${STORE_A};https://clients2.google.com/service/update2/crx`],
+    });
+    for (const path of REMOTE_EXTENSION_POLICY_PATHS) expect(command).toContain(`sudo tee '${path}'`);
+    expect(command).toContain("sudo mkdir -p '/etc/opt/chrome/policies/managed' '/etc/chromium/policies/managed'");
+  });
+
+  it("always writes the list, so an empty one removes what was force-installed", () => {
+    // Chrome uninstalls a force-installed extension when its id leaves the
+    // list; that is what makes disable in Settings mean something on the box.
+    const command = boxExtensionPolicyCommand([]);
+    const policy = JSON.parse(
+      Buffer.from(/printf %s '([A-Za-z0-9+/=]+)'/.exec(command)![1]!, "base64").toString("utf8"),
+    );
+    expect(policy).toEqual({ ExtensionInstallForcelist: [] });
+  });
+
+  it("never lets a non-store id into the policy", () => {
+    const command = boxExtensionPolicyCommand(["local-0123456789ab", "'; rm -rf / #", STORE_A]);
+    const policy = JSON.parse(
+      Buffer.from(/printf %s '([A-Za-z0-9+/=]+)'/.exec(command)![1]!, "base64").toString("utf8"),
+    );
+    expect(policy.ExtensionInstallForcelist).toHaveLength(1);
+    expect(command).not.toContain("rm -rf");
+  });
+
+  it("is valid shell", () => {
+    const check = spawnSync("bash", ["-n"], { input: boxExtensionPolicyCommand([STORE_A]), encoding: "utf8" });
+    expect(check.status).toBe(0);
   });
 });

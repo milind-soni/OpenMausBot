@@ -1,0 +1,12 @@
+{
+  "manifest_version": 3,
+  "name": "OpenMausBot Surface Fixture",
+  "version": "1.0.0",
+  "permissions": ["storage"],
+  "content_scripts": [
+    { "matches": ["http://*/*", "https://*/*"], "js": ["content.js"], "run_at": "document_idle" }
+  ],
+  "web_accessible_resources": [
+    { "resources": ["probe.json"], "matches": ["http://*/*", "https://*/*"] }
+  ]
+}

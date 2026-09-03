@@ -197,6 +197,15 @@ import {
   SECTION_CONTEXT_MAX_BYTES,
 } from "./section-context.ts";
 import {
+  browserExtensionsRevision,
+  installBrowserExtensionFromFolder,
+  installBrowserExtensionFromWebstore,
+  listBrowserExtensions,
+  readBrowserExtensionManifest,
+  removeBrowserExtension,
+  setBrowserExtensionEnabled,
+} from "./browser-extensions.ts";
+import {
   applyStagedSkillWrite,
   getStagedSkillWrite,
   installSkill,
@@ -318,6 +327,13 @@ type DesktopPrivateMessage = BrowserCleanupWireRequest | {
   type: "openmausbot:browser-control";
   botId: string;
   held: true;
+} | {
+  /** The installed-extension set changed. Electron re-reads the state file
+   * and converges every live browser session; the message carries no
+   * payload on purpose, so a stale or replayed one can only cause a
+   * redundant re-read. */
+  type: "openmausbot:browser-extensions-changed";
+  revision: string;
 };
 function postDesktopPrivateMessage(message: DesktopPrivateMessage): boolean {
   if (!utilityParentPort) return false;
@@ -333,6 +349,22 @@ const browserCleanup = new BrowserCleanupCoordinator({
   file: join(DATA_DIR, "browser-cleanups.json"),
   send: postDesktopPrivateMessage,
 });
+
+/** Tell the desktop the installed-extension set moved.
+ *
+ * Best effort by design. In a packaged build this reaches Electron over the
+ * utility parent port; in split-process development there is no parent port
+ * and this returns false, so the renderer calls the same convergence over
+ * IPC after the mutation commits. The disk state is the source of truth
+ * either way — this only decides whether live sessions converge now or on
+ * the next page load. Same dual mechanism as browser profile forgetting. */
+function notifyBrowserExtensionsChanged(): boolean {
+  return postDesktopPrivateMessage({
+    type: "openmausbot:browser-extensions-changed",
+    revision: browserExtensionsRevision(),
+  });
+}
+
 utilityParentPort?.on("message", (event) => {
   const message = event?.data;
   try {
@@ -8416,6 +8448,66 @@ const server = createServer(async (req, res) => {
       const result = removeSkill(m[1]!, m[2]!);
       if ("error" in result) return json(res, 404, { error: result.error });
       return json(res, 200, { ok: true });
+    }
+
+    // ── browser extensions: unpacked Chrome extensions ──────────────────
+    // Install lands DISABLED; the UI shows the manifest, the permissions and
+    // the compatibility warnings, and a person enables after reading. The
+    // same shape as bot skills above, for the same reason — this is
+    // third-party code that will run inside every page a bot opens.
+    //
+    // Deliberately not on /api/bots/:id: extensions load per Electron
+    // session, and named profiles are one session shared by several bots, so
+    // a per-bot list could not be honoured. See server/browser-extensions.ts.
+    //
+    // There is no agent-facing counterpart to any of these routes.
+    if (path === "/api/browser-extensions" && method === "GET") {
+      return json(res, 200, { extensions: listBrowserExtensions() });
+    }
+    if (path === "/api/browser-extensions" && method === "POST") {
+      if (!builtInBrowserEnabled(cfg)) return json(res, 409, { error: "turn on the built-in browser first" });
+      const parsed = z.union([
+        z.object({ path: z.string().min(1).max(4096) }),
+        z.object({ url: z.string().min(1).max(2048) }),
+      ]).safeParse(await readBody(req));
+      if (!parsed.success) {
+        return json(res, 400, { error: "send a folder path, or a Chrome Web Store link or extension id" });
+      }
+      // The store path reports the running Chromium's version so the update
+      // service hands back a build this browser can actually load.
+      const installed = "path" in parsed.data
+        ? installBrowserExtensionFromFolder(parsed.data.path)
+        : await installBrowserExtensionFromWebstore(parsed.data.url, process.versions.chrome ?? "150.0.0.0");
+      if ("error" in installed) return json(res, 422, { error: installed.error });
+      notifyBrowserExtensionsChanged();
+      return json(res, 201, { extension: installed });
+    }
+    m = path.match(/^\/api\/browser-extensions\/([\w-]+)$/);
+    if (m && method === "PATCH") {
+      const parsed = z.object({ enabled: z.boolean() }).safeParse(await readBody(req));
+      if (!parsed.success) return json(res, 400, { error: "enabled must be true or false" });
+      // Enabling is the privileged direction, so it needs the feature on.
+      // Disabling never does: a person must always be able to switch off
+      // something already running, whatever the feature flag now says.
+      if (parsed.data.enabled && !builtInBrowserEnabled(cfg)) {
+        return json(res, 409, { error: "turn on the built-in browser first" });
+      }
+      const result = setBrowserExtensionEnabled(m[1]!, parsed.data.enabled);
+      if (result === null) return json(res, 404, { error: "no such extension" });
+      if ("error" in result) return json(res, 422, { error: result.error });
+      notifyBrowserExtensionsChanged();
+      return json(res, 200, { extension: result });
+    }
+    if (m && method === "DELETE") {
+      if (!removeBrowserExtension(m[1]!)) return json(res, 404, { error: "no such extension" });
+      notifyBrowserExtensionsChanged();
+      return json(res, 200, { ok: true });
+    }
+    m = path.match(/^\/api\/browser-extensions\/([\w-]+)\/manifest$/);
+    if (m && method === "GET") {
+      const text = readBrowserExtensionManifest(m[1]!);
+      if (text === null) return json(res, 404, { error: "no such extension" });
+      return json(res, 200, { text });
     }
 
     // ── section context: a user-owned team brief ────────────────────────

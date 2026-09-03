@@ -14,6 +14,8 @@ import { spawn, spawnSync, type ChildProcess } from "node:child_process";
 import { createServer, type Server } from "node:http";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
+import { mkdirSync, rmSync, writeFileSync } from "node:fs";
+import { homedir } from "node:os";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
 const SERVER_DIR = dirname(fileURLToPath(import.meta.url));
@@ -560,6 +562,41 @@ describe("computer proxy (fake box)", () => {
     expect(issued[0]).toContain("'https://example.com/requested?token=secret#fragment'");
     expect(result.result.content[0].text).toContain("https://example.com/landed");
     expect(result.result.content[0].text).not.toMatch(/private|value|token|secret|fragment/);
+  });
+
+  it("hands Chrome on the box the store extensions a person enabled, as managed policy", async () => {
+    // The proxy inherits HOME from vitest's throwaway home, so this is the
+    // same file the settings card writes — nothing is mocked in between.
+    const dataDir = join(homedir(), ".openmausbot");
+    mkdirSync(dataDir, { recursive: true });
+    const enabled = "a".repeat(32);
+    writeFileSync(join(dataDir, "browser-extensions.json"), JSON.stringify({
+      version: 1,
+      extensions: [
+        { id: enabled, enabled: true },
+        { id: "b".repeat(32), enabled: false },
+        { id: "local-0123456789ab", enabled: true },
+      ],
+    }));
+    try {
+      const before = commands.length;
+      rpc({ jsonrpc: "2.0", id: 131, method: "tools/call", params: { name: "open_url", arguments: { url: "https://example.com/", observe: false } } });
+      await waitFor(131);
+      const launch = commands.slice(before)[0]!;
+      // The whole launch is wrapped by isolatedRemoteCommand in single quotes,
+      // so every inner quote arrives as the '\'' escape.
+      const encoded = /printf %s '\\''([A-Za-z0-9+/=]+)'\\''/.exec(launch)?.[1];
+      expect(encoded, launch).toBeTruthy();
+      expect(launch).toContain("sudo tee");
+      expect(launch).toContain("/etc/opt/chrome/policies/managed/openmausbot-extensions.json");
+      expect(launch).toContain("/etc/chromium/policies/managed/openmausbot-extensions.json");
+      const policy = JSON.parse(Buffer.from(encoded!, "base64").toString("utf8"));
+      expect(policy).toEqual({ ExtensionInstallForcelist: [`${enabled};https://clients2.google.com/service/update2/crx`] });
+      // and the policy lands before Chrome is launched
+      expect(launch.indexOf("sudo tee")).toBeLessThan(launch.indexOf("google-chrome --"));
+    } finally {
+      rmSync(join(dataDir, "browser-extensions.json"), { force: true });
+    }
   });
 
   it("hashes the full frame while treating distinct crops as distinct observations", async () => {

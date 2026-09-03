@@ -13,6 +13,7 @@ import { useUpdaterState } from "@/lib/updater";
 import { EnginesSettings } from "./EnginesSettings";
 import { LocalComputerSection } from "./LocalComputerSection";
 import { CompanionSection } from "./CompanionSection";
+import { BrowserExtensionsRow } from "./BrowserExtensionsRow";
 import { Card, Switch } from "./SettingsPrimitives";
 import { UsageSection } from "./UsageSection";
 import { SkinPicker } from "./SkinPicker";
@@ -31,7 +32,7 @@ const SECTIONS: Array<{
   keywords: string[];
 }> = [
   { id: "general", label: "General", icon: User, keywords: ["profile", "name", "email", "skin", "theme", "appearance", "analytics", "updates", "tools", "tool calls"] },
-  { id: "experimental", label: "Experimental", icon: FlaskConical, keywords: ["early", "preview", "teach", "skill", "browser", "profiles"] },
+  { id: "experimental", label: "Experimental", icon: FlaskConical, keywords: ["early", "preview", "teach", "skill", "browser", "profiles", "extension", "extensions", "chrome"] },
   { id: "connections", label: "Connections", icon: KeyRound, keywords: ["keys", "api", "composio", "box", "xai", "vps"] },
   { id: "engines", label: "Engines", icon: Terminal, keywords: ["models", "claude", "grok", "providers", "cli"] },
   { id: "companion", label: "Phone", icon: Smartphone, keywords: ["companion", "phone", "pair", "pairing", "mobile", "https", "secure", "tailscale", "wifi", "advanced"] },
@@ -663,6 +664,7 @@ export function SettingsModal() {
               <>
                 <ExperimentalFeaturesRow />
                 <BrowserProfilesRow />
+                <BrowserExtensionsRow />
               </>
             )}
 
