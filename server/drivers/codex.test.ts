@@ -5,18 +5,72 @@
 //
 // The fake is a shebang script — the same constraint codex.cmd itself
 // hits on Windows. resolveCliSpawn covers both, so these run everywhere.
-import { chmodSync, mkdtempSync, readFileSync } from "node:fs";
+import { chmodSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 import type { ProviderInstance } from "../contracts.ts";
+import { parseReviewVerdict } from "../auto-review.ts";
+import { PROVIDER_CREDENTIAL_ENV } from "../config.ts";
 import { recordEvents, type EventRecorder } from "../testing/events.ts";
-import { CodexDriver } from "./codex.ts";
+import { CODEX_REVIEW_TIMEOUT_MS, CodexDriver, runCodexPermissionReview } from "./codex.ts";
 import { removeTempDir } from "../testing/cleanup.ts";
 
 const FAKE_CLI = join(dirname(fileURLToPath(import.meta.url)), "..", "testing", "fake-codex-app-server.ts");
+
+/** Create a local app-server fake with controllable review lifecycle output. */
+function writeReviewFake(scratch: string, mode = "valid", dumpPath = ""): string {
+  const cli = join(scratch, "codex-review-fake.mjs");
+  writeFileSync(cli, `#!/usr/bin/env node
+import { writeFileSync } from "node:fs";
+const argv = process.argv.slice(2);
+const mode = ${JSON.stringify(mode)};
+const dumpPath = ${JSON.stringify(dumpPath)};
+const calls = [];
+const dump = () => {
+  if (dumpPath) {
+    writeFileSync(dumpPath, JSON.stringify({ argv, env: process.env, calls }, null, 2));
+  }
+};
+const out = (value) => process.stdout.write(JSON.stringify(value) + "\\n");
+if (argv[0] === "--version") { process.stdout.write("codex-review-fake 1\\n"); process.exit(0); }
+let buffer = "";
+process.stdin.on("data", (chunk) => {
+  buffer += chunk;
+  let newline;
+  while ((newline = buffer.indexOf("\\n")) !== -1) {
+    const line = buffer.slice(0, newline); buffer = buffer.slice(newline + 1);
+    if (!line.trim()) continue;
+    const message = JSON.parse(line);
+    if (message.method) calls.push({ method: message.method, params: message.params ?? null });
+    if (message.method === "initialize") out({ jsonrpc: "2.0", id: message.id, result: { ok: true } });
+    else if (message.method === "model/list") out({ jsonrpc: "2.0", id: message.id, result: { data: [], nextCursor: null } });
+    else if (message.method === "thread/start") out({ jsonrpc: "2.0", id: message.id, result: { thread: { id: "review-thread" } } });
+    else if (message.method === "turn/start") {
+      dump();
+      if (mode === "hang") continue;
+      if (mode === "null-line") process.stdout.write("null\\n");
+      if (mode === "server-request") out({ jsonrpc: "2.0", id: "srv-1", method: "item/tool/requestUserInput", params: {} });
+      out({ jsonrpc: "2.0", id: message.id, result: { ok: true } });
+      const text = mode === "oversize"
+        ? "x".repeat(1_000_001)
+        : mode === "malformed"
+          ? "not json"
+          : mode === "extra"
+            ? '{"allow":true,"reason":"safe"}\\ntrailing'
+            : '{"allow":true,"reason":"safe"}';
+      out({ jsonrpc: "2.0", method: "item/completed", params: { item: { type: "agentMessage", text } } });
+      out({ jsonrpc: "2.0", method: "turn/completed", params: { turn: { status: "completed" } } });
+    }
+  }
+});
+setInterval(() => {}, 1000);
+`);
+  chmodSync(cli, 0o755);
+  return cli;
+}
 
 describe("CodexDriver.decodeConfig", () => {
   it("defaults to the codex binary with fullAuto off", () => {
@@ -60,11 +114,129 @@ describe("CodexDriver turns (fake app-server)", () => {
     delete process.env.FAKE_CODEX_STATE;
     delete process.env.FAKE_CODEX_RETRY_SCALE;
     delete process.env.OPENAI_API_KEY;
+    delete process.env.NVIDIA_API_KEY;
+    delete process.env.OPENROUTER_API_KEY;
     delete process.env.BOX_TOKEN;
     delete process.env.OMB_TTS_KEY;
     recorder?.stop();
     await instance?.dispose();
     await removeTempDir(scratch);
+  });
+
+  it("reviews through a fresh ephemeral app-server over stdin with no MCP or dynamic tool scope", async () => {
+    const dump = join(scratch, "review.json");
+    const prompt = "review secret command: rm -rf /very-sensitive-path";
+    const reviewCli = writeReviewFake(scratch, "valid", dump);
+    const reviewEnvironment = Object.fromEntries(
+      PROVIDER_CREDENTIAL_ENV.map((key) => [key, "redacted-test-value"]),
+    );
+    const unlistedSecrets = {
+      UNSLOTH_STUDIO_AUTH_TOKEN: "unsloth-review-sentinel",
+      ARBITRARY_REVIEW_SECRET: "arbitrary-review-sentinel",
+    };
+    const codexHome = join(scratch, "review-codex-home");
+    instance = await CodexDriver.create({
+      instanceId: "codex-review",
+      displayName: "Codex Review",
+      environment: { ...reviewEnvironment, ...unlistedSecrets, CODEX_HOME: codexHome },
+      enabled: true,
+      config: { cli: reviewCli, fullAuto: false },
+    });
+
+    const raw = await instance.reviewPermission!(prompt);
+    expect(parseReviewVerdict(raw)).toEqual({ allow: true, reason: "safe" });
+
+    const seen = JSON.parse(readFileSync(dump, "utf8")) as {
+      argv: string[];
+      env: Record<string, string | undefined>;
+      calls: Array<{ method: string; params: any }>;
+    };
+    expect(seen.argv).toContain("mcp_servers={}");
+    expect(seen.argv.some((value) => value.includes(prompt))).toBe(false);
+    expect(seen.argv).not.toContain("--print");
+    expect(seen.argv.some((value) => value.startsWith("mcp_servers.") && value !== "mcp_servers={}")).toBe(false);
+    for (const key of PROVIDER_CREDENTIAL_ENV) expect(seen.env[key]).toBeUndefined();
+    expect(seen.env.BOX_TOKEN).toBeUndefined();
+    for (const [key, value] of Object.entries(unlistedSecrets)) {
+      expect(seen.env[key]).toBeUndefined();
+      expect(JSON.stringify(seen.env)).not.toContain(value);
+    }
+    expect(seen.env.CODEX_HOME).toBe(codexHome);
+    expect(seen.env.NPM_CONFIG_LOGLEVEL).toBe("error");
+    const start = seen.calls.find((call) => call.method === "thread/start")!;
+    expect(start.params).toMatchObject({
+      sandbox: "read-only",
+      approvalPolicy: "never",
+      ephemeral: true,
+      dynamicTools: [],
+    });
+    expect(start.params.developerInstructions).toContain("Do not call tools");
+    expect(start.params.cwd).toContain("omb-codex-review-");
+    const turn = seen.calls.find((call) => call.method === "turn/start")!;
+    expect(turn.params.input[0].text).toBe(prompt);
+    expect(turn.params.outputSchema).toMatchObject({
+      type: "object",
+      additionalProperties: false,
+      required: ["allow", "reason"],
+    });
+  });
+
+  it("leaves malformed and extra review output to the strict parser, which refuses both", async () => {
+    for (const mode of ["malformed", "extra"]) {
+      const reviewCli = writeReviewFake(scratch, mode);
+      instance = await CodexDriver.create({
+        instanceId: `codex-review-shape-${mode}`,
+        displayName: "Codex Review Shape",
+        environment: {},
+        enabled: true,
+        config: { cli: reviewCli, fullAuto: false },
+      });
+      const raw = await instance.reviewPermission!("return a verdict");
+      expect(parseReviewVerdict(raw)).toBeNull();
+      await instance.dispose();
+    }
+  });
+
+  it("cancels and reaps a wedged review child", async () => {
+    const reviewCli = writeReviewFake(scratch, "hang");
+    instance = await CodexDriver.create({
+      instanceId: "codex-review-cancel",
+      displayName: "Codex Review Cancel",
+      environment: {},
+      enabled: true,
+      config: { cli: reviewCli, fullAuto: false },
+    });
+    const controller = new AbortController();
+    const pending = instance.reviewPermission!("cancel this review", controller.signal);
+    setTimeout(() => controller.abort(), 25);
+    await expect(pending).rejects.toThrow("Codex review aborted");
+  });
+
+  it("enforces the bounded review timeout", async () => {
+    const reviewCli = writeReviewFake(scratch, "hang");
+    await expect(
+      runCodexPermissionReview(reviewCli, {}, "timeout this review", undefined, 25),
+    ).rejects.toThrow("Codex review timed out after 25ms");
+    expect(CODEX_REVIEW_TIMEOUT_MS).toBe(60_000);
+  });
+
+  it("rejects review output before retaining more than the configured bound", async () => {
+    const reviewCli = writeReviewFake(scratch, "oversize");
+    await expect(
+      runCodexPermissionReview(reviewCli, {}, "oversized review", undefined, 1_000),
+    ).rejects.toThrow("Codex review output exceeded 1 MB");
+  });
+
+  it("safely ignores null or scalar JSON-RPC output lines during review", async () => {
+    const reviewCli = writeReviewFake(scratch, "null-line");
+    const raw = await runCodexPermissionReview(reviewCli, {}, "allow test command");
+    expect(parseReviewVerdict(raw)).toEqual({ allow: true, reason: "safe" });
+  });
+
+  it("declines server-initiated JSON-RPC requests without hanging", async () => {
+    const reviewCli = writeReviewFake(scratch, "server-request");
+    const raw = await runCodexPermissionReview(reviewCli, {}, "allow test command");
+    expect(parseReviewVerdict(raw)).toEqual({ allow: true, reason: "safe" });
   });
 
   it("runs the handshake and normalizes a full turn", async () => {

@@ -9,7 +9,9 @@
 //
 // resumeCursor is the codex thread id; a later turn tries thread/resume
 // and falls back to a fresh thread/start.
-import { homedir } from "node:os";
+import { mkdtempSync, rmSync } from "node:fs";
+import { homedir, tmpdir } from "node:os";
+import { join } from "node:path";
 
 import { stripWorkspaceCredentialEnv } from "../config.ts";
 import { computerProxyEnv } from "../container-computer.ts";
@@ -41,6 +43,7 @@ export interface CodexConfig {
   fullAuto: boolean;
 }
 
+/** Decode persisted Codex settings while keeping full-auto opt-in strict. */
 function decodeConfig(raw: unknown): CodexConfig {
   const o = (raw ?? {}) as Record<string, unknown>;
   return {
@@ -78,6 +81,235 @@ function mountMcpServer(
   }
 }
 
+/** The review child is intentionally independent from normal turn routing. */
+export const CODEX_REVIEW_TIMEOUT_MS = 60_000;
+const CODEX_REVIEW_MAX_OUTPUT_BYTES = 1_000_000;
+const CODEX_REVIEW_INSTRUCTIONS =
+  "Review only the supplied permission request. Do not call tools, inspect files, or access the network. Return only the requested JSON verdict.";
+const CODEX_REVIEW_OUTPUT_SCHEMA = {
+  type: "object",
+  additionalProperties: false,
+  required: ["allow", "reason"],
+  properties: {
+    allow: { type: "boolean" },
+    reason: { type: "string", minLength: 1, maxLength: 200 },
+  },
+} as const;
+const CODEX_REVIEW_ENV_KEYS = [
+  "PATH",
+  "CODEX_HOME",
+  "HOME",
+  "USERPROFILE",
+  "SystemRoot",
+  "ComSpec",
+  "PATHEXT",
+  "TEMP",
+  "TMP",
+  "TMPDIR",
+  "NPM_CONFIG_LOGLEVEL",
+] as const;
+
+/** Keep only non-secret runtime context needed by the isolated reviewer. */
+function codexReviewEnv(env: Record<string, string | undefined>): Record<string, string | undefined> {
+  const reviewEnv: Record<string, string | undefined> = {};
+  for (const key of CODEX_REVIEW_ENV_KEYS) {
+    if (env[key] !== undefined) reviewEnv[key] = env[key];
+  }
+  return reviewEnv;
+}
+
+/**
+ * Run one permission review through a fresh app-server process. The prompt is
+ * only present in the JSON-RPC turn/start message on child stdin. The child
+ * gets a disposable cwd, read-only/never-approval session settings, and an
+ * empty MCP table; it never receives a normal turn's integrations or cursor.
+ *
+ * The raw assistant text is returned so auto-review's existing strict parser
+ * remains the security boundary for malformed or extra output.
+ */
+export function runCodexPermissionReview(
+  cli: string,
+  env: Record<string, string | undefined>,
+  prompt: string,
+  signal?: AbortSignal,
+  timeoutMs = CODEX_REVIEW_TIMEOUT_MS,
+): Promise<string> {
+  if (signal?.aborted) return Promise.reject(new Error("Codex review aborted"));
+
+  const reviewCwd = mkdtempSync(join(tmpdir(), "omb-codex-review-"));
+  const args = [
+    "app-server",
+    // Do not inherit MCP servers from the user's Codex config. Normal turns
+    // add their own named entries explicitly; this review has none.
+    "-c", "mcp_servers={}",
+    // Do not let the app-server inject project instructions from the temp cwd.
+    "-c", "project_doc_max_bytes=0",
+  ];
+  const reviewEnv = codexReviewEnv(env);
+  let child: ReturnType<typeof spawnCli> | undefined;
+  let settled = false;
+  let outputBytes = 0;
+  let stderr = "";
+  let buffer = "";
+  let answer: string | undefined;
+  let nextId = 1;
+  const pending = new Map<number, { resolve: (value: any) => void; reject: (error: Error) => void }>();
+  let timer: NodeJS.Timeout | undefined;
+  let onAbort: (() => void) | undefined;
+
+  return new Promise((resolve, reject) => {
+    const removeTempCwd = () => {
+      try {
+        rmSync(reviewCwd, { recursive: true, force: true });
+      } catch {
+        // The cwd is disposable; a later process cleanup must not turn a
+        // completed review into an apparently failed approval.
+      }
+    };
+    const finish = (error?: Error, value?: string) => {
+      if (settled) return;
+      settled = true;
+      if (timer) clearTimeout(timer);
+      if (onAbort) signal?.removeEventListener("abort", onAbort);
+      for (const request of pending.values()) request.reject(error ?? new Error("Codex review settled"));
+      pending.clear();
+      if (child && child.exitCode === null && child.signalCode === null) killCliTree(child);
+      if (child) child.once("close", removeTempCwd);
+      else removeTempCwd();
+      if (error) reject(error);
+      else resolve(value ?? "");
+    };
+    const send = (message: unknown) => {
+      if (!child?.stdin?.writable) throw new Error("Codex review stdin is unavailable");
+      child.stdin.write(`${JSON.stringify(message)}\n`);
+    };
+    const request = (method: string, params: unknown): Promise<any> =>
+      new Promise((resolveRequest, rejectRequest) => {
+        const id = nextId++;
+        pending.set(id, { resolve: resolveRequest, reject: rejectRequest });
+        try {
+          send({ jsonrpc: "2.0", id, method, params });
+        } catch (error) {
+          pending.delete(id);
+          rejectRequest(error instanceof Error ? error : new Error(String(error)));
+        }
+      });
+
+    try {
+      child = spawnCli(cli, args, {
+        cwd: reviewCwd,
+        env: reviewEnv,
+        stdio: ["pipe", "pipe", "pipe"],
+      });
+    } catch (error) {
+      finish(error instanceof Error ? error : new Error(String(error)));
+      return;
+    }
+
+    child.stdout.setEncoding("utf8");
+    child.stdout.on("data", (chunk: string) => {
+      const chunkBytes = Buffer.byteLength(chunk, "utf8");
+      if (outputBytes + chunkBytes > CODEX_REVIEW_MAX_OUTPUT_BYTES) {
+        finish(new Error("Codex review output exceeded 1 MB"));
+        return;
+      }
+      outputBytes += chunkBytes;
+      buffer += chunk;
+      let newline: number;
+      while ((newline = buffer.indexOf("\n")) !== -1) {
+        const line = buffer.slice(0, newline);
+        buffer = buffer.slice(newline + 1);
+        if (!line.trim()) continue;
+        let message: any;
+        try {
+          message = JSON.parse(line);
+        } catch {
+          continue;
+        }
+        if (!message || typeof message !== "object" || Array.isArray(message)) {
+          continue;
+        }
+        if (message.id !== undefined && typeof message.method === "string") {
+          try {
+            send({ jsonrpc: "2.0", id: message.id, error: { code: -32601, message: "Method not allowed during permission review" } });
+          } catch {
+            // child stdin closed
+          }
+          continue;
+        }
+        if (message.id !== undefined && (message.result !== undefined || message.error !== undefined)) {
+          const waiting = pending.get(message.id);
+          if (!waiting) continue;
+          pending.delete(message.id);
+          if (message.error) waiting.reject(new Error(message.error.message ?? JSON.stringify(message.error)));
+          else waiting.resolve(message.result);
+          continue;
+        }
+        if (message.method === "item/completed" && message.params?.item?.type === "agentMessage") {
+          const text = message.params.item.text;
+          if (typeof text === "string") {
+            if (answer !== undefined) {
+              finish(new Error("Codex review returned multiple assistant messages"));
+              return;
+            }
+            answer = text;
+          }
+          continue;
+        }
+        if (message.method === "turn/completed") {
+          const status = message.params?.turn?.status;
+          if (status !== "completed") {
+            finish(new Error(`Codex review turn failed: ${String(status ?? "unknown")}`));
+          } else if (answer === undefined) {
+            finish(new Error("Codex review returned no assistant message"));
+          } else {
+            finish(undefined, answer.trim());
+          }
+        }
+      }
+    });
+    child.stderr.setEncoding("utf8");
+    child.stderr.on("data", (chunk: string) => {
+      stderr = (stderr + chunk).slice(-8_192);
+    });
+    child.on("error", (error) => finish(error));
+    child.on("close", (code, signalCode) => {
+      removeTempCwd();
+      if (!settled) finish(new Error(stderr.trim() || `Codex review exited ${code ?? signalCode ?? "before result"}`));
+    });
+
+    onAbort = () => finish(new Error("Codex review aborted"));
+    timer = setTimeout(() => finish(new Error(`Codex review timed out after ${timeoutMs}ms`)), timeoutMs);
+    timer.unref?.();
+    if (signal?.aborted) onAbort();
+    else signal?.addEventListener("abort", onAbort, { once: true });
+
+    void (async () => {
+      try {
+        await request("initialize", { clientInfo: { name: "openmausbot-review", version: "1" } });
+        send({ jsonrpc: "2.0", method: "initialized", params: {} });
+        const started = await request("thread/start", {
+          cwd: reviewCwd,
+          sandbox: "read-only",
+          approvalPolicy: "never",
+          ephemeral: true,
+          dynamicTools: [],
+          developerInstructions: CODEX_REVIEW_INSTRUCTIONS,
+        });
+        const threadId = started?.thread?.id;
+        if (typeof threadId !== "string" || !threadId) throw new Error("Codex review returned no ephemeral thread id");
+        await request("turn/start", {
+          threadId,
+          input: [{ type: "text", text: prompt }],
+          outputSchema: CODEX_REVIEW_OUTPUT_SCHEMA,
+        });
+      } catch (error) {
+        finish(error instanceof Error ? error : new Error(String(error)));
+      }
+    })();
+  });
+}
+
 export const CodexDriver: ProviderDriver<CodexConfig> = {
   driverKind: DRIVER_KIND,
   metadata: { displayName: "Codex", supportsMultipleInstances: true },
@@ -95,6 +327,7 @@ export const CodexDriver: ProviderDriver<CodexConfig> = {
   decodeConfig,
   defaultConfig: () => decodeConfig({}),
 
+  /** Create a Codex provider instance and its runtime adapter. */
   async create(input: DriverCreateInput<CodexConfig>): Promise<ProviderInstance> {
     const { instanceId, config } = input;
     const childEnv = (): Record<string, string | undefined> => {
@@ -694,6 +927,7 @@ export const CodexDriver: ProviderDriver<CodexConfig> = {
         return () => listeners.delete(listener);
       },
     },
+    reviewPermission: (prompt, signal) => runCodexPermissionReview(config.cli, childEnv(), prompt, signal),
     dispose: async () => {
       for (const { stop } of active.values()) stop();
       listeners.clear();
