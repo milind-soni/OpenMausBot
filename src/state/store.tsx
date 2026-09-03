@@ -14,6 +14,7 @@ import {
   type ReactNode,
 } from "react";
 import type { CloudBackend, EffortLevel } from "../../server/contracts.ts";
+import type { SkillCatalogEntry } from "../../server/skill-library.ts";
 import type { MausColor, MausMotion } from "@/lib/mascot";
 import type { BotAvatarCrop } from "../../shared/bot-avatar";
 import type { MascotBodyId } from "../../shared/mascot-bodies";
@@ -55,6 +56,7 @@ function trimRoutineRuns(runs: readonly RoutineRun[]): RoutineRun[] {
 
 export type { MausColor } from "@/lib/mascot";
 export type { RoutineRunCardData } from "../../shared/routine-run";
+export type { SkillCatalogEntry } from "../../server/skill-library.ts";
 
 export interface OptionCardData {
   title: string;
@@ -270,6 +272,9 @@ export interface Bot {
   autoReview?: "off" | "shadow" | "enforce";
   /** tools this bot may always use without asking */
   alwaysAllow?: string[];
+  /** Explicit skill grants used by manual admission. */
+  skillGrants?: string[];
+  skillToolGrants?: string[];
   /** speak this bot's replies aloud as they settle */
   speakReplies?: boolean;
   /** this bot's own voice id (falls back to the app-wide one) */
@@ -438,6 +443,7 @@ export type AppSettingsSection =
   | "engines"
   | "companion"
   | "computer"
+  | "skills"
   | "usage";
 
 export interface AppState {
@@ -451,6 +457,7 @@ export interface AppState {
   routines: Routine[];
   routineRuns: RoutineRun[];
   webhooks: WebhookTrigger[];
+  skills: SkillCatalogEntry[];
   webhookAttempts: WebhookAttempt[];
   webhookIngress: WebhookIngressStatus | null;
   settingsOpen: boolean;
@@ -549,6 +556,7 @@ export type Action =
   | { type: "showTeamMap" }
   | { type: "showSkillRecorder" }
   | { type: "routinesHydrated"; routines: Routine[]; runs: RoutineRun[] }
+  | { type: "skillsHydrated"; skills: SkillCatalogEntry[] }
   | { type: "routinePatched"; routine: Routine }
   | { type: "routineDeleted"; routineId: string }
   | { type: "routineRunPatched"; run: RoutineRun }
@@ -572,6 +580,9 @@ export type Action =
       sendId?: string;
       replyToId?: string;
       threadId?: string;
+      skillIds?: string[];
+      skillId?: string;
+      onAccepted?: () => void;
       mode?: "chat" | "goal";
       onError?: () => void;
     }
@@ -596,6 +607,9 @@ export type Action =
       sendId?: string;
       replyToId?: string;
       threadId?: string;
+      skillIds?: string[];
+      skillId?: string;
+      onAccepted?: () => void;
       onError?: () => void;
     }
   | { type: "pendingQueued"; threadId: string; queueId: string; text: string }
@@ -800,6 +814,8 @@ export function reducer(state: AppState, action: Action): AppState {
       };
     case "routinesHydrated":
       return { ...state, routines: action.routines, routineRuns: trimRoutineRuns(action.runs) };
+    case "skillsHydrated":
+      return { ...state, skills: action.skills };
     case "routinePatched": {
       const exists = state.routines.some((routine) => routine.id === action.routine.id);
       return {
@@ -1309,6 +1325,7 @@ export const initialState: AppState = {
   routines: [],
   routineRuns: [],
   webhooks: [],
+  skills: [],
   webhookAttempts: [],
   webhookIngress: null,
   settingsOpen: false,
@@ -1542,7 +1559,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
           const sendId = action.sendId ?? crypto.randomUUID();
           void api(`/api/bots/${action.botId}/messages`, {
             method: "POST",
-            body: JSON.stringify({ text: action.text, replyToId: action.replyToId, threadId, sendId }),
+            body: JSON.stringify({ text: action.text, replyToId: action.replyToId, threadId, sendId, skillIds: action.skillIds, skillId: action.skillId }),
           })
             .then((body) => {
               if (body?.message && typeof body.threadId === "string") {
@@ -1560,6 +1577,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
                   text: action.text,
                 });
               }
+              action.onAccepted?.();
             })
             .catch((error) => {
               showError(error);
@@ -1726,6 +1744,8 @@ export function StoreProvider({ children }: { children: ReactNode }) {
               replyToId: action.replyToId,
               threadId,
               sendId,
+              skillIds: action.skillIds,
+              skillId: action.skillId,
               mode: action.mode ?? "chat",
             }),
           })
@@ -1733,6 +1753,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
               if (body?.message && typeof body.threadId === "string") {
                 rawDispatch({ type: "messageAdded", threadId: body.threadId, message: body.message });
               }
+              action.onAccepted?.();
               if (
                 body?.queued &&
                 typeof body.threadId === "string" &&
@@ -1835,7 +1856,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
   // ── initial load + SSE fold ──────────────────────────────────────────
   useEffect(() => {
     let alive = true;
-    type PeripheralKey = "instances" | "config" | "routines" | "webhooks";
+    type PeripheralKey = "instances" | "config" | "routines" | "webhooks" | "skills";
     type PeripheralPart = {
       key: PeripheralKey;
       request: () => Promise<() => void>;
@@ -1883,6 +1904,13 @@ export function StoreProvider({ children }: { children: ReactNode }) {
           const { webhooks, attempts, ingress } = await api("/api/webhooks");
           return () =>
             rawDispatch({ type: "webhooksHydrated", webhooks, attempts: attempts ?? [], ingress });
+        },
+      },
+      {
+        key: "skills",
+        request: async () => {
+          const { skills } = await api("/api/skills/catalog");
+          return () => rawDispatch({ type: "skillsHydrated", skills: skills ?? [] });
         },
       },
     ];

@@ -445,6 +445,11 @@ export interface BotRecord {
   /** Tools this bot may always use without asking, even outside auto mode
    * (set by "Always allow" on an approval card). */
   alwaysAllow?: string[];
+  /** Explicit skill ids this bot may admit on a send; absent preserves the
+   * catalog defaults, while an empty list denies all skills. */
+  skillGrants?: string[];
+  /** Explicit tool ids allowed for admitted skills. */
+  skillToolGrants?: string[];
   /** Speak this bot's replies aloud as they settle, without being asked.
    * Off by default: a hosted voice costs money per character, so speaking
    * is something you turn on, never something that happens to you. */

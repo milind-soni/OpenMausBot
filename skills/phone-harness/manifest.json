@@ -13,5 +13,6 @@
     "mobile app",
     "on the phone"
   ],
-  "requiredCapabilities": ["phoneMcp"]
+  "requiredCapabilities": ["phoneMcp"],
+  "tools": ["phone"]
 }

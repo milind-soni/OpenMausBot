@@ -34,6 +34,8 @@ import { goalCoordinatorForComposer, groupComposerHint, roomRespondersForCompose
 import { PendingApprovalActions, PendingApprovalPanel, pendingApprovals } from "./PendingApproval";
 import { useDesktopCapabilities } from "./DesktopCapabilities";
 import { ReplyQuote } from "./ReplyQuote";
+import { SkillsDialog } from "./SkillsDialog";
+import { clearAcceptedSkills, selectedSkillsByIds, skillsCommandQuery, toggleSkillId } from "@/lib/skills";
 import { ComposerInjectNow, composerCanInjectNow } from "./ComposerInjectNow";
 import { QueuedComposerMessages } from "./ComposerQueuedMessages";
 import { skillRecorderEnabled } from "@/lib/feature-flags";
@@ -73,7 +75,6 @@ const LEARN_COMMAND: ComposerSlashCommand = {
 interface ComposerDraftSnapshot extends ComposerSendSnapshot {
   reply: Message | null;
 }
-
 /** Composer chip for Auto mode. Compact label (Ask / Auto); the menu still
  * uses the full names. Same `autoApprove` bit as the profile switch — picking
  * Auto mode here turns that on. The chip only changes its name, not its color. */
@@ -225,6 +226,10 @@ export function Composer({
     draftId,
     !group && bot ? `bot:${bot.id}` : undefined,
   );
+  const [skillsOpen, setSkillsOpen] = useState(false);
+  const [skillsQuery, setSkillsQuery] = useState("");
+  const [selectedSkillIds, setSelectedSkillIds] = useState<string[]>([]);
+  const selectedSkills = selectedSkillsByIds(state.skills, selectedSkillIds);
   const failedSends = useFailedComposerSends(draftId);
   // Goal mode is opt-in and one-shot so the next ordinary channel message
   // cannot accidentally start another multi-turn team run.
@@ -359,6 +364,16 @@ export function Composer({
   }, [mention, dismissedAt, state.bots, bot?.id, group, members]);
   const mentionPickerOpen = candidates.length > 0;
 
+  useEffect(() => {
+    if (locked) return;
+    const commandQuery = skillsCommandQuery(text);
+    if (commandQuery === null) return;
+    setSkillsQuery(commandQuery);
+    setSkillsOpen(true);
+    editText("");
+    setCaret(0);
+  }, [locked, text, editText]);
+
   useEffect(
     () => setHighlight(0),
     [mention?.start, mention?.query, slash?.start, slash?.query],
@@ -484,6 +499,8 @@ export function Composer({
     }
     const t = composeMessage(effectiveText, attachments);
     if (!t) return;
+    const sentSkillIds = [...selectedSkillIds];
+    const onAccepted = () => setSelectedSkillIds((current) => clearAcceptedSkills(current, sentSkillIds));
     const sentDraft: ComposerDraftSnapshot = {
       draftId,
       revision: draftRevision(draftId),
@@ -505,6 +522,8 @@ export function Composer({
         replyToId: replyTo?.id,
         threadId,
         mode: effectiveChannelMode,
+        skillIds: sentSkillIds,
+        onAccepted,
         onError: () => restoreDraft(sentDraft),
       });
       track("message_sent", { room: true, mode: effectiveChannelMode, queued: busy });
@@ -516,6 +535,8 @@ export function Composer({
         sendId: sentDraft.sendId,
         replyToId: replyTo?.id,
         threadId,
+        skillIds: sentSkillIds,
+        onAccepted,
         onError: () => restoreDraft(sentDraft),
       });
       track("message_sent", { driver: bot.modelSelection?.instanceId, queued: busy && !canSteer });
@@ -525,7 +546,6 @@ export function Composer({
     onConsumeReply?.();
     if (group) setChannelMode("chat");
   };
-
   // native dictation: partials stream into the input while the Swift
   // helper runs; the final transcript stays in the box, ready to edit/send
   useEffect(() => {
@@ -710,6 +730,22 @@ export function Composer({
             else if (bot) dispatch({ type: "cancelQueued", botId: bot.id, queueId });
           }}
         />
+        {selectedSkills.length > 0 && (
+          <div className="mb-2 flex items-center gap-2 px-1">
+            <div className="flex min-w-0 flex-wrap gap-1.5">
+              {selectedSkills.map((skill) => (
+                <span key={skill.id} className="inline-flex max-w-full items-center gap-1.5 rounded-full border border-accent/25 bg-accent/10 px-2.5 py-1 text-[12px] text-ink">
+                  <BookOpen size={12} className="shrink-0 text-accent" aria-hidden="true" />
+                  <span className="truncate">{skill.name}</span>
+                  <button type="button" onClick={() => setSelectedSkillIds((current) => current.filter((id) => id !== skill.id))} aria-label={`Remove ${skill.name} from the next message`} className="rounded-full p-0.5 text-ink-secondary hover:bg-control hover:text-ink">
+                    <X size={11} />
+                  </button>
+                </span>
+              ))}
+            </div>
+            <span className="shrink-0 text-[11.5px] text-ink-secondary">Next message only</span>
+          </div>
+        )}
         <ComposerAttachments
           items={attachments}
           onAdd={addAttachments}
@@ -749,6 +785,18 @@ export function Composer({
                 className="flex size-8 shrink-0 items-center justify-center rounded-full text-ink-secondary hover:bg-control hover:text-ink"
               >
                 <Paperclip size={17} />
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setSkillsQuery("");
+                  setSkillsOpen(true);
+                }}
+                aria-label="Choose a skill for the next message"
+                title="Skills (/skills)"
+                className={cn("flex size-8 shrink-0 items-center justify-center rounded-full hover:bg-control hover:text-ink", selectedSkills.length ? "text-accent" : "text-ink-secondary")}
+              >
+                <BookOpen size={17} />
               </button>
               {group && !group.dm && (
                 <button
@@ -985,6 +1033,17 @@ export function Composer({
           }
           setAutoWarn(false);
         }}
+      />
+      <SkillsDialog
+        open={skillsOpen}
+        skills={state.skills}
+        selectedIds={selectedSkillIds}
+        initialQuery={skillsQuery}
+        onClose={() => {
+          setSkillsOpen(false);
+          requestAnimationFrame(() => inputRef.current?.focus());
+        }}
+        onToggle={(skill) => setSelectedSkillIds((current) => toggleSkillId(current, skill.id))}
       />
       </div>
     </div>

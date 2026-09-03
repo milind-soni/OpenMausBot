@@ -198,8 +198,9 @@ import {
 } from "./section-context.ts";
 import {
   applyStagedSkillWrite,
+  installGlobalSkillBatch,
+  installSkillsAtomically,
   getStagedSkillWrite,
-  installSkill,
   listSkills,
   listStagedSkillWrites,
   readSkillFile,
@@ -244,7 +245,21 @@ import { listenWebhookIngress, webhookCredential, type WebhookIngress } from "./
 import { memberTurnSelection } from "./member-turn.ts";
 import { WebhookManager } from "./webhooks.ts";
 import { SPAWNED_PROXIES } from "./proxy-paths.ts";
-import { loadBundledSkills, loadUserSkills, mergeSkills, renderSkillInstructions, selectBundledSkills } from "./skill-library.ts";
+import {
+  enabledProviderCapabilityIds,
+  loadBundledSkills,
+  loadUserSkills,
+  MAX_MANUAL_SKILLS,
+  mergeSkills,
+  removeGlobalImportedSkill,
+  renderSkillInstructions,
+  selectBundledSkills,
+  selectExactSkills,
+  skillCatalog,
+  validateSkillGrantPatch,
+  type BundledSkill,
+  type SkillSelection,
+} from "./skill-library.ts";
 import { installedPlaybookInstructions } from "./installed-playbooks.ts";
 import { createBotPackageExport } from "./package-export.ts";
 import { shouldMountLocalComputer } from "./local-routing.ts";
@@ -301,7 +316,8 @@ const cfg = loadConfig();
 const registry = new ProviderRegistry(BUILT_IN_DRIVERS);
 await registry.load(instanceConfigs(cfg));
 const bundledSkills = loadBundledSkills();
-const availableSkills = () => mergeSkills(bundledSkills, loadUserSkills(join(DATA_DIR, "skills")));
+const globalSkillsRoot = join(DATA_DIR, "skills");
+const availableSkills = () => mergeSkills(bundledSkills, loadUserSkills(globalSkillsRoot));
 
 // Electron's utility-process parent port is private to the desktop main
 // process. It lets a slow first-time managed Composio registration arrive
@@ -649,6 +665,90 @@ function phoneIntegration() {
   if (process.env.OMB_RESOURCES_PATH) env.OMB_RESOURCES_PATH = process.env.OMB_RESOURCES_PATH;
   if (process.env.PH_ANDROID_SERIAL) env.PH_ANDROID_SERIAL = process.env.PH_ANDROID_SERIAL;
   return { command: process.execPath, args: [phoneProxyPath], env };
+}
+
+function skillSelectionFor(
+  bot: NonNullable<ReturnType<typeof store.bot>>,
+  skillIds: readonly string[],
+  capabilities: Iterable<string>,
+): SkillSelection {
+  return selectExactSkills(skillIds, capabilities, availableSkills(), {
+    skillGrants: bot.skillGrants,
+    skillToolGrants: bot.skillToolGrants,
+  });
+}
+
+function optionalSkillIds(body: Record<string, unknown>): string[] {
+  const hasList = Object.hasOwn(body, "skillIds");
+  const hasScalar = Object.hasOwn(body, "skillId");
+  if (hasList && hasScalar) throw Object.assign(new Error("send either skillIds or legacy skillId, not both"), { status: 400 });
+  if (hasList) {
+    if (!Array.isArray(body.skillIds) || body.skillIds.length > MAX_MANUAL_SKILLS) {
+      throw Object.assign(new Error(`skillIds must contain at most ${MAX_MANUAL_SKILLS} exact catalog ids`), { status: 400 });
+    }
+    const ids = body.skillIds.map((value) => {
+      if (typeof value !== "string" || !/^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(value)) {
+        throw Object.assign(new Error("skillIds must contain exact lowercase catalog ids"), { status: 400 });
+      }
+      return value;
+    });
+    if (new Set(ids).size !== ids.length) throw Object.assign(new Error("skillIds must not contain duplicates"), { status: 400 });
+    return ids;
+  }
+  if (body.skillId === undefined || body.skillId === null || body.skillId === "") return [];
+  if (typeof body.skillId !== "string" || !/^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(body.skillId)) {
+    throw Object.assign(new Error("skillId must be one exact catalog id"), { status: 400 });
+  }
+  return [body.skillId];
+}
+
+/** Validate explicit skill ids against the catalog, grants, and provider
+ * capabilities before dispatch; an empty selection preserves automatic
+ * built-in triggering. */
+function manualSkillAdmission(
+  bot: NonNullable<ReturnType<typeof store.bot>>,
+  skillIds: readonly string[],
+  capabilities: Iterable<string>,
+): SkillSelection {
+  const selection = skillSelectionFor(bot, skillIds, capabilities);
+  if (!skillIds.length) return selection;
+  const refusal = selection.decisions.find((decision) => decision.reason !== "selected" && decision.reason !== "dependency");
+  if (refusal) {
+    throw Object.assign(new Error(`skill selection refused: ${refusal.reason}`), { status: 409, skillReason: refusal.reason });
+  }
+  return selection;
+}
+
+/** Keep explicit UI admission authoritative while retaining upstream
+ * trigger-based built-in skills. Imported skills remain explicit-only; any
+ * automatically selected tool is still covered by the bot's grants. */
+function triggeredBuiltInSkillsFor(
+  bot: NonNullable<ReturnType<typeof store.bot>>,
+  text: string,
+  capabilities: Iterable<string>,
+): BundledSkill[] {
+  return selectBundledSkills(text, capabilities, availableSkills(), {
+    skillGrants: bot.skillGrants,
+    skillToolGrants: bot.skillToolGrants,
+  }).filter(({ origin }) => origin === "built-in");
+}
+
+function mergeTriggeredSkills(
+  manualSelection: SkillSelection,
+  triggeredSkills: readonly BundledSkill[],
+): SkillSelection {
+  const selected = new Map(manualSelection.selectedSkills.map((skill) => [skill.manifest.id, skill]));
+  for (const skill of triggeredSkills) {
+    if (!selected.has(skill.manifest.id)) selected.set(skill.manifest.id, skill);
+  }
+  return {
+    selectedSkills: [...selected.values()],
+    mountedSkillToolIds: [...new Set([
+      ...manualSelection.mountedSkillToolIds,
+      ...triggeredSkills.flatMap(({ manifest }) => manifest.tools),
+    ])].sort(),
+    decisions: manualSelection.decisions,
+  };
 }
 
 function connectedAppsIntegration(botId: string, threadId: string) {
@@ -2707,13 +2807,13 @@ bus.subscribe((event: RuntimeEvent) => {
 });
 
 function drainQueuedSends() {
-  drainSteeredMessages(store, (botId, threadId, prompt, userMessage, excludeIds) =>
+  drainSteeredMessages(store, (botId, threadId, prompt, userMessage, excludeIds, skillIds) =>
     // A plain attended turn — no automationSource, no unattended, no comms
     // depth: exactly what typing the same words into an idle bot would run.
     // Drain just appended the held lines; userMessage keeps startTurn
     // from duplicating the last one, and excludeIds drops every drained
     // line from the transcript-replay so they are not also in `prompt`.
-    startTurn(botId, prompt, { threadId, userMessage, excludeMessageIds: excludeIds }).then(() => undefined).catch((err) => {
+    startTurn(botId, prompt, { threadId, userMessage, excludeMessageIds: excludeIds, skillIds }).then(() => undefined).catch((err) => {
       store.appendMessage(threadId, {
         role: "bot",
         kind: "activity",
@@ -2895,6 +2995,10 @@ async function startTurn(
     /** Stable identity supplied by the composer so a network retry cannot
      * dispatch the same user action twice. */
     sendId?: string;
+    /** Explicit catalog selection for this send. Empty means no skill. */
+    skillIds?: string[];
+    /** Legacy single-skill selector accepted for older clients. */
+    skillId?: string;
     onDispatchError?: (message: string) => void;
   },
 ) {
@@ -2947,6 +3051,11 @@ async function startTurn(
       { status: 409 },
     );
   }
+  const skillSelection = manualSkillAdmission(
+    bot,
+    opts?.skillIds ?? (opts?.skillId ? [opts.skillId] : []),
+    enabledProviderCapabilityIds(instance.adapter.capabilities),
+  );
 
   // an edit hands us its already-branched user message; a plain send appends
   let userMessage = opts?.userMessage;
@@ -3037,15 +3146,14 @@ async function startTurn(
     try {
       const integrations: NonNullable<Parameters<typeof instance.adapter.sendTurn>[0]["integrations"]> = {};
       let browser: Awaited<ReturnType<typeof browserIntegration>> = null;
-      const selectedSkills = selectBundledSkills(
-        text,
-        [
-          ...(instance.adapter.capabilities.phoneMcp === true ? ["phoneMcp"] : []),
+      const selectedSkills = mergeTriggeredSkills(
+        skillSelection,
+        triggeredBuiltInSkillsFor(bot, text, [
+          ...enabledProviderCapabilityIds(instance.adapter.capabilities),
           ...(skillAuthoring ? ["skillAuthoring"] : []),
-        ],
-        availableSkills(),
+        ]),
       );
-      if (selectedSkills.some((skill) => skill.manifest.requiredCapabilities.includes("phoneMcp"))) {
+      if (selectedSkills.mountedSkillToolIds.includes("phone")) {
         integrations.phone = phoneIntegration();
       }
       // the user's connected apps, but only to a driver that can mount
@@ -3065,11 +3173,11 @@ async function startTurn(
       }
       // CLI engines work inside the bot's own workspace directory rather
       // than the user's home: a bot with file tools and acceptEdits gets a
-      // desk, not the whole house — and the workspace is where its
-      // MEMORY.md lives. API/box engines have no local filesystem story.
+      // desk, not the whole house — and the workspace is where
+      // its MEMORY.md lives. API/box engines have no local filesystem story.
       const worksInWorkspace = instance.driverKind !== "grok" && instance.driverKind !== "boxAgent";
       const privateWorkspace = worksInWorkspace ? ensureWorkspace(bot.id) : undefined;
-      const skillInstructions = renderSkillInstructions(selectedSkills, {
+      const skillInstructions = renderSkillInstructions(selectedSkills.selectedSkills, {
         includeRoot: worksInWorkspace && opts?.runOn !== "cloud",
       });
       const packagePlaybooks = installedPlaybookInstructions(text, bot.playbooks);
@@ -3647,7 +3755,7 @@ routines = new RoutineManager({
     startTurn(botId, prompt, { threadId, runOn, automationSource: triggerSource, onDispatchError })
       .then(() => undefined),
   startGoal: async (groupId, threadId, prompt, coordinatorBotId, runId, _onDispatchError) => {
-    startGroupTurn(groupId, prompt, undefined, undefined, "goal", undefined, {
+    startGroupTurn(groupId, prompt, undefined, undefined, [], "goal", undefined, {
       threadId,
       goalCoordinatorBotId: coordinatorBotId,
       goalRunId: runId,
@@ -3994,6 +4102,7 @@ async function runGroupMemberTurn(
   // chat rounds only: lets a chained @mention wait for a busy teammate the
   // way the responder loop does (goal runs never follow mentions)
   operation?: GroupTurnOperation,
+  manualSkillIds: readonly string[] = [],
 ): Promise<boolean> {
   if (isCancelled?.()) return false;
   const group = store.group(groupId);
@@ -4051,20 +4160,38 @@ async function runGroupMemberTurn(
   const latestUser = [...store.activePath(threadId)].reverse().find(
     (message) => message.role === "user" && message.kind === "text" && message.text,
   );
-  const skills = availableSkills();
-  const selectedSkills = mergeSkills(
-    selectBundledSkills(
-      serializeRoomContext(threadId, userName),
-      instance.adapter.capabilities.phoneMcp === true ? ["phoneMcp"] : [],
-      skills,
-    ),
-    selectBundledSkills(
-      latestUser?.text ?? "",
-      skillAuthoring ? ["skillAuthoring"] : [],
-      skills,
-    ),
+  let skillSelection: SkillSelection;
+  try {
+    skillSelection = manualSkillAdmission(
+      bot,
+      manualSkillIds,
+      enabledProviderCapabilityIds(instance.adapter.capabilities),
+    );
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "skill selection refused";
+    store.appendMessage(threadId, {
+      role: "bot",
+      kind: "activity",
+      from: { botId: bot.id, name: bot.name, color: bot.color },
+      tool: { name: `error: ${message}`, ok: false },
+    });
+    onDispatchError?.(message);
+    return true;
+  }
+  const selectedSkills = mergeTriggeredSkills(
+    skillSelection,
+    [
+      ...triggeredBuiltInSkillsFor(
+        bot,
+        serializeRoomContext(threadId, userName),
+        instance.adapter.capabilities.phoneMcp === true ? ["phoneMcp"] : [],
+      ),
+      ...(latestUser?.text
+        ? triggeredBuiltInSkillsFor(bot, latestUser.text, skillAuthoring ? ["skillAuthoring"] : [])
+        : []),
+    ],
   );
-  if (selectedSkills.some((skill) => skill.manifest.requiredCapabilities.includes("phoneMcp"))) {
+  if (selectedSkills.mountedSkillToolIds.includes("phone")) {
     integrations.phone = phoneIntegration();
   }
   try {
@@ -4206,7 +4333,7 @@ async function runGroupMemberTurn(
     (integrations.browser ? BUILT_IN_BROWSER_SYSTEM_PROMPT : "") +
     sectionContextSystemPrompt(bot.section) +
     (workspace ? `\n${memorySystemPrompt(bot.id).trim()}${skillsSystemPrompt(bot.id)}` : "") +
-    renderSkillInstructions(selectedSkills, { includeRoot: Boolean(workspace) }) +
+    renderSkillInstructions(selectedSkills.selectedSkills, { includeRoot: Boolean(workspace) }) +
     installedPlaybookInstructions(text, bot.playbooks);
 
   // run the turn and wait for it to settle, folding the reply text so a
@@ -4464,6 +4591,7 @@ async function runGroupMemberTurn(
         skillAuthoringClaim,
         undefined,
         operation,
+        manualSkillIds,
       ))) {
         return false;
       }
@@ -4478,6 +4606,7 @@ async function runGroupGoalStep(args: {
   bot: BotRecord;
   operation: GroupTurnOperation;
   skillAuthoringClaim: { claimed: boolean };
+  manualSkillIds: readonly string[];
   coordinator: boolean;
   instructions: string;
 }): Promise<{ ran: boolean; replyText: string; outcome?: GroupMemberTurnOutcome; stopReason?: string | null }> {
@@ -4544,6 +4673,8 @@ async function runGroupGoalStep(args: {
             if (coordinatorTurn && !coordinatorTurn.turnId) coordinatorTurn.turnId = turnId;
           },
         },
+        undefined,
+        args.manualSkillIds,
       );
       if (result.outcome === "busy") continue;
       // One retry for a transient provider failure: a 13-turn goal must not
@@ -4604,6 +4735,7 @@ async function runGroupGoalOperation(args: {
   coordinator: BotRecord;
   members: BotRecord[];
   operation: GroupTurnOperation;
+  manualSkillIds: readonly string[];
 }): Promise<void> {
   const run = args.operation.goalRun;
   if (!run) return;
@@ -4628,6 +4760,7 @@ async function runGroupGoalOperation(args: {
       ...args,
       bot: args.coordinator,
       skillAuthoringClaim,
+      manualSkillIds: args.manualSkillIds,
       coordinator: true,
       instructions: groupGoalCoordinatorInstructions({
         goal: run.goal,
@@ -4714,6 +4847,7 @@ async function runGroupGoalOperation(args: {
       ...args,
       bot: workerBot,
       skillAuthoringClaim,
+      manualSkillIds: args.manualSkillIds,
       coordinator: false,
       instructions: groupGoalWorkerInstructions({
         goal: run.goal,
@@ -4793,6 +4927,7 @@ function startGroupTurn(
   text: string,
   replyTo?: Message,
   sendId?: string,
+  skillIds: readonly string[] = [],
   channelMode: "chat" | "goal" = "chat",
   queueId?: string,
   options: StartGroupTurnOptions = {},
@@ -4821,29 +4956,8 @@ function startGroupTurn(
   if (options.goalCoordinatorBotId && (channelMode !== "goal" || !requestedGoalCoordinator)) {
     throw Object.assign(new Error("the selected goal coordinator is not an active room member"), { status: 409 });
   }
-  const message = store.appendMessage(threadId, {
-    role: "user",
-    kind: "text",
-    text,
-    replyToId: replyTo?.id,
-    sendId,
-    channelMode,
-    queueId,
-  });
-  if (!group.dm) store.titleGroupTaskFromFirstMessage(group.id, text, threadId);
-
   const archived = members.filter((member) => member.hidden);
   const mentionedArchived = mentionedBots(text, archived.map(({ name }) => ({ name })))[0];
-  if (mentionedArchived) {
-    store.appendMessage(threadId, {
-      role: "bot",
-      kind: "activity",
-      tool: {
-        name: `${mentionedArchived.name} is archived and can't respond — restore it or mention an active room member.`,
-        ok: false,
-      },
-    });
-  }
   let responders = roomResponders(text, members, group.defaultResponder);
   const explicitlyMentionedLead = roomResponders(text, availableMembers, { kind: "mentions" })[0];
   const goalCoordinator = channelMode === "goal"
@@ -4856,6 +4970,36 @@ function startGroupTurn(
       .find((msg) => msg.kind === "text" && msg.from)?.from?.botId;
     const last = availableMembers.find((b) => b.id === lastSpeakerId) ?? availableMembers[0];
     responders = last ? [last] : [];
+  }
+  if (skillIds.length) {
+    for (const responder of goalCoordinator ? [goalCoordinator] : responders) {
+      const instance = registry.get(responder.modelSelection.instanceId);
+      manualSkillAdmission(
+        responder,
+        skillIds,
+        instance ? enabledProviderCapabilityIds(instance.adapter.capabilities) : [],
+      );
+    }
+  }
+  const message = store.appendMessage(threadId, {
+    role: "user",
+    kind: "text",
+    text,
+    replyToId: replyTo?.id,
+    sendId,
+    channelMode,
+    queueId,
+  });
+  if (!group.dm) store.titleGroupTaskFromFirstMessage(group.id, text, threadId);
+  if (mentionedArchived) {
+    store.appendMessage(threadId, {
+      role: "bot",
+      kind: "activity",
+      tool: {
+        name: `${mentionedArchived.name} is archived and can't respond — restore it or mention an active room member.`,
+        ok: false,
+      },
+    });
   }
   if (!responders.length && !goalCoordinator) {
     const defaultArchivedId = group.defaultResponder.kind === "member" ? group.defaultResponder.botId : undefined;
@@ -4928,7 +5072,7 @@ function startGroupTurn(
       return;
     }
     if (goalCoordinator) {
-      await runGroupGoalOperation({ groupId, threadId, coordinator: goalCoordinator, members, operation });
+      await runGroupGoalOperation({ groupId, threadId, coordinator: goalCoordinator, members, operation, manualSkillIds: skillIds });
     } else {
       const spoken = new Set<string>();
       const skillAuthoringClaim = { claimed: false };
@@ -4959,6 +5103,7 @@ function startGroupTurn(
           skillAuthoringClaim,
           undefined,
           operation,
+          skillIds,
         ))) break;
       }
     }
@@ -4981,7 +5126,7 @@ function drainQueuedChannelSends(): void {
         : Boolean(group && store.groupTaskByThread(group.id, threadId));
       if (!group || !ownsThread) return;
       try {
-        startGroupTurn(groupId, text, resolveReplyTarget(threadId, replyToId), sendId, mode, id);
+        startGroupTurn(groupId, text, resolveReplyTarget(threadId, replyToId), sendId, [], mode, id);
       } catch (error) {
         store.appendMessage(threadId, {
           role: "bot",
@@ -7763,6 +7908,7 @@ const server = createServer(async (req, res) => {
         return json(res, 409, { error: "the channel switched tasks before it could receive the message" });
       }
       const sendId = parseSendId(body.sendId);
+      const skillIds = optionalSkillIds(body);
       const replyTo = resolveReplyTarget(threadId, body.replyToId);
       const receipt = await sendSequencer.run(
         sendId ? `group:${group.id}:${threadId}:${sendId}` : undefined,
@@ -7803,7 +7949,7 @@ const server = createServer(async (req, res) => {
             });
             return { ok: true as const, queued: true as const, queueId: queued.id, threadId };
           }
-          const message = startGroupTurn(current.id, text, replyTo, sendId, channelMode);
+          const message = startGroupTurn(current.id, text, replyTo, sendId, skillIds, channelMode);
           return { ok: true as const, threadId, message };
         },
       );
@@ -8205,6 +8351,13 @@ const server = createServer(async (req, res) => {
         }
         patch.autoReview = body.autoReview;
       }
+      if (body.skillGrants !== undefined || body.skillToolGrants !== undefined) {
+        try {
+          Object.assign(patch, validateSkillGrantPatch(body, availableSkills()));
+        } catch (error) {
+          return json(res, 400, { error: error instanceof Error ? error.message : "invalid skill grants" });
+        }
+      }
       // "Auto on this Mac" hands a bot the user's real session, so the grant
       // must prove a human saw the warning. The desktop dialog is the only
       // caller that sends acknowledgeLocalAuto; without it a PATCH that would
@@ -8380,14 +8533,12 @@ const server = createServer(async (req, res) => {
     if (m && method === "POST") {
       if (!store.bot(m[1])) return json(res, 404, { error: "no such bot" });
       const parsed = z.object({ source: z.string().min(1).max(2000) }).safeParse(await readBody(req));
-      if (!parsed.success) return json(res, 400, { error: "source must be a GitHub URL or owner/repo" });
+      if (!parsed.success) return json(res, 400, { error: "source must be a GitHub URL, owner/repo, or npx skills add command" });
       const fetched = await fetchSkillFromSource(parsed.data.source);
       if ("error" in fetched) return json(res, 422, { error: fetched.error });
-      const results = fetched.skills.map((skill) => installSkill(m![1]!, skill.source, skill.files));
-      const installed = results.filter((entry): entry is Exclude<typeof entry, { error: string }> => !("error" in entry));
-      const errors = results.flatMap((entry) => ("error" in entry ? [entry.error] : []));
-      if (!installed.length) return json(res, 422, { error: errors.join("; ") || "nothing importable found" });
-      return json(res, 201, { installed, errors });
+      const result = installSkillsAtomically(m[1]!, fetched.skills);
+      if ("error" in result) return json(res, 422, { error: result.error });
+      return json(res, 201, { installed: result.installed, errors: [] });
     }
     m = path.match(/^\/api\/bots\/([\w-]+)\/skills\/([a-z0-9-]+)$/);
     if (m && method === "GET") {
@@ -8578,6 +8729,7 @@ const server = createServer(async (req, res) => {
         return json(res, 409, { error: "the bot switched tasks before it could receive the message" });
       }
       const sendId = parseSendId(body.sendId);
+      const skillIds = optionalSkillIds(body);
       const replyTo = resolveReplyTarget(threadId, body.replyToId);
       const receipt = await sendSequencer.run(
         sendId ? `bot:${bot.id}:${threadId}:${sendId}` : undefined,
@@ -8600,7 +8752,7 @@ const server = createServer(async (req, res) => {
             }
             const queued = queuedSteeredMessage(bot.id, threadId, sendId);
             if (queued) {
-              if (queued.text !== text || queued.replyToId !== replyTo?.id) {
+              if (queued.text !== text || queued.replyToId !== replyTo?.id || JSON.stringify(queued.skillIds ?? []) !== JSON.stringify(skillIds)) {
                 throw Object.assign(new Error("sendId already belongs to another message"), { status: 409 });
               }
               return { ok: true as const, queued: true as const, queueId: queued.id, threadId };
@@ -8624,7 +8776,7 @@ const server = createServer(async (req, res) => {
           if (currentAtStart.busy) {
             const instance = registry.get(currentAtStart.modelSelection.instanceId);
             let steered = false;
-            if (instance?.adapter.capabilities.queueing && instance.adapter.steer) {
+            if (!skillIds.length && instance?.adapter.capabilities.queueing && instance.adapter.steer) {
               steered = await instance.adapter
                 .steer(threadId, promptWithReply(text, replyTo, cfg.profile?.name?.trim() || "User"))
                 .catch(() => false);
@@ -8664,17 +8816,18 @@ const server = createServer(async (req, res) => {
               return { ok: true as const, steered: true as const, threadId, message };
             }
             if (!current.busy) {
-              const message = await startTurn(bot.id, text, { threadId, replyTo, sendId });
+              const message = await startTurn(bot.id, text, { threadId, replyTo, sendId, skillIds });
               return { ok: true as const, threadId, message };
             }
             const queued = queueSteeredMessage(current.id, threadId, text, {
               replyToId: replyTo?.id,
               sendId,
+              skillIds,
               prompt: promptWithReply(text, replyTo, cfg.profile?.name?.trim() || "User"),
             });
             return { ok: true as const, queued: true as const, queueId: queued.id, threadId };
           }
-          const message = await startTurn(bot.id, text, { threadId, replyTo, sendId });
+          const message = await startTurn(bot.id, text, { threadId, replyTo, sendId, skillIds });
           return { ok: true as const, threadId, message };
         },
       );
@@ -9117,6 +9270,47 @@ const server = createServer(async (req, res) => {
         return json(res, 400, { error: "limit must be a positive whole number" });
       }
       return json(res, 200, { decisions: readDecisions(DATA_DIR, parsedLimit ?? 200) });
+    }
+
+    // Unified app-wide skill catalog. Imports land in the catalog root and
+    // never create native provider discovery links; admission happens only
+    // when a client sends explicit catalog ids.
+    if (method === "GET" && (path === "/api/skills" || path === "/api/skills/catalog")) {
+      return json(res, 200, { skills: skillCatalog(availableSkills()) });
+    }
+    if (method === "POST" && path === "/api/skills/import") {
+      const body = await readBody(req);
+      if (!body || typeof body.source !== "string" || !body.source.trim()) {
+        return json(res, 400, { error: "A GitHub skill source is required" });
+      }
+      const fetched = await fetchSkillFromSource(body.source.trim());
+      if ("error" in fetched) return json(res, 400, fetched);
+      const imported = installGlobalSkillBatch(globalSkillsRoot, fetched.skills, {
+        reservedIds: bundledSkills.map((skill) => skill.manifest.id),
+      });
+      if ("error" in imported) {
+        const status = imported.kind === "collision" ? 409 : imported.kind === "invalid" ? 400 : 500;
+        return json(res, status, { error: imported.error });
+      }
+      if (!imported.results.length) return json(res, 400, { error: "No importable skills were found", results: [] });
+      return json(res, 201, { results: imported.results, skills: skillCatalog(availableSkills()) });
+    }
+    const importedSkillPath = path.match(/^\/api\/skills\/([^/]+)$/);
+    if (method === "DELETE" && importedSkillPath) {
+      let id: string;
+      try {
+        id = decodeURIComponent(importedSkillPath[1]!);
+      } catch {
+        return json(res, 400, { error: "invalid skill id" });
+      }
+      const entry = availableSkills().find((skill) => skill.manifest.id === id);
+      if (entry && entry.origin !== "imported") return json(res, 403, { error: "only imported skills can be removed here" });
+      const removed = removeGlobalImportedSkill(globalSkillsRoot, id);
+      if ("error" in removed) {
+        const status = /only imported/i.test(removed.error) ? 403 : /no imported/i.test(removed.error) ? 404 : 400;
+        return json(res, status, removed);
+      }
+      return json(res, 200, { ok: true, skills: skillCatalog(availableSkills()) });
     }
 
     // ── provider instances (model picker) ──

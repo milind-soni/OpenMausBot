@@ -28,6 +28,8 @@ export type BotUpdatePatch = Partial<
     | "browser"
     | "browserProfile"
     | "modelSelection"
+    | "skillGrants"
+    | "skillToolGrants"
   >
 > & {
   /** Rides the PATCH body only: the server's proof that the local-auto

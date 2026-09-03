@@ -3,7 +3,7 @@
 // is the stuff shared by every bot: who you are, your keys, and the
 // machine your bots can borrow.
 import { useEffect, useRef, useState } from "react";
-import { Coins, FlaskConical, Globe, KeyRound, Monitor, Search, Smartphone, Terminal, Trash2, User, X } from "lucide-react";
+import { BookOpen, Coins, FlaskConical, Globe, KeyRound, Monitor, Search, Smartphone, Terminal, Trash2, User, X } from "lucide-react";
 import { api, useStore, type AppSettingsSection, type ConfigStatus } from "@/state/store";
 import { analyticsEnabled, setAnalyticsEnabled } from "@/lib/analytics";
 import { builtInBrowserEnabled, showToolCallsEnabled, skillRecorderEnabled } from "@/lib/feature-flags";
@@ -15,6 +15,7 @@ import { LocalComputerSection } from "./LocalComputerSection";
 import { CompanionSection } from "./CompanionSection";
 import { Card, Switch } from "./SettingsPrimitives";
 import { UsageSection } from "./UsageSection";
+import { SkillsSection } from "./SkillsSection";
 import { SkinPicker } from "./SkinPicker";
 import { RoomTurnTimeoutSettings } from "./RoomTurnTimeoutSettings";
 import { TranscriptionSettings } from "./TranscriptionSettings";
@@ -36,6 +37,7 @@ const SECTIONS: Array<{
   { id: "engines", label: "Engines", icon: Terminal, keywords: ["models", "claude", "grok", "providers", "cli"] },
   { id: "companion", label: "Phone", icon: Smartphone, keywords: ["companion", "phone", "pair", "pairing", "mobile", "https", "secure", "tailscale", "wifi", "advanced"] },
   { id: "computer", label: "Local VM", icon: Monitor, keywords: ["vm", "virtual", "desktop"] },
+  { id: "skills", label: "Skills", icon: BookOpen, keywords: ["library", "recorded", "imported", "commands"] },
   { id: "usage", label: "Usage", icon: Coins, keywords: ["tokens", "cost", "billing"] },
 ];
 
@@ -700,6 +702,8 @@ export function SettingsModal() {
             {section === "companion" && <CompanionSection profileEmail={state.config?.profile?.email} />}
 
             {section === "computer" && <LocalComputerSection />}
+
+            {section === "skills" && <SkillsSection />}
 
             {section === "usage" && <UsageSection />}
           </div>

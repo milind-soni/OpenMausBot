@@ -32,7 +32,7 @@ interface QueueEntry {
    * happen on a DIFFERENT thread (a room turn) — drain matches on "this
    * queue's bot is idle now", which needs the bot, not the settling thread. */
   botId: string;
-  items: Array<{ messageId: string; text: string; prompt: string; replyToId?: string; sendId?: string }>;
+  items: Array<{ messageId: string; text: string; prompt: string; replyToId?: string; sendId?: string; skillIds?: string[] }>;
 }
 
 const queues = new Map<string, QueueEntry>(); // threadId → waiting sends
@@ -46,7 +46,7 @@ export function queueSteeredMessage(
   botId: string,
   threadId: string,
   text: string,
-  options: { prompt?: string; replyToId?: string; sendId?: string } = {},
+  options: { prompt?: string; replyToId?: string; sendId?: string; skillIds?: string[] } = {},
 ): QueuedSteer {
   const id = newId();
   const entry = queues.get(threadId) ?? { botId, items: [] };
@@ -59,6 +59,7 @@ export function queueSteeredMessage(
     prompt: options.prompt ?? text,
     replyToId: options.replyToId,
     sendId: options.sendId,
+    skillIds: options.skillIds,
   });
   queues.set(threadId, entry);
   return { id };
@@ -79,6 +80,7 @@ export function drainSteeredMessages(
     prompt: string,
     userMessage: Message,
     excludeIds: string[],
+    skillIds?: string[],
   ) => void | Promise<void>,
 ): void {
   // deleting only the entry being visited is safe under Map iteration
@@ -117,6 +119,7 @@ export function drainSteeredMessages(
       prompt,
       last,
       appended.map((message) => message.id),
+      entry.items.at(-1)?.skillIds,
     );
   }
 }
@@ -126,11 +129,11 @@ export function queuedSteeredMessage(
   botId: string,
   threadId: string,
   sendId: string,
-): { id: string; text: string; replyToId?: string } | null {
+): { id: string; text: string; replyToId?: string; skillIds?: string[] } | null {
   const entry = queues.get(threadId);
   if (!entry || entry.botId !== botId) return null;
   const item = entry.items.find((candidate) => candidate.sendId === sendId);
-  return item ? { id: item.messageId, text: item.text, replyToId: item.replyToId } : null;
+  return item ? { id: item.messageId, text: item.text, replyToId: item.replyToId, skillIds: item.skillIds } : null;
 }
 
 /** Drop one waiting send owned by this bot so it never drains. The queue id

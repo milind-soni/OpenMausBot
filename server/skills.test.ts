@@ -1,5 +1,11 @@
 import { createHash } from "node:crypto";
-import { describe, expect, it, beforeEach, afterEach } from "vitest";
+import { describe, expect, it, beforeEach, afterEach, vi } from "vitest";
+import * as fs from "node:fs";
+
+vi.mock("node:fs", async () => {
+  const actual = await vi.importActual<typeof import("node:fs")>("node:fs");
+  return { ...actual, renameSync: vi.fn(actual.renameSync) };
+});
 import {
   existsSync,
   lstatSync,
@@ -15,10 +21,13 @@ import { tmpdir } from "node:os";
 import { basename, join } from "node:path";
 
 import { removeTempDir } from "./testing/cleanup.ts";
+import * as atomic from "./atomic.ts";
 import { DATA_DIR } from "./config.ts";
 import {
   applyStagedSkillWrite,
+  installGlobalSkillBatch,
   installSkill,
+  installSkillsAtomically,
   listSkills,
   listStagedSkillWrites,
   parseSkillMd,
@@ -62,6 +71,7 @@ beforeEach(() => {
 
 afterEach(async () => {
   await removeTempDir(scratch);
+  await removeTempDir(workspaceDir(bot));
 });
 
 describe("parseSkillMd", () => {
@@ -154,6 +164,67 @@ describe("install → review → enable lifecycle", () => {
     expect("error" in removeSkill(bot, "temp-skill")).toBe(true);
   });
 
+  it("returns both manifest and restore failures when quarantine cannot be restored", () => {
+    installSkill(bot, "src", [{ path: "SKILL.md", content: SKILL("restore-failure") }]);
+    const manifestPath = join(DATA_DIR, "skill-state", bot, "skills.json");
+    const actualWriteFileAtomic = atomic.writeFileAtomic;
+    const actualRenameSync = vi.mocked(fs.renameSync).getMockImplementation();
+    if (!actualRenameSync) throw new Error("test fs mock has no rename implementation");
+    let failManifestWrite = false;
+    vi.spyOn(atomic, "writeFileAtomic").mockImplementation((path, data, options) => {
+      if (failManifestWrite && path === manifestPath) throw new Error("manifest persist blocked");
+      return actualWriteFileAtomic(path, data, options);
+    });
+    vi.mocked(fs.renameSync).mockImplementation((from, to) => {
+      if (String(from).includes(".remove-restore-failure-")) throw new Error("restore rename blocked");
+      return actualRenameSync(from, to);
+    });
+
+    failManifestWrite = true;
+    let result: ReturnType<typeof removeSkill> | undefined;
+    expect(() => {
+      result = removeSkill(bot, "restore-failure");
+    }).not.toThrow();
+    expect(result).toMatchObject({
+      error: expect.stringContaining("manifest persist blocked"),
+    });
+    expect(result).toMatchObject({
+      error: expect.stringContaining("restore failed for quarantine"),
+    });
+    expect(result).toMatchObject({ error: expect.stringContaining("restore rename blocked") });
+    vi.restoreAllMocks();
+  });
+
+  it("preflights a batch so one invalid skill cannot leave a partial import", () => {
+    const result = installSkillsAtomically(bot, [
+      { source: "fixture:alpha", files: [{ path: "SKILL.md", content: SKILL("alpha") }] },
+      { source: "fixture:broken", files: [{ path: "SKILL.md", content: "not a skill manifest" }] },
+    ]);
+    expect(result).toMatchObject({ error: expect.any(String) });
+    expect(listSkills(bot)).toEqual([]);
+    expect(existsSync(join(workspaceDir(bot), "skills", "alpha"))).toBe(false);
+  });
+
+  it("commits a valid batch together", () => {
+    const result = installSkillsAtomically(bot, [
+      { source: "fixture:alpha", files: [{ path: "SKILL.md", content: SKILL("alpha") }] },
+      { source: "fixture:beta", files: [{ path: "SKILL.md", content: SKILL("beta") }] },
+    ]);
+    expect(result).toMatchObject({ installed: [{ name: "alpha" }, { name: "beta" }] });
+    expect(listSkills(bot).map(({ name }) => name)).toEqual(["alpha", "beta"]);
+  });
+
+  it("rolls staged directories back when the manifest cannot commit", () => {
+    const root = join(workspaceDir(bot), "skills");
+    const manifestPath = join(DATA_DIR, "skill-state", bot, "skills.json");
+    mkdirSync(manifestPath, { recursive: true });
+    const result = installSkillsAtomically(bot, [
+      { source: "fixture:alpha", files: [{ path: "SKILL.md", content: SKILL("alpha") }] },
+    ]);
+    expect(result).toMatchObject({ error: expect.stringContaining("rolled back") });
+    expect(existsSync(join(root, "alpha"))).toBe(false);
+    expect(listSkills(bot)).toEqual([]);
+  });
   it("migrates workspace manifests disabled and adopts only old app-owned native links", () => {
     const content = SKILL("legacy-skill");
     installSkill(bot, "legacy:test", [{ path: "SKILL.md", content }]);
@@ -970,5 +1041,27 @@ describe("parseSkillSource", () => {
   it("refuses non-GitHub input loudly", () => {
     expect("error" in parseSkillSource("https://evil.example/skill.md")).toBe(true);
     expect("error" in parseSkillSource("")).toBe(true);
+  });
+});
+
+describe("app-wide skill imports", () => {
+  it("preflights the batch and rolls back collisions without partial writes", () => {
+    const root = mkdtempSync(join(tmpdir(), "openmausbot-global-skill-"));
+    const candidate = (name: string) => ({
+      source: `https://github.com/example/${name}`,
+      files: [{ path: "SKILL.md", content: SKILL(name) }],
+    });
+    try {
+      expect(installGlobalSkillBatch(root, [candidate("one"), candidate("two")])).toMatchObject({
+        results: [{ id: "one" }, { id: "two" }],
+      });
+      expect(installGlobalSkillBatch(root, [candidate("two"), candidate("three")])).toMatchObject({
+        kind: "collision",
+      });
+      expect(existsSync(join(root, "three"))).toBe(false);
+      expect(readFileSync(join(root, "one", "manifest.json"), "utf8")).toContain('"origin": "imported"');
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
   });
 });
