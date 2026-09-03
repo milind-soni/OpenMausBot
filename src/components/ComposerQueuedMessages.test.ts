@@ -26,6 +26,21 @@ describe("QueuedComposerMessages", () => {
     expect(markup).toContain("actually stop at 10");
   });
 
+  /** An interrupt takes seconds to land. A button that looks untouched for
+   * that long has, to the person holding the phone, done nothing. */
+  it("says it is steering while the interrupt is in flight", () => {
+    const markup = renderToStaticMarkup(
+      createElement(QueuedComposerMessages, {
+        items,
+        onSteer: () => undefined,
+        steering: true,
+        onCancel: () => undefined,
+      }),
+    );
+    expect(markup).toContain("Steering");
+    expect(markup).toContain("disabled");
+  });
+
   it("renders nothing when the queue is empty", () => {
     const markup = renderToStaticMarkup(
       createElement(QueuedComposerMessages, { items: [], onCancel: () => undefined }),

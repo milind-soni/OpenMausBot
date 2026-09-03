@@ -45,6 +45,9 @@ struct ChatView: View {
     @State private var fileDownloadTask: Task<Void, Never>?
     @State private var fileDownloadRequestID: UUID?
     @State private var acceptsNextHardwareLineBreak = false
+    /// A Steer is in flight. Cleared when the queue drains or the turn ends,
+    /// whichever the engine gets to first.
+    @State private var steering = false
     @FocusState private var composerFocused: Bool
     @StateObject private var dictation = SpeechDictation()
     /// The opening beat: the island grows with the bot's face in it, then
@@ -331,6 +334,16 @@ struct ChatView: View {
         .onDisappear {
             dictation.stop()
             resetFilePreview()
+        }
+        // A Steer is done when there is nothing left waiting, or when the
+        // turn it was fighting has ended — whichever the engine reaches
+        // first. Both are needed: an interrupt that fails to stop the turn
+        // must not leave the row spinning forever either.
+        .onChange(of: queuedSends.count) { _, count in
+            if count == 0 { steering = false }
+        }
+        .onChange(of: current.busy) { _, busy in
+            if !busy { steering = false }
         }
         .onChange(of: scenePhase) { _, phase in
             if phase != .active { dictation.stop() }
@@ -722,6 +735,7 @@ struct ChatView: View {
         return {
             Haptics.impact(.medium)
             dictation.stop()
+            steering = true
             Task { await session.interrupt(bot: bot) }
         }
     }
@@ -1110,6 +1124,7 @@ struct ChatView: View {
                 QueuedSendRow(
                     send: send,
                     onSteer: injectNow,
+                    isSteering: steering,
                     onCancel: { Task { await session.cancelQueued(send, in: current) } }
                 )
                 .transition(.move(edge: .bottom).combined(with: .opacity))

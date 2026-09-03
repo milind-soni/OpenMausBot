@@ -12,12 +12,17 @@ import { CornerDownRight, Trash2 } from "lucide-react";
 export function QueuedComposerMessages({
   items,
   onSteer,
+  steering = false,
   onCancel,
 }: {
   items: Array<{ queueId: string; text: string }>;
   /** Absent where this surface cannot interrupt, so the button is not
    * offered rather than offered and broken. */
   onSteer?: () => void;
+  /** The interrupt is in flight. Engines take their time noticing one —
+   * codex needs about six seconds — and a button that looks untouched for
+   * six seconds has, as far as the person is concerned, done nothing. */
+  steering?: boolean;
   onCancel: (queueId: string) => void;
 }) {
   if (!items.length) return null;
@@ -34,11 +39,17 @@ export function QueuedComposerMessages({
             <button
               type="button"
               onClick={onSteer}
+              disabled={steering}
               title="Stop the current turn so this message runs now"
-              className="flex shrink-0 items-center gap-1 rounded-full bg-hairline/60 px-2.5 py-1 text-[13px] text-ink hover:bg-hairline"
+              className="flex shrink-0 items-center gap-1 rounded-full bg-hairline/60 px-2.5 py-1 text-[13px] text-ink hover:bg-hairline disabled:opacity-60 disabled:hover:bg-hairline/60"
             >
-              <CornerDownRight size={12} strokeWidth={2.5} aria-hidden="true" />
-              Steer
+              <CornerDownRight
+                size={12}
+                strokeWidth={2.5}
+                aria-hidden="true"
+                className={steering ? "animate-pulse" : undefined}
+              />
+              {steering ? "Steering…" : "Steer"}
             </button>
           )}
           <button

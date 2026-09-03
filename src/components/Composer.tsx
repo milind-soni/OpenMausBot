@@ -413,6 +413,17 @@ export function Composer({
   const pendingCount = (state.pendingQueued[threadId] ?? []).length;
   const queuedMessages = state.pendingQueued[threadId] ?? [];
   const canInject = composerCanInjectNow(busy, locked, pendingCount);
+  // An interrupt is in flight. Cleared when the queue drains or the turn
+  // ends — both, because an interrupt that fails to stop the turn must not
+  // leave the row spinning for ever either.
+  const [steering, setSteering] = useState(false);
+  const steerNow = () => {
+    setSteering(true);
+    interruptTurn();
+  };
+  useEffect(() => {
+    if (!busy || pendingCount === 0) setSteering(false);
+  }, [busy, pendingCount]);
   const interruptTurn = () => {
     if (group) dispatch({ type: "interruptGroup", groupId: group.id });
     else if (bot) dispatch({ type: "interrupt", botId: bot.id });
@@ -712,7 +723,8 @@ export function Composer({
         )}
         <QueuedComposerMessages
           items={queuedMessages}
-          onSteer={canInject ? interruptTurn : undefined}
+          onSteer={canInject ? steerNow : undefined}
+          steering={steering}
           onCancel={(queueId) => {
             if (group) dispatch({ type: "cancelGroupQueued", groupId: group.id, threadId, queueId });
             else if (bot) dispatch({ type: "cancelQueued", botId: bot.id, queueId });

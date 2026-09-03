@@ -20,6 +20,10 @@ struct QueuedSendRow: View {
     /// Stop the turn so this runs now. Absent where the phone cannot
     /// interrupt — a room — so the button is not offered rather than broken.
     let onSteer: (() -> Void)?
+    /// The interrupt is in flight. Engines take their time noticing one —
+    /// codex needs about six seconds — and a button that looks untouched
+    /// for six seconds has, as far as the person is concerned, done nothing.
+    var isSteering = false
     let onCancel: () -> Void
 
     var body: some View {
@@ -37,18 +41,25 @@ struct QueuedSendRow: View {
             if let onSteer {
                 Button(action: onSteer) {
                     HStack(spacing: 4) {
-                        Image(systemName: "arrow.turn.down.right")
-                            .font(.system(size: 11, weight: .bold))
-                        Text("Steer")
-                            .font(.system(size: 14, weight: .medium))
+                        if isSteering {
+                            ProgressView().controlSize(.mini)
+                            Text("Steering…")
+                                .font(.system(size: 14, weight: .medium))
+                        } else {
+                            Image(systemName: "arrow.turn.down.right")
+                                .font(.system(size: 11, weight: .bold))
+                            Text("Steer")
+                                .font(.system(size: 14, weight: .medium))
+                        }
                     }
                     .foregroundStyle(Color.primary)
                     .padding(.horizontal, 11)
                     .padding(.vertical, 6)
-                    .background(Capsule().fill(Color.secondary.opacity(0.22)))
+                    .background(Capsule().fill(Color.secondary.opacity(isSteering ? 0.12 : 0.22)))
                 }
                 .buttonStyle(.plain)
-                .accessibilityLabel("Steer")
+                .disabled(isSteering)
+                .accessibilityLabel(isSteering ? "Steering" : "Steer")
                 .accessibilityHint("Stops the current turn so this message runs now")
             }
 
