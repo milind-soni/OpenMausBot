@@ -1111,6 +1111,54 @@ export class Store {
     return full;
   }
 
+  /** Append one terminal delegation outcome exactly once. The stable id is
+   * task-derived and the SQLite ledger delivery marker commits atomically with
+   * the message, so boot recovery cannot duplicate a worker result. */
+  appendDelegationOutcome(threadId: string, taskId: string, message: Omit<Message, "id" | "at">): { message: Message; inserted: boolean } {
+    const t = this.thread(threadId);
+    const id = `delegation-result:${taskId}`;
+    const existing = t.messages.find((candidate) => candidate.id === id);
+    if (existing) return { message: existing, inserted: false };
+    const full: Message = { id, at: Date.now(), parentId: t.activeLeafId, ...redactBotAuthored(message) };
+    const { inserted } = mdb.appendDelegationDelivery(threadId, taskId, full);
+    if (!inserted) {
+      const persisted = t.messages.find((candidate) => candidate.id === id);
+      if (persisted) return { message: persisted, inserted: false };
+      // The DB row can predate this Store cache only after a fresh process;
+      // reload the thread rather than manufacturing a duplicate event.
+      const loaded = mdb.readThread(threadId, messagesFile(threadId));
+      t.messages = loaded.messages;
+      t.activeLeafId = loaded.activeLeafId;
+      return { message: t.messages.find((candidate) => candidate.id === id) ?? full, inserted: false };
+    }
+    t.messages.push(full);
+    t.activeLeafId = full.id;
+    this.emit({ type: "message", threadId, message: full });
+    return { message: full, inserted: true };
+  }
+
+  /** A claimed source wake is deliberately not replayed after a crash; leave
+   * one durable, task-specific notice instead of silently losing continuity. */
+  appendDelegationWakeInterrupted(threadId: string, taskId: string): boolean {
+    const t = this.thread(threadId);
+    const id = `delegation-wake-interrupted:${taskId}`;
+    if (t.messages.some((candidate) => candidate.id === id)) return false;
+    const full: Message = {
+      id,
+      at: Date.now(),
+      parentId: t.activeLeafId,
+      role: "bot",
+      kind: "activity",
+      tool: { name: "Automatic continuation was interrupted by a restart; the delegated result is preserved above", ok: false },
+    };
+    const { inserted } = mdb.appendDelegationWakeInterrupted(threadId, taskId, full);
+    if (!inserted) return false;
+    t.messages.push(full);
+    t.activeLeafId = full.id;
+    this.emit({ type: "message", threadId, message: full });
+    return true;
+  }
+
   /** Insert a message into the active chain directly after `anchorId` — the
    * home for turn artifacts that finish AFTER the world moved on (the
    * settle-time screen capture races a fast follow-up send, which used to

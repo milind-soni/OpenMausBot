@@ -136,9 +136,9 @@ import type { GroupGoalRunCardData, GroupGoalRunStatus } from "../shared/group-g
 
 import { BUILT_IN_DRIVERS } from "./drivers/builtIn.ts";
 import { getOrCreateChannel, mirrorActivity, mirrorExchange, mirrorReply, type CommsBus } from "./comms-visibility.ts";
-import { searchMessages } from "./message-db.ts";
+import { abandonDelegationDelivery, acknowledgeDelegationContext, acknowledgeDelegationWake, claimDelegationWake, delegationTask, releaseDelegationWakeClaim, searchMessages } from "./message-db.ts";
 import { promptWithReply, transcriptText } from "./replies.ts";
-import { _loadPending, buildDelegationFailurePrompt, buildDelegationRevivalPrompt, DelegationWakeBudget, discardDelegations, drainDelegations, findDelegationReceipt, pendingDelegationInfo, pendingDelegationSnapshot, pendingThreads, queueDelegation, recordDelegationReceipt, releaseDelegationsWaitingOn, summarizeDelegatedActivity, type QueueResult } from "./delegations.ts";
+import { _loadPending, abandonDelegationsForSourceThread, buildDelegationFailurePrompt, buildDelegationRevivalPrompt, DELEGATION_WAKE_WINDOW_MS, DelegationWakeBudget, discardDelegations, drainDelegations, findDelegationReceipt, markDelegationRunning, pendingDelegationDeliveries, pendingDelegationInfo, pendingDelegationSnapshot, pendingThreads, queueDelegation, recordDelegationReceipt, registerRunningDelegation, releaseDelegationsWaitingOn, summarizeDelegatedActivity, type QueueResult } from "./delegations.ts";
 import {
   cancelSteeredMessage,
   drainSteeredMessages,
@@ -708,11 +708,18 @@ function controlIntegration(botId: string) {
 type AskBotOutcome = {
   status: "reply" | "failed" | "timeout" | "error";
   text: string;
+  taskId?: string;
   /** Provider's stop reason when the turn completed not-ok. */
   stopReason?: string | null;
 };
 
-function askBotAndWait(targetBotId: string, message: string, depth: number, fromBotId?: string): Promise<AskBotOutcome> {
+function askBotAndWait(
+  targetBotId: string,
+  message: string,
+  depth: number,
+  fromBotId?: string,
+  onTimeout?: () => string | undefined,
+): Promise<AskBotOutcome> {
   const target = store.bot(targetBotId);
   if (!target) return Promise.resolve({ status: "error", text: "(no such bot)" });
   const threadId = target.threadId;
@@ -741,7 +748,13 @@ function askBotAndWait(targetBotId: string, message: string, depth: number, from
     });
     // Timing out does NOT stop the peer's turn — the caller decides whether
     // the still-running work becomes a delegation claim ticket instead.
-    const timer = setTimeout(() => finish({ status: "timeout", text }), ASK_BOT_TIMEOUT_MS);
+    const timer = setTimeout(() => {
+      // Register the durable handoff before finish() removes this event
+      // listener. A provider completion racing this timeout then sees the
+      // watch instead of becoming an untracked orphan.
+      const taskId = onTimeout?.();
+      finish({ status: "timeout", text, ...(taskId ? { taskId } : {}) });
+    }, ASK_BOT_TIMEOUT_MS);
     startTurn(targetBotId, message, {
       commsDepth: depth + 1,
       unattended: isUnattended(fromBotId),
@@ -2421,56 +2434,106 @@ const delegationWatch = new Map<string, {
 // fold the result in and answer the user instead of sitting idle. Mirrors
 // the cardContinuation resume pattern used for connector/credential cards.
 const delegationWakeBudget = new DelegationWakeBudget();
-const pendingDelegationWakes = new Map<string, { botId: string; targetName: string; failureReason?: string }>();
+// Keyed by task id, not source thread: two completed delegations on one
+// thread each retain an independent durable wake claim.
+const pendingDelegationWakes = new Map<string, { botId: string; threadId: string; targetName: string; failureReason?: string }>();
+const delegationWakeRetryTimers = new Map<string, ReturnType<typeof setTimeout>>();
 
-function dispatchDelegationWake(botId: string, threadId: string, targetName: string, failureReason?: string): void {
-  const prompt = failureReason
-    ? buildDelegationFailurePrompt(targetName, failureReason)
-    : buildDelegationRevivalPrompt(targetName);
+function deferDelegationWakeDrain(threadId: string): void {
+  if (delegationWakeRetryTimers.has(threadId)) return;
+  const timer = setTimeout(() => {
+    delegationWakeRetryTimers.delete(threadId);
+    drainDelegationWakes();
+  }, DELEGATION_WAKE_WINDOW_MS);
+  timer.unref?.();
+  delegationWakeRetryTimers.set(threadId, timer);
+}
+
+function dispatchDelegationWake(taskId: string, botId: string, threadId: string, targetName: string, failureReason?: string): void {
+  const prompt = failureReason ? buildDelegationFailurePrompt(targetName, failureReason) : buildDelegationRevivalPrompt(targetName);
+  let accepted = false;
+  const handleDispatchError = (reason: unknown) => {
+    const message = reason instanceof Error ? reason.message : String(reason);
+    // A deletion can race this detached setup callback. Never recreate the
+    // vanished transcript or requeue a wake for an owner that no longer has
+    // the task; the ledger remains terminal but all source effects are done.
+    if (!store.bot(botId) || !store.taskByThread(botId, threadId)) {
+      pendingDelegationWakes.delete(taskId);
+      abandonDelegationDelivery(taskId);
+      return;
+    }
+    // No provider dispatch happened for an already-working race or a setup
+    // cancellation, so release this persisted claim and retry when the source
+    // becomes idle. Other setup failures are reported once under the existing
+    // non-retry policy.
+    if (!accepted && /(already working|stopped before dispatch|setup cancelled)/i.test(message)) {
+      releaseDelegationWakeClaim(taskId);
+      pendingDelegationWakes.set(taskId, { botId, threadId, targetName, failureReason });
+      return;
+    }
+    if (!accepted) acknowledgeDelegationWake(taskId);
+    store.appendMessage(threadId, {
+      role: "bot", kind: "activity",
+      tool: { name: `error: could not resume after delegation — ${message.slice(0, 120)}`, ok: false },
+    });
+  };
   void startTurn(botId, prompt, {
     threadId,
     cardContinuation: true,
     unattended: isUnattended(botId),
-  })
-    .then(() => undefined)
-    .catch((error) => {
-      const message = error instanceof Error ? error.message : String(error);
-      // Raced with a user turn claiming the bot — retry once it settles.
-      if (/already working/i.test(message)) {
-        pendingDelegationWakes.set(threadId, { botId, targetName, failureReason });
-        return;
-      }
-      store.appendMessage(threadId, {
-        role: "bot",
-        kind: "activity",
-        tool: {
-          name: `error: could not resume after delegation — ${message.slice(0, 120)}`,
-          ok: false,
-        },
-      });
-    });
+    onDispatchAccepted: () => {
+      accepted = true;
+      acknowledgeDelegationWake(taskId);
+    },
+    onDispatchError: handleDispatchError,
+  }).catch(handleDispatchError);
 }
 
-function wakeDelegationSource(source: BotRecord, threadId: string, targetName: string, failureReason?: string): void {
-  // Busy? Hold the wake until the source settles, then drain it — the
-  // delegated reply is already in the thread, so nothing is lost, and the
-  // source processes it the moment it is free rather than only on a later
-  // user nudge.
+function wakeDelegationSource(taskId: string, source: BotRecord, threadId: string, targetName: string, failureReason?: string): void {
   if (store.bot(source.id)?.busy) {
-    pendingDelegationWakes.set(threadId, { botId: source.id, targetName, failureReason });
+    pendingDelegationWakes.set(taskId, { botId: source.id, threadId, targetName, failureReason });
     return;
   }
-  if (!delegationWakeBudget.tryAcquire(threadId)) return;
-  dispatchDelegationWake(source.id, threadId, targetName, failureReason);
+  if (!delegationWakeBudget.tryAcquire(threadId)) {
+    pendingDelegationWakes.set(taskId, { botId: source.id, threadId, targetName, failureReason });
+    deferDelegationWakeDrain(threadId);
+    return;
+  }
+  // Persist before starting the provider. On restart, a claimed wake becomes
+  // a clear interrupted-continuation notice instead of a duplicate model run.
+  if (!claimDelegationWake(taskId)) return;
+  dispatchDelegationWake(taskId, source.id, threadId, targetName, failureReason);
 }
 
 function drainDelegationWakes(): void {
-  for (const [threadId, entry] of pendingDelegationWakes) {
-    if (store.bot(entry.botId)?.busy) continue;
-    pendingDelegationWakes.delete(threadId);
-    if (!delegationWakeBudget.tryAcquire(threadId)) continue;
-    dispatchDelegationWake(entry.botId, threadId, entry.targetName, entry.failureReason);
+  for (const [taskId, entry] of pendingDelegationWakes) {
+    const source = store.bot(entry.botId);
+    if (!source || !store.taskByThread(source.id, entry.threadId)) {
+      pendingDelegationWakes.delete(taskId);
+      abandonDelegationDelivery(taskId);
+      continue;
+    }
+    if (source.busy) continue;
+    if (!delegationWakeBudget.tryAcquire(entry.threadId)) {
+      deferDelegationWakeDrain(entry.threadId);
+      continue;
+    }
+    pendingDelegationWakes.delete(taskId);
+    if (!claimDelegationWake(taskId)) continue;
+    dispatchDelegationWake(taskId, entry.botId, entry.threadId, entry.targetName, entry.failureReason);
   }
+}
+
+/** Deletion removes a source transcript permanently, so it must cancel every
+ * queued/terminal source effect before Store removes task ownership. */
+function abandonSourceDelegationThread(threadId: string): void {
+  abandonDelegationsForSourceThread(threadId);
+  for (const [taskId, entry] of pendingDelegationWakes) {
+    if (entry.threadId === threadId) pendingDelegationWakes.delete(taskId);
+  }
+  const timer = delegationWakeRetryTimers.get(threadId);
+  if (timer) clearTimeout(timer);
+  delegationWakeRetryTimers.delete(threadId);
 }
 
 // Provider-native sessions only know about messages produced inside their
@@ -2498,9 +2561,69 @@ function markTaskContextExternallyUpdated(bot: BotRecord, threadId: string): voi
   store.patchBot(bot.id, patch);
 }
 
+/** Deliver a persisted terminal outcome once. The ledger transaction writes
+ * the stable source message id and delivery acknowledgement together; a boot
+ * retry can therefore safely call this again after any crash boundary. */
+function deliverDelegationOutcome(
+  taskId: string,
+  sourceThreadId: string,
+  targetId: string,
+  targetName: string,
+  ok: boolean,
+  reply: string,
+  failureName: string,
+): void {
+  const source = store.botByThread(sourceThreadId);
+  if (!source || !store.taskByThread(source.id, sourceThreadId)) {
+    // A deleted source cannot consume this result. Acknowledge abandonment so
+    // every startup does not retry an impossible delivery forever.
+    abandonDelegationDelivery(taskId);
+    return;
+  }
+  const target = store.bot(targetId);
+  if (ok && reply.trim()) {
+    const sourceReply: Omit<Message, "id" | "at"> = {
+      role: "bot", kind: "text",
+      text: `@${targetName} replied to the delegated task:\n\n${reply.trim()}`,
+    };
+    if (target) sourceReply.from = { botId: target.id, name: target.name, color: target.color };
+    store.appendDelegationOutcome(sourceThreadId, taskId, sourceReply);
+  } else {
+    store.appendDelegationOutcome(sourceThreadId, taskId, {
+      role: "bot", kind: "activity",
+      tool: { name: ok ? `Delegation to @${targetName} completed without a text reply` : `Delegation to @${targetName} failed — ${failureName}`, ok },
+    });
+  }
+  // The source message and context marker use independent durable acks. If
+  // either process boundary crashes, boot replays just the missing safe step.
+  // Mark first, then acknowledge. A crash in between safely repeats the
+  // idempotent invalidation at boot; reversing that order could acknowledge
+  // a context marker that never reached the bot store.
+  if (delegationTask(taskId)?.sourceContext === "pending") {
+    markTaskContextExternallyUpdated(source, sourceThreadId);
+    acknowledgeDelegationContext(taskId);
+  }
+  wakeDelegationSource(taskId, source, sourceThreadId, targetName, ok && reply.trim() ? undefined : (failureName || "the delegated turn did not finish"));
+}
+
 /** Consume one delegated-turn watch and mirror exactly one terminal state.
  * Some harness paths settle a busy bot without a provider turn.completed
  * event, so they call this same finalizer explicitly. */
+function resumeTerminalDelegation(taskId: string, sourceThreadId: string): void {
+  const task = delegationTask(taskId);
+  if (!task || task.state !== "terminal" || task.sourceThreadId !== sourceThreadId) return;
+  const ok = task.terminalStatus === "done";
+  deliverDelegationOutcome(
+    task.taskId,
+    task.sourceThreadId,
+    task.toBotId,
+    task.toBotName,
+    ok,
+    ok ? (task.terminalResult ?? "") : "",
+    ok ? "" : (task.terminalResult ?? "the delegated turn did not finish"),
+  );
+}
+
 function finalizeDelegationWatch(
   threadId: string,
   ok: boolean,
@@ -2509,12 +2632,12 @@ function finalizeDelegationWatch(
 ): boolean {
   const watched = delegationWatch.get(threadId);
   if (!watched) return false;
-  delegationWatch.delete(threadId);
-  // The receipt is written before any mirror short-circuits: the delegating
-  // bot's check/wait_delegation must see a terminal state even when the
-  // channel or target is gone.
+  // The first terminal transition wins before any externally visible mirror.
+  // Keep the watch if persistence fails so an explicit failure path can still
+  // retry it rather than silently forgetting an unrecorded terminal result.
+  let settled = true;
   if (watched.taskId && watched.sourceThreadId) {
-    recordDelegationReceipt({
+    settled = recordDelegationReceipt({
       id: watched.taskId,
       sourceThreadId: watched.sourceThreadId,
       toBotId: watched.toBotId,
@@ -2523,42 +2646,12 @@ function finalizeDelegationWatch(
       result: ok ? reply : failureName,
     });
   }
+  delegationWatch.delete(threadId);
+  if (!settled) return true;
   const target = store.bot(watched.toBotId);
   const targetName = target?.name ?? watched.toBotName ?? watched.toBotId;
-  const source = watched.sourceThreadId ? store.botByThread(watched.sourceThreadId) : undefined;
-  if (source && watched.sourceThreadId) {
-    if (ok && reply.trim()) {
-      const sourceReply: Omit<Message, "id" | "at"> = {
-        role: "bot",
-        kind: "text",
-        text: `@${targetName} replied to the delegated task:\n\n${reply.trim()}`,
-      };
-      if (target) sourceReply.from = { botId: target.id, name: target.name, color: target.color };
-      store.appendMessage(watched.sourceThreadId, sourceReply);
-    } else {
-      store.appendMessage(watched.sourceThreadId, {
-        role: "bot",
-        kind: "activity",
-        tool: {
-          name: ok
-            ? `Delegation to @${targetName} completed without a text reply`
-            : `Delegation to @${targetName} failed — ${failureName}`,
-          ok,
-        },
-      });
-    }
-    markTaskContextExternallyUpdated(source, watched.sourceThreadId);
-    // Peer wake: a settled delegated turn resumes the source bot so it
-    // folds the result in and answers the user, instead of sitting idle
-    // with the reply only visible in the thread (the "delegated and went
-    // silent" gap). Failures wake it too — the user must hear the task did
-    // not finish. Idle-checked and burst-capped so a busy source or a
-    // re-delegating loop cannot spin up runs.
-    if (ok && reply.trim()) {
-      wakeDelegationSource(source, watched.sourceThreadId, targetName);
-    } else if (!ok) {
-      wakeDelegationSource(source, watched.sourceThreadId, targetName, failureName || "the delegated turn did not finish");
-    }
+  if (watched.taskId && watched.sourceThreadId) {
+    deliverDelegationOutcome(watched.taskId, watched.sourceThreadId, watched.toBotId, targetName, ok, reply, failureName);
   }
   const channel = watched.channelId ? store.group(watched.channelId) : undefined;
   if (!target || !channel) return true;
@@ -2650,7 +2743,9 @@ const runDelegatedTurn: Parameters<typeof drainDelegations>[3] = (toBotId, text,
       // busy. Those asynchronous setup failures do not emit turn.completed,
       // so clear the watch and report them through this callback too.
       onDispatchError: reportStartFailure,
-    }).then(() => undefined).catch((err) => {
+    }).then(() => {
+      markDelegationRunning(taskId);
+    }).catch((err) => {
       reportStartFailure(err);
     });
 };
@@ -2895,6 +2990,8 @@ async function startTurn(
     /** Stable identity supplied by the composer so a network retry cannot
      * dispatch the same user action twice. */
     sendId?: string;
+    /** Called only after the provider accepted the turn dispatch. */
+    onDispatchAccepted?: () => void;
     onDispatchError?: (message: string) => void;
   },
 ) {
@@ -3416,6 +3513,14 @@ async function startTurn(
       if (dispatch.cancelled) {
         retireProviderTurn(dispatch.value.turnId);
         throw new DirectTurnSetupCancelled("turn stopped during provider setup");
+      }
+      // The provider has accepted this turn. Consumers that own a durable
+      // outbox may safely acknowledge their dispatch claim here; `startTurn`
+      // itself returned before this detached setup/send path began.
+      try {
+        opts?.onDispatchAccepted?.();
+      } catch (error) {
+        console.error("turn dispatch accepted callback failed", error);
       }
       clearDirectTurnDispatch(bot.id, dispatchClaimId);
       // dispatched: the rewind is spent, and the old cursors are dead
@@ -3951,6 +4056,7 @@ function serializeRoomContext(threadId: string, userName: string): string {
 // they can mirror messages + chips without re-deriving SSE plumbing. Same
 // shape every comms entry point uses (ask_bot, delegate_bot).
 const commsBus: CommsBus = { store, broadcast };
+(commsBus as CommsBus & { onDelegationTerminal?: (id: string, threadId: string) => void }).onDelegationTerminal = resumeTerminalDelegation;
 
 // approval bus: peer-approval.ts only needs to push cards and broadcast
 // them — its pending map lives in the module so the two respond endpoints
@@ -3970,6 +4076,29 @@ const approvalBus: ApprovalBus = { store, broadcast };
 // Run them now, through the same drain — target and approvePeerComms are
 // re-checked there as always; a source bot that no longer exists is skipped.
 _loadPending();
+for (const task of pendingDelegationDeliveries()) {
+  const source = store.botByThread(task.sourceThreadId);
+  if (!source || !store.taskByThread(source.id, task.sourceThreadId)) {
+    abandonDelegationDelivery(task.taskId);
+    continue;
+  }
+  if (task.sourceWake === "claimed") {
+    // A provider dispatch may already have happened. Do not duplicate it;
+    // record a visible durable notice alongside the preserved source result.
+    store.appendDelegationWakeInterrupted(task.sourceThreadId, task.taskId);
+    continue;
+  }
+  const ok = task.terminalStatus === "done";
+  deliverDelegationOutcome(
+    task.taskId,
+    task.sourceThreadId,
+    task.toBotId,
+    task.toBotName,
+    ok,
+    ok ? (task.terminalResult ?? "") : "",
+    ok ? "" : (task.terminalResult ?? "the delegated turn was interrupted when OpenMausBot restarted"),
+  );
+}
 {
   const leftover = pendingThreads();
   if (leftover.length) console.log(`delegations: ${leftover.length} thread(s) with queued handoffs from a previous run — draining`);
@@ -6205,7 +6334,11 @@ const server = createServer(async (req, res) => {
             MAX_COMMS_DEPTH,
             fromThreadId,
           );
-          if (queued.result !== "ok" || !queued.id) return json(res, 200, { busy: true });
+          if (queued.result !== "ok" || !queued.id) {
+            return json(res, 200, queued.result === "persistence_error"
+              ? { busy: true, error: "could not durably queue the busy peer handoff; do not assume it will run" }
+              : { busy: true });
+          }
           return json(res, 200, { busy: true, taskId: queued.id, toBotName: target.name });
         };
         if (target.busy) return queueBusyFallback();
@@ -6254,28 +6387,49 @@ const server = createServer(async (req, res) => {
         const channel = getOrCreateChannel(store, currentFrom, currentTarget);
         mirrorExchange(commsBus, currentFrom, currentTarget, message, channel, fromThreadId);
         const prefixed = `[Message from @${currentFrom.name}, another bot in this OpenMausBot workspace. Reply to them.]\n\n${message}`;
-        const outcome = await askBotAndWait(toBotId, prefixed, depth, fromBotId);
-        if (outcome.status === "timeout" && !delegationWatch.has(currentTarget.threadId)) {
-          // The peer's turn is still running — only the wait ended. Convert
-          // the ask into a delegation claim ticket: the watch mirrors the
-          // terminal state into the channel AND the asker's thread when the
-          // turn settles, and check/wait_delegation read the same receipt.
-          // Losing the reply was the old behavior, and it read as "the bots
-          // don't respond to each other".
-          const taskId = newId();
+        const timeoutTaskId = newId();
+        const outcome = await askBotAndWait(toBotId, prefixed, depth, fromBotId, () => {
+          if (delegationWatch.has(currentTarget.threadId)) return undefined;
+          try {
+            registerRunningDelegation({
+              taskId: timeoutTaskId,
+              sourceThreadId: fromThreadId,
+              toBotId,
+              toBotName: currentTarget.name,
+              targetThreadId: currentTarget.threadId,
+              message,
+              reason: "ask timed out",
+              depth,
+              approvalGranted: true,
+              attempts: 0,
+              waitingOnBusy: false,
+            });
+          } catch (error) {
+            const why = error instanceof Error ? error.message : String(error);
+            store.appendMessage(fromThreadId, {
+              role: "bot",
+              kind: "activity",
+              tool: { name: `Ask could not become a durable delegation — ${why.slice(0, 120)}`, ok: false },
+            });
+            return undefined;
+          }
           delegationWatch.set(currentTarget.threadId, {
             channelId: channel.id,
             toBotId,
             toBotName: currentTarget.name,
-            taskId,
+            taskId: timeoutTaskId,
             sourceThreadId: fromThreadId,
+            startedAtMs: Date.now(),
           });
+          return timeoutTaskId;
+        });
+        if (outcome.status === "timeout" && outcome.taskId) {
           store.appendMessage(fromThreadId, {
             role: "bot",
             kind: "activity",
             tool: { name: `@${currentTarget.name} is still working — ask converted to a delegation` },
           });
-          return json(res, 200, { timeout: true, taskId, toBotName: currentTarget.name, waitedMs: ASK_BOT_TIMEOUT_MS });
+          return json(res, 200, { timeout: true, taskId: outcome.taskId, toBotName: currentTarget.name, waitedMs: ASK_BOT_TIMEOUT_MS });
         }
         if (outcome.status === "failed" && !outcome.text.trim()) {
           // No partial answer to hand back — mirror the failure where the
@@ -6374,6 +6528,7 @@ const server = createServer(async (req, res) => {
             too_deep: "delegation chains are limited to one hop — do this one yourself",
             no_target: "no such bot",
             too_many: "too many delegations queued on this turn — finish some first",
+            persistence_error: "delegation was not queued because durable storage failed — do the work yourself or retry later",
           };
           return json(res, 200, { error: said[queued.result === "ok" ? "no_target" : queued.result] });
         }
@@ -8352,7 +8507,11 @@ const server = createServer(async (req, res) => {
         // a peer approval naming this bot can never be meaningfully answered
         // now, and its caller would otherwise wait out the 15-minute timeout
         cancelPeerApprovalsFor(bot.id);
-        discardDelegations(commsBus, bot.threadId);
+        // No source output should be appended while these task transcripts
+        // are being removed. Cover inactive tasks too, not only bot.threadId.
+        for (const threadId of new Set([bot.threadId, ...(bot.tasks ?? []).map((task) => task.threadId)])) {
+          abandonSourceDelegationThread(threadId);
+        }
         computerControl.forget(bot.id);
         computerControlRevision.delete(bot.id);
         const target = perBotLocalVmTarget(bot.id);
@@ -8950,12 +9109,21 @@ const server = createServer(async (req, res) => {
       return json(res, 200, { task: wireTask(task) });
     }
     if (m && method === "DELETE") {
-      const bot = store.bot(m[1]);
-      if (bot?.busy && (bot.threadId === m[2] || routines!.isActiveThread(m[2]))) {
+      const [botId, taskThreadId] = [m[1], m[2]];
+      const bot = store.bot(botId);
+      if (bot?.busy && (bot.threadId === taskThreadId || routines!.isActiveThread(taskThreadId))) {
         return json(res, 409, { error: "this task is running — stop it first" });
       }
-      const stagedSkillCleanups = stagedSkillCleanupsForThread(m[2]);
-      const updated = store.deleteTask(m[1], m[2]);
+      // Do not abandon a live task's handoffs if the delete itself will be
+      // refused (unknown task or the only remaining task).
+      if (!bot || !bot.tasks || bot.tasks.length < 2 || !bot.tasks.some((task) => task.threadId === taskThreadId)) {
+        return json(res, 400, { error: "a bot keeps at least one task" });
+      }
+      const stagedSkillCleanups = stagedSkillCleanupsForThread(taskThreadId);
+      // The task transcript is about to disappear, so atomically abandon any
+      // queued/running handoff and its terminal delivery/wake outboxes first.
+      abandonSourceDelegationThread(taskThreadId);
+      const updated = store.deleteTask(botId, taskThreadId);
       if (!updated) return json(res, 400, { error: "a bot keeps at least one task" });
       rejectDeletedThreadSkillStages(stagedSkillCleanups);
       const fresh = botWithThread(updated);
