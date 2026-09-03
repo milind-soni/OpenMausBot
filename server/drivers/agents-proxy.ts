@@ -23,6 +23,8 @@
 //   OMB_HARNESS_URL  base URL of the harness (http://127.0.0.1:8799)
 //   OMB_BOT_ID       the calling bot's id (excluded from list_bots; sender)
 //   OMB_COMMS_TOKEN  shared secret for the localhost-only internal endpoints
+//   OMB_COMMS_CAPABILITY scoped bot capability minted by the harness; the
+//                         injected thread id is checked at the existing route boundary
 //   OMB_TURN_DEPTH   this turn's comms depth (the harness refuses recursion)
 import readline from "node:readline";
 
@@ -32,6 +34,7 @@ const HARNESS = process.env.OMB_HARNESS_URL ?? "http://127.0.0.1:8799";
 const BOT_ID = process.env.OMB_BOT_ID ?? "";
 const THREAD_ID = process.env.OMB_THREAD_ID ?? "";
 const TOKEN = process.env.OMB_COMMS_TOKEN ?? "";
+const CAPABILITY = process.env.OMB_COMMS_CAPABILITY ?? "";
 const DEPTH = Number(process.env.OMB_TURN_DEPTH ?? "0") || 0;
 const SKILL_AUTHORING_ENABLED = process.env.OMB_SKILL_AUTHORING_ENABLED === "1";
 const MAX_CREATED_PER_TURN = 4;
@@ -248,6 +251,7 @@ const TOOLS = [
         bot_id: { type: "string", description: "The target bot's id (from list_bots)." },
         message: { type: "string", description: "What the peer should do / answer." },
         reason: { type: "string", description: "Optional one-line reason for the delegation (shown to the user as a chip)." },
+        runtimePolicyOverride: { type: "object", description: "Optional one-task runtime policy override; validated and accepted only when the caller is authorized." },
       },
       required: ["bot_id", "message"],
     },
@@ -415,10 +419,19 @@ const rpcErr = (id: unknown, code: number, message: string) => send({ jsonrpc: "
 const textResult = (id: unknown, text: string, isError = false) =>
   ok(id, { content: [{ type: "text", text }], isError });
 
+/** Call the local agents-proxy HTTP surface and decode its JSON response. */
 async function api(path: string, init?: RequestInit): Promise<Json> {
   const res = await fetch(HARNESS + path, {
     ...init,
-    headers: { "content-type": "application/json", authorization: `Bearer ${TOKEN}`, ...init?.headers },
+    redirect: "error",
+    headers: {
+      ...init?.headers,
+      "content-type": "application/json",
+      authorization: `Bearer ${TOKEN}`,
+      "x-omb-bot-id": BOT_ID,
+      "x-omb-thread-id": THREAD_ID,
+      "x-omb-capability": CAPABILITY,
+    },
   });
   const body = (await res.json().catch(() => ({}))) as Json;
   if (!res.ok) throw new Error(String(body.error ?? `HTTP ${res.status}`));
@@ -460,6 +473,7 @@ function confirmationResult(r: Json, fallback: string): { text: string } {
   };
 }
 
+/** Dispatch one approved agents-proxy tool request to the local server surface. */
 async function callTool(name: string, args: Json): Promise<{ text: string; isError?: boolean }> {
   if (name === "list_bots") {
     const r = await api(`/api/internal/agents?self=${encodeURIComponent(BOT_ID)}`);
@@ -520,6 +534,9 @@ async function callTool(name: string, args: Json): Promise<{ text: string; isErr
       depth: DEPTH,
     };
     if (reason) body.reason = reason;
+    if (Object.prototype.hasOwnProperty.call(args, "runtimePolicyOverride")) {
+      body.runtimePolicyOverride = args.runtimePolicyOverride;
+    }
     const r = await api(`/api/internal/delegate-bot`, { method: "POST", body: JSON.stringify(body) });
     if (r.error) return { text: `Couldn't queue the delegation: ${r.error}`, isError: true };
     // Fire-and-forget by contract: the harness returns immediately, the

@@ -15,6 +15,7 @@ export interface WatchedTurn {
   startedAt: number;
   lastEventAt: number;
   waitingOnHuman: boolean;
+  idleMs: number;
 }
 
 export interface TurnWatchdogOptions {
@@ -54,9 +55,16 @@ export class TurnWatchdog {
   }
 
   /** A turn was dispatched on this thread. */
-  watch(threadId: string, botId: string): void {
+  watch(threadId: string, botId: string, idleMs = this.opts.stallMs): void {
     const at = this.now();
-    this.turns.set(threadId, { threadId, botId, startedAt: at, lastEventAt: at, waitingOnHuman: false });
+    this.turns.set(threadId, {
+      threadId,
+      botId,
+      startedAt: at,
+      lastEventAt: at,
+      waitingOnHuman: false,
+      idleMs: Math.max(1, Math.floor(idleMs)),
+    });
   }
 
   /** Any provider event for the thread proves the turn is alive. */
@@ -88,7 +96,7 @@ export class TurnWatchdog {
     const at = this.now();
     for (const turn of this.turns.values()) {
       if (turn.waitingOnHuman) continue;
-      if (at - turn.lastEventAt < this.opts.stallMs) continue;
+      if (at - turn.lastEventAt < turn.idleMs) continue;
       this.turns.delete(turn.threadId);
       this.opts.onStall(turn);
     }

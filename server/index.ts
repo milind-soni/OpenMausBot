@@ -1,7 +1,7 @@
 // OpenMausBot server — the harness host. Clients hold no transports
 // (upstream rule): the React app dispatches typed commands over HTTP and
 // folds one SSE event stream; every provider process runs here.
-import { createHash, randomBytes, randomUUID, timingSafeEqual } from "node:crypto";
+import { createHash, createHmac, randomBytes, randomUUID, timingSafeEqual } from "node:crypto";
 import { existsSync, readFileSync, unlinkSync } from "node:fs";
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import { extname, join } from "node:path";
@@ -124,6 +124,14 @@ import {
 } from "./mcp-registry.ts";
 import { probeMcpServer } from "./mcp-probe.ts";
 import {
+  cloneRuntimePolicy,
+  effectiveBotRuntimePolicy,
+  effectiveTaskRuntimePolicy,
+  validateRuntimePolicyPatch,
+  type BotRuntimePolicy,
+  type RuntimePolicyOverrides,
+} from "./bot-runtime-policy.ts";
+import {
   GROUP_GOAL_MAX_TURNS,
   groupGoalAssignmentKey,
   groupGoalCompletionTurnId,
@@ -140,7 +148,7 @@ import { BUILT_IN_DRIVERS } from "./drivers/builtIn.ts";
 import { getOrCreateChannel, mirrorActivity, mirrorExchange, mirrorReply, type CommsBus } from "./comms-visibility.ts";
 import { searchMessages } from "./message-db.ts";
 import { promptWithReply, transcriptText } from "./replies.ts";
-import { _loadPending, buildDelegationFailurePrompt, buildDelegationRevivalPrompt, DelegationWakeBudget, discardDelegations, drainDelegations, findDelegationReceipt, pendingDelegationInfo, pendingDelegationSnapshot, pendingThreads, queueDelegation, recordDelegationReceipt, releaseDelegationsWaitingOn, summarizeDelegatedActivity, type QueueResult } from "./delegations.ts";
+import { _loadPending, buildDelegationFailurePrompt, buildDelegationRevivalPrompt, DelegationWakeBudget, discardDelegations, drainDelegations, findDelegationReceipt, pendingDelegationInfo, pendingDelegationSnapshot, pendingThreads, queueDelegation, recordDelegationReceipt, releaseDelegationsWaitingOn, summarizeDelegatedActivity, type DelegationEvidence, type QueueResult } from "./delegations.ts";
 import {
   cancelSteeredMessage,
   drainSteeredMessages,
@@ -177,6 +185,8 @@ import * as tts from "./tts/index.ts";
 import { narrateTool, toUtterances } from "./tts/speech-text.ts";
 import { buildTurnContext, engineIsFresh } from "./turn-context.ts";
 import { TurnWatchdog } from "./turn-watchdog.ts";
+import { TurnSupervision, type UnknownTurn } from "./turn-supervision.ts";
+import { TurnRuntimeLimits, type TurnRuntimeLimitEvent } from "./turn-runtime-limits.ts";
 import {
   ensureWorkspace,
   listMemoryTopics,
@@ -352,6 +362,7 @@ bus.attach(registry.instances());
 // A shared secret guards the localhost-only /api/internal endpoints the
 // agents-proxy calls; regenerated each boot (the proxy gets it via env).
 const COMMS_TOKEN = randomBytes(24).toString("hex");
+const COMMS_CAPABILITY_SECRET = randomBytes(32);
 
 /** Constant-time bearer check for the internal comms endpoints. The token
  * is high-entropy and loopback-only, so a timing oracle is a long shot —
@@ -359,6 +370,27 @@ const COMMS_TOKEN = randomBytes(24).toString("hex");
 function authorizedComms(header: string | string[] | undefined): boolean {
   const expected = Buffer.from(`Bearer ${COMMS_TOKEN}`);
   const got = Buffer.from(Array.isArray(header) ? "" : (header ?? ""));
+  return got.length === expected.length && timingSafeEqual(got, expected);
+}
+
+/** Derive the per-bot, per-thread capability used by the local agents proxy. */
+function agentCapability(botId: string, threadId: string): string {
+  return createHmac("sha256", COMMS_CAPABILITY_SECRET).update(`${botId}\n${threadId}`, "utf8").digest("hex");
+}
+
+/** The bearer proves the request came from this boot. The scoped capability
+ * additionally proves which injected bot proxy is speaking. The requested
+ * thread is still checked against that bot by every existing route boundary,
+ * so a process holding the shared bearer cannot rewrite fromBotId. */
+function authorizedAgentProxy(req: IncomingMessage, botId: string, threadId?: string): boolean {
+  const header = (value: string | string[] | undefined): string => Array.isArray(value) ? "" : value ?? "";
+  const claimedBotId = header(req.headers["x-omb-bot-id"]);
+  const claimedThreadId = header(req.headers["x-omb-thread-id"]);
+  const claimedCapability = header(req.headers["x-omb-capability"]);
+  const effectiveThreadId = threadId ?? claimedThreadId;
+  if (!claimedBotId || !claimedThreadId || claimedBotId !== botId || !effectiveThreadId || claimedThreadId !== effectiveThreadId) return false;
+  const expected = Buffer.from(agentCapability(botId, effectiveThreadId), "utf8");
+  const got = Buffer.from(claimedCapability, "utf8");
   return got.length === expected.length && timingSafeEqual(got, expected);
 }
 // Cap message chains: depth 0 = a user-initiated turn (may ask a peer);
@@ -379,6 +411,7 @@ const phoneProxyPath = SPAWNED_PROXIES.phone;
 // in the packaged app process.execPath is Electron — run the proxy as node
 const AGENTS_NODE_FLAG = { ELECTRON_RUN_AS_NODE: "1" };
 
+/** Build the isolated agents-proxy launch configuration for a bot thread. */
 function agentsIntegration(botId: string, threadId: string, depth: number, skillAuthoring: boolean) {
   return {
     command: process.execPath,
@@ -389,6 +422,7 @@ function agentsIntegration(botId: string, threadId: string, depth: number, skill
       OMB_BOT_ID: botId,
       OMB_THREAD_ID: threadId,
       OMB_COMMS_TOKEN: COMMS_TOKEN,
+      OMB_COMMS_CAPABILITY: agentCapability(botId, threadId),
       OMB_TURN_DEPTH: String(depth),
       OMB_SKILL_AUTHORING_ENABLED: skillAuthoring ? "1" : "0",
     },
@@ -553,6 +587,15 @@ function shouldIgnoreProviderEvent(event: RuntimeEvent): boolean {
   // narrow pre-id window and tombstone any id it reveals; the broad gate is
   // time-bounded so a broken promise cannot suppress a later turn forever.
   if (isTurnEventQuarantined(pendingCancelledProviderHandshakes, retiredProviderTurns, event)) return true;
+  if (event.turnId) {
+    const owner = store.botByThread(event.threadId) ??
+      (groupSpeakers.get(event.threadId) ? store.bot(groupSpeakers.get(event.threadId)!.botId) : null);
+    if (owner && !turnSupervision.wasJustAccepted(owner.id, event.threadId, event.turnId)) {
+      if (turnSupervision.isLate(owner.id, event.threadId, event.turnId)) return true;
+      if (turnSupervision.has(owner.id, event.threadId)
+        && !turnSupervision.isCurrent(owner.id, event.threadId, event.turnId)) return true;
+    }
+  }
   if (event.type !== "session.exited" || event.turnId !== undefined) return false;
   return store.botByThread(event.threadId)?.busy === true || Boolean(store.groupByThread(event.threadId)?.busyBotId);
 }
@@ -899,12 +942,33 @@ if (browserCleanupReferencesReconciled) browserCleanup.startPending();
  * paired phone has even less business holding provider session identifiers
  * than the desktop window did. Stripped here rather than at each call site
  * so a new broadcast cannot forget. */
-const wireTask = ({ resumeCursors: _resumeCursors, lastInstanceId: _lastInstanceId, ...task }: TaskRecord) => task;
+const wireTask = ({ resumeCursors: _resumeCursors, lastInstanceId: _lastInstanceId, runtimePolicySnapshot: _runtimePolicySnapshot, ...task }: TaskRecord) => task;
 
 const wireBot = (bot: NonNullable<ReturnType<typeof store.bot>>) => {
   const { resumeCursors: _resumeCursors, tasks, ...rest } = bot;
-  return { ...rest, avatarUrl: rest.avatarUrl ?? null, ...(tasks ? { tasks: tasks.map(wireTask) } : {}) };
+  return {
+    ...rest,
+    avatarUrl: rest.avatarUrl ?? null,
+    runtimePolicy: effectiveBotRuntimePolicy(rest.runtimePolicy),
+    chiefRuntimePolicyLocked: rest.chiefRuntimePolicyLocked === true,
+    ...(tasks ? { tasks: tasks.map(wireTask) } : {}),
+  };
 };
+
+function mergeRuntimePolicyOverrides(
+  previous: RuntimePolicyOverrides | undefined,
+  patch: ReturnType<typeof validateRuntimePolicyPatch>,
+): RuntimePolicyOverrides | undefined {
+  if (patch === undefined) return previous;
+  if (patch === null) return undefined;
+  return {
+    ...previous,
+    ...patch,
+    ...(previous?.cumulativeTokenPolicy || patch.cumulativeTokenPolicy
+      ? { cumulativeTokenPolicy: { ...previous?.cumulativeTokenPolicy, ...patch.cumulativeTokenPolicy } }
+      : {}),
+  };
+}
 
 /** Profile URLs are app-owned references, not merely strings with a trusted
  * prefix. Resolve them before persistence so every accepted avatar can be
@@ -1621,6 +1685,57 @@ const groupSpeakers = new Map<string, { botId: string; name: string; color: stri
 // Providers report cumulative-within-turn numbers; the final value is folded
 // into the task's tally when the turn settles.
 const turnUsage = new Map<string, { input: number; output: number; cachedInput?: number }>();
+const runtimeLimits = new TurnRuntimeLimits();
+const turnSupervision = new TurnSupervision({
+  graceMs: Math.max(1, Number(process.env.OMB_TURN_STOP_GRACE_MS) || 5_000),
+  onUnknown: (turn: UnknownTurn) => {
+    runtimeLimits.settle(turn.threadId);
+    repeats.settle(turn.threadId);
+    watchdog.settle(turn.threadId);
+    turnUsage.delete(turn.threadId);
+    void releaseBrowserCapabilityForThread(turn.threadId);
+    const direct = store.bot(turn.botId);
+    const group = store.groupByThread(turn.threadId);
+    const groupOwned = group?.busyBotId === turn.botId;
+    const groupSpeaker = groupSpeakers.get(turn.threadId);
+    if (groupOwned) {
+      groupSpeakers.delete(turn.threadId);
+      store.patchGroup(group.id, { busyBotId: null, unread: true });
+    }
+    if (direct?.busy || groupOwned) {
+      if (direct?.busy) {
+        stopScreenPoller(direct.id);
+        if (activeVpsThreads.get(direct.id) === turn.threadId) activeVpsThreads.delete(direct.id);
+        store.setActivity(direct.id, "idle");
+        retryDelegationsWaitingOn(direct.id);
+      } else {
+        if (groupSpeaker) {
+          const member = store.bot(groupSpeaker.botId);
+          if (member?.busy) {
+            store.setActivity(member.id, "idle");
+            retryDelegationsWaitingOn(member.id);
+          }
+        }
+      }
+    }
+    const receipt = finalizeDelegationWatch(
+      turn.threadId,
+      false,
+      "",
+      `Delegated turn ended without a terminal receipt — ${turn.reason}`,
+    );
+    if (!receipt) {
+      store.appendMessage(turn.threadId, {
+        role: "bot",
+        kind: "activity",
+        tool: { name: `error: ${turn.reason}`, ok: false },
+      });
+    }
+    drainQueuedSends();
+    drainConnectorResumes();
+    drainSecretResumes();
+  },
+});
 
 // Bounded per active turn. OpenHands uses a bounded recent-event scan for
 // the same class of stuck-loop detection; retaining an unlimited set of
@@ -1651,12 +1766,19 @@ const watchdog = new TurnWatchdog({
   stallMs: TURN_STALL_MS,
   checkMs: 60_000,
   onStall: (turn) => {
+    const admittedPolicy = runtimeLimits.snapshot(turn.threadId);
     void releaseBrowserCapabilityForThread(turn.threadId);
     repeats.settle(turn.threadId);
+    runtimeLimits.settle(turn.threadId);
     const bot = store.bot(turn.botId);
     const instance = bot ? registry.get(bot.modelSelection.instanceId) : null;
-    void instance?.adapter.interruptTurn(turn.threadId).catch(() => {});
-    const minutes = Math.round(TURN_STALL_MS / 60_000);
+    void turnSupervision.requestStop(
+      turn.botId,
+      turn.threadId,
+      "timeout",
+      () => instance?.adapter.interruptTurn(turn.threadId),
+    );
+    const minutes = Math.round(turn.idleMs / 60_000);
     store.appendMessage(turn.threadId, {
       role: "bot",
       kind: "activity",
@@ -1699,7 +1821,7 @@ const watchdog = new TurnWatchdog({
         drainSecretResumes();
       }
     };
-    const release = setTimeout(releaseOwnership, 6_000);
+    const release = setTimeout(releaseOwnership, (admittedPolicy?.cancellationGraceSeconds ?? 6) * 1_000);
     release.unref?.();
   },
 });
@@ -1780,10 +1902,29 @@ async function reviewPermissionCard(args: {
 
 bus.subscribe((event: RuntimeEvent) => {
   if (shouldIgnoreProviderEvent(event)) return;
+  const speaker = groupSpeakers.get(event.threadId);
+  const owner = store.botByThread(event.threadId) ?? (speaker ? store.bot(speaker.botId) : null);
+  if (owner && event.type === "turn.started" && event.turnId) {
+    turnSupervision.bind(owner.id, event.threadId, event.turnId);
+  }
+  if (owner && event.type === "turn.completed") {
+    turnSupervision.observeTerminal(owner.id, event.threadId, event.turnId);
+  } else if (owner && event.type === "session.exited" && turnSupervision.has(owner.id, event.threadId)) {
+    void turnSupervision.requestStop(owner.id, event.threadId, "provider-exit", () => {
+      const instance = registry.get(owner.modelSelection.instanceId);
+      return instance?.adapter.interruptTurn(event.threadId);
+    });
+  }
+  if (event.type === "item.started" && event.itemType === "tool") {
+    runtimeLimits.recordToolStarted(event.threadId, event.itemId ?? event.title ?? "tool");
+  } else if (event.type === "thread.token-usage.updated") {
+    runtimeLimits.recordTokenSample(event.threadId, event.input, event.output);
+  }
   if (event.type === "request.opened") watchdog.setWaitingOnHuman(event.threadId, true);
   else if (event.type === "request.resolved") watchdog.setWaitingOnHuman(event.threadId, false);
   else if (event.type === "turn.completed") {
     watchdog.settle(event.threadId);
+    runtimeLimits.settle(event.threadId);
     void releaseBrowserCapabilityForThread(event.threadId);
   } else if (event.type === "session.exited") {
     // A retained provider session can exit after a newer turn reused the same
@@ -2417,6 +2558,7 @@ const delegationWatch = new Map<string, {
   sourceThreadId?: string;
   /** when the delegated turn was dispatched — elapsed time for status checks */
   startedAtMs?: number;
+  evidence?: DelegationEvidence;
 }>();
 
 // Peer wake: when a delegated reply lands, resume the source bot so it can
@@ -2523,6 +2665,7 @@ function finalizeDelegationWatch(
       toBotName: store.bot(watched.toBotId)?.name ?? watched.toBotId,
       status: ok ? "done" : "failed",
       result: ok ? reply : failureName,
+      ...(watched.evidence ? { evidence: watched.evidence } : {}),
     });
   }
   const target = store.bot(watched.toBotId);
@@ -2605,7 +2748,7 @@ bus.subscribe((event: RuntimeEvent) => {
 /** How a drained delegation becomes a real turn on the target. Shared by
  * the settle-time drain and the boot-time drain of what a previous process
  * left queued. */
-const runDelegatedTurn: Parameters<typeof drainDelegations>[3] = (toBotId, text, commsDepth, sourceThreadId, channel, taskId) => {
+const runDelegatedTurn: Parameters<typeof drainDelegations>[3] = (toBotId, text, commsDepth, sourceThreadId, channel, taskId, evidence, runtimePolicySnapshot, runtimePolicyOverride) => {
     // startTurn REJECTS on an ordinary condition — busy target, deleted bot,
     // unavailable provider. Unhandled, that rejection is fatal to the
     // harness (Node's default), which in the packaged app kills the server
@@ -2620,6 +2763,7 @@ const runDelegatedTurn: Parameters<typeof drainDelegations>[3] = (toBotId, text,
         taskId,
         sourceThreadId,
         startedAtMs: Date.now(),
+        evidence,
       });
     }
     let failureReported = false;
@@ -2647,6 +2791,8 @@ const runDelegatedTurn: Parameters<typeof drainDelegations>[3] = (toBotId, text,
     };
     return startTurn(toBotId, text, {
       commsDepth,
+      runtimePolicySnapshot,
+      runtimePolicyOverride,
       unattended: isUnattended(store.botByThread(sourceThreadId)?.id),
       // startTurn schedules provider/integration setup after marking the bot
       // busy. Those asynchronous setup failures do not emit turn.completed,
@@ -2870,6 +3016,7 @@ async function finalScreenFrame(botId: string, threadId: string): Promise<Frame 
 }
 
 // ── turn dispatch (upstream ProviderCommandReactor, miniature) ──────────
+/** Admit and execute one turn with its immutable runtime-policy snapshot. */
 async function startTurn(
   botId: string,
   text: string,
@@ -2897,6 +3044,10 @@ async function startTurn(
     /** Stable identity supplied by the composer so a network retry cannot
      * dispatch the same user action twice. */
     sendId?: string;
+    /** Immutable policy captured at delegation queue time. */
+    runtimePolicySnapshot?: BotRuntimePolicy;
+    /** Explicit override retained in task evidence for delegated turns. */
+    runtimePolicyOverride?: RuntimePolicyOverrides;
     onDispatchError?: (message: string) => void;
   },
 ) {
@@ -2918,6 +3069,10 @@ async function startTurn(
   }
   const task = store.taskByThread(bot.id, threadId);
   if (!task) throw Object.assign(new Error("no such task"), { status: 404 });
+  const runtimePolicy = cloneRuntimePolicy(
+    opts?.runtimePolicySnapshot ?? effectiveTaskRuntimePolicy(bot.runtimePolicy, opts?.runtimePolicyOverride),
+  );
+  store.recordTaskRuntimePolicy(bot.id, threadId, runtimePolicy, opts?.runtimePolicyOverride);
   const commsDepth = opts?.commsDepth ?? 0;
   // a task takes its name from the first thing you asked it to do
   if (text.trim() && !opts?.cardContinuation) store.titleTaskFromFirstMessage(bot.id, text, threadId);
@@ -3029,6 +3184,29 @@ async function startTurn(
   // in the background — box provisioning can take ~90s and must never
   // hang the HTTP request
   const dispatchClaimId = randomUUID();
+  if (!runtimeLimits.begin(threadId, runtimePolicy, {
+    onHardStop: (event: TurnRuntimeLimitEvent) => {
+      store.appendMessage(threadId, {
+        role: "bot",
+        kind: "activity",
+        tool: { name: `error: runtime ${event.kind} limit reached (${event.observed}/${event.limit})`, ok: false },
+      });
+      void turnSupervision.requestStop(bot.id, threadId, "timeout", () => instance.adapter.interruptTurn(threadId));
+    },
+    onSoftTokenWarning: (event: TurnRuntimeLimitEvent) => {
+      store.appendMessage(threadId, {
+        role: "bot",
+        kind: "activity",
+        tool: { name: `runtime token budget reached (${event.observed}/${event.limit})`, ok: false },
+      });
+    },
+  })) {
+    throw Object.assign(new Error("the thread already has an active runtime policy"), { status: 409 });
+  }
+  if (!turnSupervision.begin(bot.id, threadId, runtimePolicy.cancellationGraceSeconds * 1_000)) {
+    runtimeLimits.settle(threadId);
+    throw Object.assign(new Error("the thread already has an active supervised turn"), { status: 409 });
+  }
   directTurnGenerationByBot.set(bot.id, dispatchClaimId);
   directTurnDispatchClaims.set(bot.id, { id: dispatchClaimId, threadId, phase: "setup" });
   store.setActivity(bot.id, "working");
@@ -3360,7 +3538,7 @@ async function startTurn(
       if (!markDirectTurnDispatching(bot.id, dispatchClaimId, threadId)) {
         throw new DirectTurnSetupCancelled("turn stopped before dispatch");
       }
-      watchdog.watch(threadId, bot.id);
+      watchdog.watch(threadId, bot.id, runtimePolicy.idleTimeoutMinutes * 60_000);
       const dispatch = await guardTurnDispatch(instance.adapter.sendTurn({
         threadId,
         text: turnText,
@@ -3449,6 +3627,8 @@ async function startTurn(
         releaseLocalVmThread(threadId);
         if (activeVpsThreads.get(bot.id) === threadId) activeVpsThreads.delete(bot.id);
         watchdog.settle(threadId);
+        runtimeLimits.settle(threadId);
+        turnSupervision.finishWithoutProvider(bot.id, threadId);
         turnUsage.delete(threadId);
       }
       if (e instanceof DirectTurnSetupCancelled) {
@@ -3978,6 +4158,7 @@ _loadPending();
   for (const threadId of leftover) drainDelegations(commsBus, approvalBus, threadId, runDelegatedTurn);
 }
 
+/** Execute one group member turn while preserving group-level lifecycle state. */
 async function runGroupMemberTurn(
   groupId: string,
   threadId: string,
@@ -4006,6 +4187,7 @@ async function runGroupMemberTurn(
   if (!group || !bot || !ownsThread) return false;
   spoken.add(botId);
   const instance = registry.get(bot.modelSelection.instanceId);
+  const runtimePolicy = effectiveBotRuntimePolicy(bot.runtimePolicy);
   const userName = cfg.profile?.name?.trim() || "User";
   if (!instance) {
     const message = `${bot.name}'s model is unavailable`;
@@ -4237,6 +4419,12 @@ async function runGroupMemberTurn(
     }
     return false;
   }
+  if (!turnSupervision.begin(bot.id, threadId, runtimePolicy.cancellationGraceSeconds * 1_000)) {
+    groupSpeakers.delete(threadId);
+    store.patchGroup(group.id, { busyBotId: null, unread: true });
+    store.setActivity(bot.id, "idle");
+    return false;
+  }
   let replyText = "";
   let providerTurnId: string | undefined;
   let abandoned = false;
@@ -4248,7 +4436,10 @@ async function runGroupMemberTurn(
     if (providerTurnId) retireProviderTurn(providerTurnId);
     else markCancelledProviderHandshake(threadId, retirementOwner);
   };
-  const timeoutMinutes = roomTurnTimeoutMinutes(cfg);
+  const configuredTimeoutMinutes = roomTurnTimeoutMinutes(cfg);
+  const timeoutMinutes = runtimePolicy.wallClockTimeoutMinutes > 0
+    ? Math.min(configuredTimeoutMinutes, runtimePolicy.wallClockTimeoutMinutes)
+    : configuredTimeoutMinutes;
   const outcome = await new Promise<GroupMemberTurnOutcome>((resolve) => {
     let done = false;
     let unsub = () => {};
@@ -4256,7 +4447,7 @@ async function runGroupMemberTurn(
     const deadline = new RoomTurnDeadline(timeoutMinutes, () => {
       abandonProviderTurn();
       void releaseBrowserCapabilityForThread(threadId);
-      void instance.adapter.interruptTurn(threadId).catch(() => {});
+      void turnSupervision.requestStop(bot.id, threadId, "timeout", () => instance.adapter.interruptTurn(threadId));
       store.appendMessage(threadId, {
         role: "bot",
         kind: "activity",
@@ -4297,7 +4488,31 @@ async function runGroupMemberTurn(
       abandonProviderTurn();
       finish("stalled");
     });
-    watchdog.watch(threadId, bot.id);
+    if (!runtimeLimits.begin(threadId, runtimePolicy, {
+      onHardStop: (event) => {
+        store.appendMessage(threadId, {
+          role: "bot",
+          kind: "activity",
+          from: { botId: bot.id, name: bot.name, color: bot.color },
+          tool: { name: `error: runtime ${event.kind} limit reached (${event.observed}/${event.limit})`, ok: false },
+        });
+        void turnSupervision.requestStop(bot.id, threadId, "timeout", () => instance.adapter.interruptTurn(threadId));
+        finish("timed_out");
+      },
+      onSoftTokenWarning: (event) => {
+        store.appendMessage(threadId, {
+          role: "bot",
+          kind: "activity",
+          from: { botId: bot.id, name: bot.name, color: bot.color },
+          tool: { name: `runtime token budget reached (${event.observed}/${event.limit})`, ok: false },
+        });
+      },
+    })) {
+      turnSupervision.finishWithoutProvider(bot.id, threadId);
+      finish("dispatch_failed");
+      return;
+    }
+    watchdog.watch(threadId, bot.id, runtimePolicy.idleTimeoutMinutes * 60_000);
     onProviderHandshakeStarted?.();
     guardTurnDispatch(instance.adapter.sendTurn({
         threadId,
@@ -4331,6 +4546,8 @@ async function runGroupMemberTurn(
       .catch((err) => {
         onProviderHandshakeSettled?.();
         clearCancelledProviderHandshake(threadId, retirementOwner);
+        runtimeLimits.settle(threadId);
+        turnSupervision.finishWithoutProvider(bot.id, threadId);
         if (abandoned) return;
         const message = err instanceof Error ? err.message : "turn failed";
         store.appendMessage(threadId, {
@@ -4398,7 +4615,7 @@ async function runGroupMemberTurn(
         drainSecretResumes();
       }
     };
-    const release = setTimeout(releaseOwnership, 6_000);
+    const release = setTimeout(releaseOwnership, runtimePolicy.cancellationGraceSeconds * 1_000);
     release.unref?.();
     return false;
   }
@@ -5142,10 +5359,12 @@ function stagedSkillCleanupsForThread(threadId: string): Array<{ botId: string; 
   return cleanups;
 }
 
+/** Reject staged skill writes left behind when their source thread is deleted. */
 function rejectDeletedThreadSkillStages(cleanups: Array<{ botId: string; stagedId: string }>): void {
   for (const cleanup of cleanups) rejectStagedSkillWrite(cleanup.botId, cleanup.stagedId);
 }
 
+/** Convert staged skill metadata into the user-facing approval-card copy. */
 function skillCardCopy(staged: { action: "create" | "update"; name: string; gist: string; warnings: string[] }): {
   title: string;
   subtitle: string;
@@ -5161,6 +5380,7 @@ function skillCardCopy(staged: { action: "create" | "update"; name: string; gist
   };
 }
 
+/** Append a staged skill request card to the target thread's message stream. */
 function appendSkillRequestCard(args: {
   botId: string;
   threadId: string;
@@ -5212,6 +5432,7 @@ function appendSkillRequestCard(args: {
   };
 }
 
+/** Resolve a reviewed skill request and apply only the approved lifecycle action. */
 function resolveSkillRequest(args: {
   botId: string;
   botName?: string;
@@ -5761,11 +5982,39 @@ function persistMcpServers(next: Record<string, unknown>): void {
 /** Rebuild the provider fleet after a config change so new keys take
  * effect without a server restart (kills any in-flight turns). */
 async function reloadProviders() {
+  // Dispose/reload is a provider lifecycle boundary. Reconcile every active
+  // generation before the old fleet disappears so a replacement turn is not
+  // rejected by a stale in-memory supervisor entry.
+  const supervised = new Set<string>();
+  for (const bot of store.bots.filter((candidate) => candidate.busy)) {
+    const threadId = bot.threadId;
+    runtimeLimits.settle(threadId);
+    watchdog.settle(threadId);
+    repeats.settle(threadId);
+    turnUsage.delete(threadId);
+    if (turnSupervision.has(bot.id, threadId)) {
+      supervised.add(`${bot.id}\u0000${threadId}`);
+      // The reload reconciliation below owns the user-visible failure chip
+      // and delegated terminal receipt for this deliberate provider restart.
+      turnSupervision.finishWithoutProvider(bot.id, threadId);
+    }
+  }
+  for (const [threadId, speaker] of groupSpeakers) {
+    runtimeLimits.settle(threadId);
+    watchdog.settle(threadId);
+    repeats.settle(threadId);
+    turnUsage.delete(threadId);
+    if (supervised.has(`${speaker.botId}\u0000${threadId}`)) continue;
+    if (turnSupervision.has(speaker.botId, threadId)) {
+      turnSupervision.finishWithoutProvider(speaker.botId, threadId);
+    }
+  }
   await releaseAllBrowserCapabilities();
   bus.detachAll();
   await registry.disposeAll();
   await registry.load(instanceConfigs(cfg));
   bus.attach(registry.instances());
+  turnSupervision.resetProviderLifecycle();
   // A killed turn's terminal events can die with the old fleet (dispose is
   // async under the hood), stranding the bot busy — and its screen poller —
   // forever. Settle anything still marked busy.
@@ -5992,6 +6241,7 @@ const server = createServer(async (req, res) => {
         const self = url.searchParams.get("self");
         const sender = self ? store.bot(self) : null;
         if (!sender) return json(res, 403, { error: "unknown sender" });
+        if (!authorizedAgentProxy(req, sender.id)) return json(res, 403, { error: "sender capability does not match proxy identity" });
         // title/description included so a "chief of staff"-style bot can
         // judge the team (who does what, who has no job description yet)
         const bots = store.bots
@@ -6185,10 +6435,11 @@ const server = createServer(async (req, res) => {
         // hard refusal — every peer turn has an accountable sender.
         const from = store.bot(fromBotId);
         if (!from) return json(res, 403, { error: "unknown sender" });
+        const fromThreadId = String(body.fromThreadId ?? from.threadId);
+        if (!authorizedAgentProxy(req, from.id, fromThreadId)) return json(res, 403, { error: "sender capability does not match proxy identity" });
         if (sectionKey(from.section) !== sectionKey(target.section)) {
           return json(res, 403, { error: "that bot belongs to a different section" });
         }
-        const fromThreadId = String(body.fromThreadId ?? from.threadId);
         if (!store.taskByThread(from.id, fromThreadId)) {
           return json(res, 403, { error: "source thread does not belong to sender" });
         }
@@ -6302,6 +6553,7 @@ const server = createServer(async (req, res) => {
         const fromThreadId = String(url.searchParams.get("fromThreadId") ?? "");
         const from = store.bot(fromBotId);
         if (!from || !store.taskByThread(from.id, fromThreadId)) return json(res, 403, { error: "unknown sender" });
+        if (!authorizedAgentProxy(req, from.id, fromThreadId)) return json(res, 403, { error: "sender capability does not match proxy identity" });
         const waitMs = Math.min(Math.max(Number(url.searchParams.get("wait_ms")) || 0, 0), 240_000);
         const deadline = Date.now() + waitMs;
         // Bounded long-poll: the delegating bot parks ONE cheap HTTP request
@@ -6312,7 +6564,12 @@ const server = createServer(async (req, res) => {
             if (receipt.sourceThreadId !== fromThreadId) {
               return json(res, 403, { error: "that task belongs to a different conversation" });
             }
-            return json(res, 200, { status: receipt.status, toBotName: receipt.toBotName, result: receipt.result ?? "" });
+            return json(res, 200, {
+              status: receipt.status,
+              toBotName: receipt.toBotName,
+              result: receipt.result ?? "",
+              ...(receipt.evidence ? { evidence: receipt.evidence } : {}),
+            });
           }
           const stillQueued = pendingDelegationInfo(taskId);
           const runningEntry = [...delegationWatch.entries()].find(([, watch]) => watch.taskId === taskId);
@@ -6337,6 +6594,7 @@ const server = createServer(async (req, res) => {
             return json(res, 200, {
               status: "queued",
               toBotName: store.bot(toBotId)?.name ?? toBotId,
+              ...(stillQueued?.evidence ?? running?.evidence ? { evidence: stillQueued?.evidence ?? running?.evidence } : {}),
             });
           }
           await new Promise((wake) => setTimeout(wake, 500));
@@ -6349,22 +6607,41 @@ const server = createServer(async (req, res) => {
         const message = String(body.message ?? "").trim();
         const reason = typeof body.reason === "string" && body.reason.trim() ? body.reason.trim() : undefined;
         const depth = Number(body.depth ?? 0) || 0;
+        let runtimePolicyOverride: RuntimePolicyOverrides | undefined;
+        if (Object.prototype.hasOwnProperty.call(body, "runtimePolicyOverride")) {
+          try {
+            const checked = validateRuntimePolicyPatch(body.runtimePolicyOverride);
+            runtimePolicyOverride = checked === null ? undefined : checked;
+          } catch (error) {
+            return json(res, 200, { error: `runtimePolicyOverride was rejected by the server-owned validator: ${error instanceof Error ? error.message : String(error)}` });
+          }
+        }
         if (!toBotId || !message) return json(res, 400, { error: "toBotId and message required" });
         const from = store.bot(fromBotId);
         if (!from) return json(res, 404, { error: "no such bot" });
+        const fromThreadId = String(body.fromThreadId ?? from.threadId);
+        if (!authorizedAgentProxy(req, from.id, fromThreadId)) return json(res, 403, { error: "sender capability does not match proxy identity" });
         const target = store.bot(toBotId);
         if (!target) return json(res, 404, { error: "no such bot" });
+        if (runtimePolicyOverride !== undefined && target.chiefRuntimePolicyLocked === true) {
+          return json(res, 200, { error: "the target bot's Chief runtime policy control is locked by the user" });
+        }
         if (sectionKey(from.section) !== sectionKey(target.section)) {
           return json(res, 403, { error: "that bot belongs to a different section" });
         }
-        const fromThreadId = String(body.fromThreadId ?? from.threadId);
         if (!store.taskByThread(from.id, fromThreadId)) {
           return json(res, 403, { error: "source thread does not belong to sender" });
+        }
+        const sourcePolicy = runtimeLimits.snapshot(fromThreadId) ?? effectiveBotRuntimePolicy(from.runtimePolicy);
+        const sourceDelegations = pendingDelegationSnapshot().filter((item) => item.sourceThreadId === fromThreadId).length
+          + [...delegationWatch.values()].filter((watch) => watch.sourceThreadId === fromThreadId).length;
+        if (sourceDelegations >= sourcePolicy.delegationConcurrency) {
+          return json(res, 200, { error: "source turn reached its delegation concurrency limit" });
         }
         const queued = queueDelegation(
           commsBus,
           from,
-          { toBotId, message, reason, depth },
+          { toBotId, message, reason, depth, ...(runtimePolicyOverride !== undefined ? { runtimePolicyOverride } : {}) },
           MAX_COMMS_DEPTH,
           fromThreadId,
         );
@@ -6376,6 +6653,8 @@ const server = createServer(async (req, res) => {
             too_deep: "delegation chains are limited to one hop — do this one yourself",
             no_target: "no such bot",
             too_many: "too many delegations queued on this turn — finish some first",
+            invalid_runtime_policy: "runtimePolicyOverride was rejected by the server-owned validator",
+            runtime_policy_chief_only: "only a Chief of Staff may set a runtime policy override",
           };
           return json(res, 200, { error: said[queued.result === "ok" ? "no_target" : queued.result] });
         }
@@ -6383,6 +6662,7 @@ const server = createServer(async (req, res) => {
         return json(res, 200, {
           queued: true,
           taskId: queued.id,
+          ...(queued.evidence ? { evidence: queued.evidence } : {}),
           message: from.approvePeerComms
             ? `Queued for review — @${targetName} will only pick it up if the user approves after your turn finishes.`
             : `Delegation queued — @${targetName} will pick it up after your current turn finishes.`,
@@ -6394,6 +6674,7 @@ const server = createServer(async (req, res) => {
         const chief = store.bot(fromBotId);
         if (!chief) return json(res, 403, { error: "unknown sender" });
         const fromThreadId = String(body.fromThreadId ?? chief.threadId);
+        if (!authorizedAgentProxy(req, chief.id, fromThreadId)) return json(res, 403, { error: "sender capability does not match proxy identity" });
         if (!connectorThread(chief.id, fromThreadId)) {
           return json(res, 403, { error: "source conversation does not belong to sender" });
         }
@@ -8100,6 +8381,22 @@ const server = createServer(async (req, res) => {
         return json(res, 400, { error: "body must be a JSON object" });
       }
       const existingBot = store.bot(m[1]);
+      let runtimePolicyPatch: ReturnType<typeof validateRuntimePolicyPatch>;
+      try {
+        runtimePolicyPatch = validateRuntimePolicyPatch(body.runtimePolicy);
+      } catch (error) {
+        return json(res, 400, { error: error instanceof Error ? error.message : String(error) });
+      }
+      if (body.chiefRuntimePolicyLocked !== undefined && typeof body.chiefRuntimePolicyLocked !== "boolean") {
+        return json(res, 400, { error: "chiefRuntimePolicyLocked must be true or false" });
+      }
+      if (
+        runtimePolicyPatch !== undefined &&
+        existingBot?.chiefRuntimePolicyLocked === true &&
+        body.chiefRuntimePolicyLocked !== false
+      ) {
+        return json(res, 409, { error: "Chief runtime policy control is locked by the user" });
+      }
       if (body.requireAvailableModel !== undefined && typeof body.requireAvailableModel !== "boolean") {
         return json(res, 400, { error: "requireAvailableModel must be true or false" });
       }
@@ -8138,6 +8435,12 @@ const server = createServer(async (req, res) => {
       }
       const patch: Record<string, unknown> = {};
       Object.assign(patch, profile.patch);
+      if (runtimePolicyPatch !== undefined) {
+        patch.runtimePolicy = mergeRuntimePolicyOverrides(existingBot?.runtimePolicy, runtimePolicyPatch);
+      }
+      if (body.chiefRuntimePolicyLocked !== undefined) {
+        patch.chiefRuntimePolicyLocked = body.chiefRuntimePolicyLocked;
+      }
       let section: string | undefined | null;
       if (body.section !== undefined) {
         if (body.section === null) section = null;
@@ -8899,7 +9202,13 @@ const server = createServer(async (req, res) => {
         }
         cancelGroupTurnOperations(busyGroup.group.id, busyGroup.threadId);
         await releaseBrowserCapabilityForThread(busyGroup.threadId);
-        await instance?.adapter.interruptTurn(busyGroup.threadId).catch(() => {});
+        const supervised = await turnSupervision.requestStop(
+          bot.id,
+          busyGroup.threadId,
+          "cancel",
+          () => instance?.adapter.interruptTurn(busyGroup.threadId),
+        );
+        if (!supervised) await instance?.adapter.interruptTurn(busyGroup.threadId).catch(() => {});
         closeOpenApprovals(busyGroup.threadId);
         return json(res, 200, { ok: true });
       }
@@ -8914,7 +9223,13 @@ const server = createServer(async (req, res) => {
       const cancelledDirect = cancelDirectTurnDispatch(bot.id, expectedThreadId);
       const directThreadId = cancelledDirect?.threadId ?? bot.threadId;
       await releaseBrowserCapabilityForThread(directThreadId);
-      await instance?.adapter.interruptTurn(directThreadId).catch(() => {});
+      const supervised = await turnSupervision.requestStop(
+        bot.id,
+        directThreadId,
+        "cancel",
+        () => instance?.adapter.interruptTurn(directThreadId),
+      );
+      if (!supervised) await instance?.adapter.interruptTurn(directThreadId).catch(() => {});
       closeOpenApprovals(directThreadId);
       return json(res, 200, { ok: true });
     }

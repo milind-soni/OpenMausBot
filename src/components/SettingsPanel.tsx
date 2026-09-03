@@ -1,6 +1,6 @@
-import { BookOpen, CalendarClock, ChevronDown, ChevronLeft, Crown, FolderOpen, Plus, Trash2, X } from "lucide-react";
+import { BookOpen, CalendarClock, ChevronDown, ChevronLeft, Crown, FolderOpen, Lock, Plus, RotateCcw, Trash2, Unlock, X } from "lucide-react";
 import { useEffect, useState } from "react";
-import { api, useStore, type Bot } from "@/state/store";
+import { api, useStore, type Bot, type RuntimePolicy } from "@/state/store";
 import { stateForBot } from "@/lib/mascot";
 import { CloudBackendPicker } from "./CloudBackendPicker";
 import { ModelPicker } from "./ModelPicker";
@@ -30,6 +30,187 @@ function Field({
       <div className="mb-1.5 text-[13px] text-ink-secondary">{label}</div>
       {children}
     </label>
+  );
+}
+
+const FALLBACK_RUNTIME_POLICY: RuntimePolicy = {
+  wallClockTimeoutMinutes: 0,
+  idleTimeoutMinutes: 20,
+  cancellationGraceSeconds: 5,
+  maxToolAgentSteps: 0,
+  delegationConcurrency: 4,
+  cumulativeTokenPolicy: { mode: "disabled", limit: 1_000_000 },
+};
+
+const RUNTIME_NUMBER_FIELDS = [
+  ["wallClockTimeoutMinutes", "Wall-clock turn limit", "0 = off", 0, 1_440],
+  ["idleTimeoutMinutes", "Idle timeout", "Minutes without provider activity", 1, 1_440],
+  ["cancellationGraceSeconds", "Cancel grace", "Seconds to let the provider settle", 1, 120],
+  ["delegationConcurrency", "Delegate concurrency", "Simultaneous delegated tasks", 1, 4],
+  ["maxToolAgentSteps", "Tool step limit", "0 = off", 0, 1_000],
+] as const;
+
+function RuntimeControlsCard({ bot }: { bot: Bot }) {
+  const { dispatch } = useStore();
+  const [draft, setDraft] = useState<RuntimePolicy>(bot.runtimePolicy ?? FALLBACK_RUNTIME_POLICY);
+  const [savedSignature, setSavedSignature] = useState(() => JSON.stringify(bot.runtimePolicy ?? FALLBACK_RUNTIME_POLICY));
+  const [status, setStatus] = useState<string | null>(null);
+  const [saving, setSaving] = useState(false);
+  const locked = bot.chiefRuntimePolicyLocked === true;
+
+  useEffect(() => {
+    const next = bot.runtimePolicy ?? FALLBACK_RUNTIME_POLICY;
+    setDraft(next);
+    setSavedSignature(JSON.stringify(next));
+    setStatus(null);
+  }, [bot.id, bot.runtimePolicy]);
+
+  const dirty = JSON.stringify(draft) !== savedSignature;
+  const updateNumber = (key: typeof RUNTIME_NUMBER_FIELDS[number][0], value: string, min: number, max: number) => {
+    const parsed = Number(value);
+    if (!Number.isFinite(parsed)) return;
+    setDraft((current) => ({ ...current, [key]: Math.max(min, Math.min(max, Math.floor(parsed))) }));
+  };
+  const save = async () => {
+    setSaving(true);
+    setStatus(null);
+    try {
+      const result = await api(`/api/bots/${bot.id}`, {
+        method: "PATCH",
+        body: JSON.stringify({ runtimePolicy: draft }),
+      }) as { bot: Bot };
+      dispatch({ type: "botPatched", bot: result.bot });
+      setSavedSignature(JSON.stringify(result.bot.runtimePolicy ?? draft));
+      setStatus("Saved");
+    } catch (error) {
+      setStatus(`Error: ${error instanceof Error ? error.message : String(error)}`);
+    } finally {
+      setSaving(false);
+    }
+  };
+  const reset = async () => {
+    setSaving(true);
+    setStatus(null);
+    try {
+      const result = await api(`/api/bots/${bot.id}`, {
+        method: "PATCH",
+        body: JSON.stringify({ runtimePolicy: null }),
+      }) as { bot: Bot };
+      dispatch({ type: "botPatched", bot: result.bot });
+      setStatus("Defaults restored");
+    } catch (error) {
+      setStatus(`Error: ${error instanceof Error ? error.message : String(error)}`);
+    } finally {
+      setSaving(false);
+    }
+  };
+  const toggleLock = async () => {
+    setStatus(null);
+    try {
+      const result = await api(`/api/bots/${bot.id}`, {
+        method: "PATCH",
+        body: JSON.stringify({ chiefRuntimePolicyLocked: !locked }),
+      }) as { bot: Bot };
+      dispatch({ type: "botPatched", bot: result.bot });
+      setStatus(!locked ? "Chief control locked" : "Chief control unlocked");
+    } catch (error) {
+      setStatus(`Error: ${error instanceof Error ? error.message : String(error)}`);
+    }
+  };
+
+  return (
+    <div className="rounded-xl bg-card p-4">
+      <div className="flex items-start justify-between gap-3">
+        <div>
+          <div className="text-[15px] font-medium text-ink">Runtime controls</div>
+          <div className="mt-0.5 text-[13px] leading-relaxed text-ink-secondary">
+            Persisted server-side and applied when the next turn is admitted.
+          </div>
+        </div>
+        <button
+          type="button"
+          onClick={() => void toggleLock()}
+          aria-label={locked ? "Unlock Chief runtime controls" : "Lock Chief runtime controls"}
+          title={locked ? "Unlock Chief runtime controls" : "Lock Chief runtime controls"}
+          className="flex size-8 shrink-0 items-center justify-center rounded-lg bg-control text-ink-secondary hover:text-ink"
+        >
+          {locked ? <Lock size={15} /> : <Unlock size={15} />}
+        </button>
+      </div>
+      <div className="mt-3 grid grid-cols-2 gap-2">
+        {RUNTIME_NUMBER_FIELDS.map(([key, label, hint, min, max]) => (
+          <label key={key} className="min-w-0">
+            <span className="block truncate text-[11.5px] text-ink-secondary" title={hint}>{label}</span>
+            <input
+              aria-label={label}
+              type="number"
+              min={min}
+              max={max}
+              value={draft[key]}
+              disabled={locked || saving}
+              onChange={(event) => updateNumber(key, event.target.value, min, max)}
+              className={cn(inputCls, "mt-1 h-8 px-2 text-[12px]")}
+            />
+          </label>
+        ))}
+      </div>
+      <div className="mt-3 flex items-center justify-between gap-3">
+        <div className="min-w-0">
+          <div className="text-[12px] text-ink-secondary">Token budget</div>
+          <div className="mt-1 flex items-center gap-2">
+            <select
+              value={draft.cumulativeTokenPolicy.mode}
+              aria-label="Token budget mode"
+              disabled={locked || saving}
+              onChange={(event) => setDraft((current) => ({
+                ...current,
+                cumulativeTokenPolicy: {
+                  ...current.cumulativeTokenPolicy,
+                  mode: event.target.value as RuntimePolicy["cumulativeTokenPolicy"]["mode"],
+                },
+              }))}
+              className="h-8 rounded-lg border border-hairline/40 bg-control px-2 text-[12px] text-ink"
+            >
+              <option value="disabled">Off</option>
+              <option value="soft">Warn</option>
+              <option value="hard">Stop</option>
+            </select>
+            <input
+              aria-label="Token budget limit"
+              type="number"
+              min={1000}
+              max={10_000_000}
+              value={draft.cumulativeTokenPolicy.limit}
+              disabled={locked || saving}
+              onChange={(event) => {
+                const limit = Number(event.target.value);
+                if (Number.isFinite(limit)) setDraft((current) => ({
+                  ...current,
+                  cumulativeTokenPolicy: {
+                    ...current.cumulativeTokenPolicy,
+                    limit: Math.max(1_000, Math.min(10_000_000, Math.floor(limit))),
+                  },
+                }));
+              }}
+              className={cn(inputCls, "h-8 w-24 px-2 text-[12px]")}
+            />
+          </div>
+        </div>
+      </div>
+      <div className="mt-3 flex items-center justify-between gap-2">
+        <span className={cn("text-[12px]", status?.startsWith("Error:") ? "text-danger" : "text-ink-secondary")}>
+          {status ?? (locked ? "Locked by the user" : dirty ? "Unsaved changes" : "")}
+        </span>
+        <div className="flex gap-2">
+          <button type="button" disabled={locked || saving} onClick={() => void reset()} className="flex items-center gap-1 rounded-lg px-2.5 py-1.5 text-[12px] text-ink-secondary hover:bg-control disabled:opacity-40">
+            <RotateCcw size={13} /> Reset
+          </button>
+          <button type="button" disabled={locked || saving || !dirty} onClick={() => void save()} className="rounded-lg bg-accent px-3 py-1.5 text-[12px] font-medium text-white disabled:opacity-40">
+            {saving ? "Saving…" : "Save"}
+          </button>
+        </div>
+      </div>
+    </div>
   );
 }
 
@@ -853,6 +1034,8 @@ export function SettingsPanel({ bot }: { bot: Bot }) {
               </div>
             </div>
           )}
+
+          <RuntimeControlsCard key={`runtime-${bot.id}`} bot={bot} />
 
           <div className="rounded-xl bg-card p-4">
             <div className="text-[15px] font-medium text-ink">Works on</div>

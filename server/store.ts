@@ -14,6 +14,13 @@ import { workspaceDir } from "./workspace.ts";
 import { newId, type CloudBackend, type ModelSelection, type ThreadId } from "./contracts.ts";
 import { pickBotName } from "./names.ts";
 import { redactSecretsInText } from "./redact.ts";
+import {
+  cloneRuntimePolicy,
+  runtimePolicyFingerprint,
+  runtimePolicyOverrideFingerprint,
+  type BotRuntimePolicy,
+  type RuntimePolicyOverrides,
+} from "./bot-runtime-policy.ts";
 import { botAvatarProfile, type BotAvatarCrop } from "../shared/bot-avatar.ts";
 import type { MascotBodyId } from "../shared/mascot-bodies.ts";
 import type { RoutineRequestCardData } from "../shared/routine-request.ts";
@@ -241,6 +248,11 @@ export interface TaskRecord {
    * a folder that moved under a live session would break resume. `null`
    * = pinned to the default (home); absent = not pinned yet. */
   cwd?: string | null;
+  /** Secret-free admission evidence for a delegated task. */
+  runtimePolicyOverride?: RuntimePolicyOverrides;
+  runtimePolicySnapshot?: BotRuntimePolicy;
+  runtimePolicyFingerprint?: string;
+  runtimePolicyOverrideFingerprint?: string;
 }
 
 export interface TaskUsage {
@@ -435,6 +447,8 @@ export interface BotRecord {
   /** where NEW tasks run their shell tools; each task pins its own copy
    * on its first turn (TaskRecord.cwd). Absent = the home folder. */
   cwd?: string;
+  /** Optional persisted policy inputs used when recording admission evidence. */
+  runtimePolicy?: RuntimePolicyOverrides;
   /** Auto mode: the bot approves its own tool permissions and keeps
    * working instead of stopping to ask. Questions it asks YOU still come
    * through, and a short list of destructive commands still stops it. */
@@ -466,6 +480,8 @@ export interface BotRecord {
   /** The coordinator for this bot's sidebar section. The store enforces
    * at most one Chief per section (including the unsectioned area). */
   chiefOfStaff?: boolean;
+  /** User-owned guard for persistent Chief runtime policy changes. */
+  chiefRuntimePolicyLocked?: boolean;
   /** Pause for human approval before this bot talks to a peer (ask_bot,
    * delegate_bot). Off by default: a chief-of-staff-style bot is most
    * useful when it can coordinate without nagging. */
@@ -1421,6 +1437,26 @@ export class Store {
     if (!task || task.lastInstanceId === instanceId) return;
     task.lastInstanceId = instanceId;
     this.saveBots();
+  }
+
+  /** Persist only the policy snapshot identity used by this task. Raw policy
+   * values are retained only when they are an explicit task override. */
+  recordTaskRuntimePolicy(
+    botId: string,
+    threadId: string,
+    policySnapshot: BotRuntimePolicy,
+    taskOverride?: RuntimePolicyOverrides,
+  ): TaskRecord | null {
+    const bot = this.bot(botId);
+    const task = bot ? this.taskByThread(botId, threadId) : undefined;
+    if (!bot || !task) return null;
+    task.runtimePolicyOverride = taskOverride ? structuredClone(taskOverride) : undefined;
+    task.runtimePolicySnapshot = cloneRuntimePolicy(policySnapshot);
+    task.runtimePolicyFingerprint = runtimePolicyFingerprint(policySnapshot);
+    task.runtimePolicyOverrideFingerprint = runtimePolicyOverrideFingerprint(taskOverride);
+    this.saveBots();
+    this.emit({ type: "bot", botId });
+    return task;
   }
 
   /** Bank one settled turn onto its task. Called once per turn.completed;

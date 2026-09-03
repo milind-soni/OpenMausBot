@@ -616,6 +616,39 @@ describe("harness HTTP API", () => {
     expect(body.bots[0].messages.length).toBeGreaterThanOrEqual(2);
   });
 
+  it("serializes and persists runtime controls, while enforcing the Chief lock", async () => {
+    const created = await api("POST", "/api/bots");
+    const bot = created.body.bot;
+    try {
+      expect(bot.runtimePolicy).toMatchObject({
+        wallClockTimeoutMinutes: 0,
+        delegationConcurrency: 4,
+        cumulativeTokenPolicy: { mode: "disabled" },
+      });
+      const values = {
+        wallClockTimeoutMinutes: 8,
+        idleTimeoutMinutes: 4,
+        cancellationGraceSeconds: 12,
+        delegationConcurrency: 2,
+        cumulativeTokenPolicy: { mode: "hard", limit: 20_000 },
+      };
+      const saved = await api("PATCH", `/api/bots/${bot.id}`, { runtimePolicy: values });
+      expect(saved.status).toBe(200);
+      expect(saved.body.bot.runtimePolicy).toMatchObject(values);
+      const roundTrip = await api("GET", "/api/bots?messages=0");
+      expect(roundTrip.body.bots.find((candidate: { id: string }) => candidate.id === bot.id).runtimePolicy).toMatchObject(values);
+
+      expect((await api("PATCH", `/api/bots/${bot.id}`, { chiefRuntimePolicyLocked: true })).status).toBe(200);
+      const blocked = await api("PATCH", `/api/bots/${bot.id}`, { runtimePolicy: { delegationConcurrency: 1 } });
+      expect(blocked.status).toBe(409);
+      expect(blocked.body.error).toMatch(/locked/i);
+      expect((await api("PATCH", `/api/bots/${bot.id}`, { chiefRuntimePolicyLocked: false })).status).toBe(200);
+      expect((await api("PATCH", `/api/bots/${bot.id}`, { runtimePolicy: { delegationConcurrency: 1 } })).status).toBe(200);
+    } finally {
+      await api("DELETE", `/api/bots/${bot.id}`);
+    }
+  });
+
   it("projects privacy-safe live team-map metadata", async () => {
     const response = await api("GET", "/api/team-map");
     expect(response.status).toBe(200);
@@ -1117,20 +1150,70 @@ describe("harness HTTP API", () => {
       const dump = z.object({
         mcpConfig: z.object({
           mcpServers: z.object({
-            agents: z.object({ env: z.object({ OMB_COMMS_TOKEN: z.string() }) }),
+            agents: z.object({ env: z.object({ OMB_COMMS_TOKEN: z.string(), OMB_COMMS_CAPABILITY: z.string() }) }),
           }),
         }),
       }).parse(await readJsonFileWhenReady(fakeClaudeDump));
       const internalHeaders = {
         authorization: `Bearer ${dump.mcpConfig.mcpServers.agents.env.OMB_COMMS_TOKEN}`,
+        "x-omb-bot-id": chief.id,
+        "x-omb-thread-id": chief.threadId,
+        "x-omb-capability": dump.mcpConfig.mcpServers.agents.env.OMB_COMMS_CAPABILITY,
         "content-type": "application/json",
       };
+      const captureThreadHeaders = async (threadId: string) => {
+        rmSync(fakeClaudeDump, { force: true });
+        expect((await api("POST", `/api/groups/${channel.id}/messages`, { text: `capture ${threadId}` })).status).toBe(202);
+        const threadDump = await readJsonFileWhenReady<{
+          mcpConfig: { mcpServers: { agents: { env: { OMB_COMMS_CAPABILITY: string } } } };
+        }>(fakeClaudeDump);
+        await api("POST", `/api/groups/${channel.id}/interrupt`, { threadId });
+        await expect.poll(async () => {
+          const state = (await api("GET", "/api/bots?messages=0")).body;
+          return state.groups.find((candidate: { id: string }) => candidate.id === channel.id)?.working;
+        }, { timeout: 5_000 }).toBe(false);
+        return {
+          ...internalHeaders,
+          "x-omb-thread-id": threadId,
+          "x-omb-capability": threadDump.mcpConfig.mcpServers.agents.env.OMB_COMMS_CAPABILITY,
+        };
+      };
+      const spoofed = await fetch(`${BASE}/api/internal/create-bot`, {
+        method: "POST",
+        headers: internalHeaders,
+        body: JSON.stringify({
+          fromBotId: outsider.id,
+          fromThreadId: outsider.threadId,
+          name: "Spoofed operator",
+          role: "Research operator",
+          instructions: "Must not be created.",
+        }),
+      });
+      expect(spoofed.status).toBe(403);
+      expect((await spoofed.json() as { error?: string }).error).toMatch(/capability/i);
+      const spoofedDelegation = await fetch(`${BASE}/api/internal/delegate-bot`, {
+        method: "POST",
+        headers: internalHeaders,
+        body: JSON.stringify({
+          fromBotId: outsider.id,
+          fromThreadId: outsider.threadId,
+          toBotId: chief.id,
+          message: "must not queue",
+          runtimePolicyOverride: { maxToolAgentSteps: 1 },
+        }),
+      });
+      expect(spoofedDelegation.status).toBe(403);
+      expect((await spoofedDelegation.json() as { error?: string }).error).toMatch(/capability/i);
       expect((await api("POST", `/api/bots/${chief.id}/interrupt`)).status).toBe(200);
+      await expect.poll(async () => {
+        const state = (await api("GET", "/api/bots?messages=0")).body;
+        return state.bots.find((candidate: { id: string }) => candidate.id === chief.id)?.busy;
+      }, { timeout: 5_000 }).toBe(false);
 
-      const createOperator = async (fromThreadId: string, name: string, fromBotId = chief.id) => {
+      const createOperator = async (fromThreadId: string, name: string, fromBotId = chief.id, headers = internalHeaders) => {
         const response = await fetch(`${BASE}/api/internal/create-bot`, {
           method: "POST",
-          headers: internalHeaders,
+          headers,
           body: JSON.stringify({
             fromBotId,
             fromThreadId,
@@ -1154,14 +1237,16 @@ describe("harness HTTP API", () => {
       channel = (await api("POST", "/api/groups", {
         name: "Chief member channel",
         memberIds: [chief.id],
-        setup: { bulletin: "", defaultResponder: { kind: "member", botId: chief.id } },
+        setup: { bulletin: "", defaultResponder: { kind: "member", botId: chief.id }, completed: true },
       })).body.group;
       const rootThreadId = channel.threadId;
+      const rootHeaders = await captureThreadHeaders(rootThreadId);
       const channelTask = await api("POST", `/api/groups/${channel.id}/tasks`, { title: "Research task" });
       expect(channelTask.status).toBe(201);
-      const rootTask = await createOperator(rootThreadId, "Channel Root Operator");
+      const taskHeaders = await captureThreadHeaders(channelTask.body.task.threadId);
+      const rootTask = await createOperator(rootThreadId, "Channel Root Operator", chief.id, rootHeaders);
       expect(rootTask.status).toBe(201);
-      const nestedTask = await createOperator(channelTask.body.task.threadId, "Channel Task Operator");
+      const nestedTask = await createOperator(channelTask.body.task.threadId, "Channel Task Operator", chief.id, taskHeaders);
       expect(nestedTask.status).toBe(201);
 
       outsiderChannel = (await api("POST", "/api/groups", {
@@ -1172,12 +1257,12 @@ describe("harness HTTP API", () => {
       const nonChief = await createOperator(outsiderChannel.threadId, "Non-Chief Operator", outsider.id);
       expect(nonChief).toEqual({
         status: 403,
-        body: { error: "only a section's Chief of Staff can create operator bots" },
+        body: { error: "sender capability does not match proxy identity" },
       });
       const denied = await createOperator(outsiderChannel.threadId, "Forbidden Operator");
       expect(denied).toEqual({
         status: 403,
-        body: { error: "source conversation does not belong to sender" },
+        body: { error: "sender capability does not match proxy identity" },
       });
       const state = (await api("GET", "/api/bots?messages=0")).body;
       expect(state.bots.some((bot: { name: string }) => bot.name === "Forbidden Operator")).toBe(false);
@@ -4596,7 +4681,7 @@ describe("harness HTTP API", () => {
       expect((await api("POST", `/api/groups/${room.id}/messages`, { text: "start the lead" })).status).toBe(202);
       const firstDump = await readJsonFileWhenReady<{
         pid: number;
-        mcpConfig: { mcpServers: { agents: { env: { OMB_COMMS_TOKEN: string } } } };
+        mcpConfig: { mcpServers: { agents: { env: { OMB_COMMS_TOKEN: string; OMB_COMMS_CAPABILITY: string } } } };
       }>(fakeClaudeDump);
       const token = firstDump.mcpConfig.mcpServers.agents.env.OMB_COMMS_TOKEN;
       expect(token).toMatch(/^[a-f0-9]{48}$/);
@@ -4605,6 +4690,9 @@ describe("harness HTTP API", () => {
         method: "POST",
         headers: {
           authorization: `Bearer ${token}`,
+          "x-omb-bot-id": first.id,
+          "x-omb-thread-id": room.threadId,
+          "x-omb-capability": firstDump.mcpConfig.mcpServers.agents.env.OMB_COMMS_CAPABILITY,
           "content-type": "application/json",
         },
         body: JSON.stringify({
@@ -4676,7 +4764,7 @@ describe("harness HTTP API", () => {
       rmSync(fakeClaudeDump, { force: true });
       expect((await api("POST", `/api/bots/${bot.id}/messages`, { text: "prepare a routine" })).status).toBe(202);
       const dump = await readJsonFileWhenReady<{
-        mcpConfig: { mcpServers: { agents: { env: { OMB_COMMS_TOKEN: string } } } };
+        mcpConfig: { mcpServers: { agents: { env: { OMB_COMMS_TOKEN: string; OMB_COMMS_CAPABILITY: string } } } };
       }>(fakeClaudeDump);
       const token = dump.mcpConfig.mcpServers.agents.env.OMB_COMMS_TOKEN;
       expect(token).toMatch(/^[a-f0-9]{48}$/);
@@ -4687,6 +4775,9 @@ describe("harness HTTP API", () => {
       }, { timeout: 5_000 }).toBe(false);
       const internalHeaders = {
         authorization: `Bearer ${token}`,
+        "x-omb-bot-id": bot.id,
+        "x-omb-thread-id": bot.threadId,
+        "x-omb-capability": dump.mcpConfig.mcpServers.agents.env.OMB_COMMS_CAPABILITY,
         "content-type": "application/json",
       };
 
@@ -5029,12 +5120,15 @@ describe("harness HTTP API", () => {
       rmSync(fakeClaudeDump, { force: true });
       expect((await api("POST", `/api/bots/${bot.id}/messages`, { text: "prepare a skill" })).status).toBe(202);
       const dump = await readJsonFileWhenReady<{
-        mcpConfig: { mcpServers: { agents: { env: { OMB_COMMS_TOKEN: string } } } };
+        mcpConfig: { mcpServers: { agents: { env: { OMB_COMMS_TOKEN: string; OMB_COMMS_CAPABILITY: string } } } };
       }>(fakeClaudeDump);
       const token = dump.mcpConfig.mcpServers.agents.env.OMB_COMMS_TOKEN;
       expect(token).toMatch(/^[a-f0-9]{48}$/);
       const internalHeaders = {
         authorization: `Bearer ${token}`,
+        "x-omb-bot-id": bot.id,
+        "x-omb-thread-id": bot.threadId,
+        "x-omb-capability": dump.mcpConfig.mcpServers.agents.env.OMB_COMMS_CAPABILITY,
         "content-type": "application/json",
       };
 

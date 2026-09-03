@@ -4,6 +4,7 @@
 // assert what would have been dispatched to the harness. The harness itself
 // stays out of these — the integration happens in comms.test.ts (the full
 // e2e through the agents proxy + fake ACP CLI).
+import { createHash } from "node:crypto";
 import { rmSync } from "node:fs";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -30,6 +31,7 @@ import {
   _pendingCount,
 } from "./delegations.ts";
 import { peerAllowKey, resolvePeerComms } from "./peer-approval.ts";
+import { effectiveTaskRuntimePolicy, runtimePolicyFingerprint } from "./bot-runtime-policy.ts";
 import { Store, type BotRecord } from "./store.ts";
 
 const selection = (): ModelSelection => ({ instanceId: "claude", model: "fake-model" });
@@ -179,6 +181,50 @@ describe("queueDelegation", () => {
       store.messagesFor(from.threadId).some((m) => m.tool?.name === "Delegated to @Helper"),
     ).toBe(false);
   });
+
+  it("records hash-only policy evidence and fails closed on malformed overrides", () => {
+    store.setChiefOfStaff(from.id);
+    const queued = queueDelegation(commsBus, from, {
+      toBotId: target.id,
+      message: "bounded work",
+      runtimePolicyOverride: { maxToolAgentSteps: 12 },
+      depth: 0,
+    }, 1);
+    expect(queued.result).toBe("ok");
+    expect(queued.evidence).toMatchObject({
+      evidenceKey: expect.stringMatching(/^[a-f0-9]{64}$/),
+      runtimePolicyFingerprint: expect.stringMatching(/^[a-f0-9]{64}$/),
+      runtimePolicyOverrideFingerprint: expect.stringMatching(/^[a-f0-9]{64}$/),
+    });
+    expect(JSON.stringify(queued.evidence)).not.toContain("maxToolAgentSteps");
+
+    const invalid = queueDelegation(commsBus, from, {
+      toBotId: target.id,
+      message: "bad policy",
+      runtimePolicyOverride: { idleTimeoutMinutes: 0 },
+      depth: 0,
+    }, 1);
+    expect(invalid.result).toBe("invalid_runtime_policy");
+
+    store.setChiefOfStaff(null);
+    const unauthorized = queueDelegation(commsBus, from, {
+      toBotId: target.id,
+      message: "unauthorized policy",
+      runtimePolicyOverride: { maxToolAgentSteps: 12 },
+      depth: 0,
+    }, 1);
+    expect(unauthorized.result).toBe("runtime_policy_chief_only");
+  });
+
+  it("uses locale-independent canonicalization for evidence keys", () => {
+    const queued = queueDelegation(commsBus, from, { toBotId: target.id, message: "I", depth: 0 }, 1);
+    expect(queued.result).toBe("ok");
+    const policyFingerprint = runtimePolicyFingerprint(effectiveTaskRuntimePolicy(target.runtimePolicy, undefined));
+    const expected = createHash("sha256")
+      .update(["i", "", policyFingerprint, "none"].join("\n\u241f\n"), "utf8")
+      .digest("hex");
+    expect(queued.evidence?.evidenceKey).toBe(expected);
+  });
 });
 
 describe("drainDelegations", () => {
@@ -248,6 +294,44 @@ describe("drainDelegations", () => {
     });
     await waitFor(() => runTargetCalls.length === 1);
     expect(runTargetCalls[0]!.message).toContain("[Reason: next step]");
+  });
+
+  it("passes runtime policy evidence to the target runner and task record", async () => {
+    store.patchBot(from.id, { chiefOfStaff: true });
+    const queued = queueDelegation(
+      commsBus,
+      from,
+      {
+        toBotId: target.id,
+        message: "run with bounded policy",
+        runtimePolicyOverride: { maxToolAgentSteps: 12 },
+        depth: 0,
+      },
+      1,
+    );
+    expect(queued.result).toBe("ok");
+    if (queued.result !== "ok") return;
+
+    let receivedEvidence: unknown;
+    drainDelegations(
+      commsBus,
+      approvalBus,
+      from.threadId,
+      (toBotId, message, commsDepth, sourceThreadId, channel, taskId, evidence) => {
+        receivedEvidence = evidence;
+        runTargetCalls.push({ toBotId, message, commsDepth, sourceThreadId });
+        void channel;
+        void taskId;
+      },
+    );
+
+    await waitFor(() => receivedEvidence !== undefined);
+    expect(receivedEvidence).toEqual(queued.evidence);
+    const task = store.taskByThread(target.id, target.threadId);
+    expect(task?.runtimePolicyFingerprint).toBe(queued.evidence?.runtimePolicyFingerprint);
+    expect(task?.runtimePolicyOverrideFingerprint).toBe(
+      queued.evidence?.runtimePolicyOverrideFingerprint,
+    );
   });
 
   it("drains and mirrors a detached routine delegation on its source thread", async () => {
@@ -638,6 +722,46 @@ describe("busy retries and receipts", () => {
 
   const chipCount = (needle: string) =>
     store.messagesFor(from.threadId).filter((m) => m.kind === "activity" && m.tool?.name?.includes(needle)).length;
+
+  it("leaves a terminal evidence receipt when Chief authority is revoked", async () => {
+    store.setChiefOfStaff(from.id);
+    const queued = queueDelegation(commsBus, from, {
+      toBotId: target.id,
+      message: "bounded work",
+      runtimePolicyOverride: { maxToolAgentSteps: 1 },
+      depth: 0,
+    }, 1);
+    expect(queued.result).toBe("ok");
+    store.setChiefOfStaff(null);
+    const runTarget = vi.fn();
+    drainDelegations(commsBus, approvalBus, from.threadId, runTarget);
+    await waitFor(() => _pendingCount(from.threadId) === 0);
+    expect(runTarget).not.toHaveBeenCalled();
+    expect(findDelegationReceipt(queued.id!)).toMatchObject({
+      status: "denied",
+      result: "only a Chief of Staff may set a runtime policy override",
+      evidence: queued.evidence,
+    });
+  });
+
+  it("reuses the queue-time policy snapshot for evidence, task, and dispatch", async () => {
+    store.setChiefOfStaff(from.id);
+    const queued = queueDelegation(commsBus, from, {
+      toBotId: target.id,
+      message: "snapshot this",
+      runtimePolicyOverride: { maxToolAgentSteps: 2 },
+      depth: 0,
+    }, 1);
+    expect(queued.result).toBe("ok");
+    store.patchBot(target.id, { runtimePolicy: { maxToolAgentSteps: 99 } });
+    const dispatched: unknown[][] = [];
+    drainDelegations(commsBus, approvalBus, from.threadId, (...args: unknown[]) => void dispatched.push(args));
+    await waitFor(() => dispatched.length === 1 && _pendingCount(from.threadId) === 0);
+    const policy = dispatched[0]![7] as Parameters<typeof runtimePolicyFingerprint>[0];
+    expect(policy.maxToolAgentSteps).toBe(2);
+    expect(runtimePolicyFingerprint(policy)).toBe(queued.evidence?.runtimePolicyFingerprint);
+    expect(store.taskByThread(target.id, target.threadId)?.runtimePolicySnapshot?.maxToolAgentSteps).toBe(2);
+  });
 
   it("keeps a handoff queued while the target is busy and dispatches on the retry drain", async () => {
     store.patchBot(target.id, { busy: true });

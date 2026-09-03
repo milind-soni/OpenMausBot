@@ -208,6 +208,20 @@ export interface ModelSelection {
   effort?: EffortLevel;
 }
 
+export type RuntimeTokenPolicyMode = "disabled" | "soft" | "hard";
+
+export interface RuntimePolicy {
+  wallClockTimeoutMinutes: number;
+  idleTimeoutMinutes: number;
+  cancellationGraceSeconds: number;
+  maxToolAgentSteps: number;
+  delegationConcurrency: number;
+  cumulativeTokenPolicy: {
+    mode: RuntimeTokenPolicyMode;
+    limit: number;
+  };
+}
+
 /** One of a bot's separate contexts: its own thread, transcript and
  * provider session. The bot's threadId points at the active one. */
 export interface Task {
@@ -282,6 +296,10 @@ export interface Bot {
   pinnedMessageId?: string;
   /** This sidebar section's primary coordinator. */
   chiefOfStaff?: boolean;
+  /** User-owned guard for persistent Chief runtime policy changes. */
+  chiefRuntimePolicyLocked?: boolean;
+  /** Effective server-owned runtime controls for this bot. */
+  runtimePolicy?: RuntimePolicy;
   /** When this bot wants to talk to another bot (ask_bot/delegate_bot),
    * pause and ask the user first. Off by default. */
   approvePeerComms?: boolean;

@@ -82,4 +82,12 @@ describe("TurnWatchdog", () => {
     dog.sweep();
     expect(stalls).toEqual([expect.objectContaining({ botId: "bot2" })]);
   });
+
+  it("uses the admitted per-turn idle timeout", () => {
+    const { dog, stalls, tick } = rig();
+    dog.watch("short", "bot1", 2_000);
+    tick(2_001);
+    dog.sweep();
+    expect(stalls).toEqual([expect.objectContaining({ threadId: "short", idleMs: 2_000 })]);
+  });
 });

@@ -9,6 +9,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { DATA_DIR } from "./config.ts";
 import type { ModelSelection } from "./contracts.ts";
 import * as mdb from "./message-db.ts";
+import { effectiveTaskRuntimePolicy } from "./bot-runtime-policy.ts";
 import { peerAllowKey } from "./peer-approval-key.ts";
 import { Store, type BotRecord } from "./store.ts";
 
@@ -1031,6 +1032,57 @@ describe("Store task usage", () => {
     const store = new Store(selection);
     const bot = store.createBot();
     expect(store.addTaskUsage(bot.id, "nope", { input: 1, output: 1, costUsd: null })).toBeNull();
+  });
+});
+
+describe("Store task runtime policy evidence", () => {
+  beforeEach(() => {
+    rmSync(DATA_DIR, { recursive: true, force: true });
+  });
+
+  it("persists effective and explicit override fingerprints with the task", () => {
+    const store = new Store(selection);
+    const bot = store.createBot();
+    store.patchBot(bot.id, { runtimePolicy: { maxToolAgentSteps: 12 } });
+    const override = { idleTimeoutMinutes: 5 } as const;
+    const task = store.recordTaskRuntimePolicy(
+      bot.id,
+      bot.threadId,
+      effectiveTaskRuntimePolicy(bot.runtimePolicy, override),
+      override,
+    );
+    expect(task?.runtimePolicyOverride).toEqual({ idleTimeoutMinutes: 5 });
+    expect(task?.runtimePolicyFingerprint).toMatch(/^[a-f0-9]{64}$/);
+    expect(task?.runtimePolicyOverrideFingerprint).toMatch(/^[a-f0-9]{64}$/);
+    expect(task?.runtimePolicySnapshot?.idleTimeoutMinutes).toBe(5);
+
+    const reloaded = new Store(selection).taskByThread(bot.id, bot.threadId);
+    expect(reloaded?.runtimePolicyFingerprint).toBe(task?.runtimePolicyFingerprint);
+    expect(reloaded?.runtimePolicyOverrideFingerprint).toBe(task?.runtimePolicyOverrideFingerprint);
+  });
+
+  it("round-trips runtime controls and the Chief lock", () => {
+    const store = new Store(selection);
+    const bot = store.createBot({}, { seedMessages: false });
+    store.patchBot(bot.id, {
+      runtimePolicy: {
+        wallClockTimeoutMinutes: 7,
+        idleTimeoutMinutes: 3,
+        cancellationGraceSeconds: 9,
+        delegationConcurrency: 2,
+        cumulativeTokenPolicy: { mode: "hard", limit: 25_000 },
+      },
+      chiefRuntimePolicyLocked: true,
+    });
+    const reloaded = new Store(selection).bot(bot.id);
+    expect(reloaded?.runtimePolicy).toEqual(expect.objectContaining({
+      wallClockTimeoutMinutes: 7,
+      idleTimeoutMinutes: 3,
+      cancellationGraceSeconds: 9,
+      delegationConcurrency: 2,
+      cumulativeTokenPolicy: { mode: "hard", limit: 25_000 },
+    }));
+    expect(reloaded?.chiefRuntimePolicyLocked).toBe(true);
   });
 });
 

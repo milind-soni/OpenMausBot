@@ -11,6 +11,7 @@
 // time, never at queue time, because the user might have just turned
 // approvePeerComms on between queueing and draining.
 
+import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 
@@ -18,6 +19,16 @@ import { writeFileAtomic } from "./atomic.ts";
 import { getOrCreateChannel, mirrorExchange, type CommsBus } from "./comms-visibility.ts";
 import { DATA_DIR } from "./config.ts";
 import { newId } from "./contracts.ts";
+import {
+  cloneRuntimePolicy,
+  effectiveTaskRuntimePolicy,
+  isBotRuntimePolicy,
+  runtimePolicyFingerprint,
+  runtimePolicyOverrideFingerprint,
+  validateRuntimePolicyPatch,
+  type BotRuntimePolicy,
+  type RuntimePolicyOverrides,
+} from "./bot-runtime-policy.ts";
 import { requestPeerApproval, type ApprovalBus } from "./peer-approval.ts";
 import { sectionKey, type BotRecord, type GroupRecord } from "./store.ts";
 
@@ -25,6 +36,8 @@ export interface DelegationItem {
   toBotId: string;
   message: string;
   reason?: string;
+  /** Optional one-task policy override. It is validated before queueing. */
+  runtimePolicyOverride?: RuntimePolicyOverrides;
   /** The user already approved this exact peer message while it was still
    * an ask_bot request. If that peer became busy before dispatch, the
    * fallback handoff must not ask them to approve the same action twice. */
@@ -48,6 +61,14 @@ interface PendingDelegationItem extends DelegationItem {
    * queue activity must not count that same period again; the target's idle
    * transition clears this marker before the next retry. */
   waitingOnBusy?: boolean;
+  evidence?: DelegationEvidence;
+  runtimePolicySnapshot?: import("./bot-runtime-policy.ts").BotRuntimePolicy;
+}
+
+export interface DelegationEvidence {
+  evidenceKey: string;
+  runtimePolicyFingerprint: string;
+  runtimePolicyOverrideFingerprint?: string;
 }
 
 export type DelegationOutcome = "done" | "failed" | "denied" | "busy_gave_up" | "dropped" | "error";
@@ -64,15 +85,18 @@ export interface DelegationReceipt {
   /** the peer's reply on success; the failure name otherwise (bounded) */
   result?: string;
   finishedAt: number;
+  /** Hash-only evidence for reproducing the admission decision. */
+  evidence?: DelegationEvidence;
 }
 
-export type QueueResult = "ok" | "no_target" | "self" | "too_deep" | "too_many";
+export type QueueResult = "ok" | "no_target" | "self" | "too_deep" | "too_many" | "invalid_runtime_policy" | "runtime_policy_chief_only";
 
 /** What queueDelegation hands back: the verdict, and on success the task id
  * the delegating bot can later read back with check/wait_delegation. */
 export interface QueuedDelegation {
   result: QueueResult;
   id?: string;
+  evidence?: DelegationEvidence;
 }
 
 /** Per source-thread queue. Persisted to delegations.json on every change
@@ -95,6 +119,42 @@ export const MAX_BUSY_ATTEMPTS = 3;
 
 let receipts: DelegationReceipt[] = [];
 
+/** Hash normalized delegation evidence parts without retaining their raw values. */
+function digest(parts: string[]): string {
+  return createHash("sha256").update(parts.join("\n\u241f\n"), "utf8").digest("hex");
+}
+
+/** Normalize user-controlled evidence text for deterministic hashing. */
+function normalized(value: string | undefined): string {
+  return (value ?? "").trim().normalize("NFKC").replaceAll("\\", "/").replace(/\s+/gu, " ").toLowerCase();
+}
+
+/** Build hash-only evidence for a queued delegation and its policy snapshot. */
+function delegationEvidence(
+  message: string,
+  reason: string | undefined,
+  policy: BotRuntimePolicy,
+  runtimePolicyOverride: RuntimePolicyOverrides | undefined,
+): DelegationEvidence {
+  const effectiveFingerprint = runtimePolicyFingerprint(policy);
+  const overrideFingerprint = runtimePolicyOverrideFingerprint(runtimePolicyOverride);
+  return {
+    evidenceKey: digest([
+      normalized(message),
+      normalized(reason),
+      effectiveFingerprint,
+      overrideFingerprint ?? "none",
+    ]),
+    runtimePolicyFingerprint: effectiveFingerprint,
+    ...(overrideFingerprint ? { runtimePolicyOverrideFingerprint: overrideFingerprint } : {}),
+  };
+}
+
+/** Return the optional evidence field for durable queue and receipt records. */
+function evidenceFields(item: PendingDelegationItem): { evidence?: DelegationEvidence } {
+  return item.evidence ? { evidence: item.evidence } : {};
+}
+
 function saveReceipts(): void {
   try {
     writeFileAtomic(RECEIPTS_FILE, JSON.stringify(receipts, null, 2), { mode: 0o600 });
@@ -116,21 +176,23 @@ export function recordDelegationReceipt(receipt: Omit<DelegationReceipt, "finish
     finishedAt: receipt.finishedAt ?? now,
   };
   if (receipt.result !== undefined) bounded.result = receipt.result.slice(0, RESULT_MAX_CHARS);
+  if (receipt.evidence) bounded.evidence = receipt.evidence;
   receipts = [bounded, ...receipts.filter((existing) => existing.id !== bounded.id)]
     .filter((existing) => now - existing.finishedAt <= RECEIPT_MAX_AGE_MS)
     .slice(0, MAX_RECEIPTS);
   saveReceipts();
 }
 
+/** Find one bounded terminal delegation receipt by its stable task id. */
 export function findDelegationReceipt(id: string): DelegationReceipt | null {
   return receipts.find((receipt) => receipt.id === id) ?? null;
 }
 
 /** A still-queued task's routing info, or null once it dispatched/settled. */
-export function pendingDelegationInfo(id: string): { sourceThreadId: string; toBotId: string; attempts: number } | null {
+export function pendingDelegationInfo(id: string): { sourceThreadId: string; toBotId: string; attempts: number; evidence?: DelegationEvidence } | null {
   for (const [sourceThreadId, items] of pendingDelegations) {
     const item = items.find((candidate) => candidate.id === id);
-    if (item) return { sourceThreadId, toBotId: item.toBotId, attempts: item.attempts };
+    if (item) return { sourceThreadId, toBotId: item.toBotId, attempts: item.attempts, ...evidenceFields(item) };
   }
   return null;
 }
@@ -182,16 +244,47 @@ export function _loadPending(): void {
           typeof item.message !== "string" ||
           !Number.isFinite(item.depth)
         ) return [];
+        let runtimePolicyOverride: RuntimePolicyOverrides | undefined;
+        if (item.runtimePolicyOverride !== undefined) {
+          try {
+            const validated = validateRuntimePolicyPatch(item.runtimePolicyOverride);
+            if (!validated || typeof validated !== "object") return [];
+            runtimePolicyOverride = validated;
+          } catch {
+            return [];
+          }
+        }
         const loaded: PendingDelegationItem = {
           id: typeof item.id === "string" && item.id ? item.id : newId(),
           toBotId: item.toBotId,
           message: item.message,
           ...(typeof item.reason === "string" ? { reason: item.reason } : {}),
+          ...(runtimePolicyOverride ? { runtimePolicyOverride } : {}),
           depth: Math.max(0, Math.trunc(item.depth!)),
           attempts: Number.isFinite(item.attempts) ? Math.max(0, Math.trunc(item.attempts!)) : 0,
         };
         if (item.approvalAlreadyGranted === true) loaded.approvalAlreadyGranted = true;
         if (item.waitingOnBusy === true) loaded.waitingOnBusy = true;
+        if (item.evidence && typeof item.evidence === "object" && !Array.isArray(item.evidence)) {
+          const evidence = item.evidence as Partial<DelegationEvidence>;
+          if (typeof evidence.evidenceKey === "string" && typeof evidence.runtimePolicyFingerprint === "string") {
+            loaded.evidence = {
+              evidenceKey: evidence.evidenceKey,
+              runtimePolicyFingerprint: evidence.runtimePolicyFingerprint,
+              ...(typeof evidence.runtimePolicyOverrideFingerprint === "string"
+                ? { runtimePolicyOverrideFingerprint: evidence.runtimePolicyOverrideFingerprint }
+                : {}),
+            };
+          }
+        }
+        if (isBotRuntimePolicy(item.runtimePolicySnapshot)) {
+          loaded.runtimePolicySnapshot = cloneRuntimePolicy(item.runtimePolicySnapshot);
+        } else {
+          // Old queue records have no recoverable effective policy identity;
+          // recompute both policy and evidence together at dispatch rather
+          // than retaining a fingerprint for a different snapshot.
+          delete loaded.evidence;
+        }
         return [loaded];
       });
       if (items.length) pendingDelegations.set(threadId, items);
@@ -218,6 +311,18 @@ export function _loadPending(): void {
         if (!Number.isFinite(finishedAt) || now - finishedAt! > RECEIPT_MAX_AGE_MS) continue;
         const receipt: DelegationReceipt = { id, sourceThreadId, toBotId, toBotName, status, finishedAt: finishedAt! };
         if (typeof result === "string") receipt.result = result;
+        if (candidate.evidence && typeof candidate.evidence === "object" && !Array.isArray(candidate.evidence)) {
+          const evidence = candidate.evidence as Partial<DelegationEvidence>;
+          if (typeof evidence.evidenceKey === "string" && typeof evidence.runtimePolicyFingerprint === "string") {
+            receipt.evidence = {
+              evidenceKey: evidence.evidenceKey,
+              runtimePolicyFingerprint: evidence.runtimePolicyFingerprint,
+              ...(typeof evidence.runtimePolicyOverrideFingerprint === "string"
+                ? { runtimePolicyOverrideFingerprint: evidence.runtimePolicyOverrideFingerprint }
+                : {}),
+            };
+          }
+        }
         loaded.push(receipt);
       }
       receipts = loaded.slice(0, MAX_RECEIPTS);
@@ -265,13 +370,33 @@ export function queueDelegation(
   if (item.depth >= maxDepth) return { result: "too_deep" };
   const target = bus.store.bot(item.toBotId);
   if (!target) return { result: "no_target" };
+  let runtimePolicyOverride: RuntimePolicyOverrides | undefined;
+  if (item.runtimePolicyOverride !== undefined) {
+    try {
+      const validated = validateRuntimePolicyPatch(item.runtimePolicyOverride);
+      if (!validated || typeof validated !== "object") return { result: "invalid_runtime_policy" };
+      runtimePolicyOverride = validated;
+    } catch {
+      return { result: "invalid_runtime_policy" };
+    }
+    if (!from.chiefOfStaff) return { result: "runtime_policy_chief_only" };
+  }
+  const runtimePolicySnapshot = effectiveTaskRuntimePolicy(target.runtimePolicy, runtimePolicyOverride);
+  const evidence = delegationEvidence(item.message, item.reason, runtimePolicySnapshot, runtimePolicyOverride);
   const list = pendingDelegations.get(sourceThreadId) ?? [];
   // Async handoff removes the backpressure that ask_bot got for free by
   // making the caller wait. Without a cap, one turn can queue unboundedly
   // and fan out into as many real turns on the next settle.
   if (list.length >= MAX_QUEUED_PER_THREAD) return { result: "too_many" };
   const id = newId();
-  list.push({ ...item, id, attempts: 0 });
+  list.push({
+    ...item,
+    ...(runtimePolicyOverride ? { runtimePolicyOverride } : {}),
+    id,
+    attempts: 0,
+    evidence,
+    runtimePolicySnapshot: cloneRuntimePolicy(runtimePolicySnapshot),
+  });
   pendingDelegations.set(sourceThreadId, list);
   savePending();
   const label = `Delegated to @${target.name}${item.reason ? `: ${item.reason}` : ""}`;
@@ -280,7 +405,7 @@ export function queueDelegation(
     kind: "activity",
     tool: { name: label },
   });
-  return { result: "ok", id };
+  return { result: "ok", id, evidence };
 }
 
 /** Drain queued delegations for a source thread (called on its
@@ -300,6 +425,9 @@ export function drainDelegations(
     sourceThreadId: string,
     channel: GroupRecord | undefined,
     taskId: string,
+    evidence: DelegationEvidence,
+    runtimePolicySnapshot: BotRuntimePolicy,
+    runtimePolicyOverride: RuntimePolicyOverrides | undefined,
   ) => void | Promise<void>,
 ): void {
   if (drainingThreads.has(threadId)) {
@@ -330,6 +458,7 @@ export function drainDelegations(
           toBotName: bus.store.bot(item.toBotId)?.name ?? item.toBotId,
           status: "error",
           result: why.slice(0, 200),
+          ...evidenceFields(item),
         });
         try {
           bus.store.appendMessage(threadId, {
@@ -386,6 +515,7 @@ export function discardDelegations(bus: CommsBus, threadId: string): void {
       toBotName: bus.store.bot(item.toBotId)?.name ?? item.toBotId,
       status: "dropped",
       result: "the delegating turn did not finish",
+      ...evidenceFields(item),
     });
   }
   const from = bus.store.botByThread(threadId);
@@ -397,6 +527,7 @@ export function discardDelegations(bus: CommsBus, threadId: string): void {
   });
 }
 
+/** Process one queued delegation through admission, provider execution, and durable receipt settlement. */
 async function processOne(
   bus: CommsBus,
   approvalBus: ApprovalBus,
@@ -410,6 +541,9 @@ async function processOne(
     sourceThreadId: string,
     channel: GroupRecord | undefined,
     taskId: string,
+    evidence: DelegationEvidence,
+    runtimePolicySnapshot: BotRuntimePolicy,
+    runtimePolicyOverride: RuntimePolicyOverrides | undefined,
   ) => void | Promise<void>,
 ): Promise<"settled" | "requeued"> {
   let sender = from;
@@ -422,11 +556,29 @@ async function processOne(
       toBotName: item.toBotId,
       status: "error",
       result: "no such bot",
+      ...evidenceFields(item),
     });
     bus.store.appendMessage(sourceThreadId, {
       role: "bot",
       kind: "activity",
       tool: { name: `error: delegation to ${item.toBotId} failed — no such bot`, ok: false },
+    });
+    return "settled";
+  }
+  if (item.runtimePolicyOverride && !sender.chiefOfStaff) {
+    recordDelegationReceipt({
+      id: item.id,
+      sourceThreadId,
+      toBotId: target.id,
+      toBotName: target.name,
+      status: "denied",
+      result: "only a Chief of Staff may set a runtime policy override",
+      ...evidenceFields(item),
+    });
+    bus.store.appendMessage(sourceThreadId, {
+      role: "bot",
+      kind: "activity",
+      tool: { name: `Delegation to @${target.name} canceled — only a Chief of Staff may set a runtime policy override`, ok: false },
     });
     return "settled";
   }
@@ -453,6 +605,7 @@ async function processOne(
       toBotName: target.name,
       status: "busy_gave_up",
       result: `@${target.name} stayed busy through ${MAX_BUSY_ATTEMPTS} retries`,
+      ...evidenceFields(item),
     });
     bus.store.appendMessage(sourceThreadId, {
       role: "bot",
@@ -482,6 +635,7 @@ async function processOne(
         toBotName: target.name,
         status: "denied",
         result: "the user denied this handoff",
+        ...evidenceFields(item),
       });
       bus.store.appendMessage(sourceThreadId, {
         role: "bot",
@@ -496,7 +650,35 @@ async function processOne(
     // and mirror a "Messaged @X" chip for an exchange that never happens.
     const current = bus.store.bot(item.toBotId);
     const currentSender = bus.store.bot(from.id);
-    if (!current || !currentSender || !bus.store.taskByThread(currentSender.id, sourceThreadId)) return "settled";
+    if (!current || !currentSender || !bus.store.taskByThread(currentSender.id, sourceThreadId)) {
+      recordDelegationReceipt({
+        id: item.id,
+        sourceThreadId,
+        toBotId: current?.id ?? item.toBotId,
+        toBotName: current?.name ?? item.toBotId,
+        status: "error",
+        result: "the sender or source conversation disappeared while approval was pending",
+        ...evidenceFields(item),
+      });
+      return "settled";
+    }
+    if (item.runtimePolicyOverride && !currentSender.chiefOfStaff) {
+      recordDelegationReceipt({
+        id: item.id,
+        sourceThreadId,
+        toBotId: current.id,
+        toBotName: current.name,
+        status: "denied",
+        result: "only a Chief of Staff may set a runtime policy override",
+        ...evidenceFields(item),
+      });
+      bus.store.appendMessage(sourceThreadId, {
+        role: "bot",
+        kind: "activity",
+        tool: { name: `Delegation to @${current.name} canceled — Chief of Staff authority was revoked`, ok: false },
+      });
+      return "settled";
+    }
     if (dropIfSectionsChanged(bus, currentSender, current, sourceThreadId, item)) {
       return "settled";
     }
@@ -520,6 +702,7 @@ async function processOne(
         toBotName: current.name,
         status: "busy_gave_up",
         result: `@${current.name} stayed busy through ${MAX_BUSY_ATTEMPTS} retries`,
+        ...evidenceFields(item),
       });
       bus.store.appendMessage(sourceThreadId, {
         role: "bot",
@@ -531,11 +714,19 @@ async function processOne(
     sender = currentSender;
     target = current;
   }
+  const runtimePolicySnapshot = item.runtimePolicySnapshot
+    ? cloneRuntimePolicy(item.runtimePolicySnapshot)
+    : effectiveTaskRuntimePolicy(target.runtimePolicy, item.runtimePolicyOverride);
+  const evidence = item.evidence ?? delegationEvidence(item.message, item.reason, runtimePolicySnapshot, item.runtimePolicyOverride);
+  item.evidence = evidence;
+  item.runtimePolicySnapshot = runtimePolicySnapshot;
+  savePending();
+  bus.store.recordTaskRuntimePolicy(target.id, target.threadId, runtimePolicySnapshot, item.runtimePolicyOverride);
   const channel = getOrCreateChannel(bus.store, sender, target);
   mirrorExchange(bus, sender, target, item.message, channel, sourceThreadId);
   const reasonLine = item.reason ? `\n\n[Reason: ${item.reason}]` : "";
   const prefixed = `[Delegated by @${sender.name}, another bot in this OpenMausBot workspace. Do the work and reply directly.]\n\n${item.message}${reasonLine}`;
-  await runTarget(item.toBotId, prefixed, item.depth + 1, sourceThreadId, channel, item.id);
+  await runTarget(item.toBotId, prefixed, item.depth + 1, sourceThreadId, channel, item.id, evidence, runtimePolicySnapshot, item.runtimePolicyOverride);
   return "settled";
 }
 
@@ -559,6 +750,7 @@ function dropIfSectionsChanged(
     toBotName: target.name,
     status: "dropped",
     result,
+    ...evidenceFields(item),
   });
   bus.store.appendMessage(sourceThreadId, {
     role: "bot",

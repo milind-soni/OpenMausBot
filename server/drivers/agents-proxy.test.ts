@@ -16,6 +16,7 @@ const TOKEN = "test-comms-token";
 let stub: Server;
 let stubPort = 0;
 let lastAuth: string | undefined;
+let lastCapability: { botId?: string; threadId?: string; value?: string } = {};
 let lastAskBody: any = null;
 /** What the stub harness returns from /api/internal/ask-bot. */
 type StubAskResponse = { botName?: string; text?: string; busy?: boolean; timeout?: boolean; waitedMs?: number; taskId?: string; toBotName?: string; error?: string };
@@ -63,6 +64,10 @@ let skillsResponse: unknown = {
   staged: [{ name: "pending-skill", action: "create", gist: "UNREVIEWED GIST", source: "UNREVIEWED SOURCE" }],
 };
 let skillStageResponse: unknown = { name: "file-expense", action: "create", gist: "Files an expense.", warnings: [] };
+let redirectAgents = false;
+let redirectSink: Server;
+let redirectSinkPort = 0;
+let leakedRedirectCapability: string | undefined;
 
 let child: ChildProcess;
 const pending = new Map<number, (msg: any) => void>();
@@ -81,13 +86,28 @@ function rpc(method: string, params?: unknown): Promise<any> {
 const callTool = (name: string, args: unknown) => rpc("tools/call", { name, arguments: args });
 
 beforeAll(async () => {
+  redirectSink = createServer((req, res) => {
+    leakedRedirectCapability = req.headers["x-omb-capability"] as string | undefined;
+    res.end("redirect sink");
+  });
+  await new Promise<void>((r) => redirectSink.listen(0, "127.0.0.1", r));
+  redirectSinkPort = (redirectSink.address() as { port: number }).port;
   stub = createServer((req, res) => {
     lastAuth = req.headers.authorization;
+    lastCapability = {
+      botId: req.headers["x-omb-bot-id"] as string | undefined,
+      threadId: req.headers["x-omb-thread-id"] as string | undefined,
+      value: req.headers["x-omb-capability"] as string | undefined,
+    };
     if (req.headers.authorization !== `Bearer ${TOKEN}`) {
       res.writeHead(401, { "content-type": "application/json" });
       return res.end(JSON.stringify({ error: "unauthorized" }));
     }
     if (req.method === "GET" && req.url?.startsWith("/api/internal/agents")) {
+      if (redirectAgents) {
+        res.writeHead(302, { location: "http://127.0.0.1:" + redirectSinkPort + "/sink" });
+        return res.end();
+      }
       res.writeHead(200, { "content-type": "application/json" });
       return res.end(
         JSON.stringify({
@@ -184,6 +204,7 @@ beforeAll(async () => {
       OMB_BOT_ID: "bot-asker",
       OMB_THREAD_ID: "thread-asker-routine",
       OMB_COMMS_TOKEN: TOKEN,
+      OMB_COMMS_CAPABILITY: "scoped-capability",
       OMB_TURN_DEPTH: "0",
       OMB_SKILL_AUTHORING_ENABLED: "1",
     },
@@ -207,6 +228,7 @@ beforeAll(async () => {
 afterAll(async () => {
   child?.kill();
   await new Promise<void>((r) => stub.close(() => r()));
+  await new Promise<void>((r) => redirectSink.close(() => r()));
 });
 
 describe("agents-proxy MCP surface", () => {
@@ -278,6 +300,20 @@ describe("agents-proxy MCP surface", () => {
     expect(text).toContain("Assign work with delegate_bot");
     expect(text).toContain("Use ask_bot only for a short answer");
     expect(lastAuth).toBe(`Bearer ${TOKEN}`);
+    expect(lastCapability).toEqual({ botId: "bot-asker", threadId: "thread-asker-routine", value: "scoped-capability" });
+  });
+
+  it("rejects redirects before forwarding the sender capability", async () => {
+    redirectAgents = true;
+    leakedRedirectCapability = undefined;
+    try {
+      const response = await callTool("list_bots", {});
+      expect(response.result.isError).toBe(true);
+      await new Promise((resolve) => setTimeout(resolve, 50));
+      expect(leakedRedirectCapability).toBeUndefined();
+    } finally {
+      redirectAgents = false;
+    }
   });
 
   it("ask_bot forwards sender + depth and returns the reply", async () => {
