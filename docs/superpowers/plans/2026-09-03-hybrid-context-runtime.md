@@ -392,6 +392,16 @@ Nothing produces a record until 4c lands; building the UI first is dead code.
 
 **Review gate:** Tasks 1–7 are independently releasable and materially fix context/compaction continuity for all current engines. Review and merge this release before starting the embedded loop.
 
+**Task 7 is a prerequisite for verifying this release, not observability polish.** Driving the
+isolated fixture (`docs/verification/README.md`) after Task 5 proves the chat workflow still
+works end to end — 46 turns sent, settled, and read back with zero errors in the server log —
+but its mapped commands report no context metadata, so they cannot show how much history
+actually reached the engine. The headline claim of this release ("more than 40 turns when the
+budget permits") is therefore unverifiable through the shared control surface until
+`context.prepared` exists. Build Task 7 before attempting Task 11's acceptance evidence, and add
+the `context.prepared` fields to a mapped command so the claim can be proven rather than
+asserted.
+
 ---
 
 ### Task 8: Add the embedded model loop behind an internal adapter
