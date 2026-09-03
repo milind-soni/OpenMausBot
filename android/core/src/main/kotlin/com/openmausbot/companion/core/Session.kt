@@ -1559,6 +1559,46 @@ class Session(
         }
     }
 
+    /**
+     * A reply as utterances the computer can voice, or `ready = false` when it
+     * has no voice set up — so a call can say so rather than fall silent.
+     * Throws: a call reads the failure itself instead of an action banner.
+     */
+    suspend fun prepareSpeech(text: String, voiceId: String?): PreparedSpeech {
+        val activeClient = client ?: throw APIError.Transport("This computer is offline.")
+        return activeClient.prepareSpeech(text, voiceId)
+    }
+
+    suspend fun speak(text: String, voiceId: String?): ByteArray {
+        val activeClient = client ?: throw APIError.Transport("This computer is offline.")
+        return activeClient.speak(text, voiceId)
+    }
+
+    /** Save the ElevenLabs key on the computer. The server's reason when it refuses, null on success. */
+    suspend fun updateVoiceKey(key: String): String? {
+        val activeClient = client ?: return "This computer is offline."
+        return try {
+            activeClient.updateVoiceKey(key)
+            null
+        } catch (error: CancellationException) {
+            throw error
+        } catch (error: Throwable) {
+            error.message ?: "Couldn't save the key."
+        }
+    }
+
+    suspend fun updateVoiceProvider(provider: String): String? {
+        val activeClient = client ?: return "This computer is offline."
+        return try {
+            activeClient.updateVoiceProvider(provider)
+            null
+        } catch (error: CancellationException) {
+            throw error
+        } catch (error: Throwable) {
+            error.message ?: "Couldn't change the voice engine."
+        }
+    }
+
     suspend fun configStatus(): ConfigStatus? = try {
         client?.config()
     } catch (error: Throwable) {

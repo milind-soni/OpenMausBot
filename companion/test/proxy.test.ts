@@ -300,6 +300,9 @@ describe("the sidecar in front of an unmodified harness", () => {
   it("refuses what a device has no business doing, by default", async () => {
     // settings and credentials stay on the machine
     expect((await device("PUT", "/api/config", { body: { xai: { apiKey: "x" } } })).status).toBe(403);
+    // …even riding along with the one write a phone may make
+    expect((await device("PUT", "/api/config", { body: { tts: { provider: "system" }, xai: { apiKey: "x" } } })).status).toBe(403);
+    expect((await device("PATCH", "/api/config", { body: { tts: { provider: "system" } } })).status).toBe(403);
     expect((await device("GET", "/api/devices")).status).toBe(403);
     expect((await device("GET", "/api/companion")).status).toBe(403);
     expect((await device("POST", "/api/local-computer/start")).status).toBe(403);
@@ -1009,5 +1012,23 @@ describe("pairing, end to end", () => {
     } finally {
       await new Promise<void>((r) => control.close(() => r()));
     }
+  });
+});
+
+describe("the voice config write", () => {
+  it("forwards a voice engine change to the harness, and nothing rides along", async () => {
+    const changed = await device("PUT", "/api/config", { body: { tts: { provider: "system" } } });
+    expect(changed.status, JSON.stringify(changed.body)).toBe(200);
+    const config = await device("GET", "/api/config");
+    expect(config.status).toBe(200);
+    expect(config.body.tts?.provider).toBe("system");
+    const back = await device("PUT", "/api/config", { body: { tts: { provider: "elevenlabs" } } });
+    expect(back.status, JSON.stringify(back.body)).toBe(200);
+  });
+
+  it("refuses a malformed key before the harness sees it", async () => {
+    const refused = await device("PUT", "/api/config", { body: { tts: { key: "bad\nkey" } } });
+    expect(refused.status).toBe(403);
+    expect(refused.body.error).toMatch(/API key/);
   });
 });

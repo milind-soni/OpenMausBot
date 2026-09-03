@@ -343,14 +343,63 @@ class CompanionClient(
             avatarGenerationClient,
         ).bot
 
-    suspend fun previewVoice(text: String, voiceId: String): ByteArray {
+    suspend fun previewVoice(text: String, voiceId: String): ByteArray = speak(text, voiceId)
+
+    /**
+     * One utterance, synthesized on the paired computer. The server caps this
+     * at 500 characters; [prepareSpeech] splits a reply into pieces that fit.
+     * An empty [voiceId] means the workspace default.
+     */
+    suspend fun speak(text: String, voiceId: String?): ByteArray {
         val raw = perform(makeRequest(
             "POST",
             "/api/tts/speak",
-            body = jsonBody("text" to text.take(500), "voiceId" to voiceId),
+            body = buildJsonObject {
+                put("text", text.take(500))
+                if (!voiceId.isNullOrEmpty()) put("voiceId", voiceId)
+            },
         ))
         check(raw)
         return raw.data
+    }
+
+    /**
+     * Split a reply into utterances the way the desktop does — on the server,
+     * next to the transform that shapes replies — and learn whether the
+     * computer can voice them at all.
+     */
+    suspend fun prepareSpeech(text: String, voiceId: String?): PreparedSpeech = send(
+        makeRequest(
+            "POST",
+            "/api/tts/prepare",
+            body = buildJsonObject {
+                put("text", text)
+                if (!voiceId.isNullOrEmpty()) put("voiceId", voiceId)
+            },
+        ),
+    )
+
+    /**
+     * Store (or, with an empty string, remove) the workspace's ElevenLabs key.
+     * The companion forwards only this shape, and the server checks a
+     * non-empty key against the provider before saving it; the key itself
+     * never comes back in any response.
+     */
+    suspend fun updateVoiceKey(key: String) {
+        val trimmed = key.trim()
+        if (trimmed.toByteArray().size > 512 || trimmed.any(Char::isISOControl)) {
+            throw APIError.Transport("That doesn't look like an API key.")
+        }
+        sendUnit(makeRequest("PUT", "/api/config", body = buildJsonObject {
+            put("tts", buildJsonObject { put("key", trimmed) })
+        }))
+    }
+
+    /** Pick the voice engine: "elevenlabs" or "system". */
+    suspend fun updateVoiceProvider(provider: String) {
+        sendUnit(makeRequest("PUT", "/api/config", body = buildJsonObject {
+            put("tts", buildJsonObject { put("provider", provider) })
+        }))
     }
 
     suspend fun createRoutine(input: RoutineInput): Routine {

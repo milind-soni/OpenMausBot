@@ -194,6 +194,9 @@ private fun LoadedChat(
     // what was typed into it — the sheet has to come back for that to matter.
     var showingProfile by rememberSaveable { mutableStateOf(false) }
     var showingPlus by remember(threadId) { mutableStateOf(false) }
+    // The bot on the line. Not saveable: a call does not survive a rotation's
+    // teardown of the audio session any better than a phone call would.
+    var showingCall by remember { mutableStateOf(false) }
     val focusManager = LocalFocusManager.current
     val focusedMessageId by session.focusedMessageId.collectAsState()
 
@@ -325,6 +328,7 @@ private fun LoadedChat(
     LaunchedEffect(showingPlus) { if (showingPlus) dictation.stop() }
     LaunchedEffect(showingTasks) { if (showingTasks) dictation.stop() }
     LaunchedEffect(showingProfile) { if (showingProfile) dictation.stop() }
+    LaunchedEffect(showingCall) { if (showingCall) dictation.stop() }
 
     // Opening a chat is what marks it read, exactly as on the desktop — and a
     // message can arrive while it is already on screen, so this keys on the bit
@@ -604,6 +608,10 @@ private fun LoadedChat(
                         dictation.stop()
                         if (bot != null) onOpenComputer(bot.id)
                     },
+                    onCall = {
+                        focusManager.clearFocus()
+                        showingCall = true
+                    },
                     // A bot's face and its name pill are both the door to its
                     // profile; a room has no profile, so its pill opens the same
                     // sheet the + does.
@@ -689,6 +697,10 @@ private fun LoadedChat(
     if (showingProfile && bot != null) {
         AgentProfileSheet(bot = bot, onDismiss = { showingProfile = false })
     }
+
+    if (showingCall && bot != null) {
+        CallScreen(bot = bot, onDismiss = { showingCall = false })
+    }
 }
 
 private fun share(
@@ -740,6 +752,7 @@ private fun ChatHeader(
     unreadElsewhere: Int,
     onBack: () -> Unit,
     onWatchComputer: () -> Unit,
+    onCall: () -> Unit,
     onOpenProfile: () -> Unit,
 ) {
     val surface = MaterialTheme.colorScheme.surface
@@ -767,8 +780,14 @@ private fun ChatHeader(
         ) {
             BackPill(unreadElsewhere = unreadElsewhere, onBack = onBack)
             Spacer(Modifier.weight(1f))
-            // The computer is a bot idea; a room has none (§12).
+            // The computer is a bot idea; a room has none (§12). So is a call.
             if (chat is Chat.BotChat) {
+                ChromeButton(
+                    painter = painterResource(R.drawable.ic_phone),
+                    contentDescription = "Call ${chat.name}",
+                    onClick = onCall,
+                )
+                Spacer(Modifier.size(8.dp))
                 ChromeButton(
                     painter = painterResource(R.drawable.ic_display),
                     contentDescription = "Watch ${chat.name}'s computer",
