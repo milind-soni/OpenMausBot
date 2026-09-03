@@ -173,7 +173,7 @@ import {
 } from "./store.ts";
 import * as tts from "./tts/index.ts";
 import { narrateTool, toUtterances } from "./tts/speech-text.ts";
-import { buildTurnContext, engineIsFresh } from "./turn-context.ts";
+import { prepareTurnContext } from "./context/prepare-turn.ts";
 import { TurnWatchdog } from "./turn-watchdog.ts";
 import {
   ensureWorkspace,
@@ -2962,22 +2962,6 @@ async function startTurn(
         });
   }
 
-  // transcript for API-backed drivers: settled text turns on the ACTIVE
-  // branch only — abandoned forks never reach the model
-  const skipTranscript = new Set<string>([userMessage.id, ...(opts?.excludeMessageIds ?? [])]);
-  const activeMessages = store.activePath(threadId);
-  // A flat reply may deliberately point across a fork in the same thread.
-  // Resolve its quote from full storage, while the replay itself remains
-  // strictly limited to the selected branch below.
-  const messagesById = new Map(store.messagesFor(threadId).map((message) => [message.id, message]));
-  const transcript = activeMessages
-    .filter((m) => m.kind === "text" && m.text && !skipTranscript.has(m.id))
-    .slice(-40)
-    .map((m) => ({
-      role: m.role === "user" ? ("user" as const) : ("assistant" as const),
-      text: transcriptText(m, messagesById, cfg.profile?.name?.trim() || "User"),
-    }));
-
   // After a rewind (edit / branch switch) the provider's native session
   // still contains the abandoned branch: start a fresh session instead of
   // resuming, and for cursor-resuming drivers replay the surviving path
@@ -2985,28 +2969,28 @@ async function startTurn(
   // cleared only once the turn is actually dispatched — clearing it here
   // would cost the next attempt its history if this dispatch fails.
   const rewound = threadId === bot.threadId && Boolean(bot.rewound);
-  // A fresh engine — the user switched this bot's model mid-thread — has no
-  // current session here either, so it gets the same replay. Distinct from
-  // rewound: the OTHER instances' cursors are left alone (a rewind wipes
-  // them all), and "fresh" is decided by who ran the last turn, not by
-  // whether we hold a cursor — see engineIsFresh.
   const externalContextMarker = isExternalContextMarker(task.lastInstanceId)
     ? task.lastInstanceId
     : undefined;
-  const fresh =
-    !rewound &&
-    !externalContextMarker &&
-    engineIsFresh({ instanceId, lastInstanceId: task.lastInstanceId, resumeCursors: task.resumeCursors, transcript });
   const skillAuthoring =
     skillRecorderEnabled(cfg) &&
     commsDepth < MAX_COMMS_DEPTH &&
     instance.adapter.capabilities.agentsMcp === true;
-  const { turnText, resume } = buildTurnContext({
-    text: promptWithReply(skillAuthoring ? expandLearnTurnText(text) : text, opts?.replyTo, cfg.profile?.name?.trim() || "User"),
-    transcript,
+  // One place decides what this turn's model sees: which settled turns on
+  // the active branch to replay, whether the native session survives, and
+  // whether history rides inline or as structured messages.
+  const { transcript, turnText, resume } = prepareTurnContext({
+    activeMessages: store.activePath(threadId),
+    allMessages: store.messagesFor(threadId),
+    excludeMessageIds: [userMessage.id, ...(opts?.excludeMessageIds ?? [])],
+    text: skillAuthoring ? expandLearnTurnText(text) : text,
+    replyTo: opts?.replyTo,
+    userName: cfg.profile?.name?.trim() || "User",
     rewound,
-    fresh,
     externallyUpdated: Boolean(externalContextMarker),
+    instanceId,
+    lastInstanceId: task.lastInstanceId,
+    resumeCursors: task.resumeCursors,
     replaysNatively: instance.driverKind === "grok",
   });
   // Snapshot the cursor alongside the context decision. An external result
