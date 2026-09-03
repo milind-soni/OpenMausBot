@@ -678,14 +678,17 @@ final class Session: ObservableObject {
         log.info("hydrated \(fleet.bots.count, privacy: .public) bots, \(fleet.groups.count, privacy: .public) rooms")
         state.hydrate(fleet)
         NotificationCoordinator.shared.setBadge(state.unreadCount)
-        // Cosmetic, so it must not be able to fail a hydrate. An older
-        // harness omits the flag and every engine reads as non-steering,
-        // which is the conservative wording.
-        steeringInstanceIds = Set(
-            ((try? await client.instances()) ?? [])
-                .filter { $0.capabilities?.queueing == true }
-                .map(\.instanceId)
-        )
+        // Deliberately off hydrate's critical path: this only words the
+        // composer, and the cursor commit — and with it the whole stream —
+        // must not wait on a request that says nothing about the transcript.
+        // An older harness omits the flag and every engine reads as
+        // non-steering, which is the conservative wording.
+        Task { [weak self] in
+            let engines = (try? await client.instances()) ?? []
+            self?.steeringInstanceIds = Set(
+                engines.filter { $0.capabilities?.queueing == true }.map(\.instanceId)
+            )
+        }
     }
 
     // MARK: - Which address to dial
