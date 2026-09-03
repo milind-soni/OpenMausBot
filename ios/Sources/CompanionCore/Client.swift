@@ -540,6 +540,19 @@ public struct CompanionClient: Sendable {
         try Self.check(response, data)
     }
 
+    /// A send, and what the harness did with it. Unlike `send(_:as:)` an
+    /// unreadable body is not an error here: the request succeeded, and an
+    /// older harness that answers with a shape this build has never seen
+    /// still made a plain send. Only the extra mid-turn detail is lost.
+    private func sendForReceipt(_ request: URLRequest) async throws -> SendReceipt {
+        let (data, response) = try await perform(request)
+        try Self.check(response, data)
+        guard let body = try? JSONDecoder().decode(SendReceiptBody.self, from: data) else {
+            return .sent(threadId: nil, steered: false)
+        }
+        return body.receipt
+    }
+
     private func perform(_ request: URLRequest) async throws -> (Data, URLResponse) {
         do {
             return try await session.data(for: request)
@@ -1162,22 +1175,47 @@ public struct CompanionClient: Sendable {
         ).bots
     }
 
-    public func send(text: String, toBot botId: String) async throws {
-        try await send(try makeRequest("POST", "/api/bots/\(botId)/messages", body: ["text": text]))
+    @discardableResult
+    public func send(text: String, toBot botId: String) async throws -> SendReceipt {
+        try await sendForReceipt(try makeRequest("POST", "/api/bots/\(botId)/messages", body: ["text": text]))
     }
 
-    public func send(text: String, toRoom groupId: String) async throws {
-        try await send(try makeRequest("POST", "/api/groups/\(groupId)/messages", body: ["text": text]))
+    @discardableResult
+    public func send(text: String, toRoom groupId: String) async throws -> SendReceipt {
+        try await sendForReceipt(try makeRequest("POST", "/api/groups/\(groupId)/messages", body: ["text": text]))
+    }
+
+    /// Drop a message the harness is still holding, before the turn it is
+    /// waiting behind settles. Nothing to cancel is not an error worth
+    /// showing: the entry drained a moment ago, which is what the caller
+    /// wanted anyway.
+    public func cancelQueued(_ queueId: String, to destination: MessageDestination) async throws {
+        guard Self.validRouteID(queueId) else { throw APIError.badURL }
+        let route: String
+        switch destination {
+        case let .bot(id, _):
+            guard Self.validRouteID(id) else { throw APIError.badURL }
+            route = "/api/bots/\(id)/queue/\(queueId)"
+        case let .room(id, _):
+            guard Self.validRouteID(id) else { throw APIError.badURL }
+            route = "/api/groups/\(id)/queue/\(queueId)"
+        }
+        do {
+            try await send(try makeRequest("DELETE", route))
+        } catch APIError.status(code: 404, message: _) {
+            return
+        }
     }
 
     /// Retry-safe send used by short-lived clients such as Share Extensions.
     /// `sendId` names the logical send, while `threadId` freezes the selected
     /// task so a retry can never drift to a newly active conversation.
+    @discardableResult
     public func send(
         text: String,
         to destination: MessageDestination,
         sendId: String
-    ) async throws {
+    ) async throws -> SendReceipt {
         let route: String
         let threadId: String
         switch destination {
@@ -1191,7 +1229,7 @@ public struct CompanionClient: Sendable {
             threadId = selectedThreadId
         }
         guard Self.validRouteID(threadId), Self.validSendID(sendId) else { throw APIError.badURL }
-        try await send(try makeRequest(
+        return try await sendForReceipt(try makeRequest(
             "POST",
             route,
             body: ["text": text, "threadId": threadId, "sendId": sendId]

@@ -19,6 +19,19 @@ public struct SidebarSection: Identifiable, Hashable, Sendable {
     public var id: String { name }
 }
 
+/// A message waiting in the harness's steer queue, as this client knows it.
+public struct QueuedSend: Identifiable, Hashable, Sendable {
+    public var queueId: String
+    public var text: String
+
+    public var id: String { queueId }
+
+    public init(queueId: String, text: String) {
+        self.queueId = queueId
+        self.text = text
+    }
+}
+
 public struct CompanionState: Sendable {
     public var bots: [Bot] = []
     public var rooms: [Room] = []
@@ -45,6 +58,17 @@ public struct CompanionState: Sendable {
     /// `screens=on`, and only the newest frame is kept — these are hundreds
     /// of kilobytes each and a history of them is worth nothing.
     public var screens: [String: ScreenFrame] = [:]
+    /// Mid-turn sends the harness is holding until the current turn settles,
+    /// by thread. They are deliberately NOT in `messages`: appending one now
+    /// would make it the active leaf, and the rest of the running turn would
+    /// hang off a line the model never saw. So the harness keeps them and
+    /// this is the phone's copy, shown as a ghost below the transcript.
+    /// Identified by the harness's queueId, never by text.
+    public var pendingQueued: [String: [QueuedSend]] = [:]
+    /// queueIds whose drain frame beat the POST's own continuation. A short,
+    /// bounded tombstone list, so a slow response cannot re-add a ghost for
+    /// a message that is already in the transcript.
+    private(set) var drainedQueueIds: [String] = []
 
     public init() {}
 
@@ -191,6 +215,10 @@ public struct CompanionState: Sendable {
             messages[room.threadId] = room.messages ?? []
             hasMore[room.threadId] = room.hasMore ?? false
         }
+        // A hydrate can be the first thing this window sees after a turn
+        // settled behind its back, so ghosts it is still holding may have
+        // already drained into these transcripts.
+        for threadId in Array(pendingQueued.keys) { reconcileQueued(inThread: threadId) }
     }
 
     /// Prepend an older page fetched for scrollback.
@@ -211,6 +239,7 @@ public struct CompanionState: Sendable {
             $0.at == $1.at ? $0.id < $1.id : $0.at < $1.at
         }
         if let more = page.hasMore { hasMore[threadId] = more }
+        reconcileQueued(inThread: threadId)
     }
 
     /// User-message alternatives created by edit-and-retry, oldest first.
@@ -419,6 +448,59 @@ public struct CompanionState: Sendable {
             thread.append(message)
         }
         messages[threadId] = thread
+        if let queueId = message.queueId { retireQueued(queueId, inThread: threadId) }
+    }
+
+    // MARK: - Held mid-turn sends
+
+    /// How many tombstones to keep. One per queued send that drained while
+    /// its own POST was still in flight — a handful at the very most, but
+    /// other clients queue into the same thread, so it is bounded.
+    private static let maxDrainedQueueIds = 64
+
+    /// Remember a message the harness said it is holding.
+    ///
+    /// The drain frame can arrive before the POST that created the entry has
+    /// even returned — the harness settles a turn on its own clock. When it
+    /// already has, the words are in the transcript and adding a ghost for
+    /// them would show the message twice, so the tombstone wins and is spent.
+    public mutating func rememberQueued(_ send: QueuedSend, inThread threadId: String) {
+        if let index = drainedQueueIds.firstIndex(of: send.queueId) {
+            drainedQueueIds.remove(at: index)
+            return
+        }
+        var waiting = pendingQueued[threadId] ?? []
+        guard !waiting.contains(where: { $0.queueId == send.queueId }) else { return }
+        waiting.append(send)
+        pendingQueued[threadId] = waiting
+    }
+
+    /// Drop a ghost because its line landed, and leave a tombstone behind.
+    private mutating func retireQueued(_ queueId: String, inThread threadId: String) {
+        forgetQueued(queueId, inThread: threadId)
+        drainedQueueIds.append(queueId)
+        if drainedQueueIds.count > Self.maxDrainedQueueIds {
+            drainedQueueIds.removeFirst(drainedQueueIds.count - Self.maxDrainedQueueIds)
+        }
+    }
+
+    /// Drop a ghost with no tombstone — the entry is gone from the harness
+    /// too, so nothing can arrive later to be matched against it.
+    public mutating func forgetQueued(_ queueId: String, inThread threadId: String) {
+        guard var waiting = pendingQueued[threadId] else { return }
+        waiting.removeAll { $0.queueId == queueId }
+        if waiting.isEmpty { pendingQueued.removeValue(forKey: threadId) }
+        else { pendingQueued[threadId] = waiting }
+    }
+
+    /// Reconcile ghosts against a transcript that arrived whole — a cold
+    /// hydrate, or a page fetch. A window that was backgrounded through the
+    /// drain never saw the message frame, and its ghosts have to go.
+    private mutating func reconcileQueued(inThread threadId: String) {
+        guard pendingQueued[threadId] != nil else { return }
+        let landed = Set((messages[threadId] ?? []).compactMap(\.queueId))
+        guard !landed.isEmpty else { return }
+        for queueId in landed { retireQueued(queueId, inThread: threadId) }
     }
 }
 
