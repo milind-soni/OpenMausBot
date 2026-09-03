@@ -817,6 +817,32 @@ describe("originating group routing", () => {
     await waitFor(() => runTargetCalls.length === 1 && _pendingCount(group.threadId) === 0);
     expect(runTargetCalls[0]!.channel?.id).toBe(group.id);
   });
+
+  it("drains each shared-group item under the bot that queued it", async () => {
+    const other = store.createBot();
+    store.patchBot(other.id, { name: "Other" });
+    store.patchGroup(group.id, { memberIds: [from.id, target.id, other.id] });
+    queueDelegation(commsBus, from, { toBotId: target.id, message: "from A", depth: 0 }, 1, group.threadId);
+    queueDelegation(commsBus, other, { toBotId: target.id, message: "from B", depth: 0 }, 1, group.threadId);
+
+    const seen: { message: string }[] = [];
+    drainDelegations(commsBus, approvalBus, group.threadId, (_to, message) => {
+      seen.push({ message });
+    });
+    await waitFor(() => seen.length === 2);
+
+    expect(seen[0]!.message).toContain(`[Delegated by @${from.name},`);
+    expect(seen[1]!.message).toContain("[Delegated by @Other,");
+    expect(store.dmGroup(from.id, target.id)).toBeUndefined();
+  });
+
+  it("tags the queue activity with the source bot in a shared group", () => {
+    queueDelegation(commsBus, from, { toBotId: target.id, message: "plan", depth: 0 }, 1, group.threadId);
+    const chip = store
+      .messagesFor(group.threadId)
+      .find((m) => m.kind === "activity" && m.tool?.name?.startsWith("Delegated to @"));
+    expect(chip?.from?.botId).toBe(from.id);
+  });
 });
 
 describe("peer wake helpers", () => {

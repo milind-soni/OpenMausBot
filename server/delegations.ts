@@ -297,10 +297,14 @@ export function queueDelegation(
   pendingDelegations.set(sourceThreadId, list);
   savePending();
   const label = `Delegated to @${target.name}${item.reason ? `: ${item.reason}` : ""}`;
+  const sourceGroup = sourceThreadId ? bus.store.groupByThread(sourceThreadId) : undefined;
   bus.store.appendMessage(sourceThreadId, {
     role: "bot",
     kind: "activity",
     tool: { name: label },
+    ...(sourceGroup && !sourceGroup.dm
+      ? { from: { botId: from.id, name: from.name, color: from.color } }
+      : {}),
   });
   return { result: "ok", id };
 }
@@ -330,20 +334,27 @@ export function drainDelegations(
   }
   const list = pendingDelegations.get(threadId);
   if (!list?.length) return;
-  // A shared channel's thread is not owned by any single bot, so the queued
-  // item itself carries the source bot identity.
-  const from =
-    bus.store.botByThread(threadId) ??
-    bus.store.bot(list[0]!.sourceBotId);
-  if (!from) {
-    pendingDelegations.delete(threadId);
-    savePending();
-    return;
-  }
   const snapshot = [...list];
   drainingThreads.add(threadId);
   void (async () => {
     for (const item of snapshot) {
+      // A shared channel's thread is not owned by any single bot, so each
+      // queued item carries its own source bot identity.
+      const from =
+        bus.store.botByThread(threadId) ??
+        bus.store.bot(item.sourceBotId);
+      if (!from) {
+        recordDelegationReceipt({
+          id: item.id,
+          sourceThreadId: threadId,
+          toBotId: item.toBotId,
+          toBotName: bus.store.bot(item.toBotId)?.name ?? item.toBotId,
+          status: "dropped",
+          result: "the delegating bot no longer exists",
+        });
+        acknowledgeDelegation(threadId, item.id);
+        continue;
+      }
       let outcome: "settled" | "requeued" = "settled";
       try {
         outcome = await processOne(bus, approvalBus, from, threadId, item, runTarget);
@@ -414,7 +425,9 @@ export function discardDelegations(bus: CommsBus, threadId: string): void {
       result: "the delegating turn did not finish",
     });
   }
-  const from = bus.store.botByThread(threadId) ?? bus.store.bot(list[0]!.sourceBotId);
+  const from =
+    bus.store.botByThread(threadId) ??
+    bus.store.bot(list.find((item) => bus.store.bot(item.sourceBotId))?.sourceBotId ?? list[0]!.sourceBotId);
   if (!from) return;
   bus.store.appendMessage(threadId, {
     role: "bot",
@@ -560,19 +573,9 @@ async function processOne(
   // Use the originating group as the channel when both bots are still
   // members; otherwise the exchange falls back to the pair DM.
   const originatingGroup =
-    (item.originatingGroupId && bus.store.group(item.originatingGroupId)) ??
+    (item.originatingGroupId ? bus.store.group(item.originatingGroupId) : undefined) ??
     (sourceThreadId ? bus.store.groupByThread(sourceThreadId) : undefined);
-  const channel = getOrCreateChannel(
-    bus.store,
-    sender,
-    target,
-    originatingGroup &&
-      !originatingGroup.dm &&
-      originatingGroup.memberIds.includes(sender.id) &&
-      originatingGroup.memberIds.includes(target.id)
-      ? originatingGroup
-      : undefined,
-  );
+  const channel = getOrCreateChannel(bus.store, sender, target, originatingGroup);
   mirrorExchange(bus, sender, target, item.message, channel, sourceThreadId);
   const reasonLine = item.reason ? `\n\n[Reason: ${item.reason}]` : "";
   const prefixed = `[Delegated by @${sender.name}, another bot in this OpenMausBot workspace. Do the work and reply directly.]\n\n${item.message}${reasonLine}`;
