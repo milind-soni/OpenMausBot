@@ -157,6 +157,17 @@ data class Message(
     val hasImage: Boolean? = null,
     val png: String? = null,
     val mime: String? = null,
+    /**
+     * A user line the engine took INTO the turn that was already running,
+     * rather than one that started a turn of its own.
+     */
+    val steered: Boolean? = null,
+    /**
+     * The steer-queue entry this user line drained from. It is how a client
+     * showing the held message knows which row to retire when the real line
+     * finally lands.
+     */
+    val queueId: String? = null,
 ) {
     @Serializable(with = MessageKindSerializer::class)
     enum class Kind { TEXT, OPTIONS, ACTIVITY, SCREEN, UNKNOWN }
@@ -518,7 +529,15 @@ data class Instance(
 }
 
 @Serializable
-data class InstanceCapabilities(val images: Boolean? = null)
+data class InstanceCapabilities(
+    val images: Boolean? = null,
+    /**
+     * The engine can take a message into a turn that is already running.
+     * Engines without it hold mid-turn sends until the turn settles, which is
+     * a different promise and deserves different words in the composer.
+     */
+    val queueing: Boolean? = null,
+)
 
 @Serializable
 data class InstanceList(val instances: List<Instance>)

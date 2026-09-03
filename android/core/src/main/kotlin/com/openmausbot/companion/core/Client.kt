@@ -428,22 +428,56 @@ class CompanionClient(
         return send<CreatedRoom>(makeRequest("POST", "/api/groups", body = body)).group
     }
 
-    suspend fun sendToBot(botId: String, text: String) {
-        sendUnit(makeRequest("POST", "/api/bots/${segment(botId)}/messages", body = jsonBody("text" to text)))
-    }
+    suspend fun sendToBot(botId: String, text: String): SendReceipt =
+        sendForReceipt(
+            makeRequest("POST", "/api/bots/${segment(botId)}/messages", body = jsonBody("text" to text)),
+        )
 
-    suspend fun sendToRoom(groupId: String, text: String) {
-        sendUnit(makeRequest("POST", "/api/groups/${segment(groupId)}/messages", body = jsonBody("text" to text)))
+    suspend fun sendToRoom(groupId: String, text: String): SendReceipt =
+        sendForReceipt(
+            makeRequest("POST", "/api/groups/${segment(groupId)}/messages", body = jsonBody("text" to text)),
+        )
+
+    /**
+     * Drop a message the harness is still holding, before the turn it is
+     * waiting behind settles.
+     *
+     * An entry that drained a moment ago is not an error worth showing — that
+     * is the outcome the caller wanted. But that is matched positively on the
+     * harness's own wording and never on the status alone: the sidecar answers
+     * 404 "no route" for a route it does not allow, so a computer too old to
+     * have this route looks identical to a drained entry. Reading those as the
+     * same thing takes the message off the phone while it is still queued on
+     * the computer, and it then arrives anyway.
+     */
+    suspend fun cancelQueued(queueId: String, to: MessageDestination) {
+        if (!isSafeRouteId(queueId)) throw APIError.BadUrl
+        val route = when (to) {
+            is MessageDestination.Bot -> "/api/bots/${safeRouteId(to.id)}/queue/$queueId"
+            is MessageDestination.Room -> "/api/groups/${safeRouteId(to.id)}/queue/$queueId"
+        }
+        try {
+            sendUnit(makeRequest("DELETE", route))
+        } catch (error: APIError.Status) {
+            if (error.code != 404) throw error
+            // The harness's own words, not Throwable.message, which falls
+            // back to generic text for a 404 and would swallow everything.
+            if (error.serverMessage?.contains(ALREADY_DRAINED, ignoreCase = true) == true) return
+            throw APIError.Status(
+                404,
+                "This computer is too old to take back a queued message. Update OpenMausBot on it.",
+            )
+        }
     }
 
     /** Retry-safe send: [threadId] is fixed at destination selection, never inferred on retry. */
-    suspend fun send(text: String, to: MessageDestination, sendId: String) {
+    suspend fun send(text: String, to: MessageDestination, sendId: String): SendReceipt {
         val route = when (to) {
             is MessageDestination.Bot -> "/api/bots/${safeRouteId(to.id)}/messages"
             is MessageDestination.Room -> "/api/groups/${safeRouteId(to.id)}/messages"
         }
         if (!isSafeRouteId(to.threadId) || !isSafeSendId(sendId)) throw APIError.BadUrl
-        sendUnit(makeRequest(
+        return sendForReceipt(makeRequest(
             "POST",
             route,
             body = buildJsonObject {
@@ -630,6 +664,24 @@ class CompanionClient(
         check(raw)
     }
 
+    /**
+     * A send, and what the harness did with it. Unlike [send] an unreadable
+     * body is not an error here: the request succeeded, and an older harness
+     * answering with a shape this build has never seen still made a plain
+     * send. Only the extra mid-turn detail is lost.
+     */
+    private suspend fun sendForReceipt(request: Request): SendReceipt {
+        val raw = perform(request)
+        check(raw)
+        return try {
+            CompanionJson
+                .decodeFromString<SendReceiptBody>(raw.data.toString(Charsets.UTF_8))
+                .receipt()
+        } catch (_: SerializationException) {
+            SendReceipt.Sent(threadId = null, steered = false)
+        }
+    }
+
     private suspend fun perform(
         request: Request,
         requestClient: OkHttpClient = actionClient,
@@ -677,6 +729,12 @@ class CompanionClient(
     private data class RawResponse(val code: Int, val headers: Headers, val data: ByteArray)
 
     companion object {
+        /**
+         * The harness's own answer when the entry is not in its queue.
+         * Matched positively, never by status alone — see [cancelQueued].
+         */
+        const val ALREADY_DRAINED = "no such queued message"
+
         private const val ACTION_TIMEOUT_SECONDS = 20L
         private const val AVATAR_GENERATION_TIMEOUT_SECONDS = 150L
         private const val STREAM_IDLE_TIMEOUT_SECONDS = 90L

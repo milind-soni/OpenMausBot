@@ -65,6 +65,10 @@ class Session(
     private val hydrateFn: suspend (CompanionClient, Int?) -> Fleet = { client, messages ->
         client.fleet(messages)
     },
+    /** Test seam: override the engine list read for composer wording. */
+    private val instancesFn: suspend (CompanionClient) -> List<Instance> = { client ->
+        client.instances()
+    },
     /** Test seam: override the authenticated endpoint snapshot. */
     private val metadataFn: suspend (CompanionClient) -> CompanionConnectionMetadata = { client ->
         client.connectionMetadata()
@@ -88,6 +92,15 @@ class Session(
 
     private val _state = MutableStateFlow(CompanionState())
     val state: StateFlow<CompanionState> = _state.asStateFlow()
+
+    /**
+     * Engines that can take a message INTO a turn that is already running.
+     * Loaded once per hydrate and only ever used to word the composer: an
+     * empty set means "we do not know", and the wording falls back to the
+     * weaker promise, which is the one that is always true.
+     */
+    private val _steeringInstanceIds = MutableStateFlow<Set<String>>(emptySet())
+    val steeringInstanceIds: StateFlow<Set<String>> = _steeringInstanceIds.asStateFlow()
 
     private val _connection = MutableStateFlow<Connection?>(null)
     val connection: StateFlow<Connection?> = _connection.asStateFlow()
@@ -828,6 +841,23 @@ class Session(
         val fleet = hydrateFn(activeClient, 50)
         _state.update { it.hydrate(fleet) }
         notificationSink.setBadge(_state.value.unreadCount)
+        // Deliberately off hydrate's critical path: this only words the
+        // composer, and the cursor commit — and with it the whole stream —
+        // must not wait on a request that says nothing about the transcript.
+        // An older harness omits the flag and every engine reads as
+        // non-steering, which is the conservative wording.
+        scope.launch {
+            _steeringInstanceIds.value = try {
+                instancesFn(activeClient)
+                    .filter { it.capabilities?.queueing == true }
+                    .map { it.instanceId }
+                    .toSet()
+            } catch (error: CancellationException) {
+                throw error
+            } catch (_: Exception) {
+                emptySet()
+            }
+        }
     }
 
     /**
@@ -1034,10 +1064,44 @@ class Session(
 
     suspend fun send(text: String, to: Chat) {
         perform {
-            when (to) {
+            val receipt = when (to) {
                 is Chat.BotChat -> it.sendToBot(to.bot.id, text)
                 is Chat.RoomChat -> it.sendToRoom(to.room.id, text)
             }
+            record(receipt, text, to.threadId)
+        }
+    }
+
+    /**
+     * A send the harness held rather than ran has to stay on screen, or the
+     * words simply vanish from the phone until the turn settles. [text] is
+     * what the person typed; the harness echoes back only an id.
+     */
+    private fun record(receipt: SendReceipt, text: String, fallbackThreadId: String) {
+        val queued = receipt as? SendReceipt.Queued ?: return
+        val threadId = queued.threadId.ifEmpty { fallbackThreadId }
+        _state.update { it.rememberQueued(QueuedSend(queued.queueId, text), threadId) }
+    }
+
+    /**
+     * Take back a held message before its turn settles. The row goes only
+     * once the harness confirms, so a failed cancel leaves the words on
+     * screen still waiting — which is what is actually true.
+     */
+    suspend fun cancelQueued(send: QueuedSend, chat: Chat) {
+        val activeClient = client ?: return
+        val destination = when (chat) {
+            is Chat.BotChat -> MessageDestination.Bot(chat.bot.id, chat.threadId)
+            is Chat.RoomChat -> MessageDestination.Room(chat.room.id, chat.threadId)
+        }
+        try {
+            activeClient.cancelQueued(send.queueId, destination)
+            _state.update { it.forgetQueued(send.queueId, chat.threadId) }
+        } catch (error: CancellationException) {
+            throw error
+        } catch (error: APIError) {
+            if (error.isUnauthorized) _status.value = Status.Unauthorized
+            _actionError.value = error.message
         }
     }
 
@@ -1116,7 +1180,12 @@ class Session(
                 urls = emptyList(),
                 attachments = uploaded,
             )
-            activeClient.send(message, destination, sendId)
+            val receipt = activeClient.send(message, destination, sendId)
+            // The row shows what was typed, not what was sent: `message`
+            // carries the <attached-file …> tags the harness reads, and a
+            // held message is a person's own words waiting, not transport.
+            // An attachment-only send has no words, so it falls back.
+            record(receipt, text.trim().ifEmpty { message }, to.threadId)
             attachmentSendIds.remove(key)
             _actionError.value = null
             true
