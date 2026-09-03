@@ -1,7 +1,8 @@
 // The bot's computer, in the right-side slot. Where it runs decides the
 // whole flow: cloud → provision the box on open (idempotent) and preview
-// via SSE frames or a ~4s screenshot poll. macOS local mode keeps the legacy
-// in-panel capture. Linux local mode is an automation readiness state and its
+// via SSE frames or a ~4s screenshot poll. macOS and Windows local modes use
+// the Electron-owned in-panel capture. Windows control still starts from a
+// separate preview. Linux local mode is an automation readiness state and its
 // separate preview remains explicitly user-initiated. Auto never selects a
 // Linux user's desktop.
 import { useCallback, useEffect, useRef, useState } from "react";
@@ -51,6 +52,7 @@ import {
   writeComputerPanelView,
   type ComputerPanelView,
 } from "@/lib/computer-panel-view";
+import { SCREEN_FRAME_FIRST_RETRY_MS, startScreenFramePoll } from "@/lib/screen-preview";
 
 interface VpsComputerStatus {
   configured: boolean;
@@ -181,6 +183,7 @@ export function ComputerPanel({
   const { capabilities, ready: capabilitiesReady } = useDesktopCapabilities();
   const localAvailable = capabilities.localComputer.available;
   const isLinux = capabilities.host.platform === "linux";
+  const isWindows = capabilities.host.platform === "win32";
   const providerSupportsLocal = instanceSupportsLocalComputer(state.instances, bot);
   const localSelectable = localComputerSelectable({ capabilities, providerSupportsLocal });
   const [localAutoWarning, setLocalAutoWarning] = useState(false);
@@ -572,33 +575,22 @@ export function ComputerPanel({
     };
   }, [panelView, phase, bot.id, viewerOpen, pageVisible, bot.busy]);
 
-  // local preview: frames from the Electron main process. The FIRST capture
+  // local preview: frames from the Electron main process on macOS and Windows. The FIRST capture
   // attempt is what makes macOS show the Screen Recording prompt (there is
   // no reliable pre-grant flow on macOS 15+), so repeated empty frames mean
   // the user denied — surface the Settings repair path instead of spinning.
   const [localMisses, setLocalMisses] = useState(0);
   useEffect(() => {
     if (panelView !== "computer" || phase !== "local" || !window.ogb || isLinux || !pageVisible) return;
-    let alive = true;
     setLocalMisses(0);
-    const shoot = async () => {
-      try {
-        const url = await window.ogb!.screenFrame();
-        if (alive && url) setLocalFrame(url);
-        else if (alive) setLocalMisses((n) => n + 1);
-      } catch {
-        if (alive) setLocalMisses((n) => n + 1);
-      }
-    };
-    void shoot();
-    // A real ScreenCaptureKit capture + PNG encode per tick: idle bots get a
-    // slow heartbeat, working ones the live cadence.
-    const timer = setInterval(shoot, bot.busy ? 3000 : 30_000);
-    return () => {
-      alive = false;
-      clearInterval(timer);
-    };
-  }, [panelView, phase, isLinux, pageVisible, bot.busy, bot.id]);
+    return startScreenFramePoll({
+      capture: () => window.ogb!.screenFrame(),
+      onFrame: setLocalFrame,
+      onMiss: () => setLocalMisses((n) => n + 1),
+      busy: bot.busy === true,
+      firstFrameRetryMs: isWindows ? SCREEN_FRAME_FIRST_RETRY_MS : null,
+    });
+  }, [panelView, phase, isLinux, isWindows, pageVisible, bot.busy]);
 
   const lastScreenMessage = [...bot.messages].reverse().find((m) => m.kind === "screen" && m.png);
   const cloudFrame =
@@ -986,7 +978,7 @@ export function ComputerPanel({
             />
           ) : (
             <div className="flex flex-col items-center gap-2 px-6 text-center text-ink-secondary">
-              {phase === "checking" || phase === "starting" || phase === "vm" || (phase === "local" && !isLinux) ? (
+              {phase === "checking" || phase === "starting" || phase === "vm" || (phase === "local" && !isLinux && !isWindows) ? (
                 <Loader2 size={18} className="animate-spin" />
               ) : phase === "off" ? (
                 <Power size={22} />
@@ -1001,12 +993,14 @@ export function ComputerPanel({
                   : phase === "local"
                     ? isLinux
                       ? "Ready for approved bot actions. Start the separate preview below when you want to watch the screen."
+                    : isWindows
+                      ? "Local control is ready, but live preview is unavailable right now. Check that a display is connected."
                       : localMisses >= 3
                       ? "No frames yet — the preview needs Screen Recording permission. After granting, relaunch the app."
                       : "Capturing this computer's screen…"
                     : emptyState[phase]}
               </span>
-              {phase === "local" && !isLinux && localMisses >= 3 && (
+              {phase === "local" && !isLinux && !isWindows && localMisses >= 3 && (
                 <button
                   onClick={() => window.ogb?.permOpenSettings?.("screen")}
                   className="mt-1 rounded-lg bg-control px-3 py-1.5 text-[12px] text-ink hover:bg-raised-hover"

@@ -1,12 +1,13 @@
 /**
- * Keep custom inset chrome only where the platform owns a stable inset model.
- * Windows' titleBarOverlay sits on top of renderer content, so every new page
- * must otherwise remember to reserve its width. Native Windows/Linux chrome
- * keeps caption controls outside the app layout and cannot cover actions.
+ * Keep native window chrome outside the renderer content on Windows and Linux.
+ * macOS retains the inset traffic-light treatment used by the app header.
  */
 export function windowChromeOptions(platform) {
   if (platform === "darwin") {
-    return { titleBarStyle: "hiddenInset", trafficLightPosition: { x: 16, y: 16 } };
+    return {
+      titleBarStyle: "hiddenInset",
+      trafficLightPosition: { x: 16, y: 16 },
+    };
   }
-  return {};
+  return { frame: true };
 }

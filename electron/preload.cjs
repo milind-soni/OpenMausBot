@@ -11,7 +11,11 @@ let pendingPackageInstallUrl = null;
 const packageInstallListeners = new Set();
 ipcRenderer.on("package:install", (_event, url) => {
   if (typeof url !== "string") return;
-  pendingPackageInstallUrl = url;
+  if (packageInstallListeners.size === 0) {
+    pendingPackageInstallUrl = url;
+    return;
+  }
+  pendingPackageInstallUrl = null;
   for (const listener of packageInstallListeners) listener(url);
 });
 
@@ -135,10 +139,19 @@ const bridge = {
   /** Tell the window which skin the page wears, so the native chrome the
    * renderer cannot paint (the Windows caption-button overlay) matches. */
   applySkin: (skin) => ipcRenderer.invoke("desktop:skin", skin),
-  /** A reviewed BotMRR package opened through openmausbot://install. */
+  /** Explicit, input-free Windows association control for public Grok Bot links. */
+  grokBotLinkHandler: {
+    status: () => ipcRenderer.invoke("desktop:grok-link-handler:status"),
+    enable: () => ipcRenderer.invoke("desktop:grok-link-handler:enable"),
+  },
+  /** A reviewed package or public Grok Bot link opened through a registered protocol. */
   onPackageInstall: (cb) => {
     packageInstallListeners.add(cb);
-    if (pendingPackageInstallUrl) cb(pendingPackageInstallUrl);
+    if (pendingPackageInstallUrl) {
+      const url = pendingPackageInstallUrl;
+      pendingPackageInstallUrl = null;
+      cb(url);
+    }
     return () => packageInstallListeners.delete(cb);
   },
   /** Mirrors durable unread state into the native Dock/taskbar badge. */

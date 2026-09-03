@@ -11,6 +11,19 @@ function originOf(value) {
   }
 }
 
+function isTrustedMainRenderer({ event, mainWindow }) {
+  return Boolean(
+    mainWindow &&
+      !mainWindow.isDestroyed() &&
+      event?.sender === mainWindow.webContents &&
+      event?.senderFrame === event.sender.mainFrame,
+  );
+}
+
+function allowScreenFrameRequest({ event, mainWindow, payload }) {
+  return isTrustedMainRenderer({ event, mainWindow }) && Array.isArray(payload) && payload.length === 0;
+}
+
 function createDisplayMediaGuard({ now = Date.now, ttlMs = 5_000 } = {}) {
   const intents = new Map();
 
@@ -66,8 +79,35 @@ function selectCaptureSource({ sources, host, primaryDisplayId }) {
     // source is still unambiguous; never guess when multiple sources remain.
     return exact ?? (sources.length === 1 ? sources[0] : null);
   }
+  if (host === "win32") {
+    const exact = sources.find(
+      (source) =>
+        source.display_id !== undefined &&
+        primaryDisplayId !== undefined &&
+        String(source.display_id) === String(primaryDisplayId),
+    );
+    // Windows can expose one source without a display_id while a monitor is
+    // still available. It is safe to use only that unambiguous source; never
+    // guess when multiple displays cannot be matched to Screen API ids.
+    return exact ?? (sources.length === 1 ? sources[0] : null);
+  }
   if (host === "darwin") return sources[0];
   return null;
+}
+
+async function captureScreenFrame({ platform, getSources, getPrimaryDisplay }) {
+  if (platform !== "darwin" && platform !== "win32") return null;
+  const sources = await getSources({
+    types: ["screen"],
+    thumbnailSize: { width: 1280, height: 800 },
+  });
+  if (!Array.isArray(sources) || sources.length === 0) return null;
+  const source = selectCaptureSource({
+    sources,
+    host: platform,
+    primaryDisplayId: getPrimaryDisplay?.()?.id,
+  });
+  return source?.thumbnail?.toDataURL?.() ?? null;
 }
 
 // Electron may throw synchronously from the display-media callback when an
@@ -86,9 +126,12 @@ function invokeDisplayMediaCallback(callback, response) {
 }
 
 module.exports = {
+  allowScreenFrameRequest,
+  captureScreenFrame,
   createDisplayMediaGuard,
   frameKey,
   invokeDisplayMediaCallback,
+  isTrustedMainRenderer,
   originOf,
   selectCaptureSource,
 };

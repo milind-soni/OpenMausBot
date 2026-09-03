@@ -27,7 +27,12 @@ import {
 import { migrateWorkspaceCredentials, workspaceCredentialEnv } from "./workspace-credentials.mjs";
 import { activateExistingWindow } from "./single-instance.mjs";
 import { pollServerIdentity } from "./server-boot-probe.mjs";
-import { packageUrlFromCommandLine, packageUrlFromDeepLink } from "./package-link.mjs";
+import {
+  enableGrokBotLinkHandler,
+  grokBotLinkHandlerStatus,
+  packageUrlFromCommandLine,
+  packageUrlFromDeepLink,
+} from "./package-link.mjs";
 import { windowChromeOptions } from "./window-chrome.mjs";
 import { defaultSaveName, withSavableFile } from "./save-file.mjs";
 import { desktopViewerPermissionAllowed } from "./desktop-viewer-permissions.mjs";
@@ -61,9 +66,14 @@ import { buildApplicationMenu } from "./menu.mjs";
 const { desktopCapabilities, nativeDesktopActions } = capabilitiesModule;
 const nativeActions = nativeDesktopActions(process.platform);
 const require = createRequire(import.meta.url);
-const { createDisplayMediaGuard, invokeDisplayMediaCallback, selectCaptureSource } = require(
-  "./screen-preview.cjs",
-);
+const {
+  allowScreenFrameRequest,
+  captureScreenFrame,
+  createDisplayMediaGuard,
+  invokeDisplayMediaCallback,
+  isTrustedMainRenderer,
+  selectCaptureSource,
+} = require("./screen-preview.cjs");
 const { STAGE_PREFIX: APPIMAGE_CUA_STAGE_PREFIX } = require("./cua-linux-bundle.cjs");
 const { desktopViewerUrl, sameDesktopViewerOrigin } = require("./desktop-viewer.cjs");
 const { createDesktopWorkspaceManager } = require("./desktop-workspace.cjs");
@@ -1373,8 +1383,12 @@ ipcMain.handle("browser:forget-profile", localOnly("browser:forget-profile", asy
   return { dropped };
 }));
 
+function isMainRenderer(event) {
+  return isTrustedMainRenderer({ event, mainWindow });
+}
+
 ipcMain.on("screen:preview-intent", (event) => {
-  event.returnValue = displayMediaGuard.begin(event.senderFrame);
+  event.returnValue = isMainRenderer(event) && displayMediaGuard.begin(event.senderFrame);
 });
 
 ipcMain.on("desktop:unread-count", (event, value) => {
@@ -1522,7 +1536,6 @@ async function forgetEnvironment(id) {
 }
 
 function createWindow() {
-  const waitsForSkinSync = process.platform === "win32";
   const primary = screen.getPrimaryDisplay();
   const displays = [primary, ...screen.getAllDisplays().filter((display) => display.id !== primary.id)];
   const restored = resolveWindowState(readWindowState(), displays.map((display) => display.workArea));
@@ -1530,11 +1543,7 @@ function createWindow() {
     ...restored.bounds,
     minWidth: 900,
     minHeight: 600,
-    // The renderer restores its persisted skin before mounting React and
-    // mirrors it over desktop:skin. Keep Windows hidden until that handshake
-    // recolors the native caption-button overlay, otherwise a saved light
-    // skin still flashes the Midnight-black block on every cold start.
-    show: !waitsForSkinSync,
+    show: true,
     icon: APP_ICON,
     backgroundColor: "#070707",
     autoHideMenuBar: process.platform !== "darwin",
@@ -1548,18 +1557,6 @@ function createWindow() {
   });
   mainWindow = win;
   void startBrowserSurface(win);
-  if (waitsForSkinSync) {
-    // A broken renderer or preload must not strand the app as an invisible
-    // process. Normal startup shows from desktop:skin almost immediately;
-    // this is only the bounded recovery path.
-    const skinSyncFallback = setTimeout(() => {
-      if (!win.isDestroyed() && !win.isVisible()) win.show();
-    }, 5_000);
-    skinSyncFallback.unref?.();
-    const clearSkinSyncFallback = () => clearTimeout(skinSyncFallback);
-    win.once("show", clearSkinSyncFallback);
-    win.once("closed", clearSkinSyncFallback);
-  }
   installWindowStatePersistence(win);
   applyUnreadBadge(win);
   if (restored.maximized) win.maximize();
@@ -1755,13 +1752,16 @@ function createWindow() {
 
 // Local-control screen preview — served from the main process so the Screen
 // Recording permission prompt attributes to the app, never the server
-ipcMain.handle("screen:frame", localOnly("screen:frame", async () => {
-  if (process.platform !== "darwin") return null;
-  const sources = await desktopCapturer.getSources({
-    types: ["screen"],
-    thumbnailSize: { width: 1280, height: 800 },
+ipcMain.handle("screen:frame", localOnly("screen:frame", async (event, ...payload) => {
+  // This channel is deliberately a no-argument capability of the main app
+  // renderer only. Do not let a child viewer or a caller-supplied payload turn
+  // it into a general desktop-capture API.
+  if (!allowScreenFrameRequest({ event, mainWindow, payload })) return null;
+  return captureScreenFrame({
+    platform: process.platform,
+    getSources: (options) => desktopCapturer.getSources(options),
+    getPrimaryDisplay: () => screen.getPrimaryDisplay(),
   });
-  return sources[0]?.thumbnail.toDataURL() ?? null;
 }));
 
 // Onboarding permission checks. Status reads are free; the mic request
@@ -1858,12 +1858,34 @@ ipcMain.handle("desktop:save-file", localOnly("desktop:save-file", async (event,
   });
 }));
 
-// The renderer owns the skin. Native Windows/Linux chrome is intentionally
-// outside that surface; acknowledge the renderer handshake without creating
-// a frameless caption overlay that can cover page controls.
-ipcMain.handle("desktop:skin", (_event, skin) => {
-  if (!isKnownSkin(skin)) return false;
-  return true;
+// Keep the renderer's skin handshake as a safe acknowledgement for current
+// and older preload clients. Native chrome is platform-owned and does not
+// depend on skin state or a hidden-window startup handshake.
+ipcMain.handle("desktop:skin", (_event, skin) => isKnownSkin(skin));
+
+function currentGrokBotLinkHandlerState() {
+  return grokBotLinkHandlerStatus({
+    platform: process.platform,
+    packaged: app.isPackaged,
+    executablePath: process.execPath,
+    isDefaultProtocolClient: (...args) => app.isDefaultProtocolClient(...args),
+  });
+}
+
+ipcMain.handle("desktop:grok-link-handler:status", (event) => {
+  if (!isMainRenderer(event)) return { supported: false, isDefault: false };
+  return currentGrokBotLinkHandlerState();
+});
+
+ipcMain.handle("desktop:grok-link-handler:enable", (event) => {
+  if (!isMainRenderer(event)) return { supported: false, isDefault: false, registrationSucceeded: false };
+  return enableGrokBotLinkHandler({
+    platform: process.platform,
+    packaged: app.isPackaged,
+    executablePath: process.execPath,
+    isDefaultProtocolClient: (...args) => app.isDefaultProtocolClient(...args),
+    setAsDefaultProtocolClient: (...args) => app.setAsDefaultProtocolClient(...args),
+  });
 });
 
 ipcMain.handle("desktop:open-external", async (_event, rawUrl) => {

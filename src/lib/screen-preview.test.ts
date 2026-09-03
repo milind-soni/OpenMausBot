@@ -1,8 +1,11 @@
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import {
   requestScreenPreview,
   screenPreviewFailure,
+  SCREEN_FRAME_CADENCE_MS,
+  SCREEN_FRAME_FIRST_RETRY_MS,
+  startScreenFramePoll,
   stopScreenPreview,
 } from "./screen-preview";
 
@@ -65,5 +68,79 @@ describe("screen preview request", () => {
     const { stream, tracks } = fakeStream(2);
     stopScreenPreview(stream);
     for (const track of tracks) expect(track.stop).toHaveBeenCalledOnce();
+  });
+});
+
+describe("local screen frame poll", () => {
+  beforeEach(() => vi.useFakeTimers());
+  afterEach(() => vi.useRealTimers());
+
+  it("retries Windows' first frame quickly, then uses busy cadence", async () => {
+    const capture = vi
+      .fn<() => Promise<string | null>>()
+      .mockResolvedValueOnce(null)
+      .mockResolvedValueOnce(null)
+      .mockResolvedValueOnce("data:image/png;base64,frame")
+      .mockResolvedValue(null);
+    const onFrame = vi.fn();
+    const onMiss = vi.fn();
+    const cancel = startScreenFramePoll({
+      capture,
+      onFrame,
+      onMiss,
+      busy: true,
+      firstFrameRetryMs: SCREEN_FRAME_FIRST_RETRY_MS,
+    });
+
+    await Promise.resolve();
+    expect(capture).toHaveBeenCalledTimes(1);
+    expect(onMiss).toHaveBeenCalledOnce();
+
+    await vi.advanceTimersByTimeAsync(SCREEN_FRAME_FIRST_RETRY_MS);
+    expect(capture).toHaveBeenCalledTimes(2);
+    await vi.advanceTimersByTimeAsync(SCREEN_FRAME_FIRST_RETRY_MS);
+    expect(capture).toHaveBeenCalledTimes(3);
+    expect(onFrame).toHaveBeenCalledWith("data:image/png;base64,frame");
+
+    await vi.advanceTimersByTimeAsync(SCREEN_FRAME_CADENCE_MS.busy - 1);
+    expect(capture).toHaveBeenCalledTimes(3);
+    await vi.advanceTimersByTimeAsync(1);
+    expect(capture).toHaveBeenCalledTimes(4);
+    cancel();
+  });
+
+  it("keeps the idle cadence and cancels the cadence after cleanup", async () => {
+    const capture = vi.fn<() => Promise<string | null>>().mockResolvedValue("frame");
+    const onFrame = vi.fn();
+    const cancel = startScreenFramePoll({ capture, onFrame, busy: false, firstFrameRetryMs: null });
+
+    await Promise.resolve();
+    expect(capture).toHaveBeenCalledOnce();
+    await vi.advanceTimersByTimeAsync(SCREEN_FRAME_CADENCE_MS.idle - 1);
+    expect(capture).toHaveBeenCalledOnce();
+    await vi.advanceTimersByTimeAsync(1);
+    expect(capture).toHaveBeenCalledTimes(2);
+    cancel();
+    await vi.advanceTimersByTimeAsync(SCREEN_FRAME_CADENCE_MS.idle);
+    expect(capture).toHaveBeenCalledTimes(2);
+  });
+
+  it("does not publish a frame after cleanup while capture is in flight", async () => {
+    let resolve!: (frame: string) => void;
+    const capture = vi.fn(() => new Promise<string>((done) => { resolve = done; }));
+    const onFrame = vi.fn();
+    const cancel = startScreenFramePoll({
+      capture,
+      onFrame,
+      busy: true,
+      firstFrameRetryMs: SCREEN_FRAME_FIRST_RETRY_MS,
+    });
+
+    cancel();
+    resolve("late-frame");
+    await Promise.resolve();
+    await vi.advanceTimersByTimeAsync(SCREEN_FRAME_FIRST_RETRY_MS * 2);
+    expect(onFrame).not.toHaveBeenCalled();
+    expect(capture).toHaveBeenCalledOnce();
   });
 });

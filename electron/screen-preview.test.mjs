@@ -2,9 +2,14 @@ import { createRequire } from "node:module";
 import { describe, expect, it } from "vitest";
 
 const require = createRequire(import.meta.url);
-const { createDisplayMediaGuard, invokeDisplayMediaCallback, selectCaptureSource } = require(
-  "./screen-preview.cjs",
-);
+const {
+  allowScreenFrameRequest,
+  captureScreenFrame,
+  createDisplayMediaGuard,
+  invokeDisplayMediaCallback,
+  isTrustedMainRenderer,
+  selectCaptureSource,
+} = require("./screen-preview.cjs");
 
 const frame = { processId: 10, routingId: 20 };
 const validRequest = {
@@ -56,6 +61,70 @@ describe("display media request guard", () => {
   });
 });
 
+describe("screen frame IPC boundary", () => {
+  const mainFrame = {};
+  const webContents = { mainFrame };
+  const mainWindow = { webContents, isDestroyed: () => false };
+  const event = { sender: webContents, senderFrame: mainFrame };
+
+  it("accepts only the live main app renderer and an empty payload", () => {
+    expect(isTrustedMainRenderer({ event, mainWindow })).toBe(true);
+    expect(allowScreenFrameRequest({ event, mainWindow, payload: [] })).toBe(true);
+    expect(allowScreenFrameRequest({ event, mainWindow, payload: ["screen:0"] })).toBe(false);
+  });
+
+  it.each([
+    ["a child renderer", { event: { sender: webContents, senderFrame: {} } }],
+    ["a destroyed window", { mainWindow: { webContents, isDestroyed: () => true } }],
+    ["a missing payload array", { payload: undefined }],
+  ])("rejects %s", (_name, change) => {
+    expect(allowScreenFrameRequest({ event, mainWindow, payload: [], ...change })).toBe(false);
+  });
+});
+
+describe("Electron screen frame capture", () => {
+  it("uses the existing screen thumbnail substrate for the Windows primary display", async () => {
+    const calls = [];
+    const source = {
+      id: "screen:primary:0",
+      display_id: "42",
+      thumbnail: { toDataURL: () => "data:image/png;base64,windows-frame" },
+    };
+    await expect(
+      captureScreenFrame({
+        platform: "win32",
+        getSources: async (options) => {
+          calls.push(options);
+          return [
+            { id: "screen:secondary:0", display_id: "41", thumbnail: { toDataURL: () => "wrong" } },
+            source,
+          ];
+        },
+        getPrimaryDisplay: () => ({ id: 42 }),
+      }),
+    ).resolves.toBe("data:image/png;base64,windows-frame");
+    expect(calls).toEqual([{ types: ["screen"], thumbnailSize: { width: 1280, height: 800 } }]);
+  });
+
+  it("returns no frame when the Windows desktop has no display source", async () => {
+    const getPrimaryDisplay = () => {
+      throw new Error("must not inspect a display when no source exists");
+    };
+    await expect(
+      captureScreenFrame({ platform: "win32", getSources: async () => [], getPrimaryDisplay }),
+    ).resolves.toBeNull();
+  });
+
+  it("keeps the local thumbnail path disabled on Linux", async () => {
+    const getSources = async () => {
+      throw new Error("Linux uses the explicit display-media preview");
+    };
+    await expect(
+      captureScreenFrame({ platform: "linux", getSources, getPrimaryDisplay: () => ({ id: 1 }) }),
+    ).resolves.toBeNull();
+  });
+});
+
 describe("display source selection", () => {
   const sources = [
     { id: "first", display_id: "41" },
@@ -67,6 +136,18 @@ describe("display source selection", () => {
       sources[1],
     );
     expect(selectCaptureSource({ sources, host: "x11", primaryDisplayId: 99 })).toBeNull();
+  });
+
+  it("matches the Windows primary display and fails closed when displays are ambiguous", () => {
+    expect(selectCaptureSource({ sources, host: "win32", primaryDisplayId: 42 })).toEqual(sources[1]);
+    expect(selectCaptureSource({ sources, host: "win32", primaryDisplayId: 99 })).toBeNull();
+    expect(
+      selectCaptureSource({
+        sources: [{ id: "only", display_id: "" }],
+        host: "win32",
+        primaryDisplayId: 42,
+      }),
+    ).toEqual({ id: "only", display_id: "" });
   });
 
   it("uses an unambiguous Xorg source when display_id is absent or mismatched", () => {
