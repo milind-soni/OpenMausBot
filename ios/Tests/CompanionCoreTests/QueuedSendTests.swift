@@ -118,6 +118,27 @@ final class QueuedSendTests: XCTestCase {
         XCTAssertEqual(state.pendingQueued["t2"]?.map(\.text), ["second"])
     }
 
+    // MARK: - Taking one back
+
+    /// The harness and the sidecar both answer 404. Only one of them means
+    /// the message is gone; the other means this computer cannot cancel at
+    /// all, and treating them alike takes the words off the phone while the
+    /// computer still intends to run them.
+    func testOnlyTheHarnessesOwn404CountsAsAlreadyGone() {
+        let drained = APIError.status(code: 404, message: CompanionClient.alreadyDrained)
+        let noRoute = APIError.status(code: 404, message: "no route: DELETE /api/bots/b1/queue/q1")
+        XCTAssertTrue(isAlreadyDrained(drained))
+        XCTAssertFalse(isAlreadyDrained(noRoute))
+        XCTAssertFalse(isAlreadyDrained(APIError.status(code: 404, message: nil)))
+    }
+
+    /// Mirrors the `catch` pattern in `cancelQueued`.
+    private func isAlreadyDrained(_ error: APIError) -> Bool {
+        guard case let .status(code, message) = error else { return false }
+        return code == 404
+            && message?.localizedCaseInsensitiveContains(CompanionClient.alreadyDrained) == true
+    }
+
     // MARK: - The message
 
     func testATranscriptLineCarriesItsMidTurnMarkers() throws {

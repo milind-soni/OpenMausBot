@@ -1185,10 +1185,17 @@ public struct CompanionClient: Sendable {
         try await sendForReceipt(try makeRequest("POST", "/api/groups/\(groupId)/messages", body: ["text": text]))
     }
 
+    /// The harness's own answer when the entry is not in its queue. Matched
+    /// positively, and never by status alone: the sidecar answers 404 with
+    /// "no route" for a route it does not allow, so a computer too old to
+    /// have this route looks identical to a drained entry. Reading those as
+    /// the same thing takes the message off the phone while it is still
+    /// queued on the computer, and it then arrives anyway.
+    static let alreadyDrained = "no such queued message"
+
     /// Drop a message the harness is still holding, before the turn it is
-    /// waiting behind settles. Nothing to cancel is not an error worth
-    /// showing: the entry drained a moment ago, which is what the caller
-    /// wanted anyway.
+    /// waiting behind settles. An entry that drained a moment ago is not an
+    /// error worth showing — that is the outcome the caller wanted.
     public func cancelQueued(_ queueId: String, to destination: MessageDestination) async throws {
         guard Self.validRouteID(queueId) else { throw APIError.badURL }
         let route: String
@@ -1202,8 +1209,14 @@ public struct CompanionClient: Sendable {
         }
         do {
             try await send(try makeRequest("DELETE", route))
-        } catch APIError.status(code: 404, message: _) {
+        } catch let APIError.status(code, message) where code == 404 &&
+            message?.localizedCaseInsensitiveContains(Self.alreadyDrained) == true {
             return
+        } catch APIError.status(code: 404, message: _) {
+            throw APIError.status(
+                code: 404,
+                message: "This computer is too old to take back a queued message. Update OpenMausBot on it."
+            )
         }
     }
 
