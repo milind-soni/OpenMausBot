@@ -19,6 +19,7 @@ import { getOrCreateChannel, mirrorExchange, type CommsBus } from "./comms-visib
 import { DATA_DIR } from "./config.ts";
 import { newId } from "./contracts.ts";
 import { requestPeerApproval, type ApprovalBus } from "./peer-approval.ts";
+import * as mdb from "./message-db.ts";
 import { sectionKey, type BotRecord, type GroupRecord } from "./store.ts";
 
 export interface DelegationItem {
@@ -66,7 +67,7 @@ export interface DelegationReceipt {
   finishedAt: number;
 }
 
-export type QueueResult = "ok" | "no_target" | "self" | "too_deep" | "too_many";
+export type QueueResult = "ok" | "no_target" | "self" | "too_deep" | "too_many" | "persistence_error";
 
 /** What queueDelegation hands back: the verdict, and on success the task id
  * the delegating bot can later read back with check/wait_delegation. */
@@ -105,8 +106,19 @@ function saveReceipts(): void {
 
 /** Record one terminal outcome. Newest first; pruned by count and age so the
  * drawer can never grow without bound. */
-export function recordDelegationReceipt(receipt: Omit<DelegationReceipt, "finishedAt"> & { finishedAt?: number }): void {
+export function recordDelegationReceipt(receipt: Omit<DelegationReceipt, "finishedAt"> & { finishedAt?: number }): boolean {
   const now = Date.now();
+  // New ledger-backed tasks transition before the legacy receipt cache is
+  // touched. The cache remains for older installations/read compatibility,
+  // never as the authority for a new task's crash recovery.
+  const task = mdb.delegationTask(receipt.id);
+  // The ledger's compare-and-set makes the first terminal observation the
+  // authority. Later completion events must not reopen source delivery or
+  // replace a result which may already have reached the source transcript.
+  const settled = task
+    ? mdb.settleDelegationTask(receipt.id, receipt.status, receipt.result?.slice(0, RESULT_MAX_CHARS), receipt.finishedAt ?? now)
+    : undefined;
+  if (task && !settled) return false;
   const bounded: DelegationReceipt = {
     id: receipt.id,
     sourceThreadId: receipt.sourceThreadId,
@@ -120,9 +132,22 @@ export function recordDelegationReceipt(receipt: Omit<DelegationReceipt, "finish
     .filter((existing) => now - existing.finishedAt <= RECEIPT_MAX_AGE_MS)
     .slice(0, MAX_RECEIPTS);
   saveReceipts();
+  return true;
 }
 
 export function findDelegationReceipt(id: string): DelegationReceipt | null {
+  const task = mdb.delegationTask(id);
+  if (task?.state === "terminal" && task.terminalStatus && task.finishedAt) {
+    return {
+      id: task.taskId,
+      sourceThreadId: task.sourceThreadId,
+      toBotId: task.toBotId,
+      toBotName: task.toBotName,
+      status: task.terminalStatus as DelegationOutcome,
+      ...(task.terminalResult !== undefined ? { result: task.terminalResult } : {}),
+      finishedAt: task.finishedAt,
+    };
+  }
   return receipts.find((receipt) => receipt.id === id) ?? null;
 }
 
@@ -152,7 +177,10 @@ export function releaseDelegationsWaitingOn(toBotId: string): string[] {
   if (!threads.length) return threads;
   for (const threadId of threads) {
     for (const item of pendingDelegations.get(threadId) ?? []) {
-      if (item.toBotId === toBotId) delete item.waitingOnBusy;
+      if (item.toBotId === toBotId) {
+        delete item.waitingOnBusy;
+        mdb.updateDelegationTask(item.id, { waitingOnBusy: false });
+      }
     }
   }
   savePending();
@@ -225,6 +253,78 @@ export function _loadPending(): void {
   } catch {
     /* no receipts yet */
   }
+
+  // One-way compatibility import: old queue rows become ledger rows before
+  // any boot drain. Existing ids are stable in supported versions; malformed
+  // legacy rows were already discarded above.
+  for (const [sourceThreadId, items] of pendingDelegations) {
+    for (const item of items) {
+      if (mdb.delegationTask(item.id)) continue;
+      try {
+        mdb.createDelegationTask({
+          taskId: item.id,
+          sourceThreadId,
+          toBotId: item.toBotId,
+          toBotName: item.toBotId,
+          message: item.message,
+          ...(item.reason ? { reason: item.reason } : {}),
+          depth: item.depth,
+          approvalGranted: item.approvalAlreadyGranted === true,
+          attempts: item.attempts,
+          waitingOnBusy: item.waitingOnBusy === true,
+          state: "queued",
+          sourceDelivery: "pending",
+          createdAt: Date.now(),
+        });
+      } catch {
+        // Leave the legacy item visible rather than silently starting work
+        // without a ledger. processOne will fail closed at its launch claim.
+      }
+    }
+  }
+  // Never redispatch an ambiguous provider launch after process death.
+  mdb.terminalizeInterruptedDelegations("the delegated turn was interrupted when OpenMausBot restarted");
+  pendingDelegations.clear();
+  mdb.pruneDelegationTasks(Date.now() - RECEIPT_MAX_AGE_MS, MAX_RECEIPTS);
+  for (const task of mdb.delegationTasks(["queued"])) {
+    const item: PendingDelegationItem = {
+      id: task.taskId,
+      toBotId: task.toBotId,
+      message: task.message,
+      ...(task.reason ? { reason: task.reason } : {}),
+      depth: task.depth,
+      attempts: task.attempts,
+    };
+    if (task.approvalGranted) item.approvalAlreadyGranted = true;
+    if (task.waitingOnBusy) item.waitingOnBusy = true;
+    const list = pendingDelegations.get(task.sourceThreadId) ?? [];
+    list.push(item);
+    pendingDelegations.set(task.sourceThreadId, list);
+  }
+}
+
+/** Terminal outcomes which survived a crash before their source transcript
+ * was updated. The server owns rendering/wake policy; this module owns the
+ * durable task state. */
+export function pendingDelegationDeliveries(): mdb.DelegationTaskRow[] {
+  return mdb.pendingDelegationDeliveries();
+}
+
+/** Claim one queued item before provider dispatch. */
+function claimDelegationLaunch(itemId: string, targetThreadId: string): boolean {
+  return mdb.claimDelegationLaunch(itemId, targetThreadId);
+}
+
+export function markDelegationRunning(taskId: string): void {
+  const task = mdb.delegationTask(taskId);
+  if (!task || task.state !== "launching") return;
+  mdb.updateDelegationTask(taskId, { state: "running" });
+}
+
+/** Register an already-running peer turn when ask_bot's bounded wait expires.
+ * This writes before the waiter resolves, closing the timeout/completion race. */
+export function registerRunningDelegation(task: Omit<mdb.DelegationTaskRow, "state" | "sourceDelivery" | "sourceContext" | "sourceWake" | "createdAt">): void {
+  mdb.createDelegationTask({ ...task, state: "running", sourceDelivery: "pending", sourceContext: "pending", sourceWake: "pending", createdAt: Date.now() });
 }
 
 /** Source threads with something queued — what a boot drain iterates. */
@@ -271,6 +371,33 @@ export function queueDelegation(
   // and fan out into as many real turns on the next settle.
   if (list.length >= MAX_QUEUED_PER_THREAD) return { result: "too_many" };
   const id = newId();
+  // This is the dispatch boundary: if the ledger cannot be written, do not
+  // leave an item that could later start an untracked external worker.
+  try {
+    mdb.createDelegationTask({
+      taskId: id,
+      sourceThreadId,
+      toBotId: item.toBotId,
+      toBotName: target.name,
+      message: item.message,
+      ...(item.reason ? { reason: item.reason } : {}),
+      depth: item.depth,
+      approvalGranted: item.approvalAlreadyGranted === true,
+      attempts: 0,
+      waitingOnBusy: false,
+      state: "queued",
+      sourceDelivery: "pending",
+      createdAt: Date.now(),
+    });
+  } catch (error) {
+    const why = error instanceof Error ? error.message : String(error);
+    bus.store.appendMessage(sourceThreadId, {
+      role: "bot",
+      kind: "activity",
+      tool: { name: `Delegation was not queued — durable storage failed: ${why.slice(0, 120)}`, ok: false },
+    });
+    return { result: "persistence_error" };
+  }
   list.push({ ...item, id, attempts: 0 });
   pendingDelegations.set(sourceThreadId, list);
   savePending();
@@ -310,6 +437,10 @@ export function drainDelegations(
   if (!list?.length) return;
   const from = bus.store.botByThread(threadId);
   if (!from) {
+    // This queue may have survived a restart after its bot/task was deleted.
+    // It must become a terminal abandoned record, never an immortal queued
+    // payload that rehydrates on every later boot.
+    for (const item of list) abandonMissingSourceDelegation(threadId, item);
     pendingDelegations.delete(threadId);
     savePending();
     return;
@@ -332,11 +463,7 @@ export function drainDelegations(
           result: why.slice(0, 200),
         });
         try {
-          bus.store.appendMessage(threadId, {
-            role: "bot",
-            kind: "activity",
-            tool: { name: `error: delegation failed — ${why.slice(0, 120)}`, ok: false },
-          });
+          deliverDelegationActivity(bus, threadId, item.id, `error: delegation failed — ${why.slice(0, 120)}`);
         } catch (reportError) {
           console.error("delegation failed and could not be reported", reportError);
         }
@@ -362,6 +489,50 @@ export function drainDelegations(
 }
 
 /** Remove one terminal handoff only after approval/dispatch has settled. */
+function deliverDelegationActivity(
+  bus: CommsBus,
+  sourceThreadId: string,
+  taskId: string,
+  name: string,
+  ok = false,
+): void {
+  bus.store.appendDelegationOutcome(sourceThreadId, taskId, {
+    role: "bot",
+    kind: "activity",
+    tool: { name, ok },
+  });
+  // The server supplies this continuation hook. Keeping the queue module
+  // harness-free preserves its focused tests while every settled terminal
+  // path still drives the same durable context/wake outbox.
+  (bus as CommsBus & { onDelegationTerminal?: (id: string, threadId: string) => void })
+    .onDelegationTerminal?.(taskId, sourceThreadId);
+}
+
+function abandonMissingSourceDelegation(threadId: string, item: PendingDelegationItem): void {
+  const settled = recordDelegationReceipt({
+    id: item.id,
+    sourceThreadId: threadId,
+    toBotId: item.toBotId,
+    toBotName: item.toBotId,
+    status: "dropped",
+    result: "the source bot or task was removed before this delegation could dispatch",
+  });
+  if (settled) mdb.abandonDelegationDelivery(item.id);
+}
+
+/** Called by task/bot deletion before the transcript disappears. The ledger
+ * operation covers queued, ambiguous, terminal, and outbox states; this map
+ * cleanup prevents a same-process drain from retaining stale work. */
+export function abandonDelegationsForSourceThread(threadId: string): void {
+  pendingDelegations.delete(threadId);
+  queuedRedrains.delete(threadId);
+  mdb.abandonDelegationsForSourceThread(
+    threadId,
+    "the source bot or task was removed before this delegation could dispatch",
+  );
+  savePending();
+}
+
 function acknowledgeDelegation(threadId: string, itemId: string): void {
   const current = pendingDelegations.get(threadId);
   if (!current) return;
@@ -378,17 +549,19 @@ export function discardDelegations(bus: CommsBus, threadId: string): void {
   if (!list?.length) return;
   pendingDelegations.delete(threadId);
   savePending();
+  const from = bus.store.botByThread(threadId);
   for (const item of list) {
+    const targetName = bus.store.bot(item.toBotId)?.name ?? item.toBotId;
     recordDelegationReceipt({
       id: item.id,
       sourceThreadId: threadId,
       toBotId: item.toBotId,
-      toBotName: bus.store.bot(item.toBotId)?.name ?? item.toBotId,
+      toBotName: targetName,
       status: "dropped",
       result: "the delegating turn did not finish",
     });
+    if (from) deliverDelegationActivity(bus, threadId, item.id, `Delegation to @${targetName} dropped — the delegating turn did not finish`);
   }
-  const from = bus.store.botByThread(threadId);
   if (!from) return;
   bus.store.appendMessage(threadId, {
     role: "bot",
@@ -414,6 +587,10 @@ async function processOne(
 ): Promise<"settled" | "requeued"> {
   let sender = from;
   let target = bus.store.bot(item.toBotId);
+  if (!bus.store.taskByThread(sender.id, sourceThreadId)) {
+    abandonMissingSourceDelegation(sourceThreadId, item);
+    return "settled";
+  }
   if (!target) {
     recordDelegationReceipt({
       id: item.id,
@@ -423,11 +600,7 @@ async function processOne(
       status: "error",
       result: "no such bot",
     });
-    bus.store.appendMessage(sourceThreadId, {
-      role: "bot",
-      kind: "activity",
-      tool: { name: `error: delegation to ${item.toBotId} failed — no such bot`, ok: false },
-    });
+    deliverDelegationActivity(bus, sourceThreadId, item.id, `error: delegation to ${item.toBotId} failed — no such bot`);
     return "settled";
   }
   if (dropIfSectionsChanged(bus, sender, target, sourceThreadId, item)) {
@@ -437,6 +610,7 @@ async function processOne(
     if (item.waitingOnBusy) return "requeued";
     item.attempts += 1;
     item.waitingOnBusy = true;
+    mdb.updateDelegationTask(item.id, { attempts: item.attempts, waitingOnBusy: true });
     if (item.attempts < MAX_BUSY_ATTEMPTS) {
       savePending();
       bus.store.appendMessage(sourceThreadId, {
@@ -454,15 +628,12 @@ async function processOne(
       status: "busy_gave_up",
       result: `@${target.name} stayed busy through ${MAX_BUSY_ATTEMPTS} retries`,
     });
-    bus.store.appendMessage(sourceThreadId, {
-      role: "bot",
-      kind: "activity",
-      tool: { name: `Delegation to @${target.name} canceled — still busy after ${MAX_BUSY_ATTEMPTS} retries`, ok: false },
-    });
+    deliverDelegationActivity(bus, sourceThreadId, item.id, `Delegation to @${target.name} canceled — still busy after ${MAX_BUSY_ATTEMPTS} retries`);
     return "settled";
   }
   if (item.waitingOnBusy) {
     delete item.waitingOnBusy;
+    mdb.updateDelegationTask(item.id, { waitingOnBusy: false });
     savePending();
   }
   if (sender.approvePeerComms && !item.approvalAlreadyGranted) {
@@ -483,11 +654,7 @@ async function processOne(
         status: "denied",
         result: "the user denied this handoff",
       });
-      bus.store.appendMessage(sourceThreadId, {
-        role: "bot",
-        kind: "activity",
-        tool: { name: `Delegation to @${target.name} denied by user`, ok: false },
-      });
+      deliverDelegationActivity(bus, sourceThreadId, item.id, `Delegation to @${target.name} denied by user`);
       return "settled";
     }
     // The approval could have been sitting for up to 15 minutes. Everything
@@ -496,7 +663,22 @@ async function processOne(
     // and mirror a "Messaged @X" chip for an exchange that never happens.
     const current = bus.store.bot(item.toBotId);
     const currentSender = bus.store.bot(from.id);
-    if (!current || !currentSender || !bus.store.taskByThread(currentSender.id, sourceThreadId)) return "settled";
+    if (!currentSender || !bus.store.taskByThread(currentSender.id, sourceThreadId)) {
+      abandonMissingSourceDelegation(sourceThreadId, item);
+      return "settled";
+    }
+    if (!current) {
+      recordDelegationReceipt({
+        id: item.id,
+        sourceThreadId,
+        toBotId: item.toBotId,
+        toBotName: item.toBotId,
+        status: "error",
+        result: "the target bot was removed before this delegation could dispatch",
+      });
+      deliverDelegationActivity(bus, sourceThreadId, item.id, `error: delegation to ${item.toBotId} failed — target bot was removed`);
+      return "settled";
+    }
     if (dropIfSectionsChanged(bus, currentSender, current, sourceThreadId, item)) {
       return "settled";
     }
@@ -504,6 +686,7 @@ async function processOne(
       if (item.waitingOnBusy) return "requeued";
       item.attempts += 1;
       item.waitingOnBusy = true;
+      mdb.updateDelegationTask(item.id, { attempts: item.attempts, waitingOnBusy: true });
       if (item.attempts < MAX_BUSY_ATTEMPTS) {
         savePending();
         bus.store.appendMessage(sourceThreadId, {
@@ -521,15 +704,17 @@ async function processOne(
         status: "busy_gave_up",
         result: `@${current.name} stayed busy through ${MAX_BUSY_ATTEMPTS} retries`,
       });
-      bus.store.appendMessage(sourceThreadId, {
-        role: "bot",
-        kind: "activity",
-        tool: { name: `Delegation to @${current.name} canceled — still busy after ${MAX_BUSY_ATTEMPTS} retries`, ok: false },
-      });
+      deliverDelegationActivity(bus, sourceThreadId, item.id, `Delegation to @${current.name} canceled — still busy after ${MAX_BUSY_ATTEMPTS} retries`);
       return "settled";
     }
     sender = currentSender;
     target = current;
+  }
+  // Persist launch intent before mirroring or provider dispatch. If this
+  // compare-and-set fails, a concurrent/recovered drain already owns the
+  // task and must be allowed to settle it alone.
+  if (!claimDelegationLaunch(item.id, target.threadId)) {
+    return "settled";
   }
   const channel = getOrCreateChannel(bus.store, sender, target);
   mirrorExchange(bus, sender, target, item.message, channel, sourceThreadId);
@@ -560,11 +745,7 @@ function dropIfSectionsChanged(
     status: "dropped",
     result,
   });
-  bus.store.appendMessage(sourceThreadId, {
-    role: "bot",
-    kind: "activity",
-    tool: { name: `Delegation to @${target.name} canceled — bots now belong to different sections`, ok: false },
-  });
+  deliverDelegationActivity(bus, sourceThreadId, item.id, `Delegation to @${target.name} canceled — bots now belong to different sections`);
   return true;
 }
 

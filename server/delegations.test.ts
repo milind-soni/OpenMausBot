@@ -11,6 +11,7 @@ import type { CommsBus } from "./comms-visibility.ts";
 import { DATA_DIR } from "./config.ts";
 import type { ModelSelection } from "./contracts.ts";
 import {
+  abandonDelegationsForSourceThread,
   buildDelegationFailurePrompt,
   buildDelegationRevivalPrompt,
   DELEGATION_WAKE_MAX_PER_WINDOW,
@@ -27,9 +28,12 @@ import {
   releaseDelegationsWaitingOn,
   summarizeDelegatedActivity,
   threadsWaitingOn,
+  _loadPending,
   _pendingCount,
+  _resetPending,
 } from "./delegations.ts";
 import { peerAllowKey, resolvePeerComms } from "./peer-approval.ts";
+import * as mdb from "./message-db.ts";
 import { Store, type BotRecord } from "./store.ts";
 
 const selection = (): ModelSelection => ({ instanceId: "claude", model: "fake-model" });
@@ -116,6 +120,17 @@ describe("queueDelegation", () => {
     }, 1);
     expect(result.result).toBe("no_target");
     expect(_pendingCount(from.threadId)).toBe(0);
+  });
+
+  it("fails closed when the durable ledger cannot record a handoff", () => {
+    const create = vi.spyOn(mdb, "createDelegationTask").mockImplementationOnce(() => {
+      throw new Error("disk full");
+    });
+    const result = queueDelegation(commsBus, from, { toBotId: target.id, message: "do not dispatch", depth: 0 }, 1);
+    create.mockRestore();
+    expect(result).toEqual({ result: "persistence_error" });
+    expect(_pendingCount(from.threadId)).toBe(0);
+    expect(store.messagesFor(from.threadId).some((message) => message.tool?.name.includes("durable storage failed"))).toBe(true);
   });
 
   it("queues, broadcasts, and drops a 'Delegated to @Target' chip on the source thread", () => {
@@ -208,6 +223,103 @@ describe("drainDelegations", () => {
     // double-check by counting the module's pending map: tests that didn't
     // resolve should be re-examined if this ever fires.
     void runTargetCalls;
+  });
+
+  it("terminalizes a persisted launch on restart instead of dispatching it twice", async () => {
+    const queued = queueDelegation(commsBus, from, { toBotId: target.id, message: "one external side effect", depth: 0 }, 1);
+    let calls = 0;
+    drainDelegations(commsBus, approvalBus, from.threadId, () => {
+      calls += 1;
+      return new Promise<void>(() => {}); // crash after launch claim, before acknowledgement
+    });
+    await waitFor(() => calls === 1);
+
+    _resetPending();
+    _loadPending();
+    expect(_pendingCount(from.threadId)).toBe(0);
+    expect(findDelegationReceipt(queued.id!)).toMatchObject({ status: "failed" });
+    drainDelegations(commsBus, approvalBus, from.threadId, () => { calls += 1; });
+    await Promise.resolve();
+    expect(calls).toBe(1);
+  });
+
+  it("terminalizes and abandons a queued task when its source bot was removed before restart drain", async () => {
+    const queued = queueDelegation(commsBus, from, { toBotId: target.id, message: "never dispatch this", depth: 0 }, 1);
+    expect(queued.id).toBeTruthy();
+    store.deleteBot(from.id);
+
+    _resetPending();
+    _loadPending();
+    let calls = 0;
+    drainDelegations(commsBus, approvalBus, from.threadId, () => { calls += 1; });
+    await waitFor(() => _pendingCount(from.threadId) === 0);
+
+    expect(calls).toBe(0);
+    expect(findDelegationReceipt(queued.id!)).toMatchObject({
+      status: "dropped",
+      result: expect.stringContaining("source bot or task was removed"),
+    });
+    expect(mdb.delegationTask(queued.id!)).toMatchObject({
+      state: "terminal",
+      sourceDelivery: "abandoned",
+      sourceContext: "abandoned",
+      sourceWake: "abandoned",
+    });
+  });
+
+  it("abandons inactive-task handoffs before bot deletion so reload cannot dispatch them", async () => {
+    const inactiveTask = store.createTask(from.id, "Inactive source", false)!;
+    const queued = queueDelegation(
+      commsBus,
+      from,
+      { toBotId: target.id, message: "never dispatch inactive work", depth: 0 },
+      1,
+      inactiveTask.threadId,
+    );
+    abandonDelegationsForSourceThread(inactiveTask.threadId);
+    store.deleteBot(from.id);
+
+    _resetPending();
+    _loadPending();
+    let calls = 0;
+    drainDelegations(commsBus, approvalBus, inactiveTask.threadId, () => { calls += 1; });
+    await Promise.resolve();
+
+    expect(calls).toBe(0);
+    expect(_pendingCount(inactiveTask.threadId)).toBe(0);
+    expect(mdb.delegationTask(queued.id!)).toMatchObject({
+      state: "terminal",
+      sourceDelivery: "abandoned",
+      sourceWake: "abandoned",
+    });
+  });
+
+  it("abandons a task handoff before task deletion so reload cannot dispatch it", async () => {
+    const deletedTask = store.createTask(from.id, "Deleted source", false)!;
+    const queued = queueDelegation(
+      commsBus,
+      from,
+      { toBotId: target.id, message: "never dispatch deleted task work", depth: 0 },
+      1,
+      deletedTask.threadId,
+    );
+    abandonDelegationsForSourceThread(deletedTask.threadId);
+    expect(store.deleteTask(from.id, deletedTask.threadId)).toBeTruthy();
+
+    _resetPending();
+    _loadPending();
+    let calls = 0;
+    drainDelegations(commsBus, approvalBus, deletedTask.threadId, () => { calls += 1; });
+    await Promise.resolve();
+
+    expect(calls).toBe(0);
+    expect(_pendingCount(deletedTask.threadId)).toBe(0);
+    expect(mdb.delegationTask(queued.id!)).toMatchObject({
+      state: "terminal",
+      sourceDelivery: "abandoned",
+      sourceContext: "abandoned",
+      sourceWake: "abandoned",
+    });
   });
 
   it("runs the target's turn via runTarget and mirrors the exchange", async () => {
@@ -498,7 +610,7 @@ describe("drainDelegations", () => {
 
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
-import { _loadPending, _resetPending, discardDelegations, pendingThreads } from "./delegations.ts";
+import { discardDelegations, pendingThreads } from "./delegations.ts";
 
 describe("delegations survive a restart", () => {
   let store: Store;

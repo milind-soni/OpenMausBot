@@ -50,7 +50,37 @@ function open(): DatabaseSync {
       thread_id TEXT PRIMARY KEY,
       active_leaf_id TEXT
     );
+    CREATE TABLE IF NOT EXISTS delegation_tasks (
+      task_id TEXT PRIMARY KEY,
+      source_thread_id TEXT NOT NULL,
+      to_bot_id TEXT NOT NULL,
+      to_bot_name TEXT NOT NULL,
+      target_thread_id TEXT,
+      message TEXT NOT NULL,
+      reason TEXT,
+      depth INTEGER NOT NULL,
+      approval_granted INTEGER NOT NULL DEFAULT 0,
+      attempts INTEGER NOT NULL DEFAULT 0,
+      waiting_on_busy INTEGER NOT NULL DEFAULT 0,
+      state TEXT NOT NULL CHECK (state IN ('queued', 'launching', 'running', 'terminal')),
+      terminal_status TEXT,
+      terminal_result TEXT,
+      finished_at INTEGER,
+      source_delivery TEXT NOT NULL DEFAULT 'pending' CHECK (source_delivery IN ('pending', 'delivered', 'abandoned')),
+      source_context TEXT NOT NULL DEFAULT 'pending' CHECK (source_context IN ('pending', 'acknowledged', 'abandoned')),
+      source_wake TEXT NOT NULL DEFAULT 'pending' CHECK (source_wake IN ('pending', 'claimed', 'acknowledged', 'abandoned')),
+      created_at INTEGER NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS delegation_tasks_state ON delegation_tasks(state, source_thread_id);
+    CREATE INDEX IF NOT EXISTS delegation_tasks_delivery ON delegation_tasks(state, source_delivery);
   `);
+  // The first ledger revision shipped without context/wake outboxes. SQLite
+  // cannot add their CHECK constraints with ALTER TABLE, but the values are
+  // still constrained by every writer below and old rows safely default.
+  const columns = db.prepare("PRAGMA table_info(delegation_tasks)").all() as Array<{ name: string }> ;
+  const names = new Set(columns.map((column) => column.name));
+  if (!names.has("source_context")) db.exec("ALTER TABLE delegation_tasks ADD COLUMN source_context TEXT NOT NULL DEFAULT 'pending'");
+  if (!names.has("source_wake")) db.exec("ALTER TABLE delegation_tasks ADD COLUMN source_wake TEXT NOT NULL DEFAULT 'pending'");
   return db;
 }
 
@@ -249,6 +279,198 @@ export function searchMessages(query: string, limit = 40, threadId?: string): Se
       ...(row.from_name ? { from: row.from_name } : {}),
     };
   });
+}
+
+export type DelegationTaskState = "queued" | "launching" | "running" | "terminal";
+export type SourceDeliveryState = "pending" | "delivered" | "abandoned";
+export type SourceContextState = "pending" | "acknowledged" | "abandoned";
+export type SourceWakeState = "pending" | "claimed" | "acknowledged" | "abandoned";
+
+export interface DelegationTaskRow {
+  taskId: string;
+  sourceThreadId: string;
+  toBotId: string;
+  toBotName: string;
+  targetThreadId?: string;
+  message: string;
+  reason?: string;
+  depth: number;
+  approvalGranted: boolean;
+  attempts: number;
+  waitingOnBusy: boolean;
+  state: DelegationTaskState;
+  terminalStatus?: string;
+  terminalResult?: string;
+  finishedAt?: number;
+  sourceDelivery: SourceDeliveryState;
+  sourceContext: SourceContextState;
+  sourceWake: SourceWakeState;
+  createdAt: number;
+}
+
+function rowToDelegation(row: Record<string, unknown>): DelegationTaskRow {
+  return {
+    taskId: String(row.task_id), sourceThreadId: String(row.source_thread_id),
+    toBotId: String(row.to_bot_id), toBotName: String(row.to_bot_name),
+    ...(typeof row.target_thread_id === "string" && row.target_thread_id ? { targetThreadId: row.target_thread_id } : {}),
+    message: String(row.message), ...(typeof row.reason === "string" ? { reason: row.reason } : {}),
+    depth: Number(row.depth), approvalGranted: Number(row.approval_granted) === 1,
+    attempts: Number(row.attempts), waitingOnBusy: Number(row.waiting_on_busy) === 1,
+    state: row.state as DelegationTaskState,
+    ...(typeof row.terminal_status === "string" ? { terminalStatus: row.terminal_status } : {}),
+    ...(typeof row.terminal_result === "string" ? { terminalResult: row.terminal_result } : {}),
+    ...(typeof row.finished_at === "number" ? { finishedAt: row.finished_at } : {}),
+    sourceDelivery: (row.source_delivery === "delivered" || row.source_delivery === "abandoned") ? row.source_delivery : "pending",
+    sourceContext: (row.source_context === "acknowledged" || row.source_context === "abandoned") ? row.source_context : "pending",
+    sourceWake: (["claimed", "acknowledged", "abandoned"] as string[]).includes(String(row.source_wake)) ? row.source_wake as SourceWakeState : "pending",
+    createdAt: Number(row.created_at),
+  };
+}
+
+export function createDelegationTask(task: Omit<DelegationTaskRow, "sourceContext" | "sourceWake"> & Partial<Pick<DelegationTaskRow, "sourceContext" | "sourceWake">>): void {
+  db().prepare(
+    "INSERT INTO delegation_tasks (task_id, source_thread_id, to_bot_id, to_bot_name, target_thread_id, message, reason, depth, approval_granted, attempts, waiting_on_busy, state, terminal_status, terminal_result, finished_at, source_delivery, source_context, source_wake, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+  ).run(task.taskId, task.sourceThreadId, task.toBotId, task.toBotName, task.targetThreadId ?? null, task.message, task.reason ?? null, task.depth, task.approvalGranted ? 1 : 0, task.attempts, task.waitingOnBusy ? 1 : 0, task.state, task.terminalStatus ?? null, task.terminalResult ?? null, task.finishedAt ?? null, task.sourceDelivery, task.sourceContext ?? "pending", task.sourceWake ?? "pending", task.createdAt);
+}
+
+export function delegationTask(taskId: string): DelegationTaskRow | null {
+  const row = db().prepare("SELECT * FROM delegation_tasks WHERE task_id = ?").get(taskId) as Record<string, unknown> | undefined;
+  return row ? rowToDelegation(row) : null;
+}
+
+export function delegationTasks(states?: readonly DelegationTaskState[]): DelegationTaskRow[] {
+  const rows = states?.length
+    ? db().prepare(`SELECT * FROM delegation_tasks WHERE state IN (${states.map(() => "?").join(",")}) ORDER BY created_at`).all(...states) as Record<string, unknown>[]
+    : db().prepare("SELECT * FROM delegation_tasks ORDER BY created_at").all() as Record<string, unknown>[];
+  return rows.map(rowToDelegation);
+}
+
+/** Non-terminal bookkeeping only. Terminal settlement must use settleDelegationTask. */
+export function updateDelegationTask(taskId: string, patch: Partial<Pick<DelegationTaskRow, "targetThreadId" | "attempts" | "waitingOnBusy" | "state">>): boolean {
+  const current = delegationTask(taskId);
+  if (!current || current.state === "terminal") return false;
+  const next = { ...current, ...patch };
+  const result = db().prepare("UPDATE delegation_tasks SET target_thread_id = ?, attempts = ?, waiting_on_busy = ?, state = ? WHERE task_id = ? AND state != 'terminal'")
+    .run(next.targetThreadId ?? null, next.attempts, next.waitingOnBusy ? 1 : 0, next.state, taskId) as { changes?: number };
+  return result.changes === 1;
+}
+
+/** First terminal outcome wins. This CAS is the sole terminal transition;
+ * later provider events/restarts must never reopen delivery or replace output. */
+export function settleDelegationTask(taskId: string, status: string, result: string | undefined, finishedAt = Date.now()): DelegationTaskRow | null {
+  const database = db();
+  database.exec("BEGIN IMMEDIATE");
+  try {
+    const write = database.prepare("UPDATE delegation_tasks SET state = 'terminal', terminal_status = ?, terminal_result = ?, finished_at = ?, source_delivery = 'pending', source_context = 'pending', source_wake = 'pending' WHERE task_id = ? AND state != 'terminal'")
+      .run(status, result ?? null, finishedAt, taskId) as { changes?: number };
+    if (write.changes !== 1) { database.exec("COMMIT"); return null; }
+    const row = database.prepare("SELECT * FROM delegation_tasks WHERE task_id = ?").get(taskId) as Record<string, unknown>;
+    database.exec("COMMIT");
+    return rowToDelegation(row);
+  } catch (error) { database.exec("ROLLBACK"); throw error; }
+}
+
+/** Claim a queued task before provider dispatch. A crash after this write is
+ * terminalized at boot rather than risking a second external worker. */
+export function claimDelegationLaunch(taskId: string, targetThreadId: string): boolean {
+  const result = db().prepare("UPDATE delegation_tasks SET state = 'launching', target_thread_id = ? WHERE task_id = ? AND state = 'queued'").run(targetThreadId, taskId) as { changes?: number };
+  return result.changes === 1;
+}
+
+export function terminalizeInterruptedDelegations(reason: string): DelegationTaskRow[] {
+  const candidates = delegationTasks(["launching", "running"]);
+  const settled: DelegationTaskRow[] = [];
+  for (const task of candidates) {
+    const winner = settleDelegationTask(task.taskId, "failed", reason);
+    if (winner) settled.push(winner);
+  }
+  return settled;
+}
+
+/** Append a stable terminal message and acknowledge delivery atomically. */
+export function appendDelegationDelivery(threadId: string, taskId: string, message: Message): { inserted: boolean } {
+  const database = db(); database.exec("BEGIN IMMEDIATE");
+  try {
+    const task = database.prepare("SELECT state, source_thread_id, source_delivery FROM delegation_tasks WHERE task_id = ?").get(taskId) as { state: string; source_thread_id: string; source_delivery: string } | undefined;
+    if (!task || task.state !== "terminal" || task.source_thread_id !== threadId || task.source_delivery === "abandoned") throw new Error("delegation is not deliverable for this thread");
+    const result = database.prepare("INSERT OR IGNORE INTO messages (thread_id, id, at, role, kind, text, json) VALUES (?, ?, ?, ?, ?, ?, ?)")
+      .run(threadId, message.id, message.at, message.role, message.kind, message.text ?? null, JSON.stringify(message)) as { changes?: number };
+    const inserted = result.changes === 1;
+    if (inserted) setActiveLeaf(threadId, message.id);
+    database.prepare("UPDATE delegation_tasks SET source_delivery = 'delivered' WHERE task_id = ?").run(taskId);
+    database.exec("COMMIT"); return { inserted };
+  } catch (error) { database.exec("ROLLBACK"); throw error; }
+}
+
+export function acknowledgeDelegationContext(taskId: string): boolean {
+  const result = db().prepare("UPDATE delegation_tasks SET source_context = 'acknowledged' WHERE task_id = ? AND state = 'terminal' AND source_delivery = 'delivered' AND source_context = 'pending'").run(taskId) as { changes?: number };
+  return result.changes === 1;
+}
+
+/** Claim before calling startTurn. A claimed wake is never replayed after a
+ * process crash because provider turns lack an idempotency key. */
+export function claimDelegationWake(taskId: string): boolean {
+  const result = db().prepare("UPDATE delegation_tasks SET source_wake = 'claimed' WHERE task_id = ? AND state = 'terminal' AND source_delivery = 'delivered' AND source_context = 'acknowledged' AND source_wake = 'pending'").run(taskId) as { changes?: number };
+  return result.changes === 1;
+}
+export function acknowledgeDelegationWake(taskId: string): void {
+  db().prepare("UPDATE delegation_tasks SET source_wake = 'acknowledged' WHERE task_id = ? AND source_wake = 'claimed'").run(taskId);
+}
+/** startTurn rejected before provider dispatch (usually a race with a user
+ * turn), so this claim is safe to retry when the source becomes idle. */
+export function releaseDelegationWakeClaim(taskId: string): void {
+  db().prepare("UPDATE delegation_tasks SET source_wake = 'pending' WHERE task_id = ? AND source_wake = 'claimed'").run(taskId);
+}
+export function abandonDelegationDelivery(taskId: string): void {
+  db().prepare("UPDATE delegation_tasks SET source_delivery = CASE WHEN source_delivery = 'pending' THEN 'abandoned' ELSE source_delivery END, source_context = CASE WHEN source_context = 'pending' THEN 'abandoned' ELSE source_context END, source_wake = CASE WHEN source_wake IN ('pending', 'claimed') THEN 'abandoned' ELSE source_wake END WHERE task_id = ? AND state = 'terminal'").run(taskId);
+}
+
+/** Remove every remaining responsibility for a source thread before its bot
+ * or task is deleted. A single statement makes queued/ambiguous work terminal
+ * and abandons every outbox without ever appending into the doomed transcript.
+ * Existing terminal outcomes retain their first-wins result; only their
+ * undeliverable source effects are abandoned. */
+export function abandonDelegationsForSourceThread(sourceThreadId: string, reason: string): number {
+  const result = db().prepare(
+    "UPDATE delegation_tasks SET " +
+    "state = CASE WHEN state = 'terminal' THEN state ELSE 'terminal' END, " +
+    "terminal_status = CASE WHEN state = 'terminal' THEN terminal_status ELSE 'dropped' END, " +
+    "terminal_result = CASE WHEN state = 'terminal' THEN terminal_result ELSE ? END, " +
+    "finished_at = CASE WHEN state = 'terminal' THEN finished_at ELSE ? END, " +
+    "source_delivery = 'abandoned', source_context = 'abandoned', source_wake = 'abandoned' " +
+    "WHERE source_thread_id = ?",
+  ).run(reason, Date.now(), sourceThreadId) as { changes?: number };
+  return result.changes ?? 0;
+}
+export function pendingDelegationDeliveries(): DelegationTaskRow[] {
+  return (db().prepare("SELECT * FROM delegation_tasks WHERE state = 'terminal' AND (source_delivery = 'pending' OR (source_delivery = 'delivered' AND (source_context = 'pending' OR source_wake = 'pending' OR source_wake = 'claimed'))) ORDER BY finished_at, created_at").all() as Record<string, unknown>[]).map(rowToDelegation);
+}
+/** Discard old terminal payloads only after the same retention period used by
+ * receipts. Delivered/abandoned rows are no longer needed for recovery. */
+export function pruneDelegationTasks(cutoff: number, keep = 100): void {
+  const database = db();
+  database.prepare("DELETE FROM delegation_tasks WHERE task_id IN (SELECT task_id FROM delegation_tasks WHERE state = 'terminal' AND source_delivery IN ('delivered', 'abandoned') AND source_wake IN ('acknowledged', 'abandoned') AND finished_at < ? ORDER BY finished_at DESC LIMIT -1 OFFSET ?)").run(cutoff, keep);
+}
+/** Mark previously claimed wakes as interrupted without rerunning a possibly
+ * externally visible provider turn. The caller appends an explicit activity. */
+export function abandonClaimedDelegationWake(taskId: string): boolean {
+  const result = db().prepare("UPDATE delegation_tasks SET source_wake = 'abandoned' WHERE task_id = ? AND state = 'terminal' AND source_wake = 'claimed'").run(taskId) as { changes?: number };
+  return result.changes === 1;
+}
+
+/** Persist the conservative notice used after a crash interrupts a claimed
+ * source wake. It shares the state transition so restart retries cannot
+ * create duplicate activity chips. */
+export function appendDelegationWakeInterrupted(threadId: string, taskId: string, message: Message): { inserted: boolean } {
+  const database = db(); database.exec("BEGIN IMMEDIATE");
+  try {
+    const claimed = database.prepare("UPDATE delegation_tasks SET source_wake = 'abandoned' WHERE task_id = ? AND state = 'terminal' AND source_thread_id = ? AND source_wake = 'claimed'").run(taskId, threadId) as { changes?: number };
+    if (claimed.changes !== 1) { database.exec("COMMIT"); return { inserted: false }; }
+    const result = database.prepare("INSERT OR IGNORE INTO messages (thread_id, id, at, role, kind, text, json) VALUES (?, ?, ?, ?, ?, ?, ?)")
+      .run(threadId, message.id, message.at, message.role, message.kind, message.text ?? null, JSON.stringify(message)) as { changes?: number };
+    if (result.changes === 1) setActiveLeaf(threadId, message.id);
+    database.exec("COMMIT"); return { inserted: result.changes === 1 };
+  } catch (error) { database.exec("ROLLBACK"); throw error; }
 }
 
 /** Test/shutdown hook — closes the handle so a wiped DATA_DIR starts clean. */

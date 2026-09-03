@@ -6,12 +6,26 @@ import { beforeEach, describe, expect, it } from "vitest";
 
 import { DATA_DIR } from "./config.ts";
 import {
+  appendDelegationDelivery,
+  appendDelegationWakeInterrupted,
+  acknowledgeDelegationContext,
+  acknowledgeDelegationWake,
+  abandonDelegationDelivery,
+  abandonDelegationsForSourceThread,
+  claimDelegationWake,
   closeMessageDb,
+  createDelegationTask,
+  delegationTask,
+  delegationTasks,
   deleteThread,
   insertMessage,
   readThread,
+  pendingDelegationDeliveries,
+  pruneDelegationTasks,
   searchMessages,
+  settleDelegationTask,
   setActiveLeaf,
+  terminalizeInterruptedDelegations,
   updateMessage,
 } from "./message-db.ts";
 import { Store, type Message } from "./store.ts";
@@ -80,6 +94,134 @@ describe("message-db", () => {
     new Store(selection);
     expect(searchMessages("unopened legacy")).toMatchObject([{ threadId: bot.threadId, messageId: "old" }]);
     expect(existsSync(`${legacy(bot.threadId)}.imported`)).toBe(true);
+  });
+
+  it("terminalizes ambiguous launches and appends each task outcome once", () => {
+    createDelegationTask({
+      taskId: "task-a",
+      sourceThreadId: "source",
+      toBotId: "target",
+      toBotName: "Target",
+      message: "do work",
+      depth: 0,
+      approvalGranted: false,
+      attempts: 0,
+      waitingOnBusy: false,
+      state: "launching",
+      sourceDelivery: "pending",
+      createdAt: 1,
+    });
+    expect(terminalizeInterruptedDelegations("interrupted on restart")).toHaveLength(1);
+    expect(delegationTask("task-a")).toMatchObject({ state: "terminal", terminalStatus: "failed" });
+    const outcome = msg("delegation-result:task-a", "worker interrupted", { role: "bot", parentId: null });
+    expect(appendDelegationDelivery("source", "task-a", outcome)).toEqual({ inserted: true });
+    expect(appendDelegationDelivery("source", "task-a", outcome)).toEqual({ inserted: false });
+    expect(readThread("source", legacy("source")).messages.filter((message) => message.id === outcome.id)).toHaveLength(1);
+    expect(pendingDelegationDeliveries()).toMatchObject([{ taskId: "task-a", sourceDelivery: "delivered", sourceContext: "pending", sourceWake: "pending" }]);
+  });
+
+  it("keeps the first terminal settlement and its delivery state", () => {
+    createDelegationTask({
+      taskId: "cas-task", sourceThreadId: "source", toBotId: "target", toBotName: "Target", message: "do work",
+      depth: 0, approvalGranted: false, attempts: 0, waitingOnBusy: false, state: "running", sourceDelivery: "pending", createdAt: 1,
+    });
+    expect(settleDelegationTask("cas-task", "done", "first", 1)).toMatchObject({ terminalResult: "first" });
+    appendDelegationDelivery("source", "cas-task", msg("delegation-result:cas-task", "first", { role: "bot", parentId: null }));
+    expect(settleDelegationTask("cas-task", "failed", "late", 2)).toBeNull();
+    expect(delegationTask("cas-task")).toMatchObject({ terminalStatus: "done", terminalResult: "first", sourceDelivery: "delivered" });
+  });
+
+  it("keeps simultaneous task deliveries independent", () => {
+    for (const taskId of ["task-a", "task-b"]) {
+      createDelegationTask({
+        taskId,
+        sourceThreadId: "source",
+        toBotId: "target",
+        toBotName: "Target",
+        message: "do work",
+        depth: 0,
+        approvalGranted: false,
+        attempts: 0,
+        waitingOnBusy: false,
+        state: "terminal",
+        terminalStatus: "done",
+        terminalResult: taskId,
+        finishedAt: 1,
+        sourceDelivery: "pending",
+        createdAt: 1,
+      });
+      appendDelegationDelivery("source", taskId, msg(`delegation-result:${taskId}`, taskId, { role: "bot", parentId: null }));
+    }
+    expect(readThread("source", legacy("source")).messages.map((message) => message.id)).toEqual([
+      "delegation-result:task-a",
+      "delegation-result:task-b",
+    ]);
+  });
+
+  it("recovers context and wake outboxes independently, then prunes settled payloads", () => {
+    createDelegationTask({
+      taskId: "outbox", sourceThreadId: "source", toBotId: "target", toBotName: "Target", message: "sensitive prompt",
+      depth: 0, approvalGranted: false, attempts: 0, waitingOnBusy: false, state: "terminal", terminalStatus: "done", terminalResult: "answer", finishedAt: 1, sourceDelivery: "pending", createdAt: 1,
+    });
+    appendDelegationDelivery("source", "outbox", msg("delegation-result:outbox", "answer", { role: "bot", parentId: null }));
+    expect(pendingDelegationDeliveries()).toHaveLength(1); // context/wake remain recoverable
+    expect(acknowledgeDelegationContext("outbox")).toBe(true);
+    expect(claimDelegationWake("outbox")).toBe(true);
+    expect(acknowledgeDelegationWake("outbox")).toBeUndefined();
+    expect(pendingDelegationDeliveries()).toEqual([]);
+    pruneDelegationTasks(2, 0);
+    expect(delegationTask("outbox")).toBeNull();
+
+    createDelegationTask({
+      taskId: "gone", sourceThreadId: "missing", toBotId: "target", toBotName: "Target", message: "secret",
+      depth: 0, approvalGranted: false, attempts: 0, waitingOnBusy: false, state: "terminal", terminalStatus: "failed", finishedAt: 1, sourceDelivery: "pending", createdAt: 1,
+    });
+    abandonDelegationDelivery("gone");
+    expect(delegationTask("gone")).toMatchObject({ sourceDelivery: "abandoned", sourceContext: "abandoned", sourceWake: "abandoned" });
+
+    createDelegationTask({
+      taskId: "claimed-wake", sourceThreadId: "source", toBotId: "target", toBotName: "Target", message: "work",
+      depth: 0, approvalGranted: false, attempts: 0, waitingOnBusy: false, state: "terminal", terminalStatus: "done", finishedAt: 1, sourceDelivery: "pending", createdAt: 1,
+    });
+    appendDelegationDelivery("source", "claimed-wake", msg("delegation-result:claimed-wake", "answer", { role: "bot", parentId: null }));
+    acknowledgeDelegationContext("claimed-wake");
+    // A wake claim remains recoverable until the real provider-dispatch
+    // callback acknowledges it; merely scheduling startTurn must not clear it.
+    expect(claimDelegationWake("claimed-wake")).toBe(true);
+    expect(delegationTask("claimed-wake")).toMatchObject({ sourceWake: "claimed" });
+    const interrupted = msg("delegation-wake-interrupted:claimed-wake", "wake interrupted", { role: "bot", parentId: null });
+    expect(appendDelegationWakeInterrupted("source", "claimed-wake", interrupted)).toEqual({ inserted: true });
+    expect(appendDelegationWakeInterrupted("source", "claimed-wake", interrupted)).toEqual({ inserted: false });
+    expect(delegationTask("claimed-wake")).toMatchObject({ sourceWake: "abandoned" });
+  });
+
+  it("abandons every lifecycle state for a removed source thread atomically", () => {
+    for (const [taskId, state] of [["queued", "queued"], ["launching", "launching"], ["running", "running"], ["terminal", "terminal"]] as const) {
+      createDelegationTask({
+        taskId,
+        sourceThreadId: "removed-source",
+        toBotId: "target",
+        toBotName: "Target",
+        message: "sensitive task",
+        depth: 0,
+        approvalGranted: false,
+        attempts: 0,
+        waitingOnBusy: false,
+        state,
+        ...(state === "terminal" ? { terminalStatus: "done", terminalResult: "preserve me", finishedAt: 1 } : {}),
+        sourceDelivery: "pending",
+        createdAt: 1,
+      });
+    }
+    expect(abandonDelegationsForSourceThread("removed-source", "source removed")).toBe(4);
+    expect(delegationTasks().map((task) => ({ id: task.taskId, state: task.state, delivery: task.sourceDelivery, context: task.sourceContext, wake: task.sourceWake }))).toEqual([
+      { id: "queued", state: "terminal", delivery: "abandoned", context: "abandoned", wake: "abandoned" },
+      { id: "launching", state: "terminal", delivery: "abandoned", context: "abandoned", wake: "abandoned" },
+      { id: "running", state: "terminal", delivery: "abandoned", context: "abandoned", wake: "abandoned" },
+      { id: "terminal", state: "terminal", delivery: "abandoned", context: "abandoned", wake: "abandoned" },
+    ]);
+    expect(delegationTask("running")).toMatchObject({ terminalStatus: "dropped", terminalResult: "source removed" });
+    expect(delegationTask("terminal")).toMatchObject({ terminalStatus: "done", terminalResult: "preserve me" });
   });
 
   it("stores transcripts with owner-only permissions", () => {
