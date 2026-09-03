@@ -50,6 +50,11 @@ final class Session: ObservableObject {
     /// Distinguishes a real `.notDetermined` result from the in-memory value
     /// used while notification settings are still loading at launch.
     @Published private(set) var notificationAuthorizationResolved = false
+    /// Engines that can take a message INTO a turn that is already running.
+    /// Loaded once per hydrate and only ever used to word the composer: an
+    /// empty set means "we do not know", and the wording falls back to the
+    /// weaker promise, which is the one that is always true.
+    @Published private(set) var steeringInstanceIds: Set<String> = []
     /// A short-lived desktop handoff waiting for PairingView to present it.
     @Published private(set) var pairingInvite: PairingInvite?
     /// Pairing can be opened while another computer remains connected. The
@@ -673,6 +678,17 @@ final class Session: ObservableObject {
         log.info("hydrated \(fleet.bots.count, privacy: .public) bots, \(fleet.groups.count, privacy: .public) rooms")
         state.hydrate(fleet)
         NotificationCoordinator.shared.setBadge(state.unreadCount)
+        // Deliberately off hydrate's critical path: this only words the
+        // composer, and the cursor commit — and with it the whole stream —
+        // must not wait on a request that says nothing about the transcript.
+        // An older harness omits the flag and every engine reads as
+        // non-steering, which is the conservative wording.
+        Task { [weak self] in
+            let engines = (try? await client.instances()) ?? []
+            self?.steeringInstanceIds = Set(
+                engines.filter { $0.capabilities?.queueing == true }.map(\.instanceId)
+            )
+        }
     }
 
     // MARK: - Which address to dial
@@ -791,12 +807,25 @@ final class Session: ObservableObject {
     // is a phone that disagrees with the laptop.
 
     func send(_ text: String, to chat: Chat) async {
-        await perform {
+        await perform { client in
+            let receipt: SendReceipt
             switch chat {
-            case let .bot(bot): try await $0.send(text: text, toBot: bot.id)
-            case let .room(room): try await $0.send(text: text, toRoom: room.id)
+            case let .bot(bot): receipt = try await client.send(text: text, toBot: bot.id)
+            case let .room(room): receipt = try await client.send(text: text, toRoom: room.id)
             }
+            self.record(receipt, text: text, fallbackThreadId: chat.threadId)
         }
+    }
+
+    /// A send the harness held rather than ran has to stay on screen, or the
+    /// words simply vanish from the phone until the turn settles. `text` is
+    /// what the person typed; the harness echoes back only an id.
+    private func record(_ receipt: SendReceipt, text: String, fallbackThreadId: String) {
+        guard case let .queued(queueId, threadId) = receipt else { return }
+        state.rememberQueued(
+            QueuedSend(queueId: queueId, text: text),
+            inThread: threadId.isEmpty ? fallbackThreadId : threadId
+        )
     }
 
     /// Send a composer draft with app-owned attachments. The destination
@@ -891,7 +920,16 @@ final class Session: ObservableObject {
                 urls: [],
                 attachments: uploaded
             )
-            try await client.send(text: message, to: destination, sendId: sendID)
+            let receipt = try await client.send(text: message, to: destination, sendId: sendID)
+            // The ghost shows what was typed, not what was sent: `message`
+            // carries the <attached-file …> tags the harness reads, and a
+            // held message is a person's own words waiting, not transport.
+            // An attachment-only send has no words, so it falls back.
+            record(
+                receipt,
+                text: trimmed.isEmpty ? message : trimmed,
+                fallbackThreadId: chat.threadId
+            )
             attachmentSendIDs.removeValue(forKey: draftKey)
             actionError = nil
             return true
@@ -1191,6 +1229,27 @@ final class Session: ObservableObject {
 
     func interrupt(bot: Bot) async {
         await perform { try await $0.interrupt(botId: bot.id) }
+    }
+
+    /// Take back a held message before its turn settles. The ghost goes only
+    /// once the harness confirms, so a failed cancel leaves the words on
+    /// screen still waiting — which is what is actually true.
+    func cancelQueued(_ send: QueuedSend, in chat: Chat) async {
+        guard let client else { return }
+        let threadId = chat.threadId
+        let destination: MessageDestination
+        switch chat {
+        case let .bot(bot): destination = .bot(id: bot.id, threadId: threadId)
+        case let .room(room): destination = .room(id: room.id, threadId: threadId)
+        }
+        do {
+            try await client.cancelQueued(send.queueId, to: destination)
+            state.forgetQueued(send.queueId, inThread: threadId)
+        } catch let error as APIError where error.isUnauthorized {
+            status = .unauthorized
+        } catch {
+            actionError = error.localizedDescription
+        }
     }
 
     /// Ask for one fresh cloud viewer URL. Unlike ordinary actions this

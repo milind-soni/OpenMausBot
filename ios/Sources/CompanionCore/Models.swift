@@ -198,6 +198,13 @@ public struct Message: Codable, Hashable, Identifiable, Sendable {
     /// Screen messages in the full shape: base64 pixels, inline.
     public var png: String?
     public var mime: String?
+    /// A user line the engine took INTO the turn that was already running,
+    /// rather than one that started a turn of its own.
+    public var steered: Bool?
+    /// The steer-queue entry this user line drained from. It is how a client
+    /// that is showing the held message knows which placeholder to retire
+    /// when the real line finally lands.
+    public var queueId: String?
 
     public var date: Date { Date(timeIntervalSince1970: at / 1000) }
 }
@@ -515,9 +522,14 @@ public struct ModelCatalog: Codable, Hashable, Sendable {
 /// offer a reasoning control.
 public struct InstanceCapabilities: Codable, Hashable, Sendable {
     public var effortLevels: [String]?
+    /// The engine can take a message into a turn that is already running.
+    /// Engines without it hold mid-turn sends until the turn settles, which
+    /// is a different promise and deserves different words in the composer.
+    public var queueing: Bool?
 
-    public init(effortLevels: [String]? = nil) {
+    public init(effortLevels: [String]? = nil, queueing: Bool? = nil) {
         self.effortLevels = effortLevels
+        self.queueing = queueing
     }
 }
 
