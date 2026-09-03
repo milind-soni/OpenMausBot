@@ -37,7 +37,7 @@ import { goalCoordinatorForComposer, groupComposerHint, roomRespondersForCompose
 import { PendingApprovalActions, PendingApprovalPanel, pendingApprovals } from "./PendingApproval";
 import { useDesktopCapabilities } from "./DesktopCapabilities";
 import { ReplyQuote } from "./ReplyQuote";
-import { ComposerInjectNow, composerCanInjectNow } from "./ComposerInjectNow";
+import { composerCanInjectNow } from "./ComposerInjectNow";
 import { QueuedComposerMessages } from "./ComposerQueuedMessages";
 import { skillRecorderEnabled } from "@/lib/feature-flags";
 import {
@@ -413,6 +413,17 @@ export function Composer({
   const pendingCount = (state.pendingQueued[threadId] ?? []).length;
   const queuedMessages = state.pendingQueued[threadId] ?? [];
   const canInject = composerCanInjectNow(busy, locked, pendingCount);
+  // An interrupt is in flight. Cleared when the queue drains or the turn
+  // ends — both, because an interrupt that fails to stop the turn must not
+  // leave the row spinning for ever either.
+  const [steering, setSteering] = useState(false);
+  const steerNow = () => {
+    setSteering(true);
+    interruptTurn();
+  };
+  useEffect(() => {
+    if (!busy || pendingCount === 0) setSteering(false);
+  }, [busy, pendingCount]);
   const interruptTurn = () => {
     if (group) dispatch({ type: "interruptGroup", groupId: group.id });
     else if (bot) dispatch({ type: "interrupt", botId: bot.id });
@@ -712,6 +723,8 @@ export function Composer({
         )}
         <QueuedComposerMessages
           items={queuedMessages}
+          onSteer={canInject ? steerNow : undefined}
+          steering={steering}
           onCancel={(queueId) => {
             if (group) dispatch({ type: "cancelGroupQueued", groupId: group.id, threadId, queueId });
             else if (bot) dispatch({ type: "cancelQueued", botId: bot.id, queueId });
@@ -908,8 +921,6 @@ export function Composer({
               ? "Attaching files…"
               : recording
               ? "Listening…"
-              : canInject
-                ? `${busyName} is working — inject now to interrupt with the queued message`
               : busy && canSteer
                 ? `${busyName} is working — Enter sends this into the running turn`
               : busy
@@ -926,11 +937,9 @@ export function Composer({
             className="max-h-[9rem] min-h-6 min-w-0 flex-1 resize-none overflow-y-auto self-center bg-transparent px-1 py-1 text-[15px] leading-6 text-ink placeholder:text-ink-secondary focus:outline-none"
           />
           <div className="flex items-center gap-1">
-          {/* Inject is stop-then-steer made visible. The square stop would
-              drain the same queue, so it yields while a send is waiting.
-              Cancelling the queued composer card brings Stop back. */}
-          {canInject && <ComposerInjectNow onInject={interruptTurn} />}
-          {busy && !locked && !canInject && (
+          {/* Stop-then-steer is spelled out on the queued row above, next to
+              the message it acts on. Stop stays exactly what it says. */}
+          {busy && !locked && (
           <button
             onClick={interruptTurn}
             aria-label="Stop this turn"

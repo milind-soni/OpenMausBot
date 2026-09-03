@@ -79,6 +79,10 @@ const ALLOWED: ReadonlyArray<{ method: string; path: RegExp }> = [
   // unlike the desktop's broad PATCH it cannot alter execution policy.
   { method: "POST", path: /^\/api\/sidebar-sections$/ },
   { method: "POST", path: /^\/api\/bots\/[\w-]+\/messages$/ },
+  // Take back a mid-turn send the harness is still holding. Deleting an
+  // entry that only exists because this device created it moments ago; the
+  // harness 404s anything else.
+  { method: "DELETE", path: /^\/api\/bots\/[\w-]+\/queue\/[\w-]+$/ },
   { method: "POST", path: /^\/api\/bots\/[\w-]+\/interrupt$/ },
   { method: "POST", path: /^\/api\/bots\/[\w-]+\/read$/ },
   { method: "POST", path: /^\/api\/bots\/[\w-]+\/always-allow$/ },
@@ -102,6 +106,7 @@ const ALLOWED: ReadonlyArray<{ method: string; path: RegExp }> = [
   // rooms — making one, and talking in one
   { method: "POST", path: /^\/api\/groups$/ },
   { method: "POST", path: /^\/api\/groups\/[\w-]+\/messages$/ },
+  { method: "DELETE", path: /^\/api\/groups\/[\w-]+\/queue\/[\w-]+$/ },
   { method: "POST", path: /^\/api\/groups\/[\w-]+\/read$/ },
   { method: "POST", path: /^\/api\/groups\/[\w-]+\/tasks$/ },
   { method: "POST", path: /^\/api\/groups\/[\w-]+\/tasks\/[\w-]+$/ },

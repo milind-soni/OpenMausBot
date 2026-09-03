@@ -45,6 +45,9 @@ struct ChatView: View {
     @State private var fileDownloadTask: Task<Void, Never>?
     @State private var fileDownloadRequestID: UUID?
     @State private var acceptsNextHardwareLineBreak = false
+    /// A Steer is in flight. Cleared when the queue drains or the turn ends,
+    /// whichever the engine gets to first.
+    @State private var steering = false
     @FocusState private var composerFocused: Bool
     @StateObject private var dictation = SpeechDictation()
     /// The opening beat: the island grows with the bot's face in it, then
@@ -183,10 +186,14 @@ struct ChatView: View {
                         // one arrives — the store clears it on the same frame
                         // that appends the message, so there is never a beat
                         // where both are on screen.
-                        if let live = session.state.streaming[threadId], !live.isEmpty {
+                        // Gated on `busy`, not merely on there being text:
+                        // a buffer left behind by a turn that died mid
+                        // sentence would otherwise render as a reply that
+                        // streams for ever.
+                        if current.busy, let live = session.state.streaming[threadId], !live.isEmpty {
                             StreamingBubble(text: live, reasoning: nil, color: current.color)
                                 .id(Self.liveBubbleId)
-                        } else if let thinking = session.state.reasoning[threadId], !thinking.isEmpty {
+                        } else if current.busy, let thinking = session.state.reasoning[threadId], !thinking.isEmpty {
                             // Only while there is no answer yet. Once tokens
                             // of the reply exist, the reasoning is behind us
                             // and showing both is just noise.
@@ -197,6 +204,7 @@ struct ChatView: View {
                                 .id(Self.liveBubbleId)
                                 .accessibilityLabel("\(current.name) is working")
                         }
+
                     }
                     .padding(.horizontal, 16)
                     .padding(.vertical, 12)
@@ -330,6 +338,16 @@ struct ChatView: View {
         .onDisappear {
             dictation.stop()
             resetFilePreview()
+        }
+        // A Steer is done when there is nothing left waiting, or when the
+        // turn it was fighting has ended — whichever the engine reaches
+        // first. Both are needed: an interrupt that fails to stop the turn
+        // must not leave the row spinning forever either.
+        .onChange(of: queuedSends.count) { _, count in
+            if count == 0 { steering = false }
+        }
+        .onChange(of: current.busy) { _, busy in
+            if !busy { steering = false }
         }
         .onChange(of: scenePhase) { _, phase in
             if phase != .active { dictation.stop() }
@@ -697,6 +715,62 @@ struct ChatView: View {
         messages.contains { $0.card?.isPending == true }
     }
 
+    /// Words this computer is holding until the running turn settles.
+    private var queuedSends: [QueuedSend] {
+        session.state.pendingQueued[current.threadId] ?? []
+    }
+
+    /// Whether this bot's engine can take a message INTO the running turn.
+    /// Unknown reads as false, which is the promise that is always safe to
+    /// make: the message will be sent, just not necessarily right now.
+    private var engineCanSteer: Bool {
+        guard case let .bot(bot) = current else { return false }
+        return session.steeringInstanceIds.contains(bot.modelSelection.instanceId)
+    }
+
+    /// Stop the running turn so the waiting words go now. The harness
+    /// deliberately does NOT drop its steer queue on an interrupt — that is
+    /// what makes stopping a send rather than a cancellation.
+    ///
+    /// nil where the phone cannot interrupt at all: a room. The button is
+    /// then simply not offered, rather than offered and broken.
+    private var injectNow: (() -> Void)? {
+        guard case let .bot(bot) = current else { return nil }
+        return {
+            Haptics.impact(.medium)
+            dictation.stop()
+            steering = true
+            Task {
+                await session.interrupt(bot: bot)
+                // A floor under the spinner. The two onChange hooks clear it
+                // as soon as the computer says the turn ended or the queue
+                // drained; this is what happens when neither frame arrives,
+                // because a control that spins for ever is worse than one
+                // that admits it does not know.
+                try? await Task.sleep(for: .seconds(20))
+                steering = false
+            }
+        }
+    }
+
+    /// True when this send will wait rather than run — the bot is working
+    /// and its engine cannot take words into the turn.
+    private var willQueue: Bool {
+        current.busy && !engineCanSteer
+    }
+
+    /// What the composer promises about the message being typed.
+    private var composerPrompt: String {
+        if sendingMessage { return "Sending…" }
+        if dictation.isListening { return "Listening…" }
+        // The name is in the header a thumb's width above; spending the
+        // field's whole width repeating it truncates the part that says
+        // what pressing send will actually do.
+        guard current.busy else { return "Ask \(current.name)" }
+        if engineCanSteer { return "Sends into this turn" }
+        return "Sends after this turn"
+    }
+
     private func submit(_ explicitText: String? = nil) {
         // This also cancels an in-flight permission prompt before it can
         // open the microphone after the message has already been sent.
@@ -1057,6 +1131,18 @@ struct ChatView: View {
                 .transition(.move(edge: .bottom).combined(with: .opacity))
             }
 
+            // Everything the computer is holding, stacked straight above
+            // the chat bar in the order it was sent.
+            ForEach(queuedSends) { send in
+                QueuedSendRow(
+                    send: send,
+                    onSteer: injectNow,
+                    isSteering: steering,
+                    onCancel: { Task { await session.cancelQueued(send, in: current) } }
+                )
+                .transition(.move(edge: .bottom).combined(with: .opacity))
+            }
+
             GlassGroup(spacing: 10) {
                 HStack(alignment: .bottom, spacing: 10) {
                     Button {
@@ -1097,7 +1183,7 @@ struct ChatView: View {
                         .padding(.bottom, 6)
 
                         TextField(
-                            sendingMessage ? "Sending…" : dictation.isListening ? "Listening…" : "Ask \(current.name)",
+                            composerPrompt,
                             text: composerDraft,
                             axis: .vertical
                         )
@@ -1150,6 +1236,10 @@ struct ChatView: View {
                         .padding(.bottom, 6)
                         .accessibilityLabel(dictation.isListening ? "Stop dictation" : "Start dictation")
 
+                        // One send key, one meaning, always an arrow. What
+                        // becomes of the message is said in words — in the
+                        // placeholder before it is sent, and on the waiting
+                        // bubble after — never in a glyph you have to decode.
                         Button { submit() } label: {
                             Image(systemName: "arrow.up")
                                 .font(.system(size: 15, weight: .bold))
@@ -1164,6 +1254,11 @@ struct ChatView: View {
                         .padding(.trailing, 6)
                         .padding(.bottom, 6)
                         .animation(.easeOut(duration: 0.15), value: canSend)
+                        .accessibilityLabel(
+                            willQueue
+                                ? "Queue this message for when the turn finishes"
+                                : current.busy ? "Send into the running turn" : "Send message"
+                        )
                     }
                     .frame(minHeight: 44)
                     .glassCapsule(interactive: false)
@@ -1481,6 +1576,14 @@ struct TextBubble: View {
                         .foregroundStyle(Color.primary)
                         .textSelection(.enabled)
                         .fixedSize(horizontal: false, vertical: true)
+                }
+                // The engine took this line into a turn that was already
+                // running. Worth saying: it is why the reply above it can
+                // read as if the bot had not seen this yet.
+                if mine, message.steered == true {
+                    Text("sent mid-turn")
+                        .font(.system(size: 11))
+                        .foregroundStyle(BubbleColor.mineText.opacity(0.72))
                 }
             }
             .padding(.horizontal, customCard ? 0 : 15)

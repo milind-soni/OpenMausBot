@@ -376,7 +376,10 @@ final class ShareViewModel: ObservableObject {
     ) async {
         phase = .sending
         do {
-            try await withFailover(deadline: deadline) { client in
+            // The share sheet is gone before a turn could settle, so the
+            // harness's receipt — sent, steered, or held — has nowhere to
+            // land here. The app shows it in the chat instead.
+            _ = try await withFailover(deadline: deadline) { client in
                 try await client.send(
                     text: delivery.text,
                     to: delivery.destination.messageDestination,
