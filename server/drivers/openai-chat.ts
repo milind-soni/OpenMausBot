@@ -69,6 +69,22 @@ const usageFrom = (usage: CompletionJson["usage"]): Usage | null =>
 const asError = (value: unknown): Error =>
   value instanceof Error ? value : new Error(String(value));
 
+/** The exact messages this runtime sends, given one turn. Exported so the
+ * whole handoff — what dispatch projects, and what the provider receives —
+ * can be asserted in one place. History arrives ONLY through
+ * `turn.transcript`: these engines declare `contextOwnership: "omb-replay"`,
+ * so dispatch must not also inline it into `turn.text`. */
+export function chatMessagesFor(turn: SendTurnInput): OpenAIChatMessage[] {
+  return [
+    ...(turn.system ? [{ role: "system" as const, content: turn.system }] : []),
+    ...(turn.transcript ?? []).map((message) => ({
+      role: message.role,
+      content: message.text,
+    })),
+    { role: "user", content: turn.text },
+  ];
+}
+
 /** Shared runtime for the three providers that speak OpenAI chat completions. */
 export function createOpenAIChatRuntime<Config>(options: RuntimeOptions<Config>): ProviderInstance {
   const { input } = options;
@@ -166,22 +182,13 @@ export function createOpenAIChatRuntime<Config>(options: RuntimeOptions<Config>)
     return { text, reasoning, usage };
   };
 
-  const messagesFor = (turn: SendTurnInput): OpenAIChatMessage[] => [
-    ...(turn.system ? [{ role: "system" as const, content: turn.system }] : []),
-    ...(turn.transcript ?? []).map((message) => ({
-      role: message.role,
-      content: message.text,
-    })),
-    { role: "user", content: turn.text },
-  ];
-
   const sendTurn = async (turn: SendTurnInput) => {
     if (!options.apiKey) throw new Error(options.missingKeyError);
     if (active.has(turn.threadId)) throw new Error("a turn is already running on this thread");
 
     const turnId = newId();
     const abort = new AbortController();
-    const messages = messagesFor(turn);
+    const messages = chatMessagesFor(turn);
     const model = turn.model || options.models().default;
     active.set(turn.threadId, abort);
     appendNative(turn.threadId, {
