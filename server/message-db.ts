@@ -147,6 +147,32 @@ export function appendMessage(threadId: string, message: Message): void {
   }
 }
 
+/** Insert a message that is threaded INTO the branch rather than appended
+ * to it, and reparent the rows that now follow it — as one mutation.
+ *
+ * Two differences from appendMessage, both load-bearing:
+ * - `thread_state` is left alone. A message inserted mid-branch is not the
+ *   branch head, and writing it as one makes activePath() stop there on the
+ *   next launch, hiding every message after it.
+ * - the insert and the reparenting commit together. Split across writes, a
+ *   crash between them orphans the rows that were about to be reparented. */
+export function insertMessageWithReparent(
+  threadId: string,
+  message: Message,
+  reparented: readonly Message[],
+): void {
+  const database = db();
+  database.exec("BEGIN IMMEDIATE");
+  try {
+    insertMessage(threadId, message);
+    for (const child of reparented) updateMessage(threadId, child);
+    database.exec("COMMIT");
+  } catch (error) {
+    database.exec("ROLLBACK");
+    throw error;
+  }
+}
+
 export function updateMessage(threadId: string, message: Message): void {
   db()
     .prepare("UPDATE messages SET at = ?, role = ?, kind = ?, text = ?, json = ? WHERE thread_id = ? AND id = ?")

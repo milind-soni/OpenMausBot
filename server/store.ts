@@ -1125,7 +1125,11 @@ export class Store {
     const full: Message = { id: newId(), at: Date.now(), ...redactBotAuthored(message), parentId: anchorId };
     const children = t.messages.filter((m) => m.parentId === anchorId);
     t.messages.push(full);
-    mdb.appendMessage(threadId, full);
+    // The insert and the reparenting are one durable mutation, and neither
+    // moves the branch head: this message went in BEHIND the leaf, so
+    // recording it as the head would make the next launch walk a path that
+    // stops here and hides everything after it.
+    this.reparentOnto(threadId, full, children);
     if (full.kind === "screen") {
       for (const pruned of this.pruneScreenFrames(t)) {
         mdb.updateMessage(threadId, pruned);
@@ -1135,7 +1139,40 @@ export class Store {
     this.emit({ type: "message", threadId, message: full });
     // announced after the insert so no client ever sees two siblings
     // claiming the same parent
-    for (const child of children) this.patchMessage(threadId, child.id, { parentId: full.id });
+    for (const child of children) this.emit({ type: "message.patch", threadId, message: child });
+    return full;
+  }
+
+  /** Persist `inserted` and move `children` onto it, in memory and in SQLite,
+   * as one mutation that leaves the branch head untouched. Mutates the child
+   * records in place so callers can announce them afterwards. */
+  private reparentOnto(threadId: string, inserted: Message, children: Message[]): void {
+    for (const child of children) child.parentId = inserted.id;
+    mdb.insertMessageWithReparent(threadId, inserted, children);
+  }
+
+  /** Insert a message directly BEFORE `targetId`: the new message takes
+   * `targetId`'s parent, and ONLY `targetId` moves onto it. Siblings — other
+   * branches forked from that same parent — keep their original parent, so
+   * the insert stays local to one branch. That is the difference from
+   * insertMessageAfter, which deliberately sweeps up every child.
+   *
+   * Returns null when the target is unknown; the caller decides whether a
+   * stale boundary is worth reporting. */
+  insertMessageBefore(threadId: string, targetId: string, message: Omit<Message, "id" | "at">): Message | null {
+    const t = this.thread(threadId);
+    const target = t.messages.find((m) => m.id === targetId);
+    if (!target) return null;
+    const full: Message = {
+      id: newId(),
+      at: Date.now(),
+      ...redactBotAuthored(message),
+      parentId: target.parentId ?? null,
+    };
+    t.messages.push(full);
+    this.reparentOnto(threadId, full, [target]);
+    this.emit({ type: "message", threadId, message: full });
+    this.emit({ type: "message.patch", threadId, message: target });
     return full;
   }
 
