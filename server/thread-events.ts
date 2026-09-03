@@ -160,6 +160,21 @@ const stringOrNullOrMissing = (value: unknown) => value === undefined || value =
 const numberOrNullOrMissing = (value: unknown) => value === undefined || value === null || typeof value === "number";
 const stringsOrMissing = (value: unknown) => value === undefined || (Array.isArray(value) && value.every((item) => typeof item === "string"));
 
+/** A count read back from disk. The log is an ordinary file people can
+ * edit, truncate, or hand-assemble, so a "number" is not enough: NaN and
+ * Infinity both survive JSON round-trips through null but arrive as numbers
+ * from a hand-written line, and a negative count would render as nonsense. */
+const isCount = (value: unknown): boolean =>
+  typeof value === "number" && Number.isInteger(value) && value >= 0;
+
+const counts = [
+  "sourceItems",
+  "sentItems",
+  "estimatedInputTokens",
+  "historyTokens",
+  "contextWindow",
+] as const;
+
 function isRuntimeEvent(value: unknown): value is RuntimeEvent {
   if (
     !isRecord(value) ||
@@ -226,6 +241,15 @@ function isRuntimeEvent(value: unknown): value is RuntimeEvent {
       );
     case "thread.token-usage.updated":
       return typeof value.input === "number" && typeof value.output === "number";
+    case "context.prepared":
+      return (
+        (value.ownership === "vendor-session" || value.ownership === "omb-replay" || value.ownership === "omb-loop") &&
+        (value.mode === "resume-preferred" || value.mode === "replay-required") &&
+        (value.limitsSource === "catalog" || value.limitsSource === "pattern" || value.limitsSource === "default") &&
+        counts.every((field) => isCount(value[field])) &&
+        typeof value.compacted === "boolean" &&
+        typeof value.clipped === "boolean"
+      );
     case "runtime.error":
       return typeof value.message === "string" && (value.setup === undefined || typeof value.setup === "boolean");
     default:

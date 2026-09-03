@@ -5,9 +5,9 @@
 // Stream. The shapes and names are kept so the two codebases stay mutually
 // readable.
 
-import type { ContextOwnership, TurnContextPlan } from "./context/types.ts";
+import type { ContextLimitsSource, ContextOwnership, TurnContextPlan } from "./context/types.ts";
 
-export type { ContextOwnership, TurnContextPlan };
+export type { ContextLimitsSource, ContextOwnership, TurnContextPlan };
 
 export type DriverKind = string;
 export type InstanceId = string;
@@ -138,6 +138,32 @@ export type RuntimeEvent = RuntimeEventBase &
         approvalScope?: "local-computer";
       }
     | { type: "thread.token-usage.updated"; input: number; output: number; cachedInput?: number }
+    /** What this turn's context plan decided, in metadata only.
+     *
+     * Deliberately carries NO prompt, summary, memory, tool output, file
+     * path, or credential: it is written to the canonical NDJSON log that
+     * people paste into bug reports. Everything here is a count, an enum, or
+     * a boolean, so the log can answer "why did the model not remember
+     * that?" without becoming a transcript of its own. */
+    | {
+        type: "context.prepared";
+        ownership: ContextOwnership;
+        mode: "resume-preferred" | "replay-required";
+        /** semantic units available on the branch before budgeting. */
+        sourceItems: number;
+        /** units actually sent. */
+        sentItems: number;
+        estimatedInputTokens: number;
+        /** what history was allowed to occupy. */
+        historyTokens: number;
+        contextWindow: number;
+        /** whether the window above was declared, guessed, or defaulted. */
+        limitsSource: ContextLimitsSource;
+        /** a durable compaction summary stood in for older history. */
+        compacted: boolean;
+        /** at least one unit was dropped or cut to fit. */
+        clipped: boolean;
+      }
     // `setup: true` marks a failure the user fixes by installing or
     // configuring something, not by retrying — the UI offers setup instead.
     | { type: "runtime.error"; message: string; setup?: boolean }

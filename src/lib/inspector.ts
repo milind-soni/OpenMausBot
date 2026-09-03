@@ -94,6 +94,23 @@ export function summarizeRuntime(e: RuntimeEvent): { summary: string; tone: Insp
       return { summary: `resolved ${e.behavior} · ${e.source}`, tone: "plain" };
     case "thread.token-usage.updated":
       return { summary: `tokens in ${e.input} · out ${e.output}`, tone: "plain" };
+    case "context.prepared": {
+      const ownership = e.ownership === "vendor-session"
+        ? "vendor session"
+        : e.ownership === "omb-replay"
+          ? "OpenMaus replay"
+          : "OpenMaus managed";
+      const parts = [
+        `context · ${ownership}`,
+        `${e.sentItems}/${e.sourceItems} items`,
+        `~${e.estimatedInputTokens}/${e.historyTokens} tok`,
+        // a guessed window is worth seeing next to the numbers it produced
+        e.limitsSource === "catalog" ? null : `window ${e.limitsSource}`,
+        e.compacted ? "compacted" : null,
+        e.clipped ? "clipped" : null,
+      ].filter(Boolean);
+      return { summary: parts.join(" · "), tone: "plain" };
+    }
     case "runtime.error":
       return { summary: `${e.setup ? "setup: " : ""}${clip(oneLine(e.message))}`, tone: "error" };
     default:

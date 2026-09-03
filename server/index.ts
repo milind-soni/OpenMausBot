@@ -3412,6 +3412,28 @@ async function startTurn(
         throw new DirectTurnSetupCancelled("turn stopped during provider setup");
       }
       clearDirectTurnDispatch(bot.id, dispatchClaimId);
+      // Emitted only for a plan the provider actually accepted, so the log
+      // never claims context was prepared for a turn that never ran.
+      // Metadata only — see the event's contract for why.
+      bus.publish({
+        eventId: randomUUID(),
+        provider: instance.driverKind,
+        providerInstanceId: instanceId,
+        threadId,
+        turnId: dispatch.value.turnId,
+        createdAt: new Date().toISOString(),
+        type: "context.prepared",
+        ownership: contextPlan.ownership,
+        mode: contextPlan.mode,
+        sourceItems: contextPlan.diagnostics.sourceItems,
+        sentItems: contextPlan.diagnostics.sentItems,
+        estimatedInputTokens: contextPlan.diagnostics.estimatedInputTokens,
+        historyTokens: contextPlan.budget.historyTokens,
+        contextWindow: contextPlan.budget.contextWindow,
+        limitsSource: contextPlan.budget.limitsSource,
+        compacted: contextPlan.diagnostics.compacted,
+        clipped: contextPlan.diagnostics.clipped,
+      });
       // dispatched: the rewind is spent, and the old cursors are dead
       if (rewound) store.patchBot(bot.id, { rewound: false, resumeCursors: {} });
       // and this engine now owns the thread's most recent turn
