@@ -106,6 +106,7 @@ import { describeSpawnFailure, execCli } from "./procs.ts";
 import { buildNotification, type Notification } from "./notify.ts";
 import {
   isEffortLevel,
+  type ModelCatalog,
   type ModelSelection,
   type ProviderInstance,
   type RequestOutcome,
@@ -3959,7 +3960,6 @@ const webhookIngressStatus = () => ({
 // fresh session with recent room context. A member's reply may @mention
 // teammates; those get one chained turn (hop 1), never deeper.
 const groupQueues = new Map<string, Promise<void>>();
-const GROUP_CONTEXT_MESSAGES = 30;
 const MAX_GROUP_HOPS = 1;
 
 type GroupMemberTurnOutcome =
@@ -3979,13 +3979,45 @@ type GroupTurnOrchestration = {
   onTurnStarted?: (turnId: string) => void;
 };
 
-function serializeRoomContext(threadId: string, userName: string): string {
-  const messages = store.messagesFor(threadId);
-  const messagesById = new Map(messages.map((message) => [message.id, message]));
-  return messages
+/** The room as the next speaker should see it: sized for THEIR model, with
+ * each member's lines attributed, and compacted through their engine when
+ * it will not fit.
+ *
+ * The budget is per-responder but a compaction record is per-thread, so in a
+ * mixed room the first bot to outgrow its own window folds the history for
+ * everyone after it — the smallest window effectively sets the room's. That
+ * is the shipped behaviour: the failure mode is a large model seeing less
+ * than it could, never lost history, since the display path is untouched.
+ *
+ * Reads the ACTIVE path rather than every message. Room threads cannot fork
+ * today (branchMessage is only reachable for a bot's own thread), so this
+ * changes nothing yet; it stops a future rewind from replaying two versions
+ * of the same turn. */
+async function serializeRoomContext(
+  threadId: string,
+  userName: string,
+  target: { model: string | undefined; catalog: ModelCatalog; generateText?: (prompt: string) => Promise<string> },
+): Promise<string> {
+  const rebuilt = await rebuildForModel({
+    store,
+    threadId,
+    contextWindow: contextWindowFor(target.model, target.catalog),
+    generateText: target.generateText ?? registry.instances().find((i) => i.generateText)?.generateText,
+    userName,
+    createdByInstanceId: "room",
+  });
+  if (rebuilt.record) broadcast({ kind: "message", threadId, message: rebuilt.record });
+
+  const view = store.modelContext(threadId);
+  const messagesById = new Map(store.messagesFor(threadId).map((message) => [message.id, message]));
+  const lines = view.messages
     .filter((m) => m.kind === "text" && m.text)
-    .slice(-GROUP_CONTEXT_MESSAGES)
-    .map((m) => `${m.role === "user" ? userName : (m.from?.name ?? "Bot")}: ${transcriptText(m, messagesById, userName)}`)
+    .map((m) => `${m.role === "user" ? userName : (m.from?.name ?? "Bot")}: ${transcriptText(m, messagesById, userName)}`);
+  return [
+    rebuilt.summary ? `[Summary of the earlier conversation]\n${rebuilt.summary}` : "",
+    ...lines,
+  ]
+    .filter(Boolean)
     .join("\n");
 }
 
@@ -4095,9 +4127,16 @@ async function runGroupMemberTurn(
     (message) => message.role === "user" && message.kind === "text" && message.text,
   );
   const skills = availableSkills();
+  // Built once and reused below: this may write a compaction record, and
+  // doing it twice in one turn would fold twice.
+  const roomContext = await serializeRoomContext(threadId, userName, {
+    model: bot.modelSelection.model,
+    catalog: instance.models,
+    generateText: instance.generateText,
+  });
   const selectedSkills = mergeSkills(
     selectBundledSkills(
-      serializeRoomContext(threadId, userName),
+      roomContext,
       instance.adapter.capabilities.phoneMcp === true ? ["phoneMcp"] : [],
       skills,
     ),
@@ -4230,7 +4269,7 @@ async function runGroupMemberTurn(
 
   const learnTurn = skillAuthoring && latestUser?.text ? expandLearnTurnText(latestUser.text) : "";
   const learnBlock = learnTurn && learnTurn !== latestUser?.text ? `\n\n${learnTurn}` : "";
-  const text = `${serializeRoomContext(threadId, userName)}\n\n(Reply to the conversation above as ${bot.name}.)${learnBlock}${cardContinuation ? `\n\n${cardContinuation}` : ""
+  const text = `${roomContext}\n\n(Reply to the conversation above as ${bot.name}.)${learnBlock}${cardContinuation ? `\n\n${cardContinuation}` : ""
   }`;
 
   // same workspace + memory as a 1:1 turn — the room is a different

@@ -131,6 +131,60 @@ describe("rebuildForModel", () => {
     expect(store.modelContext(bot.threadId).summary).toBe("SECOND FOLD");
   });
 
+  it("folds a room thread through the RESPONDER's window, not the room's", async () => {
+    // A room is multi-speaker and mixed-model: the budget is per-responder
+    // but the record is per-thread, so the first bot to outgrow its own
+    // window folds the history for everyone after it. Chosen behaviour —
+    // the failure mode is a large model seeing less than it could, never
+    // lost history.
+    const store = new Store(selection);
+    const bot = store.createBot();
+    for (let i = 0; i < 20; i += 1) {
+      store.appendMessage(bot.threadId, { role: "user", kind: "text", text: `question ${i}: ${LONG}` });
+      store.appendMessage(bot.threadId, {
+        role: "bot",
+        kind: "text",
+        text: `answer ${i}: ${LONG}`,
+        from: { botId: i % 2 ? "b2" : "b1", name: i % 2 ? "Fig" : "Wren", color: "#fff" },
+      });
+    }
+
+    // the large member sees the whole room and folds nothing
+    const large = await rebuild(store, bot.threadId, { contextWindow: 1_000_000 });
+    expect(large.compacted).toBe(false);
+
+    // the small member outgrows its window and folds for everyone
+    const small = await rebuild(store, bot.threadId, { contextWindow: 10_000 });
+    expect(small.compacted).toBe(true);
+
+    // and the large member now inherits the folded view
+    const after = store.modelContext(bot.threadId);
+    expect(after.summary).toContain("stage.example.com");
+    expect(after.messages.length).toBeLessThan(store.activePath(bot.threadId).length);
+  });
+
+  it("keeps each room member's attribution through a fold", async () => {
+    const store = new Store(selection);
+    const bot = store.createBot();
+    for (let i = 0; i < 20; i += 1) {
+      store.appendMessage(bot.threadId, { role: "user", kind: "text", text: `question ${i}: ${LONG}` });
+      store.appendMessage(bot.threadId, {
+        role: "bot",
+        kind: "text",
+        text: `answer ${i}: ${LONG}`,
+        from: { botId: "b1", name: "Wren", color: "#fff" },
+      });
+    }
+
+    await rebuild(store, bot.threadId);
+
+    // the kept tail still says who spoke — a room that collapses every bot
+    // into one voice reads as one assistant contradicting itself
+    const kept = store.modelContext(bot.threadId).messages.filter((m) => m.role === "bot");
+    expect(kept.length).toBeGreaterThan(0);
+    expect(kept.every((m) => m.from?.name === "Wren")).toBe(true);
+  });
+
   it("excludes the message being sent from what it folds", async () => {
     const store = new Store(selection);
     const bot = store.createBot();
