@@ -11,6 +11,7 @@ import { peerAllowKey, type PeerAction } from "./peer-approval-key.ts";
 import { DATA_DIR, loadBrowserProfileIdAliases } from "./config.ts";
 import * as mdb from "./message-db.ts";
 import type { ToolContextSnapshot } from "./context/types.ts";
+import { activePathDigest } from "./context/compact.ts";
 import { workspaceDir } from "./workspace.ts";
 import { newId, type CloudBackend, type ModelSelection, type ThreadId } from "./contracts.ts";
 import { pickBotName } from "./names.ts";
@@ -1208,6 +1209,35 @@ export class Store {
     this.emit({ type: "message", threadId, message: full });
     this.emit({ type: "message.patch", threadId, message: target });
     return full;
+  }
+
+  /** The active path plus its identity, for a compaction that will be
+   * computed asynchronously and validated on the way back in. */
+  modelContext(threadId: string): { activeMessages: Message[]; allMessages: Message[]; digest: string } {
+    const activeMessages = this.activePath(threadId);
+    return { activeMessages, allMessages: this.messagesFor(threadId), digest: activePathDigest(activeMessages) };
+  }
+
+  /** Write a compaction divider, if it is still valid.
+   *
+   * Summary generation is a model call, so the branch can move underneath
+   * it: a rewind, a delegated result, another turn. Writing a stale record
+   * would fold away history that is no longer behind it, or point at a
+   * message that is no longer on the path. Both are silent corruption of
+   * what the model is shown, so this revalidates and refuses instead.
+   *
+   * Returns null when the record no longer applies; the caller uses a
+   * bounded ephemeral projection for the current turn and may compact again
+   * on the next one. */
+  insertCompaction(threadId: string, record: CompactionRecord): Message | null {
+    const activeMessages = this.activePath(threadId);
+    if (record.sourceDigest !== activePathDigest(activeMessages)) return null;
+    // The boundary must still be ON this branch. A digest match makes that
+    // near-certain, but a malformed id from a hand-edited or migrated record
+    // must not become a divider dangling off the path.
+    if (!activeMessages.some((message) => message.id === record.firstKeptId)) return null;
+    if (!record.summary.trim()) return null;
+    return this.insertMessageBefore(threadId, record.firstKeptId, { role: "bot", kind: "compaction", compaction: record });
   }
 
   /** Hide the first-run quiz on this thread, if it is still open. */
