@@ -173,7 +173,7 @@ import {
 } from "./store.ts";
 import * as tts from "./tts/index.ts";
 import { narrateTool, toUtterances } from "./tts/speech-text.ts";
-import { prepareTurnContext } from "./context/prepare-turn.ts";
+import { MEMORY_RESERVE_TOKENS, prepareTurnContext } from "./context/prepare-turn.ts";
 import { TurnWatchdog } from "./turn-watchdog.ts";
 import {
   ensureWorkspace,
@@ -2976,10 +2976,21 @@ async function startTurn(
     skillRecorderEnabled(cfg) &&
     commsDepth < MAX_COMMS_DEPTH &&
     instance.adapter.capabilities.agentsMcp === true;
+  const persona = [
+    `You are ${bot.name}, a personal bot in OpenMausBot.`,
+    bot.title && `Role: ${bot.title}.`,
+    bot.description && `About: ${bot.description}`,
+  ]
+    .filter(Boolean)
+    .join(" ");
+  // Same rule as the workspace check below, evaluated here because the
+  // memory block's size has to be reserved before history is sized. The
+  // workspace itself is still provisioned during setup.
+  const carriesMemoryBlock = instance.driverKind !== "grok" && instance.driverKind !== "boxAgent";
   // One place decides what this turn's model sees: which settled turns on
   // the active branch to replay, whether the native session survives, and
   // whether history rides inline or as structured messages.
-  const { transcript, turnText, resume } = prepareTurnContext({
+  const { transcript, turnText, resume, plan: contextPlan } = prepareTurnContext({
     activeMessages: store.activePath(threadId),
     allMessages: store.messagesFor(threadId),
     excludeMessageIds: [userMessage.id, ...(opts?.excludeMessageIds ?? [])],
@@ -2992,20 +3003,16 @@ async function startTurn(
     lastInstanceId: task.lastInstanceId,
     resumeCursors: task.resumeCursors,
     ownership: instance.adapter.capabilities.contextOwnership,
+    model,
+    catalog: instance.models,
+    systemText: persona,
+    reservedSystemTokens: carriesMemoryBlock ? MEMORY_RESERVE_TOKENS : 0,
   });
   // Snapshot the cursor alongside the context decision. An external result
   // can arrive during async computer/setup work and clear the task cursor;
   // this already-built turn must either keep its old session or replay on the
   // following turn, never start a blank session with no transcript.
   const resumeCursor = resume ? task.resumeCursors[instanceId] : undefined;
-
-  const persona = [
-    `You are ${bot.name}, a personal bot in OpenMausBot.`,
-    bot.title && `Role: ${bot.title}.`,
-    bot.description && `About: ${bot.description}`,
-  ]
-    .filter(Boolean)
-    .join(" ");
 
   // busy flips immediately so the composer locks; the dispatch itself runs
   // in the background — box provisioning can take ~90s and must never
@@ -3353,6 +3360,9 @@ async function startTurn(
         // resume the wrong conversation and defeat the context bubble
         resumeCursor,
         transcript,
+        // authoritative; `text` and `transcript` above are its compatibility
+        // projections while drivers migrate onto the plan
+        context: contextPlan,
         system:
           persona +
           (computerKind === "vm"

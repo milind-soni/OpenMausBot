@@ -5,7 +5,7 @@
 import { describe, expect, it } from "vitest";
 
 import type { Message } from "../store.ts";
-import { HISTORY_MESSAGE_LIMIT, prepareTurnContext, type PrepareTurnContextInput } from "./prepare-turn.ts";
+import { prepareTurnContext, type PrepareTurnContextInput } from "./prepare-turn.ts";
 
 let seq = 0;
 const text = (role: Message["role"], body: string, extra: Partial<Message> = {}): Message => ({
@@ -80,21 +80,30 @@ describe("prepareTurnContext — history projection", () => {
     expect(out.transcript[0].text).toContain("which region?");
   });
 
-  it("DEFECT: keeps a flat tail of 40 messages regardless of their size or the model's window", () => {
+  it("sizes history against the target model's window, with no fixed message count", () => {
+    // Was a defect: a flat `.slice(-40)` that never consulted message size
+    // or the model, so 40 long turns overflowed a small window while 40
+    // short ones wasted a large one.
     const many = Array.from({ length: 100 }, (_, i) => text(i % 2 === 0 ? "user" : "bot", `turn ${i}`));
-    const out = prepare({ activeMessages: many, rewound: true });
-    expect(out.transcript).toHaveLength(HISTORY_MESSAGE_LIMIT);
-    expect(out.transcript[0].text).toBe("turn 60");
-    // Size is not consulted at all: one enormous message counts the same as
-    // one word, so 40 long turns can overflow a small model's window while
-    // 40 short turns waste a large one.
+    expect(prepare({ activeMessages: many, rewound: true, model: "claude-opus-5" }).transcript.length)
+      .toBeGreaterThan(40);
+
+    // and size IS consulted now: the same count of enormous turns does not fit
     const huge = Array.from({ length: 100 }, (_, i) => text(i % 2 === 0 ? "user" : "bot", "x".repeat(20_000)));
-    expect(prepare({ activeMessages: huge, rewound: true }).transcript).toHaveLength(HISTORY_MESSAGE_LIMIT);
+    const clipped = prepare({ activeMessages: huge, rewound: true, model: "claude-opus-5" });
+    expect(clipped.transcript.length).toBeLessThan(100);
+    expect(clipped.plan.diagnostics.clipped).toBe(true);
   });
 
-  it.todo("sizes history against the target model's context window, with no fixed message count");
+  it("gives a small model less of the same branch than a large one", () => {
+    const many = Array.from({ length: 200 }, (_, i) =>
+      text(i % 2 === 0 ? "user" : "bot", `turn ${i}: ${"detail ".repeat(28)}`));
+    const small = prepare({ activeMessages: many, rewound: true, model: "gemma-4-31b-it-bf16" });
+    const large = prepare({ activeMessages: many, rewound: true, model: "claude-opus-5" });
+    expect(small.transcript.length).toBeLessThan(large.transcript.length);
+  });
 
-  it("DEFECT: drops every non-text message, so tool activity never survives a handoff", () => {
+  it("carries tool observations across a handoff, which the old transcript dropped", () => {
     const out = prepare({
       activeMessages: [
         text("user", "read the config"),
@@ -103,13 +112,13 @@ describe("prepareTurnContext — history projection", () => {
         text("bot", "done"),
       ],
       rewound: true,
+      model: "claude-opus-5",
     });
-    // The model is told the file was read and edited only if the assistant
-    // happened to say so in prose. The tool record itself is gone.
-    expect(out.transcript.map((t) => t.text)).toEqual(["read the config", "done"]);
+    const joined = out.transcript.map((t) => t.text).join("\n");
+    expect(joined).toContain("tool: Read");
+    expect(joined).toContain("tool: Edit");
+    expect(out.plan.messages.filter((m) => m.kind === "tool-observation")).toHaveLength(2);
   });
-
-  it.todo("carries bounded portable tool observations across an engine switch");
 });
 
 describe("prepareTurnContext — resume and replay", () => {
