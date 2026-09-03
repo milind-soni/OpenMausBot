@@ -30,6 +30,7 @@ import { decodeCodexSelection, readCodexModelCatalog, STATIC_CODEX_MODELS } from
 import { codexLocalProviderArgs } from "./local-inject.ts";
 import { augmentedPath } from "../env-path.ts";
 import { classifyError, computeBackoff, RETRY_MAX_ATTEMPTS } from "./retry.ts";
+import { classifyResumeFailure, recoveryPromptFor } from "../context/resume-recovery.ts";
 import { appendNative } from "./native.ts";
 
 export { decodeCodexSelection, readCodexModelCatalog, STATIC_CODEX_MODELS } from "./codex-catalog.ts";
@@ -553,6 +554,10 @@ export const CodexDriver: ProviderDriver<CodexConfig> = {
         const cursor = typeof turn.resumeCursor === "string" ? turn.resumeCursor : null;
         let codexThreadId: string | null = null;
         let startedModel: string | null = null;
+        // Protocol state, not error text: thread/resume runs strictly before
+        // turn/start, so a rejection here is provably before the prompt was
+        // submitted and the turn has caused nothing yet.
+        let resumeRejected = false;
         if (cursor) {
           try {
             const resumed = await request("thread/resume", { threadId: cursor });
@@ -560,6 +565,7 @@ export const CodexDriver: ProviderDriver<CodexConfig> = {
           } catch {
             /* resume unsupported or thread gone — start fresh below */
           }
+          resumeRejected = codexThreadId === null;
         }
         if (!codexThreadId) {
           const selection = decodeCodexSelection(turn.model);
@@ -575,9 +581,23 @@ export const CodexDriver: ProviderDriver<CodexConfig> = {
           startedModel = started?.model ?? null;
         }
         emit({ ...base(threadId, turnId), type: "session.started", sessionId: codexThreadId, model: startedModel ?? turn.model ?? null });
+        // A fresh thread started after a rejected resume has no history at
+        // all. Sending only the current message here is what made a bot
+        // appear to forget the whole conversation while the harness believed
+        // it had resumed — so rebuild from the canonical transcript instead.
+        const recovery = recoveryPromptFor({
+          plan: turn.context,
+          currentText: turn.text,
+          failure: classifyResumeFailure({
+            attempted: Boolean(cursor),
+            rejected: resumeRejected,
+            promptSubmitted: false,
+            producedOutput: state.sawStreamDelta,
+          }),
+        });
         await request("turn/start", {
           threadId: codexThreadId,
-          input: [{ type: "text", text: turn.system ? `${turn.system}\n\n${turn.text}` : turn.text }],
+          input: [{ type: "text", text: turn.system ? `${turn.system}\n\n${recovery.text}` : recovery.text }],
           // Spread, not `effort: turn.effort ?? null`. Probed against
           // codex-cli 0.146.0: null is indistinguishable from an absent key
           // — both leave the thread's current effort alone, emitting no

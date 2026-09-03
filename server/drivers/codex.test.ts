@@ -67,6 +67,99 @@ describe("CodexDriver turns (fake app-server)", () => {
     await removeTempDir(scratch);
   });
 
+  it("rebuilds history when the codex thread is gone, instead of silently forgetting it", async () => {
+    // The bug: thread/resume fails (thread expired or the CLI dropped it),
+    // the driver quietly starts a FRESH thread, and sends only the current
+    // message. The harness believes it resumed; the user sees a bot that
+    // forgot the whole conversation. thread/resume runs strictly before
+    // turn/start, so nothing has been submitted and a rebuild is safe.
+    await create(); // default mode rejects thread/resume with "no such thread"
+    const dump = join(scratch, "dump-lost.json");
+    process.env.FAKE_CODEX_DUMP = dump;
+
+    const replayPrompt = "[You are joining this conversation mid-thread…]\n\nUser: my dog is Biscuit\n\nwhat now?";
+    await instance.adapter.sendTurn({
+      threadId: "t-lost",
+      text: "what now?",
+      resumeCursor: "codex-thread-that-is-gone",
+      context: {
+        ownership: "vendor-session",
+        mode: "resume-preferred",
+        currentPrompt: "what now?",
+        replayPrompt,
+        messages: [],
+        budget: { contextWindow: 200_000, maxOutputTokens: 4_096, historyTokens: 100_000, limitsSource: "pattern" },
+        diagnostics: { sourceItems: 2, sentItems: 2, estimatedInputTokens: 20, compacted: false, clipped: false },
+      },
+    });
+    await recorder.until((e) => e.type === "turn.completed");
+
+    const calls = JSON.parse(readFileSync(dump, "utf8")).calls as Array<{ method: string; params?: any }>;
+    // it did try to resume, and it did fall back to a fresh thread
+    expect(calls.map((c) => c.method)).toContain("thread/resume");
+    expect(calls.map((c) => c.method)).toContain("thread/start");
+    // and the fresh thread was given the conversation back
+    const started = calls.find((c) => c.method === "turn/start");
+    expect(started?.params?.input?.[0]?.text).toContain("my dog is Biscuit");
+    expect(started?.params?.input?.[0]?.text.match(/what now\?/g)).toHaveLength(1);
+  });
+
+  it("sends the plain prompt when the resume SUCCEEDS — no rebuild needed", async () => {
+    await create({ mode: "resume" });
+    const dump = join(scratch, "dump-resumed.json");
+    process.env.FAKE_CODEX_DUMP = dump;
+
+    await instance.adapter.sendTurn({
+      threadId: "t-resumed",
+      text: "what now?",
+      resumeCursor: "codex-thread-1",
+      context: {
+        ownership: "vendor-session",
+        mode: "resume-preferred",
+        currentPrompt: "what now?",
+        replayPrompt: "[rebuild…]\n\nUser: my dog is Biscuit\n\nwhat now?",
+        messages: [],
+        budget: { contextWindow: 200_000, maxOutputTokens: 4_096, historyTokens: 100_000, limitsSource: "pattern" },
+        diagnostics: { sourceItems: 2, sentItems: 2, estimatedInputTokens: 20, compacted: false, clipped: false },
+      },
+    });
+    await recorder.until((e) => e.type === "turn.completed");
+
+    const calls = JSON.parse(readFileSync(dump, "utf8")).calls as Array<{ method: string; params?: any }>;
+    expect(calls.map((c) => c.method)).not.toContain("thread/start");
+    const started = calls.find((c) => c.method === "turn/start");
+    // the live session already holds the history; replaying it would say
+    // everything twice
+    expect(started?.params?.input?.[0]?.text).not.toContain("my dog is Biscuit");
+  });
+
+  it("does not rebuild when there was no session to resume in the first place", async () => {
+    await create();
+    const dump = join(scratch, "dump-fresh.json");
+    process.env.FAKE_CODEX_DUMP = dump;
+
+    await instance.adapter.sendTurn({
+      threadId: "t-fresh",
+      text: "what now?",
+      context: {
+        ownership: "vendor-session",
+        mode: "resume-preferred",
+        currentPrompt: "what now?",
+        replayPrompt: "[rebuild…]\n\nUser: earlier\n\nwhat now?",
+        messages: [],
+        budget: { contextWindow: 200_000, maxOutputTokens: 4_096, historyTokens: 100_000, limitsSource: "pattern" },
+        diagnostics: { sourceItems: 1, sentItems: 1, estimatedInputTokens: 10, compacted: false, clipped: false },
+      },
+    });
+    await recorder.until((e) => e.type === "turn.completed");
+
+    const calls = JSON.parse(readFileSync(dump, "utf8")).calls as Array<{ method: string; params?: any }>;
+    expect(calls.map((c) => c.method)).not.toContain("thread/resume");
+    // no resume was attempted, so the boundary is unproven and dispatch's
+    // own decision stands
+    expect(calls.find((c) => c.method === "turn/start")?.params?.input?.[0]?.text).toBe("what now?");
+  });
+
   it("runs the handshake and normalizes a full turn", async () => {
     await create();
     const dump = join(scratch, "dump.json");

@@ -338,6 +338,16 @@ Nothing produces a record until 4c lands; building the UI first is dead code.
 - Modify: `server/drivers/acp/core.test.ts`
 
 - [ ] Implement `classifyResumeFailure()` returning `before-accept`, `after-accept`, or `unknown`.
+- [ ] **Codex is not a missing-recovery case, it is a silent data-loss bug.** When
+      `thread/resume` fails, `codex.ts` catches the error, quietly starts a fresh thread via
+      `thread/start`, and sends only the current message. The harness records a normal turn; the
+      user sees a bot that forgot the entire conversation, with nothing in the log saying why.
+      Fixed by sending `context.replayPrompt` to the fresh thread. Verified by reverting the fix
+      and watching the driver test fail.
+- [ ] Each remaining driver needs its own protocol reading, not a shared assumption. Claude's
+      `--resume` fails VISIBLY rather than silently recovering, so it has no equivalent bug —
+      only a missing recovery. Check Pi's `switch_session` and ACP's `session/load` for which
+      shape they are before wiring.
 - [ ] Permit exactly one fresh-session retry with `replayPrompt` only for `before-accept`.
 - [ ] For `after-accept`/`unknown`, fail visibly and never resend automatically.
 - [ ] Add fixtures for Claude resume rejection, Codex `thread/resume`, Pi `switch_session`, and ACP `session/load` before prompt submission.
