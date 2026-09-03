@@ -21,6 +21,7 @@
 // `custom` because pi is a custom-only (BYOK) engine — the model picker's
 // Local pane only lists `custom` options for custom-only engines.
 import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { classifyResumeFailure, recoveryPromptFor } from "../context/resume-recovery.ts";
 import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -726,6 +727,10 @@ export const PiDriver: ProviderDriver<PiConfig> = {
       // sessionFile, which switch_session expects as `sessionPath`.
       const sessionPath = typeof turn.resumeCursor === "string" ? turn.resumeCursor : null;
       let sessionFile = sessionPath;
+      // Protocol state, not error text: switch_session runs strictly before
+      // the prompt is sent, so a rejection here proves the turn has caused
+      // nothing yet.
+      let resumeRejected = false;
       try {
         const command = sessionPath ? "switch_session" : "new_session";
         const hsPromise = awaitResponse(command);
@@ -741,6 +746,7 @@ export const PiDriver: ProviderDriver<PiConfig> = {
       } catch {
         // without a session we can still try a bare prompt; pi --no-session
         // accepts a prompt without an explicit session.
+        resumeRejected = Boolean(sessionPath);
       }
 
       // pin the chosen model (composite id or host::model inject → provider + modelId)
@@ -767,7 +773,20 @@ export const PiDriver: ProviderDriver<PiConfig> = {
         }
       }
 
-      const message = turn.system ? `${turn.system}\n\n${turn.text}` : turn.text;
+      // A sessionless prompt after a rejected switch_session carries no
+      // history: sending only the current message is what made a bot appear
+      // to forget the conversation while the harness believed it resumed.
+      const recovery = recoveryPromptFor({
+        plan: turn.context,
+        currentText: turn.text,
+        failure: classifyResumeFailure({
+          attempted: Boolean(sessionPath),
+          rejected: resumeRejected,
+          promptSubmitted: false,
+          producedOutput: false,
+        }),
+      });
+      const message = turn.system ? `${turn.system}\n\n${recovery.text}` : recovery.text;
       try {
         send({ type: "prompt", message });
       } catch {

@@ -9,6 +9,7 @@
 //   - the bot's cloud computer (box.ascii.dev) via server/computer-proxy.ts
 //     — screenshot/exec/open_url, the CUA-on-the-box bridge
 import { createHash, randomBytes } from "node:crypto";
+import { classifyResumeFailure, mayReplay, recoveryPromptFor } from "../context/resume-recovery.ts";
 import { chmodSync, mkdtempSync, readFileSync, rmSync, unlinkSync, writeFileSync } from "node:fs";
 import { createServer as createNetServer } from "node:net";
 import { homedir, tmpdir } from "node:os";
@@ -562,6 +563,10 @@ export const ClaudeDriver: ProviderDriver<ClaudeConfig> = {
       argsKey: string;
       /** the CLI's session id from `init`, what --resume takes later */
       sessionId: string | null;
+      /** the CLI emitted its `init` frame — it accepted the session and
+       * began the turn. The acceptance boundary for --resume: before it,
+       * nothing was submitted and the turn has caused nothing. */
+      sawInit: boolean;
       /** the running turn, or null between turns */
       turn: { turnId: string; settled: boolean; sawStreamDelta: boolean } | null;
       idleTimer: ReturnType<typeof setTimeout> | null;
@@ -569,6 +574,9 @@ export const ClaudeDriver: ProviderDriver<ClaudeConfig> = {
       stderr: string;
     }
     const sessions = new Map<string, Session>();
+    /** Threads that already spent their one fresh-session recovery. Cleared
+     * once a turn settles, so a later dead session gets its own attempt. */
+    const resumeRecovered = new Set<string>();
     const configuredIdleMinimum = Number(process.env.OMB_CLAUDE_SESSION_IDLE_MIN_MS);
     const sessionIdleMinimum = Number.isFinite(configuredIdleMinimum) && configuredIdleMinimum > 0
       ? configuredIdleMinimum
@@ -919,6 +927,7 @@ export const ClaudeDriver: ProviderDriver<ClaudeConfig> = {
         systemPromptPath,
         argsKey,
         sessionId: sessionId ?? newSessionId,
+        sawInit: false,
         turn: { turnId, settled: false, sawStreamDelta: false },
         idleTimer: null,
         closing: false,
@@ -973,6 +982,7 @@ export const ClaudeDriver: ProviderDriver<ClaudeConfig> = {
         switch (o.type) {
           case "system":
             if (o.subtype === "init") {
+              session.sawInit = true;
               if (typeof o.session_id === "string") session.sessionId = o.session_id;
               emit({ ...base(threadId, currentTurnId()), type: "session.started", sessionId: o.session_id, model: o.model });
             } else if (o.subtype === "thinking_tokens") {
@@ -1158,6 +1168,43 @@ export const ClaudeDriver: ProviderDriver<ClaudeConfig> = {
                   stopReason: "exit_before_result",
                   cost: null,
                 });
+              }
+            })();
+            return;
+          }
+          // A --resume that the CLI never acknowledged: it exited without
+          // an `init` frame, so it never read the prompt and this turn has
+          // caused nothing. Without this the thread is BRICKED — the dead
+          // cursor is never cleared, so every later turn resumes the same
+          // missing session and fails identically, and the user has no way
+          // back except switching engines.
+          const resumeFailure = classifyResumeFailure({
+            attempted: Boolean(sessionId),
+            rejected: !session.sawInit,
+            promptSubmitted: session.sawInit,
+            producedOutput: session.turn?.sawStreamDelta ?? false,
+          });
+          if (mayReplay(resumeFailure) && !retry.cancelled && !resumeRecovered.has(threadId)) {
+            resumeRecovered.add(threadId);
+            const recovery = recoveryPromptFor({
+              plan: turn.context,
+              currentText: turn.text,
+              failure: resumeFailure,
+            });
+            sessions.delete(threadId);
+            session.turn = null;
+            active.delete(threadId);
+            void (async () => {
+              try {
+                // no cursor: a fresh session, carrying the rebuild
+                await sendTurn({ ...turn, resumeCursor: undefined, text: recovery.text });
+              } catch (e) {
+                emit({
+                  ...base(threadId, turnId),
+                  type: "runtime.error",
+                  message: e instanceof Error ? e.message : String(e),
+                });
+                emit({ ...base(threadId, turnId), type: "turn.completed", ok: false, stopReason: "exit_before_result", cost: null });
               }
             })();
             return;

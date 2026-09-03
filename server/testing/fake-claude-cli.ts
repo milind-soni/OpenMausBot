@@ -4,7 +4,8 @@
 // scripted session. Failure modes are toggled by env var, mirroring how
 // the real thing misbehaves:
 //
-//   FAKE_CLAUDE_MODE   happy (default) | exit-early | hang | malformed
+//   FAKE_CLAUDE_MODE   happy (default) | exit-early | hang | malformed |
+//                      dead-session (fails only when --resume is passed)
 //                      | stream (partial-message text deltas before the
 //                        whole-message frame, plus subagent noise to drop)
 //   FAKE_CLAUDE_DUMP   path to write {argv, env, prompt, systemPrompt,
@@ -180,6 +181,14 @@ const playTurn = (prompt: JsonValue) => {
       process.env.FAKE_CLAUDE_DUMP,
       JSON.stringify({ pid: process.pid, argv, env: process.env, prompt, systemPrompt, mcpConfig }, null, 2),
     );
+  }
+
+  // A resumed session the CLI no longer has: it exits before any `init`
+  // frame, so the prompt on stdin is never read. A FRESH launch (--session-id)
+  // works normally, which is what makes recovery observable.
+  if (mode === "dead-session" && argv.includes("--resume")) {
+    process.stderr.write(`fake-claude: No conversation found with session ID: ${sessionId}\n`);
+    process.exit(1);
   }
 
   if (mode === "exit-early") {

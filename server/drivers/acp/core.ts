@@ -14,6 +14,7 @@
 // session/update notifications, so updates are double-gated: nothing emits
 // before the prompt is sent, and `_meta.isReplay` updates are dropped.
 import { homedir } from "node:os";
+import { classifyResumeFailure, recoveryPromptFor } from "../../context/resume-recovery.ts";
 
 import { PROVIDER_CREDENTIAL_ENV, WORKSPACE_CREDENTIAL_ENV } from "../../config.ts";
 import { decodeInjectId } from "../local-inject.ts";
@@ -629,6 +630,10 @@ export function createAcpDriver(support: AcpSupport): ProviderDriver<AcpConfig> 
 
             const cursor = typeof turn.resumeCursor === "string" ? turn.resumeCursor : null;
             let sessionResult: any = null;
+            // Protocol state, not error text: session/load runs strictly
+            // before session/prompt, so a rejection here proves the turn has
+            // caused nothing yet.
+            let resumeRejected = false;
             if (cursor) {
               try {
                 sessionResult = await request(
@@ -639,6 +644,7 @@ export function createAcpDriver(support: AcpSupport): ProviderDriver<AcpConfig> 
                 sessionId = cursor;
               } catch {
                 /* session gone, load unsupported, or too slow — start fresh */
+                resumeRejected = true;
               }
             }
             if (!sessionId) {
@@ -708,11 +714,26 @@ export function createAcpDriver(support: AcpSupport): ProviderDriver<AcpConfig> 
             }
             emitSessionStarted();
             state.promptSent = true;
+            // A session/new started after a rejected session/load has no
+            // history: sending only the current message is what made a bot
+            // appear to forget the conversation while the harness believed
+            // it had resumed.
+            const recovery = recoveryPromptFor({
+              plan: turn.context,
+              currentText: turn.text,
+              failure: classifyResumeFailure({
+                attempted: Boolean(cursor),
+                rejected: resumeRejected,
+                promptSubmitted: false,
+                producedOutput: false,
+              }),
+            });
+            const recoveredTurn = recovery.replayed ? { ...turn, text: recovery.text } : turn;
             const text = support.buildPromptText
-              ? support.buildPromptText(turn)
-              : turn.system
-                ? `${turn.system}\n\n${turn.text}`
-                : turn.text;
+              ? support.buildPromptText(recoveredTurn)
+              : recoveredTurn.system
+                ? `${recoveredTurn.system}\n\n${recoveredTurn.text}`
+                : recoveredTurn.text;
             const result = await request("session/prompt", {
               sessionId,
               prompt: [{ type: "text", text }],

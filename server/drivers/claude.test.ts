@@ -1302,6 +1302,83 @@ describe("ClaudeDriver turns (fake CLI)", () => {
 // on macOS the OAuth tokens live in the login Keychain, so the old
 // ~/.claude/.credentials.json check reported signed-in users as signed out
 // and disabled the model picker with them (#108).
+describe("ClaudeDriver resume recovery (fake CLI)", () => {
+  let instance: ProviderInstance;
+  let recorder: EventRecorder;
+
+  const PLAN = {
+    ownership: "vendor-session" as const,
+    mode: "resume-preferred" as const,
+    currentPrompt: "what now?",
+    replayPrompt: "[rebuild]\n\nUser: my dog is Biscuit\n\nwhat now?",
+    messages: [],
+    budget: { contextWindow: 200_000, historyTokens: 80_000, limitsSource: "pattern" as const },
+    diagnostics: { sourceItems: 2, sentItems: 2, estimatedInputTokens: 20, compacted: false, clipped: false },
+  };
+
+  beforeEach(async () => {
+    chmodSync(FAKE_CLI, 0o755);
+    process.env.FAKE_CLAUDE_MODE = "dead-session";
+    instance = await ClaudeDriver.create({
+      instanceId: "claude-test",
+      displayName: "Claude Test",
+      environment: {},
+      enabled: true,
+      config: { cli: FAKE_CLI, permissionMode: "auto" } as never,
+    });
+    recorder = recordEvents(instance.adapter);
+  });
+
+  afterEach(async () => {
+    delete process.env.FAKE_CLAUDE_MODE;
+    recorder?.stop();
+    await instance?.dispose();
+  });
+
+  it("starts a fresh session with the rebuild when --resume is refused", async () => {
+    // Was a bricked thread: the CLI exits before `init`, the failure is
+    // terminal so nothing retries, and the dead cursor is never cleared —
+    // so every later turn resumed the same missing session and failed
+    // identically, with no way back except switching engines.
+    await instance.adapter.sendTurn({
+      threadId: "t-dead",
+      text: "what now?",
+      resumeCursor: "a-session-claude-no-longer-has",
+      context: PLAN,
+    });
+    await recorder.until((e) => e.type === "turn.completed");
+
+    const completed = recorder.events.filter((e) => e.type === "turn.completed");
+    expect(completed.at(-1)).toMatchObject({ ok: true });
+    // it started a NEW session, so the harness records a live cursor again
+    const started = recorder.events.filter((e) => e.type === "session.started");
+    expect(started.length).toBeGreaterThan(0);
+    expect(started.at(-1)).not.toMatchObject({ sessionId: "a-session-claude-no-longer-has" });
+  });
+
+  it("recovers only once, then fails visibly", async () => {
+    // exit-early refuses every launch, resumed or fresh: the recovery is
+    // spent on the first relaunch and the turn must then settle as failed
+    // rather than relaunching forever
+    process.env.FAKE_CLAUDE_MODE = "exit-early";
+    await instance.adapter.sendTurn({
+      threadId: "t-always-dead",
+      text: "what now?",
+      resumeCursor: "gone",
+      context: PLAN,
+    });
+    await recorder.until((e) => e.type === "turn.completed");
+    expect(recorder.events.filter((e) => e.type === "turn.completed").at(-1)).toMatchObject({ ok: false });
+  });
+
+  it("does not rebuild when there was no session to resume", async () => {
+    process.env.FAKE_CLAUDE_MODE = "happy";
+    await instance.adapter.sendTurn({ threadId: "t-fresh", text: "what now?", context: PLAN });
+    await recorder.until((e) => e.type === "turn.completed");
+    expect(recorder.events.filter((e) => e.type === "turn.completed").at(-1)).toMatchObject({ ok: true });
+  });
+});
+
 describe("ClaudeDriver snapshot auth (fake CLI)", () => {
   let instance: ProviderInstance;
 
