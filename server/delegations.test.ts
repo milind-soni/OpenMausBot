@@ -154,7 +154,7 @@ describe("queueDelegation", () => {
     }, 1);
     const ownSnapshot = pendingDelegationSnapshot().filter((item) => item.sourceThreadId === from.threadId);
     expect(ownSnapshot).toEqual([
-      { sourceThreadId: from.threadId, toBotId: target.id, reason: "followup" },
+      { sourceThreadId: from.threadId, sourceBotId: from.id, toBotId: target.id, reason: "followup" },
     ]);
     expect(JSON.stringify(ownSnapshot)).not.toContain("private customer task details");
   });
@@ -842,6 +842,34 @@ describe("originating group routing", () => {
       .messagesFor(group.threadId)
       .find((m) => m.kind === "activity" && m.tool?.name?.startsWith("Delegated to @"));
     expect(chip?.from?.botId).toBe(from.id);
+  });
+
+  it("preserves each source bot's identity for two bots delegating to the same target", async () => {
+    const other = store.createBot();
+    store.patchBot(other.id, { name: "Other" });
+    store.patchGroup(group.id, { memberIds: [from.id, target.id, other.id] });
+
+    queueDelegation(commsBus, from, { toBotId: target.id, message: "from A", depth: 0 }, 1, group.threadId);
+    queueDelegation(commsBus, other, { toBotId: target.id, message: "from B", depth: 0 }, 1, group.threadId);
+
+    const snapshot = pendingDelegationSnapshot().filter((item) => item.sourceThreadId === group.threadId);
+    expect(snapshot.map((item) => item.sourceBotId).sort()).toEqual([from.id, other.id].sort());
+
+    const calls: Array<{ sourceBotId: string; sourceThreadId: string; channel?: GroupRecord }> = [];
+    drainDelegations(commsBus, approvalBus, group.threadId, (...args: unknown[]) => {
+      calls.push({
+        sourceBotId: args[6] as string,
+        sourceThreadId: args[3] as string,
+        channel: args[4] as GroupRecord | undefined,
+      });
+    });
+    await waitFor(() => calls.length === 2);
+
+    const sourceBotIds = calls.map((c) => c.sourceBotId).sort();
+    expect(sourceBotIds).toEqual([from.id, other.id].sort());
+    expect(calls.every((c) => c.sourceThreadId === group.threadId)).toBe(true);
+    expect(calls.every((c) => c.channel?.id === group.id && !c.channel?.dm)).toBe(true);
+    expect(store.dmGroup(from.id, target.id)).toBeUndefined();
   });
 });
 

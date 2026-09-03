@@ -2413,6 +2413,7 @@ const delegationWatch = new Map<string, {
   toBotName?: string;
   taskId?: string;
   sourceThreadId?: string;
+  sourceBotId?: string;
   /** when the delegated turn was dispatched — elapsed time for status checks */
   startedAtMs?: number;
 }>();
@@ -2525,7 +2526,9 @@ function finalizeDelegationWatch(
   }
   const target = store.bot(watched.toBotId);
   const targetName = target?.name ?? watched.toBotName ?? watched.toBotId;
-  const source = watched.sourceThreadId ? store.botByThread(watched.sourceThreadId) : undefined;
+  const source = watched.sourceBotId
+    ? store.bot(watched.sourceBotId)
+    : (watched.sourceThreadId ? store.botByThread(watched.sourceThreadId) : undefined);
   if (source && watched.sourceThreadId) {
     if (ok && reply.trim()) {
       const sourceReply: Omit<Message, "id" | "at"> = {
@@ -2603,7 +2606,7 @@ bus.subscribe((event: RuntimeEvent) => {
 /** How a drained delegation becomes a real turn on the target. Shared by
  * the settle-time drain and the boot-time drain of what a previous process
  * left queued. */
-const runDelegatedTurn: Parameters<typeof drainDelegations>[3] = (toBotId, text, commsDepth, sourceThreadId, channel, taskId) => {
+const runDelegatedTurn: Parameters<typeof drainDelegations>[3] = (toBotId, text, commsDepth, sourceThreadId, channel, taskId, sourceBotId) => {
     // startTurn REJECTS on an ordinary condition — busy target, deleted bot,
     // unavailable provider. Unhandled, that rejection is fatal to the
     // harness (Node's default), which in the packaged app kills the server
@@ -2617,6 +2620,7 @@ const runDelegatedTurn: Parameters<typeof drainDelegations>[3] = (toBotId, text,
         toBotName: target?.name,
         taskId,
         sourceThreadId,
+        sourceBotId,
         startedAtMs: Date.now(),
       });
     }
@@ -6265,6 +6269,7 @@ const server = createServer(async (req, res) => {
             toBotName: currentTarget.name,
             taskId,
             sourceThreadId: fromThreadId,
+            sourceBotId: currentFrom.id,
           });
           store.appendMessage(fromThreadId, {
             role: "bot",
@@ -6587,14 +6592,14 @@ const server = createServer(async (req, res) => {
         }))
         .sort((a, b) => b.lastAt - a.lastAt);
       const queued = pendingDelegationSnapshot().flatMap((item) => {
-        const source = store.botByThread(item.sourceThreadId);
-        if (!source || !visible.has(source.id) || !visible.has(item.toBotId)) return [];
-        return [{ sourceBotId: source.id, targetBotId: item.toBotId, reason: item.reason }];
+        if (!visible.has(item.sourceBotId) || !visible.has(item.toBotId)) return [];
+        return [{ sourceBotId: item.sourceBotId, targetBotId: item.toBotId, reason: item.reason }];
       });
       const running = [...delegationWatch.entries()].flatMap(([threadId, watch]) => {
         if (!visible.has(watch.toBotId)) return [];
         const channel = watch.channelId ? store.group(watch.channelId) : undefined;
-        const sourceBotId = channel?.memberIds.find((botId) => botId !== watch.toBotId);
+        const sourceBotId = watch.sourceBotId ??
+          channel?.memberIds.find((botId) => botId !== watch.toBotId);
         if (!sourceBotId || !visible.has(sourceBotId)) return [];
         return [{ sourceBotId, targetBotId: watch.toBotId, threadId, groupId: channel?.id }];
       });

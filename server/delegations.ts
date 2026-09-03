@@ -246,12 +246,14 @@ export function pendingThreads(): string[] {
  * the UI only needs to know who handed work to whom and the optional label. */
 export function pendingDelegationSnapshot(): Array<{
   sourceThreadId: string;
+  sourceBotId: string;
   toBotId: string;
   reason?: string;
 }> {
   return [...pendingDelegations.entries()].flatMap(([sourceThreadId, items]) =>
     items.map((item) => ({
       sourceThreadId,
+      sourceBotId: item.sourceBotId,
       toBotId: item.toBotId,
       ...(item.reason ? { reason: item.reason } : {}),
     })),
@@ -326,6 +328,7 @@ export function drainDelegations(
     sourceThreadId: string,
     channel: GroupRecord | undefined,
     taskId: string,
+    sourceBotId: string,
   ) => void | Promise<void>,
 ): void {
   if (drainingThreads.has(threadId)) {
@@ -449,6 +452,7 @@ async function processOne(
     sourceThreadId: string,
     channel: GroupRecord | undefined,
     taskId: string,
+    sourceBotId: string,
   ) => void | Promise<void>,
 ): Promise<"settled" | "requeued"> {
   let sender = from;
@@ -579,7 +583,7 @@ async function processOne(
   mirrorExchange(bus, sender, target, item.message, channel, sourceThreadId);
   const reasonLine = item.reason ? `\n\n[Reason: ${item.reason}]` : "";
   const prefixed = `[Delegated by @${sender.name}, another bot in this OpenMausBot workspace. Do the work and reply directly.]\n\n${item.message}${reasonLine}`;
-  await runTarget(item.toBotId, prefixed, item.depth + 1, sourceThreadId, channel, item.id);
+  await runTarget(item.toBotId, prefixed, item.depth + 1, sourceThreadId, channel, item.id, item.sourceBotId);
   return "settled";
 }
 
