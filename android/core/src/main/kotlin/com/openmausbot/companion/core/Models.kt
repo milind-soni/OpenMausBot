@@ -195,7 +195,17 @@ object MessageRoleSerializer : KSerializer<Message.Role> {
 }
 
 @Serializable
-data class ModelSelection(val instanceId: String, val model: String)
+data class ModelSelection(
+    val instanceId: String,
+    val model: String,
+    /**
+     * Optional reasoning effort passed through to engines that support it.
+     * Older computers omit this field, which means the engine default — and a
+     * null here is *omitted* on the wire, never sent as `null`, so an old
+     * server's validator does not see a field it does not know.
+     */
+    val effort: String? = null,
+)
 
 @Serializable
 data class BotTask(val threadId: String, val title: String, val createdAt: Double)
@@ -517,8 +527,15 @@ data class Instance(
     val id: String get() = instanceId
 }
 
+/**
+ * The small, phone-safe part of an engine's capabilities. Missing capabilities
+ * or effort levels mean the engine offers no reasoning control.
+ */
 @Serializable
-data class InstanceCapabilities(val images: Boolean? = null)
+data class InstanceCapabilities(
+    val images: Boolean? = null,
+    val effortLevels: List<String>? = null,
+)
 
 @Serializable
 data class InstanceList(val instances: List<Instance>)

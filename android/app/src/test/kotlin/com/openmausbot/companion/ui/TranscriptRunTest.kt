@@ -114,6 +114,7 @@ class ChatActionsTest {
                 ChatActionId.FILES,
                 ChatActionId.NEW_TASK,
                 ChatActionId.TASKS,
+                ChatActionId.SETTINGS,
                 ChatActionId.WATCH_COMPUTER,
                 ChatActionId.SHARE_MARKDOWN,
                 ChatActionId.SHARE_JSON,
@@ -128,12 +129,14 @@ class ChatActionsTest {
         assertEquals("Start a fresh thread with Scout", actions[2].subtitle)
         assertEquals("Tasks", actions[3].title)
         assertEquals("Switch, rename or remove one", actions[3].subtitle)
-        assertEquals("Watch computer", actions[4].title)
-        assertEquals("Live view of what Scout is doing", actions[4].subtitle)
-        assertEquals("Share transcript", actions[5].title)
-        assertEquals("This chat as Markdown", actions[5].subtitle)
-        assertEquals("Share as JSON", actions[6].title)
-        assertEquals("Structured transcript data", actions[6].subtitle)
+        assertEquals("Bot settings", actions[4].title)
+        assertEquals("Model, profile, voice and notifications", actions[4].subtitle)
+        assertEquals("Watch computer", actions[5].title)
+        assertEquals("Live view of what Scout is doing", actions[5].subtitle)
+        assertEquals("Share transcript", actions[6].title)
+        assertEquals("This chat as Markdown", actions[6].subtitle)
+        assertEquals("Share as JSON", actions[7].title)
+        assertEquals("Structured transcript data", actions[7].subtitle)
     }
 
     @Test

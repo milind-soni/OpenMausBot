@@ -188,7 +188,9 @@ object SearchPolicy {
  * with a task list get the same task controls as an agent. Exporting is not a
  * bot idea — a room has a transcript like anything else.
  */
-enum class ChatActionId { PHOTOS, FILES, NEW_TASK, TASKS, WATCH_COMPUTER, SHARE_MARKDOWN, SHARE_JSON, INTERRUPT }
+enum class ChatActionId {
+    PHOTOS, FILES, NEW_TASK, TASKS, SETTINGS, WATCH_COMPUTER, SHARE_MARKDOWN, SHARE_JSON, INTERRUPT
+}
 
 data class ChatAction(
     val id: ChatActionId,
@@ -237,6 +239,11 @@ object ChatActions {
                 id = ChatActionId.TASKS,
                 title = "Tasks",
                 subtitle = "Switch, rename or remove one",
+            )
+            out += ChatAction(
+                id = ChatActionId.SETTINGS,
+                title = "Bot settings",
+                subtitle = "Model, profile, voice and notifications",
             )
             out += ChatAction(
                 id = ChatActionId.WATCH_COMPUTER,

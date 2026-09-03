@@ -1656,6 +1656,35 @@ class Session(
         }
     }
 
+    /**
+     * The model catalog lives on the paired computer because availability
+     * depends on which engines are installed and signed in there.
+     */
+    suspend fun modelInstances(): List<Instance> {
+        val activeClient = client ?: return emptyList()
+        return try {
+            activeClient.instances()
+        } catch (error: Throwable) {
+            if (error is kotlinx.coroutines.CancellationException) throw error
+            _actionError.value = error.message
+            emptyList()
+        }
+    }
+
+    suspend fun updateModel(selection: ModelSelection, forBot: Bot): Bot? {
+        val activeClient = client ?: return null
+        return try {
+            val updated = activeClient.updateModel(forBot.id, selection)
+            currentCoroutineContext().ensureActive()
+            _state.update { it.apply(Frame.Bot(updated)) }
+            updated
+        } catch (error: Throwable) {
+            if (error is kotlinx.coroutines.CancellationException) throw error
+            _actionError.value = error.message
+            null
+        }
+    }
+
     suspend fun uploadAvatar(
         data: ByteArray,
         mime: String,

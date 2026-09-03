@@ -309,6 +309,18 @@ class CompanionClient(
         ).bot
     }
 
+    /**
+     * Change only the engine, model and optional reasoning effort. This uses the
+     * companion's narrow model route rather than the desktop's general bot PATCH,
+     * which also owns execution policy and computer settings.
+     */
+    suspend fun updateModel(botId: String, selection: ModelSelection): Bot {
+        val body = CompanionJson.encodeToJsonElement(ModelSelection.serializer(), selection).jsonObject
+        return send<BotResponse>(
+            makeRequest("PATCH", "/api/bots/${segment(botId)}/model", body = body),
+        ).bot
+    }
+
     /** Upload a shared image as raw bytes; [uploadId] makes an interrupted retry idempotent. */
     suspend fun uploadImage(data: ByteArray, mime: String, uploadId: String? = null): String {
         if (!validUploadId(uploadId)) throw APIError.BadUrl
