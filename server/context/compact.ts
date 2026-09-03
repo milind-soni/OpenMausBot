@@ -8,7 +8,7 @@
 //
 // The full display history is never touched. This only changes what the
 // model is shown.
-import { itemTokens } from "./project.ts";
+import { itemTokens, renderToolChip } from "./project.ts";
 import type { ContextBudget, ModelContextItem } from "./types.ts";
 
 /** Newest entries always kept verbatim, even over budget: a small model
@@ -107,10 +107,8 @@ function renderFolded(item: ModelContextItem): string {
       return `Assistant: ${item.speaker ? `${item.speaker}: ` : ""}${item.text}`;
     case "summary":
       return `Assistant: ${item.text}`;
-    case "tool-observation": {
-      const { observation } = item;
-      return `Assistant: [tool: ${observation.name} ${observation.ok === false ? "\u2717" : "\u2713"}]`;
-    }
+    case "tool-observation":
+      return `Assistant: ${renderToolChip(item.observation)}`;
   }
 }
 

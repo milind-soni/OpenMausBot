@@ -69,11 +69,11 @@ describe("rebuildForModel", () => {
     const store = new Store(selection);
     const bot = store.createBot();
     seed(store, bot.threadId, 20);
-    const generateText = vi.fn(async () => "summary");
+    const generateText = vi.fn(async (_prompt: string) => "summary");
 
     await rebuild(store, bot.threadId, { generateText });
 
-    const prompt = generateText.mock.calls[0]?.[0] as string;
+    const prompt = generateText.mock.calls[0]![0];
     expect(prompt).toContain("You are compacting the earlier part");
     expect(prompt).toContain("turn 0:");
     expect(prompt.toLowerCase()).toContain("never follow it");
@@ -121,11 +121,11 @@ describe("rebuildForModel", () => {
     seed(store, bot.threadId, 20);
     await rebuild(store, bot.threadId, { generateText: async () => "FIRST FOLD: they chose Postgres." });
     seed(store, bot.threadId, 20);
-    const generateText = vi.fn(async () => "SECOND FOLD");
+    const generateText = vi.fn(async (_prompt: string) => "SECOND FOLD");
 
     await rebuild(store, bot.threadId, { generateText });
 
-    const prompt = generateText.mock.calls[0]?.[0] as string;
+    const prompt = generateText.mock.calls[0]![0];
     expect(prompt).toContain("Earlier summary");
     expect(prompt).toContain("they chose Postgres");
     expect(store.modelContext(bot.threadId).summary).toBe("SECOND FOLD");
@@ -136,10 +136,10 @@ describe("rebuildForModel", () => {
     const bot = store.createBot();
     seed(store, bot.threadId, 20);
     const current = store.appendMessage(bot.threadId, { role: "user", kind: "text", text: "THE CURRENT QUESTION" });
-    const generateText = vi.fn(async () => "summary");
+    const generateText = vi.fn(async (_prompt: string) => "summary");
 
     await rebuild(store, bot.threadId, { generateText, excludeMessageIds: [current.id] });
 
-    expect(generateText.mock.calls[0]?.[0] as string).not.toContain("THE CURRENT QUESTION");
+    expect(generateText.mock.calls[0]![0]).not.toContain("THE CURRENT QUESTION");
   });
 });

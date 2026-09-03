@@ -47,6 +47,32 @@ that impossible. On a 200k window nothing clips:
 family floor for `claude-*`, not a figure the driver declared. Only
 `"catalog"` means the engine actually said so.
 
+## What this harness cannot prove
+
+**Compaction does not fire here, and that is not a failure.** Two independent
+reasons, both worth knowing before you spend an afternoon on it:
+
+- `control-omb launch` builds its child env from scratch — an allowlist of
+  platform keys plus fixed fixture values (see `childEnv` in
+  `scripts/control-omb.ts`). Arbitrary parent env is dropped on purpose, so
+  `OMB_CONTEXT_WINDOW=…` never reaches the server and every model keeps its
+  real window.
+- Compaction only runs on a turn that will REPLAY — a rewind, an engine
+  switch, an external update, or an `omb-replay` engine. The fixture's fake
+  engine resumes cleanly, so `willReplay` is false and no rebuild is
+  attempted. A resumed turn paying nothing is the intended design, not a bug.
+
+Driving 30 long turns against the fixture therefore produces zero compaction
+records, correctly. The real coverage is `server/context/rebuild.test.ts`,
+which exercises it against a live `Store`: the fold, the display path staying
+whole, the summarizer prompt, previous-summary carry-forward, and the three
+failure modes (no summarizer, a throwing one, a blank summary — all write
+nothing and none fail the turn).
+
+Closing this properly needs two changes to the control surface: forwarding
+`OMB_CONTEXT_WINDOW` to the child, and a mapped command that can force a
+replay path. Neither exists yet; do not add a map entry claiming otherwise.
+
 ## Gotchas
 
 - Run on Node 24. On 22 the electron suite reports 10 cancelled subtests and

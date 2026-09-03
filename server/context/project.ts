@@ -8,7 +8,7 @@
 import type { Message } from "../store.ts";
 import { replyExcerpt, replySpeaker } from "../replies.ts";
 import { ENTRY_OVERHEAD, estimateTextTokens } from "./budget.ts";
-import type { ContextBudget, ModelContextItem } from "./types.ts";
+import type { ContextBudget, ModelContextItem, ToolContextSnapshot } from "./types.ts";
 
 /** Kinds that carry no model-facing content.
  *
@@ -107,19 +107,21 @@ function quoted(
   return `[replying to ${replySpeaker(target, userName)}: “${replyExcerpt(target.text, 220)}”]\n${text}`;
 }
 
+/** How a tool call appears to a model: a compact chip saying that work
+ * happened and whether it worked.
+ *
+ * The bounded input/output summaries stay in the durable record but are NOT
+ * replayed. Sending them would let one tool call cost ~1,500 tokens against
+ * this chip's ~8, which moves the compaction trigger far earlier on
+ * tool-heavy threads. One function so the two prompts and the cost
+ * estimate cannot drift apart. */
+export function renderToolChip(observation: ToolContextSnapshot): string {
+  return `[tool: ${observation.name} ${observation.ok === false ? "\u2717" : "\u2713"}]`;
+}
+
 /** What one item costs, including the framing a driver wraps it in. */
 export function itemTokens(item: ModelContextItem): number {
-  const text = item.kind === "tool-observation"
-    ? [
-        item.observation.name,
-        item.observation.inputSummary,
-        item.observation.outputSummary,
-        ...(item.observation.filesRead ?? []),
-        ...(item.observation.filesModified ?? []),
-      ]
-        .filter(Boolean)
-        .join(" ")
-    : item.text;
+  const text = item.kind === "tool-observation" ? renderToolChip(item.observation) : item.text;
   return estimateTextTokens(text) + ENTRY_OVERHEAD;
 }
 
