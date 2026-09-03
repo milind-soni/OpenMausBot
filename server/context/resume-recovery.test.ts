@@ -23,7 +23,7 @@ const plan = (replayPrompt: string): TurnContextPlan => ({
   currentPrompt: "what now?",
   replayPrompt,
   messages: [],
-  budget: { contextWindow: 200_000, maxOutputTokens: 4_096, historyTokens: 100_000, limitsSource: "pattern" },
+  budget: { contextWindow: 200_000, historyTokens: 100_000, limitsSource: "pattern" },
   diagnostics: { sourceItems: 0, sentItems: 0, estimatedInputTokens: 0, compacted: false, clipped: false },
 });
 

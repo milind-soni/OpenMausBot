@@ -7,7 +7,7 @@
 // conversation.
 import type { Message } from "../store.ts";
 import { replyExcerpt, replySpeaker } from "../replies.ts";
-import { FRAMING_TOKENS_PER_ITEM, estimateContextTokens } from "./budget.ts";
+import { ENTRY_OVERHEAD, estimateTextTokens } from "./budget.ts";
 import type { ContextBudget, ModelContextItem } from "./types.ts";
 
 /** Kinds that carry no model-facing content.
@@ -120,7 +120,7 @@ export function itemTokens(item: ModelContextItem): number {
         .filter(Boolean)
         .join(" ")
     : item.text;
-  return estimateContextTokens(text) + FRAMING_TOKENS_PER_ITEM;
+  return estimateTextTokens(text) + ENTRY_OVERHEAD;
 }
 
 /** Project the active branch down to what fits.

@@ -36,7 +36,6 @@ const eventFor = (messages: Message[], over: Record<string, unknown> = {}) => {
     resumeCursors: { i1: "s1" },
     ownership: "vendor-session",
     model: "claude-opus-5",
-    systemText: `You are Wren. Your key is ${SECRET}`,
     ...over,
   });
   const plan = prepared.plan;
@@ -67,7 +66,7 @@ describe("context.prepared carries metadata and nothing else", () => {
 
   it("leaks no prompt, history, memory, path, or credential", () => {
     const serialized = JSON.stringify(eventFor(history));
-    for (const forbidden of [SECRET, "Rowan Lane", "my API key", "what now?", "You are Wren", "Noted"]) {
+    for (const forbidden of [SECRET, "Rowan Lane", "my API key", "what now?", "Noted"]) {
       expect(serialized, forbidden).not.toContain(forbidden);
     }
   });
@@ -97,8 +96,8 @@ describe("context.prepared carries metadata and nothing else", () => {
 
   it("reports clipping when history did not fit", () => {
     const many = Array.from({ length: 200 }, (_, i) =>
-      text(i % 2 === 0 ? "user" : "bot", `turn ${i}: ${"detail ".repeat(28)}`));
-    const event = eventFor(many, { model: "gemma-4-31b-it-bf16" });
+      text(i % 2 === 0 ? "user" : "bot", `turn ${i}: ${"detail ".repeat(120)}`));
+    const event = eventFor(many, { model: "ollama/qwen3:8b" });
     expect(event.clipped).toBe(true);
     expect(event.sentItems).toBeLessThan(event.sourceItems);
   });

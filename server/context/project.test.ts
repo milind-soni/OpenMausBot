@@ -22,11 +22,7 @@ const tool = (name: string, over: Partial<Message["tool"]> = {}) =>
 const realistic = (label: string) => `${label}: ${"detail ".repeat(28)}`.trim();
 
 const budgetOf = (contextWindow: number): ContextBudget =>
-  makeContextBudget({
-    limits: { contextWindow, maxOutputTokens: 4_096, limitsSource: "pattern" },
-    systemTokens: 0,
-    toolTokens: 0,
-  });
+  makeContextBudget({ limits: { contextWindow, limitsSource: "pattern" } });
 
 const project = (messages: Message[], budget = budgetOf(200_000), over: Partial<Parameters<typeof projectActiveBranch>[0]> = {}) =>
   projectActiveBranch({

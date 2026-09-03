@@ -89,17 +89,19 @@ describe("prepareTurnContext — history projection", () => {
       .toBeGreaterThan(40);
 
     // and size IS consulted now: the same count of enormous turns does not fit
-    const huge = Array.from({ length: 100 }, (_, i) => text(i % 2 === 0 ? "user" : "bot", "x".repeat(20_000)));
-    const clipped = prepare({ activeMessages: huge, rewound: true, model: "claude-opus-5" });
+    const huge = Array.from({ length: 100 }, (_, i) => text(i % 2 === 0 ? "user" : "bot", "x".repeat(40_000)));
+    const clipped = prepare({ activeMessages: huge, rewound: true, model: "ollama/qwen3:8b" });
     expect(clipped.transcript.length).toBeLessThan(100);
     expect(clipped.plan.diagnostics.clipped).toBe(true);
   });
 
   it("gives a small model less of the same branch than a large one", () => {
+    // sized against the real budget: 40% of a 32k window is 12,800 tokens,
+    // about 51k characters, so the fixture has to exceed that to bite
     const many = Array.from({ length: 200 }, (_, i) =>
-      text(i % 2 === 0 ? "user" : "bot", `turn ${i}: ${"detail ".repeat(28)}`));
-    const small = prepare({ activeMessages: many, rewound: true, model: "gemma-4-31b-it-bf16" });
-    const large = prepare({ activeMessages: many, rewound: true, model: "claude-opus-5" });
+      text(i % 2 === 0 ? "user" : "bot", `turn ${i}: ${"detail ".repeat(120)}`));
+    const small = prepare({ activeMessages: many, rewound: true, model: "ollama/qwen3:8b" });
+    const large = prepare({ activeMessages: many, rewound: true, model: "gemini-3.6-flash" });
     expect(small.transcript.length).toBeLessThan(large.transcript.length);
   });
 

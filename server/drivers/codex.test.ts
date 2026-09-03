@@ -88,7 +88,7 @@ describe("CodexDriver turns (fake app-server)", () => {
         currentPrompt: "what now?",
         replayPrompt,
         messages: [],
-        budget: { contextWindow: 200_000, maxOutputTokens: 4_096, historyTokens: 100_000, limitsSource: "pattern" },
+        budget: { contextWindow: 200_000, historyTokens: 100_000, limitsSource: "pattern" },
         diagnostics: { sourceItems: 2, sentItems: 2, estimatedInputTokens: 20, compacted: false, clipped: false },
       },
     });
@@ -119,7 +119,7 @@ describe("CodexDriver turns (fake app-server)", () => {
         currentPrompt: "what now?",
         replayPrompt: "[rebuild…]\n\nUser: my dog is Biscuit\n\nwhat now?",
         messages: [],
-        budget: { contextWindow: 200_000, maxOutputTokens: 4_096, historyTokens: 100_000, limitsSource: "pattern" },
+        budget: { contextWindow: 200_000, historyTokens: 100_000, limitsSource: "pattern" },
         diagnostics: { sourceItems: 2, sentItems: 2, estimatedInputTokens: 20, compacted: false, clipped: false },
       },
     });
@@ -147,7 +147,7 @@ describe("CodexDriver turns (fake app-server)", () => {
         currentPrompt: "what now?",
         replayPrompt: "[rebuild…]\n\nUser: earlier\n\nwhat now?",
         messages: [],
-        budget: { contextWindow: 200_000, maxOutputTokens: 4_096, historyTokens: 100_000, limitsSource: "pattern" },
+        budget: { contextWindow: 200_000, historyTokens: 100_000, limitsSource: "pattern" },
         diagnostics: { sourceItems: 1, sentItems: 1, estimatedInputTokens: 10, compacted: false, clipped: false },
       },
     });

@@ -52,8 +52,8 @@ export type ModelContextItem =
 export interface ContextBudget {
   /** the target model's total window. */
   contextWindow: number;
-  maxOutputTokens: number;
-  /** what history may occupy after system, tools, output, and safety. */
+  /** what the replay may occupy — a SHARE of the window, not the remainder
+   * after subtracting measured parts. See budget.ts for why. */
   historyTokens: number;
   limitsSource: ContextLimitsSource;
 }
