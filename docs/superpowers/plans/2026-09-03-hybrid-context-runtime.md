@@ -31,10 +31,14 @@
 - Follow `docs/verification/README.md`; never mutate the installed app or `~/.openmausbot` during verification.
 - Run targeted tests for every red/green cycle, `pnpm typecheck` and `pnpm lint` before task commits, and the full suite in Task 11.
 - Suggested commits are local checkpoints, not authorization to push.
-- `package.json` requires Node >= 24 and the local toolchain is on 22.x, so every `pnpm` command
-  prints an unsupported-engine warning and `node:sqlite` runs as experimental. Tests pass, but
-  Task 11's acceptance evidence must be produced on Node 24+ or it does not represent what
-  ships.
+- **Use Node 24.** `package.json` requires `>=24`; the shell defaults to 22.x, but 24 is already
+  installed at `~/.nvm/versions/node/v24.14.1/bin`. This is not cosmetic: on Node 22 the whole
+  `electron/server-boot-probe.node-test.mjs` suite reports 10 cancelled subtests
+  ("Promise resolution is still pending but the event loop has already resolved") and `pnpm test`
+  exits non-zero, which reads exactly like a regression you just caused. On Node 24 the same
+  suite is 90/90. Prefix with
+  `export PATH="$HOME/.nvm/versions/node/v24.14.1/bin:$PATH"` before any `pnpm test` or
+  `pnpm test:electron`.
 
 ---
 
@@ -202,64 +206,76 @@ export interface TurnContextPlan {
 
 ---
 
-### Task 4: Persist safe tool observations and branch-local compactions
+### Task 4a: Persistence primitives for mid-branch inserts
 
-**Files:**
+**Files:** `server/message-db.ts`, `server/store.ts`, `server/context/insert-position.test.ts`
 
-- Create: `server/context/sanitize.ts`
-- Create: `server/context/sanitize.test.ts`
-- Create: `server/context/compact.ts`
-- Create: `server/context/compact.test.ts`
-- Create: `src/components/CompactionDivider.tsx`
-- Modify: `server/store.ts` (this is where `Message.kind` and `Message.tool` are declared)
-- Modify: `server/store.test.ts`
-- Modify: `server/message-db.ts`
-- Modify: `server/message-db.test.ts`
-- Modify: `server/thread-events.ts`
-- Modify: `server/thread-events.test.ts`
-- Modify: `src/state/store.tsx`
-- Modify: `src/components/ChatView.tsx`
-- Modify: `src/components/GroupView.tsx`
+No new message kind. Pure storage work, independently valuable: it fixes a live restart bug.
 
-**Persistence contract:**
+- [ ] `insertMessageAfter` persists through `mdb.appendMessage()`, which also writes
+      `thread_state.active_leaf_id`. A message threaded in behind the leaf is not the branch
+      head, so the next launch walks a path that stops at it and hides everything after. Prove
+      it with a restart test first.
+- [ ] Add `mdb.insertMessageWithReparent()`: insert plus reparent in one `BEGIN IMMEDIATE`,
+      leaving `thread_state` alone. Split across writes, a crash orphans the rows being
+      reparented.
+- [ ] Add `Store.insertMessageBefore(threadId, targetId, message)`: the new message takes the
+      target's parent and ONLY the target moves onto it. Siblings keep their parent, so the
+      insert stays branch-local. `insertMessageAfter` sweeps up every child, which would drag
+      abandoned forks onto a divider.
+- [ ] Commit: `fix: keep the branch head off mid-branch inserts`.
 
-- Add message kind `compaction` and the spec's exact `CompactionRecord` to the `Message` union in
-  `server/store.ts` and to the renderer's mirror of it.
-- Add optional `context: ToolContextSnapshot` to `Message.tool` (also `server/store.ts`).
-- Persist the divider through a new `message-db` helper that inserts the divider row and
-  reparents `targetId` inside **one** `BEGIN IMMEDIATE` transaction. Two separate writes can
-  orphan the branch on a crash, which is what `insertMessageAfter` does today via
-  `mdb.appendMessage()` followed by per-child `patchMessage()` calls.
-- The divider must not touch `thread_state`. `mdb.appendMessage()` calls
-  `setActiveLeaf(threadId, full.id)` while the in-memory `activeLeafId` stays put, so a restart
-  resolves the leaf to the inserted row. Use `mdb.insertMessage()` and leave the leaf alone.
-  Fix the same divergence in `insertMessageAfter` while the restart tests are open — the
-  compaction suite exercises exactly that path and will otherwise encode the bug.
-- Keep summaries out of full-text search: `mdb.searchMessages()` selects over the `text` column
-  for every kind, so write the summary into the `json` blob with `text` left null.
-- Cap tool input at 2,000 characters, output at 6,000, each path at 512, and each path list at 50. Strip controls, call `redactSecretsInText()`, and set `clipped` when any cap applies.
-- Add `Store.insertMessageBefore(threadId, targetId, message)`, reparenting only `targetId`; siblings must remain on their original parent.
-- Add `Store.modelContext(threadId)` and `Store.insertCompaction(...)` with active-path adjacency and digest revalidation.
+---
 
-- [ ] Write Store tests for no compaction, one/repeated compaction, restart from SQLite, rewind before divider, alternate sibling branches, malformed boundary IDs, changed path during summary generation, and full visible-history preservation.
-- [ ] Write sanitizer tests for secrets, controls, oversized output, path caps, and idempotence.
-- [ ] Make `planCompaction()` fold complete semantic units and retain at least six recent user/assistant exchanges.
-- [ ] Make `buildCompactionPrompt()` preserve the spec's continuity facts while treating its input as untrusted.
-- [ ] On empty/error/stale summary, use bounded ephemeral projection and write nothing.
-- [ ] Assert `searchMessages()` never returns a `compaction` row for a query matching summary text.
-- [ ] Render an expandable divider in individual and group chats; old messages remain visible above it.
-- [ ] Make every renderer path treat an unrecognized `Message.kind` as "render nothing" rather
-      than throw, so a user who downgrades to a build without `compaction` can still open the
-      thread. Test with a synthetic unknown kind, not only with `compaction`.
-- [ ] Run:
+### Task 4b: Durable context types and the tool sanitizer
 
-  ```sh
-  pnpm vitest run server/store.test.ts server/context/compact.test.ts server/context/sanitize.test.ts server/thread-events.test.ts
-  pnpm typecheck
-  pnpm lint
-  ```
+**Files:** `server/store.ts`, `server/context/sanitize.ts`, `server/context/durable-context.test.ts`,
+`src/state/store.tsx`, `src/lib/taskTimeline.ts`, `src/components/ChatView.tsx`
 
-- [ ] Commit: `feat: preserve portable tool context and branch compactions`.
+- [ ] Add message kind `compaction` and `CompactionRecord` to the `Message` union in
+      `server/store.ts` — NOT `server/contracts.ts`, which does not declare `Message`.
+- [ ] Add optional `context: ToolContextSnapshot` to `Message.tool`.
+- [ ] Store the summary in `compaction.summary` with `text` left null. `searchMessages()` is
+      scoped to `kind = 'text'` and `kind = 'activity'`, so this is what keeps summaries out of
+      search — assert it rather than assuming it, because it is one careless `text:` away from
+      breaking.
+- [ ] `sanitizeToolObservation()`: redact, strip controls, then cap — in that order. Capping
+      first lets a secret survive by being cut in half; redacting after stripping misses a
+      credential with a control character inside it. Must be idempotent.
+- [ ] Mirror both types into the renderer by hand. `src/` cannot import from `server/` — the two
+      builds use different module resolution — and every kind union has to move together:
+      `src/state/store.tsx`, `src/lib/taskTimeline.ts`.
+- [ ] Handle `compaction` explicitly in ChatView's kind switch. Its `default` renders a `Bubble`,
+      so an unhandled kind becomes an empty bubble rather than nothing. Test with a synthetic
+      unknown kind too: these rows are written once and read forever, including by a build the
+      user downgraded to.
+- [ ] Commit: `feat: add durable compaction records and bounded tool observations`.
+
+---
+
+### Task 4c: Compaction planner — BLOCKED ON TASK 3
+
+Needs `ContextBudget` to know a projection has outgrown the window.
+
+- [ ] `planCompaction()` folds complete semantic units and retains at least six recent
+      user/assistant exchanges.
+- [ ] `buildCompactionPrompt()` preserves the spec's continuity facts while treating its input as
+      untrusted.
+- [ ] Revalidate the active-path digest after summary generation; on a changed path, empty
+      summary, or error, use a bounded ephemeral projection and write nothing.
+- [ ] `Store.modelContext(threadId)` and `Store.insertCompaction(...)` over 4a's primitives.
+- [ ] Store tests: no compaction, one and repeated compactions, restart from SQLite, rewind
+      before a divider, alternate sibling branches, malformed boundary ids, changed path during
+      generation, full visible-history preservation.
+
+---
+
+### Task 4d: Divider rendering — BLOCKED ON TASK 4c
+
+Nothing produces a record until 4c lands; building the UI first is dead code.
+
+- [ ] `src/components/CompactionDivider.tsx`, expandable, in individual and group chats.
+- [ ] Old messages remain visible above it.
 
 ---
 

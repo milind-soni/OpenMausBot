@@ -101,10 +101,37 @@ export interface SecretRequestCardData {
   error?: string;
 }
 
+/** Mirror of server/context/types.ts. Bounded, redacted record of one tool
+ * call, safe to show and to replay to another engine. */
+export interface ToolContextSnapshot {
+  callId?: string;
+  name: string;
+  inputSummary?: string;
+  outputSummary?: string;
+  ok?: boolean;
+  filesRead?: string[];
+  filesModified?: string[];
+  clipped?: boolean;
+}
+
+/** Mirror of server/store.ts. A durable divider on one branch: history from
+ * `firstKeptId` on is replayed verbatim, everything folded behind it is
+ * represented by `summary`. Display history is never removed. */
+export interface CompactionRecord {
+  schemaVersion: 1;
+  summary: string;
+  firstKeptId: string;
+  throughId: string;
+  sourceDigest: string;
+  estimatedTokensBefore: number;
+  targetContextWindow: number;
+  createdByInstanceId: string;
+}
+
 export interface Message {
   id: string;
   role: "bot" | "user";
-  kind: "text" | "options" | "activity" | "screen" | "connector" | "secret" | "routine.run" | "goal.run";
+  kind: "text" | "options" | "activity" | "screen" | "connector" | "secret" | "routine.run" | "goal.run" | "compaction";
   text?: string;
   /** Provider-generated files attached to this assistant response. */
   attachments?: Array<{ kind: "image"; path: string; mime: string }>;
@@ -120,7 +147,17 @@ export interface Message {
   /** activity messages: tool name + outcome. `spoken` is the server's
    * narration of the same chip ("reading a file"), used by call mode. */
   /** `setup` marks an error fixed by installing something, not by retrying. */
-  tool?: { name: string; ok?: boolean; spoken?: string; setup?: boolean };
+  tool?: {
+    name: string;
+    ok?: boolean;
+    spoken?: string;
+    setup?: boolean;
+    /** bounded, redacted record of the call, replayable to another engine */
+    context?: ToolContextSnapshot;
+  };
+  /** compaction messages: the durable summary standing in for the history
+   * folded behind this point. Display history above it is untouched. */
+  compaction?: CompactionRecord;
   /** user messages sent into a running turn — the model saw it mid-turn */
   steered?: boolean;
   /** Provider turn that produced this message. */

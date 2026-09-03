@@ -763,6 +763,13 @@ const MessagesList = memo(function MessagesList({
             }
             case "screen":
               return m.png ? <ScreenFrame png={m.png} mime={m.mime} /> : null;
+            case "compaction":
+              // The divider UI lands with the compaction planner. Until then
+              // the row renders as nothing rather than falling through to an
+              // empty Bubble — and the history above it stays visible, which
+              // is the part that matters if a user downgrades onto a
+              // transcript that already has dividers in it.
+              return null;
             default:
               return (
                 <Bubble

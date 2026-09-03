@@ -10,6 +10,7 @@ import { writeFileAtomic } from "./atomic.ts";
 import { peerAllowKey, type PeerAction } from "./peer-approval-key.ts";
 import { DATA_DIR, loadBrowserProfileIdAliases } from "./config.ts";
 import * as mdb from "./message-db.ts";
+import type { ToolContextSnapshot } from "./context/types.ts";
 import { workspaceDir } from "./workspace.ts";
 import { newId, type CloudBackend, type ModelSelection, type ThreadId } from "./contracts.ts";
 import { pickBotName } from "./names.ts";
@@ -92,10 +93,30 @@ export interface SecretRequestCardData {
   error?: string;
 }
 
+/** A durable divider on ONE branch. Everything from `firstKeptId` onward is
+ * replayed verbatim; everything before it, back through `throughId`, is
+ * represented by `summary`. Full display history is untouched — this only
+ * changes what the model is shown. */
+export interface CompactionRecord {
+  schemaVersion: 1;
+  summary: string;
+  /** first message still replayed verbatim after this divider. */
+  firstKeptId: string;
+  /** last message folded INTO the summary. */
+  throughId: string;
+  /** digest of the active path this was computed against. Compaction runs
+   * asynchronously, so a record whose path has since changed is stale and
+   * must not be written. */
+  sourceDigest: string;
+  estimatedTokensBefore: number;
+  targetContextWindow: number;
+  createdByInstanceId: string;
+}
+
 export interface Message {
   id: string;
   role: "bot" | "user";
-  kind: "text" | "options" | "activity" | "screen" | "connector" | "secret" | "routine.run" | "goal.run";
+  kind: "text" | "options" | "activity" | "screen" | "connector" | "secret" | "routine.run" | "goal.run" | "compaction";
   text?: string;
   /** Durable provider output stored by the harness. Paths always point into
    * OpenMausBot's private attachment directory; renderers receive only the
@@ -115,7 +136,20 @@ export interface Message {
    * for chips not worth interrupting the ear for. */
   /** `setup` marks an error the user fixes by installing or configuring
    * something — the UI offers setup instead of a retry that cannot work. */
-  tool?: { name: string; ok?: boolean; spoken?: string; setup?: boolean };
+  tool?: {
+    name: string;
+    ok?: boolean;
+    spoken?: string;
+    setup?: boolean;
+    /** Bounded, redacted record of the call, safe to persist and to replay
+     * to a different engine later. Absent on drivers that report only a
+     * tool name — see server/context/sanitize.ts for the bounds. */
+    context?: ToolContextSnapshot;
+  };
+  /** compaction messages: a durable summary standing in for the history
+   * folded behind it. The summary lives here rather than in `text` so it
+   * stays out of full-text search, which spans every kind. */
+  compaction?: CompactionRecord;
   /** user messages sent INTO a running turn (capabilities.queueing): the
    * model saw it mid-turn, so the transcript marks it — a reader should
    * know the reply above it may already account for this line */
