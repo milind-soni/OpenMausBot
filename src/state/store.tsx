@@ -122,7 +122,6 @@ export interface CompactionRecord {
   summary: string;
   firstKeptId: string;
   throughId: string;
-  sourceDigest: string;
   estimatedTokensBefore: number;
   targetContextWindow: number;
   createdByInstanceId: string;

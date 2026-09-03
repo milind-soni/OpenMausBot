@@ -2,7 +2,7 @@
 import { describe, expect, it } from "vitest";
 
 import { makeContextBudget } from "./budget.ts";
-import { KEEP_TAIL, activePathDigest, buildCompactionPrompt, planCompaction } from "./compact.ts";
+import { KEEP_TAIL, buildCompactionPrompt, planCompaction } from "./compact.ts";
 import { itemTokens } from "./project.ts";
 import type { ContextBudget, ModelContextItem } from "./types.ts";
 
@@ -23,7 +23,7 @@ const budgetOf = (contextWindow: number): ContextBudget =>
   makeContextBudget({ limits: { contextWindow, limitsSource: "pattern" } });
 
 const plan = (messages: ModelContextItem[], budget = budgetOf(8_000)) =>
-  planCompaction({ messages, budget, activeMessages: messages.map((m) => ({ id: m.messageId })) });
+  planCompaction({ messages, budget });
 
 describe("planCompaction", () => {
   it("leaves a conversation that fits alone", () => {
@@ -82,30 +82,9 @@ describe("planCompaction", () => {
     expect(result.firstKeptId).not.toBe(previous.messageId);
   });
 
-  it("reports the path it was computed against", () => {
-    const messages = exchanges(40);
-    const result = plan(messages)!;
-    expect(result.sourceDigest).toBe(activePathDigest(messages.map((m) => ({ id: m.messageId }))));
-  });
 
   it("does nothing when there is no budget at all", () => {
     expect(plan(exchanges(40), { ...budgetOf(8_000), historyTokens: 0 })).toBeNull();
-  });
-});
-
-describe("activePathDigest", () => {
-  it("changes when the path changes", () => {
-    const base = [{ id: "a" }, { id: "b" }];
-    expect(activePathDigest(base)).toBe(activePathDigest([{ id: "a" }, { id: "b" }]));
-    expect(activePathDigest(base)).not.toBe(activePathDigest([{ id: "a" }, { id: "c" }]));
-    expect(activePathDigest(base)).not.toBe(activePathDigest([{ id: "a" }]));
-    // order is part of identity: a rewind can reorder without adding or
-    // removing anything
-    expect(activePathDigest(base)).not.toBe(activePathDigest([{ id: "b" }, { id: "a" }]));
-  });
-
-  it("does not collide on ids that concatenate the same way", () => {
-    expect(activePathDigest([{ id: "ab" }, { id: "c" }])).not.toBe(activePathDigest([{ id: "a" }, { id: "bc" }]));
   });
 });
 

@@ -8,9 +8,6 @@
 //
 // The full display history is never touched. This only changes what the
 // model is shown.
-import { createHash } from "node:crypto";
-
-import type { Message } from "../store.ts";
 import { itemTokens } from "./project.ts";
 import type { ContextBudget, ModelContextItem } from "./types.ts";
 
@@ -26,18 +23,7 @@ export interface CompactionPlan {
   /** last message folded in. */
   throughId: string;
   /** digest of the active path this was computed against. */
-  sourceDigest: string;
   estimatedTokensBefore: number;
-}
-
-/** Identity of one active path. Compaction runs asynchronously, so the path
- * can change underneath it — a rewind, a delegated result, another turn. A
- * record computed against a path that no longer exists must not be written,
- * and comparing digests is how that is detected. */
-export function activePathDigest(messages: readonly { id: string }[]): string {
-  const hash = createHash("sha256");
-  for (const message of messages) hash.update(message.id).update("\n");
-  return `sha256:${hash.digest("hex").slice(0, 32)}`;
 }
 
 /** Where to cut, or null when this branch should be left alone. */
@@ -45,8 +31,6 @@ export function planCompaction(input: {
   /** the FULL projection of the active branch, before budgeting. */
   messages: readonly ModelContextItem[];
   budget: ContextBudget;
-  /** the active path, for the digest. */
-  activeMessages: readonly { id: string }[];
 }): CompactionPlan | null {
   const { messages, budget } = input;
   if (budget.historyTokens <= 0) return null;
@@ -75,7 +59,6 @@ export function planCompaction(input: {
     fold: [...carried, ...fold],
     firstKeptId: firstKept.messageId,
     throughId: lastFolded.messageId,
-    sourceDigest: activePathDigest(input.activeMessages),
     estimatedTokensBefore: total,
   };
 }
@@ -131,7 +114,3 @@ function renderFolded(item: ModelContextItem): string {
   }
 }
 
-/** A compaction record is only valid against the path it was computed for. */
-export function compactionIsCurrent(record: { sourceDigest: string }, activeMessages: readonly Message[]): boolean {
-  return record.sourceDigest === activePathDigest(activeMessages);
-}

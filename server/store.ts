@@ -11,7 +11,6 @@ import { peerAllowKey, type PeerAction } from "./peer-approval-key.ts";
 import { DATA_DIR, loadBrowserProfileIdAliases } from "./config.ts";
 import * as mdb from "./message-db.ts";
 import type { ToolContextSnapshot } from "./context/types.ts";
-import { activePathDigest } from "./context/compact.ts";
 import { workspaceDir } from "./workspace.ts";
 import { newId, type CloudBackend, type ModelSelection, type ThreadId } from "./contracts.ts";
 import { pickBotName } from "./names.ts";
@@ -105,10 +104,6 @@ export interface CompactionRecord {
   firstKeptId: string;
   /** last message folded INTO the summary. */
   throughId: string;
-  /** digest of the active path this was computed against. Compaction runs
-   * asynchronously, so a record whose path has since changed is stale and
-   * must not be written. */
-  sourceDigest: string;
   estimatedTokensBefore: number;
   targetContextWindow: number;
   createdByInstanceId: string;
@@ -1186,58 +1181,37 @@ export class Store {
     mdb.insertMessageWithReparent(threadId, inserted, children);
   }
 
-  /** Insert a message directly BEFORE `targetId`: the new message takes
-   * `targetId`'s parent, and ONLY `targetId` moves onto it. Siblings — other
-   * branches forked from that same parent — keep their original parent, so
-   * the insert stays local to one branch. That is the difference from
-   * insertMessageAfter, which deliberately sweeps up every child.
-   *
-   * Returns null when the target is unknown; the caller decides whether a
-   * stale boundary is worth reporting. */
-  insertMessageBefore(threadId: string, targetId: string, message: Omit<Message, "id" | "at">): Message | null {
-    const t = this.thread(threadId);
-    const target = t.messages.find((m) => m.id === targetId);
-    if (!target) return null;
-    const full: Message = {
-      id: newId(),
-      at: Date.now(),
-      ...redactBotAuthored(message),
-      parentId: target.parentId ?? null,
-    };
-    t.messages.push(full);
-    this.reparentOnto(threadId, full, [target]);
-    this.emit({ type: "message", threadId, message: full });
-    this.emit({ type: "message.patch", threadId, message: target });
-    return full;
+  /** Fold the older part of the model-facing rebuild into a summary. The
+   * record is appended like any message (parentId = current leaf) so it
+   * sits in the tree and travels with the branch; a rewind to before it
+   * simply no longer sees it. */
+  appendCompaction(threadId: string, compaction: CompactionRecord): Message {
+    return this.appendMessage(threadId, { role: "bot", kind: "compaction", compaction });
   }
 
-  /** The active path plus its identity, for a compaction that will be
-   * computed asynchronously and validated on the way back in. */
-  modelContext(threadId: string): { activeMessages: Message[]; allMessages: Message[]; digest: string } {
-    const activeMessages = this.activePath(threadId);
-    return { activeMessages, allMessages: this.messagesFor(threadId), digest: activePathDigest(activeMessages) };
-  }
-
-  /** Write a compaction divider, if it is still valid.
+  /** What a model should be shown for this thread: the latest compaction's
+   * summary (if one is on the active path) plus every message from its
+   * firstKeptId onward, records themselves excluded. Without a compaction
+   * this is the whole active path.
    *
-   * Summary generation is a model call, so the branch can move underneath
-   * it: a rewind, a delegated result, another turn. Writing a stale record
-   * would fold away history that is no longer behind it, or point at a
-   * message that is no longer on the path. Both are silent corruption of
-   * what the model is shown, so this revalidates and refuses instead.
-   *
-   * Returns null when the record no longer applies; the caller uses a
-   * bounded ephemeral projection for the current turn and may compact again
-   * on the next one. */
-  insertCompaction(threadId: string, record: CompactionRecord): Message | null {
-    const activeMessages = this.activePath(threadId);
-    if (record.sourceDigest !== activePathDigest(activeMessages)) return null;
-    // The boundary must still be ON this branch. A digest match makes that
-    // near-certain, but a malformed id from a hand-edited or migrated record
-    // must not become a divider dangling off the path.
-    if (!activeMessages.some((message) => message.id === record.firstKeptId)) return null;
-    if (!record.summary.trim()) return null;
-    return this.insertMessageBefore(threadId, record.firstKeptId, { role: "bot", kind: "compaction", compaction: record });
+   * A boundary that is no longer on the path — the branch moved while the
+   * summary was being written — falls back to the messages after the
+   * record rather than failing. Nothing is deleted either way; this only
+   * changes what the model is shown. */
+  modelContext(threadId: string): { summary?: string; messages: Message[] } {
+    const path = this.activePath(threadId);
+    let latest = -1;
+    for (let i = path.length - 1; i >= 0; i -= 1) {
+      if (path[i].kind === "compaction" && path[i].compaction) {
+        latest = i;
+        break;
+      }
+    }
+    if (latest < 0) return { messages: path.filter((m) => m.kind !== "compaction") };
+    const record = path[latest].compaction!;
+    const keptFrom = path.findIndex((m) => m.id === record.firstKeptId);
+    const start = keptFrom >= 0 && keptFrom < latest ? keptFrom : latest + 1;
+    return { summary: record.summary, messages: path.slice(start).filter((m) => m.kind !== "compaction") };
   }
 
   /** Hide the first-run quiz on this thread, if it is still open. */

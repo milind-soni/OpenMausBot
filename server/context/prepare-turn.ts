@@ -39,6 +39,9 @@ export interface PrepareTurnContextInput {
   resumeCursors: Record<string, unknown>;
   /** who owns this engine's context, declared by its driver. */
   ownership: ContextOwnership;
+  /** the summary standing in for history folded behind a compaction
+   * record, when one applies on this branch. */
+  summary?: string;
   /** target model, for sizing. */
   model?: string;
   catalog?: ModelCatalog;
@@ -89,7 +92,13 @@ export function prepareTurnContext(input: PrepareTurnContextInput): PreparedTurn
     budget,
   });
 
-  const transcript = projection.messages.map((item) => asTranscriptTurn(item));
+  // The summary leads: a transcript has no slot of its own for it, and a
+  // model reading history needs to know what came before the first line.
+  const summaryItem: ModelContextItem | null = input.summary
+    ? { kind: "summary", messageId: "compaction", text: input.summary }
+    : null;
+  const withSummary = summaryItem ? [summaryItem, ...projection.messages] : projection.messages;
+  const transcript = withSummary.map((item) => asTranscriptTurn(item));
 
   const fresh =
     !input.rewound &&
@@ -104,7 +113,7 @@ export function prepareTurnContext(input: PrepareTurnContextInput): PreparedTurn
   const resume = !input.rewound && !fresh && !input.externallyUpdated;
   const currentPrompt = promptWithReply(input.text, input.replyTo, input.userName);
   const reason: ReplayReason = input.rewound ? "rewound" : input.externallyUpdated ? "external-update" : "fresh";
-  const replayPrompt = renderReplayPrompt({ reason, messages: projection.messages, currentPrompt });
+  const replayPrompt = renderReplayPrompt({ reason, messages: withSummary, currentPrompt });
 
   // An omb-replay engine already receives history through its structured
   // channel, so inlining it here as well would send the branch twice.
@@ -115,13 +124,13 @@ export function prepareTurnContext(input: PrepareTurnContextInput): PreparedTurn
     mode: resume ? "resume-preferred" : "replay-required",
     currentPrompt,
     replayPrompt,
-    messages: projection.messages,
+    messages: withSummary,
     budget,
     diagnostics: {
       sourceItems: projection.sourceItems,
-      sentItems: projection.messages.length,
+      sentItems: withSummary.length,
       estimatedInputTokens: projection.estimatedTokens,
-      compacted: projection.compacted,
+      compacted: projection.compacted || Boolean(input.summary),
       clipped: projection.clipped,
     },
   };

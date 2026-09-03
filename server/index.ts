@@ -174,6 +174,9 @@ import {
 import * as tts from "./tts/index.ts";
 import { narrateTool, toUtterances } from "./tts/speech-text.ts";
 import { prepareTurnContext } from "./context/prepare-turn.ts";
+import { rebuildForModel } from "./context/rebuild.ts";
+import { contextWindowFor } from "./context/budget.ts";
+import { engineIsFresh } from "./turn-context.ts";
 import { TurnWatchdog } from "./turn-watchdog.ts";
 import {
   ensureWorkspace,
@@ -2983,11 +2986,40 @@ async function startTurn(
   ]
     .filter(Boolean)
     .join(" ");
+  // Only a turn that will actually REPLAY pays for a rebuild — a resumed
+  // turn costs nothing. The rebuild is sized for this model's window and
+  // summarizes the older part through generateText (the bot's own engine,
+  // else any instance that has one) when it will not fit. A compaction is a
+  // record in the tree; the display path is untouched, and a failed or
+  // missing summarizer just drops the oldest instead of failing the turn.
+  const ownership = instance.adapter.capabilities.contextOwnership;
+  const willReplay = rewound || Boolean(externalContextMarker) || ownership === "omb-replay"
+    || engineIsFresh({
+      instanceId,
+      lastInstanceId: task.lastInstanceId,
+      resumeCursors: task.resumeCursors,
+      transcript: store.modelContext(threadId).messages
+        .filter((m) => m.kind === "text" && m.text)
+        .map((m) => ({ role: m.role === "user" ? ("user" as const) : ("assistant" as const), text: m.text ?? "" })),
+    });
+  if (willReplay) {
+    const rebuilt = await rebuildForModel({
+      store,
+      threadId,
+      contextWindow: contextWindowFor(model, instance.models),
+      generateText: instance.generateText ?? registry.instances().find((i) => i.generateText)?.generateText,
+      excludeMessageIds: [userMessage.id, ...(opts?.excludeMessageIds ?? [])],
+      userName: cfg.profile?.name?.trim() || "User",
+      createdByInstanceId: instanceId,
+    });
+    if (rebuilt.record) broadcast({ kind: "message", threadId, message: rebuilt.record });
+  }
+
   // One place decides what this turn's model sees: which settled turns on
   // the active branch to replay, whether the native session survives, and
   // whether history rides inline or as structured messages.
   const { transcript, turnText, resume, plan: contextPlan } = prepareTurnContext({
-    activeMessages: store.activePath(threadId),
+    activeMessages: store.modelContext(threadId).messages,
     allMessages: store.messagesFor(threadId),
     excludeMessageIds: [userMessage.id, ...(opts?.excludeMessageIds ?? [])],
     text: skillAuthoring ? expandLearnTurnText(text) : text,
@@ -2998,7 +3030,8 @@ async function startTurn(
     instanceId,
     lastInstanceId: task.lastInstanceId,
     resumeCursors: task.resumeCursors,
-    ownership: instance.adapter.capabilities.contextOwnership,
+    ownership,
+    summary: store.modelContext(threadId).summary,
     model,
     catalog: instance.models,
   });

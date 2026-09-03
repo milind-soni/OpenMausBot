@@ -17,7 +17,6 @@ const record = (over: Partial<CompactionRecord> = {}): CompactionRecord => ({
   summary: "The user is deploying to Vercel. Their staging URL is stage.example.com.",
   firstKeptId: "m10",
   throughId: "m9",
-  sourceDigest: "sha256:abc",
   estimatedTokensBefore: 12_000,
   targetContextWindow: 8_000,
   createdByInstanceId: "claude",
@@ -69,7 +68,7 @@ describe("durable compaction records", () => {
     const before = store.appendMessage(bot.threadId, { role: "user", kind: "text", text: "the old turn" });
     const target = store.appendMessage(bot.threadId, { role: "bot", kind: "text", text: "the kept turn" });
 
-    store.insertMessageBefore(bot.threadId, target.id, { role: "bot", kind: "compaction", compaction: record() });
+    store.appendCompaction(bot.threadId, record({ firstKeptId: target.id }));
 
     const path = new Store(selection).activePath(bot.threadId);
     expect(path.map((m) => m.text)).toContain("the old turn");
