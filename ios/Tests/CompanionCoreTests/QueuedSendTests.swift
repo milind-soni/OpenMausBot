@@ -8,6 +8,15 @@ import XCTest
 @testable import CompanionCore
 
 final class QueuedSendTests: XCTestCase {
+    private func echo() -> Bot {
+        Bot(
+            id: "b1", threadId: "t1", name: "Echo", title: "", description: "",
+            notifications: true, color: "blue", unread: false,
+            modelSelection: ModelSelection(instanceId: "codex", model: "gpt-5.5"),
+            createdAt: 1
+        )
+    }
+
     private func drained(_ id: String, queueId: String, text: String = "and add tests") -> Message {
         var message = Message(id: id, role: .user, kind: .text, at: 10)
         message.text = text
@@ -116,6 +125,40 @@ final class QueuedSendTests: XCTestCase {
         state.apply(.message(threadId: "t1", message: drained("m1", queueId: "q1")))
         XCTAssertNil(state.pendingQueued["t1"])
         XCTAssertEqual(state.pendingQueued["t2"]?.map(\.text), ["second"])
+    }
+
+    /// A bot frame carrying a whole transcript replaces `messages` outright
+    /// rather than appending, so it never runs the retirement that `append`
+    /// does. Without reconciling here the held message sits above the chat
+    /// bar for ever, long after its line has landed.
+    func testAWholesaleTranscriptReplacementRetiresTheGhost() {
+        var state = CompanionState()
+        var bot = echo()
+        state.apply(.bot(bot))
+        state.rememberQueued(QueuedSend(queueId: "q1", text: "Count to 5"), inThread: "t1")
+        XCTAssertEqual(state.pendingQueued["t1"]?.count, 1)
+
+        bot.messages = [drained("m1", queueId: "q1")]
+        state.apply(.bot(bot))
+        XCTAssertNil(state.pendingQueued["t1"])
+    }
+
+    /// An engine that dies mid-sentence reports the failure as activity, not
+    /// as a settled reply, so nothing else clears the buffer. Left alone it
+    /// renders as an answer that streams for ever.
+    func testAnIdleBotHasNothingStreaming() {
+        var state = CompanionState()
+        var bot = echo()
+        bot.busy = true
+        state.apply(.bot(bot))
+        state.apply(.runtime(RuntimeEvent(
+            type: "content.delta", threadId: "t1", delta: "A History of Comp", streamKind: "assistant_text"
+        )))
+        XCTAssertFalse((state.streaming["t1"] ?? "").isEmpty)
+
+        bot.busy = false
+        state.apply(.bot(bot))
+        XCTAssertNil(state.streaming["t1"])
     }
 
     // MARK: - Taking one back

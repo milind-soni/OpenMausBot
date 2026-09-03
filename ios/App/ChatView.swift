@@ -186,10 +186,14 @@ struct ChatView: View {
                         // one arrives — the store clears it on the same frame
                         // that appends the message, so there is never a beat
                         // where both are on screen.
-                        if let live = session.state.streaming[threadId], !live.isEmpty {
+                        // Gated on `busy`, not merely on there being text:
+                        // a buffer left behind by a turn that died mid
+                        // sentence would otherwise render as a reply that
+                        // streams for ever.
+                        if current.busy, let live = session.state.streaming[threadId], !live.isEmpty {
                             StreamingBubble(text: live, reasoning: nil, color: current.color)
                                 .id(Self.liveBubbleId)
-                        } else if let thinking = session.state.reasoning[threadId], !thinking.isEmpty {
+                        } else if current.busy, let thinking = session.state.reasoning[threadId], !thinking.isEmpty {
                             // Only while there is no answer yet. Once tokens
                             // of the reply exist, the reasoning is behind us
                             // and showing both is just noise.
@@ -736,7 +740,16 @@ struct ChatView: View {
             Haptics.impact(.medium)
             dictation.stop()
             steering = true
-            Task { await session.interrupt(bot: bot) }
+            Task {
+                await session.interrupt(bot: bot)
+                // A floor under the spinner. The two onChange hooks clear it
+                // as soon as the computer says the turn ended or the queue
+                // drained; this is what happens when neither frame arrives,
+                // because a control that spins for ever is worse than one
+                // that admits it does not know.
+                try? await Task.sleep(for: .seconds(20))
+                steering = false
+            }
         }
     }
 

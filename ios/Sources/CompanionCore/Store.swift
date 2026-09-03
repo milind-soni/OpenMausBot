@@ -312,11 +312,20 @@ public struct CompanionState: Sendable {
                     merged.messages = replacement
                     clearStream(previous.threadId)
                     if previous.threadId != bot.threadId { clearStream(bot.threadId) }
+                    // A replacement bypasses `append`, which is what normally
+                    // retires a ghost. Without this the held message stays on
+                    // screen for ever, long after its line has landed.
+                    reconcileQueued(inThread: bot.threadId)
                 } else {
                     merged.messages = previous.messages
                     merged.activeLeafId = bot.activeLeafId ?? previous.activeLeafId
                 }
                 bots[index] = merged
+                // A turn can end without a settled reply — an engine that
+                // dies mid-sentence reports the failure as activity, not
+                // text — and the half-written answer would otherwise sit in
+                // the buffer streaming for ever.
+                if bot.busy != true { clearStream(bot.threadId) }
             } else {
                 bots.append(bot)
                 if messages[bot.threadId] == nil {
