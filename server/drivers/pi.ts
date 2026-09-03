@@ -825,6 +825,7 @@ export const PiDriver: ProviderDriver<PiConfig> = {
         capabilities: {
           // model is set per turn via set_model before prompt
           sessionModelSwitch: "in-session",
+          contextOwnership: "vendor-session",
           // Integrations arrive as stdio MCP servers mounted by the
           // pi-mcp-extension (pi core has no MCP client of its own).
           agentsMcp: true,

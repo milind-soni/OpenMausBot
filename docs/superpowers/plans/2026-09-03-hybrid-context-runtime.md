@@ -130,6 +130,14 @@ export interface TurnContextPlan {
       `contextWindow` doc comment from the non-existent `server/context-rebuild.ts` to
       `server/context/`.
 - [ ] Add `context?: TurnContextPlan` to `SendTurnInput`; retain `text`/`transcript` as temporary compatibility fields.
+- [ ] Make `contextOwnership` REQUIRED rather than optional, and let the compiler enumerate the
+      declaration sites (there are eight, including the fake driver). An optional field with a
+      default reintroduces exactly the silent-default bug this task exists to remove.
+- [ ] Consume the capability at the dispatch site in the same task: replace
+      `replaysNatively: instance.driverKind === "grok"` with
+      `ownership: instance.adapter.capabilities.contextOwnership`. Declaring ownership without
+      reading it leaves the duplicate-history defect live across a commit boundary for no gain,
+      so the Task 1 duplicate-history `it.todo` activates here rather than in Task 5.
 - [ ] Give the fake driver an ownership override and add exhaustiveness tests.
 - [ ] Run:
 
@@ -139,7 +147,7 @@ export interface TurnContextPlan {
   pnpm lint
   ```
 
-- [ ] Commit: `refactor: declare engine context ownership`.
+- [ ] Commit: `fix: declare engine context ownership and stop double-replaying history`.
 
 ---
 
@@ -277,9 +285,6 @@ export interface TurnContextPlan {
 - [ ] Move current `memorySystemPrompt()` output into a named budgeted context section without changing `MEMORY.md` storage or the separate memory plans. Record included bytes/tokens and clipping in diagnostics.
 - [ ] Convert `buildTurnContext()` into a compatibility renderer over the plan, or remove it when its callers are migrated. Keep `engineIsFresh()` as the ownership-independent invalidation rule.
 - [ ] Make `openai-chat.ts` consume `context.messages`; compatibility fallback may remain only for callers without a plan during this task.
-- [ ] Activate the Task 1 duplicate-history todo: an `omb-replay` engine receives history in
-      `context.messages` only, never additionally inlined into the prompt. Assert one copy for
-      `openai-compat` and `minimax`, not just for `grok`.
 - [ ] Route direct chat, routines, delegations/external updates, queue drains, replies, and
       edited messages through the same service.
 - [ ] Rooms and groups are net-new plumbing, not a substitution. The room dispatch path in

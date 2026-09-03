@@ -7,6 +7,7 @@
 //
 // See docs/superpowers/plans/2026-09-03-hybrid-context-runtime.md.
 import type { Message } from "../store.ts";
+import type { ContextOwnership } from "./types.ts";
 import { promptWithReply, transcriptText } from "../replies.ts";
 import { buildTurnContext, engineIsFresh } from "../turn-context.ts";
 
@@ -45,9 +46,12 @@ export interface PrepareTurnContextInput {
   instanceId: string;
   lastInstanceId: string | undefined;
   resumeCursors: Record<string, unknown>;
-  /** this engine receives history through `SendTurnInput.transcript` rather
-   * than inlined into the prompt. */
-  replaysNatively: boolean;
+  /** who owns this engine's context, declared by its driver. An
+   * `omb-replay` engine receives history through the structured channel, so
+   * inlining it into the prompt as well sends the branch twice — which is
+   * what testing `driverKind === "grok"` here used to do to every other
+   * driver built on the same runtime. */
+  ownership: ContextOwnership;
 }
 
 export interface PreparedTurnContext {
@@ -89,7 +93,9 @@ export function prepareTurnContext(input: PrepareTurnContextInput): PreparedTurn
     rewound: input.rewound,
     fresh,
     externallyUpdated: input.externallyUpdated,
-    replaysNatively: input.replaysNatively,
+    // vendor-session and omb-loop engines have no structured history
+    // channel today, so an invalidated turn is rebuilt inline for them.
+    replaysNatively: input.ownership === "omb-replay",
   });
 
   return { transcript, turnText, resume, fresh };

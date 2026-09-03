@@ -666,6 +666,7 @@ export const CodexDriver: ProviderDriver<CodexConfig> = {
       provider: DRIVER_KIND,
       capabilities: {
         sessionModelSwitch: "unsupported",
+        contextOwnership: "vendor-session",
         computerMcp: true,
         localComputerMcp: true,
         composioMcp: true,

@@ -921,6 +921,7 @@ export const AntigravityDriver: ProviderDriver<AntigravityConfig> = {
         provider: DRIVER_KIND,
         capabilities: {
           sessionModelSwitch: "in-session",
+          contextOwnership: "vendor-session",
           images: true,
           // Cloud box, Local VM, and VPS computers all mount through the
           // global mcp_config.json above. Only full-auto instances advertise

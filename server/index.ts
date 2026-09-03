@@ -2991,7 +2991,7 @@ async function startTurn(
     instanceId,
     lastInstanceId: task.lastInstanceId,
     resumeCursors: task.resumeCursors,
-    replaysNatively: instance.driverKind === "grok",
+    ownership: instance.adapter.capabilities.contextOwnership,
   });
   // Snapshot the cursor alongside the context decision. An external result
   // can arrive during async computer/setup work and clear the task cursor;

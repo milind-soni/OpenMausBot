@@ -251,7 +251,7 @@ export const BoxAgentDriver: ProviderDriver<BoxAgentConfig> = {
       snapshot,
       adapter: {
         provider: DRIVER_KIND,
-        capabilities: { sessionModelSwitch: "in-session" },
+        capabilities: { sessionModelSwitch: "in-session", contextOwnership: "vendor-session" },
         sendTurn,
         interruptTurn: async (threadId) => active.get(threadId)?.cancel(),
         respondToRequest: async () => "unavailable" as const, // this engine has no asks to answer

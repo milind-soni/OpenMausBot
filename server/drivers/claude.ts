@@ -1295,6 +1295,7 @@ export const ClaudeDriver: ProviderDriver<ClaudeConfig> = {
         provider: DRIVER_KIND,
         capabilities: {
           sessionModelSwitch: "in-session",
+          contextOwnership: "vendor-session",
           agentsMcp: true,
         customMcp: true,
           computerMcp: true,

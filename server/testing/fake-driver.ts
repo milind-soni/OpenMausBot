@@ -2,6 +2,7 @@
 // deliberately tiny: tests reach into the returned handle to emit
 // canonical events as if the provider produced them.
 import type {
+  ContextOwnership,
   DriverCreateInput,
   EffortLevel,
   ProviderDriver,
@@ -19,6 +20,10 @@ export interface FakeDriverOptions {
   failSnapshot?: string;
   /** effort levels this fake driver declares, forwarded onto capabilities. */
   effortLevels?: readonly EffortLevel[];
+  /** context ownership this fake driver declares. Defaults to
+   * `vendor-session`, matching the installed-CLI engines most tests stand
+   * in for; set `omb-replay` to exercise structured-history paths. */
+  contextOwnership?: ContextOwnership;
 }
 
 export interface FakeDriverHandle {
@@ -65,7 +70,11 @@ export function makeFakeDriver(opts: FakeDriverOptions = {}): FakeDriverHandle {
           },
           adapter: {
             provider: kind,
-            capabilities: { sessionModelSwitch: "unsupported", effortLevels: opts.effortLevels },
+            capabilities: {
+              sessionModelSwitch: "unsupported",
+              contextOwnership: opts.contextOwnership ?? "vendor-session",
+              effortLevels: opts.effortLevels,
+            },
             sendTurn: async () => ({ turnId: "fake-turn" }),
             interruptTurn: async () => {},
             respondToRequest: async () => "unavailable" as const, // this engine has no asks to answer

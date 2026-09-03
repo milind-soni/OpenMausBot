@@ -5,6 +5,10 @@
 // Stream. The shapes and names are kept so the two codebases stay mutually
 // readable.
 
+import type { ContextOwnership, TurnContextPlan } from "./context/types.ts";
+
+export type { ContextOwnership, TurnContextPlan };
+
 export type DriverKind = string;
 export type InstanceId = string;
 export type ThreadId = string;
@@ -158,8 +162,13 @@ export interface SendTurnInput {
   model?: string;
   effort?: EffortLevel;
   resumeCursor?: unknown;
-  /** Prior turns for transcript-replay providers (API-backed drivers). */
+  /** Prior turns for transcript-replay providers (API-backed drivers).
+   * Superseded by `context` as drivers migrate onto the plan. */
   transcript?: Array<{ role: "user" | "assistant"; text: string }>;
+  /** The authoritative, provider-neutral context for this turn. `text` and
+   * `transcript` remain as compatibility projections of it while drivers
+   * migrate. */
+  context?: TurnContextPlan;
   /** Bot persona (name/title/description) as a system prompt. */
   system?: string;
   /** Per-bot integrations the driver may hand to the agent as tools. */
@@ -219,6 +228,12 @@ export interface ProviderAdapter {
   readonly provider: DriverKind;
   readonly capabilities: {
     sessionModelSwitch: "in-session" | "unsupported";
+    /** Who owns this engine's model-facing context. Required, because the
+     * wrong default is silent: a driver that receives structured history but
+     * is not declared `omb-replay` also gets that history inlined into its
+     * prompt, and sends the whole branch twice. Read the union's own doc for
+     * what each mode means. */
+    contextOwnership: ContextOwnership;
     /** True when the driver mounts turn.integrations.agents as MCP tools —
      * the harness only offers agents tooling (and prompts about it) to
      * drivers that can actually hand it to the agent. */
@@ -330,9 +345,15 @@ export interface ModelCatalog {
      * same model id stay distinguishable. */
     provider?: string;
     /** total context window in tokens, when the driver knows it — sizes
-     * the model-facing rebuild (server/context-rebuild.ts). Unknown falls
-     * back to a pattern table over the model id, then a conservative default. */
+     * the model-facing rebuild (server/context/). Unknown falls back to a
+     * pattern table over the model id, then a conservative default. Most
+     * engines declare nothing here, so the pattern table is the primary
+     * path rather than a rare fallback. */
     contextWindow?: number;
+    /** the most the model may generate, when the driver knows it. Reserved
+     * out of the history budget so a long answer cannot overflow the
+     * window that history was sized against. */
+    maxOutputTokens?: number;
   }>;
 }
 

@@ -38,7 +38,7 @@ const prepare = (over: Partial<PrepareTurnContextInput> = {}) => {
     instanceId: "claude",
     lastInstanceId: "claude",
     resumeCursors: { claude: "s1" },
-    replaysNatively: false,
+    ownership: "vendor-session",
     ...over,
   });
 };
@@ -140,24 +140,24 @@ describe("prepareTurnContext — resume and replay", () => {
     expect(out.turnText.endsWith("what now?")).toBe(true);
   });
 
-  it("DEFECT: sends the whole branch TWICE to a transcript-replay engine that is not `grok`", () => {
-    // `server/index.ts` decides this with `driverKind === "grok"`, but
-    // `openai-compat` and `minimax` are also createOpenAIChatRuntime drivers,
-    // and that runtime always prepends `turn.transcript` before `turn.text`.
-    // So for those engines the branch arrives inlined in the prompt AND as
-    // structured messages.
-    const out = prepare({ activeMessages: history, rewound: true, replaysNatively: false });
-    expect(out.transcript.map((t) => t.text)).toContain("my dog is Biscuit");
+  it("sends history exactly once to an omb-replay engine, whatever its driver kind", () => {
+    // Was a defect: dispatch decided this with `driverKind === "grok"`, so
+    // openai-compat and minimax — the same createOpenAIChatRuntime, which
+    // always prepends `turn.transcript` before `turn.text` — received the
+    // branch inlined in the prompt AND as structured messages. Ownership is
+    // now declared by the driver, so all three behave identically.
+    for (const flags of [{ rewound: true }, { externallyUpdated: true }]) {
+      const out = prepare({ activeMessages: history, ownership: "omb-replay", ...flags });
+      expect(out.transcript.map((t) => t.text)).toContain("my dog is Biscuit");
+      expect(out.turnText).toBe("what now?");
+      expect(out.resume).toBe(false);
+    }
+  });
+
+  it("still rebuilds inline for a vendor-session engine, which has no structured channel", () => {
+    const out = prepare({ activeMessages: history, ownership: "vendor-session", rewound: true });
     expect(out.turnText).toContain("User: my dog is Biscuit");
   });
-
-  it("sends it once to `grok`, the one engine the driver-kind test names", () => {
-    const out = prepare({ activeMessages: history, rewound: true, replaysNatively: true });
-    expect(out.transcript.map((t) => t.text)).toContain("my dog is Biscuit");
-    expect(out.turnText).toBe("what now?");
-  });
-
-  it.todo("sends history exactly once to every omb-replay engine, not only to grok");
 
   it("never inlines a replay it has no history for", () => {
     const out = prepare({ activeMessages: [], rewound: true });

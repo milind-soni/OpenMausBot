@@ -280,7 +280,7 @@ export function createOpenAIChatRuntime<Config>(options: RuntimeOptions<Config>)
       : { state: "unavailable", reason: options.unavailableReason },
     adapter: {
       provider: options.driverKind,
-      capabilities: { sessionModelSwitch: "in-session" },
+      capabilities: { sessionModelSwitch: "in-session", contextOwnership: "omb-replay" },
       sendTurn,
       interruptTurn: async (threadId) => active.get(threadId)?.abort(),
       respondToRequest: async () => "unavailable" as const,

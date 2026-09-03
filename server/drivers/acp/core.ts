@@ -792,6 +792,8 @@ export function createAcpDriver(support: AcpSupport): ProviderDriver<AcpConfig> 
           provider: DRIVER_KIND,
           capabilities: {
             sessionModelSwitch: "unsupported",
+            // the installed ACP agent owns its session and its inner loop
+            contextOwnership: "vendor-session",
             agentsMcp: true,
         customMcp: true,
             computerMcp: true,
