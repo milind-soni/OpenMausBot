@@ -1149,6 +1149,59 @@ describe("harness HTTP API", () => {
       });
       const state = (await api("GET", "/api/bots?messages=0")).body;
       expect(state.bots.some((bot: { name: string }) => bot.name === "Forbidden Operator")).toBe(false);
+
+      // Exercise /api/internal/create-room, /api/internal/manage-room, and /api/internal/move-bot
+      const createRoomResp = await fetch(`${BASE}/api/internal/create-room`, {
+        method: "POST",
+        headers: internalHeaders,
+        body: JSON.stringify({
+          fromBotId: chief.id,
+          fromThreadId: chief.threadId,
+          name: "Chief Managed Team",
+          memberIds: [chief.id, outsider.id],
+          section: "Channel creation test",
+          bulletin: "Room bulletin.",
+        }),
+      });
+      expect(createRoomResp.status).toBe(201);
+      const createdRoom: any = await createRoomResp.json();
+      expect(createdRoom).toMatchObject({
+        name: "Chief Managed Team",
+        section: "Channel creation test",
+        memberCount: 2,
+      });
+
+      const manageRoomResp = await fetch(`${BASE}/api/internal/manage-room`, {
+        method: "POST",
+        headers: internalHeaders,
+        body: JSON.stringify({
+          fromBotId: chief.id,
+          fromThreadId: chief.threadId,
+          roomId: createdRoom.id,
+          action: "rename",
+          name: "Renamed Chief Team",
+        }),
+      });
+      expect(manageRoomResp.status).toBe(200);
+      const botsState = (await api("GET", "/api/bots?messages=0")).body;
+      const groupCheck = botsState.groups.find((g: { id: string }) => g.id === createdRoom.id);
+      expect(groupCheck?.name).toBe("Renamed Chief Team");
+
+      const moveBotResp = await fetch(`${BASE}/api/internal/move-bot`, {
+        method: "POST",
+        headers: internalHeaders,
+        body: JSON.stringify({
+          fromBotId: chief.id,
+          fromThreadId: chief.threadId,
+          botId: outsider.id,
+          section: "Channel creation test",
+        }),
+      });
+      expect(moveBotResp.status).toBe(200);
+      const movedBot = (await api("GET", "/api/bots?messages=0")).body.bots.find((b: { id: string }) => b.id === outsider.id);
+      expect(movedBot?.section).toBe("Channel creation test");
+
+      await api("DELETE", `/api/groups/${createdRoom.id}`);
     } finally {
       await api("POST", `/api/bots/${chief.id}/interrupt`);
       if (outsiderChannel?.id) await api("DELETE", `/api/groups/${outsiderChannel.id}`);

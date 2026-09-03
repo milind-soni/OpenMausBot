@@ -292,6 +292,69 @@ const TOOLS = [
     },
   },
   {
+    name: "create_room",
+    description:
+      "Create a group chat room (channel) within a sidebar section and assign its member bots. Only a section's Chief of Staff may use this.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        name: { type: "string", description: "Display name for the room (e.g. \"Nalamdesk Team\")." },
+        member_bot_ids: {
+          type: "array",
+          items: { type: "string" },
+          description: "List of bot IDs to include as members of the room.",
+        },
+        section: {
+          type: "string",
+          description: "Optional section name to file this room under. Defaults to the Chief of Staff's section.",
+        },
+        bulletin: {
+          type: "string",
+          description: "Optional initial bulletin / goal / instructions pinned for this room.",
+        },
+      },
+      required: ["name", "member_bot_ids"],
+    },
+  },
+  {
+    name: "manage_room",
+    description:
+      "Manage an existing group room: add/remove/set member bots, rename the room, update its section, or change its bulletin. Only a section's Chief of Staff may use this.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        room_id: { type: "string", description: "The ID of the group room to manage." },
+        action: {
+          type: "string",
+          enum: ["add_members", "remove_members", "set_members", "rename", "set_section", "set_bulletin"],
+          description: "The action to perform on the room.",
+        },
+        member_bot_ids: {
+          type: "array",
+          items: { type: "string" },
+          description: "List of bot IDs when action is add_members, remove_members, or set_members.",
+        },
+        name: { type: "string", description: "New name for the room when action is rename." },
+        section: { type: "string", description: "Target section name when action is set_section." },
+        bulletin: { type: "string", description: "New bulletin text when action is set_bulletin." },
+      },
+      required: ["room_id", "action"],
+    },
+  },
+  {
+    name: "move_bot",
+    description:
+      "Move a bot to a different sidebar section. Only a section's Chief of Staff may use this.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        bot_id: { type: "string", description: "The ID of the bot to move." },
+        section: { type: "string", description: "Target section name (e.g. \"Nalamdesk\" or empty/\"General\" for unsectioned)." },
+      },
+      required: ["bot_id", "section"],
+    },
+  },
+  {
     name: "request_credential",
     description:
       "Ask the user for a supported API key through OpenMausBot's secure credential flow. On desktop this shows a secure entry card; on mobile it only shows a handoff telling the user to open the conversation on their computer, because credentials cannot be entered from the mobile app. Never claim a secure field opened on mobile, and never ask the user to paste a secret into chat. The secret is saved by the desktop app and is never returned to you. After calling this tool, end the turn; OpenMausBot resumes the task after the user saves or declines.",
@@ -591,6 +654,83 @@ async function callTool(name: string, args: Json): Promise<{ text: string; isErr
     return {
       text: `Created @${r.name ?? botName} in ${r.section ?? "General"} [id: ${r.id}]. Assign work with delegate_bot.`,
     };
+  }
+  if (name === "create_room") {
+    const roomName = String(args.name ?? "").trim();
+    const memberIds = Array.isArray(args.member_bot_ids)
+      ? args.member_bot_ids.map((id) => String(id).trim()).filter(Boolean)
+      : [];
+    const section = typeof args.section === "string" ? args.section.trim() : undefined;
+    const bulletin = typeof args.bulletin === "string" ? args.bulletin.trim() : undefined;
+    if (!roomName) {
+      return { text: "create_room needs a room name.", isError: true };
+    }
+    if (!memberIds.length) {
+      return { text: "create_room needs at least one bot ID in member_bot_ids.", isError: true };
+    }
+    const r = await api(`/api/internal/create-room`, {
+      method: "POST",
+      body: JSON.stringify({
+        fromBotId: BOT_ID,
+        fromThreadId: THREAD_ID,
+        name: roomName,
+        memberIds,
+        section,
+        bulletin,
+      }),
+    });
+    if (r.error) return { text: `Couldn't create room: ${r.error}`, isError: true };
+    return {
+      text: `Created room “${r.name ?? roomName}” in section “${r.section ?? "General"}” [id: ${r.id}] with ${r.memberCount ?? memberIds.length} members.`,
+    };
+  }
+  if (name === "manage_room") {
+    const roomId = String(args.room_id ?? "").trim();
+    const action = String(args.action ?? "").trim();
+    if (!roomId || !action) {
+      return { text: "manage_room needs room_id and action.", isError: true };
+    }
+    const memberIds = Array.isArray(args.member_bot_ids)
+      ? args.member_bot_ids.map((id) => String(id).trim()).filter(Boolean)
+      : undefined;
+    const roomName = typeof args.name === "string" ? args.name.trim() : undefined;
+    const section = typeof args.section === "string" ? args.section.trim() : undefined;
+    const bulletin = typeof args.bulletin === "string" ? args.bulletin.trim() : undefined;
+    const r = await api(`/api/internal/manage-room`, {
+      method: "POST",
+      body: JSON.stringify({
+        fromBotId: BOT_ID,
+        fromThreadId: THREAD_ID,
+        roomId,
+        action,
+        memberIds,
+        name: roomName,
+        section,
+        bulletin,
+      }),
+    });
+    if (r.error) return { text: `Couldn't manage room: ${r.error}`, isError: true };
+    const message = typeof r.message === "string" ? r.message : `Updated room ${roomId}.`;
+    return { text: message };
+  }
+  if (name === "move_bot") {
+    const targetBotId = String(args.bot_id ?? "").trim();
+    const targetSection = String(args.section ?? "").trim();
+    if (!targetBotId) {
+      return { text: "move_bot needs bot_id.", isError: true };
+    }
+    const r = await api(`/api/internal/move-bot`, {
+      method: "POST",
+      body: JSON.stringify({
+        fromBotId: BOT_ID,
+        fromThreadId: THREAD_ID,
+        botId: targetBotId,
+        section: targetSection,
+      }),
+    });
+    if (r.error) return { text: `Couldn't move bot: ${r.error}`, isError: true };
+    const message = typeof r.message === "string" ? r.message : `Moved @${r.botName ?? targetBotId} to ${r.section ?? "General"}.`;
+    return { text: message };
   }
   if (name === "request_credential") {
     const credentialId = args.credential_id;

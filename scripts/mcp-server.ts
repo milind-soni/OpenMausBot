@@ -97,12 +97,21 @@ export async function probeBaseUrls(candidates: string[]): Promise<string> {
   throw new Error(`Could not find a running OpenMausBot server. ${failures.join("; ")}`);
 }
 
+export function resetDiscoveredBaseUrl(): void {
+  discoveredBaseUrl = undefined;
+}
+
 export async function resolveBaseUrl(): Promise<string> {
+  const currentConfiguredUrl = process.env.OPENMAUSBOT_URL ||
+    (process.env.OMB_PORT ? `http://127.0.0.1:${process.env.OMB_PORT}` : undefined);
   if (discoveredBaseUrl) return discoveredBaseUrl;
-  if (process.env.OPENMAUSBOT_TOKEN?.trim() && !configuredUrl) {
+  if (process.env.OPENMAUSBOT_TOKEN?.trim() && !currentConfiguredUrl) {
     throw new Error("Set OPENMAUSBOT_URL or OMB_PORT when using OPENMAUSBOT_TOKEN so credentials are never sent during port discovery");
   }
-  discoveredBaseUrl = await probeBaseUrls(DISCOVERY_URLS);
+  const discoveryUrls = currentConfiguredUrl
+    ? [validateBaseUrl(currentConfiguredUrl)]
+    : DISCOVERY_URLS;
+  discoveredBaseUrl = await probeBaseUrls(discoveryUrls);
   return discoveredBaseUrl;
 }
 

@@ -6444,6 +6444,145 @@ const server = createServer(async (req, res) => {
           model: safeBot.modelSelection.model,
         });
       }
+      if (method === "POST" && path === "/api/internal/create-room") {
+        const body = await readBody(req);
+        const fromBotId = String(body.fromBotId ?? "");
+        const chief = store.bot(fromBotId);
+        if (!chief) return json(res, 403, { error: "unknown sender" });
+        const fromThreadId = String(body.fromThreadId ?? chief.threadId);
+        if (!connectorThread(chief.id, fromThreadId)) {
+          return json(res, 403, { error: "source conversation does not belong to sender" });
+        }
+        if (!chief.chiefOfStaff) {
+          return json(res, 403, { error: "only a section's Chief of Staff can create rooms" });
+        }
+        const name = String(body.name ?? "").trim();
+        if (!name) return json(res, 400, { error: "room name is required" });
+        if (name.length > 80) return json(res, 400, { error: "room name must be at most 80 characters" });
+        const rawMemberIds = Array.isArray(body.memberIds) ? (body.memberIds as unknown[]) : [];
+        const memberIds: string[] = [...new Set(rawMemberIds.map((id) => String(id ?? "").trim()).filter(Boolean))];
+        if (!memberIds.length) return json(res, 400, { error: "at least one valid bot member is required" });
+        const validBots = memberIds.map((id: string) => store.bot(id)).filter((b) => b && !b.hidden);
+        if (validBots.length !== memberIds.length) {
+          return json(res, 400, { error: "one or more member bot IDs are invalid or hidden" });
+        }
+        const requestedSection = typeof body.section === "string" ? body.section.trim() : "";
+        const targetSection = requestedSection || chief.section || undefined;
+        const bulletin = typeof body.bulletin === "string" ? body.bulletin.trim() : "";
+        const group = store.createGroup(name, memberIds, false, targetSection, {
+          bulletin,
+          completed: true,
+        });
+        return json(res, 201, {
+          id: group.id,
+          name: group.name,
+          section: group.section || "General",
+          memberCount: group.memberIds.length,
+          memberIds: group.memberIds,
+        });
+      }
+      if (method === "POST" && path === "/api/internal/manage-room") {
+        const body = await readBody(req);
+        const fromBotId = String(body.fromBotId ?? "");
+        const chief = store.bot(fromBotId);
+        if (!chief) return json(res, 403, { error: "unknown sender" });
+        const fromThreadId = String(body.fromThreadId ?? chief.threadId);
+        if (!connectorThread(chief.id, fromThreadId)) {
+          return json(res, 403, { error: "source conversation does not belong to sender" });
+        }
+        if (!chief.chiefOfStaff) {
+          return json(res, 403, { error: "only a section's Chief of Staff can manage rooms" });
+        }
+        const roomId = String(body.roomId ?? "").trim();
+        const action = String(body.action ?? "").trim();
+        const group = store.group(roomId);
+        if (!group || group.dm) return json(res, 404, { error: "room not found" });
+
+        if (action === "rename") {
+          const newName = String(body.name ?? "").trim();
+          if (!newName) return json(res, 400, { error: "new room name is required" });
+          if (newName.length > 80) return json(res, 400, { error: "room name must be at most 80 characters" });
+          store.patchGroup(group.id, { name: newName });
+          return json(res, 200, { ok: true, message: `Renamed room to “${newName}”.` });
+        }
+        if (action === "set_section") {
+          const rawSection = typeof body.section === "string" ? body.section.trim() : "";
+          const targetSection = rawSection ? sectionKey(rawSection) : undefined;
+          store.patchGroup(group.id, { section: targetSection });
+          return json(res, 200, { ok: true, message: `Moved room “${group.name}” to section “${targetSection || "General"}”.` });
+        }
+        if (action === "set_bulletin") {
+          const bulletin = typeof body.bulletin === "string" ? body.bulletin.trim() : "";
+          store.patchGroup(group.id, { bulletin });
+          return json(res, 200, { ok: true, message: `Updated bulletin for room “${group.name}”.` });
+        }
+        if (action === "add_members" || action === "remove_members" || action === "set_members") {
+          const rawMemberIds = Array.isArray(body.memberIds) ? (body.memberIds as unknown[]) : [];
+          const inputIds: string[] = [...new Set(rawMemberIds.map((id) => String(id ?? "").trim()).filter(Boolean))];
+          if (!inputIds.length && action !== "set_members") {
+            return json(res, 400, { error: "at least one bot ID is required in memberIds" });
+          }
+          let nextMemberIds: string[];
+          if (action === "add_members") {
+            const validBots = inputIds.map((id: string) => store.bot(id)).filter((b) => b && !b.hidden);
+            if (validBots.length !== inputIds.length) {
+              return json(res, 400, { error: "one or more member bot IDs are invalid or hidden" });
+            }
+            nextMemberIds = [...new Set([...group.memberIds, ...inputIds])];
+          } else if (action === "remove_members") {
+            nextMemberIds = group.memberIds.filter((id) => !inputIds.includes(id));
+            if (!nextMemberIds.length) {
+              return json(res, 400, { error: "cannot remove all members from a room" });
+            }
+          } else {
+            const validBots = inputIds.map((id: string) => store.bot(id)).filter((b) => b && !b.hidden);
+            if (validBots.length !== inputIds.length || !inputIds.length) {
+              return json(res, 400, { error: "at least one valid bot member is required" });
+            }
+            nextMemberIds = inputIds;
+          }
+          store.patchGroup(group.id, { memberIds: nextMemberIds });
+          return json(res, 200, {
+            ok: true,
+            memberCount: nextMemberIds.length,
+            memberIds: nextMemberIds,
+            message: `Room “${group.name}” members updated (${nextMemberIds.length} members).`,
+          });
+        }
+        return json(res, 400, { error: `unsupported action "${action}"` });
+      }
+      if (method === "POST" && path === "/api/internal/move-bot") {
+        const body = await readBody(req);
+        const fromBotId = String(body.fromBotId ?? "");
+        const chief = store.bot(fromBotId);
+        if (!chief) return json(res, 403, { error: "unknown sender" });
+        const fromThreadId = String(body.fromThreadId ?? chief.threadId);
+        if (!connectorThread(chief.id, fromThreadId)) {
+          return json(res, 403, { error: "source conversation does not belong to sender" });
+        }
+        if (!chief.chiefOfStaff) {
+          return json(res, 403, { error: "only a section's Chief of Staff can move bots" });
+        }
+        const targetBotId = String(body.botId ?? "").trim();
+        const bot = store.bot(targetBotId);
+        if (!bot || bot.hidden) return json(res, 404, { error: "bot not found" });
+        const rawSection = typeof body.section === "string" ? body.section.trim() : "";
+        const targetSection = rawSection ? sectionKey(rawSection) : "";
+        const resSet = store.setBotsSection([bot.id], targetSection);
+        if (!resSet.ok) {
+          if (resSet.reason === "chief-conflict") {
+            return json(res, 409, { error: "cannot move: destination section already has a Chief of Staff" });
+          }
+          return json(res, 400, { error: "failed to move bot" });
+        }
+        return json(res, 200, {
+          ok: true,
+          botId: bot.id,
+          botName: bot.name,
+          section: targetSection || "General",
+          message: `Moved @${bot.name} to section “${targetSection || "General"}”.`,
+        });
+      }
       if (method === "POST" && path === "/api/internal/request-credential") {
         const body = await readBody(req);
         const fromBotId = String(body.fromBotId ?? "");

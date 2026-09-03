@@ -45,6 +45,7 @@ function knownDirs(): string[] {
     join(home, ".deno", "bin"),
     join(home, "bin"),
     ...nvmBinDirs(),
+    ...((process.versions as Record<string, string | undefined>).electron ? [] : [dirname(process.execPath)]),
   ];
 }
 
