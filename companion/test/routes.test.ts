@@ -7,7 +7,7 @@
 // and the one that quietly stopped being true once before.
 import { describe, expect, it } from "vitest";
 
-import { denyReason } from "../src/routes.ts";
+import { denyReason, voiceConfigDenial } from "../src/routes.ts";
 
 const ask = (method: string, path: string, authenticated = true) =>
   denyReason({ method, path, authenticated });
@@ -75,7 +75,9 @@ describe("what the app may do", () => {
     ["GET", "/api/attachments/avatar-123.webp"],
     ["POST", "/api/files"],
     ["GET", "/api/tts/voices"],
+    ["POST", "/api/tts/prepare"],
     ["POST", "/api/tts/speak"],
+    ["PUT", "/api/config"],
     ["GET", "/api/routines"],
     ["POST", "/api/routines"],
     ["PATCH", "/api/routines/routine_1"],
@@ -95,7 +97,6 @@ describe("what the app may do", () => {
 describe("what it may not", () => {
   it("refuses host configuration, and says where it happens", () => {
     for (const [method, path] of [
-      ["PUT", "/api/config"],
       ["PATCH", "/api/config"],
       ["GET", "/api/devices"],
       ["GET", "/api/companion"],
@@ -178,7 +179,9 @@ describe("what it may not", () => {
     expect(allowed("GET", "/api/sidebar-sections")).toBe(false);
     expect(allowed("PATCH", "/api/sidebar-sections")).toBe(false);
     expect(allowed("POST", "/api/sidebar-sections/extra")).toBe(false);
-    expect(allowed("PUT", "/api/config")).toBe(false);
+    // Allowed by path; the proxy reads the body and forwards only a voice change.
+    expect(allowed("PUT", "/api/config")).toBe(true);
+    expect(allowed("PATCH", "/api/config")).toBe(false);
     expect(allowed("GET", "/api/attachments/../config.json")).toBe(false);
     expect(allowed("GET", "/api/files")).toBe(false);
     expect(allowed("POST", "/api/files/anything")).toBe(false);
@@ -214,5 +217,38 @@ describe("what it may not", () => {
       expect(allowed("POST", path), path).toBe(false);
       expect(allowed("DELETE", path), path).toBe(false);
     }
+  });
+});
+
+describe("the voice config write", () => {
+  it("forwards exactly a voice key or engine change", () => {
+    expect(voiceConfigDenial({ tts: { key: "sk_live_abc" } })).toBeNull();
+    expect(voiceConfigDenial({ tts: { key: "" } })).toBeNull();
+    expect(voiceConfigDenial({ tts: { provider: "system" } })).toBeNull();
+    expect(voiceConfigDenial({ tts: { provider: "elevenlabs", key: "k" } })).toBeNull();
+  });
+
+  it("refuses every other key, and any other field beside the voice ones", () => {
+    for (const body of [
+      { xai: { apiKey: "x" } },
+      { tts: { key: "k" }, xai: { apiKey: "x" } },
+      { tts: { voice: "rachel" } },
+      { tts: { key: "k", voice: "rachel" } },
+      { tts: {} },
+      { tts: "k" },
+      {},
+      [],
+      null,
+      "tts",
+    ]) {
+      expect(voiceConfigDenial(body), JSON.stringify(body)).toMatch(/on your computer/);
+    }
+  });
+
+  it("refuses a key that is not a key", () => {
+    expect(voiceConfigDenial({ tts: { key: 42 } })).toMatch(/API key/);
+    expect(voiceConfigDenial({ tts: { key: "a\nb" } })).toMatch(/API key/);
+    expect(voiceConfigDenial({ tts: { key: "k".repeat(513) } })).toMatch(/API key/);
+    expect(voiceConfigDenial({ tts: { provider: "cartesia" } })).toMatch(/voice engine/);
   });
 });

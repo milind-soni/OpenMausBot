@@ -54,6 +54,12 @@ class SpeechDictation internal constructor(
     private val postMain: (() -> Unit) -> Unit = { block ->
         Handler(Looper.getMainLooper()).post(block)
     },
+    /** Runs [block] after a delay; the call endpointer below is a chain of these. */
+    private val postDelayed: (delayMillis: Long, block: () -> Unit) -> Unit = { delayMillis, block ->
+        Handler(Looper.getMainLooper()).postDelayed(block, delayMillis)
+    },
+    /** Milliseconds from any fixed origin; only differences are read. */
+    private val clock: () -> Long = { System.nanoTime() / 1_000_000 },
 ) : DefaultLifecycleObserver {
 
     constructor(
@@ -79,6 +85,18 @@ class SpeechDictation internal constructor(
     private var attempt: Int = 0
     private var stopping: Boolean = false
 
+    // Call mode. Composer dictation runs until the person taps stop; a call
+    // has to notice when they have finished a sentence. The same silence
+    // endpointer as the desktop helper: the turn ends [turnGapMillis] after the
+    // transcript last *changed* — a recognizer may re-emit an unchanged
+    // partial, and only a change counts. An empty turn never ends on the
+    // timer: a call may be quiet for as long as the person needs before they
+    // begin. (The platform recognizer does give up on prolonged silence; that
+    // ends the turn empty, and the call listens again.)
+    private var turnGapMillis: Long? = null
+    private var onTurnEnded: ((String) -> Unit)? = null
+    private var lastTranscriptChange: Long = 0L
+
     private val _isListening = MutableStateFlow(false)
     private val _isStarting = MutableStateFlow(false)
     private val _transcript = MutableStateFlow("")
@@ -100,6 +118,9 @@ class SpeechDictation internal constructor(
             if (_isListening.value || _isStarting.value) {
                 stopLocked()
             } else {
+                // Composer dictation, not a call: no endpointer, no callback.
+                turnGapMillis = null
+                onTurnEnded = null
                 startLocked(capturing)
             }
         }
@@ -107,6 +128,43 @@ class SpeechDictation internal constructor(
 
     fun stop() {
         synchronized(lock) { stopLocked() }
+    }
+
+    /**
+     * One turn of a call: listen until [endpointGapMillis] of silence follows
+     * speech, then stop and hand the transcript to [onTurn]. A final result
+     * from the recognizer ends the turn too. Stopping any other way — hang up,
+     * an interruption — ends the turn without a callback.
+     */
+    fun listenForTurn(endpointGapMillis: Long, onTurn: (String) -> Unit) {
+        synchronized(lock) {
+            if (_isListening.value || _isStarting.value) return
+            turnGapMillis = endpointGapMillis
+            onTurnEnded = onTurn
+            startLocked("")
+            // A start that failed outright has already cleared the callback.
+            if (onTurnEnded != null) scheduleEndpointCheckLocked(generation)
+        }
+    }
+
+    private fun scheduleEndpointCheckLocked(gen: Int) {
+        postDelayed(ENDPOINT_POLL_MILLIS) {
+            synchronized(lock) {
+                if (gen != generation || stopping) return@synchronized
+                val gap = turnGapMillis ?: return@synchronized
+                val heard = _transcript.value.isNotEmpty() && clock() - lastTranscriptChange >= gap
+                if (_isListening.value && heard) endTurnLocked() else scheduleEndpointCheckLocked(gen)
+            }
+        }
+    }
+
+    /** Take the callback first — [stopLocked] clears it — and deliver it off the lock. */
+    private fun endTurnLocked() {
+        val callback = onTurnEnded ?: return
+        val heard = _transcript.value
+        onTurnEnded = null
+        stopLocked()
+        postMain { callback(heard) }
     }
 
     /** True while starting or listening — the composer must not accept edits. */
@@ -167,6 +225,7 @@ class SpeechDictation internal constructor(
         _error.value = null
         base = capturing.trim()
         _transcript.value = ""
+        lastTranscriptChange = clock()
         _isStarting.value = true
         stopping = false
         generation += 1
@@ -289,6 +348,8 @@ class SpeechDictation internal constructor(
 
     private fun stopLocked() {
         generation += 1
+        turnGapMillis = null
+        onTurnEnded = null
         attempt += 1
         _isStarting.value = false
         stopping = true
@@ -332,7 +393,12 @@ class SpeechDictation internal constructor(
         override fun onPartial(text: String) {
             synchronized(lock) {
                 if (!live() || !_isListening.value) return
-                _transcript.value = text
+                // Only a change restarts the silence clock: a recognizer may
+                // re-emit the same partial while the person is quiet.
+                if (text != _transcript.value) {
+                    _transcript.value = text
+                    lastTranscriptChange = clock()
+                }
             }
         }
 
@@ -341,8 +407,9 @@ class SpeechDictation internal constructor(
                 if (!live() || !_isListening.value) return
                 if (text.isNotEmpty()) _transcript.value = text
                 // Composer dictation does not wait for a later final beyond
-                // this — matching iOS stopping when the recognizer finalizes.
-                stopLocked()
+                // this — matching iOS stopping when the recognizer finalizes;
+                // on a call, that is the turn ending.
+                if (onTurnEnded != null) endTurnLocked() else stopLocked()
             }
         }
 
@@ -376,6 +443,10 @@ class SpeechDictation internal constructor(
                                 localeIndex = 0,
                                 gen = gen,
                             )
+                        } else if (onTurnEnded != null) {
+                            // On a call, silence the recognizer gave up on is an
+                            // empty turn, not a failure: the call listens again.
+                            endTurnLocked()
                         } else {
                             _error.value = TRANSCRIBE_FAILED_MESSAGE
                             stopLocked()
@@ -394,6 +465,7 @@ class SpeechDictation internal constructor(
             "Dictation isn't available for this language."
         const val START_FAILED_MESSAGE: String = "Couldn't start the microphone."
         const val TRANSCRIBE_FAILED_MESSAGE: String = "Couldn't transcribe that."
+        private const val ENDPOINT_POLL_MILLIS: Long = 100L
     }
 }
 

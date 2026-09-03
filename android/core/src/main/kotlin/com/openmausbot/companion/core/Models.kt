@@ -540,6 +540,13 @@ data class InstanceCapabilities(
 @Serializable
 data class InstanceList(val instances: List<Instance>)
 
+/**
+ * A reply split into utterances the computer can voice, and whether it can
+ * voice them at all — `POST /api/tts/prepare`.
+ */
+@Serializable
+data class PreparedSpeech(val ready: Boolean, val utterances: List<String>)
+
 /** Which engine actually speaks. `VoiceProvider` in `server/tts/index.ts`. */
 enum class VoiceProvider { ELEVENLABS, SYSTEM }
 

@@ -366,6 +366,7 @@ private fun PairedScreen(
             onBack = navigator::pop,
             onOpenRoutines = { navigator.push(Destination.Routines) },
             onOpenConnectedApps = { navigator.push(Destination.ConnectedApps) },
+            onOpenVoice = { navigator.push(Destination.Voice) },
         )
         Destination.Routines -> TasksRoutinesScreen(
             onBack = navigator::pop,
@@ -374,6 +375,7 @@ private fun PairedScreen(
             onOpenChat = navigator::open,
         )
         Destination.ConnectedApps -> ConnectedAppsScreen(onBack = navigator::pop)
+        Destination.Voice -> VoiceSettingsScreen(onBack = navigator::pop)
         // One branch for both shapes of chat address, so a notification's thread
         // becoming an addressed chat re-reads the same screen instead of
         // rebuilding it.

@@ -56,6 +56,48 @@ export function isMessageFileDownload(method: string, path: string): boolean {
   return method === MESSAGE_FILE_ROUTE.method && MESSAGE_FILE_ROUTE.path.test(path);
 }
 
+/** The one host-configuration write a phone may make: the workspace voice
+ * key and engine, so a call can be set up from the phone. The route itself
+ * is the desktop's general config PUT, which also carries every other
+ * provider key — so the proxy reads the body first and forwards only the
+ * shape `voiceConfigDenial` accepts. */
+export const VOICE_CONFIG_ROUTE = {
+  method: "PUT",
+  path: /^\/api\/config$/,
+} as const;
+
+export function isVoiceConfigWrite(method: string, path: string): boolean {
+  return method === VOICE_CONFIG_ROUTE.method && VOICE_CONFIG_ROUTE.path.test(path);
+}
+
+const VOICE_PROVIDERS = new Set(["elevenlabs", "system"]);
+
+/** Why a config write from a phone is refused, or null when it is exactly a
+ * voice-key or voice-engine change: `{ tts: { key?, provider? } }` and nothing
+ * else at either level. The key is bounded and free of control characters;
+ * the server still verifies it against the provider before saving. */
+export function voiceConfigDenial(body: unknown): string | null {
+  const refusal = "only the voice key and engine can be changed from a phone; other API keys are set on your computer";
+  if (!body || typeof body !== "object" || Array.isArray(body)) return refusal;
+  const top = body as Record<string, unknown>;
+  const keys = Object.keys(top);
+  if (keys.length !== 1 || keys[0] !== "tts") return refusal;
+  const tts = top.tts;
+  if (!tts || typeof tts !== "object" || Array.isArray(tts)) return refusal;
+  const fields = Object.keys(tts as Record<string, unknown>);
+  if (fields.length === 0 || fields.some((field) => field !== "key" && field !== "provider")) return refusal;
+  const { key, provider } = tts as { key?: unknown; provider?: unknown };
+  if (key !== undefined) {
+    if (typeof key !== "string" || Buffer.byteLength(key) > 512 || /[\u0000-\u001f\u007f]/.test(key)) {
+      return "that doesn't look like an API key";
+    }
+  }
+  if (provider !== undefined && (typeof provider !== "string" || !VOICE_PROVIDERS.has(provider))) {
+    return "unknown voice engine";
+  }
+  return null;
+}
+
 /** Every request the iOS app makes, and nothing else.
  *
  * Ids are `[\w-]+`, matching the harness's own route patterns. The paths
@@ -128,8 +170,13 @@ const ALLOWED: ReadonlyArray<{ method: string; path: RegExp }> = [
 
   // Renderer-neutral voice operations. Neither route reads or writes the
   // workspace ElevenLabs key; the phone receives labels or audio only.
+  // `prepare` splits a reply into utterances the way the desktop does and
+  // says whether the computer can voice them at all; it reads no key.
+  { method: "POST", path: /^\/api\/tts\/prepare$/ },
   { method: "GET", path: /^\/api\/tts\/voices$/ },
   { method: "POST", path: /^\/api\/tts\/speak$/ },
+  // The voice key and engine, and nothing else: the proxy gates the body.
+  VOICE_CONFIG_ROUTE,
 
   // Routines create ordinary tasks using an existing agent configuration.
   // Webhook management remains explicitly denied below.
@@ -161,7 +208,7 @@ const EXPLAINED: ReadonlyArray<{ path: RegExp; error: string }> = [
     // Losing the phone must not mean losing the ability to lock it out.
     error: "Phone settings are managed on your computer",
   },
-  { path: /^\/api\/config$/, error: "API keys can only be changed on your computer" },
+  { path: /^\/api\/config$/, error: "API keys other than the voice key can only be changed on your computer" },
   { path: /^\/api\/local-computer(\/|$)/, error: "the Local VM is set up on your computer" },
   {
     // Creating one exposes an endpoint to the internet, and rotating a
