@@ -918,7 +918,15 @@ final class Session: ObservableObject {
                 attachments: uploaded
             )
             let receipt = try await client.send(text: message, to: destination, sendId: sendID)
-            record(receipt, text: message, fallbackThreadId: chat.threadId)
+            // The ghost shows what was typed, not what was sent: `message`
+            // carries the <attached-file …> tags the harness reads, and a
+            // held message is a person's own words waiting, not transport.
+            // An attachment-only send has no words, so it falls back.
+            record(
+                receipt,
+                text: trimmed.isEmpty ? message : trimmed,
+                fallbackThreadId: chat.threadId
+            )
             attachmentSendIDs.removeValue(forKey: draftKey)
             actionError = nil
             return true

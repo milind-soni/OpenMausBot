@@ -198,16 +198,6 @@ struct ChatView: View {
                                 .accessibilityLabel("\(current.name) is working")
                         }
 
-                        // Sends the computer is holding until this turn ends.
-                        // They are not in the transcript on purpose, so this
-                        // is the only place they exist on screen.
-                        ForEach(queuedSends) { send in
-                            QueuedSendRow(send: send) {
-                                Task { await session.cancelQueued(send, in: current) }
-                            }
-                            .id("companion.queued.\(send.queueId)")
-                            .transition(.opacity)
-                        }
                     }
                     .padding(.horizontal, 16)
                     .padding(.vertical, 12)
@@ -721,12 +711,19 @@ struct ChatView: View {
         return session.steeringInstanceIds.contains(bot.modelSelection.instanceId)
     }
 
-    /// Something is waiting behind a live turn and the person can stop that
-    /// turn, which sends the waiting words now. Interrupting deliberately
-    /// does NOT drop the steer queue — that is what makes this a send.
-    private var canInject: Bool {
-        guard case .bot = current else { return false }
-        return current.busy && !queuedSends.isEmpty
+    /// Stop the running turn so the waiting words go now. The harness
+    /// deliberately does NOT drop its steer queue on an interrupt — that is
+    /// what makes stopping a send rather than a cancellation.
+    ///
+    /// nil where the phone cannot interrupt at all: a room. The button is
+    /// then simply not offered, rather than offered and broken.
+    private var injectNow: (() -> Void)? {
+        guard case let .bot(bot) = current else { return nil }
+        return {
+            Haptics.impact(.medium)
+            dictation.stop()
+            Task { await session.interrupt(bot: bot) }
+        }
     }
 
     /// True when this send will wait rather than run — the bot is working
@@ -1107,6 +1104,17 @@ struct ChatView: View {
                 .transition(.move(edge: .bottom).combined(with: .opacity))
             }
 
+            // Everything the computer is holding, stacked straight above
+            // the chat bar in the order it was sent.
+            ForEach(queuedSends) { send in
+                QueuedSendRow(
+                    send: send,
+                    onSteer: injectNow,
+                    onCancel: { Task { await session.cancelQueued(send, in: current) } }
+                )
+                .transition(.move(edge: .bottom).combined(with: .opacity))
+            }
+
             GlassGroup(spacing: 10) {
                 HStack(alignment: .bottom, spacing: 10) {
                     Button {
@@ -1178,55 +1186,34 @@ struct ChatView: View {
                             }
                             .onSubmit { submit() }
 
-                        // Inject takes the microphone's place rather than
-                        // send's: with words already waiting, stopping the
-                        // turn is the urgent control, and typing another
-                        // message has to keep working while one is held.
-                        // The harness keeps its steer queue across an
-                        // interrupt, which is what makes stopping a send.
-                        if canInject {
-                            Button {
-                                Haptics.impact(.medium)
-                                guard case let .bot(bot) = current else { return }
-                                dictation.stop()
-                                Task { await session.interrupt(bot: bot) }
-                            } label: {
-                                Image(systemName: "bolt.fill")
-                                    .font(.system(size: 15, weight: .semibold))
-                                    .foregroundStyle(Color.white)
-                                    .frame(width: 32, height: 32)
-                                    .background(Circle().fill(Color.green))
-                            }
-                            .buttonStyle(.plain)
-                            .padding(.bottom, 6)
-                            .accessibilityLabel("Send the queued message now")
-                            .accessibilityHint("Stops the current turn so the waiting message runs")
-                        } else {
-                            Button {
-                                composerFocused = false
-                                dictation.toggle(capturing: draft)
-                            } label: {
-                                Image(systemName: dictation.isListening ? "mic.fill" : "mic")
-                                    .font(.system(size: 15, weight: .semibold))
-                                    .foregroundStyle(dictation.isListening ? Color.red : Color.primary)
-                                    .frame(width: 32, height: 32)
-                                    .background(
-                                        Circle().fill(
-                                            dictation.isListening
-                                                ? Color.red.opacity(0.2)
-                                                : Color.secondary.opacity(0.12)
-                                        )
+                        Button {
+                            composerFocused = false
+                            dictation.toggle(capturing: draft)
+                        } label: {
+                            Image(systemName: dictation.isListening ? "mic.fill" : "mic")
+                                .font(.system(size: 15, weight: .semibold))
+                                .foregroundStyle(dictation.isListening ? Color.red : Color.primary)
+                                .frame(width: 32, height: 32)
+                                .background(
+                                    Circle().fill(
+                                        dictation.isListening
+                                            ? Color.red.opacity(0.2)
+                                            : Color.secondary.opacity(0.12)
                                     )
-                                    .symbolEffect(.pulse, isActive: dictation.isListening)
-                            }
-                            .buttonStyle(.plain)
-                            .disabled(preparingAttachments || sendingMessage)
-                            .padding(.bottom, 6)
-                            .accessibilityLabel(dictation.isListening ? "Stop dictation" : "Start dictation")
+                                )
+                                .symbolEffect(.pulse, isActive: dictation.isListening)
                         }
+                        .buttonStyle(.plain)
+                        .disabled(preparingAttachments || sendingMessage)
+                        .padding(.bottom, 6)
+                        .accessibilityLabel(dictation.isListening ? "Stop dictation" : "Start dictation")
 
+                        // One send key, one meaning, always an arrow. What
+                        // becomes of the message is said in words — in the
+                        // placeholder before it is sent, and on the waiting
+                        // bubble after — never in a glyph you have to decode.
                         Button { submit() } label: {
-                            Image(systemName: willQueue ? "clock" : "arrow.up")
+                            Image(systemName: "arrow.up")
                                 .font(.system(size: 15, weight: .bold))
                                 .foregroundStyle(canSend ? Color.white : Color.secondary)
                                 .frame(width: 32, height: 32)
