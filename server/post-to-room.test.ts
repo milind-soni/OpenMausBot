@@ -422,6 +422,52 @@ describe("post_to_room", () => {
     expect(await messagesOf(room.threadId)).toHaveLength(2);
   }, 40_000);
 
+  it("re-arms the room's ceiling once the person writes in it", async () => {
+    // The ceiling counts the posts nobody has answered. A person typing in
+    // the room is the human it would otherwise have sent the model to find —
+    // and it is what leaves the sender window and the ring any air to fire in.
+    const one = await makeBot("Answered One", "Answered");
+    const two = await makeBot("Answered Two", "Answered");
+    const room = await makeRoom("Answered room", [one.id, two.id], "Answered");
+
+    expect((await post(one.id, one.threadId, room.id, "first")).status).toBe(201);
+    expect((await post(two.id, two.threadId, room.id, "second")).status).toBe(201);
+    const shut = await post(one.id, one.threadId, room.id, "third");
+    expect(shut.status).toBe(429);
+
+    // the person says something in the room — no bot is mentioned, so nobody
+    // takes a turn; the room simply has a person in it again
+    expect((await api("POST", `/api/groups/${room.id}/messages`, { text: "thanks both" })).status).toBe(202);
+    const reopened = await post(one.id, one.threadId, room.id, "third");
+    expect(reopened.status, JSON.stringify(reopened.body)).toBe(201);
+    expect((await messagesOf(room.threadId)).filter((message) => message.role === "bot")).toHaveLength(3);
+  }, 40_000);
+
+  it("shuts the room on a three-bot ring, which no per-sender limit would see", async () => {
+    const a = await makeBot("Ring A", "Ring");
+    const b = await makeBot("Ring B", "Ring");
+    const c = await makeBot("Ring C", "Ring");
+    const room = await makeRoom("Ring room", [a.id, b.id, c.id], "Ring");
+
+    expect((await post(a.id, a.threadId, room.id, "one")).status).toBe(201);
+    expect((await post(b.id, b.threadId, room.id, "two")).status).toBe(201);
+    expect((await api("POST", `/api/groups/${room.id}/messages`, { text: "go on" })).status).toBe(202);
+    expect((await post(c.id, c.threadId, room.id, "three")).status).toBe(201);
+
+    // A → B → C → A. Every bot posted once, and the person is still there,
+    // so only the room's view of its own speaker sequence can catch this.
+    const closing = await post(a.id, a.threadId, room.id, "four");
+    expect(closing.status, JSON.stringify(closing.body)).toBe(429);
+    expect(str(closing.body.error)).toMatch(/loop/i);
+    expect(str(closing.body.error)).toMatch(/do not retry/i);
+
+    // and the room is shut for every member, not just the bot that closed it
+    const afterwards = await post(b.id, b.threadId, room.id, "five");
+    expect(afterwards.status).toBe(429);
+    expect(str(afterwards.body.error)).toMatch(/closed/i);
+    expect((await messagesOf(room.threadId)).filter((message) => message.role === "bot")).toHaveLength(3);
+  }, 40_000);
+
   it("refuses an identical repost without spending the room's budget", async () => {
     const bot = await makeBot("Repeater", "Repeats");
     const mate = await makeBot("Repeat Mate", "Repeats");

@@ -2,41 +2,70 @@
 // both sides — one millisecond inside it and one outside — because a
 // budget that only ever refuses, or only ever allows, passes a happy-path
 // test either way.
+//
+// Nothing here writes a record into a budget by hand. Every state a rule is
+// tested against is built by feeding posts through decideRoomPost and
+// keeping what it hands back, so a rule that the server could never drive
+// the budget into fails here instead of passing on invented history.
 import { describe, expect, it } from "vitest";
 
 import {
   decideRoomPost,
   emptyRoomPostBudget,
   type RoomPostBudget,
+  type RoomPostRefusal,
 } from "./room-post-budget.ts";
 
 const T0 = 1_760_000_000_000;
 
+/** One attempt. `lastHumanAt` is when the person last wrote in the room —
+ * the ceiling counts only what nobody has answered since. */
 const post = (
   budget: RoomPostBudget,
   botId: string,
   text: string,
   now: number,
-) => decideRoomPost(budget, { botId, botName: botId, text, now });
+  lastHumanAt?: number,
+) => {
+  const attempt = { botId, botName: botId, text, now };
+  return decideRoomPost(budget, lastHumanAt === undefined ? attempt : { ...attempt, lastHumanAt });
+};
 
 /** Seed a budget with allowed posts, failing loudly if one is refused. */
-const seed = (entries: Array<{ botId: string; text: string; now: number }>): RoomPostBudget => {
+const seed = (
+  entries: Array<{ botId: string; text: string; now: number; lastHumanAt?: number }>,
+): RoomPostBudget => {
   let budget = emptyRoomPostBudget();
   for (const entry of entries) {
-    const decision = post(budget, entry.botId, entry.text, entry.now);
+    const decision = post(budget, entry.botId, entry.text, entry.now, entry.lastHumanAt);
     if (!decision.allowed) throw new Error(`seed post was refused: ${decision.refusal}`);
     budget = decision.budget;
   }
   return budget;
 };
 
-/** A history written straight into the budget. The room ceiling is stricter
- * than both the ring and the per-sender window, so those two can only be
- * reached by handing the function a history it did not accumulate itself —
- * which is precisely what a raised ceiling would produce. */
-const history = (entries: Array<[string, string, number]>): RoomPostBudget => ({
-  posts: entries.map(([botId, text, at]) => ({ botId, text, at })),
-});
+/** The room a ring needs: three bots, one post each, with the person
+ * speaking once in the middle so the ceiling lets the third through. */
+const RING_SPOKE_AT = T0 + 1_500;
+const ringSetUp = (): RoomPostBudget =>
+  seed([
+    { botId: "a", text: "one", now: T0 },
+    { botId: "b", text: "two", now: T0 + 1_000 },
+    { botId: "c", text: "three", now: T0 + 2_000, lastHumanAt: RING_SPOKE_AT },
+  ]);
+
+/** One bot posting as fast as the person answers: ten posts inside a
+ * minute, none of them left unanswered, so only the sender window is left
+ * to stop the eleventh. */
+const floodedByOneBot = (): RoomPostBudget =>
+  seed(
+    Array.from({ length: 10 }, (_, i) => ({
+      botId: "a",
+      text: `flood ${i}`,
+      now: T0 + i * 100,
+      lastHumanAt: T0 + i * 100 - 50,
+    })),
+  );
 
 describe("decideRoomPost", () => {
   it("allows the first post into a quiet room and records it", () => {
@@ -64,18 +93,14 @@ describe("decideRoomPost", () => {
 
   it("trips the breaker when a third bot closes the ring back onto the first", () => {
     // A → B → C → A: nobody spoke twice, so every per-sender limit is happy
-    const budget = history([
-      ["a", "one", T0],
-      ["b", "two", T0 + 1_000],
-      ["c", "three", T0 + 2_000],
-    ]);
-    const closing = post(budget, "a", "four", T0 + 3_000);
+    const closing = post(ringSetUp(), "a", "four", T0 + 3_000, RING_SPOKE_AT);
     expect(closing.allowed).toBe(false);
     expect(closing.allowed === false && closing.refusal).toBe("ring");
     expect(closing.budget.trippedAt).toBe(T0 + 3_000);
 
-    // and the room stays shut for everyone, not just the bot that closed it
-    const afterwards = post(closing.budget, "d", "unrelated", T0 + 4_000);
+    // and the room stays shut for everyone, not just the bot that closed it —
+    // and for a person present in the room too, which the ceiling would not be
+    const afterwards = post(closing.budget, "d", "unrelated", T0 + 4_000, T0 + 3_900);
     expect(afterwards.allowed === false && afterwards.refusal).toBe("breaker");
     // …until the cooldown ends
     const cooled = post(closing.budget, "d", "unrelated", T0 + 3_000 + 5 * 60_000 + 1);
@@ -91,9 +116,14 @@ describe("decideRoomPost", () => {
     // it is refused, but by the room ceiling — never mislabelled as a ring
     expect(third.allowed).toBe(false);
     expect(third.allowed === false && third.refusal).toBe("escalate");
+
+    // and once the person has spoken, the same third post is simply allowed:
+    // two bots passing a message back and forth is not the shape being caught
+    const answered = post(budget, "a", "three", T0 + 2_000, T0 + 1_500);
+    expect(answered.allowed).toBe(true);
   });
 
-  it("sends the room to the human on its third bot post inside five minutes", () => {
+  it("sends the room to the human on its third unanswered bot post", () => {
     const budget = seed([
       { botId: "a", text: "one", now: T0 },
       { botId: "b", text: "two", now: T0 + 1_000 },
@@ -108,20 +138,53 @@ describe("decideRoomPost", () => {
     expect(later.allowed).toBe(true);
   });
 
-  it("caps one bot at ten posts a minute, and lets the cap lapse with the minute", () => {
-    // The room ceiling refuses long before the sender cap does, so the cap
-    // is observed through WHICH rule answers, not through an allowed post.
-    const nine = history(Array.from({ length: 9 }, (_, i): [string, string, number] => ["a", `x${i}`, T0 + i]));
-    const tenth = post(nine, "a", "ten", T0 + 10);
-    expect(tenth.allowed === false && tenth.refusal, "nine posts must still be under the sender cap").toBe("escalate");
+  it("re-arms the ceiling when the person writes in the room", () => {
+    const budget = seed([
+      { botId: "a", text: "one", now: T0 },
+      { botId: "b", text: "two", now: T0 + 1_000 },
+    ]);
+    // the human the ceiling would have gone to fetch is already here
+    const answered = post(budget, "c", "three", T0 + 2_000, T0 + 1_500);
+    expect(answered.allowed).toBe(true);
 
-    const full = history(Array.from({ length: 10 }, (_, i): [string, string, number] => ["a", `x${i}`, T0 + i]));
-    const eleventh = post(full, "a", "one too many", T0 + 20);
+    // but only for what came before them: two posts on, the room is shut again
+    const fourth = post(answered.budget, "d", "four", T0 + 2_500, T0 + 1_500);
+    expect(fourth.allowed).toBe(true);
+    const fifth = post(fourth.budget, "e", "five", T0 + 3_000, T0 + 1_500);
+    expect(fifth.allowed === false && fifth.refusal).toBe("escalate");
+  });
+
+  it("caps one bot at ten posts a minute, and lets the cap lapse with the minute", () => {
+    const flooded = floodedByOneBot();
+    expect(flooded.posts).toHaveLength(10);
+    const eleventh = post(flooded, "a", "one too many", T0 + 1_100, T0 + 1_050);
     expect(eleventh.allowed === false && eleventh.refusal).toBe("sender-rate");
 
     // one minute on, those ten no longer count against the sender
-    const afterTheMinute = post(full, "a", "one too many", T0 + 60_001);
-    expect(afterTheMinute.allowed === false && afterTheMinute.refusal).toBe("escalate");
+    const afterTheMinute = post(flooded, "a", "one too many", T0 + 60_100, T0 + 60_050);
+    expect(afterTheMinute.allowed).toBe(true);
+  });
+
+  it("reaches every one of its rules from an empty budget", () => {
+    // The guard the ring and the sender window needed: a rule the server can
+    // never drive the budget into is not a limiter, however green its test.
+    // Every state below is accumulated by decideRoomPost itself.
+    const refusals = new Set<RoomPostRefusal>();
+    const record = (decision: ReturnType<typeof post>) => {
+      if (!decision.allowed) refusals.add(decision.refusal);
+      return decision;
+    };
+
+    record(post(seed([{ botId: "a", text: "same", now: T0 }]), "a", "same", T0 + 1));
+    record(post(seed([
+      { botId: "a", text: "one", now: T0 },
+      { botId: "b", text: "two", now: T0 + 1 },
+    ]), "c", "three", T0 + 2));
+    record(post(floodedByOneBot(), "a", "one too many", T0 + 1_100, T0 + 1_050));
+    const ring = record(post(ringSetUp(), "a", "four", T0 + 3_000, RING_SPOKE_AT));
+    record(post(ring.budget, "d", "unrelated", T0 + 4_000, RING_SPOKE_AT));
+
+    expect([...refusals].sort()).toEqual(["breaker", "duplicate", "escalate", "ring", "sender-rate"]);
   });
 
   it("tells the model to stop rather than to retry, whichever rule refuses", () => {
@@ -136,22 +199,8 @@ describe("decideRoomPost", () => {
       "three",
       T0 + 2,
     );
-    const ring = post(
-      history([
-        ["a", "one", T0],
-        ["b", "two", T0 + 1_000],
-        ["c", "three", T0 + 2_000],
-      ]),
-      "a",
-      "four",
-      T0 + 3_000,
-    );
-    const rate = post(
-      history(Array.from({ length: 10 }, (_, i): [string, string, number] => ["a", `x${i}`, T0 + i])),
-      "a",
-      "one too many",
-      T0 + 20,
-    );
+    const ring = post(ringSetUp(), "a", "four", T0 + 3_000, RING_SPOKE_AT);
+    const rate = post(floodedByOneBot(), "a", "one too many", T0 + 1_100, T0 + 1_050);
     for (const decision of [duplicate, ceiling, ring, rate]) {
       expect(decision.allowed).toBe(false);
       if (decision.allowed) continue;

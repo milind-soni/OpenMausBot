@@ -165,7 +165,7 @@ import { EventBus } from "./harness/bus.ts";
 import { ProviderRegistry } from "./harness/registry.ts";
 import { cancelPeerApprovalsFor, cancelPeerApprovalsForThread, dismissStalePeerCards, requestPeerApproval, resolvePeerComms, type ApprovalBus } from "./peer-approval.ts";
 import { peerProvenanceNote, withPeerProvenance } from "./peer-provenance.ts";
-import { decideRoomPost, emptyRoomPostBudget, type RoomPostBudget } from "./room-post-budget.ts";
+import { decideRoomPost, emptyRoomPostBudget, type RoomPostAttempt, type RoomPostBudget } from "./room-post-budget.ts";
 import {
   mentionedBots,
   roomResponders,
@@ -5250,6 +5250,20 @@ function connectorThread(botId: string, threadId: string) {
   return null;
 }
 
+/** When a person last wrote into the room's current conversation, if one
+ * ever has. The posting budget's ceiling counts only the bot posts nobody
+ * has answered since, so this is read fresh on every attempt rather than
+ * remembered — the room's transcript is already the record of who spoke
+ * last, and a second copy of it could only ever disagree. */
+function lastHumanRoomMessageAt(group: GroupRecord): number | undefined {
+  const messages = store.messagesFor(group.threadId);
+  for (let i = messages.length - 1; i >= 0; i -= 1) {
+    const message = messages[i];
+    if (message.role === "user" && message.kind === "text") return message.at;
+  }
+  return undefined;
+}
+
 /** Whether `bot` may write into `group` from outside a turn there, and the
  * exact refusal when it may not.
  *
@@ -6704,15 +6718,27 @@ const server = createServer(async (req, res) => {
         // model would then be refused its retry with "you already posted
         // that", which is the one thing worse than a refusal: a false
         // receipt for a message nobody can read.
-        const askBudget = (bot: BotRecord, group: GroupRecord) =>
-          decideRoomPost(roomPostBudgets.get(group.id) ?? emptyRoomPostBudget(), {
+        const askBudget = (bot: BotRecord, group: GroupRecord) => {
+          const attempt: RoomPostAttempt = {
             botId: bot.id,
             botName: bot.name,
             text: message,
             now: Date.now(),
-          });
+          };
+          const spokeAt = lastHumanRoomMessageAt(group);
+          if (spokeAt !== undefined) attempt.lastHumanAt = spokeAt;
+          return decideRoomPost(roomPostBudgets.get(group.id) ?? emptyRoomPostBudget(), attempt);
+        };
+        // A refusal is stored, an allowance is not: the budget a refusal
+        // hands back never contains the attempt — it is the pruning, plus
+        // the breaker if this call is what tripped it — so keeping it costs
+        // the room nothing and losing it would let a ring re-form one call
+        // later.
         const preflight = askBudget(from, room);
-        if (!preflight.allowed) return json(res, 429, { error: preflight.message });
+        if (!preflight.allowed) {
+          roomPostBudgets.set(room.id, preflight.budget);
+          return json(res, 429, { error: preflight.message });
+        }
         let poster = from;
         if (from.approvePeerComms) {
           // Same gate ask_bot carries, aimed at the room instead of a peer:
@@ -6743,8 +6769,8 @@ const server = createServer(async (req, res) => {
         // room may have taken another bot's post, so this decision — not the
         // preflight — is the one that can refuse.
         const decision = askBudget(poster, room);
-        if (!decision.allowed) return json(res, 429, { error: decision.message });
         roomPostBudgets.set(room.id, decision.budget);
+        if (!decision.allowed) return json(res, 429, { error: decision.message });
         // Unattended inheritance: the mark rides the sender, and reading it
         // here is also what keeps its window alive through a turn that only
         // posts — an aged-out mark would hand the next hop to auto-approve.
