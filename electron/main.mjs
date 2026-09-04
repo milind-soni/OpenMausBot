@@ -2050,17 +2050,57 @@ ipcMain.handle("companion:revoke", localOnly("companion:revoke", (_event, device
   companionRevoke(deviceId).then(() => desktopCompanionState()),
 ));
 
-// Auth and connector credentials never cross this boundary. Every handler
-// returns the same deliberately tiny, secret-free public account state.
-ipcMain.handle("companion-account:state", localOnly("companion-account:state", () => ensureCompanionAccountService().state()));
-ipcMain.handle("companion-account:request-code", localOnly("companion-account:request-code", (_event, email) =>
-  ensureCompanionAccountService().requestCode(email),
-));
-ipcMain.handle("companion-account:verify-code", localOnly("companion-account:verify-code", (_event, email, code) =>
-  ensureCompanionAccountService().verifyCode(email, code),
-));
-ipcMain.handle("companion-account:retry", localOnly("companion-account:retry", () => ensureCompanionAccountService().retry()));
-ipcMain.handle("companion-account:sign-out", localOnly("companion-account:sign-out", () => ensureCompanionAccountService().signOut()));
+// returns the same deliberately tiny, secret-free public account state. Keep
+// account-backed calls on the main app renderer: a child BrowserWindow must
+// not get to reuse the process-owned account bearer or share mutations.
+function mainWindowForAccountEvent(event) {
+  const owner = mainWindow;
+  if (!owner || owner.isDestroyed() || event.sender !== owner.webContents) {
+    throw new Error("Account actions are available only to the main app window");
+  }
+  return owner;
+}
+
+ipcMain.handle("companion-account:state", localOnly("companion-account:state", (event) => {
+  mainWindowForAccountEvent(event);
+  return ensureCompanionAccountService().state();
+}));
+ipcMain.handle("companion-account:request-code", localOnly("companion-account:request-code", (event, email) => {
+  mainWindowForAccountEvent(event);
+  return ensureCompanionAccountService().requestCode(email);
+}));
+ipcMain.handle("companion-account:verify-code", localOnly("companion-account:verify-code", (event, email, code) => {
+  mainWindowForAccountEvent(event);
+  return ensureCompanionAccountService().verifyCode(email, code);
+}));
+ipcMain.handle("companion-account:retry", localOnly("companion-account:retry", (event) => {
+  mainWindowForAccountEvent(event);
+  return ensureCompanionAccountService().retry();
+}));
+ipcMain.handle("companion-account:sign-out", localOnly("companion-account:sign-out", (event) => {
+  mainWindowForAccountEvent(event);
+  return ensureCompanionAccountService().signOut();
+}));
+ipcMain.handle("bot-shares:list", localOnly("bot-shares:list", (event) => {
+  mainWindowForAccountEvent(event);
+  return ensureCompanionAccountService().listBotShares();
+}));
+ipcMain.handle("bot-shares:create", localOnly("bot-shares:create", (event, input) => {
+  mainWindowForAccountEvent(event);
+  return ensureCompanionAccountService().createBotShare(input);
+}));
+ipcMain.handle("bot-shares:update", localOnly("bot-shares:update", (event, shareId, input) => {
+  mainWindowForAccountEvent(event);
+  return ensureCompanionAccountService().updateBotShare(shareId, input);
+}));
+ipcMain.handle("bot-shares:visibility", localOnly("bot-shares:visibility", (event, shareId, visibility) => {
+  mainWindowForAccountEvent(event);
+  return ensureCompanionAccountService().setBotShareVisibility(shareId, visibility);
+}));
+ipcMain.handle("bot-shares:delete", localOnly("bot-shares:delete", (event, shareId) => {
+  mainWindowForAccountEvent(event);
+  return ensureCompanionAccountService().deleteBotShare(shareId);
+}));
 
 ipcMain.handle("environments:state", (event) => ({
   localOrigin: rendererOrigin(),

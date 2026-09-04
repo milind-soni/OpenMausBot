@@ -152,6 +152,13 @@ type SkillRecordingPayload = {
         retry(): Promise<CompanionAccountState>;
         signOut(): Promise<CompanionAccountState>;
       };
+      botShares?: {
+        list(): Promise<BotShare[]>;
+        create(input: { packageMarkdown: string; visibility?: BotShareVisibility }): Promise<BotShare>;
+        update(shareId: string, input: { packageMarkdown: string; expectedActiveVersion: number }): Promise<BotShare>;
+        setVisibility(shareId: string, visibility: BotShareVisibility): Promise<BotShare>;
+        delete(shareId: string): Promise<void>;
+      };
       localControl: {
         status(): Promise<LinuxLocalControlStatus>;
         enable(): Promise<LinuxLocalControlStatus>;
@@ -334,6 +341,23 @@ export interface CompanionAccountState {
   email?: string;
   endpoint?: string;
   message?: string;
+}
+
+export type BotShareVisibility = "unlisted" | "private";
+
+export interface BotShare {
+  id: string;
+  visibility: BotShareVisibility;
+  activeVersion: number;
+  name: string;
+  summary: string;
+  sha256: string;
+  byteSize: number;
+  createdAt: number;
+  updatedAt: number;
+  versionCreatedAt: number;
+  shareUrl: string;
+  packageUrl: string;
 }
 
 export type AndroidUsbDevice = {

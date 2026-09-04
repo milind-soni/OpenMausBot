@@ -4,6 +4,9 @@ const INSTALLATION_ID =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const CLIENT_INSTANCE = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/;
 const REQUEST_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+const BOT_SHARE_ID = /^[A-Za-z0-9_-]{21}$/;
+const SHA256 = /^[0-9a-f]{64}$/;
+const BOT_PACKAGE_MAX_BYTES = 1_000_000;
 
 const stringValue = (value) => (typeof value === "string" ? value : null);
 
@@ -164,6 +167,49 @@ function validatedEndpoint(value) {
   return { url: url.origin };
 }
 
+function safeInteger(value, minimum = 0) {
+  return Number.isSafeInteger(value) && value >= minimum ? value : null;
+}
+
+function boundedText(value, maximum) {
+  const input = stringValue(value);
+  return input !== null && input.length >= 1 && input.length <= maximum ? input : null;
+}
+
+function validatedBotShare(value, origin) {
+  const share = plainObject(value);
+  const id = stringValue(share?.id);
+  const visibility = share?.visibility;
+  const activeVersion = safeInteger(share?.activeVersion, 1);
+  const name = boundedText(share?.name, 100);
+  const summary = boundedText(share?.summary, 2_000);
+  const sha256 = stringValue(share?.sha256);
+  const byteSize = safeInteger(share?.byteSize, 1);
+  const createdAt = safeInteger(share?.createdAt);
+  const updatedAt = safeInteger(share?.updatedAt);
+  const versionCreatedAt = safeInteger(share?.versionCreatedAt);
+  if (
+    id === null || !BOT_SHARE_ID.test(id) ||
+    !["unlisted", "private"].includes(visibility) ||
+    activeVersion === null || !name || !summary ||
+    sha256 === null || !SHA256.test(sha256) ||
+    byteSize === null || byteSize > BOT_PACKAGE_MAX_BYTES ||
+    createdAt === null || updatedAt === null || versionCreatedAt === null ||
+    share?.shareUrl !== `${origin}/s/${id}` ||
+    share?.packageUrl !== `${origin}/v1/bot-shares/${id}/package`
+  ) return null;
+  return {
+    id, visibility, activeVersion, name, summary, sha256, byteSize,
+    createdAt, updatedAt, versionCreatedAt,
+    shareUrl: share.shareUrl, packageUrl: share.packageUrl,
+  };
+}
+
+function validatedPackageMarkdown(value) {
+  if (typeof value !== "string" || !value) return null;
+  return new TextEncoder().encode(value).byteLength <= BOT_PACKAGE_MAX_BYTES ? value : null;
+}
+
 export function createControlPlaneClient({
   baseURL,
   fetchImpl = globalThis.fetch,
@@ -176,10 +222,10 @@ export function createControlPlaneClient({
 
   const request = async (
     path,
-    { method = "GET", token, body, allowEmpty = false, deadlineMs = timeoutMs } = {},
+    { method = "GET", bearer, body, allowEmpty = false, deadlineMs = timeoutMs } = {},
   ) => {
     const headers = new Headers({ accept: "application/json" });
-    if (token) headers.set("authorization", `Bearer ${token}`);
+    if (bearer) headers.set("authorization", `Bearer ${bearer}`);
     // Node's fetch sends `Sec-Fetch-Mode: cors` even though Electron is a
     // native client. Better Auth 1.7 treats that Fetch Metadata as a
     // browser-shaped request and requires a trusted Origin. Our exact,
@@ -226,7 +272,7 @@ export function createControlPlaneClient({
 
   const accountInstallations = async (accountToken) => {
     if (!boundedSecret(accountToken)) throw new ControlPlaneError("signed_out", 401);
-    const { payload } = await request("/v1/installations", { token: accountToken });
+    const { payload } = await request("/v1/installations", { bearer: accountToken });
     if (!Array.isArray(payload.installations)) {
       throw new ControlPlaneError("invalid_response");
     }
@@ -235,6 +281,18 @@ export function createControlPlaneClient({
       throw new ControlPlaneError("invalid_response");
     }
     return installations;
+  };
+
+  const accountTokenOrThrow = (accountToken) => {
+    const bearer = boundedSecret(accountToken);
+    if (!bearer || INSTALLATION_CREDENTIAL.test(bearer)) throw new ControlPlaneError("signed_out", 401);
+    return bearer;
+  };
+
+  const shareFromPayload = (payload) => {
+    const share = validatedBotShare(payload.share, origin);
+    if (!share) throw new ControlPlaneError("invalid_response");
+    return share;
   };
 
   return {
@@ -290,7 +348,7 @@ export function createControlPlaneClient({
 
     async me(accountToken) {
       if (!boundedSecret(accountToken)) throw new ControlPlaneError("signed_out", 401);
-      const { payload } = await request("/v1/me", { token: accountToken });
+      const { payload } = await request("/v1/me", { bearer: accountToken });
       const user = validatedUser(payload.user);
       if (!user) throw new ControlPlaneError("invalid_response");
       return user;
@@ -298,6 +356,55 @@ export function createControlPlaneClient({
 
     async listInstallations(accountToken) {
       return accountInstallations(accountToken);
+    },
+
+    async listBotShares(accountToken) {
+      const { payload } = await request("/v1/bot-shares", { bearer: accountTokenOrThrow(accountToken) });
+      if (!Array.isArray(payload.shares)) throw new ControlPlaneError("invalid_response");
+      const shares = payload.shares.map((share) => validatedBotShare(share, origin));
+      if (shares.some((share) => !share)) throw new ControlPlaneError("invalid_response");
+      return shares;
+    },
+
+    async createBotShare(accountToken, { packageMarkdown, visibility = "unlisted" } = {}) {
+      const markdown = validatedPackageMarkdown(packageMarkdown);
+      if (!markdown || !["unlisted", "private"].includes(visibility)) {
+        throw new ControlPlaneError("invalid_request", 400);
+      }
+      const { payload } = await request("/v1/bot-shares", {
+        method: "POST", bearer: accountTokenOrThrow(accountToken),
+        body: { packageMarkdown: markdown, visibility },
+      });
+      return shareFromPayload(payload);
+    },
+
+    async updateBotShare(accountToken, shareId, { packageMarkdown, expectedActiveVersion } = {}) {
+      const markdown = validatedPackageMarkdown(packageMarkdown);
+      if (!BOT_SHARE_ID.test(String(shareId)) || !markdown || !Number.isSafeInteger(expectedActiveVersion) || expectedActiveVersion < 1) {
+        throw new ControlPlaneError("invalid_request", 400);
+      }
+      const { payload } = await request(`/v1/bot-shares/${shareId}/versions`, {
+        method: "POST", bearer: accountTokenOrThrow(accountToken),
+        body: { packageMarkdown: markdown, expectedActiveVersion },
+      });
+      return shareFromPayload(payload);
+    },
+
+    async setBotShareVisibility(accountToken, shareId, visibility) {
+      if (!BOT_SHARE_ID.test(String(shareId)) || !["unlisted", "private"].includes(visibility)) {
+        throw new ControlPlaneError("invalid_request", 400);
+      }
+      const { payload } = await request(`/v1/bot-shares/${shareId}/visibility`, {
+        method: "POST", bearer: accountTokenOrThrow(accountToken), body: { visibility },
+      });
+      return shareFromPayload(payload);
+    },
+
+    async deleteBotShare(accountToken, shareId) {
+      if (!BOT_SHARE_ID.test(String(shareId))) throw new ControlPlaneError("invalid_request", 400);
+      await request(`/v1/bot-shares/${shareId}`, {
+        method: "DELETE", bearer: accountTokenOrThrow(accountToken), allowEmpty: true,
+      });
     },
 
     async ensureInstallation({ accountToken, currentCredential, clientInstanceId, name, platform, appVersion }) {
@@ -312,7 +419,7 @@ export function createControlPlaneClient({
         INSTALLATION_CREDENTIAL.test(currentCredential)
       ) {
         try {
-          const { payload } = await request("/v1/installations/self", { token: currentCredential });
+          const { payload } = await request("/v1/installations/self", { bearer: currentCredential });
           const installation = validatedInstallation(payload.installation);
           if (installation?.clientInstanceId === clientInstanceId) {
             return {
@@ -335,11 +442,11 @@ export function createControlPlaneClient({
       const result = existing
         ? await request(`/v1/installations/${encodeURIComponent(existing.id)}/credentials/rotate`, {
             method: "POST",
-            token: accountToken,
+            bearer: accountToken,
           })
         : await request("/v1/installations", {
             method: "POST",
-            token: accountToken,
+            bearer: accountToken,
             body: { clientInstanceId, name, platform, appVersion },
           });
       const installation = existing ?? validatedInstallation(result.payload.installation);
@@ -366,7 +473,7 @@ export function createControlPlaneClient({
       }
       const { payload } = await request("/v1/installations/self/endpoint", {
         method: "POST",
-        token: installationCredential,
+        bearer: installationCredential,
       });
       const endpoint = validatedEndpoint(payload.endpoint);
       const connectorToken = boundedSecret(payload.connectorToken, 16_384);
@@ -383,7 +490,7 @@ export function createControlPlaneClient({
       }
       await request("/v1/installations/self/endpoint", {
         method: "DELETE",
-        token: installationCredential,
+        bearer: installationCredential,
         allowEmpty: true,
       });
     },
@@ -398,7 +505,7 @@ export function createControlPlaneClient({
       }
       await request(`/v1/installations/${encodeURIComponent(installationId)}`, {
         method: "DELETE",
-        token: accountToken,
+        bearer: accountToken,
         allowEmpty: true,
       });
     },
@@ -407,7 +514,7 @@ export function createControlPlaneClient({
       if (!boundedSecret(accountToken)) return;
       await request("/api/auth/sign-out", {
         method: "POST",
-        token: accountToken,
+        bearer: accountToken,
       });
     },
   };

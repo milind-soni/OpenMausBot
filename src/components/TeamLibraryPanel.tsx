@@ -3,20 +3,25 @@ import { cn } from "@/lib/cn";
 import { teamImportPreview, type PendingTeamImport } from "@/lib/team-import";
 import type { Routine } from "@/lib/routines";
 import { api, useStore, type Bot, type Group } from "@/state/store";
+import type { BotShare, BotShareVisibility, CompanionAccountState } from "@/types/ogb";
 import {
   ArrowLeft,
   BookOpen,
   CalendarClock,
   Check,
   Compass,
+  Copy,
   Crown,
   ExternalLink,
   FolderOpen,
   Github,
+  Lock,
   Loader2,
   MessageSquare,
   Plug,
   Search,
+  Share2,
+  Trash2,
   UploadCloud,
   Users,
   X,
@@ -62,9 +67,15 @@ export interface TeamImportResult {
   archived: ArchivedTeamBot[];
 }
 
-type ImportSource = "library" | "file" | "github";
-type TeamTab = "explore" | "import" | "scout";
+type ImportSource = "library" | "file" | "github" | "shared";
+type TeamTab = "export" | "explore" | "import" | "scout";
 type ImportMode = "replace" | "add";
+
+interface PublishDraft {
+  name: string;
+  members: number;
+  markdown: string;
+}
 
 /** the scout endpoint's answer, as far as this panel renders it — the
  * manifest itself stays opaque and goes back to the server verbatim */
@@ -108,6 +119,18 @@ async function openExternal(url: string): Promise<void> {
   if (opened) opened.opener = null;
 }
 
+function downloadExportPackage(draft: PublishDraft): void {
+  const slug = draft.name.trim().toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "") || "botmrr-team";
+  const url = URL.createObjectURL(new Blob([draft.markdown], { type: "text/markdown;charset=utf-8" }));
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = `${slug}.md`;
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  window.setTimeout(() => URL.revokeObjectURL(url), 60_000);
+}
+
 function TeamGlyph({ index }: { index: number }) {
   return (
     <div className={cn("flex size-11 shrink-0 items-center justify-center rounded-xl", TEAM_GLYPHS[index % TEAM_GLYPHS.length])}>
@@ -130,7 +153,7 @@ export function TeamLibraryPanel({
   const { state, dispatch } = useStore();
   const dialogRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
-  const [tab, setTab] = useState<TeamTab>("explore");
+  const [tab, setTab] = useState<TeamTab>("export");
   const [catalog, setCatalog] = useState<TeamCatalog | null>(null);
   const [catalogLoading, setCatalogLoading] = useState(true);
   const [catalogError, setCatalogError] = useState("");
@@ -155,6 +178,13 @@ export function TeamLibraryPanel({
   const [pickedDirectory, setPickedDirectory] = useState<Set<string>>(new Set());
   const [roomName, setRoomName] = useState("");
   const [creating, setCreating] = useState(false);
+  const [accountState, setAccountState] = useState<CompanionAccountState | null>(null);
+  const [shares, setShares] = useState<BotShare[]>([]);
+  const [sharesLoading, setSharesLoading] = useState(false);
+  const [shareListError, setShareListError] = useState("");
+  const [shareBusy, setShareBusy] = useState("");
+  const [publishDraft, setPublishDraft] = useState<PublishDraft | null>(null);
+  const [publishVisibility, setPublishVisibility] = useState<BotShareVisibility>("unlisted");
   // monotonically increasing scout token: a late response from an older
   // scout (including its lazy directory call) must never overwrite state
   // that belongs to a newer one
@@ -178,6 +208,46 @@ export function TeamLibraryPanel({
   useEffect(() => {
     void loadCatalog();
   }, [loadCatalog]);
+
+  const loadShareAccount = useCallback(async () => {
+    const bridge = window.ogb;
+    setShareListError("");
+    if (!bridge?.companionAccount || !bridge.botShares) {
+      setAccountState(null);
+      setShares([]);
+      return;
+    }
+    try {
+      const account = await bridge.companionAccount.state();
+      setAccountState(account);
+      if (!account.email) {
+        setShares([]);
+        return;
+      }
+      setSharesLoading(true);
+      try {
+        setShares(await bridge.botShares.list());
+      } catch {
+        setShares([]);
+        setShareListError("Shared links are temporarily unavailable. Local export still works.");
+      } finally {
+        setSharesLoading(false);
+      }
+    } catch {
+      setAccountState({
+        available: false,
+        status: "error",
+        message: "The account could not be checked. Local export still works.",
+      });
+      setShares([]);
+      setSharesLoading(false);
+      setError("");
+    }
+  }, []);
+
+  useEffect(() => {
+    if (tab === "export") void loadShareAccount();
+  }, [loadShareAccount, tab]);
 
   useEffect(() => {
     dialogRef.current?.focus();
@@ -253,16 +323,29 @@ export function TeamLibraryPanel({
     await loadGithubUrl(githubUrl);
   };
 
+  const isSharedPackageLink = (value: string): boolean => {
+    try {
+      const url = new URL(value.trim());
+      return url.origin === "https://accounts.openmausbot.com" &&
+        (/^\/v1\/bot-shares\/[A-Za-z0-9_-]{21}\/package$/.test(url.pathname) ||
+          /^\/s\/[A-Za-z0-9_-]{21}$/.test(url.pathname)) &&
+        !url.username && !url.password && !url.port && !url.search && !url.hash;
+    } catch {
+      return false;
+    }
+  };
+
   const loadGithubUrl = async (requestedUrl: string) => {
     if (!requestedUrl.trim()) return;
     setGithubLoading(true);
     setError("");
     try {
-      const manifest = await api("/api/team-library/github", {
+      const shared = isSharedPackageLink(requestedUrl);
+      const manifest = await api(shared ? "/api/team-library/shared" : "/api/team-library/github", {
         method: "POST",
         body: JSON.stringify({ url: requestedUrl.trim() }),
       });
-      previewManifest(teamImportPreview(manifest), "github");
+      previewManifest(teamImportPreview(manifest), shared ? "shared" : "github");
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : String(cause));
     } finally {
@@ -409,6 +492,102 @@ export function TeamLibraryPanel({
       setError(cause instanceof Error ? cause.message : String(cause));
     } finally {
       setCreating(false);
+    }
+  };
+
+  const createExportDraft = async (download: boolean): Promise<PublishDraft> => {
+    setShareBusy(download ? "export" : "publish");
+    setError("");
+    try {
+      const exported = (await api("/api/teams/export", {
+        method: "POST",
+        body: JSON.stringify({ format: "package" }),
+      })) as PublishDraft;
+      teamImportPreview(exported.markdown);
+      setPublishDraft(exported);
+      if (download) downloadExportPackage(exported);
+      return exported;
+    } catch (cause) {
+      const message = cause instanceof Error ? cause.message : String(cause);
+      setError(message);
+      throw cause;
+    } finally {
+      setShareBusy("");
+    }
+  };
+
+  const publishNewShare = async () => {
+    const botShares = window.ogb?.botShares;
+    if (!botShares) return;
+    setShareBusy("new");
+    setError("");
+    try {
+      const draft = publishDraft ?? await createExportDraft(false);
+      const created = await botShares.create({ packageMarkdown: draft.markdown, visibility: publishVisibility });
+      setShares((current) => [created, ...current.filter((share) => share.id !== created.id)]);
+      track("team_shared", { version: created.activeVersion, visibility: created.visibility });
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : String(cause));
+    } finally {
+      setShareBusy("");
+    }
+  };
+
+  const publishShareVersion = async (share: BotShare) => {
+    const botShares = window.ogb?.botShares;
+    if (!botShares || !publishDraft) return;
+    setShareBusy(`version:${share.id}`);
+    setError("");
+    try {
+      const updated = await botShares.update(share.id, {
+        packageMarkdown: publishDraft.markdown,
+        expectedActiveVersion: share.activeVersion,
+      });
+      setShares((current) => current.map((item) => item.id === updated.id ? updated : item));
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : String(cause));
+      await loadShareAccount();
+    } finally {
+      setShareBusy("");
+    }
+  };
+
+  const changeShareVisibility = async (share: BotShare) => {
+    const botShares = window.ogb?.botShares;
+    if (!botShares) return;
+    const visibility: BotShareVisibility = share.visibility === "unlisted" ? "private" : "unlisted";
+    setShareBusy(`visibility:${share.id}`);
+    setError("");
+    try {
+      const updated = await botShares.setVisibility(share.id, visibility);
+      setShares((current) => current.map((item) => item.id === updated.id ? updated : item));
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : String(cause));
+    } finally {
+      setShareBusy("");
+    }
+  };
+
+  const deleteShare = async (share: BotShare) => {
+    const botShares = window.ogb?.botShares;
+    if (!botShares || !window.confirm(`Delete the shared link for “${share.name}”?`)) return;
+    setShareBusy(`delete:${share.id}`);
+    setError("");
+    try {
+      await botShares.delete(share.id);
+      setShares((current) => current.filter((item) => item.id !== share.id));
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : String(cause));
+    } finally {
+      setShareBusy("");
+    }
+  };
+
+  const copyShareLink = async (share: BotShare) => {
+    try {
+      await navigator.clipboard.writeText(share.shareUrl);
+    } catch {
+      setError("The share link could not be copied.");
     }
   };
 
@@ -563,7 +742,21 @@ export function TeamLibraryPanel({
         ) : (
           <>
             <div className="flex flex-col gap-3 px-6 pb-4 pt-5 sm:flex-row sm:items-center sm:justify-between sm:px-8">
-              <div className="flex w-fit rounded-xl bg-raised/70 p-1" role="tablist" aria-label="Team source">
+            <div className="flex w-fit rounded-xl bg-raised/70 p-1" role="tablist" aria-label="Team source">
+                <button
+                  role="tab"
+                  aria-selected={tab === "export"}
+                  onClick={() => {
+                    setTab("export");
+                    setError("");
+                  }}
+                  className={cn(
+                    "rounded-lg px-4 py-2 text-[13.5px] transition-colors",
+                    tab === "export" ? "bg-card text-ink shadow-sm" : "text-ink-secondary hover:text-ink",
+                  )}
+                >
+                  Export &amp; share
+                </button>
                 <button
                   role="tab"
                   aria-selected={tab === "explore"}
@@ -622,6 +815,72 @@ export function TeamLibraryPanel({
             </div>
 
             <div className="min-h-0 flex-1 overflow-y-auto px-6 pb-7 pt-5 sm:px-8">
+              {tab === "export" && (
+                <section>
+                  <div className="mb-3">
+                    <h3 className="text-[16px] font-semibold text-ink">Export &amp; share</h3>
+                    <p className="mt-1 max-w-2xl text-[12.5px] leading-relaxed text-ink-secondary">
+                      Export the active team as the official BotMRR Markdown package. Local export works without an account.
+                    </p>
+                  </div>
+                  <div className="rounded-2xl bg-raised/25 px-5 py-5">
+                    <div className="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
+                      <div>
+                        <div className="text-[14px] font-medium text-ink">Current team</div>
+                        <p className="mt-1 text-[12.5px] text-ink-secondary">
+                          {currentBotCount} active {currentBotCount === 1 ? "bot" : "bots"} · validated package format
+                        </p>
+                      </div>
+                      <div className="flex flex-wrap gap-2">
+                        <button
+                          onClick={() => void createExportDraft(true).catch(() => undefined)}
+                          disabled={currentBotCount === 0 || shareBusy !== ""}
+                          className="flex items-center justify-center gap-2 rounded-full bg-accent px-5 py-2.5 text-[13.5px] font-medium text-white hover:bg-accent/90 disabled:opacity-40"
+                        >
+                          {shareBusy === "export" && <Loader2 size={15} className="animate-spin" />}
+                          Export package
+                        </button>
+                        <button
+                          onClick={() => void createExportDraft(false).catch(() => undefined)}
+                          disabled={currentBotCount === 0 || shareBusy !== ""}
+                          className="rounded-full bg-card px-5 py-2.5 text-[13.5px] font-medium text-ink ring-1 ring-inset ring-hairline/50 hover:bg-raised disabled:opacity-40"
+                        >
+                          Prepare package
+                        </button>
+                      </div>
+                    </div>
+                    {publishDraft && <div className="mt-3 text-[11.5px] text-ink-secondary">Preview validated: {publishDraft.members} bots · ready to publish.</div>}
+                  </div>
+
+                  <div className="mt-5 rounded-2xl bg-raised/25 px-5 py-5">
+                    <div className="flex items-center gap-2 text-[15px] font-semibold text-ink"><Share2 size={17} /> Publish link</div>
+                    {!window.ogb?.botShares && <p className="mt-2 text-[12.5px] leading-relaxed text-ink-secondary">Publishing is available in the desktop app. Local package export remains available here.</p>}
+                    {window.ogb?.botShares && accountState === null && <div className="mt-3 flex items-center gap-2 text-[13px] text-ink-secondary"><Loader2 size={15} className="animate-spin" /> Checking account…</div>}
+                    {window.ogb?.botShares && accountState?.status === "error" && !accountState.email && <p className="mt-3 flex items-start gap-2 text-[12.5px] leading-relaxed text-ink-secondary"><Lock size={16} className="mt-0.5 shrink-0" /> {accountState.message ?? "The account could not be checked. Local export still works."}</p>}
+                    {window.ogb?.botShares && accountState !== null && accountState.status !== "error" && !accountState.email && <p className="mt-3 flex items-start gap-2 text-[12.5px] leading-relaxed text-ink-secondary"><Lock size={16} className="mt-0.5 shrink-0" /> Sign in from Settings to publish or manage links. This does not affect local export.</p>}
+                    {window.ogb?.botShares && accountState?.email && <>
+                      <div className="mt-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                        <div className="flex rounded-xl bg-raised/70 p-1" aria-label="Share visibility">
+                          {(["unlisted", "private"] as const).map((visibility) => (
+                            <button key={visibility} onClick={() => setPublishVisibility(visibility)} className={cn("rounded-lg px-3 py-1.5 text-[12px] capitalize", publishVisibility === visibility ? "bg-card text-ink shadow-sm" : "text-ink-secondary hover:text-ink")}>{visibility}</button>
+                          ))}
+                        </div>
+                        <button onClick={() => void publishNewShare()} disabled={!publishDraft || sharesLoading || shareBusy !== ""} className="flex items-center justify-center gap-1.5 rounded-full bg-accent px-4 py-2.5 text-[13px] font-medium text-white hover:bg-accent/90 disabled:opacity-40">
+                          {shareBusy === "new" && <Loader2 size={14} className="animate-spin" />} Publish new link
+                        </button>
+                      </div>
+                      <p className="mt-2 text-[11.5px] text-ink-secondary">The link uses the validated draft above. Unlisted is the default.</p>
+                      <div className="mt-6 flex items-center justify-between"><div className="text-[12px] font-medium text-ink-secondary">Your shared bots</div><div className="text-[11.5px] text-ink-secondary">{accountState.email}</div></div>
+                      {shareListError && <div role="status" className="mt-2 rounded-xl bg-raised/55 px-3.5 py-3 text-[12px] text-ink-secondary">{shareListError}</div>}
+                      {sharesLoading && <div className="flex items-center gap-2 py-8 text-[13px] text-ink-secondary"><Loader2 size={15} className="animate-spin" /> Loading links…</div>}
+                      {!sharesLoading && !shareListError && shares.length === 0 && <div className="mt-2 rounded-2xl border border-dashed border-hairline/60 px-5 py-8 text-center text-[12.5px] text-ink-secondary">No shared links yet.</div>}
+                      {!sharesLoading && shares.length > 0 && <div className="mt-2 divide-y divide-hairline/35 rounded-2xl bg-raised/20 px-4">{shares.map((share) => <div key={share.id} className="flex flex-col gap-3 py-4 sm:flex-row sm:items-center"><div className="min-w-0 flex-1"><div className="flex items-center gap-2"><span className="truncate text-[14px] font-medium text-ink">{share.name}</span><span className="shrink-0 rounded-full bg-raised px-2 py-0.5 text-[10.5px] text-ink-secondary">v{share.activeVersion} · {share.visibility}</span></div><p className="mt-1 truncate text-[12px] text-ink-secondary">{share.summary}</p></div><div className="flex shrink-0 flex-wrap items-center gap-1"><button onClick={() => void copyShareLink(share)} className="rounded-lg p-2 text-ink-secondary hover:bg-raised hover:text-ink" aria-label={`Copy link for ${share.name}`} title="Copy link"><Copy size={14} /></button><button onClick={() => void openExternal(share.shareUrl)} className="rounded-lg p-2 text-ink-secondary hover:bg-raised hover:text-ink" aria-label={`Open ${share.name}`} title="Open link"><ExternalLink size={14} /></button><button onClick={() => void changeShareVisibility(share)} disabled={shareBusy !== ""} className="rounded-full bg-raised px-3 py-2 text-[11.5px] text-ink hover:bg-raised-hover disabled:opacity-40">{share.visibility === "unlisted" ? "Make private" : "Make unlisted"}</button><button onClick={() => void publishShareVersion(share)} disabled={!publishDraft || sharesLoading || shareBusy !== ""} className="rounded-full bg-raised px-3 py-2 text-[11.5px] text-ink hover:bg-raised-hover disabled:opacity-40">{shareBusy === `version:${share.id}` ? "Publishing…" : "Publish new version"}</button><button onClick={() => void deleteShare(share)} disabled={shareBusy !== ""} className="rounded-lg p-2 text-ink-secondary hover:bg-danger/10 hover:text-danger disabled:opacity-40" aria-label={`Delete ${share.name}`} title="Delete link"><Trash2 size={14} /></button></div></div>)}</div>}
+                    </>}
+                  </div>
+                  {error && <div role="alert" className="mt-4 rounded-lg bg-danger/10 px-3 py-2 text-[12.5px] text-danger">{error}</div>}
+                </section>
+              )}
+
               {tab === "explore" && (
                 <div>
                   <div className="mb-3 text-[12px] font-medium text-ink-secondary">
@@ -715,15 +974,15 @@ export function TeamLibraryPanel({
 
                     <div className="flex min-h-56 flex-col justify-center rounded-2xl bg-raised/25 px-6">
                       <Github size={25} className="text-ink-secondary" />
-                      <h3 className="mt-3 text-[14px] font-medium text-ink">Load from GitHub</h3>
-                      <p className="mt-1 text-[12.5px] leading-relaxed text-ink-secondary">Paste a public repo or a direct team JSON link.</p>
+                      <h3 className="mt-3 text-[14px] font-medium text-ink">Load from a link</h3>
+                      <p className="mt-1 text-[12.5px] leading-relaxed text-ink-secondary">Paste an OpenMausBot shared package or public GitHub team link.</p>
                       <div className="mt-4 flex gap-2">
                         <input
                           value={githubUrl}
                           onChange={(event) => setGithubUrl(event.target.value)}
                           onKeyDown={(event) => event.key === "Enter" && void loadGithubTeam()}
-                          placeholder="github.com/owner/repo"
-                          aria-label="GitHub team URL"
+                          placeholder="accounts.openmausbot.com or github.com/owner/repo"
+                          aria-label="Shared bot or GitHub team URL"
                           className="min-w-0 flex-1 rounded-xl bg-raised/80 px-3 py-2.5 text-[13px] text-ink placeholder:text-ink-secondary focus:outline-none"
                         />
                         <button

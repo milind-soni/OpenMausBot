@@ -64,6 +64,11 @@ function readyClient(overrides = {}) {
       connectorToken: CONNECTOR_TOKEN,
     })),
     listInstallations: vi.fn(async () => []),
+    listBotShares: vi.fn(async () => []),
+    createBotShare: vi.fn(async (_token, input) => ({ id: "Abcdefghijklmnopqrstu", ...input })),
+    updateBotShare: vi.fn(async (_token, shareId, input) => ({ id: shareId, ...input })),
+    setBotShareVisibility: vi.fn(async (_token, shareId, visibility) => ({ id: shareId, visibility })),
+    deleteBotShare: vi.fn(async () => {}),
     deleteEndpoint: vi.fn(async () => {}),
     revokeInstallation: vi.fn(async () => {}),
     signOut: vi.fn(async () => {}),
@@ -104,6 +109,49 @@ function signedCredentials(overrides = {}) {
 }
 
 describe("Companion account service", () => {
+  it("uses the stored account bearer for share actions without persisting or exposing it", async () => {
+    const share = { id: "Abcdefghijklmnopqrstu", visibility: "unlisted" };
+    const client = readyClient({
+      listBotShares: vi.fn(async () => [share]),
+      createBotShare: vi.fn(async () => share),
+    });
+    const { service, store } = serviceFixture({ initial: signedCredentials(), client });
+
+    await expect(service.listBotShares()).resolves.toEqual([share]);
+    await expect(service.createBotShare({ packageMarkdown: "# safe" })).resolves.toEqual(share);
+    expect(client.listBotShares).toHaveBeenCalledWith(ACCOUNT_TOKEN);
+    expect(client.createBotShare).toHaveBeenCalledWith(ACCOUNT_TOKEN, { packageMarkdown: "# safe" });
+    expect(store.writes).toHaveLength(0);
+  });
+
+  it("keeps the local-ready account state usable when remote share listing fails", async () => {
+    const client = readyClient({
+      listBotShares: vi.fn(async () => {
+        throw new ControlPlaneError("not_found", 404);
+      }),
+    });
+    const { service, store } = serviceFixture({ initial: signedCredentials(), client });
+
+    await expect(service.listBotShares()).rejects.toThrow("The secure connection request could not be completed");
+    await expect(service.state()).resolves.toMatchObject({
+      available: true,
+      status: "ready",
+      email: "ada@example.com",
+      endpoint: ENDPOINT,
+    });
+    expect(store.writes).toHaveLength(0);
+  });
+
+  it("fails share actions closed while signed out", async () => {
+    const client = readyClient();
+    const { service } = serviceFixture({
+      initial: { [COMPANION_INSTALLATION_CREDENTIAL_FIELD]: INSTALLATION_CREDENTIAL },
+      client,
+    });
+    await expect(service.listBotShares()).rejects.toThrow("Sign in to publish");
+    expect(client.listBotShares).not.toHaveBeenCalled();
+  });
+
   it("uses the packaged hosted default and only explicit safe development origins", () => {
     expect(resolveCompanionControlPlaneURL({ isPackaged: true, environment: {} })).toBe(
       "https://accounts.openmausbot.com",

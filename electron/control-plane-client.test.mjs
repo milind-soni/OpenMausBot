@@ -236,6 +236,38 @@ describe("control-plane desktop client", () => {
     });
   });
 
+  it("keeps account credentials in headers while validating managed share metadata", async () => {
+    const id = "Abcdefghijklmnopqrstu";
+    const share = {
+      id,
+      visibility: "unlisted",
+      activeVersion: 1,
+      name: "Research Team",
+      summary: "A portable team.",
+      sha256: "a".repeat(64),
+      byteSize: 120,
+      createdAt: 1,
+      updatedAt: 1,
+      versionCreatedAt: 1,
+      shareUrl: `https://accounts.openmausbot.com/s/${id}`,
+      packageUrl: `https://accounts.openmausbot.com/v1/bot-shares/${id}/package`,
+    };
+    const fetchImpl = vi.fn(async (url, init) => {
+      expect(init.headers.get("authorization")).toBe(`Bearer ${ACCOUNT}`);
+      expect(String(url)).not.toContain(ACCOUNT);
+      if (init.method === "DELETE") return new Response(null, { status: 204 });
+      return jsonResponse(String(url).endsWith("/v1/bot-shares") && init.method === "GET"
+        ? { shares: [share] }
+        : { share });
+    });
+    const client = createControlPlaneClient({ baseURL: "https://accounts.openmausbot.com", fetchImpl });
+
+    await expect(client.listBotShares(ACCOUNT)).resolves.toEqual([share]);
+    await expect(client.createBotShare(ACCOUNT, { packageMarkdown: "# safe" })).resolves.toEqual(share);
+    await expect(client.deleteBotShare(ACCOUNT, id)).resolves.toBeUndefined();
+    expect(fetchImpl).toHaveBeenCalledTimes(3);
+  });
+
   it("validates endpoint material without leaking the connector token into the URL", async () => {
     const connectorToken = `eyJ${"x".repeat(80)}`;
     const fetchImpl = vi.fn(async (url, init) => {

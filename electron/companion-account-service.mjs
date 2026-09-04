@@ -137,6 +137,11 @@ const FRIENDLY_MESSAGES = Object.freeze({
   credential_rotation_rate_limited: "This computer was reconnected too often. Wait a little, then try again.",
   installation_limit_reached: "This account has reached its computer limit. Remove an old computer and try again.",
   installation_exists: "This computer is already connected. Try again to recover it.",
+  version_conflict: "This shared bot changed before the new version was published. Review the latest version and try again.",
+  invalid_package: "The BotMRR package could not be validated. Export a fresh preview and try again.",
+  package_too_large: "The BotMRR package is larger than 1 MB.",
+  share_limit_reached: "This account already has 100 active shared links. Delete one before publishing another.",
+  version_limit_reached: "This shared link already has 50 versions. Publish a new link instead.",
   endpoint_busy: "The secure connection is still being prepared. Try again in a moment.",
   endpoint_unavailable: "The secure connection service could not finish setup. Local pairing still works; try again shortly.",
   endpoint_cleanup_pending: "The secure connection is still being removed. Try signing out again shortly.",
@@ -615,6 +620,22 @@ export function createCompanionAccountService({
     return settledState();
   });
 
+  const shareAccount = () => {
+    if (!configured) throw new Error(FRIENDLY_MESSAGES.control_plane_unavailable);
+    const account = storedAccount(credentials());
+    if (!account?.accountToken) throw new Error("Sign in to publish and manage shared bots.");
+    return account;
+  };
+
+  const shareAction = async (action) => {
+    const account = shareAccount();
+    try {
+      return await action(account.accountToken);
+    } catch (error) {
+      throw new Error(friendlyCompanionAccountError(error));
+    }
+  };
+
   return Object.freeze({
     state: async () => {
       await probeControlPlane();
@@ -625,5 +646,10 @@ export function createCompanionAccountService({
     retry,
     signOut,
     restore,
+    listBotShares: () => shareAction((accountToken) => client.listBotShares(accountToken)),
+    createBotShare: (input) => serialize(() => shareAction((accountToken) => client.createBotShare(accountToken, input))),
+    updateBotShare: (shareId, input) => serialize(() => shareAction((accountToken) => client.updateBotShare(accountToken, shareId, input))),
+    setBotShareVisibility: (shareId, visibility) => serialize(() => shareAction((accountToken) => client.setBotShareVisibility(accountToken, shareId, visibility))),
+    deleteBotShare: (shareId) => serialize(() => shareAction((accountToken) => client.deleteBotShare(accountToken, shareId))),
   });
 }

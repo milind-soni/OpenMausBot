@@ -55,6 +55,15 @@ const bridge = {
     retry: () => ipcRenderer.invoke("companion-account:retry"),
     signOut: () => ipcRenderer.invoke("companion-account:sign-out"),
   },
+  /** Account-owned bot shares. The bearer stays in main; only validated
+   * metadata and user-authored package Markdown cross this bridge. */
+  botShares: {
+    list: () => ipcRenderer.invoke("bot-shares:list"),
+    create: (input) => ipcRenderer.invoke("bot-shares:create", input),
+    update: (shareId, input) => ipcRenderer.invoke("bot-shares:update", shareId, input),
+    setVisibility: (shareId, visibility) => ipcRenderer.invoke("bot-shares:visibility", shareId, visibility),
+    delete: (shareId) => ipcRenderer.invoke("bot-shares:delete", shareId),
+  },
   localControl: {
     status: () => ipcRenderer.invoke("cua:linux-status"),
     enable: () => ipcRenderer.invoke("cua:linux-enable"),

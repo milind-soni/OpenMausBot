@@ -5,6 +5,7 @@ import { parseTeamManifest, type ParsedTeamManifest } from "./team-manifest.ts";
 export const TEAM_LIBRARY_REPOSITORY = "https://github.com/milind-soni/openmausbot-teams";
 export const TEAM_LIBRARY_RAW_ROOT = "https://raw.githubusercontent.com/milind-soni/openmausbot-teams/main";
 export const TEAM_LIBRARY_CATALOG_URL = `${TEAM_LIBRARY_RAW_ROOT}/catalog.json`;
+export const BOT_SHARE_ORIGIN = "https://accounts.openmausbot.com";
 
 const MAX_CATALOG_BYTES = 256_000;
 const MAX_MANIFEST_BYTES = 1_000_000;
@@ -235,4 +236,56 @@ export async function fetchGithubTeam(input: string, fetcher: Fetcher = fetch): 
     }
   }
   throw lastError ?? new Error("No botmrr.md, team.md, or legacy team file was found in that repository");
+}
+
+export function sharedPackageUrl(input: string): string {
+  const raw = input.trim();
+  // URL normalisation erases the explicit default port, so reject it from
+  // the raw authority before constructing URL. The share contract uses one
+  // exact HTTPS origin and does not need an explicit :443 spelling.
+  if (/^https:\/\/[^/?#]*:443(?:[/?#]|$)/i.test(raw)) {
+    throw new Error("Only exact OpenMausBot shared links are supported");
+  }
+  let url: URL;
+  try {
+    url = new URL(raw);
+  } catch {
+    throw new Error("Enter a valid OpenMausBot shared package URL");
+  }
+  const packageMatch = url.pathname.match(/^\/v1\/bot-shares\/([A-Za-z0-9_-]{21})\/package$/);
+  const landingMatch = url.pathname.match(/^\/s\/([A-Za-z0-9_-]{21})$/);
+  if (
+    url.origin !== BOT_SHARE_ORIGIN ||
+    url.username ||
+    url.password ||
+    url.port ||
+    url.search ||
+    url.hash ||
+    (!packageMatch && !landingMatch)
+  ) {
+    throw new Error("Only exact OpenMausBot shared links are supported");
+  }
+  const shareId = packageMatch?.[1] ?? landingMatch?.[1];
+  return `${BOT_SHARE_ORIGIN}/v1/bot-shares/${shareId}/package`;
+}
+
+/** Fetch one public, active, unlisted package. Private, deleted, and unknown
+ * shares all arrive as the same upstream failure and never reach preview. */
+export async function fetchSharedBotPackage(input: string, fetcher: Fetcher = fetch): Promise<ParsedBotPackage> {
+  const url = sharedPackageUrl(input);
+  const response = await fetcher(url, {
+    headers: { accept: "text/markdown" },
+    redirect: "error",
+    signal: AbortSignal.timeout(10_000),
+  });
+  if (!response.ok) {
+    throw Object.assign(new Error("That shared bot is unavailable"), { status: response.status });
+  }
+  const announced = Number(response.headers.get("content-length") ?? 0);
+  if (announced > MAX_MANIFEST_BYTES) throw new Error("The shared bot package is too large");
+  const markdown = await response.text();
+  if (Buffer.byteLength(markdown, "utf8") > MAX_MANIFEST_BYTES) {
+    throw new Error("The shared bot package is too large");
+  }
+  return parseBotPackage(markdown);
 }

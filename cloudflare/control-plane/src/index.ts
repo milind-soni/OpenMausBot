@@ -19,9 +19,24 @@ import {
   revokeInstallation,
   rotateInstallationCredential,
 } from "./installations";
+import {
+  BOT_SHARE_PUBLISH_BODY_MAX_BYTES,
+  createBotShare,
+  deleteBotShare,
+  listBotShares,
+  publicBotShareLanding,
+  publicBotSharePackage,
+  updateBotShare,
+  updateBotShareVisibility,
+} from "./bot-shares";
 
 const ROTATE_ROUTE = /^\/v1\/installations\/([^/]+)\/credentials\/rotate$/;
 const INSTALLATION_ROUTE = /^\/v1\/installations\/([^/]+)$/;
+const BOT_SHARE_ROUTE = /^\/v1\/bot-shares\/([^/]+)$/;
+const BOT_SHARE_VERSION_ROUTE = /^\/v1\/bot-shares\/([^/]+)\/versions$/;
+const BOT_SHARE_VISIBILITY_ROUTE = /^\/v1\/bot-shares\/([^/]+)\/visibility$/;
+const BOT_SHARE_PACKAGE_ROUTE = /^\/v1\/bot-shares\/([^/]+)\/package$/;
+const BOT_SHARE_LANDING_ROUTE = /^\/s\/([^/]+)$/;
 
 const BETTER_AUTH_ERROR_CODES = new Map([
   ["INVALID_EMAIL", "invalid_email"],
@@ -79,6 +94,19 @@ async function route(
   }
 
   const auth = createAuth(env, ctx, config, requestId);
+  const baseURL = new URL(config.authBaseURL).origin;
+  if (request.method === "GET" && url.pathname === "/v1/bot-shares") return listBotShares(request, env, auth, baseURL);
+  if (request.method === "POST" && url.pathname === "/v1/bot-shares") return createBotShare(request, env, auth, baseURL);
+  const shareVersion = url.pathname.match(BOT_SHARE_VERSION_ROUTE);
+  if (request.method === "POST" && shareVersion) return updateBotShare(request, shareVersion[1], env, auth, baseURL);
+  const shareVisibility = url.pathname.match(BOT_SHARE_VISIBILITY_ROUTE);
+  if (request.method === "POST" && shareVisibility) return updateBotShareVisibility(request, shareVisibility[1], env, auth, baseURL);
+  const sharePackage = url.pathname.match(BOT_SHARE_PACKAGE_ROUTE);
+  if (request.method === "GET" && sharePackage) return publicBotSharePackage(sharePackage[1], env);
+  const shareLanding = url.pathname.match(BOT_SHARE_LANDING_ROUTE);
+  if (request.method === "GET" && shareLanding) return publicBotShareLanding(shareLanding[1], env, baseURL);
+  const share = url.pathname.match(BOT_SHARE_ROUTE);
+  if (request.method === "DELETE" && share) return deleteBotShare(request, share[1], env, auth);
   if (request.method === "GET" && url.pathname === "/v1/me") {
     const session = await accountSession(request, auth);
     if (!session) throw new HTTPError(401, "unauthorized");
@@ -156,7 +184,13 @@ export function createWorker(cloudflareFetch: CloudflareFetch = fetch) {
         if (origin && !config.allowedOrigins.has(origin)) {
           return secureResponse(errorResponse(403, "origin_not_allowed"), request, config, requestId);
         }
-        const boundedRequest = await withBoundedRequestBody(request);
+        const publishBody = request.method === "POST" && (
+          url.pathname === "/v1/bot-shares" || BOT_SHARE_VERSION_ROUTE.test(url.pathname)
+        );
+        const boundedRequest = await withBoundedRequestBody(
+          request,
+          publishBody ? BOT_SHARE_PUBLISH_BODY_MAX_BYTES : undefined,
+        );
         return secureResponse(
           await route(boundedRequest, env, ctx, config, requestId, cloudflareFetch),
           request,

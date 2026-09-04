@@ -10,7 +10,7 @@ export const JSON_HEADERS = {
 const jsonValueSchema = z.json();
 export type JSONValue = z.infer<typeof jsonValueSchema>;
 
-const MAX_API_BODY_BYTES = 16 * 1024;
+export const MAX_API_BODY_BYTES = 16 * 1024;
 const BODYLESS_METHODS = new Set(["GET", "HEAD", "OPTIONS"]);
 const ALLOWED_CORS_METHODS = new Set(["GET", "POST", "DELETE"]);
 const ALLOWED_CORS_HEADERS = new Set(["authorization", "content-type"]);
@@ -32,17 +32,17 @@ export function errorResponse(status: number, code: string): Response {
   return json({ error: code }, status);
 }
 
-function validateDeclaredBodyLength(request: Request) {
+function validateDeclaredBodyLength(request: Request, maxBytes: number) {
   const contentLength = request.headers.get("content-length");
   if (contentLength !== null) {
     const declared = Number(contentLength);
     if (!Number.isSafeInteger(declared) || declared < 0) throw new HTTPError(400, "invalid_request");
-    if (declared > MAX_API_BODY_BYTES) throw new HTTPError(413, "request_too_large");
+    if (declared > maxBytes) throw new HTTPError(413, "request_too_large");
   }
 }
 
-async function readBoundedBody(request: Request): Promise<Uint8Array<ArrayBuffer>> {
-  validateDeclaredBodyLength(request);
+async function readBoundedBody(request: Request, maxBytes = MAX_API_BODY_BYTES): Promise<Uint8Array<ArrayBuffer>> {
+  validateDeclaredBodyLength(request, maxBytes);
   if (!request.body) return new Uint8Array();
 
   const reader = request.body.getReader();
@@ -53,7 +53,7 @@ async function readBoundedBody(request: Request): Promise<Uint8Array<ArrayBuffer
       const { done, value } = await reader.read();
       if (done) break;
       length += value.byteLength;
-      if (length > MAX_API_BODY_BYTES) {
+      if (length > maxBytes) {
         await reader.cancel();
         throw new HTTPError(413, "request_too_large");
       }
@@ -72,9 +72,9 @@ async function readBoundedBody(request: Request): Promise<Uint8Array<ArrayBuffer
   return bytes;
 }
 
-export async function withBoundedRequestBody(request: Request): Promise<Request> {
+export async function withBoundedRequestBody(request: Request, maxBytes = MAX_API_BODY_BYTES): Promise<Request> {
   if (BODYLESS_METHODS.has(request.method.toUpperCase())) return request;
-  const bytes = await readBoundedBody(request);
+  const bytes = await readBoundedBody(request, maxBytes);
   if (!request.body) return request;
 
   const headers = new Headers(request.headers);
@@ -85,11 +85,15 @@ export async function withBoundedRequestBody(request: Request): Promise<Request>
 }
 
 export async function readBoundedJSON(request: Request): Promise<JSONValue> {
+  return readBoundedJSONWithLimit(request, MAX_API_BODY_BYTES);
+}
+
+export async function readBoundedJSONWithLimit(request: Request, maxBytes: number): Promise<JSONValue> {
   const mediaType = request.headers.get("content-type")?.split(";", 1)[0].trim().toLowerCase();
   if (mediaType !== "application/json") throw new HTTPError(415, "unsupported_media_type");
   if (!request.body) throw new HTTPError(400, "invalid_request");
 
-  const bytes = await readBoundedBody(request);
+  const bytes = await readBoundedBody(request, maxBytes);
   try {
     return jsonValueSchema.parse(JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(bytes)));
   } catch {

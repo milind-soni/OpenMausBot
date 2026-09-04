@@ -253,7 +253,7 @@ import { screenFrameHash, screenTouchingTool, settledFrameIsNews } from "./scree
 import { RoutineRequestService } from "./routine-requests.ts";
 import { fetchBotDirectory, matchDirectoryBots, type MatchedDirectoryBot } from "./bot-directory.ts";
 import { scoutProject, suggestTeam } from "./project-scout.ts";
-import { fetchGithubTeam, fetchLibraryTeam, fetchTeamCatalog } from "./team-library.ts";
+import { fetchGithubTeam, fetchLibraryTeam, fetchSharedBotPackage, fetchTeamCatalog } from "./team-library.ts";
 import { isBotPackage, packageAgentAsMember, parseBotPackage, renderBotPackageMarkdown } from "./bot-package.ts";
 import { createTeamManifest, importedMemberProfile, parseTeamManifest } from "./team-manifest.ts";
 import { readThreadEvents } from "./thread-events.ts";
@@ -7923,6 +7923,18 @@ const server = createServer(async (req, res) => {
       } catch (error) {
         const status = (error as { status?: number }).status === 404 ? 404 : 400;
         return json(res, status, { error: error instanceof Error ? error.message : "The GitHub team could not be loaded" });
+      }
+    }
+    if (method === "POST" && path === "/api/team-library/shared") {
+      const body = await readBody(req);
+      if (!body || typeof body.url !== "string" || !body.url.trim()) {
+        return json(res, 400, { error: "An OpenMausBot shared package URL is required" });
+      }
+      try {
+        return json(res, 200, await fetchSharedBotPackage(body.url));
+      } catch (error) {
+        const status = (error as { status?: number }).status === 404 ? 404 : 400;
+        return json(res, status, { error: error instanceof Error ? error.message : "The shared bot could not be loaded" });
       }
     }
     if (method === "GET" && path === "/api/teams/scout") {
