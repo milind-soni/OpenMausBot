@@ -27,6 +27,10 @@ export interface Notification {
   /** The bot's stored profile image, when it has one; clients show it as
    * the OS notification's icon so every banner carries its bot's face. */
   avatarUrl?: string;
+  /** The room this came out of, when the bot was speaking in one. Routing
+   * already works off `threadId` alone; this is what lets a client say which
+   * room, and stack a room's banners together instead of under the bot. */
+  groupId?: string;
 }
 
 /** One line, short enough for a lock screen, with the newlines and code
@@ -43,6 +47,27 @@ export interface NotifyBot {
   notifications?: boolean;
 }
 
+/** The room a bot is holding while it works, as this module needs it. */
+export interface NotifyRoom {
+  id: string;
+  name: string;
+  threadId: string;
+  busyBotId?: string | null;
+}
+
+/** Where a "blocked on you" notification has to open. A bot speaking in a
+ * room is not reachable in its own 1:1 thread — the turn, its screen and the
+ * card all live in the room — so the room wins while it owns that bot. A
+ * room it merely belongs to, or one another member is speaking in, is not
+ * where this bot is: those fall back to its own thread. */
+export function blockedTarget(
+  bot: NotifyBot,
+  room?: NotifyRoom | null,
+): { threadId: string; group?: { id: string; name: string } } {
+  if (!room || room.busyBotId !== bot.id) return { threadId: bot.threadId };
+  return { threadId: room.threadId, group: { id: room.id, name: room.name } };
+}
+
 /** Build the frame for one event, or null when it should stay quiet.
  *
  * Kept pure and separate from the event fold so the policy — which is the
@@ -52,7 +77,7 @@ export function buildNotification(
   bot: NotifyBot,
   threadId: string,
   detail: string,
-  extra?: { avatarUrl?: string },
+  extra?: { avatarUrl?: string; group?: { id: string; name: string } },
 ): Notification | null {
   // The toggle means what it says: off is off, including for approvals.
   // A bot whose notifications you turned off can still block waiting for
@@ -60,22 +85,29 @@ export function buildNotification(
   if (bot.notifications === false) return null;
 
   const body = summarize(detail);
+  // A bot working in a room is not "Scout" to whoever reads the banner — it
+  // is Scout, in that room. Name the room or the notification reads as if it
+  // came from the 1:1 thread it will not open.
+  const who = extra?.group ? `${bot.name} in ${extra.group.name}` : bot.name;
   const title =
     kind === "approval"
-      ? `${bot.name} needs approval`
+      ? `${who} needs approval`
       : kind === "question"
-        ? `${bot.name} has a question`
+        ? `${who} has a question`
         : kind === "takeover"
-          ? `${bot.name} needs your hands`
+          ? `${who} needs your hands`
           : kind === "routine-failed"
-            ? `${bot.name}'s routine failed`
+            ? `${who}'s routine failed`
             : kind === "turn-failed"
-              ? `${bot.name} couldn't start`
-              : `${bot.name} finished`;
+              ? `${who} couldn't start`
+              : `${who} finished`;
 
   // A "finished" with nothing to say is not worth a notification — the
   // badge in the sidebar already carries that much.
   if (kind === "done" && !body) return null;
 
-  return { kind, botId: bot.id, botName: bot.name, threadId, title, body, ...extra };
+  const notification: Notification = { kind, botId: bot.id, botName: bot.name, threadId, title, body };
+  if (extra?.avatarUrl) notification.avatarUrl = extra.avatarUrl;
+  if (extra?.group) notification.groupId = extra.group.id;
+  return notification;
 }

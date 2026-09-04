@@ -107,7 +107,7 @@ import { ComputerControl } from "./computer-control.ts";
 import { MAX_REMOTE_COMMAND_LENGTH } from "./remote-computer.ts";
 import { augmentedPath, findCliCandidates, resetPathCache } from "./env-path.ts";
 import { describeSpawnFailure, execCli } from "./procs.ts";
-import { buildNotification, type Notification } from "./notify.ts";
+import { blockedTarget, buildNotification, type Notification } from "./notify.ts";
 import {
   isEffortLevel,
   type ModelSelection,
@@ -1838,6 +1838,29 @@ function isUnattended(botId?: string | null): boolean {
   unattendedBots.set(botId, Date.now());
   return true;
 }
+
+// Threads whose turn in flight was started by another BOT — an ask_bot hop,
+// a drained delegation. The person asked ONE bot; the fan-out behind that
+// answer is that bot's work, not mail addressed to them, so its completion
+// raises no badge and no banner. Anything that genuinely needs a human still
+// breaks through from its own path: a card that reached a person, a takeover,
+// a peer-approval — none of which run through the completion fold.
+//
+// Keyed by THREAD because turn.completed carries nothing else, and derived
+// from commsDepth, which every peer path already threads through. Every
+// dispatch rewrites the flag, so a peer turn that dies before it starts can
+// never silence the person's own next turn on that thread.
+const internalTurnThreads = new Set<string>();
+
+function markInternalTurn(threadId: string) {
+  internalTurnThreads.add(threadId);
+}
+function clearInternalTurn(threadId: string) {
+  internalTurnThreads.delete(threadId);
+}
+function isInternalTurn(threadId: string): boolean {
+  return internalTurnThreads.has(threadId);
+}
 let routines: RoutineManager | null = null;
 let calendarCalls: CalendarCallManager | null = null;
 const localVmOwnerBusy = (botId: string) => store.bot(botId)?.busy === true;
@@ -2333,6 +2356,10 @@ bus.subscribe((event: RuntimeEvent) => {
       turnUsage.set(event.threadId, { input: event.input, output: event.output, cachedInput: event.cachedInput });
       break;
     case "turn.completed": {
+      // Read the classification before releasing it for whatever runs on this
+      // thread next: a peer-started turn settles as coordination, not as news.
+      const internal = isInternalTurn(event.threadId);
+      clearInternalTurn(event.threadId);
       const generatedKey = generatedImageTurnKey(event.threadId, event.turnId);
       const generated = generatedImagesByTurn.get(generatedKey) ?? [];
       generatedImagesByTurn.delete(generatedKey);
@@ -2389,8 +2416,14 @@ bus.subscribe((event: RuntimeEvent) => {
         const routineReportGroup = routineReportThread ? store.groupByThread(routineReportThread) : undefined;
         // Group-origin routines belong to that channel's unread state. Their
         // hidden execution task should not light up the bot's 1:1 sidebar too.
-        if (!routineReportGroup) store.patchBot(bot.id, { unread: true });
-        if (routineRun?.status !== "failed") {
+        // Neither should a peer's hop: the exchange is already recorded in the
+        // pair channel and chipped into both threads, which is the whole of
+        // what the person needs to be able to find it.
+        if (!routineReportGroup && !internal) store.patchBot(bot.id, { unread: true });
+        // A failed peer turn stays a chip too. The bot that delegated is woken
+        // with the failure and answers the person in its own thread — buzzing
+        // here as well would ring twice for one piece of news.
+        if (routineRun?.status !== "failed" && !internal) {
           // the frame carries the bot's avatar so every desktop client can
           // show the notification under that bot's own face
           const completionDetail = routineRun
@@ -2430,7 +2463,6 @@ bus.subscribe((event: RuntimeEvent) => {
         const speakingBot = store.bot(speaker.botId);
         if (speakingBot?.busy) {
           store.setActivity(speakingBot.id, "idle");
-          store.patchBot(speakingBot.id, { unread: true });
           retryDelegationsWaitingOn(speakingBot.id);
         }
       }
@@ -3042,6 +3074,10 @@ async function startTurn(
   const providerText = usesNativeImageInput ? resolvedImages.text : text;
   const turnImages = usesNativeImageInput ? resolvedImages.images : [];
   const commsDepth = opts?.commsDepth ?? 0;
+  // Classify the turn where the peer paths' depth actually arrives: by the
+  // time it settles, the fold has only a thread id to go on.
+  if (commsDepth > 0) markInternalTurn(threadId);
+  else clearInternalTurn(threadId);
   // a task takes its name from the first thing you asked it to do
   if (resolvedImages.text.trim() && !opts?.cardContinuation) {
     store.titleTaskFromFirstMessage(bot.id, resolvedImages.text, threadId);
@@ -6677,9 +6713,16 @@ const server = createServer(async (req, res) => {
           const body = await readBody(req);
           const { snapshot, requestId } = computerControl.requestHelpLease(botId, body.reason);
           // worth a buzz: the bot is blocked on the person's hands, which
-          // is exactly the "blocked on you" rule notify.ts encodes
+          // is exactly the "blocked on you" rule notify.ts encodes.
+          // A bot stuck mid-room is not in its 1:1 thread — the turn and the
+          // screen it needs hands on are in the room — so send the person
+          // where the work is, and say which room it was.
+          const roomTurn = activeGroupTurnForBot(bot.id);
+          const target = blockedTarget(bot, roomTurn && { ...roomTurn.group, threadId: roomTurn.threadId });
           notify(
-            buildNotification("takeover", bot, bot.threadId, snapshot.helpReason ?? "asked you to take over"),
+            buildNotification("takeover", bot, target.threadId, snapshot.helpReason ?? "asked you to take over", {
+              group: target.group,
+            }),
           );
           return json(res, 200, { held: snapshot.held, helpOpen: snapshot.helpReason !== null, requestId });
         }
