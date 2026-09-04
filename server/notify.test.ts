@@ -2,7 +2,7 @@
 // tests are mostly about the cases where the answer is "stay quiet".
 import { describe, expect, it } from "vitest";
 
-import { buildNotification, summarize } from "./notify.ts";
+import { blockedTarget, buildNotification, summarize } from "./notify.ts";
 
 const bot = { id: "bot-1", name: "Scout", threadId: "thread-1" };
 
@@ -53,6 +53,42 @@ describe("buildNotification", () => {
 
     // no profile image → the frame stays exactly as before
     expect(buildNotification("done", bot, "thread-1", "pushed")?.avatarUrl).toBeUndefined();
+  });
+});
+
+describe("blockedTarget", () => {
+  const room = { id: "room-1", name: "Launch", threadId: "room-thread", busyBotId: "bot-1" };
+
+  it("opens the room a bot is speaking in, not the bot's own thread", () => {
+    // the turn, the screen and the card are all in the room; the 1:1 thread
+    // the notification used to open has nothing on it
+    expect(blockedTarget(bot, room)).toEqual({
+      threadId: "room-thread",
+      group: { id: "room-1", name: "Launch" },
+    });
+  });
+
+  it("stays on the bot's own thread for a room it is not holding", () => {
+    expect(blockedTarget(bot, { ...room, busyBotId: "someone-else" })).toEqual({ threadId: "thread-1" });
+    expect(blockedTarget(bot, { ...room, busyBotId: null })).toEqual({ threadId: "thread-1" });
+    expect(blockedTarget(bot, null)).toEqual({ threadId: "thread-1" });
+    expect(blockedTarget(bot)).toEqual({ threadId: "thread-1" });
+  });
+
+  it("names the room in the title and carries its id for grouping", () => {
+    const target = blockedTarget(bot, room);
+    expect(buildNotification("takeover", bot, target.threadId, "the login page wants a code", {
+      group: target.group,
+    })).toMatchObject({
+      kind: "takeover",
+      threadId: "room-thread",
+      groupId: "room-1",
+      title: "Scout in Launch needs your hands",
+    });
+    // a 1:1 takeover is untouched — no room to name, nothing to group under
+    const direct = buildNotification("takeover", bot, bot.threadId, "the login page wants a code");
+    expect(direct?.title).toBe("Scout needs your hands");
+    expect(direct?.groupId).toBeUndefined();
   });
 });
 
