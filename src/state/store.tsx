@@ -370,6 +370,9 @@ export interface ConfigStatus {
   rooms: { turnTimeoutMinutes: number };
   localVm: { mode: "shared" | "per-bot"; maxInstances: number };
   opencodeGo?: { configured: boolean };
+  /** One key shared by the openai-compat engine and the preview OpenMaus
+   * Runtime; `configured` only — the key never reaches the renderer. */
+  openaiCompat?: { configured: boolean };
   /** Voice (ElevenLabs). `configured` = a key is saved; `ready` = a key AND
    * a voice, which is what it takes to actually speak. The key itself is
    * never echoed back. */
@@ -381,7 +384,7 @@ export interface ConfigStatus {
   /** UI language override; "" (or absent) follows the system language. */
   language?: string;
   /** Opt-in flags. Absent means off. */
-  features?: { skillRecorder: boolean; showToolCalls?: boolean; browser?: boolean };
+  features?: { skillRecorder: boolean; showToolCalls?: boolean; browser?: boolean; ownedRuntime?: boolean };
   /** Named browser sessions any bot can be pointed at. */
   browserProfiles?: BrowserProfile[];
 }
@@ -396,7 +399,7 @@ export interface BrowserProfile {
 
 export type ConfigStatusFrame = Pick<
   ConfigStatus,
-  "xai" | "composio" | "box" | "vps" | "rooms" | "localVm" | "opencodeGo" | "tts" | "imageGen" | "profile" | "language" | "features" | "browserProfiles"
+  "xai" | "composio" | "box" | "vps" | "rooms" | "localVm" | "opencodeGo" | "openaiCompat" | "tts" | "imageGen" | "profile" | "language" | "features" | "browserProfiles"
 >;
 
 export function configStatusFromFrame(frame: ConfigStatusFrame): ConfigStatus {
@@ -408,6 +411,7 @@ export function configStatusFromFrame(frame: ConfigStatusFrame): ConfigStatus {
     rooms: frame.rooms,
     localVm: frame.localVm,
     opencodeGo: frame.opencodeGo,
+    openaiCompat: frame.openaiCompat,
     tts: frame.tts,
     imageGen: frame.imageGen,
     profile: frame.profile,
@@ -454,6 +458,8 @@ export interface InstanceInfo {
     /** This engine can answer a bounded review prompt without changing the
      * bot's active conversation. */
     approvalReview?: boolean;
+    /** who owns the model-facing context; see src/lib/context-label.ts */
+    contextOwnership?: "vendor-session" | "omb-replay" | "omb-loop";
   };
   /** `custom` agents sit below the rail divider — no subscription catalog. */
   access?: "subscription" | "custom";

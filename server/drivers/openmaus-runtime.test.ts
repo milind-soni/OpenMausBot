@@ -53,16 +53,23 @@ function fakeRuntime(script: OwnedRuntimeEvent[]) {
   return runtime;
 }
 
-const instanceWith = (runtime: OwnedAgentRuntime, key = "sk-test", options: { mcpStartupTimeoutMs?: number } = {}) =>
+const REMOTE = "https://openrouter.ai/api/v1";
+const LOCAL = "http://127.0.0.1:1/v1";
+
+const instanceWith = (
+  runtime: OwnedAgentRuntime,
+  key = "sk-test",
+  options: { mcpStartupTimeoutMs?: number; url?: string } = {},
+) =>
   createOpenMausRuntimeInstance(
     {
       instanceId: "owned-test",
       displayName: "Owned",
       environment: key ? { OPENAI_COMPAT_API_KEY: key } : {},
       enabled: true,
-      config: OpenMausRuntimeDriver.decodeConfig({ url: "http://127.0.0.1:1/v1", model: "test-model" }),
+      config: OpenMausRuntimeDriver.decodeConfig({ url: options.url ?? LOCAL, model: "test-model" }),
     },
-    { runtime, ...options },
+    { runtime, mcpStartupTimeoutMs: options.mcpStartupTimeoutMs },
   );
 
 describe("OpenMausRuntimeDriver", () => {
@@ -78,14 +85,34 @@ describe("OpenMausRuntimeDriver", () => {
     }
   });
 
-  it("is available and metered with a key, unavailable without one", async () => {
-    await expect(instanceWith(fakeRuntime([])).snapshot()).resolves.toMatchObject({ state: "available", billing: "metered" });
-    await expect(instanceWith(fakeRuntime([]), "").snapshot()).resolves.toMatchObject({ state: "unavailable" });
+  it("is available and metered with a key; a REMOTE endpoint is unavailable without one", async () => {
+    await expect(instanceWith(fakeRuntime([]), "sk-test", { url: REMOTE }).snapshot()).resolves.toMatchObject({ state: "available", billing: "metered" });
+    await expect(instanceWith(fakeRuntime([]), "", { url: REMOTE }).snapshot()).resolves.toMatchObject({ state: "unavailable" });
   });
 
-  it("refuses a turn without a key, and never calls the runtime", async () => {
+  it("runs a LOCAL endpoint with no key — it is the user's own server", async () => {
+    const runtime = fakeRuntime([{ type: "completed", ok: true, stopReason: "end_turn" }]);
+    const inst = instanceWith(runtime, "", { url: "http://127.0.0.1:8080/v1" });
+    await expect(inst.snapshot()).resolves.toMatchObject({ state: "available", billing: "metered" });
+    const rec = recordEvents(inst.adapter);
+    await inst.adapter.sendTurn({ threadId: "t", text: "hi", context: plan });
+    await rec.until((e) => e.type === "turn.completed");
+    expect(runtime.runs[0]!.model.apiKey).toBeUndefined();
+    rec.stop();
+  });
+
+  it("refuses a REMOTE endpoint with no key, and says why", async () => {
+    // every prompt would go to a host the user never authenticated with
     const runtime = fakeRuntime([]);
-    await expect(instanceWith(runtime, "").adapter.sendTurn({ threadId: "t", text: "hi", context: plan })).rejects.toThrow(/no API key/);
+    const inst = instanceWith(runtime, "", { url: REMOTE });
+    await expect(inst.snapshot()).resolves.toMatchObject({ state: "unavailable", reason: expect.stringContaining("not a local endpoint") });
+    await expect(inst.adapter.sendTurn({ threadId: "t", text: "hi", context: plan })).rejects.toThrow(/not a local endpoint/);
+    expect(runtime.runs).toHaveLength(0);
+  });
+
+  it("refuses a keyless turn to a remote endpoint, and never calls the runtime", async () => {
+    const runtime = fakeRuntime([]);
+    await expect(instanceWith(runtime, "", { url: REMOTE }).adapter.sendTurn({ threadId: "t", text: "hi", context: plan })).rejects.toThrow(/needs an API key/);
     expect(runtime.runs).toHaveLength(0);
   });
 

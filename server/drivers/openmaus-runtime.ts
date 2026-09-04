@@ -29,6 +29,7 @@ import { newEventId, newId } from "../contracts.ts";
 import { contextLimitsFor } from "../context/budget.ts";
 import type { OwnedAgentRuntime, OwnedRuntimeEvent } from "../runtime/contracts.ts";
 import { mountMcpServers, type MountedMcp } from "../runtime/mcp-tools.ts";
+import { isLocalEndpoint } from "./local-endpoint.ts";
 import { createPiRuntime } from "../runtime/pi-runtime.ts";
 import { appendNative } from "./native.ts";
 
@@ -73,6 +74,8 @@ function decodeConfig(raw: unknown): OpenMausRuntimeConfig {
 }
 
 const NO_KEY = (env: string) => `no API key — set ${env} or add it to the instance config`;
+const REMOTE_NEEDS_KEY = (env: string, url: string) =>
+  `${url} is not a local endpoint, so it needs an API key — set ${env} or add it to the instance config. Only loopback and private-network hosts may run without one.`;
 
 export interface CreateOpenMausRuntimeOptions {
   /** injected by tests; production uses the Pi-backed runtime. */
@@ -105,6 +108,12 @@ export function createOpenMausRuntimeInstance(
       }
     : DEFAULT_MODELS;
 
+  // A local endpoint (loopback / private network) may run with no key: it
+  // is the user's own server. A remote one never may — every prompt would
+  // go to a host the user never authenticated with.
+  const local = isLocalEndpoint(config.url);
+  const usable = Boolean(apiKey) || local;
+  const unavailableReason = local ? NO_KEY(config.apiKeyEnv) : REMOTE_NEEDS_KEY(config.apiKeyEnv, config.url);
   const runtime = options.runtime ?? createPiRuntime();
   const listeners = new Set<RuntimeEventListener>();
   const active = new Map<string, AbortController>();
@@ -181,7 +190,7 @@ export function createOpenMausRuntimeInstance(
   };
 
   const sendTurn = async (turn: SendTurnInput) => {
-    if (!apiKey) throw new Error(NO_KEY(config.apiKeyEnv));
+    if (!usable) throw new Error(unavailableReason);
     if (active.has(turn.threadId)) throw new Error("a turn is already running on this thread");
     // For an omb-loop engine the plan is not a compatibility projection, it
     // is the only history there is. Refusing a planless turn is how a
@@ -262,9 +271,9 @@ export function createOpenMausRuntimeInstance(
     displayName: input.displayName,
     enabled: input.enabled,
     models: catalog,
-    snapshot: async () => apiKey
+    snapshot: async () => usable
       ? { state: "available", authenticated: true, version: null, billing: "metered" }
-      : { state: "unavailable", reason: NO_KEY(config.apiKeyEnv) },
+      : { state: "unavailable", reason: unavailableReason },
     adapter: {
       provider: OPENMAUS_RUNTIME_KIND,
       capabilities: {

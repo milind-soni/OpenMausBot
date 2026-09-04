@@ -557,6 +557,26 @@ asserted.
 - [ ] State explicitly that OpenMaus Runtime does not reuse Claude/Codex subscription login and may incur provider API charges.
 - [ ] Do not auto-migrate `openai-compat` bots. Switching to/from the preview is an explicit per-bot engine selection.
 - [ ] Verify keys never enter config responses, renderer state, diagnostics, analytics, or logs.
+
+  **Resolved 2026-09-04 (Task 10 shipped):**
+  - The credential is `openaiCompatApiKey`, one row in `WORKSPACE_CREDENTIALS`, one entry in
+    `main.mjs`'s `CREDENTIAL_PATCH`, one literal in the `setCredential` union. The server side
+    (`syncCredentialEnv`) already handled `openaiCompat.key`; only Electron and the renderer
+    were missing. The renderer sees `openaiCompat: { configured }` — a boolean, never the key.
+  - No-key endpoints are allowed only for loopback and private-network hosts
+    (`server/drivers/local-endpoint.ts`): `127.0.0.1`, `localhost`, `*.localhost`, `[::1]`,
+    RFC 1918, link-local, and IPv6 ULA/link-local. An unparseable URL is treated as remote — the
+    safe side. A remote URL with no key is unavailable with a reason that names the rule.
+  - `features.ownedRuntime` is a Settings → Experimental switch. Off means absent from the
+    fleet; a bot that chose it sees an unavailable engine and keeps every transcript. Nothing
+    migrates an existing bot.
+  - The disclosure lives once, in `src/lib/context-label.ts` (`OWNED_RUNTIME_DISCLOSURE`), and
+    the settings toggle, engine row, model menu, and setup card all render from it, so three
+    surfaces cannot drift into three promises. `contextLabel()` and `authLabel()` are kept
+    deliberately separate: who owns the context is not how it is paid for, and this engine is
+    the case where they differ.
+  - `registry.describe()` now projects `contextOwnership`, so the UI can label every engine,
+    not only this one.
 - [ ] Run targeted config, Electron credential, setup, engine/model-picker, and secret-redaction tests, then:
 
   ```sh

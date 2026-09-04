@@ -5,6 +5,7 @@
 // asks before registering — the classic miss is a path the terminal sees
 // but this GUI app can't.
 import { useEffect, useRef, useState } from "react";
+import { authLabel, contextLabel } from "@/lib/context-label";
 import { Check, ChevronDown, Loader2, RefreshCw, TriangleAlert } from "lucide-react";
 
 import { api, useStore, type InstanceInfo } from "@/state/store";
@@ -270,6 +271,14 @@ function EngineRow({ instance }: { instance: InstanceInfo }) {
             {instance.snapshot.version}
           </span>
         )}
+        {contextLabel(instance.capabilities?.contextOwnership) && (
+          <span className="shrink-0 text-[11px] text-ink-secondary" title="Who owns the model-facing context">
+            {contextLabel(instance.capabilities?.contextOwnership)}
+          </span>
+        )}
+        <span className="shrink-0 text-[11px] text-ink-secondary/80" title="How this engine authenticates and bills">
+          {authLabel(instance)}
+        </span>
         <span className="flex-1" />
         {instance.driverKind === "claudeAgent" && (
           <button

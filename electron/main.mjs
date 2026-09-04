@@ -2070,6 +2070,7 @@ const CREDENTIAL_PATCH = {
   opencodeGoApiKey: (value) => ({ opencodeGo: { apiKey: value } }),
   ttsKey: (value) => ({ tts: { key: value } }),
   openaiImageApiKey: (value) => ({ imageGen: { key: value } }),
+  openaiCompatApiKey: (value) => ({ openaiCompat: { key: value } }),
 };
 
 ipcMain.handle("credential:set", localOnly("credential:set", async (_event, name, value) => {

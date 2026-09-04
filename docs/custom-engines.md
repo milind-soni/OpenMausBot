@@ -67,7 +67,33 @@ entry:
   `model` as a custom option either way.
 - Honest limits: chat text + reasoning streams only — **no tool calls**, so
   bots on these instances answer and write, but don't operate computers or
-  connected apps.
+  connected apps. The one exception is the preview engine below, which runs
+  its own tool loop.
+
+## OpenMaus Runtime (preview): the loop runs inside OpenMausBot
+
+Every other engine hands the inner model/tool loop to an installed CLI or a
+one-shot chat endpoint. This one runs it in-process — model call, tool call,
+approval, steering, cancellation — against any OpenAI-compatible endpoint.
+It is off until you enable it in Settings → Experimental features, and no
+existing bot is moved onto it; you pick it per bot in the model menu.
+
+- **It does not use a Claude or Codex login.** Authentication is an API key
+  (the same `openaiCompat.key` the OpenAI-compatible engine uses) or a local
+  server that needs none. Usage is billed by that provider.
+- **No key is accepted only for a local endpoint** — loopback or a private
+  network address (`127.0.0.1`, `localhost`, `10.x`, `192.168.x`, `172.16–31.x`,
+  `[::1]`, `fd..`). A remote URL with no key shows as unavailable and says so;
+  every prompt would otherwise go to a host you never authenticated with.
+- **Tools:** your own `mcpServers` from `config.json` mount as tools, namespaced
+  by server. Every call asks for approval through the ordinary card, or your
+  auto-approve rules; an unanswered ask is a deny, never an allow.
+- **Context:** the engine row and model menu show `Context: OpenMaus managed`
+  alongside `API key · billed by the provider` — two labels on purpose. Who
+  owns the conversation's context and how the engine is paid for are separate
+  questions, and this is the engine where they differ.
+- Bounds: 32 model calls and 64 tool calls per turn, 180 s per tool, and a stop
+  after the same call is repeated five times.
 
 ## Notes
 

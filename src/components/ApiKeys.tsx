@@ -6,7 +6,7 @@ import { Check, CircleHelp, ExternalLink, Loader2, TriangleAlert } from "lucide-
 import { api, useStore, type ConfigStatus } from "@/state/store";
 import { cn } from "@/lib/cn";
 
-export type ConfigSection = "composio" | "box" | "opencodeGo";
+export type ConfigSection = "composio" | "box" | "opencodeGo" | "openaiCompat";
 
 const SECTIONS: Record<
   ConfigSection,
@@ -18,12 +18,14 @@ const SECTIONS: Record<
   },
   box: { body: (v) => ({ box: { token: v } }), flag: (c) => c.box.configured },
   opencodeGo: { body: (v) => ({ opencodeGo: { apiKey: v } }), flag: (c) => c.opencodeGo?.configured ?? false },
+  openaiCompat: { body: (v) => ({ openaiCompat: { key: v } }), flag: (c) => c.openaiCompat?.configured ?? false },
 };
 
-const ELECTRON_CREDENTIAL: Record<ConfigSection, "composioApiKey" | "boxToken" | "opencodeGoApiKey"> = {
+const ELECTRON_CREDENTIAL: Record<ConfigSection, "composioApiKey" | "boxToken" | "opencodeGoApiKey" | "openaiCompatApiKey"> = {
   composio: "composioApiKey",
   box: "boxToken",
   opencodeGo: "opencodeGoApiKey",
+  openaiCompat: "openaiCompatApiKey",
 };
 
 const CREDENTIALS: Record<
@@ -62,6 +64,15 @@ const CREDENTIALS: Record<
     href: "https://opencode.ai/docs/providers/",
     linkLabel: "Open the OpenCode provider guide",
     optional: true,
+  },
+  openaiCompat: {
+    label: "OpenAI-compatible API key",
+    placeholder: "sk-or-v1-… (OpenRouter), gsk_… (Groq), or leave empty for a local server",
+    description: "Used by the OpenAI-compatible engine and the preview OpenMaus Runtime. A local llama.cpp, vLLM, or LM Studio endpoint needs no key.",
+    href: "https://openrouter.ai/keys",
+    linkLabel: "Get an OpenRouter key",
+    optional: true,
+    warning: "This is a metered API key, not a Claude or Codex login. The provider bills for usage.",
   },
 };
 
