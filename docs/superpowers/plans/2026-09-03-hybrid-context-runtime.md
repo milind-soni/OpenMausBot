@@ -493,6 +493,33 @@ asserted.
 - [ ] Implement steering before the next model call and test no-live-turn fallback.
 - [ ] Enforce 32 model calls, 64 tool calls, 180-second default tool timeout, advisory at three identical calls in a six-call window, and stop at five identical calls. The existing total-turn watchdog wins if earlier.
 - [ ] Advertise each MCP capability only after its integration test passes.
+
+  **Resolved 2026-09-04 (Task 9 shipped):** `customMcp` is advertised — the user's own
+  `config.json` servers mount as namespaced tools (`server__tool`) with a reverse routing map,
+  proven by `server/runtime/mcp-tools.test.ts` against a real stdio child in every failure mode
+  the fake supports. `agentsMcp`, `computerMcp`, `composioMcp`, `phoneMcp`, and `browserMcp`
+  stay unadvertised: each needs its own proof before a bot is told it has that tool.
+
+  Two findings worth more than the checklist:
+
+  - **Silence is a deny, and it broke the right tests.** Wiring the approval gate made every
+    one of Task 8's tool-call tests time out — they assumed a tool runs unprompted, and now
+    nothing runs without an answer. The tests were changed to play the harness's auto-approve;
+    the runtime was not. A future test that "just calls a tool" and hangs is hitting this
+    property, not a bug.
+  - **The MCP SDK silently drops a malformed `tools/list` reply.** A server that answers the
+    handshake and then speaks garbage does not error; the client simply waits. Only
+    `MCP_STARTUP_TIMEOUT_MS` (20 s) returns the turn, so that constant is load-bearing. Tests
+    shorten it through `mcpStartupTimeoutMs`; production must not.
+  - **The MCP SDK's stdio transport broke the packaged build, and only the packaged smoke
+    caught it.** `cross-spawn@7.0.6` (pulled in by `StdioClientTransport`) calls
+    `require("child_process")` at load time; esbuild's ESM output has no `require`, so
+    `dist-server/index.js` threw on boot while vitest and Electron dev — both unbundled — were
+    green. Fixed with a `createRequire` banner on both server builds in
+    `scripts/bundle-server.mjs`. `child_process` is a builtin, so the shim resolves it with no
+    `node_modules` in reach and the packaged server stays self-contained. Bundle after Task 9:
+    **3,599,073 bytes** (+425 KB over Task 8 for the MCP client; the require shim is 122 bytes). Keep running
+    `pnpm test:packaged-server` before every task commit; nothing else exercises the bundle.
 - [ ] Run:
 
   ```sh

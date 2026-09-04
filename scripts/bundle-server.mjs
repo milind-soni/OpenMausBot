@@ -61,12 +61,21 @@ const ENTRY_POINTS = [
   "drivers/browser-proxy.ts",
 ];
 
+// CommonJS dependencies (cross-spawn, via the MCP SDK's stdio transport) call
+// require() for Node builtins at load time. An ESM bundle has no require, so
+// give it one. createRequire resolves builtins without node_modules, which
+// keeps the packaged server self-contained — test:packaged-server proves it.
+const REQUIRE_SHIM = {
+  js: 'import { createRequire as __omb_createRequire } from "node:module"; const require = __omb_createRequire(import.meta.url);',
+};
+
 await build({
   entryPoints: ENTRY_POINTS.map((entry) => join(server, entry)),
   bundle: true,
   platform: "node",
   target: "node20",
   format: "esm",
+  banner: REQUIRE_SHIM,
   outbase: server,
   outdir: join(root, "dist-server"),
   // Written after tsc, replacing its output for these entry points.
@@ -85,6 +94,7 @@ await build({
   platform: "node",
   target: "node20",
   format: "esm",
+  banner: REQUIRE_SHIM,
   outfile: join(root, "dist-server", "mcp-server.js"),
   allowOverwrite: true,
   logLevel: "info",

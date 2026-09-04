@@ -53,7 +53,12 @@ async function turn(script: FakeResponse[], over: Partial<OwnedTurnInput> = {}) 
     limits: { maxModelCalls: 32, maxToolCalls: 64, toolTimeoutMs: 5_000 },
     ...over,
   };
-  await runtime.run(input, (e) => events.push(e));
+  await runtime.run(input, (e) => {
+    events.push(e);
+    // every tool call asks; these tests are about the loop, not approval,
+    // so they play the harness's auto-approve and allow each one
+    if (e.type === "ask.opened") runtime.answer(input.threadId, e.requestId, "allow");
+  });
   return { events, fake, runtime, abort };
 }
 
@@ -189,7 +194,10 @@ describe("createPiRuntime", () => {
       threadId: "t1", turnId: "turn-1", plan: plan(), system: "", tools: [steerOnce], signal: new AbortController().signal,
       model: { id: "m", baseUrl: "http://127.0.0.1:1/v1", apiKey: "k", contextWindow: 8_000, maxOutputTokens: 1_000, reasoning: false },
       limits: { maxModelCalls: 32, maxToolCalls: 64, toolTimeoutMs: 5_000 },
-    }, (e) => events.push(e));
+    }, (e) => {
+      events.push(e);
+      if (e.type === "ask.opened") runtime.answer("t1", e.requestId, "allow");
+    });
     const second = fake.calls[1]!;
     expect(second.messages.some((m) => m.role === "user" && m.content === "actually, stop after this")).toBe(true);
   });
@@ -209,11 +217,107 @@ describe("createPiRuntime", () => {
       model: { id: "m", baseUrl: "http://127.0.0.1:1/v1", apiKey: "k", contextWindow: 8_000, maxOutputTokens: 1_000, reasoning: false },
       limits: { maxModelCalls: 32, maxToolCalls: 64, toolTimeoutMs: 5_000 },
     };
-    await runtime.run({ ...base, turnId: "turn-1", plan: plan() }, () => {});
-    await runtime.run({ ...base, turnId: "turn-2", plan: plan() }, () => {});
+    const allow = (e: OwnedRuntimeEvent) => {
+      if (e.type === "ask.opened") runtime.answer("t1", e.requestId, "allow");
+    };
+    await runtime.run({ ...base, turnId: "turn-1", plan: plan() }, allow);
+    await runtime.run({ ...base, turnId: "turn-2", plan: plan() }, allow);
     const third = fake.calls[2]!;
     expect(third.messages.some((m) => m.role === "toolResult")).toBe(false);
     expect(third.messages).toHaveLength(3);
+  });
+});
+
+describe("createPiRuntime — approvals and the loop guard", () => {
+  const TOOL_TURN = [{ toolCalls: [{ name: "echo", args: { text: "a" } }] }, { text: "done" }];
+
+  /** Run a tool turn while answering asks with `decide`. */
+  async function approvalTurn(
+    decide: (ask: Extract<OwnedRuntimeEvent, { type: "ask.opened" }>, answer: (b: "allow" | "deny" | "answer", m?: string) => string) => void,
+    script = TOOL_TURN,
+    opts: { askTimeoutMs?: number } = {},
+  ) {
+    const calls: Array<Record<string, unknown>> = [];
+    const fake = makeFakeModel(script);
+    const runtime = createPiRuntime({ streamFn: fake.streamFn, ...opts });
+    const events: OwnedRuntimeEvent[] = [];
+    const run = runtime.run({
+      threadId: "t1", turnId: "turn-1", plan: plan(), system: "", tools: [echoTool(calls)], signal: new AbortController().signal,
+      model: { id: "m", baseUrl: "http://127.0.0.1:1/v1", apiKey: "k", contextWindow: 8_000, maxOutputTokens: 1_000, reasoning: false },
+      limits: { maxModelCalls: 32, maxToolCalls: 64, toolTimeoutMs: 5_000 },
+    }, (e) => {
+      events.push(e);
+      if (e.type === "ask.opened") decide(e, (b, m) => runtime.answer("t1", e.requestId, b, m));
+    });
+    await run;
+    return { events, calls, fake, runtime };
+  }
+
+  it("asks before every tool call and runs it on allow", async () => {
+    const { events, calls } = await approvalTurn((ask, answer) => {
+      expect(ask.kind).toBe("permission");
+      expect(ask.tool).toBe("echo");
+      expect(ask.summary).toContain("a");
+      expect(answer("allow")).toBe("allowed-once");
+    });
+    expect(calls).toEqual([{ text: "a" }]);
+    expect(events.find((e) => e.type === "ask.resolved")).toMatchObject({ behavior: "allow", source: "user" });
+    expect(events.at(-1)).toEqual({ type: "completed", ok: true, stopReason: "end_turn" });
+  });
+
+  it("never runs a denied tool, and tells the model why", async () => {
+    const { calls, fake } = await approvalTurn((_ask, answer) => {
+      expect(answer("deny", "not on this machine")).toBe("rejected");
+    });
+    expect(calls).toEqual([]);
+    // the second model call saw the refusal as the tool's result
+    const toolResult = fake.calls[1]!.messages.find((m) => m.role === "toolResult");
+    expect(JSON.stringify(toolResult)).toContain("not on this machine");
+  });
+
+  it("denies when nobody answers in time — silence is never an allow", async () => {
+    const { calls, events } = await approvalTurn(() => {}, TOOL_TURN, { askTimeoutMs: 50 });
+    expect(calls).toEqual([]);
+    expect(events.find((e) => e.type === "ask.resolved")).toMatchObject({ behavior: "deny", source: "timeout" });
+  });
+
+  it("answers a stale request id with unavailable", async () => {
+    const { runtime } = await approvalTurn((_a, answer) => answer("allow"));
+    expect(runtime.answer("t1", "no-such-ask", "allow")).toBe("unavailable");
+    expect(runtime.answer("other-thread", "x", "allow")).toBe("unavailable");
+  });
+
+  it("settles a pending ask with the system reply when the turn is interrupted", async () => {
+    const fake = makeFakeModel(TOOL_TURN);
+    const runtime = createPiRuntime({ streamFn: fake.streamFn });
+    const events: OwnedRuntimeEvent[] = [];
+    const run = runtime.run({
+      threadId: "t1", turnId: "turn-1", plan: plan(), system: "", tools: [echoTool()], signal: new AbortController().signal,
+      model: { id: "m", baseUrl: "http://127.0.0.1:1/v1", apiKey: "k", contextWindow: 8_000, maxOutputTokens: 1_000, reasoning: false },
+      limits: { maxModelCalls: 32, maxToolCalls: 64, toolTimeoutMs: 5_000 },
+    }, (e) => {
+      events.push(e);
+      if (e.type === "ask.opened") runtime.interrupt("t1");
+    });
+    await run;
+    expect(events.find((e) => e.type === "ask.resolved")).toMatchObject({ behavior: "deny", source: "system" });
+    expect(events.at(-1)).toMatchObject({ type: "completed", ok: false, stopReason: "interrupted" });
+  });
+
+  it("warns the model on the third identical call, in the result it reads next", async () => {
+    const repeat = { toolCalls: [{ name: "echo", args: { text: "same" } }] };
+    const { fake } = await approvalTurn((_a, answer) => answer("allow"), [repeat, repeat, repeat, { text: "ok" }]);
+    const afterThird = fake.calls[3]!.messages.filter((m) => m.role === "toolResult").at(-1);
+    expect(JSON.stringify(afterThird)).toContain("made this exact call several times");
+    const afterFirst = fake.calls[1]!.messages.filter((m) => m.role === "toolResult").at(-1);
+    expect(JSON.stringify(afterFirst)).not.toContain("made this exact call");
+  });
+
+  it("stops the loop on the fifth identical call", async () => {
+    const repeat = { toolCalls: [{ name: "echo", args: { text: "same" } }] };
+    const { events, calls } = await approvalTurn((_a, answer) => answer("allow"), Array.from({ length: 10 }, () => repeat));
+    expect(calls.length).toBe(4);
+    expect(events.at(-1)).toEqual({ type: "completed", ok: true, stopReason: "max_tool_calls" });
   });
 });
 

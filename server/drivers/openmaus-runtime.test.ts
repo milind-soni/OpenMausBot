@@ -1,6 +1,8 @@
 // The driver over the owned loop: how OwnedRuntimeEvents become canonical
 // RuntimeEvents, and what the adapter refuses. The runtime itself is faked
 // here — pi-runtime.test.ts covers the loop; this covers the seam.
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 
 import type { RuntimeEvent } from "../contracts.ts";
@@ -8,6 +10,8 @@ import type { TurnContextPlan } from "../context/types.ts";
 import type { OwnedAgentRuntime, OwnedRuntimeEmit, OwnedRuntimeEvent, OwnedTurnInput } from "../runtime/contracts.ts";
 import { recordEvents } from "../testing/events.ts";
 import { OpenMausRuntimeDriver, createOpenMausRuntimeInstance } from "./openmaus-runtime.ts";
+
+const FAKE_MCP = join(dirname(fileURLToPath(import.meta.url)), "..", "testing", "fake-mcp-server.ts");
 
 const plan: TurnContextPlan = {
   ownership: "omb-loop",
@@ -23,10 +27,15 @@ const plan: TurnContextPlan = {
  * what it was asked to do. */
 function fakeRuntime(script: OwnedRuntimeEvent[]) {
   const runs: OwnedTurnInput[] = [];
-  const runtime: OwnedAgentRuntime & { runs: OwnedTurnInput[]; steered: string[]; interrupted: string[] } = {
+  const runtime: OwnedAgentRuntime & { runs: OwnedTurnInput[]; steered: string[]; interrupted: string[]; answered: string[] } = {
     runs,
     steered: [],
     interrupted: [],
+    answered: [],
+    answer(threadId, requestId, behavior) {
+      runtime.answered.push(`${threadId}:${requestId}:${behavior}`);
+      return "unavailable";
+    },
     async run(input, emit: OwnedRuntimeEmit) {
       runs.push(input);
       for (const event of script) emit(event);
@@ -44,7 +53,7 @@ function fakeRuntime(script: OwnedRuntimeEvent[]) {
   return runtime;
 }
 
-const instanceWith = (runtime: OwnedAgentRuntime, key = "sk-test") =>
+const instanceWith = (runtime: OwnedAgentRuntime, key = "sk-test", options: { mcpStartupTimeoutMs?: number } = {}) =>
   createOpenMausRuntimeInstance(
     {
       instanceId: "owned-test",
@@ -53,17 +62,18 @@ const instanceWith = (runtime: OwnedAgentRuntime, key = "sk-test") =>
       enabled: true,
       config: OpenMausRuntimeDriver.decodeConfig({ url: "http://127.0.0.1:1/v1", model: "test-model" }),
     },
-    { runtime },
+    { runtime, ...options },
   );
 
 describe("OpenMausRuntimeDriver", () => {
-  it("declares ownership of the loop, queueing, and no MCP capability yet", () => {
+  it("declares ownership of the loop and queueing, and only the MCP capability it has proven", () => {
     const inst = instanceWith(fakeRuntime([]));
     const caps = inst.adapter.capabilities;
     expect(caps.contextOwnership).toBe("omb-loop");
     expect(caps.queueing).toBe(true);
-    // advertised only after each integration test passes (Task 9)
-    for (const cap of ["agentsMcp", "computerMcp", "composioMcp", "phoneMcp", "browserMcp", "customMcp", "localComputerMcp"] as const) {
+    // each integration is advertised only after its own test passes; the
+    // user's own MCP servers are (mcp-tools.test.ts), the rest are not yet
+    for (const cap of ["agentsMcp", "computerMcp", "composioMcp", "phoneMcp", "browserMcp", "localComputerMcp"] as const) {
       expect(caps[cap], cap).toBeFalsy();
     }
   });
@@ -193,6 +203,95 @@ describe("OpenMausRuntimeDriver", () => {
     expect(runtime.steered).toEqual(["t:stop"]);
     await inst.adapter.interruptTurn("t");
     expect(runtime.interrupted).toEqual(["t"]);
+  });
+
+  it("turns a runtime ask into an approval request and its answer into a resolution", async () => {
+    const runtime = fakeRuntime([
+      { type: "ask.opened", requestId: "ask-1", kind: "permission", tool: "notes__read_notes", summary: '{"text":"a"}' },
+      { type: "ask.resolved", requestId: "ask-1", behavior: "allow", source: "user" },
+      { type: "ask.opened", requestId: "ask-2", kind: "question", tool: "ask_user", summary: "which?", choices: ["x", "y"] },
+      { type: "ask.resolved", requestId: "ask-2", behavior: "answer", source: "timeout" },
+      { type: "completed", ok: true, stopReason: "end_turn" },
+    ]);
+    const inst = instanceWith(runtime);
+    const rec = recordEvents(inst.adapter);
+    await inst.adapter.sendTurn({ threadId: "t", text: "hi", context: plan });
+    await rec.until((e) => e.type === "turn.completed");
+    const opened = rec.events.filter((e) => e.type === "request.opened");
+    expect(opened[0]).toMatchObject({ requestId: "ask-1", requestType: "permission", tool: "notes__read_notes", summary: '{"text":"a"}' });
+    expect(opened[1]).toMatchObject({ requestId: "ask-2", requestType: "question", choices: ["x", "y"] });
+    const resolved = rec.events.filter((e) => e.type === "request.resolved");
+    expect(resolved[0]).toMatchObject({ requestId: "ask-1", behavior: "allow", source: "user" });
+    expect(resolved[1]).toMatchObject({ requestId: "ask-2", behavior: "answer", source: "timeout" });
+    rec.stop();
+  });
+
+  it("routes the harness's answer to the runtime and returns what it said", async () => {
+    const runtime = fakeRuntime([]);
+    runtime.run = () => new Promise(() => {});
+    const inst = instanceWith(runtime);
+    await inst.adapter.sendTurn({ threadId: "t", text: "hi", context: plan });
+    // the fake always says unavailable — the point is the delegation, and
+    // that unavailable is passed through untouched rather than upgraded
+    await expect(inst.adapter.respondToRequest("t", "ask-9", { behavior: "allow" })).resolves.toBe("unavailable");
+    expect(runtime.answered).toEqual(["t:ask-9:allow"]);
+  });
+
+  it("advertises the user's own MCP servers, and nothing else, as mountable", () => {
+    const caps = instanceWith(fakeRuntime([])).adapter.capabilities;
+    expect(caps.customMcp).toBe(true);
+    for (const cap of ["agentsMcp", "computerMcp", "composioMcp", "phoneMcp", "browserMcp", "localComputerMcp"] as const) {
+      expect(caps[cap], cap).toBeFalsy();
+    }
+  });
+
+  it("mounts the turn's MCP servers as namespaced tools and hands them to the loop", async () => {
+    const runtime = fakeRuntime([{ type: "completed", ok: true, stopReason: "end_turn" }]);
+    const inst = instanceWith(runtime);
+    const rec = recordEvents(inst.adapter);
+    const custom = {
+      notes: { command: process.execPath, args: ["--experimental-strip-types", FAKE_MCP], env: { ...process.env as Record<string, string> } },
+    };
+    await inst.adapter.sendTurn({ threadId: "t", text: "hi", context: plan, integrations: { custom } });
+    await rec.until((e) => e.type === "turn.completed");
+    expect(runtime.runs[0]!.tools.map((t) => t.name)).toEqual(["notes__read_notes"]);
+    // no runtime.error: the server started cleanly
+    expect(rec.events.some((e) => e.type === "runtime.error")).toBe(false);
+    rec.stop();
+  });
+
+  it("reports a server that failed to start and still runs the turn", async () => {
+    const runtime = fakeRuntime([{ type: "completed", ok: true, stopReason: "end_turn" }]);
+    // a garbage tools/list reply is dropped silently by the SDK; only the
+    // startup timeout brings the turn back, so it is shortened here
+    const inst = instanceWith(runtime, "sk-test", { mcpStartupTimeoutMs: 1_000 });
+    const rec = recordEvents(inst.adapter);
+    const custom = {
+      broken: { command: process.execPath, args: ["--experimental-strip-types", FAKE_MCP], env: { ...process.env as Record<string, string>, FAKE_MCP_MODE: "malformed" } },
+    };
+    await inst.adapter.sendTurn({ threadId: "t", text: "hi", context: plan, integrations: { custom } });
+    await rec.until((e) => e.type === "turn.completed");
+    expect(rec.events.some((e) => e.type === "runtime.error" && e.message.includes('"broken"'))).toBe(true);
+    expect(runtime.runs[0]!.tools).toEqual([]);
+    expect(rec.events.at(-1)).toMatchObject({ type: "turn.completed", ok: true });
+    rec.stop();
+  });
+
+  it("mounts fresh for each turn — a second turn is not handed the first turn's children", async () => {
+    const runtime = fakeRuntime([{ type: "completed", ok: true, stopReason: "end_turn" }]);
+    const inst = instanceWith(runtime);
+    const rec = recordEvents(inst.adapter);
+    const custom = {
+      notes: { command: process.execPath, args: ["--experimental-strip-types", FAKE_MCP], env: { ...process.env as Record<string, string> } },
+    };
+    await inst.adapter.sendTurn({ threadId: "t", text: "one", context: plan, integrations: { custom } });
+    await rec.until((e) => e.type === "turn.completed");
+    await inst.adapter.sendTurn({ threadId: "t", text: "two", context: plan, integrations: { custom } });
+    await rec.until((e) => e.type === "turn.completed" && rec.events.filter((x) => x.type === "turn.completed").length === 2);
+    expect(runtime.runs).toHaveLength(2);
+    expect(runtime.runs[1]!.tools[0]).not.toBe(runtime.runs[0]!.tools[0]);
+    expect(runtime.runs[1]!.tools.map((t) => t.name)).toEqual(["notes__read_notes"]);
+    rec.stop();
   });
 
   it("reuses openai-compat's config envelope so the two engines are interchangeable", () => {

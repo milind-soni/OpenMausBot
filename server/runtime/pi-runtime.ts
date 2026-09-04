@@ -28,7 +28,9 @@ import type { EffortLevel } from "../contracts.ts";
 import { sanitizeToolObservation } from "../context/sanitize.ts";
 import type { ModelContextItem } from "../context/types.ts";
 import { renderToolChip } from "../context/project.ts";
+import { createApprovalGate, type ApprovalGate } from "./approval-gate.ts";
 import type { OwnedAgentRuntime, OwnedModelTarget, OwnedTool } from "./contracts.ts";
+import { REPEAT_ADVISORY_NOTE, REPEAT_STOP_NOTE, createLoopGuard } from "./loop-guard.ts";
 
 /** What a Pi model call is made with. Exported so the driver can pass a
  * fake in tests and so nothing else needs to spell Pi's signature. */
@@ -137,9 +139,10 @@ function toPiTool(tool: OwnedTool, timeoutMs: number): AgentTool {
 interface LiveTurn {
   agent: Agent;
   abort: AbortController;
+  gate: ApprovalGate;
 }
 
-export function createPiRuntime(options: { streamFn?: PiStreamFn } = {}): OwnedAgentRuntime {
+export function createPiRuntime(options: { streamFn?: PiStreamFn; askTimeoutMs?: number } = {}): OwnedAgentRuntime {
   const live = new Map<string, LiveTurn>();
   // streamSimple maps the thinking level onto provider-specific fields and
   // takes the same options shape the Agent hands us
@@ -159,6 +162,16 @@ export function createPiRuntime(options: { streamFn?: PiStreamFn } = {}): OwnedA
     const model = toPiModel(input.model);
     let modelCalls = 0;
     let toolCalls = 0;
+    // Every tool call asks. Auto-approval is the harness's decision, made
+    // on the request.opened event; from here it is just an answer that
+    // arrived. Nothing runs on silence.
+    const gate = createApprovalGate({
+      onOpen: (ask) => emit({ type: "ask.opened", requestId: ask.id, kind: ask.kind, tool: ask.tool, summary: ask.summary, ...(ask.choices ? { choices: ask.choices } : {}) }),
+      onResolve: (ask, r) => emit({ type: "ask.resolved", requestId: ask.id, behavior: r.behavior, source: r.source }),
+      ...(options.askTimeoutMs === undefined ? {} : { timeoutMs: options.askTimeoutMs }),
+    });
+    const guard = createLoopGuard();
+    const advisories = new Set<string>();
     let stopReason: "end_turn" | "max_model_calls" | "max_tool_calls" = "end_turn";
     let failed: string | null = null;
     let finalText = "";
@@ -181,13 +194,31 @@ export function createPiRuntime(options: { streamFn?: PiStreamFn } = {}): OwnedA
         return streamFn(m, context, { ...opts, apiKey: input.model.apiKey, env: {}, signal: abort.signal });
       },
       convertToLlm: (messages) => messages as Message[],
-      beforeToolCall: async () => {
+      beforeToolCall: async (context) => {
         toolCalls += 1;
         if (toolCalls > input.limits.maxToolCalls) {
           stopReason = "max_tool_calls";
           return { block: true, reason: `tool call limit of ${input.limits.maxToolCalls} reached`, terminate: true };
         }
+        const verdict = guard.observe(context.toolCall.name, context.args);
+        if (verdict === "stop") {
+          stopReason = "max_tool_calls";
+          return { block: true, reason: REPEAT_STOP_NOTE, terminate: true };
+        }
+        if (verdict === "advisory") advisories.add(context.toolCall.id);
+        const summary = JSON.stringify(context.args ?? {}).slice(0, 300);
+        const answer = await gate.ask({ kind: "permission", tool: context.toolCall.name, summary });
+        if (answer.behavior !== "allow") {
+          return { block: true, reason: answer.message ?? "OpenMausBot: this action was not approved." };
+        }
         return undefined;
+      },
+      afterToolCall: async (context) => {
+        if (!advisories.delete(context.toolCall.id)) return undefined;
+        // the model is told, in the result it is about to read, that it is
+        // repeating itself — most models take the hint before the stop
+        const content = Array.isArray(context.result?.content) ? context.result.content : [];
+        return { content: [...content, { type: "text", text: REPEAT_ADVISORY_NOTE }] };
       },
       shouldStopAfterTurn: () => {
         if (modelCalls >= input.limits.maxModelCalls) {
@@ -257,7 +288,7 @@ export function createPiRuntime(options: { streamFn?: PiStreamFn } = {}): OwnedA
       }
     });
 
-    live.set(input.threadId, { agent, abort });
+    live.set(input.threadId, { agent, abort, gate });
     try {
       await agent.prompt(input.plan.currentPrompt);
       if (!failed && agent.state.errorMessage && !abort.signal.aborted) failed = agent.state.errorMessage;
@@ -278,6 +309,9 @@ export function createPiRuntime(options: { streamFn?: PiStreamFn } = {}): OwnedA
         emit({ type: "completed", ok: false, stopReason: "error" });
       }
     } finally {
+      // an ask that outlives the turn is answered by the system, never left
+      // hanging for a tool that will never run
+      gate.drain();
       unsubscribe();
       input.signal.removeEventListener("abort", onOuterAbort);
       live.delete(input.threadId);
@@ -295,12 +329,21 @@ export function createPiRuntime(options: { streamFn?: PiStreamFn } = {}): OwnedA
     interrupt: (threadId) => {
       const turn = live.get(threadId);
       if (!turn) return;
+      turn.gate.drain();
       turn.abort.abort();
       turn.agent.abort();
+    },
+    answer: (threadId, requestId, behavior, message) => {
+      const turn = live.get(threadId);
+      // no live turn means no pending ask: unavailable, which the harness
+      // treats as a deny and never as an allow
+      if (!turn) return "unavailable";
+      return turn.gate.answer(requestId, behavior, message);
     },
     hasTurn: (threadId) => live.has(threadId),
     dispose: async () => {
       for (const turn of live.values()) {
+        turn.gate.drain();
         turn.abort.abort();
         turn.agent.abort();
       }

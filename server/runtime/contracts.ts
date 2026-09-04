@@ -81,6 +81,10 @@ export interface OwnedLoopLimits {
 export type OwnedRuntimeEvent =
   | { type: "model.call"; call: number }
   | { type: "delta"; kind: "text" | "reasoning"; text: string }
+  /** a tool call is waiting on the harness. The driver turns this into
+   * request.opened; the answer comes back through answer(). */
+  | { type: "ask.opened"; requestId: string; kind: "permission" | "question"; tool: string; summary: string; choices?: string[] }
+  | { type: "ask.resolved"; requestId: string; behavior: "allow" | "deny" | "answer"; source: "user" | "timeout" | "system" | "unavailable" }
   | { type: "tool.started"; callId: string; name: string; inputSummary: string }
   | { type: "tool.completed"; callId: string; name: string; ok: boolean; observation: ToolContextSnapshot }
   | { type: "assistant"; text: string }
@@ -101,6 +105,9 @@ export interface OwnedAgentRuntime {
   steer(threadId: string, text: string): boolean;
   /** Abort the running turn on this thread, if any. */
   interrupt(threadId: string): void;
+  /** The harness's answer to an open ask. `unavailable` when nothing by
+   * that id is pending on that thread — never treated as an allow. */
+  answer(threadId: string, requestId: string, behavior: "allow" | "deny" | "answer", message?: string): "allowed-once" | "rejected" | "answered" | "unavailable";
   hasTurn(threadId: string): boolean;
   dispose(): Promise<void>;
 }

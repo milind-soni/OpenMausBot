@@ -12,9 +12,10 @@
 // another CLI's auth files. Authentication here is an API key or a local
 // endpoint that needs none, and usage is billed by that provider.
 //
-// Preview: disabled unless config.features.ownedRuntime is true. No MCP
-// integrations are mounted yet — those capabilities are advertised only
-// after each one is proven.
+// Preview: disabled unless config.features.ownedRuntime is true. The user's
+// own MCP servers (config.json mcpServers) mount as tools; every call asks
+// for approval through the ordinary card / auto-approve flow and fails
+// closed. Other integrations are advertised only as each one is proven.
 import type {
   DriverCreateInput,
   ModelCatalog,
@@ -27,6 +28,7 @@ import type {
 import { newEventId, newId } from "../contracts.ts";
 import { contextLimitsFor } from "../context/budget.ts";
 import type { OwnedAgentRuntime, OwnedRuntimeEvent } from "../runtime/contracts.ts";
+import { mountMcpServers, type MountedMcp } from "../runtime/mcp-tools.ts";
 import { createPiRuntime } from "../runtime/pi-runtime.ts";
 import { appendNative } from "./native.ts";
 
@@ -75,6 +77,11 @@ const NO_KEY = (env: string) => `no API key — set ${env} or add it to the inst
 export interface CreateOpenMausRuntimeOptions {
   /** injected by tests; production uses the Pi-backed runtime. */
   runtime?: OwnedAgentRuntime;
+  /** how long a mounted MCP server may take to answer its handshake. Tests
+   * shorten it; production keeps MCP_STARTUP_TIMEOUT_MS. That timeout is
+   * load-bearing: a server that replies to tools/list with garbage is
+   * silently dropped by the SDK, and only the timeout returns the turn. */
+  mcpStartupTimeoutMs?: number;
 }
 
 export function createOpenMausRuntimeInstance(
@@ -101,8 +108,15 @@ export function createOpenMausRuntimeInstance(
   const runtime = options.runtime ?? createPiRuntime();
   const listeners = new Set<RuntimeEventListener>();
   const active = new Map<string, AbortController>();
+  /** MCP children live exactly as long as the turn that mounted them. */
+  const mounted = new Map<string, MountedMcp>();
+  const unmount = async (threadId: string) => {
+    const servers = mounted.get(threadId);
+    mounted.delete(threadId);
+    await servers?.close();
+  };
   const emit = (event: RuntimeEvent) => {
-    for (const listener of [...listeners]) listener(event);
+    for (const listener of listeners) listener(event);
   };
   const base = (threadId: string, turnId: string) => ({
     eventId: newEventId(),
@@ -117,6 +131,20 @@ export function createOpenMausRuntimeInstance(
     const b = base(threadId, turnId);
     switch (event.type) {
       case "model.call":
+        return;
+      case "ask.opened":
+        emit({
+          ...b,
+          requestId: event.requestId,
+          type: "request.opened",
+          requestType: event.kind,
+          tool: event.tool,
+          summary: event.summary,
+          ...(event.choices ? { choices: event.choices } : {}),
+        });
+        return;
+      case "ask.resolved":
+        emit({ ...b, requestId: event.requestId, type: "request.resolved", behavior: event.behavior, source: event.source });
         return;
       case "delta":
         emit({ ...b, type: "content.delta", streamKind: event.kind === "text" ? "assistant_text" : "reasoning_text", delta: event.text });
@@ -138,6 +166,9 @@ export function createOpenMausRuntimeInstance(
         return;
       case "completed":
         active.delete(threadId);
+        // children stop on settle, not on dispose: a turn's servers must not
+        // outlive it and keep a socket or a process around
+        void unmount(threadId);
         emit({
           ...b,
           type: "turn.completed",
@@ -157,6 +188,8 @@ export function createOpenMausRuntimeInstance(
     // future caller learns that, instead of the model silently starting
     // from nothing.
     if (!turn.context) throw new Error("openmaus-runtime requires SendTurnInput.context");
+    // captured here: the async body below cannot see the guard's narrowing
+    const plan = turn.context;
 
     const turnId = newId();
     const abort = new AbortController();
@@ -166,16 +199,32 @@ export function createOpenMausRuntimeInstance(
     appendNative(turn.threadId, {
       dir: "out",
       source: "openmaus-runtime.turn",
-      msg: { model, items: turn.context.messages.length, ownership: turn.context.ownership },
+      msg: { model, items: plan.messages.length, ownership: plan.ownership },
     });
     emit({ ...base(turn.threadId, turnId), type: "turn.started" });
     emit({ ...base(turn.threadId, turnId), type: "session.started", sessionId: null, model });
 
-    void runtime.run(
+    // Mount inside the async body: a server that takes seconds to start
+    // must not block the HTTP request that started the turn. A server that
+    // fails is recorded and the turn proceeds without it.
+    void (async () => {
+      const servers = await mountMcpServers(turn.integrations?.custom ?? {}, {
+        toolTimeoutMs: OWNED_LOOP_LIMITS.toolTimeoutMs,
+        ...(options.mcpStartupTimeoutMs === undefined ? {} : { startupTimeoutMs: options.mcpStartupTimeoutMs }),
+      });
+      mounted.set(turn.threadId, servers);
+      for (const [name, reason] of servers.failures) {
+        emit({ ...base(turn.threadId, turnId), type: "runtime.error", message: `MCP server "${name}" did not start: ${reason}` });
+      }
+      if (abort.signal.aborted) {
+        await unmount(turn.threadId);
+        return;
+      }
+      await runtime.run(
       {
         threadId: turn.threadId,
         turnId,
-        plan: turn.context,
+        plan,
         system: turn.system,
         model: {
           id: model,
@@ -189,16 +238,18 @@ export function createOpenMausRuntimeInstance(
           ...(config.provider ? { openRouterProvider: config.provider } : {}),
         },
         effort: turn.effort,
-        tools: [],
+        tools: servers.tools,
         signal: abort.signal,
         limits: OWNED_LOOP_LIMITS,
       },
       forward(turn.threadId, turnId),
-    ).catch((error: unknown) => {
+      );
+    })().catch(async (error: unknown) => {
       // run() is contracted never to reject for model/tool failures; this is
       // the belt for a bug in the adapter itself, so the thread is not left
       // busy forever
       active.delete(turn.threadId);
+      await unmount(turn.threadId);
       emit({ ...base(turn.threadId, turnId), type: "runtime.error", message: error instanceof Error ? error.message : String(error) });
       emit({ ...base(turn.threadId, turnId), type: "turn.completed", ok: false, stopReason: "error", cost: null });
     });
@@ -223,19 +274,26 @@ export function createOpenMausRuntimeInstance(
         queueing: true,
         images: false,
         effortLevels: ["none", "low", "medium", "high", "xhigh", "max"],
-        // no MCP capability is advertised until its integration test passes
+        // the user's own MCP servers, proven by mcp-tools.test.ts; every
+        // other integration is advertised only once its own test passes
+        customMcp: true,
       },
       sendTurn,
       interruptTurn: async (threadId) => {
         active.get(threadId)?.abort();
         runtime.interrupt(threadId);
+        await unmount(threadId);
       },
-      respondToRequest: async () => "unavailable" as const,
+      // the harness's answer to an approval card; `unavailable` when nothing
+      // is pending, which the harness treats as a deny
+      respondToRequest: async (threadId, requestId, decision) =>
+        runtime.answer(threadId, requestId, decision.behavior, decision.message),
       steer: async (threadId, text) => runtime.steer(threadId, text),
       hasSession: (threadId) => active.has(threadId),
       stopAll: async () => {
         for (const abort of active.values()) abort.abort();
         await runtime.dispose();
+        await Promise.all([...mounted.keys()].map(unmount));
       },
       onEvent: (listener) => {
         listeners.add(listener);
@@ -245,6 +303,7 @@ export function createOpenMausRuntimeInstance(
     dispose: async () => {
       for (const abort of active.values()) abort.abort();
       await runtime.dispose();
+      await Promise.all([...mounted.keys()].map(unmount));
       listeners.clear();
     },
   };
