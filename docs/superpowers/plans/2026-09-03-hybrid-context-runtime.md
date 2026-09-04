@@ -442,6 +442,15 @@ asserted.
   message, and run `pnpm build:server && pnpm test:packaged-server` before the task commit — not
   only in Task 11.
 
+  **Resolved 2026-09-04:** `@earendil-works/pi-agent-core@0.85.0`, `@earendil-works/pi-ai@0.85.0`,
+  `@modelcontextprotocol/sdk@1.30.0`, all MIT. `scripts/bundle-server.mjs` has no `external`
+  list, so esbuild inlines whatever is imported. Importing `@earendil-works/pi-ai/compat` took
+  `dist-server/index.js` from **2,199,143 to 6,442,198 bytes (+4.2 MB, 2.9x)** because `compat`
+  re-exports every provider pi ships. Importing the one provider this engine speaks —
+  `@earendil-works/pi-ai/api/openai-completions` — lands at **3,173,475 bytes (+0.97 MB, +44%)**.
+  Rule: import the provider subpath, never `/compat`; a future reviewer seeing `/compat` in
+  `pi-runtime.ts` should treat it as a 3 MB regression.
+
 - [ ] Define concrete internal `OwnedAgentRuntime` inputs/events; keep all Pi imports inside `pi-runtime.ts`.
 - [ ] Create a deterministic fake streaming model covering text, reasoning, one/multiple tool calls, cancellation, provider error, and usage.
 - [ ] Adapt `TurnContextPlan.messages` to Pi model messages. Keep native tool-call/result pairs only in live state and use portable observations after restart.

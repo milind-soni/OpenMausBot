@@ -79,6 +79,9 @@
     "control-plane:dry-run": "pnpm --filter @openmausbot/control-plane dry-run"
   },
   "dependencies": {
+    "@earendil-works/pi-agent-core": "0.85.0",
+    "@earendil-works/pi-ai": "0.85.0",
+    "@modelcontextprotocol/sdk": "1.30.0",
     "@trycua/cua-driver": "0.20.0",
     "clsx": "^2.1.1",
     "lucide-react": "^0.539.0",
