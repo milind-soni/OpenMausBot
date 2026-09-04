@@ -50,6 +50,8 @@ writes down something wrong on Tuesday is still acting on it in March.
 
 ### Task 1: Typed memory entries
 
+> **Superseded** by [Memory structure and safety](2026-09-04-08-memory-structure-and-safety.md) Task 1: `server/memory-entries.ts` ships `parseMemory` / `renderMemory` / `selectMemory` with six kinds, a `(date, thread, msg, supersedes, superseded)` marker, and `## History` instead of deletes. Tasks 2–5 below import that module rather than the interface sketched here.
+
 **Files:**
 - Modify: `server/workspace.ts`, `server/workspace.test.ts`
 

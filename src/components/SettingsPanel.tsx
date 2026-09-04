@@ -381,7 +381,72 @@ interface MemoryTopic {
   bytes: number;
 }
 
+interface MemoryCapacity {
+  lines: number;
+  bytes: number;
+  loadedLines: number;
+  loadedBytes: number;
+  maxLines: number;
+  maxBytes: number;
+  truncated: boolean;
+  dropped: Partial<Record<"preference" | "decision" | "fact" | "procedure" | "episode" | "history" | "other", number>>;
+}
+
+interface MemoryResponse {
+  text: string;
+  truncated: boolean;
+  topics: MemoryTopic[];
+  capacity: MemoryCapacity;
+  /** false for engines with no private workspace: memory never loads there */
+  loads: boolean;
+}
+
 const formatBytes = (bytes: number) => (bytes < 1024 ? `${bytes} B` : `${Math.round(bytes / 102.4) / 10} KB`);
+
+const DROPPED_LABEL: Record<keyof MemoryCapacity["dropped"], string> = {
+  preference: "preferences",
+  decision: "decisions",
+  fact: "facts",
+  procedure: "procedures",
+  episode: "episodes",
+  history: "history entries",
+  other: "other lines",
+};
+
+/** "25 episodes, 12 facts" */
+function describeDropped(dropped: MemoryCapacity["dropped"]): string {
+  return (Object.keys(dropped) as Array<keyof MemoryCapacity["dropped"]>)
+    .filter((kind) => (dropped[kind] ?? 0) > 0)
+    .sort((a, b) => (dropped[b] ?? 0) - (dropped[a] ?? 0))
+    .map((kind) => `${dropped[kind]} ${DROPPED_LABEL[kind]}`)
+    .join(", ");
+}
+
+/** How full memory is, and what will not load. The bar is the load
+ * budget; past it the file still holds everything, the prompt does not. */
+function MemoryGauge({ capacity }: { capacity: MemoryCapacity }) {
+  const linePct = Math.min(100, Math.round((capacity.lines / capacity.maxLines) * 100));
+  const missing = capacity.lines - capacity.loadedLines;
+  return (
+    <div className="mt-2" data-testid="memory-gauge">
+      <div className="flex items-center justify-between gap-3 text-[11.5px] tabular-nums text-ink-secondary">
+        <span>
+          {capacity.lines} / {capacity.maxLines} lines · {formatBytes(capacity.bytes)} / {formatBytes(capacity.maxBytes)}
+        </span>
+        {capacity.truncated && <span className="text-danger">over budget</span>}
+      </div>
+      <div className="mt-1 h-1 overflow-hidden rounded-full bg-control" aria-hidden>
+        <div className={cn("h-full", capacity.truncated ? "bg-danger" : "bg-accent")} style={{ width: `${linePct}%` }} />
+      </div>
+      {capacity.truncated && (
+        <div className="mt-1.5 text-[11.5px] text-ink-secondary">
+          {missing} line{missing === 1 ? "" : "s"} will not load: {describeDropped(capacity.dropped)}. Oldest episodes drop first,
+          then oldest facts.
+        </div>
+      )}
+    </div>
+  );
+}
 
 /** MEMORY.md + memory/ topic files, surfaced so the user can read and fix
  * what the bot believes. Fetched on expand, not on mount: settings opens for
@@ -393,7 +458,8 @@ function MemoryCard({ bot }: { bot: Bot }) {
   const [error, setError] = useState<string | null>(null);
   const [text, setText] = useState("");
   const [dirty, setDirty] = useState(false);
-  const [truncated, setTruncated] = useState(false);
+  const [capacity, setCapacity] = useState<MemoryCapacity | null>(null);
+  const [loads, setLoads] = useState(true);
   const [topics, setTopics] = useState<MemoryTopic[]>([]);
   const [saving, setSaving] = useState(false);
   const [topic, setTopic] = useState<{ name: string; text: string } | null>(null);
@@ -403,11 +469,10 @@ function MemoryCard({ bot }: { bot: Bot }) {
     setError(null);
     setTopic(null);
     try {
-      const result: { text: string; truncated: boolean; topics: MemoryTopic[] } = await api(
-        `/api/bots/${bot.id}/memory`,
-      );
+      const result: MemoryResponse = await api(`/api/bots/${bot.id}/memory`);
       setText(result.text);
-      setTruncated(result.truncated);
+      setCapacity(result.capacity);
+      setLoads(result.loads);
       setTopics(result.topics);
       setDirty(false);
     } catch (e) {
@@ -421,11 +486,11 @@ function MemoryCard({ bot }: { bot: Bot }) {
     setSaving(true);
     setError(null);
     try {
-      const result: { truncated: boolean } = await api(`/api/bots/${bot.id}/memory`, {
+      const result: { truncated: boolean; capacity: MemoryCapacity } = await api(`/api/bots/${bot.id}/memory`, {
         method: "PUT",
         body: JSON.stringify({ text }),
       });
-      setTruncated(result.truncated);
+      setCapacity(result.capacity);
       setDirty(false);
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
@@ -482,7 +547,14 @@ function MemoryCard({ bot }: { bot: Bot }) {
         </div>
       )}
 
-      {open && !loading && !topic && (
+      {open && !loading && !topic && !loads && (
+        <div className="mt-3 text-[13px] text-ink-secondary">
+          This engine runs without a private workspace, so memory does not load for it. Switch the bot to a local
+          engine to give it a notebook.
+        </div>
+      )}
+
+      {open && !loading && !topic && loads && (
         <div className="mt-3">
           <textarea
             className={cn(inputCls, "min-h-[160px] resize-y font-mono text-[12.5px] leading-relaxed")}
@@ -502,12 +574,8 @@ function MemoryCard({ bot }: { bot: Bot }) {
             >
               {saving ? "Saving…" : "Save"}
             </button>
-            {truncated && (
-              <span className="text-[11.5px] text-ink-secondary">
-                Over the budget — only the top of this file loads each turn.
-              </span>
-            )}
           </div>
+          {capacity && <MemoryGauge capacity={capacity} />}
           {topics.length > 0 && (
             <div className="mt-3">
               <div className="mb-1.5 text-[12px] font-medium uppercase tracking-[0.08em] text-ink-secondary">
