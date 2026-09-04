@@ -5230,6 +5230,54 @@ function connectorThread(botId: string, threadId: string) {
   return null;
 }
 
+/** Whether `bot` may write into `group` from outside a turn there, and the
+ * exact refusal when it may not.
+ *
+ * Room membership is the one place the app's section boundary does not
+ * reach: list_bots, ask_bot, delegate_bot and create_bot are all scoped to
+ * the sender's section, but a person is free to put bots from two sections
+ * in one room. A tool that pushed text into such a room would therefore be
+ * the first way one section speaks to another with nobody in the loop, so
+ * this refuses it outright rather than trying to judge when that is
+ * harmless. The cost is real — a genuinely cross-section room cannot be
+ * posted into from outside — and it is the cheaper mistake: the person can
+ * still relay, and the boundary keeps meaning exactly one thing.
+ *
+ * Membership is read from the record here and never from a tool argument;
+ * the argument only names which room to look up. */
+function roomPostEligibility(
+  bot: BotRecord,
+  group: GroupRecord,
+): { ok: true } | { ok: false; status: number; error: string } {
+  if (group.dm) {
+    return {
+      ok: false,
+      status: 400,
+      error: "that is a one-to-one bot channel, not a room — use ask_bot or delegate_bot to reach a single bot",
+    };
+  }
+  if (!group.memberIds.includes(bot.id)) {
+    return { ok: false, status: 403, error: "you are not a member of that room" };
+  }
+  const outsider = group.memberIds
+    .map((id) => store.bot(id))
+    .find((member) => member && sectionKey(member.section) !== sectionKey(bot.section));
+  if (outsider) {
+    return {
+      ok: false,
+      status: 403,
+      error: `that room includes @${outsider.name}, who is outside your section — tell the user what you wanted to post there instead`,
+    };
+  }
+  // A room whose setup the person has not finished has never been opened
+  // for business, and its first message decides whether setup still counts
+  // as pending. A bot must not be the one to settle that.
+  if (roomSetupPending(group)) {
+    return { ok: false, status: 409, error: "that room is still being set up — it cannot receive messages yet" };
+  }
+  return { ok: true };
+}
+
 function routineProposalPersistence(botId: string, threadId: string) {
   if (!store.bot(botId)) {
     return { ok: false as const, status: 403, error: "unknown sender" };
@@ -6154,6 +6202,31 @@ const server = createServer(async (req, res) => {
             description: b.description || undefined,
           }));
         return json(res, 200, { bots });
+      }
+      // Nothing else ever tells a bot a room id, so this is the discovery
+      // half of post_to_room: it lists exactly the rooms that tool would
+      // accept, resolved from the sender's own membership. Listing a room a
+      // post would be refused for would only teach the model to keep trying.
+      if (method === "GET" && path === "/api/internal/rooms") {
+        const fromBotId = String(url.searchParams.get("fromBotId") ?? "");
+        const from = store.bot(fromBotId);
+        if (!from) return json(res, 403, { error: "unknown sender" });
+        const fromThreadId = String(url.searchParams.get("fromThreadId") ?? from.threadId);
+        if (!connectorThread(from.id, fromThreadId)) {
+          return json(res, 403, { error: "source conversation does not belong to sender" });
+        }
+        const rooms = store.groups
+          .filter((group) => roomPostEligibility(from, group).ok)
+          .slice(0, 50)
+          .map((group) => ({
+            id: group.id,
+            name: group.name,
+            members: group.memberIds
+              .map((id) => store.bot(id))
+              .filter((member): member is BotRecord => Boolean(member))
+              .map((member) => member.name),
+          }));
+        return json(res, 200, { rooms });
       }
       if (method === "GET" && path === "/api/internal/routines") {
         const fromBotId = String(url.searchParams.get("fromBotId") ?? "");

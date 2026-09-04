@@ -218,3 +218,49 @@ describe("peer comms from a room turn", () => {
     expect(str(throughPeerTask.body.error)).toContain("does not belong to sender");
   }, 40_000);
 });
+
+describe("list_rooms discovery", () => {
+  it("lists only the rooms the caller belongs to, and never one with a member outside its section", async () => {
+    const scout = await makeBot("Scout", "Discovery");
+    const mate = await makeBot("Scout Mate", "Discovery");
+    const stranger = await makeBot("Stranger", "Elsewhere");
+    const mine = await makeRoom("My room", [scout.id, mate.id], "Discovery");
+    // same section, so only the membership check can keep this one out
+    const theirs = await makeRoom("Their room", [mate.id, (await makeBot("Third Wheel", "Discovery")).id], "Discovery");
+    const mixed = await makeRoom("Mixed room", [scout.id, stranger.id], "Discovery");
+
+    const listed = await internal("GET", `/api/internal/rooms?fromBotId=${scout.id}&fromThreadId=${scout.threadId}`);
+    expect(listed.status).toBe(200);
+    const rooms = Array.isArray(listed.body.rooms) ? listed.body.rooms : [];
+    const ids = rooms.map((room) => str(field(room as Record<string, unknown>, "id")));
+    expect(ids).toContain(mine.id);
+    expect(ids, "a room the caller is not in was listed").not.toContain(theirs.id);
+    expect(ids, "a cross-section room was listed").not.toContain(mixed.id);
+
+    const listedRoom = rooms.find((room) => str(field(room as Record<string, unknown>, "id")) === mine.id);
+    expect(field(listedRoom as Record<string, unknown>, "members")).toEqual(["Scout", "Scout Mate"]);
+  }, 40_000);
+
+  it("never lists a one-to-one bot channel, and refuses a caller with no claim on the conversation", async () => {
+    const a = await makeBot("Pair A", "Discovery");
+    const b = await makeBot("Pair B", "Discovery");
+    // ask_bot auto-creates the pair's own bot-to-bot channel
+    const asked = await internal("POST", "/api/internal/ask-bot", {
+      fromBotId: a.id,
+      fromThreadId: a.threadId,
+      toBotId: b.id,
+      message: "make us a channel",
+      depth: 0,
+    });
+    expect(asked.status).toBe(200);
+    await api("POST", `/api/bots/${b.id}/interrupt`);
+
+    const listed = await internal("GET", `/api/internal/rooms?fromBotId=${a.id}&fromThreadId=${a.threadId}`);
+    const rooms = Array.isArray(listed.body.rooms) ? listed.body.rooms : [];
+    const names = rooms.map((room) => str(field(room as Record<string, unknown>, "name")));
+    expect(names.some((name) => name.includes("⇄")), `a bot-to-bot channel was listed: ${names.join(", ")}`).toBe(false);
+
+    const borrowed = await internal("GET", `/api/internal/rooms?fromBotId=${a.id}&fromThreadId=${b.threadId}`);
+    expect(borrowed.status).toBe(403);
+  }, 40_000);
+});

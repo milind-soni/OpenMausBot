@@ -5,6 +5,7 @@
 // tools are:
 //
 //   list_bots()                          → the other bots in this section + their status
+//   list_rooms()                         → the shared rooms this bot may post into
 //   ask_bot(bot_id, msg)                 → send msg to that bot, wait, return its reply
 //   delegate_bot(bot_id, msg, reason?)   → hand the task to a peer ASYNC: returns
 //                                          immediately, the peer runs after your
@@ -224,6 +225,12 @@ const TOOLS = [
     description:
       "List the other bots (agents) in your OpenMausBot section, with their model and whether they're busy. Call this before delegate_bot or ask_bot to discover who's available. Use delegate_bot for assignments; use ask_bot only for a short consultation needed inline.",
     inputSchema: { type: "object", properties: {} },
+  },
+  {
+    name: "list_rooms",
+    description:
+      "List the shared rooms (team channels) you belong to, with the other members of each. Call this before post_to_room — it is the only place room ids come from. One-to-one bot channels are never listed (reach a single bot with ask_bot or delegate_bot), and neither is a room containing someone outside your section.",
+    inputSchema: { type: "object", additionalProperties: false, properties: {} },
   },
   {
     name: "ask_bot",
@@ -472,6 +479,21 @@ async function callTool(name: string, args: Json): Promise<{ text: string; isErr
     });
     return {
       text: `Other bots in your section:\n${lines.join("\n")}\n\nAssign work with delegate_bot. Use ask_bot only for a short answer you need inline.`,
+    };
+  }
+  if (name === "list_rooms") {
+    const query = new URLSearchParams({ fromBotId: BOT_ID, fromThreadId: THREAD_ID });
+    const r = await api(`/api/internal/rooms?${query.toString()}`);
+    const rooms = Array.isArray(r.rooms) ? r.rooms.filter(jsonRecord) : [];
+    if (!rooms.length) {
+      return { text: "You are not in any room you can post into. Tell the user what you wanted to share and let them decide where it goes." };
+    }
+    const lines = rooms.map((room) => {
+      const members = Array.isArray(room.members) ? room.members.map(String).join(", ") : "";
+      return `- ${String(room.name)} [id: ${String(room.id)}]${members ? ` — members: ${members}` : ""}`;
+    });
+    return {
+      text: `Rooms you can post into:\n${lines.join("\n")}\n\nUse post_to_room with one of these ids. A post adds one message to the room; it does not start anyone's turn, so nobody replies to it automatically.`,
     };
   }
   if (name === "ask_bot") {
