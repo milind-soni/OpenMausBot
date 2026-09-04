@@ -51,8 +51,48 @@ function open(): DatabaseSync {
       active_leaf_id TEXT
     );
   `);
+  ensureRecallIndex(db);
   return db;
 }
+
+// Ranked recall over transcript text, for the bot's own session_search tool.
+// An external-content FTS5 table over messages.text: the index stores no
+// copy of the text, and three triggers keep it in step with every insert,
+// update, and delete on `messages`. FTS5 ships inside node:sqlite, so this
+// is no more of a dependency than the table it indexes. The sidebar's LIKE
+// search below stays as it is — substring find over a single thread wants
+// every occurrence, not a relevance ranking.
+function ensureRecallIndex(db: DatabaseSync): void {
+  const existed = db
+    .prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'messages_fts'")
+    .get();
+  db.exec(`
+    CREATE VIRTUAL TABLE IF NOT EXISTS messages_fts USING fts5(
+      text, content='messages', content_rowid='rowid', tokenize='unicode61'
+    );
+    CREATE TRIGGER IF NOT EXISTS messages_fts_ai AFTER INSERT ON messages BEGIN
+      INSERT INTO messages_fts(rowid, text) VALUES (new.rowid, new.text);
+    END;
+    CREATE TRIGGER IF NOT EXISTS messages_fts_ad AFTER DELETE ON messages BEGIN
+      INSERT INTO messages_fts(messages_fts, rowid, text) VALUES ('delete', old.rowid, old.text);
+    END;
+    CREATE TRIGGER IF NOT EXISTS messages_fts_au AFTER UPDATE ON messages BEGIN
+      INSERT INTO messages_fts(messages_fts, rowid, text) VALUES ('delete', old.rowid, old.text);
+      INSERT INTO messages_fts(rowid, text) VALUES (new.rowid, new.text);
+    END;
+  `);
+  // First time on an existing database: index everything already there.
+  if (!existed) db.exec("INSERT INTO messages_fts(messages_fts) VALUES ('rebuild')");
+}
+
+// INSERT OR REPLACE would delete and re-insert the row under a new rowid
+// without firing the delete trigger (SQLite only fires it with recursive
+// triggers on), leaving a dangling FTS entry. An upsert keeps the rowid and
+// runs the update trigger, so the index never drifts from the table.
+const UPSERT_MESSAGE =
+  "INSERT INTO messages (thread_id, id, at, role, kind, text, json) VALUES (?, ?, ?, ?, ?, ?, ?) " +
+  "ON CONFLICT(thread_id, id) DO UPDATE SET at = excluded.at, role = excluded.role, kind = excluded.kind, " +
+  "text = excluded.text, json = excluded.json";
 
 /** The live handle — reopened when the file was removed out from under us
  * (tests wipe DATA_DIR between cases; a fresh Store must get a fresh DB,
@@ -102,9 +142,7 @@ function importLegacy(threadId: string, legacyFile: string): ThreadRows {
     messages = ((raw as { messages?: Message[] }).messages ?? []) as Message[];
     activeLeafId = (raw as { activeLeafId?: string | null }).activeLeafId ?? null;
   }
-  const insert = db().prepare(
-    "INSERT OR REPLACE INTO messages (thread_id, id, at, role, kind, text, json) VALUES (?, ?, ?, ?, ?, ?, ?)",
-  );
+  const insert = db().prepare(UPSERT_MESSAGE);
   db().exec("BEGIN");
   try {
     for (const message of messages) {
@@ -129,7 +167,7 @@ function importLegacy(threadId: string, legacyFile: string): ThreadRows {
 
 export function insertMessage(threadId: string, message: Message): void {
   db()
-    .prepare("INSERT OR REPLACE INTO messages (thread_id, id, at, role, kind, text, json) VALUES (?, ?, ?, ?, ?, ?, ?)")
+    .prepare(UPSERT_MESSAGE)
     .run(threadId, message.id, message.at, message.role, message.kind, message.text ?? null, JSON.stringify(message));
 }
 
@@ -267,6 +305,94 @@ export function searchMessages(query: string, limit = 40, threadId?: string): Se
       ...(row.from_name ? { from: row.from_name } : {}),
     };
   });
+}
+
+export interface RecallHit {
+  threadId: string;
+  messageId: string;
+  at: number;
+  role: string;
+  /** the matched text, with each matched term wrapped in [brackets] */
+  snippet: string;
+  /** room messages: which member said it */
+  from?: string;
+}
+
+// Every query token must match, so a function word the model happened to
+// include ("archive reference on") turns a good query into a miss. Drop
+// the common ones; if that empties the query, search for what was sent.
+const STOP_WORDS = new Set(
+  "a an and are as at be by did do for from had has have how i in is it its of on or that the this to was we were what when where which who why with you your".split(" "),
+);
+
+/** Turn free text into an FTS5 query that cannot be misparsed: every
+ * whitespace-separated token becomes a quoted string, so `AND`, `NOT`,
+ * `*`, `:`, and stray quotes are searched for rather than interpreted.
+ * Tokens are ANDed — FTS5's default — so a hit contains all of them. */
+function ftsQuery(query: string): string | null {
+  const tokens = query
+    .split(/\s+/)
+    .map((token) => token.replace(/"/g, "").trim())
+    .filter(Boolean);
+  if (!tokens.length) return null;
+  const content = tokens.filter((token) => !STOP_WORDS.has(token.toLowerCase()));
+  return (content.length ? content : tokens).map((token) => `"${token}"`).join(" ");
+}
+
+/** How much of a matched message rides back in a hit. Wide enough that a
+ * short report reads whole; a longer one is fetched with readMessageText. */
+const SNIPPET_TOKENS = 48;
+
+/** Full text of one text message, for a session_read after a search hit.
+ * Null for a missing row or a non-text kind (activity chips carry no
+ * transcript text). */
+export function readMessageText(
+  threadId: string,
+  messageId: string,
+): { threadId: string; messageId: string; at: number; role: string; text: string; from?: string } | null {
+  const row = db()
+    .prepare(
+      "SELECT at, role, text, json_extract(json, '$.from.name') AS from_name FROM messages " +
+        "WHERE thread_id = ? AND id = ? AND kind = 'text' AND text IS NOT NULL",
+    )
+    .get(threadId, messageId) as { at: number; role: string; text: string; from_name: string | null } | undefined;
+  if (!row) return null;
+  return { threadId, messageId, at: row.at, role: row.role, text: row.text, ...(row.from_name ? { from: row.from_name } : {}) };
+}
+
+/** Relevance-ranked recall over the text messages of the given threads:
+ * the bot's own past conversations, best match first, not newest first.
+ * bm25 rank from FTS5; the snippet is FTS5's own, windowed around the
+ * matched terms. Scoping happens in SQL before LIMIT, so a busy thread
+ * cannot crowd out a quieter one. */
+export function recallMessages(query: string, threadIds: readonly string[], limit = 12): RecallHit[] {
+  const match = ftsQuery(query);
+  if (!match || !threadIds.length) return [];
+  const placeholders = threadIds.map(() => "?").join(", ");
+  const rows = db()
+    .prepare(
+      "SELECT m.thread_id, m.id, m.at, m.role, json_extract(m.json, '$.from.name') AS from_name, " +
+        `snippet(messages_fts, 0, '[', ']', '…', ${SNIPPET_TOKENS}) AS snippet ` +
+        "FROM messages_fts JOIN messages m ON m.rowid = messages_fts.rowid " +
+        `WHERE messages_fts MATCH ? AND m.kind = 'text' AND m.thread_id IN (${placeholders}) ` +
+        "ORDER BY bm25(messages_fts), m.at DESC LIMIT ?",
+    )
+    .all(match, ...threadIds, limit) as Array<{
+    thread_id: string;
+    id: string;
+    at: number;
+    role: string;
+    from_name: string | null;
+    snippet: string;
+  }>;
+  return rows.map((row) => ({
+    threadId: row.thread_id,
+    messageId: row.id,
+    at: row.at,
+    role: row.role,
+    snippet: row.snippet.replace(/\s+/g, " ").trim(),
+    ...(row.from_name ? { from: row.from_name } : {}),
+  }));
 }
 
 /** Test/shutdown hook — closes the handle so a wiped DATA_DIR starts clean. */

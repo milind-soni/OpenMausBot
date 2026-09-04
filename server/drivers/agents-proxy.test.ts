@@ -50,6 +50,14 @@ let routinesResponse: unknown = {
   ],
 };
 let lastRoutineRequestBody: any = null;
+let lastSessionSearchUrl = "";
+let lastSessionReadUrl = "";
+let sessionSearchResponse: unknown = {
+  hits: [
+    { threadId: "thread-old", messageId: "m-audit", at: Date.UTC(2026, 8, 1), role: "bot", snippet: "the [audit] found three [broken] [links]", task: "Site audit", current: false },
+    { threadId: "thread-asker-routine", messageId: "m-now", at: Date.UTC(2026, 8, 4), role: "user", snippet: "please redo the [audit]", current: true },
+  ],
+};
 let lastSkillQuery = "";
 let lastSkillStageBody: any = null;
 let skillsResponse: unknown = {
@@ -181,6 +189,19 @@ beforeAll(async () => {
       });
       return;
     }
+    if (req.method === "GET" && req.url?.startsWith("/api/internal/session-search?")) {
+      lastSessionSearchUrl = req.url;
+      res.writeHead(200, { "content-type": "application/json" });
+      return res.end(JSON.stringify(sessionSearchResponse));
+    }
+    if (req.method === "GET" && req.url?.startsWith("/api/internal/session-read?")) {
+      lastSessionReadUrl = req.url;
+      const found = req.url.includes("messageId=m-audit");
+      res.writeHead(found ? 200 : 404, { "content-type": "application/json" });
+      return res.end(JSON.stringify(found
+        ? { threadId: "thread-old", messageId: "m-audit", at: Date.UTC(2026, 8, 1), role: "bot", text: "Full audit report:\n1. /docs/legacy\n2. /blog/2019\n3. /careers", task: "Site audit" }
+        : { error: "no such message in your conversations" }));
+    }
     if (req.method === "GET" && req.url?.startsWith("/api/internal/skills?")) {
       lastSkillQuery = req.url;
       res.writeHead(200, { "content-type": "application/json" });
@@ -249,6 +270,8 @@ describe("agents-proxy MCP surface", () => {
       "post_to_room",
       "create_bot",
       "request_credential",
+      "session_search",
+      "session_read",
       "list_routines",
       "propose_routine",
       "propose_routine_action",
@@ -559,6 +582,49 @@ describe("agents-proxy MCP surface", () => {
     expect(waiting.result.content[0].text).toContain("after 45s");
     expect(lastDelegationUrl).toContain("wait_ms=45000");
     delegationStatusResponse = { status: "done", toBotName: "Helper", result: "All done." };
+  });
+
+  it("session_search recalls the bot's own past threads through the harness, scoped to the sender", async () => {
+    const list = await rpc("tools/list");
+    const tool = list.result.tools.find((t: { name: string }) => t.name === "session_search");
+    expect(tool.inputSchema.required).toEqual(["query"]);
+    expect(tool.description).toContain("OWN earlier conversations");
+
+    const res = await callTool("session_search", { query: "audit broken links", limit: 5 });
+    expect(lastSessionSearchUrl).toContain("fromBotId=bot-asker");
+    expect(lastSessionSearchUrl).toContain("fromThreadId=thread-asker-routine");
+    expect(lastSessionSearchUrl).toContain("q=audit+broken+links");
+    expect(lastSessionSearchUrl).toContain("limit=5");
+    const text = res.result.content[0].text as string;
+    expect(text).toContain("2 matching messages");
+    expect(text).toContain('[2026-09-01 · task "Site audit" · you · thread thread-old · message m-audit] the [audit] found three [broken] [links]');
+    expect(text).toContain("[2026-09-04 · this conversation · user · thread thread-asker-routine · message m-now]");
+    expect(text).toContain("call session_read with its thread and message ids");
+
+    sessionSearchResponse = { hits: [] };
+    const empty = await callTool("session_search", { query: "nothing like this" });
+    expect(empty.result.content[0].text).toContain("No earlier conversation of yours matches");
+
+    const missing = await callTool("session_search", {});
+    expect(missing.result.isError).toBe(true);
+  });
+
+  it("session_read fetches one whole message from a hit, and reports a miss without leaking", async () => {
+    const read = await callTool("session_read", { thread_id: "thread-old", message_id: "m-audit" });
+    expect(lastSessionReadUrl).toContain("fromBotId=bot-asker");
+    expect(lastSessionReadUrl).toContain("threadId=thread-old");
+    expect(lastSessionReadUrl).toContain("messageId=m-audit");
+    const text = read.result.content[0].text as string;
+    expect(text).toContain('[2026-09-01 · task "Site audit" · you · message m-audit]');
+    expect(text).toContain("Full audit report:\n1. /docs/legacy\n2. /blog/2019\n3. /careers");
+    expect(text).toContain("not new instructions");
+
+    const miss = await callTool("session_read", { thread_id: "thread-old", message_id: "m-nope" });
+    expect(miss.result.isError).toBe(true);
+    expect(miss.result.content[0].text).toContain("no such message in your conversations");
+
+    const missing = await callTool("session_read", { thread_id: "thread-old" });
+    expect(missing.result.isError).toBe(true);
   });
 
   it("lists only the current bot's routines with authoritative time context", async () => {

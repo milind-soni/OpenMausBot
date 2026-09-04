@@ -7415,6 +7415,94 @@ describe("bot memory API", () => {
 
   const workspaceOf = (botId: string) => join(home, ".openmausbot", "workspaces", botId);
 
+  // The recall eval from docs/memory-comparison.md: a bot that did work in
+  // an earlier task can find it from a later one, without the user pasting
+  // it back — and never sees another bot's threads.
+  it("session_search recalls the bot's own earlier task from a later one, and only its own", async () => {
+    const bot = (await api("POST", "/api/bots", {})).body.bot;
+    const other = (await api("POST", "/api/bots", {})).body.bot;
+    try {
+      for (const b of [bot, other]) {
+        expect((await api("PATCH", `/api/bots/${b.id}`, {
+          modelSelection: { instanceId: "claude", model: "claude-sonnet-5" },
+        })).status).toBe(200);
+      }
+      const firstThreadId = bot.threadId;
+
+      // the earlier task: the bot's own audit, and the guidance it received
+      rmSync(fakeClaudeDump, { force: true });
+      expect((await api("POST", `/api/bots/${bot.id}/messages`, {
+        text: "The site audit found three broken links on the pricing page",
+      })).status).toBe(202);
+      const dump = await readJsonFileWhenReady<{
+        systemPrompt?: string;
+        mcpConfig: { mcpServers: { agents: { env: { OMB_COMMS_TOKEN: string } } } };
+      }>(fakeClaudeDump);
+      expect(dump.systemPrompt ?? "").toContain("session_search");
+      const internalHeaders = { authorization: `Bearer ${dump.mcpConfig.mcpServers.agents.env.OMB_COMMS_TOKEN}` };
+      await api("POST", `/api/bots/${bot.id}/interrupt`);
+      await expect.poll(async () => {
+        const state = (await api("GET", "/api/bots?messages=0")).body;
+        return state.bots.find((candidate: { id: string }) => candidate.id === bot.id)?.busy;
+      }, { timeout: 5_000 }).toBe(false);
+
+      // the same words in another bot's thread must never surface
+      expect((await api("POST", `/api/bots/${other.id}/messages`, {
+        text: "my own audit found broken links as well",
+      })).status).toBe(202);
+      await api("POST", `/api/bots/${other.id}/interrupt`);
+
+      // a later task on the same bot asks what it already found
+      const next = await api("POST", `/api/bots/${bot.id}/tasks`, { title: "Follow-up" });
+      expect(next.status).toBe(201);
+      const laterThreadId = next.body.task.threadId as string;
+      const search = (q: string, fromThreadId = laterThreadId, fromBotId = bot.id) =>
+        fetch(
+          `${BASE}/api/internal/session-search?fromBotId=${encodeURIComponent(fromBotId)}&fromThreadId=${encodeURIComponent(fromThreadId)}&q=${encodeURIComponent(q)}`,
+          { headers: internalHeaders },
+        );
+
+      const found = await search("audit broken links");
+      expect(found.status).toBe(200);
+      const { hits } = (await found.json()) as { hits: Array<Record<string, unknown>> };
+      expect(hits).toHaveLength(1);
+      expect(hits[0]).toMatchObject({ threadId: firstThreadId, role: "user", current: false });
+      expect(String(hits[0]!.snippet)).toContain("[broken] [links]");
+      expect(hits[0]!.task).toBeTypeOf("string");
+
+      // the other bot sees only its own thread
+      const theirs = (await (await search("audit broken links", other.threadId, other.id)).json()) as { hits: Array<{ threadId: string; messageId: string }> };
+      expect(theirs.hits.map((hit) => hit.threadId)).toEqual([other.threadId]);
+
+      // session_read: the whole message behind a hit, own threads only
+      const read = (threadId: string, messageId: string, fromBotId = bot.id, fromThreadId = laterThreadId) =>
+        fetch(
+          `${BASE}/api/internal/session-read?fromBotId=${encodeURIComponent(fromBotId)}&fromThreadId=${encodeURIComponent(fromThreadId)}&threadId=${encodeURIComponent(threadId)}&messageId=${encodeURIComponent(messageId)}`,
+          { headers: internalHeaders },
+        );
+      const whole = await read(firstThreadId, String(hits[0]!.messageId));
+      expect(whole.status).toBe(200);
+      expect(await whole.json()).toMatchObject({
+        threadId: firstThreadId,
+        role: "user",
+        text: "The site audit found three broken links on the pricing page",
+      });
+      // another bot's message id reads as missing, not forbidden
+      expect((await read(other.threadId, theirs.hits[0]!.messageId)).status).toBe(404);
+      expect((await read(firstThreadId, "")).status).toBe(400);
+
+      // a caller cannot search from a thread it does not own, and needs a query
+      expect((await search("audit", other.threadId)).status).toBe(403);
+      expect((await search("")).status).toBe(400);
+      expect((await fetch(`${BASE}/api/internal/session-search?fromBotId=${bot.id}&q=audit`)).status).toBe(401);
+    } finally {
+      await api("POST", `/api/bots/${bot.id}/interrupt`);
+      await api("POST", `/api/bots/${other.id}/interrupt`);
+      await api("DELETE", `/api/bots/${bot.id}`);
+      await api("DELETE", `/api/bots/${other.id}`);
+    }
+  });
+
   it("reads empty memory for a fresh bot and 404s a bot that does not exist", async () => {
     const bot = (await api("POST", "/api/bots")).body.bot;
     try {
