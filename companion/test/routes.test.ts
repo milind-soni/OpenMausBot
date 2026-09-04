@@ -58,6 +58,7 @@ describe("what the app may do", () => {
     ["PATCH", "/api/bots/bot_123/model"],
     ["POST", "/api/bots/bot_123/avatar/generate"],
     ["POST", "/api/bots/bot_123/computer/join"],
+    ["POST", "/api/bots/bot_123/secret-cards/message_1/provide"],
     ["POST", "/api/groups/room-1/messages"],
     ["POST", "/api/groups/room-1/read"],
     ["POST", "/api/groups/room-1/tasks"],
@@ -159,6 +160,13 @@ describe("what it may not", () => {
     expect(allowed("POST", "/api/bots/bot_123/computer/sleep")).toBe(false);
     expect(allowed("POST", "/api/bots/bot_123/computer/exec")).toBe(false);
     expect(allowed("POST", "/api/bots/bot_123/computer/screenshot")).toBe(false);
+  });
+
+  it("allows only the exact encrypted credential submission verb", () => {
+    expect(allowed("POST", "/api/bots/bot_123/secret-cards/message_1/provide")).toBe(true);
+    expect(allowed("GET", "/api/bots/bot_123/secret-cards/message_1/provide")).toBe(false);
+    expect(allowed("POST", "/api/bots/bot_123/secret-cards/message_1/provided")).toBe(false);
+    expect(allowed("POST", "/api/bots/bot_123/secret-cards/message_1/provide/extra")).toBe(false);
   });
 
   // The method is part of the allowance, not decoration: reading the fleet

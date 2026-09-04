@@ -67,12 +67,21 @@ final class ConnectionTests: XCTestCase {
 
     func testParsesADesktopPairingInvite() throws {
         let token = "omb_pair_" + String(repeating: "a", count: 43)
-        let url = try XCTUnwrap(URL(string: "openmausbot://pair?address=macbook.tail1234.ts.net%3A8810&token=\(token)&code=004209&name=Milind%27s%20Mac"))
+        let secretKey = "BIPBQ12_dWnF1DZLsTZO3Vg0NGjds5-jp9h3jhjr2To7bJelczS0LM82rfXV68PmSJhz2ePosj3fL974XckCpDU"
+        let url = try XCTUnwrap(URL(string: "openmausbot://pair?address=macbook.tail1234.ts.net%3A8810&token=\(token)&code=004209&name=Milind%27s%20Mac&secretKey=\(secretKey)"))
         let invite = try XCTUnwrap(PairingInvite.parse(url))
         XCTAssertEqual(invite.connection.host, "macbook.tail1234.ts.net")
         XCTAssertEqual(invite.connection.port, 8810)
         XCTAssertEqual(invite.connection.name, "Milind's Mac")
+        XCTAssertEqual(invite.connection.secretPublicKey, secretKey)
         XCTAssertEqual(invite.credential, token)
+    }
+
+    func testRejectsAPresentButInvalidSecureEntryKey() throws {
+        let token = "omb_pair_" + String(repeating: "a", count: 43)
+        let invalid = try XCTUnwrap(URL(string:
+            "openmausbot://pair?address=mac.local&token=\(token)&secretKey=not-a-p256-key"))
+        XCTAssertNil(PairingInvite.parse(invalid))
     }
 
     func testPairingConsentShowsNormalizedOriginInsteadOfTrustingQRName() throws {
@@ -174,6 +183,8 @@ final class ConnectionTests: XCTestCase {
         XCTAssertNil(saved.hosts)
         XCTAssertNil(saved.allowedRouteKinds)
         XCTAssertNil(saved.allowedLocalRouteURLs)
+        XCTAssertNil(saved.secretPublicKey)
+        XCTAssertNil(saved.companionDeviceId)
         XCTAssertEqual(saved.orderedHosts, ["mac.tail1234.ts.net"])
     }
 

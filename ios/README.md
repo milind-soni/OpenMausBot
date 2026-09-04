@@ -3,10 +3,10 @@
 Your bots keep running on the laptop. This is the phone you watch them from,
 answer their approvals on, and send them the next thing.
 
-The laptop stays the only machine that owns agent processes, credentials,
-transcripts and computers. The phone owns nothing — it is a second client of the
-same harness the desktop app talks to, through the restricted sidecar described in
-[`docs/ios-companion.md`](../docs/ios-companion.md).
+The laptop stays the only machine that persists agent processes, credentials,
+transcripts and computers. The phone owns no copy — it is a second client of
+the same harness the desktop app talks to, through the restricted sidecar
+described in [`docs/ios-companion.md`](../docs/ios-companion.md).
 
 ## Status
 
@@ -14,6 +14,17 @@ Built and verified against a real harness on both a simulator and an iPhone:
 QR handoff, Bonjour discovery, manual LAN and Tailscale pairing, the roster, paged chat,
 streaming replies, shared sidebar sections, the computer view, and — the one that matters — an approval
 raised by a bot on the Mac, answered on the phone, with the bot carrying on.
+
+Pending API-key cards can also be completed on a freshly QR-paired phone.
+The native secure field supports iOS Password AutoFill (Apple Passwords is the
+free built-in option; enabled third-party providers work too), then CryptoKit
+encrypts the value for the paired computer before it enters the network. The
+phone clears the native field immediately; it may retain only the exact
+ciphertext in memory for an idempotent retry, and never persists it. The
+sidecar, hosted relay, transcript and SQLite database retain no plaintext copy.
+Submission requires Secure phone access (HTTPS) or Tailscale; local Wi-Fi chat
+still works, but the app does not send a reusable device token with a credential
+request over cleartext LAN HTTP.
 
 The app also installs an iOS Share extension. From any app's Share sheet, a
 person can choose **OpenMausBot**, review the paired computer and destination,

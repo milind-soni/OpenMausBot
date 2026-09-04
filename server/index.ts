@@ -287,6 +287,15 @@ import {
 } from "./request-auth.ts";
 import { formatPairingCode, SESSION_TTL_MS, SessionRegistry, type Scope } from "./sessions.ts";
 import { describeBrand, loadBrand } from "./brand.ts";
+import {
+  PHONE_SECRET_PROTOCOL_VERSION,
+  PhoneSecretBridge,
+  PhoneSecretError,
+  PhoneSecretSubmissionRegistry,
+  assertPhoneSecretRequestMatches,
+  phoneSecretOperationId,
+  type PhoneSecretContext,
+} from "./phone-secret.ts";
 
 const PORT = Number(process.env.OMB_PORT || process.env.OGB_PORT || 8799);
 const WEBHOOK_PORT = Number(process.env.OMB_WEBHOOK_PORT || PORT + 1);
@@ -353,6 +362,11 @@ type DesktopPrivateMessage = BrowserCleanupWireRequest | {
   type: "openmausbot:browser-control";
   botId: string;
   held: true;
+} | {
+  type: "openmausbot:phone-secret-save";
+  requestId: string;
+  target: string;
+  value: string;
 };
 function postDesktopPrivateMessage(message: DesktopPrivateMessage): boolean {
   if (!utilityParentPort) return false;
@@ -368,10 +382,12 @@ const browserCleanup = new BrowserCleanupCoordinator({
   file: join(DATA_DIR, "browser-cleanups.json"),
   send: postDesktopPrivateMessage,
 });
+const phoneSecrets = new PhoneSecretBridge(postDesktopPrivateMessage);
 utilityParentPort?.on("message", (event) => {
   const message = event?.data;
   try {
     if (browserCleanup.receive(message)) return;
+    if (phoneSecrets.receive(message)) return;
     if (!applyDesktopBrowserConnectionMessage(message)) composio.applyManagedBrokerMessage(message);
   } catch (error) {
     console.error(`[desktop-sync] rejected private parent message: ${error instanceof Error ? error.message : String(error)}`);
@@ -404,6 +420,16 @@ const createSidebarSectionSchema = z.object({
   botIds: z.array(z.string().regex(/^[\w-]+$/)).min(1).max(MAX_WORKSPACE_BOTS),
 }).strict();
 const createGroupTaskRequestSchema = z.object({ title: z.string().optional() });
+const phoneSecretEnvelopeSchema = z.object({
+  version: z.literal(PHONE_SECRET_PROTOCOL_VERSION),
+  threadId: z.string().regex(/^[\w-]{1,128}$/),
+  keyId: z.string().regex(/^[A-Za-z0-9_-]{22}$/),
+  deviceId: z.string().regex(/^[\w-]{1,128}$/),
+  target: z.string().regex(/^[A-Za-z][A-Za-z0-9]{0,63}$/),
+  requestKey: z.string().regex(/^[\w-]{1,128}$/),
+  encapsulatedKey: z.string().regex(/^[A-Za-z0-9_-]{87}$/),
+  ciphertext: z.string().regex(/^[A-Za-z0-9_-]{23,5483}$/),
+}).strict();
 // Resolved from the server root — see server/proxy-paths.ts. This descending
 // path happened to survive bundling, but it goes through the same anchor so
 // there is exactly one way proxies are located.
@@ -3635,7 +3661,7 @@ async function startTurn(
           ? peerRosterSystemPrompt(sectionPeers)
           : "";
       const credentialPrompt = integrations.agents
-        ? " If a supported API key is missing, use request_credential to create a secure credential request. The desktop app shows the entry card; the mobile app only shows a handoff to the computer and never accepts the credential. Never claim a secure field opened on mobile, and never ask the user to paste credentials into chat."
+        ? " If a supported API key is missing, use request_credential to create a secure credential request. A freshly QR-paired mobile app or the desktop app can show the secure entry card. Never claim it opened unless the request succeeded, and never ask the user to paste credentials into chat."
         : "";
       const routinePrompt = integrations.agents
         ? " If the user explicitly asks to list or review, schedule, run, or change routines, use list_routines and propose_routine or propose_routine_action. A proposal is not applied until the user confirms its in-app card, so never claim the action completed before that confirmation."
@@ -4571,7 +4597,7 @@ async function runGroupMemberTurn(
     group.bulletin.trim() && `Room bulletin (shared instructions for everyone):\n${group.bulletin.trim()}`,
     `Reply as yourself, briefly and conversationally. To bring a teammate in, mention them like @Name — they'll see the conversation and respond.`,
     integrations.agents &&
-      "If a supported API key is missing, use request_credential to create a secure credential request. The desktop app shows the entry card; the mobile app only shows a handoff to the computer and never accepts the credential. Never claim a secure field opened on mobile, and never ask the user to paste credentials into chat.",
+      "If a supported API key is missing, use request_credential to create a secure credential request. A freshly QR-paired mobile app or the desktop app can show the secure entry card. Never claim it opened unless the request succeeded, and never ask the user to paste credentials into chat.",
     integrations.agents &&
       "If the user explicitly asks to list or review, schedule, run, or change routines, use list_routines and propose_routine or propose_routine_action. A proposal is not applied until the user confirms its in-app card, so never claim the action completed before that confirmation.",
     skillAuthoring &&
@@ -5952,15 +5978,56 @@ type SecretResumeEntry = {
   outcome: "provided" | "dismissed";
 };
 const pendingSecretResumes = new Map<string, SecretResumeEntry>();
+const phoneSecretSubmissions = new PhoneSecretSubmissionRegistry();
+
+function claimPhoneSecretBotDeletion(botId: string): (() => void) | null {
+  const scopes = [
+    { botId },
+    ...store.groups
+      .filter((group) => group.memberIds.includes(botId))
+      .map((group) => ({ groupId: group.id })),
+  ];
+  const releases: Array<() => void> = [];
+  for (const scope of scopes) {
+    const release = phoneSecretSubmissions.claimMutation(scope);
+    if (!release) {
+      for (const undo of releases.reverse()) undo();
+      return null;
+    }
+    releases.push(release);
+  }
+  return () => {
+    for (const release of releases.reverse()) release();
+  };
+}
+
+function phoneSecretSubmissionKey(threadId: string, messageId: string, requestKey: string): string {
+  return `${threadId}:${messageId}:${requestKey}`;
+}
 
 function credentialDesktopHandoff(label: string): string {
-  return `Open this conversation in OpenMausBot on your computer to securely enter the ${label}. Credential entry is not available in the mobile app.`;
+  return `Securely provide the ${label} from OpenMausBot on your phone or computer. It is never added to chat.`;
 }
 
 function secretMessage(botId: string, threadId: string, messageId: string): Message | null {
-  if (!connectorThread(botId, threadId)) return null;
-  const message = store.messagesFor(threadId).find((candidate) => candidate.id === messageId);
+  const owner = connectorThread(botId, threadId);
+  if (!owner) return null;
+  // A credential card is actionable only while it is visible on the chosen
+  // conversation branch. In a channel, the sender attribution is also the
+  // durable owner: any member may share the thread, but only the bot that
+  // requested this credential may bind it into HPKE AAD or resume its turn.
+  const message = store.activePath(threadId).find((candidate) => candidate.id === messageId);
+  if (owner.group && message?.from?.botId !== botId) return null;
   return message?.kind === "secret" && message.secret ? message : null;
+}
+
+function currentSecretState(botId: string, threadId: string, messageId: string) {
+  const message = secretMessage(botId, threadId, messageId);
+  if (!message?.secret) return null;
+  return {
+    provided: message.secret.provided === true,
+    resumed: message.secret.resumed === true,
+  };
 }
 
 function markSecretResumeFailed(threadId: string, messageId: string, error: string) {
@@ -6049,6 +6116,102 @@ function resumeSecretCard(botId: string, threadId: string, messageId: string, ou
   });
   dispatchSecretResume({ botId, threadId, messageId, label: message.secret.label, outcome });
   return true;
+}
+
+async function provideSecretFromPhone(
+  context: PhoneSecretContext,
+  authenticatedDeviceId: string,
+): Promise<{ provided: boolean; resumed: boolean }> {
+  const owner = connectorThread(context.botId, context.threadId);
+  const message = secretMessage(context.botId, context.threadId, context.messageId);
+  if (!owner || !message?.secret) throw new PhoneSecretError("No such credential request", 404);
+  if (message.secret.dismissed) throw new PhoneSecretError("This credential request was dismissed", 409);
+  assertPhoneSecretRequestMatches(context, authenticatedDeviceId, {
+    target: message.secret.target,
+    requestKey: message.secret.requestKey,
+  });
+  const operationId = phoneSecretOperationId(context);
+  if (message.secret.phoneOperationId && message.secret.phoneOperationId !== operationId) {
+    throw new PhoneSecretError(
+      "This credential request was already completed by another submission",
+      409,
+    );
+  }
+  // The encrypted store may have committed immediately before a process
+  // interruption. Recording the winning operation precedes completing the
+  // card, so the exact retry can repair that tiny window without writing the
+  // credential again. A different randomized envelope was rejected above.
+  if (message.secret.phoneOperationId === operationId && !message.secret.provided) {
+    if (!credentialIsConfigured(cfg, message.secret.target)) {
+      throw new PhoneSecretError(`${message.secret.label} is no longer configured`, 409);
+    }
+    if (!resumeSecretCard(context.botId, context.threadId, context.messageId, "provided")) {
+      throw new PhoneSecretError("This credential request is no longer available", 409);
+    }
+    const recovered = currentSecretState(context.botId, context.threadId, context.messageId);
+    if (!recovered) throw new PhoneSecretError("This credential request is no longer available", 409);
+    return recovered;
+  }
+  if (message.secret.provided) {
+    if (message.secret.phoneOperationId !== operationId) {
+      throw new PhoneSecretError(
+        "This credential request was already completed by another submission",
+        409,
+      );
+    }
+    if (!credentialIsConfigured(cfg, message.secret.target)) {
+      throw new PhoneSecretError(`${message.secret.label} is no longer configured`, 409);
+    }
+    // A crash or older build may have committed the credential and marked
+    // the card provided without dispatching its continuation. An exact phone
+    // retry repairs that state instead of silently claiming it resumed.
+    if (!message.secret.resumed && !resumeSecretCard(
+      context.botId,
+      context.threadId,
+      context.messageId,
+      "provided",
+    )) {
+      throw new PhoneSecretError("This credential request is no longer available", 409);
+    }
+    const recovered = currentSecretState(context.botId, context.threadId, context.messageId);
+    if (!recovered) throw new PhoneSecretError("This credential request is no longer available", 409);
+    return recovered;
+  }
+
+  const submissionKey = phoneSecretSubmissionKey(context.threadId, context.messageId, context.requestKey);
+  await phoneSecretSubmissions.run({
+    cardKey: submissionKey,
+    botId: context.botId,
+    threadId: context.threadId,
+    ...(owner.group ? { groupId: owner.group.id } : {}),
+  }, operationId, async () => {
+    await phoneSecrets.provide(context);
+    const current = secretMessage(context.botId, context.threadId, context.messageId);
+    if (!current?.secret || current.secret.requestKey !== context.requestKey) {
+      throw new PhoneSecretError("This credential request is no longer available", 409);
+    }
+    if (current.secret.dismissed) {
+      throw new PhoneSecretError("This credential request was dismissed", 409);
+    }
+    // Electron acknowledges only after credentials.bin and the server's
+    // external-secret config update both commit. Keep this assertion at the
+    // boundary so a future parent handler cannot accidentally resume first.
+    if (!credentialIsConfigured(cfg, current.secret.target)) {
+      throw new PhoneSecretError(`${current.secret.label} was not saved yet`, 409);
+    }
+    // Persist the winning randomized envelope id before completing the card.
+    // A later exact retry can recover a lost response, while a newly sealed
+    // value can never be reported as though it were the value already saved.
+    store.patchMessage(context.threadId, current.id, {
+      secret: { ...current.secret, phoneOperationId: operationId },
+    });
+    if (!resumeSecretCard(context.botId, context.threadId, context.messageId, "provided")) {
+      throw new PhoneSecretError("This credential request is no longer available", 409);
+    }
+  });
+  const settled = currentSecretState(context.botId, context.threadId, context.messageId);
+  if (!settled) throw new PhoneSecretError("This credential request is no longer available", 409);
+  return settled;
 }
 
 function drainSecretResumes() {
@@ -6300,7 +6463,7 @@ function json(res: ServerResponse, status: number, body: unknown) {
   res.end(data);
 }
 
-function readBody(req: IncomingMessage): Promise<any> {
+function readBody(req: IncomingMessage, limit = 1_000_000): Promise<any> {
   return new Promise((resolve, reject) => {
     let data = "";
     let bytes = 0;
@@ -6314,7 +6477,7 @@ function readBody(req: IncomingMessage): Promise<any> {
     req.on("data", (c) => {
       if (done) return;
       bytes += typeof c === "string" ? Buffer.byteLength(c) : c.length;
-      if (bytes > 1_000_000) {
+      if (bytes > limit) {
         // Keep draining the socket, but stop retaining attacker-controlled
         // bytes. Destroying the request here prevents the caller from
         // receiving the useful 413 response.
@@ -7096,7 +7259,7 @@ const server = createServer(async (req, res) => {
         if (credentialIsConfigured(cfg, credentialId)) {
           return json(res, 200, { alreadyConfigured: true, label: target.label });
         }
-        const existing = store.messagesFor(fromThreadId).find((message) =>
+        const existing = store.activePath(fromThreadId).find((message) =>
           isReusableCredentialRequest(message, credentialId, from.id, Boolean(owner.group))
         );
         if (existing) {
@@ -8238,6 +8401,9 @@ const server = createServer(async (req, res) => {
         return json(res, 409, { error: "this channel is working or waiting on you — finish that turn first" });
       }
       const body = await readBody(req);
+      if (phoneSecretSubmissions.hasGroup(group.id)) {
+        return json(res, 409, { error: "this channel is securely saving a credential — try again when it finishes" });
+      }
       if (!body || typeof body !== "object" || Array.isArray(body)) {
         return json(res, 400, { error: "body must be a JSON object" });
       }
@@ -8255,6 +8421,9 @@ const server = createServer(async (req, res) => {
       const group = store.group(m[1]);
       if (!group) return json(res, 404, { error: "no such channel" });
       if (group.dm) return json(res, 400, { error: "bot-to-bot channels keep one canonical conversation" });
+      if (phoneSecretSubmissions.hasGroup(group.id)) {
+        return json(res, 409, { error: "this channel is securely saving a credential — try again when it finishes" });
+      }
       if (channelTaskSwitchBlocked(group, m[2])) {
         return json(res, 409, { error: "this channel is working or waiting on you in another task" });
       }
@@ -8286,6 +8455,9 @@ const server = createServer(async (req, res) => {
       const group = store.group(m[1]);
       if (!group) return json(res, 404, { error: "no such channel" });
       if (group.dm) return json(res, 400, { error: "bot-to-bot channels keep one canonical conversation" });
+      if (phoneSecretSubmissions.hasThread(m[2])) {
+        return json(res, 409, { error: "this task is securely saving a credential — try again when it finishes" });
+      }
       if (channelTaskBlocked(group)) {
         return json(res, 409, { error: "this channel is working or waiting on you — finish that turn first" });
       }
@@ -8308,6 +8480,9 @@ const server = createServer(async (req, res) => {
       }
       const existing = store.group(m[1]);
       if (!existing) return json(res, 404, { error: "no such room" });
+      if (body.memberIds !== undefined && phoneSecretSubmissions.hasGroup(existing.id)) {
+        return json(res, 409, { error: "this channel is securely saving a credential — try again when it finishes" });
+      }
       if (
         channelTaskBlocked(existing) &&
         (body.memberIds !== undefined || body.defaultResponder !== undefined || body.bulletin !== undefined)
@@ -8408,6 +8583,9 @@ const server = createServer(async (req, res) => {
     if (m && method === "DELETE") {
       const group = store.group(m[1]);
       if (!group) return json(res, 404, { error: "no such room" });
+      if (phoneSecretSubmissions.hasGroup(group.id)) {
+        return json(res, 409, { error: "this channel is securely saving a credential — try again when it finishes" });
+      }
       if (groupIsWorking(group)) {
         return json(res, 409, { error: "this channel is working — stop that turn first" });
       }
@@ -9060,7 +9238,17 @@ const server = createServer(async (req, res) => {
           error: "finish reconciling this bot's pending cloud computer creation before deleting it — check ascii.dev, then retry Box setup",
         });
       }
+      // Bot deletion awaits VM/browser/provider cleanup. Claim the bot and
+      // every channel it belongs to before that first await so a phone save
+      // cannot begin halfway through teardown (or vice versa). The computer
+      // lifecycle claim is synchronous too, so either both claims are held or
+      // neither survives this request.
       const releaseComputerLifecycle = claimBotComputerLifecycle(bot.id);
+      const releasePhoneSecretMutation = claimPhoneSecretBotDeletion(bot.id);
+      if (!releasePhoneSecretMutation) {
+        releaseComputerLifecycle();
+        return json(res, 409, { error: "this bot or one of its channels is securely saving a credential" });
+      }
       try {
         if (localVmMode(cfg) === "per-bot") {
           const target = perBotLocalVmTarget(bot.id);
@@ -9181,6 +9369,7 @@ const server = createServer(async (req, res) => {
         return json(res, 200, { ok: true });
       } finally {
         releaseComputerLifecycle();
+        releasePhoneSecretMutation();
       }
     }
 
@@ -9530,6 +9719,9 @@ const server = createServer(async (req, res) => {
       // never both get past this check: startTurn flips busy before the
       // next request is handled
       if (bot.busy) return json(res, 409, { error: "the bot is working — stop it before editing" });
+      if (phoneSecretSubmissions.hasThread(bot.threadId)) {
+        return json(res, 409, { error: "this task is securely saving a credential — try again when it finishes" });
+      }
       const source = store.messagesFor(bot.threadId).find((msg) => msg.id === messageId);
       if (!source || source.role !== "user" || source.kind !== "text") {
         return json(res, 404, { error: "only user messages can be edited" });
@@ -9554,6 +9746,9 @@ const server = createServer(async (req, res) => {
       if (!bot) return json(res, 404, { error: "no such bot" });
       if (bot.busy) return json(res, 409, { error: "the bot is working — stop it before switching versions" });
       const body = await readBody(req);
+      if (phoneSecretSubmissions.hasThread(bot.threadId)) {
+        return json(res, 409, { error: "this task is securely saving a credential — try again when it finishes" });
+      }
       const leaf = store.setActiveLeaf(bot.threadId, String(body.messageId ?? ""));
       if (!leaf) return json(res, 404, { error: "no such message" });
       // provider sessions still hold the other branch — next turn replays
@@ -9729,6 +9924,9 @@ const server = createServer(async (req, res) => {
       if (!bot) return json(res, 404, { error: "no such bot" });
       if (bot.busy) return json(res, 409, { error: "this bot is working — let it finish before starting a task" });
       const body = await readBody(req);
+      if (phoneSecretSubmissions.hasBot(bot.id)) {
+        return json(res, 409, { error: "this bot is securely saving a credential — try again when it finishes" });
+      }
       const task = store.createTask(bot.id, typeof body.title === "string" ? body.title : undefined);
       if (!task) return json(res, 500, { error: "couldn't create that task" });
       const fresh = botWithThread(store.bot(bot.id)!);
@@ -9739,6 +9937,9 @@ const server = createServer(async (req, res) => {
     if (m && method === "POST") {
       const bot = store.bot(m[1]);
       if (!bot) return json(res, 404, { error: "no such bot" });
+      if (phoneSecretSubmissions.hasBot(bot.id)) {
+        return json(res, 409, { error: "this bot is securely saving a credential — try again when it finishes" });
+      }
       // Switching the active thread while its provider turn is still running
       // loses ownership of the process and can make a later interrupt target
       // the wrong task. Keep this mutation atomic at the HTTP boundary; an
@@ -9763,6 +9964,12 @@ const server = createServer(async (req, res) => {
     }
     if (m && method === "DELETE") {
       const bot = store.bot(m[1]);
+      if (!bot || !store.taskByThread(bot.id, m[2])) {
+        return json(res, 404, { error: "no such task" });
+      }
+      if (phoneSecretSubmissions.hasThread(m[2])) {
+        return json(res, 409, { error: "this task is securely saving a credential — try again when it finishes" });
+      }
       if (bot?.busy && (bot.threadId === m[2] || routines!.isActiveThread(m[2]))) {
         return json(res, 409, { error: "this task is running — stop it first" });
       }
@@ -10743,22 +10950,61 @@ const server = createServer(async (req, res) => {
     m = path.match(/^\/api\/connectors\/([\w-]+)$/);
     if (m && method === "DELETE") return json(res, 200, await composio.removeService(cfg, m[1]));
 
-    // Inline credential cards never receive the credential value. Electron
-    // saves it through the OS-backed store first; this route only verifies
-    // configured state, updates card metadata, and resumes the paused turn.
+    // Phone credential entry arrives as an HPKE envelope bound to the exact
+    // paired device, bot, task, card and allowlisted target. The companion
+    // authenticates the bearer and supplies the device id; only the embedded
+    // Electron server has the private key needed to open the envelope.
+    m = path.match(/^\/api\/bots\/([\w-]+)\/secret-cards\/([\w-]+)\/provide$/);
+    if (m && method === "POST") {
+      if (req.headers["x-openmausbot-companion"] !== "1") {
+        return json(res, 403, { error: "Secure phone entry must come from a paired phone" });
+      }
+      const rawDeviceId = req.headers["x-openmausbot-companion-device"];
+      const authenticatedDeviceId = Array.isArray(rawDeviceId) ? "" : String(rawDeviceId ?? "");
+      if (!/^[\w-]{1,128}$/.test(authenticatedDeviceId)) {
+        return json(res, 401, { error: "This paired phone could not be verified" });
+      }
+      if (!String(req.headers["content-type"] ?? "").toLowerCase().startsWith("application/json")) {
+        return json(res, 415, { error: "content-type must be application/json" });
+      }
+      const parsed = phoneSecretEnvelopeSchema.safeParse(await readBody(req, 16_384));
+      if (!parsed.success || !isCredentialTargetId(parsed.data?.target)) {
+        return json(res, 400, { error: "The encrypted credential request is invalid" });
+      }
+      const state = await provideSecretFromPhone({
+        ...parsed.data,
+        botId: m[1],
+        messageId: m[2],
+        target: parsed.data.target,
+      }, authenticatedDeviceId);
+      return json(res, 200, state);
+    }
+
+    // Desktop credential cards never send the credential through this route.
+    // Electron saves it through the OS-backed store first; these actions only
+    // verify configured state, update card metadata, and resume the turn.
     m = path.match(/^\/api\/bots\/([\w-]+)\/secret-cards\/([\w-]+)\/(provided|resume|dismiss)$/);
     if (m && method === "POST") {
       const body = await readBody(req);
       const threadId = String(body.threadId ?? "");
       const message = secretMessage(m[1], threadId, m[2]);
       if (!message?.secret) return json(res, 404, { error: "no such credential request" });
+      if (phoneSecretSubmissions.has(
+        phoneSecretSubmissionKey(threadId, message.id, message.secret.requestKey),
+      )) {
+        return json(res, 409, { error: "this credential is currently being saved from a phone" });
+      }
       if (m[3] === "provided") {
         if (message.secret.dismissed) return json(res, 409, { error: "this credential request was dismissed" });
         if (!credentialIsConfigured(cfg, message.secret.target)) {
           return json(res, 409, { error: `${message.secret.label} was not saved yet` });
         }
-        resumeSecretCard(m[1], threadId, message.id, "provided");
-        return json(res, 200, { provided: true, resumed: true });
+        if (!resumeSecretCard(m[1], threadId, message.id, "provided")) {
+          return json(res, 409, { error: "this credential request is no longer available" });
+        }
+        const state = currentSecretState(m[1], threadId, message.id);
+        if (!state) return json(res, 409, { error: "this credential request is no longer available" });
+        return json(res, 200, state);
       }
       if (m[3] === "resume") {
         const outcome = credentialResumeOutcome(message.secret);
@@ -10768,11 +11014,19 @@ const server = createServer(async (req, res) => {
         if (outcome === "provided" && !credentialIsConfigured(cfg, message.secret.target)) {
           return json(res, 409, { error: `${message.secret.label} is no longer configured` });
         }
-        resumeSecretCard(m[1], threadId, message.id, outcome);
-        return json(res, 200, { resumed: true });
+        if (!resumeSecretCard(m[1], threadId, message.id, outcome)) {
+          return json(res, 409, { error: "this credential request is no longer available" });
+        }
+        const state = currentSecretState(m[1], threadId, message.id);
+        if (!state) return json(res, 409, { error: "this credential request is no longer available" });
+        return json(res, 200, { resumed: state.resumed });
       }
-      if (!message.secret.provided) resumeSecretCard(m[1], threadId, message.id, "dismissed");
-      return json(res, 200, { dismissed: true, resumed: true });
+      if (!message.secret.provided && !resumeSecretCard(m[1], threadId, message.id, "dismissed")) {
+        return json(res, 409, { error: "this credential request is no longer available" });
+      }
+      const state = currentSecretState(m[1], threadId, message.id);
+      if (!state) return json(res, 409, { error: "this credential request is no longer available" });
+      return json(res, 200, { dismissed: true, resumed: state.resumed });
     }
 
     // Inline connection cards are bound to both the bot and the exact task

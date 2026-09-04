@@ -1517,14 +1517,33 @@ struct ActivityChip: View {
     }
 }
 
-/// A host credential is intentionally entered on the computer, where
-/// Electron can commit it through the operating system's encrypted store.
-/// The phone still needs a real row: an invisible blocker makes the bot look
-/// confused and encourages people to paste a key into ordinary chat.
+/// A credential entered here is encrypted for the exact computer whose
+/// public key was pinned by the pairing QR. Password AutoFill remains
+/// provider-neutral: Apple Passwords works without another subscription,
+/// while 1Password, Bitwarden and other enabled providers work as usual.
 struct CredentialRequestCardView: View {
     let chat: Chat
     let message: Message
     let secret: SecretRequestCardData
+    @EnvironmentObject private var session: Session
+    @Environment(\.scenePhase) private var scenePhase
+    @State private var value = ""
+    @State private var fieldID = UUID()
+    @State private var preparedSubmission: PreparedPhoneCredential?
+    @State private var submissionTask: Task<Void, Never>?
+    @State private var activeSubmissionID: UUID?
+    @State private var submitting = false
+    @State private var submitted = false
+    @State private var submissionError: String?
+
+    private struct RequestIdentity: Equatable {
+        let connectionID: String?
+        let botID: String?
+        let threadID: String
+        let messageID: String
+        let target: String?
+        let requestKey: String?
+    }
 
     private var tint: Color { MausPalette.color(message.from?.color ?? chat.color) }
     private var requester: String { message.from?.name ?? chat.name }
@@ -1534,7 +1553,10 @@ struct CredentialRequestCardView: View {
             return secret.resumed == true ? "Saved securely. The task resumed." : "Saved securely on your computer."
         }
         if secret.dismissed == true { return "Not provided." }
-        return "Finish this credential request on your computer."
+        if submitted { return "Encrypted and sent to your computer." }
+        if canEnterOnPhone { return "Enter it securely on this phone." }
+        if !hasSecurePairing { return "Pair again by QR code, or finish on your computer." }
+        return "Use secure phone access or Tailscale, or finish on your computer."
     }
 
     private func visible(_ value: String?) -> String? {
@@ -1551,6 +1573,45 @@ struct CredentialRequestCardView: View {
               url.password == nil
         else { return nil }
         return url
+    }
+
+    private var hasSecurePairing: Bool {
+        guard secret.isPending,
+              visible(secret.target) != nil,
+              visible(secret.requestKey) != nil,
+              let connection = session.connection
+        else { return false }
+        return connection.secretPublicKey != nil && connection.companionDeviceId != nil
+    }
+
+    private var hasProtectedTransport: Bool {
+        session.phoneCredentialTransportIsProtected
+    }
+
+    private var canEnterOnPhone: Bool { hasSecurePairing && hasProtectedTransport }
+
+    private var placeholder: String { visible(secret.placeholder) ?? label }
+
+    private var canSubmit: Bool {
+        guard canEnterOnPhone, !submitting, !submitted else { return false }
+        return preparedSubmission != nil
+            || !value.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    }
+
+    private var requestIdentity: RequestIdentity {
+        let botID: String?
+        switch chat {
+        case let .bot(bot): botID = bot.id
+        case .room: botID = message.from?.botId
+        }
+        return RequestIdentity(
+            connectionID: session.connection?.id,
+            botID: botID,
+            threadID: chat.threadId,
+            messageID: message.id,
+            target: secret.target,
+            requestKey: secret.requestKey
+        )
     }
 
     var body: some View {
@@ -1580,20 +1641,94 @@ struct CredentialRequestCardView: View {
             }
 
             if secret.provided == true {
-                Label(
-                    secret.resumed == true ? "Saved securely. The task resumed." : "Saved securely on your computer.",
-                    systemImage: "checkmark.shield.fill"
-                )
-                .foregroundStyle(.green)
+                VStack(alignment: .leading, spacing: 8) {
+                    Label(
+                        secret.resumed == true ? "Saved securely. The task resumed." : "Saved securely on your computer.",
+                        systemImage: "checkmark.shield.fill"
+                    )
+                    .foregroundStyle(.green)
+
+                    if secret.resumed != true, let preparedSubmission {
+                        Button(action: { send(preparedSubmission) }) {
+                            HStack(spacing: 7) {
+                                if submitting { ProgressView() }
+                                Image(systemName: "arrow.clockwise")
+                                Text(submitting ? "Resuming…" : "Try resuming the task")
+                            }
+                            .font(.system(size: 13, weight: .semibold))
+                        }
+                        .disabled(submitting || !hasProtectedTransport)
+                    }
+                }
             } else if secret.dismissed == true {
                 Label("Not provided", systemImage: "xmark.circle")
                     .foregroundStyle(Color.secondary)
-            } else {
+            } else if submitted {
+                Label("Encrypted and saved on your computer", systemImage: "checkmark.shield.fill")
+                    .foregroundStyle(.green)
+            } else if canEnterOnPhone {
                 VStack(alignment: .leading, spacing: 5) {
-                    Label("Finish on your computer", systemImage: "desktopcomputer")
+                    Label("Enter securely on this phone", systemImage: "lock.shield.fill")
                         .font(.system(size: 14, weight: .semibold))
                         .foregroundStyle(tint)
-                    Text("Open this chat in OpenMausBot on your computer to enter the key. It is stored there securely and is never added to chat.")
+
+                    if preparedSubmission == nil {
+                        SecureField(placeholder, text: $value)
+                            .id(fieldID)
+                            .textContentType(.password)
+                            .textInputAutocapitalization(.never)
+                            .autocorrectionDisabled()
+                            .privacySensitive()
+                            .disabled(submitting)
+                            .submitLabel(.done)
+                            .onSubmit { submit() }
+                            .padding(.horizontal, 12)
+                            .frame(minHeight: 44)
+                            .background(
+                                Color.secondary.opacity(0.1),
+                                in: RoundedRectangle(cornerRadius: 11, style: .continuous)
+                            )
+                            .accessibilityLabel(label)
+                    } else {
+                        Label(
+                            submitting ? "Encrypted and saving…" : "Encrypted and ready to retry",
+                            systemImage: "lock.fill"
+                        )
+                        .font(.system(size: 13))
+                        .foregroundStyle(Color.secondary)
+                        .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
+                        .padding(.horizontal, 12)
+                        .background(
+                            Color.secondary.opacity(0.1),
+                            in: RoundedRectangle(cornerRadius: 11, style: .continuous)
+                        )
+                    }
+
+                    Button(action: submit) {
+                        HStack(spacing: 7) {
+                            if submitting { ProgressView().tint(.white) }
+                            Image(systemName: "lock.fill")
+                            Text(
+                                submitting
+                                    ? "Saving securely…"
+                                    : preparedSubmission == nil ? "Save securely" : "Try again securely"
+                            )
+                        }
+                        .font(.system(size: 14, weight: .semibold))
+                        .frame(maxWidth: .infinity, minHeight: 42)
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .tint(tint)
+                    .disabled(!canSubmit)
+
+                    if preparedSubmission != nil, !submitting, submissionError != nil {
+                        Button("Enter a different value") {
+                            discardPreparedSubmission()
+                        }
+                        .font(.system(size: 13, weight: .medium))
+                    }
+
+                    Text("Use Apple Passwords, 1Password, Bitwarden, or paste. The value is encrypted for your computer and never added to chat.")
                         .font(.system(size: 13))
                         .foregroundStyle(Color.secondary)
                         .fixedSize(horizontal: false, vertical: true)
@@ -1601,6 +1736,39 @@ struct CredentialRequestCardView: View {
                 .padding(11)
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .background(tint.opacity(0.08), in: RoundedRectangle(cornerRadius: 13, style: .continuous))
+            } else if !hasSecurePairing {
+                VStack(alignment: .leading, spacing: 5) {
+                    Label("Pair again to enter here", systemImage: "qrcode")
+                        .font(.system(size: 14, weight: .semibold))
+                        .foregroundStyle(tint)
+                    Text("This pairing predates secure phone entry. Scan a fresh QR from OpenMausBot, or finish this request on your computer.")
+                        .font(.system(size: 13))
+                        .foregroundStyle(Color.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                .padding(11)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .background(tint.opacity(0.08), in: RoundedRectangle(cornerRadius: 13, style: .continuous))
+            } else {
+                VStack(alignment: .leading, spacing: 5) {
+                    Label("Secure connection required", systemImage: "lock.shield.fill")
+                        .font(.system(size: 14, weight: .semibold))
+                        .foregroundStyle(tint)
+                    Text("Switch to Secure phone access (HTTPS) or Tailscale, then try again. You can still finish this request on your computer.")
+                        .font(.system(size: 13))
+                        .foregroundStyle(Color.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                .padding(11)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .background(tint.opacity(0.08), in: RoundedRectangle(cornerRadius: 13, style: .continuous))
+            }
+
+            if let submissionError = visible(submissionError) {
+                Label(submissionError, systemImage: "exclamationmark.triangle.fill")
+                    .font(.system(size: 12.5))
+                    .foregroundStyle(.red)
+                    .fixedSize(horizontal: false, vertical: true)
             }
 
             if let error = visible(secret.error) {
@@ -1627,9 +1795,133 @@ struct CredentialRequestCardView: View {
             RoundedRectangle(cornerRadius: 22, style: .continuous)
                 .strokeBorder(secret.isPending ? tint.opacity(0.65) : Color.clear, lineWidth: 1.25)
         }
-        .accessibilityElement(children: .combine)
+        .accessibilityElement(children: canEnterOnPhone ? .contain : .combine)
         .accessibilityLabel("\(label). \(accessibilityStatus)")
+        .onAppear {
+            preparedSubmission = session.preparedCredential(
+                chat: chat,
+                message: message,
+                secret: secret
+            )
+        }
+        .onChange(of: requestIdentity) { _, _ in
+            resetSensitiveState(clearPrepared: true)
+            preparedSubmission = session.preparedCredential(
+                chat: chat,
+                message: message,
+                secret: secret
+            )
+            submitted = false
+        }
+        .onChange(of: session.credentialEntryResetGeneration) { _, _ in
+            suspendSensitiveEntry()
+        }
+        .onChange(of: session.status) { _, status in
+            if status != .live { suspendSensitiveEntry() }
+        }
+        .onChange(of: scenePhase) { _, phase in
+            // Password AutoFill and its Face ID sheet temporarily make the
+            // scene inactive. Removing the SecureField at that point breaks
+            // the very fill operation the user requested. A true background
+            // transition (including locking the phone) still scrubs it.
+            if phase == .background { suspendSensitiveEntry() }
+        }
+        .onDisappear {
+            // The async request owns only ciphertext and is safe to finish.
+            // Its envelope stays in Session so returning to this card can
+            // retry the exact same operation after an ambiguous response.
+            clearPlaintext()
+            submissionError = nil
+        }
     }
+
+    private func submit() {
+        guard canSubmit else { return }
+        submissionError = nil
+        if let preparedSubmission {
+            send(preparedSubmission)
+            return
+        }
+
+        do {
+            // Encryption happens synchronously. No task closure ever captures
+            // the cleartext, and the native field is replaced immediately.
+            let prepared = try session.prepareCredential(
+                value,
+                chat: chat,
+                message: message,
+                secret: secret
+            )
+            clearPlaintext()
+            preparedSubmission = prepared
+            send(prepared)
+        } catch {
+            clearPlaintext()
+            submissionError = error.localizedDescription
+            Haptics.notification(.error)
+        }
+    }
+
+    private func send(_ prepared: PreparedPhoneCredential) {
+        submissionTask?.cancel()
+        let submissionID = UUID()
+        activeSubmissionID = submissionID
+        submissionError = nil
+        submitting = true
+
+        submissionTask = Task { @MainActor in
+            do {
+                try await session.provideCredential(prepared)
+                guard !Task.isCancelled, activeSubmissionID == submissionID else { return }
+                submitted = true
+                Haptics.success()
+            } catch {
+                guard !Task.isCancelled, activeSubmissionID == submissionID else { return }
+                // Keep only the exact ciphertext so Retry is the same
+                // idempotent operation. The cleartext field is already gone.
+                submissionError = error.localizedDescription
+                Haptics.notification(.error)
+            }
+
+            guard activeSubmissionID == submissionID else { return }
+            activeSubmissionID = nil
+            submissionTask = nil
+            submitting = false
+        }
+    }
+
+    private func clearPlaintext() {
+        value.removeAll(keepingCapacity: false)
+        // Replacing the SecureField also clears UIKit's backing control,
+        // including text inserted by Password AutoFill.
+        fieldID = UUID()
+    }
+
+    private func suspendSensitiveEntry() {
+        clearPlaintext()
+        activeSubmissionID = nil
+        submissionTask?.cancel()
+        submissionTask = nil
+        submitting = false
+        submissionError = nil
+        // Keep an already-encrypted envelope. If the request reached the
+        // computer before iOS suspended it, foreground Retry must send the
+        // exact same operation instead of generating fresh HPKE randomness.
+    }
+
+    private func resetSensitiveState(clearPrepared: Bool) {
+        suspendSensitiveEntry()
+        if clearPrepared, let preparedSubmission {
+            session.discardPreparedCredential(preparedSubmission)
+            self.preparedSubmission = nil
+        }
+    }
+
+    private func discardPreparedSubmission() {
+        resetSensitiveState(clearPrepared: true)
+        submitted = false
+    }
+
 }
 
 /// An option card. When it still has a request behind it, this is the

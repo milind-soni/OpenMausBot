@@ -83,6 +83,10 @@ const ALLOWED: ReadonlyArray<{ method: string; path: RegExp }> = [
   { method: "POST", path: /^\/api\/bots\/[\w-]+\/read$/ },
   { method: "POST", path: /^\/api\/bots\/[\w-]+\/always-allow$/ },
   { method: "POST", path: /^\/api\/bots\/[\w-]+\/messages\/[\w-]+\/edit$/ },
+  // A credential value crosses this one route only as an HPKE envelope. The
+  // server binds it to the authenticated device and exact pending card before
+  // Electron opens it into the OS-encrypted credential store.
+  { method: "POST", path: /^\/api\/bots\/[\w-]+\/secret-cards\/[\w-]+\/provide$/ },
   { method: "POST", path: /^\/api\/bots\/[\w-]+\/active-branch$/ },
   { method: "POST", path: /^\/api\/bots\/[\w-]+\/tasks$/ },
   { method: "POST", path: /^\/api\/bots\/[\w-]+\/tasks\/[\w-]+$/ },

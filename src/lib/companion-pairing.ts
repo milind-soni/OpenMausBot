@@ -12,6 +12,9 @@ interface CompanionPairingLinkOptions {
   /** Complete base URLs for current mobile builds. Encoded separately from
    * the legacy address/hosts fields so HTTPS and port 443 stay unambiguous. */
   endpoints?: CompanionEndpoint[];
+  /** P-256 HPKE recipient key pinned by the camera scan. Its private half
+   * remains in the desktop's OS-encrypted credential store. */
+  secretPublicKey?: string;
 }
 
 export type CompanionEndpointKind = "hosted" | "tailnet" | "lan" | "bonjour";
@@ -286,6 +289,22 @@ function encodeEndpoints(endpoints: CompanionEndpoint[]): string {
   return btoa(binary).replaceAll("+", "-").replaceAll("/", "_").replace(/=+$/, "");
 }
 
+function validSecretPublicKey(value: string | undefined): string | null {
+  if (!value || !/^[A-Za-z0-9_-]{87}$/.test(value)) return null;
+  try {
+    const base64 = value.replaceAll("-", "+").replaceAll("_", "/") + "=";
+    const decoded = atob(base64);
+    if (decoded.length !== 65 || decoded.charCodeAt(0) !== 4) return null;
+    let binary = "";
+    for (let index = 0; index < decoded.length; index += 1) binary += decoded[index];
+    return btoa(binary).replaceAll("+", "-").replaceAll("/", "_").replace(/=+$/, "") === value
+      ? value
+      : null;
+  } catch {
+    return null;
+  }
+}
+
 /**
  * A short-lived handoff from the trusted desktop pairing panel to the mobile
  * app. The code still has to be redeemed with the companion; putting it in
@@ -299,6 +318,7 @@ export function companionPairingLink({
   name,
   hosts,
   endpoints,
+  secretPublicKey,
 }: CompanionPairingLinkOptions): string | null {
   const host = address.trim();
   if (
@@ -329,5 +349,7 @@ export function companionPairingLink({
   if (candidates.length) url.searchParams.set("hosts", candidates.join(","));
   const routes = qrEndpoints(endpoints);
   if (routes.length) url.searchParams.set("endpoints", encodeEndpoints(routes));
+  const secretKey = validSecretPublicKey(secretPublicKey);
+  if (secretKey) url.searchParams.set("secretKey", secretKey);
   return url.toString();
 }

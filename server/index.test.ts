@@ -6,11 +6,17 @@
 import { spawn, type ChildProcess } from "node:child_process";
 import { createHash } from "node:crypto";
 import { createServer, request, type Server } from "node:http";
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { DatabaseSync } from "node:sqlite";
+import {
+  Aes256Gcm,
+  CipherSuite,
+  DhkemP256HkdfSha256,
+  HkdfSha256,
+} from "@hpke/core";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { z } from "zod";
 
@@ -18,6 +24,11 @@ import { removeTempDir, waitForExit } from "./testing/cleanup.ts";
 import { freePortBlock } from "./testing/ports.ts";
 import { openSse } from "./testing/sse.ts";
 import { FILE_MAX_BYTES, IMAGE_MAX_BYTES } from "./attachments.ts";
+import {
+  PHONE_SECRET_INFO,
+  phoneSecretAAD,
+  type PhoneSecretContext,
+} from "./phone-secret.ts";
 
 const SERVER_DIR = dirname(fileURLToPath(import.meta.url));
 const ROOT = join(SERVER_DIR, "..");
@@ -27,6 +38,48 @@ const PORT = 18800 + Math.floor(Math.random() * 10_000);
 const BASE = `http://127.0.0.1:${PORT}`;
 const WEBHOOK_PORT = 39000 + Math.floor(Math.random() * 10_000);
 const WEBHOOK_BASE = `http://127.0.0.1:${WEBHOOK_PORT}`;
+
+const PHONE_SECRET_TEST_IDENTITY = {
+  type: "openmausbot:phone-secret-key",
+  version: 1,
+  keyId: "taWSR_nZ7ojlH_0Z3tar6Q",
+  privateKey: {
+    kty: "EC",
+    crv: "P-256",
+    x: "g8FDXb91acXUNkuxNk7dWDQ0aN2zn6On2HeOGOvZOjs",
+    y: "bJelczS0LM82rfXV68PmSJhz2ePosj3fL974XckCpDU",
+    d: "5B-SwYLGXc04u4v7YLpzFrwj2JjysBFaJevOPl3h3Zg",
+  },
+} as const;
+const phoneSecretTestSuite = new CipherSuite({
+  kem: new DhkemP256HkdfSha256(),
+  kdf: new HkdfSha256(),
+  aead: new Aes256Gcm(),
+});
+
+async function sealPhoneSecretForTest(
+  context: Omit<PhoneSecretContext, "encapsulatedKey" | "ciphertext">,
+  value: string,
+): Promise<PhoneSecretContext> {
+  const publicKey = await phoneSecretTestSuite.kem.deserializePublicKey(Buffer.concat([
+    Buffer.from([4]),
+    Buffer.from(PHONE_SECRET_TEST_IDENTITY.privateKey.x, "base64url"),
+    Buffer.from(PHONE_SECRET_TEST_IDENTITY.privateKey.y, "base64url"),
+  ]));
+  const encrypted = await phoneSecretTestSuite.seal(
+    {
+      recipientPublicKey: publicKey,
+      info: new TextEncoder().encode(PHONE_SECRET_INFO),
+    },
+    new TextEncoder().encode(value),
+    phoneSecretAAD(context),
+  );
+  return {
+    ...context,
+    encapsulatedKey: Buffer.from(encrypted.enc).toString("base64url"),
+    ciphertext: Buffer.from(encrypted.ct).toString("base64url"),
+  };
+}
 
 let child: ChildProcess;
 /** stands in for the box provider so config saving never touches the network */
@@ -3410,16 +3463,77 @@ describe("harness HTTP API", () => {
       });
       expect(requested.status).toBe(201);
       const { messageId } = (await requested.json()) as { messageId: string };
-      const directCard = (await api("GET", "/api/bots?messages=20")).body.bots
-        .find((candidate: { id: string }) => candidate.id === bot.id)?.messages
+      const directState = (await api("GET", "/api/bots?messages=20")).body.bots
+        .find((candidate: { id: string }) => candidate.id === bot.id);
+      const directCard = directState?.messages
         .find((message: { id: string }) => message.id === messageId);
       expect(directCard).toMatchObject({
         kind: "secret",
-        text: "Open this conversation in OpenMausBot on your computer to securely enter the OpenAI API key. Credential entry is not available in the mobile app.",
+        text: "Securely provide the OpenAI API key from OpenMausBot on your phone or computer. It is never added to chat.",
       });
       expect(directCard).not.toHaveProperty("from");
 
+      const encryptedEnvelope = {
+        version: 1,
+        threadId: bot.threadId,
+        keyId: "A".repeat(22),
+        deviceId: "phone-1",
+        target: "openaiImageApiKey",
+        requestKey: directCard.secret.requestKey,
+        encapsulatedKey: "A".repeat(87),
+        ciphertext: "A".repeat(23),
+      };
+      const directProvision = await fetch(
+        `${BASE}/api/bots/${bot.id}/secret-cards/${messageId}/provide`,
+        {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify(encryptedEnvelope),
+        },
+      );
+      expect(directProvision.status).toBe(403);
+
+      const developmentProvision = await fetch(
+        `${BASE}/api/bots/${bot.id}/secret-cards/${messageId}/provide`,
+        {
+          method: "POST",
+          headers: {
+            "content-type": "application/json",
+            "x-openmausbot-companion": "1",
+            "x-openmausbot-companion-device": "phone-1",
+          },
+          body: JSON.stringify(encryptedEnvelope),
+        },
+      );
+      expect(developmentProvision.status).toBe(503);
+
       expect((await api("POST", `/api/bots/${bot.id}/interrupt`)).status).toBe(200);
+      await expect.poll(async () => {
+        const current = (await api("GET", "/api/bots?messages=0")).body.bots
+          .find((candidate: { id: string }) => candidate.id === bot.id);
+        return current?.busy;
+      }).toBe(false);
+      const originalUserMessage = directState?.messages.find(
+        (message: { role?: string; kind?: string; text?: string }) =>
+          message.role === "user" && message.kind === "text" && message.text === "stay active",
+      );
+      expect(originalUserMessage?.id).toEqual(expect.any(String));
+      expect((await api("POST", `/api/bots/${bot.id}/messages/${originalUserMessage.id}/edit`, {
+        text: "take another branch",
+      })).status).toBe(202);
+      expect((await api("POST", `/api/bots/${bot.id}/secret-cards/${messageId}/dismiss`, {
+        threadId: bot.threadId,
+      })).status).toBe(404);
+      expect((await api("POST", `/api/bots/${bot.id}/interrupt`)).status).toBe(200);
+      await expect.poll(async () => {
+        const current = (await api("GET", "/api/bots?messages=0")).body.bots
+          .find((candidate: { id: string }) => candidate.id === bot.id);
+        return current?.busy;
+      }).toBe(false);
+      expect((await api("POST", `/api/bots/${bot.id}/active-branch`, {
+        messageId,
+      })).status).toBe(200);
+
       expect((await api("PATCH", `/api/bots/${bot.id}`, { computer: "cloud" })).status).toBe(200);
       expect((await api("POST", `/api/bots/${bot.id}/secret-cards/${messageId}/dismiss`, {
         threadId: bot.threadId,
@@ -3441,6 +3555,318 @@ describe("harness HTTP API", () => {
       rmSync(fakeClaudeDump, { force: true });
     }
   });
+
+  it("keeps credential-card ownership stable while an encrypted phone save is in flight", async () => {
+    const isolatedHome = mkdtempSync(join(tmpdir(), "omb-phone-secret-races-"));
+    const isolatedData = join(isolatedHome, ".openmausbot");
+    const isolatedStatic = join(isolatedHome, "static");
+    const isolatedGate = join(isolatedHome, "credential-gate");
+    const isolatedPort = await freePortBlock([0, 1]);
+    const isolatedDump = join(isolatedHome, "fake-claude-dump.json");
+    const releaseFile = join(isolatedGate, "release");
+    mkdirSync(join(isolatedStatic, "assets"), { recursive: true });
+    mkdirSync(isolatedData, { recursive: true });
+    mkdirSync(isolatedGate, { recursive: true });
+    writeFileSync(join(isolatedStatic, "index.html"), "<!doctype html><title>Phone secret race test</title>");
+    writeFileSync(join(isolatedStatic, "assets", "smoke.css"), "body{}");
+    writeFileSync(join(isolatedData, "config.json"), JSON.stringify({
+      instances: {
+        claude: { driver: "claudeAgent", displayName: "Fixture Claude", config: { cli: FAKE_CLAUDE_CLI } },
+      },
+    }));
+
+    // Model Electron's private utility-process bridge. Both encrypted saves
+    // pause after decryption, before the external credential config commit,
+    // so the public routes below exercise their real in-flight guards.
+    const desktopPrelude = `data:text/javascript,${encodeURIComponent(`
+      const { existsSync, writeFileSync } = await import("node:fs");
+      const { join } = await import("node:path");
+      const identity = ${JSON.stringify(PHONE_SECRET_TEST_IDENTITY)};
+      const gate = ${JSON.stringify(isolatedGate)};
+      const release = ${JSON.stringify(releaseFile)};
+      let listener;
+      let saves = Promise.resolve();
+      const delay = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+      Object.defineProperty(process, "parentPort", {
+        value: {
+          on(event, callback) {
+            if (event !== "message") return;
+            listener = callback;
+            queueMicrotask(() => listener?.({ data: identity }));
+          },
+          postMessage(message) {
+            if (message?.type !== "openmausbot:phone-secret-save") return;
+            writeFileSync(join(gate, message.requestId + ".started"), message.target);
+            saves = saves.then(async () => {
+              while (!existsSync(release)) await delay(10);
+              try {
+                const patch = message.target === "openaiImageApiKey"
+                  ? { imageGen: { key: message.value } }
+                  : null;
+                if (!patch) throw new Error("unsupported test credential target");
+                const response = await fetch(
+                  "http://127.0.0.1:" + process.env.OMB_PORT + "/api/config?secretStorage=external",
+                  {
+                    method: "PUT",
+                    headers: { "content-type": "application/json" },
+                    body: JSON.stringify(patch),
+                  },
+                );
+                const body = await response.json().catch(() => null);
+                if (!response.ok) throw new Error(body?.error || "credential config failed");
+                listener?.({ data: {
+                  type: "openmausbot:phone-secret-save-result",
+                  requestId: message.requestId,
+                  ok: true,
+                } });
+              } catch (error) {
+                listener?.({ data: {
+                  type: "openmausbot:phone-secret-save-result",
+                  requestId: message.requestId,
+                  ok: false,
+                  error: error instanceof Error ? error.message : String(error),
+                } });
+              }
+            });
+          },
+        },
+      });
+    `)}`;
+    let isolatedStderr = "";
+    const isolatedChild = spawn(
+      process.execPath,
+      ["--import", desktopPrelude, join(SERVER_DIR, "index.ts")],
+      {
+        cwd: ROOT,
+        env: {
+          ...(process.env.PATH ? { PATH: process.env.PATH } : {}),
+          ...(process.env.SystemRoot ? { SystemRoot: process.env.SystemRoot } : {}),
+          HOME: isolatedHome,
+          USERPROFILE: isolatedHome,
+          OMB_PORT: String(isolatedPort),
+          OMB_WEBHOOK_PORT: String(isolatedPort + 1),
+          OMB_STATIC_DIR: isolatedStatic,
+          FAKE_CLAUDE_MODE: "hang",
+          FAKE_CLAUDE_DUMP: isolatedDump,
+        },
+        stdio: ["ignore", "pipe", "pipe"],
+      },
+    );
+    isolatedChild.stderr!.on("data", (chunk) => (isolatedStderr += chunk));
+    const isolatedApi = async (method: string, path: string, body?: unknown): Promise<{
+      status: number;
+      body: any;
+    }> => {
+      const response = await fetch(`http://127.0.0.1:${isolatedPort}${path}`, {
+        method,
+        headers: body ? { "content-type": "application/json" } : undefined,
+        body: body ? JSON.stringify(body) : undefined,
+      });
+      return { status: response.status, body: await response.json() };
+    };
+    const requestCredential = async (
+      token: string,
+      botId: string,
+      threadId: string,
+    ): Promise<{ messageId: string }> => {
+      const response = await fetch(`http://127.0.0.1:${isolatedPort}/api/internal/request-credential`, {
+        method: "POST",
+        headers: {
+          authorization: `Bearer ${token}`,
+          "content-type": "application/json",
+        },
+        body: JSON.stringify({
+          fromBotId: botId,
+          fromThreadId: threadId,
+          credentialId: "openaiImageApiKey",
+          reason: "needed for this task",
+        }),
+      });
+      expect(response.status).toBe(201);
+      return response.json() as Promise<{ messageId: string }>;
+    };
+    const provideRequests: Array<Promise<Response>> = [];
+    const earlyProvisionStatuses: number[] = [];
+
+    try {
+      await waitForIsolatedServer(isolatedChild, isolatedPort, () => isolatedStderr);
+      const createBot = async () => (await isolatedApi("POST", "/api/bots", {
+        modelSelection: { instanceId: "claude", model: "claude-sonnet-5" },
+        requireAvailableModel: true,
+      })).body.bot;
+      const direct = await createBot();
+      const channelOwner = await createBot();
+      const channelPeer = await createBot();
+
+      const directOriginalThread = direct.threadId as string;
+      const directAlternate = await isolatedApi("POST", `/api/bots/${direct.id}/tasks`, { title: "Alternate" });
+      expect(directAlternate.status).toBe(201);
+      expect((await isolatedApi(
+        "POST",
+        `/api/bots/${direct.id}/tasks/${directOriginalThread}`,
+      )).status).toBe(200);
+
+      const group = (await isolatedApi("POST", "/api/groups", {
+        name: "Credential ownership",
+        memberIds: [channelOwner.id, channelPeer.id],
+        setup: { bulletin: "", defaultResponder: { kind: "member", botId: channelOwner.id } },
+      })).body.group;
+      const groupOriginalThread = group.threadId as string;
+      const groupAlternate = await isolatedApi("POST", `/api/groups/${group.id}/tasks`, { title: "Alternate" });
+      expect(groupAlternate.status).toBe(201);
+      expect((await isolatedApi(
+        "POST",
+        `/api/groups/${group.id}/tasks/${groupOriginalThread}`,
+      )).status).toBe(200);
+
+      expect((await isolatedApi(
+        "POST",
+        `/api/bots/${direct.id}/messages`,
+        { text: "request a private key" },
+      )).status).toBe(202);
+      const dump = await readJsonFileWhenReady<{
+        mcpConfig: { mcpServers: { agents: { env: { OMB_COMMS_TOKEN: string } } } };
+      }>(isolatedDump);
+      const token = dump.mcpConfig.mcpServers.agents.env.OMB_COMMS_TOKEN;
+      const directRequest = await requestCredential(token, direct.id, directOriginalThread);
+      expect((await isolatedApi("POST", `/api/bots/${direct.id}/interrupt`, {})).status).toBe(200);
+      await expect.poll(async () => {
+        const state = (await isolatedApi("GET", "/api/bots?messages=0")).body;
+        return state.bots.find((bot: { id: string }) => bot.id === direct.id)?.busy;
+      }).toBe(false);
+      const groupRequest = await requestCredential(token, channelOwner.id, groupOriginalThread);
+
+      const state = (await isolatedApi("GET", "/api/bots?messages=20")).body;
+      const directState = state.bots.find((bot: { id: string }) => bot.id === direct.id);
+      const directCard = directState.messages.find(
+        (message: { id: string }) => message.id === directRequest.messageId,
+      );
+      const directUser = directState.messages.find(
+        (message: { role: string; text?: string }) => message.role === "user" && message.text === "request a private key",
+      );
+      const groupCard = state.groups
+        .find((candidate: { id: string }) => candidate.id === group.id).messages
+        .find((message: { id: string }) => message.id === groupRequest.messageId);
+      expect(directCard?.secret?.requestKey).toEqual(expect.any(String));
+      expect(directUser?.id).toEqual(expect.any(String));
+      expect(groupCard).toMatchObject({ from: { botId: channelOwner.id } });
+
+      const deviceId = "paired-phone";
+      const directEnvelope = await sealPhoneSecretForTest({
+        version: 1,
+        keyId: PHONE_SECRET_TEST_IDENTITY.keyId,
+        deviceId,
+        botId: direct.id,
+        threadId: directOriginalThread,
+        messageId: directRequest.messageId,
+        target: "openaiImageApiKey",
+        requestKey: directCard.secret.requestKey,
+      }, "sk-test-direct");
+      const groupEnvelope = await sealPhoneSecretForTest({
+        version: 1,
+        keyId: PHONE_SECRET_TEST_IDENTITY.keyId,
+        deviceId,
+        botId: channelOwner.id,
+        threadId: groupOriginalThread,
+        messageId: groupRequest.messageId,
+        target: "openaiImageApiKey",
+        requestKey: groupCard.secret.requestKey,
+      }, "sk-test-channel");
+      const provide = (botId: string, messageId: string, envelope: PhoneSecretContext) => fetch(
+        `http://127.0.0.1:${isolatedPort}/api/bots/${botId}/secret-cards/${messageId}/provide`,
+        {
+          method: "POST",
+          headers: {
+            "content-type": "application/json",
+            "x-openmausbot-companion": "1",
+            "x-openmausbot-companion-device": deviceId,
+          },
+          body: JSON.stringify(Object.fromEntries(
+            Object.entries(envelope).filter(([key]) => key !== "botId" && key !== "messageId"),
+          )),
+        },
+      );
+      provideRequests.push(...[
+        provide(direct.id, directRequest.messageId, directEnvelope),
+        provide(channelOwner.id, groupRequest.messageId, groupEnvelope),
+      ].map((request) => request.then((response) => {
+        earlyProvisionStatuses.push(response.status);
+        return response;
+      })));
+      await expect.poll(
+        () => ({
+          started: readdirSync(isolatedGate).filter((name) => name.endsWith(".started")).length,
+          earlyProvisionStatuses,
+        }),
+        { timeout: 20_000 },
+      ).toEqual({ started: 2, earlyProvisionStatuses: [] });
+
+      const expectLocked = async (result: Promise<{ status: number; body: any }>) => {
+        const response = await result;
+        expect(response.status).toBe(409);
+        expect(response.body.error).toMatch(/securely saving a credential/i);
+      };
+      await expectLocked(isolatedApi("POST", `/api/bots/${direct.id}/messages/${directUser.id}/edit`, {
+        text: "rewind under the save",
+      }));
+      await expectLocked(isolatedApi("POST", `/api/bots/${direct.id}/active-branch`, {
+        messageId: directRequest.messageId,
+      }));
+      await expectLocked(isolatedApi("POST", `/api/bots/${direct.id}/tasks`, { title: "Race" }));
+      await expectLocked(isolatedApi(
+        "POST",
+        `/api/bots/${direct.id}/tasks/${directAlternate.body.task.threadId}`,
+      ));
+      await expectLocked(isolatedApi("DELETE", `/api/bots/${direct.id}/tasks/${directOriginalThread}`));
+      await expectLocked(isolatedApi("DELETE", `/api/bots/${direct.id}`));
+
+      await expectLocked(isolatedApi("POST", `/api/groups/${group.id}/tasks`, { title: "Race" }));
+      await expectLocked(isolatedApi(
+        "POST",
+        `/api/groups/${group.id}/tasks/${groupAlternate.body.task.threadId}`,
+      ));
+      await expectLocked(isolatedApi("DELETE", `/api/groups/${group.id}/tasks/${groupOriginalThread}`));
+      await expectLocked(isolatedApi("PATCH", `/api/groups/${group.id}`, {
+        memberIds: [channelPeer.id],
+      }));
+      await expectLocked(isolatedApi("DELETE", `/api/groups/${group.id}`));
+      await expectLocked(isolatedApi("DELETE", `/api/bots/${channelOwner.id}`));
+      await expectLocked(isolatedApi("DELETE", `/api/bots/${channelPeer.id}`));
+
+      writeFileSync(releaseFile, "release");
+      const completed = await Promise.all(provideRequests);
+      for (const response of completed) {
+        expect(response.status).toBe(200);
+        expect(await response.json()).toEqual({ provided: true, resumed: true });
+      }
+
+      // A lost HTTP response may replay the exact randomized envelope, but a
+      // new envelope could contain a different value and must never inherit
+      // the first save's success result.
+      const exactRetry = await provide(direct.id, directRequest.messageId, directEnvelope);
+      expect(exactRetry.status).toBe(200);
+      expect(await exactRetry.json()).toEqual({ provided: true, resumed: true });
+      const replacementEnvelope = await sealPhoneSecretForTest({
+        version: 1,
+        keyId: PHONE_SECRET_TEST_IDENTITY.keyId,
+        deviceId,
+        botId: direct.id,
+        threadId: directOriginalThread,
+        messageId: directRequest.messageId,
+        target: "openaiImageApiKey",
+        requestKey: directCard.secret.requestKey,
+      }, "sk-test-replacement");
+      const replacement = await provide(direct.id, directRequest.messageId, replacementEnvelope);
+      expect(replacement.status).toBe(409);
+      expect(await replacement.json()).toMatchObject({ error: expect.stringMatching(/already completed/i) });
+    } finally {
+      writeFileSync(releaseFile, "release");
+      await Promise.allSettled(provideRequests);
+      await waitForExit(isolatedChild, { signal: "SIGTERM" });
+      await removeTempDir(isolatedHome);
+    }
+    expectStoppedTestServerCleanly(isolatedChild, isolatedStderr);
+  }, 45_000);
 
   it("reports a failed routine once, not twice", async () => {
     // A routine reaches the same dispatch catch as an interactive turn and
@@ -5611,9 +6037,39 @@ describe("harness HTTP API", () => {
         .find((message: { id: string }) => message.id === messageId);
       expect(roomCard).toMatchObject({
         kind: "secret",
-        text: "Open this conversation in OpenMausBot on your computer to securely enter the OpenAI API key. Credential entry is not available in the mobile app.",
+        text: "Securely provide the OpenAI API key from OpenMausBot on your phone or computer. It is never added to chat.",
         from: { botId: second.id, name: second.name, color: second.color },
       });
+
+      // Every channel member shares the same thread, but the card remains
+      // owned by the member that requested it. Another member cannot dismiss
+      // it (and likewise cannot bind a phone ciphertext to itself).
+      const wrongOwner = await api("POST", `/api/bots/${first.id}/secret-cards/${messageId}/dismiss`, {
+        threadId: room.threadId,
+      });
+      expect(wrongOwner.status).toBe(404);
+      const wrongOwnerPhone = await fetch(
+        `${BASE}/api/bots/${first.id}/secret-cards/${messageId}/provide`,
+        {
+          method: "POST",
+          headers: {
+            "content-type": "application/json",
+            "x-openmausbot-companion": "1",
+            "x-openmausbot-companion-device": "phone-1",
+          },
+          body: JSON.stringify({
+            version: 1,
+            threadId: room.threadId,
+            keyId: "A".repeat(22),
+            deviceId: "phone-1",
+            target: "openaiImageApiKey",
+            requestKey: roomCard.secret.requestKey,
+            encapsulatedKey: "A".repeat(87),
+            ciphertext: "A".repeat(23),
+          }),
+        },
+      );
+      expect(wrongOwnerPhone.status).toBe(404);
 
       const resumed = await api("POST", `/api/bots/${second.id}/secret-cards/${messageId}/dismiss`, {
         threadId: room.threadId,

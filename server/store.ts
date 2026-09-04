@@ -86,6 +86,9 @@ export interface SecretRequestCardData {
   placeholder: string;
   helpUrl: string;
   requestKey: string;
+  /** Exact successful HPKE operation. This contains no plaintext and prevents
+   * a freshly sealed value from being mistaken for a lost-response retry. */
+  phoneOperationId?: string;
   provided?: boolean;
   dismissed?: boolean;
   resumed?: boolean;

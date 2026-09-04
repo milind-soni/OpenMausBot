@@ -2,9 +2,10 @@
 //
 // Everything the phone can do to the harness, in one place. The rules it
 // encodes come from the default-deny policy in `companion/src/routes.ts`: a
-// paired phone may chat, answer approvals, and read rooms — it may not touch
-// credentials, pairing, or the Local VM. Those routes are simply absent here
-// rather than present and failing at runtime.
+// paired phone may chat, answer approvals, and read rooms. Credential values
+// are the narrow exception: this client can transport an HPKE envelope whose
+// plaintext only the QR-paired Electron process can open. Pairing management
+// and the Local VM remain absent rather than failing at runtime.
 import Foundation
 
 /// Where a companion connects, and with what. The token is *not* held here
@@ -38,6 +39,12 @@ public struct Connection: Codable, Hashable, Identifiable, Sendable {
     /// LAN or Bonjour origin for local pairing. Absent alongside a nil kind
     /// policy on connections saved before route consent existed.
     public var allowedLocalRouteURLs: Set<String>?
+    /// P-256 HPKE recipient point learned only from the camera-scanned QR.
+    /// It is public key material; the phone never receives the private key.
+    public var secretPublicKey: String?
+    /// Sidecar device identity returned after redemption. Bound into every
+    /// credential envelope and checked against the authenticated bearer.
+    public var companionDeviceId: String?
 
     public init(
         id: String = UUID().uuidString,
@@ -48,7 +55,9 @@ public struct Connection: Codable, Hashable, Identifiable, Sendable {
         activeEndpoint: CompanionEndpoint? = nil,
         endpoints: [CompanionEndpoint]? = nil,
         allowedRouteKinds: Set<CompanionEndpointKind>? = nil,
-        allowedLocalRouteURLs: Set<String>? = nil
+        allowedLocalRouteURLs: Set<String>? = nil,
+        secretPublicKey: String? = nil,
+        companionDeviceId: String? = nil
     ) {
         self.id = id
         self.name = name
@@ -59,6 +68,8 @@ public struct Connection: Codable, Hashable, Identifiable, Sendable {
         self.endpoints = endpoints
         self.allowedRouteKinds = allowedRouteKinds
         self.allowedLocalRouteURLs = allowedLocalRouteURLs
+        self.secretPublicKey = secretPublicKey
+        self.companionDeviceId = companionDeviceId
     }
 
     /// The representation `URLComponents.host` accepts for a literal IPv6
@@ -234,6 +245,10 @@ public struct PairingInvite: Equatable, Sendable {
             guard let endpoints = Self.decodeEndpoints(encoded) else { return nil }
             connection.endpoints = endpoints
             connection = connection.dialing(endpoints[0])
+        }
+        if let secretKey = values["secretKey"] {
+            guard let normalized = PhoneSecretCrypto.normalizedPublicKey(secretKey) else { return nil }
+            connection.secretPublicKey = normalized
         }
         connection.establishRoutePolicyFromInvite()
         return PairingInvite(connection: connection, credential: credential)
@@ -1324,6 +1339,25 @@ public struct CompanionClient: Sendable {
 
     public func interrupt(botId: String) async throws {
         try await send(try makeRequest("POST", "/api/bots/\(botId)/interrupt"))
+    }
+
+    public func provideCredential(
+        botId: String,
+        messageId: String,
+        envelope: PhoneSecretEnvelope
+    ) async throws {
+        var request = try makeRequest(
+            "POST",
+            "/api/bots/\(botId)/secret-cards/\(messageId)/provide",
+            encodedBody: envelope
+        )
+        // Saving is transactional: the desktop validates provider access,
+        // commits its OS-encrypted credential document, and updates the live
+        // server before replying. Those provider checks have bounded network
+        // deadlines of their own, so this one operation deliberately gets
+        // longer than the normal twenty-second chat API timeout.
+        request.timeoutInterval = 115
+        try await send(request)
     }
 
     /// Mint a fresh interactive viewer for an existing cloud computer. The

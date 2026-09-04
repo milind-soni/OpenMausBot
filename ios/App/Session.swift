@@ -27,6 +27,18 @@ private final class CachedAttachmentDownload: NSObject {
     }
 }
 
+/// An immutable, ciphertext-only credential write prepared on the main
+/// actor before any asynchronous work begins. HPKE uses fresh randomness for
+/// every seal, so retries must reuse this exact value rather than encrypting
+/// the same credential again after an ambiguous network failure.
+struct PreparedPhoneCredential: Equatable, Sendable {
+    fileprivate let requestIdentity: String
+    fileprivate let connectionID: String
+    fileprivate let botID: String
+    fileprivate let messageID: String
+    fileprivate let envelope: PhoneSecretEnvelope
+}
+
 @MainActor
 final class Session: ObservableObject {
     enum Status: Equatable {
@@ -55,12 +67,20 @@ final class Session: ObservableObject {
     /// Pairing can be opened while another computer remains connected. The
     /// working session is only replaced after the new credential commits.
     @Published private(set) var pairingRequested = false
+    /// Views with sensitive input observe this value so an explicit runtime
+    /// disconnect clears the field even when the selected connection itself
+    /// has not changed.
+    @Published private(set) var credentialEntryResetGeneration = 0
 
     /// A notification response that should be pushed by the roster's
     /// NavigationStack after the exact detached task has been activated.
     @Published private(set) var notificationChat: Chat?
 
     private var client: CompanionClient?
+    /// Ciphertext-only operations survive navigation and transient
+    /// disconnects so a retry cannot accidentally reseal the same value with
+    /// a different HPKE operation id. Nothing here is persisted to disk.
+    private var preparedPhoneCredentials: [String: PreparedPhoneCredential] = [:]
     /// The device token, kept in memory so the client can be rebuilt when the
     /// dial moves to another stored host. The keychain remains the only place
     /// it is persisted.
@@ -117,6 +137,11 @@ final class Session: ObservableObject {
     /// is available. Retain the last explicitly tapped destination until the
     /// paired client can be rebuilt after unlock.
     private var pendingNotification: NotificationTarget?
+
+    /// The exact route the current client will use for a credential write.
+    var phoneCredentialTransportIsProtected: Bool {
+        client?.connection.activeEndpoint?.protectsCredentials == true
+    }
 
     private struct AttachmentDraftKey: Hashable {
         let destination: MessageDestination
@@ -257,6 +282,7 @@ final class Session: ObservableObject {
         // prefer the name the computer calls itself over the Bonjour label
         var stored = outcome.connection
         if !paired.serverName.isEmpty { stored.name = paired.serverName }
+        stored.companionDeviceId = paired.device.id
         // The computer knows every address it answers on, but redemption may
         // not widen the explicit route consent carried by the invite.
         stored.applyPairingAdvertisement(hosts: paired.hosts, endpoints: paired.endpoints)
@@ -381,6 +407,7 @@ final class Session: ObservableObject {
         guard registry.connection(id: id) != nil else { return }
         let wasActive = registry.activeConnectionID == id
         if wasActive { stopActiveRuntime() }
+        preparedPhoneCredentials = preparedPhoneCredentials.filter { $0.value.connectionID != id }
         Keychain.remove(id)
         registry.remove(id: id)
         persistRegistry()
@@ -414,6 +441,7 @@ final class Session: ObservableObject {
     }
 
     private func clearActiveConnection() {
+        resetCredentialEntry()
         streamTask?.cancel()
         streamTask = nil
         endpointRefreshTask?.cancel()
@@ -450,6 +478,7 @@ final class Session: ObservableObject {
     }
 
     private func stopActiveRuntime() {
+        resetCredentialEntry()
         streamGeneration += 1
         streamTask?.cancel()
         streamTask = nil
@@ -556,11 +585,16 @@ final class Session: ObservableObject {
     /// anyway; dropping it deliberately means the cursor is written down at
     /// a known point instead of wherever the socket happened to die.
     func disconnect() {
+        resetCredentialEntry()
         streamTask?.cancel()
         streamTask = nil
         endpointRefreshTask?.cancel()
         endpointRefreshTask = nil
         endLinger()
+    }
+
+    private func resetCredentialEntry() {
+        credentialEntryResetGeneration &+= 1
     }
 
     private var lingerTask: UIBackgroundTaskIdentifier = .invalid
@@ -1102,6 +1136,157 @@ final class Session: ObservableObject {
             isPermission: card.isPermission,
             reviewedSha256: card.skillRequest?.reviewedSha256
         )
+    }
+
+    /// Synchronously seal a credential before the caller starts an async
+    /// request. The caller can then erase its input immediately and retain
+    /// only this ciphertext value for an exact, idempotent retry.
+    func prepareCredential(
+        _ value: String,
+        chat: Chat,
+        message: Message,
+        secret: SecretRequestCardData
+    ) throws -> PreparedPhoneCredential {
+        guard let client, let connection else {
+            throw APIError.transport("This computer is offline.")
+        }
+        guard let publicKey = connection.secretPublicKey,
+              let deviceId = connection.companionDeviceId,
+              let target = secret.target,
+              let requestKey = secret.requestKey
+        else { throw PhoneSecretError.unavailable }
+        guard client.connection.activeEndpoint?.protectsCredentials == true else {
+            throw PhoneSecretError.insecureTransport
+        }
+
+        let botId = try credentialBotID(chat: chat, message: message)
+        let context = PhoneSecretRequestContext(
+            deviceId: deviceId,
+            botId: botId,
+            threadId: chat.threadId,
+            messageId: message.id,
+            target: target,
+            requestKey: requestKey
+        )
+        let keyId = try PhoneSecretCrypto.publicKeyId(publicKey)
+        let requestIdentity = phoneCredentialRequestIdentity(
+            connectionID: connection.id,
+            botID: botId,
+            context: context,
+            keyID: keyId
+        )
+        if let prepared = preparedPhoneCredentials[requestIdentity] {
+            return prepared
+        }
+        let envelope = try PhoneSecretCrypto.encrypt(
+            value,
+            publicKey: publicKey,
+            context: context
+        )
+
+        let prepared = PreparedPhoneCredential(
+            requestIdentity: requestIdentity,
+            connectionID: connection.id,
+            botID: botId,
+            messageID: message.id,
+            envelope: envelope
+        )
+        preparedPhoneCredentials[requestIdentity] = prepared
+        return prepared
+    }
+
+    /// Recover an ambiguous ciphertext-only operation when a card view is
+    /// recreated. This is deliberately in-memory: a force-quit forgets it,
+    /// while ordinary navigation, AutoFill, and reconnects do not.
+    func preparedCredential(
+        chat: Chat,
+        message: Message,
+        secret: SecretRequestCardData
+    ) -> PreparedPhoneCredential? {
+        guard let connection,
+              let publicKey = connection.secretPublicKey,
+              let deviceId = connection.companionDeviceId,
+              let target = secret.target,
+              let requestKey = secret.requestKey,
+              let botId = try? credentialBotID(chat: chat, message: message),
+              let keyId = try? PhoneSecretCrypto.publicKeyId(publicKey)
+        else { return nil }
+        let context = PhoneSecretRequestContext(
+            deviceId: deviceId,
+            botId: botId,
+            threadId: chat.threadId,
+            messageId: message.id,
+            target: target,
+            requestKey: requestKey
+        )
+        return preparedPhoneCredentials[phoneCredentialRequestIdentity(
+            connectionID: connection.id,
+            botID: botId,
+            context: context,
+            keyID: keyId
+        )]
+    }
+
+    func discardPreparedCredential(_ prepared: PreparedPhoneCredential) {
+        if preparedPhoneCredentials[prepared.requestIdentity] == prepared {
+            preparedPhoneCredentials.removeValue(forKey: prepared.requestIdentity)
+        }
+    }
+
+    private func credentialBotID(chat: Chat, message: Message) throws -> String {
+        switch chat {
+        case let .bot(bot): return bot.id
+        case .room:
+            guard let sender = message.from?.botId else {
+                throw PhoneSecretError.invalidRequest
+            }
+            return sender
+        }
+    }
+
+    private func phoneCredentialRequestIdentity(
+        connectionID: String,
+        botID: String,
+        context: PhoneSecretRequestContext,
+        keyID: String
+    ) -> String {
+        [
+            connectionID,
+            keyID,
+            botID,
+            context.threadId,
+            context.messageId,
+            context.target,
+            context.requestKey,
+        ].joined(separator: "\u{0}")
+    }
+
+    /// Send one already-sealed operation. A retry deliberately reuses the
+    /// same HPKE envelope; the desktop derives its idempotency key from these
+    /// bytes, so a lost response cannot cause a second provider save.
+    func provideCredential(_ prepared: PreparedPhoneCredential) async throws {
+        guard let client, let connection else {
+            throw APIError.transport("This computer is offline.")
+        }
+        guard connection.id == prepared.connectionID,
+              connection.companionDeviceId == prepared.envelope.deviceId,
+              let publicKey = connection.secretPublicKey,
+              (try? PhoneSecretCrypto.publicKeyId(publicKey)) == prepared.envelope.keyId
+        else { throw PhoneSecretError.unavailable }
+        guard client.connection.activeEndpoint?.protectsCredentials == true else {
+            throw PhoneSecretError.insecureTransport
+        }
+
+        do {
+            try await client.provideCredential(
+                botId: prepared.botID,
+                messageId: prepared.messageID,
+                envelope: prepared.envelope
+            )
+        } catch let error as APIError where error.isUnauthorized {
+            status = .unauthorized
+            throw error
+        }
     }
 
     /// The same answer, from something that only has the ids — the Live

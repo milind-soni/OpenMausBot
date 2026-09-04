@@ -78,6 +78,7 @@ export interface CompanionState {
   lan?: string | null;
   hosts?: string[];
   endpoints?: CompanionEndpoint[];
+  secretPublicKey?: string;
   discovery?: { advertising: boolean; name: string };
   error?: string;
 }
@@ -790,6 +791,7 @@ export function usePhoneSetupController(profileEmail = ""): PhoneSetupController
       code: state.pairing.code,
       token: state.pairing.token,
       name: state.discovery?.name,
+      secretPublicKey: state.secretPublicKey,
     });
   }, [pairingRoute, state]);
 

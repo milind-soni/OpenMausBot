@@ -37,6 +37,7 @@ import {
 } from "./mdns.ts";
 import { createProxyHandler } from "./proxy.ts";
 import { companionOriginSocket, listenCompanionOrigin } from "./origin.ts";
+import { normalizedPhoneSecretPublicKey } from "./phone-secret-key.ts";
 
 /** A port from the environment, or the default. Anything that is not a whole
  * number in range is the default — a typo'd port must not become port 0. */
@@ -52,6 +53,9 @@ const CONTROL_PORT = num(process.env.OMB_CONTROL_PORT, 8811);
 const SERVICE_TYPE = "_openmausbot._tcp";
 let hostedUrl = hostedCompanionUrl(process.env.OMB_COMPANION_HOSTED_URL);
 const PRIVATE_ORIGIN = companionOriginSocket(process.env.OMB_COMPANION_INTERNAL_ORIGIN);
+const SECRET_PUBLIC_KEY = normalizedPhoneSecretPublicKey(
+  process.env.OMB_PHONE_SECRET_PUBLIC_KEY ?? "",
+);
 
 /** Ports the harness takes for itself, and what it uses each for.
  *
@@ -153,6 +157,7 @@ const managedOrigin = PRIVATE_ORIGIN ? createServer(proxy) : null;
 const control = createControlServer({
   devices,
   companionPort: COMPANION_PORT,
+  secretPublicKey: () => SECRET_PUBLIC_KEY,
   hostedUrl: () => hostedUrl,
   setHostedUrl: (next) => {
     hostedUrl = next;

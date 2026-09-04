@@ -60,6 +60,10 @@ extraResources:
     to: licenses/cloudflared-LICENSE.txt
   - from: third_party/cloudflared/README.md
     to: licenses/cloudflared-README.md
+  - from: third_party/hpke-js/core-LICENSE.txt
+    to: licenses/hpke-core-LICENSE.txt
+  - from: third_party/hpke-js/common-LICENSE.txt
+    to: licenses/hpke-common-LICENSE.txt
   - from: dist
     to: ui
   - from: dist-server

@@ -264,8 +264,8 @@ describe("agents-proxy MCP surface", () => {
     expect(delegate.description).toContain("DEFAULT FOR ASSIGNING WORK");
     expect(delegate.description).toContain("delivered automatically");
     expect(wait.description).toContain("Never call it in the same turn as delegate_bot");
-    expect(credential.description).toContain("on mobile it only shows a handoff");
-    expect(credential.description).toContain("Never claim a secure field opened on mobile");
+    expect(credential.description).toContain("freshly QR-paired mobile app show a secure entry card");
+    expect(credential.description).toContain("Never claim a secure field opened unless this request succeeds");
   });
 
   it("publishes a flat routine schedule schema that survives provider conversion", async () => {
@@ -490,8 +490,8 @@ describe("agents-proxy MCP surface", () => {
       reason: "The selected model needs it.",
     });
     expect(res.result.content[0].text).toContain("secure OpenCode API key request");
-    expect(res.result.content[0].text).toContain("mobile app only shows a handoff");
-    expect(res.result.content[0].text).toContain("Do not claim a secure field opened on mobile");
+    expect(res.result.content[0].text).toContain("freshly QR-paired mobile app show its secure entry card");
+    expect(res.result.content[0].text).toContain("older mobile pairings explain how to pair again");
     expect(res.result.content[0].text).toContain("End this turn");
     expect(lastCredentialBody).toEqual({
       fromBotId: "bot-asker",

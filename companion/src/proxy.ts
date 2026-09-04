@@ -67,6 +67,17 @@ export interface CompanionEndpointSnapshot {
  * that deliberately never ends, and a timeout that could not tell the
  * difference would cut every live stream at thirty seconds. */
 const HEADERS_TIMEOUT_MS = 30_000;
+// Secure credential saves include bounded provider validation before the
+// encrypted desktop store commits. Keep this beyond the server's 90-second
+// private-save deadline but comfortably inside the hosted proxy's deadline,
+// leaving time for the final card update and response to travel back.
+const PHONE_SECRET_HEADERS_TIMEOUT_MS = 105_000;
+const PHONE_SECRET_PROVIDE_PATH = /^\/api\/bots\/[\w-]+\/secret-cards\/[\w-]+\/provide(?:\?|$)/;
+
+export function proxyHeadersTimeoutMs(url: string, override?: number): number {
+  return override
+    ?? (PHONE_SECRET_PROVIDE_PATH.test(url) ? PHONE_SECRET_HEADERS_TIMEOUT_MS : HEADERS_TIMEOUT_MS);
+}
 
 /** A JSON response has to be buffered whole before it can be scrubbed, so the
  * buffer is the size of the response and nothing upstream promises that is
@@ -197,7 +208,7 @@ const endpointSnapshot = (options: ProxyOptions): CompanionEndpointSnapshot => {
  * blocklist: `host` and `origin` must not travel (see above), `authorization`
  * is the sidecar's credential and means nothing to the harness, and hop-by-hop
  * headers are by definition not ours to relay. */
-const forwardHeaders = (req: IncomingMessage): Record<string, string> => {
+const forwardHeaders = (req: IncomingMessage, authenticatedDeviceId?: string): Record<string, string> => {
   const out: Record<string, string> = {
     accept: String(req.headers.accept ?? "*/*"),
     // Lets a response whose URL is intentionally loopback-only (the VPS SSH
@@ -205,6 +216,12 @@ const forwardHeaders = (req: IncomingMessage): Record<string, string> => {
     // carries no authority; it only narrows behavior at the harness.
     "x-openmausbot-companion": "1",
   };
+  // Never forward a caller-supplied device header. This value comes only
+  // from the registry entry which authenticated the bearer above, allowing
+  // the harness to bind an encrypted credential to the same paired phone.
+  if (authenticatedDeviceId && /^[\w-]{1,128}$/.test(authenticatedDeviceId)) {
+    out["x-openmausbot-companion-device"] = authenticatedDeviceId;
+  }
   const contentType = req.headers["content-type"];
   if (contentType) out["content-type"] = String(contentType);
   // Preserve a trustworthy byte count for bounded raw uploads. Without it,
@@ -313,7 +330,7 @@ export function createProxyHandler(options: ProxyOptions) {
         port: options.harnessPort,
         path: req.url,
         method,
-        headers: forwardHeaders(req),
+        headers: forwardHeaders(req, device?.id),
       },
       (harness) => {
         clearTimeout(headersDeadline);
@@ -567,10 +584,11 @@ export function createProxyHandler(options: ProxyOptions) {
     // harness that accepts the connection and then says nothing holds the
     // device's request open until one side gives up, which neither does.
     let timedOut = false;
+    const headersTimeoutMs = proxyHeadersTimeoutMs(req.url ?? "", options.headersTimeoutMs);
     const headersDeadline = setTimeout(() => {
       timedOut = true;
       upstream.destroy(new Error("the harness sent no response headers"));
-    }, options.headersTimeoutMs ?? HEADERS_TIMEOUT_MS);
+    }, headersTimeoutMs);
     headersDeadline.unref?.();
 
     upstream.on("error", () => {

@@ -7,7 +7,7 @@
 import { createServer, type Server, type ServerResponse } from "node:http";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
-import { createProxyHandler } from "../src/proxy.ts";
+import { createProxyHandler, proxyHeadersTimeoutMs } from "../src/proxy.ts";
 import type { CompanionEndpoint } from "../src/endpoints.ts";
 import { scrub } from "../src/wire.ts";
 
@@ -26,6 +26,7 @@ let sidecar: Server;
 let sidecarPort = 0;
 let cloudDesktopAccess = true;
 let companionMarker = "";
+let companionDevice = "";
 let endpointCandidates: CompanionEndpoint[] = [];
 /** What the stub harness answers with next. Set per test. */
 let respond: (res: ServerResponse) => void = (res) => res.end();
@@ -56,6 +57,7 @@ const device = async (
 beforeAll(async () => {
   harness = createServer((req, res) => {
     companionMarker = String(req.headers["x-openmausbot-companion"] ?? "");
+    companionDevice = String(req.headers["x-openmausbot-companion-device"] ?? "");
     respond(res);
   });
   const harnessPort = await listen(harness);
@@ -63,7 +65,7 @@ beforeAll(async () => {
   sidecar = createServer(
     createProxyHandler({
       harnessPort,
-      authenticate: (t) => (t === TOKEN ? { cloudDesktopAccess } : null),
+      authenticate: (t) => (t === TOKEN ? { id: "phone-1", cloudDesktopAccess } : null),
       redeem: () => ({ error: "not used here" }),
       serverName: () => "Test computer",
       endpoints: () => endpointCandidates,
@@ -78,6 +80,12 @@ afterAll(async () => {
 });
 
 describe("preparing a harness response for a device", () => {
+  it("gives only transactional phone credential saves the longer deadline", () => {
+    expect(proxyHeadersTimeoutMs("/api/bots/b1/secret-cards/m1/provide")).toBe(105_000);
+    expect(proxyHeadersTimeoutMs("/api/bots/b1/messages")).toBe(30_000);
+    expect(proxyHeadersTimeoutMs("/api/bots/b1/secret-cards/m1/provide", 17)).toBe(17);
+  });
+
   it("drops an endpoint whose runtime URL is not a string", async () => {
     const malformed: CompanionEndpoint = { kind: "hosted", priority: 0, url: "https://ok.example" };
     Object.defineProperty(malformed, "url", { value: 42 });
@@ -112,6 +120,22 @@ describe("preparing a harness response for a device", () => {
     expect(status).toBe(200);
     expect(JSON.parse(text).joinUrl).toBe("https://desktop.example/session/fresh");
     expect(companionMarker).toBe("1");
+    expect(companionDevice).toBe("phone-1");
+  });
+
+  it("replaces a caller-supplied device identity with the authenticated one", async () => {
+    respond = (res) => {
+      res.writeHead(200, { "content-type": "application/json" });
+      res.end("{}");
+    };
+    const response = await fetch(`http://127.0.0.1:${sidecarPort}/api/bots`, {
+      headers: {
+        authorization: `Bearer ${TOKEN}`,
+        "x-openmausbot-companion-device": "another-phone",
+      },
+    });
+    expect(response.status).toBe(200);
+    expect(companionDevice).toBe("phone-1");
   });
 
   it("never forwards a body it could not scrub", async () => {

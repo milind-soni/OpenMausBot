@@ -24,6 +24,14 @@ production hosted service still match this repository.
   developer's control plane. Confirm the current App Store Connect definition
   of ephemeral processing when answering the collection question for the
   submitted build.
+- A credential entered into a pending secure card is encrypted on the phone
+  for the QR-paired computer and is submitted only over hosted HTTPS or
+  Tailscale. The hosted route and companion sidecar can see only ciphertext;
+  the developer cannot decrypt or retain the value.
+  The phone clears its transient field immediately after local encryption. It
+  may keep only the exact ciphertext in memory for an interrupted-request
+  retry; that ciphertext is not persisted. The value is not added to chat,
+  preferences, Keychain, diagnostics, or analytics.
 - Privacy policy URL:
   `https://github.com/milind-soni/OpenMausBot/blob/main/docs/ios-privacy.md`
 

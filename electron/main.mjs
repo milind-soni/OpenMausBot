@@ -46,6 +46,14 @@ import {
   withoutManagedCompanionTunnelAccess,
 } from "./managed-companion-tunnel.mjs";
 import { createSecureCredentialState } from "./secure-credential-state.mjs";
+import {
+  createPhoneSecretSaveCoordinator,
+  createPhoneSecretIdentity,
+  decodePhoneSecretSaveRequest,
+  phoneSecretPrivateKeyMessage,
+  readPhoneSecretIdentity,
+  withPhoneSecretIdentity,
+} from "./phone-secret-identity.mjs";
 import { isKnownSkin } from "./skin-overlay.cjs";
 import { readSecureCredentials } from "./secure-credentials.mjs";
 import { createControlPlaneClient } from "./control-plane-client.mjs";
@@ -268,6 +276,7 @@ async function stopUtilityServer(proc, timeoutMs = UTILITY_SERVER_STOP_TIMEOUT_M
     }),
   ]).finally(() => clearTimeout(timer));
 }
+let phoneSecretIdentity = null;
 
 const CREDENTIALS_FILE = path.join(app.getPath("userData"), "credentials.bin");
 
@@ -525,6 +534,29 @@ export async function updateSecureCredentialDocument(derive, afterPersist) {
   }
 }
 
+async function ensurePhoneSecretIdentity() {
+  const existing = readPhoneSecretIdentity(secureCredentialState?.read() ?? secureCredentials);
+  if (existing) {
+    phoneSecretIdentity = existing;
+    return existing;
+  }
+  try {
+    const created = await createPhoneSecretIdentity();
+    await updateSecureCredentialDocument((credentials) =>
+      withPhoneSecretIdentity(credentials, created),
+    );
+    phoneSecretIdentity = created;
+    return created;
+  } catch (error) {
+    // Companion chat remains available. Pairing simply omits the public key,
+    // and mobile cards explain that secure entry needs the desktop until the
+    // OS credential store is available on a later launch.
+    phoneSecretIdentity = null;
+    slog(`phone credential key unavailable: ${error?.message ?? error}`);
+    return null;
+  }
+}
+
 function publicManagedCompanionState() {
   const access = managedCompanionTunnelAccess(secureCredentials);
   const status = managedCompanionConnector?.getStatus();
@@ -560,6 +592,10 @@ function companionLaunchOptions(hostedUrl = null) {
     resourcesPath: process.resourcesPath,
     harnessPort: SERVER_PORT,
     hostedUrl,
+    // Only an embedded server receives the private half over its utility
+    // port. A dev server launched in another terminal cannot decrypt, so it
+    // must not advertise a public key and strand the phone on a dead path.
+    secretPublicKey: app.isPackaged && serverProc ? phoneSecretIdentity?.publicKey ?? null : null,
     log: slog,
   };
 }
@@ -882,6 +918,33 @@ function receiveBrowserLifecycleCleanup(proc, rawMessage) {
   return true;
 }
 
+function syncPhoneSecretKey(proc) {
+  const message = phoneSecretPrivateKeyMessage(phoneSecretIdentity);
+  if (!message) return;
+  try {
+    proc.postMessage(message);
+  } catch (error) {
+    slog(`phone credential key sync failed: ${error?.message ?? error}`);
+  }
+}
+
+const savePhoneSecretOnce = createPhoneSecretSaveCoordinator((target, value) =>
+  saveWorkspaceCredential(target, value),
+);
+
+function receivePhoneSecretSave(proc, rawMessage) {
+  const request = decodePhoneSecretSaveRequest(rawMessage);
+  if (!request) return false;
+  void savePhoneSecretOnce(request).then((result) => {
+    try {
+      proc.postMessage(result);
+    } catch (error) {
+      slog(`phone credential save result failed: ${error?.message ?? error}`);
+    }
+  });
+  return true;
+}
+
 async function startServerOn(port) {
   const entry = path.join(process.resourcesPath, "server", "index.js");
   const childEnv = managedComposioChildEnvironment(composioBrokerUrl(), secureCredentials, {
@@ -928,13 +991,15 @@ async function startServerOn(port) {
     try {
       if (receiveBrowserControlHold(message)) return;
       if (receiveBrowserLifecycleCleanup(proc, message)) return;
+      if (receivePhoneSecretSave(proc, message)) return;
     } catch (error) {
-      slog(`browser private sync rejected: ${error?.message ?? error}`);
+      slog(`desktop private sync rejected: ${error?.message ?? error}`);
     }
   });
   proc.once("spawn", () => {
     slog(`spawned pid=${proc.pid}`);
     syncBrowserConnection(proc);
+    syncPhoneSecretKey(proc);
   });
   let exited = false;
   proc.once("exit", (code) => {
@@ -2118,7 +2183,7 @@ const CREDENTIAL_PATCH = {
   openaiImageApiKey: (value) => ({ imageGen: { key: value } }),
 };
 
-ipcMain.handle("credential:set", localOnly("credential:set", async (_event, name, value) => {
+async function saveWorkspaceCredential(name, value) {
   const patchFor = CREDENTIAL_PATCH[name];
   if (!patchFor || typeof value !== "string") {
     throw new Error("Unsupported credential");
@@ -2154,7 +2219,11 @@ ipcMain.handle("credential:set", localOnly("credential:set", async (_event, name
     },
     applyToHarness,
   );
-}));
+}
+
+ipcMain.handle("credential:set", localOnly("credential:set", (_event, name, value) =>
+  saveWorkspaceCredential(name, value),
+));
 
 async function broadcastDesktopCapabilities() {
   const capabilities = desktopCapabilities({
@@ -2207,6 +2276,7 @@ app.whenReady().then(async () => {
     writable: !credentialStoreUnavailable,
   });
   secureCredentials = secureCredentialState.read();
+  if (app.isPackaged) await ensurePhoneSecretIdentity();
   const hostedAccount = ensureCompanionAccountService();
   // Display capture remains user-initiated. The renderer first sends a
   // short-lived one-shot intent, then calls getDisplayMedia in the same click.

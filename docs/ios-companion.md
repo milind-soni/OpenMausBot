@@ -1,7 +1,7 @@
 # iOS companion architecture
 
 The iOS app is a thin, native client for the OpenMausBot instance running on
-your Mac. The Mac remains the only machine that owns agent processes,
+your Mac. The Mac remains the only machine that persists agent processes,
 credentials, SQLite data, transcripts, and computers. The iPhone trusts a Mac
 by scanning the QR code shown in desktop **Settings → Phone**; it does not need
 an OpenMausBot account of its own.
@@ -26,6 +26,9 @@ The first version includes:
 - Resumable SSE, streamed reply text, reconnect hydration, and an opt-in live
   Box computer view. The loopback-only VPS SSH viewer remains desktop-only.
 - Markdown rendering and Keychain storage for the phone's pairing trust.
+- Secure completion of supported credential-request cards using iOS Password
+  AutoFill and QR-pinned HPKE encryption. Apple Passwords/iCloud Keychain is
+  sufficient; 1Password, Bitwarden, and other AutoFill providers are optional.
 
 Alerts work while the app is open or for the short period it remains connected
 after moving to the background. Once iOS suspends or closes the app, new alerts
@@ -44,7 +47,7 @@ transport.
 ## Runtime architecture
 
 ```text
- iPhone (pairing trust in Keychain)
+ iPhone (pairing trust in Keychain; credential plaintext only while editing)
        │                         │
        │ trusted LAN/Tailscale   │ optional hosted HTTPS
        ▼                         ▼
@@ -56,12 +59,16 @@ transport.
                                  └──────────────┐
                                                 ▼
  companion sidecar (pairing auth, default-deny allowlist,
- response/SSE scrubbing, authenticated endpoint refresh)
+ response/SSE scrubbing, authenticated endpoint refresh;
+ credential ciphertext only)
             │ loopback only
             ▼
  OpenMausBot harness :8799
    HTTP API + event stream
    agent processes and approvals
+            │ private Electron utility-process channel
+            ▼
+ OS-encrypted desktop credential store
             │
             ▼
  SQLite message store + local configuration
@@ -171,7 +178,10 @@ local port cannot inherit the public route.
 2. On the iPhone, choose **Connect my computer** and scan the QR.
 3. Confirm the computer name and the displayed transport — **HTTPS connection**,
    **Tailscale connection**, or **Trusted local connection**. The phone stores
-   its trust securely in Keychain; no iPhone account is required.
+   its trust securely in Keychain; no iPhone account is required. A camera QR
+   also pins that computer's public credential-encryption key. Manual and old
+   pairings can still chat, but must scan a fresh QR before entering a key on
+   the phone.
 4. If scanning is unavailable, open **Other ways to connect** for a nearby
    computer, manual address, or six-digit code.
 5. Revoking the phone on the Mac removes its access and lets it pair again.
@@ -196,6 +206,53 @@ An OpenMausBot account is not required for nearby, manual, or Tailscale
 connections. Only the desktop owner signs in when enabling the optional hosted
 HTTPS route; the iPhone always uses the same QR trust flow.
 
+### Secure credential entry
+
+This is Password AutoFill, not a password-vault integration. A native
+`SecureField` marked as a password lets the user explicitly choose Apple
+Passwords or any enabled third-party AutoFill provider. OpenMausMobile does
+not enumerate a vault, receive a provider token, or save the entered value in
+its own Keychain.
+
+The packaged desktop creates one stable P-256 recipient key pair and keeps the
+private JWK inside its operating-system-encrypted credential document. Only the
+65-byte uncompressed public point is added to a camera QR. The phone validates
+and pins that point with the connection; manual and older pairings remain fully
+usable for chat but cannot submit a credential until they scan a fresh QR.
+
+Credential submission is enabled only while the phone is using hosted HTTPS or
+a Tailscale route. Local and Bonjour chat pairing still work as before, but
+their cleartext HTTP transport would expose the reusable device token to anyone
+who could observe that Wi-Fi network, so the app directs the user to finish the
+credential request on the computer instead.
+
+Each submission uses RFC 9180 base-mode HPKE with P-256/HKDF-SHA256/AES-GCM-256
+and authenticates this exact newline-separated context:
+
+```text
+openmausbot-phone-credential-v1
+<key id>
+<authenticated companion device id>
+<bot id>
+<thread id>
+<message id>
+<credential target>
+<one-time request key>
+```
+
+The companion replaces any caller-supplied device header with the identity of
+the bearer token it authenticated. The harness accepts only an allowlisted
+target on the exact pending card, opens the ciphertext through its private
+Electron channel, and waits for the encrypted desktop store and live config to
+commit before it marks the card complete. Replays are idempotent; moving a
+ciphertext to another device, bot, task, card, target, or computer fails
+authentication. The native field is cleared immediately after local
+encryption. If the response is interrupted, the app retains only that exact
+ciphertext in memory and reuses it for Retry, so HPKE randomness cannot turn a
+network retry into a second credential write. Nothing is persisted on the
+phone. Development servers deliberately have no recipient key and fail closed
+instead of advertising an unusable secure-entry route.
+
 The device-facing socket rejects browser `Origin` headers before reading a
 token. Its route policy in `companion/src/routes.ts` is default-deny: a new
 harness route remains unreachable until it is deliberately added.
@@ -209,6 +266,11 @@ Allowed in the first release:
 - Send messages, interrupt bots, answer approvals/questions, and mark chats
   read.
 - Create a basic bot.
+- Submit a supported pending credential card as an RFC 9180 HPKE envelope
+  bound to the authenticated device, bot, task, message, request, and target.
+  Only the paired packaged desktop's embedded server and Electron private
+  process channel receive the private key or plaintext; the sidecar, hosted
+  relay, chat transcript, and SQLite store see ciphertext or status only.
 
 The write surface uses purpose-built `read` and `always-allow` endpoints. The
 general bot and room `PATCH` endpoints are not reachable through the sidecar.
@@ -218,7 +280,9 @@ to invent a broad execution grant.
 
 Intentionally refused:
 
-- API keys and provider configuration.
+- Reading credentials, arbitrary credential targets, and general provider
+  configuration. The only credential write is the exact pending-card envelope
+  above, and it feeds the existing desktop OS-encrypted save path.
 - Pairing, device revocation, or companion lifecycle control.
 - Local VM lifecycle, webhooks, connectors, routines, team import/export, and
   internal peer-agent routes.

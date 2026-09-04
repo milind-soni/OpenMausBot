@@ -187,7 +187,7 @@ export function stopCompanion() {
 }
 
 /** startCompanion's body, run inside the transition queue. */
-async function start({ resourcesPath, harnessPort, hostedUrl = null, log }) {
+async function start({ resourcesPath, harnessPort, hostedUrl = null, secretPublicKey = null, log }) {
   if (proc) return companionState();
   lastError = null;
   const resolved = entryPoint(resourcesPath);
@@ -223,8 +223,12 @@ async function start({ resourcesPath, harnessPort, hostedUrl = null, log }) {
   const childEnvironment = { ...process.env };
   delete childEnvironment.OMB_COMPANION_HOSTED_URL;
   delete childEnvironment.OMB_COMPANION_INTERNAL_ORIGIN;
+  delete childEnvironment.OMB_PHONE_SECRET_PUBLIC_KEY;
   if (hostedUrl) childEnvironment.OMB_COMPANION_HOSTED_URL = hostedUrl;
   childEnvironment.OMB_COMPANION_INTERNAL_ORIGIN = allocatedOrigin.socketPath;
+  if (/^[A-Za-z0-9_-]{87}$/.test(String(secretPublicKey ?? ""))) {
+    childEnvironment.OMB_PHONE_SECRET_PUBLIC_KEY = secretPublicKey;
+  }
 
   let child;
   try {
