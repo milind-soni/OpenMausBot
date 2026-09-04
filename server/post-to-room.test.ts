@@ -77,6 +77,24 @@ const field = (body: Record<string, unknown>, ...path: string[]): unknown => {
 
 const str = (value: unknown): string => (typeof value === "string" ? value : "");
 
+interface StoredMessage {
+  id: string;
+  role: string;
+  kind: string;
+  text?: string;
+  from?: { botId: string; name: string };
+  peerPost?: { unattended?: boolean };
+  tool?: { name: string };
+  card?: { requestId?: string; tool?: string; title?: string };
+}
+
+const messagesOf = async (threadId: string): Promise<StoredMessage[]> => {
+  const { body } = await api("GET", `/api/threads/${threadId}/messages`);
+  const messages = field(body, "messages");
+  // SAFETY: /api/threads/:id/messages answers with the thread transcript.
+  return Array.isArray(messages) ? (messages as StoredMessage[]) : [];
+};
+
 /** A bot with a name and a section, ready to be put in a room. */
 const makeBot = async (name: string, section: string): Promise<{ id: string; threadId: string }> => {
   const created = await api("POST", "/api/bots");
@@ -90,14 +108,21 @@ const makeBot = async (name: string, section: string): Promise<{ id: string; thr
   return { id, threadId: str(field(created.body, "bot", "threadId")) };
 };
 
-const makeRoom = async (name: string, memberIds: string[], section: string): Promise<{ id: string; threadId: string }> => {
+const makeRoom = async (
+  name: string,
+  memberIds: string[],
+  section: string,
+  // "mentions" keeps most cases quiet; a case that must prove no turn ran
+  // picks a responder that would certainly have run.
+  defaultResponder: Record<string, unknown> = { kind: "mentions" },
+): Promise<{ id: string; threadId: string }> => {
   const created = await api("POST", "/api/groups", {
     name,
     memberIds,
     section,
     // A room whose setup the person never finished is not open for business;
     // finishing it here keeps every case in this file about posting rules.
-    setup: { bulletin: "", defaultResponder: { kind: "mentions" } },
+    setup: { bulletin: "", defaultResponder },
   });
   expect(created.status).toBe(201);
   return {
@@ -263,4 +288,196 @@ describe("list_rooms discovery", () => {
     const borrowed = await internal("GET", `/api/internal/rooms?fromBotId=${a.id}&fromThreadId=${b.threadId}`);
     expect(borrowed.status).toBe(403);
   }, 40_000);
+});
+
+describe("post_to_room", () => {
+  const post = (fromBotId: string, fromThreadId: string, groupId: string, message: string) =>
+    internal("POST", "/api/internal/post-to-room", { fromBotId, fromThreadId, groupId, message });
+
+  it("writes a bot-authored message and starts nobody's turn", async () => {
+    const poster = await makeBot("Poster", "Posting");
+    const listener = await makeBot("Listener", "Posting");
+    // a responder that WOULD have answered, so silence means no turn ran
+    const room = await makeRoom("Standup", [poster.id, listener.id], "Posting", {
+      kind: "member",
+      botId: listener.id,
+    });
+
+    rmSync(fakeClaudeDump, { force: true });
+    const posted = await post(poster.id, poster.threadId, room.id, "deploy is green");
+    expect(posted.status, JSON.stringify(posted.body)).toBe(201);
+
+    // a dispatched turn spawns the fake CLI, which writes this file
+    await new Promise((wake) => setTimeout(wake, 2_000));
+    expect(existsSync(fakeClaudeDump), "post_to_room started a turn").toBe(false);
+
+    const roomMessages = await messagesOf(room.threadId);
+    expect(roomMessages).toHaveLength(1);
+    const only = roomMessages[0];
+    // role "user" is the cascade: it re-enters responder selection
+    expect(only.role, "the post was appended as a user message").toBe("bot");
+    expect(only.kind).toBe("text");
+    expect(only.text).toBe("deploy is green");
+    expect(only.from).toMatchObject({ botId: poster.id, name: "Poster" });
+    // nobody replied and nobody is working
+    expect(roomMessages.some((message) => message.from?.botId === listener.id)).toBe(false);
+    const bots = field((await api("GET", "/api/bots")).body, "bots");
+    const listenerNow = Array.isArray(bots)
+      ? bots.find((bot) => str(field(bot as Record<string, unknown>, "id")) === listener.id)
+      : undefined;
+    expect(field(listenerNow as Record<string, unknown>, "busy")).toBeFalsy();
+
+    // and the conversation the poster is actually in shows what it did
+    const source = await messagesOf(poster.threadId);
+    expect(source.some((message) => message.tool?.name === "Posted in Standup")).toBe(true);
+  }, 40_000);
+
+  it("refuses a room the sender is not a member of, whatever id it sends", async () => {
+    const outsider = await makeBot("Post Outsider", "Posting");
+    const insider = await makeBot("Post Insider", "Posting");
+    const other = await makeBot("Post Other", "Posting");
+    const closed = await makeRoom("Members only", [insider.id, other.id], "Posting");
+
+    const refused = await post(outsider.id, outsider.threadId, closed.id, "let me in");
+    expect(refused.status).toBe(403);
+    expect(str(refused.body.error)).toContain("not a member");
+    expect(await messagesOf(closed.threadId)).toHaveLength(0);
+  }, 40_000);
+
+  it("refuses a room holding anyone outside the sender's section", async () => {
+    const inside = await makeBot("Section Inside", "Section A");
+    const outside = await makeBot("Section Outside", "Section B");
+    const mixed = await makeRoom("Cross section", [inside.id, outside.id], "Section A");
+
+    const refused = await post(inside.id, inside.threadId, mixed.id, "hello other section");
+    expect(refused.status).toBe(403);
+    expect(str(refused.body.error)).toContain("outside your section");
+    expect(await messagesOf(mixed.threadId)).toHaveLength(0);
+  }, 40_000);
+
+  it("refuses a one-to-one bot channel and the room the sender is already speaking in", async () => {
+    const a = await makeBot("Channel A", "Posting");
+    const b = await makeBot("Channel B", "Posting");
+    const room = await makeRoom("Shared desk", [a.id, b.id], "Posting");
+
+    const asked = await internal("POST", "/api/internal/ask-bot", {
+      fromBotId: a.id,
+      fromThreadId: a.threadId,
+      toBotId: b.id,
+      message: "make us a channel",
+      depth: 0,
+    });
+    expect(asked.status).toBe(200);
+    await api("POST", `/api/bots/${b.id}/interrupt`);
+
+    const groups = field((await api("GET", "/api/bots")).body, "groups");
+    const pair = Array.isArray(groups)
+      ? groups.find((group) => field(group as Record<string, unknown>, "dm") === true)
+      : undefined;
+    const pairId = str(field(pair as Record<string, unknown>, "id"));
+    expect(pairId).not.toBe("");
+
+    const intoPair = await post(a.id, a.threadId, pairId, "hello");
+    expect(intoPair.status).toBe(400);
+    expect(str(intoPair.body.error)).toContain("one-to-one");
+
+    const intoOwnRoom = await post(a.id, room.threadId, room.id, "hello again");
+    expect(intoOwnRoom.status).toBe(409);
+    expect(str(intoOwnRoom.body.error)).toContain("already speaking");
+  }, 40_000);
+
+  it("stops the room at its third bot post and sends the model to the user", async () => {
+    const one = await makeBot("Budget One", "Budget");
+    const two = await makeBot("Budget Two", "Budget");
+    const three = await makeBot("Budget Three", "Budget");
+    const room = await makeRoom("Busy room", [one.id, two.id, three.id], "Budget");
+
+    expect((await post(one.id, one.threadId, room.id, "first")).status).toBe(201);
+    expect((await post(two.id, two.threadId, room.id, "second")).status).toBe(201);
+    const third = await post(three.id, three.threadId, room.id, "third");
+    expect(third.status).toBe(429);
+    expect(str(third.body.error)).toMatch(/ask the user/i);
+    expect(str(third.body.error)).toMatch(/do not retry/i);
+    expect(await messagesOf(room.threadId)).toHaveLength(2);
+  }, 40_000);
+
+  it("refuses an identical repost without spending the room's budget", async () => {
+    const bot = await makeBot("Repeater", "Repeats");
+    const mate = await makeBot("Repeat Mate", "Repeats");
+    const room = await makeRoom("Echo room", [bot.id, mate.id], "Repeats");
+
+    expect((await post(bot.id, bot.threadId, room.id, "same words")).status).toBe(201);
+    const again = await post(bot.id, bot.threadId, room.id, "same words");
+    expect(again.status).toBe(429);
+    expect(str(again.body.error)).toMatch(/already posted that exact message/i);
+    expect(str(again.body.error)).toMatch(/do not post it again/i);
+    expect(await messagesOf(room.threadId)).toHaveLength(1);
+  }, 40_000);
+
+  it("holds the post behind the human card when the sender's peer gate is on", async () => {
+    const gated = await makeBot("Gated Poster", "Gated");
+    const mate = await makeBot("Gate Mate", "Gated");
+    const room = await makeRoom("Gated room", [gated.id, mate.id], "Gated");
+    expect((await api("PATCH", `/api/bots/${gated.id}`, { approvePeerComms: true })).status).toBe(200);
+
+    const pending = post(gated.id, gated.threadId, room.id, "needs a human first");
+    let card: StoredMessage | undefined;
+    const deadline = Date.now() + 10_000;
+    while (!card && Date.now() < deadline) {
+      card = (await messagesOf(gated.threadId)).find((message) => message.card?.tool === "post_to_room");
+      if (!card) await new Promise((wake) => setTimeout(wake, 100));
+    }
+    expect(card, "no approval card was raised for post_to_room").toBeTruthy();
+    expect(card?.card?.title).toContain("Gated room");
+    // nothing has reached the room while the card is open
+    expect(await messagesOf(room.threadId)).toHaveLength(0);
+
+    expect((await api("POST", `/api/bots/${gated.id}/respond`, {
+      requestId: card?.card?.requestId,
+      behavior: "allow",
+    })).status).toBe(200);
+    const settled = await pending;
+    expect(settled.status).toBe(201);
+    expect(await messagesOf(room.threadId)).toHaveLength(1);
+  }, 40_000);
+
+  it("marks a post from an unattended bot, and leaves an attended one unmarked", async () => {
+    const attended = await makeBot("Attended Poster", "Unattended");
+    const automated = await makeBot("Automated Poster", "Unattended");
+    const attendedRoom = await makeRoom("Attended room", [attended.id, automated.id], "Unattended");
+    const automatedRoom = await makeRoom("Automated room", [automated.id, attended.id], "Unattended");
+
+    expect((await post(attended.id, attended.threadId, attendedRoom.id, "typed by a person's bot")).status).toBe(201);
+    const attendedPost = (await messagesOf(attendedRoom.threadId))[0];
+    expect(attendedPost.peerPost).toBeTruthy();
+    expect(attendedPost.peerPost?.unattended).toBeUndefined();
+
+    // a webhook turn is the harness's definition of "nobody is watching",
+    // and the mark rides the bot from there
+    const hook = await api("POST", "/api/webhooks", {
+      name: "Nightly",
+      prompt: "Handle the incoming event",
+      botId: automated.id,
+      runOn: "maus",
+    });
+    expect(hook.status).toBe(201);
+    const delivered = await fetch(str(field(hook.body, "credential", "url")), {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ status: "failed" }),
+    });
+    expect(delivered.status).toBe(202);
+    await expect.poll(async () => {
+      const bots = field((await api("GET", "/api/bots")).body, "bots");
+      const record = Array.isArray(bots)
+        ? bots.find((bot) => str(field(bot as Record<string, unknown>, "id")) === automated.id)
+        : undefined;
+      return field(record as Record<string, unknown>, "busy") === false;
+    }, { timeout: 30_000 }).toBe(true);
+
+    const posted = await post(automated.id, automated.threadId, automatedRoom.id, "the nightly build failed");
+    expect(posted.status, JSON.stringify(posted.body)).toBe(201);
+    const automatedPost = (await messagesOf(automatedRoom.threadId))[0];
+    expect(automatedPost.peerPost?.unattended, "the unattended mark did not reach the post").toBe(true);
+  }, 90_000);
 });

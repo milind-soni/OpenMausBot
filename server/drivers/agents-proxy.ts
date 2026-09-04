@@ -6,6 +6,8 @@
 //
 //   list_bots()                          → the other bots in this section + their status
 //   list_rooms()                         → the shared rooms this bot may post into
+//   post_to_room(group_id, message)      → put ONE message in a room; nobody's
+//                                          turn starts, so nobody replies
 //   ask_bot(bot_id, msg)                 → send msg to that bot, wait, return its reply
 //   delegate_bot(bot_id, msg, reason?)   → hand the task to a peer ASYNC: returns
 //                                          immediately, the peer runs after your
@@ -37,6 +39,13 @@ const DEPTH = Number(process.env.OMB_TURN_DEPTH ?? "0") || 0;
 const SKILL_AUTHORING_ENABLED = process.env.OMB_SKILL_AUTHORING_ENABLED === "1";
 const MAX_CREATED_PER_TURN = 4;
 let createdThisTurn = 0;
+// Same spirit as MAX_CREATED_PER_TURN above and MAX_QUEUED_PER_THREAD in
+// delegations.ts: one turn's worth of a good idea is a handful, and a turn
+// that wants more than that has stopped reporting and started broadcasting.
+// The harness enforces its own per-room budget regardless; this one exists
+// so the refusal reaches the model without a round trip.
+const MAX_ROOM_POSTS_PER_TURN = 3;
+let roomPostsThisTurn = 0;
 const delegationTaskIdsThisTurn = new Set<string>();
 
 const WEEKDAYS = [
@@ -285,6 +294,20 @@ const TOOLS = [
     },
   },
   {
+    name: "post_to_room",
+    description:
+      "Put one message into a shared room you belong to, for example when the user asks you to tell the team something. Get group_id from list_rooms. This posts and returns: no room member's turn starts, nobody replies, and nothing comes back except confirmation — so never use it to ask a question or hand out work (use ask_bot or delegate_bot for those). Post once, say it in full, and tell the user what you posted. If a post is refused, do not retry it: say what you wanted to post in your reply instead.",
+    inputSchema: {
+      type: "object",
+      additionalProperties: false,
+      properties: {
+        group_id: { type: "string", description: "The room's id, copied exactly from list_rooms." },
+        message: { type: "string", description: "The complete message to post, written for the room to read as it stands." },
+      },
+      required: ["group_id", "message"],
+    },
+  },
+  {
     name: "create_bot",
     description:
       "Create a specialist bot in your section. Only a section's Chief of Staff may use this. The new bot inherits the Chief's engine, starts with connected apps and automatic approvals disabled, and can then receive work through delegate_bot. Create only the smallest useful team (maximum four per turn).",
@@ -494,6 +517,28 @@ async function callTool(name: string, args: Json): Promise<{ text: string; isErr
     });
     return {
       text: `Rooms you can post into:\n${lines.join("\n")}\n\nUse post_to_room with one of these ids. A post adds one message to the room; it does not start anyone's turn, so nobody replies to it automatically.`,
+    };
+  }
+  if (name === "post_to_room") {
+    const groupId = String(args.group_id ?? "").trim();
+    const message = String(args.message ?? "").trim();
+    if (!groupId || !message) {
+      return { text: "post_to_room needs group_id (from list_rooms) and message.", isError: true };
+    }
+    if (roomPostsThisTurn >= MAX_ROOM_POSTS_PER_TURN) {
+      return {
+        text: `You have already posted ${MAX_ROOM_POSTS_PER_TURN} times this turn, which is the limit. Do not retry — finish your turn and say anything further to the user directly.`,
+        isError: true,
+      };
+    }
+    const r = await api("/api/internal/post-to-room", {
+      method: "POST",
+      body: JSON.stringify({ fromBotId: BOT_ID, fromThreadId: THREAD_ID, groupId, message }),
+    });
+    if (r.error) return { text: String(r.error), isError: true };
+    roomPostsThisTurn += 1;
+    return {
+      text: `Posted in ${r.roomName ?? "the room"}. Nobody's turn was started, so expect no reply — tell the user it is posted.`,
     };
   }
   if (name === "ask_bot") {

@@ -143,6 +143,12 @@ export interface Message {
   channelMode?: "chat" | "goal";
   /** group threads: which member said this (sender attribution). */
   from?: { botId: string; name: string; color: string };
+  /** Set on a room message a bot pushed in with post_to_room instead of by
+   * taking a turn there. Internal transport changes custody, not authorship:
+   * a reader's turn wraps this one in a provenance preamble rather than
+   * letting it read as ordinary room conversation. `unattended` records that
+   * nobody was watching the bot that posted it. */
+  peerPost?: { unattended?: boolean };
   /** emoji reactions; by = "user" or a member botId. */
   reactions?: Array<{ emoji: string; by: string }>;
   /** comm chips: "Messaged @X" in the caller's chat, linking to the

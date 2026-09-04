@@ -70,10 +70,24 @@ function allowKeyAllowed(from: BotRecord, allowKey: string): boolean {
   return from.alwaysAllow?.includes(allowKey) ?? false;
 }
 
+/** Who a peer action is aimed at. A bot for ask_bot and delegate_bot, a
+ * room for post_to_room — the gate only ever needs its id and its name. */
+export interface PeerApprovalTarget {
+  id: string;
+  name: string;
+}
+
+/** How the card names what is about to happen. */
+const ACTION_VERB: Record<PeerAction, string> = {
+  ask_bot: "contact",
+  delegate_bot: "delegate to",
+  post_to_room: "post in",
+};
+
 function pushApprovalCard(
   bus: ApprovalBus,
   from: BotRecord,
-  target: BotRecord,
+  target: PeerApprovalTarget,
   message: string,
   action: PeerAction,
   requestId: string,
@@ -84,7 +98,8 @@ function pushApprovalCard(
     role: "bot",
     kind: "options",
     card: {
-      title: `@${from.name} wants to ${action === "ask_bot" ? "contact" : "delegate to"} @${target.name}`,
+      // a room is named as a room; only a bot gets an @
+      title: `@${from.name} wants to ${ACTION_VERB[action]} ${action === "post_to_room" ? `“${target.name}”` : `@${target.name}`}`,
       subtitle,
       options: ["Allow", "Deny", "Always allow"],
       requestId,
@@ -102,7 +117,7 @@ function pushApprovalCard(
 export function requestPeerApproval(
   bus: ApprovalBus,
   from: BotRecord,
-  target: BotRecord,
+  target: PeerApprovalTarget,
   message: string,
   action: PeerAction,
   sourceThreadId = from.threadId,
@@ -193,7 +208,7 @@ export function dismissStalePeerCards(bus: ApprovalBus): number {
       for (const message of bus.store.messagesFor(threadId)) {
         const card = message.card;
         if (!card?.requestId || card.answered || card.dismissed) continue;
-        if (card.tool !== "ask_bot" && card.tool !== "delegate_bot") continue;
+        if (card.tool !== "ask_bot" && card.tool !== "delegate_bot" && card.tool !== "post_to_room") continue;
         if (pendingComms.has(card.requestId)) continue;
         const patched = bus.store.patchMessage(threadId, message.id, {
           card: { ...card, answered: "deny", dismissed: true },
