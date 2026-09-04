@@ -360,6 +360,35 @@ describe("drainDelegations", () => {
     ).toBe(true);
   });
 
+  it("drops a queued handoff when the sender's allow-list stops covering the target", async () => {
+    // The allow-list is checked again at the dispatch edge for the same
+    // reason section membership is: a handoff can sit in the queue across a
+    // busy target or an approval card, and the grant it was queued under may
+    // have been narrowed since.
+    const queued = queueDelegation(
+      commsBus,
+      from,
+      { toBotId: target.id, message: "do this", depth: 0 },
+      1,
+    );
+    store.patchBot(from.id, { peers: [] });
+
+    drainDelegations(commsBus, approvalBus, from.threadId, (toBotId, message, commsDepth) => {
+      runTargetCalls.push({ toBotId, message, commsDepth });
+    });
+
+    await waitFor(() => findDelegationReceipt(queued.id!) && _pendingCount(from.threadId) === 0);
+    expect(findDelegationReceipt(queued.id!)).toMatchObject({
+      status: "dropped",
+      result: expect.stringContaining("no longer allowed to contact"),
+    });
+    expect(runTargetCalls).toEqual([]);
+    expect(
+      store.messagesFor(from.threadId).some((message) =>
+        message.tool?.name.includes("is no longer an allowed peer")),
+    ).toBe(true);
+  });
+
   it("keeps the handoff queued with a 'waiting' chip when the target is currently busy", async () => {
     store.patchBot(target.id, { busy: true });
     queueDelegation(commsBus, from, { toBotId: target.id, message: "do this", depth: 0 }, 1);

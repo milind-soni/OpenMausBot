@@ -19,6 +19,7 @@ import { getOrCreateChannel, mirrorExchange, type CommsBus } from "./comms-visib
 import { DATA_DIR } from "./config.ts";
 import { newId } from "./contracts.ts";
 import { requestPeerApproval, type ApprovalBus } from "./peer-approval.ts";
+import { peerAllowed } from "./peer-roster.ts";
 import { sectionKey, type BotRecord, type GroupRecord, type Store } from "./store.ts";
 
 export interface DelegationItem {
@@ -473,7 +474,7 @@ async function processOne(
     });
     return "settled";
   }
-  if (dropIfSectionsChanged(bus, sender, target, sourceThreadId, item)) {
+  if (dropIfUnreachable(bus, sender, target, sourceThreadId, item)) {
     return "settled";
   }
   if (target.busy) {
@@ -540,7 +541,7 @@ async function processOne(
     const current = bus.store.bot(item.toBotId);
     const currentSender = bus.store.bot(from.id);
     if (!current || !currentSender || !sourceThreadBelongsToBot(bus.store, currentSender.id, sourceThreadId)) return "settled";
-    if (dropIfSectionsChanged(bus, currentSender, current, sourceThreadId, item)) {
+    if (dropIfUnreachable(bus, currentSender, current, sourceThreadId, item)) {
       return "settled";
     }
     if (current.busy) {
@@ -595,19 +596,26 @@ function sourceThreadBelongsToBot(store: Store, botId: string, threadId: string)
   return Boolean(group && group.memberIds.includes(botId));
 }
 
-/** Section membership is an execution boundary, not just sidebar styling.
- * A queued handoff may wait through a turn, a busy target, or human approval,
- * so the permission granted when it was queued must be checked again at the
- * final dispatch edge. */
-function dropIfSectionsChanged(
+/** Section membership and the sender's peer allow-list are execution
+ * boundaries, not just sidebar styling. A queued handoff may wait through a
+ * turn, a busy target, or human approval, so the permission granted when it
+ * was queued must be checked again at the final dispatch edge — the user may
+ * have moved either bot, or narrowed the sender's peers, in between. */
+function dropIfUnreachable(
   bus: CommsBus,
   sender: BotRecord,
   target: BotRecord,
   sourceThreadId: string,
   item: PendingDelegationItem,
 ): boolean {
-  if (sectionKey(sender.section) === sectionKey(target.section)) return false;
-  const result = `@${sender.name} and @${target.name} now belong to different sections`;
+  const sectionsDiffer = sectionKey(sender.section) !== sectionKey(target.section);
+  if (!sectionsDiffer && peerAllowed(sender, target.id)) return false;
+  const reason = sectionsDiffer
+    ? "bots now belong to different sections"
+    : `@${target.name} is no longer an allowed peer`;
+  const result = sectionsDiffer
+    ? `@${sender.name} and @${target.name} now belong to different sections`
+    : `@${sender.name} is no longer allowed to contact @${target.name}`;
   recordDelegationReceipt({
     id: item.id,
     sourceThreadId,
@@ -619,7 +627,7 @@ function dropIfSectionsChanged(
   bus.store.appendMessage(sourceThreadId, {
     role: "bot",
     kind: "activity",
-    tool: { name: `Delegation to @${target.name} canceled — bots now belong to different sections`, ok: false },
+    tool: { name: `Delegation to @${target.name} canceled — ${reason}`, ok: false },
   });
   return true;
 }
