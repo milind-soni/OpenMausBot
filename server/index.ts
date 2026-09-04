@@ -5254,7 +5254,12 @@ function connectorThread(botId: string, threadId: string) {
  * ever has. The posting budget's ceiling counts only the bot posts nobody
  * has answered since, so this is read fresh on every attempt rather than
  * remembered — the room's transcript is already the record of who spoke
- * last, and a second copy of it could only ever disagree. */
+ * last, and a second copy of it could only ever disagree.
+ *
+ * Only a person puts a user-role message in a room: the composer, or a
+ * calendar call they scheduled. No bot has that ingress — post_to_room
+ * appends role "bot", which is the rule this whole surface turns on — so
+ * a bot cannot re-arm the ceiling it just spent. */
 function lastHumanRoomMessageAt(group: GroupRecord): number | undefined {
   const messages = store.messagesFor(group.threadId);
   for (let i = messages.length - 1; i >= 0; i -= 1) {
