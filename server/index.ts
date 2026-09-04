@@ -164,6 +164,7 @@ import {
 import { EventBus } from "./harness/bus.ts";
 import { ProviderRegistry } from "./harness/registry.ts";
 import { cancelPeerApprovalsFor, cancelPeerApprovalsForThread, dismissStalePeerCards, requestPeerApproval, resolvePeerComms, type ApprovalBus } from "./peer-approval.ts";
+import { peerProvenanceNote, withPeerProvenance } from "./peer-provenance.ts";
 import { decideRoomPost, emptyRoomPostBudget, type RoomPostBudget } from "./room-post-budget.ts";
 import {
   mentionedBots,
@@ -4075,6 +4076,7 @@ function serializeRoomContext(
   threadId: string,
   userName: string,
   textOverride?: { messageId: string; text: string },
+  readerBotId?: string,
 ): string {
   const messages = store.messagesFor(threadId);
   const messagesById = new Map(messages.map((message) => [message.id, message]));
@@ -4083,7 +4085,14 @@ function serializeRoomContext(
     .slice(-GROUP_CONTEXT_MESSAGES)
     .map((m) => {
       const rendered = textOverride?.messageId === m.id ? { ...m, text: textOverride.text } : m;
-      return `${m.role === "user" ? userName : (m.from?.name ?? "Bot")}: ${transcriptText(rendered, messagesById, userName)}`;
+      const speaker = m.role === "user" ? userName : (m.from?.name ?? "Bot");
+      const line = `${speaker}: ${transcriptText(rendered, messagesById, userName)}`;
+      // A room reply is the room talking. A post_to_room message is another
+      // bot's text carried in from somewhere else, so it says so — the
+      // reader's own posts excepted, which would only be telling it about
+      // itself.
+      if (!m.peerPost || !m.from || m.from.botId === readerBotId) return line;
+      return `${peerProvenanceNote({ botName: m.from.name, delivery: "post_to_room", unattended: m.peerPost.unattended })}\n${line}`;
     })
     .join("\n");
 }
@@ -4212,6 +4221,7 @@ async function runGroupMemberTurn(
     usesNativeImageInput && latestUser
       ? { messageId: latestUser.id, text: resolvedLatestImages.text }
       : undefined,
+    bot.id,
   );
   const turnImages = usesNativeImageInput ? resolvedLatestImages.images : [];
   const skills = availableSkills();
@@ -6499,7 +6509,11 @@ const server = createServer(async (req, res) => {
         }
         const channel = getOrCreateChannel(store, currentFrom, currentTarget);
         mirrorExchange(commsBus, currentFrom, currentTarget, message, channel, fromThreadId);
-        const prefixed = `[Message from @${currentFrom.name}, another bot in this OpenMausBot workspace. Reply to them.]\n\n${message}`;
+        const prefixed = withPeerProvenance(message, {
+          botName: currentFrom.name,
+          delivery: "ask_bot",
+          unattended: isUnattended(currentFrom.id),
+        });
         const outcome = await askBotAndWait(toBotId, prefixed, depth, fromBotId);
         if (outcome.status === "timeout" && !delegationWatch.has(currentTarget.threadId)) {
           // The peer's turn is still running — only the wait ended. Convert
