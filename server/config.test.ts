@@ -801,3 +801,35 @@ describe("customMcpServers", () => {
     expect(Object.keys(out)).toEqual(["keeper"]);
   });
 });
+
+describe("Antigravity worker instances", () => {
+  it("includes Worker A and Worker B in default fleet and migrates legacy antigravity", () => {
+    const defaultInstances = instanceConfigs({});
+    expect(defaultInstances["antigravity-worker-a"]).toMatchObject({
+      driver: "antigravityAgent",
+      displayName: "Antigravity Worker A",
+    });
+    expect(defaultInstances["antigravity-worker-b"]).toMatchObject({
+      driver: "antigravityAgent",
+      displayName: "Antigravity Worker B",
+    });
+
+    const migrated = instanceConfigs({
+      instances: {
+        antigravity: {
+          driver: "antigravityAgent",
+          config: { cli: "/custom/agy" },
+        },
+      },
+    });
+    expect(migrated["antigravity"]).toBeUndefined();
+    expect(migrated["antigravity-worker-a"]).toMatchObject({
+      driver: "antigravityAgent",
+      config: { cli: "/custom/agy" },
+    });
+    expect(migrated["antigravity-worker-b"]).toMatchObject({
+      driver: "antigravityAgent",
+      config: { cli: "/custom/agy" },
+    });
+  });
+});

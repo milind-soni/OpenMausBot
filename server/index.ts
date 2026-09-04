@@ -250,6 +250,15 @@ import { loadBundledSkills, loadUserSkills, mergeSkills, renderSkillInstructions
 import { installedPlaybookInstructions } from "./installed-playbooks.ts";
 import { createBotPackageExport } from "./package-export.ts";
 import { shouldMountLocalComputer } from "./local-routing.ts";
+import {
+  antigravityAccountStatuses,
+  activateAntigravityProfile,
+  refreshAntigravityProfileQuota,
+  antigravityManagedWorkerRunning,
+  antigravityProcessRunning,
+  antigravityManagedQuotaRefreshRunning,
+  type AntigravityProfile,
+} from "./antigravity-accounts.ts";
 import { resolveSurface } from "./surface.ts";
 import {
   PendingTurnCancellations,
@@ -9199,6 +9208,49 @@ const server = createServer(async (req, res) => {
           : 500;
         return json(res, status, { error: error instanceof Error ? error.message : String(error) });
       }
+    }
+
+    // ── Antigravity multi-account coordination (Worker A / Worker B) ──
+    if (method === "GET" && path === "/api/antigravity/accounts") {
+      const refresh = url.searchParams.get("refresh") === "1";
+      const requestedProfile = url.searchParams.get("profile");
+      if (requestedProfile !== null && requestedProfile !== "a" && requestedProfile !== "b") {
+        return json(res, 400, { error: "profile must be a or b" });
+      }
+      if (refresh && antigravityManagedWorkerRunning()) {
+        return json(res, 200, {
+          accounts: await antigravityAccountStatuses(false),
+          refreshDeferred: true,
+        });
+      }
+      if (refresh && (await antigravityProcessRunning()) && !antigravityManagedQuotaRefreshRunning()) {
+        return json(res, 409, { error: "Close standalone Antigravity terminals before refreshing account quotas." });
+      }
+      if (refresh && requestedProfile) {
+        try {
+          await refreshAntigravityProfileQuota(requestedProfile as AntigravityProfile);
+        } catch {
+          // Status response keeps last-good value and marks this profile stale.
+        }
+        return json(res, 200, { accounts: await antigravityAccountStatuses(false) });
+      }
+      return json(res, 200, {
+        accounts: await antigravityAccountStatuses(refresh),
+      });
+    }
+
+    if (method === "POST" && path === "/api/antigravity/activate") {
+      if (!String(req.headers["content-type"] ?? "").toLowerCase().startsWith("application/json")) {
+        return json(res, 415, { error: "content-type must be application/json" });
+      }
+      const body = await readBody(req);
+      const profile = body?.profile as AntigravityProfile;
+      if (profile !== "a" && profile !== "b") return json(res, 400, { error: "profile must be a or b" });
+      if (providerConfigBusy || (await antigravityProcessRunning())) {
+        return json(res, 409, { error: "Antigravity is busy. Wait for the current task or close its terminal." });
+      }
+      await activateAntigravityProfile(profile);
+      return json(res, 200, { accounts: await antigravityAccountStatuses(false) });
     }
 
     // ── CLI binary discovery for the Engines "detected" dropdown ──

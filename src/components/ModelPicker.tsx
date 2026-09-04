@@ -3,7 +3,7 @@
 // engines that need setup show one focused action instead of a disabled wall.
 import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 import { Check, ChevronDown, ChevronLeft, ChevronRight, Loader2, RefreshCw, Search } from "lucide-react";
-import { useStore, type Bot, type InstanceInfo, type ModelSelection } from "@/state/store";
+import { api, useStore, type Bot, type InstanceInfo, type ModelSelection, type AntigravityAccountStatus } from "@/state/store";
 import { filterCustomModels, partitionCustomModels, suggestedModels } from "@/lib/custom-models";
 import { isCustomOnly, splitEngineRail } from "@/lib/engine-rail";
 import { ProviderMark } from "./ProviderIcons";
@@ -103,6 +103,65 @@ function ModelSearch({
   );
 }
 
+export function accountDisplayLabel(account: AntigravityAccountStatus): string {
+  if (account.email) return account.email;
+  return account.label || (account.profile === "a" ? "Worker A account" : "Worker B account");
+}
+
+export function AntigravityAccountCards({
+  accounts,
+  selectedInstanceId,
+  selectedBotInstanceId,
+  busy,
+  onRefresh,
+}: {
+  accounts: AntigravityAccountStatus[];
+  selectedInstanceId: string;
+  selectedBotInstanceId: string;
+  busy: boolean;
+  onRefresh: () => void;
+}) {
+  const account = accounts.find((candidate) => candidate.instanceId === selectedInstanceId);
+  if (!account) return null;
+  const quota = account.quota?.gemini;
+  const value = (window: { remaining: number; resetsAt: string | null } | null | undefined) =>
+    window && typeof window.remaining === "number" ? `${window.remaining}%` : "—";
+  return (
+    <div
+      data-testid={`antigravity-quota-card-${account.instanceId}`}
+      className="mt-2 rounded-lg border border-hairline/40 bg-inset px-2.5 py-2 text-[11px]"
+    >
+      <div className="flex items-center justify-between gap-2">
+        <span className="truncate font-medium text-ink">{accountDisplayLabel(account)}</span>
+        <span className={cn("text-[10px]", selectedBotInstanceId === account.instanceId ? "text-success font-medium" : "text-ink-secondary")}>
+          {selectedBotInstanceId === account.instanceId ? "Selected for bot" : "Select model"}
+        </span>
+      </div>
+      {account.quotaStale && (
+        <div className="mt-1 text-warning">Refresh failed · showing last good</div>
+      )}
+      <div className="mt-2 flex items-center gap-4 text-[11px] text-ink">
+        <span>Weekly: <b>{value(quota?.weekly)}</b></span>
+        <span>5-hour: <b>{value(quota?.fiveHour)}</b></span>
+      </div>
+      <div className="mt-2 flex items-center justify-between border-t border-hairline/20 pt-1.5 text-[10px] text-ink-secondary">
+        <span>Profile {account.profile.toUpperCase()}</span>
+        <button
+          type="button"
+          onClick={onRefresh}
+          disabled={busy}
+          className="flex items-center gap-1 rounded px-1.5 py-0.5 text-ink-secondary hover:bg-raised hover:text-ink disabled:opacity-50"
+          title="Refresh account quota"
+          aria-label="Refresh account quota"
+        >
+          <RefreshCw size={11} className={busy ? "animate-spin" : undefined} />
+          <span>Refresh quota</span>
+        </button>
+      </div>
+    </div>
+  );
+}
+
 export function ModelPicker({
   bot,
   className,
@@ -123,6 +182,10 @@ export function ModelPicker({
   const [query, setQuery] = useState("");
   const [showAll, setShowAll] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
+  const [agyAccounts, setAgyAccounts] = useState<AntigravityAccountStatus[]>([]);
+  const [agyBusy, setAgyBusy] = useState(false);
+  const [agyError, setAgyError] = useState<string | null>(null);
+  const [agyNotice, setAgyNotice] = useState<string | null>(null);
   const rootRef = useRef<HTMLDivElement>(null);
   const refreshingRef = useRef(false);
 
@@ -167,6 +230,13 @@ export function ModelPicker({
 
   useEffect(() => {
     if (!open) return;
+    void api("/api/antigravity/accounts")
+      .then((value) => setAgyAccounts(value.accounts ?? []))
+      .catch((error) => setAgyError(error instanceof Error ? error.message : String(error)));
+  }, [open, refreshInstances]);
+
+  useEffect(() => {
+    if (!open) return;
     const closeOnOutsideClick = (event: MouseEvent) => {
       const clickedNode = event.target instanceof Node ? event.target : null;
       if (!rootRef.current?.contains(clickedNode)) setOpen(false);
@@ -206,7 +276,25 @@ export function ModelPicker({
     resetList();
   };
 
-  const pick = (instance: InstanceInfo, model: string) => {
+  const pick = async (instance: InstanceInfo, model: string) => {
+    const account = agyAccounts.find((candidate) => candidate.instanceId === instance.instanceId);
+    if (account) {
+      setAgyBusy(true);
+      setAgyError(null);
+      try {
+        const result = await api("/api/antigravity/activate", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ profile: account.profile }),
+        });
+        setAgyAccounts(result.accounts ?? []);
+      } catch (error) {
+        setAgyError(error instanceof Error ? error.message : String(error));
+        setAgyBusy(false);
+        return;
+      }
+      setAgyBusy(false);
+    }
     const sameInstance = instance.instanceId === selection.instanceId;
     const nextSelection: ModelSelection = {
       instanceId: instance.instanceId,
@@ -219,6 +307,28 @@ export function ModelPicker({
       selection: nextSelection,
     });
     setOpen(false);
+  };
+
+  const refreshAgyQuotas = async () => {
+    if (!railInstance) return;
+    setAgyBusy(true);
+    setAgyError(null);
+    setAgyNotice(null);
+    try {
+      const selectedAccount = agyAccounts.find(
+        (candidate) => candidate.instanceId === railInstance.instanceId,
+      );
+      if (!selectedAccount) throw new Error("No Antigravity account is selected.");
+      const result = await api(`/api/antigravity/accounts?refresh=1&profile=${selectedAccount.profile}`);
+      setAgyAccounts(result.accounts ?? []);
+      if (result.refreshDeferred) {
+        setAgyNotice("Worker is active. Quota will refresh automatically when its task finishes.");
+      }
+    } catch (error) {
+      setAgyError(error instanceof Error ? error.message : String(error));
+    } finally {
+      setAgyBusy(false);
+    }
   };
 
   const official = railInstance?.models.options.filter((option) => !option.custom) ?? [];
@@ -400,6 +510,19 @@ export function ModelPicker({
                       ? "Run this agent with a model already on your machine."
                       : "Choose a model for this bot."}
                   </div>
+                  <AntigravityAccountCards
+                    accounts={agyAccounts}
+                    selectedInstanceId={railInstance.instanceId}
+                    selectedBotInstanceId={selection.instanceId}
+                    busy={agyBusy}
+                    onRefresh={() => void refreshAgyQuotas()}
+                  />
+                  {agyError && railInstance.driverKind === "antigravityAgent" && (
+                    <div className="mt-2 text-[10.5px] text-warning">{agyError}</div>
+                  )}
+                  {agyNotice && railInstance.driverKind === "antigravityAgent" && (
+                    <div className="mt-2 text-[10.5px] text-ink-secondary">{agyNotice}</div>
+                  )}
                 </div>
 
                 {pane === "custom" && canReturnToOfficial && (

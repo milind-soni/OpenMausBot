@@ -56,6 +56,22 @@ function trimRoutineRuns(runs: readonly RoutineRun[]): RoutineRun[] {
 export type { MausColor } from "@/lib/mascot";
 export type { RoutineRunCardData } from "../../shared/routine-run";
 
+export interface AntigravityQuotaWindow { remaining: number; resetsAt: string | null }
+export interface AntigravityAccountStatus {
+  profile: "a" | "b";
+  instanceId: string;
+  label: string;
+  email?: string;
+  active: boolean;
+  available: boolean;
+  quota: {
+    gemini: { weekly: AntigravityQuotaWindow | null; fiveHour: AntigravityQuotaWindow | null };
+    other: { weekly: AntigravityQuotaWindow | null; fiveHour: AntigravityQuotaWindow | null };
+  };
+  quotaStale?: boolean;
+  error?: string;
+}
+
 export interface OptionCardData {
   title: string;
   subtitle: string;

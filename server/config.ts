@@ -23,6 +23,8 @@ export const DEFAULT_LOCAL_VM_MODE = "shared" as const;
 export const DEFAULT_LOCAL_VM_MAX_INSTANCES = 2;
 export const MIN_LOCAL_VM_MAX_INSTANCES = 1;
 export const MAX_LOCAL_VM_MAX_INSTANCES = 4;
+export const ANTIGRAVITY_WORKER_A_INSTANCE_ID = "antigravity-worker-a";
+export const ANTIGRAVITY_WORKER_B_INSTANCE_ID = "antigravity-worker-b";
 
 export function isValidSshAlias(value: unknown): value is string {
   return typeof value === "string" && SSH_ALIAS.test(value);
@@ -729,7 +731,8 @@ export function instanceConfigs(cfg: AppConfig): InstanceConfigMap {
     cursor: { driver: "cursorAgent" },
     claude: { driver: "claudeAgent" },
     codex: { driver: "codex" },
-    antigravity: { driver: "antigravityAgent" },
+    [ANTIGRAVITY_WORKER_A_INSTANCE_ID]: { driver: "antigravityAgent", displayName: "Antigravity Worker A" },
+    [ANTIGRAVITY_WORKER_B_INSTANCE_ID]: { driver: "antigravityAgent", displayName: "Antigravity Worker B" },
     opencodeGo: { driver: "opencodeGo" },
     computer: { driver: "boxAgent" },
     openaiCompat: { driver: "openai-compat" },
@@ -752,6 +755,35 @@ export function instanceConfigs(cfg: AppConfig): InstanceConfigMap {
   } as const;
   const configured = cfg.instances && Object.keys(cfg.instances).length ? cfg.instances : null;
   const map: InstanceConfigMap = configured ? { ...configured } : { ...DEFAULT_FLEET };
+  const antigravityFleetIsConfigured =
+    !configured ||
+    Object.hasOwn(configured, "antigravity") ||
+    Object.hasOwn(configured, ANTIGRAVITY_WORKER_A_INSTANCE_ID) ||
+    Object.hasOwn(configured, ANTIGRAVITY_WORKER_B_INSTANCE_ID);
+  if (antigravityFleetIsConfigured) {
+    const legacy = map.antigravity;
+    delete map.antigravity;
+    const workerEntry = (profile: "a" | "b", source: InstanceConfigMap[string] | undefined) => {
+      const rawConfig =
+        source?.config && typeof source.config === "object" && !Array.isArray(source.config)
+          ? (source.config as Record<string, unknown>)
+          : {};
+      return {
+        ...(source ?? { driver: "antigravityAgent" }),
+        driver: "antigravityAgent",
+        displayName: profile === "a" ? "Antigravity Worker A" : "Antigravity Worker B",
+        config: { ...rawConfig },
+      };
+    };
+    map[ANTIGRAVITY_WORKER_A_INSTANCE_ID] = workerEntry(
+      "a",
+      map[ANTIGRAVITY_WORKER_A_INSTANCE_ID] ?? legacy,
+    );
+    map[ANTIGRAVITY_WORKER_B_INSTANCE_ID] = workerEntry(
+      "b",
+      map[ANTIGRAVITY_WORKER_B_INSTANCE_ID] ?? legacy,
+    );
+  }
   // Product fleets pick up newly shipped engines. A one-off test/shadow map
   // (no claude/grok/codex) is left exactly as written.
   if (

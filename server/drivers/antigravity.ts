@@ -28,6 +28,10 @@ import {
   resolveAntigravityRuntime,
 } from "./antigravity-runtime.ts";
 import { resolveAntigravityReleaseAsset } from "./antigravity-release.ts";
+import {
+  registerManagedAntigravityWorker,
+  unregisterManagedAntigravityWorker,
+} from "../antigravity-accounts.ts";
 
 export const STATIC_ANTIGRAVITY_MODELS: ModelCatalog = {
   default: "gemini-3.8-flash-high",
@@ -140,6 +144,7 @@ export const AntigravityDriver: ProviderDriver<AcpConfig> = {
   async create(input: DriverCreateInput<AcpConfig>): Promise<ProviderInstance> {
     const base = await AcpAntigravityDriver.create(input);
     const auth = new AntigravityAuthController();
+    registerManagedAntigravityWorker(input.instanceId);
     const runtimeAndProfile = async () => {
       const environment = { ...process.env, ...input.environment };
       const runtime = await resolveAntigravityRuntime(input.config.cli, environment);
@@ -169,6 +174,7 @@ export const AntigravityDriver: ProviderDriver<AcpConfig> = {
       completeAuthentication: async (flowId, callbackUrl) => auth.complete(flowId, callbackUrl),
       cancelAuthentication: async () => auth.cancel(),
       dispose: async () => {
+        unregisterManagedAntigravityWorker(input.instanceId);
         auth.cancel();
         await base.dispose();
       },
