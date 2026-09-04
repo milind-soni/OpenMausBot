@@ -381,8 +381,9 @@ export function isValidAntigravityInitializeResult(
   const name = initialized.agentInfo?.name;
   if (name !== "antigravity-acp" && name !== "Google Antigravity") return false;
   const actualVersion = initialized.agentInfo?.version;
-  const normalizedActual = actualVersion?.replace(/^agy_acp_server_/u, "")?.trim();
-  const normalizedExpected = expectedVersion.replace(/^agy_acp_server_/u, "")?.trim();
+  if (typeof actualVersion !== "string") return false;
+  const normalizedActual = actualVersion.replace(/^agy_acp_server_/u, "").trim();
+  const normalizedExpected = expectedVersion.replace(/^agy_acp_server_/u, "").trim();
   if (actualVersion !== expectedVersion && normalizedActual !== normalizedExpected) return false;
   if (
     initialized.agentCapabilities?.loadSession !== true ||

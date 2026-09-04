@@ -168,6 +168,16 @@ describe("official Antigravity runtime", () => {
       authMethods: [{ id: "api-key" }],
     }, "1.1.1")).toBe(false);
 
+    // Rejects non-string versions
+    expect(isValidAntigravityInitializeResult({
+      ...basePayload,
+      agentInfo: { name: "antigravity-acp", version: 1 },
+    }, "1.1.1")).toBe(false);
+    expect(isValidAntigravityInitializeResult({
+      ...basePayload,
+      agentInfo: { name: "antigravity-acp", version: null },
+    }, "1.1.1")).toBe(false);
+
     // Handles null / undefined gracefully
     expect(isValidAntigravityInitializeResult(null, "1.1.1")).toBe(false);
     expect(isValidAntigravityInitializeResult(undefined, "1.1.1")).toBe(false);
