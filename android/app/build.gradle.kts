@@ -69,7 +69,7 @@ private val releaseKeystore: java.io.File? = when {
 // The one line to edit at a release. `versionCode` is derived from it below, so
 // there is no second number to bump and no way to build a new version under a
 // code the Play Store has already accepted.
-private val appVersionName = "1.0.0"
+private val appVersionName = "1.2.0"
 
 // Play orders uploads by `versionCode` alone and refuses one it has already
 // seen, so the code has to rise whenever the name does — and rise in the
