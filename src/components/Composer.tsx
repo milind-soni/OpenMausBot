@@ -599,6 +599,63 @@ export function Composer({
     if (group) setChannelMode("chat");
   };
 
+  /**
+   * Handles clipboard paste events in the composer textarea: converts pasted clipboard
+   * images into uploaded attachments (if supported by the responder) and converts oversized
+   * text into draft attachment chips.
+   *
+   * @param e - Clipboard event from the composer textarea.
+   */
+  const handlePaste = (e: React.ClipboardEvent<HTMLTextAreaElement>) => {
+    // an image from the clipboard becomes an uploaded attachment —
+    // but only for engines that can open one; a grok bot politely
+    // refuses instead of receiving a path it cannot read
+    const imageFiles = clipboardImageFiles(e.clipboardData);
+    if (imageFiles.length > 0 || clipboardHasImages(e.clipboardData)) {
+      if (!engineSupportsImages) {
+        e.preventDefault();
+        dispatch({
+          type: "error",
+          message: "The selected responder does not support image attachments.",
+        });
+        return;
+      }
+      if (imageFiles.length > 0) {
+        e.preventDefault();
+        changeDraftAttachmentPending(draftId, true);
+        void (async () => {
+          try {
+            const results = await Promise.allSettled(imageFiles.map(uploadImage));
+            for (const result of results) {
+              if (result.status === "rejected") {
+                dispatch({
+                  type: "error",
+                  message: result.reason instanceof Error ? result.reason.message : "image upload failed",
+                });
+              }
+            }
+          } finally {
+            changeDraftAttachmentPending(draftId, false);
+          }
+        })();
+        return;
+      }
+    }
+    // a wall of text becomes a chip instead of burying the input
+    const pasted = e.clipboardData.getData("text/plain");
+    if (!isLongPaste(pasted)) return;
+    e.preventDefault();
+    // Preserve native paste replacement semantics: if text was
+    // selected, the attachment replaces that selection.
+    const start = e.currentTarget.selectionStart;
+    const end = e.currentTarget.selectionEnd;
+    if (start !== end) {
+      editText(`${text.slice(0, start)}${text.slice(end)}`);
+      setCaret(start);
+    }
+    editAttachments((prev) => [...prev, pasteAttachment(pasted)]);
+  };
+
   // native dictation: partials stream into the input while the Swift
   // helper runs; the final transcript stays in the box, ready to edit/send
   useEffect(() => {
@@ -873,55 +930,7 @@ export function Composer({
             setDismissedAt(null);
             setDismissedSlashAt(null);
           }}
-          onPaste={(e) => {
-            // an image from the clipboard becomes an uploaded attachment —
-            // but only for engines that can open one; a grok bot politely
-            // refuses instead of receiving a path it cannot read
-            const imageFiles = clipboardImageFiles(e.clipboardData);
-            if (imageFiles.length > 0 || clipboardHasImages(e.clipboardData)) {
-              if (!engineSupportsImages) {
-                e.preventDefault();
-                dispatch({
-                  type: "error",
-                  message: "The selected responder does not support image attachments.",
-                });
-                return;
-              }
-              if (imageFiles.length > 0) {
-                e.preventDefault();
-                changeDraftAttachmentPending(draftId, true);
-                void (async () => {
-                  try {
-                    const results = await Promise.allSettled(imageFiles.map(uploadImage));
-                    for (const result of results) {
-                      if (result.status === "rejected") {
-                        dispatch({
-                          type: "error",
-                          message: result.reason instanceof Error ? result.reason.message : "image upload failed",
-                        });
-                      }
-                    }
-                  } finally {
-                    changeDraftAttachmentPending(draftId, false);
-                  }
-                })();
-                return;
-              }
-            }
-            // a wall of text becomes a chip instead of burying the input
-            const pasted = e.clipboardData.getData("text/plain");
-            if (!isLongPaste(pasted)) return;
-            e.preventDefault();
-            // Preserve native paste replacement semantics: if text was
-            // selected, the attachment replaces that selection.
-            const start = e.currentTarget.selectionStart;
-            const end = e.currentTarget.selectionEnd;
-            if (start !== end) {
-              editText(`${text.slice(0, start)}${text.slice(end)}`);
-              setCaret(start);
-            }
-            editAttachments((prev) => [...prev, pasteAttachment(pasted)]);
-          }}
+          onPaste={handlePaste}
           onKeyUp={(e) => setCaret((e.target as HTMLTextAreaElement).selectionStart ?? 0)}
           onClick={(e) => setCaret((e.target as HTMLTextAreaElement).selectionStart ?? 0)}
           onKeyDown={(e) => {

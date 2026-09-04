@@ -142,6 +142,12 @@ export function documentMime(file: Pick<File, "name" | "type">): string | null {
   return DOCUMENT_MIMES[extension] ?? null;
 }
 
+/**
+ * Checks if a given file or descriptor has a supported image MIME type.
+ *
+ * @param file - Object with a MIME `type` and optional `size`.
+ * @returns `true` if the file is a supported image format (PNG, JPEG, GIF, WebP).
+ */
 export function isImageFile(file: { type: string; size?: number }): boolean {
   return (
     file.type.startsWith("image/") &&
@@ -149,9 +155,14 @@ export function isImageFile(file: { type: string; size?: number }): boolean {
   );
 }
 
-/** Extracts valid image files from clipboard data, checking items first because
+/**
+ * Extracts valid image files from clipboard data, checking items first because
  * Chromium on macOS exposes screenshots and copied image bitmaps via items
- * while clipboardData.files may remain empty. */
+ * while clipboardData.files may remain empty.
+ *
+ * @param clipboardData - The clipboard DataTransfer object or mock data.
+ * @returns Array of valid image File objects found in the clipboard.
+ */
 export function clipboardImageFiles(
   clipboardData: {
     files?: Iterable<File> | null;
@@ -177,7 +188,12 @@ export function clipboardImageFiles(
   return [];
 }
 
-/** Detects if the clipboard data contains any image items or files. */
+/**
+ * Detects if the clipboard data contains any image items or files.
+ *
+ * @param clipboardData - The clipboard DataTransfer object or mock data.
+ * @returns `true` if any image file or item is present in the clipboard.
+ */
 export function clipboardHasImages(
   clipboardData: {
     files?: Iterable<{ type: string; size?: number }> | null;

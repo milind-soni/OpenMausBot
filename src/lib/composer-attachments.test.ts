@@ -359,6 +359,26 @@ describe("isImageFile", () => {
   });
 });
 
+/**
+ * Helper to construct a mock clipboard item for DataTransferItemList testing.
+ *
+ * @param kind - Item kind (e.g. 'file' or 'string').
+ * @param type - Item MIME type.
+ * @param file - File instance returned by getAsFile, if any.
+ * @returns Mock clipboard item object.
+ */
+function mockClipboardItem(kind: string, type: string, file: File | null = null) {
+  /**
+   * Returns the mock file or null.
+   *
+   * @returns Mock file or null.
+   */
+  function getAsFile() {
+    return file;
+  }
+  return { kind, type, getAsFile };
+}
+
 describe("clipboardImageFiles", () => {
   it("returns empty array for empty or null clipboard", () => {
     expect(clipboardImageFiles(null)).toEqual([]);
@@ -370,8 +390,8 @@ describe("clipboardImageFiles", () => {
     const pngFile = new File([new Uint8Array([1])], "test.png", { type: "image/png" });
     const clipboardData = {
       items: [
-        { kind: "string", type: "text/plain", getAsFile: () => null },
-        { kind: "file", type: "image/png", getAsFile: () => pngFile },
+        mockClipboardItem("string", "text/plain"),
+        mockClipboardItem("file", "image/png", pngFile),
       ],
       files: [],
     };
@@ -382,7 +402,7 @@ describe("clipboardImageFiles", () => {
     const jpegFile = new File([new Uint8Array([2])], "test.jpg", { type: "image/jpeg" });
     const clipboardData = {
       items: [
-        { kind: "string", type: "text/plain", getAsFile: () => null },
+        mockClipboardItem("string", "text/plain"),
       ],
       files: [jpegFile],
     };
