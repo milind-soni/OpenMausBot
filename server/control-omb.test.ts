@@ -114,6 +114,39 @@ describe("control-omb command mapping", () => {
     });
   });
 
+  it("maps an engine switch onto set_bot_model", async () => {
+    // the one mapped way to reach the engine-switch replay path, and to
+    // move a bot onto the preview runtime inside the fixture
+    const callTool = vi.fn(async (name: string, args: Record<string, unknown>) => ({ name, args }));
+    await expect(runControlOmb(
+      ["set-model", "--bot", "bot-1", "--instance", "openmausRuntime", "--model", "fake-model"],
+      { callTool: callTool as any, env: { OPENMAUSBOT_URL: "http://127.0.0.1:19999" } },
+    )).resolves.toEqual({
+      name: "set_bot_model",
+      args: { bot_id: "bot-1", instance_id: "openmausRuntime", model: "fake-model" },
+    });
+  });
+
+  it("treats set-model as mutating", async () => {
+    await expect(runControlOmb(["set-model", "--bot", "b", "--instance", "i", "--model", "m"], {
+      callTool: vi.fn() as any,
+      env: {},
+    })).rejects.toMatchObject({ message: "mutating commands require an explicit OpenMausBot instance" });
+  });
+
+  it("requires bot, instance, and model for set-model", async () => {
+    const callTool = vi.fn();
+    const env = { OPENMAUSBOT_URL: "http://127.0.0.1:19999" };
+    for (const args of [
+      ["set-model", "--instance", "i", "--model", "m"],
+      ["set-model", "--bot", "b", "--model", "m"],
+      ["set-model", "--bot", "b", "--instance", "i"],
+    ]) {
+      await expect(runControlOmb(args, { callTool: callTool as any, env })).rejects.toThrow(/is required/);
+    }
+    expect(callTool).not.toHaveBeenCalled();
+  });
+
   it("requires every part of an edit before calling the shared tool", async () => {
     const callTool = vi.fn();
     const env = { OPENMAUSBOT_URL: "http://127.0.0.1:19999" };

@@ -636,6 +636,38 @@ asserted.
 - [ ] Manually verify ownership labels, preview disclosure, compaction divider, inspector row, engine switch/rollback, approval, interrupt, and steering in a rebuilt renderer. Keep this evidence separate from server-harness evidence.
 - [ ] Commit: `test: verify portable context and owned runtime`.
 
+  **Resolved 2026-09-04 (Task 11 shipped), and precise about what proved what:**
+
+  Driven through the shared control surface (`docs/verification/context-runtime.md`):
+  1. more than 40 turns — 151 items on a 200k window (Task 7 evidence);
+  3. rewind excluding the abandoned branch — `omb edit` (#760);
+  5. a small window creating a divider with history intact — `OMB_CONTEXT_WINDOW` + `edit`;
+  7. the owned runtime calling a tool, asking, and being interruptible — `OMB_VERIFY_OWNED=1`
+     with `set-model`: `request.opened` for `notes__read_notes`, an "Approval needed" card,
+     `needs-user`, then `interrupt` draining the ask as a system deny;
+  8. restart without native state — a second turn carried `sent=3/3` from the plan alone;
+  9. no key or tool output in diagnostics — canary `verify-key-canary-0000` absent from the
+     whole event log, no tool output in any `context.prepared` line.
+
+  Proven by tests, not the fixture — and the plan should say so rather than imply otherwise:
+  2. vendor-to-replay switch preserving tool observations — `prepare-turn.test.ts`,
+     `replay-once.test.ts`;
+  4. external/delegated updates entering the next plan — `prepare-turn.test.ts`;
+  6. one safe resume retry, never after acceptance — `codex/claude/pi/acp` driver tests;
+  10. `openai-compat` receiving history once — `replay-once.test.ts`;
+  11. room attribution across an engine switch — `rebuild.test.ts`.
+  Approval allow/deny/timeout and steering on the owned runtime — `pi-runtime.test.ts`,
+  `approval-gate.test.ts`. The control surface deliberately has no `approve` command, so
+  `needs-user` is the fixture's proof that a call asked and blocked.
+
+  Two gaps in the shared surface found on the way, left as they are:
+  - `registry.describe()` does not project `customMcp`, and `list_available_models` projects
+    only `snapshot.state`, so `omb models` shows neither `customMcp` nor `billing`. Both are
+    pre-existing projections; adding them is a small follow-up, not part of this release.
+  - `FAKE_OPENAI_TOOL` exists because a tool call to a name the loop has not mounted is
+    reported as unknown BEFORE the approval gate runs — which proves nothing. Point the fake
+    at the mounted, namespaced name or the scenario silently degrades.
+
 ---
 
 ## Release gates

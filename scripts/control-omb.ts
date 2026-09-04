@@ -14,7 +14,9 @@ import { freePortBlock } from "../server/testing/ports.ts";
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
 const FAKE_CLI = join(ROOT, "server", "testing", "fake-claude-cli.ts");
-const MUTATING = new Set(["new-bot", "new-channel", "send", "send-channel", "interrupt", "edit"]);
+const FAKE_OPENAI = join(ROOT, "server", "testing", "fake-openai-server.ts");
+const FAKE_MCP = join(ROOT, "server", "testing", "fake-mcp-server.ts");
+const MUTATING = new Set(["new-bot", "new-channel", "send", "send-channel", "interrupt", "edit", "set-model"]);
 
 export class ControlOmbError extends Error {
   readonly hint?: string;
@@ -54,9 +56,13 @@ mutating (an explicit --url or OPENMAUSBOT_URL/OMB_PORT is required):
   interrupt --bot ID [--dry-run] [--url URL]
   interrupt --channel ID [--dry-run] [--url URL]
   edit --bot ID --message ID --text TEXT [--url URL]
+  set-model --bot ID --instance ID --model ID [--url URL]
 
 isolated fixture:
   node --experimental-strip-types scripts/control-omb.ts launch
+  OMB_VERIFY_OWNED=1 … launch   also starts a loopback fake OpenAI-compatible
+                                server and enables the preview OpenMaus Runtime
+                                against it, with a fake MCP server mounted
 
 Output is JSON. launch owns a temporary fake-engine server until interrupted.`;
 
@@ -203,6 +209,22 @@ export async function runControlOmb(
     }, opts.url);
   }
 
+  if (command === "set-model") {
+    // Switching a bot's engine is the one mapped way to reach the
+    // engine-switch replay path, and the only way to move a bot onto the
+    // preview runtime in the fixture.
+    const opts = parse(command, args, {
+      bot: { type: "string" },
+      instance: { type: "string" },
+      model: { type: "string" },
+    });
+    return call("set_bot_model", {
+      bot_id: required(opts.bot, "--bot"),
+      instance_id: required(opts.instance, "--instance"),
+      model: required(opts.model, "--model"),
+    }, opts.url);
+  }
+
   if (command === "new-channel") {
     const values = parse(command, args, {
       name: { type: "string" },
@@ -288,6 +310,35 @@ export async function launchVerificationServer(
   const evidenceDir = join(tmpdir(), "openmausbot-verification-evidence");
   mkdirSync(evidenceDir, { recursive: true });
   const logPath = join(evidenceDir, `server-${Date.now()}-${process.pid}.log`);
+  // OMB_VERIFY_OWNED=1 adds the preview OpenMaus Runtime, pointed at a
+  // loopback fake OpenAI-compatible server this launcher owns, with the fake
+  // MCP server mounted as the bot's own tool. Everything stays on 127.0.0.1
+  // and dies with the launcher.
+  const verifyOwned = parentEnv.OMB_VERIFY_OWNED === "1";
+  let fakeOpenAI: ReturnType<typeof spawn> | null = null;
+  let fakeOpenAIUrl: string | null = null;
+  if (verifyOwned) {
+    fakeOpenAI = spawn(process.execPath, ["--experimental-strip-types", FAKE_OPENAI], {
+      env: {
+        ...process.env,
+        ...(parentEnv.FAKE_OPENAI_MODE ? { FAKE_OPENAI_MODE: parentEnv.FAKE_OPENAI_MODE } : {}),
+        ...(parentEnv.FAKE_OPENAI_TOOL ? { FAKE_OPENAI_TOOL: parentEnv.FAKE_OPENAI_TOOL } : {}),
+      },
+      stdio: ["ignore", "pipe", "ignore"],
+    });
+    fakeOpenAIUrl = await new Promise<string>((resolve, reject) => {
+      const timer = setTimeout(() => reject(new Error("fake OpenAI server did not report its URL")), 10_000);
+      let buffer = "";
+      fakeOpenAI!.stdout!.on("data", (chunk) => {
+        buffer += String(chunk);
+        const line = buffer.split("\n").find((l) => l.startsWith("{"));
+        if (!line) return;
+        clearTimeout(timer);
+        resolve((JSON.parse(line) as { url: string }).url);
+      });
+      fakeOpenAI!.once("exit", () => reject(new Error("fake OpenAI server exited before reporting its URL")));
+    });
+  }
   writeFileSync(join(dataDir, "config.json"), JSON.stringify({
     instances: {
       claude: {
@@ -295,7 +346,19 @@ export async function launchVerificationServer(
         displayName: "Verification fixture",
         config: { cli: FAKE_CLI },
       },
+      ...(fakeOpenAIUrl
+        ? { openmausRuntime: { driver: "openmaus-runtime", displayName: "Owned fixture", config: { url: fakeOpenAIUrl, model: "fake-model" } } }
+        : {}),
     },
+    ...(fakeOpenAIUrl
+      ? {
+          features: { ownedRuntime: true },
+          // a loopback endpoint needs no key; one is set anyway so the
+          // credential path is exercised and the canary can be grepped for
+          openaiCompat: { key: "verify-key-canary-0000" },
+          mcpServers: { notes: { command: process.execPath, args: ["--experimental-strip-types", FAKE_MCP] } },
+        }
+      : {}),
   }, null, 2));
 
   const log = openSync(logPath, "a", 0o600);
@@ -329,7 +392,7 @@ export async function launchVerificationServer(
   // without them whole features are unverifiable here: OMB_CONTEXT_WINDOW
   // shrinks every model's window so compaction can be watched on a short
   // thread, and FAKE_CLAUDE_MODE drives the CLI failure paths.
-  for (const key of ["OMB_CONTEXT_WINDOW", "FAKE_CLAUDE_MODE"]) {
+  for (const key of ["OMB_CONTEXT_WINDOW", "FAKE_CLAUDE_MODE", "FAKE_OPENAI_MODE"]) {
     const value = parentEnv[key];
     if (value) childEnv[key] = value;
   }
@@ -362,19 +425,22 @@ export async function launchVerificationServer(
     }
   } catch (error) {
     await waitForExit(child, { signal: "SIGTERM" });
+    if (fakeOpenAI) await waitForExit(fakeOpenAI, { signal: "SIGTERM" });
     await removeTempDir(dataDir);
     throw error;
   }
 
   let closed = false;
   return {
-    info: { url, pid: child.pid!, dataDir, logPath },
+    info: { url, pid: child.pid!, dataDir, logPath, ...(fakeOpenAIUrl ? { ownedRuntimeUrl: fakeOpenAIUrl } : {}) },
     fixtureDumpPath,
     child,
     async close() {
       if (closed) return;
       closed = true;
       await waitForExit(child, { signal: "SIGTERM" });
+      // the fake provider is this launcher's child too; it never outlives it
+      if (fakeOpenAI) await waitForExit(fakeOpenAI, { signal: "SIGTERM" });
       await removeTempDir(dataDir);
     },
   };
