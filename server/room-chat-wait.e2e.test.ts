@@ -178,7 +178,14 @@ const cleanup = async (roomId: string | undefined, botIds: string[]) => {
   for (const botId of botIds) await api("DELETE", `/api/bots/${botId}`).catch(() => undefined);
 };
 
-describe("chat rooms wait for a member busy elsewhere", () => {
+/** These cases are deliberately slow: each one holds a real turn open on one
+ * bot and waits for a second bot to take its turn only once the first settles,
+ * through a real server and the fake CLI. The inner polls already allow 15s,
+ * which leaves nothing inside vitest's 20s default for process start-up — so on
+ * the slowest runner they time out for lack of headroom rather than because
+ * anything regressed. The wait itself is what is under test; the clock is not.
+ */
+describe("chat rooms wait for a member busy elsewhere", { timeout: 45_000 }, () => {
   it("parks on a responder busy in a 1:1, then lets them reply once that turn settles, in order", async () => {
     const busy = await createBot("Busy", "patient");
     const quick = await createBot("Quick", "quick");
