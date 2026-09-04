@@ -6053,8 +6053,10 @@ const server = createServer(async (req, res) => {
         const self = url.searchParams.get("self");
         const sender = self ? store.bot(self) : null;
         if (!sender) return json(res, 403, { error: "unknown sender" });
-        // title/description included so a "chief of staff"-style bot can
-        // judge the team (who does what, who has no job description yet)
+        // title/description included so the caller can judge the team (who
+        // does what, who has no job description yet). Every bot reads this
+        // now, not just the Chief, so it answers the same reachability
+        // question the roster does — same peers, same order.
         const bots = reachablePeers(store.bots, sender)
           .map((b) => ({
             id: b.id,
