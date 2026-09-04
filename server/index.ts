@@ -6339,7 +6339,12 @@ const server = createServer(async (req, res) => {
           return json(res, 403, { error: "that bot is not on this bot's allowed peers — call list_bots for the ones you can reach" });
         }
         const fromThreadId = String(body.fromThreadId ?? from.threadId);
-        if (!store.taskByThread(from.id, fromThreadId)) {
+        // Rooms are conversations too. The task-only lookup here refused every
+        // ask made from a room turn — the bot could see its teammates and not
+        // reach them — while create_bot and the routine endpoints already
+        // accepted a group thread the sender belongs to. One ownership rule,
+        // and it is still the sender's own membership that decides.
+        if (!connectorThread(from.id, fromThreadId)) {
           return json(res, 403, { error: "source thread does not belong to sender" });
         }
         // A busy peer used to be a flat bounce ("try again later") — a
@@ -6396,8 +6401,11 @@ const server = createServer(async (req, res) => {
           if (!peerAllowed(freshFrom, freshTarget.id)) {
             return json(res, 200, { error: "that bot is no longer an allowed peer" });
           }
-          if (!store.taskByThread(freshFrom.id, fromThreadId)) {
-            return json(res, 404, { error: "source task no longer exists" });
+          // Membership can be revoked while the card is open: re-check the
+          // same way, so a bot removed from a room mid-approval cannot go on
+          // speaking through it.
+          if (!connectorThread(freshFrom.id, fromThreadId)) {
+            return json(res, 404, { error: "source conversation no longer belongs to sender" });
           }
           // The user just approved this exact ask_bot request. Preserve that
           // decision if it has to become an async handoff; asking twice makes
