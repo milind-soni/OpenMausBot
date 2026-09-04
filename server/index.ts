@@ -180,6 +180,7 @@ import {
   type BotRecord,
   type GroupDefaultResponder,
   type GroupRecord,
+  type MausColor,
   type Message,
   type TaskRecord,
 } from "./store.ts";
@@ -189,9 +190,11 @@ import { buildTurnContext, engineIsFresh } from "./turn-context.ts";
 import { extractTurnImages } from "./turn-images.ts";
 import { TurnWatchdog } from "./turn-watchdog.ts";
 import {
+  describeDropped,
   ensureWorkspace,
   listMemoryTopics,
   isMemoryTopicName,
+  memoryCapacity,
   memorySystemPrompt,
   workspaceDir,
 } from "./workspace.ts";
@@ -962,9 +965,51 @@ if (browserCleanupReferencesReconciled) browserCleanup.startPending();
 const wireTask = ({ resumeCursors: _resumeCursors, lastInstanceId: _lastInstanceId, ...task }: TaskRecord) => task;
 
 const wireBot = (bot: NonNullable<ReturnType<typeof store.bot>>) => {
-  const { resumeCursors: _resumeCursors, tasks, ...rest } = bot;
+  const { resumeCursors: _resumeCursors, memoryNotice: _memoryNotice, tasks, ...rest } = bot;
   return { ...rest, avatarUrl: rest.avatarUrl ?? null, ...(tasks ? { tasks: tasks.map(wireTask) } : {}) };
 };
+
+/** One visible notice when a bot's memory is over budget: an activity chip
+ * with ok:false, which both views render regardless of the tool-calls
+ * setting. Once per over-budget state per bot — not per turn, not per
+ * task — keyed by the file's size signature stored on the bot record and
+ * cleared when the user saves memory. Unattended turns (routines, webhooks,
+ * delegations) post nothing: nobody is reading that thread, and the gauge
+ * in settings is the durable signal. Never throws into the turn. */
+function announceMemoryBudget(
+  bot: NonNullable<ReturnType<typeof store.bot>>,
+  threadId: string,
+  attended: boolean,
+  from?: { botId: string; name: string; color: MausColor },
+): void {
+  if (!attended) return;
+  try {
+    const capacity = memoryCapacity(bot.id);
+    const signature = capacity.truncated ? `${capacity.lines}:${capacity.bytes}` : "";
+    if ((bot.memoryNotice ?? "") === signature) return;
+    store.patchBot(bot.id, { memoryNotice: signature });
+    if (!signature) return;
+    const missing = capacity.lines - capacity.loadedLines;
+    store.appendMessage(threadId, {
+      role: "bot",
+      kind: "activity",
+      ...(from ? { from } : {}),
+      tool: {
+        name: `memory: over budget — ${missing} line${missing === 1 ? "" : "s"} did not load (${describeDropped(capacity.dropped)}). Trim it in Settings → Memory.`,
+        ok: false,
+      },
+    });
+  } catch (error) {
+    console.error(`[omb-memory] notice failed for bot=${bot.id}: ${error instanceof Error ? error.message : String(error)}`);
+  }
+}
+
+/** Whether memory loads for this bot's engine at all: API-only and box
+ * engines have no private workspace (see worksInWorkspace at dispatch). */
+function memoryLoadsFor(bot: NonNullable<ReturnType<typeof store.bot>>): boolean {
+  const driverKind = registry.get(bot.modelSelection.instanceId)?.driverKind;
+  return driverKind !== undefined && driverKind !== "grok" && driverKind !== "boxAgent";
+}
 
 /** Profile URLs are app-owned references, not merely strings with a trusted
  * prefix. Resolve them before persistence so every accepted avatar can be
@@ -3412,6 +3457,13 @@ async function startTurn(
       // MEMORY.md lives. API/box engines have no local filesystem story.
       const worksInWorkspace = instance.driverKind !== "grok" && instance.driverKind !== "boxAgent";
       const privateWorkspace = worksInWorkspace ? ensureWorkspace(bot.id) : undefined;
+      if (privateWorkspace) {
+        announceMemoryBudget(
+          bot,
+          threadId,
+          opts?.automationSource === undefined && !opts?.unattended && !opts?.commsDepth && !opts?.cardContinuation,
+        );
+      }
       const skillInstructions = renderSkillInstructions(selectedSkills, {
         includeRoot: worksInWorkspace && opts?.runOn !== "cloud",
       });
@@ -3756,7 +3808,7 @@ async function startTurn(
           routinePrompt +
           learnPrompt +
           sectionContextSystemPrompt(bot.section) +
-          (privateWorkspace ? memorySystemPrompt(bot.id) + skillsSystemPrompt(bot.id) : "") +
+          (privateWorkspace ? memorySystemPrompt(bot.id, threadId) + skillsSystemPrompt(bot.id) : "") +
           skillInstructions +
           packagePlaybooks +
           (opts?.automationSource === "webhook"
@@ -4629,11 +4681,12 @@ async function runGroupMemberTurn(
   // but must not decide the pin: the room's desk is a property of the
   // room, not of whichever member happened to speak first.
   const cwd = groupTurnCwd(workspace, () => store.pinGroupCwd(group.id, threadId));
+  if (workspace) announceMemoryBudget(bot, threadId, true, { botId: bot.id, name: bot.name, color: bot.color });
   const roomSystem =
     system +
     (integrations.browser ? BUILT_IN_BROWSER_SYSTEM_PROMPT : "") +
     sectionContextSystemPrompt(bot.section) +
-    (workspace ? `\n${memorySystemPrompt(bot.id).trim()}${skillsSystemPrompt(bot.id)}` : "") +
+    (workspace ? `\n${memorySystemPrompt(bot.id, threadId).trim()}${skillsSystemPrompt(bot.id)}` : "") +
     renderSkillInstructions(selectedSkills, { includeRoot: Boolean(workspace) }) +
     installedPlaybookInstructions(text, bot.playbooks);
 
@@ -9527,11 +9580,18 @@ const server = createServer(async (req, res) => {
     // not run yet simply has nothing to show.
     m = path.match(/^\/api\/bots\/([\w-]+)\/memory$/);
     if (m && method === "GET") {
-      if (!store.bot(m[1])) return json(res, 404, { error: "no such bot" });
-      return json(res, 200, { ...readMemoryFile(m[1]), topics: listMemoryTopics(m[1]) });
+      const bot = store.bot(m[1]);
+      if (!bot) return json(res, 404, { error: "no such bot" });
+      return json(res, 200, {
+        ...readMemoryFile(m[1]),
+        topics: listMemoryTopics(m[1]),
+        capacity: memoryCapacity(m[1]),
+        loads: memoryLoadsFor(bot),
+      });
     }
     if (m && method === "PUT") {
-      if (!store.bot(m[1])) return json(res, 404, { error: "no such bot" });
+      const bot = store.bot(m[1]);
+      if (!bot) return json(res, 404, { error: "no such bot" });
       const parsed = z.object({ text: z.string() }).safeParse(await readBody(req));
       if (!parsed.success) return json(res, 400, { error: "text must be a string" });
       if (Buffer.byteLength(parsed.data.text, "utf8") > MEMORY_FILE_MAX_BYTES) {
@@ -9540,8 +9600,11 @@ const server = createServer(async (req, res) => {
         });
       }
       writeMemoryFile(m[1], parsed.data.text);
-      // truncated echoes back so the editor can warn about the load budget
-      return json(res, 200, { ok: true, truncated: readMemoryFile(m[1]).truncated });
+      // the user changed the file: the next over-budget state is news again
+      if (bot.memoryNotice !== undefined) store.patchBot(bot.id, { memoryNotice: undefined });
+      // capacity echoes back so the editor can draw the gauge without a refetch
+      const capacity = memoryCapacity(m[1]);
+      return json(res, 200, { ok: true, truncated: capacity.truncated, capacity });
     }
     m = path.match(/^\/api\/bots\/([\w-]+)\/memory\/topics\/([^/]+)$/);
     if (m && method === "GET") {

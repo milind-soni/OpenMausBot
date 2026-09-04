@@ -467,6 +467,10 @@ export interface BotRecord {
   rewound?: boolean;
   pinned?: boolean;
   hidden?: boolean;
+  /** The memory capacity ("lines:bytes") this bot last posted an
+   * over-budget notice for, so the notice fires once per state, not once
+   * per turn. Cleared when the user saves memory from settings. */
+  memoryNotice?: string;
   /** Optional labeled divider used to organize this bot in the sidebar. */
   section?: string;
   /** the one message pinned to the top of this bot's active thread; a pin

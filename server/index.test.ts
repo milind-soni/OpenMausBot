@@ -7116,12 +7116,94 @@ describe("bot memory API", () => {
 
   const workspaceOf = (botId: string) => join(home, ".openmausbot", "workspaces", botId);
 
+  // The visibility eval from docs/memory-comparison.md: when memory is over
+  // budget the user hears once, in the thread, not once per turn — and the
+  // bot's prompt gets the selection with the thread id it can cite.
+  it("posts one over-budget notice per state, re-armed by a save, and hands the bot a labeled selection", async () => {
+    const bot = (await api("POST", "/api/bots", {})).body.bot;
+    try {
+      expect((await api("PATCH", `/api/bots/${bot.id}`, {
+        modelSelection: { instanceId: "claude", model: "claude-sonnet-5" },
+      })).status).toBe(200);
+      const episodes = Array.from({ length: 230 }, (_, i) => `- (2026-01-${String((i % 28) + 1).padStart(2, "0")}) episode ${i}`);
+      mkdirSync(workspaceOf(bot.id), { recursive: true });
+      writeFileSync(
+        join(workspaceOf(bot.id), "MEMORY.md"),
+        ["## Preferences", "- (2026-09-01) short answers", "## Episodes", ...episodes, ""].join("\n"),
+      );
+      const notices = async (threadId: string) => {
+        const state = (await api("GET", "/api/bots")).body;
+        const current = state.bots.find((candidate: { id: string }) => candidate.id === bot.id);
+        const messages: Array<{ kind: string; tool?: { name: string; ok?: boolean } }> =
+          threadId === bot.threadId ? current.messages : (await api("GET", `/api/threads/${threadId}/messages`)).body.messages ?? [];
+        return messages.filter((m) => m.kind === "activity" && m.tool?.name.startsWith("memory:"));
+      };
+      const turn = async (threadId: string, text: string) => {
+        rmSync(fakeClaudeDump, { force: true });
+        expect((await api("POST", `/api/bots/${bot.id}/messages`, { text, threadId })).status).toBe(202);
+        const dump = await readJsonFileWhenReady<{ systemPrompt?: string }>(fakeClaudeDump);
+        await api("POST", `/api/bots/${bot.id}/interrupt`, { threadId });
+        await expect.poll(async () => {
+          const state = (await api("GET", "/api/bots?messages=0")).body;
+          return state.bots.find((candidate: { id: string }) => candidate.id === bot.id)?.busy;
+        }, { timeout: 5_000 }).toBe(false);
+        return dump.systemPrompt ?? "";
+      };
+
+      const first = await turn(bot.threadId, "hello");
+      expect(first).toContain("Your memory, selected from MEMORY.md (");
+      expect(first).toContain("## Preferences (newest first)\n- (2026-09-01) short answers");
+      expect(first).toContain(`This conversation's thread id is ${bot.threadId}.`);
+      expect(first).not.toContain("Your memory (MEMORY.md):");
+      const posted = await notices(bot.threadId);
+      expect(posted).toHaveLength(1);
+      expect(posted[0]!.tool).toMatchObject({ ok: false });
+      expect(posted[0]!.tool!.name).toMatch(/^memory: over budget — \d+ lines did not load \(\d+ episodes\)\. Trim it in Settings → Memory\.$/);
+      // the notice is visible to a client with tool chips off: ok:false is the contract
+      expect((await api("GET", `/api/bots/${bot.id}/memory`)).body.capacity).toMatchObject({ truncated: true, lines: 234 });
+
+      // same state, second turn: nothing new
+      await turn(bot.threadId, "again");
+      expect(await notices(bot.threadId)).toHaveLength(1);
+
+      // the bot's other task is the same bot: still nothing new
+      const next = await api("POST", `/api/bots/${bot.id}/tasks`, { title: "Second" });
+      expect(next.status).toBe(201);
+      const otherThread = next.body.task.threadId as string;
+      await turn(otherThread, "and here");
+      expect(await notices(otherThread)).toHaveLength(0);
+
+      // the user saved memory: the next over-budget state is news again
+      const saved = await api("PUT", `/api/bots/${bot.id}/memory`, {
+        text: ["## Preferences", "- (2026-09-01) short answers", "## Episodes", ...episodes, "- (2026-02-01) one more", ""].join("\n"),
+      });
+      expect(saved.body.capacity.truncated).toBe(true);
+      await turn(otherThread, "after the save");
+      expect(await notices(otherThread)).toHaveLength(1);
+
+      // under budget: no notice, and the prompt says the file loaded whole
+      await api("PUT", `/api/bots/${bot.id}/memory`, { text: "## Preferences\n- (2026-09-01) short answers\n" });
+      const whole = await turn(otherThread, "trimmed");
+      expect(whole).toContain("Your memory (all of MEMORY.md, by section):");
+      expect(await notices(otherThread)).toHaveLength(1);
+    } finally {
+      await api("POST", `/api/bots/${bot.id}/interrupt`);
+      await api("DELETE", `/api/bots/${bot.id}`);
+    }
+  });
+
   it("reads empty memory for a fresh bot and 404s a bot that does not exist", async () => {
     const bot = (await api("POST", "/api/bots")).body.bot;
     try {
       const fresh = await api("GET", `/api/bots/${bot.id}/memory`);
       expect(fresh.status).toBe(200);
-      expect(fresh.body).toEqual({ text: "", truncated: false, topics: [] });
+      expect(fresh.body).toEqual({
+        text: "",
+        truncated: false,
+        topics: [],
+        loads: true,
+        capacity: { lines: 0, bytes: 0, loadedLines: 0, loadedBytes: 0, maxLines: 200, maxBytes: 24_000, truncated: false, dropped: {} },
+      });
       expect((await api("GET", "/api/bots/does-not-exist/memory")).status).toBe(404);
     } finally {
       await api("DELETE", `/api/bots/${bot.id}`);
@@ -7134,6 +7216,7 @@ describe("bot memory API", () => {
       const saved = await api("PUT", `/api/bots/${bot.id}/memory`, { text: "# Memory\n- prefers pnpm\n" });
       expect(saved.status).toBe(200);
       expect(saved.body.truncated).toBe(false);
+      expect(saved.body.capacity).toMatchObject({ lines: 3, loadedLines: 3, truncated: false });
       const read = await api("GET", `/api/bots/${bot.id}/memory`);
       expect(read.body.text).toBe("# Memory\n- prefers pnpm\n");
       // the write lands in the same file the bot's own tools read

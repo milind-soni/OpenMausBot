@@ -38,6 +38,7 @@ import {
 import { EngineSetup } from "./EngineSetup";
 import { BotAvatar, MausAvatar } from "./Avatar";
 import { TurnPresence } from "./TurnPresence";
+import { activityChipVisible } from "@/lib/activity-visibility";
 import { showToolCallsEnabled } from "@/lib/feature-flags";
 import { stateForBot } from "@/lib/mascot";
 import { showWorkingDots } from "@/lib/turn-tail";
@@ -766,7 +767,7 @@ const MessagesList = memo(function MessagesList({
                   />
                 );
               }
-              if (!showToolCalls && !m.comm) return null;
+              if (!activityChipVisible(m, showToolCalls)) return null;
               return <ActivityChip message={m} />;
             }
             case "screen":
