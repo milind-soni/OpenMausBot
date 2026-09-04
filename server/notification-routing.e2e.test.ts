@@ -23,6 +23,11 @@ import { openSse } from "./testing/sse.ts";
 // human, and a bot asking for hands — which now deep-links to the room it is
 // stuck in. The unit halves of these rules live in notify.test.ts and
 // comms-visibility.test.ts; this file pins the wiring around them.
+//
+// Every silence asserted below is only worth something beside the noise, so
+// the ordinary turn — the one a person asked for, which must still badge and
+// still buzz — is pinned first. A gate that suppressed everything would pass
+// the quiet cases perfectly.
 
 const SERVER_DIR = dirname(fileURLToPath(import.meta.url));
 const ROOT = join(SERVER_DIR, "..");
@@ -183,6 +188,34 @@ afterAll(async () => {
   if (home) await removeTempDir(home);
 });
 
+describe("an ordinary turn still announces itself", () => {
+  it("badges the bot and banners the person when a person asked", async () => {
+    const bot = await createBot("Herald", "quick");
+    const stream = await openSse(`${base}/api/events`);
+    try {
+      expect((await api("POST", `/api/bots/${bot.id}/messages`, { text: "how did it go?" })).status).toBe(202);
+
+      // the plain case the whole feature is carved out of: nobody delegated
+      // this, so the answer is news, and news gets a badge and a banner
+      const frame = await stream.until(
+        (candidate) =>
+          candidate.kind === "notify" &&
+          candidate.notification?.kind === "done" &&
+          candidate.notification?.botId === bot.id,
+        20_000,
+      );
+      expect(frame.notification).toMatchObject({ threadId: bot.threadId, title: "Herald finished" });
+      expect(frame.notification.body).toContain("hello from fake claude");
+      // no room in the picture, so nothing to group it under
+      expect(frame.notification.groupId).toBeUndefined();
+      await expect.poll(async () => (await botState(bot.id))?.unread, { timeout: 20_000 }).toBe(true);
+    } finally {
+      stream.close();
+      await cleanup([], [bot.id]);
+    }
+  }, 40_000);
+});
+
 describe("a room turn belongs to the room", () => {
   it("leaves the speaking bot's own thread unread-free while the room lights up", async () => {
     const bot = await createBot("Roomie", "quick");
@@ -323,6 +356,92 @@ describe("bot-to-bot coordination is recorded, not announced", () => {
         (candidate) => candidate.kind === "bot" && candidate.bot?.id === asker.id && candidate.bot?.name === "Pen observed",
       );
       expect(stream.frames.filter((candidate) => candidate.kind === "notify")).toEqual([]);
+    } finally {
+      stream.close();
+      await cleanup([channelId], [asker.id, peer.id]);
+    }
+  }, 45_000);
+
+  // A hop runs on the PEER'S OWN 1:1 thread (askBotAndWait dispatches to
+  // target.threadId) — the very thread the person types into. So the
+  // classification must not outlive the turn that earned it: leak it once,
+  // in either of the two ways a hop can end, and that bot's DM is mute from
+  // then on, with nothing anywhere to say why.
+  const pairChannelId = async (a: string, b: string) =>
+    (await state(0)).groups.find(
+      (group: { dm?: boolean; memberIds: string[] }) =>
+        group.dm === true && group.memberIds.includes(a) && group.memberIds.includes(b),
+    )?.id;
+
+  it("still announces the person's own next message after a hop that finished", async () => {
+    const asker = await createBot("Nib", "quick");
+    const peer = await createBot("Vellum", "quick");
+    let channelId: string | undefined;
+    const stream = await openSse(`${base}/api/events`);
+    try {
+      const asked = await api(
+        "POST",
+        "/api/internal/ask-bot",
+        { fromBotId: asker.id, toBotId: peer.id, message: "Vellum, is the branch green?" },
+        { authorization: `Bearer ${commsToken}` },
+      );
+      expect(asked.status).toBe(200);
+      expect((await botState(peer.id))?.unread).toBeFalsy();
+
+      // same bot, same thread, but a person is asking this time
+      expect((await api("POST", `/api/bots/${peer.id}/messages`, { text: "and for me?" })).status).toBe(202);
+      const frame = await stream.until(
+        (candidate) =>
+          candidate.kind === "notify" &&
+          candidate.notification?.kind === "done" &&
+          candidate.notification?.botId === peer.id,
+        20_000,
+      );
+      expect(frame.notification.threadId).toBe(peer.threadId);
+      await expect.poll(async () => (await botState(peer.id))?.unread, { timeout: 20_000 }).toBe(true);
+      channelId = await pairChannelId(asker.id, peer.id);
+    } finally {
+      stream.close();
+      await cleanup([channelId], [asker.id, peer.id]);
+    }
+  }, 45_000);
+
+  it("still announces the person's own next message after a hop that never started", async () => {
+    const asker = await createBot("Quire", "quick");
+    const peer = await createBot("Folio", "quick");
+    let channelId: string | undefined;
+    const stream = await openSse(`${base}/api/events`);
+    try {
+      // Park the peer on an engine that is not there. startTurn classifies the
+      // turn and THEN refuses to run it, so this hop marks the thread and dies
+      // without ever reaching the completion fold — the one release the fold
+      // cannot perform for it.
+      expect((await api("PATCH", `/api/bots/${peer.id}`, {
+        modelSelection: { instanceId: "ghost", model: "ghost-1" },
+      })).status).toBe(200);
+      const asked = await api(
+        "POST",
+        "/api/internal/ask-bot",
+        { fromBotId: asker.id, toBotId: peer.id, message: "Folio, still there?" },
+        { authorization: `Bearer ${commsToken}` },
+      );
+      expect(asked.status).toBe(200);
+      expect(asked.body.text).toContain("couldn't start");
+
+      expect((await api("PATCH", `/api/bots/${peer.id}`, {
+        modelSelection: { instanceId: "quick", model: "claude-sonnet-5" },
+      })).status).toBe(200);
+      expect((await api("POST", `/api/bots/${peer.id}/messages`, { text: "back? tell me when" })).status).toBe(202);
+      const frame = await stream.until(
+        (candidate) =>
+          candidate.kind === "notify" &&
+          candidate.notification?.kind === "done" &&
+          candidate.notification?.botId === peer.id,
+        20_000,
+      );
+      expect(frame.notification.threadId).toBe(peer.threadId);
+      await expect.poll(async () => (await botState(peer.id))?.unread, { timeout: 20_000 }).toBe(true);
+      channelId = await pairChannelId(asker.id, peer.id);
     } finally {
       stream.close();
       await cleanup([channelId], [asker.id, peer.id]);

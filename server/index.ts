@@ -2356,8 +2356,10 @@ bus.subscribe((event: RuntimeEvent) => {
       turnUsage.set(event.threadId, { input: event.input, output: event.output, cachedInput: event.cachedInput });
       break;
     case "turn.completed": {
-      // Read the classification before releasing it for whatever runs on this
-      // thread next: a peer-started turn settles as coordination, not as news.
+      // A peer-started turn settles as coordination, not as news. What keeps
+      // that classification from outliving its turn is the rewrite at
+      // dispatch, not this line — releasing it here too is hygiene, so a
+      // thread nobody types in again (a deleted bot's) is not held forever.
       const internal = isInternalTurn(event.threadId);
       clearInternalTurn(event.threadId);
       const generatedKey = generatedImageTurnKey(event.threadId, event.turnId);
