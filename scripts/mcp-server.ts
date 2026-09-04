@@ -403,6 +403,24 @@ export const TOOLS: McpToolDefinition[] = [
     annotations: MUTATING,
   },
   {
+    name: "edit_bot_message",
+    description:
+      "Edit an earlier user message, which forks the conversation from that point and answers again. "
+      + "This is the rewind a person performs in the composer, and the only mapped way to make the "
+      + "harness rebuild a thread's context instead of resuming the provider's own session.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        bot_id: { type: "string", description: "The ID of the bot." },
+        message_id: { type: "string", description: "The user message to replace." },
+        text: { type: "string", description: "What that message should say instead." },
+      },
+      required: ["bot_id", "message_id", "text"],
+      additionalProperties: false,
+    },
+    annotations: MUTATING,
+  },
+  {
     name: "list_available_models",
     description: "List configured model instances and capabilities without exposing local executable paths.",
     inputSchema: {
@@ -1107,6 +1125,24 @@ export async function handleToolCall(
         body: JSON.stringify({ modelSelection: selection, requireAvailableModel: true }),
       });
       return { success: true, bot: projectBot(res.bot) };
+    }
+
+    case "edit_bot_message": {
+      const botId = idArg(args, "bot_id");
+      const messageId = idArg(args, "message_id");
+      const text = String(args.text ?? "").trim();
+      if (!text) throw new Error("text is required");
+      const current = await fleet(fetcher);
+      const bot = records(current.bots).find((candidate) => candidate.id === botId);
+      if (!bot) throw new Error(`Bot not found: ${botId}`);
+      // the server refuses a rewind under a live turn — branching beneath a
+      // dying turn is how a thread ends up with two tails
+      if (bot.busy) throw new Error("Interrupt the bot or let it finish before editing a message");
+      const res = await fetcher(
+        `/api/bots/${encodeURIComponent(botId)}/messages/${encodeURIComponent(messageId)}/edit`,
+        { method: "POST", body: JSON.stringify({ text }) },
+      );
+      return { success: true, threadId: res.threadId, message: res.message };
     }
 
     case "list_available_models": {
