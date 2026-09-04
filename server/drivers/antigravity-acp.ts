@@ -366,6 +366,13 @@ export async function probeAntigravityModels(input: {
   }
 }
 
+/**
+ * Validates whether an ACP initialization response matches an official Google Antigravity release.
+ *
+ * @param initialized - The raw initialization response payload returned by the ACP client.
+ * @param expectedVersion - The expected release version tag or semver string.
+ * @returns `true` if the initialize result satisfies protocol, agent identity, capability, and auth requirements.
+ */
 export function isValidAntigravityInitializeResult(
   initialized: any,
   expectedVersion: string,
@@ -390,6 +397,14 @@ export function isValidAntigravityInitializeResult(
   return true;
 }
 
+/**
+ * Starts a transient Antigravity ACP client against a temporary profile to verify
+ * that the downloaded runtime binary starts properly and identifies as the expected release.
+ *
+ * @param runtime - The resolved Antigravity executable and harness paths.
+ * @param expectedVersion - The expected version string or tag.
+ * @returns A promise that resolves when verification succeeds, or rejects if initialization fails.
+ */
 export async function validateAntigravityRuntime(runtime: AntigravityRuntime, expectedVersion: string): Promise<void> {
   const profileDirectory = await mkdtemp(join(tmpdir(), "openmaus-antigravity-verify-"));
   try {

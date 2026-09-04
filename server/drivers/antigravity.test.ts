@@ -107,7 +107,13 @@ describe("official Antigravity runtime", () => {
     expect(asset.archiveBytes).toBeGreaterThan(100_000_000);
   });
 
-  it("validates ACP initialize results from official Antigravity releases", () => {
+  /**
+   * Verifies that isValidAntigravityInitializeResult correctly validates initialization
+   * responses from official Google Antigravity releases and rejects invalid responses.
+   *
+   * @returns {void}
+   */
+  function testValidatesAcpInitializeResults() {
     const basePayload = {
       protocolVersion: 1,
       agentInfo: { name: "antigravity-acp", version: "1.1.1" },
@@ -165,7 +171,9 @@ describe("official Antigravity runtime", () => {
     // Handles null / undefined gracefully
     expect(isValidAntigravityInitializeResult(null, "1.1.1")).toBe(false);
     expect(isValidAntigravityInitializeResult(undefined, "1.1.1")).toBe(false);
-  });
+  }
+
+  it("validates ACP initialize results from official Antigravity releases", testValidatesAcpInitializeResults);
 
   it("requires the official executable and harness as a pair", async () => {
     const fake = fakeRuntime();
