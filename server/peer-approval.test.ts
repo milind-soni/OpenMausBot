@@ -155,6 +155,48 @@ describe("peer approval card lifecycle", () => {
     ).toBe(true);
   });
 
+  it("dismisses a stale card left in a room's thread, not just a bot's", () => {
+    // post_to_room and ask_bot both run from a room turn, and the card goes
+    // into the thread the caller is speaking from — the room's. Quitting the
+    // app with one open used to leave that room's composer blocked forever.
+    const room = store.createGroup("Standup", [from.id, target.id]);
+    const orphan = store.appendMessage(room.threadId, {
+      role: "bot",
+      kind: "options",
+      card: {
+        title: "@Asker wants to post in “Standup”",
+        subtitle: "deploy is green",
+        options: ["Allow", "Deny"],
+        requestId: "room-card-from-a-dead-process",
+        tool: "post_to_room",
+      },
+    });
+
+    expect(dismissStalePeerCards(bus)).toBe(1);
+    const settled = store.messagesFor(room.threadId).find((message) => message.id === orphan.id);
+    expect(settled?.card?.dismissed, "a room's composer stayed blocked after a restart").toBe(true);
+    expect(settled?.card?.answered).toBe("deny");
+    expect(dismissStalePeerCards(bus)).toBe(0);
+  });
+
+  it("dismisses a stale card left in a room's background task thread", () => {
+    const room = store.createGroup("Release", [from.id, target.id]);
+    const task = store.createGroupTask(room.id, "Cut 1.2", false)!;
+    store.appendMessage(task.threadId, {
+      role: "bot",
+      kind: "options",
+      card: {
+        title: "@Asker wants to contact @Helper",
+        subtitle: "ping",
+        options: ["Allow", "Deny"],
+        requestId: "room-task-card-from-a-dead-process",
+        tool: "ask_bot",
+      },
+    });
+
+    expect(dismissStalePeerCards(bus)).toBe(1);
+  });
+
   it("leaves a live card alone at boot", async () => {
     void requestPeerApproval(bus, from, target, "ping", "ask_bot");
     expect(pendingCard(store, from)).toBeTruthy();
