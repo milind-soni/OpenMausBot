@@ -6,6 +6,8 @@ import {
   appendPastedText,
   attachmentBasename,
   attachmentImageUrl,
+  clipboardHasImages,
+  clipboardImageFiles,
   composeMessage,
   documentMime,
   fileAttachment,
@@ -354,6 +356,70 @@ describe("isImageFile", () => {
     expect(isImageFile({ type: "image/webp", size: 10 })).toBe(true);
     expect(isImageFile({ type: "image/svg+xml", size: 10 })).toBe(false);
     expect(isImageFile({ type: "text/plain", size: 10 })).toBe(false);
+  });
+});
+
+describe("clipboardImageFiles", () => {
+  it("returns empty array for empty or null clipboard", () => {
+    expect(clipboardImageFiles(null)).toEqual([]);
+    expect(clipboardImageFiles(undefined)).toEqual([]);
+    expect(clipboardImageFiles({ files: [], items: [] })).toEqual([]);
+  });
+
+  it("extracts images from items when available", () => {
+    const pngFile = new File([new Uint8Array([1])], "test.png", { type: "image/png" });
+    const clipboardData = {
+      items: [
+        { kind: "string", type: "text/plain", getAsFile: () => null },
+        { kind: "file", type: "image/png", getAsFile: () => pngFile },
+      ],
+      files: [],
+    };
+    expect(clipboardImageFiles(clipboardData)).toEqual([pngFile]);
+  });
+
+  it("falls back to files when items has no image files", () => {
+    const jpegFile = new File([new Uint8Array([2])], "test.jpg", { type: "image/jpeg" });
+    const clipboardData = {
+      items: [
+        { kind: "string", type: "text/plain", getAsFile: () => null },
+      ],
+      files: [jpegFile],
+    };
+    expect(clipboardImageFiles(clipboardData)).toEqual([jpegFile]);
+  });
+
+  it("ignores non-image files in fallback", () => {
+    const txtFile = new File([new Uint8Array([3])], "test.txt", { type: "text/plain" });
+    const clipboardData = {
+      items: [],
+      files: [txtFile],
+    };
+    expect(clipboardImageFiles(clipboardData)).toEqual([]);
+  });
+});
+
+describe("clipboardHasImages", () => {
+  it("detects images in items", () => {
+    expect(clipboardHasImages({
+      items: [{ kind: "file", type: "image/png" }],
+      files: [],
+    })).toBe(true);
+  });
+
+  it("detects images in files", () => {
+    expect(clipboardHasImages({
+      items: [],
+      files: [{ type: "image/jpeg", size: 10 }],
+    })).toBe(true);
+  });
+
+  it("returns false when no images exist", () => {
+    expect(clipboardHasImages(null)).toBe(false);
+    expect(clipboardHasImages({
+      items: [{ kind: "string", type: "text/plain" }],
+      files: [{ type: "text/plain", size: 10 }],
+    })).toBe(false);
   });
 });
 

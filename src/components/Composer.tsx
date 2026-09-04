@@ -26,6 +26,8 @@ import { LocalComputerAutoWarning } from "./LocalComputerAutoWarning";
 import {
   appendPastedText,
   handoffAttachmentImagePreview,
+  clipboardHasImages,
+  clipboardImageFiles,
   composeMessage,
   imageAttachmentFromFile,
   intakeFiles,
@@ -875,26 +877,36 @@ export function Composer({
             // an image from the clipboard becomes an uploaded attachment —
             // but only for engines that can open one; a grok bot politely
             // refuses instead of receiving a path it cannot read
-            const imageFiles = Array.from(e.clipboardData.files).filter(isImageFile);
-            if (imageFiles.length && engineSupportsImages) {
-              e.preventDefault();
-              changeDraftAttachmentPending(draftId, true);
-              void (async () => {
-                try {
-                  const results = await Promise.allSettled(imageFiles.map(uploadImage));
-                  for (const result of results) {
-                    if (result.status === "rejected") {
-                      dispatch({
-                        type: "error",
-                        message: result.reason instanceof Error ? result.reason.message : "image upload failed",
-                      });
+            const imageFiles = clipboardImageFiles(e.clipboardData);
+            if (imageFiles.length > 0 || clipboardHasImages(e.clipboardData)) {
+              if (!engineSupportsImages) {
+                e.preventDefault();
+                dispatch({
+                  type: "error",
+                  message: "The selected responder does not support image attachments.",
+                });
+                return;
+              }
+              if (imageFiles.length > 0) {
+                e.preventDefault();
+                changeDraftAttachmentPending(draftId, true);
+                void (async () => {
+                  try {
+                    const results = await Promise.allSettled(imageFiles.map(uploadImage));
+                    for (const result of results) {
+                      if (result.status === "rejected") {
+                        dispatch({
+                          type: "error",
+                          message: result.reason instanceof Error ? result.reason.message : "image upload failed",
+                        });
+                      }
                     }
+                  } finally {
+                    changeDraftAttachmentPending(draftId, false);
                   }
-                } finally {
-                  changeDraftAttachmentPending(draftId, false);
-                }
-              })();
-              return;
+                })();
+                return;
+              }
             }
             // a wall of text becomes a chip instead of burying the input
             const pasted = e.clipboardData.getData("text/plain");
