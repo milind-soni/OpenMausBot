@@ -6693,17 +6693,26 @@ const server = createServer(async (req, res) => {
         }
         const eligibility = roomPostEligibility(from, room);
         if (!eligibility.ok) return json(res, eligibility.status, { error: eligibility.error });
-        // The budget is consulted BEFORE any approval card. A bot in a loop
-        // must not be able to convert that loop into a queue of cards for a
-        // person to work through — the refusal has to land on the bot.
-        const decision = decideRoomPost(roomPostBudgets.get(room.id) ?? emptyRoomPostBudget(), {
-          botId: from.id,
-          botName: from.name,
-          text: message,
-          now: Date.now(),
-        });
-        roomPostBudgets.set(room.id, decision.budget);
-        if (!decision.allowed) return json(res, 429, { error: decision.message });
+        // The budget is read BEFORE any approval card and CHARGED only on
+        // the path that actually appends. Reading it early is what stops a
+        // bot in a loop turning that loop into a queue of cards for a person
+        // to work through: the refusal lands on the bot, not in the inbox.
+        // Charging it early would have been a lie in the other direction —
+        // a denied card, a room deleted while the card was open, or a
+        // roster change that ends the post all leave the room with nothing
+        // in it, and a room that took no post must not be told it did. The
+        // model would then be refused its retry with "you already posted
+        // that", which is the one thing worse than a refusal: a false
+        // receipt for a message nobody can read.
+        const askBudget = (bot: BotRecord, group: GroupRecord) =>
+          decideRoomPost(roomPostBudgets.get(group.id) ?? emptyRoomPostBudget(), {
+            botId: bot.id,
+            botName: bot.name,
+            text: message,
+            now: Date.now(),
+          });
+        const preflight = askBudget(from, room);
+        if (!preflight.allowed) return json(res, 429, { error: preflight.message });
         let poster = from;
         if (from.approvePeerComms) {
           // Same gate ask_bot carries, aimed at the room instead of a peer:
@@ -6729,6 +6738,13 @@ const server = createServer(async (req, res) => {
           poster = freshFrom;
           room = freshRoom;
         }
+        // The room's budget is charged here, against the records the append
+        // below will actually use. Between the preflight and this line the
+        // room may have taken another bot's post, so this decision — not the
+        // preflight — is the one that can refuse.
+        const decision = askBudget(poster, room);
+        if (!decision.allowed) return json(res, 429, { error: decision.message });
+        roomPostBudgets.set(room.id, decision.budget);
         // Unattended inheritance: the mark rides the sender, and reading it
         // here is also what keeps its window alive through a turn that only
         // posts — an aged-out mark would hand the next hop to auto-approve.
