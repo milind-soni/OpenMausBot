@@ -24,6 +24,34 @@ describe("team import preview", () => {
     });
   });
 
+  it("preserves safe mascot bodies for static import preview", () => {
+    const preview = teamImportPreview({
+      format: "openmaus.team",
+      version: 2,
+      team: {
+        name: "Appearance team",
+        members: [{
+          name: "Ada",
+          appearance: {
+            color: "cyan",
+            mascotExpression: "happy",
+            mascotBody: "cursor",
+          },
+        }, {
+          name: "Fallback",
+          appearance: { color: "not-a-color", mascotBody: "not-a-body" },
+        }],
+      },
+    });
+
+    expect(preview.members[0]?.appearance).toEqual({
+      color: "cyan",
+      mascotExpression: "happy",
+      mascotBody: "cursor",
+    });
+    expect(preview.members[1]?.appearance).toBeUndefined();
+  });
+
   it("rejects unsupported and empty files", () => {
     expect(() => teamImportPreview({ format: "openmaus.team", version: 3, team: {} })).toThrow("not supported");
     expect(() =>
@@ -67,6 +95,33 @@ describe("team import preview", () => {
         { label: "Google Sheets", optional: true },
       ],
     });
+  });
+
+  it("marks manual-only routines as paused without inventing a schedule", () => {
+    const preview = teamImportPreview({
+      format: "openmaus.package",
+      version: 1,
+      package: {
+        name: "Manual team",
+        agents: [{ key: "reviewer", name: "Reviewer" }],
+        routines: [{
+          name: "Imported review",
+          agent: "reviewer",
+          prompt: "Review when asked.",
+          runOn: "maus",
+          schedule: { type: "manual" },
+          durationMinutes: 30,
+          enabledAfterInstall: false,
+        }],
+      },
+    });
+
+    expect(preview.routineEntries).toMatchObject([{
+      name: "Imported review",
+      owner: "Reviewer",
+      schedule: "Manual only",
+      status: "Paused after import",
+    }]);
   });
 
   it("previews a portable Markdown playbook", () => {

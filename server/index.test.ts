@@ -2971,6 +2971,35 @@ describe("harness HTTP API", () => {
     }
   });
 
+  it("exports only the requested visible bot scope", async () => {
+    const first = (await api("POST", "/api/bots", { name: "Scoped Mira" })).body.bot;
+    const second = (await api("POST", "/api/bots", { name: "Scoped Scout" })).body.bot;
+    const hidden = (await api("POST", "/api/bots", { name: "Scoped Hidden" })).body.bot;
+    await api("PATCH", `/api/bots/${hidden.id}`, { hidden: true });
+    try {
+      const scope = { botIds: [first.id], groupIds: [] };
+      const team = await api("POST", "/api/teams/export", { name: "Scoped Team", scope });
+      expect(team.status).toBe(200);
+      expect(team.body.team.members.map((member: { name: string }) => member.name)).toEqual(["Scoped Mira"]);
+
+      const packageExport = await api("POST", "/api/teams/export", { name: "Scoped Team", format: "package", scope });
+      expect(packageExport.status).toBe(200);
+      expect(packageExport.body.members).toBe(1);
+      expect(packageExport.body.markdown).toContain("Scoped Mira");
+      expect(packageExport.body.markdown).not.toMatch(/Scoped Scout|Scoped Hidden/);
+
+      const hiddenScope = await api("POST", "/api/teams/export", {
+        scope: { botIds: [hidden.id], groupIds: [] },
+      });
+      expect(hiddenScope.status).toBe(400);
+      expect(hiddenScope.body.error).toContain("hidden bot");
+    } finally {
+      await api("DELETE", `/api/bots/${first.id}`);
+      await api("DELETE", `/api/bots/${second.id}`);
+      await api("DELETE", `/api/bots/${hidden.id}`);
+    }
+  });
+
   it("imports a team as a project: one room, on a folder", async () => {
     // The manifest still describes only people. Room name and folder come
     // from the CALLER, so a manifest fetched from the library cannot create
