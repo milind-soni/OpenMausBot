@@ -318,6 +318,34 @@ describe("MCP tool execution", () => {
     expect(result.hits).toHaveLength(1);
   });
 
+  it("rewinds a thread by editing an earlier message, and refuses while busy", async () => {
+    // The composer rewind. It forks the conversation and answers again,
+    // which is the only mapped way to make the harness REBUILD context
+    // rather than resume the provider's own session.
+    const busyFetcher = vi.fn(async () => ({ bots: [{ id: "bot-1", busy: true }] }));
+    await expect(handleToolCall("edit_bot_message", {
+      bot_id: "bot-1", message_id: "m-9", text: "say that again",
+    }, busyFetcher)).rejects.toThrow("let it finish");
+
+    const fetcher = vi.fn(async (path: string) => {
+      if (path === "/api/bots?messages=0") return { bots: [{ id: "bot-1", busy: false }] };
+      return { threadId: "t-1", message: { id: "m-new" } };
+    });
+    const result: any = await handleToolCall("edit_bot_message", {
+      bot_id: "bot-1", message_id: "m-9", text: "say that again",
+    }, fetcher);
+    expect(fetcher).toHaveBeenCalledWith("/api/bots/bot-1/messages/m-9/edit", expect.objectContaining({ method: "POST" }));
+    expect(result).toMatchObject({ success: true, threadId: "t-1" });
+  });
+
+  it("will not rewind to an empty message", async () => {
+    const fetcher = vi.fn();
+    await expect(handleToolCall("edit_bot_message", {
+      bot_id: "bot-1", message_id: "m-9", text: "   ",
+    }, fetcher as never)).rejects.toThrow("text is required");
+    expect(fetcher).not.toHaveBeenCalled();
+  });
+
   it("requires an exact available model and refuses changes while busy", async () => {
     const busyFetcher = vi.fn(async () => ({ bots: [{ id: "bot-1", busy: true }] }));
     await expect(handleToolCall("set_bot_model", {

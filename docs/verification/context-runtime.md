@@ -47,31 +47,49 @@ that impossible. On a 200k window nothing clips:
 family floor for `claude-*`, not a figure the driver declared. Only
 `"catalog"` means the engine actually said so.
 
-## What this harness cannot prove
+## Driving compaction
 
-**Compaction does not fire here, and that is not a failure.** Two independent
-reasons, both worth knowing before you spend an afternoon on it:
+Compaction needs two things the default fixture does not give you: a window
+small enough to overflow on a short thread, and a turn that REBUILDS rather
+than resumes. A cleanly resumed turn never compacts — the vendor CLI owns its
+own context, and that is by design.
 
-- `control-omb launch` builds its child env from scratch — an allowlist of
-  platform keys plus fixed fixture values (see `childEnv` in
-  `scripts/control-omb.ts`). Arbitrary parent env is dropped on purpose, so
-  `OMB_CONTEXT_WINDOW=…` never reaches the server and every model keeps its
-  real window.
-- Compaction only runs on a turn that will REPLAY — a rewind, an engine
-  switch, an external update, or an `omb-replay` engine. The fixture's fake
-  engine resumes cleanly, so `willReplay` is false and no rebuild is
-  attempted. A resumed turn paying nothing is the intended design, not a bug.
+```sh
+OMB_CONTEXT_WINDOW=12000 node --experimental-strip-types scripts/control-omb.ts launch
+```
 
-Driving 30 long turns against the fixture therefore produces zero compaction
-records, correctly. The real coverage is `server/context/rebuild.test.ts`,
-which exercises it against a live `Store`: the fold, the display path staying
-whole, the summarizer prompt, previous-summary carry-forward, and the three
-failure modes (no summarizer, a throwing one, a blank summary — all write
-nothing and none fail the turn).
+`launch` builds its child env from scratch so the fixture cannot inherit your
+shell; `OMB_CONTEXT_WINDOW` and `FAKE_CLAUDE_MODE` are the two overrides it
+forwards when explicitly set, because without them whole features cannot be
+exercised here.
 
-Closing this properly needs two changes to the control surface: forwarding
-`OMB_CONTEXT_WINDOW` to the child, and a mapped command that can force a
-replay path. Neither exists yet; do not add a map entry claiming otherwise.
+Then fill the thread past the budget and rewind:
+
+```sh
+omb() { node --experimental-strip-types scripts/control-omb.ts "$@"; }
+LONG=$(python3 -c "print('please remember this carefully: ' + 'context ' * 150)")
+for i in $(seq 1 30); do
+  omb send --bot "$BOT" --text "turn $i: $LONG" --url $URL
+  omb wait --bot "$BOT" --timeout 30 --url $URL
+done
+# edit the LATEST user turn — editing an early one forks away the history you
+# just built, and the shorter branch fits again
+omb edit --bot "$BOT" --message "$LAST_USER_MESSAGE_ID" --text "summarise everything" --url $URL
+omb wait --bot "$BOT" --timeout 30 --url $URL
+```
+
+`edit` is the rewind a person performs in the composer, and the only mapped
+way to make the harness rebuild instead of resume.
+
+Expected — the last `context.prepared` reports `"mode":"replay-required"` and
+`"compacted":true`, and one record lands in the database:
+
+```sh
+sqlite3 "$DATA_DIR/messages.db" "SELECT json FROM messages WHERE kind='compaction'"
+```
+
+Observed on 2026-09-04: `tokensBefore 5358` against a 4,800-token budget on a
+12k window, one record, the display path still holding every message.
 
 ## Gotchas
 
@@ -82,3 +100,7 @@ replay path. Neither exists yet; do not add a map entry claiming otherwise.
   bug reports.
 - Item counts are semantic units, not messages: one chat turn usually
   produces a user turn, an assistant turn, and a tool observation.
+- A resumed turn never compacts. If `mode` says `resume-preferred`, no rebuild
+  was attempted and `compacted:false` proves nothing about compaction.
+- Rewind at the newest user turn. An edit forks the branch at that message, so
+  editing an early one discards the history you were trying to overflow.

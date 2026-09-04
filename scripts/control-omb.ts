@@ -14,7 +14,7 @@ import { freePortBlock } from "../server/testing/ports.ts";
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
 const FAKE_CLI = join(ROOT, "server", "testing", "fake-claude-cli.ts");
-const MUTATING = new Set(["new-bot", "new-channel", "send", "send-channel", "interrupt"]);
+const MUTATING = new Set(["new-bot", "new-channel", "send", "send-channel", "interrupt", "edit"]);
 
 export class ControlOmbError extends Error {
   readonly hint?: string;
@@ -53,6 +53,7 @@ mutating (an explicit --url or OPENMAUSBOT_URL/OMB_PORT is required):
   send-channel --channel ID --text TEXT [--dry-run] [--url URL]
   interrupt --bot ID [--dry-run] [--url URL]
   interrupt --channel ID [--dry-run] [--url URL]
+  edit --bot ID --message ID --text TEXT [--url URL]
 
 isolated fixture:
   node --experimental-strip-types scripts/control-omb.ts launch
@@ -186,6 +187,22 @@ export async function runControlOmb(
     }, values.url);
   }
 
+  if (command === "edit") {
+    // The rewind a person performs in the composer. It is the only mapped
+    // way to make the harness REBUILD a thread rather than resume the
+    // provider's session — which is what compaction needs to be observable.
+    const opts = parse(command, args, {
+      bot: { type: "string" },
+      message: { type: "string" },
+      text: { type: "string" },
+    });
+    return call("edit_bot_message", {
+      bot_id: required(opts.bot, "--bot"),
+      message_id: required(opts.message, "--message"),
+      text: required(opts.text, "--text"),
+    }, opts.url);
+  }
+
   if (command === "new-channel") {
     const values = parse(command, args, {
       name: { type: "string" },
@@ -307,6 +324,15 @@ export async function launchVerificationServer(
     FAKE_CLAUDE_DUMP: fixtureDumpPath,
     PATH: "",
   });
+  // The child env is built from scratch so the fixture cannot inherit the
+  // user's shell. Two overrides are forwarded when explicitly set, because
+  // without them whole features are unverifiable here: OMB_CONTEXT_WINDOW
+  // shrinks every model's window so compaction can be watched on a short
+  // thread, and FAKE_CLAUDE_MODE drives the CLI failure paths.
+  for (const key of ["OMB_CONTEXT_WINDOW", "FAKE_CLAUDE_MODE"]) {
+    const value = parentEnv[key];
+    if (value) childEnv[key] = value;
+  }
   const child = spawn(process.execPath, ["--experimental-strip-types", join(ROOT, "server", "index.ts")], {
     cwd: ROOT,
     env: childEnv,
