@@ -353,6 +353,42 @@ describe("post_to_room", () => {
     expect(source.some((message) => message.tool?.name === "Posted in Standup")).toBe(true);
   }, 40_000);
 
+  it("refuses a source conversation the sender has no claim on", async () => {
+    // The source thread is where the activity chip lands, and where the
+    // approval card would be raised for a gated bot — naming someone else's
+    // conversation writes into a thread the sender has no business in.
+    const sender = await makeBot("Thread Borrower", "Borrowing");
+    const bystander = await makeBot("Thread Lender", "Borrowing");
+    const stranger = await makeBot("Thread Stranger", "Borrowing");
+    const room = await makeRoom("Borrower's room", [sender.id, bystander.id], "Borrowing");
+    const elsewhere = await makeRoom("Rooms apart", [bystander.id, stranger.id], "Borrowing");
+
+    const borrowed = await internal("POST", "/api/internal/post-to-room", {
+      fromBotId: sender.id,
+      fromThreadId: bystander.threadId,
+      groupId: room.id,
+      message: "posted from a thread I do not own",
+    });
+    expect(borrowed.status).toBe(403);
+    expect(str(borrowed.body.error)).toContain("does not belong to sender");
+    expect(await messagesOf(room.threadId)).toHaveLength(0);
+    expect(
+      (await messagesOf(bystander.threadId)).some((message) => message.tool?.name?.startsWith("Posted in")),
+      "a chip was written into a conversation the sender has no claim on",
+    ).toBe(false);
+
+    // and a room is only a source conversation for its own members
+    const fromAnotherRoom = await internal("POST", "/api/internal/post-to-room", {
+      fromBotId: sender.id,
+      fromThreadId: elsewhere.threadId,
+      groupId: room.id,
+      message: "posted from a room I am not in",
+    });
+    expect(fromAnotherRoom.status).toBe(403);
+    expect(await messagesOf(room.threadId)).toHaveLength(0);
+    expect(await messagesOf(elsewhere.threadId)).toHaveLength(0);
+  }, 40_000);
+
   it("refuses a room the sender is not a member of, whatever id it sends", async () => {
     const outsider = await makeBot("Post Outsider", "Posting");
     const insider = await makeBot("Post Insider", "Posting");
