@@ -8,6 +8,8 @@ export const TEAM_MANIFEST_FORMAT = "openmaus.team" as const;
 export const TEAM_MANIFEST_VERSION = 2 as const;
 export const LEGACY_TEAM_MANIFEST_VERSION = 1 as const;
 export const MAX_TEAM_MEMBERS = 200;
+/** Keep imported member instructions bounded independently from package size. */
+export const BOT_INSTRUCTIONS_MAX_CHARS = 24_000;
 
 const COLORS = [
   "green",
@@ -44,7 +46,7 @@ const memberSchema = z.object({
   }),
   name: requiredText(100),
   title: optionalText(200),
-  description: optionalText(4_000),
+  description: optionalText(BOT_INSTRUCTIONS_MAX_CHARS),
   appearance: z.object({
     color: z.enum(COLORS, { error: "is not supported" }),
     mascotExpression: optionalText(80),

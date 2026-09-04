@@ -2971,6 +2971,31 @@ describe("harness HTTP API", () => {
     }
   });
 
+  it("exports only the explicitly scoped visible bots", async () => {
+    const first = (await api("POST", "/api/bots", { name: "Scoped Lead" })).body.bot;
+    const second = (await api("POST", "/api/bots", { name: "Scoped Helper" })).body.bot;
+    try {
+      const exported = await api("POST", "/api/teams/export", {
+        format: "package",
+        name: "Scoped Package",
+        scope: { botIds: [first.id], groupIds: [] },
+      });
+      expect(exported.status).toBe(200);
+      expect(exported.body.members).toBe(1);
+      expect(exported.body.markdown).toContain("Scoped Lead");
+      expect(exported.body.markdown).not.toContain("Scoped Helper");
+      const invalid = await api("POST", "/api/teams/export", {
+        format: "package",
+        scope: { botIds: [first.id, first.id], groupIds: [] },
+      });
+      expect(invalid.status).toBe(400);
+      expect(invalid.body.error).toContain("must not contain duplicates");
+    } finally {
+      await api("DELETE", `/api/bots/${first.id}`);
+      await api("DELETE", `/api/bots/${second.id}`);
+    }
+  });
+
   it("imports a team as a project: one room, on a folder", async () => {
     // The manifest still describes only people. Room name and folder come
     // from the CALLER, so a manifest fetched from the library cannot create
@@ -3045,6 +3070,7 @@ describe("harness HTTP API", () => {
             description: "Find evidence.",
             appearance: { color: "cyan" },
             playbooks: ["signal-check"],
+            skills: ["source-check"],
             autoApprove: true,
           },
           {
@@ -3080,6 +3106,15 @@ describe("harness HTTP API", () => {
           triggers: ["signal brief"],
           instructions: "Keep the source URL and confidence.",
         }],
+        skills: {
+          version: 1,
+          entries: [{
+            name: "source-check",
+            description: "Check sources before writing.",
+            source: "package:signal-desk",
+            instructions: "---\nname: source-check\ndescription: Check sources before writing.\n---\n\n# Source check\n",
+          }],
+        },
       },
     };
 
@@ -3102,6 +3137,23 @@ describe("harness HTTP API", () => {
       },
     });
     expect(scout).not.toHaveProperty("autoApprove");
+    const importedSkills = await api("GET", `/api/bots/${scout.id}/skills`);
+    expect(importedSkills.body.skills).toMatchObject([{
+      name: "source-check",
+      enabled: false,
+      source: "package:signal-desk",
+    }]);
+    expect(await api("GET", `/api/bots/${scout.id}/skills/source-check`)).toMatchObject({
+      status: 200,
+      body: { text: expect.stringContaining("name: source-check") },
+    });
+    const exportedWithSkill = await api("POST", "/api/teams/export", {
+      format: "package",
+      name: "Signal Skill Package",
+      scope: { botIds: [scout.id], groupIds: [] },
+    });
+    expect(exportedWithSkill.status).toBe(200);
+    expect(exportedWithSkill.body.markdown).toContain("name: source-check");
     expect(editor.playbooks).toBeUndefined();
     expect(scout.section).toBe(editor.section);
     expect(installed.body.groups[0]).toMatchObject({

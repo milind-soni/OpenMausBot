@@ -214,6 +214,7 @@ import {
   installSkill,
   listSkills,
   listStagedSkillWrites,
+  isSkillName,
   readSkillFile,
   rejectStagedSkillWrite,
   removeSkill,
@@ -263,7 +264,7 @@ import { WebhookManager } from "./webhooks.ts";
 import { SPAWNED_PROXIES } from "./proxy-paths.ts";
 import { loadBundledSkills, loadUserSkills, mergeSkills, renderSkillInstructions, selectBundledSkills } from "./skill-library.ts";
 import { installedPlaybookInstructions } from "./installed-playbooks.ts";
-import { createBotPackageExport } from "./package-export.ts";
+import { createBotPackageExport, type ExportablePackageSkill } from "./package-export.ts";
 import { shouldMountLocalComputer } from "./local-routing.ts";
 import { resolveSurface } from "./surface.ts";
 import {
@@ -858,6 +859,113 @@ function checkedModelSelection(
     return { ok: false, status: 400, error: `effort "${selection.effort}" is not offered by this bot's engine` };
   }
   return { ok: true, selection };
+}
+
+type ExportSelection = { botIds: string[]; groupIds: string[] };
+
+function checkedExportSelection(
+  value: unknown,
+  bots: readonly BotRecord[],
+  groups: readonly GroupRecord[],
+): { ok: true; selection: ExportSelection } | { ok: false; error: string } {
+  const visible = bots.filter((bot) => !bot.hidden);
+  if (value === undefined || value === "all") {
+    const botIds = visible.map((bot) => bot.id);
+    return botIds.length
+      ? {
+          ok: true,
+          selection: {
+            botIds,
+            groupIds: groups
+              .filter((group) => !group.dm && group.memberIds.some((id) => botIds.includes(id)))
+              .map((group) => group.id),
+          },
+        }
+      : { ok: false, error: "scope selects no visible bots" };
+  }
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return { ok: false, error: 'scope must be "all" or an object with botIds' };
+  }
+  const scope = value as { botIds?: unknown; groupIds?: unknown };
+  if (!Array.isArray(scope.botIds) || !scope.botIds.length || scope.botIds.some((id) => typeof id !== "string" || !id.trim())) {
+    return { ok: false, error: "scope.botIds must be a non-empty list of bot IDs" };
+  }
+  const botIds = [...scope.botIds] as string[];
+  if (new Set(botIds).size !== botIds.length) return { ok: false, error: "scope.botIds must not contain duplicates" };
+  for (const id of botIds) {
+    const bot = bots.find((candidate) => candidate.id === id);
+    if (!bot) return { ok: false, error: `scope.botIds contains unknown bot ID "${id}"` };
+    if (bot.hidden) return { ok: false, error: `scope.botIds contains hidden bot ID "${id}"` };
+  }
+  const groupIds = scope.groupIds === undefined ? [] : scope.groupIds;
+  if (!Array.isArray(groupIds) || groupIds.some((id) => typeof id !== "string" || !id.trim())) {
+    return { ok: false, error: "scope.groupIds must be a list of room IDs" };
+  }
+  const normalizedGroupIds = [...groupIds] as string[];
+  if (new Set(normalizedGroupIds).size !== normalizedGroupIds.length) {
+    return { ok: false, error: "scope.groupIds must not contain duplicates" };
+  }
+  for (const id of normalizedGroupIds) {
+    const group = groups.find((candidate) => candidate.id === id);
+    if (!group) return { ok: false, error: `scope.groupIds contains unknown room ID "${id}"` };
+    if (group.dm) return { ok: false, error: `scope.groupIds cannot include direct-message room "${id}"` };
+    if (!group.memberIds.some((memberId) => botIds.includes(memberId))) {
+      return { ok: false, error: `scope.groupIds room "${id}" has no selected visible bots` };
+    }
+  }
+  return { ok: true, selection: { botIds, groupIds: normalizedGroupIds } };
+}
+
+function checkedExportSkillNames(
+  value: unknown,
+  bots: readonly BotRecord[],
+): { ok: true; names: string[] } | { ok: false; error: string } {
+  const available = new Set(bots.flatMap((bot) => listSkills(bot.id).map((skill) => skill.name)));
+  if (value === undefined) return { ok: true, names: [...available].sort() };
+  if (!Array.isArray(value) || value.some((name) => typeof name !== "string" || !isSkillName(name))) {
+    return { ok: false, error: "skillIds must be a list of exact imported skill names" };
+  }
+  const names = [...value] as string[];
+  if (new Set(names).size !== names.length) return { ok: false, error: "skillIds must not contain duplicates" };
+  if (names.length > 20) return { ok: false, error: "skillIds must contain at most 20 names" };
+  const unknown = names.find((name) => !available.has(name));
+  if (unknown) return { ok: false, error: `skillIds contains unknown imported skill "${unknown}"` };
+  return { ok: true, names };
+}
+
+function collectExportSkills(
+  bots: readonly BotRecord[],
+  names: readonly string[],
+): ReadonlyMap<string, readonly ExportablePackageSkill[]> {
+  const selected = new Set(names);
+  const byName = new Map<string, ExportablePackageSkill>();
+  const byBot = new Map<string, ExportablePackageSkill[]>();
+  for (const bot of bots) {
+    const assigned: ExportablePackageSkill[] = [];
+    for (const listing of listSkills(bot.id)) {
+      if (!selected.has(listing.name)) continue;
+      const instructions = readSkillFile(bot.id, listing.name);
+      if (instructions === null) {
+        throw new Error(`Skill "${listing.name}" changed or is unavailable and cannot be exported safely`);
+      }
+      const skill: ExportablePackageSkill = {
+        name: listing.name,
+        description: listing.description,
+        ...(listing.source ? { source: listing.source } : {}),
+        ...(listing.license ? { license: listing.license } : {}),
+        ...(listing.compatibility ? { compatibility: listing.compatibility } : {}),
+        instructions,
+      };
+      const existing = byName.get(skill.name);
+      if (existing && existing.instructions !== skill.instructions) {
+        throw new Error(`Skill "${skill.name}" has conflicting content across selected bots`);
+      }
+      if (!existing) byName.set(skill.name, skill);
+      assigned.push(existing ?? skill);
+    }
+    if (assigned.length) byBot.set(bot.id, assigned);
+  }
+  return byBot;
 }
 
 function checkedGroupResponder(value: unknown, memberIds: string[]): GroupDefaultResponder | null {
@@ -7865,16 +7973,22 @@ const server = createServer(async (req, res) => {
           : profileName
             ? `${profileName}'s Team`
             : "My OpenMaus Team";
-      const memberIds = store.bots.filter((bot) => !bot.hidden).map((bot) => bot.id);
-      if (memberIds.length === 0) return json(res, 400, { error: "Create a bot before exporting your team" });
+      const selection = checkedExportSelection(body.scope, store.bots, store.groups);
+      if (!selection.ok) return json(res, 400, { error: selection.error });
+      const memberIds = selection.selection.botIds;
+      const selectedBots = store.bots.filter((bot) => memberIds.includes(bot.id));
+      const selectedGroups = store.groups.filter((group) => selection.selection.groupIds.includes(group.id));
       try {
         if (body.format === "package") {
+          const skillNames = checkedExportSkillNames(body.skillIds, selectedBots);
+          if (!skillNames.ok) return json(res, 400, { error: skillNames.error });
           const document = createBotPackageExport({
             name,
             authorName: profileName,
-            bots: store.bots,
-            groups: store.groups,
+            bots: selectedBots,
+            groups: selectedGroups,
             routines: routines!.listRoutines(),
+            skillsByBot: collectExportSkills(selectedBots, skillNames.names),
           });
           return json(res, 200, {
             name: document.package.name,
@@ -7998,8 +8112,8 @@ const server = createServer(async (req, res) => {
       const pkg = packageDocument?.package;
       const importName = pkg?.name ?? manifest!.team.name;
       const sourceMembers = pkg
-        ? pkg.agents.map((agent) => ({ member: packageAgentAsMember(agent), playbookKeys: agent.playbooks ?? [] }))
-        : manifest!.team.members.map((member) => ({ member, playbookKeys: [] as string[] }));
+        ? pkg.agents.map((agent) => ({ member: packageAgentAsMember(agent), playbookKeys: agent.playbooks ?? [], skillNames: agent.skills ?? [] }))
+        : manifest!.team.members.map((member) => ({ member, playbookKeys: [] as string[], skillNames: [] as string[] }));
 
       // Snapshot before creating anything so replace never archives the new
       // team. Old bots are hidden only after every new bot was created; a
@@ -8036,6 +8150,7 @@ const server = createServer(async (req, res) => {
           }
         }
         const playbookByKey = new Map((pkg?.playbooks ?? []).map((playbook) => [playbook.key, playbook]));
+        const packageSkillByName = new Map((pkg?.skills?.entries ?? []).map((skill) => [skill.name, skill]));
         for (const source of sourceMembers) {
           const member = source.member;
           // importedMemberProfile is the authority boundary: persona fields
@@ -8071,6 +8186,16 @@ const server = createServer(async (req, res) => {
                 }
               : {}),
           });
+          for (const skillName of source.skillNames) {
+            const skill = packageSkillByName.get(skillName);
+            if (!skill) throw new Error(`Package skill "${skillName}" is unavailable`);
+            const installed = installSkill(created.id, skill.source ?? `package:${pkg!.id}`, [
+              { path: "SKILL.md", content: skill.instructions },
+            ]);
+            if ("error" in installed) {
+              throw new Error(`Package skill "${skillName}" could not be imported: ${installed.error}`);
+            }
+          }
           importedBots.push(created);
           memberIds.set(member.key, created.id);
         }

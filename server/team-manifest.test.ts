@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { createTeamManifest, importedMemberProfile, parseTeamManifest } from "./team-manifest.ts";
+import { BOT_INSTRUCTIONS_MAX_CHARS, createTeamManifest, importedMemberProfile, parseTeamManifest } from "./team-manifest.ts";
 
 describe("team manifests", () => {
   it("exports portable member keys without room or runtime state", () => {
@@ -101,6 +101,18 @@ describe("team manifests", () => {
 
     expect(manifest.team.name).toBe("Engineering");
     expect(manifest.team).not.toHaveProperty("room");
+  });
+
+  it("keeps long member instructions within the shared portable cap", () => {
+    const manifest = (description: string) => ({
+      format: "openmaus.team" as const,
+      version: 2 as const,
+      team: { name: "Engineering", members: [{ key: "lead", name: "Ada", description, appearance: { color: "blue" as const } }] },
+    });
+    const accepted = "A".repeat(6_219);
+    expect(parseTeamManifest(manifest(accepted)).team.members[0]?.description).toBe(accepted);
+    expect(() => parseTeamManifest(manifest("A".repeat(BOT_INSTRUCTIONS_MAX_CHARS + 1))))
+      .toThrow("members.0.description is too long");
   });
 
   it("rejects unsupported versions and dangling member references", () => {

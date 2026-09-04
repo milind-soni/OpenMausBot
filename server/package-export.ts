@@ -1,4 +1,4 @@
-import { parseBotPackage, type BotPackageDefinition, type BotPackagePlaybook, type ParsedBotPackage } from "./bot-package.ts";
+import { parseBotPackage, type BotPackageDefinition, type BotPackagePlaybook, type BotPackageSkill, type ParsedBotPackage } from "./bot-package.ts";
 import type { Routine } from "./routines.ts";
 import type { BotRecord, GroupRecord, InstalledPlaybook } from "./store.ts";
 
@@ -21,6 +21,11 @@ function samePlaybook(a: InstalledPlaybook, b: BotPackagePlaybook): boolean {
     a.triggers.join("\n") === b.triggers.join("\n");
 }
 
+export interface ExportablePackageSkill extends Omit<BotPackageSkill, "name" | "description"> {
+  name: string;
+  description: string;
+}
+
 /** Export a workspace definition, never its runtime state. Connected-app
  * labels are retained as setup intent, but grants, credentials, approvals,
  * transcripts, memory, paths, engines, and schedules' active state are not. */
@@ -30,6 +35,7 @@ export function createBotPackageExport(input: {
   bots: BotRecord[];
   groups: GroupRecord[];
   routines: Routine[];
+  skillsByBot?: ReadonlyMap<string, readonly ExportablePackageSkill[]>;
 }): ParsedBotPackage {
   const bots = input.bots.filter((bot) => !bot.hidden);
   if (!bots.length) throw new Error("Create a bot before exporting your package");
@@ -43,6 +49,8 @@ export function createBotPackageExport(input: {
   const playbooks: BotPackagePlaybook[] = [];
   const playbookKeys = new Set<string>();
   const agentPlaybooks = new Map<string, string[]>();
+  const packageSkills = new Map<string, ExportablePackageSkill>();
+  const agentSkills = new Map<string, string[]>();
   for (const bot of bots) {
     const agentKey = idToKey.get(bot.id)!;
     const assigned: string[] = [];
@@ -59,6 +67,16 @@ export function createBotPackageExport(input: {
       assigned.push(key);
     }
     agentPlaybooks.set(bot.id, assigned);
+    const assignedSkills: string[] = [];
+    for (const skill of input.skillsByBot?.get(bot.id) ?? []) {
+      const existing = packageSkills.get(skill.name);
+      if (existing && existing.instructions !== skill.instructions) {
+        throw new Error(`Skill "${skill.name}" has conflicting content across selected bots`);
+      }
+      if (!existing) packageSkills.set(skill.name, { ...skill });
+      if (!assignedSkills.includes(skill.name)) assignedSkills.push(skill.name);
+    }
+    agentSkills.set(bot.id, assignedSkills);
   }
 
   const requirements = new Map<string, { slug: string; label: string; reason: string; optional?: boolean }>();
@@ -109,7 +127,9 @@ export function createBotPackageExport(input: {
               everyMinutes: routine.schedule.everyMinutes,
               anchorAt: routine.schedule.anchorAt,
             }
-          : { type: "daily", time: routine.schedule.time, weekdays: [...routine.schedule.weekdays] },
+          : routine.schedule.type === "daily"
+            ? { type: "daily", time: routine.schedule.time, weekdays: [...routine.schedule.weekdays] }
+            : { type: "manual" },
       durationMinutes: routine.durationMinutes,
       ...(routine.timeoutMinutes === undefined ? {} : { timeoutMinutes: routine.timeoutMinutes }),
       enabledAfterInstall: false as const,
@@ -130,6 +150,8 @@ export function createBotPackageExport(input: {
     };
     const assigned = agentPlaybooks.get(bot.id);
     if (assigned?.length) agent.playbooks = assigned;
+    const assignedSkills = agentSkills.get(bot.id);
+    if (assignedSkills?.length) agent.skills = assignedSkills;
     return agent;
   });
   const definition: BotPackageDefinition = {
@@ -151,6 +173,12 @@ export function createBotPackageExport(input: {
   if (rooms.length) definition.rooms = rooms;
   if (routines.length) definition.routines = routines;
   if (playbooks.length) definition.playbooks = playbooks;
+  if (packageSkills.size) {
+    definition.skills = {
+      version: 1,
+      entries: [...packageSkills.values()].map((skill) => ({ ...skill })),
+    };
+  }
   return parseBotPackage({
     format: "openmaus.package",
     version: 1,

@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import { packageAgentAsMember, parseBotPackage, renderBotPackageMarkdown } from "./bot-package.ts";
+import { BOT_INSTRUCTIONS_MAX_CHARS } from "./team-manifest.ts";
 
 const validPackage: any = {
   format: "openmaus.package",
@@ -51,6 +52,35 @@ const validPackage: any = {
 };
 
 describe("bot packages", () => {
+  const portableSkill = {
+    name: "source-check",
+    description: "Check sources before writing.",
+    source: "conversation:source-check",
+    instructions: "---\nname: source-check\ndescription: Check sources before writing.\n---\n\n# Source check\n",
+  };
+
+  it("round-trips portable skills and rejects dangling or mismatched references", () => {
+    const withSkill = {
+      ...validPackage,
+      package: {
+        ...validPackage.package,
+        agents: [{ ...validPackage.package.agents[0], skills: [portableSkill.name] }],
+        skills: { version: 1, entries: [portableSkill] },
+      },
+    };
+    const parsed = parseBotPackage(withSkill);
+    expect(parsed.package.agents[0]?.skills).toEqual(["source-check"]);
+    expect(parseBotPackage(renderBotPackageMarkdown(parsed)).package.skills?.entries).toEqual([portableSkill]);
+    expect(() => parseBotPackage({
+      ...withSkill,
+      package: { ...withSkill.package, agents: [{ ...withSkill.package.agents[0], skills: ["missing"] }] },
+    })).toThrow("unknown skill");
+    expect(() => parseBotPackage({
+      ...withSkill,
+      package: { ...withSkill.package, skills: { version: 1, entries: [{ ...portableSkill, description: "Different" }] } },
+    })).toThrow("does not match its description");
+  });
+
   it("parses the complete portable structure and strips authority fields", () => {
     const parsed = parseBotPackage(validPackage);
     expect(parsed.package.rooms![0]?.defaultResponder).toEqual({ kind: "agent", agent: "lead" });
@@ -144,6 +174,32 @@ describe("bot packages", () => {
         }],
       },
     })).toThrow();
+  });
+
+  it("round-trips a paused manual-only routine without inventing a schedule", () => {
+    const manual = structuredClone(validPackage);
+    manual.package.routines = [{
+      key: "manual-review",
+      name: "Manual review",
+      agent: "lead",
+      prompt: "Review when asked.",
+      runOn: "maus",
+      schedule: { type: "manual" },
+      durationMinutes: 30,
+      enabledAfterInstall: false,
+    }];
+    const parsed = parseBotPackage(manual);
+    expect(parsed.package.routines?.[0]?.schedule).toEqual({ type: "manual" });
+    expect(renderBotPackageMarkdown(parsed)).toContain("**Schedule:** manual only");
+  });
+
+  it("keeps long agent instructions within the shared portable cap", () => {
+    const accepted = structuredClone(validPackage);
+    accepted.package.agents[0].description = "A".repeat(6_219);
+    expect(parseBotPackage(accepted).package.agents[0]?.description).toHaveLength(6_219);
+    const rejected = structuredClone(validPackage);
+    rejected.package.agents[0].description = "A".repeat(BOT_INSTRUCTIONS_MAX_CHARS + 1);
+    expect(() => parseBotPackage(rejected)).toThrow("agents.0.description is too long");
   });
 
   it("rejects dangling agent, room, playbook, chief, and routine references", () => {
