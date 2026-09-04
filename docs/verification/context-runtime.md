@@ -91,6 +91,77 @@ sqlite3 "$DATA_DIR/messages.db" "SELECT json FROM messages WHERE kind='compactio
 Observed on 2026-09-04: `tokensBefore 5358` against a 4,800-token budget on a
 12k window, one record, the display path still holding every message.
 
+## Driving the owned runtime (preview)
+
+`OMB_VERIFY_OWNED=1` makes `launch` also start a loopback fake OpenAI-compatible
+server it owns, enable `features.ownedRuntime`, add an `openmausRuntime`
+instance pointed at that server, and mount the fake MCP server as the bot's
+own tool. Nothing leaves 127.0.0.1 and everything dies with the launcher.
+
+```sh
+OMB_VERIFY_OWNED=1 FAKE_OPENAI_MODE=tool FAKE_OPENAI_TOOL=notes__read_notes \
+  node --experimental-strip-types scripts/control-omb.ts launch
+# the JSON now includes ownedRuntimeUrl
+omb() { node --experimental-strip-types scripts/control-omb.ts "$@"; }
+omb models --url $URL                      # openmausRuntime: available, contextOwnership omb-loop
+BOT=$(omb new-bot --name Owned --url $URL | python3 -c "import sys,json;print(json.load(sys.stdin)['bot']['id'])")
+omb set-model --bot $BOT --instance openmausRuntime --model fake-model --url $URL
+omb send --bot $BOT --text "read my notes" --url $URL
+omb wait --bot $BOT --timeout 30 --url $URL   # needs-user: the tool call asked, a card is up
+omb messages --bot $BOT --limit 6 --url $URL  # "Approval needed" with the call's arguments
+omb interrupt --bot $BOT --url $URL
+omb wait --bot $BOT --timeout 30 --url $URL   # settled: the pending ask drained as a system deny
+omb send --bot $BOT --text "what did I just ask?" --url $URL
+omb wait --bot $BOT --timeout 30 --url $URL   # settled: a second turn from canonical context alone
+```
+
+`FAKE_OPENAI_MODE=tool` makes the fake answer the FIRST model call with a tool
+call to `FAKE_OPENAI_TOOL` and every later call with text. The tool name must
+be the mounted, namespaced one — otherwise the loop reports an unknown tool
+and the approval gate is never reached, which proves nothing.
+
+## Expected
+
+Observed on 2026-09-04, `"$DATA_DIR"/events/*.ndjson`:
+
+```
+context.prepared: ownership=omb-loop  sent=1/1  window=128000
+request.opened:   permission tool=notes__read_notes
+request.resolved: deny source=system              ← the interrupt drained it
+turn.completed:   ok=false stop=interrupted
+context.prepared: ownership=omb-loop  mode=replay-required  sent=3/3
+turn.completed:   ok=true
+```
+
+`omb models` shows all three ownership modes side by side — `claude`
+`vendor-session`, `openaiCompat` `omb-replay`, `openmausRuntime` `omb-loop` —
+and the preview engine available on a keyless loopback URL. The server log
+has zero errors; the fixture's data dir is removed on interrupt.
+
+Leak check: the seeded key is `verify-key-canary-0000`. It must appear
+nowhere in the event log, and no tool output may appear in any
+`context.prepared` line:
+
+```sh
+grep -c verify-key-canary "$DATA_DIR"/events/*.ndjson     # 0
+grep context.prepared "$DATA_DIR"/events/*.ndjson | grep -c "echoed:"   # 0
+```
+
+## What this harness cannot prove about the owned runtime
+
+- **Answering an approval.** The control surface deliberately exposes no
+  `approve` command (the MCP surface test asserts `approve_request` is
+  absent). So `needs-user` IS the proof that a tool call asked and blocked;
+  allow, deny, timeout-deny, and steering are proven by
+  `server/runtime/pi-runtime.test.ts` and `approval-gate.test.ts`, not here.
+- **The card's tool name.** `messages` projects a bounded, redacted card and
+  does not carry `tool`; the `request.opened` event in the log does.
+- **`mode` on a first turn reads `resume-preferred`.** The plan computes it
+  from cursors, and a brand-new bot has none to invalidate. The owned runtime
+  ignores `mode` — it rebuilds from the plan on every call — so the label is
+  accurate to the plan and irrelevant to the engine. A later change could
+  force `replay-required` for `omb-loop` to make the log read plainly.
+
 ## Gotchas
 
 - Run on Node 24. On 22 the electron suite reports 10 cancelled subtests and

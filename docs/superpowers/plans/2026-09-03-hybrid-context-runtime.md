@@ -442,6 +442,15 @@ asserted.
   message, and run `pnpm build:server && pnpm test:packaged-server` before the task commit — not
   only in Task 11.
 
+  **Resolved 2026-09-04:** `@earendil-works/pi-agent-core@0.85.0`, `@earendil-works/pi-ai@0.85.0`,
+  `@modelcontextprotocol/sdk@1.30.0`, all MIT. `scripts/bundle-server.mjs` has no `external`
+  list, so esbuild inlines whatever is imported. Importing `@earendil-works/pi-ai/compat` took
+  `dist-server/index.js` from **2,199,143 to 6,442,198 bytes (+4.2 MB, 2.9x)** because `compat`
+  re-exports every provider pi ships. Importing the one provider this engine speaks —
+  `@earendil-works/pi-ai/api/openai-completions` — lands at **3,173,475 bytes (+0.97 MB, +44%)**.
+  Rule: import the provider subpath, never `/compat`; a future reviewer seeing `/compat` in
+  `pi-runtime.ts` should treat it as a 3 MB regression.
+
 - [ ] Define concrete internal `OwnedAgentRuntime` inputs/events; keep all Pi imports inside `pi-runtime.ts`.
 - [ ] Create a deterministic fake streaming model covering text, reasoning, one/multiple tool calls, cancellation, provider error, and usage.
 - [ ] Adapt `TurnContextPlan.messages` to Pi model messages. Keep native tool-call/result pairs only in live state and use portable observations after restart.
@@ -484,6 +493,33 @@ asserted.
 - [ ] Implement steering before the next model call and test no-live-turn fallback.
 - [ ] Enforce 32 model calls, 64 tool calls, 180-second default tool timeout, advisory at three identical calls in a six-call window, and stop at five identical calls. The existing total-turn watchdog wins if earlier.
 - [ ] Advertise each MCP capability only after its integration test passes.
+
+  **Resolved 2026-09-04 (Task 9 shipped):** `customMcp` is advertised — the user's own
+  `config.json` servers mount as namespaced tools (`server__tool`) with a reverse routing map,
+  proven by `server/runtime/mcp-tools.test.ts` against a real stdio child in every failure mode
+  the fake supports. `agentsMcp`, `computerMcp`, `composioMcp`, `phoneMcp`, and `browserMcp`
+  stay unadvertised: each needs its own proof before a bot is told it has that tool.
+
+  Two findings worth more than the checklist:
+
+  - **Silence is a deny, and it broke the right tests.** Wiring the approval gate made every
+    one of Task 8's tool-call tests time out — they assumed a tool runs unprompted, and now
+    nothing runs without an answer. The tests were changed to play the harness's auto-approve;
+    the runtime was not. A future test that "just calls a tool" and hangs is hitting this
+    property, not a bug.
+  - **The MCP SDK silently drops a malformed `tools/list` reply.** A server that answers the
+    handshake and then speaks garbage does not error; the client simply waits. Only
+    `MCP_STARTUP_TIMEOUT_MS` (20 s) returns the turn, so that constant is load-bearing. Tests
+    shorten it through `mcpStartupTimeoutMs`; production must not.
+  - **The MCP SDK's stdio transport broke the packaged build, and only the packaged smoke
+    caught it.** `cross-spawn@7.0.6` (pulled in by `StdioClientTransport`) calls
+    `require("child_process")` at load time; esbuild's ESM output has no `require`, so
+    `dist-server/index.js` threw on boot while vitest and Electron dev — both unbundled — were
+    green. Fixed with a `createRequire` banner on both server builds in
+    `scripts/bundle-server.mjs`. `child_process` is a builtin, so the shim resolves it with no
+    `node_modules` in reach and the packaged server stays self-contained. Bundle after Task 9:
+    **3,599,073 bytes** (+425 KB over Task 8 for the MCP client; the require shim is 122 bytes). Keep running
+    `pnpm test:packaged-server` before every task commit; nothing else exercises the bundle.
 - [ ] Run:
 
   ```sh
@@ -521,6 +557,26 @@ asserted.
 - [ ] State explicitly that OpenMaus Runtime does not reuse Claude/Codex subscription login and may incur provider API charges.
 - [ ] Do not auto-migrate `openai-compat` bots. Switching to/from the preview is an explicit per-bot engine selection.
 - [ ] Verify keys never enter config responses, renderer state, diagnostics, analytics, or logs.
+
+  **Resolved 2026-09-04 (Task 10 shipped):**
+  - The credential is `openaiCompatApiKey`, one row in `WORKSPACE_CREDENTIALS`, one entry in
+    `main.mjs`'s `CREDENTIAL_PATCH`, one literal in the `setCredential` union. The server side
+    (`syncCredentialEnv`) already handled `openaiCompat.key`; only Electron and the renderer
+    were missing. The renderer sees `openaiCompat: { configured }` — a boolean, never the key.
+  - No-key endpoints are allowed only for loopback and private-network hosts
+    (`server/drivers/local-endpoint.ts`): `127.0.0.1`, `localhost`, `*.localhost`, `[::1]`,
+    RFC 1918, link-local, and IPv6 ULA/link-local. An unparseable URL is treated as remote — the
+    safe side. A remote URL with no key is unavailable with a reason that names the rule.
+  - `features.ownedRuntime` is a Settings → Experimental switch. Off means absent from the
+    fleet; a bot that chose it sees an unavailable engine and keeps every transcript. Nothing
+    migrates an existing bot.
+  - The disclosure lives once, in `src/lib/context-label.ts` (`OWNED_RUNTIME_DISCLOSURE`), and
+    the settings toggle, engine row, model menu, and setup card all render from it, so three
+    surfaces cannot drift into three promises. `contextLabel()` and `authLabel()` are kept
+    deliberately separate: who owns the context is not how it is paid for, and this engine is
+    the case where they differ.
+  - `registry.describe()` now projects `contextOwnership`, so the UI can label every engine,
+    not only this one.
 - [ ] Run targeted config, Electron credential, setup, engine/model-picker, and secret-redaction tests, then:
 
   ```sh
@@ -579,6 +635,38 @@ asserted.
 
 - [ ] Manually verify ownership labels, preview disclosure, compaction divider, inspector row, engine switch/rollback, approval, interrupt, and steering in a rebuilt renderer. Keep this evidence separate from server-harness evidence.
 - [ ] Commit: `test: verify portable context and owned runtime`.
+
+  **Resolved 2026-09-04 (Task 11 shipped), and precise about what proved what:**
+
+  Driven through the shared control surface (`docs/verification/context-runtime.md`):
+  1. more than 40 turns — 151 items on a 200k window (Task 7 evidence);
+  3. rewind excluding the abandoned branch — `omb edit` (#760);
+  5. a small window creating a divider with history intact — `OMB_CONTEXT_WINDOW` + `edit`;
+  7. the owned runtime calling a tool, asking, and being interruptible — `OMB_VERIFY_OWNED=1`
+     with `set-model`: `request.opened` for `notes__read_notes`, an "Approval needed" card,
+     `needs-user`, then `interrupt` draining the ask as a system deny;
+  8. restart without native state — a second turn carried `sent=3/3` from the plan alone;
+  9. no key or tool output in diagnostics — canary `verify-key-canary-0000` absent from the
+     whole event log, no tool output in any `context.prepared` line.
+
+  Proven by tests, not the fixture — and the plan should say so rather than imply otherwise:
+  2. vendor-to-replay switch preserving tool observations — `prepare-turn.test.ts`,
+     `replay-once.test.ts`;
+  4. external/delegated updates entering the next plan — `prepare-turn.test.ts`;
+  6. one safe resume retry, never after acceptance — `codex/claude/pi/acp` driver tests;
+  10. `openai-compat` receiving history once — `replay-once.test.ts`;
+  11. room attribution across an engine switch — `rebuild.test.ts`.
+  Approval allow/deny/timeout and steering on the owned runtime — `pi-runtime.test.ts`,
+  `approval-gate.test.ts`. The control surface deliberately has no `approve` command, so
+  `needs-user` is the fixture's proof that a call asked and blocked.
+
+  Two gaps in the shared surface found on the way, left as they are:
+  - `registry.describe()` does not project `customMcp`, and `list_available_models` projects
+    only `snapshot.state`, so `omb models` shows neither `customMcp` nor `billing`. Both are
+    pre-existing projections; adding them is a small follow-up, not part of this release.
+  - `FAKE_OPENAI_TOOL` exists because a tool call to a name the loop has not mounted is
+    reported as unknown BEFORE the approval gate runs — which proves nothing. Point the fake
+    at the mounted, namespaced name or the scenario silently degrades.
 
 ---
 

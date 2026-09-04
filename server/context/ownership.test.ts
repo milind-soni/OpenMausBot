@@ -53,6 +53,12 @@ describe("context ownership is declared, not inferred", () => {
     }
   });
 
+  it("declares `omb-loop` for the owned runtime — the third mode, now real", async () => {
+    // The one engine where OpenMausBot runs the model/tool loop itself. It
+    // creates no process and reaches no network, so create() is safe here.
+    expect(await ownershipOf("openmaus-runtime")).toBe("omb-loop");
+  });
+
   it("never reports a value outside the union", async () => {
     for (const kind of CHAT_RUNTIME_KINDS) {
       expect(OWNERSHIP, kind).toContain(await ownershipOf(kind));

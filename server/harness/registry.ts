@@ -190,6 +190,8 @@ export class ProviderRegistry {
             queueing: inst.adapter.capabilities.queueing === true,
             localComputerMcp: inst.adapter.capabilities.localComputerMcp === true,
             approvalReview: inst.reviewPermission !== undefined,
+            // who owns the model-facing context — the UI labels engines by it
+            contextOwnership: inst.adapter.capabilities.contextOwnership,
           },
           access: driver?.metadata.access ?? "subscription",
           install: driver?.install,

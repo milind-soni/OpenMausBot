@@ -220,6 +220,9 @@ const featureConfigSchema = z.object({
   /** Experimental built-in browser. Off until explicitly enabled; each bot
    * also has its own switch. */
   browser: z.boolean().optional(),
+  /** Preview: the OpenMaus-owned agent loop for API-key and local-model
+   * bots. Off until explicitly enabled; existing bots are never migrated. */
+  ownedRuntime: z.boolean().optional(),
 });
 const instanceConfigSchema = z.object({
   driver: z.string().min(1),
@@ -290,7 +293,7 @@ export interface AppConfig {
    * separate container, durable workspace, viewer and lease. */
   localVm?: { mode?: "shared" | "per-bot"; maxInstances?: number };
   /** Opt-in product experiments. Every flag defaults to disabled. */
-  features?: { skillRecorder?: boolean; showToolCalls?: boolean; browser?: boolean };
+  features?: { skillRecorder?: boolean; showToolCalls?: boolean; browser?: boolean; ownedRuntime?: boolean };
   /** Named browser sessions any bot can be pointed at. */
   browserProfiles?: BrowserProfile[];
   instances?: InstanceConfigMap;
@@ -428,6 +431,13 @@ export function showToolCallsEnabled(cfg: AppConfig): boolean {
  * switch sits under it, so either can withhold the browser. */
 export function builtInBrowserEnabled(cfg: AppConfig): boolean {
   return cfg.features?.browser === true;
+}
+
+/** Workspace-level gate for the preview OpenMaus Runtime engine. Off means
+ * the instance is simply absent from the fleet: a bot that selected it
+ * shows its engine as unavailable, and no transcript is touched. */
+export function ownedRuntimeEnabled(cfg: AppConfig): boolean {
+  return cfg.features?.ownedRuntime === true;
 }
 
 // OMB_DATA_DIR isolates test/soak rigs from the user's real fleet.
@@ -693,9 +703,12 @@ interface InstanceCliUpdate {
 function injectedEnvironment(cfg: AppConfig, driver: string): Map<string, string> {
   const environment = new Map<string, string>();
   if (driver === "grok" && cfg.xai?.key) environment.set("XAI_API_KEY", cfg.xai.key);
-  if (driver === "openai-compat" && cfg.openaiCompat?.key)
+  // the owned runtime reuses openai-compat's key and URL contract exactly,
+  // so switching a bot between the two moves nothing else
+  const compatDriver = driver === "openai-compat" || driver === "openmaus-runtime";
+  if (compatDriver && cfg.openaiCompat?.key)
     environment.set("OPENAI_COMPAT_API_KEY", cfg.openaiCompat.key);
-  if (driver === "openai-compat" && cfg.openaiCompat?.url)
+  if (compatDriver && cfg.openaiCompat?.url)
     environment.set("OPENAI_COMPAT_URL", cfg.openaiCompat.url);
   if (driver === "boxAgent" && cfg.box?.token) environment.set("BOX_TOKEN", cfg.box.token);
   if (driver === "opencodeGo" && cfg.opencodeGo?.apiKey) environment.set("OPENCODE_API_KEY", cfg.opencodeGo.apiKey);
@@ -761,6 +774,12 @@ export function instanceConfigs(cfg: AppConfig): InstanceConfigMap {
       if (!Object.hasOwn(map, id)) map[id] = { ...entry };
     }
   }
+  // The preview engine joins the fleet only while its flag is on. A user
+  // who turns it off keeps every transcript; the bots that chose it just
+  // see an unavailable engine until they pick another.
+  if (ownedRuntimeEnabled(cfg) && !Object.hasOwn(map, "openmausRuntime")) {
+    map.openmausRuntime = { driver: "openmaus-runtime" };
+  }
   for (const [id, sourceEntry] of Object.entries(map)) {
     // instanceConfigs() builds a transient runtime map. Never mutate the
     // caller's persisted entries while injecting workspace defaults: doing so
@@ -774,7 +793,7 @@ export function instanceConfigs(cfg: AppConfig): InstanceConfigMap {
     // intentionally not consulted by ProviderRegistry when it decodes a
     // driver's config, so carry the workspace default into the transient
     // instance map while preserving a per-instance override.
-    if (entry.driver === "openai-compat" && cfg.openaiCompat) {
+    if ((entry.driver === "openai-compat" || entry.driver === "openmaus-runtime") && cfg.openaiCompat) {
       const defaults: Record<string, string> = {};
       if (cfg.openaiCompat.url) defaults.url = cfg.openaiCompat.url;
       if (cfg.openaiCompat.model) defaults.model = cfg.openaiCompat.model;

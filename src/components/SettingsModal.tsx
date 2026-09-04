@@ -9,6 +9,7 @@ import { analyticsEnabled, setAnalyticsEnabled } from "@/lib/analytics";
 import { builtInBrowserEnabled, showToolCallsEnabled, skillRecorderEnabled } from "@/lib/feature-flags";
 import { localeChoices } from "@/locales";
 import { ApiKeyRow, VpsConnection } from "./ApiKeys";
+import { OWNED_RUNTIME_DISCLOSURE } from "@/lib/context-label";
 import { useUpdaterState } from "@/lib/updater";
 import { EnginesSettings } from "./EnginesSettings";
 import { LocalComputerSection } from "./LocalComputerSection";
@@ -244,10 +245,10 @@ function ExperimentalFeaturesRow() {
   const browser = builtInBrowserEnabled(state.config);
   const desktopBrowser = Boolean(window.ogb?.browser);
   const browserBlockedOnWindows = window.ogb?.platform === "win32" && !desktopBrowser;
-  const [saving, setSaving] = useState<"skillRecorder" | "browser" | null>(null);
+  const [saving, setSaving] = useState<"skillRecorder" | "browser" | "ownedRuntime" | null>(null);
   const [error, setError] = useState("");
 
-  const toggle = async (feature: "skillRecorder" | "browser", next: boolean) => {
+  const toggle = async (feature: "skillRecorder" | "browser" | "ownedRuntime", next: boolean) => {
     if (saving) return;
     setSaving(feature);
     setError("");
@@ -302,6 +303,22 @@ function ExperimentalFeaturesRow() {
           aria-label="Enable the built-in browser"
           disabled={saving !== null || (!browser && !desktopBrowser)}
           onClick={() => void toggle("browser", !browser)}
+          className="disabled:cursor-wait disabled:opacity-50"
+        />
+      </div>
+      <div className="mt-4 flex items-center justify-between gap-4 border-t border-hairline/30 pt-4">
+        <div className="min-w-0">
+          <div className="text-[14px] font-medium text-ink">OpenMaus Runtime (preview)</div>
+          <div className="mt-0.5 text-[12px] leading-relaxed text-ink-secondary">{OWNED_RUNTIME_DISCLOSURE}</div>
+          <div className="mt-1 text-[11px] text-ink-secondary/80">
+            Context: OpenMaus managed · Auth: API key, billed by the provider. Existing bots are never moved; pick it per bot in the model menu.
+          </div>
+        </div>
+        <Switch
+          checked={Boolean(state.config?.features?.ownedRuntime)}
+          aria-label="Enable OpenMaus Runtime preview"
+          disabled={saving !== null}
+          onClick={() => void toggle("ownedRuntime", !state.config?.features?.ownedRuntime)}
           className="disabled:cursor-wait disabled:opacity-50"
         />
       </div>
@@ -681,6 +698,7 @@ export function SettingsModal() {
                   <ApiKeyRow section="box" />
                   <VpsConnection />
                   <ApiKeyRow section="opencodeGo" />
+                  <ApiKeyRow section="openaiCompat" />
                   <details className="rounded-lg border border-hairline/40 bg-inset px-3 py-2">
                     <summary className="cursor-pointer text-[13px] text-ink-secondary">Self-host connected apps</summary>
                     <div className="mt-3">

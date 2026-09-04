@@ -24,4 +24,13 @@ engine is available. The isolated fixture should expose `claude`.
 
 - Doctor proves server/engine readiness, not authentication against a real
   provider.
+- The preview `openmausRuntime` instance appears in `models` only when
+  `features.ownedRuntime` is true in the fixture's config; by default it is
+  absent, not unavailable. Its `capabilities.contextOwnership` is `omb-loop`,
+  where every installed CLI reports `vendor-session` and the OpenAI-compatible
+  engines report `omb-replay`.
+- With no key, the preview engine is available only for a loopback or
+  private-network URL. Point it at a public host without a key and `models`
+  shows it unavailable with a reason naming the rule — that is the policy
+  working, not a broken fixture.
 - Model-picker rendering is Electron UI and remains outside this first map.

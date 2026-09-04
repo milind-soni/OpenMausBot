@@ -14,6 +14,7 @@ describe("workspace credential migration", () => {
       tts: { key: "tts-secret", voice: "narrator" },
       imageGen: { key: "image-secret" },
       opencodeGo: { apiKey: "ocg-secret" },
+      openaiCompat: { key: "compat-secret", url: "https://openrouter.ai/api/v1" },
       profile: { name: "Ada" },
     };
     const result = migrateWorkspaceCredentials(config, {});
@@ -25,6 +26,7 @@ describe("workspace credential migration", () => {
       ttsKey: "tts-secret",
       opencodeGoApiKey: "ocg-secret",
       openaiImageApiKey: "image-secret",
+      openaiCompatApiKey: "compat-secret",
     });
     // secrets are DELETED (not blanked) so "" stays meaningful as "cleared";
     // non-secret siblings (endpoint url, chosen voice) stay in the file
@@ -34,6 +36,8 @@ describe("workspace credential migration", () => {
       tts: { voice: "narrator" },
       imageGen: {},
       opencodeGo: {},
+      // the URL is configuration, not a credential: it stays in the file
+      openaiCompat: { url: "https://openrouter.ai/api/v1" },
       profile: { name: "Ada" },
     });
     // inputs are never mutated — main.mjs decides which files to rewrite

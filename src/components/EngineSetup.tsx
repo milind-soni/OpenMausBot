@@ -2,6 +2,7 @@
 // errors. The command has one inline copy action and one primary next step;
 // unusable model lists stay out of the way until the engine is ready.
 import { useState } from "react";
+import { authLabel, contextLabel } from "@/lib/context-label";
 import { Check, Copy, Download, ExternalLink, LogIn, TerminalSquare } from "lucide-react";
 import type { EngineInstall, InstanceInfo } from "@/state/store";
 import { cn } from "@/lib/cn";
@@ -160,6 +161,13 @@ export function EngineSetup({
         </p>
       )}
 
+      {instance.access === "custom" && (
+        <p className="mt-2 text-[11px] leading-relaxed text-ink-secondary/80">
+          {authLabel(instance)}
+          {contextLabel(instance.capabilities?.contextOwnership) ? ` · Context: ${contextLabel(instance.capabilities?.contextOwnership)}` : ""}
+          . This engine does not use a Claude or Codex login.
+        </p>
+      )}
       {!signInOnly && install.needsNode && (
         <p className="mt-2 text-[11px] leading-relaxed text-ink-secondary/70">
           Requires Node.js and <code className="font-mono">npm</code>.

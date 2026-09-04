@@ -2,6 +2,7 @@
 // show a short suggested list with search and an explicit all-models view;
 // engines that need setup show one focused action instead of a disabled wall.
 import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
+import { authLabel, contextLabel } from "@/lib/context-label";
 import { Check, ChevronDown, ChevronLeft, ChevronRight, Loader2, RefreshCw, Search } from "lucide-react";
 import { useStore, type Bot, type InstanceInfo, type ModelSelection } from "@/state/store";
 import { filterCustomModels, partitionCustomModels, suggestedModels } from "@/lib/custom-models";
@@ -26,7 +27,10 @@ function modelProvider(instance: InstanceInfo | undefined, model: string): strin
 function engineStatus(instance: InstanceInfo): string {
   if (needsCli(instance)) return "Not installed";
   if (needsSignIn(instance)) return "Sign-in required";
-  return instance.snapshot.version ?? "Ready";
+  // the two labels stay separate: who owns the context is not how it is
+  // paid for, and the preview engine is the case where they differ
+  const context = contextLabel(instance.capabilities?.contextOwnership);
+  return [instance.snapshot.version ?? "Ready", context && `Context: ${context}`, authLabel(instance)].filter(Boolean).join(" · ");
 }
 
 function ModelRow({

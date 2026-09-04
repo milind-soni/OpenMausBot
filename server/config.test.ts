@@ -17,6 +17,7 @@ import { customMcpServers,
   showToolCallsEnabled,
   saveConfig,
   skillRecorderEnabled,
+  ownedRuntimeEnabled,
   builtInBrowserEnabled,
   browserProfilePartitionId,
   browserProfilePartitionTarget,
@@ -303,6 +304,36 @@ describe("configuration boundaries", () => {
     });
     expect(localVmMode({ localVm: { mode: "per-bot" } })).toBe("per-bot");
     expect(localVmMaxInstances({ localVm: { maxInstances: 3 } })).toBe(3);
+  });
+
+  it("keeps the preview OpenMaus Runtime off by default and out of the fleet", () => {
+    expect(ownedRuntimeEnabled({})).toBe(false);
+    expect(ownedRuntimeEnabled({ features: { browser: true } })).toBe(false);
+    expect(Object.hasOwn(instanceConfigs({}), "openmausRuntime")).toBe(false);
+  });
+
+  it("adds the preview engine to the fleet only on an explicit opt-in, reusing openai-compat's contract", () => {
+    expect(parseConfigPatch({ features: { ownedRuntime: true } })).toEqual({ features: { ownedRuntime: true } });
+    expect(ownedRuntimeEnabled({ features: { ownedRuntime: true } })).toBe(true);
+    const cfg = {
+      features: { ownedRuntime: true },
+      openaiCompat: { key: "sk-or-test", url: "https://openrouter.ai/api/v1", model: "some/model", provider: "groq" },
+    };
+    const map = instanceConfigs(cfg);
+    const entry = map.openmausRuntime;
+    expect(entry?.driver).toBe("openmaus-runtime");
+    // the same key and URL the openai-compat instance gets — switching a bot
+    // between the two engines moves nothing else
+    expect(entry?.environment).toMatchObject({ OPENAI_COMPAT_API_KEY: "sk-or-test", OPENAI_COMPAT_URL: "https://openrouter.ai/api/v1" });
+    expect(entry?.config).toMatchObject({ url: "https://openrouter.ai/api/v1", model: "some/model", provider: "groq" });
+    expect(map.openaiCompat?.environment).toMatchObject({ OPENAI_COMPAT_API_KEY: "sk-or-test" });
+  });
+
+  it("joins a persisted product fleet too, and never overrides a user-defined instance", () => {
+    const configured = { claude: { driver: "claudeAgent" }, openmausRuntime: { driver: "openmaus-runtime", displayName: "Mine", config: { url: "http://127.0.0.1:8080/v1" } } };
+    const map = instanceConfigs({ features: { ownedRuntime: true }, instances: configured });
+    expect(map.openmausRuntime?.displayName).toBe("Mine");
+    expect(map.openmausRuntime?.config).toMatchObject({ url: "http://127.0.0.1:8080/v1" });
   });
 
   it("keeps experimental features off by default and accepts an explicit opt-in", () => {
