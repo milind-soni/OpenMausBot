@@ -11,7 +11,7 @@
 // nobody runs is a thing that rots. index.ts owns the listeners now.
 import { execFile } from "node:child_process";
 import { homedir, networkInterfaces } from "node:os";
-import { join } from "node:path";
+import { delimiter, join } from "node:path";
 
 /** Interfaces that exist to tunnel, bridge or mesh traffic — utun (Tailscale
  * and every other VPN), vmnet/bridge (VMs, containers, internet sharing),
@@ -100,6 +100,8 @@ export function tailscaleCandidates(home = homedir()): string[] {
     "/usr/local/bin/tailscale",
     "/usr/bin/tailscale",
     "/run/current-system/sw/bin/tailscale",
+    "C:\\Program Files\\Tailscale\\tailscale.exe",
+    "C:\\Program Files (x86)\\Tailscale\\tailscale.exe",
     "tailscale",
   ];
 }
@@ -109,10 +111,10 @@ const TAILSCALE_BUDGET_MS = 5000;
 
 /** PATH with the usual package-manager locations added back, for the bare
  * `tailscale` attempt. Costs nothing when PATH was already complete. */
-const searchPath = (): string =>
+export const searchPath = (): string =>
   [process.env.PATH ?? "", "/opt/homebrew/bin", "/usr/local/bin", "/usr/bin", "/bin"]
     .filter(Boolean)
-    .join(":");
+    .join(delimiter);
 
 /** Ask the Tailscale CLI where it thinks we are.
  *
