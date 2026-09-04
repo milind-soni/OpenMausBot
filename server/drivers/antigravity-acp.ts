@@ -366,6 +366,30 @@ export async function probeAntigravityModels(input: {
   }
 }
 
+export function isValidAntigravityInitializeResult(
+  initialized: any,
+  expectedVersion: string,
+): boolean {
+  if (!initialized || initialized.protocolVersion !== 1) return false;
+  const name = initialized.agentInfo?.name;
+  if (name !== "antigravity-acp" && name !== "Google Antigravity") return false;
+  const actualVersion = initialized.agentInfo?.version;
+  const normalizedActual = actualVersion?.replace(/^agy_acp_server_/u, "")?.trim();
+  const normalizedExpected = expectedVersion.replace(/^agy_acp_server_/u, "")?.trim();
+  if (actualVersion !== expectedVersion && normalizedActual !== normalizedExpected) return false;
+  if (
+    initialized.agentCapabilities?.loadSession !== true ||
+    initialized.agentCapabilities?.sessionCapabilities?.resume !== true ||
+    initialized.agentCapabilities?.auth?.logout !== true
+  ) {
+    return false;
+  }
+  if (!Array.isArray(initialized.authMethods) || !initialized.authMethods.some((method: any) => method?.id === "oauth-personal")) {
+    return false;
+  }
+  return true;
+}
+
 export async function validateAntigravityRuntime(runtime: AntigravityRuntime, expectedVersion: string): Promise<void> {
   const profileDirectory = await mkdtemp(join(tmpdir(), "openmaus-antigravity-verify-"));
   try {
@@ -377,15 +401,9 @@ export async function validateAntigravityRuntime(runtime: AntigravityRuntime, ex
     const client = new AntigravityAcpClient(runtime, profile, profileDirectory);
     try {
       const initialized = await client.initialize();
-      if (
-        initialized?.protocolVersion !== 1 ||
-        initialized?.agentInfo?.name !== "antigravity-acp" ||
-        initialized?.agentInfo?.version !== expectedVersion ||
-        initialized?.agentCapabilities?.loadSession !== true ||
-        initialized?.agentCapabilities?.sessionCapabilities?.resume !== true ||
-        initialized?.agentCapabilities?.auth?.logout !== true ||
-        !initialized?.authMethods?.some((method: any) => method?.id === "oauth-personal")
-      ) throw new Error("The download did not identify as the expected Google Antigravity ACP release.");
+      if (!isValidAntigravityInitializeResult(initialized, expectedVersion)) {
+        throw new Error("The download did not identify as the expected Google Antigravity ACP release.");
+      }
     } finally {
       client.close();
     }

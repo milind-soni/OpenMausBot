@@ -12,6 +12,7 @@ import {
   ANTIGRAVITY_AUTH_STDOUT_PREFIX,
   antigravityProfileDirectory,
   catalogFromAntigravityConfigOptions,
+  isValidAntigravityInitializeResult,
   parseAntigravityAuthorizationUrl,
   prepareAntigravityProfile,
   probeAntigravityModels,
@@ -104,6 +105,66 @@ describe("official Antigravity runtime", () => {
     expect(asset.url).toMatch(/^https:\/\/dl\.google\.com\/agy-extensions\/releases\//u);
     expect(asset.sha256).toMatch(/^[a-f0-9]{64}$/u);
     expect(asset.archiveBytes).toBeGreaterThan(100_000_000);
+  });
+
+  it("validates ACP initialize results from official Antigravity releases", () => {
+    const basePayload = {
+      protocolVersion: 1,
+      agentInfo: { name: "antigravity-acp", version: "1.1.1" },
+      agentCapabilities: {
+        loadSession: true,
+        sessionCapabilities: { resume: true },
+        auth: { logout: true },
+      },
+      authMethods: [{ id: "oauth-personal" }],
+    };
+
+    // Standard semver version from official agent.json manifest
+    expect(isValidAntigravityInitializeResult(basePayload, "agy_acp_server_1.1.1")).toBe(true);
+    expect(isValidAntigravityInitializeResult(basePayload, "1.1.1")).toBe(true);
+
+    // With binary release tag as version
+    expect(isValidAntigravityInitializeResult({
+      ...basePayload,
+      agentInfo: { name: "antigravity-acp", version: "agy_acp_server_1.1.1" },
+    }, "agy_acp_server_1.1.1")).toBe(true);
+
+    // With official display name from manifest
+    expect(isValidAntigravityInitializeResult({
+      ...basePayload,
+      agentInfo: { name: "Google Antigravity", version: "1.1.1" },
+    }, "agy_acp_server_1.1.1")).toBe(true);
+
+    // Rejects mismatched protocol version
+    expect(isValidAntigravityInitializeResult({ ...basePayload, protocolVersion: 2 }, "1.1.1")).toBe(false);
+
+    // Rejects unexpected agent name
+    expect(isValidAntigravityInitializeResult({
+      ...basePayload,
+      agentInfo: { name: "rogue-agent", version: "1.1.1" },
+    }, "1.1.1")).toBe(false);
+
+    // Rejects mismatched version
+    expect(isValidAntigravityInitializeResult({
+      ...basePayload,
+      agentInfo: { name: "antigravity-acp", version: "2.0.0" },
+    }, "1.1.1")).toBe(false);
+
+    // Rejects missing required capabilities
+    expect(isValidAntigravityInitializeResult({
+      ...basePayload,
+      agentCapabilities: { loadSession: false, sessionCapabilities: { resume: true }, auth: { logout: true } },
+    }, "1.1.1")).toBe(false);
+
+    // Rejects missing oauth-personal auth method
+    expect(isValidAntigravityInitializeResult({
+      ...basePayload,
+      authMethods: [{ id: "api-key" }],
+    }, "1.1.1")).toBe(false);
+
+    // Handles null / undefined gracefully
+    expect(isValidAntigravityInitializeResult(null, "1.1.1")).toBe(false);
+    expect(isValidAntigravityInitializeResult(undefined, "1.1.1")).toBe(false);
   });
 
   it("requires the official executable and harness as a pair", async () => {
