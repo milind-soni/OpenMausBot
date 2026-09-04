@@ -402,6 +402,13 @@ export interface InstanceInfo {
     reason?: string;
     authenticated?: boolean;
     version?: string | null;
+    /** A newer provider version unlocks capabilities, but this installed
+     * version and its current models remain usable. */
+    update?: {
+      title: string;
+      message: string;
+      command: string;
+    };
     /** a reported cost on a subscription is notional; the UI says so */
     billing?: "metered" | "subscription";
   };

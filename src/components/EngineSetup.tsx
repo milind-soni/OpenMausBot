@@ -2,7 +2,7 @@
 // errors. The command has one inline copy action and one primary next step;
 // unusable model lists stay out of the way until the engine is ready.
 import { useEffect, useState } from "react";
-import { Check, Copy, Download, ExternalLink, Loader2, LogIn, TerminalSquare } from "lucide-react";
+import { AlertTriangle, Check, Copy, Download, ExternalLink, Loader2, LogIn, TerminalSquare } from "lucide-react";
 import { api, type EngineInstall, type InstanceInfo, useStore } from "@/state/store";
 import { cn } from "@/lib/cn";
 
@@ -34,9 +34,17 @@ export function needsCli(instance: InstanceInfo | undefined): boolean {
   return instance?.snapshot.state !== "available";
 }
 
-function CommandRow({ command, actionLabel }: { command: string; actionLabel: string }) {
+export function CommandRow({
+  command,
+  actionLabel,
+  compact = false,
+}: {
+  command: string;
+  actionLabel: string;
+  compact?: boolean;
+}) {
   const [status, setStatus] = useState<"copied" | "opened" | null>(null);
-  const canOpen = Boolean(window.ogb?.openInstallTerminal);
+  const canOpen = typeof window !== "undefined" && Boolean(window.ogb?.openInstallTerminal);
 
   const settle = (next: "copied" | "opened") => {
     setStatus(next);
@@ -56,6 +64,41 @@ function CommandRow({ command, actionLabel }: { command: string; actionLabel: st
     const opened = await window.ogb!.openInstallTerminal!(command);
     settle(opened ? "opened" : "copied");
   };
+
+  if (compact) {
+    return (
+      <div className="mt-2 flex min-w-0 items-center gap-1.5 rounded-lg border border-hairline/50 bg-app px-2 py-1.5">
+        <code className="min-w-0 flex-1 truncate font-mono text-[11px] text-ink-secondary" title={command}>
+          {command}
+        </code>
+        <button
+          type="button"
+          onClick={() => void copy()}
+          aria-label="Copy command"
+          title="Copy command"
+          className="flex shrink-0 items-center gap-1 rounded-md px-1.5 py-1 text-[11px] font-medium text-ink-secondary hover:bg-control hover:text-ink"
+        >
+          {status === "copied" ? <Check size={12} className="text-success" /> : <Copy size={12} />}
+          {status === "copied" ? "Copied" : "Copy"}
+        </button>
+        {canOpen && (
+          <button
+            type="button"
+            onClick={() => void openTerminal()}
+            aria-label={actionLabel}
+            title={actionLabel}
+            className="flex shrink-0 items-center gap-1 rounded-md bg-accent px-2 py-1 text-[11px] font-semibold text-white hover:brightness-110"
+          >
+            {status === "opened" ? <Check size={12} /> : <TerminalSquare size={12} />}
+            {status === "opened" ? "Opened" : "Terminal"}
+          </button>
+        )}
+        <span aria-live="polite" className="sr-only">
+          {status === "opened" ? "Terminal opened. Paste the command and press Enter." : ""}
+        </span>
+      </div>
+    );
+  }
 
   return (
     <div className="mt-3">
@@ -101,6 +144,30 @@ function CommandRow({ command, actionLabel }: { command: string; actionLabel: st
           {status === "copied" ? "Command copied" : "Copy command"}
         </button>
       )}
+    </div>
+  );
+}
+
+export function EngineUpdateNotice({
+  update,
+  className,
+}: {
+  update: NonNullable<InstanceInfo["snapshot"]["update"]>;
+  className?: string;
+}) {
+  return (
+    <div
+      data-engine-update-notice
+      className={cn("rounded-xl border border-warning/25 bg-warning/5 p-2.5", className)}
+    >
+      <div className="flex items-start gap-2">
+        <AlertTriangle size={14} className="mt-0.5 shrink-0 text-warning" aria-hidden="true" />
+        <div className="min-w-0">
+          <div className="text-[12.5px] font-semibold text-ink">{update.title}</div>
+          <p className="mt-0.5 text-[11.5px] leading-relaxed text-ink-secondary">{update.message}</p>
+        </div>
+      </div>
+      <CommandRow command={update.command} actionLabel="Open update in Terminal" compact />
     </div>
   );
 }

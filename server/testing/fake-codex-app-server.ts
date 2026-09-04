@@ -14,7 +14,7 @@ import { readFileSync, writeFileSync } from "node:fs";
 const mode = process.env.FAKE_CODEX_MODE ?? "happy";
 
 if (process.argv[2] === "--version") {
-  process.stdout.write("codex-cli 0.147.0\n");
+  process.stdout.write(`${process.env.FAKE_CODEX_VERSION ?? "codex-cli 0.147.0"}\n`);
   process.exit(0);
 }
 if (process.argv[2] === "login" && process.argv[3] === "status") {
@@ -111,12 +111,16 @@ process.stdin.on("data", (chunk) => {
             },
           });
         } else {
+          const hasAstra = process.env.FAKE_CODEX_ASTRA === "1";
           out({
             jsonrpc: "2.0",
             id: msg.id,
             result: {
               data: [
-                { id: "gpt-fake-default", displayName: "GPT Fake Default", hidden: false, isDefault: true },
+                ...(hasAstra
+                  ? [{ id: "gpt-6-astra", displayName: "GPT-6 Astra", hidden: false, isDefault: true }]
+                  : []),
+                { id: "gpt-fake-default", displayName: "GPT Fake Default", hidden: false, isDefault: !hasAstra },
               ],
               nextCursor: "page-2",
             },

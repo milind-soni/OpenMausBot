@@ -7,7 +7,7 @@ import { useStore, type Bot, type InstanceInfo, type ModelSelection } from "@/st
 import { filterCustomModels, partitionCustomModels, suggestedModels } from "@/lib/custom-models";
 import { isCustomOnly, splitEngineRail } from "@/lib/engine-rail";
 import { ProviderMark } from "./ProviderIcons";
-import { EngineSetup, needsCli, needsSignIn } from "./EngineSetup";
+import { EngineSetup, EngineUpdateNotice, needsCli, needsSignIn } from "./EngineSetup";
 import { EngineGroupLabel } from "./EngineGroupLabel";
 import { cn } from "@/lib/cn";
 import { COMPACT_SQUARE } from "@/lib/compact-chip";
@@ -323,7 +323,7 @@ export function ModelPicker({
               const { subscription, custom: local } = splitEngineRail(state.instances);
               const railButton = (instance: InstanceInfo) => {
                 const selected = instance.instanceId === railInstance?.instanceId;
-                const attention = needsCli(instance) || needsSignIn(instance);
+                const attention = needsCli(instance) || needsSignIn(instance) || Boolean(instance.snapshot.update);
                 return (
                   <button
                     type="button"
@@ -445,6 +445,9 @@ export function ModelPicker({
                     <div className="min-h-0 flex-1 overflow-y-auto px-2 pb-2">
                       {pane === "main" ? (
                         <>
+                          {railInstance.snapshot.update && (
+                            <EngineUpdateNotice update={railInstance.snapshot.update} className="mx-1 mb-2" />
+                          )}
                           <EngineGroupLabel className="px-2 pb-1 pt-0.5">
                             {query ? `${filteredOfficial.length} results` : showAll ? `All models · ${official.length}` : "Suggested"}
                           </EngineGroupLabel>

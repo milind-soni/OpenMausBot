@@ -304,6 +304,13 @@ export interface ProviderSnapshot {
   reason?: string;
   authenticated?: boolean;
   version?: string | null;
+  /** A non-blocking provider update that unlocks newer capabilities. The
+   * engine remains usable; renderer surfaces the exact terminal command. */
+  update?: {
+    title: string;
+    message: string;
+    command: string;
+  };
   /** How this instance is paid for, when the driver can tell: a reported
    * cost on a subscription is notional and the UI labels it as such. */
   billing?: "metered" | "subscription";
