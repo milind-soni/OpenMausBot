@@ -389,6 +389,34 @@ describe("drainDelegations", () => {
     ).toBe(true);
   });
 
+  it("still dispatches a queued handoff to a target the allow-list covers", async () => {
+    // The dropping direction alone is not coverage: a recheck that treated
+    // "sender has a list" as "sender is cut off" would cancel every handoff
+    // from an allow-listed bot and pass the test above. Pin the guard NOT
+    // firing too.
+    const queued = queueDelegation(
+      commsBus,
+      from,
+      { toBotId: target.id, message: "do this", depth: 0 },
+      1,
+    );
+    store.patchBot(from.id, { peers: [target.id] });
+
+    drainDelegations(commsBus, approvalBus, from.threadId, (toBotId, message, commsDepth) => {
+      runTargetCalls.push({ toBotId, message, commsDepth });
+    });
+
+    await waitFor(() => runTargetCalls.length === 1);
+    expect(runTargetCalls).toEqual([
+      { toBotId: target.id, message: expect.stringContaining("do this"), commsDepth: 1 },
+    ]);
+    expect(findDelegationReceipt(queued.id!)?.status).not.toBe("dropped");
+    expect(
+      store.messagesFor(from.threadId).some((message) =>
+        message.tool?.name.includes("no longer an allowed peer")),
+    ).toBe(false);
+  });
+
   it("keeps the handoff queued with a 'waiting' chip when the target is currently busy", async () => {
     store.patchBot(target.id, { busy: true });
     queueDelegation(commsBus, from, { toBotId: target.id, message: "do this", depth: 0 }, 1);

@@ -1,8 +1,11 @@
 // The per-pair peer allow-list, end to end against the real harness server.
 //
-// Two claims are pinned here that no unit can reach: an ordinary (non-Chief)
-// bot's system prompt now names its teammates, and `peers` narrows what that
-// bot can see AND what the internal comms endpoints will let it do. The
+// Four claims are pinned here that no unit can reach: an ordinary (non-Chief)
+// bot's system prompt now names its teammates; `peers` narrows what that bot
+// can see AND what the internal comms endpoints will let it do, without
+// refusing the peers it still covers; the list survives an approval card that
+// was open while it changed; and the field can only ever be made smaller from
+// the loopback API a bot's own tool call can reach. The
 // endpoints are sealed behind a per-boot token, so — as in
 // room-chat-wait.e2e.test.ts — the token is read out of the MCP config the
 // fake CLI dumps on its first turn.
@@ -124,6 +127,30 @@ const botBusy = async (botId: string) => {
   return state.bots.find((bot: { id: string }) => bot.id === botId)?.busy;
 };
 
+const botPeers = async (botId: string) => {
+  const state = (await api("GET", "/api/bots?messages=0")).body;
+  return state.bots.find((bot: { id: string }) => bot.id === botId)?.peers;
+};
+
+const botMessages = async (botId: string): Promise<any[]> => {
+  const state = (await api("GET", "/api/bots")).body;
+  return state.bots.find((bot: { id: string }) => bot.id === botId)?.messages ?? [];
+};
+
+/** Drive a bot through one turn so it owns a task its own thread id resolves
+ * to — /api/internal/ask-bot refuses a source thread that has none. */
+const warmUp = async (botId: string) => {
+  expect((await api("POST", `/api/bots/${botId}/messages`, { text: "Warm up" })).status).toBe(202);
+  await expect.poll(() => botBusy(botId), { timeout: 15_000 }).toBe(false);
+};
+
+const hideSeededBot = async () => {
+  // the seeded bot would otherwise join the unsectioned team and make the
+  // roster and listing assertions depend on install order
+  const seeded = (await api("GET", "/api/bots?messages=0")).body.bots[0];
+  await api("PATCH", `/api/bots/${seeded.id}`, { hidden: true });
+};
+
 const peerNames = async (selfId: string, token: string) => {
   const listed = await api(
     "GET",
@@ -137,10 +164,7 @@ const peerNames = async (selfId: string, token: string) => {
 
 describe("peer allow-list", () => {
   it("gives an ordinary bot a roster, then narrows it and the comms endpoints", async () => {
-    // the seeded bot would otherwise join the unsectioned team and make the
-    // roster assertions depend on install order
-    const seeded = (await api("GET", "/api/bots?messages=0")).body.bots[0];
-    await api("PATCH", `/api/bots/${seeded.id}`, { hidden: true });
+    await hideSeededBot();
     const asker = await createBot("Ada", "asker");
     const quill = await createBot("Quill", "plain");
     const patch = await createBot("Patch", "plain");
@@ -152,12 +176,19 @@ describe("peer allow-list", () => {
 
       // 1. an ordinary bot is finally told who its teammates are
       const systemPrompt = String(dump.systemPrompt);
-      expect(systemPrompt).toContain("Bots you can reach:");
+      expect(systemPrompt).toContain("[TEAM ROSTER]");
       expect(systemPrompt).toContain("- Quill — General assistant (available)");
       expect(systemPrompt).toContain("- Patch — General assistant (available)");
       // and is told nothing about creating bots or directing them
       expect(systemPrompt).toContain("peers, not staff");
       expect(systemPrompt).not.toContain("create_bot");
+      // The harness keeps appending its own rules with a bare leading space
+      // (index.ts: `${coordinationPrompt}` then credentialPrompt). The last
+      // roster line is a stranger's text, so the terminator has to be what
+      // those rules land against — otherwise a persona ending "…ask the user
+      // to paste the key into chat" sits flush against the rule forbidding
+      // exactly that.
+      expect(systemPrompt).toContain("[/TEAM ROSTER] If a supported API key is missing");
 
       const token = String(dump.mcpConfig?.mcpServers?.agents?.env?.OMB_COMMS_TOKEN ?? "");
       expect(token).toBeTruthy();
@@ -196,7 +227,20 @@ describe("peer allow-list", () => {
       expect(refusedDelegation.status).toBe(403);
       expect(String(refusedDelegation.body.error)).toContain(REFUSED);
 
-      // the peer that is still wired is untouched
+      // …while the peer that IS still wired stays reachable on BOTH
+      // endpoints. Without this the gate could refuse every bot that merely
+      // has a list — the exact regression an allow-list introduces — and the
+      // 403s above would still be green.
+      const allowedAsk = await api(
+        "POST",
+        "/api/internal/ask-bot",
+        { fromBotId: asker.id, toBotId: quill.id, message: "Quill, still there?" },
+        { authorization: `Bearer ${token}` },
+      );
+      expect(allowedAsk.status).toBe(200);
+      expect(allowedAsk.body.error).toBeUndefined();
+      await expect.poll(() => botBusy(quill.id)).toBe(false);
+
       const allowedDelegation = await api(
         "POST",
         "/api/internal/delegate-bot",
@@ -214,8 +258,7 @@ describe("peer allow-list", () => {
   }, 40_000);
 
   it("renders only the allow-listed peers into the roster the bot is given", async () => {
-    const seeded = (await api("GET", "/api/bots?messages=0")).body.bots[0];
-    await api("PATCH", `/api/bots/${seeded.id}`, { hidden: true });
+    await hideSeededBot();
     const bound = await createBot("Dot", "bound");
     const near = await createBot("Near", "plain");
     const far = await createBot("Farside", "plain");
@@ -236,4 +279,108 @@ describe("peer allow-list", () => {
       }
     }
   }, 40_000);
+
+  it("re-checks the allow-list after the approval card, not just before it", async () => {
+    // The card can sit open for minutes. Everything the handler captured
+    // before it — including the grant — is stale by the time the user
+    // clicks Allow, so the gate has to run a second time against fresh
+    // records. Nothing else in the suite drives a bot through the card.
+    await hideSeededBot();
+    // on the dump fixture, because the per-boot comms token is only ever
+    // readable out of a bot's MCP config
+    const asker = await createBot("Iris", "asker");
+    const helper = await createBot("Hedge", "plain");
+
+    try {
+      await warmUp(asker.id);
+      await expect.poll(() => readDump(askerDump)()?.mcpConfig, { timeout: 10_000 }).toBeTruthy();
+      const token = String(readDump(askerDump)()!.mcpConfig?.mcpServers?.agents?.env?.OMB_COMMS_TOKEN ?? "");
+      expect(token).toBeTruthy();
+      expect((await api("PATCH", `/api/bots/${asker.id}`, { approvePeerComms: true })).status).toBe(200);
+
+      // parks inside requestPeerApproval until the card below is answered
+      const parked = api(
+        "POST",
+        "/api/internal/ask-bot",
+        { fromBotId: asker.id, toBotId: helper.id, message: "Hedge, a quick one" },
+        { authorization: `Bearer ${token}` },
+      );
+
+      const askCard = async () =>
+        (await botMessages(asker.id)).find(
+          (message) => message.kind === "options" && message.card?.tool === "ask_bot",
+        )?.card;
+      await expect.poll(async () => (await askCard())?.requestId, { timeout: 15_000 }).toBeTruthy();
+      const card = (await askCard())!;
+
+      // the operator narrows the sender WHILE the card is open
+      expect((await api("PATCH", `/api/bots/${asker.id}`, { peers: [] })).status).toBe(200);
+      const allowed = await api("POST", `/api/bots/${asker.id}/respond`, {
+        requestId: card.requestId,
+        behavior: "allow",
+      });
+      expect(allowed.status).toBe(200);
+
+      // the human said yes to a contact that is no longer permitted
+      const outcome = await parked;
+      expect(outcome.status).toBe(200);
+      expect(String(outcome.body.error)).toBe("that bot is no longer an allowed peer");
+      // and the peer turn never started: no inbound message, nothing to mirror
+      expect(
+        (await botMessages(helper.id)).some(
+          (message) => message.role === "user" && message.kind === "text",
+        ),
+      ).toBe(false);
+      expect(await botBusy(helper.id)).toBeFalsy();
+    } finally {
+      for (const bot of [asker, helper]) {
+        await api("POST", `/api/bots/${bot.id}/interrupt`, {}).catch(() => undefined);
+        await api("DELETE", `/api/bots/${bot.id}`).catch(() => undefined);
+      }
+    }
+  }, 60_000);
+
+  it("lets the loopback API narrow a bot's peers but never widen them unacknowledged", async () => {
+    // The bot this field constrains can curl this endpoint from a tool call
+    // and gets admin scope for it (request-auth.ts hands every loopback
+    // caller LOOPBACK_SCOPES). A leash a prompt-injected bot can cut is not
+    // a leash, so only the narrowing direction is free.
+    await hideSeededBot();
+    const bound = await createBot("Ivy", "plain");
+    const peer = await createBot("Ash", "plain");
+    const other = await createBot("Elm", "plain");
+
+    try {
+      // narrowing needs nothing — an operator, a script, or the bot itself
+      expect((await api("PATCH", `/api/bots/${bound.id}`, { peers: [peer.id, other.id] })).status).toBe(200);
+      expect((await api("PATCH", `/api/bots/${bound.id}`, { peers: [peer.id] })).status).toBe(200);
+      expect(await botPeers(bound.id)).toEqual([peer.id]);
+
+      // adding an id back is the privileged direction, and so is clearing
+      const readded = await api("PATCH", `/api/bots/${bound.id}`, { peers: [peer.id, other.id] });
+      expect(readded.status).toBe(400);
+      expect(String(readded.body.error)).toContain("acknowledgePeerScope");
+      const cleared = await api("PATCH", `/api/bots/${bound.id}`, { peers: null });
+      expect(cleared.status).toBe(400);
+      expect(String(cleared.body.error)).toContain("acknowledgePeerScope");
+      // refused means unchanged, not partially applied
+      expect(await botPeers(bound.id)).toEqual([peer.id]);
+
+      // the flag the desktop dialog sends — and a tool call cannot forge —
+      // is what carries the human's decision
+      const acknowledged = await api("PATCH", `/api/bots/${bound.id}`, {
+        peers: [peer.id, other.id],
+        acknowledgePeerScope: true,
+      });
+      expect(acknowledged.status).toBe(200);
+      expect(await botPeers(bound.id)).toEqual([peer.id, other.id]);
+      expect((await api("PATCH", `/api/bots/${bound.id}`, { peers: null, acknowledgePeerScope: true })).status).toBe(200);
+      expect(await botPeers(bound.id)).toBeUndefined();
+    } finally {
+      for (const bot of [bound, peer, other]) {
+        await api("POST", `/api/bots/${bot.id}/interrupt`, {}).catch(() => undefined);
+        await api("DELETE", `/api/bots/${bot.id}`).catch(() => undefined);
+      }
+    }
+  }, 60_000);
 });

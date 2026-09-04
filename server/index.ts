@@ -8327,16 +8327,39 @@ const server = createServer(async (req, res) => {
       // Who this bot may contact. null clears the list back to "everyone
       // visible in my section"; an array — including an empty one — is the
       // explicit wiring, so a bot can be given exactly one correspondent.
+      //
+      // Narrowing is free, widening is not. The bot this field constrains
+      // can reach this endpoint: resolveRequestAuth hands admin+client to
+      // any loopback caller, so a bot holding Bash is one curl from
+      // deleting its own leash — the same adversary the acknowledgeLocalAuto
+      // block above is written against, and the exact bot the allow-list
+      // exists to contain. So cutting reach needs nothing (an operator, a
+      // script, even the bot itself may only ever make it smaller), while
+      // clearing the list or adding an id needs the proof of a human the
+      // desktop dialog sends and a tool call cannot forge.
       if (body.peers !== undefined) {
-        if (body.peers === null) patch.peers = undefined;
+        let nextPeers: string[] | undefined;
+        if (body.peers === null) nextPeers = undefined;
         else if (
           !Array.isArray(body.peers) ||
           body.peers.some((peerId: unknown) => typeof peerId !== "string")
         ) {
           return json(res, 400, { error: "peers must be a list of bot ids, or null for every bot in this section" });
         } else {
-          patch.peers = [...new Set<string>(body.peers)].slice(0, MAX_WORKSPACE_BOTS);
+          nextPeers = [...new Set<string>(body.peers)].slice(0, MAX_WORKSPACE_BOTS);
         }
+        // A bot with no list is already at its widest, so the first list it
+        // is ever given can only narrow it.
+        const currentPeers = existingBot?.peers;
+        const widensReach =
+          Array.isArray(currentPeers) &&
+          (nextPeers === undefined || nextPeers.some((peerId) => !currentPeers.includes(peerId)));
+        if (widensReach && body.acknowledgePeerScope !== true) {
+          return json(res, 400, {
+            error: "Widening a bot's allowed peers requires confirming it first (acknowledgePeerScope)",
+          });
+        }
+        patch.peers = nextPeers;
       }
       if (body.alwaysAllow !== undefined) {
         if (!Array.isArray(body.alwaysAllow) || body.alwaysAllow.some((t: unknown) => typeof t !== "string")) {

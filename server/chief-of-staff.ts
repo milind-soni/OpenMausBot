@@ -27,7 +27,16 @@ export function chiefOfStaffSystemPrompt(
   // the endpoints must agree, or the prompt names teammates the tools will
   // then refuse to reach.
   const team = reachablePeers(bots, chief ?? { id: chiefId, name: "" });
-  const roster = renderRoster(team, ROSTER_MAX_BOTS, "- No other visible bots are available yet.");
+  // `about: true` keeps the blurb the Chief staffs from — and keeps this
+  // prompt byte-identical to what Chiefs have always been given. The
+  // ordinary-bot roster drops it (peer-roster.ts); widening the Chief's
+  // existing exposure was never in scope, and narrowing it here would
+  // silently change how a Chief picks a specialist.
+  const roster = renderRoster(team, {
+    max: ROSTER_MAX_BOTS,
+    empty: "- No other visible bots are available yet.",
+    about: true,
+  });
 
   const delegation = canDelegate
     ? [
