@@ -1,4 +1,4 @@
-import { delimiter } from "node:path";
+import { delimiter, join } from "node:path";
 import { describe, expect, it } from "vitest";
 
 import { searchPath, tailscaleCandidates } from "../src/listener.ts";
@@ -10,14 +10,19 @@ describe("tailscaleCandidates", () => {
     expect(candidates).toContain("C:\\Program Files (x86)\\Tailscale\\tailscale.exe");
   });
 
-  it("keeps the macOS, Linux and bare-PATH lookups in order", () => {
-    const candidates = tailscaleCandidates("/home/test");
-    expect(candidates).toContain("/Applications/Tailscale.app/Contents/MacOS/Tailscale");
-    expect(candidates).toContain("/opt/homebrew/bin/tailscale");
-    expect(candidates).toContain("/usr/local/bin/tailscale");
-    expect(candidates).toContain("/usr/bin/tailscale");
-    expect(candidates).toContain("/run/current-system/sw/bin/tailscale");
-    expect(candidates[candidates.length - 1]).toBe("tailscale");
+  it("keeps the absolute candidates in documented lookup order with bare PATH last", () => {
+    const home = "/home/test";
+    expect(tailscaleCandidates(home)).toEqual([
+      "/Applications/Tailscale.app/Contents/MacOS/Tailscale",
+      join(home, "Applications", "Tailscale.app", "Contents", "MacOS", "Tailscale"),
+      "/opt/homebrew/bin/tailscale",
+      "/usr/local/bin/tailscale",
+      "/usr/bin/tailscale",
+      "/run/current-system/sw/bin/tailscale",
+      "C:\\Program Files\\Tailscale\\tailscale.exe",
+      "C:\\Program Files (x86)\\Tailscale\\tailscale.exe",
+      "tailscale",
+    ]);
   });
 });
 
@@ -33,7 +38,11 @@ describe("searchPath", () => {
       // The join character is the real check: ':' on POSIX, ';' on Windows.
       expect(result).toContain(delimiter);
     } finally {
-      process.env.PATH = before;
+      if (before === undefined) {
+        delete process.env.PATH;
+      } else {
+        process.env.PATH = before;
+      }
     }
   });
 });
