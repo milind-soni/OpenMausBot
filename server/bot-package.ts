@@ -36,6 +36,54 @@ const key = requiredText(64).regex(/^[a-z0-9][a-z0-9_-]*$/, {
   message: "may only contain lowercase letters, numbers, - and _",
 });
 const MAX_DATE_MS = 8_640_000_000_000_000;
+const CLOCK_TIME = /^([01]\d|2[0-3]):[0-5]\d$/;
+const intervalWeekdays = z.array(z.number().int().min(0).max(6)).min(1).max(7).refine(
+  (weekdays) => new Set(weekdays).size === weekdays.length,
+  "must contain unique weekdays",
+);
+const intervalWindow = z.object({
+  start: z.string().regex(CLOCK_TIME, { message: "must use HH:MM" }),
+  end: z.string().regex(CLOCK_TIME, { message: "must use HH:MM" }),
+}).strict().refine(({ start, end }) => start < end, {
+  message: "must end later on the same day",
+});
+const packageRoutineScheduleSchema = z.discriminatedUnion("type", [
+  z.object({ type: z.literal("once"), at: z.number().int() }),
+  z.object({
+    type: z.literal("daily"),
+    time: requiredText(5).regex(CLOCK_TIME, { message: "must use HH:MM" }),
+    weekdays: z.array(z.number().int().min(0).max(6)).min(1).max(7),
+  }),
+  z.object({
+    type: z.literal("interval"),
+    everyMinutes: z.number().int().min(5).max(1_440),
+    anchorAt: z.number().int().nonnegative().max(MAX_DATE_MS),
+    weekdays: intervalWeekdays.optional(),
+    window: intervalWindow.optional(),
+    endsAt: z.number().int().nonnegative().max(MAX_DATE_MS).optional(),
+  }),
+]).superRefine((schedule, context) => {
+  if (schedule.type !== "interval") return;
+  if (schedule.window) {
+    const [startHour, startMinute] = schedule.window.start.split(":").map(Number);
+    const [endHour, endMinute] = schedule.window.end.split(":").map(Number);
+    const windowMinutes = endHour * 60 + endMinute - (startHour * 60 + startMinute);
+    if (windowMinutes < schedule.everyMinutes) {
+      context.addIssue({
+        code: "custom",
+        message: "must be at least as long as the interval cadence",
+        path: ["window"],
+      });
+    }
+  }
+  if (schedule.endsAt !== undefined && schedule.endsAt < schedule.anchorAt) {
+    context.addIssue({
+      code: "custom",
+      message: "must not be before the interval anchor",
+      path: ["endsAt"],
+    });
+  }
+});
 
 const packageSchema = z.object({
   format: z.literal(BOT_PACKAGE_FORMAT, { error: "This is not an OpenMaus package" }),
@@ -93,19 +141,7 @@ const packageSchema = z.object({
       agent: key,
       prompt: requiredText(20_000),
       runOn: z.enum(["maus", "cloud"]),
-      schedule: z.discriminatedUnion("type", [
-        z.object({ type: z.literal("once"), at: z.number().int() }),
-        z.object({
-          type: z.literal("daily"),
-          time: requiredText(5).regex(/^([01]\d|2[0-3]):[0-5]\d$/, { message: "must use HH:MM" }),
-          weekdays: z.array(z.number().int().min(0).max(6)).min(1).max(7),
-        }),
-        z.object({
-          type: z.literal("interval"),
-          everyMinutes: z.number().int().min(5).max(1_440),
-          anchorAt: z.number().int().nonnegative().max(MAX_DATE_MS),
-        }),
-      ]),
+      schedule: packageRoutineScheduleSchema,
       durationMinutes: z.number().int().min(5).max(240),
       timeoutMinutes: z.number().int().min(5).max(240).optional(),
       enabledAfterInstall: z.literal(false),
@@ -207,6 +243,21 @@ export function parseBotPackage(value: JsonValue | ParsedBotPackage): ParsedBotP
 }
 
 const list = (values: string[]) => values.map((value) => `- ${value}`).join("\n");
+const WEEKDAY_NAMES = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
+
+function intervalScheduleText(
+  schedule: Extract<NonNullable<BotPackageDefinition["routines"]>[number]["schedule"], { type: "interval" }>,
+): string {
+  const restrictions = [
+    schedule.weekdays?.length
+      ? `on ${schedule.weekdays.map((day) => WEEKDAY_NAMES[day]).join(", ")}`
+      : null,
+    schedule.window ? `during ${schedule.window.start}–${schedule.window.end}` : null,
+    schedule.endsAt !== undefined ? `until ${new Date(schedule.endsAt).toISOString()}` : null,
+  ].filter((part): part is string => part !== null);
+  const cadence = `every ${schedule.everyMinutes} minutes from ${new Date(schedule.anchorAt).toISOString()}`;
+  return restrictions.length ? `${cadence}; ${restrictions.join("; ")}` : cadence;
+}
 
 /** Render the public artifact. The frontmatter enables deterministic imports;
  * the body is deliberately complete enough for any Chief-of-Staff agent to
@@ -235,7 +286,7 @@ export function renderBotPackageMarkdown(document: ParsedBotPackage): string {
       routine.schedule.type === "daily"
         ? `${routine.schedule.time} on weekdays ${routine.schedule.weekdays.join(", ")}`
         : routine.schedule.type === "interval"
-          ? `every ${routine.schedule.everyMinutes} minutes from ${new Date(routine.schedule.anchorAt).toISOString()}`
+          ? intervalScheduleText(routine.schedule)
           : `once at ${routine.schedule.at}`
     }  `,
     `**Run limit:** ${routine.timeoutMinutes === undefined ? "none" : `${routine.timeoutMinutes} minutes`}  `,

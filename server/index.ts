@@ -4704,6 +4704,13 @@ const agentRoutine = (
             type: "interval" as const,
             everyMinutes: routine.schedule.everyMinutes,
             anchorAt: new Date(routine.schedule.anchorAt).toISOString(),
+            ...(routine.schedule.weekdays === undefined
+              ? {}
+              : { weekdays: routine.schedule.weekdays.map((day) => ROUTINE_WEEKDAY_NAMES[day]) }),
+            ...(routine.schedule.window === undefined ? {} : { window: { ...routine.schedule.window } }),
+            ...(routine.schedule.endsAt === undefined
+              ? {}
+              : { endsAt: new Date(routine.schedule.endsAt).toISOString() }),
           }
         : {
             type: "weekly" as const,

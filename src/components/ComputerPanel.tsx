@@ -118,7 +118,23 @@ function routineScheduleLabel(routine: Routine) {
     });
   }
   if (routine.schedule.type === "interval") {
-    return `Every ${routine.schedule.everyMinutes} min`;
+    const details = [`Every ${routine.schedule.everyMinutes} min`];
+    if (routine.schedule.weekdays && routine.schedule.weekdays.length < 7) {
+      details.push(routine.schedule.weekdays.join(",") === "1,2,3,4,5"
+        ? "weekdays"
+        : routine.schedule.weekdays.map((day) => ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"][day]).join(", "));
+    }
+    if (routine.schedule.window) {
+      const formatTime = (time: string) => {
+        const [hour, minute] = time.split(":").map(Number);
+        return new Date(2000, 0, 1, hour, minute).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
+      };
+      details.push(`${formatTime(routine.schedule.window.start)}–${formatTime(routine.schedule.window.end)}`);
+    }
+    if (routine.schedule.endsAt != null) {
+      details.push(`until ${new Date(routine.schedule.endsAt).toLocaleDateString([], { month: "short", day: "numeric", year: "numeric" })}`);
+    }
+    return details.join(" · ");
   }
   const days = routine.schedule.weekdays;
   const cadence =

@@ -10,10 +10,39 @@
 
 export type RoutineRequestRunOn = "maus" | "cloud";
 
+export interface RoutineRequestIntervalWindow {
+  start: string;
+  end: string;
+}
+
 export type RoutineRequestSchedule =
   | { type: "once"; at: number }
   | { type: "daily"; time: string; weekdays: number[] }
-  | { type: "interval"; everyMinutes: number; anchorAt?: number };
+  | {
+    type: "interval";
+    everyMinutes: number;
+    anchorAt?: number;
+    /** Local weekdays (Sunday = 0). Missing means every day. */
+    weekdays?: number[];
+    /** Local wall-clock window. Missing means all day. */
+    window?: RoutineRequestIntervalWindow;
+    /** Inclusive epoch-millisecond cutoff. Missing means never. */
+    endsAt?: number;
+  };
+
+export type RoutineRequestScheduleChanges =
+  | Exclude<RoutineRequestSchedule, { type: "interval" }>
+  | {
+    type: "interval";
+    everyMinutes: number;
+    anchorAt?: number;
+    /** `null` explicitly restores the every-day default. */
+    weekdays?: number[] | null;
+    /** `null` explicitly restores the all-day default. */
+    window?: RoutineRequestIntervalWindow | null;
+    /** `null` explicitly removes an existing end date. */
+    endsAt?: number | null;
+  };
 
 export interface RoutineRequestDefinition {
   name: string;
@@ -27,8 +56,12 @@ export interface RoutineRequestDefinition {
 }
 
 export type RoutineRequestChanges =
-  & Omit<Partial<RoutineRequestDefinition>, "timeoutMinutes">
-  & { /** `null` removes an existing safety cap. */ timeoutMinutes?: number | null };
+  & Omit<Partial<RoutineRequestDefinition>, "schedule" | "timeoutMinutes">
+  & {
+    schedule?: RoutineRequestScheduleChanges;
+    /** `null` removes an existing safety cap. */
+    timeoutMinutes?: number | null;
+  };
 
 /** Another bot in the proposer's section that the routine is scheduled for.
  * Captured (id + display name) when the card is created so the card stays

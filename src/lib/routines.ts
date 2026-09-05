@@ -1,7 +1,36 @@
+export interface RoutineIntervalWindow {
+  start: string;
+  end: string;
+}
+
 export type RoutineSchedule =
   | { type: "once"; at: number }
   | { type: "daily"; time: string; weekdays: number[] }
-  | { type: "interval"; everyMinutes: number; anchorAt: number };
+  | {
+    type: "interval";
+    everyMinutes: number;
+    anchorAt: number;
+    /** Local weekdays (Sunday = 0). Missing means every day. */
+    weekdays?: number[];
+    /** Local wall-clock window. Missing means all day. */
+    window?: RoutineIntervalWindow;
+    /** Inclusive epoch-millisecond cutoff. Missing means never. */
+    endsAt?: number;
+  };
+
+export type RoutineScheduleInput =
+  | Extract<RoutineSchedule, { type: "once" | "daily" }>
+  | {
+    type: "interval";
+    everyMinutes: number;
+    anchorAt: number;
+    /** `null` explicitly restores the every-day default on updates. */
+    weekdays?: number[] | null;
+    /** `null` explicitly restores the all-day default on updates. */
+    window?: RoutineIntervalWindow | null;
+    /** `null` explicitly removes an existing end date on updates. */
+    endsAt?: number | null;
+  };
 
 export type RoutineRunOn = "maus" | "cloud";
 
@@ -95,7 +124,7 @@ export interface RoutineInput {
   groupId?: string | null;
   runOn?: RoutineRunOn;
   enabled?: boolean;
-  schedule: RoutineSchedule;
+  schedule: RoutineScheduleInput;
   durationMinutes?: number;
   /** `null` explicitly removes the limit; omission preserves it on updates. */
   timeoutMinutes?: number | null;

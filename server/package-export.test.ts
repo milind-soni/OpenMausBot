@@ -91,7 +91,14 @@ describe("package export", () => {
           botId: "private-id",
           runOn: "maus",
           enabled: true,
-          schedule: { type: "interval", everyMinutes: 15, anchorAt: 1_788_254_400_000 },
+          schedule: {
+            type: "interval",
+            everyMinutes: 15,
+            anchorAt: 1_788_254_400_000,
+            weekdays: [1, 3, 5],
+            window: { start: "09:00", end: "17:00" },
+            endsAt: 1_790_843_400_000,
+          },
           durationMinutes: 30,
           timeoutMinutes: 20,
           nextRunAt: 789,
@@ -105,6 +112,9 @@ describe("package export", () => {
       type: "interval",
       everyMinutes: 15,
       anchorAt: 1_788_254_400_000,
+      weekdays: [1, 3, 5],
+      window: { start: "09:00", end: "17:00" },
+      endsAt: 1_790_843_400_000,
     });
     expect(exported.package.routines?.[1]?.timeoutMinutes).toBe(20);
 

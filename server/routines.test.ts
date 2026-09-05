@@ -132,6 +132,30 @@ describe("nextOccurrence", () => {
       anchorAt: 8_640_000_000_000_000,
     }, 8_640_000_000_000_000)).toBeNull();
   });
+
+  it("keeps restricted intervals on their global cadence inside local days and hours", () => {
+    const mondayAtEight = new Date(2026, 7, 17, 8, 0, 0).getTime();
+    const schedule: RoutineSchedule = {
+      type: "interval",
+      everyMinutes: 30,
+      anchorAt: mondayAtEight,
+      weekdays: [1, 3],
+      window: { start: "09:00", end: "10:30" },
+    };
+
+    expect(nextOccurrence(schedule, mondayAtEight)).toBe(new Date(2026, 7, 17, 9, 0, 0).getTime());
+    expect(nextOccurrence(schedule, new Date(2026, 7, 17, 10, 0, 0).getTime()))
+      .toBe(new Date(2026, 7, 19, 9, 0, 0).getTime());
+  });
+
+  it("treats an interval end as an inclusive cutoff", () => {
+    const anchorAt = new Date(2026, 7, 17, 8, 0, 0).getTime();
+    const endsAt = anchorAt + 10 * 60_000;
+    const schedule: RoutineSchedule = { type: "interval", everyMinutes: 5, anchorAt, endsAt };
+
+    expect(nextOccurrence(schedule, anchorAt + 5 * 60_000)).toBe(endsAt);
+    expect(nextOccurrence(schedule, endsAt)).toBeNull();
+  });
 });
 
 describe("RoutineManager", () => {
@@ -193,6 +217,145 @@ describe("RoutineManager", () => {
         schedule: { type: "interval", everyMinutes: 5, anchorAt: invalidAnchor },
       })).toThrow(/valid interval start time/);
     }
+  });
+
+  it("validates and normalizes interval restrictions", () => {
+    const h = harness();
+    const anchorAt = new Date(2026, 7, 17, 8, 5).getTime();
+    const endsAt = new Date(2026, 7, 31, 23, 59).getTime();
+    const input = {
+      name: "Restricted check",
+      prompt: "Check during support hours",
+      botId: "maus-1",
+    };
+    const routine = h.manager.create({
+      ...input,
+      schedule: {
+        type: "interval",
+        everyMinutes: 30,
+        anchorAt,
+        weekdays: [5, 1, 3],
+        window: { start: "09:00", end: "17:00" },
+        endsAt,
+      },
+    });
+
+    expect(routine.schedule).toEqual({
+      type: "interval",
+      everyMinutes: 30,
+      anchorAt,
+      weekdays: [1, 3, 5],
+      window: { start: "09:00", end: "17:00" },
+      endsAt,
+    });
+    expect(h.manager.create({
+      ...input,
+      name: "Every day",
+      schedule: {
+        type: "interval",
+        everyMinutes: 30,
+        anchorAt,
+        weekdays: [6, 5, 4, 3, 2, 1, 0],
+      },
+    }).schedule).toEqual({ type: "interval", everyMinutes: 30, anchorAt });
+
+    const invalidSchedules = [
+      { type: "interval" as const, everyMinutes: 30, anchorAt, weekdays: [] },
+      { type: "interval" as const, everyMinutes: 30, anchorAt, weekdays: [1, 1] },
+      { type: "interval" as const, everyMinutes: 30, anchorAt, weekdays: [7] },
+      { type: "interval" as const, everyMinutes: 30, anchorAt, window: { start: "9:00", end: "17:00" } },
+      { type: "interval" as const, everyMinutes: 30, anchorAt, window: { start: "17:00", end: "09:00" } },
+      { type: "interval" as const, everyMinutes: 60, anchorAt, window: { start: "09:00", end: "09:30" } },
+      { type: "interval" as const, everyMinutes: 30, anchorAt, endsAt: anchorAt - 1 },
+    ];
+    for (const [index, schedule] of invalidSchedules.entries()) {
+      expect(() => h.manager.create({ ...input, name: `Invalid ${index}`, schedule })).toThrow();
+    }
+  });
+
+  it("preserves interval restrictions for legacy schedule updates and clears explicit nulls", () => {
+    const h = harness();
+    const anchorAt = new Date(2026, 7, 17, 8, 5).getTime();
+    const endsAt = new Date(2026, 7, 31, 23, 59).getTime();
+    const routine = h.manager.create({
+      name: "Restricted check",
+      prompt: "Check during support hours",
+      botId: "maus-1",
+      schedule: {
+        type: "interval",
+        everyMinutes: 30,
+        anchorAt,
+        weekdays: [1, 3, 5],
+        window: { start: "09:00", end: "17:00" },
+        endsAt,
+      },
+    });
+
+    const legacyUpdate = h.manager.update(routine.id, {
+      name: "Renamed on an older phone",
+      schedule: { type: "interval", everyMinutes: 60, anchorAt },
+    });
+    expect(legacyUpdate?.schedule).toEqual({
+      type: "interval",
+      everyMinutes: 60,
+      anchorAt,
+      weekdays: [1, 3, 5],
+      window: { start: "09:00", end: "17:00" },
+      endsAt,
+    });
+
+    const cleared = h.manager.update(routine.id, {
+      schedule: {
+        type: "interval",
+        everyMinutes: 60,
+        anchorAt,
+        weekdays: null,
+        window: null,
+        endsAt: null,
+      },
+    });
+    expect(cleared?.schedule).toEqual({ type: "interval", everyMinutes: 60, anchorAt });
+  });
+
+  it("rejects enabled intervals without a future run but allows them while disabled", () => {
+    const now = new Date(2026, 7, 17, 8, 0, 0).getTime();
+    const h = harness(now);
+    const expiredSchedule = {
+      type: "interval" as const,
+      everyMinutes: 5,
+      anchorAt: now - 60 * 60_000,
+      endsAt: now - 30 * 60_000,
+    };
+    const input = {
+      name: "Expired check",
+      prompt: "Check only before the cutoff",
+      botId: "maus-1",
+      schedule: expiredSchedule,
+    };
+
+    expect(() => h.manager.create(input)).toThrow(
+      "This interval has no future runs. Choose a later end date or turn it off.",
+    );
+    const disabled = h.manager.create({ ...input, enabled: false });
+    expect(disabled).toMatchObject({ enabled: false, nextRunAt: null, schedule: expiredSchedule });
+
+    const active = h.manager.create({
+      ...input,
+      name: "Active check",
+      schedule: {
+        type: "interval",
+        everyMinutes: 5,
+        anchorAt: now + 5 * 60_000,
+        endsAt: now + 10 * 60_000,
+      },
+    });
+    expect(() => h.manager.update(active.id, { schedule: expiredSchedule })).toThrow(
+      "This interval has no future runs. Choose a later end date or turn it off.",
+    );
+    expect(h.manager.listRoutines().find((routine) => routine.id === active.id)?.enabled).toBe(true);
+
+    const paused = h.manager.update(active.id, { enabled: false, schedule: expiredSchedule });
+    expect(paused).toMatchObject({ enabled: false, nextRunAt: null, schedule: expiredSchedule });
   });
 
   it("stores routine data with owner-only permissions", () => {
@@ -640,6 +803,32 @@ describe("RoutineManager", () => {
     expect(h.manager.listRoutines()[0]?.nextRunAt).toBe(anchorAt + 15 * 60_000);
   });
 
+  it("catches up to the latest allowed restricted interval occurrence", async () => {
+    const mondayAtEight = new Date(2026, 7, 17, 8, 0, 0).getTime();
+    const h = harness(mondayAtEight);
+    h.manager.create({
+      name: "Support-hours check",
+      prompt: "Check the support queue",
+      botId: "maus-interval",
+      schedule: {
+        type: "interval",
+        everyMinutes: 30,
+        anchorAt: mondayAtEight,
+        weekdays: [1],
+        window: { start: "09:00", end: "10:30" },
+      },
+    });
+
+    h.setNow(new Date(2026, 7, 17, 10, 20, 0).getTime());
+    await h.manager.tick();
+
+    expect(h.manager.listRuns()).toMatchObject([{
+      status: "running",
+      scheduledFor: new Date(2026, 7, 17, 10, 0, 0).getTime(),
+    }]);
+    expect(h.manager.listRoutines()[0]?.nextRunAt).toBe(new Date(2026, 7, 24, 9, 0, 0).getTime());
+  });
+
   it("rebases a scheduled interval queued behind a busy bot before dispatch", async () => {
     const h = harness();
     h.setBot("busy");
@@ -671,6 +860,127 @@ describe("RoutineManager", () => {
       threadId: "thread-1",
       prompt: "Check the latest queue",
     }]);
+  });
+
+  it("holds a queued restricted interval outside its window and dispatches in the next window", async () => {
+    const mondayAtEight = new Date(2026, 7, 17, 8, 0, 0).getTime();
+    const h = harness(mondayAtEight);
+    h.setBot("busy");
+    h.manager.create({
+      name: "Business-hours check",
+      prompt: "Check at an allowed time",
+      botId: "maus-interval",
+      schedule: {
+        type: "interval",
+        everyMinutes: 30,
+        anchorAt: mondayAtEight,
+        weekdays: [1],
+        window: { start: "09:00", end: "10:30" },
+      },
+    });
+
+    h.setNow(new Date(2026, 7, 17, 10, 0, 0).getTime());
+    await h.manager.tick();
+    expect(h.manager.listRuns()[0]).toMatchObject({ status: "queued" });
+
+    h.setNow(new Date(2026, 7, 17, 11, 0, 0).getTime());
+    h.setBot("ready");
+    await h.manager.tick();
+    expect(h.started).toHaveLength(0);
+    expect(h.manager.listRuns()[0]).toMatchObject({ status: "queued" });
+
+    const nextMondayAtNine = new Date(2026, 7, 24, 9, 0, 0).getTime();
+    h.setNow(nextMondayAtNine);
+    await h.manager.tick();
+    expect(h.started).toEqual([{
+      botId: "maus-interval",
+      threadId: "thread-1",
+      prompt: "Check at an allowed time",
+    }]);
+    expect(h.manager.listRuns()[0]).toMatchObject({
+      status: "running",
+      scheduledFor: nextMondayAtNine,
+    });
+  });
+
+  it("waits for the first aligned occurrence in a new allowed window before dispatching a carried queue", async () => {
+    const mondayAtEightOhFive = new Date(2026, 7, 17, 8, 5, 0).getTime();
+    const h = harness(mondayAtEightOhFive);
+    h.setBot("busy");
+    h.manager.create({
+      name: "Phase-aligned check",
+      prompt: "Keep the original cadence",
+      botId: "maus-interval",
+      schedule: {
+        type: "interval",
+        everyMinutes: 30,
+        anchorAt: mondayAtEightOhFive,
+        weekdays: [1],
+        window: { start: "09:00", end: "10:30" },
+      },
+    });
+
+    const firstMondayAtTenOhFive = new Date(2026, 7, 17, 10, 5, 0).getTime();
+    h.setNow(firstMondayAtTenOhFive);
+    await h.manager.tick();
+    expect(h.manager.listRuns()[0]).toMatchObject({
+      status: "queued",
+      scheduledFor: firstMondayAtTenOhFive,
+    });
+
+    h.setBot("ready");
+    h.setNow(new Date(2026, 7, 24, 9, 1, 0).getTime());
+    await h.manager.tick();
+    expect(h.started).toHaveLength(0);
+    expect(h.manager.listRuns()[0]).toMatchObject({
+      status: "queued",
+      scheduledFor: firstMondayAtTenOhFive,
+    });
+
+    const nextMondayAtNineOhFive = new Date(2026, 7, 24, 9, 5, 0).getTime();
+    h.setNow(nextMondayAtNineOhFive);
+    await h.manager.tick();
+    expect(h.started).toEqual([{
+      botId: "maus-interval",
+      threadId: "thread-1",
+      prompt: "Keep the original cadence",
+    }]);
+    expect(h.manager.listRuns()[0]).toMatchObject({
+      status: "running",
+      scheduledFor: nextMondayAtNineOhFive,
+    });
+  });
+
+  it("disables an exhausted interval and marks its still-queued final run missed", async () => {
+    const start = new Date(2026, 7, 17, 8, 0, 0).getTime();
+    const finalOccurrence = start + 5 * 60_000;
+    const h = harness(start);
+    h.setBot("busy");
+    h.manager.create({
+      name: "Short-lived check",
+      prompt: "Run before the cutoff",
+      botId: "maus-interval",
+      schedule: {
+        type: "interval",
+        everyMinutes: 5,
+        anchorAt: start,
+        endsAt: finalOccurrence,
+      },
+    });
+
+    h.setNow(finalOccurrence);
+    await h.manager.tick();
+    expect(h.manager.listRoutines()[0]).toMatchObject({ enabled: false, nextRunAt: null });
+    expect(h.manager.listRuns()[0]).toMatchObject({ status: "queued", scheduledFor: finalOccurrence });
+
+    h.setNow(finalOccurrence + 60_000);
+    h.setBot("ready");
+    await h.manager.tick();
+    expect(h.started).toHaveLength(0);
+    expect(h.manager.listRuns()[0]).toMatchObject({
+      status: "missed",
+      error: "The routine ended before this scheduled run could start",
+    });
   });
 
   it("preserves exact timestamps for manual and webhook interval work", async () => {

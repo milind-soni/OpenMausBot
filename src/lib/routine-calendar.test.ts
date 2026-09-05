@@ -4,6 +4,8 @@ import type { Routine, RoutineRun } from "./routines";
 import {
   atLocalTime,
   formatGmtOffset,
+  intervalAnchorForSave,
+  nextIntervalAnchor,
   packCalendarCollisions,
   projectedRoutineItems,
   scheduleAt,
@@ -14,6 +16,24 @@ import {
 } from "./routine-calendar";
 
 describe("routine calendar geometry", () => {
+  it("anchors a new interval one cadence after save on a clean minute", () => {
+    const saveClick = new Date(2026, 7, 31, 9, 12, 34, 567).getTime();
+    const anchor = nextIntervalAnchor(saveClick, 5);
+
+    expect(anchor).toBe(new Date(2026, 7, 31, 9, 18).getTime());
+    expect(anchor - saveClick).toBeGreaterThanOrEqual(5 * 60_000);
+    expect(new Date(anchor).getSeconds()).toBe(0);
+    expect(new Date(anchor).getMilliseconds()).toBe(0);
+  });
+
+  it("preserves an interval anchor only while its cadence is unchanged", () => {
+    const saveClick = new Date(2026, 7, 31, 9, 12, 34, 567).getTime();
+    const current = { everyMinutes: 5, anchorAt: new Date(2026, 7, 1, 9).getTime() };
+
+    expect(intervalAnchorForSave(saveClick, 5, current)).toBe(current.anchorAt);
+    expect(intervalAnchorForSave(saveClick, 10, current)).toBe(new Date(2026, 7, 31, 9, 23).getTime());
+  });
+
   it("snaps pointer positions to 5 minute slots", () => {
     expect(snapMinutes(2)).toBe(0);
     expect(snapMinutes(3)).toBe(5);
@@ -48,6 +68,27 @@ describe("routine calendar geometry", () => {
       type: "interval",
       everyMinutes: 15,
       anchorAt: new Date(2026, 7, 31, 9, 50).getTime(),
+    });
+  });
+
+  it("keeps interval day, time-window, and end restrictions when moving a series", () => {
+    const anchor = new Date(2026, 7, 31, 9).getTime();
+    const occurrence = anchor + 30 * 60_000;
+    const moved = new Date(2026, 7, 31, 11).getTime();
+    expect(scheduleAt({
+      type: "interval",
+      everyMinutes: 30,
+      anchorAt: anchor,
+      weekdays: [1, 3, 5],
+      window: { start: "09:00", end: "17:00" },
+      endsAt: new Date(2026, 8, 30, 23, 59, 59, 999).getTime(),
+    }, occurrence, moved)).toEqual({
+      type: "interval",
+      everyMinutes: 30,
+      anchorAt: new Date(2026, 7, 31, 10, 30).getTime(),
+      weekdays: [1, 3, 5],
+      window: { start: "09:00", end: "17:00" },
+      endsAt: new Date(2026, 8, 30, 23, 59, 59, 999).getTime(),
     });
   });
 

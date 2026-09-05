@@ -6811,7 +6811,14 @@ describe("harness HTTP API", () => {
         botId: bot.id,
         runOn: "maus",
         enabled: false,
-        schedule: { type: "daily", time: "10:00", weekdays: [1] },
+        schedule: {
+          type: "interval",
+          everyMinutes: 15,
+          anchorAt: Date.parse("2026-08-28T10:00:00Z"),
+          weekdays: [1, 3, 5],
+          window: { start: "09:00", end: "17:00" },
+          endsAt: Date.parse("2026-09-30T18:00:00Z"),
+        },
       });
       legacyRoutineId = legacy.body.routine.id;
       const finalToken = await mintTestCapability(BASE, bot.id, bot.threadId);
@@ -6836,6 +6843,14 @@ describe("harness HTTP API", () => {
       expect(legacyResult.name).not.toContain(fakeNameSecret);
       expect(legacyResult.instructions).toContain("redacted");
       expect(legacyResult.instructionsTruncated).toBe(true);
+      expect(legacyResult.schedule).toEqual({
+        type: "interval",
+        everyMinutes: 15,
+        anchorAt: "2026-08-28T10:00:00.000Z",
+        weekdays: ["monday", "wednesday", "friday"],
+        window: { start: "09:00", end: "17:00" },
+        endsAt: "2026-09-30T18:00:00.000Z",
+      });
 
       const wrongThread = await fetch(`${BASE}/api/internal/routine-requests`, {
         method: "POST",

@@ -294,6 +294,12 @@ describe("agents-proxy MCP surface", () => {
     expect(create.inputSchema.properties.timeout_minutes).toMatchObject({ minimum: 5, maximum: 240 });
     expect(create.inputSchema.properties.clear_timeout.type).toBe("boolean");
     expect(schedule.properties.every_minutes).toMatchObject({ minimum: 5, maximum: 1_440 });
+    expect(schedule.properties.window_start.type).toBe("string");
+    expect(schedule.properties.window_end.type).toBe("string");
+    expect(schedule.properties.ends_at.type).toBe("string");
+    expect(schedule.properties.every_day.type).toBe("boolean");
+    expect(schedule.properties.all_day.type).toBe("boolean");
+    expect(schedule.properties.never_ends.type).toBe("boolean");
     expect(create.description).toContain("does NOT enable");
   });
 
@@ -639,12 +645,19 @@ describe("agents-proxy MCP surface", () => {
         type: "interval",
         every_minutes: 5,
         starts_at: "2026-09-01T09:00:00+05:30",
+        weekdays: ["Monday", "fri"],
+        window_start: "09:00",
+        window_end: "17:00",
+        ends_at: "2026-09-30T17:00:00+05:30",
       },
     });
     expect(lastRoutineRequestBody.routine.schedule).toEqual({
       type: "interval",
       everyMinutes: 5,
       anchorAt: "2026-09-01T09:00:00+05:30",
+      weekdays: ["monday", "friday"],
+      window: { start: "09:00", end: "17:00" },
+      endsAt: "2026-09-30T17:00:00+05:30",
     });
   });
 
@@ -662,6 +675,32 @@ describe("agents-proxy MCP surface", () => {
       changes: { name: "Weekday brief", timeoutMinutes: null },
     });
     expect(update.result.content[0].text).toContain("has not been applied");
+
+    await callTool("propose_routine_action", {
+      routine_id: "routine-1",
+      action: "update",
+      changes: {
+        schedule: {
+          type: "interval",
+          every_minutes: 15,
+          every_day: true,
+          all_day: true,
+          never_ends: true,
+        },
+      },
+    });
+    expect(lastRoutineRequestBody).toMatchObject({
+      action: "update",
+      changes: {
+        schedule: {
+          type: "interval",
+          everyMinutes: 15,
+          weekdays: null,
+          window: null,
+          endsAt: null,
+        },
+      },
+    });
 
     await callTool("propose_routine_action", { routine_id: "routine-1", action: "delete" });
     expect(lastRoutineRequestBody).toEqual({

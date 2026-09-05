@@ -57,6 +57,7 @@ import {
   calendarRangeLabel,
   formatGmtOffset,
   fromLocalDateAndTime,
+  intervalAnchorForSave,
   packCalendarCollisions,
   projectedRoutineItems,
   scheduleAt,
@@ -75,12 +76,14 @@ import type {
   RoutineRunOn,
   RoutineRunStatus,
   RoutineSchedule,
+  RoutineScheduleInput,
   RoutineTarget,
 } from "@/lib/routines";
 import { api, useStore, type Bot, type Group } from "@/state/store";
 
 const HOUR_HEIGHT = 64;
 const DAY_NAMES = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+const DAY_CHIP_LABELS = ["Su", "Mo", "Tu", "We", "Th", "Fr", "Sa"];
 const ALL_DAYS = [0, 1, 2, 3, 4, 5, 6];
 const WEEKDAYS = [1, 2, 3, 4, 5];
 const INTERVAL_PRESETS = [5, 10, 15, 30, 60];
@@ -91,6 +94,9 @@ const EVENT_DRAG_TYPE = "application/x-openmaus-calendar-event";
 type EventKind = "routine" | "call";
 type RecurrenceChoice = "none" | "daily" | "weekdays" | "weekly" | "custom" | "interval";
 type CalendarRecurrenceChoice = Exclude<RecurrenceChoice, "interval">;
+type IntervalDayChoice = "every-day" | "weekdays" | "custom";
+type IntervalWindowChoice = "all-day" | "custom";
+type IntervalEndChoice = "never" | "on-date";
 
 type CallOccurrence = {
   id: string;
@@ -170,10 +176,41 @@ function intervalLabel(minutes: number): string {
   return `Every ${Math.floor(minutes / 60)} hr ${minutes % 60} min`;
 }
 
+function sameDays(left: readonly number[] | undefined, right: readonly number[]): boolean {
+  return Boolean(left && left.length === right.length && left.every((day, index) => day === right[index]));
+}
+
+function intervalDayChoice(schedule: RoutineSchedule | CalendarCall["schedule"]): IntervalDayChoice {
+  if (schedule.type !== "interval" || !schedule.weekdays || schedule.weekdays.length === 7) return "every-day";
+  return sameDays(schedule.weekdays, WEEKDAYS) ? "weekdays" : "custom";
+}
+
+function endOfLocalDate(dateInput: string): number {
+  const date = new Date(`${dateInput}T00:00`);
+  date.setHours(23, 59, 59, 999);
+  return date.getTime();
+}
+
+function wallTimeLabel(time: string): string {
+  return niceTime(atLocalTime(Date.now(), time));
+}
+
 function scheduleLabel(schedule: RoutineSchedule | CalendarCall["schedule"]): string {
   if (schedule.type === "once") return `${niceDate(schedule.at)}, ${niceTime(schedule.at)}`;
   if (schedule.type === "interval") {
-    return `${intervalLabel(schedule.everyMinutes)} · starting ${niceDate(schedule.anchorAt)}, ${niceTime(schedule.anchorAt)}`;
+    const details: string[] = [intervalLabel(schedule.everyMinutes)];
+    if (schedule.weekdays && schedule.weekdays.length < 7) {
+      details.push(sameDays(schedule.weekdays, WEEKDAYS)
+        ? "weekdays"
+        : schedule.weekdays.map((day) => DAY_NAMES[day]).join(", "));
+    }
+    if (schedule.window) {
+      details.push(`${wallTimeLabel(schedule.window.start)}–${wallTimeLabel(schedule.window.end)}`);
+    }
+    if (schedule.endsAt != null) {
+      details.push(`until ${new Date(schedule.endsAt).toLocaleDateString([], { month: "short", day: "numeric", year: "numeric" })}`);
+    }
+    return details.join(" · ");
   }
   const days = schedule.weekdays;
   const label = days.length === 7
@@ -207,8 +244,19 @@ function makeCalendarSchedule(choice: CalendarRecurrenceChoice, at: number, week
   return { type: "daily", time: toLocalTimeInput(at), weekdays: [...selected].sort() };
 }
 
-function makeRoutineSchedule(choice: RecurrenceChoice, at: number, weekdays: number[], everyMinutes: number): RoutineSchedule {
-  if (choice === "interval") return { type: "interval", everyMinutes, anchorAt: at };
+function makeRoutineSchedule(
+  choice: RecurrenceChoice,
+  at: number,
+  weekdays: number[],
+  everyMinutes: number,
+  interval: {
+    anchorAt: number;
+    weekdays: number[] | null;
+    window: { start: string; end: string } | null;
+    endsAt: number | null;
+  },
+): RoutineScheduleInput {
+  if (choice === "interval") return { type: "interval", everyMinutes, ...interval };
   return makeCalendarSchedule(choice, at, weekdays);
 }
 
@@ -342,6 +390,7 @@ function EventEditor({
   const existingRoutine = seed.routine;
   const existingCall = seed.call;
   const [kind, setKind] = useState<EventKind>(seed.kind);
+  const [editorOpenedAt] = useState(() => Date.now());
   const [name, setName] = useState(existingRoutine?.name ?? existingCall?.name ?? seed.name ?? "");
   const [description, setDescription] = useState(existingRoutine?.prompt ?? existingCall?.description ?? seed.description ?? "");
   const initialAt = existingRoutine?.schedule.type === "once"
@@ -366,6 +415,17 @@ function EventEditor({
   const [recurrence, setRecurrence] = useState<RecurrenceChoice>(recurrenceFor(schedule, initialAt));
   const [weekdays, setWeekdays] = useState(schedule.type === "daily" ? schedule.weekdays : [new Date(initialAt).getDay()]);
   const [intervalMinutes, setIntervalMinutes] = useState(schedule.type === "interval" ? schedule.everyMinutes : 15);
+  const [intervalDays, setIntervalDays] = useState<IntervalDayChoice>(() => intervalDayChoice(schedule));
+  const [intervalWeekdays, setIntervalWeekdays] = useState(() => schedule.type === "interval" && schedule.weekdays?.length
+    ? schedule.weekdays
+    : [...ALL_DAYS]);
+  const [intervalWindow, setIntervalWindow] = useState<IntervalWindowChoice>(schedule.type === "interval" && schedule.window ? "custom" : "all-day");
+  const [intervalWindowStart, setIntervalWindowStart] = useState(schedule.type === "interval" ? schedule.window?.start ?? "09:00" : "09:00");
+  const [intervalWindowEnd, setIntervalWindowEnd] = useState(schedule.type === "interval" ? schedule.window?.end ?? "17:00" : "17:00");
+  const [intervalEnd, setIntervalEnd] = useState<IntervalEndChoice>(schedule.type === "interval" && schedule.endsAt != null ? "on-date" : "never");
+  const [intervalEndDate, setIntervalEndDate] = useState(() => schedule.type === "interval" && schedule.endsAt != null
+    ? toLocalDateInput(schedule.endsAt)
+    : toLocalDateInput(addDays(startOfDay(Math.max(Date.now(), initialAt)), 7)));
   const [botIds, setBotIds] = useState(lockedBotId ? [lockedBotId] : existingRoutine ? [existingRoutine.botId] : existingCall?.botIds ?? seed.botIds);
   const [routineTarget, setRoutineTarget] = useState<RoutineTarget>(existingRoutine?.target ?? "bot");
   const [groupId, setGroupId] = useState(existingRoutine?.groupId ?? "");
@@ -393,18 +453,49 @@ function EventEditor({
   onCloseRef.current = onClose;
   const intervalInvalid = recurrence === "interval"
     && (!Number.isInteger(intervalMinutes) || intervalMinutes < 5 || intervalMinutes > 1_440);
+  const intervalDaysInvalid = recurrence === "interval" && intervalDays === "custom" && intervalWeekdays.length === 0;
+  const intervalWindowMinutes = fromLocalDateAndTime("2000-01-01", intervalWindowEnd)
+    - fromLocalDateAndTime("2000-01-01", intervalWindowStart);
+  const intervalWindowInvalid = recurrence === "interval"
+    && intervalWindow === "custom"
+    && (!intervalWindowStart
+      || !intervalWindowEnd
+      || !Number.isFinite(intervalWindowMinutes)
+      || intervalWindowMinutes < intervalMinutes * 60_000);
+  const existingIntervalSchedule = existingRoutine?.schedule.type === "interval"
+    ? existingRoutine.schedule
+    : undefined;
+  const intervalEndMinimumAt = intervalAnchorForSave(
+    editorOpenedAt,
+    Math.max(5, intervalMinutes || 5),
+    existingIntervalSchedule,
+  );
+  const intervalEndsAt = intervalEnd === "on-date" ? endOfLocalDate(intervalEndDate) : null;
+  const intervalEndInvalid = recurrence === "interval"
+    && intervalEnd === "on-date"
+    && (intervalEndsAt == null || !Number.isSafeInteger(intervalEndsAt) || intervalEndsAt < intervalEndMinimumAt);
+  const selectedIntervalWeekdays = intervalDays === "every-day"
+    ? undefined
+    : intervalDays === "weekdays"
+      ? WEEKDAYS
+      : intervalWeekdays;
+  const selectedIntervalWindow = intervalWindow === "custom"
+    ? { start: intervalWindowStart, end: intervalWindowEnd }
+    : undefined;
 
   const selectRecurrence = (choice: RecurrenceChoice) => {
-    if (choice === "interval" && recurrence !== "interval" && !existingRoutine) {
-      const firstAt = Date.now() + intervalMinutes * 60_000;
-      setDate(toLocalDateInput(firstAt));
-      setStartTime(toLocalTimeInput(firstAt));
-    }
     if (choice === "interval" && !intervalTimeoutDefaultApplied) {
       setTimeoutMinutes((current) => current ?? 30);
       setIntervalTimeoutDefaultApplied(true);
     }
     setRecurrence(choice);
+  };
+
+  const selectIntervalDays = (choice: IntervalDayChoice) => {
+    if (choice === "custom" && intervalDays !== "custom") {
+      setIntervalWeekdays(intervalDays === "weekdays" ? [...WEEKDAYS] : [...ALL_DAYS]);
+    }
+    setIntervalDays(choice);
   };
 
   const selectRoutineTarget = (target: RoutineTarget) => {
@@ -455,7 +546,17 @@ function EventEditor({
     setError("");
     try {
       if (kind === "routine") {
-        const nextSchedule = makeRoutineSchedule(recurrence, at, weekdays, intervalMinutes);
+        const savedAt = Date.now();
+        const intervalAnchorAt = intervalAnchorForSave(savedAt, intervalMinutes, existingIntervalSchedule);
+        if (recurrence === "interval" && intervalEndsAt != null && intervalEndsAt < intervalAnchorAt) {
+          throw new Error("Choose an end date after the first run.");
+        }
+        const nextSchedule = makeRoutineSchedule(recurrence, at, weekdays, intervalMinutes, {
+          anchorAt: intervalAnchorAt,
+          weekdays: selectedIntervalWeekdays ? [...selectedIntervalWeekdays].sort() : null,
+          window: selectedIntervalWindow ?? null,
+          endsAt: intervalEndsAt,
+        });
         const input: RoutineInput = {
           name,
           prompt: description,
@@ -507,7 +608,10 @@ function EventEditor({
       : routineTarget === "room-goal"
         ? groupId && botIds[0] && roomMembers.some((bot) => bot.id === botIds[0])
         : botIds.length > 0)
-    && !intervalInvalid,
+    && !intervalInvalid
+    && !intervalDaysInvalid
+    && !intervalWindowInvalid
+    && !intervalEndInvalid,
   );
   const canSwitchKind = !existingRoutine && !existingCall && !lockedBotId;
 
@@ -625,7 +729,7 @@ function EventEditor({
                 </div>
               )}
               {recurrence === "interval" && kind === "routine" && (
-                <div>
+                <div className="space-y-3">
                   <div className="flex flex-wrap items-center gap-2 text-[12.5px] text-ink">
                     <span className="font-medium">Runs every</span>
                     <select
@@ -652,18 +756,114 @@ function EventEditor({
                         className={cn("w-20 rounded-lg border bg-inset px-3 py-2 text-[12.5px] tabular-nums text-ink outline-none focus:border-accent", intervalInvalid ? "border-danger/70" : "border-hairline/50")}
                       />
                     )}
-                    <span>minutes, starting</span>
-                    <input aria-label="Interval start date" type="date" value={date} onChange={(event) => setDate(event.target.value)} className="rounded-lg border border-hairline/50 bg-inset px-3 py-2 text-[13px] text-ink outline-none focus:border-accent [color-scheme:dark]" />
-                    <span>at</span>
-                    <input aria-label="Interval start time" type="time" step={CALENDAR_SLOT_MINUTES * 60} value={startTime} onChange={(event) => setStartTime(event.target.value)} className="rounded-lg border border-hairline/50 bg-inset px-3 py-2 text-[13px] text-ink outline-none focus:border-accent [color-scheme:dark]" />
-                    <span>.</span>
+                    <span>minutes</span>
                   </div>
-                  <div id="routine-interval-help" className="mt-2 text-[11px] leading-relaxed text-ink-secondary">
-                    The cadence continues from this starting point. If a run is still active, the next occurrence is skipped instead of queued.
+
+                  <div className="grid items-center gap-2 text-[12.5px] text-ink sm:flex sm:flex-wrap">
+                    <span className="inline-flex items-center gap-2 whitespace-nowrap">
+                      <span className="font-medium">On</span>
+                      <select
+                        value={intervalDays}
+                        onChange={(event) => selectIntervalDays(event.target.value as IntervalDayChoice)}
+                        aria-label="Days this interval runs"
+                        aria-invalid={intervalDaysInvalid}
+                        aria-describedby={intervalDaysInvalid ? "routine-interval-days-error" : undefined}
+                        className="rounded-lg border border-hairline/50 bg-inset px-3 py-2 text-[12.5px] text-ink outline-none focus:border-accent"
+                      >
+                        <option value="every-day">Every day</option>
+                        <option value="weekdays">Weekdays</option>
+                        <option value="custom">Custom…</option>
+                      </select>
+                    </span>
+                    <span aria-hidden="true" className="hidden text-ink-secondary sm:inline">·</span>
+                    <span className="inline-flex items-center gap-2 whitespace-nowrap">
+                      <span className="font-medium">During</span>
+                      <select
+                        value={intervalWindow}
+                        onChange={(event) => setIntervalWindow(event.target.value as IntervalWindowChoice)}
+                        aria-label="Hours this interval runs"
+                        aria-invalid={intervalWindowInvalid}
+                        aria-describedby={intervalWindowInvalid ? "routine-interval-window-error" : undefined}
+                        className="rounded-lg border border-hairline/50 bg-inset px-3 py-2 text-[12.5px] text-ink outline-none focus:border-accent"
+                      >
+                        <option value="all-day">All day</option>
+                        <option value="custom">Custom hours…</option>
+                      </select>
+                    </span>
+                    <span aria-hidden="true" className="hidden text-ink-secondary sm:inline">·</span>
+                    <span className="inline-flex items-center gap-2 whitespace-nowrap">
+                      <span className="font-medium">Ends</span>
+                      <select
+                        value={intervalEnd}
+                        onChange={(event) => setIntervalEnd(event.target.value as IntervalEndChoice)}
+                        aria-label="When this interval ends"
+                        aria-invalid={intervalEndInvalid}
+                        aria-describedby={intervalEndInvalid ? "routine-interval-end-error" : undefined}
+                        className="rounded-lg border border-hairline/50 bg-inset px-3 py-2 text-[12.5px] text-ink outline-none focus:border-accent"
+                      >
+                        <option value="never">Never</option>
+                        <option value="on-date">On a date…</option>
+                      </select>
+                    </span>
                   </div>
-                  {intervalInvalid && (
-                    <div id="routine-interval-error" className="mt-2 text-[11px] text-danger">Choose a whole number from 5 to 1,440 minutes.</div>
+
+                  {intervalDays === "custom" && (
+                    <div>
+                      <div className="mb-2 text-[11px] font-medium text-ink-secondary">Choose the days</div>
+                      <div
+                        role="group"
+                        aria-label="Custom interval days"
+                        aria-invalid={intervalDaysInvalid}
+                        aria-describedby={intervalDaysInvalid ? "routine-interval-days-error" : undefined}
+                        className="flex flex-wrap gap-1.5"
+                      >
+                        {DAY_NAMES.map((label, day) => (
+                          <button
+                            key={label}
+                            type="button"
+                            onClick={() => setIntervalWeekdays((current) => current.includes(day)
+                              ? current.filter((value) => value !== day)
+                              : [...current, day].sort())}
+                            aria-label={`${label}, ${intervalWeekdays.includes(day) ? "selected" : "not selected"}`}
+                            aria-pressed={intervalWeekdays.includes(day)}
+                            className={cn("size-8 rounded-full text-[10px] font-semibold", intervalWeekdays.includes(day) ? "bg-accent text-white" : "bg-inset text-ink-secondary hover:bg-raised hover:text-ink")}
+                          >
+                            {DAY_CHIP_LABELS[day]}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
                   )}
+
+                  {intervalWindow === "custom" && (
+                    <div className="flex flex-wrap items-center gap-2 text-[12px] text-ink">
+                      <span className="font-medium text-ink-secondary">Run between</span>
+                      <input aria-label="Interval window start" aria-invalid={intervalWindowInvalid} aria-describedby={intervalWindowInvalid ? "routine-interval-window-error" : undefined} type="time" step={CALENDAR_SLOT_MINUTES * 60} value={intervalWindowStart} onChange={(event) => setIntervalWindowStart(event.target.value)} className={cn("rounded-lg border bg-inset px-3 py-2 text-[13px] text-ink outline-none focus:border-accent [color-scheme:dark]", intervalWindowInvalid ? "border-danger/70" : "border-hairline/50")} />
+                      <span className="text-ink-secondary">and</span>
+                      <input aria-label="Interval window end" aria-invalid={intervalWindowInvalid} aria-describedby={intervalWindowInvalid ? "routine-interval-window-error" : undefined} type="time" step={CALENDAR_SLOT_MINUTES * 60} value={intervalWindowEnd} onChange={(event) => setIntervalWindowEnd(event.target.value)} className={cn("rounded-lg border bg-inset px-3 py-2 text-[13px] text-ink outline-none focus:border-accent [color-scheme:dark]", intervalWindowInvalid ? "border-danger/70" : "border-hairline/50")} />
+                    </div>
+                  )}
+
+                  {intervalEnd === "on-date" && (
+                    <label className="flex flex-wrap items-center gap-2 text-[12px] text-ink">
+                      <span className="font-medium text-ink-secondary">Stop scheduling after</span>
+                      <input aria-label="Interval end date" aria-invalid={intervalEndInvalid} aria-describedby={intervalEndInvalid ? "routine-interval-end-error" : undefined} type="date" min={toLocalDateInput(intervalEndMinimumAt)} value={intervalEndDate} onChange={(event) => setIntervalEndDate(event.target.value)} className={cn("rounded-lg border bg-inset px-3 py-2 text-[13px] text-ink outline-none focus:border-accent [color-scheme:dark]", intervalEndInvalid ? "border-danger/70" : "border-hairline/50")} />
+                    </label>
+                  )}
+
+                  {intervalInvalid && (
+                    <div id="routine-interval-error" className="text-[11px] text-danger">Choose a whole number from 5 to 1,440 minutes.</div>
+                  )}
+                  {intervalDaysInvalid && (
+                    <div id="routine-interval-days-error" className="text-[11px] text-danger">Choose at least one day.</div>
+                  )}
+                  {intervalWindowInvalid && (
+                    <div id="routine-interval-window-error" className="text-[11px] text-danger">Choose a same-day window at least {intervalMinutes || 5} minutes long.</div>
+                  )}
+                  {intervalEndInvalid && (
+                    <div id="routine-interval-end-error" className="text-[11px] text-danger">Choose an end date after the first run.</div>
+                  )}
+                  <div id="routine-interval-help" className="text-[11px] leading-relaxed text-ink-secondary">If a run is still active, the next occurrence is skipped instead of queued.</div>
                 </div>
               )}
               {kind === "routine" && (

@@ -10,10 +10,40 @@ import { redactSecretsInText } from "./redact.ts";
 import type { GroupGoalRunStatus } from "../shared/group-goal-run.ts";
 import type { RoutineRequestOperation } from "../shared/routine-request.ts";
 
+export interface RoutineIntervalWindow {
+  start: string;
+  end: string;
+}
+
+export interface RoutineIntervalSchedule {
+  type: "interval";
+  everyMinutes: number;
+  anchorAt: number;
+  /** Local weekdays (`0` is Sunday). Missing means every day. */
+  weekdays?: number[];
+  /** Local, same-day wall-clock window. Missing means all day. */
+  window?: RoutineIntervalWindow;
+  /** Inclusive epoch-millisecond cutoff. Missing means the series never ends. */
+  endsAt?: number;
+}
+
+/** Input-only nullable restrictions let current clients deliberately clear a
+ * restriction while an omitted field remains distinguishable for legacy
+ * clients that know only the interval cadence and anchor. */
+export type RoutineIntervalScheduleInput = Omit<RoutineIntervalSchedule, "weekdays" | "window" | "endsAt"> & {
+  weekdays?: number[] | null;
+  window?: RoutineIntervalWindow | null;
+  endsAt?: number | null;
+};
+
 export type RoutineSchedule =
   | { type: "once"; at: number }
   | { type: "daily"; time: string; weekdays: number[] }
-  | { type: "interval"; everyMinutes: number; anchorAt: number };
+  | RoutineIntervalSchedule;
+
+export type RoutineScheduleInput =
+  | Exclude<RoutineSchedule, RoutineIntervalSchedule>
+  | RoutineIntervalScheduleInput;
 
 /** `cloud` runs the agent itself inside the bot's Box VM. `maus` keeps
  * using the provider selected on the MAUS and only borrows its configured
@@ -146,7 +176,7 @@ export interface RoutineInput {
   groupId?: string | null;
   runOn?: RoutineRunOn;
   enabled?: boolean;
-  schedule: RoutineSchedule;
+  schedule: RoutineScheduleInput;
   durationMinutes?: number;
   /** `null` deliberately removes an existing safety cap. */
   timeoutMinutes?: number | null;
@@ -207,6 +237,9 @@ export interface RoutineManagerOptions {
 const ALL_DAYS = [0, 1, 2, 3, 4, 5, 6];
 const CATCH_UP_MS = 12 * 60 * 60_000;
 const MAX_DATE_MS = 8_640_000_000_000_000;
+const LOCAL_DAY_MS = 24 * 60 * 60_000;
+const INTERVAL_RESTRICTION_SEARCH_MS = 9 * LOCAL_DAY_MS;
+const CLOCK_TIME = /^([01]\d|2[0-3]):([0-5]\d)$/;
 const MAX_RUNS = 2_000;
 const MAX_ATTACHMENTS = 50;
 const attachmentSchema = z.object({
@@ -281,7 +314,14 @@ function loadAttachments(value: unknown): RoutineContextAttachment[] {
 function cloneSchedule(schedule: RoutineSchedule): RoutineSchedule {
   if (schedule.type === "once") return { type: "once", at: schedule.at };
   if (schedule.type === "interval") {
-    return { type: "interval", everyMinutes: schedule.everyMinutes, anchorAt: schedule.anchorAt };
+    return {
+      type: "interval",
+      everyMinutes: schedule.everyMinutes,
+      anchorAt: schedule.anchorAt,
+      ...(schedule.weekdays ? { weekdays: [...schedule.weekdays] } : {}),
+      ...(schedule.window ? { window: { ...schedule.window } } : {}),
+      ...(schedule.endsAt === undefined ? {} : { endsAt: schedule.endsAt }),
+    };
   }
   return { type: "daily", time: schedule.time, weekdays: [...schedule.weekdays] };
 }
@@ -354,7 +394,60 @@ function composeExecutionPrompt(prompt: string, attachments: readonly RoutineCon
   return parts.filter(Boolean).join("\n\n");
 }
 
-function cleanSchedule(schedule: RoutineSchedule): RoutineSchedule {
+function cleanIntervalWeekdays(value: unknown): number[] | undefined {
+  if (value == null) return undefined;
+  if (!Array.isArray(value) || value.length === 0 || value.length > ALL_DAYS.length) {
+    throw new Error("Choose at least one valid interval day");
+  }
+  if (value.some((day) => typeof day !== "number" || !Number.isInteger(day) || day < 0 || day > 6)) {
+    throw new Error("Interval days must be whole numbers from 0 to 6");
+  }
+  if (new Set(value).size !== value.length) throw new Error("Choose each interval day only once");
+  const weekdays = [...value].sort((a, b) => a - b);
+  return weekdays.length === ALL_DAYS.length ? undefined : weekdays;
+}
+
+function clockMinutes(value: string): number | null {
+  const match = CLOCK_TIME.exec(value);
+  return match ? Number(match[1]) * 60 + Number(match[2]) : null;
+}
+
+function cleanIntervalWindow(value: unknown, everyMinutes: number): RoutineIntervalWindow | undefined {
+  if (value == null) return undefined;
+  if (typeof value !== "object" || Array.isArray(value)) {
+    throw new Error("Choose a valid interval time window");
+  }
+  const candidate = value as Partial<RoutineIntervalWindow>;
+  const start = typeof candidate.start === "string" ? candidate.start : "";
+  const end = typeof candidate.end === "string" ? candidate.end : "";
+  const startMinutes = clockMinutes(start);
+  const endMinutes = clockMinutes(end);
+  if (startMinutes == null || endMinutes == null) {
+    throw new Error("Interval window times must use HH:MM");
+  }
+  if (startMinutes >= endMinutes) {
+    throw new Error("Interval window must start before it ends on the same day");
+  }
+  if (endMinutes - startMinutes < everyMinutes) {
+    throw new Error("Interval window must be at least as long as the interval");
+  }
+  return { start, end };
+}
+
+function cleanIntervalEndsAt(value: unknown, anchorAt: number): number | undefined {
+  if (value == null) return undefined;
+  if (
+    typeof value !== "number" ||
+    !Number.isSafeInteger(value) ||
+    value < anchorAt ||
+    value > MAX_DATE_MS
+  ) {
+    throw new Error("Choose a valid interval end time after its start");
+  }
+  return value;
+}
+
+function cleanSchedule(schedule: RoutineScheduleInput): RoutineSchedule {
   if (schedule?.type === "once") {
     const at = Number(schedule.at);
     if (!Number.isFinite(at)) throw new Error("Choose a valid date and time");
@@ -378,28 +471,75 @@ function cleanSchedule(schedule: RoutineSchedule): RoutineSchedule {
     ) {
       throw new Error("Choose a valid interval start time");
     }
-    return { type: "interval", everyMinutes, anchorAt };
+    const weekdays = cleanIntervalWeekdays(schedule.weekdays);
+    const window = cleanIntervalWindow(schedule.window, everyMinutes);
+    const endsAt = cleanIntervalEndsAt(schedule.endsAt, anchorAt);
+    return {
+      type: "interval",
+      everyMinutes,
+      anchorAt,
+      ...(weekdays ? { weekdays } : {}),
+      ...(window ? { window } : {}),
+      ...(endsAt === undefined ? {} : { endsAt }),
+    };
   }
   throw new Error("Choose a supported schedule");
 }
 
 function loadSchedule(value: unknown): RoutineSchedule | null {
   try {
-    return cleanSchedule(value as RoutineSchedule);
+    return cleanSchedule(value as RoutineScheduleInput);
   } catch {
     return null;
   }
+}
+
+function intervalHasRestrictions(schedule: RoutineIntervalSchedule): boolean {
+  return schedule.weekdays !== undefined || schedule.window !== undefined || schedule.endsAt !== undefined;
+}
+
+function intervalAllowsOccurrence(schedule: RoutineIntervalSchedule, at: number): boolean {
+  if (schedule.endsAt !== undefined && at > schedule.endsAt) return false;
+  const date = new Date(at);
+  if (schedule.weekdays && !schedule.weekdays.includes(date.getDay())) return false;
+  if (schedule.window) {
+    const minute = date.getHours() * 60 + date.getMinutes();
+    const start = clockMinutes(schedule.window.start)!;
+    const end = clockMinutes(schedule.window.end)!;
+    if (minute < start || minute >= end) return false;
+  }
+  return true;
+}
+
+function isSameLocalDay(left: number, right: number): boolean {
+  const a = new Date(left);
+  const b = new Date(right);
+  return a.getFullYear() === b.getFullYear() && a.getMonth() === b.getMonth() && a.getDate() === b.getDate();
+}
+
+function nextAlignedInterval(schedule: RoutineIntervalSchedule, after: number): number | null {
+  if (schedule.anchorAt > after) return schedule.anchorAt;
+  const intervalMs = schedule.everyMinutes * 60_000;
+  const intervalsElapsed = Math.floor((after - schedule.anchorAt) / intervalMs);
+  const candidate = schedule.anchorAt + (intervalsElapsed + 1) * intervalMs;
+  return Number.isSafeInteger(candidate) && candidate <= MAX_DATE_MS ? candidate : null;
 }
 
 /** Next wall-clock occurrence in this computer's timezone, strictly after `after`. */
 export function nextOccurrence(schedule: RoutineSchedule, after: number): number | null {
   if (schedule.type === "once") return schedule.at > after ? schedule.at : null;
   if (schedule.type === "interval") {
-    if (schedule.anchorAt > after) return schedule.anchorAt;
     const intervalMs = schedule.everyMinutes * 60_000;
-    const intervalsElapsed = Math.floor((after - schedule.anchorAt) / intervalMs);
-    const candidate = schedule.anchorAt + (intervalsElapsed + 1) * intervalMs;
-    return Number.isSafeInteger(candidate) && candidate <= MAX_DATE_MS ? candidate : null;
+    let candidate = nextAlignedInterval(schedule, after);
+    if (!intervalHasRestrictions(schedule)) return candidate;
+    const maxCandidates = Math.ceil(INTERVAL_RESTRICTION_SEARCH_MS / intervalMs) + 2;
+    for (let checked = 0; candidate !== null && checked < maxCandidates; checked++) {
+      if (schedule.endsAt !== undefined && candidate > schedule.endsAt) return null;
+      if (intervalAllowsOccurrence(schedule, candidate)) return candidate;
+      const next = candidate + intervalMs;
+      candidate = Number.isSafeInteger(next) && next <= MAX_DATE_MS ? next : null;
+    }
+    return null;
   }
   const [hour, minute] = schedule.time.split(":").map(Number);
   const weekdays = new Set(cleanDays(schedule.weekdays));
@@ -413,12 +553,40 @@ export function nextOccurrence(schedule: RoutineSchedule, after: number): number
 }
 
 function latestIntervalOccurrence(
-  schedule: Extract<RoutineSchedule, { type: "interval" }>,
+  schedule: RoutineIntervalSchedule,
   at: number,
 ): number | null {
-  if (schedule.anchorAt > at) return null;
   const intervalMs = schedule.everyMinutes * 60_000;
-  return schedule.anchorAt + Math.floor((at - schedule.anchorAt) / intervalMs) * intervalMs;
+  const ceiling = Math.min(at, schedule.endsAt ?? at);
+  if (schedule.anchorAt > ceiling) return null;
+  let candidate = schedule.anchorAt + Math.floor((ceiling - schedule.anchorAt) / intervalMs) * intervalMs;
+  if (!intervalHasRestrictions(schedule)) return candidate;
+  const maxCandidates = Math.ceil(INTERVAL_RESTRICTION_SEARCH_MS / intervalMs) + 2;
+  for (let checked = 0; checked < maxCandidates; checked++) {
+    if (intervalAllowsOccurrence(schedule, candidate)) return candidate;
+    const previous = candidate - intervalMs;
+    if (!Number.isSafeInteger(previous) || previous < schedule.anchorAt) return null;
+    candidate = previous;
+  }
+  return null;
+}
+
+function mergeScheduleUpdate(
+  current: RoutineSchedule,
+  incoming: RoutineScheduleInput,
+): RoutineScheduleInput {
+  if (current.type !== "interval" || incoming.type !== "interval") return incoming;
+  const merged: RoutineIntervalScheduleInput = { ...incoming };
+  if (!Object.hasOwn(incoming, "weekdays") && current.weekdays) {
+    merged.weekdays = [...current.weekdays];
+  }
+  if (!Object.hasOwn(incoming, "window") && current.window) {
+    merged.window = { ...current.window };
+  }
+  if (!Object.hasOwn(incoming, "endsAt") && current.endsAt !== undefined) {
+    merged.endsAt = current.endsAt;
+  }
+  return merged;
 }
 
 function sanitizeInput(input: RoutineInput): Omit<Routine, "id" | "createdAt" | "updatedAt" | "nextRunAt"> {
@@ -652,13 +820,17 @@ export class RoutineManager {
     const clean = sanitizeInput(input);
     if (this.targetState(clean) === "missing") throw new Error(this.missingTargetMessage(clean.target));
     const at = this.now();
+    const nextRunAt = clean.enabled ? this.initialOccurrence(clean.schedule, at) : null;
+    if (clean.schedule.type === "interval" && clean.enabled && nextRunAt === null) {
+      throw new Error("This interval has no future runs. Choose a later end date or turn it off.");
+    }
     const routine: Routine = {
       id: randomUUID(),
       ...clean,
       // Only a confirmed chat card supplies `request`; the public calendar
       // API cannot choose an arbitrary transcript as a reporting target.
       sourceThreadId: request?.threadId,
-      nextRunAt: clean.enabled ? this.initialOccurrence(clean.schedule, at) : null,
+      nextRunAt,
       createdAt: at,
       updatedAt: at,
     };
@@ -693,16 +865,20 @@ export class RoutineManager {
       groupId: Object.hasOwn(patch, "groupId") ? patch.groupId : routine.groupId,
       runOn: patch.runOn ?? routine.runOn,
       enabled: patch.enabled ?? routine.enabled,
-      schedule: patch.schedule ?? routine.schedule,
+      schedule: patch.schedule ? mergeScheduleUpdate(routine.schedule, patch.schedule) : routine.schedule,
       durationMinutes: patch.durationMinutes ?? routine.durationMinutes,
       timeoutMinutes: Object.hasOwn(patch, "timeoutMinutes") ? patch.timeoutMinutes : routine.timeoutMinutes,
       attachments: patch.attachments ?? routine.attachments,
     });
     if (this.targetState(clean) === "missing") throw new Error(this.missingTargetMessage(clean.target));
+    const nextRunAt = clean.enabled ? this.initialOccurrence(clean.schedule, now) : null;
+    if (clean.schedule.type === "interval" && clean.enabled && nextRunAt === null) {
+      throw new Error("This interval has no future runs. Choose a later end date or turn it off.");
+    }
     const cancelledRuns: RoutineRun[] = [];
     this.commitMutation(() => {
       Object.assign(routine, clean, {
-        nextRunAt: clean.enabled ? this.initialOccurrence(clean.schedule, now) : null,
+        nextRunAt,
         // `updatedAt` doubles as the optimistic revision on durable routine
         // confirmation cards. Keep it monotonic even for two writes in one ms.
         updatedAt: Math.max(now, routine.updatedAt + 1),
@@ -1002,6 +1178,9 @@ export class RoutineManager {
         if (routine.schedule.type === "once") {
           routine.enabled = false;
           routine.updatedAt = Math.max(now, routine.updatedAt + 1);
+        } else if (routine.schedule.type === "interval" && routine.nextRunAt === null) {
+          routine.enabled = false;
+          routine.updatedAt = Math.max(now, routine.updatedAt + 1);
         }
         this.emitRoutine(routine);
         changed = true;
@@ -1026,6 +1205,16 @@ export class RoutineManager {
             run.scheduledFor = latest;
             this.save();
             this.emitRun(run);
+          }
+          const requiresCurrentDayOccurrence =
+            definition.schedule.weekdays !== undefined || definition.schedule.window !== undefined;
+          const mayDispatch = intervalAllowsOccurrence(definition.schedule, now) &&
+            (!requiresCurrentDayOccurrence || (latest !== null && isSameLocalDay(latest, now)));
+          if (!mayDispatch) {
+            if (nextOccurrence(definition.schedule, now) === null) {
+              this.missQueuedRun(run, "The routine ended before this scheduled run could start");
+            }
+            continue;
           }
         }
         const state = this.targetState(run);
@@ -1184,6 +1373,16 @@ export class RoutineManager {
 
   private failRun(run: RoutineRun, message: string) {
     run.status = "failed";
+    run.attention = undefined;
+    run.error = redactSecretsInText(message).slice(0, 500);
+    run.finishedAt = this.now();
+    this.save();
+    this.emitRun(run);
+    this.options.onRunFailed?.(cloneRun(run));
+  }
+
+  private missQueuedRun(run: RoutineRun, message: string) {
+    run.status = "missed";
     run.attention = undefined;
     run.error = redactSecretsInText(message).slice(0, 500);
     run.finishedAt = this.now();

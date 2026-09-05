@@ -108,6 +108,13 @@ export function createBotPackageExport(input: {
               type: "interval",
               everyMinutes: routine.schedule.everyMinutes,
               anchorAt: routine.schedule.anchorAt,
+              ...(routine.schedule.weekdays === undefined
+                ? {}
+                : { weekdays: [...routine.schedule.weekdays] }),
+              ...(routine.schedule.window === undefined
+                ? {}
+                : { window: { ...routine.schedule.window } }),
+              ...(routine.schedule.endsAt === undefined ? {} : { endsAt: routine.schedule.endsAt }),
             }
           : { type: "daily", time: routine.schedule.time, weekdays: [...routine.schedule.weekdays] },
       durationMinutes: routine.durationMinutes,

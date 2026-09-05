@@ -116,7 +116,14 @@ describe("bot packages", () => {
           agent: "lead",
           prompt: "Check the queue.",
           runOn: "maus",
-          schedule: { type: "interval", everyMinutes: 15, anchorAt: 1_788_254_400_000 },
+          schedule: {
+            type: "interval",
+            everyMinutes: 15,
+            anchorAt: 1_788_254_400_000,
+            weekdays: [1, 3, 5],
+            window: { start: "09:00", end: "17:00" },
+            endsAt: 1_790_843_400_000,
+          },
           durationMinutes: 30,
           timeoutMinutes: 20,
           enabledAfterInstall: false,
@@ -129,9 +136,14 @@ describe("bot packages", () => {
       type: "interval",
       everyMinutes: 15,
       anchorAt: 1_788_254_400_000,
+      weekdays: [1, 3, 5],
+      window: { start: "09:00", end: "17:00" },
+      endsAt: 1_790_843_400_000,
     });
     expect(parsed.package.routines?.[0]?.timeoutMinutes).toBe(20);
     expect(renderBotPackageMarkdown(parsed)).toContain("every 15 minutes");
+    expect(renderBotPackageMarkdown(parsed)).toContain("Monday, Wednesday, Friday");
+    expect(renderBotPackageMarkdown(parsed)).toContain("09:00–17:00");
     expect(renderBotPackageMarkdown(parsed)).toContain("**Run limit:** 20 minutes");
     expect(() => parseBotPackage({
       ...document,
@@ -147,6 +159,32 @@ describe("bot packages", () => {
         }],
       },
     })).toThrow();
+    expect(() => parseBotPackage({
+      ...document,
+      package: {
+        ...document.package,
+        routines: [{
+          ...document.package.routines[0],
+          schedule: {
+            ...document.package.routines[0].schedule,
+            weekdays: [1, 1],
+          },
+        }],
+      },
+    })).toThrow(/unique weekdays/);
+    expect(() => parseBotPackage({
+      ...document,
+      package: {
+        ...document.package,
+        routines: [{
+          ...document.package.routines[0],
+          schedule: {
+            ...document.package.routines[0].schedule,
+            window: { start: "17:00", end: "09:00" },
+          },
+        }],
+      },
+    })).toThrow(/later on the same day/);
   });
 
   it("rejects dangling agent, room, playbook, chief, and routine references", () => {

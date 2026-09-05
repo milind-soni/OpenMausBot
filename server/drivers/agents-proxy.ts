@@ -68,7 +68,7 @@ const ROUTINE_SCHEDULE_SCHEMA = {
   type: "object",
   additionalProperties: false,
   description:
-    'Either {"type":"once","at":RFC3339} for one future run, {"type":"weekly","time":"HH:MM","weekdays":[...]} for chosen days, {"type":"daily","time":"HH:MM"} for every day, or {"type":"interval","every_minutes":15,"starts_at":RFC3339} to repeat from an optional starting point.',
+    'Either {"type":"once","at":RFC3339} for one future run, {"type":"weekly","time":"HH:MM","weekdays":[...]} for chosen days, {"type":"daily","time":"HH:MM"} for every day, or {"type":"interval","every_minutes":15} to repeat. Intervals can optionally be limited with weekdays, window_start + window_end, and ends_at.',
   properties: {
     type: {
       type: "string",
@@ -87,7 +87,8 @@ const ROUTINE_SCHEDULE_SCHEMA = {
     weekdays: {
       type: "array",
       items: { type: "string", enum: WEEKDAYS },
-      description: "Only for type weekly: which days the routine runs, in the computer's local timezone.",
+      description:
+        "For type weekly: required run days. For type interval: optional allowed days. Values use the computer's local timezone.",
     },
     every_minutes: {
       type: "integer",
@@ -99,6 +100,33 @@ const ROUTINE_SCHEDULE_SCHEMA = {
       type: "string",
       description:
         "Optional for type interval: RFC3339 date-time with an explicit timezone offset that anchors the cadence. Omit to start one interval after confirmation.",
+    },
+    window_start: {
+      type: "string",
+      description:
+        "Optional for type interval, together with window_end: local 24-hour HH:MM when runs may begin, inclusive.",
+    },
+    window_end: {
+      type: "string",
+      description:
+        "Optional for type interval, together with window_start: local 24-hour HH:MM when the allowed window ends, exclusive. It must be later on the same day.",
+    },
+    ends_at: {
+      type: "string",
+      description:
+        "Optional for type interval: inclusive RFC3339 date-time cutoff with an explicit timezone offset.",
+    },
+    every_day: {
+      type: "boolean",
+      description: "Only for an interval update: true removes an existing weekday restriction.",
+    },
+    all_day: {
+      type: "boolean",
+      description: "Only for an interval update: true removes an existing time-window restriction.",
+    },
+    never_ends: {
+      type: "boolean",
+      description: "Only for an interval update: true removes an existing end cutoff.",
     },
   },
   required: ["type"],
@@ -120,7 +148,7 @@ const SHORT_WEEKDAYS = {
 const SUPPORTED_SCHEDULES =
   'Supported schedules: {"type":"once","at":"2026-09-01T09:00:00+05:30"} (future RFC3339 with explicit offset), ' +
   '{"type":"weekly","time":"09:00","weekdays":["monday","friday"]}, {"type":"daily","time":"09:00"}, ' +
-  'or {"type":"interval","every_minutes":15}.';
+  'or {"type":"interval","every_minutes":15,"weekdays":["monday","friday"],"window_start":"09:00","window_end":"17:00"}.';
 
 /** The outcome of coercing a model-sent schedule: the harness-dialect
  * schedule, or a message telling the model exactly what to send instead. */
@@ -187,11 +215,63 @@ function normalizeScheduleInput(args: Json): NormalizedSchedule {
     if (rawStart !== undefined && (typeof rawStart !== "string" || !rawStart.trim())) {
       return { error: '"starts_at" must be an RFC3339 date-time with an explicit timezone offset.' };
     }
+    if (raw.every_day === true && Array.isArray(raw.weekdays) && raw.weekdays.length > 0) {
+      return { error: 'Choose interval "weekdays" or "every_day", not both.' };
+    }
+    let intervalWeekdays: string[] | null | undefined;
+    if (raw.every_day === true) {
+      intervalWeekdays = null;
+    } else if (raw.weekdays !== undefined) {
+      if (!Array.isArray(raw.weekdays) || raw.weekdays.length === 0) {
+        return { error: 'Interval "weekdays" must contain at least one full weekday name.' };
+      }
+      intervalWeekdays = [];
+      for (const day of raw.weekdays) {
+        const lower = String(day).trim().toLowerCase();
+        const full = (WEEKDAYS as readonly string[]).includes(lower)
+          ? lower
+          : Object.hasOwn(SHORT_WEEKDAYS, lower)
+            ? SHORT_WEEKDAYS[lower as keyof typeof SHORT_WEEKDAYS]
+            : undefined;
+        if (!full) return { error: `Unsupported weekday "${String(day)}". Use full names: ${WEEKDAYS.join(", ")}.` };
+        if (!intervalWeekdays.includes(full)) intervalWeekdays.push(full);
+      }
+    }
+    const rawWindow = jsonRecord(raw.window) ? raw.window : undefined;
+    const windowStart = raw.window_start ?? rawWindow?.start;
+    const windowEnd = raw.window_end ?? rawWindow?.end;
+    if (raw.all_day === true && (windowStart !== undefined || windowEnd !== undefined)) {
+      return { error: 'Choose window_start + window_end or "all_day", not both.' };
+    }
+    let window: Json | null | undefined;
+    if (raw.all_day === true) {
+      window = null;
+    } else if (windowStart !== undefined || windowEnd !== undefined) {
+      if (typeof windowStart !== "string" || !windowStart.trim() || typeof windowEnd !== "string" || !windowEnd.trim()) {
+        return { error: 'An interval time window needs both "window_start" and "window_end" in 24-hour HH:MM.' };
+      }
+      window = { start: windowStart.trim(), end: windowEnd.trim() };
+    }
+    const rawEnd = raw.ends_at ?? raw.endsAt;
+    if (raw.never_ends === true && rawEnd !== undefined) {
+      return { error: 'Choose "ends_at" or "never_ends", not both.' };
+    }
+    let endsAt: string | null | undefined;
+    if (raw.never_ends === true) endsAt = null;
+    else if (rawEnd !== undefined) {
+      if (typeof rawEnd !== "string" || !rawEnd.trim()) {
+        return { error: '"ends_at" must be an RFC3339 date-time with an explicit timezone offset.' };
+      }
+      endsAt = rawEnd.trim();
+    }
     return {
       schedule: {
         type: "interval",
         everyMinutes,
         ...(typeof rawStart === "string" ? { anchorAt: rawStart.trim() } : {}),
+        ...(intervalWeekdays !== undefined ? { weekdays: intervalWeekdays } : {}),
+        ...(window !== undefined ? { window } : {}),
+        ...(endsAt !== undefined ? { endsAt } : {}),
       },
     };
   }
