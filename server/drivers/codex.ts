@@ -20,6 +20,7 @@ import { isHarnessOwnedMcpEnvName } from "../mcp-registry.ts";
 
 import type {
   DriverCreateInput,
+  ModelCatalog,
   ProviderDriver,
   ProviderInstance,
   ProviderSnapshot,
@@ -109,6 +110,60 @@ function decodeConfig(raw: unknown): CodexConfig {
 const QUESTION_TIMEOUT_NOTE = "No answer was given — use your best judgment.";
 const DENY_TIMEOUT_NOTE =
   "OpenMausBot: nobody answered this permission request in time. Skip this action and finish what you can without it.";
+
+type DirectCodexProvider = "nvidia" | "openrouter";
+
+const DIRECT_CODEX_PROVIDERS: Record<DirectCodexProvider, {
+  baseUrl: string;
+  envKey: string;
+  model: string;
+  label: string;
+}> = {
+  nvidia: {
+    baseUrl: "https://integrate.api.nvidia.com/v1",
+    envKey: "OPENMAUSBOT_NVIDIA_API_KEY",
+    model: "z-ai/glm-5.2",
+    label: "GLM 5.2 (NVIDIA NIM)",
+  },
+  openrouter: {
+    baseUrl: "https://openrouter.ai/api/v1",
+    envKey: "OPENMAUSBOT_OPENROUTER_API_KEY",
+    model: "z-ai/glm-5.2",
+    label: "GLM 5.2 (OpenRouter)",
+  },
+};
+
+function directCodexProvider(modelId: string | null | undefined): DirectCodexProvider | null {
+  const provider = decodeCodexSelection(modelId).modelProvider;
+  return provider === "nvidia" || provider === "openrouter" ? provider : null;
+}
+
+function configuredDirectCodexModels(environment: Record<string, string>): ModelCatalog {
+  const options = (Object.entries(DIRECT_CODEX_PROVIDERS) as Array<[DirectCodexProvider, typeof DIRECT_CODEX_PROVIDERS[DirectCodexProvider]]>)
+    .filter(([, provider]) => Boolean(environment[provider.envKey]))
+    .map(([id, provider]) => ({
+      id: `${id}::${provider.model}`,
+      label: provider.label,
+      custom: true,
+    }));
+  return { default: options[0]?.id ?? "", options };
+}
+
+function directCodexProviderArgs(
+  env: Record<string, string | undefined>,
+  modelId: string | null | undefined,
+  keys: Record<DirectCodexProvider, string | undefined>,
+): string[] {
+  const providerId = directCodexProvider(modelId);
+  if (!providerId) return [];
+  const provider = DIRECT_CODEX_PROVIDERS[providerId];
+  if (keys[providerId]) env[provider.envKey] = keys[providerId];
+  return [
+    "-c", `model_providers.${providerId}.name=${JSON.stringify(providerId)}`,
+    "-c", `model_providers.${providerId}.base_url=${JSON.stringify(provider.baseUrl)}`,
+    "-c", `model_providers.${providerId}.env_key=${JSON.stringify(provider.envKey)}`,
+  ];
+}
 
 type StdioMcpServer = { command: string; args: string[]; env: Record<string, string> };
 
@@ -455,7 +510,11 @@ export const CodexDriver: ProviderDriver<CodexConfig> = {
 
   async create(input: DriverCreateInput<CodexConfig>): Promise<ProviderInstance> {
     const { instanceId, config } = input;
-    const childEnv = (): Record<string, string | undefined> => {
+    const directProviderKeys: Record<DirectCodexProvider, string | undefined> = {
+      nvidia: input.environment.OPENMAUSBOT_NVIDIA_API_KEY,
+      openrouter: input.environment.OPENMAUSBOT_OPENROUTER_API_KEY,
+    };
+    const childEnv = (modelId?: string): Record<string, string | undefined> => {
       const env: Record<string, string | undefined> = {
         ...process.env,
         ...input.environment,
@@ -468,14 +527,27 @@ export const CodexDriver: ProviderDriver<CodexConfig> = {
       // The harness process may hold workspace credentials (xai/box/voice
       // keys, env-injected at boot); none of them are this CLI's to see.
       stripWorkspaceCredentialEnv(env);
+      for (const provider of Object.values(DIRECT_CODEX_PROVIDERS)) delete env[provider.envKey];
+      const selectedProvider = directCodexProvider(modelId);
+      if (selectedProvider && directProviderKeys[selectedProvider]) {
+        env[DIRECT_CODEX_PROVIDERS[selectedProvider].envKey] = directProviderKeys[selectedProvider];
+      }
       return env;
     };
-    const catalogEnv = childEnv();
-    let models = STATIC_CODEX_MODELS;
+    const catalogEnv = { ...input.environment };
+    const directModels = configuredDirectCodexModels(catalogEnv);
+    const withDirectModels = (catalog: ModelCatalog): ModelCatalog => {
+      const seen = new Set(catalog.options.map((option) => option.id));
+      return {
+        default: catalog.default || directModels.default,
+        options: [...catalog.options, ...directModels.options.filter((option) => !seen.has(option.id))],
+      };
+    };
+    let models = withDirectModels(STATIC_CODEX_MODELS);
     const refreshModels = async () => {
       try {
         const resolved = await readCodexModelCatalog(catalogEnv, fetch, config.cli);
-        if (resolved.options.length) models = resolved;
+        if (resolved.options.length) models = withDirectModels(resolved);
       } catch {
         // Keep the last usable catalog when a local provider is down.
       }
@@ -523,8 +595,12 @@ export const CodexDriver: ProviderDriver<CodexConfig> = {
       const retryScale = Number(process.env.FAKE_CODEX_RETRY_SCALE ?? "1");
 
       const launchAttempt = async (attempt: number): Promise<void> => {
-        const env = childEnv();
-        const appServerArgs = ["app-server", ...codexLocalProviderArgs(env, turn.model)];
+        const env = childEnv(turn.model);
+        const appServerArgs = [
+          "app-server",
+          ...directCodexProviderArgs(env, turn.model, directProviderKeys),
+          ...codexLocalProviderArgs(env, turn.model),
+        ];
         if (turn.integrations?.composio) {
           mountMcpServer(appServerArgs, env, "openmausbot_connectors", turn.integrations.composio);
         }
@@ -1114,6 +1190,9 @@ export const CodexDriver: ProviderDriver<CodexConfig> = {
       );
     });
     if (!version) return { state: "unavailable", reason: `\`${config.cli}\` CLI not found` };
+    if (directProviderKeys.nvidia || directProviderKeys.openrouter) {
+      return { state: "available", version, authenticated: true, billing: "metered" };
+    }
     const authenticated = await new Promise<boolean>((resolve) => {
       execCli(config.cli, ["login", "status"], { timeout: 8000, env }, (err, stdout, stderr) =>
         resolve(!err && /^logged in\b/im.test(`${stdout}\n${stderr ?? ""}`)),

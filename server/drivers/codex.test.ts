@@ -615,6 +615,43 @@ describe("CodexDriver turns (fake app-server)", () => {
     expect(seen.env.OPENMAUSBOT_LOCAL_UNSLOTH_API_KEY).toBe("unsloth-secret");
   });
 
+  it("routes direct NVIDIA and OpenRouter models with only the selected key", async () => {
+    const environment = {
+      OPENMAUSBOT_NVIDIA_API_KEY: "nvidia-secret",
+      OPENMAUSBOT_OPENROUTER_API_KEY: "openrouter-secret",
+    };
+    await create({ environment });
+    expect(instance.models.options.map((option) => option.id)).toEqual(
+      expect.arrayContaining(["nvidia::z-ai/glm-5.2", "openrouter::z-ai/glm-5.2"]),
+    );
+    const nvidiaDump = join(scratch, "nvidia.json");
+    process.env.FAKE_CODEX_DUMP = nvidiaDump;
+    await instance.adapter.sendTurn({ threadId: "t-nvidia", text: "route", model: "nvidia::z-ai/glm-5.2" });
+    await recorder.until((event) => event.type === "turn.completed");
+    const nvidia = JSON.parse(readFileSync(nvidiaDump, "utf8"));
+    expect(nvidia.env.OPENMAUSBOT_NVIDIA_API_KEY).toBe("nvidia-secret");
+    expect(nvidia.env.OPENMAUSBOT_OPENROUTER_API_KEY).toBeUndefined();
+    expect(nvidia.argv).toContain('model_providers.nvidia.base_url="https://integrate.api.nvidia.com/v1"');
+    expect(nvidia.argv).toContain('model_providers.nvidia.env_key="OPENMAUSBOT_NVIDIA_API_KEY"');
+    expect(JSON.stringify(nvidia.argv)).not.toContain("nvidia-secret");
+    expect(JSON.stringify(nvidia.argv)).not.toContain("openrouter-secret");
+
+    await instance.dispose();
+    recorder.stop();
+    await create({ environment });
+    const openrouterDump = join(scratch, "openrouter.json");
+    process.env.FAKE_CODEX_DUMP = openrouterDump;
+    await instance.adapter.sendTurn({ threadId: "t-openrouter", text: "route", model: "openrouter::z-ai/glm-5.2" });
+    await recorder.until((event) => event.type === "turn.completed");
+    const openrouter = JSON.parse(readFileSync(openrouterDump, "utf8"));
+    expect(openrouter.env.OPENMAUSBOT_OPENROUTER_API_KEY).toBe("openrouter-secret");
+    expect(openrouter.env.OPENMAUSBOT_NVIDIA_API_KEY).toBeUndefined();
+    expect(openrouter.argv).toContain('model_providers.openrouter.base_url="https://openrouter.ai/api/v1"');
+    expect(openrouter.argv).toContain('model_providers.openrouter.env_key="OPENMAUSBOT_OPENROUTER_API_KEY"');
+    expect(JSON.stringify(openrouter.argv)).not.toContain("nvidia-secret");
+    expect(JSON.stringify(openrouter.argv)).not.toContain("openrouter-secret");
+  });
+
   it("streams agentMessage deltas without re-emitting the settled text", async () => {
     process.env.FAKE_CODEX_MODE = "stream";
     await create();
