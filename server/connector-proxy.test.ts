@@ -104,6 +104,8 @@ describe("connector MCP bridge", () => {
           toolkits: [
             { toolkit: "googledrive", alias: "work-devhouse" },
             { name: "LINEAR", account: "personal" },
+            { toolkit: "googledrive", alias: "personal" },
+            { toolkit: "GOOGLEDRIVE", alias: " Work-Devhouse " },
           ],
         },
       },
@@ -118,6 +120,7 @@ describe("connector MCP bridge", () => {
       items: [
         { slug: "googledrive", alias: "work-devhouse" },
         { slug: "linear", alias: "personal" },
+        { slug: "googledrive", alias: "personal" },
       ],
     });
   });

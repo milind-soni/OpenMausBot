@@ -8341,7 +8341,7 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
         const items: { slug: string; alias?: string }[] = [];
         for (const raw of rawItems as unknown[]) {
           if (typeof raw === "string") {
-            const slug = raw.toLowerCase();
+            const slug = raw.trim().toLowerCase();
             if (CONNECTOR_SLUG.test(slug)) items.push({ slug });
             continue;
           }
@@ -8349,14 +8349,14 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
           const row = raw as { slug?: unknown; toolkit?: unknown; alias?: unknown; account?: unknown };
           const slug = typeof row.slug === "string" ? row.slug : typeof row.toolkit === "string" ? row.toolkit : undefined;
           if (!slug || !CONNECTOR_SLUG.test(slug.toLowerCase())) continue;
-          const alias = typeof row.alias === "string" ? row.alias : typeof row.account === "string" ? row.account : undefined;
-          items.push({ slug: slug.toLowerCase(), ...(alias ? { alias: alias.trim() } : {}) });
+          const alias = composio.normalizeAccountAlias((row.alias ?? row.account) as string | undefined);
+          items.push({ slug: slug.toLowerCase(), ...(alias ? { alias } : {}) });
         }
         const slugs = [...new Set(items.map((item) => item.slug))];
         const owner = connectorThread(botId, threadId);
         if (!owner) return json(res, 403, { error: "conversation does not belong to this bot" });
         if (!/^[\w-]{8,100}$/.test(resumeKey)) return json(res, 400, { error: "invalid resume key" });
-        if (!slugs.length || slugs.length > 12) return json(res, 400, { error: "one to twelve valid apps are required" });
+        if (!items.length || items.length > 12) return json(res, 400, { error: "one to twelve valid connection requests are required" });
         if (!composio.configured(cfg) || owner.bot.composio === false) {
           return json(res, 409, { error: "connected apps are not enabled for this bot" });
         }
@@ -8365,7 +8365,8 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
         const messageIds: string[] = [];
         for (const item of items) {
           const existing = store.messagesFor(threadId).find(
-            (message) => message.connector?.resumeKey === resumeKey && message.connector.slug === item.slug,
+            (message) => message.connector?.resumeKey === resumeKey && message.connector.slug === item.slug
+              && (message.connector.alias ?? "").toLowerCase() === (item.alias ?? "").toLowerCase(),
           );
           if (existing) {
             messageIds.push(existing.id);
@@ -12251,7 +12252,18 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
         }
       }
       if (m[3] === "status" && method === "GET") {
-        const state = (await composio.connectionStatus(cfg, [connector.slug]))[connector.slug];
+        const service = (await composio.connectionStatus(cfg, [connector.slug]))[connector.slug];
+        // A different active account must never complete a second-account card.
+        // Missing alias metadata stays pending rather than guessing from the
+        // toolkit-wide status (including scoped keys without account reads).
+        const account = connector.alias
+          ? service?.accounts?.find((item) => item.alias?.trim().toLowerCase() === connector.alias!.toLowerCase())
+          : undefined;
+        const state = connector.alias ? {
+          connected: /^active$/i.test(account?.status ?? ""),
+          pending: /^(initiated|initializing|pending)$/i.test(account?.status ?? ""),
+          status: account?.status ?? "not_connected",
+        } : service;
         const failed = /failed|expired|revoked|error/i.test(state?.status ?? "");
         const next = {
           ...connector,

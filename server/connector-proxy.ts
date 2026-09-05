@@ -128,9 +128,10 @@ function connectorAdds(args: unknown): ConnectorRequest[] {
   const requests: ConnectorRequest[] = [];
   for (const item of toolkits) {
     if (typeof item === "string") {
-      const slug = item.toLowerCase();
-      if (!seen.has(slug)) {
-        seen.add(slug);
+      const slug = item.trim().toLowerCase();
+      const key = JSON.stringify([slug, ""]);
+      if (!seen.has(key)) {
+        seen.add(key);
         requests.push({ slug });
       }
       continue;
@@ -141,11 +142,12 @@ function connectorAdds(args: unknown): ConnectorRequest[] {
     if (!["add", "connect", "initiate"].includes(action)) continue;
     const slug = typeof row.toolkit === "string" ? row.toolkit : row.name;
     if (typeof slug !== "string") continue;
-    const normalized = slug.toLowerCase();
-    if (seen.has(normalized)) continue;
-    seen.add(normalized);
-    const alias = typeof row.alias === "string" ? row.alias : typeof row.account === "string" ? row.account : undefined;
-    requests.push({ slug: normalized, ...(alias ? { alias: alias.trim() } : {}) });
+    const normalized = slug.trim().toLowerCase();
+    const alias = (typeof row.alias === "string" ? row.alias : typeof row.account === "string" ? row.account : "").trim();
+    const key = JSON.stringify([normalized, alias.toLowerCase()]);
+    if (seen.has(key)) continue;
+    seen.add(key);
+    requests.push({ slug: normalized, ...(alias ? { alias } : {}) });
   }
   return requests;
 }

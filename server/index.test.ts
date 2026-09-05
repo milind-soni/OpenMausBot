@@ -130,6 +130,8 @@ let fakeClaudeDump: string;
 let fakeDockerFixture: string;
 let fakeDockerLog: string;
 let stderr = "";
+let connectorAccounts: Array<{ id: string; alias: string; status: string; toolkit: { slug: string } }> = [];
+const connectorLinkRequests: Array<{ toolkit: string; alias?: string }> = [];
 const browserCapabilityCalls: Array<{ operation: string; authorization?: string; body: any }> = [];
 let browserRevokeFailuresRemaining = 0;
 let browserRegisterDelayMs = 0;
@@ -638,6 +640,10 @@ beforeAll(async () => {
       res.writeHead(200, { "content-type": "application/json" });
       return res.end(JSON.stringify(operation === "register" ? { ok: true, expiresAt: body.expiresAt } : { ok: true }));
     }
+    if (req.url?.startsWith("/api/v3.1/connected_accounts") || req.url?.startsWith("/api/v3/toolkits")) {
+      res.writeHead(200, { "content-type": "application/json" });
+      return res.end(JSON.stringify({ items: req.url.startsWith("/api/v3.1/connected_accounts") ? connectorAccounts : [] }));
+    }
     if (req.url?.startsWith("/api/v3.1/tool_router/session")) {
       if (req.headers["x-api-key"] !== "ak_good") {
         res.writeHead(401, { "content-type": "application/json" });
@@ -646,6 +652,15 @@ beforeAll(async () => {
       let raw = "";
       for await (const chunk of req) raw += chunk;
       const body = raw ? JSON.parse(raw) : {};
+      if (req.url.includes("/toolkits")) {
+        res.writeHead(200, { "content-type": "application/json" });
+        return res.end(JSON.stringify({ items: [{ slug: "gmail", connected_account: { id: "ca_personal", status: "ACTIVE" } }] }));
+      }
+      if (req.url.endsWith("/link")) {
+        connectorLinkRequests.push(body);
+        res.writeHead(200, { "content-type": "application/json" });
+        return res.end(JSON.stringify({ redirect_url: "https://connect.composio.dev/fixture-only" }));
+      }
       res.writeHead(201, { "content-type": "application/json" });
       return res.end(JSON.stringify({
         session_id: "trs_config_test",
@@ -794,6 +809,7 @@ beforeAll(async () => {
       OMB_EXTRA_PATH: fakeDockerDir,
       OMB_BOX_API: `http://127.0.0.1:${boxStubPort}`,
       OMB_COMPOSIO_API: `http://127.0.0.1:${boxStubPort}/api/v3.1`,
+      OMB_COMPOSIO_TOOLKITS_API: `http://127.0.0.1:${boxStubPort}/api/v3`,
       OMB_STATIC_DIR: staticDir,
       // Created only by the browser integration test. Keeping an explicit
       // path prevents that test from ever discovering a developer app's live
@@ -7189,6 +7205,51 @@ describe("harness HTTP API", () => {
     // override must keep Composio configured until the next app launch.
     expect((await api("PUT", "/api/config", { profile: { name: "Grace" } })).status).toBe(200);
     expect((await api("GET", "/api/config")).body.composio).toEqual({ configured: true, mode: "self-hosted" });
+  });
+
+  it("keeps second-account cards separate and waits for the requested alias, not an existing account", async () => {
+    expect((await api("PUT", "/api/config", { composio: { apiKey: "ak_good" } })).status).toBe(200);
+    const bot = (await api("POST", "/api/bots")).body.bot;
+    connectorAccounts = [{ id: "ca_personal", alias: "personal", status: "ACTIVE", toolkit: { slug: "gmail" } }];
+    try {
+      const token = await mintTestCapability(BASE, bot.id, bot.threadId, { kind: "connectors" });
+      const create = async (items: unknown[], resumeKey = "alias-fixture-123") => {
+        const response = await fetch(`${BASE}/api/internal/connectors/request`, {
+          method: "POST",
+          headers: { "content-type": "application/json", authorization: `Bearer ${token}` },
+          body: JSON.stringify({ botId: bot.id, threadId: bot.threadId, resumeKey, items }),
+        });
+        return { status: response.status, body: await response.json() as any };
+      };
+      expect((await create([{ slug: "gmail", alias: "x".repeat(65) }])).status).toBe(400);
+      const requested = await create([
+        { slug: "gmail", alias: "work" }, { slug: "gmail", alias: "other" }, { slug: "gmail", alias: "WORK" },
+      ]);
+      expect(requested.status).toBe(200);
+      const [work, other, duplicate] = requested.body.messageIds;
+      expect(work).toBe(duplicate);
+      expect(other).not.toBe(work);
+      expect((await create([{ slug: "gmail", alias: "work" }])).body.messageIds).toEqual([work]);
+      const card = (id: string, action: string) => `/api/bots/${bot.id}/connector-cards/${id}/${action}`;
+      expect((await api("POST", card(work, "authorize"), { threadId: bot.threadId })).body.url).toBe("https://connect.composio.dev/fixture-only");
+      expect(connectorLinkRequests.at(-1)).toEqual({ toolkit: "gmail", alias: "work" });
+      const poll = () => api("GET", `${card(work, "status")}?threadId=${bot.threadId}`);
+      expect((await poll()).body.connected).toBe(false);
+      expect((await api("POST", card(work, "resume"), { threadId: bot.threadId })).status).toBe(409);
+      const pending = { id: "ca_work", alias: "Work", status: "INITIATED", toolkit: { slug: "gmail" } };
+      connectorAccounts.push(pending);
+      expect((await poll()).body).toMatchObject({ connected: false, pending: true });
+      pending.status = "FAILED";
+      expect((await poll()).body).toMatchObject({ connected: false, status: "FAILED" });
+      pending.status = "ACTIVE";
+      expect((await poll()).body.connected).toBe(true);
+      // The other requested alias is still missing, so no continuation yet.
+      expect((await api("POST", card(work, "resume"), { threadId: bot.threadId })).status).toBe(409);
+      expect((await api("GET", `${card(other, "status")}?threadId=${bot.threadId}`)).body.connected).toBe(false);
+    } finally {
+      connectorAccounts = [];
+      await api("DELETE", `/api/bots/${bot.id}`);
+    }
   });
 
   it("does not relay a slow connector request after Connected Apps is disabled", async () => {
