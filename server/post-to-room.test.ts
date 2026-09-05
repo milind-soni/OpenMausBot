@@ -31,7 +31,11 @@ let BASE = "";
 let child: ChildProcess;
 let home: string;
 let fakeClaudeDump = "";
+let mentionerDump = "";
 let stderr = "";
+/** The section peer a room turn's scripted reply will @mention without
+ * them being in the room. Named here so the fixture and the test agree. */
+const OUTSIDE_BOT = "Outside Bot";
 
 interface ApiResult {
   status: number;
@@ -120,13 +124,17 @@ const waitForPeerCard = async (threadId: string): Promise<StoredMessage> => {
 };
 
 /** A bot with a name and a section, ready to be put in a room. */
-const makeBot = async (name: string, section: string): Promise<{ id: string; threadId: string }> => {
+const makeBot = async (
+  name: string,
+  section: string,
+  instanceId = "claude",
+): Promise<{ id: string; threadId: string }> => {
   const created = await api("POST", "/api/bots");
   const id = str(field(created.body, "bot", "id"));
   const patched = await api("PATCH", `/api/bots/${id}`, {
     name,
     section,
-    modelSelection: { instanceId: "claude", model: "claude-sonnet-5" },
+    modelSelection: { instanceId, model: "claude-sonnet-5" },
   });
   expect(patched.status).toBe(200);
   return { id, threadId: str(field(created.body, "bot", "threadId")) };
@@ -162,12 +170,24 @@ beforeAll(async () => {
   BASE = `http://127.0.0.1:${PORT}`;
   home = mkdtempSync(join(tmpdir(), "omb-post-to-room-"));
   fakeClaudeDump = join(home, "fake-claude-dump.json");
+  mentionerDump = join(home, "mentioner-dump.json");
   mkdirSync(join(home, ".openmausbot"), { recursive: true });
   writeFileSync(
     join(home, ".openmausbot", "config.json"),
     JSON.stringify({
       instances: {
         claude: { driver: "claudeAgent", displayName: "Fixture Claude", config: { cli: FAKE_CLAUDE_CLI } },
+        // replies by @mentioning a bot that is in the section but not in
+        // the room — the one thing the room prompt's advice cannot reach
+        mentioner: {
+          driver: "claudeAgent",
+          displayName: "Mentioning fixture",
+          environment: {
+            FAKE_CLAUDE_DUMP: mentionerDump,
+            FAKE_CLAUDE_REPLIES: JSON.stringify([`@${OUTSIDE_BOT} what do you think?`]),
+          },
+          config: { cli: FAKE_CLAUDE_CLI },
+        },
       },
     }),
   );
@@ -258,6 +278,53 @@ describe("peer comms from a room turn", () => {
     });
     expect(throughPeerTask.status).toBe(403);
     expect(str(throughPeerTask.body.error)).toContain("does not belong to sender");
+  }, 40_000);
+});
+
+describe("a room turn and the teammates outside the room", () => {
+  it("tells the bot who its @mentions cannot reach, and shows a mention that missed", async () => {
+    const speaker = await makeBot("Room Speaker", "Reach", "mentioner");
+    const inside = await makeBot("Room Inside", "Reach");
+    const outside = await makeBot(OUTSIDE_BOT, "Reach");
+    const elsewhere = await makeBot("Elsewhere Bot", "Reach elsewhere");
+    const room = await makeRoom("Reach room", [speaker.id, inside.id], "Reach", {
+      kind: "member",
+      botId: speaker.id,
+    });
+
+    rmSync(mentionerDump, { force: true });
+    expect((await api("POST", `/api/groups/${room.id}/messages`, { text: `get ${OUTSIDE_BOT}'s take on this` })).status).toBe(202);
+    await expect.poll(() => existsSync(mentionerDump), { timeout: 10_000 }).toBe(true);
+    // SAFETY: the fake CLI writes {systemPrompt,...} — a dump that is not
+    // that shape fails the assertions below rather than the parse.
+    const dump = JSON.parse(readFileSync(mentionerDump, "utf8")) as { systemPrompt?: string };
+    const system = String(dump.systemPrompt ?? "");
+    // the room turn is told who an @mention cannot reach, and how to reach them
+    expect(system).toContain("An @mention only reaches the members of this room");
+    expect(system).toContain(`- ${OUTSIDE_BOT} — General assistant (available)`);
+    expect(system).toContain("ask_bot");
+    // room members are the @mention roster, not this one; other sections stay unseen
+    expect(system).not.toContain("- Room Inside — General assistant");
+    expect(system).not.toContain("Elsewhere Bot");
+
+    // the scripted reply mentions the outsider: nobody's turn starts, and the
+    // room says so where the person who can add them is reading
+    const chip = await (async () => {
+      const deadline = Date.now() + 10_000;
+      for (;;) {
+        const found = (await messagesOf(room.threadId)).find(
+          (message) => message.kind === "activity" && message.tool?.ok === false && (message.tool.name.includes(OUTSIDE_BOT)),
+        );
+        if (found) return found;
+        if (Date.now() > deadline) throw new Error("no chip for the mention that missed");
+        await new Promise((wake) => setTimeout(wake, 100));
+      }
+    })();
+    expect(chip.tool?.name).toBe(`${OUTSIDE_BOT} isn't in this room, so that mention didn't reach them — add them to the room to bring them in.`);
+    expect((await messagesOf(outside.threadId)).some((message) => message.role === "user")).toBe(false);
+    expect((await messagesOf(elsewhere.threadId)).some((message) => message.role === "user")).toBe(false);
+
+    await api("POST", `/api/groups/${room.id}/interrupt`, {});
   }, 40_000);
 });
 

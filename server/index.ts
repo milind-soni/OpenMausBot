@@ -79,7 +79,7 @@ import {
 } from "./cloud-backend.ts";
 import * as composio from "./composio.ts";
 import { chiefOfStaffSystemPrompt } from "./chief-of-staff.ts";
-import { peerAllowed, peerRosterSystemPrompt, reachablePeers } from "./peer-roster.ts";
+import { peerAllowed, peerRosterSystemPrompt, reachablePeers, roomPeerRosterSystemPrompt } from "./peer-roster.ts";
 import { openMausStatusSystemPrompt } from "./openmaus-status-capsule.ts";
 import {
   containerComputerAction,
@@ -5243,6 +5243,14 @@ async function runGroupMemberTurn(
     .filter((b): b is NonNullable<typeof b> => Boolean(b))
     .map((b) => `@${b.name}${b.title ? ` (${b.title})` : ""}`)
     .join(", ");
+  // The roster above is who an @mention can reach; the section's other bots
+  // are who it cannot. The 1:1 prompt has carried a peer roster since #774,
+  // and a room turn had nothing — the only advice it gave ("mention them
+  // like @Name") sends the model after a teammate who will never see it.
+  // Same reachability rule as list_bots, minus the room's own members.
+  const outsideRoom = integrations.agents
+    ? reachablePeers(store.bots, bot).filter((peer) => !readyGroup.memberIds.includes(peer.id))
+    : [];
   const system = [
     `You are ${bot.name}, a bot in the room "${readyGroup.name}" in OpenMausBot.`,
     bot.title && `Role: ${bot.title}.`,
@@ -5250,6 +5258,7 @@ async function runGroupMemberTurn(
     `Room members: ${roster}, and ${userName} (the human).`,
     readyGroup.bulletin.trim() && `Room bulletin (shared instructions for everyone):\n${readyGroup.bulletin.trim()}`,
     `Reply as yourself, briefly and conversationally. To bring a teammate in, mention them like @Name — they'll see the conversation and respond.`,
+    outsideRoom.length > 0 && roomPeerRosterSystemPrompt(outsideRoom),
     integrations.agents &&
       "If a supported API key is missing, use request_credential to create a secure credential request. A freshly QR-paired mobile app or the desktop app can show the secure entry card. Never claim it opened unless the request succeeded, and never ask the user to paste credentials into chat.",
     integrations.agents &&
@@ -5521,6 +5530,25 @@ async function runGroupMemberTurn(
     const members = group.memberIds
       .map((id) => store.bot(id))
       .filter((b): b is NonNullable<typeof b> => Boolean(b) && b!.id !== bot.id);
+    // A mention of a section peer who is NOT in the room reaches nobody:
+    // no turn, no error, just a name in the reply that looks like it did
+    // something. Say so in the room, where the person who can fix it — by
+    // adding them — is the one reading. Only reachable peers are checked,
+    // so the chip never names a bot this one could not contact anyway.
+    const missed = mentionedBots(
+      replyText,
+      reachablePeers(store.bots, bot).filter((peer) => !group.memberIds.includes(peer.id)),
+    );
+    for (const peer of missed) {
+      store.appendMessage(threadId, {
+        role: "bot",
+        kind: "activity",
+        tool: {
+          name: `${peer.name} isn't in this room, so that mention didn't reach them — add them to the room to bring them in.`,
+          ok: false,
+        },
+      });
+    }
     for (const next of roomResponders(replyText, members, { kind: "mentions" })) {
       if (isCancelled?.()) return false;
       if (spoken.has(next.id)) continue;
