@@ -74,6 +74,19 @@ import {
 import capabilitiesModule from "./capabilities.cjs";
 import environmentsModule from "./environments.cjs";
 import localOriginModule from "./local-origin.cjs";
+/** IPC that controls this computer, its files, its logins or its updater is
+ * answered only for the local server's UI (electron/local-origin.cjs). A
+ * remote server's page gets a reduced bridge (preload.cjs) in the first
+ * place; this is the second wall, shared with cua.mjs, updater.mjs and
+ * android-device.mjs.
+ *
+ * Bound here, beside the import, on purpose: the ipcMain registrations
+ * below wrap their handlers with this gate while the module is still
+ * evaluating, so a `const` declared further down is in its temporal dead
+ * zone when the first one runs and the packaged app dies at boot with
+ * "Cannot access 'localOnly' before initialization". The import itself is
+ * hoisted; the binding must be too. */
+const { isLocalSender: senderIsLocal, localOnly, localOnlySync, setLocalOrigin } = localOriginModule;
 import { buildApplicationMenu } from "./menu.mjs";
 import { acquireDataDirLease } from "./data-dir-lease.mjs";
 
@@ -1605,13 +1618,6 @@ function writeEnvironments(state) {
 function activeOrigin() {
   return activeEnvironment(environmentsState)?.origin ?? rendererOrigin();
 }
-
-/** IPC that controls this computer, its files, its logins or its updater is
- * answered only for the local server's UI (electron/local-origin.cjs). A
- * remote server's page gets a reduced bridge (preload.cjs) in the first
- * place; this is the second wall, shared with cua.mjs, updater.mjs and
- * android-device.mjs. */
-const { isLocalSender: senderIsLocal, localOnly, localOnlySync, setLocalOrigin } = localOriginModule;
 
 function refreshApplicationMenu() {
   Menu.setApplicationMenu(
