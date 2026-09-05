@@ -63,7 +63,51 @@ function open(): DatabaseSync {
 // is no more of a dependency than the table it indexes. The sidebar's LIKE
 // search below stays as it is — substring find over a single thread wants
 // every occurrence, not a relevance ranking.
+/** Whether this runtime's SQLite has FTS5, decided once per handle.
+ *
+ * Not a given: Electron ships Node 24 with FTS5, but `pnpm dev:server` and
+ * `vitest` run on whatever Node the contributor has, and `node:sqlite` did not
+ * carry FTS5 before Node 24. Without a guard, `CREATE VIRTUAL TABLE … USING
+ * fts5` throws inside `open()` and the whole message store fails to open — not
+ * just recall — so a Node 22 checkout cannot run the tests or the dev server.
+ */
+let recallIndexReady = false;
+
+/** Whether this runtime can build the recall index at all.
+ *
+ * Answered by an in-memory probe rather than by `recallIndexReady`, because a
+ * caller may ask before any transcript has been opened — a test deciding
+ * whether an index-only case applies, for instance — and "not opened yet" is
+ * not the same answer as "this Node has no FTS5". Memoised: one throwaway
+ * database per process. */
+let ftsSupported: boolean | null = null;
+
+export function recallIndexAvailable(): boolean {
+  if (ftsSupported === null) {
+    try {
+      const probe = new DatabaseSync(":memory:");
+      probe.exec("CREATE VIRTUAL TABLE probe USING fts5(x)");
+      probe.close();
+      ftsSupported = true;
+    } catch {
+      ftsSupported = false;
+    }
+  }
+  return ftsSupported;
+}
+
 function ensureRecallIndex(db: DatabaseSync): void {
+  try {
+    createRecallIndex(db);
+    recallIndexReady = true;
+  } catch {
+    // No FTS5 here. Transcripts still load, write and search from the sidebar;
+    // `recallMessages` falls back to the LIKE scan below.
+    recallIndexReady = false;
+  }
+}
+
+function createRecallIndex(db: DatabaseSync): void {
   const existed = db
     .prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'messages_fts'")
     .get();
@@ -395,6 +439,7 @@ export function readMessageText(
 export function recallMessages(query: string, threadIds: readonly string[], limit = 12): RecallHit[] {
   const match = ftsQuery(query);
   if (!match || !threadIds.length) return [];
+  if (!recallIndexReady) return recallWithoutIndex(query, threadIds, limit);
   const placeholders = threadIds.map(() => "?").join(", ");
   const rows = db()
     .prepare(
@@ -423,6 +468,80 @@ export function recallMessages(query: string, threadIds: readonly string[], limi
       at: row.at,
       role: row.role,
       snippet: row.snippet.replace(/\s+/g, " ").trim(),
+      ...(row.from_name ? { from: row.from_name } : {}),
+      ...(peer ? { peer } : {}),
+    };
+  });
+}
+
+/** Recall on a runtime whose SQLite has no FTS5.
+ *
+ * Same contract as the indexed path — same scoping, same shape, same cap — so
+ * a caller never has to ask which one answered. It gives up relevance ranking
+ * for recency and a hand-cut window for FTS5's snippet, which is the honest
+ * trade: correct and slower beats the tool not existing. Terms come from the
+ * same `ftsQuery` tokens, so both paths agree on what a query means and
+ * stop-words are dropped identically.
+ *
+ * A LIKE scan is what `searchMessages` has always done over the same rows. */
+const escapeRegExp = (value: string): string => value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+
+function recallWithoutIndex(query: string, threadIds: readonly string[], limit: number): RecallHit[] {
+  const terms = query
+    .split(/\s+/)
+    .map((token) => token.replace(/"/g, "").trim())
+    .filter(Boolean);
+  const content = terms.filter((token) => !STOP_WORDS.has(token.toLowerCase()));
+  const wanted = (content.length ? content : terms).slice(0, 8).map((term) => term.toLowerCase());
+  if (!wanted.length) return [];
+
+  const placeholders = threadIds.map(() => "?").join(", ");
+  const patterns = wanted.map((term) => `%${term.replace(/([\\%_])/g, "\\$1")}%`);
+  // AND, not OR: `ftsQuery` emits space-separated quoted terms, which FTS5
+  // reads as "every term must appear". The fallback has to mean the same, or a
+  // multi-word query returns a wider set here than it does on Electron.
+  const allTerms = patterns.map(() => "lower(m.text) LIKE ? ESCAPE '\\'").join(" AND ");
+  const rows = db()
+    .prepare(
+      "SELECT m.thread_id, m.id, m.at, m.role, m.text, json_extract(m.json, '$.from.name') AS from_name, " +
+        `json_extract(m.json, '$.peerAsk.name') AS peer_name, substr(m.text, 1, ${PEER_NOTE_HEAD_CHARS}) AS head ` +
+        "FROM messages m " +
+        `WHERE m.kind = 'text' AND m.text IS NOT NULL AND m.thread_id IN (${placeholders}) AND (${allTerms}) ` +
+        "ORDER BY m.at DESC LIMIT ?",
+    )
+    .all(...threadIds, ...patterns, limit) as unknown as Array<{
+    thread_id: string;
+    id: string;
+    at: number;
+    role: string;
+    text: string;
+    from_name: string | null;
+    peer_name: string | null;
+    head: string;
+  }>;
+
+  return rows.map((row) => {
+    const hitAt = Math.max(0, row.text.toLowerCase().indexOf(wanted[0]));
+    const start = Math.max(0, hitAt - 80);
+    const end = Math.min(row.text.length, hitAt + 220);
+    const window = row.text.slice(start, end).replace(/\s+/g, " ").trim();
+    // FTS5's snippet() brackets the matched terms; callers render that, so the
+    // fallback marks them too rather than returning a differently-shaped hit.
+    const marked = wanted.reduce(
+      (text, term) => text.replace(new RegExp(`(?<![\\w[])(${escapeRegExp(term)})(?![\\w\\]])`, "giu"), "[$1]"),
+      window,
+    );
+    const snippet = (start > 0 ? "…" : "") + marked + (end < row.text.length ? "…" : "");
+    // Same authorship resolution as the indexed path: a relayed line must
+    // name the bot behind it on either runtime, or recall attributes a
+    // teammate's words to the person.
+    const peer = peerAuthor(row.peer_name, row.head);
+    return {
+      threadId: row.thread_id,
+      messageId: row.id,
+      at: row.at,
+      role: row.role,
+      snippet,
       ...(row.from_name ? { from: row.from_name } : {}),
       ...(peer ? { peer } : {}),
     };

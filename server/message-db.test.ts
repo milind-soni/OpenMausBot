@@ -12,6 +12,7 @@ import {
   insertMessage,
   readMessageText,
   readThread,
+  recallIndexAvailable,
   recallMessages,
   searchMessages,
   setActiveLeaf,
@@ -199,7 +200,11 @@ describe("message-db", () => {
     expect(readMessageText("dm", "m-bot")!.peer).toBeUndefined();
   });
 
-  it("recall indexes rows that predate the index", () => {
+  // Backfill is a property of the index itself, so this case only has meaning
+  // where FTS5 exists. Without it the DROP TABLE below has no table to drop and
+  // nothing to rebuild — recall still answers from the LIKE fallback, which the
+  // suite at the end of this file covers.
+  it.skipIf(!recallIndexAvailable())("recall indexes rows that predate the index", () => {
     // simulate a database written before messages_fts existed
     insertMessage("t-old", msg("m1", "legacy row about the quarterly forecast"));
     closeMessageDb();
@@ -271,5 +276,49 @@ describe("message-db", () => {
     expect(path.at(-1)?.text).toBe("edited");
     // both branches survive in the tree
     expect(reloaded.messagesFor(bot.threadId).filter((m) => m.parentId === first.parentId)).toHaveLength(2);
+  });
+});
+
+// The recall index is an accelerator, not a prerequisite. Electron ships Node
+// 24 with FTS5; `pnpm dev:server` and this suite run on whatever Node the
+// contributor has, and node:sqlite carried no FTS5 before Node 24. These cases
+// assert behaviour rather than which path answered, so they hold on both.
+describe("recall without an FTS5 runtime", () => {
+  it("opens the store and persists messages whether or not the index exists", () => {
+    // The regression this guards: CREATE VIRTUAL TABLE … USING fts5 threw
+    // inside open(), so on Node 22 the whole message store failed — not just
+    // recall — and a checkout could neither run the dev server nor this suite.
+    expect(() => insertMessage("own-a", msg("k1", "the idle timer removes the container"))).not.toThrow();
+
+    expect(readThread("own-a", legacy("own-a")).messages.map((m) => m.id)).toContain("k1");
+  });
+
+  it("reports which path is active instead of pretending", () => {
+    expect(typeof recallIndexAvailable()).toBe("boolean");
+  });
+
+  it("recalls, scopes and caps the same way on either path", () => {
+    insertMessage("own-a", msg("k1", "the idle timer removes the Local VM container"));
+    insertMessage("own-b", msg("k2", "Search Console shows the screener is not indexed"));
+    insertMessage("stranger", msg("k3", "a container question in a thread we cannot see"));
+
+    const hits = recallMessages("container", ["own-a", "own-b"]);
+
+    expect(hits.length).toBeGreaterThan(0);
+    expect(hits.every((hit) => hit.threadId !== "stranger")).toBe(true);
+    expect(hits[0]?.snippet.length).toBeGreaterThan(0);
+    expect(recallMessages("container", ["own-a"], 1).length).toBeLessThanOrEqual(1);
+  });
+
+  it("drops stop-words on either path, so a common word still matches", () => {
+    insertMessage("own-a", msg("k1", "the archive reference on the shelf"));
+
+    expect(recallMessages("archive reference on", ["own-a"]).length).toBeGreaterThan(0);
+  });
+
+  it("never throws on the FTS syntax a model might type", () => {
+    insertMessage("own-a", msg("k1", "pricing audit for the quarter"));
+
+    expect(() => recallMessages('audit AND NOT "links" OR pricing:* (', ["own-a"])).not.toThrow();
   });
 });
