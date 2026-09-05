@@ -14,7 +14,9 @@ on:
       - .github/workflows/npm-package.yml
 
 permissions:
-  contents: read
+  # write: the release-tag run attaches the tarball to the GitHub release.
+  # Pull-request runs from forks get a read-only token regardless.
+  contents: write
   id-token: write
 
 jobs:
@@ -58,3 +60,17 @@ jobs:
         run: npm publish --access public --provenance
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+      # The same tarball beside the desktop installers on the GitHub release,
+      # for people who install from a download rather than the registry. The
+      # release exists by the time the tag does (publishing it is what creates
+      # the tag); a tag pushed without one is left alone.
+      - name: Attach the tarball to the GitHub release (release tags only)
+        if: startsWith(github.ref, 'refs/tags/v')
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if gh release view "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            gh release upload "$GITHUB_REF_NAME" release/npm/openmausbot-*.tgz --repo "$GITHUB_REPOSITORY" --clobber
+          else
+            echo "no GitHub release named $GITHUB_REF_NAME; tarball not attached"
+          fi
