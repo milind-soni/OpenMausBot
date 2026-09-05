@@ -1,5 +1,5 @@
 import { track } from "@/lib/analytics";
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import {
   Archive,
@@ -1064,6 +1064,9 @@ export function Sidebar({ open, onClose }: { open: boolean; onClose: () => void 
   const remoteClient = window.ogb?.remoteClient?.active === true;
   const { capabilities } = useDesktopCapabilities();
   const importReturnRef = useRef<HTMLButtonElement>(null);
+  const sidebarRef = useRef<HTMLElement>(null);
+  const [confirm, setConfirm] = useState<{ kind: BotConfirmKind; bot: Bot } | null>(null);
+  const cancelConfirm = useCallback(() => setConfirm(null), []);
   const [menu, setMenu] = useState<MenuState | null>(null);
   const [sectionPicker, setSectionPicker] = useState<MenuState | null>(null);
   const [roomMenu, setRoomMenu] = useState<{ groupId: string; x: number; y: number } | null>(null);
@@ -1119,13 +1122,13 @@ export function Sidebar({ open, onClose }: { open: boolean; onClose: () => void 
   // New Room panel can be open on top of it, so the same Escape press closes
   // them together. Fine, since both directions are "get me out of here."
   useEffect(() => {
-    if (!open) return;
+    if (!open || confirm) return;
     const closeOnEscape = (event: KeyboardEvent) => {
       if (event.key === "Escape") onClose();
     };
     document.addEventListener("keydown", closeOnEscape);
     return () => document.removeEventListener("keydown", closeOnEscape);
-  }, [open, onClose]);
+  }, [open, onClose, confirm]);
 
   useEffect(() => {
     if (!densityOpen) return;
@@ -1170,8 +1173,6 @@ export function Sidebar({ open, onClose }: { open: boolean; onClose: () => void 
 
   // One pending confirmation at a time: archive (inline button or context
   // menu) and delete (context menu) both open the same dialog.
-  const [confirm, setConfirm] = useState<{ kind: BotConfirmKind; bot: Bot } | null>(null);
-
   const requestArchive = (bot: Bot) => {
     const activeBots = state.bots.filter((candidate) => !candidate.hidden);
     if (bot.chiefOfStaff || activeBots.length <= 1) return;
@@ -1348,6 +1349,8 @@ export function Sidebar({ open, onClose }: { open: boolean; onClose: () => void 
 
   return (
     <aside
+      ref={sidebarRef}
+      tabIndex={-1}
       aria-label="Bots and navigation"
       data-native-view-overlay
       data-sidebar
@@ -1794,7 +1797,8 @@ export function Sidebar({ open, onClose }: { open: boolean; onClose: () => void 
         open={confirm !== null}
         {...(confirm ? botConfirmCopy(confirm.kind, confirm.bot.name) : botConfirmCopy("archive", ""))}
         icon={confirm?.kind === "delete" ? <Trash2 size={18} /> : <Archive size={18} />}
-        onCancel={() => setConfirm(null)}
+        onCancel={cancelConfirm}
+        returnFocusRef={sidebarRef}
         onConfirm={() => {
           if (!confirm) return;
           const { kind, bot } = confirm;

@@ -1,4 +1,4 @@
-import { useEffect, useRef, type ReactNode } from "react";
+import { useEffect, useRef, type ReactNode, type RefObject } from "react";
 import { createPortal } from "react-dom";
 import { AlertTriangle } from "lucide-react";
 
@@ -17,6 +17,8 @@ export interface ConfirmDialogProps {
   icon?: ReactNode;
   onCancel: () => void;
   onConfirm: () => void;
+  /** Stable fallback when a context-menu trigger disappears before opening. */
+  returnFocusRef?: RefObject<HTMLElement | null>;
 }
 
 /** In-app replacement for window.confirm, following the FullAccessWarning
@@ -24,12 +26,13 @@ export interface ConfirmDialogProps {
  * a stray Enter never confirms. Portalled to <body> because the sidebar
  * translates below md and would otherwise become the containing block. */
 export function ConfirmDialog(props: ConfirmDialogProps) {
-  const { open, onCancel } = props;
+  const { open, onCancel, returnFocusRef } = props;
   const dialogRef = useRef<HTMLDivElement>(null);
   const cancelRef = useRef<HTMLButtonElement>(null);
 
   useEffect(() => {
     if (!open) return;
+    const opener = document.activeElement instanceof HTMLElement ? document.activeElement : null;
     cancelRef.current?.focus();
     const onKey = (event: KeyboardEvent) => {
       if (event.key === "Escape") {
@@ -52,8 +55,12 @@ export function ConfirmDialog(props: ConfirmDialogProps) {
       }
     };
     window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, [open, onCancel]);
+    return () => {
+      window.removeEventListener("keydown", onKey);
+      const target = opener?.isConnected && opener !== document.body ? opener : returnFocusRef?.current;
+      target?.focus();
+    };
+  }, [open, onCancel, returnFocusRef]);
 
   if (!open) return null;
 
