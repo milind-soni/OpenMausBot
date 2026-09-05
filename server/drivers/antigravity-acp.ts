@@ -388,10 +388,14 @@ export function isValidAntigravityInitializeResult(
   const normalizedActual = actualVersion.replace(/^agy_acp_server_/u, "").trim();
   const normalizedExpected = expectedVersion.replace(/^agy_acp_server_/u, "").trim();
   if (actualVersion !== expectedVersion && normalizedActual !== normalizedExpected) return false;
+  // ACP advertises these optional operations as capability objects (including
+  // empty objects). Keep accepting the boolean form used by older runtimes.
+  const advertised = (value: unknown) => value === true
+    || (typeof value === "object" && value !== null && !Array.isArray(value));
   if (
     initialized.agentCapabilities?.loadSession !== true ||
-    initialized.agentCapabilities?.sessionCapabilities?.resume !== true ||
-    initialized.agentCapabilities?.auth?.logout !== true
+    !advertised(initialized.agentCapabilities?.sessionCapabilities?.resume) ||
+    !advertised(initialized.agentCapabilities?.auth?.logout)
   ) {
     return false;
   }

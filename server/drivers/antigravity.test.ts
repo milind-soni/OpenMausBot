@@ -221,6 +221,32 @@ describe("official Antigravity runtime", () => {
 
   it("validates ACP initialize results from official Antigravity releases", testValidatesAcpInitializeResults);
 
+  // Captured from the SHA-256-pinned Google 1.1.1 macOS arm64 binary in an
+  // isolated, unauthenticated profile. Optional operations are objects, not true.
+  const officialInitialize = {
+    protocolVersion: 1,
+    agentInfo: { name: "antigravity-acp", title: "Google Antigravity", version: "agy_acp_server_1.1.1" },
+    agentCapabilities: {
+      loadSession: true,
+      sessionCapabilities: { list: {}, resume: {} },
+      auth: { logout: {} },
+    },
+    authMethods: [{ id: "oauth-personal", name: "Log in with Google" }],
+  };
+
+  it("accepts the official runtime's object-shaped capabilities", () => {
+    expect(isValidAntigravityInitializeResult(officialInitialize, ANTIGRAVITY_RELEASE_VERSION)).toBe(true);
+  });
+
+  it.each([undefined, null, false, [], "true", 1])("rejects malformed operation capabilities: %j", (value) => {
+    for (const capabilities of [
+      { ...officialInitialize.agentCapabilities, sessionCapabilities: { resume: value } },
+      { ...officialInitialize.agentCapabilities, auth: { logout: value } },
+    ]) {
+      expect(isValidAntigravityInitializeResult({ ...officialInitialize, agentCapabilities: capabilities }, ANTIGRAVITY_RELEASE_VERSION)).toBe(false);
+    }
+  });
+
   it("requires the official executable and harness as a pair", async () => {
     const fake = fakeRuntime();
     await expect(resolveAntigravityRuntime(fake.executable)).resolves.toMatchObject({
