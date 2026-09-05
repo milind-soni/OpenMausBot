@@ -6,6 +6,7 @@ on:
   pull_request:
     paths:
       - server/cli.ts
+      - server/tunnel.ts
       - server/tailscale.ts
       - server/pair-cli.ts
       - scripts/build-npm-package.mjs
@@ -46,6 +47,14 @@ jobs:
           OMB_PORT=18799 node cli.js status | grep -q "ci ·"
           OMB_PORT=18799 node cli.js pair --label "CI phone" | grep -q "open or scan:  https://ci.example/pair#code="
           OMB_PORT=18799 node cli.js sessions | grep -q "no paired devices yet"
+          # --tunnel fails closed without an account, and ships its own pieces
+          test -f dist-server/tunnel-guardian.js && test -f dist-server/prepare-cloudflared.js
+          if HOME=/tmp/omb-pack/home node cli.js serve --tunnel --port 18798 --data-dir /tmp/omb-pack/data2 2> tunnel.err; then echo "serve --tunnel ran without an account" && exit 1; fi
+          grep -q "run \`openmausbot login\` first" tunnel.err
+          # --tunnel ships its own processes and fails closed without an account
+          test -f dist-server/tunnel-guardian.js && test -f dist-server/prepare-cloudflared.js
+          if HOME=/tmp/omb-pack/home node cli.js serve --tunnel --port 18798 --data-dir /tmp/omb-pack/data2 > tunnel.log 2>&1; then echo "serve --tunnel should refuse without login"; exit 1; fi
+          grep -q "run \`openmausbot login\` first" tunnel.log
           kill %1; wait %1 || true
       - name: Publish to npm (release tags only)
         if: startsWith(github.ref, 'refs/tags/v')

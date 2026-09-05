@@ -81,7 +81,17 @@ export function requestOrigin(req: IncomingMessage): string | null {
  * must not turn a remote client into the owner. */
 export function isProxied(req: IncomingMessage): boolean {
   const h = req.headers;
-  return Boolean(h["x-forwarded-for"] || h["x-forwarded-proto"] || h["x-forwarded-host"] || h["forwarded"]);
+  return ipcPeer(req) || Boolean(h["x-forwarded-for"] || h["x-forwarded-proto"] || h["x-forwarded-host"] || h["forwarded"]);
+}
+
+/** A request over an IPC listener (a unix socket or a named pipe) has no peer
+ * address. Only a gateway on this machine can reach such a listener, and it
+ * is there to forward traffic from elsewhere (`openmausbot serve --tunnel`),
+ * so the request is remote by construction: whatever headers it carries or
+ * lacks, it never gets loopback trust. */
+export function ipcPeer(req: IncomingMessage): boolean {
+  const socket = req.socket;
+  return Boolean(socket) && socket.remoteAddress === undefined && socket.remoteFamily === undefined;
 }
 
 /** Origin absent (non-browser) or equal to this request's own origin. */
@@ -99,7 +109,8 @@ export function isSameOrigin(req: IncomingMessage): boolean {
  * an interface) is the source itself, and its forwarded header is ignored. */
 export function requestSource(req: IncomingMessage): string {
   const peer = req.socket?.remoteAddress || "unknown";
-  const viaLocalProxy = peer === "127.0.0.1" || peer === "::1" || peer === "::ffff:127.0.0.1";
+  // An IPC listener's only peer is the tunnel gateway on this machine.
+  const viaLocalProxy = ipcPeer(req) || peer === "127.0.0.1" || peer === "::1" || peer === "::ffff:127.0.0.1";
   // The LAST hop is the one the adjacent (trusted, same-machine) proxy wrote;
   // earlier hops are whatever the client or an outer proxy put there.
   const hops = viaLocalProxy ? (headerValue(req.headers["x-forwarded-for"]) ?? "").split(",").map((h) => h.trim()).filter(Boolean) : [];

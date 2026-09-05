@@ -8,6 +8,7 @@ import {
   clearSessionCookie,
   clientBotPatchViolation,
   clientGroupPatchViolation,
+  ipcPeer,
   isAllowedOrigin,
   isLoopbackHost,
   isProxied,
@@ -16,8 +17,8 @@ import {
   requestOrigin,
   requestSource,
   requiredScope,
-  sanitizeSource,
   resolveRequestAuth,
+  sanitizeSource,
   serializeSessionCookie,
   sessionCookieName,
 } from "./request-auth.ts";
@@ -263,5 +264,41 @@ describe("resolveRequestAuth", () => {
     expect(remote.error).toMatch(/expired or was revoked; pair this device again/);
     // the owner on the same machine keeps working even with a stale cookie
     expect(resolve({ host: "127.0.0.1:8799", cookie: `${cookieName}=${token}` }).auth?.kind).toBe("loopback");
+  });
+});
+
+describe("an IPC listener (openmausbot serve --tunnel) is remote by construction", () => {
+  // SAFETY: only headers, method and the socket peer are read; a unix-socket peer has no address
+  const overSocket = (headers: Record<string, string>) => ({ headers, method: "GET", socket: {} }) as unknown as IncomingMessage;
+
+  it("counts as proxied whatever the headers say; a bare mock without a socket does not", () => {
+    expect(ipcPeer(overSocket({ host: "127.0.0.1:8799" }))).toBe(true);
+    expect(isProxied(overSocket({ host: "localhost" }))).toBe(true);
+    expect(ipcPeer(request({ host: "127.0.0.1:8799" }))).toBe(false);
+    expect(isProxied(request({ host: "127.0.0.1:8799" }))).toBe(false);
+  });
+
+  it("attributes pairing attempts to the address the tunnel forwarded", () => {
+    expect(requestSource(overSocket({ "x-forwarded-for": "203.0.113.9" }))).toBe("203.0.113.9");
+    expect(requestSource(overSocket({}))).toBe("unknown");
+  });
+
+  it("never grants loopback trust over the socket, even with a loopback Host and no forwarded headers; a session works", () => {
+    const dir = mkdtempSync(join(tmpdir(), "omb-auth-ipc-"));
+    try {
+      const sessions = new SessionRegistry({ file: join(dir, "sessions.json") });
+      const gate = { sessions, cookieName: "omb_session_test", streamPath: "/api/events", url: new URL("/api/bots", "http://x") };
+      const denied = resolveRequestAuth(overSocket({ host: "127.0.0.1:8799" }), gate);
+      expect(denied.auth).toBeNull();
+      expect(denied.status).toBe(403);
+      expect(denied.error).toMatch(/through a proxy/);
+      const { code } = sessions.openPairing({ scopes: ["admin", "client"] });
+      const paired = sessions.exchange({ code, label: "phone", source: "203.0.113.9" });
+      if (!paired.ok) throw new Error(paired.error);
+      const admitted = resolveRequestAuth(overSocket({ host: "c-1.openmausbot.com", authorization: `Bearer ${paired.token}` }), gate);
+      expect(admitted.auth?.kind).toBe("session");
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
   });
 });

@@ -92,6 +92,37 @@ await build({
   logLevel: "info",
 });
 
+// `openmausbot serve --tunnel` (server/tunnel.ts) spawns the connector guardian
+// as its own process, so it has to exist as a file beside the server, not only
+// as code inlined into the bundle that imports its neighbours. Bundled under
+// its own name: the same file the desktop app ships as
+// electron/managed-companion-guardian.mjs, so a fix lands in both.
+await build({
+  entryPoints: [join(root, "electron", "managed-companion-guardian.mjs")],
+  bundle: true,
+  platform: "node",
+  target: "node20",
+  format: "esm",
+  outfile: join(root, "dist-server", "tunnel-guardian.js"),
+  allowOverwrite: true,
+  logLevel: "info",
+});
+
+// `serve --tunnel` downloads cloudflared on first use by running the same
+// pinned-digest script the release build uses, as its own process (it runs
+// itself when executed directly, so it must never be inlined into another
+// entry).
+await build({
+  entryPoints: [join(root, "scripts", "prepare-cloudflared.mjs")],
+  bundle: true,
+  platform: "node",
+  target: "node20",
+  format: "esm",
+  outfile: join(root, "dist-server", "prepare-cloudflared.js"),
+  allowOverwrite: true,
+  logLevel: "info",
+});
+
 // pi-mcp-extension.ts is NOT an OpenMausBot entry point: it is loaded by the
 // external `pi` process (pi's own jiti), which resolves its
 // @earendil-works/pi-coding-agent and typebox imports from pi's install. Ship

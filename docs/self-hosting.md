@@ -49,6 +49,22 @@ laptop. Sign the engine CLIs in on the same machine as usual (`claude`,
   own certificate and the link uses this machine's MagicDNS name, so only
   devices on your tailnet can reach it. Needs Tailscale signed in and HTTPS
   certificates enabled for the tailnet (admin console → DNS).
+- **A public address, no domain, no proxy, no open port:**
+
+  ```sh
+  npx openmausbot login          # once: an emailed code signs this machine in
+  npx openmausbot serve --tunnel
+  ```
+
+  `login` reserves an address like `https://c-….openmausbot.com` for this
+  machine; `serve --tunnel` connects it through a Cloudflare tunnel (the same
+  one the desktop app uses for its companion) and prints the pairing link at
+  that address. The first run downloads `cloudflared` (pinned version and
+  digest) into the data dir. Only traffic through the tunnel reaches the
+  server, and it still has to pair: the tunnel lands on a separate listener
+  the server treats as "through a proxy", never as the owner. `npx openmausbot
+  logout` releases the address. The account credentials live in
+  `~/.openmausbot/tunnel-account.json` (mode 0600).
 - **Behind your own proxy or domain:** `npx openmausbot serve --public-url
   https://maus.example.com`, with the proxy rules from "Putting a proxy in
   front".

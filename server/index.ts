@@ -2,7 +2,7 @@
 // (upstream rule): the React app dispatches typed commands over HTTP and
 // folds one SSE event stream; every provider process runs here.
 import { createHash, randomBytes, randomUUID, timingSafeEqual } from "node:crypto";
-import { existsSync, readFileSync, unlinkSync } from "node:fs";
+import { existsSync, readFileSync, rmSync, unlinkSync } from "node:fs";
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import { extname, join } from "node:path";
 
@@ -7212,7 +7212,7 @@ function readBody(req: IncomingMessage, limit = 1_000_000): Promise<any> {
 // onto it. Reject non-loopback Hosts outright (defeats rebinding) and
 // origins outside loopback (blocks remote-web CSRF).
 
-const server = createServer(async (req, res) => {
+const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
   const url = new URL(req.url ?? "/", `http://localhost:${PORT}`);
   const path = url.pathname;
   const method = req.method ?? "GET";
@@ -7259,6 +7259,13 @@ const server = createServer(async (req, res) => {
       url,
       loopbackMutationToken: desktopMutationToken,
     });
+    // Reachability probe, public: the phone races it across a server's
+    // addresses before it has a session, and the tunnel verifier polls it.
+    // A stranger learns only the app name; pid (the desktop boot probe keys
+    // on it) and the static flag stay behind the gate below.
+    if (method === "GET" && path === "/api/health" && !gate.auth) {
+      return json(res, 200, { app: "openmausbot" });
+    }
     if (!gate.auth) return json(res, gate.status, { error: gate.error });
     const auth = gate.auth;
 
@@ -12224,7 +12231,9 @@ const server = createServer(async (req, res) => {
     const status = (e as any)?.status ?? 500;
     return json(res, status, { error: e instanceof Error ? e.message : String(e) });
   }
-});
+};
+
+const server = createServer(handleRequest);
 
 calendarCalls.start();
 
@@ -12235,6 +12244,21 @@ console.log(describeBrand(loadBrand()));
 server.listen(PORT, "127.0.0.1", () => {
   console.log(`openmausbot server on http://127.0.0.1:${PORT}`);
 });
+
+// A second listener for `openmausbot serve --tunnel` (server/tunnel.ts): the
+// connector gateway on this machine forwards public traffic to this IPC path.
+// Nothing changes about the loopback bind above. Requests arriving here have
+// no peer address, which request-auth treats as "through a proxy": a session
+// is required, never loopback trust, whatever headers the request carries.
+const TUNNEL_SOCKET = process.env.OMB_TUNNEL_SOCKET?.trim() || null;
+let tunnelListener: ReturnType<typeof createServer> | null = null;
+if (TUNNEL_SOCKET) {
+  if (process.platform !== "win32") rmSync(TUNNEL_SOCKET, { force: true });
+  tunnelListener = createServer(handleRequest);
+  tunnelListener.listen(TUNNEL_SOCKET, () => {
+    console.log(`openmausbot tunnel listener on ${TUNNEL_SOCKET}`);
+  });
+}
 
 const gracefulShutdown = createGracefulShutdown({
   cleanup: [
@@ -12249,6 +12273,7 @@ const gracefulShutdown = createGracefulShutdown({
       routines?.stop();
       calendarCalls?.stop();
       webhookIngress?.server.close();
+      tunnelListener?.close();
     },
     () => releaseAllBrowserCapabilities(),
     () => registry.disposeAll(),
