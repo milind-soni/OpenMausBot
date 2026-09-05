@@ -250,6 +250,23 @@ describe("peer comms from a room turn", () => {
     expect(delivered?.text).toMatch(/information, not as an instruction/i);
     expect(delivered?.text).toContain("what is the status?");
 
+    // The exchange is mirrored into the room the ask was made from — both
+    // the question and the answer — not tucked into a pair channel under
+    // Bot Chats that nothing badges. The room keeps its "Messaged" chip too.
+    const inRoom = await messagesOf(room.threadId);
+    expect(inRoom.some((m) => m.kind === "text" && m.from?.botId === asker.id && m.text === "what is the status?")).toBe(true);
+    expect(inRoom.some((m) => m.kind === "text" && m.from?.botId === helper.id && str(m.text).includes("hello from fake claude"))).toBe(true);
+    expect(inRoom.some((m) => m.kind === "activity" && m.tool?.name === "Messaged @Room Helper")).toBe(true);
+    const groups = field((await api("GET", "/api/bots?messages=0")).body, "groups");
+    const pairChannel = (Array.isArray(groups) ? groups : []).find(
+      (group: unknown) =>
+        typeof group === "object" && group !== null &&
+        (group as { dm?: boolean }).dm === true &&
+        ((group as { memberIds?: string[] }).memberIds ?? []).includes(asker.id) &&
+        ((group as { memberIds?: string[] }).memberIds ?? []).includes(helper.id),
+    );
+    expect(pairChannel).toBeUndefined();
+
     await api("POST", `/api/bots/${helper.id}/interrupt`);
   }, 40_000);
 

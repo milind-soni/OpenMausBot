@@ -18,6 +18,7 @@ import {
 import { MausAvatar } from "./Avatar";
 import { TurnPresence } from "./TurnPresence";
 import { showToolCallsEnabled } from "@/lib/feature-flags";
+import { roomActivityVisible } from "@/lib/room-activity";
 import { normalizeState } from "@/lib/mascot";
 import { effectiveDefaultResponder, groupResponseHint } from "@/lib/group-routing";
 import { ChatMarkdown } from "./ChatMarkdown";
@@ -66,21 +67,27 @@ function dayLabel(at: number): string {
 
 /** One finished tool step in a room. Same pill the 1:1 chat uses, minus the
  * status glyph — a room reads as a conversation, not a build log. A chip
- * that links somewhere ("Posted in #Standup") opens it, as it would in a
- * 1:1 — a receipt the person cannot follow is only half a receipt. */
-export function RoomToolChip({ message }: { message: Message }) {
-  const { dispatch } = useStore();
+ * that links somewhere ("Posted in #Standup", a bot⇄bot exchange) opens it,
+ * as it would in a 1:1 — a receipt the person cannot follow is only half a
+ * receipt. When the linked channel IS this room (an ask made from here is
+ * mirrored back into it) there is nowhere to go, so it stays a plain,
+ * visible pill. */
+export function RoomToolChip({ message, roomId }: { message: Message; roomId?: string }) {
+  const { state, dispatch } = useStore();
   const tool = message.tool;
   if (!tool) return null;
   const comm = message.comm;
-  if (comm) {
+  if (comm && comm.groupId !== roomId) {
+    const withBot = state.bots.find((b) => b.id === comm.withBotId);
     return (
       <div className="flex justify-start">
         <button
+          type="button"
           onClick={() => dispatch({ type: "select", id: comm.groupId })}
           title={`Open ${comm.withName}`}
           className="flex items-center gap-2 rounded-full border border-hairline/40 bg-panel px-3 py-1.5 text-[13px] text-ink-secondary hover:bg-raised hover:text-ink"
         >
+          <MausAvatar color={comm.withColor} bodyId={withBot?.mascotBody ?? undefined} state="happy" size={16} />
           <span className="max-w-[480px] truncate">{tool.name}</span>
           <ChevronRight size={13} />
         </button>
@@ -236,8 +243,8 @@ const Transcript = memo(function Transcript({
               />
             </div>
           ) : m.kind === "activity" && m.tool ? (
-            m.tool.ok === false || m.tool.name.startsWith("error:") || showToolCalls ? (
-              <RoomToolChip message={m} />
+            roomActivityVisible(m, showToolCalls) ? (
+              <RoomToolChip message={m} roomId={group.id} />
             ) : null
           ) : m.kind === "text" && (m.text || m.attachments?.length) ? (
             <div className={cn("group flex w-full flex-col", user ? "items-end" : "items-start")}>

@@ -7852,7 +7852,17 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
           currentFrom = freshFrom;
           currentTarget = freshTarget;
         }
-        const channel = getOrCreateChannel(store, currentFrom, currentTarget);
+        // An ask made from inside a room is mirrored into that room — the
+        // conversation the person is actually reading — the way delegate_bot
+        // already does. The pair channel is for asks made from a bot's own
+        // thread; sending a room's ask there put the whole exchange behind
+        // an unbadged "A ⇄ B" entry nobody had a reason to open.
+        const channel = getOrCreateChannel(
+          store,
+          currentFrom,
+          currentTarget,
+          connectorThread(currentFrom.id, fromThreadId)?.group,
+        );
         mirrorExchange(commsBus, currentFrom, currentTarget, message, channel, fromThreadId);
         const prefixed = withPeerProvenance(message, {
           botName: currentFrom.name,
