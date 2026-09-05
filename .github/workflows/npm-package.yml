@@ -41,6 +41,9 @@ jobs:
           cd release/npm && npm pack --silent && cd ../..
           rm -rf /tmp/omb-pack && mkdir -p /tmp/omb-pack && tar -xzf release/npm/openmausbot-*.tgz -C /tmp/omb-pack
           cd /tmp/omb-pack/package
+          # Every check below is a silent grep/test; say which one failed, and what the server said.
+          set -x
+          trap 'echo "--- serve.log"; cat serve.log 2>/dev/null; echo "--- tunnel.log"; cat tunnel.log 2>/dev/null' ERR
           test ! -d node_modules
           node cli.js --help | grep -q "openmausbot serve"
           HOME=/tmp/omb-pack/home node cli.js serve --no-pair --port 18799 --data-dir /tmp/omb-pack/data --label ci --public-url https://ci.example > serve.log 2>&1 &
