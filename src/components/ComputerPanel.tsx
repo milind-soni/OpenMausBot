@@ -29,6 +29,7 @@ import type { Routine } from "@/lib/routines";
 import { ApiKeyRow } from "./ApiKeys";
 import { cn } from "@/lib/cn";
 import { usePageVisible } from "@/lib/page-visible";
+import { CloudScreenPreview } from "./CloudScreenPreview";
 import { CloudBackendPicker } from "./CloudBackendPicker";
 import { useDesktopCapabilities } from "./DesktopCapabilities";
 import { RoutineEditor } from "./RoutinesPage";
@@ -261,6 +262,8 @@ export function ComputerPanel({
   }, [bot.id, bot.computer, cloudBackend, flushBotPatches]);
   const [boxState, setBoxState] = useState<string | null>(null);
   const [polledFrame, setPolledFrame] = useState<{ png: string; mime: string } | null>(null);
+  const [previewError, setPreviewError] = useState<string | null>(null);
+  const [previewRetry, setPreviewRetry] = useState(0);
   const [vmFrame, setVmFrame] = useState<string | null>(null);
   // The Local VM's interactive noVNC viewer (passworded, autoconnect). The
   // preview below is a periodic screenshot that swallows clicks — this URL is
@@ -386,6 +389,7 @@ export function ComputerPanel({
     setResolvedComputerSelection(null);
     setPhase("checking");
     setPolledFrame(null);
+    setPreviewError(null);
     setVmFrame(null);
     setVmViewerUrl(null);
     setVmStatus(null);
@@ -625,35 +629,64 @@ export function ComputerPanel({
     computerSelectionPersisted,
   ]);
 
-  // cloud preview: SSE frames win while the bot works; otherwise poll.
-  // Every preview poll below gates on visibility and slows way down for an
-  // idle bot — a drawer left open overnight must not keep shooting.
+  // Only frames received during this connection may replace its preview.
+  // A cached SSE frame must never mask every subsequent screenshot poll.
   const pageVisible = usePageVisible();
   const live = state.screens[bot.id];
-  const sseFlowing = Boolean(bot.busy && live);
-  const inFlight = useRef(false);
+  const latestLive = useRef({ frame: live, at: 0 });
   useEffect(() => {
-    if (panelView !== "computer" || !cloudPreviewReady || sseFlowing || viewerOpen || !pageVisible) return;
-    let alive = true;
+    if (!cloudPreviewReady) {
+      latestLive.current = { frame: live, at: 0 };
+      return;
+    }
+    if (latestLive.current.frame === live) return;
+    latestLive.current = { frame: live, at: 0 };
+    if (cloudPreviewReady && live) {
+      latestLive.current.at = Date.now();
+      setPolledFrame(live);
+      setPreviewError(null);
+    }
+  }, [live, cloudPreviewReady]);
+
+  useEffect(() => {
+    if (panelView !== "computer" || !cloudPreviewReady || viewerOpen || !pageVisible) return;
+    let inFlight = false;
+    const controller = new AbortController();
+    setPreviewError(null);
     const shoot = async () => {
-      if (inFlight.current) return;
-      inFlight.current = true;
+      if (inFlight) return;
+      // Resume polling if a busy bot stops publishing frames. A single old
+      // SSE event is not evidence of a working stream for the whole turn.
+      if (bot.busy && Date.now() - latestLive.current.at < 10_000) return;
+      inFlight = true;
+      const startedAt = Date.now();
       try {
-        const { png, format } = await api(`/api/bots/${bot.id}/computer/screenshot`, { method: "POST" });
-        if (alive) setPolledFrame({ png, mime: format === "jpeg" ? "image/jpeg" : "image/png" });
-      } catch {
-        /* box mid-command or asleep — next tick */
+        const { png, format } = await api(`/api/bots/${bot.id}/computer/screenshot`, {
+          method: "POST",
+          signal: AbortSignal.any([controller.signal, AbortSignal.timeout(90_000)]),
+        });
+        if (!controller.signal.aborted && latestLive.current.at <= startedAt) {
+          if (typeof png !== "string" || !png.trim()) throw new Error("The computer returned an empty screen image.");
+          setPolledFrame({ png, mime: format === "jpeg" ? "image/jpeg" : "image/png" });
+          setPreviewError(null);
+        }
+      } catch (e) {
+        if (!controller.signal.aborted && latestLive.current.at <= startedAt) {
+          setPreviewError(e instanceof Error && e.name === "TimeoutError"
+            ? "The computer took too long to send a frame. Try again."
+            : e instanceof Error ? e.message : "The screen is temporarily unavailable.");
+        }
       } finally {
-        inFlight.current = false;
+        inFlight = false;
       }
     };
     void shoot();
     const timer = setInterval(shoot, bot.busy ? 4000 : 30_000);
     return () => {
-      alive = false;
+      controller.abort();
       clearInterval(timer);
     };
-  }, [panelView, cloudPreviewReady, sseFlowing, bot.id, viewerOpen, pageVisible, bot.busy]);
+  }, [panelView, cloudPreviewReady, bot.id, cloudBackend, viewerOpen, pageVisible, bot.busy, previewRetry]);
 
   // Local VM preview comes directly from Cua Driver through the harness. It
   // does not use the password-protected noVNC viewer or cloud endpoints.
@@ -709,18 +742,13 @@ export function ComputerPanel({
     };
   }, [panelView, phase, isLinux, pageVisible, bot.busy, bot.id]);
 
-  const lastScreenMessage = [...bot.messages].reverse().find((m) => m.kind === "screen" && m.png);
-  const cloudFrame =
-    live ??
-    polledFrame ??
-    (lastScreenMessage ? { png: lastScreenMessage.png!, mime: lastScreenMessage.mime ?? "image/png" } : null);
   const frameSrc =
     phase === "vm"
       ? vmFrame
       : phase === "local" && !isLinux
       ? localFrame
       : cloudPreviewReady || (bot.computer === "cloud" && phase === "starting")
-        ? cloudFrame && `data:${cloudFrame.mime};base64,${cloudFrame.png}`
+        ? polledFrame && `data:${polledFrame.mime};base64,${polledFrame.png}`
         : null;
   const previewOpensDesktop = Boolean(
     frameSrc &&
@@ -1082,8 +1110,25 @@ export function ComputerPanel({
             )}
             {computerStatusCurrent && bot.computer === "cloud" && cloudBackend === "vps" && (phase === "ready" || phase === "starting") && <span className="text-[11px]">self-hosted VPS</span>}
         </div>
-        <div className="flex aspect-[16/10] w-full items-center justify-center overflow-hidden rounded-xl bg-card">
-          {frameSrc && previewOpensDesktop ? (
+        <div className="relative flex aspect-[16/10] w-full items-center justify-center overflow-hidden rounded-xl bg-card">
+          {cloudPreviewReady || (bot.computer === "cloud" && phase === "starting") ? (
+            <CloudScreenPreview
+              key={`${bot.id}:${cloudBackend}:${previewRetry}`}
+              src={frameSrc}
+              name={bot.name}
+              error={previewError}
+              starting={phase === "starting"}
+              opening={pending === "join"}
+              disabled={controlPending}
+              onOpen={() => void openDesktop()}
+              onRetry={() => {
+                latestLive.current.at = 0;
+                setPolledFrame(null);
+                setPreviewError(null);
+                setPreviewRetry((n) => n + 1);
+              }}
+            />
+          ) : frameSrc && previewOpensDesktop ? (
             <button
               type="button"
               onClick={() => void openDesktop()}
