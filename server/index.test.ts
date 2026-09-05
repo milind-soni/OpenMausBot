@@ -4128,6 +4128,38 @@ describe("harness HTTP API", () => {
     }
   });
 
+  it("stores a bot's depth profile and refuses anything outside the three", async () => {
+    const bot = (await api("POST", "/api/bots")).body.bot;
+    try {
+      // absent by default, so an existing bot's prompt is untouched
+      expect(bot.depth).toBeUndefined();
+
+      const deep = await api("PATCH", `/api/bots/${bot.id}`, { depth: "deep" });
+      expect(deep.status).toBe(200);
+      expect(deep.body.bot.depth).toBe("deep");
+
+      // it survives a reload of the public view, not just the write response
+      const listed = (await api("GET", "/api/bots?messages=0")).body.bots
+        .find((candidate: { id: string }) => candidate.id === bot.id);
+      expect(listed.depth).toBe("deep");
+
+      for (const bad of ["DEEP", "verbose", "", 3, null]) {
+        const refused = await api("PATCH", `/api/bots/${bot.id}`, { depth: bad });
+        expect(refused.status).toBe(400);
+        expect(refused.body.error).toMatch(/quick, standard, or deep/);
+      }
+      // a refused write leaves the stored value alone
+      const after = (await api("GET", "/api/bots?messages=0")).body.bots
+        .find((candidate: { id: string }) => candidate.id === bot.id);
+      expect(after.depth).toBe("deep");
+
+      expect((await api("PATCH", `/api/bots/${bot.id}`, { depth: "standard" })).body.bot.depth)
+        .toBe("standard");
+    } finally {
+      await api("DELETE", `/api/bots/${bot.id}`);
+    }
+  });
+
   it("creates a fully configured bot in one request and greets with its final name", async () => {
     const created = await api("POST", "/api/bots", {
       name: "  Pathfinder  ",
@@ -5024,6 +5056,43 @@ describe("harness HTTP API", () => {
     expect(disk.rooms).toEqual({ turnTimeoutMinutes: 20 });
 
     await api("PUT", "/api/config", { rooms: { turnTimeoutMinutes: 5 } });
+  });
+
+  it("puts the depth contract into the system prompt a real engine receives", async () => {
+    // The unit tests prove the string; this proves the wiring. A setting that
+    // never reaches the provider is worse than no setting, because the UI
+    // would claim it is on.
+    const bot = (await api("POST", "/api/bots", {})).body.bot;
+    try {
+      expect((await api("PATCH", `/api/bots/${bot.id}`, {
+        modelSelection: { instanceId: "claude", model: "claude-sonnet-5" },
+      })).status).toBe(200);
+
+      // standard is the default and is deliberately silent
+      rmSync(fakeClaudeDump, { force: true });
+      expect((await api("POST", `/api/bots/${bot.id}/messages`, { text: "hello" })).status).toBe(202);
+      await expect.poll(() => existsSync(fakeClaudeDump), { timeout: 5_000 }).toBe(true);
+      expect(JSON.parse(readFileSync(fakeClaudeDump, "utf8")).systemPrompt ?? "")
+        .not.toMatch(/put the report in your reply/i);
+      await api("POST", `/api/bots/${bot.id}/interrupt`);
+      await expect.poll(async () => {
+        const current = (await api("GET", "/api/bots?messages=0")).body.bots
+          .find((candidate: { id: string }) => candidate.id === bot.id);
+        return Boolean(current?.busy);
+      }, { timeout: 5_000 }).toBe(false);
+
+      // deep carries the contract through to the engine
+      expect((await api("PATCH", `/api/bots/${bot.id}`, { depth: "deep" })).status).toBe(200);
+      rmSync(fakeClaudeDump, { force: true });
+      expect((await api("POST", `/api/bots/${bot.id}/messages`, { text: "hello again" })).status).toBe(202);
+      await expect.poll(() => existsSync(fakeClaudeDump), { timeout: 5_000 }).toBe(true);
+      const system = JSON.parse(readFileSync(fakeClaudeDump, "utf8")).systemPrompt ?? "";
+      expect(system).toMatch(/put the report in your reply/i);
+      expect(system).toMatch(/keep what you verified separate/i);
+    } finally {
+      await api("POST", `/api/bots/${bot.id}/interrupt`);
+      await api("DELETE", `/api/bots/${bot.id}`);
+    }
   });
 
   it("mounts the verification skill into a real turn when its trigger appears", async () => {

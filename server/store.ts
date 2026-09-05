@@ -10,6 +10,7 @@ import { writeFileAtomic } from "./atomic.ts";
 import { peerAllowKey, type PeerAction } from "./peer-approval-key.ts";
 import { DATA_DIR, loadBrowserProfileIdAliases } from "./config.ts";
 import * as mdb from "./message-db.ts";
+import type { DepthProfile } from "./depth-profile.ts";
 import { workspaceDir } from "./workspace.ts";
 import { newId, type CloudBackend, type ModelSelection, type ThreadId } from "./contracts.ts";
 import { pickBotName } from "./names.ts";
@@ -452,6 +453,9 @@ export interface BotRecord {
   computer?: "cloud" | "vm" | "local" | "browser" | "off";
   /** Which cloud computer backs `computer: "cloud"`; absent means Box. */
   cloudBackend?: CloudBackend;
+  /** How much work an answer shows. Absent = "standard", which emits no
+   * guidance at all, so bots created before this setting are unchanged. */
+  depth?: DepthProfile;
   /** Auto mode may prepare/start this bot's managed VPS container. Off by
    * default because starting remote infrastructure is an external action. */
   autoStartVps?: boolean;
