@@ -95,7 +95,8 @@ interface StoredMessage {
   text?: string;
   from?: { botId: string; name: string };
   peerPost?: { unattended?: boolean };
-  tool?: { name: string };
+  tool?: { name: string; ok?: boolean };
+  comm?: { groupId: string; withName: string };
   card?: { requestId?: string; tool?: string; title?: string };
 }
 
@@ -343,9 +344,14 @@ describe("post_to_room", () => {
       : undefined;
     expect(field(listenerNow as Record<string, unknown>, "busy")).toBeFalsy();
 
-    // and the conversation the poster is actually in shows what it did
+    // and the conversation the poster is actually in shows what it did —
+    // as a settled receipt that opens the room, not a step still spinning:
+    // the chat shows linked chips with tool calls off, and hides the rest
     const source = await messagesOf(poster.threadId);
-    expect(source.some((message) => message.tool?.name === "Posted in Standup")).toBe(true);
+    const receipt = source.find((message) => message.tool?.name === "Posted in Standup");
+    expect(receipt, "no receipt in the poster's own conversation").toBeDefined();
+    expect(receipt?.tool?.ok, "the receipt never settled").toBe(true);
+    expect(receipt?.comm).toMatchObject({ groupId: room.id, withName: "Standup" });
   }, 40_000);
 
   it("refuses a source conversation the sender has no claim on", async () => {

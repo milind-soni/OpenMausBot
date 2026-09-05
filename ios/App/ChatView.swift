@@ -1207,7 +1207,9 @@ struct MessageRow: View {
             content
 
             if let comm = message.comm {
-                Label("Messaged \(comm.withName)", systemImage: "arrow.up.right.bubble")
+                // the chip already says what happened ("Posted in Standup");
+                // a linked chip is not always a message sent to someone
+                Label(message.tool?.name ?? "Messaged \(comm.withName)", systemImage: "arrow.up.right.bubble")
                     .font(.system(size: 12))
                     .foregroundStyle(Color.secondary)
             }

@@ -8035,10 +8035,15 @@ const server = createServer(async (req, res) => {
         store.patchGroup(room.id, { unread: true });
         // The same visibility contract the peer tools keep: whatever a bot
         // does elsewhere shows up in the conversation it is actually in.
+        // The chip is settled — the post has already landed — and carries
+        // the same link a "Messaged @X" chip does, which is what makes it a
+        // receipt rather than a log line: linked chips stay visible with
+        // tool calls off, and open the room they name.
         const chip: Omit<Message, "id" | "at"> = {
           role: "bot",
           kind: "activity",
-          tool: { name: `Posted in ${room.name}` },
+          tool: { name: `Posted in ${room.name}`, ok: true },
+          comm: { groupId: room.id, withBotId: poster.id, withName: room.name, withColor: poster.color },
         };
         if (owner.group) chip.from = { botId: poster.id, name: poster.name, color: poster.color };
         store.appendMessage(fromThreadId, chip);

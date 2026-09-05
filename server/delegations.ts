@@ -304,7 +304,9 @@ export function queueDelegation(
   bus.store.appendMessage(sourceThreadId, {
     role: "bot",
     kind: "activity",
-    tool: { name: label },
+    // settled at birth: queueing is the whole act. Left open, the chip
+    // would spin until the transcript is closed — the chat never patches it
+    tool: { name: label, ok: true },
     ...(sourceGroup && !sourceGroup.dm
       ? { from: { botId: from.id, name: from.name, color: from.color } }
       : {}),
