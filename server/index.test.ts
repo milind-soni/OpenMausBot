@@ -284,7 +284,7 @@ const uploadAvatar = async (mime = "image/png"): Promise<string> => {
 
 const statusWithHeaders = (headers: Record<string, string>): Promise<number> =>
   new Promise((resolve, reject) => {
-    const req = request({ hostname: "127.0.0.1", port: PORT, path: "/api/health", headers }, (res) => {
+    const req = request({ hostname: "127.0.0.1", port: PORT, path: "/api/bots", headers }, (res) => {
       res.resume();
       resolve(res.statusCode ?? 0);
     });
@@ -866,6 +866,20 @@ describe("harness HTTP API", () => {
 
   it("rejects non-loopback authorities while accepting IPv4 and IPv6 loopback forms", async () => {
     expect(await statusWithHeaders({ host: "example.com" })).toBe(403);
+    // The one exception: the reachability probe answers strangers with the app name and nothing else
+    // (the phone's route race and the tunnel verifier need it before they can pair).
+    // (node's fetch drops a custom Host header, so this goes through http.request)
+    const probe = await new Promise<{ status: number; body: unknown }>((resolve, reject) => {
+      const req = request({ hostname: "127.0.0.1", port: PORT, path: "/api/health", headers: { host: "example.com" } }, (res) => {
+        let raw = "";
+        res.on("data", (chunk) => (raw += chunk));
+        res.on("end", () => resolve({ status: res.statusCode ?? 0, body: JSON.parse(raw) }));
+      });
+      req.on("error", reject);
+      req.end();
+    });
+    expect(probe.status).toBe(200);
+    expect(probe.body).toEqual({ app: "openmausbot" });
     expect(await statusWithHeaders({ origin: "https://example.com" })).toBe(403);
     expect(await statusWithHeaders({ host: `127.0.0.2:${PORT}` })).toBe(200);
     expect(await statusWithHeaders({ host: `[::1]:${PORT}` })).toBe(200);
