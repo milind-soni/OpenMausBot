@@ -147,6 +147,8 @@ const bridge = {
   /** Open a web link in the default browser. Unlike renderer window.open,
    * this remains reliable after an asynchronous API request. */
   openExternal: (url) => ipcRenderer.invoke("desktop:open-external", url),
+  /** Opens Windows Default Apps so the person can choose a Grok Bot link handler. */
+  openGrokDefaultApps: () => ipcRenderer.invoke("desktop:open-grok-default-apps"),
   /** Tell the window which skin the page wears, so the native chrome the
    * renderer cannot paint (the Windows caption-button overlay) matches. */
   applySkin: (skin) => ipcRenderer.invoke("desktop:skin", skin),

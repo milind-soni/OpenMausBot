@@ -227,9 +227,11 @@ type SkillRecordingPayload = {
       openInstallTerminal?(command: string): Promise<boolean>;
       /** Opens an http(s) link in the user's default browser. */
       openExternal?(url: string): Promise<boolean>;
+      /** Opens Windows Default Apps for the registered Grok Bot link candidate. */
+      openGrokDefaultApps?(): Promise<boolean>;
       /** Recolor the native window chrome for a skin; absent on older builds. */
       applySkin?(skin: string): Promise<boolean>;
-      /** Receives a GitHub package URL opened through openmausbot://install. */
+      /** Receives a public package URL opened through an approved desktop deep link. */
       onPackageInstall?(cb: (url: string) => void): () => void;
       /** Updates the native Dock/taskbar unread indicator. */
       setUnreadCount?(count: number): void;

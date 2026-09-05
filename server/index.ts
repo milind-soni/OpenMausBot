@@ -268,6 +268,7 @@ import { RoutineRequestService } from "./routine-requests.ts";
 import { fetchBotDirectory, matchDirectoryBots, type MatchedDirectoryBot } from "./bot-directory.ts";
 import { scoutProject, suggestTeam } from "./project-scout.ts";
 import { fetchGithubTeam, fetchLibraryTeam, fetchTeamCatalog } from "./team-library.ts";
+import { fetchGrokBotPackage } from "./grok-bot-template.ts";
 import { isBotPackage, packageAgentAsMember, parseBotPackage, renderBotPackageMarkdown } from "./bot-package.ts";
 import { createTeamManifest, importedMemberProfile, parseTeamManifest } from "./team-manifest.ts";
 import { readThreadEvents } from "./thread-events.ts";
@@ -9052,6 +9053,25 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
       } catch (error) {
         const status = (error as { status?: number }).status === 404 ? 404 : 400;
         return json(res, status, { error: error instanceof Error ? error.message : "The GitHub team could not be loaded" });
+      }
+    }
+    if (method === "POST" && path === "/api/team-library/grok") {
+      const body = await readBody(req);
+      if (
+        !body ||
+        typeof body !== "object" ||
+        Array.isArray(body) ||
+        typeof body.url !== "string" ||
+        !body.url.trim() ||
+        body.url.length > 300
+      ) {
+        return json(res, 400, { error: "A public Grok Bot URL is required" });
+      }
+      try {
+        return json(res, 200, await fetchGrokBotPackage(body.url));
+      } catch (error) {
+        const status = (error as { status?: unknown }).status === 400 ? 400 : 502;
+        return json(res, status, { error: error instanceof Error ? error.message : "The Grok Bot could not be loaded" });
       }
     }
     if (method === "GET" && path === "/api/teams/scout") {

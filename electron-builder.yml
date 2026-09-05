@@ -147,6 +147,7 @@ win:
 nsis:
   oneClick: true
   perMachine: false
+  include: build/installer.nsh
   shortcutName: OpenMausBot
   # Versioned, like the .dmg. The README's /latest/download/ button needs a
   # STABLE filename, so ship a second copy named OpenMausBot-setup.exe on the

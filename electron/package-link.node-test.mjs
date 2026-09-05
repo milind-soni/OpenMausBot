@@ -10,6 +10,22 @@ describe("BotMRR package deep links", () => {
     assert.equal(packageUrlFromCommandLine(["OpenMausBot", "--flag", `openmausbot://install?url=${encodeURIComponent(target)}`]), target);
   });
 
+  it("converts an exact Grok Bot app link into the public importer URL", () => {
+    const id = "KZ9xav0Qad1U5QigEn7rh";
+    const deepLink = `grokbot://app/v1/bot-template?id=${id}`;
+    assert.equal(packageUrlFromDeepLink(deepLink), `https://x.ai/bot/${id}`);
+    assert.equal(packageUrlFromCommandLine(["OpenMausBot.exe", deepLink]), `https://x.ai/bot/${id}`);
+  });
+
+  it("rejects malformed or expanded Grok Bot app links", () => {
+    const id = "KZ9xav0Qad1U5QigEn7rh";
+    assert.equal(packageUrlFromDeepLink(`grokbot://other/v1/bot-template?id=${id}`), null);
+    assert.equal(packageUrlFromDeepLink(`grokbot://app/v2/bot-template?id=${id}`), null);
+    assert.equal(packageUrlFromDeepLink(`grokbot://app/v1/bot-template?id=${id}&next=https://evil.example`), null);
+    assert.equal(packageUrlFromDeepLink(`grokbot://app/v1/bot-template?id=short`), null);
+    assert.equal(packageUrlFromDeepLink(`grokbot://app/v1/bot-template?id=${id}#fragment`), null);
+  });
+
   it("rejects other commands, hosts, protocols, credentials, and unsupported file types", () => {
     assert.equal(packageUrlFromDeepLink("openmausbot://settings"), null);
     assert.equal(packageUrlFromDeepLink("openmausbot://install?url=https://evil.example/bot.json"), null);
