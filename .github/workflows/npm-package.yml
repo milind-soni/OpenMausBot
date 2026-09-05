@@ -33,7 +33,6 @@ jobs:
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version: 24
-          registry-url: https://registry.npmjs.org
       - run: pnpm install --frozen-lockfile
         env:
           ELECTRON_SKIP_BINARY_DOWNLOAD: "1"
@@ -57,12 +56,30 @@ jobs:
           if HOME=/tmp/omb-pack/home node cli.js serve --tunnel --port 18798 --data-dir /tmp/omb-pack/data2 > tunnel.log 2>&1; then echo "serve --tunnel should refuse without login"; exit 1; fi
           grep -q "run \`openmausbot login\` first" tunnel.log
           kill %1; wait %1 || true
+      # Trusted publishing: npm trusts this repository's workflow through the
+      # OIDC token (`id-token: write` above), so no registry token is stored
+      # anywhere and no one-time password is asked for. One-time setup on
+      # npmjs.com: package → Settings → Publishing access → GitHub Actions,
+      # owner milind-soni, repository OpenMausBot, workflow npm-package.yml.
+      # Needs npm ≥ 11.5 (Node 24 ships it).
       - name: Publish to npm (release tags only)
         if: startsWith(github.ref, 'refs/tags/v')
         working-directory: release/npm
-        run: npm publish --access public --provenance
+        run: |
+          npm --version
+          npm publish --access public --provenance
+      - name: Note the npm package on the GitHub release (release tags only)
+        if: startsWith(github.ref, 'refs/tags/v')
         env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          version="${GITHUB_REF_NAME#v}"
+          npm view "openmausbot@$version" version   # what the registry has now
+          if gh release view "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            gh release view "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" --json body --jq .body > "$RUNNER_TEMP/notes.md"
+            printf '\n\n**npm:** `npx openmausbot@%s` · https://www.npmjs.com/package/openmausbot/v/%s\n' "$version" "$version" >> "$RUNNER_TEMP/notes.md"
+            gh release edit "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" --notes-file "$RUNNER_TEMP/notes.md"
+          fi
       # The same tarball beside the desktop installers on the GitHub release,
       # for people who install from a download rather than the registry. The
       # release exists by the time the tag does (publishing it is what creates
