@@ -1,7 +1,7 @@
 import { spawn } from "node:child_process";
 import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { dirname, join } from "node:path";
+import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 
@@ -13,7 +13,8 @@ const SERVER_DIR = dirname(fileURLToPath(import.meta.url));
 describe("openmausbot command line", () => {
   it("parses commands and flags, and explains mistakes", () => {
     const serve = parseArgs(["serve", "--port", "9001", "--data-dir", "/tmp/x", "--label", "cab mini", "--tailscale", "--no-pair"], {});
-    expect(serve).toMatchObject({ command: "serve", port: 9001, dataDir: "/tmp/x", label: "cab mini", tailscale: true, pair: false });
+    // --data-dir is resolved against the platform: C:\tmp\x on Windows.
+    expect(serve).toMatchObject({ command: "serve", port: 9001, dataDir: resolve("/tmp/x"), label: "cab mini", tailscale: true, pair: false });
     expect(parseArgs(["pair", "--client", "--public-url", "https://h/"], {})).toMatchObject({ command: "pair", client: true, publicUrl: "https://h" });
     expect(parseArgs(["sessions", "revoke", "abc"], {})).toMatchObject({ command: "sessions", revoke: "abc" });
     expect(parseArgs([], { OMB_PORT: "8123" })).toMatchObject({ command: "help", port: 8123 });
