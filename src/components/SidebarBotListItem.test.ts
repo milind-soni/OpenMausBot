@@ -71,6 +71,12 @@ describe("BotListItem", () => {
     expect(markup).toContain('class="sr-only">Working…');
   });
 
+  it("marks the avatar with a green presence dot only while the bot works", () => {
+    expect(renderRow(bot({ busy: true }), false)).toContain('data-testid="working-dot"');
+    expect(renderRow(bot(), false)).not.toContain('data-testid="working-dot"');
+    expect(renderRow(bot({ busy: true, activity: "waiting-on-you" }), false)).not.toContain('data-testid="working-dot"');
+  });
+
   it("renders the inline Archive action only when it is available", () => {
     expect(renderRow(bot(), true)).not.toContain('aria-label="Archive Atlas"');
     expect(renderRow(bot(), false)).toContain('aria-label="Archive Atlas"');

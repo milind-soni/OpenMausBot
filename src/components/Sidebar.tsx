@@ -726,20 +726,38 @@ export function BotListItem({
     // another bot was active.
     selected ? "border-transparent bg-raised" : "border-transparent hover:bg-raised/50",
   );
+  const working = Boolean(bot.busy) && bot.activity !== "waiting-on-you";
   const body = (
     <>
-      <BotAvatar
-        bot={bot}
-        state={stateForBot({ ...bot, messages: visible })}
-        size={avatarSize}
-        motion={mascotMotion?.kind ?? "none"}
-        motionKey={mascotMotion?.nonce ?? 0}
-        // Motion means something is happening. A resting bot holds a resting
-        // pose — N idle rows bobbing at display rate was most of the app's
-        // visible-idle CPU (states are keyword-derived, so "working" can be
-        // decorative; busy/unread/motion are the real signals).
-        animated={Boolean(bot.busy) || Boolean(bot.unread) || (mascotMotion?.kind ?? "none") !== "none"}
-      />
+      {/* flex, not inline: an inline wrapper adds a baseline gap under the
+          avatar and makes the row taller than before the presence dot */}
+      <span className="relative flex shrink-0">
+        <BotAvatar
+          bot={bot}
+          state={stateForBot({ ...bot, messages: visible })}
+          size={avatarSize}
+          motion={mascotMotion?.kind ?? "none"}
+          motionKey={mascotMotion?.nonce ?? 0}
+          // Motion means something is happening. A resting bot holds a resting
+          // pose — N idle rows bobbing at display rate was most of the app's
+          // visible-idle CPU (states are keyword-derived, so "working" can be
+          // decorative; busy/unread/motion are the real signals).
+          animated={Boolean(bot.busy) || Boolean(bot.unread) || (mascotMotion?.kind ?? "none") !== "none"}
+        />
+        {working && (
+          // presence dot: green while the bot is working, ringed in the row's
+          // ground so it reads on both a photo and the mascot. Also the only
+          // activity signal in icons-only density, where the text is hidden.
+          <span
+            data-testid="working-dot"
+            className={cn(
+              "absolute -right-0.5 -bottom-0.5 rounded-full border-2 border-panel bg-success",
+              // scale with the avatar: 56px comfortable, 40/44px compact + icons
+              density === "comfortable" ? "size-3.5" : "size-3",
+            )}
+          />
+        )}
+      </span>
       <div className={cn("min-w-0 flex-1", iconOnly && "hidden")}>
         <div className="flex items-baseline justify-between gap-2">
           <span className="flex min-w-0 items-center gap-1.5 truncate text-[15px] font-semibold text-ink">
