@@ -3597,6 +3597,43 @@ describe("harness HTTP API", () => {
     expect(patched.body.error).toContain("not recognized");
   });
 
+  it("expands /research in a room, not just a 1:1", async () => {
+    // The command reaches a room member through a different path than a
+    // direct turn. Expanding in only one of them leaves the other receiving
+    // the literal "/research …" text, which looks like it works until you
+    // read what the bot was actually asked.
+    const lead = (await api("POST", "/api/bots")).body.bot;
+    let room: { id: string } | undefined;
+    try {
+      expect((await api("PATCH", `/api/bots/${lead.id}`, {
+        modelSelection: { instanceId: "claude", model: "claude-sonnet-5" },
+      })).status).toBe(200);
+      room = (await api("POST", "/api/groups", {
+        name: "Research room",
+        memberIds: [lead.id],
+        setup: { bulletin: "", defaultResponder: { kind: "member", botId: lead.id } },
+      })).body.group;
+
+      rmSync(fakeClaudeDump, { force: true });
+      expect((await api("POST", `/api/groups/${room!.id}/messages`, {
+        text: "/research who owns investsights.in",
+      })).status).toBe(202);
+
+      // the CLI dumps the raw stream-json turn, so read the whole prompt
+      // rather than assuming where the text sits inside it
+      const dump = await readJsonFileWhenReady<{ prompt?: unknown }>(fakeClaudeDump);
+      const prompt = JSON.stringify(dump.prompt ?? "");
+      // the procedure arrived, not the raw command
+      expect(prompt).toContain("[/research]");
+      expect(prompt).toContain("who owns investsights.in");
+      expect(prompt).toMatch(/corroborate/i);
+    } finally {
+      await api("POST", `/api/bots/${lead.id}/interrupt`);
+      if (room) await api("DELETE", `/api/groups/${room.id}`);
+      await api("DELETE", `/api/bots/${lead.id}`);
+    }
+  });
+
   it("buzzes when a turn dies before it can start", async () => {
     // A dispatch failure already leaves an error row in the thread, but the
     // person who has to fix it is often not looking at the thread — the cause

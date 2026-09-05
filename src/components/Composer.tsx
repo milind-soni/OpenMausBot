@@ -84,6 +84,12 @@ const LEARN_COMMAND: ComposerSlashCommand = {
   description: "Teach a reusable workflow from this conversation",
 };
 
+const RESEARCH_COMMAND: ComposerSlashCommand = {
+  id: "research",
+  label: "/research",
+  description: "Answer with sources checked, and say what could not be",
+};
+
 interface ComposerDraftSnapshot extends ComposerSendSnapshot {
   reply: Message | null;
 }
@@ -252,6 +258,9 @@ export function Composer({
     ) {
       available.push(LEARN_COMMAND);
     }
+    // no capability gate: /research only needs the tools the bot already has,
+    // so unlike /goal and /learn it is offered everywhere
+    available.push(RESEARCH_COMMAND);
     const query = slash.query.toLowerCase();
     return available.filter(
       (command) =>

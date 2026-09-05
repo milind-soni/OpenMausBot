@@ -236,6 +236,7 @@ import {
   stageSkillWrite,
 } from "./skills.ts";
 import { fetchSkillFromSource } from "./skill-fetch.ts";
+import { expandResearchTurnText } from "./research-command.ts";
 import { expandLearnTurnText, learnSource } from "./skill-learn.ts";
 import type { SkillRequestCardData } from "../shared/skill-request.ts";
 import { readCuaConnection } from "./local-computer.ts";
@@ -3897,8 +3898,11 @@ async function startTurn(
     commsDepth < MAX_COMMS_DEPTH &&
     instance.adapter.capabilities.agentsMcp === true;
   const { turnText, resume } = buildTurnContext({
+    // /learn needs the skill tools mounted; /research needs nothing beyond
+    // the tools the bot already has, so it is not gated. Both expanders pass
+    // ordinary text through untouched, and a message can only be one command.
     text: promptWithReply(
-      skillAuthoring ? expandLearnTurnText(providerText) : providerText,
+      expandResearchTurnText(skillAuthoring ? expandLearnTurnText(providerText) : providerText),
       opts?.replyTo,
       cfg.profile?.name?.trim() || "User",
     ),
@@ -5303,8 +5307,13 @@ async function runGroupMemberTurn(
     .join("\n");
 
   const latestUserText = usesNativeImageInput ? resolvedLatestImages.text : latestUser?.text;
-  const learnTurn = skillAuthoring && latestUserText ? expandLearnTurnText(latestUserText) : "";
-  const learnBlock = learnTurn && learnTurn !== latestUserText ? `\n\n${learnTurn}` : "";
+  // Composed exactly as in startTurn: /learn needs the skill tools mounted,
+  // /research needs nothing, and a message can only be one command. A room
+  // turn has to expand both or the command reaches the bot as literal text.
+  const commandTurn = latestUserText
+    ? expandResearchTurnText(skillAuthoring ? expandLearnTurnText(latestUserText) : latestUserText)
+    : "";
+  const learnBlock = commandTurn && commandTurn !== latestUserText ? `\n\n${commandTurn}` : "";
   const text = `${roomContext}\n\n(Reply to the conversation above as ${bot.name}.)${learnBlock}${cardContinuation ? `\n\n${cardContinuation}` : ""
   }`;
 
