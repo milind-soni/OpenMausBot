@@ -455,6 +455,15 @@ import {
   stopCompanion,
 } from "./companion.mjs";
 
+/** IPC that controls this computer, its files, its logins or its updater is
+ * answered only for the local server's UI (electron/local-origin.cjs). A
+ * remote server's page gets a reduced bridge (preload.cjs) in the first
+ * place; this is the second wall, shared with cua.mjs, updater.mjs and
+ * android-device.mjs. Declared before any handler registration below: a
+ * const declared later would be in its temporal dead zone at module load.
+ */
+const { isLocalSender: senderIsLocal, localOnly, localOnlySync, setLocalOrigin } = localOriginModule;
+
 let companionPowerBlocker = null;
 
 function syncCompanionKeepAwake(companionEnabled, keepAwake) {
@@ -1606,12 +1615,6 @@ function activeOrigin() {
   return activeEnvironment(environmentsState)?.origin ?? rendererOrigin();
 }
 
-/** IPC that controls this computer, its files, its logins or its updater is
- * answered only for the local server's UI (electron/local-origin.cjs). A
- * remote server's page gets a reduced bridge (preload.cjs) in the first
- * place; this is the second wall, shared with cua.mjs, updater.mjs and
- * android-device.mjs. */
-const { isLocalSender: senderIsLocal, localOnly, localOnlySync, setLocalOrigin } = localOriginModule;
 
 function refreshApplicationMenu() {
   Menu.setApplicationMenu(
