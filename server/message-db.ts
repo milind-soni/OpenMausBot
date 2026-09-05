@@ -15,6 +15,7 @@ import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 
 import { DATA_DIR } from "./config.ts";
+import { peerProvenanceAuthor } from "./peer-provenance.ts";
 import type { Message } from "./store.ts";
 
 const DB_FILE = () => join(DATA_DIR, "messages.db");
@@ -316,7 +317,21 @@ export interface RecallHit {
   snippet: string;
   /** room messages: which member said it */
   from?: string;
+  /** a user-role line another bot delivered with ask_bot: that bot's name.
+   * The stored text opens with a note saying so, but the snippet windows
+   * around the match and drops it, so the reader learns it here. */
+  peer?: string;
 }
+
+/** Who wrote a user-role line that reads as the user's. The structural
+ * field wins; rows stored before it existed still open with the note. */
+function peerAuthor(peerName: string | null, text: string): string | null {
+  return peerName ?? peerProvenanceAuthor(text);
+}
+
+/** Enough of a line to see whether it opens with an ask_bot note — the
+ * note's fixed wording plus a bot name — without reading the whole text. */
+const PEER_NOTE_HEAD_CHARS = 160;
 
 // Every query token must match, so a function word the model happened to
 // include ("archive reference on") turns a good query into a miss. Drop
@@ -349,15 +364,27 @@ const SNIPPET_TOKENS = 48;
 export function readMessageText(
   threadId: string,
   messageId: string,
-): { threadId: string; messageId: string; at: number; role: string; text: string; from?: string } | null {
+): { threadId: string; messageId: string; at: number; role: string; text: string; from?: string; peer?: string } | null {
   const row = db()
     .prepare(
-      "SELECT at, role, text, json_extract(json, '$.from.name') AS from_name FROM messages " +
+      "SELECT at, role, text, json_extract(json, '$.from.name') AS from_name, " +
+        "json_extract(json, '$.peerAsk.name') AS peer_name FROM messages " +
         "WHERE thread_id = ? AND id = ? AND kind = 'text' AND text IS NOT NULL",
     )
-    .get(threadId, messageId) as { at: number; role: string; text: string; from_name: string | null } | undefined;
+    .get(threadId, messageId) as
+    | { at: number; role: string; text: string; from_name: string | null; peer_name: string | null }
+    | undefined;
   if (!row) return null;
-  return { threadId, messageId, at: row.at, role: row.role, text: row.text, ...(row.from_name ? { from: row.from_name } : {}) };
+  const peer = peerAuthor(row.peer_name, row.text);
+  return {
+    threadId,
+    messageId,
+    at: row.at,
+    role: row.role,
+    text: row.text,
+    ...(row.from_name ? { from: row.from_name } : {}),
+    ...(peer ? { peer } : {}),
+  };
 }
 
 /** Relevance-ranked recall over the text messages of the given threads:
@@ -372,6 +399,7 @@ export function recallMessages(query: string, threadIds: readonly string[], limi
   const rows = db()
     .prepare(
       "SELECT m.thread_id, m.id, m.at, m.role, json_extract(m.json, '$.from.name') AS from_name, " +
+        `json_extract(m.json, '$.peerAsk.name') AS peer_name, substr(m.text, 1, ${PEER_NOTE_HEAD_CHARS}) AS head, ` +
         `snippet(messages_fts, 0, '[', ']', '…', ${SNIPPET_TOKENS}) AS snippet ` +
         "FROM messages_fts JOIN messages m ON m.rowid = messages_fts.rowid " +
         `WHERE messages_fts MATCH ? AND m.kind = 'text' AND m.thread_id IN (${placeholders}) ` +
@@ -383,16 +411,22 @@ export function recallMessages(query: string, threadIds: readonly string[], limi
     at: number;
     role: string;
     from_name: string | null;
+    peer_name: string | null;
+    head: string;
     snippet: string;
   }>;
-  return rows.map((row) => ({
-    threadId: row.thread_id,
-    messageId: row.id,
-    at: row.at,
-    role: row.role,
-    snippet: row.snippet.replace(/\s+/g, " ").trim(),
-    ...(row.from_name ? { from: row.from_name } : {}),
-  }));
+  return rows.map((row) => {
+    const peer = peerAuthor(row.peer_name, row.head);
+    return {
+      threadId: row.thread_id,
+      messageId: row.id,
+      at: row.at,
+      role: row.role,
+      snippet: row.snippet.replace(/\s+/g, " ").trim(),
+      ...(row.from_name ? { from: row.from_name } : {}),
+      ...(peer ? { peer } : {}),
+    };
+  });
 }
 
 /** Test/shutdown hook — closes the handle so a wiped DATA_DIR starts clean. */

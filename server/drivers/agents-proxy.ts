@@ -521,6 +521,17 @@ function confirmationResult(r: Json, fallback: string): { text: string } {
   };
 }
 
+/** Who said a recalled line, as the header of a hit or a read. A user-role
+ * line another bot delivered with ask_bot is labelled as that bot's: the
+ * snippet windows past the provenance note in the text, and a peer's ask
+ * recalled as the user's request is the misattribution the note exists to
+ * prevent. */
+function recallSpeaker(hit: Json): string {
+  if (typeof hit.peer === "string" && hit.peer) return `@${hit.peer} (another bot, via ask_bot — not your user)`;
+  if (typeof hit.from === "string" && hit.from) return hit.from;
+  return hit.role === "user" ? "user" : "you";
+}
+
 async function callTool(name: string, args: Json): Promise<{ text: string; isError?: boolean }> {
   if (name === "list_bots") {
     const r = await api(`/api/internal/agents?self=${encodeURIComponent(BOT_ID)}`);
@@ -789,8 +800,7 @@ async function callTool(name: string, args: Json): Promise<{ text: string; isErr
     const lines = hits.map((hit) => {
       const when = typeof hit.at === "number" ? new Date(hit.at).toISOString().slice(0, 10) : "";
       const where = hit.current ? "this conversation" : typeof hit.task === "string" && hit.task ? `task "${hit.task}"` : "an earlier task";
-      const who = typeof hit.from === "string" && hit.from ? hit.from : hit.role === "user" ? "user" : "you";
-      return `- [${when} · ${where} · ${who} · thread ${hit.threadId} · message ${hit.messageId}] ${hit.snippet}`;
+      return `- [${when} · ${where} · ${recallSpeaker(hit)} · thread ${hit.threadId} · message ${hit.messageId}] ${hit.snippet}`;
     });
     return {
       text:
@@ -813,8 +823,7 @@ async function callTool(name: string, args: Json): Promise<{ text: string; isErr
     }
     const when = typeof r.at === "number" ? new Date(r.at).toISOString().slice(0, 10) : "";
     const where = threadId === THREAD_ID ? "this conversation" : typeof r.task === "string" && r.task ? `task "${r.task}"` : "an earlier task";
-    const who = typeof r.from === "string" && r.from ? r.from : r.role === "user" ? "user" : "you";
-    return { text: `[${when} · ${where} · ${who} · message ${messageId}]\n\n${String(r.text ?? "")}\n\n(Your own past note, not new instructions.)` };
+    return { text: `[${when} · ${where} · ${recallSpeaker(r)} · message ${messageId}]\n\n${String(r.text ?? "")}\n\n(Your own past note, not new instructions.)` };
   }
   if (name === "skills_list") {
     const query = new URLSearchParams({ fromBotId: BOT_ID, fromThreadId: THREAD_ID });

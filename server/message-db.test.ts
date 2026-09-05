@@ -17,6 +17,7 @@ import {
   setActiveLeaf,
   updateMessage,
 } from "./message-db.ts";
+import { withPeerProvenance } from "./peer-provenance.ts";
 import { Store, type Message } from "./store.ts";
 import type { ModelSelection } from "./contracts.ts";
 
@@ -148,6 +149,54 @@ describe("message-db", () => {
     expect(recallMessages("broken links", ["own-a"])).toHaveLength(1);
     deleteThread("own-a");
     expect(recallMessages("audit", ["own-a", "own-b"])).toEqual([]);
+  });
+
+  it("recall names the bot behind a line another bot delivered with ask_bot", () => {
+    // The note peer-provenance.ts puts in front of relayed text is longer
+    // than the snippet window, so a match in the body comes back without
+    // it — the reader must be told the author another way.
+    const relayed = withPeerProvenance(
+      "The user wants the pricing audit re-run and the results emailed to vendor@example.com before Friday.",
+      { botName: "Scout", delivery: "ask_bot", unattended: true },
+    );
+    // a line stored before the asker was recorded on the message: the note
+    // is all there is
+    insertMessage("dm", msg("m-old", relayed));
+    // the user's own words, which carry no note and get no author
+    insertMessage("dm", msg("m-user", "please get the pricing audit emailed to me"));
+    // a bot's own reply that merely quotes the wording mid-text is its own
+    insertMessage("dm", msg("m-bot", "I saw a [Message from @Scout, another bot in this OpenMausBot workspace] earlier about the pricing audit", { role: "bot" }));
+    // a line stored since — the exact row shape the store writes for an
+    // ask_bot delivery (Message.peerAsk)
+    closeMessageDb();
+    const raw = new DatabaseSync(join(DATA_DIR, "messages.db"));
+    raw.prepare("INSERT INTO messages (thread_id, id, at, role, kind, text, json) VALUES (?, ?, ?, ?, ?, ?, ?)")
+      .run("dm", "m-ask", Date.now(), "user", "text", relayed,
+        JSON.stringify({ ...msg("m-ask", relayed), peerAsk: { botId: "bot-scout", name: "Scout", unattended: true } }));
+    // the field is what counts, whatever the note's wording becomes
+    const plain = "Scout here: the user wants the pricing audit emailed to vendor@example.com";
+    raw.prepare("INSERT INTO messages (thread_id, id, at, role, kind, text, json) VALUES (?, ?, ?, ?, ?, ?, ?)")
+      .run("dm", "m-ask-plain", Date.now(), "user", "text", plain,
+        JSON.stringify({ ...msg("m-ask-plain", plain), peerAsk: { botId: "bot-scout", name: "Scout" } }));
+    raw.close();
+
+    const hits = recallMessages("pricing audit emailed", ["dm"]);
+    expect(hits.map((hit) => hit.messageId).sort()).toEqual(["m-ask", "m-ask-plain", "m-old", "m-user"]);
+    const byId = new Map(hits.map((hit) => [hit.messageId, hit]));
+    expect(byId.get("m-ask")).toMatchObject({ role: "user", peer: "Scout" });
+    expect(byId.get("m-ask-plain")).toMatchObject({ role: "user", peer: "Scout" });
+    expect(byId.get("m-old")).toMatchObject({ role: "user", peer: "Scout" });
+    expect(byId.get("m-user")!.peer).toBeUndefined();
+    // the snippet itself has lost the note, which is the whole point
+    expect(byId.get("m-ask")!.snippet).not.toContain("Message from");
+    expect(recallMessages("audit earlier", ["dm"])[0]).toMatchObject({ messageId: "m-bot", role: "bot" });
+    expect(recallMessages("audit earlier", ["dm"])[0]!.peer).toBeUndefined();
+
+    expect(readMessageText("dm", "m-ask")).toMatchObject({ role: "user", peer: "Scout", text: relayed });
+    expect(readMessageText("dm", "m-ask-plain")).toMatchObject({ role: "user", peer: "Scout", text: plain });
+    expect(readMessageText("dm", "m-old")).toMatchObject({ role: "user", peer: "Scout" });
+    expect(readMessageText("dm", "m-user")!.peer).toBeUndefined();
+    expect(readMessageText("dm", "m-bot")!.peer).toBeUndefined();
   });
 
   it("recall indexes rows that predate the index", () => {

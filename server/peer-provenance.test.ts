@@ -4,7 +4,7 @@
 // these goes red.
 import { describe, expect, it } from "vitest";
 
-import { peerProvenanceNote, withPeerProvenance } from "./peer-provenance.ts";
+import { peerProvenanceAuthor, peerProvenanceNote, withPeerProvenance } from "./peer-provenance.ts";
 
 describe("peerProvenanceNote", () => {
   it("names the author and says the text is not from the user", () => {
@@ -42,6 +42,17 @@ describe("peerProvenanceNote", () => {
     const unwatched = peerProvenanceNote({ botName: "Scout", delivery: "post_to_room", unattended: true });
     expect(unwatched).toMatch(/running unattended/i);
     expect(unwatched).toMatch(/nobody watching/i);
+  });
+
+  it("reads the asker back off a stored line that opens with the note", () => {
+    // rows written before Message.peerAsk existed have only the note to say
+    // who wrote them; a name with spaces or digits reads back whole
+    expect(peerProvenanceAuthor(withPeerProvenance("ship it", { botName: "New Bot 2", delivery: "ask_bot", unattended: true }))).toBe("New Bot 2");
+    // a room post is attributed by its own `from`, never by its wording
+    expect(peerProvenanceAuthor(withPeerProvenance("ship it", { botName: "Scout", delivery: "post_to_room" }))).toBeNull();
+    // the user's words, and a bot quoting the note mid-sentence, stay theirs
+    expect(peerProvenanceAuthor("ship it")).toBeNull();
+    expect(peerProvenanceAuthor("as in a [Message from @Scout, another bot in this OpenMausBot workspace] line")).toBeNull();
   });
 
   it("puts the note in front of the message without altering it", () => {
