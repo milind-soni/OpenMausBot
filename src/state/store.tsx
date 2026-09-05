@@ -71,7 +71,7 @@ export interface OptionCardData {
   held?: string;
   /** the narrow grant "always allow" remembers, e.g. "Bash:git" */
   allowKey?: string;
-  approvalScope?: "local-computer";
+  approvalScope?: "local-computer" | "remote-worker-computer";
   /** Persisted proposal used by the server when the user confirms it. */
   routineRequest?: RoutineRequestCardData;
   /** Staged learned-skill change; applied only after the user confirms this card. */
@@ -261,7 +261,9 @@ export interface Bot {
   modelSelection: ModelSelection;
   /** Where this bot works: a computer, only the built-in browser tab, or
    * nowhere; unset = auto (cloud box if one exists, else local). */
-  computer?: "cloud" | "vm" | "local" | "browser" | "off";
+  computer?: "cloud" | "vm" | "local" | "worker" | "browser" | "off";
+  /** Which named remote worker backs `computer: "worker"`. */
+  workerId?: string;
   /** Which cloud computer backs `computer: "cloud"`; absent means Box. */
   cloudBackend?: CloudBackend;
   /** Allow Auto to prepare/start the managed VPS container. Off by default. */

@@ -45,6 +45,7 @@ import { LocalScreenPreview } from "./LocalScreenPreview";
 import { LinuxLocalControl } from "./LinuxLocalControl";
 import { MacLocalControl } from "./MacLocalControl";
 import { LocalComputerAutoWarning } from "./LocalComputerAutoWarning";
+import { WorkerPicker } from "./WorkerPicker";
 import {
   autoSelectsLocalComputer,
   instanceSupportsLocalComputer,
@@ -82,6 +83,8 @@ type Phase =
   | "vps-stopped"
   | "local"
   | "local-unavailable"
+  | "worker"
+  | "worker-unavailable"
   | "auto-unavailable"
   | "show-ready-box"
   | "show-sleeping-box"
@@ -197,30 +200,35 @@ export function ComputerPanel({
   const providerSupportsLocal = instanceSupportsLocalComputer(state.instances, bot);
   const localSelectable = localComputerSelectable({ capabilities, providerSupportsLocal });
   const [localAutoWarningTarget, setLocalAutoWarningTarget] = useState<string | null>(null);
+  const [choosingWorker, setChoosingWorker] = useState(false);
   const localDisabledReason = localComputerDisabledReason({ capabilities, providerSupportsLocal });
   const [phase, setPhase] = useState<Phase>("checking");
   const [persistedComputerSelection, setPersistedComputerSelection] = useState<{
     botId: string;
     computer: Bot["computer"];
     cloudBackend: CloudBackend;
+    workerId?: string;
   } | null>(null);
   const [resolvedComputerSelection, setResolvedComputerSelection] = useState<{
     botId: string;
     computer: Bot["computer"];
     cloudBackend: CloudBackend;
+    workerId?: string;
   } | null>(null);
   const cloudBackend = bot.cloudBackend ?? "box";
   const computerSelectionPersisted = Boolean(
     persistedComputerSelection
       && persistedComputerSelection.botId === bot.id
       && persistedComputerSelection.computer === bot.computer
-      && persistedComputerSelection.cloudBackend === cloudBackend,
+      && persistedComputerSelection.cloudBackend === cloudBackend
+      && persistedComputerSelection.workerId === bot.workerId,
   );
   const computerStatusCurrent = Boolean(
     resolvedComputerSelection
       && resolvedComputerSelection.botId === bot.id
       && resolvedComputerSelection.computer === bot.computer
-      && resolvedComputerSelection.cloudBackend === cloudBackend,
+      && resolvedComputerSelection.cloudBackend === cloudBackend
+      && resolvedComputerSelection.workerId === bot.workerId,
   );
   const cloudPreviewReady = shouldPollCloudPreview({
     computer: bot.computer,
@@ -236,6 +244,9 @@ export function ComputerPanel({
     cloudBackend?: CloudBackend;
     browser?: boolean;
     acknowledgeLocalAuto?: boolean;
+    workerId?: string;
+    approvalMode?: "ask";
+    autoApprove?: false;
   }) => {
     // Clear old-provider UI in the same render as the optimistic profile
     // change. The resolving effect waits for its PATCH before doing any work.
@@ -253,16 +264,18 @@ export function ComputerPanel({
         cloudBackend,
         persistedBot,
       })) return;
+      if (persistedBot && persistedBot.workerId !== bot.workerId) return;
       setPersistedComputerSelection({
         botId: bot.id,
         computer: bot.computer,
         cloudBackend,
+        workerId: bot.workerId,
       });
     });
     return () => {
       alive = false;
     };
-  }, [bot.id, bot.computer, cloudBackend, flushBotPatches]);
+  }, [bot.id, bot.computer, bot.workerId, cloudBackend, flushBotPatches]);
   const [boxState, setBoxState] = useState<string | null>(null);
   const [polledFrame, setPolledFrame] = useState<{ png: string; mime: string } | null>(null);
   const [previewError, setPreviewError] = useState<string | null>(null);
@@ -352,6 +365,10 @@ export function ComputerPanel({
       selectedInstance.capabilities?.computerMcp &&
       selectedInstance.driverKind !== "boxAgent",
   );
+  const workerSupported = Boolean(
+    selectedInstance?.capabilities?.computerMcp &&
+      selectedInstance.driverKind !== "boxAgent",
+  );
   const computerToolSupported = selectedInstance?.capabilities?.computerMcp === true;
   const vpsSupported = Boolean(computerToolSupported && selectedInstance?.driverKind !== "boxAgent");
   const cloudSupported = cloudBackend === "vps"
@@ -374,6 +391,8 @@ export function ComputerPanel({
         ? "the Local VM"
       : bot.computer === "local"
         ? "this computer"
+      : bot.computer === "worker"
+        ? "the selected worker computer"
       : bot.computer === "browser"
         ? "the built-in browser"
         : bot.computer === "off"
@@ -403,6 +422,11 @@ export function ComputerPanel({
     // let it choose a provider until the PATCH lane confirms server state.
     if (!computerSelectionPersisted) return;
 
+    if (choosingWorker && bot.computer !== "worker") {
+      setPhase("worker-unavailable");
+      return;
+    }
+
     if (bot.computer === "off") {
       setPhase("off");
       return;
@@ -411,6 +435,24 @@ export function ComputerPanel({
     // screen, so this tab must not wake a box or start host capture.
     if (bot.computer === "browser") {
       setPhase("browser");
+      return;
+    }
+    if (bot.computer === "worker") {
+      setResolvedComputerSelection({
+        botId: bot.id,
+        computer: bot.computer,
+        cloudBackend,
+        workerId: bot.workerId,
+      });
+      if (!workerSupported) {
+        setError("This model engine cannot use a remote worker. Choose Claude or an ACP engine.");
+        setPhase("worker-unavailable");
+      } else if (!bot.workerId) {
+        setError("Choose a configured worker for this bot.");
+        setPhase("worker-unavailable");
+      } else {
+        setPhase("worker");
+      }
       return;
     }
     if (bot.computer === "local") {
@@ -616,6 +658,7 @@ export function ComputerPanel({
   }, [
     bot.id,
     bot.computer,
+    bot.workerId,
     bot.autoStartVps,
     cloudBackend,
     retry,
@@ -625,11 +668,13 @@ export function ComputerPanel({
     providerSupportsLocal,
     selectedInstance?.driverKind,
     vmSupported,
+    workerSupported,
     cloudSupported,
     vpsSupported,
     state.config?.vps?.sshAlias,
     panelView,
     computerSelectionPersisted,
+    choosingWorker,
   ]);
 
   // Only frames received during this connection may replace its preview.
@@ -1001,10 +1046,13 @@ export function ComputerPanel({
     "vps-stopped": "The managed VPS computer is stopped",
     "local-unavailable": localDisabledReason ?? "Local computer control isn't ready.",
     "vm-unavailable": "The Local VM isn't available for this bot",
+    "worker-unavailable": choosingWorker
+      ? "Choose the Mac or Windows worker this bot should use."
+      : "The selected worker isn't available for this bot.",
     browser: "This bot works in the built-in browser — no desktop here",
     off: "This bot's computer is off",
     error: "Couldn't reach the computer",
-  } satisfies Record<Exclude<Phase, "ready" | "local" | "vm">, string>;
+  } satisfies Record<Exclude<Phase, "ready" | "local" | "vm" | "worker">, string>;
 
   return (
     <>
@@ -1108,6 +1156,7 @@ export function ComputerPanel({
             <span>{bot.name}'s screen</span>
             {phase === "local" && <span className="text-[11px]">this computer</span>}
             {phase === "vm" && <span className="text-[11px]">Local VM</span>}
+            {phase === "worker" && <span className="text-[11px]">remote worker</span>}
             {(phase === "show-ready-box" || phase === "show-sleeping-box" || phase === "show-pending-box") && (
               <span className="text-[11px]">cloud box · Auto · read-only</span>
             )}
@@ -1173,6 +1222,8 @@ export function ComputerPanel({
                     ? "Auto found an existing cloud computer. Choose Cloud to open it."
                   : phase === "vm"
                     ? "Capturing the Local VM screen…"
+                  : phase === "worker"
+                    ? "Worker selected. Live interaction stays on that remote desktop."
                   : phase === "local"
                     ? isLinux
                       ? "Ready for approved bot actions. Start the separate preview below when you want to watch the screen."
@@ -1312,7 +1363,7 @@ export function ComputerPanel({
           )}
 
         {/* Who is driving — take the wheel / hand it back */}
-        {(cloudPreviewReady || phase === "vm") && control.helpReason && !control.held && (
+        {(cloudPreviewReady || phase === "vm" || phase === "worker") && control.helpReason && !control.held && (
           <div className="mt-3 rounded-xl border border-warning/25 bg-warning/10 p-4">
             <div className="text-[13px] leading-relaxed text-warning">
               <b>{bot.name}</b> asked for your hands: {control.helpReason}
@@ -1338,12 +1389,13 @@ export function ComputerPanel({
             </div>
           </div>
         )}
-        {(cloudPreviewReady || phase === "vm") && control.held && (
+        {(cloudPreviewReady || phase === "vm" || phase === "worker") && control.held && (
           <div className="mt-3 rounded-xl border border-accent/25 bg-accent/10 p-4">
             <div className="text-[13px] leading-relaxed text-ink">
               You have the wheel — the bot's clicks and keystrokes are refused until you hand it back.
               {cloudPreviewReady && " Use Open desktop to drive."}
               {phase === "vm" && " Use Open desktop to drive — the preview here is watch-only."}
+              {phase === "worker" && " Continue on the selected remote desktop."}
             </div>
             <button
               onClick={() => {
@@ -1447,14 +1499,18 @@ export function ComputerPanel({
               ["cloud", "Cloud", "Hosted desktop", Cloud],
               ["vm", "Local VM", "Isolated local desktop", Box],
               ["local", "This computer", "Your screen and apps", Monitor],
+              ["worker", "Worker", "Mac or Windows desktop", Columns2],
               ["browser", "Browser", "Web pages only", Globe],
               ["off", "Off", "No computer access", Power],
             ] as const).map(([mode, label, description, Icon]) => {
-                const selected = mode === null ? !bot.computer : bot.computer === mode;
+                const selected = mode === "worker"
+                  ? choosingWorker || bot.computer === "worker"
+                  : mode === null ? !bot.computer : bot.computer === mode;
                 const disabled =
                   (mode === "cloud" && !cloudSupported) ||
                   (mode === "vm" && !vmSupported) ||
                   (mode === "local" && !localSelectable) ||
+                  (mode === "worker" && !workerSupported) ||
                   (mode === "browser" && !browserSelectable);
                 const unavailableTitle =
                   mode === "vm" && !vmSupported
@@ -1463,6 +1519,8 @@ export function ComputerPanel({
                       ? "This model engine cannot use cloud computer tools"
                       : mode === "local" && !localSelectable
                         ? localDisabledReason ?? "Local computer control isn't ready"
+                        : mode === "worker" && !workerSupported
+                          ? "This model engine cannot use a remote worker"
                         : mode === "browser"
                           ? browserSelectable ? "The built-in browser tab only; no desktop" : browserDisabledReason
                           : undefined;
@@ -1472,9 +1530,22 @@ export function ComputerPanel({
                 disabled={disabled}
                 title={unavailableTitle}
                 onClick={() => {
-                  if ((mode === null && bot.computer === undefined) || mode === bot.computer) return;
+                  if (mode !== "worker" && ((mode === null && bot.computer === undefined) || mode === bot.computer)) return;
+                  if (mode !== "worker") setChoosingWorker(false);
                   if (mode === "local" && approvalModeFor(bot) === "auto") {
                     setLocalAutoWarningTarget(bot.id);
+                  }
+                  else if (mode === "worker") {
+                    if (bot.workerId) {
+                      setChoosingWorker(false);
+                      updateComputerSelection({
+                        computer: "worker",
+                        workerId: bot.workerId,
+                        ...(approvalModeFor(bot) === "auto" ? { approvalMode: "ask", autoApprove: false } : {}),
+                      });
+                    } else {
+                      setChoosingWorker(true);
+                    }
                   }
                   // a browser-only bot must actually have its browser: flip
                   // the per-bot switch on with the destination
@@ -1504,6 +1575,19 @@ export function ComputerPanel({
                 );
             })}
           </div>
+          {(choosingWorker || bot.computer === "worker") && workerSupported && (
+            <WorkerPicker
+              selectedWorkerId={bot.workerId}
+              onSelect={(workerId) => {
+                setChoosingWorker(false);
+                updateComputerSelection({
+                  computer: "worker",
+                  workerId,
+                  ...(approvalModeFor(bot) === "auto" ? { approvalMode: "ask", autoApprove: false } : {}),
+                });
+              }}
+            />
+          )}
           {bot.computer === "cloud" && (
             <>
               <CloudBackendPicker
@@ -1531,6 +1615,8 @@ export function ComputerPanel({
                 </>
               ) : bot.computer === "local" ? (
                 "Uses your screen, mouse, and keyboard."
+              ) : bot.computer === "worker" ? (
+                "Uses the selected remote Mac or Windows desktop. Each worker has its own lease, so different workers can run at the same time."
               ) : bot.computer === "browser" ? (
                 "Uses the built-in browser without access to your desktop."
               ) : (

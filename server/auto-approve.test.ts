@@ -179,6 +179,19 @@ describe("autoDecision", () => {
     ).toBeNull();
   });
 
+  it("records remote-worker and local-computer blocks as distinct sources", () => {
+    const bot = {
+      alwaysAllow: [
+        "local-computer:mcp__computer__click",
+        "remote-worker-computer:mcp__computer__click",
+      ],
+    };
+    expect(autoVerdict(bot, "mcp__computer__click", "Click Submit", { scope: "local-computer" }).source)
+      .toBe("local-computer-block");
+    expect(autoVerdict(bot, "mcp__computer__click", "Click Submit", { scope: "remote-worker-computer" }).source)
+      .toBe("remote-worker-block");
+  });
+
   it("Full access approves ordinary, destructive, sensitive, unattended, and local actions", () => {
     const bot = { approvalMode: "full" as const };
     expect(autoDecision(bot, "Bash", "ls -la")).toBe("approved Bash (full access)");

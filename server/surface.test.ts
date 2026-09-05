@@ -31,7 +31,7 @@ describe("resolveSurface", () => {
   });
 
   it("a computer destination keeps the browser alongside it", () => {
-    for (const destination of ["cloud", "vm", "local"] as const) {
+    for (const destination of ["cloud", "vm", "local", "worker"] as const) {
       expect(resolveSurface({ destination, browserOn: true })).toMatchObject({ computer: destination, browser: true, pinned: null });
       expect(resolveSurface({ destination, browserOn: false })).toMatchObject({ computer: destination, browser: false });
     }
@@ -54,7 +54,7 @@ describe("resolveSurface", () => {
   });
 
   it("Auto follows a pinned computer and mounts only that one", () => {
-    for (const pin of ["cloud", "vm", "local"] as const) {
+    for (const pin of ["cloud", "vm", "local", "worker"] as const) {
       expect(resolveSurface({ destination: undefined, pinnedSurface: pin, browserOn: true, available: { [pin]: true } }))
         .toEqual({ computer: pin, browser: false, pinned: pin, clearPin: false, note: "" });
     }
@@ -127,9 +127,10 @@ describe("surfaceForTool", () => {
 });
 
 describe("surface parsing", () => {
-  it("accepts only the four surfaces off the wire", () => {
+  it("accepts only the five surfaces off the wire", () => {
     expect(parseSurface("browser")).toBe("browser");
     expect(parseSurface("cloud")).toBe("cloud");
+    expect(parseSurface("worker")).toBe("worker");
     expect(parseSurface("box")).toBeUndefined();
     expect(parseSurface(42)).toBeUndefined();
     expect(parseSurface(undefined)).toBeUndefined();
@@ -140,6 +141,7 @@ describe("surface parsing", () => {
     expect(surfaceOfComputerKind("vps")).toBe("cloud");
     expect(surfaceOfComputerKind("vm")).toBe("vm");
     expect(surfaceOfComputerKind("local")).toBe("local");
+    expect(surfaceOfComputerKind("worker")).toBe("worker");
     expect(surfaceOfComputerKind(null)).toBeNull();
   });
 });

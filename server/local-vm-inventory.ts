@@ -6,7 +6,7 @@ import {
   type Runtime,
 } from "./container-computer.ts";
 
-export type LocalVmDestination = "auto" | "cloud" | "vm" | "local" | "browser" | "off";
+export type LocalVmDestination = "auto" | "cloud" | "vm" | "local" | "worker" | "browser" | "off";
 
 export interface LocalVmInventoryBot {
   id: string;

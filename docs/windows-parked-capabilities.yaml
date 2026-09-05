@@ -1,0 +1,18 @@
+# Safe bootstrap state for the interactive Windows CUA Scheduled Task.
+# The Windows companion replaces this file atomically with a short-lived,
+# approved task capability, then restarts the fixed worker Scheduled Task so
+# CUA loads that immutable boundary. The shared IDE/CLI bridge is not involved.
+# `allow.tools` must be non-empty in CUA 0.20.0, so this names the macOS-only
+# permission-status tool; the Windows base policy does not admit it, leaving
+# the effective parked tool intersection empty.
+version: 3
+expires_after: 24h
+idle_timeout: 24h
+
+allow:
+  tools:
+    - check_permissions
+
+resources:
+  desktop:
+    display: false

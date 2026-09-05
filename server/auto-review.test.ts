@@ -27,6 +27,7 @@ describe("shouldReview", () => {
     "explicit-approval-block",
     "unattended-block",
     "local-computer-block",
+    "remote-worker-block",
     "destructive-guard",
     "sensitive-guard",
     "no-grant",

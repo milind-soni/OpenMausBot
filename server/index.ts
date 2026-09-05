@@ -116,6 +116,8 @@ import {
   EVENTS_DIR,
   NATIVE_DIR,
   customMcpServers,
+  configuredWorkers,
+  workerById,
 } from "./config.ts";
 import { ComputerControl } from "./computer-control.ts";
 import { MAX_REMOTE_COMMAND_LENGTH } from "./remote-computer.ts";
@@ -246,6 +248,16 @@ import {
 } from "./local-vm-inventory.ts";
 import { LocalVmIdleTimer } from "./local-vm-idle.ts";
 import { LocalVmLease, LocalVmLeasePool } from "./local-vm-lease.ts";
+import type { ResolvedWorker } from "./computer-workers.ts";
+import { publicWorkerStatus, RemoteWorkerLease, remoteWorkerMcp } from "./remote-worker.ts";
+import { allWorkerStatuses, workerStatus } from "./worker-status.ts";
+import { WorkerTaskRegistry } from "./worker-task-manifest.ts";
+import {
+  cancelWorkerTaskApprovalsForThread,
+  dismissStaleWorkerTaskCards,
+  resolveWorkerTaskApproval,
+} from "./worker-task-approval.ts";
+import { WorkerTaskService } from "./worker-task-service.ts";
 import { RepeatDetector, callKey } from "./repeat-detector.ts";
 import { redactSecretsInText } from "./redact.ts";
 import * as vps from "./vps-computer.ts";
@@ -462,7 +474,7 @@ type InternalCapability = {
   threadId: string;
   generation: string;
   depth: number;
-  kind: "agents" | "connectors" | "computer";
+  kind: "agents" | "connectors" | "computer" | "worker-task";
   skillAuthoring: boolean;
   createdBots: number;
   orphanExpiresAt: number;
@@ -943,6 +955,24 @@ function controlIntegration(botId: string, threadId: string, generation: string)
       generation,
       depth: 0,
       kind: "computer",
+      skillAuthoring: false,
+      createdBots: 0,
+    }),
+  };
+}
+
+/** Turn-scoped endpoint for the worker manifest approval and execution
+ * tools. It receives a distinct route family and bearer, so neither this nor
+ * the computer-control token can be replayed against the other's endpoint. */
+function taskIntegration(botId: string, threadId: string, generation: string) {
+  return {
+    url: `http://127.0.0.1:${PORT}/api/internal/worker-task?botId=${encodeURIComponent(botId)}`,
+    token: mintInternalCapability({
+      botId,
+      threadId,
+      generation,
+      depth: 0,
+      kind: "worker-task",
       skillAuthoring: false,
       createdBots: 0,
     }),
@@ -2143,6 +2173,7 @@ function closeOpenApprovals(threadId: string): void {
   // Peer approvals also hold an in-memory promise. Resolve those first; merely
   // patching their cards would leave the delegation queue waiting 15 minutes.
   cancelPeerApprovalsForThread(threadId);
+  releaseWorkerThread(threadId);
   for (const message of store.messagesFor(threadId)) {
     const card = message.card;
     if (!card?.requestId || card.answered || card.dismissed) continue;
@@ -2602,6 +2633,58 @@ function localVmIdleFor(target: LocalVmTarget): LocalVmIdleTimer {
   return idle;
 }
 
+/** One independent lease per SSH alias: the Mac guest and Windows PC can be
+ * active together, while two turns can never interleave input on one desktop. */
+const workerLease = new RemoteWorkerLease();
+const workerThreadWorkers = new Map<string, ResolvedWorker>();
+const workerThreadChannels = new Map<string, string>();
+const workerLeaseKeepalives = new Map<string, ReturnType<typeof setInterval>>();
+/** A reset continues briefly after its bot becomes idle. Do not admit a new
+ * turn on that alias until the non-action parked digest is confirmed again. */
+const workerResettingAliases = new Set<string>();
+const workerTasks = new WorkerTaskRegistry();
+let workerTaskService: WorkerTaskService | null = null;
+
+function keepWorkerLeaseAlive(threadId: string): void {
+  const old = workerLeaseKeepalives.get(threadId);
+  if (old) clearInterval(old);
+  const timer = setInterval(() => {
+    const owner = workerThreadWorkers.get(threadId);
+    if (!owner) return;
+    const lease = workerLease.current(owner.sshAlias, (botId) => store.bot(botId)?.busy === true);
+    if (!lease || lease.threadId !== threadId) {
+      releaseWorkerThread(threadId);
+      return;
+    }
+    workerLease.touch(threadId);
+  }, 60_000);
+  timer.unref?.();
+  workerLeaseKeepalives.set(threadId, timer);
+}
+
+function releaseWorkerThread(threadId: string): void {
+  const timer = workerLeaseKeepalives.get(threadId);
+  if (timer) clearInterval(timer);
+  workerLeaseKeepalives.delete(threadId);
+  const worker = workerThreadWorkers.get(threadId);
+  workerThreadWorkers.delete(threadId);
+  workerThreadChannels.delete(threadId);
+  cancelWorkerTaskApprovalsForThread(threadId);
+  const record = workerTasks.forThread(threadId);
+  if (worker && record && workerTaskService) {
+    workerResettingAliases.add(worker.sshAlias.toLowerCase());
+    void workerTaskService.release(worker, record.manifest.taskId).finally(() => {
+      workerResettingAliases.delete(worker.sshAlias.toLowerCase());
+      workerLease.release(threadId);
+    });
+  } else if (record) {
+    workerTasks.revoke(record.manifest.taskId);
+    workerLease.release(threadId);
+  } else {
+    workerLease.release(threadId);
+  }
+}
+
 function releaseLocalVmThread(threadId: string): void {
   const target = localVmThreadTargets.get(threadId);
   if (!target) return;
@@ -2666,8 +2749,10 @@ bus.subscribe((event: RuntimeEvent) => {
     localVmLeaseFor(localVmTarget).touch(event.threadId);
     localVmIdleFor(localVmTarget).touch();
   }
+  if (workerThreadWorkers.has(event.threadId)) workerLease.touch(event.threadId);
   if (event.type === "turn.completed") {
     releaseLocalVmThread(event.threadId);
+    releaseWorkerThread(event.threadId);
   }
   const coordinatorTurnsForThread = groupGoalCoordinatorTurns.get(event.threadId);
   const ambiguousCoordinatorText = !event.turnId && (coordinatorTurnsForThread?.size ?? 0) > 1;
@@ -2918,6 +3003,8 @@ bus.subscribe((event: RuntimeEvent) => {
           title:
             permission && event.approvalScope === "local-computer"
               ? "Local computer approval"
+              : permission && event.approvalScope === "remote-worker-computer"
+                ? "Worker computer approval"
               : permission
                 ? "Approval needed"
                 : "Your bot has a question",
@@ -4023,7 +4110,8 @@ async function startTurn(
       }
       const wants = plan.computer;
       let previewCapture: (() => Promise<{ png: string; format: string }>) | null = null;
-      let computerKind: "box" | "vps" | "vm" | "local" | null = null;
+      let computerKind: "box" | "vps" | "vm" | "local" | "worker" | null = null;
+      let workerTarget: ResolvedWorker | null = null;
       let autoVpsProblem: string | null = null;
 
       // Explicit destinations are strict. In particular, Local VM must never
@@ -4067,6 +4155,38 @@ async function startTurn(
         if (!cua) throw new Error("CUA Driver is not ready for this computer — check permissions and restart OpenMausBot");
         integrations.localComputer = cua;
         computerKind = "local";
+      } else if (wants === "worker") {
+        if (!mountsComputerMcp || instance.driverKind === "boxAgent") {
+          throw new Error("this model engine cannot use a remote worker — choose Claude or an ACP engine, or select another computer destination");
+        }
+        const worker = workerById(cfg, bot.workerId ?? null);
+        if (!worker) {
+          throw new Error("this bot is not assigned to a configured worker");
+        }
+        if (workerResettingAliases.has(worker.sshAlias.toLowerCase())) {
+          throw new Error(`the ${worker.displayName} desktop is returning to its parked capability — wait a moment`);
+        }
+        if (!workerLease.claim(worker.sshAlias, threadId, bot.id, (id) => store.bot(id)?.busy === true)) {
+          throw new Error(`the ${worker.displayName} desktop is already being used by another turn — wait for that turn to finish`);
+        }
+        workerThreadWorkers.set(threadId, worker);
+        keepWorkerLeaseAlive(threadId);
+        const status = await workerStatus(worker, {
+          expectedCapabilityDigest: workerTaskService?.activeCapabilityDigest(worker.id),
+        });
+        if (!status.ready || !status.channelPath) {
+          throw new Error(status.problem ?? "this worker is not ready");
+        }
+        workerThreadChannels.set(threadId, status.channelPath);
+        integrations.localComputer = remoteWorkerMcp(
+          worker,
+          status.channelPath,
+          controlIntegration(bot.id, threadId, dispatchClaimId),
+          status.capabilityDigest ?? undefined,
+          taskIntegration(bot.id, threadId, dispatchClaimId),
+        );
+        workerTarget = worker;
+        computerKind = "worker";
       }
 
       // A VPS is a local-agent computer mount, never a remote agent runner.
@@ -4303,6 +4423,8 @@ async function startTurn(
               ? " You have your own self-hosted remote Linux computer through the official Cua tools. Its filesystem is disposable: everything on it is wiped whenever its container is recreated, so keep long-lived work somewhere durable — push it to a remote, or hand the results back in chat — instead of leaving it only on that computer. Inspect the desktop state before acting, prefer accessibility targets over raw coordinates, and act carefully."
               : computerKind === "local"
               ? " You can act on the user's computer through the computer tools — take a screenshot or read the desktop state first, prefer accessibility actions over raw coordinates, and act carefully."
+              : computerKind === "worker"
+              ? ` You have your own ${workerTarget?.platform === "windows" ? "Windows" : "macOS"} worker computer — a separate machine the user owns, reached through the official Cua tools. It is not disposable and it is not the user's own desktop: treat its files as real, do not reconfigure the machine, and stay inside the approved task surface. Inspect the desktop state before acting, prefer accessibility targets over raw coordinates, and act carefully.`
               : "") +
           (computerKind
             ? " At a sign-in, password, MFA, CAPTCHA, or other protected-input step, stop and ask the user to complete it on the visible computer. Never type their password or ask them to paste a password or one-time code into chat."
@@ -4376,6 +4498,7 @@ async function startTurn(
       const ownsLatestGeneration = directTurnGenerationByBot.get(bot.id) === dispatchClaimId;
       if (ownsLatestGeneration) {
         releaseLocalVmThread(threadId);
+        releaseWorkerThread(threadId);
         if (activeVpsThreads.get(bot.id) === threadId) activeVpsThreads.delete(bot.id);
         watchdog.settle(threadId);
         turnUsage.delete(threadId);
@@ -4963,12 +5086,25 @@ const ROOM_POST_MAX_CHARS = 4_000;
 // can call resolvePeerComms without holding a reference back to here.
 const approvalBus: ApprovalBus = { store, broadcast, notify };
 
+workerTaskService = new WorkerTaskService({
+  bus: approvalBus,
+  registry: workerTasks,
+  workerFor: (bot) => workerById(cfg, bot.workerId ?? null),
+  channelFor: (threadId) => workerThreadChannels.get(threadId) ?? null,
+  controlHeld: (botId) => computerControl.snapshot(botId).held,
+});
+
 // Approvals live only in memory, so any peer card still open on disk is one
 // whose resolver died with the previous process. Left alone it can never be
 // answered, and the composer stays disabled behind it — settle them at boot.
 {
   const stale = dismissStalePeerCards(approvalBus);
   if (stale) console.log(`peer approvals: dismissed ${stale} card(s) left by a previous run`);
+}
+
+{
+  const stale = dismissStaleWorkerTaskCards(approvalBus);
+  if (stale) console.log(`worker tasks: dismissed ${stale} card(s) left by a previous run`);
 }
 
 // Handoffs a previous process queued but never ran: the source turn is
@@ -7177,6 +7313,7 @@ async function reloadProviders() {
   // one synchronous step before the first teardown await, including room/task
   // threads that are not a bot's default DM.
   revokeAllInternalCapabilities();
+  for (const threadId of [...workerThreadWorkers.keys()]) releaseWorkerThread(threadId);
   await releaseAllBrowserCapabilities();
   bus.detachAll();
   await registry.disposeAll();
@@ -7438,7 +7575,7 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
       const parsed = z.object({
         botId: z.string().regex(/^[\w-]{1,128}$/),
         threadId: z.string().regex(/^[\w-]{1,128}$/),
-        kind: z.enum(["agents", "connectors", "computer"]).default("agents"),
+        kind: z.enum(["agents", "connectors", "computer", "worker-task"]).default("agents"),
         depth: z.number().int().min(0).max(MAX_COMMS_DEPTH).default(0),
         skillAuthoring: z.boolean().default(false),
       }).strict().safeParse(await readBody(req));
@@ -7467,9 +7604,11 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
       }
       const requiredCapabilityKind = path.startsWith("/api/internal/connectors/")
         ? "connectors"
-        : path === "/api/internal/computer-control"
-          ? "computer"
-          : "agents";
+        : path === "/api/internal/worker-task"
+          ? "worker-task"
+          : path === "/api/internal/computer-control"
+            ? "computer"
+            : "agents";
       if (internalCapability.kind !== requiredCapabilityKind) {
         return json(res, 403, { error: "this internal capability cannot access that service" });
       }
@@ -8301,6 +8440,20 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
         return res.end(Buffer.from(upstream.bytes));
       }
       // ── computer control: proxies read the hold, bots plead for help ──
+      if (path === "/api/internal/worker-task" && method === "POST") {
+        const body = await readInternalBody();
+        if (!workerTaskService) return json(res, 503, { error: "worker task service is unavailable" });
+        const outcome = await workerTaskService.handle(internalSender, body, internalCapability.threadId);
+        return json(
+          res,
+          outcome.status,
+          outcome.error
+            ? { error: outcome.error }
+            : outcome.content
+              ? { content: outcome.content, isError: outcome.isError === true }
+              : { text: outcome.text ?? "", isError: outcome.isError === true },
+        );
+      }
       if (path === "/api/internal/computer-control") {
         const botId = url.searchParams.get("botId") ?? "";
         const bot = store.bot(botId);
@@ -10062,13 +10215,38 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
           patch.computer = undefined;
         } else if (
           typeof body.computer === "string" &&
-          ["cloud", "vm", "local", "browser", "off"].includes(body.computer)
+          ["cloud", "vm", "local", "worker", "browser", "off"].includes(body.computer)
         ) {
           requestedComputer = body.computer;
           patch.computer = body.computer;
         } else {
-          return json(res, 400, { error: "computer must be null (Auto), cloud, vm, local, browser, or off" });
+          return json(res, 400, { error: "computer must be null (Auto), cloud, vm, local, worker, browser, or off" });
         }
+      }
+      let assignedWorkerId: string | null | undefined;
+      if (body.workerId !== undefined) {
+        if (body.workerId === null || body.workerId === "") {
+          assignedWorkerId = null;
+          patch.workerId = undefined;
+        } else {
+          const worker = workerById(cfg, body.workerId);
+          if (!worker) return json(res, 400, { error: "workerId must name a configured worker" });
+          assignedWorkerId = worker.id;
+          patch.workerId = worker.id;
+        }
+      }
+      const nextWorkerId = assignedWorkerId !== undefined ? assignedWorkerId : (existingBot?.workerId ?? null);
+      if (requestedComputer === "worker" && !workerById(cfg, nextWorkerId)) {
+        return json(res, 400, { error: "choose a configured worker for this bot first" });
+      }
+      if (
+        existingBot?.busy &&
+        ((computerSpecified &&
+          requestedComputer !== existingBot.computer &&
+          (requestedComputer === "worker" || existingBot.computer === "worker")) ||
+          (assignedWorkerId !== undefined && assignedWorkerId !== (existingBot.workerId ?? null)))
+      ) {
+        return json(res, 409, { error: "stop this bot's turn before changing its worker computer" });
       }
       if (normalizedSelection) patch.modelSelection = normalizedSelection;
       // one pinned message per thread; null/"" clears. The id is not
@@ -10156,6 +10334,9 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
         requestedApprovalMode = approvalModeFor(existingBot ?? {});
       }
       const currentApprovalMode = approvalModeFor(existingBot ?? {});
+      if (requestedComputer === "worker" && requestedApprovalMode === "auto") {
+        return json(res, 400, { error: "Auto mode is unavailable while this bot uses a remote worker" });
+      }
       const approvalChangeRequested = body.approvalMode !== undefined || body.autoApprove !== undefined;
       if (existingBot?.busy && approvalChangeRequested && requestedApprovalMode !== currentApprovalMode) {
         return json(res, 409, {
@@ -10963,6 +11144,9 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
       if (resolvePeerComms(approvalBus, String(body.requestId), behavior)) {
         return json(res, 200, { ok: true, outcome: behavior === "allow" ? "allowed-once" : "rejected" });
       }
+      if (resolveWorkerTaskApproval(String(body.requestId), behavior)) {
+        return json(res, 200, { ok: true, outcome: behavior === "allow" ? "allowed-once" : "rejected" });
+      }
       const outcome = await answerRequest(bot.threadId, bot.modelSelection.instanceId, String(body.requestId), behavior, body.message, { id: bot.id, name: bot.name });
       return json(res, 200, { ok: true, outcome });
     }
@@ -11015,6 +11199,9 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
       // belongs to the bus rather than to a speaker, so resolve it before we go
       // looking for one — a room between turns has no speaker to find.
       if (resolvePeerComms(approvalBus, requestId, behavior)) {
+        return json(res, 200, { ok: true, outcome: behavior === "allow" ? "allowed-once" : "rejected" });
+      }
+      if (resolveWorkerTaskApproval(requestId, behavior)) {
         return json(res, 200, { ok: true, outcome: behavior === "allow" ? "allowed-once" : "rejected" });
       }
       const group = store.groupByThread(threadId);
@@ -11657,6 +11844,44 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
       }
     }
 
+    // ── named remote workers (Windows PCs and macOS guests) ──
+    if (method === "GET" && path === "/api/workers") {
+      const workers = configuredWorkers(cfg);
+      const statuses = await allWorkerStatuses(workers, {
+        lease: workerLease,
+        isBotBusy: (botId) => store.bot(botId)?.busy === true,
+        capabilityDigestForWorker: (workerId) => workerTaskService?.activeCapabilityDigest(workerId) ?? null,
+      });
+      for (const [index, status] of statuses.entries()) {
+        const worker = workers[index];
+        const held = worker
+          ? workerLease.current(worker.sshAlias, (botId) => store.bot(botId)?.busy === true)
+          : null;
+        // Capability changes restart the daemon. A readiness poll inside that
+        // small window may truthfully see it offline, but must not revoke the
+        // active turn whose approval caused the restart. Reset has the same
+        // boundary after the bot becomes idle.
+        if (
+          !status.ready &&
+          status.errorCode !== "worker_busy" &&
+          !held &&
+          !(worker && workerResettingAliases.has(worker.sshAlias.toLowerCase()))
+        ) {
+          workerTaskService?.forgetWorker(status.workerId);
+        }
+      }
+      return json(res, 200, {
+        workers: workers.map((worker, index) => ({
+          id: worker.id,
+          platform: worker.platform,
+          displayName: worker.displayName,
+          configured: worker.configured,
+          paused: worker.paused,
+          status: publicWorkerStatus(statuses[index]),
+        })),
+      });
+    }
+
     // ── app config (API keys — never echoed back, booleans only) ──
     if (method === "GET" && path === "/api/config") {
       const status = configStatus();
@@ -11677,6 +11902,31 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
       const patch = parseConfigPatch(body);
       if (!Object.keys(patch).length) return json(res, 400, { error: "nothing to save" });
       if (providerConfigBusy) return json(res, 409, { error: "provider settings are already being updated" });
+      const changedWorkers: ResolvedWorker[] = [];
+      if (patch.workers !== undefined) {
+        const currentWorkers = configuredWorkers(cfg);
+        const nextWorkers = new Map(
+          configuredWorkers({ ...cfg, workers: patch.workers }).map((worker) => [worker.id, worker]),
+        );
+        for (const current of currentWorkers) {
+          const next = nextWorkers.get(current.id);
+          if (!next || JSON.stringify(current) !== JSON.stringify(next)) changedWorkers.push(current);
+        }
+        const held = changedWorkers.find(
+          (worker) => workerLease.current(worker.sshAlias, (botId) => store.bot(botId)?.busy === true) !== null,
+        );
+        if (held) {
+          return json(res, 409, {
+            error: `wait for the turn using ${held.displayName} to finish before changing that worker`,
+          });
+        }
+        const resetting = changedWorkers.find((worker) => workerResettingAliases.has(worker.sshAlias.toLowerCase()));
+        if (resetting) {
+          return json(res, 409, {
+            error: `wait for ${resetting.displayName} to finish returning to its parked capability before changing it`,
+          });
+        }
+      }
       const disablingBuiltInBrowser = patch.features?.browser === false && builtInBrowserEnabled(cfg);
       const removedBrowserProfileIds = patch.browserProfiles === undefined
         ? []
@@ -11967,6 +12217,21 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
           syncCredentialEnv(patch);
           Object.assign(cfg, loadConfig());
         }
+        if (patch.workers !== undefined) {
+          const liveIds = new Set(configuredWorkers(cfg).map((worker) => worker.id));
+          for (const worker of changedWorkers) {
+            workerLease.releaseAlias(worker.sshAlias);
+            workerTaskService?.forgetWorker(worker.id);
+          }
+          for (const bot of store.bots) {
+            if (bot.workerId && !liveIds.has(bot.workerId)) {
+              store.patchBot(bot.id, {
+                workerId: undefined,
+                ...(bot.computer === "worker" ? { computer: undefined } : {}),
+              });
+            }
+          }
+        }
       } catch (error) {
         if (configWriteCommitted) {
           for (const request of browserCleanupRequests) {
@@ -12010,7 +12275,8 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
           key !== "rooms" &&
           key !== "localVm" &&
           key !== "features" &&
-          key !== "browserProfiles",
+          key !== "browserProfiles" &&
+          key !== "workers",
       );
       // Config is already durable. A provider credential or runtime change
       // invalidates every old child immediately, including when browser

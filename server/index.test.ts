@@ -45,7 +45,7 @@ async function mintTestCapability(
   baseUrl: string,
   botId: string,
   threadId: string,
-  options: { kind?: "agents" | "connectors" | "computer"; skillAuthoring?: boolean } = {},
+  options: { kind?: "agents" | "connectors" | "computer" | "worker-task"; skillAuthoring?: boolean } = {},
 ): Promise<string> {
   const response = await fetch(`${baseUrl}/api/testing/internal-capability`, {
     method: "POST",
@@ -8151,10 +8151,12 @@ describe("instance CLI override API", () => {
 
 describe("computer control API (who is driving)", () => {
   let botId = "";
+  let threadId = "";
 
   beforeAll(async () => {
     const created = await api("POST", "/api/bots", {});
     botId = created.body.bot.id;
+    threadId = created.body.bot.threadId;
   });
 
   it("starts disengaged", async () => {
@@ -8241,5 +8243,21 @@ describe("computer control API (who is driving)", () => {
   it("keeps the internal who-is-driving endpoint behind the boot token", async () => {
     const res = await fetch(`${BASE}/api/internal/computer-control?botId=${botId}`);
     expect(res.status).toBe(401);
+  });
+
+  it("keeps computer-control and worker-task capabilities mutually scoped", async () => {
+    const computerToken = await mintTestCapability(BASE, botId, threadId, { kind: "computer" });
+    const taskWithComputerToken = await fetch(`${BASE}/api/internal/worker-task?botId=${botId}`, {
+      method: "POST",
+      headers: { authorization: `Bearer ${computerToken}`, "content-type": "application/json" },
+      body: JSON.stringify({ op: "status" }),
+    });
+    expect(taskWithComputerToken.status).toBe(403);
+
+    const taskToken = await mintTestCapability(BASE, botId, threadId, { kind: "worker-task" });
+    const controlWithTaskToken = await fetch(`${BASE}/api/internal/computer-control?botId=${botId}`, {
+      headers: { authorization: `Bearer ${taskToken}` },
+    });
+    expect(controlWithTaskToken.status).toBe(403);
   });
 });

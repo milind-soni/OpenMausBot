@@ -10,6 +10,13 @@ import { writeFileAtomic } from "./atomic.ts";
 import type { InstanceConfigMap } from "./contracts.ts";
 import { parseStoredMcpServer } from "./mcp-registry.ts";
 import { parseJson, schemaIssue, type JsonObject, type JsonValue } from "./schema.ts";
+import {
+  findWorker,
+  listWorkers,
+  workerConfigMapSchema,
+  type ResolvedWorker,
+  type WorkerConfigMap,
+} from "./computer-workers.ts";
 
 const optionalText = z.string().optional();
 const SSH_ALIAS = /^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$/;
@@ -259,6 +266,8 @@ const appConfigSchema = z.object({
   localVm: localVmConfigSchema.optional(),
   features: featureConfigSchema.optional(),
   browserProfiles: browserProfilesSchema.optional(),
+  /** Operator-owned Windows and macOS desktops, keyed by worker id. */
+  workers: workerConfigMapSchema.optional(),
   instances: instanceConfigMapSchema.optional(),
   /** User-configured MCP servers, mounted into every capable engine. Kept
    * loosely typed HERE on purpose: parseStoredConfig throws away the whole
@@ -293,6 +302,9 @@ export interface AppConfig {
   features?: { skillRecorder?: boolean; showToolCalls?: boolean; browser?: boolean };
   /** Named browser sessions any bot can be pointed at. */
   browserProfiles?: BrowserProfile[];
+  /** Named remote CUA workers. Authentication stays in the operator's SSH
+   * config; only aliases and public identity/policy digests are persisted. */
+  workers?: WorkerConfigMap;
   instances?: InstanceConfigMap;
 }
 export type BrowserProfile = z.output<typeof browserProfileSchema> & {
@@ -402,6 +414,14 @@ export function parseConfigPatch(value: JsonValue): ConfigPatch {
 
 export function vpsSshAlias(cfg: AppConfig): string | null {
   return isValidSshAlias(cfg.vps?.sshAlias) ? cfg.vps.sshAlias : null;
+}
+
+export function configuredWorkers(cfg: AppConfig): ResolvedWorker[] {
+  return listWorkers(cfg.workers);
+}
+
+export function workerById(cfg: AppConfig, id: JsonValue): ResolvedWorker | null {
+  return findWorker(cfg.workers, id);
 }
 
 export function roomTurnTimeoutMinutes(cfg: AppConfig): number {
@@ -618,6 +638,9 @@ export function saveConfig(patch: Partial<AppConfig>): void {
     if (routingConflict) throw Object.assign(new Error(routingConflict), { status: 409 });
     disk.browserProfiles = nextProfiles;
   }
+  // Worker configuration is a keyed registry whose removal semantics require
+  // replacement, not the per-section shallow merge used above.
+  if (checkedPatch.workers !== undefined) disk.workers = checkedPatch.workers;
   if (checkedPatch.instances) {
     const currentInstances = jsonObjectSchema.safeParse(disk.instances);
     const diskInstances: JsonObject = currentInstances.success ? currentInstances.data : {};

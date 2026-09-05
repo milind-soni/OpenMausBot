@@ -23,6 +23,7 @@ export default defineConfig({
       "electron/**/*.test.mjs",
       "src/**/*.test.ts",
       "companion/**/*.test.ts",
+      "worker-companion/**/*.test.ts",
       "enterprise/**/*.test.ts",
       "scripts/**/*.test.mjs",
     ],

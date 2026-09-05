@@ -8,14 +8,14 @@
 
 /** A place a bot can act. `cloud` covers both the Box and VPS backends —
  * from the person's seat they are the same "cloud computer" panel. */
-export type Surface = "cloud" | "vm" | "local" | "browser";
+export type Surface = "cloud" | "vm" | "local" | "worker" | "browser";
 
 /** The bot's "Works on" setting; undefined = Auto. */
 export type Destination = Surface | "off" | undefined;
 
 /** What the computer block of a dispatch aims for. Mirrors the old `wants`
  * local exactly, so its strict/auto branches keep their meaning. */
-export type ComputerWant = "cloud" | "vm" | "local" | "off" | undefined;
+export type ComputerWant = "cloud" | "vm" | "local" | "worker" | "off" | undefined;
 
 /** What a turn actually mounted, in surface terms. */
 export interface MountedSurfaces {
@@ -34,7 +34,7 @@ export interface SurfacePlan {
   note: string;
 }
 
-const SURFACES: ReadonlySet<string> = new Set(["cloud", "vm", "local", "browser"]);
+const SURFACES: ReadonlySet<string> = new Set(["cloud", "vm", "local", "worker", "browser"]);
 
 /** Parse a surface arriving over the wire; anything else is "not said". */
 export function parseSurface(value: unknown): Surface | undefined {
@@ -44,7 +44,7 @@ export function parseSurface(value: unknown): Surface | undefined {
 }
 
 /** The per-turn computer kinds the dispatch tracks, folded to a surface. */
-export function surfaceOfComputerKind(kind: "box" | "vps" | "vm" | "local" | null): Surface | null {
+export function surfaceOfComputerKind(kind: "box" | "vps" | "vm" | "local" | "worker" | null): Surface | null {
   if (kind === "box" || kind === "vps") return "cloud";
   return kind;
 }
@@ -99,6 +99,8 @@ export function surfaceLabel(surface: Surface): string {
       return "the Local VM";
     case "local":
       return "this computer";
+    case "worker":
+      return "the selected worker computer";
     case "browser":
       return "the built-in browser";
   }

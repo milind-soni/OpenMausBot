@@ -6,3 +6,8 @@
 shared/mascot-bodies.ts text eol=lf
 ios/Sources/CompanionCore/MausBodies.swift text eol=lf
 android/app/src/main/kotlin/com/openmausbot/companion/ui/MausBodies.kt text eol=lf
+
+# Worker policies and capability manifests are hashed byte-for-byte. Keep
+# their digests stable when the checkout is created on Windows.
+docs/*-parked-capabilities.yaml text eol=lf
+docs/*-base-policy.yaml text eol=lf

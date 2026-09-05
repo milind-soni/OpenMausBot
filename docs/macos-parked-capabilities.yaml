@@ -1,0 +1,19 @@
+# Safe bootstrap state for the interactive macOS CUA daemon.
+# The worker companion replaces this file atomically with a short-lived,
+# approved task capability, then restarts the fixed worker daemon so CUA loads
+# that immutable boundary. OpenMausBot's shared IDE/CLI bridge is not involved.
+#
+# It grants only the non-prompting permission-status tool admitted by the base
+# policy. A worker running this manifest is reachable and provably bounded but
+# cannot observe or control the desktop until a task capability is approved.
+version: 3
+expires_after: 24h
+idle_timeout: 24h
+
+allow:
+  tools:
+    - check_permissions
+
+resources:
+  desktop:
+    display: false

@@ -5,6 +5,7 @@ packages:
   - "."
   - "apps/docs"
   - "cloudflare/control-plane"
+  - "worker-companion"
 allowBuilds:
   electron: true # postinstall downloads the Electron dist
   esbuild: true # postinstall validates the platform binary

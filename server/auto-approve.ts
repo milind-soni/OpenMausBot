@@ -12,6 +12,7 @@
 // sandbox and the bot's own computer, not a regex.
 
 import { approvalModeFor, type ApprovalMode } from "../shared/approval-mode.ts";
+import type { ApprovalScope } from "./contracts.ts";
 
 /** The mode a turn actually runs under, given where the turn came from.
  *
@@ -85,7 +86,7 @@ export function looksDestructive(text: string): boolean {
  * client so the two sides can never disagree about what was granted. */
 const COMMAND_TOOLS = new Set(["bash", "shell", "execute", "run_command", "computer_exec", "terminal"]);
 
-export function approvalKey(tool: string, summary: string, scope?: "local-computer"): string {
+export function approvalKey(tool: string, summary: string, scope?: ApprovalScope): string {
   const bare = tool.replace(/^mcp__[^_]+__/, "").toLowerCase();
   if (!COMMAND_TOOLS.has(bare)) return scope ? `${scope}:${tool}` : tool;
   // first bare word of the command, skipping env assignments and sudo
@@ -114,6 +115,7 @@ export type AutoVerdictSource =
   | "explicit-approval-block"
   | "unattended-block"
   | "local-computer-block"
+  | "remote-worker-block"
   | "destructive-guard"
   | "sensitive-guard"
   | "no-grant";
@@ -128,7 +130,7 @@ export function rememberableApprovalKey(
   summary: string,
   context: {
     source: AutoVerdictSource | undefined;
-    scope?: "local-computer";
+    scope?: ApprovalScope;
     requiresExplicitApproval?: boolean;
   },
 ): string | undefined {
@@ -169,8 +171,8 @@ export function autoVerdict(
     unattended?: boolean;
     /** Respect the native reviewer (including a provider with no Auto mode). */
     nativeApproval?: boolean;
-    /** the request controls the user's active desktop */
-    scope?: "local-computer";
+    /** the request controls the user's active desktop or a paired worker */
+    scope?: ApprovalScope;
     /** The provider is asking to widen its configured sandbox rather than
      * perform one ordinary action. Only explicit Full may synthesize this. */
     requiresExplicitApproval?: boolean;
@@ -222,11 +224,17 @@ export function autoVerdict(
     if (sensitive) return { approve: null, source: "sensitive-guard", rule: sensitive };
     return { approve: null, source: "no-grant" };
   }
-  if (context?.scope === "local-computer" && mode !== "auto") {
-    // Host control is not covered by a remembered always-allow grant.
+  if (context?.scope !== undefined && mode !== "auto") {
+    // Real-desktop control is not covered by a remembered always-allow grant.
     // After the Auto-on-this-computer warning, unclassified GUI actions
     // (click/type) may auto-approve; destructive/sensitive still card.
-    if (grant) return { approve: null, source: "local-computer-block", rule: grant.rule };
+    if (grant) {
+      return {
+        approve: null,
+        source: context.scope === "remote-worker-computer" ? "remote-worker-block" : "local-computer-block",
+        rule: grant.rule,
+      };
+    }
     if (destructive) return { approve: null, source: "destructive-guard", rule: destructive };
     if (sensitive) return { approve: null, source: "sensitive-guard", rule: sensitive };
     return { approve: null, source: "no-grant" };
@@ -245,8 +253,8 @@ export function autoDecision(
   context?: {
     /** the turn was started by an outside event, with nobody at the keyboard */
     unattended?: boolean;
-    /** the request controls the user's active desktop */
-    scope?: "local-computer";
+    /** the request controls the user's active desktop or a paired worker */
+    scope?: ApprovalScope;
     requiresExplicitApproval?: boolean;
   },
 ): string | null {

@@ -13,6 +13,10 @@ export type ThreadId = string;
 export type TurnId = string;
 export type CloudBackend = "box" | "vps";
 
+/** A tool call that drives a real interactive desktop. Remembered grants do
+ * not silently extend from the local host to a paired worker (or vice versa). */
+export type ApprovalScope = "local-computer" | "remote-worker-computer";
+
 export type ProviderErrorCode =
   | "missing_cli"
   | "invalid_credentials"
@@ -133,7 +137,7 @@ export type RuntimeEvent = RuntimeEventBase &
         tool: string;
         summary: string;
         choices?: string[];
-        approvalScope?: "local-computer";
+        approvalScope?: ApprovalScope;
         /** Provider asks to widen its configured sandbox. Only explicit Full
          * access may answer this automatically; Auto/remembered grants may not. */
         requiresExplicitApproval?: boolean;
@@ -145,7 +149,7 @@ export type RuntimeEvent = RuntimeEventBase &
          * harness (turn ended / settings changed), or nobody — the answerer
          * was already gone and the action never ran */
         source: "user" | "auto" | "timeout" | "system" | "unavailable" | "peer";
-        approvalScope?: "local-computer";
+        approvalScope?: ApprovalScope;
       }
     | { type: "thread.token-usage.updated"; input: number; output: number; cachedInput?: number }
     // `setup: true` marks a failure the user fixes by installing or
@@ -209,7 +213,7 @@ export interface SendTurnInput {
       env: Record<string, string>;
       platform?: "darwin" | "linux" | "win32";
       generation?: string;
-      scope?: "local-computer";
+      scope?: ApprovalScope;
     };
     /** Peer-agent comms: an MCP proxy (list_bots / ask_bot) that routes back
      * through the harness so this bot can message other bots. The harness

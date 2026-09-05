@@ -8,10 +8,10 @@ import { join } from "node:path";
 
 import { writeFileAtomic } from "./atomic.ts";
 import { peerAllowKey, type PeerAction } from "./peer-approval-key.ts";
-import { DATA_DIR, loadBrowserProfileIdAliases } from "./config.ts";
+import { DATA_DIR, loadBrowserProfileIdAliases, loadConfig, workerById } from "./config.ts";
 import * as mdb from "./message-db.ts";
 import { workspaceDir } from "./workspace.ts";
-import { newId, type CloudBackend, type ModelSelection, type ThreadId } from "./contracts.ts";
+import { newId, type ApprovalScope, type CloudBackend, type ModelSelection, type ThreadId } from "./contracts.ts";
 import { pickBotName } from "./names.ts";
 import { redactSecretsInText } from "./redact.ts";
 import { botAvatarProfile, type BotAvatarCrop } from "../shared/bot-avatar.ts";
@@ -57,7 +57,7 @@ export interface OptionCardData {
   /** the narrow grant "always allow" remembers, e.g. "Bash:git" */
   allowKey?: string;
   /** Local actions never share remembered grants with cloud/tool approvals. */
-  approvalScope?: "local-computer";
+  approvalScope?: ApprovalScope;
   /** A durable chat-created routine proposal. The scheduler only applies it
    * after this card is explicitly confirmed by the user. */
   routineRequest?: RoutineRequestCardData;
@@ -449,9 +449,11 @@ export interface BotRecord {
   /** provider-native continuation per instance (e.g. claude session id) */
   resumeCursors: Record<string, unknown>;
   /** where the bot works ("Works on"): its cloud box, the Local VM, this
-   * computer (local CUA), only the built-in browser tab, or nowhere.
+   * computer (local CUA), a paired worker, only the built-in browser tab, or nowhere.
    * Unset = auto (box when it exists, else local when available). */
-  computer?: "cloud" | "vm" | "local" | "browser" | "off";
+  computer?: "cloud" | "vm" | "local" | "worker" | "browser" | "off";
+  /** App-wide worker registry key. The bot never persists the transport alias. */
+  workerId?: string;
   /** Which cloud computer backs `computer: "cloud"`; absent means Box. */
   cloudBackend?: CloudBackend;
   /** Auto mode may prepare/start this bot's managed VPS container. Off by
@@ -687,6 +689,7 @@ export class Store {
     // before default responders existed adopt their first member as lead.
     let botsMigrated = false;
     const browserProfileAliases = loadBrowserProfileIdAliases();
+    const appConfig = loadConfig();
     const chiefSectionsSeen = new Set<string>();
     let groupsMigrated = false;
     for (const b of this.bots) {
@@ -709,6 +712,16 @@ export class Store {
       }
       if (b.autoStartVps !== undefined && b.autoStartVps !== true && b.autoStartVps !== false) {
         delete b.autoStartVps;
+        botsMigrated = true;
+      }
+      if (b.workerId !== undefined && workerById(appConfig, b.workerId) === null) {
+        delete b.workerId;
+        if (b.computer === "worker") delete b.computer;
+        botsMigrated = true;
+      } else if (b.computer === "worker" && b.workerId === undefined) {
+        // A half-selected worker mode cannot run. Fall back to the documented
+        // automatic destination rather than preserving a permanently broken bot.
+        delete b.computer;
         botsMigrated = true;
       }
       if (b.approvalMode !== undefined && !isApprovalMode(b.approvalMode)) {

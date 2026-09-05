@@ -8,6 +8,7 @@ export type BotUpdatePatch = Partial<
     | "title"
     | "description"
     | "notifications"
+    | "workerId"
     | "cloudBackend"
     | "autoStartVps"
     | "color"
