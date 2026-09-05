@@ -7439,7 +7439,9 @@ describe("bot memory API", () => {
         mcpConfig: { mcpServers: { agents: { env: { OMB_COMMS_TOKEN: string } } } };
       }>(fakeClaudeDump);
       expect(dump.systemPrompt ?? "").toContain("session_search");
-      const internalHeaders = { authorization: `Bearer ${dump.mcpConfig.mcpServers.agents.env.OMB_COMMS_TOKEN}` };
+      // Internal calls are authorised by a capability bound to one bot and one
+      // thread, minted per turn — the dump's token belongs to the turn that
+      // wrote it, so each search mints its own for the thread it claims.
       await api("POST", `/api/bots/${bot.id}/interrupt`);
       await expect.poll(async () => {
         const state = (await api("GET", "/api/bots?messages=0")).body;
@@ -7456,10 +7458,10 @@ describe("bot memory API", () => {
       const next = await api("POST", `/api/bots/${bot.id}/tasks`, { title: "Follow-up" });
       expect(next.status).toBe(201);
       const laterThreadId = next.body.task.threadId as string;
-      const search = (q: string, fromThreadId = laterThreadId, fromBotId = bot.id) =>
+      const search = async (q: string, fromThreadId = laterThreadId, fromBotId = bot.id) =>
         fetch(
           `${BASE}/api/internal/session-search?fromBotId=${encodeURIComponent(fromBotId)}&fromThreadId=${encodeURIComponent(fromThreadId)}&q=${encodeURIComponent(q)}`,
-          { headers: internalHeaders },
+          { headers: { authorization: `Bearer ${await mintTestCapability(BASE, fromBotId, fromThreadId)}` } },
         );
 
       const found = await search("audit broken links");
@@ -7475,10 +7477,10 @@ describe("bot memory API", () => {
       expect(theirs.hits.map((hit) => hit.threadId)).toEqual([other.threadId]);
 
       // session_read: the whole message behind a hit, own threads only
-      const read = (threadId: string, messageId: string, fromBotId = bot.id, fromThreadId = laterThreadId) =>
+      const read = async (threadId: string, messageId: string, fromBotId = bot.id, fromThreadId = laterThreadId) =>
         fetch(
           `${BASE}/api/internal/session-read?fromBotId=${encodeURIComponent(fromBotId)}&fromThreadId=${encodeURIComponent(fromThreadId)}&threadId=${encodeURIComponent(threadId)}&messageId=${encodeURIComponent(messageId)}`,
-          { headers: internalHeaders },
+          { headers: { authorization: `Bearer ${await mintTestCapability(BASE, fromBotId, fromThreadId)}` } },
         );
       const whole = await read(firstThreadId, String(hits[0]!.messageId));
       expect(whole.status).toBe(200);
