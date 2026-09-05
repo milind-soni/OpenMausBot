@@ -45,6 +45,12 @@ public struct Connection: Codable, Hashable, Identifiable, Sendable {
     /// Sidecar device identity returned after redemption. Bound into every
     /// credential envelope and checked against the authenticated bearer.
     public var companionDeviceId: String?
+    /// Set when this connection was paired against the server's own sessions
+    /// (`openmausbot serve` / the Docker stack) rather than the desktop's
+    /// companion sidecar: the bearer is an `omb_sess_` token with the client
+    /// scope, so what the app may administer differs. Absent on connections
+    /// saved before servers could be paired directly.
+    public var serverEnvironmentId: String?
 
     public init(
         id: String = UUID().uuidString,
@@ -57,7 +63,8 @@ public struct Connection: Codable, Hashable, Identifiable, Sendable {
         allowedRouteKinds: Set<CompanionEndpointKind>? = nil,
         allowedLocalRouteURLs: Set<String>? = nil,
         secretPublicKey: String? = nil,
-        companionDeviceId: String? = nil
+        companionDeviceId: String? = nil,
+        serverEnvironmentId: String? = nil
     ) {
         self.id = id
         self.name = name
@@ -70,7 +77,13 @@ public struct Connection: Codable, Hashable, Identifiable, Sendable {
         self.allowedLocalRouteURLs = allowedLocalRouteURLs
         self.secretPublicKey = secretPublicKey
         self.companionDeviceId = companionDeviceId
+        self.serverEnvironmentId = serverEnvironmentId
     }
+
+    /// Paired with a server directly (client scope): chat, approvals and
+    /// reading are in; creating bots, changing models, connected apps and
+    /// cloud computers are the owner's, done on the server's own UI.
+    public var pairedWithServer: Bool { serverEnvironmentId != nil }
 
     /// The representation `URLComponents.host` accepts for a literal IPv6
     /// address. It adds brackets exactly once and leaves DNS/IPv4 names alone.
@@ -207,6 +220,7 @@ public struct PairingInvite: Equatable, Sendable {
     }
 
     public static func parse(_ url: URL) -> PairingInvite? {
+        if let server = parseServerLink(url) { return server }
         guard url.scheme?.lowercased() == "openmausbot",
               url.host?.lowercased() == "pair",
               let components = URLComponents(url: url, resolvingAgainstBaseURL: false)
@@ -283,6 +297,44 @@ public struct PairingInvite: Equatable, Sendable {
         var seen = Set<String>()
         let unique = stable.filter { seen.insert($0.url).inserted }
         return unique.isEmpty ? nil : unique
+    }
+
+    /// `https://host/pair#code=ABCD-EFGH-JKLM`: the link a server prints
+    /// (`openmausbot serve`, `openmausbot pair`, the Docker stack). It pairs
+    /// against the server's own sessions, not the companion sidecar. The code
+    /// rides in the fragment, which never reaches a server in a request, and
+    /// the server takes it with or without dashes.
+    static func parseServerLink(_ url: URL) -> PairingInvite? {
+        guard let components = URLComponents(url: url, resolvingAgainstBaseURL: false),
+              let scheme = components.scheme?.lowercased(),
+              scheme == "https" || scheme == "http",
+              let host = components.host, !host.isEmpty,
+              components.path == "/pair",
+              components.query == nil,
+              let fragment = components.fragment
+        else { return nil }
+        var values: [String: String] = [:]
+        for pair in fragment.split(separator: "&") {
+            let parts = pair.split(separator: "=", maxSplits: 1)
+            guard parts.count == 2, values[String(parts[0])] == nil else { return nil }
+            values[String(parts[0])] = String(parts[1]).removingPercentEncoding ?? String(parts[1])
+        }
+        guard let raw = values["code"], let code = normalizedServerCode(raw) else { return nil }
+        var origin = components
+        origin.path = ""
+        origin.fragment = nil
+        guard let originString = origin.string, let connection = Connection.parse(originString) else { return nil }
+        return PairingInvite(connection: connection, credential: code)
+    }
+
+    /// A server pairing code: 12 characters from a confusion-free alphabet,
+    /// shown as three dashed groups. Only the shape is checked here; a
+    /// mistyped code fails at the server with its own message. Six-digit
+    /// codes and `omb_pair_` tokens are the companion's and return nil.
+    public static func normalizedServerCode(_ raw: String) -> String? {
+        let cleaned = raw.uppercased().filter { $0.isASCII && ($0.isLetter || $0.isNumber) }
+        guard cleaned.count == 12, !cleaned.allSatisfy(\.isNumber) else { return nil }
+        return cleaned
     }
 
     private static func credential(from values: [String: String]) -> String? {
@@ -603,6 +655,38 @@ public struct CompanionClient: Sendable {
         // address must not consume the default twenty-second API deadline.
         pairRequest.timeoutInterval = 8
         return try await client.send(pairRequest, as: PairResponse.self)
+    }
+
+    /// Pair against the server's own sessions (`POST /api/auth/pair`). The
+    /// answer is a bearer for the client scope; no cookie is asked for, so
+    /// the token is the app's alone. `attemptId` makes a retry after a lost
+    /// response idempotent for a minute, like the companion's request id.
+    public static func pairWithServer(
+        connection: Connection,
+        code: String,
+        label: String,
+        attemptId: String = UUID().uuidString,
+        session: URLSession = .shared
+    ) async throws -> ServerPairResponse {
+        let client = CompanionClient(connection: connection, token: nil, session: session)
+        var request = try client.makeRequest(
+            "POST",
+            "/api/auth/pair",
+            body: ["code": code, "label": label, "attemptId": attemptId]
+        )
+        request.timeoutInterval = 8
+        return try await client.send(request, as: ServerPairResponse.self)
+    }
+
+    /// The server's public descriptor: reachable before pairing, and the way
+    /// to notice that the address now belongs to a different server.
+    public func environment() async throws -> ServerEnvironment {
+        try await send(makeRequest("GET", "/.well-known/openmausbot/environment"), as: ServerEnvironment.self)
+    }
+
+    /// End this session on the server (server-paired connections only).
+    public func logout() async throws {
+        try await send(makeRequest("POST", "/api/auth/logout"))
     }
 
     /// Resolve the multi-address invite before consuming its credential.

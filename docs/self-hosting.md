@@ -237,15 +237,21 @@ is the reference implementation.
 
 ## Using it from your phone
 
-The iOS companion pairs with a running server. Start the companion process
-next to the harness and pair by QR:
+The iOS app pairs with a server the same way a laptop does: scan the QR
+code that `openmausbot serve` (or `openmausbot pair`) prints, or paste the
+whole `https://host/pair#code=…` link into the address field on the pairing
+screen. The phone gets a session of its own, listed and revocable with
+`openmausbot sessions`. It can chat, approve, and read; creating bots,
+changing models, connecting apps and cloud computers stay with the owner in
+the server's own UI, and the app hides those controls.
+
+Older way, still supported: run the companion sidecar next to the harness
+and pair by its own QR. It advertises on your private networks
+(Tailscale-aware) and issues per-device credentials on pairing.
 
 ```sh
 node --experimental-strip-types companion/src/index.ts
 ```
-
-It advertises on your private networks (Tailscale-aware) and issues
-per-device credentials on pairing — see the pairing screen in the iOS app.
 
 ## Updating
 

@@ -1,0 +1,18 @@
+{
+  "token": "omb_sess_Zk3vJq8mN2xR7tL9wP4yH6bC1dF5gA0sE8uK2iO7",
+  "session": {
+    "id": "sess_01J9X",
+    "label": "Milind's iPhone",
+    "scopes": ["client"],
+    "createdAt": 1757059200000,
+    "lastSeenAt": 1757059200000,
+    "expiresAt": 1759651200000
+  },
+  "environment": {
+    "environmentId": "env_7f3a9c",
+    "label": "cab mini",
+    "platform": "linux",
+    "version": "0.1.55",
+    "capabilities": { "remoteSessions": true, "selfUpdate": false }
+  }
+}

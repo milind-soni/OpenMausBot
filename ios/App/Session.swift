@@ -272,6 +272,25 @@ final class Session: ObservableObject {
         if invited.allowedRouteKinds == nil {
             invited.establishRoutePolicyFromInvite()
         }
+        // A 12-character code pairs with a server directly (its own sessions,
+        // a client-scope bearer); anything else is the companion sidecar's.
+        if let code = PairingInvite.normalizedServerCode(credential) {
+            let paired = try await CompanionClient.pairWithServer(
+                connection: invited,
+                code: code,
+                label: deviceName,
+                attemptId: pairRequestId
+            )
+            var stored = invited
+            if !paired.environment.label.isEmpty { stored.name = paired.environment.label }
+            stored.serverEnvironmentId = paired.environment.environmentId
+            stored.companionDeviceId = nil
+            if let existing = registry.matchingConnection(for: stored) {
+                stored.id = existing.id
+            }
+            try commitPairing(stored, token: paired.token)
+            return
+        }
         let outcome = try await CompanionClient.pairFirstReachable(
             connection: invited,
             credential: credential,
@@ -298,8 +317,15 @@ final class Session: ObservableObject {
         if let existing = registry.matchingConnection(for: stored) {
             stored.id = existing.id
         }
+        try commitPairing(stored, token: paired.token, winner: winner)
+    }
 
-        try Keychain.save(paired.token, for: stored.id)
+    /// The device token goes to the keychain and the connection to defaults —
+    /// deliberately apart, so the thing that gets backed up is never the
+    /// credential. Shared by companion and server pairing; `winner` is the
+    /// route that answered, which a server pairing (one route) has no use for.
+    private func commitPairing(_ stored: Connection, token: String, winner: CompanionEndpoint? = nil) throws {
+        try Keychain.save(token, for: stored.id)
         let firstPairing = registry.connections.isEmpty
         var updatedRegistry = registry
         updatedRegistry.upsert(stored)
@@ -329,14 +355,14 @@ final class Session: ObservableObject {
         registry = updatedRegistry
         connections = registry.connections
         self.connection = stored
-        self.token = paired.token
+        self.token = token
         let liveRoutes = winner.map { route in
             [route] + stored.orderedEndpoints.filter { $0.url != route.url }
         } ?? stored.orderedEndpoints
         self.rotation = CandidateRotation(endpoints: liveRoutes)
         self.client = CompanionClient(
             connection: winner.map(stored.dialing) ?? stored,
-            token: paired.token
+            token: token
         )
         self.state = CompanionState()
         // A fresh pairing settles any restore that was still waiting on the
@@ -404,8 +430,14 @@ final class Session: ObservableObject {
     }
 
     func forgetConnection(id: String) {
-        guard registry.connection(id: id) != nil else { return }
+        guard let forgotten = registry.connection(id: id) else { return }
         let wasActive = registry.activeConnectionID == id
+        // A server session is ended on the server too, best effort: the
+        // bearer is discarded locally either way.
+        if forgotten.pairedWithServer, let token = try? Keychain.token(for: id) {
+            let client = CompanionClient(connection: forgotten, token: token)
+            Task.detached { try? await client.logout() }
+        }
         if wasActive { stopActiveRuntime() }
         preparedPhoneCredentials = preparedPhoneCredentials.filter { $0.value.connectionID != id }
         Keychain.remove(id)

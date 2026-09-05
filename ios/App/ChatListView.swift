@@ -387,6 +387,9 @@ struct ChatListView: View {
             updatesButton
                 .frame(minWidth: 148)
             searchButton
+            // Creating bots and sections is the owner's, on the server's own
+            // UI, when this phone is paired with a server directly.
+            if session.connection?.pairedWithServer != true {
             Menu {
                 Button("New section", systemImage: "folder.badge.plus", action: openNewSection)
                     .disabled(!hasVisibleBots)
@@ -401,6 +404,7 @@ struct ChatListView: View {
             .buttonStyle(.plain)
             .glassCapsule()
             .accessibilityLabel("Create")
+            }
         }
     }
 
