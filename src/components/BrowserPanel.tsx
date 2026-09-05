@@ -9,6 +9,7 @@ import {
   AlertTriangle,
   ArrowLeft,
   ArrowRight,
+  ChevronDown,
   ExternalLink,
   Globe,
   Hand,
@@ -229,23 +230,34 @@ export function BrowserPanel({
   onControl,
   size = "compact",
   onExpand,
+  onCollapse,
+  onDismissHelp,
 }: {
   bot: Bot;
   control: ControlSnapshot;
   controlPending: boolean;
   onControl: (action: "take" | "release") => Promise<boolean>;
-  size?: "compact" | "expanded";
-  /** Compact only: hand the tab to the main column. */
+  /** compact: the Computer panel's small preview; expanded: the whole main
+   * column; docked: the chat column, above the composer. Docked and
+   * expanded both take control in place on a click; compact expands first. */
+  size?: "compact" | "expanded" | "docked";
+  /** Compact and docked: hand the tab to the main column. */
   onExpand?: () => void;
-  /** Expanded only: hand the tab back to the panel. */
+  /** Docked: fold the page down to a one-line bar. */
   onCollapse?: () => void;
+  /** Docked: clear the bot's plea without taking control. */
+  onDismissHelp?: () => void;
 }) {
   const { state, dispatch } = useStore();
   const bridge = window.ogb?.browser;
   const pageVisible = usePageVisible();
   const layoutOwner = useId();
+  // Electron knows two presentations. The dock is the expanded one placed
+  // elsewhere: same aspect-fit scaling, and clicks take control in place
+  // instead of being swallowed to expand a watch-only preview.
+  const nativeMode: "compact" | "expanded" = size === "compact" ? "compact" : "expanded";
   const hostRef = useRef<HTMLDivElement>(null);
-  const nativeViewObscured = useNativeViewObscured(hostRef, size === "expanded" ? 1.6 : null);
+  const nativeViewObscured = useNativeViewObscured(hostRef, nativeMode === "expanded" ? 1.6 : null);
   const operationPending = useBrowserPanelOperationPending(bot.id);
   const nativeTakePending = useRef(false);
   const botBusyRef = useRef(browserProfileChangesDisabled(bot));
@@ -323,10 +335,10 @@ export function BrowserPanel({
     const send = () => {
       if (!alive) return;
       const rawBounds = elementBounds(hostRef.current);
-      const bounds = rawBounds && size === "expanded" ? aspectFitBrowserBounds(rawBounds) : rawBounds;
+      const bounds = rawBounds && nativeMode === "expanded" ? aspectFitBrowserBounds(rawBounds) : rawBounds;
       const target = bounds && pageVisible && !nativeViewObscured && shouldPlaceNativeSurface ? bounds : null;
       bridge
-        .layout(botId, target, activePartition, size, layoutOwner)
+        .layout(botId, target, activePartition, nativeMode, layoutOwner)
         .then((next) => {
           if (!alive) return;
           acceptSurface(next);
@@ -363,7 +375,7 @@ export function BrowserPanel({
       // The tab is gone; the page stays alive (a bot mid-task keeps its tab)
       // but nothing may paint over the chat. Scope the hide to this profile:
       // cleanup from an old selection must not hide the newly selected one.
-      void bridge.layout(botId, null, activePartition, size, layoutOwner).catch(() => {});
+      void bridge.layout(botId, null, activePartition, nativeMode, layoutOwner).catch(() => {});
     };
   }, [
     bridge,
@@ -371,7 +383,7 @@ export function BrowserPanel({
     pageVisible,
     activePartition,
     layoutOwner,
-    size,
+    nativeMode,
     acceptSurface,
     nativeViewObscured,
     presentation,
@@ -601,10 +613,12 @@ export function BrowserPanel({
   }
 
   const expanded = size === "expanded";
+  const docked = size === "docked";
+  const compact = size === "compact";
 
   return (
-    <div className={cn("flex h-full min-h-0 flex-col", !expanded && "overflow-y-auto overscroll-contain pr-0.5")}>
-      {!expanded ? (
+    <div className={cn(docked ? "flex flex-col" : "flex h-full min-h-0 flex-col", compact && "overflow-y-auto overscroll-contain pr-0.5")}>
+      {compact ? (
         <div className="mb-2 mt-2 flex items-center justify-between text-[13px] text-ink-secondary">
           <span className="flex items-center gap-2" aria-live="polite">
             {bot.name}'s browser
@@ -677,6 +691,7 @@ export function BrowserPanel({
             aria-label="Web address"
           />
         </div>
+        {!docked && (
         <button
           type="submit"
           disabled={!address.trim() || busy || profileBusy || operationPending}
@@ -684,6 +699,7 @@ export function BrowserPanel({
         >
           Go
         </button>
+        )}
         {currentUrl && (
           <button
             type="button"
@@ -695,20 +711,44 @@ export function BrowserPanel({
             <ExternalLink size={15} aria-hidden="true" />
           </button>
         )}
+        {docked && onExpand && (
+          <button
+            type="button"
+            onClick={onExpand}
+            className="rounded-md p-1.5 text-ink-secondary outline-none hover:bg-control hover:text-ink focus-visible:ring-2 focus-visible:ring-accent"
+            title="Show the page large"
+            aria-label="Show the page large"
+          >
+            <Maximize2 size={15} aria-hidden="true" />
+          </button>
+        )}
+        {docked && onCollapse && (
+          <button
+            type="button"
+            onClick={onCollapse}
+            className="rounded-md p-1.5 text-ink-secondary outline-none hover:bg-control hover:text-ink focus-visible:ring-2 focus-visible:ring-accent"
+            title="Fold the page down to a bar"
+            aria-label="Collapse the browser"
+          >
+            <ChevronDown size={15} aria-hidden="true" />
+          </button>
+        )}
       </form>
 
       {/* Keep a visible renderer frame around the rectangular native view.
           Compact clicks are consumed by Electron: the first click expands and
           takes control without also activating whatever is underneath it. */}
       <div
-        onClick={!expanded && onExpand ? onExpand : undefined}
-        title={!expanded && onExpand ? "Click to expand" : undefined}
+        onClick={compact && onExpand ? onExpand : undefined}
+        title={compact && onExpand ? "Click to expand" : undefined}
         data-browser-presentation={presentation}
         className={cn(
           "relative overflow-hidden rounded-2xl border border-hairline/60 bg-card p-[3px] shadow-sm shadow-black/10",
           expanded
             ? "min-h-[320px] flex-1"
-            : "aspect-[16/10] w-full max-w-[720px] shrink-0 self-center cursor-zoom-in",
+            : docked
+              ? "aspect-[16/10] w-full shrink-0"
+              : "aspect-[16/10] w-full max-w-[720px] shrink-0 self-center cursor-zoom-in",
         )}
       >
         <div
@@ -729,6 +769,59 @@ export function BrowserPanel({
         </div>
       </div>
 
+      {docked ? (
+        /* Who is driving, in the chat: the bot's plea and the button that
+           answers it sit together under the page it is stuck on. */
+        <div
+          role={control.helpReason && !control.held ? "alert" : undefined}
+          className={cn(
+            "mt-2 flex items-center justify-between gap-2 rounded-xl border px-2.5 py-1.5",
+            control.held
+              ? "border-accent/30 bg-accent/10"
+              : control.helpReason
+                ? "border-warning/25 bg-warning/10"
+                : "border-hairline/30 bg-card",
+          )}
+        >
+          <div className="min-w-0 text-[12px] leading-snug text-ink-secondary">
+            {control.held ? (
+              <>
+                You have control. Click and type on the page; <span className="font-medium text-ink">{bot.name}</span> is paused until you hand back.
+              </>
+            ) : control.helpReason ? (
+              <span className="text-warning">
+                <b className="font-semibold">{bot.name} needs you.</b> {control.helpReason}
+              </span>
+            ) : (
+              <>{bot.name} is browsing. Click into the page to take over any time.</>
+            )}
+          </div>
+          <div className="flex shrink-0 items-center gap-1.5">
+            {control.helpReason && !control.held && onDismissHelp && (
+              <button
+                type="button"
+                onClick={onDismissHelp}
+                disabled={controlPending}
+                className="rounded-lg px-2.5 py-1.5 text-[12.5px] text-ink-secondary outline-none hover:bg-control hover:text-ink focus-visible:ring-2 focus-visible:ring-accent disabled:opacity-60"
+              >
+                Dismiss
+              </button>
+            )}
+            <button
+              type="button"
+              onClick={() => void changeControl(control.held ? "release" : "take")}
+              disabled={controlPending || busy || profileBusy || operationPending}
+              className={cn(
+                "flex shrink-0 items-center gap-1.5 rounded-lg px-3 py-1.5 text-[13px] font-medium outline-none focus-visible:ring-2 focus-visible:ring-accent disabled:opacity-60",
+                control.held ? "bg-accent text-accent-ink" : "bg-control text-ink hover:bg-raised-hover",
+              )}
+            >
+              <Hand size={14} aria-hidden="true" />
+              {control.held ? "Hand back" : "Take control"}
+            </button>
+          </div>
+        </div>
+      ) : (
       <div className="mt-3 flex items-center justify-between gap-3">
         <div className="min-w-0 text-[12px] leading-relaxed text-ink-secondary">
           {control.held
@@ -748,8 +841,11 @@ export function BrowserPanel({
           {control.held ? "Hand back" : "Take control"}
         </button>
       </div>
+      )}
 
-      {/* Profile: which session (cookies, logins) this bot's tab uses. */}
+      {/* Profile: which session (cookies, logins) this bot's tab uses. The
+          dock leaves this to the panel so the chat stays about the page. */}
+      {!docked && (
       <div className="mt-3 rounded-xl border border-hairline/30 bg-card p-3">
         <div className="flex items-center justify-between gap-3">
           <div className="flex min-w-0 items-center gap-2 text-[13px] text-ink">
@@ -828,6 +924,7 @@ export function BrowserPanel({
             : `Profiles keep logins separate. “${bot.name}'s own” is private to this bot; Guest is cleared when you switch away.`}
         </div>
       </div>
+      )}
       {error && (
         <div role="alert" className="mt-2 rounded-lg border border-danger/30 bg-danger/10 px-3 py-2 text-[12px] text-danger">
           {error}

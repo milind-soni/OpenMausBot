@@ -150,7 +150,10 @@ behavior contract.
    (built-in CDP: `Input.*`, `Runtime.*`, `Page.*`,
    `Accessibility.getFullAXTree` for playwright-mcp-style snapshot refs) +
    `capturePage()` for vision. User can grab the mouse mid-task for logins /
-   CAPTCHAs, then hand back. Known limit: Google OAuth blocks embedded
+   CAPTCHAs, then hand back. In the chat the page floats picture-in-picture
+   above the composer (`BrowserDock`, bottom-right, 16:10) the moment the bot
+   opens one or asks for hands; the Computer panel's Browser tab and the
+   expanded workspace show the same native view. Known limit: Google OAuth blocks embedded
    webviews — route Google-account flows to tier 2/3.
 2. **Opt-in "use my real Chrome": extension bridge.** Chrome 136+ killed
    `--remote-debugging-port` on the default profile (do NOT build the old

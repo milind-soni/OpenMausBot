@@ -268,7 +268,7 @@ function Shell() {
       ) : group ? (
         <GroupView key={group.id} group={group} />
       ) : bot ? (
-        <ChatView bot={bot} />
+        <ChatView bot={bot} onExpandBrowser={remoteClient ? undefined : () => openBrowserWorkspace(bot.id)} />
       ) : (
         <main className="flex h-full min-w-0 flex-1 flex-col items-center justify-center gap-3 bg-app text-ink-secondary">
           <Loader2 size={20} className="animate-spin" />

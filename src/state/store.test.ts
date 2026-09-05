@@ -1179,3 +1179,21 @@ describe("messageAdded leaf adoption", () => {
     expect(next.bots[0].messages.map((m) => m.id)).toContain("shot");
   });
 });
+
+describe("browser dock state", () => {
+  it("opens, collapses, and forgets a bot's dock without touching others", () => {
+    const opened = reducer(initialState, { type: "browserDock", botId: "bot-1", state: "open" });
+    expect(opened.browserDock).toEqual({ "bot-1": "open" });
+    const collapsed = reducer(opened, { type: "browserDock", botId: "bot-1", state: "collapsed" });
+    expect(collapsed.browserDock).toEqual({ "bot-1": "collapsed" });
+    const second = reducer(collapsed, { type: "browserDock", botId: "bot-2", state: "open" });
+    const forgotten = reducer(second, { type: "browserDock", botId: "bot-1", state: null });
+    expect(forgotten.browserDock).toEqual({ "bot-2": "open" });
+  });
+
+  it("returns the same state when nothing changes", () => {
+    const opened = reducer(initialState, { type: "browserDock", botId: "bot-1", state: "open" });
+    expect(reducer(opened, { type: "browserDock", botId: "bot-1", state: "open" })).toBe(opened);
+    expect(reducer(initialState, { type: "browserDock", botId: "bot-9", state: null })).toBe(initialState);
+  });
+});

@@ -33,6 +33,7 @@ import { showNotification, type NotificationTarget } from "@/lib/notify";
 import { speaker } from "@/lib/tts";
 import { createBotPatchQueue, type BotUpdatePatch } from "./bot-patch-queue";
 import { skillRecorderEnabled } from "@/lib/feature-flags";
+import type { BrowserDockState } from "@/lib/browser-dock";
 import { openLiveEvents } from "@/lib/live-events";
 
 const MAX_ROUTINE_RUNS = 2_000;
@@ -486,6 +487,8 @@ export interface AppState {
    * (the bot's hands are refused server-side); helpReason = the bot's open
    * plea for the person to take over */
   computerControl: Record<string, { held: boolean; helpReason: string | null }>;
+  /** The browser dock in each bot's chat: open, collapsed to a bar, or absent. */
+  browserDock: Record<string, BrowserDockState>;
   /** a search hit to scroll to once its thread is on screen; nonce lets the
    * same message be focused twice in a row */
   focusMessage: { threadId: string; messageId: string; nonce: number; consumed: boolean } | null;
@@ -658,6 +661,7 @@ export type Action =
   | { type: "screenFrame"; botId: string; png: string; mime: string }
   | { type: "provisioning"; botId: string; on: boolean }
   | { type: "computerControl"; botId: string; held: boolean; helpReason: string | null }
+  | { type: "browserDock"; botId: string; state: BrowserDockState | null }
   | { type: "setModel"; botId: string; selection: ModelSelection }
   | { type: "interrupt"; botId: string; threadId?: string; onError?: () => void }
   | { type: "connected"; value: boolean }
@@ -1176,6 +1180,13 @@ export function reducer(state: AppState, action: Action): AppState {
           [action.botId]: { held: action.held, helpReason: action.helpReason },
         },
       };
+    case "browserDock": {
+      if ((state.browserDock[action.botId] ?? null) === action.state) return state;
+      const browserDock = { ...state.browserDock };
+      if (action.state === null) delete browserDock[action.botId];
+      else browserDock[action.botId] = action.state;
+      return { ...state, browserDock };
+    }
     case "setModel":
       return updateBot(state, action.botId, (b) => ({ ...b, modelSelection: action.selection }));
     case "connected":
@@ -1477,6 +1488,7 @@ export const initialState: AppState = {
   provisioning: {},
   deletingBots: {},
   computerControl: {},
+  browserDock: {},
   focusMessage: null,
   connected: false,
   error: null,

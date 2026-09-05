@@ -69,6 +69,7 @@ import { webhookMessageView } from "@/lib/webhook-message";
 import { splitTranscriptAttachments } from "@/lib/composer-attachments";
 import { BOTTOM_FOLLOW_THRESHOLD, shouldResumeBottomFollow } from "@/lib/bottom-follow";
 import { useComposerDockPad } from "@/lib/composer-dock";
+import { BrowserDock } from "./BrowserDock";
 import {
   TRANSCRIPT_WINDOW_SIZE,
   expandWindowStart,
@@ -865,7 +866,14 @@ function PinnedBanner({
   );
 }
 
-export function ChatView({ bot }: { bot: Bot }) {
+export function ChatView({
+  bot,
+  /** Desktop only: hand the docked browser the whole main column. */
+  onExpandBrowser,
+}: {
+  bot: Bot;
+  onExpandBrowser?: () => void;
+}) {
   const { state, dispatch } = useStore();
   const remoteClient = window.ogb?.remoteClient?.active === true;
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -1345,6 +1353,14 @@ export function ChatView({ bot }: { bot: Bot }) {
             since={busySince}
           />
         </div>
+      </div>
+
+      {/* The bot's live page, picture-in-picture over the transcript's
+          bottom-right corner, just above the composer. It is a native view
+          that paints above React anyway, so an overlay is the honest shape;
+          the transcript keeps its own padding and scrolls behind it. */}
+      <div className="pointer-events-none absolute inset-x-0 z-[3] flex justify-end px-5" style={{ bottom: composerDock.height }}>
+        <BrowserDock bot={bot} onExpand={onExpandBrowser} />
       </div>
 
       {/* Reading scrollback — one tap back to the end, streaming or not */}

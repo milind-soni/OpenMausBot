@@ -2,67 +2,13 @@
 // whole main column. Opened by clicking the small preview in the computer
 // panel; closing hands the tab back to the panel. Control (Take control /
 // Hand back) is the same lease the panel uses, so a hold survives the swap.
-import { useCallback, useEffect, useState } from "react";
 import { Globe, X } from "lucide-react";
-import { z } from "zod";
-import { api, useStore, type Bot } from "@/state/store";
+import type { Bot } from "@/state/store";
+import { useBrowserControl } from "@/hooks/use-browser-control";
 import { BrowserPanel } from "./BrowserPanel";
 
-const controlSnapshotSchema = z.looseObject({
-  held: z.boolean().optional().default(false),
-  helpReason: z.string().nullable().optional().default(null),
-});
-
 export function BrowserWorkspace({ bot, onClose }: { bot: Bot; onClose: () => void }) {
-  const { state, dispatch } = useStore();
-  const control = state.computerControl[bot.id] ?? { held: false, helpReason: null };
-  const [controlPending, setControlPending] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-
-  useEffect(() => {
-    let alive = true;
-    api(`/api/bots/${bot.id}/computer/control`)
-      .then((raw) => {
-        if (!alive) return;
-        const snap = controlSnapshotSchema.parse(raw);
-        dispatch({
-          type: "computerControl",
-          botId: bot.id,
-          held: snap.held === true,
-          helpReason: snap.helpReason,
-        });
-      })
-      .catch(() => {});
-    return () => {
-      alive = false;
-    };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [bot.id]);
-
-  const controlAction = useCallback(async (action: "take" | "release"): Promise<boolean> => {
-    setControlPending(true);
-    setError(null);
-    try {
-      const snap = controlSnapshotSchema.parse(await api(`/api/bots/${bot.id}/computer/control`, {
-        method: "POST",
-        body: JSON.stringify({ action }),
-      }));
-      dispatch({
-        type: "computerControl",
-        botId: bot.id,
-        held: snap.held === true,
-        helpReason: snap.helpReason,
-      });
-      // A successful HTTP response is not enough: only advance Electron's
-      // native input gate when the durable lease reached the requested state.
-      return snap.held === (action === "take");
-    } catch (cause) {
-      setError(cause instanceof Error ? cause.message : String(cause));
-      return false;
-    } finally {
-      setControlPending(false);
-    }
-  }, [bot.id, dispatch]);
+  const { control, controlPending, controlAction, error } = useBrowserControl(bot.id);
 
   return (
     <main className="flex h-full min-w-0 flex-1 flex-col bg-app">

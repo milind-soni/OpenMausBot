@@ -39,6 +39,7 @@ import { useDesktopCapabilities } from "./DesktopCapabilities";
 import { RoutineEditor } from "./RoutinesPage";
 import { AndroidDevicePanel, useAndroidUsbDevices } from "./AndroidDevicePanel";
 import { BrowserPanel } from "./BrowserPanel";
+import { computerPanelHostsBrowser } from "@/lib/browser-dock";
 import { builtInBrowserEnabled } from "@/lib/feature-flags";
 import { transitionComputerControlLease, type ComputerControlAction } from "@/lib/computer-control";
 import { LocalScreenPreview } from "./LocalScreenPreview";
@@ -1084,6 +1085,7 @@ export function ComputerPanel({
 
       {panelView === "browser" && browserEnabled ? (
         <div className="flex min-h-0 flex-1 flex-col px-4 pb-4">
+          {computerPanelHostsBrowser(state.browserDock[bot.id]) ? (
           <BrowserPanel
             bot={bot}
             control={control}
@@ -1091,6 +1093,24 @@ export function ComputerPanel({
             onControl={controlAction}
             onExpand={onExpandBrowser ? expandBrowser : undefined}
           />
+          ) : (
+          /* One React host at a time: while the chat dock is open it owns
+             the native rectangle, so this tab points there instead. */
+          <div className="mt-2 rounded-xl border border-hairline/30 bg-card p-4 text-[13px] text-ink-secondary">
+            <div className="flex items-center gap-2 text-ink">
+              <Globe size={14} aria-hidden="true" />
+              Showing in the chat
+            </div>
+            <p className="mt-1 leading-relaxed">{bot.name}'s page is docked above the message box.</p>
+            <button
+              type="button"
+              onClick={() => dispatch({ type: "browserDock", botId: bot.id, state: "collapsed" })}
+              className="mt-3 rounded-lg bg-control px-3 py-1.5 text-[13px] font-medium text-ink hover:bg-raised-hover"
+            >
+              Move it here
+            </button>
+          </div>
+          )}
           {error && (
             <div role="alert" className="mt-2 rounded-lg border border-danger/30 bg-danger/10 px-3 py-2 text-[12px] text-danger">
               {error}
