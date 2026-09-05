@@ -3921,7 +3921,11 @@ async function startTurn(
   directTurnDispatchClaims.set(bot.id, { id: dispatchClaimId, threadId, phase: "setup" });
   beginInternalCapabilityGeneration(threadId, dispatchClaimId);
   store.setActivity(bot.id, "working");
-  store.patchBot(bot.id, { unread: false });
+  // The badge is "this bot answered you, and you have not looked yet". A
+  // person starting a turn has looked; a teammate's hop has not — the fold
+  // never re-marks an internal turn, so clearing here would silently spend
+  // a signal the person still owes a glance to.
+  if (commsDepth === 0) store.patchBot(bot.id, { unread: false });
   turnUsage.delete(threadId);
 
   void (async () => {

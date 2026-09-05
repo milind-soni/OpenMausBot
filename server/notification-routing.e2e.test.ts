@@ -297,6 +297,12 @@ describe("bot-to-bot coordination is recorded, not announced", () => {
     let channelId: string | undefined;
     const stream = await openSse(`${base}/api/events`);
     try {
+      // Ink already answered the person earlier and they have not looked yet.
+      // A hop runs on Ink's own 1:1 thread, so this badge is the one it could
+      // spend by mistake — seeded true, or the "no badge" checks below would
+      // pass for a hop that had just cleared it.
+      expect((await api("PATCH", `/api/bots/${peer.id}`, { unread: true })).status).toBe(200);
+      expect((await botState(peer.id))?.unread).toBe(true);
       const asked = await api(
         "POST",
         "/api/internal/ask-bot",
@@ -330,10 +336,13 @@ describe("bot-to-bot coordination is recorded, not announced", () => {
       expect(chip(asker.id, "Messaged @Ink")).toBe(true);
       expect(chip(peer.id, "Message from @Pen")).toBe(true);
 
-      // nothing about it is worth interrupting anyone: no channel badge, no
-      // sidebar dot on the peer whose 1:1 thread only carries a chip
+      // nothing about it is worth interrupting anyone: no channel badge, and
+      // the asker — whose thread only carries a chip — gets no dot
       expect(channel.unread).toBeFalsy();
-      expect(current.bots.find((candidate: { id: string }) => candidate.id === peer.id)?.unread).toBeFalsy();
+      expect(current.bots.find((candidate: { id: string }) => candidate.id === asker.id)?.unread).toBeFalsy();
+      // ...while the badge Ink already earned is neither spent by the hop
+      // nor re-raised by it: still exactly the one signal the person had
+      expect(current.bots.find((candidate: { id: string }) => candidate.id === peer.id)?.unread).toBe(true);
 
       // A unique bot patch is an SSE ordering barrier: by the time it is
       // observed, every notification this exchange raised is already in
