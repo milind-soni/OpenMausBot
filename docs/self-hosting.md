@@ -13,6 +13,11 @@ path **today**; first-class remote access is coming — see
 > (Caddy) in front. Proper token-based remote auth is exactly what the
 > Remote Workspace plan adds.
 
+Step by step, for a server you do not have yet: [Deploy OpenMausBot on a
+VPS](deploy-vps.md) walks through the three ways in (public address, own
+domain, Tailscale), signing engines in, pairing, keeping it running,
+updating and backups. This page is the reference behind it.
+
 ## What works headless (and what doesn't)
 
 Runs fully on a server:

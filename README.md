@@ -344,6 +344,16 @@ OpenMausBot is free and open source. If it does real work for you, you can
 one-time any amount, or monthly. Payments are handled by [Polar](https://polar.sh/supamaus),
 which takes care of receipts and taxes; nothing about the app ever sits behind a paywall.
 
+## Run it on a server
+
+Bots keep working with every laptop closed when the server runs on a VPS or
+a Mac mini. One command with Node 24: `npx openmausbot serve` (add
+`--tunnel` for a public address with no domain or open port, or
+`--tailscale` for your tailnet), or the Docker stack for your own domain.
+Devices pair once with a short code. The step-by-step guide is
+[docs/deploy-vps.md](docs/deploy-vps.md); the reference is
+[docs/self-hosting.md](docs/self-hosting.md).
+
 ## License
 
 [Apache License 2.0](LICENSE) © 2026 Milind Soni and OpenMausBot contributors.

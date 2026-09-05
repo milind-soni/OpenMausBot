@@ -1,5 +1,10 @@
 {
   "title": "Self-hosting",
   "icon": "Server",
-  "pages": ["index", "networking", "data-and-backups"]
+  "pages": [
+    "index",
+    "deploy-vps",
+    "networking",
+    "data-and-backups"
+  ]
 }
