@@ -34,6 +34,9 @@ let lastDelegationUrl: string | null = null;
 let delegationStatusResponse: unknown = { status: "done", toBotName: "Helper", result: "All done." };
 let delegateResponse: unknown = { queued: true, message: "Delegation queued." };
 let lastCreateBody: any = null;
+let lastCreateRoomBody: any = null;
+let lastManageRoomBody: any = null;
+let lastMoveBotBody: any = null;
 let lastCredentialBody: any = null;
 let lastRoutineQuery = "";
 let routinesResponse: unknown = {
@@ -156,6 +159,36 @@ beforeAll(async () => {
       });
       return;
     }
+    if (req.method === "POST" && req.url === "/api/internal/create-room") {
+      let data = "";
+      req.on("data", (c) => (data += c));
+      req.on("end", () => {
+        lastCreateRoomBody = JSON.parse(data);
+        res.writeHead(201, { "content-type": "application/json" });
+        res.end(JSON.stringify({ id: "room-dev", name: "Dev Team", section: "Work", memberCount: 2 }));
+      });
+      return;
+    }
+    if (req.method === "POST" && req.url === "/api/internal/manage-room") {
+      let data = "";
+      req.on("data", (c) => (data += c));
+      req.on("end", () => {
+        lastManageRoomBody = JSON.parse(data);
+        res.writeHead(200, { "content-type": "application/json" });
+        res.end(JSON.stringify({ ok: true, message: "Room updated." }));
+      });
+      return;
+    }
+    if (req.method === "POST" && req.url === "/api/internal/move-bot") {
+      let data = "";
+      req.on("data", (c) => (data += c));
+      req.on("end", () => {
+        lastMoveBotBody = JSON.parse(data);
+        res.writeHead(200, { "content-type": "application/json" });
+        res.end(JSON.stringify({ ok: true, botId: lastMoveBotBody.botId, botName: "Pixel", section: "Launch", message: "Moved @Pixel to Launch." }));
+      });
+      return;
+    }
     if (req.method === "POST" && req.url === "/api/internal/request-credential") {
       let data = "";
       req.on("data", (c) => (data += c));
@@ -248,6 +281,9 @@ describe("agents-proxy MCP surface", () => {
       "wait_delegation",
       "post_to_room",
       "create_bot",
+      "create_room",
+      "manage_room",
+      "move_bot",
       "request_credential",
       "list_routines",
       "propose_routine",
@@ -481,6 +517,50 @@ describe("agents-proxy MCP surface", () => {
       name: "Pixel",
       role: "Product designer",
       instructions: "Design and review the user experience.",
+    });
+  });
+
+  it("lets a Chief create a group room and manage members through the harness", async () => {
+    const resCreate = await callTool("create_room", {
+      name: "Dev Team",
+      member_bot_ids: ["bot-1", "bot-2"],
+      section: "Work",
+      bulletin: "Ship fast.",
+    });
+    expect(resCreate.result.content[0].text).toContain("Created room “Dev Team” in section “Work”");
+    expect(lastCreateRoomBody).toEqual({
+      fromBotId: "bot-asker",
+      fromThreadId: "thread-asker-routine",
+      name: "Dev Team",
+      memberIds: ["bot-1", "bot-2"],
+      section: "Work",
+      bulletin: "Ship fast.",
+    });
+
+    const resManage = await callTool("manage_room", {
+      room_id: "room-dev",
+      action: "add_members",
+      member_bot_ids: ["bot-3"],
+    });
+    expect(resManage.result.content[0].text).toContain("Room updated.");
+    expect(lastManageRoomBody).toEqual({
+      fromBotId: "bot-asker",
+      fromThreadId: "thread-asker-routine",
+      roomId: "room-dev",
+      action: "add_members",
+      memberIds: ["bot-3"],
+    });
+
+    const resMove = await callTool("move_bot", {
+      bot_id: "bot-designer",
+      section: "Launch",
+    });
+    expect(resMove.result.content[0].text).toContain("Moved @Pixel to Launch.");
+    expect(lastMoveBotBody).toEqual({
+      fromBotId: "bot-asker",
+      fromThreadId: "thread-asker-routine",
+      botId: "bot-designer",
+      section: "Launch",
     });
   });
 

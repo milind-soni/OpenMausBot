@@ -5,6 +5,7 @@ import {
   probeBaseUrls,
   processMcpMessage,
   request,
+  resetDiscoveredBaseUrl,
   resolveBaseUrl,
   TOOLS,
   validateBaseUrl,
@@ -27,7 +28,10 @@ afterEach(() => {
   vi.restoreAllMocks();
   globalThis.fetch = ORIGINAL_FETCH;
   delete process.env.OPENMAUSBOT_TOKEN;
+  delete process.env.OPENMAUSBOT_URL;
+  delete process.env.OMB_PORT;
   delete process.env.ALLOW_INSECURE_HTTP;
+  resetDiscoveredBaseUrl();
 });
 
 describe("MCP JSON-RPC protocol", () => {
@@ -585,6 +589,8 @@ describe("connection security and discovery", () => {
   });
 
   it("requires an explicit destination before sending a bearer token", async () => {
+    delete process.env.OPENMAUSBOT_URL;
+    delete process.env.OMB_PORT;
     process.env.OPENMAUSBOT_TOKEN = "proxy-token";
     await expect(resolveBaseUrl()).rejects.toThrow("OPENMAUSBOT_URL or OMB_PORT");
   });
