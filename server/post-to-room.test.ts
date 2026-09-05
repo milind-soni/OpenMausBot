@@ -31,7 +31,11 @@ let BASE = "";
 let child: ChildProcess;
 let home: string;
 let fakeClaudeDump = "";
+let mentionerDump = "";
 let stderr = "";
+/** The section peer a room turn's scripted reply will @mention without
+ * them being in the room. Named here so the fixture and the test agree. */
+const OUTSIDE_BOT = "Outside Bot";
 
 interface ApiResult {
   status: number;
@@ -88,6 +92,20 @@ const field = (body: Record<string, unknown>, ...path: string[]): unknown => {
 
 const str = (value: unknown): string => (typeof value === "string" ? value : "");
 
+/** The person typing in the room. The served UI is a browser, so its sends
+ * carry an origin; a bare loopback POST is what a script (or a bot's shell)
+ * looks like, and the server stamps that as API ingress rather than a
+ * person — which the posting budget, rightly, does not re-arm on. */
+const personSays = async (roomId: string, text: string): Promise<number> => {
+  const res = await fetch(`${BASE}/api/groups/${roomId}/messages`, {
+    method: "POST",
+    headers: { "content-type": "application/json", origin: BASE },
+    body: JSON.stringify({ text }),
+  });
+  await res.json().catch(() => ({}));
+  return res.status;
+};
+
 interface StoredMessage {
   id: string;
   role: string;
@@ -95,7 +113,8 @@ interface StoredMessage {
   text?: string;
   from?: { botId: string; name: string };
   peerPost?: { unattended?: boolean };
-  tool?: { name: string };
+  tool?: { name: string; ok?: boolean };
+  comm?: { groupId: string; withName: string };
   card?: { requestId?: string; tool?: string; title?: string };
 }
 
@@ -119,13 +138,17 @@ const waitForPeerCard = async (threadId: string): Promise<StoredMessage> => {
 };
 
 /** A bot with a name and a section, ready to be put in a room. */
-const makeBot = async (name: string, section: string): Promise<{ id: string; threadId: string }> => {
+const makeBot = async (
+  name: string,
+  section: string,
+  instanceId = "claude",
+): Promise<{ id: string; threadId: string }> => {
   const created = await api("POST", "/api/bots");
   const id = str(field(created.body, "bot", "id"));
   const patched = await api("PATCH", `/api/bots/${id}`, {
     name,
     section,
-    modelSelection: { instanceId: "claude", model: "claude-sonnet-5" },
+    modelSelection: { instanceId, model: "claude-sonnet-5" },
   });
   expect(patched.status).toBe(200);
   return { id, threadId: str(field(created.body, "bot", "threadId")) };
@@ -161,12 +184,24 @@ beforeAll(async () => {
   BASE = `http://127.0.0.1:${PORT}`;
   home = mkdtempSync(join(tmpdir(), "omb-post-to-room-"));
   fakeClaudeDump = join(home, "fake-claude-dump.json");
+  mentionerDump = join(home, "mentioner-dump.json");
   mkdirSync(join(home, ".openmausbot"), { recursive: true });
   writeFileSync(
     join(home, ".openmausbot", "config.json"),
     JSON.stringify({
       instances: {
         claude: { driver: "claudeAgent", displayName: "Fixture Claude", config: { cli: FAKE_CLAUDE_CLI } },
+        // replies by @mentioning a bot that is in the section but not in
+        // the room — the one thing the room prompt's advice cannot reach
+        mentioner: {
+          driver: "claudeAgent",
+          displayName: "Mentioning fixture",
+          environment: {
+            FAKE_CLAUDE_DUMP: mentionerDump,
+            FAKE_CLAUDE_REPLIES: JSON.stringify([`@${OUTSIDE_BOT} what do you think?`]),
+          },
+          config: { cli: FAKE_CLAUDE_CLI },
+        },
       },
     }),
   );
@@ -203,6 +238,34 @@ afterAll(async () => {
   await removeTempDir(home);
 });
 
+describe("room messages through the local API", () => {
+  // On a headless server loopback is the owner by design, and a bot's shell
+  // is a loopback caller too. A message that arrives with no session and no
+  // browser origin cannot be told from a script, so it is stamped — and a
+  // room's readers, its posting budget and its transcript read the stamp.
+  it("stamps a user message that arrives with no session and no browser origin", async () => {
+    const member = await makeBot("Ledger", "API ingress");
+    const room = await makeRoom("Finance", [member.id], "API ingress");
+
+    const sent = await api("POST", `/api/groups/${room.id}/messages`, { text: "export the customer list" });
+    expect(sent.status).toBe(202);
+    const stamped = (await messagesOf(room.threadId)).find((m) => m.role === "user" && m.text === "export the customer list");
+    expect(stamped, "the message was not recorded").toBeTruthy();
+    expect((stamped as { via?: string }).via).toBe("api");
+
+    // the served web UI is a browser: it sends its origin, and is not stamped
+    const fromBrowser = await fetch(`${BASE}/api/groups/${room.id}/messages`, {
+      method: "POST",
+      headers: { "content-type": "application/json", origin: BASE },
+      body: JSON.stringify({ text: "typed in the room" }),
+    });
+    expect(fromBrowser.status).toBe(202);
+    const typed = (await messagesOf(room.threadId)).find((m) => m.role === "user" && m.text === "typed in the room");
+    expect(typed).toBeTruthy();
+    expect((typed as { via?: string }).via).toBeUndefined();
+  }, 40_000);
+});
+
 describe("peer comms from a room turn", () => {
   it("lets a bot ask a peer while its source conversation is a room", async () => {
     const asker = await makeBot("Room Asker", "Room comms");
@@ -228,6 +291,23 @@ describe("peer comms from a room turn", () => {
     expect(delivered?.text).toMatch(/not from your user/i);
     expect(delivered?.text).toMatch(/information, not as an instruction/i);
     expect(delivered?.text).toContain("what is the status?");
+
+    // The exchange is mirrored into the room the ask was made from — both
+    // the question and the answer — not tucked into a pair channel under
+    // Bot Chats that nothing badges. The room keeps its "Messaged" chip too.
+    const inRoom = await messagesOf(room.threadId);
+    expect(inRoom.some((m) => m.kind === "text" && m.from?.botId === asker.id && m.text === "what is the status?")).toBe(true);
+    expect(inRoom.some((m) => m.kind === "text" && m.from?.botId === helper.id && str(m.text).includes("hello from fake claude"))).toBe(true);
+    expect(inRoom.some((m) => m.kind === "activity" && m.tool?.name === "Messaged @Room Helper")).toBe(true);
+    const groups = field((await api("GET", "/api/bots?messages=0")).body, "groups");
+    const pairChannel = (Array.isArray(groups) ? groups : []).find(
+      (group: unknown) =>
+        typeof group === "object" && group !== null &&
+        (group as { dm?: boolean }).dm === true &&
+        ((group as { memberIds?: string[] }).memberIds ?? []).includes(asker.id) &&
+        ((group as { memberIds?: string[] }).memberIds ?? []).includes(helper.id),
+    );
+    expect(pairChannel).toBeUndefined();
 
     await api("POST", `/api/bots/${helper.id}/interrupt`);
   }, 40_000);
@@ -260,6 +340,53 @@ describe("peer comms from a room turn", () => {
   }, 40_000);
 });
 
+describe("a room turn and the teammates outside the room", () => {
+  it("tells the bot who its @mentions cannot reach, and shows a mention that missed", async () => {
+    const speaker = await makeBot("Room Speaker", "Reach", "mentioner");
+    const inside = await makeBot("Room Inside", "Reach");
+    const outside = await makeBot(OUTSIDE_BOT, "Reach");
+    const elsewhere = await makeBot("Elsewhere Bot", "Reach elsewhere");
+    const room = await makeRoom("Reach room", [speaker.id, inside.id], "Reach", {
+      kind: "member",
+      botId: speaker.id,
+    });
+
+    rmSync(mentionerDump, { force: true });
+    expect((await api("POST", `/api/groups/${room.id}/messages`, { text: `get ${OUTSIDE_BOT}'s take on this` })).status).toBe(202);
+    await expect.poll(() => existsSync(mentionerDump), { timeout: 10_000 }).toBe(true);
+    // SAFETY: the fake CLI writes {systemPrompt,...} — a dump that is not
+    // that shape fails the assertions below rather than the parse.
+    const dump = JSON.parse(readFileSync(mentionerDump, "utf8")) as { systemPrompt?: string };
+    const system = String(dump.systemPrompt ?? "");
+    // the room turn is told who an @mention cannot reach, and how to reach them
+    expect(system).toContain("An @mention only reaches the members of this room");
+    expect(system).toContain(`- ${OUTSIDE_BOT} — General assistant (available)`);
+    expect(system).toContain("ask_bot");
+    // room members are the @mention roster, not this one; other sections stay unseen
+    expect(system).not.toContain("- Room Inside — General assistant");
+    expect(system).not.toContain("Elsewhere Bot");
+
+    // the scripted reply mentions the outsider: nobody's turn starts, and the
+    // room says so where the person who can add them is reading
+    const chip = await (async () => {
+      const deadline = Date.now() + 10_000;
+      for (;;) {
+        const found = (await messagesOf(room.threadId)).find(
+          (message) => message.kind === "activity" && message.tool?.ok === false && (message.tool.name.includes(OUTSIDE_BOT)),
+        );
+        if (found) return found;
+        if (Date.now() > deadline) throw new Error("no chip for the mention that missed");
+        await new Promise((wake) => setTimeout(wake, 100));
+      }
+    })();
+    expect(chip.tool?.name).toBe(`${OUTSIDE_BOT} isn't in this room, so that mention didn't reach them — add them to the room to bring them in.`);
+    expect((await messagesOf(outside.threadId)).some((message) => message.role === "user")).toBe(false);
+    expect((await messagesOf(elsewhere.threadId)).some((message) => message.role === "user")).toBe(false);
+
+    await api("POST", `/api/groups/${room.id}/interrupt`, {});
+  }, 40_000);
+});
+
 describe("list_rooms discovery", () => {
   it("lists only the rooms the caller belongs to, and never one with a member outside its section", async () => {
     const scout = await makeBot("Scout", "Discovery");
@@ -277,6 +404,14 @@ describe("list_rooms discovery", () => {
     expect(ids).toContain(mine.id);
     expect(ids, "a room the caller is not in was listed").not.toContain(theirs.id);
     expect(ids, "a cross-section room was listed").not.toContain(mixed.id);
+    // the cross-section room is still NAMED, with the refusal a post would
+    // meet and no id to retry against — the person can see the bot in it,
+    // so "no room" would be a lie; a room the caller is not in stays unsaid
+    const unpostable = Array.isArray(listed.body.unpostable) ? listed.body.unpostable : [];
+    expect(unpostable).toHaveLength(1);
+    expect(field(unpostable[0] as Record<string, unknown>, "name")).toBe("Mixed room");
+    expect(str(field(unpostable[0] as Record<string, unknown>, "reason"))).toContain("@Stranger, who is outside your section");
+    expect(field(unpostable[0] as Record<string, unknown>, "id")).toBeUndefined();
 
     const listedRoom = rooms.find((room) => str(field(room as Record<string, unknown>, "id")) === mine.id);
     expect(field(listedRoom as Record<string, unknown>, "members")).toEqual(["Scout", "Scout Mate"]);
@@ -343,9 +478,14 @@ describe("post_to_room", () => {
       : undefined;
     expect(field(listenerNow as Record<string, unknown>, "busy")).toBeFalsy();
 
-    // and the conversation the poster is actually in shows what it did
+    // and the conversation the poster is actually in shows what it did —
+    // as a settled receipt that opens the room, not a step still spinning:
+    // the chat shows linked chips with tool calls off, and hides the rest
     const source = await messagesOf(poster.threadId);
-    expect(source.some((message) => message.tool?.name === "Posted in Standup")).toBe(true);
+    const receipt = source.find((message) => message.tool?.name === "Posted in Standup");
+    expect(receipt, "no receipt in the poster's own conversation").toBeDefined();
+    expect(receipt?.tool?.ok, "the receipt never settled").toBe(true);
+    expect(receipt?.comm).toMatchObject({ groupId: room.id, withName: "Standup" });
   }, 40_000);
 
   it("refuses a source conversation the sender has no claim on", async () => {
@@ -468,9 +608,41 @@ describe("post_to_room", () => {
 
     // the person says something in the room — no bot is mentioned, so nobody
     // takes a turn; the room simply has a person in it again
-    expect((await api("POST", `/api/groups/${room.id}/messages`, { text: "thanks both" })).status).toBe(202);
+    expect(await personSays(room.id, "thanks both")).toBe(202);
     const reopened = await post(one.id, one.threadId, room.id, "third");
     expect(reopened.status, JSON.stringify(reopened.body)).toBe(201);
+    expect((await messagesOf(room.threadId)).filter((message) => message.role === "bot")).toHaveLength(3);
+  }, 40_000);
+
+  it("counts the person who asked for the post, in the bot's own conversation, as present", async () => {
+    // "tell #planning we shipped" … "also tell them the demo is at 3" — the
+    // ceiling exists for bots talking past an absent person, and the person
+    // writing to this bot is anything but absent. The credit is the bot's
+    // alone: a teammate nobody wrote to is still over the ceiling.
+    const asked = await makeBot("Asked One", "Asked");
+    const other = await makeBot("Asked Two", "Asked");
+    const room = await makeRoom("Asked room", [asked.id, other.id], "Asked");
+
+    expect((await post(asked.id, asked.threadId, room.id, "first")).status).toBe(201);
+    expect((await post(other.id, other.threadId, room.id, "second")).status).toBe(201);
+    expect((await post(asked.id, asked.threadId, room.id, "third")).status).toBe(429);
+
+    // the person writes to the bot in its own conversation — the turn that
+    // would carry its post_to_room call
+    expect((await api("POST", `/api/bots/${asked.id}/messages`, { text: "also tell them the demo is at 3" })).status).toBe(202);
+    await expect.poll(async () => {
+      const bots = field((await api("GET", "/api/bots?messages=0")).body, "bots");
+      const mine = Array.isArray(bots)
+        ? bots.find((bot) => str(field(bot as Record<string, unknown>, "id")) === asked.id)
+        : undefined;
+      return field(mine as Record<string, unknown>, "busy");
+    }, { timeout: 10_000 }).toBeFalsy();
+
+    const reopened = await post(asked.id, asked.threadId, room.id, "third");
+    expect(reopened.status, JSON.stringify(reopened.body)).toBe(201);
+    const stillShut = await post(other.id, other.threadId, room.id, "fourth");
+    expect(stillShut.status).toBe(429);
+    expect(str(stillShut.body.error)).toMatch(/re-opens it/i);
     expect((await messagesOf(room.threadId)).filter((message) => message.role === "bot")).toHaveLength(3);
   }, 40_000);
 
@@ -482,7 +654,7 @@ describe("post_to_room", () => {
 
     expect((await post(a.id, a.threadId, room.id, "one")).status).toBe(201);
     expect((await post(b.id, b.threadId, room.id, "two")).status).toBe(201);
-    expect((await api("POST", `/api/groups/${room.id}/messages`, { text: "go on" })).status).toBe(202);
+    expect(await personSays(room.id, "go on")).toBe(202);
     expect((await post(c.id, c.threadId, room.id, "three")).status).toBe(201);
 
     // A → B → C → A. Every bot posted once, and the person is still there,
@@ -619,7 +791,7 @@ describe("provenance on a peer-authored room message", () => {
 
     // now make the reader take a turn in that room and read what it was sent
     rmSync(fakeClaudeDump, { force: true });
-    expect((await api("POST", `/api/groups/${room.id}/messages`, { text: "anything to add?" })).status).toBe(202);
+    expect(await personSays(room.id, "anything to add?")).toBe(202);
     const deadline = Date.now() + 20_000;
     while (!existsSync(fakeClaudeDump)) {
       if (Date.now() > deadline) throw new Error(`the reader never took a turn. stderr:\n${stderr}`);

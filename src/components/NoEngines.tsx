@@ -16,7 +16,32 @@ import { brand } from "../lib/brand";
 
 export function NoEngines() {
   const { state, refreshInstances } = useStore();
+  const remoteClient = window.ogb?.remoteClient?.active === true;
   const [rechecking, setRechecking] = useState(false);
+  const recheck = async () => {
+    setRechecking(true);
+    try {
+      await refreshInstances();
+    } finally {
+      setRechecking(false);
+    }
+  };
+
+  if (remoteClient) {
+    return (
+      <main className="flex h-full min-w-0 flex-1 items-center justify-center bg-app px-6">
+        <div className="max-w-[520px] rounded-2xl border border-hairline/40 bg-card p-6 text-center">
+          <h1 className="text-[20px] font-semibold text-ink">The host needs an agent engine</h1>
+          <p className="mt-2 text-[13.5px] leading-relaxed text-ink-secondary">
+            Configure Claude, ACP, or another supported engine in OpenMausBot on the host computer, then return here.
+          </p>
+          <button onClick={() => void recheck()} disabled={rechecking} className="mt-5 rounded-lg bg-raised px-3 py-2 text-[13px] text-ink hover:bg-raised-hover disabled:opacity-60">
+            {rechecking ? "Checking…" : "Check again"}
+          </button>
+        </div>
+      </main>
+    );
+  }
 
   // Only things you actually install belong on a "get started" screen. The
   // Box cloud runner also reports unavailable here, but it's configured with
@@ -32,15 +57,6 @@ export function NoEngines() {
       const bCmd = installCommandFor(b.install) ? 0 : 1;
       return aCmd - bCmd;
     });
-
-  const recheck = async () => {
-    setRechecking(true);
-    try {
-      await refreshInstances();
-    } finally {
-      setRechecking(false);
-    }
-  };
 
   return (
     <main className="flex h-full min-w-0 flex-1 flex-col overflow-y-auto bg-app">

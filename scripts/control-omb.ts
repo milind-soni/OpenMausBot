@@ -305,7 +305,10 @@ export async function launchVerificationServer(
     OMB_WEBHOOK_PORT: String(port + 1),
     FAKE_CLAUDE_MODE: "happy",
     FAKE_CLAUDE_DUMP: fixtureDumpPath,
-    PATH: "",
+    // Keep the environment hermetic while allowing POSIX to resolve the
+    // fake CLI's `#!/usr/bin/env node` shebang. Windows resolves that same
+    // fixture through spawnCli without a shell.
+    PATH: dirname(process.execPath),
   });
   const child = spawn(process.execPath, ["--experimental-strip-types", join(ROOT, "server", "index.ts")], {
     cwd: ROOT,

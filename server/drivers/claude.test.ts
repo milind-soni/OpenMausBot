@@ -376,8 +376,41 @@ describe("ClaudeDriver turns (fake CLI)", () => {
 
     const seen = JSON.parse(readFileSync(dump, "utf8"));
     expect(seen.argv).toContain("--permission-mode");
-    expect(seen.argv[seen.argv.indexOf("--permission-mode") + 1]).toBe("acceptEdits");
+    expect(seen.argv[seen.argv.indexOf("--permission-mode") + 1]).toBe("default");
     expect(seen.argv).toContain("--permission-prompt-tool");
+  });
+
+  it("reapplies Full, Auto, and Ask on the same resumed conversation", async () => {
+    await create(undefined, {}, { permissionMode: "bypassPermissions" });
+    const dump = join(scratch, "approval-transitions.json");
+    process.env.FAKE_CLAUDE_DUMP = dump;
+    for (const [approvalMode, nativeMode] of [["full", "bypassPermissions"], ["auto", "auto"], ["ask", "default"]] as const) {
+      const { turnId } = await instance.adapter.sendTurn({
+        threadId: "t-mode-transitions",
+        text: "hello",
+        approvalMode,
+        resumeCursor: "11111111-1111-4111-8111-111111111111",
+      });
+      await recorder.until((e) => e.type === "turn.completed" && e.turnId === turnId);
+      const seen = JSON.parse(readFileSync(dump, "utf8"));
+      expect(seen.argv[seen.argv.indexOf("--permission-mode") + 1]).toBe(nativeMode);
+      expect(seen.argv.includes("--permission-prompt-tool")).toBe(approvalMode !== "full");
+      expect(seen.argv).toContain("--resume");
+    }
+  });
+
+  it("keeps questions answerable in per-bot Full access", async () => {
+    await create("hang");
+    await instance.adapter.sendTurn({ threadId: "t-full-question", text: "go", approvalMode: "full" });
+    const conn = await connectSocket(permissionSocketPath("t-full-question"));
+    try {
+      conn.write(JSON.stringify({ t: "ask", kind: "question", id: "full-question", tool: "ask_user", input: { question: "Which account?" } }) + "\n");
+      const opened = await recorder.until((e) => e.type === "request.opened");
+      expect(opened).toMatchObject({ requestType: "question" });
+      expect(await instance.adapter.respondToRequest("t-full-question", (opened as { requestId: string }).requestId, { behavior: "answer", message: "Work" })).toBe("answered");
+    } finally {
+      conn.destroy();
+    }
   });
 
   it("sends attached images as native blocks before text without logging their bytes", async () => {

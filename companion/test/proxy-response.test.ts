@@ -99,13 +99,15 @@ describe("preparing a harness response for a device", () => {
     }
   });
 
-  it("requires the Mac to enable cloud desktop for this phone", async () => {
+  it("requires the host to enable cloud desktop for viewer and preview requests", async () => {
     cloudDesktopAccess = false;
     try {
-      const { status, text } = await device("/api/bots/b1/computer/join", "POST");
-      expect(status).toBe(403);
-      expect(text).toContain("enable it in OpenMausBot");
-      expect(text).toContain("Settings → Phone");
+      for (const action of ["join", "screenshot"]) {
+        const { status, text } = await device(`/api/bots/b1/computer/${action}`, "POST");
+        expect(status).toBe(403);
+        expect(text).toContain("enable it in OpenMausBot");
+        expect(text).toContain("Settings → Remote access");
+      }
     } finally {
       cloudDesktopAccess = true;
     }
@@ -136,6 +138,23 @@ describe("preparing a harness response for a device", () => {
     });
     expect(response.status).toBe(200);
     expect(companionDevice).toBe("phone-1");
+  });
+
+  it("turns a host-loopback VPS viewer into a device-scoped companion path", async () => {
+    respond = (res) => {
+      res.writeHead(200, { "content-type": "application/json" });
+      res.end(JSON.stringify({
+        joinUrl: "http://127.0.0.1:45678/vnc.html#autoconnect=true&password=viewer-secret",
+        state: "running",
+      }));
+    };
+    const { status, text } = await device("/api/bots/b1/computer/join", "POST");
+    expect(status).toBe(200);
+    const joinUrl = String(JSON.parse(text).joinUrl);
+    expect(joinUrl).toMatch(/^\/vps-viewer\/[A-Za-z0-9_-]{32}\/vnc\.html#/);
+    expect(joinUrl).toContain("password=viewer-secret");
+    expect(joinUrl).toContain("path=vps-viewer%2F");
+    expect(joinUrl).not.toContain("127.0.0.1:45678");
   });
 
   it("never forwards a body it could not scrub", async () => {
@@ -249,5 +268,27 @@ describe("preparing a harness response for a device", () => {
     expect(response.text).toBe(bytes);
     expect(response.headers.get("content-disposition")).toContain("report.json");
     expect(response.headers.get("cache-control")).toBe("private, no-store");
+  });
+
+  it("relays generated speech to a paired desktop byte for byte", async () => {
+    const audio = Uint8Array.from([0x49, 0x44, 0x33, 0x00, 0xff, 0x17]);
+    respond = (res) => {
+      res.writeHead(200, {
+        "content-type": "audio/mpeg",
+        "content-length": String(audio.byteLength),
+        "cache-control": "public, max-age=86400",
+      });
+      res.end(audio);
+    };
+
+    const response = await fetch(`http://127.0.0.1:${sidecarPort}/api/tts/speak`, {
+      method: "POST",
+      headers: { authorization: `Bearer ${TOKEN}`, "content-type": "application/json" },
+      body: JSON.stringify({ text: "Hello from the agent" }),
+    });
+    expect(response.status).toBe(200);
+    expect(response.headers.get("content-type")).toBe("audio/mpeg");
+    expect(response.headers.get("cache-control")).toBe("private, no-store");
+    expect(new Uint8Array(await response.arrayBuffer())).toEqual(audio);
   });
 });

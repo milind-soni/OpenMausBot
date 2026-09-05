@@ -233,6 +233,8 @@ See [MCP server setup and tool reference](docs/mcp-server.md).
 | **Ubuntu 24.04** (x64) | [OpenMausBot-amd64.deb](https://github.com/milind-soni/OpenMausBot/releases/latest/download/OpenMausBot-amd64.deb) · [OpenMausBot.AppImage](https://github.com/milind-soni/OpenMausBot/releases/latest/download/OpenMausBot.AppImage) | Install the `.deb` with APT (recommended), or make the AppImage executable and run it. Beta; GNOME is the supported desktop. |
 
 See the [Ubuntu Desktop guide](docs/linux-desktop.md) for installation, capabilities, and troubleshooting.
+Any desktop build can also pair as a client to another Windows, macOS, or Ubuntu host over Tailscale; see [desktop-to-desktop companion mode](docs/desktop-companion.md).
+
 
 **From source:**
 
@@ -341,6 +343,16 @@ OpenMausBot is free and open source. If it does real work for you, you can
 [buy the project a coffee or become a monthly supporter](https://buy.polar.sh/polar_cl_EEzWmormSVBD151HkmkyId9j0GPXina0KurfS1fYYcO) —
 one-time any amount, or monthly. Payments are handled by [Polar](https://polar.sh/supamaus),
 which takes care of receipts and taxes; nothing about the app ever sits behind a paywall.
+
+## Run it on a server
+
+Bots keep working with every laptop closed when the server runs on a VPS or
+a Mac mini. One command with Node 24: `npx openmausbot serve` (add
+`--tunnel` for a public address with no domain or open port, or
+`--tailscale` for your tailnet), or the Docker stack for your own domain.
+Devices pair once with a short code. The step-by-step guide is
+[docs/deploy-vps.md](docs/deploy-vps.md); the reference is
+[docs/self-hosting.md](docs/self-hosting.md).
 
 ## License
 

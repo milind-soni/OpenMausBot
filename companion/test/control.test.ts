@@ -72,10 +72,14 @@ describe("origins the control server will change state for", () => {
     if ("error" in paired) throw new Error(paired.error);
 
     expect(paired.device.cloudDesktopAccess).toBe(false);
+    disconnectedDeviceIds = [];
     expect((await ask("POST", `/devices/${paired.device.id}/cloud-desktop`)).status).toBe(200);
     expect(devices.authenticate(paired.token)?.cloudDesktopAccess).toBe(true);
+    expect(disconnectedDeviceIds).toEqual([paired.device.id]);
+    disconnectedDeviceIds = [];
     expect((await ask("DELETE", `/devices/${paired.device.id}/cloud-desktop`)).status).toBe(200);
     expect(devices.authenticate(paired.token)?.cloudDesktopAccess).toBe(false);
+    expect(disconnectedDeviceIds).toEqual([paired.device.id]);
     expect((await ask("POST", "/devices/missing/cloud-desktop")).status).toBe(404);
   });
 

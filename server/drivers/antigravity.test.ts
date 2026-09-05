@@ -490,7 +490,7 @@ describe("Antigravity driver over shared ACP", () => {
     expect(antigravityPermissionMode(true)).toBe("yolo");
   });
 
-  it("runs an authenticated turn, selects model and mode, and keeps MCP session-scoped", async () => {
+  it.each(["ask", "auto", "full"] as const)("runs an authenticated %s turn with explicit mode and session-scoped MCP", async (approvalMode) => {
     ensureDirs();
     const fake = fakeRuntime();
     const dump = join(fake.directory, "dump.json");
@@ -516,6 +516,8 @@ describe("Antigravity driver over shared ACP", () => {
     const { turnId } = await instance.adapter.sendTurn({
       threadId: "thread-antigravity",
       text: "hello",
+      approvalMode,
+      resumeCursor: "fake-acp-session",
       model: "gemini-3.8-flash-low",
       integrations: {
         custom: { docs: { command: "docs-mcp", args: ["serve"], env: { TOKEN: "scoped" } } },
@@ -534,7 +536,7 @@ describe("Antigravity driver over shared ACP", () => {
     const calls = JSON.parse(readFileSync(`${dump}.config.json`, "utf8"));
     expect(calls).toEqual([
       { method: "session/set_config_option", params: { sessionId: "fake-acp-session", configId: "model", value: "gemini-3.8-flash-low" } },
-      { method: "session/set_config_option", params: { sessionId: "fake-acp-session", configId: "mode", value: "default" } },
+      { method: "session/set_config_option", params: { sessionId: "fake-acp-session", configId: "mode", value: approvalMode === "full" ? "yolo" : "default" } },
     ]);
     const mcp = JSON.parse(readFileSync(`${dump}.mcp.json`, "utf8"));
     expect(mcp).toEqual([{ name: "docs", command: "docs-mcp", args: ["serve"], env: [{ name: "TOKEN", value: "scoped" }] }]);
@@ -573,7 +575,11 @@ describe("Antigravity driver over shared ACP", () => {
     )).toBe(true);
   });
 
-  it("keeps Antigravity questions interactive even in full-auto mode", async () => {
+  it.each([
+    ["question", undefined],
+    ["question", "full"],
+    ["permission", "full"],
+  ] as const)("keeps Antigravity %s requests interactive with mode %s", async (requestKind, approvalMode) => {
     ensureDirs();
     const fake = fakeRuntime();
     const instanceId = "antigravity-question";
@@ -584,7 +590,7 @@ describe("Antigravity driver over shared ACP", () => {
       instanceId,
       displayName: undefined,
       environment: {
-        FAKE_ACP_MODE: "question",
+        FAKE_ACP_MODE: requestKind,
         FAKE_ACP_PAD_QUESTION_OPTION: "1",
         FAKE_ACP_AUTH_METHOD: "oauth-personal",
         FAKE_ACP_MODELS: "gemini-3.8-flash-high",
@@ -594,15 +600,16 @@ describe("Antigravity driver over shared ACP", () => {
       config: { cli: fake.executable, fullAuto: true },
     });
     recorder = recordEvents(instance.adapter);
-    await instance.adapter.sendTurn({ threadId: "thread-question", text: "ask me", cwd: fake.directory });
+    await instance.adapter.sendTurn({ threadId: "thread-question", text: "ask me", cwd: fake.directory, approvalMode });
     const opened = await recorder.until((event) => event.type === "request.opened");
-    expect(opened).toMatchObject({ requestType: "question", summary: "Which color?", choices: ["Blue", "Green"] });
+    expect(opened).toMatchObject({ requestType: requestKind });
+    if (requestKind === "question") expect(opened).toMatchObject({ summary: "Which color?", choices: ["Blue", "Green"] });
     await instance.adapter.respondToRequest("thread-question", (opened as { requestId: string }).requestId, {
-      behavior: "answer",
+      behavior: requestKind === "question" ? "answer" : "allow",
       message: "Green",
     });
     expect(await recorder.until((event) => event.type === "request.resolved")).toMatchObject({
-      behavior: "answer",
+      behavior: requestKind === "question" ? "answer" : "allow",
       source: "user",
     });
     expect(await recorder.until((event) => event.type === "turn.completed")).toMatchObject({ ok: true });

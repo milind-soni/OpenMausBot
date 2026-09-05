@@ -212,6 +212,38 @@ function endToEndHeaders(headers = {}) {
   );
 }
 
+function upgradeHeaders(headers = {}) {
+  if (String(headers.upgrade ?? "").toLowerCase() !== "websocket") return null;
+  return {
+    ...endToEndHeaders(headers),
+    connection: "Upgrade",
+    upgrade: "websocket",
+  };
+}
+
+function writeUpgrade(socket, response) {
+  const lines = [];
+  for (const name of [
+    "upgrade",
+    "connection",
+    "sec-websocket-accept",
+    "sec-websocket-protocol",
+    "sec-websocket-extensions",
+  ]) {
+    const value = response.headers[name];
+    if (typeof value === "string") lines.push(`${name}: ${value}`);
+  }
+  socket.write(
+    `HTTP/1.1 ${response.statusCode ?? 101} ${response.statusMessage ?? "Switching Protocols"}\r\n`
+      + `${lines.join("\r\n")}\r\n\r\n`,
+  );
+}
+
+function destroySockets(sockets) {
+  for (const socket of sockets) socket.destroy();
+  sockets.clear();
+}
+
 /** Loopback gateway owned by the connector guardian. The target is immutable
  * for one guardian lifetime, and is checked again for every request. */
 export function createCompanionOriginGateway({
@@ -221,6 +253,7 @@ export function createCompanionOriginGateway({
   isTargetAlive = () => true,
   createServer = http.createServer,
   request = http.request,
+  upstreamTimeoutMs = 30_000,
 } = {}) {
   if (!validCompanionOriginTarget(target)) {
     throw new Error("The companion origin target is invalid");
@@ -228,6 +261,7 @@ export function createCompanionOriginGateway({
   let accepting = true;
   let listening = false;
   let transition = Promise.resolve();
+  const upgradedSockets = new Set();
 
   const server = createServer((incoming, outgoing) => {
     if (!accepting || !isTargetAlive(target)) return unavailable(outgoing);
@@ -237,8 +271,10 @@ export function createCompanionOriginGateway({
         method: incoming.method,
         path: incoming.url,
         socketPath: target.socketPath,
+        timeout: upstreamTimeoutMs,
       },
       (response) => {
+        upstream.setTimeout(0);
         if (!accepting || !isTargetAlive(target)) {
           response.destroy();
           return unavailable(outgoing);
@@ -256,10 +292,54 @@ export function createCompanionOriginGateway({
         response.pipe(outgoing);
       },
     );
+    upstream.once("timeout", () => upstream.destroy(new Error("companion origin timed out")));
     upstream.once("error", () => unavailable(outgoing));
     incoming.once("aborted", () => upstream.destroy());
     outgoing.once("close", () => upstream.destroy());
     incoming.pipe(upstream);
+  });
+  server.on("upgrade", (incoming, socket, head) => {
+    if (!accepting || !isTargetAlive(target)) return socket.destroy();
+    const headers = upgradeHeaders(incoming.headers);
+    if (!headers || incoming.method !== "GET") return socket.destroy();
+    upgradedSockets.add(socket);
+    let remoteSocket = null;
+    const release = () => {
+      upgradedSockets.delete(socket);
+      if (remoteSocket) upgradedSockets.delete(remoteSocket);
+    };
+    socket.once("close", release);
+    const upstream = request({
+      headers,
+      method: "GET",
+      path: incoming.url,
+      socketPath: target.socketPath,
+      timeout: upstreamTimeoutMs,
+    });
+    upstream.once("timeout", () => upstream.destroy(new Error("companion origin upgrade timed out")));
+    upstream.once("upgrade", (response, remote, remoteHead) => {
+      upstream.setTimeout(0);
+      remote.setTimeout(0);
+      if (!accepting || !isTargetAlive(target)) {
+        remote.destroy();
+        socket.destroy();
+        return;
+      }
+      writeUpgrade(socket, response);
+      remoteSocket = remote;
+      upgradedSockets.add(remote);
+      remote.once("close", release);
+      if (head.length) remote.write(head);
+      if (remoteHead.length) socket.write(remoteHead);
+      socket.pipe(remote).pipe(socket);
+    });
+    upstream.once("response", (response) => {
+      response.resume();
+      socket.destroy();
+    });
+    upstream.once("error", () => socket.destroy());
+    socket.once("close", () => upstream.destroy());
+    upstream.end();
   });
   server.on("clientError", (_error, socket) => socket.destroy());
 
@@ -297,12 +377,14 @@ export function createCompanionOriginGateway({
     invalidate() {
       accepting = false;
       server.closeAllConnections?.();
+      destroySockets(upgradedSockets);
     },
 
     close() {
       return serialize(async () => {
         accepting = false;
         server.closeAllConnections?.();
+        destroySockets(upgradedSockets);
         if (!listening) return;
         await new Promise((resolve) => server.close(() => resolve()));
         listening = false;

@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  connectedAppsMayDisconnect,
   connectedInventoryCopy,
   connectorActionLabel,
   disconnectAccountConfirmation,
@@ -11,6 +12,13 @@ import {
   type ConnectorStatus,
 } from "./PluginsPanel";
 import { managedConnectorUnavailableReason } from "../../shared/connector-availability";
+
+describe("connected-app remote permissions", () => {
+  it("allows pairing and status remotely but keeps revocation on the host", () => {
+    expect(connectedAppsMayDisconnect(false)).toBe(true);
+    expect(connectedAppsMayDisconnect(true)).toBe(false);
+  });
+});
 
 describe("connected-app status races", () => {
   it("offers status recovery for a pending authorization whose URL was lost on remount", () => {

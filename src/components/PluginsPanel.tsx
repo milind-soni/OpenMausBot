@@ -85,6 +85,10 @@ export function disconnectAccountConfirmation(
   return `Disconnect ${identity} from ${service}? Only this ${service} account will be revoked. Your other ${service} accounts will stay connected.`;
 }
 
+export function connectedAppsMayDisconnect(remoteClient: boolean): boolean {
+  return !remoteClient;
+}
+
 export function requiresAccountAlias(message: string) {
   return /account alias.*existing connection.*not replaced/i.test(message);
 }
@@ -195,6 +199,8 @@ function ServiceIcon({ card }: { card: ToolkitCard }) {
 
 export function PluginsPanel() {
   const { dispatch } = useStore();
+  const remoteClient = window.ogb?.remoteClient?.active === true;
+  const mayDisconnect = connectedAppsMayDisconnect(remoteClient);
   const dialogRef = useRef<HTMLDivElement>(null);
   const [surface, setSurface] = useState<"apps" | "mcp">("apps");
   const [cards, setCards] = useState<ToolkitCard[] | null>(null);
@@ -586,9 +592,9 @@ export function PluginsPanel() {
             connection service" is advice for someone who never set one up. */}
         {!configured && !stale && (
           <div className="mx-6 mb-1 rounded-xl bg-warning/10 px-4 py-3 text-[13px] text-warning sm:mx-8">
-            Connected apps are temporarily unavailable. You can retry after restarting, or configure your own connection service.{" "}
+            Connected apps are temporarily unavailable. Retry after restarting the host, or configure the connection service there.{" "}
             <button
-              className="font-medium underline underline-offset-2"
+              className={cn("font-medium underline underline-offset-2", remoteClient && "hidden")}
               onClick={() => {
                 close();
                 dispatch({ type: "toggleAppSettings", open: true });
@@ -598,7 +604,7 @@ export function PluginsPanel() {
             </button>
           </div>
         )}
-        {configured && source === "curated" && mode === "self-hosted" && (
+        {configured && !remoteClient && source === "curated" && mode === "self-hosted" && (
           <div className="mx-6 mb-1 text-[12px] text-ink-secondary sm:mx-8">
             Showing featured apps.{" "}
             <button
@@ -716,18 +722,20 @@ export function PluginsPanel() {
                                 {account.alias ? `${account.id} · ` : ""}{account.status.toLowerCase()}
                               </div>
                             </div>
-                            <button
-                              type="button"
-                              disabled={busy}
-                              onClick={() => {
-                                if (!window.confirm(disconnectAccountConfirmation(card.label, account))) return;
-                                disconnectAccount(card.slug, account.id);
-                              }}
-                              className="rounded-md px-2 py-1 text-[11px] text-ink-secondary transition-colors hover:bg-danger/10 hover:text-danger disabled:opacity-40"
-                              aria-label={`Disconnect ${account.alias || account.id} from ${card.label}`}
-                            >
-                              Disconnect
-                            </button>
+                            {mayDisconnect && (
+                              <button
+                                type="button"
+                                disabled={busy}
+                                onClick={() => {
+                                  if (!window.confirm(disconnectAccountConfirmation(card.label, account))) return;
+                                  disconnectAccount(card.slug, account.id);
+                                }}
+                                className="rounded-md px-2 py-1 text-[11px] text-ink-secondary transition-colors hover:bg-danger/10 hover:text-danger disabled:opacity-40"
+                                aria-label={`Disconnect ${account.alias || account.id} from ${card.label}`}
+                              >
+                                Disconnect
+                              </button>
+                            )}
                           </div>
                         );
                       })}

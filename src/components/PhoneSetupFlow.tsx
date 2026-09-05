@@ -311,7 +311,7 @@ export function usePhoneSetupController(profileEmail = ""): PhoneSetupController
       if (mounted.current) setError(
         normalizePhoneSetupActionError(
           cause,
-          "Phone access could not be updated. Open Advanced & troubleshooting and try again.",
+          "Remote access could not be updated. Open Advanced & troubleshooting and try again.",
         ),
       );
     } finally {
@@ -336,7 +336,7 @@ export function usePhoneSetupController(profileEmail = ""): PhoneSetupController
       } catch (cause) {
         if (mounted.current) setAccountError(normalizePhoneSetupActionError(
           cause,
-          "Secure phone access could not be updated. Try again.",
+          "Secure remote access could not be updated. Try again.",
         ));
       } finally {
         if (mounted.current) setAccountBusy(false);
@@ -362,7 +362,7 @@ export function usePhoneSetupController(profileEmail = ""): PhoneSetupController
       const companion = companionBridge();
       if (!companion) {
         if (mounted.current && setupGeneration.current === generation) {
-          setError("Phone setup is only available in the desktop app.");
+          setError("Remote access setup is only available in the desktop app.");
         }
         finishAttempt();
         return;
@@ -483,7 +483,7 @@ export function usePhoneSetupController(profileEmail = ""): PhoneSetupController
         setProvisioning(false);
         setError(normalizePhoneSetupActionError(
           cause,
-          "Phone pairing could not be prepared. Open Advanced & troubleshooting and try again.",
+          "Device pairing could not be prepared. Open Advanced & troubleshooting and try again.",
         ));
         dispatchFlow({ type: "reset" });
       } finally {
@@ -895,9 +895,9 @@ export function usePhoneSetupController(profileEmail = ""): PhoneSetupController
 
 function ValuePoints() {
   const points: Array<{ Icon: typeof Smartphone; title: string; detail: string }> = [
-    { Icon: Smartphone, title: "Your chats", detail: "Read and reply from your phone." },
+    { Icon: Smartphone, title: "Your conversations", detail: "Read and reply from another device." },
     { Icon: Check, title: "Quick approvals", detail: "Keep work moving when you step away." },
-    { Icon: ShieldCheck, title: "Private by default", detail: "Only phones you approve can connect." },
+    { Icon: ShieldCheck, title: "Private by default", detail: "Only devices you approve can connect." },
   ];
   return (
     <div className="mt-5 grid w-full gap-2 sm:grid-cols-3">
@@ -934,9 +934,9 @@ export function PhoneSetupFlowView({
         <div className="flex size-14 items-center justify-center rounded-2xl bg-accent/12 text-accent">
           <Smartphone size={26} />
         </div>
-        <h2 className="mt-4 text-[19px] font-semibold text-ink">Use {brand().name} from your phone</h2>
+        <h2 className="mt-4 text-[19px] font-semibold text-ink">Use {brand().name} from another device</h2>
         <p className="mt-1.5 max-w-[460px] text-[13.5px] leading-relaxed text-ink-secondary">
-          Check chats, answer approvals, and send new work without staying at your computer.
+          Check chats, answer approvals, and send new work from a phone or another computer.
         </p>
         <ValuePoints />
         <button
@@ -946,9 +946,9 @@ export function PhoneSetupFlowView({
         >
           {variant === "settings"
             ? c.state?.devices.length
-              ? "Pair another phone"
-              : "Pair a phone"
-            : "Set up my phone"}
+              ? "Pair another device"
+              : "Pair a device"
+            : "Set up another device"}
         </button>
         {c.error && <p role="alert" className="mt-3 max-w-[390px] text-[12.5px] text-danger">{c.error}</p>}
         {variant === "onboarding" && (
@@ -963,7 +963,7 @@ export function PhoneSetupFlowView({
               Not now
             </button>
             <p className="mt-2 text-[11.5px] text-ink-secondary">
-              You can resume anytime from Settings → Phone.
+              You can resume anytime from Settings → Remote access.
             </p>
           </>
         )}
@@ -990,7 +990,7 @@ export function PhoneSetupFlowView({
           className="mt-1 text-[13px] leading-relaxed text-ink-secondary"
         >
           {unavailable
-            ? "Online phone access is not available right now. You can still pair directly on the same Wi-Fi."
+            ? "Online remote access is not available right now. You can still pair directly on the same Wi-Fi."
             : c.setupTimedOut
               ? "Secure access is taking longer than expected. You can try again or pair directly on this Wi-Fi."
             : failed
@@ -1079,7 +1079,7 @@ export function PhoneSetupFlowView({
               <ShieldCheck size={15} /> Pair over Tailscale
             </button>
             <p className="mt-2 text-center text-[11px] leading-relaxed text-ink-secondary">
-              Your iPhone must be signed in to the same tailnet.
+              The other device must be signed in to the same tailnet.
             </p>
           </>
         )}
@@ -1108,14 +1108,14 @@ export function PhoneSetupFlowView({
             ? "Preparing your pairing code"
             : c.tailscaleFallback
               ? "Preparing Tailscale pairing"
-              : "Creating secure phone access"}
+              : "Creating secure remote access"}
         </h2>
         <p className="mt-1.5 max-w-[360px] text-[13px] leading-relaxed text-ink-secondary">
           {c.localFallback
             ? "This should only take a moment."
             : c.tailscaleFallback
               ? "Your pairing code will use your private tailnet connection."
-            : "We’re giving this computer a private connection that works even when your phone is away from this Wi-Fi."}
+            : "We’re giving this computer a private connection that works even when the paired device is away from this Wi-Fi."}
         </p>
         {(c.error || c.accountError) && (
           <p role="alert" className="mt-3 max-w-[380px] text-[12.5px] text-danger">{c.error ?? c.accountError}</p>
@@ -1131,7 +1131,7 @@ export function PhoneSetupFlowView({
         <div className="flex size-14 items-center justify-center rounded-full bg-success/15 text-success">
           <Check size={28} />
         </div>
-        <h2 className="mt-4 text-[19px] font-semibold text-ink">Your phone is ready</h2>
+        <h2 className="mt-4 text-[19px] font-semibold text-ink">Your device is ready</h2>
         <p className="mt-1.5 text-[13px] text-ink-secondary">
           It can now open chats, answer approvals, and send new work.
         </p>
@@ -1154,15 +1154,15 @@ export function PhoneSetupFlowView({
         <QrCode size={23} />
       </div>
       <h2 className="mt-3 text-[18px] font-semibold text-ink">
-        {c.pairingExpired ? "That code expired" : "Scan with your iPhone"}
+        {c.pairingExpired ? "That code expired" : "Scan or enter the code"}
       </h2>
       <p className="mt-1 text-[13px] text-ink-secondary">
         {c.pairingExpired
-          ? "Create a fresh code when your phone is ready."
-          : "Open OpenMaus on your iPhone and scan this code."}
+          ? "Create a fresh code when the other device is ready."
+          : "Scan this code in OpenMaus on iPhone, or enter the address and code from pairing details in another desktop app."}
       </p>
       {!c.pairingExpired && c.pairingLink && (
-        <div className="mt-4 rounded-2xl bg-white p-3.5" aria-label="Phone pairing QR code">
+        <div className="mt-4 rounded-2xl bg-white p-3.5" aria-label="Device pairing QR code">
           <QRCodeSVG value={c.pairingLink} size={180} level="M" bgColor="#ffffff" fgColor="#111111" />
         </div>
       )}

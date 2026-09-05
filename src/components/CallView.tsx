@@ -23,6 +23,7 @@ import { Loader2, Phone, PhoneOff, X } from "lucide-react";
 import { useStore, visibleMessages, type Bot } from "@/state/store";
 import { currentCall, deferCallCleanup, endCall, startCall, useOnCall } from "@/lib/call";
 import { speaker } from "@/lib/tts";
+import { localSystemVoiceActive } from "@/lib/local-voice";
 import { useSpeech } from "@/lib/tts/useSpeech";
 import { usePushToTalk } from "@/lib/push-to-talk";
 import { MausAvatar } from "./Avatar";
@@ -74,10 +75,12 @@ export function CallTargetButton({
   const { capabilities, ready: capabilitiesReady } = useDesktopCapabilities();
   const active = useOnCall() === targetId;
   const supported = capabilities.dictation.available && Boolean(window.ogb?.speechStart);
-  const configured = Boolean(state.config?.tts?.configured);
+  const localVoice = localSystemVoiceActive();
+  const configured = localVoice || Boolean(state.config?.tts?.configured);
   const everyTargetHasVoice = voices.length > 0 && voices.every((voice) => Boolean(voice));
   const voiceReady =
-    configured && (requireExplicitVoices ? everyTargetHasVoice : Boolean(state.config?.tts?.ready || everyTargetHasVoice));
+    localVoice ||
+    (configured && (requireExplicitVoices ? everyTargetHasVoice : Boolean(state.config?.tts?.ready || everyTargetHasVoice)));
   const unavailable = !active && (!capabilitiesReady || !supported || !voiceReady);
   const voiceSetupRequired = capabilitiesReady && supported && !voiceReady;
   const [helpOpen, setHelpOpen] = useState(false);

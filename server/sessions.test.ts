@@ -7,7 +7,6 @@ import {
   EXCHANGE_REPLAY_MS,
   formatPairingCode,
   generatePairingCode,
-  GLOBAL_LOCKOUT,
   LOCKOUT,
   normalizePairingCode,
   PAIRING_CODE_ALPHABET,
@@ -53,9 +52,8 @@ describe("pairing codes", () => {
     const first = registry.exchange({ code: formatPairingCode(code).toLowerCase(), label: "", source: "a" });
     expect(first.ok).toBe(true);
     if (first.ok) expect(first.session.label).toBe("phone");
-    // the same source retrying gets the same answer (lost-response replay); anyone else is refused
-    expect(registry.exchange({ code, label: "x", source: "a" })).toEqual(first);
-    const again = registry.exchange({ code, label: "x", source: "someone-else" });
+    // without an attempt id there is no replay: the same source asking again is refused too
+    const again = registry.exchange({ code, label: "x", source: "a" });
     expect(again.ok).toBe(false);
     if (!again.ok) expect(again.error).toMatch(/wrong or has expired/);
     const { code: stale } = registry.openPairing();
@@ -73,7 +71,7 @@ describe("pairing codes", () => {
     expect(locked.ok).toBe(false);
     if (!locked.ok) {
       expect(locked.status).toBe(429);
-      expect(locked.error).toMatch(/try again in 10 min/);
+      expect(locked.error).toMatch(/from your address; try again in 60s/);
     }
     // a different source is unaffected, and the code is still unused
     expect(registry.exchange({ code, label: "", source: "friend" }).ok).toBe(true);
@@ -82,28 +80,30 @@ describe("pairing codes", () => {
     expect(registry.exchange({ code: fresh, label: "", source: "attacker" }).ok).toBe(true);
   });
 
-  it("answers a lost-response retry with the same session for a minute, from the same source only", () => {
+  it("answers a lost-response retry with the same session for a minute, keyed on the client's attempt id", () => {
     const { code } = registry.openPairing();
-    const first = registry.exchange({ code, label: "phone", source: "a" });
-    const retry = registry.exchange({ code, label: "phone", source: "a" });
-    expect(retry).toEqual(first);
+    const first = registry.exchange({ code, label: "phone", source: "a", attemptId: "attempt-0001-abcd" });
+    expect(first.ok).toBe(true);
+    // same attempt id: the same answer, even from another address (the phone changed networks)
+    expect(registry.exchange({ code, label: "phone", source: "b", attemptId: "attempt-0001-abcd" })).toEqual(first);
     expect(registry.list()).toHaveLength(1);
-    const stranger = registry.exchange({ code, label: "x", source: "b" });
-    expect(stranger.ok).toBe(false);
+    // a different attempt id, or none, is a new attempt against a consumed code
+    expect(registry.exchange({ code, label: "x", source: "a", attemptId: "attempt-0002-efgh" }).ok).toBe(false);
+    expect(registry.exchange({ code, label: "x", source: "a" }).ok).toBe(false);
+    // malformed attempt ids never replay
+    const { code: c2 } = registry.openPairing();
+    expect(registry.exchange({ code: c2, label: "p", source: "a", attemptId: "no" }).ok).toBe(true);
+    expect(registry.exchange({ code: c2, label: "p", source: "a", attemptId: "no" }).ok).toBe(false);
     clock += EXCHANGE_REPLAY_MS + 1;
-    expect(registry.exchange({ code, label: "phone", source: "a" }).ok).toBe(false);
+    expect(registry.exchange({ code, label: "phone", source: "a", attemptId: "attempt-0001-abcd" }).ok).toBe(false);
   });
 
-  it("caps failures across all sources so rotating the forwarded address does not help", () => {
-    for (let i = 0; i < GLOBAL_LOCKOUT.failures; i++) {
-      expect(registry.exchange({ code: "AAAAAAAAAAAA", label: "", source: `rotating-${i}` }).ok).toBe(false);
-    }
-    const { code } = registry.openPairing();
-    const blocked = registry.exchange({ code, label: "", source: "fresh-address" });
-    expect(blocked.ok).toBe(false);
-    if (!blocked.ok) expect(blocked.error).toMatch(/across all clients/);
-    clock += GLOBAL_LOCKOUT.lockMs + 1;
-    expect(registry.exchange({ code, label: "", source: "fresh-address" }).ok).toBe(true);
+  it("forgets a source's failures once its window and lock have passed", () => {
+    registry.exchange({ code: "AAAAAAAAAAAA", label: "", source: "flaky" });
+    expect(registry.failureSources()).toContain("flaky");
+    clock += LOCKOUT.windowMs + 1;
+    registry.openPairing(); // any registry activity prunes
+    expect(registry.failureSources()).not.toContain("flaky");
   });
 
   it("names the device from the client, else the code's label, else the user agent", () => {

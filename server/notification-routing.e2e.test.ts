@@ -297,6 +297,12 @@ describe("bot-to-bot coordination is recorded, not announced", () => {
     let channelId: string | undefined;
     const stream = await openSse(`${base}/api/events`);
     try {
+      // Ink already answered the person earlier and they have not looked yet.
+      // A hop runs on Ink's own 1:1 thread, so this badge is the one it could
+      // spend by mistake — seeded true, or the "no badge" checks below would
+      // pass for a hop that had just cleared it.
+      expect((await api("PATCH", `/api/bots/${peer.id}`, { unread: true })).status).toBe(200);
+      expect((await botState(peer.id))?.unread).toBe(true);
       const asked = await api(
         "POST",
         "/api/internal/ask-bot",
@@ -330,10 +336,13 @@ describe("bot-to-bot coordination is recorded, not announced", () => {
       expect(chip(asker.id, "Messaged @Ink")).toBe(true);
       expect(chip(peer.id, "Message from @Pen")).toBe(true);
 
-      // nothing about it is worth interrupting anyone: no channel badge, no
-      // sidebar dot on the peer whose 1:1 thread only carries a chip
+      // nothing about it is worth interrupting anyone: no channel badge, and
+      // the asker — whose thread only carries a chip — gets no dot
       expect(channel.unread).toBeFalsy();
-      expect(current.bots.find((candidate: { id: string }) => candidate.id === peer.id)?.unread).toBeFalsy();
+      expect(current.bots.find((candidate: { id: string }) => candidate.id === asker.id)?.unread).toBeFalsy();
+      // ...while the badge Ink already earned is neither spent by the hop
+      // nor re-raised by it: still exactly the one signal the person had
+      expect(current.bots.find((candidate: { id: string }) => candidate.id === peer.id)?.unread).toBe(true);
 
       // A unique bot patch is an SSE ordering barrier: by the time it is
       // observed, every notification this exchange raised is already in
@@ -432,6 +441,46 @@ describe("bot-to-bot coordination is recorded, not announced", () => {
     } finally {
       stream.close();
       await cleanup([channelId], [asker.id, peer.id]);
+    }
+  }, 45_000);
+
+  it("buzzes when a bot stops to ask whether it may contact a teammate", async () => {
+    const asker = await createBot("Nib", "quick");
+    const peer = await createBot("Dot", "quick");
+    // the one gate a person switches on for a bot's peer comms — the card it
+    // raises is the one bot-to-bot event that genuinely blocks on them
+    expect((await api("PATCH", `/api/bots/${asker.id}`, { approvePeerComms: true })).status).toBe(200);
+    const stream = await openSse(`${base}/api/events`);
+    const asking = api(
+      "POST",
+      "/api/internal/ask-bot",
+      { fromBotId: asker.id, toBotId: peer.id, message: "Dot, can you take the deploy?" },
+      await capability(asker.id, asker.threadId),
+    );
+    try {
+      const frame = await stream.until(
+        (candidate) => candidate.kind === "notify" && candidate.notification?.botId === asker.id,
+        20_000,
+      );
+      expect(frame.notification).toMatchObject({
+        kind: "approval",
+        botId: asker.id,
+        threadId: asker.threadId,
+        title: "Nib needs approval",
+      });
+      expect(frame.notification.body).toContain("wants to contact @Dot");
+      // the card is really open where the banner points
+      const card = (await botState(asker.id))?.messages.findLast(
+        (message: { kind: string; card?: { requestId?: string; tool?: string } }) => message.kind === "options" && Boolean(message.card?.requestId),
+      );
+      expect(card?.card?.tool).toBe("ask_bot");
+      const denied = await api("POST", `/api/bots/${asker.id}/respond`, { requestId: card.card.requestId, behavior: "deny" });
+      expect(denied.status).toBe(200);
+      expect((await asking).body).toMatchObject({ error: "denied by user" });
+    } finally {
+      stream.close();
+      await asking.catch(() => undefined);
+      await cleanup([], [asker.id, peer.id]);
     }
   }, 45_000);
 

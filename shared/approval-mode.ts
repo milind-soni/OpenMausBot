@@ -3,6 +3,24 @@ export const APPROVAL_MODES = ["ask", "auto", "full", "custom"] as const;
 
 export type ApprovalMode = (typeof APPROVAL_MODES)[number];
 
+/** Only providers with an implemented permission mapping may expose elevation. */
+export function supportsApprovalMode(driverKind: string | undefined, mode: ApprovalMode): boolean {
+  if (mode === "custom") return driverKind === "codex";
+  if (mode !== "full") return true;
+  return ["codex", "claudeAgent", "antigravityAgent", "cursorAgent", "grokAgent", "opencodeGo"].includes(driverKind ?? "");
+}
+
+export function hasNativeAutoReview(driverKind: string | undefined): boolean {
+  return ["codex", "claudeAgent", "cursorAgent"].includes(driverKind ?? "");
+}
+
+/** A native reviewer has already declined to decide, or Auto has no native
+ * equivalent. Never second-guess that request with the app's heuristic rules.
+ * OpenCode's Full mode is implemented by approving individual ACP requests. */
+export function requiresNativeApproval(driverKind: string, mode: ApprovalMode): boolean {
+  return mode === "auto" || (mode === "full" && ["claudeAgent", "antigravityAgent", "cursorAgent", "grokAgent"].includes(driverKind));
+}
+
 export function isApprovalMode(value: unknown): value is ApprovalMode {
   return typeof value === "string" && (APPROVAL_MODES as readonly string[]).includes(value);
 }

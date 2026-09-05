@@ -46,6 +46,7 @@ import type {
 import { newEventId, newId } from "../../contracts.ts";
 import { computerProxyEnv } from "../../container-computer.ts";
 import { augmentedPath } from "../../env-path.ts";
+import { supportsApprovalMode } from "../../../shared/approval-mode.ts";
 
 // Resolved from the server root, never relative to this file: bundling inlines
 // this module two directories up, so the `".."` pair here would climb past the
@@ -419,9 +420,9 @@ export function createAcpDriver(support: AcpSupport): ProviderDriver<AcpConfig> 
         // embedders and tests outside the harness.
         const turnConfig = turn.approvalMode === undefined
           ? config
-          : { ...config, fullAuto: false };
+          : { ...config, fullAuto: turn.approvalMode === "full" && supportsApprovalMode(DRIVER_KIND, "full") };
         const controlsHost = turn.integrations?.localComputer?.scope === "local-computer";
-        if (controlsHost && turnConfig.fullAuto) {
+        if (controlsHost && turnConfig.fullAuto && turn.approvalMode !== "full") {
           throw new Error("local computer control requires interactive provider approvals");
         }
         const turnId = newId();
@@ -621,7 +622,7 @@ export function createAcpDriver(support: AcpSupport): ProviderDriver<AcpConfig> 
 
           const toolCall = params.toolCall ?? {};
           const isQuestion = String(toolCall.toolCallId ?? "").startsWith("interaction_");
-          if (turnConfig.fullAuto && !isQuestion) {
+          if (turnConfig.fullAuto && turn.approvalMode === undefined && !isQuestion) {
             const allow = optionFor("allow");
             if (!allow) missing("allow");
             return send({

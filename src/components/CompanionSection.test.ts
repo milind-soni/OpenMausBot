@@ -42,7 +42,7 @@ describe("companion account action errors", () => {
 });
 
 describe("companion status refresh", () => {
-  it("omits the redundant status pill when phone access is ready for its first pairing", () => {
+  it("omits the redundant status pill when device access is ready for its first pairing", () => {
     expect(deriveCompanionPanelStatus({
       enabled: true,
       devices: [],
@@ -54,7 +54,7 @@ describe("companion status refresh", () => {
       enabled: true,
       devices: [],
       error: "sidecar stopped responding",
-    })).toEqual({ label: "Phone access needs attention", good: false });
+    })).toEqual({ label: "Remote access needs attention", good: false });
   });
 
   it("keeps account refreshes when the local Companion status fails", async () => {
@@ -200,7 +200,7 @@ describe("Tailscale pairing onboarding", () => {
   it("keeps HTTPS as the recommended default surface", () => {
     expect(pairingSurfaceCopy({ localFallback: false, tailscaleFallback: false })).toEqual({
       title: "Secure HTTPS pairing",
-      subtitle: "Recommended — the simplest setup, and it keeps working when your phone leaves this Wi-Fi.",
+      subtitle: "Recommended — the simplest setup, and it keeps working when the paired device leaves this Wi-Fi.",
     });
     expect(pairingSurfaceCopy({ localFallback: false, tailscaleFallback: true }).title).toBe(
       "Tailscale pairing",
@@ -210,7 +210,7 @@ describe("Tailscale pairing onboarding", () => {
   it("explains every step between unchecked and ready", () => {
     expect(deriveTailscalePairingStatus({ enabled: false }, false)).toMatchObject({
       kind: "unchecked",
-      detail: expect.stringContaining("turns on Phone access"),
+      detail: expect.stringContaining("turns on Remote access"),
     });
     expect(deriveTailscalePairingStatus({ enabled: true }, false).kind).toBe("unavailable");
     expect(deriveTailscalePairingStatus({
@@ -233,7 +233,7 @@ describe("Tailscale pairing onboarding", () => {
       error: "the companion is not responding",
     }, false)).toEqual({
       kind: "error",
-      title: "Phone access needs attention",
+      title: "Remote access needs attention",
       detail: "the companion is not responding",
     });
   });

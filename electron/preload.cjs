@@ -6,6 +6,7 @@ const { contextBridge, ipcRenderer, webUtils } = require("electron");
 // load sibling CommonJS files. Keep this tiny predicate inline here; main's
 // privileged process uses the shared browser-platform helper.
 const browserSurfaceSupported = process.platform === "darwin" || process.platform === "linux";
+const desktopRemoteClient = process.argv.includes("--openmausbot-remote-client");
 
 let pendingPackageInstallUrl = null;
 const packageInstallListeners = new Set();
@@ -21,7 +22,7 @@ ipcRenderer.on("package:install", (_event, url) => {
 // helpers here. Main enforces the same rule on the sensitive channels.
 const localOrigin = process.argv.find((arg) => arg.startsWith("--omb-local-origin="))?.slice("--omb-local-origin=".length) ?? null;
 const isLocalPage = !localOrigin || location.origin === localOrigin;
-const REMOTE_SAFE = new Set(["platform", "getCapabilities", "onCapabilitiesChanged", "applySkin", "setUnreadCount", "openExternal", "getPathForFile", "permStatus", "environments"]);
+const REMOTE_SAFE = new Set(["platform", "getCapabilities", "onCapabilitiesChanged", "applySkin", "setUnreadCount", "permStatus"]);
 
 const bridge = {
   /** Host platform ("darwin" | "win32" | "linux") — for platform-aware UI. */
@@ -31,6 +32,14 @@ const bridge = {
     const handler = (_event, capabilities) => cb(capabilities);
     ipcRenderer.on("desktop:capabilities-changed", handler);
     return () => ipcRenderer.removeListener("desktop:capabilities-changed", handler);
+  },
+  /** Pair this desktop app to another OpenMausBot host. The bearer remains in
+   * the main process and is never returned over this bridge. */
+  remoteClient: {
+    active: desktopRemoteClient,
+    state: () => ipcRenderer.invoke("desktop-remote:state"),
+    pair: (endpoint, code) => ipcRenderer.invoke("desktop-remote:pair", endpoint, code),
+    disconnect: () => ipcRenderer.invoke("desktop-remote:disconnect"),
   },
   /** The companion sidecar: the one part of this app that listens off the
    * machine, so it runs as its own process and is off until switched on.
@@ -175,7 +184,7 @@ const bridge = {
   /** The built-in browser: a native page view per bot that the Browser tab
    * positions over its own rectangle. Bots drive it through their tools; the
    * person drives it by clicking into the view. */
-  browser: browserSurfaceSupported ? {
+  browser: browserSurfaceSupported && !desktopRemoteClient ? {
     available: () => ipcRenderer.invoke("browser:available"),
     state: (botId) => ipcRenderer.invoke("browser:state", botId),
     layout: (botId, bounds, profile, mode, layoutOwner) =>

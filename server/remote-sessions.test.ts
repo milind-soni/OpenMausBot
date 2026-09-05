@@ -9,6 +9,7 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
+import { LOCKOUT } from "./sessions.ts";
 import { removeTempDir, waitForExit } from "./testing/cleanup.ts";
 import { openSse } from "./testing/sse.ts";
 
@@ -75,7 +76,11 @@ beforeAll(async () => {
   mkdirSync(join(home, ".openmausbot"), { recursive: true });
   mkdirSync(join(staticDir, "assets"), { recursive: true });
   writeFileSync(join(staticDir, "index.html"), "<!doctype html><title>Served UI</title>");
-  writeFileSync(join(home, ".openmausbot", "config.json"), JSON.stringify({ instances: {} }));
+  // Avoid probing whatever agent CLIs happen to be installed on the test
+  // machine; remote-session behavior does not depend on an engine.
+  writeFileSync(join(home, ".openmausbot", "config.json"), JSON.stringify({
+    instances: { fixture: { driver: "remote-session-test-shadow" } },
+  }));
   child = spawn(process.execPath, [join(SERVER_DIR, "index.ts")], {
     cwd: ROOT,
     env: {
@@ -90,7 +95,9 @@ beforeAll(async () => {
       OMB_APP_VERSION: "9.9.9-test",
       OMB_ENVIRONMENT_LABEL: "cab mini",
       OMB_BROWSER_CONNECTION: join(home, "browser-test-connection.json"),
-      OMB_SSE_HEARTBEAT_MS: "50",
+      // Slow heartbeat on purpose: the revocation test must prove the stream is
+      // ended by the revoke itself, not by the next heartbeat noticing.
+      OMB_SSE_HEARTBEAT_MS: "4000",
     },
     stdio: ["ignore", "pipe", "pipe"],
   });
@@ -175,11 +182,8 @@ describe("pairing", () => {
     expect(paired.body.token).toMatch(/^omb_sess_/);
     expect(paired.body.session.label).toBe("Safari on Mac");
     expect(paired.body.environment.label).toBe("cab mini");
-    // a retry from the same address (lost response) replays the same session; another address is refused
-    const replay = await call("/api/auth/pair", { method: "POST", headers: remote("10.0.0.3"), body: JSON.stringify({ code: opened.code }) });
-    expect(replay.status).toBe(200);
-    expect(replay.body.token).toBe(paired.body.token);
-    const again = await call("/api/auth/pair", { method: "POST", headers: remote("10.0.0.33"), body: JSON.stringify({ code: opened.code }) });
+    // a plain retry (no attempt id) is a second use of a consumed code: refused
+    const again = await call("/api/auth/pair", { method: "POST", headers: remote("10.0.0.3"), body: JSON.stringify({ code: opened.code }) });
     expect(again.status).toBe(401);
 
     const bearer = remote("10.0.0.3", { authorization: `Bearer ${paired.body.token}` });
@@ -239,15 +243,86 @@ describe("pairing", () => {
     expect((await call("/api/bots", { headers: remote("10.0.0.4", { cookie }) })).status).toBe(401);
   });
 
-  it("locks a source out after five bad codes and says how long", async () => {
-    for (let i = 0; i < 5; i++) {
+  it("only accepts JSON for the exchange, and replays a lost response by attempt id", async () => {
+    const opened = await pairingCode();
+    const form = await call("/api/auth/pair", { method: "POST", headers: { ...remote("10.0.0.20"), "content-type": "application/x-www-form-urlencoded" }, body: `code=${opened.code}` });
+    expect(form.status).toBe(415);
+    const first = await call("/api/auth/pair", { method: "POST", headers: remote("10.0.0.20"), body: JSON.stringify({ code: opened.code, attemptId: "attempt-first-0001" }) });
+    expect(first.status).toBe(200);
+    const replay = await call("/api/auth/pair", { method: "POST", headers: remote("10.0.0.21"), body: JSON.stringify({ code: opened.code, attemptId: "attempt-first-0001" }) });
+    expect(replay.status).toBe(200);
+    expect(replay.body.token).toBe(first.body.token);
+    const other = await call("/api/auth/pair", { method: "POST", headers: remote("10.0.0.20"), body: JSON.stringify({ code: opened.code, attemptId: "attempt-other-0002" }) });
+    expect(other.status).toBe(401);
+  });
+
+  it("ends a live event stream the moment its session is revoked", async () => {
+    const opened = await pairingCode();
+    const paired = await call("/api/auth/pair", { method: "POST", headers: remote("10.0.0.30"), body: JSON.stringify({ code: opened.code, label: "stream" }) });
+    const bearer = remote("10.0.0.30", { authorization: `Bearer ${paired.body.token}` });
+    const ticket = await call("/api/auth/stream-ticket", { method: "POST", headers: bearer });
+    const ended = new Promise<{ hello: boolean; endedMs: number }>((resolve, reject) => {
+      const startedAt = Date.now();
+      let hello = false;
+      const req = request({ host: "127.0.0.1", port: PORT, path: `/api/events?ticket=${ticket.body.ticket}`, method: "GET", headers: { accept: "text/event-stream", ...remote("10.0.0.30") } }, (res) => {
+        res.setEncoding("utf8");
+        res.on("data", (chunk: string) => {
+          if (chunk.includes('"kind":"hello"')) {
+            hello = true;
+            void call(`/api/auth/sessions/${paired.body.session.id}`, { method: "DELETE" }).then((r) => {
+              if (r.status !== 200) reject(new Error(`revoke returned ${r.status}`));
+            });
+          }
+        });
+        res.on("end", () => resolve({ hello, endedMs: Date.now() - startedAt }));
+        res.on("error", reject);
+      });
+      req.on("error", reject);
+      req.end();
+      setTimeout(() => reject(new Error("stream did not end after revocation")), 8_000).unref();
+    });
+    const outcome = await ended;
+    expect(outcome.hello).toBe(true);
+    // well under the 4 s heartbeat: the revoke closed it, not the heartbeat
+    expect(outcome.endedMs).toBeLessThan(2_500);
+  });
+
+  it("gives a client-scope session chat but not the machine: allow-list, display-only edits, stripped config", async () => {
+    const opened = await pairingCode(["client"]);
+    const paired = await call("/api/auth/pair", { method: "POST", headers: remote("10.0.0.40"), body: JSON.stringify({ code: opened.code, label: "viewer" }) });
+    expect(paired.status).toBe(200);
+    const h = (extra: Record<string, string> = {}) => remote("10.0.0.40", { authorization: `Bearer ${paired.body.token}`, ...extra });
+    expect((await call("/api/bots", { headers: h() })).status).toBe(200);
+    for (const [method, path] of [["POST", "/api/cli-test"], ["GET", "/api/instances"], ["POST", "/api/webhooks"], ["GET", "/api/mcp/servers"], ["POST", "/api/local-computer/run"]] as const) {
+      const r = await call(path, { method, headers: h(), body: method === "POST" ? "{}" : undefined });
+      expect(r.status, `${method} ${path}`).toBe(403);
+      expect(r.body.error, `${method} ${path}`).toContain("admin scope");
+    }
+    const created = await call("/api/bots", { method: "POST", body: JSON.stringify({ name: "Scoped" }) });
+    const botId = created.body?.id ?? created.body?.bot?.id;
+    if (botId) {
+      const cosmetic = await call(`/api/bots/${botId}`, { method: "PATCH", headers: h(), body: JSON.stringify({ unread: true }) });
+      expect(cosmetic.status).toBe(200);
+      const smuggled = await call(`/api/bots/${botId}`, { method: "PATCH", headers: h(), body: JSON.stringify({ unread: true, autoApprove: true }) });
+      expect(smuggled.status).toBe(403);
+      expect(smuggled.body.error).toContain('"autoApprove"');
+    }
+    const config = await call("/api/config", { headers: h() });
+    expect(config.status).toBe(200);
+    expect(config.body.vps.sshAlias).toBe("");
+    expect(config.body.profile.email).toBe("");
+    expect(JSON.stringify(config.body)).not.toContain("partitionId");
+  });
+
+  it("locks a source out after repeated bad codes and says how long", async () => {
+    for (let i = 0; i < LOCKOUT.failures; i++) {
       const r = await call("/api/auth/pair", { method: "POST", headers: remote("10.0.0.99"), body: JSON.stringify({ code: `BAD${i}-BADB-ADBA` }) });
       expect(r.status).toBe(401);
     }
     const opened = await pairingCode();
     const locked = await call("/api/auth/pair", { method: "POST", headers: remote("10.0.0.99"), body: JSON.stringify({ code: opened.code }) });
     expect(locked.status).toBe(429);
-    expect(locked.body.error).toMatch(/try again in \d+ min/);
+    expect(locked.body.error).toMatch(/from your address; try again in \d+s/);
     // the code itself is untouched: another source can still use it
     expect((await call("/api/auth/pair", { method: "POST", headers: remote("10.0.0.100"), body: JSON.stringify({ code: opened.code }) })).status).toBe(200);
     expect(stderr).toMatch(/pairing refused from 10\.0\.0\.99/);

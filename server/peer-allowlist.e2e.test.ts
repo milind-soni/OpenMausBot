@@ -70,6 +70,14 @@ beforeAll(async () => {
       // — and the only place it can read a bot's assembled system prompt
       asker: fixture("Asker fixture", askerDump),
       bound: fixture("Allow-listed fixture", boundDump),
+      // never finishes: how a bot is held mid-turn, which is the one moment
+      // its own shell could be the caller behind a loopback PATCH
+      stuck: {
+        driver: "claudeAgent",
+        displayName: "Stuck fixture",
+        environment: { FAKE_CLAUDE_MODE: "hang" },
+        config: { cli: FAKE_CLAUDE },
+      },
     },
   }));
   const port = await freePortBlock([0, 1]);
@@ -351,6 +359,63 @@ describe("peer allow-list", () => {
       expect(await botBusy(helper.id)).toBeFalsy();
     } finally {
       for (const bot of [asker, helper]) {
+        await api("POST", `/api/bots/${bot.id}/interrupt`, {}).catch(() => undefined);
+        await api("DELETE", `/api/bots/${bot.id}`).catch(() => undefined);
+      }
+    }
+  }, 60_000);
+
+  it("refuses to loosen a bot from a bare loopback call while any bot is working", async () => {
+    // Outside the packaged desktop the acknowledgement flag is a JSON field
+    // any caller can send — including the bot it constrains, from its own
+    // shell, mid-turn. What a tool call does not have is a browser origin or
+    // a paired session; what it always has is a running turn. So an
+    // originless, session-less loopback PATCH may loosen a bot only while
+    // every bot is idle. The served UI sends its origin and is unaffected.
+    await hideSeededBot();
+    const held = await createBot("Held", "stuck");
+    const bound = await createBot("Ivy", "plain");
+    const peer = await createBot("Ash", "plain");
+    const other = await createBot("Elm", "plain");
+    const botState = async (id: string) =>
+      (await api("GET", "/api/bots?messages=0")).body.bots.find((bot: { id: string }) => bot.id === id);
+    const browser = async (path: string, body: unknown) => api("PATCH", path, body, { origin: base });
+
+    try {
+      // wired tight while everything is idle: narrowing is always free
+      expect((await api("PATCH", `/api/bots/${bound.id}`, { peers: [peer.id], approvePeerComms: true, section: "Ops" })).status).toBe(200);
+      expect((await api("POST", `/api/bots/${held.id}/messages`, { text: "hold the line" })).status).toBe(202);
+      await expect.poll(async () => (await botState(held.id))?.busy, { timeout: 20_000 }).toBe(true);
+
+      // every way of loosening the leash, refused with the same message
+      const attempts: Array<Record<string, unknown>> = [
+        { peers: [peer.id, other.id], acknowledgePeerScope: true },
+        { peers: null, acknowledgePeerScope: true },
+        { approvePeerComms: false },
+        { section: "Finance" },
+        { alwaysAllow: ["Bash", "Bash:curl"] },
+      ];
+      for (const body of attempts) {
+        const refused = await api("PATCH", `/api/bots/${bound.id}`, body);
+        expect(refused.status, JSON.stringify(body)).toBe(409);
+        expect(String(refused.body.error)).toContain("desktop app or a paired device");
+      }
+      // refused means unchanged
+      expect(await botState(bound.id)).toMatchObject({ peers: [peer.id], approvePeerComms: true, section: "Ops" });
+      // tightening still needs nothing, and so does an unrelated field
+      expect((await api("PATCH", `/api/bots/${bound.id}`, { peers: [] })).status).toBe(200);
+      expect((await api("PATCH", `/api/bots/${bound.id}`, { name: "Ivy renamed" })).status).toBe(200);
+      // the served UI is a browser: its origin is what tells it apart
+      expect((await browser(`/api/bots/${bound.id}`, { peers: [peer.id], acknowledgePeerScope: true })).status).toBe(200);
+      expect((await browser(`/api/bots/${bound.id}`, { section: "Finance" })).status).toBe(200);
+
+      // and once nothing is running, a script may loosen again (and is logged)
+      expect((await api("POST", `/api/bots/${held.id}/interrupt`, {})).status).toBe(200);
+      await expect.poll(async () => (await botState(held.id))?.busy, { timeout: 20_000 }).toBeFalsy();
+      expect((await api("PATCH", `/api/bots/${bound.id}`, { peers: null, acknowledgePeerScope: true })).status).toBe(200);
+      expect(await botPeers(bound.id)).toBeUndefined();
+    } finally {
+      for (const bot of [held, bound, peer, other]) {
         await api("POST", `/api/bots/${bot.id}/interrupt`, {}).catch(() => undefined);
         await api("DELETE", `/api/bots/${bot.id}`).catch(() => undefined);
       }

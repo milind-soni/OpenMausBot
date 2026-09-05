@@ -308,6 +308,7 @@ function SectionContextDialog({ section, label, onClose }: { section: string; la
 
 export function TeamMapPage() {
   const { state } = useStore();
+  const remoteClient = window.ogb?.remoteClient?.active === true;
   const [snapshot, setSnapshot] = useState<TeamMapSnapshot>(EMPTY_TEAM_MAP_SNAPSHOT);
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -371,14 +372,14 @@ export function TeamMapPage() {
                 <div className="mb-3 flex items-center justify-between">
                   <h2 className="text-[12px] font-semibold uppercase tracking-[0.08em] text-ink-secondary">{section.name}</h2>
                   <div className="flex items-center gap-2">
-                    <button
+                    {!remoteClient && <button
                       onClick={() => setContextEditor({ section: section.key, label: section.name })}
                       className="flex items-center gap-1 rounded-md px-1.5 py-1 text-[10.5px] font-medium text-ink-secondary hover:bg-raised hover:text-ink"
                       aria-label={`Edit ${section.name} shared context`}
                       title="Shared context"
                     >
                       <BookOpen size={11} /> Context
-                    </button>
+                    </button>}
                     <span className="text-[11px] tabular-nums text-ink-secondary">{section.chiefs.length + section.members.length}</span>
                   </div>
                 </div>

@@ -219,7 +219,7 @@ describe("CursorAgentDriver", () => {
     });
     const recorder = recordEvents(instance.adapter);
     try {
-      await instance.adapter.sendTurn({ threadId: "t-cursor", text: "hi", model: "gpt-5.3-codex" });
+      await instance.adapter.sendTurn({ threadId: "t-cursor", text: "hi", model: "gpt-5.3-codex", approvalMode: "full" });
       await recorder.until((e) => e.type === "turn.completed");
 
       const seen = JSON.parse(readFileSync(dump, "utf8"));
@@ -231,6 +231,11 @@ describe("CursorAgentDriver", () => {
       expect(applied).toEqual([
         { method: "session/set_model", params: { sessionId: "fake-acp-session", modelId: "gpt-5.3-codex" } },
       ]);
+      for (const approvalMode of ["auto", "ask"] as const) {
+        const { turnId } = await instance.adapter.sendTurn({ threadId: "t-cursor", text: "continue", approvalMode, resumeCursor: "fake-acp-session" });
+        await recorder.until((e) => e.type === "turn.completed" && e.turnId === turnId);
+        expect(JSON.parse(readFileSync(dump, "utf8")).argv).toEqual(approvalMode === "auto" ? ["--auto-review", "acp"] : ["acp"]);
+      }
     } finally {
       recorder.stop();
       await instance.dispose();

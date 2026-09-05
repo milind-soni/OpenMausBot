@@ -11,7 +11,7 @@ import { brand } from "../lib/brand";
 
 // First-run onboarding: who you are (email), what's installed (live engine
 // checks from the harness), what the app may use (TCC), then an optional
-// phone setup that can always be resumed from Settings → Phone.
+// phone setup that can always be resumed from Settings → Remote access.
 // Every check is skippable — onboarding must never brick the app.
 
 type InstanceRow = InstanceInfo;

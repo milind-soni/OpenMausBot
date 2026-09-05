@@ -92,7 +92,7 @@ It prints where to point the phone, and where you pair:
 ```text
 companion  http://0.0.0.0:8810  →  harness 127.0.0.1:8799
 pair here  http://127.0.0.1:8811
-on your phone, enter  macbook.tail1234.ts.net:8810
+on the device, enter  macbook.tail1234.ts.net:8810
 ```
 
 Open the pairing page, click **Start pairing**, and type the six digits into
@@ -103,7 +103,7 @@ switch — running it *is* the opt-in, so there is no toggle to forget.
 
 That is the standalone way to run it, and it is what to reach for when the
 harness is running on its own — a headless box, or `pnpm dev:server` in a
-terminal. **The normal desktop workflow is Settings → Phone**, which
+terminal. **The normal desktop workflow is Settings → Remote access**, which
 starts and stops this same sidecar as a child process and offers pairing and
 revocation inline; the loopback page above is the same API rendered for
 people not running the desktop app. Either way the sidecar only listens while

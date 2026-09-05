@@ -39,6 +39,21 @@ import { createProxyHandler } from "./proxy.ts";
 import { companionOriginSocket, listenCompanionOrigin } from "./origin.ts";
 import { normalizedPhoneSecretPublicKey } from "./phone-secret-key.ts";
 
+// Only Electron supplies this port. Standalone sidecars retain the existing
+// unguarded local-server path; Electron children fail closed until initialized.
+const parentPort = (process as NodeJS.Process & {
+  parentPort?: { on(event: "message", listener: (event: { data?: unknown }) => void): void };
+}).parentPort;
+let mutationToken: string | null = null;
+parentPort?.on("message", ({ data }) => {
+  if (!data || typeof data !== "object") return;
+  const message = data as Record<string, unknown>;
+  if (message.type !== "openmausbot:companion-mutation-token") return;
+  if (typeof message.token === "string" && /^[A-Za-z0-9_-]{43}$/.test(message.token)) {
+    mutationToken = message.token;
+  }
+});
+
 /** A port from the environment, or the default. Anything that is not a whole
  * number in range is the default — a typo'd port must not become port 0. */
 const num = (value: string | undefined, fallback: number): number => {
@@ -139,6 +154,7 @@ const service = (): ServiceInfo => ({
 const connectedDevices = createConnectedDeviceTracker();
 const proxy = createProxyHandler({
     harnessPort: HARNESS_PORT,
+    mutationToken: parentPort ? () => mutationToken : undefined,
     // `authenticate` also stamps lastSeenAt, which is what makes the control
     // page able to say when a phone was last heard from.
     authenticate: (token) => devices.authenticate(token),
@@ -152,7 +168,12 @@ const proxy = createProxyHandler({
     connected: connectedDevices.open,
   });
 const companion = createServer(proxy);
+// `createServer(proxy)` handles ordinary HTTP only. noVNC switches its
+// connection to WebSocket, so every server exposing this proxy must also
+// forward Node's separate `upgrade` event to the viewer relay.
+companion.on("upgrade", proxy.upgrade);
 const managedOrigin = PRIVATE_ORIGIN ? createServer(proxy) : null;
+managedOrigin?.on("upgrade", proxy.upgrade);
 
 const control = createControlServer({
   devices,
@@ -164,7 +185,10 @@ const control = createControlServer({
   },
   discovery: () => ({ advertising: mdns.advertising, name: service().name }),
   connectedDeviceIds: connectedDevices.ids,
-  disconnectDevice: connectedDevices.disconnect,
+  disconnectDevice: (deviceId) => {
+    connectedDevices.disconnect(deviceId);
+    proxy.disconnectDevice(deviceId);
+  },
   refreshTailscale: () => refreshTailnetName(),
 });
 

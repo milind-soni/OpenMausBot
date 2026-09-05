@@ -16,6 +16,7 @@ export function SecretRequestCard({
 }) {
   const { dispatch } = useStore();
   const secret = message.secret!;
+  const remoteClient = window.ogb?.remoteClient?.active === true;
   const [value, setValue] = useState("");
   const [saving, setSaving] = useState(false);
   const [savedLocally, setSavedLocally] = useState(false);
@@ -137,7 +138,12 @@ export function SecretRequestCard({
             </button>
           )}
         </div>
-        {!provided && !declined && (
+        {remoteClient && !provided && !declined && (
+          <div className="border-t border-hairline/40 bg-panel/40 px-4 py-3 text-[12.5px] leading-relaxed text-ink-secondary">
+            This key must be saved on the host computer. Open this conversation on the host to continue securely.
+          </div>
+        )}
+        {!remoteClient && !provided && !declined && (
           <form onSubmit={(event) => void save(event)} className="border-t border-hairline/40 bg-panel/40 px-4 py-3">
             <div className="flex gap-2">
               <input

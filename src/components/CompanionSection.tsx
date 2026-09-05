@@ -48,7 +48,7 @@ export function deriveTailscalePairingStatus(
   if (state.error) {
     return {
       kind: "error",
-      title: "Phone access needs attention",
+      title: "Remote access needs attention",
       detail: state.error,
     };
   }
@@ -56,14 +56,14 @@ export function deriveTailscalePairingStatus(
     return {
       kind: "ready",
       title: `Ready on ${state.tailnetName}`,
-      detail: "Keep Tailscale connected on this computer and your phone while they pair.",
+      detail: "Keep Tailscale connected on the host and the device being paired.",
     };
   }
   if (state.tailscale) {
     return {
       kind: "magicdns",
       title: "Tailscale found — MagicDNS is still needed",
-      detail: "Turn on MagicDNS in Tailscale, then check again so the iPhone gets a secure tailnet name.",
+      detail: "Turn on MagicDNS in Tailscale, then check again so the device gets a secure tailnet name.",
     };
   }
   if (state.enabled) {
@@ -76,7 +76,7 @@ export function deriveTailscalePairingStatus(
   return {
     kind: "unchecked",
     title: "Already use Tailscale?",
-    detail: "Connect both devices to the same tailnet. Checking turns on Phone access so your phone can reach this computer.",
+    detail: "Connect both devices to the same tailnet. Checking turns on Remote access so the other device can reach this computer.",
   };
 }
 
@@ -86,7 +86,7 @@ export function pairingSurfaceCopy(
   if (route.tailscaleFallback) {
     return {
       title: "Tailscale pairing",
-      subtitle: "Private pairing through the tailnet shared by this computer and your phone.",
+      subtitle: "Private pairing through the tailnet shared by the host and the device being paired.",
     };
   }
   if (route.localFallback) {
@@ -97,19 +97,19 @@ export function pairingSurfaceCopy(
   }
   return {
     title: "Secure HTTPS pairing",
-    subtitle: "Recommended — the simplest setup, and it keeps working when your phone leaves this Wi-Fi.",
+    subtitle: "Recommended — the simplest setup, and it keeps working when the paired device leaves this Wi-Fi.",
   };
 }
 
 export function deriveCompanionPanelStatus(
   state: Pick<CompanionState, "enabled" | "devices" | "error">,
 ): CompanionPanelStatus | null {
-  if (state.error) return { label: "Phone access needs attention", good: false };
-  if (!state.enabled) return { label: "Phone access off", good: false };
+  if (state.error) return { label: "Remote access needs attention", good: false };
+  if (!state.enabled) return { label: "Remote access off", good: false };
   const pairedCount = state.devices.length;
   if (!pairedCount) return null;
   return {
-    label: `${pairedCount} ${pairedCount === 1 ? "phone" : "phones"} paired`,
+    label: `${pairedCount} ${pairedCount === 1 ? "device" : "devices"} paired`,
     good: true,
   };
 }
@@ -140,15 +140,15 @@ export function CompanionSection({ profileEmail = "" }: { profileEmail?: string 
   if (!companionBridge()) {
     return (
       <Card
-        title={`Use ${brand().name} from your phone`}
-        subtitle={`Open Settings in the ${brand().name} desktop app to set up a phone.`}
+        title={`Use ${brand().name} from another device`}
+        subtitle="Open Remote access in the desktop app to pair a phone or computer."
       />
     );
   }
 
   if (!state) {
     return (
-      <Card title="Phone" subtitle="Checking phone access…">
+      <Card title="Remote access" subtitle="Checking device access…">
         <Loader2 size={15} className="animate-spin text-ink-secondary" />
       </Card>
     );
@@ -236,14 +236,14 @@ export function CompanionSection({ profileEmail = "" }: { profileEmail?: string 
             onClick={c.refreshTailscale}
             className="mt-3 rounded-lg border border-hairline/40 px-3 py-1.5 text-[12px] text-ink hover:bg-control disabled:opacity-40"
           >
-            {c.busy ? "Checking…" : state.enabled ? "Check again" : "Turn on phone access & check"}
+            {c.busy ? "Checking…" : state.enabled ? "Check again" : "Turn on device access & check"}
           </button>
         )}
       </Card>
 
       <Card
-        title="Paired phones"
-        subtitle={pairedCount ? `Manage the phones that can use this ${brand().name}.` : "No phones are paired yet."}
+        title="Paired devices"
+        subtitle={pairedCount ? `Manage the devices that can use this ${brand().name}.` : "No devices are paired yet."}
       >
         {pairedCount > 0 && (
           <ul className="flex flex-col gap-2">
@@ -269,7 +269,7 @@ export function CompanionSection({ profileEmail = "" }: { profileEmail?: string 
                 <div className="mt-3 flex items-center justify-between gap-3 border-t border-hairline/30 pt-3">
                   <div>
                     <div className="text-[12px] text-ink">Allow computer view</div>
-                    <div className="mt-0.5 text-[11px] text-ink-secondary">Full interactive access from this phone.</div>
+                    <div className="mt-0.5 text-[11px] text-ink-secondary">Full interactive access from this device.</div>
                   </div>
                   <Switch
                     checked={device.cloudDesktopAccess}
@@ -295,14 +295,14 @@ export function CompanionSection({ profileEmail = "" }: { profileEmail?: string 
         <div className="flex flex-col gap-4 border-t border-hairline/30 px-4 py-4">
           <div className="flex items-center justify-between gap-4">
             <div className="min-w-0">
-              <div className="text-[13px] text-ink">Phone access</div>
+              <div className="text-[13px] text-ink">Remote access</div>
               <div className="mt-0.5 text-[11.5px] leading-relaxed text-ink-secondary">
-                Turn off all phone connections to this computer.
+                Turn off all remote-device connections to this computer.
               </div>
             </div>
             <Switch
               checked={state.enabled}
-              aria-label="Phone access"
+              aria-label="Remote access"
               disabled={c.busy}
               onClick={() => void c.act((companion) => (state.enabled ? companion.stop() : companion.start()))}
             />
@@ -312,12 +312,12 @@ export function CompanionSection({ profileEmail = "" }: { profileEmail?: string 
             <div className="min-w-0">
               <div className="text-[13px] text-ink">Keep this computer awake</div>
               <div className="mt-0.5 text-[11.5px] leading-relaxed text-ink-secondary">
-                Keeps phone access and scheduled work available while the screen is off.
+                Keeps remote access and scheduled work available while the screen is off.
               </div>
             </div>
             <Switch
               checked={state.keepAwake}
-              aria-label="Keep this computer awake while Phone access is on"
+              aria-label="Keep this computer awake while Remote access is on"
               disabled={c.busy || !state.enabled}
               onClick={() => void c.act((companion) => companion.keepAwake(!state.keepAwake))}
             />
@@ -328,7 +328,7 @@ export function CompanionSection({ profileEmail = "" }: { profileEmail?: string 
               <div className="flex min-w-0 items-start gap-2.5">
                 <Cloud size={15} className="mt-0.5 shrink-0 text-accent" />
                 <div className="min-w-0">
-                  <div className="text-[13px] text-ink">Secure phone account</div>
+                  <div className="text-[13px] text-ink">Secure remote-access account</div>
                   <div className="mt-0.5 text-[11.5px] leading-relaxed text-ink-secondary">
                     {c.account?.status === "ready"
                       ? `Signed in as ${c.account.email ?? "your account"}.`
@@ -336,7 +336,7 @@ export function CompanionSection({ profileEmail = "" }: { profileEmail?: string 
                         ? "Finishing secure access…"
                         : c.account?.status === "error"
                           ? c.account.message ?? "Secure access needs attention."
-                          : "You’ll be asked to sign in when you pair a phone."}
+                          : "You’ll be asked to sign in when you pair a device."}
                   </div>
                 </div>
               </div>
@@ -397,7 +397,7 @@ export function CompanionSection({ profileEmail = "" }: { profileEmail?: string 
 
           {state.enabled && !hosted && !state.tailscale && (
             <div className="rounded-lg bg-inset px-3 py-2 text-[11.5px] leading-relaxed text-ink-secondary">
-              Without secure phone access or Tailscale, this computer is reachable only on a compatible local network.
+              Without secure remote access or Tailscale, this computer is reachable only on a compatible local network.
             </div>
           )}
           {(c.error || state.error) && <div className="text-[12px] text-danger">{c.error ?? state.error}</div>}

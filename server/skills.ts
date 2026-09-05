@@ -41,6 +41,7 @@ import {
   renameSync,
   rmSync,
   symlinkSync,
+  unlinkSync,
   writeFileSync,
 } from "node:fs";
 import { dirname, join, relative, resolve } from "node:path";
@@ -371,16 +372,70 @@ function nativeLinkDirectlyTargetsOwnedSkill(
   root: string,
   name: string,
   revisionWasManaged: boolean,
+  targetBaseDirectory = dirname(link),
 ): boolean {
   try {
     if (!lstatSync(link).isSymbolicLink()) return false;
     const rawTarget = readlinkSync(link);
-    const resolvedTarget = resolve(dirname(link), rawTarget.replace(/^\\\\\?\\/, ""));
+    const resolvedTarget = resolve(targetBaseDirectory, rawTarget.replace(/^\\\\\?\\/, ""));
     const insideSkills = relative(join(root, "skills"), resolvedTarget).replaceAll("\\", "/");
     return insideSkills === name || (revisionWasManaged && /^\.revisions\/[a-f0-9]{64}$/.test(insideSkills));
   } catch {
     return false;
   }
+}
+
+type NativeLinkRemoval = "removed" | "preserved" | "retry";
+
+/** Move one exact directory entry aside before deciding whether it is ours.
+ * `renameSync` is the identity boundary: a workspace process may replace the
+ * original name at any time, but it cannot change which entry was moved. */
+function removeOwnedNativeLink(
+  botId: string,
+  link: string,
+  root: string,
+  name: string,
+  revisionWasManaged: boolean,
+  beforeRemove?: (link: string) => void,
+): NativeLinkRemoval {
+  const quarantineDir = join(skillStateDir(botId), "link-removal");
+  try {
+    mkdirSync(quarantineDir, { recursive: true, mode: 0o700 });
+  } catch {
+    return "retry";
+  }
+  const quarantined = join(quarantineDir, randomUUID());
+  beforeRemove?.(link);
+  try {
+    renameSync(link, quarantined);
+  } catch {
+    return nativeLinkDirectlyTargetsOwnedSkill(link, root, name, revisionWasManaged)
+      ? "retry"
+      : "preserved";
+  }
+
+  if (nativeLinkDirectlyTargetsOwnedSkill(
+    quarantined,
+    root,
+    name,
+    revisionWasManaged,
+    dirname(link),
+  )) {
+    try {
+      unlinkSync(quarantined);
+      return "removed";
+    } catch {
+      try {
+        if (!entryExistsWithoutFollowing(link)) renameSync(quarantined, link);
+      } catch {}
+      return "retry";
+    }
+  }
+
+  try {
+    if (!entryExistsWithoutFollowing(link)) renameSync(quarantined, link);
+  } catch {}
+  return "preserved";
 }
 
 function writeManifest(botId: string, manifest: SkillManifest): void {
@@ -401,6 +456,7 @@ function removeNativeLinksForUnsafeSkillsRoot(
   botId: string,
   root: string,
   previouslyManaged: string[],
+  beforeRemove?: (link: string) => void,
 ): void {
   const retry = new Set<string>();
   for (const dir of NATIVE_SKILL_DIRS) {
@@ -421,11 +477,15 @@ function removeNativeLinksForUnsafeSkillsRoot(
     for (const name of new Set([...existing, ...previouslyManaged])) {
       const link = join(linkDir, name);
       if (!nativeLinkDirectlyTargetsOwnedSkill(link, root, name, previouslyManaged.includes(name))) continue;
-      try {
-        rmSync(link, { recursive: true, force: true });
-      } catch {
-        retry.add(name);
-      }
+      const result = removeOwnedNativeLink(
+        botId,
+        link,
+        root,
+        name,
+        previouslyManaged.includes(name),
+        beforeRemove,
+      );
+      if (result === "retry") retry.add(name);
     }
   }
   try {
@@ -439,14 +499,17 @@ function removeNativeLinksForUnsafeSkillsRoot(
 /** Recreate the native-discovery links from the manifest. Links, not copies,
  * so disable/remove has exactly one source of truth; junctions on Windows
  * because directory symlinks there need privileges junctions do not. */
-export function syncSkillLinks(botId: string): void {
+export function syncSkillLinks(
+  botId: string,
+  options: { beforeRemove?: (link: string) => void } = {},
+): void {
   const root = workspaceDir(botId);
   const previouslyManaged = readManagedLinks(botId);
   // A bot can edit its workspace. Never follow a replaced skills root while
   // deciding which native links are safe to publish. Existing app links must
   // still be revoked, or they start resolving into the replacement.
   if (directoryEntryState(skillsDir(botId)) === "unsafe") {
-    removeNativeLinksForUnsafeSkillsRoot(botId, root, previouslyManaged);
+    removeNativeLinksForUnsafeSkillsRoot(botId, root, previouslyManaged, options.beforeRemove);
     return;
   }
   const manifest = readManifest(botId);
@@ -472,12 +535,15 @@ export function syncSkillLinks(botId: string): void {
       if (target && nativeLinkPointsToSkill(link, target)) {
         managed.add(name);
       } else if (nativeLinkDirectlyTargetsOwnedSkill(link, root, name, previouslyManaged.includes(name))) {
-        try {
-          rmSync(link, { recursive: true, force: true });
-        } catch {
-          // Leave an undeletable app link visible for a later repair attempt.
-          managed.add(name);
-        }
+        const result = removeOwnedNativeLink(
+          botId,
+          link,
+          root,
+          name,
+          previouslyManaged.includes(name),
+          options.beforeRemove,
+        );
+        if (result === "retry") managed.add(name);
       }
     }
     if (!enabled.length) continue;

@@ -41,7 +41,9 @@ const yamlEsmPlugin = {
 // Every file run as its own process. Keep in sync with the spawn sites above.
 const ENTRY_POINTS = [
   "index.ts",
-  // `pair` for operators of a container or headless install (docs/self-hosting.md)
+  // the `openmausbot` command (serve/pair/sessions/status) for the npm
+  // package, the container image and checkouts; pair-cli.ts stays as an alias
+  "openmausbot.ts",
   "pair-cli.ts",
   // The packaged smoke probe imports this manifest directly. Importing the
   // shared avatar contract widens TypeScript's inferred emit root to the repo,
@@ -86,6 +88,37 @@ await build({
   target: "node20",
   format: "esm",
   outfile: join(root, "dist-server", "mcp-server.js"),
+  allowOverwrite: true,
+  logLevel: "info",
+});
+
+// `openmausbot serve --tunnel` (server/tunnel.ts) spawns the connector guardian
+// as its own process, so it has to exist as a file beside the server, not only
+// as code inlined into the bundle that imports its neighbours. Bundled under
+// its own name: the same code the desktop app runs from
+// electron/managed-companion-guardian-main.mjs, so a fix lands in both.
+await build({
+  entryPoints: [join(root, "electron", "managed-companion-guardian-main.mjs")],
+  bundle: true,
+  platform: "node",
+  target: "node20",
+  format: "esm",
+  outfile: join(root, "dist-server", "tunnel-guardian.js"),
+  allowOverwrite: true,
+  logLevel: "info",
+});
+
+// `serve --tunnel` downloads cloudflared on first use by running the same
+// pinned-digest script the release build uses, as its own process (it runs
+// itself when executed directly, so it must never be inlined into another
+// entry).
+await build({
+  entryPoints: [join(root, "scripts", "prepare-cloudflared.mjs")],
+  bundle: true,
+  platform: "node",
+  target: "node20",
+  format: "esm",
+  outfile: join(root, "dist-server", "prepare-cloudflared.js"),
   allowOverwrite: true,
   logLevel: "info",
 });

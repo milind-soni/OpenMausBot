@@ -1,0 +1,105 @@
+name: npm package
+
+on:
+  # release.yml dispatches this on the tag it just published: a tag created
+  # with the workflow token never fires push events on its own.
+  workflow_dispatch:
+  push:
+    tags: ["v*"]
+  pull_request:
+    paths:
+      - server/cli.ts
+      - server/tunnel.ts
+      - server/tailscale.ts
+      - server/pair-cli.ts
+      - scripts/build-npm-package.mjs
+      - scripts/bundle-server.mjs
+      - .github/workflows/npm-package.yml
+
+permissions:
+  # write: the release-tag run attaches the tarball to the GitHub release.
+  # Pull-request runs from forks get a read-only token regardless.
+  contents: write
+  id-token: write
+
+jobs:
+  pack-and-prove:
+    name: assemble, pack, run standalone
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: pnpm/action-setup@ff378ebe6b225b0680b81c1ad4498ae0d1d3a5e3 # v6.0.10
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 24
+      - run: pnpm install --frozen-lockfile
+        env:
+          ELECTRON_SKIP_BINARY_DOWNLOAD: "1"
+      - run: pnpm build:server && pnpm exec vite build && node scripts/build-npm-package.mjs
+      - name: Prove the packed tarball runs with no node_modules at all
+        run: |
+          set -euo pipefail
+          cd release/npm && npm pack --silent && cd ../..
+          rm -rf /tmp/omb-pack && mkdir -p /tmp/omb-pack && tar -xzf release/npm/openmausbot-*.tgz -C /tmp/omb-pack
+          cd /tmp/omb-pack/package
+          # Every check below is a silent grep/test; say which one failed, and what the server said.
+          set -x
+          trap 'echo "--- serve.log"; cat serve.log 2>/dev/null; echo "--- tunnel.log"; cat tunnel.log 2>/dev/null' ERR
+          test ! -d node_modules
+          node cli.js --help | grep -q "openmausbot serve"
+          HOME=/tmp/omb-pack/home node cli.js serve --no-pair --port 18799 --data-dir /tmp/omb-pack/data --label ci --public-url https://ci.example > serve.log 2>&1 &
+          for i in $(seq 1 60); do curl -sf http://127.0.0.1:18799/api/health >/dev/null && break; sleep 1; done
+          grep -q "reachable at https://ci.example" serve.log
+          OMB_PORT=18799 node cli.js status | grep -q "ci ·"
+          OMB_PORT=18799 node cli.js pair --label "CI phone" | grep -q "open or scan:  https://ci.example/pair#code="
+          OMB_PORT=18799 node cli.js sessions | grep -q "no paired devices yet"
+          # the bundles also run directly by path (the image and docs do that), not only through cli.js:
+          # a bundled module with a "run when executed directly" block would fire here
+          node dist-server/openmausbot.js --help | grep -q "openmausbot serve"
+          OMB_PORT=1 node dist-server/pair-cli.js > pair.out 2>&1 || true
+          cat pair.out
+          grep -q "no OpenMausBot server" pair.out
+          # --tunnel ships its own processes and fails closed without an account
+          test -f dist-server/tunnel-guardian.js && test -f dist-server/prepare-cloudflared.js
+          if HOME=/tmp/omb-pack/home node cli.js serve --tunnel --port 18798 --data-dir /tmp/omb-pack/data2 > tunnel.log 2>&1; then echo "serve --tunnel should refuse without login"; exit 1; fi
+          grep -q "run \`openmausbot login\` first" tunnel.log
+          kill %1; wait %1 || true
+      # Trusted publishing: npm trusts this repository's workflow through the
+      # OIDC token (`id-token: write` above), so no registry token is stored
+      # anywhere and no one-time password is asked for. One-time setup on
+      # npmjs.com: package → Settings → Publishing access → GitHub Actions,
+      # owner milind-soni, repository OpenMausBot, workflow npm-package.yml.
+      # Needs npm ≥ 11.5 (Node 24 ships it).
+      - name: Publish to npm (release tags only)
+        if: startsWith(github.ref, 'refs/tags/v')
+        working-directory: release/npm
+        run: |
+          npm --version
+          npm publish --access public --provenance
+      - name: Note the npm package on the GitHub release (release tags only)
+        if: startsWith(github.ref, 'refs/tags/v')
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          version="${GITHUB_REF_NAME#v}"
+          npm view "openmausbot@$version" version   # what the registry has now
+          if gh release view "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            gh release view "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" --json body --jq .body > "$RUNNER_TEMP/notes.md"
+            printf '\n\n**npm:** `npx openmausbot@%s` · https://www.npmjs.com/package/openmausbot/v/%s\n' "$version" "$version" >> "$RUNNER_TEMP/notes.md"
+            gh release edit "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" --notes-file "$RUNNER_TEMP/notes.md"
+          fi
+      # The same tarball beside the desktop installers on the GitHub release,
+      # for people who install from a download rather than the registry. The
+      # release exists by the time the tag does (publishing it is what creates
+      # the tag); a tag pushed without one is left alone.
+      - name: Attach the tarball to the GitHub release (release tags only)
+        if: startsWith(github.ref, 'refs/tags/v')
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if gh release view "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            gh release upload "$GITHUB_REF_NAME" release/npm/openmausbot-*.tgz --repo "$GITHUB_REPOSITORY" --clobber
+          else
+            echo "no GitHub release named $GITHUB_REF_NAME; tarball not attached"
+          fi

@@ -55,6 +55,14 @@ import {
   readPhoneSecretIdentity,
   withPhoneSecretIdentity,
 } from "./phone-secret-identity.mjs";
+import {
+  desktopCompanionAccess,
+  desktopCompanionRendererArguments,
+  pairDesktopCompanion,
+  startDesktopCompanionRelay,
+  withDesktopCompanionAccess,
+  withoutDesktopCompanionAccess,
+} from "./desktop-companion-client.mjs";
 import { isKnownSkin } from "./skin-overlay.cjs";
 import { readSecureCredentials } from "./secure-credentials.mjs";
 import { createControlPlaneClient } from "./control-plane-client.mjs";
@@ -65,6 +73,7 @@ import {
 } from "./companion-account-service.mjs";
 import capabilitiesModule from "./capabilities.cjs";
 import environmentsModule from "./environments.cjs";
+import localOriginModule from "./local-origin.cjs";
 import { buildApplicationMenu } from "./menu.mjs";
 import { acquireDataDirLease } from "./data-dir-lease.mjs";
 
@@ -222,6 +231,17 @@ nativeAutoUpdater.on("before-quit-for-update", () => releaseSingleInstanceLock(a
 function deliverPackageInstall(win) {
   if (!pendingPackageInstallUrl || !win || win.isDestroyed()) return;
   if (win.webContents.isLoadingMainFrame()) return;
+  // A package installs into THIS computer's workspace, so it is handed to the
+  // local UI only. Showing a remote server: switch back to Local first; the
+  // pending link is delivered when that page finishes loading.
+  let showingLocal = false;
+  try {
+    showingLocal = new URL(win.webContents.getURL()).origin === rendererOrigin();
+  } catch {}
+  if (!showingLocal) {
+    if (activeEnvironment(environmentsState)) switchEnvironment(LOCAL_ID);
+    return;
+  }
   win.webContents.send("package:install", pendingPackageInstallUrl);
   pendingPackageInstallUrl = null;
 }
@@ -264,6 +284,7 @@ const utilityServerExits = new WeakMap();
 const UTILITY_SERVER_STOP_TIMEOUT_MS = 6_500;
 const trustedApprovalMode = createTrustedApprovalModeCoordinator({ randomId: randomUUID });
 const desktopMutationToken = randomBytes(32).toString("base64url");
+const companionMutationToken = randomBytes(32).toString("base64url");
 
 function desktopDataDir() {
   // Match the historical desktop fallback for an unset or empty override,
@@ -293,6 +314,8 @@ async function stopUtilityServer(proc, timeoutMs = UTILITY_SERVER_STOP_TIMEOUT_M
   ]).finally(() => clearTimeout(timer));
 }
 let phoneSecretIdentity = null;
+let desktopRemoteAccess = null;
+let desktopCompanionRelay = null;
 
 const CREDENTIALS_FILE = path.join(app.getPath("userData"), "credentials.bin");
 
@@ -432,6 +455,15 @@ import {
   startCompanion,
   stopCompanion,
 } from "./companion.mjs";
+
+/** IPC that controls this computer, its files, its logins or its updater is
+ * answered only for the local server's UI (electron/local-origin.cjs). A
+ * remote server's page gets a reduced bridge (preload.cjs) in the first
+ * place; this is the second wall, shared with cua.mjs, updater.mjs and
+ * android-device.mjs. Declared before any handler registration below: a
+ * const declared later would be in its temporal dead zone at module load.
+ */
+const { isLocalSender: senderIsLocal, localOnly, localOnlySync, setLocalOrigin } = localOriginModule;
 
 let companionPowerBlocker = null;
 
@@ -607,6 +639,7 @@ function companionLaunchOptions(hostedUrl = null) {
   return {
     resourcesPath: process.resourcesPath,
     harnessPort: SERVER_PORT,
+    mutationToken: companionMutationToken,
     hostedUrl,
     // Only an embedded server receives the private half over its utility
     // port. A dev server launched in another terminal cannot decrypt, so it
@@ -949,6 +982,7 @@ function syncDesktopMutationToken(proc) {
     proc.postMessage({
       type: "openmausbot:desktop-mutation-token",
       token: desktopMutationToken,
+      companionToken: companionMutationToken,
     });
   } catch (error) {
     slog(`desktop mutation capability sync failed: ${error?.message ?? error}`);
@@ -1171,7 +1205,7 @@ const displayMediaGuard = createDisplayMediaGuard();
 let displayMediaRequestCount = 0;
 
 function rendererOrigin() {
-  return new URL(app.isPackaged ? `http://127.0.0.1:${SERVER_PORT}` : DEV_URL).origin;
+  return new URL(app.isPackaged || desktopRemoteAccess ? `http://127.0.0.1:${SERVER_PORT}` : DEV_URL).origin;
 }
 
 function respondToDisplayMediaRequest(callback, response) {
@@ -1534,9 +1568,9 @@ ipcMain.handle("browser:forget-profile", localOnly("browser:forget-profile", asy
   return { dropped };
 }));
 
-ipcMain.on("screen:preview-intent", (event) => {
+ipcMain.on("screen:preview-intent", localOnlySync("screen:preview-intent", (event) => {
   event.returnValue = displayMediaGuard.begin(event.senderFrame);
-});
+}));
 
 ipcMain.on("desktop:unread-count", (event, value) => {
   const sender = BrowserWindow.fromWebContents(event.sender);
@@ -1584,24 +1618,6 @@ function activeOrigin() {
   return activeEnvironment(environmentsState)?.origin ?? rendererOrigin();
 }
 
-function senderIsLocal(event) {
-  const url = event?.senderFrame?.url ?? event?.sender?.getURL?.() ?? "";
-  try {
-    return new URL(url).origin === rendererOrigin();
-  } catch {
-    return false;
-  }
-}
-
-/** IPC that controls this computer, its files, its logins or its updater is
- * answered only for the local server's UI. A remote server's page gets a
- * reduced bridge (preload.cjs) in the first place; this is the second wall. */
-function localOnly(channel, handler) {
-  return (event, ...args) => {
-    if (!senderIsLocal(event)) throw new Error(`${channel} is only available while using the local server`);
-    return handler(event, ...args);
-  };
-}
 
 function refreshApplicationMenu() {
   Menu.setApplicationMenu(
@@ -1674,6 +1690,12 @@ async function forgetEnvironment(id) {
   });
   if (response !== 0) return;
   persistEnvironments(withoutEnvironment(environmentsState, id));
+  try {
+    // Revoke the session on the server while the cookie is still here.
+    await session.defaultSession.fetch(`${env.origin}/api/auth/logout`, { method: "POST", signal: AbortSignal.timeout(5_000) });
+  } catch (error) {
+    slog(`forget server: logout skipped (${error?.message ?? error})`);
+  }
   try {
     await session.defaultSession.clearStorageData({ origin: env.origin, storages: ["cookies", "localstorage", "indexdb", "serviceworkers", "cachestorage"] });
   } catch (error) {
@@ -1752,12 +1774,16 @@ function createWindow() {
       contextIsolation: true,
       preload: path.join(__dirname, "preload.cjs"),
       // The preload exposes the full bridge only to this origin (see preload.cjs).
-      additionalArguments: [`--omb-local-origin=${rendererOrigin()}`],
+      // Companion client mode still serves the bundled UI from its own
+      // loopback relay, so it is a trusted local page while also needing the
+      // renderer's remote-only feature gates. Keep the two facts independent:
+      // upstream's origin boundary must not erase the client-mode marker.
+      additionalArguments: desktopCompanionRendererArguments(rendererOrigin(), desktopRemoteAccess),
     },
   });
   mainWindow = win;
   attachUpdaterWindow(win);
-  void startBrowserSurface(win);
+  if (!desktopRemoteAccess) void startBrowserSurface(win);
   if (waitsForSkinSync) {
     // A broken renderer or preload must not strand the app as an invisible
     // process. Normal startup shows from desktop:skin almost immediately;
@@ -1794,6 +1820,22 @@ function createWindow() {
   };
   win.webContents.on("will-navigate", guardNavigation);
   win.webContents.on("will-redirect", guardNavigation);
+  // Subframes: a page may not embed the local server, or any other saved
+  // server, inside this preload-bearing window.
+  win.webContents.on("will-frame-navigate", (details) => {
+    if (details.isMainFrame) return;
+    let target = null;
+    let page = null;
+    try {
+      target = new URL(details.url).origin;
+      page = new URL(win.webContents.getURL()).origin;
+    } catch {}
+    if (!target || !page || target === page) return;
+    if (target === rendererOrigin() || allowedOrigins(environmentsState, rendererOrigin()).has(target)) {
+      details.preventDefault();
+      slog(`blocked subframe navigation to ${details.url}`);
+    }
+  });
   win.webContents.on("did-fail-load", (_event, errorCode, errorDescription, validatedURL, isMainFrame) => {
     if (!isMainFrame || errorCode === -3) return; // -3: aborted by a newer navigation
     const remote = activeEnvironment(environmentsState);
@@ -1929,7 +1971,9 @@ function createWindow() {
   }
 
   const remote = activeEnvironment(environmentsState);
-  if (remote) {
+  if (desktopRemoteAccess) {
+    win.loadURL(serverReady ? `http://127.0.0.1:${SERVER_PORT}` : buildErrorPage({ allPortsOccupied: serverStartConflictOnly }));
+  } else if (remote) {
     win.loadURL(remote.origin);
   } else if (app.isPackaged) {
     win.loadURL(serverReady ? `http://127.0.0.1:${SERVER_PORT}` : buildErrorPage({ allPortsOccupied: serverStartConflictOnly }));
@@ -2192,6 +2236,53 @@ ipcMain.handle("companion:revoke", localOnly("companion:revoke", (_event, device
   companionRevoke(deviceId).then(() => desktopCompanionState()),
 ));
 
+function publicDesktopRemoteState() {
+  return desktopRemoteAccess
+    ? {
+        active: true,
+        endpoint: desktopRemoteAccess.endpoint,
+        serverName: desktopRemoteAccess.serverName,
+        deviceId: desktopRemoteAccess.deviceId,
+      }
+    : { active: false };
+}
+
+function requireMainWindowSender(event) {
+  const sender = BrowserWindow.fromWebContents(event.sender);
+  if (!sender || sender !== mainWindow || sender.isDestroyed()) {
+    throw new Error("The desktop client window is unavailable");
+  }
+}
+
+function relaunchAfterDesktopRemoteChange() {
+  const timer = setTimeout(() => {
+    app.relaunch();
+    app.exit(0);
+  }, 250);
+  timer.unref?.();
+}
+
+ipcMain.handle("desktop-remote:state", () => publicDesktopRemoteState());
+ipcMain.handle("desktop-remote:pair", localOnly("desktop-remote:pair", async (event, endpoint, code) => {
+  requireMainWindowSender(event);
+  const access = await pairDesktopCompanion({
+    endpoint,
+    code,
+    deviceName: `${installationDisplayName()} desktop`,
+  });
+  await updateSecureCredentialDocument((credentials) => withDesktopCompanionAccess(credentials, access));
+  desktopRemoteAccess = access;
+  relaunchAfterDesktopRemoteChange();
+  return publicDesktopRemoteState();
+}));
+ipcMain.handle("desktop-remote:disconnect", localOnly("desktop-remote:disconnect", async (event) => {
+  requireMainWindowSender(event);
+  await updateSecureCredentialDocument(withoutDesktopCompanionAccess);
+  desktopRemoteAccess = null;
+  relaunchAfterDesktopRemoteChange();
+  return { active: false };
+}));
+
 // Auth and connector credentials never cross this boundary. Every handler
 // returns the same deliberately tiny, secret-free public account state.
 ipcMain.handle("companion-account:state", localOnly("companion-account:state", () => ensureCompanionAccountService().state()));
@@ -2315,14 +2406,19 @@ ipcMain.handle("approvals:set-trusted-mode", localOnly("approvals:set-trusted-mo
 }));
 
 async function broadcastDesktopCapabilities() {
-  const capabilities = desktopCapabilities({
-    platform: process.platform,
-    env: process.env,
-    packaged: app.isPackaged,
-    localConnection: await cuaReady,
-  });
+  const localConnection = await cuaReady;
+  const build = (remote) =>
+    desktopCapabilities({ remote, platform: process.platform, env: process.env, packaged: app.isPackaged, localConnection });
+  const local = build(false);
+  let redacted = null;
   for (const window of BrowserWindow.getAllWindows()) {
-    if (!window.isDestroyed()) window.webContents.send("desktop:capabilities-changed", capabilities);
+    if (window.isDestroyed()) continue;
+    let isLocal = false;
+    try {
+      isLocal = new URL(window.webContents.getURL()).origin === rendererOrigin();
+    } catch {}
+    if (!isLocal) redacted ??= build(true);
+    window.webContents.send("desktop:capabilities-changed", isLocal ? local : redacted);
   }
 }
 
@@ -2372,7 +2468,8 @@ app.whenReady().then(async () => {
   });
   secureCredentials = secureCredentialState.read();
   if (app.isPackaged) await ensurePhoneSecretIdentity();
-  const hostedAccount = ensureCompanionAccountService();
+  desktopRemoteAccess = desktopCompanionAccess(secureCredentials);
+  const hostedAccount = desktopRemoteAccess ? null : ensureCompanionAccountService();
   // Display capture remains user-initiated. The renderer first sends a
   // short-lived one-shot intent, then calls getDisplayMedia in the same click.
   // The handler binds that request to the same frame/origin, rejects audio,
@@ -2431,13 +2528,27 @@ app.whenReady().then(async () => {
   // connection descriptor on first render. Never blocks window creation on
   // failure — computer use degrades to "unavailable", the rest still works.
   cuaReady =
-    process.platform === "darwin" || process.platform === "linux"
+    !desktopRemoteAccess && (process.platform === "darwin" || process.platform === "linux")
       ? startCua().catch((e) => {
           console.error("[cua] start failed:", e);
           return { mode: "unavailable", reason: String(e) };
         })
       : Promise.resolve({ mode: "unavailable", reason: "unsupported-platform" });
-  if (app.isPackaged) {
+  if (desktopRemoteAccess) {
+    try {
+      desktopCompanionRelay = await startDesktopCompanionRelay({
+        access: desktopRemoteAccess,
+        staticDir: app.isPackaged
+          ? path.join(process.resourcesPath, "ui")
+          : path.join(app.getAppPath(), "dist"),
+      });
+      SERVER_PORT = desktopCompanionRelay.port;
+      serverReady = true;
+    } catch (error) {
+      serverReady = false;
+      slog(`desktop companion relay failed: ${error?.message ?? error}`);
+    }
+  } else if (app.isPackaged) {
     // The embedded harness receives this descriptor only over its private
     // utility-process port. Never leave the master token in userData where a
     // shell-capable bot running as the same OS user could read it.
@@ -2452,15 +2563,32 @@ app.whenReady().then(async () => {
   // exact options the IPC handler uses. A failure surfaces in companionState
   // (the panel shows the error) rather than retrying; and it never delays
   // the window.
-  if (serverReady && companionEnabledAtRest()) {
+  if (!desktopRemoteAccess && serverReady && companionEnabledAtRest()) {
     void startDesktopCompanion({ waitForHosted: false, remember: false });
   }
+  setLocalOrigin(rendererOrigin());
+  // Device permissions (microphone, camera, notifications, …) are for the
+  // local UI only; a remote server's page in this window is refused without
+  // a prompt. Client mode's loopback relay is the local UI.
+  const localPermission = (url) => {
+    try {
+      return new URL(String(url)).origin === rendererOrigin();
+    } catch {
+      return false;
+    }
+  };
+  session.defaultSession.setPermissionRequestHandler((contents, _permission, callback, details) =>
+    callback(localPermission(details?.requestingUrl ?? contents?.getURL?.() ?? "")),
+  );
+  session.defaultSession.setPermissionCheckHandler((contents, _permission, requestingOrigin) =>
+    localPermission(requestingOrigin || contents?.getURL?.() || ""),
+  );
   environmentsState = readEnvironments();
   createWindow();
   // Reconcile incomplete setup and resume interrupted sign-out only after the
   // local app is usable. This background network work never gates LAN pairing
   // or the first window.
-  void hostedAccount.restore().catch(() => {});
+  if (hostedAccount) void hostedAccount.restore().catch(() => {});
   // Registration is optional network work. Start it only after the local
   // server and first window are usable, then update the server child over its
   // private parent port so Connected Apps becomes available without restart.
@@ -2470,7 +2598,7 @@ app.whenReady().then(async () => {
   if (credentialStoreUnavailable) {
     slog("skipping connected-apps registration: the credential store was unreadable this launch");
   }
-  if (app.isPackaged && composioBrokerUrl() && !credentialStoreUnavailable) {
+  if (!desktopRemoteAccess && app.isPackaged && composioBrokerUrl() && !credentialStoreUnavailable) {
     void updateSecureCredentialDocument(async (credentials) => {
       await ensureManagedComposioCredentials({
         brokerUrl: composioBrokerUrl(),
@@ -2525,6 +2653,9 @@ app.on("before-quit", (e) => {
   serverProc = null;
   // Release the sleep blocker synchronously; child shutdown is awaited below.
   syncCompanionKeepAwake(false, false);
+  try {
+    desktopCompanionRelay?.close?.();
+  } catch {}
   // a live dictation session runs its own helper child that holds the mic —
   // stop it here so quitting never orphans a recording process
   if (nativeActions.appleSpeech) stopSpeech();

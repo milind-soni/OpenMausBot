@@ -186,3 +186,22 @@ export class ComputerControl {
     return snapshot;
   }
 }
+
+/** Safely executes an async tool or desktop control call, catching runtime exceptions gracefully. */
+export async function executeToolSafely<T>(
+  toolName: string,
+  fn: () => Promise<T>
+): Promise<{ success: boolean; data?: T; error?: string }> {
+  try {
+    const data = await fn();
+    return { success: true, data };
+  } catch (err: any) {
+    const errorMessage = err?.message || String(err) || 'Unknown execution error';
+    console.error(`[Tool Execution Error] Name: ${toolName} | Details: ${errorMessage}`);
+    return {
+      success: false,
+      error: `Tool '${toolName}' failed to execute: ${errorMessage}`
+    };
+  }
+}
+

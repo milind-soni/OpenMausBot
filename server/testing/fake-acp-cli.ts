@@ -384,6 +384,9 @@ function handle(msg: any) {
       break;
     }
     case "session/resume": {
+      if (process.env.FAKE_ACP_DUMP) {
+        writeFileSync(`${process.env.FAKE_ACP_DUMP}.mcp.json`, JSON.stringify(msg.params?.mcpServers ?? []));
+      }
       const opts = configOptions();
       const mdls = sessionModels();
       result(msg.id, { ...(opts ? { configOptions: opts } : {}), ...(mdls ? { models: mdls } : {}) });

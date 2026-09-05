@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { Check, Hand, Settings, ShieldAlert, ShieldCheck } from "lucide-react";
 
-import { approvalModeFor, type ApprovalMode } from "../../shared/approval-mode";
+import { approvalModeFor, hasNativeAutoReview, supportsApprovalMode, type ApprovalMode } from "../../shared/approval-mode";
 import { cn } from "@/lib/cn";
 import { APPROVAL_LEVELS_URL, openExternalLink } from "@/lib/app-links";
 
@@ -23,7 +23,7 @@ export const APPROVAL_MODE_OPTIONS: ReadonlyArray<{
     mode: "auto",
     label: "Approve for me",
     chip: "Auto",
-    description: "Only ask for actions detected as potentially unsafe",
+    description: "The provider reviews routine actions and asks about others",
     Icon: ShieldCheck,
   },
   {
@@ -43,9 +43,12 @@ export const APPROVAL_MODE_OPTIONS: ReadonlyArray<{
 ];
 
 export function approvalModeOptionsFor(driverKind: string, trustedModesAvailable = true) {
-  return driverKind === "codex" && trustedModesAvailable
-    ? APPROVAL_MODE_OPTIONS
-    : APPROVAL_MODE_OPTIONS.filter((option) => option.mode === "ask" || option.mode === "auto");
+  return APPROVAL_MODE_OPTIONS
+    .filter((option) => supportsApprovalMode(driverKind, option.mode)
+      && (trustedModesAvailable || option.mode === "ask" || option.mode === "auto"))
+    .map((option) => option.mode === "auto" && !hasNativeAutoReview(driverKind)
+      ? { ...option, description: "This provider has no automatic review; behaves like Ask" }
+      : option);
 }
 
 export function approvalModeSelectionRequiresLocalDesktop(

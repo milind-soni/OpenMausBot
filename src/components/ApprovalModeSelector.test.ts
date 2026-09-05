@@ -17,7 +17,7 @@ describe("approval mode selector", () => {
       {
         mode: "auto",
         label: "Approve for me",
-        description: "Only ask for actions detected as potentially unsafe",
+        description: "The provider reviews routine actions and asks about others",
       },
       {
         mode: "full",
@@ -32,7 +32,7 @@ describe("approval mode selector", () => {
     ]);
   });
 
-  it("offers Full access and config.toml only when the bot uses Codex", () => {
+  it("offers provider-supported Full access but keeps config.toml Codex-only", () => {
     expect(approvalModeOptionsFor("codex").map((option) => option.mode)).toEqual([
       "ask",
       "auto",
@@ -42,7 +42,18 @@ describe("approval mode selector", () => {
     expect(approvalModeOptionsFor("claudeAgent").map((option) => option.mode)).toEqual([
       "ask",
       "auto",
+      "full",
     ]);
+  });
+
+  it.each(["antigravityAgent", "cursorAgent", "grokAgent", "opencodeGo"])("offers Full access for %s", (kind) => {
+    expect(approvalModeOptionsFor(kind).map((option) => option.mode)).toEqual(["ask", "auto", "full"]);
+    expect(approvalModeOptionsFor(kind, false).map((option) => option.mode)).toEqual(["ask", "auto"]);
+  });
+
+  it("explains Auto fallbacks and does not elevate unknown providers", () => {
+    expect(approvalModeOptionsFor("antigravityAgent").find((option) => option.mode === "auto")?.description).toContain("behaves like Ask");
+    expect(approvalModeOptionsFor("customAgent").map((option) => option.mode)).toEqual(["ask", "auto"]);
   });
 
   it("hides trusted modes when the packaged desktop bridge is unavailable", () => {

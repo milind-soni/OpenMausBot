@@ -21,10 +21,10 @@ const device = (lastSeenAt: number) => ({
 describe("sidebar phone status", () => {
   const now = 1_900_000_000_000;
 
-  it("uses neutral plus semantics when no phone is paired", () => {
+  it("uses neutral plus semantics when no device is paired", () => {
     expect(deriveSidebarPhoneStatus({ enabled: true, devices: [], connectedDeviceIds: [] }, now)).toEqual({
       kind: "unpaired",
-      label: "Pair a phone",
+      label: "Pair a device",
       pairedCount: 0,
       connectedCount: 0,
     });
@@ -37,7 +37,7 @@ describe("sidebar phone status", () => {
       connectedDeviceIds: [],
     }, now)).toEqual({
       kind: "unavailable",
-      label: "Phone access off",
+      label: "Remote access off",
       pairedCount: 0,
       connectedCount: 0,
     });
@@ -48,22 +48,22 @@ describe("sidebar phone status", () => {
       error: "sidecar unavailable",
     }, now)).toEqual({
       kind: "unavailable",
-      label: "Phone status unavailable",
+      label: "Device status unavailable",
       pairedCount: 0,
       connectedCount: 0,
     });
   });
 
-  it("turns green only for a paired phone with a live authenticated stream", () => {
+  it("turns green only for a paired device with a live authenticated stream", () => {
     const recent = device(now - SIDEBAR_PHONE_RECENT_MS);
     expect(deriveSidebarPhoneStatus({
       enabled: true,
       devices: [recent],
       connectedDeviceIds: ["phone-1"],
-    }, now)).toMatchObject({ kind: "connected", label: "Phone connected", connectedCount: 1 });
+    }, now)).toMatchObject({ kind: "connected", label: "Device connected", connectedCount: 1 });
     expect(
       deriveSidebarPhoneStatus({ enabled: true, devices: [recent], connectedDeviceIds: [] }, now),
-    ).toMatchObject({ kind: "disconnected", label: "Phone paired — not connected" });
+    ).toMatchObject({ kind: "disconnected", label: "Device paired — not connected" });
     expect(deriveSidebarPhoneStatus({
       enabled: false,
       devices: [recent],
@@ -77,14 +77,14 @@ describe("sidebar phone status", () => {
     }, now).kind).toBe("unavailable");
   });
 
-  it("reports partial live connectivity without implying every paired phone is online", () => {
+  it("reports partial live connectivity without implying every paired device is online", () => {
     expect(deriveSidebarPhoneStatus({
       enabled: true,
       devices: [device(now - 1_000), { ...device(now - SIDEBAR_PHONE_RECENT_MS - 1), id: "phone-2" }],
       connectedDeviceIds: ["phone-1"],
     }, now)).toMatchObject({
       kind: "connected",
-      label: "1 of 2 phones connected",
+      label: "1 of 2 devices connected",
       pairedCount: 2,
       connectedCount: 1,
     });
@@ -96,12 +96,12 @@ describe("sidebar phone status", () => {
       devices: [device(now - 1_000)],
     }, now)).toMatchObject({
       kind: "recent",
-      label: "Phone active recently",
+      label: "Device active recently",
       connectedCount: 0,
     });
   });
 
-  it("opens Settings directly on the internal Phone section", () => {
+  it("opens Settings directly on the internal Remote access section", () => {
     expect(phoneSettingsAction()).toEqual({
       type: "toggleAppSettings",
       open: true,
@@ -121,13 +121,13 @@ describe("SidebarPhoneStatusButton", () => {
   it("keeps its plain status accessible in the full sidebar without exposing connection details", () => {
     const markup = render("comfortable", {
       kind: "connected",
-      label: "Phone connected",
+      label: "Device connected",
       pairedCount: 1,
       connectedCount: 1,
     });
 
-    expect(markup).toContain('aria-label="Phone connected"');
-    expect(markup).toContain('title="Phone connected"');
+    expect(markup).toContain('aria-label="Device connected"');
+    expect(markup).toContain('title="Device connected"');
     expect(markup).toContain('data-sidebar-density="comfortable"');
     expect(markup).toContain('data-phone-status="connected"');
     expect(markup).toContain("data-phone-connected");
@@ -138,13 +138,13 @@ describe("SidebarPhoneStatusButton", () => {
   it("stays a centered compact control and shows the plus only when unpaired", () => {
     const unpaired = render("icons", {
       kind: "unpaired",
-      label: "Pair a phone",
+      label: "Pair a device",
       pairedCount: 0,
       connectedCount: 0,
     });
     const stale = render("icons", {
       kind: "stale",
-      label: "Phone paired — not recently active",
+      label: "Device paired — not recently active",
       pairedCount: 1,
       connectedCount: 0,
     });
@@ -159,7 +159,7 @@ describe("SidebarPhoneStatusButton", () => {
   it("uses the same fixed-size control in the compact text sidebar", () => {
     const markup = render("compact", {
       kind: "stale",
-      label: "Phone paired — not recently active",
+      label: "Device paired — not recently active",
       pairedCount: 1,
       connectedCount: 0,
     });

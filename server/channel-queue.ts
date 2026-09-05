@@ -14,6 +14,8 @@ interface ChannelQueueItem {
   replyToId?: string;
   sendId?: string;
   mode: "chat" | "goal";
+  /** kept so the drain appends it with the same provenance it arrived with */
+  via?: "api";
 }
 
 interface ChannelQueueEntry {
@@ -35,6 +37,7 @@ export function queueChannelMessage(
     replyToId?: string;
     sendId?: string;
     mode?: "chat" | "goal";
+    via?: "api";
   } = {},
 ): QueuedChannelMessage {
   const entry = queues.get(threadId) ?? { groupId, items: [] };
@@ -45,6 +48,7 @@ export function queueChannelMessage(
     replyToId: options.replyToId,
     sendId: options.sendId,
     mode: options.mode ?? "chat",
+    via: options.via,
   };
   entry.items.push(item);
   queues.set(threadId, entry);

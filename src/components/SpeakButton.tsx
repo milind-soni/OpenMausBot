@@ -1,6 +1,7 @@
 import { Loader2, Square, Volume2 } from "lucide-react";
 
 import { speaker } from "@/lib/tts";
+import { localSystemVoiceActive } from "@/lib/local-voice";
 import { useSpeech } from "@/lib/tts/useSpeech";
 import { useStore } from "@/state/store";
 import { cn } from "@/lib/cn";
@@ -27,8 +28,9 @@ export function SpeakButton({
   const { state } = useStore();
   const speech = useSpeech();
   const tts = state.config?.tts;
-  const configured = Boolean(tts?.configured);
-  const ready = configured && Boolean(voiceId || tts?.voice);
+  const localVoice = localSystemVoiceActive();
+  const configured = localVoice || Boolean(tts?.configured);
+  const ready = localVoice || (configured && Boolean(voiceId || tts?.voice));
   const mine = speech.messageId === messageId && speech.status !== "idle";
   const preparing = mine && speech.status === "preparing";
 

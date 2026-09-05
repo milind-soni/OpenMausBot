@@ -246,12 +246,12 @@ function namedApprovalParams(mode: Exclude<ApprovalMode, "custom">): CodexApprov
   return {
     thread: {
       approvalPolicy: "on-request",
-      approvalsReviewer: "user",
+      approvalsReviewer: mode === "auto" ? "auto_review" : "user",
       sandbox: "workspace-write",
     },
     turn: {
       approvalPolicy: "on-request",
-      approvalsReviewer: "user",
+      approvalsReviewer: mode === "auto" ? "auto_review" : "user",
       sandboxPolicy: { type: "workspaceWrite" },
     },
   };

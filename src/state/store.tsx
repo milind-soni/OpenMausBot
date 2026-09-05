@@ -124,6 +124,8 @@ export interface Message {
   tool?: { name: string; ok?: boolean; spoken?: string; setup?: boolean };
   /** user messages sent into a running turn — the model saw it mid-turn */
   steered?: boolean;
+  /** a user message that arrived through the server's API, not typed here */
+  via?: "api";
   /** Provider turn that produced this message. */
   turnId?: string;
   /** Last assistant text item from a settled provider turn. */
@@ -448,6 +450,7 @@ export type AppSettingsSection =
   | "connections"
   | "engines"
   | "companion"
+  | "remote"
   | "computer"
   | "usage";
 
@@ -2095,16 +2098,23 @@ export function StoreProvider({ children }: { children: ReactNode }) {
           const bot = stateRef.current.bots.find((b) => b.id === action.id);
           const group = stateRef.current.groups.find((g) => g.id === action.id);
           if (bot?.unread) {
-            api(`/api/bots/${action.id}`, { method: "PATCH", body: JSON.stringify({ unread: false }) }).catch(() => {});
+            api(`/api/bots/${action.id}/read`, { method: "POST" }).catch(() => {});
           } else if (group?.unread) {
-            api(`/api/groups/${action.id}`, { method: "PATCH", body: JSON.stringify({ unread: false }) }).catch(() => {});
+            api(`/api/groups/${action.id}/read`, { method: "POST" }).catch(() => {});
           }
           break;
         }
         case "createGroup":
           api(`/api/groups`, {
             method: "POST",
-            body: JSON.stringify({ memberIds: action.memberIds, name: action.name, section: action.section }),
+            body: JSON.stringify({
+              memberIds: action.memberIds,
+              name: action.name,
+              section: action.section,
+              ...(window.ogb?.remoteClient?.active
+                ? { setup: { bulletin: "", defaultResponder: { kind: "mentions" } } }
+                : {}),
+            }),
           })
             .then(({ group }) => {
               rawDispatch({ type: "groupPatched", group });
@@ -2298,14 +2308,14 @@ export function StoreProvider({ children }: { children: ReactNode }) {
           return () => rawDispatch({ type: "routinesHydrated", routines, runs });
         },
       },
-      {
+      ...(window.ogb?.remoteClient?.active ? [] : [{
         key: "webhooks",
         request: async () => {
           const { webhooks, attempts, ingress } = await api("/api/webhooks");
           return () =>
             rawDispatch({ type: "webhooksHydrated", webhooks, attempts: attempts ?? [], ingress });
         },
-      },
+      } satisfies PeripheralPart]),
     ];
     const partByKey = new Map(peripheralParts.map((part) => [part.key, part]));
     const schedulePeripheralRetry = (part: PeripheralPart, error?: Error) => {
@@ -2468,11 +2478,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
           // reading the selected chat clears its badge immediately
           if (bot.unread && bot.id === stateRef.current.selectedId) {
             bot.unread = false;
-            fetch(`/api/bots/${bot.id}`, {
-              method: "PATCH",
-              headers: { "content-type": "application/json" },
-              body: JSON.stringify({ unread: false }),
-            }).catch(() => {});
+            fetch(`/api/bots/${bot.id}/read`, { method: "POST" }).catch(() => {});
           }
           rawDispatch({
             type: "botPatched",
@@ -2485,11 +2491,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
           // reading the selected room clears its badge immediately
           if (group.unread && group.id === stateRef.current.selectedId) {
             group.unread = false;
-            fetch(`/api/groups/${group.id}`, {
-              method: "PATCH",
-              headers: { "content-type": "application/json" },
-              body: JSON.stringify({ unread: false }),
-            }).catch(() => {});
+            fetch(`/api/groups/${group.id}/read`, { method: "POST" }).catch(() => {});
           }
           rawDispatch({ type: "groupPatched", group });
           break;

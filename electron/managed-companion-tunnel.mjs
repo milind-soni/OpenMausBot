@@ -142,7 +142,7 @@ export function resolveCloudflaredBinary({
 }
 
 export function resolveManagedCompanionGuardian({ appPath, exists = fs.existsSync } = {}) {
-  const entry = path.join(String(appPath ?? ""), "electron", "managed-companion-guardian.mjs");
+  const entry = path.join(String(appPath ?? ""), "electron", "managed-companion-guardian-main.mjs");
   return exists(entry) ? entry : null;
 }
 

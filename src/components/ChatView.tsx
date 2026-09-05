@@ -25,6 +25,7 @@ import {
 import { WorkingDots } from "@/components/WorkingIndicator";
 import { cachedInput, costCaption, formatTokens, formatUsd, hasFiniteCost, usageChip, usageDetail } from "@/lib/usage";
 import {
+  api,
   useStore,
   useStreaming,
   formatTime,
@@ -315,6 +316,7 @@ function Bubble({
   onReply: () => void;
 }) {
   const { dispatch } = useStore();
+  const remoteClient = window.ogb?.remoteClient?.active === true;
   const user = message.role === "user";
   const [expanded, setExpanded] = useState(false);
   const text = message.text ?? "";
@@ -376,7 +378,10 @@ function Bubble({
                 })
               }
               aria-label={bot.pinnedMessageId === message.id ? "Unpin message" : "Pin message"}
-              className="rounded-md p-1.5 text-ink-secondary opacity-0 transition-opacity hover:bg-raised hover:text-ink focus-visible:opacity-100 group-hover:opacity-100 group-focus-within:opacity-100"
+              className={cn(
+                "rounded-md p-1.5 text-ink-secondary opacity-0 transition-opacity hover:bg-raised hover:text-ink focus-visible:opacity-100 group-hover:opacity-100 group-focus-within:opacity-100",
+                remoteClient && "hidden",
+              )}
               title={
                 bot.pinnedMessageId === message.id
                   ? "Unpin this message"
@@ -505,7 +510,10 @@ function Bubble({
                 })
               }
               aria-label={bot.pinnedMessageId === message.id ? "Unpin message" : "Pin message"}
-              className="rounded-md p-1.5 text-ink-secondary opacity-0 transition-opacity hover:bg-raised hover:text-ink focus-visible:opacity-100 group-hover:opacity-100 group-focus-within:opacity-100"
+              className={cn(
+                "rounded-md p-1.5 text-ink-secondary opacity-0 transition-opacity hover:bg-raised hover:text-ink focus-visible:opacity-100 group-hover:opacity-100 group-focus-within:opacity-100",
+                remoteClient && "hidden",
+              )}
               title={
                 bot.pinnedMessageId === message.id
                   ? "Unpin this message"
@@ -664,7 +672,15 @@ const MessagesList = memo(function MessagesList({
           <BotAvatar bot={bot} state="idle" size={64} motion="none" motionKey={0} />
           <RenameTitle
             value={bot.name}
-            onCommit={(name) => dispatch({ type: "updateBot", botId: bot.id, patch: { name } })}
+            onCommit={(name) => {
+              if (window.ogb?.remoteClient?.active) {
+                void api(`/api/bots/${bot.id}/profile`, { method: "PATCH", body: JSON.stringify({ name }) })
+                  .then(({ bot: updated }) => dispatch({ type: "botPatched", bot: updated }))
+                  .catch((cause) => dispatch({ type: "error", message: cause instanceof Error ? cause.message : String(cause) }));
+              } else {
+                dispatch({ type: "updateBot", botId: bot.id, patch: { name } });
+              }
+            }}
             className="text-[17px] font-semibold text-ink"
             inputClassName="rounded bg-inset px-1.5 py-0.5 text-center text-[17px] font-semibold"
           />
@@ -816,7 +832,7 @@ function PinnedBanner({
   pinnedId?: string;
   messages: Message[];
   onJump: (messageId: string) => void;
-  onUnpin: () => void;
+  onUnpin?: () => void;
 }) {
   const pinned = messages.find((m) => m.id === pinnedId);
   if (!pinned || pinned.kind !== "text") return null;
@@ -836,14 +852,14 @@ function PinnedBanner({
           <span className="shrink-0 text-[11.5px] font-medium text-accent">{sender}</span>
           <span className="truncate text-[12.5px] text-ink-secondary">{text}</span>
         </button>
-        <button
+        {onUnpin && <button
           onClick={onUnpin}
           aria-label="Unpin message"
           title="Unpin"
           className="shrink-0 rounded p-0.5 text-ink-secondary hover:bg-raised hover:text-ink"
         >
           <X size={13} />
-        </button>
+        </button>}
       </div>
     </div>
   );
@@ -851,6 +867,7 @@ function PinnedBanner({
 
 export function ChatView({ bot }: { bot: Bot }) {
   const { state, dispatch } = useStore();
+  const remoteClient = window.ogb?.remoteClient?.active === true;
   const scrollRef = useRef<HTMLDivElement>(null);
   const composerDockRef = useRef<HTMLDivElement>(null);
   const composerDock = useComposerDockPad(composerDockRef);
@@ -1120,7 +1137,15 @@ export function ChatView({ bot }: { bot: Bot }) {
           </button>
           <RenameTitle
             value={bot.name}
-            onCommit={(name) => dispatch({ type: "updateBot", botId: bot.id, patch: { name } })}
+            onCommit={(name) => {
+              if (window.ogb?.remoteClient?.active) {
+                void api(`/api/bots/${bot.id}/profile`, { method: "PATCH", body: JSON.stringify({ name }) })
+                  .then(({ bot: updated }) => dispatch({ type: "botPatched", bot: updated }))
+                  .catch((cause) => dispatch({ type: "error", message: cause instanceof Error ? cause.message : String(cause) }));
+              } else {
+                dispatch({ type: "updateBot", botId: bot.id, patch: { name } });
+              }
+            }}
             onActivate={() => dispatch({ type: "toggleSettings", open: true })}
             showEditButton
             className="truncate text-[15px] font-semibold text-ink"
@@ -1161,8 +1186,8 @@ export function ChatView({ bot }: { bot: Bot }) {
           )}
           <TaskPicker bot={bot} />
           <UsageChip bot={bot} />
-          <WorkingFolderChip bot={bot} />
-          <ModelPicker bot={bot} />
+          {!remoteClient && <WorkingFolderChip bot={bot} />}
+          {!remoteClient && <ModelPicker bot={bot} />}
           <CallButton bot={bot} />
           <button
             onClick={() => dispatch({ type: "toggleComputer" })}
@@ -1174,7 +1199,7 @@ export function ChatView({ bot }: { bot: Bot }) {
           >
             <Monitor size={18} />
           </button>
-          <button
+          {!remoteClient && <button
             onClick={() => dispatch({ type: "toggleInspector" })}
             aria-label="Inspector"
             aria-pressed={state.inspectorOpen}
@@ -1185,7 +1210,7 @@ export function ChatView({ bot }: { bot: Bot }) {
             title="Inspector — runtime events and raw protocol for this thread"
           >
             <Bug size={18} />
-          </button>
+          </button>}
         </div>
       </div>
 
@@ -1208,7 +1233,7 @@ export function ChatView({ bot }: { bot: Bot }) {
         onJump={(messageId) =>
           dispatch({ type: "focusMessage", threadId: bot.threadId, messageId })
         }
-        onUnpin={() =>
+        onUnpin={remoteClient ? undefined : () =>
           dispatch({ type: "updateBot", botId: bot.id, patch: { pinnedMessageId: "" } })
         }
       />

@@ -13,6 +13,30 @@
 
 import { approvalModeFor, type ApprovalMode } from "../shared/approval-mode.ts";
 
+/** The mode a turn actually runs under, given where the turn came from.
+ *
+ * Full and Custom are Codex's: on any other engine they fall to Ask, so a
+ * hand-edited record cannot hand Claude a bypass it was never granted.
+ *
+ * And Full is a decision the person made about THEIR OWN sessions with a
+ * bot — "run without asking me". A turn started by another bot is not one
+ * of those: the person never saw the request, and the sender may itself be
+ * unattended or working off a page it just read. A Full target reached that
+ * way runs as Approve for me instead — ordinary requests still flow, the
+ * destructive and sensitive guards card, an unattended sender's block holds,
+ * and every answer goes through the fold and into the decision log, where a
+ * driver-side Full accept never appears. A webhook or scheduled turn on a
+ * Full bot is unchanged: the person opted into that, and the docs say so. */
+export function approvalModeForOrigin(mode: ApprovalMode, origin: { peerInitiated: boolean }): ApprovalMode {
+  // Provider support is settled by supportsApprovalMode at the call site;
+  // this only answers who STARTED the turn. A permissive mode is the
+  // person's grant to the bot they talk to, not to every teammate that can
+  // reach it, so a peer-started turn runs one notch down and still gets the
+  // unattended downgrade after this.
+  if ((mode === "full" || mode === "custom") && origin.peerInitiated) return "auto";
+  return mode;
+}
+
 const DESTRUCTIVE = [
   /\brm\s+(-[a-z]*\s+)*-[a-z]*[rf]/i, // rm -rf, rm -fr, rm -r -f
   /\bmkfs\b|\bdiskutil\s+erase|\bdd\s+[^|]*\bof=\/dev\//i,
@@ -86,6 +110,7 @@ export type AutoVerdictSource =
   | "always-allow"
   | "auto-mode"
   | "full-access"
+  | "native-approval"
   | "explicit-approval-block"
   | "unattended-block"
   | "local-computer-block"
@@ -142,6 +167,8 @@ export function autoVerdict(
   context?: {
     /** the turn was started by an outside event, with nobody at the keyboard */
     unattended?: boolean;
+    /** Respect the native reviewer (including a provider with no Auto mode). */
+    nativeApproval?: boolean;
     /** the request controls the user's active desktop */
     scope?: "local-computer";
     /** The provider is asking to widen its configured sandbox rather than
@@ -150,6 +177,7 @@ export function autoVerdict(
   },
 ): AutoVerdict {
   const mode = approvalModeFor(bot);
+  if (context?.nativeApproval) return { approve: null, source: "native-approval" };
   // This branch intentionally precedes every guard. Entering Full access is
   // separately consent-gated by the bot PATCH endpoint, and its promise is
   // literal: even destructive, sensitive, unattended, and host-computer

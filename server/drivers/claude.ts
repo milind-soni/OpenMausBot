@@ -698,11 +698,10 @@ export const ClaudeDriver: ProviderDriver<ClaudeConfig> = {
       // per-turn mode keep the legacy adapter behavior.
       const permissionMode = turn.approvalMode === undefined
         ? config.permissionMode
-        : config.permissionMode === "bypassPermissions"
-          ? "acceptEdits"
-          : config.permissionMode;
+        : turn.approvalMode === "full" ? "bypassPermissions"
+          : turn.approvalMode === "auto" ? "auto" : "default";
       const controlsHost = turn.integrations?.localComputer?.scope === "local-computer";
-      if (controlsHost && permissionMode === "bypassPermissions") {
+      if (controlsHost && permissionMode === "bypassPermissions" && turn.approvalMode !== "full") {
         throw new Error("local computer control requires the interactive approval broker");
       }
       // Materialize before creating a broker or process. A missing/corrupt
@@ -727,7 +726,7 @@ export const ClaudeDriver: ProviderDriver<ClaudeConfig> = {
         // token-level streaming: content_block_delta events between the
         // whole-message frames, so the bubble grows as the model writes
         "--include-partial-messages",
-        "--permission-mode", permissionMode === "auto" ? "acceptEdits" : permissionMode,
+        "--permission-mode", permissionMode,
       ];
       if (config.tools !== undefined) args.push("--tools", config.tools.join(","));
       if (config.disallowedTools?.length) {
@@ -812,17 +811,15 @@ export const ClaudeDriver: ProviderDriver<ClaudeConfig> = {
         if (name in mcpServers) continue;
         mcpServers[name] = { ...server };
       }
-      // permission broker: anything acceptEdits would silently deny becomes
-      // an Allow/Deny card in chat, and the agent gets ask_user. Skipped in
-      // bypassPermissions (fullAuto) — nothing would ever ask.
+      // Keep ask_user available even in Full access. Native bypass skips
+      // permission prompts, not questions requiring a person's answer.
       let broker: Awaited<ReturnType<typeof createPermissionBroker>> | undefined;
-      let socketPath: string | null = null;
+      const socketPath = permissionSocketPath(threadId);
       if (permissionMode !== "bypassPermissions") {
-        socketPath = permissionSocketPath(threadId);
         args.push("--permission-prompt-tool", "mcp__ogb__approve");
-        mcpServers.ogb = { command: process.execPath, args: [PERM_PROXY_PATH, socketPath], env: { ...NODE_ENV_FLAG }, alwaysLoad: true };
-        allowed.push("mcp__ogb");
       }
+      mcpServers.ogb = { command: process.execPath, args: [PERM_PROXY_PATH, socketPath], env: { ...NODE_ENV_FLAG }, alwaysLoad: true };
+      allowed.push("mcp__ogb");
       // The MCP config carries credentials — a Composio consumer key in a
       // header, the box token in the computer proxy's env, the comms token in
       // the agents proxy's env. On argv every one of those is world-readable

@@ -165,7 +165,7 @@ export function decideRoomPost(budget: RoomPostBudget, attempt: RoomPostAttempt)
   if (unanswered >= ESCALATE_MAX) {
     return refuse(
       "escalate",
-      `This room has already taken ${unanswered} bot posts that nobody has answered, which is as far as bots go without a person. Stop posting and ask the user what they want said in the room. Do not retry this call.`,
+      `This room has already taken ${unanswered} bot posts that nobody has answered, which is as far as bots go without a person. Stop posting and ask the user what they want said in the room — tell them that anything they write in the room themselves re-opens it, and that it also re-opens by itself after a few minutes. Do not retry this call.`,
     );
   }
   return { allowed: true, budget: { posts: [...posts, { botId, text, at: now }] } };

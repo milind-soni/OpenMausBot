@@ -328,6 +328,7 @@ function EventEditor({
   bots,
   lockedBotId,
   defaultRunOn,
+  routinesOnly = false,
   onClose,
   onSavedCall,
 }: {
@@ -335,13 +336,14 @@ function EventEditor({
   bots: Bot[];
   lockedBotId?: string;
   defaultRunOn?: RoutineRunOn;
+  routinesOnly?: boolean;
   onClose: () => void;
   onSavedCall: (call: CalendarCall) => void;
 }) {
   const { state, dispatch } = useStore();
   const existingRoutine = seed.routine;
   const existingCall = seed.call;
-  const [kind, setKind] = useState<EventKind>(seed.kind);
+  const [kind, setKind] = useState<EventKind>(routinesOnly ? "routine" : seed.kind);
   const [name, setName] = useState(existingRoutine?.name ?? existingCall?.name ?? seed.name ?? "");
   const [description, setDescription] = useState(existingRoutine?.prompt ?? existingCall?.description ?? seed.description ?? "");
   const initialAt = existingRoutine?.schedule.type === "once"
@@ -454,7 +456,7 @@ function EventEditor({
     setSaving(true);
     setError("");
     try {
-      if (kind === "routine") {
+      if (kind === "routine" || routinesOnly) {
         const nextSchedule = makeRoutineSchedule(recurrence, at, weekdays, intervalMinutes);
         const input: RoutineInput = {
           name,
@@ -509,7 +511,7 @@ function EventEditor({
         : botIds.length > 0)
     && !intervalInvalid,
   );
-  const canSwitchKind = !existingRoutine && !existingCall && !lockedBotId;
+  const canSwitchKind = !routinesOnly && !existingRoutine && !existingCall && !lockedBotId;
 
   useEffect(() => {
     const dialog = dialogRef.current;
@@ -794,6 +796,7 @@ function EventEditor({
 function QuickComposer({
   seed,
   bots,
+  routinesOnly = false,
   onClose,
   onMore,
   onSavedRoutine,
@@ -801,13 +804,14 @@ function QuickComposer({
 }: {
   seed: EventSeed;
   bots: Bot[];
+  routinesOnly?: boolean;
   onClose: () => void;
   onMore: (seed: EventSeed) => void;
   onSavedRoutine: (routine: Routine) => void;
   onSavedCall: (call: CalendarCall) => void;
 }) {
   const { dispatch } = useStore();
-  const [kind, setKind] = useState<EventKind>(seed.kind);
+  const [kind, setKind] = useState<EventKind>(routinesOnly ? "routine" : seed.kind);
   const [name, setName] = useState(seed.name ?? "");
   const [description, setDescription] = useState(seed.description ?? "");
   const [botIds, setBotIds] = useState(seed.botIds.length ? seed.botIds : bots[0] ? [bots[0].id] : []);
@@ -845,7 +849,7 @@ function QuickComposer({
     setWorking(true);
     setError("");
     try {
-      if (kind === "routine") {
+      if (kind === "routine" || routinesOnly) {
         const response = await api("/api/routines", {
           method: "POST",
           body: JSON.stringify({
@@ -890,10 +894,12 @@ function QuickComposer({
       </div>
       <div className="space-y-3 p-4">
         <input autoFocus value={name} onChange={(event) => setName(event.target.value)} placeholder="Add title" onKeyDown={(event) => { if (event.key === "Enter" && valid) void save(); }} className="w-full border-b border-hairline/60 bg-transparent pb-2 text-[18px] font-medium text-ink outline-none placeholder:text-ink-secondary/55 focus:border-accent" />
-        <div className="flex items-center gap-1 border-b border-hairline/35 pb-2">
-          <button type="button" onClick={() => { setKind("routine"); setBotIds((ids) => ids.slice(0, 1)); }} className={cn("rounded-lg px-3 py-1.5 text-[12px] font-medium", kind === "routine" ? "bg-accent/15 text-accent" : "text-ink-secondary hover:bg-raised hover:text-ink")}>Routine</button>
-          <button type="button" onClick={() => setKind("call")} className={cn("rounded-lg px-3 py-1.5 text-[12px] font-medium", kind === "call" ? "bg-accent/15 text-accent" : "text-ink-secondary hover:bg-raised hover:text-ink")}>Call</button>
-        </div>
+        {!routinesOnly && (
+          <div className="flex items-center gap-1 border-b border-hairline/35 pb-2">
+            <button type="button" onClick={() => { setKind("routine"); setBotIds((ids) => ids.slice(0, 1)); }} className={cn("rounded-lg px-3 py-1.5 text-[12px] font-medium", kind === "routine" ? "bg-accent/15 text-accent" : "text-ink-secondary hover:bg-raised hover:text-ink")}>Routine</button>
+            <button type="button" onClick={() => setKind("call")} className={cn("rounded-lg px-3 py-1.5 text-[12px] font-medium", kind === "call" ? "bg-accent/15 text-accent" : "text-ink-secondary hover:bg-raised hover:text-ink")}>Call</button>
+          </div>
+        )}
         <div className="flex items-start gap-3 text-[12.5px] text-ink">
           <Clock3 size={16} className="mt-0.5 shrink-0 text-ink-secondary" />
           <div><div>{niceDate(seed.at)}</div><div className="mt-0.5 text-ink-secondary">{niceTime(seed.at)}{kind === "call" ? ` – ${niceTime(seed.at + durationMinutes * 60_000)}` : ""}</div></div>
@@ -1384,6 +1390,7 @@ export function RoutineEditor({
 export function RoutinesPage({ onBack, onOpenRoom }: { onBack: () => void; onOpenRoom: (id: string) => void }) {
   const { state, dispatch } = useStore();
   const { capabilities } = useDesktopCapabilities();
+  const routinesOnly = window.ogb?.remoteClient?.active === true;
   const backButtonRef = useRef<HTMLButtonElement>(null);
   const newMenuRef = useRef<HTMLDetailsElement>(null);
   const [section, setSection] = useState<"calendar" | "webhooks">("calendar");
@@ -1409,7 +1416,9 @@ export function RoutinesPage({ onBack, onOpenRoom }: { onBack: () => void; onOpe
       setError(cause instanceof Error ? cause.message : String(cause));
     }
   }, []);
-  useEffect(() => { void loadCalls(); }, [loadCalls]);
+  useEffect(() => {
+    if (!routinesOnly) void loadCalls();
+  }, [loadCalls, routinesOnly]);
   useEffect(() => { backButtonRef.current?.focus({ preventScroll: true }); }, []);
   useEffect(() => {
     const closeNewMenu = (event: PointerEvent) => {
@@ -1530,8 +1539,8 @@ export function RoutinesPage({ onBack, onOpenRoom }: { onBack: () => void; onOpe
           </button>
           <div className="mr-2 flex items-center gap-2"><CalendarDays size={21} className="text-accent" /><h1 className="text-[18px] font-semibold tracking-tight text-ink">Automations</h1></div>
           <div className="flex items-center rounded-lg border border-hairline/50 bg-panel p-0.5" style={windowNoDragStyle} aria-label="Automation type">
-            <button type="button" aria-pressed={section === "calendar"} onClick={() => setSection("calendar")} className={cn("rounded-md px-3 py-1.5 text-[11.5px] font-medium", section === "calendar" ? "bg-raised text-ink shadow-sm" : "text-ink-secondary hover:text-ink")}>Schedule</button>
-            <button type="button" aria-pressed={section === "webhooks"} onClick={() => setSection("webhooks")} className={cn("flex items-center gap-1.5 rounded-md px-3 py-1.5 text-[11.5px] font-medium", section === "webhooks" ? "bg-raised text-ink shadow-sm" : "text-ink-secondary hover:text-ink")}><Webhook size={12} />Webhooks{state.webhooks.length > 0 && <span className="rounded-full bg-accent/15 px-1.5 text-[9px] text-accent">{state.webhooks.length}</span>}</button>
+            <button type="button" aria-pressed={section === "calendar"} onClick={() => setSection("calendar")} className={cn("rounded-md px-3 py-1.5 text-[11.5px] font-medium", section === "calendar" ? "bg-raised text-ink shadow-sm" : "text-ink-secondary hover:text-ink")}>{routinesOnly ? "Scheduled routines" : "Schedule"}</button>
+            {!routinesOnly && <button type="button" aria-pressed={section === "webhooks"} onClick={() => setSection("webhooks")} className={cn("flex items-center gap-1.5 rounded-md px-3 py-1.5 text-[11.5px] font-medium", section === "webhooks" ? "bg-raised text-ink shadow-sm" : "text-ink-secondary hover:text-ink")}><Webhook size={12} />Webhooks{state.webhooks.length > 0 && <span className="rounded-full bg-accent/15 px-1.5 text-[9px] text-accent">{state.webhooks.length}</span>}</button>}
           </div>
           <details ref={newMenuRef} className="group relative ml-auto" style={windowNoDragStyle}>
             <summary aria-label="Create an automation" className="flex cursor-pointer list-none items-center gap-1.5 rounded-lg bg-accent px-3.5 py-2 text-[12px] font-semibold text-white hover:brightness-110 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/60">
@@ -1542,14 +1551,14 @@ export function RoutinesPage({ onBack, onOpenRoom }: { onBack: () => void; onOpe
                 <Clock3 size={16} className="mt-0.5 shrink-0 text-accent" aria-hidden="true" />
                 <span><span className="block text-[12.5px] font-medium text-ink">Scheduled task</span><span className="mt-0.5 block text-[10.5px] leading-relaxed text-ink-secondary">Ask a bot to do something later.</span></span>
               </button>
-              <button type="button" aria-label="Create a scheduled call" onClick={() => { newMenuRef.current?.removeAttribute("open"); setSection("calendar"); openCreate({ kind: "call" }); }} className="flex w-full items-start gap-3 rounded-lg px-3 py-2.5 text-left hover:bg-raised">
+              {!routinesOnly && <button type="button" aria-label="Create a scheduled call" onClick={() => { newMenuRef.current?.removeAttribute("open"); setSection("calendar"); openCreate({ kind: "call" }); }} className="flex w-full items-start gap-3 rounded-lg px-3 py-2.5 text-left hover:bg-raised">
                 <Video size={16} className="mt-0.5 shrink-0 text-accent" aria-hidden="true" />
                 <span><span className="block text-[12.5px] font-medium text-ink">Scheduled call</span><span className="mt-0.5 block text-[10.5px] leading-relaxed text-ink-secondary">Bring bots together at a set time.</span></span>
-              </button>
-              <button type="button" aria-label="Create a webhook" disabled={visibleBots.length === 0} onClick={() => { newMenuRef.current?.removeAttribute("open"); setSection("webhooks"); setWebhookCreateRequest((request) => request + 1); }} className="flex w-full items-start gap-3 rounded-lg px-3 py-2.5 text-left hover:bg-raised disabled:cursor-not-allowed disabled:opacity-40">
+              </button>}
+              {!routinesOnly && <button type="button" aria-label="Create a webhook" disabled={visibleBots.length === 0} onClick={() => { newMenuRef.current?.removeAttribute("open"); setSection("webhooks"); setWebhookCreateRequest((request) => request + 1); }} className="flex w-full items-start gap-3 rounded-lg px-3 py-2.5 text-left hover:bg-raised disabled:cursor-not-allowed disabled:opacity-40">
                 <Webhook size={16} className="mt-0.5 shrink-0 text-accent" aria-hidden="true" />
                 <span><span className="block text-[12.5px] font-medium text-ink">Webhook</span><span className="mt-0.5 block text-[10.5px] leading-relaxed text-ink-secondary">Start a task when another app sends an event.</span></span>
-              </button>
+              </button>}
             </div>
           </details>
         </div>
@@ -1578,8 +1587,8 @@ export function RoutinesPage({ onBack, onOpenRoom }: { onBack: () => void; onOpe
         </div>
       )}
 
-      {quick && <><div className="fixed inset-0 z-40 bg-black/25" onMouseDown={() => setQuick(null)} /><QuickComposer seed={quick} bots={visibleBots} onClose={() => setQuick(null)} onMore={(seed) => { setQuick(null); setEditor(seed); }} onSavedRoutine={(routine) => dispatch({ type: "routinePatched", routine })} onSavedCall={upsertCall} /></>}
-      {editor && <EventEditor seed={editor} bots={visibleBots} onClose={() => setEditor(null)} onSavedCall={upsertCall} />}
+      {quick && <><div className="fixed inset-0 z-40 bg-black/25" onMouseDown={() => setQuick(null)} /><QuickComposer seed={quick} bots={visibleBots} routinesOnly={routinesOnly} onClose={() => setQuick(null)} onMore={(seed) => { setQuick(null); setEditor(seed); }} onSavedRoutine={(routine) => dispatch({ type: "routinePatched", routine })} onSavedCall={upsertCall} /></>}
+      {editor && <EventEditor seed={editor} bots={visibleBots} routinesOnly={routinesOnly} onClose={() => setEditor(null)} onSavedCall={upsertCall} />}
       {liveSelected && <EventDetails item={liveSelected} bots={state.bots} onClose={() => setSelected(null)} onEdit={() => { const seed: EventSeed = liveSelected.kind === "call" ? { kind: "call", at: liveSelected.at, durationMinutes: liveSelected.call.durationMinutes, botIds: liveSelected.call.botIds, call: liveSelected.call } : { kind: "routine", at: liveSelected.at, durationMinutes: liveSelected.routine?.durationMinutes ?? liveSelected.run?.durationMinutes ?? 30, botIds: [liveSelected.routine?.botId ?? liveSelected.run?.botId ?? ""].filter(Boolean), routine: liveSelected.routine ?? undefined }; setSelected(null); setEditor(seed); }} onCallChanged={(id) => { if (id) setCalls((current) => current.filter((call) => call.id !== id)); else void loadCalls(); }} onOpenRoom={onOpenRoom} />}
       {pausedOpen && <PausedList routines={paused} bots={state.bots} groups={state.groups} onClose={() => setPausedOpen(false)} onEdit={(routine) => { setPausedOpen(false); const at = routine.schedule.type === "once" ? routine.schedule.at : routine.schedule.type === "interval" ? routine.schedule.anchorAt : atLocalTime(Date.now(), routine.schedule.time); setEditor({ kind: "routine", at, durationMinutes: routine.durationMinutes, botIds: [routine.botId], routine }); }} onOpenRoom={onOpenRoom} />}
     </main>

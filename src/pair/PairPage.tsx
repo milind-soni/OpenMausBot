@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 
-import { defaultDeviceLabel, pairWithCode, readSessionState, type EnvironmentDescriptor, type SessionState } from "../lib/session";
+import { defaultDeviceLabel, newAttemptId, pairWithCode, readSessionState, type EnvironmentDescriptor, type SessionState } from "../lib/session";
 
 /** The page a pairing link opens: /pair#code=XXXX-XXXX-XXXX. Also what the
  * app shows instead of itself when a remote browser has no session yet. */
@@ -11,6 +11,8 @@ export function PairPage({ initialCode, reason }: { initialCode: string | null; 
   const [session, setSession] = useState<SessionState | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // one id per code typed: a retry after a lost response reuses it, a new code gets a new one
+  const [attemptId, setAttemptId] = useState(() => newAttemptId());
 
   useEffect(() => {
     void fetch("/.well-known/openmausbot/environment")
@@ -26,7 +28,7 @@ export function PairPage({ initialCode, reason }: { initialCode: string | null; 
     e.preventDefault();
     setBusy(true);
     setError(null);
-    const result = await pairWithCode({ code, label });
+    const result = await pairWithCode({ code, label, attemptId });
     setBusy(false);
     if (result.ok) {
       location.replace("/");
@@ -59,7 +61,10 @@ export function PairPage({ initialCode, reason }: { initialCode: string | null; 
             <input
               id="pair-code"
               value={code}
-              onChange={(e) => setCode(e.target.value)}
+              onChange={(e) => {
+                setCode(e.target.value);
+                setAttemptId(newAttemptId());
+              }}
               placeholder="XXXX-XXXX-XXXX"
               autoComplete="one-time-code"
               autoCapitalize="characters"

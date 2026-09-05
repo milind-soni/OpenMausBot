@@ -48,12 +48,22 @@ export const MESSAGE_FILE_ROUTE = {
   path: /^\/api\/threads\/[\w-]+\/messages\/[\w-]+\/file$/,
 } as const;
 
+export const CLOUD_DESKTOP_CONTROL_ROUTE = {
+  method: "POST",
+  path: /^\/api\/bots\/[\w-]+\/computer\/(?:control|screenshot|viewer-close)$/,
+} as const;
+
 export function isCloudDesktopJoin(method: string, path: string): boolean {
   return method === CLOUD_DESKTOP_JOIN_ROUTE.method && CLOUD_DESKTOP_JOIN_ROUTE.path.test(path);
 }
 
 export function isMessageFileDownload(method: string, path: string): boolean {
   return method === MESSAGE_FILE_ROUTE.method && MESSAGE_FILE_ROUTE.path.test(path);
+}
+
+export function isCloudDesktopAccess(method: string, path: string): boolean {
+  return isCloudDesktopJoin(method, path)
+    || (method === CLOUD_DESKTOP_CONTROL_ROUTE.method && CLOUD_DESKTOP_CONTROL_ROUTE.path.test(path));
 }
 
 /** Every request the iOS app makes, and nothing else.
@@ -68,6 +78,7 @@ const ALLOWED: ReadonlyArray<{ method: string; path: RegExp }> = [
   { method: "GET", path: /^\/api\/config$/ },
   { method: "GET", path: /^\/api\/events$/ },
   { method: "GET", path: /^\/api\/instances$/ },
+  { method: "GET", path: /^\/api\/team-map$/ },
   // Sidecar-owned, authenticated endpoint metadata. The proxy terminates it
   // locally; it never becomes a newly exposed harness route.
   { method: "GET", path: /^\/api\/companion\/endpoints$/ },
@@ -79,7 +90,10 @@ const ALLOWED: ReadonlyArray<{ method: string; path: RegExp }> = [
   // unlike the desktop's broad PATCH it cannot alter execution policy.
   { method: "POST", path: /^\/api\/sidebar-sections$/ },
   { method: "POST", path: /^\/api\/bots\/[\w-]+\/messages$/ },
+  { method: "PATCH", path: /^\/api\/bots\/[\w-]+\/cards\/[\w-]+$/ },
+  { method: "POST", path: /^\/api\/bots\/[\w-]+\/respond$/ },
   { method: "POST", path: /^\/api\/bots\/[\w-]+\/interrupt$/ },
+  { method: "DELETE", path: /^\/api\/bots\/[\w-]+\/queue\/[\w-]+$/ },
   { method: "POST", path: /^\/api\/bots\/[\w-]+\/read$/ },
   { method: "POST", path: /^\/api\/bots\/[\w-]+\/always-allow$/ },
   { method: "POST", path: /^\/api\/bots\/[\w-]+\/messages\/[\w-]+\/edit$/ },
@@ -103,9 +117,12 @@ const ALLOWED: ReadonlyArray<{ method: string; path: RegExp }> = [
   // second, per-device capability check before it reaches the harness.
   CLOUD_DESKTOP_JOIN_ROUTE,
 
+  CLOUD_DESKTOP_CONTROL_ROUTE,
   // rooms — making one, and talking in one
   { method: "POST", path: /^\/api\/groups$/ },
   { method: "POST", path: /^\/api\/groups\/[\w-]+\/messages$/ },
+  { method: "POST", path: /^\/api\/groups\/[\w-]+\/interrupt$/ },
+  { method: "DELETE", path: /^\/api\/groups\/[\w-]+\/queue\/[\w-]+$/ },
   { method: "POST", path: /^\/api\/groups\/[\w-]+\/read$/ },
   { method: "POST", path: /^\/api\/groups\/[\w-]+\/tasks$/ },
   { method: "POST", path: /^\/api\/groups\/[\w-]+\/tasks\/[\w-]+$/ },
@@ -130,9 +147,10 @@ const ALLOWED: ReadonlyArray<{ method: string; path: RegExp }> = [
   // only this exact upload route crosses the companion boundary.
   { method: "POST", path: /^\/api\/files$/ },
 
-  // Renderer-neutral voice operations. Neither route reads or writes the
-  // workspace ElevenLabs key; the phone receives labels or audio only.
+  // Renderer-neutral voice operations. These routes never expose or mutate
+  // the workspace ElevenLabs key; the client receives labels or audio only.
   { method: "GET", path: /^\/api\/tts\/voices$/ },
+  { method: "POST", path: /^\/api\/tts\/prepare$/ },
   { method: "POST", path: /^\/api\/tts\/speak$/ },
 
   // Routines create ordinary tasks using an existing agent configuration.
@@ -142,14 +160,24 @@ const ALLOWED: ReadonlyArray<{ method: string; path: RegExp }> = [
   { method: "PATCH", path: /^\/api\/routines\/[\w-]+$/ },
   { method: "DELETE", path: /^\/api\/routines\/[\w-]+$/ },
   { method: "POST", path: /^\/api\/routines\/[\w-]+\/run$/ },
+  { method: "POST", path: /^\/api\/routine-runs\/[\w-]+\/(?:cancel|seen)$/ },
 
   // Multi-account Composio management exposes opaque ids and aliases only.
-  // Revocation stays on the Mac: the account DELETE route is deliberately
-  // absent — a paired phone can see and add accounts, never remove one.
+  // Revocation stays on the host: the account DELETE route is deliberately
+  // absent — a paired client can see and add accounts, never remove one.
   { method: "GET", path: /^\/api\/connectors\/catalog$/ },
   { method: "GET", path: /^\/api\/connectors\/connected$/ },
   { method: "GET", path: /^\/api\/connectors$/ },
   { method: "POST", path: /^\/api\/connectors\/[\w-]+\/authorize$/ },
+  // Inline connector cards are scoped by bot, transcript message, and
+  // thread. They expose the same opaque OAuth authorization already allowed
+  // above, then only poll, resume, or dismiss that exact pending card.
+  { method: "GET", path: /^\/api\/bots\/[\w-]+\/connector-cards\/[\w-]+\/status$/ },
+  { method: "POST", path: /^\/api\/bots\/[\w-]+\/connector-cards\/[\w-]+\/(?:authorize|resume|dismiss)$/ },
+  // A remote client may decline or retry a credential request, but never
+  // claim that it stored a host credential. Saving and `provided` stay local
+  // to the host's OS-backed credential store.
+  { method: "POST", path: /^\/api\/bots\/[\w-]+\/secret-cards\/[\w-]+\/(?:resume|dismiss)$/ },
 ];
 
 /** Route families worth naming in the refusal.
@@ -163,7 +191,7 @@ const EXPLAINED: ReadonlyArray<{ path: RegExp; error: string }> = [
   {
     path: /^\/api\/(companion|devices)(\/|$)/,
     // Losing the phone must not mean losing the ability to lock it out.
-    error: "Phone settings are managed on your computer",
+    error: "Remote access settings are managed on the host computer",
   },
   { path: /^\/api\/config$/, error: "API keys can only be changed on your computer" },
   { path: /^\/api\/local-computer(\/|$)/, error: "the Local VM is set up on your computer" },
@@ -198,7 +226,7 @@ export function denyReason({ path, method, authenticated }: RouteRequest): Denia
   if (method === "GET" && path === "/api/health") return null;
 
   if (!authenticated) {
-    return { status: 401, error: "pair this device from Phone settings in OpenMausBot on your computer" };
+    return { status: 401, error: "pair this device from Remote access settings on the host computer" };
   }
 
   if (ALLOWED.some((route) => route.method === method && route.path.test(path))) return null;

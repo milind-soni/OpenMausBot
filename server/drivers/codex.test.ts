@@ -183,12 +183,12 @@ describe("CodexDriver turns (fake app-server)", () => {
       }>;
       expect(calls.find((call) => call.method === "thread/start")?.params).toMatchObject({
         approvalPolicy,
-        approvalsReviewer: "user",
+        approvalsReviewer: approvalMode === "auto" ? "auto_review" : "user",
         sandbox,
       });
       expect(calls.find((call) => call.method === "turn/start")?.params).toMatchObject({
         approvalPolicy,
-        approvalsReviewer: "user",
+        approvalsReviewer: approvalMode === "auto" ? "auto_review" : "user",
         sandboxPolicy: { type: turnSandbox },
       });
     },

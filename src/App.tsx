@@ -7,8 +7,10 @@ import { Sidebar } from "@/components/Sidebar";
 import { ChatView } from "@/components/ChatView";
 import { GroupView } from "@/components/GroupView";
 import { SettingsPanel } from "@/components/SettingsPanel";
+import { RemoteAgentSettingsPanel } from "@/components/RemoteAgentSettingsPanel";
 import { PluginsPanel, preloadConnectedApps } from "@/components/PluginsPanel";
 import { ComputerPanel } from "@/components/ComputerPanel";
+import { RemoteDesktopPanel } from "@/components/remote-desktop-panel";
 import { InspectorPanel } from "@/components/InspectorPanel";
 import { SettingsModal } from "@/components/SettingsModal";
 import { UpdateBanner } from "@/components/UpdateBanner";
@@ -29,6 +31,7 @@ function Shell() {
   const unreadCount =
     state.bots.filter((bot) => !bot.hidden && bot.unread).length +
     state.groups.filter((group) => group.unread).length;
+  const remoteClient = window.ogb?.remoteClient?.active === true;
   // Mobile-only drawer state. Above md, none of these properties are emitted
   // at all — Sidebar scopes every mobile class with max-md: rather than
   // cancelling them with md:, which would still emit a translate value and
@@ -249,11 +252,11 @@ function Shell() {
         <TeamMapPage />
       ) : state.activeView === "routines" ? (
         <RoutinesPage onBack={closeCalendar} onOpenRoom={openCalendarRoom} />
-      ) : state.activeView === "skill-recorder" ? (
+      ) : !remoteClient && state.activeView === "skill-recorder" ? (
         <SkillRecorderPage />
-      ) : browserWorkspaceBotId && bot && bot.id === browserWorkspaceBotId ? (
+      ) : !remoteClient && browserWorkspaceBotId && bot && bot.id === browserWorkspaceBotId ? (
         <BrowserWorkspace bot={bot} onClose={closeBrowserWorkspace} />
-      ) : localVmWorkspaceBotId ? (
+      ) : !remoteClient && localVmWorkspaceBotId ? (
         <LocalVmWorkspace
           primaryBotId={localVmWorkspaceBotId}
           overlayOpen={nativeViewOverlayOpen}
@@ -279,16 +282,24 @@ function Shell() {
           )}
         </main>
       )}
-      {state.settingsOpen && bot && <SettingsPanel bot={bot} />}
-      {state.computerOpen && bot && (
-        <ComputerPanel
-          key={bot.id}
-          bot={bot}
-          onOpenVmWorkspace={openLocalVmWorkspace}
-          onExpandBrowser={openBrowserWorkspace}
-        />
+      {state.settingsOpen && bot && (
+        remoteClient
+          ? <RemoteAgentSettingsPanel bot={bot} />
+          : <SettingsPanel bot={bot} />
       )}
-      {state.inspectorOpen && bot && <InspectorPanel bot={bot} />}
+      {state.computerOpen && bot && (
+        remoteClient ? (
+          <RemoteDesktopPanel key={bot.id} bot={bot} />
+        ) : (
+          <ComputerPanel
+            key={bot.id}
+            bot={bot}
+            onOpenVmWorkspace={openLocalVmWorkspace}
+            onExpandBrowser={openBrowserWorkspace}
+          />
+        )
+      )}
+      {!remoteClient && state.inspectorOpen && bot && <InspectorPanel bot={bot} />}
       {state.appSettingsOpen && <SettingsModal />}
       {state.pluginsOpen && <PluginsPanel />}
       {/* mounted after the modals: same z-50 tier, so DOM order keeps the
@@ -300,7 +311,7 @@ function Shell() {
 }
 
 export default function App() {
-  const [gated, setGated] = useState(() => !emailGateDone());
+  const [gated, setGated] = useState(() => window.ogb?.remoteClient?.active !== true && !emailGateDone());
   useEffect(() => {
     initAnalytics();
   }, []);

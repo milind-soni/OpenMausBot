@@ -16,6 +16,7 @@ const FAKE_CLAUDE = join(SERVER_DIR, "testing", "fake-claude-cli.ts");
 let child: ChildProcess;
 let home = "";
 let stopScopedWorkerFinishGate = "";
+let busyWorkerFinishGate = "";
 let base = "";
 let stderr = "";
 
@@ -46,6 +47,7 @@ const api = async (method: string, path: string, body?: unknown): Promise<{ stat
 beforeAll(async () => {
   home = mkdtempSync(join(tmpdir(), "omb-goal-run-"));
   stopScopedWorkerFinishGate = join(home, "stop-scoped-worker-finish");
+  busyWorkerFinishGate = join(home, "busy-worker-finish");
   const data = join(home, ".openmausbot");
   const staticDir = join(home, "static");
   mkdirSync(data, { recursive: true });
@@ -121,6 +123,7 @@ beforeAll(async () => {
         displayName: "Busy worker fixture",
         environment: {
           FAKE_CLAUDE_MODE: "slow",
+          FAKE_CLAUDE_SLOW_FINISH_GATE: busyWorkerFinishGate,
           FAKE_CLAUDE_REPLIES: JSON.stringify([
             "The unrelated direct research is complete.",
             "Evidence gathered for the coordinator.",
@@ -386,6 +389,10 @@ describe("goal-driven channel runs", () => {
         roomBusyBotId: null,
         workerDirectBusy: true,
       });
+
+      // Keep the worker occupied until the waiting state is observed, even
+      // when CI takes longer than the fake driver's default 800 ms turn.
+      writeFileSync(busyWorkerFinishGate, "release");
 
       await expect.poll(async () => {
         const state = (await api("GET", "/api/bots?messages=30")).body;

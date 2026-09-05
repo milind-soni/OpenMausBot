@@ -10,8 +10,10 @@
 // request this process makes to 127.0.0.1 satisfies that by construction. So
 // the sidecar does NOT forward the device's Host or Origin. It speaks to the
 // harness as itself, from the machine the harness is already willing to
-// serve. Nothing upstream has to change, or even know this exists.
+// serve. Packaged harnesses also require a private per-launch relay capability,
+// attached only after authenticating the phone and authorizing its route.
 import { request as httpRequest, type IncomingMessage, type ServerResponse } from "node:http";
+import type { Duplex } from "node:stream";
 
 import { bearerToken } from "./devices.ts";
 import {
@@ -19,13 +21,17 @@ import {
   MAX_COMPANION_ENDPOINTS,
   type CompanionEndpoint,
 } from "./endpoints.ts";
-import { denyReason, isCloudDesktopJoin, isMessageFileDownload } from "./routes.ts";
+import { denyReason, isCloudDesktopAccess, isMessageFileDownload } from "./routes.ts";
+import { CompanionViewerRelay } from "./viewer-relay.ts";
 import { createSseScrubber, isJson, scrub } from "./wire.ts";
 
 /** What the forwarding handler needs from the process around it. */
 export interface ProxyOptions {
   /** Where the harness is listening on loopback. */
   harnessPort: number;
+  /** Private Electron capability; null means bootstrap is not ready yet.
+   * Undefined keeps standalone sidecars compatible with a plain Node harness. */
+  mutationToken?: () => string | null;
   /** Does this bearer token belong to a paired device? */
   authenticate: (token: string | undefined) => { id?: string; cloudDesktopAccess: boolean } | null;
   /** Redeem a pairing code. Handled here and never forwarded: the harness
@@ -208,7 +214,7 @@ const endpointSnapshot = (options: ProxyOptions): CompanionEndpointSnapshot => {
  * blocklist: `host` and `origin` must not travel (see above), `authorization`
  * is the sidecar's credential and means nothing to the harness, and hop-by-hop
  * headers are by definition not ours to relay. */
-const forwardHeaders = (req: IncomingMessage, authenticatedDeviceId?: string): Record<string, string> => {
+const forwardHeaders = (req: IncomingMessage, authenticatedDeviceId?: string, mutationToken?: string): Record<string, string> => {
   const out: Record<string, string> = {
     accept: String(req.headers.accept ?? "*/*"),
     // Lets a response whose URL is intentionally loopback-only (the VPS SSH
@@ -221,6 +227,7 @@ const forwardHeaders = (req: IncomingMessage, authenticatedDeviceId?: string): R
   // the harness to bind an encrypted credential to the same paired phone.
   if (authenticatedDeviceId && /^[\w-]{1,128}$/.test(authenticatedDeviceId)) {
     out["x-openmausbot-companion-device"] = authenticatedDeviceId;
+    if (mutationToken) out["x-openmausbot-companion-auth"] = mutationToken;
   }
   const contentType = req.headers["content-type"];
   if (contentType) out["content-type"] = String(contentType);
@@ -247,7 +254,8 @@ const forwardHeaders = (req: IncomingMessage, authenticatedDeviceId?: string): R
  * the token, then replay the request to the harness over loopback and scrub
  * what comes back. Pairing is the one route that stops here. */
 export function createProxyHandler(options: ProxyOptions) {
-  return function handle(req: IncomingMessage, res: ServerResponse): void {
+  const viewers = new CompanionViewerRelay();
+  const handle = function handle(req: IncomingMessage, res: ServerResponse): void {
     const path = (req.url ?? "/").split("?")[0];
     const method = req.method ?? "GET";
 
@@ -260,6 +268,10 @@ export function createProxyHandler(options: ProxyOptions) {
 
     const token = bearerToken(req.headers.authorization);
     const device = options.authenticate(token);
+    if (viewers.isViewerPath(req.url)) {
+      viewers.handleHttp(req, res, device);
+      return;
+    }
     const denial = denyReason({
       path,
       method,
@@ -274,11 +286,14 @@ export function createProxyHandler(options: ProxyOptions) {
     // Pairing a phone grants the ordinary companion surface, not a browser
     // session with every credential that may exist inside the cloud desktop.
     // The computer owner enables this capability per device, off by default.
-    if (isCloudDesktopJoin(method, path) && !device?.cloudDesktopAccess) {
+    if (isCloudDesktopAccess(method, path) && !device?.cloudDesktopAccess) {
       return sendJson(res, 403, {
-        error: "cloud desktop access is off for this phone — enable it in OpenMausBot → Settings → Phone",
+        error: "cloud desktop access is off for this device — enable it in OpenMausBot → Settings → Remote access",
       });
     }
+
+    const viewerClose = /^\/api\/bots\/([\w-]+)\/computer\/viewer-close$/.exec(path);
+    if (viewerClose && device?.id) viewers.close(device.id, viewerClose[1]);
 
     // Pairing terminates here. Forwarding it would hand the harness a route
     // it does not have, and the 404 would read to a phone as "wrong address".
@@ -324,13 +339,17 @@ export function createProxyHandler(options: ProxyOptions) {
       return sendJson(res, 200, endpointSnapshot(options));
     }
 
+    const mutationToken = device ? options.mutationToken?.() : undefined;
+    if (device && options.mutationToken && !mutationToken) {
+      return sendJson(res, 503, { error: "The desktop connection is starting. Please try again shortly." });
+    }
     const upstream = httpRequest(
       {
         hostname: "127.0.0.1",
         port: options.harnessPort,
         path: req.url,
         method,
-        headers: forwardHeaders(req, device?.id),
+        headers: forwardHeaders(req, device?.id, mutationToken ?? undefined),
       },
       (harness) => {
         clearTimeout(headersDeadline);
@@ -398,7 +417,7 @@ export function createProxyHandler(options: ProxyOptions) {
           if (tracksDeviceConnection && currentDevice?.id !== device?.id) {
             harness.destroy();
             return sendJson(res, 401, {
-              error: "pair this device from Phone settings in OpenMausBot on your computer",
+              error: "pair this device from Remote access settings on the host computer",
             });
           }
           const disconnect = () => {
@@ -542,6 +561,7 @@ export function createProxyHandler(options: ProxyOptions) {
           // JSON.parse handles it fine.
           let text: string;
           try {
+            parsed = viewers.rewriteJoinResponse(path, parsed, device?.id);
             text = JSON.stringify(scrub(parsed));
           } catch {
             sendJson(res, 502, { error: "the response could not be prepared for this device" });
@@ -613,4 +633,16 @@ export function createProxyHandler(options: ProxyOptions) {
     });
     req.pipe(upstream);
   };
+
+  handle.upgrade = (req: IncomingMessage, socket: Duplex, head: Buffer): void => {
+    if (req.headers.origin) {
+      socket.destroy();
+      return;
+    }
+    const token = bearerToken(req.headers.authorization);
+    const device = options.authenticate(token);
+    viewers.handleUpgrade(req, socket, head, device);
+  };
+  handle.disconnectDevice = (deviceId: string): void => viewers.closeDevice(deviceId);
+  return handle;
 }

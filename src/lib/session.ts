@@ -58,8 +58,15 @@ export function defaultDeviceLabel(userAgent: string = navigator.userAgent): str
   return os ? `${browser} on ${os}` : browser;
 }
 
+/** One random id per pairing attempt. Re-sending the same id after a lost
+ * response returns the same session instead of "code already used"; nobody
+ * who merely shares this device's address can guess it. */
+export function newAttemptId(): string {
+  return typeof crypto?.randomUUID === "function" ? crypto.randomUUID() : `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 14)}`;
+}
+
 export async function pairWithCode(
-  input: { code: string; label: string },
+  input: { code: string; label: string; attemptId?: string },
   fetchImpl: typeof fetch = fetch,
 ): Promise<{ ok: true } | { ok: false; error: string }> {
   let res: Response;
@@ -68,7 +75,7 @@ export async function pairWithCode(
       method: "POST",
       credentials: "same-origin",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ code: input.code, label: input.label, cookie: true }),
+      body: JSON.stringify({ code: input.code, label: input.label, cookie: true, attemptId: input.attemptId ?? newAttemptId() }),
     });
   } catch (error) {
     return { ok: false, error: `could not reach the server (${error instanceof Error ? error.message : String(error)})` };

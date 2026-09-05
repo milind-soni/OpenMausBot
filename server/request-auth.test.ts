@@ -6,6 +6,9 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 import {
   clearSessionCookie,
+  clientBotPatchViolation,
+  clientGroupPatchViolation,
+  ipcPeer,
   isAllowedOrigin,
   isLoopbackHost,
   isProxied,
@@ -15,6 +18,7 @@ import {
   requestSource,
   requiredScope,
   resolveRequestAuth,
+  sanitizeSource,
   serializeSessionCookie,
   sessionCookieName,
 } from "./request-auth.ts";
@@ -71,33 +75,51 @@ describe("request source for the lockout", () => {
   const withPeer = (peer: string, headers: Record<string, string>) =>
     // SAFETY: only headers and the socket peer are read
     ({ headers, method: "POST", socket: { remoteAddress: peer } }) as unknown as IncomingMessage;
-  it("takes the forwarded address only from a proxy on this machine", () => {
-    expect(requestSource(withPeer("127.0.0.1", { "x-forwarded-for": "203.0.113.9, 10.0.0.1" }))).toBe("203.0.113.9");
+  it("takes the LAST forwarded hop, only from a proxy on this machine, and sanitises it", () => {
+    // the last hop is the one our own proxy wrote; earlier hops are client-supplied
+    expect(requestSource(withPeer("127.0.0.1", { "x-forwarded-for": "1.2.3.4, 203.0.113.9" }))).toBe("203.0.113.9");
     expect(requestSource(withPeer("::ffff:127.0.0.1", { "x-forwarded-for": "203.0.113.9" }))).toBe("203.0.113.9");
     expect(requestSource(withPeer("127.0.0.1", {}))).toBe("127.0.0.1");
     expect(requestSource(withPeer("100.64.0.7", { "x-forwarded-for": "1.1.1.1" }))).toBe("100.64.0.7");
+    expect(requestSource(withPeer("127.0.0.1", { "x-forwarded-for": "evil\n\u0007 <script>" + "x".repeat(200) }))).toMatch(/^[\w.:%[\]-]{1,64}$/);
+    expect(sanitizeSource("")).toBe("unknown");
   });
 });
 
 describe("scopes", () => {
-  it("needs admin for pairing, session management and configuration writes; client elsewhere", () => {
-    expect(requiredScope("POST", "/api/auth/pairing")).toBe("admin");
-    expect(requiredScope("DELETE", "/api/auth/sessions/abc")).toBe("admin");
-    expect(requiredScope("PUT", "/api/config")).toBe("admin");
-    expect(requiredScope("GET", "/api/config")).toBe("client");
-    expect(requiredScope("POST", "/api/instances")).toBe("admin");
-    expect(requiredScope("GET", "/api/instances")).toBe("client");
-    expect(requiredScope("POST", "/api/mcp/servers")).toBe("admin");
-    expect(requiredScope("POST", "/api/mcp/servers/github/test")).toBe("admin");
-    expect(requiredScope("GET", "/api/mcp/servers")).toBe("client");
-    expect(requiredScope("GET", "/api/computers/boxes")).toBe("client");
-    expect(requiredScope("POST", "/api/computers/boxes/bx_23456789/sleep")).toBe("admin");
-    expect(requiredScope("POST", "/api/computers/boxes/bx_23456789/delete")).toBe("admin");
-    expect(requiredScope("GET", "/api/computers/vps")).toBe("client");
-    expect(requiredScope("POST", "/api/computers/vps/openmausbot-vps-one/remove")).toBe("admin");
-    expect(requiredScope("POST", "/api/bots/x/messages")).toBe("client");
-    expect(requiredScope("POST", "/api/auth/pair")).toBe("client");
-    expect(requiredScope("POST", "/api/auth/stream-ticket")).toBe("client");
+  it("is default deny: chat, approvals, rooms, attachments, routines and own session are client; everything else admin", () => {
+    for (const [method, path] of [
+      ["POST", "/api/bots/x/messages"], ["POST", "/api/bots/x/respond"], ["POST", "/api/threads/t/respond"],
+      ["PATCH", "/api/bots/x/cards/m"], ["POST", "/api/groups/g/messages"], ["PATCH", "/api/groups/g"],
+      ["PATCH", "/api/bots/x"], ["PATCH", "/api/bots/x/profile"], ["POST", "/api/attachments"],
+      ["GET", "/api/attachments/a.png"], ["POST", "/api/routines"], ["POST", "/api/routines/r/run"],
+      ["GET", "/api/bots"], ["GET", "/api/threads/t/messages"], ["GET", "/api/search"], ["GET", "/api/events"],
+      ["GET", "/api/config"], ["GET", "/api/webhooks"], ["POST", "/api/tts/speak"],
+      ["GET", "/api/auth/session"], ["POST", "/api/auth/stream-ticket"], ["POST", "/api/auth/logout"],
+    ] as const) expect(requiredScope(method, path), `${method} ${path}`).toBe("client");
+    for (const [method, path] of [
+      ["POST", "/api/cli-test"], ["GET", "/api/cli-candidates"], ["GET", "/api/instances"], ["PATCH", "/api/instances/claude"],
+      ["POST", "/api/bots/x/computer/exec"], ["POST", "/api/bots/x/computer/join"], ["POST", "/api/local-computer/run"],
+      ["GET", "/api/computers/boxes"], ["POST", "/api/computers/boxes/bx_23456789/delete"],
+      ["POST", "/api/webhooks"], ["POST", "/api/webhooks/w/rotate"], ["POST", "/api/bots/x/skills"], ["PATCH", "/api/bots/x/skills/s"],
+      ["PATCH", "/api/bots/x/model"], ["PATCH", "/api/groups/g/setup"], ["POST", "/api/teams/import"], ["GET", "/api/teams/scout"],
+      ["GET", "/api/bots/x/memory"], ["PUT", "/api/bots/x/memory"], ["PUT", "/api/section-context"], ["GET", "/api/threads/t/events"],
+      ["POST", "/api/bots/x/checkpoints/restore"], ["GET", "/api/mcp/servers"], ["POST", "/api/mcp/servers"], ["POST", "/api/connectors/slack/authorize"],
+      ["PUT", "/api/config"], ["POST", "/api/auth/pairing"], ["GET", "/api/auth/sessions"], ["DELETE", "/api/auth/sessions/abc"],
+      ["POST", "/api/auth/pair"], // handled before the gate; the gate itself never grants it
+      ["GET", "/api/something-new"], // anything unlisted is admin until listed
+    ] as const) expect(requiredScope(method, path), `${method} ${path}`).toBe("admin");
+  });
+
+  it("limits a client's bot and room edits to display fields, naming the field it refused", () => {
+    expect(clientBotPatchViolation({ unread: true })).toBeNull();
+    expect(clientBotPatchViolation({ pinned: true, color: "green" })).toBeNull();
+    expect(clientBotPatchViolation({ unread: true, autoApprove: true })).toBe("autoApprove");
+    expect(clientBotPatchViolation({ cwd: "/" })).toBe("cwd");
+    expect(clientBotPatchViolation([])).toBe("body");
+    expect(clientGroupPatchViolation({ name: "Ops", unread: false })).toBeNull();
+    expect(clientGroupPatchViolation({ cwd: "/tmp" })).toBe("cwd");
+    expect(clientGroupPatchViolation({ memberIds: [] })).toBe("memberIds");
   });
 });
 
@@ -113,6 +135,42 @@ describe("resolveRequestAuth", () => {
     sessions = new SessionRegistry({ file: join(dir, "sessions.json") });
   });
   afterEach(() => rmSync(dir, { recursive: true, force: true }));
+
+  it("accepts authenticated relay mutations without exposing the desktop owner capability", () => {
+    const headers = {
+      host: "127.0.0.1:8799",
+      "x-openmausbot-companion": "1",
+      "x-openmausbot-companion-device": "phone-1",
+      "x-openmausbot-companion-auth": "relay-secret",
+    };
+    const check = (method: string, path: string, overrides: Record<string, string> = {}, relay = "relay-secret") =>
+      resolveRequestAuth(request({ ...headers, ...overrides }, method), {
+        sessions, cookieName, streamPath: "/api/events", url: new URL(path, "http://localhost"),
+        loopbackMutationToken: "desktop-secret", companionMutationToken: relay,
+      });
+    for (const [method, path] of [
+      ["POST", "/api/bots"], ["POST", "/api/bots/b/messages"],
+      ["POST", "/api/bots/b/read"], ["POST", "/api/bots/b/respond"],
+      ["POST", "/api/bots/b/secret-cards/card/provide"],
+      ["GET", "/api/events"], ["PATCH", "/api/bots/b/profile"],
+    ]) expect(check(method, path).auth?.kind, path).toBe("loopback");
+    const forged: Record<string, string>[] = [
+      { "x-openmausbot-companion-auth": "" },
+      { "x-openmausbot-companion-auth": "desktop-secret" },
+      { "x-openmausbot-companion-device": "" },
+      { "x-openmausbot-companion": "0" },
+      { origin: "https://evil.example" },
+      { "x-forwarded-for": "203.0.113.1" },
+      { host: "remote.example" },
+    ];
+    for (const overrides of forged) expect(check("POST", "/api/bots/b/read", overrides).auth).toBeNull();
+    expect(check("POST", "/api/bots/b/read", {}, "").auth).toBeNull();
+    for (const [method, path] of [
+      ["PUT", "/api/config"], ["POST", "/api/auth/pairing"],
+      ["POST", "/api/internal/anything"], ["GET", "/api/auth/sessions"],
+      ["POST", "/api/not-yet-supported"],
+    ]) expect(check(method, path).auth, path).toBeNull();
+  });
 
   function pairedToken(scopes: Array<"admin" | "client"> = ["admin", "client"]): string {
     const { code } = sessions.openPairing({ scopes });
@@ -242,5 +300,41 @@ describe("resolveRequestAuth", () => {
     expect(remote.error).toMatch(/expired or was revoked; pair this device again/);
     // the owner on the same machine keeps working even with a stale cookie
     expect(resolve({ host: "127.0.0.1:8799", cookie: `${cookieName}=${token}` }).auth?.kind).toBe("loopback");
+  });
+});
+
+describe("an IPC listener (openmausbot serve --tunnel) is remote by construction", () => {
+  // SAFETY: only headers, method and the socket peer are read; a unix-socket peer has no address
+  const overSocket = (headers: Record<string, string>) => ({ headers, method: "GET", socket: {} }) as unknown as IncomingMessage;
+
+  it("counts as proxied whatever the headers say; a bare mock without a socket does not", () => {
+    expect(ipcPeer(overSocket({ host: "127.0.0.1:8799" }))).toBe(true);
+    expect(isProxied(overSocket({ host: "localhost" }))).toBe(true);
+    expect(ipcPeer(request({ host: "127.0.0.1:8799" }))).toBe(false);
+    expect(isProxied(request({ host: "127.0.0.1:8799" }))).toBe(false);
+  });
+
+  it("attributes pairing attempts to the address the tunnel forwarded", () => {
+    expect(requestSource(overSocket({ "x-forwarded-for": "203.0.113.9" }))).toBe("203.0.113.9");
+    expect(requestSource(overSocket({}))).toBe("unknown");
+  });
+
+  it("never grants loopback trust over the socket, even with a loopback Host and no forwarded headers; a session works", () => {
+    const dir = mkdtempSync(join(tmpdir(), "omb-auth-ipc-"));
+    try {
+      const sessions = new SessionRegistry({ file: join(dir, "sessions.json") });
+      const gate = { sessions, cookieName: "omb_session_test", streamPath: "/api/events", url: new URL("/api/bots", "http://x") };
+      const denied = resolveRequestAuth(overSocket({ host: "127.0.0.1:8799" }), gate);
+      expect(denied.auth).toBeNull();
+      expect(denied.status).toBe(403);
+      expect(denied.error).toMatch(/through a proxy/);
+      const { code } = sessions.openPairing({ scopes: ["admin", "client"] });
+      const paired = sessions.exchange({ code, label: "phone", source: "203.0.113.9" });
+      if (!paired.ok) throw new Error(paired.error);
+      const admitted = resolveRequestAuth(overSocket({ host: "c-1.openmausbot.com", authorization: `Bearer ${paired.token}` }), gate);
+      expect(admitted.auth?.kind).toBe("session");
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
   });
 });
