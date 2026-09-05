@@ -32,7 +32,7 @@ import { currentCall } from "@/lib/call";
 import { showNotification, type NotificationTarget } from "@/lib/notify";
 import { speaker } from "@/lib/tts";
 import { createBotPatchQueue, type BotUpdatePatch } from "./bot-patch-queue";
-import { skillRecorderEnabled } from "@/lib/feature-flags";
+import { skillRecorderEnabled, spacesEnabled } from "@/lib/feature-flags";
 import { openLiveEvents } from "@/lib/live-events";
 
 const MAX_ROUTINE_RUNS = 2_000;
@@ -351,7 +351,7 @@ export interface ConfigStatus {
   /** UI language override; "" (or absent) follows the system language. */
   language?: string;
   /** Opt-in flags. Absent means off. */
-  features?: { skillRecorder: boolean; showToolCalls?: boolean; browser?: boolean };
+  features?: { skillRecorder: boolean; showToolCalls?: boolean; browser?: boolean; spaces?: boolean };
   /** Named browser sessions any bot can be pointed at. */
   browserProfiles?: BrowserProfile[];
 }
@@ -470,6 +470,9 @@ export interface AppState {
   webhookIngress: WebhookIngressStatus | null;
   settingsOpen: boolean;
   pluginsOpen: boolean;
+  /** The Spaces canvas is open over the shell. Reachable only when the
+   * feature is switched on; the sidebar view stays the default. */
+  spacesOpen: boolean;
   computerOpen: boolean;
   /** the per-thread event inspector (runtime stream + native protocol tee) */
   inspectorOpen: boolean;
@@ -664,6 +667,7 @@ export type Action =
   | { type: "error"; message: string | null }
   | { type: "toggleSettings"; open?: boolean }
   | { type: "togglePlugins"; open?: boolean }
+  | { type: "toggleSpaces"; open?: boolean }
   | { type: "toggleComputer"; open?: boolean }
   | { type: "toggleInspector"; open?: boolean }
   | { type: "focusMessage"; threadId: string; messageId: string }
@@ -908,6 +912,7 @@ export function reducer(state: AppState, action: Action): AppState {
           state.activeView === "skill-recorder" && !skillRecorderEnabled(action.config)
             ? "chat"
             : state.activeView,
+        spacesOpen: state.spacesOpen && spacesEnabled(action.config),
       };
     case "select": {
       if (state.groups.some((g) => g.id === action.id)) {
@@ -1200,6 +1205,12 @@ export function reducer(state: AppState, action: Action): AppState {
     }
     case "togglePlugins":
       return { ...state, pluginsOpen: action.open ?? !state.pluginsOpen };
+    case "toggleSpaces": {
+      const open = action.open ?? !state.spacesOpen;
+      // Turning it on is only possible while the feature is enabled; the
+      // config handler closes it again if the switch goes back off.
+      return open && !spacesEnabled(state.config) ? state : { ...state, spacesOpen: open };
+    }
     case "focusMessage":
       return {
         ...state,
@@ -1468,6 +1479,7 @@ export const initialState: AppState = {
   webhookAttempts: [],
   webhookIngress: null,
   settingsOpen: false,
+  spacesOpen: false,
   pluginsOpen: false,
   computerOpen: false,
   inspectorOpen: false,

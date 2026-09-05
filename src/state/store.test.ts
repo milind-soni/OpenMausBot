@@ -1179,3 +1179,37 @@ describe("messageAdded leaf adoption", () => {
     expect(next.bots[0].messages.map((m) => m.id)).toContain("shot");
   });
 });
+
+describe("spaces canvas", () => {
+  const enabled = { features: { spaces: true } } as never;
+  const disabled = { features: { spaces: false } } as never;
+
+  it("starts closed", () => {
+    expect(initialState.spacesOpen).toBe(false);
+  });
+
+  it("cannot be opened while the feature is switched off", () => {
+    const state = { ...initialState, config: disabled };
+    expect(reducer(state, { type: "toggleSpaces", open: true }).spacesOpen).toBe(false);
+    expect(reducer({ ...initialState, config: null }, { type: "toggleSpaces", open: true }).spacesOpen).toBe(false);
+  });
+
+  it("opens and closes once the feature is on", () => {
+    const state = { ...initialState, config: enabled };
+    const opened = reducer(state, { type: "toggleSpaces", open: true });
+    expect(opened.spacesOpen).toBe(true);
+    expect(reducer(opened, { type: "toggleSpaces", open: false }).spacesOpen).toBe(false);
+    expect(reducer(opened, { type: "toggleSpaces" }).spacesOpen).toBe(false);
+  });
+
+  it("closes itself when the feature is switched back off underneath it", () => {
+    const open = { ...initialState, config: enabled, spacesOpen: true };
+    expect(reducer(open, { type: "configStatus", config: disabled }).spacesOpen).toBe(false);
+    expect(reducer(open, { type: "configStatus", config: enabled }).spacesOpen).toBe(true);
+  });
+
+  it("closing it is always allowed, whatever the flag says", () => {
+    const stuck = { ...initialState, config: disabled, spacesOpen: true };
+    expect(reducer(stuck, { type: "toggleSpaces", open: false }).spacesOpen).toBe(false);
+  });
+});

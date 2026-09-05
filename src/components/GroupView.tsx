@@ -17,6 +17,7 @@ import {
 } from "@/state/store";
 import { BotAvatar, MausAvatar } from "./Avatar";
 import { TurnPresence } from "./TurnPresence";
+import { installChatHotkeys } from "@/lib/chat-hotkeys";
 import { showToolCallsEnabled } from "@/lib/feature-flags";
 import { roomActivityVisible } from "@/lib/room-activity";
 import { normalizeState } from "@/lib/mascot";
@@ -873,7 +874,17 @@ function RoomSetup({ group, members }: { group: Group; members: Bot[] }) {
     </section>
   );
 }
-export function GroupView({ group }: { group: Group }) {
+export function GroupView({
+  group,
+  /** See ChatView: only the focused card answers the keyboard. */
+  active = true,
+  /** See ChatView: Spaces supplies one composer for the whole canvas. */
+  composer = true,
+}: {
+  group: Group;
+  active?: boolean;
+  composer?: boolean;
+}) {
   const { state, dispatch } = useStore();
   const remoteClient = window.ogb?.remoteClient?.active === true;
   const stream = useStreaming();
@@ -898,16 +909,10 @@ export function GroupView({ group }: { group: Group }) {
   const membersTriggerRef = useRef<HTMLButtonElement>(null);
   const closeMembers = useCallback(() => setMembersOpen(false), []);
   useEffect(() => setFindOpen(false), [group.threadId]);
-  useEffect(() => {
-    const onFind = (event: KeyboardEvent) => {
-      if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "f") {
-        event.preventDefault();
-        setFindOpen(true);
-      }
-    };
-    window.addEventListener("keydown", onFind);
-    return () => window.removeEventListener("keydown", onFind);
-  }, []);
+  useEffect(
+    () => installChatHotkeys(window, { active, onFind: () => setFindOpen(true), onScrollAway: () => {} }),
+    [active],
+  );
 
   const members = useMemo(
     () => group.memberIds.map((id) => state.bots.find((b) => b.id === id)).filter((b): b is Bot => Boolean(b)),
@@ -1347,6 +1352,7 @@ export function GroupView({ group }: { group: Group }) {
         </button>
       )}
 
+      {composer && (
       <div ref={composerDockRef} className="absolute inset-x-0 bottom-0 z-[2]">
       <Composer
         key={group.threadId}
@@ -1359,6 +1365,7 @@ export function GroupView({ group }: { group: Group }) {
         onRestoreReply={restoreReply}
       />
       </div>
+      )}
       </div>
     </main>
   );

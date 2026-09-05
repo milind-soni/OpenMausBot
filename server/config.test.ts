@@ -18,6 +18,7 @@ import { customMcpServers,
   saveConfig,
   skillRecorderEnabled,
   builtInBrowserEnabled,
+  spacesEnabled,
   browserProfilePartitionId,
   browserProfilePartitionTarget,
   browserProfileReplacementConflict,
@@ -799,5 +800,22 @@ describe("customMcpServers", () => {
       }),
     );
     expect(Object.keys(out)).toEqual(["keeper"]);
+  });
+});
+
+describe("spaces feature flag", () => {
+  it("is off unless the config says otherwise", () => {
+    expect(spacesEnabled({})).toBe(false);
+    expect(spacesEnabled({ features: {} })).toBe(false);
+    expect(spacesEnabled({ features: { spaces: false } })).toBe(false);
+    expect(spacesEnabled({ features: { spaces: true } })).toBe(true);
+  });
+
+  it("survives a config PATCH", () => {
+    expect(parseConfigPatch({ features: { spaces: true } })).toEqual({ features: { spaces: true } });
+  });
+
+  it("does not ride on another experiment being enabled", () => {
+    expect(spacesEnabled({ features: { browser: true, skillRecorder: true } })).toBe(false);
   });
 });

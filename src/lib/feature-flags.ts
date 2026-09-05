@@ -1,5 +1,5 @@
 export interface FeatureFlagConfig {
-  features?: { skillRecorder?: boolean; showToolCalls?: boolean; browser?: boolean };
+  features?: { skillRecorder?: boolean; showToolCalls?: boolean; browser?: boolean; spaces?: boolean };
 }
 
 /** Experimental features are available only after an explicit opt-in. */
@@ -17,4 +17,10 @@ export function builtInBrowserEnabled(config: FeatureFlagConfig | null | undefin
  * shows that work is happening. */
 export function showToolCallsEnabled(config: FeatureFlagConfig | null | undefined): boolean {
   return config?.features?.showToolCalls === true;
+}
+
+/** The Spaces canvas — every bot as a card on one zoomable surface. Off until
+ * the person using the app turns it on; the sidebar shell stays the default. */
+export function spacesEnabled(config: FeatureFlagConfig | null | undefined): boolean {
+  return config?.features?.spaces === true;
 }
