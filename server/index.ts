@@ -2397,6 +2397,17 @@ function clearInternalTurn(threadId: string) {
 function isInternalTurn(threadId: string): boolean {
   return internalTurnThreads.has(threadId);
 }
+// When the person last wrote into each thread with a turn in flight — but
+// only for turns THEY started. post_to_room's ceiling counts the bot posts
+// nobody has answered, and "answered" used to mean a person writing in the
+// room alone. A person driving one bot from its own conversation ("tell
+// #planning we shipped", then two more) was refused the third post and
+// told to go and ask the user — who had just asked. The person who wrote
+// into the bot's thread is attending that post as surely as one writing
+// in the room, so the ceiling reads this too. A scheduled or webhook turn,
+// a peer hop, or a resumed card records nothing here: the user message
+// such a turn finds in its thread may be hours old and its author gone.
+const personAskAt = new Map<string, number>();
 let routines: RoutineManager | null = null;
 let calendarCalls: CalendarCallManager | null = null;
 const localVmOwnerBusy = (botId: string) => store.bot(botId)?.busy === true;
@@ -3812,6 +3823,15 @@ async function startTurn(
           replyToId: opts?.replyTo?.id,
           sendId: opts?.sendId,
         });
+  }
+  // A card continuation neither starts nor ends the person's ask: it
+  // resumes the turn their last message began, so that record stands.
+  if (!opts?.cardContinuation) {
+    if (commsDepth === 0 && opts?.automationSource === undefined && !opts?.unattended) {
+      personAskAt.set(threadId, userMessage.at);
+    } else {
+      personAskAt.delete(threadId);
+    }
   }
 
   // transcript for API-backed drivers: settled text turns on the ACTIVE
@@ -7984,8 +8004,13 @@ const server = createServer(async (req, res) => {
             text: message,
             now: Date.now(),
           };
-          const spokeAt = lastHumanRoomMessageAt(group);
-          if (spokeAt !== undefined) attempt.lastHumanAt = spokeAt;
+          // The person attending is whoever wrote last: in the room, or —
+          // when the post was asked for in the sender's own conversation —
+          // there. A room-sourced post has no such person; its room is the
+          // conversation, and what a person wrote in it is already counted.
+          const askedAt = owner.group ? undefined : personAskAt.get(fromThreadId);
+          const spokeAt = Math.max(lastHumanRoomMessageAt(group) ?? -Infinity, askedAt ?? -Infinity);
+          if (Number.isFinite(spokeAt)) attempt.lastHumanAt = spokeAt;
           return decideRoomPost(roomPostBudgets.get(group.id) ?? emptyRoomPostBudget(), attempt);
         };
         // A refusal is stored, an allowance is not: the budget a refusal

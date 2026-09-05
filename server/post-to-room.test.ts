@@ -488,6 +488,38 @@ describe("post_to_room", () => {
     expect((await messagesOf(room.threadId)).filter((message) => message.role === "bot")).toHaveLength(3);
   }, 40_000);
 
+  it("counts the person who asked for the post, in the bot's own conversation, as present", async () => {
+    // "tell #planning we shipped" … "also tell them the demo is at 3" — the
+    // ceiling exists for bots talking past an absent person, and the person
+    // writing to this bot is anything but absent. The credit is the bot's
+    // alone: a teammate nobody wrote to is still over the ceiling.
+    const asked = await makeBot("Asked One", "Asked");
+    const other = await makeBot("Asked Two", "Asked");
+    const room = await makeRoom("Asked room", [asked.id, other.id], "Asked");
+
+    expect((await post(asked.id, asked.threadId, room.id, "first")).status).toBe(201);
+    expect((await post(other.id, other.threadId, room.id, "second")).status).toBe(201);
+    expect((await post(asked.id, asked.threadId, room.id, "third")).status).toBe(429);
+
+    // the person writes to the bot in its own conversation — the turn that
+    // would carry its post_to_room call
+    expect((await api("POST", `/api/bots/${asked.id}/messages`, { text: "also tell them the demo is at 3" })).status).toBe(202);
+    await expect.poll(async () => {
+      const bots = field((await api("GET", "/api/bots?messages=0")).body, "bots");
+      const mine = Array.isArray(bots)
+        ? bots.find((bot) => str(field(bot as Record<string, unknown>, "id")) === asked.id)
+        : undefined;
+      return field(mine as Record<string, unknown>, "busy");
+    }, { timeout: 10_000 }).toBeFalsy();
+
+    const reopened = await post(asked.id, asked.threadId, room.id, "third");
+    expect(reopened.status, JSON.stringify(reopened.body)).toBe(201);
+    const stillShut = await post(other.id, other.threadId, room.id, "fourth");
+    expect(stillShut.status).toBe(429);
+    expect(str(stillShut.body.error)).toMatch(/re-opens it/i);
+    expect((await messagesOf(room.threadId)).filter((message) => message.role === "bot")).toHaveLength(3);
+  }, 40_000);
+
   it("shuts the room on a three-bot ring, which no per-sender limit would see", async () => {
     const a = await makeBot("Ring A", "Ring");
     const b = await makeBot("Ring B", "Ring");
