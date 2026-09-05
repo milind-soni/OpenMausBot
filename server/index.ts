@@ -10228,6 +10228,43 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
         }
         patch.alwaysAllow = [...new Set(body.alwaysAllow as string[])].slice(0, 200);
       }
+      // What "the proof of a human" above actually rests on. In the packaged
+      // desktop it is real: every mutation here already carried the owner
+      // capability a tool call cannot forge. Outside it — `pnpm dev`, the
+      // CLI, the Docker stack — loopback is the owner by design, so the
+      // acknowledgement flag and the settings that loosen a bot's leash
+      // (a wider peer list, the peer-approval gate switched off, a section
+      // move that changes who is in reach, a standing always-allow grant)
+      // are one curl away from the bot they constrain. What such a request
+      // does NOT have is a paired session or a browser origin; and the one
+      // moment a bot's shell can send it is while a turn is running. So an
+      // originless, session-less loopback caller may loosen a bot only
+      // while every bot is idle — and is logged when it does — while the
+      // served UI (a browser, with its origin) and a paired device keep
+      // working mid-turn as before. A bar, not a wall: the wall is the
+      // desktop capability or a paired session, which is what the refusal
+      // points at.
+      const loosened: string[] = [];
+      if (body.peers !== undefined && Array.isArray(existingBot?.peers)) {
+        const nextPeers = patch.peers;
+        if (nextPeers === undefined || (Array.isArray(nextPeers) && nextPeers.some((peerId) => !existingBot.peers!.includes(peerId)))) {
+          loosened.push("peers");
+        }
+      }
+      if (body.approvePeerComms === false && existingBot?.approvePeerComms === true) loosened.push("approvePeerComms");
+      if (section !== undefined && sectionKey(existingBot?.section) !== sectionKey(section)) loosened.push("section");
+      if (Array.isArray(patch.alwaysAllow) && patch.alwaysAllow.some((key) => !(existingBot?.alwaysAllow ?? []).includes(key))) {
+        loosened.push("alwaysAllow");
+      }
+      const browserOrigin = typeof req.headers.origin === "string" && req.headers.origin.trim() !== "";
+      if (loosened.length && auth.kind === "loopback" && !DESKTOP_MANAGED && !browserOrigin) {
+        if (store.bots.some((candidate) => candidate.busy)) {
+          return json(res, 409, {
+            error: "A bot is working right now, so this change has to come from the desktop app or a paired device. Try again once every bot is idle.",
+          });
+        }
+        console.warn(`bot ${m[1]}: ${loosened.join(", ")} loosened by ${requestSource(req)} through the local API with no paired session`);
+      }
       if (existingBot?.computer === "local" && computerSpecified && requestedComputer !== "local") {
         const routineThread = routines!.activeBotRunForBot(existingBot.id)?.threadId;
         const groupThread = activeGroupTurnForBot(existingBot.id)?.threadId;
