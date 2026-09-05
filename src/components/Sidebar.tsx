@@ -750,6 +750,20 @@ export function BotListItem({
               className="truncate"
               inputClassName="w-full rounded bg-inset px-1 py-0.5 text-[15px] font-semibold"
             />
+            {bot.chiefOfStaff && !renaming && (
+              // Chief of Staff lives on the name line: a bare crown to the
+              // left of the title badge when there is one, otherwise the
+              // crown + label in the badge's place.
+              title ? (
+                <span className="flex shrink-0 items-center text-accent" title="Chief of Staff" aria-label="Chief of Staff" role="img">
+                  <Crown size={12} />
+                </span>
+              ) : (
+                <span className="flex shrink-0 items-center gap-1 text-[11.5px] font-medium text-accent">
+                  <Crown size={11} /> Chief of Staff
+                </span>
+              )
+            )}
             {title && !renaming && (
               <span className="max-w-[120px] shrink-0 truncate rounded-full bg-control px-1.5 py-px text-[10.5px] font-medium text-ink-secondary">
                 {title}
@@ -770,12 +784,6 @@ export function BotListItem({
             </span>
           ) : (
             <span className="flex min-w-0 items-center gap-1.5 truncate text-[13px] text-ink-secondary">
-              {bot.chiefOfStaff && (
-                <span className="flex shrink-0 items-center gap-1 text-[11.5px] font-medium text-accent">
-                  <Crown size={11} /> Chief of Staff
-                </span>
-              )}
-              {bot.chiefOfStaff && preview(bot) && <span className="shrink-0 text-ink-secondary/60">·</span>}
               <span className="truncate">{preview(bot)}</span>
             </span>
           )}
