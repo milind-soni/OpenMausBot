@@ -710,6 +710,8 @@ export function BotListItem({
   // the visible branch, so a version switch changes the row with the chat
   const visible = visibleMessages(bot);
   const last = visible.at(-1);
+  // the role from Bot Settings → Title, shown as a pill beside the name
+  const title = bot.title.trim();
   const rowClass = cn(
     "flex w-full items-center rounded-xl border text-left",
     iconOnly
@@ -748,6 +750,11 @@ export function BotListItem({
               className="truncate"
               inputClassName="w-full rounded bg-inset px-1 py-0.5 text-[15px] font-semibold"
             />
+            {title && !renaming && (
+              <span className="max-w-[120px] shrink-0 truncate rounded-full bg-control px-1.5 py-px text-[10.5px] font-medium text-ink-secondary">
+                {title}
+              </span>
+            )}
           </span>
           {selected && last && !renaming && (
             <span className="shrink-0 text-xs text-ink-secondary transition-opacity group-hover:opacity-0 group-focus-within:opacity-0">

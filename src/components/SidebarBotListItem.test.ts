@@ -46,6 +46,13 @@ describe("BotListItem", () => {
     expect(markup).not.toContain('aria-label="Archive Atlas"');
   });
 
+  it("shows the bot's title as a badge beside the name", () => {
+    const markup = renderRow(bot({ title: "Developer" }), false);
+
+    expect(markup).toContain(">Developer</span>");
+    expect(renderRow(bot({ title: "  " }), false)).not.toContain(">Developer</span>");
+  });
+
   it("renders the inline Archive action only when it is available", () => {
     expect(renderRow(bot(), true)).not.toContain('aria-label="Archive Atlas"');
     expect(renderRow(bot(), false)).toContain('aria-label="Archive Atlas"');
