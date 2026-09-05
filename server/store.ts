@@ -124,6 +124,13 @@ export interface Message {
    * model saw it mid-turn, so the transcript marks it — a reader should
    * know the reply above it may already account for this line */
   steered?: boolean;
+  /** A user-role message that did not come from a person at a keyboard:
+   * a headless server's HTTP API, reached with no paired session and no
+   * browser origin — which is to say, most often a script, and possibly a
+   * bot's own shell. Stamped rather than refused because loopback is the
+   * owner on such a server by design; but a reader (a bot's room turn, the
+   * posting budget, the transcript) must not take it for the person. */
+  via?: "api";
   /** Provider turn that produced this message. Assistant output can arrive
    * in several pieces around tool calls; the UI uses this identity to keep
    * those pieces together without discarding them. */

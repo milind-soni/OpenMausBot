@@ -124,6 +124,8 @@ export interface Message {
   tool?: { name: string; ok?: boolean; spoken?: string; setup?: boolean };
   /** user messages sent into a running turn — the model saw it mid-turn */
   steered?: boolean;
+  /** a user message that arrived through the server's API, not typed here */
+  via?: "api";
   /** Provider turn that produced this message. */
   turnId?: string;
   /** Last assistant text item from a settled provider turn. */

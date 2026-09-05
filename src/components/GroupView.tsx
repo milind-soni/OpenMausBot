@@ -302,6 +302,9 @@ const Transcript = memo(function Transcript({
                         />
                       )}
                       {attachments?.display ?? m.text}
+                      {m.via === "api" && (
+                        <div className="mt-1 text-[11px] text-ink-secondary">Sent through the API, not typed here</div>
+                      )}
                     </>
                   ) : (
                     <>

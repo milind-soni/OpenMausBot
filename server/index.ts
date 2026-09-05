@@ -4916,8 +4916,12 @@ function serializeRoomContext(
     .slice(-GROUP_CONTEXT_MESSAGES)
     .map((m) => {
       const rendered = textOverride?.messageId === m.id ? { ...m, text: textOverride.text } : m;
-      // a bot's name is quoted on the speaker line, so it gets one line
-      const speaker = m.role === "user" ? userName : m.from ? peerName(m.from.name) : "Bot";
+      // a bot's name is quoted on the speaker line, so it gets one line; a
+      // user line that came through the API says so, since the reader would
+      // otherwise take it for the person typing
+      const speaker = m.role === "user"
+        ? m.via === "api" ? `${userName} (sent through the local API, not typed)` : userName
+        : m.from ? peerName(m.from.name) : "Bot";
       const line = `${speaker}: ${transcriptText(rendered, messagesById, userName)}`;
       // A room reply is the room talking. A post_to_room message is another
       // bot's text carried in from somewhere else, so it says so — the
@@ -5923,6 +5927,9 @@ type StartGroupTurnOptions = {
   goalCoordinatorBotId?: string;
   /** Correlates a room goal card with its durable RoutineRun receipt. */
   goalRunId?: string;
+  /** The message came through the HTTP API with nothing to say a person
+   * sent it (see Message.via). */
+  via?: "api";
 };
 
 function startGroupTurn(
@@ -5966,6 +5973,7 @@ function startGroupTurn(
     sendId,
     channelMode,
     queueId,
+    via: options.via,
   });
   if (!group.dm) store.titleGroupTaskFromFirstMessage(group.id, text, threadId);
 
@@ -6111,14 +6119,14 @@ function drainQueuedChannelSends(): void {
       const group = store.group(groupId);
       return group ? groupIsWorking(group) : false;
     },
-    ({ groupId, threadId, text, replyToId, sendId, mode, id }) => {
+    ({ groupId, threadId, text, replyToId, sendId, mode, id, via }) => {
       const group = store.group(groupId);
       const ownsThread = group?.dm
         ? group.threadId === threadId
         : Boolean(group && store.groupTaskByThread(group.id, threadId));
       if (!group || !ownsThread) return;
       try {
-        startGroupTurn(groupId, text, resolveReplyTarget(threadId, replyToId), sendId, mode, id);
+        startGroupTurn(groupId, text, resolveReplyTarget(threadId, replyToId), sendId, mode, id, { via });
       } catch (error) {
         store.appendMessage(threadId, {
           role: "bot",
@@ -6219,14 +6227,17 @@ function connectorThread(botId: string, threadId: string) {
  * last, and a second copy of it could only ever disagree.
  *
  * Only a person puts a user-role message in a room: the composer, or a
- * calendar call they scheduled. No bot has that ingress — post_to_room
- * appends role "bot", which is the rule this whole surface turns on — so
- * a bot cannot re-arm the ceiling it just spent. */
+ * calendar call they scheduled. No bot tool has that ingress — post_to_room
+ * appends role "bot", which is the rule this whole surface turns on. The
+ * one door a bot's shell could reach on a headless server, the HTTP API
+ * with no session behind it, stamps what it lets in (Message.via), and a
+ * line so stamped does not count here — so a bot cannot re-arm the ceiling
+ * it just spent. */
 function lastHumanRoomMessageAt(group: GroupRecord): number | undefined {
   const messages = store.messagesFor(group.threadId);
   for (let i = messages.length - 1; i >= 0; i -= 1) {
     const message = messages[i];
-    if (message.role === "user" && message.kind === "text") return message.at;
+    if (message.role === "user" && message.kind === "text" && !message.via) return message.at;
   }
   return undefined;
 }
@@ -8943,7 +8954,9 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
       const userName = cfg.profile?.name?.trim() || "User";
       const lines: string[] = [`# ${title}`, ""];
       for (const msg of messages) {
-        const who = msg.role === "user" ? userName : (msg.from?.name ?? bot?.name ?? "Bot");
+        const who = msg.role === "user"
+          ? msg.via === "api" ? `${userName} (via the local API)` : userName
+          : (msg.from?.name ?? bot?.name ?? "Bot");
         if (msg.kind === "text" && msg.text) lines.push(`**${who}:**`, "", msg.text, "");
         else if (msg.kind === "activity" && msg.tool) lines.push(`> ${msg.tool.name}`, "");
         else if (msg.kind === "screen") lines.push("> [screen capture]", "");
@@ -9612,6 +9625,20 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
       }
       const sendId = parseSendId(body.sendId);
       const replyTo = resolveReplyTarget(threadId, body.replyToId);
+      // Who is this "user"? On a headless server loopback is the owner by
+      // design, and a bot's shell is a loopback caller too. A request with
+      // no paired session and no browser origin cannot be told from a
+      // script, so its message is stamped rather than trusted as typed —
+      // the room's readers, its posting budget and its transcript all look
+      // at that stamp — and the send is logged where the operator can see
+      // it. The desktop app never gets here: its owner capability is
+      // checked before this handler runs.
+      const browserOrigin = typeof req.headers.origin === "string" && req.headers.origin.trim() !== "";
+      const via: "api" | undefined =
+        auth.kind === "loopback" && !DESKTOP_MANAGED && !browserOrigin ? "api" : undefined;
+      if (via) {
+        console.warn(`room message from ${requestSource(req)} through the local API (no session, no browser origin) into "${group.name}"`);
+      }
       const receipt = await sendSequencer.run(
         sendId ? `group:${group.id}:${threadId}:${sendId}` : undefined,
         sendFingerprint(text, replyTo?.id, channelMode),
@@ -9648,10 +9675,11 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
               replyToId: replyTo?.id,
               sendId,
               mode: channelMode,
+              via,
             });
             return { ok: true as const, queued: true as const, queueId: queued.id, threadId };
           }
-          const message = startGroupTurn(current.id, text, replyTo, sendId, channelMode);
+          const message = startGroupTurn(current.id, text, replyTo, sendId, channelMode, undefined, { via });
           return { ok: true as const, threadId, message };
         },
       );

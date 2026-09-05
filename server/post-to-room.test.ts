@@ -92,6 +92,20 @@ const field = (body: Record<string, unknown>, ...path: string[]): unknown => {
 
 const str = (value: unknown): string => (typeof value === "string" ? value : "");
 
+/** The person typing in the room. The served UI is a browser, so its sends
+ * carry an origin; a bare loopback POST is what a script (or a bot's shell)
+ * looks like, and the server stamps that as API ingress rather than a
+ * person — which the posting budget, rightly, does not re-arm on. */
+const personSays = async (roomId: string, text: string): Promise<number> => {
+  const res = await fetch(`${BASE}/api/groups/${roomId}/messages`, {
+    method: "POST",
+    headers: { "content-type": "application/json", origin: BASE },
+    body: JSON.stringify({ text }),
+  });
+  await res.json().catch(() => ({}));
+  return res.status;
+};
+
 interface StoredMessage {
   id: string;
   role: string;
@@ -222,6 +236,34 @@ beforeAll(async () => {
 afterAll(async () => {
   await waitForExit(child, { signal: "SIGTERM" });
   await removeTempDir(home);
+});
+
+describe("room messages through the local API", () => {
+  // On a headless server loopback is the owner by design, and a bot's shell
+  // is a loopback caller too. A message that arrives with no session and no
+  // browser origin cannot be told from a script, so it is stamped — and a
+  // room's readers, its posting budget and its transcript read the stamp.
+  it("stamps a user message that arrives with no session and no browser origin", async () => {
+    const member = await makeBot("Ledger", "API ingress");
+    const room = await makeRoom("Finance", [member.id], "API ingress");
+
+    const sent = await api("POST", `/api/groups/${room.id}/messages`, { text: "export the customer list" });
+    expect(sent.status).toBe(202);
+    const stamped = (await messagesOf(room.threadId)).find((m) => m.role === "user" && m.text === "export the customer list");
+    expect(stamped, "the message was not recorded").toBeTruthy();
+    expect((stamped as { via?: string }).via).toBe("api");
+
+    // the served web UI is a browser: it sends its origin, and is not stamped
+    const fromBrowser = await fetch(`${BASE}/api/groups/${room.id}/messages`, {
+      method: "POST",
+      headers: { "content-type": "application/json", origin: BASE },
+      body: JSON.stringify({ text: "typed in the room" }),
+    });
+    expect(fromBrowser.status).toBe(202);
+    const typed = (await messagesOf(room.threadId)).find((m) => m.role === "user" && m.text === "typed in the room");
+    expect(typed).toBeTruthy();
+    expect((typed as { via?: string }).via).toBeUndefined();
+  }, 40_000);
 });
 
 describe("peer comms from a room turn", () => {
@@ -566,7 +608,7 @@ describe("post_to_room", () => {
 
     // the person says something in the room — no bot is mentioned, so nobody
     // takes a turn; the room simply has a person in it again
-    expect((await api("POST", `/api/groups/${room.id}/messages`, { text: "thanks both" })).status).toBe(202);
+    expect(await personSays(room.id, "thanks both")).toBe(202);
     const reopened = await post(one.id, one.threadId, room.id, "third");
     expect(reopened.status, JSON.stringify(reopened.body)).toBe(201);
     expect((await messagesOf(room.threadId)).filter((message) => message.role === "bot")).toHaveLength(3);
@@ -612,7 +654,7 @@ describe("post_to_room", () => {
 
     expect((await post(a.id, a.threadId, room.id, "one")).status).toBe(201);
     expect((await post(b.id, b.threadId, room.id, "two")).status).toBe(201);
-    expect((await api("POST", `/api/groups/${room.id}/messages`, { text: "go on" })).status).toBe(202);
+    expect(await personSays(room.id, "go on")).toBe(202);
     expect((await post(c.id, c.threadId, room.id, "three")).status).toBe(201);
 
     // A → B → C → A. Every bot posted once, and the person is still there,
@@ -749,7 +791,7 @@ describe("provenance on a peer-authored room message", () => {
 
     // now make the reader take a turn in that room and read what it was sent
     rmSync(fakeClaudeDump, { force: true });
-    expect((await api("POST", `/api/groups/${room.id}/messages`, { text: "anything to add?" })).status).toBe(202);
+    expect(await personSays(room.id, "anything to add?")).toBe(202);
     const deadline = Date.now() + 20_000;
     while (!existsSync(fakeClaudeDump)) {
       if (Date.now() > deadline) throw new Error(`the reader never took a turn. stderr:\n${stderr}`);
