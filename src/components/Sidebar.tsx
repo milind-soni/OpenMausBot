@@ -686,6 +686,13 @@ function BotContextMenu({
 
 export type BotConfirmKind = "archive" | "delete";
 
+/** A confirmation may span live fleet updates; never authorize from its snapshot. */
+export function currentArchivableBot(bots: readonly Bot[], id: string): Bot | undefined {
+  const active = bots.filter((candidate) => !candidate.hidden);
+  if (active.length <= 1) return undefined;
+  return active.find((candidate) => candidate.id === id && !candidate.chiefOfStaff);
+}
+
 /** Copy for the archive / delete confirmation dialogs. Archiving keeps
  * everything and is reversible from Archived bots; deleting is not — the
  * server drops every task transcript, the workspace (files + memory), and
@@ -1174,14 +1181,14 @@ export function Sidebar({ open, onClose }: { open: boolean; onClose: () => void 
   // One pending confirmation at a time: archive (inline button or context
   // menu) and delete (context menu) both open the same dialog.
   const requestArchive = (bot: Bot) => {
-    const activeBots = state.bots.filter((candidate) => !candidate.hidden);
-    if (bot.chiefOfStaff || activeBots.length <= 1) return;
-    setConfirm({ kind: "archive", bot });
+    const current = currentArchivableBot(state.bots, bot.id);
+    if (current) setConfirm({ kind: "archive", bot: current });
   };
 
-  const archiveBot = async (bot: Bot) => {
+  const archiveBot = async ({ id }: Pick<Bot, "id">) => {
+    const bot = currentArchivableBot(state.bots, id);
+    if (!bot) return;
     const activeBots = state.bots.filter((candidate) => !candidate.hidden);
-    if (bot.chiefOfStaff || activeBots.length <= 1) return;
     setTeamFeedback(null);
     try {
       const response = await api(`/api/bots/${bot.id}`, {

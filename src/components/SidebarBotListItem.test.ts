@@ -9,7 +9,7 @@ vi.mock("./DesktopCapabilities", () => ({
 }));
 
 import { ConfirmDialogCard } from "./ConfirmDialog";
-import { BotDeleteMenuItem, BotListItem, botConfirmCopy } from "./Sidebar";
+import { BotDeleteMenuItem, BotListItem, botConfirmCopy, currentArchivableBot } from "./Sidebar";
 
 const bot = (overrides: Partial<Bot> = {}): Bot => ({
   id: "atlas",
@@ -88,6 +88,16 @@ describe("BotListItem", () => {
 });
 
 describe("archive / delete confirmation", () => {
+  it("rechecks the latest fleet after a confirmation was opened", () => {
+    const snapshot = bot();
+    const other = bot({ id: "other" });
+    const renamed = bot({ name: "New name" });
+    expect(currentArchivableBot([renamed, other], snapshot.id)).toBe(renamed);
+    expect(currentArchivableBot([bot({ chiefOfStaff: true }), other], snapshot.id)).toBeUndefined();
+    expect(currentArchivableBot([bot({ hidden: true }), other], snapshot.id)).toBeUndefined();
+    expect(currentArchivableBot([snapshot], snapshot.id)).toBeUndefined();
+    expect(currentArchivableBot([other, bot({ id: "third" })], snapshot.id)).toBeUndefined();
+  });
   it("archive copy names the bot and says it can be restored", () => {
     const copy = botConfirmCopy("archive", "Juniper");
 
