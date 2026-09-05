@@ -316,6 +316,10 @@ describe("comms e2e (fake ACP fleet)", () => {
       const inbound = helperBot.messages.find((m: any) => m.role === "user" && m.kind === "text");
       expect(inbound.text).toContain("[Message from @Asker");
       expect(inbound.text).toContain("ping from fake");
+      // the transport is on the line itself, not only in its wording: a
+      // later reader that never sees the note's opening still knows the
+      // words came from a bot, and which one
+      expect(inbound.peerAsk).toEqual({ botId: asker.id, name: "Asker" });
       const rnote = helperBot.messages.find((m: any) => m.kind === "activity" && m.tool?.name === "Message from @Asker");
       expect(rnote?.comm?.groupId).toBe(note.comm.groupId);
       expect(helperBot.busy).toBeFalsy();

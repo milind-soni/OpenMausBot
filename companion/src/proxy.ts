@@ -10,7 +10,8 @@
 // request this process makes to 127.0.0.1 satisfies that by construction. So
 // the sidecar does NOT forward the device's Host or Origin. It speaks to the
 // harness as itself, from the machine the harness is already willing to
-// serve. Nothing upstream has to change, or even know this exists.
+// serve. Packaged harnesses also require a private per-launch relay capability,
+// attached only after authenticating the phone and authorizing its route.
 import { request as httpRequest, type IncomingMessage, type ServerResponse } from "node:http";
 import type { Duplex } from "node:stream";
 
@@ -28,6 +29,9 @@ import { createSseScrubber, isJson, scrub } from "./wire.ts";
 export interface ProxyOptions {
   /** Where the harness is listening on loopback. */
   harnessPort: number;
+  /** Private Electron capability; null means bootstrap is not ready yet.
+   * Undefined keeps standalone sidecars compatible with a plain Node harness. */
+  mutationToken?: () => string | null;
   /** Does this bearer token belong to a paired device? */
   authenticate: (token: string | undefined) => { id?: string; cloudDesktopAccess: boolean } | null;
   /** Redeem a pairing code. Handled here and never forwarded: the harness
@@ -210,7 +214,7 @@ const endpointSnapshot = (options: ProxyOptions): CompanionEndpointSnapshot => {
  * blocklist: `host` and `origin` must not travel (see above), `authorization`
  * is the sidecar's credential and means nothing to the harness, and hop-by-hop
  * headers are by definition not ours to relay. */
-const forwardHeaders = (req: IncomingMessage, authenticatedDeviceId?: string): Record<string, string> => {
+const forwardHeaders = (req: IncomingMessage, authenticatedDeviceId?: string, mutationToken?: string): Record<string, string> => {
   const out: Record<string, string> = {
     accept: String(req.headers.accept ?? "*/*"),
     // Lets a response whose URL is intentionally loopback-only (the VPS SSH
@@ -223,6 +227,7 @@ const forwardHeaders = (req: IncomingMessage, authenticatedDeviceId?: string): R
   // the harness to bind an encrypted credential to the same paired phone.
   if (authenticatedDeviceId && /^[\w-]{1,128}$/.test(authenticatedDeviceId)) {
     out["x-openmausbot-companion-device"] = authenticatedDeviceId;
+    if (mutationToken) out["x-openmausbot-companion-auth"] = mutationToken;
   }
   const contentType = req.headers["content-type"];
   if (contentType) out["content-type"] = String(contentType);
@@ -334,13 +339,17 @@ export function createProxyHandler(options: ProxyOptions) {
       return sendJson(res, 200, endpointSnapshot(options));
     }
 
+    const mutationToken = device ? options.mutationToken?.() : undefined;
+    if (device && options.mutationToken && !mutationToken) {
+      return sendJson(res, 503, { error: "The desktop connection is starting. Please try again shortly." });
+    }
     const upstream = httpRequest(
       {
         hostname: "127.0.0.1",
         port: options.harnessPort,
         path: req.url,
         method,
-        headers: forwardHeaders(req, device?.id),
+        headers: forwardHeaders(req, device?.id, mutationToken ?? undefined),
       },
       (harness) => {
         clearTimeout(headersDeadline);

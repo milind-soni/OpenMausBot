@@ -231,6 +231,13 @@ struct PairingView: View {
             Button("Continue") {
                 Haptics.selection()
                 failure = nil
+                // The whole link a server printed (https://host/pair#code=…) is
+                // fine here too: it names both the address and the code.
+                if let url = URL(string: manualAddress.trimmingCharacters(in: .whitespacesAndNewlines)),
+                   let invite = PairingInvite.parse(url) {
+                    accept(invite)
+                    return
+                }
                 guard let connection = Self.parse(manualAddress) else {
                     failure = "That address doesn't look right. Copy it from Phone settings and try again."
                     return
@@ -315,7 +322,9 @@ struct PairingView: View {
                         .foregroundStyle(.secondary)
 
                     TextField("000000", text: $code)
-                        .keyboardType(.numberPad)
+                        .keyboardType(.asciiCapable)
+                        .textInputAutocapitalization(.characters)
+                        .autocorrectionDisabled()
                         .textContentType(.oneTimeCode)
                         .font(.system(size: 28, weight: .bold, design: .rounded))
                         .multilineTextAlignment(.center)
@@ -323,7 +332,8 @@ struct PairingView: View {
                         .background(Color(uiColor: .tertiarySystemGroupedBackground))
                         .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
                         .onChange(of: code) { _, value in
-                            code = String(value.filter { $0.isASCII && $0.isNumber }.prefix(6))
+                            // six digits for a computer, ABCD-EFGH-JKLM for a server
+                            code = String(value.uppercased().filter { $0.isASCII && ($0.isNumber || $0.isLetter || $0 == "-") }.prefix(14))
                         }
 
                     Button {
@@ -338,7 +348,7 @@ struct PairingView: View {
                     }
                     .buttonStyle(.borderedProminent)
                     .controlSize(.large)
-                    .disabled(code.count != 6 || pairing)
+                    .disabled(!Self.codeLooksComplete(code) || pairing)
                 }
             }
 
@@ -442,6 +452,11 @@ struct PairingView: View {
                 }
             }
         }
+    }
+
+    /// A companion's six digits, or a server's twelve characters.
+    static func codeLooksComplete(_ code: String) -> Bool {
+        (code.count == 6 && code.allSatisfy(\.isNumber)) || PairingInvite.normalizedServerCode(code) != nil
     }
 
     private func accept(_ invite: PairingInvite?) {

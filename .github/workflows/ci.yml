@@ -60,6 +60,9 @@ jobs:
           OMB_SKIP_REAL_ELECTRON_BROWSER_FIXTURE: "0"
         run: pnpm exec vitest run electron/browser-closed-shadow.electron.test.mjs
       - run: pnpm check:electron
+      - name: Verify paired phone authorization against packaged harness
+        if: matrix.os == 'macos-latest'
+        run: pnpm build:companion && pnpm exec electron scripts/smoke-phone-relay-auth.cjs
       - name: production UI build
         if: matrix.os == 'ubuntu-latest'
         run: pnpm exec vite build

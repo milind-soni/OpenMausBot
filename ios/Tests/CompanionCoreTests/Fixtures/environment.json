@@ -1,0 +1,7 @@
+{
+  "environmentId": "env_7f3a9c",
+  "label": "cab mini",
+  "platform": "linux",
+  "version": "0.1.55",
+  "capabilities": { "remoteSessions": true, "selfUpdate": false }
+}

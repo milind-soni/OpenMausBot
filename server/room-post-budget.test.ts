@@ -132,6 +132,9 @@ describe("decideRoomPost", () => {
     expect(third.allowed).toBe(false);
     expect(third.allowed === false && third.refusal).toBe("escalate");
     expect(third.allowed === false && third.message).toMatch(/ask the user/i);
+    // and says how the room re-opens — the user just asked, so "ask the
+    // user" alone hands the model nothing it can relay
+    expect(third.allowed === false && third.message).toMatch(/write in the room themselves re-opens it/i);
 
     // the window slides: once the first two age out, the room reopens
     const later = post(budget, "c", "three", T0 + 5 * 60_000 + 1_001);

@@ -7,6 +7,7 @@ import { describe, expect, it } from "vitest";
 import {
   approvalHeldReason,
   approvalKey,
+  approvalModeForOrigin,
   autoDecision,
   autoVerdict,
   looksDestructive,
@@ -216,6 +217,28 @@ describe("autoDecision", () => {
   });
 });
 
+// Full is a decision about the person's OWN sessions with a bot. A turn
+// another bot started is not one, so it runs as Approve for me: the guards
+// card, an unattended sender's block holds, and the fold logs every answer.
+describe("approvalModeForOrigin", () => {
+  const person = { peerInitiated: false };
+  const peer = { peerInitiated: true };
+
+  it("keeps a person's own turn at the mode they chose", () => {
+    for (const mode of ["ask", "auto", "full", "custom"] as const) {
+      expect(approvalModeForOrigin(mode, person)).toBe(mode);
+    }
+  });
+
+  it("runs a peer-started turn on a Full or Custom bot as Approve for me", () => {
+    expect(approvalModeForOrigin("full", peer)).toBe("auto");
+    expect(approvalModeForOrigin("custom", peer)).toBe("auto");
+    // and never widens the lower modes
+    expect(approvalModeForOrigin("ask", peer)).toBe("ask");
+    expect(approvalModeForOrigin("auto", peer)).toBe("auto");
+  });
+});
+
 describe("unattended turns", () => {
   const bot = { autoApprove: true, alwaysAllow: ["Bash:git"] };
 
@@ -254,6 +277,16 @@ describe("approvalHeldReason", () => {
 
   it("does not offer Full access to a provider that cannot reach it", () => {
     const held = approvalHeldReason({ ...auto, unattended: true, fullAccessAvailable: false });
+    expect(held).toContain("every action asks");
+    expect(held).not.toContain("Full access");
+  });
+
+  it("explains a peer-started Full bot as Auto without promising Full bypasses the origin guard", () => {
+    const held = approvalHeldReason({
+      ...auto, unattended: true,
+      mode: approvalModeForOrigin("full", { peerInitiated: true }),
+      fullAccessAvailable: false,
+    });
     expect(held).toContain("every action asks");
     expect(held).not.toContain("Full access");
   });

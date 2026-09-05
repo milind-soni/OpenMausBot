@@ -1,6 +1,9 @@
 name: Docker image
 
 on:
+  # release.yml dispatches this on the tag it just published: a tag created
+  # with the workflow token never fires push events on its own.
+  workflow_dispatch:
   push:
     branches: [main]
     tags: ["v*"]
@@ -85,8 +88,9 @@ jobs:
           body() { curl -sk --max-time 10 "$@"; }
           H=https://localhost
           grep -q '"environmentId"' <<<"$(body $H/.well-known/openmausbot/environment)"   # descriptor is public
-          test "$(code $H/api/health)" = 403                                      # nothing else before pairing
-          grep -q 'pair this device' <<<"$(body $H/api/health)"
+          grep -q '^{"app":"openmausbot"}$' <<<"$(body $H/api/health)"             # the probe is public, and says only the app name
+          test "$(code $H/api/bots)" = 403                                        # nothing else before pairing
+          grep -q 'pair this device' <<<"$(body $H/api/bots)"
           grep -qi '<html' <<<"$(body $H/pair)"                                    # the UI shell is served so /pair can load
           test "$(code http://localhost/)" = 308                                   # HTTP redirects to HTTPS
           pairing=$(docker compose -f deploy/docker-compose.yml exec -T omb node dist-server/pair-cli.js --label ci)
@@ -110,7 +114,7 @@ jobs:
           sse=$( (curl -sk -b "$jar" -N --max-time 4 $H/api/events || true) | head -c 64 )
           test -n "$sse"                                                           # SSE streams, not buffered
           grep -q '"baseUrl":"https://localhost"' <<<"$(body -b "$jar" $H/api/webhooks)"   # OMB_WEBHOOK_PUBLIC_URL is advertised
-          test "$(code $H/api/health)" = 403                                      # and without the cookie it is still closed
+          test "$(code $H/api/bots)" = 403                                        # and without the cookie it is still closed
           docker compose -f deploy/docker-compose.yml down -v
 
   publish:

@@ -17,6 +17,8 @@
 // the shape of the first few words is what a model actually keys on, and
 // that marker has been in the ask path since peer comms shipped.
 
+import { peerName } from "./peer-roster.ts";
+
 /** Where the text came from and what the reader owes it. */
 export interface PeerProvenance {
   /** The bot that wrote it. */
@@ -28,7 +30,9 @@ export interface PeerProvenance {
 }
 
 /** The bracketed provenance line on its own. */
-export function peerProvenanceNote({ botName, delivery, unattended }: PeerProvenance): string {
+export function peerProvenanceNote({ botName: rawName, delivery, unattended }: PeerProvenance): string {
+  // the note is one bracketed line, and the name must not be able to end it
+  const botName = peerName(rawName);
   const opening = delivery === "ask_bot"
     ? `Message from @${botName}, another bot in this OpenMausBot workspace`
     : `Posted by @${botName}, another bot in this OpenMausBot workspace`;
@@ -46,4 +50,13 @@ export function peerProvenanceNote({ botName, delivery, unattended }: PeerProven
 /** The message with its provenance line in front of it. */
 export function withPeerProvenance(message: string, provenance: PeerProvenance): string {
   return `${peerProvenanceNote(provenance)}\n\n${message}`;
+}
+
+/** The bot named by an ask_bot note at the start of a stored line, or null
+ * when the line does not open with one. Lines stored since Message.peerAsk
+ * exists carry the asker structurally; this reads the same fact off older
+ * rows, whose only record of it is the note itself. */
+export function peerProvenanceAuthor(text: string): string | null {
+  const opening = /^\[Message from @(.+?), another bot in this OpenMausBot workspace/.exec(text);
+  return opening?.[1] ?? null;
 }

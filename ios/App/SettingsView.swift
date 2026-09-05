@@ -115,13 +115,17 @@ struct SettingsView: View {
                         }
                     }
 
-                    NavigationLink {
-                        ConnectedAppsView()
-                    } label: {
-                        Label {
-                            Text("Connected Apps")
-                        } icon: {
-                            SettingsIcon(symbol: "link", color: .blue)
+                    // Connecting apps needs the admin scope; on a server the
+                    // owner does it in the server's own UI.
+                    if session.connection?.pairedWithServer != true {
+                        NavigationLink {
+                            ConnectedAppsView()
+                        } label: {
+                            Label {
+                                Text("Connected Apps")
+                            } icon: {
+                                SettingsIcon(symbol: "link", color: .blue)
+                            }
                         }
                     }
                 }

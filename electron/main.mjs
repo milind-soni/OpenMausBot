@@ -284,6 +284,7 @@ const utilityServerExits = new WeakMap();
 const UTILITY_SERVER_STOP_TIMEOUT_MS = 6_500;
 const trustedApprovalMode = createTrustedApprovalModeCoordinator({ randomId: randomUUID });
 const desktopMutationToken = randomBytes(32).toString("base64url");
+const companionMutationToken = randomBytes(32).toString("base64url");
 
 function desktopDataDir() {
   // Match the historical desktop fallback for an unset or empty override,
@@ -638,6 +639,7 @@ function companionLaunchOptions(hostedUrl = null) {
   return {
     resourcesPath: process.resourcesPath,
     harnessPort: SERVER_PORT,
+    mutationToken: companionMutationToken,
     hostedUrl,
     // Only an embedded server receives the private half over its utility
     // port. A dev server launched in another terminal cannot decrypt, so it
@@ -980,6 +982,7 @@ function syncDesktopMutationToken(proc) {
     proc.postMessage({
       type: "openmausbot:desktop-mutation-token",
       token: desktopMutationToken,
+      companionToken: companionMutationToken,
     });
   } catch (error) {
     slog(`desktop mutation capability sync failed: ${error?.message ?? error}`);

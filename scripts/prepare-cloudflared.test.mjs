@@ -88,6 +88,10 @@ describe("pinned cloudflared packaging", () => {
     expect(parsePrepareCloudflaredArgs(["--current"])).toEqual({ current: true });
     expect(() => parsePrepareCloudflaredArgs(["--all"])).toThrow(/Usage:/);
     expect(() => parsePrepareCloudflaredArgs(["--current", "--current"])).toThrow(/Usage:/);
+    // `openmausbot serve --tunnel` stages into its data dir
+    expect(parsePrepareCloudflaredArgs(["--current", "--root", "/srv/omb"])).toEqual({ current: true, root: "/srv/omb" });
+    expect(() => parsePrepareCloudflaredArgs(["--root"])).toThrow(/Usage:/);
+    expect(() => parsePrepareCloudflaredArgs(["--root", "/a", "--root", "/b"])).toThrow(/Usage:/);
   });
 
   it("stages the current target for development without narrowing package preparation", () => {
