@@ -8,7 +8,8 @@ vi.mock("./DesktopCapabilities", () => ({
   useDesktopCapabilities: () => ({}),
 }));
 
-import { BotDeleteMenuItem, BotListItem } from "./Sidebar";
+import { ConfirmDialogCard } from "./ConfirmDialog";
+import { BotDeleteMenuItem, BotListItem, botConfirmCopy } from "./Sidebar";
 
 const bot = (overrides: Partial<Bot> = {}): Bot => ({
   id: "atlas",
@@ -80,6 +81,39 @@ describe("BotListItem", () => {
   it("renders the inline Archive action only when it is available", () => {
     expect(renderRow(bot(), true)).not.toContain('aria-label="Archive Atlas"');
     expect(renderRow(bot(), false)).toContain('aria-label="Archive Atlas"');
+  });
+});
+
+describe("archive / delete confirmation", () => {
+  it("archive copy names the bot and says it can be restored", () => {
+    const copy = botConfirmCopy("archive", "Juniper");
+
+    expect(copy.title).toContain("Juniper");
+    expect(copy.body).toMatch(/restore/i);
+    expect(copy.tone).toBe("neutral");
+  });
+
+  it("delete copy names the bot and spells out that it is permanent", () => {
+    const copy = botConfirmCopy("delete", "Willow");
+
+    expect(copy.title).toContain("Willow");
+    expect(copy.body).toMatch(/permanently/i);
+    expect(copy.tone).toBe("danger");
+  });
+
+  it("renders as an alert dialog with Cancel and the action button", () => {
+    const markup = renderToStaticMarkup(createElement(ConfirmDialogCard, {
+      open: true,
+      ...botConfirmCopy("delete", "Willow"),
+      onCancel: vi.fn(),
+      onConfirm: vi.fn(),
+    }));
+
+    expect(markup).toContain('role="alertdialog"');
+    expect(markup).toContain("Delete Willow?");
+    expect(markup).toContain(">Cancel</button>");
+    expect(markup).toContain(">Delete</button>");
+    expect(markup).toContain("bg-danger");
   });
 });
 

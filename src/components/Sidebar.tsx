@@ -34,6 +34,7 @@ import { api, useStore, formatTime, visibleMessages, type Bot, type Group } from
 import { BotAvatar, InitialsAvatar } from "./Avatar";
 import { stateForBot } from "@/lib/mascot";
 import { cn } from "@/lib/cn";
+import { ConfirmDialog } from "./ConfirmDialog";
 import { WorkingDots } from "./WorkingIndicator";
 import { skillRecorderEnabled } from "@/lib/feature-flags";
 import { nextRename } from "@/lib/rename";
@@ -538,11 +539,13 @@ function BotContextMenu({
   menu,
   onClose,
   onArchive,
+  onDelete,
   onMoveToSection,
 }: {
   menu: MenuState;
   onClose: () => void;
   onArchive: (bot: Bot) => void;
+  onDelete: (bot: Bot) => void;
   onMoveToSection: (botId: string) => void;
 }) {
   const { state, dispatch } = useStore();
@@ -658,13 +661,35 @@ function BotContextMenu({
           key="delete"
           deleting={deleting}
           onClick={() => {
-            dispatch({ type: "deleteBot", botId: bot.id });
             onClose();
+            onDelete(bot);
           }}
         />,
       ]}
     </div>
   );
+}
+
+export type BotConfirmKind = "archive" | "delete";
+
+/** Copy for the archive / delete confirmation dialogs. Archiving keeps
+ * everything and is reversible from Archived bots; deleting is not — the
+ * server drops every task transcript, the workspace (files + memory), and
+ * staged skill state with the bot. */
+export function botConfirmCopy(kind: BotConfirmKind, name: string) {
+  return kind === "archive"
+    ? {
+        title: `Archive ${name}?`,
+        body: `${name} leaves the sidebar, but every conversation is kept. You can restore it any time from Archived bots.`,
+        confirmLabel: "Archive",
+        tone: "neutral" as const,
+      }
+    : {
+        title: `Delete ${name}?`,
+        body: `This permanently removes ${name} along with its conversations, files, and memory. This cannot be undone.`,
+        confirmLabel: "Delete",
+        tone: "danger" as const,
+      };
 }
 
 export function BotDeleteMenuItem({ deleting, onClick }: { deleting: boolean; onClick: () => void }) {
@@ -1124,6 +1149,16 @@ export function Sidebar({ open, onClose }: { open: boolean; onClose: () => void 
   };
 
 
+  // One pending confirmation at a time: archive (inline button or context
+  // menu) and delete (context menu) both open the same dialog.
+  const [confirm, setConfirm] = useState<{ kind: BotConfirmKind; bot: Bot } | null>(null);
+
+  const requestArchive = (bot: Bot) => {
+    const activeBots = state.bots.filter((candidate) => !candidate.hidden);
+    if (bot.chiefOfStaff || activeBots.length <= 1) return;
+    setConfirm({ kind: "archive", bot });
+  };
+
   const archiveBot = async (bot: Bot) => {
     const activeBots = state.bots.filter((candidate) => !candidate.hidden);
     if (bot.chiefOfStaff || activeBots.length <= 1) return;
@@ -1484,7 +1519,7 @@ export function Sidebar({ open, onClose }: { open: boolean; onClose: () => void 
                 bot={unsectionedChief}
                 density={density}
                 onMenu={setMenu}
-                onArchive={(bot) => void archiveBot(bot)}
+                onArchive={requestArchive}
                 archiveDisabled
               />
             </div>
@@ -1558,7 +1593,7 @@ export function Sidebar({ open, onClose }: { open: boolean; onClose: () => void 
                         bot={bot}
                         density={density}
                         onMenu={setMenu}
-                        onArchive={(candidate) => void archiveBot(candidate)}
+                        onArchive={requestArchive}
                         archiveDisabled
                       />
                     ))}
@@ -1576,7 +1611,7 @@ export function Sidebar({ open, onClose }: { open: boolean; onClose: () => void 
                         bot={bot}
                         density={density}
                         onMenu={setMenu}
-                        onArchive={(candidate) => void archiveBot(candidate)}
+                        onArchive={requestArchive}
                         archiveDisabled={activeBotCount <= 1}
                       />
                     ))}
@@ -1729,10 +1764,24 @@ export function Sidebar({ open, onClose }: { open: boolean; onClose: () => void 
         <BotContextMenu
           menu={menu}
           onClose={() => setMenu(null)}
-          onArchive={(bot) => void archiveBot(bot)}
+          onArchive={requestArchive}
+          onDelete={(bot) => setConfirm({ kind: "delete", bot })}
           onMoveToSection={(botId) => setSectionPicker({ botId, x: menu.x, y: menu.y })}
         />
       )}
+      <ConfirmDialog
+        open={confirm !== null}
+        {...(confirm ? botConfirmCopy(confirm.kind, confirm.bot.name) : botConfirmCopy("archive", ""))}
+        icon={confirm?.kind === "delete" ? <Trash2 size={18} /> : <Archive size={18} />}
+        onCancel={() => setConfirm(null)}
+        onConfirm={() => {
+          if (!confirm) return;
+          const { kind, bot } = confirm;
+          setConfirm(null);
+          if (kind === "archive") void archiveBot(bot);
+          else dispatch({ type: "deleteBot", botId: bot.id });
+        }}
+      />
       {sectionPicker && (
         <SectionPicker
           current={state.bots.find((b) => b.id === sectionPicker.botId)?.section}
