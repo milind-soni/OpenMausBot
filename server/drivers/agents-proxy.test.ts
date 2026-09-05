@@ -358,6 +358,22 @@ describe("agents-proxy MCP surface", () => {
     roomsResponse = { rooms: [{ id: "room-launch", name: "Launch", members: ["Asker", "Helper"] }] };
   });
 
+  it("names a room the bot is in but cannot post into, with the reason and no id", async () => {
+    // the person can see the bot in that room, so "no room" would be a lie;
+    // the reason travels to the model, an id it could retry against does not
+    roomsResponse = {
+      rooms: [],
+      unpostable: [{ name: "Planning", reason: "that room includes @Scout, who is outside your section — tell the user what you wanted to post there instead" }],
+    };
+    const res = await callTool("list_rooms", {});
+    const text = res.result.content[0].text;
+    expect(text).toContain("cannot post into");
+    expect(text).toContain("- Planning: that room includes @Scout, who is outside your section");
+    expect(text).toContain("nothing to retry");
+    expect(text).not.toContain("[id:");
+    roomsResponse = { rooms: [{ id: "room-launch", name: "Launch", members: ["Asker", "Helper"] }] };
+  });
+
   it("post_to_room forwards the sender's own identity and warns that no reply is coming", async () => {
     const res = await callTool("post_to_room", { group_id: "room-launch", message: "shipping at 4" });
     expect(res.result.isError).toBeFalsy();

@@ -7436,26 +7436,36 @@ const server = createServer(async (req, res) => {
       }
       // Nothing else ever tells a bot a room id, so this is the discovery
       // half of post_to_room: it lists exactly the rooms that tool would
-      // accept, resolved from the sender's own membership. Listing a room a
-      // post would be refused for would only teach the model to keep trying.
+      // accept, resolved from the sender's own membership. A room a post
+      // would be refused for gets no id — an id would only teach the model
+      // to keep trying — but it is still NAMED, with the refusal it would
+      // have met. Without that the bot can only say it is in no room at
+      // all, while the person is looking at it in that very room.
       if (method === "GET" && path === "/api/internal/rooms") {
         const from = internalSender;
         const fromThreadId = internalCapability.threadId;
         if (!connectorThread(from.id, fromThreadId)) {
           return json(res, 403, { error: "source conversation does not belong to sender" });
         }
-        const rooms = store.groups
-          .filter((group) => roomPostEligibility(from, group).ok)
-          .slice(0, 50)
-          .map((group) => ({
+        const rooms: Array<{ id: string; name: string; members: string[] }> = [];
+        const unpostable: Array<{ name: string; reason: string }> = [];
+        for (const group of store.groups) {
+          if (group.dm || !group.memberIds.includes(from.id)) continue;
+          const eligibility = roomPostEligibility(from, group);
+          if (!eligibility.ok) {
+            unpostable.push({ name: group.name, reason: eligibility.error });
+            continue;
+          }
+          rooms.push({
             id: group.id,
             name: group.name,
             members: group.memberIds
               .map((id) => store.bot(id))
               .filter((member): member is BotRecord => Boolean(member))
               .map((member) => member.name),
-          }));
-        return json(res, 200, { rooms });
+          });
+        }
+        return json(res, 200, { rooms: rooms.slice(0, 50), unpostable: unpostable.slice(0, 50) });
       }
       if (method === "GET" && path === "/api/internal/routines") {
         const from = internalSender;

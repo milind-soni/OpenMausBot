@@ -278,6 +278,14 @@ describe("list_rooms discovery", () => {
     expect(ids).toContain(mine.id);
     expect(ids, "a room the caller is not in was listed").not.toContain(theirs.id);
     expect(ids, "a cross-section room was listed").not.toContain(mixed.id);
+    // the cross-section room is still NAMED, with the refusal a post would
+    // meet and no id to retry against — the person can see the bot in it,
+    // so "no room" would be a lie; a room the caller is not in stays unsaid
+    const unpostable = Array.isArray(listed.body.unpostable) ? listed.body.unpostable : [];
+    expect(unpostable).toHaveLength(1);
+    expect(field(unpostable[0] as Record<string, unknown>, "name")).toBe("Mixed room");
+    expect(str(field(unpostable[0] as Record<string, unknown>, "reason"))).toContain("@Stranger, who is outside your section");
+    expect(field(unpostable[0] as Record<string, unknown>, "id")).toBeUndefined();
 
     const listedRoom = rooms.find((room) => str(field(room as Record<string, unknown>, "id")) === mine.id);
     expect(field(listedRoom as Record<string, unknown>, "members")).toEqual(["Scout", "Scout Mate"]);
