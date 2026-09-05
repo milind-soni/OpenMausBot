@@ -243,6 +243,7 @@ function RoomContextMenu({
   return createPortal(
     <div
       data-room-menu
+      data-sidebar
       style={{ top, left }}
       className="fixed z-40 w-[228px] overflow-hidden rounded-xl border border-hairline/50 bg-card py-1.5 shadow-2xl shadow-black/60"
     >
@@ -1267,6 +1268,7 @@ export function Sidebar({ open, onClose }: { open: boolean; onClose: () => void 
     <aside
       aria-label="Bots and navigation"
       data-native-view-overlay
+      data-sidebar
       className={cn(
         "flex h-full shrink-0 flex-col border-r border-hairline/40 bg-panel transition-[width] duration-200",
         density === "icons" ? "w-[80px]" : density === "compact" ? "w-[272px]" : "w-[320px]",
