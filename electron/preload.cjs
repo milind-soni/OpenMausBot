@@ -22,7 +22,7 @@ ipcRenderer.on("package:install", (_event, url) => {
 // helpers here. Main enforces the same rule on the sensitive channels.
 const localOrigin = process.argv.find((arg) => arg.startsWith("--omb-local-origin="))?.slice("--omb-local-origin=".length) ?? null;
 const isLocalPage = !localOrigin || location.origin === localOrigin;
-const REMOTE_SAFE = new Set(["platform", "getCapabilities", "onCapabilitiesChanged", "applySkin", "setUnreadCount", "openExternal", "getPathForFile", "permStatus", "environments"]);
+const REMOTE_SAFE = new Set(["platform", "getCapabilities", "onCapabilitiesChanged", "applySkin", "setUnreadCount", "permStatus"]);
 
 const bridge = {
   /** Host platform ("darwin" | "win32" | "linux") — for platform-aware UI. */

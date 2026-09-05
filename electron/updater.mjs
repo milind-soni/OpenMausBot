@@ -7,6 +7,7 @@
 // electron-updater is vendored (electron/vendor/electron-updater.cjs) because
 // the packaged app ships no node_modules.
 import { app, clipboard, ipcMain } from "electron";
+import localOriginModule from "./local-origin.cjs";
 import { appendFileSync, existsSync, mkdirSync, readFileSync } from "node:fs";
 import { createRequire } from "node:module";
 import { join } from "node:path";
@@ -71,11 +72,14 @@ function setState(patch) {
   }
 }
 
+// The updater changes THIS app: only the local server's UI may drive it.
+const { localOnly } = localOriginModule;
+
 export function registerUpdaterIpc() {
-  ipcMain.handle("update:get-state", () => state);
-  ipcMain.handle("update:check", () => updaterCoordinator?.check(true));
-  ipcMain.handle("update:download", () => updaterCoordinator?.download());
-  ipcMain.handle("update:install", () => updaterCoordinator?.install());
+  ipcMain.handle("update:get-state", localOnly("update:get-state", () => state));
+  ipcMain.handle("update:check", localOnly("update:check", () => updaterCoordinator?.check(true)));
+  ipcMain.handle("update:download", localOnly("update:download", () => updaterCoordinator?.download()));
+  ipcMain.handle("update:install", localOnly("update:install", () => updaterCoordinator?.install()));
 }
 
 // macOS keeps the process (and updater) alive after its window closes.
