@@ -1,6 +1,9 @@
 name: npm package
 
 on:
+  # release.yml dispatches this on the tag it just published: a tag created
+  # with the workflow token never fires push events on its own.
+  workflow_dispatch:
   push:
     tags: ["v*"]
   pull_request:
