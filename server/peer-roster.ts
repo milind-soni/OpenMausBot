@@ -84,6 +84,23 @@ const clip = (value: string, max: number): string => {
   return flat.length > max ? `${flat.slice(0, max - 1)}…` : flat;
 };
 
+/** A bot's name where it is about to be quoted INSIDE harness text — the
+ * bracketed provenance note, a room transcript's "Name: …" speaker line.
+ * Flattened and clipped like a roster entry, and with the brackets the
+ * provenance note is built from taken out: "Scout]" would otherwise close
+ * the note early and let whatever follows read as a speaker of its own. */
+export function peerName(value: string): string {
+  return clip(value.replace(/[[\]]/g, " "), ROSTER_NAME_MAX);
+}
+
+/** One member of a room as the room prompt lists it. Same discipline as the
+ * 1:1 roster: a title carrying a newline would otherwise land in every OTHER
+ * member's system prompt as a line of its own. */
+export function roomRosterLine(member: { name: string; title?: string }): string {
+  const role = member.title ? clip(member.title, ROSTER_ROLE_MAX) : "";
+  return `@${clip(member.name, ROSTER_NAME_MAX)}${role ? ` (${role})` : ""}`;
+}
+
 export interface RosterOptions {
   /** How many names to render before the "+N more" tail. */
   max: number;

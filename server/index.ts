@@ -67,7 +67,7 @@ import {
   generateAvatarImage,
   snapshotAvatarGenerationState,
 } from "./avatar-image.ts";
-import { parseBotProfilePatch } from "./bot-profile.ts";
+import { fitsOnOneLine, parseBotProfilePatch } from "./bot-profile.ts";
 import { groupTurnCwd } from "./room-cwd.ts";
 import { RoomTurnDeadline, RoomTurnStallRegistry, roomTurnTimeoutMessage } from "./room-turn-timeout.ts";
 import * as box from "./box.ts";
@@ -79,7 +79,7 @@ import {
 } from "./cloud-backend.ts";
 import * as composio from "./composio.ts";
 import { chiefOfStaffSystemPrompt } from "./chief-of-staff.ts";
-import { peerAllowed, peerRosterSystemPrompt, reachablePeers, roomPeerRosterSystemPrompt } from "./peer-roster.ts";
+import { peerAllowed, peerName, peerRosterSystemPrompt, reachablePeers, roomPeerRosterSystemPrompt, roomRosterLine } from "./peer-roster.ts";
 import { openMausStatusSystemPrompt } from "./openmaus-status-capsule.ts";
 import {
   containerComputerAction,
@@ -4916,7 +4916,8 @@ function serializeRoomContext(
     .slice(-GROUP_CONTEXT_MESSAGES)
     .map((m) => {
       const rendered = textOverride?.messageId === m.id ? { ...m, text: textOverride.text } : m;
-      const speaker = m.role === "user" ? userName : (m.from?.name ?? "Bot");
+      // a bot's name is quoted on the speaker line, so it gets one line
+      const speaker = m.role === "user" ? userName : m.from ? peerName(m.from.name) : "Bot";
       const line = `${speaker}: ${transcriptText(rendered, messagesById, userName)}`;
       // A room reply is the room talking. A post_to_room message is another
       // bot's text carried in from somewhere else, so it says so — the
@@ -5259,7 +5260,7 @@ async function runGroupMemberTurn(
   const roster = readyGroup.memberIds
     .map((id) => store.bot(id))
     .filter((b): b is NonNullable<typeof b> => Boolean(b))
-    .map((b) => `@${b.name}${b.title ? ` (${b.title})` : ""}`)
+    .map(roomRosterLine)
     .join(", ");
   // The roster above is who an @mention can reach; the section's other bots
   // are who it cannot. The 1:1 prompt has carried a peer roster since #774,
@@ -8161,6 +8162,10 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
         }
         if (name.length > 80) return json(res, 400, { error: "name must be at most 80 characters" });
         if (role.length > 120) return json(res, 400, { error: "role must be at most 120 characters" });
+        // the same door the profile endpoints keep: both fields are quoted
+        // into every other room member's system prompt, one line each
+        if (!fitsOnOneLine(name)) return json(res, 400, { error: "name must fit on one line" });
+        if (!fitsOnOneLine(role)) return json(res, 400, { error: "role must fit on one line" });
         if (instructions.length > 1_000) {
           return json(res, 400, { error: "instructions must be at most 1000 characters" });
         }

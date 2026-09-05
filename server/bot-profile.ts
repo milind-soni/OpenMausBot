@@ -6,6 +6,21 @@ import { MASCOT_BODY_IDS, mascotBodySchema } from "../shared/mascot-bodies.ts";
 
 import type { BotRecord } from "./store.ts";
 
+/** A name or title is quoted inside prompts and cards as one line — a
+ * roster entry, a "Name: …" speaker line, the bracketed provenance note.
+ * Text that can break out of that line (a newline, a control byte, the
+ * Unicode separators) is refused at the door rather than flattened later,
+ * so what the person sees in the sidebar is what every prompt sees too.
+ * Written as a scan because a control-character class is the kind of
+ * literal the linter (rightly) refuses. */
+export function fitsOnOneLine(value: string): boolean {
+  for (let i = 0; i < value.length; i += 1) {
+    const code = value.charCodeAt(i);
+    if (code < 0x20 || (code >= 0x7f && code <= 0x9f) || code === 0x2028 || code === 0x2029) return false;
+  }
+  return true;
+}
+
 export const BOT_PROFILE_PATCH_FIELDS = [
   "name",
   "title",
@@ -23,10 +38,12 @@ const profilePatchSchema = z.object({
     .string({ error: "name must be a string" })
     .max(BOT_PROFILE_LIMITS.name, { error: "name must be at most 100 characters" })
     .refine((value) => Boolean(value.trim()), { error: "name must not be empty" })
+    .refine(fitsOnOneLine, { error: "name must fit on one line" })
     .optional(),
   title: z
     .string({ error: "title must be a string" })
     .max(BOT_PROFILE_LIMITS.title, { error: "title must be at most 200 characters" })
+    .refine(fitsOnOneLine, { error: "title must fit on one line" })
     .optional(),
   description: z
     .string({ error: "description must be a string" })
