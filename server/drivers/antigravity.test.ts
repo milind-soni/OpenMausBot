@@ -9,7 +9,8 @@ import type { ProviderInstance } from "../contracts.ts";
 import { recordEvents, type EventRecorder } from "../testing/events.ts";
 import { removeTempDir } from "../testing/cleanup.ts";
 import {
-  ANTIGRAVITY_AUTH_STDOUT_PREFIX,
+  ANTIGRAVITY_AUTH_PREFIX,
+  authorizationUrlFromLine,
   AntigravityAuthController,
   antigravityProfileDirectory,
   antigravityProfileAuthenticated,
@@ -102,6 +103,8 @@ describe("official Antigravity catalog", () => {
 });
 
 describe("Antigravity sign-in lifecycle", () => {
+  // Google's server announces the link on stderr, never stdout — a fake that
+  // prints to stdout passes against code that cannot sign in at all.
   it.each(["cancel", "provider failure"])("contains %s after handing the browser a sign-in URL", async (ending) => {
     const fake = fakeRuntime();
     const url = "https://accounts.google.com/o/oauth2/v2/auth?response_type=code&state=fixture&redirect_uri=http%3A%2F%2F127.0.0.1%3A54321%2F";
@@ -110,7 +113,7 @@ import { createInterface } from 'node:readline';
 createInterface({ input: process.stdin }).on('line', line => {
   const message = JSON.parse(line);
   if (message.method === 'authenticate') {
-    console.log(${JSON.stringify(ANTIGRAVITY_AUTH_STDOUT_PREFIX + url)});
+    console.error(${JSON.stringify(ANTIGRAVITY_AUTH_PREFIX + url)});
     ${ending === "provider failure" ? `setTimeout(() => console.log(JSON.stringify({ jsonrpc: '2.0', id: message.id, error: { code: -1, message: 'Sign-in expired' } })), 100);` : ""}
   } else console.log(JSON.stringify({ jsonrpc: '2.0', id: message.id, result: {} }));
 });
@@ -437,10 +440,25 @@ describe("Antigravity OAuth validation", () => {
   const authorizationUrl = `https://accounts.google.com/o/oauth2/v2/auth?response_type=code&state=${state}&redirect_uri=${encodeURIComponent(redirectUri)}`;
 
   it("accepts only Google's exact loopback authorization request", () => {
-    expect(ANTIGRAVITY_AUTH_STDOUT_PREFIX).toContain("authenticate the ACP server");
+    expect(ANTIGRAVITY_AUTH_PREFIX).toContain("authenticate the ACP server");
     expect(parseAntigravityAuthorizationUrl(authorizationUrl)).toEqual({ authorizationUrl, redirectUri, state });
     expect(() => parseAntigravityAuthorizationUrl(authorizationUrl.replace("accounts.google.com", "example.com"))).toThrow(/invalid/u);
     expect(() => parseAntigravityAuthorizationUrl(authorizationUrl.replace("127.0.0.1", "localhost"))).toThrow(/invalid/u);
+  });
+
+  it("reads the sign-in link from either announcement Google makes", () => {
+    // The $BROWSER helper re-emits the link JSON-encoded behind this marker;
+    // the plain notice is what a terminal user would have read.
+    expect(authorizationUrlFromLine(`__OPENMAUS_ANTIGRAVITY_AUTH_URL__${JSON.stringify(authorizationUrl)}`))
+      .toBe(authorizationUrl);
+    expect(authorizationUrlFromLine(`${ANTIGRAVITY_AUTH_PREFIX}${authorizationUrl}`)).toBe(authorizationUrl);
+  });
+
+  it("ignores ordinary server logs, including ones quoting a link", () => {
+    expect(authorizationUrlFromLine("I0905 11:02:06.473720 8283299200 main.py:80] Starting AGY ACP Server...")).toBeNull();
+    expect(authorizationUrlFromLine(`I0905 credential_manager.py:553] ${ANTIGRAVITY_AUTH_PREFIX}${authorizationUrl}`)).toBeNull();
+    expect(authorizationUrlFromLine("__OPENMAUS_ANTIGRAVITY_AUTH_URL__not-json")).toBeNull();
+    expect(authorizationUrlFromLine("")).toBeNull();
   });
 
   it("ties a pasted remote callback to the active state and loopback port", () => {
