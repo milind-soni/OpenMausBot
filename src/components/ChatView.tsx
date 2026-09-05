@@ -40,6 +40,7 @@ import { EngineSetup } from "./EngineSetup";
 import { BotAvatar, MausAvatar } from "./Avatar";
 import { TurnPresence } from "./TurnPresence";
 import { showToolCallsEnabled } from "@/lib/feature-flags";
+import { installChatHotkeys } from "@/lib/chat-hotkeys";
 import { stateForBot } from "@/lib/mascot";
 import { showWorkingDots } from "@/lib/turn-tail";
 import { liveActivityLabel } from "@/lib/live-activity";
@@ -865,7 +866,20 @@ function PinnedBanner({
   );
 }
 
-export function ChatView({ bot }: { bot: Bot }) {
+export function ChatView({
+  bot,
+  /** Spaces mounts one ChatView per bot. Only the focused one answers the
+   * keyboard; the rest stay live and scrollable but silent. */
+  active = true,
+  /** Spaces supplies one floating composer for the whole canvas, so the
+   * per-card one would be a second input for the same bot, stacked directly
+   * under it. */
+  composer = true,
+}: {
+  bot: Bot;
+  active?: boolean;
+  composer?: boolean;
+}) {
   const { state, dispatch } = useStore();
   const remoteClient = window.ogb?.remoteClient?.active === true;
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -884,16 +898,6 @@ export function ChatView({ bot }: { bot: Bot }) {
     bot.messages,
   );
   useEffect(() => setFindOpen(false), [bot.threadId]);
-  useEffect(() => {
-    const onFind = (event: KeyboardEvent) => {
-      if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "f") {
-        event.preventDefault();
-        setFindOpen(true);
-      }
-    };
-    window.addEventListener("keydown", onFind);
-    return () => window.removeEventListener("keydown", onFind);
-  }, []);
 
   // only the active branch is rendered; forks stay reachable via ‹ › nav
   const messages = useMemo(() => visibleMessages(bot), [bot]);
@@ -1083,16 +1087,15 @@ export function ChatView({ bot }: { bot: Bot }) {
   // keyboard is a scroll gesture too (upstream lesson): PageUp/Home/ArrowUp
   // break follow like an upward wheel; the at-end onScroll check re-arms it.
   // ArrowUp only counts outside inputs — in the composer it edits, not scrolls.
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => {
-      const typing = e.target instanceof HTMLTextAreaElement || e.target instanceof HTMLInputElement;
-      if (e.key === "PageUp" || ((e.key === "Home" || e.key === "ArrowUp") && !typing)) {
-        setBottomFollow(false);
-      }
-    };
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, [setBottomFollow]);
+  useEffect(
+    () =>
+      installChatHotkeys(window, {
+        active,
+        onFind: () => setFindOpen(true),
+        onScrollAway: () => setBottomFollow(false),
+      }),
+    [active, setBottomFollow],
+  );
 
   const atEnd = () => {
     const el = scrollRef.current;
@@ -1363,6 +1366,7 @@ export function ChatView({ bot }: { bot: Bot }) {
           request can restore the old task without spilling into the newly
           selected one. ArrowUp-to-edit stays gated on busy because editing
           rewinds the thread, which a live turn forbids (the server 409s it). */}
+      {composer && (
       <div ref={composerDockRef} className="absolute inset-x-0 bottom-0 z-[2]">
       <Composer
         key={bot.threadId}
@@ -1376,6 +1380,7 @@ export function ChatView({ bot }: { bot: Bot }) {
           : undefined}
       />
       </div>
+      )}
       </div>
 
     </main>

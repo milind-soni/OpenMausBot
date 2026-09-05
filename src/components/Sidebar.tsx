@@ -25,6 +25,7 @@ import {
   Search,
   Sparkles,
   Puzzle,
+  LayoutGrid,
   Trash2,
   Users,
   X,
@@ -36,7 +37,7 @@ import { stateForBot } from "@/lib/mascot";
 import { cn } from "@/lib/cn";
 import { ConfirmDialog } from "./ConfirmDialog";
 import { WorkingDots } from "./WorkingIndicator";
-import { skillRecorderEnabled } from "@/lib/feature-flags";
+import { skillRecorderEnabled, spacesEnabled } from "@/lib/feature-flags";
 import { nextRename } from "@/lib/rename";
 import { downloadAllBots } from "@/lib/team-files";
 import { useDesktopCapabilities } from "./DesktopCapabilities";
@@ -1678,6 +1679,21 @@ export function Sidebar({ open, onClose }: { open: boolean; onClose: () => void 
             <Network size={20} className={state.activeView === "team-map" ? "text-accent" : "text-ink-secondary"} />
             <span className={cn("flex-1 text-[14px]", density === "icons" && "hidden")}>Team map</span>
           </button>
+          {spacesEnabled(state.config) && (
+            <button
+              onClick={() => dispatch({ type: "toggleSpaces", open: true })}
+              aria-label={density === "icons" ? "Spaces" : undefined}
+              title={density === "icons" ? "Spaces" : undefined}
+              className={cn(
+                "flex min-h-10 w-full items-center rounded-xl py-2 text-left transition-colors",
+                density === "icons" ? "justify-center px-2" : "gap-3 px-3",
+                "text-ink hover:bg-raised/50",
+              )}
+            >
+              <LayoutGrid size={20} className="text-ink-secondary" />
+              <span className={cn("flex-1 text-[14px]", density === "icons" && "hidden")}>Spaces</span>
+            </button>
+          )}
           {!remoteClient && skillRecorderEnabled(state.config) && (
             <button
               onClick={() => dispatch({ type: "showSkillRecorder" })}
@@ -1736,6 +1752,17 @@ export function Sidebar({ open, onClose }: { open: boolean; onClose: () => void 
                 active: state.activeView === "team-map",
                 onSelect: () => dispatch({ type: "showTeamMap" }),
               },
+              ...(spacesEnabled(state.config)
+                ? [
+                    {
+                      key: "spaces",
+                      label: "Spaces",
+                      icon: <LayoutGrid size={18} />,
+                      active: state.spacesOpen,
+                      onSelect: () => dispatch({ type: "toggleSpaces", open: true }),
+                    },
+                  ]
+                : []),
               ...(!remoteClient && skillRecorderEnabled(state.config)
                 ? [
                     {

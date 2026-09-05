@@ -6,7 +6,7 @@ import { useEffect, useRef, useState } from "react";
 import { Coins, FlaskConical, Globe, KeyRound, Monitor, Search, TabletSmartphone, Terminal, Trash2, User, X } from "lucide-react";
 import { api, useStore, type AppSettingsSection, type ConfigStatus } from "@/state/store";
 import { analyticsEnabled, setAnalyticsEnabled } from "@/lib/analytics";
-import { builtInBrowserEnabled, showToolCallsEnabled, skillRecorderEnabled } from "@/lib/feature-flags";
+import { builtInBrowserEnabled, showToolCallsEnabled, skillRecorderEnabled, spacesEnabled } from "@/lib/feature-flags";
 import { localeChoices } from "@/locales";
 import { ApiKeyRow, VpsConnection } from "./ApiKeys";
 import { useUpdaterState } from "@/lib/updater";
@@ -32,7 +32,7 @@ const SECTIONS: Array<{
   keywords: string[];
 }> = [
   { id: "general", label: "General", icon: User, keywords: ["profile", "name", "email", "skin", "theme", "appearance", "analytics", "updates", "tools", "tool calls"] },
-  { id: "experimental", label: "Experimental", icon: FlaskConical, keywords: ["early", "preview", "teach", "skill", "browser", "profiles"] },
+  { id: "experimental", label: "Experimental", icon: FlaskConical, keywords: ["early", "preview", "teach", "skill", "browser", "profiles", "spaces", "canvas", "windows", "grid"] },
   { id: "connections", label: "Connections", icon: KeyRound, keywords: ["keys", "api", "composio", "box", "xai", "vps"] },
   { id: "engines", label: "Engines", icon: Terminal, keywords: ["models", "claude", "grok", "providers", "cli"] },
   { id: "companion", label: "Remote access", icon: TabletSmartphone, keywords: ["companion", "device", "phone", "desktop", "client", "host", "pair", "pairing", "mobile", "https", "secure", "tailscale", "wifi", "remote", "advanced"] },
@@ -245,10 +245,11 @@ function ExperimentalFeaturesRow() {
   const browser = builtInBrowserEnabled(state.config);
   const desktopBrowser = Boolean(window.ogb?.browser);
   const browserBlockedOnWindows = window.ogb?.platform === "win32" && !desktopBrowser;
-  const [saving, setSaving] = useState<"skillRecorder" | "browser" | null>(null);
+  const spaces = spacesEnabled(state.config);
+  const [saving, setSaving] = useState<"skillRecorder" | "browser" | "spaces" | null>(null);
   const [error, setError] = useState("");
 
-  const toggle = async (feature: "skillRecorder" | "browser", next: boolean) => {
+  const toggle = async (feature: "skillRecorder" | "browser" | "spaces", next: boolean) => {
     if (saving) return;
     setSaving(feature);
     setError("");
@@ -282,6 +283,21 @@ function ExperimentalFeaturesRow() {
           aria-label="Show Teach a skill"
           disabled={saving !== null}
           onClick={() => void toggle("skillRecorder", !skillRecorder)}
+          className="disabled:cursor-wait disabled:opacity-50"
+        />
+      </div>
+      <div className="mt-4 flex items-center justify-between gap-4 border-t border-hairline/30 pt-4">
+        <div className="min-w-0">
+          <div className="text-[14px] font-medium text-ink">Spaces</div>
+          <div className="mt-0.5 text-[12px] leading-relaxed text-ink-secondary">
+            Every bot as a card on one canvas. ⌘⌥↑ opens it, ⌘⌥1/2/3 puts one, two or three bots on screen, ⌘⌥← and ⌘⌥→ slide between them, Esc comes back. You can also pan and pinch with the trackpad. Your usual sidebar stays exactly as it is.
+          </div>
+        </div>
+        <Switch
+          checked={spaces}
+          aria-label="Show Spaces"
+          disabled={saving !== null}
+          onClick={() => void toggle("spaces", !spaces)}
           className="disabled:cursor-wait disabled:opacity-50"
         />
       </div>

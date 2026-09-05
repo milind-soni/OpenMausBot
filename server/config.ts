@@ -220,6 +220,8 @@ const featureConfigSchema = z.object({
   /** Experimental built-in browser. Off until explicitly enabled; each bot
    * also has its own switch. */
   browser: z.boolean().optional(),
+  /** The Spaces canvas: every bot as a card on one zoomable surface. */
+  spaces: z.boolean().optional(),
 });
 const instanceConfigSchema = z.object({
   driver: z.string().min(1),
@@ -290,7 +292,7 @@ export interface AppConfig {
    * separate container, durable workspace, viewer and lease. */
   localVm?: { mode?: "shared" | "per-bot"; maxInstances?: number };
   /** Opt-in product experiments. Every flag defaults to disabled. */
-  features?: { skillRecorder?: boolean; showToolCalls?: boolean; browser?: boolean };
+  features?: { skillRecorder?: boolean; showToolCalls?: boolean; browser?: boolean; spaces?: boolean };
   /** Named browser sessions any bot can be pointed at. */
   browserProfiles?: BrowserProfile[];
   instances?: InstanceConfigMap;
@@ -428,6 +430,11 @@ export function showToolCallsEnabled(cfg: AppConfig): boolean {
  * switch sits under it, so either can withhold the browser. */
 export function builtInBrowserEnabled(cfg: AppConfig): boolean {
   return cfg.features?.browser === true;
+}
+
+/** Workspace-level gate for the Spaces canvas. */
+export function spacesEnabled(cfg: AppConfig): boolean {
+  return cfg.features?.spaces === true;
 }
 
 // OMB_DATA_DIR isolates test/soak rigs from the user's real fleet.

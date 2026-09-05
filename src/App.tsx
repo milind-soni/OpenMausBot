@@ -23,7 +23,8 @@ import { BrowserWorkspace } from "@/components/BrowserWorkspace";
 import { SkillRecorderPage } from "@/components/SkillRecorderPage";
 import { TeamMapPage } from "@/components/TeamMapPage";
 import { heldComputerControlBotIds } from "@/lib/computer-control";
-import { skillRecorderEnabled } from "@/lib/feature-flags";
+import { skillRecorderEnabled, spacesEnabled } from "@/lib/feature-flags";
+import { SpacesShell } from "@/components/spaces/SpacesShell";
 import { setLocale } from "@/lib/i18n";
 
 function Shell() {
@@ -74,6 +75,8 @@ function Shell() {
     const onKey = (e: KeyboardEvent) => {
       const mod = e.metaKey || e.ctrlKey;
       if (!mod) return;
+      // Cmd-Opt-<n> belongs to the Spaces layout switcher, not to jump-to-bot.
+      if (e.altKey) return;
       const bots = state.bots.filter((b) => !b.hidden);
       if (e.key === "n" && !e.shiftKey) {
         e.preventDefault();
@@ -96,6 +99,21 @@ function Shell() {
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
   }, [state.bots, state.selectedId, dispatch]);
+
+  // Cmd-Opt-Up zooms out into Spaces. NOT Control-Up: macOS reserves every
+  // Control+Arrow for Mission Control and never delivers them to the app.
+  // Only bound once the feature is switched on; the shell closes it itself.
+  const canvasUnlocked = spacesEnabled(state.config);
+  useEffect(() => {
+    if (!canvasUnlocked || state.spacesOpen) return;
+    const onKey = (event: KeyboardEvent) => {
+      if (!event.metaKey || !event.altKey || event.ctrlKey || event.key !== "ArrowUp") return;
+      event.preventDefault();
+      dispatch({ type: "toggleSpaces", open: true });
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [canvasUnlocked, dispatch, state.spacesOpen]);
 
   useEffect(() => {
     window.ogb?.setUnreadCount?.(unreadCount);
@@ -306,6 +324,9 @@ function Shell() {
           palette on top when one of them is open underneath */}
       <CommandPalette onOpenChange={setPaletteOpen} />
       </div>
+      {canvasUnlocked && state.spacesOpen && (
+        <SpacesShell onClose={() => dispatch({ type: "toggleSpaces", open: false })} />
+      )}
     </div>
   );
 }
