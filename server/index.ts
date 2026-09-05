@@ -10767,7 +10767,15 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
                   { status: 409 },
                 );
               }
-              clearUnattended(current.id);
+              // A person steering a webhook turn is present, and auto mode may
+              // follow them again. But this route is also reachable from the
+              // bot's own shell on a headless server (loopback is the owner
+              // there), and "continue" typed by the turn itself must not be
+              // the thing that lifts the block written against it — so only
+              // a request that proves a person (a paired session, or the
+              // desktop's owner capability, which every mutation there has
+              // already shown) clears the mark.
+              if (auth.kind === "session" || DESKTOP_MANAGED) clearUnattended(current.id);
               const message = store.appendMessage(threadId, {
                 role: "user",
                 kind: "text",
