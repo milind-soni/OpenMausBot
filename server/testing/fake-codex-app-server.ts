@@ -5,7 +5,9 @@
 // real app-server, it never exits on its own — the driver kills it.
 //
 //   FAKE_CODEX_MODE   happy (default) | approval | resume | stream | windows-command |
-//                     mcp-elicitation | image | logged-in-stdout | logged-out | unauthorized
+//                     mcp-elicitation | mcp-app-approval | mcp-form | permissions-approval | config-profile |
+//                     config-profile-unsupported | config-read-error | image |
+//                     logged-in-stdout | logged-out | unauthorized
 //   FAKE_CODEX_DUMP   path to write {argv, env, calls, decision} as JSON
 //
 // Keep this file dependency-free — it runs as a bare `node` subprocess.
@@ -30,6 +32,7 @@ if (process.argv[2] === "login" && process.argv[3] === "status") {
 }
 const calls: Array<{ method: string; params: unknown }> = [];
 let decision: unknown = null;
+let experimentalApi = false;
 
 const out = (obj: unknown) => process.stdout.write(JSON.stringify(obj) + "\n");
 const notify = (method: string, params: unknown) => out({ jsonrpc: "2.0", method, params });
@@ -95,6 +98,7 @@ process.stdin.on("data", (chunk) => {
 
     switch (msg.method) {
       case "initialize":
+        experimentalApi = msg.params?.capabilities?.experimentalApi === true;
         out({ jsonrpc: "2.0", id: msg.id, result: { ok: true } });
         break;
       case "model/list":
@@ -127,17 +131,59 @@ process.stdin.on("data", (chunk) => {
           });
         }
         break;
+      case "config/read":
+        if (mode === "config-read-error") {
+          out({ jsonrpc: "2.0", id: msg.id, error: { code: -32000, message: "config unavailable" } });
+          break;
+        }
+        out({
+          jsonrpc: "2.0",
+          id: msg.id,
+          result: {
+            config: mode === "config-profile" || mode === "config-profile-unsupported"
+              ? {
+                  default_permissions: "private-operator-profile",
+                  permissions: {
+                    "private-operator-profile": { extends: ":danger-full-access" },
+                  },
+                  // These conflicting legacy values prove the profile wins.
+                  approval_policy: null,
+                  approvals_reviewer: null,
+                  sandbox_mode: "read-only",
+                }
+              : {
+                  approval_policy: "never",
+                  approvals_reviewer: "auto_review",
+                  sandbox_mode: "read-only",
+                  mcp_servers: {
+                    harmless_name: { env: { DISPLAY_LABEL: "innocuous-config-secret-7a9c" } },
+                  },
+                },
+            origins: {},
+          },
+        });
+        break;
       case "thread/resume":
-        if (mode === "resume") {
+        if (msg.params?.permissions && (!experimentalApi || mode === "config-profile-unsupported")) {
+          out({ jsonrpc: "2.0", id: msg.id, error: { code: -32602, message: "experimental API required for permissions" } });
+        } else if (mode === "resume" || mode === "config-profile" || mode === "config-profile-unsupported") {
           out({ jsonrpc: "2.0", id: msg.id, result: { thread: { id: msg.params?.threadId } } });
         } else {
           out({ jsonrpc: "2.0", id: msg.id, error: { code: -1, message: "no such thread" } });
         }
         break;
       case "thread/start":
-        out({ jsonrpc: "2.0", id: msg.id, result: { thread: { id: "codex-thread-1" }, model: "fake-codex-model" } });
+        if (msg.params?.permissions && (!experimentalApi || mode === "config-profile-unsupported")) {
+          out({ jsonrpc: "2.0", id: msg.id, error: { code: -32602, message: "experimental API required for permissions" } });
+        } else {
+          out({ jsonrpc: "2.0", id: msg.id, result: { thread: { id: "codex-thread-1" }, model: "fake-codex-model" } });
+        }
         break;
       case "turn/start": {
+        if (msg.params?.permissions && (!experimentalApi || mode === "config-profile-unsupported")) {
+          out({ jsonrpc: "2.0", id: msg.id, error: { code: -32602, message: "experimental API required for permissions" } });
+          break;
+        }
         if (mode === "unauthorized") {
           out({
             jsonrpc: "2.0",
@@ -181,7 +227,7 @@ process.stdin.on("data", (chunk) => {
           ? [
               "\"C:\\WINDOWS\\System32\\WindowsPowerShell\\v1.0\\powershell.exe\"",
               "-Command",
-              `\"Get-Content -Raw -LiteralPath 'C:\\Users\\Ada\\workspaces\\${"very-long-folder\\".repeat(8)}NOTES.md'\"`,
+              `"Get-Content -Raw -LiteralPath 'C:\\Users\\Ada\\workspaces\\${"very-long-folder\\".repeat(8)}NOTES.md'"`,
             ].join(" ")
           : "ls -la";
         notify("item/started", { item: { id: "i1", type: "commandExecution", command } });
@@ -197,6 +243,66 @@ process.stdin.on("data", (chunk) => {
               _meta: { codex_approval_kind: "mcp_tool_call", tool_params: {} },
               message: 'Allow the agents MCP server to run tool "list_bots"?',
               requestedSchema: { type: "object", properties: {} },
+            },
+          });
+        } else if (mode === "mcp-app-approval") {
+          out({
+            jsonrpc: "2.0",
+            id: 101,
+            method: "mcpServer/elicitation/request",
+            params: {
+              serverName: "computer-use",
+              mode: "form",
+              message: "Allow ChatGPT to use Safari?",
+              _meta: { app_name: "Safari", persist: ["session", "always"] },
+              requestedSchema: {
+                type: "object",
+                properties: {
+                  approval: {
+                    type: "string",
+                    oneOf: [
+                      { const: "once", title: "Allow once" },
+                      { const: "session", title: "Allow for this session" },
+                      { const: "always", title: "Always allow Safari" },
+                    ],
+                  },
+                },
+                required: ["approval"],
+              },
+            },
+          });
+        } else if (mode === "mcp-form") {
+          out({
+            jsonrpc: "2.0",
+            id: 101,
+            method: "mcpServer/elicitation/request",
+            params: {
+              serverName: "example",
+              mode: "form",
+              message: "Enter an API key",
+              requestedSchema: {
+                type: "object",
+                properties: { apiKey: { type: "string" } },
+                required: ["apiKey"],
+              },
+            },
+          });
+        } else if (mode === "permissions-approval") {
+          out({
+            jsonrpc: "2.0",
+            id: 101,
+            method: "item/permissions/requestApproval",
+            params: {
+              threadId: "codex-thread-1",
+              turnId: "turn-1",
+              itemId: "permission-1",
+              cwd: "/tmp",
+              startedAtMs: Date.now(),
+              reason: "Needs network access",
+              permissions: {
+                network: { enabled: true },
+                fileSystem: null,
+              },
             },
           });
         } else if (mode === "approval" || mode === "windows-command") {

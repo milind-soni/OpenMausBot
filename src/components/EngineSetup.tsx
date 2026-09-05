@@ -257,8 +257,9 @@ function ManagedEngineSetup({ instance, signInOnly }: { instance: InstanceInfo; 
         className="flex w-full items-center justify-center gap-2 rounded-lg bg-accent px-3 py-2 text-[12.5px] font-semibold text-white hover:brightness-110 disabled:cursor-wait disabled:opacity-70"
       >
         {busy === "signin" ? <Loader2 size={14} className="animate-spin" /> : <LogIn size={14} />}
-        {flow ? "Open Google sign-in again" : "Sign in with Google"}
+        {busy === "signin" ? "Starting Google sign-in…" : flow ? "Open Google sign-in again" : "Sign in with Google"}
       </button>
+      {busy === "signin" && <p role="status" className="text-[11.5px] text-ink-secondary">Starting Antigravity can take up to 90 seconds. Your browser will open when it’s ready.</p>}
       {flow && (
         <>
           <button type="button" onClick={() => void check()} className="w-full rounded-lg bg-control px-3 py-2 text-[12px] font-semibold text-ink hover:bg-raised-hover">

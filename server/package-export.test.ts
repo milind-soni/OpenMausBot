@@ -23,6 +23,7 @@ describe("package export", () => {
           chiefOfStaff: true,
           composio: true,
           cwd: "/private/path",
+          approvalMode: "full",
           autoApprove: true,
           alwaysAllow: ["everything"],
           installedPackage: {
@@ -120,7 +121,7 @@ describe("package export", () => {
         playbooks: [{ key: "launch" }],
       },
     });
-    expect(JSON.stringify(exported)).not.toMatch(/private-id|private-thread|private-engine|secret-model|secret-session|private\/path|private-attachment|autoApprove|alwaysAllow|nextRunAt/);
+    expect(JSON.stringify(exported)).not.toMatch(/private-id|private-thread|private-engine|secret-model|secret-session|private\/path|private-attachment|approvalMode|autoApprove|alwaysAllow|nextRunAt/);
   });
 
   it("shares one identical playbook definition across multiple bots", () => {

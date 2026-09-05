@@ -166,6 +166,10 @@ export function ModelPicker({
   }, [open, refreshLocalInstances]);
 
   useEffect(() => {
+    if (bot.busy) setOpen(false);
+  }, [bot.busy]);
+
+  useEffect(() => {
     if (!open) return;
     const closeOnOutsideClick = (event: MouseEvent) => {
       const clickedNode = event.target instanceof Node ? event.target : null;
@@ -207,6 +211,7 @@ export function ModelPicker({
   };
 
   const pick = (instance: InstanceInfo, model: string) => {
+    if (bot.busy) return;
     const sameInstance = instance.instanceId === selection.instanceId;
     const nextSelection: ModelSelection = {
       instanceId: instance.instanceId,
@@ -252,7 +257,9 @@ export function ModelPicker({
   const trigger = (
     <button
       type="button"
+      disabled={Boolean(bot.busy)}
       onClick={() => {
+        if (bot.busy) return;
         setRailId(selection.instanceId);
         setOpen((wasOpen) => {
           const next = !wasOpen;
@@ -260,17 +267,19 @@ export function ModelPicker({
           return next;
         });
       }}
-      aria-expanded={open}
+      aria-expanded={open && !bot.busy}
       aria-haspopup="dialog"
       className={cn(
-        "flex items-center gap-1.5 rounded-full border border-hairline/40 bg-control/60 py-1 pl-2 pr-2.5 text-[13px] text-ink hover:bg-raised-hover",
+        "flex items-center gap-1.5 rounded-full border border-hairline/40 bg-control/60 py-1 pl-2 pr-2.5 text-[13px] text-ink hover:bg-raised-hover disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:bg-control/60",
         // in a narrow chat header fold to a rounded square with just the
         // provider mark; the model name rides the tooltip (a bot with no
         // resolved engine keeps its label — the mark is what would hide it)
         !contained && active && COMPACT_SQUARE,
       )}
       title={
-        active
+        bot.busy
+          ? "Stop this bot's turn before changing its model"
+          : active
           ? `${active.displayName} · ${modelLabel(active, selection.model)}${
               modelProvider(active, selection.model) ? ` · ${modelProvider(active, selection.model)}` : ""
             }`
@@ -306,7 +315,7 @@ export function ModelPicker({
         trigger
       )}
 
-      {open && (
+      {open && !bot.busy && (
         <div
           data-model-picker-content
           role="dialog"

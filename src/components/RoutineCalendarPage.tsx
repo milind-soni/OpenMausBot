@@ -1162,6 +1162,7 @@ function EventDetails({
 }) {
   const { state, dispatch } = useStore();
   const [working, setWorking] = useState(false);
+  const runNowPending = useRef(false);
   const [error, setError] = useState("");
   const isCall = item.kind === "call";
   const routine = item.kind === "routine" ? item.routine : null;
@@ -1204,6 +1205,24 @@ function EventDetails({
     } finally {
       setWorking(false);
     }
+  };
+
+  const runRoutineNow = () => {
+    if (!routine || working || runNowPending.current) return;
+    runNowPending.current = true;
+    setWorking(true);
+    setError("");
+    // The store flushes pending model and approval-level changes before it
+    // starts the run. Keep this button pending through that barrier and the
+    // POST so a double-click cannot create two routine runs.
+    dispatch({
+      type: "runRoutine",
+      routineId: routine.id,
+      onSettled: () => {
+        runNowPending.current = false;
+        setWorking(false);
+      },
+    });
   };
 
   const joinRoom = async () => {
@@ -1279,7 +1298,7 @@ function EventDetails({
           {roomId && <button onClick={() => onOpenRoom(roomId)} className="flex items-center gap-1.5 rounded-lg bg-accent px-3 py-2 text-[12px] font-semibold text-white hover:brightness-110"><ExternalLink size={13} />Join room</button>}
           {call && call.botIds.length > 1 && <button onClick={joinRoom} disabled={working} className="flex items-center gap-1.5 rounded-lg bg-accent px-3 py-2 text-[12px] font-semibold text-white hover:brightness-110 disabled:opacity-50"><ExternalLink size={13} />Join room</button>}
           {isRoomGoal && goalGroup && !executionThreadId && <button onClick={() => { onOpenRoom(goalGroup.id); onClose(); }} className="flex items-center gap-1.5 rounded-lg bg-accent px-3 py-2 text-[12px] font-semibold text-white hover:brightness-110"><ExternalLink size={13} />Open room</button>}
-          {routine && <button onClick={() => void invoke(`/api/routines/${routine.id}/run`)} disabled={working} className="flex items-center gap-1.5 rounded-lg bg-accent px-3 py-2 text-[12px] font-semibold text-white hover:brightness-110 disabled:opacity-50"><Play size={13} />Run now</button>}
+          {routine && <button onClick={runRoutineNow} disabled={working} className="flex items-center gap-1.5 rounded-lg bg-accent px-3 py-2 text-[12px] font-semibold text-white hover:brightness-110 disabled:opacity-50"><Play size={13} />Run now</button>}
           {executionThreadId && (isRoomGoal ? goalGroup : primary) && <button onClick={openRunTask} className="flex items-center gap-1.5 rounded-lg px-3 py-2 text-[12px] text-ink-secondary hover:bg-raised hover:text-ink"><ExternalLink size={13} />{isRoomGoal ? "Open room task" : "Open task"}</button>}
           {run && ["queued", "running", "waiting"].includes(run.status) && <button onClick={() => void invoke(`/api/routine-runs/${run.id}/cancel`)} disabled={working} className="flex items-center gap-1.5 rounded-lg px-3 py-2 text-[12px] text-ink-secondary hover:bg-raised hover:text-ink disabled:opacity-40"><X size={13} />Cancel run</button>}
           {routine && <button onClick={() => void invoke(`/api/routines/${routine.id}`, "PATCH")} className="hidden" aria-hidden />}

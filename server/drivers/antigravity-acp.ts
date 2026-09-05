@@ -13,6 +13,9 @@ import type { AntigravityRuntime } from "./antigravity-runtime.ts";
 
 export const ANTIGRAVITY_AUTH_STDOUT_PREFIX = "Open the following link to authenticate the ACP server: ";
 const AUTH_TIMEOUT_MS = 5 * 60_000;
+// Google's packaged server can take tens of seconds to cold-start, especially
+// on Windows. Match T3 Code's bounded setup allowance, not a fast CLI probe.
+const STARTUP_TIMEOUT_MS = 90_000;
 const MAX_PROTOCOL_LINE_BYTES = 16 * 1024 * 1024;
 
 export interface AntigravityProfile {
@@ -213,7 +216,7 @@ export class AntigravityAcpClient {
     });
   }
 
-  async initialize(timeoutMs = 30_000): Promise<any> {
+  async initialize(timeoutMs = STARTUP_TIMEOUT_MS): Promise<any> {
     return this.request("initialize", {
       protocolVersion: 1,
       clientInfo: { name: "openmausbot", version: "0.0.0" },
@@ -343,7 +346,7 @@ export async function probeAntigravityModels(input: {
   fallbackDefault: string;
   timeoutMs?: number;
 }): Promise<ModelCatalog> {
-  const deadline = Date.now() + (input.timeoutMs ?? 5_000);
+  const deadline = Date.now() + (input.timeoutMs ?? STARTUP_TIMEOUT_MS);
   const remaining = () => {
     const milliseconds = deadline - Date.now();
     if (milliseconds <= 0) throw new Error("Antigravity model discovery timed out.");
@@ -464,7 +467,7 @@ export class AntigravityAuthController {
       const authenticated = client.request("authenticate", { methodId: "oauth-personal" }, AUTH_TIMEOUT_MS);
       let startupTimer: ReturnType<typeof setTimeout> | undefined;
       const startupTimeout = new Promise<never>((_resolve, reject) => {
-        startupTimer = setTimeout(() => reject(new Error("Google sign-in did not start in time.")), 30_000);
+        startupTimer = setTimeout(() => reject(new Error("Google sign-in did not start in time.")), STARTUP_TIMEOUT_MS);
         startupTimer.unref?.();
       });
       const outcome = await Promise.race([
@@ -481,7 +484,7 @@ export class AntigravityAuthController {
       const flow: AuthFlow = {
         id: randomUUID(),
         client,
-        completed: authenticated.then(() => undefined),
+        completed: authenticated,
         pending: { redirectUri: outcome.request.redirectUri, state: outcome.request.state },
         expiresAt: Date.now() + AUTH_TIMEOUT_MS,
       };

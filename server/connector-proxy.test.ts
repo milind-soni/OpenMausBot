@@ -56,7 +56,10 @@ describe("connector MCP bridge", () => {
     });
     const lines = start({
       OMB_HARNESS_URL: harness,
-      OMB_COMMS_TOKEN: "bridge-secret",
+      OMB_CONNECTOR_TOKEN: "bridge-secret",
+      // A simultaneously mounted agents proxy may define this different
+      // value in Codex's flattened child environment.
+      OMB_COMMS_TOKEN: "agents-secret",
       OMB_BOT_ID: "bot-1",
       OMB_THREAD_ID: "thread-1",
     });

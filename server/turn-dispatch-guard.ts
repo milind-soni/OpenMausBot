@@ -38,6 +38,47 @@ export class RetiredTurnRegistry {
   }
 }
 
+export type ProviderTurnGenerationOwner = { threadId: string; generation: string };
+
+/** Correlate an internal capability generation with its provider turn without
+ * leaving a bearer alive when a very fast provider completes before
+ * sendTurn() returns its id. Completed ids are kept in a bounded tombstone
+ * registry, so a late bind fails closed instead of publishing stale ownership. */
+export class ProviderTurnGenerationRegistry {
+  readonly #owners = new Map<string, ProviderTurnGenerationOwner>();
+  readonly #completed: RetiredTurnRegistry;
+
+  constructor(limit = 4_096) {
+    this.#completed = new RetiredTurnRegistry(limit);
+  }
+
+  bind(threadId: string, generation: string, turnId: string): boolean {
+    if (this.#completed.has(turnId)) return false;
+    this.#owners.set(turnId, { threadId, generation });
+    return true;
+  }
+
+  complete(threadId: string, turnId: string): ProviderTurnGenerationOwner | null {
+    this.#completed.retire(turnId);
+    const owner = this.#owners.get(turnId);
+    if (!owner || owner.threadId !== threadId) return null;
+    this.#owners.delete(turnId);
+    return owner;
+  }
+
+  deleteGeneration(threadId: string, generation: string): void {
+    for (const [turnId, owner] of this.#owners) {
+      if (owner.threadId === threadId && owner.generation === generation) {
+        this.#owners.delete(turnId);
+      }
+    }
+  }
+
+  clear(): void {
+    this.#owners.clear();
+  }
+}
+
 /** Thread gate for the narrow interval after Stop wins but before an async
  * adapter returns the provider turn id that can be retired. Multiple queued
  * room operations may share a thread, so ownership is reference-counted.

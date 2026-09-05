@@ -15,6 +15,14 @@ OpenMausBot connects to Google Antigravity through Google's official Agent Clien
 
 The runtime download is large because Google ships the ACP server and its local computer harness together. OpenMausBot stores it in its own data directory; it does not modify a system installation.
 
+## After upgrading from the older agy integration
+
+Version 0.1.51 switched from the community `agy` CLI to Google's official ACP runtime. An existing Antigravity app or `agy` login does not sign this separate runtime in. Complete **Install official Antigravity** and **Sign in with Google** in the model picker, then refresh and choose a model available to that account.
+
+Saved legacy `agy` paths, including Windows `.cmd` shims, now resolve to the official runtime. Genuine custom ACP executable paths are still respected. The migration does not copy credentials from another app, remove the old CLI, or change which Google account you authorize.
+
+The Google sign-in belongs to the engine instance, not the runtime version, so ordinary app updates do not require signing in again. Cold starts can be slow, particularly on Windows; setup and model discovery allow up to 90 seconds. If Google expires or revokes the saved session, sign in again when prompted.
+
 ## Multiple Google accounts
 
 Create another Antigravity engine instance for another account. Each instance has a separate private `GEMINI_HOME`, token, settings file, and model catalog. Signing one instance in never replaces another instance's account.

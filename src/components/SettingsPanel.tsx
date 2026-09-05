@@ -13,8 +13,11 @@ import { shortPath } from "@/lib/short-path";
 import { instanceSupportsLocalComputer, localComputerDisabledReason, localComputerSelectable } from "@/lib/local-computer";
 import { BotProfileAvatarCard } from "./BotProfileAvatarCard";
 import { LocalComputerAutoWarning } from "./LocalComputerAutoWarning";
+import { ApprovalModeSelector } from "./ApprovalModeSelector";
+import { FullAccessWarning } from "./FullAccessWarning";
 import { VoiceSettings } from "./VoiceSettings";
 import { BOT_PROFILE_LIMITS } from "../../shared/bot-profile";
+import { approvalModeFor, type ApprovalMode } from "../../shared/approval-mode";
 import { Switch } from "./SettingsPrimitives";
 import { RoutineEditor } from "./RoutinesPage";
 import { BotInstructionsDialog } from "./BotInstructionsDialog";
@@ -541,7 +544,11 @@ export function SettingsPanel({ bot }: { bot: Bot }) {
   const { capabilities } = useDesktopCapabilities();
   const providerSupportsLocal = instanceSupportsLocalComputer(state.instances, bot);
   const localSelectable = localComputerSelectable({ capabilities, providerSupportsLocal });
-  const [localAutoWarning, setLocalAutoWarning] = useState<"auto" | "local" | null>(null);
+  const [localAutoWarning, setLocalAutoWarning] = useState<{
+    botId: string;
+    kind: "auto" | "local";
+  } | null>(null);
+  const [fullAccessTarget, setFullAccessTarget] = useState<string | null>(null);
   const [creatingRoutine, setCreatingRoutine] = useState(false);
   const [instructionsOpen, setInstructionsOpen] = useState(false);
   useEffect(() => {
@@ -565,6 +572,7 @@ export function SettingsPanel({ bot }: { bot: Bot }) {
         | "avatarUrl"
         | "avatarCrop"
         | "autoApprove"
+        | "approvalMode"
         | "autoReview"
         | "speakReplies"
         | "voice"
@@ -574,11 +582,28 @@ export function SettingsPanel({ bot }: { bot: Bot }) {
         | "browser"
         | "modelSelection"
       >
-    > & { computer?: Bot["computer"] | null; acknowledgeLocalAuto?: boolean },
+    > & {
+      computer?: Bot["computer"] | null;
+      acknowledgeLocalAuto?: boolean;
+      confirmFullAccess?: boolean;
+    },
   ) => dispatch({ type: "updateBot", botId: bot.id, patch: p });
   const activeState = stateForBot(bot);
   const mascotMotion = state.mascotMotion?.botId === bot.id ? state.mascotMotion : null;
   const engine = state.instances.find((instance) => instance.instanceId === bot.modelSelection.instanceId);
+  const approvalMode = approvalModeFor(bot);
+  const setApprovalMode = (mode: ApprovalMode) => {
+    if (bot.busy || mode === approvalMode) return;
+    if (mode === "full") {
+      setFullAccessTarget(bot.id);
+      return;
+    }
+    if (mode === "auto" && bot.computer === "local") {
+      setLocalAutoWarning({ botId: bot.id, kind: "auto" });
+      return;
+    }
+    patch({ approvalMode: mode });
+  };
   const canAutoReview = engine?.capabilities?.approvalReview === true;
   const canCoordinate = engine?.capabilities?.agentsMcp === true;
   const canUseConnectedApps = engine?.capabilities?.composioMcp === true;
@@ -902,7 +927,9 @@ export function SettingsPanel({ bot }: { bot: Bot }) {
                   }
                   onClick={() => {
                     if ((mode === null && bot.computer === undefined) || mode === bot.computer) return;
-                    if (mode === "local" && bot.autoApprove) setLocalAutoWarning("local");
+                    if (mode === "local" && approvalMode === "auto") {
+                      setLocalAutoWarning({ botId: bot.id, kind: "local" });
+                    }
                     // a browser-only bot must actually have its browser: flip
                     // the per-bot switch on with the destination
                     else if (mode === "browser") patch({ computer: mode, browser: true });
@@ -961,33 +988,32 @@ export function SettingsPanel({ bot }: { bot: Bot }) {
 
           <LearnedSkillsCard key={`skills-${bot.id}`} bot={bot} />
 
-          <div className="flex items-center justify-between gap-4 rounded-xl bg-card p-4">
-            <div>
-              <div className="text-[15px] font-medium text-ink">Auto mode</div>
-              <div className="mt-0.5 text-[13px] text-ink-secondary">
-                {bot.computer === "local"
-                  ? bot.autoApprove
-                    ? "Keeps going on this computer — you'll still be asked about anything destructive, and about questions it asks you."
-                    : "Approve each action on this computer yourself. Turn on to let this bot keep working without stopping to ask."
-                  : bot.autoApprove
-                  ? "Keeps going on its own — you'll still be asked about anything destructive, and about questions it asks you."
-                  : "Approve each action yourself. Turn on to let this bot keep working without stopping to ask."}
-              </div>
+          <div className="rounded-xl bg-card p-4">
+            <div className="text-[15px] font-medium text-ink">Approval level</div>
+            <div className="mt-0.5 text-[13px] text-ink-secondary">
+              Choose how much this bot can do before it stops to ask you.
             </div>
-            <Switch
-              checked={Boolean(bot.autoApprove)}
-              aria-label="Auto mode"
-              onClick={() => {
-                if (!bot.autoApprove && bot.computer === "local") setLocalAutoWarning("auto");
-                else patch({ autoApprove: !bot.autoApprove });
-              }}
-            />
+            <div className="mt-3">
+              <ApprovalModeSelector
+                approvalMode={bot.approvalMode}
+                autoApprove={bot.autoApprove}
+                providerName={engine?.displayName ?? bot.name}
+                driverKind={engine?.driverKind ?? ""}
+                onSelect={setApprovalMode}
+                menuDirection="down"
+                wide
+                disabled={Boolean(bot.busy)}
+                trustedModesAvailable={Boolean(window.ogb?.approvals && capabilities.host.packaged)}
+              />
+            </div>
           </div>
 
           <div className="rounded-xl bg-card p-4">
             <div className="text-[15px] font-medium text-ink">Review routine approvals</div>
             <div className="mt-0.5 text-[13px] text-ink-secondary">
-              {canAutoReview
+              {approvalMode === "custom"
+                ? "Custom follows your Codex config.toml and its approval prompts. Routine auto-review stays off in this mode."
+                : canAutoReview
                 ? "The same engine reviews ordinary approval cards. Existing safety rules, unattended turns, local-computer access, and questions still wait for you."
                 : "This engine cannot run an isolated review safely, so approval cards continue to wait for you."}
             </div>
@@ -999,12 +1025,20 @@ export function SettingsPanel({ bot }: { bot: Bot }) {
                   ["enforce", "On", "Answer only reviews that return a strict approval."],
                 ] as const
               ).map(([value, label, hint]) => {
-                const current = bot.autoReview === "shadow" || bot.autoReview === "enforce" ? bot.autoReview : "off";
-                const disabled = value !== "off" && !canAutoReview;
+                const current = approvalMode === "custom"
+                  ? "off"
+                  : bot.autoReview === "shadow" || bot.autoReview === "enforce"
+                    ? bot.autoReview
+                    : "off";
+                const disabled = value !== "off" && (approvalMode === "custom" || !canAutoReview);
                 return (
                   <button
                     key={value}
-                    title={disabled ? "Not supported by this engine" : hint}
+                    title={disabled
+                      ? approvalMode === "custom"
+                        ? "Custom approval behavior is controlled by config.toml"
+                        : "Not supported by this engine"
+                      : hint}
                     disabled={disabled}
                     onClick={() => patch({ autoReview: value })}
                     className={cn(
@@ -1056,9 +1090,30 @@ export function SettingsPanel({ bot }: { bot: Bot }) {
       open={localAutoWarning !== null}
       onCancel={() => setLocalAutoWarning(null)}
       onConfirm={() => {
-        if (localAutoWarning === "auto") patch({ autoApprove: true, acknowledgeLocalAuto: true });
-        if (localAutoWarning === "local") patch({ computer: "local", acknowledgeLocalAuto: true });
+        const target = localAutoWarning;
         setLocalAutoWarning(null);
+        if (!target) return;
+        dispatch({
+          type: "updateBot",
+          botId: target.botId,
+          patch: target.kind === "auto"
+            ? { approvalMode: "auto", acknowledgeLocalAuto: true }
+            : { computer: "local", acknowledgeLocalAuto: true },
+        });
+      }}
+    />
+    <FullAccessWarning
+      open={fullAccessTarget !== null}
+      onCancel={() => setFullAccessTarget(null)}
+      onConfirm={() => {
+        if (fullAccessTarget) {
+          dispatch({
+            type: "updateBot",
+            botId: fullAccessTarget,
+            patch: { approvalMode: "full", confirmFullAccess: true },
+          });
+        }
+        setFullAccessTarget(null);
       }}
     />
     </>

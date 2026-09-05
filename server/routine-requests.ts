@@ -222,6 +222,9 @@ export interface ProposeRoutineRequestArgs {
   proposal: unknown;
   /** Room cards retain the member attribution used by every other bot message. */
   from?: { botId: string; name: string; color: string };
+  /** Exact caller/turn lease checked synchronously after any readiness await
+   * and immediately before the durable card append. */
+  canCommit?: () => boolean;
 }
 
 export interface RoutineProposalResult {
@@ -747,6 +750,9 @@ export class RoutineRequestService {
     const persistence = this.canPersist?.(botId, threadId);
     if (persistence && !persistence.ok) {
       throw new RoutineRequestError(persistence.error, persistence.status);
+    }
+    if (args.canCommit && !args.canCommit()) {
+      throw new RoutineRequestError("The requesting turn ended before this proposal could be saved", 401);
     }
     const message = this.store.appendMessage(threadId, messageInput);
     return {

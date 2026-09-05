@@ -222,7 +222,7 @@ const MAX_MEMBER_NAME = 100;
  *
  * 1. Allowlist, not blocklist. The returned object is built field by field
  *    from the parsed member, so every privilege-bearing BotRecord field —
- *    autoApprove, autoReview, alwaysAllow, chiefOfStaff, approvePeerComms, composio,
+ *    approvalMode, autoApprove, autoReview, alwaysAllow, chiefOfStaff, approvePeerComms, composio,
  *    computer, cloudBackend, cwd — is structurally absent, whatever the
  *    file claimed. parseTeamManifest already drops unknown member keys;
  *    this keeps the guarantee even if the schema grows a field later,

@@ -174,6 +174,7 @@ describe("team manifests", () => {
             // one of these has to vanish in the parse, not downstream
             id: "bot-1",
             threadId: "thread-1",
+            approvalMode: "full",
             autoApprove: true,
             alwaysAllow: ["Bash"],
             chiefOfStaff: true,

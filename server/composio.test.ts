@@ -621,7 +621,7 @@ describe.sequential("Composio Sessions", () => {
         OMB_CONNECTOR_UPSTREAM_URL: "http://127.0.0.1:8799/api/internal/connectors/mcp",
         OMB_CONNECTOR_UPSTREAM_HEADERS: JSON.stringify({ authorization: "Bearer secret" }),
         OMB_HARNESS_URL: "http://127.0.0.1:8799",
-        OMB_COMMS_TOKEN: "secret",
+        OMB_CONNECTOR_TOKEN: "secret",
         OMB_BOT_ID: "bot-1",
         OMB_THREAD_ID: "thread-1",
       },

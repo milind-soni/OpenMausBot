@@ -1,6 +1,6 @@
 import { track } from "@/lib/analytics";
 import { useCallback, useEffect, useMemo, useRef, useState, type SetStateAction } from "react";
-import { ArrowUp, BookOpen, Check, Clock, Hand, Mic, Paperclip, ShieldCheck, Square, Target, Users, X } from "lucide-react";
+import { ArrowUp, BookOpen, Clock, Mic, Paperclip, Square, Target, Users, X } from "lucide-react";
 import { useStore, visibleMessages, type Bot, type Group, type Message } from "@/state/store";
 import { cn } from "@/lib/cn";
 import {
@@ -23,6 +23,9 @@ import {
 import { MausAvatar } from "./Avatar";
 import { ComposerAttachments, pathForFile } from "./ComposerAttachments";
 import { LocalComputerAutoWarning } from "./LocalComputerAutoWarning";
+import { ApprovalModeSelector } from "./ApprovalModeSelector";
+import { FullAccessWarning } from "./FullAccessWarning";
+import { approvalModeFor, type ApprovalMode } from "../../shared/approval-mode";
 import {
   appendPastedText,
   handoffAttachmentImagePreview,
@@ -82,102 +85,6 @@ const LEARN_COMMAND: ComposerSlashCommand = {
 
 interface ComposerDraftSnapshot extends ComposerSendSnapshot {
   reply: Message | null;
-}
-
-/** Composer chip for Auto mode. Compact label (Ask / Auto); the menu still
- * uses the full names. Same `autoApprove` bit as the profile switch — picking
- * Auto mode here turns that on. The chip only changes its name, not its color. */
-function PermissionModeSelector({ bot, onSetAuto }: { bot: Bot; onSetAuto: (auto: boolean) => void }) {
-  const [open, setOpen] = useState(false);
-  const wrapperRef = useRef<HTMLDivElement>(null);
-  const on = Boolean(bot.autoApprove);
-
-  useEffect(() => {
-    function handleClickOutside(e: MouseEvent) {
-      if (wrapperRef.current && !wrapperRef.current.contains(e.target as Node)) setOpen(false);
-    }
-    document.addEventListener("mousedown", handleClickOutside);
-    return () => document.removeEventListener("mousedown", handleClickOutside);
-  }, []);
-
-  useEffect(() => {
-    if (!open) return;
-    const closeOnEscape = (event: KeyboardEvent) => {
-      if (event.key === "Escape") setOpen(false);
-    };
-    document.addEventListener("keydown", closeOnEscape);
-    return () => document.removeEventListener("keydown", closeOnEscape);
-  }, [open]);
-
-  return (
-    <div className="relative flex items-center" ref={wrapperRef}>
-      <button
-        type="button"
-        aria-haspopup="menu"
-        aria-expanded={open}
-        aria-label={on ? "Auto mode" : "Ask for approval"}
-        onClick={() => setOpen((current) => !current)}
-        className="flex h-8 items-center gap-1.5 whitespace-nowrap rounded-full border border-hairline/20 bg-transparent px-3 text-[13px] text-ink-secondary hover:bg-raised hover:text-ink"
-      >
-        {on ? <ShieldCheck size={14} className="opacity-70" /> : <Hand size={14} className="opacity-70" />}
-        {on ? "Auto" : "Ask"}
-      </button>
-
-      {open && (
-        <div
-          role="menu"
-          aria-label={`Permission mode for ${bot.name}`}
-          className="absolute bottom-full left-0 z-30 mb-2 w-80 overflow-hidden rounded-xl border border-hairline/40 bg-raised shadow-lg"
-        >
-          <div className="border-b border-hairline/20 px-4 py-3 text-[13px] font-medium text-ink-secondary">
-            How should {bot.name} actions be approved?
-          </div>
-          <div className="flex flex-col py-1">
-            <button
-              type="button"
-              role="menuitemradio"
-              aria-checked={!on}
-              onClick={() => {
-                onSetAuto(false);
-                setOpen(false);
-              }}
-              className="flex items-start gap-3 px-4 py-3 text-left hover:bg-raised-hover"
-            >
-              <Hand size={16} className="mt-0.5 shrink-0 opacity-70" />
-              <div className="flex w-full flex-col gap-0.5">
-                <div className="flex items-center justify-between text-[14px] text-ink">
-                  Ask for approval
-                  {!on && <Check size={14} />}
-                </div>
-                <div className="text-[13px] text-ink-secondary">Ask before actions that need your permission</div>
-              </div>
-            </button>
-            <button
-              type="button"
-              role="menuitemradio"
-              aria-checked={on}
-              onClick={() => {
-                onSetAuto(true);
-                setOpen(false);
-              }}
-              className="flex items-start gap-3 px-4 py-3 text-left hover:bg-raised-hover"
-            >
-              <ShieldCheck size={16} className="mt-0.5 shrink-0 opacity-70" />
-              <div className="flex w-full flex-col gap-0.5">
-                <div className="flex items-center justify-between text-[14px] text-ink">
-                  Auto mode
-                  {on && <Check size={14} />}
-                </div>
-                <div className="text-[13px] text-ink-secondary">
-                  Keep going automatically; destructive and sensitive actions still ask
-                </div>
-              </div>
-            </button>
-          </div>
-        </div>
-      )}
-    </div>
-  );
 }
 
 /** Renders the editable message composer and its pending attachments. */
@@ -457,10 +364,16 @@ export function Composer({
     return () => window.clearTimeout(timeout);
   }, [busy, pendingCount, steering]);
   const fileInput = useRef<HTMLInputElement>(null);
-  const [autoWarn, setAutoWarn] = useState(false);
+  const [approvalWarning, setApprovalWarning] = useState<{
+    mode: "auto" | "full";
+    botId: string;
+  } | null>(null);
   const [attachmentNotice, setAttachmentNotice] = useState<string | null>(null);
-  // Auto mode belongs to one bot; a room has several, each with its own.
-  const autoBot = group ? undefined : bot;
+  // Approval mode belongs to one bot; a room has several, each with its own.
+  const modeBot = group ? undefined : bot;
+  const approvalEngine = modeBot
+    ? state.instances.find((instance) => instance.instanceId === modeBot.modelSelection.instanceId)
+    : undefined;
   const uploadImage = useCallback(async (file: File): Promise<Attachment | null> => {
     const optimistic = optimisticImageAttachment(file);
     if (!optimistic) return null;
@@ -501,17 +414,18 @@ export function Composer({
       changeDraftAttachmentPending(draftId, false);
     }
   };
-  const setAuto = (auto: boolean) => {
-    if (!autoBot) return;
-    // Turning it on for a bot that drives THIS computer is the one case that
-    // has to be acknowledged first. The flag the dialog sends is stripped by
-    // the reducer rather than stored, so — exactly like the settings panel —
-    // the warning is shown on every switch-on, not just the first.
-    if (auto && !autoBot.autoApprove && autoBot.computer === "local") {
-      setAutoWarn(true);
+  const setApprovalMode = (mode: ApprovalMode) => {
+    if (!modeBot || modeBot.busy || mode === approvalModeFor(modeBot)) return;
+    if (mode === "full") {
+      setApprovalWarning({ mode: "full", botId: modeBot.id });
       return;
     }
-    dispatch({ type: "updateBot", botId: autoBot.id, patch: { autoApprove: auto } });
+    // Safe Auto still needs its dedicated warning when it can drive the host.
+    if (mode === "auto" && modeBot.computer === "local") {
+      setApprovalWarning({ mode: "auto", botId: modeBot.id });
+      return;
+    }
+    dispatch({ type: "updateBot", botId: modeBot.id, patch: { approvalMode: mode } });
   };
 
   const hasContent = Boolean(effectiveText.trim()) || attachments.length > 0;
@@ -858,7 +772,17 @@ export function Composer({
                   {effectiveChannelMode === "goal" ? "/goal" : "Goal"}
                 </button>
               )}
-              {autoBot && <PermissionModeSelector bot={autoBot} onSetAuto={setAuto} />}
+              {modeBot && approvalEngine && (
+                <ApprovalModeSelector
+                  approvalMode={modeBot.approvalMode}
+                  autoApprove={modeBot.autoApprove}
+                  providerName={approvalEngine.displayName}
+                  driverKind={approvalEngine.driverKind}
+                  onSelect={setApprovalMode}
+                  disabled={Boolean(modeBot.busy)}
+                  trustedModesAvailable={Boolean(window.ogb?.approvals && capabilities.host.packaged)}
+                />
+              )}
             </div>
           )}
           <textarea
@@ -1051,17 +975,31 @@ export function Composer({
       </div>
       <div className="pointer-events-auto">
       <LocalComputerAutoWarning
-        open={autoWarn}
-        onCancel={() => setAutoWarn(false)}
+        open={approvalWarning?.mode === "auto"}
+        onCancel={() => setApprovalWarning(null)}
         onConfirm={() => {
-          if (autoBot) {
+          if (approvalWarning?.mode === "auto") {
             dispatch({
               type: "updateBot",
-              botId: autoBot.id,
-              patch: { autoApprove: true, acknowledgeLocalAuto: true },
+              botId: approvalWarning.botId,
+              patch: { approvalMode: "auto", acknowledgeLocalAuto: true },
             });
           }
-          setAutoWarn(false);
+          setApprovalWarning(null);
+        }}
+      />
+      <FullAccessWarning
+        open={approvalWarning?.mode === "full"}
+        onCancel={() => setApprovalWarning(null)}
+        onConfirm={() => {
+          if (approvalWarning?.mode === "full") {
+            dispatch({
+              type: "updateBot",
+              botId: approvalWarning.botId,
+              patch: { approvalMode: "full", confirmFullAccess: true },
+            });
+          }
+          setApprovalWarning(null);
         }}
       />
       </div>

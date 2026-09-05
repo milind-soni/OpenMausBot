@@ -549,7 +549,10 @@ export async function mcpIntegration(
       OMB_CONNECTOR_UPSTREAM_URL: `${context.harnessUrl}/api/internal/connectors/mcp`,
       OMB_CONNECTOR_UPSTREAM_HEADERS: JSON.stringify({ authorization: `Bearer ${context.commsToken}` }),
       OMB_HARNESS_URL: context.harnessUrl,
-      OMB_COMMS_TOKEN: context.commsToken,
+      // Distinct from the agents proxy token: Codex flattens mounted MCP env
+      // variables into one process environment, so a shared name would let
+      // the later agents mount overwrite this connector-scoped capability.
+      OMB_CONNECTOR_TOKEN: context.commsToken,
       OMB_BOT_ID: context.botId,
       OMB_THREAD_ID: context.threadId,
     },

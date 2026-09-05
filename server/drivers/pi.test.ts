@@ -194,13 +194,17 @@ describe("PiDriver turns (fake CLI)", () => {
   let instance: ProviderInstance;
   let recorder: EventRecorder;
 
-  const create = async (mode?: string, environment: Record<string, string> = {}) => {
+  const create = async (
+    mode?: string,
+    environment: Record<string, string> = {},
+    fullAuto = false,
+  ) => {
     instance = await PiDriver.create({
       instanceId: "pi-test",
       displayName: "pi Test",
       environment: { ...environment, ...(mode ? { FAKE_PI_MODE: mode } : {}) },
       enabled: true,
-      config: { cli: FAKE_CLI, fullAuto: false },
+      config: { cli: FAKE_CLI, fullAuto },
     });
     recorder = recordEvents(instance.adapter);
   };
@@ -495,6 +499,38 @@ describe("PiDriver turns (fake CLI)", () => {
     const done = await recorder.until((e) => e.type === "turn.completed");
     expect(done).toMatchObject({ ok: true, stopReason: "end_turn" });
     expect(recorder.events.some((e) => e.type === "request.resolved")).toBe(true);
+  });
+
+  it("per-bot Ask restores host approval on a legacy full-auto instance", async () => {
+    await create("permission", {}, true);
+    expect(instance.adapter.capabilities.localComputerMcp).toBe(true);
+    const localComputer = {
+      command: "/cua-driver",
+      args: ["mcp"],
+      env: {},
+      platform: "linux" as const,
+      scope: "local-computer" as const,
+    };
+
+    await expect(instance.adapter.sendTurn({
+      threadId: "t-pi-legacy-full-auto",
+      text: "go",
+      integrations: { localComputer },
+    })).rejects.toThrow(/interactive approval broker/);
+
+    await instance.adapter.sendTurn({
+      threadId: "t-pi-ask-override",
+      text: "go",
+      approvalMode: "ask",
+      integrations: { localComputer },
+    });
+    const opened = await recorder.until((e) => e.type === "request.opened");
+    await instance.adapter.respondToRequest(
+      "t-pi-ask-override",
+      (opened as { requestId: string }).requestId,
+      { behavior: "allow" },
+    );
+    await recorder.until((e) => e.type === "turn.completed");
   });
 
   it("registers an ask before emitting it so synchronous auto-approval works", async () => {

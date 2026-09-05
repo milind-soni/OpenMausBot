@@ -1,6 +1,6 @@
 import { app, BrowserWindow, WebContentsView, clipboard, desktopCapturer, dialog, ipcMain, Menu, nativeImage, powerSaveBlocker, safeStorage, screen, session, shell, systemPreferences, utilityProcess } from "electron";
 import { createRequire } from "node:module";
-import { randomUUID } from "node:crypto";
+import { randomBytes, randomUUID } from "node:crypto";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -81,6 +81,8 @@ const { browserPartition, browserProfilePartition } = require("./browser-snapsho
 const { createBrowserHost } = require("./browser-host.cjs");
 const { browserSurfaceSupported } = require("./browser-platform.cjs");
 const { clearBrowserPartitionSession } = require("./browser-partition-cleanup.cjs");
+const { createTrustedApprovalModeCoordinator } = require("./approval-trusted-mode.cjs");
+const { DESKTOP_MUTATION_HEADER, desktopServerHeaders } = require("./desktop-server-auth.cjs");
 const {
   postBrowserConnection,
   removeBrowserConnectionDescriptor: removeBrowserConnectionDescriptorFile,
@@ -248,6 +250,8 @@ let secureCredentialState = null;
 let desktopDataDirLease = null;
 const utilityServerExits = new WeakMap();
 const UTILITY_SERVER_STOP_TIMEOUT_MS = 6_500;
+const trustedApprovalMode = createTrustedApprovalModeCoordinator({ randomId: randomUUID });
+const desktopMutationToken = randomBytes(32).toString("base64url");
 
 function desktopDataDir() {
   // Match the historical desktop fallback for an unset or empty override,
@@ -928,6 +932,39 @@ function syncPhoneSecretKey(proc) {
   }
 }
 
+function syncDesktopMutationToken(proc) {
+  try {
+    proc.postMessage({
+      type: "openmausbot:desktop-mutation-token",
+      token: desktopMutationToken,
+    });
+  } catch (error) {
+    slog(`desktop mutation capability sync failed: ${error?.message ?? error}`);
+  }
+}
+
+function installDesktopMutationHeader() {
+  session.defaultSession.webRequest.onBeforeSendHeaders((details, callback) => {
+    let ownsTarget = false;
+    try {
+      const target = new URL(details.url);
+      ownsTarget = target.protocol === "http:" &&
+        target.hostname === "127.0.0.1" &&
+        Number(target.port || 80) === SERVER_PORT;
+    } catch {}
+    if (!ownsTarget) {
+      callback({ requestHeaders: details.requestHeaders });
+      return;
+    }
+    callback({
+      requestHeaders: {
+        ...details.requestHeaders,
+        [DESKTOP_MUTATION_HEADER]: desktopMutationToken,
+      },
+    });
+  });
+}
+
 const savePhoneSecretOnce = createPhoneSecretSaveCoordinator((target, value) =>
   saveWorkspaceCredential(target, value),
 );
@@ -989,6 +1026,7 @@ async function startServerOn(port) {
   proc.stderr?.on("data", (d) => slog(`[err] ${String(d).trimEnd()}`));
   proc.on("message", (message) => {
     try {
+      if (trustedApprovalMode.receive(proc, message)) return;
       if (receiveBrowserControlHold(message)) return;
       if (receiveBrowserLifecycleCleanup(proc, message)) return;
       if (receivePhoneSecretSave(proc, message)) return;
@@ -998,12 +1036,14 @@ async function startServerOn(port) {
   });
   proc.once("spawn", () => {
     slog(`spawned pid=${proc.pid}`);
+    syncDesktopMutationToken(proc);
     syncBrowserConnection(proc);
     syncPhoneSecretKey(proc);
   });
   let exited = false;
   proc.once("exit", (code) => {
     exited = true;
+    trustedApprovalMode.rejectProcess(proc);
     resolveServerExit();
     // Capabilities belong to turns in this exact server child. A crash or
     // restart invalidates them before any replacement child receives the
@@ -1773,14 +1813,20 @@ function createWindow() {
                 });
               });
             }
-            const [initialCapabilities, healthResponse] = await Promise.all([
+            const [initialCapabilities, healthResponse, ownerMutationResponse] = await Promise.all([
               window.ogb.getCapabilities(),
               fetch("/api/health"),
+              fetch("/api/auth/stream-ticket", { method: "POST" }),
             ]);
             if (!healthResponse.ok) {
               throw new Error(\`health request failed: \${healthResponse.status} \${healthResponse.statusText}\`);
             }
             const health = await healthResponse.json();
+            if (!ownerMutationResponse.ok) {
+              throw new Error(
+                \`desktop mutation capability failed: \${ownerMutationResponse.status} \${ownerMutationResponse.statusText}\`,
+              );
+            }
             let capabilities = initialCapabilities;
             let cuaCrashReason = null;
             let cuaRetryStatus = null;
@@ -2200,7 +2246,10 @@ async function saveWorkspaceCredential(name, value) {
     const secretStorage = app.isPackaged ? "?secretStorage=external" : "";
     const response = await fetch(`http://127.0.0.1:${SERVER_PORT}/api/config${secretStorage}`, {
       method: "PUT",
-      headers: { "content-type": "application/json" },
+      headers: desktopServerHeaders(
+        { "content-type": "application/json" },
+        { packaged: app.isPackaged, token: desktopMutationToken },
+      ),
       body: JSON.stringify(patchFor(secret)),
     });
     const body = await response.json().catch(() => null);
@@ -2225,6 +2274,15 @@ async function saveWorkspaceCredential(name, value) {
 ipcMain.handle("credential:set", localOnly("credential:set", (_event, name, value) =>
   saveWorkspaceCredential(name, value),
 ));
+
+ipcMain.handle("approvals:set-trusted-mode", localOnly("approvals:set-trusted-mode", (_event, botId, mode, options) => {
+  // Development uses a separately launched server, which is intentionally
+  // outside this trust path. Never degrade this grant to loopback HTTP.
+  if (!app.isPackaged || !serverProc) {
+    throw new Error("Full and Custom approval modes require the embedded desktop server");
+  }
+  return trustedApprovalMode.request(serverProc, botId, mode, options);
+}));
 
 async function broadcastDesktopCapabilities() {
   const capabilities = desktopCapabilities({
@@ -2263,7 +2321,13 @@ app.whenReady().then(async () => {
       return;
     }
   }
-  if (app.isPackaged) app.setAsDefaultProtocolClient("openmausbot");
+  if (app.isPackaged) {
+    app.setAsDefaultProtocolClient("openmausbot");
+    // Chromium adds this capability below JavaScript, so renderer requests
+    // can mutate the local harness while a Full-access shell using curl
+    // cannot impersonate the person operating the desktop app.
+    installDesktopMutationHeader();
+  }
   if (process.platform === "darwin") app.dock.setIcon(APP_ICON);
   secureCredentials = await loadSecureCredentials();
   if (app.isPackaged) {

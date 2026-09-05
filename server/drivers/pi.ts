@@ -481,11 +481,14 @@ export const PiDriver: ProviderDriver<PiConfig> = {
     const sendTurn = async (turn: SendTurnInput) => {
       const { threadId } = turn;
       if (active.has(threadId)) throw new Error("a turn is already running on this thread");
+      // Per-bot Ask/Auto is authoritative for harness turns. Preserve the
+      // legacy instance flag only for direct adapter callers that omit it.
+      const fullAuto = turn.approvalMode === undefined ? config.fullAuto : false;
       // Host control always routes through the permission card; full-auto must
       // never get unapproved hands on the user's machine (same guard as the
       // Claude and ACP drivers).
       const controlsHost = turn.integrations?.localComputer?.scope === "local-computer";
-      if (controlsHost && config.fullAuto) {
+      if (controlsHost && fullAuto) {
         throw new Error("local computer control requires the interactive approval broker");
       }
       const turnId = newId();
@@ -870,7 +873,7 @@ export const PiDriver: ProviderDriver<PiConfig> = {
           // card (`ctx.ui.confirm` → extension_ui_request) gated in the
           // extension, so it is offered exactly when the other engines offer
           // it: enabled unless the bot is in full-auto.
-          localComputerMcp: !config.fullAuto,
+          localComputerMcp: true,
           // Images ride pi's native RPC prompt as base64 content blocks, so a
           // vision model can inspect them without a separate file-read tool.
           images: true,

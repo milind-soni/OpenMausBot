@@ -5,6 +5,8 @@
 // Stream. The shapes and names are kept so the two codebases stay mutually
 // readable.
 
+import type { ApprovalMode } from "../shared/approval-mode.ts";
+
 export type DriverKind = string;
 export type InstanceId = string;
 export type ThreadId = string;
@@ -132,6 +134,9 @@ export type RuntimeEvent = RuntimeEventBase &
         summary: string;
         choices?: string[];
         approvalScope?: "local-computer";
+        /** Provider asks to widen its configured sandbox. Only explicit Full
+         * access may answer this automatically; Auto/remembered grants may not. */
+        requiresExplicitApproval?: boolean;
       }
     | {
         type: "request.resolved";
@@ -164,6 +169,9 @@ export type RequestOutcome = "allowed-once" | "rejected" | "answered" | "unavail
 export interface SendTurnInput {
   threadId: ThreadId;
   text: string;
+  /** Per-bot approval policy, reasserted by providers on every turn so a
+   * resumed native session cannot retain a stale, more permissive mode. */
+  approvalMode?: ApprovalMode;
   /** Images attached to this user turn only. They are deliberately kept out
    * of replay transcripts: the provider's native session owns earlier image
    * context, while a fresh replay retains the visible attachment marker. */

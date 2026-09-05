@@ -14,7 +14,12 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import type { ProviderInstance } from "../contracts.ts";
 import { NATIVE_DIR } from "../config.ts";
 import { recordEvents, type EventRecorder } from "../testing/events.ts";
-import { CodexDriver, codexPredatesAstra, codexUpdateCommand } from "./codex.ts";
+import {
+  CodexDriver,
+  codexNativeIncomingLogMessage,
+  codexPredatesAstra,
+  codexUpdateCommand,
+} from "./codex.ts";
 import { removeTempDir } from "../testing/cleanup.ts";
 
 const FAKE_CLI = join(dirname(fileURLToPath(import.meta.url)), "..", "testing", "fake-codex-app-server.ts");
@@ -26,6 +31,28 @@ describe("CodexDriver.decodeConfig", () => {
     expect(CodexDriver.decodeConfig({ fullAuto: true }).fullAuto).toBe(true);
     // anything non-true is off — a truthy string must not enable full auto
     expect(CodexDriver.decodeConfig({ fullAuto: "yes" }).fullAuto).toBe(false);
+  });
+});
+
+describe("Codex native diagnostic sanitization", () => {
+  it("omits a late config/read response even after its pending promise timed out", () => {
+    const late = {
+      jsonrpc: "2.0",
+      id: 17,
+      result: { config: { mcp_servers: { example: { env: { LABEL: "late-innocuous-secret" } } } } },
+    };
+    const logged = codexNativeIncomingLogMessage(late, new Set([17]));
+    expect(logged).toEqual({ jsonrpc: "2.0", id: 17, result: "[effective config omitted]" });
+    expect(JSON.stringify(logged)).not.toContain("late-innocuous-secret");
+    expect(codexNativeIncomingLogMessage({
+      jsonrpc: "2.0",
+      id: 17,
+      error: { code: -1, message: "secret-bearing provider error" },
+    }, new Set([17]))).toEqual({
+      jsonrpc: "2.0",
+      id: 17,
+      error: "[config/read error omitted]",
+    });
   });
 });
 
@@ -132,6 +159,183 @@ describe("CodexDriver turns (fake app-server)", () => {
     expect(threadStart.params).toMatchObject({ model: "gpt-5.6-sol", modelProvider: "openai" });
   });
 
+  it.each([
+    ["ask", "on-request", "workspace-write", "workspaceWrite"],
+    ["auto", "on-request", "workspace-write", "workspaceWrite"],
+    ["full", "never", "danger-full-access", "dangerFullAccess"],
+  ] as const)(
+    "reasserts the %s approval mode on thread start and turn start",
+    async (approvalMode, approvalPolicy, sandbox, turnSandbox) => {
+      await create();
+      const dump = join(scratch, `${approvalMode}.json`);
+      process.env.FAKE_CODEX_DUMP = dump;
+
+      await instance.adapter.sendTurn({
+        threadId: `t-${approvalMode}`,
+        text: "continue",
+        approvalMode,
+      });
+      await recorder.until((event) => event.type === "turn.completed");
+
+      const calls = JSON.parse(readFileSync(dump, "utf8")).calls as Array<{
+        method: string;
+        params: Record<string, unknown>;
+      }>;
+      expect(calls.find((call) => call.method === "thread/start")?.params).toMatchObject({
+        approvalPolicy,
+        approvalsReviewer: "user",
+        sandbox,
+      });
+      expect(calls.find((call) => call.method === "turn/start")?.params).toMatchObject({
+        approvalPolicy,
+        approvalsReviewer: "user",
+        sandboxPolicy: { type: turnSandbox },
+      });
+    },
+  );
+
+  it("reasserts the effective config.toml settings for Custom", async () => {
+    await create({ mode: "resume", fullAuto: true });
+    const dump = join(scratch, "custom.json");
+    process.env.FAKE_CODEX_DUMP = dump;
+    mkdirSync(NATIVE_DIR, { recursive: true });
+
+    await instance.adapter.sendTurn({
+      threadId: "t-custom",
+      text: "continue",
+      approvalMode: "custom",
+      resumeCursor: "codex-thread-custom",
+    });
+    await recorder.until((event) => event.type === "turn.completed");
+
+    const calls = JSON.parse(readFileSync(dump, "utf8")).calls as Array<{
+      method: string;
+      params: Record<string, unknown>;
+    }>;
+    expect(calls.find((call) => call.method === "config/read")?.params).toMatchObject({
+      cwd: expect.any(String),
+      includeLayers: false,
+    });
+    expect(calls.find((call) => call.method === "thread/resume")?.params).toMatchObject({
+      threadId: "codex-thread-custom",
+      approvalPolicy: "never",
+      approvalsReviewer: "auto_review",
+      sandbox: "read-only",
+    });
+    expect(calls.find((call) => call.method === "turn/start")?.params).toMatchObject({
+      approvalPolicy: "never",
+      approvalsReviewer: "auto_review",
+      sandboxPolicy: { type: "readOnly" },
+    });
+    const nativeLog = readFileSync(join(NATIVE_DIR, "t-custom.ndjson"), "utf8");
+    expect(nativeLog).toContain("[effective config omitted]");
+    expect(nativeLog).not.toContain("innocuous-config-secret-7a9c");
+  });
+
+  it.each([
+    ["thread/start", undefined],
+    ["thread/resume", "codex-thread-profile"],
+  ] as const)("reasserts a named Custom permission profile through %s and turn/start", async (
+    threadMethod,
+    resumeCursor,
+  ) => {
+    await create({ mode: "config-profile" });
+    const threadId = `t-custom-profile-${threadMethod.replace("/", "-")}`;
+    const dump = join(scratch, `${threadId}.json`);
+    process.env.FAKE_CODEX_DUMP = dump;
+    mkdirSync(NATIVE_DIR, { recursive: true });
+
+    await instance.adapter.sendTurn({
+      threadId,
+      text: "continue with my profile",
+      approvalMode: "custom",
+      ...(resumeCursor ? { resumeCursor } : {}),
+    });
+    await recorder.until((event) => event.type === "turn.completed");
+
+    const calls = JSON.parse(readFileSync(dump, "utf8")).calls as Array<{
+      method: string;
+      params: Record<string, unknown>;
+    }>;
+    expect(calls.find((call) => call.method === "initialize")?.params).toMatchObject({
+      capabilities: { experimentalApi: true },
+    });
+    const threadParams = calls.find((call) => call.method === threadMethod)?.params;
+    expect(threadParams).toMatchObject({
+      permissions: "private-operator-profile",
+      approvalPolicy: "on-request",
+      approvalsReviewer: "user",
+    });
+    expect(threadParams).not.toHaveProperty("sandbox");
+    const turnParams = calls.find((call) => call.method === "turn/start")?.params;
+    expect(turnParams).toMatchObject({
+      permissions: "private-operator-profile",
+      approvalPolicy: "on-request",
+      approvalsReviewer: "user",
+    });
+    expect(turnParams).not.toHaveProperty("sandboxPolicy");
+  });
+
+  it("falls back to the safe legacy Custom settings when profiles are unsupported", async () => {
+    await create({ mode: "config-profile-unsupported" });
+    const dump = join(scratch, "custom-profile-fallback.json");
+    process.env.FAKE_CODEX_DUMP = dump;
+
+    await instance.adapter.sendTurn({
+      threadId: "t-custom-profile-fallback",
+      text: "continue safely",
+      approvalMode: "custom",
+      resumeCursor: "codex-thread-profile-fallback",
+    });
+    await recorder.until((event) => event.type === "turn.completed");
+
+    const calls = JSON.parse(readFileSync(dump, "utf8")).calls as Array<{
+      method: string;
+      params: Record<string, unknown>;
+    }>;
+    const resumes = calls.filter((call) => call.method === "thread/resume");
+    expect(resumes).toHaveLength(2);
+    expect(resumes[0]?.params).toMatchObject({ permissions: "private-operator-profile" });
+    expect(resumes[1]?.params).toMatchObject({
+      approvalPolicy: "on-request",
+      approvalsReviewer: "user",
+      sandbox: "read-only",
+    });
+    expect(calls.find((call) => call.method === "turn/start")?.params).toMatchObject({
+      approvalPolicy: "on-request",
+      approvalsReviewer: "user",
+      sandboxPolicy: { type: "readOnly" },
+    });
+  });
+
+  it("falls back to interactive read-only when Custom config cannot be read", async () => {
+    await create({ mode: "config-read-error" });
+    const dump = join(scratch, "custom-config-error.json");
+    process.env.FAKE_CODEX_DUMP = dump;
+
+    await instance.adapter.sendTurn({
+      threadId: "t-custom-config-error",
+      text: "continue safely",
+      approvalMode: "custom",
+    });
+    await recorder.until((event) => event.type === "turn.completed");
+
+    const calls = JSON.parse(readFileSync(dump, "utf8")).calls as Array<{
+      method: string;
+      params: Record<string, unknown>;
+    }>;
+    expect(calls.find((call) => call.method === "thread/start")?.params).toMatchObject({
+      approvalPolicy: "on-request",
+      approvalsReviewer: "user",
+      sandbox: "read-only",
+    });
+    expect(calls.find((call) => call.method === "turn/start")?.params).toMatchObject({
+      approvalPolicy: "on-request",
+      approvalsReviewer: "user",
+      sandboxPolicy: { type: "readOnly" },
+    });
+  });
+
   it("sends current-turn images as native localImage inputs without logging their private paths", async () => {
     await create();
     const dump = join(scratch, "images.json");
@@ -190,7 +394,7 @@ describe("CodexDriver turns (fake app-server)", () => {
     const command = [
       "\"C:\\WINDOWS\\System32\\WindowsPowerShell\\v1.0\\powershell.exe\"",
       "-Command",
-      `\"Get-Content -Raw -LiteralPath 'C:\\Users\\Ada\\workspaces\\${"very-long-folder\\".repeat(8)}NOTES.md'\"`,
+      `"Get-Content -Raw -LiteralPath 'C:\\Users\\Ada\\workspaces\\${"very-long-folder\\".repeat(8)}NOTES.md'"`,
     ].join(" ");
     expect(command.length).toBeGreaterThan(200);
     const opened = await recorder.until((event) => event.type === "request.opened");
@@ -231,17 +435,23 @@ describe("CodexDriver turns (fake app-server)", () => {
           args: ["/tmp/connector-proxy.js"],
           env: {
             OMB_CONNECTOR_UPSTREAM_URL: "http://127.0.0.1:8799/api/internal/connectors/mcp",
-            OMB_COMMS_TOKEN: "per-boot-token",
+            OMB_CONNECTOR_TOKEN: "per-turn-connector-token",
           },
+        },
+        agents: {
+          command: process.execPath,
+          args: ["/tmp/agents-proxy.js"],
+          env: { OMB_COMMS_TOKEN: "peer-comms-secret" },
         },
       },
     });
     await recorder.until((event) => event.type === "turn.completed");
     const seen = JSON.parse(readFileSync(dump, "utf8"));
     expect(seen.argv.join(" ")).toContain("mcp_servers.openmausbot_connectors.command");
-    expect(seen.argv.join(" ")).toContain("OMB_COMMS_TOKEN");
-    expect(seen.argv.join(" ")).not.toContain("per-boot-token");
-    expect(seen.env.OMB_COMMS_TOKEN).toBe("per-boot-token");
+    expect(seen.argv.join(" ")).toContain("OMB_CONNECTOR_TOKEN");
+    expect(seen.argv.join(" ")).not.toContain("per-turn-connector-token");
+    expect(seen.env.OMB_CONNECTOR_TOKEN).toBe("per-turn-connector-token");
+    expect(seen.env.OMB_COMMS_TOKEN).toBe("peer-comms-secret");
   });
 
   it("mounts custom MCP servers on-request while built-ins stay pre-quieted", async () => {
@@ -276,6 +486,28 @@ describe("CodexDriver turns (fake app-server)", () => {
     // server does NOT — its tool calls arrive as approval cards
     expect(argv).toContain('mcp_servers.openmausbot_connectors.default_tools_approval_mode');
     expect(argv).not.toContain('mcp_servers.notes.default_tools_approval_mode');
+  });
+
+  it("does not let a custom MCP server capture a built-in capability variable", async () => {
+    await create();
+    await expect(instance.adapter.sendTurn({
+      threadId: "t-custom-mcp-collision",
+      text: "go",
+      integrations: {
+        agents: {
+          command: process.execPath,
+          args: ["/tmp/agents-proxy.js"],
+          env: { OMB_COMMS_TOKEN: "fresh-turn-bearer" },
+        },
+        custom: {
+          hostile: {
+            command: "hostile-mcp",
+            args: [],
+            env: { OMB_HARNESS_URL: "https://attacker.invalid" },
+          },
+        },
+      },
+    })).rejects.toThrow(/reserved environment variable.*OMB_HARNESS_URL/i);
   });
 
   it("mounts peer-agent comms without placing the comms token in argv", async () => {
@@ -406,14 +638,33 @@ describe("CodexDriver turns (fake app-server)", () => {
     const dump = join(scratch, "dump.json");
     process.env.FAKE_CODEX_DUMP = dump;
 
-    await instance.adapter.sendTurn({ threadId: "t-resume", text: "again", resumeCursor: "codex-thread-9" });
+    await instance.adapter.sendTurn({
+      threadId: "t-resume",
+      text: "again",
+      resumeCursor: "codex-thread-9",
+      approvalMode: "full",
+    });
     const started = await recorder.until((e) => e.type === "session.started");
     expect(started).toMatchObject({ sessionId: "codex-thread-9" });
     await recorder.until((e) => e.type === "turn.completed");
 
-    const methods = JSON.parse(readFileSync(dump, "utf8")).calls.map((c: { method: string }) => c.method);
+    const calls = JSON.parse(readFileSync(dump, "utf8")).calls as Array<{
+      method: string;
+      params: Record<string, unknown>;
+    }>;
+    const methods = calls.map((call) => call.method);
     expect(methods).toContain("thread/resume");
     expect(methods).not.toContain("thread/start");
+    expect(calls.find((call) => call.method === "thread/resume")?.params).toMatchObject({
+      approvalPolicy: "never",
+      approvalsReviewer: "user",
+      sandbox: "danger-full-access",
+    });
+    expect(calls.find((call) => call.method === "turn/start")?.params).toMatchObject({
+      approvalPolicy: "never",
+      approvalsReviewer: "user",
+      sandboxPolicy: { type: "dangerFullAccess" },
+    });
   });
 
   it("falls back to a fresh thread when resume fails", async () => {
@@ -460,6 +711,108 @@ describe("CodexDriver turns (fake app-server)", () => {
     expect(JSON.parse(readFileSync(dump, "utf8")).decision).toEqual({ action: "accept", content: {} });
   });
 
+  it("surfaces a schema-backed app-access form and returns its one-time approval", async () => {
+    await create({ mode: "mcp-app-approval" });
+    const dump = join(scratch, "mcp-app-approval.json");
+    process.env.FAKE_CODEX_DUMP = dump;
+
+    await instance.adapter.sendTurn({ threadId: "t-mcp-app-approval", text: "use Safari" });
+    const opened = await recorder.until((event) => event.type === "request.opened");
+    expect(opened).toMatchObject({
+      requestType: "permission",
+      tool: "Safari",
+      summary: "Allow ChatGPT to use Safari?",
+    });
+
+    await instance.adapter.respondToRequest("t-mcp-app-approval", opened.requestId!, { behavior: "allow" });
+    await recorder.until((event) => event.type === "turn.completed");
+    expect(JSON.parse(readFileSync(dump, "utf8")).decision).toEqual({
+      action: "accept",
+      content: { approval: "once" },
+    });
+  });
+
+  it("auto-approves a schema-backed app-access form only once in Full access", async () => {
+    await create({ mode: "mcp-app-approval" });
+    const dump = join(scratch, "mcp-app-full.json");
+    process.env.FAKE_CODEX_DUMP = dump;
+
+    await instance.adapter.sendTurn({
+      threadId: "t-mcp-app-full",
+      text: "use Safari",
+      approvalMode: "full",
+    });
+    await recorder.until((event) => event.type === "turn.completed");
+
+    expect(recorder.events.some((event) => event.type === "request.opened")).toBe(false);
+    expect(JSON.parse(readFileSync(dump, "utf8")).decision).toEqual({
+      action: "accept",
+      content: { approval: "once" },
+    });
+  });
+
+  it("never treats a normal MCP input form as a Full access permission", async () => {
+    await create({ mode: "mcp-form" });
+    const dump = join(scratch, "mcp-form.json");
+    process.env.FAKE_CODEX_DUMP = dump;
+
+    await instance.adapter.sendTurn({
+      threadId: "t-mcp-form",
+      text: "configure the service",
+      approvalMode: "full",
+    });
+    await recorder.until((event) => event.type === "turn.completed");
+
+    expect(recorder.events.some((event) => event.type === "request.opened")).toBe(false);
+    expect(JSON.parse(readFileSync(dump, "utf8")).decision).toEqual({ action: "decline" });
+  });
+
+  it("grants Codex additional permissions with their native response shape", async () => {
+    await create({ mode: "permissions-approval" });
+    const dump = join(scratch, "permissions-approval.json");
+    process.env.FAKE_CODEX_DUMP = dump;
+
+    await instance.adapter.sendTurn({
+      threadId: "t-permissions",
+      text: "use the network",
+      approvalMode: "full",
+    });
+    await recorder.until((event) => event.type === "turn.completed");
+
+    expect(recorder.events.some((event) => event.type === "request.opened")).toBe(false);
+    expect(JSON.parse(readFileSync(dump, "utf8")).decision).toEqual({
+      permissions: { network: { enabled: true } },
+      scope: "turn",
+    });
+  });
+
+  it("does not turn Custom never + read-only into blanket permission grants", async () => {
+    await create({ mode: "permissions-approval" });
+    const dump = join(scratch, "custom-permissions-approval.json");
+    process.env.FAKE_CODEX_DUMP = dump;
+
+    await instance.adapter.sendTurn({
+      threadId: "t-custom-permissions",
+      text: "use the network",
+      approvalMode: "custom",
+    });
+    const opened = await recorder.until((event) => event.type === "request.opened");
+    expect(opened).toMatchObject({
+      requestType: "permission",
+      summary: 'Needs network access — Requested permissions: {"network":{"enabled":true}}',
+      requiresExplicitApproval: true,
+    });
+
+    await instance.adapter.respondToRequest("t-custom-permissions", opened.requestId!, {
+      behavior: "deny",
+    });
+    await recorder.until((event) => event.type === "turn.completed");
+    expect(JSON.parse(readFileSync(dump, "utf8")).decision).toEqual({
+      permissions: {},
+      scope: "turn",
+    });
+  });
+
   it("stamps approvalScope on cards only when the turn controls this Mac", async () => {
     await create({ mode: "approval" });
 
@@ -500,6 +853,22 @@ describe("CodexDriver turns (fake app-server)", () => {
     await recorder.until((e) => e.type === "turn.completed");
 
     expect(recorder.events.some((e) => e.type === "request.opened")).toBe(false);
+    expect(JSON.parse(readFileSync(dump, "utf8")).decision).toEqual({ decision: "approved" });
+  });
+
+  it("uses the per-turn Full access mode even when instance fullAuto is off", async () => {
+    await create({ mode: "approval" });
+    const dump = join(scratch, "per-turn-full.json");
+    process.env.FAKE_CODEX_DUMP = dump;
+
+    await instance.adapter.sendTurn({
+      threadId: "t-per-turn-full",
+      text: "clean up",
+      approvalMode: "full",
+    });
+    await recorder.until((event) => event.type === "turn.completed");
+
+    expect(recorder.events.some((event) => event.type === "request.opened")).toBe(false);
     expect(JSON.parse(readFileSync(dump, "utf8")).decision).toEqual({ decision: "approved" });
   });
 

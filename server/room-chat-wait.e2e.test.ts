@@ -20,6 +20,7 @@ import { freePortBlock } from "./testing/ports.ts";
 const SERVER_DIR = dirname(fileURLToPath(import.meta.url));
 const ROOT = join(SERVER_DIR, "..");
 const FAKE_CLAUDE = join(SERVER_DIR, "testing", "fake-claude-cli.ts");
+const TEST_CAPABILITY_KEY = "room-chat-wait-fixture-capability";
 
 const WAIT_CHIP = (name: string) => `${name} is finishing another conversation — will reply here when free`;
 
@@ -81,8 +82,8 @@ beforeAll(async () => {
         FAKE_CLAUDE_REPLIES: JSON.stringify(["Let me pull in @Bee for this."]),
         FAKE_CLAUDE_REPLY_STATE: join(home, "summoner-replies.txt"),
       }),
-      // the dump is the only place a test can read the per-boot comms
-      // token from, and ask_bot is the only way a bot⇄bot channel is born
+      // The dump proves the real per-turn token is mounted. An exact synthetic
+      // capability below drives ask_bot after this quick fake turn settles.
       pen: fixture("Dumping fixture", { FAKE_CLAUDE_MODE: "happy", FAKE_CLAUDE_DUMP: penDump }),
     },
   }));
@@ -98,6 +99,7 @@ beforeAll(async () => {
       OMB_PORT: String(port),
       OMB_WEBHOOK_PORT: String(port + 1),
       OMB_STATIC_DIR: staticDir,
+      OMB_TEST_INTERNAL_CAPABILITY_KEY: TEST_CAPABILITY_KEY,
     },
     stdio: ["ignore", "pipe", "pipe"],
   });
@@ -273,9 +275,16 @@ describe("chat rooms wait for a member busy elsewhere", { timeout: 45_000 }, () 
         }
       };
       await expect.poll(readToken, { timeout: 10_000 }).toBeTruthy();
-      const token = readToken() ?? "";
-      expect(token).toBeTruthy();
+      expect(readToken()).toMatch(/^[a-f0-9]{48}$/);
       await expect.poll(() => botBusy(pen.id)).toBe(false);
+      const minted = await api(
+        "POST",
+        "/api/testing/internal-capability",
+        { botId: pen.id, threadId: pen.threadId, kind: "agents" },
+        { "x-openmausbot-test-capability": TEST_CAPABILITY_KEY },
+      );
+      expect(minted.status).toBe(201);
+      const token = String(minted.body.token);
 
       // ask_bot is what births the channel; the peer answers at once here
       const asked = await api(
@@ -293,7 +302,6 @@ describe("chat rooms wait for a member busy elsewhere", { timeout: 45_000 }, () 
       expect(channel).toBeTruthy();
       channelId = channel.id;
       await expect.poll(() => botBusy(ink.id)).toBe(false);
-
       await holdBusy(ink.id, "Ink, finish this first");
       expect((await api("POST", `/api/groups/${channel.id}/messages`, { text: "@Ink one more thing" })).status).toBe(202);
 

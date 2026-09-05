@@ -15,6 +15,7 @@ const FAKE_CLAUDE = join(SERVER_DIR, "testing", "fake-claude-cli.ts");
 
 let child: ChildProcess;
 let home = "";
+let stopScopedWorkerFinishGate = "";
 let base = "";
 let stderr = "";
 
@@ -44,6 +45,7 @@ const api = async (method: string, path: string, body?: unknown): Promise<{ stat
 
 beforeAll(async () => {
   home = mkdtempSync(join(tmpdir(), "omb-goal-run-"));
+  stopScopedWorkerFinishGate = join(home, "stop-scoped-worker-finish");
   const data = join(home, ".openmausbot");
   const staticDir = join(home, "static");
   mkdirSync(data, { recursive: true });
@@ -145,7 +147,8 @@ beforeAll(async () => {
         driver: "claudeAgent",
         displayName: "Stop-scoped worker fixture",
         environment: {
-          FAKE_CLAUDE_MODE: "slow",
+          FAKE_CLAUDE_MODE: "background-result",
+          FAKE_CLAUDE_FINISH_GATE: stopScopedWorkerFinishGate,
           FAKE_CLAUDE_REPLIES: JSON.stringify([
             "The worker's unrelated direct task completed naturally.",
             "Scheduled analysis returned to the coordinator.",
@@ -826,6 +829,7 @@ describe("goal-driven channel runs", () => {
       expect(["working", "completed"]).toContain(afterStopCard.goalRun.status);
       expect(afterStopCard.goalRun.status).not.toBe("stopped");
 
+      writeFileSync(stopScopedWorkerFinishGate, "finish");
       await expect.poll(async () => {
         const calendar = (await api("GET", "/api/routines")).body;
         const completed = calendar.runs.find((run: { id: string }) => run.id === runId);
@@ -851,6 +855,7 @@ describe("goal-driven channel runs", () => {
         turnCount: 3,
       });
     } finally {
+      writeFileSync(stopScopedWorkerFinishGate, "finish");
       await api("POST", `/api/groups/${room.id}/interrupt`).catch(() => undefined);
       await api("POST", `/api/bots/${lead.id}/interrupt`).catch(() => undefined);
       await api("POST", `/api/bots/${worker.id}/interrupt`).catch(() => undefined);

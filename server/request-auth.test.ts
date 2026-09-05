@@ -133,6 +133,47 @@ describe("resolveRequestAuth", () => {
     expect(foreignOrigin.error).toBe("forbidden: cross-origin request");
   });
 
+  it("requires the packaged desktop capability for public loopback mutations", () => {
+    const options = (path: string) => ({
+      sessions,
+      cookieName,
+      streamPath: "/api/events",
+      url: new URL(path, "http://x"),
+      loopbackMutationToken: "owner-token-123",
+    });
+    const denied = resolveRequestAuth(
+      request({ host: "127.0.0.1:8799" }, "PATCH"),
+      options("/api/bots/bot-1"),
+    );
+    expect(denied.auth).toBeNull();
+    expect(denied.status).toBe(403);
+    expect(denied.error).toMatch(/desktop app or a paired device/);
+
+    const desktop = resolveRequestAuth(
+      request({
+        host: "127.0.0.1:8799",
+        "x-openmausbot-desktop-owner": "owner-token-123",
+      }, "POST"),
+      options("/api/routines"),
+    );
+    expect(desktop.auth?.kind).toBe("loopback");
+
+    expect(resolveRequestAuth(
+      request({ host: "127.0.0.1:8799" }, "GET"),
+      options("/api/bots"),
+    ).auth?.kind).toBe("loopback");
+    const connectorRefresh = resolveRequestAuth(
+      request({ host: "127.0.0.1:8799" }, "GET"),
+      options("/api/bots/bot-1/connector-cards/card-1/status?threadId=thread-1"),
+    );
+    expect(connectorRefresh.auth).toBeNull();
+    expect(connectorRefresh.status).toBe(403);
+    expect(resolveRequestAuth(
+      request({ host: "127.0.0.1:8799" }, "POST"),
+      options("/api/internal/ask-bot"),
+    ).auth?.kind).toBe("loopback");
+  });
+
   it("never grants loopback trust to a request that came through a proxy, whatever Host it carries", () => {
     expect(isProxied(request({ host: "localhost", "x-forwarded-for": "203.0.113.9" }))).toBe(true);
     expect(isProxied(request({ host: "localhost", "x-forwarded-proto": "https" }))).toBe(true);

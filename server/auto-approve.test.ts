@@ -4,7 +4,13 @@
 // question is never answered by the machine.
 import { describe, expect, it } from "vitest";
 
-import { approvalKey, autoDecision, looksDestructive, looksSensitive } from "./auto-approve.ts";
+import {
+  approvalKey,
+  autoDecision,
+  looksDestructive,
+  looksSensitive,
+  rememberableApprovalKey,
+} from "./auto-approve.ts";
 
 describe("looksDestructive", () => {
   const dangerous = [
@@ -88,6 +94,29 @@ describe("approvalKey", () => {
   });
 });
 
+describe("rememberableApprovalKey", () => {
+  it("offers an ordinary Ask-mode grant but never a misleading Custom or guarded grant", () => {
+    expect(rememberableApprovalKey(
+      { approvalMode: "ask" },
+      "Bash",
+      "git status",
+      { source: "no-grant" },
+    )).toBe("Bash:git");
+    expect(rememberableApprovalKey(
+      { approvalMode: "custom" },
+      "Bash",
+      "git status",
+      { source: "no-grant" },
+    )).toBeUndefined();
+    expect(rememberableApprovalKey(
+      { approvalMode: "auto" },
+      "Bash",
+      "rm -rf /tmp/work",
+      { source: "destructive-guard" },
+    )).toBeUndefined();
+  });
+});
+
 describe("autoDecision", () => {
   it("asks when the bot is not in auto mode", () => {
     expect(autoDecision({}, "Bash", "ls -la")).toBeNull();
@@ -96,6 +125,15 @@ describe("autoDecision", () => {
   it("approves routine tools in auto mode, and says so", () => {
     const decision = autoDecision({ autoApprove: true }, "Bash", "ls -la");
     expect(decision).toBe("auto-approved Bash");
+  });
+
+  it("keeps legacy autoApprove as safe Auto instead of widening it to Full access", () => {
+    expect(autoDecision({ autoApprove: true }, "Bash", "rm -rf /")).toBeNull();
+    expect(
+      autoDecision({ autoApprove: true }, "Read", "cat .env.production", {
+        unattended: true,
+      }),
+    ).toBeNull();
   });
 
   it("still stops for a destructive command in auto mode", () => {
@@ -128,6 +166,43 @@ describe("autoDecision", () => {
       autoDecision(bot, "mcp__computer__click", "Click the Submit button", {
         scope: "local-computer",
       }),
+    ).toBeNull();
+  });
+
+  it("Full access approves ordinary, destructive, sensitive, unattended, and local actions", () => {
+    const bot = { approvalMode: "full" as const };
+    expect(autoDecision(bot, "Bash", "ls -la")).toBe("approved Bash (full access)");
+    expect(autoDecision(bot, "Bash", "rm -rf /")).toBe("approved Bash (full access)");
+    expect(autoDecision(bot, "Read", "cat .env.production")).toBe(
+      "approved Read (full access)",
+    );
+    expect(autoDecision(bot, "Bash", "git status", { unattended: true })).toBe(
+      "approved Bash (full access)",
+    );
+    expect(
+      autoDecision(bot, "mcp__computer__click", "Click Delete", {
+        scope: "local-computer",
+      }),
+    ).toBe("approved mcp__computer__click (full access)");
+  });
+
+  it("Ask and Custom do not inherit a stale legacy Auto bit", () => {
+    expect(autoDecision({ approvalMode: "ask", autoApprove: true }, "Bash", "ls")).toBeNull();
+    expect(autoDecision({ approvalMode: "custom", autoApprove: true }, "Bash", "ls")).toBeNull();
+  });
+
+  it("requires a person for sandbox-widening requests outside Full access", () => {
+    const context = { requiresExplicitApproval: true };
+    expect(autoDecision({ approvalMode: "auto" }, "permissions", "network", context)).toBeNull();
+    expect(autoDecision({ alwaysAllow: ["permissions"] }, "permissions", "network", context)).toBeNull();
+    expect(autoDecision({ approvalMode: "full" }, "permissions", "network", context)).toBe(
+      "approved permissions (full access)",
+    );
+  });
+
+  it("does not layer remembered OpenMaus grants over Custom config.toml", () => {
+    expect(
+      autoDecision({ approvalMode: "custom", alwaysAllow: ["Read"] }, "Read", "README.md"),
     ).toBeNull();
   });
 });

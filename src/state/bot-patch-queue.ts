@@ -15,6 +15,7 @@ export type BotUpdatePatch = Partial<
     | "avatarUrl"
     | "avatarCrop"
     | "autoApprove"
+    | "approvalMode"
     | "speakReplies"
     | "voice"
     | "pinned"
@@ -37,10 +38,17 @@ export type BotUpdatePatch = Partial<
    * reach the wire inside the coalesced body and must never fold into bot
    * state — the queue strips it from every overlay it hands back. */
   acknowledgeLocalAuto?: boolean;
+  /** Renderer-local marker that the elevated-risk Full access dialog was
+   * confirmed. StoreProvider consumes it before the private Electron request;
+   * it is never sent over HTTP or folded into bot state. */
+  confirmFullAccess?: boolean;
 };
 
 /** A wire patch after clear-only values have been normalized for Bot state. */
-export type BotStatePatch = Omit<BotUpdatePatch, "computer" | "acknowledgeLocalAuto"> & {
+export type BotStatePatch = Omit<
+  BotUpdatePatch,
+  "computer" | "acknowledgeLocalAuto" | "confirmFullAccess"
+> & {
   computer?: Bot["computer"];
 };
 
@@ -62,6 +70,7 @@ export interface BotPatchQueueOptions {
     botId: string,
     patch: BotUpdatePatch,
     signal: AbortSignal,
+    current: BotAnnouncement,
   ) => Promise<BotAnnouncement>;
   reconcile: (botId: string, signal: AbortSignal) => Promise<BotAnnouncement | null>;
   onAuthoritative: (bot: BotAnnouncement, optimisticOverlay: BotStatePatch) => void;
@@ -83,11 +92,21 @@ export interface BotPatchQueue {
 }
 
 const hasFields = (patch: BotUpdatePatch): boolean => Object.keys(patch).length > 0;
+const hasOwn = (value: object, key: PropertyKey): boolean =>
+  Object.prototype.hasOwnProperty.call(value, key);
+
+const isAbortError = (error: unknown): boolean =>
+  Boolean(error && typeof error === "object" && (error as { name?: unknown }).name === "AbortError");
 
 /** What may fold back into renderer bot state: everything except the consent
  * flag, which is wire-only. One strip point covers both overlay paths. */
 const stateOverlay = (patch: BotUpdatePatch): BotStatePatch => {
-  const { acknowledgeLocalAuto: _ack, computer, ...fields } = patch;
+  const {
+    acknowledgeLocalAuto: _localAck,
+    confirmFullAccess: _fullConfirmation,
+    computer,
+    ...fields
+  } = patch;
   if (computer === null) return { ...fields, computer: undefined };
   return computer === undefined ? fields : { ...fields, computer };
 };
@@ -118,12 +137,16 @@ export function createBotPatchQueue(options: BotPatchQueueOptions): BotPatchQueu
     entry.controller = controller;
 
     try {
-      const bot = await options.send(entry.botId, patch, controller.signal);
+      const bot = await options.send(entry.botId, patch, controller.signal, entry.fallback);
       if (disposed || entry.cancelled) return;
       entry.fallback = bot;
       options.onAuthoritative(bot, stateOverlay(entry.pending));
     } catch (caught) {
       if (!disposed && !entry.cancelled) {
+        const supersededApproval = controller.signal.aborted &&
+          hasOwn(entry.pending, "approvalMode") &&
+          isAbortError(caught);
+        if (supersededApproval) return;
         // A rejected patch is no longer optimistic. Re-read before rolling back
         // because a lost HTTP response may still have committed and broadcast.
         entry.inFlight = {};
@@ -176,7 +199,30 @@ export function createBotPatchQueue(options: BotPatchQueueOptions): BotPatchQueu
       };
       entries.set(botId, entry);
       entry.pending = { ...entry.pending, ...patch };
-      schedule(entry);
+      // A private Full/Custom grant cannot be cancelled after it crosses the
+      // Electron bridge. Signal the sender as soon as a newer level exists so
+      // it can compensate a late grant back to Ask before this lane advances.
+      const inFlightMode = entry.inFlight.approvalMode;
+      if (
+        entry.running &&
+        (inFlightMode === "full" || inFlightMode === "custom") &&
+        hasOwn(patch, "approvalMode") &&
+        patch.approvalMode !== inFlightMode
+      ) {
+        entry.controller?.abort();
+      }
+      // Execution-boundary edits must start immediately. They still share the
+      // same serialized lane, but never sit behind the cosmetic 400 ms
+      // debounce where a message/routine could begin under stale permissions.
+      const immediate = Object.prototype.hasOwnProperty.call(patch, "approvalMode") ||
+        Object.prototype.hasOwnProperty.call(patch, "modelSelection");
+      if (immediate) {
+        if (entry.timer !== null) clearTimeout(entry.timer);
+        entry.timer = null;
+        void drain(entry);
+      } else {
+        schedule(entry);
+      }
     },
 
     flush(botId) {
