@@ -95,10 +95,10 @@ await build({
 // `openmausbot serve --tunnel` (server/tunnel.ts) spawns the connector guardian
 // as its own process, so it has to exist as a file beside the server, not only
 // as code inlined into the bundle that imports its neighbours. Bundled under
-// its own name: the same file the desktop app ships as
-// electron/managed-companion-guardian.mjs, so a fix lands in both.
+// its own name: the same code the desktop app runs from
+// electron/managed-companion-guardian-main.mjs, so a fix lands in both.
 await build({
-  entryPoints: [join(root, "electron", "managed-companion-guardian.mjs")],
+  entryPoints: [join(root, "electron", "managed-companion-guardian-main.mjs")],
   bundle: true,
   platform: "node",
   target: "node20",

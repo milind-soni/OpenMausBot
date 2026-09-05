@@ -186,7 +186,7 @@ export function prepareEntry(here = HERE): string {
 export function guardianEntry(here = HERE): string | null {
   const bundled = join(here, "tunnel-guardian.js");
   if (existsSync(bundled)) return bundled;
-  const source = resolve(here, "..", "electron", "managed-companion-guardian.mjs");
+  const source = resolve(here, "..", "electron", "managed-companion-guardian-main.mjs");
   return existsSync(source) ? source : null;
 }
 

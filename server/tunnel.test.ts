@@ -134,7 +134,7 @@ describe("where the pieces are", () => {
       void removeTempDir(bundled);
     }
     // a checkout: the source files
-    expect(guardianEntry()).toMatch(/managed-companion-guardian\.mjs$/);
+    expect(guardianEntry()).toMatch(/managed-companion-guardian-main\.mjs$/);
   });
 
   it("describes tunnel states in one line each", () => {
