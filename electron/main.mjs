@@ -16,6 +16,7 @@ import {
   stopRecorder,
 } from "./skill-recorder.mjs";
 import { openBlankTerminal } from "./terminal-launch.mjs";
+import { pasteMenuItem } from "./paste-menu-item.mjs";
 import { attachUpdaterWindow, startUpdater, registerUpdaterIpc } from "./updater.mjs";
 import {
   buildDiagnosticsReport,
@@ -1709,20 +1710,13 @@ function showContextMenu(win, params) {
       { type: "separator" },
     );
   }
-  let hasClipboardImage = false;
-  if (params.isEditable && !params.editFlags.canPaste) {
-    try {
-      hasClipboardImage = !clipboard.readImage().isEmpty();
-    } catch {}
-  }
-  const canPaste = params.editFlags.canPaste || hasClipboardImage;
   menuItems.push(
     { label: "Undo", role: "undo", enabled: params.editFlags.canUndo },
     { label: "Redo", role: "redo", enabled: params.editFlags.canRedo },
     { type: "separator" },
     { label: "Cut", role: "cut", enabled: params.editFlags.canCut },
     { label: "Copy", role: "copy", enabled: params.editFlags.canCopy },
-    { label: "Paste", role: "paste", enabled: canPaste },
+    pasteMenuItem(params, clipboard, win.webContents),
     { label: "Paste and Match Style", role: "pasteAndMatchStyle", enabled: params.editFlags.canPaste },
     { type: "separator" },
     { label: "Select All", role: "selectAll", enabled: params.editFlags.canSelectAll },

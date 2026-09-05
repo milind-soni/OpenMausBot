@@ -417,6 +417,22 @@ describe("clipboardImageFiles", () => {
     };
     expect(clipboardImageFiles(clipboardData)).toEqual([]);
   });
+
+  it("does not duplicate images exposed through both clipboard collections", () => {
+    const file = new File(["image"], "shot.png", { type: "image/png" });
+    expect(clipboardImageFiles({ items: [mockClipboardItem("file", file.type, file)], files: [file] })).toEqual([file]);
+  });
+
+  it("falls back when an image item cannot produce a file", () => {
+    const file = new File(["image"], "shot.png", { type: "image/png" });
+    expect(clipboardImageFiles({ items: [mockClipboardItem("file", "image/png", null)], files: [file] })).toEqual([file]);
+  });
+
+  it("does not accept unsupported image formats or string items", () => {
+    const svg = new File(["<svg/>"], "shot.svg", { type: "image/svg+xml" });
+    const png = new File(["image"], "shot.png", { type: "image/png" });
+    expect(clipboardImageFiles({ items: [mockClipboardItem("file", svg.type, svg), mockClipboardItem("string", png.type, png)], files: [svg] })).toEqual([]);
+  });
 });
 
 describe("clipboardHasImages", () => {

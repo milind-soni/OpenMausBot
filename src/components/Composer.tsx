@@ -34,7 +34,6 @@ import {
   composeMessage,
   imageAttachmentFromFile,
   intakeFiles,
-  isImageFile,
   isLongPaste,
   optimisticImageAttachment,
   pasteAttachment,
@@ -526,16 +525,19 @@ export function Composer({
     // refuses instead of receiving a path it cannot read
     const imageFiles = clipboardImageFiles(e.clipboardData);
     if (imageFiles.length > 0 || clipboardHasImages(e.clipboardData)) {
+      e.preventDefault();
       if (!engineSupportsImages) {
-        e.preventDefault();
         dispatch({
           type: "error",
           message: "The selected responder does not support image attachments.",
         });
         return;
       }
+      if (!imageFiles.length) {
+        dispatch({ type: "error", message: "Could not read the clipboard image. Try attaching the image file instead." });
+        return;
+      }
       if (imageFiles.length > 0) {
-        e.preventDefault();
         changeDraftAttachmentPending(draftId, true);
         void (async () => {
           try {
