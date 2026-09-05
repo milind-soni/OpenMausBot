@@ -26,7 +26,7 @@ import {
   type CredentialTargetId,
 } from "../shared/credential-request.ts";
 
-import { autoVerdict, rememberableApprovalKey } from "./auto-approve.ts";
+import { approvalModeForOrigin, autoVerdict, rememberableApprovalKey } from "./auto-approve.ts";
 import { requestReview, resolveAutoReviewMode, shouldReview } from "./auto-review.ts";
 import { updateClaudeCli } from "./claude-update.ts";
 import {
@@ -1173,9 +1173,10 @@ const wireTrustedApprovalBot = (bot: NonNullable<ReturnType<typeof store.bot>>) 
 /** Defense in depth for hand-edited/corrupt durable records: elevated
  * approval semantics require an implemented provider mapping. The trusted transition enforces
  * this too, but no provider dispatch or later permission callback relies on
- * persistence having been produced exclusively by that route. */
-const approvalModeForTurn = (bot: BotRecord): ApprovalMode => {
-  const mode = approvalModeFor(bot);
+ * persistence having been produced exclusively by that route. And a turn
+ * another bot started never runs as Full — see approvalModeForOrigin. */
+const approvalModeForTurn = (bot: BotRecord, peerInitiated = false): ApprovalMode => {
+  const mode = approvalModeForOrigin(approvalModeFor(bot), { peerInitiated });
   if (!supportsApprovalMode(registry.cliTarget(bot.modelSelection.instanceId)?.driverKind, mode)) {
     return "ask";
   }
@@ -2820,7 +2821,9 @@ bus.subscribe((event: RuntimeEvent) => {
       const unattended = permission && asker && event.requestId ? isUnattended(asker.id) : false;
       const verdict = permission && asker && event.requestId
         ? autoVerdict({
-            approvalMode: approvalModeForTurn(asker),
+            // the same origin the dispatch used, so a peer-started turn's
+            // residual asks are judged as Approve for me here too
+            approvalMode: approvalModeForTurn(asker, isInternalTurn(event.threadId)),
             autoApprove: false,
             alwaysAllow: asker.alwaysAllow,
           }, event.tool, event.summary, {
@@ -4274,7 +4277,7 @@ async function startTurn(
         threadId,
         text: turnText,
         images: turnImages,
-        approvalMode: approvalModeForTurn(liveBot ?? bot),
+        approvalMode: approvalModeForTurn(liveBot ?? bot, commsDepth > 0),
         model,
         effort,
         // a rewound thread never resumes the abandoned branch's session

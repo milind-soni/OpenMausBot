@@ -7,7 +7,7 @@ when that provider resumes an existing native thread.
 | --- | --- |
 | **Ask for approval** | The provider asks before actions outside its normal workspace or network permissions. |
 | **Approve for me** | Uses native automatic review on Codex, Claude, and Cursor. Other providers fall back to Ask. Requests the native reviewer leaves for you are not overridden by OpenMausBot. Unattended Auto runs use Ask. |
-| **Full access** | Enables the provider's permissive mode for commands, edits, and selected-computer actions, including potentially destructive or sensitive work. Some providers still ask for approval. Questions and separate OpenMausBot confirmations still wait for you. |
+| **Full access** | Enables the provider's permissive mode for commands, edits, and selected-computer actions, including potentially destructive or sensitive work. Some providers still ask for approval. A turn another bot starts (ask_bot, delegate_bot) runs as **Approve for me** instead, so a teammate cannot hand a Full bot a destructive command with nobody watching. Questions and separate OpenMausBot confirmations still wait for you. |
 | **Custom (`config.toml`)** | Codex only. OpenMausBot reads and reapplies the effective approval and sandbox settings from your Codex configuration. |
 
 Full access is an elevated-risk standing approval. Full and Custom can only be

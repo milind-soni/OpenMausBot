@@ -6,6 +6,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   approvalKey,
+  approvalModeForOrigin,
   autoDecision,
   autoVerdict,
   looksDestructive,
@@ -212,6 +213,28 @@ describe("autoDecision", () => {
     expect(
       autoDecision({ approvalMode: "custom", alwaysAllow: ["Read"] }, "Read", "README.md"),
     ).toBeNull();
+  });
+});
+
+// Full is a decision about the person's OWN sessions with a bot. A turn
+// another bot started is not one, so it runs as Approve for me: the guards
+// card, an unattended sender's block holds, and the fold logs every answer.
+describe("approvalModeForOrigin", () => {
+  const person = { peerInitiated: false };
+  const peer = { peerInitiated: true };
+
+  it("keeps a person's own turn at the mode they chose", () => {
+    for (const mode of ["ask", "auto", "full", "custom"] as const) {
+      expect(approvalModeForOrigin(mode, person)).toBe(mode);
+    }
+  });
+
+  it("runs a peer-started turn on a Full or Custom bot as Approve for me", () => {
+    expect(approvalModeForOrigin("full", peer)).toBe("auto");
+    expect(approvalModeForOrigin("custom", peer)).toBe("auto");
+    // and never widens the lower modes
+    expect(approvalModeForOrigin("ask", peer)).toBe("ask");
+    expect(approvalModeForOrigin("auto", peer)).toBe("auto");
   });
 });
 
