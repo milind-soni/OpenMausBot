@@ -11,12 +11,12 @@ import { PassThrough } from "node:stream";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 import { DATA_DIR } from "./config.ts";
+import type { ResolvedWorker } from "./computer-workers.ts";
 import type { ModelSelection } from "./contracts.ts";
 import type { JsonValue } from "./schema.ts";
 import { Store, type BotRecord } from "./store.ts";
 import {
   fakeTaskRoot,
-  HOST_TASK_PLATFORM,
   parsedManifest,
   taskProposalFixture,
   TASK_NOW,
@@ -34,8 +34,10 @@ import { WORKER_TASK_MAX_REPLY_CONTENT_BLOCKS, WORKER_TASK_MAX_REPLY_TEXT_CHARS 
 import type { WorkerTaskStreamOptions } from "./worker-task-transport.ts";
 
 const selection = (): ModelSelection => ({ instanceId: "claude", model: "fake-model" });
-const worker = workerFixture();
-const taskRoot = fakeTaskRoot(HOST_TASK_PLATFORM, "task-1");
+// The successful desktop protocol is macOS on every CI host. These workers
+// are fake; Windows desktop admission has its own negative acceptance below.
+const worker = workerFixture("macos");
+const taskRoot = fakeTaskRoot("macos", "task-1");
 
 // A manifest is bound to one conversation, and a test bot's thread id is
 // generated, so these are rebuilt per test rather than at module scope.
@@ -102,13 +104,13 @@ function fakeWorker(overrides: Record<string, JsonValue> = {}) {
 
 function makeService(
   overrides: Record<string, JsonValue> = {},
-  options: { controlHeld?: (botId: string) => boolean } = {},
+  options: { controlHeld?: (botId: string) => boolean; worker?: ResolvedWorker } = {},
 ): WorkerTaskService {
   const fake = fakeWorker(overrides);
   return new WorkerTaskService({
     bus: { store, broadcast: () => {} },
     registry,
-    workerFor: () => worker,
+    workerFor: () => options.worker ?? worker,
     channelFor: () => worker.platform === "windows"
       ? "\\\\.\\pipe\\cua-driver"
       : "/Users/worker/.openmausbot/run/cua.sock",
@@ -131,7 +133,7 @@ async function answer(behavior: "allow" | "deny"): Promise<void> {
 }
 
 const propose = (document?: JsonValue) =>
-  ({ op: "propose", manifest: document ?? taskProposalFixture(HOST_TASK_PLATFORM) }) as JsonValue;
+  ({ op: "propose", manifest: document ?? taskProposalFixture("macos") }) as JsonValue;
 
 beforeEach(() => {
   rmSync(DATA_DIR, { recursive: true, force: true });
@@ -143,7 +145,7 @@ beforeEach(() => {
   store.patchBot(bot.id, { cwd, workerId: worker.id });
   bot = store.bot(bot.id)!;
 
-  const manifest = parsedManifest(HOST_TASK_PLATFORM, { threadId: bot.threadId });
+  const manifest = parsedManifest("macos", { threadId: bot.threadId });
   digest = workerTaskManifestDigest(manifest);
   capability = workerCuaCapabilityDigest(workerCuaCapabilityManifest(manifest, taskRoot, TASK_NOW));
 });
@@ -154,6 +156,37 @@ afterEach(() => {
 });
 
 describe("propose", () => {
+  it("holds Windows desktop tasks before approval, registration or SSH", async () => {
+    const service = makeService({}, { worker: workerFixture("windows") });
+    const outcome = await service.handle(bot, propose(taskProposalFixture("windows")));
+    expect(outcome.status).toBe(409);
+    expect(outcome.error).toMatch(/Windows desktop tasks.*application-boundary acceptance/);
+    expect(registry.forThread(bot.threadId)).toBeNull();
+    expect(store.messagesFor(bot.threadId).some((message) => message.card?.tool?.startsWith("worker_task:"))).toBe(false);
+    expect(ops).toEqual([]);
+  });
+
+  it("also holds an existing Windows desktop record before any remote operation", async () => {
+    const manifest = parsedManifest("windows", { threadId: bot.threadId });
+    registry.register(manifest);
+    registry.approve(manifest.taskId, workerTaskManifestDigest(manifest), TASK_NOW);
+    const service = makeService({}, { worker: workerFixture("windows") });
+    const outcome = await service.handle(bot, { op: "run", commandId: "build" });
+    expect(outcome.status).toBe(409);
+    expect(outcome.error).toMatch(/Windows desktop tasks.*application-boundary acceptance/);
+    expect(ops).toEqual([]);
+  });
+
+  it("still requests normal approval for the separate Windows browser surface", async () => {
+    const service = makeService({}, { worker: workerFixture("windows") });
+    const pending = service.handle(bot, propose(taskProposalFixture("windows", {
+      origins: ["https://example.com"],
+    })));
+    await answer("deny");
+    expect((await pending).text).toContain("denied");
+    expect(ops).toEqual([]);
+  });
+
   it("stages, validates and activates only after a person allows", async () => {
     const service = makeService();
     const pending = service.handle(bot, propose());
@@ -180,7 +213,7 @@ describe("propose", () => {
 
   it("refuses control-plane-owned fields in a model proposal", async () => {
     const service = makeService();
-    const attemptedBinding = taskProposalFixture(HOST_TASK_PLATFORM, { threadId: "another-thread" });
+    const attemptedBinding = taskProposalFixture("macos", { threadId: "another-thread" });
     const outcome = await service.handle(bot, propose(attemptedBinding));
     expect(outcome.status).toBe(409);
     expect(outcome.error).toMatch(/Invalid worker task proposal/);

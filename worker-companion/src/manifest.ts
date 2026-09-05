@@ -248,7 +248,6 @@ const DESKTOP_TOOLS = [
   "press_key",
   "hotkey",
   "set_value",
-  "wait",
   "bring_to_front",
 ];
 

@@ -18,6 +18,7 @@
 // and a command id. It still cannot name an executable, argv, path, policy or
 // capability document, which is the property the companion exists to hold.
 import { createHash } from "node:crypto";
+import { expectedDriverDigests, matchesDriverDigests } from "./driver-digests.ts";
 import {
   closeSync,
   constants,
@@ -330,6 +331,7 @@ async function awaitActiveCapability(
   platform: WorkerPlatform,
 ): Promise<void> {
   const socket = cuaSocket(platform);
+  const expected = expectedDriverDigests(capability, basePolicy, platform);
   await restartWorkerDaemon(platform);
   const deadline = Date.now() + READY_TIMEOUT_MS;
   let diagnostic = "";
@@ -338,9 +340,7 @@ async function awaitActiveCapability(
     diagnostic = `${status.stdout}\n${status.stderr}`.toLowerCase();
     if (
       status.code === 0 &&
-      diagnostic.includes(capability) &&
-      diagnostic.includes(basePolicy.toLowerCase()) &&
-      diagnostic.includes("bounded")
+      matchesDriverDigests(diagnostic, expected)
     ) return;
     if (Date.now() >= deadline) break;
     await new Promise((wait) => setTimeout(wait, 250));
@@ -357,6 +357,11 @@ export async function activateTask(
   platform: WorkerPlatform = workerPlatform(),
 ): Promise<Sha256Digest> {
   const { manifest, root } = validateTask(taskId, manifestSha256, platform);
+  // Also enforce the Windows desktop hold on the worker, so an older control
+  // plane cannot activate the driver that failed live application denial.
+  if (manifest.platform === "windows" && manifest.surface === "desktop") {
+    throw new Error("Windows desktop tasks are unavailable: CUA 0.20.0 failed application-boundary acceptance");
+  }
   if (Math.abs(now - issuedAt) > MAX_ISSUE_SKEW_MS) {
     throw new Error("task capability was issued too far from this worker's clock");
   }

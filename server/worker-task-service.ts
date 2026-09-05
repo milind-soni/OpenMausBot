@@ -60,6 +60,14 @@ import {
 /** Per artefact, so a large diff cannot flood a turn's context. */
 const MAX_ARTEFACT_CHARS = 64 * 1024;
 
+function assertTaskAdmission(manifest: WorkerTaskManifest): void {
+  // Live acceptance of the pinned Windows driver failed its application deny
+  // test. Do not mint desktop authority until a replacement passes that test.
+  if (manifest.platform === "windows" && manifest.surface === "desktop") {
+    throw new Error("Windows desktop tasks are unavailable: CUA 0.20.0 failed application-boundary acceptance");
+  }
+}
+
 const requestSchema = z.discriminatedUnion("op", [
   z.object({ op: z.literal("propose"), manifest: z.json() }),
   z.object({ op: z.literal("status") }),
@@ -284,6 +292,7 @@ export class WorkerTaskService {
     // value and never a live object carrying getters or a prototype.
     const document: JsonValue = parseJson(JSON.stringify(raw ?? null));
     const manifest = parseWorkerTaskProposal(document, worker, threadId, this.now());
+    assertTaskAdmission(manifest);
     const digest = workerTaskManifestDigest(manifest);
     this.deps.registry.register(manifest);
 
@@ -389,6 +398,7 @@ export class WorkerTaskService {
     const record = this.deps.registry.forThread(threadId);
     if (!record) throw new Error("no worker task has been proposed in this conversation");
     if (record.manifest.workerId !== worker.id) throw new Error("this task was approved for a different worker");
+    assertTaskAdmission(record.manifest);
     const live = this.deps.registry.approved(record.manifest.taskId, record.digest, this.now());
     if (!live) throw new Error("this task is no longer approved — propose it again");
     const activation = this.activations.get(live.manifest.taskId);

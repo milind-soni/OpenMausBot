@@ -132,3 +132,10 @@ describe.each(["windows", "macos"] as const)("%s CUA capability", (platform) => 
       .not.toBe(workerCuaCapabilityDigest(capability(platform, { surface: "browser", origins: ["https://a.example"] })));
   });
 });
+
+// Frozen from the official 0.20.0 Windows CLI. An unsupported tool makes the
+// entire bounded daemon fail to start, even when that tool is never called.
+it("uses only reviewed CUA 0.20.0 desktop tools", () => {
+  const reviewed = new Set(["bring_to_front", "click", "double_click", "drag", "end_session", "get_window_state", "hotkey", "launch_app", "list_windows", "press_key", "right_click", "scroll", "set_value", "start_session", "type_text"]);
+  expect(workerCuaToolsForSurface("desktop").filter((tool) => !reviewed.has(tool))).toEqual([]);
+});

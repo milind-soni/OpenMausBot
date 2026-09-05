@@ -14,6 +14,7 @@ import { taskManifestDigest } from "../src/manifest.ts";
 import { taskBaselineRoot, taskRoot, type WorkerPlatform } from "../src/platform.ts";
 import {
   fetchResults,
+  activateTask,
   isSafeStagedPath,
   MANIFEST_FILE,
   resolveInRoot,
@@ -225,6 +226,24 @@ describe("validate", () => {
 
   it("refuses when nothing is staged under that id", () => {
     expect(() => validateTask("never-staged", "a".repeat(64), PLATFORM)).toThrow(/no task is staged/);
+  });
+});
+
+describe("activation admission", () => {
+  it("refuses Windows desktop activation without touching the daemon or capability file", async () => {
+    const document = JSON.parse(workerTaskManifestJson(parsedManifest("windows", {
+      createdAt: NOW - 1_000,
+      expiresAt: NOW + 60 * 60_000,
+    }, workerFixture("windows"), NOW))) as JsonValue;
+    const input = new PassThrough();
+    const staged = stageTask(TASK_ID, input, "win32");
+    input.end(stagingStream(document, []));
+    await staged;
+    const capabilityPath = join(home, "OpenMausBot", "active-capabilities.yaml");
+    writeFileSync(capabilityPath, "parked sentinel");
+    await expect(activateTask(TASK_ID, taskManifestDigest(document), NOW, asDigest("a".repeat(64)), NOW, "win32"))
+      .rejects.toThrow(/Windows desktop tasks.*application-boundary acceptance/);
+    expect(readFileSync(capabilityPath, "utf8")).toBe("parked sentinel");
   });
 });
 

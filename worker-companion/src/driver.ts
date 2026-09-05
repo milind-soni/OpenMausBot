@@ -11,6 +11,7 @@ import type { ChildProcess } from "node:child_process";
 import { capabilityDigest, parkedCapability, writeActiveCapability } from "./capability.ts";
 import { childEnvironment, cuaSocket, workerPlatform, type WorkerPlatform } from "./platform.ts";
 import { asDigest, type Sha256Digest } from "./wire.ts";
+import { expectedDriverDigests, matchesDriverDigests } from "./driver-digests.ts";
 
 export const EXPECTED_DRIVER_VERSION = "0.20.0";
 const MAX_CAPTURE_BYTES = 1024 * 1024;
@@ -190,6 +191,7 @@ export async function resumeParkedWorker(expectedBasePolicySha256: Sha256Digest)
   writeActiveCapability(content);
   const parkedDigest = asDigest(capabilityDigest(content));
   const socket = cuaSocket();
+  const expected = expectedDriverDigests(parkedDigest, expectedBasePolicySha256, workerPlatform());
   await restartWorkerDaemon();
   const deadline = Date.now() + READY_TIMEOUT_MS;
   let diagnostic = "";
@@ -198,9 +200,7 @@ export async function resumeParkedWorker(expectedBasePolicySha256: Sha256Digest)
     diagnostic = `${status.stdout}\n${status.stderr}`.toLowerCase();
     if (
       status.code === 0 &&
-      diagnostic.includes(parkedDigest) &&
-      diagnostic.includes(expectedBasePolicySha256.toLowerCase()) &&
-      diagnostic.includes("bounded")
+      matchesDriverDigests(diagnostic, expected)
     ) return parkedDigest;
     await new Promise((wait) => setTimeout(wait, 250));
   }

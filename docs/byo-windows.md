@@ -11,6 +11,22 @@ window station, Windows UI Automation, registry, and named-pipe behavior this
 backend must verify. Use a real Windows installation in Parallels, VMware,
 UTM, another local hypervisor, or a physical PC.
 
+## Desktop admission hold
+
+Windows desktop tasks are currently unavailable. Live acceptance against the
+pinned official CUA Driver 0.20.0 failed the application restriction: an
+unapproved application launched, while a state read for an approved application's
+window was rejected. The control plane refuses these tasks before approval or
+staging, and the companion independently refuses desktop activation before
+changing the capability or starting the daemon. Healthy SSH, matching loaded
+hashes, and successful command/result transport do not lift this hold.
+
+Keep affected workers paused with their parked capability. Remove the hold only
+after a reviewed driver replacement passes the real allowed-application state,
+click and type checks and rejects unapproved applications and path escapes.
+The separate typed-browser surface is not covered by this desktop acceptance;
+it still needs its own live origin and profile tests before admission.
+
 ## Security model
 
 The operator owns the Windows installation and the macOS OpenSSH alias. The
@@ -137,8 +153,17 @@ The session must be `Active` or `Disc`, never Session 0. The status output must
 show bounded mode and hashes for the loaded policy and capability file. An
 unset policy variable means policy enforcement is disabled; OpenMausBot checks
 the loaded digest, not merely the file on disk. Readiness also requires the
-daemon's reported session ID to match an Explorer desktop owned by the SSH
-user; another user's interactive session cannot satisfy the gate.
+session ID of the actual named-pipe server process to match an Explorer desktop
+owned by the SSH user. The probe verifies both process owner SIDs with query-only
+Windows token handles; CUA 0.20.0 does not print a session ID, and WMI ownership
+queries can be unavailable to a non-administrator SSH token. Another user's
+interactive session cannot satisfy the gate.
+
+The registry pins the raw file SHA-256 values below. CUA 0.20.0 reports different
+loaded fingerprints: its policy hash includes a domain separator, filename and
+lengths, and its capability hash includes a versioned domain separator. The
+probe and companion verify the pinned file bytes before deriving and comparing
+these loaded fingerprints; do not replace registry pins with status hashes.
 
 Compute both stable digests and record them in the worker registry:
 
@@ -210,7 +235,8 @@ the profile's identity; the operator must verify that the selected native
 window is the dedicated **OpenMaus Windows Worker** profile during the transport
 spike and before each consequential browser task.
 
-Desktop tasks expose VS Code and File Explorer only. Chrome is not an allowed
+The intended desktop scope is VS Code and File Explorer only; desktop admission
+remains held as described above. Chrome is not an allowed
 application on that surface. A workflow that needs both must use two visible
 tasks/handoffs; it cannot combine the permissions in one manifest.
 

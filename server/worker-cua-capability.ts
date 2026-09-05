@@ -73,7 +73,6 @@ export const WORKER_DESKTOP_CUA_TOOLS = [
   "press_key",
   "hotkey",
   "set_value",
-  "wait",
   "bring_to_front",
 ] as const;
 
