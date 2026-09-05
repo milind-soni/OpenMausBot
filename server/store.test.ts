@@ -243,6 +243,33 @@ describe("Store", () => {
     expect(messages.at(-1)).toMatchObject({ role: "user", text: "hi there" });
   });
 
+  it("revokes an unconfirmed elevated approval grant before startup work", () => {
+    const store = new Store(selection);
+    const bot = store.createBot();
+    store.patchBot(bot.id, {
+      approvalMode: "full",
+      approvalGrant: {
+        requestId: "123e4567-e89b-42d3-a456-426614174000",
+        mode: "full",
+        phase: "confirmed",
+      },
+    });
+
+    const reloaded = new Store(selection);
+    expect(reloaded.bot(bot.id)).toMatchObject({
+      approvalMode: "ask",
+      autoApprove: false,
+    });
+    expect(reloaded.bot(bot.id)).not.toHaveProperty("approvalGrant");
+
+    const persisted: BotRecord[] = JSON.parse(readFileSync(join(DATA_DIR, "bots.json"), "utf8"));
+    expect(persisted.find((candidate) => candidate.id === bot.id)).toMatchObject({
+      approvalMode: "ask",
+      autoApprove: false,
+    });
+    expect(persisted.find((candidate) => candidate.id === bot.id)).not.toHaveProperty("approvalGrant");
+  });
+
   it("normalizes persisted cloud backends without changing valid or absent values", () => {
     const store = new Store(selection);
     const box = store.createBot();

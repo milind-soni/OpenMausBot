@@ -55,6 +55,12 @@ const bridge = {
     retry: () => ipcRenderer.invoke("companion-account:retry"),
     signOut: () => ipcRenderer.invoke("companion-account:sign-out"),
   },
+  /** Full/Custom and transitions out of Custom are deliberately unavailable
+   * through the loopback API. The local renderer applies those changes over
+   * the embedded server's private utilityProcess port. */
+  approvals: {
+    setMode: (botId, mode, options) => ipcRenderer.invoke("approvals:set-trusted-mode", botId, mode, options),
+  },
   localControl: {
     status: () => ipcRenderer.invoke("cua:linux-status"),
     enable: () => ipcRenderer.invoke("cua:linux-enable"),

@@ -25,6 +25,7 @@ posixOnly("mid-turn steering e2e", () => {
   let home: string;
   let stderr = "";
   let steerGate: string;
+  let steerFinishGate: string;
 
   const api = async (method: string, path: string, body?: unknown): Promise<{ status: number; body: any }> => {
     const res = await fetch(`${BASE}${path}`, {
@@ -49,11 +50,17 @@ posixOnly("mid-turn steering e2e", () => {
     home = mkdtempSync(join(tmpdir(), "omb-steer-"));
     mkdirSync(join(home, ".openmausbot"), { recursive: true });
     steerGate = join(home, "delayed-steer.gate");
+    steerFinishGate = join(home, "finish-steered-turn.gate");
     writeFileSync(
       join(home, ".openmausbot", "config.json"),
       JSON.stringify({
         instances: {
           claude: { driver: "claudeAgent", environment: { FAKE_CLAUDE_MODE: "slow" }, config: { cli: FAKE_CLAUDE, permissionMode: "bypassPermissions" } },
+          claudeSteer: {
+            driver: "claudeAgent",
+            environment: { FAKE_CLAUDE_MODE: "slow", FAKE_CLAUDE_SLOW_FINISH_GATE: steerFinishGate },
+            config: { cli: FAKE_CLAUDE, permissionMode: "bypassPermissions" },
+          },
           claudeRace: {
             driver: "claudeAgent",
             environment: { FAKE_CLAUDE_MODE: "slow", FAKE_CLAUDE_STEER_GATE: steerGate },
@@ -96,16 +103,22 @@ posixOnly("mid-turn steering e2e", () => {
   it(
     "a message during a Claude turn is steered into it: 202, in the transcript in order and marked, folded into the reply",
     async () => {
+      rmSync(steerFinishGate, { force: true });
       const created = (await api("POST", "/api/bots")).body.bot;
-      await api("PATCH", `/api/bots/${created.id}`, { modelSelection: { instanceId: "claude", model: "claude-fake" } });
+      await api("PATCH", `/api/bots/${created.id}`, { modelSelection: { instanceId: "claudeSteer", model: "claude-fake" } });
       const instances = (await api("GET", "/api/instances")).body.instances;
-      expect(instances.find((i: any) => i.instanceId === "claude").capabilities.queueing).toBe(true);
+      expect(instances.find((i: any) => i.instanceId === "claudeSteer").capabilities.queueing).toBe(true);
 
       expect((await api("POST", `/api/bots/${created.id}/messages`, { text: "first" })).status).toBe(202);
       await waitFor(async () => (await getBot(created.id)).busy === true, "the turn to start");
       // the fake pauses after its tool result; this lands inside that gap
       await waitFor(async () => (await getBot(created.id)).messages.some((m: any) => m.kind === "activity"), "the tool chip");
-      const second = await api("POST", `/api/bots/${created.id}/messages`, { text: "and also this" });
+      let second: Awaited<ReturnType<typeof api>>;
+      try {
+        second = await api("POST", `/api/bots/${created.id}/messages`, { text: "and also this" });
+      } finally {
+        writeFileSync(steerFinishGate, "finish");
+      }
       expect(second.status).toBe(202);
       expect(second.body.steered).toBe(true);
 

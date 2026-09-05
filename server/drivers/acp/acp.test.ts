@@ -165,7 +165,7 @@ describe("ACP decodeConfig", () => {
     expect(GrokAgentDriver.decodeConfig({ fullAuto: true }).fullAuto).toBe(true);
   });
 
-  it("does not advertise or accept local CUA in full-auto mode", async () => {
+  it("advertises per-bot local CUA but rejects legacy full-auto turns without a mode", async () => {
     const fullAuto = await GrokAgentDriver.create({
       instanceId: "grok-full-auto",
       displayName: "Grok Full Auto",
@@ -173,7 +173,7 @@ describe("ACP decodeConfig", () => {
       enabled: true,
       config: { cli: FAKE_CLI, fullAuto: true },
     });
-    expect(fullAuto.adapter.capabilities.localComputerMcp).toBe(false);
+    expect(fullAuto.adapter.capabilities.localComputerMcp).toBe(true);
     await expect(
       fullAuto.adapter.sendTurn({
         threadId: "t-full-auto-local",
@@ -627,6 +627,36 @@ describe("ACP turns (fake CLI)", () => {
     expect(done).toMatchObject({ ok: true });
   });
 
+  it("per-bot Ask surfaces permissions from a legacy full-auto instance", async () => {
+    process.env.FAKE_ACP_MODE = "permission";
+    const dump = join(scratch, "ask-permission-overrides-full-auto.json");
+    process.env.FAKE_ACP_DUMP = dump;
+    instance = await GrokAgentDriver.create({
+      instanceId: "grok-ask-override",
+      displayName: "Grok Ask Override",
+      environment: {},
+      enabled: true,
+      config: { cli: FAKE_CLI, fullAuto: true },
+    });
+    recorder = recordEvents(instance.adapter);
+
+    await instance.adapter.sendTurn({
+      threadId: "t-ask-permission-override",
+      text: "go",
+      approvalMode: "ask",
+    });
+    const opened = await recorder.until((e) => e.type === "request.opened");
+    const argv = JSON.parse(readFileSync(dump, "utf8")).argv as string[];
+    expect(argv[argv.indexOf("--permission-mode") + 1]).toBe("default");
+
+    await instance.adapter.respondToRequest(
+      "t-ask-permission-override",
+      (opened as { requestId: string }).requestId,
+      { behavior: "allow" },
+    );
+    await recorder.until((e) => e.type === "turn.completed");
+  });
+
   it("grok fails closed when the CLI advertises no cached_token (needs login)", async () => {
     await create(GrokAgentDriver, "no-auth");
     await instance.adapter.sendTurn({ threadId: "t-auth", text: "go" });
@@ -853,6 +883,28 @@ describe("ACP turns (fake CLI)", () => {
     await recorder.until((e) => e.type === "turn.completed");
 
     expect(JSON.parse(readFileSync(dump, "utf8")).env.TEST_POLICY).toBe("auto");
+  });
+
+  it("per-bot Ask overrides a legacy full-auto instance for the whole turn", async () => {
+    const dump = join(scratch, "ask-overrides-full-auto.json");
+    process.env.FAKE_ACP_DUMP = dump;
+    instance = await EnvPolicyDriver.create({
+      instanceId: "policy-override-test",
+      displayName: undefined,
+      environment: {},
+      enabled: true,
+      config: { cli: FAKE_CLI, fullAuto: true },
+    });
+    recorder = recordEvents(instance.adapter);
+
+    await instance.adapter.sendTurn({
+      threadId: "t-policy-override",
+      text: "go",
+      approvalMode: "ask",
+    });
+    await recorder.until((e) => e.type === "turn.completed");
+
+    expect(JSON.parse(readFileSync(dump, "utf8")).env.TEST_POLICY).toBe("ask");
   });
 
   it("declares effort levels for Grok only", async () => {

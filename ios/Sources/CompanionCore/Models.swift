@@ -247,6 +247,9 @@ public struct Bot: Codable, Hashable, Identifiable, Sendable {
     /// Desktop sidebar section. Missing or blank means the built-in Bots area.
     public var section: String?
     public var chiefOfStaff: Bool?
+    /// ask, auto, full, or custom. Missing on older harnesses; autoApprove
+    /// remains the compatibility mirror for older companion builds.
+    public var approvalMode: String?
     public var autoApprove: Bool?
     public var alwaysAllow: [String]?
     public var computer: String?

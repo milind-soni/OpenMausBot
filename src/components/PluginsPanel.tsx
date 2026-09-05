@@ -93,13 +93,14 @@ export type ConnectorInventoryPhase = "loading" | "ready" | "error";
 
 export function connectorActionLabel(
   phase: ConnectorInventoryPhase,
-  state: { busy: boolean; included: boolean; canContinue: boolean; hasAccounts: boolean; failed: boolean },
+  state: { busy: boolean; included: boolean; canContinue: boolean; pending?: boolean; hasAccounts: boolean; failed: boolean },
 ) {
   if (state.busy) return null;
   if (state.included) return "Included";
   if (phase === "loading") return "Checking…";
   if (phase === "error") return "Unavailable";
   if (state.canContinue) return "Continue";
+  if (state.pending) return "Check status";
   if (state.hasAccounts) return "Add account";
   if (state.failed) return "Retry";
   return "Connect";
@@ -635,7 +636,7 @@ export function PluginsPanel() {
               // pointless authorize. It ships included.
               const included = card.noAuth === true
                 || (serviceStatus?.connected === true && !accounts.length && !pending && !failed);
-              const addingAccount = aliasSlug === card.slug;
+              const addingAccount = aliasSlug === card.slug && !pending;
               const busy = busySlug === card.slug;
               const unavailableReason = managedConnectorUnavailableReason(mode, card.slug);
               return (
@@ -653,7 +654,9 @@ export function PluginsPanel() {
                       >
                         {unavailableReason ?? (
                           pending
-                            ? "Finish setup in your browser"
+                            ? pendingUrls[card.slug]
+                              ? "Finish setup in your browser"
+                              : "Finish setup in your browser, or disconnect the pending account below to start again"
                             : failed && !accounts.length
                               ? "Authorization expired — try again"
                               : card.blurb
@@ -665,9 +668,16 @@ export function PluginsPanel() {
                       disabled={!configured || inventoryPhase !== "ready" || busy || included || Boolean(unavailableReason)}
                       title={unavailableReason ?? undefined}
                       onClick={() => {
-                        if (pending && pendingUrls[card.slug]) {
-                          setError(null);
-                          void openConnectUrl(pendingUrls[card.slug]).catch((e) => setError(e.message));
+                        if (pending) {
+                          if (pendingUrls[card.slug]) {
+                            setError(null);
+                            void openConnectUrl(pendingUrls[card.slug]).catch((e) => setError(e.message));
+                          } else {
+                            setAliasSlug(null);
+                            setError(null);
+                            void refreshStatus([card.slug]);
+                            startPolling(card.slug);
+                          }
                         } else {
                           setAliasSlug((current) => current === card.slug ? null : card.slug);
                           setAliasDraft("");
@@ -684,6 +694,7 @@ export function PluginsPanel() {
                           busy,
                           included,
                           canContinue: Boolean(pending && pendingUrls[card.slug]),
+                          pending,
                           hasAccounts: accounts.length > 0,
                           failed: Boolean(failed),
                         })

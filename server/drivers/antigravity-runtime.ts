@@ -125,22 +125,29 @@ async function externalRuntime(candidate: string, source: "override" | "path"): 
 }
 
 /** Resolve an explicit official ACP binary, the pinned managed release, or an
- * official binary already on PATH. The old community `agy` default is treated
- * as "managed" so existing OpenMausBot configs migrate without edits. */
+ * official binary already on PATH. Legacy `agy` commands (including saved
+ * absolute paths and Windows shims) migrate without editing user config. */
 export async function resolveAntigravityRuntime(
   binaryPath?: string,
   env: NodeJS.ProcessEnv = process.env,
   baseDir = DATA_DIR,
 ): Promise<AntigravityRuntime> {
   const override = binaryPath?.trim();
+  const legacyCli = override !== undefined && /(?:^|[\\/])agy(?:\.(?:cmd|bat|exe|ps1))?$/iu.test(override);
   if (override && override !== "agy") {
     for (const candidate of pathCandidates(override, env)) {
       const found = await externalRuntime(candidate, "override");
       if (found) return found;
     }
-    throw new AntigravitySetupError(
-      "The custom Antigravity ACP executable or its localharness_external sibling is missing.",
-    );
+    // Older versions saved the detected agy path in engine settings. It is
+    // not an official ACP override: installing the new runtime must not leave
+    // discovery permanently stuck on that legacy command. A valid explicit
+    // ACP executable still wins above, regardless of its filename.
+    if (!legacyCli) {
+      throw new AntigravitySetupError(
+        "The custom Antigravity ACP executable or its localharness_external sibling is missing.",
+      );
+    }
   }
 
   const asset = resolveAntigravityReleaseAsset();
@@ -158,7 +165,9 @@ export async function resolveAntigravityRuntime(
       `Google does not publish an Antigravity runtime for ${process.platform}-${process.arch}. Set a custom executable path.`,
     );
   }
-  throw new AntigravitySetupError("Antigravity is not installed. Install the official Google runtime to continue.");
+  throw new AntigravitySetupError(legacyCli
+    ? "Antigravity now uses Google's official runtime. Choose Install official Antigravity, then Sign in with Google. Your previous agy login is not copied."
+    : "Antigravity is not installed. Install the official Google runtime to continue.");
 }
 
 interface PinnedZipEntry {

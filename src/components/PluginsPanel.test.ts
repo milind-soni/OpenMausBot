@@ -13,6 +13,18 @@ import {
 import { managedConnectorUnavailableReason } from "../../shared/connector-availability";
 
 describe("connected-app status races", () => {
+  it("offers status recovery for a pending authorization whose URL was lost on remount", () => {
+    for (const hasAccounts of [false, true]) {
+      expect(connectorActionLabel("ready", {
+        busy: false, included: false, pending: true, canContinue: false,
+        hasAccounts, failed: false,
+      })).toBe("Check status");
+      expect(connectorActionLabel("ready", {
+        busy: false, included: false, pending: true, canContinue: true,
+        hasAccounts, failed: false,
+      })).toBe("Continue");
+    }
+  });
   it("does not render a dead Twitter connect action for managed installs", () => {
     expect(managedConnectorUnavailableReason("managed", "twitter")).toMatch(/self-hosted/i);
     expect(managedConnectorUnavailableReason("self-hosted", "twitter")).toBeNull();

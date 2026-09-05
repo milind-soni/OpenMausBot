@@ -2,6 +2,7 @@ import { z } from "zod";
 
 import { parseJson } from "./schema.ts";
 import type { AutoVerdictSource } from "./auto-approve.ts";
+import type { ApprovalMode } from "../shared/approval-mode.ts";
 
 export type AutoReviewMode = "off" | "shadow" | "enforce";
 
@@ -22,6 +23,7 @@ export interface ReviewVerdict {
 export interface ReviewContext {
   source: AutoVerdictSource | undefined;
   mode: AutoReviewMode;
+  approvalMode: ApprovalMode;
   unattended: boolean;
   approvalScope: "local-computer" | undefined;
 }
@@ -36,6 +38,7 @@ export function resolveAutoReviewMode(stored: string | undefined): AutoReviewMod
 export function shouldReview(context: ReviewContext): boolean {
   return (
     context.mode !== "off" &&
+    context.approvalMode !== "custom" &&
     context.source === "no-grant" &&
     !context.unattended &&
     context.approvalScope === undefined

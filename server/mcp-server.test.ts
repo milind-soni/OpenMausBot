@@ -573,6 +573,17 @@ describe("connection security and discovery", () => {
     await expect(request("/api/health", {}, "https://maus.example.com")).rejects.toThrow("non-JSON response");
   });
 
+  it("explains how to authorize packaged write refusals", async () => {
+    globalThis.fetch = vi.fn(async () => jsonResponse(
+      { error: "desktop owner capability required" },
+      { ok: false, status: 403, statusText: "Forbidden" },
+    )) as any;
+    await expect(request("/api/bots/bot-1/messages", {
+      method: "POST",
+      body: JSON.stringify({ text: "hello" }),
+    }, "http://127.0.0.1:8799")).rejects.toThrow("paired session token");
+  });
+
   it("requires an explicit destination before sending a bearer token", async () => {
     process.env.OPENMAUSBOT_TOKEN = "proxy-token";
     await expect(resolveBaseUrl()).rejects.toThrow("OPENMAUSBOT_URL or OMB_PORT");

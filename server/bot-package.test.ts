@@ -25,6 +25,7 @@ const validPackage: any = {
         description: "Own the brief.",
         appearance: { color: "purple" },
         playbooks: ["source-check"],
+        approvalMode: "full",
         autoApprove: true,
       },
     ],
@@ -54,6 +55,7 @@ describe("bot packages", () => {
   it("parses the complete portable structure and strips authority fields", () => {
     const parsed = parseBotPackage(validPackage);
     expect(parsed.package.rooms![0]?.defaultResponder).toEqual({ kind: "agent", agent: "lead" });
+    expect(parsed.package.agents[0]).not.toHaveProperty("approvalMode");
     expect(parsed.package.agents[0]).not.toHaveProperty("autoApprove");
     expect(packageAgentAsMember(parsed.package.agents[0]!)).toEqual({
       key: "lead",
@@ -69,6 +71,7 @@ describe("bot packages", () => {
     expect(markdown).toContain("## Activation");
     expect(markdown).toContain("Give this file to your Chief of Staff");
     expect(markdown).not.toContain("autoApprove");
+    expect(markdown).not.toContain("approvalMode");
     expect(parseBotPackage(markdown).package).toMatchObject({
       id: "research-desk",
       chiefOfStaff: "lead",

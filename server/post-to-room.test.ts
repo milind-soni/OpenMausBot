@@ -23,6 +23,7 @@ import { freePortBlock } from "./testing/ports.ts";
 
 const SERVER_DIR = dirname(fileURLToPath(import.meta.url));
 const FAKE_CLAUDE_CLI = join(SERVER_DIR, "testing", "fake-claude-cli.ts");
+const TEST_CAPABILITY_KEY = "post-to-room-fixture-capability";
 
 let PORT = 0;
 let WEBHOOK_PORT = 0;
@@ -31,8 +32,6 @@ let child: ChildProcess;
 let home: string;
 let fakeClaudeDump = "";
 let stderr = "";
-/** The loopback bearer the agents proxy is handed for this boot. */
-let commsToken = "";
 
 interface ApiResult {
   status: number;
@@ -52,10 +51,22 @@ const api = async (method: string, path: string, body?: unknown): Promise<ApiRes
 };
 
 const internal = async (method: string, path: string, body?: unknown): Promise<ApiResult> => {
+  const url = new URL(path, BASE);
+  const claims = body && typeof body === "object" && !Array.isArray(body)
+    ? body as Record<string, unknown>
+    : {};
+  const botId = String(claims.fromBotId ?? claims.botId ?? url.searchParams.get("fromBotId") ?? url.searchParams.get("botId") ?? "");
+  const threadId = String(claims.fromThreadId ?? claims.threadId ?? url.searchParams.get("fromThreadId") ?? "");
+  const minted = await fetch(`${BASE}/api/testing/internal-capability`, {
+    method: "POST",
+    headers: { "content-type": "application/json", "x-openmausbot-test-capability": TEST_CAPABILITY_KEY },
+    body: JSON.stringify({ botId, threadId, kind: "agents", skillAuthoring: true }),
+  });
+  const { token } = await minted.json() as { token: string };
   const res = await fetch(`${BASE}${path}`, {
     method,
     headers: {
-      authorization: `Bearer ${commsToken}`,
+      authorization: `Bearer ${token}`,
       ...(body ? { "content-type": "application/json" } : {}),
     },
     body: body ? JSON.stringify(body) : undefined,
@@ -169,6 +180,7 @@ beforeAll(async () => {
       OMB_PORT: String(PORT),
       OMB_WEBHOOK_PORT: String(WEBHOOK_PORT),
       FAKE_CLAUDE_DUMP: fakeClaudeDump,
+      OMB_TEST_INTERNAL_CAPABILITY_KEY: TEST_CAPABILITY_KEY,
     },
     stdio: ["ignore", "pipe", "pipe"],
   });
@@ -184,23 +196,6 @@ beforeAll(async () => {
     await new Promise((wake) => setTimeout(wake, 150));
   }
 
-  // The loopback token is minted per boot and only ever handed to the agents
-  // proxy. One throwaway turn makes the fake CLI write the mcpConfig it was
-  // launched with, which is where these tests read it from.
-  const seed = await makeBot("Token Seed", "Seeds");
-  rmSync(fakeClaudeDump, { force: true });
-  expect((await api("POST", `/api/bots/${seed.id}/messages`, { text: "hello" })).status).toBe(202);
-  const dumpDeadline = Date.now() + 15_000;
-  while (!existsSync(fakeClaudeDump)) {
-    if (Date.now() > dumpDeadline) throw new Error(`the fake CLI never wrote its dump. stderr:\n${stderr}`);
-    await new Promise((wake) => setTimeout(wake, 100));
-  }
-  const dump: unknown = JSON.parse(readFileSync(fakeClaudeDump, "utf8"));
-  // SAFETY: the fake CLI writes the mcpConfig it received verbatim.
-  commsToken = str(field(dump as Record<string, unknown>, "mcpConfig", "mcpServers", "agents", "env", "OMB_COMMS_TOKEN"));
-  expect(commsToken).not.toBe("");
-  await api("POST", `/api/bots/${seed.id}/interrupt`);
-  await api("PATCH", `/api/bots/${seed.id}`, { hidden: true });
 }, 60_000);
 
 afterAll(async () => {

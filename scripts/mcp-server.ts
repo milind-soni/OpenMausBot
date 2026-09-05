@@ -68,6 +68,12 @@ async function fetchJson(url: string, options: RequestInit = {}): Promise<any> {
   });
   if (!response.ok) {
     const text = await response.text().catch(() => "");
+    if (response.status === 403 && !process.env.OPENMAUSBOT_TOKEN?.trim()) {
+      throw new Error(
+        "OpenMausBot refused this write because the installed desktop app requires a paired session token. " +
+        "Set OPENMAUSBOT_TOKEN as described in docs/mcp-server.md.",
+      );
+    }
     throw new Error(`OpenMausBot API error (${response.status}): ${text || response.statusText}`);
   }
   try {

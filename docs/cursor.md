@@ -43,9 +43,12 @@ and the turn continues.
 
 ## Autonomy
 
-Instance `fullAuto: true` adds `--force` (the CLI's documented auto-approve
-switch). OpenMausBot still answers ACP `session/request_permission` itself:
-full-auto selects an allow option when the CLI offered one.
+For compatibility with direct driver embedders, an instance `fullAuto: true`
+adds `--force` (the CLI's documented auto-approve switch) only when a turn
+does not provide a bot approval level. OpenMausBot app turns always provide
+one: both **Ask for approval** and **Approve for me** launch Cursor without
+`--force`, then OpenMausBot handles its permission requests according to the
+bot's current level.
 
 ## What this driver does not do yet
 

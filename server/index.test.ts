@@ -39,6 +39,25 @@ const PORT = 18800 + Math.floor(Math.random() * 10_000);
 const BASE = `http://127.0.0.1:${PORT}`;
 const WEBHOOK_PORT = 39000 + Math.floor(Math.random() * 10_000);
 const WEBHOOK_BASE = `http://127.0.0.1:${WEBHOOK_PORT}`;
+const TEST_CAPABILITY_KEY = "index-fixture-internal-capability";
+
+async function mintTestCapability(
+  baseUrl: string,
+  botId: string,
+  threadId: string,
+  options: { kind?: "agents" | "connectors" | "computer"; skillAuthoring?: boolean } = {},
+): Promise<string> {
+  const response = await fetch(`${baseUrl}/api/testing/internal-capability`, {
+    method: "POST",
+    headers: {
+      "content-type": "application/json",
+      "x-openmausbot-test-capability": TEST_CAPABILITY_KEY,
+    },
+    body: JSON.stringify({ botId, threadId, kind: options.kind ?? "agents", skillAuthoring: options.skillAuthoring ?? false }),
+  });
+  expect(response.status).toBe(201);
+  return ((await response.json()) as { token: string }).token;
+}
 
 const PHONE_SECRET_TEST_IDENTITY = {
   type: "openmausbot:phone-secret-key",
@@ -186,7 +205,12 @@ const api = async (method: string, path: string, body?: unknown): Promise<{ stat
 
 /** Wait until the server accepts the headers, then let the test complete
  * the body only after another request changes the conversation's state. */
-const delayedJsonBody = async (method: string, path: string, body: unknown) => {
+const delayedJsonBody = async (
+  method: string,
+  path: string,
+  body: unknown,
+  headers: Record<string, string> = {},
+) => {
   const raw = JSON.stringify(body);
   const req = request(`${BASE}${path}`, {
     method,
@@ -194,6 +218,7 @@ const delayedJsonBody = async (method: string, path: string, body: unknown) => {
       "content-type": "application/json",
       "content-length": Buffer.byteLength(raw),
       expect: "100-continue",
+      ...headers,
     },
   });
   const response = new Promise<{ status: number; body: any }>((resolve, reject) => {
@@ -322,6 +347,10 @@ beforeAll(async () => {
       instances: {
         ghost: { driver: "not-a-real-driver", displayName: "Ghost" },
         claude: { driver: "claudeAgent", displayName: "Fixture Claude", config: { cli: FAKE_CLAUDE_CLI } },
+        // Keep a known Codex target in the registry so approval-mode route
+        // tests exercise the trusted desktop boundary, while an intentionally
+        // missing CLI keeps it out of the default available-model selection.
+        codex: { driver: "codex", displayName: "Fixture Codex", config: { cli: join(home, "missing-codex") } },
       },
     }),
   );
@@ -778,6 +807,7 @@ beforeAll(async () => {
       OMB_SSE_HEARTBEAT_MS: "50",
       FAKE_CLAUDE_MODE: "hang",
       FAKE_CLAUDE_DUMP: fakeClaudeDump,
+      OMB_TEST_INTERNAL_CAPABILITY_KEY: TEST_CAPABILITY_KEY,
     },
     stdio: ["ignore", "pipe", "pipe"],
   });
@@ -1441,16 +1471,14 @@ describe("harness HTTP API", () => {
           }),
         }),
       }).parse(await readJsonFileWhenReady(fakeClaudeDump));
-      const internalHeaders = {
-        authorization: `Bearer ${dump.mcpConfig.mcpServers.agents.env.OMB_COMMS_TOKEN}`,
-        "content-type": "application/json",
-      };
+      expect(dump.mcpConfig.mcpServers.agents.env.OMB_COMMS_TOKEN).toMatch(/^[a-f0-9]{48}$/);
       expect((await api("POST", `/api/bots/${chief.id}/interrupt`)).status).toBe(200);
 
       const createOperator = async (fromThreadId: string, name: string, fromBotId = chief.id) => {
+        const token = await mintTestCapability(BASE, fromBotId, fromThreadId);
         const response = await fetch(`${BASE}/api/internal/create-bot`, {
           method: "POST",
-          headers: internalHeaders,
+          headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
           body: JSON.stringify({
             fromBotId,
             fromThreadId,
@@ -1508,6 +1536,48 @@ describe("harness HTTP API", () => {
       for (const botId of createdBotIds) await api("DELETE", `/api/bots/${botId}`);
       await api("DELETE", `/api/bots/${outsider.id}`);
       await api("DELETE", `/api/bots/${chief.id}`);
+    }
+  });
+
+  it("rejects a slow internal mutation when its bot is deleted before the body arrives", async () => {
+    const chief = (await api("POST", "/api/bots")).body.bot;
+    const lateName = `Late operator ${chief.id}`;
+    let held: Awaited<ReturnType<typeof delayedJsonBody>> | undefined;
+    let deleted = false;
+    try {
+      expect((await api("PATCH", `/api/bots/${chief.id}`, {
+        chiefOfStaff: true,
+      })).status).toBe(200);
+      const token = await mintTestCapability(BASE, chief.id, chief.threadId);
+      held = await delayedJsonBody(
+        "POST",
+        "/api/internal/create-bot",
+        {
+          fromBotId: chief.id,
+          fromThreadId: chief.threadId,
+          name: lateName,
+          role: "Late operator",
+          instructions: "This mutation must never be committed.",
+        },
+        { authorization: `Bearer ${token}` },
+      );
+
+      const removed = await api("DELETE", `/api/bots/${chief.id}`);
+      expect(removed.status).toBe(200);
+      deleted = true;
+
+      const rejected = await held.finish();
+      expect(rejected.status).toBe(401);
+      expect(rejected.body.error).toMatch(/expired/i);
+      const state = (await api("GET", "/api/bots?messages=0")).body;
+      expect(state.bots.some((bot: { name: string }) => bot.name === lateName)).toBe(false);
+    } finally {
+      held?.close();
+      const state = (await api("GET", "/api/bots?messages=0")).body;
+      for (const bot of state.bots.filter((candidate: { name: string }) => candidate.name === lateName)) {
+        await api("DELETE", `/api/bots/${bot.id}`);
+      }
+      if (!deleted) await api("DELETE", `/api/bots/${chief.id}`);
     }
   });
 
@@ -2941,6 +3011,112 @@ describe("harness HTTP API", () => {
     }
   });
 
+  it("keeps Full and Custom bots on Codex when the paired model route changes providers", async () => {
+    const isolatedHome = mkdtempSync(join(tmpdir(), "omb-trusted-mode-model-"));
+    const isolatedData = join(isolatedHome, ".openmausbot");
+    const isolatedStatic = join(isolatedHome, "static");
+    const isolatedPort = await freePortBlock([0, 1]);
+    mkdirSync(join(isolatedStatic, "assets"), { recursive: true });
+    mkdirSync(isolatedData, { recursive: true });
+    writeFileSync(join(isolatedStatic, "index.html"), "<!doctype html><title>Trusted mode model test</title>");
+    writeFileSync(join(isolatedStatic, "assets", "smoke.css"), "body{}");
+    writeFileSync(join(isolatedData, "config.json"), JSON.stringify({
+      instances: {
+        codex: { driver: "codex", displayName: "Fixture Codex", config: { cli: join(isolatedHome, "missing-codex") } },
+        claude: { driver: "claudeAgent", displayName: "Fixture Claude", config: { cli: FAKE_CLAUDE_CLI } },
+      },
+    }));
+    const trustedBots = (["full", "custom"] as const).map((approvalMode, index) => ({
+      id: `${approvalMode}-model-guard`,
+      threadId: `${approvalMode}-model-thread`,
+      name: `${approvalMode} model guard`,
+      title: "",
+      description: "",
+      notifications: true,
+      color: "blue",
+      unread: false,
+      modelSelection: { instanceId: "codex", model: "fixture-codex-model" },
+      resumeCursors: {},
+      createdAt: index + 1,
+      approvalMode,
+      autoApprove: false,
+    }));
+    writeFileSync(join(isolatedData, "bots.json"), JSON.stringify(trustedBots));
+
+    let isolatedStderr = "";
+    const isolatedChild = spawn(process.execPath, [join(SERVER_DIR, "index.ts")], {
+      cwd: ROOT,
+      env: {
+        ...(process.env.PATH ? { PATH: process.env.PATH } : {}),
+        ...(process.env.PATHEXT ? { PATHEXT: process.env.PATHEXT } : {}),
+        ...(process.env.SystemRoot ? { SystemRoot: process.env.SystemRoot } : {}),
+        HOME: isolatedHome,
+        USERPROFILE: isolatedHome,
+        OMB_PORT: String(isolatedPort),
+        OMB_WEBHOOK_PORT: String(isolatedPort + 1),
+        OMB_STATIC_DIR: isolatedStatic,
+        FAKE_CLAUDE_MODE: "hang",
+        FAKE_CLAUDE_DUMP: join(isolatedHome, "fake-claude-dump.json"),
+      },
+      stdio: ["ignore", "pipe", "pipe"],
+    });
+    isolatedChild.stderr!.on("data", (chunk) => (isolatedStderr += chunk));
+    const isolatedApi = async (method: string, path: string, body?: unknown): Promise<{
+      status: number;
+      body: any;
+    }> => {
+      const response = await fetch(`http://127.0.0.1:${isolatedPort}${path}`, {
+        method,
+        headers: body ? { "content-type": "application/json" } : undefined,
+        body: body ? JSON.stringify(body) : undefined,
+      });
+      return { status: response.status, body: await response.json() };
+    };
+
+    try {
+      await waitForIsolatedServer(isolatedChild, isolatedPort, () => isolatedStderr);
+      const instances = (await isolatedApi("GET", "/api/instances")).body.instances;
+      const claude = instances.find((instance: { instanceId: string }) => instance.instanceId === "claude");
+      const targetSelection = { instanceId: claude.instanceId, model: claude.models.default };
+
+      for (const seeded of trustedBots) {
+        const rejected = await isolatedApi("PATCH", `/api/bots/${seeded.id}/model`, targetSelection);
+        expect(rejected.status, seeded.approvalMode).toBe(400);
+        expect(rejected.body.error).toMatch(/requires a Codex provider.*Ask or Auto first/i);
+        const unchanged = (await isolatedApi("GET", "/api/bots?messages=0")).body.bots.find(
+          (candidate: { id: string }) => candidate.id === seeded.id,
+        );
+        expect(unchanged).toMatchObject({
+          approvalMode: seeded.approvalMode,
+          modelSelection: seeded.modelSelection,
+        });
+      }
+
+      // A loopback-capable bot must not escape a restrictive Custom config
+      // by changing another idle bot to Ask/Auto. Leaving Custom is a trusted
+      // desktop transition just like entering it.
+      const custom = trustedBots.find((candidate) => candidate.approvalMode === "custom")!;
+      for (const body of [
+        { approvalMode: "ask" },
+        { approvalMode: "auto" },
+        { autoApprove: false },
+        { autoApprove: true },
+      ]) {
+        const rejected = await isolatedApi("PATCH", `/api/bots/${custom.id}`, body);
+        expect(rejected.status, JSON.stringify(body)).toBe(403);
+        expect(rejected.body.error).toMatch(/packaged desktop app/i);
+      }
+      const stillCustom = (await isolatedApi("GET", "/api/bots?messages=0")).body.bots.find(
+        (candidate: { id: string }) => candidate.id === custom.id,
+      );
+      expect(stillCustom).toMatchObject({ approvalMode: "custom", autoApprove: false });
+    } finally {
+      await waitForExit(isolatedChild, { signal: "SIGTERM" });
+      await removeTempDir(isolatedHome);
+    }
+    expectStoppedTestServerCleanly(isolatedChild, isolatedStderr);
+  }, 30_000);
+
   it("exports every visible bot and imports the team without creating a room", async () => {
     const first = (await api("POST", "/api/bots")).body.bot;
     const second = (await api("POST", "/api/bots")).body.bot;
@@ -3687,6 +3863,7 @@ describe("harness HTTP API", () => {
           OMB_STATIC_DIR: isolatedStatic,
           FAKE_CLAUDE_MODE: "hang",
           FAKE_CLAUDE_DUMP: isolatedDump,
+          OMB_TEST_INTERNAL_CAPABILITY_KEY: TEST_CAPABILITY_KEY,
         },
         stdio: ["ignore", "pipe", "pipe"],
       },
@@ -3704,10 +3881,10 @@ describe("harness HTTP API", () => {
       return { status: response.status, body: await response.json() };
     };
     const requestCredential = async (
-      token: string,
       botId: string,
       threadId: string,
     ): Promise<{ messageId: string }> => {
+      const token = await mintTestCapability(`http://127.0.0.1:${isolatedPort}`, botId, threadId);
       const response = await fetch(`http://127.0.0.1:${isolatedPort}/api/internal/request-credential`, {
         method: "POST",
         headers: {
@@ -3763,17 +3940,14 @@ describe("harness HTTP API", () => {
         `/api/bots/${direct.id}/messages`,
         { text: "request a private key" },
       )).status).toBe(202);
-      const dump = await readJsonFileWhenReady<{
-        mcpConfig: { mcpServers: { agents: { env: { OMB_COMMS_TOKEN: string } } } };
-      }>(isolatedDump);
-      const token = dump.mcpConfig.mcpServers.agents.env.OMB_COMMS_TOKEN;
-      const directRequest = await requestCredential(token, direct.id, directOriginalThread);
+      await readJsonFileWhenReady(isolatedDump);
+      const directRequest = await requestCredential(direct.id, directOriginalThread);
       expect((await isolatedApi("POST", `/api/bots/${direct.id}/interrupt`, {})).status).toBe(200);
       await expect.poll(async () => {
         const state = (await isolatedApi("GET", "/api/bots?messages=0")).body;
         return state.bots.find((bot: { id: string }) => bot.id === direct.id)?.busy;
       }).toBe(false);
-      const groupRequest = await requestCredential(token, channelOwner.id, groupOriginalThread);
+      const groupRequest = await requestCredential(channelOwner.id, groupOriginalThread);
 
       const state = (await isolatedApi("GET", "/api/bots?messages=20")).body;
       const directState = state.bots.find((bot: { id: string }) => bot.id === direct.id);
@@ -4316,6 +4490,113 @@ describe("harness HTTP API", () => {
     const back = await api("PATCH", `/api/bots/${bot.id}`, { computer: "local" });
     expect(back.status).toBe(400);
     await api("DELETE", `/api/bots/${bot.id}`);
+  });
+
+  it("stores safe approval levels and refuses trusted modes over HTTP", async () => {
+    const bot = (await api("POST", "/api/bots", {
+      modelSelection: { instanceId: "codex", model: "fixture-codex-model" },
+    })).body.bot;
+    try {
+      for (const approvalMode of ["automatic", "unsafe", true, null]) {
+        const invalid = await api("PATCH", `/api/bots/${bot.id}`, { approvalMode });
+        expect(invalid.status, String(approvalMode)).toBe(400);
+      }
+
+      const auto = await api("PATCH", `/api/bots/${bot.id}`, { approvalMode: "auto" });
+      expect(auto.status).toBe(200);
+      expect(auto.body.bot).toMatchObject({ approvalMode: "auto", autoApprove: true });
+      const ask = await api("PATCH", `/api/bots/${bot.id}`, { approvalMode: "ask" });
+      expect(ask.status).toBe(200);
+      expect(ask.body.bot).toMatchObject({ approvalMode: "ask", autoApprove: false });
+
+      // Both modes are equivalent to native Codex configuration grants. A
+      // tool can call this loopback route, so even a forged renderer-only
+      // acknowledgement must not cross the trusted desktop boundary.
+      for (const approvalMode of ["full", "custom"]) {
+        for (const body of [
+          { approvalMode },
+          { approvalMode, acknowledgeFullAccess: true },
+        ]) {
+          const rejected = await api("PATCH", `/api/bots/${bot.id}`, body);
+          expect(rejected.status, JSON.stringify(body)).toBe(403);
+          expect(rejected.body.error).toMatch(/desktop app/i);
+        }
+      }
+
+      const stored = (await api("GET", "/api/bots")).body.bots.find(
+        (candidate: { id: string }) => candidate.id === bot.id,
+      );
+      expect(stored).toMatchObject({ approvalMode: "ask", autoApprove: false });
+    } finally {
+      await api("DELETE", `/api/bots/${bot.id}`);
+    }
+  });
+
+  it("does not offer Full or Custom approval modes to non-Codex bots", async () => {
+    const bot = (await api("POST", "/api/bots", {
+      modelSelection: { instanceId: "claude", model: "fixture-claude-model" },
+    })).body.bot;
+    try {
+      for (const approvalMode of ["full", "custom"]) {
+        const rejected = await api("PATCH", `/api/bots/${bot.id}`, {
+          approvalMode,
+          acknowledgeFullAccess: true,
+        });
+        expect(rejected.status, approvalMode).toBe(400);
+        expect(rejected.body.error).toMatch(/only for Codex/i);
+      }
+      const stored = (await api("GET", "/api/bots")).body.bots.find(
+        (candidate: { id: string }) => candidate.id === bot.id,
+      );
+      expect(stored.approvalMode).toBeUndefined();
+    } finally {
+      await api("DELETE", `/api/bots/${bot.id}`);
+    }
+  });
+
+  it("maps legacy autoApprove PATCHes to safe Auto or Ask", async () => {
+    const bot = (await api("POST", "/api/bots")).body.bot;
+    const auto = await api("PATCH", `/api/bots/${bot.id}`, { autoApprove: true });
+    expect(auto.status).toBe(200);
+    expect(auto.body.bot).toMatchObject({ approvalMode: "auto", autoApprove: true });
+
+    const ask = await api("PATCH", `/api/bots/${bot.id}`, { autoApprove: false });
+    expect(ask.status).toBe(200);
+    expect(ask.body.bot).toMatchObject({ approvalMode: "ask", autoApprove: false });
+    await api("DELETE", `/api/bots/${bot.id}`);
+  });
+
+  it("refuses approval-level changes while a bot is working", async () => {
+    const instances = (await api("GET", "/api/instances")).body.instances;
+    const claude = instances.find((instance: { instanceId: string }) => instance.instanceId === "claude");
+    const bot = (await api("POST", "/api/bots", {
+      modelSelection: { instanceId: claude.instanceId, model: claude.models.default },
+      approvalMode: "ask",
+    })).body.bot;
+    try {
+      expect((await api("POST", `/api/bots/${bot.id}/messages`, { text: "keep working" })).status).toBe(202);
+      await expect.poll(async () => {
+        const state = (await api("GET", "/api/bots?messages=0")).body;
+        return state.bots.find((candidate: { id: string }) => candidate.id === bot.id)?.busy;
+      }, { timeout: 5_000 }).toBe(true);
+
+      const blocked = await api("PATCH", `/api/bots/${bot.id}`, { approvalMode: "auto" });
+      expect(blocked.status).toBe(409);
+      expect(blocked.body.error).toMatch(/stop this bot's turn before changing its approval level/i);
+      const stored = (await api("GET", "/api/bots?messages=0")).body.bots.find(
+        (candidate: { id: string }) => candidate.id === bot.id,
+      );
+      expect(stored.busy).toBe(true);
+      expect(stored).not.toHaveProperty("approvalMode");
+      expect(stored).not.toHaveProperty("autoApprove");
+    } finally {
+      await api("POST", `/api/bots/${bot.id}/interrupt`, {}).catch(() => undefined);
+      await expect.poll(async () => {
+        const state = (await api("GET", "/api/bots?messages=0")).body;
+        return state.bots.find((candidate: { id: string }) => candidate.id === bot.id)?.busy;
+      }, { timeout: 5_000 }).toBeFalsy();
+      await api("DELETE", `/api/bots/${bot.id}`).catch(() => undefined);
+    }
   });
 
   it("stores only known approval-review modes", async () => {
@@ -6128,8 +6409,8 @@ describe("harness HTTP API", () => {
         pid: number;
         mcpConfig: { mcpServers: { agents: { env: { OMB_COMMS_TOKEN: string } } } };
       }>(fakeClaudeDump);
-      const token = firstDump.mcpConfig.mcpServers.agents.env.OMB_COMMS_TOKEN;
-      expect(token).toMatch(/^[a-f0-9]{48}$/);
+      expect(firstDump.mcpConfig.mcpServers.agents.env.OMB_COMMS_TOKEN).toMatch(/^[a-f0-9]{48}$/);
+      const token = await mintTestCapability(BASE, second.id, room.threadId);
 
       const requested = await fetch(`${BASE}/api/internal/request-credential`, {
         method: "POST",
@@ -6238,13 +6519,13 @@ describe("harness HTTP API", () => {
       const dump = await readJsonFileWhenReady<{
         mcpConfig: { mcpServers: { agents: { env: { OMB_COMMS_TOKEN: string } } } };
       }>(fakeClaudeDump);
-      const token = dump.mcpConfig.mcpServers.agents.env.OMB_COMMS_TOKEN;
-      expect(token).toMatch(/^[a-f0-9]{48}$/);
+      expect(dump.mcpConfig.mcpServers.agents.env.OMB_COMMS_TOKEN).toMatch(/^[a-f0-9]{48}$/);
       expect((await api("POST", `/api/bots/${bot.id}/interrupt`)).status).toBe(200);
       await expect.poll(async () => {
         const state = (await api("GET", "/api/bots")).body;
         return state.bots.find((candidate: { id: string }) => candidate.id === bot.id)?.busy;
       }, { timeout: 5_000 }).toBe(false);
+      const token = await mintTestCapability(BASE, bot.id, bot.threadId);
       const internalHeaders = {
         authorization: `Bearer ${token}`,
         "content-type": "application/json",
@@ -6455,9 +6736,14 @@ describe("harness HTTP API", () => {
           .find((candidate: { id: string }) => candidate.id === bot.id);
         expect(afterSeen.unread).toBe(false);
 
+        const refreshedToken = await mintTestCapability(BASE, bot.id, bot.threadId);
+        const refreshedHeaders = {
+          authorization: `Bearer ${refreshedToken}`,
+          "content-type": "application/json",
+        };
         const grounded = await fetch(
           `${BASE}/api/internal/routines?fromBotId=${encodeURIComponent(bot.id)}&fromThreadId=${encodeURIComponent(bot.threadId)}`,
-          { headers: internalHeaders },
+          { headers: refreshedHeaders },
         );
         const groundedBody = z.object({
           routines: z.array(z.object({
@@ -6492,9 +6778,14 @@ describe("harness HTTP API", () => {
       const orphanThreadId = z.object({
         task: z.object({ threadId: z.string() }),
       }).parse(orphanSource.body).task.threadId;
+      const orphanToken = await mintTestCapability(BASE, bot.id, orphanThreadId);
+      const orphanHeaders = {
+        authorization: `Bearer ${orphanToken}`,
+        "content-type": "application/json",
+      };
       const orphanProposalResponse = await fetch(`${BASE}/api/internal/routine-requests`, {
         method: "POST",
-        headers: internalHeaders,
+        headers: orphanHeaders,
         body: JSON.stringify({
           fromBotId: bot.id,
           fromThreadId: orphanThreadId,
@@ -6540,9 +6831,14 @@ describe("harness HTTP API", () => {
         schedule: { type: "daily", time: "10:00", weekdays: [1] },
       });
       legacyRoutineId = legacy.body.routine.id;
+      const finalToken = await mintTestCapability(BASE, bot.id, bot.threadId);
+      const finalHeaders = {
+        authorization: `Bearer ${finalToken}`,
+        "content-type": "application/json",
+      };
       const listed = await fetch(
         `${BASE}/api/internal/routines?fromBotId=${encodeURIComponent(bot.id)}&fromThreadId=${encodeURIComponent(bot.threadId)}`,
-        { headers: internalHeaders },
+        { headers: finalHeaders },
       );
       expect(listed.status).toBe(200);
       const listedBody = z.object({
@@ -6560,7 +6856,7 @@ describe("harness HTTP API", () => {
 
       const wrongThread = await fetch(`${BASE}/api/internal/routine-requests`, {
         method: "POST",
-        headers: internalHeaders,
+        headers: finalHeaders,
         body: JSON.stringify({
           fromBotId: bot.id,
           fromThreadId: "not-this-bots-thread",
@@ -6591,8 +6887,8 @@ describe("harness HTTP API", () => {
       const dump = await readJsonFileWhenReady<{
         mcpConfig: { mcpServers: { agents: { env: { OMB_COMMS_TOKEN: string } } } };
       }>(fakeClaudeDump);
-      const token = dump.mcpConfig.mcpServers.agents.env.OMB_COMMS_TOKEN;
-      expect(token).toMatch(/^[a-f0-9]{48}$/);
+      expect(dump.mcpConfig.mcpServers.agents.env.OMB_COMMS_TOKEN).toMatch(/^[a-f0-9]{48}$/);
+      const token = await mintTestCapability(BASE, bot.id, bot.threadId, { skillAuthoring: true });
       const internalHeaders = {
         authorization: `Bearer ${token}`,
         "content-type": "application/json",
@@ -6806,9 +7102,10 @@ describe("harness HTTP API", () => {
       const nextThreadId = nextTask.body.task.threadId as string;
       expect((await api("DELETE", `/api/bots/${bot.id}/tasks/${bot.threadId}`)).status).toBe(200);
 
+      const nextToken = await mintTestCapability(BASE, bot.id, nextThreadId, { skillAuthoring: true });
       const listing = await fetch(
         `${BASE}/api/internal/skills?fromBotId=${encodeURIComponent(bot.id)}&fromThreadId=${encodeURIComponent(nextThreadId)}`,
-        { headers: internalHeaders },
+        { headers: { authorization: `Bearer ${nextToken}` } },
       );
       expect(listing.status).toBe(200);
       const inventory = await listing.json() as {
@@ -6894,6 +7191,29 @@ describe("harness HTTP API", () => {
     // override must keep Composio configured until the next app launch.
     expect((await api("PUT", "/api/config", { profile: { name: "Grace" } })).status).toBe(200);
     expect((await api("GET", "/api/config")).body.composio).toEqual({ configured: true, mode: "self-hosted" });
+  });
+
+  it("does not relay a slow connector request after Connected Apps is disabled", async () => {
+    const bot = (await api("POST", "/api/bots")).body.bot;
+    let held: Awaited<ReturnType<typeof delayedJsonBody>> | undefined;
+    try {
+      expect((await api("PATCH", `/api/bots/${bot.id}`, { composio: true })).status).toBe(200);
+      const token = await mintTestCapability(BASE, bot.id, bot.threadId, { kind: "connectors" });
+      held = await delayedJsonBody(
+        "POST",
+        "/api/internal/connectors/mcp",
+        { jsonrpc: "2.0", id: 1, method: "tools/list", params: {} },
+        { authorization: `Bearer ${token}` },
+      );
+
+      expect((await api("PATCH", `/api/bots/${bot.id}`, { composio: false })).status).toBe(200);
+      const rejected = await held.finish();
+      expect(rejected.status).toBe(403);
+      expect(rejected.body.error).toMatch(/connected apps are not enabled/i);
+    } finally {
+      held?.close();
+      await api("DELETE", `/api/bots/${bot.id}`);
+    }
   });
 
   it.skipIf(process.platform === "win32")("stores the credentials file with owner-only permissions", () => {

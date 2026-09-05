@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { activateExistingWindow } from "./single-instance.mjs";
+import { activateExistingWindow, releaseSingleInstanceLock } from "./single-instance.mjs";
 
 function fakeWindow({ destroyed = false, minimized = false, focused = false } = {}) {
   const calls = [];
@@ -49,4 +49,36 @@ test("reports failure when no window can be activated", () => {
   assert.equal(activateExistingWindow([]), false);
   assert.equal(activateExistingWindow([dead]), false);
   assert.deepEqual(dead.calls, []);
+});
+
+function fakeApp({ holdsLock = true } = {}) {
+  const calls = [];
+  let held = holdsLock;
+  return {
+    calls,
+    hasSingleInstanceLock: () => held,
+    releaseSingleInstanceLock: () => {
+      held = false;
+      calls.push("releaseSingleInstanceLock");
+    },
+  };
+}
+
+test("releases a held single-instance lock for an update relaunch", () => {
+  const app = fakeApp();
+  assert.equal(releaseSingleInstanceLock(app), true);
+  assert.deepEqual(app.calls, ["releaseSingleInstanceLock"]);
+});
+
+test("stays a no-op when the lock is not held", () => {
+  const app = fakeApp({ holdsLock: false });
+  assert.equal(releaseSingleInstanceLock(app), false);
+  assert.deepEqual(app.calls, []);
+});
+
+test("releases the lock only once when the update signal fires twice", () => {
+  const app = fakeApp();
+  assert.equal(releaseSingleInstanceLock(app), true);
+  assert.equal(releaseSingleInstanceLock(app), false);
+  assert.deepEqual(app.calls, ["releaseSingleInstanceLock"]);
 });

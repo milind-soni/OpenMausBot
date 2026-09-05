@@ -55,6 +55,7 @@ import {
   writeComputerPanelView,
   type ComputerPanelView,
 } from "@/lib/computer-panel-view";
+import { approvalModeFor } from "../../shared/approval-mode";
 
 interface VpsComputerStatus {
   configured: boolean;
@@ -191,7 +192,7 @@ export function ComputerPanel({
   const isLinux = capabilities.host.platform === "linux";
   const providerSupportsLocal = instanceSupportsLocalComputer(state.instances, bot);
   const localSelectable = localComputerSelectable({ capabilities, providerSupportsLocal });
-  const [localAutoWarning, setLocalAutoWarning] = useState(false);
+  const [localAutoWarningTarget, setLocalAutoWarningTarget] = useState<string | null>(null);
   const localDisabledReason = localComputerDisabledReason({ capabilities, providerSupportsLocal });
   const [phase, setPhase] = useState<Phase>("checking");
   const [persistedComputerSelection, setPersistedComputerSelection] = useState<{
@@ -1436,7 +1437,9 @@ export function ComputerPanel({
                 title={unavailableTitle}
                 onClick={() => {
                   if ((mode === null && bot.computer === undefined) || mode === bot.computer) return;
-                  if (mode === "local" && bot.autoApprove) setLocalAutoWarning(true);
+                  if (mode === "local" && approvalModeFor(bot) === "auto") {
+                    setLocalAutoWarningTarget(bot.id);
+                  }
                   // a browser-only bot must actually have its browser: flip
                   // the per-bot switch on with the destination
                   else if (mode === "browser") updateComputerSelection({ computer: mode, browser: true });
@@ -1556,11 +1559,21 @@ export function ComputerPanel({
       )}
     </aside>
     <LocalComputerAutoWarning
-      open={localAutoWarning}
-      onCancel={() => setLocalAutoWarning(false)}
+      open={localAutoWarningTarget !== null}
+      onCancel={() => setLocalAutoWarningTarget(null)}
       onConfirm={() => {
-        updateComputerSelection({ computer: "local", acknowledgeLocalAuto: true });
-        setLocalAutoWarning(false);
+        const targetBotId = localAutoWarningTarget;
+        setLocalAutoWarningTarget(null);
+        if (!targetBotId) return;
+        if (targetBotId === bot.id) {
+          setResolvedComputerSelection(null);
+          setPhase("checking");
+        }
+        dispatch({
+          type: "updateBot",
+          botId: targetBotId,
+          patch: { computer: "local", acknowledgeLocalAuto: true },
+        });
       }}
     />
     </>

@@ -14,3 +14,15 @@ export function activateExistingWindow(windows) {
   target.focus();
   return true;
 }
+
+// Drop this process's single-instance lock. The update-relaunch path needs
+// it: Squirrel.Mac can start the new build while the old process is still
+// inside its deferred before-quit cleanup, and the new copy exits at the
+// lock check unless the old one lets go first. The guard keeps the release
+// idempotent because both Electron and electron-updater can emit
+// before-quit-for-update for the same install.
+export function releaseSingleInstanceLock(app) {
+  if (!app.hasSingleInstanceLock()) return false;
+  app.releaseSingleInstanceLock();
+  return true;
+}

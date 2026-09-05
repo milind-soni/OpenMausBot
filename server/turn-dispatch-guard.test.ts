@@ -2,10 +2,28 @@ import { describe, expect, it, vi } from "vitest";
 
 import {
   PendingTurnCancellations,
+  ProviderTurnGenerationRegistry,
   RetiredTurnRegistry,
   guardTurnDispatch,
   isTurnEventQuarantined,
 } from "./turn-dispatch-guard.ts";
+
+describe("provider turn capability correlation", () => {
+  it("rejects a bind when completion arrived before sendTurn resolved", () => {
+    const turns = new ProviderTurnGenerationRegistry();
+    expect(turns.complete("thread-1", "turn-1")).toBeNull();
+    expect(turns.bind("thread-1", "generation-1", "turn-1")).toBe(false);
+  });
+
+  it("returns the exact owner when completion follows a normal bind", () => {
+    const turns = new ProviderTurnGenerationRegistry();
+    expect(turns.bind("thread-1", "generation-1", "turn-1")).toBe(true);
+    expect(turns.complete("thread-1", "turn-1")).toEqual({
+      threadId: "thread-1",
+      generation: "generation-1",
+    });
+  });
+});
 
 describe("turn dispatch cancellation boundary", () => {
   it("interrupts again after a provider setup that was cancelled while pending", async () => {

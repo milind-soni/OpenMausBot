@@ -6,11 +6,11 @@
 // refusing the peers it still covers; the list survives an approval card that
 // was open while it changed; and the field can only ever be made smaller from
 // the loopback API a bot's own tool call can reach. The
-// endpoints are sealed behind a per-boot token, so — as in
-// room-chat-wait.e2e.test.ts — the token is read out of the MCP config the
-// fake CLI dumps on its first turn.
+// endpoints are sealed behind a per-turn token. The real MCP config is still
+// inspected below, while the isolated server's test-only mint route provides
+// an exact synthetic active turn for driving the endpoint after the fake exits.
 import { spawn, type ChildProcess } from "node:child_process";
-import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -24,6 +24,7 @@ const SERVER_DIR = dirname(fileURLToPath(import.meta.url));
 const ROOT = join(SERVER_DIR, "..");
 const FAKE_CLAUDE = join(SERVER_DIR, "testing", "fake-claude-cli.ts");
 const REFUSED = "not on this bot's allowed peers";
+const TEST_CAPABILITY_KEY = "peer-allowlist-fixture-capability";
 
 let child: ChildProcess;
 let home = "";
@@ -65,7 +66,7 @@ beforeAll(async () => {
   writeFileSync(join(data, "config.json"), JSON.stringify({
     instances: {
       plain: fixture("Plain fixture"),
-      // the dump is the only place a test can read the per-boot comms token
+      // the dump is the only place a test can read the real per-turn comms token
       // — and the only place it can read a bot's assembled system prompt
       asker: fixture("Asker fixture", askerDump),
       bound: fixture("Allow-listed fixture", boundDump),
@@ -83,6 +84,7 @@ beforeAll(async () => {
       OMB_PORT: String(port),
       OMB_WEBHOOK_PORT: String(port + 1),
       OMB_STATIC_DIR: staticDir,
+      OMB_TEST_INTERNAL_CAPABILITY_KEY: TEST_CAPABILITY_KEY,
     },
     stdio: ["ignore", "pipe", "pipe"],
   });
@@ -144,6 +146,17 @@ const warmUp = async (botId: string) => {
   await expect.poll(() => botBusy(botId), { timeout: 15_000 }).toBe(false);
 };
 
+const mintCapability = async (botId: string, threadId: string): Promise<string> => {
+  const minted = await api(
+    "POST",
+    "/api/testing/internal-capability",
+    { botId, threadId, kind: "agents" },
+    { "x-openmausbot-test-capability": TEST_CAPABILITY_KEY },
+  );
+  expect(minted.status).toBe(201);
+  return String(minted.body.token);
+};
+
 const hideSeededBot = async () => {
   // the seeded bot would otherwise join the unsectioned team and make the
   // roster and listing assertions depend on install order
@@ -170,6 +183,7 @@ describe("peer allow-list", () => {
     const patch = await createBot("Patch", "plain");
 
     try {
+      rmSync(askerDump, { force: true });
       expect((await api("POST", `/api/bots/${asker.id}/messages`, { text: "Warm up" })).status).toBe(202);
       await expect.poll(() => readDump(askerDump)()?.systemPrompt, { timeout: 10_000 }).toBeTruthy();
       const dump = readDump(askerDump)()!;
@@ -190,9 +204,10 @@ describe("peer allow-list", () => {
       // exactly that.
       expect(systemPrompt).toContain("[/TEAM ROSTER] If a supported API key is missing");
 
-      const token = String(dump.mcpConfig?.mcpServers?.agents?.env?.OMB_COMMS_TOKEN ?? "");
-      expect(token).toBeTruthy();
+      const providerToken = String(dump.mcpConfig?.mcpServers?.agents?.env?.OMB_COMMS_TOKEN ?? "");
+      expect(providerToken).toMatch(/^[a-f0-9]{48}$/);
       await expect.poll(() => botBusy(asker.id)).toBe(false);
+      const token = await mintCapability(asker.id, asker.threadId);
 
       // 2. with no allow-list set, both peers are visible and reachable
       expect(await peerNames(asker.id, token)).toEqual(["Patch", "Quill"]);
@@ -286,16 +301,18 @@ describe("peer allow-list", () => {
     // clicks Allow, so the gate has to run a second time against fresh
     // records. Nothing else in the suite drives a bot through the card.
     await hideSeededBot();
-    // on the dump fixture, because the per-boot comms token is only ever
+    // on the dump fixture, because the real per-turn comms token is only ever
     // readable out of a bot's MCP config
     const asker = await createBot("Iris", "asker");
     const helper = await createBot("Hedge", "plain");
 
     try {
+      rmSync(askerDump, { force: true });
       await warmUp(asker.id);
       await expect.poll(() => readDump(askerDump)()?.mcpConfig, { timeout: 10_000 }).toBeTruthy();
-      const token = String(readDump(askerDump)()!.mcpConfig?.mcpServers?.agents?.env?.OMB_COMMS_TOKEN ?? "");
-      expect(token).toBeTruthy();
+      const providerToken = String(readDump(askerDump)()!.mcpConfig?.mcpServers?.agents?.env?.OMB_COMMS_TOKEN ?? "");
+      expect(providerToken).toMatch(/^[a-f0-9]{48}$/);
+      const token = await mintCapability(asker.id, asker.threadId);
       expect((await api("PATCH", `/api/bots/${asker.id}`, { approvePeerComms: true })).status).toBe(200);
 
       // parks inside requestPeerApproval until the card below is answered

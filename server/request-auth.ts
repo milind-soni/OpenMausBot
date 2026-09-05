@@ -1,13 +1,15 @@
 // Who is asking, and are they allowed to?
 //
-// Two ways in. A **loopback** request (Host and Origin both loopback) is the
-// desktop app on the same machine and has always been trusted as the owner;
-// that stays. A **session** request carries a credential minted by pairing
+// Two ways in. A **loopback** request (Host and Origin both loopback) may read
+// local state; packaged mutations additionally carry a per-launch capability
+// injected by Electron below renderer JavaScript. A **session** request carries
+// a credential minted by pairing
 // (server/sessions.ts): a bearer token, the session cookie the served web UI
 // uses, or, for the event stream only, a short-lived ticket. With a session
 // the loopback rule is replaced by a same-origin rule, so a browser on
 // another site still cannot ride the cookie (CSRF), and by a scope check.
 import type { IncomingMessage } from "node:http";
+import { timingSafeEqual } from "node:crypto";
 import { isIP } from "node:net";
 
 import type { Scope, SessionRecord, SessionRegistry } from "./sessions.ts";
@@ -154,8 +156,9 @@ export function clearSessionCookie(name: string): string {
 
 /** Route → scope. Anything not listed needs `client`, which every session has;
  * the listed routes change who can get in or what the server runs, so they
- * need `admin`. Loopback holds both. Keep this table next to the routes it
- * names when adding one. */
+ * need `admin`. Loopback holds both scopes, while packaged loopback mutations
+ * separately prove the private desktop capability below. Keep this table next
+ * to the routes it names when adding one. */
 const ADMIN_ROUTES: ReadonlyArray<{ methods: readonly string[] | null; path: RegExp }> = [
   { methods: null, path: /^\/api\/auth\/pairing(\/|$)/ },
   { methods: null, path: /^\/api\/auth\/sessions(\/|$)/ },
@@ -178,6 +181,37 @@ export interface ResolveOptions {
   /** Path that may authenticate with a stream ticket in its query string. */
   streamPath: string;
   url: URL;
+  /** Packaged desktop capability, delivered over Electron's private child
+   * port. When present, originless loopback callers may still read but every
+   * public mutation must prove it came through the desktop's web session. */
+  loopbackMutationToken?: string;
+}
+
+const DESKTOP_OWNER_HEADER = "x-openmausbot-desktop-owner";
+
+function mutatingPublicRoute(method: string, path: string): boolean {
+  const upper = method.toUpperCase();
+  // This legacy polling endpoint is spelled GET but synchronizes upstream
+  // state into the transcript and can resume a paused turn. Classify by
+  // effect, not verb, until clients migrate to a POST refresh route.
+  if (
+    upper === "GET" &&
+    /^\/api\/bots\/[\w-]+\/connector-cards\/[\w-]+\/status$/.test(path)
+  ) return true;
+  if (["GET", "HEAD", "OPTIONS"].includes(upper)) return false;
+  // Agent integrations have their own high-entropy, per-boot authorization
+  // and narrower route semantics. Pairing-code exchange is intentionally
+  // public; possession of the one-time code is its authorization.
+  return !path.startsWith("/api/internal/") &&
+    path !== "/api/testing/internal-capability" &&
+    path !== "/api/auth/pair";
+}
+
+function secureTokenMatch(actual: string | undefined, expected: string): boolean {
+  if (!actual || !expected) return false;
+  const left = Buffer.from(actual);
+  const right = Buffer.from(expected);
+  return left.length === right.length && timingSafeEqual(left, right);
 }
 
 /** Decide how this request is authenticated. Never throws. */
@@ -215,7 +249,16 @@ export function resolveRequestAuth(req: IncomingMessage, options: ResolveOptions
 
   const proxied = isProxied(req);
   const loopback = !proxied && isLoopbackHost(headerValue(req.headers.host)) && isAllowedOrigin(headerValue(req.headers.origin));
-  if (loopback) return { auth: { kind: "loopback", scopes: LOOPBACK_SCOPES }, status: 401, error: "" };
+  if (loopback) {
+    if (
+      options.loopbackMutationToken !== undefined &&
+      mutatingPublicRoute(method, path) &&
+      !secureTokenMatch(headerValue(req.headers[DESKTOP_OWNER_HEADER]), options.loopbackMutationToken)
+    ) {
+      return deny(403, "forbidden: this change must come from the desktop app or a paired device");
+    }
+    return { auth: { kind: "loopback", scopes: LOOPBACK_SCOPES }, status: 401, error: "" };
+  }
 
   if (via) {
     return deny(401, "unauthorized: this session has expired or was revoked; pair this device again");

@@ -31,6 +31,7 @@ const calls: Array<{
 }> = [];
 let malformedConnectedAccounts = false;
 let connectedAccountsUnavailable = false;
+let emptyConnectedAccounts = false;
 // The project's own auth configs, and the ones the stub Session was created
 // with — a Session only knows the configs named at its creation, which is
 // the whole reason #509 happened.
@@ -172,6 +173,7 @@ beforeAll(async () => {
       }
       res.writeHead(200, { "content-type": "application/json" });
       if (malformedConnectedAccounts) return res.end(JSON.stringify({ items: {} }));
+      if (emptyConnectedAccounts) return res.end(JSON.stringify({ items: [] }));
       if (url.searchParams.get("cursor") === "accounts-page-2") {
         return res.end(JSON.stringify({
           items: [
@@ -621,7 +623,7 @@ describe.sequential("Composio Sessions", () => {
         OMB_CONNECTOR_UPSTREAM_URL: "http://127.0.0.1:8799/api/internal/connectors/mcp",
         OMB_CONNECTOR_UPSTREAM_HEADERS: JSON.stringify({ authorization: "Bearer secret" }),
         OMB_HARNESS_URL: "http://127.0.0.1:8799",
-        OMB_COMMS_TOKEN: "secret",
+        OMB_CONNECTOR_TOKEN: "secret",
         OMB_BOT_ID: "bot-1",
         OMB_THREAD_ID: "thread-1",
       },
@@ -770,12 +772,20 @@ describe.sequential("Composio Sessions", () => {
     const cfg: AppConfig = {
       composio: { apiKey: "ak_test", userId: "openmausbot_existing", sessionId: "trs_test" },
     };
-    const before = calls.length;
-    await expect(authorizeService(cfg, "slack", "team")).resolves.toEqual({
-      url: "https://connect.composio.dev/link/slack",
-    });
-    const linkCalls = calls.slice(before).filter((call) => call.method === "POST" && call.path.endsWith("/link"));
-    expect(linkCalls).toHaveLength(1);
-    expect(linkCalls[0].body).toEqual({ toolkit: "slack", alias: "team" });
+    emptyConnectedAccounts = true;
+    try {
+      await expect(connectionStatus(cfg, ["slack"])).resolves.toMatchObject({
+        slack: { connected: false, pending: false, accounts: [] },
+      });
+      const before = calls.length;
+      await expect(authorizeService(cfg, "slack", "team")).resolves.toEqual({
+        url: "https://connect.composio.dev/link/slack",
+      });
+      const linkCalls = calls.slice(before).filter((call) => call.method === "POST" && call.path.endsWith("/link"));
+      expect(linkCalls).toHaveLength(1);
+      expect(linkCalls[0].body).toEqual({ toolkit: "slack", alias: "team" });
+    } finally {
+      emptyConnectedAccounts = false;
+    }
   });
 });
