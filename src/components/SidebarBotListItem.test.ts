@@ -64,6 +64,13 @@ describe("BotListItem", () => {
     expect(renderRow(bot({ title: "  " }), false)).not.toContain(">Developer</span>");
   });
 
+  it("shows typing dots instead of preview text while the bot works", () => {
+    const markup = renderRow(bot({ busy: true }), false);
+
+    expect(markup).toContain("animate-status-pulse");
+    expect(markup).toContain('class="sr-only">Working…');
+  });
+
   it("renders the inline Archive action only when it is available", () => {
     expect(renderRow(bot(), true)).not.toContain('aria-label="Archive Atlas"');
     expect(renderRow(bot(), false)).toContain('aria-label="Archive Atlas"');

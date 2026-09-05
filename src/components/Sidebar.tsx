@@ -34,6 +34,7 @@ import { api, useStore, formatTime, visibleMessages, type Bot, type Group } from
 import { BotAvatar, InitialsAvatar } from "./Avatar";
 import { stateForBot } from "@/lib/mascot";
 import { cn } from "@/lib/cn";
+import { WorkingDots } from "./WorkingIndicator";
 import { skillRecorderEnabled } from "@/lib/feature-flags";
 import { nextRename } from "@/lib/rename";
 import { downloadAllBots } from "@/lib/team-files";
@@ -785,7 +786,16 @@ export function BotListItem({
             </span>
           ) : (
             <span className="flex min-w-0 items-center gap-1.5 truncate text-[13px] text-ink-secondary">
-              <span className="truncate">{preview(bot)}</span>
+              {bot.busy && bot.activity !== "waiting-on-you" ? (
+                // the same typing dots as the chat header; sized to the text's
+                // line box so the row does not jump when work starts or ends
+                <span className="flex h-[1.5em] items-center" role="status">
+                  <WorkingDots size={3.5} />
+                  <span className="sr-only">Working…</span>
+                </span>
+              ) : (
+                <span className="truncate">{preview(bot)}</span>
+              )}
             </span>
           )}
           {bot.unread && (
