@@ -16,8 +16,9 @@ import {
   botAvatarUrlFromStoredPath,
   type BotAvatarCrop,
 } from "../../shared/bot-avatar";
-import { MASCOT_BODIES, MASCOT_BODY_IDS } from "../../shared/mascot-bodies";
+import { MASCOT_BODIES, botMascotBody } from "../../shared/mascot-bodies";
 import { BotAvatar, MausAvatar } from "./Avatar";
+import { AvatarLabDialog } from "./AvatarLabDialog";
 
 type AvatarPatch = Partial<
   Pick<Bot, "avatarCrop" | "avatarUrl" | "color" | "mascotExpression" | "mascotBody">
@@ -48,6 +49,7 @@ export function BotProfileAvatarCard({
   const [savingKey, setSavingKey] = useState(false);
   const [direction, setDirection] = useState("");
   const [generating, setGenerating] = useState(false);
+  const [avatarLabOpen, setAvatarLabOpen] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const crop = bot.avatarCrop ?? "mascot";
   const cropRef = useRef(crop);
@@ -252,27 +254,29 @@ export function BotProfileAvatarCard({
               ))}
             </div>
 
-            <div className="mb-2 mt-4 text-[12px] font-medium uppercase tracking-[0.08em] text-ink-secondary">
-              Body
-            </div>
-            <div className="grid grid-cols-5 gap-1.5">
-              {MASCOT_BODY_IDS.map((id) => (
-                <button
-                  key={id}
-                  type="button"
-                  aria-pressed={(bot.mascotBody ?? "cursor") === id}
-                  aria-label={`Use the ${MASCOT_BODIES[id].name} body`}
-                  onClick={() => onPatch({ mascotBody: id })}
-                  className={cn(
-                    "flex items-center justify-center rounded-lg py-1.5",
-                    (bot.mascotBody ?? "cursor") === id
-                      ? "bg-control text-ink"
-                      : "text-ink-secondary hover:bg-control/60",
-                  )}
-                >
-                  <MausAvatar color={bot.color} bodyId={id} size={34} animated={false} trackPointer={false} />
-                </button>
-              ))}
+            <div className="mt-4 flex min-w-0 items-center gap-3 rounded-xl border border-hairline/40 bg-inset px-3 py-2.5">
+              <MausAvatar
+                color={bot.color}
+                bodyId={botMascotBody(bot.mascotBody)}
+                state={activeState}
+                size={48}
+                animated={false}
+                trackPointer={false}
+                label="Current mascot style"
+              />
+              <div className="min-w-0 flex-1">
+                <div className="text-[12px] font-medium text-ink">Current mascot style</div>
+                <div className="truncate text-[11px] text-ink-secondary">
+                  {MASCOT_BODIES[botMascotBody(bot.mascotBody)].name}
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setAvatarLabOpen(true)}
+                className="shrink-0 rounded-lg px-2 py-1.5 text-[11.5px] font-medium text-accent hover:bg-control"
+              >
+                Edit
+              </button>
             </div>
           </>
         )}
@@ -360,6 +364,15 @@ export function BotProfileAvatarCard({
 
         {error && <div role="alert" className="mt-3 text-[12px] text-danger">{error}</div>}
       </div>
+
+      <AvatarLabDialog
+        open={avatarLabOpen}
+        bot={bot}
+        activeState={activeState}
+        mascotMotion={mascotMotion}
+        onApply={onPatch}
+        onClose={() => setAvatarLabOpen(false)}
+      />
     </div>
   );
 }
