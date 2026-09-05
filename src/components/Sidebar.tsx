@@ -717,13 +717,10 @@ export function BotListItem({
       : density === "compact"
         ? "gap-2 px-2 py-1.5 pr-12"
         : "gap-3 px-3 py-2.5 pr-12",
-    bot.chiefOfStaff
-      ? selected
-        ? "border-accent/40 bg-accent/15"
-        : "border-accent/25 bg-accent/5 hover:bg-accent/10"
-      : selected
-        ? "border-transparent bg-raised"
-        : "border-transparent hover:bg-raised/50",
+    // Chief of Staff is called out by the crown label below, not by tinting
+    // the whole row — an accent border + fill read as "selected" even when
+    // another bot was active.
+    selected ? "border-transparent bg-raised" : "border-transparent hover:bg-raised/50",
   );
   const body = (
     <>
