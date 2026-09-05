@@ -136,6 +136,42 @@ describe("resolveRequestAuth", () => {
   });
   afterEach(() => rmSync(dir, { recursive: true, force: true }));
 
+  it("accepts authenticated relay mutations without exposing the desktop owner capability", () => {
+    const headers = {
+      host: "127.0.0.1:8799",
+      "x-openmausbot-companion": "1",
+      "x-openmausbot-companion-device": "phone-1",
+      "x-openmausbot-companion-auth": "relay-secret",
+    };
+    const check = (method: string, path: string, overrides: Record<string, string> = {}, relay = "relay-secret") =>
+      resolveRequestAuth(request({ ...headers, ...overrides }, method), {
+        sessions, cookieName, streamPath: "/api/events", url: new URL(path, "http://localhost"),
+        loopbackMutationToken: "desktop-secret", companionMutationToken: relay,
+      });
+    for (const [method, path] of [
+      ["POST", "/api/bots"], ["POST", "/api/bots/b/messages"],
+      ["POST", "/api/bots/b/read"], ["POST", "/api/bots/b/respond"],
+      ["POST", "/api/bots/b/secret-cards/card/provide"],
+      ["GET", "/api/events"], ["PATCH", "/api/bots/b/profile"],
+    ]) expect(check(method, path).auth?.kind, path).toBe("loopback");
+    const forged: Record<string, string>[] = [
+      { "x-openmausbot-companion-auth": "" },
+      { "x-openmausbot-companion-auth": "desktop-secret" },
+      { "x-openmausbot-companion-device": "" },
+      { "x-openmausbot-companion": "0" },
+      { origin: "https://evil.example" },
+      { "x-forwarded-for": "203.0.113.1" },
+      { host: "remote.example" },
+    ];
+    for (const overrides of forged) expect(check("POST", "/api/bots/b/read", overrides).auth).toBeNull();
+    expect(check("POST", "/api/bots/b/read", {}, "").auth).toBeNull();
+    for (const [method, path] of [
+      ["PUT", "/api/config"], ["POST", "/api/auth/pairing"],
+      ["POST", "/api/internal/anything"], ["GET", "/api/auth/sessions"],
+      ["POST", "/api/not-yet-supported"],
+    ]) expect(check(method, path).auth, path).toBeNull();
+  });
+
   function pairedToken(scopes: Array<"admin" | "client"> = ["admin", "client"]): string {
     const { code } = sessions.openPairing({ scopes });
     const result = sessions.exchange({ code, label: "test", source: "1.2.3.4" });

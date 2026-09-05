@@ -361,6 +361,7 @@ const DESKTOP_MANAGED = process.env.OMB_DESKTOP_PARENT === "1";
 // Empty is deliberately a deny-all bootstrap state. Only Electron's private
 // utility-process port can replace it with the per-launch owner capability.
 let desktopMutationToken: string | undefined = DESKTOP_MANAGED ? "" : undefined;
+let companionMutationToken: string | undefined = DESKTOP_MANAGED ? "" : undefined;
 // Where remote clients reach this server (a proxy's public address); pairing URLs use it.
 const PUBLIC_URL = process.env.OMB_PUBLIC_URL?.trim().replace(/\/+$/, "") || null;
 const cfg = loadConfig();
@@ -424,6 +425,9 @@ function applyDesktopMutationTokenMessage(raw: unknown): boolean {
     throw new Error("invalid desktop mutation capability");
   }
   desktopMutationToken = message.token;
+  if (typeof message.companionToken === "string" && /^[A-Za-z0-9_-]{43}$/.test(message.companionToken)) {
+    companionMutationToken = message.companionToken;
+  }
   return true;
 }
 const browserCleanup = new BrowserCleanupCoordinator({
@@ -7339,6 +7343,7 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
       streamPath: "/api/events",
       url,
       loopbackMutationToken: desktopMutationToken,
+      companionMutationToken,
     });
     // Reachability probe, public: the phone races it across a server's
     // addresses before it has a session, and the tunnel verifier polls it.

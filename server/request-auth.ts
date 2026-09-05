@@ -13,6 +13,7 @@ import { timingSafeEqual } from "node:crypto";
 import { isIP } from "node:net";
 
 import type { Scope, SessionRecord, SessionRegistry } from "./sessions.ts";
+import { denyReason as companionDenial } from "../companion/src/routes.ts";
 
 export type RequestAuth =
   | { kind: "loopback"; scopes: readonly Scope[] }
@@ -283,6 +284,8 @@ export interface ResolveOptions {
    * port. When present, originless loopback callers may still read but every
    * public mutation must prove it came through the desktop's web session. */
   loopbackMutationToken?: string;
+  /** Separate private capability held by the authenticated phone relay. */
+  companionMutationToken?: string;
 }
 
 const DESKTOP_OWNER_HEADER = "x-openmausbot-desktop-owner";
@@ -348,6 +351,16 @@ export function resolveRequestAuth(req: IncomingMessage, options: ResolveOptions
   const proxied = isProxied(req);
   const loopback = !proxied && isLoopbackHost(headerValue(req.headers.host)) && isAllowedOrigin(headerValue(req.headers.origin));
   if (loopback) {
+    const companionToken = headerValue(req.headers["x-openmausbot-companion-auth"]);
+    if (companionToken && options.loopbackMutationToken !== undefined) {
+      if (
+        !secureTokenMatch(companionToken, options.companionMutationToken ?? "") ||
+        req.headers["x-openmausbot-companion"] !== "1" ||
+        !/^[\w-]{1,128}$/.test(headerValue(req.headers["x-openmausbot-companion-device"]) ?? "") ||
+        companionDenial({ path, method, authenticated: true })
+      ) return deny(403, "forbidden: invalid companion request");
+      return { auth: { kind: "loopback", scopes: LOOPBACK_SCOPES }, status: 401, error: "" };
+    }
     if (
       options.loopbackMutationToken !== undefined &&
       mutatingPublicRoute(method, path) &&
