@@ -8,7 +8,7 @@
 // codex-cli 0.144.4 by agentcal.
 //
 // resumeCursor is the codex thread id; a later turn tries thread/resume
-// and falls back to a fresh thread/start.
+// and preserves that history or reports a failed resume.
 import { existsSync } from "node:fs";
 import { homedir } from "node:os";
 
@@ -33,6 +33,7 @@ import { codexLocalProviderArgs } from "./local-inject.ts";
 import { augmentedPath, splitCliString } from "../env-path.ts";
 import { classifyError, computeBackoff, RETRY_MAX_ATTEMPTS } from "./retry.ts";
 import { appendNative } from "./native.ts";
+import { syncCodexInstructions } from "./codex-instructions.ts";
 import type { ApprovalMode } from "../../shared/approval-mode.ts";
 
 export { decodeCodexSelection, readCodexModelCatalog, STATIC_CODEX_MODELS } from "./codex-catalog.ts";
@@ -983,6 +984,10 @@ export const CodexDriver: ProviderDriver<CodexConfig> = {
         // mode may synthesize approvals; Custom must preserve the sandbox
         // boundary from config.toml (for example never + read-only).
         autoAcceptPermissions = approvalMode === "full";
+        // Each turn launches a new app-server. Reassert current bot instructions
+        // on start AND resume so Codex owns their lifetime through compaction.
+        // An empty string clears removed rules; omission can inherit config.
+        const developerInstructions = turn.system ?? "";
         const cursor = typeof turn.resumeCursor === "string" ? turn.resumeCursor : null;
         let codexThreadId: string | null = null;
         let startedModel: string | null = null;
@@ -990,6 +995,7 @@ export const CodexDriver: ProviderDriver<CodexConfig> = {
           try {
             const resumed = await request("thread/resume", {
               threadId: cursor,
+              developerInstructions,
               ...approvalParams.thread,
             });
             codexThreadId = resumed?.thread?.id ?? cursor;
@@ -999,22 +1005,21 @@ export const CodexDriver: ProviderDriver<CodexConfig> = {
               // profile selector. Retry the same resume safely rather than
               // losing the native thread or inheriting its previous mode.
               approvalParams = approvalParams.fallback;
-              try {
-                const resumed = await request("thread/resume", {
-                  threadId: cursor,
-                  ...approvalParams.thread,
-                });
-                codexThreadId = resumed?.thread?.id ?? cursor;
-              } catch {
-                /* thread gone or resume unsupported — start fresh below */
-              }
+              const resumed = await request("thread/resume", {
+                threadId: cursor,
+                developerInstructions,
+                ...approvalParams.thread,
+              });
+              codexThreadId = resumed?.thread?.id ?? cursor;
+            } else {
+              throw error;
             }
-            /* thread gone or resume unsupported — start fresh below */
           }
         }
         if (!codexThreadId) {
           const selection = decodeCodexSelection(turn.model);
           const startThread = () => request("thread/start", {
+              developerInstructions,
               cwd: turn.cwd ?? homedir(),
               model: selection.model,
               ...(selection.modelProvider ? { modelProvider: selection.modelProvider } : {}),
@@ -1032,8 +1037,10 @@ export const CodexDriver: ProviderDriver<CodexConfig> = {
           codexThreadId = started?.thread?.id ?? null;
           startedModel = started?.model ?? null;
         }
+        if (!codexThreadId) throw new Error("Codex did not return a native thread id");
+        await syncCodexInstructions(threadId, codexThreadId, developerInstructions, Boolean(cursor), request);
         emit({ ...base(threadId, turnId), type: "session.started", sessionId: codexThreadId, model: startedModel ?? turn.model ?? null });
-        const promptText = turn.system ? `${turn.system}\n\n${turn.text}` : turn.text;
+        const promptText = turn.text;
         const turnInput = [
           ...(promptText ? [{ type: "text" as const, text: promptText }] : []),
           ...(turn.images ?? []).map((image) => ({ type: "localImage" as const, path: image.path })),
