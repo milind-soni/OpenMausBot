@@ -59,7 +59,10 @@ function Fixture() {
   const [busy, setBusy] = useState(false);
   const [generation, setGeneration] = useState(0);
   useEffect(() => {
-    if (bot) dispatch({ type: "screenFrame", botId: bot.id, png: blank, mime: "image/png" });
+    if (bot) {
+      dispatch({ type: "screenFrame", botId: bot.id, png: blank, mime: "image/png" });
+      dispatch({ type: "updateBot", botId: bot.id, patch: { computer: "cloud", cloudBackend: "box" } });
+    }
   }, [bot?.id, dispatch]);
   return <div className="flex h-screen justify-center">
     <div className="fixed left-2 top-2 grid max-w-32 gap-3 text-sm">
@@ -70,7 +73,7 @@ function Fixture() {
       <button onClick={() => setBusy(!busy)}>Busy: {String(busy)}</button>
       <button disabled={!bot} onClick={() => dispatch({ type: "screenFrame", botId: bot.id, png: frame("New live frame", "#312e81"), mime: "image/png" })}>Publish live frame</button>
     </div>
-    {bot ? <ComputerPanel key={generation} bot={{ ...bot, computer: "cloud", cloudBackend: "box", busy }} /> : "Loading fixture…"}
+    {bot ? <ComputerPanel key={generation} bot={{ ...bot, busy }} /> : "Loading fixture…"}
   </div>;
 }
 applySkin(readSkin());

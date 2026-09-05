@@ -11,6 +11,10 @@ import {
   CalendarClock,
   CalendarDays,
   Columns2,
+  Box,
+  Check,
+  Cloud,
+  Sparkles,
   Globe,
   Hand,
   Loader2,
@@ -44,7 +48,6 @@ import { LocalComputerAutoWarning } from "./LocalComputerAutoWarning";
 import {
   autoSelectsLocalComputer,
   instanceSupportsLocalComputer,
-  linuxAutoDescription,
   localComputerDisabledReason,
   localComputerSelectable,
   persistedComputerSelectionMatches,
@@ -1435,31 +1438,19 @@ export function ComputerPanel({
         {/* Computer source */}
           <div className="mt-4 rounded-xl bg-card p-4">
             <div className="text-[15px] font-medium text-ink">Works on</div>
-            <div className="mt-0.5 text-[13px] text-ink-secondary">
-              {!bot.computer &&
-                (isLinux || !localSelectable
-                  ? cloudBackend === "vps"
-                    ? "Auto reuses a ready VPS when one is configured; otherwise computer use stays off. "
-                    : `${linuxAutoDescription()} `
-                  : cloudBackend === "vps"
-                    ? "Auto reuses a ready VPS when one exists, otherwise this computer. "
-                    : "Auto uses a cloud box when one exists, otherwise this computer. ")}
-              Pick where this bot works. <b className="text-ink">Local VM</b> is a Cua-controlled Linux desktop
-              in a container on this machine — free and separate from your own desktop. Set it up in App
-              Settings → Computers. <b className="text-ink">Browser</b> is the built-in browser tab only; no desktop.
-          </div>
-          <div className="mt-3 flex overflow-hidden rounded-lg border border-hairline/40">
-            {(
-              [
-                [null, "Auto"],
-                ["cloud", "Cloud"],
-                ["vm", "Local VM"],
-                ["local", "This computer"],
-                ["browser", "Browser"],
-                ["off", "Off"],
-              ] as const
-            ).map(([mode, label], i) => (
-              (() => {
+            <p className="mt-1 text-[12px] leading-5 text-ink-secondary">
+              Choose where this bot can use a computer.
+            </p>
+          <div role="group" aria-label="Computer destination" className="mt-3 grid auto-rows-fr grid-cols-2 gap-2">
+            {([
+              [null, "Auto", "Choose automatically", Sparkles],
+              ["cloud", "Cloud", "Hosted desktop", Cloud],
+              ["vm", "Local VM", "Isolated local desktop", Box],
+              ["local", "This computer", "Your screen and apps", Monitor],
+              ["browser", "Browser", "Web pages only", Globe],
+              ["off", "Off", "No computer access", Power],
+            ] as const).map(([mode, label, description, Icon]) => {
+                const selected = mode === null ? !bot.computer : bot.computer === mode;
                 const disabled =
                   (mode === "cloud" && !cloudSupported) ||
                   (mode === "vm" && !vmSupported) ||
@@ -1490,33 +1481,61 @@ export function ComputerPanel({
                   else if (mode === "browser") updateComputerSelection({ computer: mode, browser: true });
                   else updateComputerSelection({ computer: mode });
                 }}
+                type="button"
+                aria-pressed={selected}
                 className={cn(
-                  "flex-1 py-1.5 text-[13px]",
-                  i > 0 && "border-l border-hairline/40",
-                  disabled && "cursor-not-allowed opacity-40",
-                  (mode === null ? bot.computer === undefined : bot.computer === mode)
-                    ? "bg-control text-ink"
-                    : "text-ink-secondary hover:bg-control/60 hover:text-ink",
+                  "min-w-0 rounded-lg border px-2.5 py-3 text-left transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent focus-visible:ring-offset-2 focus-visible:ring-offset-card",
+                  selected
+                    ? "border-accent/60 bg-accent/10 text-ink"
+                    : "border-hairline/50 bg-panel/30 text-ink-secondary",
+                  disabled
+                    ? "cursor-not-allowed"
+                    : "hover:border-accent/40 hover:bg-control/60",
                 )}
               >
-                {label}
+                <span className="flex items-center gap-2 text-[12px] font-medium leading-4">
+                  {selected ? <Check size={14} className="shrink-0 text-accent" /> : <Icon size={14} className="shrink-0 text-ink-secondary" />}
+                  <span>{label}</span>
+                </span>
+                <span className="mt-1.5 block text-[11px] leading-4 text-ink-secondary">
+                  {disabled ? "Unavailable here" : description}
+                </span>
               </button>
                 );
-              })()
-            ))}
+            })}
           </div>
           {bot.computer === "cloud" && (
             <>
               <CloudBackendPicker
+                compact
                 value={cloudBackend}
                 vpsSupported={vpsSupported}
                 onChange={(backend) => updateComputerSelection({ cloudBackend: backend })}
               />
             </>
           )}
-          {!bot.computer && (
-            <div className="mt-3 rounded-lg bg-inset px-3 py-2.5 text-[11.5px] leading-relaxed text-ink-secondary">
-              Auto is selected. Opening this panel only checks for an existing computer; it never creates or wakes one. Choose Cloud to configure or start a cloud computer.
+          {bot.computer !== "cloud" && (
+            <div className="mt-3 border-t border-hairline/40 pt-3 text-[11.5px] leading-5 text-ink-secondary" aria-live="polite">
+              {!bot.computer ? (
+                cloudBackend === "vps" && bot.autoStartVps
+                  ? "Uses your VPS and starts it when needed."
+                  : localSelectable && !isLinux
+                    ? "Prefers an existing cloud computer; otherwise uses this computer. Select Cloud to start a cloud computer."
+                    : "Uses an existing cloud computer. Select Cloud to create or wake one."
+              ) : bot.computer === "vm" ? (
+                <>
+                  A private Linux desktop on this device, separate from your own screen.
+                  <button type="button" onClick={openVmSettings} className="mt-1 block font-medium text-accent hover:underline">
+                    Local VM settings →
+                  </button>
+                </>
+              ) : bot.computer === "local" ? (
+                "Uses your screen, mouse, and keyboard."
+              ) : bot.computer === "browser" ? (
+                "Uses the built-in browser without access to your desktop."
+              ) : (
+                "This bot can still chat and use its other tools."
+              )}
             </div>
           )}
         </div>
