@@ -31,7 +31,34 @@ Desktop-only for now (needs the Mac/Linux app):
 - the built-in browser panel, the skill recorder, dictation/voice,
   controlling the host desktop
 
-## Docker (recommended)
+## Quickest: one command with Node
+
+On any machine with Node 24 or newer (a VPS, a Mac mini, a Raspberry Pi):
+
+```sh
+npx openmausbot serve
+```
+
+It starts the server, keeps your data in `~/.openmausbot`, and prints a
+pairing link with a QR code: scan it with the phone, or open it on the
+laptop. Sign the engine CLIs in on the same machine as usual (`claude`,
+`codex`, …). Two ways to make it reachable from elsewhere:
+
+- **On your Tailscale network, no domain needed:**
+  `npx openmausbot serve --tailscale`. Tailscale terminates HTTPS with its
+  own certificate and the link uses this machine's MagicDNS name, so only
+  devices on your tailnet can reach it. Needs Tailscale signed in and HTTPS
+  certificates enabled for the tailnet (admin console → DNS).
+- **Behind your own proxy or domain:** `npx openmausbot serve --public-url
+  https://maus.example.com`, with the proxy rules from "Putting a proxy in
+  front".
+
+Later: `npx openmausbot pair --label "Kitchen iPad"` for another device
+(`--client` for one that may chat but not change settings), and
+`npx openmausbot sessions` to see or revoke them. Run it under systemd or
+pm2 to keep it up; `openmausbot serve` is a plain foreground process.
+
+## Docker (with HTTPS on your own domain)
 
 One tenant = one container for the server plus Caddy for HTTPS.
 Requirements: Docker with Compose, a DNS name pointing at the machine, and
@@ -53,7 +80,7 @@ pairing code for your first device:
 
 ```sh
 docker compose exec omb claude                       # each CLI you listed in ENGINES
-docker compose exec omb node dist-server/pair-cli.js # prints a code and a link
+docker compose exec omb node dist-server/openmausbot.js pair # prints a code, a link and a QR
 ```
 
 Open the link (`https://<DOMAIN>/pair#code=…`) in a browser and it is
@@ -123,8 +150,9 @@ Pair once, then use the server from any browser on any machine that can
 reach it. On the server:
 
 ```sh
-pnpm pair                                  # from a checkout
-docker compose exec omb node dist-server/pair-cli.js   # Docker
+npx openmausbot pair                         # npm install
+pnpm omb pair                                # from a checkout
+docker compose exec omb node dist-server/openmausbot.js pair   # Docker
 ```
 
 It prints a 12-character code (single use, five minutes) and, when the

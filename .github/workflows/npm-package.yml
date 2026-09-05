@@ -1,0 +1,55 @@
+name: npm package
+
+on:
+  push:
+    tags: ["v*"]
+  pull_request:
+    paths:
+      - server/cli.ts
+      - server/tailscale.ts
+      - server/pair-cli.ts
+      - scripts/build-npm-package.mjs
+      - scripts/bundle-server.mjs
+      - .github/workflows/npm-package.yml
+
+permissions:
+  contents: read
+  id-token: write
+
+jobs:
+  pack-and-prove:
+    name: assemble, pack, run standalone
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: pnpm/action-setup@ff378ebe6b225b0680b81c1ad4498ae0d1d3a5e3 # v6.0.10
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 24
+          registry-url: https://registry.npmjs.org
+      - run: pnpm install --frozen-lockfile
+        env:
+          ELECTRON_SKIP_BINARY_DOWNLOAD: "1"
+      - run: pnpm build:server && pnpm exec vite build && node scripts/build-npm-package.mjs
+      - name: Prove the packed tarball runs with no node_modules at all
+        run: |
+          set -euo pipefail
+          cd release/npm && npm pack --silent && cd ../..
+          rm -rf /tmp/omb-pack && mkdir -p /tmp/omb-pack && tar -xzf release/npm/openmausbot-*.tgz -C /tmp/omb-pack
+          cd /tmp/omb-pack/package
+          test ! -d node_modules
+          node cli.js --help | grep -q "openmausbot serve"
+          HOME=/tmp/omb-pack/home node cli.js serve --no-pair --port 18799 --data-dir /tmp/omb-pack/data --label ci --public-url https://ci.example > serve.log 2>&1 &
+          for i in $(seq 1 60); do curl -sf http://127.0.0.1:18799/api/health >/dev/null && break; sleep 1; done
+          grep -q "reachable at https://ci.example" serve.log
+          OMB_PORT=18799 node cli.js status | grep -q "ci ·"
+          OMB_PORT=18799 node cli.js pair --label "CI phone" | grep -q "open or scan:  https://ci.example/pair#code="
+          OMB_PORT=18799 node cli.js sessions | grep -q "no paired devices yet"
+          kill %1; wait %1 || true
+      - name: Publish to npm (release tags only)
+        if: startsWith(github.ref, 'refs/tags/v')
+        working-directory: release/npm
+        run: npm publish --access public --provenance
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
