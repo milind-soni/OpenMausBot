@@ -74,7 +74,11 @@ final class ServerPairingTests: XCTestCase {
     }
 
     private func fixture(_ name: String) throws -> Data {
-        let url = try XCTUnwrap(Bundle.module.url(forResource: name, withExtension: "json"))
+        // `.copy("Fixtures")` keeps the directory; a stale local build may flatten it
+        let url = try XCTUnwrap(
+            Bundle.module.url(forResource: name, withExtension: "json", subdirectory: "Fixtures")
+                ?? Bundle.module.url(forResource: name, withExtension: "json")
+        )
         return try Data(contentsOf: url)
     }
 
