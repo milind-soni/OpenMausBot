@@ -13,6 +13,11 @@ path **today**; first-class remote access is coming — see
 > (Caddy) in front. Proper token-based remote auth is exactly what the
 > Remote Workspace plan adds.
 
+Step by step, for a server you do not have yet: [Deploy OpenMausBot on a
+VPS](deploy-vps.md) walks through the three ways in (public address, own
+domain, Tailscale), signing engines in, pairing, keeping it running,
+updating and backups. This page is the reference behind it.
+
 ## What works headless (and what doesn't)
 
 Runs fully on a server:
@@ -49,6 +54,22 @@ laptop. Sign the engine CLIs in on the same machine as usual (`claude`,
   own certificate and the link uses this machine's MagicDNS name, so only
   devices on your tailnet can reach it. Needs Tailscale signed in and HTTPS
   certificates enabled for the tailnet (admin console → DNS).
+- **A public address, no domain, no proxy, no open port:**
+
+  ```sh
+  npx openmausbot login          # once: an emailed code signs this machine in
+  npx openmausbot serve --tunnel
+  ```
+
+  `login` reserves an address like `https://c-….openmausbot.com` for this
+  machine; `serve --tunnel` connects it through a Cloudflare tunnel (the same
+  one the desktop app uses for its companion) and prints the pairing link at
+  that address. The first run downloads `cloudflared` (pinned version and
+  digest) into the data dir. Only traffic through the tunnel reaches the
+  server, and it still has to pair: the tunnel lands on a separate listener
+  the server treats as "through a proxy", never as the owner. `npx openmausbot
+  logout` releases the address. The account credentials live in
+  `~/.openmausbot/tunnel-account.json` (mode 0600).
 - **Behind your own proxy or domain:** `npx openmausbot serve --public-url
   https://maus.example.com`, with the proxy rules from "Putting a proxy in
   front".
@@ -221,15 +242,21 @@ is the reference implementation.
 
 ## Using it from your phone
 
-The iOS companion pairs with a running server. Start the companion process
-next to the harness and pair by QR:
+The iOS app pairs with a server the same way a laptop does: scan the QR
+code that `openmausbot serve` (or `openmausbot pair`) prints, or paste the
+whole `https://host/pair#code=…` link into the address field on the pairing
+screen. The phone gets a session of its own, listed and revocable with
+`openmausbot sessions`. It can chat, approve, and read; creating bots,
+changing models, connecting apps and cloud computers stay with the owner in
+the server's own UI, and the app hides those controls.
+
+Older way, still supported: run the companion sidecar next to the harness
+and pair by its own QR. It advertises on your private networks
+(Tailscale-aware) and issues per-device credentials on pairing.
 
 ```sh
 node --experimental-strip-types companion/src/index.ts
 ```
-
-It advertises on your private networks (Tailscale-aware) and issues
-per-device credentials on pairing — see the pairing screen in the iOS app.
 
 ## Updating
 

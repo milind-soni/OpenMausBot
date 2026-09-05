@@ -1,10 +1,8 @@
 // Entry point for the `openmausbot` command (see cli.ts).
 import { main } from "./cli.ts";
+import { exitAfterFlush } from "./exit.ts";
 
-main().then(
-  (code) => process.exit(code),
-  (error) => {
-    console.error(error instanceof Error ? error.message : String(error));
-    process.exit(1);
-  },
-);
+main().then(exitAfterFlush, (error) => {
+  console.error(error instanceof Error ? error.message : String(error));
+  exitAfterFlush(1);
+});

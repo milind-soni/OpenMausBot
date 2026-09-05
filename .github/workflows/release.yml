@@ -411,6 +411,8 @@ jobs:
       cancel-in-progress: false
     permissions:
       contents: write
+      # to dispatch the npm and Docker publishes on the new tag
+      actions: write
     steps:
       - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
@@ -577,3 +579,10 @@ jobs:
           GH_TOKEN="$LEGACY_TOKEN" gh release view "v$VERSION" \
             --repo milind-soni/openmausbot-releases --json isDraft --jq .isDraft | grep -q false
           echo "v$VERSION is live on the canonical feed and its legacy updater bridge"
+          # Publishing created the tag with this workflow's token, and GitHub
+          # starts no workflow from events that token creates. Start the two
+          # tag-driven publishes by hand, on the tag, so they see refs/tags/v*.
+          for workflow in npm-package.yml docker.yml; do
+            GH_TOKEN="$CANONICAL_TOKEN" gh workflow run "$workflow" --repo "$GITHUB_REPOSITORY" --ref "v$VERSION"
+          done
+          echo "dispatched the npm package and Docker image publishes on v$VERSION"

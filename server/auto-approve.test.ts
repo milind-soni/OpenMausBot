@@ -5,7 +5,9 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  approvalHeldReason,
   approvalKey,
+  approvalModeForOrigin,
   autoDecision,
   autoVerdict,
   looksDestructive,
@@ -215,6 +217,28 @@ describe("autoDecision", () => {
   });
 });
 
+// Full is a decision about the person's OWN sessions with a bot. A turn
+// another bot started is not one, so it runs as Approve for me: the guards
+// card, an unattended sender's block holds, and the fold logs every answer.
+describe("approvalModeForOrigin", () => {
+  const person = { peerInitiated: false };
+  const peer = { peerInitiated: true };
+
+  it("keeps a person's own turn at the mode they chose", () => {
+    for (const mode of ["ask", "auto", "full", "custom"] as const) {
+      expect(approvalModeForOrigin(mode, person)).toBe(mode);
+    }
+  });
+
+  it("runs a peer-started turn on a Full or Custom bot as Approve for me", () => {
+    expect(approvalModeForOrigin("full", peer)).toBe("auto");
+    expect(approvalModeForOrigin("custom", peer)).toBe("auto");
+    // and never widens the lower modes
+    expect(approvalModeForOrigin("ask", peer)).toBe("ask");
+    expect(approvalModeForOrigin("auto", peer)).toBe("auto");
+  });
+});
+
 describe("unattended turns", () => {
   const bot = { autoApprove: true, alwaysAllow: ["Bash:git"] };
 
@@ -229,5 +253,54 @@ describe("unattended turns", () => {
   it("still auto-approves the same action when a person started the turn", () => {
     expect(autoDecision(bot, "Bash", "git status")).toBeTruthy();
     expect(autoDecision(bot, "Bash", "git status", { unattended: false })).toBeTruthy();
+  });
+});
+
+// The report behind this: Auto mode "still asks for many commands" once a
+// fleet is running. The cards were right to appear — Auto is switched off
+// entirely for a turn nobody started — but they explained themselves as if
+// this one action were special, so the mode looked broken instead of paused.
+describe("approvalHeldReason", () => {
+  const auto = { permission: true, mode: "auto" as const, fullAccessAvailable: true };
+
+  it("says Auto is paused, not picky, when nobody started the turn", () => {
+    const held = approvalHeldReason({ ...auto, unattended: true });
+    expect(held).toContain("every action asks");
+    expect(held).toContain("Full access");
+    expect(held).not.toContain("This action needs you");
+  });
+
+  it("still blames the action when a person is driving the turn", () => {
+    expect(approvalHeldReason({ ...auto, unattended: false }))
+      .toBe("This action needs you, so Approve for me stopped to ask.");
+  });
+
+  it("does not offer Full access to a provider that cannot reach it", () => {
+    const held = approvalHeldReason({ ...auto, unattended: true, fullAccessAvailable: false });
+    expect(held).toContain("every action asks");
+    expect(held).not.toContain("Full access");
+  });
+
+  it("explains a peer-started Full bot as Auto without promising Full bypasses the origin guard", () => {
+    const held = approvalHeldReason({
+      ...auto, unattended: true,
+      mode: approvalModeForOrigin("full", { peerInitiated: true }),
+      fullAccessAvailable: false,
+    });
+    expect(held).toContain("every action asks");
+    expect(held).not.toContain("Full access");
+  });
+
+  it("keeps the native and sandbox notes ahead of any mode explanation", () => {
+    expect(approvalHeldReason({ ...auto, unattended: true, source: "native-approval" }))
+      .toBe("The provider requires your approval for this action.");
+    expect(approvalHeldReason({ ...auto, unattended: true, requiresExplicitApproval: true }))
+      .toContain("only Full access can approve it automatically");
+  });
+
+  it("explains nothing for questions or for modes that always ask", () => {
+    expect(approvalHeldReason({ ...auto, unattended: true, permission: false })).toBeUndefined();
+    expect(approvalHeldReason({ ...auto, unattended: true, mode: "ask" })).toBeUndefined();
+    expect(approvalHeldReason({ ...auto, unattended: true, mode: "full" })).toBeUndefined();
   });
 });

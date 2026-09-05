@@ -5,44 +5,67 @@
 // file next to the server.
 //
 //   openmausbot serve [--port 8799] [--data-dir ~/.openmausbot] [--label "cab mini"]
-//                     [--public-url https://host] [--tailscale] [--no-pair]
+//                     [--public-url https://host] [--tailscale | --tunnel] [--no-pair]
 //   openmausbot pair  [--label "My MacBook"] [--client] [--public-url https://host]
 //   openmausbot sessions [revoke <id>]
 //   openmausbot status
+//   openmausbot login [--email you@example.com]
+//   openmausbot logout
 //
 // `serve` starts the server, waits for it, and prints a pairing link with a
 // QR code: scan it with the phone or open it on a laptop. `--tailscale` asks
 // Tailscale to terminate HTTPS for it and uses the MagicDNS name in the link.
+// `--tunnel` (after `login`) serves at a public https://….openmausbot.com
+// address through a Cloudflare tunnel: no domain, no proxy, no open port.
 //
 // This module only exports; openmausbot.ts is the entry that runs main(), so
 // bundling this file into other entries (pair-cli.ts) never runs it twice.
 import { spawn, type ChildProcess } from "node:child_process";
-import { existsSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, join, resolve } from "node:path";
+import { createInterface } from "node:readline/promises";
 import { fileURLToPath } from "node:url";
 import qrcode from "qrcode-terminal";
 
 import { explainTailscaleFailure, tailscaleServe, tailscaleServeOff, tailscaleStatus, type TailscaleStatus } from "./tailscale.ts";
+import {
+  cleanupTunnelOrigin,
+  createTunnelAccount,
+  createTunnelOrigin,
+  describeTunnelAccount,
+  describeTunnelState,
+  ensureCloudflared,
+  guardianEntry,
+  startTunnel,
+  tunnelAccess,
+  type CompanionOriginEndpoint,
+  type ManagedTunnelAccess,
+  type RunningTunnel,
+} from "./tunnel.ts";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 
 export interface CliOptions {
-  command: "serve" | "pair" | "sessions" | "status" | "help";
+  command: "serve" | "pair" | "sessions" | "status" | "login" | "logout" | "help";
   port: number;
   dataDir: string;
   label?: string;
   publicUrl?: string;
   tailscale: boolean;
+  tunnel: boolean;
   client: boolean;
   pair: boolean;
   revoke?: string;
+  email?: string;
   json: boolean;
 }
 
+const COMMANDS = ["serve", "pair", "sessions", "status", "login", "logout", "help", "--help", "-h"];
+
 export function parseArgs(argv: string[], env: NodeJS.ProcessEnv = process.env): CliOptions | { error: string } {
   const [command = "help", ...rest] = argv;
-  if (!["serve", "pair", "sessions", "status", "help", "--help", "-h"].includes(command)) {
+  if (!COMMANDS.includes(command)) {
     return { error: `unknown command "${command}"` };
   }
   const options: CliOptions = {
@@ -50,6 +73,7 @@ export function parseArgs(argv: string[], env: NodeJS.ProcessEnv = process.env):
     port: Number(env.OMB_PORT || 8799),
     dataDir: env.OMB_DATA_DIR || join(homedir(), ".openmausbot"),
     tailscale: false,
+    tunnel: false,
     client: false,
     pair: true,
     json: false,
@@ -68,9 +92,11 @@ export function parseArgs(argv: string[], env: NodeJS.ProcessEnv = process.env):
       else if (arg === "--label") options.label = value();
       else if (arg === "--public-url") options.publicUrl = value().replace(/\/+$/, "");
       else if (arg === "--tailscale") options.tailscale = true;
+      else if (arg === "--tunnel") options.tunnel = true;
       else if (arg === "--client") options.client = true;
       else if (arg === "--no-pair") options.pair = false;
       else if (arg === "--json") options.json = true;
+      else if (arg === "--email") options.email = value();
       else if (options.command === "sessions" && arg === "revoke") options.revoke = value();
       else return { error: `unknown argument "${arg}"` };
     } catch (error) {
@@ -79,26 +105,71 @@ export function parseArgs(argv: string[], env: NodeJS.ProcessEnv = process.env):
   }
   if (!Number.isInteger(options.port) || options.port < 1 || options.port > 65_535) return { error: "--port must be 1-65535" };
   if (options.publicUrl && !/^https?:\/\//.test(options.publicUrl)) return { error: "--public-url must start with http:// or https://" };
+  if (options.tailscale && options.tunnel) return { error: "choose one of --tailscale (your tailnet) and --tunnel (a public address)" };
   return options;
 }
 
 export const USAGE = `openmausbot — run the server anywhere, pair devices to it
 
   openmausbot serve [--port 8799] [--data-dir DIR] [--label NAME]
-                    [--public-url https://host] [--tailscale] [--no-pair]
+                    [--public-url https://host] [--tailscale | --tunnel] [--no-pair]
   openmausbot pair  [--label NAME] [--client] [--public-url https://host]
   openmausbot sessions [revoke ID]
   openmausbot status
+  openmausbot login [--email you@example.com]
+  openmausbot logout
 
 serve   starts the server and prints a pairing link + QR code
 pair    mints a pairing code against a running server (--client: chat only)
 sessions lists paired devices; "sessions revoke ID" signs one out
 status  what the server says about itself
+login   signs this machine in to an OpenMausBot account (an emailed code)
+        and reserves its public address for --tunnel
+logout  releases that address and signs out
 
 --tailscale  serve over your tailnet: Tailscale terminates HTTPS and the
              link uses this machine's MagicDNS name (needs Tailscale signed in
              and HTTPS certificates enabled for the tailnet)
+--tunnel     serve at a public https://….openmausbot.com address through a
+             Cloudflare tunnel: no domain, no proxy, no open port. Run
+             \`openmausbot login\` once on this machine first.
 `;
+
+/** Terminal in, terminal out; tests substitute all three. */
+export interface CliIo {
+  log(line: string): void;
+  error(line: string): void;
+  ask(question: string): Promise<string>;
+}
+
+export function defaultIo(): CliIo {
+  return {
+    log: (line) => console.log(line),
+    error: (line) => console.error(line),
+    ask: async (question) => {
+      const rl = createInterface({ input: process.stdin, output: process.stdout });
+      try {
+        return await rl.question(question);
+      } finally {
+        rl.close();
+      }
+    },
+  };
+}
+
+/** The version this command ships with: package.json is one level up in the
+ * npm package (dist-server/), the image and a checkout (server/). */
+export function serverVersion(here = HERE): string {
+  try {
+    const parsed: unknown = JSON.parse(readFileSync(resolve(here, "..", "package.json"), "utf8"));
+    const version = typeof parsed === "object" && parsed !== null ? Reflect.get(parsed, "version") : undefined;
+    return typeof version === "string" && version ? version : "0.0.0";
+  } catch {
+    return "0.0.0";
+  }
+}
+
+const message = (error: unknown) => (error instanceof Error ? error.message : String(error));
 
 // ── talking to a running server (loopback = owner) ────────────────────
 async function api(port: number, path: string, init: { method?: string; body?: string } = {}): Promise<{ status: number; body: any }> {
@@ -199,16 +270,86 @@ export function formatSessions(sessions: Array<{ id: string; label: string; scop
   return [line(head), ...rows.map(line), "", "revoke one with: openmausbot sessions revoke <id>"].join("\n");
 }
 
-export async function runStatus(options: CliOptions): Promise<number> {
+export async function runStatus(options: CliOptions, io: CliIo = defaultIo()): Promise<number> {
+  let code = 0;
   try {
     const res = await fetch(`http://127.0.0.1:${options.port}/.well-known/openmausbot/environment`);
     const body: any = await res.json();
-    console.log(options.json ? JSON.stringify(body, null, 2) : `${body.label} · OpenMausBot ${body.version} on ${body.platform} · id ${body.environmentId}`);
-    return 0;
+    io.log(options.json ? JSON.stringify(body, null, 2) : `${body.label} · OpenMausBot ${body.version} on ${body.platform} · id ${body.environmentId}`);
   } catch {
-    console.error(`no OpenMausBot server on http://127.0.0.1:${options.port}`);
+    io.error(`no OpenMausBot server on http://127.0.0.1:${options.port}`);
+    code = 1;
+  }
+  if (!options.json) {
+    const account = describeTunnelAccount(createTunnelAccount({ dataDir: options.dataDir, version: serverVersion() }).credentials.read());
+    if (account.address) io.log(`public address: ${account.address} (signed in as ${account.email ?? "?"}; serve it with --tunnel)`);
+  }
+  return code;
+}
+
+export async function runLogin(options: CliOptions, io: CliIo = defaultIo()): Promise<number> {
+  const account = createTunnelAccount({ dataDir: options.dataDir, version: serverVersion() });
+  if (account.credentials.status === "unavailable") {
+    io.error(`${account.credentials.file} exists but could not be read; fix or remove it, then try again`);
     return 1;
   }
+  if (!account.controlPlane) {
+    io.error("OMB_CONTROL_PLANE_URL is set but is not an https address");
+    return 1;
+  }
+  const existing = describeTunnelAccount(account.credentials.read());
+  if (existing.address) io.log(`already signed in as ${existing.email ?? "?"} (${existing.address}); signing in again refreshes it`);
+  const email = (options.email ?? (await io.ask("Email for your OpenMausBot account: "))).trim();
+  if (!email) {
+    io.error("an email address is needed: openmausbot login --email you@example.com");
+    return 1;
+  }
+  try {
+    await account.service.requestCode(email);
+  } catch (error) {
+    io.error(`could not send a sign-in code: ${message(error)}`);
+    return 1;
+  }
+  const code = (await io.ask(`Enter the 8-digit code we emailed to ${email}: `)).trim();
+  let state;
+  try {
+    state = await account.service.verifyCode(email, code);
+  } catch (error) {
+    io.error(`sign-in failed: ${message(error)}`);
+    return 1;
+  }
+  const signedIn = describeTunnelAccount(account.credentials.read());
+  if (!signedIn.address) {
+    io.error(`signed in, but no public address was issued${state.message ? `: ${state.message}` : ""}`);
+    return 1;
+  }
+  io.log(`Signed in as ${signedIn.email ?? email}.`);
+  io.log(`This machine's public address: ${signedIn.address}`);
+  io.log("Serve there with:  openmausbot serve --tunnel");
+  return 0;
+}
+
+export async function runLogout(options: CliOptions, io: CliIo = defaultIo()): Promise<number> {
+  const account = createTunnelAccount({ dataDir: options.dataDir, version: serverVersion() });
+  const before = describeTunnelAccount(account.credentials.read());
+  if (!before.email) {
+    io.log("this machine is not signed in");
+    return 0;
+  }
+  let state;
+  try {
+    state = await account.service.signOut();
+  } catch (error) {
+    io.error(`sign-out failed: ${message(error)}`);
+    return 1;
+  }
+  const after = describeTunnelAccount(account.credentials.read());
+  if (after.email) {
+    io.error(`still signed in${state.message ? `: ${state.message}` : ""}`);
+    return 1;
+  }
+  io.log(`Signed out ${before.email}${before.address ? `; ${before.address} is released` : ""}.`);
+  return 0;
 }
 
 /** Where the server bundle lives relative to this file: next to it in the
@@ -227,6 +368,41 @@ export function serverEntry(here = HERE): { command: string; args: string[]; sta
   return { command: process.execPath, args: ["--experimental-strip-types", source], staticDir, skillsDir: existsSync(join(root, "skills")) ? join(root, "skills") : null };
 }
 
+interface TunnelPlan {
+  access: ManagedTunnelAccess;
+  binary: string;
+  guardian: string;
+  origin: CompanionOriginEndpoint;
+}
+
+/** Everything `--tunnel` needs before the server starts, or the one reason
+ * it cannot have it. Fails closed: no silent fallback to a local-only server. */
+async function planTunnel(options: CliOptions, log: (line: string) => void): Promise<TunnelPlan | { error: string }> {
+  const account = createTunnelAccount({ dataDir: options.dataDir, version: serverVersion() });
+  if (account.credentials.status === "unavailable") return { error: `${account.credentials.file} exists but could not be read; fix or remove it` };
+  if (!describeTunnelAccount(account.credentials.read()).email) {
+    return { error: "no account on this machine yet: run `openmausbot login` first, then `openmausbot serve --tunnel`" };
+  }
+  // A fresh connector token when the control plane answers; the saved one otherwise.
+  try {
+    const state = await account.service.retry();
+    if (state.message && !tunnelAccess(account.credentials.read())) log(`tunnel: ${state.message}`);
+  } catch (error) {
+    log(`tunnel: control plane not reachable right now (${message(error)}); using the saved address`);
+  }
+  const access = tunnelAccess(account.credentials.read());
+  if (!access) return { error: "this machine has no public address; run `openmausbot login` again" };
+  let binary: string;
+  try {
+    binary = await ensureCloudflared({ dataDir: options.dataDir, log });
+  } catch (error) {
+    return { error: `--tunnel: ${message(error)}` };
+  }
+  const guardian = guardianEntry();
+  if (!guardian) return { error: "--tunnel: the connector guardian is missing from this install" };
+  return { access, binary, guardian, origin: createTunnelOrigin() };
+}
+
 export async function runServe(options: CliOptions, log: (line: string) => void = console.log): Promise<number> {
   if (await serverUp(options.port)) {
     console.error(`something already answers on http://127.0.0.1:${options.port}; use \`openmausbot pair\` against it, or --port for a second server`);
@@ -242,6 +418,17 @@ export async function runServe(options: CliOptions, log: (line: string) => void 
     }
     tailscale = probe.status;
   }
+  let plan: TunnelPlan | null = null;
+  if (options.tunnel) {
+    const planned = await planTunnel(options, log);
+    if ("error" in planned) {
+      console.error(planned.error);
+      return 1;
+    }
+    plan = planned;
+    if (publicUrl && publicUrl !== plan.access.endpoint) log(`note: --public-url is ignored with --tunnel; the address is ${plan.access.endpoint}`);
+    publicUrl = plan.access.endpoint;
+  }
   const entry = serverEntry();
   if (!entry.staticDir) log("note: no built UI found next to the server; the API runs but browsers get no page (build with `pnpm exec vite build`)");
   const env: NodeJS.ProcessEnv = {
@@ -253,6 +440,7 @@ export async function runServe(options: CliOptions, log: (line: string) => void 
   if (entry.staticDir) env.OMB_STATIC_DIR = entry.staticDir;
   if (entry.skillsDir && !process.env.OMB_SKILLS_DIR) env.OMB_SKILLS_DIR = entry.skillsDir;
   if (options.label && !process.env.OMB_ENVIRONMENT_LABEL) env.OMB_ENVIRONMENT_LABEL = options.label;
+  if (plan) env.OMB_TUNNEL_SOCKET = plan.origin.socketPath;
   if (tailscale) {
     const served = await tailscaleServe(tailscale, options.port);
     if ("failure" in served) {
@@ -269,9 +457,17 @@ export async function runServe(options: CliOptions, log: (line: string) => void 
   child.on("exit", (code) => {
     exited = code ?? 1;
   });
-  const stop = async () => {
-    if (tailscale) await tailscaleServeOff(tailscale).catch(() => undefined);
-    if (exited === null) child.kill("SIGTERM");
+  let tunnel: RunningTunnel | null = null;
+  let stopping: Promise<void> | null = null;
+  const stop = () => {
+    stopping ??= (async () => {
+      // The gateway stops accepting before the server it forwards to goes away.
+      if (tunnel) await tunnel.stop().catch(() => undefined);
+      if (tailscale) await tailscaleServeOff(tailscale).catch(() => undefined);
+      if (exited === null) child.kill("SIGTERM");
+      if (plan) cleanupTunnelOrigin(plan.origin);
+    })();
+    return stopping;
   };
   process.on("SIGINT", () => void stop());
   process.on("SIGTERM", () => void stop());
@@ -281,11 +477,25 @@ export async function runServe(options: CliOptions, log: (line: string) => void 
     if (await serverUp(options.port)) break;
     await new Promise((r) => setTimeout(r, 250));
   }
-  if (exited !== null) return exited;
+  if (exited !== null) {
+    if (plan) cleanupTunnelOrigin(plan.origin);
+    return exited;
+  }
   if (!(await serverUp(options.port))) {
     console.error("the server did not answer within a minute; see its output above");
     await stop();
     return 1;
+  }
+  if (plan && child.pid) {
+    tunnel = startTunnel({
+      dataDir: options.dataDir,
+      access: plan.access,
+      originTarget: { pid: child.pid, socketPath: plan.origin.socketPath },
+      binaryPath: plan.binary,
+      guardian: plan.guardian,
+      onState: (state) => log(describeTunnelState(state, plan.access.endpoint)),
+    });
+    tunnel.started.catch((error: unknown) => log(`tunnel: ${message(error)}`));
   }
   log("");
   log(`OpenMausBot is running on http://127.0.0.1:${options.port}${publicUrl ? `, reachable at ${publicUrl}` : ""}`);
@@ -298,7 +508,9 @@ export async function runServe(options: CliOptions, log: (line: string) => void 
   }
   log("stop with Ctrl+C");
   return await new Promise<number>((resolveExit) => {
-    child.on("exit", (code) => resolveExit(code ?? 0));
+    child.on("exit", (code) => {
+      void stop().finally(() => resolveExit(code ?? 0));
+    });
   });
 }
 
@@ -317,6 +529,10 @@ export async function main(argv = process.argv.slice(2)): Promise<number> {
       return runSessions(options);
     case "status":
       return runStatus(options);
+    case "login":
+      return runLogin(options);
+    case "logout":
+      return runLogout(options);
     default:
       console.log(USAGE);
       return 0;

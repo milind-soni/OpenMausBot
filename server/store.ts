@@ -126,6 +126,13 @@ export interface Message {
    * model saw it mid-turn, so the transcript marks it — a reader should
    * know the reply above it may already account for this line */
   steered?: boolean;
+  /** A user-role message that did not come from a person at a keyboard:
+   * a headless server's HTTP API, reached with no paired session and no
+   * browser origin — which is to say, most often a script, and possibly a
+   * bot's own shell. Stamped rather than refused because loopback is the
+   * owner on such a server by design; but a reader (a bot's room turn, the
+   * posting budget, the transcript) must not take it for the person. */
+  via?: "api";
   /** Provider turn that produced this message. Assistant output can arrive
    * in several pieces around tool calls; the UI uses this identity to keep
    * those pieces together without discarding them. */
@@ -155,6 +162,12 @@ export interface Message {
    * letting it read as ordinary room conversation. `unattended` records that
    * nobody was watching the bot that posted it. */
   peerPost?: { unattended?: boolean };
+  /** Set on the user-role line another bot delivered with ask_bot into this
+   * bot's own conversation. The text opens with the provenance note, but a
+   * reader that windows into the message (recall snippets, a renderer) never
+   * sees the opening — this is the same fact where it cannot be cut off.
+   * `unattended` records that nobody was watching the bot that asked. */
+  peerAsk?: { botId: string; name: string; unattended?: boolean };
   /** emoji reactions; by = "user" or a member botId. */
   reactions?: Array<{ emoji: string; by: string }>;
   /** comm chips: "Messaged @X" in the caller's chat, linking to the

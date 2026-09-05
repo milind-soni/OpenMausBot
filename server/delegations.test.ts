@@ -132,6 +132,8 @@ describe("queueDelegation", () => {
       .messagesFor(from.threadId)
       .find((m) => m.kind === "activity" && m.tool?.name?.startsWith("Delegated to @"));
     expect(chip?.tool?.name).toBe("Delegated to @Helper: followup");
+    // queueing is the whole act — an open chip would spin for good
+    expect(chip?.tool?.ok).toBe(true);
 
     // The chip is also broadcast over SSE so chat clients see it without
     // polling /api/bots

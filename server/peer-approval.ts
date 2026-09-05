@@ -15,6 +15,7 @@
 // `alwaysAllow`, so the two sides never disagree about what was granted.
 
 import { newId } from "./contracts.ts";
+import { buildNotification, type Notification } from "./notify.ts";
 import { peerAllowKey, type PeerAction } from "./peer-approval-key.ts";
 import type { BotRecord, Message, Store } from "./store.ts";
 
@@ -27,6 +28,9 @@ export interface ApprovalBus {
   store: Store;
   /** SSE broadcast (kind: "message" envelope). */
   broadcast: (payload: Record<string, unknown>) => void;
+  /** Where a "blocked on you" frame goes. Optional: the boot-time cleanup
+   * and the settle paths only ever answer cards, and never raise one. */
+  notify?: (notification: Notification | null) => void;
 }
 
 interface Pending {
@@ -55,6 +59,10 @@ function settleCard(pending: Pending, behavior: string, source: "user" | "system
   pending.bus.store.patchMessage(pending.threadId, pending.messageId, {
     card: { ...existing.card, answered: behavior, dismissed: source !== "user" },
   });
+  // answered (by whoever): the turn is working again — the same hand-back
+  // the request.resolved fold does for a provider's card
+  const waiting = pending.bus.store.bot(pending.fromBotId);
+  if (waiting?.activity === "waiting-on-you") pending.bus.store.setActivity(waiting.id, "working");
 }
 
 /** requestId → pending ask. Lives only in memory — restarting the
@@ -110,6 +118,26 @@ function pushApprovalCard(
   return note;
 }
 
+/** This card is the one bot-to-bot event that blocks on a person — for up
+ * to fifteen minutes — so it gets exactly what a provider's card gets: the
+ * bot shows as waiting rather than working, and a "needs approval" frame
+ * goes out aimed at the thread the card is in. Without this the sidebar
+ * read "Working…" with no dot and no banner until the timer denied it, and
+ * the bot then reported it could not reach a teammate nobody knew it had
+ * asked for. A bot speaking in a room is not reachable in its own thread,
+ * so the room the card landed in is named, the way takeover does. */
+function announceCard(bus: ApprovalBus, from: BotRecord, card: Message, sourceThreadId: string): void {
+  // the bot is not working now — it is waiting on a person. A delegation
+  // drained after its turn has already settled is idle, and stays so.
+  const live = bus.store.bot(from.id);
+  if (live?.busy) bus.store.setActivity(from.id, "waiting-on-you");
+  const room = bus.store.groupByThread(sourceThreadId);
+  const group = room && !room.dm ? { id: room.id, name: room.name } : undefined;
+  const title = card.card?.title ?? "";
+  const detail = card.card?.subtitle ? `${title} — ${card.card.subtitle}` : title;
+  bus.notify?.(buildNotification("approval", from, sourceThreadId, detail, { avatarUrl: from.avatarUrl, group }));
+}
+
 /** Ask the user (in the source task thread) whether `from` may `action` `target`.
  * Resolves with `"allow"` or `"deny"`. If `from.alwaysAllow` already
  * covers the (action, target) pair, returns `"allow"` immediately
@@ -130,6 +158,7 @@ export function requestPeerApproval(
     // the card has to exist before the entry, so a timeout or an answer can
     // always find it to settle
     const card = pushApprovalCard(bus, from, target, message, action, requestId, sourceThreadId);
+    announceCard(bus, from, card, sourceThreadId);
     const timer = setTimeout(() => {
       // 15 minutes without an answer → deny. Keeps an unattended bot from
       // stalling its own turn forever (matches the Claude broker timeout).

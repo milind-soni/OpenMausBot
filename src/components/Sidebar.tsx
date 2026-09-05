@@ -1,5 +1,5 @@
 import { track } from "@/lib/analytics";
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import {
   Archive,
@@ -34,6 +34,8 @@ import { api, useStore, formatTime, visibleMessages, type Bot, type Group } from
 import { BotAvatar, InitialsAvatar } from "./Avatar";
 import { stateForBot } from "@/lib/mascot";
 import { cn } from "@/lib/cn";
+import { ConfirmDialog } from "./ConfirmDialog";
+import { WorkingDots } from "./WorkingIndicator";
 import { skillRecorderEnabled } from "@/lib/feature-flags";
 import { nextRename } from "@/lib/rename";
 import { downloadAllBots } from "@/lib/team-files";
@@ -244,6 +246,7 @@ function RoomContextMenu({
   return createPortal(
     <div
       data-room-menu
+      data-sidebar
       style={{ top, left }}
       className="fixed z-40 w-[228px] overflow-hidden rounded-xl border border-hairline/50 bg-card py-1.5 shadow-2xl shadow-black/60"
     >
@@ -537,11 +540,13 @@ function BotContextMenu({
   menu,
   onClose,
   onArchive,
+  onDelete,
   onMoveToSection,
 }: {
   menu: MenuState;
   onClose: () => void;
   onArchive: (bot: Bot) => void;
+  onDelete: (bot: Bot) => void;
   onMoveToSection: (botId: string) => void;
 }) {
   const { state, dispatch } = useStore();
@@ -670,13 +675,42 @@ function BotContextMenu({
           key="delete"
           deleting={deleting}
           onClick={() => {
-            dispatch({ type: "deleteBot", botId: bot.id });
             onClose();
+            onDelete(bot);
           }}
         />,
       ]}
     </div>
   );
+}
+
+export type BotConfirmKind = "archive" | "delete";
+
+/** A confirmation may span live fleet updates; never authorize from its snapshot. */
+export function currentArchivableBot(bots: readonly Bot[], id: string): Bot | undefined {
+  const active = bots.filter((candidate) => !candidate.hidden);
+  if (active.length <= 1) return undefined;
+  return active.find((candidate) => candidate.id === id && !candidate.chiefOfStaff);
+}
+
+/** Copy for the archive / delete confirmation dialogs. Archiving keeps
+ * everything and is reversible from Archived bots; deleting is not — the
+ * server drops every task transcript, the workspace (files + memory), and
+ * staged skill state with the bot. */
+export function botConfirmCopy(kind: BotConfirmKind, name: string) {
+  return kind === "archive"
+    ? {
+        title: `Archive ${name}?`,
+        body: `${name} leaves the sidebar, but every conversation is kept. You can restore it any time from Archived bots.`,
+        confirmLabel: "Archive",
+        tone: "neutral" as const,
+      }
+    : {
+        title: `Delete ${name}?`,
+        body: `This permanently removes ${name} along with its conversations, files, and memory. This cannot be undone.`,
+        confirmLabel: "Delete",
+        tone: "danger" as const,
+      };
 }
 
 export function BotDeleteMenuItem({ deleting, onClick }: { deleting: boolean; onClick: () => void }) {
@@ -725,6 +759,8 @@ export function BotListItem({
   // the visible branch, so a version switch changes the row with the chat
   const visible = visibleMessages(bot);
   const last = visible.at(-1);
+  // the role from Bot Settings → Title, shown as a pill beside the name
+  const title = bot.title.trim();
   const rowClass = cn(
     "flex w-full items-center rounded-xl border text-left",
     iconOnly
@@ -732,28 +768,43 @@ export function BotListItem({
       : density === "compact"
         ? "gap-2 px-2 py-1.5 pr-12"
         : "gap-3 px-3 py-2.5 pr-12",
-    bot.chiefOfStaff
-      ? selected
-        ? "border-accent/40 bg-accent/15"
-        : "border-accent/25 bg-accent/5 hover:bg-accent/10"
-      : selected
-        ? "border-transparent bg-raised"
-        : "border-transparent hover:bg-raised/50",
+    // Chief of Staff is called out by the crown label below, not by tinting
+    // the whole row — an accent border + fill read as "selected" even when
+    // another bot was active.
+    selected ? "border-transparent bg-raised" : "border-transparent hover:bg-raised/50",
   );
+  const working = Boolean(bot.busy) && bot.activity !== "waiting-on-you";
   const body = (
     <>
-      <BotAvatar
-        bot={bot}
-        state={stateForBot({ ...bot, messages: visible })}
-        size={avatarSize}
-        motion={mascotMotion?.kind ?? "none"}
-        motionKey={mascotMotion?.nonce ?? 0}
-        // Motion means something is happening. A resting bot holds a resting
-        // pose — N idle rows bobbing at display rate was most of the app's
-        // visible-idle CPU (states are keyword-derived, so "working" can be
-        // decorative; busy/unread/motion are the real signals).
-        animated={Boolean(bot.busy) || Boolean(bot.unread) || (mascotMotion?.kind ?? "none") !== "none"}
-      />
+      {/* flex, not inline: an inline wrapper adds a baseline gap under the
+          avatar and makes the row taller than before the presence dot */}
+      <span className="relative flex shrink-0">
+        <BotAvatar
+          bot={bot}
+          state={stateForBot({ ...bot, messages: visible })}
+          size={avatarSize}
+          motion={mascotMotion?.kind ?? "none"}
+          motionKey={mascotMotion?.nonce ?? 0}
+          // Motion means something is happening. A resting bot holds a resting
+          // pose — N idle rows bobbing at display rate was most of the app's
+          // visible-idle CPU (states are keyword-derived, so "working" can be
+          // decorative; busy/unread/motion are the real signals).
+          animated={Boolean(bot.busy) || Boolean(bot.unread) || (mascotMotion?.kind ?? "none") !== "none"}
+        />
+        {working && (
+          // presence dot: green while the bot is working, ringed in the row's
+          // ground so it reads on both a photo and the mascot. Also the only
+          // activity signal in icons-only density, where the text is hidden.
+          <span
+            data-testid="working-dot"
+            className={cn(
+              "absolute -right-0.5 -bottom-0.5 rounded-full border-2 border-panel bg-success",
+              // scale with the avatar: 56px comfortable, 40/44px compact + icons
+              density === "comfortable" ? "size-3.5" : "size-3",
+            )}
+          />
+        )}
+      </span>
       <div className={cn("min-w-0 flex-1", iconOnly && "hidden")}>
         <div className="flex items-baseline justify-between gap-2">
           <span className="flex min-w-0 items-center gap-1.5 truncate text-[15px] font-semibold text-ink">
@@ -774,6 +825,11 @@ export function BotListItem({
               className="truncate"
               inputClassName="w-full rounded bg-inset px-1 py-0.5 text-[15px] font-semibold"
             />
+            {title && !renaming && (
+              <span className="max-w-[120px] shrink-0 truncate rounded-full bg-control px-1.5 py-px text-[10.5px] font-medium text-ink-secondary">
+                {title}
+              </span>
+            )}
           </span>
           {selected && last && !renaming && (
             <span className="shrink-0 text-xs text-ink-secondary transition-opacity group-hover:opacity-0 group-focus-within:opacity-0">
@@ -781,6 +837,13 @@ export function BotListItem({
             </span>
           )}
         </div>
+        {bot.chiefOfStaff && !renaming && (
+          // Chief of Staff gets its own line under the name so a long name
+          // and the title badge keep the full width of the name line.
+          <span className="flex items-center gap-1 text-[11.5px] font-medium leading-4 text-accent">
+            <Crown size={11} className="shrink-0" /> Chief of Staff
+          </span>
+        )}
         <div className="flex items-center justify-between gap-2">
           {deleting ? (
             <span role="status" className="flex min-w-0 items-center gap-1.5 truncate text-[13px] text-ink-secondary">
@@ -789,13 +852,16 @@ export function BotListItem({
             </span>
           ) : (
             <span className="flex min-w-0 items-center gap-1.5 truncate text-[13px] text-ink-secondary">
-              {bot.chiefOfStaff && (
-                <span className="flex shrink-0 items-center gap-1 text-[11.5px] font-medium text-accent">
-                  <Crown size={11} /> Chief of Staff
+              {bot.busy && bot.activity !== "waiting-on-you" ? (
+                // the same typing dots as the chat header; sized to the text's
+                // line box so the row does not jump when work starts or ends
+                <span className="flex h-[1.5em] items-center" role="status">
+                  <WorkingDots size={3.5} />
+                  <span className="sr-only">Working…</span>
                 </span>
+              ) : (
+                <span className="truncate">{preview(bot)}</span>
               )}
-              {bot.chiefOfStaff && preview(bot) && <span className="shrink-0 text-ink-secondary/60">·</span>}
-              <span className="truncate">{preview(bot)}</span>
             </span>
           )}
           {bot.unread && (
@@ -1005,6 +1071,9 @@ export function Sidebar({ open, onClose }: { open: boolean; onClose: () => void 
   const remoteClient = window.ogb?.remoteClient?.active === true;
   const { capabilities } = useDesktopCapabilities();
   const importReturnRef = useRef<HTMLButtonElement>(null);
+  const sidebarRef = useRef<HTMLElement>(null);
+  const [confirm, setConfirm] = useState<{ kind: BotConfirmKind; bot: Bot } | null>(null);
+  const cancelConfirm = useCallback(() => setConfirm(null), []);
   const [menu, setMenu] = useState<MenuState | null>(null);
   const [sectionPicker, setSectionPicker] = useState<MenuState | null>(null);
   const [roomMenu, setRoomMenu] = useState<{ groupId: string; x: number; y: number } | null>(null);
@@ -1060,13 +1129,13 @@ export function Sidebar({ open, onClose }: { open: boolean; onClose: () => void 
   // New Room panel can be open on top of it, so the same Escape press closes
   // them together. Fine, since both directions are "get me out of here."
   useEffect(() => {
-    if (!open) return;
+    if (!open || confirm) return;
     const closeOnEscape = (event: KeyboardEvent) => {
       if (event.key === "Escape") onClose();
     };
     document.addEventListener("keydown", closeOnEscape);
     return () => document.removeEventListener("keydown", closeOnEscape);
-  }, [open, onClose]);
+  }, [open, onClose, confirm]);
 
   useEffect(() => {
     if (!densityOpen) return;
@@ -1109,9 +1178,17 @@ export function Sidebar({ open, onClose }: { open: boolean; onClose: () => void 
   };
 
 
-  const archiveBot = async (bot: Bot) => {
+  // One pending confirmation at a time: archive (inline button or context
+  // menu) and delete (context menu) both open the same dialog.
+  const requestArchive = (bot: Bot) => {
+    const current = currentArchivableBot(state.bots, bot.id);
+    if (current) setConfirm({ kind: "archive", bot: current });
+  };
+
+  const archiveBot = async ({ id }: Pick<Bot, "id">) => {
+    const bot = currentArchivableBot(state.bots, id);
+    if (!bot) return;
     const activeBots = state.bots.filter((candidate) => !candidate.hidden);
-    if (bot.chiefOfStaff || activeBots.length <= 1) return;
     setTeamFeedback(null);
     try {
       const response = await api(`/api/bots/${bot.id}`, {
@@ -1279,8 +1356,11 @@ export function Sidebar({ open, onClose }: { open: boolean; onClose: () => void 
 
   return (
     <aside
+      ref={sidebarRef}
+      tabIndex={-1}
       aria-label="Bots and navigation"
       data-native-view-overlay
+      data-sidebar
       className={cn(
         "flex h-full shrink-0 flex-col border-r border-hairline/40 bg-panel transition-[width] duration-200",
         density === "icons" ? "w-[80px]" : density === "compact" ? "w-[272px]" : "w-[320px]",
@@ -1470,7 +1550,7 @@ export function Sidebar({ open, onClose }: { open: boolean; onClose: () => void 
                 bot={unsectionedChief}
                 density={density}
                 onMenu={setMenu}
-                onArchive={(bot) => void archiveBot(bot)}
+                onArchive={requestArchive}
                 archiveDisabled
               />
             </div>
@@ -1544,7 +1624,7 @@ export function Sidebar({ open, onClose }: { open: boolean; onClose: () => void 
                         bot={bot}
                         density={density}
                         onMenu={setMenu}
-                        onArchive={(candidate) => void archiveBot(candidate)}
+                        onArchive={requestArchive}
                         archiveDisabled
                       />
                     ))}
@@ -1562,7 +1642,7 @@ export function Sidebar({ open, onClose }: { open: boolean; onClose: () => void 
                         bot={bot}
                         density={density}
                         onMenu={setMenu}
-                        onArchive={(candidate) => void archiveBot(candidate)}
+                        onArchive={requestArchive}
                         archiveDisabled={activeBotCount <= 1}
                       />
                     ))}
@@ -1715,10 +1795,25 @@ export function Sidebar({ open, onClose }: { open: boolean; onClose: () => void 
         <BotContextMenu
           menu={menu}
           onClose={() => setMenu(null)}
-          onArchive={(bot) => void archiveBot(bot)}
+          onArchive={requestArchive}
+          onDelete={(bot) => setConfirm({ kind: "delete", bot })}
           onMoveToSection={(botId) => setSectionPicker({ botId, x: menu.x, y: menu.y })}
         />
       )}
+      <ConfirmDialog
+        open={confirm !== null}
+        {...(confirm ? botConfirmCopy(confirm.kind, confirm.bot.name) : botConfirmCopy("archive", ""))}
+        icon={confirm?.kind === "delete" ? <Trash2 size={18} /> : <Archive size={18} />}
+        onCancel={cancelConfirm}
+        returnFocusRef={sidebarRef}
+        onConfirm={() => {
+          if (!confirm) return;
+          const { kind, bot } = confirm;
+          setConfirm(null);
+          if (kind === "archive") void archiveBot(bot);
+          else dispatch({ type: "deleteBot", botId: bot.id });
+        }}
+      />
       {sectionPicker && (
         <SectionPicker
           current={state.bots.find((b) => b.id === sectionPicker.botId)?.section}

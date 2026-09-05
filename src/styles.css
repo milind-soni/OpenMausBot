@@ -1043,3 +1043,12 @@ button:disabled.bg-danger {
   color: var(--color-ink-secondary);
   opacity: 1;
 }
+
+/* Sidebar items are clickable and should say so on hover. Tailwind v4's
+   preflight stopped giving buttons a pointer cursor, so bot rows, section
+   headers, and menu entries hovered like static text. Scoped to the sidebar
+   (and its portalled context menu) rather than every button in the app;
+   disabled or busy controls keep the default cursor. */
+[data-sidebar] :is(button, [role="button"]):not(:disabled, [aria-busy="true"]) {
+  cursor: pointer;
+}

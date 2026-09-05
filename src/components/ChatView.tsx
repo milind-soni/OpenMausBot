@@ -1328,8 +1328,10 @@ export function ChatView({ bot }: { bot: Bot }) {
           )}
           <TurnPresence
             avatar={
-              <MausAvatar
-                color={bot.color}
+              // BotAvatar, not a bare MausAvatar: an uploaded profile image
+              // (and a chosen mascot body) must match the sidebar row.
+              <BotAvatar
+                bot={bot}
                 state={toolInFlight ? "working" : "thinking"}
                 size={36}
                 forward={false}

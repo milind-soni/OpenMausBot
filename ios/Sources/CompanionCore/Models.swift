@@ -1015,3 +1015,30 @@ struct RoutineRunResponse: Codable, Sendable { var run: RoutineRun }
 struct ConnectorAuthorizationResponse: Codable, Sendable {
     var url: String
 }
+
+// MARK: - Server sessions (pairing with a server directly)
+
+/// What `POST /api/auth/pair` returns on a server: the bearer, the session
+/// it opened, and the server's public descriptor.
+public struct ServerPairResponse: Codable, Sendable {
+    public var token: String
+    public var session: ServerSession
+    public var environment: ServerEnvironment
+}
+
+public struct ServerSession: Codable, Hashable, Sendable {
+    public var id: String
+    public var label: String
+    public var scopes: [String]
+    public var expiresAt: Double?
+
+    public var isAdmin: Bool { scopes.contains("admin") }
+}
+
+/// `GET /.well-known/openmausbot/environment`, served without a session.
+public struct ServerEnvironment: Codable, Hashable, Sendable {
+    public var environmentId: String
+    public var label: String
+    public var platform: String?
+    public var version: String?
+}

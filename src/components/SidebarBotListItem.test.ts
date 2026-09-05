@@ -8,7 +8,8 @@ vi.mock("./DesktopCapabilities", () => ({
   useDesktopCapabilities: () => ({}),
 }));
 
-import { BotDeleteMenuItem, BotListItem } from "./Sidebar";
+import { ConfirmDialogCard } from "./ConfirmDialog";
+import { BotDeleteMenuItem, BotListItem, botConfirmCopy, currentArchivableBot } from "./Sidebar";
 
 const bot = (overrides: Partial<Bot> = {}): Bot => ({
   id: "atlas",
@@ -46,9 +47,86 @@ describe("BotListItem", () => {
     expect(markup).not.toContain('aria-label="Archive Atlas"');
   });
 
+  it("shows the Chief of Staff label on its own line under the name", () => {
+    const withTitle = renderRow(bot({ chiefOfStaff: true, title: "Developer" }), false);
+    expect(withTitle).toContain(">Developer</span>");
+    expect(withTitle).toContain("Chief of Staff</span>");
+    // the label sits after the name line, never inside it
+    expect(withTitle.indexOf("Chief of Staff</span>")).toBeGreaterThan(withTitle.indexOf(">Developer</span>"));
+
+    const withoutTitle = renderRow(bot({ chiefOfStaff: true }), false);
+    expect(withoutTitle).toContain("Chief of Staff</span>");
+    expect(withoutTitle.indexOf("Chief of Staff</span>")).toBeGreaterThan(withoutTitle.indexOf(">Atlas<"));
+
+    expect(renderRow(bot(), false)).not.toContain("Chief of Staff");
+  });
+
+  it("shows the bot's title as a badge beside the name", () => {
+    const markup = renderRow(bot({ title: "Developer" }), false);
+
+    expect(markup).toContain(">Developer</span>");
+    expect(renderRow(bot({ title: "  " }), false)).not.toContain(">Developer</span>");
+  });
+
+  it("shows typing dots instead of preview text while the bot works", () => {
+    const markup = renderRow(bot({ busy: true }), false);
+
+    expect(markup).toContain("animate-status-pulse");
+    expect(markup).toContain('class="sr-only">Working…');
+  });
+
+  it("marks the avatar with a green presence dot only while the bot works", () => {
+    expect(renderRow(bot({ busy: true }), false)).toContain('data-testid="working-dot"');
+    expect(renderRow(bot(), false)).not.toContain('data-testid="working-dot"');
+    expect(renderRow(bot({ busy: true, activity: "waiting-on-you" }), false)).not.toContain('data-testid="working-dot"');
+  });
+
   it("renders the inline Archive action only when it is available", () => {
     expect(renderRow(bot(), true)).not.toContain('aria-label="Archive Atlas"');
     expect(renderRow(bot(), false)).toContain('aria-label="Archive Atlas"');
+  });
+});
+
+describe("archive / delete confirmation", () => {
+  it("rechecks the latest fleet after a confirmation was opened", () => {
+    const snapshot = bot();
+    const other = bot({ id: "other" });
+    const renamed = bot({ name: "New name" });
+    expect(currentArchivableBot([renamed, other], snapshot.id)).toBe(renamed);
+    expect(currentArchivableBot([bot({ chiefOfStaff: true }), other], snapshot.id)).toBeUndefined();
+    expect(currentArchivableBot([bot({ hidden: true }), other], snapshot.id)).toBeUndefined();
+    expect(currentArchivableBot([snapshot], snapshot.id)).toBeUndefined();
+    expect(currentArchivableBot([other, bot({ id: "third" })], snapshot.id)).toBeUndefined();
+  });
+  it("archive copy names the bot and says it can be restored", () => {
+    const copy = botConfirmCopy("archive", "Juniper");
+
+    expect(copy.title).toContain("Juniper");
+    expect(copy.body).toMatch(/restore/i);
+    expect(copy.tone).toBe("neutral");
+  });
+
+  it("delete copy names the bot and spells out that it is permanent", () => {
+    const copy = botConfirmCopy("delete", "Willow");
+
+    expect(copy.title).toContain("Willow");
+    expect(copy.body).toMatch(/permanently/i);
+    expect(copy.tone).toBe("danger");
+  });
+
+  it("renders as an alert dialog with Cancel and the action button", () => {
+    const markup = renderToStaticMarkup(createElement(ConfirmDialogCard, {
+      open: true,
+      ...botConfirmCopy("delete", "Willow"),
+      onCancel: vi.fn(),
+      onConfirm: vi.fn(),
+    }));
+
+    expect(markup).toContain('role="alertdialog"');
+    expect(markup).toContain("Delete Willow?");
+    expect(markup).toContain(">Cancel</button>");
+    expect(markup).toContain(">Delete</button>");
+    expect(markup).toContain("bg-danger");
   });
 });
 

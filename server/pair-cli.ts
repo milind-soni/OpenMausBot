@@ -1,11 +1,9 @@
 // Compatibility alias: `openmausbot pair` lives in cli.ts now. Kept because
 // docs and images reference dist-server/pair-cli.js.
 import { main } from "./cli.ts";
+import { exitAfterFlush } from "./exit.ts";
 
-main(["pair", ...process.argv.slice(2)]).then(
-  (code) => process.exit(code),
-  (error) => {
-    console.error(error instanceof Error ? error.message : String(error));
-    process.exit(1);
-  },
-);
+main(["pair", ...process.argv.slice(2)]).then(exitAfterFlush, (error) => {
+  console.error(error instanceof Error ? error.message : String(error));
+  exitAfterFlush(1);
+});

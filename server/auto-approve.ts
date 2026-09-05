@@ -13,6 +13,30 @@
 
 import { approvalModeFor, type ApprovalMode } from "../shared/approval-mode.ts";
 
+/** The mode a turn actually runs under, given where the turn came from.
+ *
+ * Full and Custom are Codex's: on any other engine they fall to Ask, so a
+ * hand-edited record cannot hand Claude a bypass it was never granted.
+ *
+ * And Full is a decision the person made about THEIR OWN sessions with a
+ * bot — "run without asking me". A turn started by another bot is not one
+ * of those: the person never saw the request, and the sender may itself be
+ * unattended or working off a page it just read. A Full target reached that
+ * way runs as Approve for me instead — ordinary requests still flow, the
+ * destructive and sensitive guards card, an unattended sender's block holds,
+ * and every answer goes through the fold and into the decision log, where a
+ * driver-side Full accept never appears. A webhook or scheduled turn on a
+ * Full bot is unchanged: the person opted into that, and the docs say so. */
+export function approvalModeForOrigin(mode: ApprovalMode, origin: { peerInitiated: boolean }): ApprovalMode {
+  // Provider support is settled by supportsApprovalMode at the call site;
+  // this only answers who STARTED the turn. A permissive mode is the
+  // person's grant to the bot they talk to, not to every teammate that can
+  // reach it, so a peer-started turn runs one notch down and still gets the
+  // unattended downgrade after this.
+  if ((mode === "full" || mode === "custom") && origin.peerInitiated) return "auto";
+  return mode;
+}
+
 const DESTRUCTIVE = [
   /\brm\s+(-[a-z]*\s+)*-[a-z]*[rf]/i, // rm -rf, rm -fr, rm -r -f
   /\bmkfs\b|\bdiskutil\s+erase|\bdd\s+[^|]*\bof=\/dev\//i,
@@ -227,4 +251,37 @@ export function autoDecision(
   },
 ): string | null {
   return autoVerdict(bot, tool, summary, context).approve;
+}
+
+/** The note a card shows above its buttons, explaining why the bot stopped
+ * rather than answering for itself.
+ *
+ * The unattended case is the one users misread. A turn a webhook or another
+ * bot started never runs Auto at all — approvalModeForTurn downgrades it to
+ * Ask before the provider spawns — so "this action needs you" would name the
+ * wrong cause and imply the next action might pass. It will not: with a fleet
+ * delegating between bots, every card looks like this until someone answers.
+ * Say that plainly, and name the mode that keeps running. */
+export function approvalHeldReason(context: {
+  /** Native and sandbox notes outrank any mode explanation, so a provider's
+   * own remaining checks are never described as something Full access skips. */
+  source?: AutoVerdictSource;
+  /** Questions are not permissions and are never held for a mode reason. */
+  permission: boolean;
+  requiresExplicitApproval?: boolean;
+  /** Origin-adjusted mode, before unattended Auto is downgraded to Ask. */
+  mode: ApprovalMode;
+  unattended: boolean;
+  /** Suppress the Full access hint on providers that cannot offer it. */
+  fullAccessAvailable: boolean;
+}): string | undefined {
+  if (context.source === "native-approval") return "The provider requires your approval for this action.";
+  if (!context.permission) return undefined;
+  if (context.requiresExplicitApproval) {
+    return "This changes the provider sandbox, so only Full access can approve it automatically.";
+  }
+  if (context.mode !== "auto") return undefined;
+  if (!context.unattended) return "This action needs you, so Approve for me stopped to ask.";
+  const hint = context.fullAccessAvailable ? " Full access keeps working unattended." : "";
+  return `A webhook or another bot started this turn, so Approve for me is paused and every action asks.${hint}`;
 }

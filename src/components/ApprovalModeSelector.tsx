@@ -23,7 +23,7 @@ export const APPROVAL_MODE_OPTIONS: ReadonlyArray<{
     mode: "auto",
     label: "Approve for me",
     chip: "Auto",
-    description: "The provider reviews routine actions and asks about others",
+    description: "The provider reviews routine actions and asks about others; unattended turns always ask",
     Icon: ShieldCheck,
   },
   {
