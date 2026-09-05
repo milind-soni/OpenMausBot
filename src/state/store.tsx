@@ -84,6 +84,7 @@ export interface ConnectorCardData {
   description: string;
   status: "required" | "authorizing" | "connected" | "failed";
   resumeKey: string;
+  alias?: string;
   error?: string;
   dismissed?: boolean;
   resumed?: boolean;

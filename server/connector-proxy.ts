@@ -115,25 +115,46 @@ async function relay(message: Json, timeoutMs = RELAY_TIMEOUT_MS): Promise<Json 
   return parseUpstream(await readBounded(response), message.id);
 }
 
-function connectorAdds(args: unknown): string[] {
+interface ConnectorRequest {
+  slug: string;
+  alias?: string;
+}
+
+function connectorAdds(args: unknown): ConnectorRequest[] {
   if (!args || typeof args !== "object" || Array.isArray(args)) return [];
   const toolkits = (args as { toolkits?: unknown }).toolkits;
   if (!Array.isArray(toolkits)) return [];
-  return [...new Set(toolkits.flatMap((item) => {
-    if (typeof item === "string") return [item.toLowerCase()];
-    if (!item || typeof item !== "object" || Array.isArray(item)) return [];
-    const row = item as { name?: unknown; toolkit?: unknown; action?: unknown };
-    const slug = typeof row.toolkit === "string" ? row.toolkit : row.name;
+  const seen = new Set<string>();
+  const requests: ConnectorRequest[] = [];
+  for (const item of toolkits) {
+    if (typeof item === "string") {
+      const slug = item.toLowerCase();
+      if (!seen.has(slug)) {
+        seen.add(slug);
+        requests.push({ slug });
+      }
+      continue;
+    }
+    if (!item || typeof item !== "object" || Array.isArray(item)) continue;
+    const row = item as { name?: unknown; toolkit?: unknown; action?: unknown; alias?: unknown; account?: unknown };
     const action = String(row.action ?? "add").toLowerCase();
-    return typeof slug === "string" && ["add", "connect", "initiate"].includes(action) ? [slug.toLowerCase()] : [];
-  }))];
+    if (!["add", "connect", "initiate"].includes(action)) continue;
+    const slug = typeof row.toolkit === "string" ? row.toolkit : row.name;
+    if (typeof slug !== "string") continue;
+    const normalized = slug.toLowerCase();
+    if (seen.has(normalized)) continue;
+    seen.add(normalized);
+    const alias = typeof row.alias === "string" ? row.alias : typeof row.account === "string" ? row.account : undefined;
+    requests.push({ slug: normalized, ...(alias ? { alias: alias.trim() } : {}) });
+  }
+  return requests;
 }
 
-async function showConnectorCards(slugs: string[]): Promise<void> {
+async function showConnectorCards(items: ConnectorRequest[]): Promise<void> {
   const response = await fetch(`${HARNESS}/api/internal/connectors/request`, {
     method: "POST",
     headers: { "content-type": "application/json", authorization: `Bearer ${TOKEN}` },
-    body: JSON.stringify({ botId: BOT_ID, threadId: THREAD_ID, slugs, resumeKey: randomUUID() }),
+    body: JSON.stringify({ botId: BOT_ID, threadId: THREAD_ID, items, resumeKey: randomUUID() }),
     signal: AbortSignal.timeout(30_000),
   });
   if (!response.ok) {
@@ -175,12 +196,13 @@ async function handle(message: Json): Promise<void> {
   if (method === "tools/call") {
     const params = (message.params ?? {}) as Json;
     const name = String(params.name ?? "");
-    const slugs = /MANAGE_CONNECTIONS$/i.test(name) ? connectorAdds(params.arguments) : [];
-    if (slugs.length) {
-      await showConnectorCards(slugs);
+    const requests = /MANAGE_CONNECTIONS$/i.test(name) ? connectorAdds(params.arguments) : [];
+    if (requests.length) {
+      await showConnectorCards(requests);
+      const labels = requests.map((r) => (r.alias ? `${r.slug} (${r.alias})` : r.slug)).join(", ");
       send(textResult(
         id,
-        `OpenMausBot showed the user a secure connection card for ${slugs.join(", ")}. End this turn now. The app will continue the task automatically after the connection finishes.`,
+        `OpenMausBot showed the user a secure connection card for ${labels}. End this turn now. The app will continue the task automatically after the connection finishes.`,
       ));
       return;
     }

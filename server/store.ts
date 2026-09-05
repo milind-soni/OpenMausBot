@@ -74,6 +74,8 @@ export interface ConnectorCardData {
   status: "required" | "authorizing" | "connected" | "failed";
   /** Cards created by one agent request resume together after all connect. */
   resumeKey: string;
+  /** Account alias supplied by the agent when adding a second (or first) account. */
+  alias?: string;
   error?: string;
   dismissed?: boolean;
   resumed?: boolean;
