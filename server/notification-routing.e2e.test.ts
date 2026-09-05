@@ -444,6 +444,46 @@ describe("bot-to-bot coordination is recorded, not announced", () => {
     }
   }, 45_000);
 
+  it("buzzes when a bot stops to ask whether it may contact a teammate", async () => {
+    const asker = await createBot("Nib", "quick");
+    const peer = await createBot("Dot", "quick");
+    // the one gate a person switches on for a bot's peer comms — the card it
+    // raises is the one bot-to-bot event that genuinely blocks on them
+    expect((await api("PATCH", `/api/bots/${asker.id}`, { approvePeerComms: true })).status).toBe(200);
+    const stream = await openSse(`${base}/api/events`);
+    const asking = api(
+      "POST",
+      "/api/internal/ask-bot",
+      { fromBotId: asker.id, toBotId: peer.id, message: "Dot, can you take the deploy?" },
+      await capability(asker.id, asker.threadId),
+    );
+    try {
+      const frame = await stream.until(
+        (candidate) => candidate.kind === "notify" && candidate.notification?.botId === asker.id,
+        20_000,
+      );
+      expect(frame.notification).toMatchObject({
+        kind: "approval",
+        botId: asker.id,
+        threadId: asker.threadId,
+        title: "Nib needs approval",
+      });
+      expect(frame.notification.body).toContain("wants to contact @Dot");
+      // the card is really open where the banner points
+      const card = (await botState(asker.id))?.messages.findLast(
+        (message: { kind: string; card?: { requestId?: string; tool?: string } }) => message.kind === "options" && Boolean(message.card?.requestId),
+      );
+      expect(card?.card?.tool).toBe("ask_bot");
+      const denied = await api("POST", `/api/bots/${asker.id}/respond`, { requestId: card.card.requestId, behavior: "deny" });
+      expect(denied.status).toBe(200);
+      expect((await asking).body).toMatchObject({ error: "denied by user" });
+    } finally {
+      stream.close();
+      await asking.catch(() => undefined);
+      await cleanup([], [asker.id, peer.id]);
+    }
+  }, 45_000);
+
   it("still buzzes when a peer's turn stops to ask the person a question", async () => {
     const asker = await createBot("Quill", "quick");
     const peer = await createBot("Sage", "curious", "fake-model");

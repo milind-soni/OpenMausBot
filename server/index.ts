@@ -4946,7 +4946,7 @@ const ROOM_POST_MAX_CHARS = 4_000;
 // approval bus: peer-approval.ts only needs to push cards and broadcast
 // them — its pending map lives in the module so the two respond endpoints
 // can call resolvePeerComms without holding a reference back to here.
-const approvalBus: ApprovalBus = { store, broadcast };
+const approvalBus: ApprovalBus = { store, broadcast, notify };
 
 // Approvals live only in memory, so any peer card still open on disk is one
 // whose resolver died with the previous process. Left alone it can never be
