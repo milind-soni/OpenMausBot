@@ -38,6 +38,7 @@ Use only mapped, tested commands:
 - [Chat turns](chat-turns.md)
 - [Channels](channels.md)
 - [Engines and Doctor](engines.md)
+- [Team backups](team-backups.md)
 
 Renderer-only behavior—Settings, sidebar drag-and-drop, the VM modal, the
 built-in browser panel, and updater UI—is not proven by this first harness.

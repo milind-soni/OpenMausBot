@@ -133,6 +133,24 @@ export function insertMessage(threadId: string, message: Message): void {
     .run(threadId, message.id, message.at, message.role, message.kind, message.text ?? null, JSON.stringify(message));
 }
 
+/** A backup may only populate a fresh thread, never replace a transcript. */
+export function importThread(threadId: string, messages: Message[], activeLeafId: string | null): void {
+  const database = db();
+  database.exec("BEGIN IMMEDIATE");
+  try {
+    if (database.prepare("SELECT 1 FROM messages WHERE thread_id = ? LIMIT 1").get(threadId) ||
+        database.prepare("SELECT 1 FROM thread_state WHERE thread_id = ?").get(threadId)) {
+      throw new Error("Cannot import over an existing conversation");
+    }
+    for (const message of messages) insertMessage(threadId, message);
+    setActiveLeaf(threadId, activeLeafId);
+    database.exec("COMMIT");
+  } catch (error) {
+    database.exec("ROLLBACK");
+    throw error;
+  }
+}
+
 /** Persist a new message and the branch head as one crash-safe mutation. */
 export function appendMessage(threadId: string, message: Message): void {
   const database = db();

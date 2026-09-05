@@ -1105,6 +1105,14 @@ export class Store {
     return this.thread(threadId).messages;
   }
 
+  /** Used only with newly allocated import threads. No live actions are
+   * replayed: the importer supplies inert text and freshly remapped IDs. */
+  importTranscript(threadId: string, messages: Message[], activeLeafId: string | null): void {
+    if (this.messagesFor(threadId).length) throw new Error("Cannot import over an existing conversation");
+    mdb.importThread(threadId, messages, activeLeafId);
+    this.threads.delete(threadId);
+  }
+
   activeLeaf(threadId: string): string | null {
     return this.thread(threadId).activeLeafId;
   }

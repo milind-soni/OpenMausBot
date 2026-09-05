@@ -39,7 +39,7 @@ import { nextRename } from "@/lib/rename";
 import { downloadAllBots } from "@/lib/team-files";
 import { useDesktopCapabilities } from "./DesktopCapabilities";
 import { MIN_QUERY, SearchResults } from "./SearchResults";
-import { TeamLibraryPanel, type TeamImportResult } from "./TeamLibraryPanel";
+import { TeamLibraryPanel } from "./TeamLibraryPanel";
 import { RenameTitle } from "./RenameTitle";
 import { BotPickerList } from "./BotPickerList";
 import {
@@ -993,7 +993,6 @@ export function Sidebar({ open, onClose }: { open: boolean; onClose: () => void 
   const [teamFeedback, setTeamFeedback] = useState<{
     error: boolean;
     text: string;
-    undo?: TeamImportResult;
     restoreBot?: { id: string; name: string };
   } | null>(null);
   const [query, setQuery] = useState("");
@@ -1071,8 +1070,8 @@ export function Sidebar({ open, onClose }: { open: boolean; onClose: () => void 
     setTeamFeedback(null);
     try {
       const exported = await downloadAllBots();
-      track("team_exported", { members: exported.members, scope: "all_visible" });
-      setTeamFeedback({ error: false, text: `${exported.members} bots exported` });
+      track("team_exported", { members: exported.members, scope: "backup" });
+      setTeamFeedback({ error: false, text: `Backup downloaded · ${exported.members} bots and conversation text. ${exported.warnings.length ? `${exported.warnings.length} backup notes about deleted bots/rooms—review them when importing. ` : ""}Keep this file private.` });
     } catch (cause) {
       setTeamFeedback({
         error: true,
@@ -1083,59 +1082,6 @@ export function Sidebar({ open, onClose }: { open: boolean; onClose: () => void 
     }
   };
 
-  const undoTeamLoad = async (result: TeamImportResult) => {
-    setTeamFeedback(null);
-    try {
-      await Promise.all([
-        ...result.importedRoutineIds.map((routineId) =>
-          api(`/api/routines/${routineId}`, { method: "DELETE" }).then(() =>
-            dispatch({ type: "routineDeleted", routineId }),
-          ),
-        ),
-        ...result.importedGroupIds.map((groupId) =>
-          api(`/api/groups/${groupId}`, { method: "DELETE" }).then(() =>
-            dispatch({ type: "groupDeleted", groupId }),
-          ),
-        ),
-      ]);
-      const archiveNew = await Promise.all(
-        result.importedBotIds.map((botId) =>
-          api(`/api/bots/${botId}`, {
-            method: "PATCH",
-            body: JSON.stringify({ hidden: true, chiefOfStaff: false }),
-          }),
-        ),
-      );
-      for (const response of archiveNew) dispatch({ type: "botPatched", bot: response.bot });
-
-      const previousChiefs = result.archived.filter((bot) => bot.chiefOfStaff);
-      const restoreOthers = await Promise.all(
-        result.archived
-          .filter((bot) => !bot.chiefOfStaff)
-          .map((bot) =>
-            api(`/api/bots/${bot.id}`, {
-              method: "PATCH",
-              body: JSON.stringify({ hidden: false }),
-            }),
-          ),
-      );
-      for (const response of restoreOthers) dispatch({ type: "botPatched", bot: response.bot });
-      const restoredChiefs = await Promise.all(
-        previousChiefs.map((previousChief) =>
-          api(`/api/bots/${previousChief.id}`, {
-            method: "PATCH",
-            body: JSON.stringify({ hidden: false, chiefOfStaff: true }),
-          }),
-        ),
-      );
-      for (const response of restoredChiefs) dispatch({ type: "botPatched", bot: response.bot });
-      const first = result.archived[0];
-      if (first) dispatch({ type: "select", id: first.id });
-      setTeamFeedback({ error: false, text: "Previous team restored" });
-    } catch (cause) {
-      setTeamFeedback({ error: true, text: cause instanceof Error ? cause.message : String(cause) });
-    }
-  };
 
   const archiveBot = async (bot: Bot) => {
     const activeBots = state.bots.filter((candidate) => !candidate.hidden);
@@ -1303,7 +1249,6 @@ export function Sidebar({ open, onClose }: { open: boolean; onClose: () => void 
   };
   const activeBotCount = state.bots.filter((bot) => !bot.hidden).length;
   const archivedBots = state.bots.filter((bot) => bot.hidden);
-  const pendingTeamUndo = teamFeedback?.undo;
   const pendingBotUndo = teamFeedback?.restoreBot;
 
   return (
@@ -1435,10 +1380,11 @@ export function Sidebar({ open, onClose }: { open: boolean; onClose: () => void 
                     void exportAllBots();
                   }}
                   disabled={exportingTeam}
+                  title="Private backup of bot setup and conversation text. Files, images, workspace memory and connections are not included."
                   className="flex w-full items-center gap-3 px-3.5 py-2 text-left text-[14px] text-ink hover:bg-raised/70"
                 >
                   {exportingTeam ? <Loader2 size={16} className="animate-spin text-ink-secondary" /> : <ArrowDownToLine size={16} className="text-ink-secondary" />}
-                  {exportingTeam ? "Exporting…" : "Export all bots"}
+                  {exportingTeam ? "Exporting…" : "Export backup"}
                 </button>
                 <button
                   onClick={() => {
@@ -1790,18 +1736,7 @@ export function Sidebar({ open, onClose }: { open: boolean; onClose: () => void 
           onImported={(result) => {
             setTeamLibraryOpen(false);
             setTeamInstallUrl(null);
-            setTeamFeedback(
-              result.archived.length > 0
-                ? {
-                    error: false,
-                    text: `${result.name} loaded · ${result.members} ${result.members === 1 ? "bot" : "bots"}`,
-                    undo: result,
-                  }
-                : {
-                    error: false,
-                    text: `${result.name} loaded · ${result.members} ${result.members === 1 ? "bot" : "bots"}`,
-                  },
-            );
+            setTeamFeedback({ error: false, text: `${result.members} ${result.members === 1 ? "bot" : "bots"} added · existing bots and chats kept` });
           }}
         />
       )}
@@ -1818,14 +1753,6 @@ export function Sidebar({ open, onClose }: { open: boolean; onClose: () => void 
           >
             <div className="flex items-center gap-3">
               <span>{teamFeedback.text}</span>
-              {pendingTeamUndo && (
-                <button
-                  onClick={() => void undoTeamLoad(pendingTeamUndo)}
-                  className="rounded-md px-1.5 py-0.5 font-medium text-accent hover:bg-raised"
-                >
-                  Undo
-                </button>
-              )}
               {pendingBotUndo && (
                 <button
                   onClick={() => void undoBotArchive(pendingBotUndo)}

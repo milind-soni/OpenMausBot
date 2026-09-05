@@ -271,6 +271,8 @@ import { SPAWNED_PROXIES } from "./proxy-paths.ts";
 import { loadBundledSkills, loadUserSkills, mergeSkills, renderSkillInstructions, selectBundledSkills } from "./skill-library.ts";
 import { installedPlaybookInstructions } from "./installed-playbooks.ts";
 import { createBotPackageExport } from "./package-export.ts";
+import { createTeamBackup, importTeamBackup } from "./team-backup.ts";
+import { MAX_TEAM_BACKUP_BYTES } from "../shared/team-backup.ts";
 import { shouldMountLocalComputer } from "./local-routing.ts";
 import { resolveSurface } from "./surface.ts";
 import {
@@ -8816,8 +8818,11 @@ const server = createServer(async (req, res) => {
             ? `${profileName}'s Team`
             : "My OpenMaus Team";
       const memberIds = store.bots.filter((bot) => !bot.hidden).map((bot) => bot.id);
-      if (memberIds.length === 0) return json(res, 400, { error: "Create a bot before exporting your team" });
+      if ((body.format === "backup" ? store.bots.length : memberIds.length) === 0) return json(res, 400, { error: "Create a bot before exporting your team" });
       try {
+        if (body.format === "backup") {
+          return json(res, 200, createTeamBackup(store, routines!.listRoutines(), name));
+        }
         if (body.format === "package") {
           const document = createBotPackageExport({
             name,
@@ -8912,15 +8917,13 @@ const server = createServer(async (req, res) => {
       // GitHub, a shared file), so it must be structurally unable to reach
       // records the user already has: every member becomes a NEW bot with a
       // fresh id — a manifest cannot name, update, or merge into an existing
-      // bot or room, and importing the same file twice simply creates a
-      // second, freshly numbered set (an edit the user made to the first set
-      // is theirs and stays). Replace mode does hide the current team, but
-      // that archive is driven by the mode parameter the user chose and
-      // touches only hidden/chiefOfStaff on their own bots — nothing in the
-      // file decides what gets archived or how.
+      // bot or room. Repeated imports create freshly numbered copies.
       const importMode = url.searchParams.get("mode") ?? "add";
-      if (importMode !== "add" && importMode !== "replace" && importMode !== "project") {
-        return json(res, 400, { error: "Team import mode must be add, replace, or project" });
+      if (importMode === "replace") {
+        return json(res, 400, { error: "Replacing your team is no longer supported. Reopen Import in the updated app to add bots alongside your existing conversations." });
+      }
+      if (importMode !== "add" && importMode !== "project") {
+        return json(res, 400, { error: "Team import mode must be add or project" });
       }
       // `project` adds the team AND opens a caller-owned room on a folder.
       // Legacy team manifests remain people-only. Full bot packages may add
@@ -8936,7 +8939,20 @@ const server = createServer(async (req, res) => {
           projectCwd = validated.cwd;
         }
       }
-      const body = await readBody(req);
+      const body = await readBody(req, MAX_TEAM_BACKUP_BYTES);
+      if (body?.format === "openmaus.backup") {
+        if (importMode !== "add") return json(res, 400, { error: "Import backups alongside your existing bots; project mode is only for templates" });
+        try {
+          const imported = importTeamBackup(store, routines!, body, await defaultSelection());
+          const bots = imported.bots.map((bot) => publicBot(bot));
+          const groups = imported.groups.map((group) => ({ ...publicGroupState(group), ...messagePage(group.threadId, undefined) }));
+          for (const bot of bots) broadcast({ kind: "bot", bot });
+          for (const group of groups) broadcast({ kind: "group", group });
+          return json(res, 201, { ...imported, bots, groups });
+        } catch (error) {
+          return json(res, 400, { error: error instanceof Error ? error.message : "Backup could not be imported" });
+        }
+      }
       let packageDocument: ReturnType<typeof parseBotPackage> | null = null;
       let manifest: ReturnType<typeof parseTeamManifest> | null = null;
       try {
@@ -8951,23 +8967,12 @@ const server = createServer(async (req, res) => {
         ? pkg.agents.map((agent) => ({ member: packageAgentAsMember(agent), playbookKeys: agent.playbooks ?? [] }))
         : manifest!.team.members.map((member) => ({ member, playbookKeys: [] as string[] }));
 
-      // Snapshot before creating anything so replace never archives the new
-      // team. Old bots are hidden only after every new bot was created; a
-      // failed import therefore leaves the current workspace untouched.
-      const archived = importMode === "replace"
-        ? store.bots
-            .filter((bot) => !bot.hidden)
-            .map((bot) => ({ id: bot.id, chiefOfStaff: Boolean(bot.chiefOfStaff) }))
-        : [];
       const importedBots: ReturnType<typeof store.createBot>[] = [];
       const createdGroups: GroupRecord[] = [];
       const createdRoutineIds: string[] = [];
       // Names already in use, hidden bots included: an archived bot can be
       // un-archived later, and a revived duplicate would be just as
-      // ambiguous then. In replace mode this means re-importing your own
-      // export numbers the newcomers ("Mira 2") — the old team is only
-      // hidden, not gone, and Undo must never surface two bots wearing the
-      // same name.
+      // ambiguous then.
       const takenNames = new Set(store.bots.map((bot) => bot.name.trim().toLowerCase()));
       const memberIds = new Map<string, string>();
       let group: GroupRecord | undefined;
@@ -9003,6 +9008,7 @@ const server = createServer(async (req, res) => {
             },
             { seedMessages: false },
           );
+          importedBots.push(created);
           const installedPlaybooks = source.playbookKeys.flatMap((key) => {
             const playbook = playbookByKey.get(key);
             return playbook ? [{ ...playbook }] : [];
@@ -9021,7 +9027,6 @@ const server = createServer(async (req, res) => {
                 }
               : {}),
           });
-          importedBots.push(created);
           memberIds.set(member.key, created.id);
         }
 
@@ -9030,6 +9035,7 @@ const server = createServer(async (req, res) => {
         for (const room of pkg?.rooms ?? []) {
           const ids = room.members.map((key) => memberIds.get(key)!);
           let created = store.createGroup(room.name, ids, false, packageSection);
+          createdGroups.push(created);
           const defaultResponder = room.defaultResponder.kind === "agent"
             ? { kind: "member" as const, botId: memberIds.get(room.defaultResponder.agent)! }
             : { kind: room.defaultResponder.kind } as const;
@@ -9038,7 +9044,6 @@ const server = createServer(async (req, res) => {
             defaultResponder,
             setupCompletedAt: Date.now(),
           }) ?? created;
-          createdGroups.push(created);
         }
 
         for (const routine of pkg?.routines ?? []) {
@@ -9065,6 +9070,7 @@ const server = createServer(async (req, res) => {
         if (!pkg && importMode === "project" && importedBots.length > 0) {
           const roomName = url.searchParams.get("room")?.trim() || manifest!.team.name;
           group = store.createGroup(roomName, importedBots.map((bot) => bot.id));
+          createdGroups.push(group);
           if (projectCwd) {
             // `cwd` is the folder the room WANTS; the store pins it on the
             // first turn (pinGroupCwd). Setting the pin here would decide it
@@ -9072,25 +9078,14 @@ const server = createServer(async (req, res) => {
             group = store.patchGroup(group.id, { cwd: projectCwd }) ?? group;
           }
           broadcast({ kind: "group", group: publicGroupState(group) });
-          createdGroups.push(group);
         }
 
-        // Archive only after the complete new structure exists. A package
-        // that fails validation or persistence never disturbs the current
-        // workspace.
-        const archivedBots = archived.flatMap(({ id }) => {
-          const bot = store.patchBot(id, { hidden: true, chiefOfStaff: false });
-          return bot ? [publicBot(bot)] : [];
-        });
         const publicBots = importedBots.map((bot) => publicBot(store.bot(bot.id)!));
-        for (const bot of archivedBots) broadcast({ kind: "bot", bot });
         for (const bot of publicBots) broadcast({ kind: "bot", bot });
 
         return json(res, 201, {
           name: importName,
           bots: publicBots,
-          archivedBots,
-          archived,
           group,
           groups: createdGroups.map((created) => ({ ...created, messages: [] })),
           routines: createdRoutineIds.flatMap((id) => routines!.listRoutines().filter((routine) => routine.id === id)),
