@@ -47,15 +47,18 @@ describe("BotListItem", () => {
     expect(markup).not.toContain('aria-label="Archive Atlas"');
   });
 
-  it("moves the Chief of Staff marker beside the title badge when a title is set", () => {
+  it("shows the Chief of Staff label on its own line under the name", () => {
     const withTitle = renderRow(bot({ chiefOfStaff: true, title: "Developer" }), false);
     expect(withTitle).toContain(">Developer</span>");
-    expect(withTitle).toContain('aria-label="Chief of Staff"');
-    expect(withTitle).not.toContain("> Chief of Staff</span>");
+    expect(withTitle).toContain("Chief of Staff</span>");
+    // the label sits after the name line, never inside it
+    expect(withTitle.indexOf("Chief of Staff</span>")).toBeGreaterThan(withTitle.indexOf(">Developer</span>"));
 
     const withoutTitle = renderRow(bot({ chiefOfStaff: true }), false);
     expect(withoutTitle).toContain("Chief of Staff</span>");
-    expect(withoutTitle).not.toContain('aria-label="Chief of Staff"');
+    expect(withoutTitle.indexOf("Chief of Staff</span>")).toBeGreaterThan(withoutTitle.indexOf(">Atlas<"));
+
+    expect(renderRow(bot(), false)).not.toContain("Chief of Staff");
   });
 
   it("shows the bot's title as a badge beside the name", () => {
