@@ -17,7 +17,7 @@ describe("approval mode selector", () => {
       {
         mode: "auto",
         label: "Approve for me",
-        description: "The provider reviews routine actions and asks about others",
+        description: "The provider reviews routine actions and asks about others; unattended turns always ask",
       },
       {
         mode: "full",

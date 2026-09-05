@@ -5,6 +5,7 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  approvalHeldReason,
   approvalKey,
   autoDecision,
   autoVerdict,
@@ -229,5 +230,44 @@ describe("unattended turns", () => {
   it("still auto-approves the same action when a person started the turn", () => {
     expect(autoDecision(bot, "Bash", "git status")).toBeTruthy();
     expect(autoDecision(bot, "Bash", "git status", { unattended: false })).toBeTruthy();
+  });
+});
+
+// The report behind this: Auto mode "still asks for many commands" once a
+// fleet is running. The cards were right to appear — Auto is switched off
+// entirely for a turn nobody started — but they explained themselves as if
+// this one action were special, so the mode looked broken instead of paused.
+describe("approvalHeldReason", () => {
+  const auto = { permission: true, mode: "auto" as const, fullAccessAvailable: true };
+
+  it("says Auto is paused, not picky, when nobody started the turn", () => {
+    const held = approvalHeldReason({ ...auto, unattended: true });
+    expect(held).toContain("every action asks");
+    expect(held).toContain("Full access");
+    expect(held).not.toContain("This action needs you");
+  });
+
+  it("still blames the action when a person is driving the turn", () => {
+    expect(approvalHeldReason({ ...auto, unattended: false }))
+      .toBe("This action needs you, so Approve for me stopped to ask.");
+  });
+
+  it("does not offer Full access to a provider that cannot reach it", () => {
+    const held = approvalHeldReason({ ...auto, unattended: true, fullAccessAvailable: false });
+    expect(held).toContain("every action asks");
+    expect(held).not.toContain("Full access");
+  });
+
+  it("keeps the native and sandbox notes ahead of any mode explanation", () => {
+    expect(approvalHeldReason({ ...auto, unattended: true, source: "native-approval" }))
+      .toBe("The provider requires your approval for this action.");
+    expect(approvalHeldReason({ ...auto, unattended: true, requiresExplicitApproval: true }))
+      .toContain("only Full access can approve it automatically");
+  });
+
+  it("explains nothing for questions or for modes that always ask", () => {
+    expect(approvalHeldReason({ ...auto, unattended: true, permission: false })).toBeUndefined();
+    expect(approvalHeldReason({ ...auto, unattended: true, mode: "ask" })).toBeUndefined();
+    expect(approvalHeldReason({ ...auto, unattended: true, mode: "full" })).toBeUndefined();
   });
 });

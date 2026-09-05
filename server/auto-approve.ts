@@ -228,3 +228,36 @@ export function autoDecision(
 ): string | null {
   return autoVerdict(bot, tool, summary, context).approve;
 }
+
+/** The note a card shows above its buttons, explaining why the bot stopped
+ * rather than answering for itself.
+ *
+ * The unattended case is the one users misread. A turn a webhook or another
+ * bot started never runs Auto at all — approvalModeForTurn downgrades it to
+ * Ask before the provider spawns — so "this action needs you" would name the
+ * wrong cause and imply the next action might pass. It will not: with a fleet
+ * delegating between bots, every card looks like this until someone answers.
+ * Say that plainly, and name the mode that keeps running. */
+export function approvalHeldReason(context: {
+  /** Native and sandbox notes outrank any mode explanation, so a provider's
+   * own remaining checks are never described as something Full access skips. */
+  source?: AutoVerdictSource;
+  /** Questions are not permissions and are never held for a mode reason. */
+  permission: boolean;
+  requiresExplicitApproval?: boolean;
+  /** The durable mode, not the downgraded one this turn ran under. */
+  mode: ApprovalMode;
+  unattended: boolean;
+  /** Suppress the Full access hint on providers that cannot offer it. */
+  fullAccessAvailable: boolean;
+}): string | undefined {
+  if (context.source === "native-approval") return "The provider requires your approval for this action.";
+  if (!context.permission) return undefined;
+  if (context.requiresExplicitApproval) {
+    return "This changes the provider sandbox, so only Full access can approve it automatically.";
+  }
+  if (context.mode !== "auto") return undefined;
+  if (!context.unattended) return "This action needs you, so Approve for me stopped to ask.";
+  const hint = context.fullAccessAvailable ? " Full access keeps working unattended." : "";
+  return `A webhook or another bot started this turn, so Approve for me is paused and every action asks.${hint}`;
+}
