@@ -55,7 +55,9 @@ jobs:
           # the bundles also run directly by path (the image and docs do that), not only through cli.js:
           # a bundled module with a "run when executed directly" block would fire here
           node dist-server/openmausbot.js --help | grep -q "openmausbot serve"
-          OMB_PORT=1 node dist-server/pair-cli.js 2>&1 | grep -q "no OpenMausBot server"
+          OMB_PORT=1 node dist-server/pair-cli.js > pair.out 2>&1 || true
+          cat pair.out
+          grep -q "no OpenMausBot server" pair.out
           # --tunnel ships its own processes and fails closed without an account
           test -f dist-server/tunnel-guardian.js && test -f dist-server/prepare-cloudflared.js
           if HOME=/tmp/omb-pack/home node cli.js serve --tunnel --port 18798 --data-dir /tmp/omb-pack/data2 > tunnel.log 2>&1; then echo "serve --tunnel should refuse without login"; exit 1; fi
