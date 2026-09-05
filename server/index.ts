@@ -985,9 +985,19 @@ function askBotAndWait(targetBotId: string, message: string, depth: number, from
     // Timing out does NOT stop the peer's turn — the caller decides whether
     // the still-running work becomes a delegation claim ticket instead.
     const timer = setTimeout(() => finish({ status: "timeout", text }), ASK_BOT_TIMEOUT_MS);
+    // The asker's identity rides on the stored line as well as in the note
+    // prefixed to it: the wording is for the model reading this turn, the
+    // field is for anything that reads the transcript later.
+    const asker = fromBotId ? store.bot(fromBotId) : undefined;
+    const unattended = isUnattended(fromBotId);
     startTurn(targetBotId, message, {
       commsDepth: depth + 1,
-      unattended: isUnattended(fromBotId),
+      unattended,
+      peerAsk: asker
+        ? unattended
+          ? { botId: asker.id, name: asker.name, unattended: true }
+          : { botId: asker.id, name: asker.name }
+        : undefined,
       onDispatchError: (reason) => finish({ status: "error", text: `(couldn't start that bot: ${reason})` }),
     }).catch((err) =>
       finish({ status: "error", text: `(couldn't start that bot: ${err instanceof Error ? err.message : String(err)})` }),
@@ -3712,6 +3722,9 @@ async function startTurn(
     automationSource?: RoutineRunTrigger;
     /** the caller was already running unattended, so this turn is too */
     unattended?: boolean;
+    /** ask_bot delivery: the bot whose words this user-role line carries,
+     * recorded on the message itself (Message.peerAsk). */
+    peerAsk?: Message["peerAsk"];
     /** Resume an agent after the user completed an inline connection or credential card.
      * The prompt is control-plane context: it reaches the provider without
      * masquerading as another message authored by the user. */
@@ -3811,6 +3824,7 @@ async function startTurn(
           text,
           replyToId: opts?.replyTo?.id,
           sendId: opts?.sendId,
+          peerAsk: opts?.peerAsk,
         });
   }
 

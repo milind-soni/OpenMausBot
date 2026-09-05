@@ -153,6 +153,12 @@ export interface Message {
    * letting it read as ordinary room conversation. `unattended` records that
    * nobody was watching the bot that posted it. */
   peerPost?: { unattended?: boolean };
+  /** Set on the user-role line another bot delivered with ask_bot into this
+   * bot's own conversation. The text opens with the provenance note, but a
+   * reader that windows into the message (recall snippets, a renderer) never
+   * sees the opening — this is the same fact where it cannot be cut off.
+   * `unattended` records that nobody was watching the bot that asked. */
+  peerAsk?: { botId: string; name: string; unattended?: boolean };
   /** emoji reactions; by = "user" or a member botId. */
   reactions?: Array<{ emoji: string; by: string }>;
   /** comm chips: "Messaged @X" in the caller's chat, linking to the
