@@ -465,13 +465,20 @@ const browserCleanup: BrowserCleanupCoordinator = new BrowserCleanupCoordinator(
       : request.partitionId
         ? [browserSessionId("", request.partitionId)]
         : [];
+    // Best effort, never a reason to keep a deleted bot or profile around:
+    // the engine's saved state is a per-session file set, and an engine that
+    // cannot run here (or was never installed) has nothing to clear. A real
+    // failure is logged with the session name so it can be cleared by hand.
     const work = status.kind === "ready" && sessions.length
-      ? Promise.all(sessions.map((session) => clearBrowserSessionState(status.binaryPath, session, { encryptionKey: browserEngineEncryptionKey() })))
+      ? Promise.all(sessions.map(async (session) => {
+          const ok = await clearBrowserSessionState(status.binaryPath, session, { encryptionKey: browserEngineEncryptionKey() });
+          if (!ok) console.warn(`browser cleanup: could not clear the engine's saved state for session ${session}; clear it with \`agent-browser --session ${session} state clear --all\``);
+          return ok;
+        }))
       : Promise.resolve([true]);
-    void work.then(
-      (results) => browserCleanup.receive({ type: "openmausbot:browser-lifecycle-result", requestId: request.requestId, ok: results.every(Boolean) }),
-      () => browserCleanup.receive({ type: "openmausbot:browser-lifecycle-result", requestId: request.requestId, ok: false }),
-    );
+    void work.finally(() => {
+      browserCleanup.receive({ type: "openmausbot:browser-lifecycle-result", requestId: request.requestId, ok: true });
+    });
     return true;
   },
 });
