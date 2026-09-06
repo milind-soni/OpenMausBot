@@ -759,7 +759,9 @@ export function BotListItem({
   // the visible branch, so a version switch changes the row with the chat
   const visible = visibleMessages(bot);
   const last = visible.at(-1);
-  // the role from Bot Settings → Title, shown as a pill beside the name
+  // the role from Bot Settings → Title. A badge or tooltip beside the name
+  // (#866, #871) always traded the name's width against the title's; its own
+  // line above the name lets both truncate independently instead.
   const title = bot.title.trim();
   const rowClass = cn(
     "flex w-full items-center rounded-xl border text-left",
@@ -806,6 +808,13 @@ export function BotListItem({
         )}
       </span>
       <div className={cn("min-w-0 flex-1", iconOnly && "hidden")}>
+        {title && !renaming && (
+          // Its own line above the name: a badge or tooltip beside the name
+          // (#866, #871) always traded the name's width against the title's —
+          // stacking the two removes the competition entirely, so both can
+          // truncate independently against the full row width.
+          <div className="truncate text-[11px] font-medium leading-4 text-ink-secondary">{title}</div>
+        )}
         <div className="flex items-baseline justify-between gap-2">
           <span className="flex min-w-0 grow items-center gap-1.5 truncate text-[15px] font-semibold text-ink">
             {bot.pinned && <Pin size={12} className="shrink-0 text-ink-secondary" />}
@@ -825,11 +834,6 @@ export function BotListItem({
               className="truncate"
               inputClassName="w-full rounded bg-inset px-1 py-0.5 text-[15px] font-semibold"
             />
-            {title && !renaming && (
-              <span className="max-w-[45%] shrink-0 truncate rounded-full bg-control px-1.5 py-px text-[10.5px] font-medium text-ink-secondary">
-                {title}
-              </span>
-            )}
           </span>
           {selected && last && !renaming && (
             <span className="shrink-0 text-xs text-ink-secondary transition-opacity group-hover:opacity-0 group-focus-within:opacity-0">

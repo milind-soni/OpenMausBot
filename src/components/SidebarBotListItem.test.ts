@@ -49,10 +49,9 @@ describe("BotListItem", () => {
 
   it("shows the Chief of Staff label on its own line under the name", () => {
     const withTitle = renderRow(bot({ chiefOfStaff: true, title: "Developer" }), false);
-    expect(withTitle).toContain(">Developer</span>");
     expect(withTitle).toContain("Chief of Staff</span>");
     // the label sits after the name line, never inside it
-    expect(withTitle.indexOf("Chief of Staff</span>")).toBeGreaterThan(withTitle.indexOf(">Developer</span>"));
+    expect(withTitle.indexOf("Chief of Staff</span>")).toBeGreaterThan(withTitle.indexOf(">Atlas<"));
 
     const withoutTitle = renderRow(bot({ chiefOfStaff: true }), false);
     expect(withoutTitle).toContain("Chief of Staff</span>");
@@ -61,23 +60,28 @@ describe("BotListItem", () => {
     expect(renderRow(bot(), false)).not.toContain("Chief of Staff");
   });
 
-  it("shows the bot's title as a badge beside the name", () => {
+  it("shows the bot's title on its own line above the name, not a badge beside it", () => {
+    // #866 / #871: a badge next to the name always had to fight the name for
+    // width — a long name crushed the badge, and a long title crushed a long
+    // name right back. Its own line above the name never competes with it.
     const markup = renderRow(bot({ title: "Developer" }), false);
 
-    expect(markup).toContain(">Developer</span>");
-    expect(renderRow(bot({ title: "  " }), false)).not.toContain(">Developer</span>");
+    expect(markup).toContain(">Developer<");
+    expect(markup.indexOf(">Developer<")).toBeLessThan(markup.indexOf(">Atlas<"));
+    // the rename hint is unrelated to the bot's title
+    expect(markup).toContain('title="Double-click to rename"');
+
+    expect(renderRow(bot(), false)).not.toContain(">Developer<");
+    expect(renderRow(bot({ title: "  " }), false)).not.toContain('<div class="truncate text-[11px]');
   });
 
-  it("caps the title badge to a share of the name line, not a fixed width", () => {
-    // a fixed cap freezes the badge at its full width and crushes the name
-    const markup = renderRow(bot({ title: "Meta-Agent — opensource team maintainer" }), false);
-    const badge = /<span class="([^"]*)"[^>]*>Meta-Agent/.exec(markup);
+  it("shows a long title in full above the name, never truncated or width-capped", () => {
+    const longTitle = "Meta-Agent — opensource team maintainer";
+    const markup = renderRow(bot({ name: "Team Maintainer", title: longTitle }), false);
 
-    expect(badge?.[1]).toContain("max-w-[45%]");
-    expect(badge?.[1]).not.toMatch(/max-w-\[\d+px\]/);
-    // the share is of the whole row, so the name line has to fill it
-    const line = /<span class="([^"]*)"><span class="cursor-text truncate"/.exec(markup);
-    expect(line?.[1]).toContain("grow");
+    expect(markup).toContain(`>${longTitle}<`);
+    expect(markup).toContain(">Team Maintainer<");
+    expect(markup).not.toContain("max-w-[45%]");
   });
 
   it("shows typing dots instead of preview text while the bot works", () => {
