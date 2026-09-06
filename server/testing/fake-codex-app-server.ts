@@ -8,7 +8,7 @@
 //                     mcp-elicitation | mcp-app-approval | mcp-form | permissions-approval | config-profile |
 //                     config-profile-unsupported | config-read-error | image |
 //                     logged-in-stdout | logged-out | unauthorized
-//   FAKE_CODEX_DUMP   path to write {argv, env, calls, decision} as JSON
+//   FAKE_CODEX_DUMP   path to write {pid, argv, env, calls, decision} as JSON
 //
 // Keep this file dependency-free — it runs as a bare `node` subprocess.
 import { readFileSync, writeFileSync } from "node:fs";
@@ -41,7 +41,7 @@ const dump = () => {
   if (process.env.FAKE_CODEX_DUMP) {
     writeFileSync(
       process.env.FAKE_CODEX_DUMP,
-      JSON.stringify({ argv: process.argv.slice(2), env: process.env, calls, decision }, null, 2),
+      JSON.stringify({ pid: process.pid, argv: process.argv.slice(2), env: process.env, calls, decision }, null, 2),
     );
   }
 };
