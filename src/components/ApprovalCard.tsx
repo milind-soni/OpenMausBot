@@ -7,45 +7,48 @@
 import { Check, ShieldCheck, X } from "lucide-react";
 import { type Bot, type Message } from "@/state/store";
 import { cn } from "@/lib/cn";
+import { t } from "@/lib/i18n";
+import type { LocaleKey } from "@/locales";
 import { SkillRequestPreview } from "@/components/SkillRequestPreview";
 
 interface ToolLabels {
-  [tool: string]: string;
+  [tool: string]: LocaleKey;
 }
 
 const ROUTINE_SETTLED_LABEL = {
-  create: "Routine scheduled",
-  update: "Routine updated",
-  pause: "Routine paused",
-  resume: "Routine resumed",
-  run_now: "Routine run queued",
-  delete: "Routine deleted",
+  create: "approval.status.routineScheduled",
+  update: "approval.status.routineUpdated",
+  pause: "approval.status.routinePaused",
+  resume: "approval.status.routineResumed",
+  run_now: "approval.status.routineRunQueued",
+  delete: "approval.status.routineDeleted",
 } as const;
 
 const SKILL_SETTLED_LABEL = {
-  create: "Skill enabled",
-  update: "Skill updated",
+  create: "approval.status.skillEnabled",
+  update: "approval.status.skillUpdated",
 } as const;
 
 /** The tool's own name is noise to a human: mcp__ogb__computer_batch is
  * "computer batch", Bash is "run a command". */
 function toolLabel(tool?: string): string {
-  if (!tool) return "an action";
+  if (!tool) return t("approval.tool.action");
   const bare = tool.replace(/^mcp__[^_]+__/, "").replace(/_/g, " ");
   const nice: ToolLabels = {
-    Bash: "run a command",
-    Read: "read a file",
-    Write: "write a file",
-    Edit: "edit a file",
-    WebFetch: "fetch a web page",
-    WebSearch: "search the web",
-    schedule_routine: "schedule a routine",
-    manage_routine: "change a routine",
-    stage_skill: "enable a learned skill",
-    update_skill: "update a learned skill",
-    update_profile: "update its profile",
+    Bash: "approval.tool.runCommand",
+    Read: "approval.tool.readFile",
+    Write: "approval.tool.writeFile",
+    Edit: "approval.tool.editFile",
+    WebFetch: "approval.tool.fetchWebPage",
+    WebSearch: "approval.tool.searchWeb",
+    schedule_routine: "approval.tool.scheduleRoutine",
+    manage_routine: "approval.tool.changeRoutine",
+    stage_skill: "approval.tool.enableSkill",
+    update_skill: "approval.tool.updateSkill",
+    update_profile: "approval.tool.updateProfile",
   };
-  return nice[tool] ?? bare;
+  const key = nice[tool];
+  return key ? t(key) : bare;
 }
 
 export function ApprovalCard({
@@ -64,8 +67,8 @@ export function ApprovalCard({
   const isProfileRequest = Boolean(card.profileRequest);
   const routineAction = card.routineRequest?.operation.action;
   const skillAction = card.skillRequest?.action;
-  const routineSettledLabel = routineAction ? ROUTINE_SETTLED_LABEL[routineAction] : undefined;
-  const skillSettledLabel = skillAction ? SKILL_SETTLED_LABEL[skillAction] : undefined;
+  const routineSettledLabel = routineAction ? t(ROUTINE_SETTLED_LABEL[routineAction]) : undefined;
+  const skillSettledLabel = skillAction ? t(SKILL_SETTLED_LABEL[skillAction]) : undefined;
   const displayTool = isRoutineRequest
     ? routineAction === "create" ? "schedule_routine" : "manage_routine"
     : isSkillRequest
@@ -78,11 +81,12 @@ export function ApprovalCard({
   // silently claim the proposer's own profile is changing. Name the actual
   // target whenever it differs from the proposer.
   const profileHeader = isProfileRequest && card.profileRequest
-    ? `${bot ? bot.name : "Someone"} wants to update ${
-        card.profileRequest.targetBotId === card.profileRequest.botId
-          ? "its"
-          : `@${card.profileRequest.targetName}'s`
-      } profile`
+    ? card.profileRequest.targetBotId === card.profileRequest.botId
+      ? t("approval.card.profileWantsToOwn", { name: bot?.name ?? t("approval.someone") })
+      : t("approval.card.profileWantsToOther", {
+          name: bot?.name ?? t("approval.someone"),
+          target: card.profileRequest.targetName,
+        })
     : undefined;
 
   return (
@@ -96,8 +100,9 @@ export function ApprovalCard({
         <div className="text-[15px] font-semibold text-ink">
           {profileHeader ?? (
             <>
-              {bot ? `${bot.name} wants to ` : "Wants to "}
-              {toolLabel(displayTool)}
+              {bot
+                ? t("approval.card.namedWantsTo", { name: bot.name, action: toolLabel(displayTool) })
+                : t("approval.card.wantsTo", { action: toolLabel(displayTool) })}
             </>
           )}
         </div>
@@ -109,12 +114,12 @@ export function ApprovalCard({
         tabIndex={0}
         aria-label={
           isRoutineRequest
-            ? "Routine details"
+            ? t("approval.aria.routineDetails")
             : isSkillRequest
-              ? "Skill details"
+              ? t("approval.aria.skillDetails")
               : isProfileRequest
-                ? "Profile change"
-                : "Approval details"
+                ? t("approval.aria.profileChange")
+                : t("approval.aria.details")
         }
         className="mt-2 max-h-40 overflow-auto whitespace-pre-wrap break-words rounded-lg bg-inset px-3 py-2 font-mono text-[12.5px] leading-relaxed text-ink"
       >
@@ -138,23 +143,25 @@ export function ApprovalCard({
             {skillSettledLabel ??
               routineSettledLabel ??
               (isProfileRequest
-                ? "Profile updated"
+                ? t("approval.status.profileUpdated")
                 : isRoutineRequest
-                  ? "Routine confirmed"
+                  ? t("approval.status.routineConfirmed")
                   : isSkillRequest
-                    ? "Skill confirmed"
-                    : "Allowed")}
+                    ? t("approval.status.skillConfirmed")
+                    : t("approval.status.allowed"))}
           </>
         ) : settled ? (
           <>
-            <X size={14} /> {isRoutineRequest || isSkillRequest || isProfileRequest ? "Cancelled" : "Denied"}
+            <X size={14} /> {isRoutineRequest || isSkillRequest || isProfileRequest
+              ? t("approval.status.cancelled")
+              : t("approval.status.denied")}
           </>
         ) : (
           <>
             <ShieldCheck size={14} className="text-accent" />
             {isRoutineRequest || isSkillRequest || isProfileRequest
-              ? "Waiting for your confirmation below"
-              : "Waiting for your answer below"}
+              ? t("approval.status.waitingConfirmation")
+              : t("approval.status.waitingAnswer")}
           </>
         )}
       </div>

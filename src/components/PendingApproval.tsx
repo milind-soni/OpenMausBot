@@ -10,11 +10,13 @@
 import { memo } from "react";
 import { useStore, type Bot, type Message } from "@/state/store";
 import { cn } from "@/lib/cn";
+import { t } from "@/lib/i18n";
+import type { LocaleKey } from "@/locales";
 import { SkillRequestPreview } from "@/components/SkillRequestPreview";
 import { reviewedSkillSha256 } from "../../shared/skill-request";
 
 interface ApprovalLabels {
-  [tool: string]: string;
+  [tool: string]: LocaleKey;
 }
 
 export interface Pending {
@@ -64,46 +66,56 @@ export function spokenApprovalPrompt(pending: Pending, requester: string): strin
   const isProfileRequest = isProfileApproval(pending);
   if (isSkillRequest) {
     const updating = pending.message.card?.skillRequest?.action === "update";
-    const title = pending.message.card?.title.trim() || (updating ? "Update this skill?" : "Enable this skill?");
-    return `${requester} asks: ${title}${/[.!?]$/.test(title) ? "" : "."} Review the skill on screen. Should I ${updating ? "update" : "enable"} it?`;
+    const title = pending.message.card?.title.trim() || t(
+      updating ? "approval.voice.defaultUpdateSkill" : "approval.voice.defaultEnableSkill",
+    );
+    return t("approval.voice.skill", {
+      requester,
+      title: `${title}${/[.!?]$/.test(title) ? "" : "."}`,
+      action: t(updating ? "approval.voice.actionUpdate" : "approval.voice.actionEnable"),
+    });
   }
   if (isProfileRequest) {
     // pending.detail is the full subtitle — the whole diff for a soul
     // change. Speak the card's concise title instead, the same way the
     // routine/skill branches do, and let the user read the diff on screen.
-    const title = pending.message.card?.title.trim() || "Update this profile?";
-    return `${requester} wants to update its profile: ${title}. Review the change on screen. Should I confirm it?`;
+    const title = pending.message.card?.title.trim() || t("approval.voice.defaultUpdateProfile");
+    return t("approval.voice.profile", { requester, title });
   }
   if (!isRoutineRequest) {
-    return `${requester} wants to ${pending.tool}. ${pending.detail}. Should I allow it?`;
+    return t("approval.voice.command", { requester, tool: pending.tool, detail: pending.detail });
   }
-  const title = pending.message.card?.title.trim() || "Confirm this routine?";
-  return `${requester} asks: ${title}${/[.!?]$/.test(title) ? "" : "."} Review the schedule and instructions on screen. Should I confirm it?`;
+  const title = pending.message.card?.title.trim() || t("approval.voice.defaultConfirmRoutine");
+  return t("approval.voice.routine", {
+    requester,
+    title: `${title}${/[.!?]$/.test(title) ? "" : "."}`,
+  });
 }
 
 function label(pending: Pending): string {
   if (isSkillApproval(pending)) {
     return pending.message.card?.skillRequest?.action === "update"
-      ? "Update this learned skill"
-      : "Enable this learned skill";
+      ? t("approval.label.updateSkill")
+      : t("approval.label.enableSkill");
   }
   if (isProfileApproval(pending)) {
-    return "Confirm this profile change";
+    return t("approval.label.confirmProfileChange");
   }
   if (isRoutineApproval(pending)) {
     return pending.message.card?.routineRequest?.operation.action === "create"
-      ? "Confirm this routine"
-      : "Confirm this routine change";
+      ? t("approval.label.confirmRoutine")
+      : t("approval.label.confirmRoutineChange");
   }
   const nice: ApprovalLabels = {
-    Bash: "Command approval requested",
-    shell: "Command approval requested",
-    Read: "File-read approval requested",
-    Write: "File-change approval requested",
-    Edit: "File-change approval requested",
-    edit: "File-change approval requested",
+    Bash: "approval.label.commandRequested",
+    shell: "approval.label.commandRequested",
+    Read: "approval.label.fileReadRequested",
+    Write: "approval.label.fileChangeRequested",
+    Edit: "approval.label.fileChangeRequested",
+    edit: "approval.label.fileChangeRequested",
   };
-  return nice[pending.tool] ?? "Approval requested";
+  const key = nice[pending.tool];
+  return key ? t(key) : t("approval.label.requested");
 }
 
 export const PendingApprovalPanel = memo(function PendingApprovalPanel({
@@ -120,20 +132,22 @@ export const PendingApprovalPanel = memo(function PendingApprovalPanel({
       role="region"
       aria-label={
         isSkillApproval(pending)
-          ? "Pending skill confirmation"
+          ? t("approval.aria.pendingSkill")
           : isRoutineApproval(pending)
-            ? "Pending routine confirmation"
+            ? t("approval.aria.pendingRoutine")
             : isProfileApproval(pending)
-              ? "Pending profile confirmation"
-              : "Pending approval"
+              ? t("approval.aria.pendingProfile")
+              : t("approval.aria.pending")
       }
       className="rounded-t-2xl border-b border-hairline/50 bg-control/40 px-4 py-3"
     >
       <div className="flex flex-wrap items-center gap-2" aria-live="polite">
-        <span className="text-[11px] uppercase tracking-[0.18em] text-ink-secondary">Pending approval</span>
+        <span className="text-[11px] uppercase tracking-[0.18em] text-ink-secondary">
+          {t("approval.pending")}
+        </span>
         {count > 1 && (
           <span className="rounded-full bg-control px-1.5 py-0.5 text-[11px] tabular-nums text-ink-secondary">
-            {index + 1} of {count}
+            {t("approval.position", { index: index + 1, count })}
           </span>
         )}
         <span className="text-[13px] text-ink">{label(pending)}</span>
@@ -154,12 +168,12 @@ export const PendingApprovalPanel = memo(function PendingApprovalPanel({
         tabIndex={0}
         aria-label={
           isSkillApproval(pending)
-            ? "Skill details to review"
+            ? t("approval.aria.reviewSkill")
             : isRoutineApproval(pending)
-              ? "Routine details to review"
+              ? t("approval.aria.reviewRoutine")
               : isProfileApproval(pending)
-                ? "Profile change to review"
-                : "Approval details to review"
+                ? t("approval.aria.reviewProfile")
+                : t("approval.aria.reviewDetails")
         }
         className="mt-2 max-h-40 overflow-auto whitespace-pre-wrap break-words font-mono text-[12px] leading-relaxed text-ink"
       >
@@ -209,22 +223,22 @@ export function PendingApprovalActions({
     <div className="flex flex-wrap items-center justify-end gap-2 px-2 py-2">
       {!durableRequest && (
         <button onClick={onCancelTurn} className={cn(base, "text-ink-secondary hover:bg-control hover:text-ink")}>
-          Cancel turn
+          {t("approval.action.cancelTurn")}
         </button>
       )}
       <button
         onClick={() => decide("deny")}
         className={cn(base, "border border-danger/40 text-danger hover:bg-danger/10")}
       >
-        {isRoutineRequest || isProfileRequest ? "Cancel" : "Deny"}
+        {isRoutineRequest || isProfileRequest ? t("approval.action.cancel") : t("approval.action.deny")}
       </button>
       {!durableRequest && bot && pending.allowKey && (
         <button
           onClick={() => decide("allow", true)}
-          title={`Stop asking ${bot.name} about ${pending.allowKey}`}
+          title={t("approval.action.stopAsking", { name: bot.name, key: pending.allowKey })}
           className={cn(base, "border border-hairline/50 text-ink hover:bg-control")}
         >
-          Always allow
+          {t("approval.action.alwaysAllow")}
         </button>
       )}
       <button
@@ -236,8 +250,12 @@ export function PendingApprovalActions({
         )}
       >
         {isSkillRequest
-          ? pending.message.card?.skillRequest?.action === "update" ? "Update" : "Enable"
-          : isRoutineRequest || isProfileRequest ? "Confirm" : "Allow once"}
+          ? pending.message.card?.skillRequest?.action === "update"
+            ? t("approval.action.update")
+            : t("approval.action.enable")
+          : isRoutineRequest || isProfileRequest
+            ? t("approval.action.confirm")
+            : t("approval.action.allowOnce")}
       </button>
     </div>
   );
