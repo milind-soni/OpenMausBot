@@ -62,6 +62,7 @@
 /* Tokens that no utility generates — declared outside `@theme` so Tailwind
    can't tree-shake them away, and so a skin can redefine them freely. */
 :root {
+  --code-color-scheme: dark;
   /* ink carried by a filled accent / danger surface (see the rule at the
      bottom of this file, which is what makes them take effect) */
   --color-accent-ink: #ffffff;
@@ -83,6 +84,7 @@
    they carry. Atelier and Foundry fix this via --color-accent-ink.
    ───────────────────────────────────────────────────────────────────────── */
 [data-skin="midnight"] {
+  --code-color-scheme: dark;
   --color-app: #070707;
   --color-panel: #111111;
   --color-raised: #2f2f2f;
@@ -122,6 +124,7 @@
    value is named next to each, so the drift stays auditable.
    ───────────────────────────────────────────────────────────────────────── */
 [data-skin="atelier"] {
+  --code-color-scheme: light;
   --color-app: #f5f1eb;           /* outermost ground */
   --color-panel: #fbf8f2;         /* sidebar */
   --color-raised: #ffffff;        /* content — raised means lighter here */
@@ -177,6 +180,7 @@
    8px — because sheet metal doesn't round the way paper does.
    ───────────────────────────────────────────────────────────────────────── */
 [data-skin="foundry"] {
+  --code-color-scheme: dark;
   --color-app: #100e0b;           /* deepest ground, warm black */
   --color-panel: #171410;         /* sidebar */
   --color-raised: #262019;        /* raised means warmer, not just lighter */
@@ -226,6 +230,7 @@
    round more than paper does, and far more than sheet metal.
    ───────────────────────────────────────────────────────────────────────── */
 [data-skin="lagoon"] {
+  --code-color-scheme: light;
   /* The tint is the point, so it is carried by the surfaces, not by a button:
      the ground sits 13 points of green-blue above its red channel, roughly
      three times Atelier's cream cast, which is what makes the skin read as
@@ -276,6 +281,7 @@
    desaturated: it marks actions and focus without making the chrome glow.
    ───────────────────────────────────────────────────────────────────────── */
 [data-skin="graphite"] {
+  --code-color-scheme: dark;
   --color-app: #111214;
   --color-panel: #181a1d;
   --color-raised: #2a2d32;
@@ -315,6 +321,7 @@
    crisp and familiar instead of colourful.
    ───────────────────────────────────────────────────────────────────────── */
 [data-skin="linen"] {
+  --code-color-scheme: light;
   --color-app: #eceff3;
   --color-panel: #f5f6f8;
   --color-raised: #ffffff;
@@ -353,6 +360,7 @@
    much as the accent, so the skin feels cohesive rather than neon or themed.
    ───────────────────────────────────────────────────────────────────────── */
 [data-skin="dusk"] {
+  --code-color-scheme: dark;
   --color-app: #121014;
   --color-panel: #19161c;
   --color-raised: #2b2630;
@@ -384,6 +392,12 @@
     "Segoe UI", system-ui, sans-serif;
   --radius-lg: 8px;
   --radius-xl: 12px;
+}
+
+/* Shiki emits both palettes so cached blocks follow the nearest skin without
+   re-tokenizing. Scope the scheme to code; native controls keep their styling. */
+.chat-md .shiki {
+  color-scheme: var(--code-color-scheme);
 }
 
 html,
