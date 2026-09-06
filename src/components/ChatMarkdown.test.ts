@@ -1,6 +1,7 @@
 import { createElement } from "react";
+import * as React from "react";
 import { renderToStaticMarkup } from "react-dom/server";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 import {
   ChatMarkdown,
@@ -9,6 +10,33 @@ import {
   markdownImageOpenUrl,
   localFilePath,
 } from "./ChatMarkdown";
+
+vi.mock("react", async (importOriginal) => {
+  const react = await importOriginal<typeof React>();
+  return { ...react, useEffect: vi.fn(react.useEffect) };
+});
+
+it("requests both code palettes for skin-aware highlighting", async () => {
+  const originalUseEffect = (await vi.importActual<typeof React>("react")).useEffect;
+  const effects: React.EffectCallback[] = [];
+  const effect = vi.mocked(React.useEffect).mockImplementation((callback) => { effects.push(callback); });
+  const codeToHtml = vi.fn().mockResolvedValue("<pre>dual palette</pre>");
+  vi.doMock("shiki", () => ({ codeToHtml }));
+  const cleanup: ReturnType<React.EffectCallback>[] = [];
+  try {
+    renderToStaticMarkup(createElement(ChatMarkdown, { text: "```text\nPalette regression sample\n```" }));
+    for (const callback of effects) cleanup.push(callback());
+    await vi.waitFor(() => expect(codeToHtml).toHaveBeenCalledWith("Palette regression sample", {
+      lang: "text",
+      themes: { light: "github-light-default", dark: "github-dark-default" },
+      defaultColor: "light-dark()",
+    }));
+  } finally {
+    for (const close of cleanup) if (typeof close === "function") close();
+    effect.mockImplementation(originalUseEffect);
+    vi.doUnmock("shiki");
+  }
+});
 
 describe("Markdown image metadata", () => {
   it("prefers alt text and otherwise derives a readable filename", () => {

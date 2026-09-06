@@ -39,6 +39,15 @@ describe("skins", () => {
     }
   });
 
+  it("selects a code-only light or dark palette in every nearest skin", () => {
+    for (const id of SKIN_IDS) {
+      const body = css.match(new RegExp(`\\[data-skin="${id}"\\]\\s*\\{([^}]*)\\}`))?.[1] ?? "";
+      const scheme = ["atelier", "lagoon", "linen"].includes(id) ? "light" : "dark";
+      expect(body).toContain(`--code-color-scheme: ${scheme};`);
+    }
+    expect(css).toMatch(/\.chat-md \.shiki\s*\{\s*color-scheme:\s*var\(--code-color-scheme\);\s*\}/);
+  });
+
   it("describes each skin exactly once", () => {
     expect(SKINS.map((s) => s.id).sort()).toEqual([...SKIN_IDS].sort());
     for (const skin of SKINS) {
