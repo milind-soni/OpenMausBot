@@ -7,6 +7,22 @@ import { writeFileAtomic } from "../atomic.ts";
 
 const digest = (value: string) => createHash("sha256").update(value).digest("hex");
 
+/** Preserve native configured rules when overriding Codex's developer slot. */
+export function codexDeveloperInstructions(config: unknown, botInstructions: string): string {
+  if (!config || typeof config !== "object" || Array.isArray(config)) {
+    throw new Error("Codex returned no effective configuration; cannot safely update bot instructions.");
+  }
+  const configured = (config as Record<string, unknown>).developer_instructions;
+  if (configured != null && typeof configured !== "string") {
+    throw new Error("Codex returned invalid developer instructions; cannot safely update bot instructions.");
+  }
+  // Native rules previously outranked the bot's user-message prefix. Keep
+  // them last in the combined developer block to preserve that precedence.
+  return configured
+    ? `${botInstructions || "No OpenMausBot bot-specific instructions remain."}\n\n${configured}`
+    : botInstructions;
+}
+
 export async function syncCodexInstructions(
   key: string,
   nativeThreadId: string,
@@ -37,7 +53,7 @@ export async function syncCodexInstructions(
           role: "developer",
           content: [{
             type: "input_text",
-            text: "The following replaces all previous OpenMausBot bot-specific instructions. Other Codex instructions and permissions still apply.\n\n"
+            text: "The following replaces the previous developer instruction block supplied by OpenMausBot, including its native configured rules and bot-specific instructions. Other Codex instructions and permissions still apply.\n\n"
               + (instructions || "No OpenMausBot bot-specific instructions remain."),
           }],
         }],

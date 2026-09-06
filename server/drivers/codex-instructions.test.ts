@@ -1,6 +1,20 @@
 import { randomUUID } from "node:crypto";
 import { describe, expect, it, vi } from "vitest";
-import { syncCodexInstructions } from "./codex-instructions.ts";
+import { codexDeveloperInstructions, syncCodexInstructions } from "./codex-instructions.ts";
+
+describe("Codex effective developer instructions", () => {
+  it("preserves native rules after bot rules, including when bot rules are removed", () => {
+    const config = { developer_instructions: "Native rules." };
+    expect(codexDeveloperInstructions(config, "Bot rules.")).toBe("Bot rules.\n\nNative rules.");
+    expect(codexDeveloperInstructions(config, "")).toBe("No OpenMausBot bot-specific instructions remain.\n\nNative rules.");
+    expect(codexDeveloperInstructions({}, "Bot rules.")).toBe("Bot rules.");
+    expect(codexDeveloperInstructions({ developer_instructions: null }, "")).toBe("");
+  });
+
+  it.each([undefined, null, [], { developer_instructions: 42 }])("rejects unknown native configuration: %j", (config) => {
+    expect(() => codexDeveloperInstructions(config, "Bot rules.")).toThrow("cannot safely update bot instructions");
+  });
+});
 
 describe("Codex instruction receipts", () => {
   it("does not repeat unchanged rules, but persists edits and removal", async () => {

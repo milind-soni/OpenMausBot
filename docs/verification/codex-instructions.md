@@ -2,6 +2,13 @@
 
 The driver sends bot rules as `developerInstructions` on thread start and
 resume. Ordinary turn input contains only the current message and images.
+The effective native `developer_instructions` are read for every approval mode
+and retained after the bot rules in that block. Removing bot rules does not
+remove the user's native configured rules. Effective configuration and outgoing
+developer blocks are omitted from diagnostic logs. If configuration cannot be
+read, the turn fails before changing native history instead of overwriting
+unknown instructions. Approval/sandbox parameters and permission-profile
+fallback remain unchanged.
 Codex 0.147.0 and 0.153.4 retain the original developer message on resume, even
 when configuration changes. Therefore a changed instruction block also needs a
 `thread/inject_items` developer update before the next user turn.
@@ -34,7 +41,8 @@ specific executable. It uses temporary homes, native persisted threads, and a
 loopback Responses API fixture; it uses no credentials or authenticated model
 inference. It restarts the app-server between turns, edits/removes rules, runs
 manual compaction, asserts model-request bodies, and prints retained temporary
-evidence paths. Synthetic replies and summaries prove protocol behavior, not
+evidence paths. A native configured rule is checked through bot-rule edits,
+removal and compaction. Synthetic replies and summaries prove protocol behavior, not
 model quality, semantic compaction fidelity, or token/cost savings.
 
 Verified on macOS with Codex 0.147.0 and 0.153.4. Older releases have not been
@@ -44,6 +52,9 @@ fix: 245 versus 49 instruction characters on request five. These are actual
 fixture marker/character counts, not measured tokens. Changed blocks append an
 update; this is not deduplication of shared sections between different blocks.
 Historical copies from sessions created before the fix are not deleted.
+Goal counters, team status, selected skills, and memory can change between
+turns and cause another full developer update. Deduplication applies only to
+identical complete instruction blocks, not every production conversation.
 
 An additional authenticated smoke on Codex 0.153.4 with Astra medium used four
 synthetic read-only turns and a fresh app-server process for each. Replies were

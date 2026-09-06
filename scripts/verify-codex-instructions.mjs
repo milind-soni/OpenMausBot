@@ -10,7 +10,7 @@ import { createInterface } from 'node:readline';
 import { once } from 'node:events';
 const root = mkdtempSync(join(tmpdir(), 'omb-native-instructions-'));
 process.env.OMB_DATA_DIR = join(root, 'omb');
-const { syncCodexInstructions } = await import('../server/drivers/codex-instructions.ts');
+const { codexDeveloperInstructions, syncCodexInstructions } = await import('../server/drivers/codex-instructions.ts');
 const captures = [];
 const server = createServer(async (req, res) => {
     let raw = '';
@@ -41,7 +41,7 @@ const home = join(root, 'home');
 const cwd = join(root, 'cwd');
 mkdirSync(home);
 mkdirSync(cwd);
-writeFileSync(join(home, 'config.toml'), `model="gpt-5.6-sol"\nmodel_provider="fixture"\napproval_policy="never"\nsandbox_mode="read-only"\n[model_providers.fixture]\nname="Fixture"\nbase_url="http://127.0.0.1:${port}/v1"\nwire_api="responses"\nrequires_openai_auth=false\n`);
+writeFileSync(join(home, 'config.toml'), `developer_instructions="NATIVE_RULE: Preserve configured instructions."\nmodel="gpt-5.6-sol"\nmodel_provider="fixture"\napproval_policy="never"\nsandbox_mode="read-only"\n[model_providers.fixture]\nname="Fixture"\nbase_url="http://127.0.0.1:${port}/v1"\nwire_api="responses"\nrequires_openai_auth=false\n`);
 let child, seq = 0, pending, events, waiters;
 async function start() {
     pending = new Map();
@@ -77,11 +77,13 @@ let cursor;
 try {
     for (const [index, instructions] of [...Array(5).fill('BOT_RULE_A: You are Testy. Always answer briefly.'), 'BOT_RULE_B: You are Renamed. Use new rules.', 'BOT_RULE_B: You are Renamed. Use new rules.', '', ''].entries()) {
         await start();
+        const configured = await rpc('config/read', { cwd, includeLayers: false });
+        const developerInstructions = codexDeveloperInstructions(configured.config, instructions);
         const method = cursor ? 'thread/resume' : 'thread/start';
-        const t = await rpc(method, { ...(cursor ? { threadId: cursor } : { cwd, model: 'gpt-5.6-sol', ephemeral: false }), developerInstructions: process.env.PROBE_BEFORE ? '' : instructions, approvalPolicy: 'never', sandbox: 'read-only' });
+        const t = await rpc(method, { ...(cursor ? { threadId: cursor } : { cwd, model: 'gpt-5.6-sol', ephemeral: false }), ...(process.env.PROBE_BEFORE ? {} : { developerInstructions }), approvalPolicy: 'never', sandbox: 'read-only' });
         cursor = t.thread.id;
         if (!process.env.PROBE_BEFORE)
-            await syncCodexInstructions("native-probe", cursor, instructions, index > 0, rpc);
+            await syncCodexInstructions("native-probe", cursor, developerInstructions, index > 0, rpc);
         await rpc('turn/start', { threadId: cursor, input: [{ type: 'text', text: (process.env.PROBE_BEFORE ? instructions + '\n\n' : '') + (index === 0 ? 'Remember ALPHA.' : 'Continue ' + index) }] });
         const completed = await event('turn/completed');
         assert.equal(completed.params?.turn?.status, 'completed');
@@ -95,6 +97,10 @@ try {
         await stop();
     }
     const text = (index, role) => (captures[index].body.input ?? []).filter(item => item.role === role).flatMap(item => item.content ?? []).map(part => part.text ?? '').join('\n');
+    for (let i = 0; i < captures.length; i++) {
+        assert(text(i, 'developer').includes('NATIVE_RULE: Preserve configured instructions.'));
+        assert(!text(i, 'user').includes('NATIVE_RULE'));
+    }
     if (!process.env.PROBE_BEFORE) {
         for (let i = 0; i < captures.length; i++) {
             assert(!text(i, 'user').includes('BOT_RULE_'));

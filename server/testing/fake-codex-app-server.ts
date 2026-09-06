@@ -133,6 +133,7 @@ process.stdin.on("data", (chunk) => {
         break;
       case "config/read":
         if (mode === "config-read-error") {
+          dump();
           out({ jsonrpc: "2.0", id: msg.id, error: { code: -32000, message: "config unavailable" } });
           break;
         }
@@ -140,7 +141,8 @@ process.stdin.on("data", (chunk) => {
           jsonrpc: "2.0",
           id: msg.id,
           result: {
-            config: mode === "config-profile" || mode === "config-profile-unsupported"
+            config: {
+              ...(mode === "config-profile" || mode === "config-profile-unsupported"
               ? {
                   default_permissions: "private-operator-profile",
                   permissions: {
@@ -158,7 +160,9 @@ process.stdin.on("data", (chunk) => {
                   mcp_servers: {
                     harmless_name: { env: { DISPLAY_LABEL: "innocuous-config-secret-7a9c" } },
                   },
-                },
+                }),
+              developer_instructions: process.env.FAKE_CODEX_INSTRUCTIONS ?? null,
+            },
             origins: {},
           },
         });

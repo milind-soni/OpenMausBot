@@ -98,6 +98,7 @@ describe("CodexDriver turns (fake app-server)", () => {
     delete process.env.FAKE_CODEX_RETRY_SCALE;
     delete process.env.FAKE_CODEX_VERSION;
     delete process.env.FAKE_CODEX_ASTRA;
+    delete process.env.FAKE_CODEX_INSTRUCTIONS;
     delete process.env.OPENAI_API_KEY;
     delete process.env.BOX_TOKEN;
     delete process.env.OMB_TTS_KEY;
@@ -161,7 +162,7 @@ describe("CodexDriver turns (fake app-server)", () => {
     expect(seen.env.BOX_TOKEN).toBeUndefined();
     expect(seen.env.OMB_TTS_KEY).toBeUndefined();
     const methods = seen.calls.map((c: { method: string }) => c.method);
-    expect(methods).toEqual(["initialize", "initialized", "thread/start", "turn/start"]);
+    expect(methods).toEqual(["initialize", "initialized", "config/read", "thread/start", "turn/start"]);
     // Standing instructions belong to native thread configuration, not user history.
     const turnStart = seen.calls.at(-1);
     expect(turnStart.params.input[0].text).toBe("list files");
@@ -318,7 +319,7 @@ describe("CodexDriver turns (fake app-server)", () => {
     });
   });
 
-  it("falls back to interactive read-only when Custom config cannot be read", async () => {
+  it.each(["ask", "auto", "full", "custom"] as const)("stops before replacing unknown native instructions in %s mode", async (approvalMode) => {
     await create({ mode: "config-read-error" });
     const dump = join(scratch, "custom-config-error.json");
     process.env.FAKE_CODEX_DUMP = dump;
@@ -326,24 +327,16 @@ describe("CodexDriver turns (fake app-server)", () => {
     await instance.adapter.sendTurn({
       threadId: "t-custom-config-error",
       text: "continue safely",
-      approvalMode: "custom",
+      approvalMode,
     });
-    await recorder.until((event) => event.type === "turn.completed");
+    await expect(recorder.until((event) => event.type === "turn.completed")).resolves.toMatchObject({ ok: false });
 
     const calls = JSON.parse(readFileSync(dump, "utf8")).calls as Array<{
       method: string;
       params: Record<string, unknown>;
     }>;
-    expect(calls.find((call) => call.method === "thread/start")?.params).toMatchObject({
-      approvalPolicy: "on-request",
-      approvalsReviewer: "user",
-      sandbox: "read-only",
-    });
-    expect(calls.find((call) => call.method === "turn/start")?.params).toMatchObject({
-      approvalPolicy: "on-request",
-      approvalsReviewer: "user",
-      sandboxPolicy: { type: "readOnly" },
-    });
+    expect(calls.map((call) => call.method)).toEqual(["initialize", "initialized", "config/read"]);
+    expect(recorder.events.some((event) => event.type === "runtime.error" && event.message.includes("cannot safely update bot instructions"))).toBe(true);
   });
 
   it("sends current-turn images as native localImage inputs without logging their private paths", async () => {
@@ -733,6 +726,34 @@ describe("CodexDriver turns (fake app-server)", () => {
         expect(call.params.input).toEqual([{ type: "text", text: `message-${index}` }]);
       }
     }
+  });
+
+  it.each(["ask", "auto", "full", "custom"] as const)("preserves configured native rules and keeps them private in %s mode", async (approvalMode) => {
+    await create({ mode: "resume" });
+    process.env.FAKE_CODEX_INSTRUCTIONS = "Private native rules.";
+    const dump = join(scratch, "native-instructions.json");
+    process.env.FAKE_CODEX_DUMP = dump;
+    mkdirSync(NATIVE_DIR, { recursive: true });
+    const threadId = `t-native-instructions-${approvalMode}`;
+    for (const [index, system] of ["Bot rules.", "", undefined].entries()) {
+      const { turnId } = await instance.adapter.sendTurn({
+        threadId, text: `message-${index}`, system, approvalMode,
+        ...(index > 0 ? { resumeCursor: "codex-thread-1" } : {}),
+      });
+      await expect(recorder.until((event) => event.type === "turn.completed" && event.turnId === turnId)).resolves.toMatchObject({ ok: true });
+      const calls = JSON.parse(readFileSync(dump, "utf8")).calls;
+      const threadCall = calls.find((call: { method: string }) => call.method === (index ? "thread/resume" : "thread/start"));
+      expect(threadCall.params.developerInstructions).toBe(`${system || "No OpenMausBot bot-specific instructions remain."}\n\nPrivate native rules.`);
+      expect(calls.filter((call: { method: string }) => call.method === "thread/inject_items")).toHaveLength(index === 1 ? 1 : 0);
+      expect(calls.find((call: { method: string }) => call.method === "turn/start").params.input).toEqual([{ type: "text", text: `message-${index}` }]);
+    }
+    const nativeLog = readFileSync(join(NATIVE_DIR, `${threadId}.ndjson`), "utf8");
+    expect(nativeLog).toContain("[effective config omitted]");
+    expect(nativeLog).toContain("[developer instructions omitted]");
+    expect(nativeLog).toContain("[developer instruction update omitted]");
+    expect(nativeLog).not.toContain("Private native rules.");
+    expect(nativeLog).not.toContain("Bot rules.");
+    expect(nativeLog).not.toContain("innocuous-config-secret-7a9c");
   });
 
   it("surfaces an approval request and forwards the user's decision", async () => {
