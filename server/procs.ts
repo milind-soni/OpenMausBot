@@ -123,32 +123,46 @@ export function describeSpawnFailure(err: NodeJS.ErrnoException, cli: string): S
 }
 
 /** Stop a CLI and every process it spawned (MCP proxies included). */
-export function killCliTree(child: ChildProcess): void {
+export function killCliTree(child: ChildProcess, timeoutMs = 5_000): Promise<boolean> {
   const pid = child.pid;
-  if (!pid || child.exitCode !== null || child.signalCode !== null) return;
+  if (!pid || child.exitCode !== null || child.signalCode !== null) return Promise.resolve(true);
 
-  if (process.platform === "win32") {
-    execFile("taskkill", ["/PID", String(pid), "/T", "/F"], { windowsHide: true }, (err) => {
-      if (!err) return;
+  return new Promise((resolve) => {
+    let timer: NodeJS.Timeout;
+    const done = (stopped: boolean) => {
+      clearTimeout(timer);
+      child.off("close", closed);
+      resolve(stopped);
+    };
+    const closed = () => done(true);
+    child.once("close", closed);
+    timer = setTimeout(() => done(false), timeoutMs);
+    timer.unref?.();
+
+    if (process.platform === "win32") {
+      execFile("taskkill", ["/PID", String(pid), "/T", "/F"], { windowsHide: true }, (err) => {
+        if (!err) return;
+        try {
+          // taskkill is unavailable or the tree lookup failed. At least stop
+          // the process we own instead of leaving the entire turn running.
+          child.kill();
+        } catch {
+          /* already gone */
+        }
+      });
+      return;
+    }
+
+    try {
+      process.kill(-pid, "SIGTERM");
+    } catch {
       try {
-        // taskkill is unavailable or the tree lookup failed. At least stop
-        // the process we own instead of leaving the entire turn running.
-        child.kill();
+        child.kill("SIGTERM");
       } catch {
         /* already gone */
       }
-    });
-    return;
-  }
-  try {
-    process.kill(-pid, "SIGTERM");
-  } catch {
-    try {
-      child.kill("SIGTERM");
-    } catch {
-      /* already gone */
     }
-  }
+  });
 }
 
 /** Per-turn broker channel: unix socket on POSIX, named pipe on Windows

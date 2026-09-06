@@ -24,6 +24,15 @@ import { removeTempDir } from "../testing/cleanup.ts";
 
 const FAKE_CLI = join(dirname(fileURLToPath(import.meta.url)), "..", "testing", "fake-codex-app-server.ts");
 
+function processIsAlive(pid: number): boolean {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 describe("CodexDriver.decodeConfig", () => {
   it("defaults to the codex binary with fullAuto off", () => {
     expect(CodexDriver.decodeConfig({})).toEqual({ cli: "codex", fullAuto: false });
@@ -147,6 +156,7 @@ describe("CodexDriver turns (fake app-server)", () => {
     expect(recorder.events.at(-1)).toMatchObject({ type: "turn.completed", ok: true, usage: { input: 7, output: 3, cachedInput: 4 } });
 
     const seen = JSON.parse(readFileSync(dump, "utf8"));
+    expect(processIsAlive(seen.pid)).toBe(false);
     expect(seen.env.OPENAI_API_KEY).toBeUndefined();
     expect(seen.env.BOX_TOKEN).toBeUndefined();
     expect(seen.env.OMB_TTS_KEY).toBeUndefined();

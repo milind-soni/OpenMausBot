@@ -131,7 +131,7 @@ describe("Antigravity initialization diagnostics", () => {
 describe("Antigravity validation shutdown", () => {
   it("contains Windows one-file extraction in the owned verification profile", async () => {
     const child = fakeChild();
-    vi.mocked(killCliTree).mockImplementation(() => { child.emit("close", 0); });
+    vi.mocked(killCliTree).mockImplementation(async () => { child.emit("close", 0); return true; });
     await validateAntigravityRuntime(runtime, "1.1.1");
     const environment = vi.mocked(spawnCli).mock.calls[0][2].env!;
     if (process.platform === "win32") {
@@ -176,7 +176,7 @@ describe("Antigravity validation shutdown", () => {
     fakeChild();
     let killed!: () => void;
     const stopping = new Promise<void>((resolve) => { killed = resolve; });
-    vi.mocked(killCliTree).mockImplementation(killed);
+    vi.mocked(killCliTree).mockImplementation(async () => { killed(); return false; });
     const validation = validateAntigravityRuntime(runtime, "1.1.1");
     const rejected = expect(validation).rejects.toThrow("did not shut down");
     await stopping;
@@ -193,7 +193,7 @@ describe("Antigravity validation shutdown", () => {
     fakeChild(reply);
     let killed!: () => void;
     const stopping = new Promise<void>((resolve) => { killed = resolve; });
-    vi.mocked(killCliTree).mockImplementation(killed);
+    vi.mocked(killCliTree).mockImplementation(async () => { killed(); return false; });
     const rejected = expect(validateAntigravityRuntime(runtime, "1.1.1")).rejects.toThrow(error);
     await stopping;
     await vi.advanceTimersByTimeAsync(5_000);
@@ -207,7 +207,7 @@ describe("Antigravity validation shutdown", () => {
     { reply: { result: {} }, error: "did not identify" },
   ])("preserves $error when profile cleanup fails after close", async ({ reply, error }) => {
     const child = fakeChild(reply);
-    vi.mocked(killCliTree).mockImplementation(() => { child.emit("close", 0); });
+    vi.mocked(killCliTree).mockImplementation(async () => { child.emit("close", 0); return true; });
     vi.mocked(rm).mockRejectedValueOnce(Object.assign(new Error("cleanup EPERM"), { code: "EPERM" }));
     await expect(validateAntigravityRuntime(runtime, "1.1.1")).rejects.toThrow(error);
     expect(rm).toHaveBeenCalledWith(scratch[0], { recursive: true, force: true, maxRetries: 4, retryDelay: 250 });
@@ -216,7 +216,7 @@ describe("Antigravity validation shutdown", () => {
 
   it("keeps successful validation when profile cleanup remains locked after close", async () => {
     const child = fakeChild();
-    vi.mocked(killCliTree).mockImplementation(() => { child.emit("close", 0); });
+    vi.mocked(killCliTree).mockImplementation(async () => { child.emit("close", 0); return true; });
     vi.mocked(rm).mockRejectedValueOnce(Object.assign(new Error("cleanup EPERM"), { code: "EPERM" }));
     await expect(validateAntigravityRuntime(runtime, "1.1.1")).resolves.toBeUndefined();
     expect(rm).toHaveBeenCalledWith(scratch[0], { recursive: true, force: true, maxRetries: 4, retryDelay: 250 });

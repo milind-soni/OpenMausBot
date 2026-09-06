@@ -330,8 +330,7 @@ export class AntigravityAcpClient {
     killCliTree(this.child);
   }
 
-  /** Close, then wait (bounded) for the process to be gone. `killCliTree`
-   * on Windows asks taskkill and returns at once; the exit lands later. */
+  /** Close, then wait (bounded) for the process to be gone. */
   async closeAndWait(timeoutMs = 5_000): Promise<boolean> {
     this.close();
     let timer: NodeJS.Timeout | undefined;
