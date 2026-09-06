@@ -67,7 +67,7 @@ import { ActivityRun } from "./ActivityRun";
 import { TurnNarrationRun } from "./TurnNarrationRun";
 import { webhookMessageView } from "@/lib/webhook-message";
 import { splitTranscriptAttachments } from "@/lib/composer-attachments";
-import { BOTTOM_FOLLOW_THRESHOLD, shouldResumeBottomFollow } from "@/lib/bottom-follow";
+import { BOTTOM_FOLLOW_THRESHOLD, shouldResumeBottomFollow, useBottomFollowResize } from "@/lib/bottom-follow";
 import { useComposerDockPad } from "@/lib/composer-dock";
 import {
   TRANSCRIPT_WINDOW_SIZE,
@@ -869,6 +869,7 @@ export function ChatView({ bot }: { bot: Bot }) {
   const { state, dispatch } = useStore();
   const remoteClient = window.ogb?.remoteClient?.active === true;
   const scrollRef = useRef<HTMLDivElement>(null);
+  const transcriptRef = useRef<HTMLDivElement>(null);
   const composerDockRef = useRef<HTMLDivElement>(null);
   const composerDock = useComposerDockPad(composerDockRef);
 
@@ -1021,6 +1022,7 @@ export function ChatView({ bot }: { bot: Bot }) {
     followRef.current = next;
     setFollow(next);
   }, []);
+  useBottomFollowResize(scrollRef, transcriptRef, followRef, transcriptKey);
 
   useEffect(() => setBottomFollow(true), [bot.id, setBottomFollow]);
 
@@ -1277,6 +1279,7 @@ export function ChatView({ bot }: { bot: Bot }) {
         }}
       >
         <div
+          ref={transcriptRef}
           className="flex w-full flex-col gap-3"
           style={{ paddingBottom: composerDock.pad }}
           role="log"

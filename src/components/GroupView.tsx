@@ -41,7 +41,7 @@ import { useDesktopCapabilities } from "./DesktopCapabilities";
 import { cn } from "@/lib/cn";
 import { useFocusMessage } from "@/lib/focus-message";
 import { shortPath } from "@/lib/short-path";
-import { BOTTOM_FOLLOW_THRESHOLD, shouldResumeBottomFollow } from "@/lib/bottom-follow";
+import { BOTTOM_FOLLOW_THRESHOLD, shouldResumeBottomFollow, useBottomFollowResize } from "@/lib/bottom-follow";
 import { useComposerDockPad } from "@/lib/composer-dock";
 import { awaitedMemberId, showWorkingDots } from "@/lib/turn-tail";
 import { liveActivityLabel } from "@/lib/live-activity";
@@ -879,6 +879,7 @@ export function GroupView({ group }: { group: Group }) {
   const stream = useStreaming();
   const streaming = stream.streaming[group.threadId];
   const scrollRef = useRef<HTMLDivElement>(null);
+  const transcriptRef = useRef<HTMLDivElement>(null);
   const composerDockRef = useRef<HTMLDivElement>(null);
   const composerDock = useComposerDockPad(composerDockRef);
   const [follow, setFollow] = useState(true);
@@ -996,6 +997,7 @@ export function GroupView({ group }: { group: Group }) {
     followRef.current = next;
     setFollow(next);
   }, []);
+  useBottomFollowResize(scrollRef, transcriptRef, followRef, setupPending ? null : transcriptKey);
 
   useEffect(() => setBottomFollow(true), [group.id, setBottomFollow]);
 
@@ -1252,6 +1254,7 @@ export function GroupView({ group }: { group: Group }) {
           </div>
         ) : (
         <div
+          ref={transcriptRef}
           className="flex w-full flex-col gap-3"
           style={{ paddingBottom: composerDock.pad }}
           role="log"
