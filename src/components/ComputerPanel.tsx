@@ -427,7 +427,11 @@ export function ComputerPanel({
           setVmStatus(status);
           // parse at the boundary: our own status endpoint sends a string or nothing
           const viewerUrl = String(status.viewer_url ?? "");
-          if (viewerUrl.startsWith("http")) setVmViewerUrl(viewerUrl);
+          // Viewer URLs now route through this server's own
+          // /api/computer-viewer proxy (computer-viewer-proxy.ts), so they're
+          // relative ("/api/computer-viewer/<port>/vnc.html#...") rather than
+          // an absolute http://127.0.0.1 URL.
+          if (viewerUrl.startsWith("http") || viewerUrl.startsWith("/")) setVmViewerUrl(viewerUrl);
           if (status.ready) {
             vmReadinessAttempts.current = 0;
             setPhase("vm");
@@ -825,6 +829,12 @@ export function ComputerPanel({
         viewerUrl = result.joinUrl?.constructor === String ? String(result.joinUrl) : null;
       }
       if (!viewerUrl) throw new Error("The computer did not return a live desktop link");
+      // The Local VM viewer is now a relative path through this server's own
+      // proxy (computer-viewer-proxy.ts). window.open()/tab navigation
+      // resolves that fine against the current page, but the Electron
+      // desktopViewer/openExternal bridges run outside a page context and
+      // need an absolute URL.
+      if (viewerUrl.startsWith("/")) viewerUrl = new URL(viewerUrl, window.location.origin).toString();
 
       if (window.ogb?.desktopViewer) {
         const opened = await window.ogb.desktopViewer.open(viewerUrl, `${bot.name}'s live desktop`, bot.id);

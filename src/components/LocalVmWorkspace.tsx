@@ -307,8 +307,12 @@ function LocalVmPane({
         if (!alive) return;
         const safeStatus = sanitizeLocalVmWorkspaceStatus(raw);
         setStatus(safeStatus);
-        const viewerUrl = readyLocalVmViewerUrl(raw);
+        let viewerUrl = readyLocalVmViewerUrl(raw);
         if (!safeStatus.ready || !viewerUrl) return;
+        // Relative path through this server's own /api/computer-viewer proxy
+        // (computer-viewer-proxy.ts) — the Electron desktopWorkspace bridge
+        // runs outside a page context, so it needs an absolute URL.
+        if (viewerUrl.startsWith("/")) viewerUrl = new URL(viewerUrl, window.location.origin).toString();
 
         // Hidden or minimized Electron windows may suspend animation frames.
         // Keep the layout read ordered after a paint when possible, but never
