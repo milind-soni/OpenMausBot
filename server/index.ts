@@ -25,6 +25,7 @@ import {
 } from "../shared/credential-request.ts";
 
 import { autoVerdict, rememberableApprovalKey } from "./auto-approve.ts";
+import { knownViewerPorts, proxyViewerRequest, proxyViewerUpgrade } from "./computer-viewer-proxy.ts";
 import { requestReview, resolveAutoReviewMode, shouldReview } from "./auto-review.ts";
 import { updateClaudeCli } from "./claude-update.ts";
 import {
@@ -7228,6 +7229,17 @@ const server = createServer(async (req, res) => {
     if (!gate.auth) return json(res, gate.status, { error: gate.error });
     const auth = gate.auth;
 
+    // ── computer viewer: proxy noVNC through this already-authenticated
+    // connection so it works over Tailscale/remote without its own tunnel
+    // (server/computer-viewer-proxy.ts; container stays loopback-only) ──
+    m = path.match(/^\/api\/computer-viewer\/(\d+)((?:\/.*)?)$/);
+    if (m) {
+      const viewerPort = Number(m[1]);
+      if (!knownViewerPorts.has(viewerPort)) return json(res, 404, { error: "unknown computer viewer" });
+      proxyViewerRequest(req, res, viewerPort, `${m[2] || "/vnc.html"}${url.search}`);
+      return;
+    }
+
     // ── sessions: who am I, tickets, pairing and revocation ─────────────
     if (method === "GET" && path === "/api/auth/session") {
       return json(
@@ -12127,6 +12139,30 @@ console.log(describeBrand(loadBrand()));
 
 server.listen(PORT, "127.0.0.1", () => {
   console.log(`openmausbot server on http://127.0.0.1:${PORT}`);
+});
+
+// noVNC's websocket half of the computer-viewer proxy above — Node never
+// emits 'request' for Upgrade requests once this listener exists, so the
+// same auth + known-port checks are re-run here directly against the socket.
+server.on("upgrade", (req, socket, head) => {
+  const reject = (status: number) => {
+    socket.write(`HTTP/1.1 ${status} ${status === 401 ? "Unauthorized" : "Not Found"}\r\nConnection: close\r\n\r\n`);
+    socket.destroy();
+  };
+  const url = new URL(req.url ?? "/", `http://localhost:${PORT}`);
+  const m = url.pathname.match(/^\/api\/computer-viewer\/(\d+)((?:\/.*)?)$/);
+  if (!m) return reject(404);
+  const gate = resolveRequestAuth(req, {
+    sessions,
+    cookieName: SESSION_COOKIE,
+    streamPath: "/api/events",
+    url,
+    loopbackMutationToken: desktopMutationToken,
+  });
+  if (!gate.auth) return reject(401);
+  const viewerPort = Number(m[1]);
+  if (!knownViewerPorts.has(viewerPort)) return reject(404);
+  proxyViewerUpgrade(req, socket, head, viewerPort, `${m[2] || "/"}${url.search}`);
 });
 
 const gracefulShutdown = createGracefulShutdown({

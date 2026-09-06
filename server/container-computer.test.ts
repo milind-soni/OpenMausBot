@@ -271,7 +271,7 @@ describe("containerComputerStatus", () => {
       persistence: "durable",
       ready: true,
     });
-    expect(status.viewer_url).toContain("http://127.0.0.1:49152/vnc.html");
+    expect(status.viewer_url).toContain("/api/computer-viewer/49152/vnc.html");
   });
 
   it("refuses a per-bot container carrying another target's label", async () => {
@@ -465,7 +465,8 @@ describe("containerComputerStatus", () => {
       problem: null,
       driver_version: "0.20.0",
     });
-    expect(status.viewer_url).toContain("#autoconnect=true&resize=scale&password=secret123");
+    expect(status.viewer_url).toContain("autoconnect=true&resize=scale&path=");
+    expect(status.viewer_url).toContain("&password=secret123");
   });
 
   it("reports the bounded desktop startup error instead of waiting forever", async () => {

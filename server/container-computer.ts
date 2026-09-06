@@ -15,6 +15,7 @@ import { promisify } from "node:util";
 import { augmentedPath, resolveCliSpawn } from "./env-path.ts";
 import { DATA_DIR } from "./config.ts";
 import { SPAWNED_PROXIES } from "./proxy-paths.ts";
+import { knownViewerPorts } from "./computer-viewer-proxy.ts";
 
 const run = promisify(execFile);
 const SCREENSHOT_STATUS_TTL_MS = 10_000;
@@ -429,12 +430,25 @@ function viewerPassword(env: string[] | Record<string, string> | undefined): str
   return env?.VNC_PW || null;
 }
 
+/** A relative path through the main server's own /api/computer-viewer proxy
+ * (server/computer-viewer-proxy.ts) rather than a raw http://127.0.0.1:<port>
+ * URL. The container's viewer stays loopback-only (unchanged security
+ * posture); the proxy is what makes it reachable from wherever the main
+ * server itself already is — Tailscale, an SSH tunnel, loopback — with no
+ * per-session tunnel setup. noVNC's own defaults (host/port from
+ * window.location, encrypt from window.location.protocol) do the rest; only
+ * `path` needs overriding so its websocket lands back on this proxy. */
 function viewerUrl(password: string | null, port: number | null): string {
   if (!port) return "";
-  const base = `http://127.0.0.1:${port}/vnc.html`;
-  if (!password) return base;
-  const fragment = new URLSearchParams({ autoconnect: "true", resize: "scale", password });
-  return `${base}#${fragment.toString()}`;
+  knownViewerPorts.add(port);
+  const proxyPath = `/api/computer-viewer/${port}`;
+  const fragment = new URLSearchParams({
+    autoconnect: "true",
+    resize: "scale",
+    path: `${proxyPath.slice(1)}/websockify`,
+  });
+  if (password) fragment.set("password", password);
+  return `${proxyPath}/vnc.html#${fragment.toString()}`;
 }
 
 /** The one authoritative `exec … cua-driver` argv. Shared with the BYO-VPS
