@@ -848,12 +848,12 @@ describe("ClaudeDriver turns (fake CLI)", () => {
     const running = await instance.adapter.sendTurn({ threadId, text: "stop this turn" });
     await recorder.until((e) => e.type === "item.completed" && e.itemType === "tool" && e.turnId === running.turnId);
     const stoppedPid = JSON.parse(readFileSync(dump, "utf8")).pid;
-    // Windows taskkill returns before the child exits. Hold that window open
-    // deterministically: the pipe remains writable until we release the kill.
+    // Hold the interrupt-before-exit window open deterministically: the pipe
+    // remains writable until we release the kill.
     const conn = await connectSocket(permissionSocketPath(threadId));
     const nextAnswer = answerQueue(conn);
     const kill = procs.killCliTree;
-    const delayedKill = vi.spyOn(procs, "killCliTree").mockImplementation(() => {});
+    const delayedKill = vi.spyOn(procs, "killCliTree").mockImplementation(async () => false);
     try {
       const pendingAnswer = nextAnswer();
       conn.write(JSON.stringify({ t: "ask", id: "before-stop", tool: "Bash", input: { command: "sleep 60" } }) + "\n");

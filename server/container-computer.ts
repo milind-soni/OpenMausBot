@@ -834,6 +834,10 @@ export function podmanSecurityIsHardened(
     CapAdd: effectiveCaps,
     PidMode: config.PidMode === "private" ? "" : config.PidMode,
     UTSMode: config.UTSMode === "private" ? "" : config.UTSMode,
+    // Rootless keep-id maps the workspace owner to the guest cua account.
+    // Do not accept arbitrary user namespace sharing or host namespaces.
+    UsernsMode: config.UsernsMode === "private" || config.UsernsMode === "keep-id:uid=1000,gid=1000"
+      ? "" : config.UsernsMode,
     CgroupnsMode: config.CgroupnsMode || "private",
   });
 }
@@ -847,6 +851,11 @@ export function containerRunArgs(
     throw new Error("Per-bot Local VMs require Docker or Podman because Apple container requires a fixed host port");
   }
   const common = ["run", "-d", "--name", target.containerName];
+  if (runtime === "podman") {
+    // The supervisor starts as namespace-root then drops to cua (1000).
+    // Preserve the host workspace owner instead of :U chowning it to root.
+    common.push("--userns", "keep-id:uid=1000,gid=1000", "--user", "0:0");
+  }
   common.push(
     "--label",
     `${MANAGED_LABEL}=1`,
@@ -910,7 +919,7 @@ export function containerRunArgs(
   common.push(
     "--mount",
     runtime === "podman"
-      ? `type=bind,source=${target.workspaceDir},target=${VM_WORKSPACE_GUEST},relabel=private,U=true`
+      ? `type=bind,source=${target.workspaceDir},target=${VM_WORKSPACE_GUEST},relabel=private`
       : `type=bind,source=${target.workspaceDir},target=${VM_WORKSPACE_GUEST}`,
     "-e",
     `VNC_PW=${password}`,

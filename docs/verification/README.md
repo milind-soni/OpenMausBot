@@ -53,6 +53,10 @@ instructions, history restore, skill/memory refresh, and stale-response isolatio
 
 ## Evidence
 
+The optional [Podman full-stack acceptance recipe](podman-self-hosting.md)
+checks the Compose deployment with a fresh home, fake engine, and two desktops.
+It includes workspace ownership, persistence, and proxy authentication checks.
+
 Keep the JSON from `wait` and `messages`, the exact command sequence, and the
 fixture's printed log path. Evidence must show both the action and the resulting
 state. A green unit test alone does not prove a user workflow.

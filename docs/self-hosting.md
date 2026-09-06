@@ -85,6 +85,10 @@ pm2 to keep it up; `openmausbot serve` is a plain foreground process.
 
 ## Docker (with HTTPS on your own domain)
 
+For a single rootless Podman engine running the server, Caddy, and per-bot
+desktops, see the optional [Podman full-stack recipe](../deploy/podman/README.md)
+for Windows/WSL2 and Linux x64. It is separate from the Docker deployment below.
+
 For local Docker Desktop or private Tailscale access without a public domain,
 use the [local Compose setup](../deploy/local/README.md). It defaults to
 `http://localhost:8080` and supports optional `.env` overrides.

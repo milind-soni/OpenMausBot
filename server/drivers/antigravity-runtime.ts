@@ -32,8 +32,8 @@ const STAGING_PREFIX = ".install-";
 
 /** Windows refuses to rename or delete a file something still holds open,
  * with EPERM/EBUSY/EACCES rather than a clear "in use": the runtime the
- * validator just stopped (taskkill is asynchronous) or an antivirus scan of
- * a brand-new executable. Retry briefly; persistent refusals still fail. */
+ * validator just stopped or an antivirus scan of a brand-new executable.
+ * Retry briefly; persistent refusals still fail. */
 export function transientWindowsFileError(error: unknown): boolean {
   const code = typeof error === "object" && error !== null ? Reflect.get(error, "code") : undefined;
   return code === "EPERM" || code === "EBUSY" || code === "EACCES" || code === "ENOTEMPTY";

@@ -232,6 +232,11 @@ describe("containerComputerStatus", () => {
       ["CAP_SETGID", "CAP_SETUID"],
       ["CAP_SETGID", "CAP_SETUID"],
     )).toBe(true);
+    for (const mode of ["private", "keep-id:uid=1000,gid=1000", "host", "container:other", "keep-id:uid=0,gid=0", "auto"]) {
+      expect(podmanSecurityIsHardened(
+        { ...config, UsernsMode: mode }, ["CAP_SETGID", "CAP_SETUID"], ["CAP_SETGID", "CAP_SETUID"],
+      )).toBe(mode === "private" || mode === "keep-id:uid=1000,gid=1000");
+    }
     expect(podmanSecurityIsHardened(
       config,
       ["CAP_NET_RAW", "CAP_SETGID", "CAP_SETUID"],
@@ -796,6 +801,9 @@ describe("setupCommands", () => {
     expect(command).toContain(`source=${target.workspaceDir},target=${VM_WORKSPACE_GUEST}`);
     expect(command).toContain("-p 127.0.0.1::6901");
     expect(command).not.toContain("127.0.0.1:6080:6901");
+    expect(args).not.toContain("--userns");
+    expect(args).not.toContain("--user");
+    expect(command).not.toContain("relabel=");
   });
 
   it("does not invent Docker commands when no runtime was detected", () => {
@@ -837,8 +845,23 @@ describe("setupCommands", () => {
   it("asks rootless Podman to map and privately relabel the durable workspace", () => {
     const command = setupCommands("podman", "linux").run!;
     expect(command).toContain(
-      `--mount type=bind,source=${VM_WORKSPACE_DIR},target=${VM_WORKSPACE_GUEST},relabel=private,U=true`,
+      `--mount type=bind,source=${VM_WORKSPACE_DIR},target=${VM_WORKSPACE_GUEST},relabel=private`,
     );
+    expect(command).toContain("--userns keep-id:uid=1000,gid=1000 --user 0:0");
+    expect(command).not.toContain("U=true");
+  });
+
+  it("keeps per-bot Podman workspaces separate without recursively changing their owner", () => {
+    for (const id of ["podman-a", "podman-b"]) {
+      const target = perBotLocalVmTarget(id);
+      const args = containerRunArgs("podman", "secret", target);
+      expect(args.slice(args.indexOf("--userns"), args.indexOf("--userns") + 4))
+        .toEqual(["--userns", "keep-id:uid=1000,gid=1000", "--user", "0:0"]);
+      expect(args[args.indexOf("--mount") + 1]).toBe(
+        `type=bind,source=${target.workspaceDir},target=${VM_WORKSPACE_GUEST},relabel=private`,
+      );
+      expect(args).toContain("127.0.0.1::6901");
+    }
   });
 
   it("shows the pinned base pull while creating the managed derivative through the API", () => {

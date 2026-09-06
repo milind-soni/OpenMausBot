@@ -1,0 +1,39 @@
+# Optional all-Podman self-hosting image; the existing Dockerfile is unchanged.
+# Build both server and renderer from this checkout, never mix release artifacts.
+FROM node:24.15.0-bookworm-slim AS build
+WORKDIR /src
+RUN npm install -g pnpm@10.33.0
+ENV ELECTRON_SKIP_BINARY_DOWNLOAD=1
+COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./
+COPY apps/docs/package.json ./apps/docs/package.json
+COPY cloudflare/control-plane/package.json ./cloudflare/control-plane/package.json
+RUN pnpm install --frozen-lockfile
+COPY . .
+RUN pnpm build:server && pnpm exec vite build
+
+FROM node:24.15.0-bookworm-slim
+RUN test "$(uname -m)" = x86_64 \
+    || { echo 'The Podman self-hosting image currently requires Linux x86_64.' >&2; exit 1; }
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends ca-certificates curl git \
+    && rm -rf /var/lib/apt/lists/* \
+    && useradd --uid 1001 --create-home --home-dir /data --shell /bin/bash maus
+# Only the remote client runs here. The engine and desktop containers are siblings.
+RUN curl -fsSL https://github.com/podman-container-tools/podman/releases/download/v5.8.3/podman-remote-static-linux_amd64.tar.gz -o /tmp/podman.tgz \
+    && echo '8431e989a1383e4dc2582a178538b3a686160e15db9f5f2de2501a61dbf91c62  /tmp/podman.tgz' | sha256sum -c - \
+    && tar -xzf /tmp/podman.tgz -C /tmp bin/podman-remote-static-linux_amd64 \
+    && install -m 0755 /tmp/bin/podman-remote-static-linux_amd64 /usr/local/bin/podman \
+    && rm /tmp/podman.tgz /tmp/bin/podman-remote-static-linux_amd64
+WORKDIR /app
+COPY --from=build --chown=maus:maus /src/dist-server ./dist-server
+COPY --from=build --chown=maus:maus /src/dist ./dist
+ARG ENGINES=""
+RUN if [ -n "$ENGINES" ]; then npm install -g $ENGINES; fi
+ENV HOME=/data \
+    OMB_DATA_DIR=/data/.openmausbot \
+    OMB_STATIC_DIR=/app/dist \
+    OMB_PORT=8799 \
+    OMB_WEBHOOK_PORT=8800 \
+    NODE_ENV=production
+USER maus
+CMD ["node", "dist-server/index.js"]

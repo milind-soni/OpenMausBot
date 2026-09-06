@@ -4,5 +4,6 @@
 # checkout every line differs and the drift guard fails for a reason that has
 # nothing to do with drift. Pin them to LF on every platform.
 shared/mascot-bodies.ts text eol=lf
+deploy/podman/*.sh text eol=lf
 ios/Sources/CompanionCore/MausBodies.swift text eol=lf
 android/app/src/main/kotlin/com/openmausbot/companion/ui/MausBodies.kt text eol=lf
