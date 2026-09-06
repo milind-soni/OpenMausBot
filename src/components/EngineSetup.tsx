@@ -28,8 +28,8 @@ export function needsSignIn(instance: InstanceInfo | undefined): boolean {
   return instance?.snapshot.state === "available" && instance.snapshot.authenticated === false;
 }
 
-/** The agent CLI itself is absent. Local-model injection needs the CLI but
- * does not need its cloud account to be signed in. */
+/** The engine needs setup; unavailable does not prove its CLI is absent.
+ * Local-model injection still requires an available engine, but no cloud sign-in. */
 export function needsCli(instance: InstanceInfo | undefined): boolean {
   return instance?.snapshot.state !== "available";
 }
@@ -195,8 +195,13 @@ function ManagedEngineSetup({ instance, signInOnly }: { instance: InstanceInfo; 
   };
 
   const install = () => run("install", async () => {
-    await api(`/api/instances/${encodeURIComponent(instance.instanceId)}/install`, { method: "POST" });
-    await refreshInstances();
+    try {
+      await api(`/api/instances/${encodeURIComponent(instance.instanceId)}/install`, { method: "POST" });
+    } finally {
+      // Keep the latest setup reason without replacing the install error if
+      // the status refresh also fails.
+      await refreshInstances().catch(() => {});
+    }
   });
 
   const signIn = () => run("signin", async () => {
@@ -340,6 +345,12 @@ export function EngineSetup({
           <p className="mt-0.5 text-[12px] leading-relaxed text-ink-secondary">{description}</p>
         </div>
       </div>
+
+      {instance.snapshot.state === "unavailable" && instance.snapshot.reason && (
+        <p role="alert" className="mt-2 text-[12px] leading-relaxed text-danger">
+          {instance.snapshot.reason}
+        </p>
+      )}
 
       {install.managed ? (
         <ManagedEngineSetup instance={instance} signInOnly={signInOnly} />

@@ -28,6 +28,7 @@ import {
   resolveAntigravityRuntime,
 } from "./antigravity-runtime.ts";
 import { resolveAntigravityReleaseAsset } from "./antigravity-release.ts";
+import { augmentedPath } from "../env-path.ts";
 
 export const STATIC_ANTIGRAVITY_MODELS: ModelCatalog = {
   default: "gemini-3.8-flash-high",
@@ -140,8 +141,11 @@ export const AntigravityDriver: ProviderDriver<AcpConfig> = {
   async create(input: DriverCreateInput<AcpConfig>): Promise<ProviderInstance> {
     const base = await AcpAntigravityDriver.create(input);
     const auth = new AntigravityAuthController();
+    let installFailure: string | undefined;
     const runtimeAndProfile = async () => {
-      const environment = { ...process.env, ...input.environment };
+      // Match the ACP driver's discovery/chat environment. A GUI launch's
+      // raw PATH may omit an official runtime that the model picker found.
+      const environment = { ...process.env, ...input.environment, PATH: augmentedPath() };
       const runtime = await resolveAntigravityRuntime(input.config.cli, environment);
       const profile = await prepareAntigravityProfile({
         instanceId: input.instanceId,
@@ -155,10 +159,25 @@ export const AntigravityDriver: ProviderDriver<AcpConfig> = {
       get models() {
         return base.models;
       },
+      snapshot: async () => {
+        const snapshot = await base.snapshot();
+        if (snapshot.state === "available") installFailure = undefined;
+        // A failed first install has no promoted executable yet. Preserve
+        // why it failed across closing/reopening setup in this app session.
+        return snapshot.state === "unavailable" && installFailure
+          ? { ...snapshot, reason: installFailure }
+          : snapshot;
+      },
       ...(antigravityManagedInstallAvailable()
         ? {
             installRuntime: async () => {
-              await installAntigravityRuntime({ validate: validateAntigravityRuntime });
+              installFailure = undefined;
+              try {
+                await installAntigravityRuntime({ validate: validateAntigravityRuntime });
+              } catch (error) {
+                installFailure = error instanceof Error ? error.message : String(error);
+                throw error;
+              }
             },
           }
         : {}),

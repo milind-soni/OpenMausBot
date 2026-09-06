@@ -6,6 +6,8 @@ import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node
 import { join } from "node:path";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
+import { soulFile, soulHash } from "./bot-folder.ts";
+import { flushProfileHistory, readHistory, recordProfileChange } from "./profile-versions.ts";
 import { DATA_DIR } from "./config.ts";
 import type { ModelSelection } from "./contracts.ts";
 import * as mdb from "./message-db.ts";
@@ -19,22 +21,28 @@ describe("Store", () => {
     rmSync(DATA_DIR, { recursive: true, force: true });
   });
 
-  it("createBot seeds a greeting and an onboarding card", () => {
+  it("createBot seeds a greeting without promising engine-specific tools", () => {
     const store = new Store(selection);
     const bot = store.createBot();
 
     const messages = store.messagesFor(bot.threadId);
-    expect(messages).toHaveLength(2);
-    expect(messages[0]).toMatchObject({ role: "bot", kind: "text" });
-    expect(messages[1].kind).toBe("options");
-    expect(messages[1].card?.options.length).toBeGreaterThan(1);
+    expect(messages).toHaveLength(1);
+    expect(messages[0]).toMatchObject({
+      role: "bot",
+      kind: "text",
+      text: `Hi, I'm ${bot.name}. What would you like me to do?`,
+    });
     expect(bot.modelSelection).toEqual(selection());
   });
 
-  it("dismisses the onboarding quiz when the user talks, and leaves live asks", () => {
+  it("dismisses an open options card when the user talks, and leaves live asks", () => {
     const store = new Store(selection);
     const bot = store.createBot();
-    const quiz = store.messagesFor(bot.threadId)[1]!;
+    const quiz = store.appendMessage(bot.threadId, {
+      role: "bot",
+      kind: "options",
+      card: { title: "Quick question", subtitle: "", options: ["A", "B"] },
+    });
     expect(quiz.card?.dismissed).toBeUndefined();
 
     store.appendMessage(bot.threadId, { role: "user", kind: "text", text: "hi" });
@@ -58,11 +66,16 @@ describe("Store", () => {
     expect(store.messagesFor(bot.threadId).find((m) => m.id === ask.id)?.card?.dismissed).toBeUndefined();
   });
 
-  it("does not dismiss the quiz for bot-authored messages", () => {
+  it("does not dismiss an open options card for bot-authored messages", () => {
     const store = new Store(selection);
     const bot = store.createBot();
+    const quiz = store.appendMessage(bot.threadId, {
+      role: "bot",
+      kind: "options",
+      card: { title: "Quick question", subtitle: "", options: ["A", "B"] },
+    });
     store.appendMessage(bot.threadId, { role: "bot", kind: "text", text: "still here" });
-    expect(store.messagesFor(bot.threadId)[1]?.card?.dismissed).toBeUndefined();
+    expect(store.messagesFor(bot.threadId).find((m) => m.id === quiz.id)?.card?.dismissed).toBeUndefined();
   });
 
   it("marks only the last assistant message from a settled provider turn as terminal", () => {
@@ -506,7 +519,11 @@ describe("Store", () => {
   it("patchMessage merges card patches and returns null for unknown ids", () => {
     const store = new Store(selection);
     const bot = store.createBot();
-    const card = store.messagesFor(bot.threadId)[1];
+    const card = store.appendMessage(bot.threadId, {
+      role: "bot",
+      kind: "options",
+      card: { title: "Quick question", subtitle: "", options: ["A", "B"] },
+    });
 
     const patched = store.patchMessage(bot.threadId, card.id, {
       card: { ...card.card!, answered: "Work & projects" },
@@ -518,7 +535,11 @@ describe("Store", () => {
   it("keeps memory and SQLite pending when a card patch cannot persist", () => {
     const store = new Store(selection);
     const bot = store.createBot();
-    const card = store.messagesFor(bot.threadId)[1]!;
+    const card = store.appendMessage(bot.threadId, {
+      role: "bot",
+      kind: "options",
+      card: { title: "Quick question", subtitle: "", options: ["A", "B"] },
+    });
     const update = vi.spyOn(mdb, "updateMessage").mockImplementationOnce(() => {
       throw new Error("simulated SQLite failure");
     });
@@ -560,7 +581,7 @@ describe("Store", () => {
     const user = store.appendMessage(bot.threadId, { role: "user", kind: "text", text: "hi" });
 
     const messages = store.messagesFor(bot.threadId);
-    expect(user.parentId).toBe(messages[1].id); // follows the onboarding card
+    expect(user.parentId).toBe(messages[0].id); // follows the greeting
     expect(store.activeLeaf(bot.threadId)).toBe(user.id);
     expect(store.activePath(bot.threadId).map((m) => m.id)).toEqual(messages.map((m) => m.id));
   });
@@ -704,10 +725,14 @@ describe("Store change stream", () => {
     expect(store.messagesFor(bot.threadId).at(-1)).toBe(m);
   });
 
-  it("emits a card patch after a user message hides the onboarding quiz", () => {
+  it("emits a card patch after a user message hides an open options card", () => {
     const store = new Store(selection);
     const bot = store.createBot();
-    const quiz = store.messagesFor(bot.threadId)[1]!;
+    const quiz = store.appendMessage(bot.threadId, {
+      role: "bot",
+      kind: "options",
+      card: { title: "Quick question", subtitle: "", options: ["A", "B"] },
+    });
     const events = record(store);
     const m = store.appendMessage(bot.threadId, { role: "user", kind: "text", text: "hi" });
     expect(events.map((event) => event.type)).toEqual(["message", "message.patch"]);
@@ -719,11 +744,11 @@ describe("Store change stream", () => {
     });
   });
 
-  it("announces a new bot before its onboarding messages", () => {
+  it("announces a new bot before its greeting", () => {
     const store = new Store(selection);
     const events = record(store);
     const bot = store.createBot();
-    expect(events.map((event) => event.type)).toEqual(["bot", "message", "message"]);
+    expect(events.map((event) => event.type)).toEqual(["bot", "message"]);
     expect(events[0]).toEqual({ type: "bot", botId: bot.id });
     expect(events.slice(1).every((event) => event.threadId === bot.threadId)).toBe(true);
   });
@@ -916,6 +941,33 @@ describe("Store redacts bot-authored secrets on write", () => {
     if (routineCard.card?.routineRequest?.operation.action !== "create") throw new Error("missing routine payload");
     expect(routineCard.card.routineRequest.operation.routine.name).not.toContain(key);
     expect(routineCard.card.routineRequest.operation.routine.instructions).not.toContain(key);
+    const profileCard = store.appendMessage(bot.threadId, {
+      role: "bot",
+      kind: "options",
+      card: {
+        title: "Update profile?",
+        subtitle: "Why: because you asked",
+        options: ["Confirm", "Cancel"],
+        requestId: "profile-request",
+        tool: "update_profile",
+        profileRequest: {
+          version: 1,
+          requestId: "profile-request",
+          botId: bot.id,
+          threadId: bot.threadId,
+          targetBotId: bot.id,
+          targetName: `Scout ${key}`,
+          createdAt: 1,
+          reason: `because you asked about ${key}`,
+          changes: { name: "Kiwi" },
+          before: { name: "Scout", soul: `token ${key}` },
+          expectedRevision: "r",
+        },
+      },
+    });
+    expect(profileCard.card?.profileRequest?.targetName).not.toContain(key);
+    expect(profileCard.card?.profileRequest?.reason).not.toContain(key);
+    expect(profileCard.card?.profileRequest?.before.soul).not.toContain(key);
     const skillCard = store.appendMessage(bot.threadId, {
       role: "bot",
       kind: "options",
@@ -1158,5 +1210,117 @@ describe("Store task working folder — cloud runs", () => {
     expect(store.taskByThread(bot.id, bot.threadId)?.cwd).toBeNull();
     // and it stays pinned even if a host run follows
     expect(store.pinTaskCwd(bot.id, bot.threadId)).toBeNull();
+  });
+});
+
+describe("soul", () => {
+  beforeEach(() => {
+    rmSync(DATA_DIR, { recursive: true, force: true });
+  });
+
+  it("seeds an empty soul with its hash and writes the SOUL.md mirror on create", () => {
+    const store = new Store(selection);
+    const bot = store.createBot();
+    expect(bot.soul).toBe("");
+    expect(bot.soulHash).toBe(soulHash(""));
+    expect(readFileSync(soulFile(bot.id), "utf8")).toBe("");
+  });
+
+  it("setSoul rewrites the record, the hash, the mirror, and clears drift", () => {
+    const store = new Store(selection);
+    const bot = store.createBot();
+    store.patchBot(bot.id, { soulDrift: true });
+    const updated = store.setSoul(bot.id, "Be brief.");
+    expect(updated?.soul).toBe("Be brief.");
+    expect(updated?.soulHash).toBe(soulHash("Be brief."));
+    expect(updated?.soulDrift).toBe(false);
+    expect(readFileSync(soulFile(bot.id), "utf8")).toBe("Be brief.");
+    expect(store.setSoul("nope", "x")).toBeNull();
+  });
+
+  it("backfills old bots' mirrors before the first non-soul history change", async () => {
+    const store = new Store(selection);
+    const bot = store.createBot();
+    const raw = JSON.parse(readFileSync(join(DATA_DIR, "bots.json"), "utf8")) as Record<string, unknown>[];
+    for (const record of raw) {
+      delete record.soul;
+      delete record.soulHash;
+    }
+    writeFileSync(join(DATA_DIR, "bots.json"), JSON.stringify(raw));
+    rmSync(join(DATA_DIR, "bots", bot.id), { recursive: true, force: true });
+    const reloaded = new Store(selection);
+    expect(reloaded.bot(bot.id)?.soul).toBe("");
+    expect(reloaded.bot(bot.id)?.soulHash).toBe(soulHash(""));
+    expect(readFileSync(soulFile(bot.id), "utf8")).toBe("");
+    reloaded.patchBot(bot.id, { title: "Tracker" });
+    recordProfileChange(bot.id, "user", "api", { title: "" }, { title: "Tracker" });
+    await flushProfileHistory(bot.id);
+    expect(readHistory(bot.id)).toMatchObject([{ field: "title", after: "Tracker" }]);
+  });
+
+  it("preserves externally edited mirrors on reload", () => {
+    const store = new Store(selection);
+    const bot = store.createBot();
+    store.setSoul(bot.id, "canonical");
+    writeFileSync(soulFile(bot.id), "user edit");
+    const reloaded = new Store(selection);
+    expect(reloaded.bot(bot.id)?.soul).toBe("canonical");
+    expect(readFileSync(soulFile(bot.id), "utf8")).toBe("user edit");
+  });
+
+  it("keeps all profile fields, the receipt and mirror unchanged when persistence fails", () => {
+    const store = new Store(selection);
+    const bot = store.createBot();
+    const before = JSON.parse(JSON.stringify(bot));
+    const save = vi.spyOn(store as unknown as { saveBots(bots: BotRecord[]): void }, "saveBots")
+      .mockImplementationOnce(() => { throw new Error("disk full"); });
+    expect(() => store.patchBotProfile(bot.id, { name: "Kiwi", soul: "new", lastProfileRequestId: "card" })).toThrow("disk full");
+    expect(bot).toEqual(before);
+    expect(readFileSync(soulFile(bot.id), "utf8")).toBe("");
+    expect(JSON.parse(readFileSync(join(DATA_DIR, "bots.json"), "utf8"))[0].name).toBe(before.name);
+    save.mockRestore();
+    const emit = vi.fn();
+    store.onChange(emit);
+    store.patchBotProfile(bot.id, { name: "Kiwi", soul: "new", lastProfileRequestId: "card" });
+    expect(emit).toHaveBeenCalledTimes(1);
+    expect(new Store(selection).bot(bot.id)).toMatchObject({ name: "Kiwi", soul: "new", lastProfileRequestId: "card" });
+  });
+
+  it("keeps runtime revocations effective in memory even when persistence fails", () => {
+    const store = new Store(selection);
+    const bot = store.createBot();
+    store.patchBot(bot.id, { browser: true });
+    const save = vi.spyOn(store as unknown as { saveBots(bots: BotRecord[]): void }, "saveBots")
+      .mockImplementationOnce(() => { throw new Error("disk full"); });
+    expect(() => store.patchBot(bot.id, { browser: false })).toThrow("disk full");
+    expect(bot.browser).toBe(false);
+    save.mockRestore();
+  });
+
+  it("deleteBot removes the bot folder with the workspace", () => {
+    const store = new Store(selection);
+    const bot = store.createBot();
+    expect(existsSync(soulFile(bot.id))).toBe(true);
+    store.deleteBot(bot.id);
+    expect(existsSync(join(DATA_DIR, "bots", bot.id))).toBe(false);
+  });
+
+  it("setSoul still returns the updated record when the mirror write fails", () => {
+    const store = new Store(selection);
+    const bot = store.createBot();
+    const folder = join(DATA_DIR, "bots", bot.id);
+    // Make the bot's folder path unwritable by putting a *file* there:
+    // writeSoulMirror's mkdirSync(folder) then fails with ENOTDIR.
+    rmSync(folder, { recursive: true, force: true });
+    writeFileSync(folder, "not a directory");
+    try {
+      const call = () => store.setSoul(bot.id, "Be brief.");
+      expect(call).not.toThrow();
+      const updated = call();
+      expect(updated?.soul).toBe("Be brief.");
+      expect(updated?.soulHash).toBe(soulHash("Be brief."));
+    } finally {
+      rmSync(folder, { force: true });
+    }
   });
 });

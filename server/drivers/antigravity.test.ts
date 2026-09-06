@@ -1,25 +1,30 @@
-import { chmodSync, copyFileSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, copyFileSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, unlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { ensureDirs } from "../config.ts";
 import type { ProviderInstance } from "../contracts.ts";
 import { recordEvents, type EventRecorder } from "../testing/events.ts";
 import { removeTempDir } from "../testing/cleanup.ts";
+import * as procs from "../procs.ts";
+import * as envPath from "../env-path.ts";
+import * as managedRuntime from "./antigravity-runtime.ts";
 import {
   ANTIGRAVITY_AUTH_PREFIX,
-  authorizationUrlFromLine,
+  AntigravityAcpClient,
   AntigravityAuthController,
-  antigravityProfileDirectory,
   antigravityProfileAuthenticated,
+  antigravityProfileDirectory,
+  authorizationUrlFromLine,
   catalogFromAntigravityConfigOptions,
   isValidAntigravityInitializeResult,
   parseAntigravityAuthorizationUrl,
   prepareAntigravityProfile,
   probeAntigravityModels,
   validateAntigravityCallbackUrl,
+  validateAntigravityRuntime,
 } from "./antigravity-acp.ts";
 import {
   ANTIGRAVITY_RELEASE_VERSION,
@@ -55,6 +60,8 @@ function fakeRuntime(startupDelayMs = 0): { directory: string; executable: strin
 }
 
 afterEach(async () => {
+  vi.restoreAllMocks();
+  vi.unstubAllEnvs();
   delete process.env.FAKE_ACP_AUTH_METHOD;
   delete process.env.FAKE_ACP_MODELS;
   delete process.env.FAKE_ACP_MODES;
@@ -103,6 +110,70 @@ describe("official Antigravity catalog", () => {
 });
 
 describe("Antigravity sign-in lifecycle", () => {
+  it("preserves failed setup errors until retry or external recovery, without reviving stale errors", async () => {
+    if (!resolveAntigravityReleaseAsset()) return;
+    const fake = fakeRuntime();
+    const custom = join(fake.directory, "not-installed");
+    const install = vi.spyOn(managedRuntime, "installAntigravityRuntime")
+      .mockRejectedValueOnce(new Error("Antigravity initialization timed out: fixture failure"));
+    const instance = await AntigravityDriver.create({
+      instanceId: "failed-antigravity-install",
+      displayName: "Antigravity fixture", enabled: true,
+      config: { cli: custom, fullAuto: false },
+      environment: {},
+    });
+    try {
+      await expect(instance.installRuntime!()).rejects.toThrow("fixture failure");
+      expect(await instance.snapshot()).toEqual({ state: "unavailable", reason: "Antigravity initialization timed out: fixture failure" });
+      // Independent refreshes (including reopening the card) keep the cause.
+      expect((await instance.snapshot()).reason).toContain("fixture failure");
+      // A manual/shared install can recover without this instance retrying.
+      copyFileSync(fake.executable, custom);
+      if (process.platform !== "win32") chmodSync(custom, 0o755);
+      expect((await instance.snapshot()).state).toBe("available");
+      unlinkSync(custom);
+      const unavailable = await instance.snapshot();
+      expect(unavailable.state).toBe("unavailable");
+      expect(unavailable.reason).not.toContain("fixture failure");
+      install.mockRejectedValueOnce(new Error("Antigravity initialization timed out: fixture failure"));
+      await expect(instance.installRuntime!()).rejects.toThrow("fixture failure");
+      install.mockResolvedValueOnce({ executablePath: fake.executable, harnessPath: fake.harness, source: "managed", version: "1.1.1" });
+      await instance.installRuntime!();
+      expect((await instance.snapshot()).reason).not.toContain("fixture failure");
+    } finally {
+      await instance.dispose();
+    }
+  });
+
+  it("uses the same discovered PATH for readiness and Google sign-in", async () => {
+    const fake = fakeRuntime();
+    const executable = join(fake.directory, process.platform === "win32" ? "agy_acp_server.exe" : "agy_acp_server.par");
+    copyFileSync(fake.executable, executable);
+    if (process.platform !== "win32") chmodSync(executable, 0o755);
+    vi.stubEnv("PATH", "");
+    vi.spyOn(envPath, "augmentedPath").mockReturnValue(fake.directory);
+    const authenticate = vi.spyOn(AntigravityAuthController.prototype, "start").mockResolvedValue({
+      phase: "succeeded", flowId: null, authorizationUrl: null, expiresAt: null,
+    });
+    const instance = await AntigravityDriver.create({
+      instanceId: "path-only-antigravity",
+      displayName: "Antigravity fixture",
+      enabled: true,
+      config: { cli: "agy_acp_server" + (process.platform === "win32" ? ".exe" : ".par"), fullAuto: false },
+      environment: { PATH: "" },
+    });
+    try {
+      expect((await instance.snapshot()).state).toBe("available");
+      await expect(instance.startAuthentication!()).resolves.toMatchObject({ phase: "succeeded" });
+      expect(authenticate).toHaveBeenCalledWith(
+        expect.objectContaining({ executablePath: executable }),
+        expect.objectContaining({ environment: expect.objectContaining({ PATH: fake.directory }) }),
+      );
+    } finally {
+      await instance.dispose();
+    }
+  });
+
   // Google's server announces the link on stderr, never stdout — a fake that
   // prints to stdout passes against code that cannot sign in at all.
   it.each(["cancel", "provider failure"])("contains %s after handing the browser a sign-in URL", async (ending) => {
@@ -132,6 +203,41 @@ createInterface({ input: process.stdin }).on('line', line => {
     } finally {
       controller.cancel();
     }
+  });
+});
+
+describe("stopping the runtime before touching its files", () => {
+  it("validates a real fake runtime and waits for its process to close before returning", async () => {
+    const fake = fakeRuntime();
+    const runtime = await resolveAntigravityRuntime(fake.executable);
+    vi.stubEnv("FAKE_ACP_AGENT_NAME", "Google Antigravity");
+    vi.stubEnv("FAKE_ACP_AGENT_VERSION", "1.1.1");
+    vi.stubEnv("FAKE_ACP_AUTH_METHOD", "oauth-personal");
+    let sawClose = false;
+    const spawn = procs.spawnCli;
+    const spawned = vi.spyOn(procs, "spawnCli").mockImplementation((...args) => {
+      const child = spawn(...args);
+      child.once("close", () => { sawClose = true; });
+      return child;
+    });
+    await validateAntigravityRuntime(runtime, "agy_acp_server_1.1.1");
+    expect(spawned).toHaveBeenCalledTimes(1);
+    expect(sawClose).toBe(true);
+    const child = spawned.mock.results[0]!.value;
+    expect(child.exitCode !== null || child.signalCode !== null).toBe(true);
+  });
+
+  it("closeAndWait resolves only once the process is gone, so a rename on Windows cannot hit a running executable", async () => {
+    const fake = fakeRuntime();
+    const runtime = await resolveAntigravityRuntime(fake.executable);
+    const profile = await prepareAntigravityProfile({ instanceId: "close-and-wait", runtime, baseDir: fake.directory });
+    const client = new AntigravityAcpClient(runtime, profile, fake.directory);
+    await client.initialize();
+    expect(client.child.exitCode).toBeNull();
+    expect(await client.closeAndWait()).toBe(true);
+    expect(client.child.exitCode !== null || client.child.signalCode !== null).toBe(true);
+    // idempotent, and immediate the second time
+    expect(await client.closeAndWait(100)).toBe(true);
   });
 });
 
@@ -363,9 +469,14 @@ describe("official Antigravity runtime", () => {
     })).rejects.toThrow(/redirected outside/u);
   });
 
-  it("coalesces, verifies, extracts, and reuses a pinned managed download", async () => {
+  it("coalesces, verifies, extracts, and reuses a pinned download without touching another install", async () => {
     const baseDir = mkdtempSync(join(tmpdir(), "omb-antigravity-install-"));
     scratch.push(baseDir);
+    const versions = join(baseDir, "tools", "antigravity-acp", `${process.platform}-${process.arch}`, "versions");
+    const otherStaging = join(versions, ".install-other-active", "runtime");
+    mkdirSync(otherStaging, { recursive: true });
+    const otherFile = join(otherStaging, "agy_acp_server.exe");
+    writeFileSync(otherFile, "another app process is still installing");
     const archive = Buffer.from(
       "UEsDBBQAAAAIAMaAI13ihkXDEwAAABEAAAASAAAAYWd5X2FjcF9zZXJ2ZXIucGFyU1bUT8rM0y/O4EqtyCxRMOACAFBLAwQUAAAACADGgCNd4oZFwxMAAAARAAAAFQAAAGxvY2FsaGFybmVzc19leHRlcm5hbFNW1E/KzNMvzuBKrcgsUTDgAgBQSwECFAMUAAAACADGgCNd4oZFwxMAAAARAAAAEgAAAAAAAAAAAAAAgAEAAAAAYWd5X2FjcF9zZXJ2ZXIucGFyUEsBAhQDFAAAAAgAxoAjXeKGRcMTAAAAEQAAABUAAAAAAAAAAAAAAIABQwAAAGxvY2FsaGFybmVzc19leHRlcm5hbFBLBQYAAAAAAgACAIMAAACJAAAAAAA=",
       "base64",
@@ -397,6 +508,8 @@ describe("official Antigravity runtime", () => {
     await installAntigravityRuntime(options);
     expect(fetches).toBe(1);
     expect(validations).toBe(2);
+    expect(readFileSync(otherFile, "utf8")).toBe("another app process is still installing");
+    expect(readdirSync(versions).filter((name) => name.startsWith(".install-"))).toEqual([".install-other-active"]);
   });
 
   it("isolates profiles by instance and strips ambient Google credentials", async () => {

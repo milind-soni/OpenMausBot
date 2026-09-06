@@ -6,7 +6,7 @@ import { emailGateDone, initAnalytics } from "@/lib/analytics";
 import { Sidebar } from "@/components/Sidebar";
 import { ChatView } from "@/components/ChatView";
 import { GroupView } from "@/components/GroupView";
-import { SettingsPanel } from "@/components/SettingsPanel";
+import { BotSettingsDialog } from "@/components/BotSettingsDialog";
 import { RemoteAgentSettingsPanel } from "@/components/RemoteAgentSettingsPanel";
 import { PluginsPanel, preloadConnectedApps } from "@/components/PluginsPanel";
 import { ComputerPanel } from "@/components/ComputerPanel";
@@ -285,7 +285,7 @@ function Shell() {
       {state.settingsOpen && bot && (
         remoteClient
           ? <RemoteAgentSettingsPanel bot={bot} />
-          : <SettingsPanel bot={bot} />
+          : <BotSettingsDialog key={bot.id} bot={bot} />
       )}
       {state.computerOpen && bot && (
         remoteClient ? (

@@ -25,6 +25,7 @@ export const BOT_PROFILE_PATCH_FIELDS = [
   "name",
   "title",
   "description",
+  "soul",
   "notifications",
   "avatarUrl",
   "avatarCrop",
@@ -49,6 +50,12 @@ const profilePatchSchema = z.object({
     .string({ error: "description must be a string" })
     .max(BOT_PROFILE_LIMITS.description, { error: "description must be at most 4000 characters" })
     .optional(),
+  soul: z
+    .string({ error: "soul must be a string" })
+    .refine((value) => Buffer.byteLength(value, "utf8") <= BOT_PROFILE_LIMITS.soul, {
+      error: "standing instructions must be at most 24000 bytes",
+    })
+    .optional(),
   notifications: z.boolean({ error: "notifications must be true or false" }).optional(),
   avatarUrl: z
     .union([botAvatarUrlSchema, z.literal(""), z.null()], {
@@ -72,6 +79,7 @@ export type BotProfilePatch = Partial<
     | "name"
     | "title"
     | "description"
+    | "soul"
     | "notifications"
     | "avatarUrl"
     | "avatarCrop"

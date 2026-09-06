@@ -106,8 +106,13 @@ const ALLOWED: ReadonlyArray<{ method: string; path: RegExp }> = [
   { method: "POST", path: /^\/api\/bots\/[\w-]+\/tasks\/[\w-]+$/ },
   { method: "PATCH", path: /^\/api\/bots\/[\w-]+\/tasks\/[\w-]+$/ },
   { method: "DELETE", path: /^\/api\/bots\/[\w-]+\/tasks\/[\w-]+$/ },
+  // Read-only summary: who the bot is, what it does and won't do, and its
+  // recent activity. No settings, no transcript — read on open and on
+  // pull-to-refresh.
+  { method: "GET", path: /^\/api\/bots\/[\w-]+\/overview$/ },
   // Paired-safe profile subset. The harness route itself rejects fields
-  // outside identity, avatar, notifications, and voice preferences.
+  // outside identity, standing instructions (soul, byte-capped), avatar,
+  // notifications, and voice preferences.
   { method: "PATCH", path: /^\/api\/bots\/[\w-]+\/profile$/ },
   // Full model selection, but no other bot settings. The harness validates
   // the live catalog and refuses changes while the bot is working.

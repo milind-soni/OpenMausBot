@@ -1661,6 +1661,21 @@ final class Session: ObservableObject {
         return try? await client.config()
     }
 
+    func botOverview(for bot: Bot) async -> BotOverview? {
+        guard let client else { return nil }
+        let connectionID = connection?.id
+        do {
+            let overview = try await client.overview(botId: bot.id)
+            guard !Task.isCancelled, connection?.id == connectionID else { return nil }
+            return overview
+        } catch {
+            guard !Task.isCancelled, connection?.id == connectionID else { return nil }
+            guard !(error is CancellationError), (error as? URLError)?.code != .cancelled else { return nil }
+            actionError = error.localizedDescription
+            return nil
+        }
+    }
+
     // MARK: - Routines
 
     func loadRoutines() async -> (routines: [Routine], runs: [RoutineRun]) {

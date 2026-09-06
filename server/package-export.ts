@@ -126,6 +126,7 @@ export function createBotPackageExport(input: {
       name: bot.name,
       title: bot.title,
       description: bot.description,
+      ...(bot.soul !== undefined ? { soul: bot.soul } : {}),
       appearance,
     };
     const assigned = agentPlaybooks.get(bot.id);

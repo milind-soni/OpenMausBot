@@ -110,6 +110,7 @@ class NavigationTest {
             Destination.ConnectedApps,
             Destination.Thread("thread:with:colons"),
             Destination.Computer("bot:with:colons"),
+            Destination.Overview("bot:with:colons"),
             Destination.Chat(ChatTarget.Bot("bot:1:x", "thread:1:y")),
             Destination.Chat(ChatTarget.Room("room::9", "")),
         )
@@ -153,6 +154,15 @@ class NavigationTest {
     }
 
     @Test
+    fun `an overview round-trips through encode and decode`() {
+        val destination = Destination.Overview("bot-1")
+        assertEquals(
+            listOf(destination),
+            CompanionNavigator.decode(CompanionNavigator.encode(listOf(destination))),
+        )
+    }
+
+    @Test
     fun `a computer sits above the chat it was opened from`() {
         val navigator = CompanionNavigator()
         navigator.push(botChat)
@@ -184,11 +194,12 @@ class NavigationTest {
     }
 
     @Test
-    fun `the four addressable destinations do not collide in saved state`() {
+    fun `the five addressable destinations do not collide in saved state`() {
         val encoded = CompanionNavigator.encode(
             listOf(
                 Destination.Thread("x"),
                 Destination.Computer("x"),
+                Destination.Overview("x"),
                 Destination.Chat(ChatTarget.Bot("x", "x")),
                 Destination.Chat(ChatTarget.Room("x", "x")),
             ),

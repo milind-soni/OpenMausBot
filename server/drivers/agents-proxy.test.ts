@@ -50,6 +50,8 @@ let routinesResponse: unknown = {
   ],
 };
 let lastRoutineRequestBody: any = null;
+let lastProfileRequestBody: any = null;
+let profileRequestResponse: unknown = { requestId: "profile-request-1", summary: "Name → Kiwi" };
 let lastSessionSearchUrl = "";
 let lastSessionReadUrl = "";
 let sessionSearchResponse: unknown = {
@@ -190,6 +192,16 @@ beforeAll(async () => {
       });
       return;
     }
+    if (req.method === "POST" && req.url === "/api/internal/profile-requests") {
+      let data = "";
+      req.on("data", (c) => (data += c));
+      req.on("end", () => {
+        lastProfileRequestBody = JSON.parse(data);
+        res.writeHead(201, { "content-type": "application/json" });
+        res.end(JSON.stringify(profileRequestResponse));
+      });
+      return;
+    }
     if (req.method === "GET" && req.url?.startsWith("/api/internal/session-search?")) {
       lastSessionSearchUrl = req.url;
       res.writeHead(200, { "content-type": "application/json" });
@@ -279,6 +291,7 @@ describe("agents-proxy MCP surface", () => {
       "list_routines",
       "propose_routine",
       "propose_routine_action",
+      "propose_profile",
       "skills_list",
       "skill_manage",
     ]);
@@ -843,6 +856,40 @@ describe("agents-proxy MCP surface", () => {
     });
     expect(badUpdate.result.isError).toBe(true);
     expect(lastRoutineRequestBody).toBeNull();
+  });
+
+  it("propose_profile posts the changed fields and reason to the internal route", async () => {
+    lastProfileRequestBody = null;
+    const res = await callTool("propose_profile", { name: " Kiwi ", soul: "Be brief.\n", reason: "asked" });
+    expect(lastProfileRequestBody).toEqual({
+      fromBotId: "bot-asker",
+      fromThreadId: "thread-asker-routine",
+      changes: { name: "Kiwi", soul: "Be brief.\n" },
+      reason: "asked",
+    });
+    expect(res.result.content[0].text).toContain("confirmation card is now visible");
+    expect(res.result.content[0].text).toContain("do not claim the profile was created or changed");
+    expect(res.result.isError).toBeFalsy();
+  });
+
+  it("propose_profile forwards for_bot_id when proposing for another bot", async () => {
+    lastProfileRequestBody = null;
+    await callTool("propose_profile", { title: "Chief of Staff", reason: "asked", for_bot_id: "bot-helper" });
+    expect(lastProfileRequestBody).toEqual({
+      fromBotId: "bot-asker",
+      fromThreadId: "thread-asker-routine",
+      changes: { title: "Chief of Staff" },
+      reason: "asked",
+      forBotId: "bot-helper",
+    });
+  });
+
+  it("propose_profile refuses an empty change set without calling the harness", async () => {
+    lastProfileRequestBody = null;
+    const res = await callTool("propose_profile", { reason: "asked" });
+    expect(res.result.isError).toBe(true);
+    expect(res.result.content[0].text).toContain("needs at least one of name, title, description, soul, or cwd");
+    expect(lastProfileRequestBody).toBeNull();
   });
 
   it("rejects unknown tools with -32602", async () => {

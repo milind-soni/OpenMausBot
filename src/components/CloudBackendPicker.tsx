@@ -1,6 +1,6 @@
 // The Box / Self-hosted VPS segmented control shown under the "Runs on"
 // picker whenever a bot can end up on a cloud computer. One component, two
-// homes (ComputerPanel and SettingsPanel), so the copy and the disabled
+// homes (ComputerPanel and the bot settings dialog's Access section), so the copy and the disabled
 // rules can never drift apart.
 import type { CloudBackend } from "../../server/contracts.ts";
 import { cn } from "@/lib/cn";

@@ -204,7 +204,7 @@ final class SpeechDictation: ObservableObject {
         // new draft or stopping the new capture.
         guard gen == generation, !stopping, isListening else { return }
         if let result {
-            transcript = result.bestTranscription.formattedString
+            transcript = Dictation.updateTranscript(transcript, new: result.bestTranscription.formattedString)
             // Composer dictation does not wait for isFinal — the last
             // partial is what you send. If the recognizer finalizes on
             // its own (rare without endAudio), just stop listening.

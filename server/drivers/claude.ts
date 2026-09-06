@@ -859,7 +859,10 @@ export const ClaudeDriver: ProviderDriver<ClaudeConfig> = {
       if (live && !live.turn && !live.closing && live.child.exitCode === null && live.argsKey === argsKey && (!sessionId || sessionId === live.sessionId)) {
         if (live.idleTimer) clearTimeout(live.idleTimer);
         live.turn = { turnId, settled: false, sawStreamDelta: false };
-        active.set(threadId, { stop: () => killCliTree(live.child), turnId, broker: live.broker });
+        active.set(threadId, { stop: () => {
+          closeSession(threadId, "interrupted");
+          killCliTree(live.child);
+        }, turnId, broker: live.broker });
         emit({ ...base(threadId, turnId), type: "turn.started" });
         const written = await writeUser(live, threadId, promptMsg);
         if (!written) {
@@ -1257,6 +1260,9 @@ export const ClaudeDriver: ProviderDriver<ClaudeConfig> = {
       });
 
       const stop = () => {
+        // taskkill is asynchronous on Windows. Retire steering and approvals
+        // now, before a still-connected child can submit more work.
+        closeSession(threadId, "interrupted");
         retry.cancelled = true;
         retryAbort.abort();
         killCliTree(child);

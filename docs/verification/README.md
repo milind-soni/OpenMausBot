@@ -48,6 +48,9 @@ map entry only after the shared control surface can really drive it.
 The [cloud preview fixture](cloud-preview.md) mounts the real Computer panel
 against an isolated server for image decoding, loading, and recovery UI checks.
 
+The [bot settings fixture](bot-settings.md) checks profile saves, standing
+instructions, history restore, skill/memory refresh, and stale-response isolation.
+
 ## Evidence
 
 Keep the JSON from `wait` and `messages`, the exact command sequence, and the

@@ -1038,6 +1038,13 @@ public struct CompanionClient: Sendable {
         return (response.routines, response.runs)
     }
 
+    /// A read-only summary of one bot: who it is, what it does and won't do,
+    /// and its recent activity. No settings, no transcript.
+    public func overview(botId: String) async throws -> BotOverview {
+        guard Self.validRouteID(botId) else { throw APIError.badURL }
+        return try await send(try makeRequest("GET", "/api/bots/\(botId)/overview"), as: BotOverview.self)
+    }
+
     // MARK: - Doing
 
     /// Make a new bot. The harness picks its name, colour and greeting — the

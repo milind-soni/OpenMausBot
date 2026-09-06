@@ -52,6 +52,15 @@ const validPackage: any = {
 };
 
 describe("bot packages", () => {
+  it("round-trips optional soul through Markdown and the import persona, with the profile byte cap", () => {
+    const input = structuredClone(validPackage);
+    const soul = "  Preserve precise instructions. 🐭\n";
+    input.package.agents[0].soul = soul;
+    const parsed = parseBotPackage(renderBotPackageMarkdown(parseBotPackage(input)));
+    expect(packageAgentAsMember(parsed.package.agents[0]).soul).toBe(soul);
+    input.package.agents[0].soul = "🐭".repeat(6_001);
+    expect(() => parseBotPackage(input)).toThrow("24000 bytes");
+  });
   it("parses the complete portable structure and strips authority fields", () => {
     const parsed = parseBotPackage(validPackage);
     expect(parsed.package.rooms![0]?.defaultResponder).toEqual({ kind: "agent", agent: "lead" });

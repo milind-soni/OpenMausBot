@@ -6,6 +6,7 @@ import { Store } from "./store.ts";
 import { RoutineManager } from "./routines.ts";
 import { createTeamBackup, importTeamBackup } from "./team-backup.ts";
 import { parseTeamBackup } from "../shared/team-backup.ts";
+import { soulFile, soulHash } from "./bot-folder.ts";
 
 const selection = () => ({ instanceId: "fixture", model: "fixture-model" });
 
@@ -18,6 +19,7 @@ function fixture() {
     startTurn: async () => { throw new Error("Import must never run a bot"); },
   });
   const chief = store.createBot({ name: "Mira", section: "Engineering", description: "Full instructions\n".repeat(400) }, { seedMessages: false });
+  store.setSoul(chief.id, "  Cite sources.\nRespect the user's current request. 🐭\n");
   const scout = store.createBot({ name: "Scout", section: "Engineering", mascotBody: "circle" }, { seedMessages: false });
   const otherChief = store.createBot({ name: "Ava", section: "Operations" }, { seedMessages: false });
   const archived = store.createBot({ name: "Archived" }, { seedMessages: false });
@@ -63,6 +65,9 @@ describe("additive portable team backups", () => {
     for (const routine of originalRoutines) expect(routines.listRoutines().find((r) => r.id === routine.id)).toEqual(routine);
     const importedChief = result.bots.find((bot) => bot.name === "Mira 2")!;
     const importedScout = result.bots.find((bot) => bot.name === "Scout 2")!;
+    expect(importedChief.soul).toBe(chief.soul);
+    expect(importedChief.soulHash).toBe(soulHash(chief.soul!));
+    expect(readFileSync(soulFile(importedChief.id), "utf8")).toBe(chief.soul);
     expect(importedChief).toMatchObject({ section: "Engineering 2", chiefOfStaff: true, description: chief.description, computer: "off", composio: false, browser: false, approvalMode: "ask", autoApprove: false, resumeCursors: {}, playbooks: chief.playbooks });
     expect(result.bots.find((bot) => bot.name === "Ava 2")).toMatchObject({ section: "Operations 2", chiefOfStaff: true });
     expect(result.bots.find((bot) => bot.name === "Archived 2")).toMatchObject({ hidden: true });
@@ -86,6 +91,7 @@ describe("additive portable team backups", () => {
     expect(importedHistory[2].text).toContain("file not included");
     expect(JSON.stringify(backup)).not.toMatch(/do-not-replay|do-not-resume|\/private\/image|\/private\/old-workspace|alwaysAllow|autoApprove|modelSelection/);
     const reloaded = new Store(selection);
+    expect(reloaded.bot(importedChief.id)?.soul).toBe(chief.soul);
     expect(reloaded.activePath(firstTask.threadId)).toEqual(store.activePath(firstTask.threadId));
     expect(reloaded.bot(importedChief.id)?.tasks).toEqual(importedChief.tasks);
     expect(reloaded.messagesFor(chief.threadId)).toEqual(store.messagesFor(chief.threadId));
@@ -95,7 +101,7 @@ describe("additive portable team backups", () => {
     expect(store.bot(importedChief.id)).toEqual(importedChief);
   });
 
-  it.each(["unknown-version", "duplicate-bot", "cycle", "dangling-room", "dangling-task", "duplicate-chief"])("rejects %s before any writes", (corruption) => {
+  it.each(["unknown-version", "duplicate-bot", "cycle", "dangling-room", "dangling-task", "duplicate-chief", "oversized-soul"])("rejects %s before any writes", (corruption) => {
     const { store, routines } = fixture();
     const backup = createTeamBackup(store, routines.listRoutines(), "My team");
     const before = readFileSync(join(DATA_DIR, "bots.json"), "utf8");
@@ -107,9 +113,21 @@ describe("additive portable team backups", () => {
     if (corruption === "dangling-room") backup.groups[0].memberIds.push("missing");
     if (corruption === "dangling-task") source.activeTask = "missing";
     if (corruption === "duplicate-chief") backup.bots.find((bot) => bot.name === "Scout")!.chiefOfStaff = true;
+    if (corruption === "oversized-soul") source.soul = "🐭".repeat(6_001);
     expect(() => importTeamBackup(store, routines, backup, selection())).toThrow("Invalid backup");
     expect(readFileSync(join(DATA_DIR, "bots.json"), "utf8")).toBe(before);
     expect(readFileSync(join(DATA_DIR, "groups.json"), "utf8")).toBe(groupsBefore);
+  });
+
+  it("accepts legacy backups without soul and enforces its UTF-8 byte cap", () => {
+    const { store, routines } = fixture();
+    const backup = createTeamBackup(store, routines.listRoutines(), "Legacy team");
+    for (const bot of backup.bots) delete bot.soul;
+    expect(importTeamBackup(store, routines, backup, selection()).bots.every((bot) => bot.soul === "")).toBe(true);
+    backup.bots[0].soul = "🐭".repeat(6_000);
+    expect(parseTeamBackup(backup).bots[0].soul).toBe(backup.bots[0].soul);
+    backup.bots[0].soul += "!";
+    expect(() => parseTeamBackup(backup)).toThrow("24000 bytes");
   });
 
   it("strips injected permissions, IDs and live actions from untrusted files", () => {

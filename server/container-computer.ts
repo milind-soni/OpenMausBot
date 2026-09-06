@@ -1028,11 +1028,14 @@ export function wholeScreenshot(bytes: Buffer): ScreenshotCheck {
   };
 }
 
-export async function containerComputerScreenshot(
+/** The raw frame, in the shape the live screen poller broadcasts to every
+ * client (server/index.ts). The web panel wants a data URL instead, so
+ * containerComputerScreenshot below wraps this one. */
+export async function containerComputerFrame(
   runner: CommandRunner = sh,
   platform: NodeJS.Platform = process.platform,
   target: LocalVmTarget = SHARED_LOCAL_VM_TARGET,
-): Promise<string> {
+): Promise<{ png: string; format: "png" | "jpeg" }> {
   const cacheable = runner === sh && platform === process.platform;
   const now = Date.now();
   const cached = screenshotStatusCache.get(target.key);
@@ -1070,11 +1073,20 @@ export async function containerComputerScreenshot(
     if (!checked.ok) {
       throw Object.assign(new Error("Cua Driver returned an incomplete screenshot"), { status: 502 });
     }
-    return `data:${checked.mime};base64,${data}`;
+    return { png: data, format: checked.mime === "image/jpeg" ? "jpeg" : "png" };
   } catch (error) {
     if (cacheable) screenshotStatusCache.delete(target.key);
     throw error;
   }
+}
+
+export async function containerComputerScreenshot(
+  runner: CommandRunner = sh,
+  platform: NodeJS.Platform = process.platform,
+  target: LocalVmTarget = SHARED_LOCAL_VM_TARGET,
+): Promise<string> {
+  const { png, format } = await containerComputerFrame(runner, platform, target);
+  return `data:image/${format};base64,${png}`;
 }
 
 const screenshotStatusCache = new Map<

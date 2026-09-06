@@ -1012,3 +1012,18 @@ internal data class RoutineRunResponse(val run: RoutineRun)
 
 @Serializable
 internal data class ConnectorAuthorizationResponse(val url: String)
+
+@Serializable
+data class BotOverviewWho(val name: String, val title: String, val blurb: String, val soulLead: String)
+
+@Serializable
+data class BotOverviewRecent(val at: Double, val summary: String)
+
+@Serializable
+data class BotOverview(
+    val who: BotOverviewWho,
+    val does: List<String> = emptyList(),
+    val reaches: List<String> = emptyList(),
+    val wont: List<String> = emptyList(),
+    val recent: List<BotOverviewRecent> = emptyList(),
+)

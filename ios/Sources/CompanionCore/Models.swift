@@ -287,6 +287,31 @@ public enum AvatarCrop: String, Codable, CaseIterable, Hashable, Sendable {
     }
 }
 
+/// The "who" section of a bot overview: identity and its soul in one line.
+public struct BotOverviewWho: Codable, Hashable, Sendable {
+    public var name: String
+    public var title: String
+    public var blurb: String
+    public var soulLead: String
+}
+
+public struct BotOverviewRecent: Codable, Hashable, Sendable {
+    /// epoch milliseconds, like every other timestamp on the wire
+    public var at: Double
+    public var summary: String
+}
+
+/// A read-only summary of one bot: who it is, what it does, what it can
+/// reach, what it won't do, and its recent activity. No settings and no
+/// transcript — this is the shape a phone is allowed to poll for.
+public struct BotOverview: Codable, Hashable, Sendable {
+    public var who: BotOverviewWho
+    public var does: [String]
+    public var reaches: [String]
+    public var wont: [String]
+    public var recent: [BotOverviewRecent]
+}
+
 public struct GroupResponder: Codable, Hashable, Sendable {
     public var kind: String
     public var botId: String?

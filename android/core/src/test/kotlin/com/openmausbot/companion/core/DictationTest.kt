@@ -67,6 +67,68 @@ class DictationTest {
         assertEquals("", Dictation.draft(base = "  ", transcript = "\n"))
     }
 
+    // --- Transcript updates across segments --------------------------------
+
+    @Test
+    fun emptyTranscriptTakesTheNewPartial() {
+        assertEquals("hello", Dictation.updateTranscript("", "hello"))
+    }
+
+    @Test
+    fun emptyPartialLeavesTheTranscript() {
+        assertEquals("hello", Dictation.updateTranscript("hello", ""))
+        assertEquals("hello", Dictation.updateTranscript("hello", "   "))
+    }
+
+    /** Same segment: each longer partial replaces the last in place. */
+    @Test
+    fun aLongerPartialReplacesTheCurrentOne() {
+        assertEquals(
+            "first sentence",
+            Dictation.updateTranscript("first sent", "first sentence"),
+        )
+        assertEquals(
+            "first sentence.",
+            Dictation.updateTranscript("first sentence", "first sentence."),
+        )
+    }
+
+    /** A fresh segment after a pause does not start with the old one. */
+    @Test
+    fun aFreshSegmentIsAppendedAfterThePreviousText() {
+        assertEquals(
+            "first sentence. second sentence.",
+            Dictation.updateTranscript("first sentence.", "second sentence."),
+        )
+    }
+
+    /** If the recognizer revises a word in the same segment, most leading words match. */
+    @Test
+    fun aWordLevelRevisionReplacesInPlace() {
+        assertEquals(
+            "I walked to a store",
+            Dictation.updateTranscript("I walked to the store", "I walked to a store"),
+        )
+    }
+
+    /** A brief backtrack (new partial shorter but still a prefix) keeps the longer text. */
+    @Test
+    fun aBacktrackKeepsTheLongerTranscript() {
+        assertEquals(
+            "first sentence",
+            Dictation.updateTranscript("first sentence", "first"),
+        )
+    }
+
+    /** A new sentence that shares the first word is still treated as a new segment. */
+    @Test
+    fun aSharedFirstWordIsNotEnoughToMergeAcrossSegments() {
+        assertEquals(
+            "first sentence first word",
+            Dictation.updateTranscript("first sentence", "first word"),
+        )
+    }
+
     @Test
     fun preferredLanguageComesFirst() {
         val locales = Dictation.localeCandidates(

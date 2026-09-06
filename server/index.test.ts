@@ -990,7 +990,7 @@ describe("harness HTTP API", () => {
     const { status, body } = await api("GET", "/api/bots");
     expect(status).toBe(200);
     expect(body.bots.length).toBeGreaterThanOrEqual(1);
-    expect(body.bots[0].messages.length).toBeGreaterThanOrEqual(2);
+    expect(body.bots[0].messages.length).toBeGreaterThanOrEqual(1);
   });
 
   it("projects privacy-safe live team-map metadata", async () => {
@@ -1709,7 +1709,7 @@ describe("harness HTTP API", () => {
   it("searches transcripts and exports a conversation", async () => {
     const bot = (await api("POST", "/api/bots")).body.bot;
     // every new bot opens with a seeded greeting — a known searchable string
-    const hits = await api("GET", "/api/search?q=nice%20to%20meet");
+    const hits = await api("GET", "/api/search?q=what%20would%20you%20like");
     expect(hits.status).toBe(200);
     const hit = hits.body.hits.find((h: { botId?: string }) => h.botId === bot.id);
     expect(hit).toMatchObject({
@@ -1719,10 +1719,10 @@ describe("harness HTTP API", () => {
       kind: "text",
       onActivePath: true,
     });
-    expect(hit.snippet.toLowerCase()).toContain("nice to meet");
-    expect(hit.snippet.slice(hit.matchStart, hit.matchStart + hit.matchLength).toLowerCase()).toBe("nice to meet");
+    expect(hit.snippet.toLowerCase()).toContain("what would you like");
+    expect(hit.snippet.slice(hit.matchStart, hit.matchStart + hit.matchLength).toLowerCase()).toBe("what would you like");
     expect((await api("GET", "/api/search?q=")).body.hits).toEqual([]);
-    const scoped = await api("GET", `/api/search?q=nice%20to%20meet&threadId=${bot.threadId}`);
+    const scoped = await api("GET", `/api/search?q=what%20would%20you%20like&threadId=${bot.threadId}`);
     expect(scoped.status).toBe(200);
     expect(scoped.body.hits.every((candidate: { threadId: string }) => candidate.threadId === bot.threadId)).toBe(true);
     expect((await api("GET", "/api/search?q=hello&threadId=missing-thread")).status).toBe(404);
@@ -1732,7 +1732,7 @@ describe("harness HTTP API", () => {
     expect(markdown.headers.get("content-type")).toContain("text/markdown");
     expect(markdown.headers.get("content-disposition")).toContain("attachment");
     const text = await markdown.text();
-    expect(text).toContain("Nice to meet you");
+    expect(text).toContain("What would you like");
 
     const asJson = await api("GET", `/api/threads/${bot.threadId}/export?format=json`);
     expect(asJson.status).toBe(200);
@@ -3700,6 +3700,9 @@ describe("harness HTTP API", () => {
         kind: "secret",
         text: "Securely provide the OpenAI API key from OpenMausBot on your phone or computer. It is never added to chat.",
       });
+      expect(directCard.secret.description).toContain(
+        `${bot.name} can use it but never read it back.`,
+      );
       expect(directCard).not.toHaveProperty("from");
 
       const encryptedEnvelope = {
@@ -4635,13 +4638,16 @@ describe("harness HTTP API", () => {
     expect(stopped).toEqual({ status: 200, body: { ok: true } });
   });
 
-  it("persists an answered onboarding card", async () => {
-    const { body } = await api("GET", "/api/bots");
-    const bot = body.bots[0];
-    const card = bot.messages.find((m: { kind: string }) => m.kind === "options");
-    const res = await api("PATCH", `/api/bots/${bot.id}/cards/${card.id}`, { answered: card.card.options[0] });
-    expect(res.status).toBe(200);
-    expect(res.body.message.card.answered).toBe(card.card.options[0]);
+  it("a new bot opens with one greeting and no quiz card", async () => {
+    const bot = (await api("POST", "/api/bots", { name: "Fresh" })).body.bot;
+    try {
+      expect(bot.messages).toHaveLength(1);
+      expect(bot.messages[0]).toMatchObject({ role: "bot", kind: "text" });
+      expect(bot.messages[0].text).toBe("Hi, I'm Fresh. What would you like me to do?");
+      expect(bot.messages.some((m: { kind: string }) => m.kind === "options")).toBe(false);
+    } finally {
+      await api("DELETE", `/api/bots/${bot.id}`);
+    }
   });
 
   it("validates approval decisions and reports a request that is no longer open", async () => {
@@ -4719,9 +4725,9 @@ describe("harness HTTP API", () => {
     const send = await api("POST", `/api/bots/${bot.id}/messages`, { text: "hello?" });
     expect(send.status).toBe(409);
     expect(send.body.error).toContain("unavailable");
-    // a failed send never landed a user message, so the first-run quiz stays
+    // a failed send never lands a user message
     const afterFail = (await api("GET", "/api/bots")).body.bots.find((candidate: { id: string }) => candidate.id === bot.id);
-    expect(afterFail.messages.find((m: { kind: string }) => m.kind === "options")?.card.dismissed).toBeFalsy();
+    expect(afterFail.messages.some((m: { role: string }) => m.role === "user")).toBe(false);
   });
 
   it("refuses to fork a message when the provider is unavailable, without mutating", async () => {
@@ -4733,11 +4739,6 @@ describe("harness HTTP API", () => {
     const greeting = bot.messages.find((m: { role: string }) => m.role === "bot");
     const notUser = await api("POST", `/api/bots/${bot.id}/messages/${greeting.id}/edit`, { text: "x" });
     expect(notUser.status).toBe(404);
-
-    // no user message exists yet, so fabricate the check via the card id
-    const card = bot.messages.find((m: { kind: string }) => m.kind === "options");
-    const res = await api("POST", `/api/bots/${bot.id}/messages/${card.id}/edit`, { text: "x" });
-    expect(res.status).toBe(404); // options card, not a user text message
 
     const empty = await api("POST", `/api/bots/${bot.id}/messages/${greeting.id}/edit`, { text: "  " });
     expect(empty.status).toBe(400);
@@ -5065,6 +5066,124 @@ describe("harness HTTP API", () => {
       await api("POST", `/api/bots/${bot.id}/interrupt`);
       await api("DELETE", `/api/bots/${bot.id}`);
       await api("PATCH", "/api/config", { features: { skillRecorder: false } });
+    }
+  });
+
+  it("injects the bot's standing instructions (soul) into a real turn, directly after the persona", async () => {
+    const bot = (await api("POST", "/api/bots", { name: "Kiwi", title: "Tracker" })).body.bot;
+    try {
+      expect((await api("PATCH", `/api/bots/${bot.id}`, {
+        modelSelection: { instanceId: "claude", model: "claude-sonnet-5" },
+        soul: "File bugs. Never file noise.",
+      })).status).toBe(200);
+      rmSync(fakeClaudeDump, { force: true });
+      expect((await api("POST", `/api/bots/${bot.id}/messages`, { text: "hello" })).status).toBe(202);
+      await expect.poll(() => existsSync(fakeClaudeDump), { timeout: 5_000 }).toBe(true);
+      const seen = JSON.parse(readFileSync(fakeClaudeDump, "utf8"));
+      const system: string = seen.systemPrompt ?? "";
+      expect(system.startsWith("You are Kiwi, a personal bot in OpenMausBot. Role: Tracker.")).toBe(true);
+      const persona = "You are Kiwi, a personal bot in OpenMausBot. Role: Tracker.";
+      const afterPersona = system.slice(persona.length);
+      expect(afterPersona.startsWith("\n\nYour standing instructions follow.")).toBe(true);
+      expect(system).toContain("--- BEGIN STANDING INSTRUCTIONS (SOUL.md, 28 bytes) ---\nFile bugs. Never file noise.\n--- END STANDING INSTRUCTIONS ---");
+    } finally {
+      await api("POST", `/api/bots/${bot.id}/interrupt`);
+      await api("DELETE", `/api/bots/${bot.id}`);
+    }
+  });
+
+  it("coaches a blank bot to set itself up, and stops once it has a description", async () => {
+    const bot = (await api("POST", "/api/bots", { name: "Blank" })).body.bot;
+    try {
+      expect((await api("PATCH", `/api/bots/${bot.id}`, {
+        modelSelection: { instanceId: "claude", model: "claude-sonnet-5" },
+      })).status).toBe(200);
+      rmSync(fakeClaudeDump, { force: true });
+      expect((await api("POST", `/api/bots/${bot.id}/messages`, { text: "hello" })).status).toBe(202);
+      let system = (await readJsonFileWhenReady<{ systemPrompt: string }>(fakeClaudeDump, 15_000)).systemPrompt;
+      expect(system.startsWith("You are Blank, a personal bot in OpenMausBot.")).toBe(true);
+      expect(system).toContain("This bot has not been set up yet");
+      expect(system).toContain("propose_profile");
+
+      const preview = await api("GET", `/api/bots/${bot.id}/system-prompt`);
+      expect(preview.body.sections.map((s: { id: string }) => s.id)).toContain("setup");
+
+      expect((await api("POST", `/api/bots/${bot.id}/interrupt`)).status).toBe(200);
+      // Interrupt requests a stop; the child can still be shutting down.
+      // This assertion compares two separate turns, not a mid-turn steer.
+      await expect.poll(async () => {
+        const state = (await api("GET", "/api/bots?messages=0")).body;
+        return state.bots.find((candidate: { id: string }) => candidate.id === bot.id)?.busy;
+      }, { timeout: 5_000 }).toBe(false);
+      expect((await api("PATCH", `/api/bots/${bot.id}`, { description: "Files bugs." })).status).toBe(200);
+      rmSync(fakeClaudeDump, { force: true });
+      expect((await api("POST", `/api/bots/${bot.id}/messages`, { text: "hello again" })).status).toBe(202);
+      system = (await readJsonFileWhenReady<{ systemPrompt: string }>(fakeClaudeDump, 15_000)).systemPrompt;
+      expect(system).not.toContain("This bot has not been set up yet");
+      expect((await api("GET", `/api/bots/${bot.id}/system-prompt`)).body.sections.map((s: { id: string }) => s.id)).not.toContain("setup");
+    } finally {
+      await api("POST", `/api/bots/${bot.id}/interrupt`);
+      await api("DELETE", `/api/bots/${bot.id}`);
+    }
+  });
+
+  it("re-enters setup mode for a configured bot when the user sends /setup, and rewrites the turn text", async () => {
+    const bot = (await api("POST", "/api/bots", { name: "Kiwi", description: "Files bugs." })).body.bot;
+    try {
+      expect((await api("PATCH", `/api/bots/${bot.id}`, {
+        modelSelection: { instanceId: "claude", model: "claude-sonnet-5" },
+        soul: "Never file noise.",
+      })).status).toBe(200);
+      rmSync(fakeClaudeDump, { force: true });
+      expect((await api("POST", `/api/bots/${bot.id}/messages`, { text: "/setup watch Discord too" })).status).toBe(202);
+      await expect.poll(() => existsSync(fakeClaudeDump), { timeout: 5_000 }).toBe(true);
+      const seen = JSON.parse(readFileSync(fakeClaudeDump, "utf8"));
+      const system: string = seen.systemPrompt ?? "";
+      // soul first, setup block right after it
+      const soulEnd = system.indexOf("--- END STANDING INSTRUCTIONS ---") + "--- END STANDING INSTRUCTIONS ---".length;
+      expect(soulEnd).toBeGreaterThan(0);
+      expect(system.slice(soulEnd).startsWith("\n\nThis bot has not been set up yet")).toBe(true);
+      // the literal /setup never reaches the model — extract the user text the
+      // way promptText() in fake-claude-cli.ts does, joining text parts if the
+      // content is an array of blocks rather than a plain string
+      const content: unknown = seen.prompt?.message?.content;
+      const userText: string = typeof content === "string"
+        ? content
+        : Array.isArray(content)
+          ? content
+              .filter((block: { type?: string }) => block?.type === "text")
+              .map((block: { text?: string }) => block.text ?? "")
+              .join("")
+          : "";
+      expect(userText).toContain("Set yourself up for this job: watch Discord too");
+      expect(userText).not.toContain("/setup");
+    } finally {
+      await api("POST", `/api/bots/${bot.id}/interrupt`);
+      await api("DELETE", `/api/bots/${bot.id}`);
+    }
+  });
+
+  it("never lets an out-of-band SOUL.md edit reach the prompt, and surfaces it as drift instead", async () => {
+    const bot = (await api("POST", "/api/bots", { name: "Kiwi", title: "Tracker" })).body.bot;
+    try {
+      expect((await api("PATCH", `/api/bots/${bot.id}`, {
+        modelSelection: { instanceId: "claude", model: "claude-sonnet-5" },
+        soul: "Record text.",
+      })).status).toBe(200);
+      // An edit made directly to the mirror file, bypassing the app entirely.
+      writeFileSync(join(home, ".openmausbot", "bots", bot.id, "SOUL.md"), "File text.");
+      rmSync(fakeClaudeDump, { force: true });
+      expect((await api("POST", `/api/bots/${bot.id}/messages`, { text: "hello" })).status).toBe(202);
+      await expect.poll(() => existsSync(fakeClaudeDump), { timeout: 5_000 }).toBe(true);
+      const seen = JSON.parse(readFileSync(fakeClaudeDump, "utf8"));
+      const systemPrompt: string = seen.systemPrompt ?? "";
+      expect(systemPrompt).toContain("Record text.");
+      expect(systemPrompt).not.toContain("File text.");
+      const bots = (await api("GET", "/api/bots")).body.bots;
+      expect(bots.find((candidate: { id: string }) => candidate.id === bot.id)?.soulDrift).toBe(true);
+    } finally {
+      await api("POST", `/api/bots/${bot.id}/interrupt`);
+      await api("DELETE", `/api/bots/${bot.id}`);
     }
   });
 
@@ -6890,6 +7009,194 @@ describe("harness HTTP API", () => {
     }
   });
 
+  it("keeps a proposed profile change inert until its card is confirmed, then records history", async () => {
+    const soulFileOf = (botId: string) => join(home, ".openmausbot", "bots", botId, "SOUL.md");
+    const bot = (await api("POST", "/api/bots", { name: "Scout" })).body.bot;
+    try {
+      await api("PATCH", `/api/bots/${bot.id}`, { modelSelection: { instanceId: "claude", model: "claude-sonnet-5" } });
+
+      // Internal routes take a per-turn capability now (main), not the raw
+      // comms token from the engine's MCP config.
+      const token = await mintTestCapability(BASE, bot.id, bot.threadId);
+      const internalHeaders = {
+        authorization: `Bearer ${token}`,
+        "content-type": "application/json",
+      };
+
+      const proposal = await fetch(`${BASE}/api/internal/profile-requests`, {
+        method: "POST",
+        headers: internalHeaders,
+        body: JSON.stringify({ fromBotId: bot.id, fromThreadId: bot.threadId, changes: { name: "Kiwi", soul: "Be brief." }, reason: "you asked" }),
+      });
+      expect(proposal.status).toBe(201);
+      const proposed = z.object({ requestId: z.string() }).passthrough().parse(await proposal.json());
+      const state = (await api("GET", "/api/bots")).body;
+      const card = state.bots
+        .find((candidate: { id: string }) => candidate.id === bot.id)
+        ?.messages.find((message: { card?: { requestId?: string } }) => message.card?.requestId === proposed.requestId);
+      expect(card?.card).toMatchObject({ tool: "update_profile", profileRequest: { botId: bot.id, targetBotId: bot.id } });
+      expect((await api("GET", `/api/bots/${bot.id}/soul`)).body.soul).toBe("");
+
+      // a stale confirm fails closed
+      await api("PATCH", `/api/bots/${bot.id}`, { title: "moved" });
+      const stale = await api("POST", `/api/threads/${bot.threadId}/respond`, { requestId: proposed.requestId, behavior: "allow" });
+      expect(stale.status).toBe(409);
+
+      // propose again and confirm
+      const againResponse = await fetch(`${BASE}/api/internal/profile-requests`, {
+        method: "POST",
+        headers: internalHeaders,
+        body: JSON.stringify({ fromBotId: bot.id, fromThreadId: bot.threadId, changes: { name: "Kiwi", soul: "Be brief." }, reason: "you asked" }),
+      });
+      const again = z.object({ requestId: z.string() }).passthrough().parse(await againResponse.json());
+      const ok = await api("POST", `/api/threads/${bot.threadId}/respond`, { requestId: again.requestId, behavior: "allow" });
+      expect(ok.body).toMatchObject({ ok: true, outcome: "allowed-once", profileFields: ["name", "soul"] });
+      const after = (await api("GET", `/api/bots/${bot.id}/soul`)).body;
+      expect(after.soul).toBe("Be brief.");
+      expect(readFileSync(soulFileOf(bot.id), "utf8")).toBe("Be brief.");
+
+      const history = await api("GET", `/api/bots/${bot.id}/history`);
+      expect(history.status).toBe(200);
+      const fields = history.body.rows.map((r: any) => `${r.field}:${r.actor}:${r.via.split(":")[0]}`);
+      expect(fields.slice(0, 2).sort()).toEqual(["name:bot:card", "soul:bot:card"]);
+      expect(fields).toContain("title:user:api");
+
+      // the default list never carries a soul row's full text
+      const soulRowDefault = history.body.rows.find((r: any) => r.field === "soul");
+      expect(soulRowDefault.before).toBeUndefined();
+      expect(soulRowDefault.after).toBeUndefined();
+      expect(soulRowDefault.summary).toMatch(/^soul: \d+ → \d+ bytes$/);
+
+      // ?full=1 still has it, for anyone who explicitly asks
+      const fullHistory = await api("GET", `/api/bots/${bot.id}/history?full=1`);
+      const fullSoulRow = fullHistory.body.rows.find((r: any) => r.field === "soul");
+      expect(fullSoulRow.before).toBe("");
+      expect(fullSoulRow.after).toBe("Be brief.");
+
+      // rollback the soul — the row from the default (stripped) list still
+      // carries enough (`at`) for the server to look the full row up itself
+      const soulRow = history.body.rows.find((r: any) => r.field === "soul");
+      const rolled = await api("POST", `/api/bots/${bot.id}/history/rollback`, { id: soulRow.id, expectedRevision: history.body.revision });
+      expect(rolled.status).toBe(200);
+      expect(rolled.body.bot.soul).toBe("");
+      expect((await api("GET", `/api/bots/${bot.id}/history`)).body.rows[0]).toMatchObject({ field: "soul", via: "rollback", actor: "user" });
+      const latestHistory = (await api("GET", `/api/bots/${bot.id}/history`)).body;
+      expect((await api("POST", `/api/bots/${bot.id}/history/rollback`, { id: "missing", expectedRevision: latestHistory.revision })).status).toBe(400);
+
+      // decisions audit
+      await expect.poll(async () => {
+        const decisions = (await api("GET", "/api/decisions")).body.decisions;
+        return decisions.filter((d: any) => d.requestId === again.requestId).map((d: any) => `${d.decision}:${d.source}`).sort();
+      }).toEqual(["card-shown:profile", "user-approved:user"]);
+    } finally {
+      await api("POST", `/api/bots/${bot.id}/interrupt`);
+      await api("DELETE", `/api/bots/${bot.id}`);
+    }
+  });
+
+  it("only lets a section's Chief of Staff propose (and hold) a change to another bot's profile", async () => {
+    const a = (await api("POST", "/api/bots", { name: "Ari" })).body.bot;
+    const b = (await api("POST", "/api/bots", { name: "Bo" })).body.bot;
+    try {
+      await api("PATCH", `/api/bots/${a.id}`, { modelSelection: { instanceId: "claude", model: "claude-sonnet-5" } });
+
+      // Internal routes take a per-turn capability now (main), not the raw
+      // comms token from the engine's MCP config.
+      const token = await mintTestCapability(BASE, a.id, a.threadId);
+      const internalHeaders = {
+        authorization: `Bearer ${token}`,
+        "content-type": "application/json",
+      };
+      // There is no GET /api/bots/:id route (only PATCH/DELETE at that path);
+      // read a single bot's current fields off the list endpoint.
+      const botTitle = async (id: string) =>
+        (await api("GET", "/api/bots")).body.bots.find((candidate: { id: string }) => candidate.id === id)?.title;
+
+      // (a) A is an ordinary bot, not the section's Chief of Staff: proposing
+      // a change for its section peer B is refused, and B is untouched.
+      const refused = await fetch(`${BASE}/api/internal/profile-requests`, {
+        method: "POST",
+        headers: internalHeaders,
+        body: JSON.stringify({
+          fromBotId: a.id, fromThreadId: a.threadId, forBotId: b.id,
+          changes: { title: "Should never land" }, reason: "testing the Chief rule",
+        }),
+      });
+      expect(refused.status).toBe(403);
+      expect(await botTitle(b.id)).toBe("");
+
+      // (b) Promote A to Chief of Staff: the same proposal now stages a card.
+      expect((await api("PATCH", `/api/bots/${a.id}`, { chiefOfStaff: true })).status).toBe(200);
+      const proposedResponse = await fetch(`${BASE}/api/internal/profile-requests`, {
+        method: "POST",
+        headers: internalHeaders,
+        body: JSON.stringify({
+          fromBotId: a.id, fromThreadId: a.threadId, forBotId: b.id,
+          changes: { title: "Lead scout" }, reason: "testing the Chief rule",
+        }),
+      });
+      expect(proposedResponse.status).toBe(201);
+      const proposed = z.object({ requestId: z.string() }).passthrough().parse(await proposedResponse.json());
+
+      // Demote A before the card is confirmed — confirmation re-checks the
+      // rule, not just the state at proposal time.
+      expect((await api("PATCH", `/api/bots/${a.id}`, { chiefOfStaff: false })).status).toBe(200);
+      const refusedConfirm = await api("POST", `/api/threads/${a.threadId}/respond`, {
+        requestId: proposed.requestId, behavior: "allow",
+      });
+      expect(refusedConfirm.status).toBeGreaterThanOrEqual(400);
+      expect(await botTitle(b.id)).toBe("");
+
+      // Re-promote A: the still-open card now confirms and applies.
+      expect((await api("PATCH", `/api/bots/${a.id}`, { chiefOfStaff: true })).status).toBe(200);
+      const okConfirm = await api("POST", `/api/threads/${a.threadId}/respond`, {
+        requestId: proposed.requestId, behavior: "allow",
+      });
+      expect(okConfirm.status).toBe(200);
+      expect(await botTitle(b.id)).toBe("Lead scout");
+    } finally {
+      await api("POST", `/api/bots/${a.id}/interrupt`);
+      await api("DELETE", `/api/bots/${a.id}`);
+      await api("DELETE", `/api/bots/${b.id}`);
+    }
+  });
+
+  it("binds profile proposals to the capability's bot and thread and rechecks late bodies", async () => {
+    const sender = (await api("POST", "/api/bots", { name: "Sender" })).body.bot;
+    const victim = (await api("POST", "/api/bots", { name: "Victim" })).body.bot;
+    let held: Awaited<ReturnType<typeof delayedJsonBody>> | undefined;
+    try {
+      const token = await mintTestCapability(BASE, sender.id, sender.threadId);
+      const headers = { authorization: `Bearer ${token}`, "content-type": "application/json" };
+      const claimed = await fetch(`${BASE}/api/internal/profile-requests`, {
+        method: "POST", headers,
+        body: JSON.stringify({ fromBotId: victim.id, fromThreadId: victim.threadId, changes: { soul: "Forged" }, reason: "r" }),
+      });
+      expect(claimed.status).toBe(403);
+      const otherTask = (await api("POST", `/api/bots/${sender.id}/tasks`, { title: "Other task" })).body.task;
+      const wrongThread = await fetch(`${BASE}/api/internal/profile-requests`, {
+        method: "POST", headers,
+        body: JSON.stringify({ fromBotId: sender.id, fromThreadId: otherTask.threadId, changes: { title: "Forged" }, reason: "r" }),
+      });
+      expect(wrongThread.status).toBe(403);
+      const currentToken = await mintTestCapability(BASE, sender.id, sender.threadId);
+      held = await delayedJsonBody("POST", "/api/internal/profile-requests", {
+        fromBotId: sender.id, fromThreadId: sender.threadId, changes: { title: "Too late" }, reason: "r",
+      }, { authorization: `Bearer ${currentToken}` });
+      // Replacing the synthetic generation revokes the exact old token.
+      await mintTestCapability(BASE, sender.id, sender.threadId);
+      expect((await held.finish()).status).toBe(401);
+      const fleet = (await api("GET", "/api/bots")).body.bots;
+      for (const id of [sender.id, victim.id]) {
+        expect(fleet.find((bot: any) => bot.id === id).messages.some((message: any) => message.card?.profileRequest)).toBe(false);
+      }
+    } finally {
+      held?.close();
+      await api("DELETE", `/api/bots/${sender.id}`);
+      await api("DELETE", `/api/bots/${victim.id}`);
+    }
+  });
+
   it("only enables the exact learned-skill proposal a current client reviewed", async () => {
     const bot = (await api("POST", "/api/bots", {})).body.bot;
     try {
@@ -6940,6 +7247,7 @@ describe("harness HTTP API", () => {
         expect(card?.title).toBe(action === "create" ? `Enable skill "${name}"?` : `Update skill "${name}"?`);
         expect(card?.options).toEqual([action === "create" ? "Enable" : "Update", "Deny"]);
         expect(card?.skillRequest?.action).toBe(action);
+        expect(card?.subtitle).toContain("Adds one line to the prompt index; the body is read only when used.");
         expect(card?.skillRequest?.preview).toContain(`# ${name}`);
         expect(card?.skillRequest?.sha256).toMatch(/^[a-f0-9]{64}$/);
         expect(createHash("sha256").update(card.skillRequest.preview).digest("hex"))
@@ -7207,6 +7515,23 @@ describe("harness HTTP API", () => {
     // override must keep Composio configured until the next app launch.
     expect((await api("PUT", "/api/config", { profile: { name: "Grace" } })).status).toBe(200);
     expect((await api("GET", "/api/config")).body.composio).toEqual({ configured: true, mode: "self-hosted" });
+
+    // With the connector configured, the overview route now reads the
+    // connected-apps inventory against the stub. It must answer 200 and
+    // never invent a connected app (the failing-read fallback itself is
+    // unit-tested in bot-overview.test.ts, since the stub answers every
+    // session path with a fake session rather than an error).
+    const kiwi = (await api("POST", "/api/bots", { name: "Kiwi" })).body.bot;
+    try {
+      const overview = await api("GET", `/api/bots/${kiwi.id}/overview`);
+      expect(overview.status).toBe(200);
+      // Whatever the stub reports, the page never contradicts itself.
+      const claimsApps = overview.body.reaches.some((line: string) => line.startsWith("Can use"));
+      const deniesApps = overview.body.wont.includes("Has no connected apps.");
+      expect(claimsApps && deniesApps).toBe(false);
+    } finally {
+      await api("DELETE", `/api/bots/${kiwi.id}`);
+    }
   });
 
   it("keeps second-account cards separate and waits for the requested alias, not an existing account", async () => {
@@ -7676,6 +8001,280 @@ describe("bot memory API", () => {
       expect(raw.text).not.toContain("TOP-SECRET");
       // malformed percent-encoding is a clean 400, not a crash
       expect((await rawGet(`/api/bots/${bot.id}/memory/topics/%zz.md`)).status).toBe(400);
+    } finally {
+      await api("DELETE", `/api/bots/${bot.id}`);
+    }
+  });
+
+  const soulFileOf = (botId: string) => join(home, ".openmausbot", "bots", botId, "SOUL.md");
+
+  it("round-trips soul through both PATCH routes and mirrors it to SOUL.md", async () => {
+    const bot = (await api("POST", "/api/bots")).body.bot;
+    try {
+      expect(bot.soul).toBe("");
+      expect(readFileSync(soulFileOf(bot.id), "utf8")).toBe("");
+
+      const broad = await api("PATCH", `/api/bots/${bot.id}`, { soul: "Be brief." });
+      expect(broad.status).toBe(200);
+      expect(broad.body.bot.soul).toBe("Be brief.");
+      expect(readFileSync(soulFileOf(bot.id), "utf8")).toBe("Be brief.");
+
+      const paired = await api("PATCH", `/api/bots/${bot.id}/profile`, { soul: "Be kind." });
+      expect(paired.status).toBe(200);
+      expect(paired.body.bot.soul).toBe("Be kind.");
+      expect(readFileSync(soulFileOf(bot.id), "utf8")).toBe("Be kind.");
+
+      const over = await api("PATCH", `/api/bots/${bot.id}`, { soul: "x".repeat(24_001) });
+      expect(over).toEqual({ status: 400, body: { error: "standing instructions must be at most 24000 bytes" } });
+    } finally {
+      await api("DELETE", `/api/bots/${bot.id}`);
+    }
+    expect(existsSync(join(home, ".openmausbot", "bots", bot.id))).toBe(false);
+  });
+
+  it("keeps mixed-request runtime revocations effective when profile persistence fails", async () => {
+    const bot = (await api("POST", "/api/bots", { name: "Mixed profile safety" })).body.bot;
+    const botsFile = join(home, ".openmausbot", "bots.json");
+    let saved: string | undefined;
+    try {
+      expect((await api("PATCH", `/api/bots/${bot.id}`, { soul: "old", browser: true, browserProfile: "guest" })).status).toBe(200);
+      saved = readFileSync(botsFile, "utf8");
+      rmSync(botsFile);
+      mkdirSync(botsFile);
+      const failed = await api("PATCH", `/api/bots/${bot.id}`, { soul: "new", browser: false, browserProfile: null });
+      expect(failed.status).toBe(500);
+      const current = (await api("GET", "/api/bots?messages=0")).body.bots.find((candidate: any) => candidate.id === bot.id);
+      expect(current.browser).toBe(false);
+      expect(current.browserProfile).toBeUndefined();
+      expect(current.soul).toBe("old");
+      expect(current.soulHash).toBe(createHash("sha256").update("old").digest("hex"));
+      expect(readFileSync(soulFileOf(bot.id), "utf8")).toBe("old");
+    } finally {
+      if (saved !== undefined) {
+        rmSync(botsFile, { recursive: true, force: true });
+        writeFileSync(botsFile, saved);
+      }
+      await api("DELETE", `/api/bots/${bot.id}`);
+    }
+  });
+
+  it("reads the soul with its file path, and reports, applies, or discards drift", async () => {
+    const bot = (await api("POST", "/api/bots")).body.bot;
+    try {
+      await api("PATCH", `/api/bots/${bot.id}`, { soul: "Be brief." });
+      const clean = await api("GET", `/api/bots/${bot.id}/soul`);
+      expect(clean.status).toBe(200);
+      expect(clean.body).toEqual({
+        soul: "Be brief.",
+        revision: expect.any(String),
+        bytes: 9,
+        limit: 24_000,
+        file: soulFileOf(bot.id),
+        drift: false,
+      });
+      expect((await api("POST", `/api/bots/${bot.id}/soul/apply-file`)).status).toBe(409);
+
+      writeFileSync(soulFileOf(bot.id), "Be verbose.");
+      const drifted = await api("GET", `/api/bots/${bot.id}/soul`);
+      expect(drifted.body.drift).toBe(true);
+      expect(drifted.body.fileText).toBe("Be verbose.");
+      expect(drifted.body.soul).toBe("Be brief.");
+
+      const discarded = await api("POST", `/api/bots/${bot.id}/soul/discard-file`, { fileText: drifted.body.fileText, expectedRevision: drifted.body.revision });
+      expect(discarded.status).toBe(200);
+      expect(discarded.body.bot.soul).toBe("Be brief.");
+      expect(readFileSync(soulFileOf(bot.id), "utf8")).toBe("Be brief.");
+
+      writeFileSync(soulFileOf(bot.id), "Be thorough.");
+      const reviewed = (await api("GET", `/api/bots/${bot.id}/soul`)).body;
+      const applied = await api("POST", `/api/bots/${bot.id}/soul/apply-file`, { fileText: reviewed.fileText, expectedRevision: reviewed.revision });
+      expect(applied.status).toBe(200);
+      expect(applied.body.bot.soul).toBe("Be thorough.");
+      expect(applied.body.bot.soulDrift).toBe(false);
+      expect((await api("GET", `/api/bots/${bot.id}/soul`)).body.drift).toBe(false);
+      const historyAfterApply = await api("GET", `/api/bots/${bot.id}/history`);
+      expect(historyAfterApply.body.rows).toContainEqual(
+        expect.objectContaining({ field: "soul", actor: "file", via: "ui" }),
+      );
+
+      const current = (await api("GET", `/api/bots/${bot.id}/soul`)).body;
+      writeFileSync(soulFileOf(bot.id), "x".repeat(24_001));
+      expect((await api("GET", `/api/bots/${bot.id}/soul`)).status).toBe(400);
+      expect((await api("POST", `/api/bots/${bot.id}/soul/apply-file`, { fileText: "x".repeat(24_001), expectedRevision: current.revision })).status).toBe(400);
+      expect((await api("GET", "/api/bots/does-not-exist/soul")).status).toBe(404);
+    } finally {
+      await api("DELETE", `/api/bots/${bot.id}`);
+    }
+  });
+
+  it("apply-file refuses to apply text the client did not actually see", async () => {
+    const bot = (await api("POST", "/api/bots")).body.bot;
+    try {
+      await api("PATCH", `/api/bots/${bot.id}`, { soul: "Be brief." });
+      // A: the text the client read and displayed.
+      writeFileSync(soulFileOf(bot.id), "A");
+      const seen = (await api("GET", `/api/bots/${bot.id}/soul`)).body;
+      expect(seen.fileText).toBe("A");
+
+      // The file moved on again before the click.
+      writeFileSync(soulFileOf(bot.id), "B");
+      const stale = await api("POST", `/api/bots/${bot.id}/soul/apply-file`, { fileText: "A", expectedRevision: seen.revision });
+      expect(stale.status).toBe(409);
+      expect(stale.body.error).toBe("SOUL.md changed since you read it; reload and look again");
+      expect((await api("GET", `/api/bots/${bot.id}/soul`)).body.soul).toBe("Be brief.");
+
+      // Sending the text that actually matches the file now applies it.
+      const fresh = await api("POST", `/api/bots/${bot.id}/soul/apply-file`, { fileText: "B", expectedRevision: seen.revision });
+      expect(fresh.status).toBe(200);
+      expect(fresh.body.bot.soul).toBe("B");
+    } finally {
+      await api("DELETE", `/api/bots/${bot.id}`);
+    }
+  });
+
+  it("pins rollback to a unique row and refuses stale or bodyless undo", async () => {
+    const bot = (await api("POST", "/api/bots", { name: "History safety" })).body.bot;
+    try {
+      await api("PATCH", `/api/bots/${bot.id}`, { soul: "one" });
+      await api("PATCH", `/api/bots/${bot.id}`, { soul: "two" });
+      const seen = (await api("GET", `/api/bots/${bot.id}/history`)).body;
+      const first = seen.rows.find((row: any) => row.field === "soul");
+      expect(first.id).toEqual(expect.any(String));
+      await api("PATCH", `/api/bots/${bot.id}`, { soul: "three" });
+      expect((await api("POST", `/api/bots/${bot.id}/history/rollback`, { id: first.id, expectedRevision: seen.revision })).status).toBe(409);
+      expect((await api("POST", `/api/bots/${bot.id}/history/rollback`, { at: first.at })).status).toBe(409);
+      const current = (await api("GET", `/api/bots/${bot.id}/history`)).body;
+      const restored = await api("POST", `/api/bots/${bot.id}/history/rollback`, { id: first.id, expectedRevision: current.revision });
+      expect(restored.status).toBe(200);
+      expect(restored.body.bot.soul).toBe("one");
+    } finally { await api("DELETE", `/api/bots/${bot.id}`); }
+  });
+
+  it("refuses redacted history restores without changing SOUL and still restores exact safe text", async () => {
+    const bot = (await api("POST", "/api/bots", { name: "Redacted history" })).body.bot;
+    const file = join(home, ".openmausbot", "bots", bot.id, "history.ndjson");
+    const exact = "  Be brief.\n\nKeep this whitespace.  \n";
+    const current = "Current instructions.";
+    try {
+      for (const soul of [exact, "Use sk-ant-api03-SECRETSECRETSECRETSECRET privately.", current]) {
+        expect((await api("PATCH", `/api/bots/${bot.id}`, { soul })).status).toBe(200);
+      }
+      const history = (await api("GET", `/api/bots/${bot.id}/history`)).body;
+      const unsafe = history.rows[0];
+      expect(unsafe).toMatchObject({ field: "soul", canRestore: false });
+      expect(unsafe.before).toBeUndefined();
+      expect(unsafe.restoreUnavailableReason).toMatch(/redacted.*cannot be restored/);
+      const full = (await api("GET", `/api/bots/${bot.id}/history?full=1`)).body;
+      expect(JSON.stringify(full)).not.toContain("SECRETSECRET");
+      expect(readFileSync(file, "utf8")).not.toContain("SECRETSECRET");
+      const safe = full.rows.find((row: any) => row.before === exact);
+      expect(safe.canRestore).toBe(true);
+
+      // Logs written before eligibility metadata existed must also fail safe.
+      writeFileSync(file, JSON.stringify({ at: 1, actor: "user", field: "soul", before: "Use «redacted 40 chars».", after: current }) + "\n", { flag: "a" });
+      const legacyHistory = (await api("GET", `/api/bots/${bot.id}/history`)).body;
+      const legacy = legacyHistory.rows[0];
+      expect(legacy.canRestore).toBe(false);
+      for (const row of [unsafe, legacy]) {
+        const rejected = await api("POST", `/api/bots/${bot.id}/history/rollback`, { id: row.id, expectedRevision: history.revision });
+        expect(rejected.status).toBe(400);
+        expect(rejected.body.error).toMatch(/redacted.*cannot be restored/);
+        const unchanged = (await api("GET", `/api/bots/${bot.id}/soul`)).body;
+        expect(unchanged.soul).toBe(current);
+        expect(unchanged.revision).toBe(history.revision);
+        expect(readFileSync(soulFileOf(bot.id), "utf8")).toBe(current);
+      }
+      const restored = await api("POST", `/api/bots/${bot.id}/history/rollback`, { id: safe.id, expectedRevision: history.revision });
+      expect(restored.status).toBe(200);
+      expect(restored.body.bot.soul).toBe(exact);
+      expect(readFileSync(soulFileOf(bot.id), "utf8")).toBe(exact);
+    } finally { await api("DELETE", `/api/bots/${bot.id}`); }
+  });
+
+  it("guards file actions against new profile/file edits and reports unreadable mirrors", async () => {
+    const bot = (await api("POST", "/api/bots", { name: "File safety" })).body.bot;
+    let held: Awaited<ReturnType<typeof delayedJsonBody>> | undefined;
+    try {
+      await api("PATCH", `/api/bots/${bot.id}`, { soul: "canonical" });
+      writeFileSync(soulFileOf(bot.id), "reviewed");
+      const seen = (await api("GET", `/api/bots/${bot.id}/soul`)).body;
+      held = await delayedJsonBody("POST", `/api/bots/${bot.id}/soul/apply-file`, { fileText: seen.fileText, expectedRevision: seen.revision });
+      await api("PATCH", `/api/bots/${bot.id}`, { soul: "new canonical" });
+      expect((await held.finish()).status).toBe(409);
+      writeFileSync(soulFileOf(bot.id), "reviewed again");
+      const next = (await api("GET", `/api/bots/${bot.id}/soul`)).body;
+      writeFileSync(soulFileOf(bot.id), "unseen edit");
+      expect((await api("POST", `/api/bots/${bot.id}/soul/discard-file`, { fileText: next.fileText, expectedRevision: next.revision })).status).toBe(409);
+      expect(readFileSync(soulFileOf(bot.id), "utf8")).toBe("unseen edit");
+      rmSync(soulFileOf(bot.id));
+      mkdirSync(soulFileOf(bot.id));
+      expect((await api("GET", `/api/bots/${bot.id}/soul`)).status).toBe(500);
+      expect((await api("POST", `/api/bots/${bot.id}/soul/discard-file`, { fileText: "unseen edit", expectedRevision: next.revision })).status).toBe(500);
+    } finally {
+      held?.close();
+      await api("DELETE", `/api/bots/${bot.id}`);
+    }
+  });
+
+  it("previews the system prompt the model will see, section by section", async () => {
+    const bot = (await api("POST", "/api/bots", { name: "Kiwi", title: "Tracker", description: "Files bugs." })).body.bot;
+    try {
+      const before = await api("GET", `/api/bots/${bot.id}/system-prompt`);
+      expect(before.status).toBe(200);
+      expect(before.body.sections[0]).toEqual({
+        id: "persona",
+        label: "Identity",
+        text: "You are Kiwi, a personal bot in OpenMausBot. Role: Tracker. About: Files bugs.",
+        bytes: 78,
+      });
+      expect(before.body.sections.map((s: { id: string }) => s.id)).not.toContain("soul");
+      expect(before.body.sections.map((s: { id: string }) => s.id)).toContain("memory");
+      expect(before.body.totalBytes).toBe(
+        before.body.sections.reduce((n: number, s: { bytes: number }) => n + s.bytes, 0),
+      );
+      expect(before.body.approxTokens).toBe(Math.ceil(before.body.totalBytes / 4));
+      expect(typeof before.body.note).toBe("string");
+
+      await api("PATCH", `/api/bots/${bot.id}`, { soul: "Never file noise." });
+      const after = await api("GET", `/api/bots/${bot.id}/system-prompt`);
+      expect(after.body.sections[1].id).toBe("soul");
+      expect(after.body.sections[1].text).toContain("Never file noise.");
+      expect(after.body.sections[1].bytes).toBe(Buffer.byteLength(after.body.sections[1].text, "utf8"));
+      expect((await api("GET", "/api/bots/does-not-exist/system-prompt")).status).toBe(404);
+    } finally {
+      await api("DELETE", `/api/bots/${bot.id}`);
+    }
+  });
+
+  it("builds a plain-language overview from a bot's real settings and history", async () => {
+    const bot = (await api("POST", "/api/bots", { name: "Kiwi", title: "Tracker", description: "Files bugs." })).body.bot;
+    try {
+      // Force the two settings-dependent won't sentences that a bare
+      // freshly-created record would not otherwise guarantee (no other
+      // bot need exist in this section, and computer defaults to "auto").
+      // composio: false makes "Has no connected apps." definite whatever the
+      // harness connector reports (an earlier test configures it).
+      await api("PATCH", `/api/bots/${bot.id}`, { computer: "off", peers: [], composio: false });
+
+      const fresh = await api("GET", `/api/bots/${bot.id}/overview`);
+      expect(fresh.status).toBe(200);
+      expect(fresh.body.who.name).toBe("Kiwi");
+      expect(fresh.body.wont).toEqual([
+        "Command approvals use Ask mode; saved permissions and provider rules still apply.",
+        "Cannot initiate contact with other bots.",
+        "Has no connected apps.",
+        "Can't use a computer.",
+        "Won't act on a schedule.",
+        "Profile proposal cards require your approval.",
+      ]);
+      expect(fresh.body.recent).toEqual([]);
+
+      await api("PATCH", `/api/bots/${bot.id}`, { soul: "Never file noise.\n\nSecond paragraph." });
+      const after = await api("GET", `/api/bots/${bot.id}/overview`);
+      expect(after.body.who.soulLead).toBe("Never file noise.");
+      expect(after.body.recent[0].summary).toMatch(/^soul:/);
+
+      expect((await api("GET", "/api/bots/does-not-exist/overview")).status).toBe(404);
     } finally {
       await api("DELETE", `/api/bots/${bot.id}`);
     }

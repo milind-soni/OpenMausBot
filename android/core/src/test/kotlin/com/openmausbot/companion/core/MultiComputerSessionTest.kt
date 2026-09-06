@@ -327,6 +327,49 @@ class MultiComputerSessionTest {
         assertNull(session.actionError)
     }
 
+    @Test
+    fun overviewResponsesFromPreviousComputerAreDiscarded() = runTest {
+        for (status in listOf(200, 500)) {
+            val started = CountDownLatch(1)
+            val release = CountDownLatch(1)
+            val http = OkHttpClient.Builder().addInterceptor { chain ->
+                started.countDown()
+                check(release.await(5, TimeUnit.SECONDS)) { "overview request was never released" }
+                Response.Builder()
+                    .request(chain.request())
+                    .protocol(Protocol.HTTP_1_1)
+                    .code(status)
+                    .message("Fixture")
+                    .body((if (status == 200) fixtureText("bot-overview") else """{"error":"old computer failed"}""")
+                        .toResponseBody("application/json".toMediaType()))
+                    .build()
+            }.build()
+            val session = Session(
+                scope = backgroundScope,
+                connectionStore = RegistryStore(ConnectionRegistry(listOf(air, pro), air.id)),
+                tokenStore = Tokens(mapOf(air.id to "air-token", pro.id to "pro-token")),
+                onboardingStore = InMemoryOnboardingStore(),
+                deviceNameProvider = { "Pixel" },
+                clientFactory = { connection, token -> CompanionClient(connection, token, http) },
+                eventsFn = { _, _, _ -> flow { awaitCancellation() } },
+            )
+            session.awaitRestored()
+
+            val result = async { session.loadOverview("bot-1") }
+            try {
+                assertTrue(withContext(Dispatchers.IO) { started.await(5, TimeUnit.SECONDS) })
+                session.switchComputer(pro.id)
+                runCurrent()
+                assertEquals(pro, session.connection.value)
+            } finally {
+                release.countDown()
+            }
+
+            assertNull(result.await(), "old computer's $status must not replace the new overview")
+            assertNull(session.actionError, "old computer's $status must not raise an error on the new one")
+        }
+    }
+
     private val sampleBot = Bot(
         id = "bot-1",
         threadId = "thread-1",

@@ -53,6 +53,7 @@ describe("what the app may do", () => {
     ["POST", "/api/bots/bot_123/read"],
     ["POST", "/api/bots/bot_123/always-allow"],
     ["POST", "/api/bots/bot_123/messages/msg_2/edit"],
+    ["GET", "/api/bots/bot_123/overview"],
     ["POST", "/api/bots/bot_123/active-branch"],
     ["POST", "/api/bots/bot_123/tasks"],
     ["POST", "/api/bots/bot_123/tasks/th_1"],
@@ -204,6 +205,8 @@ describe("what it may not", () => {
     expect(allowed("GET", "/api/bots/bot_123/model")).toBe(false);
     expect(allowed("POST", "/api/bots/bot_123/model")).toBe(false);
     expect(allowed("PATCH", "/api/bots/bot_123/model/extra")).toBe(false);
+    expect(allowed("POST", "/api/bots/bot_123/overview")).toBe(false);
+    expect(allowed("GET", "/api/bots/bot_123/overview/extra")).toBe(false);
     expect(allowed("PATCH", "/api/bots/bot_123/profile/execution-policy")).toBe(false);
     expect(allowed("GET", "/api/sidebar-sections")).toBe(false);
     expect(allowed("PATCH", "/api/sidebar-sections")).toBe(false);

@@ -19,6 +19,9 @@ export async function verifyTeamBackup(report: (event: unknown) => void = () => 
     const doctor = await command("doctor") as { ok: boolean };
     assert.equal(doctor.ok, true);
     const { bot } = await command("new-bot", "--name", "Backup probe", "--section", "Original team") as { bot: { id: string } };
+    const soul = "Keep the fixture's standing instructions. 🐭\n";
+    await request(`/api/bots/${bot.id}/profile`, { method: "PATCH", body: JSON.stringify({ soul }) }, url);
+    report({ command: "save standing instructions", botId: bot.id, soul });
     await command("send", "--bot", bot.id, "--text", "Remember the backup verification conversation. Reply once.");
     const wait = await command("wait", "--bot", bot.id, "--timeout", "30") as { status: string };
     assert.equal(wait.status, "settled");
@@ -31,6 +34,7 @@ export async function verifyTeamBackup(report: (event: unknown) => void = () => 
     const added = imported.bots.find((candidate: { name: string }) => candidate.name === "Backup probe 2");
     assert.ok(added);
     assert.equal(added.section, "Original team 2");
+    assert.equal(added.soul, soul);
     const after = await request("/api/bots", {}, url);
     for (const existing of before.bots) assert.deepEqual(after.bots.find((candidate: { id: string }) => candidate.id === existing.id), existing);
     for (const existing of before.groups) assert.deepEqual(after.groups.find((candidate: { id: string }) => candidate.id === existing.id), existing);
@@ -44,6 +48,12 @@ export async function verifyTeamBackup(report: (event: unknown) => void = () => 
     await assert.rejects(post("/api/teams/import?mode=replace", backup), /Replacing your team/);
     await assert.rejects(post("/api/teams/import", { ...backup, version: 999 }), /Invalid backup/);
     assert.deepEqual(await request("/api/bots", {}, url), after);
+    // Setup-only files must preserve the same persona, without importing
+    // conversations or permissions. Exercise the real manifest import too.
+    const manifest = await post("/api/teams/export", { name: "Fixture manifest" });
+    assert.equal(manifest.team.members.find((member: { name: string }) => member.name === "Backup probe").soul, soul);
+    const fromManifest = await post("/api/teams/import?mode=add", manifest);
+    assert.equal(fromManifest.bots.find((candidate: { name: string }) => candidate.name === "Backup probe 3").soul, soul);
     // The copied history is usable for a fresh turn without resuming the
     // original provider session or altering the original bot's transcript.
     await command("send", "--bot", added.id, "--text", "Continue the imported conversation. Reply once.");
@@ -51,7 +61,7 @@ export async function verifyTeamBackup(report: (event: unknown) => void = () => 
     assert.equal(resumed.status, "settled");
     await command("messages", "--bot", added.id, "--limit", "10");
     assert.deepEqual(await command("messages", "--bot", bot.id, "--limit", "10"), transcript);
-    const result = { ok: true, existingBotsKept: before.bots.length, importedBots: imported.bots.length, originalConversationUnchanged: true, importedConversationContinued: true, logPath: fixture.info.logPath };
+    const result = { ok: true, existingBotsKept: before.bots.length, importedBots: imported.bots.length, originalConversationUnchanged: true, importedConversationContinued: true, standingInstructionsPreserved: true, logPath: fixture.info.logPath };
     report(result);
     return result;
   } finally {

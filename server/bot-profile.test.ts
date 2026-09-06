@@ -111,3 +111,23 @@ describe("mascotBody", () => {
     });
   });
 });
+
+describe("soul (standing instructions)", () => {
+  it("accepts soul on both the strict and broad boundaries", () => {
+    expect(parseBotProfilePatch({ soul: "Be brief." }, true)).toEqual({ ok: true, patch: { soul: "Be brief." } });
+    expect(parseBotProfilePatch({ soul: "Be brief." })).toEqual({ ok: true, patch: { soul: "Be brief." } });
+  });
+
+  it("caps soul by UTF-8 bytes, not characters", () => {
+    // "é" is two bytes: 12,000 of them is exactly the 24,000-byte budget
+    expect(parseBotProfilePatch({ soul: "é".repeat(12_000) }).ok).toBe(true);
+    expect(parseBotProfilePatch({ soul: "é".repeat(12_001) })).toEqual({
+      ok: false,
+      error: "standing instructions must be at most 24000 bytes",
+    });
+  });
+
+  it("rejects a non-string soul", () => {
+    expect(parseBotProfilePatch({ soul: 5 } as never)).toEqual({ ok: false, error: "soul must be a string" });
+  });
+});

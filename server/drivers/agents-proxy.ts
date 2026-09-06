@@ -19,6 +19,7 @@
 //   list_routines()                       → inspect this bot's scheduled work
 //   propose_routine(...)                  → show a confirmation card for a new routine
 //   propose_routine_action(...)           → show a confirmation card for a routine change
+//   propose_profile(...)                  → show a confirmation card for a profile change
 //
 // Speaks raw JSON-RPC 2.0 over stdio (no MCP SDK — house style, matches
 // computer-proxy / permission-proxy). All state comes from env, injected by
@@ -425,6 +426,32 @@ const TOOLS = [
     },
   },
   {
+    name: "propose_profile",
+    description:
+      "Propose changes to your own name, title, description, standing instructions (SOUL.md), or working folder (cwd). This only creates a confirmation card; nothing changes until the user approves it. After calling it, end the turn and do not claim the change is applied. Keep SOUL.md short — who you are and the rules you never break; put step-by-step procedure into a skill instead. A Chief of Staff may pass for_bot_id (from list_bots) to propose a change for another bot in its section.",
+    inputSchema: {
+      type: "object",
+      additionalProperties: false,
+      properties: {
+        name: { type: "string", maxLength: 100, description: "New display name." },
+        title: { type: "string", maxLength: 200, description: "New role or title." },
+        description: { type: "string", maxLength: 4000, description: "New one-line blurb shown in rosters." },
+        soul: { type: "string", description: "Full replacement text for SOUL.md, at most 24000 bytes." },
+        cwd: {
+          type: "string",
+          maxLength: 1024,
+          description: "Absolute path of the folder your tools read and write in (for example /Users/me/Projects/site). It must already exist. An empty string means your private workspace.",
+        },
+        reason: { type: "string", minLength: 1, maxLength: 500, description: "One sentence the user will see explaining why." },
+        for_bot_id: {
+          type: "string",
+          description: "Chief of Staff only: the id of another bot in your section whose profile this changes. Omit to change your own.",
+        },
+      },
+      required: ["reason"],
+    },
+  },
+  {
     name: "skills_list",
     description:
       "List this bot's imported skills (enabled and disabled) and any staged skill writes waiting for the user to confirm. Use this before skill_manage to avoid duplicate names. Listing does not enable anything.",
@@ -519,10 +546,10 @@ function routineFields(args: Json): { fields: Json; error?: string } {
   return { fields };
 }
 
-function confirmationResult(r: Json, fallback: string): { text: string } {
+function confirmationResult(r: Json, fallback: string, noun = "routine"): { text: string } {
   const summary = typeof r.summary === "string" && r.summary.trim() ? `\n\n${r.summary.trim()}` : "";
   return {
-    text: `A confirmation card is now visible to the user for ${fallback}.${summary}\n\nThis change has not been applied yet. End this turn and wait for the user to confirm or deny the card; do not claim the routine was created or changed before confirmation.`,
+    text: `A confirmation card is now visible to the user for ${fallback}.${summary}\n\nThis change has not been applied yet. End this turn and wait for the user to confirm or deny the card; do not claim the ${noun} was created or changed before confirmation.`,
   };
 }
 
@@ -800,6 +827,30 @@ async function callTool(name: string, args: Json): Promise<{ text: string; isErr
       body: JSON.stringify(body),
     });
     return confirmationResult(r, `${action.replace("_", " ")} on routine ${routineId}`);
+  }
+  if (name === "propose_profile") {
+    const changes: Json = {};
+    if (typeof args.name === "string") changes.name = args.name.trim();
+    if (typeof args.title === "string") changes.title = args.title.trim();
+    if (typeof args.description === "string") changes.description = args.description.trim();
+    if (typeof args.soul === "string") changes.soul = args.soul;
+    if (typeof args.cwd === "string") changes.cwd = args.cwd.trim();
+    if (!Object.keys(changes).length) {
+      return { text: "propose_profile needs at least one of name, title, description, soul, or cwd.", isError: true };
+    }
+    const forBotId = String(args.for_bot_id ?? "").trim();
+    const r = await api("/api/internal/profile-requests", {
+      method: "POST",
+      body: JSON.stringify({
+        fromBotId: BOT_ID,
+        fromThreadId: THREAD_ID,
+        changes,
+        reason: args.reason,
+        // JSON.stringify drops the key entirely when no target was named
+        forBotId: forBotId || undefined,
+      }),
+    });
+    return confirmationResult(r, "the profile change", "profile");
   }
   if (name === "session_search") {
     const q = String(args.query ?? "").trim();

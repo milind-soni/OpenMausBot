@@ -62,7 +62,7 @@ export const DESCRIPTION_MAX = 1024;
 /** One SKILL.md may be at most this large; the spec recommends <5k tokens. */
 export const SKILL_FILE_MAX_BYTES = 256 * 1024;
 /** Index budget: name+description lines only, ~100 tokens per skill. */
-export const INDEX_MAX_SKILLS = 15;
+export const INDEX_MAX_SKILLS = 30;
 export const INDEX_MAX_BYTES = 4_000;
 /** Agent-authored writes sit here until a person confirms the in-app card. */
 export const MAX_STAGED_SKILLS = 20;

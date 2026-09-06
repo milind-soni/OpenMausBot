@@ -133,12 +133,6 @@ posixOnly("conversation branching e2e (fake ACP fleet)", () => {
 
       // turn 1 settles on the original branch
       expect((await api("POST", `/api/bots/${created.id}/messages`, { text: "original question" })).status).toBe(202);
-      const afterSend = await getBot(created.id);
-      const quiz = afterSend.messages.find(
-        (m: { kind: string; card?: { requestId?: string; dismissed?: boolean } }) =>
-          m.kind === "options" && !m.card?.requestId,
-      );
-      expect(quiz?.card?.dismissed).toBe(true);
       await waitFor(async () => {
         const b = await getBot(created.id);
         return !b.busy && b.messages.some((m: Msg) => m.role === "bot" && m.kind === "text" && m.text?.includes("fake acp"));

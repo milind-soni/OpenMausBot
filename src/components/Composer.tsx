@@ -84,6 +84,12 @@ const LEARN_COMMAND: ComposerSlashCommand = {
   description: "Teach a reusable workflow from this conversation",
 };
 
+const SETUP_COMMAND: ComposerSlashCommand = {
+  id: "setup",
+  label: "/setup",
+  description: "Have this bot interview you and set itself up",
+};
+
 interface ComposerDraftSnapshot extends ComposerSendSnapshot {
   reply: Message | null;
 }
@@ -252,6 +258,9 @@ export function Composer({
     ) {
       available.push(LEARN_COMMAND);
     }
+    // Setup mode needs the agents tools (propose_profile and friends) and a
+    // single bot: a room cannot set itself up.
+    if (!group && supportsAgents(bot)) available.push(SETUP_COMMAND);
     const query = slash.query.toLowerCase();
     return available.filter(
       (command) =>
@@ -314,7 +323,7 @@ export function Composer({
 
   const pickCommand = (command: ComposerSlashCommand) => {
     if (!slash) return;
-    const replacement = command.id === "learn" ? "/learn " : "";
+    const replacement = command.id === "learn" ? "/learn " : command.id === "setup" ? "/setup " : "";
     const next = replaceComposerSlashTrigger(text, slash, replacement);
     editText(next.text);
     setCaret(next.caret);

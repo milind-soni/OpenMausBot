@@ -178,7 +178,7 @@ export function CallTargetButton({
               onClick={() => {
                 setHelpOpen(false);
                 if (setupBotId && setupBotId !== targetId) dispatch({ type: "select", id: setupBotId });
-                dispatch({ type: "toggleSettings", open: true });
+                dispatch({ type: "toggleSettings", open: true, section: "voice" });
               }}
               className="mt-2.5 rounded-lg bg-accent px-3 py-1.5 text-[12px] font-medium text-white hover:brightness-110"
             >

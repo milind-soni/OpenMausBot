@@ -23,8 +23,8 @@ function modelProvider(instance: InstanceInfo | undefined, model: string): strin
   return instance?.models.options.find((option) => option.id === model)?.provider;
 }
 
-function engineStatus(instance: InstanceInfo): string {
-  if (needsCli(instance)) return "Not installed";
+export function engineStatus(instance: InstanceInfo): string {
+  if (needsCli(instance)) return "Setup required";
   if (needsSignIn(instance)) return "Sign-in required";
   return instance.snapshot.version ?? "Ready";
 }

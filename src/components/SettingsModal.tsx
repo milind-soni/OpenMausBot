@@ -1,12 +1,12 @@
 // App settings, as a real modal with sections rather than one long panel.
-// Per-bot settings (persona, model, computer) stay in SettingsPanel — this
+// Per-bot settings (persona, model, computer) live in BotSettingsDialog — this
 // is the stuff shared by every bot: who you are, your keys, and the
 // machine your bots can borrow.
 import { useEffect, useRef, useState } from "react";
 import { Coins, FlaskConical, Globe, KeyRound, Monitor, Search, TabletSmartphone, Terminal, Trash2, User, X } from "lucide-react";
 import { api, useStore, type AppSettingsSection, type ConfigStatus } from "@/state/store";
 import { analyticsEnabled, setAnalyticsEnabled } from "@/lib/analytics";
-import { builtInBrowserEnabled, showToolCallsEnabled, skillRecorderEnabled } from "@/lib/feature-flags";
+import { browserAvailable, browserUnavailableReason, builtInBrowserEnabled, showToolCallsEnabled, skillRecorderEnabled } from "@/lib/feature-flags";
 import { localeChoices } from "@/locales";
 import { ApiKeyRow, VpsConnection } from "./ApiKeys";
 import { useUpdaterState } from "@/lib/updater";
@@ -243,7 +243,7 @@ function ExperimentalFeaturesRow() {
   const { state, dispatch } = useStore();
   const skillRecorder = skillRecorderEnabled(state.config);
   const browser = builtInBrowserEnabled(state.config);
-  const desktopBrowser = Boolean(window.ogb?.browser);
+  const desktopBrowser = browserAvailable(state.config, Boolean(window.ogb?.browser));
   const browserBlockedOnWindows = window.ogb?.platform === "win32" && !desktopBrowser;
   const [saving, setSaving] = useState<"skillRecorder" | "browser" | null>(null);
   const [error, setError] = useState("");
@@ -294,8 +294,8 @@ function ExperimentalFeaturesRow() {
                 ? "Enabled for this workspace. Each bot also has its own browser switch."
                 : "Off by default. Enable it to let supported bots use a browser tab you can watch and take over."
               : browserBlockedOnWindows
-                ? "Temporarily unavailable on Windows while Electron's production sandbox support is being verified."
-                : "Needs the OpenMausBot desktop app."}
+                ? "Not available on this Windows machine yet: install the browser engine with `openmausbot browser install`."
+                : browserUnavailableReason(state.config)}
           </div>
         </div>
         <Switch
@@ -588,10 +588,10 @@ export function SettingsModal() {
       >
         {/* section nav */}
         <nav className="flex w-[190px] shrink-0 flex-col gap-0.5 border-r border-hairline/40 p-3">
-          <div id="app-settings-title" className="px-2 pb-2 pt-1 text-[15px] font-semibold text-ink">
+          <div id="app-settings-title" className="shrink-0 px-2 py-3 text-[15px] font-semibold text-ink">
             Settings
           </div>
-          <div className="mb-1.5 flex items-center gap-2 rounded-lg bg-control/70 px-2.5 py-1.5">
+          <div className="mb-2 mt-1 flex shrink-0 items-center gap-2 rounded-lg bg-control/70 px-2.5 py-2">
             <Search size={14} className="shrink-0 text-ink-secondary" />
             <input
               value={query}

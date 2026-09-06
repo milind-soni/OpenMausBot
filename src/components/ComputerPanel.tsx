@@ -39,7 +39,7 @@ import { useDesktopCapabilities } from "./DesktopCapabilities";
 import { RoutineEditor } from "./RoutinesPage";
 import { AndroidDevicePanel, useAndroidUsbDevices } from "./AndroidDevicePanel";
 import { BrowserPanel } from "./BrowserPanel";
-import { builtInBrowserEnabled } from "@/lib/feature-flags";
+import { browserAvailable, browserUnavailableReason, builtInBrowserEnabled } from "@/lib/feature-flags";
 import { transitionComputerControlLease, type ComputerControlAction } from "@/lib/computer-control";
 import { LocalScreenPreview } from "./LocalScreenPreview";
 import { LinuxLocalControl } from "./LinuxLocalControl";
@@ -286,7 +286,8 @@ export function ComputerPanel({
   const androidStatus = useAndroidUsbDevices();
   const androidConnected = androidStatus.devices.length > 0;
   // the built-in browser: a per-bot switch in Settings, and only the desktop app has one
-  const browserEnabled = builtInBrowserEnabled(state.config) && bot.browser !== false && Boolean(window.ogb?.browser);
+  const browserAvailableHere = browserAvailable(state.config, Boolean(window.ogb?.browser));
+  const browserEnabled = builtInBrowserEnabled(state.config) && bot.browser !== false && browserAvailableHere;
   // bumped when a Box API key is saved inline, to re-run the spin-up flow
   const [retry, setRetry] = useState(0);
   const vmReadinessAttempts = useRef(0);
@@ -298,11 +299,11 @@ export function ComputerPanel({
   // Computer engine runs inside the box, so it has no browser-only mode.
   const browserSelectable =
     builtInBrowserEnabled(state.config) &&
-    Boolean(window.ogb?.browser) &&
+    browserAvailableHere &&
     selectedInstance?.capabilities?.browserMcp === true &&
     selectedInstance.driverKind !== "boxAgent";
-  const browserDisabledReason = !window.ogb?.browser
-    ? "The built-in browser needs the OpenMausBot desktop app"
+  const browserDisabledReason = !browserAvailableHere
+    ? browserUnavailableReason(state.config)
     : !builtInBrowserEnabled(state.config)
       ? "The built-in browser is switched off under App Settings → Experimental"
       : "This model engine cannot use the built-in browser";
@@ -1025,7 +1026,7 @@ export function ComputerPanel({
       {/* Header */}
       <div className="flex items-center justify-between px-4 py-3">
         <button
-          onClick={() => dispatch({ type: "toggleSettings", open: true })}
+          onClick={() => dispatch({ type: "toggleSettings", open: true, section: "access" })}
           className="rounded-md p-1 text-ink-secondary hover:bg-control hover:text-ink"
           title="Bot settings"
         >

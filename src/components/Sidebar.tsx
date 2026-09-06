@@ -652,7 +652,7 @@ function BotContextMenu({
         divider("d1"),
         item(<Pencil size={16} className="text-ink-secondary" />, "Edit Profile", () => {
           dispatch({ type: "select", id: bot.id });
-          dispatch({ type: "toggleSettings", open: true });
+          dispatch({ type: "toggleSettings", open: true, section: "identity" });
         }),
         item(<Copy size={16} className="text-ink-secondary" />, "Duplicate", () =>
           dispatch({ type: "duplicateBot", botId: bot.id }),

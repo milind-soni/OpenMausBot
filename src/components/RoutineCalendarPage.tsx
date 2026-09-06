@@ -67,6 +67,7 @@ import {
   toLocalTimeInput,
   type RoutineCalendarItem,
 } from "@/lib/routine-calendar";
+import { DAY_NAMES, durationLabel, intervalLabel, niceDate, niceTime, scheduleLabel } from "@/lib/schedule-label";
 import type {
   Routine,
   RoutineContextAttachment,
@@ -80,7 +81,6 @@ import type {
 import { api, useStore, type Bot, type Group } from "@/state/store";
 
 const HOUR_HEIGHT = 64;
-const DAY_NAMES = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
 const ALL_DAYS = [0, 1, 2, 3, 4, 5, 6];
 const WEEKDAYS = [1, 2, 3, 4, 5];
 const INTERVAL_PRESETS = [5, 10, 15, 30, 60];
@@ -147,43 +147,6 @@ function nextHour(): number {
   const date = new Date(Date.now() + 60 * 60_000);
   date.setMinutes(0, 0, 0);
   return date.getTime();
-}
-
-function niceTime(at: number): string {
-  return new Date(at).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
-}
-
-function niceDate(at: number): string {
-  return new Date(at).toLocaleDateString([], { weekday: "long", month: "long", day: "numeric" });
-}
-
-function durationLabel(minutes: number): string {
-  if (minutes < 60) return `${minutes} min`;
-  if (minutes % 60 === 0) return `${minutes / 60} hr`;
-  return `${Math.floor(minutes / 60)} hr ${minutes % 60} min`;
-}
-
-function intervalLabel(minutes: number): string {
-  if (minutes < 60) return `Every ${minutes} min`;
-  if (minutes === 60) return "Every hour";
-  if (minutes % 60 === 0) return `Every ${minutes / 60} hr`;
-  return `Every ${Math.floor(minutes / 60)} hr ${minutes % 60} min`;
-}
-
-function scheduleLabel(schedule: RoutineSchedule | CalendarCall["schedule"]): string {
-  if (schedule.type === "once") return `${niceDate(schedule.at)}, ${niceTime(schedule.at)}`;
-  if (schedule.type === "interval") {
-    return `${intervalLabel(schedule.everyMinutes)} · starting ${niceDate(schedule.anchorAt)}, ${niceTime(schedule.anchorAt)}`;
-  }
-  const days = schedule.weekdays;
-  const label = days.length === 7
-    ? "Every day"
-    : days.join(",") === "1,2,3,4,5"
-      ? "Every weekday"
-      : days.length === 1
-        ? `Weekly on ${DAY_NAMES[days[0]!]}`
-        : days.map((day) => DAY_NAMES[day]).join(", ");
-  return `${label} at ${niceTime(atLocalTime(Date.now(), schedule.time))}`;
 }
 
 function recurrenceFor(schedule: RoutineSchedule | CalendarCall["schedule"], at: number): RecurrenceChoice {

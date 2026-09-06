@@ -284,6 +284,9 @@ class CompanionClient(
 
     suspend fun routines(): RoutinesResponse = send(makeRequest("GET", "/api/routines"))
 
+    suspend fun overview(botId: String): BotOverview =
+        send(makeRequest("GET", "/api/bots/${segment(botId)}/overview"))
+
     suspend fun createBot(): Bot = send<CreatedBot>(makeRequest("POST", "/api/bots")).bot
 
     /**

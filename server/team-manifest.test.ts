@@ -3,6 +3,20 @@ import { describe, expect, it } from "vitest";
 import { createTeamManifest, importedMemberProfile, parseTeamManifest } from "./team-manifest.ts";
 
 describe("team manifests", () => {
+  it("round-trips optional soul exactly and rejects over-budget Unicode", () => {
+    const soul = "  Be precise. 🐭\n\n";
+    const manifest = createTeamManifest({ name: "Soul team", memberIds: ["one"] }, [{
+      id: "one", name: "One", title: "", description: "", soul, color: "blue",
+    }]);
+    expect(manifest.team.members[0].soul).toBe(soul);
+    expect(importedMemberProfile(parseTeamManifest(manifest).team.members[0], new Set()).soul).toBe(soul);
+    manifest.team.members[0].soul = "🐭".repeat(6_000);
+    expect(parseTeamManifest(manifest).team.members[0].soul).toBe(manifest.team.members[0].soul);
+    manifest.team.members[0].soul += "!";
+    expect(() => parseTeamManifest(manifest)).toThrow("24000 bytes");
+    delete manifest.team.members[0].soul;
+    expect(importedMemberProfile(parseTeamManifest(manifest).team.members[0], new Set())).not.toHaveProperty("soul");
+  });
   it("exports portable member keys without room or runtime state", () => {
     const manifest = createTeamManifest(
       {

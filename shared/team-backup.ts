@@ -52,6 +52,10 @@ const backupSchema = z.object({
     ...owner,
     title: z.string().max(2_000),
     description: z.string().max(200_000),
+    // Same UTF-8 limit as the profile editor (this schema also runs in the browser).
+    soul: z.string().refine((value) => new TextEncoder().encode(value).byteLength <= 24_000, {
+      error: "standing instructions must be at most 24000 bytes",
+    }).optional(),
     color,
     mascotExpression: z.string().max(80).optional(),
     mascotBody: z.string().max(40).optional(),

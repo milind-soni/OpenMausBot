@@ -11,13 +11,14 @@ import { connect, createServer as createNetServer, type Socket } from "node:net"
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { ensureDirs, NATIVE_DIR } from "../config.ts";
 import type { ProviderInstance } from "../contracts.ts";
 import { recordEvents, type EventRecorder } from "../testing/events.ts";
 import { brokerSocketCandidates, ClaudeDriver, createPermissionBroker, permissionSocketPath, type ClaudeConfig } from "./claude.ts";
 import { removeTempDir } from "../testing/cleanup.ts";
+import * as procs from "../procs.ts";
 
 const FAKE_CLI = join(dirname(fileURLToPath(import.meta.url)), "..", "testing", "fake-claude-cli.ts");
 
@@ -833,6 +834,60 @@ describe("ClaudeDriver turns (fake CLI)", () => {
     expect(done).toMatchObject({ ok: false, stopReason: "exit_before_result" });
   });
 
+  it.each([false, true])("refuses steering and retires approvals after interrupt before process exit (retained=%s)", async (retained) => {
+    const finishGate = join(scratch, "finish-gate");
+    const dump = join(scratch, "interrupt-dump.json");
+    await create("slow", { FAKE_CLAUDE_SLOW_FINISH_GATE: finishGate, FAKE_CLAUDE_DUMP: dump });
+    const threadId = `t-stop-steer-${retained ? "retained" : "fresh"}`;
+    if (retained) {
+      writeFileSync(finishGate, "finish");
+      const first = await instance.adapter.sendTurn({ threadId, text: "first" });
+      await recorder.until((e) => e.type === "turn.completed" && e.turnId === first.turnId);
+      rmSync(finishGate);
+    }
+    const running = await instance.adapter.sendTurn({ threadId, text: "stop this turn" });
+    await recorder.until((e) => e.type === "item.completed" && e.itemType === "tool" && e.turnId === running.turnId);
+    const stoppedPid = JSON.parse(readFileSync(dump, "utf8")).pid;
+    // Windows taskkill returns before the child exits. Hold that window open
+    // deterministically: the pipe remains writable until we release the kill.
+    const conn = await connectSocket(permissionSocketPath(threadId));
+    const nextAnswer = answerQueue(conn);
+    const kill = procs.killCliTree;
+    const delayedKill = vi.spyOn(procs, "killCliTree").mockImplementation(() => {});
+    try {
+      const pendingAnswer = nextAnswer();
+      conn.write(JSON.stringify({ t: "ask", id: "before-stop", tool: "Bash", input: { command: "sleep 60" } }) + "\n");
+      await recorder.until((e) => e.type === "request.opened" && e.requestId === "before-stop");
+      const openedBefore = recorder.events.filter((e) => e.type === "request.opened").length;
+      await instance.adapter.interruptTurn(threadId);
+      expect(instance.adapter.hasSession(threadId)).toBe(true);
+      await expect(instance.adapter.steer!(threadId, "replacement")).resolves.toBe(false);
+      expect(recorder.events).toContainEqual(expect.objectContaining({
+        type: "request.resolved", requestId: "before-stop", behavior: "deny", source: "system",
+      }));
+      await expect(pendingAnswer).resolves.toMatchObject({ id: "before-stop", behavior: "deny" });
+      const lateAnswer = nextAnswer();
+      conn.write(JSON.stringify({ t: "ask", id: "after-stop", tool: "Bash", input: { command: "echo too late" } }) + "\n");
+      await expect(lateAnswer).resolves.toMatchObject({ id: "after-stop", behavior: "deny", message: "OpenMausBot: the turn ended" });
+      expect(recorder.events.filter((e) => e.type === "request.opened")).toHaveLength(openedBefore);
+      await expect(instance.adapter.respondToRequest(threadId, "after-stop", { behavior: "allow" })).resolves.toBe("unavailable");
+    } finally {
+      conn.destroy();
+      const children = delayedKill.mock.calls.map(([child]) => child);
+      delayedKill.mockRestore();
+      for (const child of children) kill(child);
+    }
+    await recorder.until((e) => e.type === "turn.completed" && e.turnId === running.turnId);
+
+    writeFileSync(finishGate, "finish");
+    const replacement = await instance.adapter.sendTurn({ threadId, text: "replacement" });
+    await recorder.until((e) => e.type === "turn.completed" && e.turnId === replacement.turnId);
+    expect(JSON.parse(readFileSync(dump, "utf8")).pid).not.toBe(stoppedPid);
+    expect(recorder.events).toContainEqual(expect.objectContaining({
+      type: "item.completed", turnId: replacement.turnId, text: "reply to: replacement",
+    }));
+  });
+
   it("a message sent mid-turn is steered into the running turn", async () => {
     await create("slow");
     const { turnId } = await instance.adapter.sendTurn({ threadId: "t-steer", text: "first" });
@@ -1340,24 +1395,20 @@ describe("ClaudeDriver turns (fake CLI)", () => {
 
     // Same connection stays open across the turn ending — the exact
     // condition that let a still-alive child raise an unanswerable card.
-    const conn = connect(permissionSocketPath("t-perm-late"));
-    await new Promise<void>((resolve, reject) => {
-      conn.on("connect", resolve);
-      conn.on("error", reject);
-    });
+    const conn = await connectSocket(permissionSocketPath("t-perm-late"));
+    const nextAnswer = answerQueue(conn);
+    const initialReply = nextAnswer();
+    conn.write(JSON.stringify({ t: "ask", id: "ask-ready", tool: "Bash", input: { command: "echo ready" } }) + "\n");
+    // Windows can signal client connect before the server accepts the pipe.
+    // Prove the broker owns this connection before closing its listener.
+    await recorder.until((e) => e.type === "request.opened" && e.requestId === "ask-ready");
 
     await instance.adapter.interruptTurn("t-perm-late");
+    await expect(initialReply).resolves.toMatchObject({ id: "ask-ready", behavior: "deny" });
     await recorder.until((e) => e.type === "turn.completed");
 
     const opensBefore = recorder.events.filter((e) => e.type === "request.opened").length;
-    const reply = new Promise<{ id: string; behavior: string; message?: string }>((resolve) => {
-      let buf = "";
-      conn.on("data", (c) => {
-        buf += c;
-        const nl = buf.indexOf("\n");
-        if (nl !== -1) resolve(JSON.parse(buf.slice(0, nl)));
-      });
-    });
+    const reply = nextAnswer();
     conn.write(JSON.stringify({ t: "ask", id: "ask-late", tool: "Bash", input: { command: "rm -rf /" } }) + "\n");
 
     // A dead card is a request.opened with no way to ever answer it — assert
@@ -1383,24 +1434,19 @@ describe("ClaudeDriver turns (fake CLI)", () => {
     await instance.adapter.sendTurn({ threadId: "t-question-late", text: "go" });
     await recorder.until((e) => e.type === "session.started");
 
-    const conn = connect(permissionSocketPath("t-question-late"));
-    await new Promise<void>((resolve, reject) => {
-      conn.on("connect", resolve);
-      conn.on("error", reject);
-    });
+    const conn = await connectSocket(permissionSocketPath("t-question-late"));
+    const nextAnswer = answerQueue(conn);
+    const initialReply = nextAnswer();
+    conn.write(JSON.stringify({ t: "ask", kind: "question", id: "q-ready", tool: "ask_user", input: { question: "ready?" } }) + "\n");
+    // Wait for server-side acceptance, not only the named-pipe connect event.
+    await recorder.until((e) => e.type === "request.opened" && e.requestId === "q-ready");
 
     await instance.adapter.interruptTurn("t-question-late");
+    await expect(initialReply).resolves.toMatchObject({ id: "q-ready", behavior: "answer" });
     await recorder.until((e) => e.type === "turn.completed");
 
     const opensBefore = recorder.events.filter((e) => e.type === "request.opened").length;
-    const reply = new Promise<{ id: string; behavior: string; message?: string }>((resolve) => {
-      let buf = "";
-      conn.on("data", (c) => {
-        buf += c;
-        const nl = buf.indexOf("\n");
-        if (nl !== -1) resolve(JSON.parse(buf.slice(0, nl)));
-      });
-    });
+    const reply = nextAnswer();
     conn.write(JSON.stringify({ t: "ask", kind: "question", id: "q-late", tool: "ask_user", input: { question: "still there?" } }) + "\n");
 
     expect(await reply).toMatchObject({

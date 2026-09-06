@@ -4,6 +4,7 @@ import { parse as parseYaml, stringify as stringifyYaml } from "yaml";
 import { schemaIssue, type JsonValue } from "./schema.ts";
 import type { MausColor } from "./store.ts";
 import type { TeamManifestMember } from "./team-manifest.ts";
+import { BOT_PROFILE_LIMITS } from "../shared/bot-profile.ts";
 
 export const BOT_PACKAGE_FORMAT = "openmaus.package" as const;
 export const BOT_PACKAGE_VERSION = 1 as const;
@@ -68,6 +69,9 @@ const packageSchema = z.object({
       name: requiredText(100),
       title: optionalText(200),
       description: optionalText(4_000),
+      soul: z.string().refine((value) => Buffer.byteLength(value, "utf8") <= BOT_PROFILE_LIMITS.soul, {
+        error: "standing instructions must be at most 24000 bytes",
+      }).optional(),
       appearance: z.object({
         color: z.enum(COLORS, { error: "is not supported" }),
         mascotExpression: optionalText(80),
@@ -275,6 +279,7 @@ export function packageAgentAsMember(agent: BotPackageAgent): TeamManifestMember
     name: agent.name,
     title: agent.title ?? "",
     description: agent.description ?? "",
+    ...(agent.soul !== undefined ? { soul: agent.soul } : {}),
     appearance: {
       color: agent.appearance.color,
       ...(agent.appearance.mascotExpression ? { mascotExpression: agent.appearance.mascotExpression } : {}),

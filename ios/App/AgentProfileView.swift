@@ -223,6 +223,11 @@ struct AgentProfileView: View {
                 }
 
                 Section("Identity") {
+                    NavigationLink {
+                        BotOverviewView(bot: current)
+                    } label: {
+                        Label("What this bot does", systemImage: "list.bullet.rectangle")
+                    }
                     TextField("Name", text: $name)
                         .textInputAutocapitalization(.words)
                     TextField("Title", text: $title)

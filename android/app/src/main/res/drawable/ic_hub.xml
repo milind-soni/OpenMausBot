@@ -1,0 +1,25 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  A center node with three others around it, for what an agent can reach. Drawn
+  here rather than pulled from `material-icons-extended`: the core icon set has
+  no such glyph, and the extended artifact is thousands of vectors for a
+  handful of uses.
+-->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="24dp"
+    android:height="24dp"
+    android:viewportWidth="24"
+    android:viewportHeight="24"
+    android:tint="?attr/colorControlNormal">
+    <path
+        android:strokeColor="@android:color/white"
+        android:strokeWidth="1.5"
+        android:strokeLineCap="round"
+        android:pathData="M12,11 L4.5,5.5 M12,11 L4.5,16.5 M12,11 L19.5,11" />
+    <path
+        android:fillColor="@android:color/white"
+        android:pathData="M12,9 m-2,0 a2,2 0 1,0 4,0 a2,2 0 1,0 -4,0
+                           M4.5,3.5 m-2,0 a2,2 0 1,0 4,0 a2,2 0 1,0 -4,0
+                           M4.5,14.5 m-2,0 a2,2 0 1,0 4,0 a2,2 0 1,0 -4,0
+                           M19.5,9 m-2,0 a2,2 0 1,0 4,0 a2,2 0 1,0 -4,0" />
+</vector>

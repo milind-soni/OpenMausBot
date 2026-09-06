@@ -98,6 +98,18 @@ npx openmausbot serve --tailscale
 
 Tailscale terminates HTTPS with its own certificate and the pairing link uses the server's MagicDNS name (`https://maus.tail1234.ts.net`). Only devices on your tailnet can reach it, which is a very good property for a server that can run tools.
 
+## Give the bots a browser (optional)
+
+Bots can browse on a server. Docker (path B) ships the engine and a Chrome in
+the image; for paths A and C run this once on the server:
+
+```sh
+sudo npx openmausbot browser install --with-deps   # Linux: also installs Chrome's system libraries
+```
+
+Then turn the browser on under Settings → Experimental, and per bot. Each bot
+gets its own isolated session whose logins persist across restarts.
+
 ## Sign the engines in
 
 Bots run on the engine CLIs installed on the server, using your accounts. Sign each one in once; the logins live under the server's data directory and survive restarts and updates.

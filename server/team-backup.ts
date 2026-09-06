@@ -55,7 +55,7 @@ export function createTeamBackup(store: Store, routines: Routine[], name: string
     format: "openmaus.backup", version: 1, name, exportedAt: Date.now(),
     warnings,
     bots: store.bots.map((bot) => ({
-      key: bot.id, name: bot.name, title: bot.title, description: bot.description,
+      key: bot.id, name: bot.name, title: bot.title, description: bot.description, soul: bot.soul,
       section: bot.section, color: bot.color,
       mascotExpression: bot.mascotExpression ?? undefined, mascotBody: bot.mascotBody ?? undefined,
       chiefOfStaff: Boolean(bot.chiefOfStaff), hidden: Boolean(bot.hidden), playbooks: bot.playbooks ?? [],
@@ -114,7 +114,7 @@ export function importTeamBackup(store: Store, routines: RoutineManager, input: 
     // Allocate all bot IDs before remapping any conversation participants.
     for (const source of backup.bots) {
       const bot = store.createBot({
-        name: takeImportName(source.name, takenNames), title: source.title, description: source.description,
+        name: takeImportName(source.name, takenNames), title: source.title, description: source.description, soul: source.soul,
         color: source.color, mascotExpression: source.mascotExpression,
         mascotBody: botMascotBody(source.mascotBody),
         modelSelection: selection, section: sectionFor(source.section),

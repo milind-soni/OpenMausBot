@@ -19,6 +19,7 @@ import {
   WORKSPACE_LABEL,
   computerProxyEnv,
   containerComputerAction,
+  containerComputerFrame,
   containerComputerMcp,
   containerComputerScreenshot,
   containerComputerStatus,
@@ -651,6 +652,33 @@ describe("Cua integration", () => {
     expect(image).toBe(`data:image/png;base64,${png.toString("base64")}`);
     expect(fake.calls).toContain(screenshotCall);
     expect(fake.calls.some((call) => /xdotool|scrot|vnc/i.test(call))).toBe(false);
+  });
+
+  // The live screen poller broadcasts this shape verbatim to every SSE
+  // client, and the phone renders nothing but those events: a data URL here
+  // would reach it as base64 that decodes to garbage.
+  it("hands the screen poller raw base64 and a bare format, not a data URL", async () => {
+    const png = validPng;
+    const fake = runner({
+      "/usr/bin/which docker": "docker\n",
+      "/usr/bin/which podman": new Error("missing"),
+      "docker info --format {{.ServerVersion}}": "29\n",
+      [`docker image inspect ${IMAGE}`]: preparedImageInspect(),
+      [`docker inspect ${CONTAINER}`]: readyInspect(),
+      [versionProbe]: `cua-driver ${CUA_DRIVER_VERSION}\n`,
+      [statusProbe]: "running\n",
+      [healthProbe]: JSON.stringify({ schema_version: "1", overall: "degraded", checks: [] }),
+      [readinessProbe]: "{}\n",
+      [readinessRead]: png.toString("base64"),
+      [`${driverExec} call get_desktop_state {} --socket ${CUA_SOCKET} ` +
+        "--screenshot-out-file /tmp/openmausbot-preview.png"]: "{}\n",
+      [`docker exec ${CONTAINER} base64 -w0 /tmp/openmausbot-preview.png`]: png.toString("base64"),
+    });
+
+    const frame = await containerComputerFrame(fake.run, "linux");
+
+    expect(frame).toEqual({ png: png.toString("base64"), format: "png" });
+    expect(frame.png.startsWith("data:")).toBe(false);
   });
 });
 

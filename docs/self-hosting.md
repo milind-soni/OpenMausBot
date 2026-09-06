@@ -31,10 +31,14 @@ Runs fully on a server:
   server-side anyway)
 - text-to-speech (with a key), the web UI (the server serves it itself)
 
+- a browser for bots, once the engine is installed on the server
+  (`npx openmausbot browser install`, or nothing to do in the Docker image,
+  which ships it): each bot gets its own isolated, persistent session.
+  Watching it live from the app is the next step (docs/plans/browser-engine.md).
+
 Desktop-only for now (needs the Mac/Linux app):
 
-- the built-in browser panel, the skill recorder, dictation/voice,
-  controlling the host desktop
+- the skill recorder, dictation/voice, controlling the host desktop
 
 ## Quickest: one command with Node
 
@@ -80,6 +84,10 @@ Later: `npx openmausbot pair --label "Kitchen iPad"` for another device
 pm2 to keep it up; `openmausbot serve` is a plain foreground process.
 
 ## Docker (with HTTPS on your own domain)
+
+For local Docker Desktop or private Tailscale access without a public domain,
+use the [local Compose setup](../deploy/local/README.md). It defaults to
+`http://localhost:8080` and supports optional `.env` overrides.
 
 One tenant = one container for the server plus Caddy for HTTPS.
 Requirements: Docker with Compose, a DNS name pointing at the machine, and

@@ -18,6 +18,7 @@ import type { MausColor, MausMotion } from "@/lib/mascot";
 import type { BotAvatarCrop } from "../../shared/bot-avatar";
 import { approvalModeFor, type ApprovalMode } from "../../shared/approval-mode";
 import type { MascotBodyId } from "../../shared/mascot-bodies";
+import type { ProfileRequestCardData } from "../../shared/profile-request";
 import type { RoutineRequestCardData } from "../../shared/routine-request";
 import type { RoutineRunCardData } from "../../shared/routine-run";
 import type { GroupGoalRunCardData } from "../../shared/group-goal-run";
@@ -76,6 +77,8 @@ export interface OptionCardData {
   routineRequest?: RoutineRequestCardData;
   /** Staged learned-skill change; applied only after the user confirms this card. */
   skillRequest?: SkillRequestCardData;
+  /** Persisted profile proposal used by the server when the user confirms it. */
+  profileRequest?: ProfileRequestCardData;
 }
 
 export interface ConnectorCardData {
@@ -245,6 +248,10 @@ export interface Bot {
   name: string;
   title: string;
   description: string;
+  /** Standing instructions (SOUL.md). Canonical on the server; the file is a mirror. */
+  soul?: string;
+  /** The SOUL.md mirror on disk differs from the record; the Soul editor offers apply/discard. */
+  soulDrift?: boolean;
   notifications: boolean;
   color: MausColor;
   mascotExpression?: string | null;
@@ -291,6 +298,10 @@ export interface Bot {
   /** When this bot wants to talk to another bot (ask_bot/delegate_bot),
    * pause and ask the user first. Off by default. */
   approvePeerComms?: boolean;
+  /** Explicit peer allow-list (bot ids); absent = every bot in its section,
+   * `[]` = none. Read-only on the web today; here so the settings dialog can
+   * refetch the overview when the server changes it. */
+  peers?: string[];
   /** Whether this bot may use the workspace's connected apps. Unset means
    * allowed for existing bots; imported bots start with this disabled. */
   composio?: boolean;
@@ -352,8 +363,18 @@ export interface ConfigStatus {
   language?: string;
   /** Opt-in flags. Absent means off. */
   features?: { skillRecorder: boolean; showToolCalls?: boolean; browser?: boolean };
+  /** Which browser this server can give bots: the desktop app's surface, the
+   * agent-browser engine, or nothing yet (with the reason). */
+  browserEngine?: BrowserEngineSummary;
   /** Named browser sessions any bot can be pointed at. */
   browserProfiles?: BrowserProfile[];
+}
+
+export interface BrowserEngineSummary {
+  kind: "desktop" | "headless" | "unavailable";
+  reason?: string;
+  installable?: boolean;
+  version?: string;
 }
 
 export interface BrowserProfile {
@@ -366,7 +387,7 @@ export interface BrowserProfile {
 
 export type ConfigStatusFrame = Pick<
   ConfigStatus,
-  "xai" | "composio" | "box" | "vps" | "rooms" | "localVm" | "opencodeGo" | "tts" | "imageGen" | "profile" | "language" | "features" | "browserProfiles"
+  "xai" | "composio" | "box" | "vps" | "rooms" | "localVm" | "opencodeGo" | "tts" | "imageGen" | "profile" | "language" | "features" | "browserEngine" | "browserProfiles"
 >;
 
 export function configStatusFromFrame(frame: ConfigStatusFrame): ConfigStatus {
@@ -383,6 +404,7 @@ export function configStatusFromFrame(frame: ConfigStatusFrame): ConfigStatus {
     profile: frame.profile,
     language: frame.language,
     features: frame.features,
+    browserEngine: frame.browserEngine,
     browserProfiles: frame.browserProfiles,
   };
 }
@@ -455,6 +477,20 @@ export type AppSettingsSection =
   | "computer"
   | "usage";
 
+export type BotSettingsSection =
+  | "overview"
+  | "identity"
+  | "soul"
+  | "skills"
+  | "memory"
+  | "routines"
+  | "access"
+  | "model"
+  | "permissions"
+  | "voice"
+  | "history"
+  | "usage";
+
 export interface AppState {
   bots: Bot[];
   groups: Group[];
@@ -475,6 +511,7 @@ export interface AppState {
   inspectorOpen: boolean;
   appSettingsOpen: boolean;
   appSettingsSection: AppSettingsSection;
+  botSettingsSection: BotSettingsSection;
   /** latest live frame of a bot's computer, per botId */
   screens: Record<string, { png: string; mime: string }>;
   /** bots whose cloud computer is being provisioned */
@@ -662,7 +699,7 @@ export type Action =
   | { type: "interrupt"; botId: string; threadId?: string; onError?: () => void }
   | { type: "connected"; value: boolean }
   | { type: "error"; message: string | null }
-  | { type: "toggleSettings"; open?: boolean }
+  | { type: "toggleSettings"; open?: boolean; section?: BotSettingsSection }
   | { type: "togglePlugins"; open?: boolean }
   | { type: "toggleComputer"; open?: boolean }
   | { type: "toggleInspector"; open?: boolean }
@@ -915,11 +952,21 @@ export function reducer(state: AppState, action: Action): AppState {
           ...state,
           activeView: "chat",
           selectedId: action.id,
+          botSettingsSection: action.id !== state.selectedId ? "overview" : state.botSettingsSection,
           groups: state.groups.map((g) => (g.id === action.id ? { ...g, unread: false } : g)),
         };
       }
       return updateBot(
-        withMascotMotion({ ...state, activeView: "chat", selectedId: action.id }, action.id, "switch"),
+        withMascotMotion(
+          {
+            ...state,
+            activeView: "chat",
+            selectedId: action.id,
+            botSettingsSection: action.id !== state.selectedId ? "overview" : state.botSettingsSection,
+          },
+          action.id,
+          "switch",
+        ),
         action.id,
         (b) => ({ ...b, unread: false }),
       );
@@ -1193,8 +1240,12 @@ export function reducer(state: AppState, action: Action): AppState {
       return {
         ...state,
         settingsOpen: open,
-        computerOpen: open ? false : state.computerOpen,
-        inspectorOpen: open ? false : state.inspectorOpen,
+        botSettingsSection: action.section ?? state.botSettingsSection,
+        // A centered modal sits over the side panels, so opening it leaves
+        // the computer panel and inspector as they were — the computer
+        // panel's own gear opens this dialog, and closing the panel under it
+        // would destroy what the user was just looking at. The app settings
+        // modal is the one thing that cannot share the screen with it.
         appSettingsOpen: open ? false : state.appSettingsOpen,
       };
     }
@@ -1473,6 +1524,7 @@ export const initialState: AppState = {
   inspectorOpen: false,
   appSettingsOpen: false,
   appSettingsSection: "general",
+  botSettingsSection: "overview",
   screens: {},
   provisioning: {},
   deletingBots: {},
@@ -1984,7 +2036,10 @@ export function StoreProvider({ children }: { children: ReactNode }) {
                   showError(error);
                 }
               }
-              await respond();
+              const response = await respond();
+              if (response?.settlementPending && typeof response.message === "string") {
+                showError(new Error(response.message));
+              }
             })
             .catch((error) => {
               // A settings flush failure deliberately stops the response;
@@ -2049,6 +2104,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
             name: `${source.name} copy`,
             title: source.title,
             description: source.description,
+            soul: source.soul,
             notifications: source.notifications,
             modelSelection: source.modelSelection,
             computer: source.computer,

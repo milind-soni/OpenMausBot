@@ -30,6 +30,13 @@ import qrcode from "qrcode-terminal";
 
 import { explainTailscaleFailure, tailscaleServe, tailscaleServeOff, tailscaleStatus, type TailscaleStatus } from "./tailscale.ts";
 import {
+  browserEngineStatus,
+  describeBrowserEngine,
+  ensureChrome,
+  installAgentBrowserBinary,
+  resolveAgentBrowserBinary,
+} from "./browser-engine.ts";
+import {
   cleanupTunnelOrigin,
   createTunnelAccount,
   createTunnelOrigin,
@@ -47,7 +54,7 @@ import {
 const HERE = dirname(fileURLToPath(import.meta.url));
 
 export interface CliOptions {
-  command: "serve" | "pair" | "sessions" | "status" | "login" | "logout" | "help";
+  command: "serve" | "pair" | "sessions" | "status" | "login" | "logout" | "browser" | "help";
   port: number;
   dataDir: string;
   label?: string;
@@ -58,10 +65,13 @@ export interface CliOptions {
   pair: boolean;
   revoke?: string;
   email?: string;
+  /** `browser install [--with-deps]` */
+  browserAction?: "install" | "status";
+  withDeps?: boolean;
   json: boolean;
 }
 
-const COMMANDS = ["serve", "pair", "sessions", "status", "login", "logout", "help", "--help", "-h"];
+const COMMANDS = ["serve", "pair", "sessions", "status", "login", "logout", "browser", "help", "--help", "-h"];
 
 export function parseArgs(argv: string[], env: NodeJS.ProcessEnv = process.env): CliOptions | { error: string } {
   const [command = "help", ...rest] = argv;
@@ -76,6 +86,7 @@ export function parseArgs(argv: string[], env: NodeJS.ProcessEnv = process.env):
     tunnel: false,
     client: false,
     pair: true,
+    withDeps: false,
     json: false,
   };
   for (let i = 0; i < rest.length; i += 1) {
@@ -98,6 +109,8 @@ export function parseArgs(argv: string[], env: NodeJS.ProcessEnv = process.env):
       else if (arg === "--json") options.json = true;
       else if (arg === "--email") options.email = value();
       else if (options.command === "sessions" && arg === "revoke") options.revoke = value();
+      else if (options.command === "browser" && (arg === "install" || arg === "status")) options.browserAction = arg;
+      else if (options.command === "browser" && arg === "--with-deps") options.withDeps = true;
       else return { error: `unknown argument "${arg}"` };
     } catch (error) {
       return { error: error instanceof Error ? error.message : String(error) };
@@ -106,6 +119,7 @@ export function parseArgs(argv: string[], env: NodeJS.ProcessEnv = process.env):
   if (!Number.isInteger(options.port) || options.port < 1 || options.port > 65_535) return { error: "--port must be 1-65535" };
   if (options.publicUrl && !/^https?:\/\//.test(options.publicUrl)) return { error: "--public-url must start with http:// or https://" };
   if (options.tailscale && options.tunnel) return { error: "choose one of --tailscale (your tailnet) and --tunnel (a public address)" };
+  if (options.command === "browser" && !options.browserAction) return { error: "browser needs an action: install or status" };
   return options;
 }
 
@@ -118,6 +132,7 @@ export const USAGE = `openmausbot — run the server anywhere, pair devices to i
   openmausbot status
   openmausbot login [--email you@example.com]
   openmausbot logout
+  openmausbot browser install [--with-deps] | status
 
 serve   starts the server and prints a pairing link + QR code
 pair    mints a pairing code against a running server (--client: chat only)
@@ -126,6 +141,10 @@ status  what the server says about itself
 login   signs this machine in to an OpenMausBot account (an emailed code)
         and reserves its public address for --tunnel
 logout  releases that address and signs out
+browser install: the bots' browser engine (agent-browser, pinned) and a
+        Chrome for Testing, into the data dir; --with-deps also installs
+        the Linux libraries Chrome needs (run as root once). status: what
+        this machine has.
 
 --tailscale  serve over your tailnet: Tailscale terminates HTTPS and the
              link uses this machine's MagicDNS name (needs Tailscale signed in
@@ -352,6 +371,40 @@ export async function runLogout(options: CliOptions, io: CliIo = defaultIo()): P
   return 0;
 }
 
+export async function runBrowser(options: CliOptions, io: CliIo = defaultIo()): Promise<number> {
+  const status = browserEngineStatus({ dataDir: options.dataDir });
+  if (options.browserAction === "status") {
+    io.log(describeBrowserEngine(status));
+    if (status.kind !== "ready" && status.installable) io.log("install it with:  openmausbot browser install");
+    return status.kind === "ready" ? 0 : 1;
+  }
+  let binary = resolveAgentBrowserBinary({ dataDir: options.dataDir });
+  if (binary) {
+    io.log(`agent-browser is already here: ${binary}`);
+  } else {
+    if (status.kind !== "ready" && !status.installable) {
+      io.error(status.reason);
+      return 1;
+    }
+    try {
+      binary = await installAgentBrowserBinary({ dataDir: options.dataDir, log: io.log });
+    } catch (error) {
+      io.error(`could not install agent-browser: ${message(error)}`);
+      return 1;
+    }
+    io.log(`installed ${binary}`);
+  }
+  try {
+    await ensureChrome(binary, { withDeps: options.withDeps === true, log: io.log });
+  } catch (error) {
+    io.error(`Chrome is not ready: ${message(error)}`);
+    if (process.platform === "linux" && !options.withDeps) io.error("on Linux, Chrome needs system libraries: run `sudo openmausbot browser install --with-deps` once");
+    return 1;
+  }
+  io.log("bots on this server can use a browser now: turn it on under Settings → Experimental, then per bot");
+  return 0;
+}
+
 /** Where the server bundle lives relative to this file: next to it in the
  * npm package and the image (dist-server/), or the TypeScript source in a
  * checkout. */
@@ -500,6 +553,7 @@ export async function runServe(options: CliOptions, log: (line: string) => void 
   log("");
   log(`OpenMausBot is running on http://127.0.0.1:${options.port}${publicUrl ? `, reachable at ${publicUrl}` : ""}`);
   log(`data: ${options.dataDir}`);
+  log(describeBrowserEngine(browserEngineStatus({ dataDir: options.dataDir })));
   if (options.pair) {
     log("");
     log(await mintPairing(options.port, { label: options.label ? `${options.label} owner` : undefined, publicUrl: publicUrl ?? undefined }));
@@ -533,6 +587,8 @@ export async function main(argv = process.argv.slice(2)): Promise<number> {
       return runLogin(options);
     case "logout":
       return runLogout(options);
+    case "browser":
+      return runBrowser(options);
     default:
       console.log(USAGE);
       return 0;

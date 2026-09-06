@@ -90,7 +90,7 @@ import kotlinx.coroutines.withContext
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-internal fun AgentProfileSheet(bot: Bot, onDismiss: () -> Unit) {
+internal fun AgentProfileSheet(bot: Bot, onDismiss: () -> Unit, onOpenOverview: (String) -> Unit) {
     val environment = LocalCompanion.current
     val session = environment.session
     val state by session.state.collectAsState()
@@ -210,6 +210,14 @@ internal fun AgentProfileSheet(bot: Bot, onDismiss: () -> Unit) {
                         fontSize = 17.sp,
                         fontWeight = FontWeight.SemiBold,
                         modifier = Modifier.align(Alignment.Center),
+                    )
+                }
+
+                FormSection(header = null) {
+                    ActionRow(
+                        text = "What this bot does",
+                        icon = Icons.Filled.Info,
+                        onClick = { onOpenOverview(bot.id) },
                     )
                 }
 

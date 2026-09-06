@@ -434,4 +434,13 @@ class DecodingTest {
             )
         }
     }
+
+    @Test
+    fun decodesTheBotOverview() {
+        val overview = decodeFixture<BotOverview>("bot-overview")
+        assertEquals("Kiwi", overview.who.name)
+        assertEquals("File bugs.", overview.who.soulLead)
+        assertTrue(overview.does.isNotEmpty())
+        assertTrue(overview.wont.isNotEmpty())
+    }
 }

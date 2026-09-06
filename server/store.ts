@@ -7,6 +7,8 @@ import { existsSync, readFileSync, mkdirSync, rmSync, unlinkSync } from "node:fs
 import { join } from "node:path";
 
 import { writeFileAtomic } from "./atomic.ts";
+import { removeBotFolder, soulFile, soulHash, writeSoulMirror } from "./bot-folder.ts";
+import type { BotProfilePatch } from "./bot-profile.ts";
 import { peerAllowKey, type PeerAction } from "./peer-approval-key.ts";
 import { DATA_DIR, loadBrowserProfileIdAliases } from "./config.ts";
 import * as mdb from "./message-db.ts";
@@ -17,6 +19,7 @@ import { redactSecretsInText } from "./redact.ts";
 import { botAvatarProfile, type BotAvatarCrop } from "../shared/bot-avatar.ts";
 import { isApprovalMode, type ApprovalMode } from "../shared/approval-mode.ts";
 import type { MascotBodyId } from "../shared/mascot-bodies.ts";
+import type { ProfileRequestCardData, ProfileRequestChanges } from "../shared/profile-request.ts";
 import type { RoutineRequestCardData } from "../shared/routine-request.ts";
 import type { RoutineRunCardData } from "../shared/routine-run.ts";
 import type { SkillRequestCardData } from "../shared/skill-request.ts";
@@ -61,6 +64,9 @@ export interface OptionCardData {
   /** A durable chat-created routine proposal. The scheduler only applies it
    * after this card is explicitly confirmed by the user. */
   routineRequest?: RoutineRequestCardData;
+  /** A durable profile-change proposal (propose_profile). The change lands
+   * only after this card is explicitly confirmed by the user. */
+  profileRequest?: ProfileRequestCardData;
   /** A durable learned-skill proposal. The skill stays staged until the
    * user confirms this card — it never rides the prompt before that. */
   skillRequest?: SkillRequestCardData;
@@ -376,6 +382,26 @@ function redactBotAuthored<T extends Omit<Message, "id" | "at"> & { at?: number 
         warnings: card.skillRequest.warnings.map((warning) => redactSecretsInText(warning)),
       };
     }
+    // A profile proposal's before/after text (and its reason) is hidden
+    // under the card's visible summary the same way a routine's or skill's
+    // is — scrub it too so nesting it on a card cannot bypass the
+    // transcript's secret-redaction boundary.
+    if (card.profileRequest) {
+      const scrubChanges = (changes: ProfileRequestChanges): ProfileRequestChanges => {
+        const out: ProfileRequestChanges = {};
+        for (const [key, value] of Object.entries(changes)) {
+          out[key as keyof ProfileRequestChanges] = redactSecretsInText(value);
+        }
+        return out;
+      };
+      card.profileRequest = {
+        ...card.profileRequest,
+        targetName: redactSecretsInText(card.profileRequest.targetName),
+        reason: redactSecretsInText(card.profileRequest.reason),
+        before: scrubChanges(card.profileRequest.before),
+        changes: scrubChanges(card.profileRequest.changes),
+      };
+    }
     out.card = card;
   }
   if (out.connector) {
@@ -436,6 +462,20 @@ export interface BotRecord {
   name: string;
   title: string;
   description: string;
+  /** Standing instructions — the persona body. Canonical HERE; SOUL.md in
+   * the bot folder is a mirror the server writes. Never read the file to
+   * build a prompt: a bot that reads untrusted content must not be able to
+   * rewrite its own persona through the filesystem. Optional only so a
+   * bots.json written before the field existed still parses; load
+   * backfills it, so every live record has a string. */
+  soul?: string;
+  /** sha256 of `soul`, for spotting a SOUL.md edited outside the app. */
+  soulHash?: string;
+  /** The mirror differed from `soul` at the last turn dispatch. The Soul
+   * editor shows the diff; a user action (apply or discard) clears it. */
+  soulDrift?: boolean;
+  /** Receipt committed with a confirmed profile, for retrying card settlement. */
+  lastProfileRequestId?: string;
   notifications: boolean;
   color: MausColor;
   mascotExpression?: MausExpression | null;
@@ -650,12 +690,6 @@ export function roomResponders<T extends { id: string; name: string; hidden?: bo
   return [];
 }
 
-const onboardingCard = (): OptionCardData => ({
-  title: "What do you mostly want help with?",
-  subtitle: "Pick whatever's closest; we can always expand from there.",
-  options: ["Work & projects", "Writing & research", "Life admin", "A bit of everything"],
-});
-
 /** Messages form a tree (forks appear when a message is edited); the
  * visible conversation is the path from the root to activeLeafId. */
 interface ThreadState {
@@ -696,6 +730,21 @@ export class Store {
       if (b.busy || (b.activity !== undefined && b.activity !== "idle")) botsMigrated = true;
       b.busy = false;
       b.activity = "idle";
+      if (typeof b.soul !== "string") {
+        b.soul = "";
+        botsMigrated = true;
+      }
+      if (b.soulHash !== soulHash(b.soul)) {
+        b.soulHash = soulHash(b.soul);
+        botsMigrated = true;
+      }
+      // Existing bots predate their folders. Create missing mirrors before
+      // their first history write, but preserve any edits already on disk.
+      if (!existsSync(soulFile(b.id))) {
+        try { writeSoulMirror(b.id, b.soul); } catch (e) {
+          console.warn(`[bot-folder] could not create SOUL.md for ${b.id}: ${(e as Error).message}`);
+        }
+      }
       if (b.browserProfile) {
         const browserProfile = browserProfileAliases.get(b.browserProfile);
         if (browserProfile && browserProfile !== b.browserProfile) {
@@ -1304,7 +1353,7 @@ export class Store {
     profile: Partial<
       Pick<
         BotRecord,
-        "name" | "title" | "description" | "color" | "mascotExpression" | "mascotBody" | "modelSelection" | "section"
+        "name" | "title" | "description" | "soul" | "color" | "mascotExpression" | "mascotBody" | "modelSelection" | "section"
       >
     > = {},
     opts: {
@@ -1321,6 +1370,8 @@ export class Store {
       name,
       title: profile.title ?? "",
       description: profile.description ?? "",
+      soul: profile.soul ?? "",
+      soulHash: soulHash(profile.soul ?? ""),
       notifications: true,
       color: profile.color ?? COLORS[this.bots.length % COLORS.length],
       ...(profile.mascotExpression ? { mascotExpression: profile.mascotExpression } : {}),
@@ -1334,16 +1385,24 @@ export class Store {
     bot.tasks = [{ threadId: bot.threadId, title: UNTITLED_TASK, createdAt: bot.createdAt, resumeCursors: {} }];
     this.bots.unshift(bot);
     this.saveBots();
+    // The folder exists from the first moment, so the user can open
+    // SOUL.md before the bot has said a word. The record is canonical: a
+    // mirror-write failure must never fail bot creation.
+    try {
+      writeSoulMirror(bot.id, bot.soul ?? "");
+    } catch (e) {
+      console.warn(`[bot-folder] could not write SOUL.md mirror for ${bot.id}: ${(e as Error).message}`);
+    }
     // Announce the owner before its onboarding transcript. SSE clients need
     // the bot/thread mapping before they can place either message.
     this.emit({ type: "bot", botId: bot.id });
+    // Keep the greeting valid for configured bots and every engine.
     if (opts.seedMessages !== false) {
       this.appendMessage(bot.threadId, {
         role: "bot",
         kind: "text",
-        text: `Hey — I'm ${name}. Nice to meet you.`,
+        text: `Hi, I'm ${name}. What would you like me to do?`,
       });
-      this.appendMessage(bot.threadId, { role: "bot", kind: "options", card: onboardingCard() });
     }
     return bot;
   }
@@ -1367,6 +1426,8 @@ export class Store {
     try {
       rmSync(join(DATA_DIR, "skill-state", id), { recursive: true, force: true });
     } catch {}
+    // The bot folder (SOUL.md mirror) is the bot's too.
+    removeBotFolder(id);
     this.saveBots();
     this.emit({ type: "bot.deleted", botId: id });
     return true;
@@ -1375,10 +1436,41 @@ export class Store {
   patchBot(id: string, patch: Partial<BotRecord>): BotRecord | null {
     const bot = this.bot(id);
     if (!bot) return null;
+    // Runtime revocations must become effective in memory even when disk is
+    // unavailable. Profile edits use the separate atomic path below.
     Object.assign(bot, patch);
     this.saveBots();
     this.emit({ type: "bot", botId: id });
     return bot;
+  }
+
+  /** Commit a validated profile change before publishing its fields. Unlike
+   * runtime revocation, a failed user edit must leave the old profile intact. */
+  patchBotProfile(id: string, patch: BotProfilePatch & Partial<Pick<BotRecord, "cwd" | "lastProfileRequestId">>): BotRecord | null {
+    const bot = this.bot(id);
+    if (!bot) return null;
+    const next = { ...bot, ...patch };
+    if (patch.soul !== undefined) {
+      next.soulHash = soulHash(patch.soul);
+      next.soulDrift = false;
+    }
+    // Persist all fields together before publishing anything to the live
+    // record. A failed write leaves both memory and disk at the old profile.
+    this.saveBots(this.bots.map((candidate) => candidate.id === id ? next : candidate));
+    Object.assign(bot, next);
+    if (patch.soul !== undefined) {
+      try { writeSoulMirror(id, patch.soul); } catch (e) {
+        console.warn(`[bot-folder] could not write SOUL.md mirror for ${id}: ${(e as Error).message}`);
+      }
+    }
+    this.emit({ type: "bot", botId: id });
+    return bot;
+  }
+
+  /** Convenience for a soul-only change. The record is canonical; a failed
+   * mirror write is reported in logs and can be retried by discarding drift. */
+  setSoul(id: string, soul: string): BotRecord | null {
+    return this.patchBotProfile(id, { soul });
   }
 
   /** File visible bots into one sidebar section as a single durable write.

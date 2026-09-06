@@ -47,6 +47,13 @@ jobs:
           # the renderer is served by the server itself (OMB_STATIC_DIR)
           docker exec omb curl -sf http://127.0.0.1:8799/ | grep -qi "<html" || { docker logs omb; echo "UI not served"; exit 1; }
           docker logs omb | tail -5
+      - name: Prove the non-root user can browse with the baked-in Chrome
+        run: |
+          set -euo pipefail
+          test "$(docker exec omb id -un)" = maus
+          timeout 45 docker exec omb agent-browser --session ci-browser open 'data:text/html,<title>OMB browser smoke</title><h1>Browser ready</h1>'
+          timeout 15 docker exec omb agent-browser --session ci-browser get title | grep -Fx 'OMB browser smoke'
+          timeout 15 docker exec omb agent-browser --session ci-browser close
       - name: Prove the server never binds a public interface
         # The loopback-trust model is the auth model, so the image must keep
         # the server unreachable from the container's own network. Probe from a
