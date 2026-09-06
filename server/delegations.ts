@@ -263,7 +263,7 @@ export function pendingDelegationSnapshot(): Array<{
 
 /** How many handoffs one turn may queue. Small on purpose: this is the only
  * thing standing between a confused bot and a fan-out of real turns. */
-const MAX_QUEUED_PER_THREAD = 4;
+const MAX_QUEUED_PER_THREAD = 8; // Rand 2026-09-06: 6 builder seats + Triage refills; was 4
 
 /** Validate and enqueue a delegation. Pushes a "Delegated to @B: reason"
  * chip to the source thread so the user can see what was queued. */
