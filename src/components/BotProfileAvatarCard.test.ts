@@ -3,7 +3,7 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it, vi } from "vitest";
 
 import { StoreProvider, type Bot } from "@/state/store";
-import { MASCOT_BODY_IDS, MASCOT_BODIES } from "../../shared/mascot-bodies";
+import { MASCOT_BODIES } from "../../shared/mascot-bodies";
 import { BotProfileAvatarCard } from "./BotProfileAvatarCard";
 
 function makeBot(overrides: Partial<Bot> = {}): Bot {
@@ -38,41 +38,34 @@ function renderCard(bot: Bot) {
 }
 
 describe("BotProfileAvatarCard body picker", () => {
-  it("renders one option per body catalog entry, labeled by name", () => {
+  it("shows one current style entry point instead of duplicate inline body renderers", () => {
     const markup = renderCard(makeBot());
 
-    expect(markup).toContain(">Body<");
-    for (const id of MASCOT_BODY_IDS) {
-      expect(markup).toContain(`aria-label="Use the ${MASCOT_BODIES[id].name} body"`);
-    }
-  });
-
-  it("marks the current body pressed and the rest unpressed, defaulting to cursor", () => {
-    const markup = renderCard(makeBot());
-
-    expect(markup).toContain(`aria-pressed="true" aria-label="Use the ${MASCOT_BODIES.cursor.name} body"`);
-    expect(markup).toContain(`aria-pressed="false" aria-label="Use the ${MASCOT_BODIES.star.name} body"`);
+    expect(markup).toContain("Current mascot style");
+    expect(markup).toContain(`>${MASCOT_BODIES.cursor.name}<`);
+    expect(markup).toContain(">Edit<");
+    expect(markup).not.toContain("Use the Hexagon body");
   });
 
   it("reflects an explicitly chosen body", () => {
     const markup = renderCard(makeBot({ mascotBody: "star" }));
 
-    expect(markup).toContain(`aria-pressed="true" aria-label="Use the ${MASCOT_BODIES.star.name} body"`);
-    expect(markup).toContain(`aria-pressed="false" aria-label="Use the ${MASCOT_BODIES.cursor.name} body"`);
+    expect(markup).toContain(`>${MASCOT_BODIES.star.name}<`);
+    expect(markup).not.toContain(`>${MASCOT_BODIES.cursor.name}<`);
   });
 
   it("hides the body picker for flat crops that have no mascot to wear one", () => {
     const markup = renderCard(makeBot({ avatarCrop: "circle" }));
 
-    expect(markup).not.toContain(">Body<");
-    expect(markup).not.toContain(`aria-label="Use the ${MASCOT_BODIES.cursor.name} body"`);
+    expect(markup).not.toContain("Current mascot style");
+    expect(markup).not.toContain(">Edit<");
   });
 
   it("hides the body picker for every flat crop, not just circle", () => {
     for (const crop of ["rounded", "square"] as const) {
       const markup = renderCard(makeBot({ avatarCrop: crop }));
 
-      expect(markup).not.toContain(">Body<");
+      expect(markup).not.toContain("Current mascot style");
     }
   });
 });
