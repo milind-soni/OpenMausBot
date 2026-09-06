@@ -78,4 +78,4 @@ host companion :8810
 host harness 127.0.0.1:8799
 ```
 
-While client mode is active, Electron does not start its local harness, companion sidecar, computer-use daemon, or built-in browser host. The renderer still uses ordinary same-origin API calls and `EventSource`, so the existing UI and streaming store do not learn or handle a second transport.
+While client mode is active, Electron does not start its local harness, companion sidecar, computer-use daemon, or browser engine host. The renderer still uses ordinary same-origin API calls and `EventSource`, so the existing UI and streaming store do not learn or handle a second transport.

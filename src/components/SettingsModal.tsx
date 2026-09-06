@@ -243,7 +243,7 @@ function ExperimentalFeaturesRow() {
   const { state, dispatch } = useStore();
   const skillRecorder = skillRecorderEnabled(state.config);
   const browser = builtInBrowserEnabled(state.config);
-  const desktopBrowser = browserAvailable(state.config, Boolean(window.ogb?.browser));
+  const desktopBrowser = browserAvailable(state.config);
   const browserBlockedOnWindows = window.ogb?.platform === "win32" && !desktopBrowser;
   const [saving, setSaving] = useState<"skillRecorder" | "browser" | null>(null);
   const [error, setError] = useState("");
@@ -369,14 +369,7 @@ function BrowserProfilesRow() {
         }),
       });
       dispatch({ type: "configStatus", config });
-      // Packaged Electron receives the same post-commit cleanup privately
-      // from the server. Keep this idempotent fallback for split-process
-      // desktop development, where the server has no parent message port.
-      try {
-        await window.ogb?.browser?.forgetProfile?.(profile.partitionId ?? profile.id);
-      } catch {
-        setError("The profile was removed, but its local browser data could not be erased. Restart OpenMausBot before reusing that profile name.");
-      }
+      // The server clears the engine's saved session state for the profile itself.
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : "Could not delete the browser profile.");
     } finally {

@@ -51,7 +51,7 @@ null; the headless engine becomes the second source of a spec there.
 
 ## Steps
 
-### 1. Headless engine (servers, and the fallback everywhere)
+### 1. Headless engine (servers, and the fallback everywhere) — shipped
 
 - `server/browser-engine.ts`: resolve the pinned agent-browser binary
   (`OMB_AGENT_BROWSER_PATH` → `$OMB_DATA_DIR/tools/agent-browser/<version>/` →
@@ -75,11 +75,16 @@ null; the headless engine becomes the second source of a spec there.
   (mutation-check the guards), an e2e turn against a fake `agent-browser`
   binary that speaks MCP.
 
-### 2. Desktop, all three platforms
+### 2. Desktop, all three platforms — shipped
 
-- The same engine and spec on the desktop; `availableBrowserConnection()` and
-  the Electron surface (`electron/browser-surface.cjs`, `browser-platform.cjs`,
-  the Windows gate, preload `browser:*` IPC) are deleted.
+- The same engine and spec on the desktop; the Electron surface
+  (`electron/browser-surface.cjs`, `browser-host.cjs`, `browser-platform.cjs`,
+  the partition cleanup, the connection/control sync, the Windows gate, the
+  preload `browser:*` IPC, the snapshot bundle) and the server's per-turn
+  capability registry are deleted. Bot and profile deletion clear the
+  engine's session state on the server itself, through the same durable
+  cleanup journal. Settings and the bot's Browser panel offer a one-click
+  install of the engine (`POST /api/browser-engine/install`).
 - Optional headed mode (`--headed`) so the bot's browser is a real window.
 - Browser profiles UI keeps its concepts (own session, shared named session)
   and gains "use my Chrome profile" (`--profile <name>`).
@@ -95,11 +100,10 @@ null; the headless engine becomes the second source of a spec there.
 - Server: the stream is reached through the harness with the session cookie
   (never a public port); desktop: loopback.
 
-### 4. Tool-name adapter
+### 4. Tool-name adapter — dropped
 
-A thin adapter presents our `browser_*` names over the `core` tools so
-existing skills keep working; then the desktop docs and skills are updated to
-the single vocabulary.
+The engine's `agent_browser_*` names are the vocabulary everywhere now; the
+system prompt teaches them. No adapter.
 
 ## Not doing
 

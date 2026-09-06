@@ -44,21 +44,6 @@ jobs:
       - run: pnpm typecheck
       - name: Run tests
         run: pnpm test
-        env:
-          # Electron 43 currently exits with EXCEPTION_BREAKPOINT before ready
-          # on GitHub's Windows runners even after Chromium's required sandbox
-          # ACL is present. Production fails closed there through the tested
-          # browser-platform gate; keep probing the upstream regression below.
-          OMB_SKIP_REAL_ELECTRON_BROWSER_FIXTURE: ${{ matrix.os == 'windows-latest' && '1' || '0' }}
-      - name: Probe upstream Electron Windows sandbox regression
-        if: matrix.os == 'windows-latest'
-        continue-on-error: true
-        env:
-          # Keep the canary honest: no --no-sandbox or sandbox-disabling flags.
-          # When electron/electron#51761 is resolved, make this blocking first,
-          # then remove the production Windows gate in browser-platform.cjs.
-          OMB_SKIP_REAL_ELECTRON_BROWSER_FIXTURE: "0"
-        run: pnpm exec vitest run electron/browser-closed-shadow.electron.test.mjs
       - run: pnpm check:electron
       - name: Verify paired phone authorization against packaged harness
         if: matrix.os == 'macos-latest'

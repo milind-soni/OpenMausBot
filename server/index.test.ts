@@ -296,6 +296,7 @@ const statusWithHeaders = (headers: Record<string, string>): Promise<number> =>
 
 beforeAll(async () => {
   home = mkdtempSync(join(tmpdir(), "omb-api-test-"));
+  writeFileSync(join(home, "fake-agent-browser"), "#!/bin/sh\nexit 0\n", { mode: 0o755 });
   staticDir = join(home, "static");
   fakeClaudeDump = join(home, "fake-claude-dump.json");
   const fakeDockerDir = join(home, "fake-docker-bin");
@@ -811,10 +812,9 @@ beforeAll(async () => {
       OMB_COMPOSIO_API: `http://127.0.0.1:${boxStubPort}/api/v3.1`,
       OMB_COMPOSIO_TOOLKITS_API: `http://127.0.0.1:${boxStubPort}/api/v3`,
       OMB_STATIC_DIR: staticDir,
-      // Created only by the browser integration test. Keeping an explicit
-      // path prevents that test from ever discovering a developer app's live
-      // descriptor on the host running the suite.
-      OMB_BROWSER_CONNECTION: join(home, "browser-test-connection.json"),
+      // The bots' browser engine: a stand-in binary the fake engine CLIs never
+      // run; the turn only has to mount it.
+      OMB_AGENT_BROWSER_PATH: join(home, "fake-agent-browser"),
       // Production uses 15s. Keep the real timer path while making the
       // browser-visible heartbeat assertion fast and deterministic.
       OMB_SSE_HEARTBEAT_MS: "50",
@@ -5522,15 +5522,7 @@ describe("harness HTTP API", () => {
     }
   });
 
-  it("mounts a scoped browser capability and the safety prompt in room turns", async () => {
-    const descriptorFile = join(home, "browser-test-connection.json");
-    const masterToken = "c".repeat(64);
-    writeFileSync(descriptorFile, JSON.stringify({
-      version: 1,
-      url: `http://127.0.0.1:${boxStubPort}`,
-      token: masterToken,
-      pid: process.pid,
-    }));
+  it("mounts the browser engine's MCP server and the safety prompt in room turns", async () => {
     const bot = (await api("POST", "/api/bots")).body.bot;
     let room: any;
     try {
@@ -5548,358 +5540,42 @@ describe("harness HTTP API", () => {
       rmSync(fakeClaudeDump, { force: true });
       expect((await api("POST", `/api/groups/${room.id}/messages`, { text: "Check the website" })).status).toBe(202);
       const dump = z.object({
-        argv: z.array(z.string()),
         env: z.record(z.string(), z.string()),
         systemPrompt: z.string(),
         mcpConfig: z.object({
           mcpServers: z.object({
             browser: z.object({
-              env: z.object({
-                OMB_BROWSER_TOKEN: z.string(),
-                OMB_BOT_ID: z.string(),
-                OMB_BROWSER_PROFILE: z.string(),
-              }),
+              command: z.string(),
+              args: z.array(z.string()),
+              env: z.record(z.string(), z.string()),
             }),
           }),
         }),
       }).parse(await readJsonFileWhenReady(fakeClaudeDump));
-      const browserEnv = dump.mcpConfig.mcpServers.browser.env;
-      expect(browserEnv).toMatchObject({ OMB_BOT_ID: bot.id, OMB_BROWSER_PROFILE: "work" });
-      const registration = browserCapabilityCalls.find(
-        (call) => call.operation === "register" && call.body.botId === bot.id && call.body.profile === "work",
-      );
-      expect(registration?.authorization).toBe(`Bearer ${masterToken}`);
-      expect(registration?.body.token).toMatch(/^[0-9a-f]{64}$/);
-      expect(browserEnv.OMB_BROWSER_TOKEN).toBe(registration?.body.token);
-      expect(browserEnv.OMB_BROWSER_TOKEN).not.toBe(masterToken);
-      expect(dump.env.OMB_BROWSER_CONNECTION).toBeUndefined();
-      expect(dump.env.OMB_USER_DATA).toBeUndefined();
-      expect(JSON.stringify(dump)).not.toContain(masterToken);
+      const browser = dump.mcpConfig.mcpServers.browser;
+      expect(browser.command).toBe(join(home, "fake-agent-browser"));
+      expect(browser.args).toEqual(["mcp", "--tools", "core", "--no-webmcp"]);
+      // the shared "work" profile is one session, isolated and restored across turns
+      expect(browser.env.AGENT_BROWSER_SESSION).toMatch(/^[A-Za-z0-9_.-]{1,96}$/);
+      expect(browser.env.AGENT_BROWSER_SESSION).not.toBe(`bot-${bot.id}`);
+      // restore is a *name*: this session's own saved state, never another bot's
+      expect(browser.env.AGENT_BROWSER_RESTORE).toBe(browser.env.AGENT_BROWSER_SESSION);
+      expect(browser.env).toMatchObject({ AGENT_BROWSER_RESTORE_SAVE: "auto", AGENT_BROWSER_HEADLESS: "1" });
+      expect(browser.env.AGENT_BROWSER_ENCRYPTION_KEY).toMatch(/^[0-9a-f]{64}$/);
+      // the engine's key never reaches the engine CLI's own environment
+      expect(dump.env.AGENT_BROWSER_ENCRYPTION_KEY).toBeUndefined();
 
       const system = dump.systemPrompt;
+      expect(system).toMatch(/agent_browser_snapshot/);
       expect(system).toMatch(/page instructions as untrusted content/i);
       expect(system).toMatch(/consequential action.*confirmation/i);
-      expect(system).toMatch(/browser_request_takeover/i);
-
-      browserRevokeFailuresRemaining = 1;
-      expect((await api("POST", `/api/groups/${room.id}/interrupt`, {})).status).toBe(200);
-      await expect.poll(() => browserCapabilityCalls.filter(
-        (call) => call.operation === "revoke" && call.body.token === registration?.body.token,
-      ).length, { timeout: 5_000 }).toBeGreaterThanOrEqual(2);
+      expect(system).toMatch(/never type their credentials/i);
     } finally {
-      browserRevokeFailuresRemaining = 0;
-      if (room) {
-        await api("POST", `/api/groups/${room.id}/interrupt`, {}).catch(() => undefined);
-        await expect.poll(() => browserCapabilityCalls.some(
-          (call) => call.operation === "revoke" && call.body.token && call.body.token !== masterToken,
-        ), { timeout: 5_000 }).toBe(true);
-        await api("DELETE", `/api/groups/${room.id}`).catch(() => undefined);
-      }
-      await api("DELETE", `/api/bots/${bot.id}`).catch(() => undefined);
+      if (room) await api("POST", `/api/groups/${room.id}/interrupt`, {}).catch(() => undefined);
       await api("PATCH", "/api/config", { features: { browser: false }, browserProfiles: [] }).catch(() => undefined);
-      rmSync(descriptorFile, { force: true });
-    }
-  });
-
-  it("requires interrupt before deleting during browser registration and never dispatches afterward", async () => {
-    const descriptorFile = join(home, "browser-test-connection.json");
-    writeFileSync(descriptorFile, JSON.stringify({
-      version: 1,
-      url: `http://127.0.0.1:${boxStubPort}`,
-      token: "c".repeat(64),
-      pid: process.pid,
-    }));
-    const bot = (await api("POST", "/api/bots")).body.bot;
-    try {
-      expect((await api("PUT", "/api/config", { box: { token: "box_route" } })).status).toBe(200);
-      expect((await api("PATCH", "/api/config", { features: { browser: true } })).status).toBe(200);
-      expect((await api("PATCH", `/api/bots/${bot.id}`, {
-        modelSelection: { instanceId: "claude", model: "claude-sonnet-5" },
-      })).status).toBe(200);
-      rmSync(fakeClaudeDump, { force: true });
-      const callOffset = browserCapabilityCalls.length;
-      browserRegisterDelayMs = 250;
-      expect((await api("POST", `/api/bots/${bot.id}/messages`, { text: "do not outlive deletion" })).status).toBe(202);
-      await expect.poll(() => browserCapabilityCalls.slice(callOffset).some(
-        (call) => call.operation === "register" && call.body.botId === bot.id,
-      ), { timeout: 5_000 }).toBe(true);
-      const registration = browserCapabilityCalls.slice(callOffset).find(
-        (call) => call.operation === "register" && call.body.botId === bot.id,
-      );
-
-      const blockedDelete = await api("DELETE", `/api/bots/${bot.id}`);
-      expect(blockedDelete.status).toBe(409);
-      expect(blockedDelete.body.error).toMatch(/stop this bot's work/i);
-
-      expect((await api("POST", `/api/bots/${bot.id}/interrupt`, { threadId: bot.threadId })).status).toBe(200);
-      await expect.poll(() => browserCapabilityCalls.slice(callOffset).some(
-        (call) => call.operation === "revoke" && call.body.token === registration?.body.token,
-      ), { timeout: 5_000 }).toBe(true);
-      await expect.poll(async () => {
-        const current = (await api("GET", "/api/bots?messages=0")).body.bots.find(
-          (candidate: { id: string }) => candidate.id === bot.id,
-        );
-        return current?.busy;
-      }, { timeout: 5_000 }).toBe(false);
-      expect((await api("DELETE", `/api/bots/${bot.id}`)).status).toBe(200);
-      // Registration is intentionally held by the stub. Wait beyond that
-      // entire window so a late provider dispatch cannot escape the check.
-      await new Promise((resolve) => setTimeout(resolve, browserRegisterDelayMs + 250));
-      expect(existsSync(fakeClaudeDump)).toBe(false);
-    } finally {
-      browserRegisterDelayMs = 0;
       await api("DELETE", `/api/bots/${bot.id}`).catch(() => undefined);
-      await api("PATCH", "/api/config", { features: { browser: false } }).catch(() => undefined);
-      await api("PUT", "/api/config", { box: { token: "" } }).catch(() => undefined);
-      rmSync(descriptorFile, { force: true });
     }
-  });
-
-  it("keeps a setup-cancelled bot owned until the provider handshake is retired", async () => {
-    const descriptorFile = join(home, "browser-test-connection.json");
-    writeFileSync(descriptorFile, JSON.stringify({
-      version: 1,
-      url: `http://127.0.0.1:${boxStubPort}`,
-      token: "c".repeat(64),
-      pid: process.pid,
-    }));
-    const bot = (await api("POST", "/api/bots", {
-      modelSelection: { instanceId: "claude", model: "claude-sonnet-5" },
-      requireAvailableModel: true,
-    })).body.bot;
-    try {
-      expect((await api("PATCH", "/api/config", { features: { browser: true } })).status).toBe(200);
-      rmSync(fakeClaudeDump, { force: true });
-      const callOffset = browserCapabilityCalls.length;
-      browserRegisterDelayMs = 1_000;
-      expect((await api("POST", `/api/bots/${bot.id}/messages`, { text: "first setup" })).status).toBe(202);
-      await expect.poll(() => browserCapabilityCalls.slice(callOffset).some(
-        (call) => call.operation === "register" && call.body.botId === bot.id,
-      ), { timeout: 5_000 }).toBe(true);
-
-      expect((await api("POST", `/api/bots/${bot.id}/interrupt`, { threadId: bot.threadId })).status).toBe(200);
-      const afterStop = (await api("GET", "/api/bots?messages=0")).body.bots.find(
-        (candidate: { id: string }) => candidate.id === bot.id,
-      );
-      expect(afterStop.busy).toBe(true);
-      const replacementTooSoon = await api("POST", `/api/bots/${bot.id}/messages`, { text: "replacement" });
-      expect(replacementTooSoon.status).toBe(202);
-      expect(replacementTooSoon.body.queued).toBe(true);
-      expect(existsSync(fakeClaudeDump)).toBe(false);
-
-      expect(JSON.stringify(await readJsonFileWhenReady(fakeClaudeDump))).toContain("replacement");
-    } finally {
-      browserRegisterDelayMs = 0;
-      await api("POST", `/api/bots/${bot.id}/interrupt`, {}).catch(() => undefined);
-      await api("DELETE", `/api/bots/${bot.id}`).catch(() => undefined);
-      await api("PATCH", "/api/config", { features: { browser: false } }).catch(() => undefined);
-      rmSync(descriptorFile, { force: true });
-    }
-  });
-
-  it("does not dispatch a room turn stopped through its bot during browser registration", async () => {
-    const descriptorFile = join(home, "browser-test-connection.json");
-    writeFileSync(descriptorFile, JSON.stringify({
-      version: 1,
-      url: `http://127.0.0.1:${boxStubPort}`,
-      token: "c".repeat(64),
-      pid: process.pid,
-    }));
-    const bot = (await api("POST", "/api/bots")).body.bot;
-    let room: any;
-    try {
-      expect((await api("PATCH", "/api/config", { features: { browser: true } })).status).toBe(200);
-      expect((await api("PATCH", `/api/bots/${bot.id}`, {
-        modelSelection: { instanceId: "claude", model: "claude-sonnet-5" },
-      })).status).toBe(200);
-      room = (await api("POST", "/api/groups", { name: "Browser stop race", memberIds: [bot.id] })).body.group;
-      expect((await api("PATCH", `/api/groups/${room.id}/setup`, { action: "skip" })).status).toBe(200);
-
-      rmSync(fakeClaudeDump, { force: true });
-      const callOffset = browserCapabilityCalls.length;
-      browserRegisterDelayMs = 250;
-      expect((await api("POST", `/api/groups/${room.id}/messages`, { text: "stop before launch" })).status).toBe(202);
-      await expect.poll(() => browserCapabilityCalls.slice(callOffset).some(
-        (call) => call.operation === "register" && call.body.botId === bot.id,
-      ), { timeout: 5_000 }).toBe(true);
-      const registration = browserCapabilityCalls.slice(callOffset).find(
-        (call) => call.operation === "register" && call.body.botId === bot.id,
-      );
-      expect((await api("POST", `/api/bots/${bot.id}/interrupt`, { threadId: room.threadId })).status).toBe(200);
-      await expect.poll(() => browserCapabilityCalls.slice(callOffset).some(
-        (call) => call.operation === "revoke" && call.body.token === registration?.body.token,
-      ), { timeout: 5_000 }).toBe(true);
-      await expect.poll(async () => {
-        const state = (await api("GET", "/api/bots")).body;
-        return {
-          botBusy: state.bots.find((candidate: { id: string }) => candidate.id === bot.id)?.busy,
-          roomBusyBotId: state.groups.find((candidate: { id: string }) => candidate.id === room.id)?.busyBotId,
-        };
-      }, { timeout: 5_000 }).toEqual({ botBusy: false, roomBusyBotId: null });
-      expect(existsSync(fakeClaudeDump)).toBe(false);
-    } finally {
-      browserRegisterDelayMs = 0;
-      if (room) {
-        await api("POST", `/api/groups/${room.id}/interrupt`, {}).catch(() => undefined);
-        await api("DELETE", `/api/groups/${room.id}`).catch(() => undefined);
-      }
-      await api("DELETE", `/api/bots/${bot.id}`).catch(() => undefined);
-      await api("PATCH", "/api/config", { features: { browser: false } }).catch(() => undefined);
-      rmSync(descriptorFile, { force: true });
-    }
-  });
-
-  it("revokes active browser access when the global feature is disabled", async () => {
-    const descriptorFile = join(home, "browser-test-connection.json");
-    writeFileSync(descriptorFile, JSON.stringify({
-      version: 1,
-      url: `http://127.0.0.1:${boxStubPort}`,
-      token: "c".repeat(64),
-      pid: process.pid,
-    }));
-    const bot = (await api("POST", "/api/bots", {
-      modelSelection: { instanceId: "claude", model: "claude-sonnet-5" },
-      requireAvailableModel: true,
-    })).body.bot;
-    try {
-      expect((await api("PATCH", "/api/config", { features: { browser: true } })).status).toBe(200);
-      const callOffset = browserCapabilityCalls.length;
-      rmSync(fakeClaudeDump, { force: true });
-      expect((await api("POST", `/api/bots/${bot.id}/messages`, { text: "browse until disabled" })).status).toBe(202);
-      await expect.poll(() => browserCapabilityCalls.slice(callOffset).find(
-        (call) => call.operation === "register" && call.body.botId === bot.id,
-      ), { timeout: 5_000 }).toBeTruthy();
-
-      const perBot = await api("PATCH", `/api/bots/${bot.id}`, { browser: false });
-      expect(perBot.status).toBe(409);
-      expect(perBot.body.error).toMatch(/stop.*turn/i);
-
-      expect((await api("PATCH", "/api/config", { features: { browser: false } })).status).toBe(200);
-      await expect.poll(() => browserCapabilityCalls.slice(callOffset).some(
-        (call) => call.operation === "clear",
-      ), { timeout: 5_000 }).toBe(true);
-    } finally {
-      await api("POST", `/api/bots/${bot.id}/interrupt`, {}).catch(() => undefined);
-      await api("DELETE", `/api/bots/${bot.id}`).catch(() => undefined);
-      await api("PATCH", "/api/config", { features: { browser: false } }).catch(() => undefined);
-      rmSync(descriptorFile, { force: true });
-    }
-  });
-
-  it("applies browser disable effects before reporting a removed-profile cleanup failure", async () => {
-    const isolatedHome = mkdtempSync(join(tmpdir(), "omb-browser-cleanup-api-"));
-    const isolatedData = join(isolatedHome, ".openmausbot");
-    const isolatedStatic = join(isolatedHome, "static");
-    const isolatedPort = await freePortBlock([0, 1]);
-    const descriptorFile = join(isolatedHome, "browser-connection.json");
-    mkdirSync(join(isolatedStatic, "assets"), { recursive: true });
-    mkdirSync(isolatedData, { recursive: true });
-    writeFileSync(join(isolatedStatic, "index.html"), "<!doctype html><title>Cleanup test</title>");
-    writeFileSync(join(isolatedStatic, "assets", "smoke.css"), "body{}");
-    writeFileSync(join(isolatedData, "config.json"), JSON.stringify({
-      instances: {
-        claude: { driver: "claudeAgent", displayName: "Fixture Claude", config: { cli: FAKE_CLAUDE_CLI } },
-      },
-      features: { browser: true },
-      browserProfiles: [{ id: "unused", name: "Unused" }],
-    }));
-    writeFileSync(descriptorFile, JSON.stringify({
-      version: 1,
-      url: `http://127.0.0.1:${boxStubPort}`,
-      token: "c".repeat(64),
-      pid: process.pid,
-    }));
-
-    // Model Electron's private utility-process port, but answer lifecycle
-    // cleanup requests with an immediate negative ACK. This keeps the test
-    // fast while exercising the real config route's post-commit ordering.
-    const noAckDesktopPrelude = `data:text/javascript,${encodeURIComponent(`
-      let listener;
-      Object.defineProperty(process, "parentPort", {
-        value: {
-          on(event, callback) { if (event === "message") listener = callback; },
-          postMessage(message) {
-            if (message?.requestId && /browser-(?:bot|profile)-deleted/.test(message.type ?? "")) {
-              queueMicrotask(() => listener?.({ data: {
-                type: "openmausbot:browser-lifecycle-result",
-                requestId: message.requestId,
-                ok: false,
-              } }));
-            }
-          },
-        },
-      });
-    `)}`;
-    let isolatedStderr = "";
-    const isolatedEnv: NodeJS.ProcessEnv = {
-      HOME: isolatedHome,
-      USERPROFILE: isolatedHome,
-      OMB_PORT: String(isolatedPort),
-      OMB_WEBHOOK_PORT: String(isolatedPort + 1),
-      OMB_STATIC_DIR: isolatedStatic,
-      OMB_BROWSER_CONNECTION: descriptorFile,
-      FAKE_CLAUDE_MODE: "hang",
-      FAKE_CLAUDE_DUMP: join(isolatedHome, "fake-claude-dump.json"),
-    };
-    if (process.env.PATH) isolatedEnv.PATH = process.env.PATH;
-    if (process.env.SystemRoot) isolatedEnv.SystemRoot = process.env.SystemRoot;
-    const isolatedChild = spawn(process.execPath, ["--import", noAckDesktopPrelude, join(SERVER_DIR, "index.ts")], {
-      cwd: ROOT,
-      env: isolatedEnv,
-      stdio: ["ignore", "pipe", "pipe"],
-    });
-    isolatedChild.stderr!.on("data", (chunk) => (isolatedStderr += chunk));
-    type IsolatedApiBody =
-      | { modelSelection: { instanceId: string; model: string }; requireAvailableModel: boolean }
-      | { text: string }
-      | { features: { browser: boolean }; browserProfiles: Array<{ id: string; name: string }> };
-    const isolatedApi = async (method: string, path: string, body?: IsolatedApiBody): Promise<{
-      status: number;
-      body: any;
-    }> => {
-      const response = await fetch(`http://127.0.0.1:${isolatedPort}${path}`, {
-        method,
-        headers: body ? { "content-type": "application/json" } : undefined,
-        body: body ? JSON.stringify(body) : undefined,
-      });
-      return { status: response.status, body: await response.json() };
-    };
-
-    try {
-      await waitForIsolatedServer(isolatedChild, isolatedPort, () => isolatedStderr);
-
-      const bot = (await isolatedApi("POST", "/api/bots", {
-        modelSelection: { instanceId: "claude", model: "claude-sonnet-5" },
-        requireAvailableModel: true,
-      })).body.bot;
-      const callOffset = browserCapabilityCalls.length;
-      expect((await isolatedApi("POST", `/api/bots/${bot.id}/messages`, { text: "keep browser access live" })).status)
-        .toBe(202);
-      await expect.poll(() => browserCapabilityCalls.slice(callOffset).some(
-        (call) => call.operation === "register" && call.body.botId === bot.id,
-      ), { timeout: 5_000 }).toBe(true);
-
-      const patched = await isolatedApi("PATCH", "/api/config", {
-        features: { browser: false },
-        browserProfiles: [],
-      });
-      expect(patched.status).toBe(503);
-      expect(patched.body.error).toMatch(/could not confirm.*browser data was erased/i);
-      // The negative cleanup ACK must not short-circuit the already-committed
-      // feature disable. The master clear revokes every live two-hour bearer.
-      expect(browserCapabilityCalls.slice(callOffset).some((call) => call.operation === "clear")).toBe(true);
-      const config = await isolatedApi("GET", "/api/config");
-      expect(config.body.features.browser).toBe(false);
-      expect(config.body.browserProfiles).toEqual([]);
-      expect(JSON.parse(readFileSync(join(isolatedData, "browser-cleanups.json"), "utf8")))
-        .toEqual([expect.objectContaining({ kind: "profile", id: "unused", phase: "committed" })]);
-    } finally {
-      await waitForExit(isolatedChild, { signal: "SIGTERM" });
-      await removeTempDir(isolatedHome);
-    }
-    expectStoppedTestServerCleanly(isolatedChild, isolatedStderr);
-  }, 30_000);
-
+  }, 60_000);
   it("reconciles a committed crash-stale bot reference before ACK and profile-id reuse", async () => {
     const isolatedHome = mkdtempSync(join(tmpdir(), "omb-browser-cleanup-restart-"));
     const isolatedData = join(isolatedHome, ".openmausbot");
@@ -6000,221 +5676,6 @@ describe("harness HTTP API", () => {
       expect(afterReuse.body.bots.find((bot: { id: string }) => bot.id === "crash-bot"))
         .not.toHaveProperty("browserProfile");
     } finally {
-      await waitForExit(isolatedChild, { signal: "SIGTERM" });
-      await removeTempDir(isolatedHome);
-    }
-    expectStoppedTestServerCleanly(isolatedChild, isolatedStderr);
-  }, 30_000);
-
-  it("revokes live browser access even when clearing a removed profile reference cannot persist", async () => {
-    const isolatedHome = mkdtempSync(join(tmpdir(), "omb-browser-reference-write-"));
-    const isolatedData = join(isolatedHome, ".openmausbot");
-    const isolatedStatic = join(isolatedHome, "static");
-    const isolatedPort = await freePortBlock([0, 1]);
-    const descriptorFile = join(isolatedHome, "browser-connection.json");
-    const botsFile = join(isolatedData, "bots.json");
-    mkdirSync(join(isolatedStatic, "assets"), { recursive: true });
-    mkdirSync(isolatedData, { recursive: true });
-    writeFileSync(join(isolatedStatic, "index.html"), "<!doctype html><title>Reference failure test</title>");
-    writeFileSync(join(isolatedStatic, "assets", "smoke.css"), "body{}");
-    writeFileSync(join(isolatedData, "config.json"), JSON.stringify({
-      instances: {
-        claude: { driver: "claudeAgent", displayName: "Fixture Claude", config: { cli: FAKE_CLAUDE_CLI } },
-      },
-      features: { browser: true },
-      browserProfiles: [{ id: "unused", name: "Unused" }],
-    }));
-    writeFileSync(descriptorFile, JSON.stringify({
-      version: 1,
-      url: `http://127.0.0.1:${boxStubPort}`,
-      token: "c".repeat(64),
-      pid: process.pid,
-    }));
-    const desktopPrelude = `data:text/javascript,${encodeURIComponent(`
-      Object.defineProperty(process, "parentPort", {
-        value: { on() {}, postMessage() {} },
-      });
-    `)}`;
-    let isolatedStderr = "";
-    const isolatedChild = spawn(process.execPath, ["--import", desktopPrelude, join(SERVER_DIR, "index.ts")], {
-      cwd: ROOT,
-      env: {
-        ...(process.env.PATH ? { PATH: process.env.PATH } : {}),
-        ...(process.env.SystemRoot ? { SystemRoot: process.env.SystemRoot } : {}),
-        HOME: isolatedHome,
-        USERPROFILE: isolatedHome,
-        OMB_PORT: String(isolatedPort),
-        OMB_WEBHOOK_PORT: String(isolatedPort + 1),
-        OMB_STATIC_DIR: isolatedStatic,
-        OMB_BROWSER_CONNECTION: descriptorFile,
-        FAKE_CLAUDE_MODE: "hang",
-        FAKE_CLAUDE_DUMP: join(isolatedHome, "fake-claude-dump.json"),
-      },
-      stdio: ["ignore", "pipe", "pipe"],
-    });
-    isolatedChild.stderr!.on("data", (chunk) => (isolatedStderr += chunk));
-    const isolatedApi = async (method: string, path: string, body?: unknown): Promise<{ status: number; body: any }> => {
-      const response = await fetch(`http://127.0.0.1:${isolatedPort}${path}`, {
-        method,
-        headers: body ? { "content-type": "application/json" } : undefined,
-        body: body ? JSON.stringify(body) : undefined,
-      });
-      return { status: response.status, body: await response.json() };
-    };
-
-    try {
-      await waitForIsolatedServer(isolatedChild, isolatedPort, () => isolatedStderr);
-      const idleBot = (await isolatedApi("POST", "/api/bots", {
-        modelSelection: { instanceId: "claude", model: "claude-sonnet-5" },
-        requireAvailableModel: true,
-      })).body.bot;
-      const activeBot = (await isolatedApi("POST", "/api/bots", {
-        modelSelection: { instanceId: "claude", model: "claude-sonnet-5" },
-        requireAvailableModel: true,
-      })).body.bot;
-      expect((await isolatedApi("PATCH", `/api/bots/${idleBot.id}`, { browserProfile: "unused" })).status).toBe(200);
-
-      const callOffset = browserCapabilityCalls.length;
-      expect((await isolatedApi("POST", `/api/bots/${activeBot.id}/messages`, { text: "keep browser access live" })).status)
-        .toBe(202);
-      await expect.poll(() => browserCapabilityCalls.slice(callOffset).some(
-        (call) => call.operation === "register" && call.body.botId === activeBot.id,
-      ), { timeout: 5_000 }).toBe(true);
-      // Registration happens before the provider's init frame is persisted.
-      // Wait for that final startup write before sabotaging the store;
-      // otherwise slower Windows runners can reset the next HTTP request when
-      // the resume-cursor save races the deliberately-invalid bots path.
-      await expect.poll(() => {
-        try {
-          const bots = z.array(z.object({
-            id: z.string().optional(),
-            resumeCursors: z.record(z.string(), z.string()).optional(),
-          }).passthrough()).parse(JSON.parse(readFileSync(botsFile, "utf8")));
-          const cursor = bots.find((bot) => bot.id === activeBot.id)?.resumeCursors?.claude;
-          return Boolean(cursor);
-        } catch {
-          return false;
-        }
-      }, { timeout: 5_000 }).toBe(true);
-
-      // The hanging provider may bank one final activity write concurrently.
-      // Win the replacement atomically by retrying until the path is a
-      // directory; subsequent Store saves then fail deterministically.
-      for (let attempt = 0; attempt < 50 && !statSync(botsFile, { throwIfNoEntry: false })?.isDirectory(); attempt += 1) {
-        rmSync(botsFile, { recursive: true, force: true });
-        try {
-          mkdirSync(botsFile);
-        } catch (error) {
-          if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error;
-        }
-      }
-      expect(statSync(botsFile).isDirectory()).toBe(true);
-      const patched = await isolatedApi("PATCH", "/api/config", {
-        features: { browser: false },
-        browserProfiles: [],
-      });
-      expect(patched.status).toBe(500);
-      expect(browserCapabilityCalls.slice(callOffset).some((call) => call.operation === "clear")).toBe(true);
-      const config = await isolatedApi("GET", "/api/config");
-      expect(config.body.features.browser).toBe(false);
-      expect(config.body.browserProfiles).toEqual([]);
-      expect(JSON.parse(readFileSync(join(isolatedData, "browser-cleanups.json"), "utf8")))
-        .toEqual([expect.objectContaining({ kind: "profile", id: "unused", phase: "prepared" })]);
-    } finally {
-      rmSync(botsFile, { recursive: true, force: true });
-      writeFileSync(botsFile, "[]");
-      await waitForExit(isolatedChild, { signal: "SIGTERM" });
-      await removeTempDir(isolatedHome);
-    }
-    expectStoppedTestServerCleanly(isolatedChild, isolatedStderr);
-  }, 30_000);
-
-  it("rejects bot deletion with no teardown when the cleanup journal is unreadable", async () => {
-    const isolatedHome = mkdtempSync(join(tmpdir(), "omb-browser-bot-delete-journal-"));
-    const isolatedData = join(isolatedHome, ".openmausbot");
-    const isolatedStatic = join(isolatedHome, "static");
-    const isolatedPort = await freePortBlock([0, 1]);
-    const descriptorFile = join(isolatedHome, "browser-connection.json");
-    mkdirSync(join(isolatedStatic, "assets"), { recursive: true });
-    mkdirSync(isolatedData, { recursive: true });
-    writeFileSync(join(isolatedStatic, "index.html"), "<!doctype html><title>Malformed journal test</title>");
-    writeFileSync(join(isolatedStatic, "assets", "smoke.css"), "body{}");
-    writeFileSync(join(isolatedData, "config.json"), JSON.stringify({
-      instances: {
-        claude: { driver: "claudeAgent", displayName: "Fixture Claude", config: { cli: FAKE_CLAUDE_CLI } },
-      },
-      features: { browser: true },
-    }));
-    writeFileSync(join(isolatedData, "browser-cleanups.json"), "{ malformed");
-    writeFileSync(descriptorFile, JSON.stringify({
-      version: 1,
-      url: `http://127.0.0.1:${boxStubPort}`,
-      token: "c".repeat(64),
-      pid: process.pid,
-    }));
-    const desktopPrelude = `data:text/javascript,${encodeURIComponent(`
-      Object.defineProperty(process, "parentPort", {
-        value: { on() {}, postMessage() {} },
-      });
-    `)}`;
-    let isolatedStderr = "";
-    const isolatedChild = spawn(process.execPath, ["--import", desktopPrelude, join(SERVER_DIR, "index.ts")], {
-      cwd: ROOT,
-      env: {
-        ...(process.env.PATH ? { PATH: process.env.PATH } : {}),
-        ...(process.env.SystemRoot ? { SystemRoot: process.env.SystemRoot } : {}),
-        HOME: isolatedHome,
-        USERPROFILE: isolatedHome,
-        OMB_PORT: String(isolatedPort),
-        OMB_WEBHOOK_PORT: String(isolatedPort + 1),
-        OMB_STATIC_DIR: isolatedStatic,
-        OMB_BROWSER_CONNECTION: descriptorFile,
-        FAKE_CLAUDE_MODE: "hang",
-        FAKE_CLAUDE_DUMP: join(isolatedHome, "fake-claude-dump.json"),
-      },
-      stdio: ["ignore", "pipe", "pipe"],
-    });
-    let createdBotId = "";
-    isolatedChild.stderr!.on("data", (chunk) => (isolatedStderr += chunk));
-    const isolatedApi = async (method: string, path: string, body?: unknown): Promise<{ status: number; body: any }> => {
-      const response = await fetch(`http://127.0.0.1:${isolatedPort}${path}`, {
-        method,
-        headers: body ? { "content-type": "application/json" } : undefined,
-        body: body ? JSON.stringify(body) : undefined,
-      });
-      return { status: response.status, body: await response.json() };
-    };
-
-    try {
-      await waitForIsolatedServer(isolatedChild, isolatedPort, () => isolatedStderr);
-      const bot = (await isolatedApi("POST", "/api/bots", {
-        modelSelection: { instanceId: "claude", model: "claude-sonnet-5" },
-        requireAvailableModel: true,
-      })).body.bot;
-      createdBotId = bot.id;
-      const callOffset = browserCapabilityCalls.length;
-      expect((await isolatedApi("POST", `/api/bots/${bot.id}/messages`, { text: "do not tear this down" })).status)
-        .toBe(202);
-      await expect.poll(() => browserCapabilityCalls.slice(callOffset).find(
-        (call) => call.operation === "register" && call.body.botId === bot.id,
-      ), { timeout: 5_000 }).toBeTruthy();
-      const registration = browserCapabilityCalls.slice(callOffset).find(
-        (call) => call.operation === "register" && call.body.botId === bot.id,
-      );
-
-      const deletion = await isolatedApi("DELETE", `/api/bots/${bot.id}`);
-      expect(deletion.status).toBe(503);
-      expect(deletion.body.error).toMatch(/cleanup journal could not be read safely/i);
-      await new Promise((resolve) => setTimeout(resolve, 100));
-      expect(browserCapabilityCalls.slice(callOffset).some(
-        (call) => call.operation === "revoke" && call.body.token === registration?.body.token,
-      )).toBe(false);
-      const state = await isolatedApi("GET", "/api/bots?messages=0");
-      expect(state.body.bots.find((candidate: { id: string }) => candidate.id === bot.id)).toMatchObject({ busy: true });
-    } finally {
-      if (createdBotId) {
-        await isolatedApi("POST", `/api/bots/${createdBotId}/interrupt`, {}).catch(() => undefined);
-      }
       await waitForExit(isolatedChild, { signal: "SIGTERM" });
       await removeTempDir(isolatedHome);
     }

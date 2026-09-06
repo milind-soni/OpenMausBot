@@ -86,22 +86,8 @@ const { createDisplayMediaGuard, invokeDisplayMediaCallback, selectCaptureSource
 const { STAGE_PREFIX: APPIMAGE_CUA_STAGE_PREFIX } = require("./cua-linux-bundle.cjs");
 const { desktopViewerUrl, sameDesktopViewerOrigin } = require("./desktop-viewer.cjs");
 const { createDesktopWorkspaceManager } = require("./desktop-workspace.cjs");
-const { createBrowserSurfaceManager } = require("./browser-surface.cjs");
-const { browserPartition, browserProfilePartition } = require("./browser-snapshot.cjs");
-const { createBrowserHost } = require("./browser-host.cjs");
-const { browserSurfaceSupported } = require("./browser-platform.cjs");
-const { clearBrowserPartitionSession } = require("./browser-partition-cleanup.cjs");
 const { createTrustedApprovalModeCoordinator } = require("./approval-trusted-mode.cjs");
 const { DESKTOP_MUTATION_HEADER, desktopServerHeaders } = require("./desktop-server-auth.cjs");
-const {
-  postBrowserConnection,
-  removeBrowserConnectionDescriptor: removeBrowserConnectionDescriptorFile,
-} = require("./browser-connection-sync.cjs");
-const {
-  applyBrowserControlHold,
-  browserLifecycleResult,
-  decodeBrowserLifecycleMessage,
-} = require("./browser-control-sync.cjs");
 const { createCuaConnectionStore: createDescriptorStore } = require("./cua-connection.cjs");
 const { MIN_BOUNDS, normalizeUnreadCount, parseWindowState, resolveWindowState } = require("./window-state.cjs");
 
@@ -117,15 +103,6 @@ let desktopViewerOwner = null;
 let desktopViewerContextId = null;
 let desktopWorkspaceManager = null;
 let desktopWorkspaceOwner = null;
-// The built-in browser surface (Browser tab of the computer panel): views
-// live in this process; bots reach them through a loopback host whose address
-// and per-boot token are sent privately to the embedded harness.
-let browserSurface = null;
-let browserHost = null;
-const browserSurfaceIsSupported = browserSurfaceSupported(process.platform);
-// Positive server assertions survive renderer reloads and surface recreation.
-// A release is deliberately local-panel-only; see browser-control-sync.cjs.
-const browserControlHolds = new Set();
 const browserConnectionStore = createDescriptorStore({
   getUserData: () => app.getPath("userData"),
   fileName: "browser-connection.json",
@@ -877,95 +854,15 @@ async function gatherDiagnostics() {
 // taken by another process — decides which error-page message renders.
 let serverStartConflictOnly = false;
 
-function syncBrowserConnection(proc) {
-  try {
-    postBrowserConnection(proc, browserHost?.url ? browserHost.descriptor() : null);
-  } catch (error) {
-    slog(`browser connection sync failed: ${error?.message ?? error}`);
-  }
-}
 
-function receiveBrowserControlHold(rawMessage) {
-  const message = rawMessage?.data ?? rawMessage;
-  return applyBrowserControlHold(message, (botId) => {
-    browserControlHolds.add(botId);
-    browserSurface?.setHumanControl(botId, true);
-  });
-}
 
-async function clearBrowserPartition(partition) {
-  await clearBrowserPartitionSession(session.fromPartition(partition));
-}
 
-async function applyBrowserLifecycleCleanup(lifecycle) {
-  if (lifecycle.type === "bot-deleted") {
-    browserSurface?.close(lifecycle.botId);
-    browserControlHolds.delete(lifecycle.botId);
-    browserHost?.revokeCapabilitiesForBot(lifecycle.botId);
-    await clearBrowserPartition(browserPartition(lifecycle.botId));
-  } else {
-    browserSurface?.forgetProfile(lifecycle.partitionId);
-    browserHost?.revokeCapabilitiesForProfile(lifecycle.partitionId);
-    await clearBrowserPartition(browserProfilePartition(lifecycle.partitionId));
-  }
-  return true;
-}
 
-const browserLifecycleCleanups = new Map();
-const completedBrowserLifecycleCleanups = new Set();
-const MAX_COMPLETED_BROWSER_CLEANUPS = 512;
 
-function rememberBrowserLifecycleCleanup(requestId) {
-  if (!requestId) return;
-  completedBrowserLifecycleCleanups.delete(requestId);
-  completedBrowserLifecycleCleanups.add(requestId);
-  while (completedBrowserLifecycleCleanups.size > MAX_COMPLETED_BROWSER_CLEANUPS) {
-    completedBrowserLifecycleCleanups.delete(completedBrowserLifecycleCleanups.values().next().value);
-  }
-}
 
 /** Run one private cleanup request at most once and acknowledge only after
  * Chromium confirms its session data is gone. Duplicate retries join the
  * same promise; a retry whose success ACK was lost receives a cached ACK. */
-function receiveBrowserLifecycleCleanup(proc, rawMessage) {
-  const message = rawMessage?.data ?? rawMessage;
-  const lifecycle = decodeBrowserLifecycleMessage(message);
-  if (!lifecycle) return false;
-  const requestId = lifecycle.requestId;
-  let cleanup = requestId ? browserLifecycleCleanups.get(requestId) : null;
-  if (!cleanup) {
-    cleanup = requestId && completedBrowserLifecycleCleanups.has(requestId)
-      ? Promise.resolve(true)
-      : applyBrowserLifecycleCleanup(lifecycle).then((result) => {
-          rememberBrowserLifecycleCleanup(requestId);
-          return result;
-        });
-    if (requestId) {
-      browserLifecycleCleanups.set(requestId, cleanup);
-      void cleanup.finally(() => {
-        if (browserLifecycleCleanups.get(requestId) === cleanup) browserLifecycleCleanups.delete(requestId);
-      }).catch(() => {});
-    }
-  }
-  void cleanup.then(
-    () => {
-      if (requestId) proc.postMessage(browserLifecycleResult(requestId, true));
-    },
-    (error) => {
-      slog(`browser lifecycle cleanup failed: ${error?.message ?? error}`);
-      if (requestId) {
-        try {
-          proc.postMessage(browserLifecycleResult(requestId, false));
-        } catch (postError) {
-          slog(`browser lifecycle result send failed: ${postError?.message ?? postError}`);
-        }
-      }
-    },
-  ).catch((error) => {
-    slog(`browser lifecycle result send failed: ${error?.message ?? error}`);
-  });
-  return true;
-}
 
 function syncPhoneSecretKey(proc) {
   const message = phoneSecretPrivateKeyMessage(phoneSecretIdentity);
@@ -1073,8 +970,6 @@ async function startServerOn(port) {
   proc.on("message", (message) => {
     try {
       if (trustedApprovalMode.receive(proc, message)) return;
-      if (receiveBrowserControlHold(message)) return;
-      if (receiveBrowserLifecycleCleanup(proc, message)) return;
       if (receivePhoneSecretSave(proc, message)) return;
     } catch (error) {
       slog(`desktop private sync rejected: ${error?.message ?? error}`);
@@ -1083,7 +978,6 @@ async function startServerOn(port) {
   proc.once("spawn", () => {
     slog(`spawned pid=${proc.pid}`);
     syncDesktopMutationToken(proc);
-    syncBrowserConnection(proc);
     syncPhoneSecretKey(proc);
   });
   let exited = false;
@@ -1094,7 +988,6 @@ async function startServerOn(port) {
     // Capabilities belong to turns in this exact server child. A crash or
     // restart invalidates them before any replacement child receives the
     // browser descriptor.
-    browserHost?.clearCapabilities();
     slog(`exited code=${code}`);
   });
   // wait for the port to answer (fresh machine: first boot writes data dirs).
@@ -1413,160 +1306,6 @@ function desktopWorkspaceForEvent(event, create = false) {
   return create ? ensureDesktopWorkspace(owner) : desktopWorkspaceManager;
 }
 
-/** The built-in browser: WebContentsViews per bot inside the app window,
- * plus the loopback host the bot's tools call. The host and its in-memory
- * master token live for the whole process; the surface belongs to a
- * window and is rebuilt for every window created — macOS keeps the app
- * alive with none open, and `activate` makes a new one. Never blocks the
- * window: without it the Browser tab simply reports itself unavailable. */
-function removeBrowserConnectionDescriptor() {
-  try {
-    removeBrowserConnectionDescriptorFile({ userData: app.getPath("userData") });
-  } catch (error) {
-    slog(`could not remove stale browser descriptor: ${error?.message ?? error}`);
-  }
-}
-
-async function ensureBrowserHost() {
-  if (!browserSurfaceIsSupported) {
-    removeBrowserConnectionDescriptor();
-    throw new Error("The sandboxed built-in browser is not yet available on this platform");
-  }
-  if (browserHost?.url) return browserHost;
-  const candidate = createBrowserHost({ manager: () => browserSurface });
-  try {
-    await candidate.start();
-    if (app.isPackaged) removeBrowserConnectionDescriptor();
-    else browserConnectionStore.persist(candidate.descriptor());
-    // Publish only after listen + descriptor handling both succeed. A failed
-    // candidate is stopped below so the next window can retry cleanly.
-    browserHost = candidate;
-    if (serverProc) syncBrowserConnection(serverProc);
-    return candidate;
-  } catch (error) {
-    await candidate.stop().catch(() => {});
-    throw error;
-  }
-}
-
-async function startBrowserSurface(owner) {
-  if (!browserSurfaceIsSupported) {
-    // Never leave a development descriptor behind that could make the server
-    // advertise browser tools while the native surface is deliberately gated.
-    removeBrowserConnectionDescriptor();
-    if (serverProc) syncBrowserConnection(serverProc);
-    return;
-  }
-  let surface = null;
-  try {
-    surface = createBrowserSurfaceManager({
-      owner,
-      createView: (options) => new WebContentsView(options),
-      notify: (state) => {
-        if (!owner.isDestroyed() && !owner.webContents.isDestroyed()) owner.webContents.send("browser:state", state);
-      },
-      onUserInteraction: (state) => {
-        if (!owner.isDestroyed() && !owner.webContents.isDestroyed()) owner.webContents.send("browser:user-interaction", state);
-      },
-    });
-    for (const botId of browserControlHolds) surface.setHumanControl(botId, true);
-    browserSurface = surface;
-    await ensureBrowserHost();
-    // A renderer reload or crash loses the panel that positioned the views;
-    // hide them until a mounted Browser tab lays them out again. The pages
-    // themselves stay alive — a bot mid-task must not lose its tab.
-    owner.webContents.on("did-start-navigation", (_event, _url, isInPlace, isMainFrame) => {
-      if (isMainFrame && !isInPlace) browserSurface?.hideAll();
-    });
-    owner.webContents.on("render-process-gone", () => browserSurface?.hideAll());
-    owner.once("closed", () => {
-      surface.closeAll();
-      if (browserSurface === surface) browserSurface = null;
-    });
-    slog(`browser surface ready for window ${owner.id} (host ${browserHost.url})`);
-  } catch (error) {
-    slog(`browser surface unavailable: ${error?.message ?? error}`);
-    surface?.closeAll();
-    if (browserSurface === surface) browserSurface = null;
-  }
-}
-
-function browserSurfaceForEvent(event) {
-  const owner = mainWindow;
-  if (!owner || owner.isDestroyed() || event.sender !== owner.webContents) {
-    throw new Error("The browser is available only to the main app window");
-  }
-  if (!browserSurface) throw new Error("The built-in browser is unavailable");
-  return browserSurface;
-}
-
-ipcMain.handle("browser:available", localOnly("browser:available", () => Boolean(browserSurface && browserHost?.url)));
-ipcMain.handle("browser:state", localOnly("browser:state", (event, botId) => browserSurfaceForEvent(event).state(botId)));
-ipcMain.handle("browser:layout", localOnly("browser:layout", (event, botId, bounds, profile, mode, layoutOwner) =>
-  browserSurfaceForEvent(event).layout(
-    botId,
-    bounds ?? null,
-    Object.prototype.toString.call(profile) === "[object String]" ? profile : undefined,
-    mode === "expanded" ? "expanded" : "compact",
-    Object.prototype.toString.call(layoutOwner) === "[object String]" && layoutOwner.length <= 128
-      ? layoutOwner
-      : undefined,
-  ),
-));
-const browserProfileFromRenderer = (profile) =>
-  Object.prototype.toString.call(profile) === "[object String]" ? profile : undefined;
-
-ipcMain.handle("browser:forward", localOnly("browser:forward", async (event, botId, profile) => {
-  const result = await browserSurfaceForEvent(event).forward(botId, browserProfileFromRenderer(profile), { source: "user" });
-  return { url: result.url, title: result.title };
-}));
-ipcMain.handle("browser:reload", localOnly("browser:reload", async (event, botId, profile) => {
-  const result = await browserSurfaceForEvent(event).reload(botId, browserProfileFromRenderer(profile), { source: "user" });
-  return { url: result.url, title: result.title };
-}));
-ipcMain.handle("browser:navigate", localOnly("browser:navigate", async (event, botId, url, profile) => {
-  const result = await browserSurfaceForEvent(event).navigate(botId, url, browserProfileFromRenderer(profile), { source: "user" });
-  return { url: result.url, title: result.title };
-}));
-ipcMain.handle("browser:back", localOnly("browser:back", async (event, botId, profile) => {
-  const result = await browserSurfaceForEvent(event).back(botId, browserProfileFromRenderer(profile), { source: "user" });
-  return { url: result.url, title: result.title };
-}));
-ipcMain.handle("browser:set-human-control", localOnly("browser:set-human-control", (event, botId, held, profile) => {
-  const owner = mainWindow;
-  if (!owner || owner.isDestroyed() || event.sender !== owner.webContents) {
-    throw new Error("The browser is available only to the main app window");
-  }
-  const id = String(botId ?? "");
-  if (!/^[A-Za-z0-9_-]{1,120}$/.test(id)) throw new Error("A bot id is required");
-  // A generic Computer-panel release must be able to clear a positive hold
-  // remembered across renderer/surface recreation. If no surface exists,
-  // there is no local browser to update, but the remembered gate still goes.
-  if (!browserSurface) {
-    if (held === true) throw new Error("The built-in browser is unavailable");
-    browserControlHolds.delete(id);
-    return true;
-  }
-  const surface = browserSurface;
-  const applied = surface.setHumanControl(id, held === true, browserProfileFromRenderer(profile));
-  if (held === true) browserControlHolds.add(id);
-  else browserControlHolds.delete(id);
-  return applied;
-}));
-ipcMain.handle("browser:close", localOnly("browser:close", (event, botId) => browserSurfaceForEvent(event).close(botId)));
-// Deleting a profile: every bot's view on it goes, then its cookies, storage
-// and cache. The partition directory itself is left for Chromium to reuse
-// (removing it while the session object lives is the EBUSY trap every
-// Electron app with profiles has hit); nothing identifying remains in it.
-ipcMain.handle("browser:forget-profile", localOnly("browser:forget-profile", async (event, partitionId) => {
-  const surface = browserSurfaceForEvent(event);
-  const id = String(partitionId ?? "");
-  if (!/^[A-Za-z0-9_-]{1,40}$/.test(id) || id === "guest") throw new Error("That browser partition id is invalid");
-  const dropped = surface.forgetProfile(id);
-  browserHost?.revokeCapabilitiesForProfile(id);
-  await clearBrowserPartition(browserProfilePartition(id));
-  return { dropped };
-}));
 
 ipcMain.on("screen:preview-intent", localOnlySync("screen:preview-intent", (event) => {
   event.returnValue = displayMediaGuard.begin(event.senderFrame);
@@ -1783,7 +1522,6 @@ function createWindow() {
   });
   mainWindow = win;
   attachUpdaterWindow(win);
-  if (!desktopRemoteAccess) void startBrowserSurface(win);
   if (waitsForSkinSync) {
     // A broken renderer or preload must not strand the app as an invisible
     // process. Normal startup shows from desktop:skin almost immediately;
@@ -2549,13 +2287,6 @@ app.whenReady().then(async () => {
       slog(`desktop companion relay failed: ${error?.message ?? error}`);
     }
   } else if (app.isPackaged) {
-    // The embedded harness receives this descriptor only over its private
-    // utility-process port. Never leave the master token in userData where a
-    // shell-capable bot running as the same OS user could read it.
-    removeBrowserConnectionDescriptor();
-    await ensureBrowserHost().catch((error) => {
-      slog(`browser host unavailable before server start: ${error?.message ?? error}`);
-    });
     serverReady = await startServerPackaged();
   }
   // The companion the user left on comes back without anyone finding the
@@ -2660,13 +2391,9 @@ app.on("before-quit", (e) => {
   // stop it here so quitting never orphans a recording process
   if (nativeActions.appleSpeech) stopSpeech();
   stopRecorder();
-  try {
-    browserSurface?.closeAll();
-  } catch {}
   const ownedHelperCleanup = Promise.race([
     Promise.all([
       stopCua().catch(() => {}),
-      browserHost?.stop().catch(() => {}) ?? Promise.resolve(),
       // Both listeners reachable from outside the app are owned children.
       // Shut the connector down first, then the sidecar, without changing the
       // remembered toggle the next launch will restore.

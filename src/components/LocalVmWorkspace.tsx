@@ -82,19 +82,14 @@ function bestEffortRelease(botId: string, controlLeaseId: string) {
     keepalive: true,
   }).then(async (response) => {
     if (!response.ok) return;
-    const snapshot = await response.json().catch(() => null);
     // The server lease is the source of truth; only clear Electron after the
     // workspace-owned release was actually accepted.
-    if (snapshot?.held === false) {
-      await window.ogb?.browser?.setHumanControl?.(botId, false).catch(() => {});
-    }
   }).catch(() => {});
 }
 
-async function setNativeBrowserControl(botId: string, held: boolean): Promise<boolean> {
-  const setter = window.ogb?.browser?.setHumanControl;
-  if (!setter) return true;
-  return (await setter(botId, held)) === true;
+async function setNativeBrowserControl(_botId: string, _held: boolean): Promise<boolean> {
+  // The engine owns its browser; there is no native surface to hold.
+  return true;
 }
 
 function dispatchControl(

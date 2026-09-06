@@ -57,7 +57,6 @@
     "build:cua:linux": "node scripts/prepare-cua-linux.mjs",
     "build:cua:linux:offline": "node scripts/prepare-cua-linux.mjs --offline",
     "build:updater": "node scripts/bundle-updater.mjs",
-    "build:browser-snapshot": "node scripts/build-browser-snapshot.mjs",
     "package:prepare": "pnpm build && pnpm build:server && pnpm build:companion && pnpm build:updater && pnpm build:android-tools && pnpm build:cloudflared",
     "package:mac": "pnpm package:prepare && pnpm build:speech && pnpm build:recorder && pnpm build:cua && electron-builder --mac --publish never",
     "package:win": "pnpm package:prepare && electron-builder --win --publish never",

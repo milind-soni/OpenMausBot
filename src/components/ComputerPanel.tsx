@@ -161,11 +161,9 @@ function readPanelWidth(): number {
 export function ComputerPanel({
   bot,
   onOpenVmWorkspace,
-  onExpandBrowser,
 }: {
   bot: Bot;
   onOpenVmWorkspace?: (botId: string) => void;
-  onExpandBrowser?: (botId: string) => void;
 }) {
   // The panel is a fixed column by default; a drag handle on its left edge
   // makes it wide enough to actually read a page in the Browser tab.
@@ -286,7 +284,7 @@ export function ComputerPanel({
   const androidStatus = useAndroidUsbDevices();
   const androidConnected = androidStatus.devices.length > 0;
   // the built-in browser: a per-bot switch in Settings, and only the desktop app has one
-  const browserAvailableHere = browserAvailable(state.config, Boolean(window.ogb?.browser));
+  const browserAvailableHere = browserAvailable(state.config);
   const browserEnabled = builtInBrowserEnabled(state.config) && bot.browser !== false && browserAvailableHere;
   // bumped when a Box API key is saved inline, to re-run the spin-up flow
   const [retry, setRetry] = useState(0);
@@ -795,12 +793,8 @@ export function ComputerPanel({
     return snap;
   }, [bot.id, dispatch]);
 
-  const setNativeBrowserControl = useCallback(async (held: boolean): Promise<boolean> => {
-    const setter = window.ogb?.browser?.setHumanControl;
-    if (!setter) return true;
-    const profile = bot.browserProfile === "guest" ? "guest" : bot.browserProfile ?? "";
-    return (await setter(bot.id, held, profile)) === true;
-  }, [bot.browserProfile, bot.id]);
+  // The engine owns its browser; there is no native surface to hold.
+  const setNativeBrowserControl = useCallback(async (): Promise<boolean> => true, []);
 
   const transitionControl = useCallback(async (action: ComputerControlAction) => {
     // BrowserPanel performs the same two-phase transition itself. Every
@@ -829,9 +823,6 @@ export function ComputerPanel({
     }
   }, [transitionControl]);
 
-  const expandBrowser = useCallback(() => {
-    onExpandBrowser?.(bot.id);
-  }, [bot.id, onExpandBrowser]);
 
   const openDesktop = async () => {
     setPending("join");
@@ -1085,13 +1076,7 @@ export function ComputerPanel({
 
       {panelView === "browser" && browserEnabled ? (
         <div className="flex min-h-0 flex-1 flex-col px-4 pb-4">
-          <BrowserPanel
-            bot={bot}
-            control={control}
-            controlPending={controlPending}
-            onControl={controlAction}
-            onExpand={onExpandBrowser ? expandBrowser : undefined}
-          />
+          <BrowserPanel bot={bot} />
           {error && (
             <div role="alert" className="mt-2 rounded-lg border border-danger/30 bg-danger/10 px-3 py-2 text-[12px] text-danger">
               {error}

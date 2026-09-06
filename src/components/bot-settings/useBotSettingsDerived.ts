@@ -62,7 +62,7 @@ export function useBotSettingsDerived(bot: Bot) {
   const connectedAppsConfigured = state.config?.composio?.configured === true;
   const connectedAppsEnabled = bot.composio !== false;
   const canUseBrowser = engine?.capabilities?.browserMcp === true;
-  const desktopBrowser = browserAvailable(state.config, Boolean(window.ogb?.browser));
+  const desktopBrowser = browserAvailable(state.config);
   const browserBlockedOnWindows = window.ogb?.platform === "win32" && !desktopBrowser;
   const browserFeature = builtInBrowserEnabled(state.config);
   const browserAllowed = bot.browser !== false;

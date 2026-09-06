@@ -371,10 +371,12 @@ export interface ConfigStatus {
 }
 
 export interface BrowserEngineSummary {
-  kind: "desktop" | "headless" | "unavailable";
+  kind: "engine" | "unavailable";
   reason?: string;
   installable?: boolean;
   version?: string;
+  installing?: boolean;
+  installError?: string;
 }
 
 export interface BrowserProfile {

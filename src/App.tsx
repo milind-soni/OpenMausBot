@@ -19,10 +19,8 @@ import { RoutinesPage } from "@/components/RoutinesPage";
 import { NoEngines } from "@/components/NoEngines";
 import { CommandPalette } from "@/components/CommandPalette";
 import { LocalVmWorkspace } from "@/components/LocalVmWorkspace";
-import { BrowserWorkspace } from "@/components/BrowserWorkspace";
 import { SkillRecorderPage } from "@/components/SkillRecorderPage";
 import { TeamMapPage } from "@/components/TeamMapPage";
-import { heldComputerControlBotIds } from "@/lib/computer-control";
 import { skillRecorderEnabled } from "@/lib/feature-flags";
 import { setLocale } from "@/lib/i18n";
 
@@ -51,7 +49,6 @@ function Shell() {
   const [localVmWorkspaceBotId, setLocalVmWorkspaceBotId] = useState<string | null>(null);
   // the Browser tab, expanded into the main column (the small preview in
   // the panel hands off to this and back)
-  const [browserWorkspaceBotId, setBrowserWorkspaceBotId] = useState<string | null>(null);
   const menuButtonRef = useRef<HTMLButtonElement>(null);
   const previousViewRef = useRef(state.activeView);
   const calendarOriginRef = useRef<"chat" | "team-map" | "skill-recorder">("chat");
@@ -101,18 +98,6 @@ function Shell() {
     window.ogb?.setUnreadCount?.(unreadCount);
   }, [unreadCount]);
 
-  // Re-assert every authoritative positive hold in the process that owns the
-  // native browser. This covers initial hydration, SSE updates from another
-  // computer surface, and renderer reloads. Deliberately never mirror false:
-  // only a trusted two-phase release may open Electron's direct browser gate.
-  useEffect(() => {
-    const setter = window.ogb?.browser?.setHumanControl;
-    if (!setter) return;
-    for (const botId of heldComputerControlBotIds(state.computerControl)) {
-      void setter(botId, true).catch(() => {});
-    }
-  }, [state.computerControl]);
-
   // Warm connected-account state as soon as the local server is available.
   // The modal then opens with the correct Connect/Add account buttons and
   // quietly revalidates instead of rediscovering every account from scratch.
@@ -151,19 +136,6 @@ function Shell() {
     dispatch({ type: "toggleComputer", open: false });
     setLocalVmWorkspaceBotId(botId);
   };
-  const openBrowserWorkspace = useCallback((botId: string) => {
-    dispatch({ type: "toggleComputer", open: false });
-    setBrowserWorkspaceBotId(botId);
-  }, [dispatch]);
-  const closeBrowserWorkspace = useCallback(() => {
-    setBrowserWorkspaceBotId(null);
-    dispatch({ type: "toggleComputer", open: true });
-  }, [dispatch]);
-  useEffect(() => {
-    if (browserWorkspaceBotId && (state.activeView !== "chat" || state.selectedId !== browserWorkspaceBotId)) {
-      setBrowserWorkspaceBotId(null);
-    }
-  }, [browserWorkspaceBotId, state.activeView, state.selectedId]);
 
   const openComputerFromWorkspace = (botId: string) => {
     setLocalVmWorkspaceBotId(null);
@@ -254,8 +226,6 @@ function Shell() {
         <RoutinesPage onBack={closeCalendar} onOpenRoom={openCalendarRoom} />
       ) : !remoteClient && state.activeView === "skill-recorder" ? (
         <SkillRecorderPage />
-      ) : !remoteClient && browserWorkspaceBotId && bot && bot.id === browserWorkspaceBotId ? (
-        <BrowserWorkspace bot={bot} onClose={closeBrowserWorkspace} />
       ) : !remoteClient && localVmWorkspaceBotId ? (
         <LocalVmWorkspace
           primaryBotId={localVmWorkspaceBotId}
@@ -295,7 +265,6 @@ function Shell() {
             key={bot.id}
             bot={bot}
             onOpenVmWorkspace={openLocalVmWorkspace}
-            onExpandBrowser={openBrowserWorkspace}
           />
         )
       )}

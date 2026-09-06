@@ -267,20 +267,14 @@ import { redactSecretsInText } from "./redact.ts";
 import * as vps from "./vps-computer.ts";
 import { RoutineManager, type RoutineRun, type RoutineRunOn, type RoutineRunTrigger } from "./routines.ts";
 import { CalendarCallManager, type CalendarCall } from "./calendar-calls.ts";
-import {
-  BUILT_IN_BROWSER_SYSTEM_PROMPT,
-  applyDesktopBrowserConnectionMessage,
-  availableBrowserConnection,
-  browserScreenshot,
-  clearBrowserCapabilities,
-  registerBrowserCapability,
-  revokeBrowserCapability,
-  type BrowserCapability,
-  type BrowserConnection,
-} from "./browser-connection.ts";
+import { BUILT_IN_BROWSER_SYSTEM_PROMPT } from "./browser-engine.ts";
 import {
   agentBrowserIntegration,
   browserEngineEncryptionKey,
+  clearBrowserSessionState,
+  ensureChrome,
+  installAgentBrowserBinary,
+  resolveAgentBrowserBinary,
   browserEngineStatus,
   browserSessionId,
   describeBrowserEngine,
@@ -457,9 +451,29 @@ function applyDesktopMutationTokenMessage(raw: unknown): boolean {
   }
   return true;
 }
-const browserCleanup = new BrowserCleanupCoordinator({
+// Browser data of a deleted bot or profile: the engine's saved session
+// state, cleared here on every host (the desktop no longer owns a browser).
+// The coordinator keeps its durable journal and replay; this is its outbox.
+const browserCleanup: BrowserCleanupCoordinator = new BrowserCleanupCoordinator({
   file: join(DATA_DIR, "browser-cleanups.json"),
-  send: postDesktopPrivateMessage,
+  send: (request) => {
+    const status = browserEngineStatus();
+    // Guest sessions are throwaway and never saved, so only the bot's own
+    // session and shared profile sessions have state to clear.
+    const sessions = request.type === "openmausbot:browser-bot-deleted" && request.botId
+      ? [browserSessionId(request.botId, "")]
+      : request.partitionId
+        ? [browserSessionId("", request.partitionId)]
+        : [];
+    const work = status.kind === "ready" && sessions.length
+      ? Promise.all(sessions.map((session) => clearBrowserSessionState(status.binaryPath, session, { encryptionKey: browserEngineEncryptionKey() })))
+      : Promise.resolve([true]);
+    void work.then(
+      (results) => browserCleanup.receive({ type: "openmausbot:browser-lifecycle-result", requestId: request.requestId, ok: results.every(Boolean) }),
+      () => browserCleanup.receive({ type: "openmausbot:browser-lifecycle-result", requestId: request.requestId, ok: false }),
+    );
+    return true;
+  },
 });
 const phoneSecrets = new PhoneSecretBridge(postDesktopPrivateMessage);
 utilityParentPort?.on("message", (event) => {
@@ -469,7 +483,7 @@ utilityParentPort?.on("message", (event) => {
     if (handleDesktopTrustedApprovalMessage(message)) return;
     if (browserCleanup.receive(message)) return;
     if (phoneSecrets.receive(message)) return;
-    if (!applyDesktopBrowserConnectionMessage(message)) composio.applyManagedBrokerMessage(message);
+    composio.applyManagedBrokerMessage(message);
   } catch (error) {
     console.error(`[desktop-sync] rejected private parent message: ${error instanceof Error ? error.message : String(error)}`);
   }
@@ -649,105 +663,6 @@ function agentsIntegration(
   };
 }
 
-/** The built-in browser, when the desktop app has one running: the harness
- * keeps Electron's per-boot master token and gives the proxy only a scoped
- * bot/profile capability, plus the who-is-driving endpoint so a person
- * taking the wheel in the panel pauses the bot's hands. */
-type ActiveBrowserCapability = {
-  botId: string;
-  ownerId: string;
-  connection: BrowserConnection;
-  capability: BrowserCapability;
-};
-
-const browserCapabilitiesByThread = new Map<string, ActiveBrowserCapability>();
-const pendingBrowserCapabilityRevocations = new Map<string, {
-  active: ActiveBrowserCapability;
-  attempt: number;
-  timer: ReturnType<typeof setTimeout>;
-}>();
-const BROWSER_REVOCATION_RETRY_MS = [250, 1_000, 3_000, 10_000, 30_000] as const;
-
-async function revokeReleasedBrowserCapability(active: ActiveBrowserCapability, attempt = 0): Promise<void> {
-  const token = active.capability.token;
-  try {
-    await revokeBrowserCapability(active.connection, active.capability);
-    const pending = pendingBrowserCapabilityRevocations.get(token);
-    if (pending) clearTimeout(pending.timer);
-    pendingBrowserCapabilityRevocations.delete(token);
-  } catch (error) {
-    if (Date.now() >= active.capability.expiresAt) {
-      pendingBrowserCapabilityRevocations.delete(token);
-      return;
-    }
-    if (attempt === 0) {
-      console.error(`[browser] could not revoke turn capability; retrying until its absolute expiry: ${error instanceof Error ? error.message : String(error)}`);
-    }
-    const delay = Math.min(
-      BROWSER_REVOCATION_RETRY_MS[Math.min(attempt, BROWSER_REVOCATION_RETRY_MS.length - 1)]!,
-      Math.max(1, active.capability.expiresAt - Date.now()),
-    );
-    const timer = setTimeout(() => {
-      const pending = pendingBrowserCapabilityRevocations.get(token);
-      if (!pending || pending.timer !== timer) return;
-      void revokeReleasedBrowserCapability(active, attempt + 1);
-    }, delay);
-    timer.unref?.();
-    const previous = pendingBrowserCapabilityRevocations.get(token);
-    if (previous) clearTimeout(previous.timer);
-    pendingBrowserCapabilityRevocations.set(token, { active, attempt: attempt + 1, timer });
-  }
-}
-
-async function releaseBrowserCapabilityForThread(threadId: string, expectedOwnerId?: string): Promise<void> {
-  const active = browserCapabilitiesByThread.get(threadId);
-  if (!active || (expectedOwnerId !== undefined && active.ownerId !== expectedOwnerId)) return;
-  browserCapabilitiesByThread.delete(threadId);
-  await revokeReleasedBrowserCapability(active);
-}
-
-async function releaseBrowserCapabilitiesForBot(botId: string): Promise<void> {
-  const threads = [...browserCapabilitiesByThread]
-    .filter(([, active]) => active.botId === botId)
-    .map(([threadId]) => threadId);
-  await Promise.all(threads.map((threadId) => releaseBrowserCapabilityForThread(threadId)));
-}
-
-async function releaseAllBrowserCapabilities(): Promise<void> {
-  const active = [...browserCapabilitiesByThread.values()];
-  browserCapabilitiesByThread.clear();
-  const connections = new Map<string, BrowserConnection>();
-  for (const entry of active) {
-    connections.set(`${entry.connection.url}:${entry.connection.token}`, entry.connection);
-  }
-  for (const pending of pendingBrowserCapabilityRevocations.values()) {
-    connections.set(`${pending.active.connection.url}:${pending.active.connection.token}`, pending.active.connection);
-  }
-
-  await Promise.all([...connections.values()].map(async (connection) => {
-    try {
-      // Master clear is atomic at the host. It also invalidates a token whose
-      // earlier per-turn revoke timed out, which is essential for feature-off
-      // and graceful-shutdown boundaries.
-      await clearBrowserCapabilities(connection);
-      for (const [token, pending] of pendingBrowserCapabilityRevocations) {
-        if (
-          pending.active.connection.url === connection.url &&
-          pending.active.connection.token === connection.token
-        ) {
-          clearTimeout(pending.timer);
-          pendingBrowserCapabilityRevocations.delete(token);
-        }
-      }
-    } catch {
-      await Promise.all(active
-        .filter((entry) =>
-          entry.connection.url === connection.url && entry.connection.token === connection.token
-        )
-        .map((entry) => revokeReleasedBrowserCapability(entry)));
-    }
-  }));
-}
 
 type DirectTurnDispatchClaim = {
   id: string;
@@ -849,62 +764,10 @@ function cancelDirectTurnDispatch(botId: string, expectedThreadId?: string): Dir
   return claim;
 }
 
-async function browserIntegration(
-  botId: string,
-  profile: string | undefined,
-  threadId: string,
-  generation: string,
-  stillValid: () => boolean = () => true,
-  ownerId = randomUUID(),
-) {
-  const connection = availableBrowserConnection();
-  if (!connection) return engineBrowserIntegration(botId, profile);
-  const control = controlIntegration(botId, threadId, generation);
-  // A profile that no longer exists falls back to the bot's own session.
-  // Canonical ids belong to config/bot references; Electron must receive the
-  // exact immutable partition inherited from #567 so an upgrade cannot move
-  // a bot into another account. Guest remains a throwaway partition.
-  const profileTarget = profile && profile !== "guest"
-    ? browserProfilePartitionTarget(cfg, profile)
-    : null;
-  const partitionId = profile === "guest" ? "guest" : (profileTarget?.partitionId ?? "");
-  await releaseBrowserCapabilityForThread(threadId);
-  const capability = await registerBrowserCapability(connection, botId, partitionId);
-  const active = { botId, ownerId, connection, capability };
-  // Registration crosses a process boundary. Stop/delete/config changes can
-  // land while the desktop host is minting the token; revalidate in the same
-  // event-loop turn that publishes it. If ownership was lost, no agent ever
-  // receives the bearer and the just-created token is revoked immediately.
-  if (!stillValid()) {
-    await revokeReleasedBrowserCapability(active);
-    return null;
-  }
-  browserCapabilitiesByThread.set(threadId, active);
-  return {
-    connection,
-    capability,
-    profile: partitionId,
-    integration: {
-      command: process.execPath,
-      args: [SPAWNED_PROXIES.browser],
-      env: {
-        ...AGENTS_NODE_FLAG,
-        OMB_BROWSER_URL: connection.url,
-        OMB_BROWSER_TOKEN: capability.token,
-        OMB_BROWSER_PROFILE: partitionId,
-        OMB_BOT_ID: botId,
-        OMB_CONTROL_URL: control.url,
-        OMB_CONTROL_TOKEN: control.token,
-      },
-    },
-  };
-}
-
-/** No desktop surface (a server, or a Windows desktop): the bot's browser is
- * agent-browser, one isolated session per profile or per bot
- * (docs/plans/browser-engine.md). Returns null, with the reason logged once,
- * when the engine is not on this machine. */
-function engineBrowserIntegration(botId: string, profile: string | undefined) {
+/** The bot's browser for this turn: agent-browser, one isolated session per
+ * browser profile or per bot (docs/plans/browser-engine.md). Null, with the
+ * reason logged once, when the engine is not on this machine. */
+function browserIntegration(botId: string, profile: string | undefined) {
   const status = browserEngineStatus();
   if (status.kind !== "ready") {
     if (!engineUnavailableLogged) {
@@ -913,12 +776,11 @@ function engineBrowserIntegration(botId: string, profile: string | undefined) {
     }
     return null;
   }
+  // A profile that no longer exists falls back to the bot's own session.
   const profileTarget = profile && profile !== "guest" ? browserProfilePartitionTarget(cfg, profile) : null;
   const partitionId = profile === "guest" ? "guest" : (profileTarget?.partitionId ?? "");
   const session = browserSessionId(botId, partitionId);
   return {
-    connection: null,
-    capability: null,
     profile: partitionId,
     integration: agentBrowserIntegration({
       binaryPath: status.binaryPath,
@@ -930,12 +792,14 @@ function engineBrowserIntegration(botId: string, profile: string | undefined) {
 }
 let engineUnavailableLogged = false;
 
-export function browserEngineSummary(): { kind: "desktop" | "headless" | "unavailable"; reason?: string; installable?: boolean; version?: string } {
-  if (availableBrowserConnection()) return { kind: "desktop" };
+let browserEngineInstall: Promise<void> | null = null;
+let browserEngineInstallError: string | null = null;
+export function browserEngineSummary(): { kind: "engine" | "unavailable"; reason?: string; installable?: boolean; version?: string; installing?: boolean; installError?: string } {
   const status = browserEngineStatus();
+  const progress = { ...(browserEngineInstall ? { installing: true } : {}), ...(browserEngineInstallError ? { installError: browserEngineInstallError } : {}) };
   return status.kind === "ready"
-    ? { kind: "headless", version: status.version }
-    : { kind: "unavailable", reason: status.reason, installable: status.installable };
+    ? { kind: "engine", version: status.version, ...progress }
+    : { kind: "unavailable", reason: status.reason, installable: status.installable, ...progress };
 }
 
 function phoneIntegration() {
@@ -2405,7 +2269,6 @@ const watchdog = new TurnWatchdog({
   stallMs: TURN_STALL_MS,
   checkMs: 60_000,
   onStall: (turn) => {
-    void releaseBrowserCapabilityForThread(turn.threadId);
     revokeInternalCapabilitiesForThread(turn.threadId);
     repeats.settle(turn.threadId);
     const bot = store.bot(turn.botId);
@@ -2539,7 +2402,6 @@ bus.subscribe((event: RuntimeEvent) => {
   else if (event.type === "request.resolved") watchdog.setWaitingOnHuman(event.threadId, false);
   else if (event.type === "turn.completed") {
     watchdog.settle(event.threadId);
-    void releaseBrowserCapabilityForThread(event.threadId);
     revokeInternalCapabilityForProviderEvent(event);
   } else if (event.type === "session.exited") {
     // A retained provider session can exit after a newer turn reused the same
@@ -2548,7 +2410,6 @@ bus.subscribe((event: RuntimeEvent) => {
     const directBotBusy = store.botByThread(event.threadId)?.busy === true;
     const roomBusy = Boolean(store.groupByThread(event.threadId)?.busyBotId);
     if (!directBotBusy && !roomBusy) {
-      void releaseBrowserCapabilityForThread(event.threadId);
     }
   } else watchdog.touch(event.threadId);
 });
@@ -4494,15 +4355,7 @@ async function startTurn(
         instance.adapter.capabilities.browserMcp === true
       ) {
         const selectedProfile = liveBot.browserProfile;
-        browser = await browserIntegration(bot.id, selectedProfile, threadId, dispatchClaimId, () => {
-          const current = store.bot(bot.id);
-          return (
-            directTurnClaimIsCurrent(bot.id, dispatchClaimId, threadId) &&
-            builtInBrowserEnabled(cfg) &&
-            current?.browser !== false &&
-            current?.browserProfile === selectedProfile
-          );
-        }, dispatchClaimId);
+        browser = browserIntegration(bot.id, selectedProfile);
         if (browser) integrations.browser = browser.integration;
       }
       // A cancelled adapter can be between accepting sendTurn and revealing
@@ -4586,10 +4439,6 @@ async function startTurn(
       // after its own turn.completed would never be torn down — it would
       // keep polling the box forever, carrying dead per-turn state. busy
       // is flipped false in the fold, so it is the honest "still running".
-      if (!previewCapture && browser?.connection && browser.capability) {
-        const { connection, capability } = browser;
-        previewCapture = () => browserScreenshot(connection, capability, fetch);
-      }
       if (previewCapture && store.bot(bot.id)?.busy) {
         startScreenPoller(bot.id, previewCapture, { screenIsTheWork: instance.driverKind === "boxAgent" });
       }
@@ -4603,7 +4452,6 @@ async function startTurn(
       clearCancelledProviderHandshake(threadId, `direct:${dispatchClaimId}`);
       clearDirectTurnDispatch(bot.id, dispatchClaimId);
       revokeInternalCapabilityGeneration(threadId, dispatchClaimId);
-      await releaseBrowserCapabilityForThread(threadId, dispatchClaimId);
       const ownsLatestGeneration = directTurnGenerationByBot.get(bot.id) === dispatchClaimId;
       if (ownsLatestGeneration) {
         releaseLocalVmThread(threadId);
@@ -4771,7 +4619,6 @@ async function interruptRoutineGroupGoal(
   const bot = speaker ? store.bot(speaker.botId) : undefined;
   cancelGroupTurnOperations(groupId, threadId, outcome);
   revokeInternalCapabilitiesForThread(threadId);
-  await releaseBrowserCapabilityForThread(threadId);
   await (bot ? registry.get(bot.modelSelection.instanceId) : undefined)
     ?.adapter.interruptTurn(threadId)
     .catch(() => {});
@@ -4800,7 +4647,6 @@ async function stopBotForEmergencyApprovalDowngrade(botId: string): Promise<void
     revokeInternalCapabilitiesForThread(groupTurn.threadId);
     cancelGroupTurnOperations(groupTurn.group.id, groupTurn.threadId);
     const results = await Promise.allSettled([
-      releaseBrowserCapabilityForThread(groupTurn.threadId),
       registry.get(bot.modelSelection.instanceId)?.adapter.interruptTurn(groupTurn.threadId),
     ]);
     closeOpenApprovals(groupTurn.threadId);
@@ -4813,7 +4659,6 @@ async function stopBotForEmergencyApprovalDowngrade(botId: string): Promise<void
   const threadId = directClaim?.threadId ?? bot.threadId;
   revokeInternalCapabilitiesForThread(threadId);
   const results = await Promise.allSettled([
-    releaseBrowserCapabilityForThread(threadId),
     registry.get(bot.modelSelection.instanceId)?.adapter.interruptTurn(threadId),
   ]);
   closeOpenApprovals(threadId);
@@ -4869,7 +4714,6 @@ routines = new RoutineManager({
         ? registry.get(bot.modelSelection.instanceId)
         : null;
     try {
-      await releaseBrowserCapabilityForThread(threadId);
       await instance?.adapter.interruptTurn(threadId);
     } finally {
       closeOpenApprovals(threadId);
@@ -5516,21 +5360,7 @@ async function runGroupMemberTurn(
     instance.adapter.capabilities.browserMcp === true
   ) {
     const selectedProfile = readyBot.browserProfile;
-    const browser = await browserIntegration(readyBot.id, selectedProfile, threadId, internalGeneration, () => {
-      const currentBot = store.bot(readyBot.id);
-      const currentGroup = store.group(readyGroup.id);
-      const stillOwnsThread = currentGroup?.dm
-        ? currentGroup.threadId === threadId
-        : Boolean(currentGroup && store.groupTaskByThread(currentGroup.id, threadId));
-      return (
-        !isCancelled?.() &&
-        stillOwnsThread &&
-        currentBot?.busy === true &&
-        builtInBrowserEnabled(cfg) &&
-        currentBot.browser !== false &&
-        currentBot.browserProfile === selectedProfile
-      );
-    });
+    const browser = browserIntegration(readyBot.id, selectedProfile);
     if (browser) integrations.browser = browser.integration;
   }
   // Stop/delete may land while Electron is registering the capability. The
@@ -5538,7 +5368,6 @@ async function runGroupMemberTurn(
   // room's setup claim so no provider turn starts after Stop returned.
   const browserReadyBot = store.bot(readyBot.id);
   if (isCancelled?.() || !browserReadyBot || !browserReadyBot.busy) {
-    await releaseBrowserCapabilityForThread(threadId);
     if (browserReadyBot?.busy) {
       store.setActivity(browserReadyBot.id, "idle");
       retryDelegationsWaitingOn(browserReadyBot.id);
@@ -5628,7 +5457,6 @@ async function runGroupMemberTurn(
     store.group(group.id)?.busyBotId !== bot.id ||
     store.bot(bot.id)?.busy !== true
   ) {
-    await releaseBrowserCapabilityForThread(threadId);
     if (store.group(group.id)?.busyBotId === bot.id) {
       groupSpeakers.delete(threadId);
       store.patchGroup(group.id, { busyBotId: null, unread: true });
@@ -5657,7 +5485,6 @@ async function runGroupMemberTurn(
     let unregisterStall = () => {};
     const deadline = new RoomTurnDeadline(timeoutMinutes, () => {
       abandonProviderTurn();
-      void releaseBrowserCapabilityForThread(threadId);
       void instance.adapter.interruptTurn(threadId).catch(() => {});
       store.appendMessage(threadId, {
         role: "bot",
@@ -5714,7 +5541,6 @@ async function runGroupMemberTurn(
         // Stop may have landed while the adapter was authenticating, before
         // it had an active process for the first interrupt to reach. Now that
         // sendTurn completed setup, revoke again and interrupt the real turn.
-        await releaseBrowserCapabilityForThread(threadId);
         await instance.adapter.interruptTurn(threadId).catch(() => {});
       })
       .then((dispatch) => {
@@ -5825,7 +5651,6 @@ async function runGroupMemberTurn(
   }
   if (outcome === "dispatch_failed") {
     if (skillAuthoring) skillAuthoringClaim.claimed = false;
-    await releaseBrowserCapabilityForThread(threadId);
     // No turn.completed follows a rejected room dispatch. Anything that was
     // queued while this bot briefly owned the room must be retried now.
     drainQueuedSends();
@@ -7466,7 +7291,6 @@ async function reloadProviders() {
   // one synchronous step before the first teardown await, including room/task
   // threads that are not a bot's default DM.
   revokeAllInternalCapabilities();
-  await releaseAllBrowserCapabilities();
   bus.detachAll();
   await registry.disposeAll();
   await registry.load(instanceConfigs(cfg));
@@ -10098,7 +9922,6 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
       for (const { threadId } of interruptTargets) cancelGroupTurnOperations(group.id, threadId);
       for (const { threadId, instance } of interruptTargets) {
         revokeInternalCapabilitiesForThread(threadId);
-        await releaseBrowserCapabilityForThread(threadId);
         await instance?.adapter.interruptTurn(threadId).catch(() => {});
         closeOpenApprovals(threadId);
       }
@@ -10671,7 +10494,6 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
               cancelDirectTurnDispatch(bot.id, routineRun.threadId);
               if (routineRun.threadId) {
                 revokeInternalCapabilitiesForThread(routineRun.threadId);
-                await releaseBrowserCapabilityForThread(routineRun.threadId);
               }
               await routines!.cancelRun(routineRun.id);
               return;
@@ -10681,7 +10503,6 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
             if (groupTurn) {
               cancelGroupTurnOperations(groupTurn.group.id, groupTurn.threadId);
               revokeInternalCapabilitiesForThread(groupTurn.threadId);
-              await releaseBrowserCapabilityForThread(groupTurn.threadId);
               await instance?.adapter.interruptTurn(groupTurn.threadId).catch(() => {});
               closeOpenApprovals(groupTurn.threadId);
               return;
@@ -10689,7 +10510,6 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
             const directClaim = cancelDirectTurnDispatch(bot.id);
             const threadId = directClaim?.threadId ?? bot.threadId;
             revokeInternalCapabilitiesForThread(threadId);
-            await releaseBrowserCapabilityForThread(threadId);
             await instance?.adapter.interruptTurn(threadId).catch(() => {});
             closeOpenApprovals(threadId);
           }),
@@ -10816,7 +10636,7 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
         // or unreadable journal therefore rejects the delete with the bot and
         // all of its live work untouched. The intent is aborted if a later
         // pre-delete side effect fails, and committed only after Store deletion.
-        const browserCleanupRequest = utilityParentPort ? browserCleanup.prepare("bot", bot.id) : null;
+        const browserCleanupRequest = browserCleanup.prepare("bot", bot.id);
         try {
           // a running turn dies with its bot
           const directClaim = cancelDirectTurnDispatch(bot.id);
@@ -10826,7 +10646,6 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
           // check is revalidated after its body arrives and must fail closed.
           revokeInternalCapabilitiesForThread(directThreadId);
           directTurnGenerationByBot.delete(bot.id);
-          await releaseBrowserCapabilitiesForBot(bot.id);
           await registry.get(bot.modelSelection.instanceId)?.adapter.interruptTurn(directThreadId).catch(() => {});
           closeOpenApprovals(directThreadId);
           // Deletion removes the thread before a late turn.completed can fold
@@ -11542,7 +11361,6 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
         cancelDirectTurnDispatch(bot.id, routineRun.threadId ?? expectedThreadId);
         if (routineRun.threadId) {
           revokeInternalCapabilitiesForThread(routineRun.threadId);
-          await releaseBrowserCapabilityForThread(routineRun.threadId);
         }
         await routines!.cancelRun(routineRun.id);
         return json(res, 200, { ok: true });
@@ -11557,7 +11375,6 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
         }
         cancelGroupTurnOperations(busyGroup.group.id, busyGroup.threadId);
         revokeInternalCapabilitiesForThread(busyGroup.threadId);
-        await releaseBrowserCapabilityForThread(busyGroup.threadId);
         await instance?.adapter.interruptTurn(busyGroup.threadId).catch(() => {});
         closeOpenApprovals(busyGroup.threadId);
         return json(res, 200, { ok: true });
@@ -11573,7 +11390,6 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
       const cancelledDirect = cancelDirectTurnDispatch(bot.id, expectedThreadId);
       const directThreadId = cancelledDirect?.threadId ?? bot.threadId;
       revokeInternalCapabilitiesForThread(directThreadId);
-      await releaseBrowserCapabilityForThread(directThreadId);
       await instance?.adapter.interruptTurn(directThreadId).catch(() => {});
       closeOpenApprovals(directThreadId);
       return json(res, 200, { ok: true });
@@ -11850,6 +11666,26 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
     // the same API shape but a different pid)
     if (method === "GET" && path === "/api/health") {
       return json(res, 200, { app: "openmausbot", pid: process.pid, static: Boolean(STATIC_DIR) });
+    }
+    // The bots' browser engine: install it on this machine (agent-browser +
+    // a Chrome for Testing, a one-time download), or ask how that is going.
+    // One install at a time; the config frame's browserEngine tells the rest.
+    if (method === "POST" && path === "/api/browser-engine/install") {
+      if (!browserEngineInstall) {
+        const status = browserEngineStatus();
+        if (status.kind === "unavailable" && !status.installable) return json(res, 409, { error: status.reason });
+        browserEngineInstall = (async () => {
+          const binary = resolveAgentBrowserBinary() ?? await installAgentBrowserBinary({ log: (line) => console.log(line) });
+          await ensureChrome(binary, { log: (line) => console.log(line) });
+        })().then(
+          () => { browserEngineInstallError = null; },
+          (error: unknown) => { browserEngineInstallError = error instanceof Error ? error.message : String(error); },
+        ).finally(() => {
+          browserEngineInstall = null;
+          broadcast({ kind: "config", ...configStatus() });
+        });
+      }
+      return json(res, 202, { installing: true });
     }
     // Which edition this server runs and why (see server/enterprise.ts). Read-only.
     if (method === "GET" && path === "/api/edition") {
@@ -12517,7 +12353,6 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
           let mandatoryError: unknown = null;
           if (disablingBuiltInBrowser) {
             try {
-              await releaseAllBrowserCapabilities();
             } catch (error) {
               mandatoryError = error;
             }
@@ -12978,7 +12813,6 @@ const gracefulShutdown = createGracefulShutdown({
       webhookIngress?.server.close();
       tunnelListener?.close();
     },
-    () => releaseAllBrowserCapabilities(),
     () => registry.disposeAll(),
     () => flushAllProfileHistory(),
   ],
