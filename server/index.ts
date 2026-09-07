@@ -12168,6 +12168,36 @@ server.on("upgrade", (req, socket, head) => {
 const gracefulShutdown = createGracefulShutdown({
   cleanup: [
     () => {
+      // Record in-flight delegated builder turns as "interrupted" (killed by restart).
+      // Persist distinct "interrupted" receipt and surface notice to source so it can re-dispatch.
+      // Do this first so receipts are durable before other cleanups.
+      for (const [targetThreadId, watched] of Array.from(delegationWatch.entries())) {
+        delegationWatch.delete(targetThreadId);
+        if (watched.taskId && watched.sourceThreadId) {
+          recordDelegationReceipt({
+            id: watched.taskId,
+            sourceThreadId: watched.sourceThreadId,
+            toBotId: watched.toBotId,
+            toBotName: store.bot(watched.toBotId)?.name ?? watched.toBotId ?? "peer",
+            status: "interrupted",
+            result: "interrupted by server restart",
+          });
+        }
+        const targetName = watched.toBotName || (watched.toBotId ? (store.bot(watched.toBotId)?.name ?? watched.toBotId) : "peer");
+        const sourceThread = watched.sourceThreadId;
+        if (sourceThread) {
+          store.appendMessage(sourceThread, {
+            role: "bot",
+            kind: "activity",
+            tool: {
+              name: `[delegation interrupted by restart] to @${targetName}`,
+              ok: false,
+            },
+          });
+        }
+      }
+    },
+    () => {
       // Child MCP processes and the HTTP listener can remain alive while the
       // asynchronous shutdown jobs drain. Invalidate their turn bearers before
       // any cleanup function reaches an await.

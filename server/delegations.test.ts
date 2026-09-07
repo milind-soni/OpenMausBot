@@ -12,6 +12,7 @@ import { DATA_DIR } from "./config.ts";
 import type { ModelSelection } from "./contracts.ts";
 import {
   buildDelegationFailurePrompt,
+  buildDelegationInterruptedPrompt,
   buildDelegationRevivalPrompt,
   DELEGATION_WAKE_MAX_PER_WINDOW,
   DELEGATION_WAKE_WINDOW_MS,
@@ -801,6 +802,22 @@ describe("busy retries and receipts", () => {
     expect(_pendingCount(from.threadId)).toBe(0);
     expect(findDelegationReceipt(queued.id!)).toMatchObject({ status: "dropped" });
   });
+  it("records interrupted status distinctly from dropped for restart recovery", () => {
+    const id = "int-1";
+    recordDelegationReceipt({
+      id,
+      sourceThreadId: "t1",
+      toBotId: "b2",
+      toBotName: "Helper",
+      status: "interrupted",
+      result: "interrupted by server restart",
+    });
+    const r = findDelegationReceipt(id);
+    expect(r).not.toBeNull();
+    expect(r!.status).toBe("interrupted");
+    expect(r!.result).toContain("restart");
+  });
+
 });
 
 describe("originating group routing", () => {
@@ -944,6 +961,13 @@ describe("peer wake helpers", () => {
     expect(prompt).toContain("delegated turn stalled");
     expect(prompt).toContain("tell the user what failed");
     expect(prompt).toContain("Do not re-delegate the exact same task unchanged");
+  });
+
+  it("buildDelegationInterruptedPrompt names the peer and explains restart recovery", () => {
+    const prompt = buildDelegationInterruptedPrompt("Helper");
+    expect(prompt).toContain("@Helper");
+    expect(prompt).toContain("interrupted by a server restart");
+    expect(prompt).toContain("Re-dispatch the work or complete it yourself");
   });
 
   it("DelegationWakeBudget caps bursts per thread and expires with the window", () => {

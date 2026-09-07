@@ -57,7 +57,7 @@ interface PendingDelegationItem extends DelegationItem {
   waitingOnBusy?: boolean;
 }
 
-export type DelegationOutcome = "done" | "failed" | "denied" | "busy_gave_up" | "dropped" | "error";
+export type DelegationOutcome = "done" | "failed" | "denied" | "busy_gave_up" | "dropped" | "error" | "interrupted";
 
 /** The durable terminal record of one handoff: what the delegating bot reads
  * back with check_delegation / wait_delegation. Bounded and pruned — this is
@@ -674,6 +674,14 @@ export function buildDelegationFailurePrompt(targetName: string, reason: string)
     "Take over: tell the user what failed in plain terms, then decide the next step — retry with a narrower task, do the work yourself, or propose an alternative. Do not re-delegate the exact same task unchanged.",
   ].join("\n\n");
 }
+export function buildDelegationInterruptedPrompt(targetName: string): string {
+  return [
+    "[A delegated task was interrupted]",
+    `The task you delegated to @${targetName} was interrupted by a server restart.`,
+    "The peer turn was killed. Any partial output may be in the thread. Re-dispatch the work or complete it yourself.",
+  ].join("\n\n");
+}
+
 
 export const DELEGATION_WAKE_MAX_PER_WINDOW = 3;
 export const DELEGATION_WAKE_WINDOW_MS = 5 * 60 * 1000;
