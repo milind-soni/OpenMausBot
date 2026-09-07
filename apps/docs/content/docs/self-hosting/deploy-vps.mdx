@@ -108,7 +108,7 @@ One container for the server plus Caddy for HTTPS at `https://maus.example.com`.
    ```sh
    git clone https://github.com/milind-soni/OpenMausBot && cd OpenMausBot/deploy
    cp .env.example .env
-   nano .env                # DOMAIN=maus.example.com ; ENGINES=@anthropic-ai/claude-code @openai/codex
+   nano .env                # DOMAIN=maus.example.com ; ENGINES=@anthropic-ai/claude-code@2.1.263 @openai/codex@0.153.4
    ```
 
    `ENGINES` lists the engine CLIs baked into your image, separated by spaces. Change it later and rebuild if you add one.

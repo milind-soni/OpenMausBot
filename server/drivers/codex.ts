@@ -454,9 +454,9 @@ export const CodexDriver: ProviderDriver<CodexConfig> = {
   metadata: { displayName: "Codex", supportsMultipleInstances: true },
   install: {
     command: {
-      darwin: "npm install -g @openai/codex",
-      linux: "npm install -g @openai/codex",
-      win32: "npm install -g @openai/codex",
+      darwin: "npm install -g @openai/codex@0.153.4",
+      linux: "npm install -g @openai/codex@0.153.4",
+      win32: "npm install -g @openai/codex@0.153.4",
     },
     needsNode: true,
     docsUrl: "https://github.com/openai/codex",

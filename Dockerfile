@@ -7,12 +7,12 @@
 # to terminate TLS and authentication at the edge.
 #
 #   docker build -t openmausbot .
-#   docker build --build-arg ENGINES="@anthropic-ai/claude-code @openai/codex" -t openmausbot .
+#   docker build --build-arg ENGINES="@anthropic-ai/claude-code@2.1.263 @openai/codex@0.153.4" -t openmausbot .
 #
 # HOME is the /data volume, so engine CLI logins (~/.claude, ~/.codex, ...) and
 # OpenMausBot's own state (~/.openmausbot) persist across container restarts.
 
-FROM node:24-bookworm-slim AS build
+FROM node:24.15.0-bookworm-slim@sha256:4e6b70dd6cbfc88c8157ba19aa3d9f9cce6ba4703576d55459e45efcbc9c5f5d AS build
 WORKDIR /src
 # pinned to package.json#packageManager; corepack is being removed from Node
 RUN npm install -g pnpm@10.33.0
@@ -26,12 +26,19 @@ RUN pnpm install --frozen-lockfile
 COPY . .
 RUN pnpm build:server && pnpm exec vite build
 
-FROM node:24-bookworm-slim
+FROM node:24.15.0-bookworm-slim@sha256:4e6b70dd6cbfc88c8157ba19aa3d9f9cce6ba4703576d55459e45efcbc9c5f5d
 # Install Chrome's Bookworm libraries directly: agent-browser --with-deps
 # invokes sudo even as root, and this image deliberately does not ship sudo.
 # git + curl: agent CLIs shell out to git; curl backs the healthcheck
-RUN apt-get update \
-  && apt-get install -y --no-install-recommends ca-certificates curl git \
+ARG DEBIAN_SNAPSHOT=20260907T000000Z
+RUN printf '%s\n' \
+    "deb [check-valid-until=no] http://snapshot.debian.org/archive/debian/${DEBIAN_SNAPSHOT} bookworm main" \
+    "deb [check-valid-until=no] http://snapshot.debian.org/archive/debian/${DEBIAN_SNAPSHOT} bookworm-updates main" \
+    "deb [check-valid-until=no] http://snapshot.debian.org/archive/debian-security/${DEBIAN_SNAPSHOT} bookworm-security main" \
+    > /etc/apt/sources.list \
+  && rm -f /etc/apt/sources.list.d/debian.sources \
+  && apt-get update \
+  && apt-get install -y --no-install-recommends ca-certificates curl git unzip \
     libxcb-shm0 libx11-xcb1 libx11-6 libxcb1 libxext6 libxrandr2 \
     libxcomposite1 libxcursor1 libxdamage1 libxfixes3 libxi6 libgtk-3-0 \
     libpangocairo-1.0-0 libpango-1.0-0 libatk1.0-0 libcairo-gobject2 \
@@ -51,9 +58,16 @@ RUN if [ -n "$ENGINES" ]; then npm install -g $ENGINES; fi
 # and a Chrome for Testing with its libraries, so a server bot can browse.
 # Pin here and in server/browser-engine-release.ts together.
 ARG AGENT_BROWSER_VERSION=0.37.0
+ARG CHROME_FOR_TESTING_VERSION=152.0.7977.82
+ARG CHROME_FOR_TESTING_SHA256=0704631fb3e4f741092e08f55272f90abc3e307f991f05f332924364415b02e0
 RUN npm install -g agent-browser@${AGENT_BROWSER_VERSION} \
-  && HOME=/opt/openmausbot-browser agent-browser install \
-  && ln -s /opt/openmausbot-browser/.agent-browser/browsers/chrome-*/chrome /opt/openmausbot-browser/chrome \
+  && curl -fsSL --retry 3 "https://storage.googleapis.com/chrome-for-testing-public/${CHROME_FOR_TESTING_VERSION}/linux64/chrome-linux64.zip" -o /tmp/chrome.zip \
+  && echo "${CHROME_FOR_TESTING_SHA256}  /tmp/chrome.zip" | sha256sum -c - \
+  && mkdir -p "/opt/openmausbot-browser/.agent-browser/browsers/chrome-${CHROME_FOR_TESTING_VERSION}" \
+  && unzip -q /tmp/chrome.zip -d /tmp \
+  && cp -a /tmp/chrome-linux64/. "/opt/openmausbot-browser/.agent-browser/browsers/chrome-${CHROME_FOR_TESTING_VERSION}/" \
+  && rm -rf /tmp/chrome.zip /tmp/chrome-linux64 \
+  && ln -s "/opt/openmausbot-browser/.agent-browser/browsers/chrome-${CHROME_FOR_TESTING_VERSION}/chrome" /opt/openmausbot-browser/chrome \
   && agent-browser --version
 # Keep the baked-in browser outside both root's private home and /data,
 # which may be an existing mounted volume. Session state still lives in HOME.
