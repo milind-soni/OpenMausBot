@@ -60,8 +60,6 @@ export interface WebhookIngressStatus {
 export interface WebhookCredential {
   endpointUrl: string;
   secret: string;
-  /** Capability URL for senders that cannot configure an Authorization header. */
-  url: string;
 }
 
 /** New local webhooks are ready to execute immediately. Editing an existing

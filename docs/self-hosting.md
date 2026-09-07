@@ -224,9 +224,11 @@ docker compose exec omb node dist-server/openmausbot.js pair # prints a code, a 
 
 Open the link (`https://<DOMAIN>/pair#code=…`) in a browser and it is
 paired; see "Using it from your computer" for what a session is. Webhook
-URLs (`https://<DOMAIN>/hooks/wh_…`) work without a session, and that is the
-base the app prints on new hooks because the stack sets
-`OMB_WEBHOOK_PUBLIC_URL`.
+endpoints (`https://<DOMAIN>/hooks/wh_…`) use their own bearer secret instead
+of a session, and that is the base the app prints on new hooks because the
+stack sets `OMB_WEBHOOK_PUBLIC_URL`. Old URLs containing the secret are
+rejected unless `OMB_WEBHOOK_LEGACY_PATH_SECRETS=1` is temporarily set for
+migration.
 
 What the stack does, so you can adapt it:
 

@@ -7626,16 +7626,17 @@ describe("harness HTTP API", () => {
     });
     expect(created.status).toBe(201);
     expect(created.body.ingress).toMatchObject({ available: true, baseUrl: WEBHOOK_BASE });
-    expect(created.body.credential.url).toMatch(new RegExp(`^${WEBHOOK_BASE}/hooks/wh_`));
+    expect(created.body.credential.endpointUrl).toMatch(new RegExp(`^${WEBHOOK_BASE}/hooks/wh_`));
+    expect(created.body.credential).not.toHaveProperty("url");
 
     const listed = await api("GET", "/api/webhooks");
     expect(listed.body.webhooks).toHaveLength(1);
     expect(listed.body.attempts).toEqual([]);
     expect(JSON.stringify(listed.body)).not.toContain(created.body.credential.secret);
 
-    const deliver = () => fetch(created.body.credential.url, {
+    const deliver = () => fetch(created.body.credential.endpointUrl, {
       method: "POST",
-      headers: { "content-type": "application/json", "idempotency-key": "build-42" },
+      headers: { authorization: `Bearer ${created.body.credential.secret}`, "content-type": "application/json", "idempotency-key": "build-42" },
       body: JSON.stringify({ status: "failed", build: 42 }),
     });
     const first = await deliver();
@@ -7658,7 +7659,7 @@ describe("harness HTTP API", () => {
 
     const rotated = await api("POST", `/api/webhooks/${created.body.webhook.id}/rotate`);
     expect(rotated.status).toBe(200);
-    expect(rotated.body.credential.url).not.toBe(created.body.credential.url);
+    expect(rotated.body.credential.secret).not.toBe(created.body.credential.secret);
     expect((await deliver()).status).toBe(401);
 
     expect((await api("DELETE", `/api/webhooks/${created.body.webhook.id}`)).status).toBe(200);
