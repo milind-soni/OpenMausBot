@@ -316,9 +316,10 @@ receipts.
 
 OpenMausBot starts a webhook-only receiver on `127.0.0.1:8800` by default (or one port above `OMB_PORT`).
 Set `OMB_WEBHOOK_PORT` to choose another port. A webhook secret is shown once when the trigger is created
-or rotated. Bearer authentication is recommended so the secret stays out of request URLs and most access
-logs; a single capability URL remains available for senders that cannot configure headers. The receiver
-exposes only `/health` and secret `/hooks/...` endpoints; it never exposes the app's broader API.
+or rotated. Send it as `Authorization: Bearer <secret>` to the displayed `/hooks/wh_...` endpoint so it
+stays out of request URLs and access logs. Old secret-bearing URLs are rejected by default; temporarily set
+`OMB_WEBHOOK_LEGACY_PATH_SECRETS=1` only while migrating a sender that cannot configure headers. The receiver
+exposes only `/health` and authenticated `/hooks/...` endpoints; it never exposes the app's broader API.
 OpenMausBot must remain running to accept a delivery. For public internet delivery, proxy only this
 dedicated receiver through a hosted relay or a tool such as Tailscale Funnel.
 

@@ -67,10 +67,13 @@ const KEY_SUFFIX_ASSIGNMENT = /\b([A-Za-z][A-Za-z0-9_-]*[_-]key)s?(=)(["']?)([A-
 const SECRET_FLAG = /(--(?:token|password|passwd|api-key|apikey|secret|access-key|auth-token)(?:=|\s+))(["']?)(?!-)([A-Za-z0-9._~+/=-]+)\2/gi;
 /** `scheme://user:secret@host` — the password in a URL's userinfo. */
 const URL_USERINFO = /(\b[a-z][a-z0-9+.-]*:\/\/[^\s/:@'"]+:)([^\s/@'"«»]+)(@)/gi;
+const WEBHOOK_PATH_SECRET =
+  /(\/hooks\/wh_[A-Za-z0-9_-]+\/)(\u00ABredacted \d+ chars\u00BB|[^/?#\s'"]+)/g;
 
 export function redactSecretsInText(text: string): string {
   if (!text || text.length < 8) return text;
   let out = text;
+  out = out.replace(WEBHOOK_PATH_SECRET, (_m, path: string, secret: string) => `${path}${mask(secret)}`);
   out = out.replace(PEM_BLOCK, (_m, open: string, body: string, close: string) => `${open}\n${mask(body.trim())}\n${close}`);
   for (const re of KEY_PREFIXES) out = out.replace(re, (m) => mask(m));
   out = out.replace(BEARER, (_m, lead: string, tok: string) => `${lead}${mask(tok)}`);
