@@ -67,6 +67,35 @@ export function ModelSection({
           </div>
         </div>
       )}
+
+      <div className="rounded-xl bg-card p-4">
+        <div className="text-[15px] font-medium text-ink">Answer depth</div>
+        {/* Same shape as Effort above, and for the same reason: the default
+            sends nothing at all, so a bot that predates this setting reads
+            exactly as it always did. Unlike Effort it needs no engine
+            capability — it is prompt text, so every engine honours it. */}
+        <div className="mt-0.5 text-[13px] text-ink-secondary">
+          How much work a reply shows{bot.depth && bot.depth !== "standard" ? "" : " (Standard: nothing is added)"}
+        </div>
+        <div className="mt-3 flex overflow-hidden rounded-lg border border-hairline/40">
+          {(["quick", "standard", "deep"] as const).map((level, i) => (
+            <button
+              key={level}
+              aria-pressed={(bot.depth ?? "standard") === level}
+              onClick={() => patch({ depth: level })}
+              className={cn(
+                "flex-1 py-1.5 text-[13px] capitalize",
+                i > 0 && "border-l border-hairline/40",
+                (bot.depth ?? "standard") === level
+                  ? "bg-control text-ink"
+                  : "text-ink-secondary hover:bg-control/60 hover:text-ink",
+              )}
+            >
+              {level === "deep" ? "Deep report" : level}
+            </button>
+          ))}
+        </div>
+      </div>
     </div>
   );
 }
