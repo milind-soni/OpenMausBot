@@ -318,9 +318,30 @@ function trustedAuthUrl(value: string | undefined, slug: string): string {
   return url.toString();
 }
 
+/** Composio's own hosts are always trusted. A backend the operator pointed
+ * the app at explicitly (OMB_COMPOSIO_API — a dev or test stub) may hand back
+ * a Session on its own origin, since the API itself was already trusted that
+ * far; any other host is refused. */
+export function trustedSessionMcpUrl(value: string): boolean {
+  let mcp: URL;
+  try {
+    mcp = new URL(value);
+  } catch {
+    return false;
+  }
+  if (mcp.protocol === "https:" && (mcp.hostname === "composio.dev" || mcp.hostname.endsWith(".composio.dev"))) return true;
+  const override = process.env.OMB_COMPOSIO_API;
+  if (!override) return false;
+  try {
+    return new URL(override).origin === mcp.origin;
+  } catch {
+    return false;
+  }
+}
+
 function parseSessionResponse(session: SessionResponse): SessionResponse {
   const mcp = new URL(session.mcp.url);
-  if (mcp.protocol !== "https:" || (mcp.hostname !== "composio.dev" && !mcp.hostname.endsWith(".composio.dev"))) {
+  if (!trustedSessionMcpUrl(session.mcp.url)) {
     throw new Error("Composio returned an untrusted Session MCP URL");
   }
   return { ...session, mcp: { ...session.mcp, url: mcp.toString() } };

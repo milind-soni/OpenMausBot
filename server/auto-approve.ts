@@ -12,6 +12,7 @@
 // sandbox and the bot's own computer, not a regex.
 
 import { approvalModeFor, type ApprovalMode } from "../shared/approval-mode.ts";
+import { isOutboundTool } from "../shared/outbound.ts";
 
 /** The mode a turn actually runs under, given where the turn came from.
  *
@@ -116,6 +117,7 @@ export type AutoVerdictSource =
   | "local-computer-block"
   | "destructive-guard"
   | "sensitive-guard"
+  | "outbound-guard"
   | "no-grant";
 
 /** A durable "Always allow" choice is offered only when that exact grant
@@ -196,13 +198,18 @@ export function autoVerdict(
   // into them
   const destructive = matchFirst(DESTRUCTIVE, summary) ?? matchFirst(DESTRUCTIVE, tool);
   const sensitive = destructive ? null : matchFirst(SENSITIVE, summary);
+  // Sending on the person's behalf is its own confirmation, like credentials
+  // and routines: it is judged by the tool's name, not the summary, because
+  // the summary of a send is the recipient and the words, and neither is a
+  // reason to skip asking. Full access has already returned above.
+  const outbound = !destructive && !sensitive && isOutboundTool(tool) ? tool : null;
   // The grant is computed even when a hard block will refuse it: the row
   // worth auditing is "this WOULD have auto-approved, and only the block
   // stood in the way", which cannot be told apart from an ordinary
   // "nobody granted this" card without knowing both halves.
   const key = approvalKey(tool, summary, context?.scope);
   const grant =
-    destructive || sensitive
+    destructive || sensitive || outbound
       ? null
       : mode !== "custom" && bot.alwaysAllow?.includes(key)
         ? { approve: `auto-approved ${key} (always allowed)`, source: "always-allow" as const, rule: key }
@@ -220,6 +227,7 @@ export function autoVerdict(
     if (grant) return { approve: null, source: "unattended-block", rule: grant.rule };
     if (destructive) return { approve: null, source: "destructive-guard", rule: destructive };
     if (sensitive) return { approve: null, source: "sensitive-guard", rule: sensitive };
+    if (outbound) return { approve: null, source: "outbound-guard", rule: outbound };
     return { approve: null, source: "no-grant" };
   }
   if (context?.scope === "local-computer" && mode !== "auto") {
@@ -229,10 +237,12 @@ export function autoVerdict(
     if (grant) return { approve: null, source: "local-computer-block", rule: grant.rule };
     if (destructive) return { approve: null, source: "destructive-guard", rule: destructive };
     if (sensitive) return { approve: null, source: "sensitive-guard", rule: sensitive };
+    if (outbound) return { approve: null, source: "outbound-guard", rule: outbound };
     return { approve: null, source: "no-grant" };
   }
   if (destructive) return { approve: null, source: "destructive-guard", rule: destructive };
   if (sensitive) return { approve: null, source: "sensitive-guard", rule: sensitive };
+  if (outbound) return { approve: null, source: "outbound-guard", rule: outbound };
   if (grant) return { approve: grant.approve, source: grant.source, rule: grant.rule };
   return { approve: null, source: "no-grant" };
 }
@@ -301,6 +311,7 @@ export const HELD_NOTE = {
     "A webhook or another bot started this turn, so Approve for me is paused and every action asks. Full access keeps working unattended.",
   "approval.held.destructive": "This looks destructive, so Approve for me stopped to ask.",
   "approval.held.sensitive": "This touches credentials, so Approve for me stopped to ask.",
+  "approval.held.outbound": "This sends something on your behalf, so it always asks first.",
   "approval.held.needsYou": "This action needs you, so Approve for me stopped to ask.",
   "approval.held.undeliveredFull": "Full access couldn't deliver this approval.",
   "approval.held.undelivered": "Approve for me couldn't answer this one.",
@@ -336,5 +347,6 @@ export function approvalHeldNote(context: {
   // "destructive" teaches people to stop reading these.
   if (context.source === "destructive-guard") return "approval.held.destructive";
   if (context.source === "sensitive-guard") return "approval.held.sensitive";
+  if (context.source === "outbound-guard") return "approval.held.outbound";
   return "approval.held.needsYou";
 }

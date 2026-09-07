@@ -50,6 +50,10 @@ const TERMINAL_PATTERNS: Array<{ pattern: RegExp; reason: TerminalReason }> = [
     pattern: /\b(?:40[13]|unauthorized|forbidden|invalid api key|missing bearer|authentication required|not logged in|logged out)\b/i,
     reason: "auth",
   },
+  // A subscription's usage window is hours away, so its limit is terminal
+  // for this engine even when the provider phrases it as a rate limit;
+  // checked before the transient 429 pattern for that reason.
+  { pattern: /\busage limit\b|\bhit your (?:usage )?limit\b|\blimit reached\b|\bout of credits\b/i, reason: "quota" },
   { pattern: /\b402\b|\bquota\b|\bbilling\b|\bsubscription\b/i, reason: "quota" },
   { pattern: /\bmodel not found\b|\bunknown model\b|\bdoes not exist for model\b|\bunsupported model\b/i, reason: "unknown_model" },
   { pattern: /\b400\b|\b422\b|\binvalid request\b|\bmalformed\b|\bunexpected status\b/i, reason: "invalid_request" },

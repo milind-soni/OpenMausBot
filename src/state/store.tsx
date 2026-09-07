@@ -17,6 +17,8 @@ import type { CloudBackend, EffortLevel } from "../../server/contracts.ts";
 import type { MausColor, MausMotion } from "@/lib/mascot";
 import type { BotAvatarCrop } from "../../shared/bot-avatar";
 import { approvalModeFor, type ApprovalMode } from "../../shared/approval-mode";
+import type { OutboundPolicy } from "../../shared/outbound";
+import type { ConnectorScopes } from "../../shared/connector-scopes";
 import type { MascotBodyId } from "../../shared/mascot-bodies";
 import type { ProfileRequestCardData } from "../../shared/profile-request";
 import type { RoutineRequestCardData } from "../../shared/routine-request";
@@ -286,6 +288,12 @@ export interface Bot {
   autoReview?: "off" | "shadow" | "enforce";
   /** tools this bot may always use without asking */
   alwaysAllow?: string[];
+  /** sending on your behalf: ask every time (absent), or a daily allowance */
+  outbound?: OutboundPolicy;
+  /** which connected apps this bot may use; absent means all of them */
+  connectorScopes?: ConnectorScopes;
+  /** engines to carry a task on to when this one hits a limit, in order */
+  fallback?: Array<{ instanceId: string; model: string }>;
   /** speak this bot's replies aloud as they settle */
   speakReplies?: boolean;
   /** this bot's own voice id (falls back to the app-wide one) */
@@ -463,6 +471,9 @@ export interface InstanceInfo {
   /** `custom` agents sit below the rail divider — no subscription catalog. */
   access?: "subscription" | "custom";
   install?: EngineInstall;
+  /** A second account on an engine: the default instance it is another
+   * login of. Only such profiles can be removed. */
+  accountOf?: string;
   /** Configured CLI path override — set ONLY when the user overrode it;
    * absent means the driver default is in effect. */
   cli?: string;
@@ -514,6 +525,8 @@ export interface AppState {
   computerOpen: boolean;
   /** the per-thread event inspector (runtime stream + native protocol tee) */
   inspectorOpen: boolean;
+  /** the bot's activity log: what it did, with the outcome */
+  activityOpen: boolean;
   appSettingsOpen: boolean;
   appSettingsSection: AppSettingsSection;
   botSettingsSection: BotSettingsSection;
@@ -708,6 +721,7 @@ export type Action =
   | { type: "togglePlugins"; open?: boolean }
   | { type: "toggleComputer"; open?: boolean }
   | { type: "toggleInspector"; open?: boolean }
+  | { type: "toggleActivity"; open?: boolean }
   | { type: "focusMessage"; threadId: string; messageId: string }
   | { type: "focusMessageConsumed"; nonce: number }
   | { type: "toggleAppSettings"; open?: boolean; section?: AppSettingsSection }
@@ -858,6 +872,7 @@ export function reducer(state: AppState, action: Action): AppState {
         settingsOpen: false,
         computerOpen: false,
         inspectorOpen: false,
+        activityOpen: false,
         appSettingsOpen: false,
         pluginsOpen: false,
       };
@@ -868,6 +883,7 @@ export function reducer(state: AppState, action: Action): AppState {
         settingsOpen: false,
         computerOpen: false,
         inspectorOpen: false,
+        activityOpen: false,
         appSettingsOpen: false,
         pluginsOpen: false,
       };
@@ -879,6 +895,7 @@ export function reducer(state: AppState, action: Action): AppState {
         settingsOpen: false,
         computerOpen: false,
         inspectorOpen: false,
+        activityOpen: false,
         appSettingsOpen: false,
         pluginsOpen: false,
       };
@@ -1276,6 +1293,7 @@ export function reducer(state: AppState, action: Action): AppState {
         computerOpen: open,
         settingsOpen: open ? false : state.settingsOpen,
         inspectorOpen: open ? false : state.inspectorOpen,
+        activityOpen: open ? false : state.activityOpen,
         appSettingsOpen: open ? false : state.appSettingsOpen,
       };
     }
@@ -1286,6 +1304,18 @@ export function reducer(state: AppState, action: Action): AppState {
         inspectorOpen: open,
         settingsOpen: open ? false : state.settingsOpen,
         computerOpen: open ? false : state.computerOpen,
+        activityOpen: open ? false : state.activityOpen,
+        appSettingsOpen: open ? false : state.appSettingsOpen,
+      };
+    }
+    case "toggleActivity": {
+      const open = action.open ?? !state.activityOpen;
+      return {
+        ...state,
+        activityOpen: open,
+        settingsOpen: open ? false : state.settingsOpen,
+        computerOpen: open ? false : state.computerOpen,
+        inspectorOpen: open ? false : state.inspectorOpen,
         appSettingsOpen: open ? false : state.appSettingsOpen,
       };
     }
@@ -1324,13 +1354,19 @@ export function reducer(state: AppState, action: Action): AppState {
         acknowledgeLocalAuto: _localAck,
         confirmFullAccess: _fullConfirmation,
         computer,
+        connectorScopes,
         ...rest
       } = action.patch;
-      const botPatch = computer === null
+      const withComputer = computer === null
         ? { ...rest, computer: undefined }
         : computer === undefined
           ? rest
           : { ...rest, computer };
+      // null is the wire form of "back to every app"; Bot state keeps that
+      // as an absent field, the same way Auto is for `computer`
+      const botPatch = connectorScopes === undefined
+        ? withComputer
+        : { ...withComputer, connectorScopes: connectorScopes ?? undefined };
       return updateBot(next, action.botId, (b) => ({ ...b, ...botPatch }));
     }
     case "threadActive": {
@@ -1527,6 +1563,7 @@ export const initialState: AppState = {
   pluginsOpen: false,
   computerOpen: false,
   inspectorOpen: false,
+  activityOpen: false,
   appSettingsOpen: false,
   appSettingsSection: "general",
   botSettingsSection: "overview",

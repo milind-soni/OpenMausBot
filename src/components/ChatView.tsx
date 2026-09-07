@@ -10,6 +10,7 @@ import {
   Copy,
   Crown,
   Folder,
+  ListChecks,
   ListTree,
   Monitor,
   MessageSquareReply,
@@ -1200,6 +1201,18 @@ export function ChatView({ bot }: { bot: Bot }) {
             title="Bot's computer"
           >
             <Monitor size={18} />
+          </button>
+          <button
+            onClick={() => dispatch({ type: "toggleActivity" })}
+            aria-label="Activity"
+            aria-pressed={state.activityOpen}
+            className={cn(
+              "rounded-md p-1.5 hover:bg-raised",
+              state.activityOpen ? "text-accent" : "text-ink-secondary hover:text-ink",
+            )}
+            title="Activity — what this bot did, with the outcome"
+          >
+            <ListChecks size={18} />
           </button>
           {!remoteClient && <button
             onClick={() => dispatch({ type: "toggleInspector" })}

@@ -11,6 +11,7 @@ import { RemoteAgentSettingsPanel } from "@/components/RemoteAgentSettingsPanel"
 import { PluginsPanel, preloadConnectedApps } from "@/components/PluginsPanel";
 import { ComputerPanel } from "@/components/ComputerPanel";
 import { RemoteDesktopPanel } from "@/components/remote-desktop-panel";
+import { ActivityPanel } from "@/components/ActivityPanel";
 import { InspectorPanel } from "@/components/InspectorPanel";
 import { SettingsModal } from "@/components/SettingsModal";
 import { UpdateBanner } from "@/components/UpdateBanner";
@@ -164,6 +165,7 @@ function Shell() {
     state.settingsOpen ||
     state.computerOpen ||
     state.inspectorOpen ||
+    state.activityOpen ||
     state.appSettingsOpen ||
     state.pluginsOpen;
 
@@ -269,6 +271,7 @@ function Shell() {
         )
       )}
       {!remoteClient && state.inspectorOpen && bot && <InspectorPanel bot={bot} />}
+      {state.activityOpen && bot && <ActivityPanel key={bot.id} bot={bot} />}
       {state.appSettingsOpen && <SettingsModal />}
       {state.pluginsOpen && <PluginsPanel />}
       {/* mounted after the modals: same z-50 tier, so DOM order keeps the

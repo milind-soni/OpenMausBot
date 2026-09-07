@@ -131,6 +131,8 @@ let fakeDockerFixture: string;
 let fakeDockerLog: string;
 let stderr = "";
 let connectorAccounts: Array<{ id: string; alias: string; status: string; toolkit: { slug: string } }> = [];
+/** Every JSON-RPC message the stub's MCP endpoint received through the relay. */
+let relayedMcpCalls: Array<{ id?: unknown; method?: string; params?: { name?: string; arguments?: unknown } }> = [];
 const connectorLinkRequests: Array<{ toolkit: string; alias?: string }> = [];
 const browserCapabilityCalls: Array<{ operation: string; authorization?: string; body: any }> = [];
 let browserRevokeFailuresRemaining = 0;
@@ -616,6 +618,16 @@ beforeAll(async () => {
   );
 
   boxStub = createServer(async (req, res) => {
+    // The Composio Session's MCP endpoint, so a relayed tool call lands here
+    // instead of on the internet. Answers every call with one text result.
+    if (req.url === "/mcp") {
+      let raw = "";
+      for await (const chunk of req) raw += chunk;
+      const body = raw ? JSON.parse(raw) : {};
+      relayedMcpCalls.push(body);
+      res.writeHead(200, { "content-type": "application/json" });
+      return res.end(JSON.stringify({ jsonrpc: "2.0", id: body.id, result: { content: [{ type: "text", text: "sent by stub" }] } }));
+    }
     if (req.url?.startsWith("/v1/capabilities/")) {
       let raw = "";
       for await (const chunk of req) raw += chunk;
@@ -665,7 +677,7 @@ beforeAll(async () => {
       res.writeHead(201, { "content-type": "application/json" });
       return res.end(JSON.stringify({
         session_id: "trs_config_test",
-        mcp: { type: "http", url: "https://app.composio.dev/tool_router/v3/trs_config_test/mcp" },
+        mcp: { type: "http", url: `http://${req.headers.host}/mcp` },
         config: { user_id: body.user_id },
       }));
     }
@@ -8389,5 +8401,415 @@ describe("computer control API (who is driving)", () => {
   it("keeps the internal who-is-driving endpoint behind the boot token", async () => {
     const res = await fetch(`${BASE}/api/internal/computer-control?botId=${botId}`);
     expect(res.status).toBe(401);
+  });
+});
+
+describe("bot activity API", () => {
+  // The receipt view: one read-only route over two logs that already exist.
+  // The reader itself is pinned in activity.test.ts; this covers the route's
+  // shape and its refusals.
+  it("returns an empty, well-formed page for a bot that has done nothing", async () => {
+    const bot = (await api("POST", "/api/bots")).body.bot;
+    const res = await api("GET", `/api/bots/${bot.id}/activity`);
+    expect(res.status).toBe(200);
+    expect(res.body).toEqual({ rows: [] });
+  });
+
+  it("refuses an unknown bot and a bad limit", async () => {
+    expect((await api("GET", "/api/bots/nope/activity")).status).toBe(404);
+    const bot = (await api("POST", "/api/bots")).body.bot;
+    expect((await api("GET", `/api/bots/${bot.id}/activity?limit=0`)).status).toBe(400);
+    expect((await api("GET", `/api/bots/${bot.id}/activity?limit=abc`)).status).toBe(400);
+  });
+});
+
+describe("outbound gate", () => {
+  // Sending on the person's behalf is its own confirmation in every approval
+  // mode, enforced where every connector call already passes: the relay.
+  type McpResult = { result: { isError?: boolean; content: Array<{ type: string; text: string }> } };
+  const relay = (token: string, id: number, name: string, args: Record<string, unknown> = {}) =>
+    fetch(`${BASE}/api/internal/connectors/mcp`, {
+      method: "POST",
+      headers: { "content-type": "application/json", authorization: `Bearer ${token}` },
+      body: JSON.stringify({ jsonrpc: "2.0", id, method: "tools/call", params: { name, arguments: args } }),
+    });
+  const openCardFor = async (botId: string, tool: string) => {
+    const state = await api("GET", "/api/bots");
+    const bot = state.body.bots.find((candidate: { id: string }) => candidate.id === botId);
+    return bot?.messages.find(
+      (message: { card?: { outboundRequest?: { tool: string }; answered?: string } }) =>
+        message.card?.outboundRequest?.tool === tool && !message.card.answered,
+    );
+  };
+
+  it("holds a send behind a card, and refuses it when the person denies", async () => {
+    const configured = await api("PUT", "/api/config", { composio: { apiKey: "ak_good" } });
+    expect(configured.body.error ?? "").toBe("");
+    const bot = (await api("POST", "/api/bots", { name: "Sender" })).body.bot;
+    try {
+      const token = await mintTestCapability(BASE, bot.id, bot.threadId, { kind: "connectors" });
+      const pending = relay(token, 7, "GMAIL_SEND_EMAIL", { to: "finance@example.com", subject: "Invoice 42" });
+      let card: any;
+      await expect.poll(async () => {
+        card = await openCardFor(bot.id, "GMAIL_SEND_EMAIL");
+        return Boolean(card);
+      }).toBe(true);
+      expect(card.card.title).toMatch(/send/i);
+      expect(card.card.subtitle).toContain("finance@example.com");
+      expect(card.card.heldCode).toBe("approval.held.outbound");
+      expect(card.card.outboundRequest).toEqual({ tool: "GMAIL_SEND_EMAIL", app: "Gmail" });
+
+      const answered = await api("POST", `/api/threads/${bot.threadId}/respond`, { requestId: card.card.requestId, behavior: "deny" });
+      expect(answered.body).toMatchObject({ ok: true, outcome: "rejected" });
+      const response = await pending;
+      expect(response.status).toBe(200);
+      const body = (await response.json()) as McpResult;
+      expect(body.result.isError).toBe(true);
+      expect(body.result.content[0].text).toMatch(/declined/i);
+      expect(relayedMcpCalls.some((call) => call.params?.name === "GMAIL_SEND_EMAIL")).toBe(false);
+      expect((await openCardFor(bot.id, "GMAIL_SEND_EMAIL"))).toBeUndefined();
+      await expect.poll(async () =>
+        (await api("GET", "/api/decisions")).body.decisions
+          .filter((decision: { requestId?: string }) => decision.requestId === card.card.requestId)
+          .map((decision: { decision: string; source: string }) => `${decision.decision}:${decision.source}`)
+          .sort(),
+      ).toEqual(["card-shown:outbound", "user-denied:user"]);
+    } finally {
+      await api("DELETE", `/api/bots/${bot.id}`);
+    }
+  });
+
+  it("forwards an allowed send, counts it, and stops at the daily cap", async () => {
+    expect((await api("PUT", "/api/config", { composio: { apiKey: "ak_good" } })).status).toBe(200);
+    const bot = (await api("POST", "/api/bots", { name: "Poster" })).body.bot;
+    try {
+      const allowed = await api("PATCH", `/api/bots/${bot.id}`, { outbound: { policy: "allow", dailyCap: 1 } });
+      expect(allowed.status).toBe(200);
+      expect(allowed.body.bot.outbound).toEqual({ policy: "allow", dailyCap: 1 });
+      const token = await mintTestCapability(BASE, bot.id, bot.threadId, { kind: "connectors" });
+
+      const first = (await (await relay(token, 8, "SLACK_SEND_MESSAGE", { channel: "#general", text: "hi" })).json()) as McpResult;
+      expect(first.result.content[0].text).toBe("sent by stub");
+      expect(relayedMcpCalls.filter((call) => call.params?.name === "SLACK_SEND_MESSAGE")).toHaveLength(1);
+      expect((await api("GET", `/api/bots/${bot.id}/outbound`)).body).toEqual({ policy: { policy: "allow", dailyCap: 1 }, today: 1 });
+
+      const second = (await (await relay(token, 9, "SLACK_SEND_MESSAGE", { channel: "#general", text: "again" })).json()) as McpResult;
+      expect(second.result.isError).toBe(true);
+      expect(second.result.content[0].text).toMatch(/daily limit/i);
+      expect(relayedMcpCalls.filter((call) => call.params?.name === "SLACK_SEND_MESSAGE")).toHaveLength(1);
+
+      // Reading is not sending: the cap never touches it.
+      const read = (await (await relay(token, 10, "GMAIL_FETCH_EMAILS", { query: "is:unread" })).json()) as McpResult;
+      expect(read.result.content[0].text).toBe("sent by stub");
+      expect(await openCardFor(bot.id, "GMAIL_FETCH_EMAILS")).toBeUndefined();
+    } finally {
+      await api("DELETE", `/api/bots/${bot.id}`);
+    }
+  });
+
+  it("sees a send inside a multi-execute call, and lets a read-only batch through", async () => {
+    expect((await api("PUT", "/api/config", { composio: { apiKey: "ak_good" } })).status).toBe(200);
+    const bot = (await api("POST", "/api/bots", { name: "Batcher" })).body.bot;
+    try {
+      const token = await mintTestCapability(BASE, bot.id, bot.threadId, { kind: "connectors" });
+      const reads = (await (await relay(token, 11, "COMPOSIO_MULTI_EXECUTE_TOOL", {
+        tools: [{ tool_slug: "GMAIL_FETCH_EMAILS", arguments: { query: "is:unread" } }, { tool_slug: "SLACK_SEARCH_MESSAGES", arguments: {} }],
+        sync_response_to_workbench: false,
+      })).json()) as McpResult;
+      expect(reads.result.content[0].text).toBe("sent by stub");
+
+      const pending = relay(token, 12, "COMPOSIO_MULTI_EXECUTE_TOOL", {
+        tools: [{ tool_slug: "GMAIL_FETCH_EMAILS", arguments: {} }, { tool_slug: "GMAIL_SEND_EMAIL", arguments: { to: "vendor@example.com" } }],
+        sync_response_to_workbench: false,
+      });
+      let card: any;
+      await expect.poll(async () => {
+        card = await openCardFor(bot.id, "GMAIL_SEND_EMAIL");
+        return Boolean(card);
+      }).toBe(true);
+      expect(card.card.subtitle).toContain("vendor@example.com");
+      await api("POST", `/api/threads/${bot.threadId}/respond`, { requestId: card.card.requestId, behavior: "deny" });
+      const refused = (await (await pending).json()) as McpResult;
+      expect(refused.result.isError).toBe(true);
+    } finally {
+      await api("DELETE", `/api/bots/${bot.id}`);
+    }
+  });
+
+  it("validates the policy and defaults to asking", async () => {
+    const bot = (await api("POST", "/api/bots")).body.bot;
+    try {
+      expect((await api("GET", `/api/bots/${bot.id}/outbound`)).body).toEqual({ policy: { policy: "ask", dailyCap: 25 }, today: 0 });
+      expect((await api("PATCH", `/api/bots/${bot.id}`, { outbound: { policy: "maybe" } })).status).toBe(400);
+      expect((await api("PATCH", `/api/bots/${bot.id}`, { outbound: { policy: "allow", dailyCap: 0 } })).status).toBe(400);
+      expect((await api("GET", "/api/bots/nope/outbound")).status).toBe(404);
+    } finally {
+      await api("DELETE", `/api/bots/${bot.id}`);
+    }
+  });
+});
+
+describe("connection scopes", () => {
+  // Which connected apps a bot may use, and whether it may write to them.
+  // Enforced at the relay, seeing through Composio's meta tools; absent
+  // means every app, the way it always has.
+  type McpResult = { result: { isError?: boolean; content: Array<{ type: string; text: string }> } };
+  const relay = (token: string, id: number, name: string, args: Record<string, unknown> = {}) =>
+    fetch(`${BASE}/api/internal/connectors/mcp`, {
+      method: "POST",
+      headers: { "content-type": "application/json", authorization: `Bearer ${token}` },
+      body: JSON.stringify({ jsonrpc: "2.0", id, method: "tools/call", params: { name, arguments: args } }),
+    });
+
+  it("stores a scope map on the bot, clears it with null, and refuses junk", async () => {
+    const bot = (await api("POST", "/api/bots")).body.bot;
+    try {
+      const scoped = await api("PATCH", `/api/bots/${bot.id}`, { connectorScopes: { apps: { Gmail: "read", slack: "write" } } });
+      expect(scoped.status).toBe(200);
+      expect(scoped.body.bot.connectorScopes).toEqual({ apps: { gmail: "read", slack: "write" } });
+      expect((await api("PATCH", `/api/bots/${bot.id}`, { connectorScopes: { apps: { gmail: "owner" } } })).status).toBe(400);
+      expect((await api("PATCH", `/api/bots/${bot.id}`, { connectorScopes: "gmail" })).status).toBe(400);
+      const cleared = await api("PATCH", `/api/bots/${bot.id}`, { connectorScopes: null });
+      expect(cleared.status).toBe(200);
+      expect(cleared.body.bot.connectorScopes).toBeUndefined();
+    } finally {
+      await api("DELETE", `/api/bots/${bot.id}`);
+    }
+  });
+
+  it("refuses an app that is not listed and a write on a read-only app, and lets the rest through", async () => {
+    expect((await api("PUT", "/api/config", { composio: { apiKey: "ak_good" } })).status).toBe(200);
+    const bot = (await api("POST", "/api/bots", { name: "Scoped" })).body.bot;
+    try {
+      expect((await api("PATCH", `/api/bots/${bot.id}`, { connectorScopes: { apps: { gmail: "read", slack: "write" } } })).status).toBe(200);
+      const token = await mintTestCapability(BASE, bot.id, bot.threadId, { kind: "connectors" });
+
+      const read = (await (await relay(token, 21, "GMAIL_FETCH_EMAILS", { query: "is:unread" })).json()) as McpResult;
+      expect(read.result.content[0].text).toBe("sent by stub");
+
+      const other = (await (await relay(token, 22, "STRIPE_LIST_CHARGES", {})).json()) as McpResult;
+      expect(other.result.isError).toBe(true);
+      expect(other.result.content[0].text).toMatch(/stripe/i);
+      expect(other.result.content[0].text).toMatch(/not been given/i);
+
+      const write = (await (await relay(token, 23, "GMAIL_CREATE_EMAIL_DRAFT", { subject: "x" })).json()) as McpResult;
+      expect(write.result.isError).toBe(true);
+      expect(write.result.content[0].text).toMatch(/read-only/i);
+
+      // A batch is refused whole when one call is out of scope.
+      const batch = (await (await relay(token, 24, "COMPOSIO_MULTI_EXECUTE_TOOL", {
+        tools: [{ tool_slug: "SLACK_SEARCH_MESSAGES", arguments: {} }, { tool_slug: "NOTION_SEARCH_PAGES", arguments: {} }],
+      })).json()) as McpResult;
+      expect(batch.result.isError).toBe(true);
+      expect(relayedMcpCalls.some((call) => call.params?.name === "COMPOSIO_MULTI_EXECUTE_TOOL"
+        && JSON.stringify(call.params.arguments).includes("NOTION_SEARCH_PAGES"))).toBe(false);
+
+      // Connecting an app the bot may not use is refused before any card appears.
+      const connect = await fetch(`${BASE}/api/internal/connectors/request`, {
+        method: "POST",
+        headers: { "content-type": "application/json", authorization: `Bearer ${token}` },
+        body: JSON.stringify({ botId: bot.id, threadId: bot.threadId, resumeKey: "scope-fixture-001", items: [{ slug: "stripe" }] }),
+      });
+      expect(connect.status).toBe(403);
+
+      await expect.poll(async () =>
+        (await api("GET", "/api/decisions")).body.decisions
+          .filter((decision: { botId?: string; source: string }) => decision.botId === bot.id && decision.source === "connector-scope")
+          .map((decision: { decision: string; rule?: string }) => `${decision.decision}:${decision.rule}`),
+      ).toEqual(["auto-denied:scope:stripe:app", "auto-denied:scope:gmail:write", "auto-denied:scope:notion:app", "auto-denied:scope:stripe:app"]);
+    } finally {
+      await api("DELETE", `/api/bots/${bot.id}`);
+    }
+  });
+
+  it("tells the bot what it may use, in its prompt", async () => {
+    const bot = (await api("POST", "/api/bots")).body.bot;
+    try {
+      expect((await api("PATCH", `/api/bots/${bot.id}`, { connectorScopes: { apps: { gmail: "read" } } })).status).toBe(200);
+      const preview = await api("GET", `/api/bots/${bot.id}/system-prompt`);
+      expect(preview.status).toBe(200);
+      expect(JSON.stringify(preview.body)).toContain("gmail (read only)");
+    } finally {
+      await api("DELETE", `/api/bots/${bot.id}`);
+    }
+  });
+});
+
+describe("account profiles and fallback", () => {
+  // A second account on an engine is another instance with its own login
+  // directory; a bot's fallback chain carries a task to it when the first
+  // account hits a limit. Isolated server: the primary fixture Claude is
+  // scripted to die on a 429, and the profile (default fake mode) answers.
+  it("adds a profile, falls over to it on a rate limit, and continues the task", async () => {
+    const isolatedHome = mkdtempSync(join(tmpdir(), "omb-fallback-"));
+    const isolatedData = join(isolatedHome, ".openmausbot");
+    const isolatedStatic = join(isolatedHome, "static");
+    const isolatedPort = await freePortBlock([0, 1]);
+    mkdirSync(join(isolatedStatic, "assets"), { recursive: true });
+    mkdirSync(isolatedData, { recursive: true });
+    writeFileSync(join(isolatedStatic, "index.html"), "<!doctype html><title>Fallback test</title>");
+    writeFileSync(join(isolatedStatic, "assets", "smoke.css"), "body{}");
+    writeFileSync(join(isolatedData, "config.json"), JSON.stringify({
+      instances: {
+        claude: {
+          driver: "claudeAgent",
+          displayName: "Fixture Claude",
+          config: { cli: FAKE_CLAUDE_CLI },
+          environment: { FAKE_CLAUDE_MODE: "rate-limited", FAKE_CLAUDE_RETRY_SCALE: "0.001" },
+        },
+      },
+    }));
+    let isolatedStderr = "";
+    const isolatedChild = spawn(process.execPath, [join(SERVER_DIR, "index.ts")], {
+      cwd: ROOT,
+      env: {
+        ...(process.env.PATH ? { PATH: process.env.PATH } : {}),
+        ...(process.env.PATHEXT ? { PATHEXT: process.env.PATHEXT } : {}),
+        ...(process.env.SystemRoot ? { SystemRoot: process.env.SystemRoot } : {}),
+        HOME: isolatedHome,
+        USERPROFILE: isolatedHome,
+        OMB_PORT: String(isolatedPort),
+        OMB_WEBHOOK_PORT: String(isolatedPort + 1),
+        OMB_STATIC_DIR: isolatedStatic,
+        FAKE_CLAUDE_MODE: "happy",
+        FAKE_CLAUDE_REPLIES: JSON.stringify(["carried on from the second account"]),
+      },
+      stdio: ["ignore", "pipe", "pipe"],
+    });
+    isolatedChild.stderr!.on("data", (chunk) => (isolatedStderr += chunk));
+    const isolatedApi = async (method: string, path: string, body?: unknown): Promise<{ status: number; body: any }> => {
+      const response = await fetch(`http://127.0.0.1:${isolatedPort}${path}`, {
+        method,
+        headers: body ? { "content-type": "application/json" } : undefined,
+        body: body ? JSON.stringify(body) : undefined,
+      });
+      return { status: response.status, body: await response.json() };
+    };
+
+    try {
+      await waitForIsolatedServer(isolatedChild, isolatedPort, () => isolatedStderr);
+
+      const added = await isolatedApi("POST", "/api/instances", { driver: "claudeAgent", displayName: "Claude (second)" });
+      expect(added.status).toBe(201);
+      expect(added.body.instanceId).toBe("claude-second");
+      const second = added.body.instances.find((instance: { instanceId: string }) => instance.instanceId === "claude-second");
+      expect(second).toMatchObject({ driverKind: "claudeAgent", displayName: "Claude (second)" });
+      expect(second.snapshot.state).toBe("available");
+      expect((await isolatedApi("POST", "/api/instances", { driver: "grokAgent", displayName: "Grok 2" })).status).toBe(400);
+
+      const primary = added.body.instances.find((instance: { instanceId: string }) => instance.instanceId === "claude");
+      const bot = (await isolatedApi("POST", "/api/bots", { name: "Hopper" })).body.bot;
+      expect((await isolatedApi("PATCH", `/api/bots/${bot.id}/model`, { instanceId: "claude", model: primary.models.default })).status).toBe(200);
+      const chained = await isolatedApi("PATCH", `/api/bots/${bot.id}`, { fallback: [{ instanceId: "claude-second", model: second.models.default }] });
+      expect(chained.status).toBe(200);
+      expect(chained.body.bot.fallback).toEqual([{ instanceId: "claude-second", model: second.models.default }]);
+      expect((await isolatedApi("PATCH", `/api/bots/${bot.id}`, { fallback: [{ instanceId: "nope", model: "x" }] })).status).toBe(400);
+
+      expect([200, 202]).toContain((await isolatedApi("POST", `/api/bots/${bot.id}/messages`, { text: "chase the unpaid invoices" })).status);
+      await expect.poll(async () => {
+        const current = (await isolatedApi("GET", "/api/bots")).body.bots.find((candidate: { id: string }) => candidate.id === bot.id);
+        const replied = current.messages.some(
+          (message: { role: string; kind: string; text?: string }) =>
+            message.role === "bot" && message.kind === "text" && message.text === "carried on from the second account",
+        );
+        const trail = current.messages
+          .slice(-6)
+          .map((message: { role: string; kind: string; text?: string; tool?: { name: string } }) => message.tool?.name ?? `${message.role}:${message.kind}:${(message.text ?? "").slice(0, 40)}`)
+          .join(" | ");
+        return replied ? `${current.modelSelection.instanceId}:${replied}:${current.busy}` : `${current.modelSelection.instanceId}:${replied}:${current.busy} :: ${trail}`;
+      }, { timeout: 20_000, interval: 200 }).toBe("claude-second:true:false");
+      const final = (await isolatedApi("GET", "/api/bots")).body.bots.find((candidate: { id: string }) => candidate.id === bot.id);
+      expect(final.messages.some((message: { tool?: { name: string } }) => message.tool?.name.startsWith("switched to Claude (second)"))).toBe(true);
+      // the person's own message appears once: the continuation is control-plane, not a second user line
+      expect(final.messages.filter((message: { role: string; kind: string }) => message.role === "user" && message.kind === "text")).toHaveLength(1);
+
+      expect((await isolatedApi("DELETE", "/api/instances/claude")).status).toBe(400);
+      const removed = await isolatedApi("DELETE", "/api/instances/claude-second");
+      expect(removed.status).toBe(200);
+      expect(removed.body.instances.some((instance: { instanceId: string }) => instance.instanceId === "claude-second")).toBe(false);
+    } finally {
+      await waitForExit(isolatedChild, { signal: "SIGTERM" });
+      await removeTempDir(isolatedHome);
+    }
+    expectStoppedTestServerCleanly(isolatedChild, isolatedStderr);
+  }, 60_000);
+});
+
+describe("team memory", () => {
+  // The section's shared people, places, decisions and terms. A bot
+  // proposes; a term lands at once, a person waits for a card; the person
+  // edits and deletes; every bot in the section reads it in its prompt.
+  const proposeAs = async (token: string, bot: { id: string; threadId: string }, body: Record<string, unknown>) => {
+    const response = await fetch(`${BASE}/api/internal/team-memory`, {
+      method: "POST",
+      headers: { "content-type": "application/json", authorization: `Bearer ${token}` },
+      body: JSON.stringify({ fromBotId: bot.id, fromThreadId: bot.threadId, ...body }),
+    });
+    return { status: response.status, body: (await response.json()) as any };
+  };
+
+  it("shares a term at once, holds a person for a card, and tells every bot in the prompt", async () => {
+    const bot = (await api("POST", "/api/bots", { name: "Scout" })).body.bot;
+    const teammate = (await api("POST", "/api/bots", { name: "Mate" })).body.bot;
+    try {
+      const token = await mintTestCapability(BASE, bot.id, bot.threadId);
+      const term = await proposeAs(token, bot, { kind: "term", name: "MCHQ", detail: "MissionControlHQ, the old name" });
+      expect(term.status).toBe(201);
+      expect(term.body.status).toBe("accepted");
+
+      const person = await proposeAs(token, bot, { kind: "person", name: "Ayush", detail: "Founder", aliases: ["Ayu"] });
+      expect(person.status).toBe(201);
+      expect(person.body.status).toBe("proposed");
+      const state = (await api("GET", "/api/bots")).body.bots.find((candidate: { id: string }) => candidate.id === bot.id);
+      const card = state.messages.find((message: { card?: { requestId?: string } }) => message.card?.requestId === person.body.requestId);
+      expect(card.card.title).toMatch(/remember/i);
+      expect(card.card.subtitle).toContain("Ayush");
+      expect(card.card.teamMemoryRequest).toMatchObject({ entryId: person.body.requestId, kind: "person" });
+
+      // not yet in anyone's prompt
+      let preview = JSON.stringify((await api("GET", `/api/bots/${teammate.id}/system-prompt`)).body);
+      expect(preview).toContain("MCHQ: MissionControlHQ");
+      expect(preview).not.toContain("Ayush");
+
+      const answered = await api("POST", `/api/threads/${bot.threadId}/respond`, { requestId: person.body.requestId, behavior: "allow" });
+      expect(answered.body).toMatchObject({ ok: true, outcome: "allowed-once" });
+      preview = JSON.stringify((await api("GET", `/api/bots/${teammate.id}/system-prompt`)).body);
+      expect(preview).toContain("Ayush (also: Ayu): Founder");
+
+      const listed = await api("GET", "/api/team-memory?section=");
+      expect(listed.body.entries.map((entry: { name: string; status: string }) => [entry.name, entry.status])).toEqual([
+        ["MCHQ", "accepted"],
+        ["Ayush", "accepted"],
+      ]);
+
+      await expect.poll(async () =>
+        (await api("GET", "/api/decisions")).body.decisions
+          .filter((decision: { botId?: string; tool?: string }) => decision.botId === bot.id && decision.tool === "propose_team_memory")
+          .map((decision: { decision: string; source: string }) => `${decision.decision}:${decision.source}`),
+      ).toEqual(["auto-approved:team-memory", "card-shown:team-memory", "user-approved:user"]);
+      expect((await proposeAs(token, bot, { kind: "rumor", name: "x", detail: "y" })).status).toBe(400);
+    } finally {
+      for (const entry of (await api("GET", "/api/team-memory?section=")).body.entries) {
+        await api("DELETE", `/api/team-memory/${entry.id}?section=`);
+      }
+      await api("DELETE", `/api/bots/${bot.id}`);
+      await api("DELETE", `/api/bots/${teammate.id}`);
+    }
+  });
+
+  it("lets the person add, edit, accept and delete entries", async () => {
+    const added = await api("POST", "/api/team-memory?section=Work", { kind: "person", name: "Bhanu", detail: "CTO" });
+    expect(added.status).toBe(201);
+    const entry = added.body.entries[0];
+    // the person's own entry never waits on the person
+    expect(entry.status).toBe("accepted");
+    const edited = await api("PATCH", `/api/team-memory/${entry.id}?section=Work`, { detail: "CTO, owns infra", aliases: ["B"] });
+    expect(edited.status).toBe(200);
+    expect(edited.body.entry).toMatchObject({ detail: "CTO, owns infra", aliases: ["B"] });
+    expect((await api("PATCH", `/api/team-memory/${entry.id}?section=Work`, { name: "" })).status).toBe(400);
+    expect((await api("GET", "/api/team-memory?section=")).body.entries.some((candidate: { id: string }) => candidate.id === entry.id)).toBe(false);
+    expect((await api("DELETE", `/api/team-memory/${entry.id}?section=Work`)).status).toBe(200);
+    expect((await api("DELETE", `/api/team-memory/${entry.id}?section=Work`)).status).toBe(404);
+    expect((await api("GET", "/api/team-memory")).status).toBe(400);
   });
 });

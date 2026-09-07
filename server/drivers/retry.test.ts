@@ -99,3 +99,19 @@ describe("computeBackoff", () => {
     }
   });
 });
+
+describe("classifyError — usage limits", () => {
+  // A subscription's usage limit is not a 429 to retry through: the window
+  // is hours away. It is terminal for this engine, and the harness may
+  // carry the task to another account or engine instead.
+  it("calls a subscription usage limit a quota problem, not a retry", () => {
+    for (const text of [
+      "You've hit your usage limit for this session. Try again at 7pm.",
+      "Usage limit reached for Claude Max",
+      "Rate limit reached: weekly limit reached",
+      "You are out of credits",
+    ]) {
+      expect(classifyError({ text }), text).toEqual({ transient: false, reason: "quota" });
+    }
+  });
+});

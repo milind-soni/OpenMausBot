@@ -5,7 +5,7 @@
 // asks before registering — the classic miss is a path the terminal sees
 // but this GUI app can't.
 import { useEffect, useRef, useState } from "react";
-import { Check, ChevronDown, Loader2, RefreshCw, TriangleAlert } from "lucide-react";
+import { Check, ChevronDown, Loader2, Plus, RefreshCw, TriangleAlert, X } from "lucide-react";
 
 import { api, useStore, type InstanceInfo } from "@/state/store";
 import { EngineGroupLabel } from "./EngineGroupLabel";
@@ -218,6 +218,16 @@ function EngineRow({ instance }: { instance: InstanceInfo }) {
     wasOpenFor.current = instance.cli ?? null;
   }, [instance.cli]);
 
+  const removeAccount = () => {
+    if (switching || updating) return;
+    setSwitching(true);
+    setError(null);
+    api(`/api/instances/${encodeURIComponent(instance.instanceId)}`, { method: "DELETE" })
+      .then(() => Promise.resolve(refreshInstances()).catch(() => {}))
+      .catch((e) => setError(e.message))
+      .finally(() => setSwitching(false));
+  };
+
   const reset = () => {
     if (switching || updating) return;
     setSwitching(true);
@@ -290,6 +300,17 @@ function EngineRow({ instance }: { instance: InstanceInfo }) {
             {switching ? "Resetting…" : "Reset"}
           </button>
         )}
+        {instance.accountOf && (
+          <button
+            onClick={removeAccount}
+            disabled={switching || updating}
+            className="flex shrink-0 items-center gap-1 text-[11.5px] text-ink-secondary hover:text-danger disabled:opacity-50"
+            title="Remove this account. Its login directory stays on disk until you delete it."
+          >
+            <X size={12} />
+            {switching ? "Removing…" : "Remove account"}
+          </button>
+        )}
         <button
           onClick={() => setOpen((v) => !v)}
           disabled={updating}
@@ -339,6 +360,7 @@ export function EnginesSettings() {
             {subscription.map((i) => (
               <EngineRow key={i.instanceId} instance={i} />
             ))}
+            {subscription.some((i) => ACCOUNT_DRIVERS.has(i.driverKind) && !i.accountOf) && <AddAccount instances={subscription} />}
             {custom.length > 0 && <EngineGroupLabel className="pt-1">Local</EngineGroupLabel>}
             {custom.map((i) => (
               <EngineRow key={i.instanceId} instance={i} />
@@ -350,6 +372,95 @@ export function EnginesSettings() {
         Set CLI points an engine at a specific binary — a versioned build, a wrapper script, or an
         absolute path. Saving reloads providers and interrupts any running turns.
       </div>
+    </div>
+  );
+}
+
+/** Engines that keep their login in a directory the harness can point at
+ * per instance. Mirrors the server's own list; anything else is refused there. */
+const ACCOUNT_DRIVERS = new Map<string, string>([
+  ["claudeAgent", "Claude"],
+  ["codex", "Codex"],
+]);
+
+/** A second account on Claude or Codex. It becomes its own engine row with
+ * its own login, so two Max plans sit side by side and a bot can fall from
+ * one to the other when a limit lands. Signing in happens in the new row. */
+function AddAccount({ instances }: { instances: InstanceInfo[] }) {
+  const { refreshInstances } = useStore();
+  const bases = instances.filter((i) => ACCOUNT_DRIVERS.has(i.driverKind) && !i.accountOf);
+  const [open, setOpen] = useState(false);
+  const [driver, setDriver] = useState(bases[0]?.driverKind ?? "claudeAgent");
+  const [name, setName] = useState("");
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const add = () => {
+    if (saving || !name.trim()) return;
+    setSaving(true);
+    setError(null);
+    api("/api/instances", { method: "POST", body: JSON.stringify({ driver, displayName: name.trim() }) })
+      .then(() => Promise.resolve(refreshInstances()).catch(() => {}))
+      .then(() => {
+        setOpen(false);
+        setName("");
+      })
+      .catch((e) => setError(e.message))
+      .finally(() => setSaving(false));
+  };
+
+  if (!open) {
+    return (
+      <button
+        onClick={() => setOpen(true)}
+        className="flex items-center gap-1.5 self-start text-[12.5px] text-ink-secondary hover:text-ink"
+      >
+        <Plus size={13} /> Add another account
+      </button>
+    );
+  }
+  return (
+    <div className="rounded-xl border border-hairline/40 bg-card p-3">
+      <div className="text-[13px] font-medium text-ink">Add another account</div>
+      <div className="mt-0.5 text-[12px] text-ink-secondary">
+        A second login on the same engine. It gets its own row here; sign in from that row, then pick it as a
+        bot's fallback so work carries on when the first account hits its limit.
+      </div>
+      <div className="mt-3 flex flex-wrap items-center gap-2">
+        <select
+          value={driver}
+          onChange={(event) => setDriver(event.target.value)}
+          aria-label="Engine"
+          className="rounded-lg border border-hairline/40 bg-inset px-2 py-1 text-[13px] text-ink"
+        >
+          {bases.map((i) => (
+            <option key={i.instanceId} value={i.driverKind}>
+              {ACCOUNT_DRIVERS.get(i.driverKind)}
+            </option>
+          ))}
+        </select>
+        <input
+          value={name}
+          onChange={(event) => setName(event.target.value)}
+          onKeyDown={(event) => {
+            if (event.key === "Enter") add();
+          }}
+          placeholder="Name, e.g. Work"
+          aria-label="Account name"
+          className="min-w-0 flex-1 rounded-lg border border-hairline/40 bg-inset px-2 py-1 text-[13px] text-ink outline-none focus:border-accent"
+        />
+        <button
+          onClick={add}
+          disabled={saving || !name.trim()}
+          className="rounded-lg bg-accent px-3 py-1 text-[12.5px] font-medium text-white disabled:opacity-50"
+        >
+          {saving ? "Adding…" : "Add"}
+        </button>
+        <button onClick={() => setOpen(false)} className="text-[12.5px] text-ink-secondary hover:text-ink">
+          Cancel
+        </button>
+      </div>
+      {error && <div role="alert" className="mt-2 text-[12px] text-danger">{error}</div>}
     </div>
   );
 }

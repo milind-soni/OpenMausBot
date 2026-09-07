@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
-import { ArrowRight, BookOpen, Crown, Loader2, Network, RefreshCw, Save, X } from "lucide-react";
+import { ArrowRight, BookOpen, Brain, Crown, Loader2, Network, RefreshCw, Save, X } from "lucide-react";
+import { TeamMemoryDialog } from "./TeamMemoryDialog";
 
 import { MausAvatar } from "./Avatar";
 import { api, formatTime, useStore, type Bot } from "@/state/store";
@@ -313,6 +314,7 @@ export function TeamMapPage() {
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [contextEditor, setContextEditor] = useState<{ section: string; label: string } | null>(null);
+  const [memoryEditor, setMemoryEditor] = useState<{ section: string; label: string } | null>(null);
   const [instructionsBot, setInstructionsBot] = useState<Bot | null>(null);
   const bots = useMemo(() => state.bots.filter((bot) => !bot.hidden), [state.bots]);
   const sections = useMemo(() => buildTeamMapSections(bots), [bots]);
@@ -380,6 +382,14 @@ export function TeamMapPage() {
                     >
                       <BookOpen size={11} /> Context
                     </button>}
+                    {!remoteClient && <button
+                      onClick={() => setMemoryEditor({ section: section.key, label: section.name })}
+                      className="flex items-center gap-1 rounded-md px-1.5 py-1 text-[10.5px] font-medium text-ink-secondary hover:bg-raised hover:text-ink"
+                      aria-label={`Open ${section.name} team memory`}
+                      title="Team memory: people, places, decisions and terms every bot here shares"
+                    >
+                      <Brain size={11} /> Memory
+                    </button>}
                     <span className="text-[11px] tabular-nums text-ink-secondary">{section.chiefs.length + section.members.length}</span>
                   </div>
                 </div>
@@ -442,6 +452,9 @@ export function TeamMapPage() {
           label={contextEditor.label}
           onClose={() => setContextEditor(null)}
         />
+      )}
+      {memoryEditor && (
+        <TeamMemoryDialog section={memoryEditor.section} label={memoryEditor.label} onClose={() => setMemoryEditor(null)} />
       )}
       {instructionsBot && <BotInstructionsDialog bot={instructionsBot} onClose={() => setInstructionsBot(null)} />}
     </main>

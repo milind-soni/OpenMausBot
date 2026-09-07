@@ -17,6 +17,8 @@ export type BotUpdatePatch = Partial<
     | "avatarCrop"
     | "autoApprove"
     | "approvalMode"
+    | "outbound"
+    | "fallback"
     | "speakReplies"
     | "voice"
     | "pinned"
@@ -34,6 +36,8 @@ export type BotUpdatePatch = Partial<
   /** null is the wire representation for clearing an explicit destination
    * and returning to Auto. Bot state itself keeps Auto as an absent field. */
   computer?: Bot["computer"] | null;
+  /** null clears the scopes back to every connected app; absent leaves them. */
+  connectorScopes?: Bot["connectorScopes"] | null;
   /** Rides the PATCH body only: the server's proof that the local-auto
    * warning dialog was shown (see server/index.ts's consent gate). It must
    * reach the wire inside the coalesced body and must never fold into bot
@@ -48,9 +52,10 @@ export type BotUpdatePatch = Partial<
 /** A wire patch after clear-only values have been normalized for Bot state. */
 export type BotStatePatch = Omit<
   BotUpdatePatch,
-  "computer" | "acknowledgeLocalAuto" | "confirmFullAccess"
+  "computer" | "connectorScopes" | "acknowledgeLocalAuto" | "confirmFullAccess"
 > & {
   computer?: Bot["computer"];
+  connectorScopes?: Bot["connectorScopes"];
 };
 
 interface BotPatchQueueEntry {
@@ -106,10 +111,16 @@ const stateOverlay = (patch: BotUpdatePatch): BotStatePatch => {
     acknowledgeLocalAuto: _localAck,
     confirmFullAccess: _fullConfirmation,
     computer,
+    connectorScopes,
     ...fields
   } = patch;
-  if (computer === null) return { ...fields, computer: undefined };
-  return computer === undefined ? fields : { ...fields, computer };
+  const withComputer = computer === null
+    ? { ...fields, computer: undefined }
+    : computer === undefined ? fields : { ...fields, computer };
+  // null clears the scopes; state keeps that as an absent field
+  return connectorScopes === undefined
+    ? withComputer
+    : { ...withComputer, connectorScopes: connectorScopes ?? undefined };
 };
 
 /**

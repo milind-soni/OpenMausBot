@@ -9,6 +9,7 @@ import { browserUnavailableReason } from "@/lib/feature-flags";
 import { FolderOpen } from "lucide-react";
 
 import { api, useStore, type Bot } from "@/state/store";
+import type { ConnectorScope, ConnectorScopes } from "../../../shared/connector-scopes";
 import { cn } from "@/lib/cn";
 import { shortPath } from "@/lib/short-path";
 import { useDesktopCapabilities } from "../DesktopCapabilities";
@@ -259,17 +260,11 @@ export function AccessSection({
           />
         </div>
         {connectedAppsEnabled && inventory?.authoritative && (
-          <div className="mt-3 flex flex-wrap gap-1.5">
-            {connectedSlugs.length === 0 ? (
-              <span className="text-[11.5px] text-ink-secondary">No apps connected yet.</span>
-            ) : (
-              connectedSlugs.map((slug) => (
-                <span key={slug} className="rounded-full bg-inset px-2 py-0.5 text-[11px] text-ink-secondary">
-                  {slug}
-                </span>
-              ))
-            )}
-          </div>
+          <ConnectorScopesControl
+            connectedSlugs={connectedSlugs}
+            scopes={bot.connectorScopes}
+            onChange={(connectorScopes) => patch({ connectorScopes })}
+          />
         )}
       </div>
 
@@ -360,6 +355,102 @@ export function AccessSection({
           dispatch({ type: "updateBot", botId: target, patch: { computer: "local", acknowledgeLocalAuto: true } });
         }}
       />
+    </div>
+  );
+}
+
+/** Which connected apps this bot may use, and how far. Unscoped is the old
+ * behavior — every connected app, read and write — and stays the default;
+ * limiting is a choice, made per bot, and the harness enforces it at the
+ * connector relay whatever the approval level says. */
+function ConnectorScopesControl({
+  connectedSlugs,
+  scopes,
+  onChange,
+}: {
+  connectedSlugs: string[];
+  scopes: ConnectorScopes | undefined;
+  onChange: (scopes: ConnectorScopes | null) => void;
+}) {
+  const limited = scopes !== undefined;
+  // Apps the bot was scoped to that are no longer connected still show, so a
+  // grant never silently disappears from view.
+  const slugs = [...new Set([...connectedSlugs, ...Object.keys(scopes?.apps ?? {})])].sort();
+  const setScope = (slug: string, scope: ConnectorScope | null) => {
+    const apps = { ...scopes?.apps };
+    if (scope) apps[slug] = scope;
+    else delete apps[slug];
+    onChange({ apps });
+  };
+
+  return (
+    <div className="mt-3">
+      <div className="flex items-center justify-between gap-4">
+        <div className="text-[13px] text-ink-secondary">
+          {limited
+            ? "Only the apps allowed below, at the level set for each. Everything else is off for this bot."
+            : "Every connected app, read and write. Limit it to hand this bot only what its job needs."}
+        </div>
+        <Switch
+          checked={limited}
+          aria-label="Limit this bot to specific apps"
+          onClick={() => onChange(limited ? null : { apps: {} })}
+        />
+      </div>
+      {!limited && connectedSlugs.length === 0 && (
+        <div className="mt-2 text-[11.5px] text-ink-secondary">No apps connected yet.</div>
+      )}
+      {!limited && connectedSlugs.length > 0 && (
+        <div className="mt-2 flex flex-wrap gap-1.5">
+          {connectedSlugs.map((slug) => (
+            <span key={slug} className="rounded-full bg-inset px-2 py-0.5 text-[11px] text-ink-secondary">
+              {slug}
+            </span>
+          ))}
+        </div>
+      )}
+      {limited && (
+        <div className="mt-2 flex flex-col divide-y divide-hairline/20 rounded-lg bg-inset">
+          {slugs.length === 0 && (
+            <div className="px-3 py-2 text-[11.5px] text-ink-secondary">No apps connected yet. Connect one under Connected apps, then allow it here.</div>
+          )}
+          {slugs.map((slug) => {
+            const current = scopes?.apps[slug] ?? null;
+            const connected = connectedSlugs.includes(slug);
+            return (
+              <div key={slug} className="flex items-center justify-between gap-3 px-3 py-1.5">
+                <span className="flex min-w-0 items-center gap-2 text-[13px] text-ink">
+                  <span className="truncate">{slug}</span>
+                  {!connected && <span className="shrink-0 text-[10.5px] text-ink-secondary">not connected</span>}
+                </span>
+                <div className="flex shrink-0 gap-0.5 rounded-md bg-card p-0.5" role="group" aria-label={`${slug} access`}>
+                  {(
+                    [
+                      [null, "Off", "This bot cannot use it."],
+                      ["read", "Read", "Search, fetch, and list only."],
+                      ["write", "Read & write", "Everything, with sends still asking as usual."],
+                    ] as const
+                  ).map(([value, label, hint]) => (
+                    <button
+                      key={label}
+                      type="button"
+                      title={hint}
+                      aria-pressed={current === value}
+                      onClick={() => setScope(slug, value)}
+                      className={cn(
+                        "rounded px-2 py-0.5 text-[11.5px] font-medium",
+                        current === value ? "bg-raised text-ink" : "text-ink-secondary hover:text-ink",
+                      )}
+                    >
+                      {label}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      )}
     </div>
   );
 }

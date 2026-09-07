@@ -87,6 +87,7 @@
   "approval.held.unattendedFullAccess": "A webhook or another bot started this turn, so Approve for me is paused and every action asks. Full access keeps working unattended.",
   "approval.held.destructive": "This looks destructive, so Approve for me stopped to ask.",
   "approval.held.sensitive": "This touches credentials, so Approve for me stopped to ask.",
+  "approval.held.outbound": "This sends something on your behalf, so it always asks first.",
   "approval.held.needsYou": "This action needs you, so Approve for me stopped to ask.",
   "approval.held.undeliveredFull": "Full access couldn't deliver this approval.",
   "approval.held.undelivered": "Approve for me couldn't answer this one."

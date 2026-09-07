@@ -28,6 +28,8 @@ import { redactSecrets } from "./redact.ts";
 
 export type DecisionKind =
   | "auto-approved"
+  /** refused by a standing rule — a daily cap — with nobody asked */
+  | "auto-denied"
   | "card-shown"
   | "user-approved"
   | "user-denied"
@@ -49,7 +51,13 @@ export type DecisionSource =
   | "profile"
   | "user"
   | "auto-review"
-  | "auto-review-shadow";
+  | "auto-review-shadow"
+  /** the connector relay's outbound gate (shared/outbound.ts) */
+  | "outbound"
+  /** the connector relay's per-bot app scopes (shared/connector-scopes.ts) */
+  | "connector-scope"
+  /** a bot proposed an entry for the section's team memory (team-memory.ts) */
+  | "team-memory";
 
 export interface DecisionRow {
   at: string;

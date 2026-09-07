@@ -11,12 +11,13 @@
 // already on Auto) stays with AccessSection, next to that picker. The
 // warnings remember which bot they were opened for, so a bot switch while
 // one is up never applies the choice to the newly selected bot.
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Crown } from "lucide-react";
 
 import { cn } from "@/lib/cn";
 import { useStore, type Bot } from "@/state/store";
 import type { ApprovalMode } from "../../../shared/approval-mode";
+import { DEFAULT_OUTBOUND_POLICY, type OutboundPolicy } from "../../../shared/outbound";
 import { ApprovalModeSelector } from "../ApprovalModeSelector";
 import { FullAccessWarning } from "../FullAccessWarning";
 import { LocalComputerAutoWarning } from "../LocalComputerAutoWarning";
@@ -129,6 +130,8 @@ export function PermissionsSection({
         </div>
       </div>
 
+      <OutboundControl bot={bot} onChange={(outbound) => patch({ outbound })} />
+
       {!(engine?.driverKind === "antigravityAgent" && approvalMode === "full") && <div className="rounded-xl bg-card p-4">
         <div className="text-[15px] font-medium text-ink">Review routine approvals</div>
         <div className="mt-0.5 text-[13px] text-ink-secondary">
@@ -194,6 +197,101 @@ export function PermissionsSection({
           dispatch({ type: "updateBot", botId: target, patch: { approvalMode: "full", confirmFullAccess: true } });
         }}
       />
+    </div>
+  );
+}
+
+/** Sending on the person's behalf. Separate from the approval level on
+ * purpose: Full access does not bypass it, so it cannot live inside that
+ * selector without implying it does. Today's count comes from the harness,
+ * which is the only thing that knows what actually went out. */
+function OutboundControl({ bot, onChange }: { bot: Bot; onChange: (policy: OutboundPolicy) => void }) {
+  const policy = bot.outbound ?? DEFAULT_OUTBOUND_POLICY;
+  const [today, setToday] = useState<number | null>(null);
+  const [capDraft, setCapDraft] = useState(String(policy.dailyCap));
+
+  useEffect(() => {
+    setCapDraft(String(policy.dailyCap));
+  }, [policy.dailyCap]);
+
+  useEffect(() => {
+    let alive = true;
+    void fetch(`/api/bots/${bot.id}/outbound`)
+      .then((res) => (res.ok ? res.json() : null))
+      .then((body: { today?: number } | null) => {
+        if (alive && body && typeof body.today === "number") setToday(body.today);
+      })
+      .catch(() => {});
+    return () => {
+      alive = false;
+    };
+  }, [bot.id, bot.outbound]);
+
+  const commitCap = () => {
+    const parsed = Number(capDraft);
+    if (!Number.isInteger(parsed) || parsed < 1 || parsed > 1000) {
+      setCapDraft(String(policy.dailyCap));
+      return;
+    }
+    if (parsed !== policy.dailyCap) onChange({ policy: policy.policy, dailyCap: parsed });
+  };
+
+  return (
+    <div className="rounded-xl bg-card p-4">
+      <div className="text-[15px] font-medium text-ink">Sending on your behalf</div>
+      <div className="mt-0.5 text-[13px] text-ink-secondary">
+        Emails, messages, posts, invites, and payments through connected apps. Reading and drafting never count.
+        This applies at every approval level, including Full access.
+      </div>
+      <div className="mt-3 flex gap-1 rounded-lg bg-inset p-0.5">
+        {(
+          [
+            ["ask", "Ask every time", "Every send waits for your tap."],
+            ["allow", "Allow a daily amount", "Sends go out on their own, up to the cap below."],
+          ] as const
+        ).map(([value, label, hint]) => (
+          <button
+            key={value}
+            title={hint}
+            onClick={() => {
+              if (value !== policy.policy) onChange({ policy: value, dailyCap: policy.dailyCap });
+            }}
+            className={cn(
+              "flex-1 rounded-md px-2.5 py-1.5 text-[13px] font-medium",
+              policy.policy === value ? "bg-raised text-ink" : "text-ink-secondary hover:text-ink",
+            )}
+          >
+            {label}
+          </button>
+        ))}
+      </div>
+      {policy.policy === "allow" && (
+        <div className="mt-3 flex items-center gap-3 text-[13px] text-ink-secondary">
+          <label className="flex items-center gap-2">
+            Up to
+            <input
+              type="number"
+              min={1}
+              max={1000}
+              value={capDraft}
+              onChange={(event) => setCapDraft(event.target.value)}
+              onBlur={commitCap}
+              onKeyDown={(event) => {
+                if (event.key === "Enter") (event.target as HTMLInputElement).blur();
+              }}
+              aria-label="Daily outbound limit"
+              className="w-20 rounded-md bg-inset px-2 py-1 text-[13px] text-ink tabular-nums outline-none focus:ring-1 focus:ring-accent"
+            />
+            a day
+          </label>
+          <span className="tabular-nums">
+            {today === null ? "" : `${today} of ${policy.dailyCap} used today`}
+          </span>
+        </div>
+      )}
+      {policy.policy === "ask" && today !== null && today > 0 && (
+        <div className="mt-2 text-[12px] text-ink-secondary tabular-nums">{today} sent today with your approval.</div>
+      )}
     </div>
   );
 }

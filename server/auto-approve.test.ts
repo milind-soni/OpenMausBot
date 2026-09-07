@@ -379,7 +379,7 @@ describe("held notes are translatable", () => {
   const auto = { permission: true, mode: "auto" as const, fullAccessAvailable: true };
   const sources: (AutoVerdictSource | undefined)[] = [
     undefined, "native-approval", "destructive-guard", "sensitive-guard",
-    "local-computer-block", "unattended-block", "no-grant", "always-allow",
+    "local-computer-block", "unattended-block", "no-grant", "always-allow", "outbound-guard",
   ];
   const contexts = sources.flatMap((source) =>
     [true, false].flatMap((unattended) =>
@@ -414,5 +414,36 @@ describe("held notes are translatable", () => {
     for (const [key, text] of Object.entries(HELD_NOTE)) {
       expect(englishCatalog[key as keyof typeof englishCatalog]).toBe(text);
     }
+  });
+});
+
+describe("outbound guard", () => {
+  // Sending on someone's behalf is its own confirmation, like credentials
+  // and routines: Approve for me and a remembered grant never wave it
+  // through, in every mode short of explicitly acknowledged Full access.
+  it("never auto-approves a tool that sends, even in Auto mode", () => {
+    const verdict = autoVerdict({ approvalMode: "auto" }, "GMAIL_SEND_EMAIL", '{"to":"finance@example.com"}');
+    expect(verdict.approve).toBeNull();
+    expect(verdict.source).toBe("outbound-guard");
+  });
+
+  it("outranks an Always allow grant for the same call", () => {
+    const tool = "mcp__claude_ai_Slack__slack_send_message";
+    const summary = '{"channel":"#general"}';
+    const verdict = autoVerdict({ approvalMode: "auto", alwaysAllow: [approvalKey(tool, summary)] }, tool, summary);
+    expect(verdict.approve).toBeNull();
+    expect(verdict.source).toBe("outbound-guard");
+  });
+
+  it("still lets Auto mode answer a read-only connector call", () => {
+    const verdict = autoVerdict({ approvalMode: "auto" }, "GMAIL_FETCH_EMAILS", "{}");
+    expect(verdict.approve).not.toBeNull();
+    expect(verdict.source).toBe("auto-mode");
+  });
+
+  it("explains the held card in the bot's own words", () => {
+    expect(
+      approvalHeldNote({ source: "outbound-guard", permission: true, mode: "auto", unattended: false, fullAccessAvailable: true }),
+    ).toBe("approval.held.outbound");
   });
 });

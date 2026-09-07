@@ -71,6 +71,9 @@ export interface InstanceConfig {
   environment?: Record<string, string>;
   enabled?: boolean;
   config?: unknown;
+  /** A second account on an engine: the default-fleet instance id this
+   * profile is another login of. Only profiles can be removed. */
+  accountOf?: string;
 }
 
 export type InstanceConfigMap = Record<InstanceId, InstanceConfig>;

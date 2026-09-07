@@ -452,6 +452,22 @@ const TOOLS = [
     },
   },
   {
+    name: "propose_team_memory",
+    description:
+      "Share something every bot on the team should know: who a person is (kind person), where a document or thing lives (place), what was decided (decision), or what a term or nickname means (term). A place or a term is remembered at once; a person or a decision creates a confirmation card and is remembered only after the user confirms it, so end the turn and do not claim it is remembered before then. Proposing an existing name again updates it.",
+    inputSchema: {
+      type: "object",
+      additionalProperties: false,
+      properties: {
+        kind: { type: "string", enum: ["person", "place", "decision", "term"], description: "What kind of entry this is." },
+        name: { type: "string", maxLength: 120, description: "The person's name, the thing or document, the decision in a few words, or the term." },
+        detail: { type: "string", maxLength: 600, description: "One or two sentences: the person's role, where the thing lives, what was decided and where, what the term means." },
+        aliases: { type: "array", maxItems: 8, items: { type: "string", maxLength: 120 }, description: "Other names it goes by, for example a nickname or an abbreviation." },
+      },
+      required: ["kind", "name", "detail"],
+    },
+  },
+  {
     name: "skills_list",
     description:
       "List this bot's imported skills (enabled and disabled) and any staged skill writes waiting for the user to confirm. Use this before skill_manage to avoid duplicate names. Listing does not enable anything.",
@@ -851,6 +867,27 @@ async function callTool(name: string, args: Json): Promise<{ text: string; isErr
       }),
     });
     return confirmationResult(r, "the profile change", "profile");
+  }
+  if (name === "propose_team_memory") {
+    const kind = String(args.kind ?? "").trim();
+    const entryName = String(args.name ?? "").trim();
+    const detail = String(args.detail ?? "").trim();
+    if (!kind || !entryName || !detail) return { text: "propose_team_memory needs kind, name, and detail.", isError: true };
+    const r = await api("/api/internal/team-memory", {
+      method: "POST",
+      body: JSON.stringify({
+        fromBotId: BOT_ID,
+        fromThreadId: THREAD_ID,
+        kind,
+        name: entryName,
+        detail,
+        aliases: Array.isArray(args.aliases) ? args.aliases.filter((alias) => typeof alias === "string") : undefined,
+      }),
+    });
+    if (r.status === "accepted" || r.status === "updated") {
+      return { text: `Remembered for the team: ${entryName} (${kind}). Every bot in the section reads it from now on.` };
+    }
+    return confirmationResult(r, `remembering ${entryName} for the team`, "entry");
   }
   if (name === "session_search") {
     const q = String(args.query ?? "").trim();

@@ -18,6 +18,8 @@ import { pickBotName } from "./names.ts";
 import { redactSecretsInText } from "./redact.ts";
 import { botAvatarProfile, type BotAvatarCrop } from "../shared/bot-avatar.ts";
 import { isApprovalMode, type ApprovalMode } from "../shared/approval-mode.ts";
+import type { OutboundPolicy } from "../shared/outbound.ts";
+import type { ConnectorScopes } from "../shared/connector-scopes.ts";
 import type { MascotBodyId } from "../shared/mascot-bodies.ts";
 import type { ProfileRequestCardData, ProfileRequestChanges } from "../shared/profile-request.ts";
 import type { RoutineRequestCardData } from "../shared/routine-request.ts";
@@ -77,6 +79,12 @@ export interface OptionCardData {
   /** A durable learned-skill proposal. The skill stays staged until the
    * user confirms this card — it never rides the prompt before that. */
   skillRequest?: SkillRequestCardData;
+  /** A connector call that would send something, held by the relay until
+   * this card is answered (outbound-requests.ts). */
+  outboundRequest?: { tool: string; app: string | null };
+  /** A person or decision a bot proposed for the section's team memory;
+   * the entry stays "proposed" until this card is answered (team-memory.ts). */
+  teamMemoryRequest?: { section: string; entryId: string; kind: string };
 }
 
 export interface ConnectorCardData {
@@ -529,6 +537,17 @@ export interface BotRecord {
   /** Tools this bot may always use without asking, even outside auto mode
    * (set by "Always allow" on an approval card). */
   alwaysAllow?: string[];
+  /** Sending on the person's behalf: ask every time (the default when
+   * absent) or allow up to a daily cap. Independent of approvalMode — Full
+   * access does not bypass it. */
+  outbound?: OutboundPolicy;
+  /** Which connected apps this bot may use, and whether it may write to
+   * them. Absent: every connected app, read and write (the old behavior). */
+  connectorScopes?: ConnectorScopes;
+  /** Where a task carries on when this bot's engine hits a usage limit or
+   * is otherwise unavailable, in order. Another account of the same engine,
+   * or a different engine; the transcript replays into whichever it lands on. */
+  fallback?: Array<{ instanceId: string; model: string }>;
   /** Speak this bot's replies aloud as they settle, without being asked.
    * Off by default: a hosted voice costs money per character, so speaking
    * is something you turn on, never something that happens to you. */

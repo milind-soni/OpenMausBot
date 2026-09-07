@@ -1,5 +1,5 @@
 import { createServer, type Server } from "node:http";
-import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
+import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 
 import type { AppConfig } from "./config.ts";
 import {
@@ -16,6 +16,7 @@ import {
   removeService,
   relayMcp,
   setManagedBrokerAccess,
+  trustedSessionMcpUrl,
 } from "./composio.ts";
 
 let api: Server;
@@ -845,5 +846,28 @@ describe.sequential("Composio Sessions", () => {
     } finally {
       emptyConnectedAccounts = false;
     }
+  });
+});
+
+describe("trustedSessionMcpUrl", () => {
+  // Composio's own hosts are always trusted. A backend the operator pointed
+  // the app at explicitly (OMB_COMPOSIO_API — dev and test stubs) may hand
+  // back a Session on its own origin; anything else is refused.
+  afterEach(() => {
+    delete process.env.OMB_COMPOSIO_API;
+  });
+
+  it("accepts composio.dev over https and nothing else by default", () => {
+    expect(trustedSessionMcpUrl("https://app.composio.dev/tool_router/v3/trs_1/mcp")).toBe(true);
+    expect(trustedSessionMcpUrl("http://app.composio.dev/mcp")).toBe(false);
+    expect(trustedSessionMcpUrl("https://evil.example/mcp")).toBe(false);
+    expect(trustedSessionMcpUrl("http://127.0.0.1:4000/mcp")).toBe(false);
+  });
+
+  it("accepts the explicitly configured backend's own origin, and only that origin", () => {
+    process.env.OMB_COMPOSIO_API = "http://127.0.0.1:4000/api/v3.1";
+    expect(trustedSessionMcpUrl("http://127.0.0.1:4000/mcp")).toBe(true);
+    expect(trustedSessionMcpUrl("http://127.0.0.1:4001/mcp")).toBe(false);
+    expect(trustedSessionMcpUrl("https://evil.example/mcp")).toBe(false);
   });
 });

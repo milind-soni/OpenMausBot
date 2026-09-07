@@ -51,6 +51,8 @@ let routinesResponse: unknown = {
 };
 let lastRoutineRequestBody: any = null;
 let lastProfileRequestBody: any = null;
+let lastTeamMemoryBody: any = null;
+let teamMemoryResponse: any = { status: "accepted" };
 let profileRequestResponse: unknown = { requestId: "profile-request-1", summary: "Name → Kiwi" };
 let lastSessionSearchUrl = "";
 let lastSessionReadUrl = "";
@@ -192,6 +194,16 @@ beforeAll(async () => {
       });
       return;
     }
+    if (req.method === "POST" && req.url === "/api/internal/team-memory") {
+      let data = "";
+      req.on("data", (c) => (data += c));
+      req.on("end", () => {
+        lastTeamMemoryBody = JSON.parse(data);
+        res.writeHead(201, { "content-type": "application/json" });
+        res.end(JSON.stringify(teamMemoryResponse));
+      });
+      return;
+    }
     if (req.method === "POST" && req.url === "/api/internal/profile-requests") {
       let data = "";
       req.on("data", (c) => (data += c));
@@ -292,6 +304,7 @@ describe("agents-proxy MCP surface", () => {
       "propose_routine",
       "propose_routine_action",
       "propose_profile",
+      "propose_team_memory",
       "skills_list",
       "skill_manage",
     ]);
@@ -882,6 +895,29 @@ describe("agents-proxy MCP surface", () => {
       reason: "asked",
       forBotId: "bot-helper",
     });
+  });
+
+  it("propose_team_memory shares a term at once and holds a person for a card", async () => {
+    lastTeamMemoryBody = null;
+    teamMemoryResponse = { status: "accepted" };
+    const term = await callTool("propose_team_memory", { kind: "term", name: "MCHQ", detail: "MissionControlHQ, the old name" });
+    expect(lastTeamMemoryBody).toEqual({
+      fromBotId: "bot-asker",
+      fromThreadId: "thread-asker-routine",
+      kind: "term",
+      name: "MCHQ",
+      detail: "MissionControlHQ, the old name",
+    });
+    expect(term.result.content[0].text).toContain("Remembered for the team");
+
+    teamMemoryResponse = { status: "proposed", requestId: "entry-1", summary: "Person: Ayush — Founder" };
+    const person = await callTool("propose_team_memory", { kind: "person", name: "Ayush", detail: "Founder", aliases: ["Ayu"] });
+    expect(lastTeamMemoryBody.aliases).toEqual(["Ayu"]);
+    expect(person.result.content[0].text).toContain("confirmation card is now visible");
+    expect(person.result.content[0].text).toContain("do not claim the entry was created");
+
+    const junk = await callTool("propose_team_memory", { kind: "term", name: "x" });
+    expect(junk.result.isError).toBe(true);
   });
 
   it("propose_profile refuses an empty change set without calling the harness", async () => {

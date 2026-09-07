@@ -52,6 +52,9 @@ export class ProviderRegistry {
   /** decoded per-instance `cli` overrides, for describe() — drivers spawn
    * from their own config; this map only reports what was configured */
   private cliByInstance = new Map<InstanceId, string>();
+  /** which default-fleet instance a profile is another account of — the
+   * client shows Remove only for these */
+  private accountOfByInstance = new Map<InstanceId, string>();
   private driversByKind: Map<string, AnyProviderDriver>;
 
   constructor(drivers: readonly AnyProviderDriver[]) {
@@ -60,6 +63,8 @@ export class ProviderRegistry {
 
   async load(configs: InstanceConfigMap) {
     for (const [instanceId, entry] of Object.entries(configs)) {
+      if (entry.accountOf) this.accountOfByInstance.set(instanceId, entry.accountOf);
+      else this.accountOfByInstance.delete(instanceId);
       const driver = this.driversByKind.get(entry.driver);
       if (!driver) {
         this.byId.set(instanceId, {
@@ -197,6 +202,7 @@ export class ProviderRegistry {
             // a shadow is exactly the "your CLI is broken, pick another"
             // case where the detected-path dropdown matters most
             cliCandidates: candidatesFor(driver),
+            accountOf: this.accountOfByInstance.get(entry.instanceId),
           };
         }
         const inst = entry.live;
@@ -227,6 +233,7 @@ export class ProviderRegistry {
           access: driver?.metadata.access ?? "subscription",
           install: driver?.install,
           cli: this.cliByInstance.get(inst.instanceId),
+          accountOf: this.accountOfByInstance.get(inst.instanceId),
           cliDefault: cliDefaultOf(driver),
           // every copy of the driver's default binary on the augmented PATH —
           // the dropdown's "detected" entries. Snapshotted per describe() so a
@@ -241,5 +248,6 @@ export class ProviderRegistry {
     await Promise.allSettled(this.instances().map((i) => i.dispose()));
     this.byId.clear();
     this.cliByInstance.clear();
+    this.accountOfByInstance.clear();
   }
 }

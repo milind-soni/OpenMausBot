@@ -114,7 +114,7 @@ function parseRecent<T>(text: string, includeFirst: boolean, limit: number, vali
   return out.slice(-limit);
 }
 
-function readRecentLines<T>(file: string, limit: number, valid: RecordGuard<T>): { lines: T[]; total: number } {
+export function readRecentLines<T>(file: string, limit: number, valid: RecordGuard<T>): { lines: T[]; total: number } {
   let fd: number;
   try {
     fd = openSync(file, "r");
@@ -160,7 +160,7 @@ const stringOrNullOrMissing = (value: unknown) => value === undefined || value =
 const numberOrNullOrMissing = (value: unknown) => value === undefined || value === null || typeof value === "number";
 const stringsOrMissing = (value: unknown) => value === undefined || (Array.isArray(value) && value.every((item) => typeof item === "string"));
 
-function isRuntimeEvent(value: unknown): value is RuntimeEvent {
+export function isRuntimeEvent(value: unknown): value is RuntimeEvent {
   if (
     !isRecord(value) ||
     typeof value.eventId !== "string" ||

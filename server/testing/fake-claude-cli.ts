@@ -5,6 +5,7 @@
 // the real thing misbehaves:
 //
 //   FAKE_CLAUDE_MODE   happy (default) | exit-early | hang | malformed
+//                      | rate-limited (429 on stderr, exit 1 before any result)
 //                      | stream (partial-message text deltas before the
 //                        whole-message frame, plus subagent noise to drop)
 //   FAKE_CLAUDE_DUMP   path to write {argv, env, prompt, systemPrompt,
@@ -185,6 +186,13 @@ const playTurn = (prompt: JsonValue) => {
   if (mode === "exit-early") {
     process.stderr.write("fake-claude: simulated crash before result\n");
     process.exit(3);
+  }
+  // A provider rate limit before any result: the driver retries it (fast,
+  // under FAKE_CLAUDE_RETRY_SCALE) and then fails the turn, which is what a
+  // bot's account fallback listens for.
+  if (mode === "rate-limited") {
+    process.stderr.write("fake-claude: API Error: 429 Too Many Requests\n");
+    process.exit(1);
   }
   // transient-failure script for retry tests. FAKE_CLAUDE_TRANSIENTS is how
   // many launches fail transiently (503-shaped stderr, exit 5); the count of

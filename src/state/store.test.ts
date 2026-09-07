@@ -1293,3 +1293,32 @@ describe("bot settings section", () => {
     expect(state.botSettingsSection).toBe("overview");
   });
 });
+
+describe("activity panel", () => {
+  // The activity panel is a sibling of the inspector and the computer panel:
+  // one side panel at a time, and any view change closes it.
+  it("starts closed", () => {
+    expect(initialState.activityOpen).toBe(false);
+  });
+
+  it("toggleActivity opens it and closes the other side panels", () => {
+    const withPanels = { ...initialState, computerOpen: true, inspectorOpen: true, appSettingsOpen: true };
+    const next = reducer(withPanels, { type: "toggleActivity" });
+    expect(next.activityOpen).toBe(true);
+    expect(next.computerOpen).toBe(false);
+    expect(next.inspectorOpen).toBe(false);
+    expect(next.appSettingsOpen).toBe(false);
+    expect(reducer(next, { type: "toggleActivity" }).activityOpen).toBe(false);
+  });
+
+  it("opening the inspector or the computer closes the activity panel", () => {
+    const open = { ...initialState, activityOpen: true };
+    expect(reducer(open, { type: "toggleInspector", open: true }).activityOpen).toBe(false);
+    expect(reducer(open, { type: "toggleComputer", open: true }).activityOpen).toBe(false);
+  });
+
+  it("switching to the routines view closes the activity panel", () => {
+    const open = { ...initialState, activityOpen: true };
+    expect(reducer(open, { type: "showRoutines" }).activityOpen).toBe(false);
+  });
+});

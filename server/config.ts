@@ -228,6 +228,9 @@ const instanceConfigSchema = z.object({
   environment: z.record(z.string(), z.string()).optional(),
   enabled: z.boolean().optional(),
   config: z.json().optional(),
+  /** A second account on an engine: the default-fleet instance id this
+   * profile is another login of. Only profiles can be removed. */
+  accountOf: optionalText,
 });
 const instanceConfigMapSchema = z.record(z.string(), instanceConfigSchema);
 const appConfigSchema = z.object({
@@ -567,7 +570,14 @@ export const PROVIDER_CREDENTIAL_ENV = [
 
 /** Merge a partial config into ~/.openmausbot/config.json (secrets never
  * echoed back — callers report configured-or-not booleans only). */
-export function saveConfig(patch: Partial<AppConfig>): void {
+export function saveConfig(
+  patch: Partial<AppConfig>,
+  options: {
+    /** Instance ids to drop from disk. The instances section merges per id,
+     * so a removed account has to be named to actually leave the file. */
+    removeInstances?: string[];
+  } = {},
+): void {
   const p = join(DATA_DIR, "config.json");
   let disk: JsonObject = {};
   try {
@@ -627,6 +637,7 @@ export function saveConfig(patch: Partial<AppConfig>): void {
       Object.assign(merged, entry);
       diskInstances[instanceId] = merged;
     }
+    for (const instanceId of options.removeInstances ?? []) delete diskInstances[instanceId];
     disk.instances = diskInstances;
   }
   mkdirSync(DATA_DIR, { recursive: true });
@@ -837,4 +848,91 @@ export function customMcpServers(cfg: AppConfig): Record<string, CustomMcpServer
     };
   }
   return out;
+}
+
+
+// ── account profiles ──
+// A second account on the same engine is another instance of its driver
+// with its own config directory, where the CLI keeps that login. The
+// harness spawns it with that directory in its environment, so two Claude
+// Max accounts (or Codex and Claude) can sit side by side and a bot can
+// fall from one to the next when a usage limit lands.
+
+/** Where each engine keeps its login, as the environment variable that
+ * moves it. An engine missing here cannot host a second account yet. */
+const ACCOUNT_HOME_VARIABLE: Record<string, { variable: string; defaultInstance: string }> = {
+  claudeAgent: { variable: "CLAUDE_CONFIG_DIR", defaultInstance: "claude" },
+  codex: { variable: "CODEX_HOME", defaultInstance: "codex" },
+};
+
+export type AccountProfileUpdate =
+  | { ok: true; config: AppConfig; instanceId: string }
+  | { ok: false; config: AppConfig; error: string };
+
+const profileSlug = (name: string): string =>
+  name
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "")
+    .slice(0, 40);
+
+/** Add a profile: a new instance beside the default fleet, keyed by the
+ * engine and a slug of the name, with the login directory under the data
+ * dir so it is private to this installation. */
+export function withAccountProfile(
+  cfg: AppConfig,
+  input: { driver: string; displayName: string; dataDir: string },
+): AccountProfileUpdate {
+  const home = ACCOUNT_HOME_VARIABLE[input.driver];
+  if (!home) return { ok: false, config: cfg, error: `${input.driver} cannot host a second account yet` };
+  const displayName = input.displayName.trim();
+  const slug = profileSlug(displayName);
+  if (!slug) return { ok: false, config: cfg, error: "give the account a name" };
+  // "Claude (work)" is the natural name and "claude-claude-work" is not the
+  // natural id: a leading engine name folds into the prefix.
+  const bare = slug.startsWith(`${home.defaultInstance}-`) ? slug.slice(home.defaultInstance.length + 1) : slug === home.defaultInstance ? "account" : slug;
+  const next: AppConfig = structuredClone(cfg);
+  const map = instanceConfigs(next);
+  let instanceId = `${home.defaultInstance}-${bare}`;
+  for (let n = 2; Object.hasOwn(map, instanceId); n++) instanceId = `${home.defaultInstance}-${bare}-${n}`;
+  const dir = join(input.dataDir, "accounts", instanceId);
+  // The same binary as the base engine: a CLI override (a versioned build, a
+  // wrapper) is about the machine, not the account, so it carries over.
+  const base = map[home.defaultInstance];
+  map[instanceId] = {
+    driver: input.driver,
+    displayName,
+    accountOf: home.defaultInstance,
+    environment: { [home.variable]: dir },
+    ...(base?.config !== undefined ? { config: structuredClone(base.config) } : {}),
+  };
+  for (const e of Object.values(map)) {
+    if (!e.environment) continue;
+    const injected = injectedEnvironment(next, e.driver);
+    for (const [k, v] of Object.entries(e.environment)) {
+      if (injected.get(k) === v) delete e.environment[k];
+    }
+    if (!Object.keys(e.environment).length) delete e.environment;
+  }
+  next.instances = map;
+  return { ok: true, config: next, instanceId };
+}
+
+/** Remove a profile. A default-fleet instance is not a profile and stays. */
+export function withoutAccountProfile(cfg: AppConfig, instanceId: string): AccountProfileUpdate {
+  const next: AppConfig = structuredClone(cfg);
+  const map = instanceConfigs(next);
+  if (!Object.hasOwn(map, instanceId)) return { ok: false, config: cfg, error: `unknown instance "${instanceId}"` };
+  if (!map[instanceId].accountOf) return { ok: false, config: cfg, error: "only an added account can be removed" };
+  delete map[instanceId];
+  for (const e of Object.values(map)) {
+    if (!e.environment) continue;
+    const injected = injectedEnvironment(next, e.driver);
+    for (const [k, v] of Object.entries(e.environment)) {
+      if (injected.get(k) === v) delete e.environment[k];
+    }
+    if (!Object.keys(e.environment).length) delete e.environment;
+  }
+  next.instances = map;
+  return { ok: true, config: next, instanceId };
 }

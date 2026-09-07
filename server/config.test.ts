@@ -26,6 +26,8 @@ import { customMcpServers,
   syncCredentialEnv,
   vpsSshAlias,
   withInstanceCli,
+  withAccountProfile,
+  withoutAccountProfile,
   WORKSPACE_CREDENTIAL_ENV,
   type AppConfig,
 } from "./config.ts";
@@ -645,6 +647,13 @@ describe("credential env preference", () => {
       futureSetting: { keep: true },
     });
 
+    // The instances section merges per id, so removing an account has to be
+    // said explicitly or the entry quietly comes back on the next load.
+    saveConfig({ instances: { "claude-work": { driver: "claudeAgent", accountOf: "claude" } } });
+    expect(JSON.parse(readFileSync(path, "utf8")).instances["claude-work"]).toMatchObject({ accountOf: "claude" });
+    saveConfig({ instances: {} }, { removeInstances: ["claude-work"] });
+    expect(JSON.parse(readFileSync(path, "utf8")).instances["claude-work"]).toBeUndefined();
+
     // A public list replacement cannot choose an alias, but an unchanged id
     // keeps the internal durable partition through a rename.
     saveConfig({ browserProfiles: [
@@ -799,5 +808,52 @@ describe("customMcpServers", () => {
       }),
     );
     expect(Object.keys(out)).toEqual(["keeper"]);
+  });
+});
+
+describe("Account profiles", () => {
+  // A second account on the same engine is an instance with its own config
+  // directory: the CLI keeps its login there, and the harness spawns it with
+  // that directory in its environment.
+  it("adds a Claude profile as an instance with its own config directory", () => {
+    const added = withAccountProfile({}, { driver: "claudeAgent", displayName: "Claude (work)", dataDir: "/home/omkar/.openmausbot" });
+    expect(added.ok).toBe(true);
+    if (!added.ok) return;
+    expect(added.instanceId).toBe("claude-work");
+    const entry = added.config.instances!["claude-work"];
+    expect(entry).toMatchObject({ driver: "claudeAgent", displayName: "Claude (work)", accountOf: "claude" });
+    expect(entry.environment).toEqual({ CLAUDE_CONFIG_DIR: "/home/omkar/.openmausbot/accounts/claude-work" });
+    // the default fleet is still there beside it
+    expect(added.config.instances!.claude).toMatchObject({ driver: "claudeAgent" });
+  });
+
+  it("runs the same binary as its base engine, so a CLI override carries over", () => {
+    const base = withInstanceCli({}, "claude", "/opt/claude-2.1/bin/claude").config;
+    const added = withAccountProfile(base, { driver: "claudeAgent", displayName: "Work", dataDir: "/h/.openmausbot" });
+    expect(added.ok && added.config.instances!["claude-work"].config).toEqual({ cli: "/opt/claude-2.1/bin/claude" });
+  });
+
+  it("uses CODEX_HOME for a Codex profile and refuses engines without a known home variable", () => {
+    const codex = withAccountProfile({}, { driver: "codex", displayName: "Codex Pro", dataDir: "/h/.openmausbot" });
+    expect(codex.ok && codex.config.instances!["codex-pro"].environment).toEqual({ CODEX_HOME: "/h/.openmausbot/accounts/codex-pro" });
+    expect(withAccountProfile({}, { driver: "grokAgent", displayName: "Grok 2", dataDir: "/h/.openmausbot" }).ok).toBe(false);
+  });
+
+  it("makes ids unique and refuses an empty name", () => {
+    const first = withAccountProfile({}, { driver: "claudeAgent", displayName: "Work", dataDir: "/h/.openmausbot" });
+    expect(first.ok && first.instanceId).toBe("claude-work");
+    const second = withAccountProfile(first.ok ? first.config : {}, { driver: "claudeAgent", displayName: "work", dataDir: "/h/.openmausbot" });
+    expect(second.ok && second.instanceId).toBe("claude-work-2");
+    expect(withAccountProfile({}, { driver: "claudeAgent", displayName: "   ", dataDir: "/h/.openmausbot" }).ok).toBe(false);
+  });
+
+  it("removes only a profile, never a default-fleet instance", () => {
+    const added = withAccountProfile({}, { driver: "claudeAgent", displayName: "Work", dataDir: "/h/.openmausbot" });
+    if (!added.ok) throw new Error("profile not added");
+    const removed = withoutAccountProfile(added.config, "claude-work");
+    expect(removed.ok).toBe(true);
+    expect(removed.config.instances!["claude-work"]).toBeUndefined();
+    expect(withoutAccountProfile(added.config, "claude").ok).toBe(false);
+    expect(withoutAccountProfile(added.config, "nope").ok).toBe(false);
   });
 });
