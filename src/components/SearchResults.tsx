@@ -5,7 +5,7 @@
 import { useEffect, useState } from "react";
 import { GitBranch, Wrench } from "lucide-react";
 import { api, useStore, formatTime } from "@/state/store";
-import { MausAvatar } from "./Avatar";
+import { BotAvatar } from "./Avatar";
 import { cn } from "@/lib/cn";
 import type { SearchHit } from "@/lib/search-hit";
 import { landOnSearchHit } from "@/lib/focus-message";
@@ -71,7 +71,7 @@ export function SearchResults({ query, onLanded }: { query: string; onLanded: ()
             className="flex w-full items-start gap-2.5 rounded-lg px-3 py-2 text-left hover:bg-raised/60"
           >
             {bot ? (
-              <MausAvatar color={bot.color} bodyId={bot.mascotBody ?? undefined} state="idle" size={26} animated={false} />
+              <BotAvatar bot={bot} state="idle" size={26} animated={false} />
             ) : (
               <span className="flex size-[26px] shrink-0 items-center justify-center rounded-full bg-raised text-[11px] text-ink-secondary">#</span>
             )}

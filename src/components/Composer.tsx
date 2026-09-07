@@ -20,7 +20,7 @@ import {
   type ComposerSendSnapshot,
   type FailedComposerSend,
 } from "@/lib/drafts";
-import { MausAvatar } from "./Avatar";
+import { BotAvatar } from "./Avatar";
 import { ComposerAttachments, pathForFile } from "./ComposerAttachments";
 import { LocalComputerAutoWarning } from "./LocalComputerAutoWarning";
 import { ApprovalModeSelector } from "./ApprovalModeSelector";
@@ -720,9 +720,8 @@ export function Composer({
                 )}
               >
                 {peer.bot ? (
-                  <MausAvatar
-                    color={peer.bot.color}
-                    bodyId={peer.bot.mascotBody ?? undefined}
+                  <BotAvatar
+                    bot={peer.bot}
                     state={normalizeState(peer.bot.mascotExpression) ?? "happy"}
                     size={24}
                   />

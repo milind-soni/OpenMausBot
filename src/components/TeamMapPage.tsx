@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { ArrowRight, BookOpen, Crown, Loader2, Network, RefreshCw, Save, X } from "lucide-react";
 
-import { MausAvatar } from "./Avatar";
+import { BotAvatar } from "./Avatar";
 import { api, formatTime, useStore, type Bot } from "@/state/store";
 import { normalizeState } from "@/lib/mascot";
 import {
@@ -42,9 +42,8 @@ function BotNode({
         className="flex min-w-0 flex-1 items-center gap-3 px-3 py-3 text-left"
         aria-label={`Open chat with ${bot.name}`}
       >
-        <MausAvatar
-          color={bot.color}
-          bodyId={bot.mascotBody ?? undefined}
+        <BotAvatar
+          bot={bot}
           state={normalizeState(bot.mascotExpression) ?? "idle"}
           size={34}
           motion="none"
