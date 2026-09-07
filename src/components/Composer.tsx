@@ -90,6 +90,12 @@ const SETUP_COMMAND: ComposerSlashCommand = {
   description: "Have this bot interview you and set itself up",
 };
 
+const RESEARCH_COMMAND: ComposerSlashCommand = {
+  id: "research",
+  label: "/research",
+  description: "Answer with sources checked, and say what could not be",
+};
+
 interface ComposerDraftSnapshot extends ComposerSendSnapshot {
   reply: Message | null;
 }
@@ -261,6 +267,9 @@ export function Composer({
     // Setup mode needs the agents tools (propose_profile and friends) and a
     // single bot: a room cannot set itself up.
     if (!group && supportsAgents(bot)) available.push(SETUP_COMMAND);
+    // no capability gate: /research only needs the tools the bot already has,
+    // so unlike its neighbours it is offered everywhere
+    available.push(RESEARCH_COMMAND);
     const query = slash.query.toLowerCase();
     return available.filter(
       (command) =>
