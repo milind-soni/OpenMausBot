@@ -800,9 +800,9 @@ export const ClaudeDriver: ProviderDriver<ClaudeConfig> = {
   // native installers differ per OS and would need verifying separately.
   install: {
     command: {
-      darwin: "npm install -g @anthropic-ai/claude-code",
-      linux: "npm install -g @anthropic-ai/claude-code",
-      win32: "npm install -g @anthropic-ai/claude-code",
+      darwin: "npm install -g @anthropic-ai/claude-code@2.1.263",
+      linux: "npm install -g @anthropic-ai/claude-code@2.1.263",
+      win32: "npm install -g @anthropic-ai/claude-code@2.1.263",
     },
     needsNode: true,
     docsUrl: "https://claude.com/claude-code",

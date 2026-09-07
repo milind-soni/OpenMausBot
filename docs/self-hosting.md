@@ -211,7 +211,8 @@ docker compose pull omb && docker compose up -d
 
 That uses the image CI publishes on every `main` push
 (`ghcr.io/milind-soni/openmausbot`, tagged `latest`, `sha-…` and `v…`).
-To build from your checkout instead: `docker compose up -d --build`.
+To build from your checkout instead:
+`OMB_IMAGE=openmausbot:local docker compose up -d --build`.
 
 Then sign the engine CLIs in **inside the container** (their logins live on
 the `data` volume, so they survive restarts and image upgrades) and mint a
@@ -245,7 +246,7 @@ What the stack does, so you can adapt it:
   commented out, if you want a second wall in front of pairing.
 
 Upgrade with `docker compose pull omb && docker compose up -d` (or
-`git pull && docker compose up -d --build`). State (chats, routines,
+`git pull && OMB_IMAGE=openmausbot:local docker compose up -d --build`). State (chats, routines,
 engine logins, paired sessions) is on the `data` volume; back that up.
 
 ## From source

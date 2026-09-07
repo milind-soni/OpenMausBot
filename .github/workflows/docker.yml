@@ -61,7 +61,7 @@ jobs:
         # the probe can see a socket that does bind 0.0.0.0.
         run: |
           set -euo pipefail
-          probe() { docker run --rm --network bridge curlimages/curl:8.14.1 -s --max-time 3 "http://$1:$2/" >/dev/null; }
+          probe() { docker run --rm --network bridge curlimages/curl:8.14.1@sha256:9a1ed35addb45476afa911696297f8e115993df459278ed036182dd2cd22b67b -s --max-time 3 "http://$1:$2/" >/dev/null; }
           docker run -d --name leaky --entrypoint node openmausbot:ci -e "require('http').createServer((q,s)=>s.end('leak')).listen(8799,'0.0.0.0')"
           sleep 2
           leaky_ip=$(docker inspect -f '{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}' leaky)
@@ -83,8 +83,7 @@ jobs:
         run: |
           set -euo pipefail
           docker rm -f omb >/dev/null
-          docker tag openmausbot:ci ghcr.io/milind-soni/openmausbot:latest
-          printf 'DOMAIN=localhost\nENGINES=\n' > deploy/.env
+          printf 'DOMAIN=localhost\nENGINES=\nOMB_IMAGE=openmausbot:ci\n' > deploy/.env
           docker compose -f deploy/docker-compose.yml up -d --no-build
           for i in $(seq 1 45); do
             curl -sk -o /dev/null --max-time 2 https://localhost/.well-known/openmausbot/environment && break
