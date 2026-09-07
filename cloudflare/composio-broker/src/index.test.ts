@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import {
+import worker, {
   authorize,
   catalog,
   connectedServices,
@@ -55,6 +55,27 @@ function testEnv(fetchCalls: Array<{ url: string; init?: RequestInit }>) {
 afterEach(() => vi.unstubAllGlobals());
 
 describe("connected-apps broker boundaries", () => {
+  it.each([undefined, "closed", "invalid"])("does not write registrations when mode is %s", async (registrationMode) => {
+    let dbTouched = false;
+    const response = await worker.fetch(
+      new Request("https://broker.test/v1/installations", { method: "POST" }),
+      {
+        REGISTRATION_MODE: registrationMode,
+        REGISTRATION_LIMITER: { limit: async () => ({ success: true }) },
+        DB: {
+          prepare() {
+            dbTouched = true;
+            throw new Error("D1 must not be touched");
+          },
+        },
+      } as never,
+      { waitUntil() {} } as never,
+    );
+
+    expect(response.status).toBe(503);
+    expect(dbTouched).toBe(false);
+  });
+
   it("accepts an empty authorize body as a first-account request", async () => {
     await expect(requestAlias(new Request("https://broker.test/v1/connectors/gmail/authorize", {
       method: "POST",
