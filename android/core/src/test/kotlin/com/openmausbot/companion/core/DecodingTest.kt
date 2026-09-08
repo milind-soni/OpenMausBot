@@ -436,6 +436,29 @@ class DecodingTest {
     }
 
     @Test
+    fun decodesAnActivityPage() {
+        // A fixture harness has run no tools, so the page is empty; the shape
+        // is what matters, and an empty list must decode, not fail.
+        val page = decodeFixture<ActivityPage>("bot-activity")
+        assertTrue(page.rows.isEmpty())
+    }
+
+    @Test
+    fun decodesTeamMemory() {
+        val page = decodeFixture<TeamMemoryPage>("team-memory")
+        assertEquals("", page.section)
+        assertEquals("General", page.label)
+        assertEquals(listOf("person", "place", "decision", "term"), page.entries.map { it.kind })
+        val ada = page.entries.first()
+        assertEquals("Ada Lovelace", ada.name)
+        assertEquals(listOf("Ada"), ada.aliases)
+        assertEquals("accepted", ada.status)
+        // the person's own entries carry no bot
+        assertEquals("you", ada.source.botName)
+        assertTrue(ada.updatedAt > 0)
+    }
+
+    @Test
     fun decodesTheBotOverview() {
         val overview = decodeFixture<BotOverview>("bot-overview")
         assertEquals("Kiwi", overview.who.name)

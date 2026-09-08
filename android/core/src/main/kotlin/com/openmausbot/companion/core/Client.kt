@@ -287,6 +287,57 @@ class CompanionClient(
     suspend fun overview(botId: String): BotOverview =
         send(makeRequest("GET", "/api/bots/${segment(botId)}/overview"))
 
+    /**
+     * What the bot did, newest first: every tool it used and every approval it
+     * asked for, with the outcome. Read-only, like the overview.
+     */
+    suspend fun activity(botId: String, limit: Int = 200): List<ActivityRow> = send<ActivityPage>(
+        makeRequest("GET", "/api/bots/${segment(botId)}/activity", query = listOf("limit" to limit.toString())),
+    ).rows
+
+    /**
+     * The section's shared people, places, decisions and terms. The section is
+     * a query parameter, empty for General, and always sent.
+     */
+    suspend fun teamMemory(section: String): TeamMemoryPage =
+        send(makeRequest("GET", "/api/team-memory", query = listOf("section" to section)))
+
+    /** Add an entry by hand. The person's own entry never waits on the person. */
+    suspend fun addTeamMemory(section: String, kind: String, name: String, detail: String): List<TeamMemoryEntry> =
+        send<TeamMemoryEdit>(
+            makeRequest(
+                "POST",
+                "/api/team-memory",
+                query = listOf("section" to section),
+                body = buildJsonObject {
+                    put("kind", kind)
+                    put("name", name)
+                    put("detail", detail)
+                },
+            ),
+        ).entries
+
+    /** Answer a proposal: remember it, or drop it. */
+    suspend fun answerTeamMemory(section: String, id: String, remember: Boolean): List<TeamMemoryEntry> {
+        val query = listOf("section" to section)
+        return if (remember) {
+            send<TeamMemoryEdit>(
+                makeRequest("PATCH", "/api/team-memory/${segment(id)}", query = query, body = buildJsonObject { put("accept", true) }),
+            ).entries
+        } else {
+            send<TeamMemoryEdit>(makeRequest("DELETE", "/api/team-memory/${segment(id)}", query = query)).entries
+        }
+    }
+
+    /** Change what an entry says. Editing a proposal accepts it. */
+    suspend fun updateTeamMemory(section: String, id: String, detail: String): List<TeamMemoryEntry> =
+        send<TeamMemoryEdit>(
+            makeRequest("PATCH", "/api/team-memory/${segment(id)}", query = listOf("section" to section), body = buildJsonObject { put("detail", detail) }),
+        ).entries
+
+    suspend fun removeTeamMemory(section: String, id: String): List<TeamMemoryEntry> =
+        send<TeamMemoryEdit>(makeRequest("DELETE", "/api/team-memory/${segment(id)}", query = listOf("section" to section))).entries
+
     suspend fun createBot(): Bot = send<CreatedBot>(makeRequest("POST", "/api/bots")).bot
 
     /**

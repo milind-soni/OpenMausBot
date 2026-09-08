@@ -1890,6 +1890,51 @@ class Session(
         }
     }
 
+    /** What the bot did, with the outcome. Read-only, like the overview. */
+    suspend fun loadActivity(botId: String): List<ActivityRow>? {
+        val activeClient = client ?: return null
+        val connectionId = _connection.value?.id
+        return try {
+            val rows = activeClient.activity(botId)
+            currentCoroutineContext().ensureActive()
+            rows.takeIf { _connection.value?.id == connectionId }
+        } catch (error: Throwable) {
+            if (error is CancellationException) throw error
+            if (_connection.value?.id == connectionId) _actionError.value = error.message
+            null
+        }
+    }
+
+    /** The section's shared people, places, decisions and terms. */
+    suspend fun loadTeamMemory(section: String): TeamMemoryPage? {
+        val activeClient = client ?: return null
+        val connectionId = _connection.value?.id
+        return try {
+            val page = activeClient.teamMemory(section)
+            currentCoroutineContext().ensureActive()
+            page.takeIf { _connection.value?.id == connectionId }
+        } catch (error: Throwable) {
+            if (error is CancellationException) throw error
+            if (_connection.value?.id == connectionId) _actionError.value = error.message
+            null
+        }
+    }
+
+    /**
+     * One team-memory edit, and the page as it is afterwards; null when it
+     * failed, with the failure already shown.
+     */
+    suspend fun editTeamMemory(edit: suspend (CompanionClient) -> List<TeamMemoryEntry>): List<TeamMemoryEntry>? {
+        val activeClient = client ?: return null
+        return try {
+            edit(activeClient)
+        } catch (error: Throwable) {
+            if (error is CancellationException) throw error
+            _actionError.value = error.message
+            null
+        }
+    }
+
     suspend fun loadRoutineRunAvailability(): RoutineRunAvailability? {
         val activeClient = client ?: return null
         return try {

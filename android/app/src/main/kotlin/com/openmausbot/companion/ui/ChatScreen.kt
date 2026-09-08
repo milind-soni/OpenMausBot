@@ -139,6 +139,8 @@ fun ChatScreen(
     onBack: () -> Unit,
     onOpenComputer: (String) -> Unit,
     onOpenOverview: (String) -> Unit,
+    onOpenActivity: (String) -> Unit,
+    onOpenTeamMemory: (String) -> Unit,
     /**
      * True while this conversation is still on the navigator stack (including
      * under Computer). Used on dispose to keep the in-memory draft across a
@@ -166,7 +168,7 @@ fun ChatScreen(
             // that is open is the one deleted.
             val resolved = (destination as? Destination.Thread)?.let { resolution.chat.target }
             LaunchedEffect(resolved) { if (resolved != null) onResolved(resolved) }
-            LoadedChat(resolution.chat, state, onBack, onOpenComputer, onOpenOverview, retainsDraft)
+            LoadedChat(resolution.chat, state, onBack, onOpenComputer, onOpenOverview, onOpenActivity, onOpenTeamMemory, retainsDraft)
         }
     }
 }
@@ -196,6 +198,8 @@ private fun LoadedChat(
     onBack: () -> Unit,
     onOpenComputer: (String) -> Unit,
     onOpenOverview: (String) -> Unit,
+    onOpenActivity: (String) -> Unit,
+    onOpenTeamMemory: (String) -> Unit,
     retainsDraft: (chatId: String) -> Boolean,
 ) {
     // The bot's *current* thread, not the one the destination named. Switching or
@@ -970,6 +974,14 @@ private fun LoadedChat(
             onDismiss = { showingProfile = false },
             onOpenOverview = {
                 onOpenOverview(it)
+                showingProfile = false
+            },
+            onOpenActivity = {
+                onOpenActivity(it)
+                showingProfile = false
+            },
+            onOpenTeamMemory = {
+                onOpenTeamMemory(it)
                 showingProfile = false
             },
         )

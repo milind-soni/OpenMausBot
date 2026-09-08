@@ -46,6 +46,15 @@ sealed interface Destination {
      */
     data class Overview(val botId: String) : Destination
 
+    /** A bot's activity log: what it did, with the outcome. Read-only. */
+    data class Activity(val botId: String) : Destination
+
+    /**
+     * A section's team memory — the people, places, decisions and terms every
+     * bot there shares. Addressed by the section key; "" is General.
+     */
+    data class TeamMemory(val section: String) : Destination
+
     /**
      * A conversation, in one of the two ways something can name one.
      *
@@ -138,6 +147,8 @@ class CompanionNavigator(initial: List<Destination> = listOf(Destination.Roster)
         private const val THREAD = "thread:"
         private const val COMPUTER = "computer:"
         private const val OVERVIEW = "overview:"
+        private const val ACTIVITY = "activity:"
+        private const val TEAM_MEMORY = "teammemory:"
         private const val BOT_CHAT = "botchat:"
         private const val ROOM_CHAT = "roomchat:"
 
@@ -150,6 +161,8 @@ class CompanionNavigator(initial: List<Destination> = listOf(Destination.Roster)
                 is Destination.Thread -> THREAD + it.threadId
                 is Destination.Computer -> COMPUTER + it.botId
                 is Destination.Overview -> OVERVIEW + it.botId
+                is Destination.Activity -> ACTIVITY + it.botId
+                is Destination.TeamMemory -> TEAM_MEMORY + it.section
                 is Destination.Chat -> when (val target = it.target) {
                     is ChatTarget.Bot -> BOT_CHAT + join(target.botId, target.threadId)
                     is ChatTarget.Room -> ROOM_CHAT + join(target.roomId, target.threadId)
@@ -166,6 +179,8 @@ class CompanionNavigator(initial: List<Destination> = listOf(Destination.Roster)
                 it.startsWith(THREAD) -> Destination.Thread(it.removePrefix(THREAD))
                 it.startsWith(COMPUTER) -> Destination.Computer(it.removePrefix(COMPUTER))
                 it.startsWith(OVERVIEW) -> Destination.Overview(it.removePrefix(OVERVIEW))
+                it.startsWith(ACTIVITY) -> Destination.Activity(it.removePrefix(ACTIVITY))
+                it.startsWith(TEAM_MEMORY) -> Destination.TeamMemory(it.removePrefix(TEAM_MEMORY))
                 it.startsWith(BOT_CHAT) -> split(it.removePrefix(BOT_CHAT))
                     ?.let { (owner, thread) -> Destination.Chat(ChatTarget.Bot(owner, thread)) }
                 it.startsWith(ROOM_CHAT) -> split(it.removePrefix(ROOM_CHAT))

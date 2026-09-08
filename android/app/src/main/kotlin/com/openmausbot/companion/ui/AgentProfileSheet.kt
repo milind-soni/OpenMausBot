@@ -19,6 +19,8 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.AddCircle
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.Face
+import androidx.compose.material.icons.filled.List
 import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.Warning
 import androidx.compose.material3.CircularProgressIndicator
@@ -90,7 +92,13 @@ import kotlinx.coroutines.withContext
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-internal fun AgentProfileSheet(bot: Bot, onDismiss: () -> Unit, onOpenOverview: (String) -> Unit) {
+internal fun AgentProfileSheet(
+    bot: Bot,
+    onDismiss: () -> Unit,
+    onOpenOverview: (String) -> Unit,
+    onOpenActivity: (String) -> Unit = {},
+    onOpenTeamMemory: (String) -> Unit = {},
+) {
     val environment = LocalCompanion.current
     val session = environment.session
     val state by session.state.collectAsState()
@@ -218,6 +226,16 @@ internal fun AgentProfileSheet(bot: Bot, onDismiss: () -> Unit, onOpenOverview: 
                         text = "What this bot does",
                         icon = Icons.Filled.Info,
                         onClick = { onOpenOverview(bot.id) },
+                    )
+                    ActionRow(
+                        text = ActivityRules.PROFILE_ROW,
+                        icon = Icons.Filled.List,
+                        onClick = { onOpenActivity(bot.id) },
+                    )
+                    ActionRow(
+                        text = TeamMemoryRules.PROFILE_ROW,
+                        icon = Icons.Filled.Face,
+                        onClick = { onOpenTeamMemory(bot.section.orEmpty()) },
                     )
                 }
 

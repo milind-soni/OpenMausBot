@@ -1027,3 +1027,59 @@ data class BotOverview(
     val wont: List<String> = emptyList(),
     val recent: List<BotOverviewRecent> = emptyList(),
 )
+
+/**
+ * One line of a bot's activity log: what ran, in words, and how it ended.
+ * Built on the computer from logs that already exist; the phone only reads
+ * it. Port of `ActivityRow` in `ios/Sources/CompanionCore/Models.swift`.
+ */
+@Serializable
+data class ActivityRow(
+    /** ISO 8601, when it started (a tool) or was asked (a request) */
+    val at: String,
+    val threadId: String,
+    val turnId: String? = null,
+    val requestId: String? = null,
+    /** the raw tool name */
+    val tool: String,
+    /** the connected app or surface it touched, when there is one */
+    val app: String? = null,
+    /** the action, in words */
+    val label: String,
+    /** the arguments the decision log recorded, already redacted */
+    val summary: String? = null,
+    /** ran | failed | running | allowed | denied | waiting */
+    val outcome: String,
+)
+
+@Serializable
+data class ActivityPage(val rows: List<ActivityRow> = emptyList())
+
+@Serializable
+data class TeamMemorySource(val botId: String, val botName: String, val threadId: String, val at: Double)
+
+/**
+ * One thing every bot in a section shares: a person, a place, a decision, or
+ * a term. `proposed` waits for the person; `accepted` rides the prompt.
+ */
+@Serializable
+data class TeamMemoryEntry(
+    val id: String,
+    /** person | place | decision | term */
+    val kind: String,
+    val name: String,
+    val detail: String,
+    val aliases: List<String> = emptyList(),
+    /** accepted | proposed */
+    val status: String,
+    val source: TeamMemorySource,
+    /** epoch milliseconds */
+    val updatedAt: Double,
+)
+
+@Serializable
+data class TeamMemoryPage(val section: String, val label: String, val entries: List<TeamMemoryEntry> = emptyList())
+
+/** What an edit answers with: the edited entry and the whole page. */
+@Serializable
+data class TeamMemoryEdit(val entry: TeamMemoryEntry? = null, val entries: List<TeamMemoryEntry> = emptyList())
