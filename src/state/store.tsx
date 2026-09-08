@@ -18,6 +18,7 @@ import type { MausColor, MausMotion } from "@/lib/mascot";
 import type { BotAvatarCrop } from "../../shared/bot-avatar";
 import { approvalModeFor, type ApprovalMode } from "../../shared/approval-mode";
 import type { MascotBodyId } from "../../shared/mascot-bodies";
+import type { QuestionRequestCardData } from "../../shared/ask-question";
 import type { ProfileRequestCardData } from "../../shared/profile-request";
 import type { RoutineRequestCardData } from "../../shared/routine-request";
 import type { RoutineRunCardData } from "../../shared/routine-run";
@@ -65,6 +66,9 @@ export interface OptionCardData {
   subtitle: string;
   options: string[];
   answered?: string;
+  /** The words an answered question card was answered with — `answered`
+   * only holds the behavior once the server settles a live ask. */
+  answeredText?: string;
   dismissed?: boolean;
   /** Present when this card is a live provider ask (approval/question). */
   requestId?: string;
@@ -85,6 +89,9 @@ export interface OptionCardData {
   skillRequest?: SkillRequestCardData;
   /** Persisted profile proposal used by the server when the user confirms it. */
   profileRequest?: ProfileRequestCardData;
+  /** The model's own questions and options (Claude's AskUserQuestion), so
+   * the card offers choices instead of an unanswerable Allow/Deny. */
+  questionRequest?: QuestionRequestCardData;
 }
 
 export interface ConnectorCardData {

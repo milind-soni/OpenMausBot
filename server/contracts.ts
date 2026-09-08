@@ -6,6 +6,7 @@
 // readable.
 
 import type { ApprovalMode } from "../shared/approval-mode.ts";
+import type { AskQuestion } from "../shared/ask-question.ts";
 
 export type DriverKind = string;
 export type InstanceId = string;
@@ -141,6 +142,10 @@ export type RuntimeEvent = RuntimeEventBase &
         tool: string;
         summary: string;
         choices?: string[];
+        /** A provider's structured ask (Claude's AskUserQuestion): the whole
+         * set of questions, each with its own options, so the card can offer
+         * them instead of an Allow/Deny a person cannot answer. */
+        questions?: AskQuestion[];
         approvalScope?: "local-computer";
         /** Provider asks to widen its configured sandbox. Only explicit Full
          * access may answer this automatically; Auto/remembered grants may not. */

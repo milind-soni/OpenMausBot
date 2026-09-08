@@ -80,7 +80,7 @@ export function OptionCard({
               // pure white, the same value as the card underneath, so a
               // hovered or answered row used to be invisible. `raised-hover`
               // is the one tone every skin guarantees stands off a surface.
-              card.answered === opt
+              (card.answeredText ?? card.answered) === opt
                 ? "bg-raised-hover"
                 : "hover:bg-raised-hover/60 disabled:hover:bg-transparent",
             )}

@@ -44,6 +44,13 @@ import {
 } from "./local-inject.ts";
 import { appendNative } from "./native.ts";
 import { SPAWNED_PROXIES } from "../proxy-paths.ts";
+import {
+  ASK_USER_QUESTION_TOOL,
+  askQuestionSummary,
+  parseAskQuestions,
+  questionChoices,
+  type AskQuestion,
+} from "../../shared/ask-question.ts";
 
 /** Whether `claude` has been signed in.
  *
@@ -474,8 +481,17 @@ function systemEndedReply(kind: Ask["kind"]): { behavior: AskBehavior; message: 
     : { behavior: "deny", message: "OpenMausBot: the turn ended" };
 }
 
+/** The structured questions behind an ask, when it is one. Claude's own
+ * AskUserQuestion carries them; everything else answers null and keeps the
+ * plain summary/choices card. */
+function askQuestions(ask: Ask): AskQuestion[] | null {
+  return ask.tool === ASK_USER_QUESTION_TOOL ? parseAskQuestions(ask.input) : null;
+}
+
 /** One human-readable line for an ask — what the card subtitle shows. */
 function askSummary(ask: Ask): string {
+  const questions = askQuestions(ask);
+  if (questions) return askQuestionSummary(questions).slice(0, 300);
   return askInputSummary(ask.input) ?? ask.tool ?? "tool";
 }
 
@@ -1289,6 +1305,7 @@ export const ClaudeDriver: ProviderDriver<ClaudeConfig> = {
                 permissionMode === "auto" && nativeMode !== null
                   ? nativeMode === "auto" ? "active" : "inactive"
                   : undefined;
+              const questions = askQuestions(ask);
               emit({
                 ...base(threadId, eventTurnId),
                 type: "request.opened",
@@ -1304,7 +1321,12 @@ export const ClaudeDriver: ProviderDriver<ClaudeConfig> = {
                   typeof ask.tool === "string" && controlsHost && ask.tool.startsWith("mcp__computer")
                     ? "local-computer"
                     : undefined,
-                choices: Array.isArray(ask.input?.choices) ? (ask.input.choices as string[]).slice(0, 5) : undefined,
+                questions: questions ?? undefined,
+                // A structured ask still offers flat labels, for the phone
+                // companions and any client that predates the question card.
+                choices: questions
+                  ? questionChoices(questions)
+                  : Array.isArray(ask.input?.choices) ? (ask.input.choices as string[]).slice(0, 5) : undefined,
               });
             },
             onResolve: (resolved) => {

@@ -50,6 +50,7 @@ import { askText, nameIsCommand, runSteps, runSummary, showRun, skillPrompt, ski
 import { ThreadRefText } from "./ThreadRefs";
 import { OptionCard, shouldHideOnboardingCard } from "./OptionCard";
 import { ApprovalCard } from "./ApprovalCard";
+import { QuestionCard } from "./QuestionCard";
 import { Composer } from "./Composer";
 import { ChatFindBar } from "./ChatFindBar";
 import { ReplyQuote } from "./ReplyQuote";
@@ -721,8 +722,12 @@ const MessagesList = memo(function MessagesList({
             case "connector":
               return m.connector ? <ConnectorCard botId={bot.id} threadId={bot.threadId} message={m} /> : null;
             case "options":
-              // a live permission ask gets the approval box; questions keep
-              // the list card. The first-run quiz drops out once they talk.
+              // a live permission ask gets the approval box; a structured
+              // ask gets the question box; anything else keeps the list
+              // card. The first-run quiz drops out once they talk.
+              if (m.card?.requestId && m.card.questionRequest) {
+                return <QuestionCard threadId={bot.threadId} bot={bot} message={m} />;
+              }
               if (m.card?.requestId && m.card.tool) {
                 return <ApprovalCard bot={bot} message={m} />;
               }

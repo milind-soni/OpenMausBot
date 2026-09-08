@@ -501,6 +501,51 @@ describe("ClaudeDriver turns (fake CLI)", () => {
     }
   });
 
+  it("turns Claude's own AskUserQuestion into a question card, not an approval", async () => {
+    // The CLI routes AskUserQuestion through --permission-prompt-tool like
+    // any other tool use. Left as a permission it offers Deny / Always allow
+    // / Allow once over a question, and answering it "allow" throws the
+    // answer away — so the ask has to arrive as a question with its options.
+    await create("hang");
+    await instance.adapter.sendTurn({ threadId: "t-structured-ask", text: "go" });
+    const conn = await connectSocket(permissionSocketPath("t-structured-ask"));
+    try {
+      conn.write(JSON.stringify({
+        t: "ask",
+        kind: "question",
+        id: "structured-ask",
+        tool: "AskUserQuestion",
+        input: {
+          questions: [{
+            question: "Which model should this bot run on?",
+            header: "Model",
+            options: [{ label: "Opus 5", description: "What it had before." }, { label: "Sonnet 5" }],
+          }],
+        },
+      }) + "\n");
+      const opened = await recorder.until((e) => e.type === "request.opened") as {
+        requestType: string;
+        summary: string;
+        requestId: string;
+        questions?: { question: string; header?: string; options: { label: string }[] }[];
+        choices?: string[];
+      };
+      expect(opened.requestType).toBe("question");
+      expect(opened.summary).toBe("Which model should this bot run on?");
+      expect(opened.questions?.[0]).toMatchObject({ question: "Which model should this bot run on?", header: "Model" });
+      // flat labels too, so the phone companions can still answer
+      expect(opened.choices).toEqual(["Opus 5", "Sonnet 5"]);
+      expect(
+        await instance.adapter.respondToRequest("t-structured-ask", opened.requestId, {
+          behavior: "answer",
+          message: "The user answered your questions.\n\nQ: Which model should this bot run on?\nA: Opus 5",
+        }),
+      ).toBe("answered");
+    } finally {
+      conn.destroy();
+    }
+  });
+
   it("sends attached images as native blocks before text without logging their bytes", async () => {
     await create();
     const dump = join(scratch, "dump-images.json");

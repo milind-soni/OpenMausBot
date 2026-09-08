@@ -10,9 +10,18 @@
 //   ask_user  — the agent can pose a question mid-run and wait; the
 //               human's words come back verbatim.
 //
+// One tool arrives through `approve` but is not a permission at all:
+// Claude's own AskUserQuestion. The CLI routes it here like any other tool
+// use, and answering "allow" only makes it run with no interface to answer
+// in ("The user did not answer the questions"). So it is forwarded as a
+// QUESTION, and the person's answer comes back on the deny channel — the
+// one branch of the permission contract whose message the CLI hands to the
+// model verbatim as the tool result.
+//
 // stdout is the MCP channel — never console.log here.
 import { connect } from "node:net";
 import { randomUUID } from "node:crypto";
+import { ASK_USER_QUESTION_TOOL, askUserQuestionToolResult } from "../shared/ask-question.ts";
 
 const socketPath = process.argv[2] ?? "";
 
@@ -105,7 +114,10 @@ async function handle(msg: any) {
     const name = msg.params?.name;
     const args = msg.params?.arguments ?? {};
     const askId = randomUUID();
-    const isQuestion = name === "ask_user";
+    // ask_user is our own tool; AskUserQuestion is Claude's, and reaches us
+    // as an `approve` call whose tool_name says what it really is.
+    const isAskUserQuestion = name === "approve" && args.tool_name === ASK_USER_QUESTION_TOOL;
+    const isQuestion = name === "ask_user" || isAskUserQuestion;
     // the CLI may include its own suggested permission rules; on allow we
     // hand them straight back as updatedPermissions so claude stops asking
     // at its own layer — no invented rule syntax (agentcal)
@@ -117,9 +129,11 @@ async function handle(msg: any) {
     const answer: any = await new Promise((resolve) => {
       waiting.set(askId, resolve);
       if (conn.destroyed) return dead();
-      const ask = isQuestion
-        ? { t: "ask", id: askId, kind: "question", tool: "ask_user", input: { question: args.question, choices: args.choices } }
-        : { t: "ask", id: askId, tool: args.tool_name, input: args.input };
+      const ask = isAskUserQuestion
+        ? { t: "ask", id: askId, kind: "question", tool: ASK_USER_QUESTION_TOOL, input: args.input ?? {} }
+        : isQuestion
+          ? { t: "ask", id: askId, kind: "question", tool: "ask_user", input: { question: args.question, choices: args.choices } }
+          : { t: "ask", id: askId, tool: args.tool_name, input: args.input };
       try {
         conn.write(JSON.stringify(ask) + "\n");
       } catch {
@@ -127,7 +141,9 @@ async function handle(msg: any) {
       }
     });
     let text = answer.message || "No answer was given — use your best judgment.";
-    if (!isQuestion) {
+    if (isAskUserQuestion) {
+      text = askUserQuestionToolResult(text);
+    } else if (!isQuestion) {
       if (answer.behavior === "allow") {
         const result: AllowPermissionResult = { behavior: "allow", updatedInput: args.input ?? {} };
         if (answer.always && suggestions) result.updatedPermissions = suggestions;
