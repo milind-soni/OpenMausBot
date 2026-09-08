@@ -55,7 +55,13 @@ export function createBotPackageExport(input: {
       let key = playbook.key;
       if (existing) key = `${agentKey}-${playbook.key}`;
       key = portableKey(key, `${agentKey}-playbook`, playbookKeys);
-      if (!playbooks.some((candidate) => candidate.key === key)) playbooks.push({ ...playbook, key });
+      // `source` is a local record of how this bot got the playbook, not part
+      // of the portable package shape: once exported it IS package content,
+      // reviewed again by whoever imports it.
+      if (!playbooks.some((candidate) => candidate.key === key)) {
+        const { source: _source, ...portable } = playbook;
+        playbooks.push({ ...portable, key });
+      }
       assigned.push(key);
     }
     agentPlaybooks.set(bot.id, assigned);

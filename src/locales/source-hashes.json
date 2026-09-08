@@ -1361,7 +1361,15 @@
       "mcp.probe.connected": "22965568d22a14ee17af055d2870b50afcfe9fd94a83eec3196e266932297bb2",
       "mcp.probe.toolsOne": "58d4006245cfb2918d3dcabf00cf81ff540f7fa934f7d3fa4f5ab1209cbfbd77",
       "mcp.probe.toolsMany": "0660f6c18ddcac3b41345451d49b7305745f461e6638e28577c12b62a9076bd6",
-      "mcp.probe.noTools": "32e076e1145fa8f3257861e45b52624a0b7b5d5d8d81a6155d6c4b43f6803550"
+      "mcp.probe.noTools": "32e076e1145fa8f3257861e45b52624a0b7b5d5d8d81a6155d6c4b43f6803550",
+      "approval.tool.updatePlaybook": "2393b302479bc506bb6d3d07a97a2b256f16333562078401de546e7c08eff19c",
+      "approval.card.playbookWantsToOwn": "c94120cbc7073083808c15d0578de6ad234015b70802093160796b0a14d16e09",
+      "approval.card.playbookWantsToOther": "3f26ea6726448514c2a66b2da1087db6dea65ec4ed0df50cd22b030a50d18ad4",
+      "approval.label.confirmPlaybookChange": "9b37b38bf988c1b7d736fc258d968558ff64258d012063570cbe55580f290564",
+      "approval.aria.pendingPlaybook": "b87ffb69aae1fb96ea82dda4fd352c55b8577eacce18a5d682f2c81fefbd44e5",
+      "approval.aria.reviewPlaybook": "ff66c93608be1bc337fd5c5ab7dafbc600fa69f152e339a239b536d8b9add0e9",
+      "approval.voice.defaultUpdatePlaybook": "15213783c8d8bf8aae7d090bb6550a3796fed4002cd858447a5f6ff27433b30c",
+      "approval.voice.playbook": "fdc3b718a7e9d1defd0b86f570e3665d9855782c4d4bfda32af4e83ec78977e5"
     },
     "es": {
       "noEngines.title": "af88855a5f80377de709995229ba3907df9e8fb3b940fbf7c0d9cbe6eea54afe",
@@ -2723,7 +2731,15 @@
       "mcp.probe.connected": "22965568d22a14ee17af055d2870b50afcfe9fd94a83eec3196e266932297bb2",
       "mcp.probe.toolsOne": "58d4006245cfb2918d3dcabf00cf81ff540f7fa934f7d3fa4f5ab1209cbfbd77",
       "mcp.probe.toolsMany": "0660f6c18ddcac3b41345451d49b7305745f461e6638e28577c12b62a9076bd6",
-      "mcp.probe.noTools": "32e076e1145fa8f3257861e45b52624a0b7b5d5d8d81a6155d6c4b43f6803550"
+      "mcp.probe.noTools": "32e076e1145fa8f3257861e45b52624a0b7b5d5d8d81a6155d6c4b43f6803550",
+      "approval.tool.updatePlaybook": "2393b302479bc506bb6d3d07a97a2b256f16333562078401de546e7c08eff19c",
+      "approval.card.playbookWantsToOwn": "c94120cbc7073083808c15d0578de6ad234015b70802093160796b0a14d16e09",
+      "approval.card.playbookWantsToOther": "3f26ea6726448514c2a66b2da1087db6dea65ec4ed0df50cd22b030a50d18ad4",
+      "approval.label.confirmPlaybookChange": "9b37b38bf988c1b7d736fc258d968558ff64258d012063570cbe55580f290564",
+      "approval.aria.pendingPlaybook": "b87ffb69aae1fb96ea82dda4fd352c55b8577eacce18a5d682f2c81fefbd44e5",
+      "approval.aria.reviewPlaybook": "ff66c93608be1bc337fd5c5ab7dafbc600fa69f152e339a239b536d8b9add0e9",
+      "approval.voice.defaultUpdatePlaybook": "15213783c8d8bf8aae7d090bb6550a3796fed4002cd858447a5f6ff27433b30c",
+      "approval.voice.playbook": "fdc3b718a7e9d1defd0b86f570e3665d9855782c4d4bfda32af4e83ec78977e5"
     },
     "fr": {
       "noEngines.title": "af88855a5f80377de709995229ba3907df9e8fb3b940fbf7c0d9cbe6eea54afe",
@@ -4085,7 +4101,15 @@
       "mcp.probe.connected": "22965568d22a14ee17af055d2870b50afcfe9fd94a83eec3196e266932297bb2",
       "mcp.probe.toolsOne": "58d4006245cfb2918d3dcabf00cf81ff540f7fa934f7d3fa4f5ab1209cbfbd77",
       "mcp.probe.toolsMany": "0660f6c18ddcac3b41345451d49b7305745f461e6638e28577c12b62a9076bd6",
-      "mcp.probe.noTools": "32e076e1145fa8f3257861e45b52624a0b7b5d5d8d81a6155d6c4b43f6803550"
+      "mcp.probe.noTools": "32e076e1145fa8f3257861e45b52624a0b7b5d5d8d81a6155d6c4b43f6803550",
+      "approval.tool.updatePlaybook": "2393b302479bc506bb6d3d07a97a2b256f16333562078401de546e7c08eff19c",
+      "approval.card.playbookWantsToOwn": "c94120cbc7073083808c15d0578de6ad234015b70802093160796b0a14d16e09",
+      "approval.card.playbookWantsToOther": "3f26ea6726448514c2a66b2da1087db6dea65ec4ed0df50cd22b030a50d18ad4",
+      "approval.label.confirmPlaybookChange": "9b37b38bf988c1b7d736fc258d968558ff64258d012063570cbe55580f290564",
+      "approval.aria.pendingPlaybook": "b87ffb69aae1fb96ea82dda4fd352c55b8577eacce18a5d682f2c81fefbd44e5",
+      "approval.aria.reviewPlaybook": "ff66c93608be1bc337fd5c5ab7dafbc600fa69f152e339a239b536d8b9add0e9",
+      "approval.voice.defaultUpdatePlaybook": "15213783c8d8bf8aae7d090bb6550a3796fed4002cd858447a5f6ff27433b30c",
+      "approval.voice.playbook": "fdc3b718a7e9d1defd0b86f570e3665d9855782c4d4bfda32af4e83ec78977e5"
     },
     "hi": {
       "noEngines.title": "af88855a5f80377de709995229ba3907df9e8fb3b940fbf7c0d9cbe6eea54afe",
@@ -5447,7 +5471,15 @@
       "mcp.probe.connected": "22965568d22a14ee17af055d2870b50afcfe9fd94a83eec3196e266932297bb2",
       "mcp.probe.toolsOne": "58d4006245cfb2918d3dcabf00cf81ff540f7fa934f7d3fa4f5ab1209cbfbd77",
       "mcp.probe.toolsMany": "0660f6c18ddcac3b41345451d49b7305745f461e6638e28577c12b62a9076bd6",
-      "mcp.probe.noTools": "32e076e1145fa8f3257861e45b52624a0b7b5d5d8d81a6155d6c4b43f6803550"
+      "mcp.probe.noTools": "32e076e1145fa8f3257861e45b52624a0b7b5d5d8d81a6155d6c4b43f6803550",
+      "approval.tool.updatePlaybook": "2393b302479bc506bb6d3d07a97a2b256f16333562078401de546e7c08eff19c",
+      "approval.card.playbookWantsToOwn": "c94120cbc7073083808c15d0578de6ad234015b70802093160796b0a14d16e09",
+      "approval.card.playbookWantsToOther": "3f26ea6726448514c2a66b2da1087db6dea65ec4ed0df50cd22b030a50d18ad4",
+      "approval.label.confirmPlaybookChange": "9b37b38bf988c1b7d736fc258d968558ff64258d012063570cbe55580f290564",
+      "approval.aria.pendingPlaybook": "b87ffb69aae1fb96ea82dda4fd352c55b8577eacce18a5d682f2c81fefbd44e5",
+      "approval.aria.reviewPlaybook": "ff66c93608be1bc337fd5c5ab7dafbc600fa69f152e339a239b536d8b9add0e9",
+      "approval.voice.defaultUpdatePlaybook": "15213783c8d8bf8aae7d090bb6550a3796fed4002cd858447a5f6ff27433b30c",
+      "approval.voice.playbook": "fdc3b718a7e9d1defd0b86f570e3665d9855782c4d4bfda32af4e83ec78977e5"
     },
     "ja": {
       "noEngines.title": "af88855a5f80377de709995229ba3907df9e8fb3b940fbf7c0d9cbe6eea54afe",
@@ -6809,7 +6841,15 @@
       "mcp.probe.connected": "22965568d22a14ee17af055d2870b50afcfe9fd94a83eec3196e266932297bb2",
       "mcp.probe.toolsOne": "58d4006245cfb2918d3dcabf00cf81ff540f7fa934f7d3fa4f5ab1209cbfbd77",
       "mcp.probe.toolsMany": "0660f6c18ddcac3b41345451d49b7305745f461e6638e28577c12b62a9076bd6",
-      "mcp.probe.noTools": "32e076e1145fa8f3257861e45b52624a0b7b5d5d8d81a6155d6c4b43f6803550"
+      "mcp.probe.noTools": "32e076e1145fa8f3257861e45b52624a0b7b5d5d8d81a6155d6c4b43f6803550",
+      "approval.tool.updatePlaybook": "2393b302479bc506bb6d3d07a97a2b256f16333562078401de546e7c08eff19c",
+      "approval.card.playbookWantsToOwn": "c94120cbc7073083808c15d0578de6ad234015b70802093160796b0a14d16e09",
+      "approval.card.playbookWantsToOther": "3f26ea6726448514c2a66b2da1087db6dea65ec4ed0df50cd22b030a50d18ad4",
+      "approval.label.confirmPlaybookChange": "9b37b38bf988c1b7d736fc258d968558ff64258d012063570cbe55580f290564",
+      "approval.aria.pendingPlaybook": "b87ffb69aae1fb96ea82dda4fd352c55b8577eacce18a5d682f2c81fefbd44e5",
+      "approval.aria.reviewPlaybook": "ff66c93608be1bc337fd5c5ab7dafbc600fa69f152e339a239b536d8b9add0e9",
+      "approval.voice.defaultUpdatePlaybook": "15213783c8d8bf8aae7d090bb6550a3796fed4002cd858447a5f6ff27433b30c",
+      "approval.voice.playbook": "fdc3b718a7e9d1defd0b86f570e3665d9855782c4d4bfda32af4e83ec78977e5"
     },
     "pt-br": {
       "noEngines.title": "af88855a5f80377de709995229ba3907df9e8fb3b940fbf7c0d9cbe6eea54afe",
@@ -8171,7 +8211,15 @@
       "mcp.probe.connected": "22965568d22a14ee17af055d2870b50afcfe9fd94a83eec3196e266932297bb2",
       "mcp.probe.toolsOne": "58d4006245cfb2918d3dcabf00cf81ff540f7fa934f7d3fa4f5ab1209cbfbd77",
       "mcp.probe.toolsMany": "0660f6c18ddcac3b41345451d49b7305745f461e6638e28577c12b62a9076bd6",
-      "mcp.probe.noTools": "32e076e1145fa8f3257861e45b52624a0b7b5d5d8d81a6155d6c4b43f6803550"
+      "mcp.probe.noTools": "32e076e1145fa8f3257861e45b52624a0b7b5d5d8d81a6155d6c4b43f6803550",
+      "approval.tool.updatePlaybook": "2393b302479bc506bb6d3d07a97a2b256f16333562078401de546e7c08eff19c",
+      "approval.card.playbookWantsToOwn": "c94120cbc7073083808c15d0578de6ad234015b70802093160796b0a14d16e09",
+      "approval.card.playbookWantsToOther": "3f26ea6726448514c2a66b2da1087db6dea65ec4ed0df50cd22b030a50d18ad4",
+      "approval.label.confirmPlaybookChange": "9b37b38bf988c1b7d736fc258d968558ff64258d012063570cbe55580f290564",
+      "approval.aria.pendingPlaybook": "b87ffb69aae1fb96ea82dda4fd352c55b8577eacce18a5d682f2c81fefbd44e5",
+      "approval.aria.reviewPlaybook": "ff66c93608be1bc337fd5c5ab7dafbc600fa69f152e339a239b536d8b9add0e9",
+      "approval.voice.defaultUpdatePlaybook": "15213783c8d8bf8aae7d090bb6550a3796fed4002cd858447a5f6ff27433b30c",
+      "approval.voice.playbook": "fdc3b718a7e9d1defd0b86f570e3665d9855782c4d4bfda32af4e83ec78977e5"
     },
     "zh": {
       "noEngines.title": "af88855a5f80377de709995229ba3907df9e8fb3b940fbf7c0d9cbe6eea54afe",
@@ -9533,7 +9581,15 @@
       "mcp.probe.connected": "22965568d22a14ee17af055d2870b50afcfe9fd94a83eec3196e266932297bb2",
       "mcp.probe.toolsOne": "58d4006245cfb2918d3dcabf00cf81ff540f7fa934f7d3fa4f5ab1209cbfbd77",
       "mcp.probe.toolsMany": "0660f6c18ddcac3b41345451d49b7305745f461e6638e28577c12b62a9076bd6",
-      "mcp.probe.noTools": "32e076e1145fa8f3257861e45b52624a0b7b5d5d8d81a6155d6c4b43f6803550"
+      "mcp.probe.noTools": "32e076e1145fa8f3257861e45b52624a0b7b5d5d8d81a6155d6c4b43f6803550",
+      "approval.tool.updatePlaybook": "2393b302479bc506bb6d3d07a97a2b256f16333562078401de546e7c08eff19c",
+      "approval.card.playbookWantsToOwn": "c94120cbc7073083808c15d0578de6ad234015b70802093160796b0a14d16e09",
+      "approval.card.playbookWantsToOther": "3f26ea6726448514c2a66b2da1087db6dea65ec4ed0df50cd22b030a50d18ad4",
+      "approval.label.confirmPlaybookChange": "9b37b38bf988c1b7d736fc258d968558ff64258d012063570cbe55580f290564",
+      "approval.aria.pendingPlaybook": "b87ffb69aae1fb96ea82dda4fd352c55b8577eacce18a5d682f2c81fefbd44e5",
+      "approval.aria.reviewPlaybook": "ff66c93608be1bc337fd5c5ab7dafbc600fa69f152e339a239b536d8b9add0e9",
+      "approval.voice.defaultUpdatePlaybook": "15213783c8d8bf8aae7d090bb6550a3796fed4002cd858447a5f6ff27433b30c",
+      "approval.voice.playbook": "fdc3b718a7e9d1defd0b86f570e3665d9855782c4d4bfda32af4e83ec78977e5"
     }
   }
 }

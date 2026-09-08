@@ -33,4 +33,20 @@ describe("installed package playbooks", () => {
     expect(rendered).toContain("do not grant tools");
     expect(rendered).not.toContain("Separate facts from hypotheses.");
   });
+
+  it("labels each playbook with where it came from", () => {
+    // A playbook a bot proposed carries the user's approval of one card, not a
+    // package review, so the prompt must not present the two as the same thing.
+    const rendered = installedPlaybookInstructions("Draft reply", [
+      { ...playbooks[1], source: "bot" as const },
+    ]);
+    expect(rendered).toContain('source="bot-authored, user-approved"');
+    expect(rendered).not.toContain("package-authored playbooks are");
+
+    // An imported playbook, and any record written before propose_playbook
+    // existed, still reads as package-authored.
+    expect(installedPlaybookInstructions("Draft reply", playbooks)).toContain('source="package-authored"');
+    expect(installedPlaybookInstructions("Draft reply", [{ ...playbooks[1], source: "package" as const }]))
+      .toContain('source="package-authored"');
+  });
 });

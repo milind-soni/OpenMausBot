@@ -46,6 +46,7 @@ function toolLabel(tool?: string): string {
     stage_skill: "approval.tool.enableSkill",
     update_skill: "approval.tool.updateSkill",
     update_profile: "approval.tool.updateProfile",
+    update_playbook: "approval.tool.updatePlaybook",
   };
   const key = nice[tool];
   return key ? t(key) : bare;
@@ -65,6 +66,7 @@ export function ApprovalCard({
   const isRoutineRequest = Boolean(card.routineRequest);
   const isSkillRequest = Boolean(card.skillRequest);
   const isProfileRequest = Boolean(card.profileRequest);
+  const isPlaybookRequest = Boolean(card.playbookRequest);
   const routineAction = card.routineRequest?.operation.action;
   const skillAction = card.skillRequest?.action;
   const heldNote = tFromServer(card.heldCode, card.held);
@@ -76,6 +78,8 @@ export function ApprovalCard({
       ? skillAction === "update" ? "update_skill" : "stage_skill"
     : isProfileRequest
       ? "update_profile"
+    : isPlaybookRequest
+      ? "update_playbook"
     : card.tool;
   // A cross-bot profile card is shown in the PROPOSER's thread, so
   // "wants to update its profile" (fine for a bot editing itself) would
@@ -89,6 +93,16 @@ export function ApprovalCard({
           target: card.profileRequest.targetName,
         })
     : undefined;
+  // Same reasoning for a Chief proposing a peer's playbook: the card sits in
+  // the Chief's thread, so it must name whose playbooks actually change.
+  const playbookHeader = isPlaybookRequest && card.playbookRequest
+    ? card.playbookRequest.targetBotId === card.playbookRequest.botId
+      ? t("approval.card.playbookWantsToOwn", { name: bot?.name ?? t("approval.someone") })
+      : t("approval.card.playbookWantsToOther", {
+          name: bot?.name ?? t("approval.someone"),
+          target: card.playbookRequest.targetName,
+        })
+    : undefined;
 
   return (
     <div
@@ -99,7 +113,7 @@ export function ApprovalCard({
     >
       <div className="flex items-baseline justify-between gap-3">
         <div className="text-[15px] font-semibold text-ink">
-          {profileHeader ?? (
+          {profileHeader ?? playbookHeader ?? (
             <>
               {bot
                 ? t("approval.card.namedWantsTo", { name: bot.name, action: toolLabel(displayTool) })

@@ -286,6 +286,7 @@ import { createScreenFrameSource, type ScreenCapture } from "./screen-frame-sour
 import { screenFrameHash, screenSurfaceForTool, screenTouchingTool, settledFrameIsNews } from "./screen-frame-gate.ts";
 import { RoutineRequestService } from "./routine-requests.ts";
 import { buildBotOverview, type BotOverview, connectedAppsFacts } from "./bot-overview.ts";
+import { PlaybookRequestService } from "./playbook-requests.ts";
 import { ProfileRequestService } from "./profile-requests.ts";
 import { profileRevision, profileSnapshot } from "./profile-revision.ts";
 import { flushAllProfileHistory, flushProfileHistory, readHistory, recordProfileChange } from "./profile-versions.ts";
@@ -4862,7 +4863,21 @@ const profileRequests = new ProfileRequestService({
     return null;
   },
 });
-const ROUTINE_WEEKDAY_NAMES = ["sunday", "monday", "tuesday", "wednesday", "thursday", "friday", "saturday"] as const;
+const playbookRequests = new PlaybookRequestService({
+  store,
+  canPersist: proposalPersistence,
+  // Same reach as a profile proposal: a Chief may change a section peer's
+  // playbooks, anyone else only its own. Re-checked at confirm.
+  validateTarget: (proposerBotId, targetBotId) => {
+    const proposer = store.bot(proposerBotId);
+    const target = store.bot(targetBotId);
+    if (!target) return "that bot no longer exists";
+    if (!proposer?.chiefOfStaff) return "only a section's Chief of Staff can change another bot's playbooks";
+    if (sectionKey(target.section) !== sectionKey(proposer.section)) return "that bot belongs to a different section";
+    return null;
+  },
+});
+const ROUTINE_WEEKDAY_NAMES =["sunday", "monday", "tuesday", "wednesday", "thursday", "friday", "saturday"] as const;
 const routineTimeZone = () => Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC";
 const routineTimestamp = (value: number | undefined) =>
   value !== undefined && Number.isFinite(value) ? new Date(value).toISOString() : null;
@@ -4991,6 +5006,40 @@ function resolveAndSendProfile(
     if (target) broadcast({ kind: "bot", bot: wireBot(target) });
     json(res, 200, {
       ok: true, outcome: "allowed-once", profileFields: result.fields,
+      ...(result.settlementPending ? { settlementPending: true, message: result.message } : {}),
+    });
+    return true;
+  }
+  if (result.state === "invalid") { json(res, result.status, { error: result.error }); return true; }
+  if (result.state === "already_settled") {
+    json(res, 200, { ok: true, outcome: result.behavior === "allow" ? "allowed-once" : "rejected", alreadySettled: true });
+    return true;
+  }
+  json(res, 200, { ok: true, outcome: "rejected" });
+  return true;
+}
+function resolveAndSendPlaybook(
+  res: ServerResponse,
+  args: { botId: string; botName?: string; threadId: string; requestId: string; behavior: string },
+): boolean {
+  const card = store.messagesFor(args.threadId).find(
+    (message) => message.card?.requestId === args.requestId && message.card.playbookRequest,
+  )?.card;
+  if (!card) return false;
+  const result = playbookRequests.resolve(args);
+  if (!result.claimed) return false;
+  if (result.state === "applied" || result.state === "denied") {
+    appendDecision(DATA_DIR, {
+      threadId: args.threadId, requestId: args.requestId, botId: args.botId, botName: args.botName,
+      tool: "update_playbook", summary: card.subtitle,
+      decision: result.state === "applied" ? "user-approved" : "user-denied", source: "user",
+    });
+  }
+  if (result.state === "applied") {
+    const target = store.bot(result.targetBotId);
+    if (target) broadcast({ kind: "bot", bot: wireBot(target) });
+    json(res, 200, {
+      ok: true, outcome: "allowed-once", playbookKey: result.key, playbookAction: result.action,
       ...(result.settlementPending ? { settlementPending: true, message: result.message } : {}),
     });
     return true;
@@ -6523,11 +6572,13 @@ function proposalPersistence(botId: string, threadId: string) {
   }
   // Only cards on the visible branch can be acted on from the composer.
   // Abandoned branches must not permanently consume the proposal quota.
-  // Routine and profile proposals share one budget per bot per thread, so
-  // one thread cannot pile up 8 of each.
+  // Routine, profile and playbook proposals share one budget per bot per
+  // thread, so one thread cannot pile up 8 of each.
   const openRequests = store.activePath(threadId).filter(
     (message) =>
-      (message.card?.routineRequest?.botId === botId || message.card?.profileRequest?.botId === botId) &&
+      (message.card?.routineRequest?.botId === botId ||
+        message.card?.profileRequest?.botId === botId ||
+        message.card?.playbookRequest?.botId === botId) &&
       !message.card.answered &&
       !message.card.dismissed,
   ).length;
@@ -7921,6 +7972,35 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
         appendDecision(DATA_DIR, {
           threadId: body.fromThreadId, requestId: proposed.requestId, botId: from.id, botName: from.name,
           tool: "update_profile", summary: proposed.detail, decision: "card-shown", source: "profile",
+        });
+        return json(res, 201, proposed);
+      }
+      if (method === "POST" && path === "/api/internal/playbook-requests") {
+        const parsed = z.object({
+          fromBotId: z.string().min(1).max(128),
+          fromThreadId: z.string().min(1).max(128),
+          forBotId: z.string().max(128).optional(),
+          change: z.unknown(),
+          reason: z.unknown(),
+        }).strict().safeParse(await readInternalBody());
+        if (!parsed.success) return json(res, 400, { error: "invalid playbook proposal" });
+        const body = parsed.data;
+        const from = store.bot(body.fromBotId);
+        if (!from) return json(res, 403, { error: "unknown sender" });
+        const owner = connectorThread(from.id, body.fromThreadId);
+        if (!owner) return json(res, 403, { error: "source conversation does not belong to sender" });
+        const targetBotId = body.forBotId?.trim() || from.id;
+        const proposed = playbookRequests.propose({
+          botId: from.id,
+          threadId: body.fromThreadId,
+          targetBotId,
+          change: body.change,
+          reason: body.reason,
+          from: owner.group ? { botId: from.id, name: from.name, color: from.color } : undefined,
+        });
+        appendDecision(DATA_DIR, {
+          threadId: body.fromThreadId, requestId: proposed.requestId, botId: from.id, botName: from.name,
+          tool: "update_playbook", summary: proposed.detail, decision: "card-shown", source: "playbook",
         });
         return json(res, 201, proposed);
       }
@@ -11403,6 +11483,13 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
         requestId: String(body.requestId),
         behavior,
       })) return;
+      if (resolveAndSendPlaybook(res, {
+        botId: bot.id,
+        botName: bot.name,
+        threadId: bot.threadId,
+        requestId: String(body.requestId),
+        behavior,
+      })) return;
       if (sendSkillResolution(res, resolveSkillRequest({
         botId: bot.id,
         botName: bot.name,
@@ -11475,6 +11562,21 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
         if (resolveAndSendProfile(res, {
           botId: profileBotId,
           botName: profileOwner?.name,
+          threadId,
+          requestId,
+          behavior,
+        })) return;
+      }
+      const playbookCard = store.messagesFor(threadId).find(
+        (message) => message.card?.requestId === requestId && message.card.playbookRequest,
+      );
+      if (playbookCard?.card?.playbookRequest) {
+        const playbookBotId = playbookCard.from?.botId ?? store.botByThread(threadId)?.id;
+        if (!playbookBotId) return json(res, 400, { error: "this playbook request has no valid owner" });
+        const playbookOwner = store.bot(playbookBotId);
+        if (resolveAndSendPlaybook(res, {
+          botId: playbookBotId,
+          botName: playbookOwner?.name,
           threadId,
           requestId,
           behavior,

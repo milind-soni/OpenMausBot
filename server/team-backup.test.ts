@@ -25,7 +25,7 @@ function fixture() {
   const archived = store.createBot({ name: "Archived" }, { seedMessages: false });
   store.patchBot(archived.id, { hidden: true });
   store.patchBot(chief.id, { chiefOfStaff: true, autoApprove: true, approvalMode: "full", alwaysAllow: ["Bash"], cwd: "/private/old-workspace", composio: true,
-    playbooks: [{ key: "research", name: "Research", summary: "Find evidence", triggers: ["research"], instructions: "Cite sources" }] });
+    playbooks: [{ key: "research", name: "Research", summary: "Find evidence", triggers: ["research"], instructions: "Cite sources", source: "bot" }] });
   store.setChiefOfStaff(otherChief.id);
   const root = store.appendMessage(chief.threadId, { role: "user", kind: "text", text: "Original question", at: 100 });
   const answer = store.appendMessage(chief.threadId, { role: "bot", kind: "text", text: "Original answer", at: 101 });
@@ -69,6 +69,9 @@ describe("additive portable team backups", () => {
     expect(importedChief.soulHash).toBe(soulHash(chief.soul!));
     expect(readFileSync(soulFile(importedChief.id), "utf8")).toBe(chief.soul);
     expect(importedChief).toMatchObject({ section: "Engineering 2", chiefOfStaff: true, description: chief.description, computer: "off", composio: false, browser: false, approvalMode: "ask", autoApprove: false, resumeCursors: {}, playbooks: chief.playbooks });
+    // A restored playbook keeps saying where it came from: presenting a
+    // bot-authored one as package-authored would overstate its review.
+    expect(importedChief.playbooks?.[0]).toMatchObject({ key: "research", source: "bot" });
     expect(result.bots.find((bot) => bot.name === "Ava 2")).toMatchObject({ section: "Operations 2", chiefOfStaff: true });
     expect(result.bots.find((bot) => bot.name === "Archived 2")).toMatchObject({ hidden: true });
     expect(importedChief).not.toHaveProperty("cwd");

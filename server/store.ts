@@ -19,6 +19,7 @@ import { redactSecretsInText } from "./redact.ts";
 import { botAvatarProfile, type BotAvatarCrop } from "../shared/bot-avatar.ts";
 import { isApprovalMode, type ApprovalMode } from "../shared/approval-mode.ts";
 import type { MascotBodyId } from "../shared/mascot-bodies.ts";
+import type { PlaybookRequestCardData } from "../shared/playbook-request.ts";
 import type { ProfileRequestCardData, ProfileRequestChanges } from "../shared/profile-request.ts";
 import type { RoutineRequestCardData } from "../shared/routine-request.ts";
 import type { RoutineRunCardData } from "../shared/routine-run.ts";
@@ -74,6 +75,9 @@ export interface OptionCardData {
   /** A durable profile-change proposal (propose_profile). The change lands
    * only after this card is explicitly confirmed by the user. */
   profileRequest?: ProfileRequestCardData;
+  /** A durable playbook proposal (propose_playbook). The playbook is added,
+   * replaced, or removed only after this card is explicitly confirmed. */
+  playbookRequest?: PlaybookRequestCardData;
   /** A durable learned-skill proposal. The skill stays staged until the
    * user confirms this card — it never rides the prompt before that. */
   skillRequest?: SkillRequestCardData;
@@ -409,6 +413,29 @@ function redactBotAuthored<T extends Omit<Message, "id" | "at"> & { at?: number 
         changes: scrubChanges(card.profileRequest.changes),
       };
     }
+    // Same for a playbook proposal: its instructions are the whole point of
+    // the card and sit under the visible summary, so they get the same scrub.
+    if (card.playbookRequest) {
+      const scrubPlaybook = <T extends { name: string; summary: string; triggers: string[]; instructions: string }>(
+        playbook: T,
+      ): T => ({
+        ...playbook,
+        name: redactSecretsInText(playbook.name),
+        summary: redactSecretsInText(playbook.summary),
+        triggers: playbook.triggers.map((trigger) => redactSecretsInText(trigger)),
+        instructions: redactSecretsInText(playbook.instructions),
+      });
+      const request = card.playbookRequest;
+      card.playbookRequest = {
+        ...request,
+        targetName: redactSecretsInText(request.targetName),
+        reason: redactSecretsInText(request.reason),
+        ...(request.before ? { before: scrubPlaybook(request.before) } : {}),
+        change: request.change.action === "upsert"
+          ? { action: "upsert", playbook: scrubPlaybook(request.change.playbook) }
+          : request.change,
+      };
+    }
     out.card = card;
   }
   if (out.connector) {
@@ -575,9 +602,13 @@ export interface BotRecord {
   /** Id of a named browser profile from config.browserProfiles; absent = the
    * bot's own private session. */
   browserProfile?: string;
-  /** Public, package-authored playbooks installed for this bot. They carry
-   * process guidance only—never executable code, credentials, or grants. */
+  /** Public playbooks installed for this bot, from a package import or an
+   * approved propose_playbook card. They carry process guidance only—never
+   * executable code, credentials, or grants. */
   playbooks?: InstalledPlaybook[];
+  /** Receipt for the last applied playbook card, so an interrupted
+   * confirmation can settle without applying the change twice. */
+  lastPlaybookRequestId?: string;
   /** Listing provenance and connector intent retained for package details
    * and future re-export. It never means the apps are authorized. */
   installedPackage?: InstalledPackageMetadata;
@@ -597,6 +628,11 @@ export interface InstalledPlaybook {
   summary: string;
   triggers: string[];
   instructions: string;
+  /** Where this playbook came from. Absent means "package" so records written
+   * before propose_playbook existed keep their meaning. The prompt states the
+   * provenance rather than calling every playbook package-authored, since a
+   * bot-authored one carries only the user's approval behind it. */
+  source?: "package" | "bot";
 }
 
 export interface InstalledPackageMetadata {
@@ -1478,6 +1514,23 @@ export class Store {
    * mirror write is reported in logs and can be retried by discarding drift. */
   setSoul(id: string, soul: string): BotRecord | null {
     return this.patchBotProfile(id, { soul });
+  }
+
+  /** Commit an approved playbook card: the whole set and its receipt land in
+   * one write, so an interrupted confirmation can settle without applying the
+   * change a second time. Separate from patchBotProfile because playbooks are
+   * not a profile field — the general bot PATCH cannot reach them either. */
+  patchBotPlaybooks(
+    id: string,
+    patch: { playbooks: InstalledPlaybook[]; lastPlaybookRequestId: string },
+  ): BotRecord | null {
+    const bot = this.bot(id);
+    if (!bot) return null;
+    const next = { ...bot, ...patch };
+    this.saveBots(this.bots.map((candidate) => candidate.id === id ? next : candidate));
+    Object.assign(bot, next);
+    this.emit({ type: "bot", botId: id });
+    return bot;
   }
 
   /** File visible bots into one sidebar section as a single durable write.
