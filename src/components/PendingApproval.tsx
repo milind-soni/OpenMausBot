@@ -44,6 +44,10 @@ export function isProfileApproval(pending: Pending): boolean {
   return Boolean(pending.message.card?.profileRequest);
 }
 
+export function isPlaybookApproval(pending: Pending): boolean {
+  return Boolean(pending.message.card?.playbookRequest);
+}
+
 /** Open approvals on a thread, oldest first — answered/dismissed drop out. */
 export function pendingApprovals(messages: Message[]): Pending[] {
   return messages
@@ -84,6 +88,12 @@ export function spokenApprovalPrompt(pending: Pending, requester: string): strin
     const title = pending.message.card?.title.trim() || t("approval.voice.defaultUpdateProfile");
     return t("approval.voice.profile", { requester, title });
   }
+  if (isPlaybookApproval(pending)) {
+    // Same reason as the profile branch: the subtitle carries the whole
+    // instruction diff, which is for reading, not for reading aloud.
+    const title = pending.message.card?.title.trim() || t("approval.voice.defaultUpdatePlaybook");
+    return t("approval.voice.playbook", { requester, title });
+  }
   if (!isRoutineRequest) {
     return t("approval.voice.command", { requester, tool: pending.tool, detail: pending.detail });
   }
@@ -102,6 +112,9 @@ function label(pending: Pending): string {
   }
   if (isProfileApproval(pending)) {
     return t("approval.label.confirmProfileChange");
+  }
+  if (isPlaybookApproval(pending)) {
+    return t("approval.label.confirmPlaybookChange");
   }
   if (isRoutineApproval(pending)) {
     return pending.message.card?.routineRequest?.operation.action === "create"
@@ -144,7 +157,9 @@ export const PendingApprovalPanel = memo(function PendingApprovalPanel({
             ? t("approval.aria.pendingRoutine")
             : isProfileApproval(pending)
               ? t("approval.aria.pendingProfile")
-              : t("approval.aria.pending")
+              : isPlaybookApproval(pending)
+                ? t("approval.aria.pendingPlaybook")
+                : t("approval.aria.pending")
       }
       className="rounded-t-2xl border-b border-hairline/50 bg-control/40 px-4 py-3"
     >
@@ -167,7 +182,9 @@ export const PendingApprovalPanel = memo(function PendingApprovalPanel({
               : "manage_routine"
             : isProfileApproval(pending)
               ? "update_profile"
-              : pending.tool}
+              : isPlaybookApproval(pending)
+                ? "update_playbook"
+                : pending.tool}
         </span>
       </div>
       {/* never truncated — long commands wrap and scroll */}
@@ -180,7 +197,9 @@ export const PendingApprovalPanel = memo(function PendingApprovalPanel({
               ? t("approval.aria.reviewRoutine")
               : isProfileApproval(pending)
                 ? t("approval.aria.reviewProfile")
-                : t("approval.aria.reviewDetails")
+                : isPlaybookApproval(pending)
+                  ? t("approval.aria.reviewPlaybook")
+                  : t("approval.aria.reviewDetails")
         }
         className="mt-2 max-h-40 overflow-auto whitespace-pre-wrap break-words font-mono text-[12px] leading-relaxed text-ink"
       >
@@ -210,7 +229,8 @@ export function PendingApprovalActions({
   const isRoutineRequest = isRoutineApproval(pending);
   const isSkillRequest = isSkillApproval(pending);
   const isProfileRequest = isProfileApproval(pending);
-  const durableRequest = isRoutineRequest || isSkillRequest || isProfileRequest;
+  const isPlaybookRequest = isPlaybookApproval(pending);
+  const durableRequest = isRoutineRequest || isSkillRequest || isProfileRequest || isPlaybookRequest;
   const reviewedSha256 = pending.message.card?.skillRequest
     ? reviewedSkillSha256(pending.message.card.skillRequest)
     : undefined;

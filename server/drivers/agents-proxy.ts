@@ -452,6 +452,40 @@ const TOOLS = [
     },
   },
   {
+    name: "propose_playbook",
+    description:
+      "Propose adding, replacing, or removing ONE playbook — reusable process guidance the bot is given only when a job matches one of that playbook's triggers. This only creates a confirmation card; nothing changes until the user approves it. After calling it, end the turn and do not claim the playbook changed. Use it for repeatable procedure (\"how we file a ticket\"); identity and never-break rules belong in SOUL.md via propose_profile instead. A Chief of Staff may pass for_bot_id (from list_bots) to propose a playbook for another bot in its section.",
+    inputSchema: {
+      type: "object",
+      additionalProperties: false,
+      properties: {
+        action: {
+          type: "string",
+          enum: ["upsert", "remove"],
+          description: "upsert adds a playbook or replaces the one with the same key; remove takes it away.",
+        },
+        key: {
+          type: "string",
+          description: "Stable slug naming the playbook: lowercase letters, numbers, - and _ (for example \"ticket-quality\").",
+        },
+        name: { type: "string", description: "Required for upsert: short display name, for example \"Ticket Quality\"." },
+        summary: { type: "string", description: "Required for upsert: one sentence on what this playbook is for." },
+        triggers: {
+          type: "array",
+          items: { type: "string" },
+          description: "Required for upsert: the phrases that make this playbook apply. Only a matching job mounts it, so name the words the user would actually write.",
+        },
+        instructions: { type: "string", description: "Required for upsert: the full procedure, at most 24000 characters." },
+        reason: { type: "string", minLength: 1, maxLength: 500, description: "One sentence the user will see explaining why." },
+        for_bot_id: {
+          type: "string",
+          description: "Chief of Staff only: the id of another bot in your section whose playbooks this changes. Omit to change your own.",
+        },
+      },
+      required: ["action", "key", "reason"],
+    },
+  },
+  {
     name: "skills_list",
     description:
       "List this bot's imported skills (enabled and disabled) and any staged skill writes waiting for the user to confirm. Use this before skill_manage to avoid duplicate names. Listing does not enable anything.",
@@ -851,6 +885,48 @@ async function callTool(name: string, args: Json): Promise<{ text: string; isErr
       }),
     });
     return confirmationResult(r, "the profile change", "profile");
+  }
+  if (name === "propose_playbook") {
+    const action = String(args.action ?? "").trim();
+    if (action !== "upsert" && action !== "remove") {
+      return { text: "propose_playbook needs action to be upsert or remove.", isError: true };
+    }
+    const key = String(args.key ?? "").trim();
+    if (!key) return { text: "propose_playbook needs a key.", isError: true };
+    let change: Json;
+    if (action === "remove") {
+      change = { action, key };
+    } else {
+      const triggers = Array.isArray(args.triggers)
+        ? args.triggers.filter((trigger): trigger is string => typeof trigger === "string").map((trigger) => trigger.trim())
+        : [];
+      if (!triggers.length) {
+        return { text: "propose_playbook needs at least one trigger for an upsert.", isError: true };
+      }
+      change = {
+        action,
+        playbook: {
+          key,
+          name: String(args.name ?? "").trim(),
+          summary: String(args.summary ?? "").trim(),
+          triggers,
+          instructions: String(args.instructions ?? ""),
+        },
+      };
+    }
+    const forBotId = String(args.for_bot_id ?? "").trim();
+    const r = await api("/api/internal/playbook-requests", {
+      method: "POST",
+      body: JSON.stringify({
+        fromBotId: BOT_ID,
+        fromThreadId: THREAD_ID,
+        change,
+        reason: args.reason,
+        // JSON.stringify drops the key entirely when no target was named
+        forBotId: forBotId || undefined,
+      }),
+    });
+    return confirmationResult(r, "the playbook change", "playbook");
   }
   if (name === "session_search") {
     const q = String(args.query ?? "").trim();

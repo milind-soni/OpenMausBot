@@ -6710,6 +6710,85 @@ describe("harness HTTP API", () => {
     }
   });
 
+  it("keeps a proposed playbook inert until confirmed, and only a Chief may propose one for a peer", async () => {
+    const a = (await api("POST", "/api/bots", { name: "Ada" })).body.bot;
+    const b = (await api("POST", "/api/bots", { name: "Ben" })).body.bot;
+    const playbook = {
+      key: "ticket-quality",
+      name: "Ticket Quality",
+      summary: "How a ticket earns its place on the board.",
+      triggers: ["ticket quality"],
+      instructions: "Refuse a vague ticket until the outcome is clear.",
+    };
+    try {
+      await api("PATCH", `/api/bots/${a.id}`, { modelSelection: { instanceId: "claude", model: "claude-sonnet-5" } });
+      const token = await mintTestCapability(BASE, a.id, a.threadId);
+      const internalHeaders = { authorization: `Bearer ${token}`, "content-type": "application/json" };
+      const propose = (body: Record<string, unknown>) =>
+        fetch(`${BASE}/api/internal/playbook-requests`, {
+          method: "POST", headers: internalHeaders, body: JSON.stringify(body),
+        });
+
+      // (a) A card is staged, and nothing is applied while it sits open.
+      const proposal = await propose({
+        fromBotId: a.id, fromThreadId: a.threadId,
+        change: { action: "upsert", playbook }, reason: "reuse the ticket rules",
+      });
+      expect(proposal.status).toBe(201);
+      const proposed = z.object({ requestId: z.string() }).passthrough().parse(await proposal.json());
+      const card = (await api("GET", "/api/bots")).body.bots
+        .find((candidate: { id: string }) => candidate.id === a.id)
+        ?.messages.find((message: { card?: { requestId?: string } }) => message.card?.requestId === proposed.requestId);
+      expect(card?.card).toMatchObject({
+        tool: "update_playbook",
+        playbookRequest: { botId: a.id, targetBotId: a.id, change: { action: "upsert" } },
+      });
+
+      // (b) Confirming applies it, and reports which playbook moved.
+      const ok = await api("POST", `/api/threads/${a.threadId}/respond`, {
+        requestId: proposed.requestId, behavior: "allow",
+      });
+      expect(ok.body).toMatchObject({
+        ok: true, outcome: "allowed-once", playbookKey: "ticket-quality", playbookAction: "upsert",
+      });
+
+      // (c) A repeated confirm settles rather than applying a second time.
+      const again = await api("POST", `/api/threads/${a.threadId}/respond`, {
+        requestId: proposed.requestId, behavior: "allow",
+      });
+      expect(again.body).toMatchObject({ alreadySettled: true });
+
+      // (d) An ordinary bot cannot reach a section peer's playbooks.
+      const refused = await propose({
+        fromBotId: a.id, fromThreadId: a.threadId, forBotId: b.id,
+        change: { action: "upsert", playbook }, reason: "testing the Chief rule",
+      });
+      expect(refused.status).toBe(403);
+
+      // (e) As the section's Chief it may, and the change lands on the peer.
+      expect((await api("PATCH", `/api/bots/${a.id}`, { chiefOfStaff: true })).status).toBe(200);
+      const asChief = await propose({
+        fromBotId: a.id, fromThreadId: a.threadId, forBotId: b.id,
+        change: { action: "upsert", playbook }, reason: "testing the Chief rule",
+      });
+      expect(asChief.status).toBe(201);
+      const chiefCard = z.object({ requestId: z.string() }).passthrough().parse(await asChief.json());
+      const peerConfirm = await api("POST", `/api/threads/${a.threadId}/respond`, {
+        requestId: chiefCard.requestId, behavior: "allow",
+      });
+      expect(peerConfirm.body).toMatchObject({ ok: true, playbookKey: "ticket-quality" });
+
+      await expect.poll(async () => {
+        const decisions = (await api("GET", "/api/decisions")).body.decisions;
+        return decisions.filter((d: any) => d.requestId === proposed.requestId).map((d: any) => `${d.decision}:${d.source}`).sort();
+      }).toEqual(["card-shown:playbook", "user-approved:user"]);
+    } finally {
+      await api("POST", `/api/bots/${a.id}/interrupt`);
+      await api("DELETE", `/api/bots/${a.id}`);
+      await api("DELETE", `/api/bots/${b.id}`);
+    }
+  });
+
   it("binds profile proposals to the capability's bot and thread and rechecks late bodies", async () => {
     const sender = (await api("POST", "/api/bots", { name: "Sender" })).body.bot;
     const victim = (await api("POST", "/api/bots", { name: "Victim" })).body.bot;

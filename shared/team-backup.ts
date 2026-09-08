@@ -36,6 +36,11 @@ const playbook = z.object({
   key, name, summary: z.string().max(24_000),
   triggers: z.array(z.string().max(2_000)).max(100),
   instructions: z.string().max(200_000),
+  // Provenance travels with the playbook: restoring a bot-authored one as
+  // "package-authored" would tell the restored bot its guidance was reviewed
+  // with a package when it only ever carried one approval. Absent in backups
+  // written before propose_playbook existed, which were package-only anyway.
+  source: z.enum(["package", "bot"]).optional(),
 });
 const schedule = z.discriminatedUnion("type", [
   z.object({ type: z.literal("once"), at: timestamp }),

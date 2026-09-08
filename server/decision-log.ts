@@ -38,8 +38,9 @@ export type DecisionKind =
  * straight through from auto-approve.ts; `question` marks cards a rule may
  * never answer, `auto-fallback` a card shown after delivery failed, `routine`
  * a durable chat scheduling proposal, `skill` a staged learned-skill card,
- * `profile` a bot proposed a profile change, `user` the human's answer, and
- * auto-review sources the isolated model reviewer. */
+ * `profile` a bot proposed a profile change, `playbook` a bot proposed a
+ * playbook change, `user` the human's answer, and auto-review sources the
+ * isolated model reviewer. */
 export type DecisionSource =
   | AutoVerdictSource
   | "question"
@@ -47,6 +48,7 @@ export type DecisionSource =
   | "routine"
   | "skill"
   | "profile"
+  | "playbook"
   | "user"
   | "auto-review"
   | "auto-review-shadow";

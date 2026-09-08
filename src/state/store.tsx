@@ -18,6 +18,7 @@ import type { MausColor, MausMotion } from "@/lib/mascot";
 import type { BotAvatarCrop } from "../../shared/bot-avatar";
 import { approvalModeFor, type ApprovalMode } from "../../shared/approval-mode";
 import type { MascotBodyId } from "../../shared/mascot-bodies";
+import type { PlaybookRequestCardData } from "../../shared/playbook-request";
 import type { ProfileRequestCardData } from "../../shared/profile-request";
 import type { RoutineRequestCardData } from "../../shared/routine-request";
 import type { RoutineRunCardData } from "../../shared/routine-run";
@@ -82,6 +83,8 @@ export interface OptionCardData {
   skillRequest?: SkillRequestCardData;
   /** Persisted profile proposal used by the server when the user confirms it. */
   profileRequest?: ProfileRequestCardData;
+  /** Persisted playbook proposal used by the server when the user confirms it. */
+  playbookRequest?: PlaybookRequestCardData;
 }
 
 export interface ConnectorCardData {
