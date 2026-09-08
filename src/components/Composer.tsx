@@ -23,6 +23,8 @@ import {
 import { MausAvatar } from "./Avatar";
 import { ComposerAttachments, pathForFile } from "./ComposerAttachments";
 import { LocalComputerAutoWarning } from "./LocalComputerAutoWarning";
+import { ComposerTokenBadge } from "./ComposerTokenBadge";
+import { getTextMetrics } from "@/lib/token-estimator";
 import {
   appendPastedText,
   handoffAttachmentImagePreview,
@@ -515,6 +517,11 @@ export function Composer({
   };
 
   const hasContent = Boolean(effectiveText.trim()) || attachments.length > 0;
+  const composedPrompt = useMemo(
+    () => (attachments.length > 0 ? composeMessage(effectiveText, attachments) : effectiveText),
+    [effectiveText, attachments],
+  );
+  const textMetrics = useMemo(() => getTextMetrics(composedPrompt), [composedPrompt]);
   const retryFailedSend = (failed: FailedComposerSend) => {
     const failedMode = failed.channelMode ?? "chat";
     if (failed.requestText.includes("<attached-image ") && !imageTargetsSupport(failed.requestText, failedMode)) {
@@ -1018,33 +1025,36 @@ export function Composer({
           </button>
         )}
         {hasContent && !locked && (
-          <button
-            onClick={send}
-            disabled={attachmentPending}
-            aria-label={
-              busy && canSteer
-                  ? "Send into the running turn"
-                  : busy
-                    ? "Queue message"
-                    : "Send message"
-            }
-            title={
-              busy && canSteer
-                  ? "Send into the running turn"
-                  : busy
-                    ? "Sends when the current turn finishes"
-                    : "Send"
-            }
-            className={cn(
-              "flex size-8 shrink-0 items-center justify-center rounded-full text-white",
-              busy && !canSteer
-                  ? "bg-raised text-ink-secondary hover:bg-raised-hover"
-                  : "bg-accent hover:brightness-110",
-            )}
-          >
-            {busy && !canSteer ? <Clock size={15} /> : <ArrowUp size={17} />}
-          </button>
-          )}
+          <div className="flex items-center gap-1.5">
+            <ComposerTokenBadge metrics={textMetrics} />
+            <button
+              onClick={send}
+              disabled={attachmentPending}
+              aria-label={
+                busy && canSteer
+                    ? "Send into the running turn"
+                    : busy
+                      ? "Queue message"
+                      : "Send message"
+              }
+              title={
+                busy && canSteer
+                    ? "Send into the running turn"
+                    : busy
+                      ? "Sends when the current turn finishes"
+                      : "Send"
+              }
+              className={cn(
+                "flex size-8 shrink-0 items-center justify-center rounded-full text-white",
+                busy && !canSteer
+                    ? "bg-raised text-ink-secondary hover:bg-raised-hover"
+                    : "bg-accent hover:brightness-110",
+              )}
+            >
+              {busy && !canSteer ? <Clock size={15} /> : <ArrowUp size={17} />}
+            </button>
+          </div>
+        )}
           </div>
         </div>
         </div>
