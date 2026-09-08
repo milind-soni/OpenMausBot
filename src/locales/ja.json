@@ -504,6 +504,7 @@
   "approval.aria.routineDetails": "ルーティンの詳細",
   "approval.aria.skillDetails": "スキルの詳細",
   "approval.aria.profileChange": "プロフィールの変更",
+  "approval.aria.playbookChange": "プレイブックの変更",
   "approval.aria.details": "承認の詳細",
   "approval.status.routineScheduled": "ルーティンを予約しました",
   "approval.status.routineUpdated": "ルーティンを更新しました",

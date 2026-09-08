@@ -504,6 +504,7 @@
   "approval.aria.routineDetails": "Detalles de la rutina",
   "approval.aria.skillDetails": "Detalles de la habilidad",
   "approval.aria.profileChange": "Cambio de perfil",
+  "approval.aria.playbookChange": "Cambio de playbook",
   "approval.aria.details": "Detalles de la aprobación",
   "approval.status.routineScheduled": "Rutina programada",
   "approval.status.routineUpdated": "Rutina actualizada",

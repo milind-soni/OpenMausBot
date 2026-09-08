@@ -504,6 +504,7 @@
   "approval.aria.routineDetails": "Détails de la routine",
   "approval.aria.skillDetails": "Détails de la compétence",
   "approval.aria.profileChange": "Modification du profil",
+  "approval.aria.playbookChange": "Modification du playbook",
   "approval.aria.details": "Détails de l'autorisation",
   "approval.status.routineScheduled": "Routine planifiée",
   "approval.status.routineUpdated": "Routine mise à jour",

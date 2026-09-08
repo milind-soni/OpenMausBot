@@ -28,6 +28,7 @@
   "approval.aria.routineDetails": "Details zur Routine",
   "approval.aria.skillDetails": "Details zur Fähigkeit",
   "approval.aria.profileChange": "Profiländerung",
+  "approval.aria.playbookChange": "Playbook-Änderung",
   "approval.aria.details": "Details zur Freigabe",
   "approval.status.routineScheduled": "Routine geplant",
   "approval.status.routineUpdated": "Routine aktualisiert",

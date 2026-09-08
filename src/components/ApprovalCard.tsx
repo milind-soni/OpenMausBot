@@ -134,7 +134,9 @@ export function ApprovalCard({
               ? t("approval.aria.skillDetails")
               : isProfileRequest
                 ? t("approval.aria.profileChange")
-                : t("approval.aria.details")
+                : isPlaybookRequest
+                  ? t("approval.aria.playbookChange")
+                  : t("approval.aria.details")
         }
         className="mt-2 max-h-40 overflow-auto whitespace-pre-wrap break-words rounded-lg bg-inset px-3 py-2 font-mono text-[12.5px] leading-relaxed text-ink"
       >
