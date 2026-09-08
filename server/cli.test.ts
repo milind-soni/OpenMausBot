@@ -5,7 +5,7 @@ import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { applyStartupPreferences, formatSessions, pairingBlock, parseArgs, qrToString, runLogin, runOnboardingCommand, serverEntry, verifyPhoneEndpoint, type CliOptions } from "./cli.ts";
+import { applyStartupPreferences, formatSessions, formatUsers, pairingBlock, parseArgs, qrToString, resolveUser, runLogin, runOnboardingCommand, serverEntry, verifyPhoneEndpoint, type CliOptions } from "./cli.ts";
 import { SetupCancelled } from "./cli-prompts.ts";
 import { removeTempDir, waitForExit } from "./testing/cleanup.ts";
 import { startControlPlaneStub } from "./testing/control-plane-stub.ts";
@@ -40,6 +40,54 @@ describe("openmausbot command line", () => {
     expect(parseArgs(["browser", "status"], {})).toMatchObject({ command: "browser", browserAction: "status" });
     expect(parseArgs(["browser"], {})).toEqual({ error: "browser needs an action: install or status" });
     expect(parseArgs(["serve", "--tailscale", "--tunnel"], {})).toEqual({ error: "choose one of --tailscale (your tailnet) and --tunnel (a public address)" });
+  });
+
+  it("parses the users commands and says what each one is missing", () => {
+    expect(parseArgs(["users"], {})).toMatchObject({ command: "users", userAction: "list" });
+    expect(parseArgs(["users", "add", "--name", "Ada L.", "--role", "admin", "--email", "ada@x.test"], {}))
+      .toMatchObject({ command: "users", userAction: "add", name: "Ada L.", role: "admin", email: "ada@x.test" });
+    // no --role: parseArgs leaves it unset and runUsers defaults it to member
+    expect(parseArgs(["users", "add", "--name", "Bob"], {})).toMatchObject({ userAction: "add", name: "Bob" });
+    expect(parseArgs(["users", "disable", "abc"], {})).toMatchObject({ userAction: "disable", user: "abc" });
+    expect(parseArgs(["users", "enable", "ada@x.test"], {})).toMatchObject({ userAction: "enable", user: "ada@x.test" });
+    expect(parseArgs(["users", "remove", "abc", "--yes"], {})).toMatchObject({ userAction: "remove", user: "abc", yes: true });
+    expect(parseArgs(["users", "edit", "abc", "--role", "member"], {})).toMatchObject({ userAction: "edit", user: "abc", role: "member" });
+    expect(parseArgs(["pair", "--user", "ada@x.test"], {})).toMatchObject({ command: "pair", user: "ada@x.test" });
+    // the person is --name, the device is --label
+    expect(parseArgs(["pair", "--user", "a", "--label", "Kitchen iPad"], {})).toMatchObject({ user: "a", label: "Kitchen iPad" });
+    expect(parseArgs(["users", "add"], {})).toEqual({ error: "users add needs --name" });
+    expect(parseArgs(["users", "disable"], {})).toEqual({ error: "users disable needs a user (id, email or name)" });
+    expect(parseArgs(["users", "add", "--name", "X", "--role", "owner"], {})).toEqual({ error: "--role must be admin or member" });
+  });
+
+  it("resolves a user by id, email or exact name, and refuses to guess", () => {
+    const users = [
+      { id: "id-ada", name: "Ada", email: "ada@x.test", role: "admin", status: "active" },
+      { id: "id-bob", name: "Bob", email: "bob@x.test", role: "member", status: "active" },
+      { id: "id-bob2", name: "Bob", email: null, role: "member", status: "active" },
+    ];
+    expect(resolveUser(users, "id-ada")).toEqual({ id: "id-ada" });
+    expect(resolveUser(users, "ADA@X.TEST")).toEqual({ id: "id-ada" });
+    expect(resolveUser(users, "ada")).toEqual({ id: "id-ada" });
+    // Two people called Bob: name the id rather than pick one.
+    const ambiguous = resolveUser(users, "Bob");
+    expect("error" in ambiguous && ambiguous.error).toMatch(/matches 2 accounts/);
+    expect("error" in ambiguous && ambiguous.error).toContain("id-bob2");
+    expect("error" in resolveUser(users, "nobody") && resolveUser(users, "nobody")).toBeTruthy();
+  });
+
+  it("lists people with their device counts", () => {
+    const table = formatUsers(
+      [
+        { id: "id-ada", name: "Ada", email: "ada@x.test", role: "admin", status: "active" },
+        { id: "id-bob", name: "Bob", email: null, role: "member", status: "disabled" },
+      ],
+      { "id-ada": 2 },
+    );
+    expect(table).toContain("id-ada");
+    expect(table).toMatch(/Ada .*ada@x\.test .*admin .*active .*2/);
+    expect(table).toMatch(/Bob .*— .*member .*disabled .*0/);
+    expect(table).toContain("openmausbot pair --user");
   });
 
   it("prints a scannable block with the link, or says where to type the code", () => {

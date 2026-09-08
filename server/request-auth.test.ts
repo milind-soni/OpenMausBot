@@ -23,6 +23,7 @@ import {
   sessionCookieName,
 } from "./request-auth.ts";
 import { SESSION_TTL_MS, SessionRegistry } from "./sessions.ts";
+import { UserRegistry } from "./users.ts";
 
 function request(headers: Record<string, string>, method = "GET"): IncomingMessage {
   // SAFETY: the resolver reads only headers and method; a bare object is the whole contract here
@@ -126,13 +127,15 @@ describe("scopes", () => {
 describe("resolveRequestAuth", () => {
   let dir: string;
   let sessions: SessionRegistry;
+  let users: UserRegistry;
   const cookieName = "omb_session_8799_env";
   const resolve = (headers: Record<string, string>, path = "/api/bots", method = "GET") =>
-    resolveRequestAuth(request(headers, method), { sessions, cookieName, streamPath: "/api/events", url: new URL(path, "http://x") });
+    resolveRequestAuth(request(headers, method), { sessions, users, cookieName, streamPath: "/api/events", url: new URL(path, "http://x") });
 
   beforeEach(() => {
     dir = mkdtempSync(join(tmpdir(), "omb-auth-"));
     sessions = new SessionRegistry({ file: join(dir, "sessions.json") });
+    users = new UserRegistry({ file: join(dir, "users.json") });
   });
   afterEach(() => rmSync(dir, { recursive: true, force: true }));
 
@@ -145,7 +148,7 @@ describe("resolveRequestAuth", () => {
     };
     const check = (method: string, path: string, overrides: Record<string, string> = {}, relay = "relay-secret") =>
       resolveRequestAuth(request({ ...headers, ...overrides }, method), {
-        sessions, cookieName, streamPath: "/api/events", url: new URL(path, "http://localhost"),
+        sessions, users, cookieName, streamPath: "/api/events", url: new URL(path, "http://localhost"),
         loopbackMutationToken: "desktop-secret", companionMutationToken: relay,
       });
     for (const [method, path] of [
@@ -180,7 +183,7 @@ describe("resolveRequestAuth", () => {
   }
 
   it("keeps the loopback owner path exactly as before", () => {
-    expect(resolve({ host: "127.0.0.1:8799" }).auth).toEqual({ kind: "loopback", scopes: ["admin", "client"] });
+    expect(resolve({ host: "127.0.0.1:8799" }).auth).toEqual({ kind: "loopback", scopes: ["admin", "client"], user: null });
     expect(resolve({ host: "127.0.0.1:8799", origin: "http://localhost:8799" }).auth?.kind).toBe("loopback");
     const foreignHost = resolve({ host: "100.64.0.9:8799" });
     expect(foreignHost.auth).toBeNull();
@@ -221,6 +224,7 @@ describe("resolveRequestAuth", () => {
   it("requires the packaged desktop capability for public loopback mutations", () => {
     const options = (path: string) => ({
       sessions,
+      users,
       cookieName,
       streamPath: "/api/events",
       url: new URL(path, "http://x"),
@@ -376,7 +380,8 @@ describe("an IPC listener (openmausbot serve --tunnel) is remote by construction
     const dir = mkdtempSync(join(tmpdir(), "omb-auth-ipc-"));
     try {
       const sessions = new SessionRegistry({ file: join(dir, "sessions.json") });
-      const gate = { sessions, cookieName: "omb_session_test", streamPath: "/api/events", url: new URL("/api/bots", "http://x") };
+      const users = new UserRegistry({ file: join(dir, "users.json") });
+      const gate = { sessions, users, cookieName: "omb_session_test", streamPath: "/api/events", url: new URL("/api/bots", "http://x") };
       const denied = resolveRequestAuth(overSocket({ host: "127.0.0.1:8799" }), gate);
       expect(denied.auth).toBeNull();
       expect(denied.status).toBe(403);
@@ -389,5 +394,112 @@ describe("an IPC listener (openmausbot serve --tunnel) is remote by construction
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }
+  });
+});
+
+describe("a device that belongs to a person", () => {
+  let dir: string;
+  let sessions: SessionRegistry;
+  let users: UserRegistry;
+  const cookieName = "omb_session_8799_env";
+
+  beforeEach(() => {
+    dir = mkdtempSync(join(tmpdir(), "omb-auth-user-"));
+    sessions = new SessionRegistry({ file: join(dir, "sessions.json") });
+    users = new UserRegistry({ file: join(dir, "users.json") });
+  });
+  afterEach(() => rmSync(dir, { recursive: true, force: true }));
+
+  /** Pair a device for `userId` with a ceiling, and return its bearer. */
+  function device(userId: string | undefined, ceiling: Array<"admin" | "client"> = ["admin", "client"]): string {
+    const { code } = sessions.openPairing({ scopes: ceiling, ...(userId ? { userId } : {}) });
+    const result = sessions.exchange({ code, label: "device", source: `s${Math.random()}` });
+    if (!result.ok) throw new Error(result.error);
+    return result.token;
+  }
+  const ask = (token: string, path = "/api/bots", method = "GET") =>
+    resolveRequestAuth(request({ host: "mini.example", authorization: `Bearer ${token}` }, method), {
+      sessions, users, cookieName, streamPath: "/api/events", url: new URL(path, "http://x"),
+    });
+
+  const ADMIN_ROUTE = "/api/auth/sessions";
+  const CLIENT_ROUTE = "/api/bots";
+
+  it("intersects the role with the device ceiling, both directions", () => {
+    const ada = users.create({ name: "Ada", role: "admin" }, null);
+    const bob = users.create({ name: "Bob", role: "member" }, null);
+
+    // An admin on a full device gets everything.
+    expect(ask(device(ada.id), ADMIN_ROUTE).auth?.scopes).toEqual(["admin", "client"]);
+    // An admin on a chat-only device stays chat-only: the ceiling still vetoes.
+    const capped = device(ada.id, ["client"]);
+    expect(ask(capped, ADMIN_ROUTE).status).toBe(403);
+    expect(ask(capped, CLIENT_ROUTE).auth?.scopes).toEqual(["client"]);
+    // A member on a full device is capped by the role instead.
+    const bobFull = device(bob.id);
+    expect(ask(bobFull, ADMIN_ROUTE).error).toMatch(/lacks the admin scope/);
+    expect(ask(bobFull, CLIENT_ROUTE).auth?.scopes).toEqual(["client"]);
+  });
+
+  it("never resolves wider than the role allows, whatever the stored ceiling says", () => {
+    const bob = users.create({ name: "Bob", role: "member" }, null);
+    const token = device(bob.id, ["admin", "client"]);
+    const auth = ask(token, CLIENT_ROUTE).auth;
+    expect(auth?.kind).toBe("session");
+    // The stored ceiling is deliberately wider than the role.
+    if (auth?.kind === "session") expect(auth.session.scopes).toEqual(["admin", "client"]);
+    expect(auth?.scopes).not.toContain("admin");
+  });
+
+  it("follows a promotion and a demotion on the next request, with no re-pairing", () => {
+    users.create({ name: "Ada", role: "admin" }, null); // so demoting Bob is not the last-admin case
+    const bob = users.create({ name: "Bob", role: "member" }, null);
+    const token = device(bob.id);
+    expect(ask(token, ADMIN_ROUTE).status).toBe(403);
+    users.update(bob.id, { role: "admin" });
+    expect(ask(token, ADMIN_ROUTE).auth?.scopes).toEqual(["admin", "client"]);
+    users.update(bob.id, { role: "member" });
+    expect(ask(token, ADMIN_ROUTE).status).toBe(403);
+  });
+
+  it("refuses a disabled account with its own message, and restores it on re-enable", () => {
+    users.create({ name: "Ada", role: "admin" }, null); // keeps guard A happy
+    const bob = users.create({ name: "Bob", role: "member" }, null);
+    const token = device(bob.id);
+    expect(ask(token, CLIENT_ROUTE).auth).not.toBeNull();
+    users.update(bob.id, { status: "disabled" });
+    const denied = ask(token, CLIENT_ROUTE);
+    expect(denied.status).toBe(403);
+    expect(denied.error).toBe("forbidden: this account is disabled");
+    users.update(bob.id, { status: "active" });
+    expect(ask(token, CLIENT_ROUTE).auth).not.toBeNull();
+  });
+
+  it("treats a device whose person is gone as a dead credential", () => {
+    const ada = users.create({ name: "Ada", role: "admin" }, null);
+    users.create({ name: "Ben", role: "admin" }, null);
+    const token = device(ada.id);
+    users.remove(ada.id);
+    const denied = ask(token, CLIENT_ROUTE);
+    expect(denied.status).toBe(401);
+    expect(denied.error).toMatch(/pair this device again/);
+  });
+
+  it("carries the person on the auth, and leaves loopback and legacy devices alone", () => {
+    const ada = users.create({ name: "Ada", role: "admin" }, null);
+    const bound = ask(device(ada.id)).auth;
+    expect(bound?.user).toEqual({ id: ada.id, name: "Ada", role: "admin" });
+
+    // A device paired before accounts existed keeps its stored scopes.
+    const legacy = ask(device(undefined, ["admin", "client"]), ADMIN_ROUTE).auth;
+    expect(legacy?.user).toBeNull();
+    expect(legacy?.scopes).toEqual(["admin", "client"]);
+
+    const loopback = resolveRequestAuth(request({ host: "127.0.0.1:8799" }), {
+      sessions, users, cookieName, streamPath: "/api/events", url: new URL(ADMIN_ROUTE, "http://x"),
+    }).auth;
+    expect(loopback?.kind).toBe("loopback");
+    expect(loopback?.user).toBeNull();
+    expect(loopback?.scopes).toEqual(["admin", "client"]);
   });
 });

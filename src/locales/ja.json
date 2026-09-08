@@ -21,6 +21,7 @@
   "settings.close": "設定を閉じる",
   "settings.noMatch": "「{query}」に一致するものはありません",
   "settings.section.general": "一般",
+  "settings.section.people": "メンバー",
   "settings.section.experimental": "実験的機能",
   "settings.section.connections": "接続",
   "settings.section.engines": "エンジン",

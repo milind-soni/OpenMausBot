@@ -96,6 +96,7 @@
   "settings.close": "Fechar as configurações",
   "settings.noMatch": "Nada corresponde a “{query}”",
   "settings.section.general": "Geral",
+  "settings.section.people": "Pessoas",
   "settings.section.experimental": "Experimental",
   "settings.section.connections": "Conexões",
   "settings.section.engines": "Mecanismos",

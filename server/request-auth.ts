@@ -13,11 +13,21 @@ import { timingSafeEqual } from "node:crypto";
 import { isIP } from "node:net";
 
 import type { Scope, SessionRecord, SessionRegistry } from "./sessions.ts";
+import { roleScopes, type RequestUser, type UserDirectory } from "./users.ts";
 import { denyReason as companionDenial } from "../companion/src/routes.ts";
 
 export type RequestAuth =
-  | { kind: "loopback"; scopes: readonly Scope[] }
-  | { kind: "session"; session: SessionRecord; via: "bearer" | "cookie" | "ticket"; scopes: readonly Scope[] };
+  | { kind: "loopback"; scopes: readonly Scope[]; user: null }
+  | {
+    kind: "session";
+    session: SessionRecord;
+    via: "bearer" | "cookie" | "ticket";
+    /** EFFECTIVE scopes: the role and the device ceiling both had to allow
+     * each one. Handlers must read these, never `session.scopes`. */
+    scopes: readonly Scope[];
+    /** The person, when the device belongs to one. */
+    user: RequestUser | null;
+  };
 
 export interface RequestAuthResult {
   auth: RequestAuth | null;
@@ -190,6 +200,7 @@ export const CLIENT_ALLOW: ReadonlyArray<{ methods: readonly string[]; path: Reg
   // liveness, identity, the stream
   { methods: ["GET"], path: /^\/api\/health$/ },
   { methods: ["GET"], path: /^\/api\/edition$/ },
+  { methods: ["GET"], path: /^\/api\/auth\/permissions$/ }, // the capability catalog; not secret
   { methods: ["GET"], path: /^\/api\/brand$/ },
   { methods: ["GET"], path: /^\/api\/events$/ },
   // reads: fleet, transcripts, search (no secrets in any of these)
@@ -276,6 +287,9 @@ export function clientGroupPatchViolation(body: unknown): string | null {
 
 export interface ResolveOptions {
   sessions: SessionRegistry;
+  /** The roster. Required, so a call site that forgets to consult it fails
+   * to compile rather than quietly authorizing a disabled account. */
+  users: UserDirectory;
   cookieName: string;
   /** Path that may authenticate with a stream ticket in its query string. */
   streamPath: string;
@@ -286,6 +300,14 @@ export interface ResolveOptions {
   loopbackMutationToken?: string;
   /** Separate private capability held by the authenticated phone relay. */
   companionMutationToken?: string;
+  /** Trusted identity-header sign-on (phase 5), inert unless the server both
+   * holds the `sso` entitlement and has it configured. `resolve` reads the
+   * proxy's header and returns a user id (creating the account if new);
+   * `session` finds or refreshes that person's one SSO session. */
+  sso?: {
+    resolve(req: IncomingMessage): string | null;
+    session(userId: string): SessionRecord;
+  };
 }
 
 const DESKTOP_OWNER_HEADER = "x-openmausbot-desktop-owner";
@@ -338,11 +360,41 @@ export function resolveRequestAuth(req: IncomingMessage, options: ResolveOptions
     session = options.sessions.authenticate(cookie);
     via = "cookie";
   }
+  // A trusted SSO header is the last credential tried, so a real token or
+  // cookie always wins. Only a proxied request can carry it (a client on this
+  // machine reaches loopback without forwarded headers), which is exactly the
+  // deployment SSO is for.
+  if (!session && options.sso) {
+    const ssoUserId = options.sso.resolve(req);
+    if (ssoUserId) {
+      session = options.sso.session(ssoUserId);
+      via = "bearer";
+    }
+  }
 
   if (session && via) {
     if (via === "cookie" && !isSameOrigin(req)) return deny(403, "forbidden: cross-origin request");
+    // What the device may do, and — once it belongs to someone — what they
+    // may do. Both have to allow a scope, so demoting a person takes effect
+    // on the next request without revoking anything, and a chat-only iPad
+    // stays chat-only however senior its owner becomes.
+    let scopes: readonly Scope[] = session.scopes;
+    let user: RequestUser | null = null;
+    if (session.userId) {
+      const record = options.users.find(session.userId);
+      // Only reachable through a hand-edited file or a race, since removing
+      // a person revokes their devices. "Pair again" is the right advice, and
+      // it must not read as a live account.
+      if (!record) return deny(401, "unauthorized: this session has expired or was revoked; pair this device again");
+      // A separate message on purpose: re-pairing cannot fix this, and the
+      // person needs to know to ask an admin rather than retry.
+      if (record.status !== "active") return deny(403, "forbidden: this account is disabled");
+      scopes = roleScopes(record.role).filter((scope) => session.scopes.includes(scope));
+      if (!scopes.length) return deny(403, "forbidden: this device has no scopes left on this account");
+      user = { id: record.id, name: record.name, role: record.role };
+    }
     const needed = requiredScope(method, path);
-    if (!session.scopes.includes(needed)) {
+    if (!scopes.includes(needed)) {
       return deny(403, `forbidden: this session lacks the ${needed} scope`);
     }
     // Only a request that passed both checks counts as use of the session,
@@ -350,7 +402,7 @@ export function resolveRequestAuth(req: IncomingMessage, options: ResolveOptions
     // is the tail of an API call that already counted, and a stream left
     // open unattended must not keep a session alive on its own.
     if (via !== "ticket") options.sessions.renew(session.id);
-    return { auth: { kind: "session", session, via, scopes: session.scopes }, status: 401, error: "" };
+    return { auth: { kind: "session", session, via, scopes, user }, status: 401, error: "" };
   }
 
   const proxied = isProxied(req);
@@ -364,7 +416,7 @@ export function resolveRequestAuth(req: IncomingMessage, options: ResolveOptions
         !/^[\w-]{1,128}$/.test(headerValue(req.headers["x-openmausbot-companion-device"]) ?? "") ||
         companionDenial({ path, method, authenticated: true })
       ) return deny(403, "forbidden: invalid companion request");
-      return { auth: { kind: "loopback", scopes: LOOPBACK_SCOPES }, status: 401, error: "" };
+      return { auth: { kind: "loopback", scopes: LOOPBACK_SCOPES, user: null }, status: 401, error: "" };
     }
     if (
       options.loopbackMutationToken !== undefined &&
@@ -373,7 +425,7 @@ export function resolveRequestAuth(req: IncomingMessage, options: ResolveOptions
     ) {
       return deny(403, "forbidden: this change must come from the desktop app or a paired device");
     }
-    return { auth: { kind: "loopback", scopes: LOOPBACK_SCOPES }, status: 401, error: "" };
+    return { auth: { kind: "loopback", scopes: LOOPBACK_SCOPES, user: null }, status: 401, error: "" };
   }
 
   if (via) {

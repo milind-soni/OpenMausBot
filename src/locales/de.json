@@ -96,6 +96,7 @@
   "settings.close": "Einstellungen schließen",
   "settings.noMatch": "Nichts passt zu „{query}“",
   "settings.section.general": "Allgemein",
+  "settings.section.people": "Personen",
   "settings.section.experimental": "Experimentell",
   "settings.section.connections": "Verbindungen",
   "settings.section.engines": "Engines",

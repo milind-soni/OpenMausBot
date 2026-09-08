@@ -284,6 +284,10 @@ import {
   browserSessionId,
   describeBrowserEngine,
 } from "./browser-engine.ts";
+import { publicUser, roleScopes, UserError, UserRegistry, type Role } from "./users.ts";
+import type { BotVisibility } from "./store.ts";
+import { appendAudit, readAudit, type AuditActor } from "./audit-log.ts";
+import { DEFAULT_ROLE_PERMISSIONS, PERMISSIONS, permissionsForRole } from "./permissions.ts";
 import { createScreenFrameSource, type ScreenCapture } from "./screen-frame-source.ts";
 import { screenFrameHash, screenSurfaceForTool, screenTouchingTool, settledFrameIsNews } from "./screen-frame-gate.ts";
 import { RoutineRequestService } from "./routine-requests.ts";
@@ -317,7 +321,7 @@ import {
 } from "./turn-dispatch-guard.ts";
 import { createGracefulShutdown } from "./graceful-shutdown.ts";
 import { acquireDataDirLeaseForProcess } from "./data-dir-lease.ts";
-import { describeEdition, editionStatus, loadEnterpriseLayer } from "./enterprise.ts";
+import { describeEdition, editionStatus, entitled, loadEnterpriseLayer } from "./enterprise.ts";
 import { environmentDescriptor, loadEnvironmentId } from "./environment.ts";
 import { createCustomDomainVerifier, normalizeCustomDomain } from "./custom-domain.ts";
 import { ProviderAuthSessions } from "./provider-auth-sessions.ts";
@@ -332,8 +336,9 @@ import {
   parseCookies,
   serializeSessionCookie,
   sessionCookieName,
+  type RequestAuth,
 } from "./request-auth.ts";
-import { cookieMaxAgeSeconds, formatPairingCode, SessionRegistry, type Scope } from "./sessions.ts";
+import { cookieMaxAgeSeconds, formatPairingCode, SCOPES, SessionRegistry, type Scope } from "./sessions.ts";
 import { describeBrand, loadBrand } from "./brand.ts";
 import { deliverSseFrame } from "./sse-fanout.ts";
 import {
@@ -386,6 +391,10 @@ process.once("exit", releaseDataDirLeaseAtExit);
 // for this server, the paired sessions, and the cookie the served UI uses.
 const ENVIRONMENT_ID = loadEnvironmentId(DATA_DIR);
 const sessions = new SessionRegistry({ file: join(DATA_DIR, "sessions.json") });
+// The people those sessions belong to (server/users.ts). Empty until an
+// operator creates the first account, and an empty roster means the server
+// behaves exactly as it did before accounts existed.
+const users = new UserRegistry({ file: join(DATA_DIR, "users.json") });
 const SESSION_COOKIE = sessionCookieName(PORT, ENVIRONMENT_ID);
 const DESKTOP_MANAGED = process.env.OMB_DESKTOP_PARENT === "1";
 // Empty is deliberately a deny-all bootstrap state. Only Electron's private
@@ -2081,6 +2090,9 @@ interface SseClient {
   /** The paired session behind this stream, when there is one: revoking or
    * expiring it must end the stream, not just future requests. */
   sessionId?: string;
+  /** The person that session belongs to, when it belongs to one: disabling
+   * them must end the stream too. */
+  userId?: string;
   /** Set once this client's socket has signalled it can't keep up (write()
    * returned false); cleared implicitly once it's disconnected. See
    * ./sse-fanout.ts for what this does to fan-out. */
@@ -2148,8 +2160,19 @@ function broadcast(payload: Record<string, unknown>) {
   // detection stays honest, but never retain their base64 payloads.
   replayBuffer.push({ seq, kind, frame: kind === "screen" ? null : frame, clientFrame: kind === "screen" ? null : clientFrame });
   if (replayBuffer.length > REPLAY_MAX) replayBuffer.shift();
+  const restrictedBotId = kind === "bot" || kind === "message" || kind === "message.patch" || kind === "thread"
+    ? botIdForFrame(payload)
+    : null;
+  const restrictedBot = restrictedBotId ? store.bot(restrictedBotId) : null;
   for (const client of [...sseClients]) {
     if (!wants(client, kind)) continue;
+    // A member off a restricted bot's list must not learn it exists through
+    // the stream. Loopback and legacy device streams (no userId) are
+    // unaffected, matching the pre-phase-4 fleet.
+    if (restrictedBot?.visibility && restrictedBot.visibility.mode === "restricted" && client.userId) {
+      const viewer = users.find(client.userId);
+      if (viewer && viewer.role !== "admin" && !restrictedBot.visibility.userIds.includes(client.userId)) continue;
+    }
     // Screen frames are replaceable and durable events are not: see
     // ./sse-fanout.ts for the backpressure/bound decision this makes.
     if (deliverSseFrame(client, kind, client.admin ? frame : clientFrame) === "disconnected") {
@@ -7511,6 +7534,79 @@ function serveStatic(res: ServerResponse, path: string): boolean {
   }
 }
 
+/** A trusted SSO identity, when the entitlement and config allow it. Reads the
+ * proxy's header, finds or creates the local user, and returns their id. Inert
+ * (returns null) unless `entitled("sso")` and cfg.sso.enabled and the header is
+ * present. Phase 5. */
+function resolveSsoUserId(req: IncomingMessage): string | null {
+  const sso = cfg.sso;
+  if (!sso?.enabled || !entitled("sso")) return null;
+  const headerName = (sso.userHeader ?? "x-auth-request-user").toLowerCase();
+  const raw = req.headers[headerName];
+  const subject = (Array.isArray(raw) ? raw[0] : raw)?.trim();
+  if (!subject) return null;
+  const emailRaw = req.headers[(sso.emailHeader ?? "x-auth-request-email").toLowerCase()];
+  const email = (Array.isArray(emailRaw) ? emailRaw[0] : emailRaw)?.trim() || null;
+  const nameRaw = req.headers[(sso.nameHeader ?? "x-auth-request-preferred-username").toLowerCase()];
+  const name = (Array.isArray(nameRaw) ? nameRaw[0] : nameRaw)?.trim() || subject;
+  // Match an existing account by email first (the federation join key), else
+  // provision one. The very first SSO user with no admin yet becomes admin, so
+  // a fresh SSO-only deployment is not locked out.
+  // A disabled person still resolves: the chokepoint then refuses them with
+  // "this account is disabled", which is true and actionable. Returning null
+  // here would instead fall through to "pair this device to use the server
+  // remotely" — advice they cannot act on and that hides why they are out.
+  const existing = email ? users.findByEmail(email) : null;
+  if (existing) return existing.id;
+  const created = users.create({ name, email, role: users.isEmpty() ? "admin" : "member" }, null);
+  appendAudit(DATA_DIR, { action: "user.create", actor: { kind: "device", source: requestSource(req) }, target: { kind: "user", id: created.id, name: created.name }, changes: { via: "sso" } });
+  return created.id;
+}
+
+/** May this request see a given bot (server/store.ts BotVisibility)?
+ * Loopback and admins see every bot; a member sees a restricted bot only when
+ * they are on its list. Phase 4 of the RBAC plan. */
+function mayViewBot(auth: RequestAuth, bot: { visibility?: BotVisibility }): boolean {
+  if (!bot.visibility || bot.visibility.mode === "everyone") return true;
+  if (auth.kind === "loopback") return true;
+  if (auth.scopes.includes("admin")) return true;
+  return auth.user ? bot.visibility.userIds.includes(auth.user.id) : false;
+}
+
+/** The bot behind an SSE frame, so a restricted bot's events never reach a
+ * member who may not see it. Frames carry either a bot object or a threadId. */
+function botIdForFrame(payload: Record<string, unknown>): string | null {
+  const bot = payload.bot as { id?: unknown } | undefined;
+  if (bot && typeof bot.id === "string") return bot.id;
+  const threadId = typeof payload.threadId === "string" ? payload.threadId : null;
+  if (threadId) return store.botByThread(threadId)?.id ?? null;
+  return null;
+}
+
+/** Who is doing this, for the audit log (server/audit-log.ts). */
+function auditActor(auth: RequestAuth, req: IncomingMessage): AuditActor {
+  const source = requestSource(req);
+  if (auth.kind === "loopback") return { kind: "loopback", source };
+  if (auth.user) return { kind: "user", userId: auth.user.id, userName: auth.user.name, sessionId: auth.session.id, source };
+  return { kind: "device", sessionId: auth.session.id, source };
+}
+
+/** Strict body for the user routes: only the four editable fields, and each
+ * of the right shape. Returns the first offending field, or null. Same style
+ * as clientBotPatchViolation in request-auth.ts. */
+function userBodyViolation(body: any, options: { requireName: boolean }): string | null {
+  if (!body || typeof body !== "object" || Array.isArray(body)) return "body must be a JSON object";
+  for (const key of Object.keys(body)) {
+    if (!["name", "email", "role", "status"].includes(key)) return `unknown field "${key}"`;
+  }
+  if (options.requireName && typeof body.name !== "string") return "name is required";
+  if (body.name !== undefined && typeof body.name !== "string") return "name must be a string";
+  if (body.email !== undefined && body.email !== null && typeof body.email !== "string") return "email must be a string or null";
+  if (body.role !== undefined && body.role !== "admin" && body.role !== "member") return 'role must be "admin" or "member"';
+  if (body.status !== undefined && body.status !== "active" && body.status !== "disabled") return 'status must be "active" or "disabled"';
+  return null;
+}
+
 function json(res: ServerResponse, status: number, body: unknown) {
   const data = JSON.stringify(body);
   res.writeHead(status, { "content-type": "application/json" });
@@ -7612,11 +7708,16 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
     }
     const gate = resolveRequestAuth(req, {
       sessions,
+      users,
       cookieName: SESSION_COOKIE,
       streamPath: "/api/events",
       url,
       loopbackMutationToken: desktopMutationToken,
       companionMutationToken,
+      sso: {
+        resolve: resolveSsoUserId,
+        session: (userId) => sessions.upsertSsoSession(userId, [...roleScopes(users.find(userId)!.role)]),
+      },
     });
     // The browser's cookie carries the term it was set with, and the
     // session's term slides on use (sessions.ts `renew`), so re-issue the
@@ -7647,12 +7748,16 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
         res,
         200,
         auth.kind === "loopback"
-          ? { kind: "loopback", scopes: auth.scopes, environmentId: ENVIRONMENT_ID }
+          ? { kind: "loopback", scopes: auth.scopes, user: null, environmentId: ENVIRONMENT_ID }
           : {
               kind: "session",
               id: auth.session.id,
               label: auth.session.label,
+              // Effective scopes: the role and the device ceiling both allowed
+              // each one (server/request-auth.ts).
               scopes: auth.scopes,
+              user: auth.user ? publicUser(users.find(auth.user.id)!) : null,
+              permissions: auth.user ? permissionsForRole(auth.user.role) : [...PERMISSIONS.map((p) => p.id)],
               expiresAt: auth.session.expiresAt,
               via: auth.via,
               environmentId: ENVIRONMENT_ID,
@@ -7672,13 +7777,43 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
       const body = await readBody(req);
       const requested: unknown = body?.scopes;
       const scopes = Array.isArray(requested) ? requested.filter((v): v is Scope => v === "admin" || v === "client") : undefined;
-      const opened = sessions.openPairing({ label: typeof body?.label === "string" ? body.label : undefined, scopes });
+      // Who the device will belong to. Before the first account exists this
+      // stays null and the code mints a device session, exactly as it always
+      // did. Once accounts exist, an unnamed code would be an anonymous admin
+      // device — the hole that would make the whole roster decorative — so it
+      // is refused.
+      const wantedUser = typeof body?.userId === "string" ? body.userId : null;
+      if (wantedUser && !users.find(wantedUser)) return json(res, 404, { error: "no such user" });
+      if (!wantedUser && !users.isEmpty()) {
+        return json(res, 400, { error: "userId is required because this server has user accounts" });
+      }
+      if (wantedUser) {
+        const target = users.find(wantedUser)!;
+        if (target.status !== "active") return json(res, 409, { error: "that account is disabled" });
+        // A code whose ceiling cannot overlap the role would pair happily and
+        // then fail every request: refuse at the mint instead.
+        if (scopes?.length && !scopes.some((scope) => roleScopes(target.role).includes(scope))) {
+          return json(res, 400, { error: "those scopes cannot apply to that account" });
+        }
+      }
+      const opened = sessions.openPairing({
+        label: typeof body?.label === "string" ? body.label : undefined,
+        scopes,
+        ...(wantedUser ? { userId: wantedUser } : {}),
+      });
       const origin = requestOrigin(req);
       const base = publicUrl() ?? (auth.kind === "session" && origin ? origin : null);
       const code = formatPairingCode(opened.code);
+      appendAudit(DATA_DIR, {
+        action: "pairing.mint",
+        actor: auditActor(auth, req),
+        target: { kind: "pairing", id: opened.id, ...(wantedUser ? { name: users.find(wantedUser)?.name } : {}) },
+        changes: { forUser: wantedUser, scopes: (scopes ?? SCOPES).join(",") },
+      });
       return json(res, 200, {
         id: opened.id,
         code,
+        userId: wantedUser,
         expiresAt: opened.expiresAt,
         url: base ? `${base}/pair#code=${code}` : null,
         hint: base
@@ -7724,11 +7859,162 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
       return json(res, cancelled ? 200 : 404, cancelled ? { ok: true } : { error: "no such pairing code" });
     }
     if (method === "GET" && path === "/api/auth/sessions") {
-      return json(res, 200, { sessions: sessions.list(), current: auth.kind === "session" ? auth.session.id : null });
+      const named = sessions.list().map((session) => {
+        const owner = session.userId ? users.find(session.userId) : null;
+        // The stored scopes are the device CEILING; what the device can
+        // actually do is that intersected with its owner's role. Reporting the
+        // ceiling would show a member's phone as "admin".
+        const effective = owner
+          ? session.scopes.filter((scope) => roleScopes(owner.role).includes(scope))
+          : session.scopes;
+        return {
+          ...session,
+          scopes: effective,
+          user: owner ? { id: owner.id, name: owner.name, role: owner.role, status: owner.status } : null,
+        };
+      });
+      return json(res, 200, { sessions: named, current: auth.kind === "session" ? auth.session.id : null });
     }
+    // ── people (server/users.ts) ────────────────────────────────────────
+    // Admin-only by default deny: none of these are in CLIENT_ALLOW, so
+    // requiredScope() already returns "admin" for every one.
+    if (method === "GET" && path === "/api/auth/users") {
+      const notice = users.notice();
+      return json(res, 200, { users: users.list(), ...(notice ? { notice } : {}) });
+    }
+    if (method === "POST" && path === "/api/auth/users") {
+      const body = await readBody(req);
+      const invalid = userBodyViolation(body, { requireName: true });
+      if (invalid) return json(res, 400, { error: invalid });
+      try {
+        const created = users.create(
+          { name: String(body.name), email: body.email === undefined ? null : (body.email as string | null), role: body.role as Role | undefined },
+          auth.kind === "session" ? auth.user?.id ?? null : null,
+        );
+        appendAudit(DATA_DIR, {
+          action: "user.create",
+          actor: auditActor(auth, req),
+          target: { kind: "user", id: created.id, name: created.name },
+          changes: { role: created.role, email: created.email },
+        });
+        return json(res, 201, { user: created });
+      } catch (error) {
+        if (error instanceof UserError) return json(res, error.status, { error: error.message });
+        throw error;
+      }
+    }
+    m = path.match(/^\/api\/auth\/users\/([\w-]+)$/);
+    if (m && method === "GET") {
+      const found = users.find(m[1]);
+      return json(res, found ? 200 : 404, found ? { user: publicUser(found) } : { error: "no such user" });
+    }
+    if (m && method === "PATCH") {
+      const id = m[1];
+      const body = await readBody(req);
+      const invalid = userBodyViolation(body, { requireName: false });
+      if (invalid) return json(res, 400, { error: invalid });
+      const target = users.find(id);
+      if (!target) return json(res, 404, { error: "no such user" });
+      // Guard B: never edit the authority of the account you are signed in as.
+      // Loopback is exempt because it has no account and cannot lock itself
+      // out of the machine it is sitting at.
+      if (auth.kind === "session" && auth.user?.id === id && (body.role !== undefined || body.status !== undefined)) {
+        return json(res, 409, { error: "you cannot change your own role or status; ask another admin" });
+      }
+      try {
+        const updated = users.update(id, {
+          name: body.name === undefined ? undefined : String(body.name),
+          email: body.email === undefined ? undefined : (body.email as string | null),
+          role: body.role as Role | undefined,
+          status: body.status as "active" | "disabled" | undefined,
+        });
+        if (!updated) return json(res, 404, { error: "no such user" });
+        // Disabling is a switch, not a shredder: the sessions stay, and every
+        // request from them is refused at the chokepoint (request-auth.ts), so
+        // enabling restores every device with no re-pairing. What must not
+        // wait is a stream already open — close those now.
+        let revokedSessions = 0;
+        let cancelledPairings = 0;
+        if (body.status === "disabled") {
+          revokedSessions = sessions.forUser(id).length;
+          cancelledPairings = sessions.cancelPairingsForUser(id);
+          for (const client of [...sseClients]) {
+            if (client.userId !== id) continue;
+            sseClients.delete(client);
+            try {
+              client.res.end();
+            } catch {
+              /* already gone */
+            }
+          }
+        }
+        const changes: Record<string, string | null> = {};
+        for (const key of ["name", "email", "role", "status"] as const) if (body[key] !== undefined) changes[key] = body[key];
+        appendAudit(DATA_DIR, {
+          action: body.status === "disabled" ? "user.disable" : body.status === "active" && target.status === "disabled" ? "user.enable" : "user.update",
+          actor: auditActor(auth, req),
+          target: { kind: "user", id, name: updated.name },
+          changes,
+          ...(revokedSessions || cancelledPairings ? { effects: { revokedSessions, cancelledPairings } } : {}),
+        });
+        return json(res, 200, { user: updated, revokedSessions, cancelledPairings });
+      } catch (error) {
+        if (error instanceof UserError) return json(res, error.status, { error: error.message });
+        throw error;
+      }
+    }
+    if (m && method === "DELETE") {
+      const id = m[1];
+      const doomed = users.find(id);
+      if (!doomed) return json(res, 404, { error: "no such user" });
+      // Guard C.
+      if (auth.kind === "session" && auth.user?.id === id) {
+        return json(res, 409, { error: "you cannot delete your own account; ask another admin" });
+      }
+      try {
+        if (!users.remove(id)) return json(res, 404, { error: "no such user" });
+      } catch (error) {
+        if (error instanceof UserError) return json(res, error.status, { error: error.message });
+        throw error;
+      }
+      const revokedSessions = sessions.revokeForUser(id);
+      const cancelledPairings = sessions.cancelPairingsForUser(id);
+      appendAudit(DATA_DIR, {
+        action: "user.remove",
+        actor: auditActor(auth, req),
+        target: { kind: "user", id, name: doomed.name },
+        effects: { revokedSessions, cancelledPairings },
+      });
+      return json(res, 200, { ok: true, revokedSessions, cancelledPairings });
+    }
+
+    // ── the permission catalog (server/permissions.ts, phase 3) ─────────
+    // The vocabulary a panel renders: every capability, which scope it needs,
+    // and what each role holds. Client-readable: it is not secret, and a
+    // member's UI uses it to hide controls it cannot use.
+    if (method === "GET" && path === "/api/auth/permissions") {
+      return json(res, 200, { permissions: PERMISSIONS, roles: DEFAULT_ROLE_PERMISSIONS });
+    }
+
+    // ── the human-action audit trail (server/audit-log.ts) ──────────────
+    if (method === "GET" && path === "/api/auth/audit") {
+      const limit = Math.min(500, Math.max(1, Number(url.searchParams.get("limit")) || 100));
+      const userId = url.searchParams.get("user") ?? undefined;
+      return json(res, 200, { rows: readAudit(DATA_DIR, limit, userId ? { userId } : undefined) });
+    }
+
     m = path.match(/^\/api\/auth\/sessions\/([\w-]+)$/);
     if (m && method === "DELETE") {
+      const doomedSession = sessions.list().find((s) => s.id === m![1]);
       const revoked = sessions.revoke(m[1]);
+      if (revoked) {
+        appendAudit(DATA_DIR, {
+          action: "session.revoke",
+          actor: auditActor(auth, req),
+          target: { kind: "session", id: m[1], name: doomedSession?.label },
+          ...(doomedSession?.userId ? { changes: { ofUser: doomedSession.userId } } : {}),
+        });
+      }
       if (auth.kind === "session" && auth.session.id === m[1]) res.setHeader("set-cookie", clearSessionCookie(SESSION_COOKIE));
       return json(res, revoked ? 200 : 404, revoked ? { ok: true } : { error: "no such session" });
     }
@@ -8924,7 +9210,10 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
         screens: url.searchParams.get("screens") !== "off",
         backpressured: false,
       };
-      if (auth.kind === "session") client.sessionId = auth.session.id;
+      if (auth.kind === "session") {
+        client.sessionId = auth.session.id;
+        if (auth.user) client.userId = auth.user.id;
+      }
       res.writeHead(200, {
         "content-type": "text/event-stream",
         "cache-control": "no-cache",
@@ -8981,6 +9270,13 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
           res.end();
           return;
         }
+        // Belt and braces for a disabled account: revoking the person's
+        // devices already closed this stream through onSessionRevoked, so
+        // this only catches a stream that somehow outlived that.
+        if (client.userId && users.find(client.userId)?.status !== "active") {
+          res.end();
+          return;
+        }
         try {
           res.write(`: keepalive\n\ndata: ${JSON.stringify({ kind: "ping" })}\n\n`);
         } catch {}
@@ -8996,11 +9292,12 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
     if (method === "GET" && path === "/api/bots") {
       const limit = pageSize(url.searchParams.get("messages"));
       if (limit === null) return json(res, 400, { error: "messages must be a non-negative whole number" });
+      const visibleBots = store.bots.filter((bot) => mayViewBot(auth, bot));
       return json(res, 200, {
-        bots: store.bots.map((bot) => ({ ...publicBot(bot), ...messagePage(bot.threadId, limit) })),
+        bots: visibleBots.map((bot) => ({ ...publicBot(bot), ...messagePage(bot.threadId, limit) })),
         groups: store.groups.map((g) => ({ ...publicGroupState(g), ...messagePage(g.threadId, limit) })),
         computerControl: Object.fromEntries(
-          store.bots.map((bot) => {
+          visibleBots.map((bot) => {
             const snapshot = computerControl.snapshot(bot.id);
             return [bot.id, { held: snapshot.held, helpReason: snapshot.helpReason }];
           }),
@@ -9012,7 +9309,13 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
     m = path.match(/^\/api\/threads\/([\w-]+)\/messages$/);
     if (m && method === "GET") {
       const threadId = m[1];
-      if (!store.botByThread(threadId) && !store.groupByThread(threadId)) {
+      const threadBot = store.botByThread(threadId);
+      if (!threadBot && !store.groupByThread(threadId)) {
+        return json(res, 404, { error: "no such conversation" });
+      }
+      // A restricted bot a member may not see must read as absent, not as
+      // forbidden: a 403 would confirm it exists.
+      if (threadBot && !mayViewBot(auth, threadBot)) {
         return json(res, 404, { error: "no such conversation" });
       }
       const limit = pageSize(url.searchParams.get("limit"));
@@ -10239,6 +10542,34 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
           activeLeafId: store.activeLeaf(bot.threadId),
         },
       });
+    }
+    // ── who may see a bot (server/store.ts, phase 4) ────────────────────
+    // Admin-only (not in CLIENT_ALLOW). Body: {mode:"everyone"} or
+    // {mode:"restricted", userIds:[...]}.
+    m = path.match(/^\/api\/bots\/([\w-]+)\/visibility$/);
+    if (m && method === "PATCH") {
+      const body = await readBody(req);
+      const mode = body?.mode;
+      if (mode !== "everyone" && mode !== "restricted") {
+        return json(res, 400, { error: 'mode must be "everyone" or "restricted"' });
+      }
+      let visibility: BotVisibility;
+      if (mode === "everyone") {
+        visibility = { mode: "everyone" };
+      } else {
+        const ids = Array.isArray(body.userIds) ? body.userIds.filter((v: unknown): v is string => typeof v === "string") : [];
+        for (const id of ids) if (!users.find(id)) return json(res, 404, { error: `no such user: ${id}` });
+        visibility = { mode: "restricted", userIds: ids };
+      }
+      const updated = store.setBotVisibility(m[1], visibility);
+      if (!updated) return json(res, 404, { error: "no such bot" });
+      appendAudit(DATA_DIR, {
+        action: "user.update",
+        actor: auditActor(auth, req),
+        target: { kind: "user", id: m[1], name: updated.name },
+        changes: { visibility: visibility.mode, ...(visibility.mode === "restricted" ? { userIds: visibility.userIds.join(",") } : {}) },
+      });
+      return json(res, 200, { bot: publicBot(updated) });
     }
     m = path.match(/^\/api\/bots\/([\w-]+)\/avatar\/generate$/);
     if (m && method === "POST") {

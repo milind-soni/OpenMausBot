@@ -3,7 +3,7 @@
 // is the stuff shared by every bot: who you are, your keys, and the
 // machine your bots can borrow.
 import { useEffect, useRef, useState } from "react";
-import { Coins, FlaskConical, Globe, KeyRound, Monitor, Search, TabletSmartphone, Terminal, Trash2, User, X } from "lucide-react";
+import { Coins, FlaskConical, Globe, KeyRound, Monitor, Search, TabletSmartphone, Terminal, Trash2, User, Users, X } from "lucide-react";
 import { api, useStore, type AppSettingsSection, type ConfigStatus } from "@/state/store";
 import { analyticsEnabled, setAnalyticsEnabled } from "@/lib/analytics";
 import { browserAvailable, browserUnavailableReason, builtInBrowserEnabled, showToolCallsEnabled, skillRecorderEnabled } from "@/lib/feature-flags";
@@ -15,6 +15,7 @@ import { EnginesSettings } from "./EnginesSettings";
 import { LocalComputerSection } from "./LocalComputerSection";
 import { CompanionSection } from "./CompanionSection";
 import { CustomDomainSettings } from "./CustomDomainSettings";
+import { PeopleSection } from "./PeopleSection";
 import { RemoteComputerSection } from "./RemoteComputerSection";
 import { Card, Switch } from "./SettingsPrimitives";
 import { UsageSection } from "./UsageSection";
@@ -38,6 +39,7 @@ const SECTIONS: Array<{
   keywords: string[];
 }> = [
   { id: "general", labelKey: "settings.section.general", icon: User, keywords: ["profile", "name", "email", "skin", "theme", "appearance", "analytics", "updates", "tools", "tool calls"] },
+  { id: "people", labelKey: "settings.section.people", icon: Users, keywords: ["users", "roles", "admin", "member", "permissions", "access", "team", "who", "rbac"] },
   { id: "experimental", labelKey: "settings.section.experimental", icon: FlaskConical, keywords: ["early", "preview", "teach", "skill", "browser", "profiles"] },
   { id: "connections", labelKey: "settings.section.connections", icon: KeyRound, keywords: ["keys", "api", "composio", "box", "xai", "vps"] },
   { id: "engines", labelKey: "settings.section.engines", icon: Terminal, keywords: ["models", "claude", "grok", "providers", "cli"] },
@@ -525,15 +527,50 @@ function DiagnosticsRow() {
   );
 }
 
+/** May this viewer manage people? The loopback owner and admins may; a member
+ * must not even see the section, or an admin-only panel shows up in their
+ * Settings and errors when opened. Undefined while the answer is in flight,
+ * so the section does not flash in and out. */
+function useCanManageUsers(): boolean | undefined {
+  const [allowed, setAllowed] = useState<boolean | undefined>(undefined);
+  useEffect(() => {
+    let cancelled = false;
+    void (async () => {
+      try {
+        const me = await api("/api/auth/session");
+        const permissions: unknown = me.permissions;
+        // Loopback reports every permission; a bound session reports its role's.
+        const may = Array.isArray(permissions) ? permissions.includes("users.manage") : me.kind === "loopback";
+        if (!cancelled) setAllowed(may);
+      } catch {
+        if (!cancelled) setAllowed(false);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+  return allowed;
+}
+
 export function SettingsModal() {
   const { state, dispatch } = useStore();
   const remoteActive = window.ogb?.remoteClient?.active === true;
+  const canManageUsers = useCanManageUsers();
   const section: AppSettingsSection =
     remoteActive || state.appSettingsSection === "remote" ? "companion" : state.appSettingsSection;
   const dialogRef = useRef<HTMLDivElement>(null);
   const [query, setQuery] = useState("");
   const q = query.trim().toLowerCase();
-  const visibleSections = SECTIONS.filter((entry) => (!remoteActive || entry.id === "companion") && sectionMatches(entry, q));
+  // People is admin-only on the server; a member must not even see it
+  // (canManageUsers stays undefined while the answer is in flight, so the
+  // section does not flash in and out).
+  const visibleSections = SECTIONS.filter(
+    (entry) =>
+      (!remoteActive || entry.id === "companion") &&
+      (entry.id !== "people" || canManageUsers !== false) &&
+      sectionMatches(entry, q),
+  );
   const sectionLabelKey = SECTIONS.find((entry) => entry.id === section)?.labelKey;
   const nextVisibleSection = visibleSections.some((entry) => entry.id === section) ? undefined : visibleSections[0]?.id;
 
@@ -674,6 +711,8 @@ export function SettingsModal() {
                 <AnalyticsRow />
               </>
             )}
+
+            {section === "people" && <PeopleSection />}
 
             {section === "experimental" && (
               <>

@@ -460,6 +460,12 @@ export function titleFromMessage(text: string): string {
   return line.length > 48 ? `${line.slice(0, 47)}…` : line || UNTITLED_TASK;
 }
 
+/** Who may see a bot (server/users.ts). "everyone" is the default and today's
+ * behaviour; "restricted" limits it to the listed people (admins always see
+ * every bot regardless). A member outside the list gets no trace of it: not
+ * in the fleet list, not on the stream. Phase 4 of the RBAC plan. */
+export type BotVisibility = { mode: "everyone" } | { mode: "restricted"; userIds: string[] };
+
 export interface BotRecord {
   id: string;
   /** the ACTIVE task's thread — everything that runs a turn reads this */
@@ -493,6 +499,8 @@ export interface BotRecord {
   avatarCrop?: BotAvatarCrop;
   unread: boolean;
   modelSelection: ModelSelection;
+  /** Who may see this bot. Absent = everyone (the pre-phase-4 default). */
+  visibility?: BotVisibility;
   /** provider-native continuation per instance (e.g. claude session id) */
   resumeCursors: Record<string, unknown>;
   /** where the bot works ("Works on"): its cloud box, the Local VM, this
@@ -1438,6 +1446,17 @@ export class Store {
     this.saveBots();
     this.emit({ type: "bot.deleted", botId: id });
     return true;
+  }
+
+  /** Set (or clear, with "everyone") who may see a bot. */
+  setBotVisibility(id: string, visibility: BotVisibility): BotRecord | null {
+    const bot = this.bot(id);
+    if (!bot) return null;
+    if (visibility.mode === "everyone") delete bot.visibility;
+    else bot.visibility = { mode: "restricted", userIds: [...new Set(visibility.userIds)] };
+    this.saveBots();
+    this.emit({ type: "bot", botId: id });
+    return bot;
   }
 
   patchBot(id: string, patch: Partial<BotRecord>): BotRecord | null {

@@ -21,6 +21,7 @@
   "settings.close": "Cerrar los ajustes",
   "settings.noMatch": "Nada coincide con «{query}»",
   "settings.section.general": "General",
+  "settings.section.people": "Personas",
   "settings.section.experimental": "Experimental",
   "settings.section.connections": "Conexiones",
   "settings.section.engines": "Motores",

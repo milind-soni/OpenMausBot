@@ -259,8 +259,8 @@ server knows its public address (`OMB_PUBLIC_URL`, set by the Docker stack),
 a link like `https://maus.example.com/pair#code=XXXX-XXXX-XXXX`. Open the
 link, or open `/pair` on the address you use and type the code. The browser
 gets a session cookie (30 days, renewed on use up to 180 days from pairing, revocable) and the app loads. Sessions are
-listed and revoked at `GET`/`DELETE /api/auth/sessions` for now; a Settings
-screen follows.
+listed and revoked at `GET`/`DELETE /api/auth/sessions`, with
+`openmausbot sessions`, and under Settings → People.
 
 From the **desktop app**, use the Server menu: "Add Server from Copied
 Pairing Link…" reads the link you copied from the server, asks once, and
@@ -289,6 +289,32 @@ event stream, because `EventSource` cannot set headers:
 it is talking to: a stable `environmentId`, the label, the version and
 capabilities. Saved connections check the id so a reused address that now
 points at a different server is refused loudly.
+
+## Giving the server a list of people
+
+Everything above pairs *devices*. A device is a credential, not a person:
+"Kitchen iPad" is a label, and revoking it tells you nothing about who was
+holding it. If more than one person uses this server, give it accounts:
+
+```sh
+npx openmausbot users add --name "Ada Lovelace" --role admin
+npx openmausbot pair --user "Ada Lovelace" --label "Ada's laptop"
+npx openmausbot users                        # who exists, and how many devices each has
+npx openmausbot users disable <id>           # signs their devices out; reversible
+```
+
+Run the first command on the machine itself (loopback is always the owner and
+needs no account). From then on every new pairing code names a person, so
+`pair` without `--user` is refused.
+
+Two roles: `admin` may change anything; `member` may chat and read but not
+change settings, pair devices or manage people. **A member still reads every
+bot's transcript** — the role limits changes, not visibility.
+
+A server with no accounts behaves exactly as it did before this existed, so
+upgrading changes nothing until you create someone. Accounts live in
+`users.json` beside `sessions.json`, owner-readable only, and never leave the
+machine. Full details in [users.md](./users.md).
 
 An SSH tunnel still works, and is the right answer when the server has no
 address of its own:

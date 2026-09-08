@@ -38,6 +38,81 @@ function pair(label = "MacBook", source = "10.0.0.2") {
   return result;
 }
 
+describe("people behind devices", () => {
+  it("carries a userId from the code onto the session and into the file", () => {
+    const { code } = registry.openPairing({ userId: "11111111-1111-4111-8111-111111111111" });
+    const result = registry.exchange({ code, label: "Ada's Mac", source: "a" });
+    if (!result.ok) throw new Error(result.error);
+    expect(result.session.userId).toBe("11111111-1111-4111-8111-111111111111");
+    expect(registry.openPairings()).toEqual([]);
+    const stored = JSON.parse(readFileSync(file(), "utf8"));
+    expect(stored.sessions[0].userId).toBe("11111111-1111-4111-8111-111111111111");
+    // Reopening keeps the binding.
+    expect(new SessionRegistry({ file: file(), now: () => clock }).list()[0].userId)
+      .toBe("11111111-1111-4111-8111-111111111111");
+  });
+
+  it("a device paired before accounts existed still loads and reports no owner", () => {
+    // A real pre-upgrade file: version 1, no userId anywhere.
+    const legacy = {
+      version: 1,
+      sessions: [{
+        id: "legacy-1",
+        tokenHash: "a".repeat(64),
+        label: "Old laptop",
+        scopes: ["admin", "client"],
+        createdAt: clock,
+        lastSeenAt: clock,
+        expiresAt: clock + SESSION_TTL_MS,
+      }],
+    };
+    writeFileSync(file(), JSON.stringify(legacy));
+    const reopened = new SessionRegistry({ file: file(), now: () => clock });
+    const [session] = reopened.list();
+    expect(session.userId).toBeNull();
+    expect(session.scopes).toEqual(["admin", "client"]);
+    expect(reopened.isLive("legacy-1")).toBe(true);
+  });
+
+  it("revokeForUser signs out one person's devices, closes their streams, and leaves everyone else alone", () => {
+    const ada = "11111111-1111-4111-8111-111111111111";
+    const bob = "22222222-2222-4222-8222-222222222222";
+    const mint = (userId?: string) => {
+      const { code } = registry.openPairing(userId ? { userId } : {});
+      const result = registry.exchange({ code, label: "d", source: "s" });
+      if (!result.ok) throw new Error(result.error);
+      return result.session.id;
+    };
+    const adaOne = mint(ada);
+    const adaTwo = mint(ada);
+    const bobOne = mint(bob);
+    const legacy = mint();
+    const closed: string[] = [];
+    registry.onSessionRevoked((id) => closed.push(id));
+
+    expect(registry.revokeForUser(ada)).toBe(2);
+    expect(closed.sort()).toEqual([adaOne, adaTwo].sort());
+    expect(registry.isLive(adaOne)).toBe(false);
+    expect(registry.isLive(bobOne)).toBe(true);
+    expect(registry.isLive(legacy)).toBe(true);
+    // Persisted, not just in memory.
+    expect(new SessionRegistry({ file: file(), now: () => clock }).list().map((s) => s.id).sort())
+      .toEqual([bobOne, legacy].sort());
+    // Nobody left to revoke is not an error.
+    expect(registry.revokeForUser(ada)).toBe(0);
+  });
+
+  it("cancels only that person's outstanding codes", () => {
+    const ada = "11111111-1111-4111-8111-111111111111";
+    registry.openPairing({ userId: ada });
+    registry.openPairing({ userId: "22222222-2222-4222-8222-222222222222" });
+    registry.openPairing();
+    expect(registry.cancelPairingsForUser(ada)).toBe(1);
+    expect(registry.openPairings()).toHaveLength(2);
+    expect(registry.openPairings().every((p) => p.userId !== ada)).toBe(true);
+  });
+});
+
 describe("pairing codes", () => {
   it("are 12 unambiguous symbols and survive human retyping", () => {
     for (let i = 0; i < 50; i++) {

@@ -21,6 +21,7 @@
   "settings.close": "关闭设置",
   "settings.noMatch": "没有与“{query}”匹配的内容",
   "settings.section.general": "通用",
+  "settings.section.people": "成员",
   "settings.section.experimental": "实验功能",
   "settings.section.connections": "连接",
   "settings.section.engines": "引擎",

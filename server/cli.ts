@@ -52,7 +52,7 @@ import {
 const HERE = dirname(fileURLToPath(import.meta.url));
 
 export interface CliOptions {
-  command: "setup" | "start" | "serve" | "pair" | "sessions" | "status" | "login" | "logout" | "browser" | "help";
+  command: "setup" | "start" | "serve" | "pair" | "sessions" | "status" | "login" | "logout" | "browser" | "users" | "help";
   port: number;
   dataDir: string;
   label?: string;
@@ -65,6 +65,14 @@ export interface CliOptions {
   email?: string;
   /** `browser install [--with-deps]` */
   browserAction?: "install" | "status";
+  /** `users [add|edit|disable|enable|remove]` */
+  userAction?: "list" | "add" | "edit" | "disable" | "enable" | "remove";
+  /** The user an action targets, or `pair --user`: an id, email or name. */
+  user?: string;
+  /** `--name` is the person; `--label` is the device. */
+  name?: string;
+  role?: "admin" | "member";
+  yes?: boolean;
   withDeps?: boolean;
   json: boolean;
   /** Explicitly ignore saved remote access for this launch. */
@@ -75,7 +83,7 @@ export interface CliOptions {
   phone?: "ios" | "android";
 }
 
-const COMMANDS = ["setup", "start", "serve", "pair", "sessions", "status", "login", "logout", "browser", "help", "--help", "-h"];
+const COMMANDS = ["setup", "start", "serve", "pair", "sessions", "status", "login", "logout", "browser", "users", "help", "--help", "-h"];
 
 export function parseArgs(argv: string[], env: NodeJS.ProcessEnv = process.env): CliOptions | { error: string } {
   const implicitStart = !argv.length || (argv[0]!.startsWith("--") && argv[0] !== "--help");
@@ -93,6 +101,7 @@ export function parseArgs(argv: string[], env: NodeJS.ProcessEnv = process.env):
     pair: true,
     withDeps: false,
     json: false,
+    ...(command === "users" ? { userAction: "list" as const } : {}),
   };
   for (let i = 0; i < rest.length; i += 1) {
     const arg = rest[i];
@@ -115,6 +124,19 @@ export function parseArgs(argv: string[], env: NodeJS.ProcessEnv = process.env):
       else if (arg === "--local") options.local = true;
       else if (arg === "--json") options.json = true;
       else if (arg === "--email") options.email = value();
+      else if (arg === "--user") options.user = value();
+      else if (arg === "--name") options.name = value();
+      else if (arg === "--yes") options.yes = true;
+      else if (arg === "--role") {
+        const role = value();
+        if (role !== "admin" && role !== "member") return { error: '--role must be admin or member' };
+        options.role = role;
+      }
+      else if (options.command === "users" && i === 0 && ["add", "edit", "disable", "enable", "remove"].includes(arg)) {
+        options.userAction = arg as CliOptions["userAction"];
+        // add takes its name from --name; the rest target a user positionally
+        if (arg !== "add" && rest[i + 1] !== undefined && !rest[i + 1].startsWith("--")) options.user = rest[++i];
+      }
       else if (options.command === "sessions" && arg === "revoke") options.revoke = value();
       else if (options.command === "browser" && (arg === "install" || arg === "status")) options.browserAction = arg;
       else if (options.command === "browser" && arg === "--with-deps") options.withDeps = true;
@@ -128,6 +150,12 @@ export function parseArgs(argv: string[], env: NodeJS.ProcessEnv = process.env):
   if (options.tailscale && options.tunnel) return { error: "choose one of --tailscale (your tailnet) and --tunnel (a public address)" };
   if (options.local && (options.tailscale || options.tunnel || options.publicUrl)) return { error: "--local cannot be combined with a remote-access option" };
   if (options.command === "browser" && !options.browserAction) return { error: "browser needs an action: install or status" };
+  if (options.command === "users") {
+    if (options.userAction === "add" && !options.name) return { error: "users add needs --name" };
+    if (["edit", "disable", "enable", "remove"].includes(options.userAction ?? "") && !options.user) {
+      return { error: `users ${options.userAction} needs a user (id, email or name)` };
+    }
+  }
   return options;
 }
 
@@ -140,6 +168,9 @@ export const USAGE = `openmausbot — your team of AI bots, ready in a few steps
                     [--public-url https://host] [--tailscale | --tunnel] [--no-pair]
   openmausbot pair  [--label NAME] [--client] [--public-url https://host]
   openmausbot sessions [revoke ID]
+  openmausbot users [add --name NAME [--email E] [--role admin|member]
+                     | edit USER [--name N] [--email E] [--role R]
+                     | disable USER | enable USER | remove USER [--yes]]
   openmausbot status
   openmausbot login [--email you@example.com]
   openmausbot logout
@@ -150,6 +181,10 @@ start   same as openmausbot: use your saved settings and open the workspace
 serve   starts the server without prompts and prints a pairing link + QR code
 pair    mints a pairing code against a running server (--client: chat only)
 sessions lists paired devices; "sessions revoke ID" signs one out
+users   the people devices belong to. With no accounts the server behaves
+        as it always has; once one exists, every new device names a person
+        ("pair --user"). USER is an id, an email or an exact name.
+        --name is the person, --label is the device.
 status  what the server says about itself
 login   signs this machine in to an OpenMausBot account (an emailed code)
         and reserves its public address for --tunnel
@@ -328,14 +363,180 @@ export function qrToString(text: string): string {
   return out;
 }
 
-async function mintPairing(port: number, options: { label?: string; client?: boolean; publicUrl?: string }): Promise<string> {
-  const request: { label?: string; scopes?: string[] } = {};
+export class AccountsRequiredError extends Error {
+  constructor() {
+    super("this server has accounts: pass --user <id|email|name> (openmausbot users to list)");
+    this.name = "AccountsRequiredError";
+  }
+}
+
+async function mintPairing(port: number, options: { label?: string; client?: boolean; publicUrl?: string; user?: string }): Promise<string> {
+  const request: { label?: string; scopes?: string[]; userId?: string } = {};
   if (options.label) request.label = options.label;
   if (options.client) request.scopes = ["client"];
+  if (options.user) {
+    const found = resolveUser(await fetchUsers(port), options.user);
+    if ("error" in found) throw new Error(found.error);
+    request.userId = found.id;
+  }
   const { status, body } = await api(port, "/api/auth/pairing", { method: "POST", body: JSON.stringify(request) });
+  // Once a server has accounts it refuses a code that names nobody (an
+  // anonymous device with full access would quietly undo the roster). The
+  // server is the authority on that, so there is no pre-check here — just
+  // its refusal, reworded into what to run instead.
+  if (status === 400 && typeof body?.error === "string" && /user accounts/.test(body.error)) {
+    throw new AccountsRequiredError();
+  }
   if (status !== 200) throw new Error(`server refused to mint a pairing code: ${typeof body?.error === "string" ? body.error : status}`);
   const url = options.publicUrl ? `${options.publicUrl}/pair#code=${body.code}` : typeof body.url === "string" ? body.url : null;
   return pairingBlock({ code: body.code, url, expiresAt: body.expiresAt, hint: typeof body.hint === "string" ? body.hint : null });
+}
+
+interface CliUser { id: string; name: string; email: string | null; role: string; status: string }
+
+async function fetchUsers(port: number): Promise<CliUser[]> {
+  const { body } = await api(port, "/api/auth/users");
+  return Array.isArray(body?.users) ? body.users : [];
+}
+
+/** An id, an email, or an exact name. An ambiguous name is an error that
+ * lists the ids, because silently picking one would target the wrong person. */
+export function resolveUser(users: CliUser[], needle: string): { id: string } | { error: string } {
+  const value = needle.trim();
+  const byId = users.find((u) => u.id === value);
+  if (byId) return { id: byId.id };
+  const lower = value.toLowerCase();
+  const matches = users.filter((u) => u.email === lower || u.name.toLowerCase() === lower);
+  if (matches.length === 1) return { id: matches[0].id };
+  if (matches.length > 1) {
+    return { error: `"${value}" matches ${matches.length} accounts; use an id:\n${matches.map((u) => `  ${u.id}  ${u.name}`).join("\n")}` };
+  }
+  return { error: `no account matches "${value}" (openmausbot users to list)` };
+}
+
+export function formatUsers(users: CliUser[], deviceCounts: Record<string, number> = {}): string {
+  const rows = users.map((u) => [
+    u.id,
+    u.name,
+    u.email ?? "—",
+    u.role,
+    u.status === "active" ? "active" : "disabled",
+    String(deviceCounts[u.id] ?? 0),
+  ]);
+  const head = ["id", "name", "email", "role", "status", "devices"];
+  const widths = head.map((h, i) => Math.max(h.length, ...rows.map((r) => r[i].length)));
+  const line = (r: string[]) => r.map((c, i) => c.padEnd(widths[i])).join("  ");
+  return [line(head), ...rows.map(line), "", "pair a device with: openmausbot pair --user <id|email|name>"].join("\n");
+}
+
+export async function runUsers(options: CliOptions, io: CliIo = defaultIo()): Promise<number> {
+  if (!(await serverUp(options.port))) {
+    io.error(`no OpenMausBot server on http://127.0.0.1:${options.port}`);
+    return 1;
+  }
+  const users = await fetchUsers(options.port);
+  const target = async (): Promise<string | null> => {
+    const found = resolveUser(users, options.user ?? "");
+    if ("error" in found) {
+      io.error(found.error);
+      return null;
+    }
+    return found.id;
+  };
+  const send = async (path: string, method: string, body?: unknown): Promise<number> => {
+    const { status, body: reply } = await api(options.port, path, { method, ...(body ? { body: JSON.stringify(body) } : {}) });
+    if (status >= 400) {
+      io.error(typeof reply?.error === "string" ? reply.error : `server refused (${status})`);
+      return 1;
+    }
+    return 0;
+  };
+
+  switch (options.userAction) {
+    case "add": {
+      const body: Record<string, unknown> = { name: options.name, role: options.role ?? "member" };
+      if (options.email) body.email = options.email;
+      const { status, body: reply } = await api(options.port, "/api/auth/users", { method: "POST", body: JSON.stringify(body) });
+      if (status !== 201) {
+        io.error(typeof reply?.error === "string" ? reply.error : `server refused (${status})`);
+        return 1;
+      }
+      io.log(`created ${reply.user.name} (${reply.user.role})  id ${reply.user.id}`);
+      // Say the limit out loud: "member" restricts what they may CHANGE, not
+      // yet what they may READ.
+      if (reply.user.role === "member") io.log("a member can chat with every bot and read every transcript; it limits changes, not visibility");
+      io.log(`pair their first device with: openmausbot pair --user ${reply.user.id}`);
+      return 0;
+    }
+    case "edit": {
+      const id = await target();
+      if (!id) return 1;
+      const patch: Record<string, unknown> = {};
+      if (options.name) patch.name = options.name;
+      if (options.email) patch.email = options.email;
+      if (options.role) patch.role = options.role;
+      if (!Object.keys(patch).length) {
+        io.error("nothing to change: pass --name, --email or --role");
+        return 1;
+      }
+      const code = await send(`/api/auth/users/${encodeURIComponent(id)}`, "PATCH", patch);
+      if (code === 0) io.log("updated");
+      return code;
+    }
+    case "disable":
+    case "enable": {
+      const id = await target();
+      if (!id) return 1;
+      const status = options.userAction === "disable" ? "disabled" : "active";
+      const { status: code, body: reply } = await api(options.port, `/api/auth/users/${encodeURIComponent(id)}`, {
+        method: "PATCH",
+        body: JSON.stringify({ status }),
+      });
+      if (code !== 200) {
+        io.error(typeof reply?.error === "string" ? reply.error : `server refused (${code})`);
+        return 1;
+      }
+      io.log(status === "disabled"
+        ? `disabled: ${reply.revokedSessions} device(s) signed out. Their records are kept — enable to restore them without re-pairing.`
+        : "enabled: their devices work again, with no re-pairing");
+      return 0;
+    }
+    case "remove": {
+      const id = await target();
+      if (!id) return 1;
+      const person = users.find((u) => u.id === id);
+      if (!options.yes) {
+        io.error(`this permanently deletes ${person?.name ?? id} and signs out every one of their devices.`);
+        io.error("re-run with --yes to confirm (or use `users disable` to switch them off reversibly)");
+        return 1;
+      }
+      const { status, body: reply } = await api(options.port, `/api/auth/users/${encodeURIComponent(id)}`, { method: "DELETE" });
+      if (status !== 200) {
+        io.error(typeof reply?.error === "string" ? reply.error : `server refused (${status})`);
+        return 1;
+      }
+      io.log(`removed: ${reply.revokedSessions} device(s) signed out`);
+      return 0;
+    }
+    default: {
+      if (options.json) {
+        io.log(JSON.stringify(users, null, 2));
+        return 0;
+      }
+      if (!users.length) {
+        io.log("no accounts yet: every paired device is an anonymous admin device.");
+        io.log('create the first person with: openmausbot users add --name "Your Name" --role admin');
+        return 0;
+      }
+      const { body } = await api(options.port, "/api/auth/sessions");
+      const counts: Record<string, number> = {};
+      for (const s of Array.isArray(body?.sessions) ? body.sessions : []) {
+        if (s.userId) counts[s.userId] = (counts[s.userId] ?? 0) + 1;
+      }
+      io.log(formatUsers(users, counts));
+      return 0;
+    }
+  }
 }
 
 // ── commands ───────────────────────────────────────────────────────────
@@ -344,7 +545,10 @@ export async function runPair(options: CliOptions): Promise<number> {
     console.error(`no OpenMausBot server on http://127.0.0.1:${options.port}; start one with \`openmausbot serve\` or set OMB_PORT`);
     return 1;
   }
-  if (process.stdin.isTTY && process.stdout.isTTY && !options.label && !options.client) {
+  // `--user` names the person a device will belong to, so it always takes the
+  // direct path: the phone wizard below mints an unnamed code, which a server
+  // with accounts refuses.
+  if (process.stdin.isTTY && process.stdout.isTTY && !options.label && !options.client && !options.user) {
     const advertised = await api(options.port, "/api/auth/pairing");
     let launch = options;
     // The running server may use a one-time route override. Saved preferences
@@ -377,7 +581,7 @@ export async function runPair(options: CliOptions): Promise<number> {
       return 130;
     }
   }
-  console.log(await mintPairing(options.port, { label: options.label, client: options.client, publicUrl: options.publicUrl }));
+  console.log(await mintPairing(options.port, { label: options.label, client: options.client, publicUrl: options.publicUrl, user: options.user }));
   if (options.client) console.log("(client scope: chat and approvals only; cannot change settings or pair others)");
   return 0;
 }
@@ -754,9 +958,19 @@ export async function runServe(options: CliOptions, log: (line: string) => void 
       if (!stopping && exited === null) await showPhonePairing(options, publicUrl, log);
     } else if (options.pair && !options.guided) {
       log("");
-      log(await mintPairing(options.port, { label: options.label ? `${options.label} owner` : undefined, client: options.client, publicUrl: publicUrl ?? undefined }));
-      log("");
-      log("another device later:  openmausbot pair --label \"Kitchen iPad\"");
+      // Once this server has accounts it refuses a code that names nobody
+      // (an anonymous device with full access would quietly undo the
+      // roster). Say what to run instead, and never fail the boot over it.
+      try {
+        log(await mintPairing(options.port, { label: options.label ? `${options.label} owner` : undefined, client: options.client, publicUrl: publicUrl ?? undefined }));
+        log("");
+        log("another device later:  openmausbot pair --label \"Kitchen iPad\"");
+        log("give this server accounts:  openmausbot users add --name \"Your Name\" --role admin");
+      } catch (error) {
+        if (!(error instanceof AccountsRequiredError)) throw error;
+        log("this server has accounts: pair a device to a person with");
+        log("  openmausbot pair --user <id|email|name>     (openmausbot users to list)");
+      }
     }
     log(options.guided ? "\nKeep this terminal open while using your bots. Ctrl+C stops the server, not your saved work." : "stop with Ctrl+C");
     if (options.guided) log("Next time: openmausbot · Change AI or phone setup: openmausbot setup · Pair another phone: openmausbot pair");
@@ -862,6 +1076,8 @@ export async function main(argv = process.argv.slice(2)): Promise<number> {
       return runLogout(options);
     case "browser":
       return runBrowser(options);
+    case "users":
+      return runUsers(options);
     default:
       console.log(USAGE);
       return 0;

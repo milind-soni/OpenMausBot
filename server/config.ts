@@ -272,6 +272,15 @@ const appConfigSchema = z.object({
   rooms: roomConfigSchema.optional(),
   localVm: localVmConfigSchema.optional(),
   features: featureConfigSchema.optional(),
+  /** Identity-provider sign-on behind a trusting proxy (phase 5). Inert
+   * unless the server holds the `sso` entitlement; `userHeader` names the
+   * header the proxy sets (e.g. X-Auth-Request-User). */
+  sso: z.object({
+    enabled: z.boolean().optional(),
+    userHeader: optionalText,
+    emailHeader: optionalText,
+    nameHeader: optionalText,
+  }).optional(),
   browserProfiles: browserProfilesSchema.optional(),
   instances: instanceConfigMapSchema.optional(),
   /** User-configured MCP servers, mounted into every capable engine. Kept
@@ -313,6 +322,8 @@ export interface AppConfig {
   localVm?: { mode?: "shared" | "per-bot"; maxInstances?: number };
   /** Opt-in product experiments. Every flag defaults to disabled. */
   features?: { skillRecorder?: boolean; showToolCalls?: boolean; browser?: boolean };
+  /** Trusted identity-header sign-on, behind the `sso` entitlement. */
+  sso?: { enabled?: boolean; userHeader?: string; emailHeader?: string; nameHeader?: string };
   /** Named browser sessions any bot can be pointed at. */
   browserProfiles?: BrowserProfile[];
   instances?: InstanceConfigMap;

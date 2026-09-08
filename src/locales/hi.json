@@ -21,6 +21,7 @@
   "settings.close": "सेटिंग्स बंद करें",
   "settings.noMatch": "“{query}” से कुछ मेल नहीं खाता",
   "settings.section.general": "सामान्य",
+  "settings.section.people": "लोग",
   "settings.section.experimental": "प्रयोगात्मक",
   "settings.section.connections": "कनेक्शन",
   "settings.section.engines": "इंजन",
