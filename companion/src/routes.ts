@@ -110,6 +110,17 @@ const ALLOWED: ReadonlyArray<{ method: string; path: RegExp }> = [
   // recent activity. No settings, no transcript — read on open and on
   // pull-to-refresh.
   { method: "GET", path: /^\/api\/bots\/[\w-]+\/overview$/ },
+  // Read-only: what the bot did, with the outcome, built from logs that
+  // already exist (server/activity.ts). No settings reachable through it.
+  { method: "GET", path: /^\/api\/bots\/[\w-]+\/activity$/ },
+  // The section's shared team memory: people, places, decisions and terms.
+  // Reading, adding, answering a proposal, editing a detail, and removing
+  // are all content edits, not execution policy — the same line the profile
+  // and sidebar-section routes draw. The section rides as a query string.
+  { method: "GET", path: /^\/api\/team-memory$/ },
+  { method: "POST", path: /^\/api\/team-memory$/ },
+  { method: "PATCH", path: /^\/api\/team-memory\/[\w-]+$/ },
+  { method: "DELETE", path: /^\/api\/team-memory\/[\w-]+$/ },
   // Paired-safe profile subset. The harness route itself rejects fields
   // outside identity, standing instructions (soul, byte-capped), avatar,
   // notifications, and voice preferences.

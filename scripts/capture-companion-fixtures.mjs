@@ -389,6 +389,31 @@ async function main() {
   if (overview.status !== 200) throw new Error(`could not read Kiwi's overview: ${JSON.stringify(overview.body)}`);
   write("bot-overview", overview.body);
 
+  // The bot's activity log. A fixture harness has no tool runs, so the rows
+  // are empty; the shape of the page is what both phone suites pin.
+  const activity = await json(`${SIDECAR}/api/bots/${kiwi.id}/activity?limit=50`, asDevice());
+  if (activity.status !== 200) throw new Error(`could not read Kiwi's activity: ${JSON.stringify(activity.body)}`);
+  write("bot-activity", activity.body);
+
+  // The General section's team memory, with one of each kind the person can
+  // add by hand, so a phone decodes every field an entry carries.
+  for (const entry of [
+    { kind: "person", name: "Ada Lovelace", detail: "Runs the team", aliases: ["Ada"] },
+    { kind: "place", name: "Launch plan", detail: "Notion, Marketing space" },
+    { kind: "decision", name: "Ship Android first", detail: "Decided in the Monday sync" },
+    { kind: "term", name: "MCHQ", detail: "MissionControlHQ, the old name" },
+  ]) {
+    const added = await json(`${SIDECAR}/api/team-memory?section=`, asDevice({
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(entry),
+    }));
+    if (added.status !== 201) throw new Error(`could not add team memory: ${JSON.stringify(added.body)}`);
+  }
+  const memory = await json(`${SIDECAR}/api/team-memory?section=`, asDevice());
+  if (memory.status !== 200) throw new Error(`could not read team memory: ${JSON.stringify(memory.body)}`);
+  write("team-memory", memory.body);
+
   console.log("\nnot captured: options-card.json — needs a real approval from a real turn");
 }
 

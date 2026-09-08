@@ -1676,6 +1676,55 @@ final class Session: ObservableObject {
         }
     }
 
+    /// What the bot did, with the outcome. Read-only, like the overview.
+    func botActivity(for bot: Bot) async -> [ActivityRow]? {
+        guard let client else { return nil }
+        let connectionID = connection?.id
+        do {
+            let rows = try await client.activity(botId: bot.id)
+            guard !Task.isCancelled, connection?.id == connectionID else { return nil }
+            return rows
+        } catch {
+            guard !Task.isCancelled, connection?.id == connectionID else { return nil }
+            guard !(error is CancellationError), (error as? URLError)?.code != .cancelled else { return nil }
+            actionError = error.localizedDescription
+            return nil
+        }
+    }
+
+    // MARK: - Team memory
+
+    /// The section's shared people, places, decisions and terms.
+    func teamMemory(section: String) async -> TeamMemoryPage? {
+        guard let client else { return nil }
+        let connectionID = connection?.id
+        do {
+            let page = try await client.teamMemory(section: section)
+            guard !Task.isCancelled, connection?.id == connectionID else { return nil }
+            return page
+        } catch {
+            guard !Task.isCancelled, connection?.id == connectionID else { return nil }
+            guard !(error is CancellationError), (error as? URLError)?.code != .cancelled else { return nil }
+            actionError = error.localizedDescription
+            return nil
+        }
+    }
+
+    /// One edit, and the page as it is afterwards; nil when it failed, with
+    /// the failure already shown.
+    func editTeamMemory(_ body: (CompanionClient) async throws -> [TeamMemoryEntry]) async -> [TeamMemoryEntry]? {
+        guard let client else { return nil }
+        do {
+            return try await body(client)
+        } catch let error as APIError where error.isUnauthorized {
+            status = .unauthorized
+            return nil
+        } catch {
+            actionError = error.localizedDescription
+            return nil
+        }
+    }
+
     // MARK: - Routines
 
     func loadRoutines() async -> (routines: [Routine], runs: [RoutineRun]) {

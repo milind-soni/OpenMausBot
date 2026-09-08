@@ -228,6 +228,16 @@ struct AgentProfileView: View {
                     } label: {
                         Label("What this bot does", systemImage: "list.bullet.rectangle")
                     }
+                    NavigationLink {
+                        BotActivityView(bot: current)
+                    } label: {
+                        Label("Activity", systemImage: "checklist")
+                    }
+                    NavigationLink {
+                        TeamMemoryView(section: current.section ?? "")
+                    } label: {
+                        Label("Team memory", systemImage: "brain")
+                    }
                     TextField("Name", text: $name)
                         .textInputAutocapitalization(.words)
                     TextField("Title", text: $title)

@@ -56,6 +56,27 @@ final class DecodingTests: XCTestCase {
         XCTAssertNil(fleet.bots.first?.hasMore)
     }
 
+    func testDecodesAnActivityPage() throws {
+        // A fixture harness has run no tools, so the page is empty; the shape
+        // is what matters, and an empty list must decode, not fail.
+        let page = try decode(ActivityPage.self, "bot-activity")
+        XCTAssertEqual(page.rows, [])
+    }
+
+    func testDecodesTeamMemory() throws {
+        let page = try decode(TeamMemoryPage.self, "team-memory")
+        XCTAssertEqual(page.section, "")
+        XCTAssertEqual(page.label, "General")
+        XCTAssertEqual(page.entries.map(\.kind), ["person", "place", "decision", "term"])
+        let ada = try XCTUnwrap(page.entries.first)
+        XCTAssertEqual(ada.name, "Ada Lovelace")
+        XCTAssertEqual(ada.aliases, ["Ada"])
+        XCTAssertEqual(ada.status, "accepted")
+        // the person's own entries carry no bot
+        XCTAssertEqual(ada.source.botName, "you")
+        XCTAssertGreaterThan(ada.updatedAt, 0)
+    }
+
     func testDecodesABotOverview() throws {
         let overview = try decode(BotOverview.self, "bot-overview")
         XCTAssertEqual(overview.who.name, "Kiwi")

@@ -1,0 +1,68 @@
+{
+  "section": "",
+  "label": "General",
+  "entries": [
+    {
+      "id": "2cd370f0-4533-49d4-925d-df3e155990e3",
+      "kind": "person",
+      "name": "Ada Lovelace",
+      "detail": "Runs the team",
+      "aliases": [
+        "Ada"
+      ],
+      "status": "accepted",
+      "source": {
+        "botId": "",
+        "botName": "you",
+        "threadId": "",
+        "at": 1788844887367
+      },
+      "updatedAt": 1788844887371
+    },
+    {
+      "id": "5586605e-03ae-409e-965d-13fc3baee4f9",
+      "kind": "place",
+      "name": "Launch plan",
+      "detail": "Notion, Marketing space",
+      "aliases": [],
+      "status": "accepted",
+      "source": {
+        "botId": "",
+        "botName": "you",
+        "threadId": "",
+        "at": 1788844887376
+      },
+      "updatedAt": 1788844887376
+    },
+    {
+      "id": "966bf5d2-c4e6-450a-9ef9-1fb002a3df5d",
+      "kind": "decision",
+      "name": "Ship Android first",
+      "detail": "Decided in the Monday sync",
+      "aliases": [],
+      "status": "accepted",
+      "source": {
+        "botId": "",
+        "botName": "you",
+        "threadId": "",
+        "at": 1788844887381
+      },
+      "updatedAt": 1788844887385
+    },
+    {
+      "id": "25296b34-1b2a-4fc4-be62-1f34d8a967e3",
+      "kind": "term",
+      "name": "MCHQ",
+      "detail": "MissionControlHQ, the old name",
+      "aliases": [],
+      "status": "accepted",
+      "source": {
+        "botId": "",
+        "botName": "you",
+        "threadId": "",
+        "at": 1788844887389
+      },
+      "updatedAt": 1788844887389
+    }
+  ]
+}

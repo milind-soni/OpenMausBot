@@ -1045,6 +1045,57 @@ public struct CompanionClient: Sendable {
         return try await send(try makeRequest("GET", "/api/bots/\(botId)/overview"), as: BotOverview.self)
     }
 
+    /// What the bot did, newest first: every tool it used and every approval
+    /// it asked for, with the outcome. Read-only, like the overview.
+    public func activity(botId: String, limit: Int = 200) async throws -> [ActivityRow] {
+        guard Self.validRouteID(botId) else { throw APIError.badURL }
+        let query = [URLQueryItem(name: "limit", value: String(limit))]
+        return try await send(try makeRequest("GET", "/api/bots/\(botId)/activity", query: query), as: ActivityPage.self).rows
+    }
+
+    // MARK: - Team memory
+
+    /// The section's shared people, places, decisions and terms. The
+    /// section is a query parameter, empty for General, and always sent.
+    public func teamMemory(section: String) async throws -> TeamMemoryPage {
+        try await send(try makeRequest("GET", "/api/team-memory", query: [URLQueryItem(name: "section", value: section)]), as: TeamMemoryPage.self)
+    }
+
+    /// Add an entry by hand. The person's own entry never waits on the person.
+    public func addTeamMemory(section: String, kind: String, name: String, detail: String) async throws -> [TeamMemoryEntry] {
+        try await send(
+            try makeRequest("POST", "/api/team-memory", query: [URLQueryItem(name: "section", value: section)], body: ["kind": kind, "name": name, "detail": detail]),
+            as: TeamMemoryEdit.self
+        ).entries
+    }
+
+    /// Answer a proposal: remember it, or drop it.
+    public func answerTeamMemory(section: String, id: String, remember: Bool) async throws -> [TeamMemoryEntry] {
+        guard Self.validRouteID(id) else { throw APIError.badURL }
+        let query = [URLQueryItem(name: "section", value: section)]
+        if remember {
+            return try await send(try makeRequest("PATCH", "/api/team-memory/\(id)", query: query, body: ["accept": true]), as: TeamMemoryEdit.self).entries
+        }
+        return try await send(try makeRequest("DELETE", "/api/team-memory/\(id)", query: query), as: TeamMemoryEdit.self).entries
+    }
+
+    /// Change what an entry says. Editing a proposal accepts it.
+    public func updateTeamMemory(section: String, id: String, detail: String) async throws -> [TeamMemoryEntry] {
+        guard Self.validRouteID(id) else { throw APIError.badURL }
+        return try await send(
+            try makeRequest("PATCH", "/api/team-memory/\(id)", query: [URLQueryItem(name: "section", value: section)], body: ["detail": detail]),
+            as: TeamMemoryEdit.self
+        ).entries
+    }
+
+    public func removeTeamMemory(section: String, id: String) async throws -> [TeamMemoryEntry] {
+        guard Self.validRouteID(id) else { throw APIError.badURL }
+        return try await send(
+            try makeRequest("DELETE", "/api/team-memory/\(id)", query: [URLQueryItem(name: "section", value: section)]),
+            as: TeamMemoryEdit.self
+        ).entries
+    }
+
     // MARK: - Doing
 
     /// Make a new bot. The harness picks its name, colour and greeting — the
