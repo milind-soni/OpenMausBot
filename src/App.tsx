@@ -4,6 +4,7 @@ import { StoreProvider, useStore } from "@/state/store";
 import { Onboarding } from "@/components/Onboarding";
 import { emailGateDone, initAnalytics } from "@/lib/analytics";
 import { Sidebar } from "@/components/Sidebar";
+import { InteractiveReplyScope } from "@/components/InteractiveReply";
 import { ChatView } from "@/components/ChatView";
 import { GroupView } from "@/components/GroupView";
 import { BotSettingsDialog } from "@/components/BotSettingsDialog";
@@ -24,6 +25,7 @@ import { TeamMapPage } from "@/components/TeamMapPage";
 import { skillRecorderEnabled } from "@/lib/feature-flags";
 import { setLocale } from "@/lib/i18n";
 
+/** Route the selected task and bind interactive drafts to that conversation. */
 function Shell() {
   const { state, dispatch } = useStore();
   const unreadCount =
@@ -236,9 +238,9 @@ function Shell() {
       ) : noEngines ? (
         <NoEngines />
       ) : group ? (
-        <GroupView key={group.id} group={group} />
+        <InteractiveReplyScope scope={`group:${group.id}:${group.threadId}`}><GroupView key={group.id} group={group} /></InteractiveReplyScope>
       ) : bot ? (
-        <ChatView bot={bot} />
+        <InteractiveReplyScope scope={`bot:${bot.id}:${bot.threadId}`}><ChatView bot={bot} /></InteractiveReplyScope>
       ) : (
         <main className="flex h-full min-w-0 flex-1 flex-col items-center justify-center gap-3 bg-app text-ink-secondary">
           <Loader2 size={20} className="animate-spin" />

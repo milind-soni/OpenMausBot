@@ -1,0 +1,383 @@
+:root {
+  --ink: #27262b;
+  --muted: #77747b;
+  --surface: #f4f3f1;
+  --border: #dddcd9;
+  --accent: #7463d3;
+  --canvas: transparent;
+  color-scheme: light dark;
+  scrollbar-width: thin;
+  scrollbar-color: var(--muted) var(--canvas);
+  font-family:
+    system-ui,
+    -apple-system,
+    BlinkMacSystemFont,
+    "Segoe UI",
+    sans-serif;
+  color: var(--ink);
+  background: var(--canvas);
+  font-size: 14px;
+}
+* {
+  box-sizing: border-box;
+}
+body {
+  margin: 0;
+  padding: 0;
+}
+p,
+h3,
+h4 {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+p {
+  line-height: 1.6;
+  text-wrap: pretty;
+}
+h3 {
+  line-height: 1.35;
+  font-size: 19px;
+  letter-spacing: -0.025em;
+}
+h4 {
+  font-size: 13px;
+  font-weight: 600;
+}
+.stack {
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+}
+.grid {
+  display: grid;
+  gap: 24px;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  align-items: start;
+}
+.card {
+  border-radius: 10px;
+  border: 0;
+  background: var(--surface);
+  padding: 20px;
+}
+.card .card {
+  padding: 12px;
+}
+.muted {
+  color: var(--muted);
+}
+button,
+input {
+  font: inherit;
+  accent-color: var(--accent);
+}
+button {
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  padding: 9px 12px;
+  background: var(--canvas);
+  color: var(--ink);
+  cursor: pointer;
+  text-align: left;
+  transition:
+    background-color 120ms,
+    border-color 120ms,
+    color 120ms;
+}
+button:hover {
+  background: var(--surface);
+}
+button[aria-pressed="true"] {
+  border-color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 8%, var(--canvas));
+}
+button:focus-visible,
+input:focus-visible,
+summary:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+}
+fieldset {
+  margin: 0;
+  padding: 0;
+  border: 0;
+  min-width: 0;
+}
+legend,
+label {
+  line-height: 1.5;
+  font-size: 13px;
+}
+legend {
+  padding: 0;
+  margin-bottom: 8px;
+  font-weight: 500;
+}
+label {
+  display: block;
+}
+input[type="text"],
+input[type="number"] {
+  display: block;
+  width: 100%;
+  margin-top: 7px;
+  padding: 9px 10px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--canvas);
+  color: var(--ink);
+}
+input[type="range"] {
+  width: 100%;
+  margin: 12px 0 0;
+  display: block;
+  appearance: none;
+  background: transparent;
+  height: 22px;
+  cursor: pointer;
+}
+input[type="checkbox"] {
+  margin: 0;
+  flex-shrink: 0;
+}
+.check {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+}
+.label-row {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+}
+.label-row output {
+  color: var(--accent);
+  font-variant-numeric: tabular-nums;
+}
+.choices {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.choices .check {
+  padding: 7px 0;
+  margin-right: 8px;
+}
+.metric {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  padding: 0;
+  background: transparent;
+  border-radius: 0;
+}
+.metric p {
+  color: var(--muted);
+  margin-bottom: 7px;
+  margin: 0;
+  font-size: 12px;
+}
+.metric output {
+  font-size: 15px;
+  line-height: 1.5;
+  letter-spacing: 0;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+.metric small {
+  font-weight: 400;
+  letter-spacing: 0;
+  color: var(--muted);
+  font-size: 12px;
+}
+.scroll {
+  max-width: 100%;
+  overflow: auto;
+}
+table {
+  border-collapse: collapse;
+  width: 100%;
+  font-size: 11px;
+}
+th,
+td {
+  text-align: left;
+  padding: 9px;
+  border-bottom: 1px solid var(--border);
+  white-space: nowrap;
+}
+th {
+  font-weight: 500;
+  color: var(--muted);
+}
+svg {
+  display: block;
+  width: 100%;
+  max-height: 360px;
+}
+svg text {
+  font: 10px system-ui;
+  fill: var(--muted);
+}
+summary {
+  cursor: pointer;
+  color: var(--muted);
+  font-size: 11px;
+}
+details > .stack {
+  margin-top: 14px;
+}
+.heatmap {
+  border-collapse: separate;
+  border-spacing: 3px;
+}
+.heatmap td {
+  min-width: 25px;
+  text-align: center;
+  border-radius: 3px;
+  padding: 7px 4px;
+  border: 0;
+}
+.heatmap td span {
+  color: var(--ink);
+  font-size: 10px;
+}
+.heatmap td[data-active="false"] span {
+  opacity: 0.25;
+}
+.heatmap th {
+  border: 0;
+  padding: 4px;
+}
+.flow {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+}
+.flow li {
+  flex: 1;
+  min-width: 130px;
+  position: relative;
+}
+.flow li:not(:last-child):after {
+  content: "";
+  position: absolute;
+  right: -9px;
+  top: 21px;
+  width: 5px;
+  height: 5px;
+  border-top: 1px solid var(--muted);
+  border-right: 1px solid var(--muted);
+  transform: rotate(45deg);
+}
+.flow button {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  width: 100%;
+  height: 100%;
+  min-height: 48px;
+}
+.flow small {
+  color: var(--muted);
+}
+.detail {
+  padding: 12px;
+  background: var(--surface);
+  border-radius: 6px;
+}
+.draft {
+  border-top: 1px solid var(--border);
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 10px;
+  border: 0;
+  padding-top: 8px;
+}
+.draft p {
+  font-size: 12px;
+  color: var(--muted);
+  max-width: 70ch;
+}
+.draft button {
+  border-color: var(--border);
+  background: var(--surface);
+  color: var(--ink);
+}
+#root > div > div > .card {
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+}
+#root > div > div > .card > h3:first-child,
+#root > div > div > .stack > h3:first-child {
+  padding-right: 64px;
+}
+input[type="range"]::-webkit-slider-runnable-track {
+  height: 4px;
+  border-radius: 2px;
+  background: var(--border);
+}
+input[type="range"]::-webkit-slider-thumb {
+  appearance: none;
+  width: 14px;
+  height: 14px;
+  margin-top: -5px;
+  border-radius: 50%;
+  background: var(--accent);
+}
+input[type="range"]::-moz-range-track {
+  height: 4px;
+  border-radius: 2px;
+  background: var(--border);
+}
+input[type="range"]::-moz-range-thumb {
+  width: 14px;
+  height: 14px;
+  border: 0;
+  border-radius: 50%;
+  background: var(--accent);
+}
+.stack > p {
+  max-width: 70ch;
+  color: var(--muted);
+}
+.draft button:hover {
+  background: color-mix(in srgb, var(--ink) 6%, var(--surface));
+}
+@media (max-width: 600px) {
+  .grid {
+    grid-template-columns: 1fr;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  button {
+    transition: none;
+  }
+}
+@media (max-width: 420px) {
+  body {
+    padding: 10px 0;
+  }
+  .card {
+    padding: 14px;
+  }
+  .flow {
+    flex-direction: column;
+  }
+  .flow li {
+    min-width: 0;
+  }
+  .flow li:not(:last-child):after {
+    right: 50%;
+    top: auto;
+    bottom: -8px;
+    transform: rotate(135deg);
+  }
+}

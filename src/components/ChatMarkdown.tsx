@@ -13,6 +13,7 @@ import remarkGfm from "remark-gfm";
 import { Check, Copy, Download, LoaderCircle, RotateCcw } from "lucide-react";
 
 import { MarkdownImagePreview, useLocalFileSave, type MessageAttachmentContext } from "./AttachmentPreview";
+import { InteractiveReply } from "./InteractiveReply";
 
 // tiny highlight cache so revisiting a thread doesn't re-tokenize settled
 // blocks; keys are content-hashed and capped. Streamed partials may land here
@@ -296,6 +297,8 @@ function Spoiler({ children }: { children?: ReactNode }) {
   );
 }
 
+/** Render safe chat Markdown, delegating admitted interactive fences to their
+ * isolated renderer while preserving the message context for local file links. */
 function ChatMarkdownComponent({ text, streaming = false, message }: { text: string; streaming?: boolean; message?: MessageAttachmentContext }) {
   return (
     <div className="chat-md min-w-0 [&>*+*]:mt-2">
@@ -303,7 +306,7 @@ function ChatMarkdownComponent({ text, streaming = false, message }: { text: str
         remarkPlugins={[remarkGfm, unwrapLinkedImages]}
         urlTransform={chatUrlTransform}
         components={{
-          pre({ children }: { children?: ReactNode }) {
+          pre({ children, node }) {
             // fenced code arrives as <pre><code class="language-x">…</code></pre>
             const child: any = Array.isArray(children) ? children[0] : children;
             const className: string = child?.props?.className ?? "";
@@ -313,6 +316,9 @@ function ChatMarkdownComponent({ text, streaming = false, message }: { text: str
             const flat = (n: any): string =>
               typeof n === "string" ? n : Array.isArray(n) ? n.map(flat).join("") : (n?.props?.children ? flat(n.props.children) : "");
             const code = flat(child?.props?.children).replace(/\n$/, "");
+            if (lang === "openmaus-ui") {
+              return <InteractiveReply source={code} streaming={streaming} message={message} offset={node?.position?.start?.offset ?? 0} />;
+            }
             return <CodeBlock code={code} lang={lang} streaming={streaming} />;
           },
           img(props) {

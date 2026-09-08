@@ -5,6 +5,7 @@
 import { describe, expect, it } from "vitest";
 
 import { soulSystemPrompt } from "./bot-folder.ts";
+import { INTERACTIVE_REPLY_PROMPT } from "../shared/interactive-reply.ts";
 import {
   buildSystemPrompt,
   computerPrompt,
@@ -18,10 +19,11 @@ import {
 } from "./system-prompt.ts";
 
 describe("buildSystemPrompt", () => {
-  it("is the persona alone when there is no soul and no parts", () => {
+  it("includes the shared interactive contract even without optional parts", () => {
     const built = buildSystemPrompt("You are Kiwi.", "", []);
-    expect(built.text).toBe("You are Kiwi.");
-    expect(built.sections).toEqual([{ id: "persona", label: "Identity", text: "You are Kiwi.", bytes: 13 }]);
+    expect(built.text).toBe("You are Kiwi." + INTERACTIVE_REPLY_PROMPT);
+    expect(built.sections[0]).toEqual({ id: "persona", label: "Identity", text: "You are Kiwi.", bytes: 13 });
+    expect(built.sections.at(-1)?.text).toContain("NEVER sends a message");
   });
 
   it("concatenates parts in order and drops empty ones, so an empty soul changes nothing", () => {
@@ -31,19 +33,19 @@ describe("buildSystemPrompt", () => {
       { id: "memory", label: "Memory", text: " Your memory file is X." },
     ];
     const built = buildSystemPrompt("You are Kiwi.", "", parts);
-    expect(built.text).toBe("You are Kiwi. You can act on the computer. Your memory file is X.");
-    expect(built.sections.map((s) => s.id)).toEqual(["persona", "computer", "memory"]);
+    expect(built.text).toBe("You are Kiwi. You can act on the computer. Your memory file is X." + INTERACTIVE_REPLY_PROMPT);
+    expect(built.sections.map((s) => s.id)).toEqual(["persona", "computer", "memory", "interactive-replies"]);
   });
 
   it("puts the soul block directly after the persona and measures it in bytes", () => {
     const built = buildSystemPrompt("You are Kiwi.", "Be brief. é", [
       { id: "memory", label: "Memory", text: " Your memory file is X." },
     ]);
-    expect(built.sections.map((s) => s.id)).toEqual(["persona", "soul", "memory"]);
+    expect(built.sections.map((s) => s.id)).toEqual(["persona", "soul", "memory", "interactive-replies"]);
     const soul = built.sections[1]!;
     expect(soul.text).toBe(soulSystemPrompt("Be brief. é"));
     expect(soul.bytes).toBe(Buffer.byteLength(soul.text, "utf8"));
-    expect(built.text).toBe("You are Kiwi." + soul.text + " Your memory file is X.");
+    expect(built.text).toBe("You are Kiwi." + soul.text + " Your memory file is X." + INTERACTIVE_REPLY_PROMPT);
   });
 });
 

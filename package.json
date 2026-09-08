@@ -83,6 +83,8 @@
   "dependencies": {
     "@clack/prompts": "1.7.0",
     "@hpke/core": "1.9.0",
+    "@openuidev/lang-core": "0.2.15",
+    "@openuidev/react-lang": "0.2.15",
     "@trycua/cua-driver": "0.22.1",
     "clsx": "^2.1.1",
     "lucide-react": "^0.539.0",

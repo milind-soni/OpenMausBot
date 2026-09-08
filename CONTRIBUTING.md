@@ -15,6 +15,12 @@ makes a PR easy to merge. Read it once before opening anything; it's short on pu
 - **UI changes need screenshots.** Before/after images in the PR body; video for anything animated.
   Match the existing palette and tone in [`src/styles.css`](src/styles.css).
 
+Interactive reply changes are reviewed as a separate renderer feature. Use the
+disposable fixture in [`docs/verification/interactive-replies.md`](docs/verification/interactive-replies.md),
+include before/after evidence, and describe the sandbox and draft boundary in
+the PR. Keep this evidence separate from document-preview work and Windows
+custom-path work; those are independent compatibility surfaces.
+
 ## Dev setup
 
 Requirements: **Node 24+**, **pnpm**, and for actually chatting with a bot, at least one agent CLI

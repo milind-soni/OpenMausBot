@@ -3,6 +3,7 @@ import { fileURLToPath } from "node:url";
 import { defineConfig } from "vitest/config";
 import react from "@vitejs/plugin-react";
 import tailwindcss from "@tailwindcss/vite";
+import { interactiveRuntimePlugin } from "./scripts/interactive-runtime-plugin";
 
 // The About dialog shows the shipped version; package.json is the one place
 // it is already maintained, so it is inlined at build time rather than
@@ -12,7 +13,7 @@ const { version } = JSON.parse(
 ) as { version: string };
 
 export default defineConfig({
-  plugins: [react(), tailwindcss()],
+  plugins: [react(), tailwindcss(), interactiveRuntimePlugin()],
   define: {
     __APP_VERSION__: JSON.stringify(version),
   },

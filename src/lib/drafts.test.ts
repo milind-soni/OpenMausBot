@@ -4,6 +4,7 @@ import { renderToStaticMarkup } from "react-dom/server";
 
 import {
   appendDraftAttachments,
+  appendComposerDraftText,
   changeDraftAttachmentPending,
   draftRevision,
   failedComposerSends,
@@ -47,6 +48,20 @@ function renderedChannelMode(id: string): string {
 }
 
 describe("channel draft delivery mode", () => {
+  it("adds an interactive answer to only the addressed draft, preserving its mode", () => {
+    const store = memoryStorage();
+    Object.defineProperty(globalThis, "localStorage", { configurable: true, value: store });
+    setDraft(store, "group:room:task-a", "My existing notes");
+    setDraftChannelMode(store, "group:room:task-a", "goal");
+    const attachment = { kind: "file" as const, id: "report", path: "/attachments/report.txt", name: "report.txt", size: 12 };
+    setDraftAttachments(store, "group:room:task-a", [attachment]);
+    setDraft(store, "group:room:task-b", "Other task");
+    appendComposerDraftText("group:room:task-a", "Review the implementation");
+    expect(getDraft(store, "group:room:task-a")).toBe("My existing notes\n\nReview the implementation");
+    expect(getDraftChannelMode(store, "group:room:task-a")).toBe("goal");
+    expect(getDraftAttachments(store, "group:room:task-a")).toEqual([attachment]);
+    expect(getDraft(store, "group:room:task-b")).toBe("Other task");
+  });
   it("restores goal intent on remount and from persisted storage after restart", () => {
     const store = memoryStorage();
     Object.defineProperty(globalThis, "localStorage", { configurable: true, value: store });

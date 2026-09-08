@@ -6,6 +6,7 @@
 // The sentences that both the direct-turn and room-turn paths use live
 // here too, so neither path can drift from the other or from the preview.
 import { soulSystemPrompt } from "./bot-folder.ts";
+import { INTERACTIVE_REPLY_PROMPT } from "../shared/interactive-reply.ts";
 
 export type PromptPart = { id: string; label: string; text: string };
 export type PromptSection = PromptPart & { bytes: number };
@@ -19,6 +20,7 @@ export function buildSystemPrompt(
     { id: "persona", label: "Identity", text: persona },
     { id: "soul", label: "Standing instructions (SOUL.md)", text: soulSystemPrompt(soul) },
     ...parts,
+    { id: "interactive-replies", label: "Interactive replies", text: INTERACTIVE_REPLY_PROMPT },
   ];
   const sections = ordered
     .filter((part) => part.text.length > 0)

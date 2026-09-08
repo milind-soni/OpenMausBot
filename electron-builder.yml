@@ -48,6 +48,8 @@ files:
 asar: true
 
 extraResources:
+  - from: third_party/openui/LICENSE.txt
+    to: licenses/OpenUI-LICENSE.txt
   # Ship the app's own license terms in every desktop distribution.
   - from: LICENSE
     to: licenses/OpenMausBot-LICENSE.txt

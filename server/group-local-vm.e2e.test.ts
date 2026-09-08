@@ -33,7 +33,16 @@ async function until<T>(read: () => T | Promise<T>, accept: (value: T) => boolea
     await new Promise(r => setTimeout(r, 40));
   }
 }
-const dump = () => until(() => existsSync(dumpFile) ? JSON.parse(readFileSync(dumpFile, "utf8")) : null, Boolean);
+// The fake CLI creates this file before writeFileSync finishes. Poll past an
+// incomplete JSON snapshot instead of failing during a valid in-flight write.
+const dump = () => until(() => {
+  if (!existsSync(dumpFile)) return null;
+  try { return JSON.parse(readFileSync(dumpFile, "utf8")); }
+  catch (error) {
+    if (error instanceof SyntaxError) return null;
+    throw error;
+  }
+}, Boolean);
 const idle = (botId: string) => until(() => api("GET", "/api/bots?messages=0"), s => !s.bots.find((b: any) => b.id === botId)?.busy);
 const computer = (d: any) => d.mcpConfig.mcpServers.computer;
 const gate = (c: any) => fetch(c.env.OMB_CONTROL_URL, { headers: { authorization: `Bearer ${c.env.OMB_CONTROL_TOKEN}` } });
@@ -100,6 +109,13 @@ const send = (id: string) => api("POST", `/api/groups/${id}/messages`, { text: "
 const stop = (id: string) => api("POST", `/api/groups/${id}/interrupt`, {});
 
 describe("Group Local VM ownership on the real isolated server", () => {
+  it("waits for the fake CLI to finish writing its dump", async () => {
+    writeFileSync(dumpFile, '{"pid":');
+    const completed = { pid: 123, mcpConfig: { mcpServers: {} } };
+    const finishWrite = setTimeout(() => writeFileSync(dumpFile, JSON.stringify(completed)), 60);
+    try { expect(await dump()).toEqual(completed); }
+    finally { clearTimeout(finishWrite); rmSync(dumpFile, { force: true }); }
+  });
   it("releases a failed readiness claim so the bot and room can run again", async () => {
     const { bots, group } = await room();
     vmState({ failed: true });

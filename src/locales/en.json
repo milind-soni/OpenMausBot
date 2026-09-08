@@ -1358,5 +1358,18 @@
   "mcp.probe.connected": "Connected",
   "mcp.probe.toolsOne": "· 1 tool: {names}",
   "mcp.probe.toolsMany": "· {count} tools: {names}",
-  "mcp.probe.noTools": "· no tools advertised"
+  "mcp.probe.noTools": "· no tools advertised",
+  "interactive.label": "Interactive reply",
+  "interactive.reset": "Reset local choices",
+  "interactive.expand": "Expand interactive reply",
+  "interactive.collapse": "Collapse interactive reply",
+  "interactive.preparing": "Preparing interactive reply…",
+  "interactive.failed": "This interactive reply could not be displayed. Its source is available below.",
+  "interactive.timeout": "This interactive reply did not open. Reset to try again, or view its source below.",
+  "interactive.source": "View source",
+  "interactive.local": "Changes stay on this device. Adding to your reply prepares a draft for you to send.",
+  "interactive.ask": "Add to reply",
+  "interactive.drafted": "Added to your reply. Review the draft before sending.",
+  "interactive.table": "View data",
+  "interactive.options": "Reply options"
 }

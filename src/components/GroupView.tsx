@@ -149,6 +149,8 @@ function PinToggle({ group, message }: { group: Group; message: Message }) {
   );
 }
 
+/** Render the group transcript with the same interactive message layout hooks
+ * as direct chats; attribution and group delivery remain owned by this view. */
 const Transcript = memo(function Transcript({
   group,
   members,
@@ -250,7 +252,7 @@ const Transcript = memo(function Transcript({
             ) : null
           ) : m.kind === "text" && (m.text || m.attachments?.length) ? (
             <div className={cn("group flex w-full flex-col", user ? "items-end" : "items-start")}>
-              <div className={cn("flex w-full items-end gap-1.5", user ? "justify-end" : "justify-start")}>
+              <div className={cn("message-row flex w-full items-end gap-1.5", user ? "justify-end" : "justify-start")}>
                 {user && (
                   <>
                     <button
@@ -267,7 +269,7 @@ const Transcript = memo(function Transcript({
                 )}
                 <div
                   className={cn(
-                    "w-fit max-w-[min(42rem,78%)] rounded-2xl px-4 py-2.5 text-[15px] leading-relaxed",
+                    "chat-message-bubble w-fit max-w-[min(42rem,78%)] rounded-2xl px-4 py-2.5 text-[15px] leading-relaxed",
                     !user && m.id === emergingId && "turn-answer",
                     user ? "whitespace-pre-wrap bg-bubble-user text-ink" : "bg-card text-ink",
                   )}
