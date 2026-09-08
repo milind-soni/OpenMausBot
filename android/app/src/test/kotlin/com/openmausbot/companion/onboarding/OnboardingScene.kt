@@ -159,6 +159,8 @@ class OnboardingScene(
         shareTranscript = { _, _ -> null },
         openCloudDesktop = { null },
         shareInbox = ShareInbox(),
+        alwaysOnEnabled = MutableStateFlow(false),
+        onToggleAlwaysOn = {},
     )
 
     init {

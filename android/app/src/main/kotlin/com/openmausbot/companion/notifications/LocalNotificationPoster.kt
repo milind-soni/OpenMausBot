@@ -98,10 +98,20 @@ class LocalNotificationPoster(
         val done = NotificationChannel(
             NotificationMapping.CHANNEL_DONE,
             appContext.getString(R.string.notification_channel_done),
-            NotificationManager.IMPORTANCE_DEFAULT,
+            // HIGH so this pops up (heads-up banner + lock screen) with sound,
+            // the way a normal messaging app does — DEFAULT only shows quietly
+            // in the shade. Kate's ask (2026-09-08): every bot message, not just
+            // approvals, should read as "interesting app noise" rather than sit
+            // unnoticed until she happens to pull the shade down.
+            NotificationManager.IMPORTANCE_HIGH,
         ).apply {
             description = appContext.getString(R.string.notification_channel_done_desc)
         }
+        // The old channel this replaced. Deleting it (rather than leaving it
+        // orphaned) keeps Settings -> App notifications from showing a dead
+        // "Finished work" entry alongside the new one; harmless no-op if it was
+        // never created on this install.
+        system.deleteNotificationChannel(LEGACY_CHANNEL_DONE)
         val routine = NotificationChannel(
             NotificationMapping.CHANNEL_ROUTINE_FAILED,
             appContext.getString(R.string.notification_channel_routine),
@@ -133,5 +143,8 @@ class LocalNotificationPoster(
 
         /** Permission string for the UI pass's launcher contract. */
         const val POST_NOTIFICATIONS_PERMISSION = Manifest.permission.POST_NOTIFICATIONS
+
+        /** The channel id [NotificationMapping.CHANNEL_DONE] replaced. See its kdoc. */
+        private const val LEGACY_CHANNEL_DONE = "done"
     }
 }

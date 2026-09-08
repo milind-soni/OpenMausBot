@@ -42,6 +42,12 @@ class SessionLingerController(
     private val session: Session,
     private val scope: CoroutineScope,
     private val anchor: ProcessAnchor,
+    /**
+     * True while [AlwaysOnConnectionService] is holding the process open on its
+     * own. Defaults to "never" so every existing caller/test is unaffected;
+     * production wires it to [AlwaysOnConnectionState.active].
+     */
+    private val alwaysOn: () -> Boolean = { false },
 ) : DefaultLifecycleObserver {
 
     /**
@@ -92,6 +98,11 @@ class SessionLingerController(
 
     override fun onStop(owner: LifecycleOwner) {
         foreground = false
+        // AlwaysOnConnectionService is already holding the process open for as
+        // long as the user left it enabled — this window would only ever be
+        // redundant (service still running) or premature (service between
+        // onDestroy and its own restart), so skip it entirely rather than race it.
+        if (alwaysOn()) return
         if (openToken != null) return
         if (!worthHolding()) {
             session.disconnect()
@@ -171,8 +182,9 @@ internal fun installSessionLinger(
     session: Session,
     scope: CoroutineScope,
     anchor: SessionLingerController.ProcessAnchor,
+    alwaysOn: () -> Boolean = { false },
 ): SessionLingerController {
-    val controller = SessionLingerController(session, scope, anchor)
+    val controller = SessionLingerController(session, scope, anchor, alwaysOn)
     anchor.attach(controller)
     lifecycle.addObserver(controller)
     return controller
