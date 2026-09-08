@@ -10,9 +10,11 @@
 import { memo, useEffect, useState, type ReactNode } from "react";
 import Markdown, { defaultUrlTransform } from "react-markdown";
 import remarkGfm from "remark-gfm";
-import { Check, Copy, Download, LoaderCircle, RotateCcw } from "lucide-react";
+import { Check, Copy, Download, FileText, LoaderCircle, RotateCcw } from "lucide-react";
 
 import { MarkdownImagePreview, useLocalFileSave, type MessageAttachmentContext } from "./AttachmentPreview";
+import { useDocumentPreview } from "./DocumentWorkspace";
+import { t } from "@/lib/i18n";
 
 // tiny highlight cache so revisiting a thread doesn't re-tokenize settled
 // blocks; keys are content-hashed and capped. Streamed partials may land here
@@ -186,10 +188,19 @@ function CodeBlock({ code, lang, streaming }: { code: string; lang: string; stre
 // and an <a href="file://…"> would still reach setWindowOpenHandler on a
 // middle or modifier click, which calls shell.openExternal without the main
 // process' containment check.
+/** Open a message-backed file in the scoped reader when available, otherwise
+ * retain the authorized download path; legacy links carry no file capability. */
 function LocalFileLink({ filePath, children, message }: { filePath: string; children?: ReactNode; message?: MessageAttachmentContext }) {
   const save = useLocalFileSave(filePath, undefined, message);
+  const open = useDocumentPreview();
   if (!message) {
     return <span title="Unavailable legacy file reference" className="break-words text-ink-secondary">{children}</span>;
+  }
+  if (open) {
+    return <button type="button" onClick={() => open(filePath, message)} title={t("document.open")}
+      className="inline-flex items-center gap-1 break-words text-left text-accent underline decoration-accent/40 hover:decoration-accent">
+      {children}<FileText size={13} className="shrink-0" aria-hidden="true" />
+    </button>;
   }
   const label = save.state === "saving"
     ? "Saving…"

@@ -5,6 +5,7 @@ import { Onboarding } from "@/components/Onboarding";
 import { emailGateDone, initAnalytics } from "@/lib/analytics";
 import { Sidebar } from "@/components/Sidebar";
 import { ChatView } from "@/components/ChatView";
+import { DocumentWorkspace } from "@/components/DocumentWorkspace";
 import { GroupView } from "@/components/GroupView";
 import { BotSettingsDialog } from "@/components/BotSettingsDialog";
 import { RemoteAgentSettingsPanel } from "@/components/RemoteAgentSettingsPanel";
@@ -24,6 +25,8 @@ import { TeamMapPage } from "@/components/TeamMapPage";
 import { skillRecorderEnabled } from "@/lib/feature-flags";
 import { setLocale } from "@/lib/i18n";
 
+/** Route the selected conversation while keeping its document reader scoped
+ * to the active bot/group task, so navigation cannot retain another preview. */
 function Shell() {
   const { state, dispatch } = useStore();
   const unreadCount =
@@ -236,9 +239,13 @@ function Shell() {
       ) : noEngines ? (
         <NoEngines />
       ) : group ? (
-        <GroupView key={group.id} group={group} />
+        <DocumentWorkspace scope={`group:${group.id}:${group.threadId}`}>
+          <GroupView key={group.id} group={group} />
+        </DocumentWorkspace>
       ) : bot ? (
-        <ChatView bot={bot} />
+        <DocumentWorkspace scope={`bot:${bot.id}:${bot.threadId}`}>
+          <ChatView bot={bot} />
+        </DocumentWorkspace>
       ) : (
         <main className="flex h-full min-w-0 flex-1 flex-col items-center justify-center gap-3 bg-app text-ink-secondary">
           <Loader2 size={20} className="animate-spin" />
