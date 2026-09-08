@@ -141,6 +141,24 @@ class SessionLingerController(
     }
 
     /**
+     * [AlwaysOnConnectionService] just took over holding the process open.
+     * `alwaysOn()` only stops a *new* trip from opening its own window
+     * ([onStop]); it does not reach one already in flight when the service
+     * races it — the toggle can be flipped on and the app backgrounded before
+     * `onStartCommand` runs, opening a window here first. Left alone, that
+     * window's own timer would call `session.disconnect()` at its 25s deadline
+     * out from under the service that now depends on the same connection. Tear
+     * it down without touching the session, which the service owns from here.
+     */
+    fun onAlwaysOnStarted() {
+        val token = openToken ?: return
+        openToken = null
+        timer?.cancel()
+        timer = null
+        anchor.stop(token)
+    }
+
+    /**
      * Whether this background trip can plausibly still receive frames.
      *
      * Status alone is not enough: right after a successful pairing there is a

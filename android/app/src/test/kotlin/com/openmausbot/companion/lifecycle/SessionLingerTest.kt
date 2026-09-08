@@ -331,6 +331,43 @@ class SessionLingerTest {
         assertNull(currentController.openWindow)
     }
 
+    // ------------------------------------------------------- always-on race
+
+    /**
+     * The race CodeRabbit flagged on PR #966: the always-on toggle is turned
+     * on and the app backgrounds before `AlwaysOnConnectionService.onStartCommand`
+     * runs, so this controller opens its own window first. Without the
+     * handoff, that window's 25s timer would call `session.disconnect()` out
+     * from under the service that now depends on the same connection.
+     */
+    @Test
+    fun `always-on starting after ON_STOP cancels the window without disconnecting`() = runTest {
+        val stream = FakeStream()
+        val sink = RecordingSink()
+        val session = session(stream, sink)
+        val owner = live(session, stream)
+
+        owner.registry.handleLifecycleEvent(Lifecycle.Event.ON_STOP)
+        runCurrent()
+        assertEquals(1, stream.collectors)
+        assertEquals(listOf(1L), currentAnchor.started)
+
+        // AlwaysOnConnectionService won the race and started after this
+        // window was already open.
+        currentController.onAlwaysOnStarted()
+        assertEquals(listOf(1L), currentAnchor.stopped)
+        assertNull(currentController.openWindow)
+
+        // The window's own deadline must not still fire and disconnect what
+        // the service now depends on staying open.
+        advanceTimeBy(30_000)
+        runCurrent()
+        assertEquals(1, stream.collectors)
+        stream.emit(notify("done", seq = 50))
+        runCurrent()
+        assertEquals(1, sink.delivered.size)
+    }
+
     // ---------------------------------------------------------------- §5.7
 
     @Test

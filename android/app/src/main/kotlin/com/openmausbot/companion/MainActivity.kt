@@ -29,6 +29,7 @@ import com.openmausbot.companion.ui.CompanionEnvironment
 import com.openmausbot.companion.ui.CompanionRoot
 import com.openmausbot.companion.ui.LocalCompanion
 import com.openmausbot.companion.ui.MicPermissionController
+import com.openmausbot.companion.ui.NotificationAccess
 import com.openmausbot.companion.ui.NotificationPermissionController
 import com.openmausbot.companion.ui.PermissionPreferences
 import com.openmausbot.companion.ui.PermissionRequests
@@ -285,7 +286,14 @@ class MainActivity : ComponentActivity() {
      */
     private fun toggleAlwaysOn() {
         val enabling = !app.alwaysOn.enabled.value
-        app.alwaysOn.setEnabled(enabling)
+        if (enabling && notifications.access.value != NotificationAccess.GRANTED) {
+            // A background connection whose notifications can't post is a
+            // foreground service and battery cost for nothing — send the user
+            // to fix that first instead of turning this on silently broken.
+            notifications.act()
+            return
+        }
+        if (!app.alwaysOn.setEnabled(enabling)) return
         if (enabling) {
             AlwaysOnConnectionService.start(this)
             requestIgnoreBatteryOptimizations()

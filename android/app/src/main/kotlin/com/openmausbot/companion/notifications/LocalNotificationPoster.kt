@@ -95,15 +95,30 @@ class LocalNotificationPoster(
         ).apply {
             description = appContext.getString(R.string.notification_channel_blocking_desc)
         }
-        val done = NotificationChannel(
-            NotificationMapping.CHANNEL_DONE,
-            appContext.getString(R.string.notification_channel_done),
+        // The legacy channel could only ever be at DEFAULT or something the
+        // user explicitly lowered it to in system settings (Android caps a
+        // channel at what the app first declared, so DEFAULT is the ceiling).
+        // A lower importance is therefore a deliberate mute, not a default —
+        // deleting the channel and starting fresh at HIGH would silently
+        // override that choice. Carry it forward; only a fresh install or an
+        // untouched legacy channel gets the HIGH bump Kate asked for.
+        val legacyImportance = system.getNotificationChannel(LEGACY_CHANNEL_DONE)?.importance
+        val doneImportance = if (legacyImportance != null &&
+            legacyImportance < NotificationManager.IMPORTANCE_DEFAULT
+        ) {
+            legacyImportance
+        } else {
             // HIGH so this pops up (heads-up banner + lock screen) with sound,
             // the way a normal messaging app does — DEFAULT only shows quietly
             // in the shade. Kate's ask (2026-09-08): every bot message, not just
             // approvals, should read as "interesting app noise" rather than sit
             // unnoticed until she happens to pull the shade down.
-            NotificationManager.IMPORTANCE_HIGH,
+            NotificationManager.IMPORTANCE_HIGH
+        }
+        val done = NotificationChannel(
+            NotificationMapping.CHANNEL_DONE,
+            appContext.getString(R.string.notification_channel_done),
+            doneImportance,
         ).apply {
             description = appContext.getString(R.string.notification_channel_done_desc)
         }

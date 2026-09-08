@@ -46,7 +46,13 @@ class AlwaysOnConnectionService : Service() {
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         startForeground(NOTIFICATION_ID, buildNotification())
         AlwaysOnConnectionState.active = true
-        (application as OpenMausApp).session.connect()
+        val app = application as OpenMausApp
+        // Closes the race where the toggle turns this on and the app
+        // backgrounds before this callback runs: SessionLingerController may
+        // already have opened its own 25s window, whose timer would otherwise
+        // disconnect the session this service now depends on staying open.
+        app.linger.onAlwaysOnStarted()
+        app.session.connect()
         return START_STICKY
     }
 

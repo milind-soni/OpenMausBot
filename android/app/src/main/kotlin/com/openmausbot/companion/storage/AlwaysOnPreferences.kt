@@ -27,10 +27,12 @@ class AlwaysOnPreferences(private val prefs: SharedPreferences) {
     private val _enabled = MutableStateFlow(prefs.getBoolean(KEY_ENABLED, false))
     val enabled: StateFlow<Boolean> = _enabled.asStateFlow()
 
-    fun setEnabled(value: Boolean) {
-        if (_enabled.value == value) return
-        prefs.edit().putBoolean(KEY_ENABLED, value).commit()
-        _enabled.value = value
+    /** @return false when the write failed — callers must not act as if it took. */
+    fun setEnabled(value: Boolean): Boolean {
+        if (_enabled.value == value) return true
+        val saved = prefs.edit().putBoolean(KEY_ENABLED, value).commit()
+        if (saved) _enabled.value = value
+        return saved
     }
 
     companion object {
