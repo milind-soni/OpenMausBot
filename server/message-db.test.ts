@@ -6,8 +6,7 @@ import { DatabaseSync } from "node:sqlite";
 import { beforeEach, describe, expect, it } from "vitest";
 
 import { DATA_DIR } from "./config.ts";
-import {
-  closeMessageDb,
+import { closeMessageDb,
   deleteThread,
   insertMessage,
   readMessageText,
@@ -15,8 +14,7 @@ import {
   recallMessages,
   searchMessages,
   setActiveLeaf,
-  updateMessage,
-} from "./message-db.ts";
+  updateMessage, describeMissingFts5 } from "./message-db.ts";
 import { withPeerProvenance } from "./peer-provenance.ts";
 import { Store, type Message } from "./store.ts";
 import type { ModelSelection } from "./contracts.ts";
@@ -271,5 +269,19 @@ describe("message-db", () => {
     expect(path.at(-1)?.text).toBe("edited");
     // both branches survive in the tree
     expect(reloaded.messagesFor(bot.threadId).filter((m) => m.parentId === first.parentId)).toHaveLength(2);
+  });
+});
+
+describe("describeMissingFts5", () => {
+  it("turns SQLite's bare module error into one that names the fix", () => {
+    const described = describeMissingFts5(new Error("no such module: fts5"));
+    expect(described?.message).toMatch(/Node 24/);
+    expect(described?.message).toContain(process.version);
+    expect(described?.message).toContain("no such module: fts5");
+  });
+
+  it("leaves every other error alone", () => {
+    expect(describeMissingFts5(new Error("database is locked"))).toBeNull();
+    expect(describeMissingFts5("disk I/O error")).toBeNull();
   });
 });

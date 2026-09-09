@@ -63,14 +63,34 @@ function open(): DatabaseSync {
 // is no more of a dependency than the table it indexes. The sidebar's LIKE
 // search below stays as it is — substring find over a single thread wants
 // every occurrence, not a relevance ranking.
+/** FTS5 is in every runtime OpenMausBot supports — node:sqlite on Node ≥ 24
+ * (package.json engines) and the Node inside Electron 43 — so a SQLite
+ * without it is a mis-installed runtime, not a mode to run in. Say that,
+ * instead of surfacing SQLite's own "no such module: fts5" from deep inside
+ * open() with nothing about what to do. Anything else is rethrown as-is. */
+export function describeMissingFts5(error: unknown): Error | null {
+  const message = error instanceof Error ? error.message : String(error);
+  if (!/no such module:\s*fts5/i.test(message)) return null;
+  return new Error(
+    `OpenMausBot needs SQLite with FTS5, which is built into Node 24 and newer (and into the app). ` +
+    `This Node (${process.version}) has none: install Node 24 or newer. (${message})`,
+  );
+}
+
 function ensureRecallIndex(db: DatabaseSync): void {
   const existed = db
     .prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'messages_fts'")
     .get();
+  try {
+    db.exec(`
+      CREATE VIRTUAL TABLE IF NOT EXISTS messages_fts USING fts5(
+        text, content='messages', content_rowid='rowid', tokenize='unicode61'
+      );
+    `);
+  } catch (error) {
+    throw describeMissingFts5(error) ?? error;
+  }
   db.exec(`
-    CREATE VIRTUAL TABLE IF NOT EXISTS messages_fts USING fts5(
-      text, content='messages', content_rowid='rowid', tokenize='unicode61'
-    );
     CREATE TRIGGER IF NOT EXISTS messages_fts_ai AFTER INSERT ON messages BEGIN
       INSERT INTO messages_fts(rowid, text) VALUES (new.rowid, new.text);
     END;
