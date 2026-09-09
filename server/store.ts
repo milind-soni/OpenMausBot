@@ -186,6 +186,10 @@ export interface Message {
   /** comm chips: "Messaged @X" in the caller's chat, linking to the
    * bot⇄bot channel where the exchange is mirrored. */
   comm?: { groupId: string; withBotId: string; withName: string; withColor: string };
+  /** thread chips: "Opened thread #Title on @X" in the opener's chat,
+   * linking to the thread a bot started with start_thread. Carries the
+   * title so the chip still reads after a rename or a deletion. */
+  threadRef?: { botId: string; threadId: string; title: string };
   /** user messages sent while the bot was mid-turn, waiting in the
    * steer-queue to auto-send on settle. Cleared when the drain consumes
    * them; a true stranded by a restart is inert because the client only
@@ -275,12 +279,28 @@ export function isProjectEmoji(value: unknown): value is string {
  * transcript, and — the part that actually matters — its own provider
  * session. Sharing resume cursors between tasks would resume the other
  * task's session and quietly undo the whole thing. */
+/** Which bot started a thread with start_thread, and under which handoff.
+ * Absent on every thread a person opened. This is the only record that lets
+ * a bot see (list_threads) or close (close_thread) a thread on a teammate:
+ * a peer's other threads stay invisible to it. */
+export interface TaskOpenedBy {
+  botId: string;
+  name: string;
+  /** the ledger id the opener tracks the thread's result under (peer
+   * threads only — a thread a bot opens on itself has no handoff) */
+  delegationId?: string;
+  at: number;
+}
+
 export interface TaskRecord {
   threadId: ThreadId;
   title: string;
   createdAt: number;
   /** Organizational grouping only; never a directory or provider context. */
   projectId?: string;
+  /** Set when a bot, not a person, opened this thread. Persisted with the
+   * task so the sidebar and a backup keep the attribution. */
+  openedBy?: TaskOpenedBy;
   /** Defaults are copied when a task is created; older records fall back
    * to the bot until migration seeds their model selection. */
   modelSelection?: ModelSelection;
@@ -1947,7 +1967,7 @@ export class Store {
 
   /** A fresh context on the same bot: new thread, new session, same
    * persona/tools/computer. Becomes the active task. */
-  createTask(botId: string, title?: string, activate = true, projectId?: string): TaskRecord | null {
+  createTask(botId: string, title?: string, activate = true, projectId?: string, openedBy?: TaskOpenedBy): TaskRecord | null {
     const bot = this.bot(botId);
     if (!bot) return null;
     if (projectId !== undefined && !this.project(botId, projectId)) return null;
@@ -1956,6 +1976,7 @@ export class Store {
       title: title?.trim().slice(0, 80) || UNTITLED_THREAD,
       createdAt: Date.now(),
       ...(projectId ? { projectId } : {}),
+      ...(openedBy ? { openedBy: structuredClone(openedBy) } : {}),
       resumeCursors: {},
       modelSelection: structuredClone(bot.modelSelection),
       approvalMode: approvalModeFor(bot),
@@ -1969,6 +1990,20 @@ export class Store {
     if (activate) {
       this.mirrorActiveTask(bot, task);
     }
+    this.saveBots();
+    this.emit({ type: "bot", botId });
+    return task;
+  }
+
+  /** Attach (or complete) the opener record after the thread exists — the
+   * handoff id is only known once the thread it targets has an id, so a
+   * peer-opened thread is created first and stamped second. Never reachable
+   * from the HTTP task PATCH: openedBy is not a TASK_PATCH_FIELD. */
+  setTaskOpenedBy(botId: string, threadId: string, openedBy: TaskOpenedBy): TaskRecord | null {
+    const bot = this.bot(botId);
+    const task = this.taskByThread(botId, threadId);
+    if (!bot || !task) return null;
+    task.openedBy = structuredClone(openedBy);
     this.saveBots();
     this.emit({ type: "bot", botId });
     return task;

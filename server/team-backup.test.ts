@@ -32,7 +32,11 @@ function fixture() {
   store.branchMessage(chief.threadId, root.id, "Edited question");
   store.setActiveLeaf(chief.threadId, answer.id);
   store.renameTask(chief.id, chief.threadId, "First conversation");
+  // created first: tasks are newest-first and the tests below read the
+  // transcript of tasks[0], which must stay the conversation with messages
+  store.createTask(chief.id, "Opened by a deleted bot", false, undefined, { botId: "gone-bot", name: "Gone", at: 98 });
   const active = store.createTask(chief.id, "Second conversation")!;
+  store.setTaskOpenedBy(chief.id, active.threadId, { botId: scout.id, name: scout.name, delegationId: "do-not-resume-delegation", at: 99 });
   store.appendMessage(active.threadId, { role: "user", kind: "text", text: "Current question", queued: true, queueId: "do-not-replay" });
   store.appendMessage(active.threadId, { role: "bot", kind: "options", card: {
     title: "Permission request", subtitle: "Old approval", options: ["Allow"], requestId: "do-not-resume", allowKey: "Bash",
@@ -84,6 +88,12 @@ describe("additive portable team backups", () => {
     expect(roomMessage).toMatchObject({ text: "Room answer", from: { botId: importedScout.id }, peerPost: { unattended: true } });
     expect(result.routines.every((routine) => !routine.enabled && routine.nextRunAt === null)).toBe(true);
     expect(result.routines.find((routine) => routine.target === "room-goal")).toMatchObject({ botId: importedChief.id, groupId: result.groups[0].id });
+    // who opened a thread travels with it, remapped like a message's `from`;
+    // the handoff id stays behind with the ledger it belongs to
+    expect(importedChief.tasks!.find((task) => task.title === "Second conversation")!.openedBy)
+      .toEqual({ botId: importedScout.id, name: scout.name, at: 99 });
+    expect(importedChief.tasks!.find((task) => task.title === "Opened by a deleted bot")).not.toHaveProperty("openedBy");
+    expect(importedChief.tasks!.find((task) => task.title === "First conversation")).not.toHaveProperty("openedBy");
     const firstTask = importedChief.tasks!.find((task) => task.title === "First conversation")!;
     expect(store.messagesFor(firstTask.threadId).map((message) => message.text)).toEqual(["Original question", "Original answer", "Edited question"]);
     expect(store.activePath(firstTask.threadId).map((message) => message.text)).toEqual(["Original question", "Original answer"]);
@@ -91,7 +101,7 @@ describe("additive portable team backups", () => {
     expect(importedHistory.every((message) => message.kind === "text" && !message.queued && !message.card)).toBe(true);
     expect(importedHistory[1].text).toContain("Permission request");
     expect(importedHistory[2].text).toContain("file not included");
-    expect(JSON.stringify(backup)).not.toMatch(/do-not-replay|do-not-resume|\/private\/image|\/private\/old-workspace|alwaysAllow|autoApprove|modelSelection/);
+    expect(JSON.stringify(backup)).not.toMatch(/do-not-replay|do-not-resume|\/private\/image|\/private\/old-workspace|alwaysAllow|autoApprove|modelSelection|delegationId/);
     const reloaded = new Store(selection);
     expect(reloaded.bot(importedChief.id)?.soul).toBe(chief.soul);
     expect(reloaded.activePath(firstTask.threadId)).toEqual(store.activePath(firstTask.threadId));

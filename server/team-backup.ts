@@ -2,7 +2,7 @@ import { newId, type ModelSelection } from "./contracts.ts";
 import { botMascotBody } from "../shared/mascot-bodies.ts";
 import { takeImportName } from "../shared/import-name.ts";
 import { MAX_TEAM_BACKUP_BYTES, parseTeamBackup, type BackupTask, type TeamBackup } from "../shared/team-backup.ts";
-import type { BotRecord, GroupRecord, Message, Store } from "./store.ts";
+import type { BotRecord, GroupRecord, Message, Store, TaskRecord } from "./store.ts";
 import type { Routine, RoutineManager } from "./routines.ts";
 
 /** Preserve readable history without importing executable cards, live queue
@@ -26,6 +26,11 @@ export function createTeamBackup(store: Store, routines: Routine[], name: string
     const tasks = record.tasks?.length ? record.tasks : [{ threadId: record.threadId, title: "Conversation", createdAt: record.createdAt }];
     return tasks.map((task) => ({
       key: task.threadId, title: task.title, createdAt: task.createdAt,
+      // Who opened the thread travels; the handoff id does not — the
+      // delegation ledger is process-local and never part of a backup.
+      openedBy: "openedBy" in task && task.openedBy
+        ? { botId: task.openedBy.botId, name: task.openedBy.name, at: task.openedBy.at }
+        : undefined,
       activeLeafId: store.activeLeaf(task.threadId),
       messages: store.messagesFor(task.threadId).map((message) => ({
         id: message.id, role: message.role, text: messageText(message), at: message.at,
@@ -126,10 +131,18 @@ export function importTeamBackup(store: Store, routines: RoutineManager, input: 
     }
     for (const source of backup.bots) {
       const bot = store.bot(botIds.get(source.key)!)!;
-      const tasks = source.tasks.map((task, i) => ({
-        threadId: i === 0 ? bot.threadId : newId(), title: task.title, createdAt: task.createdAt, resumeCursors: {},
-        modelSelection: structuredClone(selection), activity: "idle" as const, busy: false, unread: false,
-      }));
+      const tasks = source.tasks.map((task, i): TaskRecord => {
+        const record: TaskRecord = {
+          threadId: i === 0 ? bot.threadId : newId(), title: task.title, createdAt: task.createdAt, resumeCursors: {},
+          modelSelection: structuredClone(selection), activity: "idle" as const, busy: false, unread: false,
+        };
+        // Same rule as a message's `from`: the opener is remapped to its
+        // imported twin, and an opener outside this backup leaves no record
+        // rather than a bot id that resolves to a stranger.
+        const opener = task.openedBy && botIds.get(task.openedBy.botId);
+        if (task.openedBy && opener) record.openedBy = { botId: opener, name: task.openedBy.name, at: task.openedBy.at };
+        return record;
+      });
       // Own the task IDs before writing their transcripts, so rollback also
       // removes partially imported history if persistence fails midway.
       store.patchBot(bot.id, { tasks, threadId: tasks[source.tasks.findIndex((task) => task.key === source.activeTask)].threadId });
