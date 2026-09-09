@@ -77,9 +77,16 @@ const heldTurn = async (bot: { id: string; threadId: string }, text: string): Pr
   return liveToken(bot.threadId);
 };
 /** The opener is woken once with a handoff's outcome; let that turn come
- * and go before holding the thread ourselves. */
-const afterWake = async (bot: { id: string }) => {
-  await expect.poll(async () => (await botState(bot.id))?.busy, { timeout: 15_000 }).toBe(true);
+ * and go before holding the thread ourselves. Its gate already exists, so
+ * the turn is over in milliseconds — too quick to catch as busy; the
+ * fake's reply quoting the wake prompt is the durable evidence. */
+const afterWake = async (bot: { id: string; threadId: string }) => {
+  await expect.poll(async () => (await messages(bot.threadId)).some(
+    // The wake prompt opens with the harness's external-update marker on a
+    // thread whose context moved under it (#981), or the older delegated-task
+    // opener on one that did not; either is the fake quoting the wake.
+    (message) => message.role === "bot" && /reply to: \[(A delegated task|This conversation received an update)/.test(message.text ?? ""),
+  ), { timeout: 15_000 }).toBe(true);
   await expect.poll(async () => (await botState(bot.id))?.busy, { timeout: 15_000 }).toBe(false);
 };
 const mintedToken = async (botId: string, threadId: string, depth = 0): Promise<Record<string, string>> => {
@@ -119,13 +126,18 @@ beforeAll(async () => {
   mkdirSync(data, { recursive: true });
   mkdirSync(gates, { recursive: true });
   // Every turn holds until its gate exists, and dumps its argv/env/prompt
-  // under its thread id — the only way a test can read a live comms token
-  // or a bot's assembled system prompt.
+  // under its gate key — the only way a test can read a live comms token
+  // or a bot's assembled system prompt. The key is a [[gate:NAME]] marker
+  // in the first prompt line when the test put one there, else the agents
+  // server's thread id (depth-0 turns only), else "peer". Depth-1 turns
+  // carry no thread id anywhere in argv or env, so the marker is what lets
+  // two of a peer's threads be held and released separately.
   const gated = join(home, "gated-claude.mjs");
   writeFileSync(gated, [
     "#!/usr/bin/env node",
     'import { readFileSync } from "node:fs";',
     'import { join } from "node:path";',
+    'import { PassThrough } from "node:stream";',
     'const at = process.argv.indexOf("--mcp-config");',
     "let thread = null;",
     "if (at >= 0) {",
@@ -134,9 +146,26 @@ beforeAll(async () => {
     "    for (const server of Object.values(servers)) thread ??= server?.env?.OMB_THREAD_ID ?? null;",
     "  } catch {}",
     "}",
+    "const relay = new PassThrough();",
+    "const real = process.stdin;",
+    'Object.defineProperty(process, "stdin", { value: relay, configurable: true });',
+    "let decided = false;",
+    'let held = "";',
+    'real.on("data", (chunk) => {',
+    "  if (decided) { relay.write(chunk); return; }",
+    "  held += chunk;",
+    '  const nl = held.indexOf("\\n");',
+    "  if (nl === -1) return;",
+    "  const marker = /\\[\\[gate:([\\w-]+)\\]\\]/.exec(held.slice(0, nl));",
+    '  const key = marker?.[1] ?? thread ?? "peer";',
+    `  process.env.FAKE_CLAUDE_SLOW_FINISH_GATE = join(${JSON.stringify(gates)}, key + ".gate");`,
+    `  process.env.FAKE_CLAUDE_DUMP = join(${JSON.stringify(gates)}, key + ".json");`,
+    "  decided = true;",
+    "  relay.write(held);",
+    '  held = "";',
+    "});",
+    'real.on("end", () => relay.end());',
     'process.env.FAKE_CLAUDE_MODE = "slow";',
-    `process.env.FAKE_CLAUDE_SLOW_FINISH_GATE = join(${JSON.stringify(gates)}, (thread ?? "peer") + ".gate");`,
-    `process.env.FAKE_CLAUDE_DUMP = join(${JSON.stringify(gates)}, (thread ?? "peer") + ".json");`,
     `await import(${JSON.stringify(pathToFileURL(FAKE_CLAUDE).href)});`,
   ].join("\n"), { mode: 0o700 });
   writeFileSync(join(data, "config.json"), JSON.stringify({
@@ -288,7 +317,7 @@ describe("start_thread on a teammate", () => {
       const token = await liveToken(pm.threadId);
       const opened: any[] = [];
       for (let index = 1; index <= 3; index++) {
-        const response = await api("POST", "/api/internal/threads", { toBotId: qa.id, title: `QA: PR #${index}`, message: `Test pull request ${index}.`, depth: 0 }, token);
+        const response = await api("POST", "/api/internal/threads", { toBotId: qa.id, title: `QA: PR #${index}`, message: `Test pull request ${index}. [[gate:pr-${index}]]`, depth: 0 }, token);
         expect(response.status).toBe(201);
         opened.push(response.body);
       }
@@ -325,8 +354,8 @@ describe("start_thread on a teammate", () => {
       expect(firstLine.text).toContain("Test pull request 1.");
       expect(firstLine.peerAsk).toMatchObject({ botId: pm.id, name: "Pam" });
       // a peer-opened thread runs one hop down: no agents tools were mounted
-      await expect.poll(() => dumpOf("peer")?.mcpConfig !== undefined, { timeout: 15_000 }).toBe(true);
-      expect(dumpOf("peer")!.mcpConfig?.mcpServers?.agents).toBeUndefined();
+      await expect.poll(() => dumpOf("pr-1")?.mcpConfig !== undefined, { timeout: 15_000 }).toBe(true);
+      expect(dumpOf("pr-1")!.mcpConfig?.mcpServers?.agents).toBeUndefined();
 
       // the opener's next turn reads the ledger with its own live token:
       // the handoffs are running, with elapsed time, and nothing has come back
@@ -336,9 +365,13 @@ describe("start_thread on a teammate", () => {
       expect(running.elapsedMs).toBeGreaterThanOrEqual(0);
       expect((await api("GET", `/api/internal/delegations/${opened[2].delegationId}`, undefined, readBack)).body).toMatchObject({ status: "queued", toBotName: "Quinn" });
 
-      // a slot frees, the line moves, and every result flows back
-      release("peer");
+      // one slot frees while the other is still working: the line moves
+      release("pr-2");
       await expect.poll(async () => (await botState(qa.id)).tasks.some((task: any) => task.threadId === opened[2].threadId && task.busy), { timeout: 15_000 }).toBe(true);
+      expect((await taskOf(qa.id, opened[0].threadId)).busy).toBe(true);
+      expect((await api("GET", `/api/internal/delegations/${opened[1].delegationId}`, undefined, readBack)).body).toMatchObject({ status: "done" });
+      release("pr-1");
+      release("pr-3");
       await expect.poll(async () => (await botState(qa.id)).busy, { timeout: 15_000 }).toBe(false);
       for (const thread of opened) {
         const receipt = (await api("GET", `/api/internal/delegations/${thread.delegationId}?wait_ms=15000`, undefined, readBack)).body;
