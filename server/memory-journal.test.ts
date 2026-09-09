@@ -109,8 +109,10 @@ describe("journalMemoryWrite / readMemoryJournal", () => {
     const file = journalFile(bot);
     expect(file.startsWith(WORKSPACES_DIR)).toBe(false);
     expect(file.startsWith(JOURNAL_DIR)).toBe(true);
-    expect(statSync(file).mode & 0o777).toBe(0o600);
-    expect(statSync(JOURNAL_DIR).mode & 0o777).toBe(0o700);
+    // Windows has no POSIX mode bits: the write path sets them, the platform reports 0666.
+    if (process.platform !== "win32") expect(statSync(file).mode & 0o777).toBe(0o600);
+    // Windows has no POSIX mode bits: the write path sets them, the platform reports 0666.
+    if (process.platform !== "win32") expect(statSync(JOURNAL_DIR).mode & 0o777).toBe(0o700);
   });
 
   it("records nothing when the text did not change", () => {
@@ -187,7 +189,8 @@ describe("revertMemoryChange", () => {
     const result = revertMemoryChange(bot, edit.entry!.id);
     expect(result.ok).toBe(true);
     expect(readMemoryDoc(bot, "memory/y.md").text).toBe("original\n");
-    expect(statSync(join(workspaceDir(bot), "memory", "y.md")).mode & 0o777).toBe(0o600);
+    // Windows has no POSIX mode bits: the write path sets them, the platform reports 0666.
+    if (process.platform !== "win32") expect(statSync(join(workspaceDir(bot), "memory", "y.md")).mode & 0o777).toBe(0o600);
     await flushMemoryJournal(bot);
     const [latest] = readMemoryJournal(bot, 1);
     expect(latest).toMatchObject({ actor: "person", via: "revert", before: "agent rewrote this\n", kind: "edited" });
