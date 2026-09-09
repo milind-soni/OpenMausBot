@@ -259,6 +259,10 @@ data class BotTask(
     val openedBy: ThreadOpener? = null,
 )
 
+/** The thread list's quiet second line, worded as the desktop words it. */
+val BotTask.openedByLabel: String?
+    get() = openedBy?.let { "opened by ${it.name}" }
+
 @Serializable
 data class Bot(
     val id: String,

@@ -251,6 +251,11 @@ public struct BotTask: Codable, Hashable, Sendable {
     public var alwaysAllow: [String]?
     public var projectId: String?
     public var openedBy: ThreadOpener?
+
+    /// The thread list's quiet second line, worded as the desktop words it.
+    public var openedByLabel: String? {
+        openedBy.map { "opened by \($0.name)" }
+    }
 }
 
 public struct Bot: Codable, Hashable, Identifiable, Sendable {

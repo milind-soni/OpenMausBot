@@ -518,6 +518,21 @@ final class DecodingTests: XCTestCase {
         }
     }
 
+    func testAThreadOpenedByABotSaysSoInTheList() throws {
+        // Same words as the desktop's thread list, so a person reading both
+        // screens reads one sentence.
+        let opened = try JSONDecoder().decode(
+            BotTask.self,
+            from: Data(#"{"threadId":"t2","title":"Ship it","createdAt":1,"openedBy":{"botId":"scout","name":"Scout","at":2}}"#.utf8)
+        )
+        XCTAssertEqual(opened.openedByLabel, "opened by Scout")
+
+        let byThePerson = try JSONDecoder().decode(
+            BotTask.self, from: Data(#"{"threadId":"t1","title":"","createdAt":1}"#.utf8)
+        )
+        XCTAssertNil(byThePerson.openedByLabel)
+    }
+
     func testDecodesAThreadRefOnAnActivityChipAndItsAbsence() throws {
         let json = """
         {"id":"m3","role":"bot","kind":"activity","at":1,

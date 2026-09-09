@@ -58,6 +58,11 @@ struct TaskManagerView: View {
                                     Text(RelativeStamp.list(task.createdAt))
                                         .font(.caption)
                                         .foregroundStyle(Color.secondary)
+                                    if let openedBy = task.openedByLabel {
+                                        Text(verbatim: openedBy)
+                                            .font(.caption)
+                                            .foregroundStyle(Color.secondary)
+                                    }
                                 }
                                 Spacer()
                                 if task.threadId == current.threadId {

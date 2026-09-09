@@ -46,6 +46,7 @@ import kotlinx.coroutines.launch
 import com.openmausbot.companion.core.ChatTarget
 import com.openmausbot.companion.core.chat
 import com.openmausbot.companion.core.target
+import com.openmausbot.companion.core.openedByLabel
 
 /**
  * Separate contexts for an agent or channel — the port of
@@ -251,6 +252,13 @@ private fun TaskRow(
                 fontSize = 12.sp,
                 color = secondaryTint,
             )
+            task.openedByLabel?.let { openedBy ->
+                Text(
+                    text = openedBy,
+                    fontSize = 12.sp,
+                    color = secondaryTint,
+                )
+            }
         }
 
         if (current) {

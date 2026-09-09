@@ -470,6 +470,21 @@ class DecodingTest {
     }
 
     @Test
+    fun aThreadOpenedByABotSaysSoInTheList() {
+        // Same words as the desktop's thread list, so a person reading both
+        // screens reads one sentence.
+        val opened = CompanionJson.decodeFromString<BotTask>(
+            """{"threadId":"t2","title":"Ship it","createdAt":1,"openedBy":{"botId":"scout","name":"Scout","at":2}}""",
+        )
+        assertEquals("opened by Scout", opened.openedByLabel)
+
+        val byThePerson = CompanionJson.decodeFromString<BotTask>(
+            """{"threadId":"t1","title":"","createdAt":1}""",
+        )
+        assertNull(byThePerson.openedByLabel)
+    }
+
+    @Test
     fun decodesAThreadRefOnAnActivityChipAndItsAbsence() {
         val chip = CompanionJson.decodeFromString<Message>(
             """{"id":"m3","role":"bot","kind":"activity","at":1,
