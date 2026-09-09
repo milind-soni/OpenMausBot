@@ -8,8 +8,8 @@
 import { writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
-import { createServer } from "vite";
 import { launchVerificationServer, runControlOmb } from "./control-omb.ts";
+import { fixtureApi, mountPreview, parkUntilSignal, type MountedPreview } from "./testing/preview-fixture.ts";
 
 const ARABIC_REPLY = [
   "## تقرير الأداء الأسبوعي",
@@ -58,17 +58,9 @@ const ENGLISH_REPLY = [
 ].join("\n");
 
 const fixture = await launchVerificationServer();
-let ui: Awaited<ReturnType<typeof createServer>> | undefined;
+let ui: MountedPreview | undefined;
 try {
-  const api = async (method: string, path: string, body?: unknown) => {
-    const response = await fetch(`${fixture.info.url}${path}`, {
-      method, headers: { "content-type": "application/json" },
-      ...(body === undefined ? {} : { body: JSON.stringify(body) }),
-    });
-    const result = await response.json();
-    if (!response.ok) throw new Error(`${method} ${path}: ${JSON.stringify(result)}`);
-    return result;
-  };
+  const api = fixtureApi(fixture.info.url);
   const control = (args: string[]) => runControlOmb([...args, "--url", fixture.info.url]);
 
   await control(["new-bot", "--name", "Probe"]);
@@ -99,23 +91,11 @@ try {
   await control(["send", "--bot", probe.id, "--text", "Now summarise that in English"]);
   await control(["wait", "--bot", probe.id, "--timeout", "30"]);
 
-  ui = await createServer({
-    root: fileURLToPath(new URL("..", import.meta.url)),
-    server: { host: "127.0.0.1", port: 0, proxy: { "/api": { target: fixture.info.url } } },
-    plugins: [{ name: "isolated-bidi", configureServer(server) {
-      server.middlewares.use((req, res, next) => {
-        if (req.url !== "/__bidi.html") return next();
-        void server.transformIndexHtml(req.url, '<!doctype html><html><head><meta name="viewport" content="width=device-width, initial-scale=1.0" /><title>Isolated OpenMaus Bidi</title></head><body><div id="root"></div><script type="module" src="/scripts/testing/threads-preview.tsx"></script></body></html>')
-          .then((html) => { res.setHeader("content-type", "text/html"); res.end(html); }).catch(next);
-      });
-    } }],
+  ui = await mountPreview(fixture, {
+    entry: "/scripts/testing/threads-preview.tsx", route: "/__bidi.html", title: "Isolated OpenMaus Bidi",
   });
-  await ui.listen();
-  console.log(JSON.stringify({ ...fixture.info, previewUrl: `${ui.resolvedUrls!.local[0]}__bidi.html` }));
-  await new Promise<void>((resolve) => {
-    process.once("SIGINT", resolve);
-    process.once("SIGTERM", resolve);
-  });
+  console.log(JSON.stringify({ ...fixture.info, previewUrl: ui.previewUrl }));
+  await parkUntilSignal();
 } finally {
   await ui?.close();
   await fixture.close();

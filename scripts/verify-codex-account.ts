@@ -3,21 +3,13 @@
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
-import { createServer } from "vite";
 import { launchVerificationServer, runControlOmb } from "./control-omb.ts";
+import { fixtureApi, mountPreview, parkUntilSignal, type MountedPreview } from "./testing/preview-fixture.ts";
 
 const fixture = await launchVerificationServer();
-let ui: Awaited<ReturnType<typeof createServer>> | undefined;
+let ui: MountedPreview | undefined;
 try {
-  const api = async (method: string, path: string, body?: unknown) => {
-    const response = await fetch(`${fixture.info.url}${path}`, {
-      method, headers: { "content-type": "application/json" },
-      ...(body === undefined ? {} : { body: JSON.stringify(body) }),
-    });
-    const result = await response.json();
-    if (!response.ok) throw new Error(`${method} ${path}: ${JSON.stringify(result)}`);
-    return result;
-  };
+  const api = fixtureApi(fixture.info.url);
   const fixtureHome = fixture.info.dataDir;
   const codexDir = join(fixtureHome, ".codex");
   const wrapper = join(fixtureHome, "offline-codex-account.mjs");
@@ -59,20 +51,11 @@ try {
     throw new Error(`Synthetic account not ready: ${JSON.stringify(codex?.snapshot)}`);
   }
 
-  ui = await createServer({
-    root: fileURLToPath(new URL("..", import.meta.url)),
-    server: { host: "127.0.0.1", port: 0, proxy: { "/api": { target: fixture.info.url } } },
-    plugins: [{ name: "isolated-codex-account", configureServer(server) {
-      server.middlewares.use((req, res, next) => {
-        if (req.url !== "/__codex-account.html") return next();
-        void server.transformIndexHtml(req.url, '<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Codex account — offline fixture</title></head><body><div id="root"></div><script type="module" src="/scripts/testing/threads-preview.tsx"></script></body></html>')
-          .then((html) => { res.setHeader("content-type", "text/html"); res.end(html); }).catch(next);
-      });
-    } }],
+  ui = await mountPreview(fixture, {
+    entry: "/scripts/testing/threads-preview.tsx", route: "/__codex-account.html", title: "Codex account — offline fixture",
   });
-  await ui.listen();
-  console.log(JSON.stringify({ ...fixture.info, launcherPid: process.pid, commandLog, failLogoutMarker, previewUrl: `${ui.resolvedUrls!.local[0]}__codex-account.html` }));
-  await new Promise<void>((resolve) => { process.once("SIGINT", resolve); process.once("SIGTERM", resolve); });
+  console.log(JSON.stringify({ ...fixture.info, launcherPid: process.pid, commandLog, failLogoutMarker, previewUrl: ui.previewUrl }));
+  await parkUntilSignal();
 } finally {
   await ui?.close();
   await fixture.close();

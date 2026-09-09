@@ -1,8 +1,7 @@
 // Real avatar UI and server, with a loopback-only fake Images API. No paid calls.
 import { createServer as createHttpServer } from "node:http";
-import { fileURLToPath } from "node:url";
-import { createServer } from "vite";
 import { launchVerificationServer, runControlOmb } from "./control-omb.ts";
+import { mountPreview, parkUntilSignal, type MountedPreview } from "./testing/preview-fixture.ts";
 
 const png = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=";
 const requests: Array<{ path: string; model?: string; authorized: boolean }> = [];
@@ -30,32 +29,19 @@ await new Promise<void>((resolve) => imageApi.listen(0, "127.0.0.1", resolve));
 const imagePort = (imageApi.address() as { port: number }).port;
 const imageBase = `http://127.0.0.1:${imagePort}/v1`;
 let fixture: Awaited<ReturnType<typeof launchVerificationServer>> | undefined;
-let ui: Awaited<ReturnType<typeof createServer>> | undefined;
+let ui: MountedPreview | undefined;
 try {
   fixture = await launchVerificationServer();
   await runControlOmb(["new-bot", "--name", "Avatar Scout", "--url", fixture.info.url]);
-  ui = await createServer({
-    root: fileURLToPath(new URL("..", import.meta.url)),
-    server: { host: "127.0.0.1", port: 0, proxy: { "/api": { target: fixture.info.url } } },
-    plugins: [{ name: "avatar-provider-fixture", configureServer(server) {
-      server.middlewares.use((req, res, next) => {
-        if (req.url?.split("?")[0] === "/__avatar-providers.html") {
-          void server.transformIndexHtml(req.url, '<html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Avatar providers — isolated fixture</title></head><body><div id="root"></div><script type="module" src="/src/testing/avatar-providers.tsx"></script></body></html>')
-            .then((html) => { res.setHeader("content-type", "text/html"); res.end(html); }).catch(next);
-          return;
-        }
-        if (req.url === "/__fixture/requests") {
-          res.setHeader("content-type", "application/json");
-          res.end(JSON.stringify(requests));
-          return;
-        }
-        next();
-      });
-    } }],
+  ui = await mountPreview(fixture, {
+    entry: "/src/testing/avatar-providers.tsx", route: "/__avatar-providers.html", title: "Avatar providers — isolated fixture",
+    extraRoutes: [{
+      path: "/__fixture/requests",
+      handler(_req, res) { res.setHeader("content-type", "application/json"); res.end(JSON.stringify(requests)); },
+    }],
   });
-  await ui.listen();
-  console.log(JSON.stringify({ ...fixture.info, imageBase, previewUrl: `${ui.resolvedUrls!.local[0]}__avatar-providers.html?base=${encodeURIComponent(imageBase)}` }));
-  await new Promise<void>((resolve) => { process.once("SIGINT", resolve); process.once("SIGTERM", resolve); });
+  console.log(JSON.stringify({ ...fixture.info, imageBase, previewUrl: `${ui.previewUrl}?base=${encodeURIComponent(imageBase)}` }));
+  await parkUntilSignal();
 } finally {
   await ui?.close();
   await fixture?.close();

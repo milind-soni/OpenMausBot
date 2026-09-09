@@ -4,24 +4,18 @@ import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { createInterface } from "node:readline";
 import { fileURLToPath, pathToFileURL } from "node:url";
-import { createServer } from "vite";
 import { launchVerificationServer, runControlOmb } from "./control-omb.ts";
+import { fixtureApi, mountPreview, parkUntilSignal, type MountedPreview } from "./testing/preview-fixture.ts";
 import { waitForExit } from "../server/testing/cleanup.ts";
 
 const root = fileURLToPath(new URL("..", import.meta.url));
 const fixture = await launchVerificationServer();
-let ui: Awaited<ReturnType<typeof createServer>> | undefined;
+let ui: MountedPreview | undefined;
 const evidence: unknown[] = [];
-const api = async (method: string, path: string, body?: unknown) => {
-  const response = await fetch(fixture.info.url + path, {
-    method, headers: { "content-type": "application/json", origin: fixture.info.url },
-    ...(body === undefined ? {} : { body: JSON.stringify(body) }),
-  });
-  const value = await response.json();
-  if (!response.ok) throw new Error(`${method} ${path}: ${JSON.stringify(value)}`);
-  if (method !== "GET") evidence.push({ method, path, status: response.status });
-  return value;
-};
+const api = fixtureApi(fixture.info.url, {
+  headers: { origin: fixture.info.url },
+  observe: (call) => { if (call.method !== "GET") evidence.push(call); },
+});
 async function until(check: () => boolean | Promise<boolean>) {
   const deadline = Date.now() + 20_000;
   while (!await check()) {
@@ -102,19 +96,11 @@ try {
     name: "Automatic scheduled check", prompt: "Verify the scheduler dispatches without Run now.", botId: pepper.id,
     enabled: true, schedule: { type: "once", at: Date.now() + 12_000 },
   });
-  ui = await createServer({
-    root, server: { host: "127.0.0.1", port: 0, proxy: { "/api": { target: fixture.info.url } } },
-    plugins: [{ name: "isolated-routines", configureServer(server) {
-      server.middlewares.use((req, res, next) => {
-        if (req.url !== "/__routines.html") return next();
-        void server.transformIndexHtml(req.url, '<!doctype html><html><head><meta name="viewport" content="width=device-width, initial-scale=1.0" /><title>Isolated OpenMaus Routines</title></head><body><div id="root"></div><script type="module" src="/scripts/testing/threads-preview.tsx"></script></body></html>')
-          .then((html) => { res.setHeader("content-type", "text/html"); res.end(html); }).catch(next);
-      });
-    } }],
+  ui = await mountPreview(fixture, {
+    entry: "/scripts/testing/threads-preview.tsx", route: "/__routines.html", title: "Isolated OpenMaus Routines",
   });
-  await ui.listen();
-  console.log(JSON.stringify({ ...fixture.info, previewUrl: `${ui.resolvedUrls!.local[0]}__routines.html`, pepperId: pepper.id, misoId: miso.id, scheduledRoutineId: scheduled.routine.id, manualRoutineId: manual.routine.id, resultsThreadId: resultsTask.threadId, resultsFolderId: resultsFolder.id }));
-  await new Promise<void>((resolve) => { process.once("SIGINT", resolve); process.once("SIGTERM", resolve); });
+  console.log(JSON.stringify({ ...fixture.info, previewUrl: ui.previewUrl, pepperId: pepper.id, misoId: miso.id, scheduledRoutineId: scheduled.routine.id, manualRoutineId: manual.routine.id, resultsThreadId: resultsTask.threadId, resultsFolderId: resultsFolder.id }));
+  await parkUntilSignal();
 } finally {
   const final = await api("GET", "/api/routines").catch(() => null);
   // Ctrl-C can reach the child before this owner reads its API. Preserve the
