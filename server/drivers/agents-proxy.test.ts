@@ -58,6 +58,7 @@ let profileRequestResponse: unknown = { requestId: "profile-request-1", summary:
 let lastSessionSearchUrl = "";
 let lastSessionReadUrl = "";
 let lastMemoryBody: any = null;
+let lastMemoryLogBody: any = null;
 let memoryResponse: unknown = { ok: true, text: "- new fact", truncated: false, bytes: 10 };
 let memoryStatus = 200;
 let sessionSearchResponse: unknown = {
@@ -229,6 +230,16 @@ beforeAll(async () => {
       });
       return;
     }
+    if (req.method === "POST" && req.url === "/api/internal/memory/log") {
+      let data = "";
+      req.on("data", (c) => (data += c));
+      req.on("end", () => {
+        lastMemoryLogBody = JSON.parse(data);
+        res.writeHead(200, { "content-type": "application/json" });
+        res.end(JSON.stringify({ ok: true, file: "memory/log/2026-09-10.md", line: '- 14:03 · from chat "Deploy" · shipped 0.1.70' }));
+      });
+      return;
+    }
     if (req.method === "GET" && req.url?.startsWith("/api/internal/session-search?")) {
       lastSessionSearchUrl = req.url;
       res.writeHead(200, { "content-type": "application/json" });
@@ -317,6 +328,7 @@ describe("agents-proxy MCP surface", () => {
       "create_bot",
       "request_credential",
       "memory_update",
+      "memory_log",
       "session_search",
       "session_read",
       "list_routines",
@@ -816,6 +828,22 @@ describe("agents-proxy MCP surface", () => {
     const after = await callTool("memory_update", { action: "append", text: "one more" });
     expect(after.result.isError).toBe(true);
     expect(lastMemoryBody).toBeNull();
+  });
+
+  it("memory_log appends to today's log through the harness and says so, never loading it anywhere", async () => {
+    const tools = await rpc("tools/list");
+    const tool = tools.result.tools.find((t: { name: string }) => t.name === "memory_log");
+    expect(tool.description).toContain("what happened, not what is true");
+    expect(tool.description).toContain("Logs are never loaded into your prompt");
+    expect(tool.inputSchema.required).toEqual(["text"]);
+    const logged = await callTool("memory_log", { text: "shipped 0.1.70", fromBotId: "spoofed" });
+    expect(logged.result.isError).toBe(false);
+    expect(logged.result.content[0].text).toBe('Logged to memory/log/2026-09-10.md: - 14:03 · from chat "Deploy" · shipped 0.1.70');
+    expect(lastMemoryLogBody).toEqual({ fromBotId: "bot-asker", fromThreadId: "thread-asker-routine", text: "shipped 0.1.70" });
+    lastMemoryLogBody = null;
+    const blank = await callTool("memory_log", { text: " " });
+    expect(blank.result.isError).toBe(true);
+    expect(lastMemoryLogBody).toBeNull();
   });
 
   it("session_search recalls the bot's own past threads through the harness, scoped to the sender", async () => {

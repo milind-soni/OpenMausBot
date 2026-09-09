@@ -343,6 +343,60 @@ export function updateMemory(botId: string, update: MemoryUpdate, opts: MemoryUp
   return { ok: true, ...readMemoryFile(botId), bytes, entry };
 }
 
+/** The daily log lives beside the topic files, one file per day. It is
+ * never loaded into a prompt: a log is what happened, not what is true,
+ * and the prompt budget is for what is true. */
+export const MEMORY_LOG_DIR = "log";
+const LOG_FILE_NAME = /^\d{4}-\d{2}-\d{2}\.md$/;
+
+export type MemoryLogResult =
+  | { ok: true; file: string; line: string }
+  | { ok: false; code: "invalid"; error: string };
+
+/** Append one timestamped line to today's memory/log/YYYY-MM-DD.md. The
+ * time is the machine's own, the way a person would note it; the day is
+ * the file name. Same scrub and same modes as every other memory write. */
+export function appendMemoryLog(botId: string, text: string, opts: MemoryUpdateOptions = {}): MemoryLogResult {
+  if (typeof text !== "string" || !text.trim()) {
+    return { ok: false, code: "invalid", error: "memory_log needs the text of what happened." };
+  }
+  const now = opts.now ?? new Date();
+  const pad = (n: number) => String(n).padStart(2, "0");
+  const source = cleanSource(opts.source);
+  const line = `- ${pad(now.getHours())}:${pad(now.getMinutes())}${SEP}${source ? `from ${source}${SEP}` : ""}${normaliseEntryText(redactSecretsInText(text))}`;
+  const dir = join(ensureWorkspace(botId), "memory", MEMORY_LOG_DIR);
+  mkdirSync(dir, { recursive: true, mode: 0o700 });
+  const file = `${memoryDate(now)}.md`;
+  const path = join(dir, file);
+  let current = "";
+  try {
+    current = readFileSync(path, "utf8");
+  } catch {
+    // first line of the day
+  }
+  writeFileAtomic(path, `${current}${current && !current.endsWith("\n") ? "\n" : ""}${line}\n`, { mode: 0o600 });
+  return { ok: true, file: `memory/${MEMORY_LOG_DIR}/${file}`, line };
+}
+
+/** The bot's daily log files, oldest first, by day name. */
+export function listMemoryLogs(botId: string): string[] {
+  try {
+    return readdirSync(join(workspaceDir(botId), "memory", MEMORY_LOG_DIR)).filter((name) => LOG_FILE_NAME.test(name)).sort();
+  } catch {
+    return [];
+  }
+}
+
+/** One day's log, or null when there is none or the name is not a day. */
+export function readMemoryLog(botId: string, name: string): string | null {
+  if (!LOG_FILE_NAME.test(name)) return null;
+  try {
+    return readFileSync(join(workspaceDir(botId), "memory", MEMORY_LOG_DIR, name), "utf8");
+  } catch {
+    return null;
+  }
+}
+
 // One path segment, starts with a word character, plain characters only,
 // ends in .md. No slashes or backslashes means no traversal; no leading dot
 // means no dotfiles and no bare "..". This is the single gate every topic

@@ -6,8 +6,11 @@ import { join } from "node:path";
 import { beforeEach, describe, expect, it } from "vitest";
 
 import {
+  appendMemoryLog,
   ensureWorkspace,
   ensureTaskWorkspace,
+  listMemoryLogs,
+  readMemoryLog,
   isMemoryTopicName,
   listMemoryTopics,
   loadMemory,
@@ -319,6 +322,31 @@ describe("workspace", () => {
     writeMemoryFile(BOT, `# Memory\n- token: ghp_${"c".repeat(36)}\n`);
     expect(readMemoryFile(BOT).text).not.toContain("c".repeat(36));
     expect(readMemoryFile(BOT).text).toContain("«redacted");
+  });
+
+  it("appends timestamped lines to today's log file, scrubbed, private, and outside the prompt", () => {
+    const now = new Date(2026, 8, 10, 14, 3);
+    const first = appendMemoryLog(BOT, "shipped 0.1.70 with token ghp_" + "d".repeat(36), { source: 'chat "Deploy"', now });
+    expect(first).toMatchObject({ ok: true, file: "memory/log/2026-09-10.md" });
+    expect(first.ok ? first.line : "").toBe('- 14:03 · from chat "Deploy" · shipped 0.1.70 with token «redacted 40 chars»');
+    expect(appendMemoryLog(BOT, "rollback\ndone", { now: new Date(2026, 8, 10, 15, 30) }).ok).toBe(true);
+    expect(readMemoryLog(BOT, "2026-09-10.md")).toBe(
+      '- 14:03 · from chat "Deploy" · shipped 0.1.70 with token «redacted 40 chars»\n- 15:30 · rollback done\n',
+    );
+    appendMemoryLog(BOT, "next day", { now: new Date(2026, 8, 11, 9, 0) });
+    expect(listMemoryLogs(BOT)).toEqual(["2026-09-10.md", "2026-09-11.md"]);
+    const dir = workspaceDir(BOT);
+    if (process.platform !== "win32") {
+      expect(statSync(join(dir, "memory", "log")).mode & 0o777).toBe(0o700);
+      expect(statSync(join(dir, "memory", "log", "2026-09-10.md")).mode & 0o777).toBe(0o600);
+    }
+    // logs are not topics: the prompt's topic pointers and the topic list ignore them
+    expect(listMemoryTopics(BOT)).toEqual([]);
+    expect(loadMemory(BOT)).toBeNull();
+    expect(memorySystemPrompt(BOT)).not.toContain("shipped 0.1.70");
+    expect(appendMemoryLog(BOT, "  ")).toMatchObject({ ok: false, code: "invalid" });
+    expect(readMemoryLog(BOT, "../MEMORY.md")).toBeNull();
+    expect(readMemoryLog("never-ran", "2026-09-10.md")).toBeNull();
   });
 
   it("accepts plain single-segment topic names and nothing else", () => {
