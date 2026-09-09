@@ -230,12 +230,26 @@ import {
   SESSION_SEARCH_SYSTEM_PROMPT,
   workspaceDir,
 } from "./workspace.ts";
+import { readMemoryTopic } from "./workspace.ts";
 import {
-  readMemoryFile,
-  readMemoryTopic,
-  writeMemoryFile,
-  MEMORY_FILE_MAX_BYTES,
-} from "./workspace.ts";
+  MEMORY_INDEX,
+  MemoryStoreError,
+  memoryCapacity,
+  memoryOverview,
+  openMemoryLocation,
+  readMemoryDoc,
+} from "./memory-store.ts";
+import {
+  beginMemoryTurn,
+  endMemoryTurn,
+  flushAllMemoryJournals,
+  flushMemoryJournal,
+  journalMemoryDelete,
+  journalMemoryWrite,
+  readMemoryJournal,
+  revertMemoryChange,
+  type MemoryJournalEntry,
+} from "./memory-journal.ts";
 import {
   readSectionContext,
   sectionContextKey,
@@ -2651,6 +2665,17 @@ bus.subscribe((event: RuntimeEvent) => {
   } else if (event.type !== "session.exited") watchdog.touch(event.threadId);
 });
 
+// Memory journal turn boundary (server/memory-journal.ts). A bot's own
+// file-tool writes to MEMORY.md and memory/ have no hook to tap, so the
+// diff against the baseline taken at dispatch is made when the turn
+// settles — session.exited too, because a turn that died may still have
+// written. Fire-and-forget by construction: endMemoryTurn swallows its own
+// failures and never reaches the fold below.
+bus.subscribe((event: RuntimeEvent) => {
+  if (shouldIgnoreProviderEvent(event)) return;
+  if (event.type === "turn.completed" || event.type === "session.exited") endMemoryTurn(event.threadId);
+});
+
 // Bots currently working with nobody at the keyboard — a webhook turn, or a
 // turn a webhook-driven bot handed to a teammate. Auto mode is a decision
 // someone made for turns they were present for, so these don't inherit it:
@@ -4501,7 +4526,11 @@ async function startTurn(
       // desk, not the whole house — and the workspace is where its
       // MEMORY.md lives. API/box engines have no local filesystem story.
       const worksInWorkspace = instance.driverKind !== "grok" && instance.driverKind !== "boxAgent";
-      if (worksInWorkspace) ensureWorkspace(bot.id);
+      if (worksInWorkspace) {
+        ensureWorkspace(bot.id);
+        // baseline for the journal's turn-boundary diff (see the bus hook)
+        beginMemoryTurn(bot.id, threadId);
+      }
       const privateWorkspace = worksInWorkspace ? ensureTaskWorkspace(bot.id, threadId) : undefined;
       const skillInstructions = renderSkillInstructions(selectedSkills, {
         includeRoot: worksInWorkspace && opts?.runOn !== "cloud",
@@ -6037,6 +6066,8 @@ async function runGroupMemberTurn(
   // conversation, not a different bot
   const worksInWorkspace = instance.driverKind !== "grok" && instance.driverKind !== "boxAgent";
   const workspace = worksInWorkspace ? ensureWorkspace(bot.id) : undefined;
+  // a room member's memory writes are journaled the same as a 1:1 turn's
+  if (workspace) beginMemoryTurn(bot.id, threadId);
   // The room's folder pins here — on the first turn that actually
   // dispatches, not at PATCH time — so a folder set on a never-used room
   // still takes effect, while a room that already worked somewhere never
@@ -8100,6 +8131,27 @@ function json(res: ServerResponse, status: number, body: unknown) {
   const data = JSON.stringify(body);
   res.writeHead(status, { "content-type": "application/json" });
   res.end(data);
+}
+
+/** A store refusal is a client error with a status of its own (400 path,
+ * 409 conflict, 413 too large); a 409 also carries what is on disk now so
+ * the editor can show the bot's version instead of guessing. Anything else
+ * is a real failure and goes to the handler's catch-all. */
+function replyMemoryError(res: ServerResponse, error: unknown) {
+  if (!(error instanceof MemoryStoreError)) throw error;
+  if (error.code === "conflict") {
+    return json(res, error.status, { error: error.message, code: error.code, currentHash: error.currentHash, current: error.current });
+  }
+  return json(res, error.status, { error: error.message, code: error.code });
+}
+
+/** The journal row as the panel shows it: the full prior text stays on
+ * the server (a revert needs it there, the list does not), and the thread
+ * id becomes the chat title people recognise. */
+function journalEntryForClient(botId: string, entry: MemoryJournalEntry) {
+  const { before: _before, ...visible } = entry;
+  const threadTitle = entry.threadId ? store.taskByThread(botId, entry.threadId)?.title : undefined;
+  return threadTitle ? { ...visible, threadTitle } : visible;
 }
 
 function readBody(req: IncomingMessage, limit = 1_000_000): Promise<any> {
@@ -12126,28 +12178,108 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
       return json(res, 200, { bot: visible });
     }
 
-    // ── bot memory: MEMORY.md + memory/ topic files ─────────────────────
-    // The files already belong to the user (plain markdown in the bot's
-    // workspace); these routes only make them visible without a trip to
-    // the filesystem. Reads never create the workspace — a bot that has
-    // not run yet simply has nothing to show.
+    // ── bot memory: MEMORY.md + memory/ topic and log files ──────────────
+    // The files already belong to the person (plain markdown in the bot's
+    // workspace). server/memory-store.ts decides which paths can be reached
+    // and refuses a save whose expectedHash no longer matches the file;
+    // server/memory-journal.ts records every change made here so it can be
+    // read back and reverted. Reads never create the workspace — a bot that
+    // has not run yet simply has nothing to show. Admin scope by default
+    // (request-auth.ts), like the profile routes above.
     m = path.match(/^\/api\/bots\/([\w-]+)\/memory$/);
     if (m && method === "GET") {
       if (!store.bot(m[1])) return json(res, 404, { error: "no such bot" });
-      return json(res, 200, { ...readMemoryFile(m[1]), topics: listMemoryTopics(m[1]) });
+      try {
+        const overview = memoryOverview(m[1]);
+        // `text` and `truncated` ride along one release for clients of the
+        // old whole-file shape; the panel reads the file through /memory/file
+        return json(res, 200, { ...overview, text: readMemoryDoc(m[1], MEMORY_INDEX).text, truncated: overview.index.truncated });
+      } catch (error) {
+        return replyMemoryError(res, error);
+      }
     }
     if (m && method === "PUT") {
+      // The pre-panel whole-file write, kept one release: no hash check, so
+      // it can still overwrite a note the bot just wrote — journaled as the
+      // person's so at least the journal can undo it.
       if (!store.bot(m[1])) return json(res, 404, { error: "no such bot" });
       const parsed = z.object({ text: z.string() }).safeParse(await readBody(req));
       if (!parsed.success) return json(res, 400, { error: "text must be a string" });
-      if (Buffer.byteLength(parsed.data.text, "utf8") > MEMORY_FILE_MAX_BYTES) {
-        return json(res, 400, {
-          error: `memory is capped at ${MEMORY_FILE_MAX_BYTES / 1024}KB — move longer notes into memory/<topic>.md files`,
-        });
+      try {
+        const { doc } = journalMemoryWrite(m[1], MEMORY_INDEX, parsed.data.text, { actor: "person", via: "api" });
+        return json(res, 200, { ok: true, hash: doc.hash, truncated: memoryCapacity(doc.text).truncated });
+      } catch (error) {
+        return replyMemoryError(res, error);
       }
-      writeMemoryFile(m[1], parsed.data.text);
-      // truncated echoes back so the editor can warn about the load budget
-      return json(res, 200, { ok: true, truncated: readMemoryFile(m[1]).truncated });
+    }
+    m = path.match(/^\/api\/bots\/([\w-]+)\/memory\/file$/);
+    if (m && method === "GET") {
+      if (!store.bot(m[1])) return json(res, 404, { error: "no such bot" });
+      try {
+        return json(res, 200, readMemoryDoc(m[1], url.searchParams.get("path") ?? MEMORY_INDEX));
+      } catch (error) {
+        return replyMemoryError(res, error);
+      }
+    }
+    if (m && method === "PUT") {
+      if (!store.bot(m[1])) return json(res, 404, { error: "no such bot" });
+      const parsed = z
+        .object({ path: z.string().default(MEMORY_INDEX), text: z.string(), expectedHash: z.string().optional() })
+        .safeParse(await readBody(req));
+      if (!parsed.success) return json(res, 400, { error: "text must be a string; path and expectedHash are optional strings" });
+      try {
+        const { doc, entry } = journalMemoryWrite(m[1], parsed.data.path, parsed.data.text, {
+          actor: "person",
+          via: "ui",
+          expectedHash: parsed.data.expectedHash,
+        });
+        return json(res, 200, { ok: true, ...doc, entry: entry ? journalEntryForClient(m[1], entry) : null, overview: memoryOverview(m[1]) });
+      } catch (error) {
+        return replyMemoryError(res, error);
+      }
+    }
+    if (m && method === "DELETE") {
+      if (!store.bot(m[1])) return json(res, 404, { error: "no such bot" });
+      const file = url.searchParams.get("path") ?? "";
+      try {
+        const entry = journalMemoryDelete(m[1], file, { actor: "person", via: "ui" });
+        return json(res, 200, { ok: true, path: file, entry: entry ? journalEntryForClient(m[1], entry) : null, overview: memoryOverview(m[1]) });
+      } catch (error) {
+        return replyMemoryError(res, error);
+      }
+    }
+    m = path.match(/^\/api\/bots\/([\w-]+)\/memory\/journal$/);
+    if (m && method === "GET") {
+      if (!store.bot(m[1])) return json(res, 404, { error: "no such bot" });
+      // the row a save queued a moment ago may not have reached disk yet
+      await flushMemoryJournal(m[1]);
+      const limit = Math.min(200, Math.max(1, Number(url.searchParams.get("limit") ?? 50) || 50));
+      const botId = m[1];
+      return json(res, 200, { entries: readMemoryJournal(botId, limit).map((entry) => journalEntryForClient(botId, entry)) });
+    }
+    m = path.match(/^\/api\/bots\/([\w-]+)\/memory\/journal\/([\w-]+)\/revert$/);
+    if (m && method === "POST") {
+      if (!store.bot(m[1])) return json(res, 404, { error: "no such bot" });
+      await flushMemoryJournal(m[1]);
+      const result = revertMemoryChange(m[1], m[2]);
+      if (!result.ok) return json(res, result.status, { error: result.error });
+      return json(res, 200, { ok: true, ...result.doc, entry: result.entry ? journalEntryForClient(m[1], result.entry) : null, overview: memoryOverview(m[1]) });
+    }
+    m = path.match(/^\/api\/bots\/([\w-]+)\/memory\/open$/);
+    if (m && method === "POST") {
+      if (!store.bot(m[1])) return json(res, 404, { error: "no such bot" });
+      const parsed = z.object({ target: z.enum(["obsidian", "folder"]) }).safeParse(await readBody(req));
+      if (!parsed.success) return json(res, 400, { error: "target must be obsidian or folder" });
+      // The folder is on this machine's disk; opening it only makes sense
+      // from this machine. A paired phone or a remote browser gets the path
+      // to open by hand instead.
+      const workspacePath = memoryOverview(m[1]).workspacePath;
+      if (auth.kind !== "loopback") {
+        return json(res, 403, { error: `This only works on the computer running OpenMausBot. The memory folder there is ${workspacePath}`, workspacePath });
+      }
+      const opened = await openMemoryLocation(m[1], parsed.data.target);
+      if (!opened.ok) return json(res, 500, { error: opened.error, workspacePath: opened.workspacePath });
+      return json(res, 200, opened);
     }
     m = path.match(/^\/api\/bots\/([\w-]+)\/memory\/topics\/([^/]+)$/);
     if (m && method === "GET") {
@@ -14254,6 +14386,7 @@ const gracefulShutdown = createGracefulShutdown({
       await browserRuntime.closeAll();
     },
     () => flushAllProfileHistory(),
+    () => flushAllMemoryJournals(),
   ],
   // Cleanup jobs run concurrently. Release only after they settle (or reach
   // the shutdown deadline), immediately before the process exits, so no new
