@@ -31,7 +31,7 @@ import {
   Users,
   X,
 } from "lucide-react";
-import { api, useStore, formatTime, visibleMessages, currentTaskBot, type Bot, type Group } from "@/state/store";
+import { api, useStore, formatTime, visibleMessages, currentTaskBot, type AppState, type Bot, type Group } from "@/state/store";
 
 import { BotAvatar, InitialsAvatar } from "./Avatar";
 import { stateForBot } from "@/lib/mascot";
@@ -244,6 +244,17 @@ export function GroupListItem({
   );
 }
 
+/** Scroll the row of a thread the person asked to open into view, once the
+ * switch has landed and that thread is the one on screen. `block: nearest`
+ * keeps an already-visible row still. */
+function useRevealedThreadRow(reveal: AppState["revealThread"], currentThreadId: string | null) {
+  useEffect(() => {
+    if (!reveal || reveal.threadId !== currentThreadId) return;
+    const row = document.querySelector<HTMLElement>(`[data-sidebar-thread-row="${CSS.escape(reveal.threadId)}"]`);
+    row?.scrollIntoView({ block: "nearest" });
+  }, [reveal, currentThreadId]);
+}
+
 export function GroupThreadList({ group, selected, density = "comfortable", query = "" }: { group: Group; selected: boolean; density?: SidebarDensity; query?: string }) {
   const { state, dispatch } = useStore();
   const [showAll, setShowAll] = useState(false);
@@ -254,6 +265,7 @@ export function GroupThreadList({ group, selected, density = "comfortable", quer
     activity: task.threadId === group.threadId && waiting ? "waiting-on-you" as const : undefined,
   }));
   const visible = visibleSidebarThreads(tasks, group.threadId, query, [], showAll);
+  useRevealedThreadRow(state.revealThread, selected ? group.threadId : null);
   return <div className="mb-2 ml-5 space-y-0.5 border-l border-hairline/30 pl-2" role="group" aria-label={t("task.namedList", { name: group.name })}>
     {visible.map((task) => <SidebarThreadRow key={task.threadId} task={task} current={selected && task.threadId === group.threadId} compact={density === "compact"}
       onSelect={() => { if (task.threadId !== group.threadId) dispatch({ type: "switchGroupTask", groupId: group.id, threadId: task.threadId }); else dispatch({ type: "select", id: group.id }); }}
@@ -840,6 +852,7 @@ export function BotThreadList({ bot, selected, density = "comfortable", query = 
     });
   }, [selected, currentProjectId]);
   const visibleTasks = visibleSidebarThreads(tasks, bot.threadId, query, projects, showAll);
+  useRevealedThreadRow(state.revealThread, selected ? bot.threadId : null);
   const renderThread = (task: (typeof tasks)[number]) => {
     const thread = currentTaskBot(bot, task.threadId);
     return <SidebarThreadRow key={task.threadId} task={{ ...task, busy: thread.busy, activity: thread.activity }} current={selected && task.threadId === bot.threadId} compact={density === "compact"} folders={projects}
@@ -962,6 +975,11 @@ export function BotListItem({
   const selected = state.activeView === "chat" && state.selectedId === bot.id;
   const [threadsOpen, setThreadsOpen] = useState(Boolean(query));
   useEffect(() => { if (query && showThreads) setThreadsOpen(true); }, [query, showThreads]);
+  // a thread opened from a chip or #Title link: unfold this bot so the row
+  // it lands on is on screen (BotThreadList scrolls it into view)
+  const reveal = state.revealThread;
+  const revealHere = Boolean(reveal && (bot.threadId === reveal.threadId || bot.tasks?.some((task) => task.threadId === reveal.threadId)));
+  useEffect(() => { if (revealHere && showThreads) setThreadsOpen(true); }, [reveal, revealHere, showThreads]);
   const deleting = state.deletingBots[bot.id] === true;
   const mascotMotion = selected && state.mascotMotion?.botId === bot.id ? state.mascotMotion : null;
   const iconOnly = density === "icons";

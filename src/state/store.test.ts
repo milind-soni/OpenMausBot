@@ -6,6 +6,7 @@ import {
   initialState,
   loadSnapshotBoundary,
   openNotificationTarget,
+  openThread,
   persistBotUpdate,
   pinBotThreadAction,
   reducer,
@@ -559,6 +560,57 @@ describe("notification routing", () => {
     openNotificationTarget(dispatch, { botId: "bot-1", threadId: "deleted-task-thread" }, { bots, groups });
 
     expect(dispatch.mock.calls.map(([action]) => action)).toEqual([{ type: "select", id: "bot-1" }]);
+  });
+
+  describe("openThread", () => {
+    const named = bots.map((bot) => ({ ...bot, name: "Scout" }));
+
+    it("selects the bot, switches the view to the thread and reveals its row", () => {
+      const dispatch = vi.fn();
+      expect(openThread(dispatch, { botId: "bot-1", threadId: "detached-thread" }, { bots: named, groups })).toBe(true);
+      expect(dispatch.mock.calls.map(([action]) => action)).toEqual([
+        { type: "select", id: "bot-1" },
+        { type: "switchTask", botId: "bot-1", threadId: "detached-thread" },
+        { type: "revealThread", threadId: "detached-thread" },
+      ]);
+    });
+
+    it("opens a room thread through the room, not a bot switch", () => {
+      const dispatch = vi.fn();
+      openThread(dispatch, { botId: "bot-1", threadId: "older-room-thread" }, { bots: named, groups });
+      expect(dispatch.mock.calls.map(([action]) => action)).toEqual([
+        { type: "select", id: "room-1" },
+        { type: "switchGroupTask", groupId: "room-1", threadId: "older-room-thread" },
+        { type: "revealThread", threadId: "older-room-thread" },
+      ]);
+    });
+
+    it("falls back to the bot with a quiet notice when the thread is gone, never a switch that would 404", () => {
+      const dispatch = vi.fn();
+      expect(openThread(dispatch, { botId: "bot-1", threadId: "deleted-thread" }, { bots: named, groups })).toBe(false);
+      expect(dispatch.mock.calls.map(([action]) => action)).toEqual([
+        { type: "select", id: "bot-1" },
+        { type: "notice", notice: { kind: "thread-gone", botName: "Scout" } },
+      ]);
+    });
+
+    it("only notices when even the bot is gone", () => {
+      const dispatch = vi.fn();
+      expect(openThread(dispatch, { botId: "deleted-bot", threadId: "deleted-thread" }, { bots: named, groups })).toBe(false);
+      expect(dispatch.mock.calls.map(([action]) => action)).toEqual([
+        { type: "notice", notice: { kind: "thread-gone", botName: null } },
+      ]);
+    });
+
+    it("stores the notice and bumps the reveal nonce so the same thread can be revealed twice", () => {
+      const noticed = reducer(initialState, { type: "notice", notice: { kind: "thread-gone", botName: "Scout" } });
+      expect(noticed.notice).toEqual({ kind: "thread-gone", botName: "Scout" });
+      expect(reducer(noticed, { type: "notice", notice: null }).notice).toBeNull();
+      const once = reducer(initialState, { type: "revealThread", threadId: "t" });
+      const twice = reducer(once, { type: "revealThread", threadId: "t" });
+      expect(once.revealThread).toEqual({ threadId: "t", nonce: 1 });
+      expect(twice.revealThread?.nonce).toBe(2);
+    });
   });
 
   it("identifies only the exact chat thread currently on screen", () => {

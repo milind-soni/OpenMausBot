@@ -611,6 +611,11 @@ export interface AppState {
   focusMessage: { threadId: string; messageId: string; nonce: number; consumed: boolean } | null;
   connected: boolean;
   error: string | null;
+  /** a quiet, non-error line above the transcript; clears itself */
+  notice: { kind: "thread-gone"; botName: string | null } | null;
+  /** a thread the person asked to open (chip or #Title link): the sidebar
+   * expands its bot and scrolls the row into view once it is current */
+  revealThread: { threadId: string; nonce: number } | null;
   mascotMotion: {
     botId: string;
     nonce: number;
@@ -815,6 +820,8 @@ export type Action =
   | { type: "interrupt"; botId: string; threadId?: string; onError?: () => void }
   | { type: "connected"; value: boolean }
   | { type: "error"; message: string | null }
+  | { type: "notice"; notice: AppState["notice"] }
+  | { type: "revealThread"; threadId: string }
   | { type: "toggleSettings"; open?: boolean; section?: BotSettingsSection }
   | { type: "togglePlugins"; open?: boolean }
   | { type: "toggleComputer"; open?: boolean }
@@ -892,6 +899,46 @@ export function openNotificationTarget(
     bot.threadId === target.threadId ||
     (bot.tasks ?? []).some((task) => task.threadId === target.threadId);
   if (known) dispatch({ type: "switchTask", botId: bot.id, threadId: target.threadId });
+}
+
+/** A thread the person can open from a chip or a #Title link. */
+export interface ThreadTarget {
+  botId: string;
+  threadId: string;
+}
+
+interface ThreadOpeningState extends NotificationRoutingState {
+  bots: Array<NotificationThreadOwner & { name: string }>;
+}
+
+/** Open a thread the person clicked: select its bot (or room) and switch
+ * the VIEW to that thread — never the work; a turn running elsewhere keeps
+ * running (the #981 rule). The sidebar then reveals the row. A thread this
+ * client no longer knows (deleted, or not yet announced) falls back to the
+ * bot with a quiet notice rather than a 404 or a crash. Returns whether the
+ * thread was found. */
+export function openThread(
+  dispatch: (action: Action) => void,
+  target: ThreadTarget,
+  state: ThreadOpeningState,
+): boolean {
+  const owns = (owner: NotificationThreadOwner) =>
+    owner.threadId === target.threadId || (owner.tasks ?? []).some((task) => task.threadId === target.threadId);
+  if (state.groups.some(owns) || state.bots.some(owns)) {
+    openNotificationTarget(dispatch, target, state);
+    dispatch({ type: "revealThread", threadId: target.threadId });
+    return true;
+  }
+  const bot = state.bots.find((candidate) => candidate.id === target.botId);
+  if (bot) dispatch({ type: "select", id: bot.id });
+  dispatch({ type: "notice", notice: { kind: "thread-gone", botName: bot?.name ?? null } });
+  return false;
+}
+
+/** {@link openThread} bound to the live store, for chips and links. */
+export function useOpenThread(): (target: ThreadTarget) => boolean {
+  const { state, dispatch } = useStore();
+  return (target) => openThread(dispatch, target, state);
 }
 
 function updateBot(state: AppState, botId: string, fn: (b: Bot) => Bot): AppState {
@@ -1410,6 +1457,10 @@ export function reducer(state: AppState, action: Action): AppState {
     }
     case "togglePlugins":
       return { ...state, pluginsOpen: action.open ?? !state.pluginsOpen };
+    case "notice":
+      return { ...state, notice: action.notice };
+    case "revealThread":
+      return { ...state, revealThread: { threadId: action.threadId, nonce: (state.revealThread?.nonce ?? 0) + 1 } };
     case "focusMessage":
       return {
         ...state,
@@ -1715,6 +1766,8 @@ export const initialState: AppState = {
   focusMessage: null,
   connected: false,
   error: null,
+  notice: null,
+  revealThread: null,
   mascotMotion: null,
   pendingQueued: {},
   consumedQueueIds: {},
@@ -2168,6 +2221,9 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         action.type !== "deleteBot"
       ) rawDispatch(action);
       switch (action.type) {
+        case "notice":
+          if (action.notice) setTimeout(() => rawDispatch({ type: "notice", notice: null }), 6000);
+          break;
         case "createRoutine":
           api("/api/routines", { method: "POST", body: JSON.stringify(action.input) }).catch(showError);
           break;

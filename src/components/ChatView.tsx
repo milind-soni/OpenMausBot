@@ -1238,6 +1238,13 @@ export function ChatView({ bot: profile }: { bot: Bot }) {
           </div>
         </div>
       )}
+      {state.notice && (
+        <div className="w-full px-5">
+          <div role="status" className="mb-2 rounded-lg border border-hairline/40 bg-panel px-3 py-2 text-[13px] text-ink-secondary">
+            {state.notice.botName ? t("thread.goneShowing", { name: state.notice.botName }) : t("thread.gone")}
+          </div>
+        </div>
+      )}
 
       {/* Pinned message banner */}
       <PinnedBanner
