@@ -213,7 +213,7 @@ import {
 } from "./store.ts";
 import * as tts from "./tts/index.ts";
 import { narrateTool, toUtterances } from "./tts/speech-text.ts";
-import { buildTurnContext, engineIsFresh } from "./turn-context.ts";
+import { buildRecoveryText, buildTurnContext, engineIsFresh } from "./turn-context.ts";
 import { extractTurnImages } from "./turn-images.ts";
 import { TurnWatchdog } from "./turn-watchdog.ts";
 import { TurnResources, workspaceResource, type TurnOwner } from "./turn-resources.ts";
@@ -4424,6 +4424,10 @@ async function startTurn(
   // this already-built turn must either keep its old session or replay on the
   // following turn, never start a blank session with no transcript.
   const resumeCursor = resume ? task.resumeCursors[instanceId] : undefined;
+  // A cursor the provider no longer honours must not brick the thread: the
+  // driver may fall back to ONE fresh session, and this is what it sends
+  // there, so the new session is not blank (server/resume-recovery.ts).
+  const recoveryText = resumeCursor !== undefined ? buildRecoveryText({ text: turnText, transcript }) : undefined;
 
   const persona = [
     `You are ${bot.name}, a personal bot in OpenMausBot.`,
@@ -4885,6 +4889,7 @@ async function startTurn(
         // the active task's own session — another task's cursor would
         // resume the wrong conversation and defeat the context bubble
         resumeCursor,
+        ...(recoveryText !== undefined ? { recoveryText } : {}),
         transcript,
         system: prompt.text,
         integrations,

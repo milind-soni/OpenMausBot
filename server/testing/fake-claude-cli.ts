@@ -4,7 +4,10 @@
 // scripted session. Failure modes are toggled by env var, mirroring how
 // the real thing misbehaves:
 //
-//   FAKE_CLAUDE_MODE   happy (default) | exit-early | hang | malformed
+//   FAKE_CLAUDE_MODE   happy (default) | exit-early | hang | malformed |
+//                      dead-session (fails only when --resume is passed)
+//                      | resume-dies-after-init (a --resume launch emits
+//                        init, then exits without result or output)
 //                      | stream (partial-message text deltas before the
 //                        whole-message frame, plus subagent noise to drop)
 //                      | not-logged-in (the frames a signed-out CLI really
@@ -184,6 +187,14 @@ const playTurn = (prompt: JsonValue) => {
     );
   }
 
+  // A resumed session the CLI no longer has: it exits before any `init`
+  // frame, so the prompt on stdin is never read. A FRESH launch (--session-id)
+  // works normally, which is what makes recovery observable.
+  if (mode === "dead-session" && argv.includes("--resume")) {
+    process.stderr.write(`fake-claude: No conversation found with session ID: ${argAfter("--resume")}\n`);
+    process.exit(1);
+  }
+
   if (mode === "exit-early") {
     process.stderr.write("fake-claude: simulated crash before result\n");
     process.exit(3);
@@ -214,6 +225,14 @@ const playTurn = (prompt: JsonValue) => {
 
   // the real CLI re-announces init on every turn of a live process
   out({ type: "system", subtype: "init", session_id: sessionId, model });
+
+  // The CLI accepted the resumed session — it read the prompt — and then
+  // died with nothing to show. The prompt may already have run tools, so
+  // the driver must NOT send it again.
+  if (mode === "resume-dies-after-init" && argv.includes("--resume")) {
+    process.stderr.write("fake-claude: simulated crash after accepting the resumed session\n");
+    process.exit(3);
+  }
 
   if (mode === "hang") {
     // stay alive until killed — lets tests exercise interrupt + the

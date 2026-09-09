@@ -179,6 +179,12 @@ export interface SendTurnInput {
   model?: string;
   effort?: EffortLevel;
   resumeCursor?: unknown;
+  /** The turn with the conversation so far replayed inline, attached only
+   * alongside resumeCursor. A cursor-resuming driver sends it once, on a
+   * fresh session, when the provider refuses the cursor before reading the
+   * prompt (server/resume-recovery.ts) — so a session the provider lost
+   * does not brick the thread, and the new session is not blank. */
+  recoveryText?: string;
   /** Prior turns for transcript-replay providers (API-backed drivers). */
   transcript?: Array<{ role: "user" | "assistant"; text: string }>;
   /** Bot persona (name/title/description) as a system prompt. */

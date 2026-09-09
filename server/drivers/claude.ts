@@ -17,6 +17,7 @@ import { join, dirname, isAbsolute, normalize } from "node:path";
 import { DATA_DIR, stripWorkspaceCredentialEnv } from "../config.ts";
 import { augmentedPath } from "../env-path.ts";
 import { brokerSocketPath, describeSpawnFailure, execCli, killCliTree, spawnCli } from "../procs.ts";
+import { classifyResumeFailure, mayReplay, recoveryPromptFor } from "../resume-recovery.ts";
 import { ClaudeLoginController } from "./claude-login-auth.ts";
 
 import type {
@@ -697,6 +698,10 @@ export const ClaudeDriver: ProviderDriver<ClaudeConfig> = {
       argsKey: string;
       /** the CLI's session id from `init`, what --resume takes later */
       sessionId: string | null;
+      /** the CLI emitted its `init` frame — it accepted the session and
+       * began the turn. The acceptance boundary for --resume: before it,
+       * nothing was submitted and the turn has caused nothing. */
+      sawInit: boolean;
       /** the running turn, or null between turns */
       turn: { turnId: string; settled: boolean; sawStreamDelta: boolean; authFailed?: boolean } | null;
       idleTimer: ReturnType<typeof setTimeout> | null;
@@ -1077,6 +1082,7 @@ export const ClaudeDriver: ProviderDriver<ClaudeConfig> = {
         systemPromptPath,
         argsKey,
         sessionId: sessionId ?? newSessionId,
+        sawInit: false,
         turn: { turnId, settled: false, sawStreamDelta: false },
         idleTimer: null,
         closing: false,
@@ -1131,6 +1137,7 @@ export const ClaudeDriver: ProviderDriver<ClaudeConfig> = {
         switch (o.type) {
           case "system":
             if (o.subtype === "init") {
+              session.sawInit = true;
               if (typeof o.session_id === "string") session.sessionId = o.session_id;
               emit({ ...base(threadId, currentTurnId()), type: "session.started", sessionId: o.session_id, model: o.model });
             } else if (o.subtype === "thinking_tokens") {
@@ -1330,6 +1337,65 @@ export const ClaudeDriver: ProviderDriver<ClaudeConfig> = {
                   stopReason: "exit_before_result",
                   cost: null,
                 });
+              }
+            })();
+            return;
+          }
+          // A --resume that the CLI never acknowledged: it exited without
+          // an `init` frame, so it never read the prompt and this turn has
+          // caused nothing. Without this the thread is BRICKED — the dead
+          // cursor is never cleared, so every later turn resumes the same
+          // missing session and fails identically, and the user has no way
+          // back except switching engines. One fresh session, carrying the
+          // harness's rebuild of the conversation. Exactly one: the relaunch
+          // offers no cursor, so `attempted` is false there and a second
+          // failure is reported like any other.
+          const resumeFailure = classifyResumeFailure({
+            attempted: Boolean(sessionId),
+            rejected: !session.sawInit,
+            promptSubmitted: session.sawInit,
+            producedOutput: session.turn.sawStreamDelta,
+          });
+          if (mayReplay(resumeFailure) && !retry.cancelled) {
+            const recovery = recoveryPromptFor({
+              recoveryText: turn.recoveryText,
+              currentText: turn.text,
+              failure: resumeFailure,
+            });
+            session.broker?.close();
+            session.broker = undefined;
+            if (session.mcpConfigPath) {
+              try {
+                rmSync(dirname(session.mcpConfigPath), { recursive: true, force: true });
+              } catch {}
+              session.mcpConfigPath = null;
+            }
+            if (session.systemPromptPath) {
+              removePrivateTempDir(session.systemPromptPath);
+              session.systemPromptPath = null;
+            }
+            sessions.delete(threadId);
+            session.turn = null;
+            active.delete(threadId);
+            emit({
+              ...base(threadId, turnId),
+              type: "turn.retrying",
+              attempt: retry.attempt + 1,
+              delayMs: 0,
+              reason: "resume_rejected",
+            });
+            void (async () => {
+              try {
+                // no cursor: a fresh session, carrying the rebuild
+                await sendTurn({ ...turn, resumeCursor: undefined, recoveryText: undefined, text: recovery.text });
+              } catch (e) {
+                retryState.delete(threadId);
+                emit({
+                  ...base(threadId, turnId),
+                  type: "runtime.error",
+                  message: e instanceof Error ? e.message : String(e),
+                });
+                emit({ ...base(threadId, turnId), type: "turn.completed", ok: false, stopReason: "exit_before_result", cost: null });
               }
             })();
             return;

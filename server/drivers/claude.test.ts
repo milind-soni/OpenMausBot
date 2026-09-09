@@ -1593,6 +1593,112 @@ describe("ClaudeDriver turns (fake CLI)", () => {
 // on macOS the OAuth tokens live in the login Keychain, so the old
 // ~/.claude/.credentials.json check reported signed-in users as signed out
 // and disabled the model picker with them (#108).
+describe("ClaudeDriver resume recovery (fake CLI)", () => {
+  let instance: ProviderInstance;
+  let recorder: EventRecorder;
+  let scratch: string;
+
+  const REBUILD = "[rebuild]\n\nUser: my dog is Biscuit\n\nwhat now?";
+
+  beforeEach(async () => {
+    ensureDirs();
+    chmodSync(FAKE_CLI, 0o755);
+    scratch = mkdtempSync(join(tmpdir(), "omb-claude-recover-"));
+    process.env.FAKE_CLAUDE_MODE = "dead-session";
+    instance = await ClaudeDriver.create({
+      instanceId: "claude-test",
+      displayName: "Claude Test",
+      environment: {},
+      enabled: true,
+      config: { cli: FAKE_CLI, permissionMode: "auto" } as never,
+    });
+    recorder = recordEvents(instance.adapter);
+  });
+
+  afterEach(async () => {
+    delete process.env.FAKE_CLAUDE_MODE;
+    delete process.env.FAKE_CLAUDE_DUMP;
+    recorder?.stop();
+    await instance?.dispose();
+    await removeTempDir(scratch);
+  });
+
+  it("starts a fresh session carrying the rebuild when --resume is refused", async () => {
+    // Was a bricked thread: the CLI exits before `init`, the failure is
+    // terminal so nothing retries, and the dead cursor is never cleared —
+    // so every later turn resumed the same missing session and failed
+    // identically, with no way back except switching engines.
+    const dump = join(scratch, "recovered.json");
+    process.env.FAKE_CLAUDE_DUMP = dump;
+    await instance.adapter.sendTurn({
+      threadId: "t-dead",
+      text: "what now?",
+      resumeCursor: "a-session-claude-no-longer-has",
+      recoveryText: REBUILD,
+    });
+    await recorder.until((e) => e.type === "turn.completed");
+
+    expect(recorder.events.filter((e) => e.type === "turn.completed").at(-1)).toMatchObject({ ok: true });
+    expect(recorder.events.find((e) => e.type === "turn.retrying")).toMatchObject({ reason: "resume_rejected" });
+    // it started a NEW session, so the harness records a live cursor again
+    const started = recorder.events.filter((e) => e.type === "session.started");
+    expect(started.length).toBeGreaterThan(0);
+    expect(started.at(-1)).not.toMatchObject({ sessionId: "a-session-claude-no-longer-has" });
+    // and the new session is not blank: the prompt is the rebuild, once
+    const seen = JSON.parse(readFileSync(dump, "utf8"));
+    expect(seen.argv).not.toContain("--resume");
+    const content = seen.prompt.message.content;
+    const text = typeof content === "string" ? content : content.map((c: any) => c.text ?? "").join("");
+    expect(text).toBe(REBUILD);
+  });
+
+  it("recovers only once, then fails visibly", async () => {
+    // exit-early refuses every launch, resumed or fresh: the recovery is
+    // spent on the first relaunch and the turn must then settle as failed
+    // rather than relaunching forever
+    process.env.FAKE_CLAUDE_MODE = "exit-early";
+    await instance.adapter.sendTurn({ threadId: "t-always-dead", text: "what now?", resumeCursor: "gone", recoveryText: REBUILD });
+    await recorder.until((e) => e.type === "turn.completed");
+    expect(recorder.events.filter((e) => e.type === "turn.completed").at(-1)).toMatchObject({ ok: false });
+    expect(recorder.events.filter((e) => e.type === "turn.retrying")).toHaveLength(1);
+  });
+
+  it("never resends a turn the CLI accepted before dying", async () => {
+    // the resumed session emitted `init` — it read the prompt, and may have
+    // run tools on it — and then died with no output. That is the far side
+    // of the acceptance boundary: replaying here is a duplicate side effect
+    process.env.FAKE_CLAUDE_MODE = "resume-dies-after-init";
+    await instance.adapter.sendTurn({ threadId: "t-accepted", text: "what now?", resumeCursor: "accepted-then-died", recoveryText: REBUILD });
+    await recorder.until((e) => e.type === "turn.completed");
+    expect(recorder.events.filter((e) => e.type === "turn.completed").at(-1)).toMatchObject({ ok: false });
+    expect(recorder.events.some((e) => e.type === "turn.retrying" && e.reason === "resume_rejected")).toBe(false);
+  });
+
+  it("never treats a crash on a fresh launch as a refused resume", async () => {
+    // no cursor was offered, so there is no resume to have been rejected:
+    // this is an ordinary terminal failure, not a licence to send the turn
+    // again
+    process.env.FAKE_CLAUDE_MODE = "exit-early";
+    await instance.adapter.sendTurn({ threadId: "t-fresh-crash", text: "what now?", recoveryText: REBUILD });
+    await recorder.until((e) => e.type === "turn.completed");
+    expect(recorder.events.filter((e) => e.type === "turn.completed").at(-1)).toMatchObject({ ok: false });
+    expect(recorder.events.some((e) => e.type === "turn.retrying" && e.reason === "resume_rejected")).toBe(false);
+  });
+
+  it("does not rebuild when there was no session to resume", async () => {
+    process.env.FAKE_CLAUDE_MODE = "happy";
+    const dump = join(scratch, "fresh.json");
+    process.env.FAKE_CLAUDE_DUMP = dump;
+    await instance.adapter.sendTurn({ threadId: "t-fresh", text: "what now?", recoveryText: REBUILD });
+    await recorder.until((e) => e.type === "turn.completed");
+    expect(recorder.events.filter((e) => e.type === "turn.completed").at(-1)).toMatchObject({ ok: true });
+    expect(recorder.events.some((e) => e.type === "turn.retrying")).toBe(false);
+    const content = JSON.parse(readFileSync(dump, "utf8")).prompt.message.content;
+    const text = typeof content === "string" ? content : content.map((c: any) => c.text ?? "").join("");
+    expect(text).toBe("what now?");
+  });
+});
+
 describe("ClaudeDriver snapshot auth (fake CLI)", () => {
   let instance: ProviderInstance;
 
