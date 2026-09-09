@@ -286,10 +286,16 @@ function normaliseEntryText(text: string): string {
  * the room's name, else the thread's title, else the bare thread id when
  * nothing names the conversation. */
 export function memorySourceLabel(from: { room?: { name: string }; task?: { title: string }; threadId: string }): string {
-  if (from.room) return `room ${JSON.stringify(from.room.name)}`;
-  if (from.task?.title) return `chat ${JSON.stringify(from.task.title)}`;
+  // Shortened BEFORE quoting, so a long title never leaves an unclosed
+  // quote in the entry when the source is capped.
+  const short = (name: string) => JSON.stringify(name.length > SOURCE_NAME_MAX ? `${name.slice(0, SOURCE_NAME_MAX)}…` : name);
+  if (from.room) return `room ${short(from.room.name)}`;
+  if (from.task?.title) return `chat ${short(from.task.title)}`;
   return `thread ${from.threadId}`;
 }
+
+/** Enough of a title to recognise the conversation; titles can be 80. */
+const SOURCE_NAME_MAX = 60;
 
 /** One dated, sourced entry line. `- 2026-09-10 · from chat "Follow-up" · text` */
 export function memoryEntry(text: string, opts: MemoryUpdateOptions = {}): string {

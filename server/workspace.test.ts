@@ -191,6 +191,8 @@ describe("workspace", () => {
     expect(memorySourceLabel({ task: { title: "Follow-up" }, threadId: "t1" })).toBe('chat "Follow-up"');
     expect(memorySourceLabel({ task: { title: "" }, threadId: "t1" })).toBe("thread t1");
     expect(memorySourceLabel({ threadId: "t1" })).toBe("thread t1");
+    // a long title is shortened before it is quoted, so the quote still closes
+    expect(memorySourceLabel({ task: { title: "t".repeat(80) }, threadId: "t1" })).toBe(`chat "${"t".repeat(60)}…"`);
     expect(memoryEntry("fact", { source: memorySourceLabel({ room: { name: "A · B" }, threadId: "t" }), now: new Date(2026, 8, 10, 12) }))
       .toBe('- 2026-09-10 · from room "A - B" · fact');
   });
