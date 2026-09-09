@@ -418,6 +418,17 @@ const TOOLS = [
     inputSchema: { type: "object", additionalProperties: false, properties: {} },
   },
   {
+    name: "close_thread",
+    description:
+      "Mark a thread you opened (or one of your own) as finished once you have read its result: it goes idle in the person's sidebar with a note saying you closed it. Nothing is deleted — deleting stays the person's decision — and a thread that is still running cannot be closed; wait for it or leave it. Use the thread id from list_threads or from the start_thread result. If a close is refused, do not retry it.",
+    inputSchema: {
+      type: "object",
+      additionalProperties: false,
+      properties: { thread_id: { type: "string", description: "The thread id from list_threads or start_thread." } },
+      required: ["thread_id"],
+    },
+  },
+  {
     name: "start_thread",
     description:
       "Open a new thread: one conversation with its own history and its own run, shown to the person as a row under the bot it belongs to. Leave bot_id out to open it on yourself, for a separate job that should run on its own (\"review each pull request\" — one thread per pull request) instead of inside this conversation. Give bot_id (from list_bots) to open it on a teammate: that is a handoff into a fresh thread, which starts after your current turn ends and whose result is delivered here, like delegate_bot. The title becomes the row's name, so make it short and specific; write it as #Title when you mention it to the person. Do not use it for a question you need answered right now (ask_bot), for one task where the teammate's usual conversation is fine (delegate_bot), or for a note nobody has to act on. If a call is refused, do not retry it: say what you still wanted opened.",
@@ -914,6 +925,13 @@ async function callTool(name: string, args: Json): Promise<{ text: string; isErr
       return `- #${String(thread.title)} (${where}, ${state}${unread}) [thread id: ${String(thread.threadId)}]${handoff}`;
     });
     return { text: `Threads, newest first:\n${lines.join("\n")}` };
+  }
+  if (name === "close_thread") {
+    const threadId = String(args.thread_id ?? "").trim();
+    if (!threadId) return { text: "close_thread needs the thread_id from list_threads or start_thread.", isError: true };
+    const r = await api(`/api/internal/threads/${encodeURIComponent(threadId)}/close`, { method: "POST", body: JSON.stringify({ fromBotId: BOT_ID, fromThreadId: THREAD_ID }) });
+    if (r.error) return { text: `Couldn't close that thread: ${String(r.error)}`, isError: true };
+    return { text: `Closed #${String(r.title)}${r.botName ? ` on @${String(r.botName)}` : ""}. It stays in the person's sidebar, idle, with a note that you closed it.` };
   }
   if (name === "start_thread") {
     const title = String(args.title ?? "").trim();

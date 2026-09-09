@@ -8480,6 +8480,37 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
         rows.sort((a, b) => b.openedAt - a.openedAt);
         return json(res, 200, { threads: rows.slice(0, 100) });
       }
+      // close_thread: a bot tidies a thread it opened (or one of its own)
+      // once its result has been read. Closing is the sidebar's idle state
+      // plus a chip saying who closed it — never a deletion, which stays a
+      // person's confirmed action, and never while the thread is running.
+      const closeMatch = method === "POST" ? path.match(/^\/api\/internal\/threads\/([\w-]+)\/close$/) : null;
+      if (closeMatch) {
+        const from = internalSender;
+        const fromThreadId = internalCapability.threadId;
+        if (!connectorThread(from.id, fromThreadId)) {
+          return json(res, 403, { error: "source conversation does not belong to sender" });
+        }
+        const threadId = closeMatch[1]!;
+        const owner = [from, ...reachablePeers(store.bots, from)].find((bot) => store.taskByThread(bot.id, threadId));
+        const task = owner ? store.taskByThread(owner.id, threadId) : undefined;
+        if (!owner || !task) return json(res, 404, { error: "no such thread — call list_threads for the ones you can see" });
+        if (owner.id !== from.id && task.openedBy?.botId !== from.id) {
+          return json(res, 403, { error: "that thread is not yours to close — only the bot that opened it, or its own bot, can" });
+        }
+        if (threadId === fromThreadId) return json(res, 400, { error: "you cannot close the thread you are speaking in — finish your turn instead" });
+        if (threadBusy(owner.id, threadId)) {
+          return json(res, 409, { error: `#${task.title} is still running — wait for it to finish (list_threads), or the person can stop it from the app` });
+        }
+        store.appendMessage(threadId, {
+          role: "bot",
+          kind: "activity",
+          from: { botId: from.id, name: from.name, color: from.color },
+          tool: { name: `Closed by @${from.name}`, ok: true },
+        });
+        if (task.unread) store.patchTask(owner.id, threadId, { unread: false });
+        return json(res, 200, { closed: true, threadId, title: task.title, botName: owner.name });
+      }
       if (method === "GET" && path === "/api/internal/rooms") {
         const from = internalSender;
         const fromThreadId = internalCapability.threadId;

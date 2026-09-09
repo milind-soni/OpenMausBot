@@ -532,3 +532,42 @@ describe("list_threads", () => {
     }
   });
 });
+
+describe("close_thread", () => {
+  it("closes your own thread and one you opened on a teammate, refuses a teammate's other thread and a running one", async () => {
+    const pm = await createBot("Parker", "gated");
+    const qa = await createBot("Quinn", "gated");
+    try {
+      const token = await mintedToken(pm.id, pm.threadId);
+      const close = (threadId: string, headers = token) => api("POST", `/api/internal/threads/${threadId}/close`, {}, headers);
+      // a thread the person opened on Quinn is not Parker's to close
+      const theirs = (await api("POST", `/api/bots/${qa.id}/tasks`, { title: "Quinn's own audit" })).body.task.threadId as string;
+      expect((await close(theirs)).status).toBe(403);
+      // one Parker opened on Quinn is — once it is not running
+      const opened = await api("POST", "/api/internal/threads", { toBotId: qa.id, title: "QA: PR #78", message: "Test it." }, token);
+      expect(opened.status).toBe(201);
+      const closed = await close(opened.body.threadId);
+      expect(closed.status).toBe(200);
+      expect(closed.body).toMatchObject({ closed: true, title: "QA: PR #78", botName: "Quinn" });
+      expect((await messages(opened.body.threadId)).some((message) => message.tool?.name === "Closed by @Parker")).toBe(true);
+      // Parker's own second thread closes too; the one it speaks in does not
+      const own = (await api("POST", `/api/bots/${pm.id}/tasks`, { title: "Notes" })).body.task.threadId as string;
+      expect((await close(own)).status).toBe(200);
+      expect((await close(pm.threadId)).status).toBe(400);
+      // a running thread is refused: Quinn, speaking in its own thread, cannot close the one it speaks in,
+      // nor a sibling thread of its own while a turn is held open there
+      const asQuinn = await mintedToken(qa.id, qa.threadId);
+      expect((await close(qa.threadId, asQuinn)).status).toBe(400);
+      const busyOther = (await api("POST", `/api/bots/${qa.id}/tasks`, { title: "Busy one" })).body.task.threadId as string;
+      rmSync(join(gates, `${busyOther}.gate`), { force: true });
+      rmSync(join(gates, `${busyOther}.json`), { force: true });
+      expect((await api("POST", `/api/bots/${qa.id}/messages`, { text: "Work here.", threadId: busyOther })).status).toBe(202);
+      await expect.poll(async () => (await taskOf(qa.id, busyOther))?.busy, { timeout: 15_000 }).toBe(true);
+      expect((await close(busyOther, asQuinn)).status).toBe(409);
+      release(busyOther);
+    } finally {
+      await api("DELETE", `/api/bots/${pm.id}`);
+      await api("DELETE", `/api/bots/${qa.id}`);
+    }
+  });
+});

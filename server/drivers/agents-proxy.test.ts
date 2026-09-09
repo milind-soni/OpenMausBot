@@ -311,6 +311,7 @@ describe("agents-proxy MCP surface", () => {
       "check_delegation",
       "wait_delegation",
       "list_threads",
+      "close_thread",
       "start_thread",
       "post_to_room",
       "create_bot",
