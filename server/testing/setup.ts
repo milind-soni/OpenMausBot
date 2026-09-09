@@ -24,6 +24,11 @@ delete process.env.HERMES_HOME;
 // footing that delete should stand on.
 process.env.OMB_COMPANION_DIR = join(home, ".openmausbot-companion");
 
+// Product code follows navigator.language, which makes English assertions
+// depend on the developer or CI host locale. Keep the shared default stable;
+// dedicated i18n tests explicitly select every translated pack they exercise.
+Object.defineProperty(globalThis.navigator, "language", { value: "en", configurable: true });
+
 // SQLite keeps the database file open for the lifetime of its handle.
 // Windows will not remove a directory containing an open database, so close
 // the per-test handle before the next test resets its throwaway data dir.
