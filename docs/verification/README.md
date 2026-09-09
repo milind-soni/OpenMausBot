@@ -58,6 +58,9 @@ instructions, history restore, skill/memory refresh, and stale-response isolatio
 The [independent threads fixture](threads.md) checks nested sidebar navigation,
 per-thread models, simultaneous direct conversations and thread-scoped Stop.
 
+The [right-to-left fixture](bidi.md) checks per-block direction in bot replies
+and per-line direction in sent turns, with code pinned left-to-right.
+
 The [routines fixture](routines.md) checks confirmed proposals, manual and
 scheduled runs, central run logs, List/Calendar views, and bot-scoped routines
 using the real renderer and an isolated fake-engine server.
