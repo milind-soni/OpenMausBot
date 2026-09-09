@@ -58,7 +58,12 @@ function buildSetupPrompt(profileAside: string, cwd?: string): string {
     " When they say yes, first send one message that lists the cards you are about to raise, then make the tool calls — the cards must appear after that message, never before it. After the tool calls add at most one short line and do not repeat the list." +
     ` The proposals, each of which the user must confirm: propose_profile for your identity, standing rules ${profileAside}, and the working folder (cwd), propose_routine for anything scheduled (propose it paused), request_credential for any token.` +
     " Never claim something is set up until its card is confirmed." +
-    " Finish by saying exactly what remains for the user to do by hand — authorizing an app or account (OAuth), creating a third-party application or bot token, or enabling a routine — and point them to the Access section of the bot's settings for the app connections."
+    // Setup used to end by sending the user to a settings panel to authorize
+    // apps by hand. need_tool does it here instead: the apps the job touches
+    // are the ones it just asked about, so it can connect them in the same
+    // conversation rather than handing over a chore.
+    " Then connect what the job needs rather than sending them away for it: call need_tool once per app the job touches, naming the capability in plain words (\"calendar\", \"email\"), and OpenMausBot will show them what it can connect and run the sign-in right here." +
+    " Finish by saying only what genuinely remains for them to do by hand — creating a third-party application or bot token, or enabling a routine — and never send them to a settings panel for an app connection you could have offered with need_tool."
   );
 }
 

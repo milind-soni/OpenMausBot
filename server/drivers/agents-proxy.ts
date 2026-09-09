@@ -571,6 +571,72 @@ const TOOLS = [
     },
   },
   {
+    name: "need_tool",
+    description:
+      "Ask the user to connect the app this job needs, when you do not already have a working tool for it. FIRST check the tools you already have — a connected app may reach you as an MCP tool OpenMausBot cannot see from its side, and asking to connect a second one is worse than not asking at all. Say the CAPABILITY in plain words — \"calendar\", \"email\", \"spreadsheet\" — never a vendor and never a slug: OpenMausBot lists the apps it can actually connect for that capability, lets the user pick one and name the account, and runs the sign-in itself. Call this instead of telling the user you cannot do something, and instead of guessing which app they use. If a suitable account is already connected this returns immediately and you simply continue. Otherwise a card is shown: end the turn, and OpenMausBot resumes the task once the account is connected.",
+    inputSchema: {
+      type: "object",
+      additionalProperties: false,
+      properties: {
+        capability: {
+          type: "string",
+          minLength: 2,
+          description: "What the job needs, in plain words a person would use. \"calendar\", not \"googlecalendar\".",
+        },
+        reason: {
+          type: "string",
+          description: "Optional one line on why this job needs it, shown on the card.",
+        },
+      },
+      required: ["capability"],
+    },
+  },
+  {
+    name: "propose_tool",
+    description:
+      "Propose an MCP server or CLI that would let this bot do something it currently cannot — one you FOUND, or one you BUILT with cli-printing-press (kind \"generated\"). Use only after need_tool reported that OpenMausBot has no app to connect for the capability, and only after you have actually read the package or repository page — never from memory. You are proposing, not installing: OpenMausBot shows the user what you found, who publishes it, the exact version and the exact command that would run, and nothing happens unless they approve it. Give one exact version, never a range or \"latest\", and at least one https source you really read. Never propose credentials or environment VALUES — name the variables only. After calling this, end the turn and wait for the decision.",
+    inputSchema: {
+      type: "object",
+      additionalProperties: false,
+      properties: {
+        capability: { type: "string", description: "The capability this answers, in the same plain words need_tool used." },
+        kind: {
+          type: "string",
+          enum: ["mcp", "cli", "generated"],
+          description: "An MCP server, a command-line tool, or \"generated\" for one you built yourself with cli-printing-press.",
+        },
+        label: { type: "string", description: "Human name, e.g. \"Fastmail Calendar MCP\"." },
+        summary: { type: "string", description: "One or two lines on what it does." },
+        package_id: { type: "string", description: "Package or repository id, e.g. @example/calendar-mcp." },
+        package_version: { type: "string", description: "One exact version. A range or \"latest\" is refused. Omit for a generated tool." },
+        built_from: {
+          type: "string",
+          description: "Generated tools only: the https API documentation you generated it from. That is its provenance.",
+        },
+        publisher: { type: "string", description: "Who publishes it, as the page says. Shown as unverified." },
+        homepage: { type: "string", description: "https link to its page." },
+        command: { type: "string", description: "The command that would run, e.g. npx." },
+        args: { type: "array", items: { type: "string" }, description: "Its arguments, exactly." },
+        env_names: {
+          type: "array",
+          items: { type: "string" },
+          description: "NAMES of environment variables it needs. Never values, never secrets.",
+        },
+        sources: {
+          type: "array",
+          description: "The https pages you actually read. At least one.",
+          items: {
+            type: "object",
+            additionalProperties: false,
+            properties: { url: { type: "string" }, note: { type: "string" } },
+            required: ["url"],
+          },
+        },
+      },
+      required: ["capability", "kind", "label", "summary", "command"],
+    },
+  },
+  {
     name: "skills_list",
     description:
       "List this bot's imported skills (enabled and disabled) and any staged skill writes waiting for the user to confirm. Use this before skill_manage to avoid duplicate names. Listing does not enable anything.",
@@ -905,6 +971,64 @@ async function callTool(name: string, args: Json): Promise<{ text: string; isErr
     }
     return {
       text: `A secure ${r.label ?? CREDENTIAL_TARGETS[credentialId].label} request is ready. The desktop app and a freshly QR-paired mobile app show its secure entry card; older mobile pairings explain how to pair again or finish on the computer. End this turn; OpenMausBot will resume the task after the user saves or declines. Never ask them to paste the key into chat.`,
+    };
+  }
+  if (name === "need_tool") {
+    const capability = typeof args.capability === "string" ? args.capability.trim().slice(0, 120) : "";
+    if (!capability) return { text: "need_tool needs a capability, in plain words — for example \"calendar\".", isError: true };
+    const reason = typeof args.reason === "string" ? args.reason.trim().slice(0, 240) : "";
+    const r = await api("/api/internal/tool-requests", {
+      method: "POST",
+      body: JSON.stringify({
+        fromBotId: BOT_ID,
+        fromThreadId: THREAD_ID,
+        capability,
+        ...(reason ? { reason } : {}),
+      }),
+    });
+    // Rung 1: something that answers this is already connected, so there is
+    // nothing to show and nothing to wait for.
+    if (r.ready) {
+      const names = Array.isArray(r.connected) ? r.connected.join(", ") : "";
+      return { text: `Already connected${names ? `: ${names}` : ""}. Use it and continue the task.` };
+    }
+    if (r.none) {
+      return {
+        text: `OpenMausBot has no app it can connect for "${capability}", and told the user so. Do not invent one or ask them to connect something by hand. Say what you cannot do and offer what you can.`,
+      };
+    }
+    return {
+      text: `OpenMausBot showed the user the apps it can connect for "${capability}". End this turn now; the task resumes automatically once they have picked one and connected it.`,
+    };
+  }
+  if (name === "propose_tool") {
+    const strings = (value: unknown) =>
+      Array.isArray(value) ? value.filter((item): item is string => typeof item === "string") : [];
+    const r = await api("/api/internal/tool-proposals", {
+      method: "POST",
+      body: JSON.stringify({
+        fromBotId: BOT_ID,
+        fromThreadId: THREAD_ID,
+        capability: String(args.capability ?? ""),
+        kind: String(args.kind ?? ""),
+        label: String(args.label ?? ""),
+        summary: String(args.summary ?? ""),
+        packageId: String(args.package_id ?? ""),
+        packageVersion: String(args.package_version ?? ""),
+        ...(typeof args.built_from === "string" ? { builtFrom: args.built_from } : {}),
+        ...(typeof args.publisher === "string" ? { publisher: args.publisher } : {}),
+        ...(typeof args.homepage === "string" ? { homepage: args.homepage } : {}),
+        command: String(args.command ?? ""),
+        args: strings(args.args),
+        envNames: strings(args.env_names),
+        sources: Array.isArray(args.sources) ? args.sources : [],
+      }),
+    });
+    if (r.rejected) {
+      return { text: `That proposal was refused: ${r.rejected}. Fix it and propose again, or tell the user plainly that you found nothing you can vouch for.`, isError: true };
+    }
+    return {
+      text: "OpenMausBot showed the user what you found, with the exact command it would run and the sources you gave. End this turn now; nothing is installed unless they approve it, and the task resumes either way.",
     };
   }
   if (name === "list_routines") {

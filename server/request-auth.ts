@@ -218,6 +218,8 @@ export const CLIENT_ALLOW: ReadonlyArray<{ methods: readonly string[]; path: Reg
   { methods: ["POST"], path: /^\/api\/bots\/[\w-]+\/secret-cards\/[\w-]+\/(?:resume|dismiss)$/ },
   { methods: ["GET"], path: /^\/api\/bots\/[\w-]+\/connector-cards\/[\w-]+\/status$/ },
   { methods: ["POST"], path: /^\/api\/bots\/[\w-]+\/connector-cards\/[\w-]+\/(?:resume|dismiss)$/ },
+  { methods: ["POST"], path: /^\/api\/threads\/[\w-]+\/tool-cards\/[\w-]+\/(?:choose|connect|later|back|look|build)$/ },
+  { methods: ["POST"], path: /^\/api\/threads\/[\w-]+\/tool-proposals\/[\w-]+\/(?:approve|decline)$/ },
   { methods: ["POST"], path: /^\/api\/bots\/[\w-]+\/always-allow$/ }, // must match a pending card
   // rooms
   { methods: ["POST"], path: /^\/api\/groups$/ },

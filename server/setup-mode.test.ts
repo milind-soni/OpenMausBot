@@ -2,6 +2,7 @@
 // that makes the bot interview the user and configure itself through cards.
 import { describe, expect, it } from "vitest";
 
+import { NEED_TOOL_PROMPT } from "./system-prompt.ts";
 import {
   SETUP_PROMPT,
   expandSetupTurnText,
@@ -98,5 +99,38 @@ describe("setupSystemPrompt working-folder clause and card ordering", () => {
     expect(text).toContain("first send one message that lists the cards you are about to raise, then make the tool calls");
     expect(text).toContain("the cards must appear after that message, never before it");
     expect(text).toContain("After the tool calls add at most one short line");
+  });
+});
+
+describe("setup mode connects what the job needs", () => {
+  // Setup asks which apps the job touches, and used to end by pointing at a
+  // settings panel to go and authorize them. That is the chore the tool
+  // ladder exists to remove, so the prompt must not send anyone there.
+  it("reaches for need_tool instead of the settings panel", () => {
+    const prompt = setupSystemPrompt(true);
+    expect(prompt).toContain("need_tool");
+    expect(prompt).not.toContain("Access section");
+    // what genuinely cannot be done in chat is still named as manual work
+    expect(prompt).toContain("bot token");
+  });
+});
+
+// The abstract version of this rule did not survive contact with a small
+// model: asked to pull PostHog data the bot requested an API key in chat, and
+// asked to log a weld inspection it asked which system to use. Both are
+// exactly what need_tool is for, and it reached for neither. So the prompt
+// names the moments rather than describing the principle.
+describe("the need_tool prompt names the moments it is for", () => {
+  it("tells the bot what to call it INSTEAD of", () => {
+    expect(NEED_TOOL_PROMPT).toContain("INSTEAD");
+    expect(NEED_TOOL_PROMPT).toMatch(/API key/i);
+    expect(NEED_TOOL_PROMPT).toMatch(/which app/i);
+    expect(NEED_TOOL_PROMPT).toMatch(/no access/i);
+  });
+
+  it("still forbids the thing the bot did anyway", () => {
+    // it asked the user to paste a PostHog key into the chat
+    expect(NEED_TOOL_PROMPT).toMatch(/never ask for a credential in chat/i);
+    expect(NEED_TOOL_PROMPT).toContain("request_credential");
   });
 });

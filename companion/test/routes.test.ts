@@ -105,6 +105,14 @@ describe("what the app may do", () => {
     ["POST", "/api/bots/bot_123/connector-cards/msg_2/dismiss"],
     ["POST", "/api/bots/bot_123/secret-cards/msg_2/resume"],
     ["POST", "/api/bots/bot_123/secret-cards/msg_2/dismiss"],
+    ["POST", "/api/threads/thread_1/tool-cards/msg_3/choose"],
+    ["POST", "/api/threads/thread_1/tool-cards/msg_3/connect"],
+    ["POST", "/api/threads/thread_1/tool-cards/msg_3/later"],
+    ["POST", "/api/threads/thread_1/tool-cards/msg_3/back"],
+    ["POST", "/api/threads/thread_1/tool-cards/msg_3/look"],
+    ["POST", "/api/threads/thread_1/tool-cards/msg_3/build"],
+    ["POST", "/api/threads/thread_1/tool-proposals/msg_4/approve"],
+    ["POST", "/api/threads/thread_1/tool-proposals/msg_4/decline"],
   ];
 
   for (const [method, path] of calls) {
@@ -113,6 +121,14 @@ describe("what the app may do", () => {
 });
 
 describe("what it may not", () => {
+  it("refuses tool-card actions the cards never offer", () => {
+    // The allowlist is per-action on purpose: a paired phone can answer a
+    // card, not invent a new verb on one.
+    expect(ask("POST", "/api/threads/thread_1/tool-cards/msg_3/install")).not.toBeNull();
+    expect(ask("POST", "/api/threads/thread_1/tool-proposals/msg_4/install")).not.toBeNull();
+    expect(ask("GET", "/api/threads/thread_1/tool-cards/msg_3/choose")).not.toBeNull();
+  });
+
   it("refuses host configuration, and says where it happens", () => {
     for (const [method, path] of [
       ["PUT", "/api/config"],

@@ -55,6 +55,15 @@ export function computerPrompt(kind: ComputerPromptKind | null): string {
 
 export const COMPOSIO_PROMPT =
   " The user's connected apps (Gmail, Calendar, Slack, Notion, and the rest) are reachable through the composio tools — find the right one with COMPOSIO_SEARCH_TOOLS, read its arguments with COMPOSIO_GET_TOOL_SCHEMAS, then run it with COMPOSIO_MULTI_EXECUTE_TOOL. Reach for them before telling the user you have no access to a service.";
+export const NEED_TOOL_PROMPT =
+  " If a job needs an app you have no working tool for — check your own tools first, some connected apps reach you as MCP tools OpenMausBot cannot see — call need_tool with the capability in plain words (\"calendar\", \"email\", \"analytics\"), never a vendor and never a slug." +
+  // Naming the moments, because the abstract rule did not survive contact:
+  // asked to pull PostHog data the bot requested an API key in chat, and
+  // asked to log a weld inspection it asked which system to use. Those are
+  // the two places this tool exists for, and it reached for neither.
+  " Three moments are what it is for, and in all three you call it INSTEAD of writing the message you were about to write: instead of asking for an API key, token or account id; instead of asking WHICH app, service or system the user uses; and instead of saying you have no access to something." +
+  " OpenMausBot then shows them the apps it can really connect, they pick one and sign in, and the task resumes on its own. Never ask them to go and connect something by hand, and never ask for a credential in chat — request_credential exists for the ones that are genuinely keys.";
+
 export const CREDENTIAL_PROMPT =
   " If a supported API key is missing, use request_credential to create a secure credential request. A freshly QR-paired mobile app or the desktop app can show the secure entry card. Never claim it opened unless the request succeeded, and never ask the user to paste credentials into chat.";
 export const ROUTINE_PROMPT =

@@ -21,6 +21,8 @@ import { approvalModeFor, isApprovalMode, type ApprovalMode } from "../shared/ap
 import type { MascotBodyId } from "../shared/mascot-bodies.ts";
 import type { ProfileRequestCardData, ProfileRequestChanges } from "../shared/profile-request.ts";
 import type { RoutineRequestCardData } from "../shared/routine-request.ts";
+import type { ToolProposalCardData } from "../shared/tool-proposal.ts";
+import type { ToolRequestCardData } from "../shared/tool-request.ts";
 import type { RoutineRunCardData } from "../shared/routine-run.ts";
 import type { SkillRequestCardData } from "../shared/skill-request.ts";
 import type { GroupGoalRunCardData } from "../shared/group-goal-run.ts";
@@ -77,6 +79,12 @@ export interface OptionCardData {
   /** A durable learned-skill proposal. The skill stays staged until the
    * user confirms this card — it never rides the prompt before that. */
   skillRequest?: SkillRequestCardData;
+  /** The apps this job needs and does not have: the first rungs of the tool
+   * ladder, where a person picks one and names the account. */
+  toolRequest?: ToolRequestCardData;
+  /** Something the bot FOUND for a job nothing connectable answers. It is a
+   * proposal: nothing runs until this card is approved. */
+  toolProposal?: ToolProposalCardData;
 }
 
 export interface ConnectorCardData {
@@ -362,6 +370,29 @@ function redactBotAuthored<T extends Omit<Message, "id" | "at"> & { at?: number 
     if (typeof card.subtitle === "string") card.subtitle = redactSecretsInText(card.subtitle);
     if (typeof card.summary === "string") card.summary = redactSecretsInText(card.summary);
     if (typeof card.held === "string") card.held = redactSecretsInText(card.held);
+    // The capability and the reason are bot-authored text sitting behind the
+    // visible subtitle, the same as a routine's instructions.
+    // Bot-authored text again — and here it was quoted off a web page the
+    // model read, which is exactly where a secret would arrive from.
+    if (card.toolProposal) {
+      card.toolProposal = {
+        ...card.toolProposal,
+        label: redactSecretsInText(card.toolProposal.label),
+        summary: redactSecretsInText(card.toolProposal.summary),
+        args: card.toolProposal.args.map(redactSecretsInText),
+        sources: card.toolProposal.sources.map((source) => ({
+          ...source,
+          ...(source.note ? { note: redactSecretsInText(source.note) } : {}),
+        })),
+      };
+    }
+    if (card.toolRequest) {
+      card.toolRequest = {
+        ...card.toolRequest,
+        capability: redactSecretsInText(card.toolRequest.capability),
+        ...(card.toolRequest.reason ? { reason: redactSecretsInText(card.toolRequest.reason) } : {}),
+      };
+    }
     // Routine definitions are executable bot-authored text stored behind the
     // visible summary. Scrub the durable payload too so nesting it on a card
     // cannot bypass the transcript's secret-redaction boundary.

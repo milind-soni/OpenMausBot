@@ -183,6 +183,17 @@ const ALLOWED: ReadonlyArray<{ method: string; path: RegExp }> = [
   // claim that it stored a host credential. Saving and `provided` stay local
   // to the host's OS-backed credential store.
   { method: "POST", path: /^\/api\/bots\/[\w-]+\/secret-cards\/[\w-]+\/(?:resume|dismiss)$/ },
+  // The tool ladder's cards: pick an app for a capability, name the account,
+  // decline, or ask the bot to look for or build one. Each acts on one
+  // pending card in one thread and can only choose from what that card
+  // offered — the slug is validated against its own candidate list, never
+  // taken from the client.
+  { method: "POST", path: /^\/api\/threads\/[\w-]+\/tool-cards\/[\w-]+\/(?:choose|connect|later|back|look|build)$/ },
+  // Approving a found or generated tool installs third-party code, so the
+  // phone is held to the same bar as the desktop: the request carries the
+  // hash of the exact command the card displayed, and a mismatch is refused
+  // host-side. Declining needs no hash.
+  { method: "POST", path: /^\/api\/threads\/[\w-]+\/tool-proposals\/[\w-]+\/(?:approve|decline)$/ },
 ];
 
 /** Route families worth naming in the refusal.

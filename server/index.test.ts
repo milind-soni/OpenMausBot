@@ -7237,6 +7237,191 @@ describe("harness HTTP API", () => {
     }
   });
 
+  // Rungs 1 and 2 of the tool ladder. The claim under test is that a bot can
+  // never offer an app we cannot actually connect: every slug on the card
+  // comes from the catalog, and the model only ever names a capability.
+  it("turns a capability into the apps it can really connect, and answers the card", async () => {
+    expect((await api("PUT", "/api/config", { composio: { apiKey: "ak_good" } })).status).toBe(200);
+    const bot = (await api("POST", "/api/bots")).body.bot;
+    connectorAccounts = [];
+    try {
+      const token = await mintTestCapability(BASE, bot.id, bot.threadId, { kind: "agents" });
+      const need = async (capability: string, reason?: string) => {
+        const response = await fetch(`${BASE}/api/internal/tool-requests`, {
+          method: "POST",
+          headers: { "content-type": "application/json", authorization: `Bearer ${token}` },
+          body: JSON.stringify({ fromBotId: bot.id, fromThreadId: bot.threadId, capability, ...(reason ? { reason } : {}) }),
+        });
+        return { status: response.status, body: await response.json() as any };
+      };
+      const transcript = async () => (await api("GET", `/api/threads/${bot.threadId}/messages`)).body.messages;
+
+      // A capability nothing answers still produces a card: falling off a
+      // rung is something the person is told, never a silent shrug.
+      const nothing = await need("underwater welding");
+      expect(nothing.status).toBe(200);
+      expect(nothing.body).toMatchObject({ none: true });
+      const noneCard = (await transcript()).findLast((m: any) => m.card?.toolRequest);
+      expect(noneCard.card.toolRequest).toMatchObject({ settled: "none", candidates: [] });
+
+      const asked = await need("calendar", "to put the event on your calendar");
+      expect(asked.status).toBe(200);
+      // Real slugs from the catalog, and the model never named one of them.
+      expect(asked.body.candidates.length).toBeGreaterThan(0);
+      expect(asked.body.candidates).toContain("googlecalendar");
+      const messageId = asked.body.messageId;
+      const card = (action: string) => `/api/threads/${bot.threadId}/tool-cards/${messageId}/${action}`;
+      const read = async () => (await transcript()).find((m: any) => m.id === messageId).card.toolRequest;
+      expect(await read()).toMatchObject({ capability: "calendar", step: "choose", reason: "to put the event on your calendar" });
+
+      // An app the card never offered is refused: the slug is not the
+      // client's to choose.
+      expect((await api("POST", card("choose"), { slug: "stripe" })).status).toBe(400);
+
+      expect((await api("POST", card("choose"), { slug: "googlecalendar" })).status).toBe(200);
+      expect(await read()).toMatchObject({ step: "name", chosen: "googlecalendar" });
+      // "Choose a different app" loses nothing.
+      expect((await api("POST", card("back"))).status).toBe(200);
+      const reset = await read();
+      expect(reset.step).toBe("choose");
+      expect(reset.chosen ?? null).toBeNull();
+
+      expect((await api("POST", card("choose"), { slug: "googlecalendar" })).status).toBe(200);
+      expect((await api("POST", card("connect"), { slug: "googlecalendar", alias: "Work" })).status).toBe(200);
+      expect(await read()).toMatchObject({ settled: "connecting" });
+      // …and it handed off to the ordinary connector card, carrying the name.
+      const connector = (await transcript()).findLast((m: any) => m.connector);
+      expect(connector.connector).toMatchObject({ slug: "googlecalendar", alias: "Work" });
+      // A settled card cannot be answered twice.
+      expect((await api("POST", card("later"))).status).toBe(409);
+    } finally {
+      await api("DELETE", `/api/bots/${bot.id}`);
+    }
+  });
+
+  // Rung 3. The claim under test is that nothing the model found can run
+  // until a person approved the exact command, with its provenance in front
+  // of them — and that a proposal nobody could check never reaches them.
+  it("proposes a found tool with provenance, and installs only what was approved", async () => {
+    expect((await api("PUT", "/api/config", { composio: { apiKey: "ak_good" } })).status).toBe(200);
+    const bot = (await api("POST", "/api/bots")).body.bot;
+    try {
+      const token = await mintTestCapability(BASE, bot.id, bot.threadId, { kind: "agents" });
+      const propose = async (patch: Record<string, unknown> = {}) => {
+        const response = await fetch(`${BASE}/api/internal/tool-proposals`, {
+          method: "POST",
+          headers: { "content-type": "application/json", authorization: `Bearer ${token}` },
+          body: JSON.stringify({
+            fromBotId: bot.id,
+            fromThreadId: bot.threadId,
+            capability: "underwater welding",
+            kind: "mcp",
+            label: "Weld MCP",
+            summary: "Logs weld inspections.",
+            packageId: "@example/weld-mcp",
+            packageVersion: "2.0.1",
+            publisher: "example",
+            command: "npx",
+            args: ["-y", "@example/weld-mcp@2.0.1"],
+            sources: [{ url: "https://www.npmjs.com/package/@example/weld-mcp" }],
+            ...patch,
+          }),
+        });
+        return { status: response.status, body: await response.json() as any };
+      };
+      const transcript = async () => (await api("GET", `/api/threads/${bot.threadId}/messages`)).body.messages;
+
+      // A version range is refused before anyone sees it: the approval would
+      // be for whatever that range resolved to tomorrow.
+      expect((await propose({ packageVersion: "^2.0.1" })).body.rejected).toMatch(/exact version/);
+      // So is a proposal with nothing to check.
+      expect((await propose({ sources: [] })).body.rejected).toMatch(/source/);
+      expect((await propose({ sources: [{ url: "http://example.com" }] })).body.rejected).toMatch(/https/);
+
+      const shown = await propose();
+      expect(shown.status).toBe(200);
+      const messageId = shown.body.messageId;
+      const read = async () => (await transcript()).find((m: any) => m.id === messageId).card.toolProposal;
+      const proposal = await read();
+      expect(proposal).toMatchObject({ packageId: "@example/weld-mcp", packageVersion: "2.0.1", command: "npx" });
+      expect(proposal.sha256).toMatch(/^[a-f0-9]{64}$/);
+
+      const route = (action: string) => `/api/threads/${bot.threadId}/tool-proposals/${messageId}/${action}`;
+      // Approving without echoing what was displayed is refused — that is the
+      // whole point of the hash.
+      expect((await api("POST", route("approve"), {})).status).toBe(409);
+      expect((await api("POST", route("approve"), { reviewedSha256: "b".repeat(64) })).status).toBe(409);
+      // Nothing has been installed by any of that.
+      expect((await api("GET", "/api/mcp/servers")).body.servers.some((s: any) => s.name.includes("weld"))).toBe(false);
+
+      expect((await api("POST", route("approve"), { reviewedSha256: proposal.sha256 })).status).toBe(200);
+      expect((await read()).settled).toBe("approved");
+      const installed = (await api("GET", "/api/mcp/servers")).body.servers.find((s: any) => s.name.includes("weld"));
+      expect(installed).toBeTruthy();
+      expect(installed.command).toBe("npx");
+      // …and it is on, because this one WAS reviewed: the person approved
+      // this exact command with its provenance on screen.
+      expect(installed.enabled).toBe(true);
+      // A settled proposal cannot be answered twice.
+      expect((await api("POST", route("decline"))).status).toBe(409);
+    } finally {
+      await api("DELETE", `/api/bots/${bot.id}`);
+    }
+  });
+
+  // Rung 4. Generated code has no package and no publisher, so the card asks
+  // for what it WAS built from instead — and still binds the approval to the
+  // command, because it still runs.
+  it("proposes a tool the bot built, with the docs it was built from as its provenance", async () => {
+    expect((await api("PUT", "/api/config", { composio: { apiKey: "ak_good" } })).status).toBe(200);
+    const bot = (await api("POST", "/api/bots")).body.bot;
+    try {
+      const token = await mintTestCapability(BASE, bot.id, bot.threadId, { kind: "agents" });
+      const propose = async (patch: Record<string, unknown> = {}) => {
+        const response = await fetch(`${BASE}/api/internal/tool-proposals`, {
+          method: "POST",
+          headers: { "content-type": "application/json", authorization: `Bearer ${token}` },
+          body: JSON.stringify({
+            fromBotId: bot.id,
+            fromThreadId: bot.threadId,
+            capability: "underwater welding",
+            kind: "generated",
+            label: "WeldLog CLI",
+            summary: "Generated from the WeldLog API docs.",
+            packageId: "",
+            packageVersion: "",
+            builtFrom: "https://weldlog.example/docs/api",
+            command: "/tmp/weldlog-pp-mcp",
+            args: [],
+            sources: [],
+            ...patch,
+          }),
+        });
+        return { status: response.status, body: await response.json() as any };
+      };
+
+      // No documentation URL means nothing to check it against.
+      expect((await propose({ builtFrom: undefined })).body.rejected).toMatch(/built from/);
+      expect((await propose({ builtFrom: "http://weldlog.example" })).body.rejected).toMatch(/built from/);
+
+      const shown = await propose();
+      const messageId = shown.body.messageId;
+      const read = async () => (await api("GET", `/api/threads/${bot.threadId}/messages`)).body.messages
+        .find((m: any) => m.id === messageId).card.toolProposal;
+      const proposal = await read();
+      expect(proposal).toMatchObject({ kind: "generated", builtFrom: "https://weldlog.example/docs/api" });
+      expect(proposal.sha256).toMatch(/^[a-f0-9]{64}$/);
+
+      const route = (action: string) => `/api/threads/${bot.threadId}/tool-proposals/${messageId}/${action}`;
+      // Same binding as a found tool: it runs, so it is approved by hash.
+      expect((await api("POST", route("approve"), { reviewedSha256: "c".repeat(64) })).status).toBe(409);
+      expect((await api("POST", route("approve"), { reviewedSha256: proposal.sha256 })).status).toBe(200);
+      expect((await read()).settled).toBe("approved");
+    } finally {
+      await api("DELETE", `/api/bots/${bot.id}`);
+    }
+  });
+
   it("keeps second-account cards separate and waits for the requested alias, not an existing account", async () => {
     expect((await api("PUT", "/api/config", { composio: { apiKey: "ak_good" } })).status).toBe(200);
     const bot = (await api("POST", "/api/bots")).body.bot;
