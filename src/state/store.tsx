@@ -154,6 +154,8 @@ export interface Message {
   reactions?: Array<{ emoji: string; by: string }>;
   /** comm chips: "Messaged @X" linking to the bot⇄bot channel. */
   comm?: { groupId: string; withBotId: string; withName: string; withColor: MausColor };
+  /** thread chips: "Opened thread #Title on Bot" linking to that thread */
+  threadRef?: { botId: string; threadId: string; title: string };
   /** sent while the bot was mid-turn; auto-sends when the turn settles.
    * Rendered only while the bot is busy, so a flag stranded by a server
    * restart never shows a promise nothing will keep. */
@@ -933,12 +935,6 @@ export function openThread(
   if (bot) dispatch({ type: "select", id: bot.id });
   dispatch({ type: "notice", notice: { kind: "thread-gone", botName: bot?.name ?? null } });
   return false;
-}
-
-/** {@link openThread} bound to the live store, for chips and links. */
-export function useOpenThread(): (target: ThreadTarget) => boolean {
-  const { state, dispatch } = useStore();
-  return (target) => openThread(dispatch, target, state);
 }
 
 function updateBot(state: AppState, botId: string, fn: (b: Bot) => Bot): AppState {

@@ -25,6 +25,14 @@ describe("roomActivityVisible", () => {
 
   // the trace that a teammate was consulted must not depend on a developer
   // flag that is off for everyone
+  it("always shows an opened-thread chip, the only trace a bot started a thread", () => {
+    const opened = chip({
+      tool: { name: "Opened thread #QA PR 245 on Scout", ok: true },
+      threadRef: { botId: "scout", threadId: "qa-245", title: "QA PR 245" },
+    });
+    expect(roomActivityVisible(opened, false)).toBe(true);
+  });
+
   it("always shows a bot-to-bot comm chip", () => {
     const comm = chip({
       tool: { name: "Messaged @Ada" },

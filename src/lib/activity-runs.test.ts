@@ -25,6 +25,13 @@ describe("groupActivityRuns", () => {
     expect(items.map((i) => i.kind)).toEqual(["run", "message", "run"]);
   });
 
+  it("never folds an opened-thread chip into a run — it is navigation, not work", () => {
+    const opened: Message = { ...tool("Opened thread #QA PR 245 on Scout"),
+      threadRef: { botId: "scout", threadId: "qa-245", title: "QA PR 245" } };
+    const items = groupActivityRuns([tool("Edit"), tool("Edit"), opened, tool("Write"), tool("Write")]);
+    expect(items.map((i) => i.kind)).toEqual(["run", "message", "run"]);
+  });
+
   it("leaves a lone tool step as an ordinary message", () => {
     const items = groupActivityRuns([text("hi"), tool("Edit"), text("done")]);
     expect(items.map((i) => i.kind)).toEqual(["message", "message", "message"]);

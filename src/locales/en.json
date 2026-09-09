@@ -331,6 +331,7 @@
   "chat.previousVersion": "Previous version",
   "chat.nextVersion": "Next version",
   "chat.openConversationWith": "Open the conversation with {name}",
+  "chat.openThread": "Open #{title}",
   "chat.botScreen": "Bot's screen",
   "chat.emptyPrompt": "Send a message to start the conversation.",
   "chat.chiefOfStaff": "Chief of Staff",
