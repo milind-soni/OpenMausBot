@@ -231,6 +231,37 @@ class SessionP1Test {
     }
 
     @Test
+    fun threadChipSwitchesByTheTaskRouteAndLandsOnTheBotWhenTheThreadIsGone() = runTest {
+        val scout = bot("scout", "task-1", "task-1", "task-2")
+        val switched = scout.copy(threadId = "task-2")
+        val session = session { Fleet(listOf(scout), emptyList()) }
+        server.enqueue(json("""{"bot":${CompanionJson.encodeToString(switched)}}"""))
+
+        val opened = session.openThread(ThreadRef("scout", "task-2", "Task 2"))
+
+        assertEquals("task-2", opened?.threadId)
+        assertEquals("task-2", session.state.value.bot("scout")?.threadId)
+        assertEquals("POST /api/bots/scout/tasks/task-2", server.takeRequest().let { "${it.method} ${it.path}" })
+        assertNull(session.actionError)
+
+        // The chip's thread was deleted after the chip was written: land on
+        // the bot's current thread and say so, never nowhere.
+        server.enqueue(json("""{"error":"Task not found."}""", code = 404))
+        val fallback = session.openThread(ThreadRef("scout", "task-9", "Gone"))
+        assertEquals("task-2", fallback?.threadId)
+        assertEquals("POST /api/bots/scout/tasks/task-9", server.takeRequest().let { "${it.method} ${it.path}" })
+        assertEquals(Session.THREAD_GONE_MESSAGE, session.actionError)
+
+        // A thread the bot is already on needs no request at all.
+        session.actionError = null
+        assertEquals("task-2", session.openThread(ThreadRef("scout", "task-2", "Task 2"))?.threadId)
+        assertEquals(2, server.requestCount)
+
+        assertNull(session.openThread(ThreadRef("nobody", "task-1", "Nope")))
+        assertEquals("That agent no longer exists.", session.actionError)
+    }
+
+    @Test
     fun roomTaskNotificationSwitchesTheChannelAndFallsBackWhenTheTaskIsGone() = runTest {
         val room = room("room-1", "room-task-1", "room-task-1", "room-task-2")
         val switched = room.copy(

@@ -83,6 +83,7 @@ import com.openmausbot.companion.core.DisplayedMessageAttachment
 import com.openmausbot.companion.core.DownloadedFile
 import com.openmausbot.companion.core.Message
 import com.openmausbot.companion.core.OptionCard
+import com.openmausbot.companion.core.ThreadRef
 import com.openmausbot.companion.core.ToolActivity
 import com.openmausbot.companion.core.TranscriptCard
 import com.openmausbot.companion.core.TranscriptCards
@@ -111,6 +112,8 @@ fun MessageRow(
     openLink: ((String, Message) -> Unit)? = null,
     /** Open one exact user attachment through the authenticated computer route. */
     openAttachment: ((DisplayedMessageAttachment, Message, DownloadedFile?) -> Unit)? = null,
+    /** Where an "Opened thread" chip goes; null leaves the chip a receipt. */
+    openThread: ((ThreadRef) -> Unit)? = null,
 ) {
     val session = LocalCompanion.current.session
     val scope = rememberCoroutineScope()
@@ -151,6 +154,7 @@ fun MessageRow(
                 haptics = haptics,
                 openLink = openLink,
                 openAttachment = openAttachment,
+                openThread = openThread,
             )
 
             message.comm?.let {
@@ -390,11 +394,12 @@ private fun MessageContent(
     haptics: Haptics,
     openLink: ((String, Message) -> Unit)?,
     openAttachment: ((DisplayedMessageAttachment, Message, DownloadedFile?) -> Unit)?,
+    openThread: ((ThreadRef) -> Unit)?,
 ) {
     when (message.kind) {
         Message.Kind.TEXT -> TextBubble(chat.threadId, message, endsRun, openLink, openAttachment)
         Message.Kind.OPTIONS -> CardView(chat, message, haptics)
-        Message.Kind.ACTIVITY -> ActivityChip(message.tool)
+        Message.Kind.ACTIVITY -> ActivityChip(message.tool, message.threadRef, openThread)
         Message.Kind.SCREEN -> ScreenShot(chat.threadId, message)
         // A message kind from a newer computer. Almost everything the harness
         // sends carries `text`, so showing it is usually the whole message and
@@ -663,10 +668,15 @@ private fun AttachmentLoadFailure(label: String, onRetry: () -> Unit) {
  * None of iOS's detail is here, because none of it has data: `durationMs`,
  * `parameters` and `output` are dormant on that view and absent from
  * [ToolActivity]. Nothing to expand means nothing to tap, which is why this is
- * not a button.
+ * not a button — except a chip that names a thread it opened, which is the
+ * link to that thread.
  */
 @Composable
-private fun ActivityChip(tool: ToolActivity?) {
+private fun ActivityChip(
+    tool: ToolActivity?,
+    threadRef: ThreadRef? = null,
+    openThread: ((ThreadRef) -> Unit)? = null,
+) {
     if (tool == null) return
     val status = ActivityReceipt.status(tool.ok)
     val tint = when (status) {
@@ -674,9 +684,21 @@ private fun ActivityChip(tool: ToolActivity?) {
         ActivityStatus.SUCCESS -> secondaryTint
         ActivityStatus.ERROR -> MaterialTheme.colorScheme.error
     }
+    val haptics = rememberHaptics()
+    val linked = if (threadRef != null && openThread != null) {
+        Modifier
+            .heightIn(min = MIN_TOUCH_TARGET)
+            .clickable(role = Role.Button) {
+                haptics.play(TactileAction.OPEN_THREAD_CHIP)
+                openThread(threadRef)
+            }
+    } else {
+        Modifier
+    }
     Row(
         modifier = Modifier
             .padding(start = 4.dp)
+            .then(linked)
             .semantics(mergeDescendants = true) {
                 contentDescription = ActivityReceipt.announcement(tool.name, status)
             },
@@ -717,7 +739,7 @@ private fun ActivityChip(tool: ToolActivity?) {
 
 /** Several consecutive successful/running activity receipts, folded on demand. */
 @Composable
-fun ActivityRunChip(items: List<Message>) {
+fun ActivityRunChip(items: List<Message>, openThread: ((ThreadRef) -> Unit)? = null) {
     if (items.isEmpty()) return
     val haptics = rememberHaptics()
     // Keyed on the run's identity — the same one the LazyColumn keys the row by
@@ -769,7 +791,7 @@ fun ActivityRunChip(items: List<Message>) {
         }
         if (expanded) {
             Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                items.forEach { item -> ActivityChip(item.tool) }
+                items.forEach { item -> ActivityChip(item.tool, item.threadRef, openThread) }
             }
         }
     }
