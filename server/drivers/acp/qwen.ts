@@ -12,7 +12,47 @@ import { createAcpDriver, type AcpSupport } from "./core.ts";
 const EMPTY: ModelCatalog = { default: "", options: [] };
 
 function qwenHome(env: Record<string, string | undefined>): string {
-  return join(env.HOME || env.USERPROFILE || homedir(), ".qwen");
+  const home = process.platform === "win32"
+    ? env.USERPROFILE || env.HOME || homedir()
+    : env.HOME || env.USERPROFILE || homedir();
+  return join(home, ".qwen");
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return Boolean(value) && typeof value === "object" && !Array.isArray(value);
+}
+
+function qwenModelLabel(id: string, name: string): string {
+  if (!name || name.toLocaleLowerCase().endsWith(id.toLocaleLowerCase())) return id;
+  return `${id} — ${name}`;
+}
+
+/** Models already configured for Qwen Code. Only id/name are read from each row. */
+export function readQwenModelCatalog(
+  env: Record<string, string | undefined> = process.env,
+): ModelCatalog {
+  let settings: unknown;
+  try {
+    settings = JSON.parse(readFileSync(join(qwenHome(env), "settings.json"), "utf8")) as unknown;
+  } catch {
+    return EMPTY;
+  }
+  if (!isRecord(settings) || !isRecord(settings.modelProviders)) return EMPTY;
+
+  const options: ModelCatalog["options"] = [];
+  const seen = new Set<string>();
+  for (const [provider, rows] of Object.entries(settings.modelProviders)) {
+    if (!Array.isArray(rows)) continue;
+    for (const row of rows) {
+      if (!isRecord(row) || typeof row.id !== "string") continue;
+      const id = row.id.trim();
+      if (!id || seen.has(id)) continue;
+      const name = typeof row.name === "string" ? row.name.trim() : "";
+      seen.add(id);
+      options.push({ id, label: qwenModelLabel(id, name), custom: true, provider });
+    }
+  }
+  return { default: options[0]?.id ?? "", options };
 }
 
 function envKeyFor(hostId: string): string {
@@ -81,8 +121,8 @@ export function ensureQwenInjectModel(
 }
 
 async function resolveModels(env: Record<string, string | undefined>): Promise<ModelCatalog> {
-  const catalog = await mergeLocalInject(EMPTY, env);
-  return { default: catalog.options[0]?.id ?? "", options: catalog.options };
+  const catalog = await mergeLocalInject(readQwenModelCatalog(env), env);
+  return { default: catalog.default || catalog.options[0]?.id || "", options: catalog.options };
 }
 
 const support: AcpSupport = {
