@@ -200,7 +200,7 @@ async function stopCliTree(child: ChildProcess, pid: number, timeoutMs: number):
     timer.unref?.();
 
     execFile("taskkill", ["/PID", String(pid), "/T", "/F"], { windowsHide: true }, (err) => {
-      if (!err) return;
+      if (!err) return done(true);
       try {
         // taskkill is unavailable or the tree lookup failed. At least stop
         // the process we own instead of leaving the entire turn running.
