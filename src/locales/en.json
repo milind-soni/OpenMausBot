@@ -248,7 +248,7 @@
   "sidebar.new": "New",
   "sidebar.newOrShare": "New or share",
   "sidebar.newBot": "New Bot",
-  "sidebar.backup.hint": "Private backup of bot setup and conversation text. Files, images, workspace memory and connections are not included.",
+  "sidebar.backup.hint": "Private backup of bot setup, conversation text, and each bot's memory notes. Files, images and connections are not included.",
   "sidebar.backup.exporting": "Exporting…",
   "sidebar.backup.export": "Export backup",
   "sidebar.backup.downloaded": "Backup downloaded · {members} bots and conversation text.",
