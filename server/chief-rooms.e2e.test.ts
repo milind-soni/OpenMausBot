@@ -90,9 +90,9 @@ it("creates and manages an own-section room through the mounted Chief MCP proxy"
   } finally {
     if (proxy) await waitForExit(proxy, { signal: "SIGTERM" });
     await fixture.close();
-    expect(existsSync(fixture.info.dataDir)).toBe(false);
     const evidencePath = `${fixture.info.logPath}.chief-rooms.json`;
     writeFileSync(evidencePath, JSON.stringify(evidence, null, 2));
+    expect(existsSync(fixture.info.dataDir)).toBe(false);
     console.info(JSON.stringify({ ...fixture.info, evidencePath, fixtureRemoved: true, exitCode: fixture.child.exitCode }));
   }
 }, 60_000);
