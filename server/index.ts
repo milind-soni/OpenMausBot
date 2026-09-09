@@ -226,6 +226,7 @@ import {
   isMemoryTopicName,
   memorySystemPrompt,
   memorySourceLabel,
+  searchMemoryFiles,
   SESSION_SEARCH_SYSTEM_PROMPT,
   workspaceDir,
 } from "./workspace.ts";
@@ -8756,6 +8757,15 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
         if (!q) return json(res, 400, { error: "q is required" });
         const rawLimit = Number(url.searchParams.get("limit"));
         const limit = Number.isFinite(rawLimit) && rawLimit > 0 ? Math.min(Math.trunc(rawLimit), 25) : 12;
+        // Memory files ride along by default: the bot's own notes are as
+        // much its notebook as its transcripts, and scoped the same way —
+        // the caller's own bot, never another's.
+        const scope = url.searchParams.get("scope") ?? "all";
+        if (scope !== "all" && scope !== "conversations" && scope !== "memory") {
+          return json(res, 400, { error: "scope must be all, conversations, or memory" });
+        }
+        const memoryHits = scope === "conversations" ? [] : searchMemoryFiles(from.id, q, limit);
+        if (scope === "memory") return json(res, 200, { hits: [], memoryHits });
         const ownThreads = [...new Set([from.threadId, ...(from.tasks ?? []).map((task) => task.threadId)])];
         // A room is the only place a recall can be a disclosure: in a 1:1 the
         // user already owns every thread the bot can reach.
@@ -8769,7 +8779,7 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
         if (inRoom) {
           discloseRecall(from, fromThreadId, hits.filter((hit) => hit.crossed).map((hit) => hit.threadId));
         }
-        return json(res, 200, { hits });
+        return json(res, 200, { hits, memoryHits });
       }
       // session_read: the whole message behind a session_search hit. Same
       // own-bot scope — a message id from another bot's thread reads as

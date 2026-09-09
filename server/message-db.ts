@@ -53,7 +53,40 @@ function open(): DatabaseSync {
     );
   `);
   ensureRecallIndex(db);
+  ensureMemoryIndex(db);
   return db;
+}
+
+// The bot's memory files — MEMORY.md, memory/<topic>.md, memory/log/<day>.md
+// — indexed for the same session_search. One row per file, with the size
+// and mtime it was indexed at so a search can notice a file the bot's own
+// file tools rewrote without any filesystem watcher. Kept in this database
+// because FTS5 is already here; the files themselves stay the source of
+// truth on disk and this table is rebuilt from them at any time.
+function ensureMemoryIndex(db: DatabaseSync): void {
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS memory_files (
+      bot_id TEXT NOT NULL,
+      path TEXT NOT NULL,
+      text TEXT NOT NULL,
+      mtime_ms INTEGER NOT NULL,
+      bytes INTEGER NOT NULL,
+      PRIMARY KEY (bot_id, path)
+    );
+    CREATE VIRTUAL TABLE IF NOT EXISTS memory_fts USING fts5(
+      text, content='memory_files', content_rowid='rowid', tokenize='unicode61'
+    );
+    CREATE TRIGGER IF NOT EXISTS memory_fts_ai AFTER INSERT ON memory_files BEGIN
+      INSERT INTO memory_fts(rowid, text) VALUES (new.rowid, new.text);
+    END;
+    CREATE TRIGGER IF NOT EXISTS memory_fts_ad AFTER DELETE ON memory_files BEGIN
+      INSERT INTO memory_fts(memory_fts, rowid, text) VALUES ('delete', old.rowid, old.text);
+    END;
+    CREATE TRIGGER IF NOT EXISTS memory_fts_au AFTER UPDATE ON memory_files BEGIN
+      INSERT INTO memory_fts(memory_fts, rowid, text) VALUES ('delete', old.rowid, old.text);
+      INSERT INTO memory_fts(rowid, text) VALUES (new.rowid, new.text);
+    END;
+  `);
 }
 
 // Ranked recall over transcript text, for the bot's own session_search tool.
@@ -427,6 +460,62 @@ export function recallMessages(query: string, threadIds: readonly string[], limi
       ...(peer ? { peer } : {}),
     };
   });
+}
+
+export interface MemoryFileStat {
+  path: string;
+  mtimeMs: number;
+  bytes: number;
+}
+
+/** Index one memory file (upsert keeps the rowid, so the update trigger
+ * keeps the FTS rows in step — the same reasoning as UPSERT_MESSAGE). */
+export function indexMemoryFile(botId: string, path: string, text: string, stat: { mtimeMs: number; bytes: number }): void {
+  db()
+    .prepare(
+      "INSERT INTO memory_files (bot_id, path, text, mtime_ms, bytes) VALUES (?, ?, ?, ?, ?) " +
+        "ON CONFLICT(bot_id, path) DO UPDATE SET text = excluded.text, mtime_ms = excluded.mtime_ms, bytes = excluded.bytes",
+    )
+    .run(botId, path, text, Math.trunc(stat.mtimeMs), stat.bytes);
+}
+
+export function removeMemoryFile(botId: string, path: string): void {
+  db().prepare("DELETE FROM memory_files WHERE bot_id = ? AND path = ?").run(botId, path);
+}
+
+/** What is indexed for a bot, so the caller can compare against the disk. */
+export function indexedMemoryFiles(botId: string): MemoryFileStat[] {
+  const rows = db()
+    .prepare("SELECT path, mtime_ms, bytes FROM memory_files WHERE bot_id = ?")
+    .all(botId) as Array<{ path: string; mtime_ms: number; bytes: number }>;
+  return rows.map((row) => ({ path: row.path, mtimeMs: row.mtime_ms, bytes: row.bytes }));
+}
+
+export interface MemoryHit {
+  /** workspace-relative: MEMORY.md, memory/<topic>.md, memory/log/<day>.md */
+  file: string;
+  /** the matched passage, with each matched term wrapped in [brackets] */
+  snippet: string;
+  /** when the file was last written, from its mtime */
+  at: number;
+}
+
+/** Relevance-ranked recall over ONE bot's memory files. Scoped by bot id
+ * in SQL, the same way recallMessages scopes by thread: another bot's
+ * memory is not a lower-ranked result, it is not a result. */
+export function recallMemory(query: string, botId: string, limit = 12): MemoryHit[] {
+  const match = ftsQuery(query);
+  if (!match) return [];
+  const rows = db()
+    .prepare(
+      "SELECT f.path, f.mtime_ms, " +
+        `snippet(memory_fts, 0, '[', ']', '…', ${SNIPPET_TOKENS}) AS snippet ` +
+        "FROM memory_fts JOIN memory_files f ON f.rowid = memory_fts.rowid " +
+        "WHERE memory_fts MATCH ? AND f.bot_id = ? " +
+        "ORDER BY bm25(memory_fts), f.mtime_ms DESC LIMIT ?",
+    )
+    .all(match, botId, limit) as Array<{ path: string; mtime_ms: number; snippet: string }>;
+  return rows.map((row) => ({ file: row.path, at: row.mtime_ms, snippet: row.snippet.replace(/\s+/g, " ").trim() }));
 }
 
 /** Test/shutdown hook — closes the handle so a wiped DATA_DIR starts clean. */

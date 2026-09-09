@@ -5,6 +5,9 @@ import { existsSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync 
 import { join } from "node:path";
 import { beforeEach, describe, expect, it } from "vitest";
 
+import { DATA_DIR } from "./config.ts";
+import { closeMessageDb, recallMemory } from "./message-db.ts";
+
 import {
   appendMemoryLog,
   ensureWorkspace,
@@ -17,7 +20,10 @@ import {
   memorySystemPrompt,
   readMemoryFile,
   readMemoryTopic,
+  searchMemoryFiles,
+  syncMemoryIndex,
   workspaceDir,
+  writeMemoryTopic,
   writeMemoryFile,
   updateMemory,
   memoryDate,
@@ -36,6 +42,10 @@ const BOT = "bot-workspace-test";
 
 describe("workspace", () => {
   beforeEach(() => {
+    // the search index lives in the messages database, beside the files
+    // it mirrors; wiping the workspaces without it would leave stale rows
+    closeMessageDb();
+    rmSync(DATA_DIR, { recursive: true, force: true });
     rmSync(WORKSPACES_DIR, { recursive: true, force: true });
     rmSync(TASK_WORKSPACES_DIR, { recursive: true, force: true });
   });
@@ -347,6 +357,51 @@ describe("workspace", () => {
     expect(appendMemoryLog(BOT, "  ")).toMatchObject({ ok: false, code: "invalid" });
     expect(readMemoryLog(BOT, "../MEMORY.md")).toBeNull();
     expect(readMemoryLog("never-ran", "2026-09-10.md")).toBeNull();
+  });
+
+  it("makes every memory file searchable for its own bot only, in step with server writes and hand edits", () => {
+    const now = new Date(2026, 8, 10, 12);
+    updateMemory(BOT, { action: "append", text: "The site audit covers broken links monthly" }, { source: 'chat "Audit"', now });
+    appendMemoryLog(BOT, "audit run, three broken links found", { now });
+    writeMemoryTopic(BOT, "deploys.md", "railway up from main\n");
+    // each server-side write indexed as it happened — the raw index, before
+    // any search-time sync pass could paper over a missed one
+    expect(recallMemory("broken links audit", BOT).map((hit) => hit.file).sort()).toEqual(["MEMORY.md", "memory/log/2026-09-10.md"]);
+    expect(recallMemory("railway", BOT).map((hit) => hit.file)).toEqual(["memory/deploys.md"]);
+    // another bot with the same words: never a hit for this one
+    updateMemory("other-bot", { action: "append", text: "broken links audit belongs to the other bot" }, { now });
+    const hits = searchMemoryFiles(BOT, "broken links audit");
+    expect(hits.map((hit) => hit.file).sort()).toEqual(["MEMORY.md", "memory/log/2026-09-10.md"]);
+    expect(hits.find((hit) => hit.file === "MEMORY.md")?.snippet).toContain("The site [audit] covers [broken] [links]");
+    expect(searchMemoryFiles(BOT, "other bot")).toEqual([]);
+    expect(searchMemoryFiles("other-bot", "broken links").map((hit) => hit.file)).toEqual(["MEMORY.md"]);
+    expect(searchMemoryFiles(BOT, "railway").map((hit) => hit.file)).toEqual(["memory/deploys.md"]);
+    // the bot's own file tools rewrite a topic file behind the server's back:
+    // the next search notices by size and mtime, without a watcher
+    const dir = workspaceDir(BOT);
+    writeFileSync(join(dir, "memory", "deploys.md"), "fly deploy from main, railway retired\n");
+    writeFileSync(join(dir, "memory", "hosting.md"), "hand-written topic about railway\n");
+    expect(searchMemoryFiles(BOT, "fly deploy").map((hit) => hit.file)).toEqual(["memory/deploys.md"]);
+    expect(searchMemoryFiles(BOT, "railway").map((hit) => hit.file).sort()).toEqual(["memory/deploys.md", "memory/hosting.md"]);
+    // a deleted file drops out; the seed alone is never a hit
+    rmSync(join(dir, "memory", "hosting.md"));
+    writeFileSync(join(dir, "MEMORY.md"), readFileSync(join(dir, "MEMORY.md"), "utf8").replace(/.*audit.*\n/, ""));
+    syncMemoryIndex(BOT);
+    expect(searchMemoryFiles(BOT, "hand-written")).toEqual([]);
+    expect(searchMemoryFiles(BOT, "broken links audit").map((hit) => hit.file)).toEqual(["memory/log/2026-09-10.md"]);
+    rmSync(join(dir, "MEMORY.md"));
+    ensureWorkspace(BOT);
+    expect(searchMemoryFiles(BOT, "durable notes")).toEqual([]);
+    // a bot that never ran has nothing, not an error
+    expect(searchMemoryFiles("never-ran", "anything")).toEqual([]);
+  });
+
+  it("writeMemoryTopic keeps the name gate, the scrub and the modes", () => {
+    expect(() => writeMemoryTopic(BOT, "../MEMORY.md", "x")).toThrow("invalid topic name");
+    writeMemoryTopic(BOT, "keys.md", `token: xoxb-${"e".repeat(30)}\n`);
+    expect(readMemoryTopic(BOT, "keys.md")).toContain("«redacted");
+    expect(readMemoryTopic(BOT, "keys.md")).not.toContain("e".repeat(30));
+    if (process.platform !== "win32") expect(statSync(join(workspaceDir(BOT), "memory", "keys.md")).mode & 0o777).toBe(0o600);
   });
 
   it("accepts plain single-segment topic names and nothing else", () => {
