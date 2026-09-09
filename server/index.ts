@@ -222,7 +222,6 @@ import {
   ensureTaskWorkspace,
   updateMemory,
   appendMemoryLog,
-  listMemoryTopics,
   isMemoryTopicName,
   memorySystemPrompt,
   memorySourceLabel,
