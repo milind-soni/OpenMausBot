@@ -928,7 +928,20 @@ async function callTool(name: string, args: Json): Promise<{ text: string; isErr
       }
       return { text: `${opened} It could not start: ${String(r.error ?? "unknown reason")}. The thread exists but nothing is running in it; tell the person.`, isError: true };
     }
-    return { text: `${opened}${typeof r.message === "string" ? ` ${r.message}` : ""}` };
+    // A peer thread is a handoff: like delegate_bot, it starts after this
+    // turn and reports back here, so the id is a claim ticket the model
+    // must not cash in this same turn.
+    const delegationId = typeof r.delegationId === "string" ? r.delegationId.trim() : "";
+    if (delegationId) delegationTaskIdsThisTurn.add(delegationId);
+    const approval = r.approvalRequired === true
+      ? " The person must approve this handoff first; their card appears after your turn ends."
+      : "";
+    const timing = r.state === "queued"
+      ? ` @${String(r.botName ?? "that bot")} can run ${Number(r.limit) || 0} threads at once and they are all spoken for, so it waits ${ordinal(Number(r.position) || 1)} in line for a free slot after this turn ends.`
+      : " It starts when this turn ends, like any handoff.";
+    return {
+      text: `${opened}${timing}${approval} Its result will be delivered to this conversation automatically (delegation id: ${delegationId || "unknown"}). Acknowledge it, mention it to the person as #${threadTitle}, and finish your turn; do not check or wait for it in this turn.`,
+    };
   }
   if (name === "create_bot") {
     const botName = String(args.name ?? "").trim();

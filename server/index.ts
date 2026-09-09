@@ -3815,13 +3815,27 @@ bus.subscribe((event: RuntimeEvent) => {
 /** How a drained delegation becomes a real turn on the target. Shared by
  * the settle-time drain and the boot-time drain of what a previous process
  * left queued. */
-const runDelegatedTurn: Parameters<typeof drainDelegations>[3] = (toBotId, text, commsDepth, sourceThreadId, channel, taskId, sourceBotId) => {
+const runDelegatedTurn: Parameters<typeof drainDelegations>[3] = (toBotId, rawText, commsDepth, sourceThreadId, channel, taskId, sourceBotId, openedThreadId) => {
     // startTurn REJECTS on an ordinary condition — busy target, deleted bot,
     // unavailable provider. Unhandled, that rejection is fatal to the
     // harness (Node's default), which in the packaged app kills the server
     // child. Every delegation failure has to land as a chip instead.
-    const targetThreadId = store.bot(toBotId)?.threadId;
+    // A fresh-thread handoff runs in the thread the opener created — the
+    // drain already dropped it if that thread is gone — never in whatever
+    // the person is looking at.
+    const targetThreadId = openedThreadId ?? store.bot(toBotId)?.threadId;
     const target = store.bot(toBotId);
+    const opener = store.bot(sourceBotId);
+    const unattended = isUnattended(sourceBotId, sourceThreadId);
+    // The first line of an opened thread is another bot's words: it carries
+    // the same provenance note every relayed peer line does, structurally
+    // (peerAsk) as well as in the text.
+    const peerAsk: Message["peerAsk"] | undefined = openedThreadId && opener
+      ? { botId: opener.id, name: opener.name, unattended: unattended || undefined }
+      : undefined;
+    const text = openedThreadId && opener
+      ? withPeerProvenance(rawText, { botName: opener.name, delivery: "start_thread", unattended })
+      : rawText;
     if (targetThreadId) {
       delegationWatch.set(targetThreadId, {
         channelId: channel?.id,
@@ -3860,7 +3874,8 @@ const runDelegatedTurn: Parameters<typeof drainDelegations>[3] = (toBotId, text,
     return startTurn(toBotId, text, {
       threadId: targetThreadId,
       commsDepth,
-      unattended: isUnattended(sourceBotId, sourceThreadId),
+      unattended,
+      peerAsk,
       // startTurn schedules provider/integration setup after marking the bot
       // busy. Those asynchronous setup failures do not emit turn.completed,
       // so clear the watch and report them through this callback too.
@@ -3890,8 +3905,15 @@ function retryDelegationsWaitingOn(botId: string): void {
     // Explicit idle releases (room/setup/reload/watchdog fallbacks) may not
     // publish turn.completed. They free a waiting source continuation too.
     drainDelegationWakes();
-    if (store.bot(botId)?.busy) return;
-    for (const waitingThread of releaseDelegationsWaitingOn(botId)) {
+    // A bot still busy in one thread has nevertheless freed a slot: the
+    // fresh-thread handoffs waiting on it can move, while the active-thread
+    // ones keep waiting for it to go idle, as they always have.
+    const stillBusy = store.bot(botId)?.busy === true;
+    if (stillBusy && botAtThreadCapacity(botId)) return;
+    const released = stillBusy
+      ? releaseDelegationsWaitingOn(botId, (item) => item.targetThreadId !== undefined)
+      : releaseDelegationsWaitingOn(botId);
+    for (const waitingThread of released) {
       drainThreadDelegations(waitingThread);
     }
   });
@@ -5126,7 +5148,7 @@ async function stopBotForEmergencyApprovalDowngrade(botId: string): Promise<void
 // Load queued handoffs before scheduler recovery can fail an interrupted
 // run. Its failure callback can then durably drop that work immediately;
 // nothing dispatches until the listener is ready below.
-const commsBus: CommsBus = { store, broadcast };
+const commsBus: CommsBus = { store, broadcast, threadSlotFree: (botId) => !botAtThreadCapacity(botId) };
 _loadPending();
 
 routines = new RoutineManager({
@@ -9172,7 +9194,62 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
             ...outcome,
           });
         }
-        return json(res, 501, { error: "opening a thread on another bot is not available yet" });
+        // A peer thread is a handoff into a fresh thread: every gate the
+        // classic handoff has applies unchanged, here at queue time and
+        // again in the drain at dispatch time.
+        const depth = internalCapability.depth;
+        if (depth >= MAX_COMMS_DEPTH) {
+          return json(res, 200, { error: "thread chains are limited to one hop — open the thread on yourself, or do this one here" });
+        }
+        if (sectionKey(from.section) !== sectionKey(target.section)) {
+          return json(res, 403, { error: "that bot belongs to a different section" });
+        }
+        if (!peerAllowed(from, target.id)) {
+          return json(res, 403, { error: "that bot is not on this bot's allowed peers — call list_bots for the ones you can reach" });
+        }
+        const task = store.createTask(target.id, title, false, projectId, { botId: from.id, name: from.name, at: Date.now() });
+        if (!task) return json(res, 500, { error: "couldn't create that thread" });
+        const queued = queueDelegation(
+          commsBus,
+          from,
+          { toBotId: target.id, message, depth, targetThreadId: task.threadId },
+          MAX_COMMS_DEPTH,
+          fromThreadId,
+        );
+        if (queued.result !== "ok" || !queued.id) {
+          // nothing will ever run there: take the row back before the person
+          // sees a thread that goes nowhere
+          store.deleteTask(target.id, task.threadId);
+          const said: Record<Exclude<QueueResult, "ok">, string> = {
+            self: "a bot cannot hand a thread to itself this way — leave bot_id out",
+            too_deep: "thread chains are limited to one hop — open the thread on yourself, or do this one here",
+            no_target: "no such bot",
+            too_many: "too many handoffs queued on this turn — finish your turn and open the rest next time",
+          };
+          return json(res, 200, { error: said[queued.result === "ok" ? "no_target" : queued.result] });
+        }
+        store.setTaskOpenedBy(target.id, task.threadId, { botId: from.id, name: from.name, delegationId: queued.id, at: task.openedBy?.at ?? Date.now() });
+        internalCapability.openedThreads += 1;
+        // An honest forecast, not a promise: the handoff starts when this
+        // turn ends, and by then the target's slots are taken by whatever is
+        // running there plus the threads this turn already opened ahead.
+        const limit = maxConcurrentBotThreads(cfg);
+        const running = store.tasks(target.id).filter((candidate) => threadBusy(target.id, candidate.threadId)).length;
+        const ahead = pendingDelegationSnapshot().filter(
+          (pending) => pending.toBotId === target.id && pending.targetThreadId !== undefined && pending.targetThreadId !== task.threadId,
+        ).length;
+        const position = running + ahead + 1;
+        return json(res, 201, {
+          threadId: task.threadId,
+          title: task.title,
+          botId: target.id,
+          botName: target.name,
+          self: false,
+          delegationId: queued.id,
+          approvalRequired: Boolean(from.approvePeerComms),
+          limit,
+          ...(position > limit ? { state: "queued", position: position - limit } : { state: "pending" }),
+        });
       }
       if (method === "POST" && path === "/api/internal/create-bot") {
         const body = await readInternalBody();

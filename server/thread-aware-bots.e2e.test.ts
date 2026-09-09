@@ -8,7 +8,7 @@
 // path already has. Turns are held open by a gated fake CLI so the slot
 // arithmetic is observable rather than raced.
 import { spawn, type ChildProcess } from "node:child_process";
-import { chmodSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import { chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
@@ -17,6 +17,7 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
 import { removeTempDir, waitForExit } from "./testing/cleanup.ts";
 import { freePortBlock } from "./testing/ports.ts";
+import { openSse } from "./testing/sse.ts";
 
 const SERVER_DIR = dirname(fileURLToPath(import.meta.url));
 const ROOT = join(SERVER_DIR, "..");
@@ -60,6 +61,26 @@ const dumpOf = (threadId: string): { systemPrompt?: string; mcpConfig?: any } | 
 const liveToken = async (threadId: string): Promise<Record<string, string>> => {
   await expect.poll(() => dumpOf(threadId)?.mcpConfig?.mcpServers?.agents?.env?.OMB_COMMS_TOKEN, { timeout: 15_000 }).toBeTruthy();
   return { authorization: `Bearer ${dumpOf(threadId)!.mcpConfig.mcpServers.agents.env.OMB_COMMS_TOKEN}` };
+};
+/** Hold a fresh turn open on a bot's own thread and hand back its live
+ * token. A wake that lands on that thread cannot start while this turn
+ * runs, so the token stays valid for as long as the test holds the gate —
+ * the way a real tool call reads the ledger. */
+const heldTurn = async (bot: { id: string; threadId: string }, text: string): Promise<Record<string, string>> => {
+  // idle first: an earlier turn still finishing must find its gate
+  await expect.poll(async () => (await botState(bot.id))?.busy, { timeout: 15_000 }).toBe(false);
+  rmSync(join(gates, `${bot.threadId}.gate`), { force: true });
+  rmSync(join(gates, `${bot.threadId}.json`), { force: true });
+  const sent = await api("POST", `/api/bots/${bot.id}/messages`, { text });
+  expect(sent.status).toBe(202);
+  expect(sent.body.queued).toBeUndefined();
+  return liveToken(bot.threadId);
+};
+/** The opener is woken once with a handoff's outcome; let that turn come
+ * and go before holding the thread ourselves. */
+const afterWake = async (bot: { id: string }) => {
+  await expect.poll(async () => (await botState(bot.id))?.busy, { timeout: 15_000 }).toBe(true);
+  await expect.poll(async () => (await botState(bot.id))?.busy, { timeout: 15_000 }).toBe(false);
 };
 const mintedToken = async (botId: string, threadId: string, depth = 0): Promise<Record<string, string>> => {
   const minted = await api(
@@ -253,6 +274,197 @@ describe("start_thread on yourself", () => {
       await expect.poll(async () => (await botState(bot.id))?.busy, { timeout: 15_000 }).toBe(false);
     } finally {
       await cleanup([bot.id]);
+    }
+  }, 60_000);
+});
+
+describe("start_thread on a teammate", () => {
+  it("hands three threads to a peer whose limit is two: two run, one waits in line, all report back", async () => {
+    const pm = await createBot("Pam", "gated");
+    const qa = await createBot("Quinn", "gated");
+    const stream = await openSse(`${base}/api/events`);
+    try {
+      expect((await api("POST", `/api/bots/${pm.id}/messages`, { text: "Hand the pull requests to QA." })).status).toBe(202);
+      const token = await liveToken(pm.threadId);
+      const opened: any[] = [];
+      for (let index = 1; index <= 3; index++) {
+        const response = await api("POST", "/api/internal/threads", { toBotId: qa.id, title: `QA: PR #${index}`, message: `Test pull request ${index}.`, depth: 0 }, token);
+        expect(response.status).toBe(201);
+        opened.push(response.body);
+      }
+      // the forecast: two slots, three handoffs — the third waits in line
+      expect(opened[0]).toMatchObject({ botId: qa.id, botName: "Quinn", self: false, state: "pending", limit: 2 });
+      expect(opened[1]).toMatchObject({ state: "pending" });
+      expect(opened[2]).toMatchObject({ state: "queued", position: 1 });
+      expect(opened.every((thread) => typeof thread.delegationId === "string" && thread.delegationId.length > 3)).toBe(true);
+
+      // the person's view of the peer: three rows, opened by Pam under a
+      // handoff each, nothing running yet, the selected row untouched
+      const before = await botState(qa.id);
+      expect(before.threadId).toBe(qa.threadId);
+      for (const thread of opened) {
+        expect(before.tasks.find((task: any) => task.threadId === thread.threadId)).toMatchObject({
+          title: thread.title, busy: false, openedBy: { botId: pm.id, name: "Pam", delegationId: thread.delegationId },
+        });
+      }
+      // and the opener's view: one linkable chip per thread
+      const chips = (await messages(pm.threadId)).filter((message) => message.threadRef);
+      expect(chips.map((chip) => [chip.tool.name, chip.threadRef.botId, chip.threadRef.threadId])).toEqual(
+        opened.map((thread) => [`Opened thread #${thread.title} on Quinn`, qa.id, thread.threadId]),
+      );
+
+      // the handoffs start when the opener's turn ends
+      release(pm.threadId);
+      await expect.poll(async () => (await botState(qa.id)).tasks.filter((task: any) => task.busy).length, { timeout: 15_000 }).toBe(2);
+      const busyIds = (await botState(qa.id)).tasks.filter((task: any) => task.busy).map((task: any) => task.threadId);
+      expect(busyIds.sort()).toEqual([opened[0].threadId, opened[1].threadId].sort());
+      expect((await messages(pm.threadId)).some((message) => message.tool?.name === "Thread #QA: PR #3 on @Quinn waiting for a free slot")).toBe(true);
+      // the first line of an opened thread is the opener's words, marked as such
+      const firstLine = (await messages(opened[0].threadId)).find((message) => message.role === "user");
+      expect(firstLine.text).toContain("[Thread opened by @Pam, another bot in this OpenMausBot workspace");
+      expect(firstLine.text).toContain("Test pull request 1.");
+      expect(firstLine.peerAsk).toMatchObject({ botId: pm.id, name: "Pam" });
+      // a peer-opened thread runs one hop down: no agents tools were mounted
+      await expect.poll(() => dumpOf("peer")?.mcpConfig !== undefined, { timeout: 15_000 }).toBe(true);
+      expect(dumpOf("peer")!.mcpConfig?.mcpServers?.agents).toBeUndefined();
+
+      // the opener's next turn reads the ledger with its own live token:
+      // the handoffs are running, with elapsed time, and nothing has come back
+      const readBack = await heldTurn(pm, "How is QA going?");
+      const running = (await api("GET", `/api/internal/delegations/${opened[0].delegationId}`, undefined, readBack)).body;
+      expect(running).toMatchObject({ status: "running", toBotName: "Quinn" });
+      expect(running.elapsedMs).toBeGreaterThanOrEqual(0);
+      expect((await api("GET", `/api/internal/delegations/${opened[2].delegationId}`, undefined, readBack)).body).toMatchObject({ status: "queued", toBotName: "Quinn" });
+
+      // a slot frees, the line moves, and every result flows back
+      release("peer");
+      await expect.poll(async () => (await botState(qa.id)).tasks.some((task: any) => task.threadId === opened[2].threadId && task.busy), { timeout: 15_000 }).toBe(true);
+      await expect.poll(async () => (await botState(qa.id)).busy, { timeout: 15_000 }).toBe(false);
+      for (const thread of opened) {
+        const receipt = (await api("GET", `/api/internal/delegations/${thread.delegationId}?wait_ms=15000`, undefined, readBack)).body;
+        expect(receipt).toMatchObject({ status: "done", toBotName: "Quinn" });
+        expect(receipt.result).toContain("reply to:");
+      }
+      await expect.poll(async () => (await messages(pm.threadId)).filter((message) => message.text?.startsWith("@Quinn replied to the delegated task")).length, { timeout: 20_000 }).toBe(3);
+      // opening and finishing were internal: the peer's rows never badged
+      // or bannered the person — its results are the opener's to report
+      expect(stream.frames.filter((frame) => frame.kind === "notify" && frame.notification?.botId === qa.id)).toEqual([]);
+      expect((await botState(qa.id)).tasks.filter((task: any) => task.unread)).toEqual([]);
+      // the opener is woken to fold the results in once it is free
+      release(pm.threadId);
+      await expect.poll(async () => (await messages(pm.threadId)).some((message) => message.text?.includes("[A delegated task just completed]")), { timeout: 20_000 }).toBe(true);
+      await expect.poll(async () => (await botState(pm.id)).busy, { timeout: 15_000 }).toBe(false);
+    } finally {
+      stream.close();
+      await cleanup([pm.id, qa.id]);
+    }
+  }, 90_000);
+
+  it("refuses a peer outside the section, off the allow-list, or one hop too deep, and takes back a fifth handoff's row", async () => {
+    const pm = await createBot("Pam", "gated");
+    const near = await createBot("Near", "gated");
+    const far = await createBot("Far", "gated");
+    const other = await createBot("Other", "gated");
+    try {
+      expect((await api("PATCH", `/api/bots/${other.id}`, { section: "Elsewhere" })).status).toBe(200);
+      expect((await api("PATCH", `/api/bots/${pm.id}`, { peers: [near.id] })).status).toBe(200);
+      // minting a capability for a thread retires that thread's previous
+      // one, so the one-hop probe goes first
+      const deep = await api("POST", "/api/internal/threads", { toBotId: near.id, title: "Job", message: "go" }, await mintedToken(pm.id, pm.threadId, 1));
+      expect(deep.status).toBe(200);
+      expect(deep.body.error).toContain("one hop");
+      const token = await mintedToken(pm.id, pm.threadId);
+      const outside = await api("POST", "/api/internal/threads", { toBotId: other.id, title: "Job", message: "go" }, token);
+      expect(outside.status).toBe(403);
+      expect(outside.body.error).toContain("different section");
+      const unlisted = await api("POST", "/api/internal/threads", { toBotId: far.id, title: "Job", message: "go" }, token);
+      expect(unlisted.status).toBe(403);
+      expect(unlisted.body.error).toContain("not on this bot's allowed peers");
+      for (const bot of [other, far, near]) expect((await botState(bot.id)).tasks).toHaveLength(1);
+      // the ledger's own ceiling still applies: four handoffs a turn
+      for (let index = 0; index < 4; index++) {
+        expect((await api("POST", "/api/internal/threads", { toBotId: near.id, title: `Job ${index}`, message: "go" }, token)).status).toBe(201);
+      }
+      const fifth = await api("POST", "/api/internal/threads", { toBotId: near.id, title: "Job 4", message: "go" }, token);
+      expect(fifth.status).toBe(200);
+      expect(fifth.body.error).toContain("too many handoffs");
+      expect((await botState(near.id)).tasks).toHaveLength(5);
+    } finally {
+      await cleanup([pm.id, near.id, far.id, other.id]);
+    }
+  }, 60_000);
+
+  it("waits for the person's card when peer contact needs approval, and reports a denial", async () => {
+    const pm = await createBot("Pam", "gated");
+    const qa = await createBot("Quinn", "gated");
+    try {
+      expect((await api("PATCH", `/api/bots/${pm.id}`, { approvePeerComms: true })).status).toBe(200);
+      expect((await api("POST", `/api/bots/${pm.id}/messages`, { text: "Hand it to QA." })).status).toBe(202);
+      const token = await liveToken(pm.threadId);
+      const opened = await api("POST", "/api/internal/threads", { toBotId: qa.id, title: "QA: PR #9", message: "Test it." }, token);
+      expect(opened.status).toBe(201);
+      expect(opened.body.approvalRequired).toBe(true);
+      release(pm.threadId);
+      await expect.poll(async () => (await messages(pm.threadId)).some((message) => message.card?.tool === "delegate_bot"), { timeout: 15_000 }).toBe(true);
+      const card = (await messages(pm.threadId)).find((message) => message.card?.tool === "delegate_bot");
+      // nothing ran on the peer while the card was open
+      expect((await taskOf(qa.id, opened.body.threadId)).busy).toBe(false);
+      expect((await messages(opened.body.threadId)).some((message) => message.role === "user")).toBe(false);
+      expect((await api("POST", `/api/bots/${pm.id}/respond`, { threadId: pm.threadId, requestId: card.card.requestId, behavior: "deny" })).status).toBe(200);
+      await expect.poll(async () => (await messages(pm.threadId)).some((message) => message.tool?.name === "Delegation to @Quinn denied by user"), { timeout: 15_000 }).toBe(true);
+      await afterWake(pm);
+      const readBack = await heldTurn(pm, "What happened?");
+      expect((await api("GET", `/api/internal/delegations/${opened.body.delegationId}`, undefined, readBack)).body).toMatchObject({ status: "denied" });
+      expect((await messages(opened.body.threadId)).some((message) => message.role === "user")).toBe(false);
+      release(pm.threadId);
+    } finally {
+      await cleanup([pm.id, qa.id]);
+    }
+  }, 60_000);
+
+  it("drops a handoff whose thread was deleted before it could start", async () => {
+    const pm = await createBot("Pam", "gated");
+    const qa = await createBot("Quinn", "gated");
+    try {
+      expect((await api("POST", `/api/bots/${pm.id}/messages`, { text: "Hand it to QA." })).status).toBe(202);
+      const token = await liveToken(pm.threadId);
+      const opened = await api("POST", "/api/internal/threads", { toBotId: qa.id, title: "QA: PR #10", message: "Test it." }, token);
+      expect(opened.status).toBe(201);
+      expect((await api("DELETE", `/api/bots/${qa.id}/tasks/${opened.body.threadId}`)).status).toBe(200);
+      release(pm.threadId);
+      await expect.poll(async () => (await messages(pm.threadId)).some((message) => message.tool?.name === "Thread on @Quinn canceled — it was deleted before it could start"), { timeout: 15_000 }).toBe(true);
+      await afterWake(pm);
+      const readBack = await heldTurn(pm, "What happened?");
+      expect((await api("GET", `/api/internal/delegations/${opened.body.delegationId}`, undefined, readBack)).body).toMatchObject({ status: "dropped" });
+      // the peer's own conversation was never used as a fallback
+      expect((await messages(qa.threadId)).some((message) => message.role === "user")).toBe(false);
+      release(pm.threadId);
+    } finally {
+      await cleanup([pm.id, qa.id]);
+    }
+  }, 60_000);
+
+  it("still buzzes when a peer-opened thread stops to ask the person a question, deep-linked to that thread", async () => {
+    const pm = await createBot("Pam", "gated");
+    const sage = await createBot("Sage", "curious", "fake-model");
+    const stream = await openSse(`${base}/api/events`);
+    try {
+      expect((await api("POST", `/api/bots/${pm.id}/messages`, { text: "Ask Sage." })).status).toBe(202);
+      const token = await liveToken(pm.threadId);
+      const opened = await api("POST", "/api/internal/threads", { toBotId: sage.id, title: "Colour choice", message: "Which colour?" }, token);
+      expect(opened.status).toBe(201);
+      release(pm.threadId);
+      const frame = await stream.until(
+        (candidate) => candidate.kind === "notify" && candidate.notification?.botId === sage.id,
+        20_000,
+      );
+      expect(frame.notification).toMatchObject({ kind: "question", botId: sage.id, threadId: opened.body.threadId });
+      expect(frame.notification.threadId).not.toBe(sage.threadId);
+      const card = (await messages(opened.body.threadId)).findLast((message) => message.kind === "options" && Boolean(message.card));
+      expect(card?.card).toMatchObject({ title: "Your bot has a question" });
+    } finally {
+      stream.close();
+      await cleanup([pm.id, sage.id]);
     }
   }, 60_000);
 });
