@@ -57,6 +57,12 @@ let roomPostsThisTurn = 0;
 // refusal reaches the model without a round trip.
 const MAX_THREADS_PER_TURN = 5;
 let threadsOpenedThisTurn = 0;
+// A memory write the harness refused (a stale passage, a full file) needs
+// one re-read and one corrected retry, not a loop of the same append. The
+// third refusal in a turn closes the tool so the turn ends with the person
+// told what did not fit instead of a transcript of retries.
+const MAX_MEMORY_REFUSALS_PER_TURN = 3;
+let memoryRefusalsThisTurn = 0;
 const delegationTaskIdsThisTurn = new Set<string>();
 
 const WEEKDAYS = [
@@ -673,13 +679,20 @@ const textResult = (id: unknown, text: string, isError = false) =>
   ok(id, { content: [{ type: "text", text }], isError });
 
 async function api(path: string, init?: RequestInit): Promise<Json> {
+  const { ok, status, body } = await apiResponse(path, init);
+  if (!ok) throw new Error(String(body.error ?? `HTTP ${status}`));
+  return body;
+}
+
+/** Like api, but a refusal comes back as its body instead of an Error —
+ * for the tools whose refusals carry more than a sentence. */
+async function apiResponse(path: string, init?: RequestInit): Promise<{ ok: boolean; status: number; body: Json }> {
   const res = await fetch(HARNESS + path, {
     ...init,
     headers: { "content-type": "application/json", authorization: `Bearer ${TOKEN}`, ...init?.headers },
   });
   const body = (await res.json().catch(() => ({}))) as Json;
-  if (!res.ok) throw new Error(String(body.error ?? `HTTP ${res.status}`));
-  return body;
+  return { ok: res.ok, status: res.status, body };
 }
 
 /** "1st", "2nd", "3rd", "4th" — the queue position as a person says it. */
@@ -1128,7 +1141,13 @@ async function callTool(name: string, args: Json): Promise<{ text: string; isErr
       || (args.action !== "append" && (typeof args.old_text !== "string" || !args.old_text.trim()))) {
       return { text: "Use memory_update action=append with text, replace or supersede with text and old_text, or remove with old_text.", isError: true };
     }
-    const r = await api("/api/internal/memory", {
+    if (memoryRefusalsThisTurn >= MAX_MEMORY_REFUSALS_PER_TURN) {
+      return {
+        text: `Memory updates are closed for the rest of this turn: ${MAX_MEMORY_REFUSALS_PER_TURN} were refused. Do not retry. Tell the person what you wanted to keep and why it did not fit; they can tidy MEMORY.md in Settings, and you can try again in your next turn.`,
+        isError: true,
+      };
+    }
+    const { body: r } = await apiResponse("/api/internal/memory", {
       method: "POST",
       body: JSON.stringify({
         fromBotId: BOT_ID,
@@ -1138,7 +1157,14 @@ async function callTool(name: string, args: Json): Promise<{ text: string; isErr
         oldText: args.old_text,
       }),
     });
-    if (r.error || r.ok !== true) return { text: String(r.error ?? "Memory update was not confirmed."), isError: true };
+    if (r.error || r.ok !== true) {
+      memoryRefusalsThisTurn += 1;
+      const recent = Array.isArray(r.recent) ? r.recent.filter((line) => typeof line === "string") : [];
+      // A full file: the refusal carries the newest entries so the model
+      // can merge them in this same turn without a read round trip.
+      const tail = r.code === "over-budget" && recent.length ? `\n\nMost recent entries, oldest first:\n${recent.join("\n")}` : "";
+      return { text: `${String(r.error ?? "Memory update was not confirmed.")}${tail}`, isError: true };
+    }
     const entry = typeof r.entry === "string" && r.entry ? ` Entry: ${r.entry}` : "";
     return { text: `Memory updated.${entry}${r.truncated ? " MEMORY.md exceeds the prompt load budget; keep it short and curated." : ""}` };
   }

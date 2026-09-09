@@ -19,7 +19,9 @@ import {
   updateMemory,
   memoryDate,
   memoryEntry,
-  MEMORY_FILE_MAX_BYTES,
+  memoryLineCount,
+  MEMORY_CONSOLIDATE_HINT,
+  MEMORY_REFUSAL_RECENT_ENTRIES,
   MEMORY_MAX_BYTES,
   MEMORY_MAX_LINES,
   WORKSPACES_DIR,
@@ -226,8 +228,55 @@ describe("workspace", () => {
     expect(updateMemory(BOT, { action: "append", text: " " })).toMatchObject({ ok: false, code: "invalid" });
     expect(updateMemory(BOT, { action: "replace", oldText: "", text: "replacement" })).toMatchObject({ ok: false, code: "invalid" });
     expect(updateMemory(BOT, { action: "remove", oldText: "repeated", text: "unexpected" })).toMatchObject({ ok: false, code: "invalid" });
-    expect(updateMemory(BOT, { action: "append", text: "é".repeat(MEMORY_FILE_MAX_BYTES / 2) })).toMatchObject({ ok: false, code: "too-large" });
+    expect(updateMemory(BOT, { action: "append", text: "é".repeat(MEMORY_MAX_BYTES) })).toMatchObject({ ok: false, code: "over-budget" });
     expect(readMemoryFile(BOT).text).toBe("repeated repeated");
+  });
+
+  it("refuses a write that would leave the file over the load budget, with the counts and the newest entries", () => {
+    const now = new Date(2026, 8, 10, 12);
+    const entries = Array.from({ length: MEMORY_MAX_LINES }, (_, i) => `- fact ${i}`);
+    writeMemoryFile(BOT, `${entries.join("\n")}\n`);
+    expect(memoryLineCount(readMemoryFile(BOT).text)).toBe(MEMORY_MAX_LINES);
+    expect(readMemoryFile(BOT).truncated).toBe(false);
+    const refused = updateMemory(BOT, { action: "append", text: "one fact too many" }, { source: 'chat "Full"', now });
+    expect(refused).toMatchObject({
+      ok: false, code: "over-budget", lines: MEMORY_MAX_LINES + 1, budget: { lines: MEMORY_MAX_LINES, bytes: MEMORY_MAX_BYTES },
+      recent: entries.slice(-MEMORY_REFUSAL_RECENT_ENTRIES),
+    });
+    expect(refused.ok ? "" : refused.error).toContain(`would be ${MEMORY_MAX_LINES + 1} lines`);
+    expect(refused.ok ? "" : refused.error).toContain(MEMORY_CONSOLIDATE_HINT);
+    expect(refused.ok ? "" : refused.error).toContain("do not retry the same append");
+    // nothing landed
+    expect(memoryLineCount(readMemoryFile(BOT).text)).toBe(MEMORY_MAX_LINES);
+    // bytes are refused the same way, on a file with few lines
+    writeMemoryFile(BOT, `- ${"x".repeat(MEMORY_MAX_BYTES - 100)}\n`);
+    const bytes = updateMemory(BOT, { action: "append", text: "y".repeat(200) }, { now });
+    expect(bytes).toMatchObject({ ok: false, code: "over-budget", lines: 2 });
+    expect(!bytes.ok && bytes.code === "over-budget" ? bytes.bytes : 0).toBeGreaterThan(MEMORY_MAX_BYTES);
+    // an over-budget file the person grew by hand can still be consolidated:
+    // a change that makes it smaller goes through, one that grows it does not
+    writeMemoryFile(BOT, `${entries.join("\n")}\n- fact ${MEMORY_MAX_LINES}\n- fact ${MEMORY_MAX_LINES + 1}\n`);
+    expect(readMemoryFile(BOT).truncated).toBe(true);
+    expect(updateMemory(BOT, { action: "replace", oldText: "- fact 0", text: "- facts 0 and 1 merged, longer than before" }, { now })).toMatchObject({ ok: false, code: "over-budget" });
+    expect(updateMemory(BOT, { action: "remove", oldText: `- fact ${MEMORY_MAX_LINES + 1}` }, { now })).toMatchObject({ ok: true });
+    expect(updateMemory(BOT, { action: "replace", oldText: "- fact 0", text: "- f0" }, { now })).toMatchObject({ ok: true });
+    expect(memoryLineCount(readMemoryFile(BOT).text)).toBe(MEMORY_MAX_LINES + 1);
+  });
+
+  it("tells the bot how far over budget a hand-grown file is, and how to fix it, when the prompt cuts it", () => {
+    const dir = ensureWorkspace(BOT);
+    const lines = Array.from({ length: MEMORY_MAX_LINES + 50 }, (_, i) => `- fact ${i}`);
+    writeFileSync(join(dir, "MEMORY.md"), `${lines.join("\n")}\n`);
+    const memory = loadMemory(BOT);
+    expect(memory).toMatchObject({ truncated: true, lines: MEMORY_MAX_LINES + 50 });
+    const managed = memorySystemPrompt(BOT, { managedWrites: true });
+    expect(managed).toContain(`[MEMORY.md is ${MEMORY_MAX_LINES + 50} lines and ${memory!.bytes} bytes; only the first ${MEMORY_MAX_LINES} lines / ${MEMORY_MAX_BYTES} bytes are shown above`);
+    expect(managed).toContain("Consolidate it now with memory_update");
+    expect(managed).not.toContain("was cut off here — trim it");
+    expect(memorySystemPrompt(BOT)).toContain("Trim it with your file tools");
+    // a file of exactly the budget with a final newline is not over it
+    writeFileSync(join(dir, "MEMORY.md"), `${lines.slice(0, MEMORY_MAX_LINES).join("\n")}\n`);
+    expect(loadMemory(BOT)?.truncated).toBe(false);
   });
 
   it("requires explicit remove to delete a memory passage", () => {
