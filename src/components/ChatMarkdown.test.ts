@@ -243,6 +243,10 @@ describe("bidi: message content carries its own direction", () => {
     expect(textDirection("  «2024» — مرحبا hello")).toBe("rtl");
     expect(textDirection("🎉 42. hello مرحبا")).toBe("ltr");
     expect(textDirection("שלום")).toBe("rtl");
+    // scripts in living use beyond the obvious two
+    expect(textDirection("\u{10D00}\u{10D01}")).toBe("rtl"); // Hanifi Rohingya
+    expect(textDirection("\u{1E900}")).toBe("rtl"); // Adlam
+    expect(textDirection("\u{0780}")).toBe("rtl"); // Thaana
   });
 
   it("gives every block its own direction instead of the UI's", () => {
@@ -317,5 +321,30 @@ describe("bidi: message content carries its own direction", () => {
       streaming: false,
     }));
     expect(fenced).toContain('<div dir="ltr"');
+  });
+
+  it("gives links a base direction, not isolation alone", () => {
+    // isolate keeps a link from disturbing the sentence around it, but the
+    // link's own contents still lay out along its inherited direction — a URL
+    // in an RTL paragraph needs an LTR base of its own.
+    const url = renderToStaticMarkup(createElement(ChatMarkdown, {
+      text: `${ARABIC} <https://example.test/a/b?x=1> ${ARABIC}`,
+    }));
+    expect(url).toContain('dir="auto"');
+
+    // an Arabic label must not be pinned LTR, which is why the anchor
+    // resolves rather than hard-coding a direction
+    const labelled = renderToStaticMarkup(createElement(ChatMarkdown, {
+      text: `[${ARABIC}](https://example.test/a)`,
+    }));
+    expect(labelled).toContain('dir="auto"');
+
+    // a local path is always left-to-right, so that root is pinned. It needs
+    // a message context: without one the link degrades to a plain label.
+    const path = renderToStaticMarkup(createElement(ChatMarkdown, {
+      text: `${ARABIC} [report](/Users/maus/out/report.md) ${ARABIC}`,
+      message: { threadId: "thread-1", messageId: "message-1" },
+    }));
+    expect(path).toContain('<span dir="ltr"');
   });
 });

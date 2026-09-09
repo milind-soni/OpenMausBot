@@ -116,7 +116,11 @@ function unwrapLinkedImages() {
 //
 // Code is skipped when judging: an answer that opens with `fs.readFileSync`
 // and continues in Arabic is an Arabic paragraph, not an English one.
-const RTL_SCRIPT = /[\p{Script=Arabic}\p{Script=Hebrew}\p{Script=Syriac}\p{Script=Thaana}\p{Script=Nko}\p{Script=Adlam}\p{Script=Samaritan}\p{Script=Mandaic}]/u;
+// Right-to-left scripts in living use. JS regexes cannot match on
+// Bidi_Class, so the scripts are named; historic ones (Phoenician, Old
+// Turkic, the Pahlavis) are left out deliberately — nobody writes messages
+// in them, and every name here costs a branch on the hot path.
+const RTL_SCRIPT = /[\p{Script=Arabic}\p{Script=Hebrew}\p{Script=Syriac}\p{Script=Thaana}\p{Script=Nko}\p{Script=Adlam}\p{Script=Hanifi_Rohingya}\p{Script=Samaritan}\p{Script=Mandaic}]/u;
 
 /** Direction of `value`, from its first strong character (letters only —
  * digits and punctuation are directionally weak). Defaults to "ltr". */
@@ -345,7 +349,7 @@ function LocalFileLink({ filePath, children, message }: { filePath: string; chil
         : null;
 
   return (
-    <span className="inline-flex flex-wrap items-center gap-x-1.5 [unicode-bidi:isolate]">
+    <span dir="ltr" className="inline-flex flex-wrap items-center gap-x-1.5 [unicode-bidi:isolate]">
       <button
         type="button"
         onClick={() => void save.save()}
@@ -492,6 +496,7 @@ function ChatMarkdownComponent({ text, streaming = false, message }: { text: str
                 href={href}
                 target="_blank"
                 rel="noreferrer"
+                dir="auto"
                 className="break-words text-accent underline decoration-accent/40 hover:decoration-accent [unicode-bidi:isolate]"
               >
                 {children}
