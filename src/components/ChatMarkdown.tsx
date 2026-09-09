@@ -22,7 +22,9 @@ import { Check, Copy, Download, LoaderCircle, RotateCcw, WrapText } from "lucide
 import { remarkMentions, type MentionPeer } from "@/lib/mentions";
 
 import { countLines, formatLineCount, getLanguageDisplayName } from "../lib/code-block";
+import { remarkThreadRefs } from "../lib/thread-refs";
 import { MarkdownImagePreview, useLocalFileSave, type MessageAttachmentContext } from "./AttachmentPreview";
+import { ThreadLink, threadLinkFromProps, useThreadRefs } from "./ThreadRefs";
 
 // tiny highlight cache so revisiting a thread doesn't re-tokenize settled
 // blocks; keys are content-hashed and capped. Streamed partials may land here
@@ -454,10 +456,13 @@ function ChatMarkdownComponent({ text, streaming = false, message, mentionPeers 
   text: string; streaming?: boolean; message?: MessageAttachmentContext;
   mentionPeers?: readonly MentionPeer[]; everyone?: boolean;
 }) {
+  // "#Title" mentions link to the threads the person can see (ThreadRefs);
+  // @mentions were already decorated by remarkMentions, which runs first.
+  const { threads, currentBotId } = useThreadRefs();
   return (
     <div className="chat-md min-w-0 [&>*+*]:mt-2">
       <Markdown
-        remarkPlugins={[remarkGfm, unwrapLinkedImages, [remarkMentions, { peers: mentionPeers, everyone }]]}
+        remarkPlugins={[remarkGfm, unwrapLinkedImages, [remarkMentions, { peers: mentionPeers, everyone }], remarkThreadRefs(threads, currentBotId)]}
         urlTransform={chatUrlTransform}
         components={{
           pre({ children }: { children?: ReactNode }) {
@@ -495,6 +500,16 @@ function ChatMarkdownComponent({ text, streaming = false, message, mentionPeers 
             return (
               <code dir="ltr" className="rounded bg-inset px-1 py-px text-[13px] [unicode-bidi:isolate]">{children}</code>
             );
+          },
+          // markdown never emits a span itself (no raw HTML); the only
+          // spans are the ones our remark plugins produced — a thread link,
+          // or an @mention highlight that must keep its class and colour
+          span(props) {
+            // SAFETY: react-markdown hands hast data-* attributes through as string props
+            const link = threadLinkFromProps(props as Record<string, unknown>);
+            if (link) return <ThreadLink target={link.target} ambiguous={link.ambiguous}>{props.children}</ThreadLink>;
+            const { node: _node, children, ...rest } = props;
+            return <span {...rest}>{children}</span>;
           },
           a({ href, children }: { href?: string; children?: ReactNode }) {
             const localPath = localFilePath(href);

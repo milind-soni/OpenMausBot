@@ -18,6 +18,7 @@ import {
 } from "@/state/store";
 import { BotAvatar } from "./Avatar";
 import { ThreadChip } from "./ThreadChip";
+import { ThreadRefText } from "./ThreadRefs";
 import { TurnPresence } from "./TurnPresence";
 import { showToolCallsEnabled } from "@/lib/feature-flags";
 import { roomActivityVisible } from "@/lib/room-activity";
@@ -307,7 +308,7 @@ const Transcript = memo(function Transcript({
                           className={!attachments.display ? "mb-0" : undefined}
                         />
                       )}
-                      <MentionText text={attachments?.display ?? m.text ?? ""} peers={members} everyone={!group.dm} />
+                      <ThreadRefText text={attachments?.display ?? m.text ?? ""} peers={members} everyone={!group.dm} />
                       {m.via === "api" && (
                         <div className="mt-1 text-[11px] text-ink-secondary">Sent through the API, not typed here</div>
                       )}

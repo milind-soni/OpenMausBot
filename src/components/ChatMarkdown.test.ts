@@ -12,6 +12,8 @@ import {
   localFilePath,
   textDirection,
 } from "./ChatMarkdown";
+import { StoreProvider } from "@/state/store";
+import { ThreadRefsContext } from "./ThreadRefs";
 
 vi.mock("react", async (importOriginal) => {
   const react = await importOriginal<typeof React>();
@@ -73,6 +75,37 @@ it("requests both code palettes for skin-aware highlighting", async () => {
     effect.mockImplementation(originalUseEffect);
     vi.doUnmock("shiki");
   }
+});
+
+describe("#Title thread links in markdown", () => {
+  const threads = [
+    { botId: "scout", botName: "Scout", threadId: "qa-245", title: "QA PR 245", activeAt: 2 },
+    { botId: "scout", botName: "Scout", threadId: "short", title: "QA", activeAt: 1 },
+  ];
+  const render = (text: string) => renderToStaticMarkup(createElement(StoreProvider, null,
+    createElement(ThreadRefsContext.Provider, { value: { threads, currentBotId: "scout" } }, createElement(ChatMarkdown, { text }))));
+
+  it("links a known title in prose as a button that opens the thread", () => {
+    const markup = render("I opened #QA PR 245 for the review.");
+    expect(markup).toContain('<button type="button" data-thread-link="qa-245"');
+    expect(markup).toContain('title="Open #QA PR 245"');
+    expect(markup).toContain(">#QA PR 245</button>");
+    expect(markup).not.toContain('data-thread-link="short"');
+  });
+
+  it("leaves code, links, headings and issue numbers alone", () => {
+    const markup = render("`#QA PR 245` in code, [#QA PR 245](https://example.test) as a link, #123 an issue\n\n# QA PR 245\n\nplain");
+    expect(markup).not.toContain("data-thread-link");
+    expect(markup).toContain("<code");
+    // the heading survives as a heading (this renderer draws it as a div), unlinked
+    expect(markup).toContain('font-semibold">QA PR 245</div>');
+  });
+
+  it("does nothing without any visible threads", () => {
+    const markup = renderToStaticMarkup(createElement(StoreProvider, null, createElement(ChatMarkdown, { text: "#QA PR 245" })));
+    expect(markup).not.toContain("data-thread-link");
+    expect(markup).toContain("#QA PR 245");
+  });
 });
 
 describe("Markdown image metadata", () => {
