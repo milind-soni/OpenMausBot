@@ -243,10 +243,20 @@ describe("bidi: message content carries its own direction", () => {
     expect(textDirection("  «2024» — مرحبا hello")).toBe("rtl");
     expect(textDirection("🎉 42. hello مرحبا")).toBe("ltr");
     expect(textDirection("שלום")).toBe("rtl");
-    // scripts in living use beyond the obvious two
-    expect(textDirection("\u{10D00}\u{10D01}")).toBe("rtl"); // Hanifi Rohingya
+    // the ranges have to hold for every RTL script, not a maintained list:
+    // these span all four blocks Unicode reserves for right-to-left letters
+    expect(textDirection("\u0780")).toBe("rtl"); // Thaana
+    expect(textDirection("\u07CA")).toBe("rtl"); // N'Ko
+    expect(textDirection("\uFB2E")).toBe("rtl"); // Hebrew presentation form
+    expect(textDirection("\u{10D00}")).toBe("rtl"); // Hanifi Rohingya
+    expect(textDirection("\u{10E80}")).toBe("rtl"); // Yezidi
+    expect(textDirection("\u{10D50}")).toBe("rtl"); // Garay (10D40 is a digit)
+    expect(textDirection("\u{10F70}")).toBe("rtl"); // Old Uyghur
     expect(textDirection("\u{1E900}")).toBe("rtl"); // Adlam
-    expect(textDirection("\u{0780}")).toBe("rtl"); // Thaana
+    // and must not swallow the LTR scripts that sit near those blocks
+    expect(textDirection("\u{11000}\u{11005}")).toBe("ltr"); // Brahmi
+    expect(textDirection("\u0915")).toBe("ltr"); // Devanagari
+    expect(textDirection("\u4E2D")).toBe("ltr"); // Han
   });
 
   it("gives every block its own direction instead of the UI's", () => {

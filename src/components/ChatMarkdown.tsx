@@ -116,17 +116,19 @@ function unwrapLinkedImages() {
 //
 // Code is skipped when judging: an answer that opens with `fs.readFileSync`
 // and continues in Arabic is an Arabic paragraph, not an English one.
-// Right-to-left scripts in living use. JS regexes cannot match on
-// Bidi_Class, so the scripts are named; historic ones (Phoenician, Old
-// Turkic, the Pahlavis) are left out deliberately — nobody writes messages
-// in them, and every name here costs a branch on the hot path.
-const RTL_SCRIPT = /[\p{Script=Arabic}\p{Script=Hebrew}\p{Script=Syriac}\p{Script=Thaana}\p{Script=Nko}\p{Script=Adlam}\p{Script=Hanifi_Rohingya}\p{Script=Samaritan}\p{Script=Mandaic}]/u;
+// JS regexes cannot match on Bidi_Class, and naming scripts one at a time has
+// no end to it: Hanifi Rohingya, Yezidi, Garay and Old Uyghur are all
+// right-to-left, and Unicode keeps adding more. These are instead the blocks
+// Unicode reserves for right-to-left letters, so the set stays correct
+// without being maintained — and a plane-1 range is one comparison rather
+// than a property lookup.
+const RTL_LETTER = /[\u0590-\u08FF\uFB1D-\uFDFF\uFE70-\uFEFF\u{10800}-\u{10FFF}\u{1E800}-\u{1EFFF}]/u;
 
 /** Direction of `value`, from its first strong character (letters only —
  * digits and punctuation are directionally weak). Defaults to "ltr". */
 export function textDirection(value: string): "rtl" | "ltr" {
   const strong = /\p{Letter}/u.exec(value);
-  return strong && RTL_SCRIPT.test(strong[0]) ? "rtl" : "ltr";
+  return strong && RTL_LETTER.test(strong[0]) ? "rtl" : "ltr";
 }
 
 interface HastNode {
