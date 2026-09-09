@@ -39,7 +39,10 @@ files:
   - "!electron/resources/speech-helper-Info.plist"
   - "!electron/resources/OpenMausBot Speech.app/**"
   # The Teach a skill recorder is gone, but a machine that once ran
-  # `pnpm build:recorder` may still hold its helper; never ship it.
+  # `pnpm build:recorder` may still hold its helper build; never ship it.
+  - "!electron/resources/recorder-helper"
+  - "!electron/resources/recorder-helper.swift"
+  - "!electron/resources/recorder-helper-Info.plist"
   - "!electron/resources/OpenMausBot Recorder.app/**"
   - "!**/node_modules/**"
   - package.json
