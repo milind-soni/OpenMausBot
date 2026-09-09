@@ -1,16 +1,16 @@
 import { describe, expect, it } from "vitest";
 
-import { builtInBrowserEnabled, showToolCallsEnabled, skillRecorderEnabled } from "./feature-flags";
+import { builtInBrowserEnabled, showToolCallsEnabled, skillAuthoringEnabled } from "./feature-flags";
 
 describe("experimental feature flags", () => {
-  it("keeps Teach a skill hidden by default", () => {
-    expect(skillRecorderEnabled(null)).toBe(false);
-    expect(skillRecorderEnabled({})).toBe(false);
-    expect(skillRecorderEnabled({ features: { skillRecorder: false } })).toBe(false);
+  it("keeps skill authoring off by default", () => {
+    expect(skillAuthoringEnabled(null)).toBe(false);
+    expect(skillAuthoringEnabled({})).toBe(false);
+    expect(skillAuthoringEnabled({ features: { skillAuthoring: false } })).toBe(false);
   });
 
-  it("shows Teach a skill only after explicit opt-in", () => {
-    expect(skillRecorderEnabled({ features: { skillRecorder: true } })).toBe(true);
+  it("enables skill authoring only after explicit opt-in", () => {
+    expect(skillAuthoringEnabled({ features: { skillAuthoring: true } })).toBe(true);
   });
 
   it("keeps the experimental browser off until explicitly enabled", () => {

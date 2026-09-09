@@ -49,9 +49,8 @@ The proposed `SKILL.md` must contain YAML frontmatter and these sections:
 7. **Maintenance** — re-run Doctor and the affected workflow when the app
    changes; update drifted instructions but never hide a product failure.
 
-Keep it concise. A recording from Teach a skill may provide evidence for the
-user path, but it is input to the draft—not permission to retain secrets,
-audio, screenshots, or coordinates.
+Keep it concise. Evidence about the user path is input to the draft—not
+permission to retain secrets, audio, screenshots, or coordinates.
 
 ## 4. Stage it for review
 

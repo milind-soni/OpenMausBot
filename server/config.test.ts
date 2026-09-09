@@ -1,4 +1,4 @@
-import { mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
@@ -6,6 +6,7 @@ import type { JsonValue } from "./schema.ts";
 
 import { customMcpServers,
   DATA_DIR,
+  ensureDirs,
   instanceConfigs,
   isValidSshAlias,
   loadBrowserProfileIdAliases,
@@ -19,7 +20,7 @@ import { customMcpServers,
   maxConcurrentBotThreads,
   showToolCallsEnabled,
   saveConfig,
-  skillRecorderEnabled,
+  skillAuthoringEnabled,
   builtInBrowserEnabled,
   browserProfilePartitionId,
   browserProfilePartitionTarget,
@@ -357,14 +358,17 @@ describe("configuration boundaries", () => {
   });
 
   it("keeps experimental features off by default and accepts an explicit opt-in", () => {
-    expect(skillRecorderEnabled({})).toBe(false);
-    expect(parseConfigPatch({ features: { skillRecorder: true } })).toEqual({
-      features: { skillRecorder: true },
+    expect(skillAuthoringEnabled({})).toBe(false);
+    expect(parseConfigPatch({ features: { skillAuthoring: true } })).toEqual({
+      features: { skillAuthoring: true },
     });
-    expect(skillRecorderEnabled({ features: { skillRecorder: true } })).toBe(true);
+    expect(skillAuthoringEnabled({ features: { skillAuthoring: true } })).toBe(true);
+    // the pre-rename flag is dropped as a no-op rather than rejected, so a
+    // stale client's PATCH cannot fail the request or re-enable anything
+    expect(parseConfigPatch({ features: { skillRecorder: true } })).toEqual({ features: {} });
     // the built-in browser is an independent explicit opt-in
     expect(builtInBrowserEnabled({})).toBe(false);
-    expect(builtInBrowserEnabled({ features: { skillRecorder: true } })).toBe(false);
+    expect(builtInBrowserEnabled({ features: { skillAuthoring: true } })).toBe(false);
     expect(parseConfigPatch({ features: { browser: false } })).toEqual({ features: { browser: false } });
     expect(builtInBrowserEnabled({ features: { browser: false } })).toBe(false);
     expect(builtInBrowserEnabled({ features: { browser: true } })).toBe(true);
@@ -381,8 +385,8 @@ describe("configuration boundaries", () => {
     expect(() => parseConfigPatch({
       browserProfiles: [{ id: "work", name: "Work" }, { id: "work", name: "Work again" }],
     })).toThrow(/browserProfiles.*id.*duplicated/i);
-    expect(() => parseConfigPatch({ features: { skillRecorder: "yes" } })).toThrow(
-      "features.skillRecorder",
+    expect(() => parseConfigPatch({ features: { skillAuthoring: "yes" } })).toThrow(
+      "features.skillAuthoring",
     );
   });
 
@@ -625,6 +629,72 @@ describe("credential env narrowing", () => {
       instances: { computer: { driver: "boxAgent", environment: { MY_FLAG: "1" } } },
     };
     expect(instanceConfigs(cfg).computer.environment).toEqual({ MY_FLAG: "1", BOX_TOKEN: "SECRET-BOX" });
+  });
+});
+
+describe("legacy feature flag migration", () => {
+  const path = join(DATA_DIR, "config.json");
+  const readDisk = () => JSON.parse(readFileSync(path, "utf8"));
+
+  beforeEach(() => {
+    mkdirSync(DATA_DIR, { recursive: true });
+    rmSync(path, { force: true });
+  });
+  afterEach(() => {
+    rmSync(path, { force: true });
+  });
+
+  it("carries a legacy skillRecorder opt-in over to skillAuthoring once, at startup", () => {
+    writeFileSync(path, JSON.stringify({ profile: { name: "Ada" }, features: { skillRecorder: true, browser: false } }));
+    ensureDirs();
+    expect(readDisk()).toEqual({ profile: { name: "Ada" }, features: { browser: false, skillAuthoring: true } });
+    expect(skillAuthoringEnabled(loadConfig())).toBe(true);
+    if (process.platform !== "win32") expect(statSync(path).mode & 0o777).toBe(0o600);
+    // a second boot finds nothing left to migrate and leaves the file alone
+    const written = readFileSync(path, "utf8");
+    ensureDirs();
+    expect(readFileSync(path, "utf8")).toBe(written);
+  });
+
+  it("keeps a legacy opt-out off and removes the old key", () => {
+    writeFileSync(path, JSON.stringify({ features: { skillRecorder: false } }));
+    ensureDirs();
+    expect(readDisk()).toEqual({ features: { skillAuthoring: false } });
+    expect(skillAuthoringEnabled(loadConfig())).toBe(false);
+  });
+
+  it("lets an explicit skillAuthoring value win over the legacy key", () => {
+    writeFileSync(path, JSON.stringify({ features: { skillRecorder: true, skillAuthoring: false } }));
+    ensureDirs();
+    expect(readDisk()).toEqual({ features: { skillAuthoring: false } });
+    expect(skillAuthoringEnabled(loadConfig())).toBe(false);
+  });
+
+  it("treats a non-boolean legacy value as off and a null features block as absent", () => {
+    writeFileSync(path, JSON.stringify({ features: { skillRecorder: "yes" } }));
+    ensureDirs();
+    expect(readDisk()).toEqual({ features: { skillAuthoring: false } });
+    const nulled = JSON.stringify({ features: null });
+    writeFileSync(path, nulled);
+    ensureDirs();
+    expect(readFileSync(path, "utf8")).toBe(nulled);
+  });
+
+  it("leaves a config without the legacy key untouched", () => {
+    for (const disk of [{ profile: { name: "Ada" } }, { features: {} }, { features: { skillAuthoring: true } }]) {
+      const raw = JSON.stringify(disk);
+      writeFileSync(path, raw);
+      ensureDirs();
+      expect(readFileSync(path, "utf8")).toBe(raw);
+    }
+  });
+
+  it("does not create a config file or throw on a fresh or unreadable install", () => {
+    ensureDirs();
+    expect(() => readFileSync(path, "utf8")).toThrow();
+    writeFileSync(path, "{not json");
+    expect(() => ensureDirs()).not.toThrow();
+    expect(readFileSync(path, "utf8")).toBe("{not json");
   });
 });
 

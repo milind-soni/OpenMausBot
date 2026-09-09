@@ -36,7 +36,7 @@ Runs fully on a server:
 
 Desktop-only for now (needs the Mac/Linux app):
 
-- the skill recorder, dictation/voice, controlling the host desktop
+- dictation/voice, controlling the host desktop
 
 ## Quickest: one command with Node
 

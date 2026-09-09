@@ -7,14 +7,7 @@ import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { startCua, stopCua, registerCuaIpc, setCuaStateListener } from "./cua.mjs";
 import { createAndroidDeviceController } from "./android-device.mjs";
-import { assemblyAICredential, mintAssemblyAIStreamingToken } from "./assemblyai.mjs";
 import { finishSpeech, startSpeech, stopSpeech } from "./speech.mjs";
-import {
-  recorderPermissionStatus,
-  saveSkillRecording,
-  startRecorder,
-  stopRecorder,
-} from "./skill-recorder.mjs";
 import { openBlankTerminal } from "./terminal-launch.mjs";
 import { pasteMenuItem } from "./paste-menu-item.mjs";
 import { attachUpdaterWindow, startUpdater, registerUpdaterIpc } from "./updater.mjs";
@@ -1938,17 +1931,6 @@ ipcMain.handle("speech:finish", localOnly("speech:finish", () => {
   if (nativeActions.appleSpeech) finishSpeech();
 }));
 
-ipcMain.handle("skill-recorder:permissions", localOnly("skill-recorder:permissions", () => recorderPermissionStatus()));
-ipcMain.handle("skill-recorder:start", localOnly("skill-recorder:start", (event) => {
-  const win = BrowserWindow.fromWebContents(event.sender);
-  if (!win) throw new Error("The recorder window is unavailable");
-  return startRecorder(win);
-}));
-ipcMain.handle("skill-recorder:stop", localOnly("skill-recorder:stop", () => stopRecorder()));
-ipcMain.handle("skill-recorder:save", localOnly("skill-recorder:save", (_event, payload) => (
-  saveSkillRecording(payload, { dataRoot: desktopDataDir() })
-)));
-
 // ── companion sidecar ──────────────────────────────────────────────────
 // The renderer gets these five and nothing else: it can turn the companion
 // on and off, look at it, open or cancel a pairing window, and remove a
@@ -2054,28 +2036,6 @@ ipcMain.handle("desktop:capabilities", async (event) =>
     localConnection: await cuaReady,
   }),
 );
-
-ipcMain.handle("assemblyai:status", localOnly("assemblyai:status", () => ({
-  configured: Boolean(assemblyAICredential(secureCredentials)),
-})));
-
-ipcMain.handle("assemblyai:set-key", localOnly("assemblyai:set-key", async (_event, value) => {
-  if (typeof value !== "string") throw new Error("Unsupported credential");
-  if (!(await safeStorage.isAsyncEncryptionAvailable())) {
-    throw new Error("The operating-system credential store is unavailable");
-  }
-  const secret = value.trim();
-  await updateSecureCredentialDocument((credentials) => {
-    if (secret) credentials.assemblyAiApiKey = secret;
-    else delete credentials.assemblyAiApiKey;
-    return credentials;
-  });
-  return { configured: Boolean(secret) };
-}));
-
-ipcMain.handle("assemblyai:streaming-token", localOnly("assemblyai:streaming-token", () =>
-  mintAssemblyAIStreamingToken(assemblyAICredential(secureCredentials)),
-));
 
 const CREDENTIAL_PATCH = {
   composioApiKey: (value) => ({ composio: { apiKey: value } }),
@@ -2192,6 +2152,18 @@ app.whenReady().then(async () => {
   }
   if (process.platform === "darwin") app.dock.setIcon(APP_ICON);
   secureCredentials = await loadSecureCredentials();
+  // The AssemblyAI key only fed the removed Teach a skill recorder, and its
+  // set/clear handler went with it; drop the orphaned secret rather than
+  // keep a third-party key at rest with no way to remove it.
+  if (secureCredentials && Object.hasOwn(secureCredentials, "assemblyAiApiKey") && !credentialStoreUnavailable) {
+    try {
+      const { assemblyAiApiKey: _removed, ...rest } = secureCredentials;
+      await saveSecureCredentials(rest);
+      secureCredentials = rest;
+    } catch (error) {
+      slog(`orphaned AssemblyAI key not removed: ${error?.message ?? error}`);
+    }
+  }
   if (app.isPackaged) {
     await secureComposioConfig();
     await secureWorkspaceConfig();
@@ -2388,7 +2360,6 @@ app.on("before-quit", (e) => {
   // a live dictation session runs its own helper child that holds the mic —
   // stop it here so quitting never orphans a recording process
   if (nativeActions.appleSpeech) stopSpeech();
-  stopRecorder();
   const ownedHelperCleanup = Promise.race([
     Promise.all([
       stopCua().catch(() => {}),

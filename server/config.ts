@@ -215,9 +215,13 @@ const browserProfilesSchema = z.array(browserProfileSchema).max(20).superRefine(
     });
   });
 });
+// Deliberately non-strict: an unknown flag (such as `skillRecorder`, the
+// pre-rename name a stale client may still PATCH) is dropped as a no-op
+// instead of failing the whole stored config or the request.
 const featureConfigSchema = z.object({
-  /** Experimental desktop workflow recorder. Hidden unless explicitly enabled. */
-  skillRecorder: z.boolean().optional(),
+  /** Bots may draft skills (skill_manage, /learn) for your review. Off unless
+   * explicitly enabled. */
+  skillAuthoring: z.boolean().optional(),
   /** Show each tool run in the transcript. Off unless explicitly enabled. */
   showToolCalls: z.boolean().optional(),
   /** Experimental built-in browser. Off until explicitly enabled; each bot
@@ -336,7 +340,7 @@ export interface AppConfig {
    * separate container, durable workspace, viewer and lease. */
   localVm?: { mode?: "shared" | "per-bot"; maxInstances?: number };
   /** Opt-in product experiments. Every flag defaults to disabled. */
-  features?: { skillRecorder?: boolean; showToolCalls?: boolean; browser?: boolean };
+  features?: { skillAuthoring?: boolean; showToolCalls?: boolean; browser?: boolean };
   /** Named browser sessions any bot can be pointed at. */
   browserProfiles?: BrowserProfile[];
   instances?: InstanceConfigMap;
@@ -466,8 +470,8 @@ export function localVmMaxInstances(cfg: AppConfig): number {
   return cfg.localVm?.maxInstances ?? DEFAULT_LOCAL_VM_MAX_INSTANCES;
 }
 
-export function skillRecorderEnabled(cfg: AppConfig): boolean {
-  return cfg.features?.skillRecorder === true;
+export function skillAuthoringEnabled(cfg: AppConfig): boolean {
+  return cfg.features?.skillAuthoring === true;
 }
 
 export function showToolCallsEnabled(cfg: AppConfig): boolean {
@@ -497,6 +501,34 @@ export function ensureDirs() {
     }
   }
   for (const dir of [DATA_DIR, EVENTS_DIR, NATIVE_DIR]) mkdirSync(dir, { recursive: true });
+  migrateLegacyFeatureFlags();
+}
+
+/** `features.skillRecorder` became `features.skillAuthoring` when the Teach a
+ * skill recorder was removed. featureConfigSchema is non-strict, so
+ * parseStoredConfig would silently drop the old key (reading the opt-in as
+ * off) while saveConfig's raw section merge would carry it on disk forever.
+ * Rewrite it once, here, before the server's single loadConfig() at boot: an
+ * explicit `skillAuthoring` already on disk wins over the legacy key, and a
+ * file without the legacy key is left untouched. */
+function migrateLegacyFeatureFlags(): void {
+  const p = join(DATA_DIR, "config.json");
+  try {
+    if (!existsSync(p)) return;
+    const disk = jsonObjectSchema.safeParse(parseJson(readFileSync(p, "utf8")));
+    if (!disk.success) return;
+    const features = jsonObjectSchema.safeParse(disk.data.features);
+    if (!features.success || !Object.hasOwn(features.data, "skillRecorder")) return;
+    const next: JsonObject = { ...features.data };
+    if (!Object.hasOwn(next, "skillAuthoring")) next.skillAuthoring = next.skillRecorder === true;
+    delete next.skillRecorder;
+    writeFileAtomic(p, JSON.stringify({ ...disk.data, features: next }, null, 2), { mode: 0o600 });
+    console.log(`[config] features.skillRecorder renamed to features.skillAuthoring (${String(next.skillAuthoring)})`);
+  } catch (error) {
+    // A readable but unwritable config would otherwise lose the opt-in on
+    // every boot with no trace: parseStoredConfig drops the legacy key.
+    console.error(`[config] could not rename features.skillRecorder: ${error instanceof Error ? error.message : String(error)}`);
+  }
 }
 
 export function loadConfig(): AppConfig {

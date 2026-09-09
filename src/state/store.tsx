@@ -33,7 +33,6 @@ import { currentCall } from "@/lib/call";
 import { showNotification, type NotificationTarget } from "@/lib/notify";
 import { speaker } from "@/lib/tts";
 import { createBotPatchQueue, type BotUpdatePatch } from "./bot-patch-queue";
-import { skillRecorderEnabled } from "@/lib/feature-flags";
 import { openLiveEvents } from "@/lib/live-events";
 
 const MAX_ROUTINE_RUNS = 2_000;
@@ -437,7 +436,7 @@ export interface ConfigStatus {
   /** UI language override; "" (or absent) follows the system language. */
   language?: string;
   /** Opt-in flags. Absent means off. */
-  features?: { skillRecorder: boolean; showToolCalls?: boolean; browser?: boolean };
+  features?: { skillAuthoring: boolean; showToolCalls?: boolean; browser?: boolean };
   /** Which browser this server can give bots: the desktop app's surface, the
    * agent-browser engine, or nothing yet (with the reason). */
   browserEngine?: BrowserEngineSummary;
@@ -584,7 +583,7 @@ export interface AppState {
   config: ConfigStatus | null;
   /** selected chat — a bot id OR a group id */
   selectedId: string;
-  activeView: "chat" | "team-map" | "routines" | "skill-recorder";
+  activeView: "chat" | "team-map" | "routines";
   routines: Routine[];
   routineRuns: RoutineRun[];
   routinesLoadState: "loading" | "ready" | "error";
@@ -723,7 +722,6 @@ export type Action =
   | { type: "botQueues"; queues: AppState["pendingQueued"] }
   | { type: "showRoutines"; section?: "schedule" | "logs"; view?: "calendar" | "list"; botId?: string; routineId?: string }
   | { type: "showTeamMap" }
-  | { type: "showSkillRecorder" }
   | { type: "routinesHydrated"; routines: Routine[]; runs: RoutineRun[] }
   | { type: "routinesLoadFailed" }
   | { type: "routinePatched"; routine: Routine }
@@ -1055,17 +1053,6 @@ export function reducer(state: AppState, action: Action): AppState {
         appSettingsOpen: false,
         pluginsOpen: false,
       };
-    case "showSkillRecorder":
-      if (!skillRecorderEnabled(state.config)) return state;
-      return {
-        ...state,
-        activeView: "skill-recorder",
-        settingsOpen: false,
-        computerOpen: false,
-        inspectorOpen: false,
-        appSettingsOpen: false,
-        pluginsOpen: false,
-      };
     case "routinesHydrated":
       return { ...state, routines: action.routines, routineRuns: trimRoutineRuns(action.runs), routinesLoadState: "ready" };
     case "routinesLoadFailed":
@@ -1129,14 +1116,7 @@ export function reducer(state: AppState, action: Action): AppState {
     case "instances":
       return { ...state, instances: action.instances };
     case "configStatus":
-      return {
-        ...state,
-        config: action.config,
-        activeView:
-          state.activeView === "skill-recorder" && !skillRecorderEnabled(action.config)
-            ? "chat"
-            : state.activeView,
-      };
+      return { ...state, config: action.config };
     case "select": {
       if (state.groups.some((g) => g.id === action.id)) {
         return {

@@ -51,7 +51,7 @@ import {
   QueuedComposerMessages,
   composerCanSteerQueuedMessages,
 } from "./ComposerQueuedMessages";
-import { skillRecorderEnabled } from "@/lib/feature-flags";
+import { skillAuthoringEnabled } from "@/lib/feature-flags";
 import {
   composerSlashTrigger,
   goalTextFromComposer,
@@ -243,7 +243,7 @@ export function Composer({
       description: t("composer.command.goalDesc"),
     });
     if (
-      skillRecorderEnabled(state.config) &&
+      skillAuthoringEnabled(state.config) &&
       (group ? (members ?? []).some(supportsAgents) : supportsAgents(bot))
     ) {
       available.push({

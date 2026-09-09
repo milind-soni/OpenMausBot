@@ -649,7 +649,7 @@ describe("config status frames", () => {
         opencodeGo: { configured: true },
         tts: { configured: true, ready: true, voice: "Ada" },
         profile: { name: "Ian", email: "ian@example.test" },
-        features: { skillRecorder: true },
+        features: { skillAuthoring: true },
       }),
     ).toEqual({
       xai: { configured: true },
@@ -662,7 +662,7 @@ describe("config status frames", () => {
       opencodeGo: { configured: true },
       tts: { configured: true, ready: true, voice: "Ada" },
       profile: { name: "Ian", email: "ian@example.test" },
-      features: { skillRecorder: true },
+      features: { skillAuthoring: true },
     });
   });
 });
@@ -718,29 +718,26 @@ describe("task rename", () => {
   });
 });
 
-describe("Teach a skill feature flag", () => {
+describe("config status", () => {
   const config = configStatusFromFrame({
     composio: { configured: false },
     box: { configured: false },
     vps: { configured: false, sshAlias: "" },
     rooms: { turnTimeoutMinutes: 5 },
     localVm: { mode: "shared", maxInstances: 2 },
-    features: { skillRecorder: true },
+    features: { skillAuthoring: true },
   });
 
-  it("does not open the recorder while the experiment is disabled", () => {
-    expect(reducer(initialState, { type: "showSkillRecorder" }).activeView).toBe("chat");
-  });
+  it("replaces the config without moving the person off their current view", () => {
+    const onRoutines = reducer(initialState, { type: "showRoutines" });
+    expect(onRoutines.activeView).toBe("routines");
 
-  it("opens after opt-in and returns to chat when disabled", () => {
-    const enabled = reducer({ ...initialState, config }, { type: "showSkillRecorder" });
-    expect(enabled.activeView).toBe("skill-recorder");
-
-    const disabled = reducer(enabled, {
+    const next = reducer(onRoutines, {
       type: "configStatus",
-      config: { ...config, features: { skillRecorder: false } },
+      config: { ...config, features: { skillAuthoring: false } },
     });
-    expect(disabled.activeView).toBe("chat");
+    expect(next.activeView).toBe("routines");
+    expect(next.config?.features).toEqual({ skillAuthoring: false });
   });
 });
 

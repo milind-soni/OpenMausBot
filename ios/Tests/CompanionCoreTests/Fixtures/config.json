@@ -36,6 +36,6 @@
     "maxInstances": 2
   },
   "features": {
-    "skillRecorder": false
+    "skillAuthoring": false
   }
 }

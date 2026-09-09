@@ -131,7 +131,7 @@ into the renderer bundle; the served UI keeps using relative paths.
 | Computer use (cloud/container) | ✅ server-side already |
 | Web UI from any browser | ✅ served by the server |
 | Built-in browser panel | ❌ local-only for now |
-| Skill recorder, dictation, host-desktop control | ❌ local-only |
+| Dictation, host-desktop control | ❌ local-only |
 | "Open in editor" for server paths | ❌ paths shown are the server's |
 
 ## Relationship to the enterprise tracks

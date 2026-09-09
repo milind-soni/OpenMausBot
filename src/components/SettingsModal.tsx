@@ -6,7 +6,7 @@ import { useEffect, useRef, useState } from "react";
 import { Coins, FlaskConical, KeyRound, Monitor, Palette, Search, TabletSmartphone, Terminal, User, X } from "lucide-react";
 import { api, useStore, type AppSettingsSection, type ConfigStatus } from "@/state/store";
 import { analyticsEnabled, setAnalyticsEnabled } from "@/lib/analytics";
-import { browserAvailable, browserUnavailableReason, builtInBrowserEnabled, showToolCallsEnabled, skillRecorderEnabled } from "@/lib/feature-flags";
+import { browserAvailable, browserUnavailableReason, builtInBrowserEnabled, showToolCallsEnabled, skillAuthoringEnabled } from "@/lib/feature-flags";
 import { localeChoices, type LocaleKey } from "@/locales";
 import { t } from "@/lib/i18n";
 import { ApiKeyRow, VpsConnection } from "./ApiKeys";
@@ -24,7 +24,6 @@ import { UsageSection } from "./UsageSection";
 import { SkinPicker } from "./SkinPicker";
 import { RoomTurnTimeoutSettings } from "./RoomTurnTimeoutSettings";
 import { ThreadConcurrencySettings } from "./ThreadConcurrencySettings";
-import { TranscriptionSettings } from "./TranscriptionSettings";
 import { cn } from "@/lib/cn";
 import { setShowThreads, useShowThreads } from "@/lib/thread-preferences";
 
@@ -40,7 +39,7 @@ const SECTIONS: Array<{
 }> = [
   { id: "general", labelKey: "settings.section.general", icon: User, keywords: ["profile", "name", "email", "analytics", "updates", "threads", "parallel", "concurrency"] },
   { id: "appearance", labelKey: "settings.section.appearance", icon: Palette, keywords: ["skin", "theme", "appearance", "tools", "tool calls", "threads", "show threads", "hide threads", "sidebar", "display"] },
-  { id: "experimental", labelKey: "settings.section.experimental", icon: FlaskConical, keywords: ["early", "preview", "teach", "skill", "browser", "profiles"] },
+  { id: "experimental", labelKey: "settings.section.experimental", icon: FlaskConical, keywords: ["early", "preview", "learn", "skill", "authoring", "browser", "profiles"] },
   { id: "connections", labelKey: "settings.section.connections", icon: KeyRound, keywords: ["keys", "api", "composio", "box", "xai", "vps"] },
   { id: "engines", labelKey: "settings.section.engines", icon: Terminal, keywords: ["models", "claude", "grok", "providers", "cli"] },
   { id: "companion", labelKey: "settings.section.companion", icon: TabletSmartphone, keywords: ["companion", "device", "phone", "desktop", "client", "host", "pair", "pairing", "mobile", "https", "secure", "tailscale", "wifi", "remote", "advanced", "domain", "dns", "self-hosted", "server", "caddy"] },
@@ -282,15 +281,15 @@ function ToolCallsRow() {
 
 function ExperimentalFeaturesRow() {
   const { state, dispatch } = useStore();
-  const skillRecorder = skillRecorderEnabled(state.config);
+  const skillAuthoring = skillAuthoringEnabled(state.config);
   const browser = builtInBrowserEnabled(state.config);
   const desktopBrowser = browserAvailable(state.config);
   const browserInstallable = state.config?.browserEngine?.installable === true;
   const browserBlockedOnWindows = window.ogb?.platform === "win32" && !desktopBrowser && !browserInstallable;
-  const [saving, setSaving] = useState<"skillRecorder" | "browser" | null>(null);
+  const [saving, setSaving] = useState<"skillAuthoring" | "browser" | null>(null);
   const [error, setError] = useState("");
 
-  const toggle = async (feature: "skillRecorder" | "browser", next: boolean) => {
+  const toggle = async (feature: "skillAuthoring" | "browser", next: boolean) => {
     if (saving) return;
     setSaving(feature);
     setError("");
@@ -311,16 +310,16 @@ function ExperimentalFeaturesRow() {
     <Card title={t("settings.experimental.title")} subtitle={t("settings.experimental.subtitle")}>
       <div className="flex items-center justify-between gap-4">
         <div className="min-w-0">
-          <div className="text-[14px] font-medium text-ink">{t("settings.experimental.teachSkill")}</div>
+          <div className="text-[14px] font-medium text-ink">{t("settings.experimental.skillAuthoring")}</div>
           <div className="mt-0.5 text-[12px] leading-relaxed text-ink-secondary">
-            {t("settings.experimental.teachSkillDetail")}
+            {t("settings.experimental.skillAuthoringDetail")}
           </div>
         </div>
         <Switch
-          checked={skillRecorder}
-          aria-label={t("settings.experimental.teachSkillAria")}
+          checked={skillAuthoring}
+          aria-label={t("settings.experimental.skillAuthoringAria")}
           disabled={saving !== null}
-          onClick={() => void toggle("skillRecorder", !skillRecorder)}
+          onClick={() => void toggle("skillAuthoring", !skillAuthoring)}
           className="disabled:cursor-wait disabled:opacity-50"
         />
       </div>
@@ -598,7 +597,6 @@ export function SettingsModal() {
                       {t("settings.connections.ready")}
                     </div>
                   ) : null}
-                  <TranscriptionSettings />
                   <ApiKeyRow section="box" />
                   <VpsConnection />
                   <ApiKeyRow section="opencodeGo" />

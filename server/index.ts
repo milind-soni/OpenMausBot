@@ -112,7 +112,7 @@ import {
   maxConcurrentBotThreads,
   saveConfig,
   showToolCallsEnabled,
-  skillRecorderEnabled,
+  skillAuthoringEnabled,
   builtInBrowserEnabled,
   browserProfileReplacementConflict,
   browserProfilePartitionTarget,
@@ -1336,7 +1336,7 @@ function previewSystemPrompt(bot: BotRecord) {
       id: "setup",
       label: "Setup",
       text: setupSystemPrompt(agentsMounted && setupModeActive({ soul: bot.soul, description: bot.description, text: "" }), {
-        skills: skillRecorderEnabled(cfg),
+        skills: skillAuthoringEnabled(cfg),
         cwd: bot.cwd,
       }),
     },
@@ -4399,7 +4399,7 @@ async function startTurn(
   // that never mounts agent tools (or a turn already at the comms-depth cap)
   // must not be steered into — or told about — tools it cannot call.
   const agentsMounted = commsDepth < MAX_COMMS_DEPTH && instance.adapter.capabilities.agentsMcp === true;
-  const skillAuthoring = skillRecorderEnabled(cfg) && agentsMounted;
+  const skillAuthoring = skillAuthoringEnabled(cfg) && agentsMounted;
   // Setup mode's turn-text rewrite (parseSetupCommand/expandSetupTurnText)
   // must not run ahead of a system prompt that can't explain it: a driver
   // without agent tools sees the user's literal "/setup ..." message. The
@@ -5756,7 +5756,7 @@ async function runGroupMemberTurn(
   try {
   const integrations: NonNullable<Parameters<typeof instance.adapter.sendTurn>[0]["integrations"]> = {};
   const skillAuthoring =
-    skillRecorderEnabled(cfg) &&
+    skillAuthoringEnabled(cfg) &&
     hop === 0 &&
     !skillAuthoringClaim.claimed &&
     !cardContinuation &&
@@ -7910,7 +7910,7 @@ function configStatus() {
       maxInstances: localVmMaxInstances(cfg),
     },
     features: {
-      skillRecorder: skillRecorderEnabled(cfg),
+      skillAuthoring: skillAuthoringEnabled(cfg),
       showToolCalls: showToolCallsEnabled(cfg),
       browser: builtInBrowserEnabled(cfg),
     },
@@ -8791,7 +8791,7 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
         });
       }
       if (method === "GET" && path === "/api/internal/skills") {
-        if (!skillRecorderEnabled(cfg)) return json(res, 403, { error: "learned skills are not enabled" });
+        if (!skillAuthoringEnabled(cfg)) return json(res, 403, { error: "skill authoring is not enabled in Settings" });
         if (!internalCapability.skillAuthoring) {
           return json(res, 403, { error: "skill authoring is not enabled for this turn" });
         }
@@ -8806,7 +8806,7 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
         });
       }
       if (method === "POST" && path === "/api/internal/skills/stage") {
-        if (!skillRecorderEnabled(cfg)) return json(res, 403, { error: "learned skills are not enabled" });
+        if (!skillAuthoringEnabled(cfg)) return json(res, 403, { error: "skill authoring is not enabled in Settings" });
         if (!internalCapability.skillAuthoring) {
           return json(res, 403, { error: "skill authoring is not enabled for this turn" });
         }

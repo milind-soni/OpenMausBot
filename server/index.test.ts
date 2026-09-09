@@ -5181,7 +5181,7 @@ describe("harness HTTP API", () => {
     const bot = (await api("POST", "/api/bots", {})).body.bot;
     try {
       expect((await api("PATCH", "/api/config", {
-        features: { skillRecorder: true },
+        features: { skillAuthoring: true },
       })).status).toBe(200);
       expect((await api("PATCH", `/api/bots/${bot.id}`, {
         modelSelection: { instanceId: "claude", model: "claude-sonnet-5" },
@@ -5199,7 +5199,7 @@ describe("harness HTTP API", () => {
     } finally {
       await api("POST", `/api/bots/${bot.id}/interrupt`);
       await api("DELETE", `/api/bots/${bot.id}`);
-      await api("PATCH", "/api/config", { features: { skillRecorder: false } });
+      await api("PATCH", "/api/config", { features: { skillAuthoring: false } });
     }
   });
 
@@ -5329,7 +5329,7 @@ describe("harness HTTP API", () => {
     let room: any;
     try {
       expect((await api("PATCH", "/api/config", {
-        features: { skillRecorder: true },
+        features: { skillAuthoring: true },
       })).status).toBe(200);
       room = (await api("POST", "/api/groups", {
         name: "Verification skill room",
@@ -5375,29 +5375,29 @@ describe("harness HTTP API", () => {
         expect((await api("DELETE", `/api/groups/${room.id}`)).status).toBe(200);
       }
       expect((await api("DELETE", `/api/bots/${bot.id}`)).status).toBe(200);
-      expect((await api("PATCH", "/api/config", { features: { skillRecorder: false } })).status).toBe(200);
+      expect((await api("PATCH", "/api/config", { features: { skillAuthoring: false } })).status).toBe(200);
     }
   });
 
-  it("keeps Teach a skill off by default and persists an explicit opt-in", async () => {
+  it("keeps skill authoring off by default and persists an explicit opt-in", async () => {
     const before = await api("GET", "/api/config");
     expect(before.status).toBe(200);
-    expect(before.body.features).toEqual({ browser: false, skillRecorder: false, showToolCalls: false });
+    expect(before.body.features).toEqual({ browser: false, skillAuthoring: false, showToolCalls: false });
 
     const saved = await api("PATCH", "/api/config", {
-      features: { skillRecorder: true },
+      features: { skillAuthoring: true },
     });
     expect(saved.status).toBe(200);
-    expect(saved.body.features).toEqual({ browser: false, skillRecorder: true, showToolCalls: false });
+    expect(saved.body.features).toEqual({ browser: false, skillAuthoring: true, showToolCalls: false });
 
     const disk = JSON.parse(readFileSync(join(home, ".openmausbot", "config.json"), "utf8"));
-    expect(disk.features).toEqual({ skillRecorder: true });
+    expect(disk.features).toEqual({ skillAuthoring: true });
 
     const tools = await api("PATCH", "/api/config", { features: { showToolCalls: true } });
     expect(tools.status).toBe(200);
-    expect(tools.body.features).toEqual({ browser: false, skillRecorder: true, showToolCalls: true });
+    expect(tools.body.features).toEqual({ browser: false, skillAuthoring: true, showToolCalls: true });
 
-    await api("PATCH", "/api/config", { features: { skillRecorder: false, showToolCalls: false } });
+    await api("PATCH", "/api/config", { features: { skillAuthoring: false, showToolCalls: false } });
   });
 
   it("refuses to delete a bot while it owns an active channel turn", async () => {
@@ -6903,7 +6903,7 @@ describe("harness HTTP API", () => {
   it("only enables the exact learned-skill proposal a current client reviewed", async () => {
     const bot = (await api("POST", "/api/bots", {})).body.bot;
     try {
-      expect((await api("PATCH", "/api/config", { features: { skillRecorder: true } })).status).toBe(200);
+      expect((await api("PATCH", "/api/config", { features: { skillAuthoring: true } })).status).toBe(200);
       expect((await api("PATCH", `/api/bots/${bot.id}`, {
         modelSelection: { instanceId: "claude", model: "claude-sonnet-5" },
       })).status).toBe(200);
@@ -7146,7 +7146,7 @@ describe("harness HTTP API", () => {
       expect(inventory.skills.some((skill) => skill.name === "reviewed-skill-denied")).toBe(false);
       expect(inventory.staged).toEqual([]);
     } finally {
-      await api("PATCH", "/api/config", { features: { skillRecorder: false } });
+      await api("PATCH", "/api/config", { features: { skillAuthoring: false } });
       await api("POST", `/api/bots/${bot.id}/interrupt`);
       await api("DELETE", `/api/bots/${bot.id}`);
     }

@@ -9,7 +9,7 @@ import { BookOpen, Trash2 } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 
 import { api, useStore, type Bot } from "@/state/store";
-import { skillRecorderEnabled } from "@/lib/feature-flags";
+import { skillAuthoringEnabled } from "@/lib/feature-flags";
 import { Switch } from "../SettingsPrimitives";
 import { inputCls } from "./field";
 
@@ -29,7 +29,7 @@ interface StagedSkillSummary {
 
 export function SkillsSection({ bot }: { bot: Bot }) {
   const { state } = useStore();
-  const featureEnabled = skillRecorderEnabled(state.config);
+  const featureEnabled = skillAuthoringEnabled(state.config);
   const [skills, setSkills] = useState<ManagedSkill[]>([]);
   const [staged, setStaged] = useState<StagedSkillSummary[]>([]);
   const [loading, setLoading] = useState(true);
