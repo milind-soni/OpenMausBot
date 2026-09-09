@@ -426,6 +426,14 @@ describe("default fleet", () => {
     });
   });
 
+  it("injects the saved OrcaRouter key into the live default instance", () => {
+    const map = instanceConfigs({
+      orcarouter: { key: "orc-secret" },
+    });
+    expect(map.orcarouter.driver).toBe("orcarouter");
+    expect(map.orcarouter.environment).toEqual({ ORCAROUTER_API_KEY: "orc-secret" });
+  });
+
   it("preserves a per-instance OpenAI-compatible URL override", () => {
     const map = instanceConfigs({
       openaiCompat: { url: "https://workspace.example.test/v1" },
@@ -484,6 +492,7 @@ describe("default fleet", () => {
     expect(map.hermes?.driver).toBe("hermesAgent");
     expect(map.cursor?.driver).toBe("cursorAgent");
     expect(map.openaiCompat?.driver).toBe("openai-compat");
+    expect(map.orcarouter?.driver).toBe("orcarouter");
   });
 
   it("does not expand a one-off shadow fleet", () => {
