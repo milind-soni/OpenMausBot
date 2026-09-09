@@ -122,48 +122,152 @@ export function writeMemoryFile(botId: string, text: string): void {
 }
 
 export interface MemoryUpdate {
-  action: "append" | "replace" | "remove";
+  /** `supersede` strikes the old entry through and appends the new one, so
+   * a corrected fact leaves a trace instead of vanishing. */
+  action: "append" | "replace" | "remove" | "supersede";
   text?: string;
   oldText?: string;
 }
 
+export interface MemoryUpdateOptions {
+  /** Where the entry came from, as a person reads it: `chat "Follow-up"`,
+   * `room "Launch"`. Recorded on every appended entry. */
+  source?: string;
+  /** Injectable clock, for tests that pin the date in an entry. */
+  now?: Date;
+}
+
 export type MemoryUpdateResult =
-  | { ok: true; text: string; truncated: boolean; bytes: number }
+  | { ok: true; text: string; truncated: boolean; bytes: number; entry?: string }
   | { ok: false; error: string; code: "invalid" | "conflict" | "too-large" };
+
+/** The calendar day of an entry, in the machine's own zone: the person
+ * reading MEMORY.md thinks in their day, not in UTC. */
+export function memoryDate(now: Date = new Date()): string {
+  const pad = (n: number) => String(n).padStart(2, "0");
+  return `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}`;
+}
+
+/** The separator between the date, the source and the text of an entry.
+ * A middle dot so a fact that itself contains a hyphen or colon stays
+ * readable; sources are scrubbed of it so the prefix parses back. */
+const SEP = " · ";
+const DATED_ENTRY = /^(- \d{4}-\d{2}-\d{2} · (?:from [^·\n]* · )?)(.*)$/;
+const UPDATED_MARK = / · updated \d{4}-\d{2}-\d{2}$/;
+/** A prefix the model typed itself, copying the shape of the file: the
+ * entry's real prefix is the harness's to assign, so this one is dropped. */
+const TYPED_PREFIX = /^\s*- \d{4}-\d{2}-\d{2} · (?:from [^·\n]* · )?/;
+const BULLET = /^(?:[-*•]|\d+[.)])\s+/;
+
+/** A thread title can hold anything; keep it to one short line with no
+ * separator in it, so the prefix stays unambiguous when read back. */
+function cleanSource(source: string | undefined): string {
+  return (source ?? "").replace(/·/g, "-").replace(/\s+/g, " ").trim().slice(0, 80);
+}
+
+/** Text as one entry: the model's own bullet marker is dropped (the entry
+ * gets one), and everything folds onto a single line unless it holds a
+ * fenced block, which stays verbatim so the fence still closes. */
+function normaliseEntryText(text: string): string {
+  const trimmed = text.trim().replace(BULLET, "");
+  if (trimmed.includes("```")) return trimmed;
+  return trimmed.replace(/\s*\n\s*/g, " ").replace(/[ \t]+/g, " ");
+}
+
+/** One dated, sourced entry line. `- 2026-09-10 · from chat "Follow-up" · text` */
+export function memoryEntry(text: string, opts: MemoryUpdateOptions = {}): string {
+  const source = cleanSource(opts.source);
+  return `- ${memoryDate(opts.now)}${SEP}${source ? `from ${source}${SEP}` : ""}${normaliseEntryText(text)}`;
+}
+
+/** The dated prefix and the body of an entry line, or null for a line the
+ * person wrote by hand before entries carried a date. */
+function parseEntry(line: string): { prefix: string; body: string } | null {
+  const m = DATED_ENTRY.exec(line);
+  return m ? { prefix: m[1], body: m[2] } : null;
+}
+
+/** The line that holds `index`, as [start, end) offsets into `text`. */
+function lineSpan(text: string, index: number, length: number): { start: number; end: number } {
+  const start = text.lastIndexOf("\n", index - 1) + 1;
+  const newline = text.indexOf("\n", index + length);
+  return { start, end: newline === -1 ? text.length : newline };
+}
 
 /** One harness owns app-managed writes: no await occurs between reading the
  * latest file and its atomic replacement. This does not serialize arbitrary
  * shell writes by a full-access engine or an external editor. */
-export function updateMemory(botId: string, update: MemoryUpdate): MemoryUpdateResult {
-  if (!["append", "replace", "remove"].includes(update.action)
-    || (update.action !== "remove" && (typeof update.text !== "string" || !update.text.trim()))
-    || (update.action === "append" && update.oldText !== undefined)
-    || (update.action !== "append" && (typeof update.oldText !== "string" || !update.oldText.trim()))
-    || (update.action === "remove" && update.text !== undefined)) {
-    return { ok: false, code: "invalid", error: "Use append with text, replace with text and oldText, or remove with oldText." };
+export function updateMemory(botId: string, update: MemoryUpdate, opts: MemoryUpdateOptions = {}): MemoryUpdateResult {
+  const needsText = update.action !== "remove";
+  const needsOld = update.action !== "append";
+  if (!["append", "replace", "remove", "supersede"].includes(update.action)
+    || (needsText && (typeof update.text !== "string" || !update.text.trim()))
+    || (!needsText && update.text !== undefined)
+    || (needsOld && (typeof update.oldText !== "string" || !update.oldText.trim()))
+    || (!needsOld && update.oldText !== undefined)) {
+    return { ok: false, code: "invalid", error: "Use append with text, replace or supersede with text and oldText, or remove with oldText." };
   }
   const dir = ensureWorkspace(botId);
   // Do not use readMemoryFile's editor-friendly missing/read-error fallback:
   // a failed read must never turn into a successful overwrite of old notes.
   const raw = readFileSync(join(dir, "MEMORY.md"), "utf8");
   const current = raw === MEMORY_SEED ? "" : raw;
+  const today = memoryDate(opts.now);
+  // Every appended entry ends its own line; a file the person left without
+  // a final newline gets one first, and one is never added twice.
+  const appendEntry = (base: string, entry: string) => `${base}${base && !base.endsWith("\n") ? "\n" : ""}${entry}\n`;
   let next: string;
+  let entry: string | undefined;
   if (update.action === "append") {
-    next = current + (current && !current.endsWith("\n") ? "\n" : "") + update.text!;
+    entry = memoryEntry(update.text!, opts);
+    next = appendEntry(current, entry);
   } else {
     const oldText = update.oldText!;
     const index = current.indexOf(oldText);
     if (index === -1 || current.indexOf(oldText, index + 1) !== -1) {
       return { ok: false, code: "conflict", error: "oldText must match exactly once in the latest memory. Re-read MEMORY.md and retry with a current, unique passage." };
     }
-    next = current.slice(0, index) + (update.action === "remove" ? "" : update.text!) + current.slice(index + oldText.length);
+    const span = lineSpan(current, index, oldText.length);
+    const line = current.slice(span.start, span.end);
+    const parsed = oldText.includes("\n") ? null : parseEntry(line);
+    const replaceLine = (replacement: string) => current.slice(0, span.start) + replacement + current.slice(span.end);
+    if (update.action === "remove") {
+      next = current.slice(0, index) + current.slice(index + oldText.length);
+      // removing a whole entry must not leave its blank line behind
+      const atLineStart = index === 0 || next[index - 1] === "\n";
+      if (atLineStart && next[index] === "\n") next = next.slice(0, index) + next.slice(index + 1);
+    } else if (update.action === "supersede") {
+      if (oldText.includes("\n")) {
+        return { ok: false, code: "invalid", error: "supersede works on one entry line at a time; give oldText from a single entry." };
+      }
+      const body = parsed ? parsed.body : line.replace(BULLET, "");
+      if (body.startsWith("~~")) {
+        return { ok: false, code: "conflict", error: "That entry is already struck through. Replace or remove it, or append the new fact on its own." };
+      }
+      const struck = `${parsed ? parsed.prefix : line === body ? "" : "- "}~~${body}~~${SEP}superseded ${today}`;
+      entry = memoryEntry(update.text!, opts);
+      next = appendEntry(replaceLine(struck), entry);
+    } else if (!parsed) {
+      // A hand-written passage keeps the person's own shape: plain
+      // substitution, nothing dated onto it.
+      next = current.slice(0, index) + update.text! + current.slice(index + oldText.length);
+    } else {
+      // The original date stays; whether the model replaced a fragment or
+      // retyped the whole line (with or without its own prefix), the entry
+      // is rebuilt from its original prefix and marked updated today.
+      const swapped = line.slice(0, index - span.start) + update.text!.replace(TYPED_PREFIX, "") + line.slice(index - span.start + oldText.length);
+      const reparsed = parseEntry(swapped);
+      const body = reparsed ? reparsed.body : normaliseEntryText(swapped);
+      entry = `${parsed.prefix}${body.replace(UPDATED_MARK, "")}${SEP}updated ${today}`;
+      next = replaceLine(entry);
+    }
   }
   const bytes = Buffer.byteLength(next, "utf8");
   if (bytes > MEMORY_FILE_MAX_BYTES) {
     return { ok: false, code: "too-large", error: `Memory must not exceed ${MEMORY_FILE_MAX_BYTES} bytes. Remove or shorten existing notes first.` };
   }
   writeMemoryFile(botId, next);
-  return { ok: true, ...readMemoryFile(botId), bytes };
+  return { ok: true, ...readMemoryFile(botId), bytes, entry };
 }
 
 // One path segment, starts with a word character, plain characters only,

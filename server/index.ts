@@ -8444,9 +8444,18 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
           throw Object.assign(new Error("the internal turn capability has expired"), { status: 401 });
         }
       };
+      // Where an entry came from, as the person will read it in MEMORY.md:
+      // the room or the thread title, never a bare id unless nothing else
+      // names the conversation.
+      const memorySource = (): string => {
+        const room = store.groupByThread(internalCapability.threadId);
+        if (room) return `room ${JSON.stringify(room.name)}`;
+        const task = store.taskByThread(internalSender.id, internalCapability.threadId);
+        return task?.title ? `chat ${JSON.stringify(task.title)}` : `thread ${internalCapability.threadId}`;
+      };
       if (method === "POST" && path === "/api/internal/memory") {
         const body = await readInternalBody();
-        const result = updateMemory(internalSender.id, { action: body.action, text: body.text, oldText: body.oldText });
+        const result = updateMemory(internalSender.id, { action: body.action, text: body.text, oldText: body.oldText }, { source: memorySource() });
         return json(res, result.ok ? 200 : result.code === "conflict" ? 409 : result.code === "too-large" ? 413 : 400, result);
       }
       if (method === "POST" && path === "/api/internal/browser/mcp") {

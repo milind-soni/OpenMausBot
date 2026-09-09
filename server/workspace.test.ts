@@ -17,6 +17,8 @@ import {
   workspaceDir,
   writeMemoryFile,
   updateMemory,
+  memoryDate,
+  memoryEntry,
   MEMORY_FILE_MAX_BYTES,
   MEMORY_MAX_BYTES,
   MEMORY_MAX_LINES,
@@ -125,21 +127,94 @@ describe("workspace", () => {
   });
 
   it("applies independent memory appends and targeted edits to the latest file without losing updates", () => {
-    expect(updateMemory(BOT, { action: "append", text: "- Preferred package manager: npm" }).ok).toBe(true);
-    const snapshot = readMemoryFile(BOT).text;
-    expect(updateMemory(BOT, { action: "append", text: "- Shipping day: Friday" }).ok).toBe(true);
-    expect(updateMemory(BOT, { action: "replace", oldText: snapshot, text: "- Preferred package manager: pnpm" })).toMatchObject({ ok: true });
-    expect(readMemoryFile(BOT).text).toBe("- Preferred package manager: pnpm\n- Shipping day: Friday");
-    const beforeConflict = readMemoryFile(BOT).text;
-    expect(updateMemory(BOT, { action: "replace", oldText: snapshot, text: "- Preferred package manager: yarn" })).toMatchObject({ ok: false, code: "conflict" });
-    expect(readMemoryFile(BOT).text).toBe(beforeConflict);
-    expect(updateMemory(BOT, { action: "remove", oldText: "- Shipping day: Friday" })).toMatchObject({ ok: true });
-    expect(readMemoryFile(BOT).text).toBe("- Preferred package manager: pnpm\n");
-    // Human editor writes remain the canonical file the next tool update reads.
-    writeMemoryFile(BOT, "- Edited by the user");
-    expect(updateMemory(BOT, { action: "append", text: "- Another thread's fact" })).toMatchObject({
-      ok: true, text: "- Edited by the user\n- Another thread's fact", truncated: false,
+    const now = new Date(2026, 8, 10, 12);
+    const opts = { source: 'chat "Setup"', now };
+    expect(updateMemory(BOT, { action: "append", text: "- Preferred package manager: npm" }, opts)).toMatchObject({
+      ok: true, entry: '- 2026-09-10 · from chat "Setup" · Preferred package manager: npm',
     });
+    const first = readMemoryFile(BOT).text;
+    expect(first).toBe('- 2026-09-10 · from chat "Setup" · Preferred package manager: npm\n');
+    expect(updateMemory(BOT, { action: "append", text: "Shipping day: Friday" }, opts).ok).toBe(true);
+    // a fragment replace keeps the entry's original date and marks the day it changed
+    const later = { source: 'chat "Setup"', now: new Date(2026, 8, 12, 12) };
+    expect(updateMemory(BOT, { action: "replace", oldText: "manager: npm", text: "manager: pnpm" }, later)).toMatchObject({
+      ok: true, entry: '- 2026-09-10 · from chat "Setup" · Preferred package manager: pnpm · updated 2026-09-12',
+    });
+    expect(readMemoryFile(BOT).text).toBe(
+      '- 2026-09-10 · from chat "Setup" · Preferred package manager: pnpm · updated 2026-09-12\n' +
+      '- 2026-09-10 · from chat "Setup" · Shipping day: Friday\n',
+    );
+    const beforeConflict = readMemoryFile(BOT).text;
+    expect(updateMemory(BOT, { action: "replace", oldText: "manager: npm", text: "manager: yarn" }, later)).toMatchObject({ ok: false, code: "conflict" });
+    expect(readMemoryFile(BOT).text).toBe(beforeConflict);
+    // removing a whole entry takes its line with it
+    expect(updateMemory(BOT, { action: "remove", oldText: '- 2026-09-10 · from chat "Setup" · Shipping day: Friday' })).toMatchObject({ ok: true });
+    expect(readMemoryFile(BOT).text).toBe('- 2026-09-10 · from chat "Setup" · Preferred package manager: pnpm · updated 2026-09-12\n');
+    // Human editor writes remain the canonical file the next tool update reads,
+    // and a file left without a final newline gets exactly one before the entry.
+    writeMemoryFile(BOT, "- Edited by the user");
+    expect(updateMemory(BOT, { action: "append", text: "Another thread's fact" }, opts)).toMatchObject({
+      ok: true, text: '- Edited by the user\n- 2026-09-10 · from chat "Setup" · Another thread\'s fact\n', truncated: false,
+    });
+  });
+
+  it("formats an entry as one dated, sourced line and keeps fenced blocks whole", () => {
+    const now = new Date(2026, 8, 10, 12);
+    expect(memoryDate(now)).toBe("2026-09-10");
+    expect(memoryEntry("  - The user's name is Ada  ", { source: 'chat "Follow-up"', now })).toBe('- 2026-09-10 · from chat "Follow-up" · The user\'s name is Ada');
+    // no source: the thread could not be named, the date still rides
+    expect(memoryEntry("Deploys on Fridays", { now })).toBe("- 2026-09-10 · Deploys on Fridays");
+    // a multi-line note folds onto one line; a title with the separator in it is scrubbed
+    expect(memoryEntry("first line\n   second line", { source: 'chat "A · B"', now })).toBe('- 2026-09-10 · from chat "A - B" · first line second line');
+    const fenced = memoryEntry("Deploy command:\n```sh\nrailway up\n```", { now });
+    expect(fenced).toBe("- 2026-09-10 · Deploy command:\n```sh\nrailway up\n```");
+  });
+
+  it("replace re-attaches the original prefix when the model retypes the whole entry", () => {
+    const now = new Date(2026, 8, 10, 12);
+    updateMemory(BOT, { action: "append", text: "Timezone: IST" }, { source: 'chat "Setup"', now });
+    updateMemory(BOT, { action: "append", text: "Hand-written line stays" }, { source: 'chat "Setup"', now });
+    writeMemoryFile(BOT, `${readMemoryFile(BOT).text}- undated note from the person\n`);
+    const later = { source: 'room "Ops"', now: new Date(2026, 8, 11, 12) };
+    // whole line, no prefix in the new text
+    expect(updateMemory(BOT, { action: "replace", oldText: '- 2026-09-10 · from chat "Setup" · Timezone: IST', text: "- Timezone: CET" }, later)).toMatchObject({
+      ok: true, entry: '- 2026-09-10 · from chat "Setup" · Timezone: CET · updated 2026-09-11',
+    });
+    // whole line, the model copied a prefix of its own: the original one wins, and the mark is not doubled
+    expect(updateMemory(BOT, { action: "replace", oldText: "Timezone: CET · updated 2026-09-11", text: '- 2026-09-11 · from room "Ops" · Timezone: UTC' }, later)).toMatchObject({
+      ok: true, entry: '- 2026-09-10 · from chat "Setup" · Timezone: UTC · updated 2026-09-11',
+    });
+    // an undated, hand-written line is replaced as plain text, nothing dated onto it
+    expect(updateMemory(BOT, { action: "replace", oldText: "undated note", text: "undated fact" }, later)).toMatchObject({ ok: true });
+    expect(readMemoryFile(BOT).text).toBe(
+      '- 2026-09-10 · from chat "Setup" · Timezone: UTC · updated 2026-09-11\n' +
+      '- 2026-09-10 · from chat "Setup" · Hand-written line stays\n' +
+      "- undated fact from the person\n",
+    );
+  });
+
+  it("supersede strikes the old entry through with the day it stopped being true and appends the new one", () => {
+    const now = new Date(2026, 8, 10, 12);
+    updateMemory(BOT, { action: "append", text: "Office: Berlin" }, { source: 'chat "Setup"', now });
+    writeMemoryFile(BOT, `${readMemoryFile(BOT).text}- Old hand-written office: Paris\nplain paragraph\n`);
+    const later = { source: 'chat "Move"', now: new Date(2026, 8, 20, 12) };
+    expect(updateMemory(BOT, { action: "supersede", oldText: "Office: Berlin", text: "Office: Lisbon" }, later)).toMatchObject({
+      ok: true, entry: '- 2026-09-20 · from chat "Move" · Office: Lisbon',
+    });
+    expect(updateMemory(BOT, { action: "supersede", oldText: "office: Paris", text: "office: Porto" }, later).ok).toBe(true);
+    expect(updateMemory(BOT, { action: "supersede", oldText: "plain paragraph", text: "plain fact" }, later).ok).toBe(true);
+    expect(readMemoryFile(BOT).text).toBe(
+      '- 2026-09-10 · from chat "Setup" · ~~Office: Berlin~~ · superseded 2026-09-20\n' +
+      "- ~~Old hand-written office: Paris~~ · superseded 2026-09-20\n" +
+      "~~plain paragraph~~ · superseded 2026-09-20\n" +
+      '- 2026-09-20 · from chat "Move" · Office: Lisbon\n' +
+      '- 2026-09-20 · from chat "Move" · office: Porto\n' +
+      '- 2026-09-20 · from chat "Move" · plain fact\n',
+    );
+    // a struck entry is not struck again, and a passage spanning lines is refused
+    expect(updateMemory(BOT, { action: "supersede", oldText: "Office: Berlin", text: "Office: Rome" }, later)).toMatchObject({ ok: false, code: "conflict" });
+    expect(updateMemory(BOT, { action: "supersede", oldText: "Porto\n- 2026-09-20", text: "x" }, later)).toMatchObject({ ok: false, code: "invalid" });
+    expect(updateMemory(BOT, { action: "supersede", oldText: "Office: Lisbon" }, later)).toMatchObject({ ok: false, code: "invalid" });
   });
 
   it("rejects ambiguous, invalid and over-budget memory changes without changing saved notes", () => {

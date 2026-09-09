@@ -753,6 +753,13 @@ describe("agents-proxy MCP surface", () => {
       fromBotId: "bot-asker", fromThreadId: "thread-asker-routine",
       action: "replace", text: "- New preference", oldText: "- Old preference",
     });
+    // the harness echoes the entry it wrote, so the model can replace it later by exact text
+    memoryResponse = { ok: true, text: "- new fact", truncated: false, bytes: 10, entry: '- 2026-09-10 · from chat "Setup" · New preference' };
+    const echoed = await callTool("memory_update", { action: "supersede", text: "New preference", old_text: "- Old preference" });
+    expect(echoed.result.isError).toBe(false);
+    expect(echoed.result.content[0].text).toBe('Memory updated. Entry: - 2026-09-10 · from chat "Setup" · New preference');
+    expect(lastMemoryBody).toMatchObject({ action: "supersede", text: "New preference", oldText: "- Old preference" });
+    memoryResponse = { ok: true, text: "- new fact", truncated: false, bytes: 10 };
     const append = await callTool("memory_update", { action: "append", text: "- Another fact" });
     expect(append.result.isError).toBe(false);
     expect(lastMemoryBody).toEqual({
