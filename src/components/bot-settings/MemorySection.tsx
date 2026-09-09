@@ -9,6 +9,7 @@ import { useState } from "react";
 import { api, type Bot } from "@/state/store";
 import { cn } from "@/lib/cn";
 import { inputCls } from "./field";
+import { HindsightCard } from "./HindsightCard";
 
 interface MemoryTopic {
   name: string;
@@ -74,6 +75,7 @@ export function MemorySection({ bot }: { bot: Bot }) {
   };
 
   return (
+    <div className="space-y-3">
     <div className="rounded-xl bg-card p-4">
       <button
         className="flex w-full items-center justify-between gap-4 text-left"
@@ -161,6 +163,8 @@ export function MemorySection({ bot }: { bot: Bot }) {
       )}
 
       {error && <div className="mt-2 text-[12px] text-danger">{error}</div>}
+    </div>
+    <HindsightCard botId={bot.id} />
     </div>
   );
 }

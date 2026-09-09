@@ -301,11 +301,14 @@ const appConfigSchema = z.object({
    * file on a schema error, and one bad server entry must degrade to a
    * skipped entry (customMcpServers), never to a vanished config. */
   mcpServers: z.record(z.string(), z.unknown()).optional(),
+  // Private per-bot connections. Invalid entries must not discard the rest
+  // of the configuration; the Hindsight boundary validates each separately.
+  hindsightBots: z.record(z.string(), z.unknown()).optional(),
 });
 const storedAppConfigSchema = appConfigSchema.extend({
   browserProfiles: storedBrowserProfilesSchema.optional(),
 });
-const appConfigPatchSchema = appConfigSchema.omit({ instances: true, mcpServers: true, cliStartup: true, customDomain: true });
+const appConfigPatchSchema = appConfigSchema.omit({ instances: true, mcpServers: true, hindsightBots: true, cliStartup: true, customDomain: true });
 const jsonObjectSchema = z.record(z.string(), z.json());
 
 export interface AppConfig {
@@ -319,6 +322,7 @@ export interface AppConfig {
     phone?: "ios" | "android";
   };
   mcpServers?: Record<string, unknown>;
+  hindsightBots?: Record<string, unknown>;
   language?: string;
   xai?: { key?: string; url?: string };
   openaiCompat?: { key?: string; url?: string; model?: string; provider?: string };
@@ -666,6 +670,9 @@ export function saveConfig(patch: Partial<AppConfig>, options: { replaceInstance
   // saveConfig remains the single atomic persistence boundary.
   if (checkedPatch.mcpServers !== undefined) {
     disk.mcpServers = jsonObjectSchema.parse(checkedPatch.mcpServers);
+  }
+  if (checkedPatch.hindsightBots !== undefined) {
+    disk.hindsightBots = jsonObjectSchema.parse(checkedPatch.hindsightBots);
   }
   // the whole list is the unit of change: an add or a delete arrives as the
   // new list, never as a per-item merge
