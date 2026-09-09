@@ -401,6 +401,17 @@ describe("bidi: message content carries its own direction", () => {
     expect(fenced).toContain('<div dir="ltr"');
   });
 
+  it("lets an inline span break, so a long path cannot leave the bubble", () => {
+    // an unbreakable token wider than the bubble has nowhere to go but
+    // outside it, and in an RTL paragraph that is off the left edge, where
+    // the line ends — the direction that reads as text escaping the message
+    const html = renderToStaticMarkup(createElement(ChatMarkdown, {
+      text: `${ARABIC} \`dist/{download,privacy,terms,license,support,presskit,changelogs,docs,about,feedback}\` ${ARABIC}`,
+    }));
+    const inline = /<code [^>]*class="([^"]*)"/.exec(html)?.[1] ?? "";
+    expect(inline).toContain("break-words");
+  });
+
   it("gives links a base direction, not isolation alone", () => {
     // isolate keeps a link from disturbing the sentence around it, but the
     // link's own contents still lay out along its inherited direction — a URL

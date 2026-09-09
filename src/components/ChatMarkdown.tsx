@@ -497,8 +497,12 @@ function ChatMarkdownComponent({ text, streaming = false, message, mentionPeers 
             );
           },
           code({ children }: { children?: ReactNode }) {
+            // break-words because a path or an identifier can be longer than
+            // the bubble is wide, and an unbreakable token has nowhere to go
+            // but outside it — off the left edge in a right-to-left paragraph,
+            // where the line ends.
             return (
-              <code dir="ltr" className="rounded bg-inset px-1 py-px text-[13px] [unicode-bidi:isolate]">{children}</code>
+              <code dir="ltr" className="rounded bg-inset px-1 py-px text-[13px] break-words [unicode-bidi:isolate]">{children}</code>
             );
           },
           // markdown never emits a span itself (no raw HTML); the only
