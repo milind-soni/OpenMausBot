@@ -412,6 +412,12 @@ const TOOLS = [
     },
   },
   {
+    name: "list_threads",
+    description:
+      "See your own threads and the threads you opened on teammates, newest first: each with its bot, title, state (running, waiting on the person, queued, or idle), whether the person has unread there, and the delegation id if it was a handoff. Use it to check how the threads you started are going before reporting to the person; write a thread's title as #Title when you mention it. A teammate's other threads are never listed — only the ones you opened. This is a read: it starts nothing and changes nothing.",
+    inputSchema: { type: "object", additionalProperties: false, properties: {} },
+  },
+  {
     name: "start_thread",
     description:
       "Open a new thread: one conversation with its own history and its own run, shown to the person as a row under the bot it belongs to. Leave bot_id out to open it on yourself, for a separate job that should run on its own (\"review each pull request\" — one thread per pull request) instead of inside this conversation. Give bot_id (from list_bots) to open it on a teammate: that is a handoff into a fresh thread, which starts after your current turn ends and whose result is delivered here, like delegate_bot. The title becomes the row's name, so make it short and specific; write it as #Title when you mention it to the person. Do not use it for a question you need answered right now (ask_bot), for one task where the teammate's usual conversation is fine (delegate_bot), or for a note nobody has to act on. If a call is refused, do not retry it: say what you still wanted opened.",
@@ -892,6 +898,22 @@ async function callTool(name: string, args: Json): Promise<{ text: string; isErr
       };
     }
     return { text: `Task ${taskId} ended without a reply — ${String(r.status ?? "unknown")}${r.result ? `: ${String(r.result)}` : ""}.`, isError: true };
+  }
+  if (name === "list_threads") {
+    const query = new URLSearchParams({ fromBotId: BOT_ID, fromThreadId: THREAD_ID });
+    const r = await api(`/api/internal/threads?${query.toString()}`);
+    if (r.error) return { text: `Couldn't list threads: ${String(r.error)}`, isError: true };
+    const threads = Array.isArray(r.threads) ? r.threads.filter(jsonRecord) : [];
+    if (!threads.length) return { text: "No threads yet: you have none of your own beyond this one, and you have not opened any on a teammate." };
+    const stateWord: Record<string, string> = { running: "running", "waiting-on-you": "waiting on the person", queued: "queued", idle: "idle" };
+    const lines = threads.map((thread) => {
+      const where = thread.own === true ? "yours" : `on @${String(thread.botName)}`;
+      const state = stateWord[String(thread.state)] ?? String(thread.state);
+      const unread = thread.unread === true ? ", unread for the person" : "";
+      const handoff = typeof thread.delegationId === "string" && thread.delegationId ? ` [delegation id: ${thread.delegationId}]` : "";
+      return `- #${String(thread.title)} (${where}, ${state}${unread}) [thread id: ${String(thread.threadId)}]${handoff}`;
+    });
+    return { text: `Threads, newest first:\n${lines.join("\n")}` };
   }
   if (name === "start_thread") {
     const title = String(args.title ?? "").trim();

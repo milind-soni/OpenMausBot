@@ -360,6 +360,8 @@ describe("start_thread on a teammate", () => {
       // the opener's next turn reads the ledger with its own live token:
       // the handoffs are running, with elapsed time, and nothing has come back
       const readBack = await heldTurn(pm, "How is QA going?");
+      // the paragraph that tells a bot what a thread is rides with the tools
+      expect(dumpOf(pm.threadId)?.systemPrompt ?? "").toContain("start_thread");
       const running = (await api("GET", `/api/internal/delegations/${opened[0].delegationId}`, undefined, readBack)).body;
       expect(running).toMatchObject({ status: "running", toBotName: "Quinn" });
       expect(running.elapsedMs).toBeGreaterThanOrEqual(0);
@@ -500,4 +502,33 @@ describe("start_thread on a teammate", () => {
       await cleanup([pm.id, sage.id]);
     }
   }, 60_000);
+});
+
+describe("list_threads", () => {
+  it("lists your own threads and the ones you opened on a teammate, never a teammate's other threads", async () => {
+    const pm = await createBot("Parker", "gated");
+    const qa = await createBot("Quinn", "gated");
+    try {
+      // a thread the person opened on Quinn: Quinn's business, not Parker's
+      const theirs = await api("POST", `/api/bots/${qa.id}/tasks`, { title: "Quinn's own audit" });
+      expect(theirs.status).toBe(201);
+      const token = await mintedToken(pm.id, pm.threadId);
+      const opened = await api("POST", "/api/internal/threads", { toBotId: qa.id, title: "QA: PR #77", message: "Test it." }, token);
+      expect(opened.status).toBe(201);
+      const mine = await api("GET", "/api/internal/threads", undefined, token);
+      expect(mine.status).toBe(200);
+      const titles = mine.body.threads.map((row: { title: string; botName: string; own: boolean }) => `${row.own ? "own" : row.botName}:${row.title}`);
+      expect(titles).toContain("Quinn:QA: PR #77");
+      expect(titles.some((title: string) => title.startsWith("own:"))).toBe(true);
+      expect(titles).not.toContain("Quinn:Quinn's own audit");
+      // and Quinn, asking for itself, sees its own rows only — never Parker's
+      const qaToken = await mintedToken(qa.id, qa.threadId);
+      const theirsSeen = await api("GET", "/api/internal/threads", undefined, qaToken);
+      expect(theirsSeen.body.threads.every((row: { own: boolean }) => row.own)).toBe(true);
+      expect(theirsSeen.body.threads.map((row: { title: string }) => row.title)).toContain("Quinn's own audit");
+    } finally {
+      await api("DELETE", `/api/bots/${pm.id}`);
+      await api("DELETE", `/api/bots/${qa.id}`);
+    }
+  });
 });

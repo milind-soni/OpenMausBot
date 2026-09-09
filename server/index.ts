@@ -264,6 +264,7 @@ import {
   mentionPrompt,
   COMPOSIO_PROMPT,
   CREDENTIAL_PROMPT,
+  THREADS_PROMPT,
   LEARN_PROMPT,
   PROFILE_PROMPT,
   ROUTINE_PROMPT,
@@ -4763,7 +4764,7 @@ async function startTurn(
           // model mostly did not think to make.
           ? peerRosterSystemPrompt(sectionPeers)
           : "";
-      const credentialPrompt = integrations.agents ? CREDENTIAL_PROMPT : "";
+      const credentialPrompt = integrations.agents ? THREADS_PROMPT + CREDENTIAL_PROMPT : "";
       const routinePrompt = integrations.agents ? ROUTINE_PROMPT : "";
       const profilePrompt = integrations.agents ? PROFILE_PROMPT : "";
       const recallPrompt = integrations.agents ? SESSION_SEARCH_SYSTEM_PROMPT : "";
@@ -5945,7 +5946,7 @@ async function runGroupMemberTurn(
     readyGroup.bulletin.trim() && `Room bulletin (shared instructions for everyone):\n${readyGroup.bulletin.trim()}`,
     `Reply as yourself, briefly and conversationally. To bring a teammate in, mention them like @Name — they'll see the conversation and respond.`,
     outsideRoom.length > 0 && roomPeerRosterSystemPrompt(outsideRoom),
-    integrations.agents && CREDENTIAL_PROMPT.trim(),
+    integrations.agents && (THREADS_PROMPT + CREDENTIAL_PROMPT).trim(),
     integrations.agents && ROUTINE_PROMPT.trim(),
     integrations.agents && PROFILE_PROMPT.trim(),
     skillAuthoring && LEARN_PROMPT.trim(),
@@ -8437,6 +8438,48 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
       // to keep trying — but it is still NAMED, with the refusal it would
       // have met. Without that the bot can only say it is in no room at
       // all, while the person is looking at it in that very room.
+      // list_threads: the caller's own threads, plus — on every peer it can
+      // reach — only the threads the caller itself opened. A peer's other
+      // threads are its own business (and the person's), so the scope is
+      // "what you started", never "what that bot is doing". State is read
+      // the way the sidebar reads it, so the bot and the person agree.
+      if (method === "GET" && path === "/api/internal/threads") {
+        const from = internalSender;
+        const fromThreadId = internalCapability.threadId;
+        if (!connectorThread(from.id, fromThreadId)) {
+          return json(res, 403, { error: "source conversation does not belong to sender" });
+        }
+        const rows: Array<{
+          threadId: string; botId: string; botName: string; title: string;
+          state: "running" | "waiting-on-you" | "queued" | "idle";
+          unread: boolean; openedAt: number; delegationId?: string; own: boolean;
+        }> = [];
+        const stateOf = (bot: BotRecord, task: TaskRecord) => {
+          if (task.activity === "waiting-on-you") return "waiting-on-you" as const;
+          if (threadBusy(bot.id, task.threadId)) return "running" as const;
+          if (queuedThreadPosition(bot.id, task.threadId) !== null) return "queued" as const;
+          return "idle" as const;
+        };
+        for (const task of store.tasks(from.id)) {
+          rows.push({
+            threadId: task.threadId, botId: from.id, botName: from.name, title: task.title,
+            state: stateOf(from, task), unread: task.unread === true, openedAt: task.openedBy?.at ?? task.createdAt,
+            delegationId: task.openedBy?.delegationId, own: true,
+          });
+        }
+        for (const peer of reachablePeers(store.bots, from)) {
+          for (const task of store.tasks(peer.id)) {
+            if (task.openedBy?.botId !== from.id) continue;
+            rows.push({
+              threadId: task.threadId, botId: peer.id, botName: peer.name, title: task.title,
+              state: stateOf(peer, task), unread: task.unread === true, openedAt: task.openedBy.at,
+              delegationId: task.openedBy.delegationId, own: false,
+            });
+          }
+        }
+        rows.sort((a, b) => b.openedAt - a.openedAt);
+        return json(res, 200, { threads: rows.slice(0, 100) });
+      }
       if (method === "GET" && path === "/api/internal/rooms") {
         const from = internalSender;
         const fromThreadId = internalCapability.threadId;
