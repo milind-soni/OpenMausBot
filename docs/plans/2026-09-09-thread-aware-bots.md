@@ -126,6 +126,18 @@ still breaks through, deep-linked to that thread; and completion is reported
 once, by the opener's resumed turn, never twice. A thread the person has
 opened in the sidebar behaves as any thread they read.
 
+### 7. Threads are linkable from chat
+
+When a bot writes a thread's title as `#Title` in a reply, the transcript
+renders it as a link that opens that thread: select the bot, switch to the
+thread, never redirect running work. Resolution mirrors @mentions: word
+start, longest known title first, case-insensitive, only titles the person
+can actually see, never `#123`-style numbers or markdown headings. The chip
+a bot leaves when it opens a thread carries a structured `threadRef` and is
+the same clickable pill the bot⇄bot exchange chips already are, visible even
+with Tool calls hidden. Phones decode both fields, show the opener label, and
+tap through to the thread by the switch route they already use.
+
 ## Sequence
 
 1. `openedBy` on `TaskRecord`, wire, sidebar and iOS label, backup round trip.
@@ -137,6 +149,7 @@ opened in the sidebar behaves as any thread they read.
 4. Prompt paragraph; a test that the words "start_thread" reach both the 1:1
    and the room system prompt.
 5. `close_thread`.
+6. `#Title` links and the `threadRef` chip on desktop and mobile.
 
 ## Risks and the answers
 
