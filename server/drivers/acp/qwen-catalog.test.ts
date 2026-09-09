@@ -1,4 +1,5 @@
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import { rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -11,9 +12,11 @@ const FAKE_CLI = join(dirname(fileURLToPath(import.meta.url)), "../../testing/fa
 const scratchDirs: string[] = [];
 const originalFetch = globalThis.fetch;
 
-afterEach(() => {
+afterEach(async () => {
   globalThis.fetch = originalFetch;
-  for (const dir of scratchDirs.splice(0)) rmSync(dir, { recursive: true, force: true });
+  // Windows can keep the fake CLI's working directory open briefly while
+  // taskkill finishes. Yield and retry cleanup without hiding a persistent leak.
+  for (const dir of scratchDirs.splice(0)) await rm(dir, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
 });
 
 function scratchSettings(settings: unknown, raw = false): string {
