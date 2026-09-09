@@ -40,6 +40,8 @@ Use only mapped, tested commands:
 - [Chat turns](chat-turns.md)
 - [Channels](channels.md)
 - [Engines and Doctor](engines.md)
+- [Claude coordination and turn-scoped tools](claude-tool-lifecycle.md)
+- [Codex bot instructions](codex-instructions.md)
 - [Qwen model route selection](qwen-models.md)
 - [Team backups](team-backups.md)
 
@@ -47,6 +49,9 @@ Renderer-only behavior—Settings, sidebar drag-and-drop, the VM modal, the
 built-in browser panel, and updater UI—is not proven by this first harness.
 Use the relevant Electron/package smoke test and state that limitation. Add a
 map entry only after the shared control surface can really drive it.
+
+The [desktop server connection smoke](desktop-server-connection.md) mounts the
+real Settings connection component in disposable Electron windows.
 
 The [cloud preview fixture](cloud-preview.md) mounts the real Computer panel
 against an isolated server for image decoding, loading, and recovery UI checks.
@@ -57,6 +62,9 @@ watching, takeover, input, and profile switching.
 
 The [bot settings fixture](bot-settings.md) checks profile saves, standing
 instructions, history restore, skill/memory refresh, and stale-response isolation.
+
+The [sidebar fixture](sidebar.md) checks archive and delete confirmations, their
+default focus, keyboard wrapping and focus return against two disposable bots.
 
 The [avatar provider fixture](avatar-providers.md) checks image-provider settings,
 keyless local generation, saved-key handling, and safe errors with a local fake API.
@@ -71,11 +79,20 @@ The [routines fixture](routines.md) checks confirmed proposals, manual and
 scheduled runs, central run logs, List/Calendar views, and bot-scoped routines
 using the real renderer and an isolated fake-engine server.
 
+The [interval restrictions recipe](interval-restrictions.md) checks weekday and
+time-window limits on scheduled routines in that same disposable fixture.
+
 The [server settings recipe](server-settings.md) checks browser provider sign-in
 with an offline CLI and custom-domain validation without touching live accounts.
 
 The [engine library fixture](engines-ui.md) checks onboarding and Settings cards,
 responsive layouts, theme contrast, and status refreshes without losing drafts.
+
+The [Claude account recipe](claude-account.md) checks sign-out, cancellation and
+retry against an offline Claude CLI confined to a disposable home.
+
+The [Codex account recipe](codex-account.md) checks account switching against an
+offline Codex CLI whose identity is synthetic and whose credential directory is empty.
 
 The [mention fixture](mentions.md) checks candidate selection, composer highlighting,
 sent mentions, multiline scrolling and responsive wrapping in real chat views.
@@ -91,6 +108,12 @@ XFCE glyph rendering in disposable managed desktops, including fresh recreation.
 The optional [Podman full-stack acceptance recipe](podman-self-hosting.md)
 checks the Compose deployment with a fresh home, fake engine, and two desktops.
 It includes workspace ownership, persistence, and proxy authentication checks.
+
+The [Podman Firefox sandbox recipe](podman-firefox.md) checks the capability set a
+managed desktop keeps so Firefox can start, with before/after acceptance evidence.
+
+The [Hetzner launch record](hetzner-launch-2026-09-07.md) is a dated self-hosting
+run on a disposable VPS: what passed, what was corrected, and what it does not prove.
 
 Keep the JSON from `wait` and `messages`, the exact command sequence, and the
 fixture's printed log path. Evidence must show both the action and the resulting

@@ -34,7 +34,7 @@ export interface ControlOmbDependencies {
   env?: NodeJS.ProcessEnv;
 }
 
-const HELP = `control-omb — verify a running OpenMausBot instance through its shared MCP core
+export const HELP = `control-omb — verify a running OpenMausBot instance through its shared MCP core
 
 read-only:
   doctor [--url URL]
