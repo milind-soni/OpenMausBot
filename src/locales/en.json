@@ -539,6 +539,7 @@
   "task.newIn": "New thread in {name}",
   "task.actions": "Actions for {title}",
   "task.waiting": "Waiting",
+  "task.openedBy": "opened by {name}",
   "task.unread": "Unread",
   "task.unreadMany": "Unread threads",
   "task.deleteConfirm": "Delete thread?",

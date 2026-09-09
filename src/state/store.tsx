@@ -238,6 +238,17 @@ export interface Task {
   busy?: boolean;
   unread?: boolean;
   pinnedMessageId?: string;
+  /** set when a bot (not the person) started this thread — its own or a
+   * teammate's; the sidebar shows a quiet "opened by <name>" under the title */
+  openedBy?: ThreadOpener;
+}
+
+/** The bot that opened a thread on itself or a teammate. */
+export interface ThreadOpener {
+  botId: string;
+  name: string;
+  delegationId?: string;
+  at: number;
 }
 
 export interface TaskUsage {
