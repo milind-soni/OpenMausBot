@@ -116,3 +116,23 @@ describe("ThreadRefsProvider", () => {
     expect(inProvider(createElement(Probe))).toBe("<i>scout:scout-main,qa-245,ada-qa,standup-1</i>");
   });
 });
+
+// Merged with #900: a line can carry an @mention and a #thread at once, and
+// each decoration comes from its own resolver without disturbing the other.
+import { renderToStaticMarkup as renderBoth } from "react-dom/server";
+import { createElement as h } from "react";
+import { ThreadRefText as BothText, ThreadRefsProvider as BothProvider } from "./ThreadRefs";
+import { describe as describeBoth, expect as expectBoth, it as itBoth } from "vitest";
+
+describeBoth("ThreadRefText with mention peers", () => {
+  itBoth("highlights the @mention and links the #thread in one line", () => {
+    const threads = [{ botId: "qa", threadId: "t1", title: "QA PR 245", createdAt: 1 }];
+    const peers = [{ id: "scout", name: "Scout", color: "green" }];
+    const markup = renderBoth(h(BothProvider, { threads, currentBotId: "qa" },
+      h(BothText, { text: "@Scout please look at #QA PR 245 today", peers })));
+    expectBoth(markup).toContain("mention-highlight");
+    expectBoth(markup).toContain("@Scout");
+    expectBoth(markup).toMatch(/Open #QA PR 245|#QA PR 245/);
+    expectBoth(markup).toContain("today");
+  });
+});
