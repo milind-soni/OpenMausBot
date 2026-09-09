@@ -1,3 +1,10 @@
+/** These admission failures can resume after another thread frees a slot.
+ * Keep control flow independent of the user-facing error wording. */
+export function isTurnAdmissionBlocked(error: unknown): boolean {
+  return typeof error === "object" && error !== null && "code" in error &&
+    (error.code === "thread_busy" || error.code === "thread_limit");
+}
+
 /** Close the Stop-vs-provider-handshake race shared by direct and room turns.
  * An adapter may not publish its active process until sendTurn resolves, so
  * an interrupt during that await can be an honest no-op. Re-check once setup
@@ -35,6 +42,47 @@ export class RetiredTurnRegistry {
 
   has(turnId: string | undefined): boolean {
     return turnId !== undefined && this.#turnIds.has(turnId);
+  }
+}
+
+export type ProviderTurnGenerationOwner = { threadId: string; generation: string };
+
+/** Correlate an internal capability generation with its provider turn without
+ * leaving a bearer alive when a very fast provider completes before
+ * sendTurn() returns its id. Completed ids are kept in a bounded tombstone
+ * registry, so a late bind fails closed instead of publishing stale ownership. */
+export class ProviderTurnGenerationRegistry {
+  readonly #owners = new Map<string, ProviderTurnGenerationOwner>();
+  readonly #completed: RetiredTurnRegistry;
+
+  constructor(limit = 4_096) {
+    this.#completed = new RetiredTurnRegistry(limit);
+  }
+
+  bind(threadId: string, generation: string, turnId: string): boolean {
+    if (this.#completed.has(turnId)) return false;
+    this.#owners.set(turnId, { threadId, generation });
+    return true;
+  }
+
+  complete(threadId: string, turnId: string): ProviderTurnGenerationOwner | null {
+    this.#completed.retire(turnId);
+    const owner = this.#owners.get(turnId);
+    if (!owner || owner.threadId !== threadId) return null;
+    this.#owners.delete(turnId);
+    return owner;
+  }
+
+  deleteGeneration(threadId: string, generation: string): void {
+    for (const [turnId, owner] of this.#owners) {
+      if (owner.threadId === threadId && owner.generation === generation) {
+        this.#owners.delete(turnId);
+      }
+    }
+  }
+
+  clear(): void {
+    this.#owners.clear();
   }
 }
 

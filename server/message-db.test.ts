@@ -2,18 +2,24 @@
 // import, deletion, and the LIKE search used by /api/search.
 import { existsSync, mkdirSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
+import { DatabaseSync } from "node:sqlite";
 import { beforeEach, describe, expect, it } from "vitest";
 
 import { DATA_DIR } from "./config.ts";
-import {
-  closeMessageDb,
+import { closeMessageDb,
   deleteThread,
+  indexMemoryFile,
+  indexedMemoryFiles,
   insertMessage,
+  readMessageText,
+  recallMemory,
+  removeMemoryFile,
   readThread,
+  recallMessages,
   searchMessages,
   setActiveLeaf,
-  updateMessage,
-} from "./message-db.ts";
+  updateMessage, describeMissingFts5 } from "./message-db.ts";
+import { withPeerProvenance } from "./peer-provenance.ts";
 import { Store, type Message } from "./store.ts";
 import type { ModelSelection } from "./contracts.ts";
 
@@ -98,6 +104,139 @@ describe("message-db", () => {
     expect(thread.activeLeafId).toBeNull();
   });
 
+  it("recall ranks by relevance, scopes to the given threads, and survives updates and deletes", () => {
+    insertMessage("own-a", msg("m1", "The site audit found three broken links on the pricing page", { role: "bot" }));
+    insertMessage("own-a", msg("m2", "audit", { role: "user" }));
+    insertMessage("own-b", msg("m3", "unrelated chatter about lunch"));
+    insertMessage("other-bot", msg("m4", "another bot's audit found broken links too"));
+    insertMessage("own-a", { ...msg("m5", "audit broken links"), kind: "activity" });
+
+    // all query words must match; the richest match ranks first; the other
+    // bot's thread never appears because scoping happens in SQL
+    const hits = recallMessages("audit broken links", ["own-a", "own-b"]);
+    expect(hits.map((hit) => hit.messageId)).toEqual(["m1"]);
+    expect(hits[0]).toMatchObject({ threadId: "own-a", role: "bot" });
+    expect(hits[0]!.snippet).toContain("[audit]");
+    expect(hits[0]!.snippet).toContain("[broken]");
+
+    // a single word: both text messages that carry it, never the activity chip
+    expect(recallMessages("audit", ["own-a", "own-b"]).map((hit) => hit.messageId).sort()).toEqual(["m1", "m2"]);
+
+    // FTS5 syntax in the query is searched for, not interpreted
+    expect(() => recallMessages('audit AND NOT "links" OR pricing:* (', ["own-a"])).not.toThrow();
+    expect(recallMessages("", ["own-a"])).toEqual([]);
+    expect(recallMessages("audit", [])).toEqual([]);
+
+    // filler words the model adds must not turn a good query into a miss;
+    // a query made only of filler still searches for what was sent
+    expect(recallMessages("what did the audit found on the pricing page", ["own-a"]).map((hit) => hit.messageId)).toEqual(["m1"]);
+    expect(recallMessages("the on what", ["own-a"])).toEqual([]);
+
+    // the whole message behind a hit, text kinds only
+    expect(readMessageText("own-a", "m1")).toMatchObject({
+      threadId: "own-a",
+      messageId: "m1",
+      role: "bot",
+      text: "The site audit found three broken links on the pricing page",
+    });
+    expect(readMessageText("own-a", "m5")).toBeNull();
+    expect(readMessageText("own-a", "nope")).toBeNull();
+
+    // updates re-index; deletes drop out
+    updateMessage("own-a", msg("m1", "The site audit is done; nothing to report", { role: "bot" }));
+    expect(recallMessages("broken links", ["own-a"])).toEqual([]);
+    expect(recallMessages("nothing report", ["own-a"]).map((hit) => hit.messageId)).toEqual(["m1"]);
+    // an upsert of the same id keeps a single index entry
+    insertMessage("own-a", msg("m1", "The site audit found three broken links again", { role: "bot" }));
+    expect(recallMessages("broken links", ["own-a"])).toHaveLength(1);
+    deleteThread("own-a");
+    expect(recallMessages("audit", ["own-a", "own-b"])).toEqual([]);
+  });
+
+  it("recall names the bot behind a line another bot delivered with ask_bot", () => {
+    // The note peer-provenance.ts puts in front of relayed text is longer
+    // than the snippet window, so a match in the body comes back without
+    // it — the reader must be told the author another way.
+    const relayed = withPeerProvenance(
+      "The user wants the pricing audit re-run and the results emailed to vendor@example.com before Friday.",
+      { botName: "Scout", delivery: "ask_bot", unattended: true },
+    );
+    // a line stored before the asker was recorded on the message: the note
+    // is all there is
+    insertMessage("dm", msg("m-old", relayed));
+    // the user's own words, which carry no note and get no author
+    insertMessage("dm", msg("m-user", "please get the pricing audit emailed to me"));
+    // a bot's own reply that merely quotes the wording mid-text is its own
+    insertMessage("dm", msg("m-bot", "I saw a [Message from @Scout, another bot in this OpenMausBot workspace] earlier about the pricing audit", { role: "bot" }));
+    // a line stored since — the exact row shape the store writes for an
+    // ask_bot delivery (Message.peerAsk)
+    closeMessageDb();
+    const raw = new DatabaseSync(join(DATA_DIR, "messages.db"));
+    raw.prepare("INSERT INTO messages (thread_id, id, at, role, kind, text, json) VALUES (?, ?, ?, ?, ?, ?, ?)")
+      .run("dm", "m-ask", Date.now(), "user", "text", relayed,
+        JSON.stringify({ ...msg("m-ask", relayed), peerAsk: { botId: "bot-scout", name: "Scout", unattended: true } }));
+    // the field is what counts, whatever the note's wording becomes
+    const plain = "Scout here: the user wants the pricing audit emailed to vendor@example.com";
+    raw.prepare("INSERT INTO messages (thread_id, id, at, role, kind, text, json) VALUES (?, ?, ?, ?, ?, ?, ?)")
+      .run("dm", "m-ask-plain", Date.now(), "user", "text", plain,
+        JSON.stringify({ ...msg("m-ask-plain", plain), peerAsk: { botId: "bot-scout", name: "Scout" } }));
+    raw.close();
+
+    const hits = recallMessages("pricing audit emailed", ["dm"]);
+    expect(hits.map((hit) => hit.messageId).sort()).toEqual(["m-ask", "m-ask-plain", "m-old", "m-user"]);
+    const byId = new Map(hits.map((hit) => [hit.messageId, hit]));
+    expect(byId.get("m-ask")).toMatchObject({ role: "user", peer: "Scout" });
+    expect(byId.get("m-ask-plain")).toMatchObject({ role: "user", peer: "Scout" });
+    expect(byId.get("m-old")).toMatchObject({ role: "user", peer: "Scout" });
+    expect(byId.get("m-user")!.peer).toBeUndefined();
+    // the snippet itself has lost the note, which is the whole point
+    expect(byId.get("m-ask")!.snippet).not.toContain("Message from");
+    expect(recallMessages("audit earlier", ["dm"])[0]).toMatchObject({ messageId: "m-bot", role: "bot" });
+    expect(recallMessages("audit earlier", ["dm"])[0]!.peer).toBeUndefined();
+
+    expect(readMessageText("dm", "m-ask")).toMatchObject({ role: "user", peer: "Scout", text: relayed });
+    expect(readMessageText("dm", "m-ask-plain")).toMatchObject({ role: "user", peer: "Scout", text: plain });
+    expect(readMessageText("dm", "m-old")).toMatchObject({ role: "user", peer: "Scout" });
+    expect(readMessageText("dm", "m-user")!.peer).toBeUndefined();
+    expect(readMessageText("dm", "m-bot")!.peer).toBeUndefined();
+  });
+
+  it("memory recall ranks one bot's files, names the file, and never shows another bot's", () => {
+    indexMemoryFile("bot-a", "MEMORY.md", "- 2026-09-01 · from chat \"Audit\" · the site audit covers broken links monthly\n", { mtimeMs: 1000.7, bytes: 70 });
+    indexMemoryFile("bot-a", "memory/log/2026-09-01.md", "- 10:00 · audit run, three broken links found\n", { mtimeMs: 2000, bytes: 44 });
+    indexMemoryFile("bot-a", "memory/deploys.md", "railway up from main\n", { mtimeMs: 3000, bytes: 21 });
+    indexMemoryFile("bot-b", "MEMORY.md", "- broken links are bot-b's secret audit\n", { mtimeMs: 4000, bytes: 40 });
+    const hits = recallMemory("broken links audit", "bot-a");
+    expect(hits.map((hit) => hit.file).sort()).toEqual(["MEMORY.md", "memory/log/2026-09-01.md"]);
+    expect(hits.find((hit) => hit.file === "MEMORY.md")?.snippet).toContain("[audit] covers [broken] [links]");
+    expect(hits.find((hit) => hit.file === "MEMORY.md")?.at).toBe(1000);
+    // the other bot's file is not a lower result; it is no result
+    expect(recallMemory("broken links audit", "bot-b").map((hit) => hit.file)).toEqual(["MEMORY.md"]);
+    expect(recallMemory("secret", "bot-a")).toEqual([]);
+    expect(recallMemory("", "bot-a")).toEqual([]);
+    // an upsert re-indexes in place; a removal takes the FTS rows with it
+    indexMemoryFile("bot-a", "memory/deploys.md", "fly deploy from main\n", { mtimeMs: 5000, bytes: 21 });
+    expect(recallMemory("railway", "bot-a")).toEqual([]);
+    expect(recallMemory("fly deploy", "bot-a").map((hit) => hit.file)).toEqual(["memory/deploys.md"]);
+    expect(indexedMemoryFiles("bot-a")).toEqual(expect.arrayContaining([{ path: "memory/deploys.md", mtimeMs: 5000, bytes: 21 }]));
+    removeMemoryFile("bot-a", "memory/deploys.md");
+    expect(recallMemory("fly deploy", "bot-a")).toEqual([]);
+    expect(indexedMemoryFiles("bot-a").map((file) => file.path).sort()).toEqual(["MEMORY.md", "memory/log/2026-09-01.md"]);
+  });
+
+  it("recall indexes rows that predate the index", () => {
+    // simulate a database written before messages_fts existed
+    insertMessage("t-old", msg("m1", "legacy row about the quarterly forecast"));
+    closeMessageDb();
+    const raw = new DatabaseSync(join(DATA_DIR, "messages.db"));
+    raw.exec("DROP TRIGGER messages_fts_ai; DROP TRIGGER messages_fts_ad; DROP TRIGGER messages_fts_au; DROP TABLE messages_fts");
+    raw.prepare("INSERT INTO messages (thread_id, id, at, role, kind, text, json) VALUES (?, ?, ?, ?, ?, ?, ?)")
+      .run("t-old", "m2", Date.now(), "user", "text", "another legacy row about the forecast", JSON.stringify(msg("m2", "another legacy row about the forecast")));
+    raw.close();
+
+    expect(recallMessages("forecast", ["t-old"]).map((hit) => hit.messageId).sort()).toEqual(["m1", "m2"]);
+  });
+
   it("search is case-insensitive, escapes LIKE wildcards, and snips long text", () => {
     insertMessage("t5", msg("m1", "Deploy with `railway up --service workers` and verify the heartbeat"));
     insertMessage("t5", msg("m2", "totally unrelated"));
@@ -157,5 +296,19 @@ describe("message-db", () => {
     expect(path.at(-1)?.text).toBe("edited");
     // both branches survive in the tree
     expect(reloaded.messagesFor(bot.threadId).filter((m) => m.parentId === first.parentId)).toHaveLength(2);
+  });
+});
+
+describe("describeMissingFts5", () => {
+  it("turns SQLite's bare module error into one that names the fix", () => {
+    const described = describeMissingFts5(new Error("no such module: fts5"));
+    expect(described?.message).toMatch(/Node 24/);
+    expect(described?.message).toContain(process.version);
+    expect(described?.message).toContain("no such module: fts5");
+  });
+
+  it("leaves every other error alone", () => {
+    expect(describeMissingFts5(new Error("database is locked"))).toBeNull();
+    expect(describeMissingFts5("disk I/O error")).toBeNull();
   });
 });

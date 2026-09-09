@@ -3,7 +3,9 @@ package com.openmausbot.companion.core
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
+import kotlin.test.assertFalse
 import kotlin.test.assertNull
+import kotlin.test.assertTrue
 
 /** The port of `ios/Tests/CompanionCoreTests/MessageAttachmentsTests.swift`. */
 class MessageAttachmentsTest {
@@ -34,17 +36,53 @@ class MessageAttachmentsTest {
             LocalMessageLink.DesktopFile("""\\server\share\report.md"""),
             LocalMessageLink.resolve("""\\server\share\report.md"""),
         )
+        assertEquals(
+            LocalMessageLink.DesktopFile("""\\server\share\report.md"""),
+            LocalMessageLink.resolve("file://server/share/report.md"),
+        )
+        assertEquals(
+            LocalMessageLink.Web("https://files.example.com/report.md"),
+            LocalMessageLink.resolve("//files.example.com/report.md"),
+        )
+        assertEquals(
+            LocalMessageLink.DesktopFile("docs/My Report.md"),
+            LocalMessageLink.resolve("docs/My Report.md"),
+        )
+        assertEquals(
+            LocalMessageLink.DesktopFile("./reports/Quarter One.md"),
+            LocalMessageLink.resolve("./reports/Quarter%20One.md?download=1#latest"),
+        )
+        assertEquals(
+            LocalMessageLink.DesktopFile("/C:/posix/report.md"),
+            LocalMessageLink.resolve("/C:/posix/report.md"),
+        )
     }
 
     @Test
-    fun rejectsRelativeMalformedAndCustomSchemeLinks() {
-        assertNull(LocalMessageLink.resolve("notes/report.md"))
+    fun rejectsMalformedEmptyAndCustomSchemeLinks() {
+        assertNull(LocalMessageLink.resolve("#section"))
+        assertNull(LocalMessageLink.resolve("?download=1"))
         assertNull(LocalMessageLink.resolve("openmausbot://pair?token=secret"))
         assertNull(LocalMessageLink.resolve("javascript:alert(1)"))
         assertNull(LocalMessageLink.resolve("https:///missing-host.md"))
         assertNull(LocalMessageLink.resolve("file:///tmp/report.md?replace=1"))
+        assertNull(LocalMessageLink.resolve("docs/bad%ZZ.md"))
         assertNull(LocalMessageLink.resolve("/tmp/bad\u0000name.md"))
         assertNull(LocalMessageLink.resolve(""))
+    }
+
+    @Test
+    fun portableFilenamesNeverSplitUnicodeOrExceedTheirByteBudget() {
+        val name = sanitisePortableFilename("📄".repeat(100) + ".md", "file")
+        assertFalse(name.indices.any { index ->
+            val value = name[index]
+            (Character.isHighSurrogate(value) &&
+                (index + 1 >= name.length || !Character.isLowSurrogate(name[index + 1]))) ||
+                (Character.isLowSurrogate(value) &&
+                    (index == 0 || !Character.isHighSurrogate(name[index - 1])))
+        })
+        assertTrue(name.toByteArray(Charsets.UTF_8).size <= 180)
+        assertEquals("bad name.txt", sanitisePortableFilename("bad\uD800name.txt", "file"))
     }
 
     @Test

@@ -14,6 +14,8 @@ const message = (patch: Partial<Message> = {}): Message => ({
 describe("flat replies", () => {
   it("bounds and cleans quoted attachment text", () => {
     expect(replyExcerpt('<attached-image path="/tmp/shot.png" />  hello\nworld')).toBe("[image] hello world");
+    expect(replyExcerpt('<attached-image path="/tmp/shot.png" name="Shot.png" />')).toBe("[image]");
+    expect(replyExcerpt('<attached-file path="/tmp/plan.pdf" name="Plan.pdf" />')).toBe("[file]");
     expect(replyExcerpt("x".repeat(1_000), 20)).toHaveLength(20);
   });
 

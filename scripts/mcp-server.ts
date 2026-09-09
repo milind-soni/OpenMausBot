@@ -68,6 +68,12 @@ async function fetchJson(url: string, options: RequestInit = {}): Promise<any> {
   });
   if (!response.ok) {
     const text = await response.text().catch(() => "");
+    if (response.status === 403 && !process.env.OPENMAUSBOT_TOKEN?.trim()) {
+      throw new Error(
+        "OpenMausBot refused this write because the installed desktop app requires a paired session token. " +
+        "Set OPENMAUSBOT_TOKEN as described in docs/mcp-server.md.",
+      );
+    }
     throw new Error(`OpenMausBot API error (${response.status}): ${text || response.statusText}`);
   }
   try {
@@ -182,12 +188,12 @@ export const TOOLS: McpToolDefinition[] = [
   },
   {
     name: "send_bot_message",
-    description: "Send an instruction to a bot's active task. Optionally name the expected task to prevent cross-task races. This may cause the bot to use external tools.",
+    description: "Send an instruction to one bot task without changing the selected task. This may cause the bot to use external tools.",
     inputSchema: {
       type: "object",
       properties: {
         bot_id: { type: "string", description: "The ID of the bot to message." },
-        task_id: { type: "string", description: "Optional expected active task/thread ID." },
+        task_id: { type: "string", description: "Optional owned task/thread ID. Defaults to the bot's selected task." },
         text: { type: "string", description: "The message content/instruction to send." },
       },
       required: ["bot_id", "text"],
@@ -335,7 +341,7 @@ export const TOOLS: McpToolDefinition[] = [
   },
   {
     name: "switch_task",
-    description: "Switch a bot or channel to an existing task. Running or approval-blocked conversations are refused.",
+    description: "Select an existing bot or channel task. Bot tasks keep running independently; busy channels cannot switch.",
     inputSchema: {
       type: "object",
       properties: {
@@ -397,16 +403,37 @@ export const TOOLS: McpToolDefinition[] = [
   },
   {
     name: "set_bot_model",
-    description: "Change an idle bot to an exact configured provider instance and model.",
+    description: "Change an idle bot's default and selected task model, or only one idle task's model when task_id is provided. Other tasks are unchanged.",
     inputSchema: {
       type: "object",
       properties: {
         bot_id: { type: "string", description: "The ID of the bot." },
+        task_id: { type: "string", description: "Optional owned task/thread ID. Omit to change the bot's default and selected task model." },
         instance_id: { type: "string", description: "The configured provider instance ID." },
         model: { type: "string", description: "The exact model ID exposed by that instance." },
         effort: { type: "string", enum: ["none", "low", "medium", "high", "xhigh", "max"] },
       },
       required: ["bot_id", "instance_id", "model"],
+      additionalProperties: false,
+    },
+    annotations: MUTATING,
+  },
+  {
+    name: "edit_bot_message",
+    description:
+      "Edit an earlier user message, which forks the conversation from that point and answers again. "
+      + "This is the rewind a person performs in the composer, and the only mapped way to make the "
+      + "harness rebuild a thread's context instead of resuming the provider's own session. "
+      + "Refused while the thread is working.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        bot_id: { type: "string", description: "The ID of the bot." },
+        message_id: { type: "string", description: "The user message to replace." },
+        text: { type: "string", description: "What that message should say instead." },
+        task_id: { type: "string", description: "Optional owned task/thread ID. Defaults to the bot's selected task." },
+      },
+      required: ["bot_id", "message_id", "text"],
       additionalProperties: false,
     },
     annotations: MUTATING,
@@ -423,12 +450,13 @@ export const TOOLS: McpToolDefinition[] = [
   },
   {
     name: "interrupt_conversation",
-    description: "Interrupt the active turn in a bot or channel conversation.",
+    description: "Interrupt one bot or channel task's turn without stopping other bot tasks.",
     inputSchema: {
       type: "object",
       properties: {
         target_type: { type: "string", enum: ["bot", "channel"] },
         target_id: { type: "string" },
+        task_id: { type: "string", description: "Optional task/thread ID. Defaults to the selected task." },
       },
       required: ["target_type", "target_id"],
       additionalProperties: false,
@@ -552,9 +580,19 @@ function projectTask(task: Record<string, any>, activeThreadId: unknown) {
     taskId: task.threadId,
     title: task.title,
     createdAt: task.createdAt,
+    ...(typeof task.busy === "boolean" ? { busy: task.busy } : {}),
+    ...(task.activity ? { activity: task.activity } : {}),
+    ...(task.modelSelection ? { modelSelection: task.modelSelection } : {}),
     ...(typeof activeThreadId === "string" ? { active: task.threadId === activeThreadId } : {}),
     ...(task.usage ? { usage: task.usage } : {}),
   };
+}
+
+function botTaskState(bot: Record<string, any>, taskId: string) {
+  const task = records(bot.tasks).find((candidate) => candidate.threadId === taskId);
+  if (task && (typeof task.busy === "boolean" || typeof task.activity === "string")) return task;
+  // Older servers cannot run non-selected tasks and expose only bot activity.
+  return bot.threadId === taskId ? bot : { busy: false, activity: "idle" };
 }
 
 function projectBot(bot: Record<string, any>) {
@@ -798,9 +836,6 @@ export async function handleToolCall(
       if (!bot) throw new Error(`Bot not found: ${botId}`);
       const taskId = args.task_id === undefined ? String(bot.threadId) : idArg(args, "task_id");
       if (!taskBelongsTo(bot, taskId)) throw new Error(`Task '${taskId}' does not belong to bot '${botId}'`);
-      if (bot.threadId !== taskId) {
-        throw new Error(`Task '${taskId}' is not active for bot '${botId}'; switch to it before sending`);
-      }
       const busyChannel = records(state.groups).find((channel) => channel.busyBotId === botId);
       if (busyChannel) {
         throw new Error(`Bot '${botId}' is working in channel '${busyChannel.id}'; send to or interrupt that channel instead`);
@@ -1053,21 +1088,19 @@ export async function handleToolCall(
           };
         };
 
-        // Historical tasks cannot be running: all provider turns are bound
-        // to the owner's active thread, and task switching is blocked while busy.
-        if (target.threadId !== taskId) return terminal("settled");
-
         if (targetType === "bot") {
-          const busyChannel = records(state.groups).find((channel) => channel.busyBotId === targetId);
+          const task = botTaskState(target, taskId);
+          const busyChannel = task === target && records(state.groups).find((channel) => channel.busyBotId === targetId);
           if (busyChannel) {
             throw new Error(`Bot '${targetId}' is working in channel '${busyChannel.id}'; wait on that channel instead`);
           }
-          if (target.activity === "waiting-on-you") return terminal("needs-user");
-          if (target.activity === "dead") return terminal("failed");
-          if (target.activity === "no-signal") return terminal("stalled");
-          if (!target.busy) return terminal("settled");
+          if (task.activity === "waiting-on-you") return terminal("needs-user");
+          if (task.activity === "dead") return terminal("failed");
+          if (task.activity === "no-signal") return terminal("stalled");
+          if (!task.busy) return terminal("settled");
           sawBusy = true;
         } else {
+          if (target.threadId !== taskId) return terminal("settled");
           const tail = await conversationTail(fetcher, taskId);
           if (tail.raw.some(messageNeedsInput)) {
             return terminal("needs-user", tail);
@@ -1109,6 +1142,18 @@ export async function handleToolCall(
       const current = await fleet(fetcher);
       const bot = records(current.bots).find((candidate) => candidate.id === botId);
       if (!bot) throw new Error(`Bot not found: ${botId}`);
+      if (args.task_id !== undefined) {
+        const taskId = idArg(args, "task_id");
+        if (!taskBelongsTo(bot, taskId)) throw new Error(`Task '${taskId}' does not belong to bot '${botId}'`);
+        if (botTaskState(bot, taskId).busy) throw new Error("Interrupt the task or let it finish before changing its model");
+        const selection = await checkedModelSelection(args, fetcher);
+        const res = await fetcher(`${taskRoute("bot", botId)}/${encodeURIComponent(taskId)}`, {
+          method: "PATCH",
+          body: JSON.stringify({ modelSelection: selection, requireAvailableModel: true }),
+        });
+        if (!isRecord(res?.task)) throw new Error("OpenMausBot did not return the updated task");
+        return { success: true, botId, task: projectTask(res.task, bot.threadId) };
+      }
       if (bot.busy) throw new Error("Interrupt the bot or let it finish before changing its model");
       const selection = await checkedModelSelection(args, fetcher);
       const res = await fetcher(`/api/bots/${encodeURIComponent(botId)}`, {
@@ -1116,6 +1161,31 @@ export async function handleToolCall(
         body: JSON.stringify({ modelSelection: selection, requireAvailableModel: true }),
       });
       return { success: true, bot: projectBot(res.bot) };
+    }
+
+    case "edit_bot_message": {
+      const botId = idArg(args, "bot_id");
+      const messageId = idArg(args, "message_id");
+      const text = String(args.text ?? "").trim();
+      if (!text) throw new Error("text is required");
+      const current = await fleet(fetcher);
+      const bot = records(current.bots).find((candidate) => candidate.id === botId);
+      if (!bot) throw new Error(`Bot not found: ${botId}`);
+      let threadId: string | undefined;
+      if (args.task_id !== undefined) {
+        threadId = idArg(args, "task_id");
+        if (!taskBelongsTo(bot, threadId)) throw new Error(`Task '${threadId}' does not belong to bot '${botId}'`);
+        if (botTaskState(bot, threadId).busy) throw new Error("Interrupt the task or let it finish before editing a message");
+      } else if (bot.busy) {
+        // the server refuses a rewind under a live turn — branching beneath
+        // a dying turn is how a thread ends up with two tails
+        throw new Error("Interrupt the bot or let it finish before editing a message");
+      }
+      const res = await fetcher(
+        `/api/bots/${encodeURIComponent(botId)}/messages/${encodeURIComponent(messageId)}/edit`,
+        { method: "POST", body: JSON.stringify({ text, ...(threadId ? { threadId } : {}) }) },
+      );
+      return { success: true, botId, message: res?.message ?? null };
     }
 
     case "list_available_models": {
@@ -1143,9 +1213,10 @@ export async function handleToolCall(
       const target = (targetType === "bot" ? records(current.bots) : records(current.groups))
         .find((candidate) => candidate.id === targetId);
       if (!target) throw new Error(`${targetType === "bot" ? "Bot" : "Channel"} not found: ${targetId}`);
-      const taskId = String(target.threadId);
+      const taskId = args.task_id === undefined ? String(target.threadId) : idArg(args, "task_id");
+      if (!taskBelongsTo(target, taskId)) throw new Error(`Task '${taskId}' does not belong to ${targetType} '${targetId}'`);
       if (targetType === "bot") {
-        const busyChannel = records(current.groups).find((channel) => channel.busyBotId === targetId);
+        const busyChannel = botTaskState(target, taskId) === target && records(current.groups).find((channel) => channel.busyBotId === targetId);
         if (busyChannel) {
           throw new Error(`Bot '${targetId}' is working in channel '${busyChannel.id}'; interrupt that channel instead`);
         }

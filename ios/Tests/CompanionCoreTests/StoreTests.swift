@@ -187,6 +187,83 @@ final class StoreTests: XCTestCase {
         XCTAssertFalse(state.transcript(forThread: "another-task").contains { $0.id == "old-tail" })
     }
 
+    func testPinnedTaskKeepsItsModelRunAndBranchWhenAnotherDeviceSwitches() throws {
+        var state = CompanionState()
+        var bot = try XCTUnwrap(try fleet().bots.first)
+        bot.threadId = "thread-a"
+        bot.modelSelection = ModelSelection(instanceId: "codex", model: "profile-default")
+        bot.tasks = [
+            BotTask(threadId: "thread-a", title: "A", createdAt: 1, modelSelection: ModelSelection(instanceId: "codex", model: "model-a"), busy: true, unread: true),
+            BotTask(threadId: "thread-b", title: "B", createdAt: 2, modelSelection: ModelSelection(instanceId: "claude", model: "model-b"), busy: false, unread: false),
+        ]
+        var leafA = message("leaf-a")
+        leafA.parentId = "root-a"
+        var alternativeA = message("alternative-a")
+        alternativeA.parentId = "root-a"
+        bot.messages = [message("root-a"), leafA, alternativeA]
+        bot.activeLeafId = "leaf-a"
+        state.apply(.bot(bot))
+        state.apply(.runtime(RuntimeEvent(type: "content.delta", threadId: "thread-a", delta: "still running", streamKind: "assistant_text")))
+
+        // A desktop selection frame is canonical profile state, not phone
+        // navigation. Projecting A must never borrow B's model or transcript.
+        bot.threadId = "thread-b"
+        bot.busy = true // aggregate: A is still working
+        bot.messages = [message("root-b")]
+        bot.activeLeafId = "root-b"
+        state.apply(.bot(bot))
+        XCTAssertEqual(state.bot(bot.id)?.threadId, "thread-b")
+        XCTAssertEqual(state.bot(bot.id)?.modelSelection.model, "profile-default")
+        let pinned = try XCTUnwrap(state.bot(forThread: "thread-a"))
+        XCTAssertEqual(pinned.threadId, "thread-a")
+        XCTAssertEqual(pinned.modelSelection.model, "model-a")
+        XCTAssertEqual(pinned.busy, true)
+        XCTAssertEqual(pinned.unread, true)
+        XCTAssertEqual(state.bot(forThread: "thread-b")?.busy, false)
+        XCTAssertEqual(state.streaming["thread-a"], "still running")
+        XCTAssertEqual(state.visibleTranscript(forThread: "thread-a").map(\.id), ["root-a", "leaf-a"])
+        state.apply(.thread(threadId: "thread-a", activeLeafId: "alternative-a"))
+        XCTAssertEqual(state.visibleTranscript(forThread: "thread-a").map(\.id), ["root-a", "alternative-a"])
+        XCTAssertEqual(state.visibleTranscript(forThread: "thread-b").map(\.id), ["root-b"])
+        XCTAssertNil(bot.projected(forThread: "not-owned"))
+    }
+
+    func testRoutineExecutionsAreHiddenOnlyFromTheThreadPicker() throws {
+        var bot = try XCTUnwrap(try fleet().bots.first)
+        bot.threadId = "results"
+        bot.tasks = [
+            BotTask(threadId: "legacy", title: "Routine: old run", createdAt: 1),
+            BotTask(threadId: "results", title: "Brief results", createdAt: 2, busy: false),
+            BotTask(threadId: "run-thread", title: "Brief", createdAt: 3, busy: true,
+                    activity: "waiting-on-you", approvalMode: "ask", routineRunId: "run-1"),
+        ]
+        var approval = Message(id: "approval", role: .bot, kind: .options, at: 4)
+        approval.card = OptionCard(title: "Approve?", subtitle: "Read", options: ["Approve", "Deny"], requestId: "request")
+        var state = CompanionState()
+        state.apply(.bot(bot))
+        state.merge(ThreadPage(messages: [approval], activeLeafId: "approval"), intoThread: "run-thread")
+
+        XCTAssertEqual(bot.visibleTasks.map(\.threadId), ["legacy", "results"])
+        XCTAssertEqual(state.bot(bot.id)?.tasks?.count, 3)
+        let execution = try XCTUnwrap(state.bot(forThread: "run-thread"))
+        XCTAssertEqual(execution.threadId, "run-thread")
+        XCTAssertEqual(execution.currentTaskBusy, true)
+        XCTAssertEqual(execution.approvalMode, "ask")
+        XCTAssertEqual(state.visibleTranscript(forThread: "run-thread").map(\.id), ["approval"])
+        XCTAssertEqual(state.pendingApprovals.map(\.threadId), ["run-thread"])
+
+        bot.tasks = nil
+        XCTAssertTrue(bot.visibleTasks.isEmpty)
+    }
+
+    func testColdBackgroundPageCarriesItsOwnBranchHead() {
+        var state = CompanionState()
+        var leaf = message("chosen")
+        leaf.parentId = "root"
+        state.merge(ThreadPage(messages: [message("root"), leaf, message("other")], hasMore: false, activeLeafId: "chosen"), intoThread: "thread-a")
+        XCTAssertEqual(state.visibleTranscript(forThread: "thread-a").map(\.id), ["root", "chosen"])
+    }
+
     func testAChannelTaskSwitchReplacesTheActiveTranscript() throws {
         var state = try hydrated()
         var room = try XCTUnwrap(state.rooms.first)
@@ -242,8 +319,41 @@ final class StoreTests: XCTestCase {
         state.apply(.thread(threadId: bot.threadId, activeLeafId: "other"))
         XCTAssertNil(state.streaming[bot.threadId])
 
-        state.apply(.message(threadId: bot.threadId, message: message("latest")))
+        var latest = message("latest")
+        latest.parentId = "other"
+        state.apply(.message(threadId: bot.threadId, message: latest))
         XCTAssertEqual(state.bot(bot.id)?.activeLeafId, "latest")
+    }
+
+    func testMessagesOnOtherBranchesDoNotMoveSelectedOrBackgroundThreadHeads() throws {
+        for selected in [true, false] {
+            var state = CompanionState()
+            var bot = try XCTUnwrap(try fleet().bots.first)
+            bot.threadId = selected ? "thread-a" : "thread-b"
+            bot.tasks = [BotTask(threadId: "thread-a", title: "A", createdAt: 1),
+                         BotTask(threadId: "thread-b", title: "B", createdAt: 2)]
+            bot.activeLeafId = selected ? "chosen" : "sibling"
+            state.apply(.bot(bot))
+            var chosen = message("chosen")
+            chosen.parentId = "root"
+            state.merge(ThreadPage(messages: [message("root"), chosen], hasMore: false, activeLeafId: "chosen"),
+                        intoThread: "thread-a")
+            var alternative = message("alternative")
+            alternative.parentId = "root"
+            state.apply(.message(threadId: "thread-a", message: alternative))
+            XCTAssertEqual(state.bot(forThread: "thread-a")?.activeLeafId, "chosen")
+            XCTAssertEqual(state.bot(bot.id)?.activeLeafId, selected ? "chosen" : "sibling")
+            XCTAssertEqual(state.visibleTranscript(forThread: "thread-a").map(\.id), ["root", "chosen"])
+
+            var tail = message("tail")
+            tail.parentId = "chosen"
+            state.apply(.message(threadId: "thread-a", message: tail))
+            XCTAssertEqual(state.visibleTranscript(forThread: "thread-a").map(\.id), ["root", "chosen", "tail"])
+            state.apply(.message(threadId: "thread-a", message: chosen)) // replay cannot rewind the head
+            XCTAssertEqual(state.bot(forThread: "thread-a")?.activeLeafId, "tail")
+            state.apply(.thread(threadId: "thread-a", activeLeafId: "alternative"))
+            XCTAssertEqual(state.visibleTranscript(forThread: "thread-a").map(\.id), ["root", "alternative"])
+        }
     }
 
     func testDeletingABotTakesItsTranscriptWithIt() throws {

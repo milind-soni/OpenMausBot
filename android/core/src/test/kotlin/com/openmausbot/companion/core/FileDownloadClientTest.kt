@@ -12,6 +12,8 @@ import kotlin.test.Test
 import kotlin.test.assertContentEquals
 import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
+import kotlin.test.assertFalse
+import kotlin.test.assertTrue
 
 /** The authenticated file route — the download half of `ShareClientTests.swift`. */
 class FileDownloadClientTest {
@@ -77,6 +79,21 @@ class FileDownloadClientTest {
     }
 
     @Test
+    fun canonicalFilenameTruncationPreservesUnicodeScalarsAndUtf8Limit() {
+        val original = "📄".repeat(100) + ".md"
+        val name = CompanionClient.downloadFilename("attachment; filename=\"$original\"", "/fallback.md")
+
+        assertTrue(name.toByteArray(Charsets.UTF_8).size <= 180)
+        assertFalse(name.indices.any { index ->
+            val value = name[index]
+            (Character.isHighSurrogate(value) &&
+                (index + 1 >= name.length || !Character.isLowSurrogate(name[index + 1]))) ||
+                (Character.isLowSurrogate(value) &&
+                    (index == 0 || !Character.isHighSurrogate(name[index - 1])))
+        })
+    }
+
+    @Test
     fun fallsBackToTheRequestedPathsBasename() = runBlocking {
         server.enqueue(MockResponse().setHeader("Content-Type", "text/plain").setBody("x"))
         val file = client.downloadFile("thread-1", "message-1", "/Users/test/notes/todo.txt")
@@ -86,8 +103,22 @@ class FileDownloadClientTest {
     @Test
     fun rejectsAnUnsafeRequestBeforeNetworking() = runBlocking {
         assertFailsWith<APIError.BadUrl> { client.downloadFile("../thread", "message-1", "relative/report.md") }
-        assertFailsWith<APIError.BadUrl> { client.downloadFile("thread-1", "message-1", "relative/report.md") }
         assertEquals(0, server.requestCount)
+    }
+
+    @Test
+    fun postsDecodedRelativeMarkdownPathThroughTheScopedRoute() = runBlocking {
+        server.enqueue(
+            MockResponse()
+                .setHeader("Content-Type", "text/markdown")
+                .setHeader("Content-Disposition", "attachment; filename=report.md")
+                .setBody("# Report"),
+        )
+
+        client.downloadFile("thread-1", "message-1", "docs/Quarter%20Report.md?download=1#latest")
+
+        val body = CompanionJson.parseToJsonElement(server.takeRequest().body.readUtf8()).jsonObject
+        assertEquals("docs/Quarter Report.md", body.getValue("path").jsonPrimitive.content)
     }
 
     @Test

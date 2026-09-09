@@ -18,9 +18,11 @@ import {
   DRIVER_FILE_IDENTITY_KEYS,
   REQUIRED_LINUX_TOOLS,
   decodeLinuxDescriptor,
+  gatedLocalComputer,
   readCuaConnection,
   validateLinuxDescriptorRuntime,
 } from "./local-computer.ts";
+import { SPAWNED_PROXIES } from "./proxy-paths.ts";
 
 const require = createRequire(import.meta.url);
 const { DRIVER_FILE_IDENTITY_KEYS: ELECTRON_DRIVER_FILE_IDENTITY_KEYS } = require(
@@ -85,6 +87,18 @@ function linuxDescriptor(userData: string, { session = "x11" }: { session?: "x11
 }
 
 describe("local computer descriptor contract", () => {
+  it("wraps only the transport while preserving descriptor identity and original driver environment", () => {
+    const connection = {
+      command: "/trusted/cua-driver", args: ["mcp", "--socket", "/trusted/driver.sock"],
+      env: { CUA_DRIVER_EMBEDDED: "1", DISPLAY: ":4" },
+      platform: "linux" as const, scope: "local-computer" as const, generation: "fixture-generation",
+    };
+    const gated = gatedLocalComputer(connection, { url: "http://127.0.0.1:1234/control", token: "fixture-token" });
+    expect(gated).toMatchObject({ command: process.execPath, args: ["--experimental-strip-types", SPAWNED_PROXIES.localComputer], platform: "linux", scope: "local-computer", generation: connection.generation });
+    expect(gated.env).toEqual({ ...connection.env, OMB_CUA_COMMAND: connection.command, OMB_CUA_ARGS: JSON.stringify(connection.args), OMB_CONTROL_URL: "http://127.0.0.1:1234/control", OMB_CONTROL_TOKEN: "fixture-token" });
+    expect(gated.args.join(" ")).not.toContain("fixture-token");
+    expect(connection.env).not.toHaveProperty("OMB_CONTROL_TOKEN");
+  });
   it("stays synchronized with the Electron producer", () => {
     expect(DRIVER_FILE_IDENTITY_KEYS).toEqual([...ELECTRON_DRIVER_FILE_IDENTITY_KEYS]);
     expect(REQUIRED_LINUX_TOOLS).toEqual([...ELECTRON_REQUIRED_TOOLS]);

@@ -1,5 +1,5 @@
 import { createServer, type Server } from "node:http";
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 
 import type { AppConfig } from "./config.ts";
 import {
@@ -8,19 +8,30 @@ import {
   connectedServices,
   connectionMode,
   connectionStatus,
+  listToolkits,
   mcpIntegration,
   normalizeAccountAlias,
   prepareProjectSession,
   removeAccount,
   removeService,
+  relayMcp,
   setManagedBrokerAccess,
 } from "./composio.ts";
 
 let api: Server;
+let origin = "";
 let base = "";
-const calls: Array<{ method: string; path: string; query: string; body: any }> = [];
+const calls: Array<{
+  method: string;
+  path: string;
+  query: string;
+  body: any;
+  apiKey: string;
+  transportSessionId: string;
+}> = [];
 let malformedConnectedAccounts = false;
 let connectedAccountsUnavailable = false;
+let emptyConnectedAccounts = false;
 // The project's own auth configs, and the ones the stub Session was created
 // with — a Session only knows the configs named at its creation, which is
 // the whole reason #509 happened.
@@ -33,9 +44,56 @@ beforeAll(async () => {
     let raw = "";
     for await (const chunk of req) raw += chunk;
     const body = raw ? JSON.parse(raw) : null;
-    calls.push({ method: req.method ?? "GET", path: url.pathname, query: url.search, body });
+    calls.push({
+      method: req.method ?? "GET",
+      path: url.pathname,
+      query: url.search,
+      body,
+      apiKey: String(req.headers["x-api-key"] ?? ""),
+      transportSessionId: String(req.headers["mcp-session-id"] ?? ""),
+    });
 
-    if (req.headers["x-api-key"] !== "ak_test") {
+    if (url.pathname.startsWith("/broker/")) {
+      if (req.headers.authorization !== `Bearer ${"a".repeat(64)}`) {
+        res.writeHead(401, { "content-type": "application/json" });
+        return res.end(JSON.stringify({ error: "invalid broker token" }));
+      }
+      if (req.method === "GET" && url.pathname === "/broker/v1/connectors") {
+        const services = Object.fromEntries(
+          (url.searchParams.get("services") ?? "").split(",").filter(Boolean).map((slug) => [
+            slug,
+            { connected: slug === "github", status: slug === "github" ? "ACTIVE" : "not_connected" },
+          ]),
+        );
+        res.writeHead(200, { "content-type": "application/json" });
+        return res.end(JSON.stringify({ services }));
+      }
+      if (req.method === "GET" && url.pathname === "/broker/v1/connectors/connected") {
+        res.writeHead(200, { "content-type": "application/json" });
+        return res.end(JSON.stringify({ services: { github: { connected: true, status: "ACTIVE" } } }));
+      }
+      if (req.method === "POST" && url.pathname.endsWith("/authorize")) {
+        res.writeHead(200, { "content-type": "application/json" });
+        return res.end(JSON.stringify({ url: "https://connect.composio.dev/managed" }));
+      }
+      if (req.method === "DELETE" && url.pathname.startsWith("/broker/v1/connectors/")) {
+        res.writeHead(200, { "content-type": "application/json" });
+        return res.end(JSON.stringify({ removed: 1 }));
+      }
+      if (req.method === "GET" && url.pathname === "/broker/v1/catalog") {
+        res.writeHead(200, { "content-type": "application/json" });
+        return res.end(JSON.stringify({ items: [{ slug: "github", name: "GitHub" }] }));
+      }
+      if (req.method === "POST" && url.pathname === "/broker/v1/mcp") {
+        res.writeHead(200, { "content-type": "application/json", "mcp-session-id": "mcp_broker" });
+        return res.end(JSON.stringify({ source: "broker" }));
+      }
+      res.writeHead(404, { "content-type": "application/json" });
+      return res.end(JSON.stringify({ error: "unknown broker route" }));
+    }
+
+    const apiKey = String(req.headers["x-api-key"] ?? "");
+    if (!["ak_test", "ak_catalog_a", "ak_catalog_b", "ak_catalog_pages", "ak_catalog_partial", "ak_catalog_stuck"].includes(apiKey)) {
       res.writeHead(401, { "content-type": "application/json" });
       return res.end(JSON.stringify({ error: { message: "invalid project key" } }));
     }
@@ -48,6 +106,47 @@ beforeAll(async () => {
         mcp: { type: "http", url: "https://app.composio.dev/tool_router/v3/trs_test/mcp" },
         config: { user_id: body.user_id, multi_account: body.multi_account, auth_configs: sessionAuthConfigs },
       }));
+    }
+    if (
+      req.method === "GET" && url.pathname === "/api/v3/toolkits"
+      && (apiKey === "ak_catalog_pages" || apiKey === "ak_catalog_partial" || apiKey === "ak_catalog_stuck")
+    ) {
+      if (apiKey === "ak_catalog_stuck") {
+        // A broker deployed before this fix ignores the cursor and replays page one.
+        res.writeHead(200, { "content-type": "application/json" });
+        return res.end(JSON.stringify({ items: [{ slug: "gmail", name: "Gmail" }], next_cursor: "catalog-page-2" }));
+      }
+      // Mirrors the real marketplace: a usage-sorted head, then an alphabetical
+      // tail only a second page reaches. ak_catalog_partial loses that page.
+      if (url.searchParams.get("cursor") === "catalog-page-2") {
+        if (apiKey === "ak_catalog_partial") {
+          res.writeHead(502, { "content-type": "application/json" });
+          return res.end(JSON.stringify({ error: "catalog page unavailable" }));
+        }
+        res.writeHead(200, { "content-type": "application/json" });
+        return res.end(JSON.stringify({
+          items: [{ slug: "deepgram", name: "Deepgram" }, { slug: "zoom", name: "Zoom" }],
+        }));
+      }
+      res.writeHead(200, { "content-type": "application/json" });
+      return res.end(JSON.stringify({
+        items: [
+          { slug: "gmail", name: "Gmail" },
+          { slug: "bland_ai", name: "Bland AI" },
+          { slug: "currencyscoop", name: "CurrencyScoop" },
+        ],
+        next_cursor: "catalog-page-2",
+      }));
+    }
+    if (req.method === "GET" && url.pathname === "/api/v3/toolkits") {
+      res.writeHead(200, { "content-type": "application/json" });
+      if (apiKey === "ak_catalog_a") {
+        return res.end(JSON.stringify({ items: [{ slug: "notion", name: "Catalog A" }] }));
+      }
+      if (apiKey === "ak_catalog_b") {
+        return res.end(JSON.stringify({ items: [{ slug: "linear", name: "Catalog B" }] }));
+      }
+      return res.end(JSON.stringify({ items: [{ slug: "x", name: "X (Twitter)" }, { slug: "github", name: "GitHub" }] }));
     }
     if (req.method === "GET" && url.pathname === "/api/v3.1/tool_router/session/trs_test") {
       res.writeHead(200, { "content-type": "application/json" });
@@ -105,6 +204,7 @@ beforeAll(async () => {
       }
       res.writeHead(200, { "content-type": "application/json" });
       if (malformedConnectedAccounts) return res.end(JSON.stringify({ items: {} }));
+      if (emptyConnectedAccounts) return res.end(JSON.stringify({ items: [] }));
       if (url.searchParams.get("cursor") === "accounts-page-2") {
         return res.end(JSON.stringify({
           items: [
@@ -146,13 +246,16 @@ beforeAll(async () => {
     res.end(JSON.stringify({ error: "not found" }));
   });
   await new Promise<void>((resolve) => api.listen(0, "127.0.0.1", resolve));
-  base = `http://127.0.0.1:${(api.address() as { port: number }).port}/api/v3.1`;
+  origin = `http://127.0.0.1:${(api.address() as { port: number }).port}`;
+  base = `${origin}/api/v3.1`;
   process.env.OMB_COMPOSIO_API = base;
+  process.env.OMB_COMPOSIO_TOOLKITS_API = `${origin}/api/v3`;
 });
 
 afterAll(async () => {
   setManagedBrokerAccess(null);
   delete process.env.OMB_COMPOSIO_API;
+  delete process.env.OMB_COMPOSIO_TOOLKITS_API;
   await new Promise<void>((resolve) => api.close(() => resolve()));
 });
 
@@ -205,6 +308,220 @@ describe.sequential("Composio Sessions", () => {
     expect(applyManagedBrokerMessage({ type: messageType, access: null })).toBe(true);
     expect(connectionMode({})).toBe("unavailable");
   });
+
+  it("does not reuse a self-hosted catalog after the project key changes", async () => {
+    const before = calls.length;
+    const first = await listToolkits({ composio: { apiKey: "ak_catalog_a" } });
+    const second = await listToolkits({ composio: { apiKey: "ak_catalog_b" } });
+
+    expect(first.cards).toEqual([expect.objectContaining({ slug: "notion", label: "Catalog A" })]);
+    expect(second.cards).toEqual([expect.objectContaining({ slug: "linear", label: "Catalog B" })]);
+    expect(calls.slice(before).filter((call) => call.path === "/api/v3/toolkits").map((call) => call.apiKey)).toEqual([
+      "ak_catalog_a",
+      "ak_catalog_b",
+    ]);
+  });
+
+  it("pages the marketplace catalog past the first page", async () => {
+    const before = calls.length;
+    const { cards } = await listToolkits({ composio: { apiKey: "ak_catalog_pages" } });
+
+    // "Deepgram" only exists on page two: #634 saw the catalog stop at "CurrencyScoop".
+    expect(cards.map((card) => card.slug)).toEqual(["gmail", "bland_ai", "currencyscoop", "deepgram", "zoom"]);
+    const pages = calls.slice(before).filter((call) => call.path === "/api/v3/toolkits");
+    expect(pages).toHaveLength(2);
+    expect(pages[0]?.query).not.toContain("cursor=");
+    expect(pages[1]?.query).toContain("cursor=catalog-page-2");
+  });
+
+  it("keeps the catalog pages already read when a later page fails", async () => {
+    await expect(listToolkits({ composio: { apiKey: "ak_catalog_partial" } })).resolves.toMatchObject({
+      source: "api",
+      cards: [{ slug: "gmail" }, { slug: "bland_ai" }, { slug: "currencyscoop" }],
+    });
+  });
+
+  it("stops paging a catalog endpoint that replays the same cursor", async () => {
+    const before = calls.length;
+    const { cards } = await listToolkits({ composio: { apiKey: "ak_catalog_stuck" } });
+
+    expect(cards).toEqual([expect.objectContaining({ slug: "gmail" })]);
+    expect(calls.slice(before).filter((call) => call.path === "/api/v3/toolkits")).toHaveLength(2);
+  });
+
+  it("drops a managed MCP session when routing switches to a user project", async () => {
+    setManagedBrokerAccess({ url: `${origin}/broker`, token: "a".repeat(64) });
+    const projectSessions: string[] = [];
+    const realFetch = globalThis.fetch;
+    const fetchSpy = vi.spyOn(globalThis, "fetch").mockImplementation(async (input, init) => {
+      const url = typeof input === "string" || input instanceof URL ? String(input) : input.url;
+      if (url.startsWith("https://app.composio.dev/tool_router/")) {
+        projectSessions.push(new Headers(init?.headers).get("mcp-session-id") ?? "");
+        return new Response(JSON.stringify({ source: "project" }), {
+          status: 200,
+          headers: { "content-type": "application/json", "mcp-session-id": "mcp_project_after_managed" },
+        });
+      }
+      return realFetch(input, init);
+    });
+    try {
+      const managed = await relayMcp({}, { jsonrpc: "2.0", id: 101, method: "tools/list" });
+      expect(managed.transportSessionId).toBe("mcp_broker");
+      await relayMcp(
+        {},
+        { jsonrpc: "2.0", id: 105, method: "tools/list" },
+        managed.transportSessionId,
+      );
+      expect(calls.findLast((call) => call.path === "/broker/v1/mcp" && call.body?.id === 105)?.transportSessionId)
+        .toBe("mcp_broker");
+      const project = await relayMcp(
+        { composio: { apiKey: "ak_test", userId: "openmausbot_existing", sessionId: "trs_test" } },
+        { jsonrpc: "2.0", id: 102, method: "tools/list" },
+        managed.transportSessionId,
+      );
+      expect(project.transportSessionId).toBe("mcp_project_after_managed");
+      expect(projectSessions).toEqual([""]);
+    } finally {
+      fetchSpy.mockRestore();
+      setManagedBrokerAccess(null);
+    }
+  });
+
+  it("drops a project MCP session when routing switches to the managed broker", async () => {
+    setManagedBrokerAccess({ url: `${origin}/broker`, token: "a".repeat(64) });
+    const realFetch = globalThis.fetch;
+    const fetchSpy = vi.spyOn(globalThis, "fetch").mockImplementation(async (input, init) => {
+      const url = typeof input === "string" || input instanceof URL ? String(input) : input.url;
+      if (url.startsWith("https://app.composio.dev/tool_router/")) {
+        return new Response(JSON.stringify({ source: "project" }), {
+          status: 200,
+          headers: { "content-type": "application/json", "mcp-session-id": "mcp_project_before_managed" },
+        });
+      }
+      return realFetch(input, init);
+    });
+    try {
+      const project = await relayMcp(
+        { composio: { apiKey: "ak_test", userId: "openmausbot_existing", sessionId: "trs_test" } },
+        { jsonrpc: "2.0", id: 103, method: "tools/list" },
+      );
+      expect(project.transportSessionId).toBe("mcp_project_before_managed");
+      await relayMcp(
+        {},
+        { jsonrpc: "2.0", id: 104, method: "tools/list" },
+        project.transportSessionId,
+      );
+      expect(calls.findLast((call) => call.path === "/broker/v1/mcp" && call.body?.id === 104)?.transportSessionId).toBe("");
+    } finally {
+      fetchSpy.mockRestore();
+      setManagedBrokerAccess(null);
+    }
+  });
+
+  it("uses a user-owned project for every connector operation even when the managed broker is available", async () => {
+    const cfg: AppConfig = {
+      composio: { apiKey: "ak_test", userId: "openmausbot_existing", sessionId: "trs_test" },
+    };
+    setManagedBrokerAccess({ url: `${origin}/broker`, token: "a".repeat(64) });
+    const before = calls.length;
+    const realFetch = globalThis.fetch;
+    const mcpRequests: Array<{ url: string; apiKey: string | null }> = [];
+    const fetchSpy = vi.spyOn(globalThis, "fetch").mockImplementation(async (input, init) => {
+      const url = typeof input === "string" || input instanceof URL ? String(input) : input.url;
+      if (url.startsWith("https://app.composio.dev/tool_router/")) {
+        mcpRequests.push({ url, apiKey: new Headers(init?.headers).get("x-api-key") });
+        return new Response(JSON.stringify({ source: "project" }), {
+          status: 200,
+          headers: { "content-type": "application/json", "mcp-session-id": "mcp_project" },
+        });
+      }
+      return realFetch(input, init);
+    });
+
+    try {
+      expect(connectionMode(cfg)).toBe("self-hosted");
+      await expect(listToolkits(cfg)).resolves.toMatchObject({
+        source: "api",
+        cards: [{ slug: "twitter" }, { slug: "github" }],
+      });
+      await expect(connectedServices(cfg)).resolves.toHaveProperty("github.connected", true);
+      await expect(connectionStatus(cfg, ["slack"])).resolves.toHaveProperty("slack.connected", false);
+      await expect(authorizeService(cfg, "slack")).resolves.toEqual({
+        url: "https://connect.composio.dev/link/slack",
+      });
+      await expect(removeAccount(cfg, "github", "ca_github_personal")).resolves.toEqual({ removed: 1 });
+      await expect(removeService(cfg, "github")).resolves.toEqual({ removed: 1 });
+      const relayed = await relayMcp(cfg, { jsonrpc: "2.0", id: 1, method: "tools/list" });
+      expect(JSON.parse(new TextDecoder().decode(relayed.bytes))).toEqual({ source: "project" });
+      expect(relayed.transportSessionId).toBe("mcp_project");
+
+      expect(mcpRequests).toEqual([{
+        url: "https://app.composio.dev/tool_router/v3/trs_test/mcp",
+        apiKey: "ak_test",
+      }]);
+      const since = calls.slice(before);
+      expect(since.some((call) => call.path === "/api/v3.1/tool_router/session/trs_test")).toBe(true);
+      expect(since.some((call) => call.path.startsWith("/broker/"))).toBe(false);
+    } finally {
+      fetchSpy.mockRestore();
+      setManagedBrokerAccess(null);
+    }
+  });
+
+  it("accepts the legacy x alias but authorizes Composio's twitter toolkit", async () => {
+    const cfg: AppConfig = {
+      composio: { apiKey: "ak_test", userId: "openmausbot_existing", sessionId: "trs_test" },
+    };
+    sessionAuthConfigs = { twitter: "ac_twitter" };
+    setManagedBrokerAccess({ url: `${origin}/broker`, token: "a".repeat(64) });
+    const before = calls.length;
+    try {
+      await expect(authorizeService(cfg, "x")).resolves.toEqual({
+        url: "https://connect.composio.dev/link/twitter",
+      });
+      await expect(connectionStatus(cfg, ["x"])).resolves.toHaveProperty("x.connected", false);
+      await expect(removeService(cfg, "x")).resolves.toEqual({ removed: 0 });
+      const catalog = await listToolkits(cfg);
+      expect(catalog.cards).toContainEqual(expect.objectContaining({ slug: "twitter" }));
+
+      const since = calls.slice(before);
+      expect(since.filter((call) => call.method === "POST" && call.path.endsWith("/link")).at(-1)?.body).toEqual({
+        toolkit: "twitter",
+      });
+      expect(since.some((call) => call.query.includes("toolkits=twitter"))).toBe(true);
+      expect(since.some((call) => call.path.startsWith("/broker/"))).toBe(false);
+    } finally {
+      sessionAuthConfigs = {};
+      setManagedBrokerAccess(null);
+    }
+  });
+
+  it("falls back to the managed broker immediately after the project key is cleared", async () => {
+    const cfg: AppConfig = { composio: { apiKey: "" } };
+    setManagedBrokerAccess({ url: `${origin}/broker`, token: "a".repeat(64) });
+    const before = calls.length;
+    try {
+      expect(connectionMode(cfg)).toBe("managed");
+      await expect(connectionStatus(cfg, ["github"])).resolves.toHaveProperty("github.connected", true);
+      await expect(authorizeService(cfg, "github")).resolves.toEqual({
+        url: "https://connect.composio.dev/managed",
+      });
+      await expect(listToolkits(cfg)).resolves.toMatchObject({ source: "api", cards: [{ slug: "github" }] });
+      const relayed = await relayMcp(cfg, { jsonrpc: "2.0", id: 2, method: "tools/list" });
+      expect(JSON.parse(new TextDecoder().decode(relayed.bytes))).toEqual({ source: "broker" });
+
+      const brokerCalls = calls.slice(before).filter((call) => call.path.startsWith("/broker/"));
+      expect(brokerCalls.map((call) => `${call.method} ${call.path}`)).toEqual([
+        "GET /broker/v1/connectors",
+        "POST /broker/v1/connectors/github/authorize",
+        "GET /broker/v1/catalog",
+        "POST /broker/v1/mcp",
+      ]);
+    } finally {
+      setManagedBrokerAccess(null);
+    }
+  });
+
   it("accepts only project API keys", async () => {
     await expect(prepareProjectSession("old_key")).rejects.toThrow(/start with ak_/i);
     await expect(prepareProjectSession("ak_wrong")).rejects.toThrow(/invalid project key/i);
@@ -328,6 +645,19 @@ describe.sequential("Composio Sessions", () => {
     });
   });
 
+  it("does not offer Twitter through the official managed broker without an owned OAuth app", async () => {
+    setManagedBrokerAccess({
+      url: "https://broker.openmausbot.test",
+      token: "a".repeat(64),
+    });
+    try {
+      await expect(authorizeService({} as AppConfig, "twitter")).rejects.toThrow(/X Developer app/i);
+      await expect(authorizeService({} as AppConfig, "x")).rejects.toThrow(/self-hosted connected apps/i);
+    } finally {
+      setManagedBrokerAccess(null);
+    }
+  });
+
   it("validates account aliases before sending them upstream", () => {
     expect(normalizeAccountAlias("  personal gmail  ")).toBe("personal gmail");
     expect(() => normalizeAccountAlias("bad\nalias")).toThrow(/printable/i);
@@ -351,7 +681,7 @@ describe.sequential("Composio Sessions", () => {
         OMB_CONNECTOR_UPSTREAM_URL: "http://127.0.0.1:8799/api/internal/connectors/mcp",
         OMB_CONNECTOR_UPSTREAM_HEADERS: JSON.stringify({ authorization: "Bearer secret" }),
         OMB_HARNESS_URL: "http://127.0.0.1:8799",
-        OMB_COMMS_TOKEN: "secret",
+        OMB_CONNECTOR_TOKEN: "secret",
         OMB_BOT_ID: "bot-1",
         OMB_THREAD_ID: "thread-1",
       },
@@ -493,6 +823,27 @@ describe.sequential("Composio Sessions", () => {
       });
     } finally {
       malformedConnectedAccounts = false;
+    }
+  });
+
+  it("uses the provided alias for the first account authorization", async () => {
+    const cfg: AppConfig = {
+      composio: { apiKey: "ak_test", userId: "openmausbot_existing", sessionId: "trs_test" },
+    };
+    emptyConnectedAccounts = true;
+    try {
+      await expect(connectionStatus(cfg, ["slack"])).resolves.toMatchObject({
+        slack: { connected: false, pending: false, accounts: [] },
+      });
+      const before = calls.length;
+      await expect(authorizeService(cfg, "slack", "team")).resolves.toEqual({
+        url: "https://connect.composio.dev/link/slack",
+      });
+      const linkCalls = calls.slice(before).filter((call) => call.method === "POST" && call.path.endsWith("/link"));
+      expect(linkCalls).toHaveLength(1);
+      expect(linkCalls[0].body).toEqual({ toolkit: "slack", alias: "team" });
+    } finally {
+      emptyConnectedAccounts = false;
     }
   });
 });

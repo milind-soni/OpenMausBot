@@ -3,13 +3,12 @@
 // first lines instead of flooding the composer; a file dropped anywhere
 // on the window attaches by path.
 import { useEffect, useRef, useState } from "react";
-import { ClipboardPaste, File as FileIcon, Image as ImageIcon, MessageSquareText, X } from "lucide-react";
+import { ClipboardPaste, File as FileIcon, Image as ImageIcon, LoaderCircle, MessageSquareText, X } from "lucide-react";
 import { cn } from "@/lib/cn";
 import {
   attachmentImageUrl,
   intakeFiles,
   formatSize,
-  imageAttachmentFromFile,
   pasteSummary,
   type Attachment,
   type PasteAttachment,
@@ -30,6 +29,8 @@ export function ComposerAttachments({
   allowImages = true,
   notice,
   onNotice,
+  onPendingChange,
+  uploadImage,
 }: {
   items: Attachment[];
   onAdd: (attachments: Attachment[]) => void;
@@ -38,15 +39,19 @@ export function ComposerAttachments({
   allowImages?: boolean;
   notice: string | null;
   onNotice: (notice: string | null) => void;
+  onPendingChange?: (pending: boolean) => void;
+  uploadImage: (file: File) => Promise<Attachment | null>;
 }) {
   const [dragging, setDragging] = useState(false);
   const [preview, setPreview] = useState<PreviewImage | null>(null);
   // dragenter/dragleave fire once per element crossed, so the overlay
   // tracks depth rather than the last event it happened to see
   const depth = useRef(0);
+  const callbacks = useRef({ onAdd, onNotice, onPendingChange, allowImages, uploadImage });
+  callbacks.current = { onAdd, onNotice, onPendingChange, allowImages, uploadImage };
+  const pendingDrops = useRef(new Set<symbol>());
 
   useEffect(() => {
-    let active = true;
     const carriesFiles = (e: DragEvent) => Array.from(e.dataTransfer?.types ?? []).includes("Files");
 
     const onEnter = (e: DragEvent) => {
@@ -72,16 +77,20 @@ export function ComposerAttachments({
       const files = Array.from(e.dataTransfer?.files ?? []);
       // Same intake the attach button uses: a dropped file and a picked one
       // must not appear in a different order.
-      const { attachments, notice: message } = await intakeFiles(files, {
-        allowImages,
-        getPath: pathForFile,
-        uploadImage: imageAttachmentFromFile,
-      });
-      if (!active) return;
-      if (attachments.length) onAdd(attachments);
-      // Only a failure changes the notice. This keeps a concurrent successful
-      // intake from clearing an error before the user can read it.
-      if (message) onNotice(message);
+      const operation = Symbol("attachment-drop");
+      pendingDrops.current.add(operation);
+      callbacks.current.onPendingChange?.(true);
+      try {
+        const { attachments, notice: message } = await intakeFiles(files, {
+          allowImages: callbacks.current.allowImages,
+          getPath: pathForFile,
+          uploadImage: callbacks.current.uploadImage,
+        });
+        if (attachments.length) callbacks.current.onAdd(attachments);
+        if (message) callbacks.current.onNotice(message);
+      } finally {
+        if (pendingDrops.current.delete(operation)) callbacks.current.onPendingChange?.(false);
+      }
     };
 
     window.addEventListener("dragenter", onEnter);
@@ -89,20 +98,19 @@ export function ComposerAttachments({
     window.addEventListener("dragover", onOver);
     window.addEventListener("drop", onDrop);
     return () => {
-      active = false;
       window.removeEventListener("dragenter", onEnter);
       window.removeEventListener("dragleave", onLeave);
       window.removeEventListener("dragover", onOver);
       window.removeEventListener("drop", onDrop);
     };
-  }, [onAdd, allowImages, onNotice]);
+  }, []);
 
   return (
     <>
       {dragging && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/45 p-10">
           <div className="rounded-2xl border-2 border-dashed border-accent/70 bg-panel/90 px-8 py-6 text-[14px] font-medium text-ink shadow-2xl">
-            Drop to attach — the bot gets the file path
+            Drop to attach
           </div>
         </div>
       )}
@@ -152,18 +160,32 @@ export function ComposerAttachments({
               <Chip key={a.id} label="IMAGE" title={a.name} onRemove={() => onRemove(a.id)}>
                 <button
                   type="button"
-                  onClick={() => setPreview(previewImage(a.path))}
-                  className="flex h-[76px] w-full items-center justify-center overflow-hidden rounded-lg bg-inset focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/50"
+                  onClick={() => {
+                    const image = previewImage(a.path, a.name);
+                    const src = image?.src ?? a.previewUrl;
+                    if (src) setPreview(image ?? { src, name: a.name });
+                  }}
+                  disabled={!attachmentImageUrl(a.path) && !a.previewUrl}
+                  aria-busy={a.uploading || undefined}
+                  className="relative flex h-[76px] w-full items-center justify-center overflow-hidden rounded-lg bg-inset focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/50 disabled:cursor-default"
                   aria-label={`Preview ${a.name}`}
                 >
                   <img
-                    src={attachmentImageUrl(a.path) ?? undefined}
+                    src={attachmentImageUrl(a.path) ?? a.previewUrl}
                     alt={a.name}
-                    loading="lazy"
+                    loading="eager"
+                    fetchPriority="high"
                     className="max-h-[76px] max-w-full object-contain"
                   />
+                  {a.uploading && (
+                    <span className="absolute bottom-1.5 right-1.5 flex size-6 items-center justify-center rounded-full bg-black/65 text-white shadow-sm">
+                      <LoaderCircle size={14} className="animate-spin" aria-hidden="true" />
+                    </span>
+                  )}
                 </button>
-                <div className="mt-1 truncate text-[10.5px] text-ink-secondary/70">{formatSize(a.size)}</div>
+                <div className="mt-1 truncate text-[10.5px] text-ink-secondary/70">
+                  {a.uploading ? "Uploading…" : formatSize(a.size)}
+                </div>
               </Chip>
             ) : (
               <Chip key={a.id} label="FILE" title={a.path} onRemove={() => onRemove(a.id)}>

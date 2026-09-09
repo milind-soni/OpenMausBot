@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  connectedAppsMayDisconnect,
   connectedInventoryCopy,
   connectorActionLabel,
   disconnectAccountConfirmation,
@@ -10,8 +11,32 @@ import {
   onlyLatestConnectorResponses,
   type ConnectorStatus,
 } from "./PluginsPanel";
+import { managedConnectorUnavailableReason } from "../../shared/connector-availability";
+
+describe("connected-app remote permissions", () => {
+  it("allows pairing and status remotely but keeps revocation on the host", () => {
+    expect(connectedAppsMayDisconnect(false)).toBe(true);
+    expect(connectedAppsMayDisconnect(true)).toBe(false);
+  });
+});
 
 describe("connected-app status races", () => {
+  it("offers status recovery for a pending authorization whose URL was lost on remount", () => {
+    for (const hasAccounts of [false, true]) {
+      expect(connectorActionLabel("ready", {
+        busy: false, included: false, pending: true, canContinue: false,
+        hasAccounts, failed: false,
+      })).toBe("Check status");
+      expect(connectorActionLabel("ready", {
+        busy: false, included: false, pending: true, canContinue: true,
+        hasAccounts, failed: false,
+      })).toBe("Continue");
+    }
+  });
+  it("does not render a dead Twitter connect action for managed installs", () => {
+    expect(managedConnectorUnavailableReason("managed", "twitter")).toMatch(/self-hosted/i);
+    expect(managedConnectorUnavailableReason("self-hosted", "twitter")).toBeNull();
+  });
   it("does not let an older not_connected response erase a newer OAuth attempt", async () => {
     const generations = new Map([["gmail", 0]]);
     const initialRequestGenerations = new Map(generations);

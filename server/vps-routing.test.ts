@@ -12,7 +12,7 @@
 // reply carries the FULL prompt and whose gate file gives a deterministic
 // busy window — no sleeps anywhere.
 import { spawn, type ChildProcess } from "node:child_process";
-import { chmodSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import { chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -27,7 +27,7 @@ import {
   IMAGE_LAYER_VERSION,
   MANAGED_LABEL,
 } from "./container-computer.ts";
-import { VPS_CONTAINER_LABEL, VPS_IMAGE, VPS_MANAGED_LABEL, VPS_VIEWER_LABEL } from "./vps-computer.ts";
+import { VPS_CONTAINER_LABEL, VPS_IMAGE, VPS_MANAGED_LABEL, VPS_VIEWER_LABEL, vpsContainerName } from "./vps-computer.ts";
 import { removeTempDir, waitForExit } from "./testing/cleanup.ts";
 
 const SERVER_DIR = dirname(fileURLToPath(import.meta.url));
@@ -62,6 +62,7 @@ function containerInspectTemplate(): string {
   return JSON.stringify([
     {
       Id: CONTAINER_ID,
+      Name: "/__NAME__",
       Image: IMAGE_ID,
       Config: {
         Image: VPS_IMAGE,
@@ -111,7 +112,13 @@ function containerInspectTemplate(): string {
 
 const FAKE_DOCKER = `#!/bin/sh
 printf '%s\\n' "$*" >> "$FAKE_DOCKER_LOG"
+if [ -f "$FAKE_DOCKER_DIR/hold" ]; then
+  : > "$FAKE_DOCKER_DIR/started"
+  while [ -f "$FAKE_DOCKER_DIR/hold" ]; do sleep 0.05; done
+fi
 case "$*" in
+  *" container ls "*) if [ ! -f "$FAKE_DOCKER_DIR/inventory-empty" ]; then echo "${CONTAINER_ID}"; fi ;;
+  *" container inspect "*) name=$(cat "$FAKE_DOCKER_DIR/container.name"); sed "s|__NAME__|$name|g" "$FAKE_DOCKER_DIR/container.json.tpl" ;;
   *" image inspect "*) cat "$FAKE_DOCKER_DIR/image.json" ;;
   *" exec "*"--version"*) echo "cua-driver ${CUA_DRIVER_VERSION}" ;;
   *" exec "*"--screenshot-out-file"*) echo "{}" ;;
@@ -120,7 +127,7 @@ case "$*" in
   *" exec "*"base64"*) cat "$FAKE_DOCKER_DIR/screenshot.b64" ;;
   *" exec "*"status"*) echo "running" ;;
   *" exec "*"rm -f"*) : ;;
-  *" inspect "*) for arg in "$@"; do name="$arg"; done; sed "s|__NAME__|$name|g" "$FAKE_DOCKER_DIR/container.json.tpl" ;;
+  *" inspect "*) for arg in "$@"; do name="$arg"; done; printf '%s' "$name" > "$FAKE_DOCKER_DIR/container.name"; sed "s|__NAME__|$name|g" "$FAKE_DOCKER_DIR/container.json.tpl" ;;
   *) echo "unexpected docker invocation: $*" >&2; exit 64 ;;
 esac
 `;
@@ -133,7 +140,7 @@ posixOnly("VPS turn routing e2e (fake ACP fleet + fake docker over SSH)", () => 
   let acpDump: string;
   let dockerLog: string;
 
-  type ApiBody = Record<string, string | boolean | { instanceId: string; model: string } | { sshAlias: string }>;
+  type ApiBody = Record<string, string | boolean | null | { instanceId: string; model: string } | { sshAlias: string }>;
 
   const api = async (method: string, path: string, body?: ApiBody): Promise<{ status: number; body: any }> => {
     const res = await fetch(`${BASE}${path}`, {
@@ -232,12 +239,36 @@ posixOnly("VPS turn routing e2e (fake ACP fleet + fake docker over SSH)", () => 
       expect((await api("PUT", "/api/config", { vps: { sshAlias: "production-vps" } })).status).toBe(200);
 
       const bot = (await api("POST", "/api/bots")).body.bot;
+      writeFileSync(join(dirname(dockerLog), "container.name"), vpsContainerName(bot.id));
       await api("PATCH", `/api/bots/${bot.id}`, {
         name: "Remote hand",
         modelSelection: { instanceId: "vps", model: "fake-model" },
       });
       expect((await api("PATCH", `/api/bots/${bot.id}`, { cloudBackend: "vps" })).status).toBe(200);
-      // bot.computer stays unset — Auto, the mode that must never provision
+      expect((await api("PATCH", `/api/bots/${bot.id}`, { computer: "cloud" })).status).toBe(200);
+
+      // A lifecycle request claims the bot and container before its first SSH
+      // round trip. An alias change must lose while that readiness work is in
+      // flight, rather than moving the later polls to a different host.
+      const fixtureDir = dirname(dockerLog);
+      writeFileSync(join(fixtureDir, "hold"), "hold");
+      rmSync(join(fixtureDir, "started"), { force: true });
+      const provisioning = api("POST", `/api/bots/${bot.id}/computer/provision`, {});
+      await until(async () => {
+        try {
+          readFileSync(join(fixtureDir, "started"));
+          return true;
+        } catch {
+          return false;
+        }
+      }, "the held VPS lifecycle call");
+      const lifecycleRace = await api("PUT", "/api/config", { vps: { sshAlias: "other-vps" } });
+      expect(lifecycleRace.status).toBe(409);
+      expect(lifecycleRace.body.error).toMatch(/cloud computer actions|VPS computer actions/i);
+      rmSync(join(fixtureDir, "hold"), { force: true });
+      expect((await provisioning).status).toBe(200);
+      expect((await api("PATCH", `/api/bots/${bot.id}`, { computer: null })).status).toBe(200);
+      // Auto remains read-only and never provisions.
 
       const sent = await api("POST", `/api/bots/${bot.id}/messages`, { text: "check the remote desktop" });
       expect(sent.status).toBe(202);
@@ -298,9 +329,32 @@ posixOnly("VPS turn routing e2e (fake ACP fleet + fake docker over SSH)", () => 
       expect(status.status).toBe(200);
       expect(status.body).toMatchObject({ backend: "vps", ready: true, container: "running" });
 
-      // turn settled → the claim is gone: the alias may change again
+      // The turn claim is gone, but its durable container remains on the old
+      // host. Keep that resource visible until the user removes it.
       const released = await api("PUT", "/api/config", { vps: { sshAlias: "other-vps" } });
-      expect(released.status).toBe(200);
+      expect(released.status, JSON.stringify(released.body)).toBe(409);
+      expect(released.body.error).toMatch(/remove.*VPS computers/i);
+
+      // Once a fresh old-host inventory proves there are no local rows, hold
+      // the validation request open and prove the opposite race: new turns,
+      // lifecycle actions, and bot deletion all reject until commit.
+      writeFileSync(join(fixtureDir, "inventory-empty"), "empty");
+      writeFileSync(join(fixtureDir, "hold"), "hold");
+      rmSync(join(fixtureDir, "started"), { force: true });
+      const changing = api("PUT", "/api/config", { vps: { sshAlias: "other-vps" } });
+      await until(async () => {
+        try {
+          readFileSync(join(fixtureDir, "started"));
+          return true;
+        } catch {
+          return false;
+        }
+      }, "the held VPS alias validation");
+      expect((await api("POST", `/api/bots/${bot.id}/messages`, { text: "do not cross hosts" })).status).toBe(409);
+      expect((await api("POST", `/api/bots/${bot.id}/computer/provision`, {})).status).toBe(409);
+      expect((await api("DELETE", `/api/bots/${bot.id}`)).status).toBe(409);
+      rmSync(join(fixtureDir, "hold"), { force: true });
+      expect((await changing).status).toBe(200);
       expect((await api("PUT", "/api/config", { vps: { sshAlias: "production-vps" } })).status).toBe(200);
     },
     60_000,

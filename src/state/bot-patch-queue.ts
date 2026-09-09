@@ -7,8 +7,8 @@ export type BotUpdatePatch = Partial<
     | "name"
     | "title"
     | "description"
+    | "soul"
     | "notifications"
-    | "computer"
     | "cloudBackend"
     | "autoStartVps"
     | "color"
@@ -16,6 +16,7 @@ export type BotUpdatePatch = Partial<
     | "avatarUrl"
     | "avatarCrop"
     | "autoApprove"
+    | "approvalMode"
     | "speakReplies"
     | "voice"
     | "pinned"
@@ -30,11 +31,26 @@ export type BotUpdatePatch = Partial<
     | "modelSelection"
   >
 > & {
+  /** null is the wire representation for clearing an explicit destination
+   * and returning to Auto. Bot state itself keeps Auto as an absent field. */
+  computer?: Bot["computer"] | null;
   /** Rides the PATCH body only: the server's proof that the local-auto
    * warning dialog was shown (see server/index.ts's consent gate). It must
    * reach the wire inside the coalesced body and must never fold into bot
    * state — the queue strips it from every overlay it hands back. */
   acknowledgeLocalAuto?: boolean;
+  /** Renderer-local marker that the elevated-risk Full access dialog was
+   * confirmed. StoreProvider consumes it before the private Electron request;
+   * it is never sent over HTTP or folded into bot state. */
+  confirmFullAccess?: boolean;
+};
+
+/** A wire patch after clear-only values have been normalized for Bot state. */
+export type BotStatePatch = Omit<
+  BotUpdatePatch,
+  "computer" | "acknowledgeLocalAuto" | "confirmFullAccess"
+> & {
+  computer?: Bot["computer"];
 };
 
 interface BotPatchQueueEntry {
@@ -46,7 +62,7 @@ interface BotPatchQueueEntry {
   running: boolean;
   controller: AbortController | null;
   cancelled: boolean;
-  idleWaiters: Array<() => void>;
+  idleWaiters: Array<(bot: BotAnnouncement | null) => void>;
 }
 
 export interface BotPatchQueueOptions {
@@ -55,16 +71,19 @@ export interface BotPatchQueueOptions {
     botId: string,
     patch: BotUpdatePatch,
     signal: AbortSignal,
+    current: BotAnnouncement,
   ) => Promise<BotAnnouncement>;
   reconcile: (botId: string, signal: AbortSignal) => Promise<BotAnnouncement | null>;
-  onAuthoritative: (bot: BotAnnouncement, optimisticOverlay: BotUpdatePatch) => void;
+  onAuthoritative: (bot: BotAnnouncement, optimisticOverlay: BotStatePatch) => void;
   onError: (error: Error) => void;
 }
 
 export interface BotPatchQueue {
   enqueue: (botId: string, patch: BotUpdatePatch, fallback: BotAnnouncement) => void;
-  flush: (botId: string) => Promise<void>;
-  overlayFor: (botId: string) => BotUpdatePatch;
+  /** Wait for the lane to settle and return the server-authoritative bot.
+   * null means there was no queued write (or the lane was cancelled). */
+  flush: (botId: string) => Promise<BotAnnouncement | null>;
+  overlayFor: (botId: string) => BotStatePatch;
   cancel: (botId: string) => void;
   /** Undo a dispose. Exists for React StrictMode, whose dev-mode mount probe
    * runs the effect cleanup once against the SAME memoized queue — without
@@ -74,12 +93,23 @@ export interface BotPatchQueue {
 }
 
 const hasFields = (patch: BotUpdatePatch): boolean => Object.keys(patch).length > 0;
+const hasOwn = (value: object, key: PropertyKey): boolean =>
+  Object.prototype.hasOwnProperty.call(value, key);
+
+const isAbortError = (error: unknown): boolean =>
+  Boolean(error && typeof error === "object" && (error as { name?: unknown }).name === "AbortError");
 
 /** What may fold back into renderer bot state: everything except the consent
  * flag, which is wire-only. One strip point covers both overlay paths. */
-const stateOverlay = (patch: BotUpdatePatch): BotUpdatePatch => {
-  const { acknowledgeLocalAuto: _ack, ...fields } = patch;
-  return fields;
+const stateOverlay = (patch: BotUpdatePatch): BotStatePatch => {
+  const {
+    acknowledgeLocalAuto: _localAck,
+    confirmFullAccess: _fullConfirmation,
+    computer,
+    ...fields
+  } = patch;
+  if (computer === null) return { ...fields, computer: undefined };
+  return computer === undefined ? fields : { ...fields, computer };
 };
 
 /**
@@ -95,7 +125,7 @@ export function createBotPatchQueue(options: BotPatchQueueOptions): BotPatchQueu
   const settleIfIdle = (entry: BotPatchQueueEntry) => {
     if (entry.running || entry.timer !== null || hasFields(entry.pending)) return;
     entries.delete(entry.botId);
-    for (const resolve of entry.idleWaiters.splice(0)) resolve();
+    for (const resolve of entry.idleWaiters.splice(0)) resolve(entry.fallback);
   };
 
   const drain = async (entry: BotPatchQueueEntry): Promise<void> => {
@@ -108,12 +138,16 @@ export function createBotPatchQueue(options: BotPatchQueueOptions): BotPatchQueu
     entry.controller = controller;
 
     try {
-      const bot = await options.send(entry.botId, patch, controller.signal);
+      const bot = await options.send(entry.botId, patch, controller.signal, entry.fallback);
       if (disposed || entry.cancelled) return;
       entry.fallback = bot;
       options.onAuthoritative(bot, stateOverlay(entry.pending));
     } catch (caught) {
       if (!disposed && !entry.cancelled) {
+        const supersededApproval = controller.signal.aborted &&
+          hasOwn(entry.pending, "approvalMode") &&
+          isAbortError(caught);
+        if (supersededApproval) return;
         // A rejected patch is no longer optimistic. Re-read before rolling back
         // because a lost HTTP response may still have committed and broadcast.
         entry.inFlight = {};
@@ -166,17 +200,40 @@ export function createBotPatchQueue(options: BotPatchQueueOptions): BotPatchQueu
       };
       entries.set(botId, entry);
       entry.pending = { ...entry.pending, ...patch };
-      schedule(entry);
+      // A private Full/Custom grant cannot be cancelled after it crosses the
+      // Electron bridge. Signal the sender as soon as a newer level exists so
+      // it can compensate a late grant back to Ask before this lane advances.
+      const inFlightMode = entry.inFlight.approvalMode;
+      if (
+        entry.running &&
+        (inFlightMode === "full" || inFlightMode === "custom") &&
+        hasOwn(patch, "approvalMode") &&
+        patch.approvalMode !== inFlightMode
+      ) {
+        entry.controller?.abort();
+      }
+      // Execution-boundary edits must start immediately. They still share the
+      // same serialized lane, but never sit behind the cosmetic 400 ms
+      // debounce where a message/routine could begin under stale permissions.
+      const immediate = Object.prototype.hasOwnProperty.call(patch, "approvalMode") ||
+        Object.prototype.hasOwnProperty.call(patch, "modelSelection");
+      if (immediate) {
+        if (entry.timer !== null) clearTimeout(entry.timer);
+        entry.timer = null;
+        void drain(entry);
+      } else {
+        schedule(entry);
+      }
     },
 
     flush(botId) {
       const entry = entries.get(botId);
-      if (!entry) return Promise.resolve();
+      if (!entry) return Promise.resolve(null);
       if (entry.timer !== null) {
         clearTimeout(entry.timer);
         entry.timer = null;
       }
-      const idle = new Promise<void>((resolve) => entry.idleWaiters.push(resolve));
+      const idle = new Promise<BotAnnouncement | null>((resolve) => entry.idleWaiters.push(resolve));
       void drain(entry);
       settleIfIdle(entry);
       return idle;
@@ -194,7 +251,7 @@ export function createBotPatchQueue(options: BotPatchQueueOptions): BotPatchQueu
       if (entry.timer !== null) clearTimeout(entry.timer);
       entry.controller?.abort();
       entries.delete(botId);
-      for (const resolve of entry.idleWaiters.splice(0)) resolve();
+      for (const resolve of entry.idleWaiters.splice(0)) resolve(null);
     },
 
     revive() {
@@ -207,7 +264,7 @@ export function createBotPatchQueue(options: BotPatchQueueOptions): BotPatchQueu
         entry.cancelled = true;
         if (entry.timer !== null) clearTimeout(entry.timer);
         entry.controller?.abort();
-        for (const resolve of entry.idleWaiters.splice(0)) resolve();
+        for (const resolve of entry.idleWaiters.splice(0)) resolve(null);
       }
       entries.clear();
     },

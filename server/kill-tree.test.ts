@@ -24,11 +24,7 @@ describe("killCliTree", () => {
     try {
       expect(child.stdin.listenerCount("error")).toBeGreaterThan(0);
     } finally {
-      killCliTree(child);
-      await Promise.race([
-        new Promise<void>((resolve) => child.once("close", () => resolve())),
-        new Promise<void>((resolve) => setTimeout(resolve, 5_000)),
-      ]);
+      await expect(killCliTree(child)).resolves.toBe(true);
     }
   });
 
@@ -55,7 +51,7 @@ describe("killCliTree", () => {
       expect(grandchild).toBeGreaterThan(0);
       expect(alive(grandchild)).toBe(true);
 
-      killCliTree(parent);
+      await expect(killCliTree(parent)).resolves.toBe(true);
 
       // Read the parent's death off the child object: a POSIX parent stays a
       // live pid as a zombie until Node reaps it. The grandchild has no Child
@@ -68,7 +64,7 @@ describe("killCliTree", () => {
       expect(alive(grandchild)).toBe(false);
       expect(exited()).toBe(true);
     } finally {
-      killCliTree(parent);
+      await killCliTree(parent);
       if (grandchild && alive(grandchild)) {
         try {
           process.kill(grandchild, "SIGKILL");

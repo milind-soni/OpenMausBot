@@ -50,7 +50,7 @@ desktop-first agent app and adopt these points as requirements:
    ambiguity-free alphabet (60 bits), rejection-sampled, **5-minute** TTL,
    single use. Exchange it once at `POST /api/auth/pair` for an opaque
    session token: random bytes, **sha256 at rest** (the companion's
-   discipline), 30-day expiry, per-device label recorded, revocable from
+   discipline), 30-day expiry renewed on use up to 180 days from pairing, per-device label recorded, revocable from
    Settings. Pairing URLs carry the code in the **hash**, never the query.
 3. **Never put the session token in a URL.** The event stream is SSE and
    `EventSource` cannot set headers, so an authenticated `POST
@@ -109,9 +109,14 @@ desktop-first agent app and adopt these points as requirements:
    SSH tunnel, or a private network. First to ship.
 2. **Private network helper**: detect a Tailscale MagicDNS name and offer
    `tailscale serve` for HTTPS with the server's actual port (TLS is
-   Tailscale's; the server never terminates TLS). Optional, later.
+   Tailscale's; the server never terminates TLS). Shipped for the command
+   line as `openmausbot serve --tailscale`.
 3. **Managed tunnel**: the cloudflared managed-tunnel channel the companion
    already uses — zero network configuration. Rides on the same sessions.
+   Shipped for the command line as `openmausbot login` + `serve --tunnel`
+   (`server/tunnel.ts`): the tunnel gateway forwards to a second, IPC
+   listener on the harness, on which every request is "through a proxy" by
+   construction.
 
 Base URLs are resolved per connection at runtime. Nothing bakes an origin
 into the renderer bundle; the served UI keeps using relative paths.
@@ -126,7 +131,7 @@ into the renderer bundle; the served UI keeps using relative paths.
 | Computer use (cloud/container) | ✅ server-side already |
 | Web UI from any browser | ✅ served by the server |
 | Built-in browser panel | ❌ local-only for now |
-| Skill recorder, dictation, host-desktop control | ❌ local-only |
+| Dictation, host-desktop control | ❌ local-only |
 | "Open in editor" for server paths | ❌ paths shown are the server's |
 
 ## Relationship to the enterprise tracks

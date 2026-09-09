@@ -1,6 +1,7 @@
 Welcome to OpenMausMobile 1.0.
 
 • Pair securely with your OpenMausBot computer
+• Fill a requested API key from Apple Passwords or another AutoFill provider and send it encrypted over Secure phone access or Tailscale
 • Default QR pairing now stays on hosted HTTPS; Tailscale and local routes remain explicit choices
 • Chat with bots and rooms
 • Answer approvals and questions

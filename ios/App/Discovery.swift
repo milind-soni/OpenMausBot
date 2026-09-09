@@ -11,6 +11,7 @@
 import Foundation
 import Network
 import CompanionCore
+import SwiftUI
 
 @MainActor
 final class Discovery: ObservableObject {
@@ -28,7 +29,7 @@ final class Discovery: ObservableObject {
     /// Set when the browser could not start at all — almost always the
     /// missing Info.plist keys, so it is worth surfacing rather than
     /// showing an empty list forever.
-    @Published private(set) var failure: String?
+    @Published private(set) var failure: LocalizedStringKey?
 
     private var browser: NWBrowser?
     private var retryTask: Task<Void, Never>?
@@ -129,7 +130,7 @@ final class Discovery: ObservableObject {
         return Int(code) == kDNSServiceErr_DefunctConnection
     }
 
-    private static func failureMessage(for error: NWError) -> String {
+    private static func failureMessage(for error: NWError) -> LocalizedStringKey {
         if case let .dns(code) = error,
            Int(code) == kDNSServiceErr_PolicyDenied {
             return "Local Network access is off. Enable it in Settings, or enter a Tailscale address below."

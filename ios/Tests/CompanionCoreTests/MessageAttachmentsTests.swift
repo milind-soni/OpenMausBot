@@ -30,14 +30,36 @@ final class MessageAttachmentsTests: XCTestCase {
             LocalMessageLink.resolve(#"\\server\share\report.md"#),
             .desktopFile(path: #"\\server\share\report.md"#)
         )
+        XCTAssertEqual(
+            LocalMessageLink.resolve("file://server/share/report.md"),
+            .desktopFile(path: #"\\server\share\report.md"#)
+        )
+        XCTAssertEqual(
+            LocalMessageLink.resolve("//files.example.com/report.md"),
+            .web(try XCTUnwrap(URL(string: "https://files.example.com/report.md")))
+        )
+        XCTAssertEqual(
+            LocalMessageLink.resolve("docs/My Report.md"),
+            .desktopFile(path: "docs/My Report.md")
+        )
+        XCTAssertEqual(
+            LocalMessageLink.resolve("./reports/Quarter%20One.md?download=1#latest"),
+            .desktopFile(path: "./reports/Quarter One.md")
+        )
+        XCTAssertEqual(
+            LocalMessageLink.resolve("/C:/posix/report.md"),
+            .desktopFile(path: "/C:/posix/report.md")
+        )
     }
 
-    func testRejectsRelativeMalformedAndCustomSchemeLinks() {
-        XCTAssertNil(LocalMessageLink.resolve("notes/report.md"))
+    func testRejectsMalformedEmptyAndCustomSchemeLinks() {
+        XCTAssertNil(LocalMessageLink.resolve("#section"))
+        XCTAssertNil(LocalMessageLink.resolve("?download=1"))
         XCTAssertNil(LocalMessageLink.resolve("openmausbot://pair?token=secret"))
         XCTAssertNil(LocalMessageLink.resolve("javascript:alert(1)"))
         XCTAssertNil(LocalMessageLink.resolve("https:///missing-host.md"))
         XCTAssertNil(LocalMessageLink.resolve("file:///tmp/report.md?replace=1"))
+        XCTAssertNil(LocalMessageLink.resolve("docs/bad%ZZ.md"))
         XCTAssertNil(LocalMessageLink.resolve("/tmp/bad\0name.md"))
     }
 

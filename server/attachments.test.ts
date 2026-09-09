@@ -2,18 +2,38 @@
 // the name-lock that keeps the serving route inside the attachments dir.
 import {
   existsSync,
+  mkdirSync,
   mkdtempSync,
   readFileSync,
   readdirSync,
   rmSync,
   statSync,
   truncateSync,
+  unlinkSync,
   utimesSync,
   writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { link, unlink } from "node:fs/promises";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+
+vi.mock("node:fs/promises", async (importOriginal) => {
+  const fs = await importOriginal<typeof import("node:fs/promises")>();
+  return { ...fs, link: vi.fn(fs.link), unlink: vi.fn(fs.unlink) };
+});
+vi.mock("node:fs", async (importOriginal) => {
+  const fs = await importOriginal<typeof import("node:fs")>();
+  return { ...fs, unlinkSync: vi.fn(fs.unlinkSync) };
+});
+const realUnlink = (await vi.importActual<typeof import("node:fs/promises")>("node:fs/promises")).unlink;
+const realLink = (await vi.importActual<typeof import("node:fs/promises")>("node:fs/promises")).link;
+const realUnlinkSync = (await vi.importActual<typeof import("node:fs")>("node:fs")).unlinkSync;
+afterEach(() => {
+  vi.mocked(unlink).mockReset().mockImplementation(realUnlink);
+  vi.mocked(link).mockReset().mockImplementation(realLink);
+  vi.mocked(unlinkSync).mockReset().mockImplementation(realUnlinkSync);
+});
 
 // The module reads DATA_DIR at import time, so the env var must be set
 // before the import is evaluated.
@@ -26,7 +46,9 @@ const {
   ATTACHMENT_PARTIAL_MAX_AGE_MS,
   FILE_MAX_BYTES,
   IMAGE_MAX_BYTES,
+  __resetAttachmentAccountingForTests,
   cleanupStaleAttachmentPartials,
+  deleteAttachment,
   extensionForFileMime,
   extensionForMime,
   readAttachment,
@@ -36,6 +58,15 @@ const {
   saveImageUpload,
   validateAttachmentUploadId,
 } = await import("./attachments.ts");
+
+// The cache tracks committed bytes in memory; anything that mutates
+// ATTACHMENTS_DIR directly on disk (rmSync/truncateSync/writeFileSync, all
+// used below to force quota states without a real 512MiB file) must reset it
+// so the next quota check rescans instead of trusting stale counts.
+function resetDir() {
+  rmSync(ATTACHMENTS_DIR, { recursive: true, force: true });
+  __resetAttachmentAccountingForTests();
+}
 
 const UPLOAD_A = "11111111-1111-4111-8111-111111111111";
 const UPLOAD_B = "22222222-2222-4222-8222-222222222222";
@@ -62,10 +93,10 @@ describe("extensionForMime", () => {
 
 describe("saveImage", () => {
   beforeEach(() => {
-    rmSync(ATTACHMENTS_DIR, { recursive: true, force: true });
+    resetDir();
   });
   afterEach(() => {
-    rmSync(ATTACHMENTS_DIR, { recursive: true, force: true });
+    resetDir();
   });
 
   it("persists bytes under the attachments dir with a generated name", () => {
@@ -118,15 +149,16 @@ describe("saveImage", () => {
 
 describe("aggregate attachment storage", () => {
   beforeEach(() => {
-    rmSync(ATTACHMENTS_DIR, { recursive: true, force: true });
+    resetDir();
   });
   afterEach(() => {
-    rmSync(ATTACHMENTS_DIR, { recursive: true, force: true });
+    resetDir();
   });
 
   it("rejects new data at the aggregate ceiling without pruning committed attachments", () => {
     const referenced = saveImage(Buffer.from("x"), "image/png");
     truncateSync(referenced.path, ATTACHMENTS_MAX_BYTES);
+    __resetAttachmentAccountingForTests();
 
     try {
       saveImage(Buffer.from("y"), "image/png");
@@ -143,6 +175,7 @@ describe("aggregate attachment storage", () => {
   it("counts concurrent reservations so uploads cannot race past the ceiling", async () => {
     const existing = saveImage(Buffer.from("x"), "image/png");
     truncateSync(existing.path, ATTACHMENTS_MAX_BYTES - 5);
+    __resetAttachmentAccountingForTests();
 
     const first = saveFile((async function* () {
       yield Buffer.from("four");
@@ -155,6 +188,7 @@ describe("aggregate attachment storage", () => {
   it("lets an unknown-length stream use the exact space left below a reservation increment", async () => {
     const existing = saveImage(Buffer.from("x"), "image/png");
     truncateSync(existing.path, ATTACHMENTS_MAX_BYTES - 2);
+    __resetAttachmentAccountingForTests();
 
     const saved = await saveFile((async function* () {
       yield Buffer.from("a");
@@ -166,6 +200,7 @@ describe("aggregate attachment storage", () => {
   it("releases reservations and removes partials after failed uploads", async () => {
     const existing = saveImage(Buffer.from("x"), "image/png");
     truncateSync(existing.path, ATTACHMENTS_MAX_BYTES - 3);
+    __resetAttachmentAccountingForTests();
 
     await expect(saveFile((async function* () {})(), "empty.txt", "text/plain", { expectedBytes: 3 }))
       .rejects.toThrow(/empty file/);
@@ -192,15 +227,20 @@ describe("aggregate attachment storage", () => {
     expect(existsSync(`${ATTACHMENTS_DIR}/${UPLOAD_A}.png`)).toBe(true);
   });
 
-  it("counts fresh crash leftovers against quota, then reclaims them when stale", () => {
+  it("counts fresh crash leftovers against quota, then reclaims them once a cleanup sweep runs", () => {
     const existing = saveImage(Buffer.from("x"), "image/png");
     truncateSync(existing.path, ATTACHMENTS_MAX_BYTES - 2);
+    __resetAttachmentAccountingForTests();
     const orphan = `${ATTACHMENTS_DIR}/.openmaus-upload-${UPLOAD_A}-${UPLOAD_B}.partial`;
     writeFileSync(orphan, "xx");
 
     expect(() => saveImage(Buffer.from("y"), "image/png")).toThrow(/storage is full/);
     const old = new Date(Date.now() - ATTACHMENT_PARTIAL_MAX_AGE_MS - 1_000);
     utimesSync(orphan, old, old);
+    // Reservation checks no longer rescan the directory on every call (that
+    // was the PERF-03 hot loop); a stale partial is reclaimed by an explicit
+    // cleanup sweep, not automatically on the next quota check.
+    expect(cleanupStaleAttachmentPartials()).toBe(1);
     expect(() => saveImage(Buffer.from("y"), "image/png")).not.toThrow();
     expect(existsSync(orphan)).toBe(false);
   });
@@ -208,6 +248,7 @@ describe("aggregate attachment storage", () => {
   it("reclaims an inactive partial immediately when its upload ID retries", async () => {
     const existing = saveImage(Buffer.from("x"), "image/png");
     truncateSync(existing.path, ATTACHMENTS_MAX_BYTES - 3);
+    __resetAttachmentAccountingForTests();
     const orphan = `${ATTACHMENTS_DIR}/.openmaus-upload-${UPLOAD_A}-${UPLOAD_B}.partial`;
     writeFileSync(orphan, "old");
 
@@ -217,14 +258,117 @@ describe("aggregate attachment storage", () => {
     expect(saved.path.endsWith(`${UPLOAD_A}.txt`)).toBe(true);
     expect(existsSync(orphan)).toBe(false);
   });
+
+  it("frees quota after deleteAttachment, without a rescan, for a file the cache already knows about", () => {
+    const first = saveImage(Buffer.from("x"), "image/png");
+    truncateSync(first.path, ATTACHMENTS_MAX_BYTES - 2);
+    __resetAttachmentAccountingForTests();
+    expect(() => saveImage(Buffer.from("yyy"), "image/png")).toThrow(/storage is full/);
+
+    deleteAttachment(first.path);
+    expect(existsSync(first.path)).toBe(false);
+    const second = saveImage(Buffer.from("yyy"), "image/png");
+    expect(second.bytes).toBe(3);
+    expect(readdirSync(ATTACHMENTS_DIR)).toEqual([second.path.split(/[\\/]/).pop()!]);
+  });
+
+  it.each([1, 2])("counts a committed upload after %i partial-cleanup failures and an idempotent retry", async (failures) => {
+    const existing = saveImage(Buffer.from("x"), "image/png");
+    truncateSync(existing.path, ATTACHMENTS_MAX_BYTES - 3);
+    __resetAttachmentAccountingForTests();
+    const cleanupError = Object.assign(new Error("partial file is locked"), { code: "EPERM" });
+    for (let attempt = 0; attempt < failures; attempt++) {
+      vi.mocked(unlink).mockRejectedValueOnce(cleanupError);
+    }
+    const chunks = async function* () { yield Buffer.from("xx"); };
+
+    await expect(saveFile(chunks(), "retry.txt", "text/plain", { uploadId: UPLOAD_A }))
+      .rejects.toThrow("partial file is locked");
+    expect(readFileSync(join(ATTACHMENTS_DIR, `${UPLOAD_A}.txt`), "utf8")).toBe("xx");
+    expect(readdirSync(ATTACHMENTS_DIR).filter((name) => name.endsWith(".partial"))).toHaveLength(failures - 1);
+
+    await expect(saveFile(chunks(), "retry.txt", "text/plain", { uploadId: UPLOAD_A }))
+      .resolves.toMatchObject({ bytes: 2 });
+    expect(readdirSync(ATTACHMENTS_DIR).some((name) => name.endsWith(".partial"))).toBe(false);
+    expect(() => saveImage(Buffer.from("y"), "image/png")).not.toThrow();
+    expect(() => saveImage(Buffer.from("z"), "image/png")).toThrow(/storage is full/);
+  });
+
+  it.each([1, 2])("counts an image after %i partial-cleanup failures and an idempotent retry", async (failures) => {
+    const existing = saveImage(Buffer.from("x"), "image/png");
+    truncateSync(existing.path, ATTACHMENTS_MAX_BYTES - 3);
+    __resetAttachmentAccountingForTests();
+    for (let attempt = 0; attempt < failures; attempt++) {
+      vi.mocked(unlinkSync).mockImplementationOnce(() => {
+        throw Object.assign(new Error("partial file is locked"), { code: "EPERM" });
+      });
+    }
+
+    expect(() => saveImage(Buffer.from("xx"), "image/png", UPLOAD_A)).toThrow("partial file is locked");
+    expect(readFileSync(join(ATTACHMENTS_DIR, `${UPLOAD_A}.png`), "utf8")).toBe("xx");
+    expect(readdirSync(ATTACHMENTS_DIR).filter((name) => name.endsWith(".partial"))).toHaveLength(failures - 1);
+    await expect(saveImageUpload(Buffer.from("xx"), "image/png", UPLOAD_A)).resolves.toMatchObject({ bytes: 2 });
+    expect(readdirSync(ATTACHMENTS_DIR).some((name) => name.endsWith(".partial"))).toBe(false);
+    expect(() => saveImage(Buffer.from("y"), "image/png")).not.toThrow();
+    expect(() => saveImage(Buffer.from("z"), "image/png")).toThrow(/storage is full/);
+  });
+
+  it("does not count an in-flight commit twice when cleanup failure causes a rescan", async () => {
+    const existing = saveImage(Buffer.from("x"), "image/png");
+    truncateSync(existing.path, ATTACHMENTS_MAX_BYTES - 5);
+    __resetAttachmentAccountingForTests();
+    let markLinked!: () => void;
+    let finishCommit!: () => void;
+    const linked = new Promise<void>((resolve) => { markLinked = resolve; });
+    const finishing = new Promise<void>((resolve) => { finishCommit = resolve; });
+    vi.mocked(link).mockImplementationOnce(async (...args) => {
+      await realLink(...args);
+      markLinked();
+      await finishing;
+    });
+    const pending = saveFile((async function* () { yield Buffer.from("xx"); })(), "pending.txt", "text/plain", {
+      uploadId: UPLOAD_A, expectedBytes: 2,
+    });
+    try {
+      await linked;
+      for (let attempt = 0; attempt < 2; attempt++) {
+        vi.mocked(unlinkSync).mockImplementationOnce(() => {
+          throw Object.assign(new Error("partial file is locked"), { code: "EPERM" });
+        });
+      }
+      expect(() => saveImage(Buffer.from("x"), "image/png", UPLOAD_B)).toThrow("partial file is locked");
+      // This scan sees the linked file while its commit callback is pending.
+      expect(() => saveImage(Buffer.from("y"), "image/png")).toThrow(/storage is full/);
+    } finally {
+      finishCommit();
+      await pending;
+    }
+    await saveImageUpload(Buffer.from("x"), "image/png", UPLOAD_B);
+    expect(() => saveImage(Buffer.from("yy"), "image/png")).not.toThrow();
+    expect(() => saveImage(Buffer.from("z"), "image/png")).toThrow(/storage is full/);
+  });
+
+  it("initializes correctly on a fresh process against a directory that already has files", () => {
+    // No saveImage/saveFile call has happened yet in this test, so the cache
+    // is still cold (__resetAttachmentAccountingForTests in the previous
+    // test's afterEach already guaranteed that) — this mirrors a process
+    // restart that finds attachments already on disk from a prior run.
+    mkdirSync(ATTACHMENTS_DIR, { recursive: true });
+    const preexisting = join(ATTACHMENTS_DIR, "11111111-1111-4111-8111-111111111111.png");
+    writeFileSync(preexisting, "x");
+    truncateSync(preexisting, ATTACHMENTS_MAX_BYTES - 2);
+
+    expect(() => saveImage(Buffer.from("yyy"), "image/png")).toThrow(/storage is full/);
+    expect(() => saveImage(Buffer.from("y"), "image/png")).not.toThrow();
+  });
 });
 
 describe("readAttachment name lock", () => {
   beforeEach(() => {
-    rmSync(ATTACHMENTS_DIR, { recursive: true, force: true });
+    resetDir();
   });
   afterEach(() => {
-    rmSync(ATTACHMENTS_DIR, { recursive: true, force: true });
+    resetDir();
   });
 
   it("refuses traversal, dotfiles, and names the saver never writes", () => {
@@ -238,10 +382,10 @@ describe("readAttachment name lock", () => {
 
 describe("shared files", () => {
   beforeEach(() => {
-    rmSync(ATTACHMENTS_DIR, { recursive: true, force: true });
+    resetDir();
   });
   afterEach(() => {
-    rmSync(ATTACHMENTS_DIR, { recursive: true, force: true });
+    resetDir();
   });
 
   it("allows useful document mimes but not executables, archives, or active markup", () => {
@@ -280,6 +424,24 @@ describe("shared files", () => {
       expect(statSync(ATTACHMENTS_DIR).mode & 0o777).toBe(0o700);
       expect(statSync(saved.path).mode & 0o777).toBe(0o600);
     }
+  });
+
+  it.each([
+    ["audio/opus", ".opus"], ["audio/ogg; codecs=opus", ".ogg"],
+    ["audio/mpeg", ".mp3"], ["audio/mp4", ".m4a"],
+    ["audio/x-wav", ".wav"], ["audio/aac", ".aac"],
+    ["audio/flac", ".flac"], ["audio/webm", ".webm"],
+  ])("stores %s audio privately and retries without duplicating it", async (mime, extension) => {
+    const bytes = Buffer.from([0, 255, 1, 128, 79, 103, 103, 83]);
+    const chunks = async function* () { yield bytes.subarray(0, 3); yield bytes.subarray(3); };
+    const first = await saveFile(chunks(), "Voice note.opus", mime, { uploadId: UPLOAD_A });
+    const again = await saveFile(chunks(), "Voice note.opus", mime, { uploadId: UPLOAD_A });
+    expect(again.path).toBe(first.path);
+    expect(first.path).toBe(join(ATTACHMENTS_DIR, `${UPLOAD_A}${extension}`));
+    expect(first.name).toBe(`Voice note${extension}`);
+    expect(readFileSync(first.path)).toEqual(bytes);
+    if (process.platform !== "win32") expect(statSync(first.path).mode & 0o777).toBe(0o600);
+    expect(readdirSync(ATTACHMENTS_DIR)).toEqual([`${UPLOAD_A}${extension}`]);
   });
 
   it("rejects empty and oversized streams without leaving partial files", async () => {

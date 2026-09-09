@@ -204,6 +204,16 @@ function handle(cmd: any) {
       send({ type: "response", command: "set_thinking_level", success: true });
       return;
     case "prompt":
+      if (process.env.FAKE_PI_DUMP) {
+        try {
+          appendFileSync(
+            process.env.FAKE_PI_DUMP,
+            JSON.stringify({ prompt: { message: cmd.message, ...(Array.isArray(cmd.images) ? { images: cmd.images } : {}) } }) + "\n",
+          );
+        } catch {
+          /* never let dumping break a run */
+        }
+      }
       // acknowledge acceptance; the completion comes via events
       send({ type: "response", command: "prompt", success: true });
       if (mode === "tooluse") streamToolTurn();

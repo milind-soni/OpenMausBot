@@ -6,27 +6,13 @@
 import ActivityKit
 import AppIntents
 import Foundation
+import CompanionCore
 
 struct BotActivityAttributes: ActivityAttributes {
-    public struct ContentState: Codable, Hashable {
-        /// `MausState.rawValue` — the face to wear.
-        var face: String
-        /// "needsYou" | "working" | "toReview"
-        var kind: String
-        /// "Scout needs you", "Forge is working"
-        var headline: String
-        /// The question, or what it is doing.
-        var line: String
-        /// A pending card to answer, when kind == needsYou.
-        var requestId: String?
-        var options: [String]
-        /// A permission card answers allow/deny; a question answers with text.
-        var isPermission: Bool
-        /// When this kind began — the island's timer and ring count from it.
-        var since: Date
-    }
+    public typealias ContentState = BotActivityContent
 
     var botId: String
+    /// Retained to decode existing activities. Routing uses ContentState.
     var threadId: String
     var name: String
     /// MausPalette colour name.

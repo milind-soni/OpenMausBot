@@ -42,8 +42,10 @@ function decodeConfig(raw: unknown): OpenAICompatConfig {
     model: typeof config.model === "string" && config.model
       ? config.model
       : process.env.OPENAI_COMPAT_MODEL || undefined,
-    provider: typeof config.provider === "string" && config.provider
-      ? config.provider
+    // An explicit empty override disables inherited routing for an isolated
+    // connection (CLI setup uses this). Absent still inherits the global pin.
+    provider: typeof config.provider === "string"
+      ? config.provider || undefined
       : process.env.OPENAI_COMPAT_PROVIDER || undefined,
   };
 }

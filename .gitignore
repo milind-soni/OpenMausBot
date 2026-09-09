@@ -12,6 +12,7 @@ dist-server
 *.tsbuildinfo
 electron/resources/speech-helper
 electron/resources/OpenMausBot Speech.app
+# stale helper from the removed Teach a skill recorder
 electron/resources/OpenMausBot Recorder.app
 release
 .omb-scratch
@@ -35,3 +36,7 @@ cloudflare/control-plane/worker-configuration.d.ts
 
 # per-tenant deploy settings (see deploy/.env.example)
 deploy/.env
+deploy/podman/.env
+deploy/podman/.env.*
+!deploy/podman/.env.example
+/.env

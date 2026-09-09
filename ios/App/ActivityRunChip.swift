@@ -12,6 +12,8 @@ import CompanionCore
 
 struct ActivityRunChip: View {
     let items: [Message]
+    /// Where an "Opened thread" chip inside the run goes once unfolded.
+    var openThread: ((ThreadRef) -> Void)? = nil
     @Environment(\.colorScheme) private var colorScheme
     @State private var expanded = false
 
@@ -59,7 +61,7 @@ struct ActivityRunChip: View {
             if expanded {
                 VStack(alignment: .leading, spacing: 4) {
                     ForEach(items, id: \.id) { item in
-                        ActivityChip(tool: item.tool)
+                        ActivityChip(tool: item.tool, threadRef: item.threadRef, openThread: openThread)
                     }
                 }
                 .transition(.opacity.combined(with: .move(edge: .top)))

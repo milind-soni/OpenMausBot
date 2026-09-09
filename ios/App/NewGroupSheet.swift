@@ -19,7 +19,7 @@ struct NewGroupSheet: View {
         NavigationStack {
             List {
                 Section {
-                    TextField("Channel name (optional)", text: $name)
+                    TextField("Group name (optional)", text: $name)
                         .autocorrectionDisabled()
                 }
                 Section("Bots") {
@@ -46,7 +46,7 @@ struct NewGroupSheet: View {
                     }
                 }
             }
-            .navigationTitle("New channel")
+            .navigationTitle("New group")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {

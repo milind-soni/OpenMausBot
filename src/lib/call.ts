@@ -14,7 +14,7 @@ let current: string | null = null;
 const watchers = new Set<() => void>();
 
 function notify() {
-  for (const fn of [...watchers]) fn();
+  for (const fn of Array.from(watchers)) fn();
 }
 
 /** The bot or room on a call, or null. Safe to read outside React. */

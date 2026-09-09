@@ -81,7 +81,11 @@ final class ShareClientTests: XCTestCase {
             text: ["  A useful excerpt.\n", "A useful excerpt.", "  "],
             urls: [url, url],
             attachments: [
-                SharedAttachmentReference(path: "/tmp/a&\"b.png", kind: .image),
+                SharedAttachmentReference(
+                    path: "/tmp/a&\"b.png",
+                    kind: .image,
+                    displayName: "Launch & hero.png"
+                ),
                 SharedAttachmentReference(
                     path: "/tmp/notes<final>.pdf",
                     kind: .file,
@@ -97,10 +101,21 @@ final class ShareClientTests: XCTestCase {
 
         https://example.com/story
 
-        <attached-image path="/tmp/a&amp;&quot;b.png" />
+        <attached-image path="/tmp/a&amp;&quot;b.png" name="Launch &amp; hero.png" />
 
         <attached-file path="/tmp/notes&lt;final&gt;.pdf" name="Project notes.pdf" />
         """)
+    }
+
+    func testComposesLegacyUnnamedImageTagWhenNoDisplayNameIsAvailable() {
+        let message = SharedMessageComposer.compose(
+            instruction: "",
+            text: [],
+            urls: [],
+            attachments: [SharedAttachmentReference(path: "/tmp/image.png", kind: .image)]
+        )
+
+        XCTAssertEqual(message, #"<attached-image path="/tmp/image.png" />"#)
     }
 
     func testRawImageUploadKeepsBytesOutOfJSONAndReturnsMacPath() async throws {
@@ -310,6 +325,24 @@ final class ShareClientTests: XCTestCase {
         XCTAssertEqual(file.contentType, "application/octet-stream")
     }
 
+    func testFileDownloadBoundsUnicodeFilenameByUTF8BytesAndKeepsExtension() async throws {
+        ShareRequestStub.responseBody = Data([1])
+        let encodedEmoji = String(repeating: "%F0%9F%93%84", count: 100)
+        ShareRequestStub.responseHeaders = [
+            "Content-Type": "application/pdf",
+            "Content-Disposition": "attachment; filename*=UTF-8''\(encodedEmoji).pdf",
+        ]
+
+        let file = try await client.downloadFile(
+            threadId: "thread-1",
+            messageId: "message-1",
+            path: "/Users/test/fallback.pdf"
+        )
+
+        XCTAssertLessThanOrEqual(file.filename.utf8.count, 180)
+        XCTAssertTrue(file.filename.hasSuffix(".pdf"))
+    }
+
     func testFileDownloadRejectsUnsafeRequestBeforeNetworking() async {
         do {
             _ = try await client.downloadFile(
@@ -323,6 +356,26 @@ final class ShareClientTests: XCTestCase {
         } catch {
             XCTFail("unexpected error: \(error)")
         }
+    }
+
+    func testFileDownloadAllowsScopedRelativeMarkdownTargets() async throws {
+        ShareRequestStub.responseBody = Data("# Report".utf8)
+        ShareRequestStub.responseHeaders = [
+            "Content-Type": "text/markdown",
+            "Content-Disposition": "attachment; filename=report.md",
+        ]
+
+        _ = try await client.downloadFile(
+            threadId: "thread-1",
+            messageId: "message-1",
+            path: "docs/Quarter%20Report.md?download=1#latest"
+        )
+
+        let body = try XCTUnwrap(ShareRequestStub.capturedBody)
+        XCTAssertEqual(
+            try JSONSerialization.jsonObject(with: body) as? [String: String],
+            ["path": "docs/Quarter Report.md"]
+        )
     }
 
     func testFileDownloadRejectsOversizedDeclaredResponse() async {

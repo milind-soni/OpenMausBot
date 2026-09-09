@@ -1,5 +1,5 @@
 import { spawn, type ChildProcess } from "node:child_process";
-import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -15,6 +15,12 @@ const FAKE_CLAUDE = join(SERVER_DIR, "testing", "fake-claude-cli.ts");
 
 let child: ChildProcess;
 let home = "";
+let stopScopedWorkerFinishGate = "";
+let busyWorkerFinishGate = "";
+let busyGoalFinishGate = "";
+let routineGoalFinishGate = "";
+let queueFinishGate = "";
+let stopScopedLeadFinishGate = "";
 let base = "";
 let stderr = "";
 
@@ -44,6 +50,13 @@ const api = async (method: string, path: string, body?: unknown): Promise<{ stat
 
 beforeAll(async () => {
   home = mkdtempSync(join(tmpdir(), "omb-goal-run-"));
+  stopScopedWorkerFinishGate = join(home, "stop-scoped-worker-finish");
+  busyWorkerFinishGate = join(home, "busy-worker-finish");
+  busyGoalFinishGate = join(home, "busy-goal-finish");
+  routineGoalFinishGate = join(home, "routine-goal-finish");
+  queueFinishGate = join(home, "queue-finish");
+  stopScopedLeadFinishGate = join(home, "stop-scoped-lead-finish");
+  writeFileSync(stopScopedLeadFinishGate, "allow initial goal delegation");
   const data = join(home, ".openmausbot");
   const staticDir = join(home, "static");
   mkdirSync(data, { recursive: true });
@@ -83,6 +96,7 @@ beforeAll(async () => {
         displayName: "Queue fixture",
         environment: {
           FAKE_CLAUDE_MODE: "slow",
+          FAKE_CLAUDE_SLOW_FINISH_GATE: queueFinishGate,
           FAKE_CLAUDE_REPLIES: JSON.stringify(["first response", "second response"]),
           FAKE_CLAUDE_REPLY_STATE: join(home, "slow-replies.txt"),
         },
@@ -93,6 +107,7 @@ beforeAll(async () => {
         displayName: "Busy goal fixture",
         environment: {
           FAKE_CLAUDE_MODE: "slow",
+          FAKE_CLAUDE_SLOW_FINISH_GATE: busyGoalFinishGate,
           FAKE_CLAUDE_REPLIES: JSON.stringify([
             "The unrelated direct task is complete.",
             "The queued team goal is complete.\n<openmaus-goal>{\"status\":\"completed\",\"detail\":\"Waited for the lead, then completed normally.\"}</openmaus-goal>",
@@ -119,6 +134,7 @@ beforeAll(async () => {
         displayName: "Busy worker fixture",
         environment: {
           FAKE_CLAUDE_MODE: "slow",
+          FAKE_CLAUDE_SLOW_FINISH_GATE: busyWorkerFinishGate,
           FAKE_CLAUDE_REPLIES: JSON.stringify([
             "The unrelated direct research is complete.",
             "Evidence gathered for the coordinator.",
@@ -132,6 +148,7 @@ beforeAll(async () => {
         displayName: "Stop-scoped lead fixture",
         environment: {
           FAKE_CLAUDE_MODE: "slow",
+          FAKE_CLAUDE_SLOW_FINISH_GATE: stopScopedLeadFinishGate,
           FAKE_CLAUDE_REPLIES: JSON.stringify([
             "I am delegating this scheduled goal.\n<openmaus-goal>{\"status\":\"continue\",\"next\":\"Delayed worker\",\"instruction\":\"Finish the scheduled analysis\",\"detail\":\"Waiting for the delayed worker.\"}</openmaus-goal>",
             "This is unrelated direct work and should be stopped.",
@@ -145,7 +162,8 @@ beforeAll(async () => {
         driver: "claudeAgent",
         displayName: "Stop-scoped worker fixture",
         environment: {
-          FAKE_CLAUDE_MODE: "slow",
+          FAKE_CLAUDE_MODE: "background-result",
+          FAKE_CLAUDE_FINISH_GATE: stopScopedWorkerFinishGate,
           FAKE_CLAUDE_REPLIES: JSON.stringify([
             "The worker's unrelated direct task completed naturally.",
             "Scheduled analysis returned to the coordinator.",
@@ -167,6 +185,7 @@ beforeAll(async () => {
         displayName: "Routine goal fixture",
         environment: {
           FAKE_CLAUDE_MODE: "slow",
+          FAKE_CLAUDE_SLOW_FINISH_GATE: routineGoalFinishGate,
           FAKE_CLAUDE_REPLIES: JSON.stringify([
             "The scheduled review is complete.\n<openmaus-goal>{\"status\":\"completed\",\"detail\":\"Scheduled team review completed.\"}</openmaus-goal>",
           ]),
@@ -305,6 +324,9 @@ describe("goal-driven channel runs", () => {
       const waitingState = (await api("GET", "/api/bots?messages=30")).body;
       const waitingRoom = waitingState.groups.find((group: { id: string }) => group.id === room.id);
       const cardId = waitingRoom.messages.find((message: { kind: string }) => message.kind === "goal.run").id;
+      // Release only after the wait card is observed; process startup on a
+      // slow runner must not consume the fake CLI's fixed completion window.
+      writeFileSync(busyGoalFinishGate, "observed the waiting goal");
 
       await expect.poll(async () => {
         const state = (await api("GET", "/api/bots?messages=30")).body;
@@ -383,6 +405,10 @@ describe("goal-driven channel runs", () => {
         roomBusyBotId: null,
         workerDirectBusy: true,
       });
+
+      // Keep the worker occupied until the waiting state is observed, even
+      // when CI takes longer than the fake driver's default 800 ms turn.
+      writeFileSync(busyWorkerFinishGate, "release");
 
       await expect.poll(async () => {
         const state = (await api("GET", "/api/bots?messages=30")).body;
@@ -791,6 +817,9 @@ describe("goal-driven channel runs", () => {
         workerBusy: true,
       });
 
+      // Hold just this unrelated direct turn until Stop is observed. The
+      // initial goal delegation used the already-open gate above.
+      rmSync(stopScopedLeadFinishGate, { force: true });
       expect((await api("POST", `/api/bots/${lead.id}/messages`, {
         text: "Start unrelated coordinator work",
       })).status).toBe(202);
@@ -814,6 +843,7 @@ describe("goal-driven channel runs", () => {
         return state.bots.find((bot: { id: string }) => bot.id === lead.id)?.busy;
       }, { timeout: 5_000 }).toBe(false);
 
+      writeFileSync(stopScopedLeadFinishGate, "allow the later goal continuation");
       // The worker may settle and advance the room while Stop is in flight.
       // Either in-progress or already-completed is valid; cancellation/stopped
       // is the regression this snapshot must exclude.
@@ -826,6 +856,7 @@ describe("goal-driven channel runs", () => {
       expect(["working", "completed"]).toContain(afterStopCard.goalRun.status);
       expect(afterStopCard.goalRun.status).not.toBe("stopped");
 
+      writeFileSync(stopScopedWorkerFinishGate, "finish");
       await expect.poll(async () => {
         const calendar = (await api("GET", "/api/routines")).body;
         const completed = calendar.runs.find((run: { id: string }) => run.id === runId);
@@ -851,6 +882,7 @@ describe("goal-driven channel runs", () => {
         turnCount: 3,
       });
     } finally {
+      writeFileSync(stopScopedWorkerFinishGate, "finish");
       await api("POST", `/api/groups/${room.id}/interrupt`).catch(() => undefined);
       await api("POST", `/api/bots/${lead.id}/interrupt`).catch(() => undefined);
       await api("POST", `/api/bots/${worker.id}/interrupt`).catch(() => undefined);
@@ -925,6 +957,7 @@ describe("goal-driven channel runs", () => {
         threadId: running.threadId,
         working: true,
       });
+      writeFileSync(routineGoalFinishGate, "opened the running background task");
 
       await expect.poll(async () => {
         const calendar = (await api("GET", "/api/routines")).body;
@@ -1070,6 +1103,7 @@ describe("goal-driven channel runs", () => {
 
     const retryWhileQueued = await api("POST", `/api/groups/${room.id}/messages`, queuedBody);
     expect(retryWhileQueued.body).toMatchObject({ queued: true, queueId: queued.body.queueId });
+    writeFileSync(queueFinishGate, "observed the queued message and idempotent retry");
 
     await expect.poll(async () => {
       const state = (await api("GET", "/api/bots?messages=30")).body;

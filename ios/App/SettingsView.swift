@@ -9,6 +9,7 @@ struct SettingsView: View {
     @State private var enablingNotifications = false
     @AppStorage(PrefKey.activityDetail) private var activityDetail = ActivityDetail.full.rawValue
     @AppStorage(PrefKey.islandIntro) private var islandIntro = IslandIntro.oncePerBot.rawValue
+    @AppStorage(PrefKey.language) private var language = AppLanguage.system.rawValue
     private let onConnect: (() -> Void)?
 
     init(onConnect: (() -> Void)? = nil) {
@@ -23,7 +24,7 @@ struct SettingsView: View {
                         ConnectedComputersView()
                     } label: {
                         ComputerSettingsRow(
-                            name: connection.name,
+                            name: Text(verbatim: connection.name),
                             status: computerStatusText,
                             connected: session.status == .live
                         )
@@ -33,8 +34,8 @@ struct SettingsView: View {
                         onConnect?()
                     } label: {
                         ComputerSettingsRow(
-                            name: "Connect a computer",
-                            status: "Not connected",
+                            name: Text("Connect a computer"),
+                            status: Text("Not connected"),
                             connected: false
                         )
                     }
@@ -66,7 +67,7 @@ struct SettingsView: View {
             Section {
                 Picker(selection: $activityDetail) {
                     ForEach(ActivityDetail.allCases, id: \.rawValue) { level in
-                        Text(level.label).tag(level.rawValue)
+                        Text(LocalizedStringKey(level.label)).tag(level.rawValue)
                     }
                 } label: {
                     Label {
@@ -78,7 +79,7 @@ struct SettingsView: View {
 
                 Picker(selection: $islandIntro) {
                     ForEach(IslandIntro.allCases, id: \.rawValue) { option in
-                        Text(option.label).tag(option.rawValue)
+                        Text(LocalizedStringKey(option.label)).tag(option.rawValue)
                     }
                 } label: {
                     Label {
@@ -100,7 +101,23 @@ struct SettingsView: View {
             } header: {
                 Text("Chat")
             } footer: {
-                Text(ActivityDetail(rawValue: activityDetail)?.caption ?? "")
+                Text(LocalizedStringKey(ActivityDetail(rawValue: activityDetail)?.caption ?? ""))
+            }
+
+            Section {
+                Picker(selection: $language) {
+                    ForEach(AppLanguage.allCases) { option in
+                        Text(option.label).tag(option.rawValue)
+                    }
+                } label: {
+                    Label {
+                        Text("Language")
+                    } icon: {
+                        SettingsIcon(symbol: "globe", color: .teal)
+                    }
+                }
+            } footer: {
+                Text("Changes the language inside OpenMausMobile. Buttons drawn by iOS itself follow the phone's language, which you can set for this app in iOS Settings.")
             }
 
             if session.connection != nil {
@@ -109,19 +126,23 @@ struct SettingsView: View {
                         TasksRoutinesView()
                     } label: {
                         Label {
-                            Text("Tasks & Routines")
+                            Text("Threads & Routines")
                         } icon: {
                             SettingsIcon(symbol: "calendar.badge.clock", color: .orange)
                         }
                     }
 
-                    NavigationLink {
-                        ConnectedAppsView()
-                    } label: {
-                        Label {
-                            Text("Connected Apps")
-                        } icon: {
-                            SettingsIcon(symbol: "link", color: .blue)
+                    // Connecting apps needs the admin scope; a chat-only
+                    // server session leaves it to the owner, in the server's UI.
+                    if session.canAdminister {
+                        NavigationLink {
+                            ConnectedAppsView()
+                        } label: {
+                            Label {
+                                Text("Connected Apps")
+                            } icon: {
+                                SettingsIcon(symbol: "link", color: .blue)
+                            }
                         }
                     }
                 }
@@ -139,7 +160,7 @@ struct SettingsView: View {
         }
     }
 
-    private var notificationAccessibilityHint: String {
+    private var notificationAccessibilityHint: LocalizedStringKey {
         if notificationsAreEnabled { return "Notifications are enabled" }
         if session.notificationAuthorization == .denied { return "Opens device Settings" }
         return "Asks for permission to send notifications"
@@ -155,23 +176,23 @@ struct SettingsView: View {
                 ProgressView()
                     .controlSize(.small)
             } else {
-                Text(session.notificationStatusText)
+                Text(LocalizedStringKey(session.notificationStatusText))
                     .foregroundStyle(.secondary)
             }
         }
     }
 
-    private var statusText: String { session.status.settingsText }
+    private var statusText: Text { session.status.settingsText }
 
-    private var computerStatusText: String {
+    private var computerStatusText: Text {
         guard session.connections.count > 1 else { return statusText }
-        return "\(statusText) · \(session.connections.count) saved"
+        return statusText + Text(verbatim: " · ") + Text("\(session.connections.count) saved")
     }
 }
 
 private struct ComputerSettingsRow: View {
-    let name: String
-    let status: String
+    let name: Text
+    let status: Text
     let connected: Bool
 
     var body: some View {
@@ -186,14 +207,14 @@ private struct ComputerSettingsRow: View {
             .accessibilityHidden(true)
 
             VStack(alignment: .leading, spacing: 3) {
-                Text(name)
+                name
                     .foregroundStyle(.primary)
                     .lineLimit(1)
                 HStack(spacing: 5) {
                     Circle()
                         .fill(connected ? Color.green : Color.secondary)
                         .frame(width: 7, height: 7)
-                    Text(status)
+                    status
                         .font(.footnote)
                         .foregroundStyle(.secondary)
                         .lineLimit(1)
@@ -223,6 +244,14 @@ struct ConnectedComputersView: View {
     @EnvironmentObject private var session: Session
     @State private var pendingRemoval: Connection?
 
+    /// The dialog interpolates the computer's own name. With no name there is
+    /// copy to fall back to, rather than an English word inside a translated
+    /// sentence.
+    private var removalTitle: LocalizedStringKey {
+        guard let name = pendingRemoval?.name else { return "Remove this computer?" }
+        return "Remove \(name)?"
+    }
+
     private var otherComputers: [Connection] {
         session.connections.filter { $0.id != session.connection?.id }
     }
@@ -235,7 +264,7 @@ struct ConnectedComputersView: View {
                         ConnectionSecurityView()
                     } label: {
                         ComputerSettingsRow(
-                            name: active.name,
+                            name: Text(verbatim: active.name),
                             status: session.status.settingsText,
                             connected: session.status == .live
                         )
@@ -292,7 +321,7 @@ struct ConnectedComputersView: View {
         .navigationTitle("Computers")
         .navigationBarTitleDisplayMode(.inline)
         .confirmationDialog(
-            "Remove \(pendingRemoval?.name ?? "this computer")?",
+            removalTitle,
             isPresented: Binding(
                 get: { pendingRemoval != nil },
                 set: { if !$0 { pendingRemoval = nil } }
@@ -330,8 +359,11 @@ struct ConnectionSecurityView: View {
                         VStack(alignment: .leading, spacing: 4) {
                             Text(connection.name)
                                 .font(.headline)
-                            Label(session.status.settingsText,
-                                  systemImage: session.status == .live ? "checkmark.circle.fill" : "circle.dotted")
+                            Label {
+                                session.status.settingsText
+                            } icon: {
+                                Image(systemName: session.status == .live ? "checkmark.circle.fill" : "circle.dotted")
+                            }
                                 .font(.subheadline)
                                 .foregroundStyle(session.status == .live ? Color.green : Color.secondary)
                         }
@@ -381,7 +413,7 @@ struct ConnectionSecurityView: View {
                 }
 
                 Section("Troubleshooting") {
-                    Text(troubleshootingText)
+                    troubleshootingText
                         .font(.subheadline)
                         .foregroundStyle(.secondary)
 
@@ -442,18 +474,20 @@ struct ConnectionSecurityView: View {
         }
     }
 
-    private var troubleshootingText: String {
+    /// Our copy, except for `.offline`, whose text the computer itself sent and
+    /// which is shown exactly as it arrived.
+    private var troubleshootingText: Text {
         switch session.status {
         case .live:
-            return "This computer is connected and responding normally."
+            return Text("This computer is connected and responding normally.")
         case .connecting:
-            return "OpenMausBot is trying the saved connection automatically."
+            return Text("OpenMausBot is trying the saved connection automatically.")
         case let .offline(reason):
-            return reason
+            return Text(verbatim: reason)
         case .unauthorized:
-            return "This device was removed from the computer. Pair it again to reconnect."
+            return Text("This device was removed from the computer. Pair it again to reconnect.")
         case .unpaired:
-            return "This device is not paired with a computer."
+            return Text("This device is not paired with a computer.")
         }
     }
 
@@ -465,13 +499,13 @@ struct ConnectionSecurityView: View {
 }
 
 private extension Session.Status {
-    var settingsText: String {
+    var settingsText: Text {
         switch self {
-        case .live: return "Connected"
-        case .connecting: return "Connecting…"
-        case .unpaired: return "Not paired"
-        case .unauthorized: return "Needs pairing"
-        case .offline: return "Offline"
+        case .live: return Text("Connected")
+        case .connecting: return Text("Connecting…")
+        case .unpaired: return Text("Not paired")
+        case .unauthorized: return Text("Needs pairing")
+        case .offline: return Text("Offline")
         }
     }
 }

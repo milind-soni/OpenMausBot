@@ -24,9 +24,9 @@ const dependencyRoot = join(sdkRoot, "..", "..");
 const sdkPackage = JSON.parse(await readFile(join(sdkRoot, "package.json"), "utf8"));
 const expectedVersion = String(sdkPackage.version);
 const release = {
-  version: "0.20.0",
-  file: "cua-driver-rs-0.20.0-darwin-universal-binary.tar.gz",
-  sha256: "07a88ea2c28a9ead66b2d9f6f93fab4b1189a1f7c704d2cd7b6d12c30eee9984",
+  version: "0.22.1",
+  file: "cua-driver-rs-0.22.1-darwin-universal-binary.tar.gz",
+  sha256: "2abf82826fede4bb2ec748e1a10d6e4d92ef36fc39bbd86e3b47bd8cbbd447d6",
 };
 if (expectedVersion !== release.version) {
   throw new Error(

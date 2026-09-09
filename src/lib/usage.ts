@@ -1,6 +1,7 @@
 // Turning banked token/cost figures into something a header chip can show.
 // Pure, so the numbers can be tested without the components.
 import type { Bot, TaskUsage } from "@/state/store";
+import { t } from "./i18n";
 
 export const EMPTY_USAGE: TaskUsage = { input: 0, output: 0, costUsd: null, turns: 0 };
 
@@ -74,22 +75,25 @@ export function cachedInput(u: TaskUsage): number {
  * "was that really 100k?" question gets answered. */
 export function usageDetail(u: TaskUsage): string {
   const cached = cachedInput(u);
-  const input = cached > 0 ? `${formatTokens(u.input)} in (${formatTokens(cached)} cached)` : `${formatTokens(u.input)} in`;
-  return `${input} · ${formatTokens(u.output)} out`;
+  const input =
+    cached > 0
+      ? t("chat.usage.inCached", { tokens: formatTokens(u.input), cached: formatTokens(cached) })
+      : t("chat.usage.in", { tokens: formatTokens(u.input) });
+  return `${input} · ${t("chat.usage.out", { tokens: formatTokens(u.output) })}`;
 }
 
 /** The chip text: tokens, and cost when known. Empty string when nothing
  * has been spent — a fresh task shows no chip. */
 export function usageChip(u: TaskUsage): string {
   if (u.turns === 0 && u.input + u.output === 0) return "";
-  const parts = [`${formatTokens(u.input + u.output)} tok`];
+  const parts = [t("chat.usage.tokens", { tokens: formatTokens(u.input + u.output) })];
   if (hasFiniteCost(u.costUsd)) parts.push(formatUsd(u.costUsd));
   return parts.join(" · ");
 }
 
 /** How to caption a cost figure given how the engine is billed. */
 export function costCaption(billing: "metered" | "subscription" | undefined): string {
-  if (billing === "subscription") return "equivalent — on your subscription, not billed";
-  if (billing === "metered") return "billed to your API key";
-  return "as reported by the engine";
+  if (billing === "subscription") return t("chat.usage.captionSubscription");
+  if (billing === "metered") return t("chat.usage.captionMetered");
+  return t("chat.usage.captionEngine");
 }

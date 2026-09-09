@@ -95,7 +95,7 @@ export class StdioMcp {
   constructor(def: McpServerDef) {
     this.child = spawn(def.command, def.args ?? [], {
       stdio: ["pipe", "pipe", "pipe"],
-      env: { ...process.env, ...(def.env ?? {}) },
+      env: { ...process.env, ...def.env },
     });
     this.child.stderr.on("data", () => {
       /* best-effort drain so a chatty server never blocks */

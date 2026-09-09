@@ -42,6 +42,7 @@ describe("updatePhase", () => {
   it("reports the bridge's own in-flight states", () => {
     expect(updatePhase(state({ status: "checking" }), false)).toBe("checking");
     expect(updatePhase(state({ status: "downloading" }), false)).toBe("downloading");
+    expect(updatePhase(state({ status: "preparing" }), false)).toBe("preparing");
     expect(updatePhase(state({ status: "installing" }), false)).toBe("installing");
   });
 
@@ -72,6 +73,16 @@ describe("updateLabel", () => {
     expect(updateLabel("downloading", state({ status: "downloading", percent: 41.6 }))).toBe("Downloading… 42%");
   });
 
+  it("distinguishes native preparation from restart readiness", () => {
+    expect(updateLabel("preparing", state({ status: "preparing", percent: 100 }))).toBe("Preparing update…");
+    expect(updateLabel("installing", state({ status: "installing", message: "Restart is taking longer than expected." })))
+      .toBe("Restart is taking longer than expected.");
+    expect(updateLabel("downloaded", state({ status: "downloaded", version: "0.2.0", installMode: "handoff" })))
+      .toBe("Version 0.2.0 ready — install");
+    expect(updateLabel("installing", state({ status: "installing", installMode: "handoff" })))
+      .toBe("Opening a terminal…");
+  });
+
   it("carries the updater's own message when something failed", () => {
     expect(updateLabel("error", state({ status: "error", message: "Network unreachable" }))).toBe(
       "Network unreachable",
@@ -95,6 +106,7 @@ describe("updateBusy", () => {
   it("blocks clicks while something is in flight", () => {
     expect(updateBusy("checking")).toBe(true);
     expect(updateBusy("downloading")).toBe(true);
+    expect(updateBusy("preparing")).toBe(true);
     expect(updateBusy("installing")).toBe(true);
     expect(updateBusy("available")).toBe(false);
     expect(updateBusy("downloaded")).toBe(false);
@@ -123,6 +135,7 @@ describe("updateNoteworthy", () => {
   it("puts a real update on the profile row", () => {
     expect(updateNoteworthy("available")).toBe(true);
     expect(updateNoteworthy("downloading")).toBe(true);
+    expect(updateNoteworthy("preparing")).toBe(true);
     expect(updateNoteworthy("downloaded")).toBe(true);
     expect(updateNoteworthy("installing")).toBe(true);
     expect(updateNoteworthy("error")).toBe(true);

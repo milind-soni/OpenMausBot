@@ -1,18 +1,18 @@
 ---
-title: Chat, tasks, rooms, and teams
+title: Threads, groups, and collaboration
 description: Organize agents like contacts and let them collaborate without losing control of each task.
 icon: MessagesSquare
 ---
 
-## Bots and tasks
+## Bots and threads
 
-A bot is a durable agent identity. A task is one conversation with that bot and has its own transcript, provider session, approvals, costs, and state.
+A bot is a durable agent identity. A thread is one conversation with that bot and has its own transcript, model, provider session, approvals, costs, and running state. Optional folders organize related threads without duplicating the bot's memory or skills.
 
-Use separate tasks when you want fresh context without duplicating the bot. Messages sent while a bot is busy are queued, and supported providers can be steered while they work.
+Use separate threads when you want fresh context or independent work without duplicating the bot. Messages sent to a busy thread are queued, and supported providers can be steered while they work. Other threads can continue independently. See [Bots, folders, and threads](/docs/features/bots-and-tasks) for limits and shared-resource behavior.
 
-## Rooms
+## Groups
 
-Rooms bring several bots into one conversation. Each participant keeps its own agent process and provider state. Room timeouts prevent a participant from blocking the whole group indefinitely.
+Groups bring several bots into one conversation. Each participant keeps its own provider state. Group timeouts prevent a participant from blocking the whole group indefinitely. Existing channels and their thread histories remain intact; the new label does not change turn-taking or delegation.
 
 ## Delegation
 
@@ -24,4 +24,4 @@ Editing an earlier message creates a new conversation path. OpenMausBot avoids r
 
 ## Memory and working folders
 
-Bot memory is visible and editable. A bot may also have a dedicated working folder; rooms can use a shared working folder. Cloud workspaces use a stable default so generated files remain discoverable across tasks.
+Bot memory is visible and editable. A bot may also have a dedicated working folder; groups can use a shared working folder. Cloud workspaces use a stable default so generated files remain discoverable across threads. A sidebar folder is only organization, not a working directory or a permission boundary.

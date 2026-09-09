@@ -1,6 +1,6 @@
 // Left-edge tail: mascot looks around while it works, with a live activity
-// sheen beside it. The moment there is an answer, the label is gone and
-// the full bubble pops in above the mascot (same left edge).
+// sheen beside it. The moment there is an answer, the label is gone while
+// the canonical transcript row performs the settle-in animation above it.
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { cn } from "@/lib/cn";
 import { WorkingTimer } from "@/components/WorkingIndicator";
@@ -11,7 +11,6 @@ export function TurnPresence({
   label = "Thinking",
   answering = false,
   since = null,
-  children,
 }: {
   avatar: ReactNode;
   visible: boolean;
@@ -19,7 +18,6 @@ export function TurnPresence({
   answering?: boolean;
   /** Turn start (epoch ms) — shows a self-ticking elapsed readout while working. */
   since?: number | null;
-  children?: ReactNode;
 }) {
   const [mounted, setMounted] = useState(visible);
   const [phase, setPhase] = useState<"think" | "answer" | "out">(answering ? "answer" : "think");
@@ -45,15 +43,12 @@ export function TurnPresence({
   }, [visible, answering, mounted]);
 
   if (!mounted) return null;
-  const showAnswer = phase === "answer" && children;
   const showWorking = phase === "think";
   return (
     <div className="turn-presence flex flex-col items-start">
-      {showAnswer ? <div className="turn-answer">{children}</div> : null}
       <div
         className={cn(
           "flex items-center gap-2",
-          showAnswer && "turn-mascot-tight",
           phase === "think" && "turn-mascot-in",
           phase === "out" && "turn-mascot-out",
         )}

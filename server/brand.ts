@@ -12,6 +12,7 @@ import { entitled } from "./enterprise.ts";
 
 const HEX_COLOUR = /^#[0-9a-fA-F]{6}$/;
 const MAX_LOGO_CHARS = 300_000;
+const MAX_FAVICON_CHARS = 120_000;
 
 export const brandSchema = z
   .object({
@@ -29,6 +30,12 @@ export const brandSchema = z
       .optional(),
     /** Where "get help" points for this deployment. */
     supportUrl: z.string().url().startsWith("https://", "supportUrl must be an https:// URL").optional(),
+    /** Tab and home-screen icon: an inline data:image/... URI (PNG or SVG, small) or an https:// URL. */
+    favicon: z
+      .string()
+      .max(MAX_FAVICON_CHARS, `favicon must be under ${MAX_FAVICON_CHARS} characters (a 64px PNG or a small SVG)`)
+      .refine((v) => v.startsWith("data:image/") || v.startsWith("https://"), "favicon must be a data:image/... URI or an https:// URL")
+      .optional(),
   })
   .strict();
 

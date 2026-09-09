@@ -6,6 +6,7 @@ describe("Box trial provisioning", () => {
   let api: Server;
   let provisionBox: typeof import("./box.ts").provisionBox;
   const createBodies: Array<{ ttlSeconds: number; noEnv: boolean }> = [];
+  const createKeys: string[] = [];
 
   beforeAll(async () => {
     api = createServer((req, res) => {
@@ -20,6 +21,7 @@ describe("Box trial provisioning", () => {
         if (url.pathname === "/api/box/v1/boxes" && req.method === "POST") {
           const body = JSON.parse(raw);
           createBodies.push(body);
+          createKeys.push(String(req.headers["idempotency-key"] ?? ""));
           if (createBodies.length === 1) {
             res.writeHead(400);
             return res.end(JSON.stringify({
@@ -28,13 +30,13 @@ describe("Box trial provisioning", () => {
             }));
           }
           res.writeHead(201);
-          return res.end(JSON.stringify({ ok: true, box: { id: "trial-box", state: "ready" } }));
+          return res.end(JSON.stringify({ ok: true, box: { id: "bx_23456789", state: "ready" } }));
         }
-        if (url.pathname === "/api/box/v1/boxes/trial-box" && req.method === "PATCH") {
+        if (url.pathname === "/api/box/v1/boxes/bx_23456789" && req.method === "PATCH") {
           return res.end(JSON.stringify({ ok: true }));
         }
-        if (url.pathname === "/api/box/v1/boxes/trial-box" && req.method === "GET") {
-          return res.end(JSON.stringify({ ok: true, box: { id: "trial-box", state: "ready" } }));
+        if (url.pathname === "/api/box/v1/boxes/bx_23456789" && req.method === "GET") {
+          return res.end(JSON.stringify({ ok: true, box: { id: "bx_23456789", state: "ready" } }));
         }
         if (url.pathname.endsWith("/commands")) {
           return res.end(JSON.stringify({ ok: true, exitCode: 0, stdout: "", stderr: "" }));
@@ -62,10 +64,13 @@ describe("Box trial provisioning", () => {
     // SAFETY: AppConfig's remaining sections are optional; this test supplies
     // the only credential the Box path reads.
     const result = await provisionBox({ box: { token: "box_trial" } } as any, "trial-bot", "Trial Bot");
-    expect(result.boxId).toBe("trial-box");
+    expect(result.boxId).toBe("bx_23456789");
     expect(createBodies).toEqual([
       { ttlSeconds: 8 * 60 * 60, noEnv: true },
       { ttlSeconds: 2 * 60 * 60, noEnv: true },
     ]);
+    expect(createKeys[0]).toMatch(/^[0-9a-f-]{36}$/);
+    expect(createKeys[1]).toMatch(/^[0-9a-f-]{36}$/);
+    expect(createKeys[1]).not.toBe(createKeys[0]);
   });
 });

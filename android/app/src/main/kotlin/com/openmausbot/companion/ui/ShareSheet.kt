@@ -247,7 +247,11 @@ private fun ShareSheetContent(
                                     val path = session.withPairedShareClient(computerId) { client ->
                                         client.uploadImage(data, attachment.mime, attachment.id)
                                     }
-                                    uploaded += SharedAttachmentReference(path, SharedAttachmentKind.IMAGE)
+                                    uploaded += SharedAttachmentReference(
+                                        path,
+                                        SharedAttachmentKind.IMAGE,
+                                        attachment.name,
+                                    )
                                 }
                                 LocalShareAttachment.Kind.FILE -> {
                                     val uploadedFile = session.withPairedShareClient(computerId) { client ->

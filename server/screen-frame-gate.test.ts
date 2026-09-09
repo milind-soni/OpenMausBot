@@ -5,13 +5,76 @@ import { createHash } from "node:crypto";
 
 import { describe, expect, it } from "vitest";
 
-import { screenFrameHash, screenTouchingTool, settledFrameIsNews } from "./screen-frame-gate.ts";
+import { screenFrameHash, screenSurfaceForTool, screenTouchingTool, settledFrameIsNews } from "./screen-frame-gate.ts";
 
 describe("screenTouchingTool", () => {
   it("strips the Claude driver's mcp__<server>__ prefix", () => {
     expect(screenTouchingTool("mcp__computer__click")).toBe(true);
     expect(screenTouchingTool("mcp__computer__screenshot")).toBe(true);
     expect(screenTouchingTool("mcp__browser__browser_navigate")).toBe(true);
+  });
+
+  it("counts agent-browser's tools, which the engine swap left out", () => {
+    // The Electron surface's names were kept and agent-browser's were never
+    // added, so every browser turn silently stopped earning a picture.
+    expect(screenTouchingTool("mcp__browser__agent_browser_open")).toBe(true);
+    expect(screenTouchingTool("agent_browser_click")).toBe(true);
+    expect(screenTouchingTool("agent_browser_fill")).toBe(true);
+    expect(screenTouchingTool("agent_browser_type")).toBe(true);
+    expect(screenTouchingTool("agent_browser_press")).toBe(true);
+    expect(screenTouchingTool("agent_browser_select")).toBe(true);
+    expect(screenTouchingTool("agent_browser_check")).toBe(true);
+    expect(screenTouchingTool("agent_browser_screenshot")).toBe(true);
+  });
+
+  it("still leaves agent-browser's read-only tools and waits out", () => {
+    expect(screenTouchingTool("agent_browser_snapshot")).toBe(false);
+    expect(screenTouchingTool("agent_browser_read")).toBe(false);
+    expect(screenTouchingTool("agent_browser_get_text")).toBe(false);
+    expect(screenTouchingTool("agent_browser_wait_for_text")).toBe(false);
+    expect(screenTouchingTool("agent_browser_wait_for_load")).toBe(false);
+  });
+
+  it("takes the server__tool spelling the desktop's own cards use", () => {
+    // The approval card for a browser turn reads `browser__agent_browser_open`
+    // — the server segment without Claude's `mcp` in front. Stripping only
+    // `mcp__<server>__` left this unmatched, so a browser turn still settled
+    // with no picture even after agent-browser's tool names were added.
+    expect(screenTouchingTool("browser__agent_browser_open")).toBe(true);
+    expect(screenTouchingTool("browser__agent_browser_screenshot")).toBe(true);
+    expect(screenSurfaceForTool("browser__agent_browser_open")).toBe("browser");
+    // Not only the browser: the computer server's own tools carry the same
+    // spelling and were missed the same way.
+    expect(screenTouchingTool("computer__screenshot")).toBe(true);
+    expect(screenSurfaceForTool("computer__screenshot")).toBe("computer");
+  });
+
+  it("keeps read-only tools out whatever prefix they arrive with", () => {
+    expect(screenTouchingTool("browser__agent_browser_snapshot")).toBe(false);
+    expect(screenTouchingTool("browser__agent_browser_read")).toBe(false);
+    expect(screenTouchingTool("computer__computer_status")).toBe(false);
+  });
+
+  it.each(["local_vm", "computer-use", "vm2", `v${"m".repeat(31)}`])(
+    "accepts the valid %s namespace in both mounted spellings",
+    (namespace) => {
+      for (const prefix of [`mcp__${namespace}__`, `${namespace}__`]) {
+        expect(screenTouchingTool(`${prefix}screenshot`)).toBe(true);
+        expect(screenSurfaceForTool(`${prefix}screenshot`)).toBe("computer");
+        expect(screenTouchingTool(`${prefix}agent_browser_open`)).toBe(true);
+        expect(screenSurfaceForTool(`${prefix}agent_browser_open`)).toBe("browser");
+        for (const tool of ["computer_exec", "computer_status", "agent_browser_snapshot", "wait_for"])
+          expect(screenTouchingTool(`${prefix}${tool}`)).toBe(false);
+      }
+    },
+  );
+
+  it("preserves legacy MCP names without accepting invalid desktop namespaces", () => {
+    expect(screenTouchingTool("mcp__legacy.server__screenshot")).toBe(true);
+    expect(screenTouchingTool("MCP__LOCAL_VM__SCREENSHOT")).toBe(true);
+    expect(screenTouchingTool("legacy.server__screenshot")).toBe(false);
+    expect(screenTouchingTool(`${"v".repeat(33)}__screenshot`)).toBe(false);
+    expect(screenTouchingTool("2vm__screenshot")).toBe(false);
   });
 
   it("takes Codex's bare names and pi's server_tool names", () => {
@@ -75,5 +138,35 @@ describe("settledFrameIsNews", () => {
 
   it("fingerprints with sha256 over the base64, like the observation dedupe", () => {
     expect(screenFrameHash(frame)).toBe(createHash("sha256").update(frame).digest("hex"));
+  });
+});
+
+describe("screenSurfaceForTool", () => {
+  it("sends browser tools to the browser, whichever surface names them", () => {
+    expect(screenSurfaceForTool("agent_browser_open")).toBe("browser");
+    expect(screenSurfaceForTool("mcp__browser__agent_browser_click")).toBe("browser");
+    expect(screenSurfaceForTool("browser_navigate")).toBe("browser");
+  });
+
+  it("sends everything else to the computer", () => {
+    expect(screenSurfaceForTool("click")).toBe("computer");
+    expect(screenSurfaceForTool("mcp__computer__screenshot")).toBe("computer");
+    expect(screenSurfaceForTool("computer_batch")).toBe("computer");
+  });
+
+  it.each(["browser_click", "browser_fill"])("keeps desktop %s on the computer across drivers", (tool) => {
+    expect(screenSurfaceForTool(`mcp__computer__${tool}`)).toBe("computer");
+    expect(screenSurfaceForTool(`computer_${tool}`)).toBe("computer");
+    expect(screenSurfaceForTool(`computer__${tool}`)).toBe("computer");
+    expect(screenSurfaceForTool(tool)).toBe("computer");
+    expect(screenSurfaceForTool(`mcp__browser__${tool}`)).toBe("browser");
+    expect(screenSurfaceForTool(`browser__${tool}`)).toBe("browser");
+    expect(screenSurfaceForTool(`browser_agent_${tool}`)).toBe("browser");
+  });
+
+  it("keeps a browsed page from being illustrated with an idle desktop", () => {
+    // The case that made this necessary: a bot holding both surfaces, whose
+    // turn was entirely web work, settled with a picture of its Local VM.
+    expect(screenSurfaceForTool("agent_browser_open")).not.toBe(screenSurfaceForTool("launch_app"));
   });
 });

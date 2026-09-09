@@ -21,6 +21,10 @@ import fs from "node:fs";
 import net from "node:net";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
+import localOriginModule from "./local-origin.cjs";
+
+// Local control answers only the local server's UI (electron/local-origin.cjs).
+const { localOnly } = localOriginModule;
 
 const require = createRequire(import.meta.url);
 const { createCuaConnectionStore } = require("./cua-connection.cjs");
@@ -296,14 +300,14 @@ export async function stopCua() {
 }
 
 export function registerCuaIpc() {
-  ipcMain.handle("cua:connection", () => connectionStore.get());
-  ipcMain.handle("cua:permissions", () => cuaPermissionsStatus());
-  ipcMain.handle("cua:linux-status", () =>
+  ipcMain.handle("cua:connection", localOnly("cua:connection", () => connectionStore.get()));
+  ipcMain.handle("cua:permissions", localOnly("cua:permissions", () => cuaPermissionsStatus()));
+  ipcMain.handle("cua:linux-status", localOnly("cua:linux-status", () =>
     process.platform === "linux"
       ? ensureLinuxRuntime().getStatus()
       : { enabled: false, status: "unavailable", reasonCode: "unsupported-platform" },
-  );
-  ipcMain.handle("cua:linux-enable", async () => {
+  ));
+  ipcMain.handle("cua:linux-enable", localOnly("cua:linux-enable", async () => {
     if (process.platform !== "linux") {
       return { enabled: false, status: "unavailable", reasonCode: "unsupported-platform" };
     }
@@ -313,8 +317,8 @@ export function registerCuaIpc() {
       console.error("[cua] Linux enable failed:", error);
     }
     return ensureLinuxRuntime().getStatus();
-  });
-  ipcMain.handle("cua:linux-disable", async () => {
+  }));
+  ipcMain.handle("cua:linux-disable", localOnly("cua:linux-disable", async () => {
     if (process.platform !== "linux") {
       return { enabled: false, status: "unavailable", reasonCode: "unsupported-platform" };
     }
@@ -324,8 +328,8 @@ export function registerCuaIpc() {
       console.error("[cua] Linux disable failed:", error);
     }
     return ensureLinuxRuntime().getStatus();
-  });
-  ipcMain.handle("cua:linux-retry", async () => {
+  }));
+  ipcMain.handle("cua:linux-retry", localOnly("cua:linux-retry", async () => {
     if (process.platform === "darwin") {
       try {
         await stopCua();
@@ -356,5 +360,5 @@ export function registerCuaIpc() {
       console.error("[cua] Linux retry failed:", error);
     }
     return ensureLinuxRuntime().getStatus();
-  });
+  }));
 }

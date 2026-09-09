@@ -12,6 +12,44 @@ import { z } from "zod";
 const MAX_FILES = 30;
 const MAX_FILE_BYTES = 256 * 1024;
 const API = "https://api.github.com";
+class ImportLimitError extends Error {}
+
+// One budget for the entire import, including directory discovery. Read the
+// stream within the cap rather than allocating an unbounded response first.
+function boundedImportFetch(fetcher: typeof fetch): typeof fetch {
+  let requests = 0;
+  let bytes = 0;
+  const signal = AbortSignal.timeout(60_000);
+  return async (input, init) => {
+    if (++requests > 128) throw new ImportLimitError("Import request limit reached — paste a specific skill folder instead.");
+    signal.throwIfAborted();
+    const response = await fetcher(input, { ...init, signal });
+    if (!response.ok) {
+      await response.body?.cancel().catch(() => {});
+      return response;
+    }
+    if (!response.body) return response;
+    const listing = String(input).startsWith(`${API}/`);
+    const reader = response.body.getReader();
+    const chunks: Uint8Array[] = [];
+    let size = 0;
+    try {
+      while (true) {
+        const chunk = await reader.read();
+        if (chunk.done) break;
+        size += chunk.value.byteLength;
+        bytes += chunk.value.byteLength;
+        if (size > (listing ? 1_048_576 : MAX_FILE_BYTES) || bytes > 8 * 1_048_576) {
+          throw new ImportLimitError("Import size limit reached — paste a smaller skill folder instead.");
+        }
+        chunks.push(chunk.value);
+      }
+    } finally {
+      await reader.cancel().catch(() => {});
+    }
+    return new Response(Buffer.concat(chunks), { status: response.status, headers: response.headers });
+  };
+}
 
 export interface FetchedSkill {
   source: string;
@@ -85,6 +123,10 @@ async function listDir(target: Target, path: string, fetcher: typeof fetch): Pro
   return fetchListing(url, fetcher);
 }
 
+export const MAX_SKILLS_PER_IMPORT = 30;
+const MAX_FOLDERS_WALKED = 24;
+const MAX_CHILDREN_PER_FOLDER = 60;
+
 /** Where SKILL.md folders live in real repos, per the registry's own
  * discovery order: the pasted path itself, then skills/, then .claude/skills/
  * and .agents/skills/, then one level of direct children. */
@@ -99,25 +141,28 @@ export async function discoverSkillDirs(target: Target, fetcher: typeof fetch): 
   const ordered = [...dirs].sort(
     (a, b) => (preferred.includes(a.name) ? 0 : 1) - (preferred.includes(b.name) ? 0 : 1),
   );
-  for (const dir of ordered.slice(0, 12)) {
-    if (found.length >= 10) break;
+  // The shared fetch budget caps the whole walk, not each nested loop.
+  for (const dir of ordered.slice(0, MAX_FOLDERS_WALKED)) {
+    if (found.length >= MAX_SKILLS_PER_IMPORT) break;
     const base = dir.name === ".claude" || dir.name === ".agents" ? `${dir.path}/skills` : dir.path;
     let children: ContentEntry[];
     try {
       children = await listDir(target, base, fetcher);
-    } catch {
+    } catch (error) {
+      if (error instanceof ImportLimitError || (error instanceof Error && error.name === "TimeoutError")) throw error;
       continue;
     }
     if (children.some((entry) => entry.type === "file" && entry.name === "SKILL.md")) {
       found.push(base);
       continue;
     }
-    for (const child of children.filter((entry) => entry.type === "dir").slice(0, 20)) {
-      if (found.length >= 10) break;
+    for (const child of children.filter((entry) => entry.type === "dir").slice(0, MAX_CHILDREN_PER_FOLDER)) {
+      if (found.length >= MAX_SKILLS_PER_IMPORT) break;
       try {
         const inner = await listDir(target, child.path, fetcher);
         if (inner.some((entry) => entry.type === "file" && entry.name === "SKILL.md")) found.push(child.path);
-      } catch {
+      } catch (error) {
+        if (error instanceof ImportLimitError || (error instanceof Error && error.name === "TimeoutError")) throw error;
         // unreadable child — skip
       }
     }
@@ -134,12 +179,13 @@ export async function fetchSkillDir(target: Target, dir: string, fetcher: typeof
   if (!markdown.some((entry) => entry.name === "SKILL.md")) {
     throw new Error(`no SKILL.md in ${dir || "the repository root"}`);
   }
-  const files = await Promise.all(
-    markdown.map(async (entry) => ({
+  const files: FetchedSkill["files"] = [];
+  for (let i = 0; i < markdown.length; i += 4) {
+    files.push(...await Promise.all(markdown.slice(i, i + 4).map(async (entry) => ({
       path: entry.name,
       content: await fetchText(entry.download_url!, fetcher),
-    })),
-  );
+    }))));
+  }
   const ref = target.ref ? `@${target.ref}` : "";
   return { source: `github.com/${target.owner}/${target.repo}${ref}/${dir}`.replace(/\/$/, ""), files };
 }
@@ -150,6 +196,7 @@ export async function fetchSkillFromSource(
 ): Promise<{ skills: FetchedSkill[] } | { error: string }> {
   const parsed = parseSkillSource(input);
   if ("error" in parsed) return parsed;
+  fetcher = boundedImportFetch(fetcher);
   try {
     if ("rawUrl" in parsed) {
       const content = await fetchText(parsed.rawUrl, fetcher);
@@ -157,7 +204,8 @@ export async function fetchSkillFromSource(
     }
     const dirs = await discoverSkillDirs(parsed, fetcher);
     if (!dirs.length) return { error: "no SKILL.md found there — paste a skill folder or a repo with a skills/ directory" };
-    const skills = await Promise.all(dirs.map((dir) => fetchSkillDir(parsed, dir, fetcher)));
+    const skills: FetchedSkill[] = [];
+    for (const dir of dirs) skills.push(await fetchSkillDir(parsed, dir, fetcher));
     return { skills };
   } catch (error) {
     return { error: error instanceof Error ? error.message : String(error) };

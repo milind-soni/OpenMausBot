@@ -5,13 +5,10 @@
 // straight to the box's REST API, and a Local VM / VPS click rides a
 // transparent stdio bridge into Cua Driver.
 //
-// Failure posture: OPEN. Control is cooperation between the person and
-// their own bot — "hold my hands while you're driving" — not a security
-// boundary against a hostile agent (a hostile agent could reach the same
-// REST endpoint without this proxy). Failing closed would mean a harness
-// hiccup bricks every computer mid-turn, which costs more than the race
-// it would prevent: while the person is driving they are watching the
-// screen, and the panel shows the hold either way.
+// Failure posture: CLOSED once configured. A missing/expired turn capability
+// must never be interpreted as "the person released control": that would let
+// a stale computer proxy resume acting underneath them. An unconfigured
+// client remains disengaged because there is no control surface to consult.
 //
 // The state is cached briefly so a computer_batch of two dozen actions
 // doesn't turn into two dozen loopback round trips.
@@ -21,6 +18,8 @@ export interface ControlState {
   held: boolean;
   /** A help request the person has neither answered nor dismissed. */
   helpOpen: boolean;
+  /** A different thread owns the same physical computer, not a human hold. */
+  blockedReason?: string;
 }
 
 export interface ControlClient {
@@ -37,6 +36,7 @@ export interface ControlClient {
 }
 
 const DISENGAGED: ControlState = { held: false, helpOpen: false };
+const UNAVAILABLE: ControlState = { held: true, helpOpen: false };
 
 export function createControlClient(options?: {
   url?: string;
@@ -57,11 +57,16 @@ export function createControlClient(options?: {
   async function read(): Promise<ControlState> {
     try {
       const res = await fetchImpl(url, { headers, signal: AbortSignal.timeout(2_000) });
-      if (!res.ok) return DISENGAGED;
+      if (!res.ok) return UNAVAILABLE;
       const body: any = await res.json().catch(() => null);
-      return { held: body?.held === true, helpOpen: body?.helpOpen === true };
+      if (typeof body?.held !== "boolean" || typeof body?.helpOpen !== "boolean") return UNAVAILABLE;
+      return {
+        held: body.held,
+        helpOpen: body.helpOpen,
+        ...(typeof body.blockedReason === "string" && body.blockedReason.trim() ? { blockedReason: body.blockedReason } : {}),
+      };
     } catch {
-      return DISENGAGED;
+      return UNAVAILABLE;
     }
   }
 

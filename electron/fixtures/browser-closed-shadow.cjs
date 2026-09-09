@@ -34,6 +34,25 @@ async function waitForFixedViewport(browserView, label, timeoutMs = 2_000) {
   throw new Error(`${label} viewport was not fixed: ${JSON.stringify(viewport)}`);
 }
 
+// Only Linux moves a nested scroller synchronously from the isolated world;
+// everywhere else browser_scroll dispatches a real mouseWheel, which CDP
+// acknowledges as soon as it is routed and the compositor applies a frame or
+// more later. A fixed settle therefore races a loaded runner — macOS CI has
+// read the pre-scroll 0px twice — so poll for the offset the way the viewport
+// above is polled for. Only the assertions that expect movement can wait like
+// this: a scroll that must NOT happen still needs a fixed settle.
+async function waitForScrollTop(browserView, selector, expected, label, timeoutMs = 2_000) {
+  const read = `document.querySelector(${JSON.stringify(selector)}).scrollTop`;
+  const deadline = Date.now() + timeoutMs;
+  let scrollTop = null;
+  do {
+    scrollTop = await browserView.webContents.executeJavaScript(read);
+    if (scrollTop === expected) return scrollTop;
+    await new Promise((resolve) => setTimeout(resolve, 20));
+  } while (Date.now() < deadline);
+  throw new Error(`${label} moved ${scrollTop}px instead of ${expected}px`);
+}
+
 async function closeFixture(manager, browserView, owner) {
   const viewContents = browserView?.webContents;
   const viewDestroyed = viewContents && !viewContents.isDestroyed()
@@ -294,9 +313,7 @@ async function run() {
     process.stdout.write("compact-known-coordinate-click\n");
 
     await manager.scroll("fixture-bot", "down", 600, "");
-    await new Promise((resolve) => setTimeout(resolve, 50));
-    const compactScrollTop = await browserView.webContents.executeJavaScript(`document.getElementById("scroller").scrollTop`);
-    if (compactScrollTop !== 600) throw new Error(`compact nested scroll moved ${compactScrollTop}px instead of 600px`);
+    await waitForScrollTop(browserView, "#scroller", 600, "compact nested scroll");
     await browserView.webContents.executeJavaScript(`document.getElementById("scroller").scrollTop = 0`);
     process.stdout.write("compact-known-coordinate-scroll\n");
 
@@ -327,9 +344,7 @@ async function run() {
     process.stdout.write("real-double-click-sequence\n");
 
     await manager.scroll("fixture-bot", "down", 300, "");
-    await new Promise((resolve) => setTimeout(resolve, 50));
-    const expandedScrollTop = await browserView.webContents.executeJavaScript(`document.getElementById("scroller").scrollTop`);
-    if (expandedScrollTop !== 300) throw new Error(`expanded nested scroll moved ${expandedScrollTop}px instead of 300px`);
+    await waitForScrollTop(browserView, "#scroller", 300, "expanded nested scroll");
     process.stdout.write("expanded-known-coordinate-scroll\n");
 
     const expandedShot = await manager.screenshot("fixture-bot", "");

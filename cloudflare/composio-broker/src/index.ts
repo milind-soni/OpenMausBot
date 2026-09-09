@@ -96,6 +96,8 @@ const MULTI_ACCOUNT_CONFIG = {
 // accounts per page nobody real is near the ceiling.
 const MAX_CONNECTED_ACCOUNT_PAGES = 20;
 const ACCOUNT_ID = /^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$/;
+/** Composio's catalog cursor is base64 of the page and limit. */
+const CATALOG_CURSOR = /^[A-Za-z0-9+/_=-]{1,256}$/;
 const printableAliasSchema = z.string().min(1).max(64).refine((value) => {
   for (const character of value) {
     const codePoint = character.codePointAt(0);
@@ -291,8 +293,13 @@ async function proxyMcp(request: Request, installation: InstallationRow, env: En
   return new Response(response.body, { status: response.status, headers });
 }
 
-async function catalog(env: Env) {
-  const response = await fetch(`${env.COMPOSIO_TOOLKIT_BASE}/toolkits?limit=500&sort_by=usage`, {
+async function catalog(env: Env, url: URL) {
+  // The catalog runs past a thousand toolkits, so pass the caller's cursor
+  // through — dropping it capped the marketplace at one page.
+  const params = new URLSearchParams({ limit: "500", sort_by: "usage" });
+  const cursor = url.searchParams.get("cursor");
+  if (cursor && CATALOG_CURSOR.test(cursor)) params.set("cursor", cursor);
+  const response = await fetch(`${env.COMPOSIO_TOOLKIT_BASE}/toolkits?${params}`, {
     headers: { accept: "application/json", "x-api-key": env.COMPOSIO_API_KEY },
     signal: AbortSignal.timeout(20_000),
   });
@@ -577,7 +584,7 @@ async function route(request: Request, env: Env, ctx: ExecutionContext) {
   if (!installation) return json({ error: "unauthorized" }, 401);
   if (request.method === "GET" && url.pathname === "/v1/me") return json({ installationId: installation.id });
   if (request.method === "POST" && url.pathname === "/v1/mcp") return proxyMcp(request, installation, env, ctx);
-  if (request.method === "GET" && url.pathname === "/v1/catalog") return catalog(env);
+  if (request.method === "GET" && url.pathname === "/v1/catalog") return catalog(env, url);
   if (request.method === "GET" && url.pathname === "/v1/connectors/connected") return connectedServices(installation, env, ctx);
   if (request.method === "GET" && url.pathname === "/v1/connectors") return connectionStatus(url, installation, env, ctx);
   const accountMatch = url.pathname.match(/^\/v1\/connectors\/([a-z0-9][a-z0-9_-]{0,80})\/accounts\/([A-Za-z0-9][A-Za-z0-9_-]{0,127})$/);
@@ -604,6 +611,7 @@ export default {
 
 export {
   authorize,
+  catalog,
   connectedServices,
   connectionStatus,
   createSession,

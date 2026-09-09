@@ -12,6 +12,8 @@ import {
 } from "lucide-react";
 
 import { cn } from "@/lib/cn";
+import { t } from "@/lib/i18n";
+import type { LocaleKey } from "@/locales";
 import { api } from "@/state/store";
 
 export interface McpServerListing {
@@ -35,6 +37,11 @@ interface ProbeResult {
   error?: string;
 }
 
+interface McpMessage {
+  key: LocaleKey;
+  params?: Record<string, string | number>;
+}
+
 const EMPTY_DRAFT: McpDraft = { name: "", command: "", args: "", env: "" };
 const ENV_NAME = /^[A-Za-z_][A-Za-z0-9_]*$/;
 
@@ -45,21 +52,29 @@ export function parseMcpArguments(value: string): string[] {
 export function parseMcpEnvironment(
   value: string,
   savedKeys: readonly string[] = [],
-): { ok: true; env: Record<string, string | true> } | { ok: false; error: string } {
+): { ok: true; env: Record<string, string | true> } | { ok: false; error: McpMessage } {
   const saved = new Set(savedKeys);
   const env: Record<string, string | true> = {};
   for (const original of value.split(/\r?\n/)) {
     const line = original.trim();
     if (!line) continue;
     const equals = line.indexOf("=");
-    if (equals <= 0) return { ok: false, error: `Use KEY=value for “${line}”.` };
+    if (equals <= 0) return { ok: false, error: { key: "mcp.env.useKeyValue", params: { line } } };
     const key = line.slice(0, equals).trim();
     const secret = line.slice(equals + 1);
-    if (!ENV_NAME.test(key)) return { ok: false, error: `“${key}” is not a valid environment variable.` };
-    if (Object.hasOwn(env, key)) return { ok: false, error: `“${key}” is listed more than once.` };
+    if (!ENV_NAME.test(key)) return { ok: false, error: { key: "mcp.env.invalidName", params: { key } } };
+    if (Object.hasOwn(env, key)) return { ok: false, error: { key: "mcp.env.duplicate", params: { key } } };
     env[key] = secret === "" && saved.has(key) ? true : secret;
   }
   return { ok: true, env };
+}
+
+function probeToolsLabel(tools: ProbeResult["tools"]): string {
+  if (!tools?.length) return t("mcp.probe.noTools");
+  const names = tools.map((tool) => tool.name).join(", ");
+  return tools.length === 1
+    ? t("mcp.probe.toolsOne", { names })
+    : t("mcp.probe.toolsMany", { count: tools.length, names });
 }
 
 function draftFor(server: McpServerListing): McpDraft {
@@ -78,8 +93,8 @@ export function McpServersPanel() {
   const [editing, setEditing] = useState<string | "new" | null>(null);
   const [draft, setDraft] = useState<McpDraft>(EMPTY_DRAFT);
   const [busy, setBusy] = useState<string | null>(null);
-  const [error, setError] = useState<string | null>(null);
-  const [notice, setNotice] = useState<string | null>(null);
+  const [error, setError] = useState<string | McpMessage | null>(null);
+  const [notice, setNotice] = useState<(McpMessage & { stateKey?: LocaleKey }) | null>(null);
   const [probe, setProbe] = useState<Record<string, ProbeResult>>({});
   const loadGeneration = useRef(0);
 
@@ -112,7 +127,7 @@ export function McpServersPanel() {
     const name = draft.name.trim();
     const command = draft.command.trim();
     if (!name || !command) {
-      setError("Add a server name and executable command.");
+      setError({ key: "mcp.err.nameAndCommand" });
       return;
     }
     const existing = editing === "new" ? undefined : servers?.find((server) => server.name === editing);
@@ -140,9 +155,7 @@ export function McpServersPanel() {
         },
       );
       setServers(result.servers ?? []);
-      setNotice(editing === "new"
-        ? `${name} was saved off. Test it, then turn it on when you are ready.`
-        : `${name} was updated.`);
+      setNotice({ key: editing === "new" ? "mcp.saved" : "mcp.updated", params: { name } });
       closeEditor();
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : String(cause));
@@ -161,7 +174,11 @@ export function McpServersPanel() {
         body: JSON.stringify({ enabled: !server.enabled }),
       });
       setServers(result.servers ?? []);
-      setNotice(`${server.name} is now ${server.enabled ? "off" : "on"}. New tasks will use this change.`);
+      setNotice({
+        key: "mcp.toggled",
+        params: { name: server.name },
+        stateKey: server.enabled ? "mcp.state.off" : "mcp.state.on",
+      });
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : String(cause));
     } finally {
@@ -192,7 +209,7 @@ export function McpServersPanel() {
   };
 
   const remove = async (server: McpServerListing) => {
-    if (!window.confirm(`Remove the “${server.name}” MCP server?`)) return;
+    if (!window.confirm(t("mcp.removeConfirm", { name: server.name }))) return;
     setBusy(`delete:${server.name}`);
     loadGeneration.current += 1;
     setError(null);
@@ -217,9 +234,9 @@ export function McpServersPanel() {
       <div className="mx-auto max-w-[840px]">
         <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
           <div>
-            <h3 className="text-[15px] font-semibold text-ink">Your MCP servers</h3>
+            <h3 className="text-[15px] font-semibold text-ink">{t("mcp.title")}</h3>
             <p className="mt-1 max-w-[610px] text-[12.5px] leading-relaxed text-ink-secondary">
-              Add a local stdio MCP command once and every compatible bot can use its tools. Tool calls still follow your normal approval settings.
+              {t("mcp.subtitle")}
             </p>
           </div>
           <div className="flex shrink-0 items-center gap-2">
@@ -228,7 +245,7 @@ export function McpServersPanel() {
               onClick={() => void load()}
               disabled={busy !== null}
               className="rounded-lg p-2 text-ink-secondary transition-colors hover:bg-raised hover:text-ink disabled:opacity-40"
-              aria-label="Refresh MCP servers"
+              aria-label={t("mcp.refreshAria")}
             >
               <RefreshCw size={16} className={cn(busy === "load" && "animate-spin")} />
             </button>
@@ -243,24 +260,27 @@ export function McpServersPanel() {
               }}
               className="flex items-center gap-1.5 rounded-lg bg-accent px-3 py-2 text-[12.5px] font-medium text-white disabled:opacity-40"
             >
-              <Plus size={14} /> Add server
+              <Plus size={14} /> {t("mcp.addServer")}
             </button>
           </div>
         </div>
 
         <div className="mt-4 rounded-xl border border-hairline/50 bg-raised/35 px-4 py-3 text-[12px] leading-relaxed text-ink-secondary">
-          MCP commands run on this computer with the environment variables you provide. Only add software you trust. New servers stay off until you enable them.
+          {t("mcp.trustNotice")}
         </div>
 
-        {error && <div role="alert" className="mt-3 rounded-lg bg-danger/10 px-3 py-2 text-[12px] text-danger">{error}</div>}
-        {notice && <div role="status" className="mt-3 rounded-lg bg-success/10 px-3 py-2 text-[12px] text-success">{notice}</div>}
+        {error && <div role="alert" className="mt-3 rounded-lg bg-danger/10 px-3 py-2 text-[12px] text-danger">{typeof error === "string" ? error : t(error.key, error.params)}</div>}
+        {notice && <div role="status" className="mt-3 rounded-lg bg-success/10 px-3 py-2 text-[12px] text-success">{t(notice.key, {
+          ...notice.params,
+          ...(notice.stateKey ? { state: t(notice.stateKey) } : {}),
+        })}</div>}
 
         {editing && (
           <div className="mt-4 rounded-2xl border border-hairline/60 bg-card p-4 sm:p-5">
-            <div className="text-[14px] font-medium text-ink">{editing === "new" ? "Add MCP server" : `Edit ${editing}`}</div>
+            <div className="text-[14px] font-medium text-ink">{editing === "new" ? t("mcp.editorNew") : t("mcp.editorEdit", { name: editing })}</div>
             <div className="mt-4 grid gap-4 sm:grid-cols-2">
               <label className="block">
-                <span className="text-[12px] font-medium text-ink-secondary">Server name</span>
+                <span className="text-[12px] font-medium text-ink-secondary">{t("mcp.field.name")}</span>
                 <input
                   autoFocus={editing === "new"}
                   disabled={editing !== "new"}
@@ -272,7 +292,7 @@ export function McpServersPanel() {
                 />
               </label>
               <label className="block">
-                <span className="text-[12px] font-medium text-ink-secondary">Executable command</span>
+                <span className="text-[12px] font-medium text-ink-secondary">{t("mcp.field.command")}</span>
                 <input
                   autoFocus={editing !== "new"}
                   value={draft.command}
@@ -282,7 +302,7 @@ export function McpServersPanel() {
                 />
               </label>
               <label className="block">
-                <span className="text-[12px] font-medium text-ink-secondary">Arguments · one per line</span>
+                <span className="text-[12px] font-medium text-ink-secondary">{t("mcp.field.args")}</span>
                 <textarea
                   value={draft.args}
                   onChange={(event) => setDraft((current) => ({ ...current, args: event.target.value }))}
@@ -292,7 +312,7 @@ export function McpServersPanel() {
                 />
               </label>
               <label className="block">
-                <span className="text-[12px] font-medium text-ink-secondary">Environment · KEY=value per line</span>
+                <span className="text-[12px] font-medium text-ink-secondary">{t("mcp.field.env")}</span>
                 <textarea
                   value={draft.env}
                   onChange={(event) => setDraft((current) => ({ ...current, env: event.target.value }))}
@@ -300,30 +320,30 @@ export function McpServersPanel() {
                   rows={5}
                   className="mt-1.5 w-full resize-y rounded-lg border border-hairline/60 bg-raised px-3 py-2.5 font-mono text-[12px] text-ink outline-none focus:border-accent"
                 />
-                {editing !== "new" && <span className="mt-1.5 block text-[11px] text-ink-secondary">Leave an existing value blank to keep it saved. Remove the line to delete it.</span>}
+                {editing !== "new" && <span className="mt-1.5 block text-[11px] text-ink-secondary">{t("mcp.envHint")}</span>}
               </label>
             </div>
             <div className="mt-4 flex justify-end gap-2">
-              <button type="button" onClick={closeEditor} className="rounded-lg px-3 py-2 text-[12.5px] text-ink-secondary hover:bg-raised">Cancel</button>
+              <button type="button" onClick={closeEditor} className="rounded-lg px-3 py-2 text-[12.5px] text-ink-secondary hover:bg-raised">{t("mcp.cancel")}</button>
               <button
                 type="button"
                 disabled={busy !== null}
                 onClick={() => void save()}
                 className="flex items-center gap-1.5 rounded-lg bg-accent px-3.5 py-2 text-[12.5px] font-medium text-white disabled:opacity-50"
               >
-                {busy === "save" && <Loader2 size={13} className="animate-spin" />} Save
+                {busy === "save" && <Loader2 size={13} className="animate-spin" />} {t("mcp.save")}
               </button>
             </div>
           </div>
         )}
 
         {servers === null ? (
-          <div className="flex items-center justify-center gap-2 py-24 text-[13px] text-ink-secondary"><Loader2 size={14} className="animate-spin" /> Loading MCP servers…</div>
+          <div className="flex items-center justify-center gap-2 py-24 text-[13px] text-ink-secondary"><Loader2 size={14} className="animate-spin" /> {t("mcp.loading")}</div>
         ) : servers.length === 0 && !editing ? (
           <div className="mt-5 flex min-h-64 flex-col items-center justify-center rounded-2xl border border-dashed border-hairline/60 text-center">
             <div className="flex size-11 items-center justify-center rounded-xl bg-raised text-ink-secondary"><ServerCog size={21} /></div>
-            <div className="mt-3 text-[14px] font-medium text-ink">No custom MCP servers yet</div>
-            <div className="mt-1 max-w-sm text-[12.5px] text-ink-secondary">Add a trusted stdio MCP server to give your bots more tools.</div>
+            <div className="mt-3 text-[14px] font-medium text-ink">{t("mcp.empty.title")}</div>
+            <div className="mt-1 max-w-sm text-[12.5px] text-ink-secondary">{t("mcp.empty.desc")}</div>
           </div>
         ) : (
           <div className="mt-5 space-y-3">
@@ -338,26 +358,29 @@ export function McpServersPanel() {
                     <div className="min-w-0 flex-1">
                       <div className="flex items-center gap-2">
                         <span className="truncate text-[14px] font-medium text-ink">{server.name}</span>
-                        <span className={cn("rounded-full px-2 py-0.5 text-[10.5px]", server.enabled ? "bg-success/10 text-success" : "bg-raised text-ink-secondary")}>{server.enabled ? "On" : "Off"}</span>
+                        <span className={cn("rounded-full px-2 py-0.5 text-[10.5px]", server.enabled ? "bg-success/10 text-success" : "bg-raised text-ink-secondary")}>{t(server.enabled ? "mcp.badge.on" : "mcp.badge.off")}</span>
                       </div>
                       <div className="mt-1 truncate font-mono text-[11.5px] text-ink-secondary">{[server.command, ...server.args].join(" ")}</div>
-                      {server.envKeys.length > 0 && <div className="mt-1 truncate text-[11px] text-ink-secondary">Secrets saved: {server.envKeys.join(", ")}</div>}
+                      {server.envKeys.length > 0 && <div className="mt-1 truncate text-[11px] text-ink-secondary">{t("mcp.secretsSaved", { keys: server.envKeys.join(", ") })}</div>}
                     </div>
                     <div className="flex shrink-0 items-center gap-1">
                       <button type="button" disabled={busy !== null} onClick={() => void test(server)} className="flex items-center gap-1.5 rounded-lg px-2.5 py-2 text-[12px] text-ink-secondary hover:bg-raised hover:text-ink disabled:opacity-40">
-                        {busy === `test:${server.name}` ? <Loader2 size={14} className="animate-spin" /> : <FlaskConical size={14} />} Test
+                        {busy === `test:${server.name}` ? <Loader2 size={14} className="animate-spin" /> : <FlaskConical size={14} />} {t("mcp.test")}
                       </button>
-                      <button type="button" disabled={busy !== null} onClick={() => void toggle(server)} className="flex items-center gap-1.5 rounded-lg px-2.5 py-2 text-[12px] text-ink-secondary hover:bg-raised hover:text-ink disabled:opacity-40" aria-label={`Turn ${server.name} ${server.enabled ? "off" : "on"}`}>
-                        {busy === `toggle:${server.name}` ? <Loader2 size={14} className="animate-spin" /> : <CirclePower size={14} />} {server.enabled ? "Turn off" : "Turn on"}
+                      <button type="button" disabled={busy !== null} onClick={() => void toggle(server)} className="flex items-center gap-1.5 rounded-lg px-2.5 py-2 text-[12px] text-ink-secondary hover:bg-raised hover:text-ink disabled:opacity-40" aria-label={t("mcp.toggleAria", {
+                        name: server.name,
+                        state: t(server.enabled ? "mcp.state.off" : "mcp.state.on"),
+                      })}>
+                        {busy === `toggle:${server.name}` ? <Loader2 size={14} className="animate-spin" /> : <CirclePower size={14} />} {t(server.enabled ? "mcp.turnOff" : "mcp.turnOn")}
                       </button>
-                      <button type="button" disabled={busy !== null} onClick={() => { setEditing(server.name); setDraft(draftFor(server)); setError(null); setNotice(null); }} className="rounded-lg p-2 text-ink-secondary hover:bg-raised hover:text-ink disabled:opacity-40" aria-label={`Edit ${server.name}`}><Pencil size={14} /></button>
-                      <button type="button" disabled={busy !== null} onClick={() => void remove(server)} className="rounded-lg p-2 text-ink-secondary hover:bg-danger/10 hover:text-danger disabled:opacity-40" aria-label={`Remove ${server.name}`}><Trash2 size={14} /></button>
+                      <button type="button" disabled={busy !== null} onClick={() => { setEditing(server.name); setDraft(draftFor(server)); setError(null); setNotice(null); }} className="rounded-lg p-2 text-ink-secondary hover:bg-raised hover:text-ink disabled:opacity-40" aria-label={t("mcp.editAria", { name: server.name })}><Pencil size={14} /></button>
+                      <button type="button" disabled={busy !== null} onClick={() => void remove(server)} className="rounded-lg p-2 text-ink-secondary hover:bg-danger/10 hover:text-danger disabled:opacity-40" aria-label={t("mcp.removeAria", { name: server.name })}><Trash2 size={14} /></button>
                     </div>
                   </div>
                   {result && (
                     <div role="status" className={cn("mt-3 rounded-lg px-3 py-2 text-[12px]", result.ok ? "bg-success/10 text-success" : "bg-danger/10 text-danger")}>
                       {result.ok ? (
-                        <span className="flex items-start gap-2"><CheckCircle2 size={14} className="mt-px shrink-0" /> Connected{result.tools?.length ? ` · ${result.tools.length} tool${result.tools.length === 1 ? "" : "s"}: ${result.tools.map((tool) => tool.name).join(", ")}` : " · no tools advertised"}</span>
+                        <span className="flex items-start gap-2"><CheckCircle2 size={14} className="mt-px shrink-0" /> {t("mcp.probe.connected")} {probeToolsLabel(result.tools)}</span>
                       ) : result.error}
                     </div>
                   )}

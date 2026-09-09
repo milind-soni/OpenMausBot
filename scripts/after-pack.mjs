@@ -5,6 +5,7 @@ import {
   executableTarget,
   verifyCloudflaredExecutable,
 } from "./prepare-cloudflared.mjs";
+import { verifyBrowserBundle } from "./prepare-browser.mjs";
 
 async function requireRealDirectory(directory, mode = 0o755) {
   const details = await lstat(directory);
@@ -75,6 +76,18 @@ export default async function afterPack(context) {
       : path.join(context.appOutDir, "resources")
   );
   await validateCloudflared(resources, context.electronPlatformName, Boolean(context.packager));
+  const browserRoot = path.join(resources, "browser-engine");
+  const hasBrowser = await lstat(browserRoot).then(() => true, (error) => {
+    if (error?.code === "ENOENT") return false;
+    throw error;
+  });
+  // electron-builder warns and skips missing extraResources. A real package
+  // must fail here, before signing, rather than silently ship without Chrome.
+  if (hasBrowser || context.packager) {
+    const arch = { 1: "x64", 3: "arm64" }[context.arch];
+    if (!arch) throw new Error(`Unsupported desktop browser package architecture: ${context.arch}`);
+    await verifyBrowserBundle(browserRoot, `${context.electronPlatformName}-${arch}`);
+  }
 
   if (context.electronPlatformName !== "linux") return;
 

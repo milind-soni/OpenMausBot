@@ -7,6 +7,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import {
   RoutineRequestError,
   RoutineRequestService,
+  consequenceLine,
   routineRequestFingerprint,
   type RoutineProposalInput,
   type RoutineRequestMessage,
@@ -131,6 +132,39 @@ describe("RoutineRequestService", () => {
     expect(JSON.stringify(card)).toContain("redacted");
   });
 
+  it("carries continuity from the proposal through the card to the created routine", async () => {
+    const { service, store, routines } = harness();
+
+    const plain = await service.propose({
+      botId: "bot-a",
+      threadId: "thread-plain",
+      proposal: createProposal(),
+    });
+    expect(plain.detail).toContain("Continuity: Each run starts fresh");
+
+    const proposed = await service.propose({
+      botId: "bot-a",
+      threadId: "thread-a",
+      proposal: createProposal({ continuity: true }),
+    });
+    expect(proposed.detail).toContain("Continuity: Carries the previous run's report into the next run");
+
+    const card = store.messagesFor("thread-a")[0]!.card!;
+    expect(card.routineRequest?.operation).toMatchObject({
+      action: "create",
+      routine: { continuity: true },
+    });
+
+    const result = service.resolve({
+      botId: "bot-a",
+      threadId: "thread-a",
+      requestId: proposed.requestId,
+      behavior: "allow",
+    });
+    expect(result.state).toBe("applied");
+    expect(routines.listRoutines().find((routine) => routine.name === "Morning brief")?.continuity).toBe(true);
+  });
+
   it("canonicalizes receipt fingerprints and binds them to the card's conversation", async () => {
     const { service, store } = harness();
     await service.propose({ botId: "bot-a", threadId: "thread-a", proposal: createProposal() });
@@ -190,6 +224,118 @@ describe("RoutineRequestService", () => {
     expect(card.subtitle).toContain("Name: Full fidelity brief");
     expect(card.subtitle).toContain(`Instructions:\n${instructions}`);
     expect(card.subtitle).toContain("-END");
+  });
+
+  it("states the run cadence consequence before Instructions for an interval routine", async () => {
+    const { service, store } = harness();
+    await service.propose({
+      botId: "bot-a",
+      threadId: "thread-a",
+      proposal: createProposal({ schedule: { type: "interval", everyMinutes: 5 } }),
+    });
+    const card = store.messagesFor("thread-a")[0]!.card!;
+
+    expect(card.subtitle).toContain(
+      "Will run about 288 times a day; each run starts a fresh session.\n\nInstructions:",
+    );
+  });
+
+  it("states the run cadence consequence for a weekday routine", async () => {
+    const { service, store } = harness();
+    await service.propose({
+      botId: "bot-a",
+      threadId: "thread-a",
+      proposal: createProposal({
+        schedule: {
+          type: "weekly",
+          time: "09:00",
+          weekdays: ["monday", "tuesday", "wednesday", "thursday", "friday"],
+        },
+      }),
+    });
+    const card = store.messagesFor("thread-a")[0]!.card!;
+
+    expect(card.subtitle).toContain(
+      "Will run 5 days a week; each run starts a fresh session.\n\nInstructions:",
+    );
+  });
+
+  it("states every day for a full-week routine and once for a one-time routine", async () => {
+    const { service, store, clock } = harness();
+    await service.propose({
+      botId: "bot-a",
+      threadId: "thread-a",
+      proposal: createProposal({
+        schedule: {
+          type: "weekly",
+          time: "09:00",
+          weekdays: ["monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday"],
+        },
+      }),
+    });
+    const everyDayCard = store.messagesFor("thread-a")[0]!.card!;
+    expect(everyDayCard.subtitle).toContain(
+      "Will run every day; each run starts a fresh session.\n\nInstructions:",
+    );
+
+    await service.propose({
+      botId: "bot-a",
+      threadId: "thread-b",
+      proposal: createProposal({
+        schedule: { type: "once", at: new Date(clock.now + 60_000).toISOString() },
+      }),
+    });
+    const onceCard = store.messagesFor("thread-b")[0]!.card!;
+    expect(onceCard.subtitle).toContain(
+      "Will run once; that run starts a fresh session.\n\nInstructions:",
+    );
+  });
+
+  it("recomputes the run cadence line from the routine's effective schedule, not the change set", async () => {
+    const { service, store, routines } = harness();
+    const created = await service.propose({
+      botId: "bot-a",
+      threadId: "thread-a",
+      proposal: createProposal({ schedule: { type: "interval", everyMinutes: 5 } }),
+    });
+    expect(service.resolve({
+      botId: "bot-a",
+      threadId: "thread-a",
+      requestId: created.requestId,
+      behavior: "allow",
+    })).toMatchObject({ claimed: true, state: "applied", action: "create" });
+    const routineId = routines.listRoutines()[0]!.id;
+
+    const apply = async (proposal: RoutineProposalInput) => {
+      await service.propose({ botId: "bot-a", threadId: "thread-a", proposal });
+      const card = store.messagesFor("thread-a").at(-1)!.card!;
+      const result = service.resolve({
+        botId: "bot-a",
+        threadId: "thread-a",
+        requestId: card.requestId!,
+        behavior: "allow",
+      });
+      expect(result).toMatchObject({ claimed: true, state: "applied" });
+      return card;
+    };
+
+    const scheduleChanged = await apply({
+      action: "update",
+      routineId,
+      changes: { schedule: { type: "interval", everyMinutes: 60 } },
+    });
+    expect(scheduleChanged.subtitle).toContain(
+      "Will run about 24 times a day; each run starts a fresh session.",
+    );
+
+    const nameOnly = await apply({
+      action: "update",
+      routineId,
+      changes: { name: "Renamed brief" },
+    });
+    expect(nameOnly.subtitle).toContain(
+      "Will run about 24 times a day; each run starts a fresh session.",
+    );
   });
 
   it("never returns an existing routine's credential-shaped text to the proposing bot", async () => {
@@ -302,11 +448,17 @@ describe("RoutineRequestService", () => {
           type: "interval",
           everyMinutes: 15,
           anchorAt: "2026-08-28T10:07:00Z",
+          weekdays: ["monday", "friday"],
+          window: { start: "09:00", end: "17:00" },
+          endsAt: "2026-09-30T18:00:00Z",
         },
       }),
     });
 
     expect(proposed.summary).toContain("Every 15 minutes");
+    expect(proposed.summary).toContain("Monday, Friday");
+    expect(proposed.summary).toContain("09:00–17:00");
+    expect(proposed.summary).toContain("Sep 30, 2026");
     expect(proposed.summary).toContain("no run limit");
     expect(store.messagesFor("thread-a")[0]?.card?.routineRequest?.operation).toMatchObject({
       action: "create",
@@ -315,8 +467,62 @@ describe("RoutineRequestService", () => {
           type: "interval",
           everyMinutes: 15,
           anchorAt: Date.parse("2026-08-28T10:07:00Z"),
+          weekdays: [1, 5],
+          window: { start: "09:00", end: "17:00" },
+          endsAt: Date.parse("2026-09-30T18:00:00Z"),
         },
       },
+    });
+
+    expect(service.resolve({
+      botId: "bot-a",
+      threadId: "thread-a",
+      requestId: proposed.requestId,
+      behavior: "allow",
+    })).toMatchObject({ claimed: true, state: "applied" });
+    const restricted = routines.listRoutines().find((routine) => routine.sourceThreadId === "thread-a")!;
+    expect(restricted.schedule).toMatchObject({
+      type: "interval",
+      anchorAt: Date.parse("2026-08-28T10:07:00Z"),
+      weekdays: [1, 5],
+      window: { start: "09:00", end: "17:00" },
+      endsAt: Date.parse("2026-09-30T18:00:00Z"),
+    });
+
+    const clearProposal = await service.propose({
+      botId: "bot-a",
+      threadId: "thread-a",
+      proposal: {
+        action: "update",
+        routineId: restricted.id,
+        changes: {
+          schedule: {
+            type: "interval",
+            everyMinutes: 15,
+            weekdays: null,
+            window: null,
+            endsAt: null,
+          },
+        },
+      },
+    });
+    expect(store.messagesFor("thread-a")[1]?.card?.routineRequest?.operation).toMatchObject({
+      action: "update",
+      changes: {
+        schedule: { type: "interval", everyMinutes: 15, weekdays: null, window: null, endsAt: null },
+      },
+    });
+    expect(service.resolve({
+      botId: "bot-a",
+      threadId: "thread-a",
+      requestId: clearProposal.requestId,
+      behavior: "allow",
+    })).toMatchObject({ claimed: true, state: "applied" });
+    const cleared = routines.listRoutines().find((routine) => routine.id === restricted.id)!;
+    expect(cleared.schedule).toEqual({
+      type: "interval",
+      everyMinutes: 15,
+      anchorAt: Date.parse("2026-08-28T10:07:00Z"),
     });
 
     const withoutAnchor = await service.propose({
@@ -333,6 +539,27 @@ describe("RoutineRequestService", () => {
     const deferred = store.messagesFor("thread-b")[0]?.card?.routineRequest?.operation;
     if (deferred?.action !== "create") throw new Error("Expected a create operation");
     expect(deferred.routine.schedule).not.toHaveProperty("anchorAt");
+
+    const restrictedWithoutAnchor = await service.propose({
+      botId: "bot-a",
+      threadId: "thread-c",
+      proposal: createProposal({
+        schedule: {
+          type: "interval",
+          everyMinutes: 15,
+          weekdays: ["friday"],
+          window: { start: "16:00", end: "17:00" },
+        },
+      }),
+    });
+    expect(restrictedWithoutAnchor.nextRunAt).toBeNull();
+    expect(restrictedWithoutAnchor.summary).toContain(
+      "cadence starting at confirmation; first run is the next allowed time",
+    );
+    expect(restrictedWithoutAnchor.summary).toContain("Friday (Asia/Kolkata)");
+    expect(restrictedWithoutAnchor.summary).toContain("16:00–17:00 (Asia/Kolkata)");
+    expect(restrictedWithoutAnchor.detail).toContain("Next allowed time after confirmation (Asia/Kolkata)");
+    expect(restrictedWithoutAnchor.detail).not.toContain("One interval after confirmation");
 
     clock.now = now + 7 * 60_000;
     expect(service.resolve({
@@ -358,6 +585,37 @@ describe("RoutineRequestService", () => {
         schedule: { type: "interval", everyMinutes: 5, anchorAt: "1969-12-31T23:59:59Z" },
       }),
     })).rejects.toThrow(/valid interval start time/);
+  });
+
+  it("rejects a cadence-only update when preserved restrictions make the merged interval invalid", async () => {
+    const now = Date.parse("2026-08-28T10:00:00Z");
+    const { service, store, routines } = harness(now);
+    const routine = routines.create({
+      botId: "bot-a",
+      name: "Narrow check",
+      prompt: "Check during a narrow window.",
+      schedule: {
+        type: "interval",
+        everyMinutes: 5,
+        anchorAt: now,
+        window: { start: "09:00", end: "09:10" },
+      },
+    });
+
+    await expect(service.propose({
+      botId: "bot-a",
+      threadId: "thread-a",
+      proposal: {
+        action: "update",
+        routineId: routine.id,
+        changes: { schedule: { type: "interval", everyMinutes: 15 } },
+      },
+    })).rejects.toThrow(/at least as long as the cadence/);
+    expect(store.messagesFor("thread-a")).toHaveLength(0);
+    expect(routines.listRoutines().find((candidate) => candidate.id === routine.id)?.schedule).toMatchObject({
+      everyMinutes: 5,
+      window: { start: "09:00", end: "09:10" },
+    });
   });
 
   it("refuses a cloud routine before creating a card when cloud execution is not ready", async () => {
@@ -1015,6 +1273,45 @@ describe("RoutineRequestService", () => {
       proposal: { action: "resume", routineId: routine.id },
     })).rejects.toThrow(/new future time/);
   });
+
+  it("explains an ended interval accurately when a resume card becomes stale", async () => {
+    const { service, routines, clock, store } = harness();
+    const end = clock.now + 5 * 60_000;
+    const routine = routines.create({
+      botId: "bot-a",
+      name: "Limited interval",
+      prompt: "Do it while the interval is active.",
+      enabled: false,
+      schedule: {
+        type: "interval",
+        everyMinutes: 5,
+        anchorAt: clock.now,
+        endsAt: end,
+      },
+    });
+    const proposal = await service.propose({
+      botId: "bot-a",
+      threadId: "thread-a",
+      proposal: { action: "resume", routineId: routine.id },
+    });
+    clock.now = end + 1;
+
+    expect(service.resolve({
+      botId: "bot-a",
+      threadId: "thread-a",
+      requestId: proposal.requestId,
+      behavior: "allow",
+    })).toMatchObject({ claimed: true, state: "invalid", status: 409 });
+    expect(store.messagesFor("thread-a")[0]!.card?.held).toMatch(/interval routine has no future runs/i);
+    expect(store.messagesFor("thread-a")[0]!.card?.held).toMatch(/later end time|remove the end restriction/i);
+    expect(store.messagesFor("thread-a")[0]!.card?.held).not.toMatch(/one-time/i);
+
+    await expect(service.propose({
+      botId: "bot-a",
+      threadId: "thread-a",
+      proposal: { action: "resume", routineId: routine.id },
+    })).rejects.toThrow(/interval routine has no future runs/i);
+  });
 });
 
 describe("cross-bot routine targeting", () => {
@@ -1101,5 +1398,20 @@ describe("cross-bot routine targeting", () => {
     expect(routines.listRoutines()).toHaveLength(0);
     // the refusal is written back onto the card so the user sees why
     expect(store.messagesFor("thread-a")[0]?.card?.held).toMatch(/no longer exists/);
+  });
+});
+
+describe("consequenceLine", () => {
+  it("uses singular wording for one run a day and one day a week", () => {
+    expect(consequenceLine({ type: "interval", everyMinutes: 1440 })).toBe(
+      "Will run about once a day; each run starts a fresh session.",
+    );
+    expect(consequenceLine({ type: "daily", time: "09:00", weekdays: [1] })).toBe(
+      "Will run one day a week; each run starts a fresh session.",
+    );
+    expect(consequenceLine({ type: "daily", time: "09:00", weekdays: [1, 3] })).toBe(
+      "Will run 2 days a week; each run starts a fresh session.",
+    );
+    expect(consequenceLine({ type: "once", at: 0 })).toBe("Will run once; that run starts a fresh session.");
   });
 });

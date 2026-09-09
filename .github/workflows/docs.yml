@@ -4,7 +4,8 @@ on:
   pull_request:
     paths:
       - "apps/docs/**"
-      - "scripts/sync-assets.mjs"
+      - "docs/screenshots/**"
+      - "public/app-icon.svg"
       - "package.json"
       - "pnpm-lock.yaml"
       - "pnpm-workspace.yaml"
@@ -13,7 +14,8 @@ on:
     branches: [main]
     paths:
       - "apps/docs/**"
-      - "scripts/sync-assets.mjs"
+      - "docs/screenshots/**"
+      - "public/app-icon.svg"
       - "package.json"
       - "pnpm-lock.yaml"
       - "pnpm-workspace.yaml"

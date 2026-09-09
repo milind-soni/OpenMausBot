@@ -1,0 +1,77 @@
+# Temporary, reviewed Windows-only agent-browser backport. This workflow
+# produces a candidate, never publishes it. Pin its verified artifact digest
+# before the normal package/release gates consume it.
+name: Windows browser vendor build
+
+on:
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - .github/workflows/browser-vendor-windows.yml
+      - scripts/build-windows-browser-vendor.mjs
+      - scripts/build-windows-browser-vendor.test.mjs
+      - scripts/smoke-browser-bundle.mjs
+      - third_party/browser/agent-browser-windows-stdio.patch
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: Build reviewed Windows browser
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    env:
+      RUSTUP_TOOLCHAIN: 1.97.1
+      CARGO_TARGET_X86_64_PC_WINDOWS_GNU_LINKER: x86_64-w64-mingw32-gcc
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 24
+      # This is upstream's package manager, not OpenMausBot's pnpm version.
+      - run: npm install --global pnpm@11.1.3
+      - name: Install the pinned Rust toolchain and upstream Windows linker
+        run: |
+          rustup toolchain install 1.97.1 --profile minimal --target x86_64-pc-windows-gnu
+          sudo apt-get update
+          sudo apt-get install -y mingw-w64
+      - name: Build from the verified source and local backport
+        run: node scripts/build-windows-browser-vendor.mjs --output "$RUNNER_TEMP/browser-vendor"
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: windows-browser-vendor
+          path: ${{ runner.temp }}/browser-vendor/
+          if-no-files-found: error
+          retention-days: 14
+
+  smoke:
+    name: Cold-start and restart on Windows
+    needs: build
+    runs-on: windows-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: pnpm/action-setup@ff378ebe6b225b0680b81c1ad4498ae0d1d3a5e3 # v6.0.10
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 24
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: windows-browser-vendor
+          path: ${{ runner.temp }}/browser-vendor
+      - name: Stage the pinned Chromium and notices
+        run: node scripts/prepare-browser.mjs --current
+      - name: Prove cold start and close/reopen with captured MCP output
+        shell: pwsh
+        run: |
+          $resources = "$env:RUNNER_TEMP/browser-vendor-resources"
+          New-Item -ItemType Directory -Path $resources | Out-Null
+          Copy-Item -Recurse "$env:GITHUB_WORKSPACE/dist-native/browser/win32-x64" "$resources/browser-engine"
+          node scripts/smoke-browser-bundle.mjs --resources "$resources" --engine-candidate "$env:RUNNER_TEMP/browser-vendor/agent-browser-win32-x64.exe"

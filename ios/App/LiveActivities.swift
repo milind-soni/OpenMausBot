@@ -20,12 +20,22 @@ final class LiveActivityCoordinator {
 
     func attach(to session: Session) {
         // Answer from the island: the intent runs in this process.
-        AnswerApprovalIntent.handler = { [weak session] threadId, requestId, choice, isPermission in
-            await session?.answer(threadId: threadId, requestId: requestId, choice: choice, isPermission: isPermission)
+        AnswerApprovalIntent.handler = { [weak self, weak session] threadId, requestId, choice, isPermission in
+            await self?.answer(session: session, threadId: threadId, requestId: requestId, choice: choice, isPermission: isPermission)
         }
         cancellable = session.$state
             .debounce(for: .milliseconds(400), scheduler: DispatchQueue.main)
             .sink { [weak self] state in self?.sync(state) }
+    }
+
+    private func answer(session: Session?, threadId: String, requestId: String, choice: String, isPermission: Bool) async {
+        guard Activity<BotActivityAttributes>.activities.contains(where: {
+            $0.content.state.canAnswer(threadId: threadId, requestId: requestId, choice: choice, isPermission: isPermission)
+        }) else {
+            session?.actionError = "This request has changed. Open the chat to review it."
+            return
+        }
+        await session?.answer(threadId: threadId, requestId: requestId, choice: choice, isPermission: isPermission)
     }
 
     private func sync(_ state: CompanionState) {
@@ -44,13 +54,8 @@ final class LiveActivityCoordinator {
                 kind: update.kind == .needsYou ? "needsYou" : "working",
                 headline: update.kind == .needsYou ? "\(bot.name) needs you" : "\(bot.name) is working",
                 line: update.line.isEmpty ? (update.card?.title ?? "") : update.line,
-                requestId: update.card?.isPending == true ? update.card?.requestId : nil,
-                // A Live Activity cannot show the reviewed SKILL.md. Keep the
-                // alert, but withhold action buttons until the user opens chat.
-                options: update.card?.isPending == true && update.card?.skillRequest == nil
-                    ? (update.card?.options ?? [])
-                    : [],
-                isPermission: update.card?.isPermission ?? false,
+                threadId: update.chat.threadId,
+                card: update.card,
                 since: since[bot.id]?.at ?? Date()
             )
             if lastSent[bot.id] == content { continue }
@@ -66,7 +71,9 @@ final class LiveActivityCoordinator {
                 )
                 : nil
             if let activity = Activity<BotActivityAttributes>.activities.first(where: { $0.attributes.botId == bot.id }) {
-                let newAsk = update.kind == .needsYou && lastSent[bot.id]?.requestId != content.requestId
+                let newAsk = update.kind == .needsYou && (
+                    lastSent[bot.id]?.threadId != content.threadId || lastSent[bot.id]?.requestId != content.requestId
+                )
                 Task { await activity.update(.init(state: content, staleDate: nil), alertConfiguration: newAsk ? alert : nil) }
             } else {
                 let attributes = BotActivityAttributes(botId: bot.id, threadId: bot.threadId, name: bot.name, color: bot.color)

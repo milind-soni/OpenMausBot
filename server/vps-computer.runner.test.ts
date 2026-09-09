@@ -10,6 +10,7 @@ vi.mock("node:child_process", async () => ({
 }));
 
 import { defaultRunner } from "./vps-computer.ts";
+import { resolveCliSpawn } from "./env-path.ts";
 
 type FakeChild = EventEmitter & {
   stdin: Writable;
@@ -46,7 +47,12 @@ describe("default VPS command runner", () => {
     child.emit("close", 0, null);
 
     await expect(result).resolves.toEqual({ stdout: "out", stderr: "err" });
-    expect(spawnMock).toHaveBeenCalledWith("docker", ["info"], expect.objectContaining({ shell: false }));
+    const resolved = resolveCliSpawn("docker", ["info"]);
+    expect(spawnMock).toHaveBeenCalledWith(resolved.command, resolved.args, {
+      shell: false,
+      env: expect.objectContaining({ PATH: expect.any(String) }),
+      stdio: ["pipe", "pipe", "pipe"],
+    });
   });
 
   it("turns stdin EPIPE into a rejected command instead of an unhandled error", async () => {

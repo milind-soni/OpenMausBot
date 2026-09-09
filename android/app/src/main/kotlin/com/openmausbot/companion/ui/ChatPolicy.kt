@@ -1,8 +1,10 @@
 package com.openmausbot.companion.ui
 
+import com.openmausbot.companion.core.AttachedMessageContent
 import com.openmausbot.companion.core.Bot
 import com.openmausbot.companion.core.Chat
 import com.openmausbot.companion.core.ChatSummary
+import com.openmausbot.companion.core.ChatTarget
 import com.openmausbot.companion.core.CompanionState
 import com.openmausbot.companion.core.Message
 import com.openmausbot.companion.core.OptionCard
@@ -51,15 +53,7 @@ object ThreadResolution {
     fun chatOrNull(state: CompanionState, threadId: String): Chat? =
         (resolve(state, threadId) as? Result.Open)?.chat
 
-    /**
-     * The chat a destination points at.
-     *
-     * An addressed chat resolves by its owner alone, so the screen follows the
-     * bot: through a task switch, through a task being created, and through the
-     * deletion of the very task that was open — where the desktop moves the bot
-     * to another task and the phone has no business going home. Only an owner
-     * that is really gone closes the chat.
-     */
+    /** Keep the addressed task open until the reader switches or it is removed. */
     fun resolve(state: CompanionState, destination: Destination.Conversation): Result =
         when (destination) {
             is Destination.Chat -> state.chat(destination.target)?.let(Result::Open)
@@ -70,21 +64,10 @@ object ThreadResolution {
     fun resolve(state: CompanionState, threadId: String): Result {
         state.botForThread(threadId)?.let { return Result.Open(Chat.BotChat(it)) }
         state.roomForThread(threadId)?.let { return Result.Open(Chat.RoomChat(it)) }
-        // A bot that switched task now answers to a different thread, and a
-        // notification may name a task that is no longer the open one. The chat
-        // follows the bot, not the thread it was opened on — so a thread that is
-        // one of a bot's tasks still resolves to that bot, and the screen shows
-        // whichever task the bot is in now.
-        state.bots
-            .firstOrNull { bot -> bot.tasks.orEmpty().any { it.threadId == threadId } }
-            ?.let { return Result.Open(Chat.BotChat(it)) }
-        // Channel tasks use the same owner-following navigation as bot tasks.
-        // Session switches the room before opening a notification/search hit;
-        // until then, resolving the owner keeps a stale destination from
-        // looking deleted.
         state.rooms
             .firstOrNull { room -> room.tasks.orEmpty().any { it.threadId == threadId } }
-            ?.let { return Result.Open(Chat.RoomChat(it)) }
+            ?.let { room -> state.chat(ChatTarget.Room(room.id, threadId)) }
+            ?.let { return Result.Open(it) }
         return unknown(state)
     }
 
@@ -187,7 +170,7 @@ object SearchPolicy {
  * with a task list get the same task controls as an agent. Exporting is not a
  * bot idea — a room has a transcript like anything else.
  */
-enum class ChatActionId { PHOTOS, FILES, NEW_TASK, TASKS, WATCH_COMPUTER, SHARE_MARKDOWN, SHARE_JSON, INTERRUPT }
+enum class ChatActionId { PHOTOS, FILES, NEW_TASK, TASKS, WATCH_COMPUTER, SETTINGS, SHARE_MARKDOWN, SHARE_JSON, INTERRUPT }
 
 data class ChatAction(
     val id: ChatActionId,
@@ -228,14 +211,19 @@ object ChatActions {
         if (bot != null) {
             out += ChatAction(
                 id = ChatActionId.NEW_TASK,
-                title = "New task",
+                title = "New thread",
                 subtitle = "Start a fresh thread with ${bot.name}",
-                enabled = bot.busy != true,
+                enabled = TaskRules.canCreate(bot),
             )
             out += ChatAction(
                 id = ChatActionId.TASKS,
-                title = "Tasks",
+                title = "Threads",
                 subtitle = "Switch, rename or remove one",
+            )
+            out += ChatAction(
+                id = ChatActionId.SETTINGS,
+                title = "Bot settings",
+                subtitle = "Model, profile, voice and notifications",
             )
             out += ChatAction(
                 id = ChatActionId.WATCH_COMPUTER,
@@ -245,7 +233,7 @@ object ChatActions {
         } else if (chat.supportsTasks) {
             out += ChatAction(
                 id = ChatActionId.NEW_TASK,
-                title = "New task",
+                title = "New thread",
                 subtitle = "Start a fresh conversation in ${chat.name}",
                 // iOS: `disabled: current.busy || hasPendingApproval`, on the room
                 // branch only — a channel waiting on an answer does not get a
@@ -254,14 +242,14 @@ object ChatActions {
             )
             out += ChatAction(
                 id = ChatActionId.TASKS,
-                title = "Tasks",
+                title = "Threads",
                 subtitle = "Switch, rename or remove one",
             )
         }
         out += ChatAction(
             id = ChatActionId.SHARE_MARKDOWN,
             title = "Share transcript",
-            subtitle = "This chat as Markdown",
+            subtitle = "This thread as Markdown",
         )
         out += ChatAction(
             id = ChatActionId.SHARE_JSON,
@@ -476,7 +464,10 @@ object SearchHitRole {
 object MessageActions {
     /** The text worth putting on the clipboard, or null when there is none. */
     fun copyableText(message: Message): String? = when (message.kind) {
-        Message.Kind.TEXT, Message.Kind.UNKNOWN -> message.text?.takeIf { it.isNotBlank() }
+        Message.Kind.TEXT, Message.Kind.UNKNOWN -> message.text
+            ?.let { AttachedMessageContent.parse(it) }
+            ?.text
+            ?.takeIf { it.isNotBlank() }
         // An approval card is worth copying for what it is asking to do.
         Message.Kind.OPTIONS -> message.card
             ?.let { card -> listOf(card.title, card.subtitle).filter { it.isNotBlank() } }
@@ -484,6 +475,18 @@ object MessageActions {
             ?.joinToString("\n\n")
         // A tool chip is context, and a screenshot is pixels.
         Message.Kind.ACTIVITY, Message.Kind.SCREEN -> null
+    }
+
+    /**
+     * Original user text can be retried only when it has no uploaded payload.
+     * Retrying an attachment message would either leak its computer-local path
+     * or silently resend a message without the file.
+     */
+    fun editableText(message: Message): String? {
+        if (message.role != Message.Role.USER || message.kind != Message.Kind.TEXT) return null
+        val raw = message.text ?: return null
+        if (AttachedMessageContent.parse(raw).attachments.isNotEmpty()) return null
+        return raw
     }
 }
 
@@ -548,8 +551,8 @@ object SlashCommands {
         ),
         SlashCommand(
             id = SlashCommandId.TASKS,
-            title = "/tasks",
-            description = "View and manage bot task threads",
+            title = "/threads",
+            description = "View and manage threads",
             effect = SlashEffect.OpenTasks,
         ),
         SlashCommand(

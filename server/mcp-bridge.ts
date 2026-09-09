@@ -1,17 +1,16 @@
-// The one transparent stdio bridge behind both MCP entry points
-// (container-mcp.ts for the Local VM, vps-container-mcp.ts for the BYO VPS).
-// It defines no tools and parses no MCP messages: bytes in, bytes out.
+// The shared stdio bridge for the host computer, Local VM, and BYO VPS.
 //
-// The single exception to that transparency is the who-is-driving gate
-// (opt-in via `gate`). While the person holds control of this computer in
-// the app, a `tools/call` from the agent is answered with a refusal HERE,
-// on the near side, and never forwarded — Cua Driver on the far side has
-// no concept of a person holding the wheel, so the refusal cannot come
-// from anywhere else. Everything that is not a tools/call still passes
-// through untouched, and with no gate configured the bridge remains the
-// byte-for-byte pipe described above.
+// It is almost transparent — bytes in, bytes out — with two deliberate
+// near-side exceptions:
 //
-// Two behaviors live here so neither entry point can drift:
+//   1. `ping`. The bundled cua-driver (through at least v0.22.1) does not
+//      implement this MCP method and would answer with -32601. Answering it
+//      here keeps the handshake alive without reaching the driver.
+//   2. The who-is-driving `gate` (opt-in via `gate`). While the person holds
+//      control of this computer, a `tools/call` from the agent is answered
+//      with a refusal here and never forwarded.
+//
+// Both behaviors live here so neither entry point can drift:
 //   1. Exit without truncation. `process.exit()` in a close/error handler
 //      discards whatever is still buffered on stdout — a final MCP result
 //      would be cut mid-frame. The bridge sets exitCode and unpipes instead,
@@ -125,6 +124,8 @@ export function createInactivityWatchdog(options: {
 export interface BridgeOptions {
   command: string;
   args: string[];
+  /** Explicit child environment; absent preserves the existing PATH setup. */
+  env?: NodeJS.ProcessEnv;
   /** Names the far end in stderr messages, e.g. "Cua Driver". */
   label: string;
   /** Enables the dead-transport watchdog. Omitted for the Local VM, whose
@@ -173,7 +174,8 @@ export function createGateInterceptor(options: {
   forward: (line: string) => void;
   refuse: (line: string) => void;
   refusalText?: string;
-}): (line: string) => void {
+  getRefusalReason?: () => string | undefined;
+}): (line: string) => Promise<void> {
   const refusalText = options.refusalText ?? CONTROL_REFUSAL_PLAIN;
   let queue: Promise<void> = Promise.resolve();
   return (line: string) => {
@@ -189,7 +191,7 @@ export function createGateInterceptor(options: {
         options.forward(line);
         return;
       }
-      const held = await options.isHeld().catch(() => false);
+      const held = await options.isHeld().catch(() => true);
       if (!held) {
         options.forward(line);
         return;
@@ -198,17 +200,64 @@ export function createGateInterceptor(options: {
         JSON.stringify({
           jsonrpc: "2.0",
           id: frame.id ?? null,
-          result: { content: [{ type: "text", text: refusalText }], isError: true },
+          result: { content: [{ type: "text", text: options.getRefusalReason?.() ?? refusalText }], isError: true },
         }),
       );
     });
+    return queue;
+  };
+}
+
+export interface McpBridgeInterceptorOptions {
+  /** Writes a JSON-RPC response line to the agent's stdout. */
+  answer: (line: string) => void;
+  /** Forwards a line to the far-end child. */
+  forward: (line: string) => void;
+  /** Optional who-is-driving gate; when set, `tools/call` may be refused. */
+  gate?: {
+    isHeld: () => Promise<boolean>;
+    refusalText?: string;
+    getRefusalReason?: () => string | undefined;
+  };
+}
+
+/** The near-side MCP method filter. `ping` is answered here so the bundled
+ * cua-driver is never invoked for it; everything else is delegated to the
+ * gate (if configured) or forwarded untouched. */
+export function createMcpBridgeInterceptor(
+  options: McpBridgeInterceptorOptions,
+): (line: string) => void | Promise<void> {
+  const afterPing = options.gate
+    ? createGateInterceptor({
+        isHeld: options.gate.isHeld,
+        forward: options.forward,
+        refuse: options.answer,
+        refusalText: options.gate.refusalText,
+        getRefusalReason: options.gate.getRefusalReason,
+      })
+    : (line: string) => { options.forward(line); };
+  return (line: string) => {
+    let frame: any = null;
+    try {
+      frame = JSON.parse(line);
+    } catch {
+      // not a frame this bridge understands — forward untouched
+    }
+    if (frame && frame.method === "ping") {
+      // Notifications have no `id` and require no response.
+      if (frame.id !== undefined) {
+        options.answer(JSON.stringify({ jsonrpc: "2.0", id: frame.id, result: {} }));
+      }
+      return;
+    }
+    return afterPing(line);
   };
 }
 
 export function runMcpBridge(options: BridgeOptions): void {
   const child = spawn(options.command, options.args, {
     shell: false,
-    env: { ...process.env, PATH: augmentedPath() },
+    env: options.env ?? { ...process.env, PATH: augmentedPath() },
     stdio: ["pipe", "pipe", "pipe"],
   });
 
@@ -216,40 +265,56 @@ export function runMcpBridge(options: BridgeOptions): void {
   child.stdin.on("error", () => {});
   child.stderr.pipe(process.stderr);
 
-  let detach: () => void;
-  if (options.gate) {
-    const client = createControlClient({ url: options.gate.url, token: options.gate.token });
-    const inbound = createLineSplitter(
-      createGateInterceptor({
-        isHeld: async () => (await client.state(true)).held,
-        forward: (line) => child.stdin.write(line + "\n"),
-        refuse: (line) => process.stdout.write(line + "\n"),
-      }),
-    );
-    const onStdin = (chunk: Buffer) => inbound.push(chunk);
-    process.stdin.on("data", onStdin);
-    process.stdin.on("end", () => {
-      inbound.flush();
-      child.stdin.end();
-    });
-    // Injected refusals must never land inside one of the child's
-    // half-written frames, so the child's stdout is re-emitted at line
-    // granularity as well.
-    const outbound = createLineSplitter((line) => process.stdout.write(line + "\n"));
-    child.stdout.on("data", (chunk) => outbound.push(chunk));
-    child.stdout.on("end", () => outbound.flush());
-    detach = () => {
-      process.stdin.off("data", onStdin);
-      process.stdin.pause();
-    };
-  } else {
-    process.stdin.pipe(child.stdin);
-    child.stdout.pipe(process.stdout);
-    detach = () => {
-      process.stdin.unpipe(child.stdin);
-      process.stdin.pause();
-    };
-  }
+  const client = options.gate
+    ? createControlClient({ url: options.gate.url, token: options.gate.token })
+    : null;
+  let refusalReason: string | undefined;
+
+  const answer = (line: string) => process.stdout.write(line + "\n");
+  const forward = (line: string) => child.stdin.write(line + "\n");
+  const intercept = createMcpBridgeInterceptor({
+    answer,
+    forward,
+    ...(options.gate
+      ? {
+          gate: {
+            isHeld: async () => {
+              refusalReason = undefined;
+              const state = await client!.state(true);
+              refusalReason = state.blockedReason;
+              return state.held;
+            },
+            getRefusalReason: () => refusalReason,
+          },
+        }
+      : {}),
+  });
+  let pendingInput = Promise.resolve();
+  const inbound = createLineSplitter((line) => {
+    const completion = intercept(line);
+    if (completion) pendingInput = completion;
+  });
+
+  const onStdin = (chunk: Buffer) => inbound.push(chunk);
+  process.stdin.on("data", onStdin);
+  process.stdin.on("end", () => {
+    inbound.flush();
+    // A final tools/call can still be awaiting the control endpoint. Do not
+    // close the far end before the serialized gate has forwarded it.
+    void pendingInput.finally(() => child.stdin.end());
+  });
+
+  // Injected responses and refusals must never land inside one of the
+  // child's half-written frames, so the child's stdout is re-emitted at
+  // line granularity as well.
+  const outbound = createLineSplitter((line) => process.stdout.write(line + "\n"));
+  child.stdout.on("data", (chunk) => outbound.push(chunk));
+  child.stdout.on("end", () => outbound.flush());
+
+  const detach = () => {
+    process.stdin.off("data", onStdin);
+    process.stdin.pause();
+  };
 
   let watchdog: WatchdogHandle | null = null;
   if (options.liveness) {

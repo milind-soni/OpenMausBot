@@ -29,12 +29,12 @@ describe("desktop window state", () => {
         { bounds: { x: 7000, y: 7000, width: 4000, height: 200 }, maximized: false },
         [primary, left],
       ),
-    ).toEqual({ bounds: { x: 0, y: 240, width: 1920, height: 600 }, maximized: false });
+    ).toEqual({ bounds: { x: 0, y: 230, width: 1920, height: 620 }, maximized: false });
   });
 
   it("uses safe default dimensions when there is no saved state", () => {
     expect(resolveWindowState(null, [primary])).toEqual({
-      bounds: { width: 1440, height: 920 },
+      bounds: { width: 1100, height: 780 },
       maximized: false,
     });
   });

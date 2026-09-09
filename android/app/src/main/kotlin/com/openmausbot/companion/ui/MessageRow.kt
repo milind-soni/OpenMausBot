@@ -1,7 +1,6 @@
 package com.openmausbot.companion.ui
 
 import android.content.ClipData
-import android.graphics.BitmapFactory
 import android.util.Base64
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.Image
@@ -12,16 +11,20 @@ import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.rememberScrollState
@@ -56,13 +59,14 @@ import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.MotionDurationScale
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.ImageBitmap
-import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.ClipEntry
 import androidx.compose.ui.platform.LocalClipboard
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.semantics.LiveRegionMode
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
@@ -70,18 +74,24 @@ import androidx.compose.ui.semantics.liveRegion
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.font.FontFamily
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.openmausbot.companion.core.Chat
 import com.openmausbot.companion.core.AttachedMessageContent
 import com.openmausbot.companion.core.DisplayedMessageAttachment
+import com.openmausbot.companion.core.DownloadedFile
 import com.openmausbot.companion.core.Message
 import com.openmausbot.companion.core.OptionCard
+import com.openmausbot.companion.core.ThreadRef
 import com.openmausbot.companion.core.ToolActivity
 import com.openmausbot.companion.core.TranscriptCard
 import com.openmausbot.companion.core.TranscriptCards
 import kotlinx.coroutines.flow.collectLatest
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 /** What the clipboard shows this came from. */
 private const val MESSAGE_CLIP_LABEL = "OpenMausMobile message"
@@ -100,6 +110,10 @@ fun MessageRow(
     endsRun: Boolean = true,
     /** Where a tapped link in a bot reply goes; null leaves it to the system. */
     openLink: ((String, Message) -> Unit)? = null,
+    /** Open one exact user attachment through the authenticated computer route. */
+    openAttachment: ((DisplayedMessageAttachment, Message, DownloadedFile?) -> Unit)? = null,
+    /** Where an "Opened thread" chip goes; null leaves the chip a receipt. */
+    openThread: ((ThreadRef) -> Unit)? = null,
 ) {
     val session = LocalCompanion.current.session
     val scope = rememberCoroutineScope()
@@ -133,7 +147,15 @@ fun MessageRow(
             horizontalAlignment = if (mine) Alignment.End else Alignment.Start,
             verticalArrangement = Arrangement.spacedBy(6.dp),
         ) {
-            MessageContent(chat = chat, message = message, endsRun = endsRun, haptics = haptics, openLink = openLink)
+            MessageContent(
+                chat = chat,
+                message = message,
+                endsRun = endsRun,
+                haptics = haptics,
+                openLink = openLink,
+                openAttachment = openAttachment,
+                openThread = openThread,
+            )
 
             message.comm?.let {
                 Text(
@@ -255,15 +277,17 @@ fun MessageRow(
                     },
                 )
             }
-            // Edit and retry is user text on a bot only, and never while it runs.
-            if (mine && message.kind == Message.Kind.TEXT && bot != null) {
+            // Attachment messages cannot be reconstructed by a text-only edit.
+            // The policy also keeps their private transport paths out of the UI.
+            val editableText = MessageActions.editableText(message)
+            if (editableText != null && bot != null) {
                 HorizontalDivider()
                 DropdownMenuItem(
                     text = { Text("Edit and retry") },
                     enabled = bot.busy != true,
                     onClick = {
                         menuOpen = false
-                        editText = message.text.orEmpty()
+                        editText = editableText
                         editing = true
                     },
                 )
@@ -369,23 +393,33 @@ private fun MessageContent(
     endsRun: Boolean,
     haptics: Haptics,
     openLink: ((String, Message) -> Unit)?,
+    openAttachment: ((DisplayedMessageAttachment, Message, DownloadedFile?) -> Unit)?,
+    openThread: ((ThreadRef) -> Unit)?,
 ) {
     when (message.kind) {
-        Message.Kind.TEXT -> TextBubble(message, endsRun, openLink)
+        Message.Kind.TEXT -> TextBubble(chat.threadId, message, endsRun, openLink, openAttachment)
         Message.Kind.OPTIONS -> CardView(chat, message, haptics)
-        Message.Kind.ACTIVITY -> ActivityChip(message.tool)
+        Message.Kind.ACTIVITY -> ActivityChip(message.tool, message.threadRef, openThread)
         Message.Kind.SCREEN -> ScreenShot(chat.threadId, message)
         // A message kind from a newer computer. Almost everything the harness
         // sends carries `text`, so showing it is usually the whole message and
         // always better than a gap in the transcript. When there is nothing to
         // show, show nothing — a placeholder saying "unsupported" is a worse gap
         // than the gap.
-        Message.Kind.UNKNOWN -> if (!message.text.isNullOrEmpty()) TextBubble(message, endsRun, openLink)
+        Message.Kind.UNKNOWN -> if (!message.text.isNullOrEmpty()) {
+            TextBubble(chat.threadId, message, endsRun, openLink, openAttachment)
+        }
     }
 }
 
 @Composable
-private fun TextBubble(message: Message, endsRun: Boolean, openLink: ((String, Message) -> Unit)?) {
+private fun TextBubble(
+    threadId: String,
+    message: Message,
+    endsRun: Boolean,
+    openLink: ((String, Message) -> Unit)?,
+    openAttachment: ((DisplayedMessageAttachment, Message, DownloadedFile?) -> Unit)?,
+) {
     val mine = message.role == Message.Role.USER
     val tail = TranscriptLayout.tail(message, endsRun)
     // A reply that is *entirely* a patch or a table is drawn as one. The gate is
@@ -411,6 +445,7 @@ private fun TextBubble(message: Message, endsRun: Boolean, openLink: ((String, M
         Column(
             modifier = Modifier
                 .weight(1f, fill = false)
+                .widthIn(max = 640.dp)
                 // Room for the tail below, so the next row does not sit on it.
                 .padding(bottom = if (bubble && endsRun) SpeechBubble.tailDrop() else 0.dp)
                 .then(
@@ -448,13 +483,18 @@ private fun TextBubble(message: Message, endsRun: Boolean, openLink: ((String, M
             when (card) {
                 is TranscriptCard.Diff -> DiffCard(card)
                 is TranscriptCard.Table -> DataTableCard(card)
-                null -> SelectionContainer {
-                    if (mine) {
-                        Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                            attached.attachments.forEach { attachment ->
-                                SharedAttachmentChip(attachment)
-                            }
-                            if (attached.text.isNotEmpty()) {
+                null -> if (mine) {
+                    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                        attached.attachments.forEach { attachment ->
+                            SharedAttachmentView(
+                                threadId = threadId,
+                                message = message,
+                                attachment = attachment,
+                                onOpen = openAttachment,
+                            )
+                        }
+                        if (attached.text.isNotEmpty()) {
+                            SelectionContainer {
                                 Text(
                                     text = attached.text,
                                     fontSize = 17.sp,
@@ -462,7 +502,9 @@ private fun TextBubble(message: Message, endsRun: Boolean, openLink: ((String, M
                                 )
                             }
                         }
-                    } else {
+                    }
+                } else {
+                    SelectionContainer {
                         MarkdownText(
                             source = message.text.orEmpty(),
                             openLink = openLink?.let { open -> { url -> open(url, message) } },
@@ -476,19 +518,140 @@ private fun TextBubble(message: Message, endsRun: Boolean, openLink: ((String, M
 }
 
 @Composable
-private fun SharedAttachmentChip(attachment: DisplayedMessageAttachment) {
-    val type = if (attachment.kind == DisplayedMessageAttachment.Kind.IMAGE) "Image" else "File"
-    Text(
-        text = "$type: ${attachment.name}",
-        fontSize = 13.sp,
-        fontWeight = FontWeight.Medium,
-        maxLines = 1,
-        color = BubbleColor.mineText.copy(alpha = 0.84f),
+private fun SharedAttachmentView(
+    threadId: String,
+    message: Message,
+    attachment: DisplayedMessageAttachment,
+    onOpen: ((DisplayedMessageAttachment, Message, DownloadedFile?) -> Unit)?,
+) {
+    if (attachment.kind == DisplayedMessageAttachment.Kind.IMAGE) {
+        SharedImageAttachment(threadId, message, attachment, onOpen)
+        return
+    }
+    Row(
         modifier = Modifier
-            .background(BubbleColor.mineText.copy(alpha = 0.10f), RoundedCornerShape(16.dp))
-            .padding(horizontal = 10.dp, vertical = 6.dp)
-            .semantics { contentDescription = "$type attachment: ${attachment.name}" },
-    )
+            .widthIn(max = 360.dp)
+            .clip(RoundedCornerShape(16.dp))
+            .background(BubbleColor.mineText.copy(alpha = 0.10f))
+            .clickable(enabled = onOpen != null, role = Role.Button) {
+                onOpen?.invoke(attachment, message, null)
+            }
+            .padding(horizontal = 12.dp, vertical = 10.dp)
+            .semantics { contentDescription = "File attachment: ${attachment.name}. Tap to preview." },
+        horizontalArrangement = Arrangement.spacedBy(10.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Text("FILE", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = BubbleColor.mineText.copy(alpha = 0.68f))
+        Column(modifier = Modifier.weight(1f)) {
+            Text(
+                attachment.name,
+                fontSize = 14.sp,
+                fontWeight = FontWeight.Medium,
+                color = BubbleColor.mineText,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+            Text("Tap to preview", fontSize = 12.sp, color = BubbleColor.mineText.copy(alpha = 0.68f))
+        }
+    }
+}
+
+private sealed interface AttachmentThumbnailState {
+    data object Loading : AttachmentThumbnailState
+    data class Ready(val file: DownloadedFile, val image: ImageBitmap) : AttachmentThumbnailState
+    data object Failed : AttachmentThumbnailState
+}
+
+@Composable
+private fun SharedImageAttachment(
+    threadId: String,
+    message: Message,
+    attachment: DisplayedMessageAttachment,
+    onOpen: ((DisplayedMessageAttachment, Message, DownloadedFile?) -> Unit)?,
+) {
+    val session = LocalCompanion.current.session
+    var attempt by remember(message.id, attachment.path) { mutableStateOf(0) }
+    var state by remember(message.id, attachment.path) {
+        mutableStateOf<AttachmentThumbnailState>(AttachmentThumbnailState.Loading)
+    }
+    LaunchedEffect(threadId, message.id, attachment.path, attempt) {
+        state = AttachmentThumbnailState.Loading
+        // A failed inline preview owns its own retry UI; it must not replace an
+        // unrelated composer or account alert while this row scrolls on screen.
+        val downloaded = session.downloadFile(
+            threadId,
+            message.id,
+            attachment.path,
+            reportError = false,
+            cacheResult = true,
+        )
+        if (downloaded == null) {
+            state = AttachmentThumbnailState.Failed
+            return@LaunchedEffect
+        }
+        val bitmap = withContext(Dispatchers.Default) {
+            decodeAttachmentImage(downloaded.data, AttachmentImageRules.THUMBNAIL_EDGE)
+        }
+        state = bitmap?.let { AttachmentThumbnailState.Ready(downloaded, it) }
+            ?: AttachmentThumbnailState.Failed
+    }
+
+    val ready = state as? AttachmentThumbnailState.Ready
+    Column(
+        modifier = Modifier
+            .widthIn(max = 360.dp)
+            .clip(RoundedCornerShape(16.dp))
+            .background(BubbleColor.mineText.copy(alpha = 0.10f))
+            .clickable(enabled = ready != null && onOpen != null, role = Role.Button) {
+                ready?.let { onOpen?.invoke(attachment, message, it.file) }
+            }
+            .semantics { contentDescription = "Image attachment: ${attachment.name}. Tap to preview." },
+    ) {
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .aspectRatio(4f / 3f),
+            contentAlignment = Alignment.Center,
+        ) {
+            when (val current = state) {
+                AttachmentThumbnailState.Loading ->
+                    CircularProgressIndicator(modifier = Modifier.size(20.dp), strokeWidth = 2.dp)
+                AttachmentThumbnailState.Failed -> AttachmentLoadFailure(
+                    label = "Image unavailable",
+                    onRetry = { attempt += 1 },
+                )
+                is AttachmentThumbnailState.Ready -> Image(
+                    bitmap = current.image,
+                    contentDescription = null,
+                    contentScale = ContentScale.Crop,
+                    modifier = Modifier.fillMaxWidth().aspectRatio(4f / 3f),
+                )
+            }
+        }
+        Text(
+            attachment.name,
+            fontSize = 13.sp,
+            fontWeight = FontWeight.Medium,
+            color = BubbleColor.mineText,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+            modifier = Modifier.fillMaxWidth().padding(horizontal = 10.dp, vertical = 8.dp),
+        )
+    }
+}
+
+@Composable
+private fun AttachmentLoadFailure(label: String, onRetry: () -> Unit) {
+    Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(2.dp)) {
+        Icon(
+            imageVector = Icons.Filled.Warning,
+            contentDescription = null,
+            tint = BubbleColor.mineText.copy(alpha = 0.70f),
+            modifier = Modifier.size(20.dp),
+        )
+        Text(label, fontSize = 13.sp, color = BubbleColor.mineText.copy(alpha = 0.80f))
+        TextButton(onClick = onRetry) { Text("Retry") }
+    }
 }
 
 /**
@@ -505,10 +668,15 @@ private fun SharedAttachmentChip(attachment: DisplayedMessageAttachment) {
  * None of iOS's detail is here, because none of it has data: `durationMs`,
  * `parameters` and `output` are dormant on that view and absent from
  * [ToolActivity]. Nothing to expand means nothing to tap, which is why this is
- * not a button.
+ * not a button — except a chip that names a thread it opened, which is the
+ * link to that thread.
  */
 @Composable
-private fun ActivityChip(tool: ToolActivity?) {
+private fun ActivityChip(
+    tool: ToolActivity?,
+    threadRef: ThreadRef? = null,
+    openThread: ((ThreadRef) -> Unit)? = null,
+) {
     if (tool == null) return
     val status = ActivityReceipt.status(tool.ok)
     val tint = when (status) {
@@ -516,9 +684,21 @@ private fun ActivityChip(tool: ToolActivity?) {
         ActivityStatus.SUCCESS -> secondaryTint
         ActivityStatus.ERROR -> MaterialTheme.colorScheme.error
     }
+    val haptics = rememberHaptics()
+    val linked = if (threadRef != null && openThread != null) {
+        Modifier
+            .heightIn(min = MIN_TOUCH_TARGET)
+            .clickable(role = Role.Button) {
+                haptics.play(TactileAction.OPEN_THREAD_CHIP)
+                openThread(threadRef)
+            }
+    } else {
+        Modifier
+    }
     Row(
         modifier = Modifier
             .padding(start = 4.dp)
+            .then(linked)
             .semantics(mergeDescendants = true) {
                 contentDescription = ActivityReceipt.announcement(tool.name, status)
             },
@@ -559,7 +739,7 @@ private fun ActivityChip(tool: ToolActivity?) {
 
 /** Several consecutive successful/running activity receipts, folded on demand. */
 @Composable
-fun ActivityRunChip(items: List<Message>) {
+fun ActivityRunChip(items: List<Message>, openThread: ((ThreadRef) -> Unit)? = null) {
     if (items.isEmpty()) return
     val haptics = rememberHaptics()
     // Keyed on the run's identity — the same one the LazyColumn keys the row by
@@ -611,7 +791,7 @@ fun ActivityRunChip(items: List<Message>) {
         }
         if (expanded) {
             Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                items.forEach { item -> ActivityChip(item.tool) }
+                items.forEach { item -> ActivityChip(item.tool, item.threadRef, openThread) }
             }
         }
     }
@@ -803,39 +983,74 @@ private fun CardView(chat: Chat, message: Message, haptics: Haptics) {
 @Composable
 private fun ScreenShot(threadId: String, message: Message) {
     val session = LocalCompanion.current.session
-    var image by remember(message.id) { mutableStateOf<ImageBitmap?>(null) }
+    var attempt by remember(message.id) { mutableStateOf(0) }
+    var state by remember(message.id) { mutableStateOf<ScreenShotState>(ScreenShotState.Loading) }
 
-    LaunchedEffect(message.id) {
-        if (image != null) return@LaunchedEffect
-        val bytes = message.png
-            ?.let { runCatching { Base64.decode(it, Base64.DEFAULT) }.getOrNull() }
-            ?: if (message.hasImage == true) session.image(threadId, message.id) else null
-        image = bytes
-            ?.let { runCatching { BitmapFactory.decodeByteArray(it, 0, it.size) }.getOrNull() }
-            ?.asImageBitmap()
-    }
+    BoxWithConstraints(modifier = Modifier.fillMaxWidth()) {
+        val renderedWidthPixels = with(LocalDensity.current) { maxWidth.toPx().toInt().coerceAtLeast(1) }
+        LaunchedEffect(threadId, message.id, attempt, renderedWidthPixels) {
+            state = ScreenShotState.Loading
+            val bytes = try {
+                message.png?.let { encoded ->
+                    withContext(Dispatchers.Default) {
+                        runCatching { Base64.decode(encoded, Base64.DEFAULT) }.getOrNull()
+                    }
+                } ?: if (message.hasImage == true) session.image(threadId, message.id) else null
+            } catch (error: CancellationException) {
+                throw error
+            } catch (_: Throwable) {
+                null
+            }
+            val bitmap = bytes?.let {
+                withContext(Dispatchers.Default) {
+                    decodeScreenShotImage(it, renderedWidthPixels)
+                }
+            }
+            state = bitmap?.let(ScreenShotState::Ready) ?: ScreenShotState.Failed
+        }
 
-    val bitmap = image
-    if (bitmap == null) {
+        val aspectRatio = (state as? ScreenShotState.Ready)?.image?.let { image ->
+            image.width.toFloat() / image.height.coerceAtLeast(1).toFloat()
+        } ?: (16f / 10f)
         Box(
             modifier = Modifier
                 .fillMaxWidth()
-                .height(160.dp)
-                .background(secondaryTint.copy(alpha = 0.13f), RoundedCornerShape(16.dp)),
+                .aspectRatio(aspectRatio)
+                .clip(RoundedCornerShape(16.dp))
+                .background(secondaryTint.copy(alpha = 0.13f)),
             contentAlignment = Alignment.Center,
         ) {
-            CircularProgressIndicator(modifier = Modifier.size(20.dp), strokeWidth = 2.dp)
+            when (val current = state) {
+                ScreenShotState.Loading ->
+                    CircularProgressIndicator(modifier = Modifier.size(20.dp), strokeWidth = 2.dp)
+                ScreenShotState.Failed -> Column(
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    verticalArrangement = Arrangement.spacedBy(2.dp),
+                ) {
+                    Icon(
+                        imageVector = Icons.Filled.Warning,
+                        contentDescription = null,
+                        tint = MaterialTheme.colorScheme.error,
+                        modifier = Modifier.size(20.dp),
+                    )
+                    Text("Screenshot unavailable", fontSize = 13.sp, color = secondaryTint)
+                    TextButton(onClick = { attempt += 1 }) { Text("Retry") }
+                }
+                is ScreenShotState.Ready -> Image(
+                    bitmap = current.image,
+                    contentDescription = "A frame of this bot's computer",
+                    contentScale = ContentScale.Fit,
+                    modifier = Modifier.fillMaxSize(),
+                )
+            }
         }
-    } else {
-        Image(
-            bitmap = bitmap,
-            contentDescription = "A frame of this bot's computer",
-            contentScale = ContentScale.Fit,
-            modifier = Modifier
-                .fillMaxWidth()
-                .background(secondaryTint.copy(alpha = 0.13f), RoundedCornerShape(16.dp)),
-        )
     }
+}
+
+private sealed interface ScreenShotState {
+    data object Loading : ScreenShotState
+    data class Ready(val image: ImageBitmap) : ScreenShotState
+    data object Failed : ScreenShotState
 }
 
 /**

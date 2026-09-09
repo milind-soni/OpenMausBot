@@ -43,6 +43,10 @@ import com.openmausbot.companion.core.Chat
 import com.openmausbot.companion.core.Session
 import java.util.Locale
 import kotlinx.coroutines.launch
+import com.openmausbot.companion.core.ChatTarget
+import com.openmausbot.companion.core.chat
+import com.openmausbot.companion.core.target
+import com.openmausbot.companion.core.openedByLabel
 
 /**
  * Separate contexts for an agent or channel — the port of
@@ -53,17 +57,14 @@ import kotlinx.coroutines.launch
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun TaskSheet(chat: Chat, onDismiss: () -> Unit) {
+fun TaskSheet(chat: Chat, onDismiss: () -> Unit, onSelectTask: (ChatTarget) -> Unit) {
     val session = LocalCompanion.current.session
     val scope = rememberCoroutineScope()
     val state by session.state.collectAsState()
 
     // The live record, so busy and the task list stay current as frames land.
     val current = remember(state, chat) {
-        when (chat) {
-            is Chat.BotChat -> state.bot(chat.bot.id)?.let(Chat::BotChat)
-            is Chat.RoomChat -> state.rooms.firstOrNull { it.id == chat.room.id }?.let(Chat::RoomChat)
-        }
+        state.chat(chat.target)
     }
     if (current == null) {
         // Deleted while the sheet was open.
@@ -94,14 +95,14 @@ fun TaskSheet(chat: Chat, onDismiss: () -> Unit) {
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
                     Text(
-                        text = "${current.name}'s tasks",
+                        text = "${current.name}'s threads",
                         fontSize = 18.sp,
                         fontWeight = FontWeight.SemiBold,
                         modifier = Modifier.weight(1f),
                     )
                     Icon(
                         imageVector = Icons.Filled.Add,
-                        contentDescription = "New task",
+                        contentDescription = "New thread",
                         tint = if (TaskRules.canCreate(current)) {
                             MaterialTheme.colorScheme.onSurface
                         } else {
@@ -144,7 +145,7 @@ fun TaskSheet(chat: Chat, onDismiss: () -> Unit) {
                             chat = current,
                             onSwitch = {
                                 scope.launch {
-                                    switchTask(session, task, current)
+                                    switchTask(session, task, current)?.let { onSelectTask(it.target) }
                                     onDismiss()
                                 }
                             },
@@ -152,7 +153,10 @@ fun TaskSheet(chat: Chat, onDismiss: () -> Unit) {
                                 title = task.title
                                 renaming = task
                             },
-                            onDelete = { scope.launch { deleteTask(session, task, current) } },
+                            onDelete = { scope.launch {
+                                val updated = deleteTask(session, task, current)
+                                if (task.threadId == current.threadId) updated?.let { onSelectTask(it.target) }
+                            } },
                         )
                     }
                 }
@@ -171,19 +175,17 @@ fun TaskSheet(chat: Chat, onDismiss: () -> Unit) {
 
     if (creating) {
         TaskTitleDialog(
-            heading = "New task",
+            heading = "New thread",
             label = "Title (optional)",
             title = title,
             onTitleChange = { title = it },
             confirmText = "Create",
-            // Live: a bot that starts running while this is open disables Create
-            // rather than sending an edit the harness answers with 409.
             confirmEnabled = TaskDialogRules.createEnabled(current),
             onConfirm = {
                 val requested = TaskDialogRules.createTitle(title)
                 creating = false
                 scope.launch {
-                    createTask(session, current, requested)
+                    createTask(session, current, requested)?.let { onSelectTask(it.target) }
                     onDismiss()
                 }
             },
@@ -193,7 +195,7 @@ fun TaskSheet(chat: Chat, onDismiss: () -> Unit) {
 
     renaming?.let { task ->
         TaskTitleDialog(
-            heading = "Rename task",
+            heading = "Rename thread",
             label = "Title",
             title = title,
             onTitleChange = { title = it },
@@ -250,12 +252,19 @@ private fun TaskRow(
                 fontSize = 12.sp,
                 color = secondaryTint,
             )
+            task.openedByLabel?.let { openedBy ->
+                Text(
+                    text = openedBy,
+                    fontSize = 12.sp,
+                    color = secondaryTint,
+                )
+            }
         }
 
         if (current) {
             Icon(
                 imageVector = Icons.Filled.Check,
-                contentDescription = "Current task",
+                contentDescription = "Current thread",
                 tint = MaterialTheme.colorScheme.primary,
                 modifier = Modifier.size(20.dp),
             )
@@ -283,19 +292,17 @@ private fun TaskRow(
     }
 }
 
-private suspend fun createTask(session: Session, chat: Chat, title: String?) {
+private suspend fun createTask(session: Session, chat: Chat, title: String?): Chat? =
     when (chat) {
-        is Chat.BotChat -> session.createTask(chat.bot, title)
-        is Chat.RoomChat -> session.createTask(chat.room, title)
+        is Chat.BotChat -> session.createTask(chat.bot, title)?.let(Chat::BotChat)
+        is Chat.RoomChat -> session.createTask(chat.room, title)?.let(Chat::RoomChat)
     }
-}
 
-private suspend fun switchTask(session: Session, task: BotTask, chat: Chat) {
+private suspend fun switchTask(session: Session, task: BotTask, chat: Chat): Chat? =
     when (chat) {
-        is Chat.BotChat -> session.switchTask(task, chat.bot)
-        is Chat.RoomChat -> session.switchTask(task, chat.room)
+        is Chat.BotChat -> session.switchTask(task, chat.bot)?.let(Chat::BotChat)
+        is Chat.RoomChat -> session.switchTask(task, chat.room)?.let(Chat::RoomChat)
     }
-}
 
 private suspend fun renameTask(
     session: Session,
@@ -309,12 +316,11 @@ private suspend fun renameTask(
     }
 }
 
-private suspend fun deleteTask(session: Session, task: BotTask, chat: Chat) {
+private suspend fun deleteTask(session: Session, task: BotTask, chat: Chat): Chat? =
     when (chat) {
-        is Chat.BotChat -> session.deleteTask(task, chat.bot)
-        is Chat.RoomChat -> session.deleteTask(task, chat.room)
+        is Chat.BotChat -> session.deleteTask(task, chat.bot)?.let(Chat::BotChat)
+        is Chat.RoomChat -> session.deleteTask(task, chat.room)?.let(Chat::RoomChat)
     }
-}
 
 @Composable
 private fun TaskTitleDialog(

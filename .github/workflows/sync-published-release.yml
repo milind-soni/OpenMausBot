@@ -23,6 +23,9 @@ concurrency:
 jobs:
   mirror:
     name: Preserve legacy updater compatibility
+    # Dependency prereleases are not desktop updates. Manual recovery still
+    # reaches the strict stable-tag and artifact checks below.
+    if: github.event_name == 'workflow_dispatch' || (!github.event.release.prerelease && startsWith(github.event.release.tag_name, 'v'))
     runs-on: ubuntu-24.04
     timeout-minutes: 30
     steps:
@@ -39,7 +42,10 @@ jobs:
             --json isDraft,isPrerelease --jq 'select(.isDraft == false and .isPrerelease == false) | true' | grep -q true || {
               echo "::error::$TAG is not a published stable release in $GITHUB_REPOSITORY"; exit 1; }
           mkdir assets
-          gh release download "$TAG" --repo "$GITHUB_REPOSITORY" --dir assets
+          # npm attaches its lowercase tarball independently after publishing.
+          # The legacy updater bridge mirrors only the desktop/feed assets.
+          gh release download "$TAG" --repo "$GITHUB_REPOSITORY" --dir assets \
+            --pattern '*.yml' --pattern 'OpenMausBot*' --pattern 'SHA256SUMS-ubuntu-x64.txt'
           required=(
             latest-linux.yml latest-mac.yml latest.yml
             "OpenMausBot-$version-amd64.deb"
@@ -120,7 +126,10 @@ jobs:
             name,
             `sha256:${createHash("sha256").update(readFileSync(join("assets", name))).digest("hex")}`,
           ]));
-          const remote = JSON.parse(execFileSync("gh", ["release", "view", tag, "--repo", process.env.GITHUB_REPOSITORY, "--json", "assets"], { encoding: "utf8" })).assets;
+          const inventory = JSON.parse(execFileSync("gh", ["release", "view", tag, "--repo", process.env.GITHUB_REPOSITORY, "--json", "assets"], { encoding: "utf8" })).assets;
+          const npmTarball = `openmausbot-${tag.slice(1)}.tgz`;
+          const remote = inventory.filter((asset) => asset.name !== npmTarball);
+          if (inventory.length - remote.length > 1) throw new Error(`duplicate canonical npm asset: ${npmTarball}`);
           if (remote.length !== expected.size) throw new Error(`canonical release has ${remote.length} assets but ${expected.size} downloaded`);
           for (const asset of remote) {
             if (expected.get(asset.name) !== asset.digest) throw new Error(`canonical digest mismatch for ${asset.name}`);
@@ -161,6 +170,9 @@ jobs:
             { encoding: "utf8", env: { ...process.env, GH_TOKEN: token } },
           )).assets.map((asset) => [asset.name, asset.digest]));
           const canonical = assets(process.env.GITHUB_REPOSITORY, process.env.CANONICAL_TOKEN);
+          // The npm job may attach this optional asset between our download
+          // and comparison. It is canonical-only, never an updater artifact.
+          canonical.delete(`openmausbot-${tag.slice(1)}.tgz`);
           const legacy = assets("milind-soni/openmausbot-releases", process.env.LEGACY_TOKEN);
           if (canonical.size !== legacy.size) throw new Error(`legacy mirror has ${legacy.size} assets; canonical has ${canonical.size}`);
           for (const [name, digest] of canonical) {

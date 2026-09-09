@@ -9,10 +9,14 @@ OpenMausBot is local-first by default: the harness listens on loopback, agent CL
 ## Typical self-hosted setup
 
 1. Run OpenMausBot on your personal macOS, Windows, or Ubuntu computer.
-2. Install and authenticate the agent CLIs you want to use.
+2. Install and authenticate the agent CLIs you want to use separately; the npm OpenMausBot package does not include them. Use the same operating-system account for setup and the running server.
 3. Add optional third-party keys only for the services you need.
 4. Keep the harness on loopback.
-5. Use the paired companion sidecar or Tailscale when another device needs access.
+5. Use it from other devices by pairing them: a browser, the desktop app or the phone, over a public address, your own domain or your tailnet. See [Deploy on a VPS](/docs/self-hosting/deploy-vps).
+
+For a Linux service, the VPS guide covers [account setup](/docs/self-hosting/deploy-vps#before-you-start), [browser installation](/docs/self-hosting/deploy-vps#give-the-bots-a-browser-optional), and [unattended startup](/docs/self-hosting/deploy-vps#keep-it-running). Installing browser libraries as administrator still requires installing the browser in the service user's home. The service runs an installed, chosen release; upgrading it is an explicit step.
+
+Stop the server before a filesystem backup. Application state under `.openmausbot` is only part of a complete backup: preserve the service user's engine credentials, browser state, and external workspaces too. See [Data and backups](/docs/self-hosting/data-and-backups).
 
 ## What is still third party
 

@@ -18,4 +18,6 @@ test("a remote server's page is told this computer offers no screen, voice or lo
   assert.equal(remote.localComputer.enabled, false);
   assert.equal(remote.localComputer.reasonCode, "remote-server");
   assert.equal(remote.host.platform, "darwin");
+  assert.equal(remote.host.homeDir, "");
+  assert.notEqual(local.host.homeDir, "");
 });

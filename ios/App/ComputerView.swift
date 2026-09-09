@@ -64,7 +64,8 @@ struct ComputerView: View {
             // A VPS-backed bot is "cloud" too, but the server refuses to mint
             // an interactive desktop for it — no button beats a dead one. An
             // older harness never sends cloudBackend, so nil keeps the button.
-            if current.computer == "cloud" && current.cloudBackend != "vps" {
+            // Minting a desktop session is admin-only on a server, too.
+            if current.computer == "cloud" && current.cloudBackend != "vps" && session.canAdminister {
                 VStack(spacing: 8) {
                     if let desktopError {
                         Text(desktopError)

@@ -2,9 +2,10 @@
 //
 // Everything the phone can do to the harness, in one place. The rules it
 // encodes come from the default-deny policy in `companion/src/routes.ts`: a
-// paired phone may chat, answer approvals, and read rooms — it may not touch
-// credentials, pairing, or the Local VM. Those routes are simply absent here
-// rather than present and failing at runtime.
+// paired phone may chat, answer approvals, and read rooms. Credential values
+// are the narrow exception: this client can transport an HPKE envelope whose
+// plaintext only the QR-paired Electron process can open. Pairing management
+// and the Local VM remain absent rather than failing at runtime.
 import Foundation
 
 /// Where a companion connects, and with what. The token is *not* held here
@@ -38,6 +39,23 @@ public struct Connection: Codable, Hashable, Identifiable, Sendable {
     /// LAN or Bonjour origin for local pairing. Absent alongside a nil kind
     /// policy on connections saved before route consent existed.
     public var allowedLocalRouteURLs: Set<String>?
+    /// P-256 HPKE recipient point learned only from the camera-scanned QR.
+    /// It is public key material; the phone never receives the private key.
+    public var secretPublicKey: String?
+    /// Sidecar device identity returned after redemption. Bound into every
+    /// credential envelope and checked against the authenticated bearer.
+    public var companionDeviceId: String?
+    /// Set when this connection was paired against the server's own sessions
+    /// (`openmausbot serve` / the Docker stack) rather than the desktop's
+    /// companion sidecar: the bearer is an `omb_sess_` token whose scopes
+    /// say what the app may administer. Absent on connections saved before
+    /// servers could be paired directly.
+    public var serverEnvironmentId: String?
+    /// The scopes the server granted this session at pairing, kept so the
+    /// app can tell an owner's phone (`admin`) from a chat-only one
+    /// (`client`) without asking. Absent on server connections saved by
+    /// builds that did not record them, which the app treated as chat-only.
+    public var serverScopes: [String]?
 
     public init(
         id: String = UUID().uuidString,
@@ -48,7 +66,11 @@ public struct Connection: Codable, Hashable, Identifiable, Sendable {
         activeEndpoint: CompanionEndpoint? = nil,
         endpoints: [CompanionEndpoint]? = nil,
         allowedRouteKinds: Set<CompanionEndpointKind>? = nil,
-        allowedLocalRouteURLs: Set<String>? = nil
+        allowedLocalRouteURLs: Set<String>? = nil,
+        secretPublicKey: String? = nil,
+        companionDeviceId: String? = nil,
+        serverEnvironmentId: String? = nil,
+        serverScopes: [String]? = nil
     ) {
         self.id = id
         self.name = name
@@ -59,6 +81,27 @@ public struct Connection: Codable, Hashable, Identifiable, Sendable {
         self.endpoints = endpoints
         self.allowedRouteKinds = allowedRouteKinds
         self.allowedLocalRouteURLs = allowedLocalRouteURLs
+        self.secretPublicKey = secretPublicKey
+        self.companionDeviceId = companionDeviceId
+        self.serverEnvironmentId = serverEnvironmentId
+        self.serverScopes = serverScopes
+    }
+
+    /// Paired with a server directly rather than through the companion
+    /// sidecar. What the phone may do there is for the session's scopes to
+    /// say: see `canAdminister`.
+    public var pairedWithServer: Bool { serverEnvironmentId != nil }
+
+    /// Whether this pairing may administer the workspace: create bots and
+    /// sections, change models, generate avatars, connect apps, open cloud
+    /// desktops. A companion pairing always may — the sidecar applies its
+    /// own policy to each request. A server session may only with the
+    /// `admin` scope (`openmausbot pair` grants it; `--client` does not);
+    /// the server answers 403 otherwise, so the app hides those controls
+    /// instead of offering buttons that can only fail.
+    public var canAdminister: Bool {
+        guard pairedWithServer else { return true }
+        return serverScopes?.contains("admin") == true
     }
 
     /// The representation `URLComponents.host` accepts for a literal IPv6
@@ -196,6 +239,7 @@ public struct PairingInvite: Equatable, Sendable {
     }
 
     public static func parse(_ url: URL) -> PairingInvite? {
+        if let server = parseServerLink(url) { return server }
         guard url.scheme?.lowercased() == "openmausbot",
               url.host?.lowercased() == "pair",
               let components = URLComponents(url: url, resolvingAgainstBaseURL: false)
@@ -235,6 +279,10 @@ public struct PairingInvite: Equatable, Sendable {
             connection.endpoints = endpoints
             connection = connection.dialing(endpoints[0])
         }
+        if let secretKey = values["secretKey"] {
+            guard let normalized = PhoneSecretCrypto.normalizedPublicKey(secretKey) else { return nil }
+            connection.secretPublicKey = normalized
+        }
         connection.establishRoutePolicyFromInvite()
         return PairingInvite(connection: connection, credential: credential)
     }
@@ -268,6 +316,60 @@ public struct PairingInvite: Equatable, Sendable {
         var seen = Set<String>()
         let unique = stable.filter { seen.insert($0.url).inserted }
         return unique.isEmpty ? nil : unique
+    }
+
+    /// `https://host/pair#code=ABCD-EFGH-JKLM`: the link a server prints
+    /// (`openmausbot serve`, `openmausbot pair`, the Docker stack). It pairs
+    /// against the server's own sessions, not the companion sidecar. The code
+    /// rides in the fragment, which never reaches a server in a request, and
+    /// the server takes it with or without dashes.
+    static func parseServerLink(_ url: URL) -> PairingInvite? {
+        guard let components = URLComponents(url: url, resolvingAgainstBaseURL: false),
+              let scheme = components.scheme?.lowercased(),
+              scheme == "https" || scheme == "http",
+              let host = components.host, !host.isEmpty,
+              components.path == "/pair",
+              components.query == nil,
+              let fragment = components.fragment
+        else { return nil }
+        var values: [String: String] = [:]
+        for pair in fragment.split(separator: "&") {
+            let parts = pair.split(separator: "=", maxSplits: 1)
+            guard parts.count == 2, values[String(parts[0])] == nil else { return nil }
+            values[String(parts[0])] = String(parts[1]).removingPercentEncoding ?? String(parts[1])
+        }
+        guard let raw = values["code"], let code = normalizedServerCode(raw) else { return nil }
+        var origin = components
+        origin.path = ""
+        origin.fragment = nil
+        guard let originString = origin.string, let connection = Connection.parse(originString) else { return nil }
+        return PairingInvite(connection: connection, credential: code)
+    }
+
+    /// The 32 symbols a server draws pairing codes from: digits and capitals
+    /// without 0, O, 1 and I, which read alike in most fonts.
+    public static let serverCodeAlphabet = "23456789ABCDEFGHJKLMNPQRSTUVWXYZ"
+
+    /// What the server does to a typed code before comparing it
+    /// (`normalizePairingCode` in `server/sessions.ts`): uppercase, drop
+    /// dashes, spaces and anything else that is not a letter or digit, then
+    /// read 0 as O and 1 as I. Identical here so the app and the server
+    /// never disagree about which code was entered.
+    public static func normalizePairingCode(_ raw: String) -> String {
+        String(raw.uppercased().filter { $0.isASCII && ($0.isLetter || $0.isNumber) }
+            .map { $0 == "0" ? "O" : $0 == "1" ? "I" : $0 })
+    }
+
+    /// A server pairing code, normalized: exactly 12 symbols from the
+    /// server's alphabet, dashes optional. Six-digit codes and `omb_pair_`
+    /// tokens are the companion's and return nil. So does a code with a
+    /// character the alphabet does not have — the server would refuse it
+    /// and count the attempt towards its lockout, so it is refused here,
+    /// where the person can still fix it.
+    public static func normalizedServerCode(_ raw: String) -> String? {
+        let code = normalizePairingCode(raw)
+        guard code.count == 12, code.allSatisfy(serverCodeAlphabet.contains) else { return nil }
+        return code
     }
 
     private static func credential(from values: [String: String]) -> String? {
@@ -404,11 +506,10 @@ public enum SharedMessageComposer {
 
         for attachment in attachments {
             let tag = attachment.kind == .image ? "attached-image" : "attached-file"
-            if attachment.kind == .file,
-               let displayName = attachment.displayName?.trimmingCharacters(in: .whitespacesAndNewlines),
+            if let displayName = attachment.displayName?.trimmingCharacters(in: .whitespacesAndNewlines),
                !displayName.isEmpty {
                 parts.append(
-                    "<attached-file path=\"\(escapeAttribute(attachment.path))\" " +
+                    "<\(tag) path=\"\(escapeAttribute(attachment.path))\" " +
                     "name=\"\(escapeAttribute(displayName))\" />"
                 )
             } else {
@@ -591,6 +692,38 @@ public struct CompanionClient: Sendable {
         return try await client.send(pairRequest, as: PairResponse.self)
     }
 
+    /// Pair against the server's own sessions (`POST /api/auth/pair`). The
+    /// answer is a bearer for the client scope; no cookie is asked for, so
+    /// the token is the app's alone. `attemptId` makes a retry after a lost
+    /// response idempotent for a minute, like the companion's request id.
+    public static func pairWithServer(
+        connection: Connection,
+        code: String,
+        label: String,
+        attemptId: String = UUID().uuidString,
+        session: URLSession = .shared
+    ) async throws -> ServerPairResponse {
+        let client = CompanionClient(connection: connection, token: nil, session: session)
+        var request = try client.makeRequest(
+            "POST",
+            "/api/auth/pair",
+            body: ["code": code, "label": label, "attemptId": attemptId]
+        )
+        request.timeoutInterval = 8
+        return try await client.send(request, as: ServerPairResponse.self)
+    }
+
+    /// The server's public descriptor: reachable before pairing, and the way
+    /// to notice that the address now belongs to a different server.
+    public func environment() async throws -> ServerEnvironment {
+        try await send(makeRequest("GET", "/.well-known/openmausbot/environment"), as: ServerEnvironment.self)
+    }
+
+    /// End this session on the server (server-paired connections only).
+    public func logout() async throws {
+        try await send(makeRequest("POST", "/api/auth/logout"))
+    }
+
     /// Resolve the multi-address invite before consuming its credential.
     ///
     /// Health probes are non-mutating and run together, so a dead protected
@@ -715,6 +848,28 @@ public struct CompanionClient: Sendable {
     public func fleet(messages: Int? = 50) async throws -> Fleet {
         let query = messages.map { [URLQueryItem(name: "messages", value: String($0))] } ?? []
         return try await send(try makeRequest("GET", "/api/bots", query: query), as: Fleet.self)
+    }
+
+    /// The fleet includes only each bot's selected transcript. Recover the
+    /// other threads currently awaiting a person before committing a cold
+    /// snapshot, so their approval cards do not depend on opening the chat.
+    /// Fail the whole refresh on a failed page: advancing the replay cursor
+    /// with a partial snapshot could permanently miss that request.
+    public func fleetForHydration(messages limit: Int = 50) async throws -> (
+        fleet: Fleet, waitingThreads: [String: ThreadPage]
+    ) {
+        try Task.checkCancellation()
+        let fleet = try await fleet(messages: limit)
+        var waitingThreads: [String: ThreadPage] = [:]
+        for bot in fleet.bots {
+            for task in bot.tasks ?? [] where task.activity == "waiting-on-you"
+                && task.threadId != bot.threadId && waitingThreads[task.threadId] == nil {
+                try Task.checkCancellation()
+                waitingThreads[task.threadId] = try await messages(threadId: task.threadId, limit: limit)
+            }
+        }
+        try Task.checkCancellation()
+        return (fleet, waitingThreads)
     }
 
     /// Scrollback: the page before a message already held.
@@ -869,8 +1024,38 @@ public struct CompanionClient: Sendable {
             let isBidiControl = (0x202A...0x202E).contains(code) || (0x2066...0x2069).contains(code)
             return CharacterSet.controlCharacters.contains(scalar) || isBidiControl ? " " : String(scalar)
         }.joined().trimmingCharacters(in: .whitespacesAndNewlines)
-        let shortened = String(cleaned.prefix(180))
+        let shortened = boundedFilename(cleaned)
         return shortened.isEmpty || shortened == "." || shortened == ".." ? "file" : shortened
+    }
+
+    /// APFS limits one path component by bytes, not Swift characters. Keep
+    /// enough room for the preview cache's own suffix and retain a useful
+    /// extension whenever it fits.
+    private static func boundedFilename(_ value: String, maximumUTF8Bytes: Int = 180) -> String {
+        guard value.utf8.count > maximumUTF8Bytes else { return value }
+        let pathExtension = (value as NSString).pathExtension
+        let suffix = pathExtension.isEmpty ? "" : ".\(pathExtension)"
+        if !suffix.isEmpty,
+           suffix.utf8.count <= 32,
+           suffix.utf8.count < maximumUTF8Bytes {
+            let stem = String(value.dropLast(suffix.count))
+            let prefix = utf8Prefix(stem, maximumBytes: maximumUTF8Bytes - suffix.utf8.count)
+            if !prefix.isEmpty { return prefix + suffix }
+        }
+        return utf8Prefix(value, maximumBytes: maximumUTF8Bytes)
+    }
+
+    private static func utf8Prefix(_ value: String, maximumBytes: Int) -> String {
+        var result = ""
+        var bytes = 0
+        for character in value {
+            let piece = String(character)
+            let pieceBytes = piece.utf8.count
+            guard bytes + pieceBytes <= maximumBytes else { break }
+            result.append(character)
+            bytes += pieceBytes
+        }
+        return result
     }
 
     /// Fetch an app-owned avatar with the paired-device bearer token. Custom
@@ -910,6 +1095,13 @@ public struct CompanionClient: Sendable {
         return (response.routines, response.runs)
     }
 
+    /// A read-only summary of one bot: who it is, what it does and won't do,
+    /// and its recent activity. No settings, no transcript.
+    public func overview(botId: String) async throws -> BotOverview {
+        guard Self.validRouteID(botId) else { throw APIError.badURL }
+        return try await send(try makeRequest("GET", "/api/bots/\(botId)/overview"), as: BotOverview.self)
+    }
+
     // MARK: - Doing
 
     /// Make a new bot. The harness picks its name, colour and greeting — the
@@ -929,11 +1121,20 @@ public struct CompanionClient: Sendable {
         ).bot
     }
 
-    /// Change only the engine, model and optional reasoning effort. This uses
-    /// the companion's narrow model route rather than the desktop's general
-    /// bot PATCH, which also owns execution policy and computer settings.
-    public func updateModel(botId: String, selection: ModelSelection) async throws -> Bot {
+    /// A captured thread uses the task route, which cannot change siblings or
+    /// the profile default. Omitting it retains the legacy narrow model API.
+    public func updateModel(botId: String, selection: ModelSelection, threadId: String? = nil) async throws -> Bot {
         guard Self.validRouteID(botId) else { throw APIError.badURL }
+        if let threadId {
+            guard Self.validRouteID(threadId) else { throw APIError.badURL }
+            let model = try JSONSerialization.jsonObject(with: JSONEncoder().encode(selection))
+            return try await send(
+                try makeRequest("PATCH", "/api/bots/\(botId)/tasks/\(threadId)", body: [
+                    "modelSelection": model, "requireAvailableModel": true,
+                ]),
+                as: BotResponse.self
+            ).bot
+        }
         return try await send(
             try makeRequest("PATCH", "/api/bots/\(botId)/model", encodedBody: selection),
             as: BotResponse.self
@@ -1133,8 +1334,10 @@ public struct CompanionClient: Sendable {
         ).bots
     }
 
-    public func send(text: String, toBot botId: String) async throws {
-        try await send(try makeRequest("POST", "/api/bots/\(botId)/messages", body: ["text": text]))
+    public func send(text: String, toBot botId: String, threadId: String? = nil) async throws {
+        var body = ["text": text]
+        if let threadId { body["threadId"] = threadId }
+        try await send(try makeRequest("POST", "/api/bots/\(botId)/messages", body: body))
     }
 
     public func send(text: String, toRoom groupId: String) async throws {
@@ -1200,8 +1403,10 @@ public struct CompanionClient: Sendable {
 
     /// Remember a grant so the same tool stops asking. The harness decides
     /// the key and puts it on the card; the phone never derives its own.
-    public func alwaysAllow(botId: String, key: String) async throws {
-        try await send(try makeRequest("POST", "/api/bots/\(botId)/always-allow", body: ["allowKey": key]))
+    public func alwaysAllow(botId: String, key: String, threadId: String? = nil) async throws {
+        var body = ["allowKey": key]
+        if let threadId { body["threadId"] = threadId }
+        try await send(try makeRequest("POST", "/api/bots/\(botId)/always-allow", body: body))
     }
 
     /// Starts one more account authorization for a toolkit. Revocation is
@@ -1246,13 +1451,17 @@ public struct CompanionClient: Sendable {
         ).message
     }
 
-    public func edit(botId: String, messageId: String, text: String) async throws {
-        try await send(try makeRequest("POST", "/api/bots/\(botId)/messages/\(messageId)/edit", body: ["text": text]))
+    public func edit(botId: String, messageId: String, text: String, threadId: String? = nil) async throws {
+        var body = ["text": text]
+        if let threadId { body["threadId"] = threadId }
+        try await send(try makeRequest("POST", "/api/bots/\(botId)/messages/\(messageId)/edit", body: body))
     }
 
-    public func setActiveBranch(botId: String, messageId: String) async throws -> String {
-        try await send(
-            try makeRequest("POST", "/api/bots/\(botId)/active-branch", body: ["messageId": messageId]),
+    public func setActiveBranch(botId: String, messageId: String, threadId: String? = nil) async throws -> String {
+        var body = ["messageId": messageId]
+        if let threadId { body["threadId"] = threadId }
+        return try await send(
+            try makeRequest("POST", "/api/bots/\(botId)/active-branch", body: body),
             as: ActiveBranchResponse.self
         ).activeLeafId
     }
@@ -1293,8 +1502,27 @@ public struct CompanionClient: Sendable {
         try await send(try makeRequest("DELETE", "/api/groups/\(groupId)/tasks/\(threadId)"), as: RoomResponse.self).group
     }
 
-    public func interrupt(botId: String) async throws {
-        try await send(try makeRequest("POST", "/api/bots/\(botId)/interrupt"))
+    public func interrupt(botId: String, threadId: String? = nil) async throws {
+        try await send(try makeRequest("POST", "/api/bots/\(botId)/interrupt", body: threadId.map { ["threadId": $0] }))
+    }
+
+    public func provideCredential(
+        botId: String,
+        messageId: String,
+        envelope: PhoneSecretEnvelope
+    ) async throws {
+        var request = try makeRequest(
+            "POST",
+            "/api/bots/\(botId)/secret-cards/\(messageId)/provide",
+            encodedBody: envelope
+        )
+        // Saving is transactional: the desktop validates provider access,
+        // commits its OS-encrypted credential document, and updates the live
+        // server before replying. Those provider checks have bounded network
+        // deadlines of their own, so this one operation deliberately gets
+        // longer than the normal twenty-second chat API timeout.
+        request.timeoutInterval = 115
+        try await send(request)
     }
 
     /// Mint a fresh interactive viewer for an existing cloud computer. The
@@ -1308,8 +1536,8 @@ public struct CompanionClient: Sendable {
         )
     }
 
-    public func markRead(botId: String) async throws {
-        try await send(try makeRequest("POST", "/api/bots/\(botId)/read"))
+    public func markRead(botId: String, threadId: String? = nil) async throws {
+        try await send(try makeRequest("POST", "/api/bots/\(botId)/read", body: threadId.map { ["threadId": $0] }))
     }
 
     public func markRead(roomId: String) async throws {
@@ -1348,7 +1576,15 @@ public struct CompanionClient: Sendable {
     /// send a phone on cellular. The computer panel turns it on for exactly
     /// as long as it is open, which costs a reconnect — cheap, because the
     /// stream resumes from its cursor and loses nothing.
-    public func events(since cursor: String?, screens: Bool = false) throws -> AsyncThrowingStream<StreamFrame, Error> {
+    ///
+    /// `streamingSession` is for tests, which need to see the request the
+    /// stream is opened with; the app leaves it nil and gets the session
+    /// tuned above.
+    public func events(
+        since cursor: String?,
+        screens: Bool = false,
+        streamingSession: URLSession? = nil
+    ) throws -> AsyncThrowingStream<StreamFrame, Error> {
         var query = [URLQueryItem(name: "screens", value: screens ? "on" : "off")]
         if let cursor { query.append(URLQueryItem(name: "since", value: cursor)) }
         var streamRequest = try makeRequest("GET", "/api/events", query: query)
@@ -1362,6 +1598,6 @@ public struct CompanionClient: Sendable {
         // first quiet gap and reconnect, forever, looking like a flaky network
         // rather than a number in the wrong place.
         streamRequest.timeoutInterval = 90
-        return eventStream(request: streamRequest, session: Self.streaming)
+        return eventStream(request: streamRequest, session: streamingSession ?? Self.streaming)
     }
 }

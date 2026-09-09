@@ -150,11 +150,32 @@ describe("redactSecretsInText", () => {
       [`aws ${"AKIA" + "IOSFODNN7EXAMPLE"} and more`, /IOSFODNN7EXAMPLE/],
       [`google ${"AIza" + "SyA-"}${alpha.slice(0, 32)}`, /AIza/],
       [`npm ${"npm" + "_"}${alpha}`, /npm_[a-z]/],
+      [`xai ${"xai-"}${alpha}`, /xai-/],
+      [`groq ${"gsk_"}${alpha}ABCD`, /gsk_/],
+      [`huggingface ${"hf_"}${alpha}`, /hf_/],
     ];
     for (const [input, leak] of cases) {
       const out = redactSecretsInText(input);
       expect(out, input).not.toMatch(leak);
       expect(out).toMatch(/«redacted \d+ chars»/);
+    }
+  });
+
+  it.each([
+    ["xai-", 20],
+    ["gsk_", 40],
+    ["hf_", 30],
+  ] as const)("bounds %s masking without changing ordinary text", (prefix, minimum) => {
+    const key = prefix + "a".repeat(minimum);
+    const longer = key + "AB12";
+    const text = `before "${key}", ${longer}; after ✓`;
+    const expected = `before "«redacted ${key.length} chars»", «redacted ${longer.length} chars»; after ✓`;
+
+    expect(redactSecretsInText(text)).toBe(expected);
+    expect(redactSecretsInText(expected)).toBe(expected);
+    expect(redactSecrets({ note: text })).toEqual({ note: expected });
+    for (const ordinary of [prefix + "a".repeat(minimum - 1), `example_${key}`, `${prefix}example`]) {
+      expect(redactSecretsInText(ordinary)).toBe(ordinary);
     }
   });
 

@@ -4,7 +4,7 @@
 import { spawn, type ChildProcess } from "node:child_process";
 import { closeSync, mkdirSync, mkdtempSync, openSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { dirname, join } from "node:path";
+import { delimiter, dirname, join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { parseArgs, type ParseArgsOptionsConfig } from "node:util";
 
@@ -14,7 +14,7 @@ import { freePortBlock } from "../server/testing/ports.ts";
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
 const FAKE_CLI = join(ROOT, "server", "testing", "fake-claude-cli.ts");
-const MUTATING = new Set(["new-bot", "new-channel", "send", "send-channel", "interrupt"]);
+const MUTATING = new Set(["new-bot", "new-channel", "send", "send-channel", "interrupt", "set-model", "edit"]);
 
 export class ControlOmbError extends Error {
   readonly hint?: string;
@@ -41,18 +41,20 @@ read-only:
   bots [--url URL]
   channels [--url URL]
   models [--url URL]
-  messages --bot ID [--limit 30] [--url URL]
-  messages --channel ID [--limit 30] [--url URL]
-  wait --bot ID [--timeout 30] [--url URL]
-  wait --channel ID [--timeout 30] [--url URL]
+  messages --bot ID [--task ID] [--limit 30] [--url URL]
+  messages --channel ID [--task ID] [--limit 30] [--url URL]
+  wait --bot ID [--task ID] [--timeout 30] [--url URL]
+  wait --channel ID [--task ID] [--timeout 30] [--url URL]
 
 mutating (an explicit --url or OPENMAUSBOT_URL/OMB_PORT is required):
   new-bot --name NAME [--url URL]
   new-channel --name NAME --members ID,ID [--url URL]
-  send --bot ID --text TEXT [--dry-run] [--url URL]
-  send-channel --channel ID --text TEXT [--dry-run] [--url URL]
-  interrupt --bot ID [--dry-run] [--url URL]
-  interrupt --channel ID [--dry-run] [--url URL]
+  send --bot ID --text TEXT [--task ID] [--dry-run] [--url URL]
+  send-channel --channel ID --text TEXT [--task ID] [--dry-run] [--url URL]
+  interrupt --bot ID [--task ID] [--dry-run] [--url URL]
+  interrupt --channel ID [--task ID] [--dry-run] [--url URL]
+  edit --bot ID --message ID --text TEXT [--task ID] [--dry-run] [--url URL]
+  set-model --bot ID --instance ID --model ID [--task ID] [--effort LEVEL] [--dry-run] [--url URL]
 
 isolated fixture:
   node --experimental-strip-types scripts/control-omb.ts launch
@@ -208,29 +210,72 @@ export async function runControlOmb(
       bot: { type: "string" },
       channel: { type: "string" },
       text: { type: "string" },
+      task: { type: "string" },
       "dry-run": { type: "boolean", default: false },
     });
     const expected = command === "send" ? "bot" : "channel";
     const destination = target(values);
     if (destination.type !== expected) throw new ControlOmbError(`${command} requires --${expected} ID`);
     const tool = expected === "bot" ? "send_bot_message" : "send_channel_message";
-    const input = { [`${expected}_id`]: destination.id, text: required(values.text, "--text") };
+    const input = {
+      [`${expected}_id`]: destination.id,
+      text: required(values.text, "--text"),
+      ...(values.task !== undefined ? { task_id: required(values.task, "--task") } : {}),
+    };
     return dryRun(command, values, tool, input) ?? call(tool, input, values.url);
+  }
+
+  if (command === "edit") {
+    // The rewind a person performs in the composer: edit an earlier user
+    // message, fork the thread there, and answer again. It is the only
+    // mapped way to make the harness REBUILD a thread rather than resume
+    // the provider's session, which is what a replay path needs to be
+    // observable from the control surface at all.
+    const values = parse(command, args, {
+      bot: { type: "string" }, message: { type: "string" }, text: { type: "string" },
+      task: { type: "string" }, "dry-run": { type: "boolean", default: false },
+    });
+    const input = {
+      bot_id: required(values.bot, "--bot"),
+      message_id: required(values.message, "--message"),
+      text: required(values.text, "--text"),
+      ...(values.task !== undefined ? { task_id: required(values.task, "--task") } : {}),
+    };
+    return dryRun(command, values, "edit_bot_message", input) ?? call("edit_bot_message", input, values.url);
+  }
+
+  if (command === "set-model") {
+    const values = parse(command, args, {
+      bot: { type: "string" }, task: { type: "string" }, instance: { type: "string" },
+      model: { type: "string" }, effort: { type: "string" },
+      "dry-run": { type: "boolean", default: false },
+    });
+    const input = {
+      bot_id: required(values.bot, "--bot"),
+      instance_id: required(values.instance, "--instance"),
+      model: required(values.model, "--model"),
+      ...(values.task !== undefined ? { task_id: required(values.task, "--task") } : {}),
+      ...(values.effort !== undefined ? { effort: required(values.effort, "--effort") } : {}),
+    };
+    return dryRun(command, values, "set_bot_model", input) ?? call("set_bot_model", input, values.url);
   }
 
   if (command === "wait" || command === "messages" || command === "interrupt") {
     const values = parse(command, args, {
       bot: { type: "string" },
       channel: { type: "string" },
+      task: { type: "string" },
       timeout: { type: "string" },
       limit: { type: "string" },
       "dry-run": { type: "boolean", default: false },
     });
     const destination = target(values);
+    const pinned = values.task !== undefined ? { task_id: required(values.task, "--task") } : {};
     if (command === "wait") {
       return call("wait_for_conversation", {
         target_type: destination.type,
         target_id: destination.id,
+        ...pinned,
         timeout_seconds: positiveInteger(values.timeout, "--timeout", 30, 120),
       }, values.url);
     }
@@ -238,11 +283,12 @@ export async function runControlOmb(
       const tool = destination.type === "bot" ? "get_bot_messages" : "get_channel_messages";
       return call(tool, {
         [`${destination.type}_id`]: destination.id,
+        ...pinned,
         limit: positiveInteger(values.limit, "--limit", 30, 200),
       }, values.url);
     }
     const tool = "interrupt_conversation";
-    const input = { target_type: destination.type, target_id: destination.id };
+    const input = { target_type: destination.type, target_id: destination.id, ...pinned };
     return dryRun(command, values, tool, input) ?? call(tool, input, values.url);
   }
 
@@ -260,11 +306,21 @@ export interface VerificationServer {
 export async function launchVerificationServer(
   parentEnv: NodeJS.ProcessEnv = process.env,
   signal?: AbortSignal,
+  localVm?: { binDir: string; host: string; sshKey: string; staticDir: string },
+  browser?: { binaryPath: string; executablePath: string },
 ): Promise<VerificationServer> {
+  if (localVm) {
+    const endpoint = new URL(localVm.host);
+    if (endpoint.protocol !== "ssh:" || endpoint.hostname !== "127.0.0.1" || endpoint.password) {
+      throw new ControlOmbError("Local VM verification requires an explicit loopback Podman machine");
+    }
+  }
   const port = await freePortBlock([0, 1]);
   if (signal?.aborted) throw new ControlOmbError("verification launch cancelled");
   const url = `http://127.0.0.1:${port}`;
-  const dataDir = mkdtempSync(join(tmpdir(), "openmausbot-verify-data-"));
+  // Native browser daemons use UNIX sockets; a macOS temp home can exceed
+  // their path limit. This is still an owned, randomly named fixture only.
+  const dataDir = mkdtempSync(join(browser && process.platform !== "win32" ? "/tmp" : tmpdir(), "openmausbot-verify-data-"));
   const fixtureTemp = join(dataDir, "tmp");
   const fixtureDumpPath = join(dataDir, "fake-claude-dump.json");
   mkdirSync(fixtureTemp, { recursive: true });
@@ -303,9 +359,28 @@ export async function launchVerificationServer(
     OMB_DATA_DIR: dataDir,
     OMB_PORT: String(port),
     OMB_WEBHOOK_PORT: String(port + 1),
-    FAKE_CLAUDE_MODE: "happy",
+    // The fixture's default CLI behaviour; a caller that sets
+    // FAKE_CLAUDE_MODE explicitly overrides it below to drive the CLI's
+    // failure paths (exit-early, dead-session, hang...) through the real
+    // server. Nothing else from the parent shell reaches the fixture.
+    FAKE_CLAUDE_MODE: parentEnv.FAKE_CLAUDE_MODE || "happy",
     FAKE_CLAUDE_DUMP: fixtureDumpPath,
-    PATH: "",
+    // Keep the environment hermetic while allowing POSIX to resolve the
+    // fake CLI's `#!/usr/bin/env node` shebang. Windows resolves that same
+    // fixture through spawnCli without a shell.
+    PATH: dirname(process.execPath),
+  });
+  // Opt-in live Local VM fixture: keep the temporary home and fake engine,
+  // granting only the explicitly selected machine connection and static UI.
+  if (localVm) Object.assign(childEnv, {
+    OMB_EXTRA_PATH: [localVm.binDir, ...(process.platform === "win32" ? [join(childEnv.SYSTEMROOT || "C:\\Windows", "System32")] : [])].join(delimiter),
+    CONTAINER_HOST: localVm.host,
+    CONTAINER_SSHKEY: localVm.sshKey,
+    OMB_STATIC_DIR: localVm.staticDir,
+  });
+  if (browser) Object.assign(childEnv, {
+    OMB_AGENT_BROWSER_PATH: browser.binaryPath,
+    AGENT_BROWSER_EXECUTABLE_PATH: browser.executablePath,
   });
   const child = spawn(process.execPath, ["--experimental-strip-types", join(ROOT, "server", "index.ts")], {
     cwd: ROOT,

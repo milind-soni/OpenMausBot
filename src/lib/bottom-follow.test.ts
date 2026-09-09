@@ -1,6 +1,30 @@
 import { describe, expect, it } from "vitest";
 
-import { BOTTOM_FOLLOW_THRESHOLD, shouldResumeBottomFollow } from "./bottom-follow";
+import { BOTTOM_FOLLOW_THRESHOLD, followBottomGrowth, shouldResumeBottomFollow } from "./bottom-follow";
+
+describe("followBottomGrowth", () => {
+  it("scrolls resized content to its new bottom while following", () => {
+    const calls: ScrollToOptions[] = [];
+    const scroller = {
+      scrollHeight: 1_240,
+      scrollTo: (options: ScrollToOptions) => calls.push(options),
+    };
+
+    expect(followBottomGrowth(scroller, true)).toBe(true);
+    expect(calls).toEqual([{ top: 1_240 }]);
+  });
+
+  it("preserves scrollback when bottom-follow is detached", () => {
+    const calls: ScrollToOptions[] = [];
+    const scroller = {
+      scrollHeight: 1_240,
+      scrollTo: (options: ScrollToOptions) => calls.push(options),
+    };
+
+    expect(followBottomGrowth(scroller, false)).toBe(false);
+    expect(calls).toEqual([]);
+  });
+});
 
 describe("shouldResumeBottomFollow", () => {
   it("does not re-pin a small upward scroll inside the near-bottom zone", () => {

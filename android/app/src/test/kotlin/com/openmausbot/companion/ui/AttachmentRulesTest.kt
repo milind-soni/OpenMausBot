@@ -1,5 +1,7 @@
 package com.openmausbot.companion.ui
 
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.unit.IntSize
 import com.openmausbot.companion.core.AttachmentPolicy
 import com.openmausbot.companion.core.PendingMessageAttachment
 import kotlin.test.Test
@@ -60,6 +62,8 @@ class AttachmentRulesTest {
 
     @Test
     fun `a downloaded file is shown by its type, then its suffix`() {
+        assertEquals(FilePreviewKind.IMAGE, FilePreviewRules.kind("image/png", "x.bin"))
+        assertEquals(FilePreviewKind.IMAGE, FilePreviewRules.kind("application/octet-stream", "photo.webp"))
         assertEquals(FilePreviewKind.MARKDOWN, FilePreviewRules.kind("text/markdown", "x.bin"))
         assertEquals(FilePreviewKind.MARKDOWN, FilePreviewRules.kind("application/octet-stream", "README.md"))
         assertEquals(FilePreviewKind.TEXT, FilePreviewRules.kind("text/plain", "notes"))
@@ -67,6 +71,55 @@ class AttachmentRulesTest {
         assertEquals(FilePreviewKind.OTHER, FilePreviewRules.kind("application/pdf", "report.pdf"))
         assertEquals("report.pdf", FilePreviewRules.nameForOpening("/Users/x/report.pdf"))
         assertEquals("report.pdf", FilePreviewRules.nameForOpening("""C:\Users\x\report.pdf"""))
+    }
+
+    @Test
+    fun `large attachment images decode near the requested display edge`() {
+        assertEquals(4, AttachmentImageRules.sampleSize(4_000, 2_000, 768))
+        assertEquals(2, AttachmentImageRules.sampleSize(1_600, 1_200, 768))
+        assertEquals(1, AttachmentImageRules.sampleSize(700, 500, 768))
+        assertEquals(1, AttachmentImageRules.sampleSize(0, 500, 768))
+        assertEquals(IntSize(768, 384), AttachmentImageRules.targetSize(4_000, 2_000, 768))
+        assertEquals(IntSize(500, 700), AttachmentImageRules.targetSize(500, 700, 768))
+    }
+
+    @Test
+    fun `android eight sampling bounds its intermediate without needless blur`() {
+        assertEquals(4, AttachmentImageRules.legacySampleSize(4_000, 3_000, 768))
+        // The no-undershoot plan is sample 2 (36 MP). One extra step yields a
+        // 3000 px edge, just below 3072, and a bounded 9 MP allocation.
+        assertEquals(4, AttachmentImageRules.legacySampleSize(12_000, 12_000, 3_072))
+        // Just over the soft 12 MP budget but close to the requested edge: keep
+        // the sharp source under the 14 MP hard cap, then scale to 3072 exactly.
+        assertEquals(1, AttachmentImageRules.legacySampleSize(3_500, 3_500, 3_072))
+        // The tolerance is hard bounded; a materially larger allocation still samples.
+        assertEquals(2, AttachmentImageRules.legacySampleSize(4_000, 4_000, 3_072))
+        assertEquals(1, AttachmentImageRules.legacySampleSize(700, 500, 768))
+    }
+
+    @Test
+    fun `computer screenshot budget follows rendered width and source aspect`() {
+        assertEquals(1_200, ScreenShotImageRules.maximumEdge(1_200, 2_400, 1_200))
+        assertEquals(2_400, ScreenShotImageRules.maximumEdge(1_200, 1_200, 2_400))
+        assertEquals(600, ScreenShotImageRules.maximumEdge(1_200, 600, 300))
+        assertEquals(4_096, ScreenShotImageRules.maximumEdge(2_000, 1_000, 5_000))
+    }
+
+    @Test
+    fun `zoomed image pan stays inside the visible content`() {
+        assertEquals(
+            Offset(500f, 0f),
+            ImagePanRules.clamp(
+                offset = Offset(9_000f, 9_000f),
+                scale = 2f,
+                viewport = IntSize(1_000, 1_000),
+                image = IntSize(2_000, 1_000),
+            ),
+        )
+        assertEquals(
+            Offset.Zero,
+            ImagePanRules.clamp(Offset(20f, 20f), 1f, IntSize(1_000, 1_000), IntSize(2_000, 1_000)),
+        )
     }
 
     @Test

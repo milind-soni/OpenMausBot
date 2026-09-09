@@ -13,6 +13,7 @@ import type { AutoVerdictSource } from "./auto-approve.ts";
 const context = (patch: Partial<ReviewContext> = {}): ReviewContext => ({
   source: "no-grant",
   mode: "enforce",
+  approvalMode: "ask",
   unattended: false,
   approvalScope: undefined,
   ...patch,
@@ -22,6 +23,8 @@ describe("shouldReview", () => {
   const sources: AutoVerdictSource[] = [
     "always-allow",
     "auto-mode",
+    "full-access",
+    "explicit-approval-block",
     "unattended-block",
     "local-computer-block",
     "destructive-guard",
@@ -45,6 +48,10 @@ describe("shouldReview", () => {
     expect(shouldReview(context({ mode: "off" }))).toBe(false);
     expect(resolveAutoReviewMode(undefined)).toBe("off");
     expect(resolveAutoReviewMode("unknown")).toBe("off");
+  });
+
+  it("never layers app review over Custom config.toml approvals", () => {
+    expect(shouldReview(context({ approvalMode: "custom" }))).toBe(false);
   });
 });
 

@@ -37,7 +37,7 @@ describe("bundled skill library", () => {
     }, "/skills/phone-harness")).toThrow(/invalid id/);
   });
 
-  it("loads a recorded skill without letting a broken sibling disable it", () => {
+  it("loads a user skill without letting a broken sibling disable it", () => {
     const root = mkdtempSync(join(tmpdir(), "openmausbot-skills-"));
     const valid = join(root, "file-expense");
     mkdirSync(valid);

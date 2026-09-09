@@ -19,7 +19,7 @@ carried across every release, and it is the patch that broke the first time
 upstream hardened its loopback gate.
 
 ```text
-  phone ──LAN/tailnet──▶ companion :8810 ──loopback──▶ harness :8799
+  phone ──HTTPS/LAN/tailnet──▶ companion :8810 ──loopback──▶ harness :8799
                           ▲                             ▲
                           │ token, allowlist,           │ unmodified,
                           │ Origin refused              │ loopback-only
@@ -34,20 +34,29 @@ upstream hardened its loopback gate.
 | **The allowlist** | Default deny, per method and path (`src/routes.ts`) — the list is every request the app makes, and nothing else. General bot/room PATCH routes stay closed; read state and approval grants use narrow verbs. A route that appears in the harness later is closed to devices until someone adds it here on purpose. |
 | **Scrubbing** | `resumeCursors` — the harness's own provider session ids — never reach a device, whether or not the harness still sends them. |
 | **Discovery** | Bonjour, so a phone finds the computer by name instead of by typed address. |
+| **Secure credential relay** | Carries an HPKE envelope for one pending, allowlisted credential card. The sidecar never receives the desktop private key or plaintext. |
 
 ## Transport security
 
-The device port speaks plain HTTP, and the device token travels in a header on
-every request. Where that is safe depends on how the phone reaches the
-computer, and the two routes are not equivalent:
+The optional hosted route uses certificate-validated HTTPS. Direct routes use
+plain HTTP, and the device token travels in a header on every request. Where a
+direct route is safe depends on how the phone reaches the computer:
 
-- **Over a tailnet** — the recommended route, and the only one that works away
-  from home — every packet is inside WireGuard before it touches a network, so
+- **Over hosted HTTPS** — the recommended remote route — TLS encrypts and
+  authenticates the connection through the outbound desktop connector.
+
+- **Over a tailnet** — the recommended direct route away from home — every
+  packet is inside WireGuard before it touches a network, so
   the connection is encrypted and authenticated end to end despite the `http`
   in the URL.
 - **Over a LAN** it is cleartext on that network. Trust it as far as you trust
   everyone on the wifi: fine at home, not fine on a café or conference network.
   Pair over the tailnet there instead.
+
+The phone never submits credential envelopes over LAN or Bonjour HTTP. That
+operation requires hosted HTTPS or Tailscale so its reusable device token is
+protected as well as the HPKE-encrypted value. Ordinary local chat and approval
+traffic keep the documented trusted-network behavior above.
 
 Turning on TLS is not a drop-in improvement. A certificate for a LAN address
 is one nothing can validate, so it would have to be pinned at pairing and
@@ -64,8 +73,11 @@ trusted-network-only rather than described as something it is not.
   request that carries one is a browser that has found this port. Refused
   before the token is even looked at — stricter than the harness's own rule,
   which allows loopback origins.
-- **Hold credentials, settings, or Local VM control.** Those stay on the
-  machine. See `src/routes.ts` for the exact refusals and why.
+- **Hold credentials, settings, or Local VM control.** Credential plaintext
+  remains transient on the phone and desktop only: the sidecar can carry one
+  QR-keyed HPKE envelope for an exact pending card, but cannot open or retain
+  it. General credential/configuration routes, settings, and Local VM control
+  remain unavailable. See `src/routes.ts` for the exact boundary.
 
 ## Running it
 
@@ -80,7 +92,7 @@ It prints where to point the phone, and where you pair:
 ```text
 companion  http://0.0.0.0:8810  →  harness 127.0.0.1:8799
 pair here  http://127.0.0.1:8811
-on your phone, enter  macbook.tail1234.ts.net:8810
+on the device, enter  macbook.tail1234.ts.net:8810
 ```
 
 Open the pairing page, click **Start pairing**, and type the six digits into
@@ -91,7 +103,7 @@ switch — running it *is* the opt-in, so there is no toggle to forget.
 
 That is the standalone way to run it, and it is what to reach for when the
 harness is running on its own — a headless box, or `pnpm dev:server` in a
-terminal. **The normal desktop workflow is Settings → Phone**, which
+terminal. **The normal desktop workflow is Settings → Remote access**, which
 starts and stops this same sidecar as a child process and offers pairing and
 revocation inline; the loopback page above is the same API rendered for
 people not running the desktop app. Either way the sidecar only listens while

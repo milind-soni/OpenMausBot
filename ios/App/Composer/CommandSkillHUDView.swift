@@ -38,11 +38,11 @@ public struct CommandSkillHUDView: View {
         ),
         CommandSkillItem(
             id: "tasks",
-            title: "/tasks",
-            description: "View and manage bot task threads",
+            title: "/threads",
+            description: "View and manage threads",
             iconName: "square.stack.fill",
             brandColor: Color(hex: "#A855F7"),
-            command: "/tasks"
+            command: "/threads"
         ),
         CommandSkillItem(
             id: "diff",
@@ -188,7 +188,7 @@ private struct CommandCardView: View {
                         .foregroundColor(isDark ? .white : Color(hex: "#0F172A"))
                 }
                 
-                Text(cmd.description)
+                Text(LocalizedStringKey(cmd.description))
                     .font(.system(size: 9.5))
                     .foregroundColor(isDark ? Color(hex: "#94A3B8") : Color(hex: "#64748B"))
                     .lineLimit(2)

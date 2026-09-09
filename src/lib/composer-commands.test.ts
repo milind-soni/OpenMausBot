@@ -3,6 +3,7 @@ import {
   composerSlashTrigger,
   goalTextFromComposer,
   replaceComposerSlashTrigger,
+  type ComposerSlashCommandId,
 } from "./composer-commands";
 
 describe("composer slash commands", () => {
@@ -29,5 +30,13 @@ describe("composer slash commands", () => {
     );
     expect(goalTextFromComposer("/goalie says hello")).toBeNull();
     expect(goalTextFromComposer("discuss /goal later")).toBeNull();
+  });
+
+  it("offers setup as a slash command id and keeps the typed token", () => {
+    const id: ComposerSlashCommandId = "setup";
+    expect(id).toBe("setup");
+    expect(
+      replaceComposerSlashTrigger("/se", { query: "se", start: 0, end: 3 }, "/setup "),
+    ).toEqual({ text: "/setup ", caret: 7 });
   });
 });

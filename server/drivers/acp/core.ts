@@ -41,10 +41,12 @@ import type {
   RuntimeEventListener,
   SendTurnInput,
   ProviderErrorCode,
+  TurnImageInput,
 } from "../../contracts.ts";
 import { newEventId, newId } from "../../contracts.ts";
 import { computerProxyEnv } from "../../container-computer.ts";
 import { augmentedPath } from "../../env-path.ts";
+import { supportsApprovalMode } from "../../../shared/approval-mode.ts";
 
 // Resolved from the server root, never relative to this file: bundling inlines
 // this module two directories up, so the `".."` pair here would climb past the
@@ -186,6 +188,14 @@ const LOAD_SESSION_TIMEOUT = envOr("OPENMAUS_ACP_LOAD_SESSION_TIMEOUT_MS", 120_0
 const CLIENT_FILE_MAX_BYTES = 8 * 1024 * 1024;
 const TOOL_LOG_TEXT_LIMIT = 64_000;
 
+async function readAcpImageBlocks(images: readonly TurnImageInput[]) {
+  return Promise.all(images.map(async (image) => ({
+    type: "image" as const,
+    data: (await readFile(image.path)).toString("base64"),
+    mimeType: image.mime,
+  })));
+}
+
 function sanitizeToolLogValue(value: unknown, budget: { nodes: number; text: number }, depth = 0): unknown {
   if (depth > 12 || budget.nodes-- <= 0) return undefined;
   if (typeof value === "string") {
@@ -255,7 +265,7 @@ export function createAcpDriver(support: AcpSupport): ProviderDriver<AcpConfig> 
 
     async create(input: DriverCreateInput<AcpConfig>): Promise<ProviderInstance> {
       const { instanceId, config } = input;
-      const childEnv = () => {
+      const childEnv = (activeConfig = config) => {
         const env: Record<string, string | undefined> = {
           ...process.env,
           ...input.environment,
@@ -270,7 +280,7 @@ export function createAcpDriver(support: AcpSupport): ProviderDriver<AcpConfig> 
         for (const key of [...PROVIDER_CREDENTIAL_ENV, ...WORKSPACE_CREDENTIAL_ENV]) {
           if (!allowedCredentials.has(key)) delete env[key];
         }
-        support.transformEnv?.(env, config, instanceId);
+        support.transformEnv?.(env, activeConfig, instanceId);
         return env;
       };
       let models = support.models;
@@ -298,22 +308,37 @@ export function createAcpDriver(support: AcpSupport): ProviderDriver<AcpConfig> 
       };
 
       // ACP content blocks may carry a complete raster image inline. Keep the
-      // bytes available to the normalizer, but never duplicate megabytes of
-      // base64 into the provider-native diagnostic log.
+      // bytes on the wire, but never duplicate megabytes of base64 into the
+      // provider-native diagnostic log in either direction.
       const nativeLogMessage = (msg: any): unknown => {
-        const content = msg?.params?.update?.content;
+        let redacted = msg;
+        const prompt = msg?.method === "session/prompt" ? msg?.params?.prompt : null;
+        if (Array.isArray(prompt)) {
+          redacted = {
+            ...msg,
+            params: {
+              ...msg.params,
+              prompt: prompt.map((content: any) =>
+                content?.type === "image" && typeof content.data === "string"
+                  ? { ...content, data: `[image data: ${content.data.length} base64 chars]` }
+                  : content
+              ),
+            },
+          };
+        }
+        const content = redacted?.params?.update?.content;
         if (
-          msg?.method !== "session/update" ||
-          msg?.params?.update?.sessionUpdate !== "agent_message_chunk" ||
+          redacted?.method !== "session/update" ||
+          redacted?.params?.update?.sessionUpdate !== "agent_message_chunk" ||
           content?.type !== "image" ||
           typeof content.data !== "string"
-        ) return support.sanitizeToolPayload ? sanitizeAcpToolMessage(msg) : msg;
-        const redacted = {
-          ...msg,
+        ) return support.sanitizeToolPayload ? sanitizeAcpToolMessage(redacted) : redacted;
+        redacted = {
+          ...redacted,
           params: {
-            ...msg.params,
+            ...redacted.params,
             update: {
-              ...msg.params.update,
+              ...redacted.params.update,
               content: { ...content, data: `[image data: ${content.data.length} base64 chars]` },
             },
           },
@@ -386,17 +411,27 @@ export function createAcpDriver(support: AcpSupport): ProviderDriver<AcpConfig> 
       const sendTurn = async (turn: SendTurnInput) => {
         const { threadId } = turn;
         if (active.has(threadId)) throw new Error("a turn is already running on this thread");
+        // Provider-instance `fullAuto` predates per-bot approval levels. Every
+        // harness turn now carries the bot's mode, so Ask/Auto must explicitly
+        // put the native agent back into its interactive mode. Otherwise a
+        // legacy Grok bypassPermissions / Cursor --force / Droid auto-high /
+        // Antigravity yolo setting would silently outrank the selector. Calls
+        // that omit approvalMode retain the old adapter-level behavior for
+        // embedders and tests outside the harness.
+        const turnConfig = turn.approvalMode === undefined
+          ? config
+          : { ...config, fullAuto: turn.approvalMode === "full" && supportsApprovalMode(DRIVER_KIND, "full") };
         const controlsHost = turn.integrations?.localComputer?.scope === "local-computer";
-        if (controlsHost && config.fullAuto) {
+        if (controlsHost && turnConfig.fullAuto && turn.approvalMode !== "full") {
           throw new Error("local computer control requires interactive provider approvals");
         }
         const turnId = newId();
-        const cwd = turn.cwd ?? config.workspace ?? homedir();
-        const env = childEnv();
+        const cwd = turn.cwd ?? turnConfig.workspace ?? homedir();
+        const env = childEnv(turnConfig);
         if (
           support.requireAuthenticationBeforeSpawn
           && !skipSubscriptionAuthForLocalInject(turn.model)
-          && !(await support.isAuthenticated(env, config, instanceId))
+          && !(await support.isAuthenticated(env, turnConfig, instanceId))
         ) {
           emit({ ...base(threadId, turnId), type: "turn.started" });
           emit({ ...base(threadId, turnId), type: "runtime.error", message: support.loginNote, setup: true });
@@ -413,8 +448,8 @@ export function createAcpDriver(support: AcpSupport): ProviderDriver<AcpConfig> 
         let launch: { command: string; args?: string[]; env?: Record<string, string | undefined> };
         try {
           launch = support.resolveCommand
-            ? await support.resolveCommand(env, config, instanceId)
-            : { command: config.cli };
+            ? await support.resolveCommand(env, turnConfig, instanceId)
+            : { command: turnConfig.cli };
         } catch (error) {
           emit({ ...base(threadId, turnId), type: "turn.started" });
           emit({
@@ -427,7 +462,7 @@ export function createAcpDriver(support: AcpSupport): ProviderDriver<AcpConfig> 
           return { turnId };
         }
 
-        const child = spawnCli(launch.command, [...(launch.args ?? []), ...support.spawnArgs(config, cliTurn)], {
+        const child = spawnCli(launch.command, [...(launch.args ?? []), ...support.spawnArgs(turnConfig, cliTurn)], {
           cwd,
           env: launch.env ?? env,
           stdio: ["pipe", "pipe", "pipe"],
@@ -447,7 +482,7 @@ export function createAcpDriver(support: AcpSupport): ProviderDriver<AcpConfig> 
           try {
             child.stdin.write(JSON.stringify(obj) + "\n");
           } catch {}
-          appendNative(threadId, { dir: "out", source: SOURCE, msg: obj });
+          appendNative(threadId, { dir: "out", source: SOURCE, msg: nativeLogMessage(obj) });
         };
         const request = (method: string, params: unknown, timeoutMs?: number) =>
           new Promise<any>((resolve, reject) => {
@@ -587,7 +622,7 @@ export function createAcpDriver(support: AcpSupport): ProviderDriver<AcpConfig> 
 
           const toolCall = params.toolCall ?? {};
           const isQuestion = String(toolCall.toolCallId ?? "").startsWith("interaction_");
-          if (config.fullAuto && !isQuestion) {
+          if (turnConfig.fullAuto && turn.approvalMode === undefined && !isQuestion) {
             const allow = optionFor("allow");
             if (!allow) missing("allow");
             return send({
@@ -811,6 +846,14 @@ export function createAcpDriver(support: AcpSupport): ProviderDriver<AcpConfig> 
               }
             }
 
+            const images = turn.images ?? [];
+            const runtimeAcceptsImages = init?.agentCapabilities?.promptCapabilities?.image === true;
+            if (images.length && support.images === true && !runtimeAcceptsImages) {
+              throw new Error(
+                `${support.displayName} is configured for image attachments, but this installed runtime does not advertise ACP image input. Update the ${support.displayName} CLI or send the message without an image.`,
+              );
+            }
+
             const cursor = typeof turn.resumeCursor === "string" ? turn.resumeCursor : null;
             let sessionResult: any = null;
             if (cursor) {
@@ -873,7 +916,7 @@ export function createAcpDriver(support: AcpSupport): ProviderDriver<AcpConfig> 
                   request: (method, params, timeoutMs) =>
                     request(method, params, timeoutMs ?? SESSION_CONFIG_TIMEOUT),
                   sessionId,
-                  config,
+                  config: turnConfig,
                   turn: cliTurn,
                   sessionModels: Array.isArray(sessionResult?.models?.availableModels)
                     ? sessionResult.models.availableModels
@@ -897,9 +940,12 @@ export function createAcpDriver(support: AcpSupport): ProviderDriver<AcpConfig> 
               : turn.system
                 ? `${turn.system}\n\n${turn.text}`
                 : turn.text;
+            const imageBlocks = support.images === true && runtimeAcceptsImages
+              ? await readAcpImageBlocks(images)
+              : [];
             const result = await request("session/prompt", {
               sessionId,
-              prompt: [{ type: "text", text }],
+              prompt: [{ type: "text", text }, ...imageBlocks],
             });
             // opencode 1.18.18 reports usage at the result root; grok and
             // gemini put it under _meta. Read both rather than lose the count.
@@ -983,8 +1029,12 @@ export function createAcpDriver(support: AcpSupport): ProviderDriver<AcpConfig> 
             composioMcp: true,
             browserMcp: true,
             images: support.images !== false,
+            nativeImageInput: support.images === true,
             effortLevels: support.effortLevels,
-            localComputerMcp: !config.fullAuto,
+            // OpenMausBot supplies a per-bot approvalMode on every harness
+            // turn, which safely overrides a legacy instance fullAuto value.
+            // Direct adapter calls that omit it still fail closed in sendTurn.
+            localComputerMcp: true,
           },
           sendTurn,
           interruptTurn: async (threadId) => active.get(threadId)?.interrupt(),

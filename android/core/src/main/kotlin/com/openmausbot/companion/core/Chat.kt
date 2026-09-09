@@ -59,8 +59,16 @@ val Chat.target: ChatTarget
     }
 
 fun CompanionState.chat(target: ChatTarget): Chat? = when (target) {
-    is ChatTarget.Bot -> bot(target.botId)?.let(Chat::BotChat)
-    is ChatTarget.Room -> rooms.firstOrNull { it.id == target.roomId }?.let(Chat::RoomChat)
+    is ChatTarget.Bot -> bot(target.botId)?.forTask(target.threadId)?.let(Chat::BotChat)
+    is ChatTarget.Room -> rooms.firstOrNull { it.id == target.roomId }?.let { room ->
+        when {
+            room.threadId == target.threadId -> Chat.RoomChat(room)
+            room.tasks.orEmpty().any { it.threadId == target.threadId } -> Chat.RoomChat(
+                room.copy(threadId = target.threadId, busyBotId = null, unread = false, messages = null, hasMore = null),
+            )
+            else -> null
+        }
+    }
 }
 
 /**

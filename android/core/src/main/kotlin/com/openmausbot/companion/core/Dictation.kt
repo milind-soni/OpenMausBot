@@ -59,6 +59,40 @@ object Dictation {
     }
 
     /**
+     * Merge a new formatted partial into the accumulated transcript.
+     *
+     * Partials for the same segment extend or revise the current text in
+     * place. A fresh segment after a pause does not start with the previous
+     * partial, so it is appended instead of replacing the accumulated text.
+     */
+    fun updateTranscript(current: String, new: String): String {
+        val current = current.trim()
+        val new = new.trim()
+        if (new.isEmpty()) return current
+        if (current.isEmpty()) return new
+
+        // Same segment: the recognizer lengthened the current text.
+        if (new.startsWith(current)) return new
+
+        // Same segment with a brief backtrack: keep the longer version.
+        if (current.startsWith(new)) return current
+
+        // Same segment with a word-level revision: most leading words match.
+        val currentWords = current.split(" ").filter { it.isNotEmpty() }
+        val newWords = new.split(" ").filter { it.isNotEmpty() }
+        val commonWordCount = currentWords
+            .zip(newWords)
+            .takeWhile { it.first.lowercase() == it.second.lowercase() }
+            .count()
+        if (commonWordCount >= 2 && commonWordCount * 2 >= currentWords.size) {
+            return new
+        }
+
+        // New segment after a pause: append, separated by a space.
+        return draft(base = current, transcript = new)
+    }
+
+    /**
      * Typing while clean updates the saveable snapshot. Typing after any
      * partial/final leaves the snapshot alone — the live string may still
      * contain speech. Emptying the field resets like send: a contaminated

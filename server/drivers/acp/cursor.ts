@@ -198,7 +198,7 @@ export function decodeCursorModelText(text: string): ModelCatalog | null {
   for (const raw of text.split(/\r?\n/)) {
     const line = raw.trim();
     if (!line || line.startsWith("#") || /^available\s+models?\b/i.test(line) || /^models?\b/i.test(line)) continue;
-    const stripped = line.replace(/^[\s*•\-]+\s*/, "");
+    const stripped = line.replace(/^[\s*•-]+\s*/, "");
     const parts = stripped.split(/\s+[—–|:]\s+|\s+-\s+|\s{2,}/);
     const id = (parts[0] ?? "").trim();
     const rawLabel = parts.slice(1).join(" ").trim();
@@ -353,7 +353,7 @@ const support = (run: typeof execCli): AcpSupport => ({
   // `--force` is the documented auto-approve switch (`--yolo` is an alias);
   // `--model` is the reliable pin — ACP session/set_model is best-effort below.
   spawnArgs: (config, turn) => [
-    ...(config.fullAuto ? ["--force"] : []),
+    ...(config.fullAuto ? ["--force"] : turn.approvalMode === "auto" ? ["--auto-review"] : []),
     ...(turn.model ? ["--model", turn.model] : []),
     "acp",
   ],

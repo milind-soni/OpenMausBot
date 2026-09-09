@@ -94,6 +94,7 @@ function sameCredential(a: string, b: string): boolean {
  * clamp the length and drop control characters before they reach a UI. */
 export function cleanDeviceName(raw: unknown): string {
   const name = String(raw ?? "")
+    // oxlint-disable-next-line no-control-regex -- strips control characters from a display name
     .replace(/[\u0000-\u001f\u007f]/g, " ")
     .trim()
     .slice(0, 60);
@@ -165,7 +166,7 @@ export class DeviceRegistry {
 
   /** Every paired device, without the hash — this is what the page renders. */
   list(): PublicDevice[] {
-    return this.devices.map(({ tokenHash, ...rest }) => rest);
+    return this.devices.map(({ tokenHash: _tokenHash, ...rest }) => rest);
   }
 
   /** How many phones are paired, against MAX_DEVICES. */
@@ -284,7 +285,7 @@ export class DeviceRegistry {
       this.devices.pop();
       return { error: `could not save the pairing: ${(e as Error).message}` };
     }
-    const { tokenHash, ...pub } = device;
+    const { tokenHash: _tokenHash, ...pub } = device;
     const result = { device: pub, token };
     if (requestId) {
       this.replay = {

@@ -1,5 +1,6 @@
 import { EventEmitter } from "node:events";
 import { createServer as createHttpServer, request as httpRequest } from "node:http";
+import { createConnection } from "node:net";
 import fs from "node:fs";
 import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
@@ -14,6 +15,7 @@ import {
 
 const allocations = [];
 const servers = [];
+const sockets = [];
 
 const listen = (server, options) =>
   new Promise((resolve, reject) => {
@@ -37,6 +39,7 @@ function endpoint() {
 }
 
 afterEach(async () => {
+  for (const socket of sockets.splice(0)) socket.destroy();
   for (const server of servers.splice(0)) {
     if (server.listening) await close(server);
   }
@@ -152,6 +155,105 @@ describe("managed Companion loopback gateway", () => {
       path: "/echo?one=1",
     });
     expect(response.headers["x-private-hop"]).toBeUndefined();
+    await gateway.close();
+  });
+
+  it("carries an authenticated viewer WebSocket to the private companion origin", async () => {
+    const allocated = endpoint();
+    let received = null;
+    const target = createHttpServer();
+    target.on("upgrade", (request, socket) => {
+      sockets.push(socket);
+      received = {
+        authorization: request.headers.authorization,
+        path: request.url,
+        upgrade: request.headers.upgrade,
+      };
+      socket.write(
+        "HTTP/1.1 101 Switching Protocols\r\n"
+          + "Upgrade: websocket\r\n"
+          + "Connection: Upgrade\r\n"
+          + "Sec-WebSocket-Accept: test\r\n\r\n"
+          + "private-origin-ready",
+      );
+    });
+    servers.push(target);
+    await listen(target, allocated.socketPath);
+
+    const gateway = createCompanionOriginGateway({
+      target: { pid: process.pid, socketPath: allocated.socketPath },
+      originPort: 0,
+    });
+    const address = await gateway.start();
+    const response = await new Promise((resolve, reject) => {
+      const socket = createConnection({ host: "127.0.0.1", port: address.port });
+      sockets.push(socket);
+      let text = "";
+      socket.setEncoding("utf8");
+      socket.once("connect", () => socket.write(
+        "GET /vps-viewer/session/websockify HTTP/1.1\r\n"
+          + `Host: 127.0.0.1:${address.port}\r\n`
+          + "Authorization: Bearer paired-device\r\n"
+          + "Connection: Upgrade\r\n"
+          + "Upgrade: websocket\r\n"
+          + "Sec-WebSocket-Key: dGVzdA==\r\n"
+          + "Sec-WebSocket-Version: 13\r\n\r\n",
+      ));
+      socket.on("data", (chunk) => {
+        text += chunk;
+        if (text.includes("private-origin-ready")) resolve(text);
+      });
+      socket.once("error", reject);
+      socket.setTimeout(2_000, () => reject(new Error("managed viewer WebSocket timed out")));
+    });
+
+    expect(response).toContain("101 Switching Protocols");
+    expect(received).toEqual({
+      authorization: "Bearer paired-device",
+      path: "/vps-viewer/session/websockify",
+      upgrade: "websocket",
+    });
+    await gateway.close();
+  });
+
+  it("invalidates a viewer socket while its upstream upgrade is still pending", async () => {
+    const allocated = endpoint();
+    let receivedUpgrade;
+    const receivedUpgradePromise = new Promise((resolve) => {
+      receivedUpgrade = resolve;
+    });
+    const target = createHttpServer();
+    target.on("upgrade", (_request, socket) => {
+      sockets.push(socket);
+      receivedUpgrade();
+    });
+    servers.push(target);
+    await listen(target, allocated.socketPath);
+
+    const gateway = createCompanionOriginGateway({
+      target: { pid: process.pid, socketPath: allocated.socketPath },
+      originPort: 0,
+      upstreamTimeoutMs: 2_000,
+    });
+    const address = await gateway.start();
+    const socket = createConnection({ host: "127.0.0.1", port: address.port });
+    sockets.push(socket);
+    const closed = new Promise((resolve) => socket.once("close", resolve));
+    socket.once("connect", () => socket.write(
+      "GET /vps-viewer/session/websockify HTTP/1.1\r\n"
+        + `Host: 127.0.0.1:${address.port}\r\n`
+        + "Connection: Upgrade\r\n"
+        + "Upgrade: websocket\r\n"
+        + "Sec-WebSocket-Key: dGVzdA==\r\n"
+        + "Sec-WebSocket-Version: 13\r\n\r\n",
+    ));
+    await receivedUpgradePromise;
+
+    gateway.invalidate();
+    await expect(Promise.race([
+      closed,
+      new Promise((_, reject) => setTimeout(() => reject(new Error("pending viewer socket stayed open")), 2_000)),
+    ])).resolves.not.toBe("timeout");
     await gateway.close();
   });
 

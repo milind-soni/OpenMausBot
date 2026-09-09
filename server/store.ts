@@ -7,6 +7,8 @@ import { existsSync, readFileSync, mkdirSync, rmSync, unlinkSync } from "node:fs
 import { join } from "node:path";
 
 import { writeFileAtomic } from "./atomic.ts";
+import { removeBotFolder, soulFile, soulHash, writeSoulMirror } from "./bot-folder.ts";
+import type { BotProfilePatch } from "./bot-profile.ts";
 import { peerAllowKey, type PeerAction } from "./peer-approval-key.ts";
 import { DATA_DIR, loadBrowserProfileIdAliases } from "./config.ts";
 import * as mdb from "./message-db.ts";
@@ -15,7 +17,9 @@ import { newId, type CloudBackend, type ModelSelection, type ThreadId } from "./
 import { pickBotName } from "./names.ts";
 import { redactSecretsInText } from "./redact.ts";
 import { botAvatarProfile, type BotAvatarCrop } from "../shared/bot-avatar.ts";
+import { approvalModeFor, isApprovalMode, type ApprovalMode } from "../shared/approval-mode.ts";
 import type { MascotBodyId } from "../shared/mascot-bodies.ts";
+import type { ProfileRequestCardData, ProfileRequestChanges } from "../shared/profile-request.ts";
 import type { RoutineRequestCardData } from "../shared/routine-request.ts";
 import type { RoutineRunCardData } from "../shared/routine-run.ts";
 import type { SkillRequestCardData } from "../shared/skill-request.ts";
@@ -51,8 +55,15 @@ export interface OptionCardData {
   /** permission cards: the tool being requested, so the card can show what
    * is actually being asked and offer "always allow this tool". */
   tool?: string;
-  /** why this stopped despite auto mode (destructive-looking command) */
+  /** why this card is waiting: the guard, mode, sandbox or native note from
+   * approvalHeldReason, or a delivery/apply error from a routine or profile
+   * request. Free text either way, so it is shown verbatim. */
   held?: string;
+  /** Catalog key for `held` when it is one of the fixed notes, so the client
+   * shows it in the reader's language. Absent on an apply error (free text
+   * with no key) and on every card saved before this field existed, which is
+   * why `held` still carries the English. */
+  heldCode?: string;
   /** the narrow grant "always allow" remembers, e.g. "Bash:git" */
   allowKey?: string;
   /** Local actions never share remembered grants with cloud/tool approvals. */
@@ -60,6 +71,9 @@ export interface OptionCardData {
   /** A durable chat-created routine proposal. The scheduler only applies it
    * after this card is explicitly confirmed by the user. */
   routineRequest?: RoutineRequestCardData;
+  /** A durable profile-change proposal (propose_profile). The change lands
+   * only after this card is explicitly confirmed by the user. */
+  profileRequest?: ProfileRequestCardData;
   /** A durable learned-skill proposal. The skill stays staged until the
    * user confirms this card — it never rides the prompt before that. */
   skillRequest?: SkillRequestCardData;
@@ -73,6 +87,8 @@ export interface ConnectorCardData {
   status: "required" | "authorizing" | "connected" | "failed";
   /** Cards created by one agent request resume together after all connect. */
   resumeKey: string;
+  /** Account alias supplied by the agent when adding a second (or first) account. */
+  alias?: string;
   error?: string;
   dismissed?: boolean;
   resumed?: boolean;
@@ -86,6 +102,9 @@ export interface SecretRequestCardData {
   placeholder: string;
   helpUrl: string;
   requestKey: string;
+  /** Exact successful HPKE operation. This contains no plaintext and prevents
+   * a freshly sealed value from being mistaken for a lost-response retry. */
+  phoneOperationId?: string;
   provided?: boolean;
   dismissed?: boolean;
   resumed?: boolean;
@@ -120,6 +139,13 @@ export interface Message {
    * model saw it mid-turn, so the transcript marks it — a reader should
    * know the reply above it may already account for this line */
   steered?: boolean;
+  /** A user-role message that did not come from a person at a keyboard:
+   * a headless server's HTTP API, reached with no paired session and no
+   * browser origin — which is to say, most often a script, and possibly a
+   * bot's own shell. Stamped rather than refused because loopback is the
+   * owner on such a server by design; but a reader (a bot's room turn, the
+   * posting budget, the transcript) must not take it for the person. */
+  via?: "api";
   /** Provider turn that produced this message. Assistant output can arrive
    * in several pieces around tool calls; the UI uses this identity to keep
    * those pieces together without discarding them. */
@@ -143,11 +169,28 @@ export interface Message {
   channelMode?: "chat" | "goal";
   /** group threads: which member said this (sender attribution). */
   from?: { botId: string; name: string; color: string };
+  /** Set on a room message a bot pushed in with post_to_room instead of by
+   * taking a turn there. Internal transport changes custody, not authorship:
+   * a reader's turn wraps this one in a provenance preamble rather than
+   * letting it read as ordinary room conversation. `unattended` records that
+   * nobody was watching the bot that posted it. */
+  peerPost?: { unattended?: boolean };
+  /** Set on the user-role line another bot delivered into this bot's own
+   * conversation — with ask_bot, or as the first line of a thread it opened
+   * with start_thread. The text opens with the provenance note, but a
+   * reader that windows into the message (recall snippets, a renderer) never
+   * sees the opening — this is the same fact where it cannot be cut off.
+   * `unattended` records that nobody was watching the bot that asked. */
+  peerAsk?: { botId: string; name: string; unattended?: boolean };
   /** emoji reactions; by = "user" or a member botId. */
   reactions?: Array<{ emoji: string; by: string }>;
   /** comm chips: "Messaged @X" in the caller's chat, linking to the
    * bot⇄bot channel where the exchange is mirrored. */
   comm?: { groupId: string; withBotId: string; withName: string; withColor: string };
+  /** thread chips: "Opened thread #Title on @X" in the opener's chat,
+   * linking to the thread a bot started with start_thread. Carries the
+   * title so the chip still reads after a rename or a deletion. */
+  threadRef?: { botId: string; threadId: string; title: string };
   /** user messages sent while the bot was mid-turn, waiting in the
    * steer-queue to auto-send on settle. Cleared when the drain consumes
    * them; a true stranded by a restart is inert because the client only
@@ -214,6 +257,21 @@ export interface GroupRecord {
   setupSkippedAt?: number | null;
 }
 
+/** A lightweight organizational label within one bot. */
+export interface BotProjectRecord {
+  id: string;
+  name: string;
+  emoji?: string;
+}
+
+// Unicode's complete emoji sequences include flags, skin tones and ZWJ
+// combinations. Also allow unqualified single symbols (e.g. ♥), but not
+// standalone components such as a digit, skin tone or regional indicator.
+const projectEmojiPattern = new RegExp("^(?!\\p{Emoji_Component}$)(?:\\p{RGI_Emoji}|[\\p{Emoji}--\\p{Emoji_Component}])$", "v");
+export function isProjectEmoji(value: unknown): value is string {
+  return typeof value === "string" && value.length <= 64 && projectEmojiPattern.exec(value)?.[0] === value;
+}
+
 /** One task = one conversation with its own context.
  *
  * A bot used to be a single endless thread, which meant every job
@@ -222,10 +280,42 @@ export interface GroupRecord {
  * transcript, and — the part that actually matters — its own provider
  * session. Sharing resume cursors between tasks would resume the other
  * task's session and quietly undo the whole thing. */
+/** Which bot started a thread with start_thread, and under which handoff.
+ * Absent on every thread a person opened. This is the only record that lets
+ * a bot see (list_threads) or close (close_thread) a thread on a teammate:
+ * a peer's other threads stay invisible to it. */
+export interface TaskOpenedBy {
+  botId: string;
+  name: string;
+  /** the ledger id the opener tracks the thread's result under (peer
+   * threads only — a thread a bot opens on itself has no handoff) */
+  delegationId?: string;
+  at: number;
+}
+
 export interface TaskRecord {
   threadId: ThreadId;
   title: string;
   createdAt: number;
+  /** Organizational grouping only; never a directory or provider context. */
+  projectId?: string;
+  /** Detached routine execution, reachable through its visible results card. */
+  routineRunId?: string;
+  /** Set when a bot, not a person, opened this thread. Persisted with the
+   * task so the sidebar and a backup keep the attribution. */
+  openedBy?: TaskOpenedBy;
+  /** Defaults are copied when a task is created; older records fall back
+   * to the bot until migration seeds their model selection. */
+  modelSelection?: ModelSelection;
+  approvalMode?: ApprovalMode;
+  autoApprove?: boolean;
+  alwaysAllow?: string[];
+  unread?: boolean;
+  rewound?: boolean;
+  pinnedMessageId?: string;
+  /** Runtime-only state, reset on load and never written to bots.json. */
+  activity?: BotActivity;
+  busy?: boolean;
   /** provider-native continuation per instance, for THIS task only */
   resumeCursors: Record<string, unknown>;
   /** which instance dispatched the most recent turn. A cursor alone can't
@@ -242,6 +332,13 @@ export interface TaskRecord {
    * = pinned to the default (home); absent = not pinned yet. */
   cwd?: string | null;
 }
+
+const TASK_PATCH_FIELDS = [
+  "title", "projectId", "modelSelection", "approvalMode", "autoApprove", "alwaysAllow",
+  "unread", "rewound", "pinnedMessageId", "resumeCursors", "lastInstanceId", "cwd",
+  "routineRunId",
+] as const satisfies readonly (keyof TaskRecord)[];
+export type TaskPatch = Partial<Pick<TaskRecord, typeof TASK_PATCH_FIELDS[number]>>;
 
 export interface TaskUsage {
   input: number;
@@ -351,6 +448,26 @@ function redactBotAuthored<T extends Omit<Message, "id" | "at"> & { at?: number 
         warnings: card.skillRequest.warnings.map((warning) => redactSecretsInText(warning)),
       };
     }
+    // A profile proposal's before/after text (and its reason) is hidden
+    // under the card's visible summary the same way a routine's or skill's
+    // is — scrub it too so nesting it on a card cannot bypass the
+    // transcript's secret-redaction boundary.
+    if (card.profileRequest) {
+      const scrubChanges = (changes: ProfileRequestChanges): ProfileRequestChanges => {
+        const out: ProfileRequestChanges = {};
+        for (const [key, value] of Object.entries(changes)) {
+          out[key as keyof ProfileRequestChanges] = redactSecretsInText(value);
+        }
+        return out;
+      };
+      card.profileRequest = {
+        ...card.profileRequest,
+        targetName: redactSecretsInText(card.profileRequest.targetName),
+        reason: redactSecretsInText(card.profileRequest.reason),
+        before: scrubChanges(card.profileRequest.before),
+        changes: scrubChanges(card.profileRequest.changes),
+      };
+    }
     out.card = card;
   }
   if (out.connector) {
@@ -395,6 +512,7 @@ export type StoreChange =
 
 /** What a task is called before its first message names it. */
 export const UNTITLED_TASK = "New task";
+export const UNTITLED_THREAD = "New thread";
 
 /** A task's name, taken from the first thing you asked it to do. */
 export function titleFromMessage(text: string): string {
@@ -404,13 +522,29 @@ export function titleFromMessage(text: string): string {
 
 export interface BotRecord {
   id: string;
-  /** the ACTIVE task's thread — everything that runs a turn reads this */
+  /** The task selected in the UI; running turns keep their own thread id. */
   threadId: ThreadId;
   /** every task this bot has, newest first */
   tasks?: TaskRecord[];
+  /** Projects group this bot's threads; older bots have no projects. */
+  projects?: BotProjectRecord[];
   name: string;
   title: string;
   description: string;
+  /** Standing instructions — the persona body. Canonical HERE; SOUL.md in
+   * the bot folder is a mirror the server writes. Never read the file to
+   * build a prompt: a bot that reads untrusted content must not be able to
+   * rewrite its own persona through the filesystem. Optional only so a
+   * bots.json written before the field existed still parses; load
+   * backfills it, so every live record has a string. */
+  soul?: string;
+  /** sha256 of `soul`, for spotting a SOUL.md edited outside the app. */
+  soulHash?: string;
+  /** The mirror differed from `soul` at the last turn dispatch. The Soul
+   * editor shows the diff; a user action (apply or discard) clears it. */
+  soulDrift?: boolean;
+  /** Receipt committed with a confirmed profile, for retrying card settlement. */
+  lastProfileRequestId?: string;
   notifications: boolean;
   color: MausColor;
   mascotExpression?: MausExpression | null;
@@ -419,7 +553,9 @@ export interface BotRecord {
   avatarUrl?: string;
   /** Mascot, or the crop applied to avatarUrl. */
   avatarCrop?: BotAvatarCrop;
+  /** True when any task has unread output. */
   unread: boolean;
+  /** Default for new tasks; navigating tasks never changes this value. */
   modelSelection: ModelSelection;
   /** provider-native continuation per instance (e.g. claude session id) */
   resumeCursors: Record<string, unknown>;
@@ -439,6 +575,18 @@ export interface BotRecord {
    * working instead of stopping to ask. Questions it asks YOU still come
    * through, and a short list of destructive commands still stops it. */
   autoApprove?: boolean;
+  /** Canonical approval level. Missing means a legacy record and resolves
+   * through autoApprove (true = safe Auto, otherwise Ask). */
+  approvalMode?: ApprovalMode;
+  /** Server-private elevation journal. Full/Custom executes as Ask until
+   * Electron confirms the exact prepared reply and then activates it over
+   * the utility-process channel. Any marker surviving a restart is revoked
+   * during Store load. */
+  approvalGrant?: {
+    requestId: string;
+    mode: "full" | "custom";
+    phase: "prepared" | "confirmed" | "activated" | "committed";
+  };
   /** Optional model review of otherwise undecided, attended approval cards.
    * Unknown persisted values are treated as off by the review boundary. */
   autoReview?: "off" | "shadow" | "enforce";
@@ -470,6 +618,15 @@ export interface BotRecord {
    * delegate_bot). Off by default: a chief-of-staff-style bot is most
    * useful when it can coordinate without nagging. */
   approvePeerComms?: boolean;
+  /** Bot ids this bot is allowed to contact. Unset keeps the rule the app
+   * shipped with — every visible bot in the same section — because that is
+   * what every existing workspace already relies on. An explicit list wires
+   * this bot to exactly those peers (and `[]` to none), which is the only
+   * way to bound one bot's reach inside the unsectioned team, where every
+   * bot the user never filed shares a section. Enforced in one place, by
+   * peer-roster.ts, for the roster, list_bots, ask_bot and delegate_bot
+   * alike. */
+  peers?: string[];
   /** Whether this bot may use the workspace's connected apps (Composio).
    * Unset/true = allowed (the user configured the key deliberately);
    * false = this bot never receives the connection. Imported team members
@@ -488,8 +645,8 @@ export interface BotRecord {
   /** Listing provenance and connector intent retained for package details
    * and future re-export. It never means the apps are authorized. */
   installedPackage?: InstalledPackageMetadata;
-  /** Derived from `activity` — kept so the 200+ readers across the app and
-   * tests keep working unchanged. Write through setActivity(), never here. */
+  /** Aggregate of task and room activity. Change through setTaskActivity()
+   * or the legacy setActivity() room slot, never directly. */
   busy?: boolean;
   /** What the bot is doing right now, as the harness sees it. `busy` alone
    * could not tell working from waiting-on-you from a stalled engine.
@@ -604,12 +761,6 @@ export function roomResponders<T extends { id: string; name: string; hidden?: bo
   return [];
 }
 
-const onboardingCard = (): OptionCardData => ({
-  title: "What do you mostly want help with?",
-  subtitle: "Pick whatever's closest; we can always expand from there.",
-  options: ["Work & projects", "Writing & research", "Life admin", "A bit of everything"],
-});
-
 /** Messages form a tree (forks appear when a message is edited); the
  * visible conversation is the path from the root to activeLeafId. */
 interface ThreadState {
@@ -623,6 +774,9 @@ export class Store {
   private threads = new Map<string, ThreadState>();
   private defaultSelection: () => ModelSelection;
   private listeners = new Set<(change: StoreChange) => void>();
+  /** Room turns and old callers have their own activity slot. Clearing
+   * that slot must not clear a concurrently running independent task. */
+  private legacyActivities = new Map<string, BotActivity>();
 
   constructor(defaultSelection: () => ModelSelection) {
     this.defaultSelection = defaultSelection;
@@ -650,6 +804,21 @@ export class Store {
       if (b.busy || (b.activity !== undefined && b.activity !== "idle")) botsMigrated = true;
       b.busy = false;
       b.activity = "idle";
+      if (typeof b.soul !== "string") {
+        b.soul = "";
+        botsMigrated = true;
+      }
+      if (b.soulHash !== soulHash(b.soul)) {
+        b.soulHash = soulHash(b.soul);
+        botsMigrated = true;
+      }
+      // Existing bots predate their folders. Create missing mirrors before
+      // their first history write, but preserve any edits already on disk.
+      if (!existsSync(soulFile(b.id))) {
+        try { writeSoulMirror(b.id, b.soul); } catch (e) {
+          console.warn(`[bot-folder] could not create SOUL.md for ${b.id}: ${(e as Error).message}`);
+        }
+      }
       if (b.browserProfile) {
         const browserProfile = browserProfileAliases.get(b.browserProfile);
         if (browserProfile && browserProfile !== b.browserProfile) {
@@ -663,6 +832,27 @@ export class Store {
       }
       if (b.autoStartVps !== undefined && b.autoStartVps !== true && b.autoStartVps !== false) {
         delete b.autoStartVps;
+        botsMigrated = true;
+      }
+      if (b.approvalMode !== undefined && !isApprovalMode(b.approvalMode)) {
+        delete b.approvalMode;
+        botsMigrated = true;
+      }
+      // A trusted elevation is a prepare/confirm/activate commit. If the
+      // desktop process or its private reply path died before activation,
+      // the durable marker survives beside the mode in the same atomic
+      // bots.json write. Revoke it before schedulers, listeners, or HTTP can
+      // start any new work.
+      if (b.approvalGrant !== undefined) {
+        b.approvalMode = "ask";
+        b.autoApprove = false;
+        delete b.approvalGrant;
+        for (const task of b.tasks ?? []) {
+          if (task.approvalMode === "full" || task.approvalMode === "custom") {
+            task.approvalMode = "ask";
+            task.autoApprove = false;
+          }
+        }
         botsMigrated = true;
       }
       const avatar = botAvatarProfile(b);
@@ -743,21 +933,73 @@ export class Store {
       g.pinnedCwd = active.pinnedCwd;
       g.pinnedMessageId = active.pinnedMessageId;
     }
-    if (botsMigrated) this.saveBots();
     if (groupsMigrated) this.saveGroups();
     // bots saved before tasks existed have one endless thread; adopt it as
     // their first task so nothing is lost and nothing special-cases it
     for (const b of this.bots) {
-      if (b.tasks?.length) continue;
-      b.tasks = [
-        {
+      // Folders are organizational only. Preserve existing thread model
+      // snapshots while discarding the unshipped folder-default setting.
+      if (b.projects?.some((project) => "modelSelection" in project)) {
+        b.projects = b.projects.map(({ id, name, emoji }) => ({ id, name, ...(isProjectEmoji(emoji) ? { emoji } : {}) }));
+        botsMigrated = true;
+      }
+      if (!b.tasks?.length) {
+        b.tasks = [{
           threadId: b.threadId,
           title: this.firstUserLine(b.threadId) ?? UNTITLED_TASK,
           createdAt: b.createdAt,
           resumeCursors: b.resumeCursors ?? {},
-        },
-      ];
+        }];
+        botsMigrated = true;
+      }
+      // Retain an old active transcript even if a stale tasks array omitted
+      // it. Repairing the pointer by selecting another task would hide it.
+      let active = b.tasks.find((task) => task.threadId === b.threadId);
+      if (!active) {
+        active = {
+          threadId: b.threadId,
+          title: this.firstUserLine(b.threadId) ?? UNTITLED_TASK,
+          createdAt: b.createdAt,
+          resumeCursors: b.resumeCursors ?? {},
+        };
+        b.tasks.unshift(active);
+        botsMigrated = true;
+      }
+      for (const task of b.tasks) {
+        if (task.modelSelection === undefined) {
+          task.modelSelection = structuredClone(b.modelSelection);
+          botsMigrated = true;
+        }
+        if (!task.resumeCursors) {
+          task.resumeCursors = task === active ? (b.resumeCursors ?? {}) : {};
+          botsMigrated = true;
+        }
+        if (task.unread === undefined) {
+          task.unread = task === active && b.unread;
+          botsMigrated = true;
+        }
+        if (task === active) {
+          if (task.rewound === undefined && b.rewound !== undefined) {
+            task.rewound = b.rewound;
+            botsMigrated = true;
+          }
+          if (task.pinnedMessageId === undefined && b.pinnedMessageId !== undefined) {
+            task.pinnedMessageId = b.pinnedMessageId;
+            botsMigrated = true;
+          }
+        }
+        if (task.approvalMode !== undefined && !isApprovalMode(task.approvalMode)) {
+          delete task.approvalMode;
+          botsMigrated = true;
+        }
+        if (task.busy !== undefined || task.activity !== undefined) botsMigrated = true;
+        task.busy = false;
+        task.activity = "idle";
+      }
+      this.mirrorActiveTask(b, active);
+      b.unread = b.tasks.some((task) => task.unread);
     }
+    if (botsMigrated) this.saveBots();
     // Search reads SQLite directly, so migrate every known legacy transcript
     // at startup rather than waiting until the user happens to open it. Only
     // pending JSON files are touched; already-migrated threads stay lazy.
@@ -772,7 +1014,10 @@ export class Store {
   }
 
   private saveBots(bots: BotRecord[] = this.bots) {
-    writeFileAtomic(BOTS_FILE, JSON.stringify(bots, null, 2));
+    writeFileAtomic(BOTS_FILE, JSON.stringify(bots.map(({ busy: _busy, activity: _activity, ...bot }) => ({
+      ...bot,
+      tasks: bot.tasks?.map(({ busy: _taskBusy, activity: _taskActivity, ...task }) => task),
+    })), null, 2));
   }
 
   private saveGroups() {
@@ -788,7 +1033,7 @@ export class Store {
   }
 
   private emit(change: StoreChange) {
-    for (const listener of [...this.listeners]) {
+    for (const listener of Array.from(this.listeners)) {
       try {
         listener(change);
       } catch (error) {
@@ -1059,6 +1304,14 @@ export class Store {
     return this.thread(threadId).messages;
   }
 
+  /** Used only with newly allocated import threads. No live actions are
+   * replayed: the importer supplies inert text and freshly remapped IDs. */
+  importTranscript(threadId: string, messages: Message[], activeLeafId: string | null): void {
+    if (this.messagesFor(threadId).length) throw new Error("Cannot import over an existing conversation");
+    mdb.importThread(threadId, messages, activeLeafId);
+    this.threads.delete(threadId);
+  }
+
   activeLeaf(threadId: string): string | null {
     return this.thread(threadId).activeLeafId;
   }
@@ -1235,7 +1488,7 @@ export class Store {
     profile: Partial<
       Pick<
         BotRecord,
-        "name" | "title" | "description" | "color" | "mascotExpression" | "mascotBody" | "modelSelection" | "section"
+        "name" | "title" | "description" | "soul" | "color" | "mascotExpression" | "mascotBody" | "modelSelection" | "section"
       >
     > = {},
     opts: {
@@ -1252,6 +1505,8 @@ export class Store {
       name,
       title: profile.title ?? "",
       description: profile.description ?? "",
+      soul: profile.soul ?? "",
+      soulHash: soulHash(profile.soul ?? ""),
       notifications: true,
       color: profile.color ?? COLORS[this.bots.length % COLORS.length],
       ...(profile.mascotExpression ? { mascotExpression: profile.mascotExpression } : {}),
@@ -1262,19 +1517,36 @@ export class Store {
       createdAt: Date.now(),
     };
     if (section) bot.section = section;
-    bot.tasks = [{ threadId: bot.threadId, title: UNTITLED_TASK, createdAt: bot.createdAt, resumeCursors: {} }];
+    bot.tasks = [{
+      threadId: bot.threadId,
+      title: UNTITLED_THREAD,
+      createdAt: bot.createdAt,
+      resumeCursors: {},
+      modelSelection: structuredClone(bot.modelSelection),
+      unread: false,
+      activity: "idle",
+      busy: false,
+    }];
     this.bots.unshift(bot);
     this.saveBots();
+    // The folder exists from the first moment, so the user can open
+    // SOUL.md before the bot has said a word. The record is canonical: a
+    // mirror-write failure must never fail bot creation.
+    try {
+      writeSoulMirror(bot.id, bot.soul ?? "");
+    } catch (e) {
+      console.warn(`[bot-folder] could not write SOUL.md mirror for ${bot.id}: ${(e as Error).message}`);
+    }
     // Announce the owner before its onboarding transcript. SSE clients need
     // the bot/thread mapping before they can place either message.
     this.emit({ type: "bot", botId: bot.id });
+    // Keep the greeting valid for configured bots and every engine.
     if (opts.seedMessages !== false) {
       this.appendMessage(bot.threadId, {
         role: "bot",
         kind: "text",
-        text: `Hey — I'm ${name}. Nice to meet you.`,
+        text: `Hi, I'm ${name}. What would you like me to do?`,
       });
-      this.appendMessage(bot.threadId, { role: "bot", kind: "options", card: onboardingCard() });
     }
     return bot;
   }
@@ -1283,6 +1555,7 @@ export class Store {
     const bot = this.bot(id);
     if (!bot) return false;
     this.bots = this.bots.filter((b) => b.id !== id);
+    this.legacyActivities.delete(id);
     // every task's transcript goes with the bot, not just the open one
     for (const threadId of new Set([bot.threadId, ...(bot.tasks ?? []).map((t) => t.threadId)])) {
       this.deleteThreadRecord(threadId);
@@ -1292,12 +1565,16 @@ export class Store {
     try {
       rmSync(workspaceDir(id), { recursive: true, force: true });
     } catch {}
+    // Generated task-workspaces are project files, not bot memory. Keep
+    // them (and user-selected cwd folders) when deleting conversations.
     // Approval state deliberately lives outside the bot-writable workspace.
     // It still belongs to the bot, so deleting the bot must remove staged
     // proposals, manifests, and native-link ownership records with it.
     try {
       rmSync(join(DATA_DIR, "skill-state", id), { recursive: true, force: true });
     } catch {}
+    // The bot folder (SOUL.md mirror) is the bot's too.
+    removeBotFolder(id);
     this.saveBots();
     this.emit({ type: "bot.deleted", botId: id });
     return true;
@@ -1306,10 +1583,50 @@ export class Store {
   patchBot(id: string, patch: Partial<BotRecord>): BotRecord | null {
     const bot = this.bot(id);
     if (!bot) return null;
+    // Runtime revocations must become effective in memory even when disk is
+    // unavailable. Profile edits use the separate atomic path below.
     Object.assign(bot, patch);
+    const task = this.activeTask(id);
+    if (task) {
+      for (const key of ["resumeCursors", "rewound", "pinnedMessageId", "unread"] as const) {
+        if (Object.prototype.hasOwnProperty.call(patch, key)) {
+          Object.assign(task, { [key]: structuredClone(patch[key]) });
+        }
+      }
+      bot.unread = bot.tasks!.some((candidate) => candidate.unread);
+    }
     this.saveBots();
     this.emit({ type: "bot", botId: id });
     return bot;
+  }
+
+  /** Commit a validated profile change before publishing its fields. Unlike
+   * runtime revocation, a failed user edit must leave the old profile intact. */
+  patchBotProfile(id: string, patch: BotProfilePatch & Partial<Pick<BotRecord, "cwd" | "lastProfileRequestId">>): BotRecord | null {
+    const bot = this.bot(id);
+    if (!bot) return null;
+    const next = { ...bot, ...patch };
+    if (patch.soul !== undefined) {
+      next.soulHash = soulHash(patch.soul);
+      next.soulDrift = false;
+    }
+    // Persist all fields together before publishing anything to the live
+    // record. A failed write leaves both memory and disk at the old profile.
+    this.saveBots(this.bots.map((candidate) => candidate.id === id ? next : candidate));
+    Object.assign(bot, next);
+    if (patch.soul !== undefined) {
+      try { writeSoulMirror(id, patch.soul); } catch (e) {
+        console.warn(`[bot-folder] could not write SOUL.md mirror for ${id}: ${(e as Error).message}`);
+      }
+    }
+    this.emit({ type: "bot", botId: id });
+    return bot;
+  }
+
+  /** Convenience for a soul-only change. The record is canonical; a failed
+   * mirror write is reported in logs and can be retried by discarding drift. */
+  setSoul(id: string, soul: string): BotRecord | null {
+    return this.patchBotProfile(id, { soul });
   }
 
   /** File visible bots into one sidebar section as a single durable write.
@@ -1360,18 +1677,36 @@ export class Store {
     return { ok: true, bots: ids.map((id) => this.bot(id)!) };
   }
 
-  /** The one way runtime state changes. Sets `activity` and derives `busy`
-   * from it, so a reader that only knows busy sees the same truth. */
+  /** Legacy bot/room activity occupies its own slot; direct conversations
+   * use setTaskActivity so settling one thread cannot clear another. */
   setActivity(botId: string, activity: BotActivity): BotRecord | null {
     const bot = this.bot(botId);
     if (!bot) return null;
-    const busy = ACTIVITY_BUSY.has(activity);
-    if (bot.activity === activity && Boolean(bot.busy) === busy) return bot;
-    bot.activity = activity;
-    bot.busy = busy;
-    this.saveBots();
+    if ((this.legacyActivities.get(botId) ?? "idle") === activity) return bot;
+    this.legacyActivities.set(botId, activity);
+    this.refreshBotActivity(bot);
     this.emit({ type: "bot", botId });
     return bot;
+  }
+
+  setTaskActivity(botId: string, threadId: string, activity: BotActivity): BotRecord | null {
+    const bot = this.bot(botId);
+    const task = this.taskByThread(botId, threadId);
+    if (!bot || !task) return null;
+    const busy = ACTIVITY_BUSY.has(activity);
+    if ((task.activity ?? "idle") === activity && Boolean(task.busy) === busy) return bot;
+    task.activity = activity;
+    task.busy = busy;
+    this.refreshBotActivity(bot);
+    this.emit({ type: "bot", botId });
+    return bot;
+  }
+
+  private refreshBotActivity(bot: BotRecord) {
+    const activities = [this.legacyActivities.get(bot.id), ...(bot.tasks ?? []).map((task) => task.activity)];
+    bot.activity = (["waiting-on-you", "no-signal", "working", "dead"] as const)
+      .find((activity) => activities.includes(activity)) ?? "idle";
+    bot.busy = ACTIVITY_BUSY.has(bot.activity);
   }
 
   /** Elect one Chief of Staff in its section (or clear one section) as one persisted change.
@@ -1514,6 +1849,60 @@ export class Store {
   }
 
   // ── tasks ─────────────────────────────────────────────────────────────
+  project(botId: string, projectId: string): BotProjectRecord | undefined {
+    return this.bot(botId)?.projects?.find((project) => project.id === projectId);
+  }
+
+  createProject(botId: string, name: string, emoji?: string | null): BotProjectRecord | null {
+    const bot = this.bot(botId);
+    if (!bot || !name.trim() || (emoji != null && !isProjectEmoji(emoji))) return null;
+    const project: BotProjectRecord = {
+      id: newId(), name: name.trim().slice(0, 80),
+      ...(emoji == null ? {} : { emoji }),
+    };
+    bot.projects = [...(bot.projects ?? []), project];
+    this.saveBots();
+    this.emit({ type: "bot", botId });
+    return project;
+  }
+
+  patchProject(botId: string, projectId: string, patch: { name?: string; emoji?: string | null }): BotProjectRecord | null {
+    const project = this.project(botId, projectId);
+    if (!project || (patch.name !== undefined && !patch.name.trim()) || (patch.emoji != null && !isProjectEmoji(patch.emoji))) return null;
+    if (patch.name !== undefined) project.name = patch.name.trim().slice(0, 80);
+    if (patch.emoji === null) delete project.emoji;
+    else if (patch.emoji !== undefined) project.emoji = patch.emoji;
+    this.saveBots();
+    this.emit({ type: "bot", botId });
+    return project;
+  }
+
+  /** The stored array is the sidebar order; only a full owned permutation is valid. */
+  reorderProjects(botId: string, projectIds: string[]): BotProjectRecord[] | null {
+    const bot = this.bot(botId);
+    const projects = bot?.projects ?? [];
+    if (!bot || projectIds.length !== projects.length || new Set(projectIds).size !== projects.length) return null;
+    const byId = new Map(projects.map((project) => [project.id, project]));
+    if (projectIds.some((id) => !byId.has(id))) return null;
+    bot.projects = projectIds.map((id) => byId.get(id)!);
+    this.saveBots();
+    this.emit({ type: "bot", botId });
+    return bot.projects;
+  }
+
+  /** Removing an organizational label never removes its conversations. */
+  deleteProject(botId: string, projectId: string): BotRecord | null {
+    const bot = this.bot(botId);
+    if (!bot || !this.project(botId, projectId)) return null;
+    bot.projects = bot.projects!.filter((project) => project.id !== projectId);
+    for (const task of bot.tasks ?? []) {
+      if (task.projectId === projectId) delete task.projectId;
+    }
+    this.saveBots();
+    this.emit({ type: "bot", botId });
+    return bot;
+  }
+
   /** The first thing the human asked in a thread — a task's natural name. */
   private firstUserLine(threadId: string): string | null {
     const first = this.messagesFor(threadId).find((m) => m.role === "user" && m.kind === "text" && m.text?.trim());
@@ -1533,22 +1922,92 @@ export class Store {
     return this.bot(botId)?.tasks?.find((t) => t.threadId === threadId);
   }
 
+  /** A turn gets an independent snapshot without changing the selected task
+   * or mutating the bot's defaults while another turn is running. */
+  projectBotForTask(botId: string, threadId: string): BotRecord | null {
+    const bot = this.bot(botId);
+    const task = this.taskByThread(botId, threadId);
+    if (!bot || !task) return null;
+    return {
+      ...bot,
+      threadId: task.threadId,
+      modelSelection: structuredClone(task.modelSelection ?? bot.modelSelection),
+      resumeCursors: structuredClone(task.resumeCursors),
+      approvalMode: task.approvalMode ?? (task.autoApprove === undefined ? bot.approvalMode : undefined),
+      autoApprove: task.autoApprove ?? bot.autoApprove,
+      alwaysAllow: structuredClone(task.alwaysAllow ?? bot.alwaysAllow),
+      unread: Boolean(task.unread),
+      rewound: task.rewound,
+      pinnedMessageId: task.pinnedMessageId,
+      activity: task.activity ?? "idle",
+      busy: Boolean(task.busy),
+    };
+  }
+
+  patchTask(botId: string, threadId: string, patch: TaskPatch): TaskRecord | null {
+    const bot = this.bot(botId);
+    const task = this.taskByThread(botId, threadId);
+    if (!bot || !task) return null;
+    if (patch.projectId !== undefined && !this.project(botId, patch.projectId)) return null;
+    for (const key of TASK_PATCH_FIELDS) {
+      if (Object.prototype.hasOwnProperty.call(patch, key)) {
+        Object.assign(task, { [key]: structuredClone(patch[key]) });
+      }
+    }
+    if (typeof patch.title === "string") task.title = patch.title.trim().slice(0, 80) || UNTITLED_THREAD;
+    if (bot.threadId === threadId) this.mirrorActiveTask(bot, task);
+    bot.unread = bot.tasks!.some((candidate) => candidate.unread);
+    this.saveBots();
+    this.emit({ type: "bot", botId });
+    return task;
+  }
+
+  private mirrorActiveTask(bot: BotRecord, task: TaskRecord) {
+    bot.threadId = task.threadId;
+    bot.resumeCursors = structuredClone(task.resumeCursors);
+    bot.rewound = task.rewound;
+    bot.pinnedMessageId = task.pinnedMessageId;
+  }
+
   /** A fresh context on the same bot: new thread, new session, same
    * persona/tools/computer. Becomes the active task. */
-  createTask(botId: string, title?: string, activate = true): TaskRecord | null {
+  createTask(botId: string, title?: string, activate = true, projectId?: string, openedBy?: TaskOpenedBy): TaskRecord | null {
     const bot = this.bot(botId);
     if (!bot) return null;
+    if (projectId !== undefined && !this.project(botId, projectId)) return null;
     const task: TaskRecord = {
       threadId: newId(),
-      title: title?.trim() || UNTITLED_TASK,
+      title: title?.trim().slice(0, 80) || UNTITLED_THREAD,
       createdAt: Date.now(),
+      ...(projectId ? { projectId } : {}),
+      ...(openedBy ? { openedBy: structuredClone(openedBy) } : {}),
       resumeCursors: {},
+      modelSelection: structuredClone(bot.modelSelection),
+      approvalMode: approvalModeFor(bot),
+      autoApprove: Boolean(bot.autoApprove),
+      alwaysAllow: [...(bot.alwaysAllow ?? [])],
+      unread: false,
+      activity: "idle",
+      busy: false,
     };
     bot.tasks = [task, ...(bot.tasks ?? [])];
     if (activate) {
-      bot.threadId = task.threadId;
-      bot.resumeCursors = {}; // legacy mirror follows the active task
+      this.mirrorActiveTask(bot, task);
     }
+    this.saveBots();
+    this.emit({ type: "bot", botId });
+    return task;
+  }
+
+  /** Attach (or complete) the opener record after the thread exists — the
+   * handoff id is only known once the thread it targets has an id, so a
+   * peer-opened thread is created first and stamped second. Never reachable
+   * from the HTTP task PATCH: openedBy is not a TASK_PATCH_FIELD. */
+  setTaskOpenedBy(botId: string, threadId: string, openedBy: TaskOpenedBy): TaskRecord | null {
+    const bot = this.bot(botId);
+    const task = this.taskByThread(botId, threadId);
+    if (!bot || !task) return null;
+    task.openedBy = structuredClone(openedBy);
     this.saveBots();
     this.emit({ type: "bot", botId });
     return task;
@@ -1558,42 +2017,40 @@ export class Store {
     const bot = this.bot(botId);
     const task = bot?.tasks?.find((t) => t.threadId === threadId);
     if (!bot || !task) return null;
-    bot.threadId = task.threadId;
-    bot.resumeCursors = { ...task.resumeCursors };
+    this.mirrorActiveTask(bot, task);
     this.saveBots();
     this.emit({ type: "bot", botId });
     return bot;
   }
 
   renameTask(botId: string, threadId: string, title: string): TaskRecord | null {
-    const task = this.bot(botId)?.tasks?.find((t) => t.threadId === threadId);
-    if (!task) return null;
-    task.title = title.trim().slice(0, 80) || UNTITLED_TASK;
-    this.saveBots();
-    this.emit({ type: "bot", botId });
-    return task;
+    return this.patchTask(botId, threadId, { title });
   }
 
   /** Name a task after its first message, once. */
   titleTaskFromFirstMessage(botId: string, text: string, threadId?: string) {
     const task = threadId ? this.taskByThread(botId, threadId) : this.activeTask(botId);
-    if (!task || task.title !== UNTITLED_TASK) return;
+    if (!task || (task.title !== UNTITLED_TASK && task.title !== UNTITLED_THREAD)) return;
     task.title = titleFromMessage(text);
     this.saveBots();
     this.emit({ type: "bot", botId });
   }
 
-  /** Delete a task and its transcript. A bot always keeps one. */
+  /** Delete a task and its transcript, retaining generated project files.
+   * A bot always keeps one. */
   deleteTask(botId: string, threadId: string): BotRecord | null {
     const bot = this.bot(botId);
     if (!bot || !bot.tasks || bot.tasks.length < 2) return null;
     if (!bot.tasks.some((t) => t.threadId === threadId)) return null;
     bot.tasks = bot.tasks.filter((t) => t.threadId !== threadId);
-    this.deleteThreadRecord(threadId);
-    if (bot.threadId === threadId) {
-      bot.threadId = bot.tasks[0]!.threadId;
-      bot.resumeCursors = { ...bot.tasks[0]!.resumeCursors };
+    const visible = bot.tasks.find((task) => !task.routineRunId)
+      ?? this.createTask(botId, undefined, bot.threadId === threadId)!;
+    if (bot.threadId === threadId || this.taskByThread(botId, bot.threadId)?.routineRunId) {
+      this.mirrorActiveTask(bot, visible);
     }
+    this.deleteThreadRecord(threadId);
+    bot.unread = bot.tasks.some((task) => task.unread);
+    this.refreshBotActivity(bot);
     this.saveBots();
     this.emit({ type: "bot", botId });
     return bot;

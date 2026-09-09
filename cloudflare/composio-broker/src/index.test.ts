@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 import {
   authorize,
+  catalog,
   connectedServices,
   connectionStatus,
   createSession,
@@ -277,6 +278,26 @@ describe("connected-apps broker boundaries", () => {
     await expect(authorized.json()).resolves.toEqual({ url: "https://connect.composio.dev/link/gmail" });
     const linkCall = fetchCalls.find((call) => call.url.endsWith("/tool_router/session/trs_multi/link"));
     expect(JSON.parse(String(linkCall?.init?.body))).toEqual({ toolkit: "gmail", alias: "second" });
+  });
+
+  it("pages the catalog by forwarding a well-formed cursor only", async () => {
+    const fetchCalls: Array<{ url: string; init?: RequestInit }> = [];
+    const { env } = testEnv(fetchCalls);
+    vi.stubGlobal("fetch", async (input: string | URL | Request, init?: RequestInit) => {
+      fetchCalls.push({ url: String(input), init });
+      return Response.json({ items: [{ slug: "deepgram" }] });
+    });
+    const catalogEnv = { ...env, COMPOSIO_TOOLKIT_BASE: "https://backend.composio.dev/api/v3" } as never;
+
+    await catalog(catalogEnv, new URL("https://broker.test/v1/catalog"));
+    await catalog(catalogEnv, new URL("https://broker.test/v1/catalog?cursor=eyJwYWdlIjoyfQ=="));
+    await catalog(catalogEnv, new URL("https://broker.test/v1/catalog?cursor=%20%26limit%3D1"));
+
+    expect(fetchCalls.map((call) => new URL(call.url).searchParams.get("cursor"))).toEqual([
+      null,
+      "eyJwYWdlIjoyfQ==",
+      null,
+    ]);
   });
 
   it("validates aliases at the broker boundary", () => {

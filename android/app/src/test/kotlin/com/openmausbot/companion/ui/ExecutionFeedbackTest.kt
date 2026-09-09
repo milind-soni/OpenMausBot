@@ -364,6 +364,7 @@ class TactileActionTest {
                 TactileAction.GRANT_APPROVAL to HapticCue.SELECT,
                 TactileAction.START_NEW_SECTION to HapticCue.SELECT,
                 TactileAction.TOGGLE_ACTIVITY_RUN to HapticCue.SELECT,
+                TactileAction.OPEN_THREAD_CHIP to HapticCue.SELECT,
                 TactileAction.SWITCH_COMPUTER to HapticCue.SELECT,
                 TactileAction.CONNECT_ANOTHER_COMPUTER to HapticCue.SELECT,
                 TactileAction.CHOOSE_QUICK_REPLY_ICON to HapticCue.SELECT,

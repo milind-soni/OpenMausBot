@@ -106,11 +106,19 @@ public struct ToolActivity: Codable, Hashable, Sendable {
     public var setup: Bool?
 }
 
+/// The thread an activity chip opened — "Opened thread #Title on Scout" —
+/// so the phone can go there. Newer computers only; a chip without one is
+/// just a receipt.
+public struct ThreadRef: Codable, Hashable, Sendable {
+    public var botId: String
+    public var threadId: String
+    public var title: String
+}
+
 /// A credential request created by the desktop for one paused task.
 ///
-/// Paired phones deliberately cannot write host credentials. Keeping the
-/// payload lets the companion render an honest handoff card instead of
-/// turning this newer message kind into an invisible row.
+/// The phone may fill this request only through the QR-pinned HPKE transport.
+/// The payload contains identifiers and display copy, never the credential.
 public struct SecretRequestCardData: Codable, Hashable, Sendable {
     public var target: String?
     public var label: String?
@@ -185,6 +193,7 @@ public struct Message: Codable, Hashable, Identifiable, Sendable {
     public var card: OptionCard?
     public var secret: SecretRequestCardData?
     public var tool: ToolActivity?
+    public var threadRef: ThreadRef?
     /// The message this one follows; nil at the thread root. Two messages
     /// sharing a parent are a fork.
     public var parentId: String?
@@ -218,10 +227,37 @@ public struct ModelSelection: Codable, Hashable, Sendable {
     }
 }
 
+/// The bot that opened a thread, on itself or on a teammate. Absent — which
+/// is every thread from an older computer — means the person opened it.
+public struct ThreadOpener: Codable, Hashable, Sendable {
+    public var botId: String
+    public var name: String
+    public var delegationId: String?
+    public var at: Double
+}
+
 public struct BotTask: Codable, Hashable, Sendable {
     public var threadId: String
     public var title: String
     public var createdAt: Double
+    public var modelSelection: ModelSelection?
+    public var busy: Bool?
+    /// Runtime state from newer computers; used to recover approvals in
+    /// background threads without downloading every conversation.
+    public var activity: String?
+    public var unread: Bool?
+    public var approvalMode: String?
+    public var autoApprove: Bool?
+    public var alwaysAllow: [String]?
+    public var projectId: String?
+    public var openedBy: ThreadOpener?
+    /// Bot-only internal execution. Keep it addressable, but out of thread pickers.
+    public var routineRunId: String?
+
+    /// The thread list's quiet second line, worded as the desktop words it.
+    public var openedByLabel: String? {
+        openedBy.map { "opened by \($0.name)" }
+    }
 }
 
 public struct Bot: Codable, Hashable, Identifiable, Sendable {
@@ -248,6 +284,9 @@ public struct Bot: Codable, Hashable, Identifiable, Sendable {
     /// Desktop sidebar section. Missing or blank means the built-in Bots area.
     public var section: String?
     public var chiefOfStaff: Bool?
+    /// ask, auto, full, or custom. Missing on older harnesses; autoApprove
+    /// remains the compatibility mirror for older companion builds.
+    public var approvalMode: String?
     public var autoApprove: Bool?
     public var alwaysAllow: [String]?
     public var computer: String?
@@ -266,6 +305,42 @@ public struct Bot: Codable, Hashable, Identifiable, Sendable {
     public var activeLeafId: String?
     /// Paged responses only: there is more transcript above what you got.
     public var hasMore: Bool?
+
+    /// Routine results are ordinary tasks; only their per-run executions are hidden.
+    public var visibleTasks: [BotTask] {
+        (tasks ?? []).filter { $0.routineRunId == nil }
+    }
+
+    /// Older computers only send the profile default. Newer ones snapshot
+    /// each thread's model independently, including the thread open here.
+    public var currentTaskModelSelection: ModelSelection {
+        tasks?.first { $0.threadId == threadId }?.modelSelection ?? modelSelection
+    }
+
+    public var currentTaskBusy: Bool? {
+        tasks?.first { $0.threadId == threadId }?.busy ?? busy
+    }
+
+    /// A view snapshot, never a replacement for the shared profile record.
+    /// The selected thread stays local even when another client navigates.
+    public func projected(forThread selectedThreadId: String) -> Bot? {
+        let task = tasks?.first { $0.threadId == selectedThreadId }
+        guard task != nil || selectedThreadId == threadId else { return nil }
+        var view = self
+        view.threadId = selectedThreadId
+        view.modelSelection = task?.modelSelection ?? modelSelection
+        view.busy = task?.busy ?? (selectedThreadId == threadId ? busy : false)
+        view.unread = task?.unread ?? (selectedThreadId == threadId ? unread : false)
+        view.approvalMode = task?.approvalMode ?? task?.autoApprove.map { $0 ? "auto" : "ask" } ?? approvalMode
+        view.autoApprove = task?.autoApprove ?? autoApprove
+        view.alwaysAllow = task?.alwaysAllow ?? alwaysAllow
+        if selectedThreadId != threadId {
+            view.messages = nil
+            view.activeLeafId = nil
+            view.hasMore = nil
+        }
+        return view
+    }
 }
 
 public enum AvatarCrop: String, Codable, CaseIterable, Hashable, Sendable {
@@ -283,6 +358,31 @@ public enum AvatarCrop: String, Codable, CaseIterable, Hashable, Sendable {
         var container = encoder.singleValueContainer()
         try container.encode(rawValue)
     }
+}
+
+/// The "who" section of a bot overview: identity and its soul in one line.
+public struct BotOverviewWho: Codable, Hashable, Sendable {
+    public var name: String
+    public var title: String
+    public var blurb: String
+    public var soulLead: String
+}
+
+public struct BotOverviewRecent: Codable, Hashable, Sendable {
+    /// epoch milliseconds, like every other timestamp on the wire
+    public var at: Double
+    public var summary: String
+}
+
+/// A read-only summary of one bot: who it is, what it does, what it can
+/// reach, what it won't do, and its recent activity. No settings and no
+/// transcript — this is the shape a phone is allowed to poll for.
+public struct BotOverview: Codable, Hashable, Sendable {
+    public var who: BotOverviewWho
+    public var does: [String]
+    public var reaches: [String]
+    public var wont: [String]
+    public var recent: [BotOverviewRecent]
 }
 
 public struct GroupResponder: Codable, Hashable, Sendable {
@@ -341,6 +441,7 @@ public struct Fleet: Decodable, Sendable {
 public struct ThreadPage: Codable, Sendable {
     public var messages: [Message]
     public var hasMore: Bool?
+    public var activeLeafId: String?
 }
 
 public struct SearchHit: Codable, Hashable, Identifiable, Sendable {
@@ -1012,4 +1113,31 @@ struct RoutineRunResponse: Codable, Sendable { var run: RoutineRun }
 
 struct ConnectorAuthorizationResponse: Codable, Sendable {
     var url: String
+}
+
+// MARK: - Server sessions (pairing with a server directly)
+
+/// What `POST /api/auth/pair` returns on a server: the bearer, the session
+/// it opened, and the server's public descriptor.
+public struct ServerPairResponse: Codable, Sendable {
+    public var token: String
+    public var session: ServerSession
+    public var environment: ServerEnvironment
+}
+
+public struct ServerSession: Codable, Hashable, Sendable {
+    public var id: String
+    public var label: String
+    public var scopes: [String]
+    public var expiresAt: Double?
+
+    public var isAdmin: Bool { scopes.contains("admin") }
+}
+
+/// `GET /.well-known/openmausbot/environment`, served without a session.
+public struct ServerEnvironment: Codable, Hashable, Sendable {
+    public var environmentId: String
+    public var label: String
+    public var platform: String?
+    public var version: String?
 }

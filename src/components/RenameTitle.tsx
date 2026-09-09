@@ -1,6 +1,7 @@
 // Double-click a title to rename it in place. Settings still exists for
 // the rest of the profile — this is just the fast path for the name.
 import { useEffect, useState } from "react";
+import { t } from "@/lib/i18n";
 import { Pencil } from "lucide-react";
 
 import { nextRename } from "@/lib/rename";
@@ -51,7 +52,7 @@ export function RenameTitle({
         autoFocus
         value={draft}
         maxLength={BOT_PROFILE_LIMITS.name}
-        aria-label="Rename"
+        aria-label={t("rename.aria")}
         onFocus={(event) => event.currentTarget.select()}
         onChange={(event) => setDraft(event.target.value)}
         onBlur={() => finish(true)}
@@ -87,9 +88,9 @@ export function RenameTitle({
           <button
             type="button"
             onClick={onActivate}
-            aria-label={`Open ${value}'s profile`}
+            aria-label={t("chat.openProfileAria", { name: value })}
             className={cn("min-w-0 truncate text-left", className)}
-            title="Open agent profile"
+            title={t("chat.openProfile")}
           >
             {value}
           </button>
@@ -99,8 +100,8 @@ export function RenameTitle({
         <button
           type="button"
           onClick={startRename}
-          aria-label={`Rename ${value}`}
-          title="Rename agent"
+          aria-label={t("rename.named", { name: value })}
+          title={t("rename.agent")}
           className="flex size-10 shrink-0 items-center justify-center rounded text-ink-secondary opacity-70 hover:bg-raised hover:text-ink hover:opacity-100"
         >
           <Pencil size={12} />
@@ -112,10 +113,10 @@ export function RenameTitle({
   return (
     <span
       className={cn("cursor-text", className)}
-      title="Double-click to rename"
+      title={t("rename.doubleClick")}
       tabIndex={0}
       role="button"
-      aria-label={`Rename ${value}`}
+      aria-label={t("rename.named", { name: value })}
       onDoubleClick={startRename}
       onKeyDown={(event) => {
         if (event.key === "Enter" || event.key === " ") {

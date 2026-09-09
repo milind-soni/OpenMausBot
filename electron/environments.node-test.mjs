@@ -23,6 +23,18 @@ test("a pairing link keeps its code in the hash; a code anywhere else is refused
   assert.equal(env.parsePairingLink("not a link"), null);
 });
 
+test("self-hosted pairing supports custom HTTPS and Cloudflare names without Tailscale", () => {
+  for (const origin of ["https://bots.example.com", "https://example.trycloudflare.com", "https://c-example.openmausbot.com"]) {
+    const link = `${origin}/pair#code=ABCD-EFGH-JKLM`;
+    assert.deepEqual(env.parsePairingLink(link), {
+      origin, code: "ABCD-EFGH-JKLM", url: link,
+    });
+    const saved = env.withEnvironment({ environments: [], activeId: "local" }, { origin, name: "My server" }, () => "fixture");
+    assert.equal(saved.environments[0].origin, origin);
+    assert.ok(!env.serializeEnvironments(saved).includes("ABCD"), "pairing codes must not enter saved server records");
+  }
+});
+
 test("persisted state parses defensively and never resurrects Local as a remote", () => {
   const parsed = env.parseEnvironments(
     JSON.stringify({

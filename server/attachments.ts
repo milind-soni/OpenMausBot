@@ -43,6 +43,28 @@ const uploadLocks = new Map<string, Promise<void>>();
 let reservedAttachmentBytes = 0;
 const STREAM_RESERVATION_INCREMENT_BYTES = 1024 * 1024;
 
+/** Cached total of on-disk bytes that count against the quota: committed
+ * attachments plus any partial file this process did not itself write (a
+ * crash leftover, until it is cleaned up). `null` means a fresh scan is needed
+ * after cold start or a cleanup failure. Every normal commit
+ * and delete after that updates it in place instead of rescanning, which is
+ * what makes reservation growth O(1) rather than O(directory size).
+ *
+ * This is single-process, in-memory state: it does not see files another
+ * process adds or removes in ATTACHMENTS_DIR. That is an accepted limit
+ * (the app runs one server per data dir; uploadLocks already assumes the
+ * same), not a design gap this fix covers. */
+let committedAttachmentBytes: number | null = null;
+// An async link can finish while another upload invalidates or refreshes the
+// cache. Its bytes must not be added again if a scan may already include it.
+let attachmentAccountingVersion = 0;
+
+/** Force a fresh disk total and invalidate any in-flight commit's snapshot. */
+function invalidateAttachmentAccounting(): void {
+  committedAttachmentBytes = null;
+  attachmentAccountingVersion += 1;
+}
+
 /** Mimes the endpoint accepts, mapped to the extension stored on disk.
  * Sniffing is not attempted — a lie here only changes the filename. */
 const IMAGE_MIMES: Record<string, string> = {
@@ -52,12 +74,24 @@ const IMAGE_MIMES: Record<string, string> = {
   "image/webp": ".webp",
 };
 
-/** Useful document formats accepted by the phone share sheet.
+/** Useful document and audio formats accepted by the upload endpoint.
  * Generic archives, binaries, HTML, SVG, and executable/script mimes stay
  * out. Office/OpenDocument packages are allowed because they are documents,
  * despite using ZIP internally. The claimed mime determines the extension;
  * an attacker-controlled filename never does. */
 const FILE_MIMES: Readonly<Record<string, string>> = {
+  "audio/opus": ".opus",
+  "audio/ogg": ".ogg",
+  "audio/mpeg": ".mp3",
+  "audio/mp4": ".m4a",
+  "audio/x-m4a": ".m4a",
+  "audio/aac": ".aac",
+  "audio/wav": ".wav",
+  "audio/x-wav": ".wav",
+  "audio/wave": ".wav",
+  "audio/flac": ".flac",
+  "audio/x-flac": ".flac",
+  "audio/webm": ".webm",
   "text/plain": ".txt",
   "text/markdown": ".md",
   "text/csv": ".csv",
@@ -95,7 +129,10 @@ export function validateAttachmentUploadId(value: string | undefined): string | 
   return normalized;
 }
 
-function attachmentUsageAndCleanup(now = Date.now()): { bytes: number; removed: number } {
+/** The one full directory walk. Run from cold or invalidated accounting,
+ * or from an explicit cleanup sweep — never
+ * from the per-reservation hot path, which is what made PERF-03 quadratic. */
+function scanAttachmentUsageAndCleanup(now = Date.now()): { bytes: number; removed: number } {
   ensureAttachmentsDir();
   let bytes = 0;
   let removed = 0;
@@ -121,10 +158,65 @@ function attachmentUsageAndCleanup(now = Date.now()): { bytes: number; removed: 
   return { bytes, removed };
 }
 
-/** Remove only abandoned temporary uploads. Active partials are protected
- * even if a very slow request crosses the age threshold. */
+/** Return cached usage, initializing it from disk after cold start or
+ * invalidation. Reservations must use this rather than trusting a cold cache. */
+function committedBytes(): number {
+  if (committedAttachmentBytes === null) {
+    committedAttachmentBytes = scanAttachmentUsageAndCleanup().bytes;
+    attachmentAccountingVersion += 1;
+  }
+  return committedAttachmentBytes;
+}
+
+/** A newly committed file (saveFile/saveImage success path only — never the
+ * idempotent-retry branches, which reuse bytes already counted) adds to the
+ * cache. If accounting changed during an async link, a scan may already have
+ * counted that file. Let the next reservation rescan instead of adding twice. */
+function addCommittedBytes(delta: number, version = attachmentAccountingVersion): void {
+  if (version !== attachmentAccountingVersion || committedAttachmentBytes === null) {
+    invalidateAttachmentAccounting();
+    return;
+  }
+  committedAttachmentBytes += delta;
+}
+
+/** Remove only abandoned temporary uploads, and refresh the cached usage
+ * total from the same fresh scan. Outside accounting recovery, this is the
+ * only full directory walk after start-up; nothing on the upload path calls it
+ * per byte or per chunk anymore, so callers that want stale partials
+ * reclaimed promptly should invoke it on their own schedule. */
 export function cleanupStaleAttachmentPartials(now = Date.now()): number {
-  return attachmentUsageAndCleanup(now).removed;
+  const { bytes, removed } = scanAttachmentUsageAndCleanup(now);
+  committedAttachmentBytes = bytes;
+  attachmentAccountingVersion += 1;
+  return removed;
+}
+
+/** Delete a committed attachment (e.g. a generated image whose owning
+ * message/turn was retired) and keep the quota cache in sync. Every caller
+ * outside this module that removes a file saveImage/saveFile created must
+ * route through here instead of a raw unlink, or the cache will overcount
+ * forever and eventually reject uploads that should fit. */
+export function deleteAttachment(path: string): void {
+  try {
+    // Only bother sizing it if the cache is already warm — if it isn't, the
+    // eventual first scan just won't see this file, which is correct.
+    const size = committedAttachmentBytes !== null ? statSync(path).size : 0;
+    unlinkSync(path);
+    if (committedAttachmentBytes !== null) {
+      committedAttachmentBytes = Math.max(0, committedAttachmentBytes - size);
+    }
+  } catch {
+    // Already gone, or never existed — nothing to reconcile.
+  }
+}
+
+/** Test-only: force the next quota check to rescan the directory instead of
+ * trusting the cache. Needed because tests mutate ATTACHMENTS_DIR directly
+ * (truncateSync, rmSync, writeFileSync) to simulate quota states, which the
+ * cache can't observe. */
+export function __resetAttachmentAccountingForTests(): void {
+  invalidateAttachmentAccounting();
 }
 
 /** A retry owns the same UUID namespace as the interrupted attempt. Once it
@@ -139,7 +231,14 @@ function cleanupAttachmentPartialsForUpload(uploadId: string): void {
     const path = join(ATTACHMENTS_DIR, entry.name);
     if (activePartials.has(path)) continue;
     try {
+      // Only bother sizing it if the cache is already warm — if it isn't,
+      // the eventual first scan runs after this unlink and simply never
+      // sees the file, so there is nothing to reconcile.
+      const size = committedAttachmentBytes !== null ? statSync(path).size : 0;
       unlinkSync(path);
+      if (committedAttachmentBytes !== null) {
+        committedAttachmentBytes = Math.max(0, committedAttachmentBytes - size);
+      }
     } catch {
       // A concurrent cleanup already removed the abandoned attempt.
     }
@@ -156,7 +255,7 @@ class AttachmentReservation {
   }
 
   private reserveAtLeast(required: number, preferred: number): void {
-    const used = attachmentUsageAndCleanup().bytes;
+    const used = committedBytes();
     const available = ATTACHMENTS_MAX_BYTES - used - reservedAttachmentBytes;
     if (available < required) {
       throw statusError(
@@ -208,13 +307,35 @@ async function withUploadLock<T>(uploadId: string | undefined, operation: () => 
   }
 }
 
+/** Every committed attachment name is `${uuid}${extension}` for one of these
+ * fixed extensions — saveFile/saveImage never write any other suffix — so
+ * whether a given upload ID is already committed, and under which content
+ * type, can be answered with a handful of direct stats instead of a scan
+ * over every file in the directory. */
+const KNOWN_ATTACHMENT_EXTENSIONS = Array.from(
+  new Set([...Object.values(IMAGE_MIMES), ...Object.values(FILE_MIMES)]),
+);
+
+/** Missing or unreadable candidates count as absent here; the atomic link
+ * still detects a collision if a file exists when an upload commits. */
+function statSizeIfFile(path: string): number | null {
+  try {
+    const stat = statSync(path);
+    return stat.isFile() ? stat.size : null;
+  } catch {
+    return null;
+  }
+}
+
+/** Find an idempotent retry without listing the directory, rejecting an ID
+ * already committed under a different accepted content type. */
 function committedPathForUpload(uploadId: string, extension: string): string | null {
   ensureAttachmentsDir();
-  const exact = `${uploadId}${extension}`;
-  for (const entry of readdirSync(ATTACHMENTS_DIR, { withFileTypes: true })) {
-    if (!entry.isFile() || PARTIAL_NAME.test(entry.name)) continue;
-    if (entry.name === exact) return join(ATTACHMENTS_DIR, entry.name);
-    if (entry.name.startsWith(`${uploadId}.`)) {
+  const exactPath = join(ATTACHMENTS_DIR, `${uploadId}${extension}`);
+  if (statSizeIfFile(exactPath) !== null) return exactPath;
+  for (const other of KNOWN_ATTACHMENT_EXTENSIONS) {
+    if (other === extension) continue;
+    if (statSizeIfFile(join(ATTACHMENTS_DIR, `${uploadId}${other}`)) !== null) {
       throw statusError(409, "uploadId was already used for another content type");
     }
   }
@@ -259,7 +380,7 @@ export function extensionForFileMime(mime: string | undefined): string | null {
  * remain visible as bad requests. */
 export function sanitizeSharedFileName(name: string, mime: string): string {
   const extension = extensionForFileMime(mime);
-  if (!extension) throw statusError(400, "content-type must be a supported document type");
+  if (!extension) throw statusError(400, "content-type must be a supported document or audio type");
 
   const normalized = name.normalize("NFKC").trim();
   if (!normalized) throw statusError(400, "name is required");
@@ -295,7 +416,7 @@ export async function saveFile(
 ): Promise<SavedFile> {
   const normalized = normalizedMime(mime);
   if (!normalized || !extensionForFileMime(normalized)) {
-    throw statusError(400, "content-type must be a supported document type");
+    throw statusError(400, "content-type must be a supported document or audio type");
   }
   const name = sanitizeSharedFileName(originalName, normalized);
   const extension = extensionForFileMime(normalized)!;
@@ -342,6 +463,7 @@ export async function saveFile(
     let file: Awaited<ReturnType<typeof open>> | undefined;
     let bytes = 0;
     let closed = false;
+    let partialCleanupFailed = false;
 
     try {
       file = await open(partialPath, "wx", 0o600);
@@ -366,7 +488,9 @@ export async function saveFile(
       await file.close();
       closed = true;
       try {
+        const accountingVersion = attachmentAccountingVersion;
         await link(partialPath, path);
+        addCommittedBytes(bytes, accountingVersion);
         await unlink(partialPath);
       } catch (error) {
         if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error;
@@ -378,10 +502,13 @@ export async function saveFile(
       return { path, name, mime: normalized, bytes };
     } catch (error) {
       if (file && !closed) await file.close().catch(() => undefined);
-      await unlink(partialPath).catch(() => undefined);
+      await unlink(partialPath).catch(() => { partialCleanupFailed = true; });
       throw error;
     } finally {
       activePartials.delete(partialPath);
+      // A leftover partial was excluded from the cache while active. Rescan
+      // after releasing it so a retry cannot subtract bytes never counted.
+      if (partialCleanupFailed) invalidateAttachmentAccounting();
       reservation.release();
     }
   });
@@ -415,10 +542,12 @@ export function saveImage(bytes: Buffer, mime: string, requestedUploadId?: strin
   const path = join(ATTACHMENTS_DIR, name);
   const partialPath = join(ATTACHMENTS_DIR, `.openmaus-upload-${id}-${randomUUID()}.partial`);
   activePartials.add(partialPath);
+  let partialCleanupFailed = false;
   try {
     writeFileSync(partialPath, bytes, { mode: 0o600, flag: "wx" });
     try {
       linkSync(partialPath, path);
+      addCommittedBytes(bytes.byteLength);
     } catch (error) {
       if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error;
       const saved = readFileSync(path);
@@ -432,11 +561,12 @@ export function saveImage(bytes: Buffer, mime: string, requestedUploadId?: strin
     try {
       unlinkSync(partialPath);
     } catch {
-      // The successful path already removed it, or the write never created it.
+      partialCleanupFailed = true;
     }
     throw error;
   } finally {
     activePartials.delete(partialPath);
+    if (partialCleanupFailed) invalidateAttachmentAccounting();
     reservation.release();
   }
 }

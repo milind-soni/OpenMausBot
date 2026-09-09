@@ -97,6 +97,46 @@ final class BotModelClientTests: XCTestCase {
         XCTAssertNil(updated.modelSelection.effort)
     }
 
+    func testThreadModelWriteStaysPinnedWhenTheServerSelectsAnotherThread() async throws {
+        BotModelRequestStub.responseBody = Data(#"""
+        {"bot":{
+          "id":"bot-1","threadId":"thread-b","name":"Scout","title":"Researcher",
+          "description":"Finds evidence.","notifications":true,"color":"blue","unread":true,
+          "modelSelection":{"instanceId":"codex","model":"profile-default"},"createdAt":1,
+          "projects":[{"id":"project-1","name":"Website"}],
+          "tasks":[
+            {"threadId":"thread-a","title":"A","createdAt":1,"projectId":"project-1",
+             "modelSelection":{"instanceId":"codex","model":"gpt-5","effort":"high"},"busy":false},
+            {"threadId":"thread-b","title":"B","createdAt":2,"busy":true}
+          ]
+        }}
+        """#.utf8)
+        let updated = try await client.updateModel(
+            botId: "bot-1",
+            selection: ModelSelection(instanceId: "codex", model: "gpt-5", effort: "high"),
+            threadId: "thread-a"
+        )
+        XCTAssertEqual(BotModelRequestStub.capturedRequest?.url?.path, "/api/bots/bot-1/tasks/thread-a")
+        let data = try XCTUnwrap(BotModelRequestStub.capturedBody)
+        let body = try XCTUnwrap(JSONSerialization.jsonObject(with: data) as? [String: Any])
+        XCTAssertEqual(body["requireAvailableModel"] as? Bool, true)
+        XCTAssertEqual(body["modelSelection"] as? [String: String], ["instanceId": "codex", "model": "gpt-5", "effort": "high"])
+        XCTAssertEqual(updated.threadId, "thread-b", "the response is still the canonical profile")
+        XCTAssertEqual(updated.modelSelection.model, "profile-default")
+        XCTAssertEqual(updated.projected(forThread: "thread-a")?.currentTaskModelSelection.effort, "high")
+        XCTAssertEqual(updated.projected(forThread: "thread-a")?.busy, false)
+        XCTAssertEqual(updated.tasks?.first?.projectId, "project-1")
+    }
+
+    func testThreadModelWriteRejectsUnsafeThreadBeforeNetworking() async throws {
+        do {
+            _ = try await client.updateModel(botId: "bot-1", selection: ModelSelection(instanceId: "codex", model: "gpt-5"), threadId: "../other")
+            XCTFail("expected unsafe route rejection")
+        } catch APIError.badURL {
+            XCTAssertNil(BotModelRequestStub.capturedRequest)
+        }
+    }
+
     func testRejectsUnsafeBotIDsBeforeNetworking() async throws {
         do {
             _ = try await client.updateModel(

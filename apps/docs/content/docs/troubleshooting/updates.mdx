@@ -23,9 +23,19 @@ Reopen OpenMausBot once it finishes to be running the new version.
 
 Leave the app open long enough for one complete attempt, then quit and reopen it. A failed differential update should fall back to the full package. If the same release remains stuck, download the current installer from the [official releases page](https://github.com/milind-soni/OpenMausBot/releases/latest) and install it over the existing copy.
 
+On macOS, **Preparing update** is a separate step after the download finishes. macOS must stage the update before **Restart to update** becomes available. A completed download does not mean this preparation is finished.
+
+If an update fails, its error stays visible instead of being replaced by a background update check. If a restart is taking longer than expected, quit the app completely before trying again; repeatedly clicking Restart cannot speed it up.
+
 ## Restart to update does nothing
 
 Quit OpenMausBot completely and launch it again. If the version did not change, install the latest release manually. Your conversations and settings live outside the application bundle and are not removed by replacing the app.
+
+The installed version runs the updater, not the version being downloaded. If you are upgrading from an older build with a stuck updater, you may need to install the new version manually once to receive the fix. Do not delete your OpenMausBot data directory.
+
+## Report an update failure
+
+Open **App settings → General → Diagnostics → Export Diagnostics…**. Include your operating system, the currently installed version, the target version, and whether the failure happened during download, preparation, or restart. Newer builds include a bounded, redacted updater log alongside the server and desktop logs. Review the exported file before sharing it privately with support.
 
 ## No terminal opened
 

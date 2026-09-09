@@ -284,6 +284,9 @@ class CompanionClient(
 
     suspend fun routines(): RoutinesResponse = send(makeRequest("GET", "/api/routines"))
 
+    suspend fun overview(botId: String): BotOverview =
+        send(makeRequest("GET", "/api/bots/${segment(botId)}/overview"))
+
     suspend fun createBot(): Bot = send<CreatedBot>(makeRequest("POST", "/api/bots")).bot
 
     /**
@@ -306,6 +309,23 @@ class CompanionClient(
         val body = CompanionJson.encodeToJsonElement(BotProfilePatch.serializer(), patch).jsonObject
         return send<BotResponse>(
             makeRequest("PATCH", "/api/bots/${segment(botId)}/profile", body = body),
+        ).bot
+    }
+
+    /**
+     * A captured task changes only that task's model. The optional legacy form
+     * retains the narrow profile/default model route for older callers.
+     */
+    suspend fun updateModel(botId: String, selection: ModelSelection, threadId: String? = null): Bot {
+        val model = CompanionJson.encodeToJsonElement(ModelSelection.serializer(), selection).jsonObject
+        val path = if (threadId == null) "/api/bots/${segment(botId)}/model"
+            else "/api/bots/${segment(botId)}/tasks/${segment(threadId)}"
+        val body = if (threadId == null) model else buildJsonObject {
+            put("modelSelection", model)
+            put("requireAvailableModel", true)
+        }
+        return send<BotResponse>(
+            makeRequest("PATCH", path, body = body),
         ).bot
     }
 
@@ -428,22 +448,56 @@ class CompanionClient(
         return send<CreatedRoom>(makeRequest("POST", "/api/groups", body = body)).group
     }
 
-    suspend fun sendToBot(botId: String, text: String) {
-        sendUnit(makeRequest("POST", "/api/bots/${segment(botId)}/messages", body = jsonBody("text" to text)))
-    }
+    suspend fun sendToBot(botId: String, text: String, threadId: String? = null): SendReceipt =
+        sendForReceipt(
+            makeRequest("POST", "/api/bots/${segment(botId)}/messages", body = jsonBody("text" to text, "threadId" to threadId)),
+        )
 
-    suspend fun sendToRoom(groupId: String, text: String) {
-        sendUnit(makeRequest("POST", "/api/groups/${segment(groupId)}/messages", body = jsonBody("text" to text)))
+    suspend fun sendToRoom(groupId: String, text: String, threadId: String? = null): SendReceipt =
+        sendForReceipt(
+            makeRequest("POST", "/api/groups/${segment(groupId)}/messages", body = jsonBody("text" to text, "threadId" to threadId)),
+        )
+
+    /**
+     * Drop a message the harness is still holding, before the turn it is
+     * waiting behind settles.
+     *
+     * An entry that drained a moment ago is not an error worth showing — that
+     * is the outcome the caller wanted. But that is matched positively on the
+     * harness's own wording and never on the status alone: the sidecar answers
+     * 404 "no route" for a route it does not allow, so a computer too old to
+     * have this route looks identical to a drained entry. Reading those as the
+     * same thing takes the message off the phone while it is still queued on
+     * the computer, and it then arrives anyway.
+     */
+    suspend fun cancelQueued(queueId: String, to: MessageDestination) {
+        if (!isSafeRouteId(queueId)) throw APIError.BadUrl
+        val route = when (to) {
+            is MessageDestination.Bot -> "/api/bots/${safeRouteId(to.id)}/queue/$queueId"
+            is MessageDestination.Room -> "/api/groups/${safeRouteId(to.id)}/queue/$queueId"
+        }
+        try {
+            sendUnit(makeRequest("DELETE", route, body = jsonBody("threadId" to to.threadId)))
+        } catch (error: APIError.Status) {
+            if (error.code != 404) throw error
+            // The harness's own words, not Throwable.message, which falls
+            // back to generic text for a 404 and would swallow everything.
+            if (error.serverMessage?.contains(ALREADY_DRAINED, ignoreCase = true) == true) return
+            throw APIError.Status(
+                404,
+                "This computer is too old to take back a queued message. Update OpenMausBot on it.",
+            )
+        }
     }
 
     /** Retry-safe send: [threadId] is fixed at destination selection, never inferred on retry. */
-    suspend fun send(text: String, to: MessageDestination, sendId: String) {
+    suspend fun send(text: String, to: MessageDestination, sendId: String): SendReceipt {
         val route = when (to) {
             is MessageDestination.Bot -> "/api/bots/${safeRouteId(to.id)}/messages"
             is MessageDestination.Room -> "/api/groups/${safeRouteId(to.id)}/messages"
         }
         if (!isSafeRouteId(to.threadId) || !isSafeSendId(sendId)) throw APIError.BadUrl
-        sendUnit(makeRequest(
+        return sendForReceipt(makeRequest(
             "POST",
             route,
             body = buildJsonObject {
@@ -470,8 +524,8 @@ class CompanionClient(
         sendUnit(makeRequest("POST", "/api/threads/${segment(threadId)}/respond", body = body))
     }
 
-    suspend fun alwaysAllow(botId: String, key: String) {
-        sendUnit(makeRequest("POST", "/api/bots/${segment(botId)}/always-allow", body = jsonBody("allowKey" to key)))
+    suspend fun alwaysAllow(botId: String, key: String, threadId: String? = null) {
+        sendUnit(makeRequest("POST", "/api/bots/${segment(botId)}/always-allow", body = jsonBody("allowKey" to key, "threadId" to threadId)))
     }
 
     suspend fun authorizeConnector(slug: String, alias: String?): URI {
@@ -496,19 +550,19 @@ class CompanionClient(
             body = jsonBody("emoji" to emoji),
         )).message
 
-    suspend fun edit(botId: String, messageId: String, text: String) {
+    suspend fun edit(botId: String, messageId: String, text: String, threadId: String? = null) {
         sendUnit(makeRequest(
             "POST",
             "/api/bots/${segment(botId)}/messages/${segment(messageId)}/edit",
-            body = jsonBody("text" to text),
+            body = jsonBody("text" to text, "threadId" to threadId),
         ))
     }
 
-    suspend fun setActiveBranch(botId: String, messageId: String): String =
+    suspend fun setActiveBranch(botId: String, messageId: String, threadId: String? = null): String =
         send<ActiveBranchResponse>(makeRequest(
             "POST",
             "/api/bots/${segment(botId)}/active-branch",
-            body = jsonBody("messageId" to messageId),
+            body = jsonBody("messageId" to messageId, "threadId" to threadId),
         )).activeLeafId
 
     suspend fun createTask(botId: String, title: String? = null): Bot {
@@ -559,20 +613,20 @@ class CompanionClient(
         makeRequest("DELETE", "/api/groups/${segment(groupId)}/tasks/${segment(threadId)}"),
     ).group
 
-    suspend fun interrupt(botId: String) {
-        sendUnit(makeRequest("POST", "/api/bots/${segment(botId)}/interrupt"))
+    suspend fun interrupt(botId: String, threadId: String? = null) {
+        sendUnit(makeRequest("POST", "/api/bots/${segment(botId)}/interrupt", body = jsonBody("threadId" to threadId)))
     }
 
     suspend fun cloudDesktop(botId: String): CloudDesktopSession = send(
         makeRequest("POST", "/api/bots/${segment(botId)}/computer/join"),
     )
 
-    suspend fun markBotRead(botId: String) {
-        sendUnit(makeRequest("POST", "/api/bots/${segment(botId)}/read"))
+    suspend fun markBotRead(botId: String, threadId: String? = null) {
+        sendUnit(makeRequest("POST", "/api/bots/${segment(botId)}/read", body = jsonBody("threadId" to threadId)))
     }
 
-    suspend fun markRoomRead(roomId: String) {
-        sendUnit(makeRequest("POST", "/api/groups/${segment(roomId)}/read"))
+    suspend fun markRoomRead(roomId: String, threadId: String? = null) {
+        sendUnit(makeRequest("POST", "/api/groups/${segment(roomId)}/read", body = jsonBody("threadId" to threadId)))
     }
 
     fun events(since: String?, screens: Boolean = false): Flow<StreamFrame> {
@@ -630,6 +684,24 @@ class CompanionClient(
         check(raw)
     }
 
+    /**
+     * A send, and what the harness did with it. Unlike [send] an unreadable
+     * body is not an error here: the request succeeded, and an older harness
+     * answering with a shape this build has never seen still made a plain
+     * send. Only the extra mid-turn detail is lost.
+     */
+    private suspend fun sendForReceipt(request: Request): SendReceipt {
+        val raw = perform(request)
+        check(raw)
+        return try {
+            CompanionJson
+                .decodeFromString<SendReceiptBody>(raw.data.toString(Charsets.UTF_8))
+                .receipt()
+        } catch (_: SerializationException) {
+            SendReceipt.Sent(threadId = null, steered = false)
+        }
+    }
+
     private suspend fun perform(
         request: Request,
         requestClient: OkHttpClient = actionClient,
@@ -677,6 +749,12 @@ class CompanionClient(
     private data class RawResponse(val code: Int, val headers: Headers, val data: ByteArray)
 
     companion object {
+        /**
+         * The harness's own answer when the entry is not in its queue.
+         * Matched positively, never by status alone — see [cancelQueued].
+         */
+        const val ALREADY_DRAINED = "no such queued message"
+
         private const val ACTION_TIMEOUT_SECONDS = 20L
         private const val AVATAR_GENERATION_TIMEOUT_SECONDS = 150L
         private const val STREAM_IDLE_TIMEOUT_SECONDS = 90L
@@ -706,14 +784,7 @@ class CompanionClient(
                 ?: ordinary?.trim('"')
                 ?: fallbackPath.split('/', '\\').lastOrNull { it.isNotEmpty() }
                 ?: "file"
-            val basename = candidate.split('/', '\\').lastOrNull { it.isNotEmpty() } ?: "file"
-            val cleaned = basename.map { character ->
-                val code = character.code
-                val bidiControl = code in 0x202A..0x202E || code in 0x2066..0x2069
-                if (character.isISOControl() || bidiControl) ' ' else character
-            }.joinToString("").trim()
-            val shortened = cleaned.take(180)
-            return if (shortened.isEmpty() || shortened == "." || shortened == "..") "file" else shortened
+            return sanitisePortableFilename(candidate, "file")
         }
         private val AVATAR_MIME_TYPES = setOf("image/png", "image/jpeg", "image/gif", "image/webp")
         private val JSON_MEDIA_TYPE = "application/json".toMediaType()
@@ -977,8 +1048,8 @@ class CompanionClient(
         @Serializable
         private data class HealthIdentity(val app: String)
 
-        private fun jsonBody(vararg values: Pair<String, String>): JsonObject = buildJsonObject {
-            values.forEach { (name, value) -> put(name, value) }
+        private fun jsonBody(vararg values: Pair<String, String?>): JsonObject = buildJsonObject {
+            values.forEach { (name, value) -> value?.let { put(name, it) } }
         }
 
         private const val PROBE_TIMEOUT_SECONDS = 4L

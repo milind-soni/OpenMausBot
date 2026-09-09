@@ -23,9 +23,10 @@ import { Loader2, Phone, PhoneOff, X } from "lucide-react";
 import { useStore, visibleMessages, type Bot } from "@/state/store";
 import { currentCall, deferCallCleanup, endCall, startCall, useOnCall } from "@/lib/call";
 import { speaker } from "@/lib/tts";
+import { localSystemVoiceActive } from "@/lib/local-voice";
 import { useSpeech } from "@/lib/tts/useSpeech";
 import { usePushToTalk } from "@/lib/push-to-talk";
-import { MausAvatar } from "./Avatar";
+import { BotAvatar } from "./Avatar";
 import { isRoutineApproval, isSkillApproval, pendingApprovals, spokenApprovalPrompt } from "./PendingApproval";
 import { cn } from "@/lib/cn";
 import { track } from "@/lib/analytics";
@@ -74,10 +75,12 @@ export function CallTargetButton({
   const { capabilities, ready: capabilitiesReady } = useDesktopCapabilities();
   const active = useOnCall() === targetId;
   const supported = capabilities.dictation.available && Boolean(window.ogb?.speechStart);
-  const configured = Boolean(state.config?.tts?.configured);
+  const localVoice = localSystemVoiceActive();
+  const configured = localVoice || Boolean(state.config?.tts?.configured);
   const everyTargetHasVoice = voices.length > 0 && voices.every((voice) => Boolean(voice));
   const voiceReady =
-    configured && (requireExplicitVoices ? everyTargetHasVoice : Boolean(state.config?.tts?.ready || everyTargetHasVoice));
+    localVoice ||
+    (configured && (requireExplicitVoices ? everyTargetHasVoice : Boolean(state.config?.tts?.ready || everyTargetHasVoice)));
   const unavailable = !active && (!capabilitiesReady || !supported || !voiceReady);
   const voiceSetupRequired = capabilitiesReady && supported && !voiceReady;
   const [helpOpen, setHelpOpen] = useState(false);
@@ -106,7 +109,7 @@ export function CallTargetButton({
           ? "Add an ElevenLabs API key — or switch to the built-in Mac voices — so the bot can speak during calls."
           : !voiceReady
             ? voices.length > 1
-              ? "Give every channel member a voice before starting a channel call."
+              ? "Give every group member a voice before starting a group call."
               : "Choose a voice before starting a call."
             : "";
 
@@ -175,7 +178,7 @@ export function CallTargetButton({
               onClick={() => {
                 setHelpOpen(false);
                 if (setupBotId && setupBotId !== targetId) dispatch({ type: "select", id: setupBotId });
-                dispatch({ type: "toggleSettings", open: true });
+                dispatch({ type: "toggleSettings", open: true, section: "voice" });
               }}
               className="mt-2.5 rounded-lg bg-accent px-3 py-1.5 text-[12px] font-medium text-white hover:brightness-110"
             >
@@ -372,7 +375,7 @@ function Call({ bot }: { bot: Bot }) {
       const openQuestion = askedQuestion.current;
       if (openQuestion) {
         askedQuestion.current = null;
-        dispatch({ type: "answerCard", botId: bot.id, messageId: openQuestion.messageId, answer: said });
+        dispatch({ type: "answerCard", botId: bot.id, threadId: bot.threadId, messageId: openQuestion.messageId, answer: said });
         move("working");
         return;
       }
@@ -540,7 +543,7 @@ function Call({ bot }: { bot: Bot }) {
         <X size={18} />
       </button>
 
-      <MausAvatar color={bot.color} bodyId={bot.mascotBody ?? undefined} state={mascotState} size={220} animated trackPointer />
+      <BotAvatar bot={bot} state={mascotState} size={220} animated trackPointer />
 
       <div className="flex flex-col items-center gap-1.5 text-center">
         <div className="text-[20px] font-medium text-ink">{bot.name}</div>

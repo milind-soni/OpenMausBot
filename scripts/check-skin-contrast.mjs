@@ -90,11 +90,11 @@ function contrast(fgHex, bgHex) {
 // Pairs taken from what the components render, not from what looks plausible:
 // body copy sits on all five surfaces, the filled accent/danger buttons carry
 // their own ink token, and the status colours are used as text on cards.
-const SURFACES = ["--color-app", "--color-panel", "--color-raised", "--color-raised-hover", "--color-card", "--color-inset"];
+const SURFACES = ["--color-app", "--color-panel", "--color-raised", "--color-raised-hover", "--color-card", "--color-inset", "--color-composer", "--color-menu"];
 const PAIRS = [
   ...SURFACES.map((s) => ["--color-ink", s, 4.5]),
   ...SURFACES.map((s) => ["--color-ink-secondary", s, 4.5]),
-  ["--color-ink", "--color-bubble-user", 4.5],
+  ["--color-bubble-user-ink", "--color-bubble-user", 4.5],
   ["--color-accent-ink", "--color-accent", 4.5],
   ["--color-danger-ink", "--color-danger", 4.5],
   ["--color-success-ink", "--color-success", 4.5],
@@ -191,4 +191,31 @@ for (const [id, tokens] of skins) {
   if (skinFailed) failed = true;
 }
 
+// The inverted Daylight bubble has its own inherited context: the editor,
+// labels, quotes and file chips explicitly use these tokens, not parent color.
+const daylightBubble = {
+  ...skins.get("daylight"),
+  ...declarations(css.match(/@scope \(\[data-skin="daylight"\]\) to \(\[data-skin\]\)\s*\{\s*\.bg-bubble-user\s*\{([^}]*)\}/)?.[1] ?? ""),
+};
+for (const [fg, bg] of [
+  ["--color-ink", "--color-bubble-user"],
+  ["--color-ink-secondary", "--color-bubble-user"],
+  ["--color-ink", "--color-raised"],
+  ["--color-ink-secondary", "--color-raised-hover"],
+  ["--color-ink-secondary", "--color-inset"],
+  ["--color-accent", "--color-inset"],
+  ["--color-accent-text", "--color-bubble-user"],
+  ["--color-ink", "--color-control"],
+  ["--color-accent-ink", "--color-accent"],
+  ["--color-danger-ink", "--color-danger"],
+  ["--color-success-ink", "--color-success"],
+]) {
+  const ratio = contrast(daylightBubble[fg] ?? "", daylightBubble[bg] ?? "");
+  if (ratio === null || ratio < 4.5) {
+    failed = true;
+    console.log(`✗ daylight bubble — ${fg} on ${bg}: ${ratio?.toFixed(2) ?? "unmeasurable"}:1 (needs 4.5:1)`);
+  }
+}
+
+if (!failed) console.log("✓ daylight bubble — editor, controls and paired fills above 4.5:1");
 process.exit(failed ? 1 : 0);

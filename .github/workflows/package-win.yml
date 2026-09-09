@@ -42,6 +42,12 @@ jobs:
         shell: bash
         run: rm -rf dist dist-server release
       - run: pnpm package:win
+      - name: Verify the bundled browser with an empty home
+        run: node scripts/smoke-browser-bundle.mjs --resources "${{ github.workspace }}/release/win-unpacked/resources"
+      - name: Verify the packaged server discovers its browser
+        env:
+          OMB_SMOKE_DIST: ${{ github.workspace }}/release/win-unpacked/resources/server
+        run: node scripts/smoke-packaged-server.mjs --browser-bundle "${{ github.workspace }}/release/win-unpacked/resources/browser-engine"
       - name: report what was built
         shell: bash
         run: |

@@ -22,9 +22,9 @@ describe("cloud computer lifecycle", () => {
         requests.push({ method: req.method ?? "GET", path: url.pathname, command: parsed.command });
         res.writeHead(200, { "content-type": "application/json" });
         if (url.pathname === "/api/box/v1/boxes") {
-          res.end(JSON.stringify({ boxes: [{ id: "box-1", name: machineName, state: "ready" }] }));
-        } else if (url.pathname === "/api/box/v1/boxes/box-1" && req.method === "GET") {
-          res.end(JSON.stringify({ ok: true, box: { id: "box-1", name: machineName, state: "ready" } }));
+          res.end(JSON.stringify({ boxes: [{ id: "bx_23456789", name: machineName, state: "ready" }] }));
+        } else if (url.pathname === "/api/box/v1/boxes/bx_23456789" && req.method === "GET") {
+          res.end(JSON.stringify({ ok: true, box: { id: "bx_23456789", name: machineName, state: "ready" } }));
         } else if (url.pathname.endsWith("/commands")) {
           res.end(JSON.stringify({ exitCode: 0, stdout: "", stderr: "" }));
         } else {

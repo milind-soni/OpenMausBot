@@ -107,6 +107,7 @@ export function speakable(input: string): string {
   // emoji and the pictographic ranges: a voice either ignores them or,
   // worse, announces them by name
   text = text.replace(
+    // oxlint-disable-next-line no-misleading-character-class -- variation selectors are stripped on their own, not as part of a grapheme
     /[\u{1F000}-\u{1FAFF}\u{2600}-\u{27BF}\u{FE00}-\u{FE0F}\u{2190}-\u{21FF}\u{2B00}-\u{2BFF}]/gu,
     "",
   );

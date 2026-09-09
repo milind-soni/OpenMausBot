@@ -4,7 +4,10 @@ const MAX_REPLY_EXCERPT = 900;
 
 export function replyExcerpt(text: string, limit = MAX_REPLY_EXCERPT): string {
   const clean = text
-    .replace(/<attached-image\s+path="[^"]*"\s*\/>/g, "[image]")
+    .replace(
+      /<attached-(image|file)\s+path="[^"]*"(?:\s+name="[^"]*")?\s*\/>/g,
+      (_tag, kind: "image" | "file") => kind === "image" ? "[image]" : "[file]",
+    )
     .replace(/\s+/g, " ")
     .trim();
   if (clean.length <= limit) return clean;

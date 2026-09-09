@@ -31,6 +31,37 @@ public enum Dictation {
         return "\(typed) \(spoken)"
     }
 
+    /// Merge a new formatted partial into the accumulated transcript.
+    ///
+    /// Partials for the same segment extend or revise the current text in
+    /// place. A fresh segment after a pause does not start with the previous
+    /// partial, so it is appended instead of replacing the accumulated text.
+    public static func updateTranscript(_ current: String, new: String) -> String {
+        let current = current.trimmingCharacters(in: .whitespacesAndNewlines)
+        let new = new.trimmingCharacters(in: .whitespacesAndNewlines)
+        if new.isEmpty { return current }
+        if current.isEmpty { return new }
+
+        // Same segment: the recognizer lengthened the current text.
+        if new.hasPrefix(current) { return new }
+
+        // Same segment with a brief backtrack: keep the longer version.
+        if current.hasPrefix(new) { return current }
+
+        // Same segment with a word-level revision: most leading words match.
+        let currentWords = current.split(separator: " ")
+        let newWords = new.split(separator: " ")
+        let commonWordCount = zip(currentWords, newWords)
+            .prefix(while: { $0.lowercased() == $1.lowercased() })
+            .count
+        if commonWordCount >= 2, commonWordCount * 2 >= currentWords.count {
+            return new
+        }
+
+        // New segment after a pause: append, separated by a space.
+        return draft(base: current, transcript: new)
+    }
+
     /// Locales to try, in order. First available recognizer wins.
     ///
     /// Preferred languages, then the current locale, then en-US as a last

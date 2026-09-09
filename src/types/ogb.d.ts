@@ -4,63 +4,6 @@ declare global {
 /** The package.json version, inlined by Vite's define at build time. */
 const __APP_VERSION__: string;
 
-type NativeSkillRecordingEvent = {
-  type: "app" | "click" | "scroll" | "key" | "typing" | "clipboard" | "download";
-  atMs: number;
-  app?: string;
-  windowTitle?: string;
-  x?: number;
-  y?: number;
-  button?: "left" | "right" | "other";
-  deltaY?: number;
-  keycode?: number;
-  meta?: boolean;
-  control?: boolean;
-  option?: boolean;
-  shift?: boolean;
-  /** Element identity for a click, from the accessibility tree. */
-  role?: string;
-  name?: string;
-  identifier?: string;
-  ancestry?: string[];
-  /** Typed keystroke count (never the characters themselves). */
-  keyCount?: number;
-  /** Clipboard action kind — never its contents. */
-  op?: "copy" | "cut" | "paste";
-  /** Downloaded file name and its origin URLs. */
-  filename?: string;
-  whereFroms?: string[];
-};
-
-type SkillRecordingPayload = {
-  name: string;
-  description: string;
-  durationMs: number;
-  transcript: string;
-  transcription?: { provider: "assemblyai"; model: string };
-  audio?: string;
-  events: Array<{
-    type: "app" | "click" | "scroll" | "shortcut" | "typing" | "clipboard" | "download";
-    atMs: number;
-    app?: string;
-    windowTitle?: string;
-    direction?: "up" | "down";
-    shortcut?: string;
-    keyCount?: number;
-    screenshot?: string;
-    /** Element identity for a click. */
-    role?: string;
-    name?: string;
-    identifier?: string;
-    ancestry?: string[];
-    /** Clipboard action kind — never its contents. */
-    op?: "copy" | "cut" | "paste";
-    /** Downloaded file name and its origin URLs. */
-    filename?: string;
-    whereFroms?: string[];
-  }>;
-};
-
   type DesktopCapabilities = {
     host: {
       platform: "darwin" | "linux" | "win32" | "other";
@@ -127,6 +70,13 @@ type SkillRecordingPayload = {
     code?: "load-failed" | "renderer-gone";
   }
 
+  interface DesktopRemoteClientState {
+    active: boolean;
+    endpoint?: string;
+    serverName?: string;
+    deviceId?: string;
+  }
+
   interface Window {
     ogb?: {
       platform: NodeJS.Platform;
@@ -145,12 +95,27 @@ type SkillRecordingPayload = {
       };
       getCapabilities(): Promise<DesktopCapabilities>;
       onCapabilitiesChanged(cb: (capabilities: DesktopCapabilities) => void): () => void;
+      remoteClient?: {
+        active: boolean;
+        state(): Promise<DesktopRemoteClientState>;
+        pair(endpoint: string, code: string): Promise<DesktopRemoteClientState>;
+        disconnect(): Promise<DesktopRemoteClientState>;
+      };
       companionAccount?: {
         state(): Promise<CompanionAccountState>;
         requestCode(email: string): Promise<CompanionAccountState>;
         verifyCode(email: string, code: string): Promise<CompanionAccountState>;
         retry(): Promise<CompanionAccountState>;
         signOut(): Promise<CompanionAccountState>;
+      };
+      /** Local-shell-only bridge for trusted approval-mode transitions. It is
+       * absent on remote server pages and in older desktop builds. */
+      approvals?: {
+        setMode(
+          botId: string,
+          mode: import("../../shared/approval-mode").ApprovalMode,
+          options?: { acknowledgeLocalAuto?: boolean },
+        ): Promise<import("../state/store").Bot>;
       };
       localControl: {
         status(): Promise<LinuxLocalControlStatus>;
@@ -176,19 +141,6 @@ type SkillRecordingPayload = {
         cb: (line: { partial?: boolean; text?: string; error?: string }) => void,
       ): () => void;
       onSpeechEnd(cb: (info: { code: number | null; reason?: string }) => void): () => void;
-      skillRecorder?: {
-        permissions(): Promise<{ supported: boolean; reason?: string }>;
-        start(): Promise<{ recording: boolean }>;
-        stop(): Promise<{ recording: boolean }>;
-        save(payload: SkillRecordingPayload): Promise<{ id: string; path: string; events: number }>;
-        onEvent(cb: (event: NativeSkillRecordingEvent) => void): () => void;
-        onEnd(cb: (info: { code: number | null; reason?: string }) => void): () => void;
-      };
-      transcription?: {
-        status(): Promise<{ configured: boolean }>;
-        setKey(value: string): Promise<{ configured: boolean }>;
-        streamingToken(): Promise<{ token: string; expiresInSeconds: number }>;
-      };
       /** Absolute path of a dropped File ("" when the drag carried no
        * file on disk). Absent in older builds of the shell. */
       getPathForFile?(file: File): string;
@@ -222,30 +174,6 @@ type SkillRecordingPayload = {
       };
       /** Two Local VM viewers embedded in one app window. URLs are accepted
        * only by main-process validation and never return over this bridge. */
-      /** The built-in browser surface; absent in a browser tab or an older shell. */
-      browser?: {
-        available(): Promise<boolean>;
-        state(botId: string): Promise<BrowserSurfaceState>;
-        layout(
-          botId: string,
-          bounds: DesktopWorkspaceBounds | null,
-          profile?: string,
-          mode?: "compact" | "expanded",
-          layoutOwner?: string,
-        ): Promise<BrowserSurfaceState>;
-        navigate(botId: string, url: string, profile?: string): Promise<{ url: string; title: string }>;
-        back(botId: string, profile?: string): Promise<{ url: string; title: string }>;
-        forward?(botId: string, profile?: string): Promise<{ url: string; title: string }>;
-        reload?(botId: string, profile?: string): Promise<{ url: string; title: string }>;
-        /** Immediately gates native browser mutations while the durable
-         * server-side human-control snapshot catches up. */
-        setHumanControl?(botId: string, held: boolean, profile?: string): Promise<boolean>;
-        /** Native page focus/input means the person has taken the wheel. */
-        onUserInteraction?(cb: (event: { botId: string; profile: string }) => void): () => void;
-        forgetProfile?(partitionId: string): Promise<{ dropped: number }>;
-        close(botId: string): Promise<boolean>;
-        onState(cb: (state: BrowserSurfaceState) => void): () => void;
-      };
       desktopWorkspace?: {
         open(input: {
           contextId: string;
@@ -273,7 +201,7 @@ type SkillRecordingPayload = {
       saveFile?(filePath: string): Promise<string | null>;
       /** Save a provider credential through Electron's OS-backed store. */
       setCredential?(
-        name: "composioApiKey" | "xaiApiKey" | "boxToken" | "opencodeGoApiKey" | "ttsKey" | "openaiImageApiKey",
+        name: "composioApiKey" | "xaiApiKey" | "boxToken" | "opencodeGoApiKey" | "ttsKey" | "openaiImageApiKey" | "customImageApiKey",
         value: string,
       ): Promise<ConfigStatus>;
       /** In-app auto-update (packaged app only; dormant in dev). onState
@@ -308,6 +236,8 @@ export interface UpdaterState {
     | "checking"
     | "available"
     | "downloading"
+    /** downloaded bytes are being staged by the native macOS updater */
+    | "preparing"
     | "downloaded"
     | "installing"
     /** the command is on the clipboard; the user finishes in a terminal */
@@ -316,6 +246,8 @@ export interface UpdaterState {
   version?: string;
   percent?: number;
   message?: string;
+  /** native work may still be running; recovery requires an app restart */
+  retryable?: boolean;
   /**
    * How the download gets applied. "restart" quits and installs in place;
    * "handoff" copies the install command and opens a terminal so the user

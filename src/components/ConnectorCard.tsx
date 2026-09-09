@@ -2,22 +2,25 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { Check, Loader2, PlugZap, RefreshCw, X } from "lucide-react";
 
 import { api, type Message } from "@/state/store";
+import { t } from "@/lib/i18n";
+import type { LocaleKey } from "@/locales";
 
 async function openConnectionPage(url: string) {
   if (window.ogb?.openExternal) {
     await window.ogb.openExternal(url);
-    return;
+    return true;
   }
   const opened = window.open("", "_blank");
-  if (!opened) throw new Error("Your browser blocked the connection page. Allow pop-ups, then try again.");
+  if (!opened) return false;
   opened.opener = null;
   opened.location.replace(url);
+  return true;
 }
 
 export function ConnectorCard({ botId, threadId, message }: { botId: string; threadId: string; message: Message }) {
   const connector = message.connector!;
   const [busy, setBusy] = useState(false);
-  const [localError, setLocalError] = useState<string | null>(null);
+  const [localError, setLocalError] = useState<string | { key: LocaleKey } | null>(null);
   const polling = useRef(false);
 
   const endpoint = `/api/bots/${encodeURIComponent(botId)}/connector-cards/${encodeURIComponent(message.id)}`;
@@ -61,7 +64,9 @@ export function ConnectorCard({ botId, threadId, message }: { botId: string; thr
         method: "POST",
         body: JSON.stringify({ threadId }),
       });
-      await openConnectionPage(String(result.url));
+      if (!await openConnectionPage(String(result.url))) {
+        setLocalError({ key: "connectors.card.popupBlocked" });
+      }
     } catch (error) {
       setLocalError(error instanceof Error ? error.message : String(error));
     } finally {
@@ -101,26 +106,26 @@ export function ConnectorCard({ botId, threadId, message }: { botId: string; thr
               <span className="truncate text-[14px] font-semibold text-ink">{connector.label}</span>
               {connected && (
                 <span className="flex items-center gap-1 rounded-full bg-success/15 px-2 py-0.5 text-[11px] font-medium text-success">
-                  <Check size={11} /> Connected
+                  <Check size={11} /> {t("connectors.card.connected")}
                 </span>
               )}
             </div>
             <p className="mt-0.5 text-[12.5px] leading-relaxed text-ink-secondary">
               {connected
                 ? connector.resumed
-                  ? "Connected securely. Your bot is continuing the task."
-                  : "Connected securely. Continue the paused task when you're ready."
+                  ? t("connectors.card.resumed")
+                  : t("connectors.card.paused")
                 : connector.description}
             </p>
             {!connected && (
               <p className="mt-1 text-[11.5px] text-ink-secondary/80">
-                Sign in or enter the app key on the secure connection page — never in chat.
+                {t("connectors.card.signInHint")}
               </p>
             )}
-            {error && <p className="mt-2 text-[12px] text-danger">{error}</p>}
+            {error && <p className="mt-2 text-[12px] text-danger">{typeof error === "string" ? error : t(error.key)}</p>}
           </div>
           {!connected && (
-            <button onClick={dismiss} aria-label="Not now" title="Not now" className="rounded-md p-1 text-ink-secondary hover:bg-control hover:text-ink">
+            <button onClick={dismiss} aria-label={t("connectors.card.notNow")} title={t("connectors.card.notNow")} className="rounded-md p-1 text-ink-secondary hover:bg-control hover:text-ink">
               <X size={15} />
             </button>
           )}
@@ -128,7 +133,11 @@ export function ConnectorCard({ botId, threadId, message }: { botId: string; thr
         <div className="flex items-center justify-between border-t border-hairline/40 bg-panel/40 px-4 py-2.5">
           <div className="flex items-center gap-1.5 text-[11.5px] text-ink-secondary">
             {authorizing ? <Loader2 size={12} className="animate-spin" /> : <PlugZap size={12} />}
-            {authorizing ? "Waiting for sign-in…" : connected ? "Ready to use" : "Requested by your bot"}
+            {authorizing
+              ? t("connectors.card.waiting")
+              : connected
+                ? t("connectors.card.readyToUse")
+                : t("connectors.card.requested")}
           </div>
           {!connected ? (
             <button
@@ -137,7 +146,11 @@ export function ConnectorCard({ botId, threadId, message }: { botId: string; thr
               className="flex items-center gap-1.5 rounded-lg bg-accent px-3 py-1.5 text-[12.5px] font-medium text-white hover:opacity-90 disabled:opacity-50"
             >
               {busy || authorizing ? <Loader2 size={13} className="animate-spin" /> : <PlugZap size={13} />}
-              {authorizing ? "Open again" : connector.status === "failed" ? "Try again" : "Connect securely"}
+              {authorizing
+                ? t("connectors.card.openAgain")
+                : connector.status === "failed"
+                  ? t("connectors.card.tryAgain")
+                  : t("connectors.card.connectSecurely")}
             </button>
           ) : !connector.resumed ? (
             <button
@@ -145,10 +158,10 @@ export function ConnectorCard({ botId, threadId, message }: { botId: string; thr
               disabled={busy}
               className="flex items-center gap-1.5 rounded-lg bg-accent px-3 py-1.5 text-[12.5px] font-medium text-white hover:opacity-90 disabled:opacity-50"
             >
-              {busy ? <Loader2 size={13} className="animate-spin" /> : <RefreshCw size={13} />} Continue task
+              {busy ? <Loader2 size={13} className="animate-spin" /> : <RefreshCw size={13} />} {t("connectors.card.continueTask")}
             </button>
           ) : (
-            <span className="flex items-center gap-1 text-[12px] font-medium text-success"><Check size={13} /> Continuing</span>
+            <span className="flex items-center gap-1 text-[12px] font-medium text-success"><Check size={13} /> {t("connectors.card.continuing")}</span>
           )}
         </div>
       </div>

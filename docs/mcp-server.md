@@ -29,6 +29,35 @@ Start OpenMausBot, then configure the MCP client to run:
 }
 ```
 
+Packaged desktop builds require a paired session for tools that create,
+change, send, switch, interrupt, or run anything. Read-only tools work on
+loopback without one. To authorize an external MCP client:
+
+1. In OpenMausBot, open **Settings → Phone → Set up a phone** and reveal the
+   one-time pairing code.
+2. Exchange it locally (remove spaces from the displayed code):
+
+   ```sh
+   curl -X POST http://127.0.0.1:8799/api/auth/pair \
+     -H 'content-type: application/json' \
+     --data '{"code":"YOUR-CODE","label":"Local MCP client"}'
+   ```
+
+   If the desktop selected a fallback port, replace `8799` with the port shown
+   in Settings. Copy the returned `token`; the pairing code is single-use.
+3. Pin that same port and token in the MCP configuration:
+
+   ```json
+   "env": {
+     "ELECTRON_RUN_AS_NODE": "1",
+     "OMB_PORT": "8799",
+     "OPENMAUSBOT_TOKEN": "omb_sess_..."
+   }
+   ```
+
+The paired client appears with phones under **Settings → Phone** and can be
+revoked there. Do not share the token or commit it to a repository.
+
 ## From the installed desktop app
 
 Release builds bundle `server/mcp-server.js` and can run it with Electron's embedded Node runtime, so users do
@@ -66,6 +95,8 @@ HTTP is rejected unless `ALLOW_INSECURE_HTTP=true`; HTTPS should be used outside
 `OPENMAUSBOT_TOKEN` is sent as a bearer token for authenticated reverse proxies. When a token is set, an
 explicit `OPENMAUSBOT_URL` or `OMB_PORT` is required so the credential is never sent while probing unrelated
 local ports. `OPENMAUSBOT_MCP_TIMEOUT_MS` can set an HTTP timeout between 1,000 and 120,000 milliseconds.
+In packaged builds, `OPENMAUSBOT_TOKEN` is required for mutating tools as
+described above; it is not a generic reverse-proxy secret.
 
 ## Tools
 

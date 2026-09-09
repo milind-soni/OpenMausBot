@@ -123,6 +123,18 @@ data class ToolActivity(
     val setup: Boolean? = null,
 )
 
+/**
+ * The thread an activity chip opened — "Opened thread #Title on Scout" — so
+ * the phone can go there. Newer computers only; a chip without one is just a
+ * receipt.
+ */
+@Serializable
+data class ThreadRef(
+    val botId: String,
+    val threadId: String,
+    val title: String,
+)
+
 @Serializable
 data class Sender(
     val botId: String,
@@ -150,6 +162,7 @@ data class Message(
     val text: String? = null,
     val card: OptionCard? = null,
     val tool: ToolActivity? = null,
+    val threadRef: ThreadRef? = null,
     val parentId: String? = null,
     val from: Sender? = null,
     val reactions: List<Reaction>? = null,
@@ -157,6 +170,17 @@ data class Message(
     val hasImage: Boolean? = null,
     val png: String? = null,
     val mime: String? = null,
+    /**
+     * A user line the engine took INTO the turn that was already running,
+     * rather than one that started a turn of its own.
+     */
+    val steered: Boolean? = null,
+    /**
+     * The steer-queue entry this user line drained from. It is how a client
+     * showing the held message knows which row to retire when the real line
+     * finally lands.
+     */
+    val queueId: String? = null,
 ) {
     @Serializable(with = MessageKindSerializer::class)
     enum class Kind { TEXT, OPTIONS, ACTIVITY, SCREEN, UNKNOWN }
@@ -195,10 +219,51 @@ object MessageRoleSerializer : KSerializer<Message.Role> {
 }
 
 @Serializable
-data class ModelSelection(val instanceId: String, val model: String)
+data class ModelSelection(
+    val instanceId: String,
+    val model: String,
+    /**
+     * Optional reasoning effort passed through to engines that support it.
+     * Older computers omit this field, which means the engine default — and a
+     * null here is *omitted* on the wire, never sent as `null`, so an old
+     * server's validator does not see a field it does not know.
+     */
+    val effort: String? = null,
+)
+
+/**
+ * The bot that opened a thread, on itself or on a teammate. Absent — which is
+ * every thread from an older computer — means the person opened it.
+ */
+@Serializable
+data class ThreadOpener(
+    val botId: String,
+    val name: String,
+    val delegationId: String? = null,
+    val at: Double,
+)
 
 @Serializable
-data class BotTask(val threadId: String, val title: String, val createdAt: Double)
+data class BotTask(
+    val threadId: String,
+    val title: String,
+    val createdAt: Double,
+    val modelSelection: ModelSelection? = null,
+    val activity: String? = null,
+    val busy: Boolean? = null,
+    val unread: Boolean? = null,
+    val approvalMode: String? = null,
+    val autoApprove: Boolean? = null,
+    val alwaysAllow: List<String>? = null,
+    val projectId: String? = null,
+    val openedBy: ThreadOpener? = null,
+    /** Bot-only internal execution. Keep it addressable, but out of thread pickers. */
+    val routineRunId: String? = null,
+)
+
+/** The thread list's quiet second line, worded as the desktop words it. */
+val BotTask.openedByLabel: String?
+    get() = openedBy?.let { "opened by ${it.name}" }
 
 @Serializable
 data class Bot(
@@ -215,11 +280,14 @@ data class Bot(
     val avatarUrl: String? = null,
     val avatarCrop: AvatarCrop? = null,
     val busy: Boolean? = null,
+    val activity: String? = null,
     val pinned: Boolean? = null,
     val hidden: Boolean? = null,
     /** Desktop sidebar section. Missing or blank means the built-in Bots area. */
     val section: String? = null,
     val chiefOfStaff: Boolean? = null,
+    /** ask, auto, full, or custom; null when paired to an older harness. */
+    val approvalMode: String? = null,
     val autoApprove: Boolean? = null,
     val alwaysAllow: List<String>? = null,
     val computer: String? = null,
@@ -237,6 +305,26 @@ data class Bot(
     val activeLeafId: String? = null,
     val hasMore: Boolean? = null,
 )
+
+/** Project only task-local controls; the original fleet record stays profile-global. */
+fun Bot.forTask(requestedThreadId: String): Bot? {
+    val task = tasks?.firstOrNull { it.threadId == requestedThreadId }
+    if (task == null) return takeIf { threadId == requestedThreadId }
+    val selected = threadId == requestedThreadId
+    return copy(
+        threadId = requestedThreadId,
+        modelSelection = task.modelSelection ?: modelSelection,
+        busy = task.busy ?: if (selected) busy else false,
+        activity = task.activity ?: if (selected) activity else null,
+        unread = task.unread ?: if (selected) unread else false,
+        approvalMode = task.approvalMode ?: task.autoApprove?.let { if (it) "auto" else "ask" } ?: approvalMode,
+        autoApprove = task.autoApprove ?: autoApprove,
+        alwaysAllow = task.alwaysAllow ?: alwaysAllow,
+        messages = if (selected) messages else null,
+        activeLeafId = if (selected) activeLeafId else null,
+        hasMore = if (selected) hasMore else null,
+    )
+}
 
 @Serializable(with = AvatarCropSerializer::class)
 enum class AvatarCrop { MASCOT, CIRCLE, ROUNDED, SQUARE }
@@ -314,7 +402,7 @@ object FleetSerializer : KSerializer<Fleet> {
 }
 
 @Serializable
-data class ThreadPage(val messages: List<Message>, val hasMore: Boolean? = null)
+data class ThreadPage(val messages: List<Message>, val hasMore: Boolean? = null, val activeLeafId: String? = null)
 
 @Serializable
 data class SearchHit(
@@ -517,8 +605,21 @@ data class Instance(
     val id: String get() = instanceId
 }
 
+/**
+ * The small, phone-safe part of an engine's capabilities. Missing capabilities
+ * or effort levels mean the engine offers no reasoning control.
+ */
 @Serializable
-data class InstanceCapabilities(val images: Boolean? = null)
+data class InstanceCapabilities(
+    val images: Boolean? = null,
+    val effortLevels: List<String>? = null,
+    /**
+     * The engine can take a message into a turn that is already running.
+     * Engines without it hold mid-turn sends until the turn settles, which is
+     * a different promise and deserves different words in the composer.
+     */
+    val queueing: Boolean? = null,
+)
 
 @Serializable
 data class InstanceList(val instances: List<Instance>)
@@ -976,3 +1077,18 @@ internal data class RoutineRunResponse(val run: RoutineRun)
 
 @Serializable
 internal data class ConnectorAuthorizationResponse(val url: String)
+
+@Serializable
+data class BotOverviewWho(val name: String, val title: String, val blurb: String, val soulLead: String)
+
+@Serializable
+data class BotOverviewRecent(val at: Double, val summary: String)
+
+@Serializable
+data class BotOverview(
+    val who: BotOverviewWho,
+    val does: List<String> = emptyList(),
+    val reaches: List<String> = emptyList(),
+    val wont: List<String> = emptyList(),
+    val recent: List<BotOverviewRecent> = emptyList(),
+)

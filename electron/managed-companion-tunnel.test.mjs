@@ -137,6 +137,21 @@ describe("managed companion credentials", () => {
 });
 
 describe("cloudflared binary resolution", () => {
+  it.each(["x64", "arm64"])("resolves the staged Linux %s connector for self-hosting", (arch) => {
+    const appPath = temporaryDirectory();
+    const staged = path.join(appPath, "dist-native", "cloudflared", `linux-${arch}`, "cloudflared");
+    expect(
+      resolveCloudflaredBinary({
+        isPackaged: false,
+        appPath,
+        platform: "linux",
+        arch,
+        environment: {},
+        exists: (candidate) => candidate === staged,
+      }),
+    ).toBe(staged);
+  });
+
   it("requires the bundled Resources binary in production", () => {
     const resourcesPath = path.join(
       path.parse(process.cwd()).root,

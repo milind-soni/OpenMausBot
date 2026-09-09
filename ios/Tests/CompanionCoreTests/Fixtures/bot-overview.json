@@ -1,0 +1,26 @@
+{
+  "who": {
+    "name": "Kiwi",
+    "title": "Tracker",
+    "blurb": "Files bugs.",
+    "soulLead": "File bugs."
+  },
+  "does": [
+    "Every 5 minutes: Triage Discord. Next run 9:11 PM."
+  ],
+  "reaches": [
+    "Computer preference: Auto; availability is checked when a task starts.",
+    "Works in its private workspace."
+  ],
+  "wont": [
+    "Command approvals use Ask mode; saved permissions and provider rules still apply.",
+    "Has no connected apps.",
+    "Profile proposal cards require your approval."
+  ],
+  "recent": [
+    {
+      "at": 1788642361925,
+      "summary": "soul: 0 → 29 bytes"
+    }
+  ]
+}

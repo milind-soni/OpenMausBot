@@ -13,8 +13,10 @@ passphrase, and never runs an agent remotely.
 - Explicit **Cloud** with the **Self-hosted VPS** backend provisions or starts the container. **Auto** reuses
   a ready container by default; an off-by-default **Start VPS automatically** switch lets that bot prepare
   or wake its managed container when needed.
-- Interactive **Take control** through a temporary SSH tunnel. The app binds noVNC only to a random
-  `127.0.0.1` port on your computer, closes the tunnel with the viewer, and never publishes VNC on the VPS.
+- Interactive **Take control** locally or from a paired desktop client. The host binds noVNC only to a random
+  `127.0.0.1` port, closes the tunnel with the viewer, and never publishes VNC on the VPS. A paired client
+  receives a short-lived, device-scoped relay through managed HTTPS or Tailscale only after **Cloud desktop
+  access** is enabled for that device on the host.
 
 ## Prerequisites
 

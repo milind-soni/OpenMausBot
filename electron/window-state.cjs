@@ -1,5 +1,5 @@
-const DEFAULT_BOUNDS = Object.freeze({ width: 1440, height: 920 });
-const MIN_BOUNDS = Object.freeze({ width: 900, height: 600 });
+const DEFAULT_BOUNDS = Object.freeze({ width: 1100, height: 780 });
+const MIN_BOUNDS = Object.freeze({ width: 840, height: 620 });
 
 const integer = (value) => Number.isFinite(value) && Number.isInteger(value);
 const clamp = (value, min, max) => Math.min(Math.max(value, min), max);

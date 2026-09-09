@@ -10,16 +10,21 @@ import { build } from "esbuild";
 import { createRequire } from "node:module";
 import { readFile, writeFile } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
-import { dirname, join } from "node:path";
+import { dirname, join, sep } from "node:path";
 
 import { patchAppImageUpdater } from "./patch-appimage-updater.mjs";
+import { patchMacUpdater } from "./patch-mac-updater.mjs";
 
 const require = createRequire(import.meta.url);
 const root = join(dirname(fileURLToPath(import.meta.url)), "..");
 const outfile = join(root, "electron/vendor/electron-updater.cjs");
+const entryPoint = require.resolve("electron-updater");
 
 await build({
-  entryPoints: [require.resolve("electron-updater")],
+  entryPoints: [entryPoint],
+  // Keep source labels reproducible when an isolated worktree reuses the
+  // identical node_modules tree through a symlink.
+  absWorkingDir: entryPoint.split(`${sep}node_modules${sep}`)[0],
   bundle: true,
   platform: "node",
   target: "node20",
@@ -31,5 +36,5 @@ await build({
 
 // Throws when upstream's shape moved, so a bundle that would silently break
 // AppImage launchers never reaches a release.
-await writeFile(outfile, patchAppImageUpdater(await readFile(outfile, "utf8")));
-console.log("patched AppImage install to overwrite in place");
+await writeFile(outfile, patchMacUpdater(patchAppImageUpdater(await readFile(outfile, "utf8"))));
+console.log("patched AppImage replacement and native Mac staging readiness");

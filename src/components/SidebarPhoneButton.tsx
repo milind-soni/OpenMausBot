@@ -1,7 +1,8 @@
 import { useEffect, useState } from "react";
-import { Plus, Smartphone } from "lucide-react";
+import { Plus, TabletSmartphone } from "lucide-react";
 
 import { cn } from "@/lib/cn";
+import { t } from "@/lib/i18n";
 import type { Action } from "@/state/store";
 import type { SidebarDensity } from "@/lib/sidebar-preferences";
 import { companionBridge, type CompanionState } from "./PhoneSetupFlow";
@@ -38,17 +39,17 @@ export function deriveSidebarPhoneStatus(
   now: number,
 ): SidebarPhoneStatus {
   if (snapshot === undefined) {
-    return { kind: "checking", label: "Checking phone status", pairedCount: 0, connectedCount: 0 };
+    return { kind: "checking", label: t("sidebar.phone.checking"), pairedCount: 0, connectedCount: 0 };
   }
   if (snapshot === null) {
-    return { kind: "unavailable", label: "Phone status unavailable", pairedCount: 0, connectedCount: 0 };
+    return { kind: "unavailable", label: t("sidebar.phone.unavailable"), pairedCount: 0, connectedCount: 0 };
   }
 
   const pairedCount = snapshot.devices.length;
   if (snapshot.error) {
     return {
       kind: "unavailable",
-      label: "Phone status unavailable",
+      label: t("sidebar.phone.unavailable"),
       pairedCount,
       connectedCount: 0,
     };
@@ -56,13 +57,13 @@ export function deriveSidebarPhoneStatus(
   if (!snapshot.enabled) {
     return {
       kind: "unavailable",
-      label: "Phone access off",
+      label: t("sidebar.phone.off"),
       pairedCount,
       connectedCount: 0,
     };
   }
   if (!pairedCount) {
-    return { kind: "unpaired", label: "Pair a phone", pairedCount: 0, connectedCount: 0 };
+    return { kind: "unpaired", label: t("sidebar.phone.pair"), pairedCount: 0, connectedCount: 0 };
   }
 
   if (Array.isArray(snapshot.connectedDeviceIds)) {
@@ -70,15 +71,18 @@ export function deriveSidebarPhoneStatus(
     const connectedCount = snapshot.devices.filter((device) => live.has(device.id)).length;
     if (connectedCount) {
       const label = pairedCount === 1
-        ? "Phone connected"
+        ? t("sidebar.phone.connectedOne")
         : connectedCount === pairedCount
-          ? `${pairedCount} phones connected`
-          : `${connectedCount} of ${pairedCount} phones connected`;
+          ? t("sidebar.phone.connectedAll", { count: pairedCount })
+          : t("sidebar.phone.connectedSome", { connected: connectedCount, count: pairedCount });
       return { kind: "connected", label, pairedCount, connectedCount };
     }
     return {
       kind: "disconnected",
-      label: pairedCount === 1 ? "Phone paired — not connected" : `${pairedCount} phones paired — none connected`,
+      label:
+        pairedCount === 1
+          ? t("sidebar.phone.disconnectedOne")
+          : t("sidebar.phone.disconnectedMany", { count: pairedCount }),
       pairedCount,
       connectedCount: 0,
     };
@@ -92,18 +96,18 @@ export function deriveSidebarPhoneStatus(
   }).length;
   if (recentCount) {
     const label = pairedCount === 1
-      ? "Phone active recently"
+      ? t("sidebar.phone.recentOne")
       : recentCount === pairedCount
-        ? `${pairedCount} phones active recently`
-        : `${recentCount} of ${pairedCount} phones active recently`;
+        ? t("sidebar.phone.recentAll", { count: pairedCount })
+        : t("sidebar.phone.recentSome", { recent: recentCount, count: pairedCount });
     return { kind: "recent", label, pairedCount, connectedCount: 0 };
   }
 
   return {
     kind: "stale",
     label: pairedCount === 1
-      ? "Phone paired — not recently active"
-      : `${pairedCount} phones paired — none recently active`,
+      ? t("sidebar.phone.staleOne")
+      : t("sidebar.phone.staleMany", { count: pairedCount }),
     pairedCount,
     connectedCount: 0,
   };
@@ -177,7 +181,7 @@ export function SidebarPhoneStatusButton({
         connected ? "text-success" : "text-ink-secondary hover:text-ink",
       )}
     >
-      <Smartphone size={18} strokeWidth={1.8} />
+      <TabletSmartphone size={18} strokeWidth={1.8} />
       {status.kind === "unpaired" && (
         <span
           aria-hidden="true"

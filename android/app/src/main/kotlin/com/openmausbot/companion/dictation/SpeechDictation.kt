@@ -332,14 +332,14 @@ class SpeechDictation internal constructor(
         override fun onPartial(text: String) {
             synchronized(lock) {
                 if (!live() || !_isListening.value) return
-                _transcript.value = text
+                _transcript.value = Dictation.updateTranscript(_transcript.value, text)
             }
         }
 
         override fun onFinal(text: String) {
             synchronized(lock) {
                 if (!live() || !_isListening.value) return
-                if (text.isNotEmpty()) _transcript.value = text
+                if (text.isNotEmpty()) _transcript.value = Dictation.updateTranscript(_transcript.value, text)
                 // Composer dictation does not wait for a later final beyond
                 // this — matching iOS stopping when the recognizer finalizes.
                 stopLocked()

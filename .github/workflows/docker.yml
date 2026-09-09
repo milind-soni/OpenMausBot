@@ -1,6 +1,9 @@
 name: Docker image
 
 on:
+  # release.yml dispatches this on the tag it just published: a tag created
+  # with the workflow token never fires push events on its own.
+  workflow_dispatch:
   push:
     branches: [main]
     tags: ["v*"]
@@ -44,6 +47,13 @@ jobs:
           # the renderer is served by the server itself (OMB_STATIC_DIR)
           docker exec omb curl -sf http://127.0.0.1:8799/ | grep -qi "<html" || { docker logs omb; echo "UI not served"; exit 1; }
           docker logs omb | tail -5
+      - name: Prove the non-root user can browse with the baked-in Chrome
+        run: |
+          set -euo pipefail
+          test "$(docker exec omb id -un)" = maus
+          timeout 45 docker exec omb agent-browser --session ci-browser open 'data:text/html,<title>OMB browser smoke</title><h1>Browser ready</h1>'
+          timeout 15 docker exec omb agent-browser --session ci-browser get title | grep -Fx 'OMB browser smoke'
+          timeout 15 docker exec omb agent-browser --session ci-browser close
       - name: Prove the server never binds a public interface
         # The loopback-trust model is the auth model, so the image must keep
         # the server unreachable from the container's own network. Probe from a
@@ -85,8 +95,9 @@ jobs:
           body() { curl -sk --max-time 10 "$@"; }
           H=https://localhost
           grep -q '"environmentId"' <<<"$(body $H/.well-known/openmausbot/environment)"   # descriptor is public
-          test "$(code $H/api/health)" = 403                                      # nothing else before pairing
-          grep -q 'pair this device' <<<"$(body $H/api/health)"
+          grep -q '^{"app":"openmausbot"}$' <<<"$(body $H/api/health)"             # the probe is public, and says only the app name
+          test "$(code $H/api/bots)" = 403                                        # nothing else before pairing
+          grep -q 'pair this device' <<<"$(body $H/api/bots)"
           grep -qi '<html' <<<"$(body $H/pair)"                                    # the UI shell is served so /pair can load
           test "$(code http://localhost/)" = 308                                   # HTTP redirects to HTTPS
           pairing=$(docker compose -f deploy/docker-compose.yml exec -T omb node dist-server/pair-cli.js --label ci)
@@ -110,13 +121,15 @@ jobs:
           sse=$( (curl -sk -b "$jar" -N --max-time 4 $H/api/events || true) | head -c 64 )
           test -n "$sse"                                                           # SSE streams, not buffered
           grep -q '"baseUrl":"https://localhost"' <<<"$(body -b "$jar" $H/api/webhooks)"   # OMB_WEBHOOK_PUBLIC_URL is advertised
-          test "$(code $H/api/health)" = 403                                      # and without the cookie it is still closed
+          test "$(code $H/api/bots)" = 403                                        # and without the cookie it is still closed
           docker compose -f deploy/docker-compose.yml down -v
 
   publish:
     name: publish to GHCR
     needs: build-and-smoke
-    if: github.event_name == 'push'
+    # Release dispatches on its published tag because GITHUB_TOKEN-created
+    # tags do not start another workflow. A manual branch run is smoke-only.
+    if: github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && startsWith(github.ref, 'refs/tags/v'))
     runs-on: ubuntu-latest
     permissions:
       contents: read

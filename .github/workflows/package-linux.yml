@@ -82,6 +82,8 @@ jobs:
           sudo chown root:root release/linux-unpacked/chrome-sandbox
           sudo chmod 4755 release/linux-unpacked/chrome-sandbox
           test "$(stat -c '%U:%G %a' release/linux-unpacked/chrome-sandbox)" = "root:root 4755"
+      - name: Verify the installed browser with Ubuntu sandbox restrictions
+        run: node scripts/smoke-browser-bundle.mjs --resources /opt/OpenMausBot/resources
       - name: Launch packaged app and verify lifecycle
         env:
           OMB_KEEP_SMOKE_DIR: "1"

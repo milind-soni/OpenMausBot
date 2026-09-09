@@ -1,14 +1,27 @@
 // Auto mode: when a bot may answer its own permission requests.
 //
-// Two ways in — the bot is in auto mode, or the user pressed "Always
-// allow" for that one tool — and one way out: anything that reads as
-// destructive stops and asks a human anyway.
+// Safe Auto and remembered grants stop at the destructive/sensitive and
+// unattended boundaries below. Full access is a separate, explicitly
+// acknowledged mode: it answers every permission request, including those
+// guards, while questions remain outside this module and always reach a human.
 //
 // The guard is deliberately tiny and literal. It is NOT a security
 // boundary (an agent set on damage has a thousand spellings for `rm`);
 // it is a "you probably didn't mean to hand THIS one over unattended"
 // backstop for the obvious catastrophes. Real containment is the
 // sandbox and the bot's own computer, not a regex.
+
+import { approvalModeFor, type ApprovalMode } from "../shared/approval-mode.ts";
+
+/** Full access is the person's explicit grant to this receiving bot, including
+ * delegated work. It never inherits the sender's mode or elevates another bot.
+ * Custom is a provider-config choice rather than an app Full-access grant, so
+ * peer-started Custom turns still use Auto and its unattended downgrade.
+ * Provider support and grant confirmation are checked by the caller. */
+export function approvalModeForOrigin(mode: ApprovalMode, origin: { peerInitiated: boolean }): ApprovalMode {
+  if (mode === "custom" && origin.peerInitiated) return "auto";
+  return mode;
+}
 
 const DESTRUCTIVE = [
   /\brm\s+(-[a-z]*\s+)*-[a-z]*[rf]/i, // rm -rf, rm -fr, rm -r -f
@@ -72,6 +85,7 @@ export function approvalKey(tool: string, summary: string, scope?: "local-comput
 
 export interface AutoApprover {
   autoApprove?: boolean;
+  approvalMode?: ApprovalMode;
   alwaysAllow?: string[];
 }
 
@@ -81,11 +95,40 @@ export interface AutoApprover {
 export type AutoVerdictSource =
   | "always-allow"
   | "auto-mode"
+  | "full-access"
+  | "native-approval"
+  | "explicit-approval-block"
   | "unattended-block"
   | "local-computer-block"
   | "destructive-guard"
   | "sensitive-guard"
   | "no-grant";
+
+/** A durable "Always allow" choice is offered only when that exact grant
+ * would be honored on the next identical request. Custom delegates approval
+ * semantics to config.toml, while guards and provider-sandbox changes are
+ * intentionally never bypassed by remembered app grants. */
+export function rememberableApprovalKey(
+  bot: AutoApprover | null | undefined,
+  tool: string,
+  summary: string,
+  context: {
+    source: AutoVerdictSource | undefined;
+    scope?: "local-computer";
+    requiresExplicitApproval?: boolean;
+  },
+): string | undefined {
+  if (
+    !bot ||
+    approvalModeFor(bot) === "custom" ||
+    context.source !== "no-grant" ||
+    context.scope ||
+    context.requiresExplicitApproval
+  ) {
+    return undefined;
+  }
+  return approvalKey(tool, summary, context.scope);
+}
 
 export interface AutoVerdict {
   /** Chip text when the bot may answer itself, null when a human decides.
@@ -110,10 +153,31 @@ export function autoVerdict(
   context?: {
     /** the turn was started by an outside event, with nobody at the keyboard */
     unattended?: boolean;
+    /** Respect the native reviewer (including a provider with no Auto mode). */
+    nativeApproval?: boolean;
     /** the request controls the user's active desktop */
     scope?: "local-computer";
+    /** The provider is asking to widen its configured sandbox rather than
+     * perform one ordinary action. Only explicit Full may synthesize this. */
+    requiresExplicitApproval?: boolean;
   },
 ): AutoVerdict {
+  const mode = approvalModeFor(bot);
+  if (context?.nativeApproval) return { approve: null, source: "native-approval" };
+  // This branch intentionally precedes every guard. Entering Full access is
+  // separately consent-gated by the bot PATCH endpoint, and its promise is
+  // literal: even destructive, sensitive, unattended, and host-computer
+  // permission requests are approved. The request.opened caller invokes this
+  // function for permissions only, never for provider questions.
+  if (mode === "full") {
+    return {
+      approve: `approved ${tool} (full access)`,
+      source: "full-access",
+    };
+  }
+  if (context?.requiresExplicitApproval) {
+    return { approve: null, source: "explicit-approval-block" };
+  }
   // the guards outrank the grants, so an "always allow" can never widen
   // into them
   const destructive = matchFirst(DESTRUCTIVE, summary) ?? matchFirst(DESTRUCTIVE, tool);
@@ -126,9 +190,9 @@ export function autoVerdict(
   const grant =
     destructive || sensitive
       ? null
-      : bot.alwaysAllow?.includes(key)
+      : mode !== "custom" && bot.alwaysAllow?.includes(key)
         ? { approve: `auto-approved ${key} (always allowed)`, source: "always-allow" as const, rule: key }
-        : bot.autoApprove
+        : mode === "auto"
           ? { approve: `auto-approved ${tool}`, source: "auto-mode" as const, rule: undefined }
           : null;
   if (context?.unattended) {
@@ -144,7 +208,7 @@ export function autoVerdict(
     if (sensitive) return { approve: null, source: "sensitive-guard", rule: sensitive };
     return { approve: null, source: "no-grant" };
   }
-  if (context?.scope === "local-computer" && !bot.autoApprove) {
+  if (context?.scope === "local-computer" && mode !== "auto") {
     // Host control is not covered by a remembered always-allow grant.
     // After the Auto-on-this-computer warning, unclassified GUI actions
     // (click/type) may auto-approve; destructive/sensitive still card.
@@ -169,7 +233,94 @@ export function autoDecision(
     unattended?: boolean;
     /** the request controls the user's active desktop */
     scope?: "local-computer";
+    requiresExplicitApproval?: boolean;
   },
 ): string | null {
   return autoVerdict(bot, tool, summary, context).approve;
+}
+
+/** The note a card shows above its buttons, explaining why the bot stopped
+ * rather than answering for itself.
+ *
+ * The unattended case is the one users misread. A turn a webhook or another
+ * bot started never runs Auto at all — approvalModeForTurn downgrades it to
+ * Ask before the provider spawns — so "this action needs you" would name the
+ * wrong cause and imply the next action might pass. It will not: with a fleet
+ * delegating between bots, every card looks like this until someone answers.
+ * Say that plainly, and name the mode that keeps running. */
+export function approvalHeldReason(context: {
+  /** Native and sandbox notes outrank any mode explanation, so a provider's
+   * own remaining checks are never described as something Full access skips. */
+  source?: AutoVerdictSource;
+  /** Questions are not permissions and are never held for a mode reason. */
+  permission: boolean;
+  requiresExplicitApproval?: boolean;
+  /** Origin-adjusted mode, before unattended Auto is downgraded to Ask. */
+  mode: ApprovalMode;
+  unattended: boolean;
+  /** Suppress the Full access hint on providers that cannot offer it. */
+  fullAccessAvailable: boolean;
+}): string | undefined {
+  const key = approvalHeldNote(context);
+  return key && HELD_NOTE[key];
+}
+
+/** Every fixed note a held card can show, by catalog key.
+ *
+ * The card is the last thing between a bot and someone's filesystem, so the
+ * one line explaining why it stopped should not be the one line still in
+ * English. The client translates by key and falls back to this text, which
+ * the server keeps sending: cards saved before the key existed still render,
+ * and so do the free-text apply errors that have no key at all.
+ *
+ * The unattended hint is a whole second sentence rather than a suffix. A
+ * translator needs the sentence, not two halves to reassemble. */
+export const HELD_NOTE = {
+  "approval.held.native": "The provider requires your approval for this action.",
+  "approval.held.sandbox":
+    "This changes the provider sandbox, so only Full access can approve it automatically.",
+  "approval.held.localComputer":
+    "Controlling your computer is never covered by Always allow, so this needs you.",
+  "approval.held.unattended":
+    "A webhook or another bot started this turn, so Approve for me is paused and every action asks.",
+  "approval.held.unattendedFullAccess":
+    "A webhook or another bot started this turn, so Approve for me is paused and every action asks. Full access keeps working unattended.",
+  "approval.held.destructive": "This looks destructive, so Approve for me stopped to ask.",
+  "approval.held.sensitive": "This touches credentials, so Approve for me stopped to ask.",
+  "approval.held.needsYou": "This action needs you, so Approve for me stopped to ask.",
+  "approval.held.undeliveredFull": "Full access couldn't deliver this approval.",
+  "approval.held.undelivered": "Approve for me couldn't answer this one.",
+} as const;
+
+export type HeldNoteKey = keyof typeof HELD_NOTE;
+
+/** Which note, as a key. approvalHeldReason is this plus the English text, so
+ * the branching that decides the note lives in exactly one place. */
+export function approvalHeldNote(context: {
+  source?: AutoVerdictSource;
+  permission: boolean;
+  requiresExplicitApproval?: boolean;
+  mode: ApprovalMode;
+  unattended: boolean;
+  fullAccessAvailable: boolean;
+}): HeldNoteKey | undefined {
+  if (context.source === "native-approval") return "approval.held.native";
+  if (!context.permission) return undefined;
+  if (context.requiresExplicitApproval) return "approval.held.sandbox";
+  // Host control reaches this only over a grant that would otherwise have
+  // fired, in a mode that explains nothing else. "I pressed Always allow and
+  // it asked anyway" is the whole confusion, so answer that and not the mode.
+  if (context.source === "local-computer-block") return "approval.held.localComputer";
+  if (context.mode !== "auto") return undefined;
+  if (context.unattended) {
+    return context.fullAccessAvailable
+      ? "approval.held.unattendedFullAccess"
+      : "approval.held.unattended";
+  }
+  // A guard names itself. Both stop the same mode, but one is about damage
+  // and the other about secrets, and a read-only .env card that says
+  // "destructive" teaches people to stop reading these.
+  if (context.source === "destructive-guard") return "approval.held.destructive";
+  if (context.source === "sensitive-guard") return "approval.held.sensitive";
+  return "approval.held.needsYou";
 }

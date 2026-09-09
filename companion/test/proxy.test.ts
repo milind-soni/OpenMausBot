@@ -365,6 +365,12 @@ describe("the sidecar in front of an unmodified harness", () => {
     expect(filed.body.bots.map((bot: { id: string }) => bot.id)).toEqual([first.id, second.id]);
     expect(filed.body.bots.every((bot: { section?: string }) => bot.section === "Mobile")).toBe(true);
 
+    const cleared = await device("POST", "/api/sidebar-sections", {
+      body: { name: "", botIds: [first.id] },
+    });
+    expect(cleared.status).toBe(200);
+    expect(cleared.body.bots[0].section).toBeUndefined();
+
     const smuggled = await device("POST", "/api/sidebar-sections", {
       body: { name: "Unsafe", botIds: [first.id], autoApprove: true },
     });

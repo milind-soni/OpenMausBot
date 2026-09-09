@@ -11,13 +11,30 @@ export interface CommsBus {
   store: Store;
   /** SSE broadcast (kind: "message" envelope). */
   broadcast: (payload: Record<string, unknown>) => void;
-  /** SSE broadcast (kind: "group" envelope) for a single group. */
+  /** Whether the bot can start one more direct thread right now. A bot runs
+   * several threads at once, so "busy" is not "full": a fresh-thread handoff
+   * asks this instead of the bot's busy flag. Absent (tests) = busy flag. */
+  threadSlotFree?: (botId: string) => boolean;
 }
 
-/** Find or create the bot⇄bot channel for the pair. The channel keeps
- * the pair's full exchange, lives in the sidebar like any room, and the
- * user can open it to chip in. */
-export function getOrCreateChannel(store: Store, from: BotRecord, target: BotRecord): GroupRecord {
+/** Find or create the channel for a peer exchange. When an originating
+ * group is supplied and both bots are members, the exchange is mirrored
+ * back into that group. Otherwise the pair's DM is used (creating it if
+ * necessary) so 1:1-bot-thread delegations keep their historical fallback. */
+export function getOrCreateChannel(
+  store: Store,
+  from: BotRecord,
+  target: BotRecord,
+  originatingGroup?: GroupRecord,
+): GroupRecord {
+  if (
+    originatingGroup &&
+    !originatingGroup.dm &&
+    originatingGroup.memberIds.includes(from.id) &&
+    originatingGroup.memberIds.includes(target.id)
+  ) {
+    return originatingGroup;
+  }
   const existing = store.dmGroup(from.id, target.id);
   if (existing) {
     if (sectionKey(existing.section) !== sectionKey(from.section)) {
@@ -28,11 +45,29 @@ export function getOrCreateChannel(store: Store, from: BotRecord, target: BotRec
   return store.createGroup(`${from.name} ⇄ ${target.name}`, [from.id, target.id], true, from.section);
 }
 
-/** Mirror `from`'s outgoing message into the channel, drop chips into
- * both 1:1 threads linking to the channel, and bump the channel's unread
- * count. The chips are what make bot-to-bot turns observable — those
- * turns cost the user tokens, and a hidden exchange is exactly the kind
- * of mistake peer coordination is supposed to avoid. */
+/** Whether this mirror is worth a badge, and the group frame either way.
+ *
+ * A pair channel is the bots' own coordination: the person asked ONE bot,
+ * and the hops behind its answer are that bot's work, not mail addressed to
+ * them. Badging every hop turned the sidebar, the dock and the phone into a
+ * running commentary on chatter nobody asked to watch. What is NOT withheld
+ * is the record — the messages and chips above are already written, and the
+ * frame still goes out so the channel keeps its place in every client's
+ * list. Hidden bot-to-bot talk is where a prompt injection would propagate
+ * unobserved; silence the alert, never the record. A shared room is the
+ * other case: people are reading it, so it badges as it always has. */
+function markMirrored(bus: CommsBus, channel: GroupRecord, notify: boolean | undefined): void {
+  const patch: Partial<Pick<GroupRecord, "unread">> = {};
+  if (notify ?? !channel.dm) patch.unread = true;
+  bus.store.patchGroup(channel.id, patch);
+}
+
+/** Mirror `from`'s outgoing message into the channel and drop chips into
+ * both 1:1 threads linking to the channel. The chips are what make
+ * bot-to-bot turns observable — those turns cost the user tokens, and a
+ * hidden exchange is exactly the kind of mistake peer coordination is
+ * supposed to avoid. `notify` decides only whether the channel also raises
+ * a badge; it defaults to off for a bot⇄bot pair channel. */
 export function mirrorExchange(
   bus: CommsBus,
   from: BotRecord,
@@ -40,6 +75,7 @@ export function mirrorExchange(
   message: string,
   channel: GroupRecord | undefined,
   sourceThreadId = from.threadId,
+  notify?: boolean,
 ): void {
   const note = (threadId: string, m: Omit<Message, "id" | "at">) => {
     bus.store.appendMessage(threadId, m);
@@ -69,9 +105,7 @@ export function mirrorExchange(
       ? { groupId: channel.id, withBotId: from.id, withName: from.name, withColor: from.color }
       : undefined,
   });
-  if (channel) {
-    bus.store.patchGroup(channel.id, { unread: true });
-  }
+  if (channel) markMirrored(bus, channel, notify);
 }
 
 /** Mirror `target`'s reply into the channel so the channel stays the
@@ -82,6 +116,7 @@ export function mirrorReply(
   target: BotRecord,
   reply: string,
   channel: GroupRecord | undefined,
+  notify?: boolean,
 ): void {
   if (!channel || !reply.trim()) return;
   bus.store.appendMessage(channel.threadId, {
@@ -90,7 +125,7 @@ export function mirrorReply(
     text: reply,
     from: { botId: target.id, name: target.name, color: target.color },
   });
-  bus.store.patchGroup(channel.id, { unread: true });
+  markMirrored(bus, channel, notify);
 }
 
 /** Mirror a terminal activity note into the channel — for async handoffs
@@ -104,6 +139,7 @@ export function mirrorActivity(
   channel: GroupRecord | undefined,
   name: string,
   ok: boolean,
+  notify?: boolean,
 ): void {
   if (!channel) return;
   bus.store.appendMessage(channel.threadId, {
@@ -112,5 +148,5 @@ export function mirrorActivity(
     tool: { name, ok },
     from: { botId: from.id, name: from.name, color: from.color },
   });
-  bus.store.patchGroup(channel.id, { unread: true });
+  markMirrored(bus, channel, notify);
 }

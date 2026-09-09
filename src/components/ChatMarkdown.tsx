@@ -7,10 +7,31 @@
 // fence is very likely complete), then highlights and caches — so the settled
 // bubble, a fresh component instance, mounts straight from cache instead of
 // popping from plain to highlighted.
-import { memo, useEffect, useState, type ReactNode } from "react";
-import Markdown from "react-markdown";
+//
+// Bidi: message text is written in the user's or the model's language, which
+// is independent of the UI language, so every block resolves its own
+// direction from its own first strong character — one Arabic paragraph reads
+// right-to-left while the English one under it does not. Code is the
+// exception: fenced blocks and inline spans pin dir="ltr" and isolate
+// themselves, so a snippet never reorders and never scrambles the RTL
+// sentence holding it.
+import { memo, useEffect, useRef, useState, type ReactNode } from "react";
+import Markdown, { defaultUrlTransform } from "react-markdown";
 import remarkGfm from "remark-gfm";
-import { Check, Copy } from "lucide-react";
+import { Check, Copy, Download, LoaderCircle, RotateCcw, WrapText } from "lucide-react";
+import { remarkMentions, type MentionPeer } from "@/lib/mentions";
+
+import {
+  countLines,
+  downloadSnippetFile,
+  formatLineCount,
+  getLanguageDisplayName,
+  getSnippetFileName,
+} from "../lib/code-block";
+import { repairMarkdownTables } from "../lib/markdown-tables";
+import { remarkThreadRefs } from "../lib/thread-refs";
+import { MarkdownImagePreview, useLocalFileSave, type MessageAttachmentContext } from "./AttachmentPreview";
+import { ThreadLink, threadLinkFromProps, useThreadRefs } from "./ThreadRefs";
 
 // tiny highlight cache so revisiting a thread doesn't re-tokenize settled
 // blocks; keys are content-hashed and capped. Streamed partials may land here
@@ -39,27 +60,143 @@ const hash = (s: string) => {
 // where a file:// URL's pathname also arrives as "/C:/…".
 const WINDOWS_PATH = /^[a-zA-Z]:[\\/]/;
 const absolutePath = (value: string): string | null => {
-  if (value.startsWith("/") && WINDOWS_PATH.test(value.slice(1))) return value.slice(1);
   if (value.startsWith("/") || WINDOWS_PATH.test(value)) return value;
   return null;
 };
 
-const localFilePath = (href?: string): string | null => {
+export const localFilePath = (href?: string): string | null => {
   if (!href) return null;
   // URL schemes are case-insensitive, so FILE:// is as valid as file://
   if (/^file:\/\//i.test(href)) {
     try {
-      return absolutePath(decodeURIComponent(new URL(href).pathname));
+      const url = new URL(href);
+      if (url.username || url.password || url.port || url.search || url.hash) return null;
+      const path = decodeURIComponent(url.pathname);
+      if (url.hostname && url.hostname !== "localhost") return `//${url.hostname}${path}`;
+      // WHATWG file URLs spell a Windows drive as /C:/ on every host. Only
+      // strip that sentinel for an actual file URL: a raw /C:/... Markdown
+      // target is a distinct POSIX path and must retain its identity.
+      return /^\/[a-z]:[\\/]/i.test(path) ? path.slice(1) : absolutePath(path);
     } catch {
       return null;
     }
   }
-  return absolutePath(href);
+  if (href.startsWith("\\\\")) return href;
+  // Forward-slash //host/path is a protocol-relative web URL in Markdown.
+  // UNC remains available through backslashes or file://server/share.
+  if (href.startsWith("//")) return null;
+  const absolute = absolutePath(href);
+  if (absolute) return absolute;
+  if (href.startsWith("#") || /^[a-z][a-z\d+.-]*:/i.test(href)) return null;
+  return href;
 };
 
-function CodeBlock({ code, lang, streaming }: { code: string; lang: string; streaming: boolean }) {
+/** Keep only the local URL spellings our message-scoped file renderer knows
+ * about; all ordinary links still use react-markdown's protocol allow-list. */
+export function chatUrlTransform(value: string): string {
+  if (/^file:\/\//i.test(value) || WINDOWS_PATH.test(value) || value.startsWith("\\\\")) {
+    return localFilePath(value) ? value : "";
+  }
+  return defaultUrlTransform(value);
+}
+
+function unwrapLinkedImages() {
+  return (tree: { children?: any[] }) => {
+    const visit = (node: { children?: any[] }) => {
+      if (!node.children) return;
+      node.children = node.children.map((child) => {
+        if (child?.type === "link" && child.children?.length === 1 && child.children[0]?.type === "image") {
+          const image = child.children[0];
+          return { ...image, data: { ...image.data, hProperties: { ...image.data?.hProperties, "data-open-url": child.url } } };
+        }
+        visit(child);
+        return child;
+      });
+    };
+    visit(tree);
+  };
+}
+
+// Direction is resolved here rather than delegated to HTML's dir="auto",
+// because that algorithm skips any descendant carrying its own dir: a
+// <blockquote dir="auto"> whose paragraphs each resolve their own direction
+// finds no text left to judge and silently falls back to the app's LTR,
+// putting its rule on the left of right-to-left prose. Same trap for a table
+// whose cells resolve individually — the columns never reverse.
+//
+// Code is skipped when judging: an answer that opens with `fs.readFileSync`
+// and continues in Arabic is an Arabic paragraph, not an English one.
+// JS regexes cannot match on Bidi_Class, and naming scripts one at a time has
+// no end to it: Hanifi Rohingya, Yezidi, Garay and Old Uyghur are all
+// right-to-left, and Unicode keeps adding more. These are instead the blocks
+// Unicode reserves for right-to-left letters, so the set stays correct
+// without being maintained — and a plane-1 range is one comparison rather
+// than a property lookup.
+const RTL_LETTER = /[\u0590-\u08FF\uFB1D-\uFDFF\uFE70-\uFEFF\u{10800}-\u{10FFF}\u{1E800}-\u{1EFFF}]/u;
+
+/** Direction of `value`, from its first strong character (letters only —
+ * digits and punctuation are directionally weak). Defaults to "ltr". */
+export function textDirection(value: string): "rtl" | "ltr" {
+  const strong = /\p{Letter}/u.exec(value);
+  return strong && RTL_LETTER.test(strong[0]) ? "rtl" : "ltr";
+}
+
+interface HastNode {
+  type?: string;
+  tagName?: string;
+  value?: string;
+  children?: HastNode[];
+}
+
+function blockText(node: HastNode | undefined): string {
+  if (!node) return "";
+  if (node.type === "text") return node.value ?? "";
+  if (node.tagName === "code" || node.tagName === "pre") return "";
+  return (node.children ?? []).map(blockText).join("");
+}
+
+/** Direction a rendered block adopts, read from its own text. */
+export function blockDirection(node: unknown): "rtl" | "ltr" {
+  return textDirection(blockText(node as HastNode));
+}
+
+/** Props react-markdown hands a block component we only re-tag. */
+interface BlockProps {
+  node?: unknown;
+  children?: ReactNode;
+}
+
+/** Props for the {@link CodeBlock} component. */
+export interface CodeBlockProps {
+  /** Source code snippet to display. */
+  code: string;
+  /** Language identifier from markdown fence, e.g. "ts", "python". */
+  lang: string;
+  /** Whether the parent message is still actively receiving tokens. */
+  streaming: boolean;
+}
+
+/**
+ * Chromed code block component for rendered markdown messages.
+ * Features syntax highlighting with Shiki, language normalization badge,
+ * line count indicator, word wrap toggle, and accessible clipboard copy with status feedback.
+ *
+ * @param props - Component props containing code string, language identifier, and streaming flag.
+ * @returns Rendered code block element.
+ */
+export function CodeBlock({ code, lang, streaming }: CodeBlockProps) {
   const [html, setHtml] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
+  const [wrapLines, setWrapLines] = useState(false);
+  const copyTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  useEffect(() => {
+    return () => {
+      if (copyTimeoutRef.current !== null) {
+        clearTimeout(copyTimeoutRef.current);
+      }
+    };
+  }, []);
 
   useEffect(() => {
     const key = `${lang}:${hash(code)}`;
@@ -72,7 +209,11 @@ function CodeBlock({ code, lang, streaming }: { code: string; lang: string; stre
         .then((shiki) =>
           shiki.codeToHtml(code, {
             lang: lang || "text",
-            theme: "github-dark-default",
+            themes: {
+              light: "github-light-default",
+              dark: "github-dark-default",
+            },
+            defaultColor: "light-dark()",
           }),
         )
         .then((out) => {
@@ -105,30 +246,110 @@ function CodeBlock({ code, lang, streaming }: { code: string; lang: string; stre
   }, [code, lang, streaming]);
 
   const copy = () => {
-    void navigator.clipboard?.writeText(code);
-    setCopied(true);
-    setTimeout(() => setCopied(false), 1200);
+    if (!navigator.clipboard?.writeText) return;
+    navigator.clipboard
+      .writeText(code)
+      .then(() => {
+        setCopied(true);
+        if (copyTimeoutRef.current !== null) {
+          clearTimeout(copyTimeoutRef.current);
+        }
+        copyTimeoutRef.current = setTimeout(() => setCopied(false), 1500);
+      })
+      .catch(() => {
+        // Clipboard write rejected or failed silently
+      });
   };
 
+  const download = () => {
+    const filename = getSnippetFileName(lang);
+    downloadSnippetFile(filename, code);
+  };
+
+  const displayLanguage = getLanguageDisplayName(lang);
+  const lineCount = countLines(code);
+
+  // Code reads left-to-right whatever language surrounds it, so the block pins
+  // its own direction rather than inheriting the message's.
   return (
-    <div className="my-2 overflow-hidden rounded-lg border border-hairline/40 bg-inset">
-      <div className="flex items-center justify-between border-b border-hairline/30 px-3 py-1">
-        <span className="text-[11px] uppercase tracking-wide text-ink-secondary">{lang || "code"}</span>
-        <button
-          onClick={copy}
-          className="rounded p-1 text-ink-secondary hover:bg-raised hover:text-ink"
-          title="Copy code"
-        >
-          {copied ? <Check size={13} className="text-success" /> : <Copy size={13} />}
-        </button>
+    <div dir="ltr" className="my-2 overflow-hidden rounded-lg border border-hairline/40 bg-inset">
+      <div className="flex items-center justify-between gap-2 border-b border-hairline/30 bg-raised/30 px-3 py-1.5 text-xs">
+        <div className="flex min-w-0 flex-1 items-center gap-2">
+          <span title={displayLanguage} className="min-w-0 truncate rounded border border-hairline/40 bg-raised px-1.5 py-0.5 text-[11px] font-medium tracking-wide text-ink select-none">
+            {displayLanguage}
+          </span>
+          {lineCount > 0 && (
+            <span className="shrink-0 whitespace-nowrap text-[11px] text-ink-secondary select-none">
+              {formatLineCount(lineCount)}
+            </span>
+          )}
+        </div>
+        <div className="flex shrink-0 items-center gap-1 whitespace-nowrap">
+          <button
+            type="button"
+            onClick={() => setWrapLines((w) => !w)}
+            className={`inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-[11px] transition-colors ${
+              wrapLines
+                ? "bg-accent/15 text-accent font-medium"
+                : "text-ink-secondary hover:bg-raised hover:text-ink"
+            }`}
+            title={wrapLines ? "Disable line wrapping" : "Wrap long lines"}
+            aria-label={wrapLines ? "Disable line wrapping" : "Wrap long lines"}
+            aria-pressed={wrapLines}
+          >
+            <WrapText size={12} aria-hidden="true" />
+            <span className="hidden sm:inline">{wrapLines ? "Unwrap" : "Wrap"}</span>
+          </button>
+          <button
+            type="button"
+            onClick={download}
+            className="inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-[11px] text-ink-secondary hover:bg-raised hover:text-ink transition-colors"
+            title="Download snippet as file"
+            aria-label="Download snippet as file"
+          >
+            <Download size={12} aria-hidden="true" />
+            <span className="hidden sm:inline">Save</span>
+          </button>
+          <button
+            type="button"
+            onClick={copy}
+            className="inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-[11px] text-ink-secondary hover:bg-raised hover:text-ink transition-colors"
+            title={copied ? "Copied to clipboard" : "Copy code"}
+            aria-label={copied ? "Code copied to clipboard" : "Copy code to clipboard"}
+          >
+            {copied ? (
+              <>
+                <Check size={12} className="text-success" aria-hidden="true" />
+                <span className="text-success font-medium hidden sm:inline">Copied!</span>
+              </>
+            ) : (
+              <>
+                <Copy size={12} aria-hidden="true" />
+                <span className="hidden sm:inline">Copy</span>
+              </>
+            )}
+          </button>
+        </div>
       </div>
       {html ? (
         <div
-          className="overflow-x-auto text-[13px] leading-relaxed [&_pre]:!bg-transparent [&_pre]:m-0 [&_pre]:p-3"
+          className={`text-[13px] leading-relaxed [&_pre]:!bg-transparent [&_pre]:m-0 [&_pre]:p-3 ${
+            wrapLines
+              ? "whitespace-pre-wrap break-words overflow-x-hidden [&_pre]:!whitespace-pre-wrap [&_pre]:!break-words [&_code]:!whitespace-pre-wrap [&_code]:!break-words"
+              : "overflow-x-auto"
+          }`}
           dangerouslySetInnerHTML={{ __html: html }}
         />
       ) : (
-        <pre className="overflow-x-auto p-3 text-[13px] leading-relaxed text-ink">{code}</pre>
+        <pre
+          className={`p-3 text-[13px] leading-relaxed text-ink ${
+            wrapLines
+              ? "whitespace-pre-wrap break-words overflow-x-hidden"
+              : "overflow-x-auto"
+          }`}
+        >
+          {code}
+        </pre>
       )}
     </div>
   );
@@ -141,53 +362,72 @@ function CodeBlock({ code, lang, streaming }: { code: string; lang: string; stre
 // and an <a href="file://…"> would still reach setWindowOpenHandler on a
 // middle or modifier click, which calls shell.openExternal without the main
 // process' containment check.
-function LocalFileLink({ filePath, children }: { filePath: string; children?: ReactNode }) {
-  const [state, setState] = useState<"idle" | "saved" | "failed">("idle");
-  const [reason, setReason] = useState("");
-  const [savedTo, setSavedTo] = useState("");
-
-  const save = async () => {
-    const saveFile = window.ogb?.saveFile;
-    if (!saveFile) {
-      // an older shell has no save bridge; saying so beats the silent click
-      // this change exists to remove
-      setReason("Saving files needs a newer version of the desktop app");
-      setState("failed");
-      return;
-    }
-    try {
-      const saved = await saveFile(filePath);
-      // null means the user closed the save dialog, which is a decision
-      // rather than a failure — say nothing
-      if (!saved) return;
-      setSavedTo(saved);
-      setState("saved");
-      setTimeout(() => setState("idle"), 4000);
-    } catch (error) {
-      // the bug being fixed here was a click that failed silently, so a
-      // failed save says why rather than doing nothing
-      setReason(error instanceof Error ? error.message : "That file could not be saved");
-      setState("failed");
-    }
-  };
+function LocalFileLink({ filePath, children, message }: { filePath: string; children?: ReactNode; message?: MessageAttachmentContext }) {
+  const save = useLocalFileSave(filePath, undefined, message);
+  if (!message) {
+    return <span title="Unavailable legacy file reference" className="break-words text-ink-secondary">{children}</span>;
+  }
+  const label = save.state === "saving"
+    ? "Saving…"
+    : save.state === "saved"
+      ? "Saved"
+      : save.state === "failed"
+        ? "Retry"
+        : null;
 
   return (
-    <>
+    <span dir="ltr" className="inline-flex flex-wrap items-center gap-x-1.5 [unicode-bidi:isolate]">
       <button
         type="button"
-        onClick={() => void save()}
-        title={`Save a copy — ${filePath}`}
-        className="break-words text-left text-accent underline decoration-accent/40 hover:decoration-accent"
+        onClick={() => void save.save()}
+        disabled={save.state === "saving"}
+        title="Save a copy"
+        className="inline-flex items-center gap-1 break-words text-start text-accent underline decoration-accent/40 hover:decoration-accent disabled:cursor-wait"
       >
         {children}
+        {save.state === "saving" ? (
+          <LoaderCircle size={12} className="shrink-0 animate-spin" aria-hidden="true" />
+        ) : save.state === "saved" ? (
+          <Check size={12} className="shrink-0 text-success" aria-hidden="true" />
+        ) : save.state === "failed" ? (
+          <RotateCcw size={12} className="shrink-0" aria-hidden="true" />
+        ) : (
+          <Download size={12} className="shrink-0" aria-hidden="true" />
+        )}
       </button>
-      {state !== "idle" && (
-        <span className={`ml-1.5 text-[12px] ${state === "saved" ? "text-success" : "text-danger"}`}>
-          {state === "saved" ? `Saved to ${savedTo}` : reason}
+      {label && (
+        <span
+          role={save.state === "failed" ? "alert" : "status"}
+          title={save.state === "saved" ? save.savedTo : undefined}
+          className={`text-[12px] ${save.state === "saved" ? "text-success" : save.state === "failed" ? "text-danger" : "text-ink-secondary"}`}
+        >
+          {save.state === "failed" ? save.reason : label}
         </span>
       )}
-    </>
+    </span>
   );
+}
+
+export function markdownImageName(src: string, alt?: string): string {
+  const supplied = alt?.trim();
+  if (supplied) return supplied;
+  try {
+    const path = decodeURIComponent(new URL(src, "https://openmausbot.invalid").pathname);
+    const name = path.split("/").filter(Boolean).at(-1)?.trim();
+    if (name) return name;
+  } catch {
+    // A malformed source still gets a useful accessible fallback.
+  }
+  return "Image";
+}
+
+export function markdownImageOpenUrl(src: string): string | undefined {
+  try {
+    const url = new URL(src.startsWith("//") ? `https:${src}` : src);
+    return url.protocol === "https:" || url.protocol === "http:" ? url.toString() : undefined;
+  } catch {
+    return undefined;
+  }
 }
 
 // Spoiler spans: GFM parses ~~text~~ to <del>; in bot messages that content
@@ -224,7 +464,7 @@ function Spoiler({ children }: { children?: ReactNode }) {
         aria-label="Hide spoiler"
         title="Hide spoiler"
         onClick={() => setRevealed(false)}
-        className="ml-1 rounded px-0.5 text-[11px] text-ink-secondary hover:text-ink"
+        className="ms-1 rounded px-0.5 text-[11px] text-ink-secondary hover:text-ink"
       >
         Hide
       </button>
@@ -232,17 +472,34 @@ function Spoiler({ children }: { children?: ReactNode }) {
   );
 }
 
-function ChatMarkdownComponent({ text, streaming = false }: { text: string; streaming?: boolean }) {
+const NO_MENTION_PEERS: readonly MentionPeer[] = [];
+
+// A markdown image resolves its attachment by source offset, so a message
+// holding one must reach the parser byte-for-byte as written.
+const MARKDOWN_IMAGE = "![";
+
+function ChatMarkdownComponent({ text, streaming = false, message, mentionPeers = NO_MENTION_PEERS, everyone = false }: {
+  text: string; streaming?: boolean; message?: MessageAttachmentContext;
+  mentionPeers?: readonly MentionPeer[]; everyone?: boolean;
+}) {
+  // "#Title" mentions link to the threads the person can see (ThreadRefs);
+  // @mentions were already decorated by remarkMentions, which runs first.
+  const { threads, currentBotId } = useThreadRefs();
+  // A near-miss table from a model renders as an unreadable run of pipes
+  // unless it is repaired before parsing. The repair moves source offsets, so
+  // a message carrying an image opts out and keeps its text verbatim.
+  const source = text.includes(MARKDOWN_IMAGE) ? text : repairMarkdownTables(text);
   return (
     <div className="chat-md min-w-0 [&>*+*]:mt-2">
       <Markdown
-        remarkPlugins={[remarkGfm]}
+        remarkPlugins={[remarkGfm, unwrapLinkedImages, [remarkMentions, { peers: mentionPeers, everyone }], remarkThreadRefs(threads, currentBotId)]}
+        urlTransform={chatUrlTransform}
         components={{
           pre({ children }: { children?: ReactNode }) {
             // fenced code arrives as <pre><code class="language-x">…</code></pre>
             const child: any = Array.isArray(children) ? children[0] : children;
             const className: string = child?.props?.className ?? "";
-            const lang = /language-([\w-]+)/.exec(className)?.[1] ?? "";
+            const lang = /language-([^\s]+)/.exec(className)?.[1] ?? "";
             // children can be a string OR an array of strings/nodes — flatten
             // strings only, so String() never comma-joins an array
             const flat = (n: any): string =>
@@ -250,77 +507,104 @@ function ChatMarkdownComponent({ text, streaming = false }: { text: string; stre
             const code = flat(child?.props?.children).replace(/\n$/, "");
             return <CodeBlock code={code} lang={lang} streaming={streaming} />;
           },
-          img({ src, alt }: { src?: string; alt?: string }) {
+          img(props) {
+            const { src, alt } = props;
+            if (!src) {
+              return <span className="text-[12px] text-danger" role="alert">Image unavailable</span>;
+            }
+            const filePath = localFilePath(src) ?? undefined;
+            const sourceOffset = (props as { node?: { position?: { start?: { offset?: number } } } })
+              .node?.position?.start?.offset;
             return (
-              <img
+              <MarkdownImagePreview
                 src={src}
-                alt={alt ?? ""}
-                loading="lazy"
-                className="max-h-96 max-w-full rounded-lg border border-hairline/30"
+                name={markdownImageName(src, alt)}
+                openUrl={markdownImageOpenUrl(typeof (props as Record<string, unknown>)["data-open-url"] === "string" ? String((props as Record<string, unknown>)["data-open-url"]) : src)}
+                filePath={filePath}
+                message={filePath ? message : undefined}
+                sourceOffset={sourceOffset}
               />
             );
           },
           code({ children }: { children?: ReactNode }) {
+            // break-words because a path or an identifier can be longer than
+            // the bubble is wide, and an unbreakable token has nowhere to go
+            // but outside it — off the left edge in a right-to-left paragraph,
+            // where the line ends.
             return (
-              <code className="rounded bg-inset px-1 py-px text-[13px]">{children}</code>
+              <code dir="ltr" className="rounded bg-inset px-1 py-px text-[13px] break-words [unicode-bidi:isolate]">{children}</code>
             );
+          },
+          // markdown never emits a span itself (no raw HTML); the only
+          // spans are the ones our remark plugins produced — a thread link,
+          // or an @mention highlight that must keep its class and colour
+          span(props) {
+            // SAFETY: react-markdown hands hast data-* attributes through as string props
+            const link = threadLinkFromProps(props as Record<string, unknown>);
+            if (link) return <ThreadLink target={link.target} ambiguous={link.ambiguous}>{props.children}</ThreadLink>;
+            const { node: _node, children, ...rest } = props;
+            return <span {...rest}>{children}</span>;
           },
           a({ href, children }: { href?: string; children?: ReactNode }) {
             const localPath = localFilePath(href);
-            if (localPath) return <LocalFileLink filePath={localPath}>{children}</LocalFileLink>;
+            if (localPath) return <LocalFileLink filePath={localPath} message={message}>{children}</LocalFileLink>;
             return (
               <a
                 href={href}
                 target="_blank"
                 rel="noreferrer"
-                className="break-words text-accent underline decoration-accent/40 hover:decoration-accent"
+                dir="auto"
+                className="break-words text-accent underline decoration-accent/40 hover:decoration-accent [unicode-bidi:isolate]"
               >
                 {children}
               </a>
             );
           },
-          table({ children }: { children?: ReactNode }) {
+          table({ node, children }: BlockProps) {
             return (
               <div className="overflow-x-auto">
-                <table className="w-full border-collapse text-[13.5px]">{children}</table>
+                <table dir={blockDirection(node)} className="w-full border-collapse text-[13.5px]">{children}</table>
               </div>
             );
           },
           th({ children }: { children?: ReactNode }) {
             return (
-              <th className="border-b border-hairline/40 px-2 py-1.5 text-left font-semibold">{children}</th>
+              <th className="border-b border-hairline/40 px-2 py-1.5 text-start font-semibold">{children}</th>
             );
           },
           td({ children }: { children?: ReactNode }) {
             return <td className="border-b border-hairline/20 px-2 py-1.5 align-top">{children}</td>;
           },
-          ul({ children }: { children?: ReactNode }) {
-            return <ul className="list-disc space-y-1 pl-5">{children}</ul>;
+          p({ node, children }: BlockProps) {
+            return <p dir={blockDirection(node)}>{children}</p>;
           },
-          ol({ children }: { children?: ReactNode }) {
-            return <ol className="list-decimal space-y-1 pl-5">{children}</ol>;
+          ul({ node, children }: BlockProps) {
+            return <ul dir={blockDirection(node)} className="list-disc space-y-1 ps-5">{children}</ul>;
           },
-          h1({ children }: { children?: ReactNode }) {
-            return <div className="mt-2 text-[16px] font-semibold">{children}</div>;
+          ol({ node, children }: BlockProps) {
+            return <ol dir={blockDirection(node)} className="list-decimal space-y-1 ps-5">{children}</ol>;
           },
-          h2({ children }: { children?: ReactNode }) {
-            return <div className="mt-2 text-[15.5px] font-semibold">{children}</div>;
+          h1({ node, children }: BlockProps) {
+            return <div dir={blockDirection(node)} className="mt-2 text-[16px] font-semibold">{children}</div>;
           },
-          h3({ children }: { children?: ReactNode }) {
-            return <div className="mt-1.5 font-semibold">{children}</div>;
+          h2({ node, children }: BlockProps) {
+            return <div dir={blockDirection(node)} className="mt-2 text-[15.5px] font-semibold">{children}</div>;
           },
-          h4({ children }: { children?: ReactNode }) {
-            return <div className="mt-1.5 font-semibold">{children}</div>;
+          h3({ node, children }: BlockProps) {
+            return <div dir={blockDirection(node)} className="mt-1.5 font-semibold">{children}</div>;
           },
-          h5({ children }: { children?: ReactNode }) {
-            return <div className="mt-1.5 text-[14px] font-semibold">{children}</div>;
+          h4({ node, children }: BlockProps) {
+            return <div dir={blockDirection(node)} className="mt-1.5 font-semibold">{children}</div>;
           },
-          h6({ children }: { children?: ReactNode }) {
-            return <div className="mt-1.5 text-[13.5px] font-semibold text-ink-secondary">{children}</div>;
+          h5({ node, children }: BlockProps) {
+            return <div dir={blockDirection(node)} className="mt-1.5 text-[14px] font-semibold">{children}</div>;
           },
-          blockquote({ children }: { children?: ReactNode }) {
+          h6({ node, children }: BlockProps) {
+            return <div dir={blockDirection(node)} className="mt-1.5 text-[13.5px] font-semibold text-ink-secondary">{children}</div>;
+          },
+          blockquote({ node, children }: BlockProps) {
             return (
-              <blockquote className="border-l-2 border-hairline pl-3 text-ink-secondary">{children}</blockquote>
+              <blockquote dir={blockDirection(node)} className="border-s-2 border-hairline ps-3 text-ink-secondary">{children}</blockquote>
             );
           },
           del({ children }: { children?: ReactNode }) {
@@ -331,10 +615,17 @@ function ChatMarkdownComponent({ text, streaming = false }: { text: string; stre
           },
         }}
       >
-        {text}
+        {source}
       </Markdown>
     </div>
   );
 }
 
-export const ChatMarkdown = memo(ChatMarkdownComponent);
+export const ChatMarkdown = memo(ChatMarkdownComponent, (previous, next) => (
+  previous.text === next.text
+  && previous.mentionPeers === next.mentionPeers
+  && previous.everyone === next.everyone
+  && Boolean(previous.streaming) === Boolean(next.streaming)
+  && previous.message?.threadId === next.message?.threadId
+  && previous.message?.messageId === next.message?.messageId
+));

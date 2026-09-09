@@ -8,3 +8,6 @@ incorporated before the transition.
 The Google Antigravity ACP integration adapts release, installation, profile,
 and authentication behavior from T3 Code, Copyright 2026 T3 Tools Inc., used
 under the MIT License.
+
+The secure phone credential transport uses @hpke/core and @hpke/common from
+hpke-js, Copyright 2023-2024 Ajitomi Daisuke, used under the MIT License.

@@ -166,8 +166,9 @@ function desktopCapabilities({
       session: hostSession,
       packaged: Boolean(packaged),
       // so the renderer can show paths as ~/… without a Node builtin in
-      // the sandboxed preload
-      homeDir,
+      // the sandboxed preload; a remote server's page learns nothing about
+      // this computer's users
+      homeDir: remote ? "" : homeDir,
     },
     windowChrome: isMac ? "mac-inset" : "native",
     screenPreview,

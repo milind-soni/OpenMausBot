@@ -14,6 +14,7 @@
 
 See [the roadmap](2026-08-31-00-control-plane-roadmap.md#global-constraints). Load-bearing here:
 
+- **Superseded (Sep 2026):** the harness now authenticates remote clients itself (`docs/plans/remote-workspace.md`: pairing codes, sessions, and a "through a proxy" rule for forwarded requests), and `openmausbot serve --tunnel` (`server/tunnel.ts`) opens a second, IPC listener for the tunnel gateway on which every request is remote by construction. The loopback bind and its owner trust are unchanged; the sidecar is no longer the only door.
 - **The loopback bind is not negotiable.** The harness listens on `127.0.0.1` and rejects any request whose `Host` is not loopback, defeating DNS rebinding. Headless must not add a second bind to the harness. Network exposure stays entirely in the companion sidecar, which is the design `companion/README.md` argues for at length — do not relitigate it.
 - **Fail closed on absent capability.** A headless host has no desktop session, no `safeStorage`, and on Linux may have no seat at all. Every capability that is unavailable must report unavailable, never "off" and never "on".
 - **The capability rule** applies to platform capabilities too: the client must not offer local computer control for a machine that cannot do it.

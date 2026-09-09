@@ -40,6 +40,19 @@ describe("OpenAICompatDriver", () => {
     expect(cfg.apiKeyEnv).toBe("GROQ_KEY");
   });
 
+  it("allows an isolated connection to disable an inherited OpenRouter provider pin", () => {
+    const before = process.env.OPENAI_COMPAT_PROVIDER;
+    process.env.OPENAI_COMPAT_PROVIDER = "fixture-upstream";
+    try {
+      expect(OpenAICompatDriver.decodeConfig({}).provider).toBe("fixture-upstream");
+      expect(OpenAICompatDriver.decodeConfig({ provider: "" }).provider).toBeUndefined();
+      expect(OpenAICompatDriver.decodeConfig({ provider: "another-upstream" }).provider).toBe("another-upstream");
+    } finally {
+      if (before === undefined) delete process.env.OPENAI_COMPAT_PROVIDER;
+      else process.env.OPENAI_COMPAT_PROVIDER = before;
+    }
+  });
+
   it("reports unavailable without an API key", async () => {
     const inst = await OpenAICompatDriver.create({
       instanceId: "test-1",

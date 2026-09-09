@@ -1,8 +1,8 @@
 // The sidebar's utility rows, folded behind one labelled row.
 //
-// Team map, Teach a skill, Automations and Connected apps are places you
-// visit occasionally; they were costing four permanent rows at the bottom of a
-// list whose whole job is showing bots. They now live behind a single "Tools"
+// Team map, Automations and Connected apps are places you visit
+// occasionally; they were costing permanent rows at the bottom of a list
+// whose whole job is showing bots. They now live behind a single "Tools"
 // row that sits directly above the profile row and opens on hover.
 //
 // It used to be a bare chevron. A chevron alone reads as "there is more
@@ -15,6 +15,7 @@
 // click close it, and the trigger is an ordinary focusable button.
 import { ChevronUp, Wrench } from "lucide-react";
 import { cn } from "@/lib/cn";
+import { t } from "@/lib/i18n";
 import { SidebarPopoverMenu, type SidebarMenuItem } from "./SidebarPopoverMenu";
 
 export type MoreMenuItem = SidebarMenuItem;
@@ -22,7 +23,9 @@ export type MoreMenuItem = SidebarMenuItem;
 export function SidebarMoreMenu({
   items,
   compact = false,
-  label = "Tools",
+  // a default parameter is evaluated per call, so this follows the language
+  // the same way every other t() in the rail does
+  label = t("sidebar.tools"),
 }: {
   items: MoreMenuItem[];
   compact?: boolean;

@@ -92,6 +92,34 @@ if (process.exitCode === undefined) {
   }
 }
 
+// SIGKILL bypasses Electron's quit hooks. Exercise a real packaged restart so
+// stale parent/utility-process data leases cannot strand the next launch.
+if (process.exitCode === undefined) {
+  const runtimeDirectory = mkdtempSync(path.join(tmpdir(), prefixName));
+  chmodSync(runtimeDirectory, 0o700);
+  const hardDeath = spawnSync(
+    "dbus-run-session",
+    ["--", "xvfb-run", "-a", process.execPath, path.join(root, "scripts", "smoke-linux-package.mjs")],
+    {
+      cwd: root,
+      env: {
+        ...process.env,
+        XDG_RUNTIME_DIR: runtimeDirectory,
+        OMB_SMOKE_HARD_DEATH: "1",
+        OMB_SMOKE_EXECUTABLE: path.join(root, "release", "linux-unpacked", "openmausbot"),
+      },
+      stdio: "inherit",
+    },
+  );
+  if (hardDeath.error) throw hardDeath.error;
+  if (hardDeath.status !== 0) {
+    console.error(`[run-linux-package-smoke] hard-death runtime kept at ${runtimeDirectory}`);
+    process.exitCode = hardDeath.status ?? 1;
+  } else {
+    await cleanupRuntime(runtimeDirectory);
+  }
+}
+
 if (process.exitCode === undefined) for (const lane of [
   { name: "x11-overlay-free-crash-retry", wayland: false, blocked: false },
   { name: "wayland-safety-block", wayland: true, blocked: true },

@@ -154,7 +154,7 @@ private struct QuickReplyForm: View {
                     .padding(.vertical, 4)
                 }
             }
-            .navigationTitle(titled.isEmpty ? "New Quick Reply" : titled)
+            .navigationTitle(titled.isEmpty ? Text("New Quick Reply") : Text(verbatim: titled))
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {

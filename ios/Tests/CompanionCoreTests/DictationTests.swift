@@ -43,6 +43,65 @@ final class DictationTests: XCTestCase {
         XCTAssertEqual(Dictation.draft(base: "  ", transcript: "\n"), "")
     }
 
+    // MARK: - Transcript updates across segments
+
+    func testEmptyTranscriptTakesTheNewPartial() {
+        XCTAssertEqual(Dictation.updateTranscript("", new: "hello"), "hello")
+    }
+
+    func testEmptyPartialLeavesTheTranscript() {
+        XCTAssertEqual(Dictation.updateTranscript("hello", new: ""), "hello")
+        XCTAssertEqual(Dictation.updateTranscript("hello", new: "   "), "hello")
+    }
+
+    /// Same segment: each longer partial replaces the last in place.
+    func testALongerPartialReplacesTheCurrentOne() {
+        XCTAssertEqual(
+            Dictation.updateTranscript("first sent", new: "first sentence"),
+            "first sentence"
+        )
+        XCTAssertEqual(
+            Dictation.updateTranscript("first sentence", new: "first sentence."),
+            "first sentence."
+        )
+    }
+
+    /// A fresh segment after a pause does not start with the old one, so the
+    /// old text is preserved and the new segment is appended.
+    func testAFreshSegmentIsAppendedAfterThePreviousText() {
+        XCTAssertEqual(
+            Dictation.updateTranscript("first sentence.", new: "second sentence."),
+            "first sentence. second sentence."
+        )
+    }
+
+    /// If the recognizer revises a word in the middle of the same segment,
+    /// most leading words still match, so we take the latest best reading.
+    func testAWordLevelRevisionReplacesInPlace() {
+        XCTAssertEqual(
+            Dictation.updateTranscript("I walked to the store", new: "I walked to a store"),
+            "I walked to a store"
+        )
+    }
+
+    /// A brief backtrack (new partial shorter but still a prefix) keeps the
+    /// longer accumulated text.
+    func testABacktrackKeepsTheLongerTranscript() {
+        XCTAssertEqual(
+            Dictation.updateTranscript("first sentence", new: "first"),
+            "first sentence"
+        )
+    }
+
+    /// A new sentence that happens to share the first word with the previous
+    /// sentence is still treated as a new segment.
+    func testASharedFirstWordIsNotEnoughToMergeAcrossSegments() {
+        XCTAssertEqual(
+            Dictation.updateTranscript("first sentence", new: "first word"),
+            "first sentence first word"
+        )
+    }
+
     // MARK: - Locale candidates
 
     func testPreferredLanguageComesFirst() {

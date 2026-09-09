@@ -1,0 +1,10 @@
+# Entitlement ids the server understands (see server/enterprise.ts).
+# id           unlocks                                                            status
+whitelabel     product name, tagline, accent, logo and support link from brand.json shipped
+sso            sign in through an OIDC issuer (a company account) with scope mapping planned
+admin          organisation, members, domains and branding sections in Settings   planned
+budgets        per-bot and per-section spend limits                               planned
+#
+# Keys may carry ids that are not shipped yet; unknown ids grant nothing, so a
+# key can be issued ahead of the feature landing. Add a line here in the same
+# pull request that adds an `entitled("id")` check.

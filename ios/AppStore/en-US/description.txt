@@ -3,6 +3,7 @@ OpenMausMobile is the private iPhone companion for OpenMausBot on your computer.
 Keep your AI team moving when you step away from your desk:
 
 • Answer approvals and questions
+• Securely provide requested API keys with Password AutoFill
 • Follow replies as they stream
 • Send messages to bots and rooms
 • Switch and manage task contexts
@@ -14,6 +15,8 @@ Keep your AI team moving when you step away from your desk:
 YOUR COMPUTER STAYS IN CHARGE
 
 OpenMausMobile connects to the companion service on your own computer. Your bot transcripts remain in OpenMausBot’s local storage; the optional hosted connection transports them to your computer without creating a developer-hosted transcript copy.
+
+When a bot requests a supported API key, the phone can send it over Secure phone access or Tailscale, encrypted for the paired computer. Apple Passwords is built in, and other enabled Password AutoFill providers work too. The value is never added to chat or retained by OpenMausMobile.
 
 PAIR ONCE, REVOKE ANY TIME
 

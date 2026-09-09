@@ -25,6 +25,19 @@ describe("custom MCP registry", () => {
     expect(mcpServerNameError("safe-notes")).toBeNull();
   });
 
+  it("refuses harness-owned environment names in stored and renderer entries", () => {
+    for (const key of ["OMB_HARNESS_URL", "OGB_BOX_TOKEN", "ELECTRON_RUN_AS_NODE"]) {
+      expect(parseStoredMcpServer("notes", { command: "notes-mcp", env: { [key]: "bad" } })).toEqual({
+        ok: false,
+        error: `Environment variable “${key}” is reserved by OpenMausBot.`,
+      });
+      expect(parseMcpServerMutation("notes", { command: "notes-mcp", env: { [key]: "bad" } })).toEqual({
+        ok: false,
+        error: `Environment variable “${key}” is reserved by OpenMausBot.`,
+      });
+    }
+  });
+
   it("never puts environment values in renderer listings", () => {
     const listings = listMcpServers({
       github: { command: "github-mcp", env: { GITHUB_TOKEN: "ghp_real", MODE: "read-only" } },

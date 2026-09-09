@@ -48,7 +48,7 @@ export function Card({
 }
 
 /** A command the user is meant to run, with one-click copy. */
-export function CommandLine({ command }: { command: string }) {
+export function CommandLine({ command, copyLabel = "Copy command" }: { command: string; copyLabel?: string }) {
   const [copied, setCopied] = useState(false);
   const resetTimer = useRef<number | null>(null);
 
@@ -72,12 +72,13 @@ export function CommandLine({ command }: { command: string }) {
 
   return (
     <div className="flex items-center gap-2 rounded-lg bg-inset px-3 py-2">
-      <code className="min-w-0 flex-1 overflow-x-auto whitespace-nowrap font-mono text-[12px] text-ink">
+      <code className="min-w-0 flex-1 select-all overflow-x-auto whitespace-nowrap font-mono text-[12px] text-ink">
         {command}
       </code>
       <button
+        type="button"
         onClick={() => void copy()}
-        aria-label="Copy command"
+        aria-label={copyLabel}
         className="shrink-0 rounded p-1 text-ink-secondary hover:bg-raised hover:text-ink"
       >
         {copied ? <Check size={13} className="text-success" /> : <Copy size={13} />}

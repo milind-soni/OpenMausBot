@@ -434,7 +434,7 @@ describe("phone setup flow", () => {
       pairing: fresh,
     }, null, 1_000)).toBeNull();
     expect(companionPairingOpenFailure({ enabled: true, pairing: null }, null, 1_000)).toContain(
-      "Phone pairing did not open",
+      "Device pairing did not open",
     );
     expect(companionPairingOpenFailure({
       enabled: true,
@@ -444,11 +444,11 @@ describe("phone setup flow", () => {
     expect(companionPairingOpenFailure({
       enabled: true,
       pairing: fresh,
-    }, token, 1_000)).toContain("Phone pairing did not open");
+    }, token, 1_000)).toContain("Device pairing did not open");
     expect(companionPairingOpenFailure({
       enabled: true,
       pairing: { ...fresh, expiresAt: 999 },
-    }, null, 1_000)).toContain("Phone pairing did not open");
+    }, null, 1_000)).toContain("Device pairing did not open");
   });
 
   it("unwraps Electron IPC account errors without exposing channel machinery", () => {

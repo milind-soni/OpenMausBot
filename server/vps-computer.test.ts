@@ -14,6 +14,7 @@ import {
 import type { AppConfig } from "./config.ts";
 import {
   VPS_CONTAINER_LABEL,
+  VPS_ENVIRONMENT_LABEL,
   VPS_IMAGE,
   VPS_MANAGED_LABEL,
   VPS_VIEWER_LABEL,
@@ -67,6 +68,7 @@ function fixture({
   restartPolicyName = "unless-stopped",
   cgroupnsMode,
   imageLabelsMatch = true,
+  environmentId = null,
 }: {
   image?: boolean;
   container?: boolean;
@@ -93,6 +95,7 @@ function fixture({
   restartPolicyName?: string;
   cgroupnsMode?: string;
   imageLabelsMatch?: boolean;
+  environmentId?: string | null;
 } = {}) {
   const name = vpsContainerName(BOT_ID);
   const provisioningArgs = vpsContainerRunArgs(name);
@@ -138,6 +141,7 @@ function fixture({
               [BASE_IMAGE_LABEL]: BASE_IMAGE_DIGEST,
               [IMAGE_LAYER_LABEL]: IMAGE_LAYER_VERSION,
               [VPS_VIEWER_LABEL]: "1",
+              ...(environmentId ? { [VPS_ENVIRONMENT_LABEL]: environmentId } : {}),
             },
           },
            Id: containerId,
@@ -383,6 +387,8 @@ describe("VPS computer", () => {
     expect(run[run.indexOf("--cgroupns") + 1]).toBe("private");
     expect(run.at(-1)).toBe(IMAGE_ID);
     expect(run.join(" ")).toContain(`--label ${VPS_MANAGED_LABEL}=1`);
+    expect(run.find((arg) => arg.startsWith(`${VPS_ENVIRONMENT_LABEL}=`)))
+      .toMatch(/^com\.openmausbot\.environment=[0-9a-f-]{36}$/i);
     expect(run.join(" ")).toContain(`--label ${IMAGE_LAYER_LABEL}=${IMAGE_LAYER_VERSION}`);
     expect(run.join(" ")).toContain(`--label ${VPS_VIEWER_LABEL}=1`);
     expect(run.join(" ")).toContain("--restart unless-stopped");
@@ -432,6 +438,20 @@ describe("VPS computer", () => {
     ]);
     expect(results.every((status) => status.ready)).toBe(true);
     expect(fake.calls.filter(({ args }) => args[2] === "run")).toHaveLength(1);
+  });
+
+  it("keeps provisioning and readiness checks on the alias captured at operation start", async () => {
+    const fake = fixture({ container: false });
+    const config: AppConfig = { vps: { sshAlias: "original-vps" } };
+    const runner: VpsCommandRunner = async (args, options) => {
+      const result = await fake.runner(args, options);
+      if (args[2] === "run") config.vps!.sshAlias = "replacement-vps";
+      return result;
+    };
+
+    expect((await vpsComputerAction("provision", config, BOT_ID, runner)).ready).toBe(true);
+    expect(fake.calls.some(({ args }) => args[2] === "run")).toBe(true);
+    expect(fake.calls.every(({ args }) => args[1] === "ssh://original-vps")).toBe(true);
   });
 
   it("mounts the official Cua MCP server through the tiny remote exec bridge", () => {
@@ -531,6 +551,11 @@ describe("VPS computer", () => {
     const unowned = fixture({ managed: false });
     await expect(vpsComputerAction("remove", CONFIG, BOT_ID, unowned.runner)).rejects.toThrow(/did not create/);
     expect(unowned.calls.some(({ args }) => args[2] === "rm")).toBe(false);
+
+    const foreign = fixture({ environmentId: "11111111-2222-4333-8444-555555555555" });
+    expect((await vpsComputerStatus(CONFIG, BOT_ID, foreign.runner)).managed).toBe(false);
+    await expect(vpsComputerAction("remove", CONFIG, BOT_ID, foreign.runner)).rejects.toThrow(/did not create/);
+    expect(foreign.calls.some(({ args }) => args[2] === "rm")).toBe(false);
 
     const absent = fixture({ container: false });
     const afterMissing = await vpsComputerAction("remove", CONFIG, BOT_ID, absent.runner);

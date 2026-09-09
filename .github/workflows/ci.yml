@@ -24,7 +24,10 @@ jobs:
         # supported host platforms. POSIX-only process tests self-skip.
         os: [macos-latest, ubuntu-latest, windows-latest]
     runs-on: ${{ matrix.os }}
-    timeout-minutes: 15
+    # Windows' serial process fixtures already take ~14m on healthy runs;
+    # leave enough room for runner variance and the complete failure report.
+    # Keep every check and each test's own timeout unchanged.
+    timeout-minutes: ${{ matrix.os == 'windows-latest' && 25 || 15 }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: pnpm/action-setup@ff378ebe6b225b0680b81c1ad4498ae0d1d3a5e3 # v6.0.10
@@ -42,27 +45,70 @@ jobs:
         # timeout.
         run: node --input-type=commonjs -e "require('electron')"
       - run: pnpm typecheck
+      - run: pnpm lint
       - name: Run tests
         run: pnpm test
-        env:
-          # Electron 43 currently exits with EXCEPTION_BREAKPOINT before ready
-          # on GitHub's Windows runners even after Chromium's required sandbox
-          # ACL is present. Production fails closed there through the tested
-          # browser-platform gate; keep probing the upstream regression below.
-          OMB_SKIP_REAL_ELECTRON_BROWSER_FIXTURE: ${{ matrix.os == 'windows-latest' && '1' || '0' }}
-      - name: Probe upstream Electron Windows sandbox regression
-        if: matrix.os == 'windows-latest'
-        continue-on-error: true
-        env:
-          # Keep the canary honest: no --no-sandbox or sandbox-disabling flags.
-          # When electron/electron#51761 is resolved, make this blocking first,
-          # then remove the production Windows gate in browser-platform.cjs.
-          OMB_SKIP_REAL_ELECTRON_BROWSER_FIXTURE: "0"
-        run: pnpm exec vitest run electron/browser-closed-shadow.electron.test.mjs
       - run: pnpm check:electron
+      - name: Verify native approval mode transitions
+        if: matrix.os == 'macos-latest'
+        run: pnpm exec electron scripts/smoke-approval-modes.cjs
+      - name: Verify paired phone authorization against packaged harness
+        if: matrix.os == 'macos-latest'
+        run: pnpm build:companion && pnpm exec electron scripts/smoke-phone-relay-auth.cjs
       - name: production UI build
         if: matrix.os == 'ubuntu-latest'
         run: pnpm exec vite build
+
+  cloudflared-linux-arm64:
+    name: cloudflared installer (Linux ARM64)
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 24
+      - name: Install and reuse the pinned connector in an isolated fixture
+        env:
+          OMB_ARM64_FIXTURE: ${{ runner.temp }}/omb-cloudflared-arm64
+        run: |
+          node --input-type=module -e 'import assert from "node:assert/strict"; assert.equal(process.platform, "linux"); assert.equal(process.arch, "arm64");'
+          node scripts/prepare-cloudflared.mjs --current --root "$OMB_ARM64_FIXTURE"
+          node scripts/prepare-cloudflared.mjs --current --root "$OMB_ARM64_FIXTURE"
+          "$OMB_ARM64_FIXTURE/dist-native/cloudflared/linux-arm64/cloudflared" version
+
+  foss:
+    # LICENSING.md promises that deleting enterprise/ leaves a working
+    # open-source edition. Prove it on every change: typecheck, the edition
+    # tests, and a boot that reports "oss" even with a key set.
+    name: open-source edition builds without enterprise/
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: pnpm/action-setup@ff378ebe6b225b0680b81c1ad4498ae0d1d3a5e3 # v6.0.10
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 24
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: Delete the enterprise folder
+        run: rm -rf enterprise
+      - run: pnpm typecheck
+      - run: pnpm exec vitest run server/enterprise.test.ts server/brand.test.ts
+      - name: The server boots and reports the open-source edition
+        run: |
+          mkdir -p /tmp/omb-foss/home
+          HOME=/tmp/omb-foss/home OMB_DATA_DIR=/tmp/omb-foss/data OMB_PORT=18797 OMB_WEBHOOK_PORT=18796 \
+            OMB_BROWSER_CONNECTION=/tmp/omb-foss/browser-connection.json OMB_LICENSE_KEY=omb1.not.real \
+            node --experimental-strip-types server/index.ts > /tmp/omb-foss/server.log 2>&1 &
+          for i in $(seq 1 60); do curl -sf http://127.0.0.1:18797/api/health >/dev/null && break; sleep 1; done
+          curl -sf http://127.0.0.1:18797/api/edition | tee /tmp/omb-foss/edition.json; echo
+          grep -q '"edition":"oss"' /tmp/omb-foss/edition.json
+          grep -q 'no enterprise layer exists' /tmp/omb-foss/edition.json
+          kill %1; wait %1 || true
 
   control-plane:
     name: control-plane check + workerd tests + dry run
@@ -127,6 +173,8 @@ jobs:
           sudo chown root:root release/linux-unpacked/chrome-sandbox
           sudo chmod 4755 release/linux-unpacked/chrome-sandbox
           test "$(stat -c '%U:%G %a' release/linux-unpacked/chrome-sandbox)" = "root:root 4755"
+      - name: Verify the installed browser with Ubuntu sandbox restrictions
+        run: node scripts/smoke-browser-bundle.mjs --resources /opt/OpenMausBot/resources
       - name: Launch packaged app and verify lifecycle
         env:
           OMB_KEEP_SMOKE_DIR: "1"

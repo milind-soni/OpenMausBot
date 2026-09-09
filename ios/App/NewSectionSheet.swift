@@ -210,7 +210,7 @@ struct NewSectionSheet: View {
                     step = .name
                     nameFocused = true
                 } label: {
-                    Text("Continue with \(selection.selectedIDs.count) bot\(selection.selectedIDs.count == 1 ? "" : "s")")
+                    Text("Continue with \(selection.selectedIDs.count) bots")
                         .font(.system(size: 17, weight: .semibold))
                         .frame(maxWidth: .infinity)
                         .frame(height: 52)

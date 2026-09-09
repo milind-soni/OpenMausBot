@@ -7,7 +7,7 @@ import kotlin.test.assertNull
 
 class ChatTargetTest {
     @Test
-    fun createTaskFollowsTheSameBotToTheCreatedTask() {
+    fun creatingElsewhereDoesNotChangeTheLocallySelectedTask() {
         val original = bot("b1", "task-1", "task-1")
         val target = Chat.BotChat(original).target
         val state = CompanionState(bots = listOf(original)).apply(
@@ -15,18 +15,18 @@ class ChatTargetTest {
         )
 
         assertEquals("task-1", target.threadId)
-        assertEquals("task-2", assertIs<Chat.BotChat>(state.chat(target)).threadId)
+        assertEquals("task-1", assertIs<Chat.BotChat>(state.chat(target)).threadId)
     }
 
     @Test
-    fun switchTaskFollowsTheSameBotToItsNewActiveTask() {
+    fun switchingElsewhereDoesNotChangeTheLocallySelectedTask() {
         val original = bot("b1", "task-1", "task-1", "task-2")
         val target = Chat.BotChat(original).target
         val state = CompanionState(bots = listOf(original)).apply(
             Frame.Bot(bot("b1", "task-2", "task-1", "task-2")),
         )
 
-        assertEquals("task-2", assertIs<Chat.BotChat>(state.chat(target)).threadId)
+        assertEquals("task-1", assertIs<Chat.BotChat>(state.chat(target)).threadId)
     }
 
     @Test
@@ -41,7 +41,7 @@ class ChatTargetTest {
     }
 
     @Test
-    fun deletingTheActiveTaskFollowsTheDesktopSelectedTask() {
+    fun deletingTheLocallySelectedTaskClosesItWithoutChoosingASibling() {
         val original = bot("b1", "task-2", "task-1", "task-2")
         val target = Chat.BotChat(original).target
         val state = CompanionState(bots = listOf(original)).apply(
@@ -49,7 +49,7 @@ class ChatTargetTest {
         )
 
         assertEquals("task-2", target.threadId)
-        assertEquals("task-1", assertIs<Chat.BotChat>(state.chat(target)).threadId)
+        assertNull(state.chat(target))
     }
 
     @Test

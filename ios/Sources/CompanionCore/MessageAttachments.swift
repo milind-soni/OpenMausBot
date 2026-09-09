@@ -143,7 +143,8 @@ public enum AttachmentPolicy {
 
 /// What tapping a Markdown link in a message is allowed to do. Web links go
 /// to the system. Absolute desktop paths go back through the authenticated
-/// companion file route. Relative and custom-scheme links do nothing.
+/// companion file route. Relative paths are resolved by that route against
+/// the originating conversation's workspace. Custom schemes do nothing.
 public enum LocalMessageLink: Equatable, Sendable {
     case web(URL)
     case desktopFile(path: String)
@@ -154,39 +155,64 @@ public enum LocalMessageLink: Equatable, Sendable {
               !value.unicodeScalars.contains(where: CharacterSet.controlCharacters.contains)
         else { return nil }
 
-        if isWindowsAbsolutePath(value) || isUNCPath(value) {
+        if isWindowsAbsolutePath(value) || isBackslashUNCPath(value) {
             return .desktopFile(path: value)
+        }
+        // In Markdown, //host/path is a protocol-relative web link. Keep it
+        // out of the UNC path branch; file://host/path remains the explicit
+        // spelling for a network share.
+        if value.hasPrefix("//") {
+            guard let components = URLComponents(string: "https:\(value)"),
+                  let url = components.url,
+                  components.host?.isEmpty == false
+            else { return nil }
+            return .web(url)
         }
         if value.hasPrefix("/") { return .desktopFile(path: value) }
 
-        guard let components = URLComponents(string: value),
-              let scheme = components.scheme?.lowercased()
-        else { return nil }
-        if scheme == "http" || scheme == "https" {
-            guard let url = components.url, components.host?.isEmpty == false else { return nil }
-            return .web(url)
+        if let schemeRange = value.range(
+            of: #"^[A-Za-z][A-Za-z0-9+.-]*:"#,
+            options: .regularExpression
+        ) {
+            guard schemeRange.lowerBound == value.startIndex,
+                  let components = URLComponents(string: value),
+                  let scheme = components.scheme?.lowercased()
+            else { return nil }
+            if scheme == "http" || scheme == "https" {
+                guard let url = components.url, components.host?.isEmpty == false else { return nil }
+                return .web(url)
+            }
+            if scheme == "file" {
+                guard components.query == nil, components.fragment == nil else { return nil }
+                guard var path = components.percentEncodedPath.removingPercentEncoding else { return nil }
+                if path.hasPrefix("/"), isWindowsAbsolutePath(String(path.dropFirst())) {
+                    path.removeFirst()
+                }
+                if let host = components.host, !host.isEmpty, host.lowercased() != "localhost" {
+                    let sharePath = path.replacingOccurrences(of: "/", with: "\\")
+                    path = "\\\\\(host)\(sharePath)"
+                }
+                guard path.hasPrefix("/") || isWindowsAbsolutePath(path) || isBackslashUNCPath(path) else {
+                    return nil
+                }
+                return .desktopFile(path: path)
+            }
+            return nil
         }
-        if scheme == "file" {
-            guard components.query == nil, components.fragment == nil else { return nil }
-            var path = components.percentEncodedPath.removingPercentEncoding ?? components.path
-            if path.hasPrefix("/"), isWindowsAbsolutePath(String(path.dropFirst())) {
-                path.removeFirst()
-            }
-            if let host = components.host, !host.isEmpty, host.lowercased() != "localhost" {
-                path = "//\(host)\(path)"
-            }
-            guard path.hasPrefix("/") || isWindowsAbsolutePath(path) || isUNCPath(path) else {
-                return nil
-            }
-            return .desktopFile(path: path)
-        }
-        return nil
+
+        // Query strings and fragments belong to the Markdown target, not the
+        // local filename. Decode the path the same way as the scoped server
+        // matcher, while refusing query-only/fragment-only links.
+        let delimiter = value.firstIndex(where: { $0 == "?" || $0 == "#" }) ?? value.endIndex
+        let pathPart = String(value[..<delimiter])
+        guard !pathPart.isEmpty, let path = pathPart.removingPercentEncoding, !path.isEmpty else { return nil }
+        return .desktopFile(path: path)
     }
 
     public static func resolve(_ url: URL) -> LocalMessageLink? {
         let value = url.absoluteString
         if let decoded = value.removingPercentEncoding,
-           isWindowsAbsolutePath(decoded) || isUNCPath(decoded) {
+           isWindowsAbsolutePath(decoded) || isBackslashUNCPath(decoded) {
             return .desktopFile(path: decoded)
         }
         return resolve(value)
@@ -199,8 +225,8 @@ public enum LocalMessageLink: Equatable, Sendable {
         return letter && bytes[1] == 58 && (bytes[2] == 47 || bytes[2] == 92)
     }
 
-    private static func isUNCPath(_ value: String) -> Bool {
-        value.hasPrefix("\\\\") || value.hasPrefix("//")
+    private static func isBackslashUNCPath(_ value: String) -> Bool {
+        value.hasPrefix("\\\\")
     }
 }
 

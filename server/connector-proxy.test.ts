@@ -56,7 +56,10 @@ describe("connector MCP bridge", () => {
     });
     const lines = start({
       OMB_HARNESS_URL: harness,
-      OMB_COMMS_TOKEN: "bridge-secret",
+      OMB_CONNECTOR_TOKEN: "bridge-secret",
+      // A simultaneously mounted agents proxy may define this different
+      // value in Codex's flattened child environment.
+      OMB_COMMS_TOKEN: "agents-secret",
       OMB_BOT_ID: "bot-1",
       OMB_THREAD_ID: "thread-1",
     });
@@ -70,8 +73,56 @@ describe("connector MCP bridge", () => {
     expect(reply.id).toBe(7);
     expect(reply.result.content[0].text).toMatch(/secure connection card/i);
     expect(received.authorization).toBe("Bearer bridge-secret");
-    expect(received.body).toMatchObject({ botId: "bot-1", threadId: "thread-1", slugs: ["gmail"] });
+    expect(received.body).toMatchObject({ botId: "bot-1", threadId: "thread-1", items: [{ slug: "gmail" }] });
     expect(received.body.resumeKey).toMatch(/^[\w-]{8,100}$/);
+  });
+
+  it("carries an account alias when the agent asks for a second account", async () => {
+    let received: any = null;
+    const harness = await listen((request, response) => {
+      let body = "";
+      request.on("data", (chunk) => { body += chunk; });
+      request.on("end", () => {
+        received = { authorization: request.headers.authorization, body: JSON.parse(body) };
+        response.writeHead(200, { "content-type": "application/json" });
+        response.end("{}");
+      });
+    });
+    const lines = start({
+      OMB_HARNESS_URL: harness,
+      OMB_CONNECTOR_TOKEN: "bridge-secret",
+      OMB_BOT_ID: "bot-1",
+      OMB_THREAD_ID: "thread-1",
+    });
+    child!.stdin.write(`${JSON.stringify({
+      jsonrpc: "2.0",
+      id: 8,
+      method: "tools/call",
+      params: {
+        name: "COMPOSIO_MANAGE_CONNECTIONS",
+        arguments: {
+          toolkits: [
+            { toolkit: "googledrive", alias: "work-devhouse" },
+            { name: "LINEAR", account: "personal" },
+            { toolkit: "googledrive", alias: "personal" },
+            { toolkit: "GOOGLEDRIVE", alias: " Work-Devhouse " },
+          ],
+        },
+      },
+    })}\n`);
+    const reply = await nextJson(lines);
+    expect(reply.id).toBe(8);
+    expect(reply.result.content[0].text).toMatch(/secure connection card for googledrive \(work-devhouse\), linear \(personal\)/i);
+    expect(received.authorization).toBe("Bearer bridge-secret");
+    expect(received.body).toMatchObject({
+      botId: "bot-1",
+      threadId: "thread-1",
+      items: [
+        { slug: "googledrive", alias: "work-devhouse" },
+        { slug: "linear", alias: "personal" },
+        { slug: "googledrive", alias: "personal" },
+      ],
+    });
   });
 
   it("answers initialize locally so a missing or failing upstream cannot fail the MCP handshake", async () => {

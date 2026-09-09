@@ -46,7 +46,8 @@ export function UpdateBanner() {
 
   // while busy the card owns the moment: no dismissing, no second click
   const installing = s.status === "installing";
-  const busy = s.status === "downloading" || installing;
+  const preparing = s.status === "preparing";
+  const busy = s.status === "downloading" || preparing || installing;
   // Ubuntu system packages can't be swapped under a running app, so the
   // command is copied and a terminal opens; the user finishes there.
   // Nothing restarts, and the card has to stop promising that it will.
@@ -57,15 +58,17 @@ export function UpdateBanner() {
       ? `${brand().name} ${s.version} is available`
       : s.status === "downloading"
         ? `Downloading ${s.version ?? "update"}…`
-        : s.status === "downloaded"
-          ? `${s.version} is ready`
-          : installing
-            ? handoff
-              ? "Opening a terminal…"
-              : "Restarting to update…"
-            : s.status === "handed-off"
-              ? "Finish in a terminal"
-              : "Update check failed";
+        : preparing
+          ? "Preparing update…"
+          : s.status === "downloaded"
+            ? `${s.version} is ready`
+            : installing
+              ? handoff
+                ? "Opening a terminal…"
+                : "Restarting to update…"
+              : s.status === "handed-off"
+                ? "Finish in a terminal"
+                : "Update failed";
   const subtitle =
     s.status === "available"
       ? "A newer version is ready to download."
@@ -74,19 +77,23 @@ export function UpdateBanner() {
           s.percent == null
           ? "Starting download…"
           : `${Math.round(s.percent)}%`
-        : s.status === "downloaded"
-          ? handoff
-            ? "Copy the install command and open a terminal."
-            : "Restart to finish updating."
-          : installing
+        : preparing
+          ? "Download complete. macOS is preparing the update."
+          : s.status === "downloaded"
             ? handoff
-              ? "Copying the command…"
-              : `${brand().name} will reopen in a moment.`
-            : s.status === "handed-off"
-              ? s.terminalOpened
-                ? "Command copied — paste it in the terminal that opened."
-                : "Command copied — paste it in a terminal to finish."
-              : friendlyError(s.message);
+              ? "Copy the install command and open a terminal."
+              : "Restart to finish updating."
+            : installing
+              ? handoff
+                ? "Copying the command…"
+                : s.message || `${brand().name} will reopen in a moment.`
+              : s.status === "handed-off"
+                ? s.terminalOpened
+                  ? "Command copied — paste it in the terminal that opened."
+                  : "Command copied — paste it in a terminal to finish."
+                : s.retryable === false
+                  ? `Quit and reopen ${brand().name} before trying the update again.`
+                  : friendlyError(s.message);
 
   return (
     <div className="animate-panel-in fixed bottom-4 left-4 z-50 w-[300px] rounded-xl border border-hairline/40 bg-panel p-3.5 shadow-2xl shadow-black/50">
@@ -96,7 +103,7 @@ export function UpdateBanner() {
         </span>
         <div className="min-w-0 flex-1">
           <div className="text-[13.5px] font-semibold text-ink">{title}</div>
-          <div className="mt-0.5 truncate text-[12.5px] text-ink-secondary" title={subtitle}>
+          <div className="mt-0.5 text-[12.5px] text-ink-secondary" title={subtitle}>
             {subtitle}
           </div>
         </div>
@@ -131,13 +138,13 @@ export function UpdateBanner() {
         </div>
       )}
 
-      {installing && (
+      {(preparing || installing) && (
         <div className="mt-2.5 flex gap-2">
           <button
             disabled
             className="flex flex-1 items-center justify-center gap-1.5 rounded-lg bg-control py-1.5 text-[13px] font-medium text-ink-secondary"
           >
-            <Loader2 size={13} className="animate-spin" /> {handoff ? "Opening…" : "Restarting…"}
+            <Loader2 size={13} className="animate-spin" /> {preparing ? "Preparing…" : handoff ? "Opening…" : "Restarting…"}
           </button>
         </div>
       )}
@@ -188,7 +195,7 @@ export function UpdateBanner() {
               )}
             </button>
           )}
-          {s.status === "error" && (
+          {s.status === "error" && s.retryable !== false && (
             <button
               onClick={() => {
                 setPending("check");
@@ -212,7 +219,7 @@ export function UpdateBanner() {
             className="rounded-lg px-3 py-1.5 text-[13px] text-ink-secondary hover:bg-control hover:text-ink disabled:opacity-50 disabled:hover:bg-transparent"
           >
             {/* after a hand-off there is nothing left to postpone */}
-            {s.status === "handed-off" ? "Done" : "Later"}
+            {s.status === "handed-off" || s.retryable === false ? "Dismiss" : "Later"}
           </button>
         </div>
       )}

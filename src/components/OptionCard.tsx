@@ -22,9 +22,11 @@ export function shouldHideOnboardingCard(message: Message, transcript: Message[]
 
 export function OptionCard({
   botId,
+  threadId,
   message,
 }: {
   botId: string;
+  threadId?: string;
   message: Message;
 }) {
   const { state, dispatch } = useStore();
@@ -38,7 +40,7 @@ export function OptionCard({
 
   const answer = (text: string) => {
     if (!text.trim()) return;
-    dispatch({ type: "answerCard", botId, messageId: message.id, answer: text.trim() });
+    dispatch({ type: "answerCard", botId, threadId, messageId: message.id, answer: text.trim() });
   };
 
   return (
@@ -52,7 +54,7 @@ export function OptionCard({
         </div>
         <button
           onClick={() =>
-            dispatch({ type: "dismissCard", botId, messageId: message.id })
+            dispatch({ type: "dismissCard", botId, threadId, messageId: message.id })
           }
           className="rounded-md p-1 text-ink-secondary hover:bg-control hover:text-ink"
         >

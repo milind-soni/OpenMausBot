@@ -41,7 +41,7 @@ Talk to them like contacts. Watch them work. Approve what matters.
 
 <br>
 
-<a href="https://buy.polar.sh/polar_cl_EEzWmormSVBD151HkmkyId9j0GPXina0KurfS1fYYcO">
+<a href="https://buy.polar.sh/polar_cl_bbnfWFUrWONIF4HnUpZf1p0if0eUYg3HeXct73b48Yg">
   <img src="https://img.shields.io/badge/%E2%9D%A4%EF%B8%8F%20%20Support%20OpenMausBot-any%20amount%20%C2%B7%20or%20monthly-38d591?style=for-the-badge&labelColor=070707" alt="Support OpenMausBot — one-time any amount or monthly, via Polar" height="40">
 </a>
 
@@ -233,6 +233,8 @@ See [MCP server setup and tool reference](docs/mcp-server.md).
 | **Ubuntu 24.04** (x64) | [OpenMausBot-amd64.deb](https://github.com/milind-soni/OpenMausBot/releases/latest/download/OpenMausBot-amd64.deb) · [OpenMausBot.AppImage](https://github.com/milind-soni/OpenMausBot/releases/latest/download/OpenMausBot.AppImage) | Install the `.deb` with APT (recommended), or make the AppImage executable and run it. Beta; GNOME is the supported desktop. |
 
 See the [Ubuntu Desktop guide](docs/linux-desktop.md) for installation, capabilities, and troubleshooting.
+Any desktop build can also pair as a client to another Windows, macOS, or Ubuntu host over Tailscale; see [desktop-to-desktop companion mode](docs/desktop-companion.md).
+
 
 **From source:**
 
@@ -338,13 +340,55 @@ Users can add their own MCP tool servers with zero code via [`docs/custom-mcp-se
 ## Support the project
 
 OpenMausBot is free and open source. If it does real work for you, you can
-[buy the project a coffee or become a monthly supporter](https://buy.polar.sh/polar_cl_EEzWmormSVBD151HkmkyId9j0GPXina0KurfS1fYYcO) —
+[buy the project a coffee or become a monthly supporter](https://buy.polar.sh/polar_cl_bbnfWFUrWONIF4HnUpZf1p0if0eUYg3HeXct73b48Yg) —
 one-time any amount, or monthly. Payments are handled by [Polar](https://polar.sh/supamaus),
 which takes care of receipts and taxes; nothing about the app ever sits behind a paywall.
 
+## Run from a terminal or on a server
+
+With Node 24 or newer, install once and run:
+
+```sh
+npm install -g openmausbot
+openmausbot
+```
+
+Or use `npx openmausbot` without a global install. First launch guides you with
+arrow-key choices: choose AI access, sign in or paste a hidden API key, choose
+a model, and optionally connect a phone. Next time, the same command reuses your
+saved setup and opens the local workspace. Keep the terminal open; Ctrl-C stops
+the server, not your saved work. Use `--no-open` to skip opening the browser.
+
+Phone access is optional and defaults to skipping. Choose an explicitly
+approved managed public HTTPS endpoint protected by pairing, an existing
+Tailscale connection, or your own HTTPS reverse proxy. Use Safari or an installed
+iOS app on iPhone/iPad; Android uses the web browser for this CLI flow. A phone
+cannot use a localhost link. `--local` ignores saved remote access for one launch;
+`--no-pair` suppresses phone prompts and invitations but does not disable a saved
+remote connection.
+
+Run `openmausbot setup` to reconfigure without resetting bots or conversations;
+the saved model default applies only to new bots. Native setup confirms provider
+sign-in; API setup asks before a potentially billable test message. API keys are
+saved as plaintext, not encrypted, in private `config.json` (`0600` on Unix).
+See the [short setup guide](docs/cli-onboarding.md) for account differences,
+phone choices, credential storage, and cancellation.
+
+For a background service on a VPS or an always-on computer, use
+`npx openmausbot serve` with explicit remote options: `--tunnel` after
+`npx openmausbot login` for a managed public address, `--tailscale` for your
+tailnet, or the Docker stack for your own domain. These are separate from
+AI-provider sign-in. Devices pair once with a short code. The deployment guide is
+[docs/deploy-vps.md](docs/deploy-vps.md); the reference is
+[docs/self-hosting.md](docs/self-hosting.md).
+
 ## License
 
-[Apache License 2.0](LICENSE) © 2026 Milind Soni and OpenMausBot contributors.
+[Apache License 2.0](LICENSE) © 2026 Milind Soni and OpenMausBot contributors,
+except `enterprise/`, which is source-available under its
+[own license](enterprise/LICENSE); delete that folder and what remains is the
+open-source edition. Details, including how contributions are signed off, are
+in [LICENSING.md](LICENSING.md).
 
 Packaged Cua Driver components retain their upstream MIT, SIL OFL 1.1, MPL-2.0, and other dependency terms;
 the corresponding notices, license texts, source locations, and SBOM are in

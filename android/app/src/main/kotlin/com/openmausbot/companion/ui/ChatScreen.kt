@@ -16,6 +16,7 @@ import androidx.compose.animation.slideInVertically
 import androidx.compose.animation.slideOutVertically
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -31,6 +32,7 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.CircleShape
@@ -45,7 +47,7 @@ import androidx.compose.material.icons.automirrored.filled.Send
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.MoreVert
-import androidx.compose.material.icons.filled.Person
+import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.Share
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
@@ -78,6 +80,7 @@ import androidx.compose.ui.input.key.isShiftPressed
 import androidx.compose.ui.input.key.key
 import androidx.compose.ui.input.key.onPreviewKeyEvent
 import androidx.compose.ui.input.key.type
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.platform.LocalUriHandler
@@ -100,15 +103,20 @@ import com.openmausbot.companion.core.Chat
 import com.openmausbot.companion.core.ChatTarget
 import com.openmausbot.companion.core.LocalMessageLink
 import com.openmausbot.companion.core.PendingMessageAttachment
+import com.openmausbot.companion.core.QueuedSend
 import com.openmausbot.companion.core.CompanionState
 import com.openmausbot.companion.core.Dictation
+import com.openmausbot.companion.core.DisplayedMessageAttachment
+import com.openmausbot.companion.core.DownloadedFile
 import com.openmausbot.companion.core.Message
+import com.openmausbot.companion.core.ThreadRef
 import com.openmausbot.companion.core.TranscriptRow
 import com.openmausbot.companion.core.target
 import com.openmausbot.companion.core.transcriptRows
 import java.util.Locale
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
@@ -131,12 +139,15 @@ fun ChatScreen(
     onResolved: (ChatTarget) -> Unit,
     onBack: () -> Unit,
     onOpenComputer: (String) -> Unit,
+    onOpenOverview: (String) -> Unit,
     /**
      * True while this conversation is still on the navigator stack (including
      * under Computer). Used on dispose to keep the in-memory draft across a
      * push and drop it after a pop that removed the chat.
      */
     retainsDraft: (chatId: String) -> Boolean = { false },
+    /** An "Opened thread" chip pointing at another bot pushes that chat. */
+    onOpenChat: (Chat) -> Unit = {},
 ) {
     val session = LocalCompanion.current.session
     val state by session.state.collectAsState()
@@ -153,12 +164,10 @@ fun ChatScreen(
         ThreadResolution.Result.Gone -> LaunchedEffect(destination) { onBack() }
         // The live chat record, so busy/unread stay current as frames land.
         is ThreadResolution.Result.Open -> {
-            // A thread the fleet has now put a name to stops being a thread, so
-            // this chat follows its bot from here on — including when the task
-            // that is open is the one deleted.
+            // Resolve the owner without changing the task named by the destination.
             val resolved = (destination as? Destination.Thread)?.let { resolution.chat.target }
             LaunchedEffect(resolved) { if (resolved != null) onResolved(resolved) }
-            LoadedChat(resolution.chat, state, onBack, onOpenComputer, retainsDraft)
+            LoadedChat(resolution.chat, state, onBack, onOpenComputer, onOpenOverview, retainsDraft, onResolved, onOpenChat)
         }
     }
 }
@@ -187,11 +196,12 @@ private fun LoadedChat(
     state: CompanionState,
     onBack: () -> Unit,
     onOpenComputer: (String) -> Unit,
+    onOpenOverview: (String) -> Unit,
     retainsDraft: (chatId: String) -> Boolean,
+    onSelectTask: (ChatTarget) -> Unit,
+    onOpenChat: (Chat) -> Unit,
 ) {
-    // The bot's *current* thread, not the one the destination named. Switching or
-    // creating a task moves a bot to another thread; everything below re-keys on
-    // that, so the screen follows the bot to the task it is now in.
+    // This screen's selected task, independent of the desktop's selection.
     val threadId = chat.threadId
     // Stable conversation identity — not threadId. iOS keeps `@State draft`
     // across a task switch inside the same ChatView; keying the draft on
@@ -203,7 +213,43 @@ private fun LoadedChat(
     val chatDrafts = environment.chatDrafts
     val haptics = rememberHaptics()
     val scope = rememberCoroutineScope()
+    var threadOpenJob by remember { mutableStateOf<Job?>(null) }
+    DisposableEffect(threadId) {
+        onDispose { threadOpenJob?.cancel() }
+    }
     val lifecycleOwner = LocalLifecycleOwner.current
+    // Words this computer is holding until the running turn settles.
+    val queuedSends = state.pendingQueued[threadId].orEmpty()
+    val steeringInstanceIds by session.steeringInstanceIds.collectAsState()
+    // Whether this bot's engine can take a message INTO the running turn.
+    // Unknown reads as false, which is the promise that is always safe to
+    // make: the message will be sent, just not necessarily right now.
+    val steerTarget = (chat as? Chat.BotChat)?.bot
+    val engineCanSteer = steerTarget?.modelSelection?.instanceId
+        ?.let { it in steeringInstanceIds }
+        ?: false
+    // A Steer is in flight. Cleared when the queue drains or the turn ends,
+    // whichever the engine gets to first — and after twenty seconds even if
+    // neither frame ever arrives, because a control that spins for ever is
+    // worse than one that admits it does not know.
+    var steering by remember(threadId) { mutableStateOf(false) }
+    LaunchedEffect(queuedSends.size, chat.busy) {
+        if (queuedSends.isEmpty() || !chat.busy) steering = false
+    }
+    LaunchedEffect(steering) {
+        if (steering) {
+            delay(20_000)
+            steering = false
+        }
+    }
+    val steerNow: (() -> Unit)? = steerTarget?.let { target ->
+        {
+            haptics.play(HapticCue.SELECT)
+            dictation.stop()
+            steering = true
+            scope.launch { session.interrupt(target) }
+        }
+    }
     var showingTasks by remember { mutableStateOf(false) }
     // Saveable: the profile form is a form, and a rotation must not throw away
     // what was typed into it — the sheet has to come back for that to matter.
@@ -221,15 +267,24 @@ private fun LoadedChat(
     var sendingMessage by remember(chatId) { mutableStateOf(false) }
     var attachmentError by remember(chatId) { mutableStateOf<String?>(null) }
     // A bot-linked file on its way from the computer, and where it landed.
-    var openingFileName by remember { mutableStateOf<String?>(null) }
-    var fileOpenError by remember { mutableStateOf<String?>(null) }
-    var filePreview by remember { mutableStateOf<FilePreviewItem?>(null) }
-    var fileDownloadJob by remember { mutableStateOf<Job?>(null) }
+    var openingFileName by remember(threadId) { mutableStateOf<String?>(null) }
+    var fileOpenError by remember(threadId) { mutableStateOf<String?>(null) }
+    var filePreview by remember(threadId) { mutableStateOf<FilePreviewItem?>(null) }
+    var fileDownloadJob by remember(threadId) { mutableStateOf<Job?>(null) }
     val filePreviews = remember(context) { FilePreviews(context) }
     DisposableEffect(filePreviews) {
         onDispose {
             fileDownloadJob?.cancel()
             filePreviews.clear()
+        }
+    }
+    DisposableEffect(filePreviews, threadId) {
+        onDispose {
+            // LoadedChat follows the bot when its task changes. Invalidate the
+            // old request and its published preview as one lifecycle step; a
+            // late completion can no longer write into the next task's UI.
+            filePreviews.invalidateCurrent()
+            fileDownloadJob?.cancel()
         }
     }
     val canAddAttachment = AttachmentImportRules.canAdd(attachments.size, preparingAttachments, sendingMessage)
@@ -279,36 +334,81 @@ private fun LoadedChat(
         }
     }
 
+    /** Every computer-local attachment takes the authenticated message-file route. */
+    fun openFile(
+        path: String,
+        message: Message,
+        prepared: DownloadedFile? = null,
+        preferredName: String? = null,
+        cacheResult: Boolean = false,
+    ) {
+        val requestGeneration = filePreviews.beginRequest()
+        val requestedThreadId = threadId
+        fileDownloadJob?.cancel()
+        fileOpenError = null
+        openingFileName = preferredName ?: prepared?.filename ?: FilePreviewRules.nameForOpening(path)
+        fileDownloadJob = scope.launch {
+            val fetched = prepared ?: session.downloadFile(
+                requestedThreadId,
+                message.id,
+                path,
+                cacheResult = cacheResult,
+            )
+            if (!filePreviews.isCurrent(requestGeneration)) return@launch
+            openingFileName = null
+            if (fetched == null) {
+                fileOpenError = session.actionError ?: "Couldn't open that file. Try again."
+                session.actionError = null
+                return@launch
+            }
+            val item = try {
+                // The tag's display name labels the card only. Materialising
+                // and sharing must use the canonical Content-Disposition name
+                // returned by the scoped download route.
+                withContext(Dispatchers.IO) { filePreviews.store(fetched, requestGeneration) }
+            } catch (error: kotlinx.coroutines.CancellationException) {
+                throw error
+            } catch (_: Throwable) {
+                if (!filePreviews.isCurrent(requestGeneration)) return@launch
+                fileOpenError = "The downloaded file couldn't be previewed."
+                return@launch
+            } ?: return@launch
+            if (!filePreviews.isCurrent(requestGeneration)) return@launch
+            filePreview = item
+        }
+    }
+
     // A tapped link in a bot reply: the web goes to the system, a desktop path
     // comes back through the computer, anything else is refused out loud.
     fun openLink(url: String, message: Message) {
         when (val target = LocalMessageLink.resolve(url)) {
             is LocalMessageLink.Web -> runCatching { uriHandler.openUri(target.url) }
                 .onFailure { fileOpenError = "This link can't be opened on this phone." }
-            is LocalMessageLink.DesktopFile -> {
-                fileDownloadJob?.cancel()
-                fileOpenError = null
-                openingFileName = FilePreviewRules.nameForOpening(target.path)
-                fileDownloadJob = scope.launch {
-                    val downloaded = session.downloadFile(threadId, message.id, target.path)
-                    openingFileName = null
-                    if (downloaded == null) {
-                        fileOpenError = session.actionError ?: "Couldn't open that file. Try again."
-                        session.actionError = null
-                        return@launch
-                    }
-                    val item = runCatching { withContext(Dispatchers.IO) { filePreviews.store(downloaded) } }
-                        .getOrElse {
-                            fileOpenError = "The downloaded file couldn't be previewed."
-                            return@launch
-                        }
-                    when (item.kind) {
-                        FilePreviewKind.MARKDOWN, FilePreviewKind.TEXT -> filePreview = item
-                        FilePreviewKind.OTHER -> filePreviews.openWithSystem(item)?.let { fileOpenError = it }
-                    }
-                }
-            }
+            is LocalMessageLink.DesktopFile -> openFile(target.path, message)
             null -> fileOpenError = "This link can't be opened securely."
+        }
+    }
+
+    fun openAttachment(
+        attachment: DisplayedMessageAttachment,
+        message: Message,
+        downloaded: DownloadedFile?,
+    ) = openFile(
+        attachment.path,
+        message,
+        downloaded,
+        preferredName = attachment.name,
+        cacheResult = true,
+    )
+
+    // A chip that opened a thread on this bot switches this screen in place,
+    // the way a thread row does; one that opened a thread on a teammate pushes
+    // that chat.
+    fun openThread(ref: ThreadRef) {
+        threadOpenJob?.cancel()
+        threadOpenJob = scope.launch {
+            val bot = session.openThread(ref) ?: return@launch
+            if (bot.id == chatId) onSelectTask(ChatTarget.Bot(bot.id, bot.threadId)) else onOpenChat(Chat.BotChat(bot))
         }
     }
     val focusedMessageId by session.focusedMessageId.collectAsState()
@@ -448,6 +548,9 @@ private fun LoadedChat(
     LaunchedEffect(threadId, chat.unread) {
         if (chat.unread) session.markRead(chat)
     }
+    LaunchedEffect(threadId, state.messages.containsKey(threadId)) {
+        if (!state.messages.containsKey(threadId)) session.loadThread(threadId)
+    }
 
     val headerCount = if (hasMore) 1 else 0
     // One slot at the bottom, whichever of the three is in it — iOS gives all of
@@ -508,8 +611,9 @@ private fun LoadedChat(
             )
             ChatActionId.NEW_TASK -> scope.launch {
                 when (chat) {
-                    is Chat.BotChat -> session.createTask(chat.bot, null)
+                    is Chat.BotChat -> session.createTask(chat.bot, null)?.let { onSelectTask(Chat.BotChat(it).target) }
                     is Chat.RoomChat -> if (chat.supportsTasks) session.createTask(chat.room, null)
+                        ?.let { onSelectTask(Chat.RoomChat(it).target) }
                 }
             }
             ChatActionId.TASKS -> showingTasks = true
@@ -520,6 +624,7 @@ private fun LoadedChat(
                 dictation.stop()
                 if (bot != null) onOpenComputer(bot.id)
             }
+            ChatActionId.SETTINGS -> if (bot != null) showingProfile = true
             ChatActionId.SHARE_MARKDOWN -> share(scope, environment, threadId, ShareFormat.MARKDOWN)
             ChatActionId.SHARE_JSON -> share(scope, environment, threadId, ShareFormat.JSON)
             ChatActionId.INTERRUPT -> if (bot != null) scope.launch { session.interrupt(bot) }
@@ -648,11 +753,22 @@ private fun LoadedChat(
             Box(
                 modifier = Modifier
                     .weight(1f)
-                    .fillMaxWidth(),
+                    .fillMaxWidth()
+                    // Tapping the transcript puts the keyboard away, the way
+                    // it does on iOS. `detectTapGestures` and not `clickable`:
+                    // the transcript is not a button, so it should not answer
+                    // to TalkBack as one, and a tap a row has already taken —
+                    // a link, a card button — never reaches this far.
+                    .pointerInput(Unit) {
+                        detectTapGestures { focusManager.clearFocus() }
+                    },
             ) {
                 LazyColumn(
                     state = listState,
-                    modifier = Modifier.fillMaxSize(),
+                    modifier = Modifier
+                        .align(Alignment.Center)
+                        .widthIn(max = CHAT_CONTENT_MAX_WIDTH)
+                        .fillMaxSize(),
                     contentPadding = PaddingValues(
                         start = 16.dp,
                         end = 16.dp,
@@ -725,8 +841,10 @@ private fun LoadedChat(
                                     // not one per bubble.
                                     endsRun = TranscriptLayout.endsRowRun(transcript, index),
                                     openLink = ::openLink,
+                                    openAttachment = ::openAttachment,
+                                    openThread = ::openThread,
                                 )
-                                is TranscriptRow.ActivityRun -> ActivityRunChip(message.items)
+                                is TranscriptRow.ActivityRun -> ActivityRunChip(message.items, ::openThread)
                             }
                         }
                     }
@@ -767,10 +885,16 @@ private fun LoadedChat(
                             showingPlus = true
                         }
                     },
+                    modifier = Modifier
+                        .align(Alignment.TopCenter)
+                        .widthIn(max = CHAT_CONTENT_MAX_WIDTH),
                 )
             }
 
             Composer(
+                modifier = Modifier
+                    .align(Alignment.CenterHorizontally)
+                    .widthIn(max = CHAT_CONTENT_MAX_WIDTH),
                 name = chat.name,
                 draft = draft,
                 accessory = ComposerAccessories.accessory(
@@ -790,6 +914,14 @@ private fun LoadedChat(
                 attachments = attachments,
                 sending = sendingMessage,
                 preparing = preparingAttachments,
+                busy = chat.busy,
+                engineCanSteer = engineCanSteer,
+                queuedSends = queuedSends,
+                steering = steering,
+                onSteer = steerNow,
+                onCancelQueued = { queued ->
+                    scope.launch { session.cancelQueued(queued, chat) }
+                },
                 openingFileName = openingFileName,
                 attachmentError = fileOpenError ?: attachmentError,
                 onRemoveAttachment = { attachment ->
@@ -850,15 +982,30 @@ private fun LoadedChat(
     }
 
     if (showingTasks) {
-        if (chat.supportsTasks) TaskSheet(chat = chat, onDismiss = { showingTasks = false })
+        if (chat.supportsTasks) TaskSheet(chat = chat, onDismiss = { showingTasks = false }, onSelectTask = onSelectTask)
     }
 
     if (showingProfile && bot != null) {
-        AgentProfileSheet(bot = bot, onDismiss = { showingProfile = false })
+        AgentProfileSheet(
+            bot = bot,
+            onDismiss = { showingProfile = false },
+            onOpenOverview = {
+                onOpenOverview(it)
+                showingProfile = false
+            },
+        )
     }
 
     filePreview?.let { item ->
-        FilePreviewSheet(item = item, onDismiss = { filePreview = null })
+        FilePreviewSheet(
+            item = item,
+            onDismiss = {
+                filePreview = null
+                scope.launch(Dispatchers.IO) { filePreviews.dismiss(item) }
+            },
+            onShare = { filePreviews.share(item) },
+            onOpen = { filePreviews.openWithSystem(item) },
+        )
     }
 }
 
@@ -877,6 +1024,7 @@ private fun share(
 
 private const val LOAD_EARLIER_KEY = "companion.loadEarlier"
 private const val LIVE_BUBBLE_KEY = "companion.live"
+private val CHAT_CONTENT_MAX_WIDTH = 840.dp
 
 /** `itemsIndexed` with the message id as the key — one call site, one helper. */
 private fun androidx.compose.foundation.lazy.LazyListScope.itemsIndexedKeyed(
@@ -912,9 +1060,10 @@ private fun ChatHeader(
     onBack: () -> Unit,
     onWatchComputer: () -> Unit,
     onOpenProfile: () -> Unit,
+    modifier: Modifier = Modifier,
 ) {
     val surface = MaterialTheme.colorScheme.surface
-    Box(modifier = Modifier.fillMaxWidth()) {
+    Box(modifier = modifier.fillMaxWidth()) {
         Spacer(
             modifier = Modifier
                 .fillMaxWidth()
@@ -964,7 +1113,7 @@ private fun ChatHeader(
                 modifier = if (chat is Chat.BotChat) {
                     Modifier
                         .clickable(role = Role.Button, onClick = onOpenProfile)
-                        .semantics { contentDescription = "Open ${chat.name} profile" }
+                        .semantics { contentDescription = "Open ${chat.name} settings" }
                 } else {
                     Modifier
                 },
@@ -1027,7 +1176,7 @@ private fun NamePill(chat: Chat, onOpen: () -> Unit) {
             .clickable(
                 role = Role.Button,
                 onClickLabel = if (isBot) {
-                    "Open ${chat.name} profile"
+                    "Open ${chat.name} settings"
                 } else {
                     "Open ${chat.name} chat options"
                 },
@@ -1056,7 +1205,7 @@ private fun NamePill(chat: Chat, onOpen: () -> Unit) {
             )
         }
         Icon(
-            imageVector = if (isBot) Icons.Filled.Person else Icons.Filled.MoreVert,
+            imageVector = if (isBot) Icons.Filled.Settings else Icons.Filled.MoreVert,
             contentDescription = null,
             tint = secondaryTint,
             modifier = Modifier.size(16.dp),
@@ -1202,6 +1351,8 @@ private fun ChatActionIcon(id: ChatActionId, tint: Color) {
             Icon(Icons.AutoMirrored.Filled.List, null, tint = tint, modifier = modifier)
         ChatActionId.WATCH_COMPUTER ->
             Icon(painterResource(R.drawable.ic_display), null, tint = tint, modifier = modifier)
+        ChatActionId.SETTINGS ->
+            Icon(Icons.Filled.Settings, null, tint = tint, modifier = modifier)
         ChatActionId.SHARE_MARKDOWN, ChatActionId.SHARE_JSON ->
             Icon(Icons.Filled.Share, null, tint = tint, modifier = modifier)
         ChatActionId.INTERRUPT ->
@@ -1212,6 +1363,7 @@ private fun ChatActionIcon(id: ChatActionId, tint: Color) {
 /** A round + and a pill with the send button inside it. */
 @Composable
 private fun Composer(
+    modifier: Modifier = Modifier,
     name: String,
     draft: String,
     accessory: ComposerAccessory,
@@ -1232,6 +1384,12 @@ private fun Composer(
     attachments: List<PendingMessageAttachment>,
     sending: Boolean,
     preparing: Boolean,
+    busy: Boolean,
+    engineCanSteer: Boolean,
+    queuedSends: List<QueuedSend>,
+    steering: Boolean,
+    onSteer: (() -> Unit)?,
+    onCancelQueued: (QueuedSend) -> Unit,
     openingFileName: String?,
     attachmentError: String?,
     onRemoveAttachment: (PendingMessageAttachment) -> Unit,
@@ -1247,7 +1405,7 @@ private fun Composer(
         label = "plus",
     )
     Column(
-        modifier = Modifier
+        modifier = modifier
             .fillMaxWidth()
             .padding(start = 12.dp, end = 12.dp, top = 6.dp, bottom = 8.dp),
         verticalArrangement = Arrangement.spacedBy(6.dp),
@@ -1296,6 +1454,17 @@ private fun Composer(
                         .padding(horizontal = 6.dp, vertical = 4.dp),
                 )
             }
+        }
+        // Everything the computer is holding, stacked straight above the chat
+        // bar in the order it was sent.
+        queuedSends.forEach { queued ->
+            QueuedSendRow(
+                send = queued,
+                onSteer = onSteer,
+                steering = steering,
+                onCancel = { onCancelQueued(queued) },
+                modifier = Modifier.fillMaxWidth(),
+            )
         }
         if (attachments.isNotEmpty()) {
             Row(
@@ -1409,11 +1578,13 @@ private fun Composer(
                 ) {
                     if (draft.isEmpty()) {
                         Text(
-                            text = when {
-                                sending -> "Sending…"
-                                dictationListening -> "Listening…"
-                                else -> "Ask $name"
-                            },
+                            text = ComposerPromise.placeholder(
+                                name = name,
+                                busy = busy,
+                                engineCanSteer = engineCanSteer,
+                                sending = sending,
+                                listening = dictationListening,
+                            ),
                             fontSize = 17.sp,
                             color = secondaryTint,
                         )

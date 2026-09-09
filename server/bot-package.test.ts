@@ -25,6 +25,7 @@ const validPackage: any = {
         description: "Own the brief.",
         appearance: { color: "purple" },
         playbooks: ["source-check"],
+        approvalMode: "full",
         autoApprove: true,
       },
     ],
@@ -51,9 +52,19 @@ const validPackage: any = {
 };
 
 describe("bot packages", () => {
+  it("round-trips optional soul through Markdown and the import persona, with the profile byte cap", () => {
+    const input = structuredClone(validPackage);
+    const soul = "  Preserve precise instructions. 🐭\n";
+    input.package.agents[0].soul = soul;
+    const parsed = parseBotPackage(renderBotPackageMarkdown(parseBotPackage(input)));
+    expect(packageAgentAsMember(parsed.package.agents[0]).soul).toBe(soul);
+    input.package.agents[0].soul = "🐭".repeat(6_001);
+    expect(() => parseBotPackage(input)).toThrow("24000 bytes");
+  });
   it("parses the complete portable structure and strips authority fields", () => {
     const parsed = parseBotPackage(validPackage);
     expect(parsed.package.rooms![0]?.defaultResponder).toEqual({ kind: "agent", agent: "lead" });
+    expect(parsed.package.agents[0]).not.toHaveProperty("approvalMode");
     expect(parsed.package.agents[0]).not.toHaveProperty("autoApprove");
     expect(packageAgentAsMember(parsed.package.agents[0]!)).toEqual({
       key: "lead",
@@ -69,6 +80,7 @@ describe("bot packages", () => {
     expect(markdown).toContain("## Activation");
     expect(markdown).toContain("Give this file to your Chief of Staff");
     expect(markdown).not.toContain("autoApprove");
+    expect(markdown).not.toContain("approvalMode");
     expect(parseBotPackage(markdown).package).toMatchObject({
       id: "research-desk",
       chiefOfStaff: "lead",
@@ -113,7 +125,14 @@ describe("bot packages", () => {
           agent: "lead",
           prompt: "Check the queue.",
           runOn: "maus",
-          schedule: { type: "interval", everyMinutes: 15, anchorAt: 1_788_254_400_000 },
+          schedule: {
+            type: "interval",
+            everyMinutes: 15,
+            anchorAt: 1_788_254_400_000,
+            weekdays: [1, 3, 5],
+            window: { start: "09:00", end: "17:00" },
+            endsAt: 1_790_843_400_000,
+          },
           durationMinutes: 30,
           timeoutMinutes: 20,
           enabledAfterInstall: false,
@@ -126,9 +145,14 @@ describe("bot packages", () => {
       type: "interval",
       everyMinutes: 15,
       anchorAt: 1_788_254_400_000,
+      weekdays: [1, 3, 5],
+      window: { start: "09:00", end: "17:00" },
+      endsAt: 1_790_843_400_000,
     });
     expect(parsed.package.routines?.[0]?.timeoutMinutes).toBe(20);
     expect(renderBotPackageMarkdown(parsed)).toContain("every 15 minutes");
+    expect(renderBotPackageMarkdown(parsed)).toContain("Monday, Wednesday, Friday");
+    expect(renderBotPackageMarkdown(parsed)).toContain("09:00–17:00");
     expect(renderBotPackageMarkdown(parsed)).toContain("**Run limit:** 20 minutes");
     expect(() => parseBotPackage({
       ...document,
@@ -144,6 +168,32 @@ describe("bot packages", () => {
         }],
       },
     })).toThrow();
+    expect(() => parseBotPackage({
+      ...document,
+      package: {
+        ...document.package,
+        routines: [{
+          ...document.package.routines[0],
+          schedule: {
+            ...document.package.routines[0].schedule,
+            weekdays: [1, 1],
+          },
+        }],
+      },
+    })).toThrow(/unique weekdays/);
+    expect(() => parseBotPackage({
+      ...document,
+      package: {
+        ...document.package,
+        routines: [{
+          ...document.package.routines[0],
+          schedule: {
+            ...document.package.routines[0].schedule,
+            window: { start: "17:00", end: "09:00" },
+          },
+        }],
+      },
+    })).toThrow(/later on the same day/);
   });
 
   it("rejects dangling agent, room, playbook, chief, and routine references", () => {

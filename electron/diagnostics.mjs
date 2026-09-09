@@ -1,5 +1,5 @@
 // One-click bug-report bundle: app facts, a safe config summary and the
-// server.log tail, formatted for pasting into a public issue. Formatting and
+// server/updater log tails, formatted for pasting into a public issue. Formatting and
 // bounded log reads live here so redaction and path safety stay unit-testable
 // without Electron; main.mjs owns the dialog plumbing. Safety is layered: the
 // collector never reads secret fields at all (only the server's booleans-only config status),
@@ -19,6 +19,7 @@ export const CREDENTIAL_ENV_NAMES = [
   "OPENCODE_API_KEY",
   "OMB_TTS_KEY",
   "OMB_OPENAI_IMAGE_KEY",
+  "OMB_CUSTOM_IMAGE_KEY",
   "COMPOSIO_API_KEY",
   "OMB_COMPOSIO_BROKER_TOKEN",
   // Browser capability files and app-owned state paths are private even
@@ -41,9 +42,10 @@ const CREDENTIAL_TOKEN_FORMATS = [
   /\bnpm_[A-Za-z0-9]{20,}/g,
 ];
 const KEY_VALUE_PAIR =
-  /\b([A-Za-z0-9_.-]*(?:api[_-]?key|apikey|secret|token|password|passwd|authorization|auth[_-]?token|access[_-]?key|private[_-]?key)s?)\s*[:=]\s*("[^"]*"|'[^']*'|[^\s"',;)\]}]+)/gi;
+  /\b([A-Za-z0-9_.-]*(?:api[_-]?key|apikey|secret|token|password|passwd|authorization|auth[_-]?token|access[_-]?key|private[_-]?key)s?)["']?\s*[:=]\s*("[^"]*"|'[^']*'|[^\s"',;)\]}]+)/gi;
 const AUTHORIZATION =
-  /\b(authorization)\s*[:=]\s*(?:"|')?([A-Za-z][A-Za-z0-9_-]*\s+[A-Za-z0-9._~+/=-]+)(?:"|')?/gi;
+  /\b(authorization)["']?\s*[:=]\s*(?:"|')?([A-Za-z][A-Za-z0-9_-]*\s+[A-Za-z0-9._~+/=-]+)(?:"|')?/gi;
+const COOKIE = /\b((?:set-)?cookie)["']?\s*[:=]\s*("[^"\r\n]*"|'[^'\r\n]*'|[^\r\n]+)/gi;
 const BEARER = /(\bbearer\s+)([A-Za-z0-9._~+/=-]{8,})/gi;
 const PEM_BLOCK =
   /(-----BEGIN [A-Z ]*PRIVATE KEY-----)[\s\S]*?(-----END [A-Z ]*PRIVATE KEY-----)/g;
@@ -57,14 +59,24 @@ const VALUE_PART = String.raw`("[^"]*"|'[^']*'|[^\s"',;)\]}]+)`;
 
 export function redactSecretsInLine(line) {
   let out = String(line ?? "");
+  // Updater HTTP errors include signed redirect URLs. Keep the host/path for
+  // diagnosis, but never export userinfo or any query/fragment, even when a
+  // provider gives its capability an unfamiliar or percent-encoded name.
+  out = out.replace(/\bhttps?:\/\/[^\s"'<>]+/gi, (url) => {
+    const query = url.search(/[?#]/);
+    const address = query < 0 ? url : url.slice(0, query);
+    return address.replace(/^(https?:\/\/)[^/]*@/i, "$1«redacted credentials»@")
+      + (query < 0 ? "" : "?«redacted URL parameters»");
+  });
   const alreadyMasked = (value) => String(value).includes("«redacted");
   for (const name of CREDENTIAL_ENV_NAMES) {
     out = out.replace(
-      new RegExp(`\\b(${name})\\s*[:=]\\s*${VALUE_PART}`, "gi"),
+      new RegExp(`\\b(${name})["']?\\s*[:=]\\s*${VALUE_PART}`, "gi"),
       (_match, key, value) => `${key}=${mask(unquote(value))}`,
     );
   }
   out = out.replace(AUTHORIZATION, (_match, key, value) => `${key}=${mask(value)}`);
+  out = out.replace(COOKIE, (_match, key, value) => `${key}=${mask(unquote(value))}`);
   out = out.replace(BEARER, (_match, lead, token) => `${lead}${mask(token)}`);
   out = out.replace(PEM_BLOCK, (_match, open, close) => `${open}«redacted private key»${close}`);
   out = out.replace(KEY_VALUE_PAIR, (_match, key, value) =>
@@ -264,6 +276,7 @@ export function buildDiagnosticsReport({
   appInfo = {},
   configSummary = {},
   desktopLogTail,
+  updaterLogTail,
   logTail,
   now = new Date().toISOString(),
 } = {}) {
@@ -300,6 +313,13 @@ export function buildDiagnosticsReport({
     for (const line of redactSecretsInLine(logTail).split(/\r?\n/)) lines.push(line);
   } else {
     lines.push("(server log unavailable)");
+  }
+  lines.push("");
+  lines.push("## Updater log tail — credentials and URL parameters auto-masked");
+  if (updaterLogTail && updaterLogTail.trim()) {
+    for (const line of redactSecretsInLine(updaterLogTail).split(/\r?\n/)) lines.push(line);
+  } else {
+    lines.push("(updater log unavailable)");
   }
   lines.push("");
   return lines.join("\n");

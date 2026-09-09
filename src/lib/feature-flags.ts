@@ -1,10 +1,28 @@
+import { t } from "./i18n";
+
 export interface FeatureFlagConfig {
-  features?: { skillRecorder?: boolean; showToolCalls?: boolean; browser?: boolean };
+  features?: { skillAuthoring?: boolean; showToolCalls?: boolean; browser?: boolean };
+  browserEngine?: { kind: "engine" | "unavailable"; reason?: string; installable?: boolean; installing?: boolean; installError?: string };
 }
 
-/** Experimental features are available only after an explicit opt-in. */
-export function skillRecorderEnabled(config: FeatureFlagConfig | null | undefined): boolean {
-  return config?.features?.skillRecorder === true;
+/** Whether this server can give a bot a browser: the agent-browser engine is
+ * installed there. Servers from before the engine report nothing: no browser. */
+export function browserAvailable(config: FeatureFlagConfig | null | undefined): boolean {
+  return config?.browserEngine?.kind === "engine";
+}
+
+/** Why a bot cannot have a browser right now, in the user's words. */
+export function browserUnavailableReason(config: FeatureFlagConfig | null | undefined): string {
+  const engine = config?.browserEngine;
+  if (engine?.kind === "unavailable" && engine.installable) return t("browser.notInstalled");
+  if (engine?.kind === "unavailable" && engine.reason) return engine.reason;
+  return t("browser.noEngine");
+}
+
+/** Bots may draft skills (/learn, skill_manage) for the user's review. Like
+ * every experiment, available only after an explicit opt-in. */
+export function skillAuthoringEnabled(config: FeatureFlagConfig | null | undefined): boolean {
+  return config?.features?.skillAuthoring === true;
 }
 
 /** The experimental built-in browser is unavailable until the person using

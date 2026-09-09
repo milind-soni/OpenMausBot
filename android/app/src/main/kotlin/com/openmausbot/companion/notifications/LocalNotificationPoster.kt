@@ -88,28 +88,90 @@ class LocalNotificationPoster(
     fun ensureChannels() {
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) return
         val system = appContext.getSystemService(NotificationManager::class.java) ?: return
-        val blocking = NotificationChannel(
-            NotificationMapping.CHANNEL_BLOCKING,
-            appContext.getString(R.string.notification_channel_blocking),
-            NotificationManager.IMPORTANCE_HIGH,
-        ).apply {
-            description = appContext.getString(R.string.notification_channel_blocking_desc)
+
+        // Re-creating a channel that already exists is supposed to be a no-op
+        // for anything but name/description, but a plain process restart on
+        // Kate's S26+ (2026-09-09) reset a custom sound she had picked for
+        // `bot_messages` — the channel's own mUserLockedFields showed
+        // visibility+lights locked but *not* sound, so this call's freshly
+        // built (soundless) NotificationChannel object was silently winning.
+        // Only ever create each channel once; leave an existing one alone,
+        // full stop, so nothing this call passes can clobber a real pick.
+        if (system.getNotificationChannel(NotificationMapping.CHANNEL_BLOCKING) == null) {
+            system.createNotificationChannel(
+                NotificationChannel(
+                    NotificationMapping.CHANNEL_BLOCKING,
+                    appContext.getString(R.string.notification_channel_blocking),
+                    NotificationManager.IMPORTANCE_HIGH,
+                ).apply {
+                    description = appContext.getString(R.string.notification_channel_blocking_desc)
+                },
+            )
         }
-        val done = NotificationChannel(
-            NotificationMapping.CHANNEL_DONE,
-            appContext.getString(R.string.notification_channel_done),
-            NotificationManager.IMPORTANCE_DEFAULT,
-        ).apply {
-            description = appContext.getString(R.string.notification_channel_done_desc)
+
+        if (system.getNotificationChannel(NotificationMapping.CHANNEL_DONE) == null) {
+            // The legacy channel could only ever be at DEFAULT or something the
+            // user explicitly lowered it to in system settings (Android caps a
+            // channel at what the app first declared, so DEFAULT is the
+            // ceiling). A lower importance is therefore a deliberate mute, not
+            // a default — starting fresh at HIGH would silently override that
+            // choice. Carry it forward; only a fresh install or an untouched
+            // legacy channel gets the HIGH bump Kate asked for. This whole
+            // branch only runs the one time `bot_messages` doesn't exist yet,
+            // so it can't re-fire on every launch and re-decide anything.
+            val legacyDone = system.getNotificationChannel(LEGACY_CHANNEL_DONE)
+            val doneImportance = if (legacyDone != null &&
+                legacyDone.importance < NotificationManager.IMPORTANCE_DEFAULT
+            ) {
+                legacyDone.importance
+            } else {
+                // HIGH so this pops up (heads-up banner + lock screen) with sound,
+                // the way a normal messaging app does — DEFAULT only shows quietly
+                // in the shade. Kate's ask (2026-09-08): every bot message, not just
+                // approvals, should read as "interesting app noise" rather than sit
+                // unnoticed until she happens to pull the shade down.
+                NotificationManager.IMPORTANCE_HIGH
+            }
+            system.createNotificationChannel(
+                NotificationChannel(
+                    NotificationMapping.CHANNEL_DONE,
+                    appContext.getString(R.string.notification_channel_done),
+                    doneImportance,
+                ).apply {
+                    description = appContext.getString(R.string.notification_channel_done_desc)
+                    // Importance isn't the only thing a person can customize on a
+                    // channel — a picked sound, an intentionally silent one
+                    // (sound=null), vibration, and lock-screen visibility all
+                    // deserve the same carry-forward as importance above: copy
+                    // them straight off the legacy channel rather than letting
+                    // this constructor's plain defaults silently win. A fresh
+                    // install has no legacy channel, so this is a no-op there.
+                    if (legacyDone != null) {
+                        setSound(legacyDone.sound, legacyDone.audioAttributes)
+                        enableVibration(legacyDone.shouldVibrate())
+                        vibrationPattern = legacyDone.vibrationPattern
+                        lockscreenVisibility = legacyDone.lockscreenVisibility
+                    }
+                },
+            )
         }
-        val routine = NotificationChannel(
-            NotificationMapping.CHANNEL_ROUTINE_FAILED,
-            appContext.getString(R.string.notification_channel_routine),
-            NotificationManager.IMPORTANCE_DEFAULT,
-        ).apply {
-            description = appContext.getString(R.string.notification_channel_routine_desc)
+        // The old channel this replaced. Deleting it (rather than leaving it
+        // orphaned) keeps Settings -> App notifications from showing a dead
+        // "Finished work" entry alongside the new one; harmless no-op once
+        // it's already gone.
+        system.deleteNotificationChannel(LEGACY_CHANNEL_DONE)
+
+        if (system.getNotificationChannel(NotificationMapping.CHANNEL_ROUTINE_FAILED) == null) {
+            system.createNotificationChannel(
+                NotificationChannel(
+                    NotificationMapping.CHANNEL_ROUTINE_FAILED,
+                    appContext.getString(R.string.notification_channel_routine),
+                    NotificationManager.IMPORTANCE_DEFAULT,
+                ).apply {
+                    description = appContext.getString(R.string.notification_channel_routine_desc)
+                },
+            )
         }
-        system.createNotificationChannels(listOf(blocking, done, routine))
     }
 
     /** True when the platform will accept a notification post right now. */
@@ -133,5 +195,8 @@ class LocalNotificationPoster(
 
         /** Permission string for the UI pass's launcher contract. */
         const val POST_NOTIFICATIONS_PERMISSION = Manifest.permission.POST_NOTIFICATIONS
+
+        /** The channel id [NotificationMapping.CHANNEL_DONE] replaced. See its kdoc. */
+        private const val LEGACY_CHANNEL_DONE = "done"
     }
 }

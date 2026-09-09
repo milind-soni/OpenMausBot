@@ -14,6 +14,8 @@ describe("reply display", () => {
 
   it("turns saved images into a readable bounded snippet", () => {
     expect(replySnippet('<attached-image path="/tmp/a.png" /> hi\nthere')).toBe("[image] hi there");
+    expect(replySnippet('<attached-image path="/tmp/a.png" name="Beach.png" />')).toBe("[image]");
+    expect(replySnippet('<attached-file path="/tmp/a.pdf" name="Plan.pdf" />')).toBe("[file]");
     expect(replySnippet("123456", 5)).toBe("1234…");
   });
 });

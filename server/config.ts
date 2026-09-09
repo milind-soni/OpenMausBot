@@ -5,9 +5,10 @@ import { readFileSync, mkdirSync, existsSync, renameSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { z } from "zod";
+import { normalizeImageGenerationUrl, type ImageGenerationConfig } from "../shared/image-generation.ts";
 
 import { writeFileAtomic } from "./atomic.ts";
-import type { InstanceConfigMap } from "./contracts.ts";
+import { EFFORT_LEVELS, type InstanceConfigMap, type ModelSelection } from "./contracts.ts";
 import { parseStoredMcpServer } from "./mcp-registry.ts";
 import { parseJson, schemaIssue, type JsonObject, type JsonValue } from "./schema.ts";
 
@@ -19,6 +20,8 @@ const BROWSER_PROFILE_ID = /^[a-z0-9_-]{1,40}$/;
 export const DEFAULT_ROOM_TURN_TIMEOUT_MINUTES = 5;
 export const MIN_ROOM_TURN_TIMEOUT_MINUTES = 1;
 export const MAX_ROOM_TURN_TIMEOUT_MINUTES = 1_440;
+export const DEFAULT_MAX_CONCURRENT_BOT_THREADS = 3;
+export const MAX_CONCURRENT_BOT_THREADS = 10;
 export const DEFAULT_LOCAL_VM_MODE = "shared" as const;
 export const DEFAULT_LOCAL_VM_MAX_INSTANCES = 2;
 export const MIN_LOCAL_VM_MAX_INSTANCES = 1;
@@ -212,9 +215,13 @@ const browserProfilesSchema = z.array(browserProfileSchema).max(20).superRefine(
     });
   });
 });
+// Deliberately non-strict: an unknown flag (such as `skillRecorder`, the
+// pre-rename name a stale client may still PATCH) is dropped as a no-op
+// instead of failing the whole stored config or the request.
 const featureConfigSchema = z.object({
-  /** Experimental desktop workflow recorder. Hidden unless explicitly enabled. */
-  skillRecorder: z.boolean().optional(),
+  /** Bots may draft skills (skill_manage, /learn) for your review. Off unless
+   * explicitly enabled. */
+  skillAuthoring: z.boolean().optional(),
   /** Show each tool run in the transcript. Off unless explicitly enabled. */
   showToolCalls: z.boolean().optional(),
   /** Experimental built-in browser. Off until explicitly enabled; each bot
@@ -230,7 +237,24 @@ const instanceConfigSchema = z.object({
   config: z.json().optional(),
 });
 const instanceConfigMapSchema = z.record(z.string(), instanceConfigSchema);
+const defaultModelSelectionSchema = z.object({
+  instanceId: z.string().trim().min(1),
+  model: z.string().trim().min(1),
+  effort: z.enum(EFFORT_LEVELS).optional(),
+});
 const appConfigSchema = z.object({
+  /** Verified by the dedicated domain endpoint, never a generic config patch. */
+  customDomain: z.string().optional(),
+  /** Who may sign in with an emailed code (server/account-signin.ts):
+   * addresses or `@domain` entries; admins get every scope, members chat only. */
+  signIn: z.object({ admins: z.array(z.string().max(320)).max(500).optional(), members: z.array(z.string().max(320)).max(5000).optional() }).optional(),
+  defaultModelSelection: defaultModelSelectionSchema.optional(),
+  /** CLI-only launch preferences. Never enable remote access implicitly. */
+  cliStartup: z.object({
+    access: z.enum(["local", "tunnel", "tailscale", "public-url"]),
+    publicUrl: z.string().url().optional(),
+    phone: z.enum(["ios", "android"]).optional(),
+  }).optional(),
   xai: z.object({ key: optionalText, url: optionalText }).optional(),
   /** `model` seeds the default selection; `provider` pins an OpenRouter
    * upstream (e.g. "fireworks"). Both are non-secret and optional. */
@@ -248,14 +272,30 @@ const appConfigSchema = z.object({
    * engine: "elevenlabs" (default; needs a key) or "system" (the Mac's
    * built-in voices, no key). */
   tts: z.object({ key: optionalText, voice: optionalText, provider: z.enum(["elevenlabs", "system"]).optional() }).optional(),
-  /** OpenAI key used only by the in-process avatar image generator. */
-  imageGen: z.object({ key: optionalText }).optional(),
+  /** Avatar provider credentials stay separate; choosing a router never reuses a cloud key. */
+  imageGen: z.object({
+    provider: z.enum(["openai", "xai", "custom"]).optional(),
+    key: optionalText,
+    customApiKey: optionalText,
+    customUrl: z.string().trim().max(2048).transform((value, ctx) => {
+      if (!value) return "";
+      try { return normalizeImageGenerationUrl(value); } catch (error) {
+        ctx.addIssue({ code: "custom", message: (error as Error).message });
+        return z.NEVER;
+      }
+    }).optional(),
+    customModel: z.string().trim().max(200).refine(
+      (value) => !["\r", "\n", "\0"].some((character) => value.includes(character)),
+      "Use a model ID without control characters",
+    ).optional(),
+  }).optional(),
   /** Non-secret profile details shown in the sidebar. */
   profile: z.object({ name: optionalText, email: optionalText }).optional(),
   /** UI language override (BCP-47, lowercase). Empty/absent = follow the
    * system language. Unknown tags degrade to English in the renderer. */
   language: optionalText,
   rooms: roomConfigSchema.optional(),
+  threads: z.object({ maxConcurrentPerBot: z.number().int().min(1).max(MAX_CONCURRENT_BOT_THREADS) }).strict().optional(),
   localVm: localVmConfigSchema.optional(),
   features: featureConfigSchema.optional(),
   browserProfiles: browserProfilesSchema.optional(),
@@ -269,10 +309,19 @@ const appConfigSchema = z.object({
 const storedAppConfigSchema = appConfigSchema.extend({
   browserProfiles: storedBrowserProfilesSchema.optional(),
 });
-const appConfigPatchSchema = appConfigSchema.omit({ instances: true, mcpServers: true });
+const appConfigPatchSchema = appConfigSchema.omit({ instances: true, mcpServers: true, cliStartup: true, customDomain: true });
 const jsonObjectSchema = z.record(z.string(), z.json());
 
 export interface AppConfig {
+  customDomain?: string;
+  signIn?: { admins?: string[]; members?: string[] };
+  /** Preferred selection for newly created bots; existing bots keep theirs. */
+  defaultModelSelection?: ModelSelection;
+  cliStartup?: {
+    access: "local" | "tunnel" | "tailscale" | "public-url";
+    publicUrl?: string;
+    phone?: "ios" | "android";
+  };
   mcpServers?: Record<string, unknown>;
   language?: string;
   xai?: { key?: string; url?: string };
@@ -283,14 +332,15 @@ export interface AppConfig {
   vps?: { sshAlias?: string };
   opencodeGo?: { apiKey?: string };
   tts?: { key?: string; voice?: string; provider?: "elevenlabs" | "system" };
-  imageGen?: { key?: string };
+  imageGen?: ImageGenerationConfig;
   profile?: { name?: string; email?: string };
   rooms?: { turnTimeoutMinutes: number };
+  threads?: { maxConcurrentPerBot: number };
   /** Shared preserves the historical singleton. Per-bot gives every bot a
    * separate container, durable workspace, viewer and lease. */
   localVm?: { mode?: "shared" | "per-bot"; maxInstances?: number };
   /** Opt-in product experiments. Every flag defaults to disabled. */
-  features?: { skillRecorder?: boolean; showToolCalls?: boolean; browser?: boolean };
+  features?: { skillAuthoring?: boolean; showToolCalls?: boolean; browser?: boolean };
   /** Named browser sessions any bot can be pointed at. */
   browserProfiles?: BrowserProfile[];
   instances?: InstanceConfigMap;
@@ -408,6 +458,10 @@ export function roomTurnTimeoutMinutes(cfg: AppConfig): number {
   return cfg.rooms?.turnTimeoutMinutes ?? DEFAULT_ROOM_TURN_TIMEOUT_MINUTES;
 }
 
+export function maxConcurrentBotThreads(cfg: AppConfig): number {
+  return cfg.threads?.maxConcurrentPerBot ?? DEFAULT_MAX_CONCURRENT_BOT_THREADS;
+}
+
 export function localVmMode(cfg: AppConfig): "shared" | "per-bot" {
   return cfg.localVm?.mode ?? DEFAULT_LOCAL_VM_MODE;
 }
@@ -416,8 +470,8 @@ export function localVmMaxInstances(cfg: AppConfig): number {
   return cfg.localVm?.maxInstances ?? DEFAULT_LOCAL_VM_MAX_INSTANCES;
 }
 
-export function skillRecorderEnabled(cfg: AppConfig): boolean {
-  return cfg.features?.skillRecorder === true;
+export function skillAuthoringEnabled(cfg: AppConfig): boolean {
+  return cfg.features?.skillAuthoring === true;
 }
 
 export function showToolCallsEnabled(cfg: AppConfig): boolean {
@@ -447,6 +501,34 @@ export function ensureDirs() {
     }
   }
   for (const dir of [DATA_DIR, EVENTS_DIR, NATIVE_DIR]) mkdirSync(dir, { recursive: true });
+  migrateLegacyFeatureFlags();
+}
+
+/** `features.skillRecorder` became `features.skillAuthoring` when the Teach a
+ * skill recorder was removed. featureConfigSchema is non-strict, so
+ * parseStoredConfig would silently drop the old key (reading the opt-in as
+ * off) while saveConfig's raw section merge would carry it on disk forever.
+ * Rewrite it once, here, before the server's single loadConfig() at boot: an
+ * explicit `skillAuthoring` already on disk wins over the legacy key, and a
+ * file without the legacy key is left untouched. */
+function migrateLegacyFeatureFlags(): void {
+  const p = join(DATA_DIR, "config.json");
+  try {
+    if (!existsSync(p)) return;
+    const disk = jsonObjectSchema.safeParse(parseJson(readFileSync(p, "utf8")));
+    if (!disk.success) return;
+    const features = jsonObjectSchema.safeParse(disk.data.features);
+    if (!features.success || !Object.hasOwn(features.data, "skillRecorder")) return;
+    const next: JsonObject = { ...features.data };
+    if (!Object.hasOwn(next, "skillAuthoring")) next.skillAuthoring = next.skillRecorder === true;
+    delete next.skillRecorder;
+    writeFileAtomic(p, JSON.stringify({ ...disk.data, features: next }, null, 2), { mode: 0o600 });
+    console.log(`[config] features.skillRecorder renamed to features.skillAuthoring (${String(next.skillAuthoring)})`);
+  } catch (error) {
+    // A readable but unwritable config would otherwise lose the opt-in on
+    // every boot with no trace: parseStoredConfig drops the legacy key.
+    console.error(`[config] could not rename features.skillRecorder: ${error instanceof Error ? error.message : String(error)}`);
+  }
 }
 
 export function loadConfig(): AppConfig {
@@ -480,6 +562,15 @@ export function loadConfig(): AppConfig {
   if (process.env.OMB_TTS_KEY !== undefined) cfg.tts.key = process.env.OMB_TTS_KEY;
   cfg.imageGen = { ...cfg.imageGen };
   if (process.env.OMB_OPENAI_IMAGE_KEY !== undefined) cfg.imageGen.key = process.env.OMB_OPENAI_IMAGE_KEY;
+  if (process.env.OMB_CUSTOM_IMAGE_KEY !== undefined) cfg.imageGen.customApiKey = process.env.OMB_CUSTOM_IMAGE_KEY;
+  // The sign-in allow-list: env is how a headless box or a container is
+  // bootstrapped before anyone can reach Settings.
+  const splitEmails = (value: string) => value.split(/[,\s]+/).map((entry) => entry.trim().toLowerCase()).filter(Boolean);
+  if (process.env.OMB_SIGNIN_EMAILS !== undefined || process.env.OMB_SIGNIN_MEMBER_EMAILS !== undefined) {
+    cfg.signIn = { ...cfg.signIn };
+    if (process.env.OMB_SIGNIN_EMAILS !== undefined) cfg.signIn.admins = splitEmails(process.env.OMB_SIGNIN_EMAILS);
+    if (process.env.OMB_SIGNIN_MEMBER_EMAILS !== undefined) cfg.signIn.members = splitEmails(process.env.OMB_SIGNIN_MEMBER_EMAILS);
+  }
   return cfg;
 }
 
@@ -499,6 +590,7 @@ export function syncCredentialEnv(patch: Partial<AppConfig>): void {
     [patch.opencodeGo?.apiKey, "OPENCODE_API_KEY"],
     [patch.tts?.key, "OMB_TTS_KEY"],
     [patch.imageGen?.key, "OMB_OPENAI_IMAGE_KEY"],
+    [patch.imageGen?.customApiKey, "OMB_CUSTOM_IMAGE_KEY"],
   ];
   for (const [value, name] of secrets) {
     if (value === undefined) continue;
@@ -532,6 +624,7 @@ export const WORKSPACE_CREDENTIAL_ENV = [
   "OPENCODE_API_KEY",
   "OMB_TTS_KEY",
   "OMB_OPENAI_IMAGE_KEY",
+  "OMB_CUSTOM_IMAGE_KEY",
   "COMPOSIO_API_KEY",
   "OMB_COMPOSIO_BROKER_TOKEN",
   // Harness-private filesystem hints are not credentials themselves, but
@@ -567,7 +660,7 @@ export const PROVIDER_CREDENTIAL_ENV = [
 
 /** Merge a partial config into ~/.openmausbot/config.json (secrets never
  * echoed back — callers report configured-or-not booleans only). */
-export function saveConfig(patch: Partial<AppConfig>): void {
+export function saveConfig(patch: Partial<AppConfig>, options: { replaceInstances?: boolean } = {}): void {
   const p = join(DATA_DIR, "config.json");
   let disk: JsonObject = {};
   try {
@@ -582,7 +675,7 @@ export function saveConfig(patch: Partial<AppConfig>): void {
   // back after we have successfully recognized the legacy list.
   const storedProfiles = storedBrowserProfilesSchema.safeParse(disk.browserProfiles);
   if (storedProfiles.success) disk.browserProfiles = storedProfiles.data;
-  for (const key of ["xai", "openaiCompat", "composio", "box", "opencodeGo", "tts", "imageGen", "profile", "rooms", "localVm", "features"] as const) {
+  for (const key of ["xai", "openaiCompat", "composio", "box", "opencodeGo", "tts", "imageGen", "profile", "rooms", "threads", "localVm", "features"] as const) {
     const section = checkedPatch[key];
     if (!section) continue;
     const current = jsonObjectSchema.safeParse(disk[key]);
@@ -593,6 +686,14 @@ export function saveConfig(patch: Partial<AppConfig>): void {
   if (checkedPatch.vps !== undefined) disk.vps = normalizeVpsConfig(checkedPatch.vps);
   // scalar, not a section: the merge loop above only walks objects
   if (checkedPatch.language !== undefined) disk.language = checkedPatch.language;
+  if (checkedPatch.customDomain !== undefined) disk.customDomain = checkedPatch.customDomain;
+  if (checkedPatch.signIn !== undefined) disk.signIn = checkedPatch.signIn;
+  // A selection is replaced as one value, so changing engines also clears
+  // an effort level omitted from the new selection.
+  if (checkedPatch.defaultModelSelection !== undefined) {
+    disk.defaultModelSelection = checkedPatch.defaultModelSelection;
+  }
+  if (checkedPatch.cliStartup !== undefined) disk.cliStartup = checkedPatch.cliStartup;
   // Custom MCP mutations go through their own dedicated local API, but
   // saveConfig remains the single atomic persistence boundary.
   if (checkedPatch.mcpServers !== undefined) {
@@ -620,10 +721,16 @@ export function saveConfig(patch: Partial<AppConfig>): void {
   }
   if (checkedPatch.instances) {
     const currentInstances = jsonObjectSchema.safeParse(disk.instances);
-    const diskInstances: JsonObject = currentInstances.success ? currentInstances.data : {};
+    const storedInstances: JsonObject = currentInstances.success ? currentInstances.data : {};
+    const diskInstances: JsonObject = options.replaceInstances ? {} : storedInstances;
     for (const [instanceId, entry] of Object.entries(checkedPatch.instances)) {
-      const current = jsonObjectSchema.safeParse(diskInstances[instanceId]);
+      const current = jsonObjectSchema.safeParse(storedInstances[instanceId]);
       const merged: JsonObject = current.success ? { ...current.data } : {};
+      // Replacement clears omitted known settings, but retained shadow
+      // entries keep fields understood only by a newer app or driver.
+      if (options.replaceInstances) {
+        for (const key of Object.keys(instanceConfigSchema.shape)) delete merged[key];
+      }
       Object.assign(merged, entry);
       diskInstances[instanceId] = merged;
     }
@@ -638,8 +745,8 @@ export function saveConfig(patch: Partial<AppConfig>): void {
  * entry rides driver.defaultConfig(). Returns false for unknown instances
  * when the fleet is explicitly configured. The returned map must stay
  * PERSISTABLE: instanceConfigs() injects credential env into consuming
- * drivers' entries for the live fleet, so those injected keys are stripped
- * back out before the map is returned — otherwise saving an override would
+ * drivers' entries for the live fleet, so only their originally configured
+ * environment is retained — otherwise saving an override would
  * copy xai/box/opencodeGo secrets into the instances section of
  * config.json. */
 export function withInstanceCli(
@@ -648,7 +755,7 @@ export function withInstanceCli(
   cli: string,
 ): InstanceCliUpdate {
   const next: AppConfig = structuredClone(cfg);
-  const map = instanceConfigs(next);
+  const map = persistableInstanceConfigs(next);
   // hasOwn, not truthiness: map is a plain object literal, so
   // map["__proto__"] resolves to Object.prototype — truthy — and the
   // assignment below would poison EVERY object in the process (instanceId
@@ -666,16 +773,19 @@ export function withInstanceCli(
     delete rest.cli;
     entry.config = Object.keys(rest).length ? rest : undefined;
   }
-  for (const e of Object.values(map)) {
-    if (!e.environment) continue;
-    const injected = injectedEnvironment(next, e.driver);
-    for (const [k, v] of Object.entries(e.environment)) {
-      if (injected.get(k) === v) delete e.environment[k];
-    }
-    if (!Object.keys(e.environment).length) delete e.environment;
-  }
   next.instances = map;
   return { ok: true, config: next };
+}
+
+/** Materialize defaults without copying injected workspace secrets to disk. */
+export function persistableInstanceConfigs(cfg: AppConfig): InstanceConfigMap {
+  const map = instanceConfigs(cfg);
+  for (const [id, entry] of Object.entries(map)) {
+    const environment = cfg.instances?.[id]?.environment;
+    if (environment) entry.environment = { ...environment };
+    else delete entry.environment;
+  }
+  return map;
 }
 
 interface InstanceCliUpdate {
@@ -683,8 +793,7 @@ interface InstanceCliUpdate {
   config: AppConfig;
 }
 
-/** The credential env instanceConfigs() injects for one driver — shared with
- * withInstanceCli() so the inject rule and the strip rule cannot drift apart.
+/** The credential env instanceConfigs() injects for one driver at runtime.
  * Each secret goes only to the driver that actually reads it: the API-key
  * Grok driver reads XAI_API_KEY, the Computer driver reads BOX_TOKEN, and
  * OpenCode reads OPENCODE_API_KEY. Every other engine brings its own
@@ -787,6 +896,9 @@ export function instanceConfigs(cfg: AppConfig): InstanceConfigMap {
         const merged = { ...current };
         // A per-instance value always wins over the workspace default.
         for (const [k, v] of Object.entries(defaults)) {
+          // Empty routing explicitly means "no upstream pin" for isolated
+          // API connections. Do not replace it with a workspace provider.
+          if (k === "provider" && typeof merged[k] === "string") continue;
           if (typeof merged[k] !== "string" || !(merged[k] as string).trim()) merged[k] = v;
         }
         entry.config = merged;

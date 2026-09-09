@@ -24,7 +24,12 @@ beforeAll(async () => {
   home = mkdtempSync(join(tmpdir(), "omb-legacy-test-"));
   const legacy = join(home, ".opengrokbot");
   mkdirSync(legacy, { recursive: true });
-  writeFileSync(join(legacy, "config.json"), JSON.stringify({ instances: {} }));
+  // A non-product shadow keeps startup deterministic: an empty map selects
+  // the user's full default engine fleet, whose installed CLI probes are not
+  // part of this migration test.
+  writeFileSync(join(legacy, "config.json"), JSON.stringify({
+    instances: { fixture: { driver: "migration-test-shadow" } },
+  }));
   writeFileSync(join(legacy, "keep-me.txt"), "carried over");
   child = spawn(process.execPath, [join(SERVER_DIR, "index.ts")], {
     cwd: ROOT,

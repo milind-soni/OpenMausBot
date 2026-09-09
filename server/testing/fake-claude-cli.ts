@@ -4,9 +4,14 @@
 // scripted session. Failure modes are toggled by env var, mirroring how
 // the real thing misbehaves:
 //
-//   FAKE_CLAUDE_MODE   happy (default) | exit-early | hang | malformed
+//   FAKE_CLAUDE_MODE   happy (default) | exit-early | hang | malformed |
+//                      dead-session (fails only when --resume is passed)
+//                      | resume-dies-after-init (a --resume launch emits
+//                        init, then exits without result or output)
 //                      | stream (partial-message text deltas before the
 //                        whole-message frame, plus subagent noise to drop)
+//                      | not-logged-in (the frames a signed-out CLI really
+//                        sends, captured from 2.1.263)
 //   FAKE_CLAUDE_DUMP   path to write {argv, env, prompt, systemPrompt,
 //                      mcpConfig} as JSON,
 //                      so the test can assert on argv shape and env hygiene.
@@ -23,7 +28,7 @@
 //                      inherited-api-key — what `auth status` reports
 //
 // Keep this file dependency-free — it runs as a bare `node` subprocess.
-import { existsSync, readFileSync, writeFileSync } from "node:fs";
+import { appendFileSync, existsSync, readFileSync, writeFileSync } from "node:fs";
 
 const mode = process.env.FAKE_CLAUDE_MODE ?? "happy";
 const scriptedReplies = (() => {
@@ -63,7 +68,9 @@ const out = (obj: unknown) => process.stdout.write(JSON.stringify(obj) + "\n");
 
 // Snapshot probes: both answer on argv alone and exit without reading stdin.
 if (argv[0] === "--version") {
-  process.stdout.write("2.1.232 (Claude Code)\n");
+  // FAKE_CLAUDE_VERSION lets a test stand in for an older CLI: the driver
+  // withholds flags that version predates (CLAUDE_FLAG_FLOORS).
+  process.stdout.write(`${process.env.FAKE_CLAUDE_VERSION ?? "2.1.232"} (Claude Code)\n`);
   process.exit(0);
 }
 
@@ -156,6 +163,10 @@ const finishIfDone = () => {
 const playTurn = (prompt: JsonValue) => {
   turnRunning = true;
   steered = [];
+  // Every prompt this process receives, one JSON object per line. FAKE_CLAUDE_DUMP
+  // records only the first, which cannot show what a REUSED session was sent on
+  // its second and later turns.
+  if (process.env.FAKE_CLAUDE_PROMPTS) appendFileSync(process.env.FAKE_CLAUDE_PROMPTS, `${JSON.stringify(prompt)}\n`);
   if (!dumped && process.env.FAKE_CLAUDE_DUMP) {
     dumped = true;
     const configPath = argAfter("--mcp-config");
@@ -180,6 +191,14 @@ const playTurn = (prompt: JsonValue) => {
       process.env.FAKE_CLAUDE_DUMP,
       JSON.stringify({ pid: process.pid, argv, env: process.env, prompt, systemPrompt, mcpConfig }, null, 2),
     );
+  }
+
+  // A resumed session the CLI no longer has: it exits before any `init`
+  // frame, so the prompt on stdin is never read. A FRESH launch (--session-id)
+  // works normally, which is what makes recovery observable.
+  if (mode === "dead-session" && argv.includes("--resume")) {
+    process.stderr.write(`fake-claude: No conversation found with session ID: ${argAfter("--resume")}\n`);
+    process.exit(1);
   }
 
   if (mode === "exit-early") {
@@ -213,6 +232,14 @@ const playTurn = (prompt: JsonValue) => {
   // the real CLI re-announces init on every turn of a live process
   out({ type: "system", subtype: "init", session_id: sessionId, model });
 
+  // The CLI accepted the resumed session — it read the prompt — and then
+  // died with nothing to show. The prompt may already have run tools, so
+  // the driver must NOT send it again.
+  if (mode === "resume-dies-after-init" && argv.includes("--resume")) {
+    process.stderr.write("fake-claude: simulated crash after accepting the resumed session\n");
+    process.exit(3);
+  }
+
   if (mode === "hang") {
     // stay alive until killed — lets tests exercise interrupt + the
     // permission broker while a turn is officially in flight
@@ -222,6 +249,28 @@ const playTurn = (prompt: JsonValue) => {
 
   if (mode === "malformed") {
     process.stdout.write("this is not json\n{broken\n");
+  }
+
+  // A signed-out CLI answers every prompt with this, verbatim: the login
+  // instruction arrives as assistant text, and only the frame's own error
+  // fields say it is a failure at all.
+  if (mode === "not-logged-in") {
+    out({
+      type: "assistant",
+      message: { model: "<synthetic>", content: [{ type: "text", text: "Not logged in \u00b7 Please run /login" }] },
+      error: "authentication_failed",
+      is_api_error_message: true,
+    });
+    out({
+      type: "result",
+      is_error: true,
+      stop_reason: "stop_sequence",
+      terminal_reason: "api_error",
+      result: "Not logged in \u00b7 Please run /login",
+    });
+    turnRunning = false;
+    finishIfDone();
+    return;
   }
 
   if (mode === "stream") {
@@ -258,15 +307,37 @@ const playTurn = (prompt: JsonValue) => {
     turnRunning = false;
     finishIfDone();
   };
+  if (mode === "background-result") {
+    // Claude can emit a synthetic result when a background task finishes.
+    // It does not complete the user turn currently waiting on permission.
+    out({ type: "result", origin: { kind: "task-notification" }, is_error: false, total_cost_usd: 99 });
+    out({ type: "stream_event", event: { type: "content_block_delta", delta: { type: "text_delta", text: "parent still working" } } });
+    const poll = setInterval(() => {
+      if (!process.env.FAKE_CLAUDE_FINISH_GATE || !existsSync(process.env.FAKE_CLAUDE_FINISH_GATE)) return;
+      clearInterval(poll);
+      finish();
+    }, 10);
+    return;
+  }
   if (mode === "slow") {
     // a gap a test can steer into; the closing reply carries anything that
     // was folded in, the way the real CLI includes a mid-turn message in
     // the same turn's next model call
-    setTimeout(() => {
+    const finishSlowTurn = () => {
       const tail = steered.length ? ` + steered: ${steered.join(" | ")}` : "";
       out({ type: "assistant", message: { content: [{ type: "text", text: `reply to: ${promptText(prompt)}${tail}` }] } });
       finish();
-    }, 800);
+    };
+    const finishGate = process.env.FAKE_CLAUDE_SLOW_FINISH_GATE;
+    if (finishGate) {
+      const poll = setInterval(() => {
+        if (!existsSync(finishGate)) return;
+        clearInterval(poll);
+        finishSlowTurn();
+      }, 10);
+    } else {
+      setTimeout(finishSlowTurn, 800);
+    }
   } else {
     finish();
   }

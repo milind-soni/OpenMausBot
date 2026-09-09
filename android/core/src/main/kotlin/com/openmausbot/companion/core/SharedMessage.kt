@@ -42,12 +42,9 @@ object SharedMessageComposer {
         attachments.forEach { attachment ->
             val path = escapeAttribute(attachment.path)
             val name = attachment.displayName?.trim().orEmpty()
-            parts += when {
-                attachment.kind == SharedAttachmentKind.FILE && name.isNotEmpty() ->
-                    "<attached-file path=\"$path\" name=\"${escapeAttribute(name)}\" />"
-                attachment.kind == SharedAttachmentKind.FILE -> "<attached-file path=\"$path\" />"
-                else -> "<attached-image path=\"$path\" />"
-            }
+            val tag = if (attachment.kind == SharedAttachmentKind.IMAGE) "attached-image" else "attached-file"
+            val nameAttribute = if (name.isEmpty()) "" else " name=\"${escapeAttribute(name)}\""
+            parts += "<$tag path=\"$path\"$nameAttribute />"
         }
         return parts.joinToString("\n\n")
     }

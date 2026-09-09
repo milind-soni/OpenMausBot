@@ -8,6 +8,7 @@ import {
 
 describe("companionPairingLink", () => {
   const token = `omb_pair_${"a".repeat(43)}`;
+  const secretPublicKey = "BIPBQ12_dWnF1DZLsTZO3Vg0NGjds5-jp9h3jhjr2To7bJelczS0LM82rfXV68PmSJhz2ePosj3fL974XckCpDU";
 
   const decodedEndpoints = (link: string) => {
     const encoded = new URL(link).searchParams.get("endpoints");
@@ -23,6 +24,7 @@ describe("companionPairingLink", () => {
       code: "004209",
       token,
       name: "Milind's Mac",
+      secretPublicKey,
     });
 
     const url = new URL(link!);
@@ -32,6 +34,15 @@ describe("companionPairingLink", () => {
     expect(url.searchParams.get("token")).toBe(token);
     expect(url.searchParams.get("code")).toBe("004209");
     expect(url.searchParams.get("name")).toBe("Milind's Mac");
+    expect(url.searchParams.get("secretKey")).toBe(secretPublicKey);
+  });
+
+  it("omits malformed secure-entry keys instead of advertising an unusable key", () => {
+    const base = { address: "mac.local", port: 8810, code: "123456", token };
+    expect(new URL(companionPairingLink({ ...base, secretPublicKey: secretPublicKey.slice(1) })!)
+      .searchParams.get("secretKey")).toBeNull();
+    expect(new URL(companionPairingLink({ ...base, secretPublicKey: `A${secretPublicKey.slice(1)}` })!)
+      .searchParams.get("secretKey")).toBeNull();
   });
 
   it("refuses to make a link from an invalid pairing window", () => {

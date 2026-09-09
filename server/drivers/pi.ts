@@ -40,6 +40,7 @@ import type {
   RuntimeEvent,
   RuntimeEventListener,
   SendTurnInput,
+  TurnImageInput,
 } from "../contracts.ts";
 import { EFFORT_LEVELS, newEventId, newId } from "../contracts.ts";
 import {
@@ -54,6 +55,36 @@ import { appendNative } from "./native.ts";
 const DRIVER_KIND = "piAgent";
 const PI_ARGS = ["--mode", "rpc", "--no-session"];
 const NODE_ENV_FLAG = { ELECTRON_RUN_AS_NODE: "1" };
+
+type PiPromptImage = {
+  type: "image";
+  data: string;
+  mimeType: TurnImageInput["mime"];
+};
+
+function readPiPromptImages(turn: SendTurnInput): PiPromptImage[] {
+  return (turn.images ?? []).map((image) => ({
+    type: "image",
+    data: readFileSync(image.path).toString("base64"),
+    mimeType: image.mime,
+  }));
+}
+
+/** Provider-native logs are designed for bug reports. Preserve the RPC
+ * shape and encoded size, but never persist a user's image bytes in them. */
+function piNativeLogMessage(message: Record<string, unknown>): Record<string, unknown> {
+  if (!Array.isArray(message.images)) return message;
+  return {
+    ...message,
+    images: message.images.map((image) => {
+      if (!image || typeof image !== "object") return image;
+      const value = image as Record<string, unknown>;
+      return typeof value.data === "string"
+        ? { ...value, data: `[image data: ${value.data.length} base64 chars]` }
+        : value;
+    }),
+  };
+}
 
 /** Harness effort → pi thinking level (`set_thinking_level`). The sets match
  * one-for-one except for the name of the lowest rung: the harness calls it
@@ -436,7 +467,7 @@ export const PiDriver: ProviderDriver<PiConfig> = {
     }>();
 
     const emit = (event: RuntimeEvent) => {
-      for (const l of [...listeners]) l(event);
+      for (const l of Array.from(listeners)) l(event);
     };
     const base = (threadId: string, turnId: string) => ({
       eventId: newEventId(),
@@ -450,16 +481,23 @@ export const PiDriver: ProviderDriver<PiConfig> = {
     const sendTurn = async (turn: SendTurnInput) => {
       const { threadId } = turn;
       if (active.has(threadId)) throw new Error("a turn is already running on this thread");
+      // Per-bot Ask/Auto is authoritative for harness turns. Preserve the
+      // legacy instance flag only for direct adapter callers that omit it.
+      const fullAuto = turn.approvalMode === undefined ? config.fullAuto : false;
       // Host control always routes through the permission card; full-auto must
       // never get unapproved hands on the user's machine (same guard as the
       // Claude and ACP drivers).
       const controlsHost = turn.integrations?.localComputer?.scope === "local-computer";
-      if (controlsHost && config.fullAuto) {
+      if (controlsHost && fullAuto) {
         throw new Error("local computer control requires the interactive approval broker");
       }
       const turnId = newId();
       const pending = new Map<string, (decision: { behavior: "allow" | "deny" | "answer"; message?: string }) => void>();
       let settled = false;
+      // pi's RPC surface accepts image content directly. Read before spawning
+      // so an attachment that disappeared produces one clear dispatch error
+      // instead of starting a child that can never receive its prompt.
+      const images = readPiPromptImages(turn);
 
       // Write ~/.pi/agent/models.json before creating any credential-bearing
       // MCP temp files. If model setup fails, there is nothing sensitive to
@@ -537,7 +575,7 @@ export const PiDriver: ProviderDriver<PiConfig> = {
         });
       child.stdin.on("error", () => rejectWaiters(new Error("pi stdin closed")));
       const send = (obj: Record<string, unknown>) => {
-        appendNative(threadId, { dir: "out", source: "pi.rpc", msg: obj });
+        appendNative(threadId, { dir: "out", source: "pi.rpc", msg: piNativeLogMessage(obj) });
         child.stdin.write(JSON.stringify(obj) + "\n");
       };
 
@@ -769,7 +807,7 @@ export const PiDriver: ProviderDriver<PiConfig> = {
 
       const message = turn.system ? `${turn.system}\n\n${turn.text}` : turn.text;
       try {
-        send({ type: "prompt", message });
+        send({ type: "prompt", message, ...(images.length ? { images } : {}) });
       } catch {
         settle(false);
       }
@@ -835,11 +873,11 @@ export const PiDriver: ProviderDriver<PiConfig> = {
           // card (`ctx.ui.confirm` → extension_ui_request) gated in the
           // extension, so it is offered exactly when the other engines offer
           // it: enabled unless the bot is in full-auto.
-          localComputerMcp: !config.fullAuto,
-          // Images ride the ordinary prompt as <attached-image path> refs the
-          // agent opens with its read tool — no native image blocks needed,
-          // same as every other CLI engine.
+          localComputerMcp: true,
+          // Images ride pi's native RPC prompt as base64 content blocks, so a
+          // vision model can inspect them without a separate file-read tool.
           images: true,
+          nativeImageInput: true,
           // Reasoning effort pins pi's thinking level per turn (none → off).
           // xhigh/max only land on models that expose them; pi rejects an
           // unsupported level and the turn keeps the engine default.

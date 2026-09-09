@@ -13,6 +13,7 @@ enum PrefKey {
     static let islandSeen = "companion.prefs.islandSeen"
     static let activityDetail = "companion.prefs.activityDetail"
     static let quickReplies = "companion.prefs.quickReplies"
+    static let language = "companion.prefs.language"
 }
 
 /// The set of chats whose island intro has already played.

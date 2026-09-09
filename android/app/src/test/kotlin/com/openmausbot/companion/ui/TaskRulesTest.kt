@@ -26,7 +26,7 @@ class TaskRulesTest {
 
     @Test
     fun `an empty title reads as untitled rather than blank`() {
-        assertEquals("Untitled task", TaskRules.title(task("t1", "")))
+        assertEquals("Untitled thread", TaskRules.title(task("t1", "")))
         assertEquals("Research", TaskRules.title(task("t1", "Research")))
     }
 
@@ -51,6 +51,20 @@ class TaskRulesTest {
         assertFalse(TaskRules.canCreate(busy))
         assertFalse(TaskRules.canDelete(task("t2"), busy))
         assertFalse(TaskRules.canSwitch(task("t2"), busy))
+    }
+
+    @Test
+    fun `independent tasks allow navigation while only the running task refuses deletion`() {
+        val running = task("t1").copy(busy = true)
+        val idle = task("t2").copy(busy = false)
+        val subject = bot(listOf(running, idle), busy = true)
+        assertTrue(TaskRules.canCreate(subject))
+        assertTrue(TaskDialogRules.createEnabled(Chat.BotChat(subject)))
+        assertTrue(ChatActions.sheet(Chat.BotChat(subject), hasPendingApproval = true, canAddAttachment = true)
+            .single { it.id == ChatActionId.NEW_TASK }.enabled)
+        assertTrue(TaskRules.canSwitch(idle, subject))
+        assertTrue(TaskRules.canDelete(idle, subject))
+        assertFalse(TaskRules.canDelete(running, subject))
     }
 
     @Test
@@ -93,6 +107,25 @@ class TaskRulesTest {
     }
 
     @Test
+    fun `thread pickers hide only marked bot executions and preserve direct switching`() {
+        val legacy = task("legacy", "Routine: old run")
+        val results = task("results", "Brief results")
+        val execution = task("run-thread").copy(routineRunId = "run-1", busy = true)
+        val subject = bot(listOf(legacy, results, execution), current = "results", busy = true)
+
+        assertEquals(listOf(legacy, results), TaskRules.tasks(subject))
+        assertEquals(listOf(legacy, results), TaskRules.tasks(Chat.BotChat(subject)))
+        assertEquals(3, subject.tasks?.size)
+        assertTrue(TaskRules.canCreate(subject))
+        assertTrue(TaskRules.canSwitch(execution, subject))
+        assertFalse(TaskRules.canDelete(results, subject.copy(tasks = listOf(results, execution))))
+
+        // The wire type is shared, but routine execution markers are bot-only.
+        val group = Chat.RoomChat(room().copy(tasks = listOf(legacy, execution)))
+        assertEquals(listOf(legacy, execution), TaskRules.tasks(group))
+    }
+
+    @Test
     fun `room tasks use the same navigation rules as bot tasks`() {
         val tasks = listOf(task("t1"), task("t2"))
         val room = Chat.RoomChat(room().copy(threadId = "t1", tasks = tasks))
@@ -100,7 +133,7 @@ class TaskRulesTest {
         assertTrue(TaskRules.isCurrent(task("t1"), room))
         assertTrue(TaskRules.canSwitch(task("t2"), room))
         assertTrue(TaskRules.canDelete(task("t2"), room))
-        assertEquals("Channel tasks", TaskRules.subtitle(room))
+        assertEquals("Group threads", TaskRules.subtitle(room))
     }
 }
 

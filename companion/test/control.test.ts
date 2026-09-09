@@ -39,6 +39,7 @@ beforeAll(async () => {
   control = createControlServer({
     devices,
     companionPort: 8810,
+    secretPublicKey: () => "BIPBQ12_dWnF1DZLsTZO3Vg0NGjds5-jp9h3jhjr2To7bJelczS0LM82rfXV68PmSJhz2ePosj3fL974XckCpDU",
     hostedUrl: () => hostedUrl,
     setHostedUrl: (next) => {
       hostedUrl = next;
@@ -71,10 +72,14 @@ describe("origins the control server will change state for", () => {
     if ("error" in paired) throw new Error(paired.error);
 
     expect(paired.device.cloudDesktopAccess).toBe(false);
+    disconnectedDeviceIds = [];
     expect((await ask("POST", `/devices/${paired.device.id}/cloud-desktop`)).status).toBe(200);
     expect(devices.authenticate(paired.token)?.cloudDesktopAccess).toBe(true);
+    expect(disconnectedDeviceIds).toEqual([paired.device.id]);
+    disconnectedDeviceIds = [];
     expect((await ask("DELETE", `/devices/${paired.device.id}/cloud-desktop`)).status).toBe(200);
     expect(devices.authenticate(paired.token)?.cloudDesktopAccess).toBe(false);
+    expect(disconnectedDeviceIds).toEqual([paired.device.id]);
     expect((await ask("POST", "/devices/missing/cloud-desktop")).status).toBe(404);
   });
 
@@ -211,6 +216,7 @@ describe("hostCandidates", () => {
     expect(status).toBe(200);
     expect(Array.isArray(body.hosts)).toBe(true);
     expect(Array.isArray(body.endpoints)).toBe(true);
+    expect(body.secretPublicKey).toBe("BIPBQ12_dWnF1DZLsTZO3Vg0NGjds5-jp9h3jhjr2To7bJelczS0LM82rfXV68PmSJhz2ePosj3fL974XckCpDU");
     // Whatever this machine's interfaces are, the mDNS fallback is always
     // present and always last.
     expect(body.hosts.at(-1)).toMatch(/^openmausbot-[0-9a-f]{8}\.local$/);

@@ -89,6 +89,54 @@ describe("control-omb command mapping", () => {
     expect(callTool).toHaveBeenCalledTimes(1);
   });
 
+  it("maps the rewind that makes the harness rebuild instead of resume", async () => {
+    // `edit` is the composer rewind. It is the only mapped way to reach a
+    // replay path, which is what compaction needs to be observable at all —
+    // a cleanly resumed turn never compacts.
+    const callTool = vi.fn(async (name: string, args: Record<string, unknown>) => ({ name, args }));
+    const env = { OPENMAUSBOT_URL: "http://127.0.0.1:19999" };
+    await expect(runControlOmb(
+      ["edit", "--bot", "bot-1", "--message", "msg-9", "--text", "say that again"],
+      { callTool: callTool as any, env },
+    )).resolves.toEqual({
+      name: "edit_bot_message",
+      args: { bot_id: "bot-1", message_id: "msg-9", text: "say that again" },
+    });
+    await expect(runControlOmb(
+      ["edit", "--bot", "bot-1", "--message", "msg-9", "--text", "again", "--task", "task-2", "--dry-run"],
+      { callTool: callTool as any, env: {} },
+    )).resolves.toMatchObject({
+      dryRun: true,
+      tool: "edit_bot_message",
+      arguments: { bot_id: "bot-1", message_id: "msg-9", text: "again", task_id: "task-2" },
+    });
+    expect(callTool).toHaveBeenCalledTimes(1);
+  });
+
+  it("treats edit as mutating, so it cannot reach a silently discovered app", async () => {
+    // it forks a live conversation and starts a turn; it must never land on
+    // whatever instance happened to be running
+    await expect(runControlOmb(["edit", "--bot", "b", "--message", "m", "--text", "x"], {
+      callTool: vi.fn() as any,
+      env: {},
+    })).rejects.toMatchObject({
+      message: "mutating commands require an explicit OpenMausBot instance",
+    });
+  });
+
+  it("requires every part of an edit before calling the shared tool", async () => {
+    const callTool = vi.fn();
+    const env = { OPENMAUSBOT_URL: "http://127.0.0.1:19999" };
+    for (const args of [
+      ["edit", "--message", "m", "--text", "x"],
+      ["edit", "--bot", "b", "--text", "x"],
+      ["edit", "--bot", "b", "--message", "m"],
+    ]) {
+      await expect(runControlOmb(args, { callTool: callTool as any, env })).rejects.toThrow(/is required/);
+    }
+    expect(callTool).not.toHaveBeenCalled();
+  });
+
   it("rejects invalid bounds before the shared tool is called", async () => {
     const callTool = vi.fn();
     await expect(runControlOmb(["wait", "--bot", "bot-1", "--timeout", "0"], {
@@ -97,9 +145,40 @@ describe("control-omb command mapping", () => {
     })).rejects.toThrow("--timeout must be an integer from 1 to 120");
     expect(callTool).not.toHaveBeenCalled();
   });
+
+  it("forwards pinned task IDs for sends, reads, waits, interrupts, and model changes", async () => {
+    const callTool = vi.fn(async (name: string, args: Record<string, unknown>) => ({ name, args }));
+    const dependencies = { callTool: callTool as any, env: { OPENMAUSBOT_URL: "http://127.0.0.1:19999" } };
+    for (const [command, tool, extra] of [
+      ["send", "send_bot_message", ["--text", "hello"]],
+      ["messages", "get_bot_messages", []],
+      ["wait", "wait_for_conversation", []],
+      ["interrupt", "interrupt_conversation", []],
+      ["set-model", "set_bot_model", ["--instance", "claude", "--model", "model-b", "--effort", "high"]],
+    ] as const) {
+      await expect(runControlOmb([command, "--bot", "bot-1", "--task", "task-a", ...extra], dependencies))
+        .resolves.toMatchObject({ name: tool, args: { task_id: "task-a" } });
+    }
+    expect(callTool.mock.calls.at(-1)?.[1]).toEqual({
+      bot_id: "bot-1", task_id: "task-a", instance_id: "claude", model: "model-b", effort: "high",
+    });
+    await expect(runControlOmb(["set-model", "--bot", "bot-1", "--instance", "claude", "--model", "model-b"], {
+      callTool: callTool as any, env: {},
+    })).rejects.toThrow("explicit OpenMausBot instance");
+  });
 });
 
 describe("control-omb isolated verification loop", () => {
+  it.each([
+    "tcp://127.0.0.1:2375",
+    "ssh://user@production.example/run/podman.sock",
+    "ssh://user:secret@127.0.0.1/run/podman.sock",
+  ])("rejects an unsafe live VM fixture endpoint: %s", async (host) => {
+    await expect(launchVerificationServer({}, undefined, {
+      binDir: "/fixture/bin", host, sshKey: "/fixture/key", staticDir: "/fixture/dist",
+    })).rejects.toThrow("explicit loopback Podman machine");
+  });
+
   it("launches, drives a real fake-engine turn, and removes only its test data", async () => {
     const session = await launchVerificationServer({
       ...process.env,

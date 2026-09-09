@@ -1,4 +1,5 @@
 import type { Bot, Group, GroupDefaultResponder } from "@/state/store";
+import { t } from "./i18n";
 
 /** Be defensive around rooms loaded while an older server is still running,
  * and around a lead removed by another client before the group patch arrives. */
@@ -19,20 +20,22 @@ export function defaultResponderName(group: Group, members: Bot[]): string | nul
 }
 
 export function groupResponseHint(group: Group, members: Bot[]): string {
-  if (group.dm) return "Reply here to continue the bot-to-bot conversation.";
+  if (group.dm) return t("room.hint.dm");
   const value = effectiveDefaultResponder(group, members);
-  if (value.kind === "everyone") return "Everyone responds unless you @mention specific bots.";
-  if (value.kind === "mentions") return "Mention a bot with @ to bring them in.";
-  const name = defaultResponderName(group, members) ?? "The lead bot";
-  return `${name} responds by default — @mention someone else to choose them instead.`;
+  if (value.kind === "everyone") return t("room.hint.everyone");
+  if (value.kind === "mentions") return t("room.hint.mentions");
+  const name = defaultResponderName(group, members) ?? t("room.hint.leadFallback");
+  return t("room.hint.lead", { name });
 }
 
 export function groupComposerHint(group: Group, members: Bot[]): string {
-  if (group.dm) return "continue the conversation";
+  if (group.dm) return t("composer.hint.dm");
   const value = effectiveDefaultResponder(group, members);
-  if (value.kind === "everyone") return "everyone responds";
-  if (value.kind === "mentions") return "@ to bring a bot in";
-  return `${defaultResponderName(group, members) ?? "Lead"} responds`;
+  if (value.kind === "everyone") return t("composer.hint.everyone");
+  if (value.kind === "mentions") return t("composer.hint.mentions");
+  return t("composer.hint.responder", {
+    name: defaultResponderName(group, members) ?? t("composer.hint.lead"),
+  });
 }
 
 /** Same routing sendGroup uses: explicit @mentions win, otherwise the

@@ -1,47 +1,55 @@
 // App settings, as a real modal with sections rather than one long panel.
-// Per-bot settings (persona, model, computer) stay in SettingsPanel — this
+// Per-bot settings (persona, model, computer) live in BotSettingsDialog — this
 // is the stuff shared by every bot: who you are, your keys, and the
 // machine your bots can borrow.
 import { useEffect, useRef, useState } from "react";
-import { Coins, FlaskConical, Globe, KeyRound, Monitor, Search, Smartphone, Terminal, Trash2, User, X } from "lucide-react";
+import { Coins, FlaskConical, KeyRound, Monitor, Palette, Search, TabletSmartphone, Terminal, User, X } from "lucide-react";
 import { api, useStore, type AppSettingsSection, type ConfigStatus } from "@/state/store";
 import { analyticsEnabled, setAnalyticsEnabled } from "@/lib/analytics";
-import { builtInBrowserEnabled, showToolCallsEnabled, skillRecorderEnabled } from "@/lib/feature-flags";
-import { localeChoices } from "@/locales";
+import { browserAvailable, browserUnavailableReason, builtInBrowserEnabled, showToolCallsEnabled, skillAuthoringEnabled } from "@/lib/feature-flags";
+import { localeChoices, type LocaleKey } from "@/locales";
+import { t } from "@/lib/i18n";
 import { ApiKeyRow, VpsConnection } from "./ApiKeys";
 import { useUpdaterState } from "@/lib/updater";
 import { EnginesSettings } from "./EnginesSettings";
 import { LocalComputerSection } from "./LocalComputerSection";
 import { CompanionSection } from "./CompanionSection";
+import { ServerPairingCard } from "./ServerPairingCard";
+import { SignInAccessCard } from "./SignInAccessCard";
+import { CustomDomainSettings } from "./CustomDomainSettings";
+import { BrowserProfilesManager } from "./BrowserProfilesManager";
+import { RemoteComputerSection } from "./RemoteComputerSection";
 import { Card, Switch } from "./SettingsPrimitives";
 import { UsageSection } from "./UsageSection";
 import { SkinPicker } from "./SkinPicker";
 import { RoomTurnTimeoutSettings } from "./RoomTurnTimeoutSettings";
-import { TranscriptionSettings } from "./TranscriptionSettings";
+import { ThreadConcurrencySettings } from "./ThreadConcurrencySettings";
 import { cn } from "@/lib/cn";
-import {
-  browserProfileDeletionBlockReason,
-  browserProfilesForPatch,
-} from "@/lib/browser-profiles";
+import { setShowThreads, useShowThreads } from "@/lib/thread-preferences";
 
+// `labelKey`, not a label: t() reads the active pack when it is called, so a
+// label resolved here at module scope would freeze the language the app booted
+// in. The English keywords stay untranslated — they are a search index, and a
+// pack that omits them still matches what people type.
 const SECTIONS: Array<{
   id: AppSettingsSection;
-  label: string;
+  labelKey: LocaleKey;
   icon: typeof User;
   keywords: string[];
 }> = [
-  { id: "general", label: "General", icon: User, keywords: ["profile", "name", "email", "skin", "theme", "appearance", "analytics", "updates", "tools", "tool calls"] },
-  { id: "experimental", label: "Experimental", icon: FlaskConical, keywords: ["early", "preview", "teach", "skill", "browser", "profiles"] },
-  { id: "connections", label: "Connections", icon: KeyRound, keywords: ["keys", "api", "composio", "box", "xai", "vps"] },
-  { id: "engines", label: "Engines", icon: Terminal, keywords: ["models", "claude", "grok", "providers", "cli"] },
-  { id: "companion", label: "Phone", icon: Smartphone, keywords: ["companion", "phone", "pair", "pairing", "mobile", "https", "secure", "tailscale", "wifi", "advanced"] },
-  { id: "computer", label: "Local VM", icon: Monitor, keywords: ["vm", "virtual", "desktop"] },
-  { id: "usage", label: "Usage", icon: Coins, keywords: ["tokens", "cost", "billing"] },
+  { id: "general", labelKey: "settings.section.general", icon: User, keywords: ["profile", "name", "email", "analytics", "updates", "threads", "parallel", "concurrency"] },
+  { id: "appearance", labelKey: "settings.section.appearance", icon: Palette, keywords: ["skin", "theme", "appearance", "tools", "tool calls", "threads", "show threads", "hide threads", "sidebar", "display"] },
+  { id: "experimental", labelKey: "settings.section.experimental", icon: FlaskConical, keywords: ["early", "preview", "learn", "skill", "authoring", "browser", "profiles"] },
+  { id: "connections", labelKey: "settings.section.connections", icon: KeyRound, keywords: ["keys", "api", "composio", "box", "xai", "vps"] },
+  { id: "engines", labelKey: "settings.section.engines", icon: Terminal, keywords: ["models", "claude", "grok", "providers", "cli"] },
+  { id: "companion", labelKey: "settings.section.companion", icon: TabletSmartphone, keywords: ["companion", "device", "phone", "desktop", "client", "host", "pair", "pairing", "mobile", "https", "secure", "tailscale", "wifi", "remote", "advanced", "domain", "dns", "self-hosted", "server", "caddy"] },
+  { id: "computer", labelKey: "settings.section.computer", icon: Monitor, keywords: ["vm", "virtual", "desktop"] },
+  { id: "usage", labelKey: "settings.section.usage", icon: Coins, keywords: ["tokens", "cost", "billing"] },
 ];
 
 function sectionMatches(section: (typeof SECTIONS)[number], query: string): boolean {
   if (!query) return true;
-  return [section.label, ...section.keywords].some((part) => part.toLowerCase().includes(query));
+  return [t(section.labelKey), ...section.keywords].some((part) => part.toLowerCase().includes(query));
 }
 
 /** Name + email, persisted to /api/config {profile} on blur. */
@@ -69,7 +77,7 @@ function ProfileFields() {
     "w-full rounded-lg border border-hairline/40 bg-inset px-3 py-2 text-[14px] text-ink placeholder:text-ink-secondary focus:border-hairline focus:outline-none";
   return (
     <div className="flex flex-col gap-3">
-      <input value={name} onChange={(e) => setName(e.target.value)} onBlur={save} placeholder="Your name" className={inputClass} />
+      <input value={name} onChange={(e) => setName(e.target.value)} onBlur={save} placeholder={t("settings.profile.name")} className={inputClass} />
       <input
         type="email"
         value={email}
@@ -88,32 +96,58 @@ function UpdatesRow() {
   const updater = window.ogb.updater;
   const label =
     s?.status === "checking"
-      ? "Checking…"
+      ? t("settings.updates.checking")
       : s?.status === "available"
-        ? `${s.version} available`
+        ? t("settings.updates.available", { version: s.version ?? "" })
         : s?.status === "downloading"
-          ? `Downloading ${Math.round(s.percent ?? 0)}%`
-          : s?.status === "downloaded"
-            ? `${s.version} ready — restart to apply`
-            : s?.status === "error"
-              ? `Check failed: ${s.message ?? "unknown error"}`
-              : "You're on the latest version we know of.";
+          ? s.percent == null
+            ? t("settings.updates.startingDownload")
+            : t("settings.updates.downloading", { percent: Math.round(s.percent) })
+          : s?.status === "preparing"
+            ? t("settings.updates.preparing")
+            : s?.status === "downloaded"
+              ? s.installMode === "handoff"
+                ? t("settings.updates.readyInstall", { version: s.version ?? "" })
+                : t("settings.updates.ready", { version: s.version ?? "" })
+              : s?.status === "installing"
+                ? s.message ||
+                  (s.installMode === "handoff"
+                    ? t("settings.updates.openingTerminal")
+                    : t("settings.updates.restarting"))
+                : s?.status === "handed-off"
+                  ? t("settings.updates.handedOff")
+                  : s?.status === "error"
+                    ? t("settings.updates.failed", { message: s.message ?? t("settings.updates.unknownError") })
+                    : t("settings.updates.latest");
   return (
-    <Card title="Updates" subtitle={label}>
+    <Card title={t("settings.updates.title")} subtitle={label}>
       <button
         onClick={() => {
           if (s?.status === "available") return void updater.download();
           if (s?.status === "downloaded") return void updater.install();
           void updater.check();
         }}
-        disabled={s?.status === "checking" || s?.status === "downloading"}
+        disabled={
+          s?.status === "checking" || s?.status === "downloading" || s?.status === "preparing" ||
+          s?.status === "installing" || s?.retryable === false
+        }
         className="rounded-lg border border-hairline/40 px-3 py-1.5 text-[13px] text-ink hover:bg-control disabled:opacity-40"
       >
-        {s?.status === "available"
-          ? "Download"
-          : s?.status === "downloaded"
-            ? "Restart and install"
-            : "Check for updates"}
+        {s?.retryable === false
+          ? t("settings.updates.quitReopen")
+          : s?.status === "available"
+            ? t("settings.updates.download")
+            : s?.status === "downloaded"
+              ? s.installMode === "handoff"
+                ? t("settings.updates.install")
+                : t("settings.updates.restart")
+              : s?.status === "preparing"
+                ? t("settings.updates.preparingShort")
+                : s?.status === "installing"
+                  ? s.installMode === "handoff"
+                    ? t("settings.updates.opening")
+                    : t("settings.updates.restartingShort")
+                  : t("settings.updates.check")}
       </button>
     </Card>
   );
@@ -126,13 +160,10 @@ function UpdatesRow() {
 function AnalyticsRow() {
   const [on, setOn] = useState(analyticsEnabled);
   return (
-    <Card
-      title="Usage analytics"
-      subtitle="Anonymous product events — app opened, which features get used. Never conversations, prompts, file contents, or bot output. Your email is only attached if you shared it during setup."
-    >
+    <Card title={t("settings.analytics.title")} subtitle={t("settings.analytics.subtitle")}>
       <Switch
         checked={on}
-        aria-label="Send usage analytics"
+        aria-label={t("settings.analytics.aria")}
         onClick={() => {
           const next = !on;
           setAnalyticsEnabled(next);
@@ -160,25 +191,22 @@ function LanguageRow() {
       });
       dispatch({ type: "configStatus", config });
     } catch (cause) {
-      setError(cause instanceof Error ? cause.message : "Could not save the language.");
+      setError(cause instanceof Error ? cause.message : t("settings.language.error"));
     } finally {
       setSaving(false);
     }
   };
 
   return (
-    <Card
-      title="Language"
-      subtitle="The app follows your system language unless you pick one here. Only part of the interface is translated so far — untranslated text stays in English."
-    >
+    <Card title={t("settings.language.title")} subtitle={t("settings.language.subtitle")}>
       <select
         value={current}
         disabled={saving}
-        aria-label="App language"
+        aria-label={t("settings.language.aria")}
         onChange={(event) => void save(event.target.value)}
         className="w-full max-w-[280px] rounded-lg border border-hairline/40 bg-inset px-2.5 py-1.5 text-[13.5px] text-ink disabled:cursor-wait disabled:opacity-50"
       >
-        <option value="">System</option>
+        <option value="">{t("settings.language.system")}</option>
         {localeChoices.map(({ code, label }) => (
           <option key={code} value={code}>
             {label}
@@ -186,6 +214,22 @@ function LanguageRow() {
         ))}
       </select>
       {error ? <p role="alert" className="mt-2 text-[12px] text-danger">{error}</p> : null}
+    </Card>
+  );
+}
+
+function ShowThreadsRow() {
+  const enabled = useShowThreads();
+  return (
+    <Card title={t("settings.threadDisplay.title")} subtitle={t("settings.threadDisplay.subtitle")}>
+      <div className="flex items-center justify-between gap-4">
+        <div className="text-[14px] font-medium text-ink">{t("settings.threadDisplay.show")}</div>
+        <Switch
+          checked={enabled}
+          aria-label={t("settings.threadDisplay.show")}
+          onClick={() => setShowThreads(!enabled)}
+        />
+      </div>
     </Card>
   );
 }
@@ -207,27 +251,24 @@ function ToolCallsRow() {
       });
       dispatch({ type: "configStatus", config });
     } catch (cause) {
-      setError(cause instanceof Error ? cause.message : "Could not save the tool-call setting.");
+      setError(cause instanceof Error ? cause.message : t("settings.toolCalls.error"));
     } finally {
       setSaving(false);
     }
   };
 
   return (
-    <Card
-      title="Tool calls"
-      subtitle="Show each tool a bot runs in the transcript. Off by default — the mascot already shows that work is happening."
-    >
+    <Card title={t("settings.toolCalls.title")} subtitle={t("settings.toolCalls.subtitle")}>
       <div className="flex items-center justify-between gap-4">
         <div className="min-w-0">
-          <div className="text-[14px] font-medium text-ink">Show tool calls</div>
+          <div className="text-[14px] font-medium text-ink">{t("settings.toolCalls.show")}</div>
           <div className="mt-0.5 text-[12px] leading-relaxed text-ink-secondary">
-            Named chips for Bash, search, and other tools. Errors and bot-to-bot messages still appear.
+            {t("settings.toolCalls.detail")}
           </div>
         </div>
         <Switch
           checked={enabled}
-          aria-label="Show tool calls in chat"
+          aria-label={t("settings.toolCalls.aria")}
           disabled={saving}
           onClick={() => void toggle()}
           className="disabled:cursor-wait disabled:opacity-50"
@@ -240,14 +281,15 @@ function ToolCallsRow() {
 
 function ExperimentalFeaturesRow() {
   const { state, dispatch } = useStore();
-  const skillRecorder = skillRecorderEnabled(state.config);
+  const skillAuthoring = skillAuthoringEnabled(state.config);
   const browser = builtInBrowserEnabled(state.config);
-  const desktopBrowser = Boolean(window.ogb?.browser);
-  const browserBlockedOnWindows = window.ogb?.platform === "win32" && !desktopBrowser;
-  const [saving, setSaving] = useState<"skillRecorder" | "browser" | null>(null);
+  const desktopBrowser = browserAvailable(state.config);
+  const browserInstallable = state.config?.browserEngine?.installable === true;
+  const browserBlockedOnWindows = window.ogb?.platform === "win32" && !desktopBrowser && !browserInstallable;
+  const [saving, setSaving] = useState<"skillAuthoring" | "browser" | null>(null);
   const [error, setError] = useState("");
 
-  const toggle = async (feature: "skillRecorder" | "browser", next: boolean) => {
+  const toggle = async (feature: "skillAuthoring" | "browser", next: boolean) => {
     if (saving) return;
     setSaving(feature);
     setError("");
@@ -258,49 +300,46 @@ function ExperimentalFeaturesRow() {
       });
       dispatch({ type: "configStatus", config });
     } catch (cause) {
-      setError(cause instanceof Error ? cause.message : "Could not save the experimental feature setting.");
+      setError(cause instanceof Error ? cause.message : t("settings.experimental.error"));
     } finally {
       setSaving(null);
     }
   };
 
   return (
-    <Card
-      title="Experimental features"
-      subtitle="Early features may change while we test them. They stay off unless you enable them."
-    >
+    <Card title={t("settings.experimental.title")} subtitle={t("settings.experimental.subtitle")}>
       <div className="flex items-center justify-between gap-4">
         <div className="min-w-0">
-          <div className="text-[14px] font-medium text-ink">Teach a skill</div>
+          <div className="text-[14px] font-medium text-ink">{t("settings.experimental.skillAuthoring")}</div>
           <div className="mt-0.5 text-[12px] leading-relaxed text-ink-secondary">
-            Record a workflow, use /learn, or ask a supported bot to run /create-verification-skill. Every change waits for your review.
+            {t("settings.experimental.skillAuthoringDetail")}
           </div>
         </div>
         <Switch
-          checked={skillRecorder}
-          aria-label="Show Teach a skill"
+          checked={skillAuthoring}
+          aria-label={t("settings.experimental.skillAuthoringAria")}
           disabled={saving !== null}
-          onClick={() => void toggle("skillRecorder", !skillRecorder)}
+          onClick={() => void toggle("skillAuthoring", !skillAuthoring)}
           className="disabled:cursor-wait disabled:opacity-50"
         />
       </div>
       <div className="mt-4 flex items-center justify-between gap-4 border-t border-hairline/30 pt-4">
         <div className="min-w-0">
-          <div className="text-[14px] font-medium text-ink">Built-in browser</div>
+          <div className="text-[14px] font-medium text-ink">{t("settings.experimental.browser")}</div>
           <div className="mt-0.5 text-[12px] leading-relaxed text-ink-secondary">
             {desktopBrowser
               ? browser
-                ? "Enabled for this workspace. Each bot also has its own browser switch."
-                : "Off by default. Enable it to let supported bots use a browser tab you can watch and take over."
+                ? t("settings.experimental.browserOn")
+                : t("settings.experimental.browserOff")
               : browserBlockedOnWindows
-                ? "Temporarily unavailable on Windows while Electron's production sandbox support is being verified."
-                : "Needs the OpenMausBot desktop app."}
+                ? t("settings.experimental.browserWindows")
+                : browserUnavailableReason(state.config)}
           </div>
         </div>
         <Switch
           checked={browser}
-          aria-label="Enable the built-in browser"
-          disabled={saving !== null || (!browser && !desktopBrowser)}
+          aria-label={t("settings.experimental.browserAria")}
+          disabled={saving !== null || (!browser && !desktopBrowser && !browserInstallable)}
           onClick={() => void toggle("browser", !browser)}
           className="disabled:cursor-wait disabled:opacity-50"
         />
@@ -310,156 +349,13 @@ function ExperimentalFeaturesRow() {
   );
 }
 
-/** Named browser sessions: rename or delete; deleting wipes that session's
- * logins, storage and cache and sends any bot on it back to its own. */
 function BrowserProfilesRow() {
-  const { state, dispatch } = useStore();
+  const { state } = useStore();
   const profiles = state.config?.browserProfiles ?? [];
-  const [busy, setBusy] = useState<string | null>(null);
-  const [renaming, setRenaming] = useState<{ id: string; name: string } | null>(null);
-  const [error, setError] = useState("");
-  // Windows temporarily gates the live browser surface, but upgraded users
-  // must still be able to rename or permanently erase existing sessions.
-  // The packaged server can perform that private lifecycle cleanup without
-  // exposing the browser renderer bridge.
-  if (!window.ogb || (!builtInBrowserEnabled(state.config) && profiles.length === 0)) return null;
-
-  const save = async (next: typeof profiles) => {
-    try {
-      const config: ConfigStatus = await api("/api/config", {
-        method: "PATCH",
-        body: JSON.stringify({ browserProfiles: browserProfilesForPatch(next) }),
-      });
-      dispatch({ type: "configStatus", config });
-    } catch (cause) {
-      setError(cause instanceof Error ? cause.message : "Could not save browser profiles.");
-    } finally {
-      setBusy(null);
-      setRenaming(null);
-    }
-  };
-  const remove = async (id: string) => {
-    if (busy) return;
-    const profile = profiles.find((candidate) => candidate.id === id);
-    if (!profile) return;
-    const referencedBots = state.bots.filter((bot) => bot.browserProfile === id);
-    const blocked = browserProfileDeletionBlockReason(state.bots, id);
-    if (blocked) {
-      setError(blocked);
-      return;
-    }
-    const botSummary = referencedBots.length
-      ? ` ${referencedBots.length === 1 ? referencedBots[0]!.name : `${referencedBots.length} bots`} will switch to their own browser sessions.`
-      : "";
-    if (!window.confirm(`Delete “${profile.name}”?${botSummary} This permanently signs out of this profile and erases its browser data.`)) {
-      return;
-    }
-    setBusy(id);
-    setError("");
-    try {
-      // The server commits the profile list and clears every bot reference as
-      // one transaction, then privately asks Electron to erase the partition.
-      // Never wipe browser data from the renderer before that commit succeeds:
-      // a rejected config save must leave the user's signed-in session intact.
-      const config: ConfigStatus = await api("/api/config", {
-        method: "PATCH",
-        body: JSON.stringify({
-          browserProfiles: browserProfilesForPatch(profiles.filter((candidate) => candidate.id !== id)),
-        }),
-      });
-      dispatch({ type: "configStatus", config });
-      // Packaged Electron receives the same post-commit cleanup privately
-      // from the server. Keep this idempotent fallback for split-process
-      // desktop development, where the server has no parent message port.
-      try {
-        await window.ogb?.browser?.forgetProfile?.(profile.partitionId ?? profile.id);
-      } catch {
-        setError("The profile was removed, but its local browser data could not be erased. Restart OpenMausBot before reusing that profile name.");
-      }
-    } catch (cause) {
-      setError(cause instanceof Error ? cause.message : "Could not delete the browser profile.");
-    } finally {
-      setBusy(null);
-    }
-  };
-  const rename = () => {
-    if (!renaming || busy) return;
-    const name = renaming.name.trim();
-    if (!name) return;
-    setBusy(renaming.id);
-    setError("");
-    void save(profiles.map((profile) => (profile.id === renaming.id ? { ...profile, name } : profile)));
-  };
-  const usersOf = (id: string) => state.bots.filter((bot) => !bot.hidden && bot.browserProfile === id).map((bot) => bot.name);
-
+  if (!builtInBrowserEnabled(state.config) && profiles.length === 0) return null;
   return (
-    <Card
-      title="Browser profiles"
-      subtitle="Named sign-in sessions any bot can use. Create one from a bot's Browser tab; sign in once and it stays."
-    >
-      {profiles.length === 0 ? (
-        <div className="text-[13px] text-ink-secondary">No profiles yet — pick "+ Add profile…" under a bot's browser.</div>
-      ) : (
-        <div className="flex flex-col divide-y divide-hairline/30">
-          {profiles.map((profile) => {
-            const users = usersOf(profile.id);
-            const editing = renaming?.id === profile.id;
-            return (
-              <div key={profile.id} className="flex items-center justify-between gap-3 py-2.5">
-                <div className="flex min-w-0 items-center gap-2">
-                  <Globe size={14} className="shrink-0 text-ink-secondary" />
-                  {editing ? (
-                    <form
-                      className="flex items-center gap-2"
-                      onSubmit={(event) => {
-                        event.preventDefault();
-                        rename();
-                      }}
-                    >
-                      <input
-                        autoFocus
-                        value={renaming.name}
-                        onChange={(event) => setRenaming({ id: profile.id, name: event.target.value })}
-                        maxLength={40}
-                        className="rounded-md bg-inset px-2 py-1 text-[13px] text-ink outline-none"
-                        aria-label="Profile name"
-                      />
-                      <button type="submit" disabled={busy !== null} className="rounded-md bg-accent px-2.5 py-1 text-[12px] font-medium text-accent-ink disabled:opacity-50">
-                        Save
-                      </button>
-                      <button type="button" onClick={() => setRenaming(null)} className="text-[12px] text-ink-secondary hover:text-ink">
-                        Cancel
-                      </button>
-                    </form>
-                  ) : (
-                    <button
-                      type="button"
-                      onClick={() => setRenaming({ id: profile.id, name: profile.name })}
-                      className="truncate text-left text-[14px] font-medium text-ink hover:underline"
-                      title="Rename"
-                    >
-                      {profile.name}
-                    </button>
-                  )}
-                  <span className="truncate text-[12px] text-ink-secondary">
-                    {users.length ? `used by ${users.join(", ")}` : "not in use"}
-                  </span>
-                </div>
-                <button
-                  type="button"
-                  onClick={() => void remove(profile.id)}
-                  disabled={busy !== null}
-                  className="flex shrink-0 items-center gap-1 rounded-md px-2 py-1 text-[12px] text-ink-secondary hover:bg-control hover:text-danger disabled:opacity-50"
-                  title="Delete this profile and forget its logins"
-                >
-                  <Trash2 size={13} /> Delete
-                </button>
-              </div>
-            );
-          })}
-        </div>
-      )}
-      {error ? <p role="alert" className="mt-2 text-[12px] text-danger">{error}</p> : null}
+    <Card title={t("settings.profiles.title")} subtitle={t("settings.profiles.sharedSubtitle")}>
+      <BrowserProfilesManager />
     </Card>
   );
 }
@@ -477,7 +373,7 @@ function DiagnosticsRow() {
     setResult(null);
     try {
       const path = await window.ogb.exportDiagnostics();
-      if (path) setResult({ kind: "success", message: `Saved to ${path}` });
+      if (path) setResult({ kind: "success", message: t("settings.diagnostics.saved", { path }) });
     } catch (e) {
       setResult({ kind: "error", message: e instanceof Error ? e.message : String(e) });
     } finally {
@@ -486,18 +382,15 @@ function DiagnosticsRow() {
   };
 
   return (
-    <Card
-      title="Diagnostics"
-      subtitle="Versions, configuration on/off state and a redacted server log tail. Review the file before sharing it."
-    >
+    <Card title={t("settings.diagnostics.title")} subtitle={t("settings.diagnostics.subtitle")}>
       <div className="flex min-w-0 flex-col items-end gap-2">
         <button
           onClick={() => void exportDiagnostics()}
           disabled={exporting}
-          aria-label="Export diagnostics to a text file"
+          aria-label={t("settings.diagnostics.aria")}
           className="rounded-lg border border-hairline/40 px-3 py-1.5 text-[13px] text-ink hover:bg-control disabled:opacity-40"
         >
-          {exporting ? "Exporting…" : "Export Diagnostics…"}
+          {exporting ? t("settings.diagnostics.exporting") : t("settings.diagnostics.export")}
         </button>
         {result ? (
           <span
@@ -514,18 +407,24 @@ function DiagnosticsRow() {
 
 export function SettingsModal() {
   const { state, dispatch } = useStore();
-  const section = state.appSettingsSection;
+  const remoteActive = window.ogb?.remoteClient?.active === true;
+  const section: AppSettingsSection =
+    (remoteActive && state.appSettingsSection !== "appearance") || state.appSettingsSection === "remote"
+      ? "companion"
+      : state.appSettingsSection;
   const dialogRef = useRef<HTMLDivElement>(null);
   const [query, setQuery] = useState("");
   const q = query.trim().toLowerCase();
-  const visibleSections = SECTIONS.filter((entry) => sectionMatches(entry, q));
+  const availableSections = SECTIONS.filter((entry) => !remoteActive || entry.id === "companion" || entry.id === "appearance");
+  const visibleSections = availableSections.filter((entry) => sectionMatches(entry, q));
+  const sectionLabelKey = SECTIONS.find((entry) => entry.id === section)?.labelKey;
+  const nextVisibleSection = visibleSections.some((entry) => entry.id === section) ? undefined : visibleSections[0]?.id;
 
   useEffect(() => {
-    const visible = SECTIONS.filter((entry) => sectionMatches(entry, q));
-    if (visible.some((entry) => entry.id === section)) return;
-    const first = visible[0];
-    if (first) dispatch({ type: "toggleAppSettings", open: true, section: first.id });
-  }, [dispatch, q, section]);
+    // Translated matches can change without the query changing. Follow the
+    // rendered results instead of a second filter with stale effect inputs.
+    if (nextVisibleSection) dispatch({ type: "toggleAppSettings", open: true, section: nextVisibleSection });
+  }, [dispatch, nextVisibleSection]);
 
   useEffect(() => {
     const previousFocus = document.activeElement instanceof HTMLElement ? document.activeElement : null;
@@ -542,9 +441,9 @@ export function SettingsModal() {
 
       const focusable = Array.from(
         dialog.querySelectorAll<HTMLElement>(
-          'button:not([disabled]), a[href], input:not([disabled]), [tabindex]:not([tabindex="-1"])',
+          'button:not([disabled]), a[href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), summary, [tabindex]:not([tabindex="-1"])',
         ),
-      );
+      ).filter((element) => element.checkVisibility());
       if (focusable.length === 0) {
         event.preventDefault();
         dialog.focus();
@@ -572,7 +471,7 @@ export function SettingsModal() {
 
   return (
     <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-6"
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-3 sm:p-6"
       onMouseDown={(e) => e.target === e.currentTarget && dispatch({ type: "toggleAppSettings", open: false })}
     >
       <div
@@ -581,14 +480,15 @@ export function SettingsModal() {
         aria-modal="true"
         aria-labelledby="app-settings-title"
         tabIndex={-1}
-        className="flex h-[560px] w-full max-w-[860px] overflow-hidden rounded-2xl border border-hairline/50 bg-panel shadow-2xl outline-none"
+        className={cn("flex max-h-[calc(100dvh-24px)] w-full overflow-hidden rounded-2xl border border-hairline/50 bg-panel shadow-2xl outline-none", section === "engines" ? "h-[720px] max-w-[1040px]" : "h-[560px] max-w-[860px]")}
       >
         {/* section nav */}
-        <nav className="flex w-[190px] shrink-0 flex-col gap-0.5 border-r border-hairline/40 p-3">
-          <div id="app-settings-title" className="px-2 pb-2 pt-1 text-[15px] font-semibold text-ink">
-            Settings
+        <span id="app-settings-title" className="sr-only">{t("settings.title")}</span>
+        <nav className="hidden w-[190px] shrink-0 flex-col gap-0.5 border-r border-hairline/40 p-3 sm:flex">
+          <div className="shrink-0 px-2 py-3 text-[15px] font-semibold text-ink">
+            {t("settings.title")}
           </div>
-          <div className="mb-1.5 flex items-center gap-2 rounded-lg bg-control/70 px-2.5 py-1.5">
+          <div className="mb-2 mt-1 flex shrink-0 items-center gap-2 rounded-lg bg-control/70 px-2.5 py-2">
             <Search size={14} className="shrink-0 text-ink-secondary" />
             <input
               value={query}
@@ -599,17 +499,17 @@ export function SettingsModal() {
                 if (query) setQuery("");
                 else dispatch({ type: "toggleAppSettings", open: false });
               }}
-              placeholder="Search"
-              aria-label="Search settings"
+              placeholder={t("settings.search")}
+              aria-label={t("settings.searchAria")}
               className="w-full bg-transparent text-[13px] text-ink placeholder:text-ink-secondary focus:outline-none"
             />
           </div>
           {visibleSections.length === 0 && (
             <div className="px-2.5 py-4 text-[12.5px] leading-relaxed text-ink-secondary">
-              Nothing matches “{query.trim()}”
+              {t("settings.noMatch", { query: query.trim() })}
             </div>
           )}
-          {visibleSections.map(({ id, label, icon: Icon }) => (
+          {visibleSections.map(({ id, labelKey, icon: Icon }) => (
             <button
               key={id}
               onClick={() => dispatch({ type: "toggleAppSettings", open: true, section: id })}
@@ -620,42 +520,62 @@ export function SettingsModal() {
               )}
             >
               <Icon size={15} />
-              {label}
+              {t(labelKey)}
             </button>
           ))}
         </nav>
 
-        <div className="flex min-w-0 flex-1 flex-col">
-          <div className="flex items-center justify-between px-5 py-3">
-            <span className="text-[15px] font-semibold text-ink">
-              {SECTIONS.find((s) => s.id === section)?.label}
+        <div className="flex min-h-0 min-w-0 flex-1 flex-col">
+          <div className="flex shrink-0 items-center justify-between gap-3 px-3 py-3 sm:px-5">
+            <select
+              aria-label={t("settings.title")}
+              value={section}
+              onChange={(event) => {
+                setQuery("");
+                dispatch({ type: "toggleAppSettings", open: true, section: event.target.value as AppSettingsSection });
+              }}
+              className="min-w-0 rounded-lg bg-control px-3 py-2 text-[14px] text-ink sm:hidden"
+            >
+              {availableSections.map(({ id, labelKey }) => (
+                <option key={id} value={id}>{t(labelKey)}</option>
+              ))}
+            </select>
+            <span className="hidden text-[15px] font-semibold text-ink sm:block">
+              {sectionLabelKey ? t(sectionLabelKey) : null}
             </span>
             <button
               onClick={() => dispatch({ type: "toggleAppSettings", open: false })}
-              aria-label="Close settings"
+              aria-label={t("settings.close")}
               className="rounded-md p-1 text-ink-secondary hover:bg-control hover:text-ink"
             >
               <X size={18} />
             </button>
           </div>
 
-          <div className="flex flex-1 flex-col gap-4 overflow-y-auto px-5 pb-5">
+          <div className="flex flex-1 flex-col gap-4 overflow-y-auto px-3 pb-3 sm:px-5 sm:pb-5">
             {section === "general" && (
               <>
-                <Card title="Profile" subtitle="Shown in the sidebar. Saved as you go.">
+                <Card title={t("settings.profile.title")} subtitle={t("settings.profile.subtitle")}>
                   <ProfileFields />
                 </Card>
-                <Card title="Skin" subtitle="Applies instantly and is remembered on this machine.">
-                  <SkinPicker />
-                </Card>
-                <Card title="Channel turns" subtitle="Set one maximum duration for every bot turn in a channel.">
+                <Card title={t("settings.roomTurns.title")} subtitle={t("settings.roomTurns.subtitle")}>
                   <RoomTurnTimeoutSettings />
                 </Card>
+                <ThreadConcurrencySettings />
                 <LanguageRow />
-          <ToolCallsRow />
                 <UpdatesRow />
                 <DiagnosticsRow />
                 <AnalyticsRow />
+              </>
+            )}
+
+            {section === "appearance" && (
+              <>
+                <Card title={t("settings.skin.title")} subtitle={t("settings.skin.subtitle")}>
+                  <SkinPicker />
+                </Card>
+                <ShowThreadsRow />
+                {!remoteActive && <ToolCallsRow />}
               </>
             )}
 
@@ -668,21 +588,20 @@ export function SettingsModal() {
 
             {section === "connections" && (
               <Card
-                title="Connections"
-                subtitle="Connected apps work automatically in the installed app. Other optional service keys stay on this computer."
+                title={t("settings.connections.title")}
+                subtitle={t("settings.connections.subtitle")}
               >
                 <div className="flex flex-col gap-4">
                   {state.config?.composio.mode === "managed" ? (
                     <div className="rounded-lg border border-success/25 bg-success/10 px-3 py-2 text-[13px] text-success">
-                      Connected apps service is ready
+                      {t("settings.connections.ready")}
                     </div>
                   ) : null}
-                  <TranscriptionSettings />
                   <ApiKeyRow section="box" />
                   <VpsConnection />
                   <ApiKeyRow section="opencodeGo" />
                   <details className="rounded-lg border border-hairline/40 bg-inset px-3 py-2">
-                    <summary className="cursor-pointer text-[13px] text-ink-secondary">Self-host connected apps</summary>
+                    <summary className="cursor-pointer text-[13px] text-ink-secondary">{t("settings.connections.selfHost")}</summary>
                     <div className="mt-3">
                       <ApiKeyRow section="composio" />
                     </div>
@@ -692,12 +611,19 @@ export function SettingsModal() {
             )}
 
             {section === "engines" && (
-              <Card title="Engine CLIs" subtitle="Which binary each engine runs. Saved as you go.">
-                <EnginesSettings />
-              </Card>
+              <EnginesSettings />
             )}
 
-            {section === "companion" && <CompanionSection profileEmail={state.config?.profile?.email} />}
+            {section === "companion" && (
+              <>
+                <RemoteComputerSection />
+                {!remoteActive && <CustomDomainSettings />}
+                {/* a hosted server reached from a browser: pair phones and see devices here; the desktop app has its own companion flow */}
+                {!window.ogb && <SignInAccessCard />}
+                {!window.ogb && <ServerPairingCard />}
+                {!remoteActive && <CompanionSection profileEmail={state.config?.profile?.email} />}
+              </>
+            )}
 
             {section === "computer" && <LocalComputerSection />}
 

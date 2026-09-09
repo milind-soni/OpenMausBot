@@ -268,7 +268,11 @@ final class ShareViewModel: ObservableObject {
                             uploadId: attachment.id.uuidString
                         )
                     }
-                    uploaded.append(SharedAttachmentReference(path: path, kind: .image))
+                    uploaded.append(SharedAttachmentReference(
+                        path: path,
+                        kind: .image,
+                        displayName: attachment.name
+                    ))
                 case .file:
                     let uploadedFile = try await withFailover(
                         requestTimeout: 20,
@@ -430,7 +434,10 @@ final class ShareViewModel: ObservableObject {
                 imageCapableInstances = try await withFailover { client in
                     try await client.imageCapableInstanceIDs()
                 }
-            } catch APIError.status(code: 404, message: _) {
+            } catch APIError.status(let code, _) where code == 404 || code == 403 {
+                // 404: a harness from before the capability existed. 403: a
+                // server session without the admin scope, which may not read
+                // the instance list at all. Neither can say where images go.
                 throw ShareExtensionError.imageSupportUnavailable
             }
         } else {

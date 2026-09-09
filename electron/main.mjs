@@ -1,22 +1,16 @@
-import { app, BrowserWindow, WebContentsView, clipboard, desktopCapturer, dialog, ipcMain, Menu, nativeImage, powerSaveBlocker, safeStorage, screen, session, shell, systemPreferences, utilityProcess } from "electron";
+import { app, autoUpdater as nativeAutoUpdater, BrowserWindow, WebContentsView, clipboard, desktopCapturer, dialog, ipcMain, Menu, nativeImage, powerSaveBlocker, safeStorage, screen, session, shell, systemPreferences, utilityProcess } from "electron";
 import { createRequire } from "node:module";
-import { randomUUID } from "node:crypto";
+import { randomBytes, randomUUID } from "node:crypto";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { startCua, stopCua, registerCuaIpc, setCuaStateListener } from "./cua.mjs";
 import { createAndroidDeviceController } from "./android-device.mjs";
-import { assemblyAICredential, mintAssemblyAIStreamingToken } from "./assemblyai.mjs";
 import { finishSpeech, startSpeech, stopSpeech } from "./speech.mjs";
-import {
-  recorderPermissionStatus,
-  saveSkillRecording,
-  startRecorder,
-  stopRecorder,
-} from "./skill-recorder.mjs";
 import { openBlankTerminal } from "./terminal-launch.mjs";
-import { startUpdater, registerUpdaterIpc } from "./updater.mjs";
+import { pasteMenuItem } from "./paste-menu-item.mjs";
+import { attachUpdaterWindow, startUpdater, registerUpdaterIpc } from "./updater.mjs";
 import {
   buildDiagnosticsReport,
   diagnosticsFileName,
@@ -25,7 +19,7 @@ import {
   readSafeLogTail,
 } from "./diagnostics.mjs";
 import { migrateWorkspaceCredentials, workspaceCredentialEnv } from "./workspace-credentials.mjs";
-import { activateExistingWindow } from "./single-instance.mjs";
+import { activateExistingWindow, releaseSingleInstanceLock } from "./single-instance.mjs";
 import { pollServerIdentity } from "./server-boot-probe.mjs";
 import { packageUrlFromCommandLine, packageUrlFromDeepLink } from "./package-link.mjs";
 import { windowChromeOptions } from "./window-chrome.mjs";
@@ -46,6 +40,22 @@ import {
   withoutManagedCompanionTunnelAccess,
 } from "./managed-companion-tunnel.mjs";
 import { createSecureCredentialState } from "./secure-credential-state.mjs";
+import {
+  createPhoneSecretSaveCoordinator,
+  createPhoneSecretIdentity,
+  decodePhoneSecretSaveRequest,
+  phoneSecretPrivateKeyMessage,
+  readPhoneSecretIdentity,
+  withPhoneSecretIdentity,
+} from "./phone-secret-identity.mjs";
+import {
+  desktopCompanionAccess,
+  desktopCompanionRendererArguments,
+  pairDesktopCompanion,
+  startDesktopCompanionRelay,
+  withDesktopCompanionAccess,
+  withoutDesktopCompanionAccess,
+} from "./desktop-companion-client.mjs";
 import { isKnownSkin } from "./skin-overlay.cjs";
 import { readSecureCredentials } from "./secure-credentials.mjs";
 import { createControlPlaneClient } from "./control-plane-client.mjs";
@@ -56,7 +66,9 @@ import {
 } from "./companion-account-service.mjs";
 import capabilitiesModule from "./capabilities.cjs";
 import environmentsModule from "./environments.cjs";
+import localOriginModule from "./local-origin.cjs";
 import { buildApplicationMenu } from "./menu.mjs";
+import { acquireDataDirLease } from "./data-dir-lease.mjs";
 
 const { desktopCapabilities, nativeDesktopActions } = capabilitiesModule;
 const nativeActions = nativeDesktopActions(process.platform);
@@ -67,22 +79,9 @@ const { createDisplayMediaGuard, invokeDisplayMediaCallback, selectCaptureSource
 const { STAGE_PREFIX: APPIMAGE_CUA_STAGE_PREFIX } = require("./cua-linux-bundle.cjs");
 const { desktopViewerUrl, sameDesktopViewerOrigin } = require("./desktop-viewer.cjs");
 const { createDesktopWorkspaceManager } = require("./desktop-workspace.cjs");
-const { createBrowserSurfaceManager } = require("./browser-surface.cjs");
-const { browserPartition, browserProfilePartition } = require("./browser-snapshot.cjs");
-const { createBrowserHost } = require("./browser-host.cjs");
-const { browserSurfaceSupported } = require("./browser-platform.cjs");
-const { clearBrowserPartitionSession } = require("./browser-partition-cleanup.cjs");
-const {
-  postBrowserConnection,
-  removeBrowserConnectionDescriptor: removeBrowserConnectionDescriptorFile,
-} = require("./browser-connection-sync.cjs");
-const {
-  applyBrowserControlHold,
-  browserLifecycleResult,
-  decodeBrowserLifecycleMessage,
-} = require("./browser-control-sync.cjs");
-const { createCuaConnectionStore: createDescriptorStore } = require("./cua-connection.cjs");
-const { normalizeUnreadCount, parseWindowState, resolveWindowState } = require("./window-state.cjs");
+const { createTrustedApprovalModeCoordinator } = require("./approval-trusted-mode.cjs");
+const { DESKTOP_MUTATION_HEADER, desktopServerHeaders } = require("./desktop-server-auth.cjs");
+const { MIN_BOUNDS, normalizeUnreadCount, parseWindowState, resolveWindowState } = require("./window-state.cjs");
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 // 127.0.0.1 explicitly — vite binds IPv4; a bare "localhost" here can
@@ -96,19 +95,6 @@ let desktopViewerOwner = null;
 let desktopViewerContextId = null;
 let desktopWorkspaceManager = null;
 let desktopWorkspaceOwner = null;
-// The built-in browser surface (Browser tab of the computer panel): views
-// live in this process; bots reach them through a loopback host whose address
-// and per-boot token are sent privately to the embedded harness.
-let browserSurface = null;
-let browserHost = null;
-const browserSurfaceIsSupported = browserSurfaceSupported(process.platform);
-// Positive server assertions survive renderer reloads and surface recreation.
-// A release is deliberately local-panel-only; see browser-control-sync.cjs.
-const browserControlHolds = new Set();
-const browserConnectionStore = createDescriptorStore({
-  getUserData: () => app.getPath("userData"),
-  fileName: "browser-connection.json",
-});
 let pendingPackageInstallUrl = packageUrlFromCommandLine(process.argv);
 let mainWindow = null;
 let unreadCount = 0;
@@ -196,9 +182,31 @@ if (!app.requestSingleInstanceLock()) {
   console.log("[desktop] OpenMausBot is already running — focusing that window");
   process.exit(0);
 }
+
+// An update install can start the new build while this process is still
+// inside the deferred before-quit cleanup further down, still holding the
+// lock; the relaunched copy then loses the check above and exits, leaving a
+// dead Starting window with no server. Electron's native autoUpdater emits
+// before-quit-for-update only when an update drives the quit (the vendored
+// electron-updater re-emits it on the same object before app.quit()), so the
+// lock is released on that event — never in before-quit, where a normal quit
+// would allow a concurrent second instance.
+nativeAutoUpdater.on("before-quit-for-update", () => releaseSingleInstanceLock(app));
+
 function deliverPackageInstall(win) {
   if (!pendingPackageInstallUrl || !win || win.isDestroyed()) return;
   if (win.webContents.isLoadingMainFrame()) return;
+  // A package installs into THIS computer's workspace, so it is handed to the
+  // local UI only. Showing a remote server: switch back to Local first; the
+  // pending link is delivered when that page finishes loading.
+  let showingLocal = false;
+  try {
+    showingLocal = new URL(win.webContents.getURL()).origin === rendererOrigin();
+  } catch {}
+  if (!showingLocal) {
+    if (activeEnvironment(environmentsState)) switchEnvironment(LOCAL_ID);
+    return;
+  }
   win.webContents.send("package:install", pendingPackageInstallUrl);
   pendingPackageInstallUrl = null;
 }
@@ -236,6 +244,43 @@ let serverProc = null;
 let serverReady = true;
 let secureCredentials = {};
 let secureCredentialState = null;
+let desktopDataDirLease = null;
+const utilityServerExits = new WeakMap();
+const UTILITY_SERVER_STOP_TIMEOUT_MS = 6_500;
+const trustedApprovalMode = createTrustedApprovalModeCoordinator({ randomId: randomUUID });
+const desktopMutationToken = randomBytes(32).toString("base64url");
+const companionMutationToken = randomBytes(32).toString("base64url");
+
+function desktopDataDir() {
+  // Match the historical desktop fallback for an unset or empty override,
+  // then pass this exact resolved path to the utility child. server/config.ts
+  // intentionally treats an empty OMB_DATA_DIR differently, so inheriting it
+  // without normalization would lease one directory and write another.
+  return process.env.OMB_DATA_DIR || path.join(app.getPath("home"), ".openmausbot");
+}
+
+async function stopUtilityServer(proc, timeoutMs = UTILITY_SERVER_STOP_TIMEOUT_MS) {
+  if (!proc) return true;
+  const exited = utilityServerExits.get(proc);
+  if (!exited) return false;
+  try {
+    proc.kill();
+  } catch {
+    // The tracked exit promise below is still the authority. A throw can mean
+    // the process crossed the exit boundary immediately before kill().
+  }
+  let timer;
+  return Promise.race([
+    exited.then(() => true),
+    new Promise((resolve) => {
+      timer = setTimeout(() => resolve(false), timeoutMs);
+      timer.unref?.();
+    }),
+  ]).finally(() => clearTimeout(timer));
+}
+let phoneSecretIdentity = null;
+let desktopRemoteAccess = null;
+let desktopCompanionRelay = null;
 
 const CREDENTIALS_FILE = path.join(app.getPath("userData"), "credentials.bin");
 
@@ -280,7 +325,7 @@ async function saveSecureCredentials(credentials) {
 }
 
 async function secureComposioConfig() {
-  const dataDir = process.env.OMB_DATA_DIR || path.join(app.getPath("home"), ".openmausbot");
+  const dataDir = desktopDataDir();
   const configPath = path.join(dataDir, "config.json");
   try {
     const config = JSON.parse(fs.readFileSync(configPath, "utf8"));
@@ -322,7 +367,7 @@ async function secureComposioConfig() {
 // migrates plaintext left by older versions or direct development clients.
 // See workspace-credentials.mjs for the exact rules.
 async function secureWorkspaceConfig() {
-  const dataDir = process.env.OMB_DATA_DIR || path.join(app.getPath("home"), ".openmausbot");
+  const dataDir = desktopDataDir();
   const configPath = path.join(dataDir, "config.json");
   try {
     const config = JSON.parse(fs.readFileSync(configPath, "utf8"));
@@ -375,6 +420,15 @@ import {
   startCompanion,
   stopCompanion,
 } from "./companion.mjs";
+
+/** IPC that controls this computer, its files, its logins or its updater is
+ * answered only for the local server's UI (electron/local-origin.cjs). A
+ * remote server's page gets a reduced bridge (preload.cjs) in the first
+ * place; this is the second wall, shared with cua.mjs, updater.mjs and
+ * android-device.mjs. Declared before any handler registration below: a
+ * const declared later would be in its temporal dead zone at module load.
+ */
+const { isLocalSender: senderIsLocal, localOnly, localOnlySync, setLocalOrigin } = localOriginModule;
 
 let companionPowerBlocker = null;
 
@@ -493,6 +547,29 @@ export async function updateSecureCredentialDocument(derive, afterPersist) {
   }
 }
 
+async function ensurePhoneSecretIdentity() {
+  const existing = readPhoneSecretIdentity(secureCredentialState?.read() ?? secureCredentials);
+  if (existing) {
+    phoneSecretIdentity = existing;
+    return existing;
+  }
+  try {
+    const created = await createPhoneSecretIdentity();
+    await updateSecureCredentialDocument((credentials) =>
+      withPhoneSecretIdentity(credentials, created),
+    );
+    phoneSecretIdentity = created;
+    return created;
+  } catch (error) {
+    // Companion chat remains available. Pairing simply omits the public key,
+    // and mobile cards explain that secure entry needs the desktop until the
+    // OS credential store is available on a later launch.
+    phoneSecretIdentity = null;
+    slog(`phone credential key unavailable: ${error?.message ?? error}`);
+    return null;
+  }
+}
+
 function publicManagedCompanionState() {
   const access = managedCompanionTunnelAccess(secureCredentials);
   const status = managedCompanionConnector?.getStatus();
@@ -527,7 +604,12 @@ function companionLaunchOptions(hostedUrl = null) {
   return {
     resourcesPath: process.resourcesPath,
     harnessPort: SERVER_PORT,
+    mutationToken: companionMutationToken,
     hostedUrl,
+    // Only an embedded server receives the private half over its utility
+    // port. A dev server launched in another terminal cannot decrypt, so it
+    // must not advertise a public key and strand the phone on a dead path.
+    secretPublicKey: app.isPackaged && serverProc ? phoneSecretIdentity?.publicKey ?? null : null,
     log: slog,
   };
 }
@@ -740,6 +822,7 @@ async function gatherDiagnostics() {
   const logPath = path.join(LOG_DIR, "server.log");
   const log = readSafeLogTail(logPath);
   const desktopLog = readSafeLogTail(DESKTOP_CRASH_LOG);
+  const updaterLog = readSafeLogTail(path.join(LOG_DIR, "updater.log"));
   return buildDiagnosticsReport({
     appInfo: {
       version: app.getVersion(),
@@ -752,6 +835,7 @@ async function gatherDiagnostics() {
     },
     configSummary: serverStatus ?? {},
     desktopLogTail: desktopLog?.tail ?? "",
+    updaterLogTail: updaterLog?.tail ?? "",
     logTail: log?.tail ?? "",
   });
 }
@@ -760,92 +844,73 @@ async function gatherDiagnostics() {
 // taken by another process — decides which error-page message renders.
 let serverStartConflictOnly = false;
 
-function syncBrowserConnection(proc) {
-  try {
-    postBrowserConnection(proc, browserHost?.url ? browserHost.descriptor() : null);
-  } catch (error) {
-    slog(`browser connection sync failed: ${error?.message ?? error}`);
-  }
-}
 
-function receiveBrowserControlHold(rawMessage) {
-  const message = rawMessage?.data ?? rawMessage;
-  return applyBrowserControlHold(message, (botId) => {
-    browserControlHolds.add(botId);
-    browserSurface?.setHumanControl(botId, true);
-  });
-}
 
-async function clearBrowserPartition(partition) {
-  await clearBrowserPartitionSession(session.fromPartition(partition));
-}
 
-async function applyBrowserLifecycleCleanup(lifecycle) {
-  if (lifecycle.type === "bot-deleted") {
-    browserSurface?.close(lifecycle.botId);
-    browserControlHolds.delete(lifecycle.botId);
-    browserHost?.revokeCapabilitiesForBot(lifecycle.botId);
-    await clearBrowserPartition(browserPartition(lifecycle.botId));
-  } else {
-    browserSurface?.forgetProfile(lifecycle.partitionId);
-    browserHost?.revokeCapabilitiesForProfile(lifecycle.partitionId);
-    await clearBrowserPartition(browserProfilePartition(lifecycle.partitionId));
-  }
-  return true;
-}
 
-const browserLifecycleCleanups = new Map();
-const completedBrowserLifecycleCleanups = new Set();
-const MAX_COMPLETED_BROWSER_CLEANUPS = 512;
 
-function rememberBrowserLifecycleCleanup(requestId) {
-  if (!requestId) return;
-  completedBrowserLifecycleCleanups.delete(requestId);
-  completedBrowserLifecycleCleanups.add(requestId);
-  while (completedBrowserLifecycleCleanups.size > MAX_COMPLETED_BROWSER_CLEANUPS) {
-    completedBrowserLifecycleCleanups.delete(completedBrowserLifecycleCleanups.values().next().value);
-  }
-}
 
 /** Run one private cleanup request at most once and acknowledge only after
  * Chromium confirms its session data is gone. Duplicate retries join the
  * same promise; a retry whose success ACK was lost receives a cached ACK. */
-function receiveBrowserLifecycleCleanup(proc, rawMessage) {
-  const message = rawMessage?.data ?? rawMessage;
-  const lifecycle = decodeBrowserLifecycleMessage(message);
-  if (!lifecycle) return false;
-  const requestId = lifecycle.requestId;
-  let cleanup = requestId ? browserLifecycleCleanups.get(requestId) : null;
-  if (!cleanup) {
-    cleanup = requestId && completedBrowserLifecycleCleanups.has(requestId)
-      ? Promise.resolve(true)
-      : applyBrowserLifecycleCleanup(lifecycle).then((result) => {
-          rememberBrowserLifecycleCleanup(requestId);
-          return result;
-        });
-    if (requestId) {
-      browserLifecycleCleanups.set(requestId, cleanup);
-      void cleanup.finally(() => {
-        if (browserLifecycleCleanups.get(requestId) === cleanup) browserLifecycleCleanups.delete(requestId);
-      }).catch(() => {});
-    }
+
+function syncPhoneSecretKey(proc) {
+  const message = phoneSecretPrivateKeyMessage(phoneSecretIdentity);
+  if (!message) return;
+  try {
+    proc.postMessage(message);
+  } catch (error) {
+    slog(`phone credential key sync failed: ${error?.message ?? error}`);
   }
-  void cleanup.then(
-    () => {
-      if (requestId) proc.postMessage(browserLifecycleResult(requestId, true));
-    },
-    (error) => {
-      slog(`browser lifecycle cleanup failed: ${error?.message ?? error}`);
-      if (requestId) {
-        try {
-          proc.postMessage(browserLifecycleResult(requestId, false));
-        } catch (postError) {
-          slog(`browser lifecycle result send failed: ${postError?.message ?? postError}`);
-        }
-      }
-    },
-  ).catch((error) => {
-    slog(`browser lifecycle result send failed: ${error?.message ?? error}`);
+}
+
+function syncDesktopMutationToken(proc) {
+  try {
+    proc.postMessage({
+      type: "openmausbot:desktop-mutation-token",
+      token: desktopMutationToken,
+      companionToken: companionMutationToken,
+    });
+  } catch (error) {
+    slog(`desktop mutation capability sync failed: ${error?.message ?? error}`);
+  }
+}
+
+function installDesktopMutationHeader() {
+  session.defaultSession.webRequest.onBeforeSendHeaders((details, callback) => {
+    let ownsTarget = false;
+    try {
+      const target = new URL(details.url);
+      ownsTarget = target.protocol === "http:" &&
+        target.hostname === "127.0.0.1" &&
+        Number(target.port || 80) === SERVER_PORT;
+    } catch {}
+    if (!ownsTarget) {
+      callback({ requestHeaders: details.requestHeaders });
+      return;
+    }
+    callback({
+      requestHeaders: {
+        ...details.requestHeaders,
+        [DESKTOP_MUTATION_HEADER]: desktopMutationToken,
+      },
+    });
+  });
+}
+
+const savePhoneSecretOnce = createPhoneSecretSaveCoordinator((target, value) =>
+  saveWorkspaceCredential(target, value),
+);
+
+function receivePhoneSecretSave(proc, rawMessage) {
+  const request = decodePhoneSecretSaveRequest(rawMessage);
+  if (!request) return false;
+  void savePhoneSecretOnce(request).then((result) => {
+    try {
+      proc.postMessage(result);
+    } catch (error) {
+      slog(`phone credential save result failed: ${error?.message ?? error}`);
+    }
   });
   return true;
 }
@@ -854,6 +919,11 @@ async function startServerOn(port) {
   const entry = path.join(process.resourcesPath, "server", "index.js");
   const childEnv = managedComposioChildEnvironment(composioBrokerUrl(), secureCredentials, {
     ...process.env,
+    // The desktop parent owns the durable data-directory lease. Each utility
+    // server gets only a private capability that validates that same live
+    // owner; fallback-port children must not race to replace the parent lease.
+    ...desktopDataDirLease.utilityServerLeaseEnvironment(),
+    OMB_DATA_DIR: desktopDataDir(),
     // A packaged utility child must never fall back to a descriptor inherited
     // from the launching shell. It starts fail-closed until this exact main
     // process sends the private in-memory connection after spawn.
@@ -881,27 +951,33 @@ async function startServerOn(port) {
     env: childEnv,
     stdio: ["ignore", "pipe", "pipe"],
   });
+  let resolveServerExit;
+  utilityServerExits.set(proc, new Promise((resolve) => {
+    resolveServerExit = resolve;
+  }));
   proc.stdout?.on("data", (d) => slog(`[out] ${String(d).trimEnd()}`));
   proc.stderr?.on("data", (d) => slog(`[err] ${String(d).trimEnd()}`));
   proc.on("message", (message) => {
     try {
-      if (receiveBrowserControlHold(message)) return;
-      if (receiveBrowserLifecycleCleanup(proc, message)) return;
+      if (trustedApprovalMode.receive(proc, message)) return;
+      if (receivePhoneSecretSave(proc, message)) return;
     } catch (error) {
-      slog(`browser private sync rejected: ${error?.message ?? error}`);
+      slog(`desktop private sync rejected: ${error?.message ?? error}`);
     }
   });
   proc.once("spawn", () => {
     slog(`spawned pid=${proc.pid}`);
-    syncBrowserConnection(proc);
+    syncDesktopMutationToken(proc);
+    syncPhoneSecretKey(proc);
   });
   let exited = false;
   proc.once("exit", (code) => {
     exited = true;
+    trustedApprovalMode.rejectProcess(proc);
+    resolveServerExit();
     // Capabilities belong to turns in this exact server child. A crash or
     // restart invalidates them before any replacement child receives the
     // browser descriptor.
-    browserHost?.clearCapabilities();
     slog(`exited code=${code}`);
   });
   // wait for the port to answer (fresh machine: first boot writes data dirs).
@@ -934,10 +1010,11 @@ async function startServerOn(port) {
         : `child on port ${port} did not answer /api/health within ${SERVER_BOOT_TIMEOUT_MS / 1000}s`,
     );
   }
-  try {
-    proc.kill();
-  } catch {}
-  return { proc: null, reason: identity.outcome };
+  const stopped = await stopUtilityServer(proc);
+  if (!stopped) {
+    slog(`child on port ${port} did not exit after termination; refusing to start a sibling server`);
+  }
+  return { proc: null, reason: stopped ? identity.outcome : "stuck-child", abort: !stopped };
 }
 
 async function startServerPackaged() {
@@ -952,6 +1029,7 @@ async function startServerPackaged() {
         SERVER_PORT = port;
         return true;
       }
+      if (started.abort) return false;
       // A child that exited or timed out is not evidence of a port conflict —
       // only "another process answered health checks" is.
       if (started.reason !== "foreign-owner") everyPortForeignOwned = false;
@@ -1010,7 +1088,7 @@ const displayMediaGuard = createDisplayMediaGuard();
 let displayMediaRequestCount = 0;
 
 function rendererOrigin() {
-  return new URL(app.isPackaged ? `http://127.0.0.1:${SERVER_PORT}` : DEV_URL).origin;
+  return new URL(app.isPackaged || desktopRemoteAccess ? `http://127.0.0.1:${SERVER_PORT}` : DEV_URL).origin;
 }
 
 function respondToDisplayMediaRequest(callback, response) {
@@ -1218,164 +1296,10 @@ function desktopWorkspaceForEvent(event, create = false) {
   return create ? ensureDesktopWorkspace(owner) : desktopWorkspaceManager;
 }
 
-/** The built-in browser: WebContentsViews per bot inside the app window,
- * plus the loopback host the bot's tools call. The host and its in-memory
- * master token live for the whole process; the surface belongs to a
- * window and is rebuilt for every window created — macOS keeps the app
- * alive with none open, and `activate` makes a new one. Never blocks the
- * window: without it the Browser tab simply reports itself unavailable. */
-function removeBrowserConnectionDescriptor() {
-  try {
-    removeBrowserConnectionDescriptorFile({ userData: app.getPath("userData") });
-  } catch (error) {
-    slog(`could not remove stale browser descriptor: ${error?.message ?? error}`);
-  }
-}
 
-async function ensureBrowserHost() {
-  if (!browserSurfaceIsSupported) {
-    removeBrowserConnectionDescriptor();
-    throw new Error("The sandboxed built-in browser is not yet available on this platform");
-  }
-  if (browserHost?.url) return browserHost;
-  const candidate = createBrowserHost({ manager: () => browserSurface });
-  try {
-    await candidate.start();
-    if (app.isPackaged) removeBrowserConnectionDescriptor();
-    else browserConnectionStore.persist(candidate.descriptor());
-    // Publish only after listen + descriptor handling both succeed. A failed
-    // candidate is stopped below so the next window can retry cleanly.
-    browserHost = candidate;
-    if (serverProc) syncBrowserConnection(serverProc);
-    return candidate;
-  } catch (error) {
-    await candidate.stop().catch(() => {});
-    throw error;
-  }
-}
-
-async function startBrowserSurface(owner) {
-  if (!browserSurfaceIsSupported) {
-    // Never leave a development descriptor behind that could make the server
-    // advertise browser tools while the native surface is deliberately gated.
-    removeBrowserConnectionDescriptor();
-    if (serverProc) syncBrowserConnection(serverProc);
-    return;
-  }
-  let surface = null;
-  try {
-    surface = createBrowserSurfaceManager({
-      owner,
-      createView: (options) => new WebContentsView(options),
-      notify: (state) => {
-        if (!owner.isDestroyed() && !owner.webContents.isDestroyed()) owner.webContents.send("browser:state", state);
-      },
-      onUserInteraction: (state) => {
-        if (!owner.isDestroyed() && !owner.webContents.isDestroyed()) owner.webContents.send("browser:user-interaction", state);
-      },
-    });
-    for (const botId of browserControlHolds) surface.setHumanControl(botId, true);
-    browserSurface = surface;
-    await ensureBrowserHost();
-    // A renderer reload or crash loses the panel that positioned the views;
-    // hide them until a mounted Browser tab lays them out again. The pages
-    // themselves stay alive — a bot mid-task must not lose its tab.
-    owner.webContents.on("did-start-navigation", (_event, _url, isInPlace, isMainFrame) => {
-      if (isMainFrame && !isInPlace) browserSurface?.hideAll();
-    });
-    owner.webContents.on("render-process-gone", () => browserSurface?.hideAll());
-    owner.once("closed", () => {
-      surface.closeAll();
-      if (browserSurface === surface) browserSurface = null;
-    });
-    slog(`browser surface ready for window ${owner.id} (host ${browserHost.url})`);
-  } catch (error) {
-    slog(`browser surface unavailable: ${error?.message ?? error}`);
-    surface?.closeAll();
-    if (browserSurface === surface) browserSurface = null;
-  }
-}
-
-function browserSurfaceForEvent(event) {
-  const owner = mainWindow;
-  if (!owner || owner.isDestroyed() || event.sender !== owner.webContents) {
-    throw new Error("The browser is available only to the main app window");
-  }
-  if (!browserSurface) throw new Error("The built-in browser is unavailable");
-  return browserSurface;
-}
-
-ipcMain.handle("browser:available", localOnly("browser:available", () => Boolean(browserSurface && browserHost?.url)));
-ipcMain.handle("browser:state", localOnly("browser:state", (event, botId) => browserSurfaceForEvent(event).state(botId)));
-ipcMain.handle("browser:layout", localOnly("browser:layout", (event, botId, bounds, profile, mode, layoutOwner) =>
-  browserSurfaceForEvent(event).layout(
-    botId,
-    bounds ?? null,
-    Object.prototype.toString.call(profile) === "[object String]" ? profile : undefined,
-    mode === "expanded" ? "expanded" : "compact",
-    Object.prototype.toString.call(layoutOwner) === "[object String]" && layoutOwner.length <= 128
-      ? layoutOwner
-      : undefined,
-  ),
-));
-const browserProfileFromRenderer = (profile) =>
-  Object.prototype.toString.call(profile) === "[object String]" ? profile : undefined;
-
-ipcMain.handle("browser:forward", localOnly("browser:forward", async (event, botId, profile) => {
-  const result = await browserSurfaceForEvent(event).forward(botId, browserProfileFromRenderer(profile), { source: "user" });
-  return { url: result.url, title: result.title };
-}));
-ipcMain.handle("browser:reload", localOnly("browser:reload", async (event, botId, profile) => {
-  const result = await browserSurfaceForEvent(event).reload(botId, browserProfileFromRenderer(profile), { source: "user" });
-  return { url: result.url, title: result.title };
-}));
-ipcMain.handle("browser:navigate", localOnly("browser:navigate", async (event, botId, url, profile) => {
-  const result = await browserSurfaceForEvent(event).navigate(botId, url, browserProfileFromRenderer(profile), { source: "user" });
-  return { url: result.url, title: result.title };
-}));
-ipcMain.handle("browser:back", localOnly("browser:back", async (event, botId, profile) => {
-  const result = await browserSurfaceForEvent(event).back(botId, browserProfileFromRenderer(profile), { source: "user" });
-  return { url: result.url, title: result.title };
-}));
-ipcMain.handle("browser:set-human-control", localOnly("browser:set-human-control", (event, botId, held, profile) => {
-  const owner = mainWindow;
-  if (!owner || owner.isDestroyed() || event.sender !== owner.webContents) {
-    throw new Error("The browser is available only to the main app window");
-  }
-  const id = String(botId ?? "");
-  if (!/^[A-Za-z0-9_-]{1,120}$/.test(id)) throw new Error("A bot id is required");
-  // A generic Computer-panel release must be able to clear a positive hold
-  // remembered across renderer/surface recreation. If no surface exists,
-  // there is no local browser to update, but the remembered gate still goes.
-  if (!browserSurface) {
-    if (held === true) throw new Error("The built-in browser is unavailable");
-    browserControlHolds.delete(id);
-    return true;
-  }
-  const surface = browserSurface;
-  const applied = surface.setHumanControl(id, held === true, browserProfileFromRenderer(profile));
-  if (held === true) browserControlHolds.add(id);
-  else browserControlHolds.delete(id);
-  return applied;
-}));
-ipcMain.handle("browser:close", localOnly("browser:close", (event, botId) => browserSurfaceForEvent(event).close(botId)));
-// Deleting a profile: every bot's view on it goes, then its cookies, storage
-// and cache. The partition directory itself is left for Chromium to reuse
-// (removing it while the session object lives is the EBUSY trap every
-// Electron app with profiles has hit); nothing identifying remains in it.
-ipcMain.handle("browser:forget-profile", localOnly("browser:forget-profile", async (event, partitionId) => {
-  const surface = browserSurfaceForEvent(event);
-  const id = String(partitionId ?? "");
-  if (!/^[A-Za-z0-9_-]{1,40}$/.test(id) || id === "guest") throw new Error("That browser partition id is invalid");
-  const dropped = surface.forgetProfile(id);
-  browserHost?.revokeCapabilitiesForProfile(id);
-  await clearBrowserPartition(browserProfilePartition(id));
-  return { dropped };
-}));
-
-ipcMain.on("screen:preview-intent", (event) => {
+ipcMain.on("screen:preview-intent", localOnlySync("screen:preview-intent", (event) => {
   event.returnValue = displayMediaGuard.begin(event.senderFrame);
-});
+}));
 
 ipcMain.on("desktop:unread-count", (event, value) => {
   const sender = BrowserWindow.fromWebContents(event.sender);
@@ -1423,24 +1347,6 @@ function activeOrigin() {
   return activeEnvironment(environmentsState)?.origin ?? rendererOrigin();
 }
 
-function senderIsLocal(event) {
-  const url = event?.senderFrame?.url ?? event?.sender?.getURL?.() ?? "";
-  try {
-    return new URL(url).origin === rendererOrigin();
-  } catch {
-    return false;
-  }
-}
-
-/** IPC that controls this computer, its files, its logins or its updater is
- * answered only for the local server's UI. A remote server's page gets a
- * reduced bridge (preload.cjs) in the first place; this is the second wall. */
-function localOnly(channel, handler) {
-  return (event, ...args) => {
-    if (!senderIsLocal(event)) throw new Error(`${channel} is only available while using the local server`);
-    return handler(event, ...args);
-  };
-}
 
 function refreshApplicationMenu() {
   Menu.setApplicationMenu(
@@ -1514,6 +1420,12 @@ async function forgetEnvironment(id) {
   if (response !== 0) return;
   persistEnvironments(withoutEnvironment(environmentsState, id));
   try {
+    // Revoke the session on the server while the cookie is still here.
+    await session.defaultSession.fetch(`${env.origin}/api/auth/logout`, { method: "POST", signal: AbortSignal.timeout(5_000) });
+  } catch (error) {
+    slog(`forget server: logout skipped (${error?.message ?? error})`);
+  }
+  try {
     await session.defaultSession.clearStorageData({ origin: env.origin, storages: ["cookies", "localstorage", "indexdb", "serviceworkers", "cachestorage"] });
   } catch (error) {
     slog(`forget server: storage clear failed: ${error?.message ?? error}`);
@@ -1521,6 +1433,54 @@ async function forgetEnvironment(id) {
   navigateMainWindow(activeOrigin());
 }
 
+/**
+ * Displays the native context menu for editable fields, links, and selections,
+ * enabling paste if text or a clipboard image is available.
+ *
+ * @param {Electron.BrowserWindow} win - Target browser window.
+ * @param {Electron.ContextMenuParams} params - Context menu parameters from Electron.
+ * @returns {void}
+ */
+function showContextMenu(win, params) {
+  // nothing actionable here — no menu at all, rather than a wall of
+  // disabled items
+  if (!params.isEditable && !params.linkURL && !params.misspelledWord && !params.selectionText) return;
+  const menuItems = [];
+  if (params.misspelledWord) {
+    for (const suggestion of params.dictionarySuggestions.slice(0, 5)) {
+      menuItems.push({
+        label: suggestion,
+        click: () => win.webContents.replaceMisspelling(suggestion),
+      });
+    }
+    if (menuItems.length) menuItems.push({ type: "separator" });
+  }
+  if (params.linkURL) {
+    menuItems.push(
+      { label: "Copy Link", click: () => clipboard.writeText(params.linkURL) },
+      { type: "separator" },
+    );
+  }
+  menuItems.push(
+    { label: "Undo", role: "undo", enabled: params.editFlags.canUndo },
+    { label: "Redo", role: "redo", enabled: params.editFlags.canRedo },
+    { type: "separator" },
+    { label: "Cut", role: "cut", enabled: params.editFlags.canCut },
+    { label: "Copy", role: "copy", enabled: params.editFlags.canCopy },
+    pasteMenuItem(params, clipboard, win.webContents),
+    { label: "Paste and Match Style", role: "pasteAndMatchStyle", enabled: params.editFlags.canPaste },
+    { type: "separator" },
+    { label: "Select All", role: "selectAll", enabled: params.editFlags.canSelectAll },
+  );
+  Menu.buildFromTemplate(menuItems).popup({ window: win, frame: params.frame });
+}
+
+/**
+ * Creates and initializes the primary Electron browser window and configures
+ * its lifecycle hooks, context menus, and navigation guards.
+ *
+ * @returns {void}
+ */
 function createWindow() {
   const waitsForSkinSync = process.platform === "win32";
   const primary = screen.getPrimaryDisplay();
@@ -1528,8 +1488,8 @@ function createWindow() {
   const restored = resolveWindowState(readWindowState(), displays.map((display) => display.workArea));
   const win = new BrowserWindow({
     ...restored.bounds,
-    minWidth: 900,
-    minHeight: 600,
+    minWidth: MIN_BOUNDS.width,
+    minHeight: MIN_BOUNDS.height,
     // The renderer restores its persisted skin before mounting React and
     // mirrors it over desktop:skin. Keep Windows hidden until that handshake
     // recolors the native caption-button overlay, otherwise a saved light
@@ -1543,11 +1503,15 @@ function createWindow() {
       contextIsolation: true,
       preload: path.join(__dirname, "preload.cjs"),
       // The preload exposes the full bridge only to this origin (see preload.cjs).
-      additionalArguments: [`--omb-local-origin=${rendererOrigin()}`],
+      // Companion client mode still serves the bundled UI from its own
+      // loopback relay, so it is a trusted local page while also needing the
+      // renderer's remote-only feature gates. Keep the two facts independent:
+      // upstream's origin boundary must not erase the client-mode marker.
+      additionalArguments: desktopCompanionRendererArguments(rendererOrigin(), desktopRemoteAccess),
     },
   });
   mainWindow = win;
-  void startBrowserSurface(win);
+  attachUpdaterWindow(win);
   if (waitsForSkinSync) {
     // A broken renderer or preload must not strand the app as an invisible
     // process. Normal startup shows from desktop:skin almost immediately;
@@ -1584,6 +1548,22 @@ function createWindow() {
   };
   win.webContents.on("will-navigate", guardNavigation);
   win.webContents.on("will-redirect", guardNavigation);
+  // Subframes: a page may not embed the local server, or any other saved
+  // server, inside this preload-bearing window.
+  win.webContents.on("will-frame-navigate", (details) => {
+    if (details.isMainFrame) return;
+    let target = null;
+    let page = null;
+    try {
+      target = new URL(details.url).origin;
+      page = new URL(win.webContents.getURL()).origin;
+    } catch {}
+    if (!target || !page || target === page) return;
+    if (target === rendererOrigin() || allowedOrigins(environmentsState, rendererOrigin()).has(target)) {
+      details.preventDefault();
+      slog(`blocked subframe navigation to ${details.url}`);
+    }
+  });
   win.webContents.on("did-fail-load", (_event, errorCode, errorDescription, validatedURL, isMainFrame) => {
     if (!isMainFrame || errorCode === -3) return; // -3: aborted by a newer navigation
     const remote = activeEnvironment(environmentsState);
@@ -1606,37 +1586,7 @@ function createWindow() {
   // Native context menu for text inputs — without this, right-click does
   // nothing in the Electron window (no Cut/Copy/Paste/Select All).
   win.webContents.on("context-menu", (_event, params) => {
-    // nothing actionable here — no menu at all, rather than a wall of
-    // disabled items
-    if (!params.isEditable && !params.linkURL && !params.misspelledWord && !params.selectionText) return;
-    const menuItems = [];
-    if (params.misspelledWord) {
-      for (const suggestion of params.dictionarySuggestions.slice(0, 5)) {
-        menuItems.push({
-          label: suggestion,
-          click: () => win.webContents.replaceMisspelling(suggestion),
-        });
-      }
-      if (menuItems.length) menuItems.push({ type: "separator" });
-    }
-    if (params.linkURL) {
-      menuItems.push(
-        { label: "Copy Link", click: () => clipboard.writeText(params.linkURL) },
-        { type: "separator" },
-      );
-    }
-    menuItems.push(
-      { label: "Undo", role: "undo", enabled: params.editFlags.canUndo },
-      { label: "Redo", role: "redo", enabled: params.editFlags.canRedo },
-      { type: "separator" },
-      { label: "Cut", role: "cut", enabled: params.editFlags.canCut },
-      { label: "Copy", role: "copy", enabled: params.editFlags.canCopy },
-      { label: "Paste", role: "paste", enabled: params.editFlags.canPaste },
-      { label: "Paste and Match Style", role: "pasteAndMatchStyle", enabled: params.editFlags.canPaste },
-      { type: "separator" },
-      { label: "Select All", role: "selectAll", enabled: params.editFlags.canSelectAll },
-    );
-    Menu.buildFromTemplate(menuItems).popup({ window: win, frame: params.frame });
+    showContextMenu(win, params);
   });
 
   // Packaged CI smoke hook. It validates the real renderer/preload bridge and
@@ -1663,14 +1613,20 @@ function createWindow() {
                 });
               });
             }
-            const [initialCapabilities, healthResponse] = await Promise.all([
+            const [initialCapabilities, healthResponse, ownerMutationResponse] = await Promise.all([
               window.ogb.getCapabilities(),
               fetch("/api/health"),
+              fetch("/api/auth/stream-ticket", { method: "POST" }),
             ]);
             if (!healthResponse.ok) {
               throw new Error(\`health request failed: \${healthResponse.status} \${healthResponse.statusText}\`);
             }
             const health = await healthResponse.json();
+            if (!ownerMutationResponse.ok) {
+              throw new Error(
+                \`desktop mutation capability failed: \${ownerMutationResponse.status} \${ownerMutationResponse.statusText}\`,
+              );
+            }
             let capabilities = initialCapabilities;
             let cuaCrashReason = null;
             let cuaRetryStatus = null;
@@ -1743,7 +1699,9 @@ function createWindow() {
   }
 
   const remote = activeEnvironment(environmentsState);
-  if (remote) {
+  if (desktopRemoteAccess) {
+    win.loadURL(serverReady ? `http://127.0.0.1:${SERVER_PORT}` : buildErrorPage({ allPortsOccupied: serverStartConflictOnly }));
+  } else if (remote) {
     win.loadURL(remote.origin);
   } else if (app.isPackaged) {
     win.loadURL(serverReady ? `http://127.0.0.1:${SERVER_PORT}` : buildErrorPage({ allPortsOccupied: serverStartConflictOnly }));
@@ -1973,15 +1931,6 @@ ipcMain.handle("speech:finish", localOnly("speech:finish", () => {
   if (nativeActions.appleSpeech) finishSpeech();
 }));
 
-ipcMain.handle("skill-recorder:permissions", localOnly("skill-recorder:permissions", () => recorderPermissionStatus()));
-ipcMain.handle("skill-recorder:start", localOnly("skill-recorder:start", (event) => {
-  const win = BrowserWindow.fromWebContents(event.sender);
-  if (!win) throw new Error("The recorder window is unavailable");
-  return startRecorder(win);
-}));
-ipcMain.handle("skill-recorder:stop", localOnly("skill-recorder:stop", () => stopRecorder()));
-ipcMain.handle("skill-recorder:save", localOnly("skill-recorder:save", (_event, payload) => saveSkillRecording(payload)));
-
 // ── companion sidecar ──────────────────────────────────────────────────
 // The renderer gets these five and nothing else: it can turn the companion
 // on and off, look at it, open or cancel a pairing window, and remove a
@@ -2003,6 +1952,53 @@ ipcMain.handle("companion:cloud-desktop", localOnly("companion:cloud-desktop", (
 ipcMain.handle("companion:revoke", localOnly("companion:revoke", (_event, deviceId) =>
   companionRevoke(deviceId).then(() => desktopCompanionState()),
 ));
+
+function publicDesktopRemoteState() {
+  return desktopRemoteAccess
+    ? {
+        active: true,
+        endpoint: desktopRemoteAccess.endpoint,
+        serverName: desktopRemoteAccess.serverName,
+        deviceId: desktopRemoteAccess.deviceId,
+      }
+    : { active: false };
+}
+
+function requireMainWindowSender(event) {
+  const sender = BrowserWindow.fromWebContents(event.sender);
+  if (!sender || sender !== mainWindow || sender.isDestroyed()) {
+    throw new Error("The desktop client window is unavailable");
+  }
+}
+
+function relaunchAfterDesktopRemoteChange() {
+  const timer = setTimeout(() => {
+    app.relaunch();
+    app.exit(0);
+  }, 250);
+  timer.unref?.();
+}
+
+ipcMain.handle("desktop-remote:state", () => publicDesktopRemoteState());
+ipcMain.handle("desktop-remote:pair", localOnly("desktop-remote:pair", async (event, endpoint, code) => {
+  requireMainWindowSender(event);
+  const access = await pairDesktopCompanion({
+    endpoint,
+    code,
+    deviceName: `${installationDisplayName()} desktop`,
+  });
+  await updateSecureCredentialDocument((credentials) => withDesktopCompanionAccess(credentials, access));
+  desktopRemoteAccess = access;
+  relaunchAfterDesktopRemoteChange();
+  return publicDesktopRemoteState();
+}));
+ipcMain.handle("desktop-remote:disconnect", localOnly("desktop-remote:disconnect", async (event) => {
+  requireMainWindowSender(event);
+  await updateSecureCredentialDocument(withoutDesktopCompanionAccess);
+  desktopRemoteAccess = null;
+  relaunchAfterDesktopRemoteChange();
+  return { active: false };
+}));
 
 // Auth and connector credentials never cross this boundary. Every handler
 // returns the same deliberately tiny, secret-free public account state.
@@ -2041,28 +2037,6 @@ ipcMain.handle("desktop:capabilities", async (event) =>
   }),
 );
 
-ipcMain.handle("assemblyai:status", localOnly("assemblyai:status", () => ({
-  configured: Boolean(assemblyAICredential(secureCredentials)),
-})));
-
-ipcMain.handle("assemblyai:set-key", localOnly("assemblyai:set-key", async (_event, value) => {
-  if (typeof value !== "string") throw new Error("Unsupported credential");
-  if (!(await safeStorage.isAsyncEncryptionAvailable())) {
-    throw new Error("The operating-system credential store is unavailable");
-  }
-  const secret = value.trim();
-  await updateSecureCredentialDocument((credentials) => {
-    if (secret) credentials.assemblyAiApiKey = secret;
-    else delete credentials.assemblyAiApiKey;
-    return credentials;
-  });
-  return { configured: Boolean(secret) };
-}));
-
-ipcMain.handle("assemblyai:streaming-token", localOnly("assemblyai:streaming-token", () =>
-  mintAssemblyAIStreamingToken(assemblyAICredential(secureCredentials)),
-));
-
 const CREDENTIAL_PATCH = {
   composioApiKey: (value) => ({ composio: { apiKey: value } }),
   xaiApiKey: (value) => ({ xai: { key: value } }),
@@ -2070,9 +2044,10 @@ const CREDENTIAL_PATCH = {
   opencodeGoApiKey: (value) => ({ opencodeGo: { apiKey: value } }),
   ttsKey: (value) => ({ tts: { key: value } }),
   openaiImageApiKey: (value) => ({ imageGen: { key: value } }),
+  customImageApiKey: (value) => ({ imageGen: { customApiKey: value } }),
 };
 
-ipcMain.handle("credential:set", localOnly("credential:set", async (_event, name, value) => {
+async function saveWorkspaceCredential(name, value) {
   const patchFor = CREDENTIAL_PATCH[name];
   if (!patchFor || typeof value !== "string") {
     throw new Error("Unsupported credential");
@@ -2088,7 +2063,10 @@ ipcMain.handle("credential:set", localOnly("credential:set", async (_event, name
     const secretStorage = app.isPackaged ? "?secretStorage=external" : "";
     const response = await fetch(`http://127.0.0.1:${SERVER_PORT}/api/config${secretStorage}`, {
       method: "PUT",
-      headers: { "content-type": "application/json" },
+      headers: desktopServerHeaders(
+        { "content-type": "application/json" },
+        { packaged: app.isPackaged, token: desktopMutationToken },
+      ),
       body: JSON.stringify(patchFor(secret)),
     });
     const body = await response.json().catch(() => null);
@@ -2108,17 +2086,35 @@ ipcMain.handle("credential:set", localOnly("credential:set", async (_event, name
     },
     applyToHarness,
   );
+}
+
+ipcMain.handle("credential:set", localOnly("credential:set", (_event, name, value) =>
+  saveWorkspaceCredential(name, value),
+));
+
+ipcMain.handle("approvals:set-trusted-mode", localOnly("approvals:set-trusted-mode", (_event, botId, mode, options) => {
+  // Development uses a separately launched server, which is intentionally
+  // outside this trust path. Never degrade this grant to loopback HTTP.
+  if (!app.isPackaged || !serverProc) {
+    throw new Error("Full and Custom approval modes require the embedded desktop server");
+  }
+  return trustedApprovalMode.request(serverProc, botId, mode, options);
 }));
 
 async function broadcastDesktopCapabilities() {
-  const capabilities = desktopCapabilities({
-    platform: process.platform,
-    env: process.env,
-    packaged: app.isPackaged,
-    localConnection: await cuaReady,
-  });
+  const localConnection = await cuaReady;
+  const build = (remote) =>
+    desktopCapabilities({ remote, platform: process.platform, env: process.env, packaged: app.isPackaged, localConnection });
+  const local = build(false);
+  let redacted = null;
   for (const window of BrowserWindow.getAllWindows()) {
-    if (!window.isDestroyed()) window.webContents.send("desktop:capabilities-changed", capabilities);
+    if (window.isDestroyed()) continue;
+    let isLocal = false;
+    try {
+      isLocal = new URL(window.webContents.getURL()).origin === rendererOrigin();
+    } catch {}
+    if (!isLocal) redacted ??= build(true);
+    window.webContents.send("desktop:capabilities-changed", isLocal ? local : redacted);
   }
 }
 
@@ -2130,9 +2126,44 @@ setCuaStateListener((connection) => {
 });
 
 app.whenReady().then(async () => {
-  if (app.isPackaged) app.setAsDefaultProtocolClient("openmausbot");
+  if (app.isPackaged) {
+    try {
+      // Acquire before either plaintext credential migration reads or writes
+      // config.json. The parent retains ownership across utility-child port
+      // fallbacks and restarts for the entire desktop process lifetime.
+      desktopDataDirLease = acquireDataDirLease(desktopDataDir(), {
+        legacyDataDir: path.join(app.getPath("home"), ".opengrokbot"),
+      });
+    } catch (error) {
+      dialog.showErrorBox(
+        "OpenMausBot could not start safely",
+        error?.message ?? "Another process is using this OpenMausBot data folder.",
+      );
+      app.quit();
+      return;
+    }
+  }
+  if (app.isPackaged) {
+    app.setAsDefaultProtocolClient("openmausbot");
+    // Chromium adds this capability below JavaScript, so renderer requests
+    // can mutate the local harness while a Full-access shell using curl
+    // cannot impersonate the person operating the desktop app.
+    installDesktopMutationHeader();
+  }
   if (process.platform === "darwin") app.dock.setIcon(APP_ICON);
   secureCredentials = await loadSecureCredentials();
+  // The AssemblyAI key only fed the removed Teach a skill recorder, and its
+  // set/clear handler went with it; drop the orphaned secret rather than
+  // keep a third-party key at rest with no way to remove it.
+  if (secureCredentials && Object.hasOwn(secureCredentials, "assemblyAiApiKey") && !credentialStoreUnavailable) {
+    try {
+      const { assemblyAiApiKey: _removed, ...rest } = secureCredentials;
+      await saveSecureCredentials(rest);
+      secureCredentials = rest;
+    } catch (error) {
+      slog(`orphaned AssemblyAI key not removed: ${error?.message ?? error}`);
+    }
+  }
   if (app.isPackaged) {
     await secureComposioConfig();
     await secureWorkspaceConfig();
@@ -2144,7 +2175,9 @@ app.whenReady().then(async () => {
     writable: !credentialStoreUnavailable,
   });
   secureCredentials = secureCredentialState.read();
-  const hostedAccount = ensureCompanionAccountService();
+  if (app.isPackaged) await ensurePhoneSecretIdentity();
+  desktopRemoteAccess = desktopCompanionAccess(secureCredentials);
+  const hostedAccount = desktopRemoteAccess ? null : ensureCompanionAccountService();
   // Display capture remains user-initiated. The renderer first sends a
   // short-lived one-shot intent, then calls getDisplayMedia in the same click.
   // The handler binds that request to the same frame/origin, rejects audio,
@@ -2203,20 +2236,27 @@ app.whenReady().then(async () => {
   // connection descriptor on first render. Never blocks window creation on
   // failure — computer use degrades to "unavailable", the rest still works.
   cuaReady =
-    process.platform === "darwin" || process.platform === "linux"
+    !desktopRemoteAccess && (process.platform === "darwin" || process.platform === "linux")
       ? startCua().catch((e) => {
           console.error("[cua] start failed:", e);
           return { mode: "unavailable", reason: String(e) };
         })
       : Promise.resolve({ mode: "unavailable", reason: "unsupported-platform" });
-  if (app.isPackaged) {
-    // The embedded harness receives this descriptor only over its private
-    // utility-process port. Never leave the master token in userData where a
-    // shell-capable bot running as the same OS user could read it.
-    removeBrowserConnectionDescriptor();
-    await ensureBrowserHost().catch((error) => {
-      slog(`browser host unavailable before server start: ${error?.message ?? error}`);
-    });
+  if (desktopRemoteAccess) {
+    try {
+      desktopCompanionRelay = await startDesktopCompanionRelay({
+        access: desktopRemoteAccess,
+        staticDir: app.isPackaged
+          ? path.join(process.resourcesPath, "ui")
+          : path.join(app.getAppPath(), "dist"),
+      });
+      SERVER_PORT = desktopCompanionRelay.port;
+      serverReady = true;
+    } catch (error) {
+      serverReady = false;
+      slog(`desktop companion relay failed: ${error?.message ?? error}`);
+    }
+  } else if (app.isPackaged) {
     serverReady = await startServerPackaged();
   }
   // The companion the user left on comes back without anyone finding the
@@ -2224,15 +2264,32 @@ app.whenReady().then(async () => {
   // exact options the IPC handler uses. A failure surfaces in companionState
   // (the panel shows the error) rather than retrying; and it never delays
   // the window.
-  if (serverReady && companionEnabledAtRest()) {
+  if (!desktopRemoteAccess && serverReady && companionEnabledAtRest()) {
     void startDesktopCompanion({ waitForHosted: false, remember: false });
   }
+  setLocalOrigin(rendererOrigin());
+  // Device permissions (microphone, camera, notifications, …) are for the
+  // local UI only; a remote server's page in this window is refused without
+  // a prompt. Client mode's loopback relay is the local UI.
+  const localPermission = (url) => {
+    try {
+      return new URL(String(url)).origin === rendererOrigin();
+    } catch {
+      return false;
+    }
+  };
+  session.defaultSession.setPermissionRequestHandler((contents, _permission, callback, details) =>
+    callback(localPermission(details?.requestingUrl ?? contents?.getURL?.() ?? "")),
+  );
+  session.defaultSession.setPermissionCheckHandler((contents, _permission, requestingOrigin) =>
+    localPermission(requestingOrigin || contents?.getURL?.() || ""),
+  );
   environmentsState = readEnvironments();
-  const win = createWindow();
+  createWindow();
   // Reconcile incomplete setup and resume interrupted sign-out only after the
   // local app is usable. This background network work never gates LAN pairing
   // or the first window.
-  void hostedAccount.restore().catch(() => {});
+  if (hostedAccount) void hostedAccount.restore().catch(() => {});
   // Registration is optional network work. Start it only after the local
   // server and first window are usable, then update the server child over its
   // private parent port so Connected Apps becomes available without restart.
@@ -2242,7 +2299,7 @@ app.whenReady().then(async () => {
   if (credentialStoreUnavailable) {
     slog("skipping connected-apps registration: the credential store was unreadable this launch");
   }
-  if (app.isPackaged && composioBrokerUrl() && !credentialStoreUnavailable) {
+  if (!desktopRemoteAccess && app.isPackaged && composioBrokerUrl() && !credentialStoreUnavailable) {
     void updateSecureCredentialDocument(async (credentials) => {
       await ensureManagedComposioCredentials({
         brokerUrl: composioBrokerUrl(),
@@ -2257,7 +2314,7 @@ app.whenReady().then(async () => {
   }
   // in-app auto-update (packaged only) — checks GitHub releases, downloads on
   // the user's click, installs on "Restart to update"
-  startUpdater(win);
+  startUpdater();
   refreshApplicationMenu();
   app.on("activate", () => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow();
@@ -2293,22 +2350,19 @@ app.on("before-quit", (e) => {
   desktopShutdownStarted = true;
   if (cuaCleanedUp) return;
   e.preventDefault();
-  try {
-    serverProc?.kill();
-  } catch {}
+  const stoppingServer = serverProc;
+  serverProc = null;
   // Release the sleep blocker synchronously; child shutdown is awaited below.
   syncCompanionKeepAwake(false, false);
+  try {
+    desktopCompanionRelay?.close?.();
+  } catch {}
   // a live dictation session runs its own helper child that holds the mic —
   // stop it here so quitting never orphans a recording process
   if (nativeActions.appleSpeech) stopSpeech();
-  stopRecorder();
-  try {
-    browserSurface?.closeAll();
-  } catch {}
-  const cleanup = Promise.race([
+  const ownedHelperCleanup = Promise.race([
     Promise.all([
       stopCua().catch(() => {}),
-      browserHost?.stop().catch(() => {}) ?? Promise.resolve(),
       // Both listeners reachable from outside the app are owned children.
       // Shut the connector down first, then the sidecar, without changing the
       // remembered toggle the next launch will restore.
@@ -2316,8 +2370,32 @@ app.on("before-quit", (e) => {
     ]),
     new Promise((resolve) => setTimeout(resolve, CUA_STOP_TIMEOUT_MS).unref()),
   ]);
+  const cleanup = Promise.all([
+    ownedHelperCleanup,
+    stopUtilityServer(stoppingServer).then((stopped) => {
+      if (!stopped) slog("server child did not stop before desktop exit; retaining the data-directory lease");
+    }),
+  ]);
   cleanup.then(() => {
     cuaCleanedUp = true;
     app.quit();
   });
 });
+
+function releaseDesktopDataDirLease() {
+  if (!desktopDataDirLease) return;
+  try {
+    desktopDataDirLease.release();
+    desktopDataDirLease = null;
+  } catch (error) {
+    // Never print the private child capability. Lease errors contain only the
+    // data-safety reason and, for contention, the owning process id.
+    slog(`data-directory lease release failed: ${error?.message ?? error}`);
+  }
+}
+
+// before-quit is deliberately too early: this app defers it while owned
+// helpers shut down. will-quit is the final Electron lifecycle boundary; the
+// process hook covers app.exit()/fatal exits that bypass it.
+app.on("will-quit", releaseDesktopDataDirLease);
+process.once("exit", releaseDesktopDataDirLease);

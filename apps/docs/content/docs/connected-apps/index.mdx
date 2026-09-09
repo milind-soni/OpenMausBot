@@ -24,6 +24,19 @@ The installation identity is stored using Electron's operating-system-backed sec
 
 The managed service is a convenience for official packaged builds. A source build can use your own Composio project and `COMPOSIO_API_KEY`; see [Self-hosted Composio](./self-hosted-composio.mdx).
 
+You can also use your own Composio project in the packaged app. Open **App Settings → Connections → Self-host connected apps** and paste its project key. A saved project key takes priority over the managed service for the marketplace, connection management, and bot tools. Clear the key to return to the managed service.
+
+## Connect X (Twitter)
+
+Composio does not provide managed credentials for its `twitter` toolkit. To connect an X account:
+
+1. Create an app in the X Developer Portal.
+2. Create a `twitter` auth config in your Composio project using that app's credentials.
+3. Save the project's key under **Self-host connected apps**.
+4. Return to **Connected apps** and connect **X (Twitter)**.
+
+The official managed OpenMausBot service keeps X disabled until it owns an appropriate X OAuth app. Older OpenMausBot tasks that refer to the connector as `x` continue to work; OpenMausBot translates that alias to Composio's `twitter` toolkit automatically.
+
 ## Multiple accounts
 
 Connect more than one account for the same toolkit and give each a clear alias such as `work`, `personal`, or `client-acme`. When several accounts could perform an action, OpenMausBot requires explicit selection instead of silently replacing the first connection.

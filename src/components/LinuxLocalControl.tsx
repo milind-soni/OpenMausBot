@@ -10,6 +10,7 @@ import {
 } from "lucide-react";
 
 import { cn } from "@/lib/cn";
+import { t } from "@/lib/i18n";
 import { useDesktopCapabilities } from "./DesktopCapabilities";
 
 const LINUX_GUIDE_URL =
@@ -19,7 +20,7 @@ export function LinuxLocalControl() {
   const { capabilities } = useDesktopCapabilities();
   const local = capabilities.localComputer;
   const [pending, setPending] = useState<"enable" | "disable" | "retry" | null>(null);
-  const [error, setError] = useState<string | null>(null);
+  const [error, setError] = useState<string | { key: "computer.linux.stopFailed" } | null>(null);
 
   if (capabilities.host.platform !== "linux") return null;
   const busy = pending !== null || local.status === "checking" || local.status === "starting";
@@ -35,7 +36,10 @@ export function LinuxLocalControl() {
     try {
       if (action === "disable" || action === "retry") {
         const response = await fetch("/api/local-computer/interrupt", { method: "POST" });
-        if (!response.ok) throw new Error("Could not stop active local computer turns.");
+        if (!response.ok) {
+          setError({ key: "computer.linux.stopFailed" });
+          return;
+        }
       }
       await window.ogb.localControl[action]();
     } catch (reason) {
@@ -51,10 +55,10 @@ export function LinuxLocalControl() {
         <div>
           <div id="linux-local-control-title" className="flex items-center gap-2 text-[15px] font-medium text-ink">
             <MonitorCog size={16} className={ready ? "text-success" : "text-ink-secondary"} />
-            Local control
+            {t("computer.linux.title")}
           </div>
           <div className="mt-1 text-[12px] leading-relaxed text-ink-secondary">
-            Beta · Ubuntu 24.04 GNOME/{wayland ? "Wayland" : "Xorg"} · Cua Driver 0.19.3
+            {t("computer.linux.meta", { session: wayland ? "Wayland" : "Xorg" })}
           </div>
         </div>
         <span
@@ -69,7 +73,13 @@ export function LinuxLocalControl() {
                   : "bg-raised text-ink-secondary",
           )}
         >
-          {ready ? "Ready" : waylandSafetyBlocked ? "Unavailable on Wayland" : local.enabled ? "Needs attention" : "Off"}
+          {ready
+            ? t("computer.linux.ready")
+            : waylandSafetyBlocked
+              ? t("computer.linux.waylandBadge")
+              : local.enabled
+                ? t("vm.state.attention")
+                : t("vm.dest.off")}
         </span>
       </div>
 
@@ -78,9 +88,9 @@ export function LinuxLocalControl() {
           <div className="flex gap-2 text-[12px] leading-relaxed text-ink-secondary">
             <AlertTriangle size={15} className="mt-0.5 shrink-0 text-danger" />
             <span>
-              Local control is available on Ubuntu Xorg. It remains disabled on Wayland until its input-safety
-              boundary is validated. Sign out and choose <strong className="font-medium text-ink">Ubuntu on Xorg</strong>
-              {" "}to use This computer; Chat, Cloud, Local VM, and screen preview still work here.
+              {t("computer.linux.waylandBefore")}{" "}
+              <strong className="font-medium text-ink">{t("computer.linux.waylandXorg")}</strong>
+              {" "}{t("computer.linux.waylandAfter")}
             </span>
           </div>
         </div>
@@ -89,9 +99,10 @@ export function LinuxLocalControl() {
           <div className="flex gap-2 text-[12px] leading-relaxed text-ink-secondary">
             <AlertTriangle size={15} className="mt-0.5 shrink-0 text-warning" />
             <span>
-              Enabling lets bots you explicitly assign to <strong className="font-medium text-ink">This computer</strong>{" "}
-              inspect the active desktop and request mouse or keyboard actions. Every local action asks you first.
-              {wayland && " GNOME may also ask you to allow foreground input for this desktop session."}
+              {t("computer.linux.enableBefore")}{" "}
+              <strong className="font-medium text-ink">{t("vm.dest.local")}</strong>{" "}
+              {t("computer.linux.enableAfter")}
+              {wayland && ` ${t("computer.linux.waylandInput")}`}
             </span>
           </div>
         </div>
@@ -107,20 +118,20 @@ export function LinuxLocalControl() {
             )}
             <span aria-live="polite">
               {ready
-                ? "Ready for bots explicitly assigned to this computer. Bot actions use a private cursor, so your pointer stays under your control."
-                : local.message ?? "Checking the driver and desktop session…"}
+                ? t("computer.linux.readyMsg")
+                : local.message ?? t("computer.linux.checking")}
             </span>
           </div>
           {local.driverPath && (
             <div className="mt-2 break-all font-mono text-[10px] text-ink-secondary/80" title={local.driverPath}>
-              {bundledDriver ? "Bundled Cua Driver" : local.driverPath}
+              {bundledDriver ? t("computer.linux.bundledDriver") : local.driverPath}
               {local.driverVersion ? ` · ${local.driverVersion}` : ""}
             </div>
           )}
         </div>
       )}
 
-      {error && <div className="mt-2 text-[12px] text-danger">{error}</div>}
+      {error && <div className="mt-2 text-[12px] text-danger">{typeof error === "string" ? error : t(error.key)}</div>}
 
       {!waylandSafetyBlocked && <div className="mt-3 flex gap-2">
         {!local.enabled ? (
@@ -131,7 +142,7 @@ export function LinuxLocalControl() {
             className="flex flex-1 items-center justify-center gap-2 rounded-lg bg-accent py-2 text-[13px] font-medium text-white hover:opacity-90 disabled:opacity-50"
           >
             {pending === "enable" ? <Loader2 size={14} className="animate-spin" /> : <Power size={14} />}
-            Enable local control (Beta)
+            {t("computer.linux.enable")}
           </button>
         ) : (
           <>
@@ -143,7 +154,7 @@ export function LinuxLocalControl() {
                 className="flex flex-1 items-center justify-center gap-2 rounded-lg bg-raised py-2 text-[13px] text-ink hover:bg-raised-hover disabled:opacity-50"
               >
                 {pending === "retry" ? <Loader2 size={14} className="animate-spin" /> : <RotateCcw size={14} />}
-                Try again
+                {t("computer.linux.tryAgain")}
               </button>
             )}
             <button
@@ -153,7 +164,7 @@ export function LinuxLocalControl() {
               className="flex flex-1 items-center justify-center gap-2 rounded-lg bg-raised py-2 text-[13px] text-ink hover:bg-raised-hover disabled:opacity-50"
             >
               {pending === "disable" ? <Loader2 size={14} className="animate-spin" /> : <Power size={14} />}
-              Disable local control
+              {t("computer.linux.disable")}
             </button>
           </>
         )}
@@ -164,7 +175,7 @@ export function LinuxLocalControl() {
         onClick={() => window.open(LINUX_GUIDE_URL, "_blank", "noopener,noreferrer")}
         className="mt-2 flex w-full items-center justify-center gap-1.5 rounded-lg py-1.5 text-[11px] text-ink-secondary hover:bg-raised hover:text-ink"
       >
-        {capabilities.host.packaged ? "Local control guide" : "Driver setup and troubleshooting"}{" "}
+        {capabilities.host.packaged ? t("computer.linux.guide") : t("computer.linux.driverSetup")}{" "}
         <ExternalLink size={11} />
       </button>
     </section>

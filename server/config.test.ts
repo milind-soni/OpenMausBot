@@ -1,10 +1,12 @@
-import { mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import type { JsonValue } from "./schema.ts";
 
 import { customMcpServers,
   DATA_DIR,
+  ensureDirs,
   instanceConfigs,
   isValidSshAlias,
   loadBrowserProfileIdAliases,
@@ -13,10 +15,12 @@ import { customMcpServers,
   localVmMode,
   parseConfigPatch,
   parseStoredConfig,
+  persistableInstanceConfigs,
   roomTurnTimeoutMinutes,
+  maxConcurrentBotThreads,
   showToolCallsEnabled,
   saveConfig,
-  skillRecorderEnabled,
+  skillAuthoringEnabled,
   builtInBrowserEnabled,
   browserProfilePartitionId,
   browserProfilePartitionTarget,
@@ -31,6 +35,33 @@ import { customMcpServers,
 } from "./config.ts";
 
 describe("configuration boundaries", () => {
+  it("defaults to three parallel threads and validates a configurable maximum of ten", () => {
+    expect(maxConcurrentBotThreads({})).toBe(3);
+    expect(parseStoredConfig({ threads: { maxConcurrentPerBot: 10 } })).toEqual({ threads: { maxConcurrentPerBot: 10 } });
+    expect(maxConcurrentBotThreads(parseConfigPatch({ threads: { maxConcurrentPerBot: 1 } }))).toBe(1);
+    for (const value of [0, -1, 11, 1.5, "10", null]) {
+      expect(() => parseConfigPatch({ threads: { maxConcurrentPerBot: value } })).toThrow("threads.maxConcurrentPerBot");
+    }
+  });
+
+  it("keeps avatar providers and credentials separate, normalizing a router endpoint", () => {
+    const parsed = parseConfigPatch({ imageGen: {
+      provider: "custom", key: "openai-kept", customApiKey: "router-only",
+      customUrl: "http://127.0.0.1:4000/v1/", customModel: " local/image ",
+    } });
+    expect(parsed.imageGen).toEqual({ provider: "custom", key: "openai-kept", customApiKey: "router-only", customUrl: "http://127.0.0.1:4000/v1", customModel: "local/image" });
+    expect(parseStoredConfig({ imageGen: { key: "legacy" } }).imageGen).toEqual({ key: "legacy" });
+    expect(() => parseConfigPatch({ imageGen: { provider: "unknown" } })).toThrow("provider");
+    expect(() => parseConfigPatch({ imageGen: { customUrl: "https://user:secret@router.example/v1" } })).toThrow("customUrl");
+    const childEnv = { OMB_CUSTOM_IMAGE_KEY: "must-not-reach-bot" };
+    stripWorkspaceCredentialEnv(childEnv);
+    expect(childEnv).not.toHaveProperty("OMB_CUSTOM_IMAGE_KEY");
+  });
+  it("persists a custom domain but excludes it from generic config patches", () => {
+    expect(parseStoredConfig({ customDomain: "https://bots.example.com" })).toEqual({ customDomain: "https://bots.example.com" });
+    expect(parseConfigPatch({ customDomain: "https://unverified.example.com", language: "en" })).toEqual({ language: "en" });
+    expect(parseStoredConfig({ customDomain: "" })).toEqual({ customDomain: "" });
+  });
   it("keeps supported stored settings and drops unrelated top-level data", () => {
     expect(
       parseStoredConfig({
@@ -51,6 +82,27 @@ describe("configuration boundaries", () => {
     );
     expect(() => parseConfigPatch({ opencodeGo: { apiKey: 42 } })).toThrow("opencodeGo.apiKey");
     expect(() => parseConfigPatch({ profile: [] })).toThrow("profile");
+  });
+
+  it("accepts and normalizes a default model selection", () => {
+    const input = { defaultModelSelection: { instanceId: " codex ", model: " chosen-model ", effort: "high" } };
+    const expected = { defaultModelSelection: { instanceId: "codex", model: "chosen-model", effort: "high" } };
+    expect(parseStoredConfig(input)).toEqual(expected);
+    expect(parseConfigPatch(input)).toEqual(expected);
+  });
+
+  it.each<JsonValue>([
+    null,
+    "codex/model",
+    {},
+    { instanceId: "codex" },
+    { instanceId: "", model: "model" },
+    { instanceId: "codex", model: "   " },
+    { instanceId: "codex", model: 42 },
+    { instanceId: "codex", model: "model", effort: "turbo" },
+  ])("rejects an invalid default model selection: %j", (defaultModelSelection) => {
+    expect(() => parseStoredConfig({ defaultModelSelection })).toThrow("defaultModelSelection");
+    expect(() => parseConfigPatch({ defaultModelSelection })).toThrow("defaultModelSelection");
   });
 
   it("canonicalizes legacy browser profile ids without dropping other stored settings", () => {
@@ -306,14 +358,17 @@ describe("configuration boundaries", () => {
   });
 
   it("keeps experimental features off by default and accepts an explicit opt-in", () => {
-    expect(skillRecorderEnabled({})).toBe(false);
-    expect(parseConfigPatch({ features: { skillRecorder: true } })).toEqual({
-      features: { skillRecorder: true },
+    expect(skillAuthoringEnabled({})).toBe(false);
+    expect(parseConfigPatch({ features: { skillAuthoring: true } })).toEqual({
+      features: { skillAuthoring: true },
     });
-    expect(skillRecorderEnabled({ features: { skillRecorder: true } })).toBe(true);
+    expect(skillAuthoringEnabled({ features: { skillAuthoring: true } })).toBe(true);
+    // the pre-rename flag is dropped as a no-op rather than rejected, so a
+    // stale client's PATCH cannot fail the request or re-enable anything
+    expect(parseConfigPatch({ features: { skillRecorder: true } })).toEqual({ features: {} });
     // the built-in browser is an independent explicit opt-in
     expect(builtInBrowserEnabled({})).toBe(false);
-    expect(builtInBrowserEnabled({ features: { skillRecorder: true } })).toBe(false);
+    expect(builtInBrowserEnabled({ features: { skillAuthoring: true } })).toBe(false);
     expect(parseConfigPatch({ features: { browser: false } })).toEqual({ features: { browser: false } });
     expect(builtInBrowserEnabled({ features: { browser: false } })).toBe(false);
     expect(builtInBrowserEnabled({ features: { browser: true } })).toBe(true);
@@ -330,8 +385,8 @@ describe("configuration boundaries", () => {
     expect(() => parseConfigPatch({
       browserProfiles: [{ id: "work", name: "Work" }, { id: "work", name: "Work again" }],
     })).toThrow(/browserProfiles.*id.*duplicated/i);
-    expect(() => parseConfigPatch({ features: { skillRecorder: "yes" } })).toThrow(
-      "features.skillRecorder",
+    expect(() => parseConfigPatch({ features: { skillAuthoring: "yes" } })).toThrow(
+      "features.skillAuthoring",
     );
   });
 
@@ -389,6 +444,23 @@ describe("default fleet", () => {
       url: "https://instance.example.test/v1",
       apiKeyEnv: "CUSTOM_KEY",
     });
+  });
+
+  it("keeps an explicit empty routing provider while other instances inherit the workspace pin", () => {
+    const config: AppConfig = {
+      openaiCompat: { provider: "workspace-provider" },
+      instances: {
+        isolated: { driver: "openai-compat", config: { provider: "" } },
+        inherited: { driver: "openai-compat" },
+        pinned: { driver: "openai-compat", config: { provider: "instance-provider" } },
+      },
+    };
+    const instances = instanceConfigs(config);
+    expect(instances.isolated.config).toEqual({ provider: "" });
+    expect(instances.inherited.config).toEqual({ provider: "workspace-provider" });
+    expect(instances.pinned.config).toEqual({ provider: "instance-provider" });
+    expect(config.instances?.isolated.config).toEqual({ provider: "" });
+    expect(config.instances?.inherited.config).toBeUndefined();
   });
 
   it("does not retain an injected OpenAI-compatible URL across config refreshes", () => {
@@ -481,6 +553,24 @@ describe("Instance CLI override", () => {
     const kept = withInstanceCli(custom, "claude", "/x");
     expect(kept.config.instances!.claude.environment).toEqual({ MY_FLAG: "1" });
   });
+
+  it("preserves explicit instance credentials even when workspace injection shadows them", () => {
+    const cfg: AppConfig = {
+      box: { token: "fixture-workspace-box" },
+      xai: { key: "fixture-shared-xai" },
+      instances: {
+        computer: { driver: "boxAgent", environment: { BOX_TOKEN: "fixture-instance-box", MY_FLAG: "1" } },
+        sameCredential: { driver: "grok", environment: { XAI_API_KEY: "fixture-shared-xai" } },
+        injectedOnly: { driver: "boxAgent" },
+      },
+    };
+    const instances = persistableInstanceConfigs(cfg);
+    expect(instances.computer.environment).toEqual({ BOX_TOKEN: "fixture-instance-box", MY_FLAG: "1" });
+    expect(instances.sameCredential.environment).toEqual({ XAI_API_KEY: "fixture-shared-xai" });
+    expect(instances.injectedOnly.environment).toBeUndefined();
+    instances.computer.environment!.MY_FLAG = "changed";
+    expect(cfg.instances!.computer.environment!.MY_FLAG).toBe("1");
+  });
 });
 
 describe("OpenCode Go configuration", () => {
@@ -542,6 +632,72 @@ describe("credential env narrowing", () => {
   });
 });
 
+describe("legacy feature flag migration", () => {
+  const path = join(DATA_DIR, "config.json");
+  const readDisk = () => JSON.parse(readFileSync(path, "utf8"));
+
+  beforeEach(() => {
+    mkdirSync(DATA_DIR, { recursive: true });
+    rmSync(path, { force: true });
+  });
+  afterEach(() => {
+    rmSync(path, { force: true });
+  });
+
+  it("carries a legacy skillRecorder opt-in over to skillAuthoring once, at startup", () => {
+    writeFileSync(path, JSON.stringify({ profile: { name: "Ada" }, features: { skillRecorder: true, browser: false } }));
+    ensureDirs();
+    expect(readDisk()).toEqual({ profile: { name: "Ada" }, features: { browser: false, skillAuthoring: true } });
+    expect(skillAuthoringEnabled(loadConfig())).toBe(true);
+    if (process.platform !== "win32") expect(statSync(path).mode & 0o777).toBe(0o600);
+    // a second boot finds nothing left to migrate and leaves the file alone
+    const written = readFileSync(path, "utf8");
+    ensureDirs();
+    expect(readFileSync(path, "utf8")).toBe(written);
+  });
+
+  it("keeps a legacy opt-out off and removes the old key", () => {
+    writeFileSync(path, JSON.stringify({ features: { skillRecorder: false } }));
+    ensureDirs();
+    expect(readDisk()).toEqual({ features: { skillAuthoring: false } });
+    expect(skillAuthoringEnabled(loadConfig())).toBe(false);
+  });
+
+  it("lets an explicit skillAuthoring value win over the legacy key", () => {
+    writeFileSync(path, JSON.stringify({ features: { skillRecorder: true, skillAuthoring: false } }));
+    ensureDirs();
+    expect(readDisk()).toEqual({ features: { skillAuthoring: false } });
+    expect(skillAuthoringEnabled(loadConfig())).toBe(false);
+  });
+
+  it("treats a non-boolean legacy value as off and a null features block as absent", () => {
+    writeFileSync(path, JSON.stringify({ features: { skillRecorder: "yes" } }));
+    ensureDirs();
+    expect(readDisk()).toEqual({ features: { skillAuthoring: false } });
+    const nulled = JSON.stringify({ features: null });
+    writeFileSync(path, nulled);
+    ensureDirs();
+    expect(readFileSync(path, "utf8")).toBe(nulled);
+  });
+
+  it("leaves a config without the legacy key untouched", () => {
+    for (const disk of [{ profile: { name: "Ada" } }, { features: {} }, { features: { skillAuthoring: true } }]) {
+      const raw = JSON.stringify(disk);
+      writeFileSync(path, raw);
+      ensureDirs();
+      expect(readFileSync(path, "utf8")).toBe(raw);
+    }
+  });
+
+  it("does not create a config file or throw on a fresh or unreadable install", () => {
+    ensureDirs();
+    expect(() => readFileSync(path, "utf8")).toThrow();
+    writeFileSync(path, "{not json");
+    expect(() => ensureDirs()).not.toThrow();
+    expect(readFileSync(path, "utf8")).toBe("{not json");
+  });
+});
+
 describe("credential env preference", () => {
   const VARS = [
     "XAI_API_KEY",
@@ -598,6 +754,15 @@ describe("credential env preference", () => {
     expect(cfg.imageGen).toEqual({ key: "env-image" });
   });
 
+  it("saves and removes the verified domain without replacing existing settings", () => {
+    saveConfig({ profile: { name: "Workspace owner" }, customDomain: "https://bots.example.com" });
+    expect(loadConfig().customDomain).toBe("https://bots.example.com");
+    saveConfig({ language: "en" });
+    expect(loadConfig().customDomain).toBe("https://bots.example.com");
+    saveConfig({ customDomain: "" });
+    expect(loadConfig()).toMatchObject({ customDomain: "", language: "en", profile: { name: "Workspace owner" } });
+  });
+
   it("falls back to the config file when the env var is unset (dev mode)", () => {
     writeFileSync(
       join(DATA_DIR, "config.json"),
@@ -607,6 +772,60 @@ describe("credential env preference", () => {
     expect(cfg.xai?.key).toBe("file-xai");
     expect(cfg.tts?.key).toBe("file-tts");
     expect(cfg.imageGen?.key).toBe("file-image");
+  });
+
+  it("persists a default selection without changing the fleet or unrelated settings", () => {
+    const path = join(DATA_DIR, "config.json");
+    const existing = {
+      profile: { name: "Ada" },
+      instances: { customCodex: { driver: "codex", config: { cli: "/opt/custom-codex" } } },
+      openaiCompat: { key: "fixture-key", url: "https://models.example.test/v1" },
+      futureSetting: { keep: true },
+    };
+    writeFileSync(path, JSON.stringify(existing));
+    const selection = { instanceId: "customCodex", model: "fixture-model", effort: "high" as const };
+
+    saveConfig({ defaultModelSelection: selection });
+    expect(loadConfig().defaultModelSelection).toEqual(selection);
+    expect(JSON.parse(readFileSync(path, "utf8"))).toEqual({ ...existing, defaultModelSelection: selection });
+
+    saveConfig({ profile: { email: "ada@example.com" } });
+    expect(loadConfig().defaultModelSelection).toEqual(selection);
+
+    const replacement = { instanceId: "claude", model: "different-model" };
+    saveConfig({ defaultModelSelection: replacement });
+    expect(loadConfig().defaultModelSelection).toEqual(replacement);
+    expect(loadConfig().profile).toEqual({ name: "Ada", email: "ada@example.com" });
+    expect(loadConfig().instances).toEqual(existing.instances);
+  });
+
+  it("replaces instance membership and known settings while preserving retained extension fields", () => {
+    const path = join(DATA_DIR, "config.json");
+    writeFileSync(path, JSON.stringify({
+      instances: {
+        retained: {
+          driver: "fixture-future-driver",
+          displayName: "Old label",
+          environment: { FIXTURE_TOKEN: "fixture-stored-token" },
+          config: { cli: "/fixture/old-cli" },
+          futureSetting: { keep: true },
+        },
+        removed: { driver: "fixture-removed-driver", futureSetting: { remove: true } },
+      },
+    }));
+    const instances = persistableInstanceConfigs(loadConfig());
+    delete instances.removed;
+    delete instances.retained.displayName;
+    delete instances.retained.environment;
+    delete instances.retained.config;
+
+    saveConfig({ instances }, { replaceInstances: true });
+    expect(JSON.parse(readFileSync(path, "utf8")).instances).toEqual({
+      retained: { driver: "fixture-future-driver", futureSetting: { keep: true } },
+    });
+
+    saveConfig({ instances: {} }, { replaceInstances: true });
+    expect(JSON.parse(readFileSync(path, "utf8")).instances).toEqual({});
   });
 
   it("loads legacy browser profiles without resetting config and canonicalizes them on the next write", () => {

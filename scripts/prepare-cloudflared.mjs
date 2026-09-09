@@ -1,8 +1,8 @@
 // Stage a pinned Cloudflare Tunnel connector for every desktop architecture
 // electron-builder will package on this host. Pass --current for development
-// to stage only the platform and architecture running this script. The release
-// asset is verified before extraction and the executable is verified again on
-// every reuse.
+// or self-hosting to stage only the platform and architecture running this
+// script. The release asset is verified before extraction and the executable
+// is verified again on every reuse.
 // Nothing is installed globally and cloudflared's own updater stays disabled;
 // OpenMausBot updates this dependency with an ordinary reviewed app release.
 import { spawnSync } from "node:child_process";
@@ -43,6 +43,12 @@ export const CLOUDFLARED_ASSETS = Object.freeze({
     binarySha256: "fcfb02b575a52ca1af2e3267af4e1517bcdeb30ac48c834c69abaed3c0576ad2",
     archive: false,
   }),
+  "linux-arm64": Object.freeze({
+    name: "cloudflared-linux-arm64",
+    sha256: "7747d94570fb390cf47dcb4f9555c193c6355cda9793f0d878d9049e5d6a7790",
+    binarySha256: "7747d94570fb390cf47dcb4f9555c193c6355cda9793f0d878d9049e5d6a7790",
+    archive: false,
+  }),
   "win32-x64": Object.freeze({
     name: "cloudflared-windows-amd64.exe",
     sha256: "c29eee2b121f5436a642eed69fd9767da7e7b8c510fa50aaa130337f931357b5",
@@ -52,6 +58,7 @@ export const CLOUDFLARED_ASSETS = Object.freeze({
 });
 
 export function targetsForHost(platform) {
+  // Desktop package targets only. Self-hosted installs use --current instead.
   if (platform === "darwin") return ["darwin-arm64", "darwin-x64"];
   if (platform === "linux") return ["linux-x64"];
   if (platform === "win32") return ["win32-x64"];
@@ -75,9 +82,21 @@ export function targetsForPreparation({
 }
 
 export function parsePrepareCloudflaredArgs(args = []) {
-  if (args.length === 0) return { current: false };
-  if (args.length === 1 && args[0] === "--current") return { current: true };
-  throw new Error("Usage: node scripts/prepare-cloudflared.mjs [--current]");
+  const options = { current: false };
+  for (let index = 0; index < args.length; index += 1) {
+    const argument = args[index];
+    const next = args[index + 1];
+    if (argument === "--current" && !options.current) {
+      options.current = true;
+    } else if (argument === "--root" && !options.root && typeof next === "string" && next !== "") {
+      // `openmausbot serve --tunnel` stages into its data dir, not a checkout.
+      options.root = next;
+      index += 1;
+    } else {
+      throw new Error("Usage: node scripts/prepare-cloudflared.mjs [--current] [--root DIR]");
+    }
+  }
+  return options;
 }
 
 export function sha256(value) {
@@ -110,15 +129,16 @@ export function executableTarget(value) {
     throw new Error(`unsupported cloudflared Mach-O CPU type 0x${cpu.toString(16)}`);
   }
 
-  // ELF64, little-endian, AMD64 (e_machine 0x3e).
+  // ELF64, little-endian: AMD64 (EM_X86_64 = 62) or ARM64 (EM_AARCH64 = 183).
   if (
     bytes.length >= 20 &&
     bytes.subarray(0, 4).equals(Buffer.from([0x7f, 0x45, 0x4c, 0x46])) &&
     bytes[4] === 2 &&
-    bytes[5] === 1 &&
-    bytes.readUInt16LE(18) === 0x3e
+    bytes[5] === 1
   ) {
-    return "linux-x64";
+    const machine = bytes.readUInt16LE(18);
+    if (machine === 62) return "linux-x64";
+    if (machine === 183) return "linux-arm64";
   }
 
   // PE32+ AMD64. e_lfanew points from the DOS header to PE\0\0.
@@ -197,15 +217,33 @@ function extractionFailure(result) {
   return result.error?.message ?? String(result.stderr || result.stdout || `exit status ${result.status}`).trim();
 }
 
-async function releaseBytes(asset) {
+/** Retry transient download failures; callers still verify the pinned digest. */
+export async function releaseBytes(asset) {
   const cacheDirectory = process.env.OMB_CLOUDFLARED_ARCHIVE_DIR;
   const cached = cacheDirectory ? join(cacheDirectory, asset.name) : "";
   if (cached && existsSync(cached)) return readFileSync(cached);
 
   const url = `https://github.com/cloudflare/cloudflared/releases/download/${CLOUDFLARED_VERSION}/${asset.name}`;
-  const response = await fetch(url, { redirect: "follow", signal: AbortSignal.timeout(120_000) });
-  if (!response.ok) throw new Error(`could not download ${asset.name}: HTTP ${response.status}`);
-  return Buffer.from(await response.arrayBuffer());
+  const retryableStatuses = new Set([408, 429, 500, 502, 503, 504]);
+  for (let attempt = 1; attempt <= 3; attempt++) {
+    let failure;
+    try {
+      const response = await fetch(url, { redirect: "follow", signal: AbortSignal.timeout(120_000) });
+      if (response.ok) return Buffer.from(await response.arrayBuffer());
+      await response.body?.cancel().catch(() => {});
+      failure = new Error(`could not download ${asset.name}: HTTP ${response.status}`);
+      if (!retryableStatuses.has(response.status)) throw failure;
+    } catch (error) {
+      // Node fetch reports network/body failures as TypeError; each attempt
+      // has its own timeout, including reading the complete response body.
+      if (!(error instanceof TypeError) && !["TimeoutError", "AbortError"].includes(error?.name)) throw error;
+      failure = error;
+    }
+    if (attempt === 3) throw failure;
+    const delay = 1_000 * 2 ** (attempt - 1);
+    console.warn(`cloudflared download attempt ${attempt}/3 failed: ${failure.message}; retrying in ${delay}ms`);
+    await new Promise((resolve) => setTimeout(resolve, delay));
+  }
 }
 
 async function stageTarget(root, target) {

@@ -7,6 +7,7 @@
 // electron-updater is vendored (electron/vendor/electron-updater.cjs) because
 // the packaged app ships no node_modules.
 import { app, clipboard, ipcMain } from "electron";
+import localOriginModule from "./local-origin.cjs";
 import { appendFileSync, existsSync, mkdirSync, readFileSync } from "node:fs";
 import { createRequire } from "node:module";
 import { join } from "node:path";
@@ -23,7 +24,7 @@ const require = createRequire(import.meta.url);
 
 let autoUpdater = null;
 let win = null;
-// status: idle | checking | available | downloading | downloaded | installing | error
+// status: idle | checking | available | downloading | preparing | downloaded | installing | handed-off | error
 let state = { status: "idle" };
 let updaterCoordinator = null;
 
@@ -71,15 +72,24 @@ function setState(patch) {
   }
 }
 
+// The updater changes THIS app: only the local server's UI may drive it.
+const { localOnly } = localOriginModule;
+
 export function registerUpdaterIpc() {
-  ipcMain.handle("update:get-state", () => state);
-  ipcMain.handle("update:check", () => updaterCoordinator?.check(true));
-  ipcMain.handle("update:download", () => updaterCoordinator?.download());
-  ipcMain.handle("update:install", () => updaterCoordinator?.install());
+  ipcMain.handle("update:get-state", localOnly("update:get-state", () => state));
+  ipcMain.handle("update:check", localOnly("update:check", () => updaterCoordinator?.check(true)));
+  ipcMain.handle("update:download", localOnly("update:download", () => updaterCoordinator?.download()));
+  ipcMain.handle("update:install", localOnly("update:install", () => updaterCoordinator?.install()));
 }
 
-export function startUpdater(mainWindow) {
+// macOS keeps the process (and updater) alive after its window closes.
+// Retarget broadcasts on every window creation without adding more timers
+// or event listeners to the process-wide updater.
+export function attachUpdaterWindow(mainWindow) {
   win = mainWindow;
+}
+
+export function startUpdater() {
   // dev / unsigned builds can't auto-update — leave the banner dormant
   if (!app.isPackaged) {
     updaterCoordinator = null;
@@ -107,6 +117,7 @@ export function startUpdater(mainWindow) {
   setState({ installMode: handOff ? "handoff" : "restart" });
   updaterCoordinator = createUpdaterCoordinator(autoUpdater, setState, {
     handOffInstall: handOff ? handOffDownloadedPackage(packageType) : null,
+    nativeStaging: process.platform === "darwin",
   });
 
   // first check ~15s after launch (let the app settle), then hourly — both

@@ -15,6 +15,7 @@ import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 
 import { DATA_DIR } from "./config.ts";
+import { peerProvenanceAuthor } from "./peer-provenance.ts";
 import type { Message } from "./store.ts";
 
 const DB_FILE = () => join(DATA_DIR, "messages.db");
@@ -51,8 +52,101 @@ function open(): DatabaseSync {
       active_leaf_id TEXT
     );
   `);
+  ensureRecallIndex(db);
+  ensureMemoryIndex(db);
   return db;
 }
+
+// The bot's memory files — MEMORY.md, memory/<topic>.md, memory/log/<day>.md
+// — indexed for the same session_search. One row per file, with the size
+// and mtime it was indexed at so a search can notice a file the bot's own
+// file tools rewrote without any filesystem watcher. Kept in this database
+// because FTS5 is already here; the files themselves stay the source of
+// truth on disk and this table is rebuilt from them at any time.
+function ensureMemoryIndex(db: DatabaseSync): void {
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS memory_files (
+      bot_id TEXT NOT NULL,
+      path TEXT NOT NULL,
+      text TEXT NOT NULL,
+      mtime_ms INTEGER NOT NULL,
+      bytes INTEGER NOT NULL,
+      PRIMARY KEY (bot_id, path)
+    );
+    CREATE VIRTUAL TABLE IF NOT EXISTS memory_fts USING fts5(
+      text, content='memory_files', content_rowid='rowid', tokenize='unicode61'
+    );
+    CREATE TRIGGER IF NOT EXISTS memory_fts_ai AFTER INSERT ON memory_files BEGIN
+      INSERT INTO memory_fts(rowid, text) VALUES (new.rowid, new.text);
+    END;
+    CREATE TRIGGER IF NOT EXISTS memory_fts_ad AFTER DELETE ON memory_files BEGIN
+      INSERT INTO memory_fts(memory_fts, rowid, text) VALUES ('delete', old.rowid, old.text);
+    END;
+    CREATE TRIGGER IF NOT EXISTS memory_fts_au AFTER UPDATE ON memory_files BEGIN
+      INSERT INTO memory_fts(memory_fts, rowid, text) VALUES ('delete', old.rowid, old.text);
+      INSERT INTO memory_fts(rowid, text) VALUES (new.rowid, new.text);
+    END;
+  `);
+}
+
+// Ranked recall over transcript text, for the bot's own session_search tool.
+// An external-content FTS5 table over messages.text: the index stores no
+// copy of the text, and three triggers keep it in step with every insert,
+// update, and delete on `messages`. FTS5 ships inside node:sqlite, so this
+// is no more of a dependency than the table it indexes. The sidebar's LIKE
+// search below stays as it is — substring find over a single thread wants
+// every occurrence, not a relevance ranking.
+/** FTS5 is in every runtime OpenMausBot supports — node:sqlite on Node ≥ 24
+ * (package.json engines) and the Node inside Electron 43 — so a SQLite
+ * without it is a mis-installed runtime, not a mode to run in. Say that,
+ * instead of surfacing SQLite's own "no such module: fts5" from deep inside
+ * open() with nothing about what to do. Anything else is rethrown as-is. */
+export function describeMissingFts5(error: unknown): Error | null {
+  const message = error instanceof Error ? error.message : String(error);
+  if (!/no such module:\s*fts5/i.test(message)) return null;
+  return new Error(
+    `OpenMausBot needs SQLite with FTS5, which is built into Node 24 and newer (and into the app). ` +
+    `This Node (${process.version}) has none: install Node 24 or newer. (${message})`,
+  );
+}
+
+function ensureRecallIndex(db: DatabaseSync): void {
+  const existed = db
+    .prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'messages_fts'")
+    .get();
+  try {
+    db.exec(`
+      CREATE VIRTUAL TABLE IF NOT EXISTS messages_fts USING fts5(
+        text, content='messages', content_rowid='rowid', tokenize='unicode61'
+      );
+    `);
+  } catch (error) {
+    throw describeMissingFts5(error) ?? error;
+  }
+  db.exec(`
+    CREATE TRIGGER IF NOT EXISTS messages_fts_ai AFTER INSERT ON messages BEGIN
+      INSERT INTO messages_fts(rowid, text) VALUES (new.rowid, new.text);
+    END;
+    CREATE TRIGGER IF NOT EXISTS messages_fts_ad AFTER DELETE ON messages BEGIN
+      INSERT INTO messages_fts(messages_fts, rowid, text) VALUES ('delete', old.rowid, old.text);
+    END;
+    CREATE TRIGGER IF NOT EXISTS messages_fts_au AFTER UPDATE ON messages BEGIN
+      INSERT INTO messages_fts(messages_fts, rowid, text) VALUES ('delete', old.rowid, old.text);
+      INSERT INTO messages_fts(rowid, text) VALUES (new.rowid, new.text);
+    END;
+  `);
+  // First time on an existing database: index everything already there.
+  if (!existed) db.exec("INSERT INTO messages_fts(messages_fts) VALUES ('rebuild')");
+}
+
+// INSERT OR REPLACE would delete and re-insert the row under a new rowid
+// without firing the delete trigger (SQLite only fires it with recursive
+// triggers on), leaving a dangling FTS entry. An upsert keeps the rowid and
+// runs the update trigger, so the index never drifts from the table.
+const UPSERT_MESSAGE =
+  "INSERT INTO messages (thread_id, id, at, role, kind, text, json) VALUES (?, ?, ?, ?, ?, ?, ?) " +
+  "ON CONFLICT(thread_id, id) DO UPDATE SET at = excluded.at, role = excluded.role, kind = excluded.kind, " +
+  "text = excluded.text, json = excluded.json";
 
 /** The live handle — reopened when the file was removed out from under us
  * (tests wipe DATA_DIR between cases; a fresh Store must get a fresh DB,
@@ -102,9 +196,7 @@ function importLegacy(threadId: string, legacyFile: string): ThreadRows {
     messages = ((raw as { messages?: Message[] }).messages ?? []) as Message[];
     activeLeafId = (raw as { activeLeafId?: string | null }).activeLeafId ?? null;
   }
-  const insert = db().prepare(
-    "INSERT OR REPLACE INTO messages (thread_id, id, at, role, kind, text, json) VALUES (?, ?, ?, ?, ?, ?, ?)",
-  );
+  const insert = db().prepare(UPSERT_MESSAGE);
   db().exec("BEGIN");
   try {
     for (const message of messages) {
@@ -129,8 +221,26 @@ function importLegacy(threadId: string, legacyFile: string): ThreadRows {
 
 export function insertMessage(threadId: string, message: Message): void {
   db()
-    .prepare("INSERT OR REPLACE INTO messages (thread_id, id, at, role, kind, text, json) VALUES (?, ?, ?, ?, ?, ?, ?)")
+    .prepare(UPSERT_MESSAGE)
     .run(threadId, message.id, message.at, message.role, message.kind, message.text ?? null, JSON.stringify(message));
+}
+
+/** A backup may only populate a fresh thread, never replace a transcript. */
+export function importThread(threadId: string, messages: Message[], activeLeafId: string | null): void {
+  const database = db();
+  database.exec("BEGIN IMMEDIATE");
+  try {
+    if (database.prepare("SELECT 1 FROM messages WHERE thread_id = ? LIMIT 1").get(threadId) ||
+        database.prepare("SELECT 1 FROM thread_state WHERE thread_id = ?").get(threadId)) {
+      throw new Error("Cannot import over an existing conversation");
+    }
+    for (const message of messages) insertMessage(threadId, message);
+    setActiveLeaf(threadId, activeLeafId);
+    database.exec("COMMIT");
+  } catch (error) {
+    database.exec("ROLLBACK");
+    throw error;
+  }
 }
 
 /** Persist a new message and the branch head as one crash-safe mutation. */
@@ -249,6 +359,185 @@ export function searchMessages(query: string, limit = 40, threadId?: string): Se
       ...(row.from_name ? { from: row.from_name } : {}),
     };
   });
+}
+
+export interface RecallHit {
+  threadId: string;
+  messageId: string;
+  at: number;
+  role: string;
+  /** the matched text, with each matched term wrapped in [brackets] */
+  snippet: string;
+  /** room messages: which member said it */
+  from?: string;
+  /** a user-role line another bot delivered with ask_bot: that bot's name.
+   * The stored text opens with a note saying so, but the snippet windows
+   * around the match and drops it, so the reader learns it here. */
+  peer?: string;
+}
+
+/** Who wrote a user-role line that reads as the user's. The structural
+ * field wins; rows stored before it existed still open with the note. */
+function peerAuthor(peerName: string | null, text: string): string | null {
+  return peerName ?? peerProvenanceAuthor(text);
+}
+
+/** Enough of a line to see whether it opens with an ask_bot note — the
+ * note's fixed wording plus a bot name — without reading the whole text. */
+const PEER_NOTE_HEAD_CHARS = 160;
+
+// Every query token must match, so a function word the model happened to
+// include ("archive reference on") turns a good query into a miss. Drop
+// the common ones; if that empties the query, search for what was sent.
+const STOP_WORDS = new Set(
+  "a an and are as at be by did do for from had has have how i in is it its of on or that the this to was we were what when where which who why with you your".split(" "),
+);
+
+/** Turn free text into an FTS5 query that cannot be misparsed: every
+ * whitespace-separated token becomes a quoted string, so `AND`, `NOT`,
+ * `*`, `:`, and stray quotes are searched for rather than interpreted.
+ * Tokens are ANDed — FTS5's default — so a hit contains all of them. */
+function ftsQuery(query: string): string | null {
+  const tokens = query
+    .split(/\s+/)
+    .map((token) => token.replace(/"/g, "").trim())
+    .filter(Boolean);
+  if (!tokens.length) return null;
+  const content = tokens.filter((token) => !STOP_WORDS.has(token.toLowerCase()));
+  return (content.length ? content : tokens).map((token) => `"${token}"`).join(" ");
+}
+
+/** How much of a matched message rides back in a hit. Wide enough that a
+ * short report reads whole; a longer one is fetched with readMessageText. */
+const SNIPPET_TOKENS = 48;
+
+/** Full text of one text message, for a session_read after a search hit.
+ * Null for a missing row or a non-text kind (activity chips carry no
+ * transcript text). */
+export function readMessageText(
+  threadId: string,
+  messageId: string,
+): { threadId: string; messageId: string; at: number; role: string; text: string; from?: string; peer?: string } | null {
+  const row = db()
+    .prepare(
+      "SELECT at, role, text, json_extract(json, '$.from.name') AS from_name, " +
+        "json_extract(json, '$.peerAsk.name') AS peer_name FROM messages " +
+        "WHERE thread_id = ? AND id = ? AND kind = 'text' AND text IS NOT NULL",
+    )
+    .get(threadId, messageId) as
+    | { at: number; role: string; text: string; from_name: string | null; peer_name: string | null }
+    | undefined;
+  if (!row) return null;
+  const peer = peerAuthor(row.peer_name, row.text);
+  return {
+    threadId,
+    messageId,
+    at: row.at,
+    role: row.role,
+    text: row.text,
+    ...(row.from_name ? { from: row.from_name } : {}),
+    ...(peer ? { peer } : {}),
+  };
+}
+
+/** Relevance-ranked recall over the text messages of the given threads:
+ * the bot's own past conversations, best match first, not newest first.
+ * bm25 rank from FTS5; the snippet is FTS5's own, windowed around the
+ * matched terms. Scoping happens in SQL before LIMIT, so a busy thread
+ * cannot crowd out a quieter one. */
+export function recallMessages(query: string, threadIds: readonly string[], limit = 12): RecallHit[] {
+  const match = ftsQuery(query);
+  if (!match || !threadIds.length) return [];
+  const placeholders = threadIds.map(() => "?").join(", ");
+  const rows = db()
+    .prepare(
+      "SELECT m.thread_id, m.id, m.at, m.role, json_extract(m.json, '$.from.name') AS from_name, " +
+        `json_extract(m.json, '$.peerAsk.name') AS peer_name, substr(m.text, 1, ${PEER_NOTE_HEAD_CHARS}) AS head, ` +
+        `snippet(messages_fts, 0, '[', ']', '…', ${SNIPPET_TOKENS}) AS snippet ` +
+        "FROM messages_fts JOIN messages m ON m.rowid = messages_fts.rowid " +
+        `WHERE messages_fts MATCH ? AND m.kind = 'text' AND m.thread_id IN (${placeholders}) ` +
+        "ORDER BY bm25(messages_fts), m.at DESC LIMIT ?",
+    )
+    .all(match, ...threadIds, limit) as Array<{
+    thread_id: string;
+    id: string;
+    at: number;
+    role: string;
+    from_name: string | null;
+    peer_name: string | null;
+    head: string;
+    snippet: string;
+  }>;
+  return rows.map((row) => {
+    const peer = peerAuthor(row.peer_name, row.head);
+    return {
+      threadId: row.thread_id,
+      messageId: row.id,
+      at: row.at,
+      role: row.role,
+      snippet: row.snippet.replace(/\s+/g, " ").trim(),
+      ...(row.from_name ? { from: row.from_name } : {}),
+      ...(peer ? { peer } : {}),
+    };
+  });
+}
+
+export interface MemoryFileStat {
+  path: string;
+  mtimeMs: number;
+  bytes: number;
+}
+
+/** Index one memory file (upsert keeps the rowid, so the update trigger
+ * keeps the FTS rows in step — the same reasoning as UPSERT_MESSAGE). */
+export function indexMemoryFile(botId: string, path: string, text: string, stat: { mtimeMs: number; bytes: number }): void {
+  db()
+    .prepare(
+      "INSERT INTO memory_files (bot_id, path, text, mtime_ms, bytes) VALUES (?, ?, ?, ?, ?) " +
+        "ON CONFLICT(bot_id, path) DO UPDATE SET text = excluded.text, mtime_ms = excluded.mtime_ms, bytes = excluded.bytes",
+    )
+    .run(botId, path, text, Math.trunc(stat.mtimeMs), stat.bytes);
+}
+
+export function removeMemoryFile(botId: string, path: string): void {
+  db().prepare("DELETE FROM memory_files WHERE bot_id = ? AND path = ?").run(botId, path);
+}
+
+/** What is indexed for a bot, so the caller can compare against the disk. */
+export function indexedMemoryFiles(botId: string): MemoryFileStat[] {
+  const rows = db()
+    .prepare("SELECT path, mtime_ms, bytes FROM memory_files WHERE bot_id = ?")
+    // SAFETY: the SELECT names exactly these three NOT NULL columns
+    .all(botId) as Array<{ path: string; mtime_ms: number; bytes: number }>;
+  return rows.map((row) => ({ path: row.path, mtimeMs: row.mtime_ms, bytes: row.bytes }));
+}
+
+export interface MemoryHit {
+  /** workspace-relative: MEMORY.md, memory/<topic>.md, memory/log/<day>.md */
+  file: string;
+  /** the matched passage, with each matched term wrapped in [brackets] */
+  snippet: string;
+  /** when the file was last written, from its mtime */
+  at: number;
+}
+
+/** Relevance-ranked recall over ONE bot's memory files. Scoped by bot id
+ * in SQL, the same way recallMessages scopes by thread: another bot's
+ * memory is not a lower-ranked result, it is not a result. */
+export function recallMemory(query: string, botId: string, limit = 12): MemoryHit[] {
+  const match = ftsQuery(query);
+  if (!match) return [];
+  const rows = db()
+    .prepare(
+      "SELECT f.path, f.mtime_ms, " +
+        `snippet(memory_fts, 0, '[', ']', '…', ${SNIPPET_TOKENS}) AS snippet ` +
+        "FROM memory_fts JOIN memory_files f ON f.rowid = memory_fts.rowid " +
+        "WHERE memory_fts MATCH ? AND f.bot_id = ? " +
+        "ORDER BY bm25(memory_fts), f.mtime_ms DESC LIMIT ?",
+    )
+    // SAFETY: the SELECT names exactly these three columns; snippet() is never null
+    .all(match, botId, limit) as Array<{ path: string; mtime_ms: number; snippet: string }>;
+  return rows.map((row) => ({ file: row.path, at: row.mtime_ms, snippet: row.snippet.replace(/\s+/g, " ").trim() }));
 }
 
 /** Test/shutdown hook — closes the handle so a wiped DATA_DIR starts clean. */

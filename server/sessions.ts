@@ -4,8 +4,8 @@
 //
 // A pairing code is 12 characters from a 32-symbol alphabet with no 0/O/1/I
 // (60 bits), single use, five minutes. Exchanging it yields an opaque
-// session token (`omb_sess_…`, 256 bits) that lives 30 days; only its sha256
-// is stored. A stream ticket is a 5-minute single-use credential for the SSE
+// session token (`omb_sess_…`, 256 bits) that lives 30 days, renewed on use
+// up to 180 days from pairing (`renew`); only its sha256 is stored. A stream ticket is a 5-minute single-use credential for the SSE
 // endpoint, because EventSource cannot set headers. Failed exchanges are
 // counted per source: five in a minute lock that source out for ten.
 import { createHash, randomBytes, randomUUID, timingSafeEqual } from "node:crypto";
@@ -19,15 +19,47 @@ export const SCOPES: readonly Scope[] = ["admin", "client"];
 export const PAIRING_CODE_ALPHABET = "23456789ABCDEFGHJKLMNPQRSTUVWXYZ";
 export const PAIRING_CODE_LENGTH = 12;
 export const PAIRING_CODE_TTL_MS = 5 * 60_000;
-export const SESSION_TTL_MS = 30 * 24 * 60 * 60_000;
+/** A whole number of days from an environment variable, as milliseconds.
+ * Anything that is not a whole number of days between 1 and 3650 falls back
+ * to the default rather than being clamped, so a typo is not silently
+ * turned into a policy. */
+export function daysMs(value: string | undefined, fallbackDays: number): number {
+  const days = Number(value);
+  const ok = Number.isInteger(days) && days >= 1 && days <= 3650;
+  return (ok ? days : fallbackDays) * 24 * 60 * 60_000;
+}
+/** How long a session lives after its last renewal. A session used with half
+ * the term or less left is renewed for the full term again (see `renew`), so
+ * a device in regular use keeps working; one that goes quiet lapses.
+ * OMB_SESSION_TTL_DAYS overrides the 30-day default. */
+export const SESSION_TTL_MS = daysMs(process.env.OMB_SESSION_TTL_DAYS, 30);
+/** The most a session may live from the day it was paired, however often it
+ * is used. Renewal never pushes a session past this, so a stolen cookie has a
+ * bounded life and every device re-pairs occasionally. OMB_SESSION_MAX_DAYS
+ * overrides the 180-day default. */
+export const SESSION_MAX_AGE_MS = daysMs(process.env.OMB_SESSION_MAX_DAYS, 180);
+/** Renewal is due once half the term or less is left. */
+export const SESSION_RENEW_WHEN_LEFT_MS = SESSION_TTL_MS / 2;
+
+/** Max-Age for a cookie that should die with its session: whole seconds, at least one. */
+export function cookieMaxAgeSeconds(session: { expiresAt: number }, now = Date.now()): number {
+  return Math.max(1, Math.floor((session.expiresAt - now) / 1000));
+}
 export const STREAM_TICKET_TTL_MS = 5 * 60_000;
-export const LOCKOUT = { failures: 5, windowMs: 60_000, lockMs: 10 * 60_000 } as const;
-/** Every source together: a client rotating its forwarded address still
- * cannot try more than this many codes a minute. */
-export const GLOBAL_LOCKOUT = { failures: 30, windowMs: 60_000, lockMs: 60_000 } as const;
-/** A consumed code presented again by the same source within this window
- * gets the same answer, so a lost response does not strand the device. */
+/** Per-source slow-down only. A 60-bit code cannot be guessed online in
+ * five minutes whatever the rate, so the lock exists to make noise visible,
+ * not to protect the secret; it is kept short because sources are shared
+ * (an office NAT, a proxy) and a long lock would let one bad neighbour keep
+ * everyone else from pairing. */
+export const LOCKOUT = { failures: 10, windowMs: 60_000, lockMs: 60_000 } as const;
+/** A consumed code presented again with the SAME attempt id within this
+ * window gets the same answer, so a lost response does not strand the
+ * device. The attempt id is a random value the client made up for that one
+ * attempt: without it there is no replay, and sharing an address with the
+ * device is not enough to obtain its token. */
 export const EXCHANGE_REPLAY_MS = 60_000;
+/** Outstanding stream tickets per session; issuing more retires the oldest. */
+export const MAX_STREAM_TICKETS_PER_SESSION = 5;
 const LAST_SEEN_WRITE_INTERVAL_MS = 60_000;
 
 const scopeSchema = z.enum(["admin", "client"]);
@@ -40,6 +72,9 @@ const sessionSchema = z.object({
   createdAt: z.number(),
   lastSeenAt: z.number(),
   expiresAt: z.number(),
+  /** Set when the session came from an account sign-in rather than a code. */
+  userId: z.string().max(256).optional(),
+  email: z.string().max(320).optional(),
 });
 
 const fileSchema = z.object({ version: z.literal(1), sessions: z.array(sessionSchema) });
@@ -54,6 +89,8 @@ export interface PublicSession {
   createdAt: number;
   lastSeenAt: number;
   expiresAt: number;
+  /** The account that signed in, when it was an account and not a code. */
+  email?: string;
 }
 
 export interface PairingCode {
@@ -114,7 +151,7 @@ export function formatPairingCode(code: string): string {
 }
 
 function publicSession(record: SessionRecord): PublicSession {
-  return {
+  const view: PublicSession = {
     id: record.id,
     label: record.label,
     scopes: [...record.scopes],
@@ -122,6 +159,8 @@ function publicSession(record: SessionRecord): PublicSession {
     lastSeenAt: record.lastSeenAt,
     expiresAt: record.expiresAt,
   };
+  if (record.email) view.email = record.email;
+  return view;
 }
 
 export class SessionRegistry {
@@ -129,8 +168,8 @@ export class SessionRegistry {
   private pairings: PairingCode[] = [];
   private tickets = new Map<string, { sessionId: string; expiresAt: number }>();
   private failures = new Map<string, { count: number; windowStart: number; lockedUntil: number }>();
-  private globalFailures = { count: 0, windowStart: 0, lockedUntil: 0 };
-  private replays: Array<{ codeHash: string; source: string; result: ExchangeResult; expiresAt: number }> = [];
+  private replays: Array<{ codeHash: string; attemptId: string; result: ExchangeResult; expiresAt: number }> = [];
+  private readonly onRevoked = new Set<(sessionId: string) => void>();
   private lastSeenWrites = new Map<string, number>();
   private readonly now: () => number;
   private readonly options: { file: string; now?: () => number };
@@ -170,11 +209,28 @@ export class SessionRegistry {
     this.pairings = this.pairings.filter((p) => p.expiresAt > now);
     this.replays = this.replays.filter((r) => r.expiresAt > now);
     for (const [hash, ticket] of this.tickets) if (ticket.expiresAt <= now) this.tickets.delete(hash);
-    const live = this.sessions.filter((s) => s.expiresAt > now);
-    if (live.length !== this.sessions.length) {
-      this.sessions = live;
+    for (const [source, entry] of this.failures) {
+      if (entry.lockedUntil <= now && now - entry.windowStart > LOCKOUT.windowMs) this.failures.delete(source);
+    }
+    const expired = this.sessions.filter((s) => s.expiresAt <= now);
+    if (expired.length) {
+      this.sessions = this.sessions.filter((s) => s.expiresAt > now);
+      for (const s of expired) this.forget(s.id);
       this.persist();
     }
+  }
+
+  /** Called with a session id whenever it stops being valid (revoked,
+   * logged out, expired), so open streams can be closed. */
+  onSessionRevoked(listener: (sessionId: string) => void): () => void {
+    this.onRevoked.add(listener);
+    return () => this.onRevoked.delete(listener);
+  }
+
+  private forget(sessionId: string): void {
+    this.lastSeenWrites.delete(sessionId);
+    for (const [hash, ticket] of this.tickets) if (ticket.sessionId === sessionId) this.tickets.delete(hash);
+    for (const listener of this.onRevoked) listener(sessionId);
   }
 
   // ── pairing ────────────────────────────────────────────────────────────
@@ -207,6 +263,12 @@ export class SessionRegistry {
     return this.pairings.length !== before;
   }
 
+  /** Sources with recent failures (for tests and diagnostics; never the codes). */
+  failureSources(): string[] {
+    this.prune();
+    return [...this.failures.keys()];
+  }
+
   private lockState(source: string): { locked: boolean; retryAfterMs: number } {
     const entry = this.failures.get(source);
     if (!entry) return { locked: false, retryAfterMs: 0 };
@@ -217,17 +279,6 @@ export class SessionRegistry {
 
   private recordFailure(source: string): void {
     const now = this.now();
-    const g = this.globalFailures;
-    if (now - g.windowStart > GLOBAL_LOCKOUT.windowMs) {
-      g.count = 0;
-      g.windowStart = now;
-    }
-    g.count += 1;
-    if (g.count >= GLOBAL_LOCKOUT.failures) {
-      g.lockedUntil = now + GLOBAL_LOCKOUT.lockMs;
-      g.count = 0;
-      g.windowStart = now;
-    }
     const entry = this.failures.get(source) ?? { count: 0, windowStart: now, lockedUntil: 0 };
     if (now - entry.windowStart > LOCKOUT.windowMs) {
       entry.count = 0;
@@ -247,19 +298,17 @@ export class SessionRegistry {
   /** `label` is what the client asked to be called; the code's own label
    * (set by whoever minted it) comes next; `fallbackLabel` (derived from the
    * user agent) last. */
-  exchange(input: { code: string; label: string; source: string; fallbackLabel?: string }): ExchangeResult {
+  exchange(input: { code: string; label: string; source: string; fallbackLabel?: string; attemptId?: string }): ExchangeResult {
     this.prune();
     const now = this.now();
     const presented = sha256(normalizePairingCode(input.code));
-    const replay = this.replays.find((r) => r.source === input.source && sameDigest(r.codeHash, presented));
+    const attemptId = typeof input.attemptId === "string" && /^[\w-]{8,64}$/.test(input.attemptId) ? input.attemptId : null;
+    const replay = attemptId ? this.replays.find((r) => r.attemptId === attemptId && sameDigest(r.codeHash, presented)) : undefined;
     if (replay) return replay.result;
     const lock = this.lockState(input.source);
     if (lock.locked) {
-      const minutes = Math.ceil(lock.retryAfterMs / 60_000);
-      return { ok: false, status: 429, error: `too many failed pairing attempts; try again in ${minutes} min` };
-    }
-    if (this.globalFailures.lockedUntil > now) {
-      return { ok: false, status: 429, error: "too many failed pairing attempts across all clients; try again in a minute" };
+      const seconds = Math.ceil(lock.retryAfterMs / 1000);
+      return { ok: false, status: 429, error: `too many failed pairing attempts from your address; try again in ${seconds}s` };
     }
     const index = this.pairings.findIndex((p) => sameDigest(p.codeHash, presented));
     if (index < 0) {
@@ -276,14 +325,53 @@ export class SessionRegistry {
       scopes: [...pairing.scopes],
       createdAt: now,
       lastSeenAt: now,
-      expiresAt: now + SESSION_TTL_MS,
+      // The absolute cap applies from the first term, so a TTL configured
+      // longer than the cap does not hand out a session the cap forbids.
+      expiresAt: now + Math.min(SESSION_TTL_MS, SESSION_MAX_AGE_MS),
     };
     this.sessions.push(record);
     this.lastSeenWrites.set(record.id, now); // the exchange itself was the first sighting
     this.persist();
     const result: ExchangeResult = { ok: true, token, session: publicSession(record) };
-    this.replays.push({ codeHash: presented, source: input.source, result, expiresAt: now + EXCHANGE_REPLAY_MS });
+    if (attemptId) this.replays.push({ codeHash: presented, attemptId, result, expiresAt: now + EXCHANGE_REPLAY_MS });
     return result;
+  }
+
+  /** A session from a verified account sign-in (server/account-signin.ts)
+   * rather than a pairing code: same token, same term, same gates. */
+  issue(input: { label: string; scopes: Scope[]; userId?: string; email?: string }): { token: string; session: PublicSession } {
+    this.prune();
+    const now = this.now();
+    const token = `omb_sess_${randomBytes(32).toString("base64url")}`;
+    const record: SessionRecord = {
+      id: randomUUID(),
+      tokenHash: sha256(token),
+      label: (input.label.trim() || "Unnamed device").slice(0, 80),
+      scopes: [...new Set(input.scopes)],
+      createdAt: now,
+      lastSeenAt: now,
+      expiresAt: now + Math.min(SESSION_TTL_MS, SESSION_MAX_AGE_MS),
+    };
+    if (input.userId) record.userId = input.userId;
+    if (input.email) record.email = input.email;
+    this.sessions.push(record);
+    this.lastSeenWrites.set(record.id, now);
+    this.persist();
+    return { token, session: publicSession(record) };
+  }
+
+  /** The pairing lockout, for other code-like exchanges on the same source. */
+  attemptAllowed(source: string): { ok: true } | { ok: false; retryAfterMs: number } {
+    const lock = this.lockState(source);
+    return lock.locked ? { ok: false, retryAfterMs: lock.retryAfterMs } : { ok: true };
+  }
+
+  noteFailure(source: string): void {
+    this.recordFailure(source);
+  }
+
+  clearFailures(source: string): void {
+    this.failures.delete(source);
   }
 
   // ── sessions ───────────────────────────────────────────────────────────
@@ -303,6 +391,32 @@ export class SessionRegistry {
     return record;
   }
 
+  /** Sliding expiry. Called by the request gate once a request has passed
+   * the origin and scope checks (so a rejected request never extends
+   * anything): a still-valid session with half its term or less left is
+   * renewed for the full term, capped at SESSION_MAX_AGE_MS from pairing.
+   * Nothing expired is revived. Writes at most once per half-term, so it
+   * adds nothing to the last-seen traffic. Returns whether it renewed. */
+  renew(sessionId: string): boolean {
+    const record = this.sessions.find((s) => s.id === sessionId);
+    const now = this.now();
+    if (!record || record.expiresAt <= now) return false;
+    if (record.expiresAt - now > SESSION_RENEW_WHEN_LEFT_MS) return false;
+    const next = Math.min(now + SESSION_TTL_MS, record.createdAt + SESSION_MAX_AGE_MS);
+    if (next <= record.expiresAt) return false; // already at the absolute cap
+    record.expiresAt = next;
+    record.lastSeenAt = now;
+    this.lastSeenWrites.set(record.id, now);
+    this.persist();
+    return true;
+  }
+
+  /** Still valid right now (prunes expiry first). */
+  isLive(sessionId: string): boolean {
+    this.prune();
+    return this.sessions.some((s) => s.id === sessionId);
+  }
+
   list(): PublicSession[] {
     this.prune();
     return this.sessions.map(publicSession);
@@ -311,8 +425,8 @@ export class SessionRegistry {
   revoke(id: string): boolean {
     const before = this.sessions.length;
     this.sessions = this.sessions.filter((s) => s.id !== id);
-    for (const [hash, ticket] of this.tickets) if (ticket.sessionId === id) this.tickets.delete(hash);
     if (this.sessions.length === before) return false;
+    this.forget(id);
     this.persist();
     return true;
   }
@@ -321,6 +435,8 @@ export class SessionRegistry {
 
   issueStreamTicket(sessionId: string): { ticket: string; expiresAt: number } {
     this.prune();
+    const mine = [...this.tickets].filter(([, t]) => t.sessionId === sessionId).sort((a, b) => a[1].expiresAt - b[1].expiresAt);
+    for (const [hash] of mine.slice(0, Math.max(0, mine.length - (MAX_STREAM_TICKETS_PER_SESSION - 1)))) this.tickets.delete(hash);
     const ticket = `omb_tick_${randomBytes(24).toString("base64url")}`;
     const expiresAt = this.now() + STREAM_TICKET_TTL_MS;
     this.tickets.set(sha256(ticket), { sessionId, expiresAt });

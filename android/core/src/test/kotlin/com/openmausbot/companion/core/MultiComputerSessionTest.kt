@@ -10,6 +10,7 @@ import kotlin.test.assertFalse
 import kotlin.test.assertNotEquals
 import kotlin.test.assertNull
 import kotlin.test.assertTrue
+import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.async
@@ -279,6 +280,94 @@ class MultiComputerSessionTest {
 
         assertEquals(Session.Status.Unauthorized, session.status.value)
         assertEquals(air, session.connection.value)
+    }
+
+    @Test
+    fun aDownloadThatCompletesDuringAComputerSwitchDiscardsTheOldBytes() = runTest {
+        val transferred = CompletableDeferred<Unit>()
+        val releaseResult = CompletableDeferred<Unit>()
+        val http = OkHttpClient.Builder().addInterceptor { chain ->
+            Response.Builder()
+                .request(chain.request())
+                .protocol(Protocol.HTTP_1_1)
+                .code(200)
+                .message("OK")
+                .header("Content-Type", "text/plain")
+                .header("Content-Disposition", "attachment; filename=\"old.txt\"")
+                .body("old computer".toResponseBody("text/plain".toMediaType()))
+                .build()
+        }.build()
+        val connections = RegistryStore(ConnectionRegistry(listOf(air, pro), air.id))
+        val tokens = Tokens(mapOf(air.id to "air-token", pro.id to "pro-token"))
+        val session = Session(
+            scope = backgroundScope,
+            connectionStore = connections,
+            tokenStore = tokens,
+            onboardingStore = InMemoryOnboardingStore(),
+            deviceNameProvider = { "Pixel" },
+            clientFactory = { connection, token -> CompanionClient(connection, token, http) },
+            eventsFn = { _, _, _ -> emptyFlow() },
+            afterAttachmentDownload = {
+                transferred.complete(Unit)
+                releaseResult.await()
+            },
+        )
+        session.awaitRestored()
+
+        val result = async {
+            session.downloadFile("thread-1", "message-1", "/private/old.txt")
+        }
+        transferred.await()
+        session.switchComputer(pro.id)
+        runCurrent()
+        assertEquals(pro, session.connection.value)
+        releaseResult.complete(Unit)
+
+        assertNull(result.await())
+        assertNull(session.actionError)
+    }
+
+    @Test
+    fun overviewResponsesFromPreviousComputerAreDiscarded() = runTest {
+        for (status in listOf(200, 500)) {
+            val started = CountDownLatch(1)
+            val release = CountDownLatch(1)
+            val http = OkHttpClient.Builder().addInterceptor { chain ->
+                started.countDown()
+                check(release.await(5, TimeUnit.SECONDS)) { "overview request was never released" }
+                Response.Builder()
+                    .request(chain.request())
+                    .protocol(Protocol.HTTP_1_1)
+                    .code(status)
+                    .message("Fixture")
+                    .body((if (status == 200) fixtureText("bot-overview") else """{"error":"old computer failed"}""")
+                        .toResponseBody("application/json".toMediaType()))
+                    .build()
+            }.build()
+            val session = Session(
+                scope = backgroundScope,
+                connectionStore = RegistryStore(ConnectionRegistry(listOf(air, pro), air.id)),
+                tokenStore = Tokens(mapOf(air.id to "air-token", pro.id to "pro-token")),
+                onboardingStore = InMemoryOnboardingStore(),
+                deviceNameProvider = { "Pixel" },
+                clientFactory = { connection, token -> CompanionClient(connection, token, http) },
+                eventsFn = { _, _, _ -> flow { awaitCancellation() } },
+            )
+            session.awaitRestored()
+
+            val result = async { session.loadOverview("bot-1") }
+            try {
+                assertTrue(withContext(Dispatchers.IO) { started.await(5, TimeUnit.SECONDS) })
+                session.switchComputer(pro.id)
+                runCurrent()
+                assertEquals(pro, session.connection.value)
+            } finally {
+                release.countDown()
+            }
+
+            assertNull(result.await(), "old computer's $status must not replace the new overview")
+            assertNull(session.actionError, "old computer's $status must not raise an error on the new one")
+        }
     }
 
     private val sampleBot = Bot(

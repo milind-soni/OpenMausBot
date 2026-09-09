@@ -8,9 +8,15 @@ importers:
 
   .:
     dependencies:
+      '@clack/prompts':
+        specifier: 1.7.0
+        version: 1.7.0
+      '@hpke/core':
+        specifier: 1.9.0
+        version: 1.9.0
       '@trycua/cua-driver':
-        specifier: 0.20.0
-        version: 0.20.0
+        specifier: 0.22.1
+        version: 0.22.1
       clsx:
         specifier: ^2.1.1
         version: 2.1.1
@@ -23,6 +29,9 @@ importers:
       posthog-js:
         specifier: ^1.415.6
         version: 1.415.6
+      qrcode-terminal:
+        specifier: 0.12.0
+        version: 0.12.0
       qrcode.react:
         specifier: ^4.2.0
         version: 4.2.0(react@19.2.8)
@@ -57,6 +66,9 @@ importers:
       '@types/node':
         specifier: ^26.2.0
         version: 26.2.0
+      '@types/qrcode-terminal':
+        specifier: 0.12.2
+        version: 0.12.2
       '@types/react':
         specifier: ^19.1.9
         version: 19.2.18
@@ -387,6 +399,14 @@ packages:
 
   '@better-fetch/fetch@1.3.1':
     resolution: {integrity: sha512-ABkD1WhyfPZprKRQI3bhATjeiFuNWC9PXhfGWqL+sg/gKrM977oFrYkdb4msM3hgUGonr7KlOsOFT5TU2rht9g==}
+
+  '@clack/core@1.4.3':
+    resolution: {integrity: sha512-/kr3UWNtdJfxZtPgDqUOmG2pvwlmcLGheex5yiZKdwbzZJxhV+HMNR9QNmyY5cGwTNV6LrR7Jtp+KjhUAP1qBQ==}
+    engines: {node: '>= 20.12.0'}
+
+  '@clack/prompts@1.7.0':
+    resolution: {integrity: sha512-y7/yvZ2TPAnR9+jnc00klvNNLkJiXFFrQA/hlLCcxA9a2A4zQIOimyFQ9XfwYKiGD1fb5GY8vbKIIgO8d5Tb2A==}
+    engines: {node: '>= 20.12.0'}
 
   '@cloudflare/kv-asset-handler@0.5.0':
     resolution: {integrity: sha512-jxQYkj8dSIzc0cD6cMMNdOc1UVjqSqu8BZdor5s8cGjW2I8BjODt/kWPVdY+u9zj3ms75Q5qaZgnxUad83+eAg==}
@@ -889,6 +909,14 @@ packages:
 
   '@fumari/image-size@0.1.0':
     resolution: {integrity: sha512-x2o9u6P8uKUK15B8XgEoRhR3PgLoLSbQKK6FUCd14JzumEw+e8FXZPelij/dZ4VQVMp4r61VD3DcvSo3aEhLAA==}
+
+  '@hpke/common@1.10.1':
+    resolution: {integrity: sha512-moJwhmtLtuxiUzzNp1jpfBfx8yefKoO9D/RCR9dmwrnc7qjJqId1rEtQz+lSlU5cabX8daToMSx/7HayXOiaFw==}
+    engines: {node: '>=16.0.0'}
+
+  '@hpke/core@1.9.0':
+    resolution: {integrity: sha512-pFxWl1nNJeQCSUFs7+GAblHvXBCjn9EPN65vdKlYQil2aURaRxfGMO6vBKGqm1YHTKwiAxJQNEI70PbSowMP9Q==}
+    engines: {node: '>=16.0.0'}
 
   '@img/colour@1.1.0':
     resolution: {integrity: sha512-Td76q7j57o/tLVdgS746cYARfSyxk8iEfRxewL9h4OMzYhbW4TAcppl0mT4eyqXddh6L/jwoM75mo7ixa/pCeQ==}
@@ -1769,40 +1797,40 @@ packages:
     peerDependencies:
       vite: ^5.2.0 || ^6 || ^7 || ^8
 
-  '@trycua/cua-driver-darwin-arm64@0.20.0':
-    resolution: {integrity: sha512-LiEZ3Mku2BI83UJD7MWNoGw+PYIyo6hfmqA5T3zWle7Rti3Jhvic+Tnu+KZ9i+HXBZEQ84GUR91S+zUTdchh+Q==}
+  '@trycua/cua-driver-darwin-arm64@0.22.1':
+    resolution: {integrity: sha512-JKFlhjXXd8Ut15BTZjZPKMNCwKEqwIRWFXY59nsFjH6suVRI9c3T65s8+eCz3f64oKRNxvHh7OKbsTIZ1vyoFA==}
     cpu: [arm64]
     os: [darwin]
 
-  '@trycua/cua-driver-darwin-x64@0.20.0':
-    resolution: {integrity: sha512-4T2+qPYvW8ZUi6XYJM9r6mjfllw3zyEZUUdYvy9Q1WQA6HjcY4mXhXFlEfLjWE0wOeXYrNEXJ8JyYEL0jlzmtw==}
+  '@trycua/cua-driver-darwin-x64@0.22.1':
+    resolution: {integrity: sha512-sxYp6qnA5TCmr//vEQqUi9uhA1m6wWI4TOo5uYggIkUL3ebJIrcP4RPnqy2dYF3Y/GHwK7Si3MIk5DkTAnYezA==}
     cpu: [x64]
     os: [darwin]
 
-  '@trycua/cua-driver-linux-arm64-gnu@0.20.0':
-    resolution: {integrity: sha512-ya4Cc3ZO1x3HvCIAcouvVnhWDP5f7ZDWczeG1ym3qWST02AP5EtWXrqoPxRKbTV7y/yqovPO/Bk3mG+3F92AoA==}
+  '@trycua/cua-driver-linux-arm64-gnu@0.22.1':
+    resolution: {integrity: sha512-jel+5Y4I7A0cOfNIzqTwOKb79LHfjRkDQzI+naKdt6pghY04Iez0yK+8LPAzD3XAr73yTCdShgz++h6aZuFrZQ==}
     cpu: [arm64]
     os: [linux]
     libc: [glibc]
 
-  '@trycua/cua-driver-linux-x64-gnu@0.20.0':
-    resolution: {integrity: sha512-NjCt19AoCTqe148FdNAK6DmYEuFz9oW+/zh0OzCpfrGNvOvqnOkBT5wVFl7NFQIaNIlERV9f3+SG0Z6eL2QBkA==}
+  '@trycua/cua-driver-linux-x64-gnu@0.22.1':
+    resolution: {integrity: sha512-H8/lKF8zSS9ZgUuEiQZSNEukRLsHUUFCWEyPdpJy6+yiBbN5eyU9jrb9CZPO1dIU0Diex6WU1kofzxaQcGJbgQ==}
     cpu: [x64]
     os: [linux]
     libc: [glibc]
 
-  '@trycua/cua-driver-win32-arm64-msvc@0.20.0':
-    resolution: {integrity: sha512-16a1berZU8BdIA5NDg7ZWM+6r+LTTrOUcS3inUfPeWTxYiqlYhLthDVKR4PZCJhkx+w07ySSviS5O47XQx/M9A==}
+  '@trycua/cua-driver-win32-arm64-msvc@0.22.1':
+    resolution: {integrity: sha512-bD9jcQ3/FjcMCICfCYN+9fqHTqsBo/c8wHp6kbprIlmoFrxV47mbtV9SP9Edib2xNfUzJp2p59C8Rgf25lbvQw==}
     cpu: [arm64]
     os: [win32]
 
-  '@trycua/cua-driver-win32-x64-msvc@0.20.0':
-    resolution: {integrity: sha512-COOfQZJIcbhWSrfvcT98F7TFbdmwMqqP9AUQIzvPo82VxzXb/nG2KrZohinelR5dAdJ6YBGRw8hIMW/QsgTp9g==}
+  '@trycua/cua-driver-win32-x64-msvc@0.22.1':
+    resolution: {integrity: sha512-sOv3pjT5lCS1Rm6ZWTHwBkVn/sSMRPoY8X3p5TQAbQxloXrWUyWFLcHC+gt9PfFAQ8Nj5nFjVT3wsTeWOsZjPA==}
     cpu: [x64]
     os: [win32]
 
-  '@trycua/cua-driver@0.20.0':
-    resolution: {integrity: sha512-PYNA9zbZX46LLObcPSNUm37tIlP0/klphRaSyuJPA3NdaaLiglfw3HcWM/C0wB2KTb8nIS17hb2qCxB8F1VC4Q==}
+  '@trycua/cua-driver@0.22.1':
+    resolution: {integrity: sha512-qiVmjjbRxn3D3eoUvxMwGiVHdVPKjRnSVanhYtuBq5ePdrSPPT0GTqfK9PYeka5guJMKr703gr0tfnRb2CERng==}
 
   '@types/babel__core@7.20.5':
     resolution: {integrity: sha512-qoQprZvz5wQFJwMDqeseRXWv3rqMvhgpbXFfVyWhbx9X47POIA6i/+dXefEmZKoAgOaTdaIgNSMqMIU61yRyzA==}
@@ -1860,6 +1888,9 @@ packages:
 
   '@types/node@26.2.0':
     resolution: {integrity: sha512-5IviulTZeRNp2vAJ514cc/HUlY5nZ9fCbq9DMyC52BrhFZACo3nI0R7qBxhQmo/d27NFe96ur/b7Wwxklda+kg==}
+
+  '@types/qrcode-terminal@0.12.2':
+    resolution: {integrity: sha512-v+RcIEJ+Uhd6ygSQ0u5YYY7ZM+la7GgPbs0V/7l/kFs2uO4S8BcIUEMoP7za4DNIqNnUD5npf0A/7kBhrCKG5Q==}
 
   '@types/react-dom@19.2.4':
     resolution: {integrity: sha512-Bsc+QHgp+P/F02XDzNCY9jnZNCUuLki36KT7VKrTXXLdHf+vHMNZnW1rVu5DNW/rCK+fya3DATySbLM4yhtKUw==}
@@ -2602,8 +2633,17 @@ packages:
   fast-deep-equal@3.1.3:
     resolution: {integrity: sha512-f3qQ9oQy9j2AhBe/H9VC91wLmKBCCU/gDOnKNAYG5hswO7BLKj09Hc5HYNz9cGI++xlpDCIgDaitVs03ATR84Q==}
 
+  fast-string-truncated-width@3.0.3:
+    resolution: {integrity: sha512-0jjjIEL6+0jag3l2XWWizO64/aZVtpiGE3t0Zgqxv0DPuxiMjvB3M24fCyhZUO4KomJQPj3LTSUnDP3GpdwC0g==}
+
+  fast-string-width@3.0.2:
+    resolution: {integrity: sha512-gX8LrtNEI5hq8DVUfRQMbr5lpaS4nMIWV+7XEbXk2b8kiQIizgnlr12B4dA3ZEx3308ze0O4Q1R+cHts8kyUJg==}
+
   fast-uri@3.1.5:
     resolution: {integrity: sha512-gHwA1O9LDIcKunMKhObS/HimwtehO1nPUECKAu5TpKgaO19fcWEl4bliWe1jWxVFvIXztJjjQ4L8XQ1EU9f7Jw==}
+
+  fast-wrap-ansi@0.2.2:
+    resolution: {integrity: sha512-7F2Fl+TjRSenLqlU3UjSH0iyqopqoZIu7eZVpEirP2g1GtWa2G/ecEmBdgz31+Mxr+ELclgg6sokpSFIQiZ02Q==}
 
   fdir@6.5.0:
     resolution: {integrity: sha512-tIbYtZbucOs0BRGqPJkshJUYdL+SDH7dVM8gjy+ERp3WAUjLEFJE+02kanyHtwjWOnwrKYBiwAmM0p4kLJAnXg==}
@@ -3558,6 +3598,10 @@ packages:
     resolution: {integrity: sha512-BbubeCEyTuQjVMakvJQ/Sxbc93F2pwmbsxONT/ZRrwU7Ua38d8unYTwXpTVLAKJ4BDuH9IGztCjQcd/N/39Dvg==}
     engines: {node: '>=16.0.0'}
 
+  qrcode-terminal@0.12.0:
+    resolution: {integrity: sha512-EXtzRZmC+YGmGlDFbXKxQiMZNwCLEO6BANKXG4iCtSIM0yqc/pappSx3RIKr4r0uh5JsBckOXeKrB3Iz7mdQpQ==}
+    hasBin: true
+
   qrcode.react@4.2.0:
     resolution: {integrity: sha512-QpgqWi8rD9DsS9EP3z7BT+5lY5SFhsqGjpgW5DY/i3mK4M9DTBNz3ErMi8BWYEfI3L0d8GIbGmcdFAS1uIRGjA==}
     peerDependencies:
@@ -3797,6 +3841,9 @@ packages:
   simple-update-notifier@2.0.0:
     resolution: {integrity: sha512-a2B9Y0KlNXl9u/vsW6sTIu9vGEpfKu2wRV6l1H3XEas/0gUIzGzBoP/IouTcUQbm9JWZLH3COxyn03TYlFax6w==}
     engines: {node: '>=10'}
+
+  sisteransi@1.0.5:
+    resolution: {integrity: sha512-bLGGlR1QxBcynn2d5YmDX4MGjlZvy2MRBDRNHLJ8VI6l6+9FUiyTFNJ0IveOSP0bcXgVDPRcfGqA0pjaqUpfVg==}
 
   source-map-js@1.2.1:
     resolution: {integrity: sha512-UXWMKhLOwVKb728IUtQPXxfYU+usdybtUrK/8uGE8CQMvrhOpwvzDBwj0QhSL7MQc7vIsISBG8VQ8+IDQxpfQA==}
@@ -4472,6 +4519,18 @@ snapshots:
 
   '@better-fetch/fetch@1.3.1': {}
 
+  '@clack/core@1.4.3':
+    dependencies:
+      fast-wrap-ansi: 0.2.2
+      sisteransi: 1.0.5
+
+  '@clack/prompts@1.7.0':
+    dependencies:
+      '@clack/core': 1.4.3
+      fast-string-width: 3.0.2
+      fast-wrap-ansi: 0.2.2
+      sisteransi: 1.0.5
+
   '@cloudflare/kv-asset-handler@0.5.0': {}
 
   '@cloudflare/unenv-preset@2.16.1(unenv@2.0.0-rc.24)(workerd@1.20260811.1)':
@@ -4848,6 +4907,12 @@ snapshots:
       tailwindcss: 4.3.3
 
   '@fumari/image-size@0.1.0': {}
+
+  '@hpke/common@1.10.1': {}
+
+  '@hpke/core@1.9.0':
+    dependencies:
+      '@hpke/common': 1.10.1
 
   '@img/colour@1.1.0': {}
 
@@ -5484,35 +5549,35 @@ snapshots:
       tailwindcss: 4.3.3
       vite: 7.3.6(@types/node@26.2.0)(jiti@2.7.0)(lightningcss@1.32.0)(terser@5.16.9)(yaml@2.9.0)
 
-  '@trycua/cua-driver-darwin-arm64@0.20.0':
+  '@trycua/cua-driver-darwin-arm64@0.22.1':
     optional: true
 
-  '@trycua/cua-driver-darwin-x64@0.20.0':
+  '@trycua/cua-driver-darwin-x64@0.22.1':
     optional: true
 
-  '@trycua/cua-driver-linux-arm64-gnu@0.20.0':
+  '@trycua/cua-driver-linux-arm64-gnu@0.22.1':
     optional: true
 
-  '@trycua/cua-driver-linux-x64-gnu@0.20.0':
+  '@trycua/cua-driver-linux-x64-gnu@0.22.1':
     optional: true
 
-  '@trycua/cua-driver-win32-arm64-msvc@0.20.0':
+  '@trycua/cua-driver-win32-arm64-msvc@0.22.1':
     optional: true
 
-  '@trycua/cua-driver-win32-x64-msvc@0.20.0':
+  '@trycua/cua-driver-win32-x64-msvc@0.22.1':
     optional: true
 
-  '@trycua/cua-driver@0.20.0':
+  '@trycua/cua-driver@0.22.1':
     dependencies:
       '@ubjs/core': 0.31.0-3
       '@ubjs/node': 0.31.0-3
     optionalDependencies:
-      '@trycua/cua-driver-darwin-arm64': 0.20.0
-      '@trycua/cua-driver-darwin-x64': 0.20.0
-      '@trycua/cua-driver-linux-arm64-gnu': 0.20.0
-      '@trycua/cua-driver-linux-x64-gnu': 0.20.0
-      '@trycua/cua-driver-win32-arm64-msvc': 0.20.0
-      '@trycua/cua-driver-win32-x64-msvc': 0.20.0
+      '@trycua/cua-driver-darwin-arm64': 0.22.1
+      '@trycua/cua-driver-darwin-x64': 0.22.1
+      '@trycua/cua-driver-linux-arm64-gnu': 0.22.1
+      '@trycua/cua-driver-linux-x64-gnu': 0.22.1
+      '@trycua/cua-driver-win32-arm64-msvc': 0.22.1
+      '@trycua/cua-driver-win32-x64-msvc': 0.22.1
 
   '@types/babel__core@7.20.5':
     dependencies:
@@ -5588,6 +5653,8 @@ snapshots:
   '@types/node@26.2.0':
     dependencies:
       undici-types: 8.3.0
+
+  '@types/qrcode-terminal@0.12.2': {}
 
   '@types/react-dom@19.2.4(@types/react@19.2.18)':
     dependencies:
@@ -6378,7 +6445,17 @@ snapshots:
 
   fast-deep-equal@3.1.3: {}
 
+  fast-string-truncated-width@3.0.3: {}
+
+  fast-string-width@3.0.2:
+    dependencies:
+      fast-string-truncated-width: 3.0.3
+
   fast-uri@3.1.5: {}
+
+  fast-wrap-ansi@0.2.2:
+    dependencies:
+      fast-string-width: 3.0.2
 
   fdir@6.5.0(picomatch@4.0.5):
     optionalDependencies:
@@ -7648,6 +7725,8 @@ snapshots:
 
   pvutils@1.2.0: {}
 
+  qrcode-terminal@0.12.0: {}
+
   qrcode.react@4.2.0(react@19.2.8):
     dependencies:
       react: 19.2.8
@@ -8019,6 +8098,8 @@ snapshots:
   simple-update-notifier@2.0.0:
     dependencies:
       semver: 7.8.5
+
+  sisteransi@1.0.5: {}
 
   source-map-js@1.2.1: {}
 

@@ -6,6 +6,7 @@ import {
   parseRoomTurnTimeoutMinutes,
 } from "@/lib/room-turn-timeout";
 import { api, useStore, type ConfigStatus } from "@/state/store";
+import { t } from "@/lib/i18n";
 
 export function RoomTurnTimeoutSettings() {
   const { state, dispatch } = useStore();
@@ -24,7 +25,10 @@ export function RoomTurnTimeoutSettings() {
     if (!dirty || saveInFlight.current) return;
     const parsed = parseRoomTurnTimeoutMinutes(value);
     if (!parsed.ok) {
-      setError(parsed.error);
+      // Both rejection branches mean the same thing — out of range — so the
+      // sentence comes from the catalog. The parser stays pure and keeps its
+      // own English copy for its unit test.
+      setError(t("settings.roomTurns.range"));
       return;
     }
     saveInFlight.current = true;
@@ -39,7 +43,7 @@ export function RoomTurnTimeoutSettings() {
       setDirty(false);
       setError("");
     } catch (cause) {
-      setError(cause instanceof Error ? cause.message : "Could not save the channel turn limit.");
+      setError(cause instanceof Error ? cause.message : t("settings.roomTurns.error"));
     } finally {
       saveInFlight.current = false;
       setSaving(false);
@@ -49,7 +53,7 @@ export function RoomTurnTimeoutSettings() {
   return (
     <div className="flex flex-col gap-2">
       <label htmlFor="room-turn-timeout" className="text-[13px] font-medium text-ink">
-        Maximum turn length
+        {t("settings.roomTurns.label")}
       </label>
       <div
         className={`flex max-w-[220px] items-center rounded-lg border bg-inset ${
@@ -78,10 +82,10 @@ export function RoomTurnTimeoutSettings() {
           }}
           className="min-w-0 flex-1 bg-transparent px-3 py-2 text-[14px] tabular-nums text-ink focus:outline-none"
         />
-        <span className="pr-3 text-[13px] text-ink-secondary">minutes</span>
+        <span className="pr-3 text-[13px] text-ink-secondary">{t("settings.roomTurns.minutes")}</span>
       </div>
       <p id="room-turn-timeout-help" className="text-[12px] leading-relaxed text-ink-secondary">
-        Applies to every bot turn in channels. Direct chats use the inactivity watchdog instead.
+        {t("settings.roomTurns.help")}
       </p>
       {error ? (
         <p id="room-turn-timeout-error" role="alert" className="text-[12px] text-danger">

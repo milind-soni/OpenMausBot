@@ -1,0 +1,4580 @@
+{
+  "sourceLanguage": "en",
+  "strings": {
+    "%lld saved": {
+      "localizations": {
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%lld salvos"
+          }
+        }
+      }
+    },
+    "000000": {
+      "shouldTranslate": false
+    },
+    "5–1,440": {
+      "localizations": {
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "5–1.440"
+          }
+        }
+      }
+    },
+    "A section can have one Chief. Go back and choose one Chief, or use a section without one.": {
+      "localizations": {
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Uma seção pode ter um Chefe. Volte e escolha um Chefe, ou use uma seção sem nenhum."
+          }
+        }
+      }
+    },
+    "A task is one conversation and result, with its own context and working folder.": {
+      "localizations": {
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Uma tarefa é uma conversa e um resultado, com contexto e pasta de trabalho próprios."
+          }
+        }
+      }
+    },
+    "Account alias": {
+      "localizations": {
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Apelido da conta"
+          }
+        }
+      }
+    },
+    "Account details are unavailable from this provider. Refresh after authorization finishes.": {
+      "localizations": {
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Este provedor não fornece os detalhes da conta. Atualize depois que a autorização terminar."
+          }
+        }
+      }
+    },
+    "Accounts could not be re-checked": {
+      "localizations": {
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Não foi possível verificar as contas de novo"
+          }
+        }
+      }
+    },
+    "Activity": {
+      "localizations": {
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Atividade"
+          }
+        }
+      }
+    },
+    "Add Quick Reply": {
+      "localizations": {
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Adicionar resposta rápida"
+          }
+        }
+      }
+    },
+    "Add a document from Files": {
+      "localizations": {
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Adicionar um documento do app Arquivos"
+          }
+        }
+      }
+    },
+    "Add a photo to this message": {
+      "localizations": {
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Adicionar uma foto a esta mensagem"
+          }
+        }
+      }
+    },
+    "Add another account": {
+      "localizations": {
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Adicionar outra conta"
+          }
+        }
+      }
+    },
+    "Add the shared ElevenLabs key in this agent's profile on the computer. The key is never returned to iOS.": {
+      "localizations": {
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Adicione a chave compartilhada do ElevenLabs no perfil deste agente no computador. A chave nunca é devolvida ao iOS."
+          }
+        }
+      }
+    },
+    "Add to section": {
+      "localizations": {
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Adicionar à seção"
+          }
+        }
+      }
+    },
+    "Adds to existing section": {
+      "localizations": {
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Adiciona a uma seção existente"
+          }
+        }
+      }
+    },
+    "Advanced · %@ run limit": {
+      "localizations": {
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Avançado · limite de execução de %@"
+          }
+        }
+      }
+    },
+    "Advanced · no run limit": {
+      "localizations": {
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Avançado · sem limite de execução"
+          }
+        }
+      }
+    },
+    "Agent": {
+      "localizations": {
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Agente"
+          }
+        }
+      }
+    },
+    "Agent notifications": {
+      "localizations": {
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Notificações do agente"
+          }
+        }
+      }
+    },
+    "Agent tasks": {
+      "localizations": {
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Tarefas do agente"
+          }
+        }
+      }
+    },
+    "Alerts arrive while OpenMausBot is open or was recently in the background. Closed-app delivery is not available yet.": {
+      "localizations": {
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Os alertas chegam enquanto o OpenMausBot está aberto ou esteve em segundo plano há pouco. A entrega com o app fechado ainda não está disponível."
+          }
+        }
+      }
+    },
+    "All quiet": {
+      "localizations": {
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Tudo tranquilo"
+          }
+        }
+      }
+    },
+    "Allow camera access to scan the pairing QR code shown by OpenMausBot.": {
+      "localizations": {
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Permita o acesso à câmera para escanear o QR code de pareamento mostrado pelo OpenMausBot."
+          }
+        }
+      }
+    },
+    "Always": {
+      "localizations": {
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Sempre"
+          }
+        }
+      }
+    },
+    "Always allow this tool": {
+      "localizations": {
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Sempre permitir esta ferramenta"
+          }
+        }
+      }
+    },
+    "Apply model": {
+      "localizations": {
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Aplicar modelo"
+          }
+        }
+      }
+    },
+    "Approvals that are waiting for you": {
+      "localizations": {
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Aprovações esperando por você"
+          }
+        }
+      }
+    },
+    "Art direction": {
+      "localizations": {
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Direção de arte"
+          }
+        }
+      }
+    },
+    "Asks for permission to send notifications": {
+      "localizations": {
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Pede permissão para enviar notificações"
+          }
+        }
+      }
+    },
+    "Avatar": {
+      "localizations": {
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Avatar"
+          }
+        }
+      }
+    },
+    "Back": {
+      "localizations": {
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Voltar"
+          }
+        }
+      }
+    },
+    "Back to bots": {
+      "localizations": {
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Voltar aos bots"
+          }
+        }
+      }
+    },
+    "Bot chats": {
+      "localizations": {
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Conversas com bots"
+          }
+        }
+      }
+    },
+    "Bot intro animation": {
+      "localizations": {
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Animação de entrada do bot"
+          }
+        }
+      }
+    },
+    "Bot settings": {
+      "localizations": {
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Ajustes do bot"
+          }
+        }
+      }
+    },
+    "Bots": {
+      "localizations": {
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Bots"
+          }
+        }
+      }
+    },
+    "Bots you create on your computer show up here.": {
+      "localizations": {
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Os bots que você cria no seu computador aparecem aqui."
+          }
+        }
+      }
+    },
+    "Built-in Mac voices are unavailable": {
+      "localizations": {
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "As vozes nativas do Mac estão indisponíveis"
+          }
+        }
+      }
+    },
+    "Built-in Mac voices need no key, and this computer has none available. Switch the voice engine to ElevenLabs in this agent's profile on the computer to keep using voice.": {
+      "localizations": {
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "As vozes nativas do Mac não precisam de chave, e este computador não tem nenhuma disponível. Troque o motor de voz para ElevenLabs no perfil deste agente no computador para continuar usando voz."
+          }
+        }
+      }
+    },
+    "Camera access needed": {
+      "localizations": {
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "É preciso acesso à câmera"
+          }
+        }
+      }
+    },
+    "Can reach": {
+      "localizations": {
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Pode acessar"
+          }
+        }
+      }
+    },
+    "Cancel": {
+      "localizations": {
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Cancelar"
+          }
+        }
+      }
+    },
+    "Changes the language inside OpenMausMobile. Buttons drawn by iOS itself follow the phone's language, which you can set for this app in iOS Settings.": {
+      "localizations": {
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Muda o idioma dentro do OpenMausMobile. Os botões desenhados pelo próprio iOS seguem o idioma do telefone, que você pode definir para este app nos Ajustes do iOS."
+          }
+        }
+      }
+    },
+    "Changes this bot's model, profile, notifications, and voice": {
+      "localizations": {
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Muda o modelo, o perfil, as notificações e a voz deste bot"
+          }
+        }
+      }
+    },
+    "Channel name (optional)": {
+      "localizations": {
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Nome do canal (opcional)"
+          }
+        }
+      }
+    },
+    "Channel tasks": {
+      "localizations": {
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Tarefas do canal"
+          }
+        }
+      }
+    },
+    "Channels": {
+      "localizations": {
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Canais"
+          }
+        }
+      }
+    },
+    "Chat": {
+      "localizations": {
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Conversa"
+          }
+        }
+      }
+    },
+    "Chats": {
+      "localizations": {
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Conversas"
+          }
+        }
+      }
+    },
+    "Checking Cloud VM availability…": {
+      "localizations": {
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Verificando a disponibilidade da Cloud VM…"
+          }
+        }
+      }
+    },
+    "Chips": {
+      "localizations": {
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Chips"
+          }
+        }
+      }
+    },
+    "Choose File": {
+      "localizations": {
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Escolher arquivo"
+          }
+        }
+      }
+    },
+    "Choose a PNG, JPEG, GIF, or WebP image.": {
+      "localizations": {
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Escolha uma imagem PNG, JPEG, GIF ou WebP."
+          }
+        }
+      }
+    },
+    "Choose a different computer": {
+      "localizations": {
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Escolher outro computador"
+          }
+        }
+      }
+    },
+    "Choose an agent": {
+      "localizations": {
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Escolher um agente"
+          }
+        }
+      }
+    },
+    "Choose an agent voice": {
+      "localizations": {
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Escolha uma voz para o agente"
+          }
+        }
+      }
+    },
+    "Choose an available provider to change this bot's model.": {
+      "localizations": {
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Escolha um provedor disponível para mudar o modelo deste bot."
+          }
+        }
+      }
+    },
+    "Choose bots": {
+      "localizations": {
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Escolher bots"
+          }
+        }
+      }
+    },
+    "Choose up to 100 bots for one section.": {
+      "localizations": {
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Escolha até 100 bots para uma seção."
+          }
+        }
+      }
+    },
+    "Circle": {
+      "localizations": {
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Círculo"
+          }
+        }
+      }
+    },
+    "Clear": {
+      "localizations": {
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Limpar"
+          }
+        }
+      }
+    },
+    "Close": {
+      "localizations": {
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Fechar"
+          }
+        }
+      }
+    },
+    "Close slash commands": {
+      "localizations": {
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Fechar comandos de barra"
+          }
+        }
+      }
+    },
+    "Cloud VM": {
+      "localizations": {
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Cloud VM"
+          }
+        }
+      }
+    },
+    "Cloud VM status is unavailable": {
+      "localizations": {
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "O status da Cloud VM está indisponível"
+          }
+        }
+      }
+    },
+    "Completed": {
+      "localizations": {
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Concluída"
+          }
+        }
+      }
+    },
+    "Completed, waiting, failed, and manually started runs appear here.": {
+      "localizations": {
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "As execuções concluídas, aguardando, com falha e iniciadas manualmente aparecem aqui."
+          }
+        }
+      }
+    },
+    "Computer": {
+      "localizations": {
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Computador"
+          }
+        }
+      }
+    },
+    "Computer address": {
+      "localizations": {
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Endereço do computador"
+          }
+        }
+      }
+    },
+    "Computer only": {
+      "localizations": {
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Só no computador"
+          }
+        }
+      }
+    },
+    "Computers": {
+      "localizations": {
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Computadores"
+          }
+        }
+      }
+    },
+    "Computers ready to pair will appear here.": {
+      "localizations": {
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Os computadores prontos para parear vão aparecer aqui."
+          }
+        }
+      }
+    },
+    "Configure Composio on your computer first. Provider credentials are never returned to this device.": {
+      "localizations": {
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Configure o Composio no seu computador primeiro. As credenciais do provedor nunca são devolvidas a este dispositivo."
+          }
+        }
+      }
+    },
+    "Connect": {
+      "localizations": {
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Conectar"
+          }
+        }
+      }
+    },
+    "Connect a computer": {
+      "localizations": {
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Conectar um computador"
+          }
+        }
+      }
+    },
+    "Connect another computer": {
+      "localizations": {
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Conectar outro computador"
+          }
+        }
+      }
+    },
+    "Connect computer": {
+      "localizations": {
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Conectar computador"
+          }
+        }
+      }
+    },
+    "Connect my computer": {
+      "localizations": {
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Conectar meu computador"
+          }
+        }
+      }
+    },
+    "Connect to your computer": {
+      "localizations": {
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Conecte-se ao seu computador"
+          }
+        }
+      }
+    },
+    "Connect when you're ready": {
+      "localizations": {
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Conecte quando quiser"
+          }
+        }
+      }
+    },
+    "Connected": {
+      "localizations": {
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Conectado"
+          }
+        }
+      }
+    },
+    "Connected Apps": {
+      "localizations": {
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Apps conectados"
+          }
+        }
+      }
+    },
+    "Connected apps need setup": {
+      "localizations": {
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Os apps conectados precisam de configuração"
+          }
+        }
+      }
+    },
+    "Connected to %@": {
+      "localizations": {
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Conectado a %@"
+          }
+        }
+      }
+    },
+    "Connected to your computer": {
+      "localizations": {
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Conectado ao seu computador"
+          }
+        }
+      }
+    },
+    "Connecting…": {
+      "localizations": {
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Conectando…"
+          }
+        }
+      }
+    },
+    "Connection & Security": {
+      "localizations": {
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Conexão e segurança"
+          }
+        }
+      }
+    },
+    "Connection details": {
+      "localizations": {
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Detalhes da conexão"
+          }
+        }
+      }
+    },
+    "Connection unknown": {
+      "localizations": {
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Conexão desconhecida"
+          }
+        }
+      }
+    },
+    "Continue": {
+      "localizations": {
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Continuar"
+          }
+        }
+      }
+    },
+    "Continue with %lld bots": {
+      "localizations": {
+        "en": {
+          "variations": {
+            "plural": {
+              "one": {
+                "stringUnit": {
+                  "state": "translated",
+                  "value": "Continue with %lld bot"
+                }
+              },
+              "other": {
+                "stringUnit": {
+                  "state": "translated",
+                  "value": "Continue with %lld bots"
+                }
+              },
+              "zero": {
+                "stringUnit": {
+                  "state": "translated",
+                  "value": "Continue with %lld bots"
+                }
+              }
+            }
+          }
+        },
+        "pt-BR": {
+          "variations": {
+            "plural": {
+              "one": {
+                "stringUnit": {
+                  "state": "translated",
+                  "value": "Continuar com %lld bot"
+                }
+              },
+              "other": {
+                "stringUnit": {
+                  "state": "translated",
+                  "value": "Continuar com %lld bots"
+                }
+              },
+              "zero": {
+                "stringUnit": {
+                  "state": "translated",
+                  "value": "Continuar com %lld bots"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "Copied": {
+      "localizations": {
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Copiado"
+          }
+        }
+      }
+    },
+    "Copy": {
+      "localizations": {
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Copiar"
+          }
+        }
+      }
+    },
+    "Copy All": {
+      "localizations": {
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Copiar tudo"
+          }
+        }
+      }
+    },
+    "Copy CSV": {
+      "localizations": {
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Copiar CSV"
+          }
+        }
+      }
+    },
+    "Copy Diff": {
+      "localizations": {
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Copiar diff"
+          }
+        }
+      }
+    },
+    "Couldn't load": {
+      "localizations": {
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Não foi possível carregar"
+          }
+        }
+      }
+    },
+    "Couldn't open link": {
+      "localizations": {
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Não foi possível abrir o link"
+          }
+        }
+      }
+    },
+    "Couldn't start the microphone.": {
+      "localizations": {
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Não foi possível iniciar o microfone."
+          }
+        }
+      }
+    },
+    "Couldn't transcribe that.": {
+      "localizations": {
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Não foi possível transcrever isso."
+          }
+        }
+      }
+    },
+    "Couldn’t create section": {
+      "localizations": {
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Não foi possível criar a seção"
+          }
+        }
+      }
+    },
+    "Create": {
+      "localizations": {
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Criar"
+          }
+        }
+      }
+    },
+    "Create a bot first, then come back to group it into a section.": {
+      "localizations": {
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Crie um bot primeiro e depois volte para agrupá-lo em uma seção."
+          }
+        }
+      }
+    },
+    "Create section": {
+      "localizations": {
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Criar seção"
+          }
+        }
+      }
+    },
+    "Creates a new section": {
+      "localizations": {
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Cria uma nova seção"
+          }
+        }
+      }
+    },
+    "Creating or rotating a webhook changes an internet-reachable trigger and signing secret, so webhook management remains on the paired computer. Webhook run receipts still appear above.": {
+      "localizations": {
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Criar ou rotacionar um webhook altera um gatilho acessível pela internet e um segredo de assinatura, então o gerenciamento de webhooks continua no computador pareado. Os recibos de execução de webhook continuam aparecendo acima."
+          }
+        }
+      }
+    },
+    "Creating…": {
+      "localizations": {
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Criando…"
+          }
+        }
+      }
+    },
+    "Current agent voice": {
+      "localizations": {
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Voz atual do agente"
+          }
+        }
+      }
+    },
+    "Current computer": {
+      "localizations": {
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Computador atual"
+          }
+        }
+      }
+    },
+    "Current provider (unavailable)": {
+      "localizations": {
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Provedor atual (indisponível)"
+          }
+        }
+      }
+    },
+    "Custom interval in minutes": {
+      "localizations": {
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Intervalo personalizado em minutos"
+          }
+        }
+      }
+    },
+    "Custom interval…": {
+      "localizations": {
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Intervalo personalizado…"
+          }
+        }
+      }
+    },
+    "Default": {
+      "localizations": {
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Padrão"
+          }
+        }
+      }
+    },
+    "Delete": {
+      "localizations": {
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Excluir"
+          }
+        }
+      }
+    },
+    "Delete routine": {
+      "localizations": {
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Excluir rotina"
+          }
+        }
+      }
+    },
+    "Deleted agent": {
+      "localizations": {
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Agente excluído"
+          }
+        }
+      }
+    },
+    "Dictation isn't available for this language.": {
+      "localizations": {
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "O ditado não está disponível para este idioma."
+          }
+        }
+      }
+    },
+    "Dictation needs Microphone access. Enable it in Settings → OpenMausMobile.": {
+      "localizations": {
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "O ditado precisa de acesso ao Microfone. Ative em Ajustes → OpenMausMobile."
+          }
+        }
+      }
+    },
+    "Dictation needs Speech Recognition access. Enable it in Settings → OpenMausMobile.": {
+      "localizations": {
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "O ditado precisa de acesso ao Reconhecimento de Fala. Ative em Ajustes → OpenMausMobile."
+          }
+        }
+      }
+    },
+    "Dismiss": {
+      "localizations": {
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Dispensar"
+          }
+        }
+      }
+    },
+    "Does": {
+      "localizations": {
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Faz"
+          }
+        }
+      }
+    },
+    "Done": {
+      "localizations": {
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Concluído"
+          }
+        }
+      }
+    },
+    "Double tap to add this bot": {
+      "localizations": {
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Toque duas vezes para adicionar este bot"
+          }
+        }
+      }
+    },
+    "Double tap to remove this bot": {
+      "localizations": {
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Toque duas vezes para remover este bot"
+          }
+        }
+      }
+    },
+    "Each computer is paired separately. Only the selected computer is active at a time.": {
+      "localizations": {
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Cada computador é pareado separadamente. Só o computador selecionado fica ativo por vez."
+          }
+        }
+      }
+    },
+    "Each occurrence creates a fresh task. If the previous run is still active, the next occurrence is skipped instead of queued.": {
+      "localizations": {
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Cada ocorrência cria uma tarefa nova. Se a execução anterior ainda estiver ativa, a próxima ocorrência é pulada em vez de entrar na fila."
+          }
+        }
+      }
+    },
+    "Each occurrence creates a fresh task. No cron syntax is used.": {
+      "localizations": {
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Cada ocorrência cria uma tarefa nova. Nenhuma sintaxe de cron é usada."
+          }
+        }
+      }
+    },
+    "Edit": {
+      "localizations": {
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Editar"
+          }
+        }
+      }
+    },
+    "Edit address": {
+      "localizations": {
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Editar endereço"
+          }
+        }
+      }
+    },
+    "Edit and retry": {
+      "localizations": {
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Editar e tentar de novo"
+          }
+        }
+      }
+    },
+    "Edit routine": {
+      "localizations": {
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Editar rotina"
+          }
+        }
+      }
+    },
+    "ElevenLabs is not configured": {
+      "localizations": {
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "O ElevenLabs não está configurado"
+          }
+        }
+      }
+    },
+    "Enable notifications": {
+      "localizations": {
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Ativar notificações"
+          }
+        }
+      }
+    },
+    "Encrypted and saved on your computer": {
+      "localizations": {
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Criptografado e salvo no seu computador"
+          }
+        }
+      }
+    },
+    "Encrypted and sent to your computer.": {
+      "localizations": {
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Criptografado e enviado ao seu computador."
+          }
+        }
+      }
+    },
+    "English": {
+      "shouldTranslate": false
+    },
+    "Enter a different value": {
+      "localizations": {
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Digitar um valor diferente"
+          }
+        }
+      }
+    },
+    "Enter a whole number from 5 to 1,440 minutes.": {
+      "localizations": {
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Digite um número inteiro de 5 a 1.440 minutos."
+          }
+        }
+      }
+    },
+    "Enter address and code": {
+      "localizations": {
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Digitar endereço e código"
+          }
+        }
+      }
+    },
+    "Enter it securely on this phone.": {
+      "localizations": {
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Digite com segurança neste telefone."
+          }
+        }
+      }
+    },
+    "Enter securely on this phone": {
+      "localizations": {
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Digitar com segurança neste telefone"
+          }
+        }
+      }
+    },
+    "Enter the 6-digit code shown on your computer": {
+      "localizations": {
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Digite o código de 6 dígitos mostrado no seu computador"
+          }
+        }
+      }
+    },
+    "Enter the code shown on this computer": {
+      "localizations": {
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Digite o código mostrado neste computador"
+          }
+        }
+      }
+    },
+    "Every X minutes": {
+      "localizations": {
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "A cada X minutos"
+          }
+        }
+      }
+    },
+    "Every step a bot takes.": {
+      "localizations": {
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Cada passo que um bot dá."
+          }
+        }
+      }
+    },
+    "Explain steps": {
+      "localizations": {
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Explicar os passos"
+          }
+        }
+      }
+    },
+    "Finished work and important updates": {
+      "localizations": {
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Trabalhos concluídos e novidades importantes"
+          }
+        }
+      }
+    },
+    "First time per bot": {
+      "localizations": {
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Na primeira vez de cada bot"
+          }
+        }
+      }
+    },
+    "Follow the system": {
+      "localizations": {
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Seguir o sistema"
+          }
+        }
+      }
+    },
+    "For example, Research": {
+      "localizations": {
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Por exemplo, Pesquisa"
+          }
+        }
+      }
+    },
+    "Full": {
+      "localizations": {
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Completa"
+          }
+        }
+      }
+    },
+    "Generate an avatar": {
+      "localizations": {
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Gerar um avatar"
+          }
+        }
+      }
+    },
+    "Generate on computer": {
+      "localizations": {
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Gerar no computador"
+          }
+        }
+      }
+    },
+    "Generation uses the shared image provider configured on your computer. No provider key is sent to or stored on this device.": {
+      "localizations": {
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "A geração usa o provedor de imagens compartilhado configurado no seu computador. Nenhuma chave de provedor é enviada nem guardada neste dispositivo."
+          }
+        }
+      }
+    },
+    "Get alerts while OpenMausBot is open or was recently in the background. Alerts stop after iOS fully suspends or closes the app.": {
+      "localizations": {
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Receba alertas enquanto o OpenMausBot está aberto ou esteve em segundo plano há pouco. Os alertas param depois que o iOS suspende ou fecha o app por completo."
+          }
+        }
+      }
+    },
+    "HTTPS connection": {
+      "localizations": {
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Conexão HTTPS"
+          }
+        }
+      }
+    },
+    "Hidden": {
+      "localizations": {
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Oculta"
+          }
+        }
+      }
+    },
+    "Hide Diff": {
+      "localizations": {
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Ocultar diff"
+          }
+        }
+      }
+    },
+    "Hide full address": {
+      "localizations": {
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Ocultar endereço completo"
+          }
+        }
+      }
+    },
+    "Hides the steps": {
+      "localizations": {
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Oculta os passos"
+          }
+        }
+      }
+    },
+    "How often this routine runs": {
+      "localizations": {
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Com que frequência esta rotina roda"
+          }
+        }
+      }
+    },
+    "INPUT": {
+      "localizations": {
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "ENTRADA"
+          }
+        }
+      }
+    },
+    "Icon": {
+      "localizations": {
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Ícone"
+          }
+        }
+      }
+    },
+    "Identity": {
+      "localizations": {
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Identidade"
+          }
+        }
+      }
+    },
+    "Idle": {
+      "localizations": {
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Ocioso"
+          }
+        }
+      }
+    },
+    "Inspect latest git changes and patches": {
+      "localizations": {
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Inspecionar as últimas mudanças e patches do git"
+          }
+        }
+      }
+    },
+    "Interactive VNC session. Access must be enabled for this device in the Mac's Phone settings.": {
+      "localizations": {
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Sessão VNC interativa. O acesso precisa estar ativado para este dispositivo nos ajustes de Telefone do Mac."
+          }
+        }
+      }
+    },
+    "Interrupt": {
+      "localizations": {
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Interromper"
+          }
+        }
+      }
+    },
+    "It will appear on both this device and your computer.": {
+      "localizations": {
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Ela vai aparecer neste dispositivo e no seu computador."
+          }
+        }
+      }
+    },
+    "Label": {
+      "localizations": {
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Rótulo"
+          }
+        }
+      }
+    },
+    "Language": {
+      "localizations": {
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Idioma"
+          }
+        }
+      }
+    },
+    "Load earlier messages": {
+      "localizations": {
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Carregar mensagens anteriores"
+          }
+        }
+      }
+    },
+    "Loading models": {
+      "localizations": {
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Carregando modelos"
+          }
+        }
+      }
+    },
+    "Loads the image preview": {
+      "localizations": {
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Carrega a pré-visualização da imagem"
+          }
+        }
+      }
+    },
+    "Local Network access is off. Enable it in Settings, or enter a Tailscale address below.": {
+      "localizations": {
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "O acesso à Rede Local está desativado. Ative nos Ajustes, ou digite um endereço Tailscale abaixo."
+          }
+        }
+      }
+    },
+    "Local discovery isn't available right now. Enter the address shown in Phone settings.": {
+      "localizations": {
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "A descoberta local não está disponível agora. Digite o endereço mostrado nos ajustes de Telefone."
+          }
+        }
+      }
+    },
+    "Local discovery was interrupted. Retrying…": {
+      "localizations": {
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "A descoberta local foi interrompida. Tentando de novo…"
+          }
+        }
+      }
+    },
+    "Looking for computers": {
+      "localizations": {
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Procurando computadores"
+          }
+        }
+      }
+    },
+    "Make sure this is the computer you expect before connecting.": {
+      "localizations": {
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Confirme que este é o computador esperado antes de conectar."
+          }
+        }
+      }
+    },
+    "Mascot": {
+      "localizations": {
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Mascote"
+          }
+        }
+      }
+    },
+    "Message": {
+      "localizations": {
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Mensagem"
+          }
+        }
+      }
+    },
+    "Messages": {
+      "localizations": {
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Mensagens"
+          }
+        }
+      }
+    },
+    "Model": {
+      "localizations": {
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Modelo"
+          }
+        }
+      }
+    },
+    "Model, profile, voice and notifications": {
+      "localizations": {
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Modelo, perfil, voz e notificações"
+          }
+        }
+      }
+    },
+    "More": {
+      "localizations": {
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Mais"
+          }
+        }
+      }
+    },
+    "Name": {
+      "localizations": {
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Nome"
+          }
+        }
+      }
+    },
+    "Name section": {
+      "localizations": {
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Nomear a seção"
+          }
+        }
+      }
+    },
+    "Nearby computers": {
+      "localizations": {
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Computadores por perto"
+          }
+        }
+      }
+    },
+    "Needs pairing": {
+      "localizations": {
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Precisa parear"
+          }
+        }
+      }
+    },
+    "Needs you": {
+      "localizations": {
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Precisa de você"
+          }
+        }
+      }
+    },
+    "Never": {
+      "localizations": {
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Nunca"
+          }
+        }
+      }
+    },
+    "New Quick Reply": {
+      "localizations": {
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Nova resposta rápida"
+          }
+        }
+      }
+    },
+    "New bot": {
+      "localizations": {
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Novo bot"
+          }
+        }
+      }
+    },
+    "New channel": {
+      "localizations": {
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Novo canal"
+          }
+        }
+      }
+    },
+    "New routine": {
+      "localizations": {
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Nova rotina"
+          }
+        }
+      }
+    },
+    "New section": {
+      "localizations": {
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Nova seção"
+          }
+        }
+      }
+    },
+    "New task": {
+      "localizations": {
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Nova tarefa"
+          }
+        }
+      }
+    },
+    "Newer schedule": {
+      "localizations": {
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Agendamento mais novo"
+          }
+        }
+      }
+    },
+    "No activity, only messages.": {
+      "localizations": {
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Sem atividade, apenas mensagens."
+          }
+        }
+      }
+    },
+    "No bots yet": {
+      "localizations": {
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Nenhum bot ainda"
+          }
+        }
+      }
+    },
+    "No changes recorded yet.": {
+      "localizations": {
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Nenhuma mudança registrada ainda."
+          }
+        }
+      }
+    },
+    "No computer connected": {
+      "localizations": {
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Nenhum computador conectado"
+          }
+        }
+      }
+    },
+    "No cron syntax. Every run uses the agent's existing model, tools, permissions, computer, and connected apps. Times follow the paired computer's local timezone.": {
+      "localizations": {
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Sem sintaxe de cron. Cada execução usa o modelo, as ferramentas, as permissões, o computador e os apps conectados que o agente já tem. Os horários seguem o fuso local do computador pareado."
+          }
+        }
+      }
+    },
+    "No limit": {
+      "localizations": {
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Sem limite"
+          }
+        }
+      }
+    },
+    "No model providers are available": {
+      "localizations": {
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Nenhum provedor de modelos disponível"
+          }
+        }
+      }
+    },
+    "No routines": {
+      "localizations": {
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Nenhuma rotina"
+          }
+        }
+      }
+    },
+    "No workspace default voice is selected. Choose an agent-specific voice above; synthesis still uses the built-in Mac voices on your computer.": {
+      "localizations": {
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Nenhuma voz padrão do espaço de trabalho está selecionada. Escolha acima uma voz específica do agente; a síntese continua usando as vozes nativas do Mac no seu computador."
+          }
+        }
+      }
+    },
+    "No workspace default voice is selected. Choose an agent-specific voice above; synthesis still uses the shared ElevenLabs key on your computer.": {
+      "localizations": {
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Nenhuma voz padrão do espaço de trabalho está selecionada. Escolha acima uma voz específica do agente; a síntese continua usando a chave compartilhada do ElevenLabs no seu computador."
+          }
+        }
+      }
+    },
+    "Not connected": {
+      "localizations": {
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Não conectado"
+          }
+        }
+      }
+    },
+    "Not enabled": {
+      "localizations": {
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Não ativadas"
+          }
+        }
+      }
+    },
+    "Not now": {
+      "localizations": {
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Agora não"
+          }
+        }
+      }
+    },
+    "Not paired": {
+      "localizations": {
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Não pareado"
+          }
+        }
+      }
+    },
+    "Not provided": {
+      "localizations": {
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Não informado"
+          }
+        }
+      }
+    },
+    "Not provided.": {
+      "localizations": {
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Não informado."
+          }
+        }
+      }
+    },
+    "Nothing matches": {
+      "localizations": {
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Nada corresponde"
+          }
+        }
+      }
+    },
+    "Nothing needs you": {
+      "localizations": {
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Nada precisa de você"
+          }
+        }
+      }
+    },
+    "Nothing scheduled or learned yet.": {
+      "localizations": {
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Nada agendado ou aprendido ainda."
+          }
+        }
+      }
+    },
+    "Nothing to show yet": {
+      "localizations": {
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Nada para mostrar ainda"
+          }
+        }
+      }
+    },
+    "Notifications": {
+      "localizations": {
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Notificações"
+          }
+        }
+      }
+    },
+    "Notifications are enabled": {
+      "localizations": {
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "As notificações estão ativadas"
+          }
+        }
+      }
+    },
+    "OK": {
+      "localizations": {
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "OK"
+          }
+        }
+      }
+    },
+    "OUTPUT": {
+      "localizations": {
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "SAÍDA"
+          }
+        }
+      }
+    },
+    "Off in Settings": {
+      "localizations": {
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Desativadas nos Ajustes"
+          }
+        }
+      }
+    },
+    "Offline": {
+      "localizations": {
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Offline"
+          }
+        }
+      }
+    },
+    "On": {
+      "localizations": {
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Ativadas"
+          }
+        }
+      }
+    },
+    "On your computer, open OpenMausBot → Settings → Phone.": {
+      "localizations": {
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "No seu computador, abra OpenMausBot → Ajustes → Telefone."
+          }
+        }
+      }
+    },
+    "On your computer, open Settings → Phone → Set up a phone.": {
+      "localizations": {
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "No seu computador, abra Ajustes → Telefone → Configurar um telefone."
+          }
+        }
+      }
+    },
+    "One time": {
+      "localizations": {
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Uma vez"
+          }
+        }
+      }
+    },
+    "Only continue on a network you trust. Local connections are authenticated but are not encrypted by OpenMausBot.": {
+      "localizations": {
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Só continue em uma rede em que você confia. As conexões locais são autenticadas, mas não são criptografadas pelo OpenMausBot."
+          }
+        }
+      }
+    },
+    "Open Settings": {
+      "localizations": {
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Abrir Ajustes"
+          }
+        }
+      }
+    },
+    "Open chat to review": {
+      "localizations": {
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Abrir a conversa para revisar"
+          }
+        }
+      }
+    },
+    "Open chats, approve actions, and send new work from this device.": {
+      "localizations": {
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Abra conversas, aprove ações e envie novos trabalhos deste dispositivo."
+          }
+        }
+      }
+    },
+    "Open desktop": {
+      "localizations": {
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Abrir área de trabalho"
+          }
+        }
+      }
+    },
+    "Open links to other computer files from the original chat message.": {
+      "localizations": {
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Abra links para outros arquivos do computador pela mensagem original da conversa."
+          }
+        }
+      }
+    },
+    "Open live cloud desktop": {
+      "localizations": {
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Abrir a área de trabalho na nuvem ao vivo"
+          }
+        }
+      }
+    },
+    "Open live cloud desktop?": {
+      "localizations": {
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Abrir a área de trabalho na nuvem ao vivo?"
+          }
+        }
+      }
+    },
+    "Open live screen & desktop controls": {
+      "localizations": {
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Abrir a tela ao vivo e os controles da área de trabalho"
+          }
+        }
+      }
+    },
+    "Open task": {
+      "localizations": {
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Abrir tarefa"
+          }
+        }
+      }
+    },
+    "Open the chat to review SKILL.md": {
+      "localizations": {
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Abrir a conversa para revisar o SKILL.md"
+          }
+        }
+      }
+    },
+    "OpenMausBot": {
+      "shouldTranslate": false
+    },
+    "OpenMausBot is trying the saved connection automatically.": {
+      "localizations": {
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "O OpenMausBot está tentando a conexão salva automaticamente."
+          }
+        }
+      }
+    },
+    "Opening…": {
+      "localizations": {
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Abrindo…"
+          }
+        }
+      }
+    },
+    "Opens a preview": {
+      "localizations": {
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Abre uma pré-visualização"
+          }
+        }
+      }
+    },
+    "Opens device Settings": {
+      "localizations": {
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Abre os Ajustes do dispositivo"
+          }
+        }
+      }
+    },
+    "Opens the image full screen": {
+      "localizations": {
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Abre a imagem em tela cheia"
+          }
+        }
+      }
+    },
+    "Optional. The clock starts when work actually begins and does not control how often the routine starts.": {
+      "localizations": {
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Opcional. O relógio começa quando o trabalho realmente inicia e não controla com que frequência a rotina começa."
+          }
+        }
+      }
+    },
+    "Other computers": {
+      "localizations": {
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Outros computadores"
+          }
+        }
+      }
+    },
+    "Other ways to connect": {
+      "localizations": {
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Outras formas de conectar"
+          }
+        }
+      }
+    },
+    "PNG, JPEG, GIF, or WebP, up to 10 MB. Images are stored on your paired computer and loaded with this device's pairing token.": {
+      "localizations": {
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "PNG, JPEG, GIF ou WebP, até 10 MB. As imagens ficam no computador pareado e são carregadas com o token de pareamento deste dispositivo."
+          }
+        }
+      }
+    },
+    "Pair again": {
+      "localizations": {
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Parear de novo"
+          }
+        }
+      }
+    },
+    "Pair again by QR code, or finish on your computer.": {
+      "localizations": {
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Pareie de novo por QR code, ou conclua no seu computador."
+          }
+        }
+      }
+    },
+    "Pair again to enter here": {
+      "localizations": {
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Pareie de novo para digitar aqui"
+          }
+        }
+      }
+    },
+    "Pair this device with OpenMausBot to see your chats and respond to your bots.": {
+      "localizations": {
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Pareie este dispositivo com o OpenMausBot para ver suas conversas e responder aos seus bots."
+          }
+        }
+      }
+    },
+    "Past run receipts remain available.": {
+      "localizations": {
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Os recibos de execuções anteriores continuam disponíveis."
+          }
+        }
+      }
+    },
+    "Pause": {
+      "localizations": {
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Pausar"
+          }
+        }
+      }
+    },
+    "Paused": {
+      "localizations": {
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Pausada"
+          }
+        }
+      }
+    },
+    "Photo Library": {
+      "localizations": {
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Fototeca"
+          }
+        }
+      }
+    },
+    "Pick a voice for this agent before enabling speech.": {
+      "localizations": {
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Escolha uma voz para este agente antes de ativar a fala."
+          }
+        }
+      }
+    },
+    "Pick an agent voice or configure a workspace default on your computer first.": {
+      "localizations": {
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Escolha uma voz para o agente ou configure um padrão do espaço de trabalho no seu computador primeiro."
+          }
+        }
+      }
+    },
+    "Pick up the same conversations from your computer.": {
+      "localizations": {
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Retome as mesmas conversas do seu computador."
+          }
+        }
+      }
+    },
+    "Pinned": {
+      "localizations": {
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Fixados"
+          }
+        }
+      }
+    },
+    "Pinned bots stay in Pinned until you unpin them.": {
+      "localizations": {
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Os bots fixados continuam em Fixados até você desafixá-los."
+          }
+        }
+      }
+    },
+    "Point the camera at the QR code on your computer": {
+      "localizations": {
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Aponte a câmera para o QR code no seu computador"
+          }
+        }
+      }
+    },
+    "Português (Brasil)": {
+      "shouldTranslate": false
+    },
+    "Preparing attachments…": {
+      "localizations": {
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Preparando anexos…"
+          }
+        }
+      }
+    },
+    "Preview": {
+      "localizations": {
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Prévia"
+          }
+        }
+      }
+    },
+    "Preview voice": {
+      "localizations": {
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Ouvir a voz"
+          }
+        }
+      }
+    },
+    "Primary account": {
+      "localizations": {
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Conta principal"
+          }
+        }
+      }
+    },
+    "Private by design": {
+      "localizations": {
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Privado por princípio"
+          }
+        }
+      }
+    },
+    "Prompt": {
+      "localizations": {
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Prompt"
+          }
+        }
+      }
+    },
+    "Provider": {
+      "localizations": {
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Provedor"
+          }
+        }
+      }
+    },
+    "Provider accounts and API keys stay on your computer. Default sends no reasoning level and lets the provider decide.": {
+      "localizations": {
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "As contas de provedor e as chaves de API ficam no seu computador. Padrão não envia nível de raciocínio e deixa o provedor decidir."
+          }
+        }
+      }
+    },
+    "Quick Replies": {
+      "localizations": {
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Respostas rápidas"
+          }
+        }
+      }
+    },
+    "Quietly on": {
+      "localizations": {
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Ativadas em silêncio"
+          }
+        }
+      }
+    },
+    "Reasoning effort": {
+      "localizations": {
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Esforço de raciocínio"
+          }
+        }
+      }
+    },
+    "Recent changes": {
+      "localizations": {
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Mudanças recentes"
+          }
+        }
+      }
+    },
+    "Reduced": {
+      "localizations": {
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Reduzida"
+          }
+        }
+      }
+    },
+    "Refresh": {
+      "localizations": {
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Atualizar"
+          }
+        }
+      }
+    },
+    "Remove": {
+      "localizations": {
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Remover"
+          }
+        }
+      }
+    },
+    "Remove %@?": {
+      "localizations": {
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Remover %@?"
+          }
+        }
+      }
+    },
+    "Remove connection from this device": {
+      "localizations": {
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Remover conexão deste dispositivo"
+          }
+        }
+      }
+    },
+    "Remove from this device": {
+      "localizations": {
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Remover deste dispositivo"
+          }
+        }
+      }
+    },
+    "Remove this computer?": {
+      "localizations": {
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Remover este computador?"
+          }
+        }
+      }
+    },
+    "Remove this connection?": {
+      "localizations": {
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Remover esta conexão?"
+          }
+        }
+      }
+    },
+    "Rename": {
+      "localizations": {
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Renomear"
+          }
+        }
+      }
+    },
+    "Rename task": {
+      "localizations": {
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Renomear tarefa"
+          }
+        }
+      }
+    },
+    "Repeats": {
+      "localizations": {
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Repetições"
+          }
+        }
+      }
+    },
+    "Requesting camera access…": {
+      "localizations": {
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Pedindo acesso à câmera…"
+          }
+        }
+      }
+    },
+    "Reset quick replies?": {
+      "localizations": {
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Restaurar as respostas rápidas?"
+          }
+        }
+      }
+    },
+    "Reset to Defaults": {
+      "localizations": {
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Restaurar padrões"
+          }
+        }
+      }
+    },
+    "Respond when a bot needs you": {
+      "localizations": {
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Responda quando um bot precisar de você"
+          }
+        }
+      }
+    },
+    "Resume": {
+      "localizations": {
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Retomar"
+          }
+        }
+      }
+    },
+    "Resuming…": {
+      "localizations": {
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Retomando…"
+          }
+        }
+      }
+    },
+    "Retry": {
+      "localizations": {
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Tentar de novo"
+          }
+        }
+      }
+    },
+    "Retry the last turn with fresh context": {
+      "localizations": {
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Repetir o último turno com contexto novo"
+          }
+        }
+      }
+    },
+    "Review approvals without going back to your desk.": {
+      "localizations": {
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Revise aprovações sem voltar para a sua mesa."
+          }
+        }
+      }
+    },
+    "Review the complete SKILL.md": {
+      "localizations": {
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Revisar o SKILL.md completo"
+          }
+        }
+      }
+    },
+    "Rounded": {
+      "localizations": {
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Arredondado"
+          }
+        }
+      }
+    },
+    "Routine = a schedule that creates a fresh task": {
+      "localizations": {
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Rotina = um agendamento que cria uma tarefa nova"
+          }
+        }
+      }
+    },
+    "Routine name": {
+      "localizations": {
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Nome da rotina"
+          }
+        }
+      }
+    },
+    "Routines": {
+      "localizations": {
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Rotinas"
+          }
+        }
+      }
+    },
+    "Run all automated tests": {
+      "localizations": {
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Rodar todos os testes automatizados"
+          }
+        }
+      }
+    },
+    "Run location": {
+      "localizations": {
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Local de execução"
+          }
+        }
+      }
+    },
+    "Run now": {
+      "localizations": {
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Executar agora"
+          }
+        }
+      }
+    },
+    "Run receipts": {
+      "localizations": {
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Recibos de execução"
+          }
+        }
+      }
+    },
+    "Run tests": {
+      "localizations": {
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Rodar testes"
+          }
+        }
+      }
+    },
+    "Runs every": {
+      "localizations": {
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Roda a cada"
+          }
+        }
+      }
+    },
+    "Runs on": {
+      "localizations": {
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Roda em"
+          }
+        }
+      }
+    },
+    "Runs the agent and its tools inside its Box virtual machine. The VM wakes automatically for each run; keep OpenMausBot running so its scheduler can launch the job.": {
+      "localizations": {
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Roda o agente e as ferramentas dele dentro da máquina virtual Box. A VM acorda automaticamente a cada execução; mantenha o OpenMausBot rodando para que o agendador consiga iniciar o trabalho."
+          }
+        }
+      }
+    },
+    "SLASH COMMANDS": {
+      "localizations": {
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "COMANDOS DE BARRA"
+          }
+        }
+      }
+    },
+    "Save": {
+      "localizations": {
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Salvar"
+          }
+        }
+      }
+    },
+    "Save profile changes": {
+      "localizations": {
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Salvar alterações do perfil"
+          }
+        }
+      }
+    },
+    "Saved securely on your computer.": {
+      "localizations": {
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Salvo com segurança no seu computador."
+          }
+        }
+      }
+    },
+    "Saved securely. The task resumed.": {
+      "localizations": {
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Salvo com segurança. A tarefa retomou."
+          }
+        }
+      }
+    },
+    "Scan QR Code": {
+      "localizations": {
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Escanear QR code"
+          }
+        }
+      }
+    },
+    "Scan QR code": {
+      "localizations": {
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Escanear QR code"
+          }
+        }
+      }
+    },
+    "Scan the QR code in OpenMausBot. We'll securely choose the best way to connect.": {
+      "localizations": {
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Escaneie o QR code no OpenMausBot. Vamos escolher com segurança a melhor forma de conectar."
+          }
+        }
+      }
+    },
+    "Scanner unavailable": {
+      "localizations": {
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Leitor indisponível"
+          }
+        }
+      }
+    },
+    "Schedule": {
+      "localizations": {
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Agendamento"
+          }
+        }
+      }
+    },
+    "Schedule recurring or one-time agent work.": {
+      "localizations": {
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Agende trabalhos do agente, recorrentes ou únicos."
+          }
+        }
+      }
+    },
+    "Search": {
+      "localizations": {
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Buscar"
+          }
+        }
+      }
+    },
+    "Search apps": {
+      "localizations": {
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Buscar apps"
+          }
+        }
+      }
+    },
+    "Search chats": {
+      "localizations": {
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Buscar conversas"
+          }
+        }
+      }
+    },
+    "Secure connection required": {
+      "localizations": {
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Conexão segura necessária"
+          }
+        }
+      }
+    },
+    "Select Text": {
+      "localizations": {
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Selecionar texto"
+          }
+        }
+      }
+    },
+    "Select all": {
+      "localizations": {
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Selecionar todos"
+          }
+        }
+      }
+    },
+    "Selected days": {
+      "localizations": {
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Dias selecionados"
+          }
+        }
+      }
+    },
+    "Send": {
+      "localizations": {
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Enviar"
+          }
+        }
+      }
+    },
+    "Sending…": {
+      "localizations": {
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Enviando…"
+          }
+        }
+      }
+    },
+    "Set the interval to": {
+      "localizations": {
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Definir o intervalo como"
+          }
+        }
+      }
+    },
+    "Settings": {
+      "localizations": {
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Ajustes"
+          }
+        }
+      }
+    },
+    "Shape": {
+      "localizations": {
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Forma"
+          }
+        }
+      }
+    },
+    "Share as JSON": {
+      "localizations": {
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Compartilhar como JSON"
+          }
+        }
+      }
+    },
+    "Share transcript": {
+      "localizations": {
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Compartilhar a transcrição"
+          }
+        }
+      }
+    },
+    "Show diff": {
+      "localizations": {
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Mostrar diff"
+          }
+        }
+      }
+    },
+    "Show first 80 lines": {
+      "localizations": {
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Mostrar as primeiras 80 linhas"
+          }
+        }
+      }
+    },
+    "Show full address": {
+      "localizations": {
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Mostrar endereço completo"
+          }
+        }
+      }
+    },
+    "Showing what was connected last time. Your computer could not open its credential store just now, so these could not be re-checked. Nothing has been disconnected — restarting OpenMausBot on your computer usually clears this.": {
+      "localizations": {
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Mostrando o que estava conectado da última vez. O seu computador não conseguiu abrir o cofre de credenciais agora, então não foi possível verificá-las de novo. Nada foi desconectado — reiniciar o OpenMausBot no seu computador costuma resolver."
+          }
+        }
+      }
+    },
+    "Shows the steps": {
+      "localizations": {
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Mostra os passos"
+          }
+        }
+      }
+    },
+    "Slash commands": {
+      "localizations": {
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Comandos de barra"
+          }
+        }
+      }
+    },
+    "Something went wrong": {
+      "localizations": {
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Algo deu errado"
+          }
+        }
+      }
+    },
+    "Source: %@": {
+      "localizations": {
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Origem: %@"
+          }
+        }
+      }
+    },
+    "Source: unknown": {
+      "localizations": {
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Origem: desconhecida"
+          }
+        }
+      }
+    },
+    "Speak replies": {
+      "localizations": {
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Falar as respostas"
+          }
+        }
+      }
+    },
+    "Square": {
+      "localizations": {
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Quadrado"
+          }
+        }
+      }
+    },
+    "Start dictation": {
+      "localizations": {
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Iniciar o ditado"
+          }
+        }
+      }
+    },
+    "Stay in the loop": {
+      "localizations": {
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Fique por dentro"
+          }
+        }
+      }
+    },
+    "Steer and redirect active execution": {
+      "localizations": {
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Guiar e redirecionar a execução ativa"
+          }
+        }
+      }
+    },
+    "Steps fold into one line. Failures always show.": {
+      "localizations": {
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Os passos se juntam em uma linha. As falhas sempre aparecem."
+          }
+        }
+      }
+    },
+    "Stop dictation": {
+      "localizations": {
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Parar o ditado"
+          }
+        }
+      }
+    },
+    "Stop if still running after": {
+      "localizations": {
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Parar se ainda estiver rodando depois de"
+          }
+        }
+      }
+    },
+    "Stop the current turn": {
+      "localizations": {
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Parar o turno atual"
+          }
+        }
+      }
+    },
+    "Stop this bot before changing its model.": {
+      "localizations": {
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Pare este bot antes de mudar o modelo dele."
+          }
+        }
+      }
+    },
+    "Structured transcript data": {
+      "localizations": {
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Dados estruturados da transcrição"
+          }
+        }
+      }
+    },
+    "Swipe a section together": {
+      "localizations": {
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Junte uma seção deslizando"
+          }
+        }
+      }
+    },
+    "Swipe another section together, or tap Done.": {
+      "localizations": {
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Junte outra seção deslizando, ou toque em Concluído."
+          }
+        }
+      }
+    },
+    "Switch to Secure phone access (HTTPS) or Tailscale, then try again. You can still finish this request on your computer.": {
+      "localizations": {
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Mude para Acesso seguro pelo telefone (HTTPS) ou Tailscale e tente de novo. Você ainda pode concluir esta solicitação no seu computador."
+          }
+        }
+      }
+    },
+    "Switch, rename or remove one": {
+      "localizations": {
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Trocar, renomear ou remover uma"
+          }
+        }
+      }
+    },
+    "Switches OpenMausMobile to this computer": {
+      "localizations": {
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Muda o OpenMausMobile para este computador"
+          }
+        }
+      }
+    },
+    "Tailscale connection": {
+      "localizations": {
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Conexão Tailscale"
+          }
+        }
+      }
+    },
+    "Take your bots with you": {
+      "localizations": {
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Leve seus bots com você"
+          }
+        }
+      }
+    },
+    "Tap a chip to edit it. Drag to reorder, swipe to delete.": {
+      "localizations": {
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Toque em um chip para editá-lo. Arraste para reordenar, deslize para excluir."
+          }
+        }
+      }
+    },
+    "Tap bots individually, or hold and swipe through the grid.": {
+      "localizations": {
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Toque nos bots um a um, ou segure e deslize pela grade."
+          }
+        }
+      }
+    },
+    "Tap to preview": {
+      "localizations": {
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Toque para pré-visualizar"
+          }
+        }
+      }
+    },
+    "Tap to switch": {
+      "localizations": {
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Toque para trocar"
+          }
+        }
+      }
+    },
+    "Task = one conversation and result": {
+      "localizations": {
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Tarefa = uma conversa e um resultado"
+          }
+        }
+      }
+    },
+    "Tasks": {
+      "localizations": {
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Tarefas"
+          }
+        }
+      }
+    },
+    "Tasks & Routines": {
+      "localizations": {
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Tarefas e rotinas"
+          }
+        }
+      }
+    },
+    "Temporarily on": {
+      "localizations": {
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Ativadas temporariamente"
+          }
+        }
+      }
+    },
+    "That address doesn't look right. Copy it from Phone settings and try again.": {
+      "localizations": {
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Esse endereço não parece certo. Copie-o dos ajustes de Telefone e tente de novo."
+          }
+        }
+      }
+    },
+    "That image is larger than 10 MB.": {
+      "localizations": {
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Essa imagem é maior que 10 MB."
+          }
+        }
+      }
+    },
+    "That isn't an OpenMausBot pairing QR code.": {
+      "localizations": {
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Esse não é um QR code de pareamento do OpenMausBot."
+          }
+        }
+      }
+    },
+    "That link couldn't be opened.": {
+      "localizations": {
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Não foi possível abrir esse link."
+          }
+        }
+      }
+    },
+    "The authorization page could not be opened. Try again after checking your browser restrictions.": {
+      "localizations": {
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Não foi possível abrir a página de autorização. Tente de novo depois de verificar as restrições do seu navegador."
+          }
+        }
+      }
+    },
+    "The chip row is hidden while this list is empty.": {
+      "localizations": {
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "A linha de chips fica oculta enquanto esta lista está vazia."
+          }
+        }
+      }
+    },
+    "The connection was removed on your computer. Pair again to keep using your chats here.": {
+      "localizations": {
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "A conexão foi removida no seu computador. Pareie de novo para continuar usando suas conversas aqui."
+          }
+        }
+      }
+    },
+    "The copied diff always includes every line": {
+      "localizations": {
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "O diff copiado sempre inclui todas as linhas"
+          }
+        }
+      }
+    },
+    "The downloaded file couldn't be previewed.": {
+      "localizations": {
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Não foi possível pré-visualizar o arquivo baixado."
+          }
+        }
+      }
+    },
+    "The generated audio could not be played.": {
+      "localizations": {
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Não foi possível reproduzir o áudio gerado."
+          }
+        }
+      }
+    },
+    "The voice choice belongs to this agent. Workspace default uses the shared voice selected on your computer.": {
+      "localizations": {
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "A escolha de voz pertence a este agente. Padrão do espaço de trabalho usa a voz compartilhada selecionada no seu computador."
+          }
+        }
+      }
+    },
+    "Thinking…": {
+      "localizations": {
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Pensando…"
+          }
+        }
+      }
+    },
+    "This bot's computer is only captured while it is working.": {
+      "localizations": {
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "O computador deste bot só é capturado enquanto ele está trabalhando."
+          }
+        }
+      }
+    },
+    "This chat as Markdown": {
+      "localizations": {
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Esta conversa em Markdown"
+          }
+        }
+      }
+    },
+    "This computer": {
+      "localizations": {
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Este computador"
+          }
+        }
+      }
+    },
+    "This computer is connected and responding normally.": {
+      "localizations": {
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Este computador está conectado e respondendo normalmente."
+          }
+        }
+      }
+    },
+    "This creates a new version and continues from there.": {
+      "localizations": {
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Isto cria uma nova versão e continua a partir dela."
+          }
+        }
+      }
+    },
+    "This device is not paired with a computer.": {
+      "localizations": {
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Este dispositivo não está pareado com um computador."
+          }
+        }
+      }
+    },
+    "This device was removed from the computer. Pair it again to reconnect.": {
+      "localizations": {
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Este dispositivo foi removido do computador. Pareie novamente para reconectar."
+          }
+        }
+      }
+    },
+    "This device was unpaired": {
+      "localizations": {
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Este dispositivo foi despareado"
+          }
+        }
+      }
+    },
+    "This device was unpaired on the computer.": {
+      "localizations": {
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Este dispositivo foi despareado no computador."
+          }
+        }
+      }
+    },
+    "This existing Cloud VM choice is preserved, but it cannot run until the paired computer has a configured Box API key and an available Box agent.": {
+      "localizations": {
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Esta escolha de Cloud VM é mantida, mas não pode rodar enquanto o computador pareado não tiver uma chave de API do Box configurada e um agente Box disponível."
+          }
+        }
+      }
+    },
+    "This gives this device full control of the cloud computer, including anything signed in inside it.": {
+      "localizations": {
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Isto dá a este dispositivo controle total do computador na nuvem, incluindo tudo que estiver conectado dentro dele."
+          }
+        }
+      }
+    },
+    "This image couldn't be previewed.": {
+      "localizations": {
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Não foi possível pré-visualizar esta imagem."
+          }
+        }
+      }
+    },
+    "This pairing predates secure phone entry. Scan a fresh QR from OpenMausBot, or finish this request on your computer.": {
+      "localizations": {
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Este pareamento é anterior à digitação segura pelo telefone. Escaneie um novo QR do OpenMausBot ou conclua esta solicitação no seu computador."
+          }
+        }
+      }
+    },
+    "This proposal was created by an older build and cannot be safely applied. Deny it and ask the bot to create it again.": {
+      "localizations": {
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Esta proposta foi criada por uma versão mais antiga e não pode ser aplicada com segurança. Negue e peça ao bot para criá-la de novo."
+          }
+        }
+      }
+    },
+    "This removes the connection from this device only. It does not revoke this device on your Mac. To remove Mac-side access, open OpenMausBot → Settings → Phone and remove it there.": {
+      "localizations": {
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Isto remove a conexão apenas deste dispositivo. Não revoga este dispositivo no seu Mac. Para remover o acesso do lado do Mac, abra OpenMausBot → Ajustes → Telefone e remova por lá."
+          }
+        }
+      }
+    },
+    "This removes the saved connection from this device only.": {
+      "localizations": {
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Isto remove a conexão salva apenas deste dispositivo."
+          }
+        }
+      }
+    },
+    "This restores the four chips the app came with and discards your own.": {
+      "localizations": {
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Isto restaura os quatro chips originais do app e descarta os seus."
+          }
+        }
+      }
+    },
+    "This routine uses a schedule added by a newer OpenMausBot. Choose One time, Selected days, or Every X minutes before saving.": {
+      "localizations": {
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Esta rotina usa um agendamento adicionado por um OpenMausBot mais novo. Escolha Uma vez, Dias selecionados ou A cada X minutos antes de salvar."
+          }
+        }
+      }
+    },
+    "This task is waiting for your answer.": {
+      "localizations": {
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Esta tarefa está esperando sua resposta."
+          }
+        }
+      }
+    },
+    "Thought Process": {
+      "localizations": {
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Processo de pensamento"
+          }
+        }
+      }
+    },
+    "Title": {
+      "localizations": {
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Cargo"
+          }
+        }
+      }
+    },
+    "Title (optional)": {
+      "localizations": {
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Título (opcional)"
+          }
+        }
+      }
+    },
+    "To generate images, configure the shared image provider in OpenMausBot on your computer. Provider keys cannot be added from this device.": {
+      "localizations": {
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Para gerar imagens, configure o provedor de imagens compartilhado no OpenMausBot no seu computador. Não é possível adicionar chaves de provedor por este dispositivo."
+          }
+        }
+      }
+    },
+    "To review": {
+      "localizations": {
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Para revisar"
+          }
+        }
+      }
+    },
+    "Touch a bot, then glide. Pause briefly on each bot until it clicks.": {
+      "localizations": {
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Toque em um bot e deslize. Pause um instante em cada bot até ele encaixar."
+          }
+        }
+      }
+    },
+    "Touch and hold the text to select part of it.": {
+      "localizations": {
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Toque e segure o texto para selecionar parte dele."
+          }
+        }
+      }
+    },
+    "Touch and hold to select part of this message": {
+      "localizations": {
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Toque e segure para selecionar parte desta mensagem"
+          }
+        }
+      }
+    },
+    "Troubleshooting": {
+      "localizations": {
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Solução de problemas"
+          }
+        }
+      }
+    },
+    "Trusted local connection": {
+      "localizations": {
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Conexão local confiável"
+          }
+        }
+      }
+    },
+    "Try again.": {
+      "localizations": {
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Tente de novo."
+          }
+        }
+      }
+    },
+    "Try reconnecting": {
+      "localizations": {
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Tentar reconectar"
+          }
+        }
+      }
+    },
+    "Try resuming the task": {
+      "localizations": {
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Tentar retomar a tarefa"
+          }
+        }
+      }
+    },
+    "Unknown": {
+      "localizations": {
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Desconhecido"
+          }
+        }
+      }
+    },
+    "Untitled task": {
+      "localizations": {
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Tarefa sem título"
+          }
+        }
+      }
+    },
+    "Updates": {
+      "localizations": {
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Novidades"
+          }
+        }
+      }
+    },
+    "Upload image": {
+      "localizations": {
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Enviar imagem"
+          }
+        }
+      }
+    },
+    "Use": {
+      "localizations": {
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Usar"
+          }
+        }
+      }
+    },
+    "Use Apple Passwords, 1Password, Bitwarden, or paste. The value is encrypted for your computer and never added to chat.": {
+      "localizations": {
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Use o Apple Senhas, 1Password, Bitwarden ou cole. O valor é criptografado para o seu computador e nunca é adicionado à conversa."
+          }
+        }
+      }
+    },
+    "Use another computer": {
+      "localizations": {
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Usar outro computador"
+          }
+        }
+      }
+    },
+    "Use mascot": {
+      "localizations": {
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Usar mascote"
+          }
+        }
+      }
+    },
+    "Use secure phone access or Tailscale, or finish on your computer.": {
+      "localizations": {
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Use o acesso seguro pelo telefone ou o Tailscale, ou conclua no seu computador."
+          }
+        }
+      }
+    },
+    "Use the Camera app to scan the QR code, or enter the address and code manually.": {
+      "localizations": {
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Use o app Câmera para escanear o QR code, ou digite o endereço e o código manualmente."
+          }
+        }
+      }
+    },
+    "Use the address shown in Phone settings on your computer.": {
+      "localizations": {
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Use o endereço mostrado nos ajustes de Telefone no seu computador."
+          }
+        }
+      }
+    },
+    "Use the address shown in Phone settings on your computer. Your pairing is kept.": {
+      "localizations": {
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Use o endereço mostrado nos ajustes de Telefone no seu computador. O pareamento é mantido."
+          }
+        }
+      }
+    },
+    "Uses this agent's selected model and computer setting on the paired computer.": {
+      "localizations": {
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Usa o modelo e a configuração de computador selecionados para este agente no computador pareado."
+          }
+        }
+      }
+    },
+    "View Diff": {
+      "localizations": {
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Ver diff"
+          }
+        }
+      }
+    },
+    "View and manage bot task threads": {
+      "localizations": {
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Ver e gerenciar as threads de tarefas do bot"
+          }
+        }
+      }
+    },
+    "Voice": {
+      "localizations": {
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Voz"
+          }
+        }
+      }
+    },
+    "Waiting for a frame…": {
+      "localizations": {
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Aguardando um quadro…"
+          }
+        }
+      }
+    },
+    "Waiting on you": {
+      "localizations": {
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Esperando por você"
+          }
+        }
+      }
+    },
+    "Watch computer": {
+      "localizations": {
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Ver o computador"
+          }
+        }
+      }
+    },
+    "Webhooks": {
+      "localizations": {
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Webhooks"
+          }
+        }
+      }
+    },
+    "What gets sent to the bot when you tap the chip.": {
+      "localizations": {
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "O que é enviado ao bot quando você toca no chip."
+          }
+        }
+      }
+    },
+    "What should the agent do?": {
+      "localizations": {
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "O que o agente deve fazer?"
+          }
+        }
+      }
+    },
+    "What should this section be called?": {
+      "localizations": {
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Como esta seção deve se chamar?"
+          }
+        }
+      }
+    },
+    "What this agent does": {
+      "localizations": {
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "O que este agente faz"
+          }
+        }
+      }
+    },
+    "What this bot does": {
+      "localizations": {
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "O que este bot faz"
+          }
+        }
+      }
+    },
+    "What's next?": {
+      "localizations": {
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "E agora?"
+          }
+        }
+      }
+    },
+    "When a bot stops for an answer, is mid-task, or finishes something, it shows up here.": {
+      "localizations": {
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Quando um bot para para pedir uma resposta, está no meio de uma tarefa ou termina algo, ele aparece aqui."
+          }
+        }
+      }
+    },
+    "Where does it run?": {
+      "localizations": {
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Onde ela roda?"
+          }
+        }
+      }
+    },
+    "Where to get this key": {
+      "localizations": {
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Onde obter esta chave"
+          }
+        }
+      }
+    },
+    "Who": {
+      "localizations": {
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Quem"
+          }
+        }
+      }
+    },
+    "Won't": {
+      "localizations": {
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Não vai"
+          }
+        }
+      }
+    },
+    "Work": {
+      "localizations": {
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Trabalho"
+          }
+        }
+      }
+    },
+    "Work, Personal, Client…": {
+      "localizations": {
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Trabalho, Pessoal, Cliente…"
+          }
+        }
+      }
+    },
+    "Working": {
+      "localizations": {
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Trabalhando"
+          }
+        }
+      }
+    },
+    "Workspace": {
+      "localizations": {
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Espaço de trabalho"
+          }
+        }
+      }
+    },
+    "Workspace default": {
+      "localizations": {
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Padrão do espaço de trabalho"
+          }
+        }
+      }
+    },
+    "Yesterday": {
+      "localizations": {
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Ontem"
+          }
+        }
+      }
+    },
+    "You choose which trusted computer this device connects to.": {
+      "localizations": {
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Você escolhe a qual computador confiável este dispositivo se conecta."
+          }
+        }
+      }
+    },
+    "Your chats, in your pocket": {
+      "localizations": {
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Suas conversas, no seu bolso"
+          }
+        }
+      }
+    },
+    "Your computer could not open its credential store, so it cannot say which accounts are connected. Nothing has been disconnected — restarting OpenMausBot on your computer usually clears this.": {
+      "localizations": {
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "O seu computador não conseguiu abrir o cofre de credenciais, então não sabe dizer quais contas estão conectadas. Nada foi desconectado — reiniciar o OpenMausBot no seu computador costuma resolver."
+          }
+        }
+      }
+    },
+    "a custom interval": {
+      "localizations": {
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "um intervalo personalizado"
+          }
+        }
+      }
+    },
+    "minutes": {
+      "localizations": {
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "minutos"
+          }
+        }
+      }
+    }
+  },
+  "version": "1.0"
+}

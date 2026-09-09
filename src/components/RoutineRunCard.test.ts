@@ -28,6 +28,13 @@ function message(
 }
 
 describe("RoutineRunCard", () => {
+  it("dates the receipt by its scheduled occurrence, with a legacy message-time fallback", () => {
+    const at = Date.UTC(2026, 8, 9, 9);
+    const dated = renderToStaticMarkup(createElement(RoutineRunCard, { message: message("completed", { scheduledFor: at }) }));
+    expect(dated).toContain(`dateTime="${new Date(at).toISOString()}"`);
+    const legacy = renderToStaticMarkup(createElement(RoutineRunCard, { message: message("completed") }));
+    expect(legacy).toContain('dateTime="1970-01-01T00:00:00.001Z"');
+  });
   it("shows a compact completion receipt and a path to the isolated run", () => {
     const markup = renderToStaticMarkup(createElement(RoutineRunCard, {
       message: message("completed", { summary: "The brief is ready with three follow-ups." }),
@@ -41,6 +48,20 @@ describe("RoutineRunCard", () => {
     expect(markup).toContain('aria-label="Morning brief routine run: Completed"');
   });
 
+  it("keeps a long dated report available behind a collapsed disclosure", () => {
+    const summary = `The brief is ready. ${"Detailed result. ".repeat(25)}\nFinal follow-up.`;
+    const markup = renderToStaticMarkup(createElement(RoutineRunCard, {
+      message: message("completed", { summary }),
+      onOpen: vi.fn(),
+    }));
+
+    expect(markup).toContain("Show report");
+    expect(markup).toContain(summary);
+    expect(markup).toContain("<details ");
+    expect(markup).not.toContain("<details open");
+    expect(markup).toContain('aria-label="Open run for Morning brief"');
+  });
+
   it("keeps a terminal team-goal outcome distinct from scheduler completion", () => {
     const markup = renderToStaticMarkup(createElement(RoutineRunCard, {
       message: message("completed", { goalStatus: "blocked", summary: "The team needs a missing credential." }),
@@ -52,14 +73,24 @@ describe("RoutineRunCard", () => {
     expect(markup).toContain("The team needs a missing credential.");
   });
 
-  it("makes a waiting question or approval an explicit Review action", () => {
+  it("does not describe delegated work as a question or approval", () => {
     const markup = renderToStaticMarkup(createElement(RoutineRunCard, {
-      message: message("waiting", { summary: "The routine needs an answer before it can continue." }),
+      message: message("waiting", { summary: "Waiting for delegated work to finish." }),
       onOpen: vi.fn(),
     }));
 
+    expect(markup).toContain("Waiting for delegated work to finish.");
+    expect(markup).toContain("Open run");
+    expect(markup).not.toContain("Needs your input");
+    expect(markup).not.toContain("Review");
+  });
+
+  it("keeps an explicit team-goal input request actionable", () => {
+    const markup = renderToStaticMarkup(createElement(RoutineRunCard, {
+      message: message("waiting", { goalStatus: "needs-input", summary: "Which region should I use?" }),
+      onOpen: vi.fn(),
+    }));
     expect(markup).toContain("Needs your input");
-    expect(markup).toContain("Review");
     expect(markup).toContain('aria-label="Review for Morning brief"');
   });
 

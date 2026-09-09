@@ -38,6 +38,16 @@ The model picker groups models by provider and marks defaults. Supported engines
 
 <ProductScreenshot name="docs-model-picker" alt="The OpenMausBot model picker with several cloud and local engines" caption="Every bot can use a different engine and model." />
 
+## Multiple Claude accounts
+
+Open **Settings → Engines → Add Claude account** and give the account a name, such as **Work** or **Personal**. OpenMausBot creates a separate configuration-directory setting for it; it does not copy your existing login. Under **Manage account and sign-in**, copy the sign-in command and run it on the computer hosting OpenMausBot, then choose **Check account**. On Windows, use PowerShell. Claude handles the browser sign-in and stores its own credentials.
+
+In a bot's model picker, choose **Claude**, select **Work** or **Personal** in the **Account** dropdown, then choose a model to save the selection. Claude appears only once in the provider list. Each bot keeps its own selection, and the chat header shows the account name. Account changes apply to future turns and are blocked while that bot is responding; other bots are unaffected. Conversation history is not erased when you change the selection.
+
+The original **Default** entry keeps using your existing CLI login. Advanced users can supply an existing, separate Claude configuration directory. Once an account has been used by bots or conversation history, add a new account instead of repointing its directory. Removing an account from OpenMausBot does not delete its files or sign it out; first move any bots using it to another account.
+
+This does not require a CLI proxy, and there is no automatic account rotation or fallback. Named account management currently supports Claude only.
+
 <Callout type="info" title="Subscriptions stay with the provider">
   Your existing CLI login or provider API key determines access and billing. OpenMausBot does not turn one subscription into access to another provider.
 </Callout>

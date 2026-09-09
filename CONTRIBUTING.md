@@ -225,9 +225,36 @@ API keys are write-only: they land in `~/.openmausbot/config.json` via `PUT /api
 only ever reports `configured` booleans. Keep it that way — no logging keys, no echoing them in
 responses or events, no baking them into argv where another local process could read them.
 
+## Downstream forks and release ownership
+
+Changes prepared in a downstream fork should keep provenance in the pull request, not add
+fork-specific branding or ownership claims to the upstream source tree. Record the exact upstream
+commit used as the comparison base, the head branch, and the checks run after the final rebase.
+
+Fork maintainers own the binaries and update channels they publish. Before distributing a fork,
+review the application name and identifiers, signing configuration, update metadata, and every
+`electron-builder` publish target. Never upload fork artifacts or update metadata to the official
+OpenMausBot release repository, and never change the upstream publish target in a feature PR unless
+that release migration was explicitly agreed with the maintainer.
+
+An upstream PR should contain only the portable product change. Keep local build paths, account
+names, credentials, private endpoints, machine-specific configuration, and fork-only release notes
+out of its commits and screenshots.
+
+## Contribution licensing
+
+- No DCO sign-off is required. Submit only code you wrote or have the right
+  to contribute under the applicable project license.
+- Changes under `enterprise/` (source-available, see [LICENSING.md](LICENSING.md))
+  need the [CLA](CLA.md), signed once by commenting on the pull request
+  when the bot asks. Changes outside `enterprise/` do not require a CLA.
+- `enterprise/`, the cloud seam and the licensing files have code owners; a
+  maintainer review is required there.
+
 ## Before you open the PR
 
 - [ ] `pnpm typecheck` and `pnpm test` pass
+- [ ] `pnpm lint` passes
 - [ ] Locale changes pass `pnpm i18n:check` and have been reviewed by a speaker
 - [ ] `pnpm check:electron` passes for desktop-shell changes
 - [ ] Ubuntu packaging changes pass `pnpm package:linux` and `node scripts/verify-linux-package.mjs`

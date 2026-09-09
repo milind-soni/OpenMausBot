@@ -1,5 +1,5 @@
 import { spawn, type ChildProcess } from "node:child_process";
-import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -20,6 +20,7 @@ import { freePortBlock } from "./testing/ports.ts";
 const SERVER_DIR = dirname(fileURLToPath(import.meta.url));
 const ROOT = join(SERVER_DIR, "..");
 const FAKE_CLAUDE = join(SERVER_DIR, "testing", "fake-claude-cli.ts");
+const TEST_CAPABILITY_KEY = "room-chat-wait-fixture-capability";
 
 const WAIT_CHIP = (name: string) => `${name} is finishing another conversation — will reply here when free`;
 
@@ -28,6 +29,7 @@ let home = "";
 let base = "";
 let stderr = "";
 let penDump = "";
+let patientFinishGate = "";
 
 type StateMessage = {
   id: string;
@@ -68,21 +70,23 @@ beforeAll(async () => {
   writeFileSync(join(staticDir, "index.html"), "<!doctype html><title>Room chat wait test</title>");
   writeFileSync(join(staticDir, "assets", "smoke.css"), "body{}");
   penDump = join(home, "pen-dump.json");
+  patientFinishGate = join(home, "patient-finish");
+  writeFileSync(patientFinishGate, "initial turns may finish");
   writeFileSync(join(data, "config.json"), JSON.stringify({
     instances: {
-      // `slow` leaves a gap before the closing reply, which is how a bot is
-      // held busy in a 1:1 long enough for a room round to park on it; the
+      // A gate keeps a direct turn busy until the test observes the room's
+      // wait, rather than racing the fake CLI's 800ms closing reply. The
       // closing reply echoes the prompt, so a room reply carries the room's
       // own @mentions back out
-      patient: fixture("Patient fixture", { FAKE_CLAUDE_MODE: "slow" }),
+      patient: fixture("Patient fixture", { FAKE_CLAUDE_MODE: "slow", FAKE_CLAUDE_SLOW_FINISH_GATE: patientFinishGate }),
       quick: fixture("Quick fixture", { FAKE_CLAUDE_MODE: "happy" }),
       summoner: fixture("Summoning fixture", {
         FAKE_CLAUDE_MODE: "happy",
         FAKE_CLAUDE_REPLIES: JSON.stringify(["Let me pull in @Bee for this."]),
         FAKE_CLAUDE_REPLY_STATE: join(home, "summoner-replies.txt"),
       }),
-      // the dump is the only place a test can read the per-boot comms
-      // token from, and ask_bot is the only way a bot⇄bot channel is born
+      // The dump proves the real per-turn token is mounted. An exact synthetic
+      // capability below drives ask_bot after this quick fake turn settles.
       pen: fixture("Dumping fixture", { FAKE_CLAUDE_MODE: "happy", FAKE_CLAUDE_DUMP: penDump }),
     },
   }));
@@ -98,6 +102,7 @@ beforeAll(async () => {
       OMB_PORT: String(port),
       OMB_WEBHOOK_PORT: String(port + 1),
       OMB_STATIC_DIR: staticDir,
+      OMB_TEST_INTERNAL_CAPABILITY_KEY: TEST_CAPABILITY_KEY,
     },
     stdio: ["ignore", "pipe", "pipe"],
   });
@@ -141,6 +146,9 @@ const botBusy = async (botId: string) => {
 };
 
 const holdBusy = async (botId: string, text: string) => {
+  // This exact file is owned by this disposable fixture. All patient turns
+  // from the preceding case have settled or been interrupted by cleanup.
+  rmSync(patientFinishGate, { force: true });
   expect((await api("POST", `/api/bots/${botId}/messages`, { text })).status).toBe(202);
   await expect.poll(() => botBusy(botId)).toBe(true);
 };
@@ -176,9 +184,28 @@ const cleanup = async (roomId: string | undefined, botIds: string[]) => {
   for (const botId of botIds) await api("POST", `/api/bots/${botId}/interrupt`, {}).catch(() => undefined);
   if (roomId) await api("DELETE", `/api/groups/${roomId}`).catch(() => undefined);
   for (const botId of botIds) await api("DELETE", `/api/bots/${botId}`).catch(() => undefined);
+  writeFileSync(patientFinishGate, "cleanup complete");
 };
 
-describe("chat rooms wait for a member busy elsewhere", () => {
+const releaseAfterRoomWait = async (roomId: string, botId: string, name: string) => {
+  await expect.poll(async () => {
+    const { state, room, messages } = await snapshot(roomId);
+    const { speakers: _speakers, ...wait } = roundSummary(messages, botId);
+    return { working: room?.working, busy: state.bots.find((bot: { id: string }) => bot.id === botId)?.busy, ...wait };
+  }, { timeout: 15_000 }).toEqual({
+    working: true, busy: true, waitChip: WAIT_CHIP(name), waitChipOk: undefined, waitChips: 1, skipped: false,
+  });
+  writeFileSync(patientFinishGate, "observed room waiting; finish the direct turn");
+};
+
+/** These cases are deliberately slow: each one holds a real turn open on one
+ * bot and waits for a second bot to take its turn only once the first settles,
+ * through a real server and the fake CLI. The inner polls already allow 15s,
+ * which leaves nothing inside vitest's 20s default for process start-up — so on
+ * the slowest runner they time out for lack of headroom rather than because
+ * anything regressed. The wait itself is what is under test; the clock is not.
+ */
+describe("chat rooms wait for a member busy elsewhere", { timeout: 45_000 }, () => {
   it("parks on a responder busy in a 1:1, then lets them reply once that turn settles, in order", async () => {
     const busy = await createBot("Busy", "patient");
     const quick = await createBot("Quick", "quick");
@@ -191,6 +218,7 @@ describe("chat rooms wait for a member busy elsewhere", () => {
     try {
       await holdBusy(busy.id, "Finish this first");
       expect((await api("POST", `/api/groups/${room.id}/messages`, { text: "Hello team" })).status).toBe(202);
+      await releaseAfterRoomWait(room.id, busy.id, "Busy");
 
       await expect.poll(async () => {
         const { room: current, messages } = await snapshot(room.id);
@@ -227,6 +255,7 @@ describe("chat rooms wait for a member busy elsewhere", () => {
       await holdBusy(bee.id, "Bee, finish this first");
       // only Ace is addressed; Bee arrives through Ace's reply
       expect((await api("POST", `/api/groups/${room.id}/messages`, { text: "@Ace please bring Bee in" })).status).toBe(202);
+      await releaseAfterRoomWait(room.id, bee.id, "Bee");
 
       await expect.poll(async () => {
         const { room: current, messages } = await snapshot(room.id);
@@ -266,9 +295,16 @@ describe("chat rooms wait for a member busy elsewhere", () => {
         }
       };
       await expect.poll(readToken, { timeout: 10_000 }).toBeTruthy();
-      const token = readToken() ?? "";
-      expect(token).toBeTruthy();
+      expect(readToken()).toMatch(/^[a-f0-9]{48}$/);
       await expect.poll(() => botBusy(pen.id)).toBe(false);
+      const minted = await api(
+        "POST",
+        "/api/testing/internal-capability",
+        { botId: pen.id, threadId: pen.threadId, kind: "agents" },
+        { "x-openmausbot-test-capability": TEST_CAPABILITY_KEY },
+      );
+      expect(minted.status).toBe(201);
+      const token = String(minted.body.token);
 
       // ask_bot is what births the channel; the peer answers at once here
       const asked = await api(
@@ -286,9 +322,9 @@ describe("chat rooms wait for a member busy elsewhere", () => {
       expect(channel).toBeTruthy();
       channelId = channel.id;
       await expect.poll(() => botBusy(ink.id)).toBe(false);
-
       await holdBusy(ink.id, "Ink, finish this first");
       expect((await api("POST", `/api/groups/${channel.id}/messages`, { text: "@Ink one more thing" })).status).toBe(202);
+      await releaseAfterRoomWait(channel.id, ink.id, "Ink");
 
       await expect.poll(async () => {
         const { room: current, messages } = await snapshot(channel.id);
