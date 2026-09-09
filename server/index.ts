@@ -12209,6 +12209,9 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
         const { doc } = journalMemoryWrite(m[1], MEMORY_INDEX, parsed.data.text, { actor: "person", via: "api" });
         return json(res, 200, { ok: true, hash: doc.hash, truncated: memoryCapacity(doc.text).truncated });
       } catch (error) {
+        // the old route answered 400 for an oversized body; keep that for
+        // its callers while the new route says 413
+        if (error instanceof MemoryStoreError && error.code === "too-large") return json(res, 400, { error: error.message });
         return replyMemoryError(res, error);
       }
     }

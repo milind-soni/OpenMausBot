@@ -7720,7 +7720,8 @@ describe("bot memory API", () => {
     try {
       const fresh = await api("GET", `/api/bots/${bot.id}/memory`);
       expect(fresh.status).toBe(200);
-      expect(fresh.body).toEqual({ text: "", truncated: false, topics: [] });
+      // the overview grew (gauge, logs, folder) but the whole-file fields stay for one release
+      expect(fresh.body).toMatchObject({ text: "", truncated: false, topics: [], logs: [] });
       expect((await api("GET", "/api/bots/does-not-exist/memory")).status).toBe(404);
     } finally {
       await api("DELETE", `/api/bots/${bot.id}`);
@@ -7760,9 +7761,10 @@ describe("bot memory API", () => {
       writeFileSync(join(memDir, "my notes.md"), "spaced");
       writeFileSync(join(memDir, "notes.txt"), "not a topic");
       const listed = await api("GET", `/api/bots/${bot.id}/memory`);
-      expect(listed.body.topics).toEqual([
-        { name: "deploys.md", bytes: 21 },
-        { name: "my notes.md", bytes: 6 },
+      // newest first now, and both were written in the same instant — compare as a set
+      expect(listed.body.topics.map((t: { name: string; bytes: number }) => [t.name, t.bytes]).sort()).toEqual([
+        ["deploys.md", 21],
+        ["my notes.md", 6],
       ]);
 
       const topic = await api("GET", `/api/bots/${bot.id}/memory/topics/deploys.md`);
