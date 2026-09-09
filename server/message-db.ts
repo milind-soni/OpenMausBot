@@ -487,6 +487,7 @@ export function removeMemoryFile(botId: string, path: string): void {
 export function indexedMemoryFiles(botId: string): MemoryFileStat[] {
   const rows = db()
     .prepare("SELECT path, mtime_ms, bytes FROM memory_files WHERE bot_id = ?")
+    // SAFETY: the SELECT names exactly these three NOT NULL columns
     .all(botId) as Array<{ path: string; mtime_ms: number; bytes: number }>;
   return rows.map((row) => ({ path: row.path, mtimeMs: row.mtime_ms, bytes: row.bytes }));
 }
@@ -514,6 +515,7 @@ export function recallMemory(query: string, botId: string, limit = 12): MemoryHi
         "WHERE memory_fts MATCH ? AND f.bot_id = ? " +
         "ORDER BY bm25(memory_fts), f.mtime_ms DESC LIMIT ?",
     )
+    // SAFETY: the SELECT names exactly these three columns; snippet() is never null
     .all(match, botId, limit) as Array<{ path: string; mtime_ms: number; snippet: string }>;
   return rows.map((row) => ({ file: row.path, at: row.mtime_ms, snippet: row.snippet.replace(/\s+/g, " ").trim() }));
 }
