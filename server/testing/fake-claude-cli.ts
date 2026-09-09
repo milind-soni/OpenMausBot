@@ -65,7 +65,9 @@ const out = (obj: unknown) => process.stdout.write(JSON.stringify(obj) + "\n");
 
 // Snapshot probes: both answer on argv alone and exit without reading stdin.
 if (argv[0] === "--version") {
-  process.stdout.write("2.1.232 (Claude Code)\n");
+  // FAKE_CLAUDE_VERSION lets a test stand in for an older CLI: the driver
+  // withholds flags that version predates (CLAUDE_FLAG_FLOORS).
+  process.stdout.write(`${process.env.FAKE_CLAUDE_VERSION ?? "2.1.232"} (Claude Code)\n`);
   process.exit(0);
 }
 

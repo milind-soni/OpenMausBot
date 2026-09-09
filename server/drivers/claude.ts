@@ -233,6 +233,74 @@ export function autoCompactWindow(env: NodeJS.ProcessEnv): string | null {
  * threads never reach it; this is the backstop for the ones that do. */
 const DEFAULT_AUTOCOMPACT_TOKENS = 200_000;
 
+/** The Claude CLI version that first accepted each flag the harness passes
+ * for context control. An unknown flag is a hard argument error, so passing
+ * one to an older CLI would fail every turn rather than degrade; each flag
+ * is therefore only passed to a CLI known to accept it.
+ *
+ * Verified against the published binaries, not the changelog (which never
+ * records `--autocompact`): `--strict-mcp-config` is present in 1.0.60 and
+ * absent from 1.0.0; `--setting-sources` first appears in 1.0.122 (1.0.120
+ * lacks it); `--autocompact` first appears in 2.1.122 (2.1.121 lacks it). */
+export const CLAUDE_FLAG_FLOORS = {
+  "--strict-mcp-config": [1, 0, 60],
+  "--setting-sources": [1, 0, 122],
+  "--autocompact": [2, 1, 122],
+} as const satisfies Record<string, ClaudeCliVersion>;
+
+export type ClaudeCliVersion = readonly [number, number, number];
+
+/** The newest floor above: a CLI at or past it accepts everything the
+ * harness sends. Below it the engine still works, minus the flags the CLI
+ * predates, and the Engines page suggests an update. */
+export const CLAUDE_CONTEXT_CONTROL_MIN_VERSION: ClaudeCliVersion = CLAUDE_FLAG_FLOORS["--autocompact"];
+
+/** `claude --version` prints "2.1.232 (Claude Code)"; the first dotted triple
+ * is the version. Null when nothing parses, e.g. a wrapper that prints its
+ * own banner first — see claudeCliSupports for how that is treated. */
+export function parseClaudeCliVersion(stdout: string | null | undefined): ClaudeCliVersion | null {
+  const match = /(\d+)\.(\d+)\.(\d+)/.exec(stdout ?? "");
+  if (!match) return null;
+  return [Number(match[1]), Number(match[2]), Number(match[3])];
+}
+
+function versionAtLeast(installed: ClaudeCliVersion, floor: ClaudeCliVersion): boolean {
+  for (let i = 0; i < 3; i += 1) {
+    if (installed[i] !== floor[i]) return installed[i] > floor[i];
+  }
+  return true;
+}
+
+/** Whether a CLI reporting `version` accepts `flag`. A version that could
+ * not be parsed counts as current: every CLI that predates a floor prints a
+ * plain "x.y.z (Claude Code)", so an unreadable version is far more likely
+ * a newer wrapper than an old build, and withholding the flags from a modern
+ * CLI would silently re-open the context leak this file exists to close. */
+export function claudeCliSupports(version: ClaudeCliVersion | null, flag: keyof typeof CLAUDE_FLAG_FLOORS): boolean {
+  return version === null || versionAtLeast(version, CLAUDE_FLAG_FLOORS[flag]);
+}
+
+/** The Engines-page notice for a CLI older than the newest floor. The engine
+ * keeps working: turns run without the flags the CLI predates, which means
+ * no harness-picked compaction window and, on a very old CLI, no isolation
+ * from this machine's own Claude Code setup. */
+export function claudeCliUpdate(version: string | null, cli: string): ProviderSnapshot["update"] | undefined {
+  const parsed = parseClaudeCliVersion(version);
+  if (!parsed || versionAtLeast(parsed, CLAUDE_CONTEXT_CONTROL_MIN_VERSION)) return undefined;
+  const floor = CLAUDE_CONTEXT_CONTROL_MIN_VERSION.join(".");
+  const missing = (Object.keys(CLAUDE_FLAG_FLOORS) as (keyof typeof CLAUDE_FLAG_FLOORS)[])
+    .filter((flag) => !claudeCliSupports(parsed, flag));
+  return {
+    title: "Update Claude Code for context controls",
+    message:
+      `Claude Code ${parsed.join(".")} predates ${floor}, so bots run without ${missing.join(", ")}: ` +
+      "no compaction window picked by OpenMausBot" +
+      (missing.includes("--setting-sources") ? ", and bots still see this machine's own Claude Code setup" : "") +
+      ". Update it, then refresh Engines.",
+    command: cli === "claude" ? "claude update" : `${cli} update`,
+  };
+}
+
 const DRIVER_KIND = "claudeAgent";
 
 export interface ClaudeConfig {
@@ -752,6 +820,16 @@ export const ClaudeDriver: ProviderDriver<ClaudeConfig> = {
       }
     };
     await refreshModels();
+
+    // The installed CLI's version as snapshot() last read it, so a flag the
+    // CLI does not know is never passed to it (CLAUDE_FLAG_FLOORS). The
+    // harness snapshots every instance whenever it describes them — app
+    // load, the Engines page, and right after `claude update`, which is
+    // exactly when the answer changes — so a turn normally finds it filled.
+    // A turn before any snapshot assumes a current CLI rather than paying a
+    // CLI start-up of its own: the flags are the default, the exception is
+    // the older install, and the next snapshot corrects it.
+    let cliVersion: ClaudeCliVersion | null = null;
     const listeners = new Set<RuntimeEventListener>();
     // one active turn per thread; a second send while busy is a caller bug
     const active = new Map<string, { stop: () => void; turnId: string; broker?: Awaited<ReturnType<typeof createPermissionBroker>> }>();
@@ -905,11 +983,15 @@ export const ClaudeDriver: ProviderDriver<ClaudeConfig> = {
         // measured desktop mounted 407 extra tools, ~10k tokens), its skill
         // and agent listings, its hooks, and its personal CLAUDE.md. Every
         // model call in the session then re-reads all of it.
-        args.push("--strict-mcp-config");
-        args.push("--setting-sources", "project");
+        // Each flag only on a CLI that accepts it: an unknown flag is an
+        // argument error that would fail every turn (CLAUDE_FLAG_FLOORS).
+        if (claudeCliSupports(cliVersion, "--strict-mcp-config")) args.push("--strict-mcp-config");
+        if (claudeCliSupports(cliVersion, "--setting-sources")) args.push("--setting-sources", "project");
       }
       const compactWindow = autoCompactWindow(turnEnvironment);
-      if (compactWindow) args.push("--autocompact", compactWindow);
+      if (compactWindow && claudeCliSupports(cliVersion, "--autocompact")) {
+        args.push("--autocompact", compactWindow);
+      }
       const turnModel = await resolveClaudeTurnModel(turn.model, turnEnvironment);
       const injected = applyClaudeInject({ ...turnEnvironment }, turnModel);
       if (injected.model) args.push("--model", injected.model);
@@ -1524,11 +1606,13 @@ export const ClaudeDriver: ProviderDriver<ClaudeConfig> = {
         );
       });
       if (!version) return { state: "unavailable", reason: `\`${config.cli}\` CLI not found` };
+      cliVersion = parseClaudeCliVersion(version);
       const auth = await claudeAuthStatus(config.cli, env);
       // claudeEnvironment strips ANTHROPIC_API_KEY, so turns run on the
       // CLI's own login (Pro/Max): the cost it reports is what the call
       // WOULD bill, not a charge
-      return { state: "available", version, ...auth, billing: "subscription" };
+      const update = claudeCliUpdate(version, config.cli);
+      return { state: "available", version, ...auth, ...(update ? { update } : {}), billing: "subscription" };
     };
 
     /** One-shot Claude call with the prompt on stdin, never argv. Approval

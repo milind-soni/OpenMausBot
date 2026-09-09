@@ -16,7 +16,17 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { ensureDirs, NATIVE_DIR } from "../config.ts";
 import type { ProviderInstance } from "../contracts.ts";
 import { recordEvents, type EventRecorder } from "../testing/events.ts";
-import { autoCompactWindow, brokerSocketCandidates, ClaudeDriver, createPermissionBroker, permissionSocketPath, type ClaudeConfig } from "./claude.ts";
+import {
+  autoCompactWindow,
+  brokerSocketCandidates,
+  claudeCliSupports,
+  claudeCliUpdate,
+  ClaudeDriver,
+  createPermissionBroker,
+  parseClaudeCliVersion,
+  permissionSocketPath,
+  type ClaudeConfig,
+} from "./claude.ts";
 import { removeTempDir } from "../testing/cleanup.ts";
 import * as procs from "../procs.ts";
 
@@ -772,6 +782,87 @@ describe("ClaudeDriver turns (fake CLI)", () => {
     const seen = JSON.parse(readFileSync(dump, "utf8"));
     expect(seen.argv).not.toContain("--strict-mcp-config");
     expect(seen.argv).not.toContain("--setting-sources");
+  });
+
+  it("withholds a flag from a CLI that predates it, instead of failing every turn", async () => {
+    // 2.1.100 knows --strict-mcp-config and --setting-sources but not
+    // --autocompact (first shipped in 2.1.122): an unknown flag is a hard
+    // argument error, so the turn must run without it rather than not at all
+    const dump = join(scratch, "old-cli.json");
+    await create(undefined, { FAKE_CLAUDE_DUMP: dump, FAKE_CLAUDE_VERSION: "2.1.100" });
+    // the harness snapshots every instance before any turn (app load, the
+    // Engines page); that is where the driver learns the version
+    await instance.snapshot();
+    await instance.adapter.sendTurn({ threadId: "t-old-cli", text: "hi" });
+    await recorder.until((e) => e.type === "turn.completed");
+
+    const seen = JSON.parse(readFileSync(dump, "utf8"));
+    expect(seen.argv).not.toContain("--autocompact");
+    expect(seen.argv).toContain("--strict-mcp-config");
+    expect(seen.argv[seen.argv.indexOf("--setting-sources") + 1]).toBe("project");
+    // and the Engines page says what the older CLI is missing
+    expect(await instance.snapshot()).toMatchObject({
+      state: "available",
+      version: "2.1.100 (Claude Code)",
+      update: { title: "Update Claude Code for context controls", command: expect.stringContaining("update") },
+    });
+  });
+
+  it("keeps only the isolation flag a very old CLI accepts", async () => {
+    // 1.0.100: --strict-mcp-config exists (1.0.60), --setting-sources does
+    // not yet (1.0.122)
+    const dump = join(scratch, "very-old-cli.json");
+    await create(undefined, { FAKE_CLAUDE_DUMP: dump, FAKE_CLAUDE_VERSION: "1.0.100" });
+    await instance.snapshot();
+    await instance.adapter.sendTurn({ threadId: "t-very-old-cli", text: "hi" });
+    await recorder.until((e) => e.type === "turn.completed");
+
+    const seen = JSON.parse(readFileSync(dump, "utf8"));
+    expect(seen.argv).toContain("--strict-mcp-config");
+    expect(seen.argv).not.toContain("--setting-sources");
+    expect(seen.argv).not.toContain("--autocompact");
+  });
+
+  it("passes every flag to a current CLI and raises no update notice", async () => {
+    await create();
+    expect((await instance.snapshot()).update).toBeUndefined();
+  });
+
+  it("assumes a current CLI on a turn that runs before any snapshot", async () => {
+    // no CLI start-up of its own: the flags are the default, and the next
+    // snapshot corrects an older install
+    const dump = join(scratch, "unsnapshotted.json");
+    await create(undefined, { FAKE_CLAUDE_DUMP: dump, FAKE_CLAUDE_VERSION: "2.1.100" });
+    await instance.adapter.sendTurn({ threadId: "t-unsnapshotted", text: "hi" });
+    await recorder.until((e) => e.type === "turn.completed");
+    expect(JSON.parse(readFileSync(dump, "utf8")).argv).toContain("--autocompact");
+  });
+
+  it("maps a CLI version onto the flags it accepts", () => {
+    expect(parseClaudeCliVersion("2.1.232 (Claude Code)")).toEqual([2, 1, 232]);
+    expect(parseClaudeCliVersion("banner\n1.0.60 (Claude Code)")).toEqual([1, 0, 60]);
+    expect(parseClaudeCliVersion("")).toBeNull();
+    expect(parseClaudeCliVersion(null)).toBeNull();
+
+    expect(claudeCliSupports([2, 1, 122], "--autocompact")).toBe(true);
+    expect(claudeCliSupports([2, 1, 121], "--autocompact")).toBe(false);
+    expect(claudeCliSupports([3, 0, 0], "--autocompact")).toBe(true);
+    expect(claudeCliSupports([1, 0, 122], "--setting-sources")).toBe(true);
+    expect(claudeCliSupports([1, 0, 120], "--setting-sources")).toBe(false);
+    expect(claudeCliSupports([1, 0, 60], "--strict-mcp-config")).toBe(true);
+    expect(claudeCliSupports([1, 0, 0], "--strict-mcp-config")).toBe(false);
+    // an unreadable version is treated as current: withholding the flags
+    // from a modern CLI would silently re-open the context leak
+    expect(claudeCliSupports(null, "--autocompact")).toBe(true);
+
+    expect(claudeCliUpdate("2.1.122 (Claude Code)", "claude")).toBeUndefined();
+    expect(claudeCliUpdate(null, "claude")).toBeUndefined();
+    expect(claudeCliUpdate("2.1.121 (Claude Code)", "claude")).toMatchObject({
+      command: "claude update",
+      message: expect.stringContaining("--autocompact"),
+    });
+    expect(claudeCliUpdate("1.0.100 (Claude Code)", "/opt/bin/claude")?.message).toContain("this machine's own Claude Code setup");
+    expect(claudeCliUpdate("1.0.100 (Claude Code)", "/opt/bin/claude")?.command).toBe("/opt/bin/claude update");
   });
 
   it("forwards the bot project's own .mcp.json, which strict mode would drop", async () => {
