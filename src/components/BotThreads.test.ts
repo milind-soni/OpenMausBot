@@ -46,12 +46,19 @@ describe("sidebar bot threads", () => {
   });
 
   it("groups folder threads under one bot while keeping loose threads and empty folders reachable", () => {
-    const projectBot = { ...bot, projects: [{ id: "research", name: "Research" }, { id: "empty", name: "Ideas" }],
+    const projectBot = { ...bot, projects: [{ id: "research", name: "Research", emoji: "🧪" }, { id: "empty", name: "Ideas" }],
       tasks: bot.tasks!.map((task) => ({ ...task, ...(task.threadId === "working" ? { projectId: "research" } : {}) })) };
     const markup = renderToStaticMarkup(createElement(StoreProvider, null, createElement(BotThreadList, { bot: projectBot, selected: true })));
     expect(markup).toContain('data-sidebar-project="research"');
     expect(markup).toContain('aria-label="Research threads"');
-    expect(markup).toContain('aria-label="Research settings"');
+    expect(markup).toContain('aria-label="Actions for Research folder"');
+    expect(markup).toContain('aria-label="Change Research folder icon"');
+    expect(markup).toContain('data-sidebar-folder-row="research" draggable="true"');
+    // Native buttons do not inherit their parent's drag gesture in Chromium.
+    // Dragging from the label must start the same row-owned folder drag.
+    expect(markup).toContain('<button type="button" data-sidebar-folder-label="research" draggable="true"');
+    expect(markup).toContain("🧪");
+    expect(markup).toContain("lucide-folder");
     expect(markup).toContain('aria-label="New thread in Research"');
     expect(markup).toContain('aria-label="Choose folder for new thread"');
     expect(markup).toContain("Threads");

@@ -43,6 +43,21 @@ const bot: Bot = {
 };
 
 describe("thread control placement", () => {
+  it.each([
+    "شغّل الاختبارات\nThen run typecheck\nوبعدها ارفع الفرع",
+    "שלום עולם\nThen run typecheck\nתודה רבה",
+    `${"مرحبا\n".repeat(10)}Then run typecheck`,
+  ])("applies per-line direction to the actual user text, including collapsed messages", (text) => {
+    const markup = renderToStaticMarkup(createElement(ChatView, { bot: {
+      ...bot,
+      messages: [{ id: "mixed-script", role: "user", kind: "text", at: 1, text }],
+    } }));
+    // unicode-bidi does not inherit: setting it on the bubble leaves this
+    // inner text block LTR. Keep the class directly on the node with prose.
+    expect(markup).toMatch(/<div class="chat-text[^"]*">(?:شغّل|שלום|مرحبا)/);
+    expect(markup).not.toMatch(/class="[^"]*chat-text[^"\n]*bg-bubble-user/);
+  });
+
   it("keeps the selected thread's model in the header and permissions inside the composer pill", () => {
     const markup = renderToStaticMarkup(createElement(ChatView, { bot }));
     expect(markup.match(/data-test-model-control/g)).toHaveLength(1);

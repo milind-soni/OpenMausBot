@@ -12,7 +12,7 @@ import { t } from "@/lib/i18n";
 import { COMPACT_BUBBLE } from "@/lib/compact-chip";
 import { formatTaskTokens } from "@/lib/usage";
 import { nextRename } from "@/lib/rename";
-import { NewThreadButton } from "./BotProjects";
+import { FolderIcon, NewThreadButton } from "./BotProjects";
 
 /** Click-to-switch used to close this menu immediately, which unmounted the
  * row before a double-click (or right-click) could start a rename. Linger
@@ -71,7 +71,7 @@ type PickerTask = Pick<Task, "threadId" | "title" | "createdAt" | "busy" | "acti
  * Legacy/orphaned project IDs remain visible under Ungrouped. */
 export function groupThreadTasks(tasks: PickerTask[], projects: BotProject[], query: string) {
   const needle = query.trim().toLowerCase();
-  return [...projects, { id: "", name: t("folder.none") }].map((project) => {
+  return [...projects, { id: "", name: t("folder.none") } as BotProject].map((project) => {
     const members = tasks.filter((task) => project.id ? task.projectId === project.id : !projects.some((item) => item.id === task.projectId));
     return { project, tasks: project.name.toLowerCase().includes(needle) ? members : filterTasks(members, query) };
   }).filter((group) => group.tasks.length > 0);
@@ -274,7 +274,7 @@ function ConversationTaskPicker({
               const heading = grouped?.find((group) => group.tasks[0]?.threadId === task.threadId)?.project;
               return (
                 <Fragment key={task.threadId}>
-                {bot?.projects?.length && heading ? <div className={cn("px-3 pb-1 pt-2 text-[11px] font-medium text-ink-secondary", index > 0 && "border-t border-hairline/30")}>{heading.name}</div> : null}
+                {bot?.projects?.length && heading ? <div className={cn("flex items-center gap-1.5 px-3 pb-1 pt-2 text-[11px] font-medium text-ink-secondary", index > 0 && "border-t border-hairline/30")}>{heading.id && <FolderIcon emoji={heading.emoji} size={12} />}{heading.name}</div> : null}
                 <div
                   className={cn("group flex items-center gap-2 px-2.5 py-2", active ? "bg-raised/60" : "hover:bg-raised/40")}
                 >
@@ -350,7 +350,7 @@ function ConversationTaskPicker({
                       onFocus={clearDismiss} onChange={(event) => { clearDismiss(); onMove(task.threadId, event.target.value || null); }}
                       className="absolute inset-0 w-full cursor-pointer opacity-0">
                       <option value="">{t("folder.none")}</option>
-                      {bot.projects?.map((project) => <option key={project.id} value={project.id}>{project.name}</option>)}
+                      {bot.projects?.map((project) => <option key={project.id} value={project.id}>{project.emoji ? `${project.emoji} ` : ""}{project.name}</option>)}
                     </select>
                   </label>}
                   <button

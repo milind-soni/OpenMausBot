@@ -400,6 +400,18 @@
   color-scheme: var(--code-color-scheme);
 }
 
+/* Plain-text message bodies (user turns, webhook tasks, error fallbacks) are
+   written in whatever language the person used, which is independent of the
+   UI language. `plaintext` resolves direction per line from its own first
+   strong character, so a pasted block that mixes an Arabic sentence with an
+   English stack trace lays each line out correctly instead of letting the
+   first line decide for all of them — which is what a single dir="auto"
+   would do. `start` then follows that per-line direction. */
+.chat-text {
+  unicode-bidi: plaintext;
+  text-align: start;
+}
+
 html,
 body,
 #root {

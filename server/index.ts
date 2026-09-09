@@ -69,6 +69,7 @@ import {
   avatarGenerationRequestSchema,
   avatarGenerationStateMatches,
   generateAvatarImage,
+  avatarImageStatus,
   snapshotAvatarGenerationState,
 } from "./avatar-image.ts";
 import { fitsOnOneLine, parseBotProfilePatch } from "./bot-profile.ts";
@@ -108,6 +109,7 @@ import {
   localVmMode,
   parseConfigPatch,
   roomTurnTimeoutMinutes,
+  maxConcurrentBotThreads,
   saveConfig,
   showToolCallsEnabled,
   skillRecorderEnabled,
@@ -194,6 +196,7 @@ import { cancelPeerApprovalsFor, cancelPeerApprovalsForThread, dismissStalePeerC
 import { peerProvenanceNote, withPeerProvenance } from "./peer-provenance.ts";
 import { decideRoomPost, emptyRoomPostBudget, type RoomPostAttempt, type RoomPostBudget } from "./room-post-budget.ts";
 import {
+  isProjectEmoji,
   mentionedBots,
   roomResponders,
   sectionKey,
@@ -323,6 +326,7 @@ import {
   ProviderTurnGenerationRegistry,
   RetiredTurnRegistry,
   guardTurnDispatch,
+  isTurnAdmissionBlocked,
   isTurnEventQuarantined,
 } from "./turn-dispatch-guard.ts";
 import { createGracefulShutdown } from "./graceful-shutdown.ts";
@@ -733,7 +737,6 @@ const directTurnGenerationByThread = new Map<string, string>();
 // Keep the exact provider/profile settings that own a running conversation.
 // Selecting another thread or changing a default must not retarget its tools.
 const directTurnBots = new Map<string, BotRecord>();
-const MAX_CONCURRENT_BOT_THREADS = 3;
 let providerFleetReloading = false;
 const turnResources = new TurnResources();
 const turnResourceOwners = new Map<string, TurnOwner>();
@@ -768,6 +771,12 @@ function botForThread(botId: string, threadId: string): BotRecord | null {
 
 function threadBusy(botId: string, threadId: string): boolean {
   return store.taskByThread(botId, threadId)?.busy === true || directTurnDispatchClaims.has(threadId);
+}
+
+function botAtThreadCapacity(botId: string): boolean {
+  // Setup/dispatch reservations still occupy a slot even if an early
+  // completion event has already cleared the stored busy flag.
+  return store.tasks(botId).filter((task) => threadBusy(botId, task.threadId)).length >= maxConcurrentBotThreads(cfg);
 }
 
 function hasDirectDispatch(botId: string): boolean {
@@ -3561,7 +3570,7 @@ function dispatchDelegationWake(botId: string, threadId: string, targetName: str
       const message = error instanceof Error ? error.message : String(error);
       // Raced with a user turn claiming the bot — retry once it settles.
       // This is the same logical wake, so keep its original budget charge.
-      if (/already working/i.test(message)) {
+      if (isTurnAdmissionBlocked(error)) {
         pendingDelegationWakes.set(threadId, { botId, targetName, failureReason, routineRunId, budgetAcquired: true });
         return;
       }
@@ -3928,8 +3937,26 @@ function drainQueuedSends() {
     }),
     // Provider completion can precede its dispatch promise: keep the queue
     // intact until that exact handshake releases its runtime-only claim.
-    (botId, threadId) => threadBusy(botId, threadId) || Boolean(activeGroupTurnForBot(botId)),
+    (botId, threadId) => threadBusy(botId, threadId) || botAtThreadCapacity(botId) || Boolean(activeGroupTurnForBot(botId)),
   );
+}
+
+/** Keep a person's words off the transcript until a direct-thread slot is
+ * available. Reuse the existing cancellable, idempotent composer queue. */
+async function startOrQueueDirectMessage(botId: string, threadId: string, text: string, replyTo?: Message, sendId?: string) {
+  const capacity = botAtThreadCapacity(botId);
+  if (capacity || threadBusy(botId, threadId)) {
+    const reason = capacity ? "capacity" as const : undefined;
+    const queued = queueSteeredMessage(botId, threadId, text, {
+      replyToId: replyTo?.id,
+      sendId,
+      reason,
+      prompt: promptWithReply(text, replyTo, cfg.profile?.name?.trim() || "User"),
+    });
+    return { ok: true as const, queued: true as const, queueId: queued.id, threadId, reason };
+  }
+  const message = await startTurn(botId, text, { threadId, replyTo, sendId });
+  return { ok: true as const, threadId, message };
 }
 
 // ── live screen: poll the bot's computer while it works ───────────────
@@ -4151,8 +4178,8 @@ async function startTurn(
   if (activeGroupTurnForBot(botId)) {
     throw Object.assign(new Error("the bot is already working in a channel — wait for it to finish"), { status: 409, code: "thread_busy" });
   }
-  if (store.tasks(botId).filter((task) => task.busy).length >= MAX_CONCURRENT_BOT_THREADS) {
-    throw Object.assign(new Error("this bot is already working on three threads — wait for one to finish"), { status: 409, code: "thread_limit" });
+  if (botAtThreadCapacity(botId)) {
+    throw Object.assign(new Error(`this bot has reached its limit of ${maxConcurrentBotThreads(cfg)} parallel threads — wait for one to finish`), { status: 409, code: "thread_limit" });
   }
   // Retire anything a previous turn left behind before minting this turn's
   // integrations. Completion and interrupt paths do the same; this is the
@@ -7259,7 +7286,7 @@ function dispatchConnectorResume(entry: { botId: string; threadId: string; resum
     onDispatchError: (message) => markConnectorResumeFailed(entry.threadId, entry.resumeKey, message),
   }).catch((error) => {
     const message = error instanceof Error ? error.message : String(error);
-    if (/already working/i.test(message)) pendingConnectorResumes.set(`${entry.threadId}:${entry.resumeKey}`, entry);
+    if (isTurnAdmissionBlocked(error)) pendingConnectorResumes.set(`${entry.threadId}:${entry.resumeKey}`, entry);
     else markConnectorResumeFailed(entry.threadId, entry.resumeKey, message);
   });
 }
@@ -7408,7 +7435,7 @@ function dispatchSecretResume(entry: SecretResumeEntry) {
     onDispatchError: (message) => markSecretResumeFailed(entry.threadId, entry.messageId, message),
   }).catch((error) => {
     const message = error instanceof Error ? error.message : String(error);
-    if (/already working/i.test(message)) {
+    if (isTurnAdmissionBlocked(error)) {
       pendingSecretResumes.set(`${entry.threadId}:${entry.messageId}`, entry);
     } else {
       markSecretResumeFailed(entry.threadId, entry.messageId, message);
@@ -7605,6 +7632,7 @@ function cliProbeEnvironment(): NodeJS.ProcessEnv {
     "OMB_COMPOSIO_BROKER_TOKEN",
     "OMB_TTS_KEY",
     "OMB_OPENAI_IMAGE_KEY",
+    "OMB_CUSTOM_IMAGE_KEY",
     "ANTHROPIC_API_KEY",
     "OPENAI_API_KEY",
   ]) {
@@ -7719,12 +7747,13 @@ function configStatus() {
     // the chosen voice is a setting, not a secret; the key is reported the
     // same configured-or-not way as every other credential
     tts: tts.describeVoice(cfg),
-    imageGen: { configured: Boolean(cfg.imageGen?.key) },
+    imageGen: avatarImageStatus(cfg),
     // not a secret — the sidebar shows it
     profile: { name: cfg.profile?.name ?? "", email: cfg.profile?.email ?? "" },
     // not a secret — the settings picker shows it; "" = follow the system
     language: cfg.language ?? "",
     rooms: { turnTimeoutMinutes: roomTurnTimeoutMinutes(cfg) },
+    threads: { maxConcurrentPerBot: maxConcurrentBotThreads(cfg) },
     localVm: {
       mode: localVmMode(cfg),
       maxInstances: localVmMaxInstances(cfg),
@@ -8073,6 +8102,11 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
     // on it) and the static flag stay behind the gate below.
     if (method === "GET" && path === "/api/health" && !gate.auth) {
       return json(res, 200, { app: "openmausbot" });
+    }
+    // The brand is public too: the sign-in page must carry the deployment's
+    // name and icon before anyone has a session, and it holds nothing secret.
+    if (method === "GET" && path === "/api/brand" && !gate.auth) {
+      return json(res, 200, loadBrand());
     }
     if (!gate.auth) return json(res, gate.status, { error: gate.error });
     const auth = gate.auth;
@@ -10779,7 +10813,7 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
       if (!parsed.success) {
         return json(res, 400, { error: `prompt must be at most 400 characters` });
       }
-      const generated = await generateAvatarImage(cfg.imageGen?.key ?? "", existing, parsed.data.prompt);
+      const generated = await generateAvatarImage(cfg, existing, parsed.data.prompt);
       const current = store.bot(existing.id);
       if (!current) return json(res, 404, { error: "no such bot" });
       if (!avatarGenerationStateMatches(initialAvatar, current)) {
@@ -11877,7 +11911,7 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
               if (queued.text !== text || queued.replyToId !== replyTo?.id) {
                 throw Object.assign(new Error("sendId already belongs to another message"), { status: 409 });
               }
-              return { ok: true as const, queued: true as const, queueId: queued.id, threadId };
+              return { ok: true as const, queued: true as const, queueId: queued.id, threadId, reason: queued.reason };
             }
           }
 
@@ -11940,8 +11974,7 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
               return { ok: true as const, steered: true as const, threadId, message };
             }
             if (!current.busy) {
-              const message = await startTurn(bot.id, text, { threadId, replyTo, sendId });
-              return { ok: true as const, threadId, message };
+              return startOrQueueDirectMessage(bot.id, threadId, text, replyTo, sendId);
             }
             const queued = queueSteeredMessage(current.id, threadId, text, {
               replyToId: replyTo?.id,
@@ -11950,8 +11983,7 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
             });
             return { ok: true as const, queued: true as const, queueId: queued.id, threadId };
           }
-          const message = await startTurn(bot.id, text, { threadId, replyTo, sendId });
-          return { ok: true as const, threadId, message };
+          return startOrQueueDirectMessage(bot.id, threadId, text, replyTo, sendId);
         },
       );
       return json(res, 202, receipt);
@@ -12217,6 +12249,20 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
 
     // Folders organize one bot's threads; they never own settings,
     // transcripts or working directories. The project wire names stay stable.
+    m = path.match(/^\/api\/bots\/([\w-]+)\/projects\/order$/);
+    if (m && method === "PATCH") {
+      const bot = store.bot(m[1]);
+      if (!bot) return json(res, 404, { error: "no such bot" });
+      const body = await readBody(req);
+      if (!body || typeof body !== "object" || Array.isArray(body) ||
+        Object.keys(body).some((key) => key !== "projectIds") ||
+        !Array.isArray(body.projectIds) || body.projectIds.some((id: unknown) => typeof id !== "string")) {
+        return json(res, 400, { error: "projectIds must be an array of folder IDs" });
+      }
+      const projects = store.reorderProjects(bot.id, body.projectIds);
+      if (!projects) return json(res, 400, { error: "projectIds must include each of this bot's folders exactly once" });
+      return json(res, 200, { projects, bot: botWithThread(bot) });
+    }
     m = path.match(/^\/api\/bots\/([\w-]+)\/projects(?:\/([\w-]+))?$/);
     if (m && ((method === "POST" && !m[2]) || (method === "PATCH" && m[2]) || (method === "DELETE" && m[2]))) {
       const bot = store.bot(m[1]);
@@ -12228,17 +12274,21 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
       }
       const body = await readBody(req);
       if (!body || typeof body !== "object" || Array.isArray(body)) return json(res, 400, { error: "body must be a JSON object" });
-      if (Object.keys(body).some((key) => key !== "name")) {
+      if (Object.keys(body).some((key) => key !== "name" && key !== "emoji")) {
         return json(res, 400, { error: "unsupported folder setting" });
       }
       if ((method === "POST" || body.name !== undefined) &&
         (typeof body.name !== "string" || !body.name.trim() || body.name.trim().length > 80)) {
         return json(res, 400, { error: "folder name must be between 1 and 80 characters" });
       }
+      if (body.emoji !== undefined && body.emoji !== null && !isProjectEmoji(body.emoji)) {
+        return json(res, 400, { error: "folder emoji must be one emoji, or null to reset it" });
+      }
       const patch: Parameters<typeof store.patchProject>[2] = {};
       if (body.name !== undefined) patch.name = body.name.trim();
+      if (body.emoji !== undefined) patch.emoji = body.emoji;
       const project = method === "POST"
-        ? store.createProject(bot.id, patch.name!)
+        ? store.createProject(bot.id, patch.name!, patch.emoji)
         : store.patchProject(bot.id, m[2]!, patch);
       return json(res, method === "POST" ? 201 : 200, { project, bot: botWithThread(bot) });
     }
@@ -13236,6 +13286,7 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
           if (persisted.opencodeGo?.apiKey !== undefined) persisted.opencodeGo.apiKey = "";
           if (persisted.tts?.key !== undefined) persisted.tts.key = "";
           if (persisted.imageGen?.key !== undefined) persisted.imageGen.key = "";
+          if (persisted.imageGen?.customApiKey !== undefined) persisted.imageGen.customApiKey = "";
           saveConfig(persisted);
           configWriteCommitted = true;
           syncCredentialEnv(patch);
@@ -13294,6 +13345,7 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
           key !== "imageGen" &&
           key !== "vps" &&
           key !== "rooms" &&
+          key !== "threads" &&
           key !== "localVm" &&
           key !== "features" &&
           key !== "browserProfiles",
@@ -13328,6 +13380,12 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
           }
           const status = configStatus();
           broadcast({ kind: "config", ...status });
+          if (patch.threads !== undefined) {
+            drainQueuedSends();
+            drainDelegationWakes();
+            drainConnectorResumes();
+            drainSecretResumes();
+          }
           if (mandatoryError) throw mandatoryError;
           return status;
         },

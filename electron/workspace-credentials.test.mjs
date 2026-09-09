@@ -7,6 +7,15 @@ import {
 } from "./workspace-credentials.mjs";
 
 describe("workspace credential migration", () => {
+  it("stores the router key separately while keeping provider settings", () => {
+    const result = migrateWorkspaceCredentials({ imageGen: {
+      provider: "custom", key: "openai-only", customApiKey: "router-only",
+      customUrl: "http://127.0.0.1:4000/v1", customModel: "local/image",
+    } }, {});
+    expect(result.credentials).toEqual({ openaiImageApiKey: "openai-only", customImageApiKey: "router-only" });
+    expect(result.config.imageGen).toEqual({ provider: "custom", customUrl: "http://127.0.0.1:4000/v1", customModel: "local/image" });
+    expect(workspaceCredentialEnv(result.credentials)).toEqual({ OMB_OPENAI_IMAGE_KEY: "openai-only", OMB_CUSTOM_IMAGE_KEY: "router-only" });
+  });
   it("moves every plaintext secret into the store and deletes the field", () => {
     const config = {
       xai: { key: "xai-secret", url: "https://api.example.test/v1" },

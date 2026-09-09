@@ -5,6 +5,7 @@ import {
   newAttemptId,
   pairWithCode,
   readSessionState,
+  reasonWorthShowing,
   startEmailSignIn,
   verifyEmailSignIn,
   type EnvironmentDescriptor,
@@ -97,7 +98,7 @@ export function PairPage({ initialCode, reason }: { initialCode: string | null; 
               : "Enter your email and we will send you a one-time code."
             : "Enter the pairing code shown on the server. Codes work once and expire after five minutes."}
         </p>
-        {reason && !connected ? <p className="mt-3 text-[13px] text-ink-secondary">{reason}</p> : null}
+        {reasonWorthShowing(reason) && !connected ? <p className="mt-3 text-[13px] text-ink-secondary">{reasonWorthShowing(reason)}</p> : null}
         {connected ? (
           <p className="mt-4 text-[13.5px]">
             This browser is already connected.{" "}

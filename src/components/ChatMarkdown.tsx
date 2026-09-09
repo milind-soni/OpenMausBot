@@ -7,6 +7,14 @@
 // fence is very likely complete), then highlights and caches — so the settled
 // bubble, a fresh component instance, mounts straight from cache instead of
 // popping from plain to highlighted.
+//
+// Bidi: message text is written in the user's or the model's language, which
+// is independent of the UI language, so every block resolves its own
+// direction from its own first strong character — one Arabic paragraph reads
+// right-to-left while the English one under it does not. Code is the
+// exception: fenced blocks and inline spans pin dir="ltr" and isolate
+// themselves, so a snippet never reorders and never scrambles the RTL
+// sentence holding it.
 import { memo, useEffect, useRef, useState, type ReactNode } from "react";
 import Markdown, { defaultUrlTransform } from "react-markdown";
 import remarkGfm from "remark-gfm";
@@ -97,6 +105,55 @@ function unwrapLinkedImages() {
     };
     visit(tree);
   };
+}
+
+// Direction is resolved here rather than delegated to HTML's dir="auto",
+// because that algorithm skips any descendant carrying its own dir: a
+// <blockquote dir="auto"> whose paragraphs each resolve their own direction
+// finds no text left to judge and silently falls back to the app's LTR,
+// putting its rule on the left of right-to-left prose. Same trap for a table
+// whose cells resolve individually — the columns never reverse.
+//
+// Code is skipped when judging: an answer that opens with `fs.readFileSync`
+// and continues in Arabic is an Arabic paragraph, not an English one.
+// JS regexes cannot match on Bidi_Class, and naming scripts one at a time has
+// no end to it: Hanifi Rohingya, Yezidi, Garay and Old Uyghur are all
+// right-to-left, and Unicode keeps adding more. These are instead the blocks
+// Unicode reserves for right-to-left letters, so the set stays correct
+// without being maintained — and a plane-1 range is one comparison rather
+// than a property lookup.
+const RTL_LETTER = /[\u0590-\u08FF\uFB1D-\uFDFF\uFE70-\uFEFF\u{10800}-\u{10FFF}\u{1E800}-\u{1EFFF}]/u;
+
+/** Direction of `value`, from its first strong character (letters only —
+ * digits and punctuation are directionally weak). Defaults to "ltr". */
+export function textDirection(value: string): "rtl" | "ltr" {
+  const strong = /\p{Letter}/u.exec(value);
+  return strong && RTL_LETTER.test(strong[0]) ? "rtl" : "ltr";
+}
+
+interface HastNode {
+  type?: string;
+  tagName?: string;
+  value?: string;
+  children?: HastNode[];
+}
+
+function blockText(node: HastNode | undefined): string {
+  if (!node) return "";
+  if (node.type === "text") return node.value ?? "";
+  if (node.tagName === "code" || node.tagName === "pre") return "";
+  return (node.children ?? []).map(blockText).join("");
+}
+
+/** Direction a rendered block adopts, read from its own text. */
+export function blockDirection(node: unknown): "rtl" | "ltr" {
+  return textDirection(blockText(node as HastNode));
+}
+
+/** Props react-markdown hands a block component we only re-tag. */
+interface BlockProps {
+  node?: unknown;
+  children?: ReactNode;
 }
 
 /** Props for the {@link CodeBlock} component. */
@@ -197,8 +254,10 @@ export function CodeBlock({ code, lang, streaming }: CodeBlockProps) {
   const displayLanguage = getLanguageDisplayName(lang);
   const lineCount = countLines(code);
 
+  // Code reads left-to-right whatever language surrounds it, so the block pins
+  // its own direction rather than inheriting the message's.
   return (
-    <div className="my-2 overflow-hidden rounded-lg border border-hairline/40 bg-inset">
+    <div dir="ltr" className="my-2 overflow-hidden rounded-lg border border-hairline/40 bg-inset">
       <div className="flex items-center justify-between gap-2 border-b border-hairline/30 bg-raised/30 px-3 py-1.5 text-xs">
         <div className="flex min-w-0 flex-1 items-center gap-2">
           <span title={displayLanguage} className="min-w-0 truncate rounded border border-hairline/40 bg-raised px-1.5 py-0.5 text-[11px] font-medium tracking-wide text-ink select-none">
@@ -292,13 +351,13 @@ function LocalFileLink({ filePath, children, message }: { filePath: string; chil
         : null;
 
   return (
-    <span className="inline-flex flex-wrap items-center gap-x-1.5">
+    <span dir="ltr" className="inline-flex flex-wrap items-center gap-x-1.5 [unicode-bidi:isolate]">
       <button
         type="button"
         onClick={() => void save.save()}
         disabled={save.state === "saving"}
         title="Save a copy"
-        className="inline-flex items-center gap-1 break-words text-left text-accent underline decoration-accent/40 hover:decoration-accent disabled:cursor-wait"
+        className="inline-flex items-center gap-1 break-words text-start text-accent underline decoration-accent/40 hover:decoration-accent disabled:cursor-wait"
       >
         {children}
         {save.state === "saving" ? (
@@ -380,7 +439,7 @@ function Spoiler({ children }: { children?: ReactNode }) {
         aria-label="Hide spoiler"
         title="Hide spoiler"
         onClick={() => setRevealed(false)}
-        className="ml-1 rounded px-0.5 text-[11px] text-ink-secondary hover:text-ink"
+        className="ms-1 rounded px-0.5 text-[11px] text-ink-secondary hover:text-ink"
       >
         Hide
       </button>
@@ -428,7 +487,7 @@ function ChatMarkdownComponent({ text, streaming = false, message }: { text: str
           },
           code({ children }: { children?: ReactNode }) {
             return (
-              <code className="rounded bg-inset px-1 py-px text-[13px]">{children}</code>
+              <code dir="ltr" className="rounded bg-inset px-1 py-px text-[13px] [unicode-bidi:isolate]">{children}</code>
             );
           },
           a({ href, children }: { href?: string; children?: ReactNode }) {
@@ -439,54 +498,58 @@ function ChatMarkdownComponent({ text, streaming = false, message }: { text: str
                 href={href}
                 target="_blank"
                 rel="noreferrer"
-                className="break-words text-accent underline decoration-accent/40 hover:decoration-accent"
+                dir="auto"
+                className="break-words text-accent underline decoration-accent/40 hover:decoration-accent [unicode-bidi:isolate]"
               >
                 {children}
               </a>
             );
           },
-          table({ children }: { children?: ReactNode }) {
+          table({ node, children }: BlockProps) {
             return (
               <div className="overflow-x-auto">
-                <table className="w-full border-collapse text-[13.5px]">{children}</table>
+                <table dir={blockDirection(node)} className="w-full border-collapse text-[13.5px]">{children}</table>
               </div>
             );
           },
           th({ children }: { children?: ReactNode }) {
             return (
-              <th className="border-b border-hairline/40 px-2 py-1.5 text-left font-semibold">{children}</th>
+              <th className="border-b border-hairline/40 px-2 py-1.5 text-start font-semibold">{children}</th>
             );
           },
           td({ children }: { children?: ReactNode }) {
             return <td className="border-b border-hairline/20 px-2 py-1.5 align-top">{children}</td>;
           },
-          ul({ children }: { children?: ReactNode }) {
-            return <ul className="list-disc space-y-1 pl-5">{children}</ul>;
+          p({ node, children }: BlockProps) {
+            return <p dir={blockDirection(node)}>{children}</p>;
           },
-          ol({ children }: { children?: ReactNode }) {
-            return <ol className="list-decimal space-y-1 pl-5">{children}</ol>;
+          ul({ node, children }: BlockProps) {
+            return <ul dir={blockDirection(node)} className="list-disc space-y-1 ps-5">{children}</ul>;
           },
-          h1({ children }: { children?: ReactNode }) {
-            return <div className="mt-2 text-[16px] font-semibold">{children}</div>;
+          ol({ node, children }: BlockProps) {
+            return <ol dir={blockDirection(node)} className="list-decimal space-y-1 ps-5">{children}</ol>;
           },
-          h2({ children }: { children?: ReactNode }) {
-            return <div className="mt-2 text-[15.5px] font-semibold">{children}</div>;
+          h1({ node, children }: BlockProps) {
+            return <div dir={blockDirection(node)} className="mt-2 text-[16px] font-semibold">{children}</div>;
           },
-          h3({ children }: { children?: ReactNode }) {
-            return <div className="mt-1.5 font-semibold">{children}</div>;
+          h2({ node, children }: BlockProps) {
+            return <div dir={blockDirection(node)} className="mt-2 text-[15.5px] font-semibold">{children}</div>;
           },
-          h4({ children }: { children?: ReactNode }) {
-            return <div className="mt-1.5 font-semibold">{children}</div>;
+          h3({ node, children }: BlockProps) {
+            return <div dir={blockDirection(node)} className="mt-1.5 font-semibold">{children}</div>;
           },
-          h5({ children }: { children?: ReactNode }) {
-            return <div className="mt-1.5 text-[14px] font-semibold">{children}</div>;
+          h4({ node, children }: BlockProps) {
+            return <div dir={blockDirection(node)} className="mt-1.5 font-semibold">{children}</div>;
           },
-          h6({ children }: { children?: ReactNode }) {
-            return <div className="mt-1.5 text-[13.5px] font-semibold text-ink-secondary">{children}</div>;
+          h5({ node, children }: BlockProps) {
+            return <div dir={blockDirection(node)} className="mt-1.5 text-[14px] font-semibold">{children}</div>;
           },
-          blockquote({ children }: { children?: ReactNode }) {
+          h6({ node, children }: BlockProps) {
+            return <div dir={blockDirection(node)} className="mt-1.5 text-[13.5px] font-semibold text-ink-secondary">{children}</div>;
+          },
+          blockquote({ node, children }: BlockProps) {
             return (
-              <blockquote className="border-l-2 border-hairline pl-3 text-ink-secondary">{children}</blockquote>
+              <blockquote dir={blockDirection(node)} className="border-s-2 border-hairline ps-3 text-ink-secondary">{children}</blockquote>
             );
           },
           del({ children }: { children?: ReactNode }) {

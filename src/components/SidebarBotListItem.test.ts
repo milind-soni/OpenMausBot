@@ -40,6 +40,12 @@ function renderRow(candidate: Bot, archiveDisabled: boolean) {
 }
 
 describe("BotListItem", () => {
+  it("offers a direct New folder button and keyboard-accessible bot menu independently of New thread", () => {
+    const markup = renderRow(bot(), false);
+    expect(markup).toContain('aria-label="New folder under Atlas"');
+    expect(markup).toContain('aria-label="Actions for Atlas"');
+    expect(markup).toContain('aria-haspopup="menu"');
+  });
   it("keeps the native thread toggle beside, not inside, the selectable bot row", () => {
     const markup = renderRow(bot(), false);
     expect(markup).toContain('role="button" tabindex="0"');

@@ -18,7 +18,7 @@
 // drivers/ nested; import.meta.url still resolves to the same location, so
 // that lookup is unaffected.
 import { build } from "esbuild";
-import { copyFileSync, mkdirSync } from "node:fs";
+import { copyFileSync, existsSync, mkdirSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
 
@@ -123,6 +123,23 @@ await build({
   allowOverwrite: true,
   logLevel: "info",
 });
+
+// The enterprise layer (enterprise/LICENSE; delete the folder for pure OSS)
+// is loaded by path from <root>/enterprise/server/index.{ts,js}. A package
+// or image has no TypeScript runtime, so ship it bundled; the npm package
+// copies this file to enterprise/server/index.js beside the server.
+if (existsSync(join(root, "enterprise", "server", "index.ts"))) {
+  await build({
+    entryPoints: [join(root, "enterprise", "server", "index.ts")],
+    bundle: true,
+    platform: "node",
+    target: "node20",
+    format: "esm",
+    outfile: join(root, "dist-server", "enterprise", "server", "index.js"),
+    allowOverwrite: true,
+    logLevel: "info",
+  });
+}
 
 // pi-mcp-extension.ts is NOT an OpenMausBot entry point: it is loaded by the
 // external `pi` process (pi's own jiti), which resolves its

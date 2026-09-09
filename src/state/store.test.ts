@@ -99,10 +99,19 @@ describe("independent bot threads", () => {
     expect(cancelled.pendingQueued.second).toBeUndefined();
   });
 
-  it("keeps folder name edits separate from every thread and the bot default", () => {
+  it("waits for acknowledged folder writes and keeps them separate from every thread and bot default", () => {
     const projectBot = { ...bot, projects: [{ id: "work", name: "Work" }, { id: "personal", name: "Personal" }] };
-    const state = reducer({ ...start(), bots: [projectBot] }, { type: "updateProject", botId: bot.id, projectId: "work", patch: { name: "Research" } });
-    expect(state.bots[0]?.projects).toEqual([{ id: "work", name: "Research" }, { id: "personal", name: "Personal" }]);
+    const original = { ...start(), bots: [projectBot] };
+    const pending = reducer(original, { type: "updateProject", botId: bot.id, projectId: "work", patch: { name: "Research", emoji: "🧪" } });
+    expect(pending).toBe(original);
+    expect(reducer(original, { type: "reorderProjects", botId: bot.id, projectIds: ["personal", "work"] })).toBe(original);
+    expect(reducer(original, { type: "createProject", botId: bot.id, name: "New", emoji: "📁" })).toBe(original);
+    expect(reducer(original, { type: "deleteProject", botId: bot.id, projectId: "work" })).toBe(original);
+    const projects = [{ id: "personal", name: "Personal" }, { id: "work", name: "Research", emoji: "🧪" }];
+    const state = reducer(pending, { type: "botPatched", bot: { ...projectBot, projects } });
+    expect(state.bots[0]?.projects).toEqual(projects);
+    expect(state.selectedId).toBe(original.selectedId);
+    expect(state.bots[0]?.threadId).toBe(bot.threadId);
     expect(state.bots[0]?.tasks).toEqual(bot.tasks);
     expect(state.bots[0]?.messages).toEqual(bot.messages);
     expect(state.bots[0]?.modelSelection).toEqual(bot.modelSelection);
@@ -575,7 +584,7 @@ describe("notification routing", () => {
 });
 
 describe("config status frames", () => {
-  it("keeps the room turn timeout with the existing config fields", () => {
+  it("keeps thread capacity and room timeout with the existing config fields", () => {
     expect(
       configStatusFromFrame({
         xai: { configured: true },
@@ -583,6 +592,7 @@ describe("config status frames", () => {
         box: { configured: false },
         vps: { configured: true, sshAlias: "homelab" },
         rooms: { turnTimeoutMinutes: 20 },
+        threads: { maxConcurrentPerBot: 10 },
         localVm: { mode: "per-bot", maxInstances: 3 },
         opencodeGo: { configured: true },
         tts: { configured: true, ready: true, voice: "Ada" },
@@ -595,6 +605,7 @@ describe("config status frames", () => {
       box: { configured: false },
       vps: { configured: true, sshAlias: "homelab" },
       rooms: { turnTimeoutMinutes: 20 },
+      threads: { maxConcurrentPerBot: 10 },
       localVm: { mode: "per-bot", maxInstances: 3 },
       opencodeGo: { configured: true },
       tts: { configured: true, ready: true, voice: "Ada" },
@@ -1112,6 +1123,16 @@ describe("pending queued chip", () => {
       queueId: "q1",
     });
     expect(landed.pendingQueued).toEqual({});
+  });
+
+  it("retains capacity explanation only on its queued thread until dispatch", () => {
+    const queued = reducer(initialState, {
+      type: "pendingQueued", threadId: "t1", queueId: "capacity-1", text: "later", reason: "capacity",
+    });
+    expect(queued.pendingQueued).toEqual({ t1: [{ queueId: "capacity-1", text: "later", reason: "capacity" }] });
+    expect(reducer(queued, {
+      type: "consumePendingQueued", threadId: "t1", queueId: "capacity-1",
+    }).pendingQueued).toEqual({});
   });
 
   it("starts mascot work motion when the queued line is released into the transcript", () => {

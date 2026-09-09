@@ -25,7 +25,7 @@ export function QueuedComposerMessages({
   steering = false,
   onCancel,
 }: {
-  items: Array<{ queueId: string; text: string }>;
+  items: Array<{ queueId: string; text: string; reason?: "capacity" }>;
   onSteer?: () => void;
   steerMode?: "all" | "next";
   steering?: boolean;
@@ -57,6 +57,9 @@ export function QueuedComposerMessages({
       }
       aria-live="polite"
     >
+      {items.some((item) => item.reason === "capacity") && (
+        <p className="px-3 pt-2 text-[12px] text-ink-secondary">{t("composer.queued.capacity")}</p>
+      )}
       <ul className="divide-y divide-hairline/25" aria-label={t("composer.queued.list")}>
         {items.map((item, index) => (
           <li key={item.queueId} className="flex min-h-10 min-w-0 items-center gap-2 px-2.5 py-1.5">
@@ -66,7 +69,7 @@ export function QueuedComposerMessages({
               className="shrink-0 text-ink-secondary"
               aria-hidden="true"
             />
-            <span className="min-w-0 flex-1 truncate text-[14px] text-ink" title={item.text}>
+            <span dir="auto" className="min-w-0 flex-1 truncate text-[14px] text-ink" title={item.text}>
               {item.text}
             </span>
             {index === 0 && onSteer && (

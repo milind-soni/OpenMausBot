@@ -256,6 +256,15 @@ export interface GroupRecord {
 export interface BotProjectRecord {
   id: string;
   name: string;
+  emoji?: string;
+}
+
+// Unicode's complete emoji sequences include flags, skin tones and ZWJ
+// combinations. Also allow unqualified single symbols (e.g. ♥), but not
+// standalone components such as a digit, skin tone or regional indicator.
+const projectEmojiPattern = new RegExp("^(?!\\p{Emoji_Component}$)(?:\\p{RGI_Emoji}|[\\p{Emoji}--\\p{Emoji_Component}])$", "v");
+export function isProjectEmoji(value: unknown): value is string {
+  return typeof value === "string" && value.length <= 64 && projectEmojiPattern.exec(value)?.[0] === value;
 }
 
 /** One task = one conversation with its own context.
@@ -907,7 +916,7 @@ export class Store {
       // Folders are organizational only. Preserve existing thread model
       // snapshots while discarding the unshipped folder-default setting.
       if (b.projects?.some((project) => "modelSelection" in project)) {
-        b.projects = b.projects.map(({ id, name }) => ({ id, name }));
+        b.projects = b.projects.map(({ id, name, emoji }) => ({ id, name, ...(isProjectEmoji(emoji) ? { emoji } : {}) }));
         botsMigrated = true;
       }
       if (!b.tasks?.length) {
@@ -1820,11 +1829,12 @@ export class Store {
     return this.bot(botId)?.projects?.find((project) => project.id === projectId);
   }
 
-  createProject(botId: string, name: string): BotProjectRecord | null {
+  createProject(botId: string, name: string, emoji?: string | null): BotProjectRecord | null {
     const bot = this.bot(botId);
-    if (!bot || !name.trim()) return null;
+    if (!bot || !name.trim() || (emoji != null && !isProjectEmoji(emoji))) return null;
     const project: BotProjectRecord = {
       id: newId(), name: name.trim().slice(0, 80),
+      ...(emoji == null ? {} : { emoji }),
     };
     bot.projects = [...(bot.projects ?? []), project];
     this.saveBots();
@@ -1832,13 +1842,28 @@ export class Store {
     return project;
   }
 
-  patchProject(botId: string, projectId: string, patch: Partial<Pick<BotProjectRecord, "name">>): BotProjectRecord | null {
+  patchProject(botId: string, projectId: string, patch: { name?: string; emoji?: string | null }): BotProjectRecord | null {
     const project = this.project(botId, projectId);
-    if (!project || (patch.name !== undefined && !patch.name.trim())) return null;
+    if (!project || (patch.name !== undefined && !patch.name.trim()) || (patch.emoji != null && !isProjectEmoji(patch.emoji))) return null;
     if (patch.name !== undefined) project.name = patch.name.trim().slice(0, 80);
+    if (patch.emoji === null) delete project.emoji;
+    else if (patch.emoji !== undefined) project.emoji = patch.emoji;
     this.saveBots();
     this.emit({ type: "bot", botId });
     return project;
+  }
+
+  /** The stored array is the sidebar order; only a full owned permutation is valid. */
+  reorderProjects(botId: string, projectIds: string[]): BotProjectRecord[] | null {
+    const bot = this.bot(botId);
+    const projects = bot?.projects ?? [];
+    if (!bot || projectIds.length !== projects.length || new Set(projectIds).size !== projects.length) return null;
+    const byId = new Map(projects.map((project) => [project.id, project]));
+    if (projectIds.some((id) => !byId.has(id))) return null;
+    bot.projects = projectIds.map((id) => byId.get(id)!);
+    this.saveBots();
+    this.emit({ type: "bot", botId });
+    return bot.projects;
   }
 
   /** Removing an organizational label never removes its conversations. */

@@ -109,3 +109,13 @@ export function startEmailSignIn(email: string, fetchImpl: typeof fetch = fetch)
 export function verifyEmailSignIn(input: { email: string; code: string; label: string }, fetchImpl: typeof fetch = fetch): Promise<{ ok: true } | { ok: false; error: string }> {
   return postAuth("/api/auth/email/verify", { email: input.email, code: input.code, label: input.label }, fetchImpl);
 }
+
+/** The gate's ordinary "you have no session" wording is why the pair page is
+ * shown at all; repeating it under an email form reads like an error. Only a
+ * reason that says something else (a session that expired or was revoked)
+ * is worth showing. */
+export function reasonWorthShowing(reason: string | undefined): string | null {
+  if (!reason) return null;
+  if (/through a proxy|loopback host required|cross-origin request|^40[13]$/i.test(reason)) return null;
+  return reason;
+}

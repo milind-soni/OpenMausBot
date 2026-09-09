@@ -12,7 +12,6 @@ import {
   ClipboardCopy,
   Copy,
   Crown,
-  Folder,
   FolderMinus,
   FolderPlus,
   Library,
@@ -49,7 +48,8 @@ import { MIN_QUERY, SearchResults } from "./SearchResults";
 import { TeamLibraryPanel } from "./TeamLibraryPanel";
 import { RenameTitle } from "./RenameTitle";
 import { BotPickerList } from "./BotPickerList";
-import { BotProjectDialog, NewThreadButton } from "./BotProjects";
+import { BotProjectDialog, FolderActions, FolderIcon, navigateThreadMenu, NewThreadButton } from "./BotProjects";
+import { draggedFolder, FOLDER_DRAG_TYPE, moveFolder, placeFolder } from "@/lib/folder-order";
 import { SidebarThreadRow, visibleSidebarThreads } from "./SidebarThreadRow";
 import {
   loadCollapsedSections,
@@ -605,16 +605,24 @@ function BotContextMenu({
   onArchive,
   onDelete,
   onMoveToSection,
+  onNewFolder,
 }: {
   menu: MenuState;
   onClose: () => void;
   onArchive: (bot: Bot) => void;
   onDelete: (bot: Bot) => void;
   onMoveToSection: (botId: string) => void;
+  onNewFolder: (botId: string) => void;
 }) {
   const { state, dispatch } = useStore();
   const remoteClient = window.ogb?.remoteClient?.active === true;
   const bot = state.bots.find((b) => b.id === menu.botId);
+  const menuRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    const opener = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    menuRef.current?.querySelector<HTMLButtonElement>("button:not([disabled])")?.focus();
+    return () => { if (opener?.isConnected) opener.focus(); };
+  }, []);
 
   useEffect(() => {
     const onDown = (e: MouseEvent) => {
@@ -654,6 +662,8 @@ function BotContextMenu({
   ) => (
     <button
       key={label}
+      type="button"
+      role="menuitem"
       disabled={opts?.disabled}
       onClick={() => {
         onClick?.();
@@ -674,10 +684,17 @@ function BotContextMenu({
 
   return (
     <div
+      ref={menuRef}
       data-bot-menu
+      role="menu"
+      aria-label={t("sidebar.bot.actions", { name: bot.name })}
+      onKeyDown={navigateThreadMenu}
       style={{ top, left }}
       className="fixed z-40 w-[228px] overflow-hidden rounded-xl border border-hairline/50 bg-card py-1.5 shadow-2xl shadow-black/60"
     >
+      {item(<Plus size={16} className="text-ink-secondary" />, t("task.newShort"), () => dispatch({ type: "newTask", botId: bot.id }))}
+      {item(<FolderPlus size={16} className="text-ink-secondary" />, t("folder.new"), () => onNewFolder(bot.id))}
+      {divider("threads")}
       {remoteClient ? [
         item(<FolderPlus size={16} className="text-ink-secondary" />, t("sidebar.bot.moveToSection"), () => {
           onClose();
@@ -796,11 +813,17 @@ export function BotDeleteMenuItem({ deleting, onClick }: { deleting: boolean; on
 }
 
 export function BotThreadList({ bot, selected, density = "comfortable", query = "" }: { bot: Bot; selected: boolean; density?: SidebarDensity; query?: string }) {
-  const { dispatch } = useStore();
-  const tasks = bot.tasks ?? [{ threadId: bot.threadId, title: t("task.newShort"), createdAt: 0 }];
+  const { state, dispatch } = useStore();
+  const tasks = (bot.tasks ?? [{ threadId: bot.threadId, title: t("task.newShort"), createdAt: 0 }])
+    .map((task) => ({ ...task, queued: Boolean(state.pendingQueued[task.threadId]?.length) }));
   const projects = bot.projects ?? [];
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
   const [editingProject, setEditingProject] = useState<string | null>(null);
+  const [reordering, setReordering] = useState(false);
+  const [reorderError, setReorderError] = useState<string | null>(null);
+  const [reorderStatus, setReorderStatus] = useState("");
+  const [folderDrop, setFolderDrop] = useState<{ id: string; place: "before" | "after" } | null>(null);
+  const draggingFolder = useRef<string | null>(null);
   const [showAll, setShowAll] = useState(false);
   const currentProjectId = tasks.find((task) => task.threadId === bot.threadId)?.projectId;
   useEffect(() => {
@@ -822,9 +845,20 @@ export function BotThreadList({ bot, selected, density = "comfortable", query = 
   };
   const ungrouped = visibleTasks.filter((task) => !projects.some((project) => project.id === task.projectId));
   const projectToEdit = projects.find((project) => project.id === editingProject);
+  const projectIds = projects.map((project) => project.id);
+  const saveOrder = (ids: string[], onSaved?: () => void) => {
+    if (reordering || ids.every((id, index) => id === projectIds[index])) return;
+    setReordering(true); setReorderError(null); setReorderStatus(t("folder.reordering"));
+    dispatch({ type: "reorderProjects", botId: bot.id, projectIds: ids,
+      onSaved: () => { setReordering(false); setReorderStatus(t("folder.reordered")); onSaved?.(); },
+      onError: (message) => { setReordering(false); setReorderStatus(""); setReorderError(message); } });
+  };
+  const resetFolderDrag = () => { draggingFolder.current = null; setFolderDrop(null); };
   return (
-    <div className="mb-2 ml-5 space-y-0.5 border-l border-hairline/30 pl-2" role="group" aria-label={t("task.namedList", { name: bot.name })}>
-      {projects.map((project) => {
+    <div className="mb-2 ml-5 space-y-0.5 border-l border-hairline/30 pl-2" role="group" aria-label={t("task.namedList", { name: bot.name })}
+      onDragOver={(event) => { if (event.dataTransfer.types.includes(FOLDER_DRAG_TYPE)) event.stopPropagation(); }}
+      onDrop={(event) => { if (event.dataTransfer.types.includes(FOLDER_DRAG_TYPE)) { event.preventDefault(); event.stopPropagation(); resetFolderDrag(); } }}>
+      {projects.map((project, index) => {
         const projectTasks = tasks.filter((task) => task.projectId === project.id);
         const visible = visibleTasks.filter((task) => task.projectId === project.id);
         if (query && visible.length === 0 && !project.name.toLowerCase().includes(query.toLowerCase())) return null;
@@ -832,21 +866,54 @@ export function BotThreadList({ bot, selected, density = "comfortable", query = 
         const waiting = projectTasks.some((task) => task.activity === "waiting-on-you");
         const working = projectTasks.some((task) => task.busy);
         return <div key={project.id} data-sidebar-project={project.id}>
-          <div className="group/folder flex items-center gap-0.5 rounded-md text-ink-secondary hover:bg-raised/30">
+          <div data-sidebar-folder-row={project.id} draggable={!reordering}
+            onDragStart={(event) => {
+              event.stopPropagation();
+              event.dataTransfer.effectAllowed = "move";
+              event.dataTransfer.setData(FOLDER_DRAG_TYPE, JSON.stringify({ botId: bot.id, projectId: project.id }));
+              draggingFolder.current = project.id;
+            }}
+            onDragEnd={(event) => { event.stopPropagation(); resetFolderDrag(); }}
+            onDragOver={(event) => {
+              if (!event.dataTransfer.types.includes(FOLDER_DRAG_TYPE)) return;
+              event.stopPropagation();
+              if (!draggingFolder.current || reordering) { event.dataTransfer.dropEffect = "none"; return; }
+              event.preventDefault(); event.dataTransfer.dropEffect = "move";
+              const rect = event.currentTarget.getBoundingClientRect();
+              setFolderDrop({ id: project.id, place: event.clientY < rect.top + rect.height / 2 ? "before" : "after" });
+            }}
+            onDragLeave={(event) => { if (!(event.relatedTarget instanceof Node) || !event.currentTarget.contains(event.relatedTarget)) setFolderDrop(null); }}
+            onDrop={(event) => {
+              if (!event.dataTransfer.types.includes(FOLDER_DRAG_TYPE)) return;
+              event.preventDefault(); event.stopPropagation();
+              const from = draggedFolder(event.dataTransfer.getData(FOLDER_DRAG_TYPE), bot.id, projectIds);
+              const rect = event.currentTarget.getBoundingClientRect();
+              if (from) saveOrder(placeFolder(projectIds, from, project.id, event.clientY < rect.top + rect.height / 2 ? "before" : "after"));
+              resetFolderDrag();
+            }}
+            className={cn("group/folder flex items-center gap-0.5 rounded-md text-ink-secondary hover:bg-raised/30",
+              folderDrop?.id === project.id && draggingFolder.current !== project.id && (folderDrop.place === "before" ? "shadow-[0_-2px_var(--color-accent)]" : "shadow-[0_2px_var(--color-accent)]"))}>
             <button type="button" aria-expanded={open} onClick={() => setCollapsed((previous) => {
               const next = new Set(previous);
               if (next.has(project.id)) next.delete(project.id); else next.add(project.id);
               return next;
-            })} className="flex min-h-8 min-w-0 flex-1 items-center gap-1.5 py-1 pl-1 text-left text-[12px] font-medium" title={project.name}>
+            })} className="flex size-6 shrink-0 items-center justify-center rounded hover:bg-raised" aria-label={t(open ? "task.collapseNamed" : "task.expandNamed", { name: project.name })}>
               <ChevronRight size={11} className={cn("shrink-0 transition-transform", open && "rotate-90")} />
-              <Folder size={12} className="shrink-0" /><span className="truncate">{project.name}</span>
+            </button>
+            <button type="button" aria-label={t("folder.iconNamed", { name: project.name })} title={t("folder.iconNamed", { name: project.name })} onClick={() => setEditingProject(project.id)} className="flex size-6 shrink-0 items-center justify-center rounded hover:bg-raised"><FolderIcon emoji={project.emoji} size={14} /></button>
+            <button type="button" data-sidebar-folder-label={project.id} draggable={!reordering} aria-expanded={open} onClick={() => setCollapsed((previous) => {
+              const next = new Set(previous);
+              if (next.has(project.id)) next.delete(project.id); else next.add(project.id);
+              return next;
+            })} className="flex min-h-8 min-w-0 flex-1 cursor-grab select-none items-center gap-1.5 py-1 text-left text-[12px] font-medium active:cursor-grabbing" title={project.name}>
+              <span className="truncate">{project.name}</span>
               <span className="shrink-0 text-[10px] font-normal opacity-50">{projectTasks.length}</span>
               {!open && (waiting ? <span className="text-[10px] text-warning">{t("task.waiting")}</span> : working ? <Loader2 size={10} className="shrink-0 animate-spin text-success" /> : projectTasks.some((task) => task.unread) ? <span className="size-1.5 shrink-0 rounded-full bg-accent" aria-label={t("task.unreadMany")} /> : null)}
             </button>
             <button type="button" title={t("task.newIn", { name: project.name })} aria-label={t("task.newIn", { name: project.name })} onClick={() => dispatch({ type: "newTask", botId: bot.id, projectId: project.id })}
               className="flex size-6 items-center justify-center rounded opacity-0 hover:bg-raised hover:text-ink focus-visible:opacity-100 group-hover/folder:opacity-100 max-md:opacity-70"><Plus size={12} /></button>
-            <button type="button" title={t("folder.namedSettings", { name: project.name })} aria-label={t("folder.namedSettings", { name: project.name })} onClick={() => setEditingProject(project.id)}
-              className="flex size-6 items-center justify-center rounded opacity-0 hover:bg-raised hover:text-ink focus-visible:opacity-100 group-hover/folder:opacity-100 max-md:opacity-70"><MoreHorizontal size={13} /></button>
+            <FolderActions project={project} canMoveUp={index > 0} canMoveDown={index < projects.length - 1} saving={reordering}
+              onEdit={() => setEditingProject(project.id)} onMove={(direction, onSaved) => saveOrder(moveFolder(projectIds, project.id, direction), onSaved)} />
           </div>
           {open && <div className="ml-3 border-l border-hairline/25 pl-2" role="group" aria-label={t("task.namedList", { name: project.name })}>
             {visible.map(renderThread)}
@@ -854,6 +921,8 @@ export function BotThreadList({ bot, selected, density = "comfortable", query = 
           </div>}
         </div>;
       })}
+      {reorderError && <p role="alert" className="px-2.5 py-1 text-[12px] text-danger">{reorderError}</p>}
+      <span role="status" className="sr-only">{reorderStatus}</span>
       {projects.length > 0 && ungrouped.length > 0 && <div className="px-3 pb-1 pt-2 text-[10.5px] text-ink-secondary/70">{t("task.list")}</div>}
       {ungrouped.map(renderThread)}
       {!query && !showAll && tasks.length > visibleTasks.length && <button type="button" onClick={() => setShowAll(true)} className="px-3 py-1.5 text-[11px] text-ink-secondary hover:text-ink">{t("task.showAll", { count: tasks.length })}</button>}
@@ -881,6 +950,7 @@ export function BotListItem({
   const { state, dispatch } = useStore();
   const remoteClient = typeof window !== "undefined" && window.ogb?.remoteClient?.active === true;
   const [renaming, setRenaming] = useState(false);
+  const [creatingProject, setCreatingProject] = useState(false);
   const selected = state.activeView === "chat" && state.selectedId === bot.id;
   const [threadsOpen, setThreadsOpen] = useState(selected || Boolean(query));
   useEffect(() => { if (selected || query) setThreadsOpen(true); }, [selected, query]);
@@ -903,8 +973,8 @@ export function BotListItem({
     iconOnly
       ? "justify-center px-1 py-1.5"
       : density === "compact"
-        ? "gap-1.5 py-1 pl-6 pr-9"
-        : "gap-2 py-1.5 pl-6 pr-9",
+        ? "gap-1.5 py-1 pl-6 pr-[92px]"
+        : "gap-2 py-1.5 pl-6 pr-[92px]",
     // Chief of Staff is called out by the crown label below, not by tinting
     // the whole row — an accent border + fill read as "selected" even when
     // another bot was active.
@@ -1064,6 +1134,12 @@ export function BotListItem({
       {!renaming && iconOnly && bot.unread && (
         <span className="pointer-events-none absolute bottom-1.5 right-1.5 size-2 rounded-full border border-panel bg-accent" />
       )}
+      {!renaming && !deleting && !iconOnly && <>
+        <button type="button" aria-label={t("folder.newNamed", { name: bot.name })} title={t("folder.new")} onClick={() => { setThreadsOpen(true); setCreatingProject(true); }}
+          className="absolute right-[60px] top-1/2 flex size-7 -translate-y-1/2 items-center justify-center rounded text-ink-secondary hover:bg-raised hover:text-ink"><FolderPlus size={14} /></button>
+        <button type="button" aria-label={t("sidebar.bot.actions", { name: bot.name })} title={t("sidebar.bot.actions", { name: bot.name })} aria-haspopup="menu" onClick={(event) => { const rect = event.currentTarget.getBoundingClientRect(); onMenu({ botId: bot.id, x: rect.left, y: rect.bottom }); }}
+          className="absolute right-8 top-1/2 flex size-7 -translate-y-1/2 items-center justify-center rounded text-ink-secondary opacity-0 hover:bg-raised hover:text-ink focus-visible:opacity-100 group-hover:opacity-100 max-md:opacity-70"><MoreHorizontal size={14} /></button>
+      </>}
       {deleting && iconOnly && (
         <span className="pointer-events-none absolute bottom-1 right-1 rounded-full bg-card p-1 text-ink-secondary">
           <Loader2 size={12} className="animate-spin" />
@@ -1082,6 +1158,7 @@ export function BotListItem({
       </button>}
     </div>
     {!iconOnly && threadsOpen && <BotThreadList bot={bot} selected={selected} density={density} query={bot.name.toLowerCase().includes(query.toLowerCase()) || bot.title.toLowerCase().includes(query.toLowerCase()) ? "" : query} />}
+    {creatingProject && <BotProjectDialog bot={bot} onClose={() => setCreatingProject(false)} />}
     </>
   );
 }
@@ -1239,6 +1316,7 @@ export function Sidebar({ open, onClose }: { open: boolean; onClose: () => void 
   const [roomSectionPicker, setRoomSectionPicker] = useState<{ groupId: string; x: number; y: number } | null>(null);
   const [plusOpen, setPlusOpen] = useState(false);
   const [newRoom, setNewRoom] = useState(false);
+  const [newFolderBotId, setNewFolderBotId] = useState<string | null>(null);
   const [teamLibraryOpen, setTeamLibraryOpen] = useState(false);
   const [teamInstallUrl, setTeamInstallUrl] = useState<string | null>(null);
   const [archivedBotsOpen, setArchivedBotsOpen] = useState(false);
@@ -1509,6 +1587,7 @@ export function Sidebar({ open, onClose }: { open: boolean; onClose: () => void 
   };
 
   const dropSection = (event: React.DragEvent<HTMLDivElement>) => {
+    if (event.dataTransfer.types.includes(FOLDER_DRAG_TYPE)) return;
     event.preventDefault();
     const from =
       event.dataTransfer.getData("application/x-openmausbot-sidebar-section") ||
@@ -1980,8 +2059,10 @@ export function Sidebar({ open, onClose }: { open: boolean; onClose: () => void 
           onArchive={requestArchive}
           onDelete={(bot) => setConfirm({ kind: "delete", bot })}
           onMoveToSection={(botId) => setSectionPicker({ botId, x: menu.x, y: menu.y })}
+          onNewFolder={setNewFolderBotId}
         />
       )}
+      {newFolderBotId && state.bots.find((bot) => bot.id === newFolderBotId) && <BotProjectDialog bot={state.bots.find((bot) => bot.id === newFolderBotId)!} onClose={() => setNewFolderBotId(null)} />}
       <ConfirmDialog
         open={confirm !== null}
         {...(confirm ? botConfirmCopy(confirm.kind, confirm.bot.name) : botConfirmCopy("archive", ""))}

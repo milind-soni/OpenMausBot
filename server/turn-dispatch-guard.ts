@@ -1,3 +1,10 @@
+/** These admission failures can resume after another thread frees a slot.
+ * Keep control flow independent of the user-facing error wording. */
+export function isTurnAdmissionBlocked(error: unknown): boolean {
+  return typeof error === "object" && error !== null && "code" in error &&
+    (error.code === "thread_busy" || error.code === "thread_limit");
+}
+
 /** Close the Stop-vs-provider-handshake race shared by direct and room turns.
  * An adapter may not publish its active process until sendTurn resolves, so
  * an interrupt during that await can be an honest no-op. Re-check once setup

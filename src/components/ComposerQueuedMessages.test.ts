@@ -21,6 +21,15 @@ describe("composerCanSteerQueuedMessages", () => {
 });
 
 describe("QueuedComposerMessages", () => {
+  it("explains a capacity wait without offering to interrupt another thread", () => {
+    const markup = renderToStaticMarkup(createElement(QueuedComposerMessages, {
+      items: [{ queueId: "capacity", text: "Run when there is room", reason: "capacity" }],
+      onCancel: () => undefined,
+    }));
+    expect(markup).toContain("Queued — starts when this bot has a free thread slot.");
+    expect(markup).toContain('aria-label="Delete queued message 1 of 1"');
+    expect(markup).not.toContain("Steer");
+  });
   it("shows the full queued text in an attached, truncated row with real actions", () => {
     const markup = renderToStaticMarkup(
       createElement(QueuedComposerMessages, {

@@ -5,8 +5,28 @@ import {
   ProviderTurnGenerationRegistry,
   RetiredTurnRegistry,
   guardTurnDispatch,
+  isTurnAdmissionBlocked,
   isTurnEventQuarantined,
 } from "./turn-dispatch-guard.ts";
+
+describe("retryable turn admission", () => {
+  it("recognizes busy and capacity codes independently of their wording", () => {
+    for (const code of ["thread_busy", "thread_limit"]) {
+      expect(isTurnAdmissionBlocked(Object.assign(new Error("The admission message changed"), { status: 409, code }))).toBe(true);
+      expect(isTurnAdmissionBlocked({ code })).toBe(true);
+    }
+  });
+
+  it("does not retry other failures just because they mention working", () => {
+    for (const error of [
+      new Error("already working but the provider is unavailable"),
+      Object.assign(new Error("already working"), { status: 409, code: "workspace_busy" }),
+      { status: 409 }, { code: "provider_unavailable" }, null, undefined, "thread_limit",
+    ]) {
+      expect(isTurnAdmissionBlocked(error)).toBe(false);
+    }
+  });
+});
 
 describe("provider turn capability correlation", () => {
   it("rejects a bind when completion arrived before sendTurn resolved", () => {

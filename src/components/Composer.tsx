@@ -866,6 +866,8 @@ export function Composer({
           )}
           <textarea
           ref={inputRef}
+          // the message is composed in the writer's language, not the UI's
+          dir="auto"
           rows={1}
           value={text}
           onChange={(e) => {

@@ -10,6 +10,7 @@ import {
   markdownImageName,
   markdownImageOpenUrl,
   localFilePath,
+  textDirection,
 } from "./ChatMarkdown";
 
 vi.mock("react", async (importOriginal) => {
@@ -228,5 +229,132 @@ describe("ChatMarkdown code blocks", () => {
     expect(html).toContain('aria-label="Copy code to clipboard"');
     expect(html).toContain('aria-label="Wrap long lines"');
     expect(html).toContain("line1\nline2\nline3");
+  });
+});
+
+describe("bidi: message content carries its own direction", () => {
+  const ARABIC = "مرحبا بالعالم";
+
+  it("reads direction from the first strong letter, ignoring weak characters", () => {
+    expect(textDirection("مرحبا")).toBe("rtl");
+    expect(textDirection("hello")).toBe("ltr");
+    expect(textDirection("")).toBe("ltr");
+    // digits, punctuation and emoji are directionally weak — keep scanning
+    expect(textDirection("  «2024» — مرحبا hello")).toBe("rtl");
+    expect(textDirection("🎉 42. hello مرحبا")).toBe("ltr");
+    expect(textDirection("שלום")).toBe("rtl");
+    // the ranges have to hold for every RTL script, not a maintained list:
+    // these span all four blocks Unicode reserves for right-to-left letters
+    expect(textDirection("\u0780")).toBe("rtl"); // Thaana
+    expect(textDirection("\u07CA")).toBe("rtl"); // N'Ko
+    expect(textDirection("\uFB2E")).toBe("rtl"); // Hebrew presentation form
+    expect(textDirection("\u{10D00}")).toBe("rtl"); // Hanifi Rohingya
+    expect(textDirection("\u{10E80}")).toBe("rtl"); // Yezidi
+    expect(textDirection("\u{10D50}")).toBe("rtl"); // Garay (10D40 is a digit)
+    expect(textDirection("\u{10F70}")).toBe("rtl"); // Old Uyghur
+    expect(textDirection("\u{1E900}")).toBe("rtl"); // Adlam
+    // and must not swallow the LTR scripts that sit near those blocks
+    expect(textDirection("\u{11000}\u{11005}")).toBe("ltr"); // Brahmi
+    expect(textDirection("\u0915")).toBe("ltr"); // Devanagari
+    expect(textDirection("\u4E2D")).toBe("ltr"); // Han
+  });
+
+  it("gives every block its own direction instead of the UI's", () => {
+    const html = renderToStaticMarkup(createElement(ChatMarkdown, {
+      text: [
+        `# ${ARABIC}`,
+        "",
+        `${ARABIC} paragraph`,
+        "",
+        "An English paragraph stays left-to-right.",
+        "",
+        `> ${ARABIC}`,
+        "",
+        `- ${ARABIC}`,
+        "",
+        `| ${ARABIC} | b |`,
+        "| --- | --- |",
+        `| ${ARABIC} | 2 |`,
+      ].join("\n"),
+    }));
+
+    expect(html).toContain('<div dir="rtl" class="mt-2 text-[16px] font-semibold">');
+    expect(html).toContain('<p dir="rtl">');
+    expect(html).toContain('<p dir="ltr">An English paragraph');
+    expect(html).toContain('<blockquote dir="rtl"');
+    expect(html).toContain('<ul dir="rtl"');
+    expect(html).toContain('<table dir="rtl"');
+  });
+
+  it("keeps a table on one direction so columns and cells stay aligned", () => {
+    // cells must NOT resolve individually: an Arabic header over a Latin
+    // column would hang off the opposite edge from its own data
+    const html = renderToStaticMarkup(createElement(ChatMarkdown, {
+      text: `| ${ARABIC} | ms |\n| --- | --- |\n| buildIndex | 340 |`,
+    }));
+    expect(html).toContain('<table dir="rtl"');
+    expect(html).not.toContain("<th dir=");
+    expect(html).not.toContain("<td dir=");
+  });
+
+  it("judges a block by its prose, not by the code inside it", () => {
+    const html = renderToStaticMarkup(createElement(ChatMarkdown, {
+      text: `\`fs.readFileSync\` ${ARABIC} داخل الحلقة`,
+    }));
+    expect(html).toContain('<p dir="rtl">');
+  });
+
+  it("uses logical box properties so indents and rules follow the text", () => {
+    const html = renderToStaticMarkup(createElement(ChatMarkdown, {
+      text: `- ${ARABIC}\n\n1. ${ARABIC}\n\n> ${ARABIC}\n\n| a |\n| --- |\n| b |`,
+    }));
+
+    expect(html).toContain("list-disc space-y-1 ps-5");
+    expect(html).toContain("list-decimal space-y-1 ps-5");
+    expect(html).toContain("border-s-2 border-hairline ps-3");
+    expect(html).toContain("px-2 py-1.5 text-start font-semibold");
+    expect(html).not.toMatch(/class="[^"]*\bpl-5\b/);
+    expect(html).not.toMatch(/class="[^"]*\bborder-l-2\b/);
+    expect(html).not.toMatch(/class="[^"]*\btext-left\b/);
+  });
+
+  it("pins code left-to-right and isolates it from the surrounding RTL text", () => {
+    const inline = renderToStaticMarkup(createElement(ChatMarkdown, {
+      text: `${ARABIC} \`items[0].name\` ${ARABIC}`,
+    }));
+    expect(inline).toContain('<code dir="ltr"');
+    expect(inline).toContain("[unicode-bidi:isolate]");
+
+    const fenced = renderToStaticMarkup(createElement(CodeBlock, {
+      code: "const total = items[0].count + 1;",
+      lang: "ts",
+      streaming: false,
+    }));
+    expect(fenced).toContain('<div dir="ltr"');
+  });
+
+  it("gives links a base direction, not isolation alone", () => {
+    // isolate keeps a link from disturbing the sentence around it, but the
+    // link's own contents still lay out along its inherited direction — a URL
+    // in an RTL paragraph needs an LTR base of its own.
+    const url = renderToStaticMarkup(createElement(ChatMarkdown, {
+      text: `${ARABIC} <https://example.test/a/b?x=1> ${ARABIC}`,
+    }));
+    expect(url).toContain('dir="auto"');
+
+    // an Arabic label must not be pinned LTR, which is why the anchor
+    // resolves rather than hard-coding a direction
+    const labelled = renderToStaticMarkup(createElement(ChatMarkdown, {
+      text: `[${ARABIC}](https://example.test/a)`,
+    }));
+    expect(labelled).toContain('dir="auto"');
+
+    // a local path is always left-to-right, so that root is pinned. It needs
+    // a message context: without one the link degrades to a plain label.
+    const path = renderToStaticMarkup(createElement(ChatMarkdown, {
+      text: `${ARABIC} [report](/Users/maus/out/report.md) ${ARABIC}`,
+      message: { threadId: "thread-1", messageId: "message-1" },
+    }));
+    expect(path).toContain('<span dir="ltr"');
   });
 });

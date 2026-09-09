@@ -5,7 +5,7 @@ import { beforeEach, describe, expect, it } from "vitest";
 import { approvalModeFor } from "../shared/approval-mode.ts";
 import { DATA_DIR } from "./config.ts";
 import type { ModelSelection } from "./contracts.ts";
-import { Store, type BotRecord, type TaskPatch } from "./store.ts";
+import { isProjectEmoji, Store, type BotRecord, type TaskPatch } from "./store.ts";
 import { ensureTaskWorkspace } from "./workspace.ts";
 
 const selection = (): ModelSelection => ({ instanceId: "claude", model: "default" });
@@ -267,11 +267,73 @@ describe("independent bot task state", () => {
     expect(reloaded.projectBotForTask(bot.id, task.threadId)?.modelSelection).toEqual(running.modelSelection);
   });
 
+  it("persists folder order and emoji without creating threads or changing their settings", () => {
+    const store = new Store(selection);
+    const bot = store.createBot();
+    const originalThread = bot.threadId;
+    const originalTasks = structuredClone(store.tasks(bot.id));
+    const first = store.createProject(bot.id, "Website", "👩🏽‍💻")!;
+    const second = store.createProject(bot.id, "Research", "🇮🇳")!;
+    const legacy = store.createProject(bot.id, "No emoji")!;
+    expect(bot.threadId).toBe(originalThread);
+    expect(store.tasks(bot.id)).toEqual(originalTasks);
+    expect(legacy).toEqual({ id: legacy.id, name: "No emoji" });
+    const changes: unknown[] = [];
+    store.onChange((change) => changes.push(change));
+    expect(store.reorderProjects(bot.id, [legacy.id, second.id, first.id])).toEqual([legacy, second, first]);
+    expect(changes).toEqual([{ type: "bot", botId: bot.id }]);
+    let reloaded = new Store(selection);
+    expect(reloaded.bot(bot.id)?.projects).toEqual([legacy, second, first]);
+    expect(reloaded.tasks(bot.id)).toEqual(originalTasks);
+    expect(reloaded.patchProject(bot.id, first.id, { name: "Site", emoji: "❤️" })).toMatchObject({ name: "Site", emoji: "❤️" });
+    reloaded = new Store(selection);
+    expect(reloaded.project(bot.id, first.id)?.emoji).toBe("❤️");
+    expect(reloaded.patchProject(bot.id, first.id, { emoji: null })).not.toHaveProperty("emoji");
+    reloaded = new Store(selection);
+    expect(reloaded.project(bot.id, first.id)).toEqual({ id: first.id, name: "Site" });
+    expect(reloaded.bot(bot.id)?.projects?.map((project) => project.id)).toEqual([legacy.id, second.id, first.id]);
+    expect(reloaded.project(bot.id, second.id)?.emoji).toBe("🇮🇳");
+    expect(reloaded.tasks(bot.id)).toEqual(originalTasks);
+  });
+
+  it("rejects invalid folder order and emoji without partially changing saved state", () => {
+    const store = new Store(selection);
+    const bot = store.createBot();
+    const sibling = store.createBot();
+    const first = store.createProject(bot.id, "One", "📁")!;
+    const second = store.createProject(bot.id, "Two", "🔬")!;
+    const foreign = store.createProject(sibling.id, "Sibling")!;
+    for (const ids of [[], [first.id], [first.id, first.id], [first.id, "missing"], [first.id, foreign.id], [first.id, second.id, foreign.id]]) {
+      expect(store.reorderProjects(bot.id, ids)).toBeNull();
+    }
+    expect(store.reorderProjects("missing-bot", [])).toBeNull();
+    expect(store.createProject(bot.id, "Invalid", "two words")).toBeNull();
+    expect(store.patchProject(bot.id, first.id, { name: "Should not change", emoji: "📁📁" })).toBeNull();
+    expect(store.patchProject(sibling.id, first.id, { emoji: "⭐" })).toBeNull();
+    expect(new Store(selection).bot(bot.id)?.projects).toEqual([first, second]);
+    const task = store.createTask(bot.id, "Keep thread", true, first.id)!;
+    store.appendMessage(task.threadId, { role: "user", kind: "text", text: "Keep history" });
+    store.deleteProject(bot.id, first.id);
+    const reloaded = new Store(selection);
+    expect(reloaded.bot(bot.id)?.projects).toEqual([second]);
+    expect(reloaded.taskByThread(bot.id, task.threadId)?.projectId).toBeUndefined();
+    expect(reloaded.messagesFor(task.threadId).at(-1)?.text).toBe("Keep history");
+  });
+
+  it("accepts one Unicode emoji, including composed forms, but not text or incomplete components", () => {
+    for (const emoji of ["📁", "🗂️", "👩🏽‍💻", "👩‍👩‍👦", "🇮🇳", "👍🏽", "❤️", "♥", "1️⃣"]) {
+      expect(isProjectEmoji(emoji), emoji).toBe(true);
+    }
+    for (const emoji of ["", "folder", "📁📁", "📁x", "📁\n", " 📁", "1", "🇮", "🏽", "📁\u200d", "☕🏽", "a".repeat(65), null, 1, {}]) {
+      expect(isProjectEmoji(emoji), JSON.stringify(emoji)).toBe(false);
+    }
+  });
+
   it("discards unshipped folder model defaults without changing saved thread models", () => {
     const store = new Store(selection);
     const bot = store.createBot();
     const sibling = store.createBot();
-    const project = store.createProject(bot.id, "General")!;
+    const project = store.createProject(bot.id, "General", "⭐")!;
     store.patchTask(bot.id, bot.threadId, { modelSelection: { instanceId: "codex", model: "existing-thread" } });
     expect(store.createTask(bot.id, undefined, false, project.id)?.modelSelection).toEqual(selection());
     expect(store.createTask(sibling.id, undefined, false, project.id)).toBeNull();
@@ -282,7 +344,7 @@ describe("independent bot task state", () => {
     Object.assign(saved.find((entry) => entry.id === bot.id)!.projects![0], { modelSelection: { instanceId: "codex", model: "removed-folder-default" } });
     writeFileSync(join(DATA_DIR, "bots.json"), JSON.stringify(saved));
     const reloaded = new Store(selection);
-    expect(reloaded.project(bot.id, project.id)).toEqual({ id: project.id, name: "General" });
+    expect(reloaded.project(bot.id, project.id)).toEqual({ id: project.id, name: "General", emoji: "⭐" });
     expect(reloaded.taskByThread(bot.id, bot.threadId)?.modelSelection).toEqual({ instanceId: "codex", model: "existing-thread" });
     expect(reloaded.createTask(bot.id, undefined, false, project.id)?.modelSelection).toEqual(selection());
   });

@@ -56,8 +56,14 @@ watching, takeover, input, and profile switching.
 The [bot settings fixture](bot-settings.md) checks profile saves, standing
 instructions, history restore, skill/memory refresh, and stale-response isolation.
 
+The [avatar provider fixture](avatar-providers.md) checks image-provider settings,
+keyless local generation, saved-key handling, and safe errors with a local fake API.
+
 The [independent threads fixture](threads.md) checks nested sidebar navigation,
 per-thread models, simultaneous direct conversations and thread-scoped Stop.
+
+The [right-to-left fixture](bidi.md) checks per-block direction in bot replies
+and per-line direction in sent turns, with code pinned left-to-right.
 
 The [routines fixture](routines.md) checks confirmed proposals, manual and
 scheduled runs, central run logs, List/Calendar views, and bot-scoped routines

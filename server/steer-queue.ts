@@ -31,7 +31,7 @@ export interface SteerStore {
 interface QueueEntry {
   /** Keep ownership pinned even when the selected task changes. */
   botId: string;
-  items: Array<{ messageId: string; text: string; prompt: string; replyToId?: string; sendId?: string }>;
+  items: Array<{ messageId: string; text: string; prompt: string; replyToId?: string; sendId?: string; reason?: "capacity" }>;
 }
 
 const queues = new Map<string, QueueEntry>(); // threadId → waiting sends
@@ -45,7 +45,7 @@ export function queueSteeredMessage(
   botId: string,
   threadId: string,
   text: string,
-  options: { prompt?: string; replyToId?: string; sendId?: string } = {},
+  options: { prompt?: string; replyToId?: string; sendId?: string; reason?: "capacity" } = {},
 ): QueuedSteer {
   const id = newId();
   const entry = queues.get(threadId) ?? { botId, items: [] };
@@ -58,6 +58,7 @@ export function queueSteeredMessage(
     prompt: options.prompt ?? text,
     replyToId: options.replyToId,
     sendId: options.sendId,
+    reason: options.reason,
   });
   queues.set(threadId, entry);
   return { id };
@@ -132,11 +133,11 @@ export function queuedSteeredMessage(
   botId: string,
   threadId: string,
   sendId: string,
-): { id: string; text: string; replyToId?: string } | null {
+): { id: string; text: string; replyToId?: string; reason?: "capacity" } | null {
   const entry = queues.get(threadId);
   if (!entry || entry.botId !== botId) return null;
   const item = entry.items.find((candidate) => candidate.sendId === sendId);
-  return item ? { id: item.messageId, text: item.text, replyToId: item.replyToId } : null;
+  return item ? { id: item.messageId, text: item.text, replyToId: item.replyToId, ...(item.reason ? { reason: item.reason } : {}) } : null;
 }
 
 /** Drop one waiting send owned by this bot so it never drains. The queue id
