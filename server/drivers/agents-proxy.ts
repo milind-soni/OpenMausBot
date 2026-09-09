@@ -13,6 +13,9 @@
 //                                          immediately, the peer runs after your
 //                                          current turn finishes, the result is
 //                                          delivered to the source conversation
+//   start_thread(title, msg, bot_id?)    → open a real thread — on yourself for
+//                                          separate work, or on a teammate as a
+//                                          handoff that runs on its own
 //   create_bot(name, role, instructions) → Chiefs can add a specialist to
 //                                          their own section
 //   request_credential(id, reason?)       → show a secure, allowlisted key card
@@ -47,6 +50,12 @@ let createdThisTurn = 0;
 // so the refusal reaches the model without a round trip.
 const MAX_ROOM_POSTS_PER_TURN = 3;
 let roomPostsThisTurn = 0;
+// A thread is a real turn with its own run. Five in one turn is a plan
+// ("one per pull request"); more than that is a model that has stopped
+// deciding. The harness holds the same ceiling; this copy exists so the
+// refusal reaches the model without a round trip.
+const MAX_THREADS_PER_TURN = 5;
+let threadsOpenedThisTurn = 0;
 const delegationTaskIdsThisTurn = new Set<string>();
 
 const WEEKDAYS = [
@@ -403,6 +412,22 @@ const TOOLS = [
     },
   },
   {
+    name: "start_thread",
+    description:
+      "Open a new thread: one conversation with its own history and its own run, shown to the person as a row under the bot it belongs to. Leave bot_id out to open it on yourself, for a separate job that should run on its own (\"review each pull request\" — one thread per pull request) instead of inside this conversation. Give bot_id (from list_bots) to open it on a teammate: that is a handoff into a fresh thread, which starts after your current turn ends and whose result is delivered here, like delegate_bot. The title becomes the row's name, so make it short and specific; write it as #Title when you mention it to the person. Do not use it for a question you need answered right now (ask_bot), for one task where the teammate's usual conversation is fine (delegate_bot), or for a note nobody has to act on. If a call is refused, do not retry it: say what you still wanted opened.",
+    inputSchema: {
+      type: "object",
+      additionalProperties: false,
+      properties: {
+        title: { type: "string", description: "The thread's name: one short line, at most 80 characters, specific enough to tell it apart from the others (for example \"QA: PR #412 login fix\")." },
+        message: { type: "string", description: "The complete first message of the thread — everything the run needs, since it will not see this conversation." },
+        bot_id: { type: "string", description: "Optional: the teammate's id from list_bots. Leave out to open the thread on yourself." },
+        folder: { type: "string", description: "Optional: the name of one of that bot's existing folders to file the thread under. Leave out unless the person named one." },
+      },
+      required: ["title", "message"],
+    },
+  },
+  {
     name: "post_to_room",
     description:
       "Put one message into a shared room you belong to, for example when the user asks you to tell the team something. Get group_id from list_rooms. This posts and returns: no room member's turn starts, nobody replies, and nothing comes back except confirmation — so never use it to ask a question or hand out work (use ask_bot or delegate_bot for those). Post once, say it in full, and tell the user what you posted. If a post is refused, do not retry it: say what you wanted to post in your reply instead.",
@@ -636,6 +661,14 @@ async function api(path: string, init?: RequestInit): Promise<Json> {
   return body;
 }
 
+/** "1st", "2nd", "3rd", "4th" — the queue position as a person says it. */
+function ordinal(n: number): string {
+  const rem100 = n % 100;
+  if (rem100 >= 11 && rem100 <= 13) return `${n}th`;
+  const rem10 = n % 10;
+  return `${n}${rem10 === 1 ? "st" : rem10 === 2 ? "nd" : rem10 === 3 ? "rd" : "th"}`;
+}
+
 function jsonRecord(value: unknown): value is Json {
   return value !== null && typeof value === "object" && !Array.isArray(value);
 }
@@ -859,6 +892,43 @@ async function callTool(name: string, args: Json): Promise<{ text: string; isErr
       };
     }
     return { text: `Task ${taskId} ended without a reply — ${String(r.status ?? "unknown")}${r.result ? `: ${String(r.result)}` : ""}.`, isError: true };
+  }
+  if (name === "start_thread") {
+    const title = String(args.title ?? "").trim();
+    const message = String(args.message ?? "").trim();
+    if (!title || !message) return { text: "start_thread needs title (one short line) and message (the complete first message).", isError: true };
+    if (threadsOpenedThisTurn >= MAX_THREADS_PER_TURN) {
+      return {
+        text: `You have already opened ${MAX_THREADS_PER_TURN} threads this turn, which is the limit. Do not retry — finish your turn and tell the person which threads you still wanted to open, so they can open them or ask you again.`,
+        isError: true,
+      };
+    }
+    const toBotId = typeof args.bot_id === "string" ? args.bot_id.trim() : "";
+    const folder = typeof args.folder === "string" ? args.folder.trim() : "";
+    const body: Record<string, unknown> = { fromBotId: BOT_ID, fromThreadId: THREAD_ID, title, message, depth: DEPTH };
+    if (toBotId) body.toBotId = toBotId;
+    if (folder) body.folder = folder;
+    const r = await api("/api/internal/threads", { method: "POST", body: JSON.stringify(body) });
+    // A refusal opened nothing. A "failed" state opened the thread and could
+    // not start its turn — that one still counts, and still has an id.
+    if (r.error && r.state !== "failed") return { text: `Couldn't open that thread: ${String(r.error)}`, isError: true };
+    threadsOpenedThisTurn += 1;
+    const threadTitle = String(r.title ?? title);
+    const threadId = String(r.threadId ?? "");
+    const where = r.self === true ? "on yourself" : `on @${String(r.botName ?? "that bot")}`;
+    const opened = `Opened thread #${threadTitle} ${where} [thread id: ${threadId}].`;
+    if (r.self === true) {
+      if (r.state === "running") {
+        return { text: `${opened} It is running now, in parallel with this conversation, and its result stays in that thread — it will not be delivered here. Mention it to the person as #${threadTitle}; use list_threads in a later turn to see how it is going.` };
+      }
+      if (r.state === "queued") {
+        const position = Number(r.position) || 1;
+        const limit = Number(r.limit) || 0;
+        return { text: `${opened} You are at your limit of ${limit} threads running at once, so it is ${ordinal(position)} in line and starts as soon as one of them finishes — nothing more to do. Mention it to the person as #${threadTitle}.` };
+      }
+      return { text: `${opened} It could not start: ${String(r.error ?? "unknown reason")}. The thread exists but nothing is running in it; tell the person.`, isError: true };
+    }
+    return { text: `${opened}${typeof r.message === "string" ? ` ${r.message}` : ""}` };
   }
   if (name === "create_bot") {
     const botName = String(args.name ?? "").trim();

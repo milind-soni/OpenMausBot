@@ -33,6 +33,9 @@ let lastDelegateBody: any = null;
 let lastDelegationUrl: string | null = null;
 let delegationStatusResponse: unknown = { status: "done", toBotName: "Helper", result: "All done." };
 let delegateResponse: unknown = { queued: true, message: "Delegation queued." };
+let lastThreadBody: any = null;
+let threadCalls = 0;
+let threadResponse: unknown = { threadId: "thread-new", title: "QA: PR #1", botId: "bot-asker", botName: "Asker", self: true, state: "running", limit: 3 };
 let lastCreateBody: any = null;
 let lastCredentialBody: any = null;
 let lastRoutineQuery = "";
@@ -158,6 +161,17 @@ beforeAll(async () => {
       lastDelegationUrl = req.url;
       res.writeHead(200, { "content-type": "application/json" });
       res.end(JSON.stringify(delegationStatusResponse));
+      return;
+    }
+    if (req.method === "POST" && req.url === "/api/internal/threads") {
+      let data = "";
+      req.on("data", (c) => (data += c));
+      req.on("end", () => {
+        lastThreadBody = JSON.parse(data);
+        threadCalls += 1;
+        res.writeHead(201, { "content-type": "application/json" });
+        res.end(JSON.stringify(threadResponse));
+      });
       return;
     }
     if (req.method === "POST" && req.url === "/api/internal/create-bot") {
@@ -296,6 +310,7 @@ describe("agents-proxy MCP surface", () => {
       "delegate_bot",
       "check_delegation",
       "wait_delegation",
+      "start_thread",
       "post_to_room",
       "create_bot",
       "request_credential",
@@ -543,6 +558,68 @@ describe("agents-proxy MCP surface", () => {
     const res = await callTool("delegate_bot", { bot_id: "bot-helper", message: "take this" });
     expect(res.result.isError).toBe(true);
     expect(res.result.content[0].text).toContain("do this one yourself");
+  });
+
+  it("start_thread: tells the model what a thread is for and what it is not for", async () => {
+    const list = await rpc("tools/list");
+    const start = list.result.tools.find((tool: { name: string }) => tool.name === "start_thread");
+    expect(start.inputSchema.required).toEqual(["title", "message"]);
+    expect(Object.keys(start.inputSchema.properties)).toEqual(["title", "message", "bot_id", "folder"]);
+    expect(start.description).toContain("Leave bot_id out to open it on yourself");
+    expect(start.description).toContain("Do not use it for a question you need answered right now");
+    expect(start.description).toContain("do not retry it");
+  });
+
+  it("start_thread on yourself forwards the sender and says whether it runs or waits in line", async () => {
+    threadResponse = { threadId: "thread-new", title: "QA: PR #1", botId: "bot-asker", botName: "Asker", self: true, state: "running", limit: 3 };
+    const running = await callTool("start_thread", { title: "QA: PR #1", message: "Review the login fix." });
+    expect(running.result.isError).toBeFalsy();
+    expect(running.result.content[0].text).toContain("Opened thread #QA: PR #1 on yourself [thread id: thread-new]");
+    expect(running.result.content[0].text).toContain("running now");
+    expect(lastThreadBody).toEqual({
+      fromBotId: "bot-asker",
+      fromThreadId: "thread-asker-routine",
+      title: "QA: PR #1",
+      message: "Review the login fix.",
+      depth: 0,
+    });
+    threadResponse = { threadId: "thread-two", title: "QA: PR #2", botId: "bot-asker", botName: "Asker", self: true, state: "queued", position: 2, limit: 3 };
+    const queued = await callTool("start_thread", { title: "QA: PR #2", message: "Review the signup fix.", folder: "QA" });
+    expect(queued.result.content[0].text).toContain("2nd in line");
+    expect(queued.result.content[0].text).toContain("limit of 3 threads");
+    expect(lastThreadBody.folder).toBe("QA");
+    expect(lastThreadBody.toBotId).toBeUndefined();
+    threadResponse = { threadId: "thread-three", title: "QA: PR #3", botId: "bot-asker", botName: "Asker", self: true, state: "failed", error: "provider unavailable" };
+    const failed = await callTool("start_thread", { title: "QA: PR #3", message: "Review the reset fix." });
+    expect(failed.result.isError).toBe(true);
+    expect(failed.result.content[0].text).toContain("could not start: provider unavailable");
+  });
+
+  it("start_thread refuses a missing title or message locally, and hands a harness refusal to the model", async () => {
+    const before = threadCalls;
+    const missing = await callTool("start_thread", { title: "", message: "x" });
+    expect(missing.result.isError).toBe(true);
+    expect(threadCalls).toBe(before);
+    threadResponse = { error: "title must fit on one line" };
+    const refused = await callTool("start_thread", { title: "two\nlines", message: "x" });
+    expect(refused.result.isError).toBe(true);
+    expect(refused.result.content[0].text).toContain("title must fit on one line");
+  });
+
+  it("stops a turn at five opened threads and tells the model not to retry", async () => {
+    // three threads were already opened above (the refusal did not count)
+    threadResponse = { threadId: "thread-n", title: "More", botId: "bot-asker", botName: "Asker", self: true, state: "running", limit: 3 };
+    for (let i = 0; i < 2; i++) {
+      const ok = await callTool("start_thread", { title: `More ${i}`, message: "go" });
+      expect(ok.result.isError).toBeFalsy();
+    }
+    const before = threadCalls;
+    const capped = await callTool("start_thread", { title: "One more", message: "go" });
+    expect(capped.result.isError).toBe(true);
+    expect(capped.result.content[0].text).toMatch(/do not retry/i);
+    expect(capped.result.content[0].text).toContain("which threads you still wanted to open");
+    // the refusal is the proxy's own: the harness was never asked
+    expect(threadCalls).toBe(before);
   });
 
   it("lets a Chief create a bounded specialist through the harness", async () => {

@@ -31,7 +31,18 @@ export interface SteerStore {
 interface QueueEntry {
   /** Keep ownership pinned even when the selected task changes. */
   botId: string;
-  items: Array<{ messageId: string; text: string; prompt: string; replyToId?: string; sendId?: string; reason?: "capacity" }>;
+  items: Array<{
+    messageId: string;
+    text: string;
+    prompt: string;
+    replyToId?: string;
+    sendId?: string;
+    reason?: "capacity";
+    /** The words were queued by a bot already running unattended (a
+     * thread it opened on itself). The drained turn must inherit that:
+     * a queue is a delay, not a person sitting down at the keyboard. */
+    unattended?: boolean;
+  }>;
 }
 
 const queues = new Map<string, QueueEntry>(); // threadId → waiting sends
@@ -68,7 +79,7 @@ export function queueSteeredMessage(
   botId: string,
   threadId: string,
   text: string,
-  options: { prompt?: string; replyToId?: string; sendId?: string; reason?: "capacity" } = {},
+  options: { prompt?: string; replyToId?: string; sendId?: string; reason?: "capacity"; unattended?: boolean } = {},
 ): QueuedSteer {
   const id = newId();
   const entry = queues.get(threadId) ?? { botId, items: [] };
@@ -82,10 +93,25 @@ export function queueSteeredMessage(
     replyToId: options.replyToId,
     sendId: options.sendId,
     reason: options.reason,
+    unattended: options.unattended,
   });
   queues.set(threadId, entry);
   changed();
   return { id };
+}
+
+/** Where a thread stands among this bot's threads waiting for a free slot:
+ * 1 for the next to start. The drain visits queues in insertion order, so
+ * insertion order is the line. Null when nothing of this bot's is waiting
+ * on that thread. */
+export function queuedThreadPosition(botId: string, threadId: string): number | null {
+  let position = 0;
+  for (const [candidate, entry] of queues) {
+    if (entry.botId !== botId || !entry.items.some((item) => item.reason === "capacity")) continue;
+    position += 1;
+    if (candidate === threadId) return position;
+  }
+  return null;
 }
 
 /** Drain every queue whose task is idle: append the held lines (leaf is now
@@ -103,6 +129,7 @@ export function drainSteeredMessages(
     prompt: string,
     userMessage: Message,
     excludeIds: string[],
+    unattended: boolean,
   ) => void | Promise<void>,
   isBlocked?: (botId: string, threadId: string) => boolean,
 ): void {
@@ -150,6 +177,9 @@ export function drainSteeredMessages(
       prompt,
       last,
       appended.map((message) => message.id),
+      // one unattended line makes the whole drained turn unattended: a
+      // person's words in the same queue cannot re-attend a bot's own
+      entry.items.some((item) => item.unattended === true),
     );
   }
 }

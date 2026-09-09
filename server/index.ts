@@ -177,6 +177,7 @@ import {
   onSteeredQueueChange,
   queuedSteerSnapshot,
   queuedSteeredMessage,
+  queuedThreadPosition,
   queueSteeredMessage,
 } from "./steer-queue.ts";
 import {
@@ -566,6 +567,9 @@ type InternalCapability = {
   kind: "agents" | "connectors" | "computer" | "browser";
   skillAuthoring: boolean;
   createdBots: number;
+  /** start_thread calls this turn has made — capped like createdBots, so a
+   * turn cannot fan out into more real turns than a person could follow. */
+  openedThreads: number;
   orphanExpiresAt: number;
   localVmTarget?: LocalVmTarget;
   browserSession?: string;
@@ -710,6 +714,7 @@ function agentsIntegration(
     kind: "agents",
     skillAuthoring,
     createdBots: 0,
+    openedThreads: 0,
   });
   return {
     command: process.execPath,
@@ -968,7 +973,7 @@ async function browserIntegration(botId: string, profile: string | undefined, tu
   } });
   if (!turn) return { profile: partitionId, session, spec, integration: spec };
   const token = mintInternalCapability({ botId, ...turn, browserSession: session,
-    kind: "browser", depth: 0, skillAuthoring: false, createdBots: 0 });
+    kind: "browser", depth: 0, skillAuthoring: false, createdBots: 0, openedThreads: 0 });
   return { profile: partitionId, session, spec, integration: {
     command: process.execPath, args: [SPAWNED_PROXIES.browser], env: {
       ...AGENTS_NODE_FLAG, OMB_BROWSER_TOKEN: token, OMB_HARNESS_URL: `http://127.0.0.1:${PORT}`,
@@ -1004,6 +1009,7 @@ function connectedAppsIntegration(botId: string, threadId: string, generation: s
     kind: "connectors",
     skillAuthoring: false,
     createdBots: 0,
+    openedThreads: 0,
   });
   return composio.mcpIntegration(cfg, {
     harnessUrl: `http://127.0.0.1:${PORT}`,
@@ -1060,6 +1066,7 @@ function controlIntegration(botId: string, threadId: string, generation: string,
       ...(localVmTarget ? { localVmTarget } : {}),
       skillAuthoring: false,
       createdBots: 0,
+      openedThreads: 0,
     }),
   };
 }
@@ -3924,13 +3931,15 @@ bus.subscribe((event: RuntimeEvent) => {
 });
 
 function drainQueuedSends() {
-  drainSteeredMessages(store, (botId, threadId, prompt, userMessage, excludeIds) =>
-    // A plain attended turn — no automationSource, no unattended, no comms
-    // depth: exactly what typing the same words into an idle bot would run.
+  drainSteeredMessages(store, (botId, threadId, prompt, userMessage, excludeIds, unattended) =>
+    // A plain attended turn — no automationSource, no comms depth: exactly
+    // what typing the same words into an idle bot would run. The one
+    // exception is `unattended`: a thread a bot opened on itself while
+    // nobody was watching stays unwatched through the wait for a slot.
     // Drain just appended the held lines; userMessage keeps startTurn
     // from duplicating the last one, and excludeIds drops every drained
     // line from the transcript-replay so they are not also in `prompt`.
-    startTurn(botId, prompt, { threadId, userMessage, excludeMessageIds: excludeIds }).then(() => undefined).catch((err) => {
+    startTurn(botId, prompt, { threadId, userMessage, excludeMessageIds: excludeIds, unattended }).then(() => undefined).catch((err) => {
       store.appendMessage(threadId, {
         role: "bot",
         kind: "activity",
@@ -3962,6 +3971,42 @@ async function startOrQueueDirectMessage(botId: string, threadId: string, text: 
   }
   const message = await startTurn(botId, text, { threadId, replyTo, sendId });
   return { ok: true as const, threadId, message };
+}
+
+/** How many start_thread calls one turn may make. Same spirit as the
+ * create-bot ceiling above: a handful is a plan, more is a fan-out. */
+const MAX_THREADS_OPENED_PER_TURN = 5;
+
+/** A thread a bot opened on itself gets its first turn exactly the way a
+ * person's message would: it runs now if the bot has a free slot, and
+ * otherwise waits in the same composer queue, in line behind whatever the
+ * bot already has waiting. The only inheritance is `unattended` — a bot
+ * nobody is watching does not become watched by opening a thread. */
+async function startOrQueueOpenedThread(
+  botId: string,
+  threadId: string,
+  text: string,
+  unattended: boolean,
+): Promise<{ state: "running" } | { state: "queued"; position: number } | { state: "failed"; error: string }> {
+  // A room turn holds the bot too (startTurn refuses a direct turn during
+  // one); the drain's own block check already waits for it, so the words
+  // queue here rather than bounce.
+  if (botAtThreadCapacity(botId) || activeGroupTurnForBot(botId)) {
+    queueSteeredMessage(botId, threadId, text, { reason: "capacity", unattended });
+    return { state: "queued", position: queuedThreadPosition(botId, threadId) ?? 1 };
+  }
+  try {
+    await startTurn(botId, text, { threadId, unattended });
+    return { state: "running" };
+  } catch (error) {
+    const why = error instanceof Error ? error.message : String(error);
+    store.appendMessage(threadId, {
+      role: "bot",
+      kind: "activity",
+      tool: { name: `error: this thread could not start — ${why.slice(0, 120)}`, ok: false },
+    });
+    return { state: "failed", error: why };
+  }
 }
 
 // ── live screen: poll the bot's computer while it works ───────────────
@@ -8248,6 +8293,7 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
         ...parsed.data,
         generation,
         createdBots: 0,
+        openedThreads: 0,
       });
       return json(res, 201, { token });
     }
@@ -9056,6 +9102,77 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
         if (owner.group) chip.from = { botId: poster.id, name: poster.name, color: poster.color };
         store.appendMessage(fromThreadId, chip);
         return json(res, 201, { ok: true, messageId: posted.id, roomName: room.name });
+      }
+      // start_thread: a bot opens a real thread — on itself for separate
+      // work, or on a teammate as a handoff that should run on its own.
+      // Never activates: a bot must not move what the person is looking at.
+      if (method === "POST" && path === "/api/internal/threads") {
+        const body = await readInternalBody();
+        const from = internalSender;
+        const fromThreadId = internalCapability.threadId;
+        const owner = connectorThread(from.id, fromThreadId);
+        if (!owner) return json(res, 403, { error: "source conversation does not belong to sender" });
+        if (
+          body.depth !== undefined &&
+          (!Number.isInteger(body.depth) || body.depth < 0 || body.depth !== internalCapability.depth)
+        ) {
+          return json(res, 403, { error: "the recursion depth does not match this turn" });
+        }
+        const title = String(body.title ?? "").trim();
+        const message = String(body.message ?? "").trim();
+        if (!title || !message) return json(res, 400, { error: "title and message are required" });
+        if (title.length > 80) return json(res, 400, { error: "title must be at most 80 characters" });
+        // the title is quoted into chips and the sidebar, one line each
+        if (!fitsOnOneLine(title)) return json(res, 400, { error: "title must fit on one line" });
+        if (internalCapability.openedThreads >= MAX_THREADS_OPENED_PER_TURN) {
+          return json(res, 429, { error: `you can open at most ${MAX_THREADS_OPENED_PER_TURN} threads in one turn` });
+        }
+        const toBotId = typeof body.toBotId === "string" && body.toBotId.trim() ? body.toBotId.trim() : from.id;
+        const target = store.bot(toBotId);
+        if (!target) return json(res, 404, { error: "no such bot" });
+        // A folder is the target's own organisation; a name is what the
+        // model has, an id is what the sidebar has, so accept either.
+        const folder = typeof body.folder === "string" ? body.folder.trim() : "";
+        let projectId: string | undefined;
+        if (folder) {
+          const project = (target.projects ?? []).find(
+            (candidate) => candidate.id === folder || candidate.name.trim().toLowerCase() === folder.toLowerCase(),
+          );
+          if (!project) {
+            const names = (target.projects ?? []).map((candidate) => candidate.name).join(", ");
+            return json(res, 400, { error: `@${target.name} has no folder named "${folder}"${names ? ` — the folders are: ${names}` : " — it has no folders; leave folder out"}` });
+          }
+          projectId = project.id;
+        }
+        const sourceTitle = owner.group ? owner.group.name : (store.taskByThread(from.id, fromThreadId)?.title ?? "");
+        if (target.id === from.id) {
+          const task = store.createTask(from.id, title, false, projectId, { botId: from.id, name: from.name, at: Date.now() });
+          if (!task) return json(res, 500, { error: "couldn't create that thread" });
+          internalCapability.openedThreads += 1;
+          const chip: Omit<Message, "id" | "at"> = {
+            role: "bot",
+            kind: "activity",
+            tool: { name: `Opened thread #${task.title}`, ok: true },
+            threadRef: { botId: from.id, threadId: task.threadId, title: task.title },
+          };
+          if (owner.group) chip.from = { botId: from.id, name: from.name, color: from.color };
+          store.appendMessage(fromThreadId, chip);
+          // The first line is the bot's own words. Say so where the model
+          // reads it, so a later turn in that thread never mistakes the
+          // request for the person's.
+          const opening = `[Thread you opened yourself${sourceTitle ? ` from #${sourceTitle}` : ""}. The request below is your own words, not the person's: do the work here and end with a clear result they can read.]\n\n${message}`;
+          const outcome = await startOrQueueOpenedThread(from.id, task.threadId, opening, isUnattended(from.id, fromThreadId));
+          return json(res, 201, {
+            threadId: task.threadId,
+            title: task.title,
+            botId: from.id,
+            botName: from.name,
+            self: true,
+            limit: maxConcurrentBotThreads(cfg),
+            ...outcome,
+          });
+        }
+        return json(res, 501, { error: "opening a thread on another bot is not available yet" });
       }
       if (method === "POST" && path === "/api/internal/create-bot") {
         const body = await readInternalBody();
