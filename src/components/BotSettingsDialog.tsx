@@ -350,8 +350,9 @@ export function BotSettingsDialog({ bot }: { bot: Bot }) {
             {section === "skills" && <SkillsSection bot={bot} />}
 
             {/* Memory has an explicit Save button; preserve its unsaved draft
-                while the user consults another section. It fetches on expand. */}
-            <div hidden={section !== "memory"}><MemorySection bot={bot} /></div>
+                while the user consults another section. It fetches when it
+                becomes the active section. */}
+            <div hidden={section !== "memory"}><MemorySection bot={bot} active={section === "memory"} /></div>
 
             {section === "routines" && (
               <RoutinesSection bot={bot} routines={derived.botRoutines} runs={state.routineRuns} />
