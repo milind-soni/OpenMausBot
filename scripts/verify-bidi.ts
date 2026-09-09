@@ -93,6 +93,7 @@ try {
     "شغّل الاختبارات وقل لي أين المشكلة",
     "Then run pnpm typecheck and paste the output",
     "وبعدها ارفع الفرع",
+    "שלום עולם",
   ].join("\n")]);
   await control(["wait", "--bot", probe.id, "--timeout", "30"]);
   await control(["send", "--bot", probe.id, "--text", "Now summarise that in English"]);

@@ -18,8 +18,10 @@ these checks. What is being verified is content direction, per block.
 
 ## Check the real UI
 
-1. The sent bubble must resolve **per line**: the Arabic lines sit right, the
-   English line between them sits left. One line must not decide for the rest.
+1. The sent bubble must resolve **per line**: the Arabic and Hebrew lines sit
+   right, the English line between them sits left. One line must not decide
+   for the rest. The inner element holding the text must have `chat-text`:
+   `unicode-bidi` does not inherit from the outer bubble.
 2. In the Arabic reply, the heading, paragraphs, list and quote all read
    right-to-left — bullets on the right, the quote's rule on the right.
 3. Its table's columns run right-to-left, and every header sits over its own
@@ -42,7 +44,7 @@ catch that regression.
 ## Permanent regression checks
 
 ```sh
-pnpm exec vitest run src/components/ChatMarkdown.test.ts
+pnpm exec vitest run src/components/ChatMarkdown.test.ts src/components/ChatView.controls.test.ts
 ```
 
 These cover first-strong-character resolution, per-block direction, the
