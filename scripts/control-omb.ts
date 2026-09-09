@@ -14,7 +14,7 @@ import { freePortBlock } from "../server/testing/ports.ts";
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
 const FAKE_CLI = join(ROOT, "server", "testing", "fake-claude-cli.ts");
-const MUTATING = new Set(["new-bot", "new-channel", "send", "send-channel", "interrupt", "set-model"]);
+const MUTATING = new Set(["new-bot", "new-channel", "send", "send-channel", "interrupt", "set-model", "edit"]);
 
 export class ControlOmbError extends Error {
   readonly hint?: string;
@@ -53,6 +53,7 @@ mutating (an explicit --url or OPENMAUSBOT_URL/OMB_PORT is required):
   send-channel --channel ID --text TEXT [--task ID] [--dry-run] [--url URL]
   interrupt --bot ID [--task ID] [--dry-run] [--url URL]
   interrupt --channel ID [--task ID] [--dry-run] [--url URL]
+  edit --bot ID --message ID --text TEXT [--task ID] [--dry-run] [--url URL]
   set-model --bot ID --instance ID --model ID [--task ID] [--effort LEVEL] [--dry-run] [--url URL]
 
 isolated fixture:
@@ -224,6 +225,25 @@ export async function runControlOmb(
     return dryRun(command, values, tool, input) ?? call(tool, input, values.url);
   }
 
+  if (command === "edit") {
+    // The rewind a person performs in the composer: edit an earlier user
+    // message, fork the thread there, and answer again. It is the only
+    // mapped way to make the harness REBUILD a thread rather than resume
+    // the provider's session, which is what a replay path needs to be
+    // observable from the control surface at all.
+    const values = parse(command, args, {
+      bot: { type: "string" }, message: { type: "string" }, text: { type: "string" },
+      task: { type: "string" }, "dry-run": { type: "boolean", default: false },
+    });
+    const input = {
+      bot_id: required(values.bot, "--bot"),
+      message_id: required(values.message, "--message"),
+      text: required(values.text, "--text"),
+      ...(values.task !== undefined ? { task_id: required(values.task, "--task") } : {}),
+    };
+    return dryRun(command, values, "edit_bot_message", input) ?? call("edit_bot_message", input, values.url);
+  }
+
   if (command === "set-model") {
     const values = parse(command, args, {
       bot: { type: "string" }, task: { type: "string" }, instance: { type: "string" },
@@ -339,7 +359,11 @@ export async function launchVerificationServer(
     OMB_DATA_DIR: dataDir,
     OMB_PORT: String(port),
     OMB_WEBHOOK_PORT: String(port + 1),
-    FAKE_CLAUDE_MODE: "happy",
+    // The fixture's default CLI behaviour; a caller that sets
+    // FAKE_CLAUDE_MODE explicitly overrides it below to drive the CLI's
+    // failure paths (exit-early, dead-session, hang...) through the real
+    // server. Nothing else from the parent shell reaches the fixture.
+    FAKE_CLAUDE_MODE: parentEnv.FAKE_CLAUDE_MODE || "happy",
     FAKE_CLAUDE_DUMP: fixtureDumpPath,
     // Keep the environment hermetic while allowing POSIX to resolve the
     // fake CLI's `#!/usr/bin/env node` shebang. Windows resolves that same
