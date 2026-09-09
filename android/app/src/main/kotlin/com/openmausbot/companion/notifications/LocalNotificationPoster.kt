@@ -119,11 +119,11 @@ class LocalNotificationPoster(
             // legacy channel gets the HIGH bump Kate asked for. This whole
             // branch only runs the one time `bot_messages` doesn't exist yet,
             // so it can't re-fire on every launch and re-decide anything.
-            val legacyImportance = system.getNotificationChannel(LEGACY_CHANNEL_DONE)?.importance
-            val doneImportance = if (legacyImportance != null &&
-                legacyImportance < NotificationManager.IMPORTANCE_DEFAULT
+            val legacyDone = system.getNotificationChannel(LEGACY_CHANNEL_DONE)
+            val doneImportance = if (legacyDone != null &&
+                legacyDone.importance < NotificationManager.IMPORTANCE_DEFAULT
             ) {
-                legacyImportance
+                legacyDone.importance
             } else {
                 // HIGH so this pops up (heads-up banner + lock screen) with sound,
                 // the way a normal messaging app does — DEFAULT only shows quietly
@@ -139,6 +139,19 @@ class LocalNotificationPoster(
                     doneImportance,
                 ).apply {
                     description = appContext.getString(R.string.notification_channel_done_desc)
+                    // Importance isn't the only thing a person can customize on a
+                    // channel — a picked sound, an intentionally silent one
+                    // (sound=null), vibration, and lock-screen visibility all
+                    // deserve the same carry-forward as importance above: copy
+                    // them straight off the legacy channel rather than letting
+                    // this constructor's plain defaults silently win. A fresh
+                    // install has no legacy channel, so this is a no-op there.
+                    if (legacyDone != null) {
+                        setSound(legacyDone.sound, legacyDone.audioAttributes)
+                        enableVibration(legacyDone.shouldVibrate())
+                        vibrationPattern = legacyDone.vibrationPattern
+                        lockscreenVisibility = legacyDone.lockscreenVisibility
+                    }
                 },
             )
         }
