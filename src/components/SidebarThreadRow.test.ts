@@ -53,4 +53,15 @@ describe("threads a bot opened", () => {
     expect(markup.indexOf("QA PR 245")).toBeLessThan(markup.indexOf("opened by Scout"));
     expect(render({ threadId: "own", title: "Quick question" })).not.toContain("opened by");
   });
+  it("gives a bot-opened thread the same waiting and unread signals as any other", () => {
+    const waiting = render({ threadId: "qa", title: "QA PR 245", openedBy, activity: "waiting-on-you", unread: true });
+    expect(waiting).toContain('title="QA PR 245 · Waiting · Unread"');
+    expect(waiting).toContain(">Waiting</span>");
+    expect(waiting).toContain('aria-label="Unread"');
+    expect(waiting).toContain("opened by Scout");
+    // and it stays on screen past the six recent rows, exactly like a thread the person opened
+    const rows = Array.from({ length: 9 }, (_, index) => ({ threadId: String(index), title: `Thread ${index}` }));
+    const opened = [...rows, { threadId: "qa", title: "QA PR 245", openedBy, activity: "waiting-on-you" as const, busy: false }];
+    expect(visibleSidebarThreads(opened, "0").map((task) => task.threadId)).toEqual(["0", "1", "2", "3", "4", "5", "qa"]);
+  });
 });
