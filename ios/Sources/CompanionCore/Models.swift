@@ -106,6 +106,15 @@ public struct ToolActivity: Codable, Hashable, Sendable {
     public var setup: Bool?
 }
 
+/// The thread an activity chip opened — "Opened thread #Title on Scout" —
+/// so the phone can go there. Newer computers only; a chip without one is
+/// just a receipt.
+public struct ThreadRef: Codable, Hashable, Sendable {
+    public var botId: String
+    public var threadId: String
+    public var title: String
+}
+
 /// A credential request created by the desktop for one paused task.
 ///
 /// The phone may fill this request only through the QR-pinned HPKE transport.
@@ -184,6 +193,7 @@ public struct Message: Codable, Hashable, Identifiable, Sendable {
     public var card: OptionCard?
     public var secret: SecretRequestCardData?
     public var tool: ToolActivity?
+    public var threadRef: ThreadRef?
     /// The message this one follows; nil at the thread root. Two messages
     /// sharing a parent are a fork.
     public var parentId: String?
@@ -217,6 +227,15 @@ public struct ModelSelection: Codable, Hashable, Sendable {
     }
 }
 
+/// The bot that opened a thread, on itself or on a teammate. Absent — which
+/// is every thread from an older computer — means the person opened it.
+public struct ThreadOpener: Codable, Hashable, Sendable {
+    public var botId: String
+    public var name: String
+    public var delegationId: String?
+    public var at: Double
+}
+
 public struct BotTask: Codable, Hashable, Sendable {
     public var threadId: String
     public var title: String
@@ -231,6 +250,7 @@ public struct BotTask: Codable, Hashable, Sendable {
     public var autoApprove: Bool?
     public var alwaysAllow: [String]?
     public var projectId: String?
+    public var openedBy: ThreadOpener?
 }
 
 public struct Bot: Codable, Hashable, Identifiable, Sendable {
