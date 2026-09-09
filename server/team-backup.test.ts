@@ -1,4 +1,4 @@
-import { readFileSync, rmSync } from "node:fs";
+import { readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { DATA_DIR } from "./config.ts";
@@ -7,6 +7,7 @@ import { RoutineManager } from "./routines.ts";
 import { createTeamBackup, importTeamBackup } from "./team-backup.ts";
 import { parseTeamBackup } from "../shared/team-backup.ts";
 import { soulFile, soulHash } from "./bot-folder.ts";
+import { appendMemoryLog, readMemoryFile, readMemoryLog, readMemoryTopic, searchMemoryFiles, updateMemory, workspaceDir, writeMemoryTopic } from "./workspace.ts";
 
 const selection = () => ({ instanceId: "fixture", model: "fixture-model" });
 
@@ -54,6 +55,49 @@ function fixture() {
 
 describe("additive portable team backups", () => {
   beforeEach(() => rmSync(DATA_DIR, { recursive: true, force: true }));
+
+  it("carries each bot's memory, topic notes and daily logs, scrubbed on the way out and private on the way in", () => {
+    const { store, routines, chief, scout } = fixture();
+    const now = new Date(2026, 8, 10, 12);
+    updateMemory(chief.id, { action: "append", text: "The user's name is Ada" }, { source: 'chat "Setup"', now });
+    writeMemoryTopic(chief.id, "deploys.md", "railway up from main\n");
+    appendMemoryLog(chief.id, "shipped 0.1.70", { source: 'chat "Deploy"', now });
+    // a topic the bot's own file tools wrote never met the server's scrub
+    const key = `sk-ant-api03-${"k".repeat(40)}`;
+    writeFileSync(join(workspaceDir(chief.id), "memory", "keys.md"), `anthropic: ${key}\n`);
+
+    const backup = createTeamBackup(store, routines.listRoutines(), "With memory");
+    const exported = backup.bots.find((bot) => bot.key === chief.id)!.memory!;
+    expect(exported.file).toBe('- 2026-09-10 · from chat "Setup" · The user\'s name is Ada\n');
+    expect(exported.topics.map((topic) => topic.name)).toEqual(["deploys.md", "keys.md"]);
+    expect(exported.topics[1].text).not.toContain(key);
+    expect(exported.topics[1].text).toContain("anthropic: «redacted");
+    expect(exported.logs).toEqual([{ name: "2026-09-10.md", text: '- 12:00 · from chat "Deploy" · shipped 0.1.70\n' }]);
+    // a bot that never remembered anything travels as before
+    expect(backup.bots.find((bot) => bot.key === scout.id)!.memory).toBeUndefined();
+    expect(JSON.stringify(backup)).not.toContain(key);
+
+    const result = importTeamBackup(store, routines, JSON.parse(JSON.stringify(backup)), selection());
+    const imported = result.bots.find((bot) => bot.name === "Mira 2")!;
+    expect(readMemoryFile(imported.id).text).toBe(exported.file);
+    expect(readMemoryTopic(imported.id, "deploys.md")).toBe("railway up from main\n");
+    expect(readMemoryTopic(imported.id, "keys.md")).toBe(exported.topics[1].text);
+    expect(readMemoryLog(imported.id, "2026-09-10.md")).toBe(exported.logs[0].text);
+    expect(readFileSync(soulFile(imported.id), "utf8")).toBe(chief.soul);
+    if (process.platform !== "win32") {
+      const dir = workspaceDir(imported.id);
+      expect(statSync(join(dir, "memory")).mode & 0o777).toBe(0o700);
+      expect(statSync(join(dir, "memory", "log")).mode & 0o777).toBe(0o700);
+      for (const file of ["MEMORY.md", "memory/deploys.md", "memory/keys.md", "memory/log/2026-09-10.md"]) {
+        expect(statSync(join(dir, file)).mode & 0o777, file).toBe(0o600);
+      }
+    }
+    // the imported copy is searchable at once, and the original untouched
+    expect(searchMemoryFiles(imported.id, "railway").map((hit) => hit.file)).toEqual(["memory/deploys.md"]);
+    expect(readMemoryFile(chief.id).text).toBe(exported.file);
+    const noMemory = result.bots.find((bot) => bot.name === "Scout 2")!;
+    expect(readMemoryFile(noMemory.id).text).toBe("");
+  });
 
   it("round-trips all bots, sections, Chiefs, rooms, tasks and branches without changing originals", () => {
     const { store, routines, chief, scout, otherChief, archived, group } = fixture();

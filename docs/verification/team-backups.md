@@ -8,11 +8,14 @@ Import always adds independent copies; existing bots, Chiefs, rooms and chats
 are never archived, overwritten or merged. Repeated imports number copies.
 
 The private portable backup includes active and archived bot profiles,
-instructions, sections, room membership, Chiefs, playbooks, paused routine
-definitions, and conversation text from every task and branch. Action cards
-become inert text. It does not include files, screenshots, custom avatars,
-workspace memory, account connections, model settings or permissions. This
-is not a whole-computer backup. Store the file privately: chat text can
+instructions (SOUL.md), sections, room membership, Chiefs, playbooks, paused
+routine definitions, each bot's memory (`MEMORY.md`, `memory/<topic>.md` and
+the `memory/log/` daily logs, with secrets removed on the way out), and
+conversation text from every task and branch. Action cards become inert
+text. It does not include files, screenshots, custom avatars, account
+connections, model settings or permissions. Imported memory is written with
+the same private modes as memory the bot wrote itself (0700 folders, 0600
+files). This is not a whole-computer backup. Store the file privately: chat text can
 contain sensitive information. The size limit is 50 MB; export fails clearly
 instead of producing a truncated or unimportable file.
 

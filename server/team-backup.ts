@@ -4,6 +4,39 @@ import { takeImportName } from "../shared/import-name.ts";
 import { MAX_TEAM_BACKUP_BYTES, parseTeamBackup, type BackupTask, type TeamBackup } from "../shared/team-backup.ts";
 import type { BotRecord, GroupRecord, Message, Store, TaskRecord } from "./store.ts";
 import type { Routine, RoutineManager } from "./routines.ts";
+import { redactSecretsInText } from "./redact.ts";
+import {
+  listMemoryLogs, listMemoryTopics, readMemoryFile, readMemoryLog, readMemoryTopic,
+  writeMemoryFile, writeMemoryLog, writeMemoryTopic,
+} from "./workspace.ts";
+
+/** A bot's memory as it travels: MEMORY.md, every topic file, every daily
+ * log — scrubbed on the way out, because a file the bot's own file tools
+ * wrote never passed the server's scrub. Absent when the bot has none, so
+ * a backup of a bot that never remembered anything is unchanged. */
+function memoryFor(botId: string): TeamBackup["bots"][number]["memory"] {
+  const file = redactSecretsInText(readMemoryFile(botId).text);
+  const topics = listMemoryTopics(botId).flatMap((topic) => {
+    const text = readMemoryTopic(botId, topic.name);
+    return text === null ? [] : [{ name: topic.name, text: redactSecretsInText(text) }];
+  });
+  const logs = listMemoryLogs(botId).flatMap((name) => {
+    const text = readMemoryLog(botId, name);
+    return text === null ? [] : [{ name, text: redactSecretsInText(text) }];
+  });
+  if (!file && !topics.length && !logs.length) return undefined;
+  return { file, topics, logs };
+}
+
+/** Restore a bot's memory into its fresh workspace: the same writers the
+ * tool and the editor use, so modes (0700 folders, 0600 files), the scrub
+ * and the search index all come for free. Runs before any transcript is
+ * restored, inside the import's rollback — deleteBot removes the workspace. */
+function restoreMemory(botId: string, memory: NonNullable<TeamBackup["bots"][number]["memory"]>): void {
+  if (memory.file) writeMemoryFile(botId, memory.file);
+  for (const topic of memory.topics) writeMemoryTopic(botId, topic.name, topic.text);
+  for (const log of memory.logs) writeMemoryLog(botId, log.name, log.text);
+}
 
 /** Preserve readable history without importing executable cards, live queue
  * entries, approval requests, local paths or provider session handles. */
@@ -64,6 +97,7 @@ export function createTeamBackup(store: Store, routines: Routine[], name: string
       section: bot.section, color: bot.color,
       mascotExpression: bot.mascotExpression ?? undefined, mascotBody: bot.mascotBody ?? undefined,
       chiefOfStaff: Boolean(bot.chiefOfStaff), hidden: Boolean(bot.hidden), playbooks: bot.playbooks ?? [],
+      memory: memoryFor(bot.id),
       activeTask: bot.threadId, tasks: history(bot),
     })),
     groups,
@@ -128,6 +162,7 @@ export function importTeamBackup(store: Store, routines: RoutineManager, input: 
       botIds.set(source.key, bot.id);
       store.patchBot(bot.id, { composio: false, computer: "off", browser: false, approvalMode: "ask", autoApprove: false,
         hidden: source.hidden, chiefOfStaff: source.chiefOfStaff, playbooks: source.playbooks });
+      if (source.memory) restoreMemory(bot.id, source.memory);
     }
     for (const source of backup.bots) {
       const bot = store.bot(botIds.get(source.key)!)!;

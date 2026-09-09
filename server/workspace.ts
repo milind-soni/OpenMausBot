@@ -443,6 +443,16 @@ export function appendMemoryLog(botId: string, text: string, opts: MemoryUpdateO
   return { ok: true, file: relativePath, line };
 }
 
+/** Write one whole day's log — a backup import restoring it — through the
+ * same gate, scrub, modes and index as a line appended today. */
+export function writeMemoryLog(botId: string, name: string, text: string): void {
+  if (!LOG_FILE_NAME.test(name)) throw new Error("invalid log name");
+  const dir = join(ensureWorkspace(botId), "memory", MEMORY_LOG_DIR);
+  mkdirSync(dir, { recursive: true, mode: 0o700 });
+  writeFileAtomic(join(dir, name), redactSecretsInText(text), { mode: 0o600 });
+  indexWrittenMemoryFile(botId, `memory/${MEMORY_LOG_DIR}/${name}`);
+}
+
 /** The bot's daily log files, oldest first, by day name. */
 export function listMemoryLogs(botId: string): string[] {
   try {
