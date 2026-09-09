@@ -5,9 +5,10 @@
 // scripted reply that exercises every block a bot reply can contain — prose
 // around inline code, a list, a table, a quote, a fenced block, and a trailing
 // English paragraph — and mounts the real renderer against it.
-import { writeFileSync } from "node:fs";
+import { mkdtempSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { fileURLToPath, pathToFileURL } from "node:url";
+import { removeTempDir } from "../server/testing/cleanup.ts";
 import { launchVerificationServer, runControlOmb } from "./control-omb.ts";
 import { fixtureApi, mountPreview, parkUntilSignal, type MountedPreview } from "./testing/preview-fixture.ts";
 
@@ -57,7 +58,18 @@ const ENGLISH_REPLY = [
   "وهذه فقرة عربية تُغلق ردًّا إنجليزيًّا — يجب أن تُقرأ من اليمين وحدها.",
 ].join("\n");
 
-const fixture = await launchVerificationServer();
+// Each turn spawns a fresh CLI, so the reply cursor lives in a file — in this
+// launcher's own scratch directory, since the fixture home does not exist
+// until the server is up. The launcher forwards FAKE_CLAUDE_* to its engine.
+const scratch = mkdtempSync(join(tmpdir(), "openmausbot-verify-bidi-"));
+const fixture = await launchVerificationServer({
+  ...process.env,
+  FAKE_CLAUDE_REPLIES: JSON.stringify([ARABIC_REPLY, ENGLISH_REPLY]),
+  FAKE_CLAUDE_REPLY_STATE: join(scratch, "bidi-reply-cursor"),
+}).catch(async (error) => {
+  await removeTempDir(scratch);
+  throw error;
+});
 let ui: MountedPreview | undefined;
 try {
   const api = fixtureApi(fixture.info.url);
@@ -66,18 +78,6 @@ try {
   await control(["new-bot", "--name", "Probe"]);
   const { bots } = await api("GET", "/api/bots?messages=0");
   const probe = bots.find((bot: { name: string }) => bot.name === "Probe");
-
-  // Each turn spawns a fresh CLI, so the reply cursor lives in a file inside
-  // this fixture's own home rather than in the process.
-  const replyState = join(fixture.info.dataDir, "bidi-reply-cursor");
-  const wrapper = join(fixture.info.dataDir, "bidi-claude.mjs");
-  writeFileSync(wrapper, [
-    "#!/usr/bin/env node",
-    `process.env.FAKE_CLAUDE_REPLIES = ${JSON.stringify(JSON.stringify([ARABIC_REPLY, ENGLISH_REPLY]))};`,
-    `process.env.FAKE_CLAUDE_REPLY_STATE = ${JSON.stringify(replyState)};`,
-    `await import(${JSON.stringify(pathToFileURL(fileURLToPath(new URL("../server/testing/fake-claude-cli.ts", import.meta.url))).href)});`,
-  ].join("\n"), { mode: 0o700 });
-  await api("PATCH", "/api/instances/claude", { cli: wrapper });
 
   // A multi-line user turn that mixes scripts: the sent bubble must resolve
   // each line on its own, not let the first line decide for all of them.
@@ -99,4 +99,5 @@ try {
 } finally {
   await ui?.close();
   await fixture.close();
+  await removeTempDir(scratch);
 }

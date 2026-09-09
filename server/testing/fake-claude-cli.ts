@@ -24,6 +24,11 @@
 //                      bounded multi-turn orchestration deterministic.
 //   FAKE_CLAUDE_REPLY_STATE Optional counter file shared by fresh CLI
 //                      processes so scripted replies keep their order.
+//   FAKE_CLAUDE_TOOL_CALLS JSON array of {name, input?, ok?}: the tool calls
+//                      each turn makes, in order and before its reply text —
+//                      one tool_use (fresh id, that name and input) followed
+//                      by its tool_result (is_error unless ok, default true).
+//                      Unset, a turn makes the single default Bash call.
 //   FAKE_CLAUDE_AUTH   in (default) | out | unsupported | malformed |
 //                      inherited-api-key — what `auth status` reports
 //
@@ -42,6 +47,26 @@ const scriptedReplies = (() => {
     return [];
   }
 })();
+type ScriptedToolCall = { name: string; input: Record<string, unknown>; ok: boolean };
+// null = unset (or unparseable): keep the single default Bash call.
+const scriptedToolCalls: ScriptedToolCall[] | null = (() => {
+  const raw = process.env.FAKE_CLAUDE_TOOL_CALLS;
+  if (raw === undefined) return null;
+  try {
+    const parsed = JSON.parse(raw);
+    if (!Array.isArray(parsed)) return null;
+    return parsed
+      .filter((call): call is { name: string; input?: unknown; ok?: unknown } => typeof call?.name === "string")
+      .map((call) => ({
+        name: call.name,
+        input: call.input && typeof call.input === "object" && !Array.isArray(call.input) ? call.input as Record<string, unknown> : {},
+        ok: call.ok !== false,
+      }));
+  } catch {
+    return null;
+  }
+})();
+let toolUseCount = 0;
 let scriptedReplyIndex = 0;
 const nextScriptedReply = (): string[] => {
   const stateFile = process.env.FAKE_CLAUDE_REPLY_STATE;
@@ -287,20 +312,25 @@ const playTurn = (prompt: JsonValue) => {
   }
 
   const replyParts = nextScriptedReply();
-  replyParts.forEach((text, index) => {
-    const content: Array<
-      { type: "text"; text: string } | { type: "tool_use"; id: string; name: string }
-    > = [{ type: "text", text }];
-    if (index === replyParts.length - 1) content.push({ type: "tool_use", id: "tu-1", name: "Bash" });
-    out({
-      type: "assistant",
-      message: {
-        content,
-        usage: { input_tokens: 10, cache_read_input_tokens: 2, output_tokens: 5 },
-      },
+  const usage = { input_tokens: 10, cache_read_input_tokens: 2, output_tokens: 5 };
+  if (scriptedToolCalls) {
+    // scripted calls come first, each settled before the reply text
+    for (const call of scriptedToolCalls) {
+      const id = `tu-${++toolUseCount}`;
+      out({ type: "assistant", message: { content: [{ type: "tool_use", id, name: call.name, input: call.input }], usage } });
+      out({ type: "user", message: { content: [{ type: "tool_result", tool_use_id: id, is_error: !call.ok }] } });
+    }
+    for (const text of replyParts) out({ type: "assistant", message: { content: [{ type: "text", text }], usage } });
+  } else {
+    replyParts.forEach((text, index) => {
+      const content: Array<
+        { type: "text"; text: string } | { type: "tool_use"; id: string; name: string; input: Record<string, unknown> }
+      > = [{ type: "text", text }];
+      if (index === replyParts.length - 1) content.push({ type: "tool_use", id: "tu-1", name: "Bash", input: { command: "echo hi" } });
+      out({ type: "assistant", message: { content, usage } });
     });
-  });
-  out({ type: "user", message: { content: [{ type: "tool_result", tool_use_id: "tu-1", is_error: false }] } });
+    out({ type: "user", message: { content: [{ type: "tool_result", tool_use_id: "tu-1", is_error: false }] } });
+  }
 
   const finish = () => {
     out({ type: "result", is_error: false, stop_reason: "end_turn", total_cost_usd: 0.01, usage: { input_tokens: 10, cache_read_input_tokens: 2, output_tokens: 5 } });

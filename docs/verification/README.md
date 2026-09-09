@@ -20,7 +20,9 @@ It gives the child a temporary data directory and home, chooses a free
 harness/webhook port pair, installs only the repository's fake engine, prints
 the URL, PID, data directory, and persistent log path, then stays attached to
 that exact child. The parent shell and the user's OpenMausBot data are
-untouched.
+untouched. Only `FAKE_CLAUDE_*` variables cross from the launcher's
+environment into that child, so a recipe can script the fake engine's mode,
+replies and tool calls without writing a wrapper CLI.
 
 Pass the printed URL explicitly from a second terminal:
 

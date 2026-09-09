@@ -370,6 +370,11 @@ export async function launchVerificationServer(
     // fixture through spawnCli without a shell.
     PATH: dirname(process.execPath),
   });
+  // The fake engine's own knobs (mode, replies, tool calls) are the one thing
+  // a caller may script into the child: FAKE_CLAUDE_* crosses, nothing else.
+  for (const [key, value] of Object.entries(parentEnv)) {
+    if (key.startsWith("FAKE_CLAUDE_") && value) childEnv[key] = value;
+  }
   // Opt-in live Local VM fixture: keep the temporary home and fake engine,
   // granting only the explicitly selected machine connection and static UI.
   if (localVm) Object.assign(childEnv, {

@@ -150,8 +150,8 @@ underscores following a recognized name. Tests include `@調査担当者`,
 `@everyone` is channel-only in the picker, composer, user bubbles and bot
 Markdown. The stylesheet also includes the requested declaration separator.
 
-Launch with `--bot-mentions` to configure the existing fake CLI through the
-fixture's instance endpoint. Its first reply mentions Juniper, 調査担当 and Atlas;
+Launch with `--bot-mentions` to script the existing fake CLI through the
+launcher's `FAKE_CLAUDE_*` environment. Its first reply mentions Juniper, 調査担当 and Atlas;
 subsequent replies use the default text to bound channel handoffs. Send
 `@Atlas Please ask the team to review.` through the channel composer. In the
 recorded run, Atlas's actual bot message highlighted Juniper red, 調査担当 orange

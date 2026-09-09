@@ -180,12 +180,14 @@ describe("control-omb isolated verification loop", () => {
   });
 
   it("launches, drives a real fake-engine turn, and removes only its test data", async () => {
-    const session = await launchVerificationServer({
+    const parentEnv = {
       ...process.env,
       COMPOSIO_API_KEY: "must-not-reach-the-fixture",
       OMB_SKILLS_DIR: "/must/not/reach/the/fixture",
       XAI_API_KEY: "must-not-reach-the-fixture",
-    });
+      FAKE_CLAUDE_PROBE: "fixture-scripting-knob",
+    };
+    const session = await launchVerificationServer(parentEnv);
     const env = { OPENMAUSBOT_URL: session.info.url };
     try {
       const doctor = await runControlOmb(["doctor"], { env }) as any;
@@ -204,10 +206,34 @@ describe("control-omb isolated verification loop", () => {
       expect(fixtureEnv).not.toHaveProperty("OMB_SKILLS_DIR");
       expect(fixtureEnv).not.toHaveProperty("XAI_API_KEY");
       expect(JSON.stringify(fixtureEnv)).not.toContain("must-not-reach-the-fixture");
+      // The fake engine's own knobs are the one thing that crosses.
+      expect(fixtureEnv.FAKE_CLAUDE_PROBE).toBe("fixture-scripting-knob");
     } finally {
       await session.close();
     }
     expect(existsSync(session.info.dataDir)).toBe(false);
     expect(existsSync(session.info.logPath)).toBe(true);
+  }, 30_000);
+
+  it("scripts the fake engine's tool calls from the launcher's environment", async () => {
+    const session = await launchVerificationServer({
+      ...process.env,
+      FAKE_CLAUDE_TOOL_CALLS: '[{"name":"Bash","input":{"command":"pnpm control:omb doctor"},"ok":true},{"name":"Bash","input":{"command":"false"},"ok":false}]',
+    });
+    const env = { OPENMAUSBOT_URL: session.info.url };
+    try {
+      const created = await runControlOmb(["new-bot", "--name", "Tool Script Probe"], { env }) as any;
+      const botId = created.bot.id as string;
+      await runControlOmb(["send", "--bot", botId, "--text", "run both commands"], { env });
+      const settled = await runControlOmb(["wait", "--bot", botId, "--timeout", "20"], { env }) as any;
+      expect(settled.status).toBe("settled");
+      const transcript = await runControlOmb(["messages", "--bot", botId, "--limit", "10"], { env }) as any;
+      const tools = transcript.messages
+        .filter((message: { kind?: string }) => message.kind === "activity")
+        .map((message: { tool?: { name?: string; ok?: boolean } }) => ({ name: message.tool?.name, ok: message.tool?.ok }));
+      expect(tools).toEqual([{ name: "Bash", ok: true }, { name: "Bash", ok: false }]);
+    } finally {
+      await session.close();
+    }
   }, 30_000);
 });
