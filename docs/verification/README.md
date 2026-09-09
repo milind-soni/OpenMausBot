@@ -38,6 +38,7 @@ Use only mapped, tested commands:
 - [Chat turns](chat-turns.md)
 - [Channels](channels.md)
 - [Engines and Doctor](engines.md)
+- [Qwen model route selection](qwen-models.md)
 - [Team backups](team-backups.md)
 
 Renderer-only behavior—Settings, sidebar drag-and-drop, the VM modal, the

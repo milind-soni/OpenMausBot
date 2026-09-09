@@ -425,13 +425,14 @@ describe("loaded host probes", () => {
 });
 
 describe("Qwen / Hermes ACP turns", () => {
-  it("Qwen argv is --acp -m <api-id>, never the encoded picker id", async () => {
+  it("Qwen selects the full local route over ACP before prompting", async () => {
     const home = scratchHome("omb-qwen-turn-");
     const dump = join(home, "env.json");
     const instance = await QwenAgentDriver.create({
       instanceId: "qwen",
       displayName: "Qwen",
-      environment: { HOME: home, FAKE_ACP_DUMP: dump },
+      environment: { HOME: home, USERPROFILE: home, FAKE_ACP_DUMP: dump,
+        FAKE_ACP_MODELS: "saved-default(openai),gemma-4-31b-it-bf16(openai)" },
       enabled: true,
       config: { cli: FAKE_ACP, fullAuto: true },
     });
@@ -440,7 +441,13 @@ describe("Qwen / Hermes ACP turns", () => {
       await instance.adapter.sendTurn({ threadId: "t-qwen", text: "hi", model: "omlx::gemma-4-31b-it-bf16" });
       await recorder.until((e) => e.type === "turn.completed");
       const seen = JSON.parse(readFileSync(dump, "utf8")) as { argv: string[] };
-      expect(seen.argv).toEqual(["--acp", "-m", "gemma-4-31b-it-bf16"]);
+      expect(seen.argv).toEqual(["--acp"]);
+      expect(JSON.parse(readFileSync(`${dump}.config.json`, "utf8"))).toContainEqual({
+        method: "session/set_config_option", params: {
+          sessionId: "fake-acp-session", configId: "model", value: "gemma-4-31b-it-bf16(openai)",
+        },
+      });
+      expect(recorder.events.find((event) => event.type === "turn.completed")).toMatchObject({ ok: true });
     } finally {
       await instance.dispose();
     }
