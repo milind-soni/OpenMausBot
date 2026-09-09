@@ -20,6 +20,7 @@ import {
   memoryDate,
   memoryEntry,
   memoryLineCount,
+  memorySourceLabel,
   MEMORY_CONSOLIDATE_HINT,
   MEMORY_REFUSAL_RECENT_ENTRIES,
   MEMORY_MAX_BYTES,
@@ -170,6 +171,15 @@ describe("workspace", () => {
     expect(memoryEntry("first line\n   second line", { source: 'chat "A · B"', now })).toBe('- 2026-09-10 · from chat "A - B" · first line second line');
     const fenced = memoryEntry("Deploy command:\n```sh\nrailway up\n```", { now });
     expect(fenced).toBe("- 2026-09-10 · Deploy command:\n```sh\nrailway up\n```");
+  });
+
+  it("names an entry's source by room, then thread title, then thread id", () => {
+    expect(memorySourceLabel({ room: { name: "Launch" }, task: { title: "ignored" }, threadId: "t1" })).toBe('room "Launch"');
+    expect(memorySourceLabel({ task: { title: "Follow-up" }, threadId: "t1" })).toBe('chat "Follow-up"');
+    expect(memorySourceLabel({ task: { title: "" }, threadId: "t1" })).toBe("thread t1");
+    expect(memorySourceLabel({ threadId: "t1" })).toBe("thread t1");
+    expect(memoryEntry("fact", { source: memorySourceLabel({ room: { name: "A · B" }, threadId: "t" }), now: new Date(2026, 8, 10, 12) }))
+      .toBe('- 2026-09-10 · from room "A - B" · fact');
   });
 
   it("replace re-attaches the original prefix when the model retypes the whole entry", () => {

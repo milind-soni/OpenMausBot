@@ -219,6 +219,15 @@ function normaliseEntryText(text: string): string {
   return trimmed.replace(/\s*\n\s*/g, " ").replace(/[ \t]+/g, " ");
 }
 
+/** Where an entry came from, as the person will read it in MEMORY.md:
+ * the room's name, else the thread's title, else the bare thread id when
+ * nothing names the conversation. */
+export function memorySourceLabel(from: { room?: { name: string }; task?: { title: string }; threadId: string }): string {
+  if (from.room) return `room ${JSON.stringify(from.room.name)}`;
+  if (from.task?.title) return `chat ${JSON.stringify(from.task.title)}`;
+  return `thread ${from.threadId}`;
+}
+
 /** One dated, sourced entry line. `- 2026-09-10 · from chat "Follow-up" · text` */
 export function memoryEntry(text: string, opts: MemoryUpdateOptions = {}): string {
   const source = cleanSource(opts.source);

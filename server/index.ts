@@ -224,6 +224,7 @@ import {
   listMemoryTopics,
   isMemoryTopicName,
   memorySystemPrompt,
+  memorySourceLabel,
   SESSION_SEARCH_SYSTEM_PROMPT,
   workspaceDir,
 } from "./workspace.ts";
@@ -6045,8 +6046,10 @@ async function runGroupMemberTurn(
     { id: "section-context", label: "Section context", text: sectionContextSystemPrompt(bot.section) },
     // the room path has always put a newline before memory and trimmed
     // the block's leading space; keep that so existing prompts are
-    // byte-identical
-    { id: "memory", label: "Memory", text: workspace ? `\n${memorySystemPrompt(bot.id).trim()}` : "" },
+    // byte-identical. The write guidance follows the tools actually
+    // mounted, exactly as the 1:1 path decides it: memory_update is on the
+    // agents server, so a room turn with it must be told to use it too.
+    { id: "memory", label: "Memory", text: workspace ? `\n${memorySystemPrompt(bot.id, { managedWrites: Boolean(integrations.agents) }).trim()}` : "" },
     { id: "skills", label: "Skills index", text: workspace ? skillsSystemPrompt(bot.id) : "" },
     { id: "skill-instructions", label: "Skill instructions", text: renderSkillInstructions(selectedSkills, { includeRoot: Boolean(workspace) }) },
     { id: "playbooks", label: "Playbooks", text: installedPlaybookInstructions(text, bot.playbooks) },
@@ -8447,12 +8450,11 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
       // Where an entry came from, as the person will read it in MEMORY.md:
       // the room or the thread title, never a bare id unless nothing else
       // names the conversation.
-      const memorySource = (): string => {
-        const room = store.groupByThread(internalCapability.threadId);
-        if (room) return `room ${JSON.stringify(room.name)}`;
-        const task = store.taskByThread(internalSender.id, internalCapability.threadId);
-        return task?.title ? `chat ${JSON.stringify(task.title)}` : `thread ${internalCapability.threadId}`;
-      };
+      const memorySource = (): string => memorySourceLabel({
+        room: store.groupByThread(internalCapability.threadId),
+        task: store.taskByThread(internalSender.id, internalCapability.threadId),
+        threadId: internalCapability.threadId,
+      });
       if (method === "POST" && path === "/api/internal/memory") {
         const body = await readInternalBody();
         const result = updateMemory(internalSender.id, { action: body.action, text: body.text, oldText: body.oldText }, { source: memorySource() });
