@@ -66,7 +66,7 @@ export function QueuedComposerMessages({
               className="shrink-0 text-ink-secondary"
               aria-hidden="true"
             />
-            <span className="min-w-0 flex-1 truncate text-[14px] text-ink" title={item.text}>
+            <span dir="auto" className="min-w-0 flex-1 truncate text-[14px] text-ink" title={item.text}>
               {item.text}
             </span>
             {index === 0 && onSteer && (
