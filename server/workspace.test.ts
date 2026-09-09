@@ -241,6 +241,27 @@ describe("workspace", () => {
     expect(readMemoryFile(BOT).text).toBe("Keep this .");
   });
 
+  it("redacts secrets on every server-side memory write, tool and editor alike", () => {
+    const key = `sk-ant-api03-${"a".repeat(40)}`;
+    const now = new Date(2026, 8, 10, 12);
+    const appended = updateMemory(BOT, { action: "append", text: `Anthropic key is ${key}, call with Bearer ${"b".repeat(32)}` }, { source: 'chat "Keys"', now });
+    expect(appended.ok).toBe(true);
+    // the echo and the file agree, and neither holds the secret
+    const entry = appended.ok ? appended.entry! : "";
+    expect(entry).not.toContain(key);
+    expect(entry).not.toContain("b".repeat(32));
+    expect(entry).toContain("«redacted");
+    expect(readMemoryFile(BOT).text).toBe(`${entry}\n`);
+    expect(readMemoryFile(BOT).text).toContain('- 2026-09-10 · from chat "Keys" · Anthropic key is «redacted');
+    // a replacement's text is scrubbed the same way
+    expect(updateMemory(BOT, { action: "replace", oldText: "Anthropic key", text: `Anthropic key ${key} still` }, { now })).toMatchObject({ ok: true });
+    expect(readMemoryFile(BOT).text).not.toContain(key);
+    // the Settings editor path writes the whole file through the same scrub
+    writeMemoryFile(BOT, `# Memory\n- token: ghp_${"c".repeat(36)}\n`);
+    expect(readMemoryFile(BOT).text).not.toContain("c".repeat(36));
+    expect(readMemoryFile(BOT).text).toContain("«redacted");
+  });
+
   it("accepts plain single-segment topic names and nothing else", () => {
     for (const good of ["deploys.md", "a.md", "my notes.md", "v1.2-rc.md", "under_score.md"]) {
       expect(isMemoryTopicName(good), good).toBe(true);

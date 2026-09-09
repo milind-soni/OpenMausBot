@@ -12,6 +12,7 @@ import { existsSync, mkdirSync, readdirSync, readFileSync, statSync } from "node
 import { join } from "node:path";
 
 import { writeFileAtomic } from "./atomic.ts";
+import { redactSecretsInText } from "./redact.ts";
 
 import { DATA_DIR } from "./config.ts";
 
@@ -118,7 +119,11 @@ export function writeMemoryFile(botId: string, text: string): void {
   // from another process while a turn runs, and the next turn's system
   // prompt reads it at dispatch. A plain write can be observed half-written
   // by either; a rename is all-or-nothing on every platform we ship.
-  writeFileAtomic(join(workspaceDir(botId), "MEMORY.md"), text, { mode: 0o600 });
+  // Redacted here, at the one place every server-side write funnels
+  // through (the tool, the Settings editor, a backup import): memory is
+  // re-read into every future prompt and travels in backups, which is the
+  // same reason learned skills are scrubbed before they are stored.
+  writeFileAtomic(join(workspaceDir(botId), "MEMORY.md"), redactSecretsInText(text), { mode: 0o600 });
 }
 
 export interface MemoryUpdate {
@@ -207,6 +212,9 @@ export function updateMemory(botId: string, update: MemoryUpdate, opts: MemoryUp
     || (!needsOld && update.oldText !== undefined)) {
     return { ok: false, code: "invalid", error: "Use append with text, replace or supersede with text and oldText, or remove with oldText." };
   }
+  // Scrubbed before it becomes an entry, so what the tool echoes back is
+  // what landed in the file; writeMemoryFile scrubs again, harmlessly.
+  const text = update.text === undefined ? undefined : redactSecretsInText(update.text);
   const dir = ensureWorkspace(botId);
   // Do not use readMemoryFile's editor-friendly missing/read-error fallback:
   // a failed read must never turn into a successful overwrite of old notes.
@@ -219,7 +227,7 @@ export function updateMemory(botId: string, update: MemoryUpdate, opts: MemoryUp
   let next: string;
   let entry: string | undefined;
   if (update.action === "append") {
-    entry = memoryEntry(update.text!, opts);
+    entry = memoryEntry(text!, opts);
     next = appendEntry(current, entry);
   } else {
     const oldText = update.oldText!;
@@ -245,17 +253,17 @@ export function updateMemory(botId: string, update: MemoryUpdate, opts: MemoryUp
         return { ok: false, code: "conflict", error: "That entry is already struck through. Replace or remove it, or append the new fact on its own." };
       }
       const struck = `${parsed ? parsed.prefix : line === body ? "" : "- "}~~${body}~~${SEP}superseded ${today}`;
-      entry = memoryEntry(update.text!, opts);
+      entry = memoryEntry(text!, opts);
       next = appendEntry(replaceLine(struck), entry);
     } else if (!parsed) {
       // A hand-written passage keeps the person's own shape: plain
       // substitution, nothing dated onto it.
-      next = current.slice(0, index) + update.text! + current.slice(index + oldText.length);
+      next = current.slice(0, index) + text! + current.slice(index + oldText.length);
     } else {
       // The original date stays; whether the model replaced a fragment or
       // retyped the whole line (with or without its own prefix), the entry
       // is rebuilt from its original prefix and marked updated today.
-      const swapped = line.slice(0, index - span.start) + update.text!.replace(TYPED_PREFIX, "") + line.slice(index - span.start + oldText.length);
+      const swapped = line.slice(0, index - span.start) + text!.replace(TYPED_PREFIX, "") + line.slice(index - span.start + oldText.length);
       const reparsed = parseEntry(swapped);
       const body = reparsed ? reparsed.body : normaliseEntryText(swapped);
       entry = `${parsed.prefix}${body.replace(UPDATED_MARK, "")}${SEP}updated ${today}`;
