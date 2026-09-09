@@ -18,6 +18,8 @@
 //                                          handoff that runs on its own
 //   create_bot(name, role, instructions) → Chiefs can add a specialist to
 //                                          their own section
+//   create_room / manage_room            → Chiefs manage own-section rooms,
+//                                          never move bots or sections
 //   request_credential(id, reason?)       → show a secure, allowlisted key card
 //   list_routines()                       → inspect this bot's scheduled work
 //   propose_routine(...)                  → show a confirmation card for a new routine
@@ -482,22 +484,22 @@ const TOOLS = [
   {
     name: "create_room",
     description:
-      "Create a group chat room (channel) within a sidebar section and assign its member bots. Only a section's Chief of Staff may use this.",
+      "Create a room in your own section when the user asks for one (maximum four per turn). Chiefs only. Choose active peers from list_bots; you are included automatically as the default responder. This creates no turns or messages. Section moves stay with the user. If peer approval is enabled, ask the user to make the room change instead.",
     inputSchema: {
       type: "object",
+      additionalProperties: false,
       properties: {
-        name: { type: "string", description: "Display name for the room (e.g. \"Nalamdesk Team\")." },
+        name: { type: "string", minLength: 1, maxLength: 100, description: "Display name for the room (e.g. \"Nalamdesk Team\")." },
         member_bot_ids: {
           type: "array",
+          minItems: 1,
+          maxItems: 100,
           items: { type: "string" },
           description: "List of bot IDs to include as members of the room.",
         },
-        section: {
-          type: "string",
-          description: "Optional section name to file this room under. Defaults to the Chief of Staff's section.",
-        },
         bulletin: {
           type: "string",
+          maxLength: 12_000,
           description: "Optional initial bulletin / goal / instructions pinned for this room.",
         },
       },
@@ -507,14 +509,15 @@ const TOOLS = [
   {
     name: "manage_room",
     description:
-      "Manage an existing group room: add/remove/set member bots, rename the room, update its section, or change its bulletin. Only a section's Chief of Staff may use this.",
+      "Manage a room from list_rooms: rename it, change its bulletin, or add/remove/set members. Chiefs only, within your own section and allowed peers; keep yourself as a member. Busy rooms, pending approvals and team-goal leads are protected. You cannot move rooms or bots between sections. If peer approval is enabled or the change is refused, ask the user to make the change instead.",
     inputSchema: {
       type: "object",
+      additionalProperties: false,
       properties: {
         room_id: { type: "string", description: "The ID of the group room to manage." },
         action: {
           type: "string",
-          enum: ["add_members", "remove_members", "set_members", "rename", "set_section", "set_bulletin"],
+          enum: ["add_members", "remove_members", "set_members", "rename", "set_bulletin"],
           description: "The action to perform on the room.",
         },
         member_bot_ids: {
@@ -522,24 +525,10 @@ const TOOLS = [
           items: { type: "string" },
           description: "List of bot IDs when action is add_members, remove_members, or set_members.",
         },
-        name: { type: "string", description: "New name for the room when action is rename." },
-        section: { type: "string", description: "Target section name when action is set_section." },
-        bulletin: { type: "string", description: "New bulletin text when action is set_bulletin." },
+        name: { type: "string", minLength: 1, maxLength: 100, description: "New name for the room when action is rename." },
+        bulletin: { type: "string", maxLength: 12_000, description: "New bulletin text when action is set_bulletin; an empty string clears it." },
       },
       required: ["room_id", "action"],
-    },
-  },
-  {
-    name: "move_bot",
-    description:
-      "Move a bot to a different sidebar section. Only a section's Chief of Staff may use this.",
-    inputSchema: {
-      type: "object",
-      properties: {
-        bot_id: { type: "string", description: "The ID of the bot to move." },
-        section: { type: "string", description: "Target section name (e.g. \"Nalamdesk\" or empty/\"General\" for unsectioned)." },
-      },
-      required: ["bot_id", "section"],
     },
   },
   {
@@ -1107,11 +1096,11 @@ async function callTool(name: string, args: Json): Promise<{ text: string; isErr
     };
   }
   if (name === "create_room") {
+    if (args.section !== undefined) return { text: "Room sections are fixed to your own section; ask the user to move rooms.", isError: true };
     const roomName = String(args.name ?? "").trim();
     const memberIds = Array.isArray(args.member_bot_ids)
       ? args.member_bot_ids.map((id) => String(id).trim()).filter(Boolean)
       : [];
-    const section = typeof args.section === "string" ? args.section.trim() : undefined;
     const bulletin = typeof args.bulletin === "string" ? args.bulletin.trim() : undefined;
     if (!roomName) {
       return { text: "create_room needs a room name.", isError: true };
@@ -1126,7 +1115,6 @@ async function callTool(name: string, args: Json): Promise<{ text: string; isErr
         fromThreadId: THREAD_ID,
         name: roomName,
         memberIds,
-        section,
         bulletin,
       }),
     });
@@ -1136,6 +1124,7 @@ async function callTool(name: string, args: Json): Promise<{ text: string; isErr
     };
   }
   if (name === "manage_room") {
+    if (args.section !== undefined || args.action === "set_section") return { text: "Moving rooms between sections is user-only.", isError: true };
     const roomId = String(args.room_id ?? "").trim();
     const action = String(args.action ?? "").trim();
     if (!roomId || !action) {
@@ -1145,7 +1134,6 @@ async function callTool(name: string, args: Json): Promise<{ text: string; isErr
       ? args.member_bot_ids.map((id) => String(id).trim()).filter(Boolean)
       : undefined;
     const roomName = typeof args.name === "string" ? args.name.trim() : undefined;
-    const section = typeof args.section === "string" ? args.section.trim() : undefined;
     const bulletin = typeof args.bulletin === "string" ? args.bulletin.trim() : undefined;
     const r = await api(`/api/internal/manage-room`, {
       method: "POST",
@@ -1156,31 +1144,11 @@ async function callTool(name: string, args: Json): Promise<{ text: string; isErr
         action,
         memberIds,
         name: roomName,
-        section,
         bulletin,
       }),
     });
     if (r.error) return { text: `Couldn't manage room: ${r.error}`, isError: true };
     const message = typeof r.message === "string" ? r.message : `Updated room ${roomId}.`;
-    return { text: message };
-  }
-  if (name === "move_bot") {
-    const targetBotId = String(args.bot_id ?? "").trim();
-    const targetSection = String(args.section ?? "").trim();
-    if (!targetBotId) {
-      return { text: "move_bot needs bot_id.", isError: true };
-    }
-    const r = await api(`/api/internal/move-bot`, {
-      method: "POST",
-      body: JSON.stringify({
-        fromBotId: BOT_ID,
-        fromThreadId: THREAD_ID,
-        botId: targetBotId,
-        section: targetSection,
-      }),
-    });
-    if (r.error) return { text: `Couldn't move bot: ${r.error}`, isError: true };
-    const message = typeof r.message === "string" ? r.message : `Moved @${r.botName ?? targetBotId} to ${r.section ?? "General"}.`;
     return { text: message };
   }
   if (name === "request_credential") {

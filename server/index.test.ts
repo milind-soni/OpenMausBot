@@ -211,6 +211,15 @@ const api = async (method: string, path: string, body?: unknown): Promise<{ stat
   return { status: res.status, body: await res.json() };
 };
 
+const chiefRoomRequest = async (baseUrl: string, token: string, route: "create-room" | "manage-room", body: unknown) => {
+  const response = await fetch(`${baseUrl}/api/internal/${route}`, {
+    method: "POST",
+    headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
+    body: JSON.stringify(body),
+  });
+  return { status: response.status, body: await response.json() as Record<string, unknown> };
+};
+
 /** Wait until the server accepts the headers, then let the test complete
  * the body only after another request changes the conversation's state. */
 const delayedJsonBody = async (
@@ -1114,6 +1123,13 @@ describe("harness HTTP API", () => {
     expect(created.status).toBe(201);
     const routineId = created.body.routine.id;
     try {
+      expect((await api("PATCH", `/api/bots/${other.id}`, { chiefOfStaff: true })).status).toBe(200);
+      const chiefToken = await mintTestCapability(BASE, other.id, other.threadId);
+      const internalBlocked = await chiefRoomRequest(BASE, chiefToken, "manage-room", {
+        roomId: room.id, action: "remove_members", memberIds: [lead.id],
+      });
+      expect(internalBlocked.status).toBe(409);
+      expect(internalBlocked.body.error).toMatch(/pause or reassign.*team-goal routine/i);
       const blocked = await api("PATCH", `/api/groups/${room.id}`, { memberIds: [other.id] });
       expect(blocked.status).toBe(409);
       expect(blocked.body.error).toMatch(/pause or reassign.*team-goal routine/i);
@@ -1604,58 +1620,6 @@ describe("harness HTTP API", () => {
       const state = (await api("GET", "/api/bots?messages=0")).body;
       expect(state.bots.some((bot: { name: string }) => bot.name === "Forbidden Operator")).toBe(false);
 
-      // Exercise /api/internal/create-room, /api/internal/manage-room, and /api/internal/move-bot
-      const createRoomResp = await fetch(`${BASE}/api/internal/create-room`, {
-        method: "POST",
-        headers: internalHeaders,
-        body: JSON.stringify({
-          fromBotId: chief.id,
-          fromThreadId: chief.threadId,
-          name: "Chief Managed Team",
-          memberIds: [chief.id, outsider.id],
-          section: "Channel creation test",
-          bulletin: "Room bulletin.",
-        }),
-      });
-      expect(createRoomResp.status).toBe(201);
-      const createdRoom: any = await createRoomResp.json();
-      expect(createdRoom).toMatchObject({
-        name: "Chief Managed Team",
-        section: "Channel creation test",
-        memberCount: 2,
-      });
-
-      const manageRoomResp = await fetch(`${BASE}/api/internal/manage-room`, {
-        method: "POST",
-        headers: internalHeaders,
-        body: JSON.stringify({
-          fromBotId: chief.id,
-          fromThreadId: chief.threadId,
-          roomId: createdRoom.id,
-          action: "rename",
-          name: "Renamed Chief Team",
-        }),
-      });
-      expect(manageRoomResp.status).toBe(200);
-      const botsState = (await api("GET", "/api/bots?messages=0")).body;
-      const groupCheck = botsState.groups.find((g: { id: string }) => g.id === createdRoom.id);
-      expect(groupCheck?.name).toBe("Renamed Chief Team");
-
-      const moveBotResp = await fetch(`${BASE}/api/internal/move-bot`, {
-        method: "POST",
-        headers: internalHeaders,
-        body: JSON.stringify({
-          fromBotId: chief.id,
-          fromThreadId: chief.threadId,
-          botId: outsider.id,
-          section: "Channel creation test",
-        }),
-      });
-      expect(moveBotResp.status).toBe(200);
-      const movedBot = (await api("GET", "/api/bots?messages=0")).body.bots.find((b: { id: string }) => b.id === outsider.id);
-      expect(movedBot?.section).toBe("Channel creation test");
-
-      await api("DELETE", `/api/groups/${createdRoom.id}`);
     } finally {
       await api("POST", `/api/bots/${chief.id}/interrupt`);
       if (outsiderChannel?.id) await api("DELETE", `/api/groups/${outsiderChannel.id}`);
@@ -1663,6 +1627,129 @@ describe("harness HTTP API", () => {
       for (const botId of createdBotIds) await api("DELETE", `/api/bots/${botId}`);
       await api("DELETE", `/api/bots/${outsider.id}`);
       await api("DELETE", `/api/bots/${chief.id}`);
+    }
+  });
+
+  it("scopes Chief room management to its section, allowed peers and explicit room fields", async () => {
+    const section = `Chief rooms ${Date.now()}`;
+    const bots = await Promise.all(["Chief", "Peer", "Second", "Excluded", "Foreign"].map(async (name, index) => {
+      const created = await api("POST", "/api/bots", { name, section: index === 4 ? `${section} foreign` : section });
+      expect(created.status).toBe(201);
+      return created.body.bot as { id: string; threadId: string };
+    }));
+    const [chief, peer, second, excluded, foreign] = bots;
+    const roomIds: string[] = [];
+    try {
+      expect((await api("PATCH", `/api/bots/${chief.id}`, { chiefOfStaff: true, peers: [peer.id, second.id] })).status).toBe(200);
+      const token = await mintTestCapability(BASE, chief.id, chief.threadId);
+      const create = (body: unknown) => chiefRoomRequest(BASE, token, "create-room", body);
+      const managed = await create({ name: "Managed room", memberIds: [peer.id, peer.id], bulletin: "A short brief." });
+      expect(managed.status).toBe(201);
+      const roomId = String(managed.body.id);
+      roomIds.push(roomId);
+      expect(managed.body).toMatchObject({ name: "Managed room", section, memberIds: [chief.id, peer.id], memberCount: 2 });
+      const manage = (body: Record<string, unknown>) => chiefRoomRequest(BASE, token, "manage-room", { roomId, ...body });
+      expect((await manage({ action: "rename", name: "Renamed room" })).status).toBe(200);
+      expect((await manage({ action: "add_members", memberIds: [second.id] })).body.memberIds).toEqual([chief.id, peer.id, second.id]);
+      expect((await manage({ action: "remove_members", memberIds: [peer.id] })).body.memberIds).toEqual([chief.id, second.id]);
+      expect((await manage({ action: "set_members", memberIds: [chief.id, peer.id] })).body.memberIds).toEqual([chief.id, peer.id]);
+      expect((await manage({ action: "set_bulletin", bulletin: "Updated brief ✓" })).status).toBe(200);
+      const readRoom = async () => (await api("GET", "/api/bots?messages=20")).body.groups.find((group: { id: string }) => group.id === roomId);
+      expect(await readRoom()).toMatchObject({ name: "Renamed room", bulletin: "Updated brief ✓", section, memberIds: [chief.id, peer.id], defaultResponder: { kind: "member", botId: chief.id }, messages: [] });
+      for (const memberId of [foreign.id, excluded.id, "missing-bot"]) {
+        expect((await create({ name: "Forbidden room", memberIds: [memberId] })).status).toBe(403);
+        expect((await manage({ action: "add_members", memberIds: [memberId] })).status).toBe(403);
+      }
+      expect((await create({ name: "Foreign section", memberIds: [peer.id], section: `${section} foreign` })).status).toBe(403);
+      expect((await manage({ action: "set_section", section: `${section} foreign` })).status).toBe(403);
+      expect((await manage({ action: "set_section" })).status).toBe(400);
+      expect((await manage({ action: "remove_members", memberIds: [chief.id] })).status).toBe(403);
+      for (const body of [null, [], { name: "Bad roster", memberIds: [] }, { name: "Bad roster", memberIds: [42] }, { name: "Wide brief", memberIds: [peer.id], bulletin: "x".repeat(12_001) }]) {
+        expect((await create(body)).status).toBe(400);
+      }
+      for (const body of [{ action: "set_members", memberIds: [] }, { action: "set_bulletin" }, { action: "set_bulletin", bulletin: "x".repeat(12_001) }, { action: "rename", name: "changed", cwd: "/tmp" }]) {
+        expect((await manage(body)).status).toBe(400);
+      }
+      for (const [memberIds, roomSection] of [[[foreign.id], `${section} foreign`], [[chief.id, foreign.id], section], [[peer.id], section]] as const) {
+        const otherRoom = (await api("POST", "/api/groups", { name: "Unmanaged room", memberIds, section: roomSection })).body.group;
+        roomIds.push(otherRoom.id);
+        expect((await manage({ roomId: otherRoom.id, action: "rename", name: "Forbidden" })).status).toBe(403);
+      }
+      expect(await readRoom()).toMatchObject({ name: "Renamed room", bulletin: "Updated brief ✓", memberIds: [chief.id, peer.id] });
+      expect((await api("PATCH", `/api/bots/${second.id}`, { hidden: true })).status).toBe(200);
+      expect((await create({ name: "Archived member", memberIds: [second.id] })).status).toBe(403);
+      expect((await manage({ action: "add_members", memberIds: [second.id] })).status).toBe(403);
+      expect((await api("PATCH", `/api/bots/${chief.id}`, { approvePeerComms: true })).status).toBe(200);
+      expect((await manage({ action: "rename", name: "No review" })).body.error).toMatch(/peer approval is required/);
+      expect((await create({ name: "No review", memberIds: [peer.id] })).status).toBe(403);
+      expect((await api("PATCH", `/api/bots/${chief.id}`, { approvePeerComms: false })).status).toBe(200);
+      for (let count = 1; count < 4; count += 1) {
+        const created = await create({ name: `Bounded room ${count}`, memberIds: [peer.id] });
+        expect(created.status).toBe(201);
+        roomIds.push(String(created.body.id));
+      }
+      expect((await create({ name: "Fifth room", memberIds: [peer.id] })).status).toBe(429);
+      expect((await api("GET", "/api/bots?messages=0")).body.bots.find((bot: { id: string }) => bot.id === foreign.id).section).toBe(`${section} foreign`);
+      expect((await api("PATCH", `/api/bots/${chief.id}`, { modelSelection: { instanceId: "claude", model: "claude-sonnet-5" } })).status).toBe(200);
+      const busyToken = await mintTestCapability(BASE, chief.id, chief.threadId);
+      expect((await api("POST", `/api/groups/${roomId}/messages`, { text: "Hold this room turn" })).status).toBe(202);
+      await expect.poll(async () => (await readRoom()).working).toBe(true);
+      for (const mutation of [{ action: "set_members", memberIds: [chief.id] }, { action: "set_bulletin", bulletin: "Changed mid-turn" }]) {
+        const blocked = await chiefRoomRequest(BASE, busyToken, "manage-room", { roomId, ...mutation });
+        expect(blocked.status).toBe(409);
+        expect(blocked.body.error).toMatch(/working or waiting/);
+      }
+      expect(await readRoom()).toMatchObject({ bulletin: "Updated brief ✓", memberIds: [chief.id, peer.id] });
+    } finally {
+      for (const id of roomIds) {
+        await api("POST", `/api/groups/${id}/interrupt`, {});
+        await api("DELETE", `/api/groups/${id}`);
+      }
+      for (const bot of bots) await api("DELETE", `/api/bots/${bot.id}`);
+    }
+  });
+
+  it("binds Chief room management to the bearer and rechecks it after a slow body", async () => {
+    const chief = (await api("POST", "/api/bots")).body.bot;
+    const peer = (await api("POST", "/api/bots")).body.bot;
+    const room = (await api("POST", "/api/groups", { name: "Guarded room", memberIds: [chief.id, peer.id] })).body.group;
+    let held: Awaited<ReturnType<typeof delayedJsonBody>> | undefined;
+    try {
+      await api("PATCH", `/api/bots/${chief.id}`, { chiefOfStaff: true });
+      const nonChiefToken = await mintTestCapability(BASE, peer.id, peer.threadId);
+      for (const route of ["create-room", "manage-room"] as const) {
+        const body = route === "create-room" ? { name: "Must not exist", memberIds: [peer.id] }
+          : { roomId: room.id, action: "rename", name: "Must not change" };
+        expect((await chiefRoomRequest(BASE, "", route, body)).status).toBe(401);
+        expect((await chiefRoomRequest(BASE, nonChiefToken, route, body)).status).toBe(403);
+        const forged = await chiefRoomRequest(BASE, nonChiefToken, route, { ...body, fromBotId: chief.id, fromThreadId: chief.threadId });
+        expect(forged.status).toBe(403);
+        expect(forged.body.error).toMatch(/different bot/);
+        let token = await mintTestCapability(BASE, chief.id, chief.threadId);
+        expect((await chiefRoomRequest(BASE, token, route, { ...body, fromThreadId: peer.threadId })).status).toBe(403);
+        held = await delayedJsonBody("POST", `/api/internal/${route}`, body, { authorization: `Bearer ${token}` });
+        await mintTestCapability(BASE, chief.id, chief.threadId);
+        const expired = await held.finish();
+        expect(expired.status).toBe(401);
+        expect(expired.body.error).toMatch(/expired/);
+        held.close();
+        held = undefined;
+        token = await mintTestCapability(BASE, chief.id, chief.threadId, { kind: "connectors" });
+        expect((await chiefRoomRequest(BASE, token, route, body)).status).toBe(403);
+      }
+      const token = await mintTestCapability(BASE, chief.id, chief.threadId);
+      held = await delayedJsonBody("POST", "/api/internal/manage-room", { roomId: room.id, action: "rename", name: "Demoted" }, { authorization: `Bearer ${token}` });
+      await api("PATCH", `/api/bots/${chief.id}`, { chiefOfStaff: false });
+      expect((await held.finish()).status).toBe(403);
+      const groups = (await api("GET", "/api/bots?messages=0")).body.groups;
+      expect(groups.find((group: { id: string }) => group.id === room.id).name).toBe("Guarded room");
+      expect(groups.some((group: { name: string }) => group.name === "Must not exist")).toBe(false);
+      expect((await fetch(`${BASE}/api/internal/move-bot`, { method: "POST", headers: { authorization: `Bearer ${token}`, "content-type": "application/json" }, body: JSON.stringify({ targetBotId: peer.id, section: "Elsewhere" }) })).status).toBe(404);
+    } finally {
+      held?.close();
+      await api("DELETE", `/api/groups/${room.id}`);
+      await api("DELETE", `/api/bots/${chief.id}`);
+      await api("DELETE", `/api/bots/${peer.id}`);
     }
   });
 
@@ -1743,6 +1830,31 @@ describe("harness HTTP API", () => {
     const blocked = await api("POST", "/api/groups/test-stranded-room/tasks", {});
     expect(blocked.status).toBe(409);
     expect(blocked.body.error).toMatch(/waiting on you/i);
+  });
+
+  it("keeps Chief room changes behind pending user approvals", async () => {
+    const bot = (await api("POST", "/api/bots", { name: "Pending Chief", section: "Pending room" })).body.bot;
+    await api("PATCH", `/api/bots/${bot.id}`, { chiefOfStaff: true });
+    const room = (await api("POST", "/api/groups", { name: "Pending room", memberIds: [bot.id], section: "Pending room" })).body.group;
+    try {
+      const roomToken = await mintTestCapability(BASE, bot.id, room.threadId);
+      const proposed = await fetch(`${BASE}/api/internal/profile-requests`, {
+        method: "POST", headers: { authorization: `Bearer ${roomToken}`, "content-type": "application/json" },
+        body: JSON.stringify({ fromBotId: bot.id, fromThreadId: room.threadId, changes: { description: "Only after approval" }, reason: "Fixture check" }),
+      });
+      expect(proposed.status).toBe(201);
+      await proposed.json();
+      const token = await mintTestCapability(BASE, bot.id, bot.threadId);
+      const changed = await chiefRoomRequest(BASE, token, "manage-room", {
+        roomId: room.id, action: "set_bulletin", bulletin: "Changed during approval",
+      });
+      expect(changed.status).toBe(409);
+      expect(changed.body.error).toMatch(/waiting on you/);
+      expect((await chiefRoomRequest(BASE, token, "manage-room", { roomId: "test-dm", action: "rename", name: "A room" })).status).toBe(403);
+    } finally {
+      await api("DELETE", `/api/groups/${room.id}`);
+      await api("DELETE", `/api/bots/${bot.id}`);
+    }
   });
 
   it("keeps direct-message channels folderless at the API boundary", async () => {
@@ -4100,6 +4212,8 @@ describe("harness HTTP API", () => {
       const direct = await createBot();
       const channelOwner = await createBot();
       const channelPeer = await createBot();
+      expect((await isolatedApi("PATCH", `/api/bots/${channelPeer.id}`, { chiefOfStaff: true })).status).toBe(200);
+      const roomChiefToken = await mintTestCapability(`http://127.0.0.1:${isolatedPort}`, channelPeer.id, channelPeer.threadId);
 
       const directOriginalThread = direct.threadId as string;
       const directAlternate = await isolatedApi("POST", `/api/bots/${direct.id}/tasks`, { title: "Alternate" });
@@ -4229,6 +4343,11 @@ describe("harness HTTP API", () => {
       await expectLocked(isolatedApi("PATCH", `/api/groups/${group.id}`, {
         memberIds: [channelPeer.id],
       }));
+      const chiefRosterChange = await chiefRoomRequest(`http://127.0.0.1:${isolatedPort}`, roomChiefToken, "manage-room", {
+        roomId: group.id, action: "set_members", memberIds: [channelOwner.id, channelPeer.id],
+      });
+      expect(chiefRosterChange.status).toBe(409);
+      expect(chiefRosterChange.body.error).toMatch(/securely saving a credential/i);
       await expectLocked(isolatedApi("DELETE", `/api/groups/${group.id}`));
       await expectLocked(isolatedApi("DELETE", `/api/bots/${channelOwner.id}`));
       await expectLocked(isolatedApi("DELETE", `/api/bots/${channelPeer.id}`));

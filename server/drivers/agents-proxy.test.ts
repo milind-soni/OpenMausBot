@@ -37,9 +37,8 @@ let lastThreadBody: any = null;
 let threadCalls = 0;
 let threadResponse: unknown = { threadId: "thread-new", title: "QA: PR #1", botId: "bot-asker", botName: "Asker", self: true, state: "running", limit: 3 };
 let lastCreateBody: any = null;
-let lastCreateRoomBody: any = null;
-let lastManageRoomBody: any = null;
-let lastMoveBotBody: any = null;
+let lastCreateRoomBody: unknown = null;
+let lastManageRoomBody: unknown = null;
 let lastCredentialBody: any = null;
 let lastRoutineQuery = "";
 let routinesResponse: unknown = {
@@ -208,16 +207,6 @@ beforeAll(async () => {
       });
       return;
     }
-    if (req.method === "POST" && req.url === "/api/internal/move-bot") {
-      let data = "";
-      req.on("data", (c) => (data += c));
-      req.on("end", () => {
-        lastMoveBotBody = JSON.parse(data);
-        res.writeHead(200, { "content-type": "application/json" });
-        res.end(JSON.stringify({ ok: true, botId: lastMoveBotBody.botId, botName: "Pixel", section: "Launch", message: "Moved @Pixel to Launch." }));
-      });
-      return;
-    }
     if (req.method === "POST" && req.url === "/api/internal/request-credential") {
       let data = "";
       req.on("data", (c) => (data += c));
@@ -361,7 +350,6 @@ describe("agents-proxy MCP surface", () => {
       "create_bot",
       "create_room",
       "manage_room",
-      "move_bot",
       "request_credential",
       "memory_update",
       "memory_log",
@@ -716,7 +704,6 @@ describe("agents-proxy MCP surface", () => {
     const resCreate = await callTool("create_room", {
       name: "Dev Team",
       member_bot_ids: ["bot-1", "bot-2"],
-      section: "Work",
       bulletin: "Ship fast.",
     });
     expect(resCreate.result.content[0].text).toContain("Created room “Dev Team” in section “Work”");
@@ -725,7 +712,6 @@ describe("agents-proxy MCP surface", () => {
       fromThreadId: "thread-asker-routine",
       name: "Dev Team",
       memberIds: ["bot-1", "bot-2"],
-      section: "Work",
       bulletin: "Ship fast.",
     });
 
@@ -743,17 +729,17 @@ describe("agents-proxy MCP surface", () => {
       memberIds: ["bot-3"],
     });
 
-    const resMove = await callTool("move_bot", {
-      bot_id: "bot-designer",
-      section: "Launch",
-    });
-    expect(resMove.result.content[0].text).toContain("Moved @Pixel to Launch.");
-    expect(lastMoveBotBody).toEqual({
-      fromBotId: "bot-asker",
-      fromThreadId: "thread-asker-routine",
-      botId: "bot-designer",
-      section: "Launch",
-    });
+  });
+
+  it("does not expose bot moves or silently accept room section reassignment", async () => {
+    for (const [name, args] of [
+      ["create_room", { name: "Elsewhere", member_bot_ids: ["bot-1"], section: "Foreign" }],
+      ["manage_room", { room_id: "room-dev", action: "set_section", section: "Foreign" }],
+    ] as const) {
+      const result = await callTool(name, args);
+      expect(result.result.isError).toBe(true);
+    }
+    expect((await callTool("move_bot", { bot_id: "bot-1", section: "Foreign" })).error.message).toContain("Unknown tool");
   });
 
   it("requests an allowlisted credential without putting a secret in the request", async () => {
