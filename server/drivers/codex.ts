@@ -591,6 +591,10 @@ export const CodexDriver: ProviderDriver<CodexConfig> = {
         });
 
       let abandoned = false;
+      let codexThreadId: string | null = null;
+      let codexTurnId: string | null = null;
+      let startingNativeTurn = false;
+      const earlyNotifications: any[] = [];
       const state = {
         settled: false,
         lastText: "",
@@ -631,6 +635,20 @@ export const CodexDriver: ProviderDriver<CodexConfig> = {
           rpcPending.set(id, {
             resolve: (v) => {
               clearTimeout(timer);
+              if (method === "turn/start") {
+                if (typeof v?.turn?.id !== "string" || !v.turn.id) {
+                  reject(new Error("Codex did not return a native turn id"));
+                  return;
+                }
+                // Bind synchronously: a single stdout chunk can contain the
+                // response, streamed events, completion and a late request.
+                codexTurnId = v.turn.id;
+                startingNativeTurn = false;
+                for (const notification of earlyNotifications.splice(0)) {
+                  if (state.settled) break;
+                  handleNotification(notification);
+                }
+              }
               resolve(v);
             },
             reject: (e) => {
@@ -789,6 +807,30 @@ export const CodexDriver: ProviderDriver<CodexConfig> = {
 
       const handleNotification = (msg: any) => {
         const p = msg.params ?? {};
+        // An app-server also emits notifications for native helper threads.
+        // Only this request's parent may write its transcript/usage or settle
+        // its run. Requests still use the approval broker above, including
+        // helper requests; ignoring child *notifications* must not grant tools.
+        const connectionError = msg.method === "error" &&
+          !("threadId" in p) && !("turnId" in p);
+        if (!connectionError) {
+          if (!codexThreadId || p.threadId !== codexThreadId) return;
+          if (!codexTurnId) {
+            // Some servers stream before acknowledging turn/start. Retain a
+            // bounded prefix, then filter against the authoritative response.
+            if (startingNativeTurn) {
+              if (earlyNotifications.length >= 1024) {
+                void settle(false, "too_many_events_before_turn_start");
+              } else {
+                earlyNotifications.push(msg);
+              }
+            }
+            return;
+          }
+          const eventTurnId = msg.method === "turn/started" || msg.method === "turn/completed"
+            ? p.turn?.id : p.turnId;
+          if (eventTurnId !== codexTurnId) return;
+        }
         switch (msg.method) {
           // token-level chat text; the item/completed frame follows with the
           // whole message, so its delta is only a fallback when none streamed
@@ -1025,7 +1067,6 @@ export const CodexDriver: ProviderDriver<CodexConfig> = {
         // on start AND resume so Codex owns their lifetime through compaction.
         // Removed bot rules are cleared without dropping native configured rules.
         const cursor = typeof turn.resumeCursor === "string" ? turn.resumeCursor : null;
-        let codexThreadId: string | null = null;
         let startedModel: string | null = null;
         if (cursor) {
           try {
@@ -1081,7 +1122,9 @@ export const CodexDriver: ProviderDriver<CodexConfig> = {
           ...(promptText ? [{ type: "text" as const, text: promptText }] : []),
           ...(turn.images ?? []).map((image) => ({ type: "localImage" as const, path: image.path })),
         ];
-        const startTurn = () => request("turn/start", {
+        const startTurn = () => {
+          startingNativeTurn = true;
+          return request("turn/start", {
             threadId: codexThreadId,
             input: turnInput,
             ...approvalParams.turn,
@@ -1096,6 +1139,7 @@ export const CodexDriver: ProviderDriver<CodexConfig> = {
             // thread rather than the current one.
             ...(turn.effort ? { effort: turn.effort } : {}),
           });
+        };
         try {
           await startTurn();
         } catch (error) {

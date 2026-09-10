@@ -37,7 +37,17 @@ let decision: unknown = null;
 let experimentalApi = false;
 
 const out = (obj: unknown) => process.stdout.write(JSON.stringify(obj) + "\n");
-const notify = (method: string, params: unknown) => out({ jsonrpc: "2.0", method, params });
+let nativeThreadId = "codex-thread-1";
+const nativeTurnId = "turn-1";
+const notify = (method: string, params: any) => out({
+  jsonrpc: "2.0", method,
+  params: {
+    threadId: nativeThreadId,
+    ...(method.startsWith("turn/") ? {} : { turnId: nativeTurnId }),
+    ...params,
+    ...(params.turn ? { turn: { id: nativeTurnId, ...params.turn } } : {}),
+  },
+});
 
 const dump = () => {
   if (process.env.FAKE_CODEX_DUMP) {
@@ -216,6 +226,7 @@ process.stdin.on("data", (chunk) => {
         }
         break;
       case "turn/start": {
+        nativeThreadId = msg.params?.threadId ?? nativeThreadId;
         if (msg.params?.permissions && (!experimentalApi || mode === "config-profile-unsupported")) {
           out({ jsonrpc: "2.0", id: msg.id, error: { code: -32602, message: "experimental API required for permissions" } });
           break;
@@ -245,7 +256,7 @@ process.stdin.on("data", (chunk) => {
           writeFileSync(process.env.FAKE_CODEX_STATE, String(launched + 1));
           if (launched < quota) {
             if (process.env.FAKE_CODEX_PARTIAL_FAILS) {
-              out({ jsonrpc: "2.0", id: msg.id, result: { ok: true } });
+              out({ jsonrpc: "2.0", id: msg.id, result: { turn: { id: nativeTurnId } } });
               notify("item/agentMessage/delta", { itemId: "m1", delta: "half an answer" });
               notify("turn/completed", { turn: { status: "failed", error: { message: "provider overloaded, try again" } } });
               break;
@@ -258,7 +269,31 @@ process.stdin.on("data", (chunk) => {
             break;
           }
         }
-        out({ jsonrpc: "2.0", id: msg.id, result: { ok: true } });
+        if (mode === "early-turn-events") finishTurn();
+        out({ jsonrpc: "2.0", id: msg.id, result: { turn: { id: nativeTurnId } } });
+        if (mode === "early-turn-events") break;
+        if (mode === "helper-events") {
+          // Interleave child and stale-parent traffic with the active parent.
+          // A child completion must not kill the process or answer for the parent.
+          for (const scope of [
+            { threadId: "helper-thread", turnId: "helper-turn" },
+            { threadId: nativeThreadId, turnId: "previous-turn" },
+            { threadId: null, turnId: null },
+          ]) {
+            notify("item/agentMessage/delta", { ...scope, delta: "FOREIGN answer" });
+            notify("item/reasoning/textDelta", { ...scope, delta: "FOREIGN reasoning" });
+            notify("item/started", { ...scope, item: { id: "foreign-tool", type: "commandExecution", command: "FOREIGN command" } });
+            notify("item/completed", { ...scope, item: { type: "agentMessage", text: "FOREIGN final" } });
+            notify("thread/tokenUsage/updated", { ...scope, tokenUsage: { total: { inputTokens: 999, outputTokens: 999 } } });
+            notify("error", { ...scope, message: "FOREIGN error" });
+            notify("turn/completed", { ...scope, turn: { id: scope.turnId, status: "completed" } });
+            notify("turn/completed", { ...scope, turn: { id: scope.turnId, status: "failed" } });
+          }
+          // This request proves that the parent is still able to do work after
+          // the child finished. Wait for the real adapter approval response.
+          out({ jsonrpc: "2.0", id: 100, method: "execCommandApproval", params: { command: "echo parent continues" } });
+          break;
+        }
         const command = mode === "windows-command"
           ? [
               "\"C:\\WINDOWS\\System32\\WindowsPowerShell\\v1.0\\powershell.exe\"",
