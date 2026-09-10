@@ -23,10 +23,12 @@ try {
     environment: { HOME: fixture.info.dataDir, USERPROFILE: fixture.info.dataDir, CODEX_HOME: join(fixture.info.dataDir, ".codex") },
   };
   writeFileSync(configPath, JSON.stringify(config, null, 2), { mode: 0o600 });
-  await api("PUT", "/api/config", { defaultModelSelection: { instanceId: "codex", model: "gpt-6-astra" } });
-  await runControlOmb(["new-bot", "--name", "Codex Helper Fixture", "--url", fixture.info.url]);
+  await api("PUT", "/api/config", { defaultModelSelection: { instanceId: "codex", model: "gpt-fake-default" } });
+  const created = await runControlOmb(["new-bot", "--name", "Codex Helper Fixture", "--url", fixture.info.url]) as { bot: { id: string } };
+  await runControlOmb(["set-model", "--bot", created.bot.id, "--instance", "codex", "--model", "gpt-fake-default", "--url", fixture.info.url]);
   ui = await mountPreview(fixture, {
     entry: "/scripts/testing/threads-preview.tsx", route: "/__codex-helpers.html", title: "Codex helper isolation — offline fixture",
+    extraRoutes: [{ path: "/favicon.ico", handler: (_req, res) => { res.writeHead(204); res.end(); } }],
   });
   const info = { ...fixture.info, launcherPid: process.pid, previewUrl: ui.previewUrl };
   console.log(JSON.stringify(info));
