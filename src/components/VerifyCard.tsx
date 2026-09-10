@@ -3,9 +3,9 @@ import { useState } from "react";
 
 import { cn } from "@/lib/cn";
 import { t } from "@/lib/i18n";
-import { verifySummary, type VerifyStep } from "@/lib/verify-steps";
+import { runSummary, type RunStep } from "@/lib/verify-steps";
 
-function StatusIcon({ status }: { status: VerifyStep["status"] }) {
+function StatusIcon({ status }: { status: RunStep["status"] }) {
   const className = "size-4 shrink-0";
   switch (status) {
     case "running":
@@ -20,11 +20,13 @@ function StatusIcon({ status }: { status: VerifyStep["status"] }) {
 const ICON_BUTTON =
   "flex size-7 shrink-0 items-center justify-center rounded-lg text-ink-secondary outline-none hover:bg-raised-hover hover:text-ink focus-visible:ring-2 focus-visible:ring-accent/60";
 
-/** A bot's control-CLI run in the visible thread as a checklist, with one
- * action: put the run into the composer as a skill request, for the person
- * to annotate and send through the ordinary skill review flow. Collapse is
- * the card's own (a long run starts folded); dismissal is the caller's,
- * since it outlives the card. */
+/** A bot's run in the current ask as a checklist — every command it ran,
+ * the control-CLI ones tagged verified — with one action: put the run into
+ * the composer as a skill request, for the person to annotate and send
+ * through the ordinary skill review flow. The card renders whatever steps it
+ * is given; whether a run is worth a card (`showRun`) is the caller's call.
+ * Collapse is the card's own (a long run starts folded); dismissal is the
+ * caller's, since it outlives the card. */
 export function VerifyCard({
   steps,
   canSave,
@@ -32,7 +34,7 @@ export function VerifyCard({
   onDismiss,
   onSave,
 }: {
-  steps: VerifyStep[];
+  steps: RunStep[];
   /** The run can be saved now: skill authoring is on, the engine has the
    * agents tools, something passed, nothing is still running or busy. */
   canSave: boolean;
@@ -56,7 +58,7 @@ export function VerifyCard({
         <div className="flex min-w-0 flex-1 flex-col">
           <span className="text-[13px] font-medium">{t("chat.verify.title")}</span>
           <span role="status" aria-live="polite" aria-atomic="true" className="text-[12px] text-ink-secondary">
-            {verifySummary(steps).label}
+            {runSummary(steps).label}
           </span>
         </div>
         <button
@@ -83,7 +85,10 @@ export function VerifyCard({
             {steps.map((step) => (
               <li key={step.id} className="flex min-w-0 items-center gap-2 py-1">
                 <StatusIcon status={step.status} />
-                <span className="shrink-0 text-[13px] font-medium">{step.subcommand}</span>
+                <span className="shrink-0 text-[13px] font-medium">{step.label}</span>
+                {step.verified && (
+                  <span className="shrink-0 text-[10.5px] uppercase tracking-wide text-success">{t("chat.verify.verifiedTag")}</span>
+                )}
                 <code className="min-w-0 flex-1 truncate font-mono text-[11.5px] text-ink-secondary" title={step.command}>
                   {step.command}
                 </code>

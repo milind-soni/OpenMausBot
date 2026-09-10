@@ -45,7 +45,7 @@ import { ChatMarkdown } from "./ChatMarkdown";
 import { RawMarkdownView, RawToggleAction } from "./RawMarkdownToggle";
 import { ThreadChip } from "./ThreadChip";
 import { VerifyCard } from "./VerifyCard";
-import { nameIsCommand, skillPrompt, skillStaged, verifySteps as computeVerifySteps, verifySummary } from "@/lib/verify-steps";
+import { nameIsCommand, runSteps, runSummary, showRun, skillPrompt, skillStaged } from "@/lib/verify-steps";
 import { ThreadRefText } from "./ThreadRefs";
 import { OptionCard, shouldHideOnboardingCard } from "./OptionCard";
 import { ApprovalCard } from "./ApprovalCard";
@@ -871,21 +871,22 @@ export function ChatView({ bot: profile }: { bot: Bot }) {
 
   // only the active branch is rendered; forks stay reachable via ‹ › nav
   const messages = useMemo(() => visibleMessages(bot), [bot]);
-  // The bot's control-CLI run in this thread, for the Verify card. Saving
-  // mirrors the /learn gate: the flag, an engine with the agents tools, and
-  // a bot that can take a message now — plus a run with something to keep.
-  const verifySteps = useMemo(() => computeVerifySteps(messages), [messages]);
-  const verifyCounts = verifySummary(verifySteps);
+  // The bot's run in the current ask — every command it ran, the control-CLI
+  // ones verified — for the run card. Saving mirrors the /learn gate: the
+  // flag, an engine with the agents tools, and a bot that can take a message
+  // now — plus a run with something to keep.
+  const recordedRun = useMemo(() => runSteps(messages), [messages]);
+  const recordedRunCounts = runSummary(recordedRun);
   const engineSupportsAgents = Boolean(
     state.instances.find((instance) => instance.instanceId === bot.modelSelection.instanceId)?.capabilities?.agentsMcp,
   );
-  const canSaveVerify =
-    skillAuthoringEnabled(state.config) && engineSupportsAgents && verifyCounts.passed > 0 && verifyCounts.running === 0 && !bot.busy;
+  const canSaveRun =
+    skillAuthoringEnabled(state.config) && engineSupportsAgents && recordedRunCounts.passed > 0 && recordedRunCounts.running === 0 && !bot.busy;
   // A dismissal is pinned to the run's last step, per thread: the card comes
-  // back when the bot runs the CLI again, not merely when a step settles, and
-  // stays away across a switch to another thread and back.
-  const [verifyDismissed, setVerifyDismissed] = useState<ReadonlyMap<string, string>>(() => new Map());
-  const lastVerifyStep = verifySteps.at(-1);
+  // back when the bot runs another command, not merely when a step settles,
+  // and stays away across a switch to another thread and back.
+  const [runDismissed, setRunDismissed] = useState<ReadonlyMap<string, string>>(() => new Map());
+  const lastRunStep = recordedRun.at(-1);
 
   // Windowed transcript: only a tail of the thread mounts (screenshots make
   // full threads DOM-heavy). The boundary is anchored per bot+task; a
@@ -1376,21 +1377,22 @@ export function ChatView({ bot: profile }: { bot: Bot }) {
           selected one. ArrowUp-to-edit stays gated on busy because editing
           rewinds the thread, which a live turn forbids (the server 409s it). */}
       <div ref={composerDockRef} className="absolute inset-x-0 bottom-0 z-[2]">
-      {/* The bot's verification run as a checklist. Save fills this thread's
+      {/* The bot's run in this ask as a checklist, once it is worth one (a
+          verified step, or more than one command). Save fills this thread's
           composer with the run and hands the caret over; the person adds
           context and sends — nothing is sent from here. In the dock so its
           height is measured with the composer's: the transcript pad, the
           jump pill and bottom-follow all move with it. */}
-      {lastVerifyStep && verifyDismissed.get(transcriptKey) !== lastVerifyStep.id && (
+      {lastRunStep && showRun(recordedRun) && runDismissed.get(transcriptKey) !== lastRunStep.id && (
         <div className="flex justify-end px-5 pb-2">
           <VerifyCard
             key={transcriptKey}
-            steps={verifySteps}
-            canSave={canSaveVerify}
-            staged={skillStaged(messages, verifySteps)}
-            onDismiss={() => setVerifyDismissed((current) => new Map(current).set(transcriptKey, lastVerifyStep.id))}
+            steps={recordedRun}
+            canSave={canSaveRun}
+            staged={skillStaged(messages, recordedRun)}
+            onDismiss={() => setRunDismissed((current) => new Map(current).set(transcriptKey, lastRunStep.id))}
             onSave={() => {
-              appendComposerDraft(`bot:${bot.id}:${bot.threadId}`, skillPrompt(verifySteps));
+              appendComposerDraft(`bot:${bot.id}:${bot.threadId}`, skillPrompt(recordedRun));
               composerDockRef.current?.querySelector("textarea")?.focus();
             }}
           />

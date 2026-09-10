@@ -93,17 +93,24 @@ The permanent form of this recipe is `scripts/testing/control-omb-ui.e2e.test.ts
 OMB_UI_E2E=1 pnpm exec vitest run scripts/testing/control-omb-ui.e2e.test.ts
 ```
 
-The asserted recipe now also covers the floating Verify card with a successful,
-failed, and dry-run command. Those tool outcomes are **simulated provider
-events**, not executions of the commands written in the chips. The recipe then
-presses **Save as skill**: the composer textarea now contains the trigger
-phrase (`Create a verification skill from the run below.`) and the step
-commands, the caret is in the composer, and no new user message was sent — the
-transcript still holds exactly one `StaticText "hello"`. The person adds any
-notes and sends as usual; the card never sends on its own. Separately, the
-recipe runs a real fixture health check and verifies that clicking a deliberately
-missing control fails. The Verify card remains collapsible; the old execution
-timeline is no longer shown above chat.
+The asserted recipe now also covers the floating **This run** card with a
+successful, failed, and dry-run command. The card records every shell command
+the bot ran in the current ask — the commands after the person's last message —
+and marks the ones that went through the control CLI **verified**; reads
+(`cat`, `git log`, `gh pr view`, a `curl` that only fetches) and computer-use
+are left out, and a run of one unverified command shows no card. Those tool
+outcomes are **simulated provider events**, not executions of the commands
+written in the chips; the card's summary reads `3 steps · 3 verified · 1 failed
+· 1 dry run`. The recipe then presses **Save as skill**: the
+composer textarea now opens with the trigger phrase (`Create a verification
+skill from the run below.`), then the rule not to re-run, then one line per
+step with the verified ones tagged `(verified)`; the caret is in the composer
+and no new user message was sent — the transcript still holds exactly one
+`StaticText "hello"`. The person adds any notes and
+sends as usual; the card never sends on its own. Separately, the recipe runs a
+real fixture health check and verifies that clicking a deliberately missing
+control fails. The card remains collapsible; the old execution timeline is no
+longer shown above chat.
 
 For activity detail, click **Inspector → Run Log**. It shows the selected
 conversation's recorded commands, statuses and timestamps; command previews

@@ -134,7 +134,7 @@ describe("control-omb ui drives the real renderer", () => {
     expect(dry).toMatchObject({ ok: true, dryRun: true, patch: { features: { showToolCalls: true } } });
     const flagged = await ui("flag", info.ui, "--set", "features.showToolCalls=true");
     expect(flagged).toMatchObject({ ok: true, features: { showToolCalls: true } });
-    // Skill authoring is on by default, so the Verify card's Save as skill
+    // Skill authoring is on by default, so the run card's Save as skill
     // needs no flag; the fixture's default config is what a fresh install has.
     expect(flagged.features).toMatchObject({ skillAuthoring: true });
 
@@ -168,7 +168,9 @@ describe("control-omb ui drives the real renderer", () => {
     expect(transcript).toMatch(/StaticText "Bash"/);
     expect(tree).not.toContain("Not logged in");
     expect(tree).not.toContain("Execution timeline");
-    expect(tree).toContain("1 passed · 1 failed · 1 dry run");
+    // The run card: the three scripted commands all go through the control
+    // CLI, so all three are verified; one failed and one was a dry run.
+    expect(tree).toContain("3 steps · 3 verified · 1 failed · 1 dry run");
 
     // These are real control operations: the fixture health check succeeds
     // and a deliberately missing UI target rejects instead of reporting green.
@@ -184,17 +186,18 @@ describe("control-omb ui drives the real renderer", () => {
     expect(png.subarray(0, 8)).toEqual(Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]));
 
     // Save as skill fills the composer with the run — the trigger phrase and
-    // each step's command — for the person to annotate and send. It sends
+    // each step's command, the verified ones tagged — for the person to
+    // annotate and send. It sends
     // nothing itself: the transcript is unchanged and the caret is in the box.
     const rowsBefore = await ui("eval", info.ui, "--js", "document.querySelectorAll('[data-mid]').length");
     await ui("click", info.ui, "--name", "Save as skill");
     const drafted = await ui("eval", info.ui, "--js", `${COMPOSER}.value`);
     expect(drafted.ok).toBe(true);
     const draft = drafted.result as string;
-    expect(draft.startsWith("Create a verification skill from the run below.")).toBe(true);
-    expect(draft).toContain("✓ doctor — pnpm control:omb doctor");
-    expect(draft).toContain("✗ ui — pnpm control:omb ui click --name Missing");
-    expect(draft).toContain("[dry run] ui — pnpm control:omb ui flag --set features.showToolCalls=true --dry-run");
+    expect(draft.startsWith("Create a verification skill from the run below.\n")).toBe(true);
+    expect(draft).toContain("✓ doctor — pnpm control:omb doctor (verified)\n");
+    expect(draft).toContain("✗ ui — pnpm control:omb ui click --name Missing (verified)\n");
+    expect(draft).toContain("[dry run] ui — pnpm control:omb ui flag --set features.showToolCalls=true --dry-run (verified)\n");
     expect(draft.endsWith("\n\n")).toBe(true);
     expect(await ui("eval", info.ui, "--js", `document.activeElement === ${COMPOSER}`)).toMatchObject({ ok: true, result: true });
     // The composer sits inside the conversation landmark, so its draft shows up
@@ -205,10 +208,10 @@ describe("control-omb ui drives the real renderer", () => {
     const transcriptAfterSave = (afterSave.snapshot as string).slice((afterSave.snapshot as string).indexOf('log "Conversation with Pepper"'));
     expect(transcriptAfterSave.match(/StaticText "hello"/g)).toHaveLength(1);
 
-    await ui("click", info.ui, "--name", "Collapse the verification run");
+    await ui("click", info.ui, "--name", "Collapse the run");
     const collapsed = await ui("snapshot", info.ui);
-    expect(collapsed.snapshot).toContain("Expand the verification run");
-    expect(collapsed.snapshot).not.toContain('list "Verification steps"');
+    expect(collapsed.snapshot).toContain("Expand the run");
+    expect(collapsed.snapshot).not.toContain('list "Run steps"');
 
     await ui("click", info.ui, "--name", "Inspector");
     const inspected = await ui("snapshot", info.ui);

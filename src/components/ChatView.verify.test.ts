@@ -3,7 +3,7 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { afterAll, afterEach, describe, expect, it, vi } from "vitest";
 import type { AppState, Bot, InstanceInfo, Message } from "@/state/store";
 import { t } from "@/lib/i18n";
-import { skillPrompt, verifySteps } from "@/lib/verify-steps";
+import { runSteps, skillPrompt } from "@/lib/verify-steps";
 import type { VerifyCard } from "./VerifyCard";
 
 const fixture = vi.hoisted(() => {
@@ -55,26 +55,44 @@ const bot: Bot = {
 };
 const chip = (id: string, summary: string, ok?: boolean): Message =>
   ({ id, at: 1, role: "bot", kind: "activity", tool: { name: "Bash", summary, ...(ok === undefined ? {} : { ok }) } });
+const asked = (id: string, text: string): Message => ({ id, role: "user", kind: "text", at: 1, text });
 const run: Message[] = [
-  { id: "u1", role: "user", kind: "text", at: 1, text: "verify the fixture" },
+  asked("u1", "verify the fixture"),
   chip("c1", "pnpm control:omb doctor --url http://127.0.0.1:8799", true),
   chip("c2", "node --experimental-strip-types scripts/control-omb.ts send --bot x --text hi", false),
   chip("c3", "git status", true),
   chip("c4", "cat scripts/control-omb.ts", true),
 ];
+// A run with no control CLI in it: plain commands, one of them a read.
+const release: Message[] = [
+  asked("u1", "publish the release"),
+  chip("c1", "git push origin main", true),
+  chip("c2", "cat CHANGELOG.md", true),
+  chip("c3", "npm publish", false),
+];
 // An engine with the agents tools, which Save needs alongside the flag.
 const agentsEngine = { instanceId: "test", driverKind: "claude", displayName: "Test", capabilities: { agentsMcp: true } } as unknown as InstanceInfo;
+const saveable = (): void => {
+  fixture.state = { instances: [agentsEngine], config: { features: { skillAuthoring: true } } as AppState["config"] };
+};
+const CARD = `aria-label="${t("chat.verify.aria")}"`;
+const TAG = `>${t("chat.verify.verifiedTag")}<`;
 const render = (messages: Message[]) => renderToStaticMarkup(createElement(ChatView, { bot: { ...bot, messages } }));
+const draft = (): string => fixture.appendComposerDraft.mock.calls[0]![1] as string;
 
-describe("Verify card in the chat pane", () => {
-  it("appears once the bot runs a control CLI, with the run as a checklist", () => {
+describe("The run card in the chat pane", () => {
+  it("appears once the bot runs a control CLI, with the run as a checklist and its verified steps tagged", () => {
     const markup = render(run);
-    expect(markup).toContain(`aria-label="${t("chat.verify.aria")}"`);
-    expect(markup).toContain("1 passed · 1 failed");
+    expect(markup).toContain(CARD);
+    expect(markup).toContain(`>${t("chat.verify.title")}<`);
+    expect(markup).toContain("2 steps · 2 verified · 1 failed");
     expect(markup).not.toContain("Execution timeline");
     expect(markup).toContain(">doctor<");
     expect(markup).toContain(">send<");
-    expect(markup).not.toContain(">status<");
+    expect(markup.match(new RegExp(TAG, "g"))).toHaveLength(2);
+    // reads are not steps
+    expect(markup).not.toContain(">git status<");
+    expect(markup).not.toContain(">cat<");
     // no engine in the fixture has the agents tools: no Save, no footer
     expect(markup).not.toContain(t("chat.verify.save"));
   });
@@ -86,8 +104,8 @@ describe("Verify card in the chat pane", () => {
     expect(markup).not.toContain(t("chat.verify.save"));
   });
 
-  it("offers Save with an agents engine, and Save fills the thread's composer instead of sending", () => {
-    fixture.state = { instances: [agentsEngine], config: { features: { skillAuthoring: true } } as AppState["config"] };
+  it("offers Save with an agents engine; Save fills the thread's composer with the run instead of sending", () => {
+    saveable();
     const markup = render(run);
     expect(markup).toContain(t("chat.verify.save"));
     expect(markup).toContain(t("chat.verify.saveHint"));
@@ -95,12 +113,36 @@ describe("Verify card in the chat pane", () => {
 
     fixture.verify!.onSave();
     expect(fixture.appendComposerDraft).toHaveBeenCalledTimes(1);
-    expect(fixture.appendComposerDraft).toHaveBeenCalledWith("bot:bot:t1", skillPrompt(verifySteps(run)));
+    expect(fixture.appendComposerDraft).toHaveBeenCalledWith("bot:bot:t1", skillPrompt(runSteps(run)));
+    expect(draft().startsWith("Create a verification skill from the run below.\n")).toBe(true);
     expect(fixture.dispatch).not.toHaveBeenCalled();
   });
 
-  it("stays out of a thread with no control-CLI run", () => {
-    const markup = render([chip("c1", "pnpm typecheck", true), chip("c2", "git status", true)]);
-    expect(markup).not.toContain(`aria-label="${t("chat.verify.aria")}"`);
+  it("records a run with no control CLI in it too", () => {
+    saveable();
+    const markup = render(release);
+    expect(markup).toContain(CARD);
+    expect(markup).toContain(`>${t("chat.verify.title")}<`);
+    expect(markup).toContain("2 steps · 1 failed");
+    expect(markup).toContain(">git push<");
+    expect(markup).toContain(">npm publish<");
+    expect(markup).not.toContain(TAG);
+
+    fixture.verify!.onSave();
+    expect(draft()).toContain("✓ git push — git push origin main\n");
+    expect(draft()).toContain("✗ npm publish — npm publish\n");
+  });
+
+  it("stays out of a thread whose run is one unverified command", () => {
+    const markup = render([asked("u1", "push it"), chip("c1", "git push origin main", true), chip("c2", "git status", true)]);
+    expect(markup).not.toContain(CARD);
+  });
+
+  it("records only the current ask: the person's next message starts a fresh run", () => {
+    const markup = render([...run, asked("u2", "now push"), chip("c5", "git push origin main", true)]);
+    // the verified steps belong to the previous ask; what is left is one unverified command
+    expect(markup).not.toContain(CARD);
+    expect(render([...run, asked("u2", "now publish"), chip("c5", "git push origin main", true), chip("c6", "npm publish", true)]))
+      .toContain("2 steps<");
   });
 });
