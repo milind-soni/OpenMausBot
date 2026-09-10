@@ -186,6 +186,7 @@ describe("control-omb ui drives the real renderer", () => {
     // Save as skill fills the composer with the run — the trigger phrase and
     // each step's command — for the person to annotate and send. It sends
     // nothing itself: the transcript is unchanged and the caret is in the box.
+    const rowsBefore = await ui("eval", info.ui, "--js", "document.querySelectorAll('[data-mid]').length");
     await ui("click", info.ui, "--name", "Save as skill");
     const drafted = await ui("eval", info.ui, "--js", `${COMPOSER}.value`);
     expect(drafted.ok).toBe(true);
@@ -196,9 +197,12 @@ describe("control-omb ui drives the real renderer", () => {
     expect(draft).toContain("[dry run] ui — pnpm control:omb ui flag --set features.showToolCalls=true --dry-run");
     expect(draft.endsWith("\n\n")).toBe(true);
     expect(await ui("eval", info.ui, "--js", `document.activeElement === ${COMPOSER}`)).toMatchObject({ ok: true, result: true });
+    // The composer sits inside the conversation landmark, so its draft shows up
+    // in that snapshot; "nothing was sent" is the message-row count, unchanged.
+    const rowsAfter = await ui("eval", info.ui, "--js", "document.querySelectorAll('[data-mid]').length");
+    expect(rowsAfter.result).toBe(rowsBefore.result);
     const afterSave = await ui("snapshot", info.ui);
     const transcriptAfterSave = (afterSave.snapshot as string).slice((afterSave.snapshot as string).indexOf('log "Conversation with Pepper"'));
-    expect(transcriptAfterSave).not.toContain("Create a verification skill");
     expect(transcriptAfterSave.match(/StaticText "hello"/g)).toHaveLength(1);
 
     await ui("click", info.ui, "--name", "Collapse the verification run");
