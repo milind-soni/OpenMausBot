@@ -78,6 +78,17 @@ describe("buildSystemPrompt", () => {
 });
 
 describe("computerPrompt", () => {
+  it("distinguishes background window control from foreground desktop input", () => {
+    const prompt = computerPrompt("local");
+    expect(prompt).toContain("background delivery");
+    expect(prompt).toContain("do not bring OpenMausBot");
+    expect(prompt).toContain("dedicated browser tools");
+    expect(prompt).toContain("keeping the user's intended browser profile/account");
+    expect(prompt).toContain("Do not silently retry a background refusal");
+    expect(prompt).toContain("including through shell scripts, AppleScript/System Events");
+    expect(prompt).toContain("If a background action unexpectedly changes focus");
+    expect(computerPrompt("vm-private")).not.toContain("user asked for foreground control");
+  });
   it("is empty with no computer", () => {
     expect(computerPrompt(null)).toBe("");
   });

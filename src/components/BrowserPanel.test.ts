@@ -6,8 +6,9 @@ import type { Bot } from "@/state/store";
 const fixture = vi.hoisted(() => ({
   effects: [] as EffectCallback[],
   refs: [] as RefObject<unknown>[],
+  setters: [] as Array<ReturnType<typeof vi.fn>>,
   control: { held: false, controlling: false, owned: false },
-  frame: null as { seq: number; data: string } | null,
+  frame: null as { seq: number; data: string; viewerId: string; generation: number } | null,
   queues: [] as Array<{ enqueue: ReturnType<typeof vi.fn>; clear: ReturnType<typeof vi.fn>; drain: ReturnType<typeof vi.fn> }>,
 }));
 vi.mock("react", async (importOriginal) => {
@@ -15,7 +16,10 @@ vi.mock("react", async (importOriginal) => {
   return { ...react,
     useEffect: (effect: EffectCallback) => { fixture.effects.push(effect); },
     useRef: (value: unknown) => { const ref = react.useRef(value); fixture.refs.push(ref); return ref; },
-    useState: (value: unknown) => react.useState(value === null ? fixture.frame : value && typeof value === "object" && "controlling" in value ? fixture.control : value),
+    useState: (value: unknown) => {
+      const [state] = react.useState(value === null ? fixture.frame : value && typeof value === "object" && "controlling" in value ? fixture.control : value);
+      const setter = vi.fn(); fixture.setters.push(setter); return [state, setter];
+    },
   };
 });
 vi.mock("@/state/store", () => ({ api: vi.fn().mockResolvedValue({}), useStore: () => ({ state: { config: { browserProfiles: [] } } }) }));
@@ -26,6 +30,8 @@ vi.mock("@/lib/browser-input-queue", () => ({ createBrowserInputQueue: () => {
 } }));
 import { LiveBrowser } from "./BrowserPanel";
 import { BrowserViewport } from "./BrowserViewport";
+import { BrowserProfilesManager } from "./BrowserProfilesManager";
+import { api } from "@/state/store";
 
 class FixtureEventSource {
   static instances: FixtureEventSource[] = [];
@@ -41,12 +47,41 @@ class FixtureEventSource {
 }
 const bot = { id: "pepper", name: "Pepper" } as Bot;
 const render = () => renderToStaticMarkup(createElement(LiveBrowser, { bot }));
+type Node = ReactElement<{
+  children?: ReactNode; "aria-label"?: string; ref?: RefObject<HTMLInputElement | null>;
+  onReturnToToolbar?: () => void; onClick?: (event: unknown) => void; onProfileChanged?: () => void;
+  acknowledge?: (seq: number) => void; onDecodeError?: () => void;
+}>;
+const elements = (node: ReactNode): Node[] => {
+  if (!isValidElement(node)) return [];
+  const element = node as Node;
+  return [element, ...Children.toArray(element.props.children).flatMap(elements)];
+};
+const renderElements = () => {
+  let tree!: ReturnType<typeof LiveBrowser>;
+  function Capture() { tree = LiveBrowser({ bot }); return tree; }
+  renderToStaticMarkup(createElement(Capture));
+  return elements(tree);
+};
+const click = (nodes: Node[], label: string) => {
+  const node = nodes.find((node) => node.props["aria-label"] === label || node.props.children === label)!;
+  node.props.onClick!({ currentTarget: { closest: () => null } });
+};
+const deferred = () => {
+  let resolve!: () => void;
+  let reject!: (cause: Error) => void;
+  const promise = new Promise<void>((yes, no) => { resolve = yes; reject = no; });
+  return { promise, resolve, reject };
+};
+const settle = async () => { await Promise.resolve(); await Promise.resolve(); await Promise.resolve(); };
 beforeEach(() => {
-  fixture.effects = []; fixture.refs = []; fixture.queues = [];
+  fixture.effects = []; fixture.refs = []; fixture.queues = []; fixture.setters = [];
   fixture.control = { held: false, controlling: false, owned: false };
   fixture.frame = null;
   FixtureEventSource.instances = [];
   vi.stubGlobal("EventSource", FixtureEventSource);
+  vi.stubGlobal("window", { confirm: vi.fn(() => true) });
+  vi.mocked(api).mockReset().mockResolvedValue({});
 });
 afterEach(() => vi.unstubAllGlobals());
 
@@ -88,21 +123,145 @@ describe("live browser connection lifecycle", () => {
     expect(fixture.queues).toHaveLength(1);
     cleanup?.();
   });
+
+  it("reconnects after its own successful restart closes the stream before replying", async () => {
+    const nodes = renderElements();
+    const cleanup = fixture.effects[2]!();
+    const source = FixtureEventSource.instances[0]!;
+    source.emit("ready", { viewerId: "current-viewer" });
+    const restart = deferred();
+    vi.mocked(api).mockReturnValueOnce(restart.promise);
+    click(nodes, "Restart browser…");
+    await settle();
+    expect(api).toHaveBeenCalledWith("/api/bots/pepper/browser/action", {
+      method: "POST", body: JSON.stringify({ type: "restart", viewerId: "current-viewer" }),
+    });
+    source.emit("error", { message: "Browser restarted" });
+    restart.resolve(); await settle();
+    expect(fixture.setters[0]).toHaveBeenCalledOnce();
+    cleanup?.();
+  });
+
+  it.each(["reconnect", "profile", "effect cleanup"])("ignores a late successful restart after %s replaces its connection", async (replacement) => {
+    const nodes = renderElements();
+    const connect = fixture.effects[2]!;
+    const cleanup = connect();
+    FixtureEventSource.instances[0]!.emit("ready", { viewerId: "old-viewer" });
+    const restart = deferred();
+    vi.mocked(api).mockReturnValueOnce(restart.promise);
+    click(nodes, "Restart browser…"); await settle();
+    if (replacement === "reconnect") click(nodes, "Reconnect view");
+    if (replacement === "profile") nodes.find((node) => node.type === BrowserProfilesManager)!.props.onProfileChanged!();
+    cleanup?.();
+    const secondCleanup = connect();
+    const replacementSource = FixtureEventSource.instances[1]!;
+    replacementSource.emit("ready", { viewerId: "new-viewer" });
+    const viewer = fixture.refs.find((ref) => ref.current === "new-viewer")!;
+    fixture.setters.forEach((setter) => setter.mockClear());
+    restart.resolve(); await settle();
+    expect(fixture.setters[0]).not.toHaveBeenCalled();
+    expect(fixture.setters[6]).not.toHaveBeenCalled();
+    expect(fixture.setters[7]).not.toHaveBeenCalled();
+    expect(viewer.current).toBe("new-viewer");
+    expect(replacementSource.close).not.toHaveBeenCalled();
+    expect(fixture.queues[1]!.clear).not.toHaveBeenCalled();
+    secondCleanup?.();
+  });
+
+  it("invalidates an old restart immediately when reconnect is requested", async () => {
+    const nodes = renderElements();
+    const cleanup = fixture.effects[2]!();
+    FixtureEventSource.instances[0]!.emit("ready", { viewerId: "old-viewer" });
+    const restart = deferred();
+    vi.mocked(api).mockReturnValueOnce(restart.promise);
+    click(nodes, "Restart browser…"); await settle();
+    click(nodes, "Reconnect view");
+    fixture.setters.forEach((setter) => setter.mockClear());
+    // Complete the request before React has run reconnect's cleanup/setup.
+    restart.resolve(); await settle();
+    expect(fixture.setters[0]).not.toHaveBeenCalled();
+    expect(fixture.setters[6]).not.toHaveBeenCalled();
+    cleanup?.();
+  });
+
+  it("does not dispatch a command if its input drain finishes after a reconnect", async () => {
+    const nodes = renderElements();
+    const connect = fixture.effects[2]!;
+    const cleanup = connect();
+    FixtureEventSource.instances[0]!.emit("ready", { viewerId: "old-viewer" });
+    const drain = deferred();
+    fixture.queues[0]!.drain.mockReturnValueOnce(drain.promise);
+    click(nodes, "Restart browser…");
+    cleanup?.();
+    const secondCleanup = connect();
+    FixtureEventSource.instances[1]!.emit("ready", { viewerId: "new-viewer" });
+    drain.resolve(); await settle();
+    expect(api).not.toHaveBeenCalled();
+    secondCleanup?.();
+  });
+
+  it("does not show old errors or clear a replacement operation's pending state", async () => {
+    const nodes = renderElements();
+    const connect = fixture.effects[2]!;
+    const cleanup = connect();
+    FixtureEventSource.instances[0]!.emit("ready", { viewerId: "old-viewer" });
+    const oldAction = deferred(); const currentAction = deferred();
+    vi.mocked(api).mockReturnValueOnce(oldAction.promise).mockReturnValueOnce(currentAction.promise);
+    click(nodes, "Take control"); await settle();
+    cleanup?.();
+    const secondCleanup = connect();
+    FixtureEventSource.instances[1]!.emit("ready", { viewerId: "new-viewer" });
+    click(nodes, "Take control"); await settle();
+    fixture.setters.forEach((setter) => setter.mockClear());
+    oldAction.reject(new Error("Old action failed")); await settle();
+    expect(fixture.setters[6]).not.toHaveBeenCalled();
+    expect(fixture.setters[7]).not.toHaveBeenCalled();
+    currentAction.resolve(); await settle();
+    expect(fixture.setters[6]).toHaveBeenCalledWith(false);
+    secondCleanup?.();
+  });
+
+  it("serializes commands even when clicked twice before pending state renders", async () => {
+    const nodes = renderElements();
+    const cleanup = fixture.effects[2]!();
+    FixtureEventSource.instances[0]!.emit("ready", { viewerId: "current-viewer" });
+    const action = deferred();
+    vi.mocked(api).mockReturnValueOnce(action.promise);
+    click(nodes, "Take control"); click(nodes, "Take control"); await settle();
+    expect(api).toHaveBeenCalledOnce();
+    expect(fixture.queues[0]!.drain).toHaveBeenCalledOnce();
+    action.resolve(); await settle();
+    click(nodes, "Take control"); await settle();
+    expect(api).toHaveBeenCalledTimes(2);
+    cleanup?.();
+  });
+
+  it("binds frame acknowledgements and decode errors to the frame's connection", () => {
+    fixture.frame = { seq: 8, data: "fixture", viewerId: "old-viewer", generation: 1 };
+    const nodes = renderElements();
+    const viewport = nodes.find((node) => node.type === BrowserViewport)!;
+    const connect = fixture.effects[2]!;
+    const cleanup = connect();
+    FixtureEventSource.instances[0]!.emit("ready", { viewerId: "old-viewer" });
+    viewport.props.acknowledge!(8);
+    expect(api).toHaveBeenCalledWith("/api/bots/pepper/browser/action", {
+      method: "POST", body: JSON.stringify({ type: "ack", seq: 8, viewerId: "old-viewer" }),
+    });
+    cleanup?.();
+    const secondCleanup = connect();
+    FixtureEventSource.instances[1]!.emit("ready", { viewerId: "new-viewer" });
+    vi.mocked(api).mockClear(); fixture.setters[7]!.mockClear();
+    viewport.props.acknowledge!(8); viewport.props.onDecodeError!();
+    expect(api).not.toHaveBeenCalled();
+    expect(fixture.setters[7]).not.toHaveBeenCalled();
+    secondCleanup?.();
+  });
 });
 
 describe("live browser control affordance", () => {
   it("returns viewport focus to the existing browser address field", () => {
-    fixture.frame = { seq: 1, data: "fixture" };
-    let tree!: ReturnType<typeof LiveBrowser>;
-    function Capture() { tree = LiveBrowser({ bot }); return tree; }
-    renderToStaticMarkup(createElement(Capture));
-    type Node = ReactElement<{ children?: ReactNode; "aria-label"?: string; ref?: RefObject<HTMLInputElement | null>; onReturnToToolbar?: () => void }>;
-    const elements = (node: ReactNode): Node[] => {
-      if (!isValidElement(node)) return [];
-      const element = node as Node;
-      return [element, ...Children.toArray(element.props.children).flatMap(elements)];
-    };
-    const nodes = elements(tree);
+    fixture.frame = { seq: 1, data: "fixture", viewerId: "current-viewer", generation: 1 };
+    const nodes = renderElements();
     const address = nodes.find((node) => node.props["aria-label"] === "Browser address")!;
     const viewport = nodes.find((node) => node.type === BrowserViewport)!;
     const focus = vi.fn();

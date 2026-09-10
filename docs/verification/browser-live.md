@@ -37,6 +37,13 @@ UI and harness, then removes its temporary data; the server log remains.
 6. Test narrow (390 px) and desktop widths, fullscreen, tabs, overflow typing,
    and explicit browser restart. No horizontal document overflow or permanent
    settings panels should appear. Profile changes are disabled during control.
+   The complete browser image must fit the panel without changing the remote
+   page's resolution. Click the same test-page controls at each size: input
+   must follow the contained image, not its surrounding letterboxing. Empty
+   margins must not click the page; a drag begun on the image can finish there.
+7. Reconnect while a restart is still finishing, or change profiles before an
+   earlier command finishes. A late response must not disconnect the new view,
+   change its error state, or acknowledge an old frame as the new viewer.
 
 Focused automated coverage:
 
