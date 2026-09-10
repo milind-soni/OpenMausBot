@@ -1,4 +1,4 @@
-import { ChevronDown, ChevronRight, GripVertical } from "lucide-react";
+import { ChevronDown, ChevronRight } from "lucide-react";
 import type { DragEvent, KeyboardEvent } from "react";
 
 import { cn } from "@/lib/cn";
@@ -18,6 +18,7 @@ export function SidebarSectionHeader({
   onDragStart,
   onDragEnd,
   onMove,
+  onOpenMenu,
 }: {
   name: string;
   collapsed: boolean;
@@ -25,13 +26,23 @@ export function SidebarSectionHeader({
   onToggle?: () => void;
   reorderable: boolean;
   dragging: boolean;
-  onDragStart?: (event: DragEvent<HTMLSpanElement>) => void;
+  onDragStart?: (event: DragEvent<HTMLDivElement>) => void;
   onDragEnd?: () => void;
   onMove?: (direction: -1 | 1) => void;
+  /** the heading's own menu: rename, reorder, remove the label. Takes a point
+   * rather than an event, so the keyboard can open it at the row. */
+  onOpenMenu?: (point: { x: number; y: number }) => void;
 }) {
   const Chevron = collapsed ? ChevronRight : ChevronDown;
   const attentionLabel = attention ? sidebarAttentionLabel(attention) : "";
   const onHeaderKeyDown = (event: KeyboardEvent<HTMLButtonElement>) => {
+    // The same two keys that open a bot row's menu.
+    if (onOpenMenu && (event.key === "ContextMenu" || (event.shiftKey && event.key === "F10"))) {
+      event.preventDefault();
+      const rect = event.currentTarget.getBoundingClientRect();
+      onOpenMenu({ x: rect.left + rect.width / 2, y: rect.top + rect.height / 2 });
+      return;
+    }
     if (!reorderable || !event.altKey) return;
     if (event.key === "ArrowUp") {
       event.preventDefault();
@@ -43,7 +54,21 @@ export function SidebarSectionHeader({
   };
 
   return (
-    <div className="flex items-center gap-1 px-2 pb-1" data-section={name}>
+    <div
+      className={cn("flex items-center gap-1 px-2 pb-1", dragging && "opacity-40")}
+      data-section={name}
+      draggable={reorderable}
+      onDragStart={reorderable ? onDragStart : undefined}
+      onDragEnd={reorderable ? onDragEnd : undefined}
+      onContextMenu={
+        onOpenMenu
+          ? (event) => {
+              event.preventDefault();
+              onOpenMenu({ x: event.clientX, y: event.clientY });
+            }
+          : undefined
+      }
+    >
       {onToggle ? (
         <button
           type="button"
@@ -99,21 +124,6 @@ export function SidebarSectionHeader({
           </span>
           {attentionLabel && <span className="sr-only">{attentionLabel}</span>}
         </div>
-      )}
-      {reorderable && (
-        <span
-          aria-hidden="true"
-          draggable
-          title={t("sidebar.section.dragToReorder")}
-          onDragStart={onDragStart}
-          onDragEnd={onDragEnd}
-          className={cn(
-            "flex size-6 shrink-0 cursor-grab items-center justify-center rounded text-ink-secondary hover:bg-raised hover:text-ink",
-            dragging && "opacity-40",
-          )}
-        >
-          <GripVertical size={13} />
-        </span>
       )}
     </div>
   );

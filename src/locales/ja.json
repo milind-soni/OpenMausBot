@@ -187,7 +187,6 @@
   "sidebar.section.collapse": "{name} を畳む",
   "sidebar.section.expandReorder": "{name} を開きます。Alt+上下で並べ替えます。",
   "sidebar.section.collapseReorder": "{name} を畳みます。Alt+上下で並べ替えます。",
-  "sidebar.section.dragToReorder": "ドラッグして並べ替え",
   "sidebar.profile.you": "あなた",
   "sidebar.menu.yourPhone": "あなたのスマートフォン",
   "sidebar.menu.getIos": "iOS 版 OpenMausBot を入手",
@@ -1389,5 +1388,13 @@
   "remote.signInAccess.empty": "まだ誰もいません。アドレスを追加するか、会社全員なら @yourcompany.com を追加してください。",
   "remote.signInAccess.invalid": "メールアドレス、またはそのドメイン全員を表す @domain を入力してください。",
   "remote.signInAccess.note": "変更はすぐに反映されます。削除すると新しいサインインはできなくなります。既存のデバイスは上でサインアウトするまで残ります。",
-  "remote.signInAccess.error": "保存できませんでした: {error}"
+  "remote.signInAccess.error": "保存できませんでした: {error}",
+  "sidebar.resizeAria": "サイドバーの幅を変更",
+  "sidebar.section.renameContext": "コンテキスト名を変更",
+  "sidebar.section.renameContextAria": "{name} コンテキストの名前を変更",
+  "sidebar.section.deleteContext": "コンテキストを削除",
+  "sidebar.section.deleteTitle": "{name} を削除しますか？",
+  "sidebar.section.deleteBody": "見出しだけがなくなります。中の {count} 件はそのまま残り、新しいボットと同じようにコンテキストなしに戻ります。",
+  "sidebar.bot.moveUp": "上に移動",
+  "sidebar.bot.moveDown": "下に移動"
 }

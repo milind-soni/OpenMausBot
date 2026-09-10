@@ -262,7 +262,6 @@
   "sidebar.section.collapse": "{name} einklappen",
   "sidebar.section.expandReorder": "{name} ausklappen. Alt+Auf/Ab ordnet um.",
   "sidebar.section.collapseReorder": "{name} einklappen. Alt+Auf/Ab ordnet um.",
-  "sidebar.section.dragToReorder": "Zum Umsortieren ziehen",
   "sidebar.profile.you": "Du",
   "sidebar.menu.yourPhone": "Dein Telefon",
   "sidebar.menu.getIos": "OpenMausBot für iOS holen",
@@ -1389,5 +1388,13 @@
   "remote.signInAccess.empty": "Noch niemand. Füge eine Adresse hinzu, oder @deinefirma.de für alle in deiner Firma.",
   "remote.signInAccess.invalid": "Gib eine E-Mail-Adresse ein oder @domain für alle dieser Domain.",
   "remote.signInAccess.note": "Änderungen gelten sofort. Wer entfernt wird, kann sich nicht neu anmelden; bestehende Geräte bleiben angemeldet, bis du sie oben abmeldest.",
-  "remote.signInAccess.error": "Konnte nicht speichern: {error}"
+  "remote.signInAccess.error": "Konnte nicht speichern: {error}",
+  "sidebar.resizeAria": "Breite der Seitenleiste ändern",
+  "sidebar.section.renameContext": "Kontext umbenennen",
+  "sidebar.section.renameContextAria": "Kontext {name} umbenennen",
+  "sidebar.section.deleteContext": "Kontext löschen",
+  "sidebar.section.deleteTitle": "{name} löschen?",
+  "sidebar.section.deleteBody": "Die Überschrift verschwindet. Die {count} Zeilen darin behalten alles und sind wieder ohne Kontext, wie ein neu erstellter Bot.",
+  "sidebar.bot.moveUp": "Nach oben",
+  "sidebar.bot.moveDown": "Nach unten"
 }

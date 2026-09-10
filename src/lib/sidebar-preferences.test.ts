@@ -2,6 +2,15 @@ import { describe, expect, it, vi } from "vitest";
 
 import {
   SIDEBAR_COLLAPSED_SECTIONS_KEY,
+  SIDEBAR_DEFAULT_WIDTH,
+  SIDEBAR_MAX_WIDTH,
+  SIDEBAR_MIN_EXPANDED_WIDTH,
+  SIDEBAR_RAIL_WIDTH,
+  SIDEBAR_WIDTH_KEY,
+  clampSidebarWidth,
+  loadSidebarWidth,
+  saveSidebarWidth,
+  sidebarIsRail,
   SIDEBAR_DENSITY_KEY,
   SIDEBAR_SECTION_ORDER_KEY,
   loadCollapsedSections,
@@ -93,5 +102,34 @@ describe("sidebar section preferences", () => {
 
     saveSectionOrder(ids, storage);
     expect(loadSectionOrder(storage)).toEqual(ids);
+  });
+});
+
+describe("sidebar width preference", () => {
+  it("snaps to the rail below the dead zone and clamps at both ends", () => {
+    expect(clampSidebarWidth(60)).toBe(SIDEBAR_RAIL_WIDTH);
+    expect(clampSidebarWidth(179)).toBe(SIDEBAR_RAIL_WIDTH);
+    // the dead zone: no sidebar is ever 200px wide
+    expect(clampSidebarWidth(200)).toBe(SIDEBAR_MIN_EXPANDED_WIDTH);
+    expect(clampSidebarWidth(9000)).toBe(SIDEBAR_MAX_WIDTH);
+    expect(clampSidebarWidth(321)).toBe(321);
+    expect(clampSidebarWidth(Number.NaN)).toBe(SIDEBAR_DEFAULT_WIDTH);
+    expect(sidebarIsRail(SIDEBAR_RAIL_WIDTH)).toBe(true);
+    expect(sidebarIsRail(SIDEBAR_MIN_EXPANDED_WIDTH)).toBe(false);
+  });
+
+  it("falls back to the saved density instead of resetting the width", () => {
+    expect(loadSidebarWidth({ getItem: (key) => (key === SIDEBAR_DENSITY_KEY ? "icons" : null) })).toBe(
+      SIDEBAR_RAIL_WIDTH,
+    );
+    expect(loadSidebarWidth({ getItem: (key) => (key === SIDEBAR_DENSITY_KEY ? "compact" : null) })).toBe(272);
+    expect(loadSidebarWidth({ getItem: () => null })).toBe(SIDEBAR_DEFAULT_WIDTH);
+    expect(loadSidebarWidth({ getItem: () => "288" })).toBe(288);
+    expect(loadSidebarWidth({ getItem: () => "garbage" })).toBe(SIDEBAR_DEFAULT_WIDTH);
+    expect(loadSidebarWidth({ getItem: () => { throw new Error("blocked"); } })).toBe(SIDEBAR_DEFAULT_WIDTH);
+
+    const setItem = vi.fn();
+    saveSidebarWidth(300, { setItem });
+    expect(setItem).toHaveBeenCalledWith(SIDEBAR_WIDTH_KEY, "300");
   });
 });

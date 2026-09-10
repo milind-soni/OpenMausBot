@@ -1,17 +1,22 @@
 import { describe, expect, it } from "vitest";
 
+import { setLocale } from "./i18n";
+
 import {
   BOT_CHATS_SECTION_ID,
   BOTS_SECTION_ID,
   CHANNELS_SECTION_ID,
   PINNED_SECTION_ID,
   mergeSectionOrder,
+  moveRowWithinList,
   moveSection,
+  orderedSidebarRows,
   orderedSidebarSections,
   partitionSidebarBots,
   partitionSidebarGroups,
   placeSection,
   sidebarLayoutInteractive,
+  sidebarStamp,
   sidebarGoalRunPreview,
   sidebarSectionCollapsed,
   sidebarSectionLabel,
@@ -172,5 +177,58 @@ describe("sidebar section ordering", () => {
       work,
       PINNED_SECTION_ID,
     ]);
+  });
+});
+
+describe("sidebar row stamp", () => {
+  // Fixed points, so the boundaries are the subject rather than the clock.
+  const now = new Date(2026, 8, 8, 10, 0).getTime(); // Tue 8 Sep 2026, 10:00
+  const at = (day: number, hour = 9, minute = 30) => new Date(2026, 8, day, hour, minute).getTime();
+
+  it("moves from the time, through yesterday and the weekday, to the date", () => {
+    setLocale("en");
+    expect(sidebarStamp(at(8, 9, 30), now)).toMatch(/9:30/);
+    expect(sidebarStamp(at(7), now)).toBe("Yesterday");
+    expect(sidebarStamp(at(4), now)).toBe("Friday");
+    // seven days back is no longer "this week", so it becomes a date
+    expect(sidebarStamp(at(1), now)).toBe("09/01");
+  });
+
+  it("counts calendar days, not elapsed hours", () => {
+    setLocale("en");
+    // one minute earlier, but the day before: yesterday, never "23:59"
+    expect(sidebarStamp(new Date(2026, 8, 7, 23, 59).getTime(), new Date(2026, 8, 8, 0, 1).getTime())).toBe(
+      "Yesterday",
+    );
+  });
+
+  it("reads a clock that runs ahead as today rather than as an error", () => {
+    setLocale("en");
+    expect(sidebarStamp(at(9, 11, 15), now)).toMatch(/11:15/);
+  });
+});
+
+describe("row order", () => {
+  const rows = [{ id: "a" }, { id: "b" }, { id: "c" }];
+
+  it("follows the saved order and keeps unseen rows next to their neighbours", () => {
+    // "b" was never dragged, so it lands beside the neighbour it still has:
+    // ahead of "c", because the saved order put "c" before "a"
+    expect(orderedSidebarRows(rows, ["c", "a"]).map((row) => row.id)).toEqual(["b", "c", "a"]);
+    expect(orderedSidebarRows(rows, []).map((row) => row.id)).toEqual(["a", "b", "c"]);
+    // a saved id that no longer exists is ignored, not rendered
+    expect(orderedSidebarRows(rows, ["gone", "b"]).map((row) => row.id)).toEqual(["a", "b", "c"]);
+  });
+
+  it("moves a row only against a neighbour from its own list", () => {
+    // "b" and "e" share a saved order but sit in different sections
+    const saved = ["a", "b", "c", "d", "e"];
+    const list = ["b", "d"];
+    expect(moveRowWithinList(saved, list, "d", -1)).toEqual(["a", "d", "b", "c", "e"]);
+    // at the end of its own list nothing happens, even though "e" follows it
+    expect(moveRowWithinList(saved, list, "d", 1)).toEqual(saved);
+    expect(moveRowWithinList(saved, list, "b", -1)).toEqual(saved);
+    // a row outside the list cannot be moved by it
+    expect(moveRowWithinList(saved, list, "c", 1)).toEqual(saved);
   });
 });

@@ -187,7 +187,6 @@
   "sidebar.section.collapse": "Contraer {name}",
   "sidebar.section.expandReorder": "Expandir {name}. Alt+Arriba/Abajo lo reordena.",
   "sidebar.section.collapseReorder": "Contraer {name}. Alt+Arriba/Abajo lo reordena.",
-  "sidebar.section.dragToReorder": "Arrastra para reordenar",
   "sidebar.profile.you": "Tú",
   "sidebar.menu.yourPhone": "Tu teléfono",
   "sidebar.menu.getIos": "Consigue OpenMausBot para iOS",
@@ -1389,5 +1388,13 @@
   "remote.signInAccess.empty": "Nadie todavía. Añade una dirección, o @tuempresa.com para todos en tu empresa.",
   "remote.signInAccess.invalid": "Escribe un email, o @dominio para todos los de ese dominio.",
   "remote.signInAccess.note": "Los cambios se aplican al instante. Quitar a alguien impide nuevos inicios de sesión; sus dispositivos siguen conectados hasta que los cierres arriba.",
-  "remote.signInAccess.error": "No se pudo guardar: {error}"
+  "remote.signInAccess.error": "No se pudo guardar: {error}",
+  "sidebar.resizeAria": "Cambiar el ancho de la barra lateral",
+  "sidebar.section.renameContext": "Renombrar contexto",
+  "sidebar.section.renameContextAria": "Renombrar el contexto {name}",
+  "sidebar.section.deleteContext": "Eliminar contexto",
+  "sidebar.section.deleteTitle": "¿Eliminar {name}?",
+  "sidebar.section.deleteBody": "El encabezado desaparece. Sus {count} conversaciones conservan todo y vuelven a quedar sin contexto, como un bot recién creado.",
+  "sidebar.bot.moveUp": "Mover arriba",
+  "sidebar.bot.moveDown": "Mover abajo"
 }

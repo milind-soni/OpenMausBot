@@ -262,7 +262,6 @@
   "sidebar.section.collapse": "收合 {name}",
   "sidebar.section.expandReorder": "展開 {name}。按 Alt+上／下鍵可調整順序。",
   "sidebar.section.collapseReorder": "收合 {name}。按 Alt+上／下鍵可調整順序。",
-  "sidebar.section.dragToReorder": "拖曳以調整順序",
   "sidebar.profile.you": "你",
   "sidebar.menu.yourPhone": "你的手機",
   "sidebar.menu.getIos": "取得 iOS 版 OpenMausBot",

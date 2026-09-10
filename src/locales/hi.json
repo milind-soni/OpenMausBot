@@ -187,7 +187,6 @@
   "sidebar.section.collapse": "{name} समेटें",
   "sidebar.section.expandReorder": "{name} खोलें। Alt+ऊपर/नीचे से क्रम बदलें।",
   "sidebar.section.collapseReorder": "{name} समेटें। Alt+ऊपर/नीचे से क्रम बदलें।",
-  "sidebar.section.dragToReorder": "क्रम बदलने के लिए खींचें",
   "sidebar.profile.you": "आप",
   "sidebar.menu.yourPhone": "आपका फ़ोन",
   "sidebar.menu.getIos": "iOS के लिए OpenMausBot पाएँ",
@@ -1389,5 +1388,13 @@
   "remote.signInAccess.empty": "अभी कोई नहीं। कोई पता जोड़ें, या पूरी कंपनी के लिए @yourcompany.com।",
   "remote.signInAccess.invalid": "ईमेल पता लिखें, या उस डोमेन के सभी के लिए @domain।",
   "remote.signInAccess.note": "बदलाव तुरंत लागू होते हैं। किसी को हटाने से नए साइन-इन रुक जाते हैं; उनके मौजूदा डिवाइस तब तक साइन इन रहते हैं जब तक आप उन्हें ऊपर साइन आउट न करें।",
-  "remote.signInAccess.error": "सहेज नहीं सका: {error}"
+  "remote.signInAccess.error": "सहेज नहीं सका: {error}",
+  "sidebar.resizeAria": "साइडबार का आकार बदलें",
+  "sidebar.section.renameContext": "संदर्भ का नाम बदलें",
+  "sidebar.section.renameContextAria": "{name} संदर्भ का नाम बदलें",
+  "sidebar.section.deleteContext": "संदर्भ हटाएँ",
+  "sidebar.section.deleteTitle": "{name} हटाएँ?",
+  "sidebar.section.deleteBody": "शीर्षक हट जाएगा। उसमें मौजूद {count} बातचीत सब कुछ बनाए रखती हैं और फिर से बिना संदर्भ के हो जाती हैं, जैसे कोई नया बॉट।",
+  "sidebar.bot.moveUp": "ऊपर ले जाएँ",
+  "sidebar.bot.moveDown": "नीचे ले जाएँ"
 }

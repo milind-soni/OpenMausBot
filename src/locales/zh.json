@@ -187,7 +187,6 @@
   "sidebar.section.collapse": "收起 {name}",
   "sidebar.section.expandReorder": "展开 {name}。Alt+上/下可调整顺序。",
   "sidebar.section.collapseReorder": "收起 {name}。Alt+上/下可调整顺序。",
-  "sidebar.section.dragToReorder": "拖动以调整顺序",
   "sidebar.profile.you": "你",
   "sidebar.menu.yourPhone": "你的手机",
   "sidebar.menu.getIos": "获取 iOS 版 OpenMausBot",
@@ -1389,5 +1388,13 @@
   "remote.signInAccess.empty": "还没有人。添加一个地址，或用 @yourcompany.com 允许全公司。",
   "remote.signInAccess.invalid": "请输入邮箱地址，或用 @domain 表示该域名下的所有人。",
   "remote.signInAccess.note": "更改立即生效。移除某人会阻止其新的登录；已登录的设备会保留，直到你在上面将其退出。",
-  "remote.signInAccess.error": "无法保存：{error}"
+  "remote.signInAccess.error": "无法保存：{error}",
+  "sidebar.resizeAria": "调整侧边栏宽度",
+  "sidebar.section.renameContext": "重命名情境",
+  "sidebar.section.renameContextAria": "重命名情境 {name}",
+  "sidebar.section.deleteContext": "删除情境",
+  "sidebar.section.deleteTitle": "删除 {name}？",
+  "sidebar.section.deleteBody": "仅标题消失。其中的 {count} 项内容保持不变，回到没有情境的状态，就像新建的机器人一样。",
+  "sidebar.bot.moveUp": "上移",
+  "sidebar.bot.moveDown": "下移"
 }

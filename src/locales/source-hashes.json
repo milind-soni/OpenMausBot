@@ -265,7 +265,6 @@
       "sidebar.section.collapse": "19f25826b84b030c2c08c3166fe344167a98e50cc672a669aa5a86397d1f7cae",
       "sidebar.section.expandReorder": "c6fb575f359cde47dd4e5b01cb80e68c3e4bc7681fac74004df1f56e3dc11355",
       "sidebar.section.collapseReorder": "7fedebab5a9fd26cfd13c414017b2aaa190e314183faee83a9625ff4b6970a71",
-      "sidebar.section.dragToReorder": "ef86a0ed928794a4be6a964201fac2fb1d57e1836b14e307e6376ba36ad7a29a",
       "sidebar.profile.you": "08b041935798fbf6fd6ff51099ffedb140a475889986d14f5559ff8e7fc571dd",
       "sidebar.menu.yourPhone": "807163670bbc384df37a2de03c8850b5e9632b6c3344e72699877edf63144bb6",
       "sidebar.menu.getIos": "5f0214a062aca6bcb857c46f03582deda4ca99c92486c61a771815de3f91ee5d",
@@ -1392,7 +1391,15 @@
       "remote.signInAccess.empty": "7166fa8f2d9ef4f4fbbbe7da946c67814553260b89fa71481e6e03a533284a86",
       "remote.signInAccess.invalid": "f7571753e84241b531638ab312bb1b704d261eebae3a05d27f24c02a5ba5061e",
       "remote.signInAccess.note": "ce9c15dc3fe23bbed92cb66d4cd54b8fdf0498f52f6bd2250067134b1ac65783",
-      "remote.signInAccess.error": "71a471a7b15e8647dda8cab60737a1b41901bdcbe3be10f477a9163b723f4e1d"
+      "remote.signInAccess.error": "71a471a7b15e8647dda8cab60737a1b41901bdcbe3be10f477a9163b723f4e1d",
+      "sidebar.resizeAria": "243854b4d0c709a06e41005bc74a72d6b49463cc2d9ac5bc2967666f6b988c88",
+      "sidebar.section.renameContext": "d7ef0f1a379aa37491dbc4f72a0ba7a5bf053a6d56307255faf2a2e5eecccbe5",
+      "sidebar.section.renameContextAria": "57c2cb0c15dd1c49d849af217bd482cf3fc9d422caa020bd0e27a4980f566afe",
+      "sidebar.section.deleteContext": "3d33673c8203482e2b03e1b8575d2f96a59199c1c23a0e4b299930cd62d49690",
+      "sidebar.section.deleteTitle": "a4b982a9e0bc24133bce18717f9db74bd70095b79c24ee45c57a8194fb727d4d",
+      "sidebar.section.deleteBody": "0aa93d2dd16e0d39ba61234387432b92d32523867d9eca595ecc83252e827446",
+      "sidebar.bot.moveUp": "c66feb5eb8f217c76bfb0f1b41e3ee73ab41cb9959fae8284911bd3ad3816086",
+      "sidebar.bot.moveDown": "40bb50da160cdc21d6029a927b68f92b07fd450688e609826cbc70d202db96da"
     },
     "es": {
       "noEngines.title": "af88855a5f80377de709995229ba3907df9e8fb3b940fbf7c0d9cbe6eea54afe",
@@ -1583,7 +1590,6 @@
       "sidebar.section.collapse": "19f25826b84b030c2c08c3166fe344167a98e50cc672a669aa5a86397d1f7cae",
       "sidebar.section.expandReorder": "c6fb575f359cde47dd4e5b01cb80e68c3e4bc7681fac74004df1f56e3dc11355",
       "sidebar.section.collapseReorder": "7fedebab5a9fd26cfd13c414017b2aaa190e314183faee83a9625ff4b6970a71",
-      "sidebar.section.dragToReorder": "ef86a0ed928794a4be6a964201fac2fb1d57e1836b14e307e6376ba36ad7a29a",
       "sidebar.profile.you": "08b041935798fbf6fd6ff51099ffedb140a475889986d14f5559ff8e7fc571dd",
       "sidebar.menu.yourPhone": "807163670bbc384df37a2de03c8850b5e9632b6c3344e72699877edf63144bb6",
       "sidebar.menu.getIos": "5f0214a062aca6bcb857c46f03582deda4ca99c92486c61a771815de3f91ee5d",
@@ -2785,7 +2791,15 @@
       "remote.signInAccess.empty": "7166fa8f2d9ef4f4fbbbe7da946c67814553260b89fa71481e6e03a533284a86",
       "remote.signInAccess.invalid": "f7571753e84241b531638ab312bb1b704d261eebae3a05d27f24c02a5ba5061e",
       "remote.signInAccess.note": "ce9c15dc3fe23bbed92cb66d4cd54b8fdf0498f52f6bd2250067134b1ac65783",
-      "remote.signInAccess.error": "71a471a7b15e8647dda8cab60737a1b41901bdcbe3be10f477a9163b723f4e1d"
+      "remote.signInAccess.error": "71a471a7b15e8647dda8cab60737a1b41901bdcbe3be10f477a9163b723f4e1d",
+      "sidebar.resizeAria": "243854b4d0c709a06e41005bc74a72d6b49463cc2d9ac5bc2967666f6b988c88",
+      "sidebar.section.renameContext": "d7ef0f1a379aa37491dbc4f72a0ba7a5bf053a6d56307255faf2a2e5eecccbe5",
+      "sidebar.section.renameContextAria": "57c2cb0c15dd1c49d849af217bd482cf3fc9d422caa020bd0e27a4980f566afe",
+      "sidebar.section.deleteContext": "3d33673c8203482e2b03e1b8575d2f96a59199c1c23a0e4b299930cd62d49690",
+      "sidebar.section.deleteTitle": "a4b982a9e0bc24133bce18717f9db74bd70095b79c24ee45c57a8194fb727d4d",
+      "sidebar.section.deleteBody": "0aa93d2dd16e0d39ba61234387432b92d32523867d9eca595ecc83252e827446",
+      "sidebar.bot.moveUp": "c66feb5eb8f217c76bfb0f1b41e3ee73ab41cb9959fae8284911bd3ad3816086",
+      "sidebar.bot.moveDown": "40bb50da160cdc21d6029a927b68f92b07fd450688e609826cbc70d202db96da"
     },
     "fr": {
       "noEngines.title": "af88855a5f80377de709995229ba3907df9e8fb3b940fbf7c0d9cbe6eea54afe",
@@ -2976,7 +2990,6 @@
       "sidebar.section.collapse": "19f25826b84b030c2c08c3166fe344167a98e50cc672a669aa5a86397d1f7cae",
       "sidebar.section.expandReorder": "c6fb575f359cde47dd4e5b01cb80e68c3e4bc7681fac74004df1f56e3dc11355",
       "sidebar.section.collapseReorder": "7fedebab5a9fd26cfd13c414017b2aaa190e314183faee83a9625ff4b6970a71",
-      "sidebar.section.dragToReorder": "ef86a0ed928794a4be6a964201fac2fb1d57e1836b14e307e6376ba36ad7a29a",
       "sidebar.profile.you": "08b041935798fbf6fd6ff51099ffedb140a475889986d14f5559ff8e7fc571dd",
       "sidebar.menu.yourPhone": "807163670bbc384df37a2de03c8850b5e9632b6c3344e72699877edf63144bb6",
       "sidebar.menu.getIos": "5f0214a062aca6bcb857c46f03582deda4ca99c92486c61a771815de3f91ee5d",
@@ -4178,7 +4191,15 @@
       "remote.signInAccess.empty": "7166fa8f2d9ef4f4fbbbe7da946c67814553260b89fa71481e6e03a533284a86",
       "remote.signInAccess.invalid": "f7571753e84241b531638ab312bb1b704d261eebae3a05d27f24c02a5ba5061e",
       "remote.signInAccess.note": "ce9c15dc3fe23bbed92cb66d4cd54b8fdf0498f52f6bd2250067134b1ac65783",
-      "remote.signInAccess.error": "71a471a7b15e8647dda8cab60737a1b41901bdcbe3be10f477a9163b723f4e1d"
+      "remote.signInAccess.error": "71a471a7b15e8647dda8cab60737a1b41901bdcbe3be10f477a9163b723f4e1d",
+      "sidebar.resizeAria": "243854b4d0c709a06e41005bc74a72d6b49463cc2d9ac5bc2967666f6b988c88",
+      "sidebar.section.renameContext": "d7ef0f1a379aa37491dbc4f72a0ba7a5bf053a6d56307255faf2a2e5eecccbe5",
+      "sidebar.section.renameContextAria": "57c2cb0c15dd1c49d849af217bd482cf3fc9d422caa020bd0e27a4980f566afe",
+      "sidebar.section.deleteContext": "3d33673c8203482e2b03e1b8575d2f96a59199c1c23a0e4b299930cd62d49690",
+      "sidebar.section.deleteTitle": "a4b982a9e0bc24133bce18717f9db74bd70095b79c24ee45c57a8194fb727d4d",
+      "sidebar.section.deleteBody": "0aa93d2dd16e0d39ba61234387432b92d32523867d9eca595ecc83252e827446",
+      "sidebar.bot.moveUp": "c66feb5eb8f217c76bfb0f1b41e3ee73ab41cb9959fae8284911bd3ad3816086",
+      "sidebar.bot.moveDown": "40bb50da160cdc21d6029a927b68f92b07fd450688e609826cbc70d202db96da"
     },
     "hi": {
       "noEngines.title": "af88855a5f80377de709995229ba3907df9e8fb3b940fbf7c0d9cbe6eea54afe",
@@ -4369,7 +4390,6 @@
       "sidebar.section.collapse": "19f25826b84b030c2c08c3166fe344167a98e50cc672a669aa5a86397d1f7cae",
       "sidebar.section.expandReorder": "c6fb575f359cde47dd4e5b01cb80e68c3e4bc7681fac74004df1f56e3dc11355",
       "sidebar.section.collapseReorder": "7fedebab5a9fd26cfd13c414017b2aaa190e314183faee83a9625ff4b6970a71",
-      "sidebar.section.dragToReorder": "ef86a0ed928794a4be6a964201fac2fb1d57e1836b14e307e6376ba36ad7a29a",
       "sidebar.profile.you": "08b041935798fbf6fd6ff51099ffedb140a475889986d14f5559ff8e7fc571dd",
       "sidebar.menu.yourPhone": "807163670bbc384df37a2de03c8850b5e9632b6c3344e72699877edf63144bb6",
       "sidebar.menu.getIos": "5f0214a062aca6bcb857c46f03582deda4ca99c92486c61a771815de3f91ee5d",
@@ -5571,7 +5591,15 @@
       "remote.signInAccess.empty": "7166fa8f2d9ef4f4fbbbe7da946c67814553260b89fa71481e6e03a533284a86",
       "remote.signInAccess.invalid": "f7571753e84241b531638ab312bb1b704d261eebae3a05d27f24c02a5ba5061e",
       "remote.signInAccess.note": "ce9c15dc3fe23bbed92cb66d4cd54b8fdf0498f52f6bd2250067134b1ac65783",
-      "remote.signInAccess.error": "71a471a7b15e8647dda8cab60737a1b41901bdcbe3be10f477a9163b723f4e1d"
+      "remote.signInAccess.error": "71a471a7b15e8647dda8cab60737a1b41901bdcbe3be10f477a9163b723f4e1d",
+      "sidebar.resizeAria": "243854b4d0c709a06e41005bc74a72d6b49463cc2d9ac5bc2967666f6b988c88",
+      "sidebar.section.renameContext": "d7ef0f1a379aa37491dbc4f72a0ba7a5bf053a6d56307255faf2a2e5eecccbe5",
+      "sidebar.section.renameContextAria": "57c2cb0c15dd1c49d849af217bd482cf3fc9d422caa020bd0e27a4980f566afe",
+      "sidebar.section.deleteContext": "3d33673c8203482e2b03e1b8575d2f96a59199c1c23a0e4b299930cd62d49690",
+      "sidebar.section.deleteTitle": "a4b982a9e0bc24133bce18717f9db74bd70095b79c24ee45c57a8194fb727d4d",
+      "sidebar.section.deleteBody": "0aa93d2dd16e0d39ba61234387432b92d32523867d9eca595ecc83252e827446",
+      "sidebar.bot.moveUp": "c66feb5eb8f217c76bfb0f1b41e3ee73ab41cb9959fae8284911bd3ad3816086",
+      "sidebar.bot.moveDown": "40bb50da160cdc21d6029a927b68f92b07fd450688e609826cbc70d202db96da"
     },
     "ja": {
       "noEngines.title": "af88855a5f80377de709995229ba3907df9e8fb3b940fbf7c0d9cbe6eea54afe",
@@ -5762,7 +5790,6 @@
       "sidebar.section.collapse": "19f25826b84b030c2c08c3166fe344167a98e50cc672a669aa5a86397d1f7cae",
       "sidebar.section.expandReorder": "c6fb575f359cde47dd4e5b01cb80e68c3e4bc7681fac74004df1f56e3dc11355",
       "sidebar.section.collapseReorder": "7fedebab5a9fd26cfd13c414017b2aaa190e314183faee83a9625ff4b6970a71",
-      "sidebar.section.dragToReorder": "ef86a0ed928794a4be6a964201fac2fb1d57e1836b14e307e6376ba36ad7a29a",
       "sidebar.profile.you": "08b041935798fbf6fd6ff51099ffedb140a475889986d14f5559ff8e7fc571dd",
       "sidebar.menu.yourPhone": "807163670bbc384df37a2de03c8850b5e9632b6c3344e72699877edf63144bb6",
       "sidebar.menu.getIos": "5f0214a062aca6bcb857c46f03582deda4ca99c92486c61a771815de3f91ee5d",
@@ -6964,7 +6991,15 @@
       "remote.signInAccess.empty": "7166fa8f2d9ef4f4fbbbe7da946c67814553260b89fa71481e6e03a533284a86",
       "remote.signInAccess.invalid": "f7571753e84241b531638ab312bb1b704d261eebae3a05d27f24c02a5ba5061e",
       "remote.signInAccess.note": "ce9c15dc3fe23bbed92cb66d4cd54b8fdf0498f52f6bd2250067134b1ac65783",
-      "remote.signInAccess.error": "71a471a7b15e8647dda8cab60737a1b41901bdcbe3be10f477a9163b723f4e1d"
+      "remote.signInAccess.error": "71a471a7b15e8647dda8cab60737a1b41901bdcbe3be10f477a9163b723f4e1d",
+      "sidebar.resizeAria": "243854b4d0c709a06e41005bc74a72d6b49463cc2d9ac5bc2967666f6b988c88",
+      "sidebar.section.renameContext": "d7ef0f1a379aa37491dbc4f72a0ba7a5bf053a6d56307255faf2a2e5eecccbe5",
+      "sidebar.section.renameContextAria": "57c2cb0c15dd1c49d849af217bd482cf3fc9d422caa020bd0e27a4980f566afe",
+      "sidebar.section.deleteContext": "3d33673c8203482e2b03e1b8575d2f96a59199c1c23a0e4b299930cd62d49690",
+      "sidebar.section.deleteTitle": "a4b982a9e0bc24133bce18717f9db74bd70095b79c24ee45c57a8194fb727d4d",
+      "sidebar.section.deleteBody": "0aa93d2dd16e0d39ba61234387432b92d32523867d9eca595ecc83252e827446",
+      "sidebar.bot.moveUp": "c66feb5eb8f217c76bfb0f1b41e3ee73ab41cb9959fae8284911bd3ad3816086",
+      "sidebar.bot.moveDown": "40bb50da160cdc21d6029a927b68f92b07fd450688e609826cbc70d202db96da"
     },
     "pt-br": {
       "noEngines.title": "af88855a5f80377de709995229ba3907df9e8fb3b940fbf7c0d9cbe6eea54afe",
@@ -7230,7 +7265,6 @@
       "sidebar.section.collapse": "19f25826b84b030c2c08c3166fe344167a98e50cc672a669aa5a86397d1f7cae",
       "sidebar.section.expandReorder": "c6fb575f359cde47dd4e5b01cb80e68c3e4bc7681fac74004df1f56e3dc11355",
       "sidebar.section.collapseReorder": "7fedebab5a9fd26cfd13c414017b2aaa190e314183faee83a9625ff4b6970a71",
-      "sidebar.section.dragToReorder": "ef86a0ed928794a4be6a964201fac2fb1d57e1836b14e307e6376ba36ad7a29a",
       "sidebar.profile.you": "08b041935798fbf6fd6ff51099ffedb140a475889986d14f5559ff8e7fc571dd",
       "sidebar.menu.yourPhone": "807163670bbc384df37a2de03c8850b5e9632b6c3344e72699877edf63144bb6",
       "sidebar.menu.getIos": "5f0214a062aca6bcb857c46f03582deda4ca99c92486c61a771815de3f91ee5d",
@@ -8357,7 +8391,15 @@
       "remote.signInAccess.empty": "7166fa8f2d9ef4f4fbbbe7da946c67814553260b89fa71481e6e03a533284a86",
       "remote.signInAccess.invalid": "f7571753e84241b531638ab312bb1b704d261eebae3a05d27f24c02a5ba5061e",
       "remote.signInAccess.note": "ce9c15dc3fe23bbed92cb66d4cd54b8fdf0498f52f6bd2250067134b1ac65783",
-      "remote.signInAccess.error": "71a471a7b15e8647dda8cab60737a1b41901bdcbe3be10f477a9163b723f4e1d"
+      "remote.signInAccess.error": "71a471a7b15e8647dda8cab60737a1b41901bdcbe3be10f477a9163b723f4e1d",
+      "sidebar.resizeAria": "243854b4d0c709a06e41005bc74a72d6b49463cc2d9ac5bc2967666f6b988c88",
+      "sidebar.section.renameContext": "d7ef0f1a379aa37491dbc4f72a0ba7a5bf053a6d56307255faf2a2e5eecccbe5",
+      "sidebar.section.renameContextAria": "57c2cb0c15dd1c49d849af217bd482cf3fc9d422caa020bd0e27a4980f566afe",
+      "sidebar.section.deleteContext": "3d33673c8203482e2b03e1b8575d2f96a59199c1c23a0e4b299930cd62d49690",
+      "sidebar.section.deleteTitle": "a4b982a9e0bc24133bce18717f9db74bd70095b79c24ee45c57a8194fb727d4d",
+      "sidebar.section.deleteBody": "0aa93d2dd16e0d39ba61234387432b92d32523867d9eca595ecc83252e827446",
+      "sidebar.bot.moveUp": "c66feb5eb8f217c76bfb0f1b41e3ee73ab41cb9959fae8284911bd3ad3816086",
+      "sidebar.bot.moveDown": "40bb50da160cdc21d6029a927b68f92b07fd450688e609826cbc70d202db96da"
     },
     "zh": {
       "noEngines.title": "af88855a5f80377de709995229ba3907df9e8fb3b940fbf7c0d9cbe6eea54afe",
@@ -8548,7 +8590,6 @@
       "sidebar.section.collapse": "19f25826b84b030c2c08c3166fe344167a98e50cc672a669aa5a86397d1f7cae",
       "sidebar.section.expandReorder": "c6fb575f359cde47dd4e5b01cb80e68c3e4bc7681fac74004df1f56e3dc11355",
       "sidebar.section.collapseReorder": "7fedebab5a9fd26cfd13c414017b2aaa190e314183faee83a9625ff4b6970a71",
-      "sidebar.section.dragToReorder": "ef86a0ed928794a4be6a964201fac2fb1d57e1836b14e307e6376ba36ad7a29a",
       "sidebar.profile.you": "08b041935798fbf6fd6ff51099ffedb140a475889986d14f5559ff8e7fc571dd",
       "sidebar.menu.yourPhone": "807163670bbc384df37a2de03c8850b5e9632b6c3344e72699877edf63144bb6",
       "sidebar.menu.getIos": "5f0214a062aca6bcb857c46f03582deda4ca99c92486c61a771815de3f91ee5d",
@@ -9750,7 +9791,15 @@
       "remote.signInAccess.empty": "7166fa8f2d9ef4f4fbbbe7da946c67814553260b89fa71481e6e03a533284a86",
       "remote.signInAccess.invalid": "f7571753e84241b531638ab312bb1b704d261eebae3a05d27f24c02a5ba5061e",
       "remote.signInAccess.note": "ce9c15dc3fe23bbed92cb66d4cd54b8fdf0498f52f6bd2250067134b1ac65783",
-      "remote.signInAccess.error": "71a471a7b15e8647dda8cab60737a1b41901bdcbe3be10f477a9163b723f4e1d"
+      "remote.signInAccess.error": "71a471a7b15e8647dda8cab60737a1b41901bdcbe3be10f477a9163b723f4e1d",
+      "sidebar.resizeAria": "243854b4d0c709a06e41005bc74a72d6b49463cc2d9ac5bc2967666f6b988c88",
+      "sidebar.section.renameContext": "d7ef0f1a379aa37491dbc4f72a0ba7a5bf053a6d56307255faf2a2e5eecccbe5",
+      "sidebar.section.renameContextAria": "57c2cb0c15dd1c49d849af217bd482cf3fc9d422caa020bd0e27a4980f566afe",
+      "sidebar.section.deleteContext": "3d33673c8203482e2b03e1b8575d2f96a59199c1c23a0e4b299930cd62d49690",
+      "sidebar.section.deleteTitle": "a4b982a9e0bc24133bce18717f9db74bd70095b79c24ee45c57a8194fb727d4d",
+      "sidebar.section.deleteBody": "0aa93d2dd16e0d39ba61234387432b92d32523867d9eca595ecc83252e827446",
+      "sidebar.bot.moveUp": "c66feb5eb8f217c76bfb0f1b41e3ee73ab41cb9959fae8284911bd3ad3816086",
+      "sidebar.bot.moveDown": "40bb50da160cdc21d6029a927b68f92b07fd450688e609826cbc70d202db96da"
     },
     "zh-tw": {
       "noEngines.title": "af88855a5f80377de709995229ba3907df9e8fb3b940fbf7c0d9cbe6eea54afe",
@@ -10016,7 +10065,6 @@
       "sidebar.section.collapse": "19f25826b84b030c2c08c3166fe344167a98e50cc672a669aa5a86397d1f7cae",
       "sidebar.section.expandReorder": "c6fb575f359cde47dd4e5b01cb80e68c3e4bc7681fac74004df1f56e3dc11355",
       "sidebar.section.collapseReorder": "7fedebab5a9fd26cfd13c414017b2aaa190e314183faee83a9625ff4b6970a71",
-      "sidebar.section.dragToReorder": "ef86a0ed928794a4be6a964201fac2fb1d57e1836b14e307e6376ba36ad7a29a",
       "sidebar.profile.you": "08b041935798fbf6fd6ff51099ffedb140a475889986d14f5559ff8e7fc571dd",
       "sidebar.menu.yourPhone": "807163670bbc384df37a2de03c8850b5e9632b6c3344e72699877edf63144bb6",
       "sidebar.menu.getIos": "5f0214a062aca6bcb857c46f03582deda4ca99c92486c61a771815de3f91ee5d",

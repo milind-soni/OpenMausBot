@@ -266,7 +266,6 @@
   "sidebar.section.collapse": "Collapse {name}",
   "sidebar.section.expandReorder": "Expand {name}. Alt+Up/Down reorders it.",
   "sidebar.section.collapseReorder": "Collapse {name}. Alt+Up/Down reorders it.",
-  "sidebar.section.dragToReorder": "Drag to reorder",
   "sidebar.profile.you": "You",
   "sidebar.menu.yourPhone": "Your phone",
   "sidebar.menu.getIos": "Get OpenMausBot for iOS",
@@ -1656,5 +1655,13 @@
   "remote.signInAccess.empty": "Nobody yet. Add an address, or @yourcompany.com for everyone at your company.",
   "remote.signInAccess.invalid": "Enter an email address, or @domain for everyone at that domain.",
   "remote.signInAccess.note": "Changes apply immediately. Removing someone stops new sign-ins; their existing devices stay signed in until you sign them out above.",
-  "remote.signInAccess.error": "Could not save: {error}"
+  "remote.signInAccess.error": "Could not save: {error}",
+  "sidebar.resizeAria": "Resize sidebar",
+  "sidebar.section.renameContext": "Rename context",
+  "sidebar.section.renameContextAria": "Rename the {name} context",
+  "sidebar.section.deleteContext": "Delete context",
+  "sidebar.section.deleteTitle": "Delete {name}?",
+  "sidebar.section.deleteBody": "The heading goes away. Its {count} rows keep everything they have and go back to being uncategorised, the way a new bot starts.",
+  "sidebar.bot.moveUp": "Move up",
+  "sidebar.bot.moveDown": "Move down"
 }
