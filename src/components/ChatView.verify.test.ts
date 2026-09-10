@@ -43,6 +43,7 @@ describe("Verify card in the chat pane", () => {
     } }));
     expect(markup).toContain(`aria-label="${t("chat.verify.aria")}"`);
     expect(markup).toContain("1 passed · 1 failed");
+    expect(markup).not.toContain("Execution timeline");
     expect(markup).toContain(">doctor<");
     expect(markup).toContain(">send<");
     expect(markup).not.toContain(">status<");

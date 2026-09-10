@@ -30,7 +30,12 @@ const run = enabled ? it : it.skip;
 // A cold run downloads the binary and Chrome; a warm one launches in seconds.
 const LAUNCH_TIMEOUT_MS = forced && !binary ? 600_000 : 180_000;
 
-const TOOL_CALLS = '[{"name":"Bash","input":{"command":"echo hi"},"ok":true}]';
+// Synthetic provider outcomes exercise the UI, not the commands themselves.
+const TOOL_CALLS = JSON.stringify([
+  { name: "Bash", input: { command: "pnpm control:omb doctor" }, ok: true },
+  { name: "Bash", input: { command: "pnpm control:omb ui click --name Missing" }, ok: false },
+  { name: "Bash", input: { command: "pnpm control:omb ui flag --set features.showToolCalls=true --dry-run" }, ok: true },
+]);
 const REPLY = "hello from fake claude"; // the fake engine's default reply text
 // OMB_UI_EVIDENCE_DIR keeps the screenshot (CI uploads it); otherwise it is temporary.
 const evidenceDir = process.env.OMB_UI_EVIDENCE_DIR ? resolve(ROOT, process.env.OMB_UI_EVIDENCE_DIR) : mkdtempSync(join(tmpdir(), "omb-ui-evidence-"));
@@ -147,6 +152,13 @@ describe("control-omb ui drives the real renderer", () => {
     // (b) the scripted Bash call rendered as a tool chip, named by its tool
     expect(transcript).toMatch(/StaticText "Bash"/);
     expect(tree).not.toContain("Not logged in");
+    expect(tree).not.toContain("Execution timeline");
+    expect(tree).toContain("1 passed · 1 failed · 1 dry run");
+
+    // These are real control operations: the fixture health check succeeds
+    // and a deliberately missing UI target rejects instead of reporting green.
+    expect(await runControlOmb(["doctor", "--url", info.url])).toMatchObject({ ok: true });
+    await expect(ui("click", info.ui, "--name", "Deliberately missing QA control")).rejects.toThrow("no element is named");
 
     mkdirSync(evidenceDir, { recursive: true });
     const shotPath = join(evidenceDir, "chat-ui.png");
@@ -155,6 +167,33 @@ describe("control-omb ui drives the real renderer", () => {
     const png = readFileSync(shotPath);
     expect(png.length).toBeGreaterThan(1_000);
     expect(png.subarray(0, 8)).toEqual(Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]));
+
+    await ui("click", info.ui, "--name", "Collapse the verification run");
+    const collapsed = await ui("snapshot", info.ui);
+    expect(collapsed.snapshot).toContain("Expand the verification run");
+    expect(collapsed.snapshot).not.toContain('list "Verification steps"');
+
+    await ui("click", info.ui, "--name", "Inspector");
+    const inspected = await ui("snapshot", info.ui);
+    const runLog = (inspected.snapshot as string).slice((inspected.snapshot as string).indexOf('complementary "Inspector"'));
+    expect(runLog).toContain('tab "Run Log" [selected');
+    expect(runLog).toContain("pnpm control:omb doctor");
+    expect(runLog).toContain("pnpm control:omb ui click --name Missing");
+    expect(runLog).toContain('StaticText "Failed"');
+    expect(runLog).toContain("Copy redacted run log");
+    await ui("screenshot", info.ui, "--out", join(evidenceDir, "run-log.png"));
+
+    // Existing technical views remain reachable by accessible tab references.
+    const [eventsTab] = refsNamed(inspected, "Events", "tab");
+    expect(eventsTab).toBeDefined();
+    await ui("click", info.ui, "--ref", eventsTab);
+    const events = await ui("snapshot", info.ui);
+    expect(events.snapshot).toContain("turn.started");
+    const [rawTab] = refsNamed(events, "Raw", "tab");
+    await ui("click", info.ui, "--ref", rawTab);
+    expect((await ui("snapshot", info.ui)).snapshot).toContain('tab "Raw" [selected');
+    await ui("click", info.ui, "--name", "Close the Inspector");
+    expect((await ui("snapshot", info.ui)).snapshot).not.toContain('complementary "Inspector"');
 
     const logs = await ui("console", info.ui);
     expect(logs.ok).toBe(true);

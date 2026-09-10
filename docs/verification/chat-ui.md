@@ -91,6 +91,22 @@ The permanent form of this recipe is `scripts/testing/control-omb-ui.e2e.test.ts
 OMB_UI_E2E=1 pnpm exec vitest run scripts/testing/control-omb-ui.e2e.test.ts
 ```
 
+The asserted recipe now also covers the floating Verify card with a successful,
+failed, and dry-run command. Those tool outcomes are **simulated provider
+events**, not executions of the commands written in the chips. Separately, the
+recipe runs a real fixture health check and verifies that clicking a deliberately
+missing control fails. The Verify card remains collapsible; the old execution
+timeline is no longer shown above chat.
+
+For activity detail, click **Inspector → Run Log**. It shows the selected
+conversation's recorded commands, statuses and timestamps; command previews
+may be shortened. **Events** and **Raw** retain the underlying technical views.
+The recipe checks tab switching and saves `run-log.png` alongside `chat-ui.png`.
+**Copy redacted run log** copies only the displayed activity (up to 200 entries),
+not chat text or raw protocol data. Review copied logs before sharing: automatic
+redaction is best effort. Neither this log nor a successful command proves an
+unasserted user outcome.
+
 It runs when an agent-browser binary resolves and is skipped with a printed
 reason otherwise; `OMB_UI_E2E=1` forces the verified download. The `ui-smoke`
 job in `.github/workflows/ci.yml` runs it on Ubuntu 24.04 and uploads the
