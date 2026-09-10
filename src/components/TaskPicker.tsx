@@ -8,7 +8,7 @@ import { Fragment, useEffect, useRef, useState } from "react";
 import { Check, ChevronDown, FolderInput, Pencil, Plus, Search, Trash2 } from "lucide-react";
 import { useStore, formatTime, type Bot, type BotProject, type Group, type Task } from "@/state/store";
 import { cn } from "@/lib/cn";
-import { t } from "@/lib/i18n";
+import { activeLocale, t } from "@/lib/i18n";
 import { COMPACT_BUBBLE } from "@/lib/compact-chip";
 import { formatTaskTokens } from "@/lib/usage";
 import { nextRename } from "@/lib/rename";
@@ -60,7 +60,7 @@ function TaskUsage({ usage }: { usage: Task["usage"] }) {
   if (!label) return null;
   return (
     <span
-      title={`${t("chat.usage.in", { tokens: usage.input.toLocaleString() })} · ${t("chat.usage.out", { tokens: usage.output.toLocaleString() })}`}
+      title={`${t("chat.usage.in", { tokens: usage.input.toLocaleString(activeLocale()) })} · ${t("chat.usage.out", { tokens: usage.output.toLocaleString(activeLocale()) })}`}
     >
       {" · "}
       {label}
@@ -205,8 +205,8 @@ function ConversationTaskPicker({
     u && currentLabel
       ? t("task.switchWithUsage", {
           label: currentLabel,
-          input: u.input.toLocaleString(),
-          output: u.output.toLocaleString(),
+          input: u.input.toLocaleString(activeLocale()),
+          output: u.output.toLocaleString(activeLocale()),
         })
       : t("task.switch");
   const grouped = bot ? groupThreadTasks(tasks, bot.projects ?? [], query) : null;

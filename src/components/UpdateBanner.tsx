@@ -2,6 +2,7 @@
 // preload's updater bridge. Renders nothing in the browser/dev (no bridge)
 // and while idle/checking; appears only when actionable: an update to
 // download, a download in progress, a restart to apply, or an error.
+import { t } from "@/lib/i18n";
 import { useEffect, useState } from "react";
 import { ArrowDownToLine, Loader2, PackageOpen, RefreshCw, Sparkles, X } from "lucide-react";
 import { useUpdaterState } from "@/lib/updater";
@@ -19,11 +20,11 @@ const primaryAction =
 // so name the two cases that actually happen and clip anything else to its
 // first line.
 function friendlyError(message?: string): string {
-  if (!message) return "Something went wrong.";
+  if (!message) return t("update.somethingWrong");
   if (/cannot find .*\.yml|404/i.test(message))
-    return "No update has been published for this platform yet.";
+    return t("update.noRelease");
   if (/ENOTFOUND|ECONNREFUSED|ETIMEDOUT|net::/i.test(message))
-    return "Couldn't reach the update server.";
+    return t("update.unreachable");
   return message.split("\n")[0].slice(0, 140);
 }
 
@@ -57,42 +58,42 @@ export function UpdateBanner() {
     s.status === "available"
       ? `${brand().name} ${s.version} is available`
       : s.status === "downloading"
-        ? `Downloading ${s.version ?? "update"}…`
+        ? t("update.downloading", { version: s.version ?? t("update.versionFallback") })
         : preparing
-          ? "Preparing update…"
+          ? t("update.preparing")
           : s.status === "downloaded"
             ? `${s.version} is ready`
             : installing
               ? handoff
-                ? "Opening a terminal…"
-                : "Restarting to update…"
+                ? t("update.openingTerminal")
+                : t("update.restarting")
               : s.status === "handed-off"
-                ? "Finish in a terminal"
-                : "Update failed";
+                ? t("update.finishInTerminal")
+                : t("update.failed");
   const subtitle =
     s.status === "available"
-      ? "A newer version is ready to download."
+      ? t("update.readyToDownload")
       : s.status === "downloading"
         ? // no percent yet means the transfer hasn't reported in — don't imply 0
           s.percent == null
-          ? "Starting download…"
+          ? t("update.startingDownload")
           : `${Math.round(s.percent)}%`
         : preparing
-          ? "Download complete. macOS is preparing the update."
+          ? t("update.downloadComplete")
           : s.status === "downloaded"
             ? handoff
-              ? "Copy the install command and open a terminal."
-              : "Restart to finish updating."
+              ? t("update.copyCommandHint")
+              : t("update.restartToFinish")
             : installing
               ? handoff
-                ? "Copying the command…"
-                : s.message || `${brand().name} will reopen in a moment.`
+                ? t("update.copying")
+                : s.message || t("update.willReopen", { app: brand().name })
               : s.status === "handed-off"
                 ? s.terminalOpened
-                  ? "Command copied — paste it in the terminal that opened."
-                  : "Command copied — paste it in a terminal to finish."
+                  ? t("update.copiedPasteOpen")
+                  : t("update.copiedPaste")
                 : s.retryable === false
-                  ? `Quit and reopen ${brand().name} before trying the update again.`
+                  ? t("update.quitReopen", { name: brand().name })
                   : friendlyError(s.message);
 
   return (
@@ -111,7 +112,7 @@ export function UpdateBanner() {
           <button
             onClick={() => setDismissed(key)}
             className="shrink-0 rounded-md p-1 text-ink-secondary hover:bg-control hover:text-ink"
-            title="Dismiss"
+            title={t("update.dismiss")}
           >
             <X size={14} />
           </button>
@@ -144,7 +145,7 @@ export function UpdateBanner() {
             disabled
             className="flex flex-1 items-center justify-center gap-1.5 rounded-lg bg-control py-1.5 text-[13px] font-medium text-ink-secondary"
           >
-            <Loader2 size={13} className="animate-spin" /> {preparing ? "Preparing…" : handoff ? "Opening…" : "Restarting…"}
+            <Loader2 size={13} className="animate-spin" /> {preparing ? t("update.preparingShort") : handoff ? t("update.opening") : t("update.restartingShort")}
           </button>
         </div>
       )}
@@ -162,11 +163,11 @@ export function UpdateBanner() {
             >
               {pending === "download" ? (
                 <>
-                  <Loader2 size={13} className="animate-spin" /> Starting…
+                  <Loader2 size={13} className="animate-spin" /> {t("update.starting")}
                 </>
               ) : (
                 <>
-                  <ArrowDownToLine size={13} /> Download
+                  <ArrowDownToLine size={13} /> {t("update.download")}
                 </>
               )}
             </button>
@@ -182,15 +183,15 @@ export function UpdateBanner() {
             >
               {pending === "install" ? (
                 <>
-                  <Loader2 size={13} className="animate-spin" /> {handoff ? "Opening…" : "Restarting…"}
+                  <Loader2 size={13} className="animate-spin" /> {handoff ? t("update.opening") : t("update.restartingShort")}
                 </>
               ) : handoff ? (
                 <>
-                  <PackageOpen size={13} /> Install
+                  <PackageOpen size={13} /> {t("update.install")}
                 </>
               ) : (
                 <>
-                  <RefreshCw size={13} /> Restart to update
+                  <RefreshCw size={13} /> {t("update.restartToUpdate")}
                 </>
               )}
             </button>
@@ -206,10 +207,10 @@ export function UpdateBanner() {
             >
               {pending === "check" ? (
                 <>
-                  <Loader2 size={13} className="animate-spin" /> Checking…
+                  <Loader2 size={13} className="animate-spin" /> {t("common.checking")}
                 </>
               ) : (
-                "Try again"
+                t("computer.linux.tryAgain")
               )}
             </button>
           )}
@@ -219,7 +220,7 @@ export function UpdateBanner() {
             className="rounded-lg px-3 py-1.5 text-[13px] text-ink-secondary hover:bg-control hover:text-ink disabled:opacity-50 disabled:hover:bg-transparent"
           >
             {/* after a hand-off there is nothing left to postpone */}
-            {s.status === "handed-off" || s.retryable === false ? "Dismiss" : "Later"}
+            {s.status === "handed-off" || s.retryable === false ? t("update.dismiss") : t("update.later")}
           </button>
         </div>
       )}

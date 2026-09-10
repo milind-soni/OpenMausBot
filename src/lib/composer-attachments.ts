@@ -515,6 +515,8 @@ function transcriptFileName(path: string, suppliedName?: string): string {
   }).join("").replace(/\s+/g, " ").trim();
   const safe = clean(attachmentBasename(decoded));
   const fallback = clean(attachmentBasename(path));
+  // server/index.ts imports this module by relative path, so it must not
+  // reach the renderer catalog: this last-resort name stays English.
   return Array.from(safe || fallback || "Attached file").slice(0, 180).join("");
 }
 

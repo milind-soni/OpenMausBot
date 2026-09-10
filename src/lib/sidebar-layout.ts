@@ -1,3 +1,5 @@
+import { t } from "@/lib/i18n";
+import type { LocaleKey } from "@/locales";
 import type { GroupGoalRunCardData } from "../../shared/group-goal-run";
 
 export const PINNED_SECTION_ID = "builtin:pinned";
@@ -12,15 +14,15 @@ export type SectionDropPlace = "before" | "after";
 export type SidebarDensityMode = "comfortable" | "compact" | "icons";
 
 const GOAL_RUN_PREVIEW_LABEL = {
-  working: "Working",
-  completed: "Completed",
-  "needs-input": "Needs your input",
-  blocked: "Blocked",
-  "limit-reached": "Turn limit reached",
-  paused: "Paused",
-  stopped: "Stopped",
-  failed: "Failed",
-} satisfies Record<GroupGoalRunCardData["status"], string>;
+  working: "goal.working",
+  completed: "goal.completed",
+  "needs-input": "goal.needsInput",
+  blocked: "goal.blocked",
+  "limit-reached": "goal.limitReached",
+  paused: "goal.paused",
+  stopped: "goal.stopped",
+  failed: "goal.failed",
+} satisfies Record<GroupGoalRunCardData["status"], LocaleKey>;
 
 export type SidebarBot = {
   id: string;
@@ -61,7 +63,7 @@ export function sidebarGoalRunPreview(run: GroupGoalRunCardData): string {
   const detail = run.detail?.replace(/\s+/g, " ").trim();
   const goal = run.goal.replace(/\s+/g, " ").trim();
   const summary = detail || goal;
-  const label = GOAL_RUN_PREVIEW_LABEL[run.status];
+  const label = t(GOAL_RUN_PREVIEW_LABEL[run.status]);
   return summary ? `${label}: ${summary}` : label;
 }
 

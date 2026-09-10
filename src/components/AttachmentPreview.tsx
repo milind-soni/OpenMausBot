@@ -452,20 +452,20 @@ export function AttachmentPreviewDialog({
           {!loaded && !failed && (
             <div className="absolute inset-4 flex animate-pulse items-center justify-center rounded-xl bg-white/[0.055] sm:inset-8" role="status">
               <span className="flex items-center gap-2 text-[13px] text-white/55">
-                <LoaderCircle size={17} className="animate-spin" /> Loading image…
+                <LoaderCircle size={17} className="animate-spin" /> {t("attachments.loadingImage")}
               </span>
             </div>
           )}
           {failed ? (
             <div className="flex flex-col items-center gap-3 text-white/60" role="alert">
               <ImageOff size={34} />
-              <span className="text-[13px]">This image could not be loaded.</span>
+              <span className="text-[13px]">{t("attachments.imageFailed")}</span>
               <button
                 type="button"
                 onClick={retry}
                 className="flex items-center gap-1.5 rounded-lg border border-white/15 bg-white/10 px-3 py-1.5 text-[12px] text-white hover:bg-white/15"
               >
-                <RotateCcw size={13} /> Retry
+                <RotateCcw size={13} /> {t("chat.retry")}
               </button>
             </div>
           ) : (
@@ -536,7 +536,7 @@ function Thumbnail({
       {state === "failed" ? (
         <span className="absolute inset-0 flex flex-col items-center justify-center gap-2 px-3 text-center text-ink-secondary" role="alert">
           <ImageOff size={22} />
-          <span className="max-w-full truncate text-[11.5px]">Image unavailable</span>
+          <span className="max-w-full truncate text-[11.5px]">{t("attachments.imageUnavailable")}</span>
           <span
             role="button"
             tabIndex={0}
@@ -728,7 +728,7 @@ export function MarkdownImagePreview({
         )}
         {openUrl && (
           <a href={openUrl} target="_blank" rel="noreferrer" className="mt-1 inline-flex text-[11px] text-accent hover:underline">
-            Open original
+            {t("attachmentPreview.openOriginal")}
           </a>
         )}
       </span>

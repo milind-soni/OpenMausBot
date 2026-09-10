@@ -4,6 +4,8 @@
 // that keeps the two halves from drifting apart, and it means adding a skin is
 // one CSS block plus one line in SKINS.
 
+import type { LocaleKey } from "@/locales";
+
 export const SKIN_IDS = [
   "midnight",
   "atelier",
@@ -20,18 +22,18 @@ export type Skin = {
   id: SkinId;
   name: string;
   /** One line, shown under the name in the picker. */
-  tagline: string;
+  taglineKey: LocaleKey;
 };
 
 export const SKINS: readonly Skin[] = [
-  { id: "midnight", name: "Midnight", tagline: "The original. Cool and dark." },
-  { id: "atelier", name: "Atelier", tagline: "Daylight on paper, warm and quiet." },
-  { id: "foundry", name: "Foundry", tagline: "Night shift. Dark, warm, lit in brass." },
-  { id: "lagoon", name: "Lagoon", tagline: "Cool daylight. Porcelain and deep teal." },
-  { id: "graphite", name: "Graphite", tagline: "Quiet charcoal and softened steel blue." },
-  { id: "linen", name: "Linen", tagline: "Clean daylight with a restrained navy accent." },
-  { id: "dusk", name: "Dusk", tagline: "Muted plum after dark, calm and low-key." },
-  { id: "daylight", name: "Daylight", tagline: "Midnight in reverse. Near-white, ink-black bubbles." },
+  { id: "midnight", name: "Midnight", taglineKey: "skins.midnight" },
+  { id: "atelier", name: "Atelier", taglineKey: "skins.atelier" },
+  { id: "foundry", name: "Foundry", taglineKey: "skins.foundry" },
+  { id: "lagoon", name: "Lagoon", taglineKey: "skins.lagoon" },
+  { id: "graphite", name: "Graphite", taglineKey: "skins.graphite" },
+  { id: "linen", name: "Linen", taglineKey: "skins.linen" },
+  { id: "dusk", name: "Dusk", taglineKey: "skins.dusk" },
+  { id: "daylight", name: "Daylight", taglineKey: "skins.daylight" },
 ];
 
 export const DEFAULT_SKIN: SkinId = "midnight";

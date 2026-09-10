@@ -31,12 +31,12 @@ export function NoEngines() {
     return (
       <main className="flex h-full min-w-0 flex-1 items-center justify-center bg-app px-6">
         <div className="max-w-[520px] rounded-2xl border border-hairline/40 bg-card p-6 text-center">
-          <h1 className="text-[20px] font-semibold text-ink">The host needs an agent engine</h1>
+          <h1 className="text-[20px] font-semibold text-ink">{t("noEngines.hostTitle")}</h1>
           <p className="mt-2 text-[13.5px] leading-relaxed text-ink-secondary">
-            Configure Claude, ACP, or another supported engine in OpenMausBot on the host computer, then return here.
+            {t("noEngines.hostBody", { app: brand().name })}
           </p>
           <button onClick={() => void recheck()} disabled={rechecking} className="mt-5 rounded-lg bg-raised px-3 py-2 text-[13px] text-ink hover:bg-raised-hover disabled:opacity-60">
-            {rechecking ? "Checking…" : "Check again"}
+            {rechecking ? t("common.checking") : t("common.checkAgain")}
           </button>
         </div>
       </main>

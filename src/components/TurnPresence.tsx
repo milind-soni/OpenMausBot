@@ -1,6 +1,7 @@
 // Left-edge tail: mascot looks around while it works, with a live activity
 // sheen beside it. The moment there is an answer, the label is gone while
 // the canonical transcript row performs the settle-in animation above it.
+import { t } from "@/lib/i18n";
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { cn } from "@/lib/cn";
 import { WorkingTimer } from "@/components/WorkingIndicator";
@@ -8,7 +9,7 @@ import { WorkingTimer } from "@/components/WorkingIndicator";
 export function TurnPresence({
   avatar,
   visible,
-  label = "Thinking",
+  label = t("turn.thinking"),
   answering = false,
   since = null,
 }: {

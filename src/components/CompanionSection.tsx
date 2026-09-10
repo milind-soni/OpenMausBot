@@ -110,7 +110,9 @@ export function deriveCompanionPanelStatus(
   const pairedCount = state.devices.length;
   if (!pairedCount) return null;
   return {
-    label: `${pairedCount} ${pairedCount === 1 ? "device" : "devices"} paired`,
+    label: pairedCount === 1
+      ? t("remote.devicePairedOne")
+      : t("remote.devicesPaired", { count: pairedCount }),
     good: true,
   };
 }

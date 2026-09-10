@@ -1,8 +1,10 @@
+import { t } from "@/lib/i18n";
 import { useEffect, useRef } from "react";
 import { ShieldAlert } from "lucide-react";
 
-export const FULL_ACCESS_WARNING =
-  "This bot can read, edit, delete files, use the internet, and control its selected computer without asking—even for potentially destructive or sensitive actions. This also applies to scheduled work and tasks delegated by your Chief or other bots. It does not enable Full access on other bots. Some providers may still require approval. Questions and separate OpenMausBot confirmations still wait for you. This does not grant operating-system permissions or access to accounts you have not connected.";
+/** Resolved per call, not once at import: this is the warning a person reads
+ * before granting a bot full access, and it has to be in their language. */
+export const fullAccessWarning = () => t("fullAccess.body");
 
 export function FullAccessWarning({
   open,
@@ -64,10 +66,10 @@ export function FullAccessWarning({
           <ShieldAlert size={19} className="mt-0.5 shrink-0 text-danger" />
           <div>
             <h2 id="full-access-warning-title" className="text-[15px] font-semibold text-ink">
-              Enable Full access?
+              {t("fullAccess.title")}
             </h2>
             <p id="full-access-warning-body" className="mt-1.5 text-[13px] leading-relaxed text-ink-secondary">
-              {FULL_ACCESS_WARNING}
+              {fullAccessWarning()}
             </p>
           </div>
         </div>
@@ -78,14 +80,14 @@ export function FullAccessWarning({
             onClick={onCancel}
             className="rounded-xl px-4 py-2 text-[13px] text-ink-secondary hover:bg-raised hover:text-ink"
           >
-            Cancel
+            {t("common.cancel")}
           </button>
           <button
             type="button"
             onClick={onConfirm}
             className="rounded-xl bg-danger px-4 py-2 text-[13px] font-medium text-white hover:brightness-110"
           >
-            Enable full access
+            {t("fullAccess.confirm")}
           </button>
         </div>
       </div>

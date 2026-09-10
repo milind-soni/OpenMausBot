@@ -2,6 +2,7 @@
 // the server trusts loopback and none of this is visible; on a remote host
 // the browser must hold a session cookie from pairing (see /pair).
 
+import { t } from "@/lib/i18n";
 export interface EnvironmentDescriptor {
   environmentId: string;
   label: string;
@@ -78,7 +79,7 @@ export async function pairWithCode(
       body: JSON.stringify({ code: input.code, label: input.label, cookie: true, attemptId: input.attemptId ?? newAttemptId() }),
     });
   } catch (error) {
-    return { ok: false, error: `could not reach the server (${error instanceof Error ? error.message : String(error)})` };
+    return { ok: false, error: t("session.unreachable", { error: error instanceof Error ? error.message : String(error) }) };
   }
   const body: unknown = await res.json().catch(() => ({}));
   if (res.ok) return { ok: true };

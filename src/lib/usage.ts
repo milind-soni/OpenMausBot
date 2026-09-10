@@ -41,7 +41,7 @@ const trim = (x: number) => (x >= 100 ? Math.round(x).toString() : x.toFixed(1).
 export function formatTaskTokens(total: number): string | null {
   if (!Number.isFinite(total) || total < 1) return null;
   const n = Math.trunc(total);
-  if (n < 1000) return n === 1 ? "1 token" : `${n} tokens`;
+  if (n < 1000) return n === 1 ? t("usage.tokenOne") : t("usage.tokenMany", { count: n });
   const kTenths = Math.round(n / 100);
   if (kTenths < 10_000) return `${formatTenths(kTenths)}k`;
   return `${formatTenths(Math.round(n / 100_000))}M`;

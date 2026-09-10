@@ -70,7 +70,7 @@ export function EffortRow({
       {label}
       {/* wraps rather than dividing a fixed width: pi offers Default plus six
           levels, which a segmented control would squeeze in the popover */}
-      <div className="mt-2 flex flex-wrap gap-1" role="group" aria-label="Reasoning effort">
+      <div className="mt-2 flex flex-wrap gap-1" role="group" aria-label={t("modelPicker.effortAria")}>
         {[undefined, ...levels].map((level) => (
           <button
             key={level ?? "default"}
@@ -78,8 +78,8 @@ export function EffortRow({
             aria-pressed={selection.effort === level}
             title={
               level === undefined
-                ? "Send no effort level and let the engine decide"
-                : `Ask for ${effortLabel(level)} reasoning effort`
+                ? t("modelPicker.noEffort")
+                : t("modelPicker.askFor", { level: effortLabel(level) })
             }
             onClick={() => dispatch({ type: "setModel", botId: bot.id, threadId, selection: { ...selection, effort: level } })}
             className={cn(
@@ -89,7 +89,7 @@ export function EffortRow({
                 : "border-hairline/40 text-ink-secondary hover:bg-control/60 hover:text-ink",
             )}
           >
-            {level === undefined ? "Default" : effortLabel(level)}
+            {level === undefined ? t("modelPicker.default") : effortLabel(level)}
           </button>
         ))}
       </div>
@@ -128,10 +128,10 @@ function ModelRow({
           </span>
         )}
         {option.id === defaultId && (
-          <span className="shrink-0 rounded bg-inset px-1.5 py-px text-[10px] text-ink-secondary">Default</span>
+          <span className="shrink-0 rounded bg-inset px-1.5 py-px text-[10px] text-ink-secondary">{t("modelPicker.default")}</span>
         )}
         {option.loaded && (
-          <span className="shrink-0 rounded bg-accent/10 px-1.5 py-px text-[10px] text-accent">Loaded</span>
+          <span className="shrink-0 rounded bg-accent/10 px-1.5 py-px text-[10px] text-accent">{t("model.loadedChip")}</span>
         )}
       </span>
       {current && <Check size={14} className="shrink-0 text-accent" />}
@@ -664,7 +664,7 @@ export function ModelPicker({
                     bot={bot}
                     threadId={threadId}
                     className="shrink-0 border-t border-hairline/40 px-4 py-3"
-                    label={<span className="text-[12.5px] font-medium text-ink">Effort</span>}
+                    label={<span className="text-[12.5px] font-medium text-ink">{t("botSettings.model.effort")}</span>}
                   />
                 )}
 

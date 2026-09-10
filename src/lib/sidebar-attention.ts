@@ -1,3 +1,5 @@
+import { t } from "@/lib/i18n";
+
 export type SidebarAttentionBot = {
   unread?: boolean;
   busy?: boolean;
@@ -37,13 +39,13 @@ export function sidebarSectionAttention(
 export function sidebarAttentionLabel(attention: SidebarSectionAttention): string {
   const parts: string[] = [];
   if (attention.waiting > 0) {
-    parts.push(`${attention.waiting} waiting for you`);
+    parts.push(t("sidebar.attention.waiting", { count: attention.waiting }));
   }
   if (attention.unread > 0) {
-    parts.push(`${attention.unread} unread`);
+    parts.push(t("sidebar.attention.unread", { count: attention.unread }));
   }
   if (attention.working > 0) {
-    parts.push(`${attention.working} working`);
+    parts.push(t("sidebar.attention.working", { count: attention.working }));
   }
   return parts.join(", ");
 }

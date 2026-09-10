@@ -13,7 +13,16 @@ export interface TimelineMessage {
 export interface TimelineEvent {
   id: string;
   at: number;
+  /** English, and the only label for a tool: that name comes from the run. */
   label: string;
+  /** Set for the labels this module writes itself. The server imports this
+   * file by relative path and cannot reach the renderer catalog, so the key
+   * travels instead of the sentence and the chat resolves it. */
+  labelKey?:
+    | "timeline.userInput"
+    | "timeline.taskStarted"
+    | "timeline.screenObserved"
+    | "timeline.responseRecorded";
   state: "running" | "complete" | "failed" | "observed";
   kind: "task" | "tool" | "screen" | "result";
 }
@@ -30,6 +39,7 @@ export function timelineEvents(messages: TimelineMessage[]): TimelineEvent[] {
         id: message.id,
         at: message.at,
         label: sawUserInput ? "User input" : "Task started",
+        labelKey: sawUserInput ? "timeline.userInput" : "timeline.taskStarted",
         state: "observed",
         kind: "task",
       });
@@ -46,9 +56,9 @@ export function timelineEvents(messages: TimelineMessage[]): TimelineEvent[] {
         kind: "tool",
       });
     } else if (message.kind === "screen") {
-      events.push({ id: message.id, at: message.at, label: "Screen observed", state: "observed", kind: "screen" });
+      events.push({ id: message.id, at: message.at, label: "Screen observed", labelKey: "timeline.screenObserved", state: "observed", kind: "screen" });
     } else if (message.kind === "text" && message.role === "bot" && message.text?.trim()) {
-      events.push({ id: message.id, at: message.at, label: "Response recorded", state: "complete", kind: "result" });
+      events.push({ id: message.id, at: message.at, label: "Response recorded", labelKey: "timeline.responseRecorded", state: "complete", kind: "result" });
     }
   }
   return events;

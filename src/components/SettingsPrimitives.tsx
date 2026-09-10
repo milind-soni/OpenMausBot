@@ -1,3 +1,4 @@
+import { t } from "@/lib/i18n";
 import { useEffect, useRef, useState, type ComponentProps } from "react";
 import { Check, Copy } from "lucide-react";
 import { cn } from "@/lib/cn";
@@ -48,7 +49,7 @@ export function Card({
 }
 
 /** A command the user is meant to run, with one-click copy. */
-export function CommandLine({ command, copyLabel = "Copy command" }: { command: string; copyLabel?: string }) {
+export function CommandLine({ command, copyLabel = t("settingsPrimitives.copyCommand") }: { command: string; copyLabel?: string }) {
   const [copied, setCopied] = useState(false);
   const resetTimer = useRef<number | null>(null);
 

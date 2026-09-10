@@ -53,7 +53,7 @@ describe("skins", () => {
     expect(SKINS.map((s) => s.id).sort()).toEqual([...SKIN_IDS].sort());
     for (const skin of SKINS) {
       expect(skin.name.length).toBeGreaterThan(0);
-      expect(skin.tagline.length).toBeGreaterThan(0);
+      expect(skin.taglineKey.length).toBeGreaterThan(0);
     }
   });
 });

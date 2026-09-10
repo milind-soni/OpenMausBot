@@ -1,3 +1,4 @@
+import { t } from "@/lib/i18n";
 // Choosing a skin is a visual decision, so the options are shown visually: each
 // card carries a working miniature of the app rendered in that skin, not a row
 // of paint chips. That works because the skin blocks in styles.css are keyed on
@@ -100,7 +101,7 @@ export function SkinPicker() {
               <div className="min-w-0 flex-1">
                 <div className="text-[13px] font-medium text-ink">{skin.name}</div>
                 <div className="mt-0.5 text-[11px] leading-snug text-ink-secondary">
-                  {skin.tagline}
+                  {t(skin.taglineKey)}
                 </div>
               </div>
               {selected && <Check size={13} className="mt-0.5 shrink-0 text-accent-text" />}

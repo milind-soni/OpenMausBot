@@ -14,6 +14,7 @@ import {
   type ReactNode,
 } from "react";
 import type { CloudBackend, EffortLevel } from "../../server/contracts.ts";
+import { activeLocale, t } from "@/lib/i18n";
 import type { MausColor, MausMotion } from "@/lib/mascot";
 import type { BotAvatarCrop } from "../../shared/bot-avatar";
 import { approvalModeFor, type ApprovalMode } from "../../shared/approval-mode";
@@ -1822,10 +1823,10 @@ export async function persistBotUpdate(
   }
 
   if (approvalMode === "full" && confirmFullAccess !== true) {
-    throw new Error("Confirm the Full access warning before enabling it");
+    throw new Error(t("store.confirmFullAccess"));
   }
   if (!trustedApprovals || approvalMode === undefined) {
-    throw new Error("This approval-level change requires the packaged desktop app");
+    throw new Error(t("store.desktopRequired"));
   }
 
   const trustedOptions = {
@@ -1844,9 +1845,9 @@ export async function persistBotUpdate(
         await trustedApprovals.setMode(botId, "ask", { acknowledgeLocalAuto: false });
       } catch (error) {
         throw new Error(
-          `The cancelled ${approvalMode === "full" ? "Full access" : "Custom approval"} grant could not be revoked: ${
-            error instanceof Error ? error.message : String(error)
-          }`,
+          t(approvalMode === "full" ? "store.revokeFullFailed" : "store.revokeCustomFailed", {
+            error: error instanceof Error ? error.message : String(error),
+          }),
         );
       }
     }
@@ -2070,7 +2071,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
           persisted.modelSelection.model !== expectedSelection.model ||
           persisted.modelSelection.effort !== expectedSelection.effort
         ) {
-          throw new Error("The approval level or model could not be saved, so this work was not started");
+          throw new Error(t("store.saveFailed"));
         }
       })]);
       if (threadId) await taskWrites.get(threadId)?.execution;
@@ -3064,7 +3065,7 @@ export function useStore() {
 }
 
 export function formatTime(at: number) {
-  return new Date(at).toLocaleTimeString([], {
+  return new Date(at).toLocaleTimeString(activeLocale(), {
     hour: "numeric",
     minute: "2-digit",
   });

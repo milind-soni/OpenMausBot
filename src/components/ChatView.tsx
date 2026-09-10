@@ -68,6 +68,7 @@ import { SpeakButton } from "./SpeakButton";
 import { CallButton, CallOverlay } from "./CallView";
 import { cn } from "@/lib/cn";
 import { activeLocale, t } from "@/lib/i18n";
+import type { LocaleKey } from "@/locales";
 import { COMPACT_BUBBLE, COMPACT_SQUARE } from "@/lib/compact-chip";
 import { useFocusMessage } from "@/lib/focus-message";
 import { groupTranscript } from "@/lib/activity-runs";
@@ -84,7 +85,15 @@ import {
   resolveTranscriptWindow,
   tailWindowStart,
 } from "@/lib/transcript-window";
-import { timelineEvents } from "@/lib/taskTimeline";
+import { timelineEvents, type TimelineEvent } from "@/lib/taskTimeline";
+
+/** What a screen reader hears before each timeline label. */
+const TIMELINE_STATE = {
+  running: "timeline.state.running",
+  complete: "timeline.state.complete",
+  failed: "timeline.state.failed",
+  observed: "timeline.state.observed",
+} satisfies Record<TimelineEvent["state"], LocaleKey>;
 import { useReplyDraft } from "@/lib/drafts";
 
 /** Long user messages collapse behind a fade so pasted walls of text don't
@@ -145,8 +154,8 @@ function TaskTimeline({ messages, busy }: { messages: Message[]; busy: boolean }
                         : "bg-ink-secondary",
                 )}
               />
-              <span className="sr-only">{event.state}: </span>
-              <span className="truncate">{event.label}</span>
+              <span className="sr-only">{t(TIMELINE_STATE[event.state])}: </span>
+              <span className="truncate">{event.labelKey ? t(event.labelKey) : event.label}</span>
               <time className="ml-auto shrink-0 text-[11px] text-ink-secondary/70">{formatTime(event.at)}</time>
             </li>
           ))}
@@ -409,7 +418,7 @@ function Bubble({
                 ? "bg-bubble-user px-4 py-2.5 whitespace-pre-wrap text-ink"
                 : "bg-card px-4 py-2.5 text-ink",
           )}
-          title={new Date(message.at).toLocaleString()}
+          title={new Date(message.at).toLocaleString(activeLocale())}
         >
           {replyTarget && (
             <div className="mb-2">

@@ -275,7 +275,7 @@ const Transcript = memo(function Transcript({
                     !user && m.id === emergingId && "turn-answer",
                     user ? "chat-text whitespace-pre-wrap bg-bubble-user text-ink" : "bg-card text-ink",
                   )}
-                  title={new Date(m.at).toLocaleString()}
+                  title={new Date(m.at).toLocaleString(activeLocale())}
                 >
                   {m.replyToId && (() => {
                     const target = transcript.find((candidate) => candidate.id === m.replyToId);
@@ -309,7 +309,7 @@ const Transcript = memo(function Transcript({
                       )}
                       <ThreadRefText text={attachments?.display ?? m.text ?? ""} peers={members} everyone={!group.dm} />
                       {m.via === "api" && (
-                        <div className="mt-1 text-[11px] text-ink-secondary">Sent through the API, not typed here</div>
+                        <div className="mt-1 text-[11px] text-ink-secondary">{t("chat.viaApi")}</div>
                       )}
                     </>
                   ) : (
@@ -683,7 +683,7 @@ function RoomSetup({ group, members }: { group: Group; members: Bot[] }) {
                 disabled={saving}
                 className="flex shrink-0 items-center gap-1.5 rounded-xl border border-hairline/50 bg-raised px-3 py-2 text-[13px] font-medium text-ink hover:bg-raised-hover disabled:opacity-50"
               >
-                <FolderOpen size={14} /> Choose
+                <FolderOpen size={14} /> {t("chat.choose")}
               </button>
             )}
           </div>
@@ -1077,7 +1077,7 @@ export function GroupView({ group }: { group: Group }) {
   const memberMauses = members.map((b) => (
     <span
       key={b.id}
-      title={`${b.name}${group.busyBotId === b.id ? " — working…" : ""}`}
+      title={group.busyBotId === b.id ? t("chat.memberWorkingTitle", { name: b.name }) : b.name}
       className={cn(
         "relative inline-flex rounded-full",
         group.busyBotId === b.id && "ring-2 ring-accent/50 ring-offset-1 ring-offset-app",

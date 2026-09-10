@@ -20,6 +20,7 @@ import Markdown, { defaultUrlTransform } from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { Check, Copy, Download, LoaderCircle, RotateCcw, WrapText } from "lucide-react";
 import { remarkMentions, type MentionPeer } from "@/lib/mentions";
+import { t } from "@/lib/i18n";
 
 import {
   countLines,
@@ -293,34 +294,34 @@ export function CodeBlock({ code, lang, streaming }: CodeBlockProps) {
                 ? "bg-accent/15 text-accent font-medium"
                 : "text-ink-secondary hover:bg-raised hover:text-ink"
             }`}
-            title={wrapLines ? "Disable line wrapping" : "Wrap long lines"}
-            aria-label={wrapLines ? "Disable line wrapping" : "Wrap long lines"}
+            title={t(wrapLines ? "markdown.wrapOff" : "markdown.wrapOn")}
+            aria-label={t(wrapLines ? "markdown.wrapOff" : "markdown.wrapOn")}
             aria-pressed={wrapLines}
           >
             <WrapText size={12} aria-hidden="true" />
-            <span className="hidden sm:inline">{wrapLines ? "Unwrap" : "Wrap"}</span>
+            <span className="hidden sm:inline">{t(wrapLines ? "markdown.unwrap" : "markdown.wrap")}</span>
           </button>
           <button
             type="button"
             onClick={download}
             className="inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-[11px] text-ink-secondary hover:bg-raised hover:text-ink transition-colors"
-            title="Download snippet as file"
-            aria-label="Download snippet as file"
+            title={t("markdown.download")}
+            aria-label={t("markdown.download")}
           >
             <Download size={12} aria-hidden="true" />
-            <span className="hidden sm:inline">Save</span>
+            <span className="hidden sm:inline">{t("markdown.saveShort")}</span>
           </button>
           <button
             type="button"
             onClick={copy}
             className="inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-[11px] text-ink-secondary hover:bg-raised hover:text-ink transition-colors"
-            title={copied ? "Copied to clipboard" : "Copy code"}
-            aria-label={copied ? "Code copied to clipboard" : "Copy code to clipboard"}
+            title={t(copied ? "markdown.copiedTitle" : "markdown.copyCode")}
+            aria-label={t(copied ? "markdown.copiedAria" : "markdown.copyAria")}
           >
             {copied ? (
               <>
                 <Check size={12} className="text-success" aria-hidden="true" />
-                <span className="text-success font-medium hidden sm:inline">Copied!</span>
+                <span className="text-success font-medium hidden sm:inline">{t("markdown.copiedShort")}</span>
               </>
             ) : (
               <>
@@ -365,14 +366,14 @@ export function CodeBlock({ code, lang, streaming }: CodeBlockProps) {
 function LocalFileLink({ filePath, children, message }: { filePath: string; children?: ReactNode; message?: MessageAttachmentContext }) {
   const save = useLocalFileSave(filePath, undefined, message);
   if (!message) {
-    return <span title="Unavailable legacy file reference" className="break-words text-ink-secondary">{children}</span>;
+    return <span title={t("markdown.legacyRef")} className="break-words text-ink-secondary">{children}</span>;
   }
   const label = save.state === "saving"
-    ? "Saving…"
+    ? t("markdown.saving")
     : save.state === "saved"
-      ? "Saved"
+      ? t("markdown.saved")
       : save.state === "failed"
-        ? "Retry"
+        ? t("chat.retry")
         : null;
 
   return (
@@ -381,7 +382,7 @@ function LocalFileLink({ filePath, children, message }: { filePath: string; chil
         type="button"
         onClick={() => void save.save()}
         disabled={save.state === "saving"}
-        title="Save a copy"
+        title={t("markdown.saveCopy")}
         className="inline-flex items-center gap-1 break-words text-start text-accent underline decoration-accent/40 hover:decoration-accent disabled:cursor-wait"
       >
         {children}
@@ -418,7 +419,7 @@ export function markdownImageName(src: string, alt?: string): string {
   } catch {
     // A malformed source still gets a useful accessible fallback.
   }
-  return "Image";
+  return t("markdown.image");
 }
 
 export function markdownImageOpenUrl(src: string): string | undefined {
@@ -448,8 +449,8 @@ function Spoiler({ children }: { children?: ReactNode }) {
         </span>
         <button
           type="button"
-          aria-label="Reveal spoiler"
-          title="Reveal spoiler"
+          aria-label={t("markdown.revealSpoiler")}
+          title={t("markdown.revealSpoiler")}
           onClick={() => setRevealed(true)}
           className="absolute inset-0 rounded bg-raised/90"
         />
@@ -461,8 +462,8 @@ function Spoiler({ children }: { children?: ReactNode }) {
       {children}
       <button
         type="button"
-        aria-label="Hide spoiler"
-        title="Hide spoiler"
+        aria-label={t("markdown.hideSpoiler")}
+        title={t("markdown.hideSpoiler")}
         onClick={() => setRevealed(false)}
         className="ms-1 rounded px-0.5 text-[11px] text-ink-secondary hover:text-ink"
       >
@@ -510,7 +511,7 @@ function ChatMarkdownComponent({ text, streaming = false, message, mentionPeers 
           img(props) {
             const { src, alt } = props;
             if (!src) {
-              return <span className="text-[12px] text-danger" role="alert">Image unavailable</span>;
+              return <span className="text-[12px] text-danger" role="alert">{t("attachments.imageUnavailable")}</span>;
             }
             const filePath = localFilePath(src) ?? undefined;
             const sourceOffset = (props as { node?: { position?: { start?: { offset?: number } } } })

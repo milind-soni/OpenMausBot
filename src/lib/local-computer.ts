@@ -1,3 +1,4 @@
+import { t } from "@/lib/i18n";
 import type { Bot, InstanceInfo } from "@/state/store";
 
 export function instanceSupportsLocalComputer(
@@ -34,29 +35,29 @@ export function localComputerDisabledReason({
   providerSupportsLocal: boolean;
 }): string | null {
   if (!providerSupportsLocal) {
-    return "The selected provider cannot request approvals for local computer actions.";
+    return t("localComputer.providerUnsupported");
   }
   if (capabilities.localComputer.available) return null;
   if (capabilities.host.platform === "linux") {
     if (capabilities.localComputer.reasonCode === "linux-wayland-seat-safety-blocked") {
-      return "Local computer control is not available on Wayland yet. Sign out and choose Ubuntu on Xorg to use This computer.";
+      return t("localComputer.waylandBlocked");
     }
     if (capabilities.localComputer.reasonCode === "wayland-compositor-unsupported") {
-      return "Wayland local control is currently limited to GNOME. Xorg remains available on supported desktops.";
+      return t("localComputer.waylandGnomeOnly");
     }
     if (!capabilities.localComputer.enabled) {
-      return "Enable the local control beta and complete the Cua Driver checks first.";
+      return t("localComputer.enableBeta");
     }
-    return capabilities.localComputer.message ?? "Cua Driver is not ready for local control.";
+    return capabilities.localComputer.message ?? t("localComputer.cuaNotReady");
   }
   if (capabilities.host.label === "Browser") {
-    return "Local computer control requires the desktop app.";
+    return t("localComputer.desktopRequired");
   }
-  return "CUA Driver is not ready for local computer control.";
+  return t("localComputer.cuaNotReadyLocal");
 }
 
 export function linuxAutoDescription(): string {
-  return "Auto reuses an existing cloud box; otherwise computer use stays off.";
+  return t("localComputer.linuxAuto");
 }
 
 export type BoxPanelAction =

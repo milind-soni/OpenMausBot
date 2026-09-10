@@ -3,6 +3,7 @@
 // Capture stays half-duplex for the same reason as one-to-one calls: the
 // native recognizer has no acoustic echo cancellation. Bot replies are
 // explicitly queued so a fast second member never cuts off the first.
+import { t } from "@/lib/i18n";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Loader2, PhoneOff, X } from "lucide-react";
 
@@ -65,7 +66,7 @@ function GroupCall({ group, members }: { group: Group; members: Bot[] }) {
   const [note, setNote] = useState<string | null>(null);
   const [speakingMemberId, setSpeakingMemberId] = useState<string | null>(null);
   const pushToTalk = usePushToTalk(group.id, phase === "listening", () => {
-    setNote("Push to talk couldn't start. Check Microphone and Speech Recognition access.");
+    setNote(t("call.pushToTalkFailed"));
   });
 
   const messages = group.messages;
@@ -121,7 +122,7 @@ function GroupCall({ group, members }: { group: Group; members: Bot[] }) {
     setNote(null);
     void window.ogb?.speechStart({ endpointMs: CALL_ENDPOINT_MS }).catch(() => {
       if (alive.current && currentCall() === group.id) {
-        setNote("The microphone couldn't start. Check Microphone and Speech Recognition access.");
+        setNote(t("call.micFailed"));
       }
     });
   }, [group.id, move]);
@@ -207,7 +208,7 @@ function GroupCall({ group, members }: { group: Group; members: Bot[] }) {
     const offTranscript = bridge.onSpeechTranscript((line) => {
       if (!alive.current || currentCall() !== group.id || phaseRef.current !== "listening") return;
       if (line.error) {
-        setNote("Dictation stopped unexpectedly. Check Microphone and Speech Recognition access.");
+        setNote(t("call.dictationStopped"));
         return;
       }
       if (typeof line.text !== "string") return;
@@ -228,7 +229,7 @@ function GroupCall({ group, members }: { group: Group; members: Bot[] }) {
           if (allow && openApproval.skill) {
             setHeard("");
             enqueueSpeech(
-              "Open the group thread to review the complete skill before enabling it. You can say no now to deny it.",
+              t("call.reviewSkillGroup"),
               openApproval.member,
               true,
             );
@@ -257,9 +258,9 @@ function GroupCall({ group, members }: { group: Group; members: Bot[] }) {
               ) return;
               pending.submitted = false;
               const detail = error.trim().slice(0, 240);
-              const decision = openApproval.routine ? "routine decision" : "approval";
+              const decision = openApproval.routine ? t("call.decisionRoutine") : t("call.decisionApproval");
               enqueueSpeech(
-                `I couldn't save that ${decision}${detail ? `: ${detail}` : "."} Please try again.`,
+                t("call.saveFailed", { decision, detail: detail ? `: ${detail}` : "." }),
                 openApproval.member,
                 true,
               );
@@ -267,7 +268,7 @@ function GroupCall({ group, members }: { group: Group; members: Bot[] }) {
           });
           return;
         }
-        enqueueSpeech("Sorry — is that a yes or a no?", openApproval.member, true);
+        enqueueSpeech(t("call.yesOrNo"), openApproval.member, true);
         return;
       }
 
@@ -290,7 +291,7 @@ function GroupCall({ group, members }: { group: Group; members: Bot[] }) {
       if (defaultResponderRef.current.kind === "mentions" && !routed.addressed) {
         listen();
         const names = membersRef.current.map((member) => member.name).join(", ");
-        setNote("Say a member's name" + (names ? " — " + names : "") + " — or say everyone.");
+        setNote(t("call.sayMember", { names: names ? ` — ${names}` : "" }));
         return;
       }
 
@@ -302,14 +303,14 @@ function GroupCall({ group, members }: { group: Group; members: Bot[] }) {
     const offEnd = bridge.onSpeechEnd(({ code, reason }) => {
       if (!alive.current || currentCall() !== group.id) return;
       if (code === 2) {
-        setNote("Calls need macOS dictation, which isn't available here yet.");
+        setNote(t("call.noDictation"));
         return;
       }
       if (code === 1) {
         setNote(
           reason === "helper-build-failed"
-            ? "The dictation helper couldn't be built. Install Apple's Command Line Tools and try again."
-            : "Dictation needs Microphone + Speech Recognition access in System Settings.",
+            ? t("call.helperBuildFailed")
+            : t("call.needsPermissions"),
         );
         return;
       }
@@ -354,10 +355,10 @@ function GroupCall({ group, members }: { group: Group; members: Bot[] }) {
         submitted: false,
       };
       spokenIds.current.add(approval.message.id);
-      const name = member?.name ?? approval.message.from?.name ?? "A group member";
+      const name = member?.name ?? approval.message.from?.name ?? t("call.channelMember");
       const skillPrompt = approval.message.card?.skillRequest?.action === "update"
-        ? `${name} wants to update a learned skill. Open the group thread to review the complete skill before replacing the current version. You can say no to deny it.`
-        : `${name} wants to enable a new learned skill. Open the group thread to review the complete skill before enabling it. You can say no to deny it.`;
+        ? t("call.skillUpdateAskGroup", { name })
+        : t("call.skillEnableAskGroup", { name });
       enqueueSpeech(isSkillApproval(approval) ? skillPrompt : spokenApprovalPrompt(approval, name), member, true);
     }
 
@@ -365,13 +366,13 @@ function GroupCall({ group, members }: { group: Group; members: Bot[] }) {
       const member = members.find((candidate) => candidate.id === question.from?.botId);
       askedQuestion.current = { requestId: question.card.requestId, member };
       spokenIds.current.add(question.id);
-      const name = member?.name ?? question.from?.name ?? "A group member";
+      const name = member?.name ?? question.from?.name ?? t("call.channelMember");
       const detail = question.card.subtitle.trim();
       const choices = question.card.options.length
-        ? " The options are " + question.card.options.join(", ") + "."
+        ? " " + t("call.optionsAre", { options: question.card.options.join(", ") })
         : "";
       enqueueSpeech(
-        name + " asks: " + detail + (/[.!?]$/.test(detail) ? "" : ".") + choices,
+        t("call.botAsks", { name, question: detail + (/[.!?]$/.test(detail) ? "" : ".") }) + choices,
         member,
         true,
       );
@@ -442,21 +443,21 @@ function GroupCall({ group, members }: { group: Group; members: Bot[] }) {
   const status =
     phase === "listening"
       ? pushToTalk
-        ? "Push to talk"
-        : "Listening"
+        ? t("call.pushToTalk")
+        : t("call.listening")
       : phase === "sending"
-        ? "Bringing the group in"
+        ? t("call.bringingIn")
         : phase === "speaking"
-          ? (speakingMember?.name ?? "Group member") + " is speaking"
+          ? t("call.memberSpeaking", { name: speakingMember?.name ?? t("call.channelMember") })
           : workingMember
-            ? workingMember.name + " is working"
-            : "Working";
+            ? t("call.memberWorking", { name: workingMember.name })
+            : t("call.working");
 
   return (
     <div className="absolute inset-0 z-30 flex flex-col items-center justify-center gap-6 bg-app/95 px-8 backdrop-blur-sm">
       <button
         onClick={() => endCall(group.id)}
-        aria-label="Hang up"
+        aria-label={t("call.hangUp")}
         className="absolute right-5 top-5 rounded-md p-2 text-ink-secondary hover:bg-raised hover:text-ink"
       >
         <X size={18} />
@@ -513,13 +514,13 @@ function GroupCall({ group, members }: { group: Group; members: Bot[] }) {
             <span className="text-ink-secondary">
               {pushToTalk
                 ? "Release Control + Option to send…"
-                : "Say a name, say “everyone,” or just talk to the group…"}
+                : t("call.sayNameOrTalk")}
             </span>
           )
         ) : phase === "speaking" ? (
           speech.caption
         ) : (
-          <span className="text-ink-secondary">{workingMember ? "You’ll hear each response in turn." : ""}</span>
+          <span className="text-ink-secondary">{workingMember ? t("call.eachInTurn") : ""}</span>
         )}
       </div>
 
@@ -530,7 +531,7 @@ function GroupCall({ group, members }: { group: Group; members: Bot[] }) {
             onClick={listen}
             className="rounded-full border border-warning/40 px-3 py-1.5 text-[12px] hover:bg-warning/10"
           >
-            Try microphone again
+            {t("call.retryMic")}
           </button>
         </div>
       )}
@@ -542,19 +543,19 @@ function GroupCall({ group, members }: { group: Group; members: Bot[] }) {
             onClick={interruptSpeech}
             className="rounded-full border border-hairline/50 px-4 py-2 text-[13.5px] text-ink hover:bg-raised"
           >
-            Interrupt
+            {t("call.interrupt")}
           </button>
         )}
         <button
           onClick={() => endCall(group.id)}
           className="flex items-center gap-2 rounded-full bg-danger px-5 py-2.5 text-[14px] font-medium text-white hover:brightness-110"
         >
-          <PhoneOff size={16} /> Hang up
+          <PhoneOff size={16} /> {t("call.hangUp")}
         </button>
       </div>
 
       <div className="text-[11.5px] text-ink-secondary/70">
-        Hold Control + Option to talk · Say a member’s name to direct the turn · Space interrupts · Esc hangs up
+        {t("call.shortcutsGroup")}
       </div>
     </div>
   );

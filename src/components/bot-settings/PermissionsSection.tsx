@@ -15,6 +15,7 @@ import { useState } from "react";
 import { Crown } from "lucide-react";
 
 import { cn } from "@/lib/cn";
+import { t } from "@/lib/i18n";
 import { useStore, type Bot } from "@/state/store";
 import type { ApprovalMode } from "../../../shared/approval-mode";
 import { ApprovalModeSelector } from "../ApprovalModeSelector";
@@ -65,54 +66,54 @@ export function PermissionsSection({
             <Crown size={17} />
           </span>
           <div className="min-w-0 flex-1">
-            <div className="text-[15px] font-medium text-ink">Chief of Staff</div>
-            <div className="text-[11.5px] text-ink-secondary">One for {sectionName}</div>
+            <div className="text-[15px] font-medium text-ink">{t("botSettings.perms.chief")}</div>
+            <div className="text-[11.5px] text-ink-secondary">{t("botSettings.perms.chiefOneFor", { section: sectionName })}</div>
           </div>
           <Switch
             checked={Boolean(bot.chiefOfStaff)}
-            aria-label="Chief of Staff"
+            aria-label={t("botSettings.perms.chief")}
             disabled={!bot.chiefOfStaff && !canCoordinate}
             onClick={() => patch({ chiefOfStaff: !bot.chiefOfStaff })}
-            title={!bot.chiefOfStaff && !canCoordinate ? "This engine cannot contact other bots" : undefined}
+            title={!bot.chiefOfStaff && !canCoordinate ? t("botSettings.perms.engineCannotContact") : undefined}
             className="disabled:cursor-not-allowed"
           />
         </div>
         <div className="mt-3 text-[13px] leading-relaxed text-ink-secondary">
           {bot.chiefOfStaff && !canCoordinate
-            ? "This bot still holds the role, but its current engine cannot contact teammates. Choose a Claude or ACP engine to restore coordination."
+            ? t("botSettings.perms.chiefEngineNote")
             : bot.chiefOfStaff
-              ? `This is the primary contact for ${sectionName}. It can create and coordinate specialists in this section, then combine their work into one answer.`
+              ? t("botSettings.perms.chiefIsPrimary", { section: sectionName })
               : !canCoordinate
-                ? "Choose a Claude or ACP engine to let this bot coordinate teammates."
+                ? t("botSettings.perms.chiefNeedsEngine")
                 : currentChief
-                  ? `Make this bot the ${sectionName} Chief and hand the role over from ${currentChief.name}.`
-                  : `Make this bot the primary contact for the ${sectionName} section.`}
+                  ? t("botSettings.perms.chiefHandOver", { section: sectionName, current: currentChief.name })
+                  : t("botSettings.perms.chiefMakePrimary", { section: sectionName })}
         </div>
       </div>
 
       <div className="flex items-center justify-between gap-4 rounded-xl bg-card p-4">
         <div>
-          <div className="text-[15px] font-medium text-ink">Ask me before contacting other bots</div>
+          <div className="text-[15px] font-medium text-ink">{t("botSettings.perms.askBeforeContact")}</div>
           <div className="mt-0.5 text-[13px] text-ink-secondary">
             {bot.approvePeerComms
-              ? "This bot will stop and ask before it reaches out to another bot."
-              : "Let this bot talk to teammates on its own, without a confirmation step."}
+              ? t("botSettings.perms.askOn")
+              : t("botSettings.perms.askOff")}
           </div>
         </div>
         <Switch
           checked={Boolean(bot.approvePeerComms)}
-          aria-label="Ask me before contacting other bots"
+          aria-label={t("botSettings.perms.askBeforeContact")}
           disabled={!bot.approvePeerComms && !canCoordinate}
           onClick={() => patch({ approvePeerComms: !bot.approvePeerComms })}
-          title={!bot.approvePeerComms && !canCoordinate ? "This engine cannot contact other bots" : undefined}
+          title={!bot.approvePeerComms && !canCoordinate ? t("botSettings.perms.engineCannotContact") : undefined}
           className="disabled:cursor-not-allowed"
         />
       </div>
 
       <div className="rounded-xl bg-card p-4">
-        <div className="text-[15px] font-medium text-ink">Approval level</div>
+        <div className="text-[15px] font-medium text-ink">{t("botSettings.perms.approvalLevel")}</div>
         <div className="mt-0.5 text-[13px] text-ink-secondary">
-          Choose how much this bot can do before it stops to ask you.
+          {t("botSettings.perms.approvalHint")}
         </div>
         <div className="mt-3">
           <ApprovalModeSelector
@@ -130,22 +131,22 @@ export function PermissionsSection({
       </div>
 
       {!(engine?.driverKind === "antigravityAgent" && approvalMode === "full") && <div className="rounded-xl bg-card p-4">
-        <div className="text-[15px] font-medium text-ink">Review routine approvals</div>
+        <div className="text-[15px] font-medium text-ink">{t("botSettings.perms.review")}</div>
         <div className="mt-0.5 text-[13px] text-ink-secondary">
           {approvalMode === "custom"
-            ? "Custom follows your Codex config.toml and its approval prompts. Routine auto-review stays off in this mode."
+            ? t("botSettings.perms.reviewCustom")
             : canAutoReview
-              ? "The same engine reviews ordinary approval cards. Existing safety rules, unattended turns, local-computer access, and questions still wait for you."
-              : "This engine cannot run an isolated review safely, so approval cards continue to wait for you."}
+              ? t("botSettings.perms.reviewOn")
+              : t("botSettings.perms.reviewUnsupported")}
         </div>
         <div className="mt-3 flex gap-1 rounded-lg bg-inset p-0.5">
           {(
             [
-              ["off", "Off", "Every undecided approval waits for you."],
-              ["shadow", "Watch", "Record the review without answering the card."],
-              ["enforce", "On", "Answer only reviews that return a strict approval."],
+              ["off", "botSettings.perms.reviewOff", "botSettings.perms.reviewOffHint"],
+              ["shadow", "botSettings.perms.reviewShadow", "botSettings.perms.reviewShadowHint"],
+              ["enforce", "botSettings.perms.reviewEnforce", "botSettings.perms.reviewEnforceHint"],
             ] as const
-          ).map(([value, label, hint]) => {
+          ).map(([value, labelKey, hintKey]) => {
             const current = approvalMode === "custom"
               ? "off"
               : bot.autoReview === "shadow" || bot.autoReview === "enforce"
@@ -157,9 +158,9 @@ export function PermissionsSection({
                 key={value}
                 title={disabled
                   ? approvalMode === "custom"
-                    ? "Custom approval behavior is controlled by config.toml"
-                    : "Not supported by this engine"
-                  : hint}
+                    ? t("botSettings.perms.reviewCustomTitle")
+                    : t("botSettings.perms.reviewUnsupportedTitle")
+                  : t(hintKey)}
                 disabled={disabled}
                 onClick={() => patch({ autoReview: value })}
                 className={cn(
@@ -167,7 +168,7 @@ export function PermissionsSection({
                   current === value ? "bg-raised text-ink" : "text-ink-secondary hover:text-ink",
                 )}
               >
-                {label}
+                {t(labelKey)}
               </button>
             );
           })}

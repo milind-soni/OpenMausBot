@@ -1,3 +1,5 @@
+import { t } from "@/lib/i18n";
+import type { LocaleKey } from "@/locales";
 import {
   CheckCircle2,
   CircleAlert,
@@ -14,17 +16,17 @@ import type { GroupGoalRunCardData } from "../../shared/group-goal-run";
 const DETAIL_LIMIT = 280;
 
 const COPY = {
-  working: { label: "Working", tone: "text-accent", border: "border-accent/30" },
-  completed: { label: "Completed", tone: "text-success", border: "border-success/30" },
-  "needs-input": { label: "Needs your input", tone: "text-warning", border: "border-warning/35" },
-  blocked: { label: "Blocked", tone: "text-warning", border: "border-warning/35" },
-  "limit-reached": { label: "Turn limit reached", tone: "text-warning", border: "border-warning/35" },
-  paused: { label: "Paused", tone: "text-warning", border: "border-warning/35" },
-  stopped: { label: "Stopped", tone: "text-ink-secondary", border: "border-hairline/45" },
-  failed: { label: "Failed", tone: "text-danger", border: "border-danger/35" },
+  working: { labelKey: "goal.working", tone: "text-accent", border: "border-accent/30" },
+  completed: { labelKey: "goal.completed", tone: "text-success", border: "border-success/30" },
+  "needs-input": { labelKey: "goal.needsInput", tone: "text-warning", border: "border-warning/35" },
+  blocked: { labelKey: "goal.blocked", tone: "text-warning", border: "border-warning/35" },
+  "limit-reached": { labelKey: "goal.limitReached", tone: "text-warning", border: "border-warning/35" },
+  paused: { labelKey: "goal.paused", tone: "text-warning", border: "border-warning/35" },
+  stopped: { labelKey: "goal.stopped", tone: "text-ink-secondary", border: "border-hairline/45" },
+  failed: { labelKey: "goal.failed", tone: "text-danger", border: "border-danger/35" },
 } satisfies Record<
   GroupGoalRunCardData["status"],
-  { label: string; tone: string; border: string }
+  { labelKey: LocaleKey; tone: string; border: string }
 >;
 
 function compact(value: string | undefined, limit: number): string {
@@ -68,12 +70,14 @@ export function GoalRunCard({ message }: { message: Message }) {
   const goal = compact(run.goal, 180);
   const detail = compact(run.detail, DETAIL_LIMIT);
   const turns = run.status === "working"
-    ? `Turn ${Math.min(run.turnCount + 1, run.maxTurns)} of ${run.maxTurns}`
-    : `${run.turnCount} ${run.turnCount === 1 ? "turn" : "turns"}`;
+    ? t("goal.turnOf", { current: Math.min(run.turnCount + 1, run.maxTurns), max: run.maxTurns })
+    : run.turnCount === 1
+      ? t("chat.usage.turnsOne")
+      : t("chat.usage.turnsMany", { count: run.turnCount });
 
   return (
     <section
-      aria-label={`Goal run: ${copy.label}`}
+      aria-label={t("goal.runAria", { status: t(copy.labelKey) })}
       className={cn("w-full max-w-[680px] rounded-2xl border bg-card px-3.5 py-3 shadow-sm", copy.border)}
     >
       <div className="flex items-start gap-3">
@@ -82,14 +86,14 @@ export function GoalRunCard({ message }: { message: Message }) {
         </div>
         <div className="min-w-0 flex-1">
           <div className="flex flex-wrap items-baseline gap-x-2 gap-y-0.5">
-            <h3 className="truncate text-[13.5px] font-semibold text-ink">{goal || "Group goal"}</h3>
+            <h3 className="truncate text-[13.5px] font-semibold text-ink">{goal || t("goal.channelGoal")}</h3>
             <span aria-live="polite" className={cn("text-[11.5px] font-medium", copy.tone)}>
-              {copy.label}
+              {t(copy.labelKey)}
             </span>
           </div>
           {detail && <p className="mt-1 line-clamp-2 text-[12.5px] leading-relaxed text-ink-secondary">{detail}</p>}
           <p className="mt-1 text-[11.5px] text-ink-secondary/80">
-            {run.coordinatorName} coordinating · {turns}
+            {t("goal.coordinating", { name: run.coordinatorName, turns })}
           </p>
         </div>
       </div>

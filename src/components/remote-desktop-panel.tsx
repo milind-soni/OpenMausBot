@@ -1,3 +1,5 @@
+import { activeLocale, t } from "@/lib/i18n";
+import { dayName } from "@/lib/schedule-label";
 import { useEffect, useState } from "react";
 import { CalendarClock, CalendarDays, ImageOff, Loader2, Monitor, Plus, X } from "lucide-react";
 
@@ -9,14 +11,14 @@ import { api, useStore, type Bot } from "@/state/store";
 import { RoutineEditor } from "./RoutinesPage";
 
 function viewerAddress(raw: unknown): string {
-  if (typeof raw !== "string" || !raw) throw new Error("The host did not return a live desktop link");
+  if (typeof raw !== "string" || !raw) throw new Error(t("remoteDesktop.noLink"));
   if (raw.startsWith("/vps-viewer/")) return new URL(raw, window.location.origin).toString();
   return raw;
 }
 
 function routineScheduleLabel(routine: Routine) {
   if (routine.schedule.type === "once") {
-    return new Date(routine.schedule.at).toLocaleString([], {
+    return new Date(routine.schedule.at).toLocaleString(activeLocale(), {
       month: "short",
       day: "numeric",
       hour: "numeric",
@@ -25,32 +27,37 @@ function routineScheduleLabel(routine: Routine) {
   }
   if (routine.schedule.type === "interval") {
     const cadence = routine.schedule.everyMinutes % 60 === 0
-      ? `Every ${routine.schedule.everyMinutes / 60} hr`
-      : `Every ${routine.schedule.everyMinutes} min`;
-    return `${cadence} · starting ${new Date(routine.schedule.anchorAt).toLocaleString([], {
-      month: "short",
-      day: "numeric",
-      hour: "numeric",
-      minute: "2-digit",
-    })}`;
+      ? t("schedule.everyHr", { count: routine.schedule.everyMinutes / 60 })
+      : t("schedule.everyMin", { count: routine.schedule.everyMinutes });
+    const anchor = new Date(routine.schedule.anchorAt);
+    return t("schedule.intervalStarting", {
+      cadence,
+      date: anchor.toLocaleDateString(activeLocale(), { month: "short", day: "numeric" }),
+      time: anchor.toLocaleTimeString(activeLocale(), { hour: "numeric", minute: "2-digit" }),
+    });
   }
   const days = routine.schedule.weekdays;
   const cadence =
     days.length === 7
-      ? "Every day"
+      ? t("computer.routine.everyDay")
       : days.join(",") === "1,2,3,4,5"
-        ? "Weekdays"
-        : days.map((day) => ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"][day]).join(", ");
+        ? t("computer.routine.weekdays")
+        : days.map((day) => dayName(day)).join(", ");
   const [hour, minute] = routine.schedule.time.split(":").map(Number);
-  return `${cadence} · ${new Date(2000, 0, 1, hour, minute).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })}`;
+  return `${cadence} · ${new Date(2000, 0, 1, hour, minute).toLocaleTimeString(activeLocale(), { hour: "numeric", minute: "2-digit" })}`;
 }
 
 function nextRunLabel(at: number | null) {
-  if (at == null) return "Paused";
+  if (at == null) return t("vm.state.paused");
   const date = new Date(at);
   const today = new Date();
   const sameDay = date.toDateString() === today.toDateString();
-  return `${sameDay ? "Today" : date.toLocaleDateString([], { month: "short", day: "numeric" })}, ${date.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })}`;
+  // schedule.onceAt is this same "{date}, {time}" pairing, so the comma and the
+  // order belong to the pack rather than to this line.
+  return t("schedule.onceAt", {
+    date: sameDay ? t("chat.day.today") : date.toLocaleDateString(activeLocale(), { month: "short", day: "numeric" }),
+    time: date.toLocaleTimeString(activeLocale(), { hour: "numeric", minute: "2-digit" }),
+  });
 }
 
 export function RemoteDesktopPanel({ bot }: { bot: Bot }) {
@@ -136,7 +143,7 @@ export function RemoteDesktopPanel({ bot }: { bot: Bot }) {
     setError(null);
     let tookControl = false;
     try {
-      if (!window.ogb?.desktopViewer) throw new Error("The desktop viewer is unavailable in this build");
+      if (!window.ogb?.desktopViewer) throw new Error(t("remoteDesktop.viewerUnavailable"));
       await api(`/api/bots/${bot.id}/computer/control`, {
         method: "POST",
         body: JSON.stringify({ action: "take" }),
@@ -151,7 +158,7 @@ export function RemoteDesktopPanel({ bot }: { bot: Bot }) {
         `${bot.name}'s live desktop`,
         bot.id,
       );
-      if (!opened) throw new Error("OpenMausBot could not open the live desktop");
+      if (!opened) throw new Error(t("computer.err.openDesktop"));
     } catch (cause) {
       if (tookControl) {
         await api(`/api/bots/${bot.id}/computer/control`, {
@@ -175,14 +182,14 @@ export function RemoteDesktopPanel({ bot }: { bot: Bot }) {
         <div>
           <div className="text-[14px] font-medium text-ink">{bot.name}&apos;s computer</div>
           <div className="mt-0.5 text-[11px] text-ink-secondary">
-            {bot.cloudBackend === "vps" ? "Self-hosted VPS" : "Cloud desktop"}
+            {bot.cloudBackend === "vps" ? t("remoteDesktop.vps") : t("remoteDesktop.cloud")}
           </div>
         </div>
         <button
           type="button"
           onClick={() => dispatch({ type: "toggleComputer", open: false })}
           className="rounded-md p-1 text-ink-secondary hover:bg-control hover:text-ink"
-          aria-label="Close computer panel"
+          aria-label={t("remoteDesktop.closeAria")}
         >
           <X size={18} />
         </button>
@@ -194,7 +201,9 @@ export function RemoteDesktopPanel({ bot }: { bot: Bot }) {
           onClick={() => void open()}
           disabled={pending || !frame}
           className="group relative flex aspect-video w-full items-center justify-center overflow-hidden rounded-xl border border-hairline bg-black disabled:cursor-default"
-          aria-label={frame ? `Open ${bot.name}'s live desktop` : "VPS preview unavailable"}
+          aria-label={frame
+            ? t("computer.openLiveDesktopAria", { name: bot.name })
+            : t("remoteDesktop.previewUnavailableAria")}
         >
           {frame ? (
             <img src={frame} alt={`${bot.name}'s VPS desktop preview`} className="h-full w-full object-contain" />
@@ -203,19 +212,19 @@ export function RemoteDesktopPanel({ bot }: { bot: Bot }) {
           ) : (
             <div className="flex flex-col items-center gap-2 text-ink-secondary">
               <ImageOff size={24} />
-              <span className="text-[11px]">{previewUnavailable ? "Preview unavailable" : "Waiting for preview"}</span>
+              <span className="text-[11px]">{previewUnavailable ? t("remoteDesktop.previewUnavailable") : t("remoteDesktop.waitingPreview")}</span>
             </div>
           )}
           {frame && (
             <span className="absolute inset-x-0 bottom-0 bg-black/65 py-2 text-[11px] font-medium text-white opacity-0 transition-opacity group-hover:opacity-100">
-              Open live desktop
+              {t("remoteDesktop.openLiveDesktop")}
             </span>
           )}
         </button>
         <div>
-          <div className="text-[14px] font-medium text-ink">Open the live desktop</div>
+          <div className="text-[14px] font-medium text-ink">{t("remoteDesktop.openLive")}</div>
           <p className="mt-2 text-[12px] leading-relaxed text-ink-secondary">
-            The host creates a temporary, encrypted viewer relay. VPS SSH and VNC credentials stay on the host computer.
+            {t("remoteDesktop.relayHint")}
           </p>
         </div>
         <button
@@ -225,7 +234,7 @@ export function RemoteDesktopPanel({ bot }: { bot: Bot }) {
           className="flex w-full items-center justify-center gap-2 rounded-lg bg-accent px-4 py-2.5 text-[13px] font-medium text-white hover:brightness-110 disabled:opacity-50"
         >
           {pending ? <Loader2 size={15} className="animate-spin" /> : <Monitor size={15} />}
-          {pending ? "Opening…" : "Take control"}
+          {pending ? t("remoteDesktop.opening") : t("computer.takeControl")}
         </button>
         {error && (
           <div role="alert" className="w-full rounded-lg border border-danger/30 bg-danger/10 px-3 py-2 text-left text-[12px] text-danger">
@@ -240,7 +249,7 @@ export function RemoteDesktopPanel({ bot }: { bot: Bot }) {
           <div className="flex items-center justify-between gap-2">
             <div className="flex items-center gap-2 text-[15px] font-medium text-ink">
               <CalendarClock size={16} className="text-accent" />
-              Scheduled tasks
+              {t("computer.routines.title")}
             </div>
             {botRoutines.length > 0 && (
               <span className="rounded-full bg-control px-2 py-0.5 text-[10px] font-medium text-ink-secondary">
@@ -256,7 +265,7 @@ export function RemoteDesktopPanel({ bot }: { bot: Bot }) {
             >
               <Loader2 size={13} className={activeRoutineRun.status === "queued" ? "" : "animate-spin"} />
               <span className="min-w-0 flex-1 truncate">
-                {activeRoutineRun.routineName} · {activeRoutineRun.status === "waiting" ? "needs you" : activeRoutineRun.status}
+                {activeRoutineRun.routineName} · {activeRoutineRun.status === "waiting" ? t("routines.status.waiting") : activeRoutineRun.status}
               </span>
             </button>
           )}
@@ -273,7 +282,7 @@ export function RemoteDesktopPanel({ bot }: { bot: Bot }) {
                   <span className="min-w-0 flex-1">
                     <span className="block truncate text-[12.5px] font-medium text-ink">{routine.name}</span>
                     <span className="block truncate text-[10.5px] text-ink-secondary">
-                      {routineScheduleLabel(routine)}{routine.runOn === "cloud" ? " · runs on VM" : ""}
+                      {routineScheduleLabel(routine)}{routine.runOn === "cloud" ? ` · ${t("remote.runsOnVm")}` : ""}
                     </span>
                   </span>
                   <span className="shrink-0 text-[10px] text-ink-secondary">{nextRunLabel(routine.nextRunAt)}</span>
@@ -288,13 +297,13 @@ export function RemoteDesktopPanel({ bot }: { bot: Bot }) {
               className="flex flex-1 items-center justify-center gap-1.5 rounded-lg bg-accent py-2 text-[13px] font-medium text-white hover:brightness-110"
             >
               <Plus size={14} />
-              Create schedule
+              {t("computer.routines.create")}
             </button>
             <button
               type="button"
               onClick={() => dispatch({ type: "showRoutines" })}
               className="flex items-center justify-center gap-1.5 rounded-lg bg-control px-3 py-2 text-[13px] text-ink hover:bg-raised-hover"
-              title="Open schedules"
+              title={t("computer.routines.openTitle")}
             >
               <CalendarDays size={14} />
               Schedules
