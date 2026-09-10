@@ -9,6 +9,7 @@ import { cn } from "@/lib/cn";
 import { t } from "@/lib/i18n";
 import { formatTokens, formatUsd, hasFiniteCost } from "@/lib/usage";
 import { Card } from "./SettingsPrimitives";
+import { UsageBudgetCards, type BudgetState } from "./UsageBudget";
 
 export type UsageGroupBy = "bot" | "model" | "user" | "day" | "engine";
 export const USAGE_GROUPINGS: readonly UsageGroupBy[] = ["bot", "model", "user", "day", "engine"];
@@ -23,6 +24,8 @@ export interface UsageGroup {
   cachedInput: number;
   costUsd: number | null;
   unpriced: number;
+  /** the operator's own price, when a list is set and the server is entitled */
+  billableUsd?: number | null;
 }
 
 export interface UsageSummary {
@@ -31,6 +34,8 @@ export interface UsageSummary {
   groupBy: UsageGroupBy;
   groups: UsageGroup[];
   total: UsageGroup;
+  budget?: BudgetState | null;
+  billing?: { currency: string } | null;
 }
 
 /** Inclusive day bounds (UTC) for a preset period. */
@@ -70,7 +75,9 @@ export function UsageHistoryTable({ summary }: { summary: UsageSummary }) {
   if (summary.groups.length === 0) {
     return <div className="text-[13px] text-ink-secondary">{t("usage.history.empty")}</div>;
   }
-  const columns = "grid grid-cols-[1fr_auto_auto_auto] items-center gap-x-5";
+  const billable = Boolean(summary.billing);
+  const columns = billable ? "grid grid-cols-[1fr_auto_auto_auto_auto] items-center gap-x-5" : "grid grid-cols-[1fr_auto_auto_auto] items-center gap-x-5";
+  const money = (value: number | null | undefined) => (hasFiniteCost(value) ? formatUsd(value) : "—");
   return (
     <div className="flex flex-col">
       <div className={cn(columns, "border-b border-hairline/40 pb-2 text-[11.5px] font-medium uppercase tracking-wide text-ink-secondary")}>
@@ -78,6 +85,7 @@ export function UsageHistoryTable({ summary }: { summary: UsageSummary }) {
         <span className="text-right">{t("usage.colTurns")}</span>
         <span className="text-right">{t("usage.colTokens")}</span>
         <span className="text-right">{t("usage.colCost")}</span>
+        {billable && <span className="text-right">{t("usage.history.colBillable")}</span>}
       </div>
       {summary.groups.map((group) => (
         <div key={group.key} className={cn(columns, "border-b border-hairline/20 py-2 text-[13px]")}>
@@ -90,6 +98,7 @@ export function UsageHistoryTable({ summary }: { summary: UsageSummary }) {
             {hasFiniteCost(group.costUsd) ? formatUsd(group.costUsd) : <span className="text-ink-secondary">—</span>}
             {group.unpriced > 0 && hasFiniteCost(group.costUsd) && <span className="text-ink-secondary">*</span>}
           </span>
+          {billable && <span className="text-right tabular-nums text-ink">{money(group.billableUsd)}</span>}
         </div>
       ))}
       <div className={cn(columns, "pt-2.5 text-[13px] font-medium text-ink")}>
@@ -97,6 +106,7 @@ export function UsageHistoryTable({ summary }: { summary: UsageSummary }) {
         <span className="text-right tabular-nums">{summary.total.turns}</span>
         <span className="text-right tabular-nums">{formatTokens(summary.total.input + summary.total.output)}</span>
         <span className="text-right tabular-nums">{hasFiniteCost(summary.total.costUsd) ? formatUsd(summary.total.costUsd) : "—"}</span>
+        {billable && <span className="text-right tabular-nums">{money(summary.total.billableUsd)}</span>}
       </div>
       {summary.total.unpriced > 0 && (
         <div className="mt-3 text-[12px] leading-relaxed text-ink-secondary">{t("usage.history.unpriced", { count: String(summary.total.unpriced) })}</div>
@@ -129,6 +139,8 @@ export function UsageHistory({ load = fetchUsage }: { load?: typeof fetchUsage }
   }, [period, groupBy, load]);
 
   return (
+    <>
+    <UsageBudgetCards budget={summary?.budget ?? null} />
     <Card title={t("usage.history.title")} subtitle={t("usage.history.subtitle")}>
       <div className="mb-3 flex flex-wrap items-center gap-2">
         <select
@@ -173,5 +185,6 @@ export function UsageHistory({ load = fetchUsage }: { load?: typeof fetchUsage }
         <UsageHistoryTable summary={summary} />
       ) : null}
     </Card>
+    </>
   );
 }

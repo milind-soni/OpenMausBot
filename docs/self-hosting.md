@@ -498,6 +498,21 @@ curl -H "Authorization: Bearer $TOKEN" -o usage.csv \
 Dates are inclusive, UTC, at most a year apart; without them you get the
 current month to date.
 
+## Spend limits and sell prices (enterprise)
+
+With the `budgets` entitlement, **Settings → Usage → Monthly spend limit**
+caps the workspace: once the month's reported cost reaches it, no bot starts
+a turn, whether a person wrote, a routine fired, a peer asked or a webhook
+arrived, until an admin raises it. The figure is what engines report to the
+ledger: real on your keys, an equivalent on personal subscriptions. A warning
+shows at a configurable percentage.
+
+With the `billing` entitlement, **Sell prices** takes your own price per
+million tokens by model id, `driver/model`, or `default`, and History and the
+CSV export gain a **billable** column next to the provider's cost. Both are
+plain settings in `config.json` (`budgets`, `billing`) and through
+`PUT /api/config`.
+
 ## Updating
 
 For the npm service, [install the chosen new version](deploy-vps.md#update)

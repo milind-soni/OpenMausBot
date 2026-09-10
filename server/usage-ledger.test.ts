@@ -125,6 +125,20 @@ describe("usage summaries", () => {
     expect(summarizeUsage([], "day")).toEqual({ groups: [], total: expect.objectContaining({ turns: 0, costUsd: null }) });
   });
 
+  it("prices groups from the operator's list and adds a billable column to the CSV only then", () => {
+    const prices = { default: { inputPerMillion: 1000, outputPerMillion: 2000 }, "codex/gpt-5": { inputPerMillion: 0, outputPerMillion: 0 } };
+    const priced = summarizeUsage(rows, "bot", prices);
+    // Scout: one claude turn of 1200 in (900 cached at the input rate) / 300 out, one of 100 / 50
+    expect(priced.groups[0]!.billableUsd).toBeCloseTo((1200 * 1000 + 300 * 2000) / 1e6 + (100 * 1000 + 50 * 2000) / 1e6, 9);
+    // Clerk: one gpt-5 turn priced at zero, one claude turn at the default
+    expect(priced.groups[1]!.billableUsd).toBeCloseTo((1200 * 1000 + 300 * 2000) / 1e6, 9);
+    expect(priced.total.billableUsd).toBeCloseTo(priced.groups[0]!.billableUsd! + priced.groups[1]!.billableUsd!, 9);
+    expect(summarizeUsage(rows, "bot").total.billableUsd).toBeNull();
+    expect(usageCsv([rows[0]!], prices).split("\n")[0]).toContain(",cost_usd,billable_usd,thread");
+    expect(usageCsv([rows[0]!], prices).split("\n")[1]).toContain(",0.012,1.8,t1");
+    expect(usageCsv([rows[0]!]).split("\n")[0]).not.toContain("billable_usd");
+  });
+
   it("names a person by email before device label and never throws on an empty trigger", () => {
     expect(triggerLabel({ kind: "user", label: "Phone" })).toBe("Phone");
     expect(triggerKey({ kind: "user", email: "Ada@Example.test" })).toBe("user:ada@example.test");

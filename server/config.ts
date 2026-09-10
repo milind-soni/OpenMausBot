@@ -260,6 +260,31 @@ const appConfigSchema = z.object({
    * Claude instances; `url` only for a proxy or a test double. Never a
    * personal-login OAuth token. */
   anthropic: z.object({ key: optionalText, url: optionalText }).optional(),
+  /** Monthly spend limit for the whole workspace, against the cost engines
+   * report to the usage ledger. Enforced only with the `budgets` entitlement. */
+  budgets: z
+    .object({
+      monthlyUsd: z.number().min(0).max(1_000_000).optional(),
+      warnAtPercent: z.number().int().min(1).max(100).optional(),
+    })
+    .optional(),
+  /** The operator's own sell prices per million tokens, keyed by model id,
+   * `driver/model`, or `default`. Read only with the `billing` entitlement. */
+  billing: z
+    .object({
+      currency: z.string().regex(/^[A-Z]{3}$/).optional(),
+      prices: z
+        .record(
+          z.string().min(1).max(160),
+          z.object({
+            inputPerMillion: z.number().min(0).max(1_000_000),
+            outputPerMillion: z.number().min(0).max(1_000_000),
+            cachedInputPerMillion: z.number().min(0).max(1_000_000).optional(),
+          }),
+        )
+        .optional(),
+    })
+    .optional(),
   /** `model` seeds the default selection; `provider` pins an OpenRouter
    * upstream (e.g. "fireworks"). Both are non-secret and optional. */
   openaiCompat: z
@@ -330,6 +355,8 @@ export interface AppConfig {
   language?: string;
   xai?: { key?: string; url?: string };
   anthropic?: { key?: string; url?: string };
+  budgets?: { monthlyUsd?: number; warnAtPercent?: number };
+  billing?: { currency?: string; prices?: Record<string, { inputPerMillion: number; outputPerMillion: number; cachedInputPerMillion?: number }> };
   openaiCompat?: { key?: string; url?: string; model?: string; provider?: string };
   composio?: { apiKey?: string; userId?: string; sessionId?: string };
   box?: { token?: string };
@@ -690,7 +717,7 @@ export function saveConfig(patch: Partial<AppConfig>, options: { replaceInstance
   // back after we have successfully recognized the legacy list.
   const storedProfiles = storedBrowserProfilesSchema.safeParse(disk.browserProfiles);
   if (storedProfiles.success) disk.browserProfiles = storedProfiles.data;
-  for (const key of ["xai", "openaiCompat", "composio", "box", "opencodeGo", "tts", "imageGen", "profile", "rooms", "threads", "localVm", "features"] as const) {
+  for (const key of ["xai", "anthropic", "openaiCompat", "composio", "box", "opencodeGo", "tts", "imageGen", "profile", "rooms", "threads", "localVm", "features", "budgets", "billing"] as const) {
     const section = checkedPatch[key];
     if (!section) continue;
     const current = jsonObjectSchema.safeParse(disk[key]);

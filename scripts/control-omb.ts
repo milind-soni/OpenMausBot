@@ -331,6 +331,9 @@ export async function launchVerificationServer(
   signal?: AbortSignal,
   localVm?: { binDir: string; host: string; sshKey: string; staticDir: string },
   browser?: { binaryPath: string; executablePath: string },
+  /** A stand-in enterprise layer (the folder shape core loads) and the key
+   * it should accept, so a recipe can prove entitled behaviour offline. */
+  enterprise?: { dir: string; licenseKey: string },
 ): Promise<VerificationServer> {
   if (localVm) {
     const endpoint = new URL(localVm.host);
@@ -407,6 +410,7 @@ export async function launchVerificationServer(
     CONTAINER_SSHKEY: localVm.sshKey,
     OMB_STATIC_DIR: localVm.staticDir,
   });
+  if (enterprise) Object.assign(childEnv, { OMB_ENTERPRISE_DIR: enterprise.dir, OMB_LICENSE_KEY: enterprise.licenseKey });
   if (browser) Object.assign(childEnv, {
     OMB_AGENT_BROWSER_PATH: browser.binaryPath,
     AGENT_BROWSER_EXECUTABLE_PATH: browser.executablePath,
