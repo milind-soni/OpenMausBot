@@ -576,6 +576,7 @@ export type AppSettingsSection =
   | "computer"
   | "usage"
   | "people"
+  | "backups"
   | "workspaces";
 
 export type BotSettingsSection =

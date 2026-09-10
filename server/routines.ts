@@ -1220,6 +1220,8 @@ export class RoutineManager {
     return cloneRun(run);
   }
 
+  get isTicking(): boolean { return this.ticking; }
+
   start() {
     if (this.timer) return;
     void this.tick();

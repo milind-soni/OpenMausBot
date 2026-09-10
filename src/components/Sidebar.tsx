@@ -3,7 +3,6 @@ import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react
 import { createPortal } from "react-dom";
 import {
   Archive,
-  ArrowDownToLine,
   BellDot,
   Bot as BotIcon,
   CalendarDays,
@@ -40,7 +39,6 @@ import type { LocaleKey } from "@/locales";
 import { ConfirmDialog } from "./ConfirmDialog";
 import { WorkingDots } from "./WorkingIndicator";
 import { nextRename } from "@/lib/rename";
-import { downloadAllBots } from "@/lib/team-files";
 import { useDesktopCapabilities } from "./DesktopCapabilities";
 import { MIN_QUERY, SearchResults } from "./SearchResults";
 import { TeamLibraryPanel } from "./TeamLibraryPanel";
@@ -1377,7 +1375,6 @@ export function Sidebar({ open, onClose }: { open: boolean; onClose: () => void 
   const [teamLibraryOpen, setTeamLibraryOpen] = useState(false);
   const [teamInstallUrl, setTeamInstallUrl] = useState<string | null>(null);
   const [archivedBotsOpen, setArchivedBotsOpen] = useState(false);
-  const [exportingTeam, setExportingTeam] = useState(false);
   const [teamFeedback, setTeamFeedback] = useState<{
     error: boolean;
     text: string;
@@ -1453,32 +1450,6 @@ export function Sidebar({ open, onClose }: { open: boolean; onClose: () => void 
     const timer = window.setTimeout(() => setTeamFeedback(null), 5000);
     return () => window.clearTimeout(timer);
   }, [teamFeedback]);
-
-  const exportAllBots = async () => {
-    setExportingTeam(true);
-    setTeamFeedback(null);
-    try {
-      const exported = await downloadAllBots();
-      track("team_exported", { members: exported.members, scope: "backup" });
-      setTeamFeedback({
-        error: false,
-        text: [
-          t("sidebar.backup.downloaded", { members: exported.members }),
-          exported.warnings.length ? t("sidebar.backup.notes", { count: exported.warnings.length }) : "",
-          t("sidebar.backup.private"),
-        ]
-          .filter(Boolean)
-          .join(" "),
-      });
-    } catch (cause) {
-      setTeamFeedback({
-        error: true,
-        text: cause instanceof Error ? cause.message : String(cause),
-      });
-    } finally {
-      setExportingTeam(false);
-    }
-  };
 
 
   // Archive and delete share one pending confirmation at a time.
@@ -1792,18 +1763,6 @@ export function Sidebar({ open, onClose }: { open: boolean; onClose: () => void 
                   {t("sidebar.newChannel.title")}
                 </button>
                 {!remoteClient && <>
-                <button
-                  onClick={() => {
-                    setPlusOpen(false);
-                    void exportAllBots();
-                  }}
-                  disabled={exportingTeam}
-                  title={t("sidebar.backup.hint")}
-                  className="flex w-full items-center gap-3 px-3.5 py-2 text-left text-[14px] text-ink hover:bg-raised/70"
-                >
-                  {exportingTeam ? <Loader2 size={16} className="animate-spin text-ink-secondary" /> : <ArrowDownToLine size={16} className="text-ink-secondary" />}
-                  {exportingTeam ? t("sidebar.backup.exporting") : t("sidebar.backup.export")}
-                </button>
                 <button
                   onClick={() => {
                     setPlusOpen(false);

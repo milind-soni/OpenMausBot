@@ -2,7 +2,9 @@
 
 ## User path
 
-Sidebar menu → **Export backup** → a dated `.mausbackup.json` file.
+This is the legacy partial team-copy format. The sidebar no longer offers it;
+use **Settings → Backups** for a [full workspace backup](workspace-backups.md).
+Existing `.mausbackup.json` files remain importable through
 Teams → Import → choose the file → review → **Import backup**.
 Import always adds independent copies; existing bots, Chiefs, rooms and chats
 are never archived, overwritten or merged. Repeated imports number copies.
@@ -57,7 +59,8 @@ The existing package export API accepts an explicit list of imported skill names
 `POST /api/teams/export` with
 `{"format":"package","skillIds":["source-check"]}`. It exports those names from
 visible bots only. Omitting `skillIds` or using `[]` includes no skills.
-The regular **Export backup** download is unchanged and does not include skills.
+The legacy partial backup API does not include skills. The Settings full
+workspace backup includes the complete workspace skill files and state.
 
 Packages carry only `SKILL.md`, never supporting files, enabled state or local
 attachment paths. At most 20 skill definitions are accepted, with the existing

@@ -15,6 +15,7 @@ import { ComputerPanel } from "@/components/ComputerPanel";
 import { RemoteDesktopPanel } from "@/components/remote-desktop-panel";
 import { InspectorPanel } from "@/components/InspectorPanel";
 import { SettingsModal } from "@/components/SettingsModal";
+import { WorkspaceBackupRecovery } from "@/components/WorkspaceBackupSettings";
 import { UpdateBanner } from "@/components/UpdateBanner";
 import { DesktopCapabilitiesProvider } from "@/components/DesktopCapabilities";
 import { RoutinesPage } from "@/components/RoutinesPage";
@@ -289,7 +290,7 @@ function Shell() {
   );
 }
 
-export default function App() {
+function Application() {
   const [gated, setGated] = useState(() => window.ogb?.remoteClient?.active !== true && !emailGateDone());
   useEffect(() => {
     initAnalytics();
@@ -304,4 +305,8 @@ export default function App() {
       </StoreProvider>
     </DesktopCapabilitiesProvider>
   );
+}
+
+export default function App() {
+  return <WorkspaceBackupRecovery><Application /></WorkspaceBackupRecovery>;
 }

@@ -99,9 +99,19 @@ describe("Settings → Appearance", () => {
     expect(html).not.toContain('<option value="general">');
     expect(html).not.toContain('<option value="connections">');
     expect(html).not.toContain('<option value="engines">');
+    expect(html).not.toContain('<option value="backups">');
     expect(html).toContain("Midnight");
     expect(html).toContain('aria-label="Show threads"');
     expect(html).not.toContain('aria-label="Show tool calls in chat"');
+  });
+
+  it("offers full backups in local Settings", () => {
+    fixture.section = "backups";
+    const html = render();
+    expect(html).toContain('<option value="backups" selected="">Backups</option>');
+    expect(html).toContain("Export full backup");
+    expect(html).toContain('type="file" accept=".ombbackup"');
+    expect(html).toContain("Older team backups and shareable templates");
   });
 
   it("uses English fallback for new keys in untranslated languages", () => {

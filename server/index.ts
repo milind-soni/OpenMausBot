@@ -39,7 +39,7 @@ import {
   type BrowserCleanupWireRequest,
 } from "./browser-lifecycle-cleanup.ts";
 import * as checkpoints from "./checkpoints.ts";
-import { appendDecision, readDecisions } from "./decision-log.ts";
+import { appendDecision, readDecisions, flushDecisionLog } from "./decision-log.ts";
 import { validateBotCwd } from "./bot-cwd.ts";
 import {
   ATTACHMENTS_DIR,
@@ -130,7 +130,7 @@ import { ComputerControl } from "./computer-control.ts";
 import { MAX_REMOTE_COMMAND_LENGTH } from "./remote-computer.ts";
 import { augmentedPath, findCliCandidates, resetPathCache } from "./env-path.ts";
 import { registerEnginesBinDir } from "./engine-install.ts";
-import { appendUsage, parseUsageRange, readUsage, summarizeUsage, usageCsv, USAGE_GROUPINGS, type UsageGroupBy, type UsageTrigger } from "./usage-ledger.ts";
+import { appendUsage, parseUsageRange, readUsage, summarizeUsage, usageCsv, USAGE_GROUPINGS, flushUsageLedger, type UsageGroupBy, type UsageTrigger } from "./usage-ledger.ts";
 import type { RequestAuth } from "./request-auth.ts";
 import { checkProviderKey, PROVIDER_KEY_KINDS, type ProviderKeyKind } from "./provider-key-check.ts";
 import { assertWithinBudget, noteSpend, spendState } from "./spend.ts";
@@ -172,7 +172,7 @@ import type { GroupGoalRunCardData, GroupGoalRunStatus } from "../shared/group-g
 
 import { BUILT_IN_DRIVERS } from "./drivers/builtIn.ts";
 import { getOrCreateChannel, mirrorActivity, mirrorExchange, mirrorReply, type CommsBus } from "./comms-visibility.ts";
-import { readMessageText, recallMessages, searchMessages } from "./message-db.ts";
+import { readMessageText, recallMessages, searchMessages, closeMessageDb } from "./message-db.ts";
 import { claimRecallCrossings, recallCrossingLabel } from "./recall-disclosure.ts";
 
 /** A session_read answer competes with the transcript for the context
@@ -363,7 +363,11 @@ import {
 import { createGracefulShutdown } from "./graceful-shutdown.ts";
 import { acquireDataDirLeaseForProcess } from "./data-dir-lease.ts";
 import { describeEdition, editionStatus, loadEnterpriseLayer } from "./enterprise.ts";
-import { environmentDescriptor, loadEnvironmentId } from "./environment.ts";
+import { environmentDescriptor, loadEnvironmentId, serverVersion } from "./environment.ts";
+import { WorkspaceBackupMaintenance } from "./workspace-backup-maintenance.ts";
+import { createWorkspaceBackupRoutes, isWorkspaceBackupSessionControl } from "./workspace-backup-http.ts";
+import { readDesktopBackupCredentials } from "./workspace-backup-desktop.ts";
+import { restoreWorkspaceBackupOnStartup } from "./workspace-backup-startup.ts";
 import { createCustomDomainVerifier, customDomainIpv4, normalizeCustomDomain } from "./custom-domain.ts";
 import { createEmailSignIn, parseAllowList } from "./account-signin.ts";
 import { ProviderAuthSessions } from "./provider-auth-sessions.ts";
@@ -426,6 +430,10 @@ function releaseDataDirLeaseAtExit(): void {
   }
 }
 process.once("exit", releaseDataDirLeaseAtExit);
+// Restore before constructing any long-lived config, Store, session or provider
+// objects. Replacing files underneath a live Store would overwrite restored data.
+const workspaceRestore = await restoreWorkspaceBackupOnStartup(DATA_DIR);
+const workspaceMaintenance = new WorkspaceBackupMaintenance();
 // Only after ensureDirs(): it performs the one-time rename of the legacy data
 // dir, which must not find a freshly created ~/.openmausbot already there.
 // Remote clients (server/request-auth.ts, server/sessions.ts): a stable identity
@@ -4506,6 +4514,7 @@ async function startTurn(
     onDispatchError?: (message: string) => void;
   },
 ) {
+  workspaceMaintenance.assertAvailable();
   const profile = store.bot(botId);
   if (!profile) throw Object.assign(new Error("no such bot"), { status: 404 });
   const threadId = opts?.threadId ?? profile.threadId;
@@ -5853,7 +5862,10 @@ const webhooks = new WebhookManager({
 let webhookIngress: WebhookIngress | null = null;
 let webhookIngressError: string | null = null;
 try {
-  webhookIngress = await listenWebhookIngress(webhooks, { port: WEBHOOK_PORT, publicBaseUrl: WEBHOOK_PUBLIC_URL });
+  webhookIngress = await listenWebhookIngress(webhooks, {
+    port: WEBHOOK_PORT, publicBaseUrl: WEBHOOK_PUBLIC_URL,
+    claimRequest: () => workspaceMaintenance.request(),
+  });
   const advertised = WEBHOOK_PUBLIC_URL ? ` (advertised as ${webhookIngress.baseUrl})` : "";
   console.log(`openmausbot webhook receiver on http://${webhookIngress.host}:${webhookIngress.port}${advertised}`);
 } catch (error) {
@@ -5971,6 +5983,10 @@ async function runGroupMemberTurn(
   // fresh bot rather than mixing a stale adapter with fresh permissions.
   setupRetry = 0,
 ): Promise<boolean> {
+  if (workspaceMaintenance.active) {
+    onDispatchError?.("A workspace backup or restore is in progress.");
+    return false;
+  }
   if (isCancelled?.()) return false;
   if (providerFleetReloading) {
     onDispatchError?.("provider settings are being updated — try again shortly");
@@ -8467,6 +8483,41 @@ function readBody(req: IncomingMessage, limit = 1_000_000): Promise<any> {
 // onto it. Reject non-loopback Hosts outright (defeats rebinding) and
 // origins outside loopback (blocks remote-web CSRF).
 
+const workspaceBackupRoutes = createWorkspaceBackupRoutes({
+  dataDir: DATA_DIR,
+  appVersion: serverVersion(),
+  readBody,
+  credentials: readDesktopBackupCredentials,
+  restored: workspaceRestore,
+  status: () => ({ busy: workspaceMaintenance.active, pendingRestore: workspaceMaintenance.pendingRestore }),
+  authorized: (req, original) => {
+    const current = resolveRequestAuth(req, {
+      sessions, cookieName: SESSION_COOKIE, streamPath: "/api/events",
+      url: new URL(req.url ?? "/", `http://localhost:${PORT}`),
+      loopbackMutationToken: desktopMutationToken, companionMutationToken,
+    }).auth;
+    return Boolean(current?.scopes.includes("admin") && current.kind === original.kind &&
+      (current.kind !== "session" || (original.kind === "session" && current.session.id === original.session.id)));
+  },
+  exclusive: (work, keepLocked) => workspaceMaintenance.run(work, {
+    idle: () => !providerFleetReloading && !providerAuthSessions.active && !browserEngineInstall &&
+      !routines?.isTicking && !calendarCalls?.isTicking &&
+      !localVmImageBusy && !localVmProvisionBusy && !localVmModeChangeBusy &&
+      !localVmLifecycleBusy.size && !boxLifecycleBusyBots.size && !orphanBoxLifecycleBusyIds.size &&
+      !computerProviderConfigTransitions.size && !checkpointRestoreLeases.size &&
+      store.bots.every((bot) => !botHasActiveTurn(bot.id) && !routines?.activeRunForBot(bot.id) && !computerControl.snapshot(bot.id).held) &&
+      store.groups.every((group) => !groupIsWorking(group)),
+    pause: () => { routines?.stop(); calendarCalls?.stop(); watchdog.stop(); },
+    resume: () => { routines?.start(); calendarCalls?.start(); watchdog.start(); },
+    flush: async () => {
+      await Promise.all([flushAllProfileHistory(), flushAllMemoryJournals(), flushUsageLedger(DATA_DIR), flushDecisionLog(DATA_DIR)]);
+      // With writers gated and work idle, release our WAL connection for the
+      // consistent snapshot. Store reopens it lazily after maintenance.
+      closeMessageDb();
+    },
+  }, keepLocked),
+});
+
 const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
   let url: URL;
   try {
@@ -8478,6 +8529,7 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
   const method = req.method ?? "GET";
   /** scratch for route matches, shared by every `path.match` below */
   let m: RegExpMatchArray | null = null;
+  let releaseWorkspaceRequest: (() => void) | undefined;
   try {
     // ── who is asking (server/request-auth.ts) ──────────────────────────
     // Two public routes come first: what this server is, and turning a pairing
@@ -8589,6 +8641,13 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
     }
     if (!gate.auth) return json(res, gate.status, { error: gate.error });
     const auth = gate.auth;
+
+    if (await workspaceBackupRoutes(req, res, path, auth)) return;
+    // Count ordinary requests until their asynchronous handler returns, not
+    // merely until the browser disconnects. A cancelled upload can still write.
+    if (path.startsWith("/api/") && path !== "/api/events" && path !== "/api/health" && !isWorkspaceBackupSessionControl(method, path)) {
+      releaseWorkspaceRequest = workspaceMaintenance.request();
+    }
 
     // ── sessions: who am I, tickets, pairing and revocation ─────────────
     if (method === "GET" && path === "/api/auth/session") {
@@ -14692,6 +14751,8 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
   } catch (e) {
     const status = (e as any)?.status ?? 500;
     return json(res, status, { error: e instanceof Error ? e.message : String(e) });
+  } finally {
+    releaseWorkspaceRequest?.();
   }
 };
 
@@ -14774,11 +14835,14 @@ const gracefulShutdown = createGracefulShutdown({
     },
     () => flushAllProfileHistory(),
     () => flushAllMemoryJournals(),
+    () => flushUsageLedger(DATA_DIR),
+    () => flushDecisionLog(DATA_DIR),
   ],
   // Cleanup jobs run concurrently. Release only after they settle (or reach
   // the shutdown deadline), immediately before the process exits, so no new
   // server can overlap with a still-mutating old one.
   exit: (code) => {
+    closeMessageDb();
     releaseDataDirLeaseAtExit();
     process.exit(code);
   },

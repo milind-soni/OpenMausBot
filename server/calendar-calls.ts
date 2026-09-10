@@ -296,6 +296,8 @@ export class CalendarCallManager {
     return affected;
   }
 
+  get isTicking(): boolean { return this.ticking; }
+
   start(): void {
     if (this.timer) return;
     void this.tick();

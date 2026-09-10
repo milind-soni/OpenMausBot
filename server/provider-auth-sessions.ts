@@ -18,6 +18,10 @@ const failure = (message: string, status: number) => Object.assign(new Error(mes
 export class ProviderAuthSessions {
   private readonly flows = new Map<string, Flow>();
 
+  get active(): boolean {
+    return [...this.flows.values()].some((flow) => flow.busy || (!flow.revoked && flow.expiresAt > Date.now()));
+  }
+
   async start(instance: LoginInstance, owner: string): Promise<ProviderAuthenticationStart> {
     if (!instance.startAuthentication) throw failure("Account setup is unavailable for this provider.", 404);
     const existing = this.flows.get(instance.instanceId);

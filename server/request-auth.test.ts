@@ -87,6 +87,11 @@ describe("request source for the lockout", () => {
 });
 
 describe("scopes", () => {
+  it("keeps full backups, credentials and replacement behind admin scope", () => {
+    for (const path of ["status", "export", "upload", "preview", "restore", "client-state", "download/123"]) {
+      for (const method of ["GET", "POST", "DELETE"]) expect(requiredScope(method, `/api/workspace-backup/${path}`)).toBe("admin");
+    }
+  });
   it("is default deny: chat, approvals, rooms, attachments, routines and own session are client; everything else admin", () => {
     for (const [method, path] of [
       ["POST", "/api/bots/x/messages"], ["POST", "/api/bots/x/respond"], ["POST", "/api/threads/t/respond"],
