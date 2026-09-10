@@ -643,7 +643,6 @@
   "engineSetup.needsNode": "需要 Node.js 與 {npm}。",
   "engineSetup.viewGuide": "查看設定指南",
   "settings.experimental.title": "實驗性功能",
-  "settings.experimental.subtitle": "早期功能在測試期間可能會有所變動。除非你啟用，否則會保持停用。",
   "settings.experimental.error": "無法儲存實驗性功能的設定。",
   "settings.experimental.browser": "內建瀏覽器",
   "settings.experimental.browserOn": "已為此工作區啟用。每個機器人也有自己的瀏覽器開關。",

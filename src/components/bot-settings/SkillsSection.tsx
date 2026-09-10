@@ -6,6 +6,7 @@
 // used" line on every row (learned skills have no triggers to show), and a
 // read-only click-through view of a skill's full text.
 import { BookOpen, Trash2 } from "lucide-react";
+import { t } from "@/lib/i18n";
 import { useEffect, useRef, useState } from "react";
 
 import { api, useStore, type Bot } from "@/state/store";
@@ -204,9 +205,7 @@ export function SkillsSection({ bot }: { bot: Bot }) {
           <div className="text-[15px] font-medium text-ink">Learned skills</div>
         </div>
         <div className="mt-1 text-[12px] leading-relaxed text-ink-secondary">
-          {featureEnabled
-            ? "Use /learn to create a skill, or /learn update <name> to revise one. Every change waits for your review."
-            : "Skill authoring is off, but skills you already enabled stay under your control here."}
+          {featureEnabled ? t("skills.learned.hintOn") : t("skills.learned.hintOff")}
         </div>
 
         <form

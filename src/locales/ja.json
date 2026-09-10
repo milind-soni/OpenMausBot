@@ -614,7 +614,6 @@
   "engineSetup.needsNode": "Node.js と {npm} が必要です。",
   "engineSetup.viewGuide": "セットアップガイドを見る",
   "settings.experimental.title": "実験的機能",
-  "settings.experimental.subtitle": "初期段階の機能はテスト中に変わることがあります。あなたが有効にするまではオフのままです。",
   "settings.experimental.error": "実験的機能の設定を保存できませんでした。",
   "settings.experimental.browser": "内蔵ブラウザー",
   "settings.experimental.browserOn": "このワークスペースで有効です。各ボットにも独自のブラウザースイッチがあります。",

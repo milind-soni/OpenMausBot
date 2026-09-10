@@ -614,7 +614,6 @@
   "engineSetup.needsNode": "Requer Node.js e {npm}.",
   "engineSetup.viewGuide": "Ver o guia de configuração",
   "settings.experimental.title": "Recursos experimentais",
-  "settings.experimental.subtitle": "Recursos novos podem mudar enquanto testamos. Ficam desligados até você ativar.",
   "settings.experimental.error": "Não foi possível salvar a preferência do recurso experimental.",
   "settings.experimental.browser": "Navegador integrado",
   "settings.experimental.browserOn": "Ativado para esta área de trabalho. Cada bot também tem o próprio interruptor de navegador.",

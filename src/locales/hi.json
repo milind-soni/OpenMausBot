@@ -614,7 +614,6 @@
   "engineSetup.needsNode": "इसके लिए Node.js और {npm} चाहिए।",
   "engineSetup.viewGuide": "सेटअप गाइड देखें",
   "settings.experimental.title": "प्रयोगात्मक सुविधाएँ",
-  "settings.experimental.subtitle": "शुरुआती सुविधाएँ जाँच के दौरान बदल सकती हैं। जब तक आप चालू न करें, ये बंद रहती हैं।",
   "settings.experimental.error": "प्रयोगात्मक सुविधा की सेटिंग सहेजी नहीं जा सकी।",
   "settings.experimental.browser": "अंतर्निहित ब्राउज़र",
   "settings.experimental.browserOn": "इस वर्कस्पेस के लिए चालू। हर बॉट का अपना ब्राउज़र स्विच भी है।",

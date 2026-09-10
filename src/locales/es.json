@@ -614,7 +614,6 @@
   "engineSetup.needsNode": "Necesita Node.js y {npm}.",
   "engineSetup.viewGuide": "Ver la guía de configuración",
   "settings.experimental.title": "Funciones experimentales",
-  "settings.experimental.subtitle": "Las funciones tempranas pueden cambiar mientras las probamos. Siguen desactivadas hasta que las actives.",
   "settings.experimental.error": "No se pudo guardar el ajuste de la función experimental.",
   "settings.experimental.browser": "Navegador integrado",
   "settings.experimental.browserOn": "Activado para este espacio de trabajo. Cada bot tiene además su propio interruptor de navegador.",

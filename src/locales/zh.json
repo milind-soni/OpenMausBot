@@ -614,7 +614,6 @@
   "engineSetup.needsNode": "需要 Node.js 和 {npm}。",
   "engineSetup.viewGuide": "查看安装指南",
   "settings.experimental.title": "实验功能",
-  "settings.experimental.subtitle": "早期功能在我们测试期间可能会变。除非你打开，否则保持关闭。",
   "settings.experimental.error": "无法保存实验功能的设置。",
   "settings.experimental.browser": "内置浏览器",
   "settings.experimental.browserOn": "已为这个工作区启用。每个机器人还有自己的浏览器开关。",
