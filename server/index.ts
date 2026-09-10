@@ -130,6 +130,8 @@ import { ComputerControl } from "./computer-control.ts";
 import { MAX_REMOTE_COMMAND_LENGTH } from "./remote-computer.ts";
 import { augmentedPath, findCliCandidates, resetPathCache } from "./env-path.ts";
 import { registerEnginesBinDir } from "./engine-install.ts";
+import { appendUsage, parseUsageRange, readUsage, summarizeUsage, usageCsv, USAGE_GROUPINGS, type UsageGroupBy, type UsageTrigger } from "./usage-ledger.ts";
+import type { RequestAuth } from "./request-auth.ts";
 import { describeSpawnFailure, execCli } from "./procs.ts";
 import { blockedTarget, buildNotification, type Notification } from "./notify.ts";
 import {
@@ -459,6 +461,21 @@ const registry = new ProviderRegistry(BUILT_IN_DRIVERS);
 // Engines installed from Settings live under the data directory and win over
 // any other copy on PATH.
 registerEnginesBinDir();
+
+// Who asked for the next turn on a thread, noted where a message comes in
+// and read by the usage ledger when the turn settles. The last note stands
+// until the next message: a resumed connector or a drained queued send
+// still belongs to the person who wrote, and routine or peer turns are
+// told apart before this is consulted.
+const turnTriggers = new Map<string, UsageTrigger>();
+function noteTurnTrigger(threadId: string, auth: RequestAuth): void {
+  turnTriggers.set(
+    threadId,
+    auth.kind === "session"
+      ? { kind: "user", ...(auth.session.email ? { email: auth.session.email } : {}), label: auth.session.label }
+      : { kind: "owner" },
+  );
+}
 const providerAuthSessions = new ProviderAuthSessions();
 await registry.load(instanceConfigs(cfg));
 const bundledSkills = loadBundledSkills();
@@ -3699,6 +3716,27 @@ bus.subscribe((event: RuntimeEvent) => {
           output: tokens?.output,
           cachedInput: tokens?.cachedInput,
           costUsd: event.cost ?? null,
+        });
+        // and write the same figures to the month's ledger, which outlives
+        // the task and answers "what did we spend, by whom" for a period
+        const settledTask = store.taskByThread(bot.id, event.threadId);
+        const selection = settledTask?.modelSelection ?? bot.modelSelection;
+        appendUsage(DATA_DIR, {
+          botId: bot.id,
+          botName: bot.name,
+          threadId: event.threadId,
+          instanceId: selection.instanceId,
+          driverKind: registry.get(selection.instanceId)?.driverKind ?? "unknown",
+          model: selection.model,
+          input: tokens?.input ?? 0,
+          output: tokens?.output ?? 0,
+          ...(typeof tokens?.cachedInput === "number" ? { cachedInput: tokens.cachedInput } : {}),
+          costUsd: event.cost ?? null,
+          trigger: routineRun
+            ? { kind: "routine", routineId: routineRun.routineId, label: routineRun.routineName }
+            : internal
+              ? { kind: "bot", ...(settledTask?.openedBy?.botId ? { botId: settledTask.openedBy.botId } : {}) }
+              : turnTriggers.get(event.threadId) ?? { kind: "owner" },
         });
         const routineReportThread = routineRun ? routineSourceThread(routineRun) : null;
         // A routine's result belongs to its reporting thread's unread state.
@@ -11164,6 +11202,7 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
         return json(res, 400, { error: "threadId must be a task id" });
       }
       const threadId = body.threadId ?? group.threadId;
+      noteTurnTrigger(threadId, auth);
       const ownsThread = group.dm
         ? group.threadId === threadId
         : Boolean(store.groupTaskByThread(group.id, threadId));
@@ -12548,6 +12587,7 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
       // receipt after a task switch, while a genuinely new send still has to
       // target the task that is active now.
       const threadId = body.threadId ?? bot.threadId;
+      noteTurnTrigger(threadId, auth);
       if (!store.taskByThread(bot.id, threadId)) {
         return json(res, 409, { error: "the bot switched tasks before it could receive the message" });
       }
@@ -13324,6 +13364,32 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
     // Read-only like the inspector above: the rows were written at the
     // request.opened fold and in answerRequest; this only reads them back,
     // newest last, same order as thread events.
+    // ── the usage ledger: what this workspace spent over a period ──
+    // Read-only over the month files usage-ledger.ts appends at turn.completed.
+    // Admin scope by default, like every route not opened to clients.
+    if (method === "GET" && (path === "/api/usage" || path === "/api/usage.csv")) {
+      const range = parseUsageRange(url.searchParams.get("from"), url.searchParams.get("to"));
+      if (!range) return json(res, 400, { error: "from and to must be YYYY-MM-DD, from no later than to, at most a year apart" });
+      const rows = readUsage(DATA_DIR, range);
+      if (path === "/api/usage.csv") {
+        const stamp = (date: Date) => date.toISOString().slice(0, 10);
+        res.writeHead(200, {
+          "content-type": "text/csv; charset=utf-8",
+          "content-disposition": `attachment; filename="usage-${stamp(range.from)}-${stamp(range.to)}.csv"`,
+          "cache-control": "no-store",
+        });
+        res.end(usageCsv(rows));
+        return;
+      }
+      const requested = url.searchParams.get("groupBy") ?? "bot";
+      if (!USAGE_GROUPINGS.includes(requested as UsageGroupBy)) {
+        return json(res, 400, { error: `groupBy must be one of ${USAGE_GROUPINGS.join(", ")}` });
+      }
+      const groupBy = requested as UsageGroupBy;
+      res.setHeader("cache-control", "no-store");
+      return json(res, 200, { from: range.from.toISOString(), to: range.to.toISOString(), groupBy, ...summarizeUsage(rows, groupBy) });
+    }
+
     if (method === "GET" && path === "/api/decisions") {
       const rawLimit = url.searchParams.get("limit");
       const parsedLimit = rawLimit === null ? undefined : Number(rawLimit);

@@ -458,6 +458,27 @@ and pair by its own QR. It advertises on your private networks
 node --experimental-strip-types companion/src/index.ts
 ```
 
+## Usage and costs
+
+Every settled turn is appended to `<data dir>/usage/YYYY-MM.jsonl`: which
+bot, which model and engine, tokens in and out, the cost the engine reported
+(real on a metered key, an equivalent on a subscription, absent when the
+engine reports none), and who asked: the email a person signed in with, the
+device label otherwise, a routine, another bot, or this computer. No message
+text is stored. **Settings → Usage → History** shows a period grouped by bot,
+model, person, day or engine, and **Export CSV** downloads one line per turn.
+Owners can read the same over the API:
+
+```sh
+curl -H "Authorization: Bearer $TOKEN" \
+  "https://maus.example.com/api/usage?from=2026-09-01&to=2026-09-30&groupBy=user"
+curl -H "Authorization: Bearer $TOKEN" -o usage.csv \
+  "https://maus.example.com/api/usage.csv?from=2026-09-01&to=2026-09-30"
+```
+
+Dates are inclusive, UTC, at most a year apart; without them you get the
+current month to date.
+
 ## Updating
 
 For the npm service, [install the chosen new version](deploy-vps.md#update)

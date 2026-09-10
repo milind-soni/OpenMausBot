@@ -45,6 +45,7 @@ Use only mapped, tested commands:
 - [Codex bot instructions](codex-instructions.md)
 - [Qwen model route selection](qwen-models.md)
 - [Team backups](team-backups.md)
+- [Usage ledger](usage-ledger.md)
 
 `control-omb ui` ([Chat UI, driven headlessly](chat-ui.md)) drives the real
 renderer in a headless Chrome by accessible name, so composer sends, transcript
