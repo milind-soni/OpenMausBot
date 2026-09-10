@@ -32,7 +32,8 @@ function machine(root: string, options: { failing?: string[] } = {}) {
   return { deps, files, calls, root };
 }
 
-describe("fleet agent over its socket", () => {
+// The agent is a Linux service; Windows cannot bind a Unix socket in a temp folder.
+describe.skipIf(process.platform === "win32")("fleet agent over its socket", () => {
   let root: string;
   let socketPath: string;
   let stop: (() => Promise<void>) | null = null;
