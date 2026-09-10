@@ -20,7 +20,7 @@ struct ChatUpdate: Identifiable, Hashable {
     /// The card to answer, when `kind == .needsYou`.
     let card: OptionCard?
 
-    var id: String { chat.id }
+    var id: String { chat.conversationID }
 }
 
 extension CompanionState {
@@ -31,30 +31,34 @@ extension CompanionState {
         // Newest approval first, one per chat: the pill headlines the most
         // recent thing that stopped, and the sheet lists the rest.
         for pending in pendingApprovals {
-            guard let chat = chat(forThread: pending.threadId), seen.insert(chat.id).inserted else { continue }
+            guard let chat = chat(forThread: pending.threadId), seen.insert(chat.conversationID).inserted else { continue }
             let card = pending.message.card
             out.append(ChatUpdate(chat: chat, kind: .needsYou, line: card?.subtitle ?? card?.title ?? "", card: card))
         }
 
         for bot in bots where bot.hidden != true {
-            let chat = Chat.bot(bot)
-            guard !seen.contains(chat.id) else { continue }
-            if bot.busy == true {
-                seen.insert(chat.id)
-                out.append(ChatUpdate(chat: chat, kind: .working, line: workingLine(threadId: bot.threadId), card: nil))
-            } else if bot.unread {
-                seen.insert(chat.id)
-                out.append(ChatUpdate(chat: chat, kind: .toReview, line: lastLine(threadId: bot.threadId), card: nil))
+            for task in bot.threadGroups().flatMap(\.tasks) {
+                guard let projected = bot.projected(forThread: task.threadId) else { continue }
+                let chat = Chat.bot(projected)
+                guard seen.insert(chat.conversationID).inserted else { continue }
+                if task.activity == "waiting-on-you" {
+                    out.append(ChatUpdate(chat: chat, kind: .needsYou, line: "Waiting on you", card: nil))
+                } else if task.activity == "queued" || projected.busy == true {
+                    out.append(ChatUpdate(chat: chat, kind: .working,
+                        line: task.activity == "queued" ? "Queued — waiting for an available slot" : workingLine(threadId: task.threadId), card: nil))
+                } else if projected.unread {
+                    out.append(ChatUpdate(chat: chat, kind: .toReview, line: lastLine(threadId: task.threadId), card: nil))
+                }
             }
         }
         for room in rooms {
             let chat = Chat.room(room)
-            guard !seen.contains(chat.id) else { continue }
+            guard !seen.contains(chat.conversationID) else { continue }
             if room.busyBotId != nil {
-                seen.insert(chat.id)
+                seen.insert(chat.conversationID)
                 out.append(ChatUpdate(chat: chat, kind: .working, line: workingLine(threadId: room.threadId), card: nil))
             } else if room.unread {
-                seen.insert(chat.id)
+                seen.insert(chat.conversationID)
                 out.append(ChatUpdate(chat: chat, kind: .toReview, line: lastLine(threadId: room.threadId), card: nil))
             }
         }

@@ -21,6 +21,10 @@ struct ChatListView: View {
     @State private var showingUpdates = false
     @State private var showingNewGroup = false
     @State private var showingNewSection = false
+    @State private var expandedBots = Set<String>()
+    @State private var collapsedFolders = Set<String>()
+    @State private var creatingThreads = Set<String>()
+    @State private var managingThreads: Chat?
     @FocusState private var searchFocused: Bool
 
     /// Room for the floating bar, so the last row can scroll clear of it.
@@ -147,6 +151,13 @@ struct ChatListView: View {
             }
             .sheet(isPresented: $showingNewSection) {
                 NewSectionSheet()
+            }
+            .sheet(item: $managingThreads) { chat in
+                TaskManagerView(chat: chat) { threadId in
+                    guard let bot = session.state.bot(forThread: threadId) else { return }
+                    managingThreads = nil
+                    path.append(Chat.bot(bot))
+                }
             }
             .task(id: query) {
                 let expected = query
@@ -308,17 +319,41 @@ struct ChatListView: View {
     @ViewBuilder
     private func botRows(_ rows: [ChatSummary]) -> some View {
         ForEach(Array(rows.enumerated()), id: \.element.id) { index, summary in
-            NavigationLink(value: summary.chat) {
-                ChatRow(
-                    chat: summary.chat,
-                    preview: summary.preview,
-                    at: summary.lastActivity,
-                    state: MausState.forChat(summary.chat, in: session.state),
-                    waiting: waitingChats.contains(summary.chat.id),
-                    last: index == rows.count - 1
-                )
+            VStack(spacing: 0) {
+                NavigationLink(value: summary.chat) {
+                    ChatRow(
+                        chat: summary.chat,
+                        preview: summary.preview,
+                        at: summary.lastActivity,
+                        state: MausState.forChat(summary.chat, in: session.state),
+                        waiting: waitingChats.contains(summary.chat.id),
+                        last: index == rows.count - 1
+                    )
+                }
+                .buttonStyle(.plain)
+                if case let .bot(bot) = summary.chat {
+                    BotThreadTree(
+                        botID: bot.id, query: $query,
+                        expanded: Binding(
+                            get: { expandedBots.contains(bot.id) },
+                            set: { value in
+                                if value { expandedBots.insert(bot.id) } else { expandedBots.remove(bot.id) }
+                            }
+                        ),
+                        collapsedFolders: $collapsedFolders,
+                        creating: Binding(
+                            get: { creatingThreads.contains(bot.id) },
+                            set: { value in
+                                if value { creatingThreads.insert(bot.id) } else { creatingThreads.remove(bot.id) }
+                            }
+                        )
+                    ) { chat in
+                        path.append(chat)
+                    } manage: { chat in
+                        managingThreads = chat
+                    }
+                }
             }
-            .buttonStyle(.plain)
         }
     }
 
@@ -473,7 +508,13 @@ struct ChatListView: View {
             $0.chat.name.localizedCaseInsensitiveContains(query)
                 || $0.chat.subtitle.localizedCaseInsensitiveContains(query)
                 || $0.preview.localizedCaseInsensitiveContains(query)
+                || matchesThread($0.chat)
         }
+    }
+
+    private func matchesThread(_ chat: Chat) -> Bool {
+        guard case let .bot(bot) = chat else { return false }
+        return !bot.threadGroups(matching: query).isEmpty
     }
 
     private func summaries(for bots: [Bot]) -> [ChatSummary] {
@@ -705,6 +746,7 @@ struct UpdatesPill: View {
         .buttonStyle(.plain)
         .glassCapsule()
         .accessibilityLabel("Updates")
+        .accessibilityIdentifier("updates-button")
     }
 
     private var subline: String {

@@ -24,7 +24,8 @@ public struct CompanionState: Sendable {
     public var rooms: [Room] = []
     /// Transcripts by thread, which is the key both bots and rooms share.
     public var messages: [String: [Message]] = [:]
-    /// Whether there is more transcript above what we hold, per thread.
+    /// Whether there is more transcript above a fetched page, per thread.
+    /// An absent entry means no page has loaded; SSE tails do not set this.
     public var hasMore: [String: Bool] = [:]
     /// Branch heads belong to threads, not the bot's globally selected tab.
     public var activeLeafIds: [String: String] = [:]
@@ -56,6 +57,12 @@ public struct CompanionState: Sendable {
     /// stored property compiles but reads as if one shadows the other.
     public func transcript(forThread threadId: String) -> [Message] {
         messages[threadId] ?? []
+    }
+
+    /// Live events may create a partial transcript before a conversation is
+    /// opened. Only a fetched page establishes its scrollback boundary.
+    public func hasLoadedPage(forThread threadId: String) -> Bool {
+        hasMore[threadId] != nil
     }
 
     /// The active branch of a bot conversation. Rooms and legacy linear
@@ -175,9 +182,19 @@ public struct CompanionState: Sendable {
         return out.sorted { $0.message.at > $1.message.at }
     }
 
-    /// Chats worth a badge.
+    /// Visible conversations worth a badge. The bot-level flag is an
+    /// aggregate, so it must not add another count beside its unread tasks.
     public var unreadCount: Int {
-        bots.filter { $0.unread && $0.hidden != true }.count + rooms.filter(\.unread).count
+        let botCount = bots.filter { $0.hidden != true }.reduce(0) { count, bot in
+            if bot.tasks?.contains(where: { $0.unread != nil }) == true {
+                return count + bot.visibleTasks.filter { $0.unread == true }.count
+            }
+            // Legacy computers omit task unread flags entirely. Do not
+            // invent individual unread threads from their aggregate flag.
+            let hasConversation = bot.tasks == nil || !bot.visibleTasks.isEmpty
+            return count + (hasConversation && bot.unread ? 1 : 0)
+        }
+        return botCount + rooms.filter(\.unread).count
     }
 
     // MARK: - Hydrating
@@ -204,12 +221,12 @@ public struct CompanionState: Sendable {
         activeLeafIds.removeAll()
         for bot in fleet.bots {
             messages[bot.threadId] = bot.messages ?? []
-            hasMore[bot.threadId] = bot.hasMore ?? false
+            if bot.messages != nil { hasMore[bot.threadId] = bot.hasMore ?? false }
             activeLeafIds[bot.threadId] = bot.activeLeafId
         }
         for room in fleet.groups {
             messages[room.threadId] = room.messages ?? []
-            hasMore[room.threadId] = room.hasMore ?? false
+            if room.messages != nil { hasMore[room.threadId] = room.hasMore ?? false }
         }
         for (threadId, page) in waitingThreads where bot(forThread: threadId) != nil {
             merge(page, intoThread: threadId)
@@ -233,7 +250,9 @@ public struct CompanionState: Sendable {
         messages[threadId] = byId.values.sorted {
             $0.at == $1.at ? $0.id < $1.id : $0.at < $1.at
         }
-        if let more = page.hasMore { hasMore[threadId] = more }
+        // Legacy full pages omit hasMore. They still satisfy initial load,
+        // while a sparse landing window preserves an existing boundary.
+        hasMore[threadId] = page.hasMore ?? hasMore[threadId] ?? false
         if let leaf = page.activeLeafId { activeLeafIds[threadId] = leaf }
     }
 
@@ -317,8 +336,10 @@ public struct CompanionState: Sendable {
                 bots[index] = merged
             } else {
                 bots.append(bot)
-                if messages[bot.threadId] == nil {
-                    messages[bot.threadId] = bot.messages ?? []
+                if let page = bot.messages {
+                    merge(ThreadPage(messages: page, hasMore: bot.hasMore ?? false), intoThread: bot.threadId)
+                } else if messages[bot.threadId] == nil {
+                    messages[bot.threadId] = []
                 }
             }
 
@@ -360,8 +381,10 @@ public struct CompanionState: Sendable {
                 rooms[index] = merged
             } else {
                 rooms.append(room)
-                if messages[room.threadId] == nil {
-                    messages[room.threadId] = room.messages ?? []
+                if let page = room.messages {
+                    merge(ThreadPage(messages: page, hasMore: room.hasMore ?? false), intoThread: room.threadId)
+                } else if messages[room.threadId] == nil {
+                    messages[room.threadId] = []
                 }
             }
 

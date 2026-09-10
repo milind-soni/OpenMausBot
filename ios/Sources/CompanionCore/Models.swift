@@ -236,6 +236,13 @@ public struct ThreadOpener: Codable, Hashable, Sendable {
     public var at: Double
 }
 
+/// A folder within one bot, in the order saved by the desktop.
+public struct BotProject: Codable, Hashable, Identifiable, Sendable {
+    public var id: String
+    public var name: String
+    public var emoji: String?
+}
+
 public struct BotTask: Codable, Hashable, Sendable {
     public var threadId: String
     public var title: String
@@ -301,6 +308,7 @@ public struct Bot: Codable, Hashable, Identifiable, Sendable {
     /// older harness included) means the shipped `cursor` silhouette.
     public var mascotBody: String?
     public var tasks: [BotTask]?
+    public var projects: [BotProject]?
     public var messages: [Message]?
     public var activeLeafId: String?
     /// Paged responses only: there is more transcript above what you got.

@@ -85,6 +85,10 @@ private struct UpdateRow: View {
                     Text(update.chat.name)
                         .font(.system(size: 15, weight: .semibold))
                         .foregroundStyle(Color.primary)
+                    Text(update.chat.threadTitle)
+                        .font(.system(size: 12, weight: .medium))
+                        .foregroundStyle(Color.secondary)
+                        .lineLimit(1)
                     Text(update.line.isEmpty ? " " : update.line)
                         .font(.system(size: 14))
                         .foregroundStyle(Color.secondary)
@@ -154,6 +158,7 @@ private struct UpdateRow: View {
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
+        .accessibilityIdentifier("update-\(update.chat.threadId)")
     }
 }
 
