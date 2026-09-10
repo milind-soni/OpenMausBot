@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 
+import { activeLocale } from "./i18n";
 import { intervalLabel, scheduleLabel, scheduleSentence, whenLabel } from "./schedule-label";
 
 describe("schedule labels", () => {
@@ -33,11 +34,13 @@ describe("schedule labels", () => {
 
   it("labels a change by time today and by date otherwise", () => {
     const now = Date.now();
-    expect(whenLabel(now)).toBe(new Date(now).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" }));
+    expect(whenLabel(now)).toBe(
+      new Date(now).toLocaleTimeString(activeLocale(), { hour: "numeric", minute: "2-digit" }),
+    );
     const lastYear = new Date(now);
     lastYear.setFullYear(lastYear.getFullYear() - 1);
     expect(whenLabel(lastYear.getTime())).toBe(
-      lastYear.toLocaleDateString([], { month: "short", day: "numeric" }),
+      lastYear.toLocaleDateString(activeLocale(), { month: "short", day: "numeric" }),
     );
   });
 });

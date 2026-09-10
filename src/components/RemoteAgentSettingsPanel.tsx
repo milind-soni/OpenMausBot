@@ -2,6 +2,7 @@ import { useRef, useState } from "react";
 import { Bell, ChevronLeft, ImagePlus, Loader2, Trash2, X } from "lucide-react";
 
 import { api, useStore, type Bot } from "@/state/store";
+import { t } from "@/lib/i18n";
 import { VoiceSettings } from "./VoiceSettings";
 import { Switch } from "./SettingsPrimitives";
 import { BotAvatar } from "./Avatar";
@@ -40,7 +41,7 @@ export function RemoteAgentSettingsPanel({ bot }: { bot: Bot }) {
           });
           dispatch({ type: "botPatched", bot: result.bot });
         } catch (cause) {
-          setError(cause instanceof Error ? cause.message : "Could not update this agent.");
+          setError(cause instanceof Error ? cause.message : t("remoteAgent.updateFailed"));
         }
       }
     };
@@ -58,7 +59,7 @@ export function RemoteAgentSettingsPanel({ bot }: { bot: Bot }) {
     try {
       const saved = await imageAttachmentFromFile(file);
       const avatarUrl = saved ? botAvatarUrlFromStoredPath(saved.path) : null;
-      if (!avatarUrl) throw new Error("Choose a PNG, JPEG, GIF, or WebP image.");
+      if (!avatarUrl) throw new Error(t("remoteAgent.imageTypes"));
       await patch({ avatarUrl, avatarCrop: bot.avatarCrop === "square" ? "square" : "circle" });
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : String(cause));
@@ -73,15 +74,15 @@ export function RemoteAgentSettingsPanel({ bot }: { bot: Bot }) {
       <div className="flex items-center justify-between px-4 py-3">
         <button
           onClick={close}
-          aria-label="Collapse remote agent settings"
+          aria-label={t("remoteAgent.collapseAria")}
           className="flex size-10 items-center justify-center rounded-md text-ink-secondary hover:bg-control hover:text-ink"
         >
           <ChevronLeft size={18} />
         </button>
-        <span className="text-[15px] font-semibold text-ink">Remote agent settings</span>
+        <span className="text-[15px] font-semibold text-ink">{t("remoteAgent.title")}</span>
         <button
           onClick={close}
-          aria-label="Close remote agent settings"
+          aria-label={t("remoteAgent.closeAria")}
           className="flex size-10 items-center justify-center rounded-md text-ink-secondary hover:bg-control hover:text-ink"
         >
           <X size={18} />
@@ -96,18 +97,18 @@ export function RemoteAgentSettingsPanel({ bot }: { bot: Bot }) {
               <div className="flex gap-2">
                 <input ref={avatarInput} type="file" accept="image/png,image/jpeg,image/gif,image/webp" className="sr-only" onChange={(event) => void uploadAvatar(event.target.files?.[0])} />
                 <button type="button" disabled={uploading || saving} onClick={() => avatarInput.current?.click()} className="flex items-center gap-1.5 rounded-lg bg-control px-3 py-2 text-[13px] text-ink hover:bg-raised-hover disabled:opacity-50">
-                  {uploading ? <Loader2 size={14} className="animate-spin" /> : <ImagePlus size={14} />} Avatar
+                  {uploading ? <Loader2 size={14} className="animate-spin" /> : <ImagePlus size={14} />} {t("remoteAgent.avatar")}
                 </button>
-                {bot.avatarUrl && <button type="button" disabled={saving} onClick={() => void patch({ avatarUrl: null, avatarCrop: "mascot" })} aria-label="Remove custom avatar" className="flex size-9 items-center justify-center rounded-lg text-ink-secondary hover:bg-control hover:text-danger"><Trash2 size={14} /></button>}
+                {bot.avatarUrl && <button type="button" disabled={saving} onClick={() => void patch({ avatarUrl: null, avatarCrop: "mascot" })} aria-label={t("remoteAgent.removeAvatarAria")} className="flex size-9 items-center justify-center rounded-lg text-ink-secondary hover:bg-control hover:text-danger"><Trash2 size={14} /></button>}
               </div>
             </div>
-            <label className="block text-[12px] font-medium text-ink-secondary">Name
+            <label className="block text-[12px] font-medium text-ink-secondary">{t("remoteAgent.name")}
               <input key={bot.id} defaultValue={bot.name} maxLength={BOT_PROFILE_LIMITS.name} onBlur={(event) => { const name = event.currentTarget.value.trim(); if (name && name !== bot.name) void patch({ name }); }} className="mt-1 w-full rounded-lg bg-inset px-3 py-2 text-[14px] text-ink focus:outline-none focus:ring-1 focus:ring-accent" />
             </label>
-            <label className="mt-3 block text-[12px] font-medium text-ink-secondary">Title
+            <label className="mt-3 block text-[12px] font-medium text-ink-secondary">{t("remoteAgent.jobTitle")}
               <input key={bot.id} defaultValue={bot.title ?? ""} maxLength={BOT_PROFILE_LIMITS.title} onBlur={(event) => { if (event.currentTarget.value !== (bot.title ?? "")) void patch({ title: event.currentTarget.value }); }} className="mt-1 w-full rounded-lg bg-inset px-3 py-2 text-[14px] text-ink focus:outline-none focus:ring-1 focus:ring-accent" />
             </label>
-            <label className="mt-3 block text-[12px] font-medium text-ink-secondary">Description
+            <label className="mt-3 block text-[12px] font-medium text-ink-secondary">{t("remoteAgent.description")}
               <textarea key={bot.id} defaultValue={bot.description ?? ""} maxLength={BOT_PROFILE_LIMITS.description} rows={4} onBlur={(event) => { if (event.currentTarget.value !== (bot.description ?? "")) void patch({ description: event.currentTarget.value }); }} className="mt-1 w-full resize-y rounded-lg bg-inset px-3 py-2 text-[13px] leading-relaxed text-ink focus:outline-none focus:ring-1 focus:ring-accent" />
             </label>
           </div>
@@ -122,16 +123,16 @@ export function RemoteAgentSettingsPanel({ bot }: { bot: Bot }) {
             <div className="flex min-w-0 items-start gap-3">
               <Bell size={16} className="mt-0.5 shrink-0 text-ink-secondary" />
               <div>
-                <div className="text-[15px] font-medium text-ink">Notifications</div>
+                <div className="text-[15px] font-medium text-ink">{t("remoteAgent.notifications")}</div>
                 <div className="mt-0.5 text-[12px] leading-relaxed text-ink-secondary">
-                  Enable completion and attention notifications for this agent on the host and paired clients.
+                  {t("remoteAgent.notificationsHint")}
                 </div>
               </div>
             </div>
             <Switch
               checked={bot.notifications}
               disabled={saving}
-              aria-label="Agent notifications"
+              aria-label={t("remoteAgent.notificationsAria")}
               onClick={() => void patch({ notifications: !bot.notifications })}
             />
           </div>

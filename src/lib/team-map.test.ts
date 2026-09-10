@@ -46,9 +46,9 @@ describe("team map projection", () => {
       running: [],
     };
     expect(buildTeamMapEdges(bots, snapshot)).toEqual([]);
-    expect(teamMapStatus(bots[0])).toEqual({ label: "Working", tone: "success" });
+    expect(teamMapStatus(bots[0])).toEqual({ labelKey: "teamMap.status.working", tone: "success" });
     expect(teamMapStatus({ id: "x", name: "X", activity: "waiting-on-you" })).toEqual({
-      label: "Waiting for you",
+      labelKey: "teamMap.status.waiting",
       tone: "warning",
     });
   });
