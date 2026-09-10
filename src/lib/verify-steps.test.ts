@@ -1,7 +1,9 @@
 import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 
+import { SAVE_RUN_AS_SKILL_LINE } from "../../shared/learn-request";
 import {
+  askText,
   commandOf,
   nameIsCommand,
   parseControlCommand,
@@ -217,6 +219,21 @@ describe("runSteps", () => {
   });
 });
 
+describe("askText", () => {
+  it("is the first line of the person's last message, trimmed and capped at 300 characters", () => {
+    expect(askText([ask("  verify the fixture  \nthen push"), claude(DOCTOR, true)])).toBe("verify the fixture");
+    expect(askText([ask("first"), claude(DOCTOR, true), ask("second"), claude(DOCTOR, true)])).toBe("second");
+    expect(askText([ask("first"), text("the bot's reply is not the ask")])).toBe("first");
+    expect(askText([ask("x".repeat(400))])).toHaveLength(300);
+  });
+
+  it("is undefined when the person has not said anything", () => {
+    expect(askText([claude(DOCTOR, true)])).toBeUndefined();
+    expect(askText([ask("   ")])).toBeUndefined();
+    expect(askText([])).toBeUndefined();
+  });
+});
+
 describe("showRun", () => {
   it("shows a run with a verified step, or with two or more steps — one unverified command is a chip, not a run", () => {
     const [push, publish] = runSteps([claude(PUSH, true), claude("npm publish", true)]);
@@ -261,35 +278,82 @@ describe("skillStaged", () => {
 });
 
 describe("skillPrompt", () => {
-  const steps = runSteps([claude(DOCTOR, true), codex(SEND, false), acp(PRESS), claude(`${DOCTOR} --dry-run`, true), claude(PUSH, true)]);
-  const prompt = skillPrompt(steps);
+  describe("for a run with a verified step", () => {
+    const steps = runSteps([claude(DOCTOR, true), codex(SEND, false), acp(PRESS), claude(`${DOCTOR} --dry-run`, true), claude(PUSH, true)]);
+    const prompt = skillPrompt(steps, "verify the fixture");
 
-  it("mounts the bundled skill by opening with one of its trigger phrases", () => {
-    const terms = triggerTerms();
-    const opening = prompt.split("\n")[0].toLowerCase();
-    expect(terms.some((term) => opening.includes(term.toLowerCase()))).toBe(true);
-    // the skill mounts on a substring match anywhere in the turn
-    // (selectBundledSkills), so notes typed above or below still mount it
-    const annotated = `Also cover the send step.\n\n${prompt}Keep the doctor step first.`.toLowerCase();
-    expect(terms.some((term) => annotated.includes(term.toLowerCase()))).toBe(true);
+    it("mounts the bundled skill by opening with one of its trigger phrases", () => {
+      const terms = triggerTerms();
+      const opening = prompt.split("\n")[0].toLowerCase();
+      expect(terms.some((term) => opening.includes(term.toLowerCase()))).toBe(true);
+      // the skill mounts on a substring match anywhere in the turn
+      // (selectBundledSkills), so notes typed above or below still mount it
+      const annotated = `Also cover the send step.\n\n${prompt}Keep the doctor step first.`.toLowerCase();
+      expect(terms.some((term) => annotated.includes(term.toLowerCase()))).toBe(true);
+    });
+
+    it("carries the person's request as the goal, between the trigger line and the rule", () => {
+      expect(prompt.split("\n").slice(0, 4)).toEqual([
+        "Create a verification skill from the run below.",
+        "Goal: verify the fixture",
+        "Do not re-run these steps; their results are in this thread. Use the passing ones as the recipe with their exact commands and note the failed ones as gotchas.",
+        "",
+      ]);
+      // no request known: no Goal line, nothing invented
+      const bare = skillPrompt(steps);
+      expect(bare.split("\n")[1]).toMatch(/^Do not re-run these steps/);
+      expect(bare).not.toContain("Goal:");
+    });
+
+    it("ends with a blank line so the caret lands below the steps in the composer", () => {
+      expect(prompt.endsWith(`✓ git push — ${PUSH}\n\n`)).toBe(true);
+      expect(prompt.endsWith("\n\n\n")).toBe(false);
+    });
+
+    it("lists every step with its marker, the verified ones tagged — a dry run never as passing", () => {
+      expect(prompt).toContain(`✓ doctor — ${DOCTOR} (verified)\n`);
+      expect(prompt).toContain(`✗ send — ${SEND} (verified)\n`);
+      expect(prompt).toContain(`… press — ${PRESS} (verified)\n`);
+      expect(prompt).toContain(`[dry run] doctor — ${DOCTOR} --dry-run (verified)\n`);
+      expect(prompt).toContain(`✓ git push — ${PUSH}\n`);
+      expect(prompt).not.toContain(`${PUSH} (verified)`);
+      expect(prompt).not.toContain(`✓ doctor — ${DOCTOR} --dry-run`);
+      // the skill owns the layout; the prompt does not restate it
+      expect(prompt).not.toMatch(/Launch \/ Doctor/);
+      expect(prompt).not.toContain("skill_manage");
+    });
   });
 
-  it("ends with a blank line so the caret lands below the steps in the composer", () => {
-    expect(prompt.endsWith(`✓ git push — ${PUSH}\n\n`)).toBe(true);
-    expect(prompt.endsWith("\n\n\n")).toBe(false);
-  });
+  describe("for a run with no verified step", () => {
+    const steps = runSteps([claude(PUSH, true), claude("npm publish", false), claude("gh release create v1")]);
+    const prompt = skillPrompt(steps, "publish the release");
 
-  it("states the one rule, then lists every step with its marker, the verified ones tagged — a dry run never as passing", () => {
-    expect(prompt).toContain("Do not re-run these steps");
-    expect(prompt).toContain(`✓ doctor — ${DOCTOR} (verified)\n`);
-    expect(prompt).toContain(`✗ send — ${SEND} (verified)\n`);
-    expect(prompt).toContain(`… press — ${PRESS} (verified)\n`);
-    expect(prompt).toContain(`[dry run] doctor — ${DOCTOR} --dry-run (verified)\n`);
-    expect(prompt).toContain(`✓ git push — ${PUSH}\n`);
-    expect(prompt).not.toContain(`${PUSH} (verified)`);
-    expect(prompt).not.toContain(`✓ doctor — ${DOCTOR} --dry-run`);
-    // the skill owns the layout; the prompt does not restate it
-    expect(prompt).not.toMatch(/Launch \/ Doctor/);
-    expect(prompt).not.toContain("skill_manage");
+    // server/skill-learn.test.ts proves the other half: a turn that opens with
+    // this line is expanded into the skill-authoring turn exactly as /learn is.
+    it("asks in plain words — no slash command — with the goal and the one rule under the shared opening line", () => {
+      expect(prompt.startsWith(`${SAVE_RUN_AS_SKILL_LINE}\n`)).toBe(true);
+      expect(prompt.split("\n").slice(0, 4)).toEqual([
+        SAVE_RUN_AS_SKILL_LINE,
+        "Goal: publish the release",
+        "Keep the exact commands and note the failed ones as gotchas. Do not re-run anything.",
+        "",
+      ]);
+      expect(prompt).not.toContain("/learn");
+      // no request known: the run itself is the goal
+      expect(skillPrompt(steps).split("\n")[1]).toBe("Goal: the run below");
+    });
+
+    it("does not carry the verification-skill trigger phrase, so that skill stays unmounted", () => {
+      const lower = prompt.toLowerCase();
+      expect(triggerTerms().some((term) => lower.includes(term.toLowerCase()))).toBe(false);
+    });
+
+    it("lists the steps untagged and ends with a blank line", () => {
+      expect(prompt).toContain(`✓ git push — ${PUSH}\n`);
+      expect(prompt).toContain("✗ npm publish — npm publish\n");
+      expect(prompt).toContain("… gh release — gh release create v1\n");
+      expect(prompt).not.toContain("(verified)");
+      expect(prompt.endsWith("… gh release — gh release create v1\n\n")).toBe(true);
+    });
   });
 });

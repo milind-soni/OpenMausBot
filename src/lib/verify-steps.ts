@@ -4,6 +4,7 @@
 // since the control CLI is the project's verification lever. Reads — `cat`,
 // `git log`, `gh pr view` — are not steps: looking is not doing. The card
 // lists the run and can hand it to the composer as a skill request.
+import { SAVE_RUN_AS_SKILL_LINE } from "../../shared/learn-request";
 import type { Message } from "@/state/store";
 import { t } from "./i18n";
 
@@ -255,6 +256,15 @@ function askIndex(messages: Message[]): number {
   return -1;
 }
 
+/** What the person asked for, as the first line of their last message, at
+ * most 300 characters; undefined when the thread has no such message. */
+export function askText(messages: Message[]): string | undefined {
+  const index = askIndex(messages);
+  if (index < 0) return undefined;
+  const line = messages[index].text!.trim().split(/\r?\n/, 1)[0].trim();
+  return line ? line.slice(0, 300) : undefined;
+}
+
 /** Every command the bot ran in the current ask, in order, reads left out. */
 export function runSteps(messages: Message[]): RunStep[] {
   const steps: RunStep[] = [];
@@ -321,20 +331,27 @@ const MARK = { passed: "✓", failed: "✗", running: "…" } as const;
 const stepLine = (step: RunStep) =>
   `${step.dryRun ? "[dry run]" : MARK[step.status]} ${step.label} — ${step.command}${step.verified ? " (verified)" : ""}`;
 
-/** The text Save as skill puts into the composer for the person to send.
- * Its first sentence is a create-verification-skill trigger phrase, so that
- * skill mounts on the turn and lays the file out (the bundled skill matches
- * its term anywhere in the turn, so notes above or below are fine); the
- * rest is the run itself, verified steps tagged. A dry run is marked as one
- * and never reads as passing. It ends with a blank line so the caret lands
- * below the steps. */
-export function skillPrompt(steps: RunStep[]): string {
-  return [
-    "Create a verification skill from the run below.",
-    "Do not re-run these steps; their results are in this thread. Use the passing ones as the recipe with their exact commands and note the failed ones as gotchas.",
-    "",
-    ...steps.map(stepLine),
-    "",
-    "",
-  ].join("\n");
+/** The text Save as skill puts into the composer for the person to send,
+ * carrying what they asked for so the skill knows its goal. Two shapes. A
+ * run with a verified step opens with a create-verification-skill trigger
+ * phrase, so that skill mounts on the turn and lays the file out (the
+ * bundled skill matches its term anywhere in the turn, so notes above or
+ * below are fine). A run without one asks, in plain words, to save the
+ * steps as a skill: the server expands a turn that opens with that sentence
+ * into the same authoring turn as `/learn`, so nobody sees or types a slash
+ * command. Either way a dry run is marked as one and never reads as passing,
+ * and the text ends with a blank line so the caret lands below the steps. */
+export function skillPrompt(steps: RunStep[], ask?: string): string {
+  const lines = steps.some((step) => step.verified)
+    ? [
+      "Create a verification skill from the run below.",
+      ...(ask ? [`Goal: ${ask}`] : []),
+      "Do not re-run these steps; their results are in this thread. Use the passing ones as the recipe with their exact commands and note the failed ones as gotchas.",
+    ]
+    : [
+      SAVE_RUN_AS_SKILL_LINE,
+      `Goal: ${ask ?? "the run below"}`,
+      "Keep the exact commands and note the failed ones as gotchas. Do not re-run anything.",
+    ];
+  return [...lines, "", ...steps.map(stepLine), "", ""].join("\n");
 }

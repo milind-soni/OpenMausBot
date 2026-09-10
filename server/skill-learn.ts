@@ -6,6 +6,8 @@
 // prompt and recognises the slash command, so it works on every engine
 // that mounts the agents tools.
 
+import { SAVE_RUN_AS_SKILL_LINE } from "../shared/learn-request.ts";
+
 export const LEARN_COMMAND = "/learn";
 export const LEARN_SOURCE_PREFIX = "learn:";
 export const LEARN_PROMPT_MARKER = "[/learn]";
@@ -17,6 +19,16 @@ export function parseLearnCommand(text: string): { request: string } | null {
   const match = trimmed.match(/^\/learn(?:\s+|$)([\s\S]*)$/i);
   if (!match) return null;
   return { request: match[1]!.trim() };
+}
+
+/** True when the user's message opens with the run card's plain-words
+ * request (`SAVE_RUN_AS_SKILL_LINE`); the rest of the message is the request,
+ * exactly as the text after `/learn` would be. Opening line or nothing: a
+ * message that merely quotes the sentence later on is ordinary chat. */
+export function parseSaveRunRequest(text: string): { request: string } | null {
+  const trimmed = text.trim();
+  if (!trimmed.startsWith(SAVE_RUN_AS_SKILL_LINE)) return null;
+  return { request: trimmed.slice(SAVE_RUN_AS_SKILL_LINE.length).trim() };
 }
 
 export function learnSource(request: string): string {
@@ -64,7 +76,10 @@ export function buildLearnPrompt(userRequest: string): string {
   );
 }
 
+/** The turn the engine runs: `/learn <request>` and the run card's plain
+ * sentence followed by the request both become the authoring prompt; any
+ * other message is passed through. */
 export function expandLearnTurnText(userText: string): string {
-  const learn = parseLearnCommand(userText);
+  const learn = parseLearnCommand(userText) ?? parseSaveRunRequest(userText);
   return learn ? buildLearnPrompt(learn.request) : userText;
 }

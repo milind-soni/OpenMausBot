@@ -185,16 +185,16 @@ describe("control-omb ui drives the real renderer", () => {
     expect(png.length).toBeGreaterThan(1_000);
     expect(png.subarray(0, 8)).toEqual(Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]));
 
-    // Save as skill fills the composer with the run — the trigger phrase and
-    // each step's command, the verified ones tagged — for the person to
-    // annotate and send. It sends
+    // Save as skill fills the composer with the run — the trigger phrase (a
+    // verified step is in it), the typed "hello" as the goal, and each step's
+    // command tagged verified — for the person to annotate and send. It sends
     // nothing itself: the transcript is unchanged and the caret is in the box.
     const rowsBefore = await ui("eval", info.ui, "--js", "document.querySelectorAll('[data-mid]').length");
     await ui("click", info.ui, "--name", "Save as skill");
     const drafted = await ui("eval", info.ui, "--js", `${COMPOSER}.value`);
     expect(drafted.ok).toBe(true);
     const draft = drafted.result as string;
-    expect(draft.startsWith("Create a verification skill from the run below.\n")).toBe(true);
+    expect(draft.startsWith("Create a verification skill from the run below.\nGoal: hello\n")).toBe(true);
     expect(draft).toContain("✓ doctor — pnpm control:omb doctor (verified)\n");
     expect(draft).toContain("✗ ui — pnpm control:omb ui click --name Missing (verified)\n");
     expect(draft).toContain("[dry run] ui — pnpm control:omb ui flag --set features.showToolCalls=true --dry-run (verified)\n");

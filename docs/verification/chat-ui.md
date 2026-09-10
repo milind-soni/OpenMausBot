@@ -101,12 +101,18 @@ and marks the ones that went through the control CLI **verified**; reads
 are left out, and a run of one unverified command shows no card. Those tool
 outcomes are **simulated provider events**, not executions of the commands
 written in the chips; the card's summary reads `3 steps · 3 verified · 1 failed
-· 1 dry run`. The recipe then presses **Save as skill**: the
-composer textarea now opens with the trigger phrase (`Create a verification
-skill from the run below.`), then the rule not to re-run, then one line per
-step with the verified ones tagged `(verified)`; the caret is in the composer
-and no new user message was sent — the transcript still holds exactly one
-`StaticText "hello"`. The person adds any notes and
+· 1 dry run`. The recipe then presses **Save as skill**, which fills the
+composer in one of two shapes. A run with a verified step opens with the
+trigger phrase (`Create a verification skill from the run below.`), then
+`Goal: hello` (the person's request), the rule not to re-run, and one line per
+step with the verified ones tagged `(verified)`. A run with no verified step
+asks in plain words instead — `Save the steps below as a reusable skill for my
+review.`, then `Goal: <request>`, then "Keep the exact commands and note the
+failed ones as gotchas. Do not re-run anything.", then the step lines; the
+server (`server/skill-learn.ts`) expands a turn that opens with that sentence
+into the same skill-authoring turn as `/learn`, so nobody sees or types a slash
+command. In both shapes the caret is in the composer and no new user message
+was sent — the transcript still holds exactly one `StaticText "hello"`. The person adds any notes and
 sends as usual; the card never sends on its own. Separately, the recipe runs a
 real fixture health check and verifies that clicking a deliberately missing
 control fails. The card remains collapsible; the old execution timeline is no

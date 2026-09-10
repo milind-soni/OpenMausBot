@@ -3,7 +3,8 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { afterAll, afterEach, describe, expect, it, vi } from "vitest";
 import type { AppState, Bot, InstanceInfo, Message } from "@/state/store";
 import { t } from "@/lib/i18n";
-import { runSteps, skillPrompt } from "@/lib/verify-steps";
+import { askText, runSteps, skillPrompt } from "@/lib/verify-steps";
+import { SAVE_RUN_AS_SKILL_LINE } from "../../shared/learn-request";
 import type { VerifyCard } from "./VerifyCard";
 
 const fixture = vi.hoisted(() => {
@@ -104,7 +105,7 @@ describe("The run card in the chat pane", () => {
     expect(markup).not.toContain(t("chat.verify.save"));
   });
 
-  it("offers Save with an agents engine; Save fills the thread's composer with the run instead of sending", () => {
+  it("offers Save with an agents engine; Save fills the thread's composer with the run and the request instead of sending", () => {
     saveable();
     const markup = render(run);
     expect(markup).toContain(t("chat.verify.save"));
@@ -113,12 +114,12 @@ describe("The run card in the chat pane", () => {
 
     fixture.verify!.onSave();
     expect(fixture.appendComposerDraft).toHaveBeenCalledTimes(1);
-    expect(fixture.appendComposerDraft).toHaveBeenCalledWith("bot:bot:t1", skillPrompt(runSteps(run)));
-    expect(draft().startsWith("Create a verification skill from the run below.\n")).toBe(true);
+    expect(fixture.appendComposerDraft).toHaveBeenCalledWith("bot:bot:t1", skillPrompt(runSteps(run), askText(run)));
+    expect(draft().startsWith("Create a verification skill from the run below.\nGoal: verify the fixture\n")).toBe(true);
     expect(fixture.dispatch).not.toHaveBeenCalled();
   });
 
-  it("records a run with no control CLI in it too", () => {
+  it("records a run with no control CLI in it too, and saves that one in plain words the server expands like /learn", () => {
     saveable();
     const markup = render(release);
     expect(markup).toContain(CARD);
@@ -129,8 +130,11 @@ describe("The run card in the chat pane", () => {
     expect(markup).not.toContain(TAG);
 
     fixture.verify!.onSave();
+    expect(draft().startsWith(`${SAVE_RUN_AS_SKILL_LINE}\nGoal: publish the release\n`)).toBe(true);
+    expect(draft()).not.toContain("/learn");
     expect(draft()).toContain("✓ git push — git push origin main\n");
     expect(draft()).toContain("✗ npm publish — npm publish\n");
+    expect(draft()).not.toContain("Create a verification skill");
   });
 
   it("stays out of a thread whose run is one unverified command", () => {

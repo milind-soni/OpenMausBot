@@ -45,7 +45,7 @@ import { ChatMarkdown } from "./ChatMarkdown";
 import { RawMarkdownView, RawToggleAction } from "./RawMarkdownToggle";
 import { ThreadChip } from "./ThreadChip";
 import { VerifyCard } from "./VerifyCard";
-import { nameIsCommand, runSteps, runSummary, showRun, skillPrompt, skillStaged } from "@/lib/verify-steps";
+import { askText, nameIsCommand, runSteps, runSummary, showRun, skillPrompt, skillStaged } from "@/lib/verify-steps";
 import { ThreadRefText } from "./ThreadRefs";
 import { OptionCard, shouldHideOnboardingCard } from "./OptionCard";
 import { ApprovalCard } from "./ApprovalCard";
@@ -1379,10 +1379,11 @@ export function ChatView({ bot: profile }: { bot: Bot }) {
       <div ref={composerDockRef} className="absolute inset-x-0 bottom-0 z-[2]">
       {/* The bot's run in this ask as a checklist, once it is worth one (a
           verified step, or more than one command). Save fills this thread's
-          composer with the run and hands the caret over; the person adds
-          context and sends — nothing is sent from here. In the dock so its
-          height is measured with the composer's: the transcript pad, the
-          jump pill and bottom-follow all move with it. */}
+          composer with the run and the person's request and hands the caret
+          over; the person adds context and sends — nothing is sent from
+          here. In the dock so its height is measured with the composer's:
+          the transcript pad, the jump pill and bottom-follow all move with
+          it. */}
       {lastRunStep && showRun(recordedRun) && runDismissed.get(transcriptKey) !== lastRunStep.id && (
         <div className="flex justify-end px-5 pb-2">
           <VerifyCard
@@ -1392,7 +1393,7 @@ export function ChatView({ bot: profile }: { bot: Bot }) {
             staged={skillStaged(messages, recordedRun)}
             onDismiss={() => setRunDismissed((current) => new Map(current).set(transcriptKey, lastRunStep.id))}
             onSave={() => {
-              appendComposerDraft(`bot:${bot.id}:${bot.threadId}`, skillPrompt(recordedRun));
+              appendComposerDraft(`bot:${bot.id}:${bot.threadId}`, skillPrompt(recordedRun, askText(messages)));
               composerDockRef.current?.querySelector("textarea")?.focus();
             }}
           />
