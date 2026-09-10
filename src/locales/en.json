@@ -728,7 +728,7 @@
   "settings.experimental.subtitle": "Early features may change while we test them. They stay off unless you enable them.",
   "settings.experimental.error": "Could not save the experimental feature setting.",
   "settings.experimental.skillAuthoring": "Bots may draft skills for your review",
-  "settings.experimental.skillAuthoringDetail": "Use /learn or ask a supported bot to run /create-verification-skill. Every change waits for your review.",
+  "settings.experimental.skillAuthoringDetail": "On by default. Save a bot's verification run as a skill from the Verify card, or ask a supported bot to run /create-verification-skill. Every change waits for your review.",
   "settings.experimental.skillAuthoringAria": "Allow bots to draft skills",
   "settings.experimental.browser": "Built-in browser",
   "settings.experimental.browserOn": "Enabled for this workspace. Each bot also has its own browser switch.",

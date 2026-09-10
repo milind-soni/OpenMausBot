@@ -19,10 +19,11 @@ export function browserUnavailableReason(config: FeatureFlagConfig | null | unde
   return t("browser.noEngine");
 }
 
-/** Bots may draft skills (/learn, skill_manage) for the user's review. Like
- * every experiment, available only after an explicit opt-in. */
+/** Bots may draft skills (the Verify card's Save as skill, /learn,
+ * skill_manage) for the user's review. On unless the Settings toggle was
+ * switched off — the same rule as the server's skillAuthoringEnabled. */
 export function skillAuthoringEnabled(config: FeatureFlagConfig | null | undefined): boolean {
-  return config?.features?.skillAuthoring === true;
+  return config?.features?.skillAuthoring !== false;
 }
 
 /** The experimental built-in browser is unavailable until the person using

@@ -219,8 +219,9 @@ const browserProfilesSchema = z.array(browserProfileSchema).max(20).superRefine(
 // pre-rename name a stale client may still PATCH) is dropped as a no-op
 // instead of failing the whole stored config or the request.
 const featureConfigSchema = z.object({
-  /** Bots may draft skills (skill_manage, /learn) for your review. Off unless
-   * explicitly enabled. */
+  /** Bots may draft skills (skill_manage, the Verify card's Save as skill,
+   * /learn) for your review. On unless explicitly switched off in Settings;
+   * every draft still waits for review. */
   skillAuthoring: z.boolean().optional(),
   /** Show each tool run in the transcript. Off unless explicitly enabled. */
   showToolCalls: z.boolean().optional(),
@@ -502,8 +503,10 @@ export function localVmMaxInstances(cfg: AppConfig): number {
   return cfg.localVm?.maxInstances ?? DEFAULT_LOCAL_VM_MAX_INSTANCES;
 }
 
+/** On by default; only an explicit `false` (the Settings toggle, or a legacy
+ * `skillRecorder: false` carried over at startup) switches it off. */
 export function skillAuthoringEnabled(cfg: AppConfig): boolean {
-  return cfg.features?.skillAuthoring === true;
+  return cfg.features?.skillAuthoring !== false;
 }
 
 export function showToolCallsEnabled(cfg: AppConfig): boolean {

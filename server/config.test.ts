@@ -357,12 +357,14 @@ describe("configuration boundaries", () => {
     expect(localVmMaxInstances({ localVm: { maxInstances: 3 } })).toBe(3);
   });
 
-  it("keeps experimental features off by default and accepts an explicit opt-in", () => {
-    expect(skillAuthoringEnabled({})).toBe(false);
-    expect(parseConfigPatch({ features: { skillAuthoring: true } })).toEqual({
-      features: { skillAuthoring: true },
-    });
+  it("keeps skill authoring on by default with an explicit opt-out, and the browser off by default", () => {
+    expect(skillAuthoringEnabled({})).toBe(true);
+    expect(skillAuthoringEnabled({ features: {} })).toBe(true);
     expect(skillAuthoringEnabled({ features: { skillAuthoring: true } })).toBe(true);
+    expect(parseConfigPatch({ features: { skillAuthoring: false } })).toEqual({
+      features: { skillAuthoring: false },
+    });
+    expect(skillAuthoringEnabled({ features: { skillAuthoring: false } })).toBe(false);
     // the pre-rename flag is dropped as a no-op rather than rejected, so a
     // stale client's PATCH cannot fail the request or re-enable anything
     expect(parseConfigPatch({ features: { skillRecorder: true } })).toEqual({ features: {} });
