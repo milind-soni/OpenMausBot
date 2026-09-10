@@ -32,22 +32,20 @@ Stagehand, browser-use, browserless, Lightpanda) is summarised at the end.
   import/export; an encrypted auth vault (`AGENT_BROWSER_ENCRYPTION_KEY`).
 - An MCP stdio server (`agent-browser mcp --tools core`) whose verbs match our
   17 `browser_*` tools almost one to one.
-- A stream server: JPEG frames (latest-wins, configurable quality/fps), the
-  active URL, viewport metadata; `input_mouse` / keyboard messages back in
-  with per-client input priority.
+- A stream server: JPEG frames, the active URL, tabs, and viewport metadata.
+  Upstream does **not** enforce human priority. OMB owns that gate.
 
 ## Shape
 
 ```
-bot turn ──MCP stdio──> agent-browser mcp (session = bot or shared profile) ──CDP──> Chrome
-web UI browser panel <──ws frames / input──> agent-browser stream server ────────────┘
+bot turn → scoped OMB MCP proxy → profile control gate → agent-browser MCP → Chrome
+owner UI ← authenticated SSE ← OMB ← loopback WebSocket frames ← agent-browser
+owner UI → authenticated POST → control gate → acknowledged native input → Chrome
 ```
 
-Where it plugs in today: `browserIntegration()` in `server/index.ts` returns
-the MCP server spec mounted into a turn (`{command, args, env}`), guarded by
-the workspace flag (`features.browser`), the bot's own switch, and the
-engine's `capabilities.browserMcp`. With no desktop connection it returns
-null; the headless engine becomes the second source of a spec there.
+`browserIntegration()` in `server/index.ts` mounts a turn-scoped OMB proxy,
+guarded by the workspace flag, bot switch, and provider's `browserMcp`
+capability. Native session identity and encryption keys stay in the server.
 
 ## Steps
 
@@ -61,7 +59,7 @@ null; the headless engine becomes the second source of a spec there.
   report `unavailable` with the reason rather than degrading silently.
 - `browserIntegration()`: when no desktop connection exists and the engine is
   available, return `{command: <binary>, args: ["mcp", "--tools", "core",
-  "--no-webmcp"], env: {AGENT_BROWSER_SESSION, AGENT_BROWSER_RESTORE: "1",
+  "--no-webmcp"], env: {AGENT_BROWSER_SESSION, AGENT_BROWSER_RESTORE: <stable-key>,
   AGENT_BROWSER_ENCRYPTION_KEY, AGENT_BROWSER_HEADLESS: "1"}}`. Session id =
   the bot's browser profile partition, or the bot id (own session).
 - Encryption key: generated once into `$OMB_DATA_DIR/browser-engine-key`
@@ -85,20 +83,38 @@ null; the headless engine becomes the second source of a spec there.
   engine's session state on the server itself, through the same durable
   cleanup journal. Settings and the bot's Browser panel offer a one-click
   install of the engine (`POST /api/browser-engine/install`).
-- Optional headed mode (`--headed`) so the bot's browser is a real window.
-- Browser profiles UI keeps its concepts (own session, shared named session)
-  and gains "use my Chrome profile" (`--profile <name>`).
+- The app keeps browsers headless; the live panel is the visible surface.
+  Importing an operator's Chrome profile remains out of scope.
 
-### 3. Watch and take over
+### 3. Watch and take over — implemented, pending release
 
-- The browser panel renders the session's stream on a canvas and forwards
-  mouse/keyboard as `input_mouse` / keyboard messages; the address bar shows
-  the streamed URL.
-- While a human is in control, the bot's `browser_screenshot`/`snapshot`
-  return "a person is using this browser" (the one protected-field rule we
-  keep, rebuilt as a check before screenshots).
-- Server: the stream is reached through the harness with the session cookie
-  (never a public port); desktop: loopback.
+- Two compact chrome rows: tabs and a top profile button; navigation,
+  address, takeover, and overflow below. Profile management and typing/paste
+  open on demand. No permanent status dashboard around the page.
+- `BrowserLive` proxies only frame/status/tab/URL events. ACKs follow decoded
+  rendering, including identical image data. At most one pending frame waits
+  for SSE backpressure; slow/disconnected viewers are closed. Default 15 fps.
+- `BrowserRuntime` gates **all** browser tool calls and transcript captures
+  for the shared session. Takeover first blocks new calls, then drains the
+  accepted ones. Human input uses fixed native HTTP commands that await CDP
+  completion, not fire-and-forget WebSocket input. Hand-back waits for them.
+- A timed-out action has an uncertain outcome. Explicit Restart browser
+  closes the native session before recovery; it keeps saved logins. It is
+  refused while bots sharing that browser are working.
+- Owner/admin-only endpoints use existing authentication, CSRF and session
+  revocation checks on desktop and self-hosting alike. Browser frames never
+  enter the client-readable global events feed. Native stream ports remain
+  loopback-only. Other viewers are hidden during human control.
+- Own, shared, and temporary profiles work on the web too. Temporary browsers
+  last for one server run, are not saved, and close on deletion/profile exit.
+  Profile edits include a stale-list check; deletion removes only that exact
+  profile's saved state. Do not use upstream `state clear --all` for this.
+- These controls gate OMB's browser tools, not arbitrary host shell access.
+  Browser profiles are login separation, **not** OS security sandboxes.
+
+See [the native verification recipe](../verification/browser-live.md).
+Recording's `--fps 60` is separate from live streaming and needs ffmpeg;
+recording controls are intentionally not added to the live browser chrome.
 
 ### 4. Tool-name adapter — dropped
 

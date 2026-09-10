@@ -1,106 +1,26 @@
-// Routines: this bot's scheduled tasks, one row per routine with its next
-// and last run. The New-schedule/Manage card is moved from SettingsPanel.tsx
-// (the "Scheduled tasks" card + the RoutineEditor mount); the row list is new.
-import { CalendarClock, Plus } from "lucide-react";
+// Shared by bot settings and the bot's side panel. Both routes use the same
+// editor and central logs, so a routine never has a competing detail page.
+import { CalendarClock, FileText, Plus } from "lucide-react";
 import { useState } from "react";
-
 import { useStore, type Bot } from "@/state/store";
-import type { Routine, RoutineRun } from "@/lib/routines";
-import { niceTime, scheduleSentence } from "@/lib/schedule-label";
-import { cn } from "@/lib/cn";
+import type { Routine, RoutineRun, RoutineRunOn } from "@/lib/routines";
+import { t } from "@/lib/i18n";
 import { RoutineEditor } from "../RoutinesPage";
+import { RoutineList } from "../routines/RoutineList";
 
-function capitalize(text: string): string {
-  return text.length ? text[0]!.toUpperCase() + text.slice(1) : text;
-}
-
-/** The newest run recorded for a routine, by finishedAt (settled) falling
- * back to startedAt (in flight) then scheduledFor (never started). */
-function lastRunFor(routineId: string, runs: RoutineRun[]): RoutineRun | null {
-  const at = (run: RoutineRun) => run.finishedAt ?? run.startedAt ?? run.scheduledFor;
-  return runs
-    .filter((run) => run.routineId === routineId)
-    .reduce<RoutineRun | null>((latest, run) => (!latest || at(run) > at(latest) ? run : latest), null);
-}
-
-export function RoutinesSection({ bot, routines, runs }: { bot: Bot; routines: Routine[]; runs: RoutineRun[] }) {
-  const { dispatch } = useStore();
-  const [creatingRoutine, setCreatingRoutine] = useState(false);
-  const activeCount = routines.filter((routine) => routine.enabled).length;
-
-  return (
-    <div className="flex flex-col gap-4">
-      <div className="rounded-xl bg-card p-4">
-        <div className="flex items-center gap-2">
-          <CalendarClock size={16} className="text-accent" />
-          <div className="min-w-0 flex-1 text-[15px] font-medium text-ink">Scheduled tasks</div>
-          <span className="shrink-0 text-[11.5px] tabular-nums text-ink-secondary">
-            {activeCount} active · {routines.length} total
-          </span>
-        </div>
-        <div className="mt-3 flex gap-2">
-          <button
-            type="button"
-            onClick={() => setCreatingRoutine(true)}
-            className="flex flex-1 items-center justify-center gap-1.5 rounded-lg bg-accent px-3 py-2 text-[13px] font-medium text-white hover:brightness-110"
-          >
-            <Plus size={14} />
-            New schedule
-          </button>
-          <button
-            type="button"
-            onClick={() => dispatch({ type: "showRoutines" })}
-            className="rounded-lg bg-control px-3 py-2 text-[13px] text-ink hover:bg-raised-hover"
-          >
-            Manage
-          </button>
-        </div>
+export function RoutinesSection({ bot, routines, runs, defaultRunOn }: { bot: Bot; routines: Routine[]; runs: RoutineRun[]; defaultRunOn?: RoutineRunOn }) {
+  const { state, dispatch } = useStore();
+  const [editing, setEditing] = useState<Routine | "new" | null>(null);
+  return <div className="flex flex-col gap-4">
+    <div className="rounded-xl bg-card p-4">
+      <div className="flex items-center gap-2"><CalendarClock size={16} className="text-accent" /><h2 className="min-w-0 flex-1 text-[15px] font-medium text-ink">{t("computer.tab.routines")}</h2><span className="text-[11.5px] text-ink-secondary">{routines.length}</span></div>
+      <div className="mt-3 flex flex-wrap gap-2">
+        <button type="button" onClick={() => setEditing("new")} className="flex flex-1 items-center justify-center gap-1.5 rounded-lg bg-accent px-3 py-2 text-[12px] font-medium text-white hover:brightness-110"><Plus size={14} />{t("computer.routines.create")}</button>
+        <button type="button" onClick={() => dispatch({ type: "showRoutines", section: "logs", botId: bot.id })} className="flex items-center gap-1.5 rounded-lg bg-control px-3 py-2 text-[12px] text-ink hover:bg-raised-hover"><FileText size={13} />{t("routines.logs")}</button>
       </div>
-
-      {routines.length === 0 ? (
-        <div className="rounded-xl bg-card p-4 text-[13px] text-ink-secondary">No schedules yet.</div>
-      ) : (
-        <div className="divide-y divide-hairline/40 overflow-hidden rounded-xl border border-hairline/40 bg-card">
-          {routines.map((routine) => {
-            const last = lastRunFor(routine.id, runs);
-            return (
-              <div key={routine.id} className="flex items-center justify-between gap-3 px-4 py-3">
-                <div className="min-w-0 flex-1">
-                  <div className="truncate text-[13.5px] text-ink">
-                    {capitalize(scheduleSentence(routine.schedule))} · {routine.name}
-                  </div>
-                  <div className="mt-0.5 text-[11.5px] text-ink-secondary">
-                    {routine.nextRunAt != null && <span>Next {niceTime(routine.nextRunAt)}</span>}
-                    {routine.nextRunAt != null && last && " · "}
-                    {last && (
-                      <span>
-                        Last {last.status} {niceTime(last.finishedAt ?? last.startedAt ?? last.scheduledFor)}
-                      </span>
-                    )}
-                  </div>
-                </div>
-                <span
-                  className={cn(
-                    "shrink-0 rounded-full px-2 py-0.5 text-[11px] font-medium",
-                    routine.enabled ? "bg-accent/15 text-accent-text" : "bg-control text-ink-secondary",
-                  )}
-                >
-                  {routine.enabled ? "Active" : "Paused"}
-                </span>
-              </div>
-            );
-          })}
-        </div>
-      )}
-
-      {creatingRoutine && (
-        <RoutineEditor
-          key={bot.id}
-          bots={[bot]}
-          lockedBotId={bot.id}
-          onClose={() => setCreatingRoutine(false)}
-        />
-      )}
     </div>
-  );
+    <RoutineList routines={routines} runs={runs} loading={state.routinesLoadState === "loading" && routines.length === 0} error={state.routinesLoadState === "error"} onOpen={setEditing} onLogs={(routine) => dispatch({ type: "showRoutines", section: "logs", botId: bot.id, routineId: routine.id })} />
+    <button type="button" onClick={() => dispatch({ type: "showRoutines", section: "schedule", view: "list", botId: bot.id })} className="self-start text-[12px] text-accent hover:underline">{t("computer.routines.openTitle")} →</button>
+    {editing && <RoutineEditor key={bot.id} routine={editing === "new" ? undefined : editing} bots={[bot]} lockedBotId={bot.id} defaultRunOn={defaultRunOn} onClose={() => setEditing(null)} />}
+  </div>;
 }

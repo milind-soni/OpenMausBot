@@ -55,6 +55,20 @@ class NavigationTest {
     }
 
     @Test
+    fun `only the explicit task choice changes the pinned destination`() {
+        val navigator = CompanionNavigator()
+        navigator.push(botChat)
+        navigator.selectTask(botChat, ChatTarget.Bot("bot-1", "thread-2"))
+        val selected = Destination.Chat(ChatTarget.Bot("bot-1", "thread-2"))
+        assertEquals(selected, navigator.current)
+        navigator.selectTask(botChat, ChatTarget.Bot("bot-1", "late-thread"))
+        assertEquals(selected, navigator.current)
+        navigator.push(Destination.Computer("bot-1"))
+        navigator.pop()
+        assertEquals(selected, navigator.current)
+    }
+
+    @Test
     fun `a resolved notification thread is re-addressed in place`() {
         val navigator = CompanionNavigator()
         navigator.openThread("task-2")

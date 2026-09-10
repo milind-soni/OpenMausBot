@@ -1,6 +1,7 @@
+import { execFileSync } from "node:child_process";
 import { createHash, randomUUID } from "node:crypto";
 import { existsSync, linkSync, mkdirSync, readFileSync, renameSync, unlinkSync, writeFileSync } from "node:fs";
-import { hostname } from "node:os";
+import { hostname, uptime } from "node:os";
 import { join } from "node:path";
 
 const LEASE_NAME = "openmausbot-server.lease";
@@ -11,6 +12,7 @@ const DELEGATED_CHILD_DIR = ".openmausbot-server-child";
 const CHILD_LEASE_ENV = "OPENMAUSBOT_INTERNAL_DATA_DIR_LEASE";
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
 const MAX_PID = 0x7fffffff;
+const MAX_BOOT_ID = 128;
 const MAX_REAPER_GENERATIONS = 128;
 
 export class DataDirLeaseError extends Error {
@@ -25,6 +27,77 @@ function isPid(value) {
   return Number.isInteger(value) && value > 0 && value <= MAX_PID;
 }
 
+/**
+ * A pid does not identify a process across a reboot. The kernel restarts pid
+ * allocation, so the low pid a login-item launch recorded is typically reused
+ * by a root-owned daemon on the next boot; process.kill(pid, 0) then answers
+ * EPERM, which reads as alive, and the desktop refuses to start forever with
+ * no instance for anyone to close. Recording which boot wrote the lease turns
+ * that guess into proof.
+ *
+ * Both signals below may only ever prove a lease DEAD, never alive, and both
+ * are exact rather than heuristic: a wrong "stale" verdict would let two
+ * instances share one data directory, which is the harm this module exists to
+ * prevent. Nothing here is derived from the wall clock, which NTP can move.
+ */
+let cachedBootSession;
+
+function readBootSession() {
+  try {
+    if (process.platform === "linux") {
+      return normalizeBootId(readFileSync("/proc/sys/kernel/random/boot_id", "utf8"));
+    }
+    if (process.platform === "darwin") {
+      return normalizeBootId(execFileSync("/usr/sbin/sysctl", ["-n", "kern.bootsessionuuid"], {
+        encoding: "utf8",
+        timeout: 5_000,
+        stdio: ["ignore", "pipe", "ignore"],
+      }));
+    }
+  } catch {
+    // An unreadable boot id is not a startup failure. The lease simply falls
+    // back to the pid-only protocol this module has always used.
+  }
+  return null;
+}
+
+function normalizeBootId(value) {
+  const id = String(value).trim();
+  return id.length > 0 && id.length <= MAX_BOOT_ID && !/[^0-9A-Za-z:_.-]/.test(id) ? id : null;
+}
+
+/** Stable for one boot; Windows has no equivalent, so it reports null there. */
+function bootSession() {
+  if (cachedBootSession === undefined) cachedBootSession = readBootSession();
+  return cachedBootSession;
+}
+
+function uptimeMs() {
+  const seconds = uptime();
+  return Number.isFinite(seconds) && seconds >= 0 ? Math.floor(seconds * 1000) : 0;
+}
+
+function isBootIdentity(value) {
+  return value === null || (typeof value === "string" && normalizeBootId(value) === value);
+}
+
+function ownerPredatesThisBoot(owner) {
+  const current = bootSession();
+  if (current !== null && typeof owner.boot === "string") return owner.boot !== current;
+  // Without a boot id, a since-boot clock is still one-directional: it cannot
+  // run backwards within a single boot, so a larger recorded value can only
+  // have been written before a reboot.
+  if (Number.isInteger(owner.uptime)) return uptimeMs() < owner.uptime;
+  // A record written by an older build carries neither signal. Treating it as
+  // current preserves the previous behaviour exactly.
+  return false;
+}
+
+/** The only liveness question this module should ever ask about a record. */
+function ownerIsAlive(owner) {
+  return !ownerPredatesThisBoot(owner) && processIsAlive(owner.pid);
+}
+
 function isLeaseOwner(value) {
   if (!value || typeof value !== "object" || Array.isArray(value)) return false;
   return value.version === 1
@@ -37,7 +110,11 @@ function isLeaseOwner(value) {
     && UUID.test(value.token)
     && typeof value.createdAt === "number"
     && Number.isFinite(value.createdAt)
-    && value.createdAt > 0;
+    && value.createdAt > 0
+    // Optional so a lease written by an older build stays readable rather
+    // than bricking startup on an "invalid lease" during the upgrade.
+    && (value.boot === undefined || isBootIdentity(value.boot))
+    && (value.uptime === undefined || (Number.isInteger(value.uptime) && value.uptime >= 0));
 }
 
 function isReaperOwner(value, targetToken) {
@@ -143,6 +220,8 @@ function claimReaperAuthority(leasePath, expected) {
       host: hostname(),
       token: randomUUID(),
       createdAt: Date.now(),
+      boot: bootSession(),
+      uptime: uptimeMs(),
       targetToken: expected.token,
     };
     if (publishRecord(
@@ -159,7 +238,7 @@ function claimReaperAuthority(leasePath, expected) {
         `A stale OpenMausBot data-directory lease is being recovered on another machine. Recovery record: ${JSON.stringify(reaperPath)}.`,
       );
     }
-    if (processIsAlive(current.pid)) return false;
+    if (ownerIsAlive(current)) return false;
     reaperPath = successorReaperPath(leasePath, expected.token, current.token);
   }
   throw leaseError("OpenMausBot could not recover the stale data-directory lease after repeated interrupted attempts.");
@@ -174,7 +253,7 @@ function retireDeadOwner(leasePath, expected) {
       `The stale OpenMausBot data-directory lease changed ownership to another machine. Lease record: ${JSON.stringify(leasePath)}.`,
     );
   }
-  if (processIsAlive(current.pid)) return false;
+  if (ownerIsAlive(current)) return false;
   unlinkExact(leasePath, "OpenMausBot could not retire the stale data-directory lease.");
   return true;
 }
@@ -219,7 +298,7 @@ function assertNoLiveDelegatedChild(dataDir) {
       `This OpenMausBot data directory still has a delegated server on another machine. Delegated server lease: ${JSON.stringify(childLeasePath)}.`,
     );
   }
-  if (processIsAlive(child.pid)) {
+  if (ownerIsAlive(child)) {
     throw leaseError(
       `OpenMausBot's previous server process ${child.pid} is still shutting down. Try again shortly.`,
     );
@@ -262,7 +341,7 @@ function validateChildDelegation(dataDir, encoded) {
     && owner.pid === capability.pid
     && owner.token === capability.token
     && owner.host === hostname()
-    && processIsAlive(owner.pid));
+    && ownerIsAlive(owner));
   if (!matchesLiveParent(readOwner(parentLeasePath))) {
     throw invalid();
   }
@@ -297,6 +376,8 @@ function acquireDataDirLeaseInternal(dataDir, options = {}) {
     host: hostname(),
     token: randomUUID(),
     createdAt: Date.now(),
+    boot: bootSession(),
+    uptime: uptimeMs(),
   };
   const candidatePath = `${leasePath}.candidate-${owner.pid}-${owner.token}`;
   try {
@@ -325,9 +406,9 @@ function acquireDataDirLeaseInternal(dataDir, options = {}) {
           `This OpenMausBot data directory is already owned by a process on another machine. Lease record: ${JSON.stringify(leasePath)}.`,
         );
       }
-      if (processIsAlive(current.pid)) {
+      if (ownerIsAlive(current)) {
         throw leaseError(
-          `OpenMausBot is already using this data directory (process ${current.pid}). Close the other instance first.`,
+          `OpenMausBot is already using this data directory (process ${current.pid}). Close the other instance first. If no OpenMausBot is running, delete this lease record and start again: ${JSON.stringify(leasePath)}.`,
         );
       }
       if (!retireDeadOwner(leasePath, current)) {

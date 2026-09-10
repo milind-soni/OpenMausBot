@@ -13,8 +13,8 @@ struct TasksRoutinesView: View {
         List {
             Section {
                 VStack(alignment: .leading, spacing: 8) {
-                    Label("Task = one conversation and result", systemImage: "bubble.left.and.text.bubble.right")
-                    Label("Routine = a schedule that creates a fresh task", systemImage: "calendar.badge.clock")
+                    Label("Thread = one conversation and result", systemImage: "bubble.left.and.text.bubble.right")
+                    Label("Routine = scheduled work with one results thread", systemImage: "calendar.badge.clock")
                 }
                 .font(.subheadline)
             } footer: {
@@ -74,7 +74,7 @@ struct TasksRoutinesView: View {
                 Text("Creating or rotating a webhook changes an internet-reachable trigger and signing secret, so webhook management remains on the paired computer. Webhook run receipts still appear above.")
             }
         }
-        .navigationTitle("Tasks & Routines")
+        .navigationTitle("Threads & Routines")
         .toolbar {
             ToolbarItem(placement: .primaryAction) {
                 Button("New routine", systemImage: "plus") { editor = .new }
@@ -165,10 +165,10 @@ private struct RoutineRunRow: View {
             VStack(alignment: .leading, spacing: 8) {
                 if let output = run.output, !output.isEmpty { Text(output).textSelection(.enabled) }
                 if let error = run.error, !error.isEmpty { Text(error).foregroundStyle(.red).textSelection(.enabled) }
-                if run.status == "waiting" { Text("This task is waiting for your answer.").foregroundStyle(.orange) }
+                if run.status == "waiting" { Text("This thread is waiting for your answer.").foregroundStyle(.orange) }
                 if let threadId = run.threadId,
                    let target = NotificationTarget(botId: run.botId, threadId: threadId) {
-                    Button("Open task", systemImage: "arrow.up.right.square") {
+                    Button("Open thread", systemImage: "arrow.up.right.square") {
                         Task { await session.openNotification(target) }
                     }
                 }
@@ -365,9 +365,9 @@ private struct RoutineEditorView: View {
                     Text("Schedule")
                 } footer: {
                     if kind == .interval {
-                        Text("Each occurrence creates a fresh task. If the previous run is still active, the next occurrence is skipped instead of queued.")
+                        Text("Each occurrence starts with fresh context. Results collect in one thread, and full run logs remain available. If the previous run is still active, the next occurrence is skipped instead of queued.")
                     } else {
-                        Text("Each occurrence creates a fresh task. No cron syntax is used.")
+                        Text("Each occurrence starts with fresh context. Results collect in one thread, and full run logs remain available. No cron syntax is used.")
                     }
                 }
 

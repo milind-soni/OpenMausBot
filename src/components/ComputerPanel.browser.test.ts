@@ -43,7 +43,8 @@ describe("Browser panel installation access", () => {
 
   it("does not offer an install on unsupported hosts and still shows a ready engine", () => {
     expect(render({ features: { browser: true }, browserEngine: { kind: "unavailable", installable: false } })).not.toContain("Browser engine not installed");
-    expect(render({ features: { browser: true }, browserEngine: { kind: "engine" } })).toContain("has its own browser");
+    // A ready browser waits for the owner check before opening a live stream.
+    expect(render({ features: { browser: true }, browserEngine: { kind: "engine" } })).toContain("Loading browser…");
   });
 
   it("keeps Chrome setup failure and progress visible even when the binary exists", () => {

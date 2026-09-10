@@ -27,6 +27,19 @@ export function browserProfilesForPatch(profiles: BrowserProfileRecord[]): Array
   return profiles.map(({ id, name }) => ({ id, name }));
 }
 
+/** Include the list the person edited so another window's changes cannot
+ * silently disappear when this whole-list update reaches the server. */
+export function browserProfilesMutation(current: BrowserProfileRecord[], next: BrowserProfileRecord[]) {
+  return {
+    browserProfiles: browserProfilesForPatch(next),
+    expectedBrowserProfiles: browserProfilesForPatch(current),
+  };
+}
+
+export function newBrowserProfileId(): string {
+  return `profile-${crypto.randomUUID().replaceAll("-", "")}`;
+}
+
 /** A live turn may still be issuing browser actions against this partition.
  * Refuse deletion until those turns are stopped rather than racing the wipe. */
 export function browserProfileDeletionBlockReason(

@@ -138,7 +138,7 @@ class ApprovalAnswersTest {
             val grant = server.takeRequest()
             val answer = server.takeRequest()
             assertEquals("/api/bots/bot-1/always-allow", grant.path)
-            assertEquals(mapOf("allowKey" to "Bash:git push"), body(grant))
+            assertEquals(mapOf("allowKey" to "Bash:git push", "threadId" to "task-1"), body(grant))
             assertEquals("/api/threads/task-1/respond", answer.path)
             assertEquals(mapOf("requestId" to "request-1", "behavior" to "allow"), body(answer))
             assertEquals(2, server.requestCount, "the grant must not be written twice")

@@ -1,9 +1,14 @@
 // The registry's contract is forward/backward compatibility: a config
 // written by a newer or differently-built app must load as an
 // unavailable shadow, never crash the fleet. These tests pin that.
-import { describe, expect, it } from "vitest";
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { afterEach, describe, expect, it } from "vitest";
 
 import type { ModelCatalog } from "../contracts.ts";
+import { resetPathCacheForTests } from "../env-path.ts";
+import { removeTempDir } from "../testing/cleanup.ts";
 import { makeFakeDriver } from "../testing/fake-driver.ts";
 import { ProviderRegistry } from "./registry.ts";
 
@@ -191,5 +196,82 @@ describe("ProviderRegistry", () => {
     expect(fake.disposed.sort()).toEqual(["a", "b"]);
     expect(registry.entries()).toHaveLength(0);
     expect(registry.get("a")).toBeNull();
+  });
+});
+
+describe.skipIf(process.platform === "win32")("installing an npm engine from Settings", () => {
+  // A stand-in npm on PATH: records its arguments and drops the expected
+  // executable into the prefix it was given. No registry, no network.
+  const FAKE_NPM = `#!/usr/bin/env node
+import { appendFileSync, mkdirSync, writeFileSync } from 'node:fs';
+import { join } from 'node:path';
+const args = process.argv.slice(2);
+appendFileSync(process.env.FAKE_NPM_LOG, JSON.stringify(args) + '\\n');
+const prefix = args[args.indexOf('--prefix') + 1];
+mkdirSync(join(prefix, 'bin'), { recursive: true });
+writeFileSync(join(prefix, 'bin', 'fakebin'), '#!/bin/sh\\necho fixture\\n', { mode: 0o755 });
+process.exit(0);
+`;
+  let scratch: string;
+  let originalPath: string | undefined;
+  afterEach(async () => {
+    process.env.PATH = originalPath;
+    delete process.env.FAKE_NPM_LOG;
+    resetPathCacheForTests();
+    await removeTempDir(scratch);
+  });
+  function addFakeNpm(binDir: string) {
+    const npm = join(binDir, "npm");
+    writeFileSync(npm, FAKE_NPM, { mode: 0o755 });
+    chmodSync(npm, 0o755);
+    resetPathCacheForTests();
+  }
+  function withFakeNpm(present: boolean): string {
+    scratch = mkdtempSync(join(tmpdir(), "omb-registry-install-"));
+    originalPath = process.env.PATH;
+    const binDir = join(scratch, "fake-path");
+    mkdirSync(binDir);
+    if (present) addFakeNpm(binDir);
+    process.env.PATH = binDir;
+    process.env.FAKE_NPM_LOG = join(scratch, "npm-calls.jsonl");
+    resetPathCacheForTests();
+    return binDir;
+  }
+
+  it("advertises and runs the install only when the driver names an npm package and npm is on PATH", async () => {
+    withFakeNpm(true);
+    const fake = makeFakeDriver();
+    fake.driver.defaultConfig = () => ({ cli: "fakebin" });
+    Object.assign(fake.driver, { install: { command: { linux: "npm install -g fake-engine", darwin: "npm install -g fake-engine" }, needsNode: true } });
+    const registry = new ProviderRegistry([fake.driver], { enginesBaseDir: join(scratch, "data") });
+    await registry.load({ a: { driver: "fake" } });
+    const [described] = await registry.describe();
+    expect(described.install?.server).toEqual({ package: "fake-engine" });
+    expect(await registry.installRuntime("a")).toBe(true);
+    const calls = readFileSync(process.env.FAKE_NPM_LOG!, "utf8").trim().split("\n").map((line) => JSON.parse(line) as string[]);
+    expect(calls).toHaveLength(1);
+    expect(calls[0]).toEqual(["install", "-g", "--prefix", join(scratch, "data", "tools", "npm"), "--loglevel=error", "--allow-scripts=fake-engine", "fake-engine@latest"]);
+    expect(existsSync(join(scratch, "data", "tools", "npm", "bin", "fakebin"))).toBe(true);
+    expect(await registry.installRuntime("missing")).toBe(false);
+  });
+
+  it("offers nothing without npm, for a curl installer, or for a managed engine", async () => {
+    withFakeNpm(true);
+    const fake = makeFakeDriver();
+    Object.assign(fake.driver, { install: { command: { linux: "npm install -g fake-engine" } } });
+    // The PATH scan also looks in standard install locations, so "no npm" is
+    // injected rather than simulated through PATH.
+    const without = new ProviderRegistry([fake.driver], { enginesBaseDir: join(scratch, "data"), npmAvailable: () => false });
+    await without.load({ a: { driver: "fake" } });
+    expect((await without.describe())[0].install?.server).toBeUndefined();
+    expect(await without.installRuntime("a")).toBe(false);
+    const registry = new ProviderRegistry([fake.driver], { enginesBaseDir: join(scratch, "data") });
+    await registry.load({ a: { driver: "fake" } });
+    Object.assign(fake.driver, { install: { command: { linux: "curl -fsSL https://example.test/install.sh | bash" } } });
+    expect((await registry.describe())[0].install?.server).toBeUndefined();
+    expect(await registry.installRuntime("a")).toBe(false);
+    Object.assign(fake.driver, { install: { command: { linux: "npm install -g fake-engine" }, managed: { label: "Install", downloadBytes: 1 } } });
+    expect((await registry.describe())[0].install?.server).toBeUndefined();
+    expect(existsSync(join(scratch, "data"))).toBe(false);
   });
 });

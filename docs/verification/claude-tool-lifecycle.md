@@ -32,8 +32,14 @@ Sources:
 Regression checks:
 
 ```sh
-pnpm exec vitest run server/drivers/claude.test.ts server/drivers/agents-proxy.test.ts server/browser-connection.test.ts
+pnpm exec vitest run server/drivers/claude.test.ts server/drivers/agents-proxy.test.ts server/browser-proxy.test.ts
 ```
+
+The turn boundary itself — a capability whose owning turn has been replaced
+is refused with 401 even when its request body arrives late — is covered by
+`server/index.test.ts` ("binds profile proposals to the capability's bot and
+thread and rechecks late bodies"); every internal capability, the browser's
+included, passes through that same gate.
 
 For end-to-end verification, launch the isolated fixture described in
 [README.md](README.md), then follow [Chat turns](chat-turns.md). Never use the

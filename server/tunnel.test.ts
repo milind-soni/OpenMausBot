@@ -12,6 +12,8 @@ import {
   createTunnelOrigin,
   describeTunnelAccount,
   describeTunnelState,
+  fleetAccess,
+  fleetCredential,
   guardianEntry,
   openTunnelCredentials,
   platformName,
@@ -200,4 +202,25 @@ describe.skipIf(!posix)("startTunnel: guardian, gateway and connector, verified 
       await removeTempDir(dir);
     }
   }, 30_000);
+});
+
+describe("a fleet's credential in the environment", () => {
+  it("gets the public address with no account file and no emailed code; a rejected credential is a clear error", async () => {
+    const stub = await startControlPlaneStub();
+    try {
+      const env = { ...process.env, OMB_CONTROL_PLANE_URL: stub.url };
+      expect(fleetCredential({})).toBeNull();
+      expect(fleetCredential({ OMB_INSTALLATION_CREDENTIAL: "   " })).toBeNull();
+      const credential = stub.seedInstallation("box-1");
+      expect(fleetCredential({ OMB_INSTALLATION_CREDENTIAL: ` ${credential} ` })).toBe(credential);
+      const access = await fleetAccess({ credential, env });
+      expect(access).toEqual({ endpoint: stub.endpointUrl, token: stub.connectorToken });
+      expect(stub.calls).toContain("POST /v1/installations/self/endpoint");
+      expect(stub.calls.some((call) => call.includes("/api/auth/"))).toBe(false);
+      await expect(fleetAccess({ credential: `omb_install_${"x".repeat(22)}.${"y".repeat(43)}`, env })).rejects.toThrow(/rejected/);
+      await expect(fleetAccess({ credential, env: { ...env, OMB_CONTROL_PLANE_URL: "ftp://nope" } })).rejects.toThrow(/OMB_CONTROL_PLANE_URL/);
+    } finally {
+      await stub.close();
+    }
+  });
 });

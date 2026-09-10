@@ -150,11 +150,32 @@ describe("redactSecretsInText", () => {
       [`aws ${"AKIA" + "IOSFODNN7EXAMPLE"} and more`, /IOSFODNN7EXAMPLE/],
       [`google ${"AIza" + "SyA-"}${alpha.slice(0, 32)}`, /AIza/],
       [`npm ${"npm" + "_"}${alpha}`, /npm_[a-z]/],
+      [`xai ${"xai-"}${alpha}`, /xai-/],
+      [`groq ${"gsk_"}${alpha}ABCD`, /gsk_/],
+      [`huggingface ${"hf_"}${alpha}`, /hf_/],
     ];
     for (const [input, leak] of cases) {
       const out = redactSecretsInText(input);
       expect(out, input).not.toMatch(leak);
       expect(out).toMatch(/«redacted \d+ chars»/);
+    }
+  });
+
+  it.each([
+    ["xai-", 20],
+    ["gsk_", 40],
+    ["hf_", 30],
+  ] as const)("bounds %s masking without changing ordinary text", (prefix, minimum) => {
+    const key = prefix + "a".repeat(minimum);
+    const longer = key + "AB12";
+    const text = `before "${key}", ${longer}; after ✓`;
+    const expected = `before "«redacted ${key.length} chars»", «redacted ${longer.length} chars»; after ✓`;
+
+    expect(redactSecretsInText(text)).toBe(expected);
+    expect(redactSecretsInText(expected)).toBe(expected);
+    expect(redactSecrets({ note: text })).toEqual({ note: expected });
+    for (const ordinary of [prefix + "a".repeat(minimum - 1), `example_${key}`, `${prefix}example`]) {
+      expect(redactSecretsInText(ordinary)).toBe(ordinary);
     }
   });
 
@@ -186,6 +207,35 @@ describe("redactSecretsInText", () => {
     expect(redactSecretsInText('{"api_key": "abcd1234efgh5678"}')).toBe('{"api_key": "«redacted 16 chars»"}');
     expect(redactSecretsInText("client_secret: 'zzzz-yyyy-xxxx-1'")).toBe("client_secret: '«redacted 16 chars»'");
     expect(redactSecretsInText("--token=abc123def456")).toBe("--token=«redacted 12 chars»");
+  });
+
+  it("masks an assignment to any name ending in KEY, whatever the value looks like", () => {
+    expect(redactSecretsInText(`OPENAI_API_KEY=sk-${"a".repeat(20)} pnpm test`)).toBe("OPENAI_API_KEY=«redacted 23 chars» pnpm test");
+    expect(redactSecretsInText("X_KEY=value pnpm control:omb doctor")).toBe("X_KEY=«redacted 5 chars» pnpm control:omb doctor");
+    expect(redactSecretsInText("export xai-key='abc.def'")).toBe("export xai-key='«redacted 7 chars»'");
+  });
+
+  it("masks the password in a URL's userinfo, keeping the user and the host", () => {
+    expect(redactSecretsInText("psql postgres://maus:s3cret@db.internal:5432/app")).toBe("psql postgres://maus:«redacted 6 chars»@db.internal:5432/app");
+    expect(redactSecretsInText("curl https://user:p%40ss@host/path")).toBe("curl https://user:«redacted 6 chars»@host/path");
+  });
+
+  it("masks the value of a secret-naming flag, in both spellings", () => {
+    expect(redactSecretsInText("gh auth login --token abc123")).toBe("gh auth login --token «redacted 6 chars»");
+    expect(redactSecretsInText("tool --password=hunter2 --api-key 'k1' --secret s")).toBe("tool --password=«redacted 7 chars» --api-key '«redacted 2 chars»' --secret «redacted 1 chars»");
+    // a flag followed by another flag has no value to mask
+    expect(redactSecretsInText("tool --token --verbose")).toBe("tool --token --verbose");
+  });
+
+  it("does not mask ordinary words near those rules", () => {
+    for (const s of [
+      "hotkey=cmd+k keyboard=qwerty monkey=business",
+      "https://host:8080/path and user@host",
+      "git log --tokens-are-not-a-flag --passwords",
+      "the key: patience",
+    ]) {
+      expect(redactSecretsInText(s), s).toBe(s);
+    }
   });
 
   it("leaves ordinary text, code, hashes and URLs alone", () => {

@@ -41,6 +41,7 @@ const MIME = {
 
 const cleanLabel = (value, fallback) => {
   const label = String(value ?? "")
+    // oxlint-disable-next-line no-control-regex -- strips control characters from a display label
     .replace(/[\u0000-\u001f\u007f]/g, " ")
     .trim()
     .slice(0, 80);

@@ -24,6 +24,7 @@ data class CompanionState(
     val notifications: List<NotificationFrame> = emptyList(),
     val streaming: Map<String, String> = emptyMap(),
     val reasoning: Map<String, String> = emptyMap(),
+    val activeLeafIds: Map<String, String?> = emptyMap(),
     val screens: Map<String, ScreenFrame> = emptyMap(),
     /**
      * Mid-turn sends the harness is holding until the current turn settles,
@@ -45,7 +46,9 @@ data class CompanionState(
 
     fun visibleTranscript(threadId: String): List<Message> {
         val all = transcript(threadId)
-        val leafId = botForThread(threadId)?.activeLeafId ?: return all
+        val leafId = if (activeLeafIds.containsKey(threadId)) activeLeafIds[threadId]
+            else botForThread(threadId)?.activeLeafId
+        if (leafId == null) return all
         val byId = all.associateBy(Message::id)
         var current = byId[leafId] ?: return all
         val visible = mutableListOf<Message>()
@@ -59,7 +62,10 @@ data class CompanionState(
     }
 
     fun bot(id: String): Bot? = bots.firstOrNull { it.id == id }
-    fun botForThread(threadId: String): Bot? = bots.firstOrNull { it.threadId == threadId }
+    fun botForThread(threadId: String): Bot? =
+        (bots.firstOrNull { it.threadId == threadId }
+            ?: bots.firstOrNull { bot -> bot.tasks.orEmpty().any { it.threadId == threadId } })
+            ?.forTask(threadId)
     fun roomForThread(threadId: String): Room? = rooms.firstOrNull { it.threadId == threadId }
     fun roomOwningTask(threadId: String): Room? = rooms.firstOrNull {
         it.threadId == threadId || it.tasks.orEmpty().any { task -> task.threadId == threadId }
@@ -118,7 +124,8 @@ data class CompanionState(
         get() = rooms.filter { it.dm == true }
 
     val pendingApprovals: List<PendingApproval>
-        get() = (bots.map(Bot::threadId) + rooms.map(Room::threadId))
+        get() = (bots.flatMap { bot -> listOf(bot.threadId) + bot.tasks.orEmpty().map(BotTask::threadId) } +
+            rooms.map(Room::threadId)).distinct()
             .flatMap { threadId ->
                 visibleTranscript(threadId)
                     .filter { it.card?.isPending == true }
@@ -146,6 +153,7 @@ data class CompanionState(
             rooms = fleet.groups,
             messages = hydratedMessages,
             hasMore = hydratedHasMore,
+            activeLeafIds = fleet.bots.associate { it.threadId to it.activeLeafId },
         ).reconcileAllQueued()
     }
 
@@ -165,6 +173,7 @@ data class CompanionState(
         return copy(
             messages = messages + (threadId to merged),
             hasMore = page.hasMore?.let { hasMore + (threadId to it) } ?: hasMore,
+            activeLeafIds = page.activeLeafId?.let { activeLeafIds + (threadId to it) } ?: activeLeafIds,
         ).reconcileQueued(threadId)
     }
 
@@ -183,8 +192,12 @@ data class CompanionState(
         is Frame.Hello -> this
 
         is Frame.Message -> {
+            val leaf = if (activeLeafIds.containsKey(frame.threadId)) activeLeafIds[frame.threadId]
+                else botForThread(frame.threadId)?.activeLeafId
             var result = copy(
                 messages = append(messages, frame.threadId, frame.message),
+                activeLeafIds = if (frame.message.parentId == leaf)
+                    activeLeafIds + (frame.threadId to frame.message.id) else activeLeafIds,
                 bots = bots.map {
                     if (
                         it.threadId == frame.threadId &&
@@ -215,6 +228,7 @@ data class CompanionState(
         }
 
         is Frame.Thread -> copy(
+            activeLeafIds = activeLeafIds + (frame.threadId to frame.activeLeafId),
             bots = bots.map {
                 if (it.threadId == frame.threadId) it.copy(activeLeafId = frame.activeLeafId) else it
             },
@@ -312,33 +326,42 @@ data class CompanionState(
             } else {
                 messages + (bot.threadId to bot.messages.orEmpty())
             }
-            return copy(bots = bots + bot, messages = nextMessages)
+            return copy(bots = bots + bot, messages = nextMessages,
+                activeLeafIds = activeLeafIds + (bot.threadId to bot.activeLeafId))
         }
 
         val previous = bots[index]
         if (bot.messages == null) {
             val merged = bot.copy(
-                messages = previous.messages,
-                activeLeafId = bot.activeLeafId ?: previous.activeLeafId,
+                messages = previous.messages.takeIf { previous.threadId == bot.threadId },
+                activeLeafId = bot.activeLeafId ?: previous.activeLeafId.takeIf { previous.threadId == bot.threadId },
             )
-            val next = copy(bots = bots.replacing(index, merged))
+            val next = copy(bots = bots.replacing(index, merged),
+                activeLeafIds = activeLeafIds + (bot.threadId to (bot.activeLeafId ?: activeLeafIds[bot.threadId] ?: merged.activeLeafId)))
             // A turn can end without a settled reply — an engine that dies
             // mid-sentence reports the failure as activity, not text — and
             // the half-written answer would otherwise sit in the buffer
             // streaming for ever.
-            return if (bot.busy != true) next.clearStream(bot.threadId) else next
+            return next.clearSettledTaskStreams(bot)
         }
 
-        var result = copy(
+        val result = copy(
             bots = bots.replacing(index, bot.copy(messages = bot.messages)),
             messages = messages + (bot.threadId to bot.messages),
             hasMore = hasMore + (bot.threadId to (bot.hasMore ?: false)),
-        ).clearStream(previous.threadId)
-        if (previous.threadId != bot.threadId) result = result.clearStream(bot.threadId)
+            activeLeafIds = activeLeafIds + (bot.threadId to bot.activeLeafId),
+        ).clearSettledTaskStreams(bot)
         // A replacement bypasses `append`, which is what normally retires a
         // row. Without this the held message stays above the chat bar for
         // ever, long after its line has landed.
         return result.reconcileQueued(bot.threadId)
+    }
+
+    private fun clearSettledTaskStreams(bot: Bot): CompanionState {
+        val settled = bot.tasks.orEmpty().filter { it.busy == false }.map(BotTask::threadId)
+        val legacy = if (bot.tasks.orEmpty().none { it.busy != null } && bot.busy != true)
+            listOf(bot.threadId) else emptyList()
+        return (settled + legacy).fold(this) { state, thread -> state.clearStream(thread) }
     }
 
     private fun deleteBot(botId: String): CompanionState {

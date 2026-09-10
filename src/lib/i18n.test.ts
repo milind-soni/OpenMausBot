@@ -8,7 +8,7 @@ afterEach(() => {
 });
 
 describe("resolveLocale", () => {
-  const available = new Set(["en", "de", "pt-br"]);
+  const available = new Set(["en", "de", "pt-br", "zh", "zh-hant", "zh-tw"]);
 
   it("keeps a registered exact tag, case-insensitively", () => {
     expect(resolveLocale("pt-BR", available)).toBe("pt-br");
@@ -17,6 +17,10 @@ describe("resolveLocale", () => {
 
   it("falls back from a regional tag to its base language", () => {
     expect(resolveLocale("de-AT", available)).toBe("de");
+  });
+
+  it("falls back through script tags before the base language", () => {
+    expect(resolveLocale("zh-Hant-TW", available)).toBe("zh-hant");
   });
 
   it("falls back to English for unknown or missing tags", () => {
@@ -50,6 +54,9 @@ describe("t", () => {
   it("routes common system tags onto the shipped packs", () => {
     const available = new Set(Object.keys(locales));
     expect(resolveLocale("zh-CN", available)).toBe("zh");
+    expect(resolveLocale("zh-TW", available)).toBe("zh-tw");
+    expect(resolveLocale("zh-Hant-TW", available)).toBe("zh-hant");
+    expect(resolveLocale("zh-HK", available)).toBe("zh-hk");
     expect(resolveLocale("ja-JP", available)).toBe("ja");
     expect(resolveLocale("pt-BR", available)).toBe("pt-br");
     expect(resolveLocale("pt-PT", available)).toBe("pt");
@@ -61,6 +68,16 @@ describe("t", () => {
       for (const [key, value] of Object.entries(pack)) {
         expect(Object.hasOwn(en, key)).toBe(true);
         expect((value ?? "").trim().length).toBeGreaterThan(0);
+      }
+    }
+  });
+
+  it("ships translated model and trusted-access help for threads", () => {
+    for (const [code, pack] of Object.entries(locales)) {
+      if (code === "en") continue;
+      for (const key of ["model.threadBusy", "model.chooseThreadHint", "approvalMode.threadTrustedNotice"] as const) {
+        expect(pack[key], `${code}: ${key}`).toBeTruthy();
+        expect(pack[key], `${code}: ${key}`).not.toBe(en[key]);
       }
     }
   });

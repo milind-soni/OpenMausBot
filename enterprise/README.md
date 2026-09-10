@@ -30,7 +30,7 @@ open-source edition and the notice says what to fix.
 
 | id | grants |
 |---|---|
-| `whitelabel` | product name, tagline, accent colour, logo and support link from `brand.json` (below) |
+| `whitelabel` | product name, tagline, accent colour, logo, favicon and support link from `brand.json` (below) |
 | `sso` | identity-header trust behind an OIDC proxy |
 | `admin` | the admin panel routes |
 | `budgets` | per-bot and per-section spend limits |
@@ -70,6 +70,7 @@ volume in Docker) or point `OMB_BRAND_FILE` at one:
   "tagline": "Back office, on autopilot",
   "accent": "#1D4ED8",
   "logo": "data:image/svg+xml;base64,…",
+  "favicon": "data:image/png;base64,…",
   "supportUrl": "https://help.example.com"
 }
 ```

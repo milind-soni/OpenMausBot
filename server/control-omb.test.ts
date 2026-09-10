@@ -1,13 +1,18 @@
 import { spawnSync } from "node:child_process";
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it, vi } from "vitest";
 
 import {
   controlResultSucceeded,
+  HELP,
+  HELP_UI,
   launchVerificationServer,
   runControlOmb,
 } from "../scripts/control-omb.ts";
+import { installedChrome, UI_MUTATING } from "../scripts/testing/control-omb-ui.ts";
+import { removeTempDir } from "./testing/cleanup.ts";
 
 describe("control-omb command mapping", () => {
   it("treats unhealthy doctor and non-settled waits as command failures", () => {
@@ -16,6 +21,66 @@ describe("control-omb command mapping", () => {
     expect(controlResultSucceeded("wait", { status: "settled" })).toBe(true);
     for (const status of ["failed", "stalled", "timed-out", "needs-user"]) {
       expect(controlResultSucceeded("wait", { status })).toBe(false);
+    }
+    expect(controlResultSucceeded("ui", { ok: true, status: "settled" })).toBe(true);
+    expect(controlResultSucceeded("ui", { ok: false, status: "timed-out" })).toBe(false);
+  });
+
+  it("keeps every ui verb off discovery: the launch handle is required, whatever the environment says", async () => {
+    const env = { OPENMAUSBOT_URL: "http://127.0.0.1:19999", OMB_PORT: "19999" };
+    const verbs = [...UI_MUTATING, "snapshot", "screenshot", "console", "wait-settle"];
+    expect(UI_MUTATING).toEqual(new Set(["click", "type", "press", "flag", "eval"]));
+    for (const verb of verbs) {
+      await expect(runControlOmb(["ui", verb], { env })).rejects.toMatchObject({
+        message: `ui ${verb} requires --ui HANDLE`,
+        hint: expect.stringContaining("ui launch"),
+      });
+      expect(HELP_UI).toContain(`\n  ui ${verb} --ui HANDLE`);
+    }
+    expect(HELP).toContain(HELP_UI);
+    expect(await runControlOmb(["ui", "help"])).toBe(HELP_UI);
+    await expect(runControlOmb(["ui", "launch"])).rejects.toThrow("ui launch is available only from the executable CLI");
+    await expect(runControlOmb(["ui", "bogus"])).rejects.toThrow('unknown ui command "bogus"');
+    await expect(runControlOmb(["ui", "snapshot", "--ui", "/nowhere/ui.json"])).rejects.toThrow("could not read the ui handle");
+  });
+
+  it("refuses a handle whose launch has already been stopped", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "omb-ui-handle-"));
+    try {
+      const handle = join(dir, "ui.json");
+      writeFileSync(handle, JSON.stringify({
+        url: "http://127.0.0.1:19999", previewUrl: "http://127.0.0.1:5199/__threads.html", session: "omb-ui-19999",
+        binary: "/fixture/agent-browser", home: join(dir, "gone"), botId: "bot-1", logPath: "/fixture/server.log", chrome: null,
+      }));
+      await expect(runControlOmb(["ui", "snapshot", "--ui", handle])).rejects.toMatchObject({
+        message: expect.stringContaining("data directory is gone"),
+        hint: expect.stringContaining("ui launch"),
+      });
+      writeFileSync(handle, JSON.stringify({ url: "http://127.0.0.1:19999" }));
+      await expect(runControlOmb(["ui", "snapshot", "--ui", handle])).rejects.toThrow("lacks previewUrl");
+    } finally {
+      await removeTempDir(dir);
+    }
+  });
+
+  it("finds the newest Chrome for Testing that agent-browser install unpacked", () => {
+    const dir = mkdtempSync(join(tmpdir(), "omb-ui-tools-"));
+    try {
+      expect(installedChrome(dir, "linux")).toBeNull();
+      const browsers = join(dir, ".agent-browser", "browsers");
+      for (const version of ["chrome-9.0.100.1", "chrome-153.0.8010.36"]) {
+        mkdirSync(join(browsers, version), { recursive: true });
+        writeFileSync(join(browsers, version, "chrome"), "");
+      }
+      expect(installedChrome(dir, "linux")).toBe(join(browsers, "chrome-153.0.8010.36", "chrome"));
+      expect(installedChrome(dir, "darwin")).toBeNull();
+      const app = join(browsers, "chrome-153.0.8010.36", "Google Chrome for Testing.app", "Contents", "MacOS");
+      mkdirSync(app, { recursive: true });
+      writeFileSync(join(app, "Google Chrome for Testing"), "");
+      expect(installedChrome(dir, "darwin")).toBe(join(app, "Google Chrome for Testing"));
+    } finally {
+      // synchronous removal is fine here: nothing spawned inside the directory
+      void removeTempDir(dir);
     }
   });
 
@@ -89,6 +154,54 @@ describe("control-omb command mapping", () => {
     expect(callTool).toHaveBeenCalledTimes(1);
   });
 
+  it("maps the rewind that makes the harness rebuild instead of resume", async () => {
+    // `edit` is the composer rewind. It is the only mapped way to reach a
+    // replay path, which is what compaction needs to be observable at all —
+    // a cleanly resumed turn never compacts.
+    const callTool = vi.fn(async (name: string, args: Record<string, unknown>) => ({ name, args }));
+    const env = { OPENMAUSBOT_URL: "http://127.0.0.1:19999" };
+    await expect(runControlOmb(
+      ["edit", "--bot", "bot-1", "--message", "msg-9", "--text", "say that again"],
+      { callTool: callTool as any, env },
+    )).resolves.toEqual({
+      name: "edit_bot_message",
+      args: { bot_id: "bot-1", message_id: "msg-9", text: "say that again" },
+    });
+    await expect(runControlOmb(
+      ["edit", "--bot", "bot-1", "--message", "msg-9", "--text", "again", "--task", "task-2", "--dry-run"],
+      { callTool: callTool as any, env: {} },
+    )).resolves.toMatchObject({
+      dryRun: true,
+      tool: "edit_bot_message",
+      arguments: { bot_id: "bot-1", message_id: "msg-9", text: "again", task_id: "task-2" },
+    });
+    expect(callTool).toHaveBeenCalledTimes(1);
+  });
+
+  it("treats edit as mutating, so it cannot reach a silently discovered app", async () => {
+    // it forks a live conversation and starts a turn; it must never land on
+    // whatever instance happened to be running
+    await expect(runControlOmb(["edit", "--bot", "b", "--message", "m", "--text", "x"], {
+      callTool: vi.fn() as any,
+      env: {},
+    })).rejects.toMatchObject({
+      message: "mutating commands require an explicit OpenMausBot instance",
+    });
+  });
+
+  it("requires every part of an edit before calling the shared tool", async () => {
+    const callTool = vi.fn();
+    const env = { OPENMAUSBOT_URL: "http://127.0.0.1:19999" };
+    for (const args of [
+      ["edit", "--message", "m", "--text", "x"],
+      ["edit", "--bot", "b", "--text", "x"],
+      ["edit", "--bot", "b", "--message", "m"],
+    ]) {
+      await expect(runControlOmb(args, { callTool: callTool as any, env })).rejects.toThrow(/is required/);
+    }
+    expect(callTool).not.toHaveBeenCalled();
+  });
+
   it("rejects invalid bounds before the shared tool is called", async () => {
     const callTool = vi.fn();
     await expect(runControlOmb(["wait", "--bot", "bot-1", "--timeout", "0"], {
@@ -96,6 +209,27 @@ describe("control-omb command mapping", () => {
       env: {},
     })).rejects.toThrow("--timeout must be an integer from 1 to 120");
     expect(callTool).not.toHaveBeenCalled();
+  });
+
+  it("forwards pinned task IDs for sends, reads, waits, interrupts, and model changes", async () => {
+    const callTool = vi.fn(async (name: string, args: Record<string, unknown>) => ({ name, args }));
+    const dependencies = { callTool: callTool as any, env: { OPENMAUSBOT_URL: "http://127.0.0.1:19999" } };
+    for (const [command, tool, extra] of [
+      ["send", "send_bot_message", ["--text", "hello"]],
+      ["messages", "get_bot_messages", []],
+      ["wait", "wait_for_conversation", []],
+      ["interrupt", "interrupt_conversation", []],
+      ["set-model", "set_bot_model", ["--instance", "claude", "--model", "model-b", "--effort", "high"]],
+    ] as const) {
+      await expect(runControlOmb([command, "--bot", "bot-1", "--task", "task-a", ...extra], dependencies))
+        .resolves.toMatchObject({ name: tool, args: { task_id: "task-a" } });
+    }
+    expect(callTool.mock.calls.at(-1)?.[1]).toEqual({
+      bot_id: "bot-1", task_id: "task-a", instance_id: "claude", model: "model-b", effort: "high",
+    });
+    await expect(runControlOmb(["set-model", "--bot", "bot-1", "--instance", "claude", "--model", "model-b"], {
+      callTool: callTool as any, env: {},
+    })).rejects.toThrow("explicit OpenMausBot instance");
   });
 });
 
@@ -111,12 +245,14 @@ describe("control-omb isolated verification loop", () => {
   });
 
   it("launches, drives a real fake-engine turn, and removes only its test data", async () => {
-    const session = await launchVerificationServer({
+    const parentEnv = {
       ...process.env,
       COMPOSIO_API_KEY: "must-not-reach-the-fixture",
       OMB_SKILLS_DIR: "/must/not/reach/the/fixture",
       XAI_API_KEY: "must-not-reach-the-fixture",
-    });
+      FAKE_CLAUDE_PROBE: "fixture-scripting-knob",
+    };
+    const session = await launchVerificationServer(parentEnv);
     const env = { OPENMAUSBOT_URL: session.info.url };
     try {
       const doctor = await runControlOmb(["doctor"], { env }) as any;
@@ -135,10 +271,34 @@ describe("control-omb isolated verification loop", () => {
       expect(fixtureEnv).not.toHaveProperty("OMB_SKILLS_DIR");
       expect(fixtureEnv).not.toHaveProperty("XAI_API_KEY");
       expect(JSON.stringify(fixtureEnv)).not.toContain("must-not-reach-the-fixture");
+      // The fake engine's own knobs are the one thing that crosses.
+      expect(fixtureEnv.FAKE_CLAUDE_PROBE).toBe("fixture-scripting-knob");
     } finally {
       await session.close();
     }
     expect(existsSync(session.info.dataDir)).toBe(false);
     expect(existsSync(session.info.logPath)).toBe(true);
+  }, 30_000);
+
+  it("scripts the fake engine's tool calls from the launcher's environment", async () => {
+    const session = await launchVerificationServer({
+      ...process.env,
+      FAKE_CLAUDE_TOOL_CALLS: '[{"name":"Bash","input":{"command":"pnpm control:omb doctor"},"ok":true},{"name":"Bash","input":{"command":"false"},"ok":false}]',
+    });
+    const env = { OPENMAUSBOT_URL: session.info.url };
+    try {
+      const created = await runControlOmb(["new-bot", "--name", "Tool Script Probe"], { env }) as any;
+      const botId = created.bot.id as string;
+      await runControlOmb(["send", "--bot", botId, "--text", "run both commands"], { env });
+      const settled = await runControlOmb(["wait", "--bot", botId, "--timeout", "20"], { env }) as any;
+      expect(settled.status).toBe("settled");
+      const transcript = await runControlOmb(["messages", "--bot", botId, "--limit", "10"], { env }) as any;
+      const tools = transcript.messages
+        .filter((message: { kind?: string }) => message.kind === "activity")
+        .map((message: { tool?: { name?: string; ok?: boolean } }) => ({ name: message.tool?.name, ok: message.tool?.ok }));
+      expect(tools).toEqual([{ name: "Bash", ok: true }, { name: "Bash", ok: false }]);
+    } finally {
+      await session.close();
+    }
   }, 30_000);
 });

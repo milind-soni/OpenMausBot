@@ -61,7 +61,7 @@ struct ChatListView: View {
                                     .buttonStyle(.plain)
                                     .padding(.horizontal, 16)
                                 }
-                                sectionLabel(Text("Chats"))
+                                sectionLabel(Text("Threads"))
                                     .padding(.top, 14)
                                     .padding(.bottom, 4)
                             } else if searching {
@@ -85,7 +85,7 @@ struct ChatListView: View {
                             description: Text(
                                 query.isEmpty
                                     ? "Bots you create on your computer show up here."
-                                    : "No chat matches \u{201C}\(query)\u{201D}."
+                                    : "No thread matches \u{201C}\(query)\u{201D}."
                             )
                         )
                     }
@@ -184,7 +184,7 @@ struct ChatListView: View {
             Spacer(minLength: 8)
 
             VStack(spacing: 2) {
-                Text("Chats")
+                Text("Threads")
                     .font(.system(size: 17, weight: .semibold))
                     .foregroundStyle(Color.primary)
                 Text(headerSubtitle)
@@ -238,13 +238,13 @@ struct ChatListView: View {
         }
 
         channelsStrip(
-            title: "Channels",
+            title: "Groups",
             rooms: session.state.unsectionedChannels,
             showsCreate: true
         )
 
         if !session.state.botChats.isEmpty {
-            channelsStrip(title: "Bot chats", rooms: session.state.botChats, showsCreate: false)
+            channelsStrip(title: "Bot threads", rooms: session.state.botChats, showsCreate: false)
         }
 
         let unsectioned = summaries(for: session.state.unsectionedBots)
@@ -298,7 +298,7 @@ struct ChatListView: View {
                         GroupTile(room: nil)
                     }
                     .buttonStyle(.plain)
-                    .accessibilityLabel("New channel")
+                    .accessibilityLabel("New group")
                 }
             }
             .padding(.horizontal, 16)
@@ -332,7 +332,7 @@ struct ChatListView: View {
                         Image(systemName: "magnifyingglass")
                             .font(.system(size: 15, weight: .semibold))
                             .foregroundStyle(Color.secondary)
-                        TextField("Search chats", text: $query)
+                        TextField("Search threads", text: $query)
                             .font(.system(size: 17))
                             .submitLabel(.search)
                             .autocorrectionDisabled()
@@ -378,8 +378,10 @@ struct ChatListView: View {
             updatesButton
                 .frame(width: 180)
             searchButton
-            sectionButton
-            newBotButton
+            if session.canAdminister {
+                sectionButton
+                newBotButton
+            }
         }
     }
 
@@ -388,23 +390,23 @@ struct ChatListView: View {
             updatesButton
                 .frame(minWidth: 148)
             searchButton
-            // Creating bots and sections is the owner's, on the server's own
-            // UI, when this phone is paired with a server directly.
-            if session.connection?.pairedWithServer != true {
-            Menu {
-                Button("New section", systemImage: "folder.badge.plus", action: openNewSection)
-                    .disabled(!hasVisibleBots)
-                Button("New bot", systemImage: "square.and.pencil", action: createBot)
-            } label: {
-                Image(systemName: "plus")
-                    .font(.system(size: 20, weight: .medium))
-                    .foregroundStyle(Color.primary)
-                    .frame(width: 48, height: 48)
-                    .contentShape(Circle())
-            }
-            .buttonStyle(.plain)
-            .glassCapsule()
-            .accessibilityLabel("Create")
+            // Creating bots and sections needs the admin scope on a server;
+            // a chat-only phone is not shown buttons the server would refuse.
+            if session.canAdminister {
+                Menu {
+                    Button("New section", systemImage: "folder.badge.plus", action: openNewSection)
+                        .disabled(!hasVisibleBots)
+                    Button("New bot", systemImage: "square.and.pencil", action: createBot)
+                } label: {
+                    Image(systemName: "plus")
+                        .font(.system(size: 20, weight: .medium))
+                        .foregroundStyle(Color.primary)
+                        .frame(width: 48, height: 48)
+                        .contentShape(Circle())
+                }
+                .buttonStyle(.plain)
+                .glassCapsule()
+                .accessibilityLabel("Create")
             }
         }
     }
@@ -546,7 +548,7 @@ struct GroupTile: View {
             }
             .frame(width: 64, height: 64)
 
-            Text(room?.name ?? "New channel")
+            Text(room?.name ?? "New group")
                 .font(.system(size: 12, weight: .medium))
                 .foregroundStyle(room == nil ? Color.secondary : Color.primary)
                 .lineLimit(1)

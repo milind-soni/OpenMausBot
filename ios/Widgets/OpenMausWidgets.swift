@@ -42,8 +42,8 @@ struct BotActivityWidget: Widget {
                     .padding(.top, 2)
                 }
                 DynamicIslandExpandedRegion(.bottom) {
-                    if context.state.kind == "needsYou", let requestId = context.state.requestId, !context.state.options.isEmpty {
-                        AnswerButtons(context: context, requestId: requestId)
+                    if let threadId = context.state.approvalThreadId, let requestId = context.state.requestId {
+                        AnswerButtons(context: context, threadId: threadId, requestId: requestId)
                             .padding(.top, 4)
                     }
                 }
@@ -96,8 +96,8 @@ private struct LockScreenView: View {
                     .font(.system(size: 13))
                     .foregroundStyle(.white.opacity(0.7))
                     .lineLimit(2)
-                if context.state.kind == "needsYou", let requestId = context.state.requestId, !context.state.options.isEmpty {
-                    AnswerButtons(context: context, requestId: requestId)
+                if let threadId = context.state.approvalThreadId, let requestId = context.state.requestId {
+                    AnswerButtons(context: context, threadId: threadId, requestId: requestId)
                         .padding(.top, 4)
                 }
             }
@@ -110,13 +110,14 @@ private struct LockScreenView: View {
 /// The card's options, as pills — exactly the options the card offered.
 private struct AnswerButtons: View {
     let context: ActivityViewContext<BotActivityAttributes>
+    let threadId: String
     let requestId: String
 
     var body: some View {
         HStack(spacing: 8) {
             ForEach(context.state.options, id: \.self) { option in
                 Button(intent: AnswerApprovalIntent(
-                    threadId: context.attributes.threadId,
+                    threadId: threadId,
                     requestId: requestId,
                     choice: option,
                     isPermission: context.state.isPermission

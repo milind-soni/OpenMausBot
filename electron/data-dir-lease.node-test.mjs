@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
 import { createHash, randomUUID } from "node:crypto";
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
-import { hostname, tmpdir } from "node:os";
+import { hostname, tmpdir, uptime as osUptime } from "node:os";
 import path from "node:path";
 import test from "node:test";
 
@@ -387,4 +387,176 @@ test("process entry API remains compatible with a standalone server", () => {
   assert.equal(lease.delegated, false);
   assert.equal(lease.ownerPid, process.pid);
   assert.equal(lease.release(), true);
+});
+
+/**
+ * Read the lease record this build actually writes, so the boot-identity tests
+ * assert against the real on-disk shape instead of a hand-copied duplicate.
+ */
+function recordWrittenByThisProcess(dataDir) {
+  const lease = acquireDataDirLease(dataDir);
+  const record = JSON.parse(readFileSync(path.join(dataDir, LEASE_NAME), "utf8"));
+  lease.release();
+  return record;
+}
+
+function plantOwner(dataDir, overrides) {
+  const leasePath = path.join(dataDir, LEASE_NAME);
+  const owner = { ...recordWrittenByThisProcess(dataDir), ...overrides };
+  writeFileSync(leasePath, `${JSON.stringify(owner)}\n`, { mode: 0o600 });
+  return leasePath;
+}
+
+test("a lease left behind by an earlier boot is retired even though its pid is live", (t) => {
+  const { dataDir } = temporaryDirectory();
+  if (recordWrittenByThisProcess(dataDir).boot === null) return t.skip("no boot identity on this platform");
+  // The reported failure: a restart force-kills the desktop, the pid it
+  // recorded is reused by a root-owned daemon on the next boot, and kill(0)
+  // answers EPERM. Our own live pid reproduces that "owner looks alive" state
+  // exactly, without depending on which daemon holds a recycled pid.
+  plantOwner(dataDir, { boot: randomUUID(), pid: process.pid, token: randomUUID() });
+
+  const lease = acquireDataDirLease(dataDir);
+  assert.equal(lease.ownerPid, process.pid);
+  assert.equal(lease.release(), true);
+});
+
+test("a live owner from the current boot still blocks a second instance", () => {
+  const { dataDir } = temporaryDirectory();
+  plantOwner(dataDir, { pid: process.pid, token: randomUUID() });
+
+  assert.throws(() => acquireDataDirLease(dataDir), /already using this data directory/i);
+});
+
+test("a reaper from an earlier boot is succeeded even when its pid is live", (t) => {
+  const { dataDir } = temporaryDirectory();
+  const current = recordWrittenByThisProcess(dataDir);
+  if (current.boot === null) return t.skip("no boot identity on this platform");
+  const stale = { ...current, boot: randomUUID() };
+  const leasePath = path.join(dataDir, LEASE_NAME);
+  const reaper = { ...stale, token: randomUUID(), targetToken: stale.token };
+  writeFileSync(leasePath, JSON.stringify(stale));
+  writeFileSync(`${leasePath}.reap-${stale.token}`, JSON.stringify(reaper));
+
+  const lease = acquireDataDirLease(dataDir);
+  const successor = createHash("sha256").update(reaper.token).digest("hex").slice(0, 32);
+  const record = JSON.parse(readFileSync(`${leasePath}.reap-${stale.token}-${successor}`, "utf8"));
+  assert.equal(record.boot, current.boot);
+  assert.equal(record.pid, process.pid);
+  assert.equal(lease.release(), true);
+});
+
+test("a delegated child from an earlier boot cannot block a new parent", (t) => {
+  const { dataDir } = temporaryDirectory();
+  const current = recordWrittenByThisProcess(dataDir);
+  if (current.boot === null) return t.skip("no boot identity on this platform");
+  const childPath = path.join(dataDir, ".openmausbot-server-child", LEASE_NAME);
+  mkdirSync(path.dirname(childPath));
+  writeFileSync(childPath, JSON.stringify({ ...current, boot: randomUUID() }));
+
+  const parent = acquireDataDirLease(dataDir);
+  const child = acquireDataDirLeaseForProcess(dataDir, { ...parent.utilityServerLeaseEnvironment() });
+  assert.equal(child.delegated, true);
+  assert.equal(child.release(), true);
+  assert.equal(parent.release(), true);
+});
+
+test("a lease recorded above the machine's current uptime is retired", () => {
+  const { dataDir } = temporaryDirectory();
+  // Windows has no boot session id, so a reboot is proven by the only
+  // one-directional signal available: a since-boot clock cannot run backwards
+  // within a single boot.
+  plantOwner(dataDir, {
+    boot: null,
+    uptime: Math.floor(osUptime() * 1000) + 3_600_000,
+    pid: process.pid,
+    token: randomUUID(),
+  });
+
+  const lease = acquireDataDirLease(dataDir);
+  assert.equal(lease.ownerPid, process.pid);
+  assert.equal(lease.release(), true);
+});
+
+test("the contention error names the lease record so a stuck owner is recoverable", () => {
+  const { dataDir } = temporaryDirectory();
+  const leasePath = plantOwner(dataDir, { pid: process.pid, token: randomUUID() });
+
+  assert.throws(
+    () => acquireDataDirLease(dataDir),
+    (error) => {
+      assert.ok(error.message.includes(JSON.stringify(leasePath)), error.message);
+      return true;
+    },
+  );
+});
+
+test("a stale lease whose pid was recycled by a root-owned daemon no longer blocks startup", (t) => {
+  const { dataDir } = temporaryDirectory();
+  if (recordWrittenByThisProcess(dataDir).boot === null) return t.skip("no boot identity on this platform");
+  // Root/container runners may be allowed to signal PID 1. Only run this
+  // fixture when it reproduces the reported EPERM failure.
+  try {
+    process.kill(1, 0);
+    return t.skip("this runner can signal PID 1");
+  } catch (error) {
+    assert.equal(error.code, "EPERM");
+  }
+  plantOwner(dataDir, { boot: randomUUID(), pid: 1, token: randomUUID() });
+
+  const lease = acquireDataDirLease(dataDir);
+  assert.equal(lease.ownerPid, process.pid);
+  assert.equal(lease.release(), true);
+});
+
+test("boot identity does not weaken exclusion: only one of many live racers wins", async () => {
+  const { dataDir } = temporaryDirectory();
+  // The guarantee this module exists to provide. Boot identity may only ever
+  // prove a record dead, so concurrent live claimants must still serialize to
+  // exactly one owner -- a stale-detection bug that let two in would corrupt
+  // the very state the lease protects.
+  const racers = await Promise.all(Array.from({ length: 8 }, (_, index) => runNode(`
+    const { existsSync, writeFileSync } = await import("node:fs");
+    const { acquireDataDirLease } = await import(${JSON.stringify(MODULE_URL)});
+    const prefix = ${JSON.stringify(path.join(dataDir, "racer-"))};
+    const deadline = Date.now() + 10_000;
+    async function waitForAll(stage) {
+      while (!Array.from({ length: 8 }, (_, i) => existsSync(prefix + i + stage)).every(Boolean)) {
+        if (Date.now() > deadline) throw new Error("racer barrier timed out: " + stage);
+        await new Promise((resolve) => setTimeout(resolve, 10));
+      }
+    }
+    writeFileSync(prefix + ${index} + ".ready", "");
+    await waitForAll(".ready");
+    let lease;
+    try {
+      lease = acquireDataDirLease(${JSON.stringify(dataDir)});
+      writeFileSync(prefix + ${index} + ".attempted", "");
+      // Keep the winner live until every sibling has attempted acquisition,
+      // even when a runner is paused or much slower than its siblings.
+      await waitForAll(".attempted");
+      process.stdout.write(JSON.stringify({ acquired: true, released: lease.release() }));
+    } catch (error) {
+      writeFileSync(prefix + ${index} + ".attempted", "");
+      process.stdout.write(JSON.stringify({ acquired: false, error: String(error?.message ?? error) }));
+    } finally {
+      lease?.release();
+    }
+  `)));
+
+  const results = racers.map((racer) => {
+    assert.equal(racer.code, 0, racer.stderr);
+    assert.equal(racer.stderr, "");
+    return JSON.parse(racer.stdout);
+  });
+  const winners = results.filter((result) => result.acquired);
+  assert.equal(winners.length, 1, JSON.stringify(results, null, 2));
+  assert.equal(winners[0].released, true);
+  for (const loser of results.filter((result) => !result.acquired)) {
+    assert.match(loser.error, /already using this data directory|being recovered/i);
+  }
+
+  // And the directory is left usable rather than wedged by the contention.
+  const after = acquireDataDirLease(dataDir);
+  assert.equal(after.release(), true);
 });

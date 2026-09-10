@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
 import { spawn } from "node:child_process";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, statSync, writeFileSync } from "node:fs";
+import { EventEmitter } from "node:events";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, statSync, utimesSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { delimiter, join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -10,11 +11,15 @@ import {
   agentBrowserIntegration,
   browserEngineEncryptionKey,
   browserEngineStatus,
+  browserRestoreKey,
   browserSessionId,
+  clearBrowserSessionState,
+  closeBrowserSession,
   ensureChrome,
   installAgentBrowserBinary,
   isMusl,
   pinnedBinaryPath,
+  prepareBrowserSessionState,
   resolveAgentBrowserBinary,
 } from "./browser-engine.ts";
 import { AGENT_BROWSER_VERSION, agentBrowserReleaseUrl, agentBrowserReleaseVersion, resolveAgentBrowserReleaseAsset } from "./browser-engine-release.ts";
@@ -33,6 +38,227 @@ afterEach(async () => {
   for (const dir of scratch.splice(0)) await removeTempDir(dir);
 });
 
+function lifecycleChild(args: readonly string[] = [], options: { code?: number; onClose?: () => void; sessions?: string[]; inventory?: string } = {}): ReturnType<typeof spawn> {
+  const child = Object.assign(new EventEmitter(), { stdout: new EventEmitter(), kill: () => true });
+  queueMicrotask(() => {
+    if (args[0] === "session") child.stdout.emit("data", options.inventory ?? JSON.stringify({ success: true, data: { sessions: options.sessions ?? [] } }));
+    else options.onClose?.();
+    child.emit("exit", args[0] === "session" ? 0 : options.code ?? 0);
+    child.emit("close", args[0] === "session" ? 0 : options.code ?? 0);
+  });
+  return child as ReturnType<typeof spawn>;
+}
+
+describe("deleting one browser session's saved logins", () => {
+  function fixture(closeCode = 0) {
+    const home = mkdtempSync(join(tmpdir(), "omb-browser-cleanup-"));
+    scratch.push(home);
+    const directory = join(home, ".agent-browser", "sessions");
+    mkdirSync(join(directory, ".tmp"), { recursive: true });
+    vi.mocked(spawn).mockImplementation((_binary, args) => lifecycleChild(args, { code: closeCode }));
+    return { home, directory, options: { env: { HOME: home, USERPROFILE: home, PATH: "" } } };
+  }
+
+  it("removes only exact state/backup/candidate files and never calls state clear", async () => {
+    const { directory, options } = fixture();
+    const removed = ["work-work.json", "work-work.json.enc", "work-work.json.previous", "work-work.json.enc.previous", ".tmp/work-work-candidate-123.json.enc", `${browserRestoreKey("work")}-work.json.enc`, `${browserRestoreKey("work")}-work.json.enc.previous`, `.tmp/${browserRestoreKey("work")}-work-candidate-123.json.enc`];
+    const preserved = ["work-client-work-client.json.enc", "personal-personal.json", "work-another.json", "notes.json", ".tmp/work-client-work-client-candidate-123.json.enc", `${browserRestoreKey("work-client")}-work-client.json.enc`];
+    for (const name of [...removed, ...preserved]) writeFileSync(join(directory, name), "fixture state");
+    expect(await clearBrowserSessionState("fixture-browser", "work", options)).toBe(true);
+    for (const name of removed) expect(existsSync(join(directory, name)), name).toBe(false);
+    for (const name of preserved) expect(readFileSync(join(directory, name), "utf8"), name).toBe("fixture state");
+    expect(vi.mocked(spawn).mock.calls.map((call) => call[1])).toEqual([["close"], ["session", "list", "--json"]]);
+  });
+
+  it("cannot launch a browser from close through inherited launch flags or native user config", async () => {
+    const { home, options } = fixture();
+    options.env = {
+      ...options.env, AGENT_BROWSER_EXECUTABLE_PATH: "/fixture/chrome", AGENT_BROWSER_NO_WEBMCP: "1",
+      AGENT_BROWSER_PROFILE: "/fixture/shared", AGENT_BROWSER_CONFIG: "/fixture/unsafe-config.json",
+      AGENT_BROWSER_SOCKET_DIR: "/fixture/sockets",
+    } as typeof options.env;
+    expect(await clearBrowserSessionState("fixture-browser", "work", options)).toBe(true);
+    const env = vi.mocked(spawn).mock.calls[0][2]?.env;
+    expect(env).not.toHaveProperty("AGENT_BROWSER_EXECUTABLE_PATH");
+    expect(env).not.toHaveProperty("AGENT_BROWSER_NO_WEBMCP");
+    expect(env).not.toHaveProperty("AGENT_BROWSER_PROFILE");
+    expect(env?.AGENT_BROWSER_SOCKET_DIR).toBe("/fixture/sockets");
+    expect(env?.AGENT_BROWSER_CONFIG).toBe(join(home, ".agent-browser", "omb-managed-config.json"));
+    expect(readFileSync(env!.AGENT_BROWSER_CONFIG!, "utf8")).toBe("{}\n");
+  });
+
+  it("preserves state when closing the daemon fails", async () => {
+    const { directory, options } = fixture(1);
+    const path = join(directory, "work-work.json.enc");
+    writeFileSync(path, "saved login");
+    expect(await clearBrowserSessionState("fixture-browser", "work", options)).toBe(false);
+    expect(readFileSync(path, "utf8")).toBe("saved login");
+  });
+
+  it("waits for actual daemon disappearance after close acknowledgement", async () => {
+    const { options } = fixture();
+    let polls = 0;
+    vi.mocked(spawn).mockImplementation((_binary, args) => lifecycleChild(args, { sessions: args?.[0] === "session" && ++polls === 1 ? ["work", "work-client"] : ["work-client"] }));
+    expect(await closeBrowserSession("fixture-browser", { ...options.env, AGENT_BROWSER_SESSION: "work" })).toBe(true);
+    expect(polls).toBe(2);
+  });
+
+  it("waits for inventory stdout to finish after the process exits", async () => {
+    const { options } = fixture();
+    vi.mocked(spawn).mockImplementation((_binary, args) => {
+      if (args?.[0] !== "session") return lifecycleChild(args);
+      const child = Object.assign(new EventEmitter(), { stdout: new EventEmitter(), kill: () => true });
+      queueMicrotask(() => {
+        child.emit("exit", 0);
+        queueMicrotask(() => {
+          child.stdout.emit("data", '{"success":true,"data":{"sessions":[]}}');
+          child.emit("close", 0);
+        });
+      });
+      return child as ReturnType<typeof spawn>;
+    });
+    expect(await closeBrowserSession("fixture-browser", { ...options.env, AGENT_BROWSER_SESSION: "work" })).toBe(true);
+  });
+
+  it.each(['not-json', '{"success":true}', '{"success":false,"data":{"sessions":[]}}'])("refuses an invalid shutdown inventory %s", async (inventory) => {
+    const { options } = fixture();
+    vi.mocked(spawn).mockImplementation((_binary, args) => lifecycleChild(args, { inventory }));
+    expect(await closeBrowserSession("fixture-browser", { ...options.env, AGENT_BROWSER_SESSION: "work" })).toBe(false);
+  });
+
+  it("keeps saved state when the daemon remains alive past the close deadline", async () => {
+    const { directory, options } = fixture();
+    writeFileSync(join(directory, "work-work.json.enc"), "saved login");
+    vi.mocked(spawn).mockImplementation((_binary, args) => lifecycleChild(args, { sessions: ["work"] }));
+    expect(await clearBrowserSessionState("fixture-browser", "work", { ...options, timeoutMs: 35 })).toBe(false);
+    expect(readFileSync(join(directory, "work-work.json.enc"), "utf8")).toBe("saved login");
+  });
+
+  it("does not recursively remove a directory with a state-like name", async () => {
+    const { directory, options } = fixture();
+    const path = join(directory, "work-work.json");
+    mkdirSync(path);
+    writeFileSync(join(path, "keep"), "unrelated data");
+    expect(await clearBrowserSessionState("fixture-browser", "work", options)).toBe(false);
+    expect(readFileSync(join(path, "keep"), "utf8")).toBe("unrelated data");
+  });
+
+  it("handles an already-empty session without changing other state", async () => {
+    const { directory, options } = fixture();
+    writeFileSync(join(directory, "other-other.json"), "keep");
+    expect(await clearBrowserSessionState("fixture-browser", "guest-123", options)).toBe(true);
+    expect(readFileSync(join(directory, "other-other.json"), "utf8")).toBe("keep");
+  });
+
+  it.each(["", "../personal", "work/client", "work.client", "work*", "x".repeat(97)])("rejects invalid session %j before invoking a process", async (session) => {
+    const { options } = fixture();
+    expect(await clearBrowserSessionState("fixture-browser", session, options)).toBe(false);
+    expect(spawn).not.toHaveBeenCalled();
+  });
+});
+
+describe("restoring exactly one browser profile", () => {
+  function fixture() {
+    const home = mkdtempSync(join(tmpdir(), "omb-browser-restore-"));
+    scratch.push(home);
+    const directory = join(home, ".agent-browser", "sessions");
+    mkdirSync(directory, { recursive: true });
+    vi.mocked(spawn).mockImplementation((_binary, args) => lifecycleChild(args));
+    return { directory, options: { env: { HOME: home, USERPROFILE: home } } };
+  }
+
+  it("uses fixed-length restore identities even for overlapping legacy names", () => {
+    const keys = ["work", "work-client", "work-work-client", "WORK", "work_"].map(browserRestoreKey);
+    expect(new Set(keys).size).toBe(keys.length);
+    expect(keys.every((key) => /^omb-[a-f0-9]{64}$/.test(key))).toBe(true);
+    for (const a of keys) for (const b of keys) if (a !== b) expect(b.startsWith(a + "-")).toBe(false);
+  });
+
+  it("copies only the exact legacy profile, preserves originals, and keeps launch settings stable", async () => {
+    const { directory, options } = fixture();
+    writeFileSync(join(directory, "work-work.json.enc"), "work login");
+    writeFileSync(join(directory, "work-client-work-client.json.enc"), "client login");
+    const before = agentBrowserIntegration({ binaryPath: "fixture-browser", session: "work", encryptionKey: "key", env: options.env });
+    await prepareBrowserSessionState("fixture-browser", "work", options);
+    expect(readFileSync(join(directory, `${browserRestoreKey("work")}-work.json.enc`), "utf8")).toBe("work login");
+    if (posix) expect(statSync(join(directory, `${browserRestoreKey("work")}-work.json.enc`)).mode & 0o777).toBe(0o600);
+    expect(readFileSync(join(directory, "work-work.json.enc"), "utf8")).toBe("work login");
+    expect(readFileSync(join(directory, "work-client-work-client.json.enc"), "utf8")).toBe("client login");
+    expect(agentBrowserIntegration({ binaryPath: "fixture-browser", session: "work", encryptionKey: "key", env: options.env })).toEqual(before);
+    expect(vi.mocked(spawn).mock.calls[0][2]?.env?.AGENT_BROWSER_RESTORE).toBe("work");
+  });
+
+  it("never imports a prefix match when the exact legacy profile is absent", async () => {
+    const { directory, options } = fixture();
+    writeFileSync(join(directory, "work-client-work-client.json.enc"), "client login");
+    await prepareBrowserSessionState("fixture-browser", "work", options);
+    expect(existsSync(join(directory, `${browserRestoreKey("work")}-work.json.enc`))).toBe(false);
+    expect(readFileSync(join(directory, "work-client-work-client.json.enc"), "utf8")).toBe("client login");
+  });
+
+  it("prefers the latest exact state format but never overwrites current state", async () => {
+    const { directory, options } = fixture();
+    writeFileSync(join(directory, "work-work.json"), "new plain state");
+    writeFileSync(join(directory, "work-work.json.enc"), "old encrypted state");
+    utimesSync(join(directory, "work-work.json.enc"), 1, 1);
+    await prepareBrowserSessionState("fixture-browser", "work", options);
+    expect(readFileSync(join(directory, `${browserRestoreKey("work")}-work.json`), "utf8")).toBe("new plain state");
+    writeFileSync(join(directory, `${browserRestoreKey("client")}-client.json.enc`), "current state");
+    writeFileSync(join(directory, "client-client.json.enc"), "old state");
+    await prepareBrowserSessionState("fixture-browser", "client", options);
+    expect(readFileSync(join(directory, `${browserRestoreKey("client")}-client.json.enc`), "utf8")).toBe("current state");
+    expect(spawn).toHaveBeenCalledTimes(2);
+  });
+
+  it("deduplicates preparations by home and session, and skips guest persistence", async () => {
+    const a = fixture();
+    const b = fixture();
+    await Promise.all([prepareBrowserSessionState("fixture-browser", "work", a.options), prepareBrowserSessionState("fixture-browser", "work", a.options)]);
+    await prepareBrowserSessionState("fixture-browser", "work", b.options);
+    await prepareBrowserSessionState("fixture-browser", "guest", { ...a.options, persistent: false });
+    expect(spawn).toHaveBeenCalledTimes(4);
+  });
+
+  it("flushes a running legacy daemon before copying its newly saved login", async () => {
+    const { directory, options } = fixture();
+    vi.mocked(spawn).mockImplementation((_binary, args) => lifecycleChild(args, { onClose: () => { writeFileSync(join(directory, "work-work.json.enc"), "just-flushed login"); } }));
+    await prepareBrowserSessionState("fixture-browser", "work", options);
+    expect(readFileSync(join(directory, `${browserRestoreKey("work")}-work.json.enc`), "utf8")).toBe("just-flushed login");
+  });
+
+  it("refuses changed access before closing and after flushing, without resurrecting deleted state", async () => {
+    const { directory, options } = fixture();
+    writeFileSync(join(directory, "work-work.json.enc"), "old login");
+    await expect(prepareBrowserSessionState("fixture-browser", "work", { ...options, isCurrent: () => false })).rejects.toThrow(/access changed/);
+    expect(spawn).not.toHaveBeenCalled();
+    let current = true;
+    vi.mocked(spawn).mockImplementation((_binary, args) => lifecycleChild(args, { onClose: () => { current = false; } }));
+    await expect(prepareBrowserSessionState("fixture-browser", "work", { ...options, isCurrent: () => current })).rejects.toThrow(/access changed/);
+    expect(existsSync(join(directory, `${browserRestoreKey("work")}-work.json.enc`))).toBe(false);
+  });
+
+  it("does not migrate after a failed native close and allows a later retry", async () => {
+    const { directory, options } = fixture();
+    writeFileSync(join(directory, "work-work.json.enc"), "saved login");
+    let code = 1;
+    vi.mocked(spawn).mockImplementation((_binary, args) => lifecycleChild(args, { code }));
+    await expect(prepareBrowserSessionState("fixture-browser", "work", options)).rejects.toThrow(/safely prepare/);
+    expect(existsSync(join(directory, `${browserRestoreKey("work")}-work.json.enc`))).toBe(false);
+    code = 0;
+    await prepareBrowserSessionState("fixture-browser", "work", options);
+    expect(readFileSync(join(directory, `${browserRestoreKey("work")}-work.json.enc`), "utf8")).toBe("saved login");
+  });
+
+  it("does not overwrite an unexpected managed config or start a browser with it", async () => {
+    const { directory, options } = fixture();
+    const path = join(directory, "..", "omb-managed-config.json");
+    writeFileSync(path, '{"profile":"/fixture/shared"}');
+    await expect(prepareBrowserSessionState("fixture-browser", "work", options)).rejects.toThrow(/configuration was changed/);
+    expect(readFileSync(path, "utf8")).toBe('{"profile":"/fixture/shared"}');
+    expect(spawn).not.toHaveBeenCalled();
+  });
+});
+
 describe("finding the browser engine", () => {
   it("pins the native-verified Windows revision in both download and desktop manifests", () => {
     const asset = resolveAgentBrowserReleaseAsset("win32", "x64")!;
@@ -48,7 +274,7 @@ describe("finding the browser engine", () => {
       bytes: asset.bytes, sha256: asset.sha256, executable: "agent-browser.exe",
     });
     for (const [platform, arch] of [["darwin", "arm64"], ["darwin", "x64"], ["linux", "arm64"], ["linux", "x64"]] as const) {
-      expect(agentBrowserReleaseVersion(resolveAgentBrowserReleaseAsset(platform, arch))).toBe("0.36.0");
+      expect(agentBrowserReleaseVersion(resolveAgentBrowserReleaseAsset(platform, arch))).toBe("0.37.0");
     }
   });
 
@@ -202,11 +428,13 @@ describe("what a bot gets", () => {
         PRIVATE_WORKSPACE_SECRET: "synthetic-secret",
         AGENT_BROWSER_SESSION: "wrong-session", AGENT_BROWSER_ENCRYPTION_KEY: "wrong-key",
         AGENT_BROWSER_ARGS: "--no-sandbox", AGENT_BROWSER_NO_WEBMCP: "0",
+        AGENT_BROWSER_CONFIG: "/unsafe-native-config.json", AGENT_BROWSER_PROFILE: "/unsafe-shared-profile",
       },
     });
     expect(spec.env).toEqual({
-      AGENT_BROWSER_SESSION: "bot-1", AGENT_BROWSER_NO_WEBMCP: "1", AGENT_BROWSER_RESTORE: "bot-1",
+      AGENT_BROWSER_SESSION: "bot-1", AGENT_BROWSER_NO_WEBMCP: "1", AGENT_BROWSER_RESTORE: browserRestoreKey("bot-1"),
       AGENT_BROWSER_RESTORE_SAVE: "auto", AGENT_BROWSER_ENCRYPTION_KEY: "session-key",
+      AGENT_BROWSER_CONFIG: expect.stringContaining("omb-managed-config.json"),
       AGENT_BROWSER_HEADLESS: "1", PATH: "/usr/bin",
       AGENT_BROWSER_EXECUTABLE_PATH: "/opt/trusted chrome/chrome",
     });
@@ -218,8 +446,9 @@ describe("what a bot gets", () => {
     vi.stubEnv("PRIVATE_WORKSPACE_SECRET", "synthetic-process-secret");
     const spec = agentBrowserIntegration({ binaryPath: "/x/agent-browser", session: "bot-1", encryptionKey: "session-key" });
     expect(spec.env).toEqual({
-      AGENT_BROWSER_SESSION: "bot-1", AGENT_BROWSER_NO_WEBMCP: "1", AGENT_BROWSER_RESTORE: "bot-1",
+      AGENT_BROWSER_SESSION: "bot-1", AGENT_BROWSER_NO_WEBMCP: "1", AGENT_BROWSER_RESTORE: browserRestoreKey("bot-1"),
       AGENT_BROWSER_RESTORE_SAVE: "auto", AGENT_BROWSER_ENCRYPTION_KEY: "session-key",
+      AGENT_BROWSER_CONFIG: expect.stringContaining("omb-managed-config.json"),
       AGENT_BROWSER_HEADLESS: "1", PATH: "/usr/bin",
       AGENT_BROWSER_EXECUTABLE_PATH: "/opt/process-chrome/chrome",
     });
@@ -234,7 +463,7 @@ describe("what a bot gets", () => {
     const spec = agentBrowserIntegration({ binaryPath: "/x/agent-browser", session: "bot-1", encryptionKey: "k".repeat(64), env: { PATH: "/usr/bin" } });
     expect(spec.command).toBe("/x/agent-browser");
     expect(spec.args).toEqual(["mcp", "--tools", "core", "--no-webmcp"]);
-    expect(spec.env).toMatchObject({ AGENT_BROWSER_SESSION: "bot-1", AGENT_BROWSER_RESTORE: "bot-1", AGENT_BROWSER_RESTORE_SAVE: "auto", AGENT_BROWSER_HEADLESS: "1", PATH: "/usr/bin" });
+    expect(spec.env).toMatchObject({ AGENT_BROWSER_SESSION: "bot-1", AGENT_BROWSER_RESTORE: browserRestoreKey("bot-1"), AGENT_BROWSER_RESTORE_SAVE: "auto", AGENT_BROWSER_HEADLESS: "1", PATH: "/usr/bin" });
     expect(spec.env.AGENT_BROWSER_ENCRYPTION_KEY).toBe("k".repeat(64));
     expect(agentBrowserIntegration({ binaryPath: "/x", session: "s", encryptionKey: "k", headless: false }).env.AGENT_BROWSER_HEADLESS).toBeUndefined();
   });
@@ -246,7 +475,7 @@ describe("what a bot gets", () => {
     const second = browserSessionId("bot-a", "guest");
     expect(first).toMatch(/^guest-[a-f0-9-]+$/u);
     expect(first).not.toBe(second);
-    expect(spec(first, false).env).toMatchObject({ AGENT_BROWSER_RESTORE: first, AGENT_BROWSER_RESTORE_SAVE: "never" });
+    expect(spec(first, false).env).toMatchObject({ AGENT_BROWSER_RESTORE: browserRestoreKey(first), AGENT_BROWSER_RESTORE_SAVE: "never" });
   });
 
   it("names sessions after the shared profile, else the bot, in shell-safe form", () => {

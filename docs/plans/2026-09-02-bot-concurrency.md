@@ -3,6 +3,11 @@
 Status: decision record (Sep 2, 2026). Scopes the "parallel runtime" part of
 `2026-08-22-channels-plan.md` against how Grok Bot actually behaves.
 
+Update (Sep 9): the direct-conversation decision below is superseded by
+[independent threads and projects](2026-09-09-independent-threads.md).
+The earlier audit remains useful history; multi-bot channel turns still use
+the conservative per-bot lane described here.
+
 ## What Grok Bot does (verified against docs.x.ai/grok-bot and hands-on reports)
 
 - **Membership fans out.** One bot can sit in many group chats; xAI's own guide reuses the same

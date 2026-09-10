@@ -479,10 +479,17 @@ export function TeamLibraryPanel({
               {(pending.kind === "package" || pending.kind === "backup") && (
                 <div className="mt-5 flex flex-wrap gap-2 text-[11.5px] text-ink-secondary">
                   {pending.chiefOfStaff && <span className="flex items-center gap-1.5 rounded-full bg-raised px-3 py-1.5"><Crown size={13} />{pending.chiefOfStaff} leads</span>}
-                  <span className="flex items-center gap-1.5 rounded-full bg-raised px-3 py-1.5"><MessageSquare size={13} />{pending.rooms} {pending.rooms === 1 ? "room" : "rooms"}</span>
+                  <span className="flex items-center gap-1.5 rounded-full bg-raised px-3 py-1.5"><MessageSquare size={13} />{pending.rooms} {pending.rooms === 1 ? "group" : "groups"}</span>
                   <span className="flex items-center gap-1.5 rounded-full bg-raised px-3 py-1.5"><BookOpen size={13} />{pending.playbooks} playbooks</span>
                   <span className="flex items-center gap-1.5 rounded-full bg-raised px-3 py-1.5"><CalendarClock size={13} />{pending.routines} paused routines</span>
                   {pending.kind === "package" && <span className="flex items-center gap-1.5 rounded-full bg-raised px-3 py-1.5"><Plug size={13} />{pending.apps.length} connections</span>}
+                </div>
+              )}
+              {Boolean(pending.skills?.length) && (
+                <div className="mt-4 rounded-xl border border-hairline px-4 py-3 text-[12.5px] text-ink-secondary">
+                  <div className="font-medium text-ink">Included skills — disabled on import</div>
+                  <p className="mt-1 break-words">{pending.skills?.join(", ")}</p>
+                  <p className="mt-1">Review each skill in its bot profile before enabling it. Imported instructions do not run automatically.</p>
                 </div>
               )}
               <div className="mt-6 text-[12px] font-medium text-ink-secondary">Team members</div>
@@ -506,7 +513,7 @@ export function TeamLibraryPanel({
                   {pending.kind === "backup"
                     ? `${TEAM_BACKUP_EXCLUSIONS} ${pending.archivedBots ? `${pending.archivedBots} archived bots will remain archived.` : ""}`
                     : pending.kind === "package"
-                    ? "Bots, Chief of Staff, rooms, and reviewed playbooks are loaded. Suggested routines arrive paused, and connected apps stay off until you approve them. Conversations, credentials, permissions, and computer access stay private."
+                    ? "Bots, Chief of Staff, groups, and reviewed playbooks are loaded. Suggested routines arrive paused, and connected apps stay off until you approve them. Conversations, credentials, permissions, and computer access stay private."
                     : "Only roles and appearance are loaded. Your conversations, account connections, permissions, and computer access stay private."}
                 </p>
               </div>
@@ -832,7 +839,7 @@ export function TeamLibraryPanel({
                         <input
                           value={roomName}
                           onChange={(event) => setRoomName(event.target.value)}
-                          aria-label="Project channel name"
+                          aria-label="Group name"
                           className="min-w-0 flex-1 rounded-xl bg-raised/80 px-3 py-2.5 text-[13px] text-ink placeholder:text-ink-secondary focus:outline-none"
                         />
                         <button
@@ -841,11 +848,11 @@ export function TeamLibraryPanel({
                           className="flex shrink-0 items-center justify-center gap-2 rounded-full bg-accent px-5 py-2.5 text-[13.5px] font-medium text-white hover:bg-accent/90 disabled:opacity-60"
                         >
                           {creating && <Loader2 size={15} className="animate-spin" />}
-                          {creating ? "Creating…" : "Create project channel"}
+                          {creating ? "Creating…" : "Create group"}
                         </button>
                       </div>
                       <p className="mt-2 text-[12px] text-ink-secondary">
-                        Creates the team as new bots, opens a channel for them, and points the channel at this folder.
+                        Creates the team as new bots, opens a group for them, and points its working folder here.
                       </p>
                     </div>
                   )}

@@ -198,7 +198,7 @@ export function decodeCursorModelText(text: string): ModelCatalog | null {
   for (const raw of text.split(/\r?\n/)) {
     const line = raw.trim();
     if (!line || line.startsWith("#") || /^available\s+models?\b/i.test(line) || /^models?\b/i.test(line)) continue;
-    const stripped = line.replace(/^[\s*•\-]+\s*/, "");
+    const stripped = line.replace(/^[\s*•-]+\s*/, "");
     const parts = stripped.split(/\s+[—–|:]\s+|\s+-\s+|\s{2,}/);
     const id = (parts[0] ?? "").trim();
     const rawLabel = parts.slice(1).join(" ").trim();

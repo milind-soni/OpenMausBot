@@ -64,7 +64,7 @@ class ThreadResolutionTest {
     }
 
     @Test
-    fun `a task switch keeps the chat open, on the new task`() {
+    fun `a remote task switch keeps the original task open`() {
         val tasks = listOf(
             BotTask(threadId = "thread-bot-1", title = "First", createdAt = 0.0),
             BotTask(threadId = "thread-two", title = "Second", createdAt = 1.0),
@@ -76,15 +76,14 @@ class ThreadResolutionTest {
             ThreadResolution.chatOrNull(before, "thread-bot-1")?.threadId,
         )
 
-        // Switching moves the bot to the second task; the destination still names
-        // the first. The chat must follow the bot rather than pop to the roster.
+        // A desktop switch moves its pointer, not this phone's destination.
         val after = CompanionState(
             bots = listOf(bot().copy(threadId = "thread-two", tasks = tasks)),
             cursor = "s:2",
         )
         val resolved = ThreadResolution.resolve(after, "thread-bot-1")
         assertTrue(resolved is ThreadResolution.Result.Open, "resolved to $resolved")
-        assertEquals("thread-two", (resolved as ThreadResolution.Result.Open).chat.threadId)
+        assertEquals("thread-bot-1", (resolved as ThreadResolution.Result.Open).chat.threadId)
         assertEquals("bot-1", resolved.chat.id)
     }
 
@@ -130,21 +129,12 @@ class ThreadResolutionTest {
     }
 }
 
-/**
- * The chat the reader is in follows its bot, and closes only when the bot is
- * really gone — `ios/App/ChatView.swift` resolves `current` by the stable id and
- * derives every transcript lookup from `current.threadId`.
- *
- * `server/store.ts:deleteTask` is the case that used to break it: deleting the
- * open task drops that thread and moves the bot to `bot.tasks[0]`, so a chat
- * addressed by the thread has nothing left to resolve, while one addressed by
- * the bot has.
- */
+/** The local task stays addressed by both owner and thread, including deletion. */
 class ConversationResolutionTest {
     private val hydrated = "stream-1:1"
 
     @Test
-    fun `deleting the open task follows the bot to the task the desktop chose`() {
+    fun `deleting the open task closes it without choosing another`() {
         val bot = bot().copy(
             threadId = "task-2",
             tasks = listOf(BotTask("task-1", "First", 0.0), BotTask("task-2", "Second", 1.0)),
@@ -158,9 +148,7 @@ class ConversationResolutionTest {
         )
 
         val resolved = ThreadResolution.resolve(after, opened)
-        assertTrue(resolved is ThreadResolution.Result.Open, "resolved to $resolved")
-        assertEquals("task-1", (resolved as ThreadResolution.Result.Open).chat.threadId)
-        assertEquals("bot-1", resolved.chat.id)
+        assertEquals(ThreadResolution.Result.Gone, resolved)
     }
 
     @Test
@@ -209,7 +197,7 @@ class ConversationResolutionTest {
     }
 
     @Test
-    fun `a notification thread resolves to the owner the chat then keeps`() {
+    fun `a notification resolves to its exact task and owner`() {
         val bot = bot().copy(
             threadId = "task-1",
             tasks = listOf(BotTask("task-1", "First", 0.0), BotTask("task-2", "Second", 1.0)),
@@ -219,7 +207,7 @@ class ConversationResolutionTest {
         val resolved = ThreadResolution.resolve(state, Destination.Thread("task-2"))
         assertTrue(resolved is ThreadResolution.Result.Open, "resolved to $resolved")
         assertEquals(
-            ChatTarget.Bot("bot-1", "task-1"),
+            ChatTarget.Bot("bot-1", "task-2"),
             (resolved as ThreadResolution.Result.Open).chat.target,
         )
     }

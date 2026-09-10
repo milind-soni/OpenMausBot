@@ -41,14 +41,14 @@ struct AgentProfileView: View {
         _crop = State(initialValue: bot.avatarCrop ?? .mascot)
         _voice = State(initialValue: bot.voice ?? "")
         _speakReplies = State(initialValue: bot.speakReplies == true)
-        _selectedInstanceID = State(initialValue: bot.modelSelection.instanceId)
-        _selectedModelID = State(initialValue: bot.modelSelection.model)
-        _selectedEffort = State(initialValue: bot.modelSelection.effort)
-        _savedModel = State(initialValue: bot.modelSelection)
+        _selectedInstanceID = State(initialValue: bot.currentTaskModelSelection.instanceId)
+        _selectedModelID = State(initialValue: bot.currentTaskModelSelection.model)
+        _selectedEffort = State(initialValue: bot.currentTaskModelSelection.effort)
+        _savedModel = State(initialValue: bot.currentTaskModelSelection)
         _baseline = State(initialValue: ProfileFormSnapshot(bot: bot))
     }
 
-    private var current: Bot { session.state.bot(bot.id) ?? bot }
+    private var current: Bot { session.state.bot(bot.id)?.projected(forThread: bot.threadId) ?? bot }
     private var imageGenerationReady: Bool { config?.imageGen?.configured == true }
     private var voiceConfigured: Bool { config?.isTTSConfigured == true }
     private var hasWorkspaceDefaultVoice: Bool { config?.hasWorkspaceDefaultVoice == true }
@@ -111,68 +111,72 @@ struct AgentProfileView: View {
     var body: some View {
         NavigationStack {
             Form {
-                Section {
-                    if !modelsLoaded {
-                        HStack {
-                            Text("Loading models")
-                            Spacer()
-                            ProgressView()
-                        }
-                    } else if instanceChoices.isEmpty {
-                        Label("No model providers are available", systemImage: "exclamationmark.triangle")
-                            .foregroundStyle(.secondary)
-                    } else {
-                        Picker("Provider", selection: $selectedInstanceID) {
-                            if !instances.contains(where: { $0.instanceId == selectedInstanceID }) {
-                                Text("Current provider (unavailable)")
-                                    .tag(selectedInstanceID)
-                                    .disabled(true)
+                // Changing the model and generating avatars need the admin scope
+                // on a server; a chat-only phone is not shown either.
+                if session.canAdminister {
+                    Section {
+                        if !modelsLoaded {
+                            HStack {
+                                Text("Loading models")
+                                Spacer()
+                                ProgressView()
                             }
-                            ForEach(instanceChoices) { instance in
-                                Text(instanceLabel(instance))
-                                    .tag(instance.instanceId)
-                                    .disabled(!instance.snapshot.isAvailable)
-                            }
-                        }
-                        .onChange(of: selectedInstanceID) { _, instanceID in
-                            selectDefaults(for: instanceID)
-                        }
-
-                        Picker("Model", selection: $selectedModelID) {
-                            ForEach(selectedModelChoices) { option in
-                                Text(option.label).tag(option.id)
-                            }
-                        }
-                        .disabled(selectedInstance?.snapshot.isAvailable != true)
-
-                        if !effortLevels.isEmpty {
-                            Picker("Reasoning effort", selection: $selectedEffort) {
-                                Text("Default").tag(String?.none)
-                                ForEach(effortLevels, id: \.self) { level in
-                                    Text(effortLabel(level)).tag(Optional(level))
+                        } else if instanceChoices.isEmpty {
+                            Label("No model providers are available", systemImage: "exclamationmark.triangle")
+                                .foregroundStyle(.secondary)
+                        } else {
+                            Picker("Provider", selection: $selectedInstanceID) {
+                                if !instances.contains(where: { $0.instanceId == selectedInstanceID }) {
+                                    Text("Current provider (unavailable)")
+                                        .tag(selectedInstanceID)
+                                        .disabled(true)
+                                }
+                                ForEach(instanceChoices) { instance in
+                                    Text(instanceLabel(instance))
+                                        .tag(instance.instanceId)
+                                        .disabled(!instance.snapshot.isAvailable)
                                 }
                             }
-                        }
+                            .onChange(of: selectedInstanceID) { _, instanceID in
+                                selectDefaults(for: instanceID)
+                            }
 
-                        if current.busy == true {
-                            Label("Stop this bot before changing its model.", systemImage: "hourglass")
-                                .font(.footnote)
-                                .foregroundStyle(.secondary)
-                        } else if selectedInstance?.snapshot.isAvailable != true {
-                            Label("Choose an available provider to change this bot's model.", systemImage: "info.circle")
-                                .font(.footnote)
-                                .foregroundStyle(.secondary)
-                        }
+                            Picker("Model", selection: $selectedModelID) {
+                                ForEach(selectedModelChoices) { option in
+                                    Text(option.label).tag(option.id)
+                                }
+                            }
+                            .disabled(selectedInstance?.snapshot.isAvailable != true)
 
-                        Button("Apply model", systemImage: "checkmark") {
-                            Task { await saveModel() }
+                            if !effortLevels.isEmpty {
+                                Picker("Reasoning effort", selection: $selectedEffort) {
+                                    Text("Default").tag(String?.none)
+                                    ForEach(effortLevels, id: \.self) { level in
+                                        Text(effortLabel(level)).tag(Optional(level))
+                                    }
+                                }
+                            }
+
+                            if current.busy == true {
+                                Label("Stop this bot before changing its model.", systemImage: "hourglass")
+                                    .font(.footnote)
+                                    .foregroundStyle(.secondary)
+                            } else if selectedInstance?.snapshot.isAvailable != true {
+                                Label("Choose an available provider to change this bot's model.", systemImage: "info.circle")
+                                    .font(.footnote)
+                                    .foregroundStyle(.secondary)
+                            }
+
+                            Button("Apply model", systemImage: "checkmark") {
+                                Task { await saveModel() }
+                            }
+                            .disabled(busy || !canApplyModel)
                         }
-                        .disabled(busy || !canApplyModel)
+                    } header: {
+                        Text("Model")
+                    } footer: {
+                        Text("Provider accounts and API keys stay on your computer. Default sends no reasoning level and lets the provider decide.")
                     }
-                } header: {
-                    Text("Model")
-                } footer: {
-                    Text("Provider accounts and API keys stay on your computer. Default sends no reasoning level and lets the provider decide.")
                 }
 
                 Section {
@@ -207,19 +211,21 @@ struct AgentProfileView: View {
                     Text("PNG, JPEG, GIF, or WebP, up to 10 MB. Images are stored on your paired computer and loaded with this device's pairing token.")
                 }
 
-                Section {
-                    TextField("Art direction", text: $prompt, axis: .vertical)
-                        .lineLimit(2...5)
-                    Button("Generate on computer", systemImage: "sparkles") {
-                        Task { await generateImage() }
+                if session.canAdminister {
+                    Section {
+                        TextField("Art direction", text: $prompt, axis: .vertical)
+                            .lineLimit(2...5)
+                        Button("Generate on computer", systemImage: "sparkles") {
+                            Task { await generateImage() }
+                        }
+                        .disabled(busy || !imageGenerationReady || prompt.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                    } header: {
+                        Text("Generate an avatar")
+                    } footer: {
+                        Text(imageGenerationReady
+                             ? "Generation uses the shared image provider configured on your computer. No provider key is sent to or stored on this device."
+                             : "To generate images, configure the shared image provider in OpenMausBot on your computer. Provider keys cannot be added from this device.")
                     }
-                    .disabled(busy || !imageGenerationReady || prompt.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
-                } header: {
-                    Text("Generate an avatar")
-                } footer: {
-                    Text(imageGenerationReady
-                         ? "Generation uses the shared image provider configured on your computer. No provider key is sent to or stored on this device."
-                         : "To generate images, configure the shared image provider in OpenMausBot on your computer. Provider keys cannot be added from this device.")
                 }
 
                 Section("Identity") {
@@ -313,7 +319,7 @@ struct AgentProfileView: View {
             .task {
                 async let status = session.configStatus()
                 async let options = session.voiceOptions()
-                async let catalog = session.modelInstances()
+                async let catalog = loadModelCatalog()
                 let (loadedConfig, loadedVoices, loadedInstances) = await (status, options, catalog)
                 config = loadedConfig
                 voices = loadedVoices
@@ -356,15 +362,22 @@ struct AgentProfileView: View {
         busy = false
     }
 
+    /// The provider list is admin-only on a server: asking without the
+    /// scope would only put a 403 on screen for a picker that is not shown.
+    private func loadModelCatalog() async -> [Instance] {
+        session.canAdminister ? await session.modelInstances() : []
+    }
+
     private func saveModel() async {
         guard canApplyModel else { return }
         busy = true
         defer { busy = false }
         if let updated = await session.updateModel(modelDraft, for: current) {
-            selectedInstanceID = updated.modelSelection.instanceId
-            selectedModelID = updated.modelSelection.model
-            selectedEffort = updated.modelSelection.effort
-            savedModel = updated.modelSelection
+            let model = updated.projected(forThread: bot.threadId)?.currentTaskModelSelection ?? modelDraft
+            selectedInstanceID = model.instanceId
+            selectedModelID = model.model
+            selectedEffort = model.effort
+            savedModel = model
         }
     }
 

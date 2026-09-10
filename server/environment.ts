@@ -28,6 +28,8 @@ export interface EnvironmentDescriptor {
     remoteSessions: true;
     /** Who can update the server: the desktop app that runs it, or the operator. */
     selfUpdate: "desktop-managed" | "operator";
+    /** Whether /pair offers "sign in with your email" (an allow-list is set). */
+    emailSignIn?: boolean;
   };
 }
 
@@ -113,7 +115,7 @@ export function serverVersion(): string {
   return "unknown";
 }
 
-export function environmentDescriptor(input: { environmentId: string; desktopManaged: boolean }): EnvironmentDescriptor {
+export function environmentDescriptor(input: { environmentId: string; desktopManaged: boolean; emailSignIn?: boolean }): EnvironmentDescriptor {
   return {
     environmentId: input.environmentId,
     label: process.env.OMB_ENVIRONMENT_LABEL?.trim() || hostname(),
@@ -122,6 +124,7 @@ export function environmentDescriptor(input: { environmentId: string; desktopMan
     capabilities: {
       remoteSessions: true,
       selfUpdate: input.desktopManaged ? "desktop-managed" : "operator",
+      emailSignIn: input.emailSignIn === true,
     },
   };
 }

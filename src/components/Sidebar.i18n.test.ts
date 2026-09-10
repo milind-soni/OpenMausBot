@@ -5,14 +5,14 @@ import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { setLocale } from "@/lib/i18n";
+import { setLocale, t } from "@/lib/i18n";
 import { StoreProvider, type Bot } from "@/state/store";
 
 vi.mock("./DesktopCapabilities", () => ({
   useDesktopCapabilities: () => ({}),
 }));
 
-import { BotListItem, botConfirmCopy } from "./Sidebar";
+import { BotListItem, BotThreadList, botConfirmCopy } from "./Sidebar";
 
 const bot = (overrides: Partial<Bot> = {}): Bot => ({
   id: "atlas",
@@ -37,8 +37,6 @@ function renderRow(value: Bot): string {
         bot: value,
         density: "comfortable",
         onMenu: () => {},
-        onArchive: () => {},
-        archiveDisabled: false,
       }),
     ),
   );
@@ -49,6 +47,14 @@ afterEach(() => {
 });
 
 describe("sidebar rows", () => {
+  it("translates a legacy thread's fallback title", () => {
+    setLocale("ja");
+    const markup = renderToStaticMarkup(createElement(StoreProvider, null,
+      createElement(BotThreadList, { bot: bot(), selected: true })));
+    expect(markup).toContain(`title="${t("task.newShort")}"`);
+    expect(markup).not.toContain('title="New thread"');
+  });
+
   it("translates the row's own copy and its actions", () => {
     setLocale("pt-br");
     const markup = renderRow(bot({ chiefOfStaff: true, busy: true }));
@@ -58,7 +64,7 @@ describe("sidebar rows", () => {
     expect(markup).not.toContain("Chief of Staff");
 
     setLocale("ja");
-    expect(renderRow(bot())).toContain('aria-label="Atlas をアーカイブ"');
+    expect(renderRow(bot())).toContain(`aria-label="${t("sidebar.bot.actions", { name: "Atlas" })}"`);
   });
 });
 

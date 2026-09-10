@@ -209,6 +209,25 @@ fun SettingsScreen(
                 Footnote(SettingsPolicy.NOTIFICATIONS_FOOTER)
             }
 
+            SettingsSection("Background connection") {
+                val alwaysOnEnabled by environment.alwaysOnEnabled.collectAsState()
+                SettingsRow("Status", if (alwaysOnEnabled) "Always on" else "Only while open")
+                SettingsButton(
+                    text = if (alwaysOnEnabled) "Turn off" else "Turn on",
+                    onClick = environment.onToggleAlwaysOn,
+                )
+                Footnote(
+                    if (alwaysOnEnabled) {
+                        "OpenMausBot keeps a permanent notification while this is on, so scheduled " +
+                            "reminders and routine results reach you even with the app fully closed."
+                    } else {
+                        "Notifications only arrive while the app is open or was recently backgrounded. " +
+                            "Turn this on if you rely on scheduled routines to notify you later — it adds " +
+                            "a permanent low-priority notification and uses a little more battery."
+                    },
+                )
+            }
+
             SettingsSection("Chat") {
                 SettingsRow("Activity", activityDetail.label)
                 SettingsButton("Change activity detail") { choosingActivity = true }
@@ -223,7 +242,7 @@ fun SettingsScreen(
                 SettingsSection("Workspace") {
                     onOpenRoutines?.let { openRoutines ->
                         SettingsButton(
-                            text = "Tasks & Routines",
+                            text = "Threads & Routines",
                             icon = R.drawable.ic_schedule,
                             onClick = openRoutines,
                         )

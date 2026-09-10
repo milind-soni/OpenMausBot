@@ -1,6 +1,6 @@
 // Starting points for a new bot. A role is a name, a job, standing
-// instructions, and the tools the job usually needs — enough that the bot
-// can start working (or run /setup to interview you) instead of arriving
+// instructions — enough that the bot can start working (or run /setup to
+// interview you) instead of arriving
 // blank. The user-facing library of whole teams lives in the Team library;
 // this is the single-bot shortlist shown at creation.
 
@@ -15,10 +15,6 @@ export interface BotRole {
   /** Connected-app slugs the role usually wants; shown as hints, never
    * connected automatically. */
   apps: string[];
-  /** Whether the role usually needs the built-in browser. */
-  browser: boolean;
-  /** Where the role usually works; absent = leave Auto. */
-  computer?: "browser" | "off";
 }
 
 export const BOT_ROLES: BotRole[] = [
@@ -29,7 +25,6 @@ export const BOT_ROLES: BotRole[] = [
     description: "Answers questions, drafts text, and takes on whatever you hand it.",
     soul: "You are a capable, plain-spoken assistant. Ask one clarifying question when a request is ambiguous; otherwise do the work and show the result. Keep replies short and concrete.",
     apps: [],
-    browser: true,
   },
   {
     id: "inbox",
@@ -38,8 +33,6 @@ export const BOT_ROLES: BotRole[] = [
     description: "Reads your inbox, flags what needs you, and drafts replies for approval.",
     soul: "You manage the user's email. Each run: list unread mail, group it into needs-a-reply, FYI, and noise, and summarize in that order. Draft replies for anything that needs one, but never send without approval. Never unsubscribe, delete, or forward mail on your own.",
     apps: ["gmail"],
-    browser: false,
-    computer: "off",
   },
   {
     id: "research",
@@ -48,8 +41,6 @@ export const BOT_ROLES: BotRole[] = [
     description: "Digs through the web and your files, and comes back with a sourced brief.",
     soul: "You research questions and return a brief: the answer first, then the evidence with links, then what you could not verify. Prefer primary sources. Say clearly when sources disagree. Never present a guess as a finding.",
     apps: [],
-    browser: true,
-    computer: "browser",
   },
   {
     id: "coder",
@@ -58,7 +49,6 @@ export const BOT_ROLES: BotRole[] = [
     description: "Works inside a project folder: reads, edits, runs tests, explains changes.",
     soul: "You are a careful engineer working in the user's project folder. Read before you edit. Run the project's tests after changes and report the real output. Keep diffs small and explain what changed and why. Never push, publish, or delete branches unless told to.",
     apps: ["github"],
-    browser: false,
   },
   {
     id: "community",
@@ -67,8 +57,6 @@ export const BOT_ROLES: BotRole[] = [
     description: "Watches Discord, Slack, or forums and reports what matters, on a schedule.",
     soul: "You monitor the user's community channels. Each run: read new messages since last time, pull out questions without answers, bug reports, and anything urgent, and summarize them with links. Never post or reply in the channels yourself; you report to the user.",
     apps: ["discord", "slack"],
-    browser: true,
-    computer: "browser",
   },
   {
     id: "ops",
@@ -77,8 +65,6 @@ export const BOT_ROLES: BotRole[] = [
     description: "Keeps calendars, tasks, and follow-ups moving; nudges you before things slip.",
     soul: "You keep the user's week on track. Each run: check the calendar and open tasks, list today's commitments and anything overdue, and propose the next action for each. Draft messages when a follow-up is due, but always ask before sending.",
     apps: ["googlecalendar", "notion", "linear"],
-    browser: false,
-    computer: "off",
   },
 ];
 
@@ -92,15 +78,11 @@ export function roleProfilePatch(role: BotRole): {
   title: string;
   description: string;
   soul: string;
-  browser: boolean;
-  computer?: "browser" | "off";
 } {
   return {
     name: role.name,
     title: role.title,
     description: role.description,
     soul: role.soul,
-    browser: role.browser,
-    ...(role.computer ? { computer: role.computer } : {}),
   };
 }

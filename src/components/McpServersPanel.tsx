@@ -15,7 +15,7 @@ import {
 import { cn } from "@/lib/cn";
 import { t } from "@/lib/i18n";
 import type { LocaleKey } from "@/locales";
-import { loadMcpServers } from "@/lib/mcp-servers";
+import { updateMcpServers } from "@/lib/mcp-servers";
 import { api } from "@/state/store";
 
 export interface McpServerListing {
@@ -106,6 +106,7 @@ export function McpServersPanel() {
   // write. The server applies the form's rules and adds them switched off.
   const importServers = async () => {
     if (!importText.trim()) return;
+    const generation = ++loadGeneration.current;
     setBusy("import");
     setError(null);
     setNotice(null);
@@ -114,15 +115,16 @@ export function McpServersPanel() {
         method: "POST",
         body: JSON.stringify({ json: importText }),
       });
+      updateMcpServers(result.servers ?? []);
+      if (generation !== loadGeneration.current) return;
       setServers(result.servers ?? []);
       setNotice({ key: "mcp.imported", params: { names: (result.added ?? []).join(", ") } });
       setImportText("");
       setImportOpen(false);
-      void loadMcpServers(true);
     } catch (cause) {
-      setError(cause instanceof Error ? cause.message : String(cause));
+      if (generation === loadGeneration.current) setError(cause instanceof Error ? cause.message : String(cause));
     } finally {
-      setBusy(null);
+      if (generation === loadGeneration.current) setBusy(null);
     }
   };
 
@@ -132,7 +134,10 @@ export function McpServersPanel() {
     setError(null);
     return api("/api/mcp/servers")
       .then((result) => {
-        if (generation === loadGeneration.current) setServers(result.servers ?? []);
+        if (generation === loadGeneration.current) {
+          setServers(result.servers ?? []);
+          updateMcpServers(result.servers ?? []);
+        }
       })
       .catch((cause) => {
         if (generation === loadGeneration.current) setError(cause instanceof Error ? cause.message : String(cause));
@@ -144,6 +149,7 @@ export function McpServersPanel() {
 
   useEffect(() => {
     void load();
+    return () => { loadGeneration.current += 1; };
   }, [load]);
 
   const closeEditor = () => {
@@ -183,6 +189,7 @@ export function McpServersPanel() {
         },
       );
       setServers(result.servers ?? []);
+      updateMcpServers(result.servers ?? []);
       setNotice({ key: editing === "new" ? "mcp.saved" : "mcp.updated", params: { name } });
       closeEditor();
     } catch (cause) {
@@ -202,6 +209,7 @@ export function McpServersPanel() {
         body: JSON.stringify({ enabled: !server.enabled }),
       });
       setServers(result.servers ?? []);
+      updateMcpServers(result.servers ?? []);
       setNotice({
         key: "mcp.toggled",
         params: { name: server.name },
@@ -244,6 +252,7 @@ export function McpServersPanel() {
     try {
       const result = await api(`/api/mcp/servers/${server.name}`, { method: "DELETE" });
       setServers(result.servers ?? []);
+      updateMcpServers(result.servers ?? []);
       setProbe((current) => {
         const next = { ...current };
         delete next[server.name];
@@ -311,6 +320,7 @@ export function McpServersPanel() {
             <p className="mt-1 text-[12px] leading-relaxed text-ink-secondary">{t("mcp.importHint")}</p>
             <textarea
               autoFocus
+              aria-label={t("mcp.import")}
               value={importText}
               onChange={(event) => setImportText(event.target.value)}
               spellCheck={false}
@@ -321,6 +331,7 @@ export function McpServersPanel() {
             <div className="mt-3 flex items-center justify-end gap-2">
               <button
                 type="button"
+                disabled={busy === "import"}
                 onClick={() => {
                   setImportOpen(false);
                   setImportText("");
@@ -333,7 +344,7 @@ export function McpServersPanel() {
                 type="button"
                 disabled={busy !== null || !importText.trim()}
                 onClick={() => void importServers()}
-                className="rounded-lg bg-accent px-3 py-2 text-[12.5px] font-medium text-white disabled:opacity-40"
+                className="rounded-lg bg-accent px-3 py-2 text-[12.5px] font-medium text-accent-ink disabled:opacity-40"
               >
                 {t("mcp.importAction")}
               </button>

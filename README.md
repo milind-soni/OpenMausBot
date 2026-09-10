@@ -384,7 +384,11 @@ AI-provider sign-in. Devices pair once with a short code. The deployment guide i
 
 ## License
 
-[Apache License 2.0](LICENSE) © 2026 Milind Soni and OpenMausBot contributors.
+[Apache License 2.0](LICENSE) © 2026 Milind Soni and OpenMausBot contributors,
+except `enterprise/`, which is source-available under its
+[own license](enterprise/LICENSE); delete that folder and what remains is the
+open-source edition. Details, including how contributions are signed off, are
+in [LICENSING.md](LICENSING.md).
 
 Packaged Cua Driver components retain their upstream MIT, SIL OFL 1.1, MPL-2.0, and other dependency terms;
 the corresponding notices, license texts, source locations, and SBOM are in

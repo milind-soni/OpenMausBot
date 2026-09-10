@@ -7,8 +7,11 @@ Every OpenMausBot desktop build can play either role:
 
 The roles are platform-independent. A Windows, macOS, or Ubuntu build can host, and any other desktop build can be its client. One app installation uses one role at a time; disconnecting a client returns that installation to host mode without deleting its local host data.
 
-This mode is separate from the desktop app's **Server** menu. The Server menu
-loads a remote server's web UI directly using that server's browser session.
+This mode is separate from **Self-hosted server** in **Settings → Remote
+access → Connect to another computer** (also available through the **Server**
+menu). Self-hosted server connections load the remote server's web UI directly
+using that server's browser session. Use that option for a custom HTTPS domain
+or Cloudflare tunnel to a self-hosted server and its 12-character pairing link.
 Desktop companion mode instead keeps the bundled UI and native integrations on
 the client, sends API traffic through the default-deny companion boundary, and
 provides the per-device VPS viewer and client-local Mac voice behavior described
@@ -18,7 +21,8 @@ below. The two connection types intentionally do not share credentials.
 
 1. On the host, open **Settings → Remote access** and finish **Secure HTTPS pairing**.
 2. Open a pairing window so the host displays a six-digit code.
-3. On the client, open **Settings → Remote access**.
+3. On the client, open **Settings → Remote access → Connect to another computer**
+   and choose **Desktop companion**.
 4. Enter the host's managed `https://…openmausbot.com` companion address and the six-digit code.
 5. Choose **Pair and switch to client mode**. The client restarts and opens the host's bot UI.
 
@@ -28,7 +32,8 @@ The HTTPS address uses the host's managed outbound tunnel. TLS is verified by th
 
 1. Install Tailscale on both computers, sign into the same tailnet, and leave MagicDNS enabled.
 2. On the host, open **Settings → Remote access**, turn on Remote access, and open **Pair over Tailscale** to display a six-digit code.
-3. On the client, open **Settings → Remote access**.
+3. On the client, open **Settings → Remote access → Connect to another computer**
+   and choose **Desktop companion**.
 4. Enter the host's full `.ts.net` MagicDNS name and the six-digit code.
 5. Choose **Pair and switch to client mode**. The client restarts and opens the host's bot UI.
 

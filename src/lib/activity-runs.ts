@@ -18,13 +18,13 @@ export type TranscriptItem =
   | { kind: "turn"; id: string; turnId: string; label: string; messages: Message[] };
 
 /** A step that may be folded away: finished, a real tool, and not a
- * bot⇄bot chip (those are navigation, not work) or a failed turn (that
- * renders as an error). A step still running stays out, so live progress
- * is never hidden behind a fold. */
+ * bot⇄bot or opened-thread chip (those are navigation, not work) or a
+ * failed turn (that renders as an error). A step still running stays out,
+ * so live progress is never hidden behind a fold. */
 function foldable(message: Message): boolean {
   const tool = message.tool;
   if (message.kind !== "activity" || !tool) return false;
-  if (message.comm) return false;
+  if (message.comm || message.threadRef) return false;
   if (tool.ok !== true) return false;
   return !tool.name.startsWith("error:");
 }

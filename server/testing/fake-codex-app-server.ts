@@ -9,6 +9,8 @@
 //                     config-profile-unsupported | config-read-error | image |
 //                     logged-in-stdout | logged-out | unauthorized | late-request
 //   FAKE_CODEX_DUMP   path to write {pid, argv, env, calls, decision} as JSON
+//   FAKE_CODEX_ACCOUNT_EMAIL  synthetic ChatGPT identity (default ada@example.test)
+//   FAKE_CODEX_ACCOUNT_MODE   chatgpt (default) | api-key | none | unsupported | error | hang
 //
 // Keep this file dependency-free — it runs as a bare `node` subprocess.
 import { readFileSync, writeFileSync } from "node:fs";
@@ -106,6 +108,23 @@ process.stdin.on("data", (chunk) => {
         experimentalApi = msg.params?.capabilities?.experimentalApi === true;
         out({ jsonrpc: "2.0", id: msg.id, result: { ok: true } });
         break;
+      case "account/read": {
+        dump();
+        const accountMode = process.env.FAKE_CODEX_ACCOUNT_MODE;
+        if (accountMode === "hang") break;
+        if (accountMode === "unsupported" || accountMode === "error") {
+          out({ jsonrpc: "2.0", id: msg.id, error: {
+            code: accountMode === "unsupported" ? -32601 : -32000,
+            message: "Offline fixture account read unavailable",
+          } });
+          break;
+        }
+        const account = accountMode === "none" || mode === "logged-out" ? null
+          : accountMode === "api-key" ? { type: "apiKey" }
+          : { type: "chatgpt", email: process.env.FAKE_CODEX_ACCOUNT_EMAIL ?? "ada@example.test", planType: "pro" };
+        out({ jsonrpc: "2.0", id: msg.id, result: { account, requiresOpenaiAuth: true } });
+        break;
+      }
       case "model/list":
         if (msg.params?.cursor === "page-2") {
           out({

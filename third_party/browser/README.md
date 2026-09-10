@@ -2,13 +2,15 @@
 
 The desktop application ships two separate components:
 
-- **agent-browser 0.36.0**, official Vercel release executables from
-  <https://github.com/vercel-labs/agent-browser/releases/tag/v0.36.0>.
+- **agent-browser 0.37.0** on macOS and Linux, official Vercel release executables from
+  <https://github.com/vercel-labs/agent-browser/releases/tag/v0.37.0>.
   Its Apache-2.0 license is included as `agent-browser-LICENSE.txt`.
   The bundled axe-core code's upstream license and third-party notices are
   included as `LICENSE-axe-core.txt` and `LICENSE-axe-core-THIRD-PARTY.txt`.
-  These files are copied from the same `v0.36.0` source tag; there is no
-  root-level NOTICE in that tag.
+  These files match the `v0.37.0` source tag (unchanged from `v0.36.0`); there
+  is no root-level NOTICE in that tag. All six official macOS/Linux binaries
+  were downloaded and their SHA-256 digests checked against GitHub's release
+  metadata on 2026-09-08.
 - **Windows exception: agent-browser 0.36.0-omb.1** is an OpenMausBot vendor
   build, not an official or unmodified Vercel executable. It starts from exact
   v0.36.0 commit `eb05921bad874cd2a1b4fa5d1149f1ed26576cae` and carries only
@@ -23,6 +25,8 @@ The desktop application ships two separate components:
   builds the real upstream dashboard, and emits executable and build-input
   digests in `provenance.json`. Native Windows cold-start and close/reopen
   checks are required before those executable bytes are published and pinned.
+  Upstream 0.37.0 does not include that fix; keep this tested Windows build
+  until an updated official or backported release passes those native checks.
 - **Chromium Headless Shell 152.0.7977.82**, Google's official
   `chrome-headless-shell` assets published through Chrome for Testing:
   <https://googlechromelabs.github.io/chrome-for-testing/152.0.7977.82.json>.

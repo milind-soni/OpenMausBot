@@ -70,6 +70,7 @@ describe("team import preview", () => {
         rooms: [{}],
         playbooks: [{}, {}],
         routines: [{}],
+        skills: { version: 1, entries: [{ name: "source-check" }, { name: "review-draft" }] },
         requirements: {
           apps: [
             { label: "Reddit" },
@@ -86,6 +87,7 @@ describe("team import preview", () => {
       rooms: 1,
       playbooks: 2,
       routines: 1,
+      skills: ["source-check", "review-draft"],
       apps: [
         { label: "Reddit", optional: false },
         { label: "Google Sheets", optional: true },

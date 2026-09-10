@@ -17,16 +17,19 @@ import androidx.compose.runtime.getValue
 import androidx.core.app.NotificationManagerCompat
 import androidx.core.content.ContextCompat
 import com.openmausbot.companion.dictation.SpeechDictation
+import com.openmausbot.companion.lifecycle.AlwaysOnConnectionService
 import com.openmausbot.companion.notifications.notificationTarget
 import com.openmausbot.companion.browser.CloudDesktopBrowser
 import com.openmausbot.companion.sharing.TranscriptSharing
 import com.openmausbot.companion.storage.ChatPreferences
+import android.os.PowerManager
 import com.openmausbot.companion.ui.CameraPermissionController
 import com.openmausbot.companion.ui.ChatDraftHolder
 import com.openmausbot.companion.ui.CompanionEnvironment
 import com.openmausbot.companion.ui.CompanionRoot
 import com.openmausbot.companion.ui.LocalCompanion
 import com.openmausbot.companion.ui.MicPermissionController
+import com.openmausbot.companion.ui.NotificationAccess
 import com.openmausbot.companion.ui.NotificationPermissionController
 import com.openmausbot.companion.ui.PermissionPreferences
 import com.openmausbot.companion.ui.PermissionRequests
@@ -182,6 +185,8 @@ class MainActivity : ComponentActivity() {
             shareTranscript = sharing::share,
             openCloudDesktop = browser::open,
             shareInbox = app.shareInbox,
+            alwaysOnEnabled = app.alwaysOn.enabled,
+            onToggleAlwaysOn = ::toggleAlwaysOn,
         )
 
         handleIntent(intent)
@@ -266,6 +271,45 @@ class MainActivity : ComponentActivity() {
                 data = Uri.fromParts("package", packageName, null)
             },
         )
+    }
+
+    /**
+     * Flip the setting, start/stop the service to match, and — only when
+     * turning it on — ask once to be exempted from battery optimizations.
+     * Without that exemption Android's Doze/App Standby can still suspend a
+     * foreground service's network access on some OEM skins, which would make
+     * the persistent notification a lie. This is a plain `startActivity`, not a
+     * permission launcher: the system dialog's own Allow/Deny is the answer,
+     * and `onResume`'s refresh (via `NotificationPermissionController` et al.)
+     * already covers "state changed while backgrounded" for the rest of the
+     * screen, so nothing here needs to await a result.
+     */
+    private fun toggleAlwaysOn() {
+        val enabling = !app.alwaysOn.enabled.value
+        if (enabling && notifications.access.value != NotificationAccess.GRANTED) {
+            // A background connection whose notifications can't post is a
+            // foreground service and battery cost for nothing — send the user
+            // to fix that first instead of turning this on silently broken.
+            notifications.act()
+            return
+        }
+        if (!app.alwaysOn.setEnabled(enabling)) return
+        if (enabling) {
+            AlwaysOnConnectionService.start(this)
+            requestIgnoreBatteryOptimizations()
+        } else {
+            AlwaysOnConnectionService.stop(this)
+        }
+    }
+
+    private fun requestIgnoreBatteryOptimizations() {
+        val powerManager = getSystemService(PowerManager::class.java) ?: return
+        if (powerManager.isIgnoringBatteryOptimizations(packageName)) return
+        val intent = Intent(Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS)
+            .setData(Uri.parse("package:$packageName"))
+        if (intent.resolveActivity(packageManager) != null) {
+            startActivity(intent)
+        }
     }
 
     private fun preferredLanguageTags(): List<String> {

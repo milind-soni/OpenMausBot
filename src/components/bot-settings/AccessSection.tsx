@@ -6,10 +6,11 @@
 // standing grants) are new.
 import { useEffect, useState } from "react";
 import { browserUnavailableReason } from "@/lib/feature-flags";
-import { ExternalLink, FolderOpen, Plus } from "lucide-react";
+import { FolderOpen, Plus } from "lucide-react";
 
 import { api, useStore, type Bot } from "@/state/store";
 import { cn } from "@/lib/cn";
+import { t } from "@/lib/i18n";
 import { mcpServersForBot, useMcpServers } from "@/lib/mcp-servers";
 import { shortPath } from "@/lib/short-path";
 import { useDesktopCapabilities } from "../DesktopCapabilities";
@@ -101,137 +102,17 @@ function WorkingFolder({ bot }: { bot: Bot }) {
   );
 }
 
-interface CatalogCard {
-  slug: string;
-  label: string;
-}
-
-/** "Connect an app" without leaving the bot: the same authorize route the
- * Plugins panel uses, opened in the system browser, then the inventory is
- * re-read until the connection lands (or two minutes pass). */
-function ConnectApp({ connected, onConnected }: { connected: string[]; onConnected: () => void }) {
-  const [open, setOpen] = useState(false);
-  const [cards, setCards] = useState<CatalogCard[] | null>(null);
-  const [filter, setFilter] = useState("");
-  const [busy, setBusy] = useState<string | null>(null);
-  const [waiting, setWaiting] = useState<string | null>(null);
-  const [error, setError] = useState<string | null>(null);
-
-  useEffect(() => {
-    if (!open || cards !== null) return;
-    let cancelled = false;
-    api("/api/connectors/catalog")
-      .then((result) => {
-        if (cancelled) return;
-        setCards((result.cards ?? []).map((card: CatalogCard) => ({ slug: card.slug, label: card.label })));
-      })
-      .catch((cause) => {
-        if (!cancelled) setError(cause instanceof Error ? cause.message : String(cause));
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [open, cards]);
-
-  const connect = async (slug: string) => {
-    setBusy(slug);
-    setError(null);
-    try {
-      const { url } = await api(`/api/connectors/${slug}/authorize`, { method: "POST" });
-      if (window.ogb?.openExternal) await window.ogb.openExternal(url);
-      else window.open(url, "_blank", "noopener");
-      setWaiting(slug);
-      // poll the inventory the way the Plugins panel does; stop when the
-      // app shows up as connected, or give up quietly after two minutes
-      let tries = 0;
-      const timer = setInterval(() => {
-        void preloadConnectedApps(true).then((inventory) => {
-          const status = inventory.services[slug];
-          if ((status?.connected && !status.pending) || ++tries >= 24) {
-            clearInterval(timer);
-            setWaiting((current) => (current === slug ? null : current));
-            if (status?.connected) {
-              onConnected();
-              setOpen(false);
-            }
-          }
-        });
-      }, 5000);
-    } catch (cause) {
-      setError(cause instanceof Error ? cause.message : String(cause));
-    } finally {
-      setBusy(null);
-    }
-  };
-
-  const shown = (cards ?? [])
-    .filter((card) => !connected.includes(card.slug))
-    .filter((card) => !filter.trim() || card.label.toLowerCase().includes(filter.trim().toLowerCase()) || card.slug.includes(filter.trim().toLowerCase()))
-    .slice(0, 12);
-
-  return (
-    <div className="mt-3">
-      {!open ? (
-        <button
-          type="button"
-          onClick={() => setOpen(true)}
-          className="flex items-center gap-1.5 rounded-lg bg-control px-3 py-2 text-[13px] text-ink hover:bg-raised-hover"
-        >
-          <Plus size={14} /> Connect an app…
-        </button>
-      ) : (
-        <div className="rounded-lg border border-hairline/40 bg-inset p-3">
-          <div className="flex items-center gap-2">
-            <input
-              autoFocus
-              value={filter}
-              onChange={(event) => setFilter(event.target.value)}
-              placeholder="Search apps"
-              className={cn(inputCls, "flex-1")}
-            />
-            <button type="button" onClick={() => setOpen(false)} className="rounded-lg px-2 py-2 text-[13px] text-ink-secondary hover:text-ink">
-              Done
-            </button>
-          </div>
-          {error && <div className="mt-2 text-[12px] text-danger">{error}</div>}
-          {cards === null && !error ? (
-            <div className="mt-2 text-[12px] text-ink-secondary">Loading…</div>
-          ) : shown.length === 0 ? (
-            <div className="mt-2 text-[12px] text-ink-secondary">No matching apps.</div>
-          ) : (
-            <div className="mt-2 flex flex-wrap gap-1.5">
-              {shown.map((card) => (
-                <button
-                  key={card.slug}
-                  type="button"
-                  disabled={busy !== null || waiting !== null}
-                  onClick={() => void connect(card.slug)}
-                  className="flex items-center gap-1.5 rounded-full border border-hairline/40 bg-card px-2.5 py-1 text-[12.5px] text-ink hover:border-accent/50 disabled:opacity-50"
-                >
-                  {card.label}
-                  {waiting === card.slug ? <span className="text-[11px] text-ink-secondary">finishing in your browser…</span> : <ExternalLink size={12} className="text-ink-secondary" />}
-                </button>
-              ))}
-            </div>
-          )}
-          <div className="mt-2 text-[11.5px] text-ink-secondary">Sign-in opens in your browser. Come back here when it finishes.</div>
-        </div>
-      )}
-    </div>
-  );
-}
-
 /** Which app-wide MCP servers this bot mounts. Absent list = all enabled
  * (the pre-existing behavior); the first switch flip writes an explicit
  * list so later additions in Plugins do not silently reach this bot. */
 function McpServersCard({ bot, patch }: { bot: Bot; patch: (patch: { mcpServers: string[] | null }) => void }) {
   const { dispatch } = useStore();
-  const { servers } = useMcpServers();
+  const { servers, error, refresh } = useMcpServers();
   const mounted = new Set((servers ? mcpServersForBot(servers, bot.mcpServers) : []).map((server) => server.name));
   const usesAll = bot.mcpServers == null;
 
   const toggle = (name: string) => {
-    if (!servers) return;
+    if (!servers || bot.busy || error) return;
     const current = usesAll ? servers.filter((server) => server.enabled).map((server) => server.name) : [...(bot.mcpServers ?? [])];
     const next = current.includes(name) ? current.filter((item) => item !== name) : [...current, name];
     patch({ mcpServers: next });
@@ -245,28 +126,33 @@ function McpServersCard({ bot, patch }: { bot: Bot; patch: (patch: { mcpServers:
     <div className="rounded-xl bg-card p-4">
       <div className="flex items-center justify-between gap-4">
         <div>
-          <div className="text-[15px] font-medium text-ink">MCP servers</div>
+          <div className="text-[15px] font-medium text-ink">{t("connectors.tab.mcp")}</div>
           <div className="mt-0.5 text-[13px] text-ink-secondary">
-            Tools from MCP servers you added under Plugins. Each call still goes through this bot's approval mode.
+            {t("botAccess.mcpDescription")}
           </div>
         </div>
       </div>
-      {servers === null ? (
-        <div className="mt-3 text-[12px] text-ink-secondary">Loading…</div>
+      {error && (
+        <div role="alert" className="mt-3 text-[12px] text-danger">
+          {t("botAccess.mcpRefreshError")} <button type="button" onClick={() => void refresh()} className="underline">{t("connectors.action.retry")}</button>
+        </div>
+      )}
+      {servers === null ? !error && (
+        <div className="mt-3 text-[12px] text-ink-secondary">{t("mcp.loading")}</div>
       ) : servers.length === 0 ? (
-        <div className="mt-3 rounded-lg bg-inset px-3 py-2 text-[12px] text-ink-secondary">No MCP servers added yet.</div>
+        <div className="mt-3 rounded-lg bg-inset px-3 py-2 text-[12px] text-ink-secondary">{t("botAccess.mcpEmpty")}</div>
       ) : (
         <div className="mt-3 divide-y divide-hairline/40 overflow-hidden rounded-lg border border-hairline/40">
           {servers.map((server) => (
             <div key={server.name} className="flex items-center justify-between gap-3 px-3 py-2">
               <div className="min-w-0 flex-1">
                 <div className="truncate font-mono text-[12.5px] text-ink">{server.name}</div>
-                {!server.enabled && <div className="text-[11.5px] text-ink-secondary">Switched off under Plugins — test it and turn it on there first.</div>}
+                {!server.enabled && <div className="text-[11.5px] text-ink-secondary">{t("botAccess.mcpDisabled")}</div>}
               </div>
               <Switch
                 checked={mounted.has(server.name)}
-                disabled={!server.enabled}
-                aria-label={`Let this bot use ${server.name}`}
+                disabled={!server.enabled || !!bot.busy || error}
+                aria-label={t("botAccess.mcpAllow", { name: server.name })}
                 onClick={() => toggle(server.name)}
                 className="disabled:cursor-not-allowed"
               />
@@ -276,14 +162,15 @@ function McpServersCard({ bot, patch }: { bot: Bot; patch: (patch: { mcpServers:
       )}
       <div className="mt-3 flex items-center gap-2">
         <button type="button" onClick={openPlugins} className="flex items-center gap-1.5 rounded-lg bg-control px-3 py-2 text-[13px] text-ink hover:bg-raised-hover">
-          <Plus size={14} /> Add an MCP server…
+          <Plus size={14} /> {t("botAccess.mcpAdd")}
         </button>
         {!usesAll && servers && servers.length > 0 && (
-          <button type="button" onClick={() => patch({ mcpServers: null })} className="rounded-lg px-2 py-2 text-[13px] text-ink-secondary hover:text-ink">
-            Use every enabled server
+          <button type="button" disabled={!!bot.busy || error} onClick={() => { if (!bot.busy && !error) patch({ mcpServers: null }); }} className="rounded-lg px-2 py-2 text-[13px] text-ink-secondary hover:text-ink disabled:opacity-50">
+            {t("botAccess.mcpUseAll")}
           </button>
         )}
       </div>
+      {bot.busy && <p className="mt-2 text-[12px] text-ink-secondary">{t("botAccess.mcpBusy")}</p>}
     </div>
   );
 }
@@ -461,10 +348,16 @@ export function AccessSection({
           </div>
         )}
         {connectedAppsEnabled && connectedAppsConfigured && (
-          <ConnectApp
-            connected={connectedSlugs}
-            onConnected={() => void preloadConnectedApps(true).then((result) => setInventory(result))}
-          />
+          <button
+            type="button"
+            onClick={() => {
+              dispatch({ type: "toggleSettings", open: false });
+              dispatch({ type: "togglePlugins", open: true, surface: "apps" });
+            }}
+            className="mt-3 flex items-center gap-1.5 rounded-lg bg-control px-3 py-2 text-[13px] text-ink hover:bg-raised-hover"
+          >
+            <Plus size={14} /> {t("botAccess.connectApp")}
+          </button>
         )}
       </div>
 

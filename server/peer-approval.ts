@@ -61,8 +61,14 @@ function settleCard(pending: Pending, behavior: string, source: "user" | "system
   });
   // answered (by whoever): the turn is working again — the same hand-back
   // the request.resolved fold does for a provider's card
-  const waiting = pending.bus.store.bot(pending.fromBotId);
-  if (waiting?.activity === "waiting-on-you") pending.bus.store.setActivity(waiting.id, "working");
+  const store = pending.bus.store;
+  const task = store.projectBotForTask(pending.fromBotId, pending.threadId);
+  if (task) {
+    if (task.activity === "waiting-on-you") store.setTaskActivity(task.id, pending.threadId, "working");
+  } else if (store.groupByThread(pending.threadId)) {
+    const waiting = store.bot(pending.fromBotId);
+    if (waiting?.activity === "waiting-on-you") store.setActivity(waiting.id, "working");
+  }
 }
 
 /** requestId → pending ask. Lives only in memory — restarting the
@@ -129,9 +135,13 @@ function pushApprovalCard(
 function announceCard(bus: ApprovalBus, from: BotRecord, card: Message, sourceThreadId: string): void {
   // the bot is not working now — it is waiting on a person. A delegation
   // drained after its turn has already settled is idle, and stays so.
-  const live = bus.store.bot(from.id);
-  if (live?.busy) bus.store.setActivity(from.id, "waiting-on-you");
+  const task = bus.store.projectBotForTask(from.id, sourceThreadId);
   const room = bus.store.groupByThread(sourceThreadId);
+  if (task) {
+    if (task.busy) bus.store.setTaskActivity(from.id, sourceThreadId, "waiting-on-you");
+  } else if (room && bus.store.bot(from.id)?.busy) {
+    bus.store.setActivity(from.id, "waiting-on-you");
+  }
   const group = room && !room.dm ? { id: room.id, name: room.name } : undefined;
   const title = card.card?.title ?? "";
   const detail = card.card?.subtitle ? `${title} — ${card.card.subtitle}` : title;
@@ -204,7 +214,7 @@ export function resolvePeerComms(
 /** Drop every approval waiting on a bot that no longer exists (or is being
  * deleted), denying it so the caller's turn doesn't wait out the timeout. */
 export function cancelPeerApprovalsFor(botId: string): void {
-  for (const [requestId, pending] of [...pendingComms]) {
+  for (const [requestId, pending] of Array.from(pendingComms)) {
     if (pending.fromBotId !== botId && pending.toBotId !== botId) continue;
     pendingComms.delete(requestId);
     clearTimeout(pending.timer);

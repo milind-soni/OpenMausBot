@@ -120,13 +120,18 @@ class CompanionNavigator(initial: List<Destination> = listOf(Destination.Roster)
 
     /**
      * The fleet said who owns [threadId]: the entry stops being a thread, in
-     * place, so back still leads where it did and the chat now follows its bot.
+     * place, so back still leads where it did and the task remains pinned.
      *
      * Guarded on the entry still being that thread — the reader can leave while
      * the fleet is landing, and this must not re-address whatever they left to.
      */
     fun resolveThread(threadId: String, target: ChatTarget) {
-        if (stack.last() != Destination.Thread(threadId)) return
+        selectTask(Destination.Thread(threadId), target)
+    }
+
+    /** Only an explicit successful action replaces the locally selected task. */
+    fun selectTask(from: Destination.Conversation, target: ChatTarget) {
+        if (stack.last() != from) return
         stack = stack.dropLast(1) + Destination.Chat(target)
     }
 

@@ -15,6 +15,7 @@ const SKIN_CHROME = Object.freeze({
   graphite: Object.freeze({ color: "#111214", symbolColor: "#b3b8c2" }),
   linen: Object.freeze({ color: "#eceff3", symbolColor: "#59616c" }),
   dusk: Object.freeze({ color: "#121014", symbolColor: "#b9afbd" }),
+  daylight: Object.freeze({ color: "#fcfcfc", symbolColor: "#575757" }),
 });
 
 const DEFAULT_SKIN = "midnight";

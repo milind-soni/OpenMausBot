@@ -63,7 +63,7 @@ export class Speaker {
 
   private set(next: SpeechSnapshot) {
     this.snapshot = next;
-    for (const watcher of [...this.watchers]) watcher(next);
+    for (const watcher of Array.from(this.watchers)) watcher(next);
   }
 
   /** True while this exact message is the one being spoken. */

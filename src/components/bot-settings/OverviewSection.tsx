@@ -4,9 +4,10 @@
 // about what a bot does. Pure presentational — no store, no fetch; the
 // dialog owns loading, errors, and the section switch (onOpen).
 import { useState } from "react";
-import { Check, Circle, Sparkles } from "lucide-react";
+import { Circle, Sparkles } from "lucide-react";
 
 import type { BotOverview } from "@/lib/bot-overview-types";
+import { t } from "@/lib/i18n";
 import { whenLabel } from "@/lib/schedule-label";
 import type { BotSettingsSection } from "@/state/store";
 import { PromptPreview, type PromptPreviewData } from "./PromptPreview";
@@ -46,21 +47,15 @@ export function OverviewSection({
 
       {remaining.length > 0 && (
         <div className="rounded-xl border border-accent/30 bg-accent/[0.06] p-4">
-          <div className="flex items-baseline justify-between gap-3">
-            <div className="text-[15px] font-medium text-ink">Finish setting up</div>
-            <div className="shrink-0 text-[12px] text-ink-secondary">
-              {setup.length - remaining.length} of {setup.length} done
-            </div>
-          </div>
+          <div className="text-[15px] font-medium text-ink">{t("botSetup.ideas")}</div>
+          <p className="mt-1 text-[13px] text-ink-secondary">{t("botSetup.optional")}</p>
           <ul className="mt-2 flex flex-col gap-1">
-            {setup.map((step) => (
+            {remaining.map((step) => (
               <li key={step.id}>
-                {step.done || !step.section ? (
+                {!step.section ? (
                   <div className="flex items-center gap-2.5 px-1 py-1 text-[13px] text-ink">
-                    {step.done
-                      ? <Check size={14} className="shrink-0 text-accent-text" />
-                      : <Circle size={14} className="shrink-0 text-ink-secondary" />}
-                    <span className={step.done ? "text-ink-secondary line-through" : ""}>{step.label}</span>
+                    <Circle aria-hidden="true" size={14} className="shrink-0 text-ink-secondary" />
+                    <span>{step.label}</span>
                   </div>
                 ) : (
                   <button
@@ -68,7 +63,7 @@ export function OverviewSection({
                     onClick={() => onOpen(step.section!)}
                     className="flex w-full items-center gap-2.5 rounded-lg px-1 py-1 text-left text-[13px] text-ink hover:bg-inset"
                   >
-                    <Circle size={14} className="shrink-0 text-ink-secondary" />
+                    <Circle aria-hidden="true" size={14} className="shrink-0 text-ink-secondary" />
                     <span className="flex-1">{step.label}</span>
                     <span className="text-[12px] text-ink-secondary">→</span>
                   </button>
@@ -81,11 +76,11 @@ export function OverviewSection({
               <button
                 type="button"
                 onClick={onSetup}
-                className="flex items-center gap-1.5 rounded-lg bg-accent px-3 py-2 text-[12.5px] font-medium text-white hover:brightness-110"
+                className="flex items-center gap-1.5 rounded-lg bg-accent px-3 py-2 text-[12.5px] font-medium text-accent-ink hover:brightness-110"
               >
-                <Sparkles size={14} /> Set up with the bot
+                <Sparkles size={14} /> {t("botSetup.withBot")}
               </button>
-              <span className="text-[12px] text-ink-secondary">It interviews you and fills these in itself.</span>
+              <span className="text-[12px] text-ink-secondary">{t("botSetup.help")}</span>
             </div>
           )}
         </div>

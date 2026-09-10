@@ -50,7 +50,7 @@ RUN if [ -n "$ENGINES" ]; then npm install -g $ENGINES; fi
 # The bots' browser (docs/plans/browser-engine.md): the pinned agent-browser
 # and a Chrome for Testing with its libraries, so a server bot can browse.
 # Pin here and in server/browser-engine-release.ts together.
-ARG AGENT_BROWSER_VERSION=0.36.0
+ARG AGENT_BROWSER_VERSION=0.37.0
 RUN npm install -g agent-browser@${AGENT_BROWSER_VERSION} \
   && HOME=/opt/openmausbot-browser agent-browser install \
   && ln -s /opt/openmausbot-browser/.agent-browser/browsers/chrome-*/chrome /opt/openmausbot-browser/chrome \

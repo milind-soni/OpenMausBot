@@ -215,7 +215,7 @@ export function PluginsPanel() {
   const remoteClient = window.ogb?.remoteClient?.active === true;
   const mayDisconnect = connectedAppsMayDisconnect(remoteClient);
   const dialogRef = useRef<HTMLDivElement>(null);
-  const [surface, setSurface] = useState<"apps" | "mcp">(state.pluginsSurface);
+  const surface = state.pluginsSurface;
   const [cards, setCards] = useState<ToolkitCard[] | null>(null);
   const [source, setSource] = useState<"api" | "curated">("curated");
   const [configured, setConfigured] = useState(true);
@@ -540,7 +540,7 @@ export function PluginsPanel() {
                 type="button"
                 role="tab"
                 aria-selected={surface === item}
-                onClick={() => setSurface(item)}
+                onClick={() => dispatch({ type: "togglePlugins", open: true, surface: item })}
                 className={cn(
                   "border-b-2 px-0.5 pb-3 pt-1 text-[13.5px] font-medium transition-colors",
                   surface === item ? "border-accent text-ink" : "border-transparent text-ink-secondary hover:text-ink",

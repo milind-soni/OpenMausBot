@@ -3,29 +3,29 @@
 // is the stuff shared by every bot: who you are, your keys, and the
 // machine your bots can borrow.
 import { useEffect, useRef, useState } from "react";
-import { Coins, FlaskConical, Globe, KeyRound, Monitor, Search, TabletSmartphone, Terminal, Trash2, User, X } from "lucide-react";
+import { Coins, FlaskConical, KeyRound, Monitor, Palette, Search, TabletSmartphone, Terminal, User, X } from "lucide-react";
 import { api, useStore, type AppSettingsSection, type ConfigStatus } from "@/state/store";
 import { analyticsEnabled, setAnalyticsEnabled } from "@/lib/analytics";
-import { browserAvailable, browserUnavailableReason, builtInBrowserEnabled, showToolCallsEnabled, skillRecorderEnabled } from "@/lib/feature-flags";
+import { browserAvailable, browserUnavailableReason, builtInBrowserEnabled, showToolCallsEnabled, skillAuthoringEnabled } from "@/lib/feature-flags";
 import { localeChoices, type LocaleKey } from "@/locales";
 import { t } from "@/lib/i18n";
-import { ApiKeyRow, VpsConnection } from "./ApiKeys";
+import { ApiKeyRow, OpenAiCompatUrl, VpsConnection } from "./ApiKeys";
 import { useUpdaterState } from "@/lib/updater";
 import { EnginesSettings } from "./EnginesSettings";
 import { LocalComputerSection } from "./LocalComputerSection";
 import { CompanionSection } from "./CompanionSection";
+import { ServerPairingCard } from "./ServerPairingCard";
+import { SignInAccessCard } from "./SignInAccessCard";
 import { CustomDomainSettings } from "./CustomDomainSettings";
+import { BrowserProfilesManager } from "./BrowserProfilesManager";
 import { RemoteComputerSection } from "./RemoteComputerSection";
 import { Card, Switch } from "./SettingsPrimitives";
 import { UsageSection } from "./UsageSection";
 import { SkinPicker } from "./SkinPicker";
 import { RoomTurnTimeoutSettings } from "./RoomTurnTimeoutSettings";
-import { TranscriptionSettings } from "./TranscriptionSettings";
+import { ThreadConcurrencySettings } from "./ThreadConcurrencySettings";
 import { cn } from "@/lib/cn";
-import {
-  browserProfileDeletionBlockReason,
-  browserProfilesForPatch,
-} from "@/lib/browser-profiles";
+import { setShowThreads, useShowThreads } from "@/lib/thread-preferences";
 
 // `labelKey`, not a label: t() reads the active pack when it is called, so a
 // label resolved here at module scope would freeze the language the app booted
@@ -37,8 +37,9 @@ const SECTIONS: Array<{
   icon: typeof User;
   keywords: string[];
 }> = [
-  { id: "general", labelKey: "settings.section.general", icon: User, keywords: ["profile", "name", "email", "skin", "theme", "appearance", "analytics", "updates", "tools", "tool calls"] },
-  { id: "experimental", labelKey: "settings.section.experimental", icon: FlaskConical, keywords: ["early", "preview", "teach", "skill", "browser", "profiles"] },
+  { id: "general", labelKey: "settings.section.general", icon: User, keywords: ["profile", "name", "email", "analytics", "updates", "threads", "parallel", "concurrency"] },
+  { id: "appearance", labelKey: "settings.section.appearance", icon: Palette, keywords: ["skin", "theme", "appearance", "tools", "tool calls", "threads", "show threads", "hide threads", "sidebar", "display"] },
+  { id: "experimental", labelKey: "settings.section.experimental", icon: FlaskConical, keywords: ["early", "preview", "learn", "skill", "authoring", "browser", "profiles"] },
   { id: "connections", labelKey: "settings.section.connections", icon: KeyRound, keywords: ["keys", "api", "composio", "box", "xai", "vps"] },
   { id: "engines", labelKey: "settings.section.engines", icon: Terminal, keywords: ["models", "claude", "grok", "providers", "cli"] },
   { id: "companion", labelKey: "settings.section.companion", icon: TabletSmartphone, keywords: ["companion", "device", "phone", "desktop", "client", "host", "pair", "pairing", "mobile", "https", "secure", "tailscale", "wifi", "remote", "advanced", "domain", "dns", "self-hosted", "server", "caddy"] },
@@ -217,6 +218,22 @@ function LanguageRow() {
   );
 }
 
+function ShowThreadsRow() {
+  const enabled = useShowThreads();
+  return (
+    <Card title={t("settings.threadDisplay.title")} subtitle={t("settings.threadDisplay.subtitle")}>
+      <div className="flex items-center justify-between gap-4">
+        <div className="text-[14px] font-medium text-ink">{t("settings.threadDisplay.show")}</div>
+        <Switch
+          checked={enabled}
+          aria-label={t("settings.threadDisplay.show")}
+          onClick={() => setShowThreads(!enabled)}
+        />
+      </div>
+    </Card>
+  );
+}
+
 function ToolCallsRow() {
   const { state, dispatch } = useStore();
   const enabled = showToolCallsEnabled(state.config);
@@ -264,15 +281,15 @@ function ToolCallsRow() {
 
 function ExperimentalFeaturesRow() {
   const { state, dispatch } = useStore();
-  const skillRecorder = skillRecorderEnabled(state.config);
+  const skillAuthoring = skillAuthoringEnabled(state.config);
   const browser = builtInBrowserEnabled(state.config);
   const desktopBrowser = browserAvailable(state.config);
   const browserInstallable = state.config?.browserEngine?.installable === true;
   const browserBlockedOnWindows = window.ogb?.platform === "win32" && !desktopBrowser && !browserInstallable;
-  const [saving, setSaving] = useState<"skillRecorder" | "browser" | null>(null);
+  const [saving, setSaving] = useState<"skillAuthoring" | "browser" | null>(null);
   const [error, setError] = useState("");
 
-  const toggle = async (feature: "skillRecorder" | "browser", next: boolean) => {
+  const toggle = async (feature: "skillAuthoring" | "browser", next: boolean) => {
     if (saving) return;
     setSaving(feature);
     setError("");
@@ -293,16 +310,16 @@ function ExperimentalFeaturesRow() {
     <Card title={t("settings.experimental.title")} subtitle={t("settings.experimental.subtitle")}>
       <div className="flex items-center justify-between gap-4">
         <div className="min-w-0">
-          <div className="text-[14px] font-medium text-ink">{t("settings.experimental.teachSkill")}</div>
+          <div className="text-[14px] font-medium text-ink">{t("settings.experimental.skillAuthoring")}</div>
           <div className="mt-0.5 text-[12px] leading-relaxed text-ink-secondary">
-            {t("settings.experimental.teachSkillDetail")}
+            {t("settings.experimental.skillAuthoringDetail")}
           </div>
         </div>
         <Switch
-          checked={skillRecorder}
-          aria-label={t("settings.experimental.teachSkillAria")}
+          checked={skillAuthoring}
+          aria-label={t("settings.experimental.skillAuthoringAria")}
           disabled={saving !== null}
-          onClick={() => void toggle("skillRecorder", !skillRecorder)}
+          onClick={() => void toggle("skillAuthoring", !skillAuthoring)}
           className="disabled:cursor-wait disabled:opacity-50"
         />
       </div>
@@ -332,150 +349,13 @@ function ExperimentalFeaturesRow() {
   );
 }
 
-/** Named browser sessions: rename or delete; deleting wipes that session's
- * logins, storage and cache and sends any bot on it back to its own. */
 function BrowserProfilesRow() {
-  const { state, dispatch } = useStore();
+  const { state } = useStore();
   const profiles = state.config?.browserProfiles ?? [];
-  const [busy, setBusy] = useState<string | null>(null);
-  const [renaming, setRenaming] = useState<{ id: string; name: string } | null>(null);
-  const [error, setError] = useState("");
-  // Windows temporarily gates the live browser surface, but upgraded users
-  // must still be able to rename or permanently erase existing sessions.
-  // The packaged server can perform that private lifecycle cleanup without
-  // exposing the browser renderer bridge.
-  if (!window.ogb || (!builtInBrowserEnabled(state.config) && profiles.length === 0)) return null;
-
-  const save = async (next: typeof profiles) => {
-    try {
-      const config: ConfigStatus = await api("/api/config", {
-        method: "PATCH",
-        body: JSON.stringify({ browserProfiles: browserProfilesForPatch(next) }),
-      });
-      dispatch({ type: "configStatus", config });
-    } catch (cause) {
-      setError(cause instanceof Error ? cause.message : t("settings.profiles.saveError"));
-    } finally {
-      setBusy(null);
-      setRenaming(null);
-    }
-  };
-  const remove = async (id: string) => {
-    if (busy) return;
-    const profile = profiles.find((candidate) => candidate.id === id);
-    if (!profile) return;
-    const referencedBots = state.bots.filter((bot) => bot.browserProfile === id);
-    const blocked = browserProfileDeletionBlockReason(state.bots, id);
-    if (blocked) {
-      setError(blocked);
-      return;
-    }
-    const botSummary = referencedBots.length
-      ? referencedBots.length === 1
-        ? t("settings.profiles.confirmOneBot", { name: referencedBots[0]!.name })
-        : t("settings.profiles.confirmManyBots", { count: referencedBots.length })
-      : "";
-    if (!window.confirm(t("settings.profiles.confirm", { name: profile.name, bots: botSummary }))) {
-      return;
-    }
-    setBusy(id);
-    setError("");
-    try {
-      // The server commits the profile list and clears every bot reference as
-      // one transaction, then privately asks Electron to erase the partition.
-      // Never wipe browser data from the renderer before that commit succeeds:
-      // a rejected config save must leave the user's signed-in session intact.
-      const config: ConfigStatus = await api("/api/config", {
-        method: "PATCH",
-        body: JSON.stringify({
-          browserProfiles: browserProfilesForPatch(profiles.filter((candidate) => candidate.id !== id)),
-        }),
-      });
-      dispatch({ type: "configStatus", config });
-      // The server clears the engine's saved session state for the profile itself.
-    } catch (cause) {
-      setError(cause instanceof Error ? cause.message : t("settings.profiles.deleteError"));
-    } finally {
-      setBusy(null);
-    }
-  };
-  const rename = () => {
-    if (!renaming || busy) return;
-    const name = renaming.name.trim();
-    if (!name) return;
-    setBusy(renaming.id);
-    setError("");
-    void save(profiles.map((profile) => (profile.id === renaming.id ? { ...profile, name } : profile)));
-  };
-  const usersOf = (id: string) => state.bots.filter((bot) => !bot.hidden && bot.browserProfile === id).map((bot) => bot.name);
-
+  if (!builtInBrowserEnabled(state.config) && profiles.length === 0) return null;
   return (
-    <Card title={t("settings.profiles.title")} subtitle={t("settings.profiles.subtitle")}>
-      {profiles.length === 0 ? (
-        <div className="text-[13px] text-ink-secondary">{t("settings.profiles.empty")}</div>
-      ) : (
-        <div className="flex flex-col divide-y divide-hairline/30">
-          {profiles.map((profile) => {
-            const users = usersOf(profile.id);
-            const editing = renaming?.id === profile.id;
-            return (
-              <div key={profile.id} className="flex items-center justify-between gap-3 py-2.5">
-                <div className="flex min-w-0 items-center gap-2">
-                  <Globe size={14} className="shrink-0 text-ink-secondary" />
-                  {editing ? (
-                    <form
-                      className="flex items-center gap-2"
-                      onSubmit={(event) => {
-                        event.preventDefault();
-                        rename();
-                      }}
-                    >
-                      <input
-                        autoFocus
-                        value={renaming.name}
-                        onChange={(event) => setRenaming({ id: profile.id, name: event.target.value })}
-                        maxLength={40}
-                        className="rounded-md bg-inset px-2 py-1 text-[13px] text-ink outline-none"
-                        aria-label={t("settings.profiles.nameAria")}
-                      />
-                      <button type="submit" disabled={busy !== null} className="rounded-md bg-accent px-2.5 py-1 text-[12px] font-medium text-accent-ink disabled:opacity-50">
-                        {t("common.save")}
-                      </button>
-                      <button type="button" onClick={() => setRenaming(null)} className="text-[12px] text-ink-secondary hover:text-ink">
-                        {t("common.cancel")}
-                      </button>
-                    </form>
-                  ) : (
-                    <button
-                      type="button"
-                      onClick={() => setRenaming({ id: profile.id, name: profile.name })}
-                      className="truncate text-left text-[14px] font-medium text-ink hover:underline"
-                      title={t("settings.profiles.rename")}
-                    >
-                      {profile.name}
-                    </button>
-                  )}
-                  <span className="truncate text-[12px] text-ink-secondary">
-                    {users.length
-                      ? t("settings.profiles.usedBy", { names: users.join(", ") })
-                      : t("settings.profiles.notInUse")}
-                  </span>
-                </div>
-                <button
-                  type="button"
-                  onClick={() => void remove(profile.id)}
-                  disabled={busy !== null}
-                  className="flex shrink-0 items-center gap-1 rounded-md px-2 py-1 text-[12px] text-ink-secondary hover:bg-control hover:text-danger disabled:opacity-50"
-                  title={t("settings.profiles.deleteTitle")}
-                >
-                  <Trash2 size={13} /> {t("common.delete")}
-                </button>
-              </div>
-            );
-          })}
-        </div>
-      )}
-      {error ? <p role="alert" className="mt-2 text-[12px] text-danger">{error}</p> : null}
+    <Card title={t("settings.profiles.title")} subtitle={t("settings.profiles.sharedSubtitle")}>
+      <BrowserProfilesManager />
     </Card>
   );
 }
@@ -529,11 +409,14 @@ export function SettingsModal() {
   const { state, dispatch } = useStore();
   const remoteActive = window.ogb?.remoteClient?.active === true;
   const section: AppSettingsSection =
-    remoteActive || state.appSettingsSection === "remote" ? "companion" : state.appSettingsSection;
+    (remoteActive && state.appSettingsSection !== "appearance") || state.appSettingsSection === "remote"
+      ? "companion"
+      : state.appSettingsSection;
   const dialogRef = useRef<HTMLDivElement>(null);
   const [query, setQuery] = useState("");
   const q = query.trim().toLowerCase();
-  const visibleSections = SECTIONS.filter((entry) => (!remoteActive || entry.id === "companion") && sectionMatches(entry, q));
+  const availableSections = SECTIONS.filter((entry) => !remoteActive || entry.id === "companion" || entry.id === "appearance");
+  const visibleSections = availableSections.filter((entry) => sectionMatches(entry, q));
   const sectionLabelKey = SECTIONS.find((entry) => entry.id === section)?.labelKey;
   const nextVisibleSection = visibleSections.some((entry) => entry.id === section) ? undefined : visibleSections[0]?.id;
 
@@ -558,9 +441,9 @@ export function SettingsModal() {
 
       const focusable = Array.from(
         dialog.querySelectorAll<HTMLElement>(
-          'button:not([disabled]), a[href], input:not([disabled]), [tabindex]:not([tabindex="-1"])',
+          'button:not([disabled]), a[href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), summary, [tabindex]:not([tabindex="-1"])',
         ),
-      );
+      ).filter((element) => element.checkVisibility());
       if (focusable.length === 0) {
         event.preventDefault();
         dialog.focus();
@@ -588,7 +471,7 @@ export function SettingsModal() {
 
   return (
     <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-6"
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-3 sm:p-6"
       onMouseDown={(e) => e.target === e.currentTarget && dispatch({ type: "toggleAppSettings", open: false })}
     >
       <div
@@ -597,11 +480,12 @@ export function SettingsModal() {
         aria-modal="true"
         aria-labelledby="app-settings-title"
         tabIndex={-1}
-        className="flex h-[560px] w-full max-w-[860px] overflow-hidden rounded-2xl border border-hairline/50 bg-panel shadow-2xl outline-none"
+        className={cn("flex max-h-[calc(100dvh-24px)] w-full overflow-hidden rounded-2xl border border-hairline/50 bg-panel shadow-2xl outline-none", section === "engines" ? "h-[720px] max-w-[1040px]" : "h-[560px] max-w-[860px]")}
       >
         {/* section nav */}
-        <nav className="flex w-[190px] shrink-0 flex-col gap-0.5 border-r border-hairline/40 p-3">
-          <div id="app-settings-title" className="shrink-0 px-2 py-3 text-[15px] font-semibold text-ink">
+        <span id="app-settings-title" className="sr-only">{t("settings.title")}</span>
+        <nav className="hidden w-[190px] shrink-0 flex-col gap-0.5 border-r border-hairline/40 p-3 sm:flex">
+          <div className="shrink-0 px-2 py-3 text-[15px] font-semibold text-ink">
             {t("settings.title")}
           </div>
           <div className="mb-2 mt-1 flex shrink-0 items-center gap-2 rounded-lg bg-control/70 px-2.5 py-2">
@@ -641,9 +525,22 @@ export function SettingsModal() {
           ))}
         </nav>
 
-        <div className="flex min-w-0 flex-1 flex-col">
-          <div className="flex items-center justify-between px-5 py-3">
-            <span className="text-[15px] font-semibold text-ink">
+        <div className="flex min-h-0 min-w-0 flex-1 flex-col">
+          <div className="flex shrink-0 items-center justify-between gap-3 px-3 py-3 sm:px-5">
+            <select
+              aria-label={t("settings.title")}
+              value={section}
+              onChange={(event) => {
+                setQuery("");
+                dispatch({ type: "toggleAppSettings", open: true, section: event.target.value as AppSettingsSection });
+              }}
+              className="min-w-0 rounded-lg bg-control px-3 py-2 text-[14px] text-ink sm:hidden"
+            >
+              {availableSections.map(({ id, labelKey }) => (
+                <option key={id} value={id}>{t(labelKey)}</option>
+              ))}
+            </select>
+            <span className="hidden text-[15px] font-semibold text-ink sm:block">
               {sectionLabelKey ? t(sectionLabelKey) : null}
             </span>
             <button
@@ -655,23 +552,30 @@ export function SettingsModal() {
             </button>
           </div>
 
-          <div className="flex flex-1 flex-col gap-4 overflow-y-auto px-5 pb-5">
+          <div className="flex flex-1 flex-col gap-4 overflow-y-auto px-3 pb-3 sm:px-5 sm:pb-5">
             {section === "general" && (
               <>
                 <Card title={t("settings.profile.title")} subtitle={t("settings.profile.subtitle")}>
                   <ProfileFields />
                 </Card>
-                <Card title={t("settings.skin.title")} subtitle={t("settings.skin.subtitle")}>
-                  <SkinPicker />
-                </Card>
                 <Card title={t("settings.roomTurns.title")} subtitle={t("settings.roomTurns.subtitle")}>
                   <RoomTurnTimeoutSettings />
                 </Card>
+                <ThreadConcurrencySettings />
                 <LanguageRow />
-          <ToolCallsRow />
                 <UpdatesRow />
                 <DiagnosticsRow />
                 <AnalyticsRow />
+              </>
+            )}
+
+            {section === "appearance" && (
+              <>
+                <Card title={t("settings.skin.title")} subtitle={t("settings.skin.subtitle")}>
+                  <SkinPicker />
+                </Card>
+                <ShowThreadsRow />
+                {!remoteActive && <ToolCallsRow />}
               </>
             )}
 
@@ -693,7 +597,13 @@ export function SettingsModal() {
                       {t("settings.connections.ready")}
                     </div>
                   ) : null}
-                  <TranscriptionSettings />
+                  <div className="text-[11.5px] font-medium uppercase tracking-wide text-ink-secondary">{t("keys.providers.title")}</div>
+                  <p className="-mt-3 text-[12px] leading-relaxed text-ink-secondary">{t("keys.providers.subtitle")}</p>
+                  <ApiKeyRow section="anthropic" testProvider="anthropic" />
+                  <ApiKeyRow section="openaiCompat" testProvider="openaiCompat" />
+                  <OpenAiCompatUrl />
+                  <ApiKeyRow section="xai" testProvider="xai" />
+                  <div className="pt-2 text-[11.5px] font-medium uppercase tracking-wide text-ink-secondary">{t("keys.integrations.title")}</div>
                   <ApiKeyRow section="box" />
                   <VpsConnection />
                   <ApiKeyRow section="opencodeGo" />
@@ -708,15 +618,16 @@ export function SettingsModal() {
             )}
 
             {section === "engines" && (
-              <Card title={t("settings.engines.title")} subtitle={t("settings.engines.subtitle")}>
-                <EnginesSettings />
-              </Card>
+              <EnginesSettings />
             )}
 
             {section === "companion" && (
               <>
                 <RemoteComputerSection />
                 {!remoteActive && <CustomDomainSettings />}
+                {/* a hosted server reached from a browser: pair phones and see devices here; the desktop app has its own companion flow */}
+                {!window.ogb && <SignInAccessCard />}
+                {!window.ogb && <ServerPairingCard />}
                 {!remoteActive && <CompanionSection profileEmail={state.config?.profile?.email} />}
               </>
             )}

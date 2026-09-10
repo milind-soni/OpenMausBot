@@ -51,7 +51,8 @@ describe.skipIf(process.platform === "win32")("Codex browser turns with a minima
     symlinkSync(process.execPath, join(bin, "node"));
     browser = join(bin, "agent-browser");
     // The fake provider records MCP configuration without starting a browser.
-    writeFileSync(browser, "#!/bin/sh\nexit 0\n", { mode: 0o755 });
+    // Preparation checks that the acknowledged close really removed it.
+    writeFileSync(browser, "#!/bin/sh\nif [ \"$1\" = session ]; then printf '%s\\n' '{\"success\":true,\"data\":{\"sessions\":[]}}'; fi\nexit 0\n", { mode: 0o755 });
     writeFileSync(join(data, "config.json"), JSON.stringify({
       features: { browser: true },
       instances: Object.fromEntries(["default", "absolute"].map((id) => [id, {
@@ -111,9 +112,13 @@ describe.skipIf(process.platform === "win32")("Codex browser turns with a minima
     // absolute CLI retained access to the user's discovered runtime directory.
     expect(dump.env.PATH.split(":")).toContain(bin);
     expect(dump.env.PATH).toContain(FINDER_PATH);
-    expect(dump.argv).toContain(`mcp_servers.browser.command=${JSON.stringify(browser)}`);
-    expect(dump.argv).toContain('mcp_servers.browser.args=["mcp","--tools","core","--no-webmcp"]');
-    expect(dump.env.AGENT_BROWSER_SESSION).toBeTruthy();
+    // Browser work now passes through the turn-scoped hold gate. The Codex
+    // process receives no shared profile key or direct browser command.
+    expect(dump.argv).toContain(`mcp_servers.browser.command=${JSON.stringify(process.execPath)}`);
+    expect(dump.argv.some((arg: string) => arg.startsWith("mcp_servers.browser.args=") && arg.includes("browser-proxy.ts"))).toBe(true);
+    expect(dump.env.OMB_BROWSER_TOKEN).toBeTruthy();
+    expect(dump.env.AGENT_BROWSER_SESSION).toBeUndefined();
+    expect(dump.env.AGENT_BROWSER_ENCRYPTION_KEY).toBeUndefined();
     expect(dump.calls.some((call: any) => call.method === "turn/start")).toBe(true);
   });
 });

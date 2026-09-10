@@ -126,15 +126,15 @@ struct SettingsView: View {
                         TasksRoutinesView()
                     } label: {
                         Label {
-                            Text("Tasks & Routines")
+                            Text("Threads & Routines")
                         } icon: {
                             SettingsIcon(symbol: "calendar.badge.clock", color: .orange)
                         }
                     }
 
-                    // Connecting apps needs the admin scope; on a server the
-                    // owner does it in the server's own UI.
-                    if session.connection?.pairedWithServer != true {
+                    // Connecting apps needs the admin scope; a chat-only
+                    // server session leaves it to the owner, in the server's UI.
+                    if session.canAdminister {
                         NavigationLink {
                             ConnectedAppsView()
                         } label: {

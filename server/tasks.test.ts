@@ -16,8 +16,8 @@ async function freshStore() {
   vi.resetModules();
   vi.stubEnv("HOME", home);
   vi.stubEnv("USERPROFILE", home);
-  const { Store, UNTITLED_TASK, titleFromMessage } = await import("./store.ts");
-  return { store: new Store(() => ({ instanceId: "claude", model: "m" })), UNTITLED_TASK, titleFromMessage };
+  const { Store, UNTITLED_TASK, UNTITLED_THREAD, titleFromMessage } = await import("./store.ts");
+  return { store: new Store(() => ({ instanceId: "claude", model: "m" })), UNTITLED_TASK, UNTITLED_THREAD, titleFromMessage };
 }
 
 afterEach(async () => {
@@ -31,10 +31,10 @@ afterEach(async () => {
 
 describe("tasks", () => {
   it("gives every new bot one task pointing at its thread", async () => {
-    const { store, UNTITLED_TASK } = await freshStore();
+    const { store, UNTITLED_THREAD } = await freshStore();
     const bot = store.createBot();
     expect(store.tasks(bot.id)).toHaveLength(1);
-    expect(store.activeTask(bot.id)).toMatchObject({ threadId: bot.threadId, title: UNTITLED_TASK });
+    expect(store.activeTask(bot.id)).toMatchObject({ threadId: bot.threadId, title: UNTITLED_THREAD });
   });
 
   it("starts a new task on a fresh thread and makes it active", async () => {
@@ -84,10 +84,10 @@ describe("tasks", () => {
   });
 
   it("names a task after the first thing you asked it", async () => {
-    const { store, UNTITLED_TASK, titleFromMessage } = await freshStore();
+    const { store, UNTITLED_THREAD, titleFromMessage } = await freshStore();
     const bot = store.createBot();
     store.createTask(bot.id);
-    expect(store.activeTask(bot.id)!.title).toBe(UNTITLED_TASK);
+    expect(store.activeTask(bot.id)!.title).toBe(UNTITLED_THREAD);
 
     store.titleTaskFromFirstMessage(bot.id, "Audit the payroll spreadsheet\nand flag anything odd");
     expect(store.activeTask(bot.id)!.title).toBe("Audit the payroll spreadsheet");

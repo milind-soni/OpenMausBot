@@ -25,6 +25,8 @@
 //                     file exists — a deterministic busy window for the
 //                     steer-queue e2e, with the echo pinning exactly what a
 //                     drained turn was sent)
+//                   | safe-agent-reads (simulate a native Auto reviewer around
+//                     the real injected agents MCP; not a real classifier test)
 //   FAKE_ACP_DUMP   path to write {argv, env} as JSON, so a test can assert
 //                   argv shape (agent/stdio flags) and env hygiene
 //   FAKE_ACP_MODELS      comma-separated model ids. Enables the opencode-shaped
@@ -213,7 +215,7 @@ const configCalls: Array<{ method: string; params: unknown }> = [];
 
 // pending server→client permission request id → resolver
 let pendingPermissionId: number | null = null;
-let onPermissionAnswered: (() => void) | null = null;
+let onPermissionAnswered: ((allowed: boolean) => void) | null = null;
 
 // ask-peer mode: the "agents" MCP server entry from session/new's mcpServers
 type McpEntry = { command: string; args?: string[]; env?: Array<{ name: string; value: string }> };
@@ -221,7 +223,7 @@ let agentsMcp: McpEntry | null = null;
 
 /** Minimal one-shot MCP stdio client: initialize, call each tool in
  * sequence, return the text of the last result. Dependency-free. */
-function driveMcp(entry: McpEntry, calls: Array<{ name: string; args: (prev: string) => object }>): Promise<string> {
+function driveMcp(entry: McpEntry, calls: Array<{ name: string; args: (prev: string) => object }>, strict = false): Promise<string> {
   return new Promise((resolve, reject) => {
     const env = { ...process.env };
     for (const { name, value } of entry.env ?? []) env[name] = value;
@@ -256,6 +258,12 @@ function driveMcp(entry: McpEntry, calls: Array<{ name: string; args: (prev: str
           continue;
         }
         if (msg.id === undefined) continue;
+        if (strict && (msg.error || msg.result?.isError)) {
+          clearTimeout(timer);
+          child.kill();
+          reject(new Error(`Fixture MCP request failed: ${JSON.stringify(msg.error ?? msg.result)}`));
+          return;
+        }
         if (step === -1) {
           write({ jsonrpc: "2.0", method: "notifications/initialized" });
           next();
@@ -308,7 +316,7 @@ function handle(msg: any) {
   // client's response to our permission request
   if (msg.id !== undefined && (msg.result !== undefined || msg.error !== undefined) && msg.id === pendingPermissionId) {
     pendingPermissionId = null;
-    onPermissionAnswered?.();
+    onPermissionAnswered?.(msg.result?.outcome?.optionId === "allow-once");
     return;
   }
   if (!msg.method) return;
@@ -377,6 +385,12 @@ function handle(msg: any) {
       if (process.env.FAKE_ACP_LOAD_NULL) {
         result(msg.id, null);
         break;
+      }
+      if (mode === "safe-agent-reads") {
+        agentsMcp = (msg.params?.mcpServers ?? []).find((server: any) => server.name === "agents") ?? null;
+        if (process.env.FAKE_ACP_DUMP) {
+          writeFileSync(`${process.env.FAKE_ACP_DUMP}.mcp.json`, JSON.stringify(msg.params?.mcpServers ?? []));
+        }
       }
       const opts = configOptions();
       const mdls = sessionModels();
@@ -697,6 +711,33 @@ function handle(msg: any) {
         });
       } else if (mode === "interleave") playInterleaveTurn();
       else if (mode !== "empty-reply") playTurn();
+      if (mode === "safe-agent-reads" && agentsMcp) {
+        const entry = agentsMcp;
+        // Deliberately independent of the app's policy catalog. These are the
+        // two exact calls in the reported regression, repeated in one turn.
+        void (async () => {
+          for (const name of ["list_bots", "session_search", "list_bots"]) {
+            const nativeAuto = argv[argv.indexOf("--permission-mode") + 1] === "auto";
+            if (!nativeAuto) {
+              const allowed = await new Promise<boolean>((resolve) => {
+                pendingPermissionId = 9100;
+                onPermissionAnswered = resolve;
+                out({ jsonrpc: "2.0", id: pendingPermissionId, method: "session/request_permission", params: {
+                  toolCall: { toolCallId: `fixture-${name}`, kind: "other", title: `agents__${name}`, rawInput: {} },
+                  options: [{ optionId: "allow-once", kind: "allow_once" }, { optionId: "reject", kind: "reject_once" }],
+                } });
+              });
+              if (!allowed) { complete(); return; }
+            }
+            const text = await driveMcp(entry, [{ name, args: () => name === "session_search" ? { query: "approval fixture" } : {} }], true);
+            out({ jsonrpc: "2.0", method: "session/update", params: { update: {
+              sessionUpdate: "agent_message_chunk", content: { text: `${name}: ${text}\n` },
+            } } });
+          }
+          complete();
+        })().catch((error) => out({ jsonrpc: "2.0", id: msg.id, error: { code: -32000, message: String(error) } }));
+        return;
+      }
       if (mode === "permission") {
         // ask the client to approve a tool, then complete once answered
         pendingPermissionId = 9001;
@@ -706,7 +747,9 @@ function handle(msg: any) {
           id: pendingPermissionId,
           method: "session/request_permission",
           params: {
-            toolCall: { kind: "execute", rawInput: { command: "echo hi" }, title: "echo hi" },
+            toolCall: process.env.FAKE_ACP_PERMISSION_TOOL_CALL
+              ? JSON.parse(process.env.FAKE_ACP_PERMISSION_TOOL_CALL)
+              : { kind: "execute", rawInput: { command: "echo hi" }, title: "echo hi" },
             options: [
               { optionId: "allow-once", kind: "allow_once" },
               { optionId: "reject", kind: "reject_once" },

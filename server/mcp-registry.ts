@@ -130,9 +130,8 @@ export function parseMcpServerMutation(
       command: parsed.data.command,
       args: parsed.data.args ?? [],
       env,
-      // A newly added command is inert until the person has tested and
-      // explicitly enabled it. Existing file-authored entries keep today's
-      // enabled-by-default behavior through parseStoredMcpServer.
+      // A newly added command is inert until explicitly enabled. File-authored
+      // entries keep enabled-by-default behavior through parseStoredMcpServer.
       enabled: existing ? (parsed.data.enabled ?? existing.enabled) : false,
     },
   };
@@ -157,7 +156,7 @@ export function listMcpServers(raw: Record<string, unknown> | undefined): McpSer
  * the {"mcpServers": {...}} shape Claude Code, Cursor and Claude Desktop
  * write, a bare {name: entry} map, or a single {name, command, ...} entry.
  * Names are slugged into the registry's format; every entry goes through the
- * same rules as the form and lands disabled until someone tests it.
+ * same rules as the form and lands disabled until explicitly enabled.
  */
 export function parseMcpServersImport(
   text: string,
@@ -199,10 +198,9 @@ export function parseMcpServersImport(
     if (typeof record.url === "string" || record.type === "http" || record.type === "sse") {
       return { ok: false, error: `"${rawName}" is a remote (url) server; only command servers can be added here so far.` };
     }
-    if (typeof record.command === "string" && /\s/.test(record.command.trim())) {
-      return { ok: false, error: `"${rawName}": put the command's arguments in "args", not in "command".` };
-    }
-    if (servers[name]) return { ok: false, error: `"${rawName}" appears twice.` };
+    // The command is an executable path, not a shell line; spaces are valid
+    // in paths on every supported platform. The probe reports missing files.
+    if (Object.hasOwn(servers, name)) return { ok: false, error: `"${rawName}" appears twice.` };
     const result = parseMcpServerMutation(name, {
       command: record.command,
       args: record.args,

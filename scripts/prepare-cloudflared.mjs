@@ -217,15 +217,33 @@ function extractionFailure(result) {
   return result.error?.message ?? String(result.stderr || result.stdout || `exit status ${result.status}`).trim();
 }
 
-async function releaseBytes(asset) {
+/** Retry transient download failures; callers still verify the pinned digest. */
+export async function releaseBytes(asset) {
   const cacheDirectory = process.env.OMB_CLOUDFLARED_ARCHIVE_DIR;
   const cached = cacheDirectory ? join(cacheDirectory, asset.name) : "";
   if (cached && existsSync(cached)) return readFileSync(cached);
 
   const url = `https://github.com/cloudflare/cloudflared/releases/download/${CLOUDFLARED_VERSION}/${asset.name}`;
-  const response = await fetch(url, { redirect: "follow", signal: AbortSignal.timeout(120_000) });
-  if (!response.ok) throw new Error(`could not download ${asset.name}: HTTP ${response.status}`);
-  return Buffer.from(await response.arrayBuffer());
+  const retryableStatuses = new Set([408, 429, 500, 502, 503, 504]);
+  for (let attempt = 1; attempt <= 3; attempt++) {
+    let failure;
+    try {
+      const response = await fetch(url, { redirect: "follow", signal: AbortSignal.timeout(120_000) });
+      if (response.ok) return Buffer.from(await response.arrayBuffer());
+      await response.body?.cancel().catch(() => {});
+      failure = new Error(`could not download ${asset.name}: HTTP ${response.status}`);
+      if (!retryableStatuses.has(response.status)) throw failure;
+    } catch (error) {
+      // Node fetch reports network/body failures as TypeError; each attempt
+      // has its own timeout, including reading the complete response body.
+      if (!(error instanceof TypeError) && !["TimeoutError", "AbortError"].includes(error?.name)) throw error;
+      failure = error;
+    }
+    if (attempt === 3) throw failure;
+    const delay = 1_000 * 2 ** (attempt - 1);
+    console.warn(`cloudflared download attempt ${attempt}/3 failed: ${failure.message}; retrying in ${delay}ms`);
+    await new Promise((resolve) => setTimeout(resolve, delay));
+  }
 }
 
 async function stageTarget(root, target) {

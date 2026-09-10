@@ -7,7 +7,7 @@ export interface EnvironmentDescriptor {
   label: string;
   platform: string;
   version: string;
-  capabilities: { remoteSessions: true; selfUpdate: "desktop-managed" | "operator" };
+  capabilities: { remoteSessions: true; selfUpdate: "desktop-managed" | "operator"; emailSignIn?: boolean };
 }
 
 export type SessionState =
@@ -84,4 +84,38 @@ export async function pairWithCode(
   if (res.ok) return { ok: true };
   const error = Reflect.get(Object(body), "error");
   return { ok: false, error: typeof error === "string" ? error : `${res.status} ${res.statusText}` };
+}
+
+/** Server-side JSON exchanges that end in a session cookie. */
+async function postAuth(path: string, body: Record<string, unknown>, fetchImpl: typeof fetch): Promise<{ ok: true } | { ok: false; error: string }> {
+  let res: Response;
+  try {
+    res = await fetchImpl(path, { method: "POST", credentials: "same-origin", headers: { "content-type": "application/json" }, body: JSON.stringify(body) });
+  } catch (error) {
+    return { ok: false, error: `could not reach the server (${error instanceof Error ? error.message : String(error)})` };
+  }
+  const parsed: unknown = await res.json().catch(() => ({}));
+  if (res.ok) return { ok: true };
+  const error = Reflect.get(Object(parsed), "error");
+  return { ok: false, error: typeof error === "string" ? error : `${res.status} ${res.statusText}` };
+}
+
+/** Ask the server to email a sign-in code (the server checks its allow-list first). */
+export function startEmailSignIn(email: string, fetchImpl: typeof fetch = fetch): Promise<{ ok: true } | { ok: false; error: string }> {
+  return postAuth("/api/auth/email/start", { email }, fetchImpl);
+}
+
+/** Exchange the emailed code for a session cookie. */
+export function verifyEmailSignIn(input: { email: string; code: string; label: string }, fetchImpl: typeof fetch = fetch): Promise<{ ok: true } | { ok: false; error: string }> {
+  return postAuth("/api/auth/email/verify", { email: input.email, code: input.code, label: input.label }, fetchImpl);
+}
+
+/** The gate's ordinary "you have no session" wording is why the pair page is
+ * shown at all; repeating it under an email form reads like an error. Only a
+ * reason that says something else (a session that expired or was revoked)
+ * is worth showing. */
+export function reasonWorthShowing(reason: string | undefined): string | null {
+  if (!reason) return null;
+  if (/through a proxy|loopback host required|cross-origin request|^40[13]$/i.test(reason)) return null;
+  return reason;
 }

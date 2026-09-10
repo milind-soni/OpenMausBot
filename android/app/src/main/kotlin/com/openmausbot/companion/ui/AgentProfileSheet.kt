@@ -68,6 +68,7 @@ import com.openmausbot.companion.avatar.AvatarImageRules
 import com.openmausbot.companion.avatar.PreparedAvatar
 import com.openmausbot.companion.core.AvatarCrop
 import com.openmausbot.companion.core.Bot
+import com.openmausbot.companion.core.forTask
 import com.openmausbot.companion.core.BotProfilePatch
 import com.openmausbot.companion.core.ConfigStatus
 import com.openmausbot.companion.core.Instance
@@ -103,6 +104,7 @@ internal fun AgentProfileSheet(bot: Bot, onDismiss: () -> Unit, onOpenOverview: 
     // the fleet drops the agent; `current` is what every action is applied to.
     val opened = remember { bot }
     val current = state.bot(opened.id) ?: opened
+    val currentTask = current.forTask(opened.threadId)
 
     var form by rememberSaveable(stateSaver = ProfileFormSaver) {
         mutableStateOf(ProfileForm.of(opened))
@@ -288,15 +290,15 @@ internal fun AgentProfileSheet(bot: Bot, onDismiss: () -> Unit, onOpenOverview: 
                                 onSelect = { selectedEffort = it },
                             )
                         }
-                        ModelRules.note(current.busy, selectedInstance)?.let { note ->
+                        ModelRules.note(currentTask?.busy, selectedInstance)?.let { note ->
                             IconNote(text = note, icon = Icons.Filled.Info)
                         }
                         ActionRow(
                             text = "Apply model",
                             icon = Icons.Filled.Check,
-                            enabled = !busy && ModelRules.canApply(
+                            enabled = !busy && currentTask != null && ModelRules.canApply(
                                 loaded = modelsLoaded,
-                                botBusy = current.busy,
+                                botBusy = currentTask?.busy,
                                 instance = selectedInstance,
                                 draft = modelDraft,
                                 saved = savedModel,
@@ -305,7 +307,8 @@ internal fun AgentProfileSheet(bot: Bot, onDismiss: () -> Unit, onOpenOverview: 
                                 scope.launch {
                                     busy = true
                                     try {
-                                        val updated = session.updateModel(modelDraft, liveBot())
+                                        val target = liveBot().forTask(opened.threadId) ?: return@launch
+                                        val updated = session.updateModel(modelDraft, target)
                                         if (updated != null) {
                                             savedModel = updated.modelSelection
                                             showModel(updated.modelSelection)

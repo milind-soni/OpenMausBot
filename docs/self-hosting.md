@@ -36,7 +36,7 @@ Runs fully on a server:
 
 Desktop-only for now (needs the Mac/Linux app):
 
-- the skill recorder, dictation/voice, controlling the host desktop
+- dictation/voice, controlling the host desktop
 
 ## Quickest: one command with Node
 
@@ -92,6 +92,23 @@ is present. Three ways to make the server reachable from elsewhere:
   the server treats as "through a proxy", never as the owner. `npx openmausbot
   logout` releases the address. The account credentials live in
   `~/.openmausbot/tunnel-account.json` (mode 0600).
+  Starting it from a fleet or a container, where nobody can type an emailed
+  code? Set `OMB_INSTALLATION_CREDENTIAL` to the installation credential the
+  fleet issued and skip `login`: the address and connector token are fetched
+  at every start and nothing is written to disk. A rejected credential stops
+  the start with a clear message rather than serving locally.
+- **Your own domain, still one command:**
+
+  ```sh
+  npx openmausbot serve --domain maus.example.com
+  ```
+
+  Point the domain's A record at this machine and open ports 80 and 443.
+  The server downloads a pinned Caddy once into its data dir, writes the
+  same Caddyfile the Docker stack uses, runs it as a child, and Caddy gets
+  and renews the certificate from Let's Encrypt. On Linux, binding ports 80
+  and 443 as a normal user needs one privilege grant; when Caddy reports the
+  refusal, `serve` prints the exact `setcap` command to run once.
 - **Behind your own proxy or domain:** `npx openmausbot serve --public-url
   https://maus.example.com`, with the proxy rules from "Putting a proxy in
   front".
@@ -121,11 +138,34 @@ may need enabling in ChatGPT security settings or by your workspace admin; see
 Subscription limits still apply. This browser flow is currently for Codex;
 other providers retain their existing sign-in methods.
 
+Once connected, Settings shows the account email when Codex can report it.
+To switch accounts, open **Manage account and sign-in** under that line
+and choose **Sign out of ChatGPT**: OMB runs `codex logout` on the server as
+the same user and confirms with `codex login status`. New ChatGPT tasks need
+a connected account. Stop running Codex tasks before switching: sign-out does
+not cancel work already in progress. API-key logins are not removed by this
+ChatGPT-specific action. A sign-in another browser is still completing is never
+pulled away; finish or cancel it first.
+
 ## Connect a custom domain in Settings
 
 For a self-hosted server, open **Settings → Remote access → Connect your
 domain** from an owner-paired browser. This is an address-setting and verification
-flow, not a DNS or hosting service:
+flow, not a DNS or hosting service. Enter the domain to see a compact DNS record
+with copy buttons for **Type**, **Name / Host**, and **Value / IP**. The full
+hostname is shown; providers that already append the DNS zone need only the
+relative name (or `@` at the zone root). Server/proxy instructions are under
+**Advanced server setup**.
+
+The IP comes from this server's network interfaces, never the browser, tunnel
+hostname or an IP-echo service. Only a single unambiguous public IPv4 is shown.
+For containers/NAT or hosts with multiple public addresses, an administrator can
+set `OMB_PUBLIC_IPV4` to the public IPv4 of the HTTPS proxy and restart OMB.
+This is a display hint, not proof of reachability; verification still checks
+HTTPS and the workspace identity. If the IP is missing or invalid, the UI asks
+for administrator help instead of inventing a DNS value.
+
+To configure the connection:
 
 1. Point your chosen name's DNS **A** record at the server's public IPv4 address.
    Add **AAAA** only when IPv6 routes to the same server.
@@ -136,7 +176,7 @@ flow, not a DNS or hosting service:
    ports 80/443 for its usual certificate setup. For containers, follow the
    Docker recipe below so Caddy can reach the loopback listener.
 3. Enter `bots.yourcompany.com` (or its bare `https://` origin) and choose
-   **Verify and connect**. OMB checks HTTPS and the workspace identity at that
+   **Connect domain**. OMB checks HTTPS and the workspace identity at that
    domain before saving it. An incorrect domain leaves the existing address
    unchanged.
 
@@ -220,28 +260,73 @@ OMB_DATA_DIR="$HOME/.openmausbot" OMB_PORT=8799 \
   node --experimental-strip-types server/index.ts
 ```
 
-For something durable, run it under systemd:
+For something durable, let the CLI write the service for you:
 
-```ini
-# /etc/systemd/system/openmausbot.service
-[Unit]
-Description=OpenMausBot harness
-After=network.target
-
-[Service]
-User=maus
-WorkingDirectory=/home/maus/OpenMausBot
-Environment=OMB_DATA_DIR=/home/maus/.openmausbot
-Environment=OMB_PORT=8799
-ExecStart=/usr/bin/node --experimental-strip-types server/index.ts
-Restart=on-failure
-
-[Install]
-WantedBy=multi-user.target
+```sh
+npx openmausbot service install --domain maus.example.com   # or --tunnel, --tailscale, or nothing
 ```
 
-Engine CLIs read their logins from the service user's home — sign in as
-that user (`sudo -u maus claude` etc.) before starting the service.
+It renders a systemd unit (Linux) or a launchd agent (macOS) that runs the
+same `openmausbot serve …` with your options, restarts it if it stops, and,
+for `--domain`, grants the unit the capability to bind ports 80 and 443
+without root. The file is written next to your data and the two commands
+that install and start it are printed (they need `sudo` on Linux).
+`openmausbot service uninstall` prints the reverse. Install the package
+permanently first (`npm install -g openmausbot`): a service must not point
+at an `npx` cache that npm may prune.
+
+Engine CLIs read their logins from the service user's home: sign them in
+from Settings → Engines (below), or as that user in a terminal, before you
+rely on routines running unattended.
+
+## Installing the engines without a terminal
+
+Engines whose installer is an npm package (Claude Code, Codex, OpenCode,
+MiniMax, pi) can be installed and updated from **Settings → Engines** when
+npm is on the server's PATH. OMB runs `npm install -g` as its own user into
+`<data dir>/tools/npm`, so nothing needs sudo and nothing touches a global
+prefix; that folder goes ahead of everything else on the engines' PATH, so
+the copy OMB installed is the one bots run. The package name comes from the
+engine's own install descriptor, never from the browser. Engines installed
+by a `curl | bash` script still need the command on the server.
+
+## Provider keys, billed per token
+
+**Settings → Connections → Model providers** takes the keys a whole workspace
+runs on, for people who would rather pay per token than have every user sign
+in. Keys are write-only: the page shows connected-or-not and a **Test** button
+that makes one read-only request to the provider from the server.
+
+- **Anthropic API key**: while one is saved, every Claude bot runs on it and
+  Claude Code reports the real cost per turn to the usage ledger. Nobody has
+  to sign in, and Settings → Engines shows "workspace API key" instead of a
+  person. Remove the key to go back to personal logins. The server's own
+  `ANTHROPIC_API_KEY` environment variable is deliberately ignored; use the
+  page, `config.json`, or `OMB_ANTHROPIC_API_KEY`.
+- **OpenAI-compatible API key and base URL**: OpenRouter by default, or Groq,
+  Together, a gateway, or `https://api.openai.com/v1` for OpenAI itself. This
+  powers the OpenAI-compatible engine. Codex has no key path by design and
+  always uses a personal ChatGPT login.
+- **xAI API key**: the Grok API engine and xAI image generation.
+
+## Signing the engines in without a terminal
+
+On a hosted server, the engine CLIs sign in from Settings → Engines:
+
+- **Codex**: "Connect ChatGPT" shows a one-time code to enter on OpenAI's
+  device page. Once connected, Settings names the account and offers
+  **Sign out of ChatGPT** so a different person can connect their own.
+- **Claude Code**: "Sign in to Claude" opens Anthropic's own sign-in page in
+  your browser; after you sign in it shows a code, which you paste back into
+  Settings. The server hands that code to the unmodified `claude` CLI once and
+  never stores it; the login lands where Claude Code keeps it for the account
+  that runs your bots. This is the sign-in Anthropic permits for a hosted,
+  unmodified Claude Code with your own subscription; the bots then share that
+  subscription's usage limits. Once signed in, **Manage account and sign-in →
+  Sign out of Claude** runs `claude auth logout` for that account's
+  configuration directory, confirmed with `claude auth status`, so a different
+  person can sign in with their own subscription. Stop running Claude tasks
+  before switching accounts: signing out does not cancel them.
 
 ## Using it from your computer
 
@@ -262,11 +347,20 @@ gets a session cookie (30 days, renewed on use up to 180 days from pairing, revo
 listed and revoked at `GET`/`DELETE /api/auth/sessions` for now; a Settings
 screen follows.
 
-From the **desktop app**, use the Server menu: "Add Server from Copied
-Pairing Link…" reads the link you copied from the server, asks once, and
-opens that server's own UI in the app; the app stays signed in to it across
-restarts, and the menu switches between Local and any saved server (on
-Windows and Linux press Alt to show the menu bar). While a remote server is
+From the **desktop app**, open **Settings → Remote access → Connect to another
+computer**, choose **Self-hosted server**, and paste the full HTTPS pairing
+link from your server. Custom domains and Cloudflare tunnel addresses work
+here; Tailscale is not required. Generate a fresh link for each device (use
+`npx openmausbot pair --client` for chat-only access). A code already used by
+your phone cannot also pair your desktop.
+
+Confirm the server address in the app's connection dialog, then finish pairing
+on the server page. The app stays signed in across restarts. The **Server** menu
+switches between Local and saved servers; **Add Server from Copied Pairing
+Link…** remains available there too (on Windows and Linux press Alt to show
+the menu bar). The separate **Desktop companion** option in Settings is for
+the six-digit code from another desktop app, not a self-hosted server's
+12-character code. While a remote server is
 shown, this computer's screen, microphone, files and local control are not
 offered to it. "Forget" signs the app out of that server; revoke the
 session on the server too if the device is gone.
@@ -298,6 +392,43 @@ ssh -L 8799:localhost:8799 you@your-server
 # then open http://localhost:8799 — loopback, so no pairing needed
 ```
 
+## Sign in with your email
+
+A pairing code is fine for the owner's own devices. For a workspace other
+people use every day, let them sign in with an emailed code instead: set an
+allow-list, and `/pair` on your server offers "Sign in with your email" first.
+
+```sh
+OMB_SIGNIN_EMAILS="her@yourcompany.com, @yourcompany.com"   # full access
+OMB_SIGNIN_MEMBER_EMAILS="freelancer@example.com"          # chat and approvals only
+```
+
+Signed in as an admin? Settings → Remote access → **Who can sign in with an
+email** edits the same list in the browser, no command line needed. With the
+npm package, the same thing from the command line, with the server running
+or not, no restart needed:
+
+```sh
+npx openmausbot access add her@yourcompany.com
+npx openmausbot access add freelancer@example.com --chat-only
+npx openmausbot access list
+```
+
+An entry is an address or `@domain` (everyone at that domain). Admins get
+the same access as a pairing code from `openmausbot serve`; members get the
+chat-only scope, the same as `openmausbot pair --client`. The same lists live
+in `config.json` under `signIn.admins` and `signIn.members` and can be changed
+through the settings API without a restart; the environment variables win
+when set, which is how a container or a service unit is bootstrapped.
+
+The code itself comes from `accounts.openmausbot.com`, the OpenMausBot
+account service, so your server needs no email credentials. Your server asks
+it to send the code, checks the answer, and then issues its own session
+cookie: the browser only ever talks to your server, and who is welcome is
+decided only by your allow-list. Wrong codes count against the same lockout
+as pairing codes. Sessions from a sign-in show the email in
+`openmausbot sessions` and can be revoked the same way.
+
 ## Putting a proxy in front
 
 Any reverse proxy works, given three things:
@@ -320,13 +451,23 @@ is the reference implementation.
 
 ## Using it from your phone
 
+Signed in on a hosted server as an admin (with a pairing code or your
+email)? Settings → Remote access → **Pair a phone or another computer**
+creates a one-time code with a QR right in the browser, and lists every
+paired device with a sign-out button. Nobody needs the command line.
+
 The iOS app pairs with a server the same way a laptop does: scan the QR
-code that `openmausbot serve` (or `openmausbot pair`) prints, or paste the
+code that `openmausbot serve` (or `openmausbot pair`) prints, paste the
 whole `https://host/pair#code=…` link into the address field on the pairing
-screen. The phone gets a session of its own, listed and revocable with
-`openmausbot sessions`. It can chat, approve, and read; creating bots,
-changing models, connecting apps and cloud computers stay with the owner in
-the server's own UI, and the app hides those controls.
+screen, or type the address and then the code. The phone gets a session of
+its own, listed and revocable with `openmausbot sessions`. What it may do is
+the code's scope: a code from `openmausbot pair` carries `admin` and the app
+shows everything; a code from `openmausbot pair --client` (also what the
+guided phone setup mints) can chat, approve and read, and the app hides
+creating bots and sections, changing models, generating avatars, connecting
+apps and cloud desktops — those stay with the owner. A server reinstalled at
+the same address has a new identity; the app then asks to pair again rather
+than present the old session to it.
 
 Older way, still supported: run the companion sidecar next to the harness
 and pair by its own QR. It advertises on your private networks
@@ -335,6 +476,27 @@ and pair by its own QR. It advertises on your private networks
 ```sh
 node --experimental-strip-types companion/src/index.ts
 ```
+
+## Usage and costs
+
+Every settled turn is appended to `<data dir>/usage/YYYY-MM.jsonl`: which
+bot, which model and engine, tokens in and out, the cost the engine reported
+(real on a metered key, an equivalent on a subscription, absent when the
+engine reports none), and who asked: the email a person signed in with, the
+device label otherwise, a routine, another bot, or this computer. No message
+text is stored. **Settings → Usage → History** shows a period grouped by bot,
+model, person, day or engine, and **Export CSV** downloads one line per turn.
+Owners can read the same over the API:
+
+```sh
+curl -H "Authorization: Bearer $TOKEN" \
+  "https://maus.example.com/api/usage?from=2026-09-01&to=2026-09-30&groupBy=user"
+curl -H "Authorization: Bearer $TOKEN" -o usage.csv \
+  "https://maus.example.com/api/usage.csv?from=2026-09-01&to=2026-09-30"
+```
+
+Dates are inclusive, UTC, at most a year apart; without them you get the
+current month to date.
 
 ## Updating
 

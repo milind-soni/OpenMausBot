@@ -16,17 +16,16 @@ export function ModelSection({ bot }: { bot: Bot }) {
           contained
           label={
             <div>
-              <div className="text-[15px] font-medium text-ink">Model</div>
+              <div className="text-[15px] font-medium text-ink">Default model</div>
               <div className="mt-0.5 text-[13px] text-ink-secondary">
-                Which provider and model this bot runs on
+                For new threads. Existing threads keep their own model choices.
               </div>
             </div>
           }
         />
       </div>
 
-      {/* The same row the chat header's picker shows, so the two cannot
-          disagree about which levels exist or what is selected. */}
+      {/* Share the model picker's effort choices, but edit the profile default. */}
       <EffortRow
         bot={bot}
         className="rounded-xl bg-card p-4"
@@ -39,7 +38,7 @@ export function ModelSection({ bot }: { bot: Bot }) {
                 we could not keep for a thread that had already been sent
                 one. Sending nothing is true on every engine. */}
             <div className="mt-0.5 text-[13px] text-ink-secondary">
-              How hard this bot thinks{bot.modelSelection.effort ? "" : " (Default: no level is sent)"}
+              How hard new threads think{bot.modelSelection.effort ? "" : " (Default: no level is sent)"}
             </div>
           </div>
         }

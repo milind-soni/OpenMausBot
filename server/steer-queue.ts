@@ -23,19 +23,52 @@ import type { BotRecord, Message } from "./store.ts";
 /** The slice of Store this module needs — narrow so tests can fake it. */
 export interface SteerStore {
   bot(id: string): BotRecord | null;
+  projectBotForTask?(botId: string, threadId: string): BotRecord | null;
   appendMessage(threadId: string, message: Omit<Message, "id" | "at">): Message;
   patchMessage(threadId: string, messageId: string, patch: Partial<Message>): Message | null;
 }
 
 interface QueueEntry {
-  /** Kept beside the threadId because the settle that frees the bot can
-   * happen on a DIFFERENT thread (a room turn) — drain matches on "this
-   * queue's bot is idle now", which needs the bot, not the settling thread. */
+  /** Keep ownership pinned even when the selected task changes. */
   botId: string;
-  items: Array<{ messageId: string; text: string; prompt: string; replyToId?: string; sendId?: string }>;
+  items: Array<{
+    messageId: string;
+    text: string;
+    prompt: string;
+    replyToId?: string;
+    sendId?: string;
+    reason?: "capacity";
+    /** The words were queued by a bot already running unattended (a
+     * thread it opened on itself). The drained turn must inherit that:
+     * a queue is a delay, not a person sitting down at the keyboard. */
+    unattended?: boolean;
+  }>;
 }
 
 const queues = new Map<string, QueueEntry>(); // threadId → waiting sends
+const listeners = new Set<() => void>();
+const changed = () => {
+  for (const listener of listeners) {
+    try { listener(); }
+    catch { console.warn("steer-queue: change listener failed"); }
+  }
+};
+
+/** Public pending chips only: never expose provider prompts or reply context. */
+export function queuedSteerSnapshot(ownsThread: (botId: string, threadId: string) => boolean):
+  Record<string, Array<{ queueId: string; text: string; reason?: "capacity" }>> {
+  return Object.fromEntries([...queues]
+    .filter(([threadId, entry]) => ownsThread(entry.botId, threadId))
+    .map(([threadId, entry]) => [threadId, entry.items.map((item) => ({
+      queueId: item.messageId, text: item.text, ...(item.reason ? { reason: item.reason } : {}),
+    }))]));
+}
+
+/** Publish changes synchronously so every client can restore/cancel the queue. */
+export function onSteeredQueueChange(listener: () => void): () => void {
+  listeners.add(listener);
+  return () => { listeners.delete(listener); };
+}
 
 export interface QueuedSteer {
   id: string;
@@ -46,7 +79,7 @@ export function queueSteeredMessage(
   botId: string,
   threadId: string,
   text: string,
-  options: { prompt?: string; replyToId?: string; sendId?: string } = {},
+  options: { prompt?: string; replyToId?: string; sendId?: string; reason?: "capacity"; unattended?: boolean } = {},
 ): QueuedSteer {
   const id = newId();
   const entry = queues.get(threadId) ?? { botId, items: [] };
@@ -59,12 +92,29 @@ export function queueSteeredMessage(
     prompt: options.prompt ?? text,
     replyToId: options.replyToId,
     sendId: options.sendId,
+    reason: options.reason,
+    unattended: options.unattended,
   });
   queues.set(threadId, entry);
+  changed();
   return { id };
 }
 
-/** Drain every queue whose bot is idle: append the held lines (leaf is now
+/** Where a thread stands among this bot's threads waiting for a free slot:
+ * 1 for the next to start. The drain visits queues in insertion order, so
+ * insertion order is the line. Null when nothing of this bot's is waiting
+ * on that thread. */
+export function queuedThreadPosition(botId: string, threadId: string): number | null {
+  let position = 0;
+  for (const [candidate, entry] of queues) {
+    if (entry.botId !== botId || !entry.items.some((item) => item.reason === "capacity")) continue;
+    position += 1;
+    if (candidate === threadId) return position;
+  }
+  return null;
+}
+
+/** Drain every queue whose task is idle: append the held lines (leaf is now
  * the finished turn's last item), then one run per thread whose prompt is
  * the texts separated by a blank line. `userMessage` is the last appended line
  * so startTurn does not duplicate it; `excludeIds` is every drained line
@@ -79,20 +129,26 @@ export function drainSteeredMessages(
     prompt: string,
     userMessage: Message,
     excludeIds: string[],
+    unattended: boolean,
   ) => void | Promise<void>,
+  isBlocked?: (botId: string, threadId: string) => boolean,
 ): void {
   // deleting only the entry being visited is safe under Map iteration
   for (const [threadId, entry] of queues) {
-    const bot = store.bot(entry.botId);
+    const bot = store.projectBotForTask
+      ? store.projectBotForTask(entry.botId, threadId)
+      : store.bot(entry.botId);
     if (!bot) {
-      // the bot was deleted while messages waited — nothing left to steer
+      // the bot or task was deleted while messages waited
       queues.delete(threadId);
+      changed();
       continue;
     }
-    if (bot.busy) continue; // still working — the next settle tries again
+    if (bot.busy || isBlocked?.(entry.botId, threadId)) continue;
     // committed to draining: the entry leaves the map before anything runs,
     // so a settle racing another settle can never fire the same queue twice
     queues.delete(threadId);
+    changed();
     const appended: Message[] = [];
     for (const item of entry.items) {
       // queueId is the pending-chip identity from the 202; append still
@@ -121,6 +177,9 @@ export function drainSteeredMessages(
       prompt,
       last,
       appended.map((message) => message.id),
+      // one unattended line makes the whole drained turn unattended: a
+      // person's words in the same queue cannot re-attend a bot's own
+      entry.items.some((item) => item.unattended === true),
     );
   }
 }
@@ -130,24 +189,25 @@ export function queuedSteeredMessage(
   botId: string,
   threadId: string,
   sendId: string,
-): { id: string; text: string; replyToId?: string } | null {
+): { id: string; text: string; replyToId?: string; reason?: "capacity" } | null {
   const entry = queues.get(threadId);
   if (!entry || entry.botId !== botId) return null;
   const item = entry.items.find((candidate) => candidate.sendId === sendId);
-  return item ? { id: item.messageId, text: item.text, replyToId: item.replyToId } : null;
+  return item ? { id: item.messageId, text: item.text, replyToId: item.replyToId, ...(item.reason ? { reason: item.reason } : {}) } : null;
 }
 
 /** Drop one waiting send owned by this bot so it never drains. The queue id
  * is stable even if the bot switches away from the task while the request is
  * in flight. Returns false when it was already drained, belongs to another
  * bot, or a restart lost the in-memory auto-run intent. */
-export function cancelSteeredMessage(botId: string, messageId: string): boolean {
+export function cancelSteeredMessage(botId: string, messageId: string, expectedThreadId?: string): boolean {
   for (const [threadId, entry] of queues) {
-    if (entry.botId !== botId) continue;
+    if (entry.botId !== botId || (expectedThreadId !== undefined && threadId !== expectedThreadId)) continue;
     const items = entry.items.filter((item) => item.messageId !== messageId);
     if (items.length === entry.items.length) continue;
     if (items.length === 0) queues.delete(threadId);
     else queues.set(threadId, { botId: entry.botId, items });
+    changed();
     return true;
   }
   return false;

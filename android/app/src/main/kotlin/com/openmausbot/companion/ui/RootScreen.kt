@@ -380,15 +380,14 @@ private fun PairedScreen(
         is Destination.Conversation -> ChatScreen(
             destination = destination,
             onResolved = { target ->
-                (destination as? Destination.Thread)?.let {
-                    navigator.resolveThread(it.threadId, target)
-                }
+                navigator.selectTask(destination, target)
             },
             onBack = navigator::pop,
             onOpenComputer = { navigator.push(Destination.Computer(it)) },
             onOpenOverview = { navigator.push(Destination.Overview(it)) },
             // Push Computer keeps the chat under the top; pop to roster does not.
             retainsDraft = navigator::retainsChatDraft,
+            onOpenChat = navigator::open,
         )
         is Destination.Computer -> ComputerScreen(
             botId = destination.botId,

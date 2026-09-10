@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { readFileSync } from "node:fs";
 
 import {
@@ -6,6 +6,7 @@ import {
   CLOUDFLARED_VERSION,
   executableTarget,
   parsePrepareCloudflaredArgs,
+  releaseBytes,
   sha256,
   targetForCurrentHost,
   targetsForHost,
@@ -13,6 +14,65 @@ import {
   verifyPinnedBinary,
   verifySha256,
 } from "./prepare-cloudflared.mjs";
+
+describe("cloudflared download retries", () => {
+  afterEach(() => {
+    vi.useRealTimers();
+    vi.unstubAllGlobals();
+    vi.unstubAllEnvs();
+    vi.restoreAllMocks();
+  });
+
+  function mockDownload() {
+    vi.useFakeTimers();
+    vi.stubEnv("OMB_CLOUDFLARED_ARCHIVE_DIR", "");
+    vi.spyOn(console, "warn").mockImplementation(() => {});
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+    return fetchMock;
+  }
+
+  it("recovers from an HTTP 504 and verifies the recovered bytes normally", async () => {
+    const fetchMock = mockDownload();
+    const bytes = Buffer.from("downloaded release");
+    fetchMock.mockResolvedValueOnce(new Response("gateway timeout", { status: 504 }))
+      .mockResolvedValueOnce(new Response(bytes));
+    const download = releaseBytes({ name: "cloudflared-linux-amd64" });
+    await vi.runAllTimersAsync();
+    const result = await download;
+    expect(result).toEqual(bytes);
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(verifySha256(result, sha256(bytes))).toBe(sha256(bytes));
+    expect(() => verifySha256(result, sha256(Buffer.from("other release")))).toThrow(/SHA-256 verification/);
+  });
+
+  it("retries a network error and an interrupted response body", async () => {
+    const fetchMock = mockDownload();
+    fetchMock.mockRejectedValueOnce(new TypeError("fetch failed"))
+      .mockResolvedValueOnce({ ok: true, arrayBuffer: async () => { throw new TypeError("terminated"); } })
+      .mockResolvedValueOnce(new Response("complete"));
+    const download = releaseBytes({ name: "cloudflared-linux-amd64" });
+    await vi.runAllTimersAsync();
+    expect(await download).toEqual(Buffer.from("complete"));
+    expect(fetchMock).toHaveBeenCalledTimes(3);
+  });
+
+  it("stops after three transient failures", async () => {
+    const fetchMock = mockDownload();
+    fetchMock.mockImplementation(async () => new Response("unavailable", { status: 503 }));
+    const result = expect(releaseBytes({ name: "cloudflared-linux-amd64" })).rejects.toThrow(/HTTP 503/);
+    await vi.runAllTimersAsync();
+    await result;
+    expect(fetchMock).toHaveBeenCalledTimes(3);
+  });
+
+  it("fails immediately for a missing pinned asset", async () => {
+    const fetchMock = mockDownload();
+    fetchMock.mockResolvedValue(new Response("not found", { status: 404 }));
+    await expect(releaseBytes({ name: "missing" })).rejects.toThrow(/HTTP 404/);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+});
 
 const PINNED_ASSETS = {
   "darwin-arm64": {

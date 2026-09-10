@@ -627,8 +627,8 @@ const TRANSCRIPT_ATTACHMENT_TAG =
   /^<attached-(image|file)[\t ]+path="([^"\r\n]*)"(?:[\t ]+name="([^"\r\n]*)")?[\t ]*\/>[\t ]*$/;
 
 /** Split a stored user message into its display text and attachments for
- * transcript rendering. Prompt-only tags never show in the bubble. */
-export function splitTranscriptAttachments(text: string): TranscriptAttachments {
+ * transcript rendering. Markdown exports preserve whitespace; bubbles trim it. */
+export function splitTranscriptAttachments(text: string, trimDisplay = true): TranscriptAttachments {
   const images: TranscriptImageAttachment[] = [];
   const files: TranscriptFileAttachment[] = [];
   let display = "";
@@ -685,7 +685,7 @@ export function splitTranscriptAttachments(text: string): TranscriptAttachments 
     cursor = wholeLineEnd;
   }
 
-  return { display: display.trim(), images, files };
+  return { display: trimDisplay ? display.trim() : display, images, files };
 }
 
 /** Kept for callers outside the desktop bundle that used the old helper. */

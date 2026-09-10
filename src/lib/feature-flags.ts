@@ -1,7 +1,7 @@
 import { t } from "./i18n";
 
 export interface FeatureFlagConfig {
-  features?: { skillRecorder?: boolean; showToolCalls?: boolean; browser?: boolean };
+  features?: { skillAuthoring?: boolean; showToolCalls?: boolean; browser?: boolean };
   browserEngine?: { kind: "engine" | "unavailable"; reason?: string; installable?: boolean; installing?: boolean; installError?: string };
 }
 
@@ -19,9 +19,10 @@ export function browserUnavailableReason(config: FeatureFlagConfig | null | unde
   return t("browser.noEngine");
 }
 
-/** Experimental features are available only after an explicit opt-in. */
-export function skillRecorderEnabled(config: FeatureFlagConfig | null | undefined): boolean {
-  return config?.features?.skillRecorder === true;
+/** Bots may draft skills (/learn, skill_manage) for the user's review. Like
+ * every experiment, available only after an explicit opt-in. */
+export function skillAuthoringEnabled(config: FeatureFlagConfig | null | undefined): boolean {
+  return config?.features?.skillAuthoring === true;
 }
 
 /** The experimental built-in browser is unavailable until the person using

@@ -7,6 +7,7 @@ import { BotAvatar } from "./Avatar";
 import { Card } from "./SettingsPrimitives";
 import { t } from "@/lib/i18n";
 import { botUsage, cachedInput, costCaption, formatTokens, formatUsd, hasFiniteCost, sumUsage, usageDetail } from "@/lib/usage";
+import { UsageHistory } from "./UsageHistory";
 
 export function UsageSection() {
   const { state } = useStore();
@@ -28,6 +29,7 @@ export function UsageSection() {
   const billings = new Set(rows.map((r) => r.billing));
 
   return (
+    <>
     <Card title={t("usage.title")} subtitle={t("usage.subtitle")}>
       {rows.length === 0 ? (
         <div className="text-[13px] text-ink-secondary">{t("usage.empty")}</div>
@@ -74,5 +76,7 @@ export function UsageSection() {
         </div>
       )}
     </Card>
+    <UsageHistory />
+    </>
   );
 }

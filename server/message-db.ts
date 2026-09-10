@@ -53,7 +53,40 @@ function open(): DatabaseSync {
     );
   `);
   ensureRecallIndex(db);
+  ensureMemoryIndex(db);
   return db;
+}
+
+// The bot's memory files — MEMORY.md, memory/<topic>.md, memory/log/<day>.md
+// — indexed for the same session_search. One row per file, with the size
+// and mtime it was indexed at so a search can notice a file the bot's own
+// file tools rewrote without any filesystem watcher. Kept in this database
+// because FTS5 is already here; the files themselves stay the source of
+// truth on disk and this table is rebuilt from them at any time.
+function ensureMemoryIndex(db: DatabaseSync): void {
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS memory_files (
+      bot_id TEXT NOT NULL,
+      path TEXT NOT NULL,
+      text TEXT NOT NULL,
+      mtime_ms INTEGER NOT NULL,
+      bytes INTEGER NOT NULL,
+      PRIMARY KEY (bot_id, path)
+    );
+    CREATE VIRTUAL TABLE IF NOT EXISTS memory_fts USING fts5(
+      text, content='memory_files', content_rowid='rowid', tokenize='unicode61'
+    );
+    CREATE TRIGGER IF NOT EXISTS memory_fts_ai AFTER INSERT ON memory_files BEGIN
+      INSERT INTO memory_fts(rowid, text) VALUES (new.rowid, new.text);
+    END;
+    CREATE TRIGGER IF NOT EXISTS memory_fts_ad AFTER DELETE ON memory_files BEGIN
+      INSERT INTO memory_fts(memory_fts, rowid, text) VALUES ('delete', old.rowid, old.text);
+    END;
+    CREATE TRIGGER IF NOT EXISTS memory_fts_au AFTER UPDATE ON memory_files BEGIN
+      INSERT INTO memory_fts(memory_fts, rowid, text) VALUES ('delete', old.rowid, old.text);
+      INSERT INTO memory_fts(rowid, text) VALUES (new.rowid, new.text);
+    END;
+  `);
 }
 
 // Ranked recall over transcript text, for the bot's own session_search tool.
@@ -63,14 +96,34 @@ function open(): DatabaseSync {
 // is no more of a dependency than the table it indexes. The sidebar's LIKE
 // search below stays as it is — substring find over a single thread wants
 // every occurrence, not a relevance ranking.
+/** FTS5 is in every runtime OpenMausBot supports — node:sqlite on Node ≥ 24
+ * (package.json engines) and the Node inside Electron 43 — so a SQLite
+ * without it is a mis-installed runtime, not a mode to run in. Say that,
+ * instead of surfacing SQLite's own "no such module: fts5" from deep inside
+ * open() with nothing about what to do. Anything else is rethrown as-is. */
+export function describeMissingFts5(error: unknown): Error | null {
+  const message = error instanceof Error ? error.message : String(error);
+  if (!/no such module:\s*fts5/i.test(message)) return null;
+  return new Error(
+    `OpenMausBot needs SQLite with FTS5, which is built into Node 24 and newer (and into the app). ` +
+    `This Node (${process.version}) has none: install Node 24 or newer. (${message})`,
+  );
+}
+
 function ensureRecallIndex(db: DatabaseSync): void {
   const existed = db
     .prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'messages_fts'")
     .get();
+  try {
+    db.exec(`
+      CREATE VIRTUAL TABLE IF NOT EXISTS messages_fts USING fts5(
+        text, content='messages', content_rowid='rowid', tokenize='unicode61'
+      );
+    `);
+  } catch (error) {
+    throw describeMissingFts5(error) ?? error;
+  }
   db.exec(`
-    CREATE VIRTUAL TABLE IF NOT EXISTS messages_fts USING fts5(
-      text, content='messages', content_rowid='rowid', tokenize='unicode61'
-    );
     CREATE TRIGGER IF NOT EXISTS messages_fts_ai AFTER INSERT ON messages BEGIN
       INSERT INTO messages_fts(rowid, text) VALUES (new.rowid, new.text);
     END;
@@ -427,6 +480,64 @@ export function recallMessages(query: string, threadIds: readonly string[], limi
       ...(peer ? { peer } : {}),
     };
   });
+}
+
+export interface MemoryFileStat {
+  path: string;
+  mtimeMs: number;
+  bytes: number;
+}
+
+/** Index one memory file (upsert keeps the rowid, so the update trigger
+ * keeps the FTS rows in step — the same reasoning as UPSERT_MESSAGE). */
+export function indexMemoryFile(botId: string, path: string, text: string, stat: { mtimeMs: number; bytes: number }): void {
+  db()
+    .prepare(
+      "INSERT INTO memory_files (bot_id, path, text, mtime_ms, bytes) VALUES (?, ?, ?, ?, ?) " +
+        "ON CONFLICT(bot_id, path) DO UPDATE SET text = excluded.text, mtime_ms = excluded.mtime_ms, bytes = excluded.bytes",
+    )
+    .run(botId, path, text, Math.trunc(stat.mtimeMs), stat.bytes);
+}
+
+export function removeMemoryFile(botId: string, path: string): void {
+  db().prepare("DELETE FROM memory_files WHERE bot_id = ? AND path = ?").run(botId, path);
+}
+
+/** What is indexed for a bot, so the caller can compare against the disk. */
+export function indexedMemoryFiles(botId: string): MemoryFileStat[] {
+  const rows = db()
+    .prepare("SELECT path, mtime_ms, bytes FROM memory_files WHERE bot_id = ?")
+    // SAFETY: the SELECT names exactly these three NOT NULL columns
+    .all(botId) as Array<{ path: string; mtime_ms: number; bytes: number }>;
+  return rows.map((row) => ({ path: row.path, mtimeMs: row.mtime_ms, bytes: row.bytes }));
+}
+
+export interface MemoryHit {
+  /** workspace-relative: MEMORY.md, memory/<topic>.md, memory/log/<day>.md */
+  file: string;
+  /** the matched passage, with each matched term wrapped in [brackets] */
+  snippet: string;
+  /** when the file was last written, from its mtime */
+  at: number;
+}
+
+/** Relevance-ranked recall over ONE bot's memory files. Scoped by bot id
+ * in SQL, the same way recallMessages scopes by thread: another bot's
+ * memory is not a lower-ranked result, it is not a result. */
+export function recallMemory(query: string, botId: string, limit = 12): MemoryHit[] {
+  const match = ftsQuery(query);
+  if (!match) return [];
+  const rows = db()
+    .prepare(
+      "SELECT f.path, f.mtime_ms, " +
+        `snippet(memory_fts, 0, '[', ']', '…', ${SNIPPET_TOKENS}) AS snippet ` +
+        "FROM memory_fts JOIN memory_files f ON f.rowid = memory_fts.rowid " +
+        "WHERE memory_fts MATCH ? AND f.bot_id = ? " +
+        "ORDER BY bm25(memory_fts), f.mtime_ms DESC LIMIT ?",
+    )
+    // SAFETY: the SELECT names exactly these three columns; snippet() is never null
+    .all(match, botId, limit) as Array<{ path: string; mtime_ms: number; snippet: string }>;
+  return rows.map((row) => ({ file: row.path, at: row.mtime_ms, snippet: row.snippet.replace(/\s+/g, " ").trim() }));
 }
 
 /** Test/shutdown hook — closes the handle so a wiped DATA_DIR starts clean. */

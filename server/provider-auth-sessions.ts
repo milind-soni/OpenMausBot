@@ -2,7 +2,7 @@
 // the admin session that started it. Never put its device code on global SSE.
 import type { ProviderAuthenticationStart, ProviderInstance } from "./contracts.ts";
 
-type LoginInstance = Pick<ProviderInstance, "instanceId" | "startAuthentication" | "getAuthentication" | "completeAuthentication" | "cancelAuthentication">;
+type LoginInstance = Pick<ProviderInstance, "instanceId" | "startAuthentication" | "getAuthentication" | "completeAuthentication" | "cancelAuthentication" | "signOut">;
 type Flow = {
   instance: LoginInstance;
   owner: string;
@@ -88,6 +88,27 @@ export class ProviderAuthSessions {
     finally { flow.busy = false; flow.expiresAt = 0; }
   }
 
+  /** Remove the server's stored sign-in for this provider. A login another
+   * admin is still completing must not be pulled away underneath them, and
+   * nobody may start one while the credential is being removed. */
+  async signOut(instance: LoginInstance, owner: string): Promise<void> {
+    if (!instance.signOut) throw failure("Sign-out is unavailable for this provider.", 404);
+    const existing = this.flows.get(instance.instanceId);
+    if (existing && (existing.busy || (existing.owner !== owner && existing.expiresAt > Date.now() && !existing.revoked))) {
+      throw failure("A sign-in is in progress. Finish or cancel it in the browser that started it, or wait for it to expire.", 409);
+    }
+    // Reserve the slot like a starting flow: start() answers 409 until we finish.
+    const flow: Flow = { instance, owner, flowId: null, expiresAt: Date.now() + 60_000, busy: true, starting: false, revoked: false };
+    this.flows.set(instance.instanceId, flow);
+    try {
+      // This owner's own leftover flow is theirs to abandon.
+      if (existing) await existing.instance.cancelAuthentication?.();
+      await instance.signOut();
+    } finally {
+      if (this.flows.get(instance.instanceId) === flow) this.flows.delete(instance.instanceId);
+    }
+  }
+
   revokeOwner(owner: string): void {
     for (const [id, flow] of this.flows) {
       if (flow.owner !== owner) continue;
@@ -106,5 +127,12 @@ export class ProviderAuthSessions {
     for (const flow of this.flows.values()) flow.revoked = true;
     // Called when disposing the provider fleet, which owns child teardown.
     this.flows.clear();
+  }
+
+  clearInstance(instanceId: string): void {
+    const flow = this.flows.get(instanceId);
+    if (flow) flow.revoked = true;
+    this.flows.delete(instanceId);
+    // The registry's per-instance disposal owns child teardown.
   }
 }

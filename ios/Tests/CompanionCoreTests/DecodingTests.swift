@@ -32,6 +32,18 @@ final class DecodingTests: XCTestCase {
 
     // MARK: - Hydration
 
+    func testRoutineExecutionMarkerIsOptionalAndPreserved() throws {
+        let legacy = try JSONDecoder().decode(
+            BotTask.self, from: Data(#"{"threadId":"legacy","title":"Legacy","createdAt":1}"#.utf8)
+        )
+        let execution = try JSONDecoder().decode(
+            BotTask.self, from: Data(#"{"threadId":"run-thread","title":"Brief","createdAt":2,"routineRunId":"run-1"}"#.utf8)
+        )
+        XCTAssertNil(legacy.routineRunId)
+        XCTAssertEqual(execution.routineRunId, "run-1")
+        XCTAssertEqual(try JSONDecoder().decode(BotTask.self, from: JSONEncoder().encode(execution)), execution)
+    }
+
     func testDecodesThePagedFleet() throws {
         let fleet = try decode(Fleet.self, "bots-paged")
         XCTAssertFalse(fleet.bots.isEmpty)
@@ -487,6 +499,71 @@ final class DecodingTests: XCTestCase {
         """
         let message = try JSONDecoder().decode(Message.self, from: Data(json.utf8))
         XCTAssertEqual(message.text, "hi")
+    }
+
+    func testDecodesAThreadOpenedByABotAndOneOpenedByThePerson() throws {
+        // Newer computers say which bot opened a thread on itself or a
+        // teammate. The captured fixtures predate that, so every thread in
+        // them was opened by the person — and must still decode as such.
+        let json = """
+        {"threadId":"t2","title":"Ship it","createdAt":1,
+         "openedBy":{"botId":"scout","name":"Scout","delegationId":"d1","at":2}}
+        """
+        let opened = try JSONDecoder().decode(BotTask.self, from: Data(json.utf8))
+        XCTAssertEqual(opened.openedBy?.botId, "scout")
+        XCTAssertEqual(opened.openedBy?.name, "Scout")
+        XCTAssertEqual(opened.openedBy?.delegationId, "d1")
+        XCTAssertEqual(opened.openedBy?.at, 2)
+
+        let minimal = try JSONDecoder().decode(
+            BotTask.self,
+            from: Data(#"{"threadId":"t1","title":"","createdAt":1,"openedBy":{"botId":"scout","name":"Scout","at":2}}"#.utf8)
+        )
+        XCTAssertNil(minimal.openedBy?.delegationId)
+
+        let byThePerson = try JSONDecoder().decode(
+            BotTask.self, from: Data(#"{"threadId":"t1","title":"","createdAt":1}"#.utf8)
+        )
+        XCTAssertNil(byThePerson.openedBy)
+        for task in try decode(Fleet.self, "bots-paged").bots.flatMap({ $0.tasks ?? [] }) {
+            XCTAssertNil(task.openedBy, task.threadId)
+        }
+    }
+
+    func testAThreadOpenedByABotSaysSoInTheList() throws {
+        // Same words as the desktop's thread list, so a person reading both
+        // screens reads one sentence.
+        let opened = try JSONDecoder().decode(
+            BotTask.self,
+            from: Data(#"{"threadId":"t2","title":"Ship it","createdAt":1,"openedBy":{"botId":"scout","name":"Scout","at":2}}"#.utf8)
+        )
+        XCTAssertEqual(opened.openedByLabel, "opened by Scout")
+
+        let byThePerson = try JSONDecoder().decode(
+            BotTask.self, from: Data(#"{"threadId":"t1","title":"","createdAt":1}"#.utf8)
+        )
+        XCTAssertNil(byThePerson.openedByLabel)
+    }
+
+    func testDecodesAThreadRefOnAnActivityChipAndItsAbsence() throws {
+        let json = """
+        {"id":"m3","role":"bot","kind":"activity","at":1,
+         "tool":{"name":"Opened thread #Ship it on Scout","ok":true},
+         "threadRef":{"botId":"scout","threadId":"t2","title":"Ship it"}}
+        """
+        let chip = try JSONDecoder().decode(Message.self, from: Data(json.utf8))
+        XCTAssertEqual(chip.kind, .activity)
+        XCTAssertEqual(chip.tool?.name, "Opened thread #Ship it on Scout")
+        XCTAssertEqual(chip.threadRef, ThreadRef(botId: "scout", threadId: "t2", title: "Ship it"))
+
+        let receipt = try JSONDecoder().decode(
+            Message.self,
+            from: Data(#"{"id":"m4","role":"bot","kind":"activity","at":1,"tool":{"name":"Read","ok":true}}"#.utf8)
+        )
+        XCTAssertNil(receipt.threadRef)
+        for message in try decode(ThreadPage.self, "thread-page").messages {
+            XCTAssertNil(message.threadRef, message.id)
+        }
     }
 
     // MARK: - Pairing and errors

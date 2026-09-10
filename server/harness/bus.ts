@@ -16,7 +16,7 @@ const INCOMPLETE_LOG_MESSAGE =
 
 export class EventBus {
   private listeners = new Set<RuntimeEventListener>();
-  private unsubscribes: Array<() => void> = [];
+  private unsubscribes = new Map<string, () => void>();
   private pendingLogWarnings = new Map<string, RuntimeEvent>();
   private readonly appendLog: typeof appendFileSync;
 
@@ -26,6 +26,7 @@ export class EventBus {
 
   attach(instances: ProviderInstance[]) {
     for (const instance of instances) {
+      this.detach(instance.instanceId);
       const unsub = instance.adapter.onEvent((event) => {
         // hard invariant borrowed from correlateRuntimeEventWithInstance:
         // an adapter may only emit events for its own driver kind
@@ -35,7 +36,7 @@ export class EventBus {
         }
         this.publish({ ...event, providerInstanceId: instance.instanceId });
       });
-      this.unsubscribes.push(unsub);
+      this.unsubscribes.set(instance.instanceId, unsub);
     }
   }
 
@@ -76,7 +77,7 @@ export class EventBus {
   }
 
   private deliver(event: RuntimeEvent) {
-    for (const listener of [...this.listeners]) {
+    for (const listener of Array.from(this.listeners)) {
       try {
         listener(event);
       } catch (e) {
@@ -91,6 +92,11 @@ export class EventBus {
   }
 
   detachAll() {
-    for (const unsub of this.unsubscribes.splice(0)) unsub();
+    for (const id of this.unsubscribes.keys()) this.detach(id);
+  }
+
+  detach(instanceId: string) {
+    this.unsubscribes.get(instanceId)?.();
+    this.unsubscribes.delete(instanceId);
   }
 }

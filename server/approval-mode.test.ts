@@ -15,10 +15,10 @@ describe("approval modes", () => {
     for (const driver of ["codex", "claudeAgent", "antigravityAgent", "cursorAgent", "grokAgent", "opencodeGo"]) {
       expect(supportsApprovalMode(driver, "full")).toBe(true);
       expect(supportsApprovalMode(driver, "custom")).toBe(driver === "codex");
-      expect(hasNativeAutoReview(driver)).toBe(["codex", "claudeAgent", "cursorAgent"].includes(driver));
+      expect(hasNativeAutoReview(driver)).toBe(["codex", "claudeAgent", "cursorAgent", "grokAgent"].includes(driver));
       expect(requiresNativeApproval(driver, "auto")).toBe(true);
     }
-    for (const driver of [undefined, "customAgent", "pi"]) expect(supportsApprovalMode(driver, "full")).toBe(false);
+    expect(supportsApprovalMode(undefined, "full")).toBe(false);
     expect(requiresNativeApproval("antigravityAgent", "full")).toBe(false);
     expect(requiresNativeApproval("antigravityAgent", "ask")).toBe(false);
     expect(requiresNativeApproval("opencodeGo", "full")).toBe(false);
@@ -26,6 +26,21 @@ describe("approval modes", () => {
     for (const driver of ["claudeAgent", "cursorAgent", "grokAgent"]) {
       expect(requiresNativeApproval(driver, "full")).toBe(true);
     }
+  });
+
+  it.each([
+    "geminiAgent", "kimiAgent", "droidAgent", "qwenAgent", "hermesAgent", "customAcp",
+    "piAgent", "grok", "openai-compat", "boxAgent", "minimax", "unknown",
+  ])("keeps %s on supported approval levels without claiming native Auto", (driver) => {
+    expect(supportsApprovalMode(driver, "ask")).toBe(true);
+    expect(supportsApprovalMode(driver, "auto")).toBe(true);
+    expect(supportsApprovalMode(driver, "full")).toBe(false);
+    expect(supportsApprovalMode(driver, "custom")).toBe(false);
+    expect(hasNativeAutoReview(driver)).toBe(false);
+    // A surfaced Auto request stays with the human even when this engine
+    // has no native reviewer; the app must not substitute a broad allowance.
+    expect(requiresNativeApproval(driver, "auto")).toBe(true);
+    expect(requiresNativeApproval(driver, "ask")).toBe(false);
   });
   it("recognizes only the four durable values", () => {
     expect(APPROVAL_MODES).toEqual(["ask", "auto", "full", "custom"]);

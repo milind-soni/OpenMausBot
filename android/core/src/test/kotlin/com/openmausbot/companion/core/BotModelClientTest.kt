@@ -57,6 +57,24 @@ class BotModelClientTest {
     }
 
     @Test
+    fun taskModelUpdatesUseThePinnedTaskAndLeaveTheProfileRouteAlone() = runBlocking {
+        server.enqueue(json(botResponse(effort = null)))
+        client.updateModel("bot-1", ModelSelection("codex", "gpt-5"), "task-a")
+
+        val request = server.takeRequest()
+        assertEquals("PATCH", request.method)
+        assertEquals("/api/bots/bot-1/tasks/task-a", request.path)
+        val body = CompanionJson.parseToJsonElement(request.body.readUtf8()).jsonObject
+        assertEquals(setOf("modelSelection", "requireAvailableModel"), body.keys)
+        assertEquals("true", body.getValue("requireAvailableModel").jsonPrimitive.content)
+        assertEquals("gpt-5", body.getValue("modelSelection").jsonObject.getValue("model").jsonPrimitive.content)
+        assertFailsWith<APIError.BadUrl> {
+            client.updateModel("bot-1", ModelSelection("codex", "gpt-5"), "..")
+        }
+        assertEquals(1, server.requestCount)
+    }
+
+    @Test
     fun engineDefaultOmitsEffortRatherThanSendingNull() = runBlocking {
         server.enqueue(json(botResponse(effort = null)))
 

@@ -10,11 +10,23 @@ import { soulSystemPrompt } from "./bot-folder.ts";
 export type PromptPart = { id: string; label: string; text: string };
 export type PromptSection = PromptPart & { bytes: number };
 
+/** Sections whose text legitimately differs between two turns of one live
+ * conversation: memory, because a bot writes to MEMORY.md mid-conversation,
+ * and mentions, which describe the message being sent right now.
+ *
+ * They are reported apart from the rest so a driver that keeps one CLI
+ * process per thread can key that process on the stable half. Before this
+ * split, saving a memory changed the system prompt, which changed the spawn
+ * contract, which relaunched the CLI — and the provider then re-uploaded the
+ * entire conversation at the cache-write rate. Mentions did the same on any
+ * turn that tagged a bot. */
+const VOLATILE_SECTIONS = new Set(["memory", "mentions"]);
+
 export function buildSystemPrompt(
   persona: string,
   soul: string,
   parts: PromptPart[],
-): { text: string; sections: PromptSection[] } {
+): { text: string; sections: PromptSection[]; stable: string; volatile: string } {
   const ordered: PromptPart[] = [
     { id: "persona", label: "Identity", text: persona },
     { id: "soul", label: "Standing instructions (SOUL.md)", text: soulSystemPrompt(soul) },
@@ -23,7 +35,9 @@ export function buildSystemPrompt(
   const sections = ordered
     .filter((part) => part.text.length > 0)
     .map((part) => ({ ...part, bytes: Buffer.byteLength(part.text, "utf8") }));
-  return { text: sections.map((section) => section.text).join(""), sections };
+  const halves = (volatile: boolean) =>
+    sections.filter((section) => VOLATILE_SECTIONS.has(section.id) === volatile).map((section) => section.text).join("");
+  return { text: sections.map((section) => section.text).join(""), sections, stable: halves(false), volatile: halves(true) };
 }
 
 export type ComputerPromptKind = "vm-private" | "vm-shared" | "box" | "box-agent" | "vps" | "local";
@@ -60,12 +74,16 @@ export const COMPOSIO_PROMPT =
 export function customMcpPrompt(names: string[]): string {
   if (names.length === 0) return "";
   const list = names.map((name) => `"${name}"`).join(", ");
-  return ` The user also added ${names.length === 1 ? "an MCP server" : "MCP servers"} for you: ${list}. Their tools are mounted under mcp__<server>__<tool>; each call asks the user once unless already allowed.`;
+  return ` The user also added ${names.length === 1 ? "an MCP server" : "MCP servers"} for you: ${list}. Use their available tools under the engine's normal approval rules.`;
 }
 export const CREDENTIAL_PROMPT =
   " If a supported API key is missing, use request_credential to create a secure credential request. A freshly QR-paired mobile app or the desktop app can show the secure entry card. Never claim it opened unless the request succeeded, and never ask the user to paste credentials into chat.";
+export const THREADS_PROMPT =
+  " A thread is one conversation with its own history and its own run; a bot can have several running at once, and the person sees them as rows under that bot. Use start_thread to open one on yourself for separate work, or on a teammate to hand them a job that should run on its own. Use list_threads to see how the ones you opened are going. When you mention a thread to the person, write its title as #Title so it links. Do not use a ticket comment, a note, or a room post as a stand-in for a thread.";
 export const ROUTINE_PROMPT =
   " If the user explicitly asks to list or review, schedule, run, or change routines, use list_routines and propose_routine or propose_routine_action. A proposal is not applied until the user confirms its in-app card, so never claim the action completed before that confirmation.";
+export const ROUTINE_EXECUTION_PROMPT =
+  " Execute this routine now: use available peer tools for required handoffs rather than merely announcing that you will wait; after an accepted delegation, end this turn for automatic resumption, and report a concrete blocker if no handoff is possible.";
 export const LEARN_PROMPT =
   " If the user sends /learn or asks you to save a reusable procedure from this work, use skills_list and skill_manage. Create new skills; update an existing learned skill only when the user explicitly asks to revise that exact name. Include source provenance and wait for the review card decision.";
 export const WEBHOOK_PROMPT =

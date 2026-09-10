@@ -59,7 +59,7 @@ export const BoxAgentDriver: ProviderDriver<BoxAgentConfig> = {
     const active = new Map<string, { cancel: () => void; turnId: string; boxId: string }>();
 
     const emit = (event: RuntimeEvent) => {
-      for (const l of [...listeners]) l(event);
+      for (const l of Array.from(listeners)) l(event);
     };
     const base = (threadId: string, turnId: string) => ({
       eventId: newEventId(),

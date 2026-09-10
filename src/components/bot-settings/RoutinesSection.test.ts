@@ -2,7 +2,7 @@ import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it, vi } from "vitest";
 
-import { StoreProvider, type Bot } from "@/state/store";
+import type { Bot } from "@/state/store";
 import type { Routine, RoutineRun } from "@/lib/routines";
 
 // RoutinesSection mounts RoutineEditor from RoutineCalendarPage.tsx (only
@@ -12,6 +12,10 @@ import type { Routine, RoutineRun } from "@/lib/routines";
 // (no window), so it must be stubbed as SidebarBotListItem.test.ts does.
 vi.mock("@/components/DesktopCapabilities", () => ({
   useDesktopCapabilities: () => ({ capabilities: { host: { homeDir: undefined } } }),
+}));
+
+vi.mock("@/state/store", () => ({
+  useStore: () => ({ state: { routinesLoadState: "ready" }, dispatch: vi.fn() }),
 }));
 
 const { RoutinesSection } = await import("./RoutinesSection");
@@ -52,7 +56,7 @@ const pausedRoutine: Routine = {
   botId: bot.id,
   runOn: "maus",
   enabled: false,
-  schedule: { type: "once", at: Date.UTC(2026, 8, 10, 12) },
+  schedule: { type: "once", at: Date.now() + 86_400_000 },
   durationMinutes: 5,
   nextRunAt: null,
   createdAt: 0,
@@ -75,7 +79,7 @@ const finishedRun: RoutineRun = {
 
 function render(routines: Routine[], runs: RoutineRun[]) {
   return renderToStaticMarkup(
-    createElement(StoreProvider, null, createElement(RoutinesSection, { bot, routines, runs })),
+    createElement(RoutinesSection, { bot, routines, runs }),
   );
 }
 
@@ -100,24 +104,26 @@ describe("RoutinesSection", () => {
 
   it("shows the next run time for a routine that has one", () => {
     const markup = render([activeRoutine], []);
-    expect(markup).toMatch(/Next \d{1,2}:\d{2}/);
+    expect(markup).toContain("Next Sep");
   });
 
   it("omits Next for a routine with no future run and shows nothing extra without a run history", () => {
     const markup = render([pausedRoutine], []);
     expect(markup).not.toContain("Next ");
-    expect(markup).not.toContain("Last ");
+    expect(markup).toContain("Not run yet");
   });
 
-  it("shows the newest run's status and time as Last, picking the latest by finishedAt", () => {
+  it("shows the newest run's status without relying on completion order", () => {
     const olderRun: RoutineRun = {
       ...finishedRun,
       id: "run-0",
       status: "failed",
       finishedAt: Date.UTC(2026, 8, 5, 9, 2),
+      createdAt: Date.UTC(2026, 8, 5, 9),
     };
     const markup = render([activeRoutine], [olderRun, finishedRun]);
-    expect(markup).toMatch(/Last completed \d{1,2}:\d{2}/);
-    expect(markup).not.toContain("Last failed");
+    expect(markup).toContain("Latest: Completed");
+    expect(markup).not.toContain("Latest: Failed");
+    expect(markup).toContain('aria-label="Run logs for Morning brief"');
   });
 });

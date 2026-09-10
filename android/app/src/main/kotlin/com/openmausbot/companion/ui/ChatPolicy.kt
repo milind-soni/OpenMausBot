@@ -4,6 +4,7 @@ import com.openmausbot.companion.core.AttachedMessageContent
 import com.openmausbot.companion.core.Bot
 import com.openmausbot.companion.core.Chat
 import com.openmausbot.companion.core.ChatSummary
+import com.openmausbot.companion.core.ChatTarget
 import com.openmausbot.companion.core.CompanionState
 import com.openmausbot.companion.core.Message
 import com.openmausbot.companion.core.OptionCard
@@ -52,15 +53,7 @@ object ThreadResolution {
     fun chatOrNull(state: CompanionState, threadId: String): Chat? =
         (resolve(state, threadId) as? Result.Open)?.chat
 
-    /**
-     * The chat a destination points at.
-     *
-     * An addressed chat resolves by its owner alone, so the screen follows the
-     * bot: through a task switch, through a task being created, and through the
-     * deletion of the very task that was open — where the desktop moves the bot
-     * to another task and the phone has no business going home. Only an owner
-     * that is really gone closes the chat.
-     */
+    /** Keep the addressed task open until the reader switches or it is removed. */
     fun resolve(state: CompanionState, destination: Destination.Conversation): Result =
         when (destination) {
             is Destination.Chat -> state.chat(destination.target)?.let(Result::Open)
@@ -71,21 +64,10 @@ object ThreadResolution {
     fun resolve(state: CompanionState, threadId: String): Result {
         state.botForThread(threadId)?.let { return Result.Open(Chat.BotChat(it)) }
         state.roomForThread(threadId)?.let { return Result.Open(Chat.RoomChat(it)) }
-        // A bot that switched task now answers to a different thread, and a
-        // notification may name a task that is no longer the open one. The chat
-        // follows the bot, not the thread it was opened on — so a thread that is
-        // one of a bot's tasks still resolves to that bot, and the screen shows
-        // whichever task the bot is in now.
-        state.bots
-            .firstOrNull { bot -> bot.tasks.orEmpty().any { it.threadId == threadId } }
-            ?.let { return Result.Open(Chat.BotChat(it)) }
-        // Channel tasks use the same owner-following navigation as bot tasks.
-        // Session switches the room before opening a notification/search hit;
-        // until then, resolving the owner keeps a stale destination from
-        // looking deleted.
         state.rooms
             .firstOrNull { room -> room.tasks.orEmpty().any { it.threadId == threadId } }
-            ?.let { return Result.Open(Chat.RoomChat(it)) }
+            ?.let { room -> state.chat(ChatTarget.Room(room.id, threadId)) }
+            ?.let { return Result.Open(it) }
         return unknown(state)
     }
 
@@ -229,13 +211,13 @@ object ChatActions {
         if (bot != null) {
             out += ChatAction(
                 id = ChatActionId.NEW_TASK,
-                title = "New task",
+                title = "New thread",
                 subtitle = "Start a fresh thread with ${bot.name}",
-                enabled = bot.busy != true,
+                enabled = TaskRules.canCreate(bot),
             )
             out += ChatAction(
                 id = ChatActionId.TASKS,
-                title = "Tasks",
+                title = "Threads",
                 subtitle = "Switch, rename or remove one",
             )
             out += ChatAction(
@@ -251,7 +233,7 @@ object ChatActions {
         } else if (chat.supportsTasks) {
             out += ChatAction(
                 id = ChatActionId.NEW_TASK,
-                title = "New task",
+                title = "New thread",
                 subtitle = "Start a fresh conversation in ${chat.name}",
                 // iOS: `disabled: current.busy || hasPendingApproval`, on the room
                 // branch only — a channel waiting on an answer does not get a
@@ -260,14 +242,14 @@ object ChatActions {
             )
             out += ChatAction(
                 id = ChatActionId.TASKS,
-                title = "Tasks",
+                title = "Threads",
                 subtitle = "Switch, rename or remove one",
             )
         }
         out += ChatAction(
             id = ChatActionId.SHARE_MARKDOWN,
             title = "Share transcript",
-            subtitle = "This chat as Markdown",
+            subtitle = "This thread as Markdown",
         )
         out += ChatAction(
             id = ChatActionId.SHARE_JSON,
@@ -569,8 +551,8 @@ object SlashCommands {
         ),
         SlashCommand(
             id = SlashCommandId.TASKS,
-            title = "/tasks",
-            description = "View and manage bot task threads",
+            title = "/threads",
+            description = "View and manage threads",
             effect = SlashEffect.OpenTasks,
         ),
         SlashCommand(

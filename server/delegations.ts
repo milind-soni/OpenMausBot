@@ -20,7 +20,7 @@ import { DATA_DIR } from "./config.ts";
 import { newId } from "./contracts.ts";
 import { requestPeerApproval, type ApprovalBus } from "./peer-approval.ts";
 import { peerAllowed } from "./peer-roster.ts";
-import { sectionKey, type BotRecord, type GroupRecord, type Store } from "./store.ts";
+import { sectionKey, type BotRecord, type GroupRecord, type Message, type Store } from "./store.ts";
 
 export interface DelegationItem {
   toBotId: string;
@@ -38,6 +38,12 @@ export interface DelegationItem {
   /** When the delegation is initiated from a shared channel, mirror the
    * exchange back into that channel instead of creating a pair DM. */
   originatingGroupId?: string;
+  /** start_thread on a peer: the thread the opener created on the target
+   * for this handoff. The target's turn runs THERE, not in whatever the
+   * person is looking at, and "busy" means "no free slot" rather than
+   * "any thread running". Absent = a classic delegation into the target's
+   * active thread. */
+  targetThreadId?: string;
 }
 
 interface PendingDelegationItem extends DelegationItem {
@@ -153,17 +159,23 @@ export function threadsWaitingOn(toBotId: string): string[] {
 
 /** Mark a target's observed busy period as finished and return the source
  * threads that should be retried. This makes retries count distinct busy
- * periods, not unrelated drain requests on the same source thread. */
-export function releaseDelegationsWaitingOn(toBotId: string): string[] {
-  const threads = threadsWaitingOn(toBotId);
-  if (!threads.length) return threads;
-  for (const threadId of threads) {
-    for (const item of pendingDelegations.get(threadId) ?? []) {
-      if (item.toBotId === toBotId) delete item.waitingOnBusy;
+ * periods, not unrelated drain requests on the same source thread.
+ * `only` narrows the release: a bot that is still busy in one thread has
+ * nevertheless freed a slot for the fresh-thread handoffs waiting on it,
+ * while its active-thread handoffs go on waiting for it to go idle. */
+export function releaseDelegationsWaitingOn(toBotId: string, only?: (item: DelegationItem) => boolean): string[] {
+  const released: string[] = [];
+  for (const [threadId, items] of pendingDelegations) {
+    let any = false;
+    for (const item of items) {
+      if (item.toBotId !== toBotId || item.waitingOnBusy !== true || (only && !only(item))) continue;
+      delete item.waitingOnBusy;
+      any = true;
     }
+    if (any) released.push(threadId);
   }
-  savePending();
-  return threads;
+  if (released.length) savePending();
+  return released;
 }
 
 function savePending(): void {
@@ -202,6 +214,9 @@ export function _loadPending(): void {
         if (item.waitingOnBusy === true) loaded.waitingOnBusy = true;
         if (typeof item.originatingGroupId === "string" && item.originatingGroupId) {
           loaded.originatingGroupId = item.originatingGroupId;
+        }
+        if (typeof item.targetThreadId === "string" && item.targetThreadId) {
+          loaded.targetThreadId = item.targetThreadId;
         }
         return [loaded];
       });
@@ -250,6 +265,7 @@ export function pendingDelegationSnapshot(): Array<{
   sourceBotId: string;
   toBotId: string;
   reason?: string;
+  targetThreadId?: string;
 }> {
   return [...pendingDelegations.entries()].flatMap(([sourceThreadId, items]) =>
     items.map((item) => ({
@@ -257,6 +273,7 @@ export function pendingDelegationSnapshot(): Array<{
       sourceBotId: item.sourceBotId,
       toBotId: item.toBotId,
       ...(item.reason ? { reason: item.reason } : {}),
+      ...(item.targetThreadId ? { targetThreadId: item.targetThreadId } : {}),
     })),
   );
 }
@@ -299,18 +316,25 @@ export function queueDelegation(
   list.push({ ...item, id, sourceBotId: from.id, attempts: 0, ...(groupId ? { originatingGroupId: groupId } : {}) });
   pendingDelegations.set(sourceThreadId, list);
   savePending();
-  const label = `Delegated to @${target.name}${item.reason ? `: ${item.reason}` : ""}`;
   const sourceGroup = sourceThreadId ? bus.store.groupByThread(sourceThreadId) : undefined;
-  bus.store.appendMessage(sourceThreadId, {
+  // A fresh-thread handoff is announced as the thread it opened, with a
+  // link to it; a classic one as the delegation it is.
+  const openedThread = item.targetThreadId ? bus.store.taskByThread(target.id, item.targetThreadId) : undefined;
+  const chip: Omit<Message, "id" | "at"> = {
     role: "bot",
     kind: "activity",
     // settled at birth: queueing is the whole act. Left open, the chip
     // would spin until the transcript is closed — the chat never patches it
-    tool: { name: label, ok: true },
-    ...(sourceGroup && !sourceGroup.dm
-      ? { from: { botId: from.id, name: from.name, color: from.color } }
-      : {}),
-  });
+    tool: {
+      name: openedThread
+        ? `Opened thread #${openedThread.title} on ${target.name}`
+        : `Delegated to @${target.name}${item.reason ? `: ${item.reason}` : ""}`,
+      ok: true,
+    },
+  };
+  if (openedThread) chip.threadRef = { botId: target.id, threadId: openedThread.threadId, title: openedThread.title };
+  if (sourceGroup && !sourceGroup.dm) chip.from = { botId: from.id, name: from.name, color: from.color };
+  bus.store.appendMessage(sourceThreadId, chip);
   return { result: "ok", id };
 }
 
@@ -332,7 +356,11 @@ export function drainDelegations(
     channel: GroupRecord | undefined,
     taskId: string,
     sourceBotId: string,
+    targetThreadId: string | undefined,
   ) => void | Promise<void>,
+  /** Terminal failures before dispatch also need to wake the source. A
+   * launched peer reports through its provider-turn finalizer instead. */
+  onSettled?: (receipt: DelegationReceipt) => void,
 ): void {
   if (drainingThreads.has(threadId)) {
     queuedRedrains.add(threadId);
@@ -344,6 +372,9 @@ export function drainDelegations(
   drainingThreads.add(threadId);
   void (async () => {
     for (const item of snapshot) {
+      // Stop/deletion may remove queued work while another item awaits a
+      // person's approval. A stale snapshot is never authority to launch it.
+      if (!pendingDelegations.get(threadId)?.some((candidate) => candidate.id === item.id)) continue;
       // A shared channel's thread is not owned by any single bot, so each
       // queued item carries its own source bot identity.
       const from =
@@ -361,7 +392,7 @@ export function drainDelegations(
         acknowledgeDelegation(threadId, item.id);
         continue;
       }
-      let outcome: "settled" | "requeued" = "settled";
+      let outcome: "settled" | "requeued" | "dispatched" = "settled";
       try {
         outcome = await processOne(bus, approvalBus, from, threadId, item, runTarget);
       } catch (error) {
@@ -386,7 +417,16 @@ export function drainDelegations(
       } finally {
         // A requeued item (busy target, retries left) stays for the drain
         // that the target's own settling turn will trigger.
+        const stillQueued = pendingDelegations.get(threadId)?.some((candidate) => candidate.id === item.id);
         if (outcome !== "requeued") acknowledgeDelegation(threadId, item.id);
+        if (outcome === "settled" && stillQueued) {
+          const receipt = findDelegationReceipt(item.id);
+          try {
+            if (receipt) onSettled?.(receipt);
+          } catch (error) {
+            console.error("delegation settled but its source could not be resumed", error);
+          }
+        }
       }
     }
   })().finally(() => {
@@ -399,7 +439,7 @@ export function drainDelegations(
     const snapshotIds = new Set(snapshot.map((item) => item.id));
     const hasNewItems = pendingDelegations.get(threadId)?.some((item) => !snapshotIds.has(item.id)) ?? false;
     if (redrainRequested || hasNewItems) {
-      drainDelegations(bus, approvalBus, threadId, runTarget);
+      drainDelegations(bus, approvalBus, threadId, runTarget, onSettled);
     }
   });
 }
@@ -456,10 +496,24 @@ async function processOne(
     channel: GroupRecord | undefined,
     taskId: string,
     sourceBotId: string,
+    targetThreadId: string | undefined,
   ) => void | Promise<void>,
-): Promise<"settled" | "requeued"> {
+): Promise<"settled" | "requeued" | "dispatched"> {
   let sender = from;
   let target = bus.store.bot(item.toBotId);
+  // Retained approval authorizes the message, not a deleted conversation or
+  // revoked room membership. Check every retry before writing to its source.
+  if (!sourceThreadBelongsToBot(bus.store, sender.id, sourceThreadId)) {
+    recordDelegationReceipt({
+      id: item.id,
+      sourceThreadId,
+      toBotId: item.toBotId,
+      toBotName: target?.name ?? item.toBotId,
+      status: "dropped",
+      result: "the source conversation no longer belongs to the delegating bot",
+    });
+    return "settled";
+  }
   if (!target) {
     recordDelegationReceipt({
       id: item.id,
@@ -479,34 +533,11 @@ async function processOne(
   if (dropIfUnreachable(bus, sender, target, sourceThreadId, item)) {
     return "settled";
   }
-  if (target.busy) {
-    if (item.waitingOnBusy) return "requeued";
-    item.attempts += 1;
-    item.waitingOnBusy = true;
-    if (item.attempts < MAX_BUSY_ATTEMPTS) {
-      savePending();
-      bus.store.appendMessage(sourceThreadId, {
-        role: "bot",
-        kind: "activity",
-        tool: { name: `Delegation to @${target.name} waiting — they're busy (retry ${item.attempts}/${MAX_BUSY_ATTEMPTS} when they finish)` },
-      });
-      return "requeued";
-    }
-    recordDelegationReceipt({
-      id: item.id,
-      sourceThreadId,
-      toBotId: target.id,
-      toBotName: target.name,
-      status: "busy_gave_up",
-      result: `@${target.name} stayed busy through ${MAX_BUSY_ATTEMPTS} retries`,
-    });
-    bus.store.appendMessage(sourceThreadId, {
-      role: "bot",
-      kind: "activity",
-      tool: { name: `Delegation to @${target.name} canceled — still busy after ${MAX_BUSY_ATTEMPTS} retries`, ok: false },
-    });
+  if (dropIfThreadGone(bus, target, sourceThreadId, item)) {
     return "settled";
   }
+  const held = holdWhileTargetBusy(bus, target, sourceThreadId, item);
+  if (held) return held;
   if (item.waitingOnBusy) {
     delete item.waitingOnBusy;
     savePending();
@@ -520,6 +551,22 @@ async function processOne(
       "delegate_bot",
       sourceThreadId,
     );
+    if (!pendingDelegations.get(sourceThreadId)?.some((candidate) => candidate.id === item.id)) return "settled";
+    // Approval may have waited for minutes. Revalidate before even reporting
+    // a denial, which otherwise recreates a deleted source transcript.
+    const current = bus.store.bot(item.toBotId);
+    const currentSender = bus.store.bot(from.id);
+    if (!current || !currentSender || !sourceThreadBelongsToBot(bus.store, currentSender.id, sourceThreadId)) {
+      recordDelegationReceipt({
+        id: item.id,
+        sourceThreadId,
+        toBotId: item.toBotId,
+        toBotName: target.name,
+        status: "dropped",
+        result: "the peer or source conversation no longer exists",
+      });
+      return "settled";
+    }
     if (verdict !== "allow") {
       recordDelegationReceipt({
         id: item.id,
@@ -536,44 +583,19 @@ async function processOne(
       });
       return "settled";
     }
-    // The approval could have been sitting for up to 15 minutes. Everything
-    // checked above is a stale snapshot now: re-read both bots and re-check
-    // busy, or an allow can start a second turn on a bot that is mid-turn —
-    // and mirror a "Messaged @X" chip for an exchange that never happens.
-    const current = bus.store.bot(item.toBotId);
-    const currentSender = bus.store.bot(from.id);
-    if (!current || !currentSender || !sourceThreadBelongsToBot(bus.store, currentSender.id, sourceThreadId)) return "settled";
+    // A busy-target retry must not ask for the very same approval again.
+    item.approvalAlreadyGranted = true;
+    savePending();
+    // Recheck peer access and busy state too: an approval must not start a
+    // second turn or mirror an exchange that cannot actually happen.
     if (dropIfUnreachable(bus, currentSender, current, sourceThreadId, item)) {
       return "settled";
     }
-    if (current.busy) {
-      if (item.waitingOnBusy) return "requeued";
-      item.attempts += 1;
-      item.waitingOnBusy = true;
-      if (item.attempts < MAX_BUSY_ATTEMPTS) {
-        savePending();
-        bus.store.appendMessage(sourceThreadId, {
-          role: "bot",
-          kind: "activity",
-          tool: { name: `Delegation to @${current.name} waiting — they're busy (retry ${item.attempts}/${MAX_BUSY_ATTEMPTS} when they finish)` },
-        });
-        return "requeued";
-      }
-      recordDelegationReceipt({
-        id: item.id,
-        sourceThreadId,
-        toBotId: current.id,
-        toBotName: current.name,
-        status: "busy_gave_up",
-        result: `@${current.name} stayed busy through ${MAX_BUSY_ATTEMPTS} retries`,
-      });
-      bus.store.appendMessage(sourceThreadId, {
-        role: "bot",
-        kind: "activity",
-        tool: { name: `Delegation to @${current.name} canceled — still busy after ${MAX_BUSY_ATTEMPTS} retries`, ok: false },
-      });
+    if (dropIfThreadGone(bus, current, sourceThreadId, item)) {
       return "settled";
     }
+    const heldAfterApproval = holdWhileTargetBusy(bus, current, sourceThreadId, item);
+    if (heldAfterApproval) return heldAfterApproval;
     sender = currentSender;
     target = current;
   }
@@ -585,9 +607,100 @@ async function processOne(
   const channel = getOrCreateChannel(bus.store, sender, target, originatingGroup);
   mirrorExchange(bus, sender, target, item.message, channel, sourceThreadId);
   const reasonLine = item.reason ? `\n\n[Reason: ${item.reason}]` : "";
-  const prefixed = `[Delegated by @${sender.name}, another bot in this OpenMausBot workspace. Do the work and reply directly.]\n\n${item.message}${reasonLine}`;
-  await runTarget(item.toBotId, prefixed, item.depth + 1, sourceThreadId, channel, item.id, sender.id);
+  // A fresh thread's first line gets the shared peer-provenance note from
+  // the harness (which knows whether the opener was unattended); the
+  // classic handoff keeps the prefix it has always had.
+  const prefixed = item.targetThreadId
+    ? item.message
+    : `[Delegated by @${sender.name}, another bot in this OpenMausBot workspace. Do the work and reply directly.]\n\n${item.message}${reasonLine}`;
+  await runTarget(item.toBotId, prefixed, item.depth + 1, sourceThreadId, channel, item.id, sender.id, item.targetThreadId);
+  return "dispatched";
+}
+
+/** A busy target holds the handoff. What "busy" means depends on where the
+ * turn will run: a classic delegation lands in the target's active thread,
+ * so it waits for the bot to go idle, with bounded retries so a stuck peer
+ * cannot pin the handoff forever. A fresh-thread handoff needs only a free
+ * slot, and waits in line for one without a bound — it IS the line, the
+ * same one a person's message joins at that limit. Returns null when the
+ * target can take the turn now. */
+function holdWhileTargetBusy(
+  bus: CommsBus,
+  target: BotRecord,
+  sourceThreadId: string,
+  item: PendingDelegationItem,
+): "requeued" | "settled" | null {
+  if (item.targetThreadId) {
+    if (bus.threadSlotFree ? bus.threadSlotFree(target.id) : !target.busy) return null;
+    if (item.waitingOnBusy) return "requeued";
+    item.waitingOnBusy = true;
+    savePending();
+    // one chip per wait, not one per retry: the line moves on every settle
+    if (item.attempts === 0) {
+      item.attempts = 1;
+      const title = bus.store.taskByThread(target.id, item.targetThreadId)?.title ?? "thread";
+      bus.store.appendMessage(sourceThreadId, {
+        role: "bot",
+        kind: "activity",
+        tool: { name: `Thread #${title} on @${target.name} waiting for a free slot` },
+      });
+    }
+    return "requeued";
+  }
+  if (!target.busy) return null;
+  if (item.waitingOnBusy) return "requeued";
+  item.attempts += 1;
+  item.waitingOnBusy = true;
+  if (item.attempts < MAX_BUSY_ATTEMPTS) {
+    savePending();
+    bus.store.appendMessage(sourceThreadId, {
+      role: "bot",
+      kind: "activity",
+      tool: { name: `Delegation to @${target.name} waiting — they're busy (retry ${item.attempts}/${MAX_BUSY_ATTEMPTS} when they finish)` },
+    });
+    return "requeued";
+  }
+  recordDelegationReceipt({
+    id: item.id,
+    sourceThreadId,
+    toBotId: target.id,
+    toBotName: target.name,
+    status: "busy_gave_up",
+    result: `@${target.name} stayed busy through ${MAX_BUSY_ATTEMPTS} retries`,
+  });
+  bus.store.appendMessage(sourceThreadId, {
+    role: "bot",
+    kind: "activity",
+    tool: { name: `Delegation to @${target.name} canceled — still busy after ${MAX_BUSY_ATTEMPTS} retries`, ok: false },
+  });
   return "settled";
+}
+
+/** The thread a fresh-thread handoff was opened in may be deleted while the
+ * handoff waits. There is nowhere for the turn to run then, and running it
+ * in the target's active thread would put a bot's job in front of the
+ * person unasked. */
+function dropIfThreadGone(
+  bus: CommsBus,
+  target: BotRecord,
+  sourceThreadId: string,
+  item: PendingDelegationItem,
+): boolean {
+  if (!item.targetThreadId || bus.store.taskByThread(target.id, item.targetThreadId)) return false;
+  recordDelegationReceipt({
+    id: item.id,
+    sourceThreadId,
+    toBotId: target.id,
+    toBotName: target.name,
+    status: "dropped",
+    result: `the thread opened on @${target.name} was deleted before it could start`,
+  });
+  bus.store.appendMessage(sourceThreadId, {
+    role: "bot",
+    kind: "activity",
+    tool: { name: `Thread on @${target.name} canceled — it was deleted before it could start`, ok: false },
+  });
+  return true;
 }
 
 /** The source thread may be a bot's own task or a shared group where the

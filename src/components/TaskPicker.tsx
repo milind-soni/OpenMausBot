@@ -4,14 +4,18 @@
 // the only clean slate is a second bot. A task is a real boundary — its
 // own transcript and its own provider session — so sensitive work, a
 // long job and a quick question can sit side by side under one agent.
-import { useEffect, useRef, useState } from "react";
-import { Check, ChevronDown, Pencil, Plus, Search, Trash2 } from "lucide-react";
-import { useStore, formatTime, type Bot, type Group, type Task } from "@/state/store";
+import { Fragment, useEffect, useRef, useState } from "react";
+import { Check, ChevronDown, FolderInput, Pencil, Plus, Search, Trash2 } from "lucide-react";
+import { useStore, formatTime, type Bot, type BotProject, type Group, type Task } from "@/state/store";
 import { cn } from "@/lib/cn";
 import { t } from "@/lib/i18n";
 import { COMPACT_BUBBLE } from "@/lib/compact-chip";
 import { formatTaskTokens } from "@/lib/usage";
 import { nextRename } from "@/lib/rename";
+import { FolderIcon, NewThreadButton } from "./BotProjects";
+import { useShowThreads } from "@/lib/thread-preferences";
+import { sidebarBotActivityTasks } from "./SidebarBotActivity";
+import { threadOpenerLabel } from "./SidebarThreadRow";
 
 /** Click-to-switch used to close this menu immediately, which unmounted the
  * row before a double-click (or right-click) could start a rename. Linger
@@ -64,24 +68,38 @@ function TaskUsage({ usage }: { usage: Task["usage"] }) {
   );
 }
 
-type PickerTask = Pick<Task, "threadId" | "title" | "createdAt"> & { usage?: Task["usage"] };
+type PickerTask = Pick<Task, "threadId" | "title" | "createdAt" | "busy" | "activity" | "unread" | "projectId" | "openedBy"> & { usage?: Task["usage"] };
+
+/** The full picker searches both thread titles and their project names.
+ * Legacy/orphaned project IDs remain visible under Ungrouped. */
+export function groupThreadTasks(tasks: PickerTask[], projects: BotProject[], query: string) {
+  const needle = query.trim().toLowerCase();
+  return [...projects, { id: "", name: t("folder.none") } as BotProject].map((project) => {
+    const members = tasks.filter((task) => project.id ? task.projectId === project.id : !projects.some((item) => item.id === task.projectId));
+    return { project, tasks: project.name.toLowerCase().includes(needle) ? members : filterTasks(members, query) };
+  }).filter((group) => group.tasks.length > 0);
+}
 
 function ConversationTaskPicker({
   threadId,
   tasks,
   busy,
+  bot,
   onNew,
   onSwitch,
   onRename,
   onDelete,
+  onMove,
 }: {
   threadId: string;
   tasks: PickerTask[];
   busy: boolean;
+  bot?: Bot;
   onNew: () => void;
   onSwitch: (threadId: string) => void;
   onRename: (threadId: string, title: string) => void;
   onDelete: (threadId: string) => void;
+  onMove?: (threadId: string, projectId: string | null) => void;
 }) {
   const [open, setOpen] = useState(false);
   const [renaming, setRenaming] = useState<string | null>(null);
@@ -138,6 +156,7 @@ function ConversationTaskPicker({
       return;
     }
     const onDown = (e: MouseEvent) => {
+      if (e.target instanceof Element && e.target.closest("[data-thread-overlay]")) return;
       // SAFETY: a mousedown target inside a document is always a DOM Node
       if (!ref.current?.contains(e.target as Node)) {
         if (dismissTimer.current) {
@@ -150,6 +169,7 @@ function ConversationTaskPicker({
     };
     const onKey = (e: KeyboardEvent) => {
       if (e.key !== "Escape") return;
+      if (e.target instanceof Element && e.target.closest("[data-thread-overlay]")) return;
       if (renaming) return;
       if (dismissTimer.current) {
         clearTimeout(dismissTimer.current);
@@ -165,26 +185,6 @@ function ConversationTaskPicker({
       window.removeEventListener("keydown", onKey);
     };
   }, [open, renaming]);
-
-  // a bot that has only ever done one thing doesn't need a switcher yet —
-  // just the button that gives it a second context
-  if (tasks.length <= 1) {
-    return (
-      <button
-        type="button"
-        onClick={onNew}
-        disabled={busy}
-        title={busy ? t("task.newBusy") : t("task.new")}
-        className={cn(
-          "flex items-center gap-1 rounded-full border border-hairline/40 px-2.5 py-1 text-[12.5px] text-ink-secondary hover:bg-raised hover:text-ink disabled:opacity-40",
-          COMPACT_BUBBLE,
-        )}
-      >
-        <Plus size={12} className="@max-4xl/chathead:size-[14px]" />
-        <span className="@max-4xl/chathead:hidden">{t("task.chip")}</span>
-      </button>
-    );
-  }
 
   const commitRename = (threadId: string, save: boolean) => {
     // Escape unmounts the input, which fires blur. Without this guard the
@@ -209,7 +209,8 @@ function ConversationTaskPicker({
           output: u.output.toLocaleString(),
         })
       : t("task.switch");
-  const visible = filterTasks(tasks, query);
+  const grouped = bot ? groupThreadTasks(tasks, bot.projects ?? [], query) : null;
+  const visible = grouped ? grouped.flatMap((group) => group.tasks) : filterTasks(tasks, query);
   const looking = query.trim();
 
   return (
@@ -221,12 +222,13 @@ function ConversationTaskPicker({
           else setOpen(true);
         }}
         title={switchTitle}
+        aria-label={t("task.switch")}
         className={cn(
           "flex max-w-[220px] items-center gap-1.5 rounded-full border border-hairline/40 px-2.5 py-1 text-[12.5px] text-ink-secondary hover:bg-raised hover:text-ink",
           COMPACT_BUBBLE,
         )}
       >
-        <span className="truncate @max-4xl/chathead:hidden">{current?.title ?? t("task.chip")}</span>
+        <span className="truncate @max-4xl/chathead:hidden">{t("task.switch")}</span>
         {/* folded: just the count in the bubble — the title rides the tooltip */}
         <span className="shrink-0 tabular-nums opacity-60 @max-4xl/chathead:opacity-100">{tasks.length}</span>
         <ChevronDown size={12} className="shrink-0 @max-4xl/chathead:hidden" />
@@ -270,11 +272,14 @@ function ConversationTaskPicker({
               <div className="px-3 py-6 text-center text-[13px] text-ink-secondary">
                 {t("task.noMatch", { query: looking })}
               </div>
-            ) : visible.map((task) => {
+            ) : visible.map((task, index) => {
               const active = task.threadId === threadId;
+              const opener = threadOpenerLabel(task);
+              const heading = grouped?.find((group) => group.tasks[0]?.threadId === task.threadId)?.project;
               return (
+                <Fragment key={task.threadId}>
+                {bot?.projects?.length && heading ? <div className={cn("flex items-center gap-1.5 px-3 pb-1 pt-2 text-[11px] font-medium text-ink-secondary", index > 0 && "border-t border-hairline/30")}>{heading.id && <FolderIcon emoji={heading.emoji} size={12} />}{heading.name}</div> : null}
                 <div
-                  key={task.threadId}
                   className={cn("group flex items-center gap-2 px-2.5 py-2", active ? "bg-raised/60" : "hover:bg-raised/40")}
                 >
                   <Check size={13} className={cn("shrink-0", active ? "text-accent" : "opacity-0")} />
@@ -326,8 +331,10 @@ function ConversationTaskPicker({
                     >
                       <div className="truncate text-[13px] text-ink">{task.title}</div>
                       <div className="text-[11px] text-ink-secondary">
+                        {task.activity === "waiting-on-you" ? `${t("task.waiting")} · ` : task.busy ? `${t("chat.activity.working")} · ` : task.unread ? `${t("task.unread")} · ` : ""}
                         {formatTime(task.createdAt)}
                         <TaskUsage usage={task.usage} />
+                        {opener && ` · ${opener}`}
                       </div>
                     </button>
                   )}
@@ -342,10 +349,19 @@ function ConversationTaskPicker({
                       <Pencil size={13} />
                     </button>
                   )}
+                  {bot && onMove && (bot.projects?.length ?? 0) > 0 && <label title={t("folder.move")} className="relative rounded p-1 text-ink-secondary opacity-0 hover:bg-raised hover:text-ink focus-within:opacity-100 group-hover:opacity-100">
+                    <FolderInput size={13} />
+                    <select aria-label={t("folder.moveNamed", { title: task.title })} value={bot.projects?.some((project) => project.id === task.projectId) ? task.projectId : ""}
+                      onFocus={clearDismiss} onChange={(event) => { clearDismiss(); onMove(task.threadId, event.target.value || null); }}
+                      className="absolute inset-0 w-full cursor-pointer opacity-0">
+                      <option value="">{t("folder.none")}</option>
+                      {bot.projects?.map((project) => <option key={project.id} value={project.id}>{project.emoji ? `${project.emoji} ` : ""}{project.name}</option>)}
+                    </select>
+                  </label>}
                   <button
                     type="button"
                     onClick={() => onDelete(task.threadId)}
-                    disabled={busy && active}
+                    disabled={Boolean(task.busy) || busy && active}
                     aria-label={t("task.deleteAria")}
                     title={t("task.deleteTitle")}
                     className="rounded p-1 text-ink-secondary opacity-0 hover:bg-raised hover:text-danger group-hover:opacity-100 disabled:opacity-20"
@@ -353,10 +369,11 @@ function ConversationTaskPicker({
                     <Trash2 size={13} />
                   </button>
                 </div>
+                </Fragment>
               );
             })}
           </div>
-          <button
+          {bot ? <NewThreadButton bot={bot} onCreated={closeMenu} className="mt-1 w-full rounded-none border-t border-hairline/40" /> : <button
             type="button"
             onClick={() => {
               onNew();
@@ -366,24 +383,55 @@ function ConversationTaskPicker({
             className="mt-1 flex w-full items-center gap-2 border-t border-hairline/40 px-3 py-2 text-left text-[13px] text-ink hover:bg-raised/50 disabled:opacity-40"
           >
             <Plus size={13} className="text-ink-secondary" /> {t("task.newShort")}
-          </button>
+          </button>}
         </div>
       )}
     </div>
   );
 }
 
+export function BotActivityPicker({ bot }: { bot: Bot }) {
+  const { state, dispatch } = useStore();
+  const showThreads = useShowThreads();
+  if (showThreads) return null;
+  const activity = sidebarBotActivityTasks(bot, state.pendingQueued).filter((task) => task.threadId !== bot.threadId);
+  // A display preference must not strand a sibling approval or queued job,
+  // including on narrow screens where the sidebar is closed. This is an
+  // activity switcher only: idle histories and creation remain hidden.
+  if (!activity.length) return null;
+  return (
+    <div className="flex shrink-0 items-center gap-2 px-5 py-2" data-background-activity>
+      <select
+        aria-label={t("task.otherActivity", { count: activity.length })}
+        value=""
+        onChange={(event) => dispatch({ type: "switchTask", botId: bot.id, threadId: event.target.value })}
+        className="max-w-[180px] shrink-0 truncate rounded-full border border-hairline/40 bg-panel px-2.5 py-1 text-[12.5px] text-ink-secondary"
+      >
+        <option value="" disabled>{t("task.otherActivity", { count: activity.length })}</option>
+        {activity.map((task) => <option key={task.threadId} value={task.threadId}>
+          {task.title} · {task.activity === "waiting-on-you" ? t("task.waiting") : task.busy || task.activity === "working" ? t("chat.activity.working") : task.queued ? t("task.queued") : t("task.unread")}
+        </option>)}
+      </select>
+      <span className="truncate text-[12px] text-ink-secondary">{bot.tasks?.find((task) => task.threadId === bot.threadId)?.title}</span>
+    </div>
+  );
+}
+
 export function TaskPicker({ bot }: { bot: Bot }) {
   const { dispatch } = useStore();
+  const showThreads = useShowThreads();
+  if (!showThreads) return null;
   return (
     <ConversationTaskPicker
       threadId={bot.threadId}
-      tasks={bot.tasks ?? []}
-      busy={Boolean(bot.busy)}
+      tasks={(bot.tasks ?? []).filter((task) => !task.routineRunId)}
+      busy={false}
+      bot={bot}
       onNew={() => dispatch({ type: "newTask", botId: bot.id })}
       onSwitch={(threadId) => dispatch({ type: "switchTask", botId: bot.id, threadId })}
       onRename={(threadId, title) => dispatch({ type: "renameTask", botId: bot.id, threadId, title })}
       onDelete={(threadId) => dispatch({ type: "deleteTask", botId: bot.id, threadId })}
+      onMove={(threadId, projectId) => dispatch({ type: "updateTask", botId: bot.id, threadId, patch: { projectId } })}
     />
   );
 }

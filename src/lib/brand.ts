@@ -8,6 +8,7 @@ export interface Brand {
   tagline?: string;
   accent?: string;
   logo?: string;
+  favicon?: string;
   supportUrl?: string;
 }
 
@@ -65,11 +66,41 @@ export function brandVars(b: Brand): Record<string, string> {
   };
 }
 
-/** Stamp the brand on the document: title and accent variables. */
+/** The MIME type a data: URI declares, for the icon link's `type`. */
+export function iconType(href: string): string {
+  const match = /^data:(image\/[a-z0-9.+-]+)/i.exec(href);
+  return match ? match[1].toLowerCase() : "";
+}
+
+let defaultIcon: { href: string; type: string } | null = null;
+
+/** Point the tab icon at the brand's, or back at the app's when there is none. */
+function applyIcon(favicon: string | undefined): void {
+  const link = document.querySelector<HTMLLinkElement>('link[rel="icon"]');
+  if (!link) return;
+  defaultIcon ??= { href: link.getAttribute("href") ?? "", type: link.getAttribute("type") ?? "" };
+  const next = favicon ? { href: favicon, type: iconType(favicon) } : defaultIcon;
+  link.setAttribute("href", next.href);
+  if (next.type) link.setAttribute("type", next.type);
+  else link.removeAttribute("type");
+  let touch = document.querySelector<HTMLLinkElement>('link[rel="apple-touch-icon"][data-brand]');
+  if (favicon) {
+    if (!touch) {
+      touch = document.createElement("link");
+      touch.rel = "apple-touch-icon";
+      touch.dataset.brand = "1";
+      document.head.appendChild(touch);
+    }
+    touch.href = favicon;
+  } else touch?.remove();
+}
+
+/** Stamp the brand on the document: title, icon and accent variables. */
 export function applyBrand(status: BrandStatus): void {
   current = status;
   if (typeof document === "undefined") return;
   document.title = status.brand.name;
+  applyIcon(status.brand.favicon);
   const root = document.documentElement;
   for (const name of ["--color-accent", "--color-accent-border", "--color-focus", "--color-accent-text", "--color-accent-ink"]) {
     root.style.removeProperty(name);

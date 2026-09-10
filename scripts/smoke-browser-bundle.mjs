@@ -118,6 +118,7 @@ let report;
 let failure;
 let fixtureRequests = 0;
 let phase = "runtime discovery";
+let closeBrowserSession;
 
 function child(command, args, childEnv) {
   const proc = spawn(command, args, { cwd: fixture, env: childEnv, windowsHide: true, stdio: ["pipe", "pipe", "pipe"] });
@@ -153,6 +154,9 @@ function mcp(integration) {
     pending.clear();
   };
   proc.on("error", rejectPending);
+  // Let close report the engine's stderr instead of an unhandled EPIPE
+  // hiding why the child refused to start.
+  proc.stdin.on("error", (error) => { if (error.code !== "EPIPE") rejectPending(error); });
   proc.on("close", () => { lines.close(); rejectPending(new Error(`Browser MCP exited: ${errors}`)); });
   lines.on("line", (line) => {
     let message;
@@ -261,7 +265,8 @@ const interrupt = () => { for (const proc of children) proc.kill("SIGTERM"); };
 process.once("SIGINT", interrupt);
 process.once("SIGTERM", interrupt);
 try {
-  const { browserEngineStatus, agentBrowserIntegration } = await import("../server/browser-engine.ts");
+  const { browserEngineStatus, agentBrowserIntegration, prepareBrowserSessionState, closeBrowserSession: closeSession } = await import("../server/browser-engine.ts");
+  closeBrowserSession = closeSession;
   const status = browserEngineStatus({ dataDir: env.OMB_DATA_DIR, env });
   assert.equal(status.kind, "ready", `Fresh-home runtime did not discover the bundle: ${JSON.stringify(status)}`);
   assert.equal(resolve(status.binaryPath), resolve(enginePath), "Runtime did not select the engine under test");
@@ -288,6 +293,11 @@ try {
       encryptionKey: randomBytes(32).toString("hex"), persistent: false, env });
     assert.equal(resolve(integration.env.AGENT_BROWSER_EXECUTABLE_PATH ?? ""), resolve(paths.chrome), "MCP did not receive bundled Chromium");
     assert.equal(integration.env.AGENT_BROWSER_RESTORE_SAVE, "never");
+    // Use the production preparation path. Guest preparation creates only
+    // managed config; it must not prewarm a daemon and mask cold-start bugs.
+    await prepareBrowserSessionState(integration.command, integration.env.AGENT_BROWSER_SESSION,
+      { env: { ...env, ...integration.env }, persistent: false });
+    await assert.rejects(readFile(join(env.AGENT_BROWSER_SOCKET_DIR, `${integration.env.AGENT_BROWSER_SESSION}.pid`)), { code: "ENOENT" });
     const client = mcp(integration);
     clients.push(client);
     await client.request("initialize", { protocolVersion: "2025-11-25", capabilities: {}, clientInfo: { name: "omb-bundle-smoke", version: "1" } });
@@ -339,7 +349,7 @@ finally {
   const cleanupErrors = [];
   for (const client of clients) {
     try {
-      await run(client.integration.command, ["close"], { ...env, ...client.integration.env }, 15_000);
+      assert(await closeBrowserSession(client.integration.command, { ...env, ...client.integration.env }), "Owned browser daemon did not close");
     } catch (error) { cleanupErrors.push(error.message); }
   }
   await Promise.all([...children].map((proc) => new Promise((done) => {

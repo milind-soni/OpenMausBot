@@ -7,7 +7,7 @@
 //   openmausbot setup [--data-dir ~/.openmausbot]
 //   openmausbot start [serve options]
 //   openmausbot serve [--port 8799] [--data-dir ~/.openmausbot] [--label "cab mini"]
-//                     [--public-url https://host] [--tailscale | --tunnel] [--no-pair]
+//                     [--public-url https://host] [--tailscale | --tunnel | --domain HOST] [--no-pair]
 //   openmausbot pair  [--label "My MacBook"] [--client] [--public-url https://host]
 //   openmausbot sessions [revoke <id>]
 //   openmausbot status
@@ -30,6 +30,10 @@ import { createInterface } from "node:readline/promises";
 import { fileURLToPath } from "node:url";
 import qrcode from "qrcode-terminal";
 
+import { parseAllowList } from "./account-signin.ts";
+import { writeFileAtomic } from "./atomic.ts";
+import { ensureCaddy, normalizeDomainOption, startCaddy, type RunningCaddy } from "./caddy.ts";
+import { runServiceCommand } from "./service-cli.ts";
 import { explainTailscaleFailure, tailscaleServe, tailscaleServeOff, tailscaleStatus, type TailscaleStatus } from "./tailscale.ts";
 import { defaultSetupIo, SetupCancelled, type SetupIo } from "./cli-prompts.ts";
 import { normalizePhoneOrigin, phonePairingInstructions, runPhoneSetup } from "./cli-phone-setup.ts";
@@ -41,6 +45,9 @@ import {
   describeTunnelAccount,
   describeTunnelState,
   ensureCloudflared,
+  FLEET_CREDENTIAL_ENV,
+  fleetAccess,
+  fleetCredential,
   guardianEntry,
   startTunnel,
   tunnelAccess,
@@ -52,16 +59,23 @@ import {
 const HERE = dirname(fileURLToPath(import.meta.url));
 
 export interface CliOptions {
-  command: "setup" | "start" | "serve" | "pair" | "sessions" | "status" | "login" | "logout" | "browser" | "help";
+  command: "setup" | "start" | "serve" | "pair" | "sessions" | "status" | "login" | "logout" | "access" | "service" | "browser" | "help";
   port: number;
   dataDir: string;
   label?: string;
   publicUrl?: string;
+  /** `serve --domain host`: HTTPS on your own domain through a managed Caddy. */
+  domain?: string;
   tailscale: boolean;
   tunnel: boolean;
   client: boolean;
   pair: boolean;
   revoke?: string;
+  /** `access list|add|remove` */
+  accessAction?: "list" | "add" | "remove";
+  chatOnly?: boolean;
+  /** `service install|uninstall` */
+  serviceAction?: "install" | "uninstall";
   email?: string;
   /** `browser install [--with-deps]` */
   browserAction?: "install" | "status";
@@ -75,7 +89,7 @@ export interface CliOptions {
   phone?: "ios" | "android";
 }
 
-const COMMANDS = ["setup", "start", "serve", "pair", "sessions", "status", "login", "logout", "browser", "help", "--help", "-h"];
+const COMMANDS = ["setup", "start", "serve", "pair", "sessions", "status", "login", "logout", "access", "service", "browser", "help", "--help", "-h"];
 
 export function parseArgs(argv: string[], env: NodeJS.ProcessEnv = process.env): CliOptions | { error: string } {
   const implicitStart = !argv.length || (argv[0]!.startsWith("--") && argv[0] !== "--help");
@@ -93,6 +107,7 @@ export function parseArgs(argv: string[], env: NodeJS.ProcessEnv = process.env):
     pair: true,
     withDeps: false,
     json: false,
+    chatOnly: false,
   };
   for (let i = 0; i < rest.length; i += 1) {
     const arg = rest[i];
@@ -108,6 +123,11 @@ export function parseArgs(argv: string[], env: NodeJS.ProcessEnv = process.env):
       else if (arg === "--label") options.label = value();
       else if (arg === "--public-url") options.publicUrl = value().replace(/\/+$/, "");
       else if (arg === "--tailscale") options.tailscale = true;
+      else if (arg === "--domain") {
+        const domain = normalizeDomainOption(value());
+        if (typeof domain !== "string") return domain;
+        options.domain = domain;
+      }
       else if (arg === "--tunnel") options.tunnel = true;
       else if (arg === "--client") options.client = true;
       else if (arg === "--no-pair") options.pair = false;
@@ -116,6 +136,11 @@ export function parseArgs(argv: string[], env: NodeJS.ProcessEnv = process.env):
       else if (arg === "--json") options.json = true;
       else if (arg === "--email") options.email = value();
       else if (options.command === "sessions" && arg === "revoke") options.revoke = value();
+      else if (options.command === "access" && !options.accessAction && (arg === "list" || arg === "add" || arg === "remove")) {
+        options.accessAction = arg;
+        if (arg !== "list") options.email = value();
+      } else if (options.command === "access" && arg === "--chat-only") options.chatOnly = true;
+      else if (options.command === "service" && !options.serviceAction && (arg === "install" || arg === "uninstall")) options.serviceAction = arg;
       else if (options.command === "browser" && (arg === "install" || arg === "status")) options.browserAction = arg;
       else if (options.command === "browser" && arg === "--with-deps") options.withDeps = true;
       else return { error: `unknown argument "${arg}"` };
@@ -126,6 +151,9 @@ export function parseArgs(argv: string[], env: NodeJS.ProcessEnv = process.env):
   if (!Number.isInteger(options.port) || options.port < 1 || options.port > 65_535) return { error: "--port must be 1-65535" };
   if (options.publicUrl && !/^https?:\/\//.test(options.publicUrl)) return { error: "--public-url must start with http:// or https://" };
   if (options.tailscale && options.tunnel) return { error: "choose one of --tailscale (your tailnet) and --tunnel (a public address)" };
+  if (options.command === "access" && !options.accessAction) return { error: "access needs one of: list, add EMAIL [--chat-only], remove EMAIL" };
+  if (options.command === "service" && !options.serviceAction) return { error: "service needs one of: install [the same options as serve], uninstall" };
+  if (options.domain && (options.tailscale || options.tunnel || options.publicUrl)) return { error: "--domain already gives the server its address; drop --tailscale, --tunnel and --public-url" };
   if (options.local && (options.tailscale || options.tunnel || options.publicUrl)) return { error: "--local cannot be combined with a remote-access option" };
   if (options.command === "browser" && !options.browserAction) return { error: "browser needs an action: install or status" };
   return options;
@@ -137,12 +165,14 @@ export const USAGE = `openmausbot — your team of AI bots, ready in a few steps
   openmausbot setup [--data-dir DIR]
   openmausbot start [the same options as serve]
   openmausbot serve [--port 8799] [--data-dir DIR] [--label NAME]
-                    [--public-url https://host] [--tailscale | --tunnel] [--no-pair]
+                    [--public-url https://host] [--tailscale | --tunnel | --domain HOST] [--no-pair]
   openmausbot pair  [--label NAME] [--client] [--public-url https://host]
   openmausbot sessions [revoke ID]
   openmausbot status
   openmausbot login [--email you@example.com]
   openmausbot logout
+  openmausbot access list | add EMAIL [--chat-only] | remove EMAIL
+  openmausbot service install [--domain HOST | --tunnel | --tailscale] [--port N] [--data-dir DIR] | uninstall
   openmausbot browser install [--with-deps] | status
 
 setup   choose AI access and optional phone access; keep existing bots and chats
@@ -154,6 +184,13 @@ status  what the server says about itself
 login   signs this machine in to an OpenMausBot account (an emailed code)
         and reserves its public address for --tunnel
 logout  releases that address and signs out
+access  who may sign in with an emailed code at /pair: an address or
+        @domain; --chat-only gives chat and approvals without settings.
+        Takes effect at once, no restart.
+service keep the server running across reboots: writes a systemd unit
+        (Linux) or a launchd agent (macOS) for the same serve options and
+        prints the commands that install it. Install the package
+        permanently first (npm install -g openmausbot).
 browser install: the bots' browser engine (agent-browser, pinned) into the
         data dir, and Chrome for Testing into the user's browser cache.
         --with-deps also installs
@@ -167,6 +204,10 @@ browser install: the bots' browser engine (agent-browser, pinned) into the
 --tunnel     serve at a public https://….openmausbot.com address through a
              Cloudflare tunnel: no domain, no proxy, no open port. Run
              \`openmausbot login\` once on this machine first.
+--domain     serve at https://HOST on your own domain: a pinned Caddy is
+             downloaded once and run alongside the server, and gets the
+             certificate itself. Point the domain's DNS at this machine and
+             open ports 80 and 443.
 
 --no-open   do not open a browser window
 --no-pair   skip phone setup and do not print a pairing code
@@ -434,13 +475,73 @@ export async function runStatus(options: CliOptions, io: CliIo = defaultIo()): P
   }
   if (!options.json) {
     const account = describeTunnelAccount(createTunnelAccount({ dataDir: options.dataDir, version: serverVersion() }).credentials.read());
-    if (account.address) io.log(`public address: ${account.address} (signed in as ${account.email ?? "?"}; serve it with --tunnel)`);
+    if (fleetCredential()) io.log(`public address: managed by the fleet (${FLEET_CREDENTIAL_ENV} is set; the address is fetched when serve --tunnel starts)`);
+    else if (account.address) io.log(`public address: ${account.address} (signed in as ${account.email ?? "?"}; serve it with --tunnel)`);
   }
   return code;
 }
 
+/** The sign-in allow-list, edited straight in config.json: the server reads
+ * it per request, so this works with the server running or stopped and
+ * needs no restart. Environment variables (OMB_SIGNIN_EMAILS) win when set.
+ * Written the way the server writes it (atomic, 0600), touching only the
+ * one key, so nothing else in the file moves. */
+export async function runAccess(options: CliOptions, io: CliIo = defaultIo()): Promise<number> {
+  const file = join(options.dataDir, "config.json");
+  let raw: Record<string, unknown> = {};
+  if (existsSync(file)) {
+    try {
+      const parsed: unknown = JSON.parse(readFileSync(file, "utf8"));
+      if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) throw new Error("not an object");
+      raw = Object.fromEntries(Object.entries(parsed));
+    } catch (error) {
+      io.error(`${file} could not be read (${message(error)}); fix it before changing who can sign in`);
+      return 1;
+    }
+  }
+  const current = typeof raw.signIn === "object" && raw.signIn !== null ? Object(raw.signIn) : {};
+  const list = (value: unknown) => parseAllowList(Array.isArray(value) ? value.map(String).join(",") : "");
+  const admins = list(Reflect.get(current, "admins"));
+  const members = list(Reflect.get(current, "members"));
+  const overridden = process.env.OMB_SIGNIN_EMAILS !== undefined || process.env.OMB_SIGNIN_MEMBER_EMAILS !== undefined;
+  const write = (next: { admins: string[]; members: string[] }) => {
+    mkdirSync(options.dataDir, { recursive: true, mode: 0o700 });
+    writeFileAtomic(file, `${JSON.stringify({ ...raw, signIn: next }, null, 2)}\n`, { mode: 0o600 });
+  };
+  if (options.accessAction === "list") {
+    if (!admins.length && !members.length) {
+      io.log("nobody can sign in with an email yet; pairing codes only. Add someone with: openmausbot access add you@example.com");
+      return 0;
+    }
+    for (const entry of admins) io.log(`${entry.padEnd(40)} full access`);
+    for (const entry of members) io.log(`${entry.padEnd(40)} chat and approvals`);
+    if (overridden) io.log("(OMB_SIGNIN_EMAILS / OMB_SIGNIN_MEMBER_EMAILS are set in the environment and win over this list while the server runs)");
+    return 0;
+  }
+  const entry = (options.email ?? "").trim().toLowerCase();
+  if (!entry || (!entry.startsWith("@") && !entry.includes("@")) || /\s/.test(entry)) {
+    io.error("give an email address, or @domain for everyone at that domain");
+    return 2;
+  }
+  const without = (items: string[]) => items.filter((item) => item !== entry);
+  if (options.accessAction === "remove") {
+    if (!admins.includes(entry) && !members.includes(entry)) {
+      io.error(`${entry} is not on the list`);
+      return 1;
+    }
+    write({ admins: without(admins), members: without(members) });
+    io.log(`${entry} can no longer sign in (existing sessions stay until they expire or are revoked with \`openmausbot sessions revoke\`)`);
+    return 0;
+  }
+  write(options.chatOnly ? { admins: without(admins), members: [...without(members), entry] } : { admins: [...without(admins), entry], members: without(members) });
+  io.log(`${entry} can sign in at /pair with an emailed code (${options.chatOnly ? "chat and approvals" : "full access"})`);
+  if (overridden) io.log("note: OMB_SIGNIN_EMAILS / OMB_SIGNIN_MEMBER_EMAILS are set in the environment and win over this list while the server runs");
+  return 0;
+}
+
 export async function runLogin(options: CliOptions, io: CliIo = defaultIo()): Promise<number> {
   const account = createTunnelAccount({ dataDir: options.dataDir, version: serverVersion() });
+  if (fleetCredential()) io.log(`note: ${FLEET_CREDENTIAL_ENV} is set, so serve --tunnel will use that credential rather than this account`);
   if (account.credentials.status === "unavailable") {
     io.error(`${account.credentials.file} exists but could not be read; fix or remove it, then try again`);
     return 1;
@@ -566,20 +667,32 @@ interface TunnelPlan {
 /** Everything `--tunnel` needs before the server starts, or the one reason
  * it cannot have it. Fails closed: no silent fallback to a local-only server. */
 async function planTunnel(options: CliOptions, log: (line: string) => void): Promise<TunnelPlan | { error: string }> {
-  const account = createTunnelAccount({ dataDir: options.dataDir, version: serverVersion() });
-  if (account.credentials.status === "unavailable") return { error: `${account.credentials.file} exists but could not be read; fix or remove it` };
-  if (!describeTunnelAccount(account.credentials.read()).email) {
-    return { error: "no account on this machine yet: run `openmausbot login` first, then `openmausbot serve --tunnel`" };
+  let access: ManagedTunnelAccess | null = null;
+  const credential = fleetCredential();
+  if (credential) {
+    // A fleet-started container: the credential is the whole identity.
+    log(`tunnel: using the installation credential from ${FLEET_CREDENTIAL_ENV}`);
+    try {
+      access = await fleetAccess({ credential });
+    } catch (error) {
+      return { error: `--tunnel: ${message(error)}` };
+    }
+  } else {
+    const account = createTunnelAccount({ dataDir: options.dataDir, version: serverVersion() });
+    if (account.credentials.status === "unavailable") return { error: `${account.credentials.file} exists but could not be read; fix or remove it` };
+    if (!describeTunnelAccount(account.credentials.read()).email) {
+      return { error: "no account on this machine yet: run `openmausbot login` first, then `openmausbot serve --tunnel`" };
+    }
+    // A fresh connector token when the control plane answers; the saved one otherwise.
+    try {
+      const state = await account.service.retry();
+      if (state.message && !tunnelAccess(account.credentials.read())) log(`tunnel: ${state.message}`);
+    } catch (error) {
+      log(`tunnel: control plane not reachable right now (${message(error)}); using the saved address`);
+    }
+    access = tunnelAccess(account.credentials.read());
+    if (!access) return { error: "this machine has no public address; run `openmausbot login` again" };
   }
-  // A fresh connector token when the control plane answers; the saved one otherwise.
-  try {
-    const state = await account.service.retry();
-    if (state.message && !tunnelAccess(account.credentials.read())) log(`tunnel: ${state.message}`);
-  } catch (error) {
-    log(`tunnel: control plane not reachable right now (${message(error)}); using the saved address`);
-  }
-  const access = tunnelAccess(account.credentials.read());
-  if (!access) return { error: "this machine has no public address; run `openmausbot login` again" };
   let binary: string;
   try {
     binary = await ensureCloudflared({ dataDir: options.dataDir, log });
@@ -617,6 +730,16 @@ export async function runServe(options: CliOptions, log: (line: string) => void 
     plan = planned;
     if (publicUrl && publicUrl !== plan.access.endpoint) log(`note: --public-url is ignored with --tunnel; the address is ${plan.access.endpoint}`);
     publicUrl = plan.access.endpoint;
+  }
+  let caddyBinary: string | null = null;
+  if (options.domain) {
+    try {
+      caddyBinary = await ensureCaddy({ dataDir: options.dataDir, log });
+    } catch (error) {
+      console.error(`--domain: ${message(error)}`);
+      return 1;
+    }
+    publicUrl = `https://${options.domain}`;
   }
   const entry = serverEntry();
   if (!entry.staticDir) log("note: no built UI found next to the server; the API runs but browsers get no page (build with `pnpm exec vite build`)");
@@ -681,11 +804,13 @@ export async function runServe(options: CliOptions, log: (line: string) => void 
     child.once("exit", (code, signal) => { exited = code ?? (signal === "SIGTERM" || signal === "SIGINT" ? 0 : 1); done(exited); });
   });
   let tunnel: RunningTunnel | null = null;
+  let caddy: RunningCaddy | null = null;
   let stopping: Promise<void> | null = null;
   const stop = () => {
     stopping ??= (async () => {
-      // The gateway stops accepting before the server it forwards to goes away.
+      // The gateway and the edge stop accepting before the server they forward to goes away.
       if (tunnel) await tunnel.stop().catch(() => undefined);
+      if (caddy) await caddy.stop().catch(() => undefined);
       if (tailscaleServing && tailscale) await tailscaleServeOff(tailscale).catch(() => undefined);
       if (exited === null) {
         child.kill("SIGTERM");
@@ -719,6 +844,19 @@ export async function runServe(options: CliOptions, log: (line: string) => void 
       return 1;
     }
     if (stopping || exited !== null) return await childExit;
+    if (options.domain && caddyBinary) {
+      try {
+        caddy = await startCaddy({ binary: caddyBinary, dataDir: options.dataDir, domain: options.domain, appPort: options.port, webhookPort: Number(env.OMB_WEBHOOK_PORT), log });
+        log(`https: Caddy serves ${publicUrl} → http://127.0.0.1:${options.port}; it gets the certificate from Let's Encrypt once DNS for ${options.domain} points at this machine`);
+        void caddy.exited.then((code) => {
+          if (!stopping) log(`caddy: stopped (exit ${code ?? "signal"}); ${publicUrl} is no longer served. Stop and start the server again.`);
+        });
+      } catch (error) {
+        console.error(`--domain: ${message(error)}`);
+        await stop();
+        return 1;
+      }
+    }
     if (plan && child.pid) {
       tunnel = startTunnel({
         dataDir: options.dataDir,
@@ -858,6 +996,20 @@ export async function main(argv = process.argv.slice(2)): Promise<number> {
       return runStatus(options);
     case "login":
       return runLogin(options);
+    case "access":
+      return runAccess(options);
+    case "service":
+      return runServiceCommand({
+        action: options.serviceAction ?? "install",
+        dataDir: options.dataDir,
+        port: options.port,
+        domain: options.domain,
+        tunnel: options.tunnel,
+        tailscale: options.tailscale,
+        label: options.label,
+        script: process.argv[1] ?? "",
+        node: process.execPath,
+      }, { log: (line) => console.log(line), error: (line) => console.error(line) });
     case "logout":
       return runLogout(options);
     case "browser":

@@ -84,6 +84,17 @@ let loginShellPath: string | null = null;
  * and without resetting it a rescan would rebuild the cache without those
  * entries and never re-probe — "check again" would permanently lose
  * anything only the login shell's rc file knows about. */
+// Directories the app manages itself (its own npm prefix for engines it
+// installs from Settings). They go ahead of everything else so an engine
+// installed there wins over an older copy elsewhere on PATH.
+const registeredDirs: string[] = [];
+
+export function registerPathDir(dir: string): void {
+  if (registeredDirs.includes(dir)) return;
+  registeredDirs.unshift(dir);
+  resetPathCache();
+}
+
 export function resetPathCache(): void {
   cached = null;
   probed = false;
@@ -93,6 +104,7 @@ export function resetPathCache(): void {
 export function augmentedPath(): string {
   if (cached === null) {
     cached = mergePaths([
+      ...registeredDirs.filter((d) => existsSync(d)),
       ...(process.env.OMB_EXTRA_PATH ? process.env.OMB_EXTRA_PATH.split(delimiter) : []),
       ...(process.env.PATH ? process.env.PATH.split(delimiter) : []),
       // Keep the last successful login-shell result while a rescan starts a
@@ -142,6 +154,7 @@ export function resetPathCacheForTests(): void {
   cached = null;
   probed = false;
   loginShellPath = null;
+  registeredDirs.length = 0;
 }
 
 /** Every `name` binary on the augmented PATH as absolute paths, in PATH

@@ -58,6 +58,9 @@ internal enum class TactileAction(val cue: HapticCue) {
     /** The disclosure on a folded activity run (`ActivityRunChip.swift:30`). */
     TOGGLE_ACTIVITY_RUN(HapticCue.SELECT),
 
+    /** An "Opened thread" chip going to its thread (`ChatView.swift` `ActivityChip`). */
+    OPEN_THREAD_CHIP(HapticCue.SELECT),
+
     /** Moving the phone to another paired computer (`SettingsView.swift:250`). */
     SWITCH_COMPUTER(HapticCue.SELECT),
 

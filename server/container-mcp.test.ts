@@ -48,7 +48,7 @@ posixOnly("Local VM Cua MCP bridge", () => {
       child.stdin.end(input);
     });
 
-    expect(result.code).toBe(0);
+    expect(result.code, result.stderr).toBe(0);
     expect(result.stdout).toBe(input);
     expect(result.stderr).toContain(
       `ARGS:exec -i -u cua -e HOME=/home/cua -e DISPLAY=:1 -e CUA_DRIVER_INSTALL_CHANNEL=python_package ` +
@@ -97,7 +97,7 @@ posixOnly("Local VM Cua MCP bridge", () => {
       child.stdin.end(input);
     });
 
-    expect(result.code).toBe(0);
+    expect(result.code, result.stderr).toBe(0);
     const lines = result.stdout.trim().split("\n").filter(Boolean).map((line) => JSON.parse(line));
     expect(lines).toEqual([
       { jsonrpc: "2.0", id: 2, result: {} },

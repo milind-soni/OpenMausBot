@@ -2,6 +2,7 @@ import { EventEmitter } from "node:events";
 import type { LookupAddress } from "node:dns";
 import type { IncomingMessage } from "node:http";
 import type { RequestOptions } from "node:https";
+import type { NetworkInterfaceInfo } from "node:os";
 import { PassThrough } from "node:stream";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -11,6 +12,7 @@ vi.mock("node:https", () => ({ request: httpsRequestMock }));
 import {
   CUSTOM_DOMAIN_CHALLENGE_PATH,
   createCustomDomainVerifier,
+  customDomainIpv4,
   isPublicDomainAddress,
   normalizeCustomDomain,
 } from "./custom-domain.ts";
@@ -30,6 +32,31 @@ function fixture(options: { addresses?: LookupAddress[]; timeoutMs?: number } = 
 }
 
 afterEach(() => vi.useRealTimers());
+
+describe("DNS record server address", () => {
+  const interfaces = (...addresses: string[]) => ({ eth0: addresses.map((address): NetworkInterfaceInfo => ({
+    address, family: "IPv4", internal: false, netmask: "255.255.255.0", mac: "00:00:00:00:00:00", cidr: null,
+  })) });
+
+  it("shows a single public IPv4 and ignores loopback, private, and duplicate addresses", () => {
+    expect(customDomainIpv4(interfaces("127.0.0.1", "172.17.0.2", "100.64.0.2", "8.8.8.8", "8.8.8.8"), "")).toBe("8.8.8.8");
+    expect(customDomainIpv4({ eth0: [{ ...interfaces("8.8.8.8").eth0[0]!, internal: true }] }, "")).toBeNull();
+  });
+
+  it("does not guess the target for containers or multiple public interfaces", () => {
+    expect(customDomainIpv4(interfaces("172.17.0.2"), "")).toBeNull();
+    expect(customDomainIpv4(interfaces("8.8.8.8", "1.1.1.1"), "")).toBeNull();
+    expect(customDomainIpv4({}, "")).toBeNull();
+  });
+
+  it("allows an explicit public proxy IP without echo services or DNS lookups", () => {
+    expect(customDomainIpv4(interfaces("172.17.0.2"), " 8.8.8.8 ")).toBe("8.8.8.8");
+  });
+
+  it.each(["127.0.0.1", "192.168.1.5", "169.254.169.254", "203.0.113.1", "::1", "2606:4700::1111", "https://bots.company.com", "invalid"])("does not fall back to a guess when an override is invalid: %s", (configured) => {
+    expect(customDomainIpv4(interfaces("8.8.8.8"), configured)).toBeNull();
+  });
+});
 
 describe("custom domain input", () => {
   it.each([

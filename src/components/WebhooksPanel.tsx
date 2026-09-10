@@ -238,7 +238,7 @@ export function WebhooksPanel({
     setError("");
     try {
       if (action === "delete") {
-        if (!window.confirm(`Delete “${webhook.name}”? Existing task history will stay available.`)) return;
+        if (!window.confirm(`Delete “${webhook.name}”? Existing thread history will stay available.`)) return;
         await api(`/api/webhooks/${webhook.id}`, { method: "DELETE" });
         dispatch({ type: "webhookDeleted", webhookId: webhook.id });
         removeWebhookCredential(webhookCredentialStore(), webhook.id);

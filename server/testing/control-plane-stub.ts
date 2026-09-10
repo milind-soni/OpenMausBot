@@ -23,6 +23,9 @@ export interface ControlPlaneStub {
   /** "METHOD /path", in order. */
   calls: string[];
   installations: Map<string, StubInstallation>;
+  /** An installation the control plane already knows, as a fleet would create
+   * one before starting a container: returns its credential. */
+  seedInstallation(name?: string): string;
   close(): Promise<void>;
 }
 
@@ -146,6 +149,11 @@ export async function startControlPlaneStub(options: { otp?: string; endpointUrl
     connectorToken,
     calls,
     installations,
+    seedInstallation: (name = "fleet box") => {
+      const inst: StubInstallation = { id: randomUUID(), clientInstanceId: randomUUID(), name, platform: "linux", appVersion: null, credential: newCredential() };
+      installations.set(inst.id, inst);
+      return inst.credential;
+    },
     close: () => new Promise<void>((done) => server.close(() => done())),
   };
 }

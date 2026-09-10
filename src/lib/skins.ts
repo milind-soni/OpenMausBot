@@ -12,6 +12,7 @@ export const SKIN_IDS = [
   "graphite",
   "linen",
   "dusk",
+  "daylight",
 ] as const;
 export type SkinId = (typeof SKIN_IDS)[number];
 
@@ -30,6 +31,7 @@ export const SKINS: readonly Skin[] = [
   { id: "graphite", name: "Graphite", tagline: "Quiet charcoal and softened steel blue." },
   { id: "linen", name: "Linen", tagline: "Clean daylight with a restrained navy accent." },
   { id: "dusk", name: "Dusk", tagline: "Muted plum after dark, calm and low-key." },
+  { id: "daylight", name: "Daylight", tagline: "Midnight in reverse. Near-white, ink-black bubbles." },
 ];
 
 export const DEFAULT_SKIN: SkinId = "midnight";

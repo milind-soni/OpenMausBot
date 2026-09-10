@@ -228,7 +228,7 @@ function GroupCall({ group, members }: { group: Group; members: Bot[] }) {
           if (allow && openApproval.skill) {
             setHeard("");
             enqueueSpeech(
-              "Open the channel chat to review the complete skill before enabling it. You can say no now to deny it.",
+              "Open the group thread to review the complete skill before enabling it. You can say no now to deny it.",
               openApproval.member,
               true,
             );
@@ -354,10 +354,10 @@ function GroupCall({ group, members }: { group: Group; members: Bot[] }) {
         submitted: false,
       };
       spokenIds.current.add(approval.message.id);
-      const name = member?.name ?? approval.message.from?.name ?? "A channel member";
+      const name = member?.name ?? approval.message.from?.name ?? "A group member";
       const skillPrompt = approval.message.card?.skillRequest?.action === "update"
-        ? `${name} wants to update a learned skill. Open the channel chat to review the complete skill before replacing the current version. You can say no to deny it.`
-        : `${name} wants to enable a new learned skill. Open the channel chat to review the complete skill before enabling it. You can say no to deny it.`;
+        ? `${name} wants to update a learned skill. Open the group thread to review the complete skill before replacing the current version. You can say no to deny it.`
+        : `${name} wants to enable a new learned skill. Open the group thread to review the complete skill before enabling it. You can say no to deny it.`;
       enqueueSpeech(isSkillApproval(approval) ? skillPrompt : spokenApprovalPrompt(approval, name), member, true);
     }
 
@@ -365,7 +365,7 @@ function GroupCall({ group, members }: { group: Group; members: Bot[] }) {
       const member = members.find((candidate) => candidate.id === question.from?.botId);
       askedQuestion.current = { requestId: question.card.requestId, member };
       spokenIds.current.add(question.id);
-      const name = member?.name ?? question.from?.name ?? "A channel member";
+      const name = member?.name ?? question.from?.name ?? "A group member";
       const detail = question.card.subtitle.trim();
       const choices = question.card.options.length
         ? " The options are " + question.card.options.join(", ") + "."
@@ -445,9 +445,9 @@ function GroupCall({ group, members }: { group: Group; members: Bot[] }) {
         ? "Push to talk"
         : "Listening"
       : phase === "sending"
-        ? "Bringing the channel in"
+        ? "Bringing the group in"
         : phase === "speaking"
-          ? (speakingMember?.name ?? "Channel member") + " is speaking"
+          ? (speakingMember?.name ?? "Group member") + " is speaking"
           : workingMember
             ? workingMember.name + " is working"
             : "Working";
@@ -513,7 +513,7 @@ function GroupCall({ group, members }: { group: Group; members: Bot[] }) {
             <span className="text-ink-secondary">
               {pushToTalk
                 ? "Release Control + Option to send…"
-                : "Say a name, say “everyone,” or just talk to the channel…"}
+                : "Say a name, say “everyone,” or just talk to the group…"}
             </span>
           )
         ) : phase === "speaking" ? (

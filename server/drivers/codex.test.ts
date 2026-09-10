@@ -107,6 +107,29 @@ describe("CodexDriver turns (fake app-server)", () => {
     await removeTempDir(scratch);
   });
 
+  it("names the signed-in ChatGPT account from Codex's protocol and offers sign-out", async () => {
+    const codexHome = join(scratch, ".codex");
+    mkdirSync(codexHome, { recursive: true });
+    const claims = Buffer.from(JSON.stringify({ email: "stale-file@example.test" })).toString("base64url");
+    writeFileSync(join(codexHome, "auth.json"), JSON.stringify({
+      tokens: { id_token: `header.${claims}.signature-fixture`, access_token: "access-fixture", refresh_token: "refresh-fixture" },
+    }));
+    await create({ environment: { HOME: scratch, CODEX_HOME: codexHome } });
+    const connected = await instance.snapshot();
+    expect(connected).toMatchObject({ state: "available", authenticated: true, account: { email: "ada@example.test" } });
+    expect(JSON.stringify(connected)).not.toContain("fixture");
+    expect(instance.signOut).toBeTypeOf("function");
+    process.env.FAKE_CODEX_MODE = "logged-out";
+    const signedOut = await instance.snapshot();
+    expect(signedOut).toMatchObject({ state: "available", authenticated: false });
+    expect(signedOut).not.toHaveProperty("account");
+  });
+
+  it.each(["api-key", "none", "unsupported", "error"])("omits ChatGPT identity when Codex account/read reports %s", async (mode) => {
+    await create({ environment: { HOME: scratch, CODEX_HOME: join(scratch, ".codex"), FAKE_CODEX_ACCOUNT_MODE: mode } });
+    expect(await instance.snapshot()).not.toHaveProperty("account");
+  });
+
   it("runs the handshake and normalizes a full turn", async () => {
     await create();
     const dump = join(scratch, "dump.json");
@@ -209,6 +232,47 @@ describe("CodexDriver turns (fake app-server)", () => {
         approvalsReviewer: approvalMode === "auto" ? "auto_review" : "user",
         sandboxPolicy: { type: turnSandbox },
       });
+    },
+  );
+
+  it.each(["gpt-5.6-sol", "gpt-5.4"])(
+    "reapplies Full, Auto, and Ask across thread start and resume for %s",
+    async (model) => {
+      await create({ mode: "resume", fullAuto: true });
+      const dump = join(scratch, "approval-transitions.json");
+      process.env.FAKE_CODEX_DUMP = dump;
+
+      for (const [approvalMode, approvalPolicy, sandbox, turnSandbox] of [
+        ["full", "never", "danger-full-access", "dangerFullAccess"],
+        ["auto", "on-request", "workspace-write", "workspaceWrite"],
+        ["ask", "on-request", "workspace-write", "workspaceWrite"],
+      ] as const) {
+        const resumed = approvalMode !== "full";
+        const { turnId } = await instance.adapter.sendTurn({
+          threadId: "t-mode-transitions",
+          text: "continue",
+          model,
+          approvalMode,
+          ...(resumed ? { resumeCursor: "codex-thread-1" } : {}),
+        });
+        await recorder.until((event) => event.type === "turn.completed" && event.turnId === turnId);
+
+        const calls = JSON.parse(readFileSync(dump, "utf8")).calls as Array<{
+          method: string;
+          params: Record<string, unknown>;
+        }>;
+        expect(calls.find((call) => call.method === (resumed ? "thread/resume" : "thread/start"))?.params).toMatchObject({
+          ...(resumed ? { threadId: "codex-thread-1" } : { model }),
+          approvalPolicy,
+          approvalsReviewer: approvalMode === "auto" ? "auto_review" : "user",
+          sandbox,
+        });
+        expect(calls.find((call) => call.method === "turn/start")?.params).toMatchObject({
+          approvalPolicy,
+          approvalsReviewer: approvalMode === "auto" ? "auto_review" : "user",
+          sandboxPolicy: { type: turnSandbox },
+        });
+      }
     },
   );
 
@@ -520,7 +584,7 @@ describe("CodexDriver turns (fake app-server)", () => {
     })).rejects.toThrow(/reserved environment variable.*OMB_HARNESS_URL/i);
   });
 
-  it("mounts peer-agent comms without placing the comms token in argv", async () => {
+  it.each(["ask", "auto"] as const)("pre-allows peer-agent comms without exposing its token in %s mode", async (approvalMode) => {
     await create();
     const dump = join(scratch, "agents.json");
     process.env.FAKE_CODEX_DUMP = dump;
@@ -528,6 +592,7 @@ describe("CodexDriver turns (fake app-server)", () => {
     await instance.adapter.sendTurn({
       threadId: "t-agents",
       text: "ask the researcher",
+      approvalMode,
       integrations: {
         agents: {
           command: process.execPath,
@@ -547,6 +612,7 @@ describe("CodexDriver turns (fake app-server)", () => {
 
     const seen = JSON.parse(readFileSync(dump, "utf8"));
     expect(seen.argv.join(" ")).toContain("mcp_servers.agents.command");
+    expect(seen.argv).toContain('mcp_servers.agents.default_tools_approval_mode="auto"');
     expect(seen.argv.join(" ")).toContain("/tmp/agents-proxy.js");
     expect(seen.argv.join(" ")).toContain("OMB_COMMS_TOKEN");
     expect(seen.argv.join(" ")).not.toContain("peer-comms-secret");

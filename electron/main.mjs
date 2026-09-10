@@ -7,14 +7,7 @@ import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { startCua, stopCua, registerCuaIpc, setCuaStateListener } from "./cua.mjs";
 import { createAndroidDeviceController } from "./android-device.mjs";
-import { assemblyAICredential, mintAssemblyAIStreamingToken } from "./assemblyai.mjs";
 import { finishSpeech, startSpeech, stopSpeech } from "./speech.mjs";
-import {
-  recorderPermissionStatus,
-  saveSkillRecording,
-  startRecorder,
-  stopRecorder,
-} from "./skill-recorder.mjs";
 import { openBlankTerminal } from "./terminal-launch.mjs";
 import { pasteMenuItem } from "./paste-menu-item.mjs";
 import { attachUpdaterWindow, startUpdater, registerUpdaterIpc } from "./updater.mjs";
@@ -32,6 +25,7 @@ import { packageUrlFromCommandLine, packageUrlFromDeepLink } from "./package-lin
 import { windowChromeOptions } from "./window-chrome.mjs";
 import { defaultSaveName, withSavableFile } from "./save-file.mjs";
 import { desktopViewerPermissionAllowed } from "./desktop-viewer-permissions.mjs";
+import { appPermissionAllowed, externalWebUrl } from "./app-permissions.mjs";
 import {
   ensureManagedComposioCredentials,
   managedComposioAccess,
@@ -88,7 +82,6 @@ const { desktopViewerUrl, sameDesktopViewerOrigin } = require("./desktop-viewer.
 const { createDesktopWorkspaceManager } = require("./desktop-workspace.cjs");
 const { createTrustedApprovalModeCoordinator } = require("./approval-trusted-mode.cjs");
 const { DESKTOP_MUTATION_HEADER, desktopServerHeaders } = require("./desktop-server-auth.cjs");
-const { createCuaConnectionStore: createDescriptorStore } = require("./cua-connection.cjs");
 const { MIN_BOUNDS, normalizeUnreadCount, parseWindowState, resolveWindowState } = require("./window-state.cjs");
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -103,10 +96,6 @@ let desktopViewerOwner = null;
 let desktopViewerContextId = null;
 let desktopWorkspaceManager = null;
 let desktopWorkspaceOwner = null;
-const browserConnectionStore = createDescriptorStore({
-  getUserData: () => app.getPath("userData"),
-  fileName: "browser-connection.json",
-});
 let pendingPackageInstallUrl = packageUrlFromCommandLine(process.argv);
 let mainWindow = null;
 let unreadCount = 0;
@@ -1544,7 +1533,13 @@ function createWindow() {
   });
 
   win.webContents.setWindowOpenHandler(({ url }) => {
-    if (/^https?:\/\//i.test(url)) shell.openExternal(url);
+    try {
+      void shell.openExternal(externalWebUrl(url)).catch(() => {
+        console.warn("The external web link could not be opened");
+      });
+    } catch {
+      // Reject non-web links and embedded credentials without opening them.
+    }
     return { action: "deny" };
   });
   // The window shows Local or a saved server, nothing else: a page cannot
@@ -1836,20 +1831,10 @@ ipcMain.handle("desktop:skin", (_event, skin) => {
   return true;
 });
 
-ipcMain.handle("desktop:open-external", async (_event, rawUrl) => {
-  if (typeof rawUrl !== "string") throw new Error("A web address is required");
-  let url;
-  try {
-    url = new URL(rawUrl);
-  } catch {
-    throw new Error("That web address is invalid");
-  }
-  if (url.protocol !== "https:" && url.protocol !== "http:") {
-    throw new Error("Only web links can be opened");
-  }
-  await shell.openExternal(url.toString());
+ipcMain.handle("desktop:open-external", localOnly("desktop:open-external", async (_event, rawUrl) => {
+  await shell.openExternal(externalWebUrl(rawUrl));
   return true;
-});
+}));
 
 // The Box VNC viewer must be a top-level page for its token exchange. A
 // sandboxed modal BrowserWindow satisfies that requirement while keeping the
@@ -1942,17 +1927,6 @@ ipcMain.handle("speech:stop", localOnly("speech:stop", () => {
 ipcMain.handle("speech:finish", localOnly("speech:finish", () => {
   if (nativeActions.appleSpeech) finishSpeech();
 }));
-
-ipcMain.handle("skill-recorder:permissions", localOnly("skill-recorder:permissions", () => recorderPermissionStatus()));
-ipcMain.handle("skill-recorder:start", localOnly("skill-recorder:start", (event) => {
-  const win = BrowserWindow.fromWebContents(event.sender);
-  if (!win) throw new Error("The recorder window is unavailable");
-  return startRecorder(win);
-}));
-ipcMain.handle("skill-recorder:stop", localOnly("skill-recorder:stop", () => stopRecorder()));
-ipcMain.handle("skill-recorder:save", localOnly("skill-recorder:save", (_event, payload) => (
-  saveSkillRecording(payload, { dataRoot: desktopDataDir() })
-)));
 
 // ── companion sidecar ──────────────────────────────────────────────────
 // The renderer gets these five and nothing else: it can turn the companion
@@ -2060,28 +2034,6 @@ ipcMain.handle("desktop:capabilities", async (event) =>
   }),
 );
 
-ipcMain.handle("assemblyai:status", localOnly("assemblyai:status", () => ({
-  configured: Boolean(assemblyAICredential(secureCredentials)),
-})));
-
-ipcMain.handle("assemblyai:set-key", localOnly("assemblyai:set-key", async (_event, value) => {
-  if (typeof value !== "string") throw new Error("Unsupported credential");
-  if (!(await safeStorage.isAsyncEncryptionAvailable())) {
-    throw new Error("The operating-system credential store is unavailable");
-  }
-  const secret = value.trim();
-  await updateSecureCredentialDocument((credentials) => {
-    if (secret) credentials.assemblyAiApiKey = secret;
-    else delete credentials.assemblyAiApiKey;
-    return credentials;
-  });
-  return { configured: Boolean(secret) };
-}));
-
-ipcMain.handle("assemblyai:streaming-token", localOnly("assemblyai:streaming-token", () =>
-  mintAssemblyAIStreamingToken(assemblyAICredential(secureCredentials)),
-));
-
 const CREDENTIAL_PATCH = {
   composioApiKey: (value) => ({ composio: { apiKey: value } }),
   xaiApiKey: (value) => ({ xai: { key: value } }),
@@ -2089,6 +2041,7 @@ const CREDENTIAL_PATCH = {
   opencodeGoApiKey: (value) => ({ opencodeGo: { apiKey: value } }),
   ttsKey: (value) => ({ tts: { key: value } }),
   openaiImageApiKey: (value) => ({ imageGen: { key: value } }),
+  customImageApiKey: (value) => ({ imageGen: { customApiKey: value } }),
 };
 
 async function saveWorkspaceCredential(name, value) {
@@ -2196,6 +2149,18 @@ app.whenReady().then(async () => {
   }
   if (process.platform === "darwin") app.dock.setIcon(APP_ICON);
   secureCredentials = await loadSecureCredentials();
+  // The AssemblyAI key only fed the removed Teach a skill recorder, and its
+  // set/clear handler went with it; drop the orphaned secret rather than
+  // keep a third-party key at rest with no way to remove it.
+  if (secureCredentials && Object.hasOwn(secureCredentials, "assemblyAiApiKey") && !credentialStoreUnavailable) {
+    try {
+      const { assemblyAiApiKey: _removed, ...rest } = secureCredentials;
+      await saveSecureCredentials(rest);
+      secureCredentials = rest;
+    } catch (error) {
+      slog(`orphaned AssemblyAI key not removed: ${error?.message ?? error}`);
+    }
+  }
   if (app.isPackaged) {
     await secureComposioConfig();
     await secureWorkspaceConfig();
@@ -2300,22 +2265,17 @@ app.whenReady().then(async () => {
     void startDesktopCompanion({ waitForHosted: false, remember: false });
   }
   setLocalOrigin(rendererOrigin());
-  // Device permissions (microphone, camera, notifications, …) are for the
-  // local UI only; a remote server's page in this window is refused without
-  // a prompt. Client mode's loopback relay is the local UI.
-  const localPermission = (url) => {
-    try {
-      return new URL(String(url)).origin === rendererOrigin();
-    } catch {
-      return false;
-    }
-  };
-  session.defaultSession.setPermissionRequestHandler((contents, _permission, callback, details) =>
-    callback(localPermission(details?.requestingUrl ?? contents?.getURL?.() ?? "")),
-  );
-  session.defaultSession.setPermissionCheckHandler((contents, _permission, requestingOrigin) =>
-    localPermission(requestingOrigin || contents?.getURL?.() || ""),
-  );
+  // Device permissions (microphone, notifications, clipboard) are for the
+  // local UI only; privileged capabilities (camera, geolocation, USB, MIDI,
+  // serial) stay off. Client mode's loopback relay is the local UI.
+  session.defaultSession.setPermissionRequestHandler((contents, permission, callback, details) => {
+    const requesting = details?.requestingUrl ?? contents?.getURL?.() ?? "";
+    callback(appPermissionAllowed(permission, requesting, rendererOrigin(), details));
+  });
+  session.defaultSession.setPermissionCheckHandler((contents, permission, requestingOrigin, details) => {
+    const requesting = requestingOrigin || contents?.getURL?.() || "";
+    return appPermissionAllowed(permission, requesting, rendererOrigin(), details);
+  });
   environmentsState = readEnvironments();
   createWindow();
   // Reconcile incomplete setup and resume interrupted sign-out only after the
@@ -2392,7 +2352,6 @@ app.on("before-quit", (e) => {
   // a live dictation session runs its own helper child that holds the mic —
   // stop it here so quitting never orphans a recording process
   if (nativeActions.appleSpeech) stopSpeech();
-  stopRecorder();
   const ownedHelperCleanup = Promise.race([
     Promise.all([
       stopCua().catch(() => {}),

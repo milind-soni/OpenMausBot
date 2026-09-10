@@ -3,6 +3,7 @@ import { lookup as dnsLookup } from "node:dns/promises";
 import type { LookupAddress } from "node:dns";
 import { request as httpsRequest } from "node:https";
 import { BlockList, isIP, type LookupFunction } from "node:net";
+import { networkInterfaces } from "node:os";
 
 const CHECK_TIMEOUT_MS = 8_000;
 const MAX_RESPONSE_BYTES = 16_384;
@@ -58,6 +59,23 @@ export function isPublicDomainAddress(address: string): boolean {
   const family = isIP(address);
   if (family === 4) return !excludedAddresses.check(address, "ipv4");
   return family === 6 && globalIpv6.check(address, "ipv6") && !excludedAddresses.check(address, "ipv6");
+}
+
+/** Local interfaces only: a tunnel/CDN address or an external IP-echo service
+ * does not identify the server where the customer's HTTPS proxy runs. */
+export function customDomainIpv4(
+  interfaces = networkInterfaces(),
+  configured = process.env.OMB_PUBLIC_IPV4,
+): string | null {
+  if (configured?.trim()) {
+    const address = configured.trim();
+    return isIP(address) === 4 && isPublicDomainAddress(address) ? address : null;
+  }
+  const addresses = new Set(Object.values(interfaces).flatMap((entries) => entries ?? [])
+    .filter((entry) => !entry.internal && entry.family === "IPv4" && isPublicDomainAddress(entry.address))
+    .map((entry) => entry.address));
+  // Containers/NAT and multi-address hosts need an explicit operator choice.
+  return addresses.size === 1 ? [...addresses][0]! : null;
 }
 
 interface CustomDomainDependencies {

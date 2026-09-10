@@ -196,7 +196,7 @@ fun RosterScreen(navigator: CompanionNavigator) {
                         description = if (query.isEmpty()) {
                             "Bots you create on your computer show up here."
                         } else {
-                            "No chat matches “$query”."
+                            "No thread matches “$query”."
                         },
                     )
                 }
@@ -236,7 +236,7 @@ fun RosterScreen(navigator: CompanionNavigator) {
                         }
                         item(key = "channels") {
                             GroupsStrip(
-                                title = "Channels",
+                                title = "Groups",
                                 rooms = state.unsectionedChannels,
                                 members = tiles,
                                 onOpen = { navigator.open(Chat.RoomChat(it)) },
@@ -249,7 +249,7 @@ fun RosterScreen(navigator: CompanionNavigator) {
                         if (state.botChats.isNotEmpty()) {
                             item(key = "bot-chats") {
                                 GroupsStrip(
-                                    title = "Bot chats",
+                                    title = "Bot threads",
                                     rooms = state.botChats,
                                     members = tiles,
                                     onOpen = { navigator.open(Chat.RoomChat(it)) },
@@ -299,7 +299,7 @@ fun RosterScreen(navigator: CompanionNavigator) {
                             if (section.channels.isNotEmpty()) {
                                 item(key = "section-${section.id}-channels") {
                                     GroupsStrip(
-                                        title = "Channels",
+                                        title = "Groups",
                                         rooms = section.channels,
                                         members = tiles,
                                         onOpen = { navigator.open(Chat.RoomChat(it)) },
@@ -360,7 +360,7 @@ fun RosterScreen(navigator: CompanionNavigator) {
                             )
                         }
                         item(key = "chats-label") {
-                            SectionLabel("Chats", Modifier.padding(top = 14.dp, bottom = 4.dp))
+                            SectionLabel("Threads", Modifier.padding(top = 14.dp, bottom = 4.dp))
                         }
                     }
 
@@ -474,7 +474,7 @@ private fun RosterHeader(name: String?, status: Session.Status, onSettings: () -
             horizontalAlignment = Alignment.CenterHorizontally,
             verticalArrangement = Arrangement.spacedBy(2.dp),
         ) {
-            Text("Chats", fontSize = 17.sp, fontWeight = FontWeight.SemiBold)
+            Text("Threads", fontSize = 17.sp, fontWeight = FontWeight.SemiBold)
             Text(
                 text = RosterLayout.headerSubtitle(name, status),
                 fontSize = 13.sp,
@@ -851,7 +851,7 @@ private fun RosterBottomBar(
                 )
                 Box(modifier = Modifier.weight(1f)) {
                     if (bar.query.isEmpty()) {
-                        Text("Search chats", fontSize = 17.sp, color = secondaryTint)
+                        Text("Search threads", fontSize = 17.sp, color = secondaryTint)
                     }
                     BasicTextField(
                         value = bar.query,

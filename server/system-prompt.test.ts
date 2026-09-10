@@ -15,10 +15,37 @@ import {
   LEARN_PROMPT,
   PROFILE_PROMPT,
   ROUTINE_PROMPT,
+  ROUTINE_EXECUTION_PROMPT,
   WEBHOOK_PROMPT,
 } from "./system-prompt.ts";
 
 describe("buildSystemPrompt", () => {
+  it("reports the mid-conversation half apart from the stable one", () => {
+    const built = buildSystemPrompt("You are Kiwi.", "", [
+      { id: "recall", label: "Recall", text: " Search past sessions." },
+      { id: "memory", label: "Memory", text: " Your memory: likes tea." },
+      { id: "mentions", label: "Mentions", text: mentionPrompt([{ id: "b2", name: "Fig" }]) },
+    ]);
+
+    // the whole prompt is unchanged: every section, in order
+    expect(built.text).toContain("You are Kiwi.");
+    expect(built.text).toContain("likes tea");
+    expect(built.text).toContain("@Fig");
+
+    // memory and mentions differ between two turns of one live session, so a
+    // driver holding a process open must not key that process on them
+    expect(built.stable).toBe("You are Kiwi. Search past sessions.");
+    expect(built.volatile).toContain("likes tea");
+    expect(built.volatile).toContain("@Fig");
+    expect(built.volatile).not.toContain("Search past sessions");
+  });
+
+  it("has an empty volatile half when nothing mid-conversation is present", () => {
+    const built = buildSystemPrompt("You are Kiwi.", "", [{ id: "recall", label: "Recall", text: " Search." }]);
+    expect(built.volatile).toBe("");
+    expect(built.stable).toBe(built.text);
+  });
+
   it("is the persona alone when there is no soul and no parts", () => {
     const built = buildSystemPrompt("You are Kiwi.", "", []);
     expect(built.text).toBe("You are Kiwi.");
@@ -72,7 +99,7 @@ describe("computerPrompt", () => {
 
 describe("shared sentences", () => {
   it("each begins with one space so they concatenate onto the persona line", () => {
-    for (const sentence of [COMPOSIO_PROMPT, CREDENTIAL_PROMPT, ROUTINE_PROMPT, LEARN_PROMPT, WEBHOOK_PROMPT, PROFILE_PROMPT]) {
+    for (const sentence of [COMPOSIO_PROMPT, CREDENTIAL_PROMPT, ROUTINE_PROMPT, ROUTINE_EXECUTION_PROMPT, LEARN_PROMPT, WEBHOOK_PROMPT, PROFILE_PROMPT]) {
       expect(sentence.startsWith(" ")).toBe(true);
       expect(sentence.startsWith("  ")).toBe(false);
     }
@@ -82,6 +109,8 @@ describe("shared sentences", () => {
     expect(customMcpPrompt([])).toBe("");
     const one = customMcpPrompt(["notes"]);
     expect(one.startsWith(" The user also added an MCP server for you: \"notes\".")).toBe(true);
+    expect(one).toContain("engine's normal approval rules");
+    expect(one).not.toContain("each call asks");
     expect(customMcpPrompt(["notes", "linear"])).toContain('MCP servers for you: "notes", "linear".');
   });
 

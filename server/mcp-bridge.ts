@@ -1,5 +1,4 @@
-// The one stdio bridge behind both MCP entry points
-// (container-mcp.ts for the Local VM, vps-container-mcp.ts for the BYO VPS).
+// The shared stdio bridge for the host computer, Local VM, and BYO VPS.
 //
 // It is almost transparent — bytes in, bytes out — with two deliberate
 // near-side exceptions:
@@ -125,6 +124,8 @@ export function createInactivityWatchdog(options: {
 export interface BridgeOptions {
   command: string;
   args: string[];
+  /** Explicit child environment; absent preserves the existing PATH setup. */
+  env?: NodeJS.ProcessEnv;
   /** Names the far end in stderr messages, e.g. "Cua Driver". */
   label: string;
   /** Enables the dead-transport watchdog. Omitted for the Local VM, whose
@@ -173,7 +174,8 @@ export function createGateInterceptor(options: {
   forward: (line: string) => void;
   refuse: (line: string) => void;
   refusalText?: string;
-}): (line: string) => void {
+  getRefusalReason?: () => string | undefined;
+}): (line: string) => Promise<void> {
   const refusalText = options.refusalText ?? CONTROL_REFUSAL_PLAIN;
   let queue: Promise<void> = Promise.resolve();
   return (line: string) => {
@@ -189,7 +191,7 @@ export function createGateInterceptor(options: {
         options.forward(line);
         return;
       }
-      const held = await options.isHeld().catch(() => false);
+      const held = await options.isHeld().catch(() => true);
       if (!held) {
         options.forward(line);
         return;
@@ -198,10 +200,11 @@ export function createGateInterceptor(options: {
         JSON.stringify({
           jsonrpc: "2.0",
           id: frame.id ?? null,
-          result: { content: [{ type: "text", text: refusalText }], isError: true },
+          result: { content: [{ type: "text", text: options.getRefusalReason?.() ?? refusalText }], isError: true },
         }),
       );
     });
+    return queue;
   };
 }
 
@@ -214,6 +217,7 @@ export interface McpBridgeInterceptorOptions {
   gate?: {
     isHeld: () => Promise<boolean>;
     refusalText?: string;
+    getRefusalReason?: () => string | undefined;
   };
 }
 
@@ -222,15 +226,16 @@ export interface McpBridgeInterceptorOptions {
  * gate (if configured) or forwarded untouched. */
 export function createMcpBridgeInterceptor(
   options: McpBridgeInterceptorOptions,
-): (line: string) => void {
+): (line: string) => void | Promise<void> {
   const afterPing = options.gate
     ? createGateInterceptor({
         isHeld: options.gate.isHeld,
         forward: options.forward,
         refuse: options.answer,
         refusalText: options.gate.refusalText,
+        getRefusalReason: options.gate.getRefusalReason,
       })
-    : options.forward;
+    : (line: string) => { options.forward(line); };
   return (line: string) => {
     let frame: any = null;
     try {
@@ -245,14 +250,14 @@ export function createMcpBridgeInterceptor(
       }
       return;
     }
-    afterPing(line);
+    return afterPing(line);
   };
 }
 
 export function runMcpBridge(options: BridgeOptions): void {
   const child = spawn(options.command, options.args, {
     shell: false,
-    env: { ...process.env, PATH: augmentedPath() },
+    env: options.env ?? { ...process.env, PATH: augmentedPath() },
     stdio: ["pipe", "pipe", "pipe"],
   });
 
@@ -263,28 +268,40 @@ export function runMcpBridge(options: BridgeOptions): void {
   const client = options.gate
     ? createControlClient({ url: options.gate.url, token: options.gate.token })
     : null;
+  let refusalReason: string | undefined;
 
   const answer = (line: string) => process.stdout.write(line + "\n");
   const forward = (line: string) => child.stdin.write(line + "\n");
-  const inbound = createLineSplitter(
-    createMcpBridgeInterceptor({
-      answer,
-      forward,
-      ...(options.gate
-        ? {
-            gate: {
-              isHeld: async () => (await client!.state(true)).held,
+  const intercept = createMcpBridgeInterceptor({
+    answer,
+    forward,
+    ...(options.gate
+      ? {
+          gate: {
+            isHeld: async () => {
+              refusalReason = undefined;
+              const state = await client!.state(true);
+              refusalReason = state.blockedReason;
+              return state.held;
             },
-          }
-        : {}),
-    }),
-  );
+            getRefusalReason: () => refusalReason,
+          },
+        }
+      : {}),
+  });
+  let pendingInput = Promise.resolve();
+  const inbound = createLineSplitter((line) => {
+    const completion = intercept(line);
+    if (completion) pendingInput = completion;
+  });
 
   const onStdin = (chunk: Buffer) => inbound.push(chunk);
   process.stdin.on("data", onStdin);
   process.stdin.on("end", () => {
     inbound.flush();
-    child.stdin.end();
+    // A final tools/call can still be awaiting the control endpoint. Do not
+    // close the far end before the serialized gate has forwarded it.
+    void pendingInput.finally(() => child.stdin.end());
   });
 
   // Injected responses and refusals must never land inside one of the

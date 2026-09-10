@@ -265,18 +265,17 @@ describe("connectedAppsFacts", () => {
 });
 
 describe("setupSteps", () => {
-  it("lists what a fresh bot still needs, in the order a person would do it", () => {
+  it("lists optional setup ideas without inspecting conversation history", () => {
     const steps = setupSteps(baseFacts({ bot: { ...baseFacts().bot, name: "New bot", title: "", description: "" } }));
     expect(steps.map((step) => [step.id, step.done])).toEqual([
       ["identity", false],
       ["soul", false],
       ["folder", false],
       ["schedule", false],
-      ["talk", false],
     ]);
     // no apps step: this bot's engine has no connected-apps tools
     expect(steps.find((step) => step.id === "apps")).toBeUndefined();
-    expect(steps.every((step) => step.id === "talk" || step.section)).toBe(true);
+    expect(steps.every((step) => step.section)).toBe(true);
   });
 
   it("marks steps done from the same facts the sentences use", () => {
@@ -285,7 +284,6 @@ describe("setupSteps", () => {
       engine: { composioMcp: true },
       connectedApps: { configured: true, authoritative: true, services: ["gmail"] },
       routines: [{ id: "r1", name: "Digest", enabled: true, schedule: { type: "daily", time: "09:00", weekdays: [1, 2, 3, 4, 5] }, nextRunAt: null }],
-      hasTalked: true,
     });
     expect(setupSteps(facts).every((step) => step.done)).toBe(true);
     expect(setupSteps(facts).map((step) => step.id)).toContain("apps");

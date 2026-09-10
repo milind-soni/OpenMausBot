@@ -68,9 +68,9 @@ import kotlinx.coroutines.launch
 /**
  * Tasks & Routines — the port of `ios/App/TasksRoutinesView.swift`.
  *
- * A task is one conversation and result; a routine is a schedule that creates a
- * fresh task, with no cron syntax anywhere. Webhook management and the
- * cancel/seen operations on a run are not on the paired allowlist and have no
+ * A task is one conversation and result; a routine runs with fresh context and
+ * collects results in one thread, with no cron syntax anywhere. Webhook management
+ * and the cancel/seen operations on a run are not on the paired allowlist and have no
  * control here — only the receipts a webhook run leaves behind.
  */
 @OptIn(ExperimentalMaterial3Api::class)
@@ -111,7 +111,7 @@ internal fun TasksRoutinesScreen(onBack: () -> Unit, onOpenChat: (Chat) -> Unit)
         ) {
             HeaderBackButton(onBack)
             Text(
-                text = "Tasks & Routines",
+                text = "Threads & Routines",
                 fontSize = 17.sp,
                 fontWeight = FontWeight.SemiBold,
                 modifier = Modifier.weight(1f),
@@ -520,7 +520,7 @@ private fun RoutineRunRow(
                 }
                 NotificationTarget.from(run.botId, run.threadId)?.let { target ->
                     ActionRow(
-                        text = "Open task",
+                        text = "Open thread",
                         icon = Icons.AutoMirrored.Filled.ExitToApp,
                         onClick = { onOpenTask(target) },
                     )

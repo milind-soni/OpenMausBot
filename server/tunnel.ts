@@ -40,7 +40,7 @@ import {
   MANAGED_COMPANION_ORIGIN_PORT,
   type CompanionOriginEndpoint,
 } from "../electron/companion-origin-gateway.mjs";
-import { createControlPlaneClient } from "../electron/control-plane-client.mjs";
+import { ControlPlaneError, createControlPlaneClient } from "../electron/control-plane-client.mjs";
 import {
   createManagedCompanionTunnel,
   managedCompanionTunnelAccess,
@@ -165,6 +165,33 @@ export function createTunnelAccount(options: {
     newClientInstanceId: () => randomUUID(),
   });
   return { service, credentials, controlPlane };
+}
+
+// ── a fleet's credential: no account file, no emailed code ───────────────
+export const FLEET_CREDENTIAL_ENV = "OMB_INSTALLATION_CREDENTIAL";
+
+/** A container the fleet starts carries its installation credential in the
+ * environment. Nothing is written to disk and nobody types a code; the
+ * address and connector token are fetched fresh at every start. */
+export function fleetCredential(env: NodeJS.ProcessEnv = process.env): string | null {
+  const value = env[FLEET_CREDENTIAL_ENV]?.trim();
+  return value ? value : null;
+}
+
+export async function fleetAccess(options: { credential: string; env?: NodeJS.ProcessEnv; fetchImpl?: typeof fetch }): Promise<ManagedTunnelAccess> {
+  const env = options.env ?? process.env;
+  const controlPlane = resolveCompanionControlPlaneURL({ isPackaged: true, environment: env });
+  if (!controlPlane) throw new Error("OMB_CONTROL_PLANE_URL is set but is not an https address");
+  const client = createControlPlaneClient({ baseURL: controlPlane, fetchImpl: options.fetchImpl });
+  try {
+    const { endpoint, connectorToken } = await client.ensureEndpoint(options.credential);
+    return { endpoint: endpoint.url, token: connectorToken };
+  } catch (error) {
+    if (error instanceof ControlPlaneError && error.status === 401) {
+      throw new Error(`the installation credential in ${FLEET_CREDENTIAL_ENV} was rejected by ${controlPlane}; the fleet has to issue a new one`);
+    }
+    throw new Error(`could not get this machine's public address from ${controlPlane}: ${error instanceof Error ? error.message : String(error)}`);
+  }
 }
 
 // ── cloudflared and the guardian: where they are, or how to get them ──────

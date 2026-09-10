@@ -62,6 +62,8 @@ jobs:
           grep -q "no OpenMausBot server" pair.out
           # --tunnel ships its own processes and fails closed without an account
           test -f dist-server/tunnel-guardian.js && test -f dist-server/prepare-cloudflared.js
+          # the enterprise layer ships bundled (inert without a key) so a white-label key works on an npm install
+          test -f enterprise/server/index.js && test -f enterprise/LICENSE
           if HOME=/tmp/omb-pack/home node cli.js serve --tunnel --port 18798 --data-dir /tmp/omb-pack/data2 > tunnel.log 2>&1; then echo "serve --tunnel should refuse without login"; exit 1; fi
           grep -q "run \`openmausbot login\` first" tunnel.log
           kill %1; wait %1 || true
@@ -83,7 +85,8 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           version="${GITHUB_REF_NAME#v}"
-          npm view "openmausbot@$version" version   # what the registry has now
+          # The preceding npm publish must succeed. Registry reads can lag a
+          # successful upload, so do not gate notes/artifacts on an immediate read.
           if gh release view "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
             gh release view "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" --json body --jq .body > "$RUNNER_TEMP/notes.md"
             printf '\n\n**npm:** `npx openmausbot@%s` · https://www.npmjs.com/package/openmausbot/v/%s\n' "$version" "$version" >> "$RUNNER_TEMP/notes.md"

@@ -217,14 +217,34 @@ describe("createGateInterceptor", () => {
     expect(order).toEqual(["fwd:1", "fwd:2", "fwd:drained"]);
   });
 
-  it("fails open: a broken held-check forwards rather than wedging the computer", async () => {
+  it("fails closed when the control check rejects", async () => {
     const { forwarded, refused, intercept } = harness(async () => {
       throw new Error("harness went away");
     });
     intercept(frame("tools/call", 1));
     await drain();
-    expect(refused).toEqual([]);
-    expect(forwarded).toHaveLength(1);
+    expect(refused).toHaveLength(1);
+    expect(JSON.parse(refused[0]!).result.isError).toBe(true);
+    expect(forwarded).toEqual([]);
+  });
+
+  it("returns the current thread-contention reason without changing human takeover guidance", async () => {
+    const refused: string[] = [];
+    let reason: string | undefined = "Another thread is using this computer. Pause this task.";
+    const isHeld = vi.fn(async () => true);
+    const intercept = createGateInterceptor({
+      isHeld,
+      forward: () => {},
+      refuse: (line) => refused.push(line),
+      getRefusalReason: () => reason,
+    });
+    await intercept(frame("tools/list", 1));
+    expect(isHeld).not.toHaveBeenCalled();
+    await intercept(frame("tools/call", 2));
+    expect(JSON.parse(refused[0]!).result.content[0].text).toBe(reason);
+    reason = undefined;
+    await intercept(frame("tools/call", 3));
+    expect(JSON.parse(refused[1]!).result.content[0].text).toMatch(/person has taken control/i);
   });
 });
 
@@ -264,7 +284,8 @@ describe("createMcpBridgeInterceptor", () => {
       forward: (line) => forwarded.push(line),
     });
     for (const line of [frame("initialize", 1), frame("tools/list", 2), "not json"]) {
-      intercept(line);
+      // A writer's byte count/backpressure result is not a gate promise.
+      expect(intercept(line)).toBeUndefined();
     }
     expect(answered).toEqual([]);
     expect(forwarded).toEqual([frame("initialize", 1), frame("tools/list", 2), "not json"]);

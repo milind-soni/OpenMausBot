@@ -86,6 +86,7 @@ export function ApprovalModeSelector({
   wide = false,
   disabled = false,
   trustedModesAvailable = true,
+  trustedModesNotice,
 }: {
   approvalMode?: ApprovalMode;
   autoApprove?: boolean;
@@ -97,6 +98,7 @@ export function ApprovalModeSelector({
   wide?: boolean;
   disabled?: boolean;
   trustedModesAvailable?: boolean;
+  trustedModesNotice?: string;
 }) {
   const [open, setOpen] = useState(false);
   const wrapperRef = useRef<HTMLDivElement>(null);
@@ -214,13 +216,13 @@ export function ApprovalModeSelector({
                 </button>
               );
             })}
-            {!trustedModesAvailable && (driverKind === "codex" || driverKind === "antigravityAgent" || requiresLocalDesktop) && (
+            {!trustedModesAvailable && (trustedModesNotice || driverKind === "codex" || driverKind === "antigravityAgent" || requiresLocalDesktop) && (
               <div className="border-t border-hairline/20 px-4 py-2.5 text-[11.5px] leading-snug text-ink-secondary">
-                {requiresLocalDesktop
+                {trustedModesNotice ?? (requiresLocalDesktop
                   ? t("approvalMode.customLocalOnlyDot")
                   : driverKind === "antigravityAgent"
                     ? t("approvalMode.antigravityLocalOnly")
-                    : t("approvalMode.trustedLocalOnly")}
+                    : t("approvalMode.trustedLocalOnly"))}
               </div>
             )}
           </div>

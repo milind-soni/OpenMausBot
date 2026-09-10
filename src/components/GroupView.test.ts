@@ -32,6 +32,16 @@ describe("RoomToolChip", () => {
     expect(markup).toContain('title="Open Standup"');
   });
 
+  it("turns an opened-thread receipt into a button that opens that thread", () => {
+    const markup = render(chip({
+      tool: { name: "Opened thread #QA PR 245 on Scout", ok: true },
+      threadRef: { botId: "scout", threadId: "qa-245", title: "QA PR 245" },
+    }));
+    expect(markup).toContain("<button");
+    expect(markup).toContain("Opened thread #QA PR 245 on Scout");
+    expect(markup).toContain('title="Open #QA PR 245"');
+  });
+
   it("leaves an ordinary step as a plain pill", () => {
     const markup = render(chip());
     expect(markup).not.toContain("<button");

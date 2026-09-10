@@ -18,6 +18,8 @@ export interface ControlState {
   held: boolean;
   /** A help request the person has neither answered nor dismissed. */
   helpOpen: boolean;
+  /** A different thread owns the same physical computer, not a human hold. */
+  blockedReason?: string;
 }
 
 export interface ControlClient {
@@ -57,7 +59,12 @@ export function createControlClient(options?: {
       const res = await fetchImpl(url, { headers, signal: AbortSignal.timeout(2_000) });
       if (!res.ok) return UNAVAILABLE;
       const body: any = await res.json().catch(() => null);
-      return { held: body?.held === true, helpOpen: body?.helpOpen === true };
+      if (typeof body?.held !== "boolean" || typeof body?.helpOpen !== "boolean") return UNAVAILABLE;
+      return {
+        held: body.held,
+        helpOpen: body.helpOpen,
+        ...(typeof body.blockedReason === "string" && body.blockedReason.trim() ? { blockedReason: body.blockedReason } : {}),
+      };
     } catch {
       return UNAVAILABLE;
     }

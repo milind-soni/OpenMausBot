@@ -72,6 +72,9 @@ const sessionSchema = z.object({
   createdAt: z.number(),
   lastSeenAt: z.number(),
   expiresAt: z.number(),
+  /** Set when the session came from an account sign-in rather than a code. */
+  userId: z.string().max(256).optional(),
+  email: z.string().max(320).optional(),
 });
 
 const fileSchema = z.object({ version: z.literal(1), sessions: z.array(sessionSchema) });
@@ -86,6 +89,8 @@ export interface PublicSession {
   createdAt: number;
   lastSeenAt: number;
   expiresAt: number;
+  /** The account that signed in, when it was an account and not a code. */
+  email?: string;
 }
 
 export interface PairingCode {
@@ -146,7 +151,7 @@ export function formatPairingCode(code: string): string {
 }
 
 function publicSession(record: SessionRecord): PublicSession {
-  return {
+  const view: PublicSession = {
     id: record.id,
     label: record.label,
     scopes: [...record.scopes],
@@ -154,6 +159,8 @@ function publicSession(record: SessionRecord): PublicSession {
     lastSeenAt: record.lastSeenAt,
     expiresAt: record.expiresAt,
   };
+  if (record.email) view.email = record.email;
+  return view;
 }
 
 export class SessionRegistry {
@@ -328,6 +335,43 @@ export class SessionRegistry {
     const result: ExchangeResult = { ok: true, token, session: publicSession(record) };
     if (attemptId) this.replays.push({ codeHash: presented, attemptId, result, expiresAt: now + EXCHANGE_REPLAY_MS });
     return result;
+  }
+
+  /** A session from a verified account sign-in (server/account-signin.ts)
+   * rather than a pairing code: same token, same term, same gates. */
+  issue(input: { label: string; scopes: Scope[]; userId?: string; email?: string }): { token: string; session: PublicSession } {
+    this.prune();
+    const now = this.now();
+    const token = `omb_sess_${randomBytes(32).toString("base64url")}`;
+    const record: SessionRecord = {
+      id: randomUUID(),
+      tokenHash: sha256(token),
+      label: (input.label.trim() || "Unnamed device").slice(0, 80),
+      scopes: [...new Set(input.scopes)],
+      createdAt: now,
+      lastSeenAt: now,
+      expiresAt: now + Math.min(SESSION_TTL_MS, SESSION_MAX_AGE_MS),
+    };
+    if (input.userId) record.userId = input.userId;
+    if (input.email) record.email = input.email;
+    this.sessions.push(record);
+    this.lastSeenWrites.set(record.id, now);
+    this.persist();
+    return { token, session: publicSession(record) };
+  }
+
+  /** The pairing lockout, for other code-like exchanges on the same source. */
+  attemptAllowed(source: string): { ok: true } | { ok: false; retryAfterMs: number } {
+    const lock = this.lockState(source);
+    return lock.locked ? { ok: false, retryAfterMs: lock.retryAfterMs } : { ok: true };
+  }
+
+  noteFailure(source: string): void {
+    this.recordFailure(source);
+  }
+
+  clearFailures(source: string): void {
+    this.failures.delete(source);
   }
 
   // ── sessions ───────────────────────────────────────────────────────────

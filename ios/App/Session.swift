@@ -53,6 +53,10 @@ final class Session: ObservableObject {
     @Published private(set) var state = CompanionState()
     @Published private(set) var connection: Connection?
     @Published private(set) var connections: [Connection] = []
+    /// Whether the live pairing may administer the workspace — see
+    /// `Connection.canAdminister`. Views hide owner-only controls when this
+    /// is false rather than offer buttons the server would answer 403 to.
+    var canAdminister: Bool { connection?.canAdminister ?? false }
     @Published private(set) var status: Status = .unpaired
     /// Transient, user-facing failures from an action they just took.
     @Published var actionError: String?
@@ -273,8 +277,12 @@ final class Session: ObservableObject {
             invited.establishRoutePolicyFromInvite()
         }
         // A 12-character code pairs with a server directly (its own sessions,
-        // a client-scope bearer); anything else is the companion sidecar's.
+        // a bearer with the code's scopes); anything else is the companion's.
         if let code = PairingInvite.normalizedServerCode(credential) {
+            // Reachability first, on the public descriptor: a wrong address
+            // then fails as an address problem rather than a code problem,
+            // and no attempt is spent against the server's lockout.
+            try await Self.confirmServer(at: invited)
             let paired = try await CompanionClient.pairWithServer(
                 connection: invited,
                 code: code,
@@ -284,6 +292,7 @@ final class Session: ObservableObject {
             var stored = invited
             if !paired.environment.label.isEmpty { stored.name = paired.environment.label }
             stored.serverEnvironmentId = paired.environment.environmentId
+            stored.serverScopes = paired.session.scopes
             stored.companionDeviceId = nil
             if let existing = registry.matchingConnection(for: stored) {
                 stored.id = existing.id
@@ -369,6 +378,21 @@ final class Session: ObservableObject {
         // keychain — the token is in hand, so there is nothing left to retry.
         restorePending = false
         connect()
+    }
+
+    /// `GET /.well-known/openmausbot/environment` on a server about to be
+    /// paired. Nothing there means this address is not a server; the message
+    /// names the address, since that is what the person can fix. Any other
+    /// answer — unreachable, a gateway error — is passed through as it is.
+    private static func confirmServer(at connection: Connection) async throws {
+        let probe = CompanionClient(connection: connection, token: nil, requestTimeout: 8)
+        do {
+            _ = try await probe.environment()
+        } catch APIError.status(404, _) {
+            throw APIError.transport(
+                "\(connection.displayAddress) isn't an OpenMausBot server. Check the address and try again."
+            )
+        }
     }
 
     func receivePairingURL(_ url: URL) {
@@ -669,6 +693,23 @@ final class Session: ObservableObject {
         while !Task.isCancelled {
             guard let client else { return }
             status = .connecting
+            // A server connection first checks it is still the same server.
+            // The descriptor is public, so this spends no credential; a
+            // changed environment id (the address now belongs to another
+            // server, or its data directory was recreated) means "pair
+            // again", exactly like a revoked token — the bearer would be
+            // refused anyway, and a fresh install must not be shown the old
+            // one. Unreachable is not "different": the stream attempt below
+            // reports that the usual way.
+            if let expected = client.connection.serverEnvironmentId {
+                let live = try? await client.environment()
+                if Task.isCancelled { return }
+                if let live, live.environmentId != expected {
+                    log.error("server identity changed: \(expected, privacy: .public) is now \(live.environmentId, privacy: .public)")
+                    status = .unauthorized
+                    return
+                }
+            }
             log.info("opening stream, cursor=\(self.state.cursor ?? "none", privacy: .public)")
             do {
                 // The query is fixed when the connection opens, so changing
@@ -689,7 +730,7 @@ final class Session: ObservableObject {
                         // the request dies halfway through replay/hydration,
                         // reconnecting must still ask for the missing gap.
                         if !resumed {
-                            try await hydrate()
+                            try await hydrate(using: client)
                             state.resetCursor(cursor)
                         }
                         status = .live
@@ -733,12 +774,24 @@ final class Session: ObservableObject {
         }
     }
 
-    private func hydrate() async throws {
-        guard let client else { return }
-        let fleet = try await client.fleet(messages: 50)
-        log.info("hydrated \(fleet.bots.count, privacy: .public) bots, \(fleet.groups.count, privacy: .public) rooms")
-        state.hydrate(fleet)
-        NotificationCoordinator.shared.setBadge(state.unreadCount)
+    private func hydrate(using client: CompanionClient) async throws {
+        let generation = streamGeneration
+        // Notification navigation can refresh while run() continues folding
+        // live events. Retry once if that makes the fetched snapshot stale.
+        for _ in 0..<2 {
+            let expectedCursor = state.cursor
+            let snapshot = try await client.fleetForHydration(messages: 50)
+            try Task.checkCancellation()
+            guard streamGeneration == generation, self.client?.connection.id == client.connection.id else {
+                throw CancellationError()
+            }
+            guard state.hydrate(snapshot.fleet, waitingThreads: snapshot.waitingThreads,
+                                ifCursorMatches: expectedCursor) else { continue }
+            log.info("hydrated \(snapshot.fleet.bots.count, privacy: .public) bots, \(snapshot.fleet.groups.count, privacy: .public) rooms")
+            NotificationCoordinator.shared.setBadge(state.unreadCount)
+            return
+        }
+        throw APIError.status(code: 409, message: "Conversations changed while loading. Please try opening this notification again.")
     }
 
     // MARK: - Which address to dial
@@ -793,7 +846,9 @@ final class Session: ObservableObject {
     /// sidecars return 404 and a transient refresh error must not tear down a
     /// perfectly healthy event stream.
     private func refreshConnectionMetadata(using sourceClient: CompanionClient) {
-        guard let connectionID = connection?.id else { return }
+        // A server has no companion routes to advertise (`/api/companion/*`
+        // is the sidecar's); its one address is the one that was paired.
+        guard connection?.pairedWithServer != true, let connectionID = connection?.id else { return }
         let workingEndpoint = rotation.currentEndpoint ?? sourceClient.connection.activeEndpoint
         endpointRefreshTask?.cancel()
         endpointRefreshTask = Task { [weak self] in
@@ -859,7 +914,7 @@ final class Session: ObservableObject {
     func send(_ text: String, to chat: Chat) async {
         await perform {
             switch chat {
-            case let .bot(bot): try await $0.send(text: text, toBot: bot.id)
+            case let .bot(bot): try await $0.send(text: text, toBot: bot.id, threadId: bot.threadId)
             case let .room(room): try await $0.send(text: text, toRoom: room.id)
             }
         }
@@ -976,7 +1031,7 @@ final class Session: ObservableObject {
     private func imageSupported(by chat: Chat, capableInstances: Set<String>) -> Bool {
         switch chat {
         case let .bot(bot):
-            return capableInstances.contains(bot.modelSelection.instanceId)
+            return capableInstances.contains(bot.currentTaskModelSelection.instanceId)
         case let .room(room):
             return !room.memberIds.isEmpty && room.memberIds.allSatisfy { id in
                 guard let bot = state.bot(id) else { return false }
@@ -1352,7 +1407,7 @@ final class Session: ObservableObject {
     /// about what was just permitted.
     func alwaysAllow(bot: Bot, card: OptionCard) async {
         guard let key = card.allowKey else { return }
-        await perform { try await $0.alwaysAllow(botId: bot.id, key: key) }
+        await perform { try await $0.alwaysAllow(botId: bot.id, key: key, threadId: bot.threadId) }
     }
 
     /// Make a new bot. The harness chooses its name, colour and greeting, so
@@ -1407,7 +1462,7 @@ final class Session: ObservableObject {
     }
 
     func interrupt(bot: Bot) async {
-        await perform { try await $0.interrupt(botId: bot.id) }
+        await perform { try await $0.interrupt(botId: bot.id, threadId: bot.threadId) }
     }
 
     /// Ask for one fresh cloud viewer URL. Unlike ordinary actions this
@@ -1425,7 +1480,7 @@ final class Session: ObservableObject {
     func markRead(_ chat: Chat) async {
         await perform(quietly: true) {
             switch chat {
-            case let .bot(bot): try await $0.markRead(botId: bot.id)
+            case let .bot(bot): try await $0.markRead(botId: bot.id, threadId: bot.threadId)
             case let .room(room): try await $0.markRead(roomId: room.id)
             }
         }
@@ -1439,6 +1494,15 @@ final class Session: ObservableObject {
         } catch {
             actionError = error.localizedDescription
         }
+    }
+
+    /// A pinned background thread may not be in a fresh fleet snapshot.
+    func loadThreadIfNeeded(_ threadId: String) async {
+        guard let client, state.messages[threadId] == nil else { return }
+        do {
+            let page = try await client.messages(threadId: threadId)
+            state.merge(page, intoThread: threadId)
+        } catch { if !Task.isCancelled { actionError = error.localizedDescription } }
     }
 
     func image(threadId: String, messageId: String) async -> Data? {
@@ -1466,13 +1530,13 @@ final class Session: ObservableObject {
                     state.apply(.bot(bot))
                 }
                 if !hit.onActivePath {
-                    let leaf = try await client.setActiveBranch(botId: bot.id, messageId: hit.messageId)
+                    let leaf = try await client.setActiveBranch(botId: bot.id, messageId: hit.messageId, threadId: hit.threadId)
                     state.apply(.thread(threadId: hit.threadId, activeLeafId: leaf))
                 }
                 let page = try await client.messages(threadId: hit.threadId, around: hit.messageId)
                 state.merge(page, intoThread: hit.threadId)
                 focusedMessageId = hit.messageId
-                return state.bot(bot.id).map(Chat.bot)
+                return state.bot(forThread: hit.threadId).map(Chat.bot)
             }
             if let groupId = hit.groupId,
                var room = state.rooms.first(where: { $0.id == groupId }) {
@@ -1493,16 +1557,24 @@ final class Session: ObservableObject {
         if focusedMessageId == messageId { focusedMessageId = nil }
     }
 
-    func createTask(for bot: Bot, title: String?) async {
-        guard let client else { return }
-        do { state.apply(.bot(try await client.createTask(botId: bot.id, title: title))) }
-        catch { actionError = error.localizedDescription }
+    @discardableResult
+    func createTask(for bot: Bot, title: String?) async -> Bot? {
+        guard let client else { return nil }
+        do {
+            let updated = try await client.createTask(botId: bot.id, title: title)
+            state.apply(.bot(updated))
+            return updated
+        } catch { actionError = error.localizedDescription; return nil }
     }
 
-    func switchTask(_ task: BotTask, for bot: Bot) async {
-        guard let client, task.threadId != bot.threadId else { return }
-        do { state.apply(.bot(try await client.switchTask(botId: bot.id, threadId: task.threadId))) }
-        catch { actionError = error.localizedDescription }
+    @discardableResult
+    func switchTask(_ task: BotTask, for bot: Bot) async -> Bot? {
+        guard let client else { return nil }
+        do {
+            let updated = try await client.switchTask(botId: bot.id, threadId: task.threadId)
+            state.apply(.bot(updated))
+            return updated
+        } catch { actionError = error.localizedDescription; return nil }
     }
 
     func renameTask(_ task: BotTask, for bot: Bot, title: String) async {
@@ -1513,10 +1585,14 @@ final class Session: ObservableObject {
         } catch { actionError = error.localizedDescription }
     }
 
-    func deleteTask(_ task: BotTask, for bot: Bot) async {
-        guard let client else { return }
-        do { state.apply(.bot(try await client.deleteTask(botId: bot.id, threadId: task.threadId))) }
-        catch { actionError = error.localizedDescription }
+    @discardableResult
+    func deleteTask(_ task: BotTask, for bot: Bot) async -> Bot? {
+        guard let client else { return nil }
+        do {
+            let updated = try await client.deleteTask(botId: bot.id, threadId: task.threadId)
+            state.apply(.bot(updated))
+            return updated
+        } catch { actionError = error.localizedDescription; return nil }
     }
 
     func createTask(for room: Room, title: String?) async {
@@ -1562,7 +1638,7 @@ final class Session: ObservableObject {
     func updateModel(_ selection: ModelSelection, for bot: Bot) async -> Bot? {
         guard let client else { return nil }
         do {
-            let updated = try await client.updateModel(botId: bot.id, selection: selection)
+            let updated = try await client.updateModel(botId: bot.id, selection: selection, threadId: bot.threadId)
             guard !Task.isCancelled else { return nil }
             state.apply(.bot(updated))
             return updated
@@ -1741,8 +1817,7 @@ final class Session: ObservableObject {
         do {
             var bot = state.bot(target.botId)
             if bot == nil {
-                let fleet = try await client.fleet(messages: 50)
-                state.hydrate(fleet)
+                try await hydrate(using: client)
                 bot = state.bot(target.botId)
             }
             // A room's approval/question notification carries the asker bot
@@ -1775,10 +1850,68 @@ final class Session: ObservableObject {
                 }
             }
             notificationChat = .bot(selected)
+        } catch is CancellationError {
+            // A refresh from the previous computer must not alert on the
+            // newly selected connection after its generation guard rejects it.
         } catch { actionError = error.localizedDescription }
     }
 
     func consumeNotificationChat() { notificationChat = nil }
+
+    // MARK: - Thread chips
+
+    /// A tapped "Opened thread #Title on Scout" chip. Lands on that thread by
+    /// the route a thread row uses, which only changes what this phone is
+    /// looking at — a bot mid-turn keeps working where it was. A thread the
+    /// computer no longer has still lands on the bot, with a notice, rather
+    /// than nowhere.
+    ///
+    /// Returns the thread to select in place when the chip's bot is the one
+    /// already on screen. Any other bot is pushed the way a notification is,
+    /// and nil comes back.
+    func openThread(_ ref: ThreadRef, shownBotId: String?) async -> String? {
+        guard !Task.isCancelled else { return nil }
+        guard let client else {
+            actionError = "Pair this device with your computer to open that thread."
+            return nil
+        }
+        let generation = streamGeneration
+        let connectionID = client.connection.id
+        let requestIsCurrent = {
+            !Task.isCancelled && self.streamGeneration == generation && self.client?.connection.id == connectionID
+        }
+        actionError = nil
+        do {
+            var bot = state.bot(ref.botId)
+            if bot == nil {
+                try await hydrate(using: client)
+                guard requestIsCurrent() else { return nil }
+                bot = state.bot(ref.botId)
+            }
+            guard var selected = bot else { throw APIError.status(code: 404, message: "That agent no longer exists.") }
+            if selected.threadId != ref.threadId {
+                do {
+                    selected = try await client.switchTask(botId: selected.id, threadId: ref.threadId)
+                    guard requestIsCurrent() else { return nil }
+                    state.apply(.bot(selected))
+                } catch APIError.status(code: 404, message: _) {
+                    guard requestIsCurrent() else { return nil }
+                    // The thread may be gone (deleted since the chip was
+                    // written). The bot's current thread, and a word about
+                    // it, beats a dead tap.
+                    actionError = "That thread is no longer on your computer."
+                }
+            }
+            guard requestIsCurrent() else { return nil }
+            if selected.id == shownBotId { return selected.threadId }
+            notificationChat = .bot(selected)
+        } catch is CancellationError {
+        } catch {
+            guard requestIsCurrent() else { return nil }
+            actionError = error.localizedDescription
+        }
+        return nil
+    }
 
     func react(to message: Message, in threadId: String, emoji: String) async {
         guard let client else { return }
@@ -1789,13 +1922,13 @@ final class Session: ObservableObject {
     }
 
     func edit(_ message: Message, for bot: Bot, text: String) async {
-        await perform { try await $0.edit(botId: bot.id, messageId: message.id, text: text) }
+        await perform { try await $0.edit(botId: bot.id, messageId: message.id, text: text, threadId: bot.threadId) }
     }
 
     func switchVersion(to message: Message, for bot: Bot) async {
         guard let client else { return }
         do {
-            let leaf = try await client.setActiveBranch(botId: bot.id, messageId: message.id)
+            let leaf = try await client.setActiveBranch(botId: bot.id, messageId: message.id, threadId: bot.threadId)
             state.apply(.thread(threadId: bot.threadId, activeLeafId: leaf))
         } catch { actionError = error.localizedDescription }
     }

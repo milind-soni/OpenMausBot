@@ -140,7 +140,7 @@ describe("before pairing", () => {
     expect(descriptor.body.environmentId).toMatch(/^[0-9a-f-]{36}$/);
     expect(descriptor.body.label).toBe("cab mini");
     expect(descriptor.body.version).toBe("9.9.9-test");
-    expect(descriptor.body.capabilities).toEqual({ remoteSessions: true, selfUpdate: "operator" });
+    expect(descriptor.body.capabilities).toEqual({ remoteSessions: true, selfUpdate: "operator", emailSignIn: false });
     const refused = await call("/api/bots", { headers: remote("10.0.0.1") });
     expect(refused.status).toBe(403);
     expect(refused.body.error).toMatch(/pair this device/);

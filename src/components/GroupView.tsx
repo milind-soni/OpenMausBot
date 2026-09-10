@@ -17,6 +17,8 @@ import {
   type Message,
 } from "@/state/store";
 import { BotAvatar } from "./Avatar";
+import { ThreadChip } from "./ThreadChip";
+import { ThreadRefText } from "./ThreadRefs";
 import { TurnPresence } from "./TurnPresence";
 import { showToolCallsEnabled } from "@/lib/feature-flags";
 import { roomActivityVisible } from "@/lib/room-activity";
@@ -26,6 +28,7 @@ import { ChatMarkdown } from "./ChatMarkdown";
 import { Composer } from "./Composer";
 import { ChatFindBar } from "./ChatFindBar";
 import { GroupTaskPicker } from "./TaskPicker";
+import { ExportTranscriptMenu } from "./ExportTranscriptMenu";
 import { ReplyQuote } from "./ReplyQuote";
 import { ConnectorCard } from "./ConnectorCard";
 import { SecretRequestCard } from "./SecretRequestCard";
@@ -77,6 +80,7 @@ export function RoomToolChip({ message, roomId }: { message: Message; roomId?: s
   const { state, dispatch } = useStore();
   const tool = message.tool;
   if (!tool) return null;
+  if (message.threadRef) return <ThreadChip message={message} />;
   const comm = message.comm;
   if (comm && comm.groupId !== roomId) {
     const withBot = state.bots.find((b) => b.id === comm.withBotId);
@@ -269,7 +273,7 @@ const Transcript = memo(function Transcript({
                   className={cn(
                     "w-fit max-w-[min(42rem,78%)] rounded-2xl px-4 py-2.5 text-[15px] leading-relaxed",
                     !user && m.id === emergingId && "turn-answer",
-                    user ? "whitespace-pre-wrap bg-bubble-user text-ink" : "bg-card text-ink",
+                    user ? "chat-text whitespace-pre-wrap bg-bubble-user text-ink" : "bg-card text-ink",
                   )}
                   title={new Date(m.at).toLocaleString()}
                 >
@@ -303,7 +307,7 @@ const Transcript = memo(function Transcript({
                           className={!attachments.display ? "mb-0" : undefined}
                         />
                       )}
-                      {attachments?.display ?? m.text}
+                      <ThreadRefText text={attachments?.display ?? m.text ?? ""} peers={members} everyone={!group.dm} />
                       {m.via === "api" && (
                         <div className="mt-1 text-[11px] text-ink-secondary">Sent through the API, not typed here</div>
                       )}
@@ -317,7 +321,7 @@ const Transcript = memo(function Transcript({
                           eager={m.id === newestMessageId || m.id === newestUserMessageId}
                         />
                       ) : null}
-                      {m.text ? <ChatMarkdown text={m.text} message={{ threadId: group.threadId, messageId: m.id }} /> : null}
+                      {m.text ? <ChatMarkdown text={m.text} mentionPeers={members} everyone={!group.dm} message={{ threadId: group.threadId, messageId: m.id }} /> : null}
                     </>
                   )}
                 </div>
@@ -1118,6 +1122,11 @@ export function GroupView({ group }: { group: Group }) {
           >
             <Search size={18} />
           </button>
+          <ExportTranscriptMenu
+            title={group.name}
+            messages={group.messages}
+            isGroup
+          />
           <GroupCallButton group={group} members={members} />
           {!remoteClient && !setupPending && !group.dm && <RoomWorkingFolderChip group={group} onToggle={() => setFolderOpen((open) => !open)} />}
           {!remoteClient && !setupPending && !group.dm && <DefaultResponderSelect group={group} members={members} />}

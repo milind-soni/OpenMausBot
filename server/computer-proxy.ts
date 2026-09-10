@@ -821,14 +821,16 @@ async function semanticActAndObserve(
 const OPEN_WHILE_DRIVEN = new Set(["computer_request_help", "computer_status", "observation_metrics"]);
 
 async function call(id: unknown, name: string, args: any) {
-  if (!OPEN_WHILE_DRIVEN.has(name) && (await control.state(true)).held) {
-    return text(id, CONTROL_REFUSAL, true);
+  if (!OPEN_WHILE_DRIVEN.has(name)) {
+    const state = await control.state(true);
+    if (state.held) return text(id, state.blockedReason ?? CONTROL_REFUSAL, true);
   }
   if (name === "computer_request_help") {
     if (!control.configured) {
       return text(id, "nobody can be paged for this computer right now — carry on carefully", true);
     }
     const initial = await control.state(true);
+    if (initial.held && initial.blockedReason) return text(id, initial.blockedReason, true);
     // If the person is already driving, don't clobber whatever plea they
     // are reading — just wait for the hand-back.
     const requestId = initial.held ? null : await control.requestHelp(String(args?.reason ?? ""));
@@ -840,6 +842,10 @@ async function call(id: unknown, name: string, args: any) {
     while (Date.now() < deadline) {
       await new Promise((resolve) => setTimeout(resolve, CONTROL_POLL_MS));
       const state = await control.state(true);
+      if (state.held && state.blockedReason) {
+        if (requestId) await control.expireHelp(requestId);
+        return text(id, state.blockedReason, true);
+      }
       if (state.held) sawHold = true;
       if (!state.held && !state.helpOpen) {
         return text(

@@ -23,4 +23,12 @@ describe("computer panel view persistence", () => {
     const setItem = vi.fn(() => { throw new Error("blocked"); });
     expect(() => writeComputerPanelView("sprout", "browser", { setItem })).not.toThrow();
   });
+
+  it("remembers a bot's routines tab without changing another bot's view", () => {
+    const values = new Map<string, string>();
+    const storage = { getItem: (key: string) => values.get(key) ?? null, setItem: (key: string, value: string) => { values.set(key, value); } };
+    writeComputerPanelView("scout", "routines", storage);
+    expect(readComputerPanelView("scout", storage)).toBe("routines");
+    expect(readComputerPanelView("other", storage)).toBe("computer");
+  });
 });

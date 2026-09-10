@@ -14,20 +14,19 @@ export interface BotOverview {
   reaches: string[];
   wont: string[];
   recent: Array<{ at: number; summary: string }>;
-  /** The setup checklist: what a new bot still needs before it can do its
-   * job, each step pointing at the settings section that finishes it. */
+  /** Optional setup ideas, each pointing at the relevant settings section.
+   * These are customization suggestions, not requirements for chatting. */
   setup: SetupStep[];
 }
 
-export type SetupStepId = "identity" | "soul" | "folder" | "apps" | "schedule" | "talk";
+export type SetupStepId = "identity" | "soul" | "folder" | "apps" | "schedule";
 export type SetupStepSection = "identity" | "soul" | "access" | "routines";
 
 export interface SetupStep {
   id: SetupStepId;
   label: string;
   done: boolean;
-  /** Bot-settings section that completes the step; absent for "talk", which
-   * happens in the chat. */
+  /** Bot-settings section for this customization. */
   section?: SetupStepSection;
 }
 
@@ -65,9 +64,6 @@ export interface OverviewFacts {
   sectionPeers: number;
   timeZone: string;
   recent: Array<{ at: number; summary: string }>;
-  /** Whether anyone has sent this bot a message yet. Optional so older
-   * callers and tests keep working; treated as false when absent. */
-  hasTalked?: boolean;
 }
 
 /** The first paragraph of a SOUL.md-style persona, capped at 240 characters
@@ -275,7 +271,7 @@ export function buildBotOverview(facts: OverviewFacts): BotOverview {
 
 const DEFAULT_BOT_NAMES = /^(new bot|bot|untitled)(\s*\d+)?$/i;
 
-/** What a fresh bot still needs. Every step is derived from the same facts
+/** Optional customization ideas. Every step is derived from the same facts
  * the sentences use, so "done" here can never disagree with "Can reach". */
 export function setupSteps(facts: OverviewFacts): SetupStep[] {
   const named = facts.bot.name.trim() !== "" && !DEFAULT_BOT_NAMES.test(facts.bot.name.trim());
@@ -284,9 +280,9 @@ export function setupSteps(facts: OverviewFacts): SetupStep[] {
   const routines = facts.routines.some((routine) => routine.enabled);
   const webhooks = facts.webhooks.some((webhook) => webhook.enabled);
   const steps: SetupStep[] = [
-    { id: "identity", label: "Give it a name and a job title", done: named && described, section: "identity" },
+    { id: "identity", label: "Give it a name and a role", done: named && described, section: "identity" },
     { id: "soul", label: "Write its standing instructions", done: (facts.bot.soul ?? "").trim() !== "", section: "soul" },
-    { id: "folder", label: "Pick a working folder", done: Boolean(facts.bot.cwd), section: "access" },
+    { id: "folder", label: "Choose a working folder", done: Boolean(facts.bot.cwd), section: "access" },
   ];
   // Apps only count as a step when this bot could use them at all; a
   // bot on an engine without connected apps is not "missing" them.
@@ -298,7 +294,6 @@ export function setupSteps(facts: OverviewFacts): SetupStep[] {
       section: "access",
     });
   }
-  steps.push({ id: "schedule", label: "Give it a schedule or a trigger", done: routines || webhooks, section: "routines" });
-  steps.push({ id: "talk", label: "Send it a first message", done: facts.hasTalked === true });
+  steps.push({ id: "schedule", label: "Add a schedule or a trigger", done: routines || webhooks, section: "routines" });
   return steps;
 }

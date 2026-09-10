@@ -317,7 +317,7 @@ struct PairingView: View {
                 .disabled(pairing)
             } else {
                 VStack(spacing: 12) {
-                    Text("Enter the 6-digit code shown on your computer")
+                    Text("Enter the code shown on your computer")
                         .font(.subheadline)
                         .foregroundStyle(.secondary)
 
@@ -335,6 +335,13 @@ struct PairingView: View {
                             // six digits for a computer, ABCD-EFGH-JKLM for a server
                             code = String(value.uppercased().filter { $0.isASCII && ($0.isNumber || $0.isLetter || $0 == "-") }.prefix(14))
                         }
+
+                    if code.count >= 12, !Self.codeLooksComplete(code) {
+                        Text("A server's code is 12 letters and digits, never 0, O, 1 or I.")
+                            .font(.footnote)
+                            .foregroundStyle(.secondary)
+                            .multilineTextAlignment(.center)
+                    }
 
                     Button {
                         Haptics.selection()

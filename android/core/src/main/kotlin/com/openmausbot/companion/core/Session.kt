@@ -1065,8 +1065,8 @@ class Session(
     suspend fun send(text: String, to: Chat) {
         perform {
             val receipt = when (to) {
-                is Chat.BotChat -> it.sendToBot(to.bot.id, text)
-                is Chat.RoomChat -> it.sendToRoom(to.room.id, text)
+                is Chat.BotChat -> it.sendToBot(to.bot.id, text, to.threadId)
+                is Chat.RoomChat -> it.sendToRoom(to.room.id, text, to.threadId)
             }
             record(receipt, text, to.threadId)
         }
@@ -1422,7 +1422,7 @@ class Session(
 
     suspend fun alwaysAllow(bot: Bot, card: OptionCard) {
         val key = card.allowKey ?: return
-        perform { it.alwaysAllow(bot.id, key) }
+        perform { it.alwaysAllow(bot.id, key, bot.threadId) }
     }
 
     suspend fun createBot(): Bot? {
@@ -1469,7 +1469,7 @@ class Session(
     }
 
     suspend fun interrupt(bot: Bot) {
-        perform { it.interrupt(bot.id) }
+        perform { it.interrupt(bot.id, bot.threadId) }
     }
 
     suspend fun cloudDesktop(forBot: Bot): URI {
@@ -1493,9 +1493,20 @@ class Session(
     suspend fun markRead(chat: Chat) {
         perform(quietly = true) {
             when (chat) {
-                is Chat.BotChat -> it.markBotRead(chat.bot.id)
-                is Chat.RoomChat -> it.markRoomRead(chat.room.id)
+                is Chat.BotChat -> it.markBotRead(chat.bot.id, chat.threadId)
+                is Chat.RoomChat -> it.markRoomRead(chat.room.id, chat.threadId)
             }
+        }
+    }
+
+    suspend fun loadThread(threadId: String) {
+        val activeClient = client ?: return
+        try {
+            val page = activeClient.messages(threadId, limit = 50)
+            _state.update { it.merge(page, threadId) }
+        } catch (error: Throwable) {
+            if (error is kotlinx.coroutines.CancellationException) throw error
+            _actionError.value = error.message
         }
     }
 
@@ -1540,13 +1551,13 @@ class Session(
                     _state.update { it.apply(Frame.Bot(bot)) }
                 }
                 if (!hit.onActivePath) {
-                    val leaf = activeClient.setActiveBranch(bot.id, hit.messageId)
+                    val leaf = activeClient.setActiveBranch(bot.id, hit.messageId, hit.threadId)
                     _state.update { it.apply(Frame.Thread(hit.threadId, leaf)) }
                 }
                 val page = activeClient.messagesAround(hit.threadId, hit.messageId)
                 _state.update { it.merge(page, hit.threadId) }
                 _focusedMessageId.value = hit.messageId
-                return _state.value.bot(bot.id)?.let { Chat.BotChat(it) }
+                return _state.value.chat(ChatTarget.Bot(bot.id, hit.threadId))
             }
             val groupId = hit.groupId
             if (groupId != null) {
@@ -1558,7 +1569,7 @@ class Session(
                 val page = activeClient.messagesAround(hit.threadId, hit.messageId)
                 _state.update { it.merge(page, hit.threadId) }
                 _focusedMessageId.value = hit.messageId
-                return _state.value.rooms.firstOrNull { it.id == groupId }?.let { Chat.RoomChat(it) }
+                return _state.value.chat(ChatTarget.Room(groupId, hit.threadId))
             }
             null
         } catch (error: Throwable) {
@@ -1603,7 +1614,7 @@ class Session(
                         // The requested task can disappear between notification delivery and the tap.
                     }
                 }
-                Chat.BotChat(selected)
+                Chat.BotChat(selected.forTask(selected.threadId) ?: selected)
             } catch (error: Throwable) {
                 if (error is kotlinx.coroutines.CancellationException) throw error
                 _actionError.value = error.message
@@ -1635,22 +1646,84 @@ class Session(
         if (_focusedMessageId.value == messageId) _focusedMessageId.value = null
     }
 
-    suspend fun createTask(forBot: Bot, title: String?) {
-        val activeClient = client ?: return
-        try {
-            _state.update { it.apply(Frame.Bot(activeClient.createTask(forBot.id, title))) }
+    /**
+     * A tapped "Opened thread #Title on Scout" chip. Lands on that thread by
+     * the route a thread row uses, which only changes what this phone is
+     * looking at — a bot mid-turn keeps working where it was. A thread the
+     * computer no longer has still lands on the bot, with a notice, rather
+     * than nowhere.
+     *
+     * @return the bot pinned to the thread, or to its current thread when the
+     *   thread is gone; null when opening fails or the connection changes.
+     */
+    suspend fun openThread(ref: ThreadRef): Bot? {
+        currentCoroutineContext().ensureActive()
+        val activeClient = client
+        if (activeClient == null) {
+            _actionError.value = "Pair this phone with your computer to open that thread."
+            return null
+        }
+        _actionError.value = null
+        return try {
+            var bot = _state.value.bot(ref.botId)
+            if (bot == null) {
+                val fleet = hydrateFn(activeClient, 50)
+                currentCoroutineContext().ensureActive()
+                if (client !== activeClient) return null
+                _state.update { it.hydrate(fleet) }
+                notificationSink.setBadge(_state.value.unreadCount)
+                bot = _state.value.bot(ref.botId)
+            }
+            var selected = bot
+                ?: throw APIError.Status(404, "That agent no longer exists.")
+            if (selected.threadId != ref.threadId) {
+                try {
+                    selected = activeClient.switchTask(selected.id, ref.threadId)
+                    currentCoroutineContext().ensureActive()
+                    if (client !== activeClient) return null
+                    _state.update { it.apply(Frame.Bot(selected)) }
+                } catch (error: APIError.Status) {
+                    currentCoroutineContext().ensureActive()
+                    if (client !== activeClient) return null
+                    if (error.code != 404) throw error
+                    // The thread may be gone (deleted since the chip was
+                    // written). The bot's current thread, and a word about it,
+                    // beats a dead tap.
+                    _actionError.value = THREAD_GONE_MESSAGE
+                }
+            }
+            selected.forTask(selected.threadId) ?: selected
         } catch (error: Throwable) {
+            if (error is kotlinx.coroutines.CancellationException) throw error
+            currentCoroutineContext().ensureActive()
+            if (client !== activeClient) return null
             _actionError.value = error.message
+            null
         }
     }
 
-    suspend fun switchTask(task: BotTask, forBot: Bot) {
-        if (task.threadId == forBot.threadId) return
-        val activeClient = client ?: return
-        try {
-            _state.update { it.apply(Frame.Bot(activeClient.switchTask(forBot.id, task.threadId))) }
+    suspend fun createTask(forBot: Bot, title: String?): Bot? {
+        val activeClient = client ?: return null
+        return try {
+            activeClient.createTask(forBot.id, title).also { updated ->
+                _state.update { it.apply(Frame.Bot(updated)) }
+            }
         } catch (error: Throwable) {
             _actionError.value = error.message
+            null
+        }
+    }
+
+    suspend fun switchTask(task: BotTask, forBot: Bot): Bot? {
+        if (task.threadId == forBot.threadId) return forBot
+        val activeClient = client ?: return null
+        return try {
+            activeClient.switchTask(forBot.id, task.threadId).also { updated ->
+                _state.update { it.apply(Frame.Bot(updated)) }
+            }
+        } catch (error: Throwable) {
+            _actionError.value = error.message
+            null
         }
     }
 
@@ -1664,31 +1737,40 @@ class Session(
         }
     }
 
-    suspend fun deleteTask(task: BotTask, forBot: Bot) {
-        val activeClient = client ?: return
-        try {
-            _state.update { it.apply(Frame.Bot(activeClient.deleteTask(forBot.id, task.threadId))) }
+    suspend fun deleteTask(task: BotTask, forBot: Bot): Bot? {
+        val activeClient = client ?: return null
+        return try {
+            activeClient.deleteTask(forBot.id, task.threadId).also { updated ->
+                _state.update { it.apply(Frame.Bot(updated)) }
+            }
         } catch (error: Throwable) {
             _actionError.value = error.message
+            null
         }
     }
 
-    suspend fun createTask(forRoom: Room, title: String?) {
-        val activeClient = client ?: return
-        try {
-            _state.update { it.apply(Frame.Room(activeClient.createRoomTask(forRoom.id, title))) }
+    suspend fun createTask(forRoom: Room, title: String?): Room? {
+        val activeClient = client ?: return null
+        return try {
+            activeClient.createRoomTask(forRoom.id, title).also { updated ->
+                _state.update { it.apply(Frame.Room(updated)) }
+            }
         } catch (error: Throwable) {
             _actionError.value = error.message
+            null
         }
     }
 
-    suspend fun switchTask(task: BotTask, forRoom: Room) {
-        if (task.threadId == forRoom.threadId) return
-        val activeClient = client ?: return
-        try {
-            _state.update { it.apply(Frame.Room(activeClient.switchRoomTask(forRoom.id, task.threadId))) }
+    suspend fun switchTask(task: BotTask, forRoom: Room): Room? {
+        if (task.threadId == forRoom.threadId) return forRoom
+        val activeClient = client ?: return null
+        return try {
+            activeClient.switchRoomTask(forRoom.id, task.threadId).also { updated ->
+                _state.update { it.apply(Frame.Room(updated)) }
+            }
         } catch (error: Throwable) {
             _actionError.value = error.message
+            null
         }
     }
 
@@ -1702,12 +1784,15 @@ class Session(
         }
     }
 
-    suspend fun deleteTask(task: BotTask, forRoom: Room) {
-        val activeClient = client ?: return
-        try {
-            _state.update { it.apply(Frame.Room(activeClient.deleteRoomTask(forRoom.id, task.threadId))) }
+    suspend fun deleteTask(task: BotTask, forRoom: Room): Room? {
+        val activeClient = client ?: return null
+        return try {
+            activeClient.deleteRoomTask(forRoom.id, task.threadId).also { updated ->
+                _state.update { it.apply(Frame.Room(updated)) }
+            }
         } catch (error: Throwable) {
             _actionError.value = error.message
+            null
         }
     }
 
@@ -1743,10 +1828,10 @@ class Session(
     suspend fun updateModel(selection: ModelSelection, forBot: Bot): Bot? {
         val activeClient = client ?: return null
         return try {
-            val updated = activeClient.updateModel(forBot.id, selection)
+            val updated = activeClient.updateModel(forBot.id, selection, forBot.threadId)
             currentCoroutineContext().ensureActive()
             _state.update { it.apply(Frame.Bot(updated)) }
-            updated
+            updated.forTask(forBot.threadId)
         } catch (error: Throwable) {
             if (error is kotlinx.coroutines.CancellationException) throw error
             _actionError.value = error.message
@@ -1961,13 +2046,13 @@ class Session(
     }
 
     suspend fun edit(message: Message, forBot: Bot, text: String) {
-        perform { it.edit(forBot.id, message.id, text) }
+        perform { it.edit(forBot.id, message.id, text, forBot.threadId) }
     }
 
     suspend fun switchVersion(to: Message, forBot: Bot) {
         val activeClient = client ?: return
         try {
-            val leaf = activeClient.setActiveBranch(forBot.id, to.id)
+            val leaf = activeClient.setActiveBranch(forBot.id, to.id, forBot.threadId)
             _state.update { it.apply(Frame.Thread(forBot.threadId, leaf)) }
         } catch (error: Throwable) {
             _actionError.value = error.message
@@ -2011,6 +2096,7 @@ class Session(
             "This phone couldn't read its saved connection just now."
         const val SPENT_QR_MESSAGE =
             "That pairing code was already used. Start pairing again on your computer and rescan the new QR code."
+        const val THREAD_GONE_MESSAGE = "That thread is no longer on your computer."
 
         /** High-entropy QR token — distinct from a retryable six-digit code. */
         fun isQrCredential(credential: String): Boolean =

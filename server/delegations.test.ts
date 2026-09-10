@@ -16,6 +16,7 @@ import {
   DELEGATION_WAKE_MAX_PER_WINDOW,
   DELEGATION_WAKE_WINDOW_MS,
   DelegationWakeBudget,
+  discardDelegations,
   drainDelegations,
   findDelegationReceipt,
   formatDelegationElapsed,
@@ -482,6 +483,99 @@ describe("drainDelegations", () => {
     expect(runTargetCalls).toEqual([]);
   });
 
+  it("reports pre-dispatch denials after removing the pending handoff", async () => {
+    store.patchBot(from.id, { approvePeerComms: true });
+    const queued = queueDelegation(commsBus, from, { toBotId: target.id, message: "do this", depth: 0 }, 1);
+    const pendingAtSettle: number[] = [];
+    const settled = vi.fn(() => void pendingAtSettle.push(_pendingCount(from.threadId)));
+    const runTarget = vi.fn();
+    drainDelegations(commsBus, approvalBus, from.threadId, runTarget, settled);
+    const card = await waitFor(() => store.messagesFor(from.threadId).find((m) => m.card?.requestId));
+    resolvePeerComms(approvalBus, card.card!.requestId!, "deny");
+    await waitFor(() => settled.mock.calls.length === 1);
+    expect(pendingAtSettle).toEqual([0]);
+    expect(settled).toHaveBeenCalledWith(expect.objectContaining({ id: queued.id, status: "denied" }));
+    expect(runTarget).not.toHaveBeenCalled();
+  });
+
+  it("does not revive discarded work when an already-open approval is allowed", async () => {
+    store.patchBot(from.id, { approvePeerComms: true });
+    const queued = queueDelegation(commsBus, from, { toBotId: target.id, message: "do this", depth: 0 }, 1);
+    const runTarget = vi.fn();
+    const settled = vi.fn();
+    drainDelegations(commsBus, approvalBus, from.threadId, runTarget, settled);
+    const card = await waitFor(() => store.messagesFor(from.threadId).find((m) => m.card?.requestId));
+    discardDelegations(commsBus, from.threadId);
+    resolvePeerComms(approvalBus, card.card!.requestId!, "allow");
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    expect(findDelegationReceipt(queued.id!)).toMatchObject({ status: "dropped" });
+    expect(runTarget).not.toHaveBeenCalled();
+    expect(settled).not.toHaveBeenCalled();
+  });
+
+  it("retains an exact approval when the target becomes busy before dispatch", async () => {
+    store.patchBot(from.id, { approvePeerComms: true });
+    const queued = queueDelegation(commsBus, from, { toBotId: target.id, message: "do this", depth: 0 }, 1);
+    const runTarget = vi.fn();
+    drainDelegations(commsBus, approvalBus, from.threadId, runTarget);
+    const card = await waitFor(() => store.messagesFor(from.threadId).find((m) => m.card?.requestId));
+    store.patchBot(target.id, { busy: true });
+    resolvePeerComms(approvalBus, card.card!.requestId!, "allow");
+    await waitFor(() => pendingDelegationInfo(queued.id!)?.attempts === 1);
+    store.patchBot(target.id, { busy: false });
+    releaseDelegationsWaitingOn(target.id);
+    drainDelegations(commsBus, approvalBus, from.threadId, runTarget);
+    await waitFor(() => runTarget.mock.calls.length === 1);
+    expect(store.messagesFor(from.threadId).filter((message) => message.card?.requestId)).toHaveLength(1);
+  });
+
+  it.each(["source task deletion", "source group removal"] as const)(
+    "drops an approved busy retry after %s",
+    async (change) => {
+      store.patchBot(from.id, { approvePeerComms: true });
+      const group = change === "source group removal"
+        ? store.createGroup("Planning", [from.id, target.id], false, "Agents")
+        : undefined;
+      const sourceThreadId = group?.threadId ?? store.createTask(from.id, "Source task", false)!.threadId;
+      const queued = queueDelegation(commsBus, from, { toBotId: target.id, message: "do this", depth: 0 }, 1, sourceThreadId);
+      const runTarget = vi.fn();
+      drainDelegations(commsBus, approvalBus, sourceThreadId, runTarget);
+      const card = await waitFor(() => store.messagesFor(sourceThreadId).find((m) => m.card?.requestId));
+      store.patchBot(target.id, { busy: true });
+      resolvePeerComms(approvalBus, card.card!.requestId!, "allow");
+      await waitFor(() => pendingDelegationInfo(queued.id!)?.attempts === 1);
+
+      if (group) store.patchGroup(group.id, { memberIds: [target.id] });
+      else expect(store.deleteTask(from.id, sourceThreadId)).not.toBeNull();
+      const messageIdsBeforeRetry = store.messagesFor(sourceThreadId).map((message) => message.id);
+      store.patchBot(target.id, { busy: false });
+      releaseDelegationsWaitingOn(target.id);
+      drainDelegations(commsBus, approvalBus, sourceThreadId, runTarget);
+
+      await waitFor(() => _pendingCount(sourceThreadId) === 0);
+      expect(runTarget).not.toHaveBeenCalled();
+      expect(findDelegationReceipt(queued.id!)).toMatchObject({ status: "dropped" });
+      expect(store.messagesFor(sourceThreadId).map((message) => message.id)).toEqual(messageIdsBeforeRetry);
+      expect(store.dmGroup(from.id, target.id)).toBeUndefined();
+    },
+  );
+
+  it("does not recreate a deleted source transcript when a pending approval is denied", async () => {
+    store.patchBot(from.id, { approvePeerComms: true });
+    const sourceThreadId = store.createTask(from.id, "Source task", false)!.threadId;
+    const queued = queueDelegation(commsBus, from, { toBotId: target.id, message: "do this", depth: 0 }, 1, sourceThreadId);
+    const runTarget = vi.fn();
+    drainDelegations(commsBus, approvalBus, sourceThreadId, runTarget);
+    const card = await waitFor(() => store.messagesFor(sourceThreadId).find((m) => m.card?.requestId));
+    expect(store.deleteTask(from.id, sourceThreadId)).not.toBeNull();
+    resolvePeerComms(approvalBus, card.card!.requestId!, "deny");
+
+    await waitFor(() => _pendingCount(sourceThreadId) === 0);
+    expect(runTarget).not.toHaveBeenCalled();
+    expect(findDelegationReceipt(queued.id!)).toMatchObject({ status: "dropped" });
+    expect(store.messagesFor(sourceThreadId)).toEqual([]);
+  });
+
   it("does not ask twice when this exact fallback was already approved as ask_bot", async () => {
     store.patchBot(from.id, { approvePeerComms: true });
     queueDelegation(commsBus, from, {
@@ -557,7 +651,7 @@ describe("drainDelegations", () => {
 
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
-import { _loadPending, _resetPending, discardDelegations, pendingThreads } from "./delegations.ts";
+import { _loadPending, _resetPending, pendingThreads } from "./delegations.ts";
 
 describe("delegations survive a restart", () => {
   let store: Store;

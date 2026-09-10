@@ -9,7 +9,6 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { z } from "zod";
 import {
   CalendarClock,
-  CalendarDays,
   Columns2,
   Box,
   Check,
@@ -21,7 +20,6 @@ import {
   Maximize2,
   Monitor,
   Moon,
-  Plus,
   Power,
   Settings,
   Smartphone,
@@ -29,14 +27,14 @@ import {
 } from "lucide-react";
 import { api, useStore, type Bot } from "@/state/store";
 import type { CloudBackend } from "../../server/contracts.ts";
-import type { Routine } from "@/lib/routines";
 import { ApiKeyRow } from "./ApiKeys";
 import { cn } from "@/lib/cn";
 import { usePageVisible } from "@/lib/page-visible";
 import { CloudScreenPreview } from "./CloudScreenPreview";
 import { CloudBackendPicker } from "./CloudBackendPicker";
 import { useDesktopCapabilities } from "./DesktopCapabilities";
-import { RoutineEditor } from "./RoutinesPage";
+import { RoutinesSection } from "./bot-settings/RoutinesSection";
+import { routineRunLabel, routineRunTone } from "@/lib/routine-display";
 import { AndroidDevicePanel, useAndroidUsbDevices } from "./AndroidDevicePanel";
 import { BrowserPanel } from "./BrowserPanel";
 import { browserAvailable, browserUnavailableReason, builtInBrowserEnabled } from "@/lib/feature-flags";
@@ -60,7 +58,7 @@ import {
   type ComputerPanelView,
 } from "@/lib/computer-panel-view";
 import { approvalModeFor } from "../../shared/approval-mode";
-import { activeLocale, t } from "@/lib/i18n";
+import { t } from "@/lib/i18n";
 import type { LocaleKey } from "@/locales";
 
 /** Keep local failure copy translatable while it remains in panel state. */
@@ -131,54 +129,6 @@ const computerControlSnapshotSchema = z.object({
   held: z.boolean().optional().default(false),
   helpReason: z.string().nullable().optional().default(null),
 }).passthrough();
-
-const DAY_KEYS = [
-  "computer.day.sun",
-  "computer.day.mon",
-  "computer.day.tue",
-  "computer.day.wed",
-  "computer.day.thu",
-  "computer.day.fri",
-  "computer.day.sat",
-] as const;
-
-function routineScheduleLabel(routine: Routine) {
-  if (routine.schedule.type === "once") {
-    return new Date(routine.schedule.at).toLocaleString(activeLocale(), {
-      month: "short",
-      day: "numeric",
-      hour: "numeric",
-      minute: "2-digit",
-    });
-  }
-  if (routine.schedule.type === "interval") {
-    return t("computer.routine.everyMin", { minutes: routine.schedule.everyMinutes });
-  }
-  const days = routine.schedule.weekdays;
-  const cadence =
-    days.length === 7
-      ? t("computer.routine.everyDay")
-      : days.join(",") === "1,2,3,4,5"
-        ? t("computer.routine.weekdays")
-        : days.map((day) => t(DAY_KEYS[day] ?? "computer.day.sun")).join(", ");
-  const [hour, minute] = routine.schedule.time.split(":").map(Number);
-  return `${cadence} · ${new Date(2000, 0, 1, hour, minute).toLocaleTimeString(activeLocale(), { hour: "numeric", minute: "2-digit" })}`;
-}
-
-function runStatusLabel(status: string) {
-  if (status === "waiting") return t("computer.routines.needsYou");
-  if (status === "queued") return t("computer.runStatus.queued");
-  if (status === "running") return t("computer.runStatus.running");
-  return status;
-}
-
-function nextRunLabel(at: number | null) {
-  if (at == null) return t("vm.state.paused");
-  const date = new Date(at);
-  const today = new Date();
-  const sameDay = date.toDateString() === today.toDateString();
-  return `${sameDay ? t("chat.day.today") : date.toLocaleDateString(activeLocale(), { month: "short", day: "numeric" })}, ${date.toLocaleTimeString(activeLocale(), { hour: "numeric", minute: "2-digit" })}`;
-}
 
 const PANEL_WIDTH_KEY = "omb-computer-panel-width";
 const PANEL_MIN_WIDTH = 360;
@@ -317,7 +267,6 @@ export function ComputerPanel({
   const [viewerOpen, setViewerOpen] = useState(false);
   const [error, setError] = useState<Error | string | null>(null);
   const errorText = panelErrorText(error);
-  const [creatingRoutine, setCreatingRoutine] = useState(false);
   const [panelView, setPanelView] = useState<ComputerPanelView>(() => readComputerPanelView(bot.id));
   const androidStatus = useAndroidUsbDevices();
   const androidConnected = androidStatus.devices.length > 0;
@@ -406,26 +355,11 @@ export function ComputerPanel({
   const activeRoutineRun = state.routineRuns.find(
     (run) => run.botId === bot.id && ["queued", "running", "waiting"].includes(run.status),
   );
-  const computerDestination =
-    bot.computer === "cloud"
-      ? cloudBackend === "vps" ? "this self-hosted VPS" : "this cloud box"
-      : bot.computer === "vm"
-        ? "the Local VM"
-      : bot.computer === "local"
-        ? "this computer"
-      : bot.computer === "browser"
-        ? "the built-in browser"
-        : bot.computer === "off"
-          ? null
-          : phase === "ready" || phase === "show-ready-box" || phase === "show-sleeping-box" || phase === "show-pending-box"
-            ? cloudBackend === "vps" ? "the self-hosted VPS selected by Auto" : "the cloud box selected by Auto"
-            : "this computer selected by Auto";
-
   // resolve the mode on open; box endpoints are only ever hit on the
   // cloud path, so local/off can never render a JSON error as an image
   useEffect(() => {
-    // Browser and Android own their own live surfaces. Do not provision a VM,
-    // wake a box, or churn preview state behind either tab.
+    // Other tabs own their surfaces. Do not provision a VM, wake a box,
+    // or churn preview state while reading routine history.
     if (panelView !== "computer") return;
     let alive = true;
     setResolvedComputerSelection(null);
@@ -1065,8 +999,8 @@ export function ComputerPanel({
         >
           <Settings size={18} />
         </button>
-        {androidConnected || browserEnabled ? (
-          <div className="flex overflow-hidden rounded-lg border border-hairline/40">
+        {(
+          <div className="mx-2 flex min-w-0 flex-wrap overflow-hidden rounded-lg border border-hairline/40" aria-label="Bot panel view">
             <button
               onClick={() => selectPanelView("computer")}
               aria-pressed={panelView === "computer"}
@@ -1077,6 +1011,12 @@ export function ComputerPanel({
             >
               <Monitor size={13} /> {t("computer.tab.computer")}
             </button>
+            <button
+              type="button"
+              onClick={() => selectPanelView("routines")}
+              aria-pressed={panelView === "routines"}
+              className={cn("flex items-center gap-1.5 border-l border-hairline/40 px-2.5 py-1 text-[12.5px]", panelView === "routines" ? "bg-control text-ink" : "text-ink-secondary hover:text-ink")}
+            ><CalendarClock size={13} />{t("computer.tab.routines")}</button>
             {androidConnected && (
             <button
               onClick={() => selectPanelView("android")}
@@ -1105,8 +1045,6 @@ export function ComputerPanel({
             </button>
             )}
           </div>
-        ) : (
-          <span className="text-[15px] font-semibold text-ink">{t("computer.tab.computer")}</span>
         )}
         <button
           onClick={() => dispatch({ type: "toggleComputer", open: false })}
@@ -1116,7 +1054,11 @@ export function ComputerPanel({
         </button>
       </div>
 
-      {panelView === "browser" && browserEnabled ? (
+      {panelView === "routines" ? (
+        <div className="min-h-0 flex-1 overflow-y-auto px-4 pb-4">
+          <RoutinesSection key={bot.id} bot={bot} routines={botRoutines} runs={state.routineRuns} defaultRunOn={cloudRoutineReady ? "cloud" : "maus"} />
+        </div>
+      ) : panelView === "browser" && browserEnabled ? (
         <div className="flex min-h-0 flex-1 flex-col px-4 pb-4">
           <BrowserPanel bot={bot} />
           {errorText && (
@@ -1570,87 +1512,18 @@ export function ComputerPanel({
           )}
         </div>
 
-        {/* Routines */}
-        <div className="mt-4 rounded-xl bg-card p-4">
-          <div className="flex items-center justify-between gap-2">
-            <div className="flex items-center gap-2 text-[15px] font-medium text-ink">
-              <CalendarClock size={16} className="text-accent" />
-              {t("computer.routines.title")}
-            </div>
-            {botRoutines.length > 0 && (
-              <span className="rounded-full bg-control px-2 py-0.5 text-[10px] font-medium text-ink-secondary">
-                {botRoutines.length}
-              </span>
-            )}
-          </div>
-          <div className="mt-0.5 text-[13px] text-ink-secondary">
-            {t("computer.routines.subtitle", { name: bot.name })}
-          </div>
-          {!computerDestination && (
-            <div className="mt-3 flex items-start gap-2 rounded-lg border border-warning/25 bg-warning/10 px-3 py-2 text-[11.5px] leading-relaxed text-warning">
-              <Power size={13} className="mt-0.5 shrink-0" />
-              {t("computer.routines.offWarning")}
-            </div>
-          )}
-          {activeRoutineRun && (
-            <button
-              onClick={() => dispatch({ type: "showRoutines" })}
-              className="mt-3 flex w-full items-center gap-2 rounded-lg border border-accent/25 bg-accent/10 px-3 py-2 text-left text-[12px] text-accent hover:bg-accent/15"
-            >
-              <Loader2 size={13} className={activeRoutineRun.status === "queued" ? "" : "animate-spin"} />
-              <span className="min-w-0 flex-1 truncate">
-                {activeRoutineRun.routineName} · {runStatusLabel(activeRoutineRun.status)}
-              </span>
-            </button>
-          )}
-          {botRoutines.length > 0 && (
-            <div className="mt-3 space-y-1.5">
-              {botRoutines.slice(0, 3).map((routine) => (
-                <button
-                  key={routine.id}
-                  onClick={() => dispatch({ type: "showRoutines" })}
-                  className="flex w-full items-center gap-2 rounded-lg bg-inset px-3 py-2 text-left hover:bg-control/60"
-                >
-                  <span className={cn("size-1.5 shrink-0 rounded-full", routine.enabled ? "bg-success" : "bg-ink-secondary/40")} />
-                  <span className="min-w-0 flex-1">
-                    <span className="block truncate text-[12.5px] font-medium text-ink">{routine.name}</span>
-                    <span className="block truncate text-[10.5px] text-ink-secondary">
-                      {routineScheduleLabel(routine)}{routine.runOn === "cloud" ? ` · ${t("computer.routines.runsOnVm")}` : ""}
-                    </span>
-                  </span>
-                  <span className="shrink-0 text-[10px] text-ink-secondary">{nextRunLabel(routine.nextRunAt)}</span>
-                </button>
-              ))}
-            </div>
-          )}
-          <div className="mt-3 flex gap-2">
-            <button
-              onClick={() => setCreatingRoutine(true)}
-              className="flex flex-1 items-center justify-center gap-1.5 rounded-lg bg-accent py-2 text-[13px] font-medium text-white hover:brightness-110"
-            >
-              <Plus size={14} />
-              {t("computer.routines.create")}
-            </button>
-            <button
-              onClick={() => dispatch({ type: "showRoutines" })}
-              className="flex items-center justify-center gap-1.5 rounded-lg bg-control px-3 py-2 text-[13px] text-ink hover:bg-raised-hover"
-              title={t("computer.routines.openTitle")}
-            >
-              <CalendarDays size={14} />
-              {t("computer.routines.schedules")}
-            </button>
-          </div>
-        </div>
+        {/* A compact entry beneath the computer; the tab owns the full list. */}
+        <button type="button" onClick={() => selectPanelView("routines")} className="mt-4 flex w-full items-start gap-3 rounded-xl bg-card p-4 text-left hover:bg-raised">
+          <CalendarClock size={17} className="mt-0.5 shrink-0 text-accent" />
+          <span className="min-w-0 flex-1">
+            <span className="block text-[14px] font-medium text-ink">{t("computer.tab.routines")} <span className="ml-1 text-[11px] text-ink-secondary">{botRoutines.length}</span></span>
+            <span className={cn("mt-1 block truncate text-[11.5px]", activeRoutineRun ? routineRunTone(activeRoutineRun) : "text-ink-secondary")}>{activeRoutineRun ? `${activeRoutineRun.routineName} · ${routineRunLabel(activeRoutineRun)}` : t("computer.routines.openTitle")}</span>
+          </span>
+          <span className="text-ink-secondary" aria-hidden="true">→</span>
+        </button>
       </div>
       )}
-      {creatingRoutine && (
-        <RoutineEditor
-          bots={[bot]}
-          lockedBotId={bot.id}
-          defaultRunOn={cloudRoutineReady ? "cloud" : "maus"}
-          onClose={() => setCreatingRoutine(false)}
-        />
-      )}
+
     </aside>
     <LocalComputerAutoWarning
       open={localAutoWarningTarget !== null}

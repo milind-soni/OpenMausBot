@@ -109,7 +109,7 @@ export function CallTargetButton({
           ? "Add an ElevenLabs API key — or switch to the built-in Mac voices — so the bot can speak during calls."
           : !voiceReady
             ? voices.length > 1
-              ? "Give every channel member a voice before starting a channel call."
+              ? "Give every group member a voice before starting a group call."
               : "Choose a voice before starting a call."
             : "";
 
@@ -375,7 +375,7 @@ function Call({ bot }: { bot: Bot }) {
       const openQuestion = askedQuestion.current;
       if (openQuestion) {
         askedQuestion.current = null;
-        dispatch({ type: "answerCard", botId: bot.id, messageId: openQuestion.messageId, answer: said });
+        dispatch({ type: "answerCard", botId: bot.id, threadId: bot.threadId, messageId: openQuestion.messageId, answer: said });
         move("working");
         return;
       }

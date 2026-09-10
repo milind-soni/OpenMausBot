@@ -25,7 +25,7 @@ const bot = (overrides: Partial<Bot> = {}): Bot => ({
   ...overrides,
 });
 
-function renderRow(candidate: Bot, archiveDisabled: boolean) {
+function renderRow(candidate: Bot) {
   return renderToStaticMarkup(createElement(
     StoreProvider,
     null,
@@ -33,31 +33,44 @@ function renderRow(candidate: Bot, archiveDisabled: boolean) {
       bot: candidate,
       density: "comfortable",
       onMenu: vi.fn(),
-      onArchive: vi.fn(),
-      archiveDisabled,
     }),
   ));
 }
 
 describe("BotListItem", () => {
+  it("offers a direct New folder button and keyboard-accessible bot menu independently of New thread", () => {
+    const markup = renderRow(bot());
+    expect(markup).toContain('aria-label="New folder under Atlas"');
+    expect(markup).toContain('aria-label="Actions for Atlas"');
+    expect(markup).toContain('aria-haspopup="menu"');
+  });
+  it("keeps the native thread toggle beside, not inside, the selectable bot row", () => {
+    const markup = renderRow(bot());
+    expect(markup).toContain('role="button" tabindex="0"');
+    expect(markup).toContain('</div><button type="button" aria-label="Expand Atlas threads" aria-expanded="false"');
+    const toggle = markup.match(/<button[^>]*aria-label="Expand Atlas threads"[^>]*>/)?.[0];
+    expect(toggle).toContain("focus-visible:ring-1");
+    expect(toggle).not.toContain("hover:bg-");
+  });
+
   it("leaves the full Chief card as one selectable hit area", () => {
-    const markup = renderRow(bot({ chiefOfStaff: true }), false);
+    const markup = renderRow(bot({ chiefOfStaff: true }));
 
     expect(markup).toContain('data-sidebar-bot-row="atlas"');
     expect(markup).not.toContain('aria-label="Archive Atlas"');
   });
 
   it("shows the Chief of Staff label on its own line under the name", () => {
-    const withTitle = renderRow(bot({ chiefOfStaff: true, title: "Developer" }), false);
+    const withTitle = renderRow(bot({ chiefOfStaff: true, title: "Developer" }));
     expect(withTitle).toContain("Chief of Staff</span>");
     // the label sits after the name line, never inside it
     expect(withTitle.indexOf("Chief of Staff</span>")).toBeGreaterThan(withTitle.indexOf(">Atlas<"));
 
-    const withoutTitle = renderRow(bot({ chiefOfStaff: true }), false);
+    const withoutTitle = renderRow(bot({ chiefOfStaff: true }));
     expect(withoutTitle).toContain("Chief of Staff</span>");
     expect(withoutTitle.indexOf("Chief of Staff</span>")).toBeGreaterThan(withoutTitle.indexOf(">Atlas<"));
 
-    expect(renderRow(bot(), false)).not.toContain("Chief of Staff");
+    expect(renderRow(bot())).not.toContain("Chief of Staff");
   });
 
   // matches the title line's own class list (see Sidebar.tsx) — used to
@@ -69,15 +82,15 @@ describe("BotListItem", () => {
     // #866 / #871: a badge next to the name always had to fight the name for
     // width — a long name crushed the badge, and a long title crushed a long
     // name right back. Its own line above the name never competes with it.
-    const markup = renderRow(bot({ title: "Developer" }), false);
+    const markup = renderRow(bot({ title: "Developer" }));
 
     expect(titleLine.exec(markup)?.[1]).toBe("Developer");
     expect(markup.indexOf(">Developer<")).toBeLessThan(markup.indexOf(">Atlas<"));
     // the rename hint is unrelated to the bot's title
     expect(markup).toContain('title="Double-click to rename"');
 
-    expect(titleLine.test(renderRow(bot(), false))).toBe(false);
-    expect(titleLine.test(renderRow(bot({ title: "  " }), false))).toBe(false);
+    expect(titleLine.test(renderRow(bot()))).toBe(false);
+    expect(titleLine.test(renderRow(bot({ title: "  " })))).toBe(false);
   });
 
   it("keeps the title line's own truncate class instead of a shared-line width cap", () => {
@@ -86,7 +99,7 @@ describe("BotListItem", () => {
     // carries `truncate` (so a too-long title clips on its own line) and,
     // unlike the #871 badge, never a max-width cap shared with the name.
     const longTitle = "Meta-Agent — opensource team maintainer";
-    const markup = renderRow(bot({ name: "Team Maintainer", title: longTitle }), false);
+    const markup = renderRow(bot({ name: "Team Maintainer", title: longTitle }));
 
     expect(titleLine.exec(markup)?.[1]).toBe(longTitle);
     expect(markup).toContain(">Team Maintainer<");
@@ -94,21 +107,25 @@ describe("BotListItem", () => {
   });
 
   it("shows typing dots instead of preview text while the bot works", () => {
-    const markup = renderRow(bot({ busy: true }), false);
+    const markup = renderRow(bot({ busy: true }));
 
     expect(markup).toContain("animate-status-pulse");
     expect(markup).toContain('class="sr-only">Working…');
   });
 
   it("marks the avatar with a green presence dot only while the bot works", () => {
-    expect(renderRow(bot({ busy: true }), false)).toContain('data-testid="working-dot"');
-    expect(renderRow(bot(), false)).not.toContain('data-testid="working-dot"');
-    expect(renderRow(bot({ busy: true, activity: "waiting-on-you" }), false)).not.toContain('data-testid="working-dot"');
+    expect(renderRow(bot({ busy: true }))).toContain('data-testid="working-dot"');
+    expect(renderRow(bot())).not.toContain('data-testid="working-dot"');
+    expect(renderRow(bot({ busy: true, activity: "waiting-on-you" }))).not.toContain('data-testid="working-dot"');
   });
 
-  it("renders the inline Archive action only when it is available", () => {
-    expect(renderRow(bot(), true)).not.toContain('aria-label="Archive Atlas"');
-    expect(renderRow(bot(), false)).toContain('aria-label="Archive Atlas"');
+  it("keeps Archive in the Actions menu and reveals quiet row controls on focus as well as hover", () => {
+    const markup = renderRow(bot());
+    expect(markup).not.toContain('aria-label="Archive Atlas"');
+    expect(markup).toContain('aria-label="Actions for Atlas"');
+    expect(markup).toContain("group-focus-within:opacity-100");
+    expect(markup).toContain("group-hover:pointer-events-auto");
+    expect(markup).not.toContain("pr-[92px]");
   });
 });
 

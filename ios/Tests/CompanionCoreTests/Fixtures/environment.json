@@ -3,5 +3,5 @@
   "label": "cab mini",
   "platform": "linux",
   "version": "0.1.55",
-  "capabilities": { "remoteSessions": true, "selfUpdate": false }
+  "capabilities": { "remoteSessions": true, "selfUpdate": "operator" }
 }

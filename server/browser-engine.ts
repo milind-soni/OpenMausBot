@@ -10,13 +10,14 @@
 // reason a person can act on, never a silently browserless bot.
 import { spawn } from "node:child_process";
 import { createHash, randomBytes, randomUUID } from "node:crypto";
-import { chmodSync, existsSync, mkdirSync, readFileSync, renameSync, rmSync, statSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
-import { delimiter, join, resolve } from "node:path";
+import { chmodSync, constants, copyFileSync, existsSync, mkdirSync, readFileSync, readdirSync, renameSync, rmSync, statSync, unlinkSync, writeFileSync } from "node:fs";
+import { homedir, tmpdir } from "node:os";
+import { delimiter, dirname, join, resolve } from "node:path";
 
 import { writeFileAtomic } from "./atomic.ts";
 import { DATA_DIR } from "./config.ts";
 import { browserBundlePaths } from "./browser-bundle-release.ts";
+import { browserRuntimeEnv } from "./browser-runtime.ts";
 import {
   AGENT_BROWSER_VERSION,
   agentBrowserReleaseUrl,
@@ -28,6 +29,141 @@ import {
 const ENGINE_DIR = "tools/agent-browser";
 const KEY_FILE = "browser-engine-key";
 const DOWNLOAD_TIMEOUT_MS = 10 * 60_000;
+
+/** Native restore looks up a filename prefix. Fixed-length keys prevent a
+ * legacy profile named work from accidentally restoring work-client. */
+export function browserRestoreKey(session: string): string {
+  if (!/^[A-Za-z0-9_-]{1,96}$/.test(session)) throw new Error("Invalid browser session.");
+  return `omb-${createHash("sha256").update(session).digest("hex")}`;
+}
+
+function browserSessionsDirectory(env: NodeJS.ProcessEnv): string {
+  const namespace = env.AGENT_BROWSER_NAMESPACE;
+  if (namespace && !/^[a-z0-9]+(?:[-_][a-z0-9]+)*$/.test(namespace)) throw new Error("Invalid browser namespace.");
+  const home = (process.platform === "win32" ? env.USERPROFILE : env.HOME) || homedir();
+  const stateRoot = namespace ? join(home, ".agent-browser", "namespaces", namespace, "state") : join(home, ".agent-browser");
+  return join(stateRoot, "sessions");
+}
+
+function managedBrowserConfigPath(env: NodeJS.ProcessEnv): string {
+  return join(browserSessionsDirectory(env), "..", "omb-managed-config.json");
+}
+
+function ensureManagedBrowserConfig(env: NodeJS.ProcessEnv): string {
+  const path = managedBrowserConfigPath(env);
+  mkdirSync(dirname(path), { recursive: true, mode: 0o700 });
+  try { writeFileSync(path, "{}\n", { flag: "wx", mode: 0o600 }); }
+  catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error;
+    if (readFileSync(path, "utf8").trim() !== "{}") throw new Error("The managed browser configuration was changed. Restore it to an empty JSON object before connecting.");
+  }
+  return path;
+}
+
+/** Close exactly one daemon without the CLI's implicit launch envelope. */
+export async function closeBrowserSession(binaryPath: string, env: NodeJS.ProcessEnv, timeoutMs = 15_000): Promise<boolean> {
+  if (!env.AGENT_BROWSER_SESSION || !/^[A-Za-z0-9_-]{1,96}$/.test(env.AGENT_BROWSER_SESSION)) return false;
+  // Native CLI prepends a launch even to `close` when launch flags are set.
+  // Remove them, and bypass external project/user config, so closing a
+  // missing profile cannot launch and restore another legacy prefix match.
+  let configPath: string;
+  try { configPath = ensureManagedBrowserConfig(env); }
+  catch { return false; }
+  const closeEnv = Object.fromEntries(Object.entries(env).filter(([key]) => !key.startsWith("AGENT_BROWSER_") || ["AGENT_BROWSER_SESSION", "AGENT_BROWSER_SOCKET_DIR", "AGENT_BROWSER_NAMESPACE", "AGENT_BROWSER_ENCRYPTION_KEY", "AGENT_BROWSER_RESTORE", "AGENT_BROWSER_RESTORE_SAVE"].includes(key)));
+  closeEnv.AGENT_BROWSER_CONFIG = configPath;
+  const deadline = Date.now() + timeoutMs;
+  const run = (args: string[], capture = false) => new Promise<{ ok: boolean; output: string }>((done) => {
+    let settled = false;
+    let output = "";
+    const finish = (ok: boolean) => { if (!settled) { settled = true; done({ ok, output }); } };
+    let child: ReturnType<typeof spawn>;
+    try { child = spawn(binaryPath, args, { env: closeEnv, stdio: capture ? ["ignore", "pipe", "ignore"] : "ignore", windowsHide: true }); }
+    catch { return finish(false); }
+    const timer = setTimeout(() => { child.kill(); finish(false); }, Math.max(1, deadline - Date.now()));
+    timer.unref?.();
+    child.stdout?.on("data", (chunk: Buffer) => {
+      output += String(chunk);
+      if (output.length > 262_144) { clearTimeout(timer); child.kill(); finish(false); }
+    });
+    child.on("error", () => { clearTimeout(timer); finish(false); });
+    // exit can precede the last piped stdout chunk; close follows stdio.
+    child.on("close", (code) => { clearTimeout(timer); finish(code === 0); });
+  });
+  if (!(await run(["close"])).ok) return false;
+  // Native close acknowledges before the daemon exits. Observe its actual
+  // removal through the launch-free inventory command before reconnecting.
+  while (Date.now() < deadline) {
+    const status = await run(["session", "list", "--json"], true);
+    if (!status.ok) return false;
+    try {
+      const result = JSON.parse(status.output);
+      const sessions: unknown = result?.data?.sessions;
+      if (result?.success !== true || !Array.isArray(sessions) || !sessions.every((name) => typeof name === "string")) return false;
+      if (!sessions.includes(env.AGENT_BROWSER_SESSION)) return true;
+    } catch { return false; }
+    await new Promise((resolve) => setTimeout(resolve, Math.min(25, Math.max(1, deadline - Date.now()))));
+  }
+  return false;
+}
+
+const preparedBrowserSessions = new Map<string, Promise<void>>();
+
+/** Preserve only this profile's exact old file before adopting a collision-
+ * proof restore key. Originals stay intact; a reset removes both spellings.
+ * Closing first flushes even an old daemon's not-yet-autosaved login. */
+export async function prepareBrowserSessionState(
+  binaryPath: string,
+  session: string,
+  options: { env?: NodeJS.ProcessEnv; persistent?: boolean; timeoutMs?: number; isCurrent?: () => boolean } = {},
+): Promise<void> {
+  const restoreKey = browserRestoreKey(session);
+  const check = () => { if (options.isCurrent?.() === false) throw new Error("Browser access changed while connecting."); };
+  check();
+  const env = browserRuntimeEnv({ ...options.env, AGENT_BROWSER_SESSION: session, AGENT_BROWSER_HEADLESS: "1" });
+  ensureManagedBrowserConfig(env);
+  if (options.persistent === false) return;
+  const directory = browserSessionsDirectory(env);
+  const key = join(directory, session);
+  let pending = preparedBrowserSessions.get(key);
+  if (!pending) {
+    pending = (async () => {
+      const targetBase = join(directory, `${restoreKey}-${session}`);
+      const hasTarget = () => existsSync(`${targetBase}.json.enc`) || existsSync(`${targetBase}.json`);
+      if (hasTarget()) return;
+      check();
+      // Retain the old key while flushing, never the new empty destination.
+      // A newer daemon flushes its own key before a key change; close itself
+      // never launches a browser, and we check for that new file afterward.
+      if (!await closeBrowserSession(binaryPath, { ...env, AGENT_BROWSER_RESTORE: session }, options.timeoutMs)) {
+        throw new Error("Could not safely prepare saved browser logins. Close this browser and try again.");
+      }
+      check();
+      if (hasTarget()) return; // a current daemon may just have flushed it.
+      const candidates = [".json.enc", ".json"].flatMap((suffix) => {
+        const path = join(directory, `${session}-${session}${suffix}`);
+        try {
+          const stat = statSync(path);
+          if (!stat.isFile()) throw new Error("Saved browser state is not a file.");
+          return [{ path, suffix, modified: stat.mtimeMs }];
+        } catch (error) {
+          if ((error as NodeJS.ErrnoException).code === "ENOENT") return [];
+          throw error;
+        }
+      }).sort((a, b) => b.modified - a.modified);
+      const source = candidates[0];
+      if (!source) return;
+      try {
+        copyFileSync(source.path, targetBase + source.suffix, constants.COPYFILE_EXCL);
+        chmodSync(targetBase + source.suffix, 0o600);
+      }
+      catch (error) { if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error; }
+    })();
+    preparedBrowserSessions.set(key, pending);
+    void pending.catch(() => { if (preparedBrowserSessions.get(key) === pending) preparedBrowserSessions.delete(key); });
+  }
+  await pending;
+  check();
+}
 
 export type BrowserEngineStatus =
   | { kind: "ready"; binaryPath: string; version: string }
@@ -214,20 +350,26 @@ export function agentBrowserIntegration(input: {
   headless?: boolean;
   env?: NodeJS.ProcessEnv;
 }): { command: string; args: string[]; env: Record<string, string> } {
+  const sourceEnv = input.env ?? process.env;
   const env: Record<string, string> = {
     AGENT_BROWSER_SESSION: input.session,
     // The MCP server invokes child CLI commands without forwarding its own
     // global flags. The environment keeps page-provided tools disabled in
     // those commands too, and avoids changing browser launch settings later.
     AGENT_BROWSER_NO_WEBMCP: "1",
-    // This is a restore *name*, not a boolean. "1" would give every bot
-    // the same saved cookies despite using different daemon sessions.
-    AGENT_BROWSER_RESTORE: input.session,
+    // This is a restore *name*, not a boolean. Use a fixed-length identity:
+    // upstream looks up name prefixes, not an exact daemon-session filename.
+    AGENT_BROWSER_RESTORE: browserRestoreKey(input.session),
     AGENT_BROWSER_RESTORE_SAVE: input.persistent === false ? "never" : "auto",
     AGENT_BROWSER_ENCRYPTION_KEY: input.encryptionKey,
+    // OMB owns launch settings. A user's unrelated native CLI config must not
+    // inject a shared Chrome profile or a different saved-state path.
+    AGENT_BROWSER_CONFIG: managedBrowserConfigPath(browserRuntimeEnv({
+      ...(sourceEnv.HOME ? { HOME: sourceEnv.HOME } : {}),
+      ...(sourceEnv.USERPROFILE ? { USERPROFILE: sourceEnv.USERPROFILE } : {}),
+    })),
   };
   if (input.headless !== false) env.AGENT_BROWSER_HEADLESS = "1";
-  const sourceEnv = input.env ?? process.env;
   // MCP clients may filter the parent environment. Carry the configured
   // Chrome path explicitly without forwarding unrelated secrets or flags.
   for (const name of ["PATH", "AGENT_BROWSER_EXECUTABLE_PATH"] as const) {
@@ -263,7 +405,7 @@ export function agentBrowserFrame(input: {
   const file = join(tmpdir(), `openmausbot-browser-${randomUUID()}.png`);
   return new Promise((settle, fail) => {
     const child = spawn(input.binaryPath, ["screenshot", file], {
-      env: { ...process.env, ...input.env },
+        env: browserRuntimeEnv(input.env),
       stdio: ["ignore", "ignore", "pipe"],
       windowsHide: true,
     });
@@ -331,22 +473,31 @@ export async function clearBrowserSessionState(
   session: string,
   options: { env?: NodeJS.ProcessEnv; encryptionKey?: string; timeoutMs?: number } = {},
 ): Promise<boolean> {
-  const env: NodeJS.ProcessEnv = { ...(options.env ?? process.env), AGENT_BROWSER_SESSION: session, AGENT_BROWSER_HEADLESS: "1" };
+  // The native state-clear CLI ignores the daemon session, and even its named
+  // form currently drops that name before dispatch. Never invoke it here.
+  if (!/^[A-Za-z0-9_-]{1,96}$/.test(session)) return false;
+  const env = browserRuntimeEnv({ ...options.env, AGENT_BROWSER_SESSION: session, AGENT_BROWSER_HEADLESS: "1" });
+  let directory: string;
+  try { directory = browserSessionsDirectory(env); }
+  catch { return false; }
   if (options.encryptionKey) env.AGENT_BROWSER_ENCRYPTION_KEY = options.encryptionKey;
-  const run = (args: string[]) => new Promise<boolean>((done) => {
-    let settled = false;
-    const finish = (ok: boolean) => { if (!settled) { settled = true; done(ok); } };
-    let child: ReturnType<typeof spawn>;
-    try {
-      child = spawn(binaryPath, args, { env, stdio: "ignore", windowsHide: true });
-    } catch {
-      return finish(false);
-    }
-    const timer = setTimeout(() => { child.kill(); finish(false); }, options.timeoutMs ?? 15_000);
-    timer.unref?.();
-    child.on("error", () => { clearTimeout(timer); finish(false); });
-    child.on("exit", (code) => { clearTimeout(timer); finish(code === 0); });
-  });
-  await run(["close"]);
-  return run(["state", "clear", "--all"]);
+  // A failed close can still autosave later. Keep its state until it is safe
+  // to remove, rather than reporting a reset that silently comes back.
+  if (!await closeBrowserSession(binaryPath, env, options.timeoutMs)) return false;
+  const bases = [`${session}-${session}`, `${browserRestoreKey(session)}-${session}`];
+  const remove = (path: string) => {
+    try { unlinkSync(path); }
+    catch (error) { if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error; }
+  };
+  try {
+    for (const base of bases) for (const suffix of [".json", ".json.enc", ".json.previous", ".json.enc.previous"]) remove(join(directory, base + suffix));
+    const pendingDirectory = join(directory, ".tmp");
+    let pendingFiles: string[] = [];
+    try { pendingFiles = readdirSync(pendingDirectory); }
+    catch (error) { if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error; }
+    const candidates = bases.map((base) => new RegExp(`^${base}-candidate-[0-9]+\\.json(?:\\.enc)?$`));
+    for (const name of pendingFiles) if (candidates.some((candidate) => candidate.test(name))) remove(join(pendingDirectory, name));
+    preparedBrowserSessions.delete(join(directory, session));
+    return true;
+  } catch { return false; }
 }
