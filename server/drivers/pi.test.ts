@@ -24,6 +24,7 @@ import {
   PiDriver,
   preferPiInjectRows,
   splitPiModel,
+  updatePiModelCatalog,
 } from "./pi.ts";
 
 const FAKE_CLI = join(dirname(fileURLToPath(import.meta.url)), "..", "testing", "fake-pi-cli.ts");
@@ -187,6 +188,45 @@ describe("PiDriver catalog (fake CLI)", () => {
       FAKE_PI_MODE: "no-models",
     });
     expect(catalog.options).toEqual([]);
+  });
+
+  it("updates pi's catalog only on explicit refresh, then probes it again", async () => {
+    const home = mkdtempSync(join(tmpdir(), "omb-pi-update-"));
+    const dump = join(home, "launches.jsonl");
+    const instance = await PiDriver.create({
+      instanceId: "pi-refresh",
+      displayName: undefined,
+      environment: { HOME: home, FAKE_PI_DUMP: dump },
+      enabled: true,
+      config: { cli: FAKE_CLI, fullAuto: false },
+    });
+    try {
+      const startup = readFileSync(dump, "utf8").trim().split("\n").map((line) => JSON.parse(line));
+      expect(startup.some((entry) => entry.argv?.[0] === "update")).toBe(false);
+
+      writeFileSync(dump, "");
+      await instance.refreshModels?.();
+      const refresh = readFileSync(dump, "utf8").trim().split("\n").map((line) => JSON.parse(line));
+      expect(refresh.map((entry) => entry.argv)).toEqual([
+        ["update", "--models", "--no-approve"],
+        ["--mode", "rpc", "--no-session"],
+      ]);
+    } finally {
+      await instance.dispose();
+    }
+  });
+
+  it("reports update failure without preventing a cached catalog probe", async () => {
+    expect(await updatePiModelCatalog(FAKE_CLI, {
+      PATH: process.env.PATH ?? "",
+      FAKE_PI_MODE: "update-error",
+    })).toBe(false);
+    const catalog = await fetchPiModels(FAKE_CLI, {
+      PATH: process.env.PATH ?? "",
+      HOME: join(tmpdir(), "omb-pi-update-error"),
+      FAKE_PI_MODE: "update-error",
+    });
+    expect(catalog.options).toHaveLength(2);
   });
 });
 
