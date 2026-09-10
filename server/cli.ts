@@ -35,6 +35,8 @@ import { writeFileAtomic } from "./atomic.ts";
 import { ensureCaddy, normalizeDomainOption, startCaddy, type RunningCaddy } from "./caddy.ts";
 import { runServiceCommand } from "./service-cli.ts";
 import { runFleetCommand, type FleetInput } from "./fleet-cli.ts";
+import { startFleetAgent } from "./fleet-agent.ts";
+import { fleetLayout } from "./fleet.ts";
 import { explainTailscaleFailure, tailscaleServe, tailscaleServeOff, tailscaleStatus, type TailscaleStatus } from "./tailscale.ts";
 import { defaultSetupIo, SetupCancelled, type SetupIo } from "./cli-prompts.ts";
 import { normalizePhoneOrigin, phonePairingInstructions, runPhoneSetup } from "./cli-phone-setup.ts";
@@ -80,8 +82,11 @@ export interface CliOptions {
   email?: string;
   /** `browser install [--with-deps]` */
   browserAction?: "install" | "status";
-  /** `fleet init|create|list|users|suspend|resume|delete|upgrade` */
-  fleetAction?: FleetInput["action"];
+  /** `fleet init|create|list|users|suspend|resume|delete|upgrade|agent` */
+  fleetAction?: FleetInput["action"] | "agent";
+  operator?: string;
+  socket?: string;
+  group?: string;
   slug?: string;
   admins?: string[];
   members?: string[];
@@ -158,8 +163,11 @@ export function parseArgs(argv: string[], env: NodeJS.ProcessEnv = process.env):
       else if (options.command === "service" && !options.serviceAction && (arg === "install" || arg === "uninstall")) options.serviceAction = arg;
       else if (options.command === "browser" && (arg === "install" || arg === "status")) options.browserAction = arg;
       else if (options.command === "browser" && arg === "--with-deps") options.withDeps = true;
-      else if (options.command === "fleet" && !options.fleetAction && ["init", "create", "list", "users", "suspend", "resume", "delete", "upgrade"].includes(arg)) options.fleetAction = arg as FleetInput["action"];
-      else if (options.command === "fleet" && options.fleetAction && options.fleetAction !== "init" && options.fleetAction !== "list" && options.fleetAction !== "upgrade" && !options.slug && !arg.startsWith("--")) options.slug = arg;
+      else if (options.command === "fleet" && !options.fleetAction && ["init", "create", "list", "users", "suspend", "resume", "delete", "upgrade", "agent"].includes(arg)) options.fleetAction = arg as FleetInput["action"] | "agent";
+      else if (options.command === "fleet" && options.fleetAction && !["init", "list", "upgrade", "agent"].includes(options.fleetAction) && !options.slug && !arg.startsWith("--")) options.slug = arg;
+      else if (options.command === "fleet" && arg === "--operator") options.operator = value();
+      else if (options.command === "fleet" && arg === "--socket") options.socket = resolve(value());
+      else if (options.command === "fleet" && arg === "--group") options.group = value();
       else if (options.command === "fleet" && options.fleetAction === "users" && options.slug && !options.fleetUserAction && (arg === "add" || arg === "remove")) { options.fleetUserAction = arg; options.email = value(); }
       else if (options.command === "fleet" && arg === "--admin") options.admins = [...(options.admins ?? []), value()];
       else if (options.command === "fleet" && arg === "--member") options.members = [...(options.members ?? []), value()];
@@ -186,7 +194,7 @@ export function parseArgs(argv: string[], env: NodeJS.ProcessEnv = process.env):
   if (options.local && (options.tailscale || options.tunnel || options.publicUrl)) return { error: "--local cannot be combined with a remote-access option" };
   if (options.command === "browser" && !options.browserAction) return { error: "browser needs an action: install or status" };
   if (options.command === "fleet") {
-    if (!options.fleetAction) return { error: "fleet needs one of: init --domain HOST, create NAME --admin EMAIL, list, users NAME add|remove EMAIL, suspend NAME, resume NAME, delete NAME --yes, upgrade" };
+    if (!options.fleetAction) return { error: "fleet needs one of: init --domain HOST [--operator USER], create NAME --admin EMAIL, list, users NAME add|remove EMAIL, suspend NAME, resume NAME, delete NAME --yes, upgrade, agent" };
     if (["create", "users", "suspend", "resume", "delete"].includes(options.fleetAction) && !options.slug) return { error: `fleet ${options.fleetAction} needs a workspace name` };
     if (options.fleetAction === "users" && !options.fleetUserAction) return { error: "fleet users needs: NAME add|remove EMAIL [--chat-only]" };
     if (options.cap !== undefined && (!Number.isFinite(options.cap) || options.cap < 0)) return { error: "--cap must be a dollar amount of 0 or more" };
@@ -209,10 +217,11 @@ export const USAGE = `openmausbot — your team of AI bots, ready in a few steps
   openmausbot access list | add EMAIL [--chat-only] | remove EMAIL
   openmausbot service install [--domain HOST | --tunnel | --tailscale] [--port N] [--data-dir DIR] | uninstall
   openmausbot browser install [--with-deps] | status
-  openmausbot fleet init --domain HOST | create NAME --admin EMAIL [--member EMAIL] [--brand FILE]
+  openmausbot fleet init --domain HOST [--operator USER] | create NAME --admin EMAIL [--member EMAIL] [--brand FILE]
                     [--anthropic-key-file FILE] [--cap USD] [--license-key KEY] [--memory 1G]
                   | list | users NAME add|remove EMAIL [--chat-only] | suspend NAME | resume NAME
                   | delete NAME --yes [--keep-data] | upgrade   (all take --dry-run)
+                  | agent [--socket PATH] [--group USER]   (root; installed by init --operator)
 
 setup   choose AI access and optional phone access; keep existing bots and chats
 start   same as openmausbot: use your saved settings and open the workspace
@@ -240,6 +249,9 @@ fleet   many client workspaces on one Linux server, each its own account,
         service, data folder, brand, sign-in list and keys at NAME.HOST
         behind the system Caddy. Plans are printed unless run as root;
         --dry-run always prints. Install the package permanently first.
+        init --operator USER also installs the fleet agent, a root service
+        on a Unix socket only USER may open, so the workspace running as
+        USER manages the others from Settings → Workspaces.
 
 --tailscale  serve over your tailnet: Tailscale terminates HTTPS and the
              link uses this machine's MagicDNS name (needs Tailscale signed in
@@ -1054,10 +1066,27 @@ export async function main(argv = process.argv.slice(2)): Promise<number> {
         node: process.execPath,
       }, { log: (line) => console.log(line), error: (line) => console.error(line) });
     case "fleet":
+      if (options.fleetAction === "agent") {
+        const layout = fleetLayout();
+        await startFleetAgent({
+          socketPath: options.socket ?? layout.socketPath,
+          group: options.group,
+          node: process.execPath,
+          script: process.argv[1] ?? "",
+          licenseKey: options.licenseKey ?? process.env.OMB_LICENSE_KEY,
+        }, { log: (line) => console.log(line) });
+        // A service: stay up until systemd stops it.
+        await new Promise<void>((resolveStop) => {
+          for (const signal of ["SIGTERM", "SIGINT"] as const) process.once(signal, () => resolveStop());
+        });
+        return 0;
+      }
       return runFleetCommand({
-        action: options.fleetAction!,
+        // parseArgs refuses a fleet command without an action; "agent" was handled above
+        action: options.fleetAction as FleetInput["action"],
         slug: options.slug,
         domain: options.domain,
+        operator: options.operator ?? process.env.SUDO_USER,
         admins: options.admins ?? [],
         members: options.members ?? [],
         brandFile: options.brandFile,

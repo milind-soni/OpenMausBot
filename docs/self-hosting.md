@@ -342,6 +342,14 @@ openmausbot fleet upgrade           # new release, then every running workspace 
 openmausbot fleet delete acme --yes # add --keep-data to keep the home folder
 ```
 
+Give `init` `--operator USER` (the Unix user your own workspace runs as; the
+user behind `sudo` by default) and it also installs the **fleet agent**: a
+root service on a Unix socket only that user may open. Your workspace then
+shows **Settings → Workspaces** (with the enterprise `admin` feature): create
+a workspace, add or remove who may sign in, suspend, resume, delete, upgrade
+all, and see each one's spend this month. Every action goes through the
+agent's audit log at `/var/log/openmausbot/fleet.jsonl`.
+
 `https://acme.example.com` is up when `create` returns; the first admin signs
 in with an emailed code. `OMB_LICENSE_KEY` in the environment (or
 `--license-key`) is carried into every workspace so a partner's white-label

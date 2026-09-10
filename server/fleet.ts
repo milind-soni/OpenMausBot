@@ -24,6 +24,10 @@ export interface FleetLayout {
   caddyDir: string;
   caddyfile: string;
   homesDir: string;
+  /** The root-run agent the operator workspace talks to (fleet-agent.ts). */
+  agentUnitFile: string;
+  socketPath: string;
+  auditFile: string;
 }
 
 export function fleetLayout(root = "/"): FleetLayout {
@@ -38,7 +42,35 @@ export function fleetLayout(root = "/"): FleetLayout {
     caddyDir: at("etc", "caddy", "omb.d"),
     caddyfile: at("etc", "caddy", "Caddyfile"),
     homesDir: at("var", "lib", "openmausbot"),
+    agentUnitFile: at("etc", "systemd", "system", "openmausbot-fleet.service"),
+    socketPath: at("run", "openmausbot", "fleet.sock"),
+    auditFile: at("var", "log", "openmausbot", "fleet.jsonl"),
   };
+}
+
+/** The agent: root, one socket, reachable by the operator's user only. */
+export function agentUnit(spec: { node: string; script: string; operator: string; layout?: FleetLayout }): string {
+  const layout = spec.layout ?? fleetLayout();
+  const strip = spec.script.endsWith(".ts") ? " --experimental-strip-types" : "";
+  return [
+    "# Written by `openmausbot fleet init`. The operator workspace creates and manages workspaces through this.",
+    "[Unit]",
+    "Description=OpenMausBot fleet agent",
+    "After=network-online.target",
+    "Wants=network-online.target",
+    "",
+    "[Service]",
+    "Type=simple",
+    `ExecStart=${spec.node}${strip} ${spec.script} fleet agent --socket ${layout.socketPath} --group ${spec.operator}`,
+    "RuntimeDirectory=openmausbot",
+    "RuntimeDirectoryMode=0755",
+    "Restart=always",
+    "RestartSec=3",
+    "",
+    "[Install]",
+    "WantedBy=multi-user.target",
+    "",
+  ].join("\n");
 }
 
 export interface FleetWorkspace {
@@ -54,6 +86,8 @@ export interface FleetRegistry {
   version: 1;
   domain: string;
   nextPort: number;
+  /** The Unix user whose workspace may drive the fleet agent. */
+  operator?: string;
   workspaces: Record<string, FleetWorkspace>;
 }
 
@@ -67,7 +101,13 @@ export function parseRegistry(text: string): FleetRegistry {
   if (!record || record.version !== 1 || typeof record.domain !== "string" || typeof record.nextPort !== "number" || !record.workspaces || typeof record.workspaces !== "object") {
     throw new Error("fleet.json is not a fleet registry this version understands");
   }
-  return { version: 1, domain: record.domain, nextPort: record.nextPort, workspaces: { ...record.workspaces } };
+  return {
+    version: 1,
+    domain: record.domain,
+    nextPort: record.nextPort,
+    ...(typeof record.operator === "string" ? { operator: record.operator } : {}),
+    workspaces: { ...record.workspaces },
+  };
 }
 
 export function fleetUser(slug: string): string {
@@ -232,24 +272,33 @@ export function allocatePort(registry: FleetRegistry): { port: number; next: num
 
 const argvText = (argv: string[]) => argv.join(" ");
 
-export function initPlan(input: { domain: string; node: string; script: string; layout?: FleetLayout }): { steps: FleetStep[]; registry: FleetRegistry } {
+export function assertUnixUser(name: string): void {
+  if (!/^[a-z_][a-z0-9_-]{0,31}$/.test(name)) throw new Error(`"${name}" is not a Unix user name`);
+}
+
+export function initPlan(input: { domain: string; node: string; script: string; operator?: string; layout?: FleetLayout }): { steps: FleetStep[]; registry: FleetRegistry } {
   assertDomain(input.domain);
+  if (input.operator) assertUnixUser(input.operator);
   const layout = input.layout ?? fleetLayout();
-  const registry = emptyRegistry(input.domain.toLowerCase());
+  const registry: FleetRegistry = { ...emptyRegistry(input.domain.toLowerCase()), ...(input.operator ? { operator: input.operator } : {}) };
   const steps: FleetStep[] = [
     { kind: "mkdir", path: layout.etcDir, mode: 0o755 },
     { kind: "mkdir", path: layout.instancesDir, mode: 0o700 },
     { kind: "mkdir", path: layout.homesDir, mode: 0o755 },
     { kind: "mkdir", path: layout.caddyDir, mode: 0o755 },
+    { kind: "mkdir", path: layout.auditFile.replace(/\/[^/]+$/, ""), mode: 0o750 },
     { kind: "write", path: layout.registryFile, content: `${JSON.stringify(registry, null, 2)}\n`, mode: 0o600 },
     { kind: "write", path: layout.unitFile, content: templateUnit({ node: input.node, script: input.script, layout }), mode: 0o644 },
     { kind: "write", path: layout.fenceFile, content: fenceRules([]), mode: 0o600 },
     { kind: "write", path: layout.fenceUnitFile, content: fenceUnit(layout), mode: 0o644 },
+    ...(input.operator ? [{ kind: "write" as const, path: layout.agentUnitFile, content: agentUnit({ node: input.node, script: input.script, operator: input.operator, layout }), mode: 0o644 }] : []),
     { kind: "append-once", path: layout.caddyfile, line: caddyImportLine(layout) },
     { kind: "run", argv: ["systemctl", "daemon-reload"], why: "load the workspace template and the fence unit" },
     { kind: "run", argv: ["systemctl", "enable", "--now", "openmausbot-fence.service"], why: "apply the loopback fence now and at boot" },
+    ...(input.operator ? [{ kind: "run" as const, argv: ["systemctl", "enable", "--now", "openmausbot-fleet.service"], why: `start the fleet agent for ${input.operator}` }] : []),
     { kind: "run", argv: ["systemctl", "reload", "caddy"], why: "start serving the workspaces folder" },
     { kind: "note", text: `point *.${registry.domain} at this server (a wildcard A/AAAA record); each workspace gets its own certificate when created` },
+    ...(input.operator ? [{ kind: "note" as const, text: `the workspace running as ${input.operator} can now manage workspaces from Settings → Workspaces` }] : []),
   ];
   return { steps, registry };
 }

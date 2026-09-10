@@ -100,6 +100,14 @@ describe("plans", () => {
     expect(steps.find((step) => step.kind === "append-once")).toEqual({ kind: "append-once", path: "/etc/caddy/Caddyfile", line: "import /etc/caddy/omb.d/*.caddy" });
     expect(argvOf(steps)).toEqual(["systemctl daemon-reload", "systemctl enable --now openmausbot-fence.service", "systemctl reload caddy"]);
     expect(() => initPlan({ domain: "not a domain", node: "n", script: "s", layout })).toThrow("domain name");
+    // with an operator, the agent unit is written and started, and the registry remembers who
+    const withAgent = initPlan({ domain: "agentada.cc", node: "/usr/bin/node", script: "/usr/lib/node_modules/openmausbot/cli.js", operator: "maus", layout });
+    expect(withAgent.registry.operator).toBe("maus");
+    const agent = withAgent.steps.find((step) => step.kind === "write" && step.path === "/etc/systemd/system/openmausbot-fleet.service");
+    expect(agent).toMatchObject({ content: expect.stringContaining("fleet agent --socket /run/openmausbot/fleet.sock --group maus") });
+    expect(agent).toMatchObject({ content: expect.stringContaining("RuntimeDirectory=openmausbot") });
+    expect(argvOf(withAgent.steps)).toContain("systemctl enable --now openmausbot-fleet.service");
+    expect(() => initPlan({ domain: "agentada.cc", node: "n", script: "s", operator: "Not A User", layout })).toThrow("Unix user");
   });
 
   it("creates a workspace as its own account with private data, a fenced port, a unit and a site", () => {

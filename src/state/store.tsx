@@ -419,6 +419,8 @@ export interface ConfigStatus {
   openaiCompat?: { configured: boolean; url?: string };
   /** what this server is entitled to; Settings shows only what works here */
   edition?: { edition: "oss" | "enterprise"; features: string[] };
+  /** a fleet agent exists on this server (Settings → Workspaces) */
+  fleet?: { available: boolean };
   budgets?: { monthlyUsd?: number; warnAtPercent?: number };
   billing?: { currency?: string; prices?: Record<string, { inputPerMillion: number; outputPerMillion: number; cachedInputPerMillion?: number }> };
   composio: { configured: boolean; mode?: "managed" | "self-hosted" | "unavailable" };
@@ -572,7 +574,8 @@ export type AppSettingsSection =
   | "companion"
   | "remote"
   | "computer"
-  | "usage";
+  | "usage"
+  | "workspaces";
 
 export type BotSettingsSection =
   | "overview"
