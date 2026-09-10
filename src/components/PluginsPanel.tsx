@@ -87,10 +87,6 @@ export function disconnectAccountConfirmation(
   return t("connectors.disconnectConfirm", { identity, service });
 }
 
-export function connectedAppsMayDisconnect(remoteClient: boolean): boolean {
-  return !remoteClient;
-}
-
 export function requiresAccountAlias(message: string) {
   return /account alias.*existing connection.*not replaced/i.test(message);
 }
@@ -213,7 +209,6 @@ function ServiceIcon({ card }: { card: ToolkitCard }) {
 export function PluginsPanel() {
   const { state, dispatch } = useStore();
   const remoteClient = window.ogb?.remoteClient?.active === true;
-  const mayDisconnect = connectedAppsMayDisconnect(remoteClient);
   const dialogRef = useRef<HTMLDivElement>(null);
   const surface = state.pluginsSurface;
   const [cards, setCards] = useState<ToolkitCard[] | null>(null);
@@ -743,23 +738,21 @@ export function PluginsPanel() {
                                 {account.alias ? `${account.id} · ` : ""}{account.status.toLowerCase()}
                               </div>
                             </div>
-                            {mayDisconnect && (
-                              <button
-                                type="button"
-                                disabled={busy}
-                                onClick={() => {
-                                  if (!window.confirm(disconnectAccountConfirmation(card.label, account))) return;
-                                  disconnectAccount(card.slug, account.id);
-                                }}
-                                className="rounded-md px-2 py-1 text-[11px] text-ink-secondary transition-colors hover:bg-danger/10 hover:text-danger disabled:opacity-40"
-                                aria-label={t("connectors.disconnectAria", {
-                                  account: account.alias || account.id,
-                                  service: card.label,
-                                })}
-                              >
-                                {t("connectors.disconnect")}
-                              </button>
-                            )}
+                            <button
+                              type="button"
+                              disabled={busy}
+                              onClick={() => {
+                                if (!window.confirm(disconnectAccountConfirmation(card.label, account))) return;
+                                disconnectAccount(card.slug, account.id);
+                              }}
+                              className="rounded-md px-2 py-1 text-[11px] text-ink-secondary transition-colors hover:bg-danger/10 hover:text-danger disabled:opacity-40"
+                              aria-label={t("connectors.disconnectAria", {
+                                account: account.alias || account.id,
+                                service: card.label,
+                              })}
+                            >
+                              {t("connectors.disconnect")}
+                            </button>
                           </div>
                         );
                       })}
