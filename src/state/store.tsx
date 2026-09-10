@@ -575,6 +575,7 @@ export type AppSettingsSection =
   | "remote"
   | "computer"
   | "usage"
+  | "people"
   | "workspaces";
 
 export type BotSettingsSection =

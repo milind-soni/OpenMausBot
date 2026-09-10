@@ -51,6 +51,19 @@ export function takePairingCodeFromLocation(): string | null {
   return decodeURIComponent(m[1]);
 }
 
+/** The invited address carried on a pair link (`/pair?email=…`): prefilled
+ * on the sign-in page and dropped from the address bar. Never trusted on
+ * its own; the one-time code still goes to the address itself. */
+export function takeInvitedEmailFromLocation(): string | null {
+  const params = new URLSearchParams(location.search);
+  const email = params.get("email")?.trim().toLowerCase() ?? "";
+  if (!email) return null;
+  params.delete("email");
+  const search = params.toString();
+  history.replaceState(null, "", location.pathname + (search ? `?${search}` : "") + location.hash);
+  return /^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email) ? email : null;
+}
+
 /** A default device name, so the sessions list reads "Safari on iPhone" not "Unnamed device". */
 export function defaultDeviceLabel(userAgent: string = navigator.userAgent): string {
   const browser = /Edg\//.test(userAgent) ? "Edge" : /OPR\//.test(userAgent) ? "Opera" : /Chrome\//.test(userAgent) ? "Chrome" : /Firefox\//.test(userAgent) ? "Firefox" : /Safari\//.test(userAgent) ? "Safari" : "Browser";

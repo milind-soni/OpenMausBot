@@ -20,7 +20,7 @@ const fieldLabel = "mt-4 block text-[12px] font-medium text-ink-secondary";
  * app shows instead of itself when a remote browser has no session yet.
  * When the server has a sign-in allow-list, "sign in with your email" comes
  * first and the pairing code stays one link away. */
-export function PairPage({ initialCode, reason }: { initialCode: string | null; reason?: string }) {
+export function PairPage({ initialCode, initialEmail = null, reason }: { initialCode: string | null; initialEmail?: string | null; reason?: string }) {
   const [code, setCode] = useState(initialCode ?? "");
   const [label, setLabel] = useState(defaultDeviceLabel());
   const [environment, setEnvironment] = useState<EnvironmentDescriptor | null>(null);
@@ -30,7 +30,7 @@ export function PairPage({ initialCode, reason }: { initialCode: string | null; 
   // one id per code typed: a retry after a lost response reuses it, a new code gets a new one
   const [attemptId, setAttemptId] = useState(() => newAttemptId());
   const [mode, setMode] = useState<"email" | "code" | null>(initialCode ? "code" : null);
-  const [email, setEmail] = useState("");
+  const [email, setEmail] = useState(initialEmail ?? "");
   const [otp, setOtp] = useState("");
   const [sent, setSent] = useState(false);
 

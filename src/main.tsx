@@ -1,7 +1,7 @@
 import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
 import App from "./App";
-import { readSessionState, takePairingCodeFromLocation } from "./lib/session";
+import { readSessionState, takePairingCodeFromLocation, takeInvitedEmailFromLocation } from "./lib/session";
 import { bootstrapBrand } from "./lib/brand";
 import { applySkin, readSkin } from "./lib/skins";
 import { PairPage } from "./pair/PairPage";
@@ -18,7 +18,7 @@ applySkin(readSkin());
  * device"; on the owner's own machine the server trusts loopback and this
  * check is a single fast request. */
 async function chooseRoot(): Promise<React.ReactNode> {
-  if (location.pathname === "/pair") return <PairPage initialCode={takePairingCodeFromLocation()} />;
+  if (location.pathname === "/pair") return <PairPage initialCode={takePairingCodeFromLocation()} initialEmail={takeInvitedEmailFromLocation()} />;
   const session = await readSessionState();
   if (session.kind === "unauthenticated") return <PairPage initialCode={null} reason={session.error} />;
   return <App />;

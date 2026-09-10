@@ -476,6 +476,19 @@ decided only by your allow-list. Wrong codes count against the same lockout
 as pairing codes. Sessions from a sign-in show the email in
 `openmausbot sessions` and can be revoked the same way.
 
+### Inviting people
+
+**Settings → People** lists who may sign in, their role, when they were last
+seen, and what each person spent this month. **Invite** adds an address (or
+`@company.com` for everyone there) and shows a link like
+`https://your.host/pair?email=name%40company.com`: it opens the sign-in page
+with the address filled in, and the one-time code still goes to that address.
+Roles change with one click; removing someone stops new sign-ins.
+
+On the Workspaces screen, creating a client workspace shows the same kind of
+link for that workspace's admin, so a client gets one address, one workspace
+and one link.
+
 ## Putting a proxy in front
 
 Any reverse proxy works, given three things:

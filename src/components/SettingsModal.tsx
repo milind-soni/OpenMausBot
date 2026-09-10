@@ -3,7 +3,7 @@
 // is the stuff shared by every bot: who you are, your keys, and the
 // machine your bots can borrow.
 import { useEffect, useRef, useState } from "react";
-import { Coins, FlaskConical, KeyRound, Monitor, Palette, Search, TabletSmartphone, Terminal, User, X, Building2 } from "lucide-react";
+import { Coins, FlaskConical, KeyRound, Monitor, Palette, Search, TabletSmartphone, Terminal, User, Users, X, Building2 } from "lucide-react";
 import { api, useStore, type AppSettingsSection, type ConfigStatus } from "@/state/store";
 import { analyticsEnabled, setAnalyticsEnabled } from "@/lib/analytics";
 import { browserAvailable, browserUnavailableReason, builtInBrowserEnabled, showToolCallsEnabled, skillAuthoringEnabled } from "@/lib/feature-flags";
@@ -15,7 +15,7 @@ import { EnginesSettings } from "./EnginesSettings";
 import { LocalComputerSection } from "./LocalComputerSection";
 import { CompanionSection } from "./CompanionSection";
 import { ServerPairingCard } from "./ServerPairingCard";
-import { SignInAccessCard } from "./SignInAccessCard";
+import { PeopleSection } from "./PeopleSection";
 import { CustomDomainSettings } from "./CustomDomainSettings";
 import { BrowserProfilesManager } from "./BrowserProfilesManager";
 import { RemoteComputerSection } from "./RemoteComputerSection";
@@ -46,6 +46,7 @@ const SECTIONS: Array<{
   { id: "companion", labelKey: "settings.section.companion", icon: TabletSmartphone, keywords: ["companion", "device", "phone", "desktop", "client", "host", "pair", "pairing", "mobile", "https", "secure", "tailscale", "wifi", "remote", "advanced", "domain", "dns", "self-hosted", "server", "caddy"] },
   { id: "computer", labelKey: "settings.section.computer", icon: Monitor, keywords: ["vm", "virtual", "desktop"] },
   { id: "usage", labelKey: "settings.section.usage", icon: Coins, keywords: ["tokens", "cost", "billing"] },
+  { id: "people", labelKey: "settings.section.people", icon: Users, keywords: ["people", "users", "invite", "sign in", "members", "admins", "access"] },
   { id: "workspaces", labelKey: "settings.section.workspaces", icon: Building2, keywords: ["clients", "tenants", "fleet", "workspaces"] },
 ];
 
@@ -419,7 +420,9 @@ export function SettingsModal() {
   const q = query.trim().toLowerCase();
   const availableSections = SECTIONS.filter((entry) => !remoteActive || entry.id === "companion" || entry.id === "appearance")
     // the operator's screen for other workspaces exists only where a fleet agent does
-    .filter((entry) => entry.id !== "workspaces" || workspacesAvailable(state.config));
+    .filter((entry) => entry.id !== "workspaces" || workspacesAvailable(state.config))
+    // sign-in by email is a hosted server's; the desktop app pairs devices under Remote access
+    .filter((entry) => entry.id !== "people" || !window.ogb);
   const visibleSections = availableSections.filter((entry) => sectionMatches(entry, q));
   const sectionLabelKey = SECTIONS.find((entry) => entry.id === section)?.labelKey;
   const nextVisibleSection = visibleSections.some((entry) => entry.id === section) ? undefined : visibleSections[0]?.id;
@@ -630,7 +633,6 @@ export function SettingsModal() {
                 <RemoteComputerSection />
                 {!remoteActive && <CustomDomainSettings />}
                 {/* a hosted server reached from a browser: pair phones and see devices here; the desktop app has its own companion flow */}
-                {!window.ogb && <SignInAccessCard />}
                 {!window.ogb && <ServerPairingCard />}
                 {!remoteActive && <CompanionSection profileEmail={state.config?.profile?.email} />}
               </>
@@ -639,6 +641,7 @@ export function SettingsModal() {
             {section === "computer" && <LocalComputerSection />}
 
             {section === "usage" && <UsageSection />}
+            {section === "people" && <PeopleSection />}
             {section === "workspaces" && <WorkspacesSection />}
           </div>
         </div>
