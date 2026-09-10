@@ -9,7 +9,7 @@ import { analyticsEnabled, setAnalyticsEnabled } from "@/lib/analytics";
 import { browserAvailable, browserUnavailableReason, builtInBrowserEnabled, showToolCallsEnabled, skillAuthoringEnabled } from "@/lib/feature-flags";
 import { localeChoices, type LocaleKey } from "@/locales";
 import { t } from "@/lib/i18n";
-import { ApiKeyRow, VpsConnection } from "./ApiKeys";
+import { ApiKeyRow, OpenAiCompatUrl, VpsConnection } from "./ApiKeys";
 import { useUpdaterState } from "@/lib/updater";
 import { EnginesSettings } from "./EnginesSettings";
 import { LocalComputerSection } from "./LocalComputerSection";
@@ -597,6 +597,13 @@ export function SettingsModal() {
                       {t("settings.connections.ready")}
                     </div>
                   ) : null}
+                  <div className="text-[11.5px] font-medium uppercase tracking-wide text-ink-secondary">{t("keys.providers.title")}</div>
+                  <p className="-mt-3 text-[12px] leading-relaxed text-ink-secondary">{t("keys.providers.subtitle")}</p>
+                  <ApiKeyRow section="anthropic" testProvider="anthropic" />
+                  <ApiKeyRow section="openaiCompat" testProvider="openaiCompat" />
+                  <OpenAiCompatUrl />
+                  <ApiKeyRow section="xai" testProvider="xai" />
+                  <div className="pt-2 text-[11.5px] font-medium uppercase tracking-wide text-ink-secondary">{t("keys.integrations.title")}</div>
                   <ApiKeyRow section="box" />
                   <VpsConnection />
                   <ApiKeyRow section="opencodeGo" />

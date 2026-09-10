@@ -290,6 +290,25 @@ the copy OMB installed is the one bots run. The package name comes from the
 engine's own install descriptor, never from the browser. Engines installed
 by a `curl | bash` script still need the command on the server.
 
+## Provider keys, billed per token
+
+**Settings → Connections → Model providers** takes the keys a whole workspace
+runs on, for people who would rather pay per token than have every user sign
+in. Keys are write-only: the page shows connected-or-not and a **Test** button
+that makes one read-only request to the provider from the server.
+
+- **Anthropic API key**: while one is saved, every Claude bot runs on it and
+  Claude Code reports the real cost per turn to the usage ledger. Nobody has
+  to sign in, and Settings → Engines shows "workspace API key" instead of a
+  person. Remove the key to go back to personal logins. The server's own
+  `ANTHROPIC_API_KEY` environment variable is deliberately ignored; use the
+  page, `config.json`, or `OMB_ANTHROPIC_API_KEY`.
+- **OpenAI-compatible API key and base URL**: OpenRouter by default, or Groq,
+  Together, a gateway, or `https://api.openai.com/v1` for OpenAI itself. This
+  powers the OpenAI-compatible engine. Codex has no key path by design and
+  always uses a personal ChatGPT login.
+- **xAI API key**: the Grok API engine and xAI image generation.
+
 ## Signing the engines in without a terminal
 
 On a hosted server, the engine CLIs sign in from Settings → Engines:

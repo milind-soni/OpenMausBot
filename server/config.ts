@@ -256,6 +256,10 @@ const appConfigSchema = z.object({
     phone: z.enum(["ios", "android"]).optional(),
   }).optional(),
   xai: z.object({ key: optionalText, url: optionalText }).optional(),
+  /** Anthropic API key for Claude Code billed per token, handed only to
+   * Claude instances; `url` only for a proxy or a test double. Never a
+   * personal-login OAuth token. */
+  anthropic: z.object({ key: optionalText, url: optionalText }).optional(),
   /** `model` seeds the default selection; `provider` pins an OpenRouter
    * upstream (e.g. "fireworks"). Both are non-secret and optional. */
   openaiCompat: z
@@ -325,6 +329,7 @@ export interface AppConfig {
   mcpServers?: Record<string, unknown>;
   language?: string;
   xai?: { key?: string; url?: string };
+  anthropic?: { key?: string; url?: string };
   openaiCompat?: { key?: string; url?: string; model?: string; provider?: string };
   composio?: { apiKey?: string; userId?: string; sessionId?: string };
   box?: { token?: string };
@@ -547,6 +552,12 @@ export function loadConfig(): AppConfig {
   // shadow the save until the next launch.
   cfg.xai = { ...cfg.xai };
   if (process.env.XAI_API_KEY !== undefined) cfg.xai.key = process.env.XAI_API_KEY;
+  // Deliberately not ANTHROPIC_API_KEY: a key in the server's own env is
+  // never the workspace key, so an operator's stray variable cannot flip
+  // every Claude bot onto pay-as-you-go billing.
+  cfg.anthropic = { ...cfg.anthropic };
+  if (process.env.OMB_ANTHROPIC_API_KEY !== undefined) cfg.anthropic.key = process.env.OMB_ANTHROPIC_API_KEY;
+  if (process.env.OMB_ANTHROPIC_API_URL !== undefined) cfg.anthropic.url = process.env.OMB_ANTHROPIC_API_URL;
   cfg.openaiCompat = { ...cfg.openaiCompat };
   if (process.env.OPENAI_COMPAT_API_KEY !== undefined) cfg.openaiCompat.key = process.env.OPENAI_COMPAT_API_KEY;
   if (process.env.OPENAI_COMPAT_URL !== undefined) cfg.openaiCompat.url = process.env.OPENAI_COMPAT_URL;
@@ -584,6 +595,7 @@ export function loadConfig(): AppConfig {
 export function syncCredentialEnv(patch: Partial<AppConfig>): void {
   const secrets: Array<[value: string | undefined, name: string]> = [
     [patch.xai?.key, "XAI_API_KEY"],
+    [patch.anthropic?.key, "OMB_ANTHROPIC_API_KEY"],
     [patch.openaiCompat?.key, "OPENAI_COMPAT_API_KEY"],
     [patch.composio?.apiKey, "COMPOSIO_API_KEY"],
     [patch.box?.token, "BOX_TOKEN"],
@@ -601,6 +613,7 @@ export function syncCredentialEnv(patch: Partial<AppConfig>): void {
   // must follow the same set-when-truthy / delete-when-cleared rule as keys.
   const settings: Array<[value: string | undefined, name: string]> = [
     [patch.openaiCompat?.url, "OPENAI_COMPAT_URL"],
+    [patch.anthropic?.url, "OMB_ANTHROPIC_API_URL"],
     [patch.openaiCompat?.model, "OPENAI_COMPAT_MODEL"],
     [patch.openaiCompat?.provider, "OPENAI_COMPAT_PROVIDER"],
   ];
@@ -618,6 +631,8 @@ export function syncCredentialEnv(patch: Partial<AppConfig>): void {
  * child these are someone else's keys riding along in `...process.env`. */
 export const WORKSPACE_CREDENTIAL_ENV = [
   "XAI_API_KEY",
+  "OMB_ANTHROPIC_API_KEY",
+  "OMB_ANTHROPIC_API_URL",
   "OPENAI_COMPAT_API_KEY",
   "OPENAI_COMPAT_URL",
   "BOX_TOKEN",
@@ -802,6 +817,11 @@ interface InstanceCliUpdate {
 function injectedEnvironment(cfg: AppConfig, driver: string): Map<string, string> {
   const environment = new Map<string, string>();
   if (driver === "grok" && cfg.xai?.key) environment.set("XAI_API_KEY", cfg.xai.key);
+  // The workspace Anthropic key reaches Claude Code as the variable it
+  // reads, carried in the instance environment so the driver can tell a
+  // deliberate workspace key from one riding along in the parent's env.
+  if (driver === "claudeAgent" && cfg.anthropic?.key) environment.set("ANTHROPIC_API_KEY", cfg.anthropic.key);
+  if (driver === "claudeAgent" && cfg.anthropic?.key && cfg.anthropic.url) environment.set("ANTHROPIC_BASE_URL", cfg.anthropic.url);
   if (driver === "openai-compat" && cfg.openaiCompat?.key)
     environment.set("OPENAI_COMPAT_API_KEY", cfg.openaiCompat.key);
   if (driver === "openai-compat" && cfg.openaiCompat?.url)

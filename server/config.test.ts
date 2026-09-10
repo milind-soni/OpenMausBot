@@ -430,6 +430,15 @@ describe("default fleet", () => {
     });
   });
 
+  it("hands a saved Anthropic key only to Claude instances, as the variable the CLI reads", () => {
+    const map = instanceConfigs({ anthropic: { key: "sk-ant-fixture", url: "https://anthropic-proxy.example.test" } });
+    expect(map.claude.environment).toEqual({ ANTHROPIC_API_KEY: "sk-ant-fixture", ANTHROPIC_BASE_URL: "https://anthropic-proxy.example.test" });
+    expect(map.codex.environment).toEqual({});
+    expect(map.openaiCompat.environment).toEqual({});
+    expect(instanceConfigs({ anthropic: { url: "https://only-a-url.example.test" } }).claude.environment).toEqual({});
+    expect(parseConfigPatch({ anthropic: { key: "sk-ant-new" } })).toEqual({ anthropic: { key: "sk-ant-new" } });
+  });
+
   it("preserves a per-instance OpenAI-compatible URL override", () => {
     const map = instanceConfigs({
       openaiCompat: { url: "https://workspace.example.test/v1" },

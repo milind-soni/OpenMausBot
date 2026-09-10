@@ -169,6 +169,16 @@ describe("Settings → Engines → Claude accounts", () => {
     expect(html).not.toContain("pause");
   });
 
+  it("names the workspace API key instead of a person and offers no sign-out for it", () => {
+    const keyed = claude(true);
+    keyed.snapshot = { state: "available", authenticated: true, account: { method: "api-key" } };
+    keyed.authentication = { method: "paste-code", signOut: true };
+    const html = renderClaude(keyed);
+    expect(html).toContain("workspace API key");
+    expect(html).not.toContain("work@example.test");
+    expect(html).not.toContain("Sign out of Claude");
+  });
+
   it("protects the default and assigned accounts and explains credential preservation", () => {
     const defaultMarkup = renderClaude(claude(true, true));
     expect(defaultMarkup).toContain("Default account");

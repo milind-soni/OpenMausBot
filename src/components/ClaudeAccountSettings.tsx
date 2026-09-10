@@ -111,8 +111,13 @@ export function ClaudeAccountSettings({ instance }: { instance: InstanceInfo }) 
   const authenticated = instance.snapshot.authenticated === true;
   // Only a hosted server that can run `claude auth logout` for this account
   // offers it; the desktop app keeps the CLI's own sign-out.
-  const canSignOut = authenticated && instance.authentication?.signOut === true;
-  const identity = authenticated ? [instance.snapshot.account?.email, instance.snapshot.account?.organization].filter(Boolean).join(" · ") : "";
+  // On the workspace API key there is no personal login to sign out of;
+  // removing the key in Settings → Connections is the way back.
+  const onApiKey = instance.snapshot.account?.method === "api-key";
+  const canSignOut = authenticated && instance.authentication?.signOut === true && !onApiKey;
+  const identity = authenticated
+    ? onApiKey ? t("engines.account.apiKey") : [instance.snapshot.account?.email, instance.snapshot.account?.organization].filter(Boolean).join(" · ")
+    : "";
 
   const refresh = async () => {
     if (busy || signingOut) return;

@@ -65,17 +65,21 @@ function claudeAuthStatus(
           return resolve({ authenticated: false });
         }
         // Only display identity fields, never the CLI's full auth response.
-        const identity = status as { email?: unknown; orgName?: unknown };
+        const identity = status as { email?: unknown; orgName?: unknown; authMethod?: unknown };
         const boundedText = (value: unknown, max: number): string | undefined =>
           typeof value === "string" && value.trim().length > 0 && value.length <= max && !/[\p{Cc}\p{Cf}]/u.test(value)
             ? value.trim() : undefined;
         const candidateEmail = boundedText(identity.email, 254);
         const email = candidateEmail && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(candidateEmail) ? candidateEmail : undefined;
         const organization = boundedText(identity.orgName, 160);
-        resolve({
-          authenticated: true,
-          ...(email || organization ? { account: { ...(email ? { email } : {}), ...(organization ? { organization } : {}) } } : {}),
-        });
+        // An API key is a workspace decision, not a person: say so instead
+        // of showing an empty identity.
+        const account = {
+          ...(email ? { email } : {}),
+          ...(organization ? { organization } : {}),
+          ...(identity.authMethod === "api_key" ? { method: "api-key" as const } : {}),
+        };
+        resolve({ authenticated: true, ...(Object.keys(account).length ? { account } : {}) });
       } catch {
         resolve({ authenticated: false });
       }
@@ -168,7 +172,10 @@ function claudeEnvironment(
   // env-injected at boot); none of them are this CLI's to see.
   stripWorkspaceCredentialEnv(env);
   const applied = applyClaudeInject(env, model);
-  if (!applied.injected) delete env.ANTHROPIC_API_KEY;
+  // A key set on purpose for this workspace (Settings → Connections, carried
+  // in the instance environment) stays. One riding along in the parent's
+  // env never does: it would flip a subscription login to pay-as-you-go.
+  if (!applied.injected && !instanceEnvironment.ANTHROPIC_API_KEY) delete env.ANTHROPIC_API_KEY;
   return env;
 }
 

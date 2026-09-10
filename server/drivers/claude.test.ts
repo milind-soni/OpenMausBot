@@ -405,6 +405,17 @@ describe("ClaudeDriver turns (fake CLI)", () => {
     expect(recorder.events.at(-1)).toMatchObject({ type: "turn.completed", ok: false, stopReason: "auth_required" });
   });
 
+  it("keeps a workspace Anthropic key set on purpose while still dropping one from the parent env", async () => {
+    await create(undefined, { ANTHROPIC_API_KEY: "sk-ant-workspace-fixture" });
+    const dump = join(scratch, "dump-workspace-key.json");
+    process.env.FAKE_CLAUDE_DUMP = dump;
+    process.env.ANTHROPIC_API_KEY = "sk-should-not-leak";
+    await instance.adapter.sendTurn({ threadId: "t-workspace-key", text: "hello" });
+    await recorder.until((e) => e.type === "turn.completed");
+    const seen = JSON.parse(readFileSync(dump, "utf8"));
+    expect(seen.env.ANTHROPIC_API_KEY).toBe("sk-ant-workspace-fixture");
+  });
+
   it("keeps user and system prompts off argv and strips identity env vars", async () => {
     await create();
     const dump = join(scratch, "dump.json");

@@ -132,6 +132,7 @@ import { augmentedPath, findCliCandidates, resetPathCache } from "./env-path.ts"
 import { registerEnginesBinDir } from "./engine-install.ts";
 import { appendUsage, parseUsageRange, readUsage, summarizeUsage, usageCsv, USAGE_GROUPINGS, type UsageGroupBy, type UsageTrigger } from "./usage-ledger.ts";
 import type { RequestAuth } from "./request-auth.ts";
+import { checkProviderKey, PROVIDER_KEY_KINDS, type ProviderKeyKind } from "./provider-key-check.ts";
 import { describeSpawnFailure, execCli } from "./procs.ts";
 import { blockedTarget, buildNotification, type Notification } from "./notify.ts";
 import {
@@ -8168,6 +8169,9 @@ async function perBotLocalVmCountForModeChange(): Promise<number | null> {
 function configStatus() {
   return {
     xai: { configured: Boolean(cfg.xai?.key) },
+    anthropic: { configured: Boolean(cfg.anthropic?.key) },
+    // the base URL is a setting, not a secret; the key stays write-only
+    openaiCompat: { configured: Boolean(cfg.openaiCompat?.key), url: cfg.openaiCompat?.url ?? "" },
     composio: {
       configured: composio.configured(cfg),
       mode: composio.connectionMode(cfg),
@@ -13388,6 +13392,26 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
       const groupBy = requested as UsageGroupBy;
       res.setHeader("cache-control", "no-store");
       return json(res, 200, { from: range.from.toISOString(), to: range.to.toISOString(), groupBy, ...summarizeUsage(rows, groupBy) });
+    }
+
+    // ── provider key check: does a pasted or saved key open the provider's door ──
+    // One read-only request from this server; the verdict never carries the
+    // key. Admin scope by default, like every route not opened to clients.
+    if (method === "POST" && path === "/api/keys/test") {
+      const body = await readBody(req, 8192);
+      const provider = body?.provider;
+      if (!PROVIDER_KEY_KINDS.includes(provider as ProviderKeyKind)) {
+        return json(res, 400, { error: `provider must be one of ${PROVIDER_KEY_KINDS.join(", ")}` });
+      }
+      const kind = provider as ProviderKeyKind;
+      const saved = kind === "anthropic" ? cfg.anthropic : kind === "openaiCompat" ? cfg.openaiCompat : cfg.xai;
+      const pasted = typeof body?.key === "string" ? body.key.trim() : "";
+      const key = pasted || saved?.key || "";
+      if (!key) return json(res, 400, { error: "No key to test. Paste one or save one first." });
+      if (key.length > 512) return json(res, 400, { error: "That does not look like an API key." });
+      const url = typeof body?.url === "string" && body.url.trim() ? body.url.trim() : saved?.url;
+      res.setHeader("cache-control", "no-store");
+      return json(res, 200, await checkProviderKey({ provider: kind, key, url }));
     }
 
     if (method === "GET" && path === "/api/decisions") {

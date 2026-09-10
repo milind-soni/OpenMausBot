@@ -8,7 +8,9 @@ import { cn } from "@/lib/cn";
 import { t } from "@/lib/i18n";
 import type { LocaleKey } from "@/locales";
 
-export type ConfigSection = "composio" | "box" | "opencodeGo";
+export type ConfigSection = "composio" | "box" | "opencodeGo" | "anthropic" | "openaiCompat" | "xai";
+/** Sections whose key can be tried against the provider from the server. */
+export type TestableProvider = "anthropic" | "openaiCompat" | "xai";
 
 const SECTIONS: Record<
   ConfigSection,
@@ -20,9 +22,14 @@ const SECTIONS: Record<
   },
   box: { body: (v) => ({ box: { token: v } }), flag: (c) => c.box.configured },
   opencodeGo: { body: (v) => ({ opencodeGo: { apiKey: v } }), flag: (c) => c.opencodeGo?.configured ?? false },
+  anthropic: { body: (v) => ({ anthropic: { key: v } }), flag: (c) => c.anthropic?.configured ?? false },
+  openaiCompat: { body: (v) => ({ openaiCompat: { key: v } }), flag: (c) => c.openaiCompat?.configured ?? false },
+  xai: { body: (v) => ({ xai: { key: v } }), flag: (c) => c.xai?.configured ?? false },
 };
 
-const ELECTRON_CREDENTIAL: Record<ConfigSection, "composioApiKey" | "boxToken" | "opencodeGoApiKey"> = {
+// Provider keys have no desktop-shell slot yet and go through the server's
+// own 0600 config, the same place they live on a hosted server.
+const ELECTRON_CREDENTIAL: Partial<Record<ConfigSection, "composioApiKey" | "boxToken" | "opencodeGoApiKey">> = {
   composio: "composioApiKey",
   box: "boxToken",
   opencodeGo: "opencodeGoApiKey",
@@ -65,6 +72,30 @@ const CREDENTIALS: Record<
     descriptionKey: "keys.opencode.desc",
     href: "https://opencode.ai/docs/providers/",
     linkLabelKey: "keys.opencode.link",
+    optional: true,
+  },
+  anthropic: {
+    labelKey: "keys.anthropic.label",
+    placeholder: "sk-ant-…",
+    descriptionKey: "keys.anthropic.desc",
+    href: "https://console.anthropic.com/settings/keys",
+    linkLabelKey: "keys.anthropic.link",
+    optional: true,
+  },
+  openaiCompat: {
+    labelKey: "keys.openaiCompat.label",
+    placeholder: "sk-or-v1-…",
+    descriptionKey: "keys.openaiCompat.desc",
+    href: "https://openrouter.ai/keys",
+    linkLabelKey: "keys.openaiCompat.link",
+    optional: true,
+  },
+  xai: {
+    labelKey: "keys.xai.label",
+    placeholder: "xai-…",
+    descriptionKey: "keys.xai.desc",
+    href: "https://console.x.ai",
+    linkLabelKey: "keys.xai.link",
     optional: true,
   },
 };
@@ -155,15 +186,20 @@ function CredentialHelp({ section }: { section: ConfigSection }) {
 export function ApiKeyRow({
   section,
   onSaved,
+  testProvider,
 }: {
   section: ConfigSection;
   /** Called after a successful save with the section's new configured flag. */
   onSaved?: (configured: boolean) => void;
+  /** Offer a Test button that tries the saved key against the provider. */
+  testProvider?: TestableProvider;
 }) {
   const { state, dispatch } = useStore();
   const [value, setValue] = useState("");
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [testing, setTesting] = useState(false);
+  const [verdict, setVerdict] = useState<string | null>(null);
 
   const configured = state.config ? SECTIONS[section].flag(state.config) : false;
   const clearing = !value.trim() && configured;
@@ -173,8 +209,10 @@ export function ApiKeyRow({
     if (saving || (!value.trim() && !configured)) return;
     setSaving(true);
     setError(null);
-    const request = window.ogb?.setCredential
-      ? window.ogb.setCredential(ELECTRON_CREDENTIAL[section], value.trim())
+    const electronSlot = ELECTRON_CREDENTIAL[section];
+    setVerdict(null);
+    const request = window.ogb?.setCredential && electronSlot
+      ? window.ogb.setCredential(electronSlot, value.trim())
       : api("/api/config", {
           method: "PUT",
           body: JSON.stringify(SECTIONS[section].body(value.trim())),
@@ -187,6 +225,27 @@ export function ApiKeyRow({
       })
       .catch((e) => setError(e.message))
       .finally(() => setSaving(false));
+  };
+
+  const test = async () => {
+    if (!testProvider || testing) return;
+    setTesting(true);
+    setVerdict(null);
+    try {
+      // A pasted, unsaved key is tried as typed; otherwise the saved one.
+      const result = await api("/api/keys/test", { method: "POST", body: JSON.stringify({ provider: testProvider, ...(value.trim() ? { key: value.trim() } : {}) }) });
+      setVerdict(
+        result.ok
+          ? result.models?.length ? t("keys.testOk", { models: result.models.join(", ") }) : t("keys.testOkNoModels")
+          : result.reason === "rejected" ? t("keys.testRejected")
+            : result.reason === "unreachable" ? t("keys.testUnreachable")
+              : t("keys.testUnexpected", { status: String(result.status ?? "?") }),
+      );
+    } catch (cause) {
+      setVerdict(cause instanceof Error ? cause.message : String(cause));
+    } finally {
+      setTesting(false);
+    }
   };
 
   return (
@@ -227,8 +286,19 @@ export function ApiKeyRow({
         >
           {saving ? <Loader2 size={13} className="animate-spin" /> : clearing ? t("keys.clear") : <><Check size={13} />{t("common.save")}</>}
         </button>
+        {testProvider && (configured || value.trim()) && (
+          <button
+            type="button"
+            onClick={() => void test()}
+            disabled={testing || saving}
+            className="flex shrink-0 items-center justify-center rounded-lg border border-hairline/40 px-3 py-2 text-[13px] text-ink-secondary hover:bg-raised/50 hover:text-ink disabled:cursor-not-allowed disabled:opacity-50"
+          >
+            {testing ? t("keys.testing") : t("keys.test")}
+          </button>
+        )}
       </div>
       {error && <div className="mt-1 text-[12px] text-danger">{error}</div>}
+      {verdict && <div role="status" className="mt-1 text-[12px] text-ink-secondary">{verdict}</div>}
     </div>
   );
 }
@@ -307,6 +377,55 @@ export function VpsConnection() {
           {saving ? <Loader2 size={13} className="animate-spin" /> : !alias.trim() && configured ? t("keys.clear") : <><Check size={13} />{t("common.save")}</>}
         </button>
       </div>
+      {error && <div className="mt-1 text-[12px] text-danger">{error}</div>}
+    </div>
+  );
+}
+
+/** The OpenAI-compatible engine's base URL: a setting next to its key, so
+ * OpenRouter, Groq, Together or OpenAI itself are one field away. */
+export function OpenAiCompatUrl() {
+  const { state, dispatch } = useStore();
+  const saved = state.config?.openaiCompat?.url ?? "";
+  const [value, setValue] = useState(saved);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  useEffect(() => { setValue(saved); }, [saved]);
+  const dirty = value.trim() !== saved;
+
+  const save = () => {
+    if (saving || !dirty) return;
+    setSaving(true);
+    setError(null);
+    api("/api/config", { method: "PUT", body: JSON.stringify({ openaiCompat: { url: value.trim() } }) })
+      .then((status: ConfigStatus) => dispatch({ type: "configStatus", config: status }))
+      .catch((e) => setError(e.message))
+      .finally(() => setSaving(false));
+  };
+
+  return (
+    <div>
+      <div className="mb-1.5 text-[13px] text-ink-secondary">{t("keys.openaiCompat.url")}</div>
+      <div className="flex gap-2">
+        <input
+          type="url"
+          value={value}
+          onChange={(e) => setValue(e.target.value)}
+          onKeyDown={(e) => e.key === "Enter" && save()}
+          placeholder="https://openrouter.ai/api/v1"
+          aria-label={t("keys.openaiCompat.url")}
+          spellCheck={false}
+          className="w-full rounded-lg border border-hairline/40 bg-inset px-3 py-2 font-mono text-[12px] text-ink placeholder:text-ink-secondary focus:border-hairline focus:outline-none"
+        />
+        <button
+          onClick={save}
+          disabled={saving || !dirty}
+          className="flex w-[72px] shrink-0 items-center justify-center gap-1.5 rounded-lg bg-control py-2 text-[13px] text-ink hover:bg-raised-hover disabled:cursor-not-allowed disabled:opacity-50"
+        >
+          {saving ? <Loader2 size={13} className="animate-spin" /> : <><Check size={13} />{t("common.save")}</>}
+        </button>
+      </div>
+      <p className="mt-1 text-[11.5px] leading-relaxed text-ink-secondary">{t("keys.openaiCompat.urlHint")}</p>
       {error && <div className="mt-1 text-[12px] text-danger">{error}</div>}
     </div>
   );
