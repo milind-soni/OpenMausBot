@@ -1,26 +1,29 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Loader2, Maximize2, Monitor } from "lucide-react";
 
 import { t } from "@/lib/i18n";
 
 /** A connection is only visible once the browser has decoded its first frame. */
-export function CloudScreenPreview({ src, name, error, starting, opening, disabled, onOpen, onRetry }: {
+export function CloudScreenPreview({ src, name, error, starting, opening, disabled, refreshing = false, retry = 0, onOpen, onRetry }: {
   src: string | null;
   name: string;
   error: string | null;
   starting: boolean;
   opening: boolean;
   disabled: boolean;
+  refreshing?: boolean;
+  retry?: number;
   onOpen: () => void;
-  onRetry: () => void;
+  onRetry: (discardFrame: boolean) => void;
 }) {
   const [loaded, setLoaded] = useState<string | null>(null);
   const [failed, setFailed] = useState<string | null>(null);
+  useEffect(() => { setFailed(null); }, [retry]);
   const visible = Boolean(src && loaded === src && failed !== src);
   const problem = error ?? (src && failed === src ? t("computer.preview.imageFailed") : null);
 
   return (
-    <div className="relative h-full w-full" aria-busy={!problem && (!visible || opening)}>
+    <div className="relative h-full w-full" aria-busy={!problem && (!visible || opening || refreshing)}>
       {src && (
         <button
           type="button"
@@ -31,6 +34,7 @@ export function CloudScreenPreview({ src, name, error, starting, opening, disabl
           title={t("computer.openLiveDesktop")}
         >
           <img
+            key={retry}
             src={src}
             alt={t("computer.screenOf", { name })}
             onLoad={() => { setLoaded(src); setFailed(null); }}
@@ -51,11 +55,17 @@ export function CloudScreenPreview({ src, name, error, starting, opening, disabl
           {starting ? t("computer.phase.starting") : t("computer.preview.connectingScreen")}
         </div>
       )}
+      {visible && refreshing && !problem && (
+        <div role="status" className="absolute bottom-2 left-2 flex items-center gap-1 rounded-md bg-black/70 px-2 py-1 text-[11px] text-white">
+          <Loader2 size={12} className="animate-spin" />
+          {t("computer.preview.connectingScreen")}
+        </div>
+      )}
       {problem && (
         <div role="alert" className={`absolute inset-x-0 flex flex-col items-center justify-center gap-2 bg-card/95 p-4 text-center text-[12px] text-ink-secondary ${visible ? "bottom-0" : "inset-y-0"}`}>
           {!visible && <Monitor size={22} />}
           <span>{visible ? t("computer.preview.paused") : t("computer.preview.cantConnect")} {problem}</span>
-          <button type="button" onClick={onRetry} className="rounded-md bg-control px-3 py-1.5 text-ink hover:bg-control-hover">
+          <button type="button" onClick={() => onRetry(!visible)} className="rounded-md bg-control px-3 py-1.5 text-ink hover:bg-control-hover">
             {t("computer.preview.retry")}
           </button>
         </div>

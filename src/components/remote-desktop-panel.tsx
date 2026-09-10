@@ -1,11 +1,11 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { CalendarClock, CalendarDays, ImageOff, Loader2, Monitor, Plus, X } from "lucide-react";
 
 import { cn } from "@/lib/cn";
 import { usePageVisible } from "@/lib/page-visible";
-import { remoteScreenshotSource } from "@/lib/remote-desktop";
+import { isRemoteScreenshotContention, remoteScreenshotSource } from "@/lib/remote-desktop";
 import type { Routine } from "@/lib/routines";
-import { api, useStore, type Bot } from "@/state/store";
+import { api, ApiError, useStore, type Bot } from "@/state/store";
 import { RoutineEditor } from "./RoutinesPage";
 
 function viewerAddress(raw: unknown): string {
@@ -62,6 +62,8 @@ export function RemoteDesktopPanel({ bot }: { bot: Bot }) {
   const [previewUnavailable, setPreviewUnavailable] = useState(false);
   const [viewerOpen, setViewerOpen] = useState(false);
   const pageVisible = usePageVisible();
+  const previewBusy = useRef(bot.busy);
+  useEffect(() => { previewBusy.current = bot.busy; }, [bot.busy]);
   const [creatingRoutine, setCreatingRoutine] = useState(false);
   const botRoutines = state.routines
     .filter((routine) => routine.botId === bot.id)
@@ -99,37 +101,56 @@ export function RemoteDesktopPanel({ bot }: { bot: Bot }) {
   }, [bot.id]);
 
   useEffect(() => {
-    if (!pageVisible || viewerOpen) return;
-    let alive = true;
+    if (!pageVisible || viewerOpen || pending) return;
+    const controller = new AbortController();
     let requestRunning = false;
+    let lastAttemptAt = -Infinity;
+    let retryDelay: number | null = null;
+    let contentionSince: number | null = null;
     const shoot = async () => {
-      if (requestRunning) return;
+      if (requestRunning || controller.signal.aborted) return;
+      if (Date.now() - lastAttemptAt < (retryDelay ?? (previewBusy.current ? 4000 : 30_000))) return;
       requestRunning = true;
+      retryDelay = null;
       try {
         const source = remoteScreenshotSource(await api(`/api/bots/${bot.id}/computer/screenshot`, {
           method: "POST",
           body: "{}",
+          signal: AbortSignal.any([controller.signal, AbortSignal.timeout(90_000)]),
         }));
-        if (alive && source) {
+        if (!controller.signal.aborted && source) {
           setFrame(source);
           setPreviewUnavailable(false);
-        } else if (alive) {
+          contentionSince = null;
+        } else if (!controller.signal.aborted) {
           setPreviewUnavailable(true);
         }
-      } catch {
-        if (alive) setPreviewUnavailable(true);
+      } catch (cause) {
+        if (!controller.signal.aborted) {
+          if (cause instanceof ApiError && isRemoteScreenshotContention(cause)) {
+            retryDelay = 1000;
+            contentionSince ??= Date.now();
+            const prolonged = Date.now() - contentionSince >= 10_000;
+            setPreviewUnavailable(prolonged);
+            setPreviewPending(!prolonged);
+          } else {
+            contentionSince = null;
+            setPreviewUnavailable(true);
+          }
+        }
       } finally {
-        if (alive) setPreviewPending(false);
+        if (!controller.signal.aborted && retryDelay === null) setPreviewPending(false);
         requestRunning = false;
+        lastAttemptAt = Date.now();
       }
     };
     void shoot();
-    const timer = window.setInterval(shoot, bot.busy ? 4_000 : 30_000);
+    const timer = window.setInterval(shoot, 1000);
     return () => {
-      alive = false;
+      controller.abort();
       window.clearInterval(timer);
     };
-  }, [bot.busy, bot.id, pageVisible, viewerOpen]);
+  }, [bot.id, pageVisible, viewerOpen, pending]);
 
   const open = async () => {
     setPending(true);

@@ -3004,6 +3004,9 @@ let localVmProvisionBusy = false;
 let localVmModeChangeBusy = false;
 const activeVpsThreads = new Map<string, string>();
 const boxLifecycleBusyBots = new Set<string>();
+// A refresh is a reader, not a lifecycle change. Keep its reservation until
+// the provider settles even if the HTTP client leaves, and share it on retry.
+const vpsPreviewRequests = new Map<string, ReturnType<typeof vps.vpsComputerScreenshot>>();
 const orphanBoxLifecycleBusyIds = new Set<string>();
 const boxInventoryRequestsBusyIds = new Set<string>();
 type RemoteComputerProvider = "box" | "vps";
@@ -3058,7 +3061,7 @@ function providerOperationConflict(provider: RemoteComputerProvider): string | n
   if (managedBoxOwners().some((owner) => owner.inUse)) {
     return `stop active bot work and computer control before changing ${provider === "box" ? "the Box account" : "the VPS connection"}`;
   }
-  if (boxLifecycleBusyBots.size > 0) {
+  if (boxLifecycleBusyBots.size > 0 || vpsPreviewRequests.size > 0) {
     return "wait for cloud computer actions to finish before changing provider settings";
   }
   if (provider === "box") {
@@ -3117,12 +3120,16 @@ function claimManagedBoxMutation(instance: box.ManagedBoxInventoryInstance): () 
   return claimBotComputerLifecycle(ownerBotId);
 }
 
-/** One synchronous lane for every Box lifecycle consumer. Both Settings and
+/** One synchronous lane for cloud lifecycle consumers. Both Settings and
  * bot-scoped actions use it, so whichever operation starts first excludes the
- * other instead of relying on a stale check made before a provider await. */
-function claimBotComputerLifecycle(botId: string): () => void {
+ * other instead of relying on a stale check made before a provider await.
+ * Only opening an existing VPS viewer may coexist with its pending preview. */
+function claimBotComputerLifecycle(botId: string, allowPreview = false): () => void {
   if (boxLifecycleBusyBots.has(botId)) {
     throw Object.assign(new Error("this bot's cloud computer is being changed — wait for it to finish"), { status: 409 });
+  }
+  if (!allowPreview && vpsPreviewRequests.has(botId)) {
+    throw Object.assign(new Error("a screen preview is still refreshing — wait before changing this computer"), { status: 409 });
   }
   boxLifecycleBusyBots.add(botId);
   return () => boxLifecycleBusyBots.delete(botId);
@@ -8507,7 +8514,7 @@ const workspaceBackupRoutes = createWorkspaceBackupRoutes({
     idle: () => !providerFleetReloading && !providerAuthSessions.active && !browserEngineInstall &&
       !routines?.isTicking && !calendarCalls?.isTicking &&
       !localVmImageBusy && !localVmProvisionBusy && !localVmModeChangeBusy &&
-      !localVmLifecycleBusy.size && !boxLifecycleBusyBots.size && !orphanBoxLifecycleBusyIds.size &&
+      !localVmLifecycleBusy.size && !boxLifecycleBusyBots.size && !vpsPreviewRequests.size && !orphanBoxLifecycleBusyIds.size &&
       !computerProviderConfigTransitions.size && !checkpointRestoreLeases.size &&
       store.bots.every((bot) => !botHasActiveTurn(bot.id) && !routines?.activeRunForBot(bot.id) && !computerControl.snapshot(bot.id).held) &&
       store.groups.every((group) => !groupIsWorking(group)),
@@ -14683,7 +14690,19 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
         return json(res, 409, { error: "this bot's cloud computer is being changed — wait for it to finish" });
       }
       if (bot.cloudBackend === "vps") {
-        const releaseComputerLifecycle = claimBotComputerLifecycle(botId);
+        if (m[2] === "screenshot") {
+          let preview = vpsPreviewRequests.get(botId);
+          if (!preview) {
+            preview = vps.vpsComputerScreenshot(cfg, botId).finally(() => {
+              vpsPreviewRequests.delete(botId);
+            });
+            vpsPreviewRequests.set(botId, preview);
+          }
+          return json(res, 200, await preview);
+        }
+        // Opening the existing SSH viewer can coexist with a capture. Start,
+        // stop, remove and Settings deletion still exclude pending previews.
+        const releaseComputerLifecycle = claimBotComputerLifecycle(botId, m[2] === "join");
         try {
           if (m[2] === "exec") {
             return json(res, 409, { error: "the VPS console is available to the bot through its scoped computer tools" });
@@ -14697,7 +14716,6 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
           if (m[2] === "join") {
             return json(res, 200, await vps.vpsComputerJoin(cfg, botId));
           }
-          if (m[2] === "screenshot") return json(res, 200, await vps.vpsComputerScreenshot(cfg, botId));
           const action = m[2] === "provision" ? "provision" : m[2] === "remove" ? "remove" : "stop";
           return json(res, 200, await vps.vpsComputerAction(action, cfg, botId));
         } finally {

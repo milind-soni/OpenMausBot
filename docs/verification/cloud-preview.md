@@ -34,8 +34,37 @@ Verify these transitions with computer use:
 7. While **slow** is pending, switch to **connected** and **Reconnect panel**.
    The new connection must display immediately; the cancelled request must
    neither block it nor overwrite its frame later.
+8. Select **held**, turn **Busy** on, and wait for the next poll. Toggle
+   **Busy** off: the pending capture must not be canceled. **Reconnect panel**
+   does cancel its client request, but the simulated host capture continues.
+   The replacement preview must retry contention without a disconnect alert.
+   Select **connected**, then **Release held capture**; the preview recovers
+   automatically and the old capture never overwrites it.
+9. From a connected frame, select **failed** and turn **Busy** on. After the
+   error appears, select **contended** and **Retry preview**. The last frame
+   stays visible while retrying. After ten seconds the continuing contention
+   becomes an actionable error, but retries continue: select **connected** to
+   recover without clicking Retry again.
+10. Open the live desktop. The fixture holds its join until **Release desktop
+    join**; screenshot polling must pause throughout that wait. Repeat with
+    **Panel → Remote desktop**. The viewer is simulated, never a native window.
+11. Select **unconfigured** while **Busy** is on. Its permanent HTTP409 must
+    show **VPS is not configured** with Retry, not an endless connecting state.
+
+The automated browser regression runs these contention, cancellation, decoded
+frame retention, and join-pause checks against the same fixture:
+
+```sh
+OMB_UI_E2E=1 node node_modules/vitest/vitest.mjs run scripts/testing/cloud-preview.e2e.test.ts
+```
+
+It reuses the standard isolated UI harness and prints the temporary data path
+and persistent server log. To reuse already installed test binaries, set
+`OMB_AGENT_BROWSER_PATH` and `AGENT_BROWSER_EXECUTABLE_PATH` explicitly.
 
 The fixture tests actual image decoding, request cancellation, fresh frame
-selection, and renderer feedback. It does not prove real Box provisioning,
-native viewer windows, or account authentication. Test those separately with
-an explicitly isolated provider fixture when changing those paths.
+selection, and renderer feedback. Host work continuing after cancellation is
+simulated in-page; `server/vps-routing.test.ts` separately covers the real HTTP
+route with fake SSH/Docker. Neither fixture proves a real VPS connection, Box
+provisioning, native viewer windows, or account authentication. Test those
+separately with an explicitly isolated provider fixture when changing those paths.
