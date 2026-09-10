@@ -412,6 +412,10 @@ export interface ConfigStatus {
   xai?: { configured: boolean };
   anthropic?: { configured: boolean };
   openaiCompat?: { configured: boolean; url?: string };
+  /** what this server is entitled to; Settings shows only what works here */
+  edition?: { edition: "oss" | "enterprise"; features: string[] };
+  budgets?: { monthlyUsd?: number; warnAtPercent?: number };
+  billing?: { currency?: string; prices?: Record<string, { inputPerMillion: number; outputPerMillion: number; cachedInputPerMillion?: number }> };
   composio: { configured: boolean; mode?: "managed" | "self-hosted" | "unavailable" };
   box: { configured: boolean };
   vps: { configured: boolean; sshAlias: string };

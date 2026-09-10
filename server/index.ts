@@ -133,6 +133,8 @@ import { registerEnginesBinDir } from "./engine-install.ts";
 import { appendUsage, parseUsageRange, readUsage, summarizeUsage, usageCsv, USAGE_GROUPINGS, type UsageGroupBy, type UsageTrigger } from "./usage-ledger.ts";
 import type { RequestAuth } from "./request-auth.ts";
 import { checkProviderKey, PROVIDER_KEY_KINDS, type ProviderKeyKind } from "./provider-key-check.ts";
+import { assertWithinBudget, noteSpend, spendState } from "./spend.ts";
+import { entitled } from "./enterprise.ts";
 import { describeSpawnFailure, execCli } from "./procs.ts";
 import { blockedTarget, buildNotification, type Notification } from "./notify.ts";
 import {
@@ -3739,6 +3741,7 @@ bus.subscribe((event: RuntimeEvent) => {
               ? { kind: "bot", ...(settledTask?.openedBy?.botId ? { botId: settledTask.openedBy.botId } : {}) }
               : turnTriggers.get(event.threadId) ?? { kind: "owner" },
         });
+        noteSpend(DATA_DIR, event.cost ?? null);
         const routineReportThread = routineRun ? routineSourceThread(routineRun) : null;
         // A routine's result belongs to its reporting thread's unread state.
         // Its internal execution should not light up the sidebar as well.
@@ -4522,6 +4525,9 @@ async function startTurn(
   const transitionError = providerTransitionForTurn(bot, opts?.runOn);
   if (transitionError) throw Object.assign(new Error(transitionError), { status: 409 });
   if (providerFleetReloading) throw Object.assign(new Error("provider settings are being updated — try again shortly"), { status: 409 });
+  // A workspace at its monthly spend limit starts no turn of any kind: a
+  // person's message, a routine, a peer hop or a webhook all stop here.
+  assertWithinBudget(cfg, DATA_DIR);
   if (checkpointRestoreLeases.has(botId)) {
     throw Object.assign(new Error("this bot's project files are being restored — wait for the restore to finish"), {
       status: 409,
@@ -8170,6 +8176,14 @@ function configStatus() {
   return {
     xai: { configured: Boolean(cfg.xai?.key) },
     anthropic: { configured: Boolean(cfg.anthropic?.key) },
+    // what this build is entitled to, so Settings shows only what works here
+    edition: (({ edition, features }) => ({ edition, features }))(editionStatus()),
+    // settings, not secrets: the cap and the operator's own price list
+    budgets: {
+      ...(cfg.budgets?.monthlyUsd !== undefined ? { monthlyUsd: cfg.budgets.monthlyUsd } : {}),
+      ...(cfg.budgets?.warnAtPercent !== undefined ? { warnAtPercent: cfg.budgets.warnAtPercent } : {}),
+    },
+    billing: { currency: cfg.billing?.currency ?? "USD", prices: cfg.billing?.prices ?? {} },
     // the base URL is a setting, not a secret; the key stays write-only
     openaiCompat: { configured: Boolean(cfg.openaiCompat?.key), url: cfg.openaiCompat?.url ?? "" },
     composio: {
@@ -11207,6 +11221,11 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
       }
       const threadId = body.threadId ?? group.threadId;
       noteTurnTrigger(threadId, auth);
+      try {
+        assertWithinBudget(cfg, DATA_DIR);
+      } catch (error) {
+        return json(res, 409, { error: error instanceof Error ? error.message : String(error), code: "spend_cap" });
+      }
       const ownsThread = group.dm
         ? group.threadId === threadId
         : Boolean(store.groupTaskByThread(group.id, threadId));
@@ -12592,6 +12611,13 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
       // target the task that is active now.
       const threadId = body.threadId ?? bot.threadId;
       noteTurnTrigger(threadId, auth);
+      // The send is acknowledged before the turn starts, so a workspace at its
+      // spend limit is refused here, where the person can see it.
+      try {
+        assertWithinBudget(cfg, DATA_DIR);
+      } catch (error) {
+        return json(res, 409, { error: error instanceof Error ? error.message : String(error), code: "spend_cap" });
+      }
       if (!store.taskByThread(bot.id, threadId)) {
         return json(res, 409, { error: "the bot switched tasks before it could receive the message" });
       }
@@ -13375,6 +13401,8 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
       const range = parseUsageRange(url.searchParams.get("from"), url.searchParams.get("to"));
       if (!range) return json(res, 400, { error: "from and to must be YYYY-MM-DD, from no later than to, at most a year apart" });
       const rows = readUsage(DATA_DIR, range);
+      // The operator's price list is applied only with the billing entitlement.
+      const prices = entitled("billing") && cfg.billing?.prices && Object.keys(cfg.billing.prices).length ? cfg.billing.prices : null;
       if (path === "/api/usage.csv") {
         const stamp = (date: Date) => date.toISOString().slice(0, 10);
         res.writeHead(200, {
@@ -13382,7 +13410,7 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
           "content-disposition": `attachment; filename="usage-${stamp(range.from)}-${stamp(range.to)}.csv"`,
           "cache-control": "no-store",
         });
-        res.end(usageCsv(rows));
+        res.end(usageCsv(rows, prices));
         return;
       }
       const requested = url.searchParams.get("groupBy") ?? "bot";
@@ -13391,7 +13419,14 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
       }
       const groupBy = requested as UsageGroupBy;
       res.setHeader("cache-control", "no-store");
-      return json(res, 200, { from: range.from.toISOString(), to: range.to.toISOString(), groupBy, ...summarizeUsage(rows, groupBy) });
+      return json(res, 200, {
+        from: range.from.toISOString(),
+        to: range.to.toISOString(),
+        groupBy,
+        ...summarizeUsage(rows, groupBy, prices),
+        budget: spendState(cfg, DATA_DIR),
+        billing: prices ? { currency: cfg.billing?.currency ?? "USD" } : null,
+      });
     }
 
     // ── provider key check: does a pasted or saved key open the provider's door ──

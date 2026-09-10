@@ -10,6 +10,7 @@
 import { readFileSync } from "node:fs";
 import { appendFile, mkdir } from "node:fs/promises";
 import { join } from "node:path";
+import { billableFor, type PriceList } from "./prices.ts";
 
 /** Who asked for the turn. A person is named by the email they signed in
  * with when the server knows it (email sign-in), else by their device
@@ -51,6 +52,9 @@ export interface UsageGroup {
   costUsd: number | null;
   /** Rows in this group that reported no price. */
   unpriced: number;
+  /** What the operator charges for the group, from the price list; null
+   * without a list or when nothing in the group is priced. */
+  billableUsd: number | null;
 }
 
 export interface UsageSummary {
@@ -221,10 +225,10 @@ function groupOf(row: UsageRow, groupBy: UsageGroupBy): { key: string; label: st
 }
 
 function emptyGroup(key: string, label: string): UsageGroup {
-  return { key, label, turns: 0, input: 0, output: 0, cachedInput: 0, costUsd: null, unpriced: 0 };
+  return { key, label, turns: 0, input: 0, output: 0, cachedInput: 0, costUsd: null, unpriced: 0, billableUsd: null };
 }
 
-function add(group: UsageGroup, row: UsageRow): void {
+function add(group: UsageGroup, row: UsageRow, prices: PriceList | null): void {
   group.turns += 1;
   group.input += clean(row.input);
   group.output += clean(row.output);
@@ -232,10 +236,12 @@ function add(group: UsageGroup, row: UsageRow): void {
   const cost = finiteOrNull(row.costUsd);
   if (cost === null) group.unpriced += 1;
   else group.costUsd = (group.costUsd ?? 0) + cost;
+  const billable = prices ? billableFor(row, prices) : null;
+  if (billable !== null) group.billableUsd = (group.billableUsd ?? 0) + billable;
 }
 
 /** Totals per group, money first then volume; days stay chronological. */
-export function summarizeUsage(rows: UsageRow[], groupBy: UsageGroupBy): UsageSummary {
+export function summarizeUsage(rows: UsageRow[], groupBy: UsageGroupBy, prices: PriceList | null = null): UsageSummary {
   const groups = new Map<string, UsageGroup>();
   const total = emptyGroup("total", "total");
   for (const row of rows) {
@@ -245,8 +251,8 @@ export function summarizeUsage(rows: UsageRow[], groupBy: UsageGroupBy): UsageSu
       group = emptyGroup(key, label);
       groups.set(key, group);
     }
-    add(group, row);
-    add(total, row);
+    add(group, row, prices);
+    add(total, row, prices);
   }
   const ordered = [...groups.values()];
   if (groupBy === "day") ordered.sort((a, b) => a.key.localeCompare(b.key));
@@ -269,9 +275,9 @@ function csvCell(value: string | number | null): string {
   return /[",\n\r]/.test(safe) ? `"${safe.replaceAll('"', '""')}"` : safe;
 }
 
-/** One line per turn, spreadsheet-ready. */
-export function usageCsv(rows: UsageRow[]): string {
-  const header = ["time", "bot", "model", "engine", "triggered_by", "input_tokens", "output_tokens", "cached_input_tokens", "cost_usd", "thread"];
+/** One line per turn, spreadsheet-ready; a billable column when a price list is given. */
+export function usageCsv(rows: UsageRow[], prices: PriceList | null = null): string {
+  const header = ["time", "bot", "model", "engine", "triggered_by", "input_tokens", "output_tokens", "cached_input_tokens", "cost_usd", ...(prices ? ["billable_usd"] : []), "thread"];
   const lines = [header.join(",")];
   for (const row of rows) {
     lines.push([
@@ -284,6 +290,7 @@ export function usageCsv(rows: UsageRow[]): string {
       clean(row.output),
       clean(row.cachedInput),
       finiteOrNull(row.costUsd),
+      ...(prices ? [billableFor(row, prices)] : []),
       row.threadId,
     ].map(csvCell).join(","));
   }

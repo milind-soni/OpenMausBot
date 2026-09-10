@@ -3,7 +3,8 @@
 whitelabel     product name, tagline, accent, logo and support link from brand.json shipped
 sso            sign in through an OIDC issuer (a company account) with scope mapping planned
 admin          organisation, members, domains and branding sections in Settings   planned
-budgets        per-bot and per-section spend limits                               planned
+budgets        a monthly spend limit for the workspace, refusing turns at the cap  shipped
+billing        sell prices per model; a billable column in Usage and its CSV      shipped
 #
 # Keys may carry ids that are not shipped yet; unknown ids grant nothing, so a
 # key can be issued ahead of the feature landing. Add a line here in the same

@@ -46,6 +46,7 @@ Use only mapped, tested commands:
 - [Qwen model route selection](qwen-models.md)
 - [Team backups](team-backups.md)
 - [Usage ledger](usage-ledger.md)
+- [Spend cap and sell prices](spend-cap.md)
 
 `control-omb ui` ([Chat UI, driven headlessly](chat-ui.md)) drives the real
 renderer in a headless Chrome by accessible name, so composer sends, transcript
