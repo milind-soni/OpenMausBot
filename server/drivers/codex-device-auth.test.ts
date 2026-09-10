@@ -318,9 +318,10 @@ describe("Codex server-owned device authentication", () => {
   });
 
   it("expires and reaps an unattended flow", async () => {
-    const controller = create("waiting", { lifetimeMs: 350 });
+    // Long enough for two fake-CLI spawns on a loaded machine, short enough to expire promptly.
+    const controller = create("waiting", { lifetimeMs: 1500 });
     const start = await controller.start();
-    await expect.poll(async () => (await controller.get(start.flowId!)).phase).toBe("expired");
+    await expect.poll(async () => (await controller.get(start.flowId!)).phase, { timeout: 5000 }).toBe("expired");
     await controller.cancel();
     expect(alive(Number(readFileSync(join(home, "pid"), "utf8")))).toBe(false);
   });
