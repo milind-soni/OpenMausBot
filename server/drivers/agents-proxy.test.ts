@@ -854,7 +854,13 @@ describe("agents-proxy MCP surface", () => {
     }
     const tools = await rpc("tools/list");
     const schema = tools.result.tools.find((tool: { name: string }) => tool.name === "memory_update").inputSchema;
-    expect(schema.properties.text).toMatchObject({ minLength: 1, pattern: "\\S" });
+    // No pattern on free-text params: servings that constrain-decode
+    // function-call arguments collapse a patterned free-text field to a
+    // minimal satisfier instead of the intended text — the same class of
+    // failure as the schema-conversion issues behind the flat-schema rule.
+    // Blank text is still rejected by the handler (asserted above).
+    expect(schema.properties.text).toMatchObject({ minLength: 1 });
+    expect(schema.properties.text).not.toHaveProperty("pattern");
     memoryStatus = 409;
     memoryResponse = { error: "oldText must match exactly once in the latest memory." };
     const stale = await callTool("memory_update", { action: "remove", old_text: "missing" });
@@ -902,6 +908,7 @@ describe("agents-proxy MCP surface", () => {
     expect(tool.description).toContain("what happened, not what is true");
     expect(tool.description).toContain("Logs are never loaded into your prompt");
     expect(tool.inputSchema.required).toEqual(["text"]);
+    expect(tool.inputSchema.properties.text).not.toHaveProperty("pattern");
     const logged = await callTool("memory_log", { text: "shipped 0.1.70", fromBotId: "spoofed" });
     expect(logged.result.isError).toBe(false);
     expect(logged.result.content[0].text).toBe('Logged to memory/log/2026-09-10.md: - 14:03 · from chat "Deploy" · shipped 0.1.70');

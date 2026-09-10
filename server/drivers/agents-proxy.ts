@@ -560,7 +560,7 @@ const TOOLS = [
       additionalProperties: false,
       properties: {
         action: { type: "string", enum: ["append", "replace", "remove", "supersede"] },
-        text: { type: "string", minLength: 1, pattern: "\\S", description: "Non-blank new text for append, replace, or supersede: the fact itself, without a date or bullet. Omit for remove; use remove to delete a passage." },
+        text: { type: "string", minLength: 1, description: "Non-blank new text for append, replace, or supersede: the fact itself, without a date or bullet. Omit for remove; use remove to delete a passage." },
         old_text: { type: "string", minLength: 1, description: "Exact unique existing passage for replace, supersede, or remove. Omit for append." },
       },
       required: ["action"],
@@ -574,7 +574,7 @@ const TOOLS = [
       type: "object",
       additionalProperties: false,
       properties: {
-        text: { type: "string", minLength: 1, pattern: "\\S", description: "One line about what happened, in plain words." },
+        text: { type: "string", minLength: 1, description: "One line about what happened, in plain words." },
       },
       required: ["text"],
     },
