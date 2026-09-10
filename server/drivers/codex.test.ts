@@ -214,6 +214,17 @@ describe("CodexDriver turns (fake app-server)", () => {
     expect(recorder.events.at(-1)).toMatchObject({ ok: true, usage: { input: 7, output: 3 } });
     expect(recorder.events.find((event) => event.type === "item.completed" && event.itemType === "assistant_text")).toMatchObject({ text: "done from fake codex" });
     expect(JSON.stringify(recorder.events)).not.toContain("FOREIGN");
+
+    const repeat = await instance.adapter.sendTurn({
+      threadId: "t-helper-events", resumeCursor: "codex-thread-1", text: "continue and deny the next request",
+    });
+    const denied = await recorder.until((event) => event.turnId === repeat.turnId && event.type === "request.opened");
+    await instance.adapter.respondToRequest("t-helper-events", denied.requestId!, { behavior: "deny" });
+    await recorder.until((event) => event.turnId === repeat.turnId && event.type === "turn.completed");
+    expect(recorder.events.filter((event) => event.type === "turn.completed")).toHaveLength(2);
+    expect(recorder.events.at(-1)).toMatchObject({ ok: true });
+    expect(recorder.events.find((event) => event.turnId === repeat.turnId && event.type === "request.resolved")).toMatchObject({ behavior: "deny" });
+    expect(JSON.stringify(recorder.events)).not.toContain("FOREIGN");
   });
 
   it("retains parent notifications delivered before the turn/start response", async () => {

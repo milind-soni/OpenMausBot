@@ -204,7 +204,7 @@ process.stdin.on("data", (chunk) => {
       case "thread/resume":
         if (msg.params?.permissions && (!experimentalApi || mode === "config-profile-unsupported")) {
           out({ jsonrpc: "2.0", id: msg.id, error: { code: -32602, message: "experimental API required for permissions" } });
-        } else if (mode === "resume" || mode === "instructions-unsupported" || mode === "config-profile" || mode === "config-profile-unsupported") {
+        } else if (mode === "resume" || mode === "helper-events" || mode === "instructions-unsupported" || mode === "config-profile" || mode === "config-profile-unsupported") {
           out({ jsonrpc: "2.0", id: msg.id, result: { thread: { id: msg.params?.threadId } } });
         } else {
           out({ jsonrpc: "2.0", id: msg.id, error: { code: -1, message: "no such thread" } });
