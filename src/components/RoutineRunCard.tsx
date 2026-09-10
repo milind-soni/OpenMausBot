@@ -3,35 +3,36 @@ import { ArrowRight, Loader2 } from "lucide-react";
 import { cn } from "@/lib/cn";
 import { routineDateTime } from "@/lib/routine-display";
 import { t } from "@/lib/i18n";
+import type { LocaleKey } from "@/locales";
 import type { RoutineRunCardData } from "../../shared/routine-run";
 import type { Message } from "@/state/store";
 
 const DETAIL_LIMIT = 280;
 
 const COPY = {
-  queued: { label: "Queued", tone: "text-ink-secondary" },
-  running: { label: "Running", tone: "text-accent" },
-  waiting: { label: "Waiting", tone: "text-warning" },
-  completed: { label: "Completed", tone: "text-ink-secondary" },
-  failed: { label: "Failed", tone: "text-danger" },
-  cancelled: { label: "Cancelled", tone: "text-ink-secondary" },
-  missed: { label: "Missed", tone: "text-danger" },
+  queued: { labelKey: "runCard.status.queued", tone: "text-ink-secondary" },
+  running: { labelKey: "runCard.status.running", tone: "text-accent" },
+  waiting: { labelKey: "runCard.status.waiting", tone: "text-warning" },
+  completed: { labelKey: "runCard.status.completed", tone: "text-ink-secondary" },
+  failed: { labelKey: "runCard.status.failed", tone: "text-danger" },
+  cancelled: { labelKey: "runCard.status.cancelled", tone: "text-ink-secondary" },
+  missed: { labelKey: "runCard.status.missed", tone: "text-danger" },
 } satisfies Record<
   RoutineRunCardData["status"],
-  { label: string; tone: string }
+  { labelKey: LocaleKey; tone: string }
 >;
 
 const GOAL_COPY = {
   completed: COPY.completed,
-  "needs-input": { label: "Needs your input", tone: "text-warning" },
-  blocked: { label: "Blocked", tone: "text-danger" },
-  "limit-reached": { label: "Turn limit reached", tone: "text-warning" },
-  paused: { label: "Paused", tone: "text-warning" },
-  stopped: { label: "Stopped", tone: "text-ink-secondary" },
+  "needs-input": { labelKey: "runCard.goal.needsInput", tone: "text-warning" },
+  blocked: { labelKey: "runCard.goal.blocked", tone: "text-danger" },
+  "limit-reached": { labelKey: "runCard.goal.limitReached", tone: "text-warning" },
+  paused: { labelKey: "runCard.goal.paused", tone: "text-warning" },
+  stopped: { labelKey: "runCard.goal.stopped", tone: "text-ink-secondary" },
   failed: COPY.failed,
 } satisfies Record<
   NonNullable<RoutineRunCardData["goalStatus"]>,
-  { label: string; tone: string }
+  { labelKey: LocaleKey; tone: string }
 >;
 
 function compactDetail(value: string | undefined): string {
@@ -77,11 +78,11 @@ export function RoutineRunCard({
       ? (run.error ?? run.summary)
       : (run.summary ?? run.error),
   );
-  const actionLabel = run.goalStatus === "needs-input" ? "Review" : "Open run";
+  const actionLabel = t(run.goalStatus === "needs-input" ? "runCard.review" : "runCard.openRun");
 
   return (
     <section
-      aria-label={`${run.routineName} routine run: ${copy.label}`}
+      aria-label={t("runCard.aria", { name: run.routineName, status: t(copy.labelKey) })}
       className="w-full max-w-[680px] rounded-xl border border-hairline/45 bg-card px-4 py-3"
     >
       <div className="flex items-start gap-3">
@@ -90,7 +91,7 @@ export function RoutineRunCard({
             <h3 className="truncate text-[14px] font-semibold text-ink">{run.routineName}</h3>
             <span aria-live="polite" className={cn("inline-flex items-center gap-1 text-[11.5px] font-semibold", copy.tone)}>
               {run.status === "running" && !run.goalStatus && <Loader2 aria-hidden="true" className="size-3 animate-spin" />}
-              {copy.label}
+              {t(copy.labelKey)}
             </span>
           </div>
           <time dateTime={new Date(run.scheduledFor ?? message.at).toISOString()} className="mt-0.5 block text-[11.5px] text-ink-secondary">
@@ -106,7 +107,7 @@ export function RoutineRunCard({
           <button
             type="button"
             onClick={onOpen}
-            aria-label={`${actionLabel} for ${run.routineName}`}
+            aria-label={t("runCard.actionAria", { action: actionLabel, name: run.routineName })}
             className={cn(
               "flex shrink-0 items-center gap-1 rounded-md px-2 py-1 text-[12px] font-semibold transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:outline-accent",
               run.goalStatus === "needs-input"

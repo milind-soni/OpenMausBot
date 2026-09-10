@@ -5,6 +5,7 @@
 // fold and only become visible by scrolling; the in-flow menu pushes the
 // Effort card down instead and is fully visible where it opens.
 import { EffortRow, ModelPicker } from "../ModelPicker";
+import { t } from "@/lib/i18n";
 import type { Bot } from "@/state/store";
 
 export function ModelSection({ bot }: { bot: Bot }) {
@@ -16,9 +17,9 @@ export function ModelSection({ bot }: { bot: Bot }) {
           contained
           label={
             <div>
-              <div className="text-[15px] font-medium text-ink">Default model</div>
+              <div className="text-[15px] font-medium text-ink">{t("botSettings.model.title")}</div>
               <div className="mt-0.5 text-[13px] text-ink-secondary">
-                For new threads. Existing threads keep their own model choices.
+                {t("botSettings.model.subtitle")}
               </div>
             </div>
           }
@@ -31,14 +32,14 @@ export function ModelSection({ bot }: { bot: Bot }) {
         className="rounded-xl bg-card p-4"
         label={
           <div>
-            <div className="text-[15px] font-medium text-ink">Effort</div>
+            <div className="text-[15px] font-medium text-ink">{t("botSettings.model.effort")}</div>
             {/* Says what the app does, not what the engine ends up at:
                 Codex applies a level to the whole thread and has no way to
                 take one back, so "currently: engine default" was a promise
                 we could not keep for a thread that had already been sent
                 one. Sending nothing is true on every engine. */}
             <div className="mt-0.5 text-[13px] text-ink-secondary">
-              How hard new threads think{bot.modelSelection.effort ? "" : " (Default: no level is sent)"}
+              {t("botSettings.model.effortHint")}{bot.modelSelection.effort ? "" : t("botSettings.model.effortDefault")}
             </div>
           </div>
         }

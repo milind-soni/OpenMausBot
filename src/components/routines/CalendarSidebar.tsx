@@ -1,6 +1,7 @@
 import { useMemo, useState, type DragEvent } from "react";
 import { GripVertical, Search, UsersRound } from "lucide-react";
 import { BotAvatar } from "@/components/Avatar";
+import { t } from "@/lib/i18n";
 import type { Bot } from "@/state/store";
 import { MiniMonth } from "./MiniMonth";
 
@@ -30,7 +31,7 @@ export function CalendarSidebar({ bots, anchor, onSelectDate }: CalendarSidebarP
 
   return (
     <aside
-      aria-label="Schedule sidebar"
+      aria-label={t("calendar.sidebarAria")}
       className="flex h-full w-[320px] shrink-0 flex-col overflow-hidden border-r border-hairline/40 bg-panel"
     >
       <MiniMonth anchor={anchor} onSelect={onSelectDate} />
@@ -41,7 +42,7 @@ export function CalendarSidebar({ bots, anchor, onSelectDate }: CalendarSidebarP
         <div className="mb-2 flex items-center justify-between px-1">
           <div id="calendar-bots-heading" className="flex items-center gap-2 text-[11px] font-semibold uppercase tracking-[0.11em] text-ink-secondary">
             <UsersRound size={13} aria-hidden="true" />
-            My bots
+            {t("calendar.myBots")}
           </div>
           <span className="rounded-full bg-raised px-1.5 py-0.5 text-[9px] tabular-nums text-ink-secondary">
             {bots.length}
@@ -49,7 +50,7 @@ export function CalendarSidebar({ bots, anchor, onSelectDate }: CalendarSidebarP
         </div>
 
         <label className="relative mb-2 block">
-          <span className="sr-only">Search bots</span>
+          <span className="sr-only">{t("calendar.searchBots")}</span>
           <Search
             size={13}
             className="pointer-events-none absolute left-2.5 top-1/2 -translate-y-1/2 text-ink-secondary/70"
@@ -59,12 +60,12 @@ export function CalendarSidebar({ bots, anchor, onSelectDate }: CalendarSidebarP
             value={query}
             onChange={(event) => setQuery(event.target.value)}
             type="search"
-            placeholder="Search bots"
+            placeholder={t("calendar.searchBots")}
             className="h-8 w-full rounded-lg border border-hairline/45 bg-control/55 pl-8 pr-2.5 text-[11.5px] text-ink outline-none placeholder:text-ink-secondary/55 focus:border-accent/60 focus:bg-control"
           />
         </label>
 
-        <div role="list" aria-label="Bots available to schedule" className="min-h-0 flex-1 space-y-0.5 overflow-y-auto pr-0.5">
+        <div role="list" aria-label={t("calendar.botListAria")} className="min-h-0 flex-1 space-y-0.5 overflow-y-auto pr-0.5">
           {filteredBots.map((bot) => (
             <div
               key={bot.id}
@@ -72,8 +73,8 @@ export function CalendarSidebar({ bots, anchor, onSelectDate }: CalendarSidebarP
               onDragStart={(event) => beginBotDrag(event, bot)}
               role="listitem"
               className="group flex cursor-grab items-center gap-2 rounded-xl px-2 py-2 transition-colors hover:bg-raised/80 active:cursor-grabbing"
-              aria-label={`Drag ${bot.name} onto the schedule`}
-              title={`Drag ${bot.name} onto the schedule`}
+              aria-label={t("calendar.dragBotAria", { name: bot.name })}
+              title={t("calendar.dragBotAria", { name: bot.name })}
             >
               <GripVertical
                 size={13}
@@ -84,24 +85,24 @@ export function CalendarSidebar({ bots, anchor, onSelectDate }: CalendarSidebarP
               <div className="min-w-0 flex-1">
                 <div className="truncate text-[11.5px] font-medium text-ink">{bot.name}</div>
                 <div className="truncate text-[9.5px] text-ink-secondary/75">
-                  {bot.title || "BotAgent"}
+                  {bot.title || t("calendar.botAgent")}
                 </div>
               </div>
               <span className="shrink-0 rounded-full border border-hairline/50 px-1.5 py-0.5 text-[8.5px] text-ink-secondary/70 opacity-0 transition-opacity group-hover:opacity-100">
-                Drag
+                {t("calendar.drag")}
               </span>
             </div>
           ))}
 
           {filteredBots.length === 0 && (
             <div className="px-3 py-8 text-center text-[11px] leading-relaxed text-ink-secondary">
-              {bots.length === 0 ? "Create a bot to schedule work." : "No bots match your search."}
+              {bots.length === 0 ? t("calendar.noBots") : t("calendar.noMatches")}
             </div>
           )}
         </div>
 
         <p className="mt-2 px-2 text-[9.5px] leading-relaxed text-ink-secondary/65">
-          Drag a bot onto any time to schedule it.
+          {t("calendar.dragHint")}
         </p>
       </section>
     </aside>

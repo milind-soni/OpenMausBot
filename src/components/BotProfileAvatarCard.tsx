@@ -19,17 +19,19 @@ import {
 import { MASCOT_BODIES, MASCOT_BODY_IDS } from "../../shared/mascot-bodies";
 import { BotAvatar, MausAvatar } from "./Avatar";
 import { AvatarImageGenerator } from "./AvatarImageGenerator";
+import { t } from "@/lib/i18n";
+import type { LocaleKey } from "@/locales";
 
 type AvatarPatch = Partial<
   Pick<Bot, "avatarCrop" | "avatarUrl" | "color" | "mascotExpression" | "mascotBody">
 >;
 
-const CROP_LABEL = {
-  mascot: "Mascot",
-  circle: "Circle",
-  rounded: "Rounded",
-  square: "Square",
-} satisfies Record<BotAvatarCrop, string>;
+const CROP_LABEL_KEYS = {
+  mascot: "avatarCard.crop.mascot",
+  circle: "avatarCard.crop.circle",
+  rounded: "avatarCard.crop.rounded",
+  square: "avatarCard.crop.square",
+} satisfies Record<BotAvatarCrop, LocaleKey>;
 
 export function BotProfileAvatarCard({
   bot,
@@ -59,9 +61,9 @@ export function BotProfileAvatarCard({
     setError(null);
     try {
       const saved = await imageAttachmentFromFile(file);
-      if (!saved) throw new Error("Choose a PNG, JPEG, GIF, or WebP image");
+      if (!saved) throw new Error(t("avatarCard.chooseImage"));
       const avatarUrl = botAvatarUrlFromStoredPath(saved.path);
-      if (!avatarUrl) throw new Error("The uploaded image could not be used as an avatar");
+      if (!avatarUrl) throw new Error(t("avatarCard.uploadFailed"));
       const latestCrop = cropRef.current;
       onPatch({ avatarUrl, avatarCrop: latestCrop === "mascot" ? "circle" : latestCrop });
     } catch (uploadError) {
@@ -113,13 +115,13 @@ export function BotProfileAvatarCard({
   return (
     <div className="overflow-hidden rounded-xl border border-hairline/40 bg-card">
       <div className="flex items-center justify-between border-b border-hairline/40 px-3 py-2.5">
-        <span className="rounded-lg bg-control px-3 py-1.5 text-[14px] font-medium text-ink">Avatar</span>
+        <span className="rounded-lg bg-control px-3 py-1.5 text-[14px] font-medium text-ink">{t("avatarCard.avatar")}</span>
         <button
           disabled={busy}
           onClick={() => onPatch({ avatarCrop: "mascot", color: "green", mascotExpression: null, mascotBody: "cursor" })}
           className="rounded-md px-2 py-1.5 text-[13px] text-ink-secondary hover:bg-control hover:text-ink disabled:opacity-50"
         >
-          Reset mascot
+          {t("avatarCard.resetMascot")}
         </button>
       </div>
 
@@ -149,25 +151,25 @@ export function BotProfileAvatarCard({
             className="flex flex-1 items-center justify-center gap-1.5 rounded-lg bg-control px-3 py-2 text-[13px] text-ink hover:bg-raised-hover disabled:opacity-50"
           >
             {uploading ? <Loader2 size={14} className="animate-spin" /> : <ImagePlus size={14} />}
-            Upload image
+            {t("avatarCard.uploadImage")}
           </button>
           {bot.avatarUrl && (
             <button
               type="button"
               onClick={removeImage}
               disabled={busy}
-              aria-label="Remove custom avatar image"
-              title="Remove custom image"
+              aria-label={t("avatarCard.removeAria")}
+              title={t("avatarCard.removeTitle")}
               className="flex size-10 items-center justify-center rounded-lg text-ink-secondary hover:bg-control hover:text-danger disabled:opacity-50"
             >
               <Trash2 size={14} />
             </button>
           )}
         </div>
-        <div className="mt-1.5 text-[11.5px] text-ink-secondary">PNG, JPEG, GIF, or WebP · up to 10 MB</div>
+        <div className="mt-1.5 text-[11.5px] text-ink-secondary">{t("avatarCard.imageTypes")}</div>
 
         <div className="mb-2 mt-4 text-[12px] font-medium uppercase tracking-[0.08em] text-ink-secondary">
-          Shape
+          {t("avatarCard.shape")}
         </div>
         <div className="grid grid-cols-4 overflow-hidden rounded-lg border border-hairline/40">
           {BOT_AVATAR_CROPS.map((candidate, index) => (
@@ -183,7 +185,7 @@ export function BotProfileAvatarCard({
                 crop === candidate ? "bg-control text-ink" : "text-ink-secondary hover:bg-control/60 hover:text-ink",
               )}
             >
-              {CROP_LABEL[candidate]}
+              {t(CROP_LABEL_KEYS[candidate])}
             </button>
           ))}
         </div>
@@ -191,7 +193,7 @@ export function BotProfileAvatarCard({
         {crop === "mascot" && (
           <>
             <div className="mb-2 mt-4 text-[12px] font-medium uppercase tracking-[0.08em] text-ink-secondary">
-              Expression
+              {t("avatarCard.expression")}
             </div>
             <div className="grid grid-cols-5 gap-2">
               {PICKABLE_STATES.map((expression) => (
@@ -206,7 +208,7 @@ export function BotProfileAvatarCard({
                     activeState === expression && "ring-2 ring-accent-border",
                   )}
                   title={expression}
-                  aria-label={`Use ${expression} expression`}
+                  aria-label={t("avatarCard.useExpression", { name: expression })}
                 >
                   <MausAvatar color={bot.color} bodyId={bot.mascotBody ?? undefined} state={expression} size={42} animated={false} />
                 </button>
@@ -214,7 +216,7 @@ export function BotProfileAvatarCard({
             </div>
 
             <div className="mb-2 mt-4 text-[12px] font-medium uppercase tracking-[0.08em] text-ink-secondary">
-              Color
+              {t("avatarCard.color")}
             </div>
             <div className="flex flex-wrap gap-2.5">
               {MAUS_COLOR_NAMES.map((color) => (
@@ -230,13 +232,13 @@ export function BotProfileAvatarCard({
                   )}
                   style={{ backgroundColor: MAUS_COLORS[color] }}
                   title={color}
-                  aria-label={`Use ${color} mascot color`}
+                  aria-label={t("avatarCard.useColor", { name: color })}
                 />
               ))}
             </div>
 
             <div className="mb-2 mt-4 text-[12px] font-medium uppercase tracking-[0.08em] text-ink-secondary">
-              Body
+              {t("avatarCard.body")}
             </div>
             <div className="grid grid-cols-5 gap-1.5">
               {MASCOT_BODY_IDS.map((id) => (
@@ -245,7 +247,7 @@ export function BotProfileAvatarCard({
                   type="button"
                   disabled={busy}
                   aria-pressed={(bot.mascotBody ?? "cursor") === id}
-                  aria-label={`Use the ${MASCOT_BODIES[id].name} body`}
+                  aria-label={t("avatarCard.useBody", { name: MASCOT_BODIES[id].name })}
                   onClick={() => onPatch({ mascotBody: id })}
                   className={cn(
                     "flex items-center justify-center rounded-lg py-1.5 disabled:opacity-50",
