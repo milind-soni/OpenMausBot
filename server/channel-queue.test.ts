@@ -16,10 +16,12 @@ describe("channel queue", () => {
     });
     const first = queueChannelMessage("group-a", "thread-a", "first follow-up", {
       sendId: "send_first_123456",
+      usageTrigger: { kind: "user", label: "Alice device" },
     });
     queueChannelMessage("group-a", "thread-a", "second follow-up", {
       sendId: "send_second_123456",
       mode: "goal",
+      usageTrigger: { kind: "user", label: "Bob device" },
     });
 
     drainChannelMessages(() => working, run);
@@ -35,6 +37,7 @@ describe("channel queue", () => {
       threadId: "thread-a",
       text: "first follow-up",
       mode: "chat",
+      usageTrigger: { kind: "user", label: "Alice device" },
     }));
     expect(_queuedChannelCount("thread-a")).toBe(1);
 
@@ -44,13 +47,14 @@ describe("channel queue", () => {
     expect(run).toHaveBeenLastCalledWith(expect.objectContaining({
       text: "second follow-up",
       mode: "goal",
+      usageTrigger: { kind: "user", label: "Bob device" },
     }));
     expect(_queuedChannelCount("thread-a")).toBe(0);
   });
 
   it("cancels only the requested channel message", () => {
-    const keep = queueChannelMessage("group-b", "thread-b", "keep");
-    const drop = queueChannelMessage("group-b", "thread-b", "drop");
+    const keep = queueChannelMessage("group-b", "thread-b", "keep", { usageTrigger: { kind: "owner" } });
+    const drop = queueChannelMessage("group-b", "thread-b", "drop", { usageTrigger: { kind: "owner" } });
 
     expect(cancelChannelMessage("group-b", drop.id)).toBe(true);
     expect(cancelChannelMessage("group-b", drop.id)).toBe(false);

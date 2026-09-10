@@ -33,6 +33,7 @@ function harness(start = new Date(2026, 7, 17, 8, 0, 0).getTime()) {
     prompt: string;
     coordinatorBotId: string;
     runId: string;
+    routine: { routineId: string; routineName: string };
     onDispatchError: (message: string) => void;
   }> = [];
   const runOns: string[] = [];
@@ -67,8 +68,8 @@ function harness(start = new Date(2026, 7, 17, 8, 0, 0).getTime()) {
       runOns.push(runOn);
       triggerSources.push(triggerSource);
     },
-    startGoal: async (groupId, threadId, prompt, coordinatorBotId, runId, onDispatchError) => {
-      startedGoals.push({ groupId, threadId, prompt, coordinatorBotId, runId, onDispatchError });
+    startGoal: async (groupId, threadId, prompt, coordinatorBotId, runId, routine, onDispatchError) => {
+      startedGoals.push({ groupId, threadId, prompt, coordinatorBotId, runId, routine, onDispatchError });
     },
     interruptTurn: async (botId, threadId, runOn) => {
       interruptedTurns.push({ botId, threadId, runOn });
@@ -1539,6 +1540,7 @@ describe("RoutineManager", () => {
       prompt: "Prepare and verify the launch",
       coordinatorBotId: "chief-1",
       runId: run.id,
+      routine: { routineId: routine.id, routineName: "Team launch" },
     });
     expect(run).toMatchObject({ status: "running", threadId: "goal-thread-1" });
     expect(h.manager.listRoutines()[0]).toMatchObject({ target: "bot", groupId: undefined });

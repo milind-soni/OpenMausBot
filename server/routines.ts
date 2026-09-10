@@ -246,6 +246,7 @@ export interface RoutineManagerOptions {
     prompt: string,
     coordinatorBotId: string,
     runId: string,
+    routine: Pick<RoutineRun, "routineId" | "routineName">,
     onDispatchError: (message: string) => void,
   ) => Promise<void>;
   interruptTurn?: (botId: string, threadId: string, runOn: RoutineRunOn) => Promise<void>;
@@ -1384,6 +1385,7 @@ export class RoutineManager {
               prompt,
               run.botId,
               run.id,
+              { routineId: run.routineId, routineName: run.routineName },
               (message) => this.failThread(task.threadId, message),
             );
           } else {

@@ -7,6 +7,7 @@
 // never saw.
 
 import { newId } from "./contracts.ts";
+import type { UsageTrigger } from "./usage-ledger.ts";
 
 interface ChannelQueueItem {
   id: string;
@@ -14,6 +15,8 @@ interface ChannelQueueItem {
   replyToId?: string;
   sendId?: string;
   mode: "chat" | "goal";
+  /** Origin captured when the request entered the queue. */
+  readonly usageTrigger: UsageTrigger;
   /** kept so the drain appends it with the same provenance it arrived with */
   via?: "api";
 }
@@ -38,7 +41,8 @@ export function queueChannelMessage(
     sendId?: string;
     mode?: "chat" | "goal";
     via?: "api";
-  } = {},
+    usageTrigger: UsageTrigger;
+  },
 ): QueuedChannelMessage {
   const entry = queues.get(threadId) ?? { groupId, items: [] };
   if (entry.groupId !== groupId) throw new Error("queued task belongs to another channel");
@@ -48,6 +52,7 @@ export function queueChannelMessage(
     replyToId: options.replyToId,
     sendId: options.sendId,
     mode: options.mode ?? "chat",
+    usageTrigger: { ...options.usageTrigger },
     via: options.via,
   };
   entry.items.push(item);

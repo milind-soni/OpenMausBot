@@ -3,10 +3,11 @@
 ## Sub-features
 
 - Refuse every new turn once the month's reported cost reaches the workspace
-  cap: the message routes answer 409 with `code: "spend_cap"`, and a routine,
-  peer hop or webhook stops in `startTurn` with the same refusal.
+  cap: the message routes answer 409 with `code: "spend_cap"`; routines, peer
+  hops and webhooks stop in `startTurn`; and every room member, chained mention,
+  goal step, retry, queued send or calendar call checks again at dispatch.
 - Count a turn the moment it settles, not when the ledger's append lands or a
-  cache expires.
+  cache expires, including each provider-backed room or calendar member.
 - Price turns from the operator's list (`driver/model`, then model, then
   `default`) into a billable column in `/api/usage` and its CSV.
 - Do nothing at all without the `budgets` / `billing` entitlements.
@@ -25,12 +26,14 @@ pnpm exec vitest run --no-file-parallelism server/spend-cap-api.test.ts
 
 The test writes a stand-in enterprise layer (the folder shape core loads,
 granting `budgets` and `billing`) and launches the `control-omb` fixture with
-it through `launchVerificationServer(..., { dir, licenseKey })`. It sets a
-$0.015 cap and a default price list, sends two turns that the fake engine
-books at $0.01 each, and checks the third is refused with 409 `spend_cap`,
-that `/api/usage` reports the cap exceeded, warned, and priced, that the CSV
-carries `billable_usd`, and that raising the cap lets the next turn through.
-It prints the fixture's server log path and removes its temporary homes.
+it through `launchVerificationServer(..., { dir, licenseKey })`. It covers the
+direct 409, pricing and raised-cap path, then proves that room and calendar
+members are booked individually, the next room member is stopped at the
+provider boundary, room-goal spend is attributed to its routine, each queued
+user keeps their own origin, calendar operations remain owner-attributed when
+user work queues behind them, and a capped scheduled goal is blocked rather
+than retried as a provider failure. It prints each fixture's server log path
+and removes its temporary homes.
 
 For the same by hand, launch a fixture with `OMB_ENTERPRISE_DIR` pointing at a
 folder whose `server/index.js` exports such a `register()`, and

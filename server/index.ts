@@ -465,19 +465,19 @@ const registry = new ProviderRegistry(BUILT_IN_DRIVERS);
 // any other copy on PATH.
 registerEnginesBinDir();
 
-// Who asked for the next turn on a thread, noted where a message comes in
-// and read by the usage ledger when the turn settles. The last note stands
-// until the next message: a resumed connector or a drained queued send
-// still belongs to the person who wrote, and routine or peer turns are
-// told apart before this is consulted.
+// Who asked for work on a thread. Direct turns read this when they settle;
+// room ingress copies it onto each operation/queue item so later messages
+// cannot change the origin of work already accepted by the harness.
 const turnTriggers = new Map<string, UsageTrigger>();
-function noteTurnTrigger(threadId: string, auth: RequestAuth): void {
-  turnTriggers.set(
-    threadId,
-    auth.kind === "session"
-      ? { kind: "user", ...(auth.session.email ? { email: auth.session.email } : {}), label: auth.session.label }
-      : { kind: "owner" },
-  );
+function copyUsageTrigger(trigger: UsageTrigger): UsageTrigger {
+  return { ...trigger };
+}
+function noteTurnTrigger(threadId: string, auth: RequestAuth): UsageTrigger {
+  const trigger: UsageTrigger = auth.kind === "session"
+    ? { kind: "user", ...(auth.session.email ? { email: auth.session.email } : {}), label: auth.session.label }
+    : { kind: "owner" };
+  turnTriggers.set(threadId, trigger);
+  return copyUsageTrigger(trigger);
 }
 const providerAuthSessions = new ProviderAuthSessions();
 await registry.load(instanceConfigs(cfg));
@@ -1809,6 +1809,8 @@ const publicBotQueuedMessages = () => queuedSteerSnapshot((botId, threadId) => B
 type GroupTurnOperation = {
   id: string;
   threadId: string;
+  /** Immutable origin of every provider turn dispatched for this operation. */
+  readonly usageTrigger: UsageTrigger;
   botIds: Set<string>;
   cancelled: boolean;
   cancellation: AbortController;
@@ -2075,10 +2077,12 @@ function beginGroupTurnOperation(
   groupId: string,
   threadId: string,
   botIds: Iterable<string> = [],
+  usageTrigger: UsageTrigger = turnTriggers.get(threadId) ?? { kind: "owner" },
 ): GroupTurnOperation {
   const operation = {
     id: randomUUID(),
     threadId,
+    usageTrigger: copyUsageTrigger(usageTrigger),
     botIds: new Set(botIds),
     cancelled: false,
     cancellation: new AbortController(),
@@ -2698,6 +2702,28 @@ function notify(notification: Notification | null) {
 // Group threads: the fold needs to know WHO is talking — the turn engine
 // records the active member here before dispatching its turn.
 const groupSpeakers = new Map<string, { botId: string; name: string; color: string }>();
+
+// Usage attribution is fixed at the provider boundary. A queued message or
+// calendar occurrence can update the thread's next trigger while this member
+// is still running; the terminal event must keep the speaker, model and
+// initiator that actually dispatched this generation.
+type GroupTurnUsageSnapshot = Readonly<{
+  generation: string;
+  speaker: { botId: string; name: string; color: string };
+  botId: string;
+  botName: string;
+  instanceId: string;
+  driverKind: string;
+  model: string;
+  trigger: UsageTrigger;
+}>;
+const groupTurnUsageSnapshots = new Map<string, GroupTurnUsageSnapshot>();
+
+function clearGroupTurnUsageSnapshot(threadId: string, generation: string): void {
+  if (groupTurnUsageSnapshots.get(threadId)?.generation === generation) {
+    groupTurnUsageSnapshots.delete(threadId);
+  }
+}
 
 // The latest running token totals for the turn in flight on each thread.
 // Providers report cumulative-within-turn numbers; the final value is folded
@@ -3676,9 +3702,12 @@ bus.subscribe((event: RuntimeEvent) => {
       lastReply.delete(event.threadId);
       const lastReported = turnUsage.get(event.threadId);
       turnUsage.delete(event.threadId);
-      // group turns run on the room's thread — the speaking bot's task
-      // tally is not the right home for a shared room's spend, so only
-      // 1:1 task turns are tallied for now.
+      // The driver's own per-turn figure (turn.completed.usage) is
+      // authoritative; a driver that only streams the running indicator
+      // falls back to its last value. Retries therefore settle once.
+      const tokens = event.usage ?? lastReported;
+      // A room turn has no private bot task to tally, but it still belongs in
+      // the durable workspace ledger below. Keep the per-task counter 1:1.
       if (bot) {
         const resourceOwner = turnResourceOwners.get(event.threadId);
         const generation = directTurnGenerationByThread.get(event.threadId);
@@ -3709,11 +3738,8 @@ bus.subscribe((event: RuntimeEvent) => {
             drainDelegationWakes();
           }
         };
-        // bank what this turn spent before the bot broadcast carries the
-        // task list to every window. The driver's own per-turn figure
-        // (turn.completed.usage) is authoritative; a driver that only
-        // streams the running indicator falls back to its last value.
-        const tokens = event.usage ?? lastReported;
+        // Bank what this turn spent before the bot broadcast carries the
+        // task list to every window.
         store.addTaskUsage(bot.id, event.threadId, {
           input: tokens?.input,
           output: tokens?.output,
@@ -3788,13 +3814,40 @@ bus.subscribe((event: RuntimeEvent) => {
           settleDirectTurn();
         }
       }
-      const speaker = groupSpeakers.get(event.threadId);
+      const groupUsage = groupTurnUsageSnapshots.get(event.threadId);
+      if (
+        !bot &&
+        speaker &&
+        groupUsage?.speaker === speaker &&
+        turnResourceOwners.get(event.threadId)?.generation === groupUsage.generation
+      ) {
+        // Consume only this generation. Its member-turn finally block may
+        // run after a replacement has already published a newer snapshot.
+        clearGroupTurnUsageSnapshot(event.threadId, groupUsage.generation);
+        appendUsage(DATA_DIR, {
+          botId: groupUsage.botId,
+          botName: groupUsage.botName,
+          threadId: event.threadId,
+          instanceId: groupUsage.instanceId,
+          driverKind: groupUsage.driverKind,
+          model: groupUsage.model,
+          input: tokens?.input ?? 0,
+          output: tokens?.output ?? 0,
+          ...(typeof tokens?.cachedInput === "number" ? { cachedInput: tokens.cachedInput } : {}),
+          costUsd: event.cost ?? null,
+          trigger: groupUsage.trigger,
+        });
+        // This runs in the main subscriber before the member-turn waiter
+        // resumes, so the very next room dispatch observes the settled cost.
+        noteSpend(DATA_DIR, event.cost ?? null);
+      }
+      const settlingSpeaker = groupSpeakers.get(event.threadId);
       const group = store.groupByThread(event.threadId);
-      if (speaker && group?.busyBotId === speaker.botId) {
+      if (settlingSpeaker && group?.busyBotId === settlingSpeaker.botId) {
         releaseTurnResources(turnResourceOwners.get(event.threadId));
         groupSpeakers.delete(event.threadId);
         store.patchGroup(group.id, { busyBotId: null, unread: true });
-        const speakingBot = store.bot(speaker.botId);
+        const speakingBot = store.bot(settlingSpeaker.botId);
         if (speakingBot?.busy) {
           store.setActivity(speakingBot.id, "idle");
           retryDelegationsWaitingOn(speakingBot.id);
@@ -5538,11 +5591,12 @@ routines = new RoutineManager({
   startTurn: (botId, threadId, prompt, runOn, triggerSource, onDispatchError) =>
     startTurn(botId, prompt, { threadId, runOn, automationSource: triggerSource, onDispatchError })
       .then(() => undefined),
-  startGoal: async (groupId, threadId, prompt, coordinatorBotId, runId, _onDispatchError) => {
+  startGoal: async (groupId, threadId, prompt, coordinatorBotId, runId, routine, _onDispatchError) => {
     startGroupTurn(groupId, prompt, undefined, undefined, "goal", undefined, {
       threadId,
       goalCoordinatorBotId: coordinatorBotId,
       goalRunId: runId,
+      routineTrigger: { kind: "routine", routineId: routine.routineId, label: routine.routineName },
     });
   },
   interruptTurn: async (botId, threadId, runOn) => {
@@ -5876,6 +5930,7 @@ type GroupMemberTurnOutcome =
   | "settled"
   | "provider_failed"
   | "dispatch_failed"
+  | "spend_cap"
   | "stalled"
   | "timed_out"
   | "cancelled"
@@ -5976,6 +6031,27 @@ async function runGroupMemberTurn(
     ? group.threadId === threadId
     : Boolean(group && store.groupTaskByThread(group.id, threadId));
   if (!group || !bot || !ownsThread) return false;
+  const spendCapReached = () => {
+    try {
+      assertWithinBudget(cfg, DATA_DIR);
+      return false;
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      store.appendMessage(threadId, {
+        role: "bot",
+        kind: "activity",
+        from: { botId: bot.id, name: bot.name, color: bot.color },
+        tool: { name: `error: ${message.slice(0, 140)}`, ok: false },
+      });
+      onDispatchError?.(message);
+      if (orchestration) {
+        orchestration.result.outcome = "spend_cap";
+        orchestration.result.stopReason = message;
+      }
+      return true;
+    }
+  };
+  if (spendCapReached()) return false;
   if (bot.approvalGrant) {
     onDispatchError?.(`${bot.name}'s approval level is still being confirmed — skipped this round`);
     return true;
@@ -6371,6 +6447,23 @@ async function runGroupMemberTurn(
     }
     return false;
   }
+  // Setup above can yield while another bot settles and reaches the cap.
+  // Re-check at the actual provider boundary so room members, chained
+  // mentions, goal steps, retries, queued sends and calendar calls all obey
+  // the same workspace limit immediately before dispatch.
+  if (spendCapReached()) return false;
+  const dispatchSpeaker = roomSpeaker;
+  if (!dispatchSpeaker) return false;
+  groupTurnUsageSnapshots.set(threadId, {
+    generation: internalGeneration,
+    speaker: dispatchSpeaker,
+    botId: readyBot.id,
+    botName: readyBot.name,
+    instanceId: readyBot.modelSelection.instanceId,
+    driverKind: instance.driverKind,
+    model: readyBot.modelSelection.model,
+    trigger: copyUsageTrigger(operation?.usageTrigger ?? { kind: "owner" }),
+  });
   let replyText = "";
   let providerTurnId: string | undefined;
   let abandoned = false;
@@ -6650,6 +6743,7 @@ async function runGroupMemberTurn(
   } finally {
     // Covers connector/setup failures, cancellation before dispatch, and all
     // other early returns that never produce a provider terminal event.
+    clearGroupTurnUsageSnapshot(threadId, internalGeneration);
     revokeInternalCapabilityGeneration(threadId, internalGeneration);
     if (!retainRoomVmLease) releaseRoomVmLease();
     if (!providerDispatched && roomSpeaker && groupSpeakers.get(threadId) === roomSpeaker) {
@@ -6738,6 +6832,7 @@ async function runGroupGoalStep(args: {
             if (coordinatorTurn && !coordinatorTurn.turnId) coordinatorTurn.turnId = turnId;
           },
         },
+        args.operation,
       );
       if (result.outcome === "busy") continue;
       // One retry for a transient provider failure: a 13-turn goal must not
@@ -6833,6 +6928,15 @@ async function runGroupGoalOperation(args: {
       }),
     });
     if (args.operation.cancelled) return;
+    if (coordinatorResult.outcome === "spend_cap") {
+      finishGroupGoalRun(
+        args.groupId,
+        args.operation,
+        "blocked",
+        coordinatorResult.stopReason ?? "This workspace has reached its monthly spend limit.",
+      );
+      return;
+    }
     if (coordinatorResult.outcome === "unavailable") {
       finishGroupGoalRun(args.groupId, args.operation, "blocked", `${args.coordinator.name} is not available.`);
       return;
@@ -6918,6 +7022,15 @@ async function runGroupGoalOperation(args: {
       }),
     });
     if (args.operation.cancelled) return;
+    if (workerResult.outcome === "spend_cap") {
+      finishGroupGoalRun(
+        args.groupId,
+        args.operation,
+        "blocked",
+        workerResult.stopReason ?? "This workspace has reached its monthly spend limit.",
+      );
+      return;
+    }
     if (workerResult.outcome === "unavailable") {
       finishGroupGoalRun(args.groupId, args.operation, "blocked", `${workerBot.name} is not available.`);
       return;
@@ -6983,6 +7096,10 @@ type StartGroupTurnOptions = {
   /** The message came through the HTTP API with nothing to say a person
    * sent it (see Message.via). */
   via?: "api";
+  /** Origin captured when this message entered the room harness. */
+  usageTrigger?: UsageTrigger;
+  /** A scheduled room goal always overrides the ambient/user origin. */
+  routineTrigger?: Extract<UsageTrigger, { kind: "routine" }>;
 };
 
 function startGroupTurn(
@@ -7074,10 +7191,14 @@ function startGroupTurn(
     return message;
   }
 
+  const usageTrigger = copyUsageTrigger(
+    options.routineTrigger ?? options.usageTrigger ?? { kind: "owner" },
+  );
   const operation = beginGroupTurnOperation(
     groupId,
     threadId,
     goalCoordinator ? [] : responders.map((responder) => responder.id),
+    usageTrigger,
   );
   if (goalCoordinator) {
     const runId = options.goalRunId?.trim() || `goal-${Date.now().toString(36)}-${randomUUID()}`;
@@ -7172,14 +7293,14 @@ function drainQueuedChannelSends(): void {
       const group = store.group(groupId);
       return group ? groupIsWorking(group) : false;
     },
-    ({ groupId, threadId, text, replyToId, sendId, mode, id, via }) => {
+    ({ groupId, threadId, text, replyToId, sendId, mode, id, via, usageTrigger }) => {
       const group = store.group(groupId);
       const ownsThread = group?.dm
         ? group.threadId === threadId
         : Boolean(group && store.groupTaskByThread(group.id, threadId));
       if (!group || !ownsThread) return;
       try {
-        startGroupTurn(groupId, text, resolveReplyTarget(threadId, replyToId), sendId, mode, id, { via });
+        startGroupTurn(groupId, text, resolveReplyTarget(threadId, replyToId), sendId, mode, id, { via, usageTrigger });
       } catch (error) {
         store.appendMessage(threadId, {
           role: "bot",
@@ -7232,7 +7353,9 @@ function deliverCalendarCall(call: CalendarCall, scheduledFor: number): void {
   const threadIds = new Set([group.threadId, ...(group.tasks ?? []).map((task) => task.threadId)]);
   const messages = [...threadIds].flatMap((threadId) => store.messagesFor(threadId));
   if (messages.some((message) => message.sendId === sendId)) return;
-  startGroupTurn(group.id, text, undefined, sendId);
+  // Calendar calls are owner-scheduled work. Carry that origin on this exact
+  // operation even when paired-user messages are already waiting behind it.
+  startGroupTurn(group.id, text, undefined, sendId, "chat", undefined, { usageTrigger: { kind: "owner" } });
 }
 
 function roomSetupPending(group: GroupRecord): boolean {
@@ -7707,6 +7830,9 @@ function dispatchConnectorResume(entry: { botId: string; threadId: string; resum
         () => operation.cancelled,
         () => groupProviderHandshakeStarted(operation),
         () => groupProviderHandshakeSettled(operation),
+        undefined,
+        undefined,
+        operation,
       );
     });
     const tracked = next.finally(() => finishGroupTurnOperation(groupId, operation));
@@ -7852,6 +7978,9 @@ function dispatchSecretResume(entry: SecretResumeEntry) {
         () => operation.cancelled,
         () => groupProviderHandshakeStarted(operation),
         () => groupProviderHandshakeSettled(operation),
+        undefined,
+        undefined,
+        operation,
       );
     });
     const tracked = next.finally(() => finishGroupTurnOperation(groupId, operation));
@@ -11220,7 +11349,7 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
         return json(res, 400, { error: "threadId must be a task id" });
       }
       const threadId = body.threadId ?? group.threadId;
-      noteTurnTrigger(threadId, auth);
+      const usageTrigger = noteTurnTrigger(threadId, auth);
       try {
         assertWithinBudget(cfg, DATA_DIR);
       } catch (error) {
@@ -11285,10 +11414,11 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
               sendId,
               mode: channelMode,
               via,
+              usageTrigger,
             });
             return { ok: true as const, queued: true as const, queueId: queued.id, threadId };
           }
-          const message = startGroupTurn(current.id, text, replyTo, sendId, channelMode, undefined, { via });
+          const message = startGroupTurn(current.id, text, replyTo, sendId, channelMode, undefined, { via, usageTrigger });
           return { ok: true as const, threadId, message };
         },
       );
