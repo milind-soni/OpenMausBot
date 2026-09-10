@@ -35,6 +35,10 @@ describe("VerifyCard", () => {
     expect(markup).toContain(t("chat.verify.save"));
   });
 
+  it("explains under Save that it fills the message instead of sending", () => {
+    expect(render()).toMatch(new RegExp(`${t("chat.verify.save")}</button><span class="text-\\[12px\\] text-ink-secondary">${t("chat.verify.saveHint")}</span>`));
+  });
+
   it("announces the summary and makes the step list reachable by keyboard", () => {
     const markup = render();
     expect(markup).toMatch(/<span role="status" aria-live="polite" aria-atomic="true"[^>]*>1 passed · 1 failed · 1 running</);
@@ -50,6 +54,7 @@ describe("VerifyCard", () => {
     expect(markup).toContain(`aria-label="${t("chat.verify.expand")}"`);
     expect(markup).not.toContain("<ol");
     expect(markup).not.toContain(t("chat.verify.save"));
+    expect(markup).not.toContain(t("chat.verify.saveHint"));
   });
 
   it("has no footer at all when the run cannot be saved", () => {
@@ -58,11 +63,13 @@ describe("VerifyCard", () => {
     expect(markup).not.toContain(t("chat.verify.save"));
     expect(markup).not.toContain("<button disabled");
     expect(markup).not.toContain(t("chat.verify.staged"));
+    expect(markup).not.toContain(t("chat.verify.saveHint"));
   });
 
   it("says the skill is staged instead of offering Save again", () => {
     const markup = render({ staged: true });
     expect(markup).toContain(t("chat.verify.staged"));
     expect(markup).not.toContain(t("chat.verify.save"));
+    expect(markup).not.toContain(t("chat.verify.saveHint"));
   });
 });

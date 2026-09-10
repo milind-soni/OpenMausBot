@@ -380,6 +380,7 @@
   "chat.verify.expand": "Expand the verification run",
   "chat.verify.dismiss": "Dismiss the verification run",
   "chat.verify.save": "Save as skill",
+  "chat.verify.saveHint": "Adds the run to your message; add any notes, then send.",
   "chat.verify.staged": "Skill staged for your review",
   "chat.workingFolder": "Working folder: {folder}",
   "chat.usage.turnsOne": "1 turn",

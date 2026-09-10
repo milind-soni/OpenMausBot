@@ -151,6 +151,15 @@ describe("skillPrompt", () => {
     const terms: string[] = manifest.triggerTerms;
     const opening = prompt.split("\n")[0].toLowerCase();
     expect(terms.some((term) => opening.includes(term.toLowerCase()))).toBe(true);
+    // the skill mounts on a substring match anywhere in the turn
+    // (selectBundledSkills), so notes typed above or below still mount it
+    const annotated = `Also cover the send step.\n\n${prompt}Keep the doctor step first.`.toLowerCase();
+    expect(terms.some((term) => annotated.includes(term.toLowerCase()))).toBe(true);
+  });
+
+  it("ends with a blank line so the caret lands below the steps in the composer", () => {
+    expect(prompt.endsWith(`[dry run] doctor — ${DOCTOR} --dry-run\n\n`)).toBe(true);
+    expect(prompt.endsWith("\n\n\n")).toBe(false);
   });
 
   it("states the one rule, then lists every step with its marker — a dry run never as passing", () => {

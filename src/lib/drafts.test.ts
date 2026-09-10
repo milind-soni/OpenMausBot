@@ -3,6 +3,7 @@ import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 
 import {
+  appendComposerDraft,
   appendDraftAttachments,
   changeDraftAttachmentPending,
   draftRevision,
@@ -280,5 +281,43 @@ describe("durable attachment completion", () => {
     expect(isDraftAttachmentPending("bot:pending:a")).toBe(true);
     changeDraftAttachmentPending("bot:pending:a", false);
     expect(isDraftAttachmentPending("bot:pending:a")).toBe(false);
+  });
+});
+
+describe("appendComposerDraft", () => {
+  const prompt = "Create a verification skill from the run below.\n\n✓ doctor — pnpm control:omb doctor\n\n";
+
+  it("puts the text into an empty draft exactly as given", () => {
+    const store = memoryStorage();
+    Object.defineProperty(globalThis, "localStorage", { configurable: true, value: store });
+    const draftId = "bot:save:thread-empty";
+    const revision = draftRevision(draftId);
+    appendComposerDraft(draftId, prompt);
+    expect(getDraft(store, draftId)).toBe(prompt);
+    expect(JSON.parse(store.getItem("omb-drafts") ?? "{}")[draftId]).toBe(prompt);
+    // an edited draft outranks a late failed send, exactly like typing does
+    expect(draftRevision(draftId)).toBe(revision + 1);
+  });
+
+  it("appends after a blank line and never replaces what the person typed", () => {
+    const store = memoryStorage();
+    Object.defineProperty(globalThis, "localStorage", { configurable: true, value: store });
+    const draftId = "bot:save:thread-typed";
+    setDraft(store, draftId, "Keep the doctor step first.");
+    appendComposerDraft(draftId, prompt);
+    expect(getDraft(store, draftId)).toBe(`Keep the doctor step first.\n\n${prompt}`);
+  });
+
+  it("leaves attachments and the channel mode as they were", () => {
+    const store = memoryStorage();
+    Object.defineProperty(globalThis, "localStorage", { configurable: true, value: store });
+    const draftId = "group:save:thread-attached";
+    const attachment = { kind: "file" as const, id: "file-1", path: "/private/attachments/log.txt", name: "log.txt", size: 12 };
+    setDraftAttachments(store, draftId, [attachment]);
+    setDraftChannelMode(store, draftId, "goal");
+    appendComposerDraft(draftId, prompt);
+    expect(getDraft(store, draftId)).toBe(prompt);
+    expect(getDraftAttachments(store, draftId)).toEqual([attachment]);
+    expect(getDraftChannelMode(store, draftId)).toBe("goal");
   });
 });

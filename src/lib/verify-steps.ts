@@ -156,15 +156,19 @@ export function skillStaged(messages: Message[], steps: VerifyStep[]): boolean {
 
 const MARK = { passed: "✓", failed: "✗", running: "…" } as const;
 
-/** The message Save as skill sends to the bot. Its first sentence is a
- * create-verification-skill trigger phrase, so that skill mounts on the
- * turn and lays the file out; the rest is the run itself. A dry run is
- * marked as one and never reads as passing. */
+/** The text Save as skill puts into the composer for the person to send.
+ * Its first sentence is a create-verification-skill trigger phrase, so that
+ * skill mounts on the turn and lays the file out (the bundled skill matches
+ * its term anywhere in the turn, so notes above or below are fine); the
+ * rest is the run itself. A dry run is marked as one and never reads as
+ * passing. It ends with a blank line so the caret lands below the steps. */
 export function skillPrompt(steps: VerifyStep[]): string {
   return [
     "Create a verification skill from the run below.",
     "Do not re-run these steps; their results are in this thread. Use the passing ones as the recipe with their exact commands and note the failed ones as gotchas.",
     "",
     ...steps.map((step) => `${step.dryRun ? "[dry run]" : MARK[step.status]} ${step.subcommand} — ${step.command}`),
+    "",
+    "",
   ].join("\n");
 }

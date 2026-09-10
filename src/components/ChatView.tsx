@@ -81,7 +81,7 @@ import {
   resolveTranscriptWindow,
   tailWindowStart,
 } from "@/lib/transcript-window";
-import { useReplyDraft } from "@/lib/drafts";
+import { appendComposerDraft, useReplyDraft } from "@/lib/drafts";
 
 /** Long user messages collapse behind a fade so pasted walls of text don't
  * bury the conversation; bots get full markdown. */
@@ -1376,9 +1376,11 @@ export function ChatView({ bot: profile }: { bot: Bot }) {
           selected one. ArrowUp-to-edit stays gated on busy because editing
           rewinds the thread, which a live turn forbids (the server 409s it). */}
       <div ref={composerDockRef} className="absolute inset-x-0 bottom-0 z-[2]">
-      {/* The bot's verification run as a checklist, kept as a skill on request.
-          In the dock so its height is measured with the composer's: the
-          transcript pad, the jump pill and bottom-follow all move with it. */}
+      {/* The bot's verification run as a checklist. Save fills this thread's
+          composer with the run and hands the caret over; the person adds
+          context and sends — nothing is sent from here. In the dock so its
+          height is measured with the composer's: the transcript pad, the
+          jump pill and bottom-follow all move with it. */}
       {lastVerifyStep && verifyDismissed.get(transcriptKey) !== lastVerifyStep.id && (
         <div className="flex justify-end px-5 pb-2">
           <VerifyCard
@@ -1387,15 +1389,10 @@ export function ChatView({ bot: profile }: { bot: Bot }) {
             canSave={canSaveVerify}
             staged={skillStaged(messages, verifySteps)}
             onDismiss={() => setVerifyDismissed((current) => new Map(current).set(transcriptKey, lastVerifyStep.id))}
-            onSave={() =>
-              dispatch({
-                type: "send",
-                botId: bot.id,
-                text: skillPrompt(verifySteps),
-                sendId: crypto.randomUUID(),
-                threadId: bot.threadId,
-              })
-            }
+            onSave={() => {
+              appendComposerDraft(`bot:${bot.id}:${bot.threadId}`, skillPrompt(verifySteps));
+              composerDockRef.current?.querySelector("textarea")?.focus();
+            }}
           />
         </div>
       )}

@@ -37,6 +37,7 @@ const TOOL_CALLS = JSON.stringify([
   { name: "Bash", input: { command: "pnpm control:omb ui flag --set features.showToolCalls=true --dry-run" }, ok: true },
 ]);
 const REPLY = "hello from fake claude"; // the fake engine's default reply text
+const COMPOSER = `document.querySelector('textarea[aria-label="Message Pepper"]')`;
 // OMB_UI_EVIDENCE_DIR keeps the screenshot (CI uploads it); otherwise it is temporary.
 const evidenceDir = process.env.OMB_UI_EVIDENCE_DIR ? resolve(ROOT, process.env.OMB_UI_EVIDENCE_DIR) : mkdtempSync(join(tmpdir(), "omb-ui-evidence-"));
 const ownsEvidenceDir = !process.env.OMB_UI_EVIDENCE_DIR;
@@ -122,6 +123,9 @@ describe("control-omb ui drives the real renderer", () => {
     expect(dry).toMatchObject({ ok: true, dryRun: true, patch: { features: { showToolCalls: true } } });
     const flagged = await ui("flag", info.ui, "--set", "features.showToolCalls=true");
     expect(flagged).toMatchObject({ ok: true, features: { showToolCalls: true } });
+    // Save as skill on the Verify card needs skill authoring on.
+    const authoring = await ui("flag", info.ui, "--set", "features.skillAuthoring=true");
+    expect(authoring).toMatchObject({ ok: true, features: { skillAuthoring: true } });
 
     const before = await ui("snapshot", info.ui, "--interactive");
     expect(before.ok).toBe(true);
@@ -167,6 +171,24 @@ describe("control-omb ui drives the real renderer", () => {
     const png = readFileSync(shotPath);
     expect(png.length).toBeGreaterThan(1_000);
     expect(png.subarray(0, 8)).toEqual(Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]));
+
+    // Save as skill fills the composer with the run — the trigger phrase and
+    // each step's command — for the person to annotate and send. It sends
+    // nothing itself: the transcript is unchanged and the caret is in the box.
+    await ui("click", info.ui, "--name", "Save as skill");
+    const drafted = await ui("eval", info.ui, "--js", `${COMPOSER}.value`);
+    expect(drafted.ok).toBe(true);
+    const draft = drafted.result as string;
+    expect(draft.startsWith("Create a verification skill from the run below.")).toBe(true);
+    expect(draft).toContain("✓ doctor — pnpm control:omb doctor");
+    expect(draft).toContain("✗ ui — pnpm control:omb ui click --name Missing");
+    expect(draft).toContain("[dry run] ui — pnpm control:omb ui flag --set features.showToolCalls=true --dry-run");
+    expect(draft.endsWith("\n\n")).toBe(true);
+    expect(await ui("eval", info.ui, "--js", `document.activeElement === ${COMPOSER}`)).toMatchObject({ ok: true, result: true });
+    const afterSave = await ui("snapshot", info.ui);
+    const transcriptAfterSave = (afterSave.snapshot as string).slice((afterSave.snapshot as string).indexOf('log "Conversation with Pepper"'));
+    expect(transcriptAfterSave).not.toContain("Create a verification skill");
+    expect(transcriptAfterSave.match(/StaticText "hello"/g)).toHaveLength(1);
 
     await ui("click", info.ui, "--name", "Collapse the verification run");
     const collapsed = await ui("snapshot", info.ui);

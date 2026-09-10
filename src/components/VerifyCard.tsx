@@ -21,9 +21,10 @@ const ICON_BUTTON =
   "flex size-7 shrink-0 items-center justify-center rounded-lg text-ink-secondary outline-none hover:bg-raised-hover hover:text-ink focus-visible:ring-2 focus-visible:ring-accent/60";
 
 /** A bot's control-CLI run in the visible thread as a checklist, with one
- * action: ask the bot to keep it as a skill through the skill review flow.
- * Collapse is the card's own (a long run starts folded); dismissal is the
- * caller's, since it outlives the card. */
+ * action: put the run into the composer as a skill request, for the person
+ * to annotate and send through the ordinary skill review flow. Collapse is
+ * the card's own (a long run starts folded); dismissal is the caller's,
+ * since it outlives the card. */
 export function VerifyCard({
   steps,
   canSave,
@@ -32,12 +33,13 @@ export function VerifyCard({
   onSave,
 }: {
   steps: VerifyStep[];
-  /** The bot can be asked now: skill authoring is on, its engine has the
+  /** The run can be saved now: skill authoring is on, the engine has the
    * agents tools, something passed, nothing is still running or busy. */
   canSave: boolean;
   /** A skill from this run is already waiting for review. */
   staged: boolean;
   onDismiss: () => void;
+  /** Fills the thread's composer with the run; nothing is sent. */
   onSave: () => void;
 }) {
   const defaultCollapsed = steps.length > 6;
@@ -91,7 +93,7 @@ export function VerifyCard({
           {staged ? (
             <div className="border-t border-hairline/25 px-3 py-2 text-[12px] text-ink-secondary">{t("chat.verify.staged")}</div>
           ) : canSave && (
-            <div className="flex justify-end border-t border-hairline/25 px-3 py-2">
+            <div className="flex flex-col items-end gap-1 border-t border-hairline/25 px-3 py-2">
               <button
                 type="button"
                 onClick={onSave}
@@ -100,6 +102,7 @@ export function VerifyCard({
                 <BookmarkPlus size={13} aria-hidden="true" />
                 {t("chat.verify.save")}
               </button>
+              <span className="text-[12px] text-ink-secondary">{t("chat.verify.saveHint")}</span>
             </div>
           )}
         </>
