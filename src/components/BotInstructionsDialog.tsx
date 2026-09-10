@@ -4,6 +4,7 @@ import { BookOpen, X } from "lucide-react";
 
 import { BotAvatar } from "./Avatar";
 import { normalizeState } from "@/lib/mascot";
+import { t } from "@/lib/i18n";
 import type { Bot } from "@/state/store";
 
 export function BotInstructionsDialog({ bot, onClose }: { bot: Bot; onClose: () => void }) {
@@ -76,7 +77,7 @@ export function BotInstructionsDialog({ bot, onClose }: { bot: Bot; onClose: () 
             <div className="min-w-0">
               <div className="flex items-center gap-2 text-accent-text">
                 <BookOpen size={15} />
-                <span className="text-[11px] font-semibold uppercase tracking-[0.08em]">Bot instructions</span>
+                <span className="text-[11px] font-semibold uppercase tracking-[0.08em]">{t("botInstructions.eyebrow")}</span>
               </div>
               <h2 id="bot-instructions-title" className="mt-0.5 truncate text-[20px] font-semibold tracking-[-0.01em] text-ink">
                 {bot.name}
@@ -87,7 +88,7 @@ export function BotInstructionsDialog({ bot, onClose }: { bot: Bot; onClose: () 
           <button
             type="button"
             onClick={close}
-            aria-label="Close bot instructions"
+            aria-label={t("botInstructions.closeAria")}
             className="flex size-9 shrink-0 items-center justify-center rounded-lg text-ink-secondary hover:bg-raised hover:text-ink"
           >
             <X size={19} />
@@ -102,16 +103,16 @@ export function BotInstructionsDialog({ bot, onClose }: { bot: Bot; onClose: () 
           ) : (
             <div className="rounded-xl border border-dashed border-hairline bg-inset px-5 py-12 text-center">
               <BookOpen size={22} className="mx-auto text-ink-secondary/60" />
-              <p className="mt-3 text-[13px] font-medium text-ink">No instructions yet</p>
-              <p className="mt-1 text-[12px] text-ink-secondary">Add them from this bot’s profile.</p>
+              <p className="mt-3 text-[13px] font-medium text-ink">{t("botInstructions.empty")}</p>
+              <p className="mt-1 text-[12px] text-ink-secondary">{t("botInstructions.emptyHint")}</p>
             </div>
           )}
         </div>
 
         <footer className="flex items-center justify-between gap-4 border-t border-hairline/40 px-6 py-4 text-[11.5px] text-ink-secondary sm:px-8">
-          <span>Included in this bot’s context on every turn.</span>
+          <span>{t("botInstructions.footer")}</span>
           <button type="button" onClick={close} className="rounded-lg bg-control px-3.5 py-2 text-[13px] font-medium text-ink hover:bg-raised-hover">
-            Done
+            {t("botInstructions.done")}
           </button>
         </footer>
       </div>

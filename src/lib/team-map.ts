@@ -1,3 +1,6 @@
+import { t } from "@/lib/i18n";
+import type { LocaleKey } from "@/locales";
+
 export interface TeamMapBot {
   id: string;
   name: string;
@@ -32,7 +35,9 @@ export type TeamMapEdge = {
 };
 
 export interface TeamMapStatus {
-  label: string;
+  /** A catalog key, not a sentence: the map compares this to pick the pulse
+   * animation, and a translated label would break that comparison. */
+  labelKey: LocaleKey;
   tone: "success" | "warning" | "danger" | "idle";
 }
 
@@ -51,7 +56,7 @@ export function buildTeamMapSections<T extends TeamMapBot>(bots: T[]): TeamMapSe
   }
   return [...sections].map(([key, sectionBots]) => ({
     key,
-    name: key || "General",
+    name: key || t("teamMap.general"),
     chiefs: sectionBots.filter((bot) => bot.chiefOfStaff),
     members: sectionBots.filter((bot) => !bot.chiefOfStaff),
   }));
@@ -99,8 +104,8 @@ export function buildTeamMapEdges(bots: TeamMapBot[], snapshot: TeamMapSnapshot)
 }
 
 export function teamMapStatus(bot: TeamMapBot): TeamMapStatus {
-  if (bot.activity === "waiting-on-you") return { label: "Waiting for you", tone: "warning" };
-  if (bot.activity === "dead" || bot.activity === "no-signal") return { label: "No signal", tone: "danger" };
-  if (bot.busy || bot.activity === "working") return { label: "Working", tone: "success" };
-  return { label: "Ready", tone: "idle" };
+  if (bot.activity === "waiting-on-you") return { labelKey: "teamMap.status.waiting", tone: "warning" };
+  if (bot.activity === "dead" || bot.activity === "no-signal") return { labelKey: "teamMap.status.noSignal", tone: "danger" };
+  if (bot.busy || bot.activity === "working") return { labelKey: "teamMap.status.working", tone: "success" };
+  return { labelKey: "teamMap.status.ready", tone: "idle" };
 }
