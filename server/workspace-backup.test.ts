@@ -1,4 +1,4 @@
-import { createCipheriv, randomBytes, scryptSync } from "node:crypto";
+import { createCipheriv, createHash, randomBytes, scryptSync } from "node:crypto";
 import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, renameSync, rmSync, statSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -26,11 +26,11 @@ function fixture(root: string): DatabaseSync {
   writeFileSync(join(root, "attachments", "image.png"), Buffer.from([0, 1, 2, 255, 0, 128]));
   mkdirSync(join(root, "task-workspaces", "bot", "thread"), { recursive: true });
   writeFileSync(join(root, "task-workspaces", "bot", "thread", "binary.bin"), Buffer.alloc(2 * 1024 * 1024, 0xa5));
-  json(join(root, "config.json"), { instances: { custom: { driver: "claudeAgent", config: { configDir: join(root, "providers", "account") } } }, apiKey: "private-key-in-config" });
+  json(join(root, "config.json"), { language: "ja", instances: { custom: { driver: "claudeAgent", config: { configDir: join(root, "providers", "account") } } }, apiKey: "private-key-in-config" });
   json(join(root, "bots.json"), [{ id: "bot", threadId: "thread", cwd: join(root, "task-workspaces", "bot", "thread"), soul: `Do not rewrite this prose mentioning ${root}.`, tasks: [{ threadId: "thread", cwd: join(root, "task-workspaces", "bot", "thread") }] }]);
   json(join(root, "groups.json"), [{ id: "room", memberIds: ["bot"], cwd: "/external/project" }]);
   json(join(root, "routines.json"), { version: 1, routines: [{ id: "routine", enabled: true }], runs: [{ id: "waiting", status: "queued" }, { id: "historical", status: "completed" }] });
-  json(join(root, "webhooks.json"), { version: 1, webhooks: [{ id: "hook", enabled: true }], deliveries: [{ id: "delivery" }] });
+  json(join(root, "webhooks.json"), { version: 1, webhooks: [{ id: "hook", endpointId: "endpoint", enabled: true, secretHash: "a".repeat(64) }], deliveries: [{ id: "delivery" }] });
   json(join(root, "calendar-calls.json"), { version: 1, calls: [{ id: "call", nextRunAt: 100 }] });
   json(join(root, "delegations.json"), { thread: [{ id: "pending" }] });
   json(join(root, "delegation-receipts.json"), [{ id: "receipt" }]);
@@ -69,7 +69,7 @@ function tarEntry(path: string, type: "File" | "Directory" | "SymbolicLink" | "L
 afterEach(() => { for (const root of scratch.splice(0)) rmSync(root, { recursive: true, force: true }); });
 
 describe("encrypted full workspace backups", () => {
-  it("round-trips WAL conversations, binary files, private metadata and IDs; preserves destination identity", async () => {
+  it("round-trips WAL conversations, binary files, drafts and IDs; preserves destination identity and connections", async () => {
     const source = directory();
     const db = fixture(source);
     // Production closes its sole live message handle after draining writes,
@@ -78,15 +78,18 @@ describe("encrypted full workspace backups", () => {
     try {
       const originalDb = readFileSync(join(source, "messages.db"));
       const exported = await createWorkspaceBackup(source, {
-        password: PASSWORD, appVersion: "test", credentials: { xaiApiKey: "private-secret" },
+        password: PASSWORD, appVersion: "test",
         clientState: { "omb-drafts": '{"thread":"unsent"}', "omb-draft-attachments": JSON.stringify({ thread: [{ kind: "file", path: join(source, "attachments", "image.png") }] }) },
       });
-      expect(exported.summary).toMatchObject({ bots: 1, groups: 1, threads: 1, messages: 1, includesCredentials: true });
+      expect(exported.summary).toMatchObject({ bots: 1, groups: 1, threads: 1, messages: 1 });
+      expect(exported.summary).not.toHaveProperty("includesCredentials");
       const encrypted = readFileSync(exported.path);
       expect(encrypted.includes(Buffer.from("private-secret"))).toBe(false);
       expect(encrypted.includes(Buffer.from("private-key-in-config"))).toBe(false);
       expect(readFileSync(join(source, "messages.db"))).toEqual(originalDb);
       const target = directory();
+      const connections = { xai: { key: "destination-key", url: "https://destination.example" }, instances: { local: { driver: "claudeAgent", config: { configDir: join(target, "providers", "local") } } } };
+      json(join(target, "config.json"), { ...connections, language: "en" });
       json(join(target, "bots.json"), [{ id: "old" }]);
       json(join(target, "sessions.json"), { identity: "target-session" });
       writeFileSync(join(target, "environment-id"), "target-environment");
@@ -96,14 +99,17 @@ describe("encrypted full workspace backups", () => {
       const staged = await stageWorkspaceBackup(target, exported.path, { password: PASSWORD });
       expect(staged.summary).toEqual(exported.summary);
       expect(readJson(join(target, "bots.json"))).toEqual([{ id: "old" }]);
-      expect(readStagedWorkspaceBackup(target, staged.id).credentials).toEqual({ xaiApiKey: "private-secret" });
+      expect(readStagedWorkspaceBackup(target, staged.id)).not.toHaveProperty("credentials");
+      const data = join(target, ".backups", staged.id, "staged", "data");
+      expect(readJson(join(data, "config.json"))).toEqual({ language: "ja" });
+      expect(readJson(join(data, "webhooks.json")).webhooks[0]).not.toHaveProperty("secretHash");
       expect(commitPendingWorkspaceRestore(target, staged.id)).toMatchObject({ id: staged.id, restartRequired: true });
       expect(readPendingWorkspaceRestoreMetadata(target)?.id).toBe(staged.id);
       const result = applyPendingWorkspaceRestore(target);
       expect(result).toMatchObject({ restored: true, id: staged.id });
       expect(readJson(join(target, "bots.json"))[0]).toMatchObject({ id: "bot", cwd: join(target, "task-workspaces", "bot", "thread"), soul: `Do not rewrite this prose mentioning ${source}.` });
       expect(readJson(join(target, "groups.json"))[0].cwd).toBe("/external/project");
-      expect(readJson(join(target, "config.json")).instances.custom.config.configDir).toBe(join(target, "providers", "account"));
+      expect(readJson(join(target, "config.json"))).toEqual({ ...connections, language: "ja" });
       expect(readFileSync(join(target, "task-workspaces", "bot", "thread", "binary.bin"))).toEqual(Buffer.alloc(2 * 1024 * 1024, 0xa5));
       expect(readJson(join(target, "sessions.json"))).toEqual({ identity: "target-session" });
       expect(readFileSync(join(target, "environment-id"), "utf8")).toBe("target-environment");
@@ -125,6 +131,8 @@ describe("encrypted full workspace backups", () => {
       } finally { restoredDb.close(); }
       expect(readJson(join(target, "routines.json"))).toMatchObject({ routines: [{ enabled: false }], runs: [{ status: "failed" }, { status: "completed" }] });
       expect(readJson(join(target, "webhooks.json"))).toMatchObject({ webhooks: [{ enabled: false }], deliveries: [{ id: "delivery" }] });
+      expect(readJson(join(target, "webhooks.json")).webhooks[0].secretHash).toMatch(/^[a-f0-9]{64}$/);
+      expect(readJson(join(target, "webhooks.json")).webhooks[0].secretHash).not.toBe("a".repeat(64));
       expect(readJson(join(target, "calendar-calls.json")).calls[0].nextRunAt).toBeNull();
       expect(readJson(join(target, "delegations.json"))).toEqual({});
       expect(readJson(join(target, "delegation-receipts.json"))).toEqual([{ id: "receipt" }]);
@@ -155,6 +163,132 @@ describe("encrypted full workspace backups", () => {
     await expect(stageWorkspaceBackup(target, path, { password: PASSWORD })).rejects.toThrow(/damaged/);
     expect(readFileSync(join(target, "untouched"), "utf8")).toBe("original");
     expect(readdirSync(join(target, ".backups"))).toEqual([]);
+  });
+
+  it("leaves owned authentication stores out of the archive and retains only the destination copies", async () => {
+    const source = directory();
+    const target = directory();
+    const authPaths = [
+      "workspace-credentials.json", "browser-engine-key", "config.json.123.tmp",
+      "providers/account/auth.json", "providers/antigravity/account/acp_token.json",
+      "caddy/data/private.key", "chrome-profile/Cookies", ".agent-browser/auth.json",
+      "vm-home/.browser-profiles/chrome/Cookies", "vm-homes/abc/.browser-profiles/chromium/Cookies",
+      "tmp/omb-mcp-123/mcp.json", ".tmp/secret",
+    ];
+    for (const root of [source, target]) {
+      for (const path of authPaths) {
+        mkdirSync(join(root, path, ".."), { recursive: true });
+        writeFileSync(join(root, path), root === source ? "SOURCE_SAVED_SECRET" : "DESTINATION_SAVED_SECRET");
+      }
+    }
+    mkdirSync(join(source, "attachments"));
+    writeFileSync(join(source, "attachments", "user-note.txt"), "A user-pasted secret is not silently redacted.");
+    writeFileSync(join(source, "vm-home", "project.txt"), "ordinary managed VM file");
+    json(join(source, "config.json"), { xai: { key: "SOURCE_SAVED_SECRET", url: "https://source.example" }, language: "ja" });
+    json(join(source, "webhooks.json"), { webhooks: [{ id: "same", endpointId: "same-endpoint", secretHash: "a".repeat(64), enabled: true, verificationPending: true }] });
+    json(join(target, "config.json"), { xai: { key: "DESTINATION_SAVED_SECRET", url: "https://destination.example" }, language: "en" });
+    json(join(target, "webhooks.json"), { webhooks: [{ id: "same", endpointId: "same-endpoint", secretHash: "b".repeat(64) }] });
+    const exported = await createWorkspaceBackup(source, { password: PASSWORD });
+    const staged = await stageWorkspaceBackup(target, exported.path, { password: PASSWORD });
+    const staging = join(target, ".backups", staged.id, "staged");
+    const manifest = readJson(join(staging, "manifest.json"));
+    expect(manifest).not.toHaveProperty("credentials");
+    expect(manifest.summary).not.toHaveProperty("includesCredentials");
+    for (const path of authPaths) expect(existsSync(join(staging, "data", path))).toBe(false);
+    for (const entry of manifest.entries) if (entry.type === "file") expect(readFileSync(join(staging, "data", entry.path), "utf8")).not.toContain("SOURCE_SAVED_SECRET");
+    commitPendingWorkspaceRestore(target, staged.id);
+    applyPendingWorkspaceRestore(target);
+    for (const path of authPaths) expect(readFileSync(join(target, path), "utf8")).toBe("DESTINATION_SAVED_SECRET");
+    expect(readFileSync(join(target, "vm-home", "project.txt"), "utf8")).toBe("ordinary managed VM file");
+    expect(readFileSync(join(target, "attachments", "user-note.txt"), "utf8")).toBe("A user-pasted secret is not silently redacted.");
+    expect(readJson(join(target, "config.json"))).toEqual({ xai: { key: "DESTINATION_SAVED_SECRET", url: "https://destination.example" }, language: "ja" });
+    expect(readJson(join(target, "webhooks.json")).webhooks[0]).toMatchObject({ secretHash: "b".repeat(64), enabled: false, verificationPending: false });
+    // Export is read-only: the original login stores and webhook hash remain.
+    for (const path of authPaths) expect(readFileSync(join(source, path), "utf8")).toBe("SOURCE_SAVED_SECRET");
+    expect(readJson(join(source, "webhooks.json")).webhooks[0].secretHash).toBe("a".repeat(64));
+  });
+
+  it("rejects authenticated credential metadata, saved auth paths, and connection-bearing config", async () => {
+    const source = directory();
+    const exported = await createWorkspaceBackup(source, { password: PASSWORD });
+    const staged = await stageWorkspaceBackup(source, exported.path, { password: PASSWORD });
+    const base = readJson(join(source, ".backups", staged.id, "staged", "manifest.json"));
+    for (const variant of [
+      { credentials: { xaiApiKey: "secret" } },
+      { summary: { ...base.summary, includesCredentials: false } },
+    ]) {
+      const path = encryptedPayload(source, Buffer.concat([tarEntry("manifest.json", "File", JSON.stringify({ ...base, ...variant })), tarEntry("data", "Directory"), Buffer.alloc(1024)]));
+      await expect(stageWorkspaceBackup(directory(), path, { password: PASSWORD })).rejects.toThrow(/metadata/);
+    }
+    for (const [name, content] of [
+      ["workspace-credentials.json", '{"xaiApiKey":"secret"}'],
+      ["Sessions.json", "secret"],
+      ["Providers", "secret"],
+      ["Caddy", "secret"],
+      ["Browser-Engine-Key", "secret"],
+      ["vm-home/.Browser-Profiles", "secret"],
+      ["vm-homes/bot/.BROWSER-PROFILES", "secret"],
+      ["Config.json", '{"xai":{"key":"secret"}}'],
+      ["Webhooks.json", '{"webhooks":[{"secretHash":"secret"}]}'],
+      ["browser-engine-key", "secret"],
+      ["config.json", '{"xai":{"key":"secret","url":"https://source.example"}}'],
+      ["config.json", '{"futureAuth":{"field":"secret"}}'],
+      ["webhooks.json", '{"webhooks":[{"secretHash":"secret"}]}'],
+    ]) {
+      const entry = { path: name, type: "file", size: Buffer.byteLength(content), mode: 0o600, sha256: createHash("sha256").update(content).digest("hex") };
+      const parents = name.split("/").slice(0, -1).map((_part, index) => name.split("/").slice(0, index + 1).join("/"));
+      const manifest = { ...base, entries: [...parents.map((path) => ({ path, type: "directory", size: 0, mode: 0o700 })), entry], summary: { ...base.summary, directories: parents.length, files: 1, bytes: entry.size } };
+      const path = encryptedPayload(source, Buffer.concat([tarEntry("manifest.json", "File", JSON.stringify(manifest)), tarEntry("data", "Directory"), ...parents.map((parent) => tarEntry(`data/${parent}`, "Directory")), tarEntry(`data/${name}`, "File", content), Buffer.alloc(1024)]));
+      await expect(stageWorkspaceBackup(directory(), path, { password: PASSWORD })).rejects.toThrow(/Unsafe|connection settings|webhook credentials/);
+    }
+  });
+
+  it("retains differently cased destination auth roots and refuses them in recovery journals", async () => {
+    const source = directory();
+    const exported = await createWorkspaceBackup(source, { password: PASSWORD });
+    const target = directory();
+    mkdirSync(join(target, "Providers"));
+    writeFileSync(join(target, "Providers", "auth.json"), "destination-login");
+    writeFileSync(join(target, "Sessions.json"), "destination-session");
+    const staged = await stageWorkspaceBackup(target, exported.path, { password: PASSWORD });
+    commitPendingWorkspaceRestore(target, staged.id);
+    applyPendingWorkspaceRestore(target);
+    expect(readFileSync(join(target, "Providers", "auth.json"), "utf8")).toBe("destination-login");
+    expect(readFileSync(join(target, "Sessions.json"), "utf8")).toBe("destination-session");
+    json(join(target, ".backups", "restore-journal.json"), { id: staged.id, phase: "applying", existing: [], incoming: ["Sessions.json"] });
+    expect(() => applyPendingWorkspaceRestore(target)).toThrow(/recovery paths/);
+    expect(readFileSync(join(target, "Sessions.json"), "utf8")).toBe("destination-session");
+  });
+
+  it("fails explicitly on noncanonical source auth paths rather than silently skipping them", async () => {
+    const source = directory();
+    mkdirSync(join(source, "vm-home", ".Browser-Profiles"), { recursive: true });
+    writeFileSync(join(source, "vm-home", ".Browser-Profiles", "Cookies"), "source-login");
+    await expect(createWorkspaceBackup(source, { password: PASSWORD })).rejects.toThrow(/protected authentication/);
+    expect(readFileSync(join(source, "vm-home", ".Browser-Profiles", "Cookies"), "utf8")).toBe("source-login");
+  });
+
+  it("refuses registered custom auth homes inside ordinary workspace files before export or restore", async () => {
+    const source = directory();
+    const config = (field: string) => ({ instances: { custom: { driver: "claudeAgent", ...(field === "configDir" ? { config: { configDir: join(source, "custom-login") } } : { environment: { [field]: join(source, "custom-login") } }) } } });
+    mkdirSync(join(source, "custom-login"));
+    writeFileSync(join(source, "custom-login", "auth.json"), "registered-source-secret");
+    for (const field of ["configDir", "CLAUDE_CONFIG_DIR", "CODEX_HOME", "HOME", "XDG_DATA_HOME"]) {
+      json(join(source, "config.json"), config(field));
+      await expect(createWorkspaceBackup(source, { password: PASSWORD })).rejects.toThrow(/Provider authentication storage/);
+      expect(existsSync(join(source, ".backups"))).toBe(false);
+    }
+    rmSync(join(source, "custom-login"), { recursive: true });
+    json(join(source, "config.json"), { instances: { custom: { driver: "claudeAgent", config: { configDir: join(source, "providers", "custom") } } } });
+    const exported = await createWorkspaceBackup(source, { password: PASSWORD });
+    const target = directory();
+    json(join(target, "config.json"), { instances: { custom: { driver: "claudeAgent", config: { configDir: join(target, "custom-login") } } } });
+    mkdirSync(join(target, "custom-login"));
+    writeFileSync(join(target, "custom-login", "auth.json"), "registered-destination-secret");
+    const staged = await stageWorkspaceBackup(target, exported.path, { password: PASSWORD });
+    expect(() => commitPendingWorkspaceRestore(target, staged.id)).toThrow(/Provider authentication storage/);
+    expect(readPendingWorkspaceRestoreMetadata(target)).toBeNull();
+    expect(readFileSync(join(target, "custom-login", "auth.json"), "utf8")).toBe("registered-destination-secret");
   });
 
   it.each([
@@ -195,29 +329,6 @@ describe("encrypted full workspace backups", () => {
     expect(exported.summary.warnings.some((warning) => warning.includes("1 managed skill"))).toBe(true);
   });
 
-  it("rolls back every original entry when credential persistence fails after installation", async () => {
-    const source = directory();
-    json(join(source, "config.json"), { incoming: true });
-    json(join(source, "bots.json"), []);
-    const exported = await createWorkspaceBackup(source, { password: PASSWORD });
-    const target = directory();
-    json(join(target, "config.json"), { original: true });
-    writeFileSync(join(target, "original-only"), "keep this");
-    const staged = await stageWorkspaceBackup(target, exported.path, { password: PASSWORD });
-    commitPendingWorkspaceRestore(target, staged.id);
-    expect(() => applyPendingWorkspaceRestore(target, { beforeCommit() {
-      json(join(target, "config.json"), { partialCredentialWrite: true });
-      json(join(target, "workspace-credentials.json"), { xaiApiKey: "new-key" });
-      throw new Error("credential store unavailable");
-    } })).toThrow(/previous workspace was recovered/);
-    expect(readJson(join(target, "config.json"))).toEqual({ original: true });
-    expect(readFileSync(join(target, "original-only"), "utf8")).toBe("keep this");
-    expect(existsSync(join(target, "bots.json"))).toBe(false);
-    expect(existsSync(join(target, "workspace-credentials.json"))).toBe(false);
-    expect(readLastWorkspaceRestore(target)).toBeNull();
-    expect(readPendingWorkspaceRestoreMetadata(target)).toBeNull();
-  });
-
   it("recovers an interrupted top-level swap before any application state is loaded", async () => {
     const source = directory();
     json(join(source, "bots.json"), []);
@@ -250,13 +361,11 @@ describe("encrypted full workspace backups", () => {
     expect(readPendingWorkspaceRestoreMetadata(target)).toBeNull();
   });
 
-  it("validates password strength, portable credentials, client preferences and downgrade compatibility", async () => {
+  it("validates password strength, client preferences and downgrade compatibility", async () => {
     const root = directory();
     await expect(createWorkspaceBackup(root, { password: "short-password".slice(0, 11) })).rejects.toThrow(/at least 12/);
-    await expect(createWorkspaceBackup(root, { password: PASSWORD, credentials: { unknownKey: "not allowed" } })).rejects.toThrow(/credentials/);
     await expect(createWorkspaceBackup(root, { password: PASSWORD, clientState: { untrusted: "not an app preference" } })).rejects.toThrow(/preferences/);
-    const exported = await createWorkspaceBackup(root, { password: PASSWORD, appVersion: "2.0.0", credentials: { xaiApiKey: "" } });
-    expect(exported.summary.includesCredentials).toBe(false);
+    const exported = await createWorkspaceBackup(root, { password: PASSWORD, appVersion: "2.0.0" });
     await expect(stageWorkspaceBackup(directory(), exported.path, { password: PASSWORD, currentAppVersion: "1.99.99" })).rejects.toThrow(/newer/);
     expect((await stageWorkspaceBackup(directory(), exported.path, { password: PASSWORD, currentAppVersion: "2.0.0" })).summary.appVersion).toBe("2.0.0");
   });

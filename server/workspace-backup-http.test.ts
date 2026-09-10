@@ -34,7 +34,7 @@ function fakeArchive() {
   mkdirSync(directory, { recursive: true, mode: 0o700 });
   const path = join(directory, "workspace.ombbackup");
   writeFileSync(path, "fixture encrypted bytes", { mode: 0o600 });
-  const summary: WorkspaceBackupSummary = { format: "openmaus.workspace-backup", version: 1, id, createdAt: "2026-09-11T00:00:00Z", appVersion: "0.1.71", files: 1, directories: 0, bytes: 23, bots: 0, groups: 0, threads: 0, messages: 0, includesCredentials: false, exclusions: [], warnings: [] };
+  const summary: WorkspaceBackupSummary = { format: "openmaus.workspace-backup", version: 1, id, createdAt: "2026-09-11T00:00:00Z", appVersion: "0.1.71", files: 1, directories: 0, bytes: 23, bots: 0, groups: 0, threads: 0, messages: 0, exclusions: [], warnings: [] };
   return { id, path, summary };
 }
 
@@ -50,7 +50,7 @@ beforeEach(async () => {
   archive.remove.mockImplementation((_dataDir: string, id: string) => rmSync(join(dataDir, ".backups", id), { recursive: true, force: true }));
   const authenticate = (req: IncomingMessage) => resolveRequestAuth(req, { sessions, cookieName: "fixture", streamPath: "/api/events", url: new URL(req.url!, url) });
   const routes = createWorkspaceBackupRoutes({
-    dataDir, appVersion: "0.1.71", credentials: async () => ({}), restored: {},
+    dataDir, appVersion: "0.1.71", restored: {},
     readBody: async (req, limit = 1_000_000) => {
       const chunks: Buffer[] = [];
       let bytes = 0;

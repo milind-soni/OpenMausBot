@@ -5,7 +5,6 @@ export const WORKSPACE_BACKUP_CLIENT_KEYS = [
   "omb-draft-attachments",
   "omb-draft-send-ids",
   "omb-draft-channel-modes",
-  "omb-webhook-credentials",
   "omb-skin",
   "omb-show-threads",
   "openmausbot.sidebarDensity",

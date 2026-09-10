@@ -24,12 +24,14 @@ async function restartFixture(fixture: VerificationServer): Promise<ChildProcess
     if (process.env[key]) env[key] = process.env[key];
   }
   const temp = join(dataDir, "tmp");
+  const home = join(dataDir, "providers", "fixture-home");
   mkdirSync(temp, { recursive: true });
+  mkdirSync(home, { recursive: true });
   Object.assign(env, {
-    HOME: dataDir, USERPROFILE: dataDir, APPDATA: join(dataDir, "AppData", "Roaming"),
-    LOCALAPPDATA: join(dataDir, "AppData", "Local"), XDG_CONFIG_HOME: join(dataDir, ".config"),
-    XDG_CACHE_HOME: join(dataDir, ".cache"), XDG_DATA_HOME: join(dataDir, ".local", "share"),
-    TEMP: temp, TMP: temp, TMPDIR: temp, HERMES_HOME: join(dataDir, ".hermes"),
+    HOME: home, USERPROFILE: home, APPDATA: join(home, "AppData", "Roaming"),
+    LOCALAPPDATA: join(home, "AppData", "Local"), XDG_CONFIG_HOME: join(home, ".config"),
+    XDG_CACHE_HOME: join(home, ".cache"), XDG_DATA_HOME: join(home, ".local", "share"),
+    TEMP: temp, TMP: temp, TMPDIR: temp, HERMES_HOME: join(home, ".hermes"),
     OMB_DATA_DIR: dataDir, OMB_PORT: new URL(fixture.info.url).port,
     OMB_WEBHOOK_PORT: String(Number(new URL(fixture.info.url).port) + 1),
     FAKE_CLAUDE_MODE: "happy", FAKE_CLAUDE_DUMP: fixture.fixtureDumpPath,
@@ -58,10 +60,23 @@ async function restartFixture(fixture: VerificationServer): Promise<ChildProcess
   }
 }
 
+async function launchBackupFixture(): Promise<VerificationServer> {
+  const fixture = await launchVerificationServer({});
+  try {
+    // The general fixture uses DATA_DIR as HOME. Backups intentionally reject
+    // auth homes among portable files, so keep this fixture's home excluded.
+    const child = await restartFixture(fixture);
+    return { ...fixture, child, info: { ...fixture.info, pid: child.pid! }, close: async () => {
+      await waitForExit(child, { signal: "SIGTERM" });
+      await fixture.close();
+    } };
+  } catch (error) { await fixture.close(); throw error; }
+}
+
 export async function verifyWorkspaceBackup(report: (event: unknown) => void = () => {}) {
   const events: unknown[] = [];
   const record = (event: unknown) => { events.push(event); report(event); };
-  const source = await launchVerificationServer({});
+  const source = await launchBackupFixture();
   let destination: VerificationServer | undefined;
   let restarted: ChildProcess | undefined;
   const evidencePath = `${source.info.logPath}.workspace-backup.json`;
@@ -81,7 +96,7 @@ export async function verifyWorkspaceBackup(report: (event: unknown) => void = (
     return { status: response.status, body: result };
   };
   try {
-    destination = await launchVerificationServer({});
+    destination = await launchBackupFixture();
     record({ destination: destination.info });
     assert.equal((await control(source, "doctor") as { ok: boolean }).ok, true);
     const { bot } = await control(source, "new-bot", "--name", "Full backup probe", "--section", "Fixture team") as { bot: { id: string; threadId: string } };
@@ -96,6 +111,10 @@ export async function verifyWorkspaceBackup(report: (event: unknown) => void = (
     const savedConfig = JSON.parse(readFileSync(configPath, "utf8"));
     savedConfig.tts = { ...savedConfig.tts, key: "fixture-voice-key" };
     writeFileSync(configPath, JSON.stringify(savedConfig), { mode: 0o600 });
+    const destinationConfigPath = join(destination.info.dataDir, "config.json");
+    const destinationConfig = JSON.parse(readFileSync(destinationConfigPath, "utf8"));
+    destinationConfig.tts = { key: "destination-voice-key", provider: "elevenlabs", voice: "destination-voice" };
+    writeFileSync(destinationConfigPath, JSON.stringify(destinationConfig), { mode: 0o600 });
 
     // A reviewed skill and memory seed are written only into our fixture;
     // the real server must list/enable and later restore the exact content.
@@ -130,11 +149,11 @@ export async function verifyWorkspaceBackup(report: (event: unknown) => void = (
     const original = before.bots.find((candidate: { id: string }) => candidate.id === bot.id);
     assert.ok(original.messages.some((message: { text?: string }) => message.text?.includes("hello from fake claude")));
     const oldBytes = readFileSync(join(destination.info.dataDir, "bots.json"));
-    const clientState = { "omb-skin": "default", "omb-drafts": JSON.stringify({ [bot.threadId]: "Keep draft" }), "unrelated-auth-token": "must-not-transfer" };
+    const clientState = { "omb-skin": "default", "omb-drafts": JSON.stringify({ [bot.threadId]: "Keep draft" }), "omb-webhook-credentials": "private-source-webhook-url", "unrelated-auth-token": "must-not-transfer" };
     const exported = await api(source, "POST", "/api/workspace-backup/export", { password: PASSWORD, clientState });
     assert.equal(exported.status, 200, JSON.stringify(exported.body));
     assert.equal(exported.body.summary.bots, before.bots.length);
-    assert.equal(exported.body.summary.includesCredentials, true);
+    assert.equal(Object.hasOwn(exported.body.summary, "includesCredentials"), false);
     const download = await fetch(`${source.info.url}/api/workspace-backup/download/${exported.body.id}`);
     assert.equal(download.status, 200);
     const encrypted = Buffer.from(await download.arrayBuffer());
@@ -157,6 +176,13 @@ export async function verifyWorkspaceBackup(report: (event: unknown) => void = (
     assert.equal(preview.status, 200, JSON.stringify(preview.body));
     assert.notEqual(preview.body.id, incoming.id);
     assert.equal(preview.body.summary.bots, before.bots.length);
+    const staged = join(destination.info.dataDir, ".backups", preview.body.id, "staged");
+    const stagedConfig = JSON.parse(readFileSync(join(staged, "data", "config.json"), "utf8"));
+    assert.equal(Object.hasOwn(stagedConfig, "tts"), false);
+    assert.equal(Object.hasOwn(stagedConfig, "instances"), false);
+    const manifest = JSON.parse(readFileSync(join(staged, "manifest.json"), "utf8"));
+    assert.equal(Object.hasOwn(manifest, "credentials"), false);
+    assert.equal(JSON.stringify(manifest).includes("private-source-webhook-url"), false);
     assert.equal((await api(destination, "POST", "/api/workspace-backup/restore", { id: preview.body.id, confirmation: "replace" })).status, 400);
     assert.deepEqual(readFileSync(join(destination.info.dataDir, "bots.json")), oldBytes);
     const committed = await api(destination, "POST", "/api/workspace-backup/restore", { id: preview.body.id, confirmation: "REPLACE" });
@@ -185,7 +211,8 @@ export async function verifyWorkspaceBackup(report: (event: unknown) => void = (
     assert.deepEqual((await api(destination, "GET", `/api/bots/${bot.id}/skills`)).body, sourceSkills);
     const restoredConfig = JSON.parse(readFileSync(join(destination.info.dataDir, "config.json"), "utf8"));
     assert.equal(restoredConfig.profile.name, "Workspace backup fixture");
-    assert.equal(restoredConfig.tts.key, "fixture-voice-key");
+    assert.deepEqual(restoredConfig.tts, destinationConfig.tts);
+    assert.deepEqual(restoredConfig.instances, destinationConfig.instances);
     assert.equal((await api(destination, "GET", "/api/config")).body.tts.configured, true);
     const status = (await api(destination, "GET", "/api/workspace-backup/status")).body;
     assert.equal(status.lastRestoreId, preview.body.id);
@@ -199,7 +226,7 @@ export async function verifyWorkspaceBackup(report: (event: unknown) => void = (
     const continued = (await api(destination, "GET", "/api/bots?messages=200")).body.bots.find((candidate: { id: string }) => candidate.id === bot.id);
     assert.ok(continued.messages.length > restored.messages.length);
     for (const message of restored.messages) assert.deepEqual(continued.messages.find((candidate: { id: string }) => candidate.id === message.id), message);
-    const result = { ok: true, identicalIds: true, transcriptPreserved: true, conversationContinued: true, attachmentBytesPreserved: true, skillAndProfilePreserved: true, credentialsPreserved: true, clientStateAllowlisted: true, oldDataSafetyCopy: true, evidencePath, logs: [source.info.logPath, destination.info.logPath] };
+    const result = { ok: true, identicalIds: true, transcriptPreserved: true, conversationContinued: true, attachmentBytesPreserved: true, skillAndProfilePreserved: true, sourceCredentialsExcluded: true, destinationCredentialsUnchanged: true, clientStateAllowlisted: true, oldDataSafetyCopy: true, evidencePath, logs: [source.info.logPath, destination.info.logPath] };
     record(result);
     return result;
   } finally {

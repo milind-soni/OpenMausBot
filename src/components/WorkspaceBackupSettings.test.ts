@@ -31,7 +31,7 @@ function render(recovery = false) {
 const flush = async () => { for (let i = 0; i < 20; i++) await Promise.resolve(); };
 const submit = (form: Node) => form.props.onSubmit!({ preventDefault: vi.fn() });
 const change = (input: Node, value: string) => input.props.onChange!({ target: { value } });
-const summary: WorkspaceBackupSummary = { format: "openmaus.workspace-backup", version: 1, id: "archive-id", createdAt: "2026-09-11T00:00:00Z", appVersion: "0.1.71", files: 9, directories: 3, bytes: 1234, bots: 2, groups: 1, threads: 4, messages: 8, includesCredentials: true, warnings: ["Fixture warning"], exclusions: ["External CLI sign-ins"] };
+const summary: WorkspaceBackupSummary = { format: "openmaus.workspace-backup", version: 1, id: "archive-id", createdAt: "2026-09-11T00:00:00Z", appVersion: "0.1.71", files: 9, directories: 3, bytes: 1234, bots: 2, groups: 1, threads: 4, messages: 8, warnings: ["Fixture warning"], exclusions: ["Saved account credentials and connections", "External CLI sign-ins"] };
 let storage: Map<string, string>;
 beforeEach(() => {
   fixture.values = []; fixture.index = 0; fixture.effects = []; fixture.api.mockReset();
@@ -48,6 +48,9 @@ describe("Settings full backups", () => {
     expect(html).toContain('type="file" accept=".ombbackup"');
     expect(html.match(/type="password"/g)).toHaveLength(3);
     expect(html).toContain("remote VM disks");
+    expect(html).toContain("Saved account credentials and connections are not included");
+    expect(html).toContain("existing credentials on the destination stay unchanged");
+    expect(html).toContain("not automatically redacted");
     expect(html).not.toContain("Replace workspace");
     const preview = renderToStaticMarkup(createElement(WorkspaceBackupSummaryView, { summary }));
     for (const text of ["Validated backup", "0.1.71", "Bots", "Threads", "Messages", "Fixture warning", "External CLI sign-ins"]) expect(preview).toContain(text);
@@ -55,7 +58,7 @@ describe("Settings full backups", () => {
 
   it("exports encrypted state by POST and downloads without putting the password in a URL or storage", async () => {
     await ready();
-    storage.set("omb-drafts", "private draft"); storage.set("auth-token", "not exported");
+    storage.set("omb-drafts", "private draft"); storage.set("auth-token", "not exported"); storage.set("omb-webhook-credentials", "not exported either");
     let view = render();
     const passwords = view.nodes.filter((node) => node.type === "input" && node.props.type === "password");
     change(passwords[0], "correct horse battery"); change(passwords[1], "correct horse battery");

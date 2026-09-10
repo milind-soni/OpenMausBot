@@ -130,6 +130,7 @@ export function WorkspaceBackupSettings() {
   return <div className="flex flex-col gap-4">
     <p className="text-[13px] leading-relaxed text-ink-secondary">{t("backup.scope")}</p>
     <p className="text-[13px] leading-relaxed text-ink-secondary">{t("backup.excluded")}</p>
+    <p className="text-[13px] leading-relaxed text-ink-secondary">{t("backup.privacy")}</p>
     {error && <p role="alert" className="break-words text-[13px] text-danger">{error}</p>}
     {status?.pendingRestore ? <div role="status" className="rounded-xl border border-warning/40 bg-warning/10 p-4 text-[13px] text-ink">{t("backup.restart")}</div> : <>
       {(!status || status.busy) && <div role="status" className="flex items-center gap-3 text-[13px] text-ink-secondary"><span>{status?.busy ? t("backup.serverBusy") : t("backup.checkStatus")}</span><button type="button" onClick={() => void refresh()} className="underline">{t("connectors.action.retry")}</button></div>}

@@ -37,7 +37,6 @@ export function createWorkspaceBackupRoutes(options: {
   dataDir: string;
   appVersion: string;
   readBody: (req: IncomingMessage, limit?: number) => Promise<unknown>;
-  credentials: () => Promise<Record<string, unknown> | null>;
   exclusive: <T>(work: () => Promise<T>, keepLocked?: boolean) => Promise<T>;
   authorized: (req: IncomingMessage, auth: RequestAuth) => boolean;
   status: () => { busy: boolean; pendingRestore: boolean };
@@ -131,9 +130,7 @@ export function createWorkspaceBackupRoutes(options: {
           check(req, auth);
           replacePrevious(auth, ["download"]);
           if (artifacts.size >= 4) throw failure("There are already four backup files in progress. Restart or wait an hour before creating another.", 409);
-          const credentials = await options.credentials();
-          check(req, auth);
-          return createWorkspaceBackup(options.dataDir, { password: body.password, credentials: credentials ?? {}, clientState, appVersion: options.appVersion });
+          return createWorkspaceBackup(options.dataDir, { password: body.password, clientState, appVersion: options.appVersion });
         }));
         try { check(req, auth); } catch (error) { removeWorkspaceBackupJob(options.dataDir, result.id); throw error; }
         artifacts.set(result.id, { owner: owner(auth), kind: "download", path: result.path, summary: result.summary, expires: Date.now() + EXPIRES_MS });

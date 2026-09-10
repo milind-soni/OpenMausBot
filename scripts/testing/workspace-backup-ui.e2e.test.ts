@@ -67,7 +67,7 @@ describe("full backup Settings in the real renderer", () => {
         if (path.endsWith('/upload')) return reply({ id: 'uploaded-file' });
         if (path.endsWith('/preview')) {
           if (body.password !== 'fixture password 123') return reply({ error: 'Fixture password rejected' }, 400);
-          return reply({ id: 'validated-stage', summary: { format: 'openmaus.workspace-backup', version: 1, id: 'archive-id', createdAt: '2026-09-11T00:00:00Z', appVersion: '0.1.71', files: 12, directories: 4, bytes: 4321, bots: 3, groups: 2, threads: 7, messages: 21, includesCredentials: true, warnings: ['Fixture warning: routines will be paused'], exclusions: ['External CLI sign-ins', 'Remote VM disks'] } });
+          return reply({ id: 'validated-stage', summary: { format: 'openmaus.workspace-backup', version: 1, id: 'archive-id', createdAt: '2026-09-11T00:00:00Z', appVersion: '0.1.71', files: 12, directories: 4, bytes: 4321, bots: 3, groups: 2, threads: 7, messages: 21, warnings: ['Fixture warning: routines will be paused'], exclusions: ['Saved account credentials and connections', 'External CLI sign-ins', 'Remote VM disks'] } });
         }
         if (path.endsWith('/restore')) { fixture.pending = true; return reply({ restartRequired: true, restoreId: 'validated-stage' }); }
         return reply({ error: 'Unexpected fixture route' }, 404);
@@ -78,6 +78,7 @@ describe("full backup Settings in the real renderer", () => {
       };
       localStorage.setItem('omb-drafts', JSON.stringify({fixture: 'private fixture draft'}));
       localStorage.setItem('fixture-auth-token', 'must not export');
+      localStorage.setItem('omb-webhook-credentials', 'fixture private URL must not export');
       return true;
     })()`);
     await expect.poll(snapshot, { timeout: 10_000 }).toContain('button "You"');
@@ -91,12 +92,15 @@ describe("full backup Settings in the real renderer", () => {
     await click("Settings");
     await click("Backups");
     await expect.poll(snapshot, { timeout: 10_000 }).toContain("Export full backup");
+    expect(await snapshot()).toContain("Saved account credentials and connections are not included");
+    expect(await snapshot()).toContain("not automatically redacted");
     await ui("screenshot", "--out", join(ROOT, ".omb-scratch", "verify-evidence", "workspace-backup-settings.png"));
     await type("Backup password", "fixture password 123");
     await type("Confirm backup password", "fixture password 123");
     await click("Export full backup");
     await expect.poll(() => evaluate("window.backupFixture.download"), { timeout: 10_000 }).toEqual({ href: "/api/workspace-backup/download/download-stage", filename: "fixture.ombbackup" });
     expect(await evaluate("window.backupFixture.calls.find(call => call.path.endsWith('/export')).body.clientState['fixture-auth-token'] ?? null")).toBeNull();
+    expect(await evaluate("window.backupFixture.calls.find(call => call.path.endsWith('/export')).body.clientState['omb-webhook-credentials'] ?? null")).toBeNull();
     expect(await evaluate("Object.values(localStorage).some(value => value.includes('fixture password 123'))")).toBe(false);
 
     // A File is delivered through the native input's change event. This

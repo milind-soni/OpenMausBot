@@ -12,7 +12,6 @@ export interface WorkspaceBackupSummary {
   groups: number;
   threads: number;
   messages: number;
-  includesCredentials: boolean;
   exclusions: string[];
   warnings: string[];
 }
@@ -21,6 +20,5 @@ export type WorkspaceBackupClientState = Record<string, string>;
 
 export interface WorkspaceBackupPrivateMetadata {
   summary: WorkspaceBackupSummary;
-  credentials: Record<string, unknown>;
   clientState: WorkspaceBackupClientState;
 }

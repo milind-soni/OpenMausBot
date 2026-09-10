@@ -14,9 +14,22 @@ separately: there is no password recovery.
 
 The backup contains this server workspace's bots, threads and complete message
 records, attachments, custom avatars, instructions, memory, skills and supporting
-files, routines and run logs, settings, and OpenMausBot-managed connection
-credentials. Drafts and preferences from the browser performing the export are
-included too. It does not collect another browser's unsent drafts.
+files, routines and run logs, and non-secret settings. Drafts and preferences
+from the browser performing the export are included too. It does not collect
+another browser's unsent drafts.
+
+**Saved account credentials and connections are not included.** Reconnect your
+accounts on a new machine. Restoring does not overwrite credentials or connections
+already present on the destination.
+
+Encryption still matters: conversations, drafts, instructions and user files
+are private and may contain secrets you pasted into them. These contents are
+not automatically redacted, so do not treat the archive as safe to share.
+
+If you have explicitly put a provider's login home inside ordinary workspace
+files, move it into the excluded `providers/` directory or outside the workspace
+before exporting or restoring. The app refuses that layout rather than copying
+or replacing its credentials.
 
 Wait for bots, approvals, provider sign-ins, and computer actions to finish.
 Stop external editors and managed desktops that write workspace files. The app
@@ -40,13 +53,14 @@ safety directory until you have checked the restored workspace. It contains
 private data; do not share it.
 
 The downloaded file is encrypted. Import validation and recovery also create
-private, unencrypted staging and safety files under `.backups`, including saved
-connection credentials. Protect the server's disk and account accordingly;
-these recovery files are not protected by the export password. Allow extra free
-disk space for staging and the previous workspace.
+private, unencrypted staging and safety files under `.backups`. They contain
+private workspace data and may contain secrets already present in conversations
+or files. Protect the server's disk and account accordingly; these recovery files
+are not protected by the export password. Allow extra free disk space for staging
+and the previous workspace.
 
-Only restore backups you trust: provider settings, MCP commands, skills and bot
-permissions are included. Scheduled routines and webhooks are paused, calendar
+Only restore backups you trust: instructions, skills and bot permissions are
+included. Scheduled routines and webhooks are paused, calendar
 calls are not automatically restarted, and unfinished delegated work is not
 replayed. Review and re-enable automation deliberately after restoring.
 
@@ -58,9 +72,9 @@ copies. Shareable team templates remain separate from full backups.
 
 - External project directories and default CLI login homes such as `.claude`
   and `.codex`. Reinstall providers and sign in again if needed on another host.
-- Other apps' operating-system keychains, browser login/session homes, and
-  phone pairing keys. OpenMausBot's own saved connection keys are transferred
-  through its private credential store and encrypted in the backup.
+- Saved account credentials, API keys, connection settings, operating-system
+  keychains, browser login/session homes, and phone pairing keys. Sign in or
+  reconnect on the new machine; destination credentials remain untouched.
 - VM/container disk layers and remote Box/VPS files. Durable mounted files
   inside the workspace data directory are included, but the VM itself is not.
 - Other fleet workspaces, downloaded tools, caches, running processes, and
@@ -74,7 +88,11 @@ paths are not copied or rewritten; check them when moving between computers.
 
 Close OpenMausBot before taking a filesystem-level backup so SQLite and configuration files are captured consistently. Preserve the entire `.openmausbot` directory rather than selecting individual database files.
 
-For a headless npm server, engine credentials and configuration live separately in the service user's home, for example `.codex`, `.claude`, and `.claude.json`. Include the paths your installed CLIs use, any configured home/data-directory overrides, browser session state under `.agent-browser` if used, and external workspaces. Stop any engines or managed desktops still writing those files. A Docker backup of the whole `/data` volume includes the container's CLI homes.
+Raw filesystem snapshots differ from Settings exports: they may include saved
+credentials, CLI homes and browser sessions. A Docker snapshot of the whole
+`/data` volume includes the container's CLI homes. Protect these snapshots as
+sensitive data. For migration without saved credentials, use the Settings export
+and reconnect accounts on the new machine instead.
 
 Restore with the server stopped, preserving the original paths and ownership, then start it again. The [VPS backup instructions](/docs/self-hosting/deploy-vps#back-up) show the app-data archive and stop/start commands.
 
@@ -82,9 +100,9 @@ Restore with the server stopped, preserving the original paths and ownership, th
 
 Packaged desktop builds protect credentials using operating-system secure storage.
 Copying the JSON directory alone does not necessarily make those credentials
-usable elsewhere. Use the encrypted Settings export to include OpenMausBot's
-saved keys. Raw filesystem backups and automatic restore safety copies must be
-protected separately.
+usable elsewhere. Settings exports deliberately leave saved credentials and
+connections behind; sign in again on a new machine. Raw filesystem snapshots
+and automatic restore safety copies must be protected separately.
 
 ## Disposable computer filesystems
 

@@ -18,8 +18,7 @@ import {
   installDesktopCrashListeners,
   readSafeLogTail,
 } from "./diagnostics.mjs";
-import { migrateWorkspaceCredentials } from "./workspace-credentials.mjs";
-import { createWorkspaceBackupCredentialBridge, workspaceBackupCredentials, workspaceBackupEnvironment } from "./workspace-backup-credentials.mjs";
+import { migrateWorkspaceCredentials, workspaceCredentialEnv } from "./workspace-credentials.mjs";
 import { activateExistingWindow, releaseSingleInstanceLock } from "./single-instance.mjs";
 import { pollServerIdentity } from "./server-boot-probe.mjs";
 import { packageUrlFromCommandLine, packageUrlFromDeepLink } from "./package-link.mjs";
@@ -246,15 +245,6 @@ let serverProc = null;
 let serverReady = true;
 let secureCredentials = {};
 let secureCredentialState = null;
-// Includes the one starting child: pending restore runs before /api/health.
-let workspaceBackupProc = null;
-const receiveWorkspaceBackupCredentials = createWorkspaceBackupCredentialBridge({
-  isCurrent: (proc) => proc === workspaceBackupProc,
-  available: () => Boolean(secureCredentialState) && !credentialStoreUnavailable,
-  read: () => secureCredentialState.read(),
-  update: updateSecureCredentialDocument,
-  brokerUrl: composioBrokerUrl,
-});
 let desktopDataDirLease = null;
 const utilityServerExits = new WeakMap();
 const UTILITY_SERVER_STOP_TIMEOUT_MS = 6_500;
@@ -400,7 +390,7 @@ async function secureWorkspaceConfig() {
 function composioBrokerUrl() {
   const configured = process.env.OMB_COMPOSIO_BROKER_URL?.trim();
   return normalizeManagedComposioBrokerUrl(
-    secureCredentials.composioBrokerUrl || configured || (app.isPackaged ? DEFAULT_COMPOSIO_BROKER_URL : ""),
+    configured || (app.isPackaged ? DEFAULT_COMPOSIO_BROKER_URL : ""),
   );
 }
 
@@ -954,7 +944,7 @@ async function startServerOn(port) {
     // one env var per stored workspace secret (xai/box/voice/OpenCode Go);
     // the server prefers these over config.json, whose plaintext fields
     // the boot migration has deleted
-    ...workspaceBackupEnvironment(workspaceBackupCredentials(secureCredentials), composioBrokerUrl()),
+    ...workspaceCredentialEnv(secureCredentials),
   });
   delete childEnv.OMB_BROWSER_CONNECTION;
   slog(`fork ${entry} port=${port}`);
@@ -962,7 +952,6 @@ async function startServerOn(port) {
     env: childEnv,
     stdio: ["ignore", "pipe", "pipe"],
   });
-  workspaceBackupProc = proc;
   let resolveServerExit;
   utilityServerExits.set(proc, new Promise((resolve) => {
     resolveServerExit = resolve;
@@ -971,7 +960,6 @@ async function startServerOn(port) {
   proc.stderr?.on("data", (d) => slog(`[err] ${String(d).trimEnd()}`));
   proc.on("message", (message) => {
     try {
-      if (receiveWorkspaceBackupCredentials(proc, message)) return;
       if (trustedApprovalMode.receive(proc, message)) return;
       if (receivePhoneSecretSave(proc, message)) return;
     } catch (error) {
@@ -986,7 +974,6 @@ async function startServerOn(port) {
   let exited = false;
   proc.once("exit", (code) => {
     exited = true;
-    if (workspaceBackupProc === proc) workspaceBackupProc = null;
     trustedApprovalMode.rejectProcess(proc);
     resolveServerExit();
     // Capabilities belong to turns in this exact server child. A crash or
@@ -1014,13 +1001,7 @@ async function startServerOn(port) {
     bootTimeoutMs: SERVER_BOOT_TIMEOUT_MS,
     isExited: () => exited,
   });
-  if (identity.outcome === "ready") {
-    // Restore's early private listener can consume the spawn-time messages
-    // before the normal server handlers exist. Health proves they are ready.
-    syncDesktopMutationToken(proc);
-    syncPhoneSecretKey(proc);
-    return { proc };
-  }
+  if (identity.outcome === "ready") return { proc };
   if (identity.outcome === "exited") {
     slog(`child on port ${port} exited before answering /api/health`);
   } else {
@@ -2363,7 +2344,6 @@ app.on("before-quit", (e) => {
   e.preventDefault();
   const stoppingServer = serverProc;
   serverProc = null;
-  workspaceBackupProc = null;
   // Release the sleep blocker synchronously; child shutdown is awaited below.
   syncCompanionKeepAwake(false, false);
   try {

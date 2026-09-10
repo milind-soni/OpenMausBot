@@ -366,8 +366,7 @@ import { describeEdition, editionStatus, loadEnterpriseLayer } from "./enterpris
 import { environmentDescriptor, loadEnvironmentId, serverVersion } from "./environment.ts";
 import { WorkspaceBackupMaintenance } from "./workspace-backup-maintenance.ts";
 import { createWorkspaceBackupRoutes, isWorkspaceBackupSessionControl } from "./workspace-backup-http.ts";
-import { readDesktopBackupCredentials } from "./workspace-backup-desktop.ts";
-import { restoreWorkspaceBackupOnStartup } from "./workspace-backup-startup.ts";
+import { applyPendingWorkspaceRestore, readLastWorkspaceRestore, type WorkspaceRestoreResult } from "./workspace-backup.ts";
 import { createCustomDomainVerifier, customDomainIpv4, normalizeCustomDomain } from "./custom-domain.ts";
 import { createEmailSignIn, parseAllowList } from "./account-signin.ts";
 import { ProviderAuthSessions } from "./provider-auth-sessions.ts";
@@ -432,7 +431,13 @@ function releaseDataDirLeaseAtExit(): void {
 process.once("exit", releaseDataDirLeaseAtExit);
 // Restore before constructing any long-lived config, Store, session or provider
 // objects. Replacing files underneath a live Store would overwrite restored data.
-const workspaceRestore = await restoreWorkspaceBackupOnStartup(DATA_DIR);
+let workspaceRestore: WorkspaceRestoreResult = { restored: false };
+if (existsSync(join(DATA_DIR, ".backups"))) {
+  workspaceRestore = applyPendingWorkspaceRestore(DATA_DIR);
+  if (!workspaceRestore.restored && !workspaceRestore.rolledBack) {
+    workspaceRestore = readLastWorkspaceRestore(DATA_DIR) ?? workspaceRestore;
+  }
+}
 const workspaceMaintenance = new WorkspaceBackupMaintenance();
 // Only after ensureDirs(): it performs the one-time rename of the legacy data
 // dir, which must not find a freshly created ~/.openmausbot already there.
@@ -8487,7 +8492,6 @@ const workspaceBackupRoutes = createWorkspaceBackupRoutes({
   dataDir: DATA_DIR,
   appVersion: serverVersion(),
   readBody,
-  credentials: readDesktopBackupCredentials,
   restored: workspaceRestore,
   status: () => ({ busy: workspaceMaintenance.active, pendingRestore: workspaceMaintenance.pendingRestore }),
   authorized: (req, original) => {
