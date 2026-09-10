@@ -61,6 +61,9 @@ entry only after the shared control surface can really drive it.
 The [desktop server connection smoke](desktop-server-connection.md) mounts the
 real Settings connection component in disposable Electron windows.
 
+The [Tailscale discovery fixture](tailscale.md) checks standalone macOS CLI mode
+and HTTP tailnet endpoint refresh without touching a real Tailscale installation.
+
 The [cloud preview fixture](cloud-preview.md) mounts the real Computer panel
 against an isolated server for image decoding, loading, and recovery UI checks.
 

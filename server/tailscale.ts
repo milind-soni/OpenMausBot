@@ -4,7 +4,7 @@
 // node names, so failures are classified into a closed set of reasons.
 import { execFile } from "node:child_process";
 
-import { searchPath, tailscaleCandidates } from "../companion/src/listener.ts";
+import { tailscaleCandidates, tailscaleEnvironment } from "../companion/src/listener.ts";
 
 export interface TailscaleStatus {
   cli: string;
@@ -60,7 +60,7 @@ function run(cli: string, args: string[], timeoutMs: number): Promise<{ ok: bool
     execFile(
       cli,
       args,
-      { timeout: timeoutMs, killSignal: "SIGKILL", maxBuffer: 16 * 1024 * 1024, env: { ...process.env, PATH: searchPath() } },
+      { timeout: timeoutMs, killSignal: "SIGKILL", maxBuffer: 16 * 1024 * 1024, env: tailscaleEnvironment() },
       (error, stdout, stderr) => {
         const code = error && "code" in error && typeof error.code === "number" ? error.code : error ? null : 0;
         resolve({ ok: !error, stdout: String(stdout ?? ""), stderr: String(stderr ?? ""), code });
