@@ -28,7 +28,9 @@ if (!enabled) {
 }
 const run = enabled ? it : it.skip;
 // A cold run downloads the binary and Chrome; a warm one launches in seconds.
-const LAUNCH_TIMEOUT_MS = forced && !binary ? 600_000 : 180_000;
+// A forced run may still have Chrome for Testing to download (agent-browser can
+// be cached while Chrome is not), so give every forced run the long budget.
+const LAUNCH_TIMEOUT_MS = forced ? 600_000 : 180_000;
 
 // Synthetic provider outcomes exercise the UI, not the commands themselves.
 const TOOL_CALLS = JSON.stringify([
@@ -51,16 +53,25 @@ interface Launched {
 /** Start `ui launch` as a real foreground process and wait for its handle. */
 function launch(args: string[]): Promise<Launched> {
   return new Promise((done, fail) => {
+    // Own process group: a timeout must take the launch AND whatever it is
+    // running (an `agent-browser install` mid-download) down with it.
     const child = spawn(process.execPath, ["--experimental-strip-types", CLI, "ui", "launch", ...args], {
-      cwd: ROOT, env: process.env, stdio: ["ignore", "pipe", "pipe"],
+      cwd: ROOT, env: process.env, stdio: ["ignore", "pipe", "pipe"], detached: process.platform !== "win32",
     });
+    const killGroup = (signal: NodeJS.Signals) => {
+      if (child.pid && process.platform !== "win32") {
+        try { process.kill(-child.pid, signal); return; } catch { /* group already gone */ }
+      }
+      child.kill(signal);
+    };
     let stdout = "";
     let stderr = "";
     let settled = false;
     const timer = setTimeout(() => {
       if (settled) return;
       settled = true;
-      child.kill("SIGINT");
+      killGroup("SIGINT");
+      setTimeout(() => killGroup("SIGKILL"), 10_000).unref();
       fail(new Error(`ui launch printed no handle within ${LAUNCH_TIMEOUT_MS}ms\nstderr:\n${stderr}`));
     }, LAUNCH_TIMEOUT_MS);
     child.stderr!.on("data", (chunk: Buffer) => { stderr += String(chunk); });
@@ -123,9 +134,9 @@ describe("control-omb ui drives the real renderer", () => {
     expect(dry).toMatchObject({ ok: true, dryRun: true, patch: { features: { showToolCalls: true } } });
     const flagged = await ui("flag", info.ui, "--set", "features.showToolCalls=true");
     expect(flagged).toMatchObject({ ok: true, features: { showToolCalls: true } });
-    // Save as skill on the Verify card needs skill authoring on.
-    const authoring = await ui("flag", info.ui, "--set", "features.skillAuthoring=true");
-    expect(authoring).toMatchObject({ ok: true, features: { skillAuthoring: true } });
+    // Skill authoring is on by default, so the Verify card's Save as skill
+    // needs no flag; the fixture's default config is what a fresh install has.
+    expect(flagged.features).toMatchObject({ skillAuthoring: true });
 
     const before = await ui("snapshot", info.ui, "--interactive");
     expect(before.ok).toBe(true);
