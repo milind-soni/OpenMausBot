@@ -606,6 +606,8 @@ export interface AppState {
   pluginsSurface: "apps" | "mcp";
   /** The "New bot" role picker. */
   newBotOpen: boolean;
+  /** Creation continues even when the role picker is dismissed. */
+  botCreationPending: boolean;
   computerOpen: boolean;
   /** the per-thread event inspector (runtime stream + native protocol tee) */
   inspectorOpen: boolean;
@@ -816,6 +818,7 @@ export type Action =
   | { type: "renameTask"; botId: string; threadId: string; title: string }
   | { type: "deleteTask"; botId: string; threadId: string }
   | { type: "newBot"; role?: BotRole; onCreated?: () => void; onError?: (message: string) => void }
+  | { type: "botCreationPending"; on: boolean }
   | { type: "updateTask"; botId: string; threadId: string; patch: TaskUpdatePatch }
   | { type: "createProject"; botId: string; name: string; emoji?: string | null; onCreated?: (project: BotProject) => void; onError?: (message: string) => void }
   | { type: "updateProject"; botId: string; projectId: string; patch: ProjectUpdatePatch; onSaved?: () => void; onError?: (message: string) => void }
@@ -1458,6 +1461,8 @@ export function reducer(state: AppState, action: Action): AppState {
         ...(open ? { settingsOpen: false, appSettingsOpen: false, newBotOpen: false, shortcutsOpen: false } : {}),
       };
     }
+    case "botCreationPending":
+      return { ...state, botCreationPending: action.on };
     case "toggleNewBot": {
       const open = action.open ?? !state.newBotOpen;
       return {
@@ -1763,6 +1768,7 @@ export const initialState: AppState = {
   pluginsOpen: false,
   pluginsSurface: "apps",
   newBotOpen: false,
+  botCreationPending: false,
   computerOpen: false,
   inspectorOpen: false,
   appSettingsOpen: false,
@@ -2088,6 +2094,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
 
   const dispatch = useMemo(() => {
     const navigation = new Map<string, number>();
+    let creatingBot = false;
     const showError = (e: unknown) => {
       rawDispatch({ type: "error", message: e instanceof Error ? e.message : String(e) });
       setTimeout(() => rawDispatch({ type: "error", message: null }), 6000);
@@ -2429,6 +2436,10 @@ export function StoreProvider({ children }: { children: ReactNode }) {
           break;
         }
         case "newBot": {
+          // The picker can close/remount before React paints pending state.
+          if (creatingBot) break;
+          creatingBot = true;
+          rawDispatch({ type: "botCreationPending", on: true });
           void createBotWithRole(action.role)
             .then(({ bot, profileError }) => {
               rawDispatch({ type: "botAdded", bot });
@@ -2441,6 +2452,10 @@ export function StoreProvider({ children }: { children: ReactNode }) {
             .catch((error) => {
               if (action.onError) action.onError(error instanceof Error ? error.message : String(error));
               else showError(error);
+            })
+            .finally(() => {
+              creatingBot = false;
+              rawDispatch({ type: "botCreationPending", on: false });
             });
           break;
         }

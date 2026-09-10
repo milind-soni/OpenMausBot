@@ -115,7 +115,8 @@ screenshot; it is not one of the required checks.
 ## Bot setup and MCP access recipe
 
 `scripts/testing/bot-tools-ui.e2e.test.ts` uses the same full-app launcher and
-optional `OMB_UI_E2E=1` gate. It verifies profile-only role creation, recovery
+optional `OMB_UI_E2E=1` gate. It verifies profile-only role creation, closing
+and reopening the dialog during a slow creation without duplicate submissions, recovery
 when the preset PATCH fails after creation, the composer’s Tools shortcut,
 optional setup ideas, Paste config importing disabled servers, refreshed
 per-bot MCP switches and saved opt-outs, and modal Tab/Escape containment.

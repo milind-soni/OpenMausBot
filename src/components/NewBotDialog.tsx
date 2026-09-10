@@ -22,11 +22,10 @@ const APP_LABELS: Record<string, string> = {
 };
 
 export function NewBotDialog() {
-  const { dispatch } = useStore();
+  const { state, dispatch } = useStore();
   const dialogRef = useRef<HTMLDivElement>(null);
-  const pending = useRef(false);
   const alive = useRef(true);
-  const [creating, setCreating] = useState(false);
+  const creating = state.botCreationPending;
   const [error, setError] = useState<string | null>(null);
   const close = () => dispatch({ type: "toggleNewBot", open: false });
 
@@ -67,20 +66,15 @@ export function NewBotDialog() {
   }, [dispatch]);
 
   const create = (role?: BotRole) => {
-    if (pending.current) return;
-    pending.current = true;
-    setCreating(true);
+    if (creating) return;
     setError(null);
     dispatch({ type: "newBot", role,
       onCreated: () => {
         track("bot_created", { role: role?.id ?? "blank" });
-        pending.current = false;
         if (alive.current) close();
       },
       onError: (message: string) => {
-        pending.current = false;
         if (!alive.current) return;
-        setCreating(false);
         setError(message);
       },
     });

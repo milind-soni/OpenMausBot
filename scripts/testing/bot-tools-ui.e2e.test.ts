@@ -66,14 +66,47 @@ describe("bot setup and tools in the real renderer", () => {
     const original = await bots();
     const coder = BOT_ROLES.find((role) => role.id === "coder")!;
 
+    // Hold creation in this disposable browser to exercise a close/reopen
+    // while the request is pending, not just two clicks in one dialog.
+    await evaluate(`(() => {
+      const fetch = window.fetch.bind(window);
+      window.botCreateRequests = 0;
+      window.fetch = (input, init) => {
+        if (String(input) === '/api/bots' && init?.method === 'POST') {
+          window.botCreateRequests++;
+          return new Promise(resolve => {
+            window.releaseBotCreation = () => { window.fetch = fetch; resolve(fetch(input, init)); };
+          });
+        }
+        return fetch(input, init);
+      };
+      return true;
+    })()`);
     await press("Control+n");
     await clickRole(coder.title);
+    await expect.poll(() => evaluate("window.botCreateRequests"), { timeout: 10_000 }).toBe(1);
+    await press("Escape");
+    expect(await dialogCount()).toBe(0);
+    await press("Control+n");
+    expect(await evaluate("document.querySelector('[role=dialog]')?.getAttribute('aria-busy')")).toBe("true");
+    expect(await evaluate("[...document.querySelectorAll('[role=dialog] button')].filter(b => b.getAttribute('aria-label') !== 'Close').every(b => b.disabled)")).toBe(true);
+    await evaluate("[...document.querySelectorAll('[role=dialog] button')].find(b => b.textContent.includes('Blank bot')).click()");
+    expect(await evaluate("window.botCreateRequests")).toBe(1);
+    // Close remains usable; a slow server must not trap the user in a modal.
+    await click("Close");
+    expect(await dialogCount()).toBe(0);
+    await press("Control+n");
+    await evaluate("window.releaseBotCreation(); true");
     await expect.poll(async () => (await bots()).find((bot) => bot.name === coder.name)?.soul, { timeout: 10_000 }).toBe(coder.soul);
     const created = (await bots()).filter((bot) => !original.some((old) => old.id === bot.id));
     expect(created).toHaveLength(1);
     expect(created[0]).toMatchObject(roleProfilePatch(coder));
     expect(created[0].computer).toBe(original[0].computer);
     expect(created[0].browser).toBe(original[0].browser);
+    await expect.poll(() => evaluate("document.querySelector('[role=dialog]')?.getAttribute('aria-busy')"), { timeout: 10_000 }).toBe("false");
+    // The old dialog's callback must not close this newer dialog instance.
+    expect(await dialogCount()).toBe(1);
+    await press("Escape");
     await expect.poll(dialogCount, { timeout: 10_000 }).toBe(0);
 
     await openTools();

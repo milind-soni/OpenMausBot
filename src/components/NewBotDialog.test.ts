@@ -2,15 +2,15 @@ import { Children, createElement, isValidElement, type EffectCallback, type Reac
 import { renderToStaticMarkup } from "react-dom/server";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-const fixture = vi.hoisted(() => ({ effects: [] as EffectCallback[], dispatch: vi.fn(), creating: false, error: null as string | null, stateIndex: 0 }));
+const fixture = vi.hoisted(() => ({ effects: [] as EffectCallback[], dispatch: vi.fn(), creating: false, error: null as string | null }));
 vi.mock("react", async (importOriginal) => {
   const react = await importOriginal<typeof import("react")>();
   return { ...react,
     useEffect: (effect: EffectCallback) => { fixture.effects.push(effect); },
-    useState: (initial: unknown) => react.useState(fixture.stateIndex++ === 0 ? fixture.creating : fixture.error ?? initial),
+    useState: (initial: unknown) => react.useState(fixture.error ?? initial),
   };
 });
-vi.mock("@/state/store", () => ({ useStore: () => ({ dispatch: fixture.dispatch }) }));
+vi.mock("@/state/store", () => ({ useStore: () => ({ state: { botCreationPending: fixture.creating }, dispatch: fixture.dispatch }) }));
 vi.mock("@/lib/analytics", () => ({ track: vi.fn() }));
 import { NewBotDialog } from "./NewBotDialog";
 
@@ -23,7 +23,6 @@ function nodes(value: ReactNode): Node[] {
 function render() {
   let tree!: ReturnType<typeof NewBotDialog>;
   function Capture() { tree = NewBotDialog(); return tree; }
-  fixture.stateIndex = 0;
   const html = renderToStaticMarkup(createElement(Capture));
   return { html, nodes: nodes(tree) };
 }
@@ -31,10 +30,9 @@ beforeEach(() => { fixture.effects = []; fixture.dispatch.mockReset(); fixture.c
 afterEach(() => vi.unstubAllGlobals());
 
 describe("new bot role dialog", () => {
-  it("waits for creation and guards repeated clicks until the callback", () => {
+  it("waits for creation before closing the current dialog", () => {
     const { nodes } = render();
     const blank = nodes.find((node) => node.type === "button" && renderToStaticMarkup(node).includes("Blank bot"))!;
-    blank.props.onClick!();
     blank.props.onClick!();
     expect(fixture.dispatch).toHaveBeenCalledOnce();
     const action = fixture.dispatch.mock.calls[0][0];
@@ -55,6 +53,10 @@ describe("new bot role dialog", () => {
     const pending = render();
     expect(pending.html).toContain('aria-busy="true"');
     expect(pending.nodes.filter((node) => node.type === "button" && node.props["aria-label"] !== "Close").every((node) => node.props.disabled)).toBe(true);
+    // A remounted picker gets pending from the store, not its local state.
+    const pendingBlank = pending.nodes.find((node) => node.type === "button" && renderToStaticMarkup(node).includes("Blank bot"))!;
+    pendingBlank.props.onClick!();
+    expect(fixture.dispatch).toHaveBeenCalledTimes(2);
     const close = pending.nodes.find((node) => node.type === "button" && node.props["aria-label"] === "Close")!;
     expect(close.props.disabled).not.toBe(true);
     close.props.onClick!();
