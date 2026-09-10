@@ -45,6 +45,7 @@ Use only mapped, tested commands:
 - [Codex bot instructions](codex-instructions.md)
 - [Qwen model route selection](qwen-models.md)
 - [Team backups](team-backups.md)
+- [Fleet: many workspaces on one server](fleet.md)
 - [Usage ledger](usage-ledger.md)
 - [Spend cap and sell prices](spend-cap.md)
 

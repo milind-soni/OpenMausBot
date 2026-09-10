@@ -309,6 +309,45 @@ that makes one read-only request to the provider from the server.
   always uses a personal ChatGPT login.
 - **xAI API key**: the Grok API engine and xAI image generation.
 
+## Many client workspaces on one server
+
+`openmausbot fleet` runs one workspace per client on a single Linux server,
+each as its own OS user, its own `openmausbot@<name>` service on its own
+loopback ports, its own data folder, brand, sign-in list and provider key,
+reached at `<name>.<your domain>` through the system Caddy. Bots of one
+workspace cannot read another's files or reach its API: the data lives in a
+private home, the unit runs with a private `/tmp`, no new privileges and a
+read-only system, and an nftables rule keeps each workspace's ports to its
+own user, Caddy and root.
+
+Once, as root, with the package installed permanently and a wildcard DNS
+record (`*.example.com`) pointing at the server:
+
+```sh
+openmausbot fleet init --domain example.com
+```
+
+That writes the template unit, the fence and its unit, the workspace folders,
+and adds `import /etc/caddy/omb.d/*.caddy` to `/etc/caddy/Caddyfile`. Then per
+client:
+
+```sh
+openmausbot fleet create acme --admin owner@acme.test --member @acme.test \
+  --brand /root/acme-brand.json --anthropic-key-file /root/acme-anthropic.key \
+  --cap 50 --memory 1G
+openmausbot fleet users acme add bob@acme.test --chat-only
+openmausbot fleet list
+openmausbot fleet suspend acme      # 503 page, service stopped; resume undoes it
+openmausbot fleet upgrade           # new release, then every running workspace restarted in turn
+openmausbot fleet delete acme --yes # add --keep-data to keep the home folder
+```
+
+`https://acme.example.com` is up when `create` returns; the first admin signs
+in with an emailed code. `OMB_LICENSE_KEY` in the environment (or
+`--license-key`) is carried into every workspace so a partner's white-label
+key covers them all. Not root? Every command prints the exact steps to run as
+root instead, and `--dry-run` always prints.
+
 ## Signing the engines in without a terminal
 
 On a hosted server, the engine CLIs sign in from Settings → Engines:

@@ -34,6 +34,7 @@ import { parseAllowList } from "./account-signin.ts";
 import { writeFileAtomic } from "./atomic.ts";
 import { ensureCaddy, normalizeDomainOption, startCaddy, type RunningCaddy } from "./caddy.ts";
 import { runServiceCommand } from "./service-cli.ts";
+import { runFleetCommand, type FleetInput } from "./fleet-cli.ts";
 import { explainTailscaleFailure, tailscaleServe, tailscaleServeOff, tailscaleStatus, type TailscaleStatus } from "./tailscale.ts";
 import { defaultSetupIo, SetupCancelled, type SetupIo } from "./cli-prompts.ts";
 import { normalizePhoneOrigin, phonePairingInstructions, runPhoneSetup } from "./cli-phone-setup.ts";
@@ -59,7 +60,7 @@ import {
 const HERE = dirname(fileURLToPath(import.meta.url));
 
 export interface CliOptions {
-  command: "setup" | "start" | "serve" | "pair" | "sessions" | "status" | "login" | "logout" | "access" | "service" | "browser" | "help";
+  command: "setup" | "start" | "serve" | "pair" | "sessions" | "status" | "login" | "logout" | "access" | "service" | "browser" | "fleet" | "help";
   port: number;
   dataDir: string;
   label?: string;
@@ -79,6 +80,20 @@ export interface CliOptions {
   email?: string;
   /** `browser install [--with-deps]` */
   browserAction?: "install" | "status";
+  /** `fleet init|create|list|users|suspend|resume|delete|upgrade` */
+  fleetAction?: FleetInput["action"];
+  slug?: string;
+  admins?: string[];
+  members?: string[];
+  brandFile?: string;
+  anthropicKeyFile?: string;
+  cap?: number;
+  licenseKey?: string;
+  memory?: string;
+  dryRun?: boolean;
+  yes?: boolean;
+  keepData?: boolean;
+  fleetUserAction?: "add" | "remove";
   withDeps?: boolean;
   json: boolean;
   /** Explicitly ignore saved remote access for this launch. */
@@ -89,7 +104,7 @@ export interface CliOptions {
   phone?: "ios" | "android";
 }
 
-const COMMANDS = ["setup", "start", "serve", "pair", "sessions", "status", "login", "logout", "access", "service", "browser", "help", "--help", "-h"];
+const COMMANDS = ["setup", "start", "serve", "pair", "sessions", "status", "login", "logout", "access", "service", "browser", "fleet", "help", "--help", "-h"];
 
 export function parseArgs(argv: string[], env: NodeJS.ProcessEnv = process.env): CliOptions | { error: string } {
   const implicitStart = !argv.length || (argv[0]!.startsWith("--") && argv[0] !== "--help");
@@ -143,6 +158,20 @@ export function parseArgs(argv: string[], env: NodeJS.ProcessEnv = process.env):
       else if (options.command === "service" && !options.serviceAction && (arg === "install" || arg === "uninstall")) options.serviceAction = arg;
       else if (options.command === "browser" && (arg === "install" || arg === "status")) options.browserAction = arg;
       else if (options.command === "browser" && arg === "--with-deps") options.withDeps = true;
+      else if (options.command === "fleet" && !options.fleetAction && ["init", "create", "list", "users", "suspend", "resume", "delete", "upgrade"].includes(arg)) options.fleetAction = arg as FleetInput["action"];
+      else if (options.command === "fleet" && options.fleetAction && options.fleetAction !== "init" && options.fleetAction !== "list" && options.fleetAction !== "upgrade" && !options.slug && !arg.startsWith("--")) options.slug = arg;
+      else if (options.command === "fleet" && options.fleetAction === "users" && options.slug && !options.fleetUserAction && (arg === "add" || arg === "remove")) { options.fleetUserAction = arg; options.email = value(); }
+      else if (options.command === "fleet" && arg === "--admin") options.admins = [...(options.admins ?? []), value()];
+      else if (options.command === "fleet" && arg === "--member") options.members = [...(options.members ?? []), value()];
+      else if (options.command === "fleet" && arg === "--brand") options.brandFile = resolve(value());
+      else if (options.command === "fleet" && arg === "--anthropic-key-file") options.anthropicKeyFile = resolve(value());
+      else if (options.command === "fleet" && arg === "--cap") options.cap = Number(value());
+      else if (options.command === "fleet" && arg === "--license-key") options.licenseKey = value();
+      else if (options.command === "fleet" && arg === "--memory") options.memory = value();
+      else if (options.command === "fleet" && arg === "--dry-run") options.dryRun = true;
+      else if (options.command === "fleet" && arg === "--yes") options.yes = true;
+      else if (options.command === "fleet" && arg === "--keep-data") options.keepData = true;
+      else if (options.command === "fleet" && arg === "--chat-only") options.chatOnly = true;
       else return { error: `unknown argument "${arg}"` };
     } catch (error) {
       return { error: error instanceof Error ? error.message : String(error) };
@@ -156,6 +185,12 @@ export function parseArgs(argv: string[], env: NodeJS.ProcessEnv = process.env):
   if (options.domain && (options.tailscale || options.tunnel || options.publicUrl)) return { error: "--domain already gives the server its address; drop --tailscale, --tunnel and --public-url" };
   if (options.local && (options.tailscale || options.tunnel || options.publicUrl)) return { error: "--local cannot be combined with a remote-access option" };
   if (options.command === "browser" && !options.browserAction) return { error: "browser needs an action: install or status" };
+  if (options.command === "fleet") {
+    if (!options.fleetAction) return { error: "fleet needs one of: init --domain HOST, create NAME --admin EMAIL, list, users NAME add|remove EMAIL, suspend NAME, resume NAME, delete NAME --yes, upgrade" };
+    if (["create", "users", "suspend", "resume", "delete"].includes(options.fleetAction) && !options.slug) return { error: `fleet ${options.fleetAction} needs a workspace name` };
+    if (options.fleetAction === "users" && !options.fleetUserAction) return { error: "fleet users needs: NAME add|remove EMAIL [--chat-only]" };
+    if (options.cap !== undefined && (!Number.isFinite(options.cap) || options.cap < 0)) return { error: "--cap must be a dollar amount of 0 or more" };
+  }
   return options;
 }
 
@@ -174,6 +209,10 @@ export const USAGE = `openmausbot — your team of AI bots, ready in a few steps
   openmausbot access list | add EMAIL [--chat-only] | remove EMAIL
   openmausbot service install [--domain HOST | --tunnel | --tailscale] [--port N] [--data-dir DIR] | uninstall
   openmausbot browser install [--with-deps] | status
+  openmausbot fleet init --domain HOST | create NAME --admin EMAIL [--member EMAIL] [--brand FILE]
+                    [--anthropic-key-file FILE] [--cap USD] [--license-key KEY] [--memory 1G]
+                  | list | users NAME add|remove EMAIL [--chat-only] | suspend NAME | resume NAME
+                  | delete NAME --yes [--keep-data] | upgrade   (all take --dry-run)
 
 setup   choose AI access and optional phone access; keep existing bots and chats
 start   same as openmausbot: use your saved settings and open the workspace
@@ -197,6 +236,10 @@ browser install: the bots' browser engine (agent-browser, pinned) into the
         the Linux libraries Chrome needs (run as root once). Then run
         browser install as the user running serve, from that user's home.
         status: what the current user and data directory have.
+fleet   many client workspaces on one Linux server, each its own account,
+        service, data folder, brand, sign-in list and keys at NAME.HOST
+        behind the system Caddy. Plans are printed unless run as root;
+        --dry-run always prints. Install the package permanently first.
 
 --tailscale  serve over your tailnet: Tailscale terminates HTTPS and the
              link uses this machine's MagicDNS name (needs Tailscale signed in
@@ -1009,6 +1052,27 @@ export async function main(argv = process.argv.slice(2)): Promise<number> {
         label: options.label,
         script: process.argv[1] ?? "",
         node: process.execPath,
+      }, { log: (line) => console.log(line), error: (line) => console.error(line) });
+    case "fleet":
+      return runFleetCommand({
+        action: options.fleetAction!,
+        slug: options.slug,
+        domain: options.domain,
+        admins: options.admins ?? [],
+        members: options.members ?? [],
+        brandFile: options.brandFile,
+        anthropicKeyFile: options.anthropicKeyFile,
+        cap: options.cap,
+        licenseKey: options.licenseKey ?? process.env.OMB_LICENSE_KEY,
+        memory: options.memory,
+        dryRun: options.dryRun ?? false,
+        yes: options.yes ?? false,
+        keepData: options.keepData ?? false,
+        userAction: options.fleetUserAction,
+        email: options.email,
+        chatOnly: options.chatOnly,
+        node: process.execPath,
+        script: process.argv[1] ?? "",
       }, { log: (line) => console.log(line), error: (line) => console.error(line) });
     case "logout":
       return runLogout(options);
