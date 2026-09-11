@@ -268,8 +268,9 @@ const serverSupervisor = createServerSupervisor({
     // A window opened during the outage is still on our error page instead.
     for (const win of BrowserWindow.getAllWindows()) {
       if (!serverUnavailableWindows.has(win) || activeEnvironment(environmentsState)) continue;
-      serverUnavailableWindows.delete(win);
-      void win.loadURL(`http://127.0.0.1:${SERVER_PORT}`).catch((error) => {
+      void win.loadURL(`http://127.0.0.1:${SERVER_PORT}`).then(() => {
+        serverUnavailableWindows.delete(win);
+      }).catch((error) => {
         slog(`recovered server window failed to load: ${error?.message ?? error}`);
       });
     }

@@ -1,7 +1,14 @@
 import assert from "node:assert/strict";
 import { EventEmitter } from "node:events";
+import { readFileSync } from "node:fs";
 import test from "node:test";
 import { createServerSupervisor } from "./server-supervisor.mjs";
+
+test("main retires an unavailable window only after recovery navigation succeeds", () => {
+  const source = readFileSync(new URL("./main.mjs", import.meta.url), "utf8");
+  assert.match(source, /void win\.loadURL\(`http:\/\/127\.0\.0\.1:\$\{SERVER_PORT\}`\)\.then\(\(\) => \{\s*serverUnavailableWindows\.delete\(win\);/);
+  assert.doesNotMatch(source, /serverUnavailableWindows\.delete\(win\);\s*void win\.loadURL/);
+});
 
 function fixture(t, options = {}) {
   t.mock.timers.enable({ apis: ["setTimeout"] });
