@@ -19,6 +19,8 @@ test("update failures keep integrity and certificate errors distinct from recove
   ]) assert.match(updateErrorMessage(new Error(message)), expected);
   assert.match(updateErrorMessage(Object.assign(new Error("écriture impossible"), { code: "ENOSPC" })), /Free some space/);
   assert.match(updateErrorMessage(Object.assign(new Error("connection failed"), { code: "UNABLE_TO_VERIFY_LEAF_SIGNATURE" })), /do not disable certificate checks/);
+  assert.match(updateErrorMessage(Object.assign(new Error('publisherNames differ. SignerCertificate: {"Subject":"CN=Unexpected"}'), { code: "ERR_UPDATER_INVALID_SIGNATURE" })), /failed verification/);
+  assert.match(updateErrorMessage(new Error('ERR_UPDATER_INVALID_SIGNATURE: SignerCertificate mismatch')), /failed verification/);
   assert.equal(updateErrorMessage(new Error("unknown failure")), "unknown failure");
 });
 
