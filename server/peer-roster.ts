@@ -4,6 +4,8 @@
 // caps, one sanitizer, and one reachability rule to audit rather than two
 // that drift.
 
+import type { BotActivity } from "./store.ts";
+
 export interface RosterMember {
   id: string;
   name: string;
@@ -17,9 +19,45 @@ export interface RosterMember {
    * narrows this bot to exactly those ids, and an empty list cuts it off
    * from peers entirely. */
   peers?: string[];
+  /** What the harness last saw the bot doing. `busy` alone cannot tell a
+   * bot mid-task from one parked on the user's approval card. */
+  activity?: BotActivity;
 }
 
 const sectionKey = (section?: string): string => section?.trim() || "";
+
+export type PeerStatus = "available" | "working" | "waiting-on-user" | "not-responding" | "unavailable";
+
+const PEER_STATUS_WORDS: Record<PeerStatus, string> = {
+  available: "available",
+  working: "working right now",
+  "waiting-on-user": "waiting on the user",
+  "not-responding": "not responding",
+  unavailable: "unavailable — needs setup",
+};
+
+/** What a teammate is doing, as another bot should read it. `activity` is
+ * the harness's own signal. A record without one — or still `idle` while
+ * `busy` is set, as older callers and test fixtures write it — falls back
+ * to `busy`, so anything that only knows busy reads exactly as before. */
+export function peerStatus(activity: BotActivity | undefined, busy: boolean | undefined): PeerStatus {
+  switch (activity) {
+    case "working":
+      return "working";
+    case "waiting-on-you":
+      return "waiting-on-user";
+    case "no-signal":
+      return "not-responding";
+    case "dead":
+      return "unavailable";
+    default:
+      return busy ? "working" : "available";
+  }
+}
+
+export function peerStatusWords(status: PeerStatus): string {
+  return PEER_STATUS_WORDS[status];
+}
 
 /** The per-pair gate, on top of the section boundary.
  *
@@ -128,7 +166,7 @@ export function renderRoster(team: readonly RosterMember[], opts: RosterOptions)
     const name = clip(bot.name, ROSTER_NAME_MAX);
     const role = clip(bot.title ?? "", ROSTER_ROLE_MAX) || "General assistant";
     const about = opts.about ? clip(bot.description ?? "", ROSTER_ABOUT_MAX) : "";
-    const availability = bot.busy ? "working right now" : "available";
+    const availability = peerStatusWords(peerStatus(bot.activity, bot.busy));
     return `- ${name} — ${role}${about ? `: ${about}` : ""} (${availability})`;
   });
   return (
