@@ -13,6 +13,7 @@ import { spawn, type ChildProcess } from "node:child_process";
 import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
+import { DatabaseSync } from "node:sqlite";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 
@@ -353,6 +354,7 @@ describe("steer-queue e2e (fake ACP fleet)", () => {
   let stopGate: string;
   let stopRpcDump: string;
   let earlyGate: string;
+  let receiptGate: string;
   let dispatchGate: string;
   const evidence: unknown[] = [];
   let evidencePath: string;
@@ -399,6 +401,7 @@ describe("steer-queue e2e (fake ACP fleet)", () => {
     stopGate = join(home, "gates", "stop.gate");
     stopRpcDump = join(home, "gates", "stop.rpc");
     earlyGate = join(home, "gates", "early-provider.gate");
+    receiptGate = join(home, "gates", "receipt-provider.gate");
     dispatchGate = join(home, "gates", "early-dispatch.gate");
     evidencePath = join(tmpdir(), `omb-steer-evidence-${Date.now()}-${process.pid}.json`);
     // The CLI and harness remain real. Delay only the adapter's returned
@@ -406,7 +409,15 @@ describe("steer-queue e2e (fake ACP fleet)", () => {
     const prelude = join(home, "delayed-dispatch.mjs");
     writeFileSync(prelude, [
       `import { ProviderRegistry } from ${JSON.stringify(pathToFileURL(join(SERVER_DIR, "harness/registry.ts")).href)};`,
+      `import { EventBus } from ${JSON.stringify(pathToFileURL(join(SERVER_DIR, "harness/bus.ts")).href)};`,
       'import { existsSync, writeFileSync } from "node:fs";',
+      'import { randomUUID } from "node:crypto";',
+      'let oldCompletion, receiptBus;',
+      'const publish = EventBus.prototype.publish;',
+      'EventBus.prototype.publish = function(event) {',
+      '  if (event.providerInstanceId === "steerReceipt" && event.type === "turn.completed" && !oldCompletion) { oldCompletion = event; receiptBus = this; }',
+      '  return publish.call(this, event);',
+      '};',
       'const load = ProviderRegistry.prototype.load;',
       'ProviderRegistry.prototype.load = async function(configs) {',
       '  await load.call(this, configs);',
@@ -417,6 +428,23 @@ describe("steer-queue e2e (fake ACP fleet)", () => {
       '    const result = await send(turn);',
       `    writeFileSync(${JSON.stringify(`${dispatchGate}.entered`)}, "entered");`,
       `    while (!existsSync(${JSON.stringify(dispatchGate)})) await new Promise(resolve => setTimeout(resolve, 20));`,
+      '    return result;',
+      '  };',
+      '  const receipt = this.get("steerReceipt");',
+      '  if (!receipt) return;',
+      '  const sendReceipt = receipt.adapter.sendTurn;',
+      '  let calls = 0;',
+      '  receipt.adapter.sendTurn = async (turn) => {',
+      '    const replacement = ++calls === 2;',
+      '    if (replacement) {',
+      // Replay only a completion from this fixture's old real provider turn,
+      // after the replacement has installed its generation but before its ACK.
+      '      publish.call(receiptBus, { ...oldCompletion, eventId: randomUUID(), createdAt: new Date().toISOString() });',
+      `      writeFileSync(${JSON.stringify(`${receiptGate}.late`)}, "old completion delivered");`,
+      `      while (!existsSync(${JSON.stringify(`${receiptGate}.dispatch`)})) await new Promise(resolve => setTimeout(resolve, 20));`,
+      '    }',
+      '    const result = await sendReceipt(turn);',
+      `    while (replacement && !existsSync(${JSON.stringify(`${receiptGate}.ack`)})) await new Promise(resolve => setTimeout(resolve, 20));`,
       '    return result;',
       '  };',
       '};',
@@ -433,6 +461,11 @@ describe("steer-queue e2e (fake ACP fleet)", () => {
           steerEarly: {
             driver: "grokAgent",
             environment: { FAKE_ACP_MODE: "echo-gated", FAKE_ACP_GATE_FILE: earlyGate },
+            config: { cli: FAKE_CLI, fullAuto: true },
+          },
+          steerReceipt: {
+            driver: "grokAgent",
+            environment: { FAKE_ACP_MODE: "echo-gated", FAKE_ACP_GATE_FILE: receiptGate },
             config: { cli: FAKE_CLI, fullAuto: true },
           },
           // the RPC dump lets the interrupt test wait for session/prompt to
@@ -511,6 +544,31 @@ describe("steer-queue e2e (fake ACP fleet)", () => {
     expect(echoes(final)[1].text).toContain("queued after acknowledgment");
     expect(final.messages.some((message: any) => message.tool?.name?.includes("queued message could not start"))).toBe(false);
     evidence.push({ earlyCompletionQueue: { pending, final } });
+  }, 30_000);
+
+  it("retains a replacement receipt through stale completion and settles its own completion before ACK", async () => {
+    const bot = await newBot("steerReceipt", "Receipt generation");
+    expect((await api("POST", `/api/bots/${bot.id}/messages`, { text: "first receipt turn" })).status).toBe(202);
+    const body = { threadId: bot.threadId, text: "queued replacement", sendId: "replacement_receipt_123456" };
+    const queued = await api("POST", `/api/bots/${bot.id}/messages`, body);
+    expect(queued.body).toMatchObject({ queued: true, queueId: expect.any(String) });
+    const receipt = () => {
+      const database = new DatabaseSync(join(home, ".openmausbot", "messages.db"), { readOnly: true });
+      try { return database.prepare("SELECT status FROM chat_followups WHERE id = ?").get(queued.body.queueId); }
+      finally { database.close(); }
+    };
+    writeFileSync(receiptGate, "finish the old turn");
+    await until(async () => existsSync(`${receiptGate}.late`), "old completion during replacement setup");
+    expect(receipt()).toEqual({ status: "dispatching" });
+    writeFileSync(`${receiptGate}.dispatch`, "start replacement provider");
+    await until(async () => echoes(await botById(bot.id)).length === 2, "replacement completion before its ACK");
+    expect(receipt()).toEqual({ status: "dispatching" });
+    writeFileSync(`${receiptGate}.ack`, "acknowledge replacement");
+    await until(async () => receipt() === undefined, "receipt settlement by the replacement's exact provider turn");
+    const retried = await api("POST", `/api/bots/${bot.id}/messages`, body);
+    expect(retried.body.message).toMatchObject({ queueId: queued.body.queueId, sendId: body.sendId });
+    expect(echoes(await botById(bot.id))).toHaveLength(2);
+    evidence.push({ receiptGeneration: { queued, retried, final: await botById(bot.id) } });
   }, 30_000);
 
   it(

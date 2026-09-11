@@ -697,6 +697,8 @@ function revokeAllInternalCapabilities(): void {
 function bindInternalCapabilityToProviderTurn(threadId: string, generation: string, turnId?: string): void {
   if (turnId && !internalGenerationByProviderTurn.bind(threadId, generation, turnId)) {
     revokeInternalCapabilityGeneration(threadId, generation);
+    // This exact provider turn completed before its dispatch ACK arrived.
+    settleDirectFollowup(generation);
   }
 }
 
@@ -705,6 +707,7 @@ function revokeInternalCapabilityForProviderEvent(event: RuntimeEvent): void {
   const owner = internalGenerationByProviderTurn.complete(event.threadId, event.turnId);
   if (!owner) return;
   revokeInternalCapabilityGeneration(owner.threadId, owner.generation);
+  settleDirectFollowup(owner.generation);
 }
 
 /** Resolve a high-entropy bearer to its immutable server-side claims.
@@ -3755,7 +3758,6 @@ bus.subscribe((event: RuntimeEvent) => {
       if (bot) {
         const resourceOwner = turnResourceOwners.get(event.threadId);
         const generation = directTurnGenerationByThread.get(event.threadId);
-        settleDirectFollowup(generation);
         const isCurrent = () => directTurnGenerationByThread.get(event.threadId) === generation &&
           Boolean(store.taskByThread(bot.id, event.threadId));
         const settleDirectTurn = (resumeQueued = false) => {
