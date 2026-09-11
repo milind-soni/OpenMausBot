@@ -207,6 +207,22 @@ createInterface({ input: process.stdin }).on('line', line => {
 });
 
 describe("stopping the runtime before touching its files", () => {
+  it.skipIf(process.platform === "win32")("waits through forced shutdown when the verified runtime ignores TERM", async () => {
+    const fake = fakeRuntime();
+    writeFileSync(fake.executable, `#!/usr/bin/env node\nprocess.on('SIGTERM', () => {});\nawait import(${JSON.stringify(pathToFileURL(FAKE_ACP).href)});\n`);
+    const runtime = await resolveAntigravityRuntime(fake.executable);
+    vi.stubEnv("FAKE_ACP_AGENT_NAME", "Google Antigravity");
+    vi.stubEnv("FAKE_ACP_AGENT_VERSION", "1.1.1");
+    vi.stubEnv("FAKE_ACP_AUTH_METHOD", "oauth-personal");
+    const spawned = vi.spyOn(procs, "spawnCli");
+    try {
+      await expect(validateAntigravityRuntime(runtime, "agy_acp_server_1.1.1")).resolves.toBeUndefined();
+      expect(spawned.mock.results[0]!.value.signalCode).toBe("SIGKILL");
+    } finally {
+      await Promise.all(spawned.mock.results.map(({ value }) => procs.killCliTree(value, 0)));
+    }
+  }, 10_000);
+
   it("validates a real fake runtime and waits for its process to close before returning", async () => {
     const fake = fakeRuntime();
     const runtime = await resolveAntigravityRuntime(fake.executable);

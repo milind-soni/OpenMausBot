@@ -1310,6 +1310,41 @@ describe("ClaudeDriver turns (fake CLI)", () => {
     }));
   });
 
+  it.each([false, true])("finalizes root close after an uncertain Stop succeeds on retry (retained: %s)", async (retained) => {
+    const gate = join(scratch, "retry-stop.gate");
+    await create("slow", { FAKE_CLAUDE_SLOW_FINISH_GATE: gate });
+    const threadId = `t-retry-stop-${retained}`;
+    if (retained) {
+      writeFileSync(gate, "finish");
+      const first = await instance.adapter.sendTurn({ threadId, text: "first" });
+      await recorder.until((event) => event.type === "turn.completed" && event.turnId === first.turnId);
+      rmSync(gate);
+    }
+    const running = await instance.adapter.sendTurn({ threadId, text: "stop then retry" });
+    await recorder.until((event) => event.type === "item.completed" && event.itemType === "tool" && event.turnId === running.turnId);
+    const kill = procs.killCliTree;
+    const uncertain = vi.spyOn(procs, "killCliTree").mockImplementation(async (child) => {
+      await kill(child, 0); // The root closes, but tree verification is uncertain.
+      return false;
+    });
+    try {
+      await instance.adapter.interruptTurn(threadId);
+      await recorder.until((event) => event.type === "runtime.error" && event.message.includes("could not be confirmed stopped"));
+      expect(instance.adapter.hasSession(threadId)).toBe(true);
+      expect(recorder.events.some((event) => event.type === "turn.completed" && event.turnId === running.turnId)).toBe(false);
+    } finally {
+      uncertain.mockRestore();
+      await instance.adapter.interruptTurn(threadId);
+    }
+    await recorder.until((event) => event.type === "turn.completed" && event.turnId === running.turnId);
+    expect(instance.adapter.hasSession(threadId)).toBe(false);
+    expect(recorder.events.filter((event) => event.type === "turn.completed" && event.turnId === running.turnId)).toHaveLength(1);
+
+    writeFileSync(gate, "finish");
+    const replacement = await instance.adapter.sendTurn({ threadId, text: "replacement" });
+    await recorder.until((event) => event.type === "turn.completed" && event.turnId === replacement.turnId);
+  });
+
   it("a message sent mid-turn is steered into the running turn", async () => {
     await create("slow");
     const { turnId } = await instance.adapter.sendTurn({ threadId: "t-steer", text: "first" });

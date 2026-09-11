@@ -331,8 +331,8 @@ export class AntigravityAcpClient {
     this.stopping = killCliTree(this.child);
   }
 
-  /** Close, then wait (bounded) for the process to be gone. */
-  async closeAndWait(timeoutMs = 5_000): Promise<boolean> {
+  /** Allow the shared 5s TERM grace and 1s force-stop verification to finish. */
+  async closeAndWait(timeoutMs = 7_000): Promise<boolean> {
     this.close();
     let timer: NodeJS.Timeout | undefined;
     const timedOut = new Promise<boolean>((resolve) => {
