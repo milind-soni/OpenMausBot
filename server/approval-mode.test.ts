@@ -4,6 +4,7 @@ import {
   APPROVAL_MODES,
   approvalModeFor,
   supportsApprovalMode,
+  providerSwitchBreaksElevation,
   hasNativeAutoReview,
   isEmergencyApprovalDowngrade,
   isApprovalMode,
@@ -33,6 +34,20 @@ describe("approval modes", () => {
     expect(supportsApprovalMode(driver, "custom")).toBe(false);
     expect(hasNativeAutoReview(driver)).toBe(false);
   });
+  it("flags provider switches that would carry an elevation to another engine", () => {
+    // Elevated modes break on any provider change, and on a same-provider
+    // target that cannot hold the elevation at all.
+    expect(providerSwitchBreaksElevation("full", "codex", "claudeAgent")).toBe(true);
+    expect(providerSwitchBreaksElevation("custom", "codex", "claudeAgent")).toBe(true);
+    expect(providerSwitchBreaksElevation("full", "codex", "qwenAgent")).toBe(true);
+    // Same engine keeps the grant; non-elevated modes never break.
+    expect(providerSwitchBreaksElevation("full", "codex", "codex")).toBe(false);
+    expect(providerSwitchBreaksElevation("custom", "codex", "codex")).toBe(false);
+    expect(providerSwitchBreaksElevation("ask", "codex", "claudeAgent")).toBe(false);
+    expect(providerSwitchBreaksElevation("auto", "codex", "claudeAgent")).toBe(false);
+    expect(providerSwitchBreaksElevation("edits", "claudeAgent", "grokAgent")).toBe(false);
+  });
+
   it("recognizes only the five durable values", () => {
     expect(APPROVAL_MODES).toEqual(["ask", "edits", "auto", "full", "custom"]);
     for (const mode of APPROVAL_MODES) expect(isApprovalMode(mode)).toBe(true);

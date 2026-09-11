@@ -3366,6 +3366,30 @@ describe("harness HTTP API", () => {
       approvalMode,
       autoApprove: false,
     }));
+    // Bot-level Ask with a per-thread Full override: a bot-level patch cannot
+    // lower that thread, so a provider switch stays refused for it.
+    trustedBots.push({
+      id: "override-model-guard",
+      threadId: "override-model-thread",
+      name: "thread override model guard",
+      title: "",
+      description: "",
+      notifications: true,
+      color: "blue",
+      unread: false,
+      modelSelection: { instanceId: "codex", model: "fixture-codex-model" },
+      resumeCursors: {},
+      createdAt: 3,
+      approvalMode: "ask" as const,
+      autoApprove: false,
+      tasks: [{
+        threadId: "override-model-thread",
+        title: "override thread",
+        createdAt: 3,
+        approvalMode: "full" as const,
+        autoApprove: false,
+      }],
+    } as never);
     writeFileSync(join(isolatedData, "bots.json"), JSON.stringify(trustedBots));
 
     let isolatedStderr = "";
@@ -3417,9 +3441,44 @@ describe("harness HTTP API", () => {
         });
       }
 
+      // The generic bot route applies the same rule, and one request that
+      // atomically lowers approval satisfies it: patchBot writes approvalMode
+      // and modelSelection together, so the new provider never runs elevated.
+      const full = trustedBots.find((candidate) => candidate.id === "full-model-guard")!;
+      const strictRejected = await isolatedApi("PATCH", `/api/bots/${full.id}`, { modelSelection: targetSelection });
+      expect(strictRejected.status).toBe(400);
+      expect(strictRejected.body.error).toMatch(/Choose Ask for the selected thread/i);
+      const combined = await isolatedApi("PATCH", `/api/bots/${full.id}`, {
+        approvalMode: "ask",
+        modelSelection: targetSelection,
+      });
+      expect(combined.status).toBe(200);
+      expect(combined.body.bot).toMatchObject({
+        approvalMode: "ask",
+        autoApprove: false,
+        modelSelection: targetSelection,
+      });
+
+      // A per-thread Full override is untouched by a bot-level downgrade, so
+      // the combined request stays refused for that thread's provider switch.
+      const override = trustedBots.find((candidate) => candidate.id === "override-model-guard")!;
+      const overrideRejected = await isolatedApi("PATCH", `/api/bots/${override.id}`, {
+        approvalMode: "ask",
+        modelSelection: targetSelection,
+      });
+      expect(overrideRejected.status).toBe(400);
+      expect(overrideRejected.body.error).toMatch(/Choose Ask for the selected thread/i);
+
       // A loopback-capable bot must not escape a restrictive Custom config
       // by changing another idle bot to Ask/Auto. Leaving Custom is a trusted
-      // desktop transition just like entering it.
+      // desktop transition just like entering it — including inside a
+      // combined downgrade + provider switch.
+      const customCombined = await isolatedApi("PATCH", `/api/bots/${trustedBots.find((candidate) => candidate.approvalMode === "custom")!.id}`, {
+        approvalMode: "ask",
+        modelSelection: targetSelection,
+      });
+      expect(customCombined.status).toBe(403);
+      expect(customCombined.body.error).toMatch(/packaged desktop app/i);
       const custom = trustedBots.find((candidate) => candidate.approvalMode === "custom")!;
       for (const body of [
         { approvalMode: "ask" },

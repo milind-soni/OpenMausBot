@@ -12,6 +12,7 @@ import { BOT_PROFILE_LIMITS } from "../shared/bot-profile.ts";
 import {
   approvalModeFor,
   supportsApprovalMode,
+  providerSwitchBreaksElevation,
   isEmergencyApprovalDowngrade,
   isApprovalMode,
   type ApprovalMode,
@@ -11825,10 +11826,24 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
       const targetSelection = normalizedSelection ?? existingBot?.modelSelection;
       if (normalizedSelection && selectedTask) {
         const mode = approvalModeFor(selectedTask);
-        if ((mode === "full" || mode === "custom") &&
-          (!supportsApprovalMode(registry.cliTarget(normalizedSelection.instanceId)?.driverKind, mode) ||
-            registry.cliTarget(normalizedSelection.instanceId)?.driverKind !== registry.cliTarget(selectedTask.modelSelection.instanceId)?.driverKind)) {
-          return json(res, 400, { error: "Choose Ask for the selected thread before changing providers with elevated permissions" });
+        if (providerSwitchBreaksElevation(
+          mode,
+          registry.cliTarget(selectedTask.modelSelection.instanceId)?.driverKind,
+          registry.cliTarget(normalizedSelection.instanceId)?.driverKind,
+        )) {
+          // Refused so an elevation granted for one engine cannot silently
+          // transfer to another — unless this same request atomically drops
+          // the elevation. patchBot applies approvalMode and modelSelection
+          // together, so the new provider never runs elevated. A per-thread
+          // override is not touched by a bot-level patch and keeps the
+          // refusal.
+          const taskRow = store.taskByThread(selectedTask.id, selectedTask.threadId);
+          const projectedMode = taskRow && (taskRow.approvalMode !== undefined || taskRow.autoApprove !== undefined)
+            ? approvalModeFor(taskRow)
+            : requestedApprovalMode;
+          if (projectedMode === "full" || projectedMode === "custom") {
+            return json(res, 400, { error: "Choose Ask for the selected thread before changing providers with elevated permissions" });
+          }
         }
       }
       if (
