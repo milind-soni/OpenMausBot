@@ -31,8 +31,8 @@ const SKILL_SETTLED_LABEL = {
 
 /** The tool's own name is noise to a human: mcp__ogb__computer_batch is
  * "computer batch", Bash is "run a command". */
-function toolLabel(tool?: string): string {
-  if (!tool) return t("approval.tool.action");
+export function toolLabel(tool?: string): string {
+  if (!tool) return t("approval.tool.takeAction");
   const bare = tool.replace(/^mcp__[^_]+__/, "").replace(/_/g, " ");
   const nice: ToolLabels = {
     Bash: "approval.tool.runCommand",
@@ -46,6 +46,21 @@ function toolLabel(tool?: string): string {
     stage_skill: "approval.tool.enableSkill",
     update_skill: "approval.tool.updateSkill",
     update_profile: "approval.tool.updateProfile",
+    // An ACP driver can know the protocol's toolCall kind but not the
+    // tool's name, and sends the kind as the card's tool
+    // (server/drivers/acp/core.ts). Kinds are not verb phrases —
+    // "wants to other" reads as broken — so map every kind it can send
+    // to a real phrase. "shell" is its name for execute; "tool" is its
+    // fallback when an agent sends no kind at all — an unclassified call,
+    // so it reads differently from "other", the agent's own generic kind.
+    shell: "approval.tool.runCommand",
+    edit: "approval.tool.editFile",
+    read: "approval.tool.readFile",
+    fetch: "approval.tool.fetchWebPage",
+    delete: "approval.tool.deleteFile",
+    think: "approval.tool.think",
+    other: "approval.tool.takeAction",
+    tool: "approval.tool.useTool",
   };
   const key = nice[tool];
   return key ? t(key) : bare;

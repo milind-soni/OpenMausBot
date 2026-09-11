@@ -354,3 +354,61 @@ describe("ApprovalCard learned skills", () => {
       .toContain("propose the update again");
   });
 });
+
+describe("ApprovalCard tool-call kinds", () => {
+  const kindMessage = (tool?: string): Message => ({
+    id: "kind-card",
+    role: "bot",
+    kind: "options",
+    at: 1,
+    card: {
+      title: "Approval needed",
+      subtitle: "rg \"wants to\" src/components",
+      options: ["Allow", "Deny"],
+      requestId: "req-kind",
+      tool,
+    },
+  });
+
+  const bot = { id: "bot-1", name: "Scout" } as never as Bot;
+
+  it("speaks a verb phrase when the driver only knows the ACP kind", () => {
+    const html = renderToStaticMarkup(createElement(ApprovalCard, { bot, message: kindMessage("other") }));
+    expect(html).toContain("Scout wants to take an action");
+    expect(html).not.toContain("wants to other");
+  });
+
+  it("maps every kind an ACP driver can send, and still humanizes tool names", () => {
+    const cases: Array<[string, string]> = [
+      ["shell", "run a command"],
+      ["edit", "edit a file"],
+      ["read", "read a file"],
+      ["fetch", "fetch a web page"],
+      ["delete", "delete a file"],
+      ["think", "think"],
+      ["other", "take an action"],
+      ["tool", "use a tool"],
+      ["mcp__ogb__computer_batch", "computer batch"],
+    ];
+    for (const [tool, phrase] of cases) {
+      const html = renderToStaticMarkup(createElement(ApprovalCard, { bot, message: kindMessage(tool) }));
+      expect(html).toContain(`Scout wants to ${phrase}`);
+    }
+  });
+
+  it("reads grammatically when no tool is known", () => {
+    const html = renderToStaticMarkup(createElement(ApprovalCard, { message: kindMessage(undefined) }));
+    expect(html).toContain("Wants to take an action");
+    expect(html).not.toContain("Wants to an action");
+  });
+
+  it("speaks a verb phrase in the voice prompt too", () => {
+    const message = kindMessage("other");
+    const spoken = spokenApprovalPrompt(
+      { message, requestId: "req-kind", tool: "other", detail: message.card!.subtitle },
+      "Mochi",
+    );
+    expect(spoken).toContain("Mochi wants to take an action");
+    expect(spoken).not.toContain("wants to other");
+  });
+});
