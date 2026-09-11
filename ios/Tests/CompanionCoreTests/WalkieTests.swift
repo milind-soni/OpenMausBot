@@ -73,6 +73,28 @@ final class WalkieTests: XCTestCase {
         XCTAssertEqual(spoken, "Run pnpm test first. Code omitted. Then ship.")
     }
 
+    // MARK: - utterances
+
+    func testShortTextIsOneUtterance() {
+        XCTAssertEqual(Walkie.utterances("Done. Shipping now."), ["Done. Shipping now."])
+    }
+
+    func testSplitsAtSentencesWithinTheLimit() {
+        let parts = Walkie.utterances("One two three. Four five six. Seven eight nine.", limit: 30)
+        XCTAssertEqual(parts, ["One two three. Four five six.", "Seven eight nine."])
+        XCTAssertTrue(parts.allSatisfy { $0.count <= 30 })
+    }
+
+    func testARunOnSentenceSplitsAtWords() {
+        let parts = Walkie.utterances("alpha beta gamma delta epsilon zeta eta theta", limit: 20)
+        XCTAssertTrue(parts.allSatisfy { $0.count <= 20 }, "\(parts)")
+        XCTAssertEqual(parts.joined(separator: " "), "alpha beta gamma delta epsilon zeta eta theta")
+    }
+
+    func testEmptyTextHasNothingToSay() {
+        XCTAssertEqual(Walkie.utterances("   "), [])
+    }
+
     func testLongRepliesStopAtASentenceAndPointToTheChat() {
         let long = Array(repeating: "This sentence is here to make the reply long.", count: 30).joined(separator: " ")
         let spoken = Walkie.speakable(long, limit: 120)

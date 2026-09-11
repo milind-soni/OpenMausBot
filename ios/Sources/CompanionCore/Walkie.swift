@@ -65,6 +65,60 @@ public enum Walkie {
         return truncated(joined, limit: limit)
     }
 
+    /// Split speakable text into utterances the computer will synthesize.
+    /// The harness refuses anything over 500 characters, and a shorter first
+    /// piece starts speaking sooner, so pieces break at sentences — or at
+    /// words, for a sentence that is too long by itself.
+    public static func utterances(_ text: String, limit: Int = 320) -> [String] {
+        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return [] }
+        var sentences: [String] = []
+        trimmed.enumerateSubstrings(in: trimmed.startIndex..., options: .bySentences) { sentence, _, _, _ in
+            let clean = sentence?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+            if !clean.isEmpty { sentences.append(clean) }
+        }
+        if sentences.isEmpty { sentences = [trimmed] }
+
+        var out: [String] = []
+        var current = ""
+        for piece in sentences.flatMap({ wrapped($0, limit: limit) }) {
+            if current.isEmpty {
+                current = piece
+            } else if current.count + 1 + piece.count <= limit {
+                current += " " + piece
+            } else {
+                out.append(current)
+                current = piece
+            }
+        }
+        if !current.isEmpty { out.append(current) }
+        return out
+    }
+
+    private static func wrapped(_ sentence: String, limit: Int) -> [String] {
+        guard sentence.count > limit else { return [sentence] }
+        var lines: [String] = []
+        var line = ""
+        for word in sentence.split(separator: " ").map(String.init) {
+            var word = word
+            while word.count > limit {
+                if !line.isEmpty { lines.append(line); line = "" }
+                lines.append(String(word.prefix(limit)))
+                word = String(word.dropFirst(limit))
+            }
+            if line.isEmpty {
+                line = word
+            } else if line.count + 1 + word.count <= limit {
+                line += " " + word
+            } else {
+                lines.append(line)
+                line = word
+            }
+        }
+        if !line.isEmpty { lines.append(line) }
+        return lines
+    }
+
     private static func truncated(_ text: String, limit: Int) -> String {
         guard text.count > limit else { return text }
         let head = String(text.prefix(limit))

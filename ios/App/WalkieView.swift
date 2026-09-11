@@ -2,7 +2,8 @@
 //
 // The handheld concept, on the phone: agent rows with their state, four
 // keys, and a hold-to-talk bar. Tap a row to choose who you are talking to;
-// hold the bar, speak, let go. The answer is read back when the turn ends.
+// hold the bar and speak, let go to read what was heard, then Send. The
+// answer is read back when the turn ends.
 import SwiftUI
 import CompanionCore
 
@@ -12,14 +13,17 @@ struct WalkieView: View {
 
     @EnvironmentObject private var session: Session
     @Environment(\.dismiss) private var dismiss
+    @Environment(\.scenePhase) private var scenePhase
     @StateObject private var walkie = WalkieController()
     @AppStorage("walkie.target") private var targetId = ""
     @AppStorage("walkie.speakReplies") private var speakReplies = true
     @State private var pressing = false
+    @FocusState private var draftFocused: Bool
 
     private var roster: [WalkieAgent] { session.state.walkieRoster }
     private var target: Bot? { session.state.bots.first { $0.id == targetId && $0.hidden != true } }
     private var targetName: String { target?.name ?? String(localized: "an agent") }
+    private var reviewing: Bool { walkie.phase == .review || walkie.phase == .sending }
 
     var body: some View {
         VStack(spacing: 14) {
@@ -27,7 +31,7 @@ struct WalkieView: View {
             if roster.isEmpty { empty } else { agentList }
             liveCard
             keys
-            talkBar
+            if reviewing { reviewBar } else { talkBar }
         }
         .padding(.horizontal, 16)
         .padding(.top, 8)
@@ -36,9 +40,19 @@ struct WalkieView: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(Color.black.ignoresSafeArea())
         .preferredColorScheme(.dark)
+        .animation(.snappy(duration: 0.2), value: reviewing)
         .onAppear {
+            walkie.attach(session)
             walkie.speaksReplies = speakReplies
             if target == nil { targetId = roster.first?.bot.id ?? "" }
+            Task { await walkie.prepare() }
+        }
+        .onChange(of: scenePhase) { _, phase in
+            switch phase {
+            case .active: Task { await walkie.prepare() }
+            case .background: walkie.suspend()
+            default: break
+            }
         }
         .onChange(of: speakReplies) { _, on in walkie.speaksReplies = on }
         .onReceive(session.$state) { walkie.observe($0) }
@@ -124,36 +138,54 @@ struct WalkieView: View {
                     .lineLimit(1)
                 Spacer()
             }
-            Text(verbatim: liveBody)
-                .font(.system(size: 17, weight: .medium))
-                .foregroundStyle(walkie.note == nil ? Color.primary : Color.orange)
-                .lineLimit(5)
-                .frame(maxWidth: .infinity, alignment: .leading)
+            if reviewing {
+                TextField("What to send", text: $walkie.draft, axis: .vertical)
+                    .font(.system(size: 17, weight: .medium))
+                    .lineLimit(1...6)
+                    .focused($draftFocused)
+                    .disabled(walkie.phase == .sending)
+                if let note = walkie.note {
+                    Text(verbatim: note)
+                        .font(.footnote)
+                        .foregroundStyle(Color.orange)
+                }
+            } else {
+                Text(verbatim: liveBody)
+                    .font(.system(size: 17, weight: .medium))
+                    .foregroundStyle(walkie.note == nil ? Color.primary : Color.orange)
+                    .lineLimit(5)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            }
         }
         .padding(16)
         .frame(maxWidth: .infinity, minHeight: 108, alignment: .topLeading)
         .background(Self.panel)
-        .accessibilityElement(children: .combine)
     }
 
     @ViewBuilder
     private var liveIcon: some View {
         switch walkie.phase {
         case .listening: WalkieWave(active: true)
-        case .sending, .waiting: ProgressView().controlSize(.small)
+        case .transcribing, .sending, .waiting: ProgressView().controlSize(.small)
+        case .review: Image(systemName: "text.bubble.fill")
         case .speaking: Image(systemName: "speaker.wave.2.fill")
         case .idle: Image(systemName: walkie.note == nil ? "waveform" : "exclamationmark.circle.fill")
         }
     }
 
     private var liveTitle: String {
+        switch walkie.phase {
+        case .review: return String(localized: "Check it, then send to \(targetName)")
+        case .sending: return String(localized: "Sending to \(targetName)")
+        default: break
+        }
         if walkie.note != nil { return String(localized: "Heads up") }
         switch walkie.phase {
         case .listening: return String(localized: "Listening")
-        case .sending: return String(localized: "Sending to \(targetName)")
+        case .transcribing: return String(localized: "Writing it down…")
         case .waiting: return String(localized: "\(targetName) is working on it")
         case .speaking: return walkie.replyFrom
-        case .idle:
+        default:
             return walkie.reply.isEmpty ? String(localized: "Talking to \(targetName)") : walkie.replyFrom
         }
     }
@@ -161,12 +193,13 @@ struct WalkieView: View {
     private var liveBody: String {
         if let note = walkie.note { return note }
         switch walkie.phase {
-        case .listening: return walkie.heard.isEmpty ? String(localized: "Go ahead…") : walkie.heard
-        case .sending, .waiting: return "\u{201C}\(walkie.heard)\u{201D}"
+        case .listening, .transcribing:
+            return walkie.heard.isEmpty ? String(localized: "Go ahead…") : walkie.heard
+        case .waiting: return "\u{201C}\(walkie.heard)\u{201D}"
         case .speaking: return Walkie.speakable(walkie.reply, limit: 400)
-        case .idle:
+        default:
             return walkie.reply.isEmpty
-                ? String(localized: "Hold the button, say what you need, then let go.")
+                ? String(localized: "Hold the button and talk. You'll see the words before anything is sent.")
                 : Walkie.speakable(walkie.reply, limit: 400)
         }
     }
@@ -200,7 +233,7 @@ struct WalkieView: View {
 
     // MARK: - Talk
 
-    private var talkDisabled: Bool { target == nil || walkie.phase == .sending }
+    private var talkDisabled: Bool { target == nil || walkie.phase == .transcribing }
 
     private var talkBar: some View {
         let listening = walkie.phase == .listening
@@ -209,7 +242,10 @@ struct WalkieView: View {
             HStack(spacing: 10) {
                 if listening {
                     WalkieWave(active: true).frame(width: 30, height: 18)
-                    Text("Listening… let go to send")
+                    Text("Listening… let go when you're done")
+                } else if walkie.phase == .transcribing {
+                    ProgressView().tint(.white)
+                    Text("Writing it down…")
                 } else {
                     Image(systemName: "mic.fill")
                     Text(verbatim: target.map { String(localized: "Hold to talk to \($0.name)") }
@@ -224,7 +260,7 @@ struct WalkieView: View {
         }
         .frame(height: 76)
         .scaleEffect(pressing ? 0.97 : 1)
-        .animation(.snappy(duration: 0.15), value: pressing)
+        .animation(.snappy(duration: 0.12), value: pressing)
         .opacity(talkDisabled ? 0.45 : 1)
         .contentShape(Capsule())
         .gesture(
@@ -237,20 +273,66 @@ struct WalkieView: View {
                 .onEnded { _ in
                     guard pressing else { return }
                     pressing = false
-                    Task { await walkie.pressEnded(session: session, target: target) }
+                    Task { await walkie.pressEnded() }
                 }
         )
         .accessibilityElement(children: .ignore)
-        .accessibilityLabel(listening ? "Send" : "Talk")
-        .accessibilityHint(listening ? "Sends what you said" : "Starts listening. Activate again to send.")
+        .accessibilityLabel(listening ? "Stop listening" : "Talk")
+        .accessibilityHint(listening ? "Shows what was heard so you can send it" : "Starts listening. Activate again to stop.")
         .accessibilityAddTraits(.isButton)
         .accessibilityAction {
             if walkie.phase == .listening {
-                Task { await walkie.pressEnded(session: session, target: target) }
+                Task { await walkie.pressEnded() }
             } else if !talkDisabled {
                 walkie.pressBegan()
             }
         }
+    }
+
+    private var reviewBar: some View {
+        let sending = walkie.phase == .sending
+        let empty = walkie.draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        return HStack(spacing: 12) {
+            Button {
+                Haptics.selection()
+                draftFocused = false
+                walkie.discard()
+            } label: {
+                Image(systemName: "xmark")
+                    .font(.system(size: 22, weight: .semibold))
+                    .foregroundStyle(.white)
+                    .frame(width: 76, height: 76)
+                    .background(Circle().fill(Color(white: 0.2)))
+            }
+            .buttonStyle(.plain)
+            .disabled(sending)
+            .accessibilityLabel("Discard")
+
+            Button {
+                draftFocused = false
+                Task { await walkie.send(session: session, target: target) }
+            } label: {
+                HStack(spacing: 10) {
+                    if sending {
+                        ProgressView().tint(.white)
+                    } else {
+                        Image(systemName: "arrow.up.circle.fill")
+                    }
+                    Text(verbatim: String(localized: "Send to \(targetName)"))
+                }
+                .font(.system(size: 17, weight: .semibold))
+                .foregroundStyle(.white)
+                .lineLimit(1)
+                .minimumScaleFactor(0.8)
+                .frame(maxWidth: .infinity)
+                .frame(height: 76)
+                .background(Capsule().fill(Color.accentColor))
+            }
+            .buttonStyle(.plain)
+            .disabled(sending || empty || target == nil)
+            .opacity(empty || target == nil ? 0.45 : 1)
+        }
+        .transition(.opacity)
     }
 
     private static let panel = RoundedRectangle(cornerRadius: 22, style: .continuous)

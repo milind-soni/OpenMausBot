@@ -1,13 +1,16 @@
-// Walkie mode's engine: hold to talk to one bot, hear its answer back.
+// Walkie mode's engine: hold to talk, check the words, send, hear the answer.
 //
-// Dictation is the composer's own `SpeechDictation`, driven by press and
-// release instead of a toggle. Sending is `Session.send`, so a Walkie message
-// is an ordinary message in the bot's current thread — open the chat and it
-// is there. The answer is read with the phone's own voice: that needs nothing
-// configured on the computer, and works against a server with no voices.
+// Listening runs on `WalkieMic`, which is kept warm while Walkie is open so a
+// press starts at once. Letting go waits briefly for the recognizer's final
+// transcript and puts it up for review — editable, with Send and Discard —
+// because a misheard word sent to an agent is work done wrong. Sending is
+// `Session.send`, so the message lands in the bot's current thread like any
+// other. The answer is spoken by the computer's voice engine (ElevenLabs when
+// a key is set there) through `/api/tts/speak`; if that fails, the phone's
+// best installed voice reads it instead.
 import AVFoundation
-import Combine
 import CompanionCore
+import Speech
 import SwiftUI
 
 /// One row of the Walkie roster: a bot and the most urgent thing about it.
@@ -62,11 +65,13 @@ extension CompanionState {
 
 @MainActor
 final class WalkieController: ObservableObject {
-    enum Phase: Equatable { case idle, listening, sending, waiting, speaking }
+    enum Phase: Equatable { case idle, listening, transcribing, review, sending, waiting, speaking }
 
     @Published private(set) var phase: Phase = .idle
-    /// What you said: live while holding, then the last thing sent.
+    /// The live transcript while you hold the button.
     @Published private(set) var heard = ""
+    /// What Send will send: the transcript, editable while reviewing.
+    @Published var draft = ""
     /// The last answer, and who gave it.
     @Published private(set) var reply = ""
     @Published private(set) var replyFrom = ""
@@ -74,88 +79,226 @@ final class WalkieController: ObservableObject {
     @Published private(set) var note: String?
 
     var speaksReplies = true {
-        didSet {
-            if !speaksReplies, phase == .speaking { synthesizer.stopSpeaking(at: .immediate) }
-        }
+        didSet { if !speaksReplies { stopVoice() } }
     }
 
-    private let dictation = SpeechDictation()
+    private let mic = WalkieMic()
+    private let player = WalkiePlayer()
     private let synthesizer = AVSpeechSynthesizer()
     private let voiceDelegate = VoiceDelegate()
+    private weak var session: Session?
+
+    private var recognizer: SFSpeechRecognizer?
+    private var request: SFSpeechAudioBufferRecognitionRequest?
+    private var recognition: SFSpeechRecognitionTask?
+    private var finalArrived = false
+    private var finalWaiter: CheckedContinuation<Void, Never>?
+    private var ready = false
+    private var preparing = false
+    private var startWhenReady = false
+
     private var pending: Pending?
-    private var cancellables = Set<AnyCancellable>()
+    private var replyVoice: String?
+    private var speaking: Task<Void, Never>?
+    private var deviceWaiter: CheckedContinuation<Void, Never>?
 
     private struct Pending {
         let threadId: String
         let name: String
+        let voiceId: String?
         let baseline: Set<String>
         let sentAt: Date
     }
 
     /// Stop waiting for an answer after this long; the chat still gets it.
     private static let patience: TimeInterval = 10 * 60
+    /// How long a release waits for the recognizer's final words.
+    private static let finalGrace: Duration = .milliseconds(1200)
 
     init() {
         synthesizer.delegate = voiceDelegate
         voiceDelegate.onFinish = { [weak self] in
-            guard let self, self.phase == .speaking else { return }
-            self.phase = .idle
-            try? AVAudioSession.sharedInstance().setActive(false, options: .notifyOthersOnDeactivation)
+            self?.deviceWaiter?.resume()
+            self?.deviceWaiter = nil
         }
-        dictation.$transcript
-            .sink { [weak self] words in
-                guard let self, self.phase == .listening else { return }
-                self.heard = words
-            }
-            .store(in: &cancellables)
-        dictation.$error
-            .sink { [weak self] error in
-                guard let self, error != nil, self.phase == .listening else { return }
-                self.phase = .idle
-                self.note = String(localized: "Couldn't hear that. Walkie needs Microphone and Speech Recognition access in Settings.")
-            }
-            .store(in: &cancellables)
     }
 
+    func attach(_ session: Session) {
+        self.session = session
+    }
+
+    // MARK: - Microphone
+
+    /// Ask for access and start the microphone, so a press listens at once.
+    func prepare() async {
+        guard !ready, !preparing else { return }
+        preparing = true
+        defer { preparing = false }
+
+        let speech = await withCheckedContinuation { continuation in
+            SFSpeechRecognizer.requestAuthorization { continuation.resume(returning: $0) }
+        }
+        guard speech == .authorized, await AVAudioApplication.requestRecordPermission() else {
+            return fail(String(localized: "Walkie needs Microphone and Speech Recognition access. Turn them on in Settings."))
+        }
+        recognizer = Dictation.localeCandidates()
+            .compactMap { SFSpeechRecognizer(locale: $0) }
+            .first { $0.isAvailable }
+        guard recognizer != nil else {
+            return fail(String(localized: "Speech recognition isn't available for this language."))
+        }
+        do {
+            try await mic.warm()
+        } catch {
+            return fail(String(localized: "Couldn't start the microphone."))
+        }
+        ready = true
+        if startWhenReady, phase == .listening {
+            startWhenReady = false
+            startRecognition()
+        }
+    }
+
+    /// Give the microphone back: leaving Walkie, or the app leaving the screen.
+    func suspend() {
+        cancelRecognition()
+        mic.cool()
+        ready = false
+        startWhenReady = false
+        if phase == .listening || phase == .transcribing { phase = .idle }
+    }
+
+    private func fail(_ message: String) {
+        note = message
+        startWhenReady = false
+        if phase == .listening { phase = .idle }
+    }
+
+    // MARK: - Talking
+
     func pressBegan() {
-        guard phase != .listening, phase != .sending else { return }
-        synthesizer.stopSpeaking(at: .immediate)
+        guard [.idle, .waiting, .speaking].contains(phase) else { return }
+        stopVoice()
         note = nil
         heard = ""
         phase = .listening
         Haptics.impact(.medium)
-        dictation.toggle(capturing: "")
+        if ready {
+            startRecognition()
+        } else {
+            startWhenReady = true
+            Task { await prepare() }
+        }
     }
 
-    func pressEnded(session: Session, target: Bot?) async {
+    private func startRecognition() {
+        guard let recognizer else { return }
+        let request = SFSpeechAudioBufferRecognitionRequest()
+        request.shouldReportPartialResults = true
+        request.addsPunctuation = true
+        request.taskHint = .dictation
+        if recognizer.supportsOnDeviceRecognition { request.requiresOnDeviceRecognition = true }
+        let id = ObjectIdentifier(request)
+        self.request = request
+        finalArrived = false
+        mic.route(request)
+        recognition = recognizer.recognitionTask(with: request) { [weak self] result, error in
+            let text = result?.bestTranscription.formattedString
+            let done = result?.isFinal == true || error != nil
+            Task { @MainActor in self?.recognized(text, done: done, for: id) }
+        }
+    }
+
+    private func recognized(_ text: String?, done: Bool, for id: ObjectIdentifier) {
+        guard let request, ObjectIdentifier(request) == id else { return }
+        if let text, !text.isEmpty, phase == .listening || phase == .transcribing { heard = text }
+        if done { resumeFinal() }
+    }
+
+    func pressEnded() async {
         guard phase == .listening else { return }
-        let words = dictation.transcript.trimmingCharacters(in: .whitespacesAndNewlines)
-        dictation.stop()
+        startWhenReady = false
         Haptics.impact(.light)
+        guard let request else {
+            phase = .idle
+            note = String(localized: "Didn't catch that. Keep holding the button while you talk.")
+            return
+        }
+        phase = .transcribing
+        mic.route(nil)
+        request.endAudio()
+        await waitForFinal()
+        cancelRecognition()
+        let words = heard.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !words.isEmpty else {
             phase = .idle
             note = String(localized: "Didn't catch that. Keep holding the button while you talk.")
             return
         }
+        draft = words
+        phase = .review
+    }
+
+    private func waitForFinal() async {
+        guard !finalArrived else { return }
+        await withCheckedContinuation { continuation in
+            finalWaiter = continuation
+            Task { @MainActor [weak self] in
+                try? await Task.sleep(for: Self.finalGrace)
+                self?.resumeFinal()
+            }
+        }
+    }
+
+    private func resumeFinal() {
+        finalArrived = true
+        finalWaiter?.resume()
+        finalWaiter = nil
+    }
+
+    private func cancelRecognition() {
+        mic.route(nil)
+        recognition?.cancel()
+        recognition = nil
+        request = nil
+        resumeFinal()
+    }
+
+    func discard() {
+        draft = ""
+        heard = ""
+        note = nil
+        phase = .idle
+    }
+
+    func send(session: Session, target: Bot?) async {
+        guard phase == .review else { return }
+        let words = draft.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !words.isEmpty else { return discard() }
         guard let target else {
-            phase = .idle
             note = String(localized: "Pick an agent to talk to first.")
             return
         }
         heard = words
+        note = nil
         phase = .sending
+        Haptics.impact(.light)
         let baseline = Set(session.state.transcript(forThread: target.threadId).map(\.id))
         session.actionError = nil
         await session.send(words, to: .bot(target))
         if let error = session.actionError {
             // Said here, where you are looking, rather than as an alert
-            // behind this full-screen view.
+            // behind this full-screen view. The draft stays for a retry.
             session.actionError = nil
-            phase = .idle
+            phase = .review
             note = error
             return
         }
-        pending = Pending(threadId: target.threadId, name: target.name, baseline: baseline, sentAt: Date())
+        draft = ""
+        pending = Pending(
+            threadId: target.threadId, name: target.name, voiceId: target.voice,
+            baseline: baseline, sentAt: Date()
+        )
         reply = ""
         phase = .waiting
         observe(session.state)
@@ -173,6 +316,7 @@ final class WalkieController: ObservableObject {
             self.pending = nil
             reply = answer
             replyFrom = pending.name
+            replyVoice = pending.voiceId
             Haptics.success()
             if speaksReplies { speak(answer) } else { phase = .idle }
         } else if Date().timeIntervalSince(pending.sentAt) > Self.patience {
@@ -189,11 +333,7 @@ final class WalkieController: ObservableObject {
 
     /// Stop talking if the phone is talking; otherwise stop the bot's turn.
     func stop(session: Session, target: Bot?) async {
-        if phase == .speaking {
-            synthesizer.stopSpeaking(at: .immediate)
-            phase = .idle
-            return
-        }
+        if phase == .speaking { return stopVoice() }
         guard let target, target.currentTaskBusy == true else { return }
         await session.interrupt(bot: target)
         pending = nil
@@ -202,20 +342,81 @@ final class WalkieController: ObservableObject {
     }
 
     func shutdown() {
-        if phase == .listening { dictation.stop() }
-        synthesizer.stopSpeaking(at: .immediate)
+        suspend()
+        stopVoice()
         pending = nil
         phase = .idle
     }
 
+    // MARK: - Voice
+
     private func speak(_ text: String) {
-        let audio = AVAudioSession.sharedInstance()
-        try? audio.setCategory(.playback, mode: .spokenAudio, options: [.duckOthers])
-        try? audio.setActive(true)
-        let utterance = AVSpeechUtterance(string: Walkie.speakable(text))
-        utterance.voice = AVSpeechSynthesisVoice(language: AVSpeechSynthesisVoice.currentLanguageCode())
+        stopVoice()
+        let parts = Walkie.utterances(Walkie.speakable(text))
+        guard !parts.isEmpty else { return }
         phase = .speaking
-        synthesizer.speak(utterance)
+        let voiceId = replyVoice
+        speaking = Task { [weak self] in
+            await self?.play(parts, voiceId: voiceId)
+            guard let self, !Task.isCancelled else { return }
+            self.speaking = nil
+            if self.phase == .speaking { self.phase = .idle }
+        }
+    }
+
+    /// The computer's voice, one utterance at a time, fetching the next while
+    /// the current one plays. Any failure hands the rest to the phone's voice.
+    private func play(_ parts: [String], voiceId: String?) async {
+        guard let session else { return await deviceSpeak(parts.joined(separator: " ")) }
+        var next: Task<Data, Error>? = Task { try await session.speech(parts[0], voiceId: voiceId) }
+        for index in parts.indices {
+            guard let current = next, !Task.isCancelled else { return }
+            if index + 1 < parts.count {
+                let upcoming = parts[index + 1]
+                next = Task { try await session.speech(upcoming, voiceId: voiceId) }
+            } else {
+                next = nil
+            }
+            do {
+                let audio = try await current.value
+                guard !Task.isCancelled else { return }
+                try await player.play(audio)
+            } catch {
+                next?.cancel()
+                guard !Task.isCancelled else { return }
+                note = String(localized: "Your computer's voice didn't answer, so the phone read it instead.")
+                return await deviceSpeak(parts[index...].joined(separator: " "))
+            }
+        }
+    }
+
+    private func deviceSpeak(_ text: String) async {
+        let utterance = AVSpeechUtterance(string: text)
+        utterance.voice = Self.bestDeviceVoice()
+        await withCheckedContinuation { continuation in
+            deviceWaiter = continuation
+            synthesizer.speak(utterance)
+        }
+    }
+
+    /// The highest-quality installed voice for the phone's language —
+    /// premium or enhanced when someone has downloaded one.
+    private static func bestDeviceVoice() -> AVSpeechSynthesisVoice? {
+        let language = AVSpeechSynthesisVoice.currentLanguageCode()
+        let voices = AVSpeechSynthesisVoice.speechVoices()
+        let exact = voices.filter { $0.language == language }
+        let pool = exact.isEmpty ? voices.filter { $0.language.hasPrefix(String(language.prefix(2))) } : exact
+        return pool.max { $0.quality.rawValue < $1.quality.rawValue } ?? AVSpeechSynthesisVoice(language: language)
+    }
+
+    private func stopVoice() {
+        speaking?.cancel()
+        speaking = nil
+        player.stop()
+        if synthesizer.isSpeaking { synthesizer.stopSpeaking(at: .immediate) }
+        deviceWaiter?.resume()
+        deviceWaiter = nil
+        if phase == .speaking { phase = .idle }
     }
 }
 
