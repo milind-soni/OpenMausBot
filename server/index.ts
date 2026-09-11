@@ -281,7 +281,7 @@ import {
 } from "./skills.ts";
 import { fetchSkillFromSource } from "./skill-fetch.ts";
 import { expandLearnTurnText, learnSource } from "./skill-learn.ts";
-import { expandSetupTurnText, setupModeActive, setupSystemPrompt } from "./setup-mode.ts";
+import { expandSetupTurnText, firstTaskActive, firstTaskSystemPrompt, setupModeActive, setupSystemPrompt } from "./setup-mode.ts";
 import type { SkillRequestCardData } from "../shared/skill-request.ts";
 import { checkSoulDrift, readSoulDrift, soulFile, writeSoulMirror } from "./bot-folder.ts";
 import {
@@ -294,6 +294,7 @@ import {
   THREADS_PROMPT,
   LEARN_PROMPT,
   PROFILE_PROMPT,
+  RESTATE_FIRST_PROMPT,
   ROUTINE_PROMPT,
   ROUTINE_EXECUTION_PROMPT,
   WEBHOOK_PROMPT,
@@ -1444,19 +1445,20 @@ function previewSystemPrompt(bot: BotRecord) {
       ? peerRosterSystemPrompt(peers)
       : "";
   // Same gate a real turn applies: the block only goes to a bot whose
-  // engine actually mounts agent tools, since it names propose_profile,
-  // propose_routine and request_credential.
+  // engine actually mounts agent tools, since it names propose_profile.
+  // The /setup block itself is per-message and cannot be previewed from
+  // settings; what a blank bot carries on an ordinary turn can.
   const agentsMounted = caps?.agentsMcp === true;
   const privateWorkspace = instance && !["grok", "boxAgent"].includes(instance.driverKind);
   const built = buildSystemPrompt(persona, bot.soul ?? "", [
     {
-      id: "setup",
-      label: "Setup",
-      text: setupSystemPrompt(agentsMounted && setupModeActive({ soul: bot.soul, description: bot.description, text: "" }), {
-        skills: skillAuthoringEnabled(cfg),
+      id: "first-task",
+      label: "First task",
+      text: firstTaskSystemPrompt(agentsMounted && firstTaskActive({ soul: bot.soul, description: bot.description, text: "" }), {
         cwd: bot.cwd,
       }),
     },
+    { id: "conduct", label: "Conduct", text: RESTATE_FIRST_PROMPT },
     { id: "computer", label: "Computer", text: computerPrompt(computerPromptKind) },
     { id: "composio", label: "Connected apps", text: caps?.composioMcp && bot.composio !== false && composio.configured(cfg) ? COMPOSIO_PROMPT : "" },
     { id: "mcp", label: "MCP servers", text: caps?.customMcp ? customMcpPrompt(Object.keys(customMcpServers(cfg, bot.mcpServers))) : "" },
@@ -4631,10 +4633,11 @@ async function startTurn(
   const skillAuthoring = skillAuthoringEnabled(cfg) && agentsMounted;
   // Setup mode's turn-text rewrite (parseSetupCommand/expandSetupTurnText)
   // must not run ahead of a system prompt that can't explain it: a driver
-  // without agent tools sees the user's literal "/setup ..." message. The
-  // gate on whether the coaching block itself is active — setupModeActive,
-  // which also depends on the bot's soul/description — is decided below,
-  // from the same bot snapshot the prompt's soul is built from.
+  // without agent tools sees the user's literal "/setup ..." message. Which
+  // coaching block (if any) is active — setupModeActive for /setup, or
+  // firstTaskActive for a blank bot's ordinary turn, which depends on the
+  // bot's soul/description — is decided below, from the same bot snapshot
+  // the prompt's soul is built from.
   const setupText = agentsMounted ? expandSetupTurnText(providerText) : providerText;
   const { turnText, resume } = buildTurnContext({
     text: promptWithReply(
@@ -5038,13 +5041,14 @@ async function startTurn(
       // (below) share, so a soul saved mid-dispatch is seen by both instead
       // of the two disagreeing about whether setup mode is still active.
       const liveBot = store.bot(bot.id);
-      const setupMode =
-        agentsMounted &&
-        setupModeActive({
-          soul: liveBot?.soul ?? bot.soul,
-          description: liveBot?.description ?? bot.description,
-          text: providerText,
-        });
+      const setupInput = {
+        soul: liveBot?.soul ?? bot.soul,
+        description: liveBot?.description ?? bot.description,
+        text: providerText,
+      };
+      const setupMode = agentsMounted && setupModeActive(setupInput);
+      // a blank bot on an ordinary turn: do the task, offer setup afterwards
+      const firstTask = agentsMounted && firstTaskActive(setupInput);
       if (
         liveBot &&
         plan.browser &&
@@ -5087,10 +5091,13 @@ async function startTurn(
                 ? "local"
                 : null;
       const prompt = buildSystemPrompt(persona, liveBot?.soul ?? bot.soul ?? "", [
-        // first after the soul: the block names agent tools, so it only goes
-        // to a turn whose engine actually mounted them (setupMode is already
-        // false when they are not — see agentsMounted above)
+        // first after the soul: these blocks name agent tools, so they only go
+        // to a turn whose engine actually mounted them (setupMode and
+        // firstTask are already false when they are not — see agentsMounted
+        // above). At most one of the two is non-empty.
         { id: "setup", label: "Setup", text: setupSystemPrompt(setupMode, { skills: skillAuthoring, cwd: liveBot?.cwd ?? bot.cwd }) },
+        { id: "first-task", label: "First task", text: firstTaskSystemPrompt(firstTask, { cwd: liveBot?.cwd ?? bot.cwd }) },
+        { id: "conduct", label: "Conduct", text: RESTATE_FIRST_PROMPT },
         { id: "computer", label: "Computer", text: computerPrompt(computerPromptKind) },
         { id: "plan", label: "Surface", text: plan.note },
         // gated on the integration, not the key: the hint only goes to a
@@ -6263,6 +6270,7 @@ async function runGroupMemberTurn(
     `Room members: ${roster}, and ${userName} (the human).`,
     readyGroup.bulletin.trim() && `Room bulletin (shared instructions for everyone):\n${readyGroup.bulletin.trim()}`,
     `Reply as yourself, briefly and conversationally. To bring a teammate in, mention them like @Name — they'll see the conversation and respond.`,
+    RESTATE_FIRST_PROMPT.trim(),
     outsideRoom.length > 0 && roomPeerRosterSystemPrompt(outsideRoom),
     integrations.agents && (CREDENTIAL_PROMPT + THREADS_PROMPT).trim(),
     integrations.agents && ROUTINE_PROMPT.trim(),

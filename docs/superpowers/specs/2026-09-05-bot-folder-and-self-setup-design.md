@@ -9,8 +9,9 @@ the product contract; tests and implementation define API details.
   Access, Model, Permissions, Voice & alerts, History, and Usage.
 - Standing instructions (SOUL.md) up to 24,000 UTF-8 bytes, separate from the
   existing description/blurb. No automatic migration of existing instructions.
-- Setup by conversation: a blank bot interviews the user and proposes its
-  profile, working folder, skills, credentials, and routines. /setup starts again.
+- Setup by conversation, on request: `/setup` makes the bot interview the user and
+  propose its profile, working folder, skills, credentials, and routines. A blank
+  bot asked for an ordinary task does the task first and offers setup afterwards.
 - Profile confirmation cards, change history, and guarded undo for instructions.
 - GitHub skill import, including up to 30 skills, with total request/size/time
   limits. Oversized imports should use specific subfolders.
@@ -61,8 +62,9 @@ credential cards, never ordinary chat.
 ## Setup stays small
 
 Setup is a prompt block plus existing confirmation flows, not a workflow engine.
-It activates when both description and soul are blank, or for /setup, and only
-names tools the selected engine supports.
+It activates only for /setup, and only names tools the selected engine supports.
+A bot with a blank description and soul gets a one-paragraph first-task block
+instead: do the task now, then offer once to remember a profile.
 
 The bot asks a few useful questions, explains its intended configuration, then
 proposes changes. Scheduled work is proposed paused. OAuth, third-party developer

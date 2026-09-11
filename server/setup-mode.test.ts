@@ -1,10 +1,14 @@
-// Setup mode: a blank bot, or a /setup message, turns on a coaching block
-// that makes the bot interview the user and configure itself through cards.
+// Setup mode: a /setup message turns on a coaching block that makes the bot
+// interview the user and configure itself through cards. A blank bot on an
+// ordinary turn gets the light first-task block instead, never the interview.
 import { describe, expect, it } from "vitest";
 
 import {
   SETUP_PROMPT,
+  botIsBlank,
   expandSetupTurnText,
+  firstTaskActive,
+  firstTaskSystemPrompt,
   parseSetupCommand,
   setupModeActive,
   setupSystemPrompt,
@@ -37,18 +41,84 @@ describe("expandSetupTurnText", () => {
   });
 });
 
-describe("setupModeActive", () => {
-  it("is on for a blank bot regardless of the message", () => {
-    expect(setupModeActive({ soul: "", description: "", text: "hello" })).toBe(true);
-    expect(setupModeActive({ soul: "  \n", description: undefined, text: "hello" })).toBe(true);
-    expect(setupModeActive({ text: "hello" })).toBe(true);
+describe("botIsBlank", () => {
+  it("is true only when both soul and description are empty or whitespace", () => {
+    expect(botIsBlank({ soul: "", description: "" })).toBe(true);
+    expect(botIsBlank({ soul: "  \n", description: undefined })).toBe(true);
+    expect(botIsBlank({})).toBe(true);
+    expect(botIsBlank({ soul: "Be brief.", description: "" })).toBe(false);
+    expect(botIsBlank({ soul: "", description: "Files bugs." })).toBe(false);
+  });
+});
+
+describe("setupModeActive and firstTaskActive", () => {
+  const ordinary = "Combine all the images in Downloads into a single PDF called receipts.pdf, in date order.";
+
+  it("a blank bot on an ordinary task is not in setup mode; it gets the first-task block", () => {
+    for (const blank of [
+      { soul: "", description: "", text: ordinary },
+      { soul: "  \n", description: undefined, text: ordinary },
+      { text: "hello" },
+    ]) {
+      expect(setupModeActive(blank)).toBe(false);
+      expect(firstTaskActive(blank)).toBe(true);
+    }
   });
 
-  it("is off once either field is set, unless the message is /setup", () => {
-    expect(setupModeActive({ soul: "Be brief.", description: "", text: "hello" })).toBe(false);
-    expect(setupModeActive({ soul: "", description: "Files bugs.", text: "hello" })).toBe(false);
+  it("a blank bot sent /setup is in setup mode, not first-task", () => {
+    for (const text of ["/setup", "/setup watch Discord"]) {
+      expect(setupModeActive({ soul: "", description: "", text })).toBe(true);
+      expect(firstTaskActive({ soul: "", description: "", text })).toBe(false);
+    }
+  });
+
+  it("a configured bot sent /setup re-enters setup mode", () => {
     expect(setupModeActive({ soul: "Be brief.", description: "Files bugs.", text: "/setup" })).toBe(true);
     expect(setupModeActive({ soul: "Be brief.", description: "", text: "/setup change my job" })).toBe(true);
+    expect(firstTaskActive({ soul: "Be brief.", description: "", text: "/setup change my job" })).toBe(false);
+  });
+
+  it("a configured bot on an ordinary task gets neither block", () => {
+    for (const configured of [
+      { soul: "Be brief.", description: "", text: ordinary },
+      { soul: "", description: "Files bugs.", text: ordinary },
+    ]) {
+      expect(setupModeActive(configured)).toBe(false);
+      expect(firstTaskActive(configured)).toBe(false);
+    }
+  });
+
+  it("ordinary chat that merely mentions setup never enters the mode", () => {
+    expect(setupModeActive({ soul: "", description: "", text: "please setup a routine" })).toBe(false);
+    expect(setupModeActive({ soul: "", description: "", text: "use /setup later" })).toBe(false);
+  });
+});
+
+describe("firstTaskSystemPrompt", () => {
+  it("is empty when not active", () => {
+    expect(firstTaskSystemPrompt(false)).toBe("");
+    expect(firstTaskSystemPrompt(false, { cwd: "/Users/me" })).toBe("");
+  });
+
+  it("tells a blank bot to do the task now, ask at most one costly question, and offer setup once afterwards", () => {
+    const text = firstTaskSystemPrompt(true);
+    expect(text.startsWith("\n\nYou have not been set up yet. Do the task the person asked for now, using sensible defaults;")).toBe(true);
+    expect(text).toContain("work in your private workspace, using full paths, unless they name a folder");
+    expect(text).toContain("Ask a question only when a wrong guess would be costly to undo, and ask one, not several.");
+    expect(text).toContain("offer once, in one sentence, to remember a name, standing rules, and a working folder through propose_profile");
+    expect(text).toContain("raise that card only if they say yes");
+    expect(text).toContain("Never gate the task on setup.");
+    // none of the interview
+    expect(text).not.toContain("Wait for a yes");
+    expect(text).not.toContain("at most four questions");
+    expect(text).not.toContain("propose_routine");
+    expect(text).not.toContain("skill_manage");
+  });
+
+  it("names the bot's working folder when it has one", () => {
+    const text = firstTaskSystemPrompt(true, { cwd: "/Users/me/Projects/site" });
+    expect(text).toContain("work in /Users/me/Projects/site, using full paths, unless they name another folder");
+    expect(text).not.toContain("private workspace");
   });
 });
 

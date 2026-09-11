@@ -1,9 +1,15 @@
-// Setup mode: the coaching block a bot gets when it has not been set up yet,
-// or when the user asks for it with /setup. The bot interviews the user, says
-// what it intends, and then configures itself only through proposal cards
-// (propose_profile, propose_routine, skill_manage, request_credential) — so
-// nothing changes without the user's approval. Mirrors skill-learn.ts:
-// /setup is a turn-text rewrite plus a prompt block, never a hidden mode.
+// Setup mode: the coaching block a bot gets when the user asks for it with
+// /setup. The bot interviews the user, says what it intends, and then
+// configures itself only through proposal cards (propose_profile,
+// propose_routine, skill_manage, request_credential) — so nothing changes
+// without the user's approval. Mirrors skill-learn.ts: /setup is a turn-text
+// rewrite plus a prompt block, never a hidden mode.
+//
+// A bot that has not been set up yet does NOT enter setup mode on its own:
+// someone who asks a brand-new bot for a PDF wants the PDF, not an interview.
+// Such a bot gets the much lighter first-task block instead
+// (firstTaskSystemPrompt): do the task now with sensible defaults, then offer
+// once to remember a profile. Only /setup opens the interview.
 //
 // Setup mode is card-gated, not provenance-gated: it doesn't matter who sent
 // the message that entered it — a peer message or a routine trigger that
@@ -32,10 +38,42 @@ export function expandSetupTurnText(userText: string): string {
 }
 
 /** A bot with neither standing instructions nor a description has not been
- * set up. /setup re-enters the mode for a configured bot. */
+ * set up. */
+export function botIsBlank(input: { soul?: string; description?: string }): boolean {
+  return !(input.soul ?? "").trim() && !(input.description ?? "").trim();
+}
+
+/** Setup mode is entered only on request: a message that begins with /setup,
+ * whether the bot is blank or already configured. A blank bot asked to do an
+ * ordinary task gets the first-task block instead (firstTaskActive). */
 export function setupModeActive(input: { soul?: string; description?: string; text: string }): boolean {
-  const blank = !(input.soul ?? "").trim() && !(input.description ?? "").trim();
-  return blank || parseSetupCommand(input.text) !== null;
+  return parseSetupCommand(input.text) !== null;
+}
+
+/** The first-task block goes to a bot that has not been set up, on any turn
+ * that is not a /setup request. */
+export function firstTaskActive(input: { soul?: string; description?: string; text: string }): boolean {
+  return botIsBlank(input) && !setupModeActive(input);
+}
+
+function firstTaskFolderClause(cwd: string | undefined): string {
+  return cwd
+    ? `work in ${cwd}, using full paths, unless they name another folder`
+    : "work in your private workspace, using full paths, unless they name a folder";
+}
+
+/** The light block a blank bot gets on an ordinary turn: do the task, then
+ * offer once to be set up. It names propose_profile, so like the setup block
+ * it must only be mounted on a turn whose engine mounts the agent tools. */
+export function firstTaskSystemPrompt(active: boolean, options?: { cwd?: string }): string {
+  if (!active) return "";
+  return (
+    "\n\nYou have not been set up yet. Do the task the person asked for now, using sensible defaults;" +
+    ` ${firstTaskFolderClause(options?.cwd)}.` +
+    " Ask a question only when a wrong guess would be costly to undo, and ask one, not several." +
+    " When the task is done, offer once, in one sentence, to remember a name, standing rules, and a working folder through propose_profile — raise that card only if they say yes." +
+    " Never gate the task on setup."
+  );
 }
 
 // skill_manage is only ever mounted alongside the other agent tools when

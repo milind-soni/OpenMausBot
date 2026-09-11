@@ -15,6 +15,7 @@ import {
   CREDENTIAL_PROMPT,
   LEARN_PROMPT,
   PROFILE_PROMPT,
+  RESTATE_FIRST_PROMPT,
   ROUTINE_PROMPT,
   ROUTINE_EXECUTION_PROMPT,
   WEBHOOK_PROMPT,
@@ -124,10 +125,17 @@ describe("computerPrompt", () => {
 
 describe("shared sentences", () => {
   it("each begins with one space so they concatenate onto the persona line", () => {
-    for (const sentence of [COMPOSIO_PROMPT, CREDENTIAL_PROMPT, ROUTINE_PROMPT, ROUTINE_EXECUTION_PROMPT, LEARN_PROMPT, WEBHOOK_PROMPT, PROFILE_PROMPT, SIGN_IN_PROMPT]) {
+    for (const sentence of [COMPOSIO_PROMPT, CREDENTIAL_PROMPT, ROUTINE_PROMPT, ROUTINE_EXECUTION_PROMPT, LEARN_PROMPT, WEBHOOK_PROMPT, PROFILE_PROMPT, RESTATE_FIRST_PROMPT, SIGN_IN_PROMPT]) {
       expect(sentence.startsWith(" ")).toBe(true);
       expect(sentence.startsWith("  ")).toBe(false);
     }
+  });
+
+  it("RESTATE_FIRST_PROMPT is one sentence: restate with what done looks like, proceed, ask only when a wrong guess is costly", () => {
+    expect(RESTATE_FIRST_PROMPT).toBe(
+      " Before acting on a request, restate it in one sentence with what done looks like, then proceed; ask only when a wrong guess would be costly to undo.",
+    );
+    expect(RESTATE_FIRST_PROMPT.trim().split(". ").length).toBe(1);
   });
 
   it("customMcpPrompt names the mounted servers and is empty for none", () => {

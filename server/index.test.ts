@@ -5498,21 +5498,34 @@ describe("harness HTTP API", () => {
     }
   });
 
-  it("coaches a blank bot to set itself up, and stops once it has a description", async () => {
+  it("tells a blank bot to do its first task instead of interviewing, and drops that block once it has a description", async () => {
     const bot = (await api("POST", "/api/bots", { name: "Blank" })).body.bot;
     try {
       expect((await api("PATCH", `/api/bots/${bot.id}`, {
         modelSelection: { instanceId: "claude", model: "claude-sonnet-5" },
       })).status).toBe(200);
       rmSync(fakeClaudeDump, { force: true });
-      expect((await api("POST", `/api/bots/${bot.id}/messages`, { text: "hello" })).status).toBe(202);
+      expect((await api("POST", `/api/bots/${bot.id}/messages`, {
+        text: "Combine all the images in Downloads into a single PDF called receipts.pdf, in date order.",
+      })).status).toBe(202);
       let system = (await readJsonFileWhenReady<{ systemPrompt: string }>(fakeClaudeDump, 15_000)).systemPrompt;
       expect(system.startsWith("You are Blank, a personal bot in OpenMausBot.")).toBe(true);
-      expect(system).toContain("This bot has not been set up yet");
+      // the light first-task block, right after the persona (there is no soul)
+      expect(system.slice("You are Blank, a personal bot in OpenMausBot.".length).startsWith("\n\nYou have not been set up yet. Do the task the person asked for now")).toBe(true);
+      expect(system).toContain("Never gate the task on setup.");
       expect(system).toContain("propose_profile");
+      // and none of the interview
+      expect(system).not.toContain("This bot has not been set up yet");
+      expect(system).not.toContain("Wait for a yes");
+      expect(system).not.toContain("at most four questions");
+      // every bot: restate first
+      expect(system).toContain("Before acting on a request, restate it in one sentence with what done looks like");
 
       const preview = await api("GET", `/api/bots/${bot.id}/system-prompt`);
-      expect(preview.body.sections.map((s: { id: string }) => s.id)).toContain("setup");
+      const previewIds = preview.body.sections.map((s: { id: string }) => s.id);
+      expect(previewIds).toContain("first-task");
+      expect(previewIds).toContain("conduct");
+      expect(previewIds).not.toContain("setup");
 
       expect((await api("POST", `/api/bots/${bot.id}/interrupt`)).status).toBe(200);
       // Interrupt requests a stop; the child can still be shutting down.
@@ -5525,8 +5538,11 @@ describe("harness HTTP API", () => {
       rmSync(fakeClaudeDump, { force: true });
       expect((await api("POST", `/api/bots/${bot.id}/messages`, { text: "hello again" })).status).toBe(202);
       system = (await readJsonFileWhenReady<{ systemPrompt: string }>(fakeClaudeDump, 15_000)).systemPrompt;
+      expect(system).not.toContain("You have not been set up yet");
       expect(system).not.toContain("This bot has not been set up yet");
-      expect((await api("GET", `/api/bots/${bot.id}/system-prompt`)).body.sections.map((s: { id: string }) => s.id)).not.toContain("setup");
+      const configuredIds = (await api("GET", `/api/bots/${bot.id}/system-prompt`)).body.sections.map((s: { id: string }) => s.id);
+      expect(configuredIds).not.toContain("first-task");
+      expect(configuredIds).not.toContain("setup");
     } finally {
       await api("POST", `/api/bots/${bot.id}/interrupt`);
       await api("DELETE", `/api/bots/${bot.id}`);
@@ -5549,6 +5565,8 @@ describe("harness HTTP API", () => {
       const soulEnd = system.indexOf("--- END STANDING INSTRUCTIONS ---") + "--- END STANDING INSTRUCTIONS ---".length;
       expect(soulEnd).toBeGreaterThan(0);
       expect(system.slice(soulEnd).startsWith("\n\nThis bot has not been set up yet")).toBe(true);
+      expect(system).toContain("Wait for a yes");
+      expect(system).not.toContain("You have not been set up yet");
       // the literal /setup never reaches the model — extract the user text the
       // way promptText() in fake-claude-cli.ts does, joining text parts if the
       // content is an array of blocks rather than a plain string
