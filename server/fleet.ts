@@ -509,7 +509,7 @@ export function applySignIn(configText: string, action: "add" | "remove", email:
   if (action === "remove") {
     if (admins.length + members.length === list(current.admins).length + list(current.members).length) throw new Error(`${entry} is not on the list`);
     if (!admins.length) throw new Error("a workspace needs at least one admin; add another admin first");
-    return { config: `${JSON.stringify({ ...raw, signIn: { admins, members } }, null, 2)}\n`, summary: `${entry} can no longer sign in; existing sessions stay until they expire or are revoked` };
+    return { config: `${JSON.stringify({ ...raw, signIn: { admins, members } }, null, 2)}\n`, summary: `${entry} was removed from the allow-list; existing email sessions are rechecked against the remaining entries` };
   }
   const next = chatOnly ? { admins, members: [...members, entry] } : { admins: [...admins, entry], members };
   if (!next.admins.length) throw new Error("a workspace needs at least one admin; add another admin first");

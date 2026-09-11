@@ -96,6 +96,7 @@ describe("rendered files", () => {
     expect(added.summary).toContain("chat and approvals");
     const removed = applySignIn(added.config, "remove", "bob@acme.test", false);
     expect(JSON.parse(removed.config).signIn).toEqual({ admins: ["ada@example.test"], members: [] });
+    expect(removed.summary).toContain("existing email sessions are rechecked");
     expect(() => applySignIn(added.config, "remove", "nobody@acme.test", false)).toThrow("not on the list");
     expect(() => applySignIn("{}", "add", "not an email", false)).toThrow("email");
     const promoted = applySignIn(added.config, "add", "bob@acme.test", false);
