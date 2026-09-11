@@ -18,6 +18,7 @@ struct WalkieView: View {
     @AppStorage("walkie.target") private var targetId = ""
     @AppStorage("walkie.speakReplies") private var speakReplies = true
     @State private var pressing = false
+    @State private var showingVoice = false
     @FocusState private var draftFocused: Bool
 
     private var roster: [WalkieAgent] { session.state.walkieRoster }
@@ -41,8 +42,11 @@ struct WalkieView: View {
         .background(Color.black.ignoresSafeArea())
         .preferredColorScheme(.dark)
         .animation(.snappy(duration: 0.2), value: reviewing)
+        .sheet(isPresented: $showingVoice) {
+            WalkieVoiceSheet { walkie.sample(agentVoice: target?.voice) }
+                .preferredColorScheme(.dark)
+        }
         .onAppear {
-            walkie.attach(session)
             walkie.speaksReplies = speakReplies
             if target == nil { targetId = roster.first?.bot.id ?? "" }
             Task { await walkie.prepare() }
@@ -77,6 +81,8 @@ struct WalkieView: View {
                 }
             }
             Spacer()
+            GlassButton(systemImage: "person.wave.2.fill", size: 44, weight: .semibold) { showingVoice = true }
+                .accessibilityLabel("Voice settings")
             GlassButton(systemImage: "xmark", size: 44, weight: .semibold) { dismiss() }
                 .accessibilityLabel("Close Walkie")
         }

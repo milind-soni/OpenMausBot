@@ -1249,17 +1249,6 @@ public struct CompanionClient: Sendable {
         ).bot
     }
 
-    /// One utterance of speech from the computer's voice engine. The harness
-    /// caps an utterance at 500 characters; callers split longer text first.
-    /// A nil `voiceId` uses the computer's default voice.
-    public func speech(text: String, voiceId: String?) async throws -> Data {
-        var body: [String: Any] = ["text": String(text.prefix(500))]
-        if let voiceId, !voiceId.isEmpty { body["voiceId"] = voiceId }
-        let (data, response) = try await perform(try makeRequest("POST", "/api/tts/speak", body: body))
-        try Self.check(response, data)
-        return data
-    }
-
     public func previewVoice(text: String, voiceId: String) async throws -> Data {
         let request = try makeRequest(
             "POST", "/api/tts/speak",

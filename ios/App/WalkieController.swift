@@ -5,9 +5,10 @@
 // transcript and puts it up for review — editable, with Send and Discard —
 // because a misheard word sent to an agent is work done wrong. Sending is
 // `Session.send`, so the message lands in the bot's current thread like any
-// other. The answer is spoken by the computer's voice engine (ElevenLabs when
-// a key is set there) through `/api/tts/speak`; if that fails, the phone's
-// best installed voice reads it instead.
+// other. Listening is Apple's recognizer on the phone; the answer is spoken
+// by ElevenLabs, called straight from the phone with a key kept in its
+// Keychain. Without a key, or when ElevenLabs fails, the phone's best
+// installed voice reads it instead.
 import AVFoundation
 import CompanionCore
 import Speech
@@ -86,7 +87,6 @@ final class WalkieController: ObservableObject {
     private let player = WalkiePlayer()
     private let synthesizer = AVSpeechSynthesizer()
     private let voiceDelegate = VoiceDelegate()
-    private weak var session: Session?
 
     private var recognizer: SFSpeechRecognizer?
     private var request: SFSpeechAudioBufferRecognitionRequest?
@@ -121,10 +121,6 @@ final class WalkieController: ObservableObject {
             self?.deviceWaiter?.resume()
             self?.deviceWaiter = nil
         }
-    }
-
-    func attach(_ session: Session) {
-        self.session = session
     }
 
     // MARK: - Microphone
@@ -350,44 +346,92 @@ final class WalkieController: ObservableObject {
 
     // MARK: - Voice
 
+    /// A short line in the current voice settings, for the voice sheet.
+    func sample(agentVoice: String?) {
+        replyVoice = agentVoice
+        speak(String(localized: "Hi. This is how your agents will sound in Walkie."))
+    }
+
     private func speak(_ text: String) {
         stopVoice()
         let parts = Walkie.utterances(Walkie.speakable(text))
         guard !parts.isEmpty else { return }
         phase = .speaking
-        let voiceId = replyVoice
+        let agentVoice = replyVoice
         speaking = Task { [weak self] in
-            await self?.play(parts, voiceId: voiceId)
+            await self?.play(parts, agentVoice: agentVoice)
             guard let self, !Task.isCancelled else { return }
             self.speaking = nil
             if self.phase == .speaking { self.phase = .idle }
         }
     }
 
-    /// The computer's voice, one utterance at a time, fetching the next while
-    /// the current one plays. Any failure hands the rest to the phone's voice.
-    private func play(_ parts: [String], voiceId: String?) async {
-        guard let session else { return await deviceSpeak(parts.joined(separator: " ")) }
-        var next: Task<Data, Error>? = Task { try await session.speech(parts[0], voiceId: voiceId) }
+    /// ElevenLabs from this phone, one utterance at a time, fetching the next
+    /// while the current one plays. The first utterance settles the voice: an
+    /// agent's voice from another ElevenLabs account falls through to the one
+    /// chosen here. Without a key, or on any failure, the phone's own voice
+    /// reads the rest.
+    private func play(_ parts: [String], agentVoice: String?) async {
+        guard let key = WalkieVoiceKey.read() else {
+            note = String(localized: "Add your ElevenLabs key with the voice button at the top. Using the phone's voice for now.")
+            return await deviceSpeak(parts.joined(separator: " "))
+        }
+        let defaults = UserDefaults.standard
+        let useAgentVoices = defaults.object(forKey: WalkieVoicePrefs.useAgentVoices) as? Bool ?? true
+        let chosen = defaults.string(forKey: WalkieVoicePrefs.voiceId)
+        var candidates: [String] = []
+        for voice in [useAgentVoices ? agentVoice : nil, chosen, ElevenLabs.defaultVoiceId] {
+            if let voice, !voice.isEmpty, !candidates.contains(voice) { candidates.append(voice) }
+        }
+
+        var voice = ElevenLabs.defaultVoiceId
+        var audio: Data?
+        var failure: Error?
+        for candidate in candidates {
+            do {
+                audio = try await ElevenLabs.speech(text: parts[0], voiceId: candidate, key: key)
+                voice = candidate
+                break
+            } catch {
+                guard !Task.isCancelled else { return }
+                failure = error
+                // A key, credit or rate problem is the same for every voice.
+                if let status = (error as? ElevenLabs.Failure)?.status, [401, 402, 403, 429].contains(status) { break }
+            }
+        }
+        guard var current = audio else {
+            return await fallBack(parts, failure: failure)
+        }
+
         for index in parts.indices {
-            guard let current = next, !Task.isCancelled else { return }
+            var next: Task<Data, Error>?
             if index + 1 < parts.count {
                 let upcoming = parts[index + 1]
-                next = Task { try await session.speech(upcoming, voiceId: voiceId) }
-            } else {
-                next = nil
+                let settled = voice
+                next = Task { try await ElevenLabs.speech(text: upcoming, voiceId: settled, key: key) }
             }
             do {
-                let audio = try await current.value
-                guard !Task.isCancelled else { return }
-                try await player.play(audio)
+                try await player.play(current)
             } catch {
                 next?.cancel()
                 guard !Task.isCancelled else { return }
-                note = String(localized: "Your computer's voice didn't answer, so the phone read it instead.")
-                return await deviceSpeak(parts[index...].joined(separator: " "))
+                return await fallBack(Array(parts[index...]), failure: error)
+            }
+            guard !Task.isCancelled else { next?.cancel(); return }
+            guard let next else { return }
+            do {
+                current = try await next.value
+            } catch {
+                guard !Task.isCancelled else { return }
+                return await fallBack(Array(parts[(index + 1)...]), failure: error)
             }
         }
+    }
+
+    private func fallBack(_ parts: [String], failure: Error?) async {
+        let reason = failure?.localizedDescription ?? String(localized: "ElevenLabs didn't answer.")
+        note = String(localized: "\(reason) The phone read it instead.")
+        await deviceSpeak(parts.joined(separator: " "))
     }
 
     private func deviceSpeak(_ text: String) async {

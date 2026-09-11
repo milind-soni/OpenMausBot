@@ -923,14 +923,6 @@ final class Session: ObservableObject {
         }
     }
 
-    /// Spoken audio (MP3) for one utterance, synthesized on the computer with
-    /// its voice engine — ElevenLabs when a key is set there — so the key
-    /// never lives on the phone. `voiceId` nil means the computer's default.
-    func speech(_ text: String, voiceId: String?) async throws -> Data {
-        guard let client else { throw APIError.transport("This computer is offline.") }
-        return try await client.speech(text: text, voiceId: voiceId)
-    }
-
     /// Send a composer draft with app-owned attachments. The destination
     /// includes the exact active thread at tap time, so neither a desktop task
     /// switch nor an upload delay can move the message elsewhere. Callers only
