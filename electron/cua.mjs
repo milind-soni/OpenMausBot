@@ -54,6 +54,8 @@ process.env.CUA_DRIVER_RS_TELEMETRY_ENABLED ??= "0";
 
 let embeddedHost = null; // EmbeddedCuaDriverHost | null
 let startupAbort = null;
+let lifecycleGeneration = 0;
+let macRetry = null;
 let linuxRuntime = null;
 let linuxBundleStage = null;
 let stateListener = () => {};
@@ -237,6 +239,7 @@ async function startEmbedded(binary, signal) {
 
 export async function startCua() {
   if (process.platform === "linux") return ensureLinuxRuntime().initialize();
+  lifecycleGeneration++;
   startupAbort?.abort();
   startupAbort = new AbortController();
   const { signal } = startupAbort;
@@ -312,6 +315,7 @@ export async function cuaPermissionsStatus() {
 }
 
 export async function stopCua() {
+  lifecycleGeneration++;
   startupAbort?.abort();
   startupAbort = null;
   if (linuxRuntime) {
@@ -369,25 +373,33 @@ export function registerCuaIpc() {
   }));
   ipcMain.handle("cua:linux-retry", localOnly("cua:linux-retry", async () => {
     if (process.platform === "darwin") {
-      try {
-        await stopCua();
-        const connection = await startCua();
-        const ready = connection?.mode === "embedded" || connection?.mode === "standalone";
-        return {
-          enabled: ready,
-          status: ready ? "ready" : "error",
-          reasonCode: ready ? undefined : "permissions-required",
-          message: connection?.reason,
-        };
-      } catch (error) {
-        console.error("[cua] macOS retry failed:", error);
-        return {
-          enabled: false,
-          status: "error",
-          reasonCode: "permissions-required",
-          message: error instanceof Error ? error.message : String(error),
-        };
-      }
+      // Concurrent IPC requests share the whole stop/start sequence. A later
+      // explicit Stop (including quit) or startup cancels its delayed restart.
+      macRetry ??= (async () => {
+        try {
+          const stopping = stopCua();
+          const generation = lifecycleGeneration;
+          await stopping;
+          if (generation !== lifecycleGeneration) throw new Error("Computer use restart cancelled");
+          const connection = await startCua();
+          const ready = connection?.mode === "embedded" || connection?.mode === "standalone";
+          return {
+            enabled: ready,
+            status: ready ? "ready" : "error",
+            reasonCode: ready ? undefined : "permissions-required",
+            message: connection?.reason,
+          };
+        } catch (error) {
+          console.error("[cua] macOS retry failed:", error);
+          return {
+            enabled: false,
+            status: "error",
+            reasonCode: "permissions-required",
+            message: error instanceof Error ? error.message : String(error),
+          };
+        }
+      })().finally(() => { macRetry = null; });
+      return macRetry;
     }
     if (process.platform !== "linux") {
       return { enabled: false, status: "unavailable", reasonCode: "unsupported-platform" };

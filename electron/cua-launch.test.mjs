@@ -5,8 +5,8 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-const fixture = vi.hoisted(() => ({ home: "", script: "", socketReady: false, children: [], calls: [], embeddedDelays: [], hosts: [] }));
-vi.mock("electron", () => ({ app: { isPackaged: false, getPath: () => fixture.home }, ipcMain: { handle: vi.fn() } }));
+const fixture = vi.hoisted(() => ({ home: "", script: "", socketReady: false, children: [], calls: [], embeddedDelays: [], hosts: [], handlers: new Map() }));
+vi.mock("electron", () => ({ app: { isPackaged: false, getPath: () => fixture.home }, ipcMain: { handle: (name, handler) => fixture.handlers.set(name, handler) } }));
 vi.mock("@trycua/cua-driver/embedded", () => ({
   EmbeddedCuaDriverHost: class {
     constructor() { this.delay = fixture.embeddedDelays.shift(); fixture.hosts.push(this); }
@@ -69,6 +69,7 @@ vi.mock("node:child_process", async (original) => {
 });
 
 let cua;
+let localOriginModule;
 beforeEach(async () => {
   fixture.home = mkdtempSync(join(tmpdir(), "omb-cua-async-"));
   fixture.script = "setTimeout(() => process.exit(0), 120)";
@@ -77,10 +78,13 @@ beforeEach(async () => {
   fixture.calls = [];
   fixture.embeddedDelays = [];
   fixture.hosts = [];
+  fixture.handlers.clear();
   vi.stubEnv("OPENMAUSBOT_CUA_EMBEDDED", "1");
   vi.stubEnv("CUA_DRIVER_PATH", "/fixture/cua-driver");
   vi.resetModules();
   cua = await import("./cua.mjs");
+  localOriginModule = (await import("./local-origin.cjs")).default;
+  localOriginModule.setLocalOrigin("http://127.0.0.1:19777");
 });
 afterEach(async () => {
   await cua?.stopCua();
@@ -91,6 +95,7 @@ afterEach(async () => {
     await closed;
   }
   vi.unstubAllEnvs();
+  localOriginModule.setLocalOrigin(null);
   rmSync(fixture.home, { recursive: true, force: true });
 });
 
@@ -169,6 +174,59 @@ describe.skipIf(process.platform !== "darwin")("async standalone CUA launch (iso
     expect(JSON.parse(readFileSync(join(fixture.home, "cua-connection.json"), "utf8")).socketPath).toBe("/fixture/10.sock");
     await cua.stopCua();
     expect(fixture.hosts[1].stop).toHaveBeenCalledOnce();
+  });
+
+  it.each([false, true])("coalesces concurrent IPC retries and respects explicit Stop during cleanup: %s", async (cancel) => {
+    fixture.embeddedDelays = [1, 10, 20];
+    await cua.startCua();
+    let releaseStop;
+    fixture.hosts[0].stop.mockImplementation(() => new Promise((resolve) => { releaseStop = resolve; }));
+    cua.registerCuaIpc();
+    const retry = fixture.handlers.get("cua:linux-retry");
+    const event = { senderFrame: { url: "http://127.0.0.1:19777/" } };
+    let attempts;
+    try {
+      attempts = [retry(event), retry(event)];
+      // Both complete IPC flows must wait for the same old host to stop.
+      await new Promise((resolve) => setTimeout(resolve, 30));
+      expect(fixture.hosts).toHaveLength(1);
+      expect(fixture.hosts[0].stop).toHaveBeenCalledOnce();
+      if (cancel) await cua.stopCua(); // the same boundary quit calls
+    } finally {
+      releaseStop?.();
+      fixture.hosts[0].stop.mockResolvedValue();
+    }
+    const results = await Promise.all(attempts);
+    expect(results[0]).toEqual(results[1]);
+    expect(results[0]).toMatchObject(cancel
+      ? { enabled: false, status: "error", message: "Computer use restart cancelled" }
+      : { enabled: true, status: "ready" });
+    expect(fixture.hosts).toHaveLength(cancel ? 1 : 2);
+    await cua.stopCua();
+    for (const host of fixture.hosts) {
+      expect(host.stop).toHaveBeenCalledOnce();
+      expect(host.uniffiDestroy).toHaveBeenCalledOnce();
+    }
+    expect(JSON.parse(readFileSync(join(fixture.home, "cua-connection.json"), "utf8")).mode).toBe("unavailable");
+  });
+
+  it("cancels concurrent IPC retries during replacement startup", async () => {
+    fixture.embeddedDelays = [1, "until-abort"];
+    await cua.startCua();
+    cua.registerCuaIpc();
+    const retry = fixture.handlers.get("cua:linux-retry");
+    const event = { senderFrame: { url: "http://127.0.0.1:19777/" } };
+    const attempts = [retry(event), retry(event)];
+    await expect.poll(() => fixture.hosts.length).toBe(2);
+    await cua.stopCua();
+    const results = await Promise.all(attempts);
+    expect(results[0]).toEqual(results[1]);
+    expect(results[0]).toMatchObject({ enabled: false, status: "error" });
+    for (const host of fixture.hosts) {
+      expect(host.stop).toHaveBeenCalledOnce();
+      expect(host.uniffiDestroy).toHaveBeenCalledOnce();
+    }
+    expect(JSON.parse(readFileSync(join(fixture.home, "cua-connection.json"), "utf8")).mode).toBe("unavailable");
   });
 
   it("reads permission status asynchronously with bounded output", async () => {

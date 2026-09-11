@@ -36,7 +36,9 @@ child in a disposable home. The checks cover responsive asynchronous launch,
 the actual eight-second TERM-ignoring timeout, Stop cancellation, original
 failure details, bounded permission-status output, and cancellation of stalled
 or late embedded startup without publishing over or stopping a replacement.
-The installed SDK receives the startup AbortSignal directly.
+The installed SDK receives the startup AbortSignal directly. Registered IPC
+retry checks also prove concurrent requests share one stop/start sequence and
+an explicit Stop/quit during cleanup prevents its delayed restart.
 
 The Electron subprocess ratchet permits only the pre-existing cached boot-ID
 read and Linux private-group lookup. Those synchronous ownership checks remain
