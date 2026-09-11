@@ -20,7 +20,6 @@ import {
   drainDelegations,
   findDelegationReceipt,
   formatDelegationElapsed,
-  MAX_BUSY_ATTEMPTS,
   pendingDelegationInfo,
   pendingDelegationSnapshot,
   queueDelegation,
@@ -431,7 +430,7 @@ describe("drainDelegations", () => {
         .messagesFor(from.threadId)
         .find((m) => m.kind === "activity" && (m.tool?.name ?? "").includes("waiting — they're busy")),
     );
-    expect(chip.tool?.name).toBe("Delegation to @Helper waiting — they're busy (retry 1/3 when they finish)");
+    expect(chip.tool?.name).toBe("Delegation to @Helper waiting — they're busy; it'll go through when they're free");
     expect(runTargetCalls).toEqual([]);
     // retained for the retry drain the target's settling turn triggers
     expect(_pendingCount(from.threadId)).toBe(1);
@@ -521,7 +520,7 @@ describe("drainDelegations", () => {
     const card = await waitFor(() => store.messagesFor(from.threadId).find((m) => m.card?.requestId));
     store.patchBot(target.id, { busy: true });
     resolvePeerComms(approvalBus, card.card!.requestId!, "allow");
-    await waitFor(() => pendingDelegationInfo(queued.id!)?.attempts === 1);
+    await waitFor(() => pendingDelegationInfo(queued.id!)?.waiting === true);
     store.patchBot(target.id, { busy: false });
     releaseDelegationsWaitingOn(target.id);
     drainDelegations(commsBus, approvalBus, from.threadId, runTarget);
@@ -543,7 +542,7 @@ describe("drainDelegations", () => {
       const card = await waitFor(() => store.messagesFor(sourceThreadId).find((m) => m.card?.requestId));
       store.patchBot(target.id, { busy: true });
       resolvePeerComms(approvalBus, card.card!.requestId!, "allow");
-      await waitFor(() => pendingDelegationInfo(queued.id!)?.attempts === 1);
+      await waitFor(() => pendingDelegationInfo(queued.id!)?.waiting === true);
 
       if (group) store.patchGroup(group.id, { memberIds: [target.id] });
       else expect(store.deleteTask(from.id, sourceThreadId)).not.toBeNull();
@@ -685,6 +684,7 @@ describe("delegations survive a restart", () => {
       toBotId: target.id,
       message: "do this",
       approvalAlreadyGranted: true,
+      queuedAt: expect.any(Number),
     });
 
     discardDelegations(buses.commsBus, from.threadId);
@@ -769,9 +769,22 @@ describe("delegations survive a restart", () => {
     _loadPending();
     expect(pendingThreads()).toEqual([]);
   });
+
+  it("gives a handoff saved before queuedAt existed a fresh 24-hour window", () => {
+    const { mkdirSync, writeFileSync } = require("node:fs") as typeof import("node:fs");
+    mkdirSync(DATA_DIR, { recursive: true });
+    writeFileSync(file(), JSON.stringify({
+      [from.threadId]: [
+        { id: "legacy-1", sourceBotId: from.id, toBotId: target.id, message: "old", depth: 0, attempts: 2 },
+      ],
+    }));
+    const before = Date.now();
+    _loadPending();
+    expect(pendingDelegationInfo("legacy-1")?.queuedAt).toBeGreaterThanOrEqual(before);
+  });
 });
 
-describe("busy retries and receipts", () => {
+describe("busy waits and expiry", () => {
   let store: Store;
   let from: BotRecord;
   let target: BotRecord;
@@ -802,12 +815,12 @@ describe("busy retries and receipts", () => {
     const runTarget = (...args: unknown[]) => void dispatched.push(args);
 
     drainDelegations(commsBus, approvalBus, from.threadId, runTarget);
-    await waitFor(() => chipCount("waiting — they're busy (retry 1/") === 1);
+    await waitFor(() => chipCount("waiting — they're busy;") === 1);
     expect(dispatched).toHaveLength(0);
     expect(_pendingCount(from.threadId)).toBe(1);
     // this is the set a settling target turn re-drains
     expect(threadsWaitingOn(target.id)).toEqual([from.threadId]);
-    expect(pendingDelegationInfo(taskId)).toMatchObject({ toBotId: target.id, attempts: 1 });
+    expect(pendingDelegationInfo(taskId)).toMatchObject({ toBotId: target.id, waiting: true });
 
     store.patchBot(target.id, { busy: false });
     drainDelegations(commsBus, approvalBus, from.threadId, runTarget);
@@ -818,50 +831,54 @@ describe("busy retries and receipts", () => {
     expect(pendingDelegationInfo(taskId)).toBeNull();
   });
 
-  it("gives up after the bounded retries, with a receipt the delegator can read", async () => {
+  it("waits through any number of busy periods and still delivers", async () => {
     store.patchBot(target.id, { busy: true });
     const queued = queueDelegation(commsBus, from, { toBotId: target.id, message: "later", depth: 0 }, 1);
-    const taskId = queued.id!;
-    const runTarget = () => undefined;
-    for (let round = 1; round < MAX_BUSY_ATTEMPTS; round++) {
+    const runTarget = vi.fn();
+    for (let period = 0; period < 5; period++) {
       drainDelegations(commsBus, approvalBus, from.threadId, runTarget);
-      await waitFor(() => chipCount(`retry ${round}/`) === 1);
-      // One retry is charged per distinct busy period. Releasing the wait
-      // models that turn settling before another turn claims the target.
+      await waitFor(() => pendingDelegationInfo(queued.id!)?.waiting === true);
+      // the target's turn settles, and another turn claims it straight away
       expect(releaseDelegationsWaitingOn(target.id)).toEqual([from.threadId]);
     }
+    expect(findDelegationReceipt(queued.id!)).toBeNull();
+    expect(chipCount("waiting — they're busy;")).toBe(1);
+
+    store.patchBot(target.id, { busy: false });
     drainDelegations(commsBus, approvalBus, from.threadId, runTarget);
-    await waitFor(() => _pendingCount(from.threadId) === 0);
-    expect(chipCount("canceled — still busy after")).toBe(1);
-    expect(findDelegationReceipt(taskId)).toMatchObject({
-      status: "busy_gave_up",
-      toBotName: "Helper",
-      sourceThreadId: from.threadId,
-    });
+    await waitFor(() => runTarget.mock.calls.length === 1);
+    expect(_pendingCount(from.threadId)).toBe(0);
   });
 
-  it("does not burn busy retries when an unrelated drain is requested", async () => {
+  it("posts one waiting chip per handoff, however many drains run while the target is busy", async () => {
     store.patchBot(target.id, { busy: true });
     const queued = queueDelegation(commsBus, from, { toBotId: target.id, message: "later", depth: 0 }, 1);
-    const taskId = queued.id!;
     const runTarget = vi.fn();
 
     drainDelegations(commsBus, approvalBus, from.threadId, runTarget);
-    await waitFor(() => chipCount("retry 1/") === 1);
-
-    // A source-thread redrain can happen while an approval for another
-    // item settles. It must not count the same continuously busy turn again.
-    for (let index = 0; index < MAX_BUSY_ATTEMPTS + 1; index++) {
+    await waitFor(() => chipCount("waiting — they're busy;") === 1);
+    // A source-thread redrain can happen while an approval for another item
+    // settles. It must not re-announce the same wait.
+    for (let index = 0; index < 4; index++) {
       drainDelegations(commsBus, approvalBus, from.threadId, runTarget);
     }
     await new Promise((resolve) => setTimeout(resolve, 10));
-    expect(pendingDelegationInfo(taskId)?.attempts).toBe(1);
-    expect(chipCount("canceled — still busy after")).toBe(0);
+    expect(chipCount("waiting — they're busy;")).toBe(1);
+    expect(pendingDelegationInfo(queued.id!)).toMatchObject({ waiting: true });
 
     store.patchBot(target.id, { busy: false });
     expect(releaseDelegationsWaitingOn(target.id)).toEqual([from.threadId]);
     drainDelegations(commsBus, approvalBus, from.threadId, runTarget);
     await waitFor(() => runTarget.mock.calls.length === 1);
+  });
+
+  it("says the target is waiting on you when it is parked on an approval", async () => {
+    store.patchBot(target.id, { busy: true, activity: "waiting-on-you" });
+    queueDelegation(commsBus, from, { toBotId: target.id, message: "later", depth: 0 }, 1);
+    drainDelegations(commsBus, approvalBus, from.threadId, vi.fn());
+    await waitFor(() => chipCount("who's waiting on you") === 1);
+    expect(chipCount("Waiting for @Helper, who's waiting on you — it'll go through after you answer")).toBe(1);
+    expect(chipCount("they're busy")).toBe(0);
   });
 
   it("persists receipts across a restart and prunes the drawer by count", () => {

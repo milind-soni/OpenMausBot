@@ -53,17 +53,21 @@ interface PendingDelegationItem extends DelegationItem {
   /** The bot that queued this handoff. Stored explicitly because a shared
    * channel's thread is not owned by any single bot. */
   sourceBotId: string;
-  /** Busy-target retries so far. The item stays queued (not canceled) while
-   * the target is busy, and is retried when any of the target's turns
-   * settles — up to MAX_BUSY_ATTEMPTS. */
-  attempts: number;
-  /** True after this item observed the target's current busy period. Other
-   * queue activity must not count that same period again; the target's idle
-   * transition clears this marker before the next retry. */
+  /** When this handoff was queued (epoch ms). It waits for a busy target
+   * for up to DELEGATION_TTL_MS from here, then expires with a receipt. */
+  queuedAt: number;
+  /** This handoff has already posted its "waiting" chip. One chip per
+   * handoff, not one per busy period. */
+  waitAnnounced?: boolean;
+  /** Parked on the target's current busy period. The target's idle
+   * transition (releaseDelegationsWaitingOn) clears it and re-drains the
+   * source thread; nothing else counts or retries. */
   waitingOnBusy?: boolean;
 }
 
-export type DelegationOutcome = "done" | "failed" | "denied" | "busy_gave_up" | "dropped" | "error";
+/** `busy_gave_up` is only read back from receipts written before handoffs
+ * stopped counting busy periods; nothing produces it any more. */
+export type DelegationOutcome = "done" | "failed" | "denied" | "expired" | "busy_gave_up" | "dropped" | "error";
 
 /** The durable terminal record of one handoff: what the delegating bot reads
  * back with check_delegation / wait_delegation. Bounded and pruned — this is
@@ -104,7 +108,6 @@ const RECEIPTS_FILE = join(DATA_DIR, "delegation-receipts.json");
 const MAX_RECEIPTS = 100;
 const RECEIPT_MAX_AGE_MS = 48 * 60 * 60 * 1000;
 const RESULT_MAX_CHARS = 4_000;
-export const MAX_BUSY_ATTEMPTS = 3;
 
 let receipts: DelegationReceipt[] = [];
 
@@ -140,10 +143,12 @@ export function findDelegationReceipt(id: string): DelegationReceipt | null {
 }
 
 /** A still-queued task's routing info, or null once it dispatched/settled. */
-export function pendingDelegationInfo(id: string): { sourceThreadId: string; toBotId: string; attempts: number } | null {
+export function pendingDelegationInfo(
+  id: string,
+): { sourceThreadId: string; toBotId: string; queuedAt: number; waiting: boolean } | null {
   for (const [sourceThreadId, items] of pendingDelegations) {
     const item = items.find((candidate) => candidate.id === id);
-    if (item) return { sourceThreadId, toBotId: item.toBotId, attempts: item.attempts };
+    if (item) return { sourceThreadId, toBotId: item.toBotId, queuedAt: item.queuedAt, waiting: item.waitingOnBusy === true };
   }
   return null;
 }
@@ -208,10 +213,13 @@ export function _loadPending(): void {
           message: item.message,
           ...(typeof item.reason === "string" ? { reason: item.reason } : {}),
           depth: Math.max(0, Math.trunc(item.depth!)),
-          attempts: Number.isFinite(item.attempts) ? Math.max(0, Math.trunc(item.attempts!)) : 0,
+          // saved before queuedAt existed: start its 24 hours now, so an
+          // upgrade never expires queued work on the spot
+          queuedAt: Number.isFinite(item.queuedAt) ? item.queuedAt! : Date.now(),
         };
         if (item.approvalAlreadyGranted === true) loaded.approvalAlreadyGranted = true;
         if (item.waitingOnBusy === true) loaded.waitingOnBusy = true;
+        if (item.waitAnnounced === true) loaded.waitAnnounced = true;
         if (typeof item.originatingGroupId === "string" && item.originatingGroupId) {
           loaded.originatingGroupId = item.originatingGroupId;
         }
@@ -313,7 +321,7 @@ export function queueDelegation(
       ? originatingGroup.id
       : undefined;
   const id = newId();
-  list.push({ ...item, id, sourceBotId: from.id, attempts: 0, ...(groupId ? { originatingGroupId: groupId } : {}) });
+  list.push({ ...item, id, sourceBotId: from.id, queuedAt: Date.now(), ...(groupId ? { originatingGroupId: groupId } : {}) });
   pendingDelegations.set(sourceThreadId, list);
   savePending();
   const sourceGroup = sourceThreadId ? bus.store.groupByThread(sourceThreadId) : undefined;
@@ -433,8 +441,8 @@ export function drainDelegations(
     drainingThreads.delete(threadId);
     // A later turn may have queued and settled while this thread was
     // waiting for approval. Only items OUTSIDE our snapshot warrant a fresh
-    // drain — re-draining a just-requeued item would burn its bounded busy
-    // retries in milliseconds instead of once per target settle.
+    // drain — re-draining a just-requeued item would spin it in a tight
+    // loop instead of once per target settle.
     const redrainRequested = queuedRedrains.delete(threadId);
     const snapshotIds = new Set(snapshot.map((item) => item.id));
     const hasNewItems = pendingDelegations.get(threadId)?.some((item) => !snapshotIds.has(item.id)) ?? false;
@@ -619,61 +627,44 @@ async function processOne(
 
 /** A busy target holds the handoff. What "busy" means depends on where the
  * turn will run: a classic delegation lands in the target's active thread,
- * so it waits for the bot to go idle, with bounded retries so a stuck peer
- * cannot pin the handoff forever. A fresh-thread handoff needs only a free
- * slot, and waits in line for one without a bound — it IS the line, the
- * same one a person's message joins at that limit. Returns null when the
- * target can take the turn now. */
+ * so it waits for the bot to go idle; a fresh-thread handoff needs only a
+ * free slot. Neither counts busy periods — the only bound is
+ * DELEGATION_TTL_MS, checked in processOne before this runs. One waiting
+ * chip per handoff, worded for what the target is actually doing. Returns
+ * null when the target can take the turn now. */
 function holdWhileTargetBusy(
   bus: CommsBus,
   target: BotRecord,
   sourceThreadId: string,
   item: PendingDelegationItem,
-): "requeued" | "settled" | null {
-  if (item.targetThreadId) {
-    if (bus.threadSlotFree ? bus.threadSlotFree(target.id) : !target.busy) return null;
-    if (item.waitingOnBusy) return "requeued";
-    item.waitingOnBusy = true;
-    savePending();
-    // one chip per wait, not one per retry: the line moves on every settle
-    if (item.attempts === 0) {
-      item.attempts = 1;
-      const title = bus.store.taskByThread(target.id, item.targetThreadId)?.title ?? "thread";
-      bus.store.appendMessage(sourceThreadId, {
-        role: "bot",
-        kind: "activity",
-        tool: { name: `Thread #${title} on @${target.name} waiting for a free slot` },
-      });
-    }
-    return "requeued";
-  }
-  if (!target.busy) return null;
+): "requeued" | null {
+  const free = item.targetThreadId
+    ? (bus.threadSlotFree ? bus.threadSlotFree(target.id) : !target.busy)
+    : !target.busy;
+  if (free) return null;
   if (item.waitingOnBusy) return "requeued";
-  item.attempts += 1;
   item.waitingOnBusy = true;
-  if (item.attempts < MAX_BUSY_ATTEMPTS) {
-    savePending();
+  if (!item.waitAnnounced) {
+    item.waitAnnounced = true;
     bus.store.appendMessage(sourceThreadId, {
       role: "bot",
       kind: "activity",
-      tool: { name: `Delegation to @${target.name} waiting — they're busy (retry ${item.attempts}/${MAX_BUSY_ATTEMPTS} when they finish)` },
+      tool: { name: waitingChipText(bus.store, target, item) },
     });
-    return "requeued";
   }
-  recordDelegationReceipt({
-    id: item.id,
-    sourceThreadId,
-    toBotId: target.id,
-    toBotName: target.name,
-    status: "busy_gave_up",
-    result: `@${target.name} stayed busy through ${MAX_BUSY_ATTEMPTS} retries`,
-  });
-  bus.store.appendMessage(sourceThreadId, {
-    role: "bot",
-    kind: "activity",
-    tool: { name: `Delegation to @${target.name} canceled — still busy after ${MAX_BUSY_ATTEMPTS} retries`, ok: false },
-  });
-  return "settled";
+  savePending();
+  return "requeued";
+}
+
+function waitingChipText(store: Store, target: BotRecord, item: PendingDelegationItem): string {
+  if (item.targetThreadId) {
+    const title = store.taskByThread(target.id, item.targetThreadId)?.title ?? "thread";
+    return `Thread #${title} on @${target.name} waiting for a free slot`;
+  }
+  if (target.activity === "waiting-on-you") {
+    return `Waiting for @${target.name}, who's waiting on you — it'll go through after you answer`;
+  }
+  return `Delegation to @${target.name} waiting — they're busy; it'll go through when they're free`;
 }
 
 /** The thread a fresh-thread handoff was opened in may be deleted while the
