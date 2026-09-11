@@ -82,7 +82,7 @@ import {
 } from "./cloud-backend.ts";
 import * as composio from "./composio.ts";
 import { chiefOfStaffSystemPrompt } from "./chief-of-staff.ts";
-import { peerAllowed, peerName, peerRosterSystemPrompt, reachablePeers, roomPeerRosterSystemPrompt, roomRosterLine } from "./peer-roster.ts";
+import { peerAllowed, peerName, peerRosterSystemPrompt, peerStatus, peerStatusWords, reachablePeers, roomPeerRosterSystemPrompt, roomRosterLine } from "./peer-roster.ts";
 import { openMausStatusSystemPrompt } from "./openmaus-status-capsule.ts";
 import {
   containerComputerAction,
@@ -8849,14 +8849,19 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
         // now, not just the Chief, so it answers the same reachability
         // question the roster does — same peers, same order.
         const bots = reachablePeers(store.bots, sender)
-          .map((b) => ({
-            id: b.id,
-            name: b.name,
-            model: b.modelSelection.model,
-            busy: !!b.busy,
-            title: b.title || undefined,
-            description: b.description || undefined,
-          }));
+          .map((b) => {
+            const status = peerStatus(b.activity, b.busy);
+            return {
+              id: b.id,
+              name: b.name,
+              model: b.modelSelection.model,
+              busy: !!b.busy,
+              status,
+              statusText: peerStatusWords(status),
+              title: b.title || undefined,
+              description: b.description || undefined,
+            };
+          });
         return json(res, 200, { bots });
       }
       // Nothing else ever tells a bot a room id, so this is the discovery

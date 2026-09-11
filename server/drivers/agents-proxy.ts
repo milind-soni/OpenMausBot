@@ -359,7 +359,7 @@ const TOOLS = [
   {
     name: "list_bots",
     description:
-      "List the other bots (agents) in your OpenMausBot section, with their model and whether they're busy. Call this before delegate_bot or ask_bot to discover who's available. Use delegate_bot for assignments; use ask_bot only for a short consultation needed inline.",
+      "List the other bots (agents) in your OpenMausBot section, with their model and what each is doing right now (available, working, waiting on the user, not responding, or unavailable). Call this before delegate_bot or ask_bot to discover who's available. Use delegate_bot for assignments; use ask_bot only for a short consultation needed inline.",
     inputSchema: { type: "object", properties: {} },
   },
   {
@@ -852,7 +852,12 @@ async function callTool(name: string, args: Json): Promise<{ text: string; isErr
     const lines = bots.map((b) => {
       const role = b.title ? ` — ${b.title}` : "";
       const about = b.description ? ` (${String(b.description).slice(0, 120)})` : "";
-      return `- ${b.name}${role}${about} [id: ${b.id}, model: ${b.model}${b.busy ? ", busy" : ""}]`;
+      // statusText is the server's own wording for what the teammate is
+      // doing; an older server only sends busy, so fall back to that.
+      const state = typeof b.statusText === "string"
+        ? (b.status === "available" ? "" : b.statusText)
+        : (b.busy ? "busy" : "");
+      return `- ${b.name}${role}${about} [id: ${b.id}, model: ${b.model}${state ? `, ${state}` : ""}]`;
     });
     return {
       text: `Other bots in your section:\n${lines.join("\n")}\n\nAssign work with delegate_bot. Use ask_bot only for a short answer you need inline.`,

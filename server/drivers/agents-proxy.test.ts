@@ -21,6 +21,8 @@ let lastRoomsQuery = "";
 let lastPostBody: any = null;
 let postCalls = 0;
 let postResponse: unknown = { ok: true, messageId: "msg-1", roomName: "Launch" };
+const DEFAULT_AGENTS = { bots: [{ id: "bot-helper", name: "Helper", model: "fake-model", busy: false }] };
+let agentsResponse: unknown = DEFAULT_AGENTS;
 let roomsResponse: unknown = {
   rooms: [
     { id: "room-launch", name: "Launch", members: ["Asker", "Helper"] },
@@ -119,9 +121,7 @@ beforeAll(async () => {
     if (req.method === "GET" && req.url?.startsWith("/api/internal/agents")) {
       res.writeHead(200, { "content-type": "application/json" });
       return res.end(
-        JSON.stringify({
-          bots: [{ id: "bot-helper", name: "Helper", model: "fake-model", busy: false }],
-        }),
+        JSON.stringify(agentsResponse),
       );
     }
     if (req.method === "GET" && req.url?.startsWith("/api/internal/rooms?")) {
@@ -443,6 +443,25 @@ describe("agents-proxy MCP surface", () => {
     expect(text).toContain("Assign work with delegate_bot");
     expect(text).toContain("Use ask_bot only for a short answer");
     expect(lastAuth).toBe(`Bearer ${TOKEN}`);
+  });
+
+  it("list_bots says what each teammate is doing, not just busy", async () => {
+    agentsResponse = {
+      bots: [
+        { id: "bot-helper", name: "Helper", model: "fake-model", busy: true, status: "waiting-on-user", statusText: "waiting on the user" },
+        { id: "bot-quill", name: "Quill", model: "fake-model", busy: false, status: "available", statusText: "available" },
+        { id: "bot-old", name: "Old", model: "fake-model", busy: true },
+      ],
+    };
+    try {
+      const text = (await callTool("list_bots", {})).result.content[0].text;
+      expect(text).toContain("[id: bot-helper, model: fake-model, waiting on the user]");
+      expect(text).toContain("[id: bot-quill, model: fake-model]");
+      // an older server that only sends busy still reads as before
+      expect(text).toContain("[id: bot-old, model: fake-model, busy]");
+    } finally {
+      agentsResponse = DEFAULT_AGENTS;
+    }
   });
 
   it("list_rooms names each room, its id, and its members", async () => {
