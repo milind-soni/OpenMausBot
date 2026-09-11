@@ -93,19 +93,48 @@ export function createOpenAIChatRuntime<Config>(options: RuntimeOptions<Config>)
     signal?: AbortSignal,
     onDelta?: (delta: string, kind: "assistant_text" | "reasoning_text") => void,
   ): Promise<Completion> => {
-    const timeout = AbortSignal.timeout(options.timeoutMs);
-    const response = await fetch(`${options.apiUrl}/chat/completions`, {
-      method: "POST",
-      headers: { authorization: `Bearer ${options.apiKey}`, "content-type": "application/json" },
-      body: JSON.stringify(options.requestBody(model, messages, stream)),
-      signal: signal ? AbortSignal.any([signal, timeout]) : timeout,
-    });
+    // Idle timer that is renewed on every received chunk during streaming
+    const timeoutController = new AbortController();
+    let idleTimer: NodeJS.Timeout | null = null;
+    const resetIdleTimer = () => {
+      if (idleTimer) clearTimeout(idleTimer);
+      idleTimer = setTimeout(() => {
+        timeoutController.abort(new DOMException("Streaming idle timeout elapsed", "AbortError"));
+      }, options.timeoutMs);
+    };
+
+    // If caller signal aborts first, clean up idle timer
+    signal?.addEventListener("abort", () => {
+      if (idleTimer) clearTimeout(idleTimer);
+    }, { once: true });
+
+    resetIdleTimer();
+
+    let response: Response;
+    try {
+      const activeSignal = signal
+        ? AbortSignal.any([signal, timeoutController.signal])
+        : timeoutController.signal;
+
+      response = await fetch(`${options.apiUrl}/chat/completions`, {
+        method: "POST",
+        headers: { authorization: `Bearer ${options.apiKey}`, "content-type": "application/json" },
+        body: JSON.stringify(options.requestBody(model, messages, stream)),
+        signal: activeSignal,
+      });
+    } catch (err) {
+      if (idleTimer) clearTimeout(idleTimer);
+      throw err;
+    }
+
     if (!response.ok) {
+      if (idleTimer) clearTimeout(idleTimer);
       const body = await response.text().catch(() => "");
       throw new Error(`${options.httpErrorLabel} HTTP ${response.status}${body ? `: ${body.slice(0, 200)}` : ""}`);
     }
 
     if (!stream) {
+      if (idleTimer) clearTimeout(idleTimer);
       const json = await response.json() as CompletionJson;
       const message = json.choices?.[0]?.message;
       return {
@@ -118,6 +147,7 @@ export function createOpenAIChatRuntime<Config>(options: RuntimeOptions<Config>)
     }
 
     if (!response.body) {
+      if (idleTimer) clearTimeout(idleTimer);
       throw new Error(options.noBodyError ?? `${options.httpErrorLabel} returned no response body`);
     }
     let text = "";
@@ -130,6 +160,8 @@ export function createOpenAIChatRuntime<Config>(options: RuntimeOptions<Config>)
       readLoop: for (;;) {
         const { done, value } = await reader.read();
         if (done) break;
+        // Each chunk received resets the renewable idle timeout
+        resetIdleTimer();
         buffer += decoder.decode(value, { stream: true });
         let newline: number;
         while ((newline = buffer.indexOf("\n")) !== -1) {
@@ -161,6 +193,7 @@ export function createOpenAIChatRuntime<Config>(options: RuntimeOptions<Config>)
         }
       }
     } finally {
+      if (idleTimer) clearTimeout(idleTimer);
       await reader.cancel().catch(() => {});
     }
     return { text, reasoning, usage };
