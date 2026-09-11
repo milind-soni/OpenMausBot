@@ -343,7 +343,7 @@ export interface TaskRecord {
 
 const TASK_PATCH_FIELDS = [
   "title", "projectId", "modelSelection", "approvalMode", "autoApprove", "alwaysAllow",
-  "unread", "rewound", "pinnedMessageId", "resumeCursors", "lastInstanceId", "cwd",
+  "unread", "closed", "rewound", "pinnedMessageId", "resumeCursors", "lastInstanceId", "cwd",
   "routineRunId",
 ] as const satisfies readonly (keyof TaskRecord)[];
 export type TaskPatch = Partial<Pick<TaskRecord, typeof TASK_PATCH_FIELDS[number]>>;
