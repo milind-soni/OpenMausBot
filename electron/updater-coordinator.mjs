@@ -4,6 +4,8 @@
 // chat app must not run dpkg itself. Everything before the install is shared.
 // It receives the staged paths and resolves with an optional state patch
 // describing what is left to do, which the card renders.
+import { updateErrorMessage } from "./update-errors.mjs";
+
 export function createUpdaterCoordinator(updater, setState, { handOffInstall = null, nativeStaging = false } = {}) {
   let checkOperation = null;
   // Set from downloadUpdate's resolution: the paths electron-updater staged.
@@ -41,7 +43,7 @@ export function createUpdaterCoordinator(updater, setState, { handOffInstall = n
       setState({
         status: "error",
         retryable: false,
-        message: `${String(error?.message ?? error)} Quit and reopen OpenMausBot before trying the update again.`,
+        message: `${updateErrorMessage(error)} Quit and reopen OpenMausBot before trying the update again.`,
       });
       return;
     }
@@ -49,7 +51,7 @@ export function createUpdaterCoordinator(updater, setState, { handOffInstall = n
       setState({ status: "idle" });
       return;
     }
-    setState({ status: "error", message: String(error?.message ?? error) });
+    setState({ status: "error", message: updateErrorMessage(error) });
   };
 
   function handleRejectedOperation(manual, error) {
