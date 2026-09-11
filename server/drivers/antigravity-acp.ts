@@ -181,6 +181,7 @@ export class AntigravityAcpClient {
   private startupDiagnosticBytes = 0;
   private nativeStartupHint?: string;
   private closed = false;
+  private stopping?: Promise<boolean>;
   private readonly onAuthorizationUrl?: (url: string) => void;
   /** Settles once the runtime process is gone. On Windows a running
    * executable pins its file and its directory, so an installer must not
@@ -327,7 +328,7 @@ export class AntigravityAcpClient {
     if (this.closed) return;
     this.closed = true;
     this.failAll(new Error("Antigravity ACP was closed."));
-    killCliTree(this.child);
+    this.stopping = killCliTree(this.child);
   }
 
   /** Close, then wait (bounded) for the process to be gone. */
@@ -339,7 +340,7 @@ export class AntigravityAcpClient {
       timer.unref?.();
     });
     try {
-      return await Promise.race([this.exited.then(() => true), timedOut]);
+      return await Promise.race([this.stopping!, timedOut]);
     } finally {
       clearTimeout(timer);
     }

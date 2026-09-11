@@ -66,3 +66,26 @@ home is removed after the test.
 
 See the [Threads renderer recipe](threads.md) for the real sidebar, composer,
 optional folders, and group-history navigation checks.
+
+## CLI Stop regression
+
+```sh
+pnpm exec vitest run server/kill-tree.test.ts server/engine-install.test.ts server/cli-stop.e2e.test.ts
+```
+
+The Stop fixture wraps only the isolated launcher's fake Claude CLI with an
+owned helper that ignores TERM. It covers both a root that exits first and a
+root that also ignores TERM: the task stays busy during the grace period,
+settles only after both PIDs are gone, and accepts a subsequent message.
+The printed `.log.json` retains exact control commands, waits, transcripts,
+and PID checks. No real engine, account, or user's app data is used.
+
+Focused process checks also cover concurrent stops, denied signals, unrelated
+process safety, and bounded npm timeout errors. Codex's driver tests retain
+task ownership after an uncertain stop until a verified retry; Antigravity's
+lifecycle tests retain the verification profile on the same failure.
+POSIX group escalation and the
+new server cases are skipped on Windows; its existing `taskkill /T /F` path
+remains covered by the cross-platform child-tree test when run on Windows.
+Processes that intentionally detach into a different group are not owned by
+this POSIX group-based cancellation.

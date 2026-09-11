@@ -899,7 +899,7 @@ export const ClaudeDriver: ProviderDriver<ClaudeConfig> = {
         s.child.stdin.end();
       } catch {}
       const kill = setTimeout(() => {
-        if (s.child.exitCode === null) killCliTree(s.child);
+        void killCliTree(s.child);
       }, 5_000);
       kill.unref?.();
     };
@@ -1357,6 +1357,7 @@ export const ClaudeDriver: ProviderDriver<ClaudeConfig> = {
       const currentTurnId = () => session.turn?.turnId ?? turnId;
 
       const handleLine = (line: string) => {
+        if (session.closing) return;
         let o: any;
         try {
           o = JSON.parse(line);
@@ -1495,7 +1496,16 @@ export const ClaudeDriver: ProviderDriver<ClaudeConfig> = {
         settle(false, "spawn_error");
       });
 
-      child.on("close", (code) => {
+      child.on("close", async (code) => {
+        // The root can close while its MCP helpers are still running. Join
+        // an in-flight stop (or reap its remaining group) before releasing
+        // the turn so a replacement cannot overlap the old helpers.
+        if (!(await killCliTree(child, 0))) {
+          session.broker?.close();
+          session.broker = undefined;
+          emit({ ...base(threadId, currentTurnId()), type: "runtime.error", message: "Claude could not be confirmed stopped; its helper processes may still be running." });
+          return;
+        }
         // a turn still running when the process died is a failed turn; a
         // process that exited between turns (idle close, contract change)
         // is just a session ending

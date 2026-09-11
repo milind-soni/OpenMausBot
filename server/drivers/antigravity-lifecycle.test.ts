@@ -58,7 +58,9 @@ beforeEach(() => {
   vi.useFakeTimers();
   vi.spyOn(console, "warn").mockImplementation(() => {});
   vi.mocked(spawnCli).mockReset();
-  vi.mocked(killCliTree).mockReset();
+  vi.mocked(killCliTree).mockReset().mockImplementation((child) => new Promise((resolve) => {
+    child.once("close", () => resolve(true));
+  }));
   vi.mocked(rm).mockReset().mockImplementation(realRm);
 });
 
@@ -129,6 +131,14 @@ describe("Antigravity initialization diagnostics", () => {
 });
 
 describe("Antigravity validation shutdown", () => {
+  it("does not release a verification profile when root close leaves an uncertain tree", async () => {
+    const child = fakeChild();
+    vi.mocked(killCliTree).mockImplementation(async () => { child.emit("close", 0); return false; });
+    await expect(validateAntigravityRuntime(runtime, "1.1.1")).rejects.toThrow("did not shut down");
+    expect(rm).not.toHaveBeenCalled();
+    expect(existsSync(scratch[0])).toBe(true);
+  });
+
   it("contains Windows one-file extraction in the owned verification profile", async () => {
     const child = fakeChild();
     vi.mocked(killCliTree).mockImplementation(async () => { child.emit("close", 0); return true; });

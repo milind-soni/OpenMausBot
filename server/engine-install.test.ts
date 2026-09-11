@@ -1,10 +1,11 @@
 import { chmodSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { delimiter, join } from "node:path";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { enginesBinDir, enginesPrefix, installNpmEngine, npmPackageOf, serverInstallFor } from "./engine-install.ts";
 import { augmentedPath, findCliCandidates, registerPathDir, resetPathCacheForTests } from "./env-path.ts";
 import { removeTempDir } from "./testing/cleanup.ts";
+import * as procs from "./procs.ts";
 
 // A stand-in npm: records its arguments, honours --prefix, and behaves per
 // FAKE_NPM_MODE. Nothing reaches a registry or the network.
@@ -15,7 +16,8 @@ const args = process.argv.slice(2);
 const mode = process.env.FAKE_NPM_MODE || 'ok';
 appendFileSync(process.env.FAKE_NPM_LOG, JSON.stringify({ args, cwd: process.cwd(), secret: process.env.XAI_API_KEY ?? null }) + '\\n');
 if (mode === 'fail') { console.error('npm ERR! code E404\\nnpm ERR! 404 Not Found - registry-token-fixture'); process.exit(1); }
-if (mode === 'hang') { setInterval(() => {}, 1000); }
+if (mode === 'stubborn') process.on('SIGTERM', () => {});
+if (mode === 'hang' || mode === 'stubborn') { setInterval(() => {}, 1000); }
 else {
   const prefix = args[args.indexOf('--prefix') + 1];
   if (mode !== 'no-bin') {
@@ -103,6 +105,32 @@ describe.skipIf(process.platform === "win32")("installing with npm", () => {
   it("stops an install that hangs", async () => {
     process.env.FAKE_NPM_MODE = "hang";
     await expect(installNpmEngine("fake-engine", { baseDir: base, timeoutMs: 300 })).rejects.toThrow("took too long");
+  });
+
+  it("force-stops an install that ignores TERM", async () => {
+    process.env.FAKE_NPM_MODE = "stubborn";
+    const stopped = vi.spyOn(procs, "killCliTree");
+    try {
+      await expect(installNpmEngine("fake-engine", { baseDir: base, timeoutMs: 300 })).rejects.toThrow("took too long and was stopped");
+      expect(stopped.mock.calls[0]![0].signalCode).toBe("SIGKILL");
+    } finally {
+      stopped.mockRestore();
+    }
+  }, 10_000);
+
+  it("reports an uncertain stop without waiting forever for npm close", async () => {
+    process.env.FAKE_NPM_MODE = "hang";
+    const kill = procs.killCliTree;
+    const stopped = vi.spyOn(procs, "killCliTree").mockResolvedValue(false);
+    try {
+      await expect(installNpmEngine("fake-engine", { baseDir: base, timeoutMs: 300 })).rejects.toThrow("could not be confirmed stopped");
+      expect(stopped.mock.calls[0]![0].exitCode).toBeNull();
+      expect(stopped.mock.calls[0]![0].signalCode).toBeNull();
+    } finally {
+      const children = stopped.mock.calls.map(([child]) => child);
+      stopped.mockRestore();
+      await Promise.all(children.map((child) => kill(child, 0)));
+    }
   });
 
   it("says plainly when npm is missing", async () => {

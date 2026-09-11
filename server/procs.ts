@@ -53,6 +53,11 @@ export function assertSafeCliArgv(
   throw error;
 }
 
+// Only spawnCli establishes a private POSIX group. A plain spawned child
+// (for example inside an MCP gate) may share our own group: never signal it.
+const cliGroups = new WeakSet<ChildProcess>();
+const stopping = new WeakMap<ChildProcess, Promise<boolean>>();
+
 export function spawnCli(
   cli: string,
   args: string[],
@@ -66,6 +71,7 @@ export function spawnCli(
     // win32: taskkill /T does the reaping instead (see killCliTree)
     ...(process.platform === "win32" ? { windowsHide: true } : { detached: true }),
   }) as ChildProcessByStdio<Writable, Readable, Readable>; // callers always pipe all three
+  if (process.platform !== "win32") cliGroups.add(child);
 
   // A write to a dying child's stdin fails differently per platform, and one
   // of the ways is fatal. On POSIX the kill is synchronous, the stream is
@@ -122,10 +128,64 @@ export function describeSpawnFailure(err: NodeJS.ErrnoException, cli: string): S
   return { message: `spawn failed: ${err.message}`, setup: false };
 }
 
-/** Stop a CLI and every process it spawned (MCP proxies included). */
+/** Stop an owned CLI group, including helpers after its root exits. timeoutMs
+ * is the TERM grace period; SIGKILL gets one further second to settle. Helpers
+ * that deliberately detach into another group are outside this ownership. */
 export function killCliTree(child: ChildProcess, timeoutMs = 5_000): Promise<boolean> {
+  const existing = stopping.get(child);
+  if (existing) return existing;
   const pid = child.pid;
-  if (!pid || child.exitCode !== null || child.signalCode !== null) return Promise.resolve(true);
+  if (!pid) return Promise.resolve(true);
+  if (!Number.isInteger(pid) || pid <= 1 || pid === process.pid) return Promise.resolve(false);
+
+  const run = stopCliTree(child, pid, Number.isFinite(timeoutMs) ? Math.max(0, timeoutMs) : 5_000);
+  stopping.set(child, run);
+  // A failed attempt may be retried. Remember success so a delayed caller
+  // cannot signal a reused PID/group after this child's group disappeared.
+  void run.then((stopped) => { if (!stopped) stopping.delete(child); });
+  return run;
+}
+
+async function stopCliTree(child: ChildProcess, pid: number, timeoutMs: number): Promise<boolean> {
+  const exited = () => child.exitCode !== null || child.signalCode !== null;
+  if (process.platform !== "win32") {
+    const group = cliGroups.has(child);
+    const settled = () => {
+      if (!exited()) return false;
+      if (!group) return true;
+      try {
+        process.kill(-pid, 0);
+        return false;
+      } catch (error) {
+        // EPERM and other failures do not prove that the group is gone.
+        return (error as NodeJS.ErrnoException).code === "ESRCH";
+      }
+    };
+    const signal = (value: NodeJS.Signals) => {
+      try {
+        if (group) process.kill(-pid, value);
+        else child.kill(value);
+      } catch {
+        try { child.kill(value); } catch { /* report uncertainty below */ }
+      }
+    };
+    const wait = async (ms: number) => {
+      const deadline = Date.now() + ms;
+      while (!settled()) {
+        const remaining = deadline - Date.now();
+        if (remaining <= 0) return false;
+        await new Promise((resolve) => setTimeout(resolve, Math.min(25, remaining)));
+      }
+      return true;
+    };
+    if (settled()) return true;
+    signal("SIGTERM");
+    if (await wait(timeoutMs)) return true;
+    signal("SIGKILL");
+    return wait(1_000);
+  }
+
+  if (exited()) return true;
 
   return new Promise((resolve) => {
     let timer: NodeJS.Timeout;
@@ -139,29 +199,16 @@ export function killCliTree(child: ChildProcess, timeoutMs = 5_000): Promise<boo
     timer = setTimeout(() => done(false), timeoutMs);
     timer.unref?.();
 
-    if (process.platform === "win32") {
-      execFile("taskkill", ["/PID", String(pid), "/T", "/F"], { windowsHide: true }, (err) => {
-        if (!err) return;
-        try {
-          // taskkill is unavailable or the tree lookup failed. At least stop
-          // the process we own instead of leaving the entire turn running.
-          child.kill();
-        } catch {
-          /* already gone */
-        }
-      });
-      return;
-    }
-
-    try {
-      process.kill(-pid, "SIGTERM");
-    } catch {
+    execFile("taskkill", ["/PID", String(pid), "/T", "/F"], { windowsHide: true }, (err) => {
+      if (!err) return;
       try {
-        child.kill("SIGTERM");
+        // taskkill is unavailable or the tree lookup failed. At least stop
+        // the process we own instead of leaving the entire turn running.
+        child.kill();
       } catch {
         /* already gone */
       }
-    }
+    });
   });
 }
 
