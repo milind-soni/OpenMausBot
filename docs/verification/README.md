@@ -64,6 +64,10 @@ entry only after the shared control surface can really drive it.
 The [desktop server connection smoke](desktop-server-connection.md) mounts the
 real Settings connection component in disposable Electron windows.
 
+The [embedded server recovery smoke](desktop-server-recovery.md) crashes real
+Electron-owned fixture servers, verifies bounded recovery and private access,
+and proves quit cancels recovery without replaying an interrupted fixture turn.
+
 The [Tailscale discovery fixture](tailscale.md) checks standalone macOS CLI mode
 and HTTP tailnet endpoint refresh without touching a real Tailscale installation.
 
