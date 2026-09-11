@@ -102,7 +102,7 @@ it("refuses fresh work instead of evicting unexpired retry identities at capacit
   expect(reloaded.listRuns()).toEqual([]);
 });
 
-it.each(["capacity", "disk"] as const)("a rejected %s admission does not detach the scheduler's live runs", async (failure) => {
+it.each(["capacity", "disk", "routine-write"] as const)("a rejected %s admission does not detach the scheduler's live runs", async (failure) => {
   const h = harness();
   let release!: () => void;
   const held = new Promise<void>((resolve) => { release = resolve; });
@@ -126,7 +126,13 @@ it.each(["capacity", "disk"] as const)("a rejected %s admission does not detach 
   } else {
     vi.spyOn(internals, "save").mockImplementationOnce(() => { throw new Error("disk full"); });
   }
-  expect(() => manager.enqueueWebhook({ ...input, botId: "C", deliveryId: "C" })).toThrow();
+  if (failure === "routine-write") {
+    expect(() => manager.create({ name: "Unrelated routine", prompt: "Never saved", botId: "C", enabled: false,
+      schedule: { type: "interval", everyMinutes: 60, anchorAt: Date.now() },
+    })).toThrow("disk full");
+  } else {
+    expect(() => manager.enqueueWebhook({ ...input, botId: "C", deliveryId: "C" })).toThrow();
+  }
   release();
   await vi.waitFor(() => expect(starts).toEqual(["A", "B"]));
   expect(manager.listRuns().find((run) => run.id === second.id)).toMatchObject({ status: "running", threadId: "thread-B" });

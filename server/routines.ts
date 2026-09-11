@@ -1370,9 +1370,11 @@ export class RoutineManager {
 
       // Oldest queued requests have priority. New manual/webhook arrivals
       // must not continually overtake work that has already waited. Snapshot
-      // the queue because each dispatch can asynchronously add/cancel work.
-      for (const run of this.runs.slice()) {
-        if (run.status !== "queued") continue;
+      // IDs retain order across awaits without holding stale objects after
+      // another request rolls back a failed routine-definition write.
+      for (const id of this.runs.map((run) => run.id)) {
+        const run = this.runs.find((candidate) => candidate.id === id);
+        if (!run || run.status !== "queued") continue;
         // A queued interval represents the latest useful check, not a backlog
         // item. If the bot stayed busy across later occurrences, align this
         // scheduled receipt to the newest due point immediately before it can
